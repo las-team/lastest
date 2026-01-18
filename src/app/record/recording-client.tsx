@@ -1,0 +1,421 @@
+'use client';
+
+import { useState } from 'react';
+import { useRouter } from 'next/navigation';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Badge } from '@/components/ui/badge';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import {
+  startRecording,
+  stopRecording,
+  captureScreenshot,
+  saveRecordedTest,
+  getOrCreateFunctionalArea,
+} from '@/server/actions/recording';
+import {
+  Video,
+  Square,
+  Camera,
+  Loader2,
+  ExternalLink,
+  Clock,
+  MousePointer,
+  Navigation,
+} from 'lucide-react';
+import type { FunctionalArea } from '@/lib/db/schema';
+
+interface RecordingClientProps {
+  areas: FunctionalArea[];
+}
+
+type RecordingStep = 'setup' | 'recording' | 'saving';
+
+interface RecordingEvent {
+  type: string;
+  timestamp: number;
+  description: string;
+}
+
+export function RecordingClient({ areas: initialAreas }: RecordingClientProps) {
+  const router = useRouter();
+  const [step, setStep] = useState<RecordingStep>('setup');
+
+  // Setup form state
+  const [url, setUrl] = useState('https://');
+  const [testName, setTestName] = useState('');
+  const [areaId, setAreaId] = useState<string>('');
+  const [newAreaName, setNewAreaName] = useState('');
+  const [pathType, setPathType] = useState<'happy' | 'unhappy'>('happy');
+  const [areas, setAreas] = useState(initialAreas);
+
+  // Recording state
+  const [sessionId, setSessionId] = useState<string | null>(null);
+  const [events, setEvents] = useState<RecordingEvent[]>([]);
+  const [screenshots, setScreenshots] = useState<string[]>([]);
+  const [isLoading, setIsLoading] = useState(false);
+  const [generatedCode, setGeneratedCode] = useState('');
+
+  const handleStartRecording = async () => {
+    if (!url || !testName) return;
+
+    setIsLoading(true);
+    try {
+      // Create functional area if needed
+      let finalAreaId = areaId;
+      if (newAreaName && !areaId) {
+        const area = await getOrCreateFunctionalArea(newAreaName);
+        finalAreaId = area.id;
+        setAreas([...areas, { ...area, description: area.description ?? null }]);
+        setAreaId(area.id);
+      }
+
+      const { sessionId } = await startRecording(url);
+      setSessionId(sessionId);
+      setStep('recording');
+      setEvents([{
+        type: 'navigation',
+        timestamp: Date.now(),
+        description: `Navigated to ${url}`,
+      }]);
+    } catch (error) {
+      console.error('Failed to start recording:', error);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleCaptureScreenshot = async () => {
+    try {
+      const { screenshotPath } = await captureScreenshot();
+      if (screenshotPath) {
+        setScreenshots([...screenshots, screenshotPath]);
+        setEvents([...events, {
+          type: 'screenshot',
+          timestamp: Date.now(),
+          description: 'Screenshot captured',
+        }]);
+      }
+    } catch (error) {
+      console.error('Failed to capture screenshot:', error);
+    }
+  };
+
+  const handleStopRecording = async () => {
+    setIsLoading(true);
+    try {
+      const session = await stopRecording();
+      if (session) {
+        setGeneratedCode(session.generatedCode);
+        setStep('saving');
+      }
+    } catch (error) {
+      console.error('Failed to stop recording:', error);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleSaveTest = async () => {
+    setIsLoading(true);
+    try {
+      const test = await saveRecordedTest({
+        name: testName,
+        functionalAreaId: areaId || null,
+        pathType,
+        targetUrl: url,
+        code: generatedCode,
+      });
+      router.push(`/tests/${test.id}`);
+    } catch (error) {
+      console.error('Failed to save test:', error);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  if (step === 'setup') {
+    return (
+      <div className="flex-1 p-6 overflow-auto">
+        <div className="max-w-2xl mx-auto">
+          <Card>
+            <CardHeader>
+              <CardTitle>New Recording</CardTitle>
+              <CardDescription>
+                Configure your test and start recording browser interactions
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-6">
+              {/* URL Input */}
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Target URL</label>
+                <div className="flex gap-2">
+                  <Input
+                    placeholder="https://example.com"
+                    value={url}
+                    onChange={(e) => setUrl(e.target.value)}
+                  />
+                  <Button
+                    variant="outline"
+                    size="icon"
+                    onClick={() => window.open(url, '_blank')}
+                    disabled={!url.startsWith('http')}
+                  >
+                    <ExternalLink className="h-4 w-4" />
+                  </Button>
+                </div>
+              </div>
+
+              {/* Test Name */}
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Test Name</label>
+                <Input
+                  placeholder="login-success"
+                  value={testName}
+                  onChange={(e) => setTestName(e.target.value)}
+                />
+              </div>
+
+              {/* Functional Area */}
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Functional Area</label>
+                <div className="flex gap-2">
+                  <Select value={areaId} onValueChange={setAreaId}>
+                    <SelectTrigger className="flex-1">
+                      <SelectValue placeholder="Select or create new" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {areas.map((area) => (
+                        <SelectItem key={area.id} value={area.id}>
+                          {area.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <span className="text-sm text-muted-foreground self-center">or</span>
+                  <Input
+                    placeholder="New area name"
+                    value={newAreaName}
+                    onChange={(e) => {
+                      setNewAreaName(e.target.value);
+                      setAreaId('');
+                    }}
+                    className="flex-1"
+                  />
+                </div>
+              </div>
+
+              {/* Path Type */}
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Path Type</label>
+                <div className="flex gap-4">
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="radio"
+                      name="pathType"
+                      checked={pathType === 'happy'}
+                      onChange={() => setPathType('happy')}
+                      className="accent-primary"
+                    />
+                    <span>Happy path</span>
+                  </label>
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="radio"
+                      name="pathType"
+                      checked={pathType === 'unhappy'}
+                      onChange={() => setPathType('unhappy')}
+                      className="accent-primary"
+                    />
+                    <span>Unhappy path</span>
+                  </label>
+                </div>
+              </div>
+
+              {/* Start Button */}
+              <Button
+                onClick={handleStartRecording}
+                disabled={!url || !testName || isLoading}
+                className="w-full"
+                size="lg"
+              >
+                {isLoading ? (
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                ) : (
+                  <Video className="h-4 w-4 mr-2" />
+                )}
+                Start Recording
+              </Button>
+            </CardContent>
+          </Card>
+        </div>
+      </div>
+    );
+  }
+
+  if (step === 'recording') {
+    return (
+      <div className="flex-1 p-6 overflow-auto">
+        <div className="max-w-4xl mx-auto space-y-6">
+          {/* Recording Status */}
+          <Card className="border-primary">
+            <CardHeader className="pb-3">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="h-3 w-3 rounded-full bg-red-500 animate-pulse" />
+                  <CardTitle>Recording in Progress</CardTitle>
+                </div>
+                <Badge variant="outline">{testName}</Badge>
+              </div>
+              <CardDescription>{url}</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="flex gap-2">
+                <Button onClick={handleCaptureScreenshot} variant="outline">
+                  <Camera className="h-4 w-4 mr-2" />
+                  Screenshot
+                </Button>
+                <Button
+                  onClick={handleStopRecording}
+                  variant="destructive"
+                  disabled={isLoading}
+                >
+                  {isLoading ? (
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  ) : (
+                    <Square className="h-4 w-4 mr-2" />
+                  )}
+                  Stop Recording
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+
+          <div className="grid grid-cols-2 gap-6">
+            {/* Interaction Timeline */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-sm">Interaction Timeline</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-2 max-h-64 overflow-y-auto">
+                  {events.map((event, i) => (
+                    <div key={i} className="flex items-start gap-2 text-sm">
+                      <div className="mt-0.5">
+                        {event.type === 'navigation' && <Navigation className="h-3 w-3 text-blue-500" />}
+                        {event.type === 'click' && <MousePointer className="h-3 w-3 text-green-500" />}
+                        {event.type === 'screenshot' && <Camera className="h-3 w-3 text-yellow-500" />}
+                      </div>
+                      <div className="flex-1">
+                        <span className="text-muted-foreground">
+                          {new Date(event.timestamp).toLocaleTimeString()}
+                        </span>
+                        <span className="ml-2">{event.description}</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* Screenshots */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-sm">Screenshots ({screenshots.length})</CardTitle>
+              </CardHeader>
+              <CardContent>
+                {screenshots.length > 0 ? (
+                  <div className="grid grid-cols-3 gap-2">
+                    {screenshots.map((path, i) => (
+                      <div
+                        key={i}
+                        className="aspect-video bg-muted rounded border cursor-pointer hover:border-primary"
+                      >
+                        <img
+                          src={path}
+                          alt={`Screenshot ${i + 1}`}
+                          className="w-full h-full object-cover rounded"
+                        />
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="text-center py-4 text-muted-foreground text-sm">
+                    Press Screenshot or Ctrl+S to capture
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          </div>
+
+          <div className="text-sm text-muted-foreground text-center">
+            <Clock className="h-4 w-4 inline mr-1" />
+            Recording... Interact with the browser window to capture actions.
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Saving step
+  return (
+    <div className="flex-1 p-6 overflow-auto">
+      <div className="max-w-4xl mx-auto space-y-6">
+        <Card>
+          <CardHeader>
+            <CardTitle>Save Recording</CardTitle>
+            <CardDescription>
+              Review the generated test code and save
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="grid grid-cols-2 gap-4 text-sm">
+              <div>
+                <span className="text-muted-foreground">Name:</span>
+                <span className="ml-2 font-medium">{testName}</span>
+              </div>
+              <div>
+                <span className="text-muted-foreground">Path Type:</span>
+                <Badge variant="outline" className="ml-2">{pathType}</Badge>
+              </div>
+            </div>
+
+            <div>
+              <label className="text-sm font-medium">Generated Code</label>
+              <pre className="mt-2 bg-muted p-4 rounded-lg overflow-x-auto text-sm font-mono max-h-96">
+                {generatedCode || '// No code generated'}
+              </pre>
+            </div>
+
+            <div className="flex gap-2 justify-end">
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setStep('setup');
+                  setGeneratedCode('');
+                  setEvents([]);
+                  setScreenshots([]);
+                }}
+              >
+                Discard
+              </Button>
+              <Button onClick={handleSaveTest} disabled={isLoading}>
+                {isLoading ? (
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                ) : null}
+                Save Test
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    </div>
+  );
+}

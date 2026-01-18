@@ -1,0 +1,112 @@
+'use server';
+
+import { revalidatePath } from 'next/cache';
+import { getRunner } from '@/lib/playwright/runner';
+import { getGitInfo } from '@/lib/git/utils';
+import * as queries from '@/lib/db/queries';
+import { v4 as uuid } from 'uuid';
+import type { Test } from '@/lib/db/schema';
+
+export async function createTestRun(testIds?: string[]) {
+  const gitInfo = await getGitInfo();
+
+  const run = await queries.createTestRun({
+    gitBranch: gitInfo.branch,
+    gitCommit: gitInfo.commit,
+    startedAt: new Date(),
+    status: 'running',
+  });
+
+  return run;
+}
+
+export async function runTests(testIds?: string[]) {
+  const runner = getRunner();
+
+  if (runner.isActive()) {
+    throw new Error('Tests already running');
+  }
+
+  // Get tests to run
+  let tests: Test[];
+  if (testIds && testIds.length > 0) {
+    tests = await Promise.all(
+      testIds.map(id => queries.getTest(id))
+    ).then(results => results.filter((t): t is Test => t !== undefined));
+  } else {
+    tests = await queries.getTests();
+  }
+
+  if (tests.length === 0) {
+    throw new Error('No tests to run');
+  }
+
+  // Create test run record
+  const gitInfo = await getGitInfo();
+  const run = await queries.createTestRun({
+    gitBranch: gitInfo.branch,
+    gitCommit: gitInfo.commit,
+    startedAt: new Date(),
+    status: 'running',
+  });
+
+  // Run tests (this happens async)
+  runTestsAsync(run.id, tests);
+
+  return { runId: run.id, testCount: tests.length };
+}
+
+async function runTestsAsync(runId: string, tests: Test[]) {
+  const runner = getRunner();
+
+  try {
+    const results = await runner.runTests(tests, runId);
+
+    // Save results
+    for (const result of results) {
+      await queries.createTestResult({
+        testRunId: runId,
+        testId: result.testId,
+        status: result.status,
+        screenshotPath: result.screenshotPath,
+        errorMessage: result.errorMessage,
+        durationMs: result.durationMs,
+      });
+    }
+
+    // Update run status
+    const hasFailures = results.some(r => r.status === 'failed');
+    await queries.updateTestRun(runId, {
+      completedAt: new Date(),
+      status: hasFailures ? 'failed' : 'passed',
+    });
+
+  } catch (error) {
+    await queries.updateTestRun(runId, {
+      completedAt: new Date(),
+      status: 'failed',
+    });
+  }
+
+  revalidatePath('/run');
+  revalidatePath('/');
+}
+
+export async function getTestRun(runId: string) {
+  return queries.getTestRun(runId);
+}
+
+export async function getTestRunResults(runId: string) {
+  return queries.getTestResultsByRun(runId);
+}
+
+export async function getTestRuns() {
+  return queries.getTestRuns();
+}
+
+export async function getRunStatus() {
+  const runner = getRunner();
+  return {
+    isRunning: runner.isActive(),
+  };
+}

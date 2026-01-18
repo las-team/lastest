@@ -1,0 +1,236 @@
+'use client';
+
+import { useState } from 'react';
+import { useRouter } from 'next/navigation';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import { Play, Trash2, Copy, Edit2, Clock, CheckCircle, XCircle } from 'lucide-react';
+import { deleteTest } from '@/server/actions/tests';
+import type { Test, TestResult } from '@/lib/db/schema';
+
+interface TestDetailClientProps {
+  test: Test;
+  results: TestResult[];
+}
+
+export function TestDetailClient({ test, results }: TestDetailClientProps) {
+  const router = useRouter();
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [showDeleteDialog, setShowDeleteDialog] = useState(false);
+
+  const latestResult = results[0];
+
+  const handleDelete = async () => {
+    setIsDeleting(true);
+    try {
+      await deleteTest(test.id);
+      router.push('/tests');
+    } finally {
+      setIsDeleting(false);
+    }
+  };
+
+  const handleRun = () => {
+    router.push(`/run?testId=${test.id}`);
+  };
+
+  return (
+    <div className="flex-1 p-6 overflow-auto">
+      <div className="max-w-4xl space-y-6">
+        {/* Test Info Card */}
+        <Card>
+          <CardHeader>
+            <div className="flex items-start justify-between">
+              <div>
+                <CardTitle className="flex items-center gap-2">
+                  {test.name}
+                  <Badge variant={test.pathType === 'happy' ? 'default' : 'secondary'}>
+                    {test.pathType} path
+                  </Badge>
+                </CardTitle>
+                <CardDescription>
+                  {test.targetUrl || 'No target URL'}
+                </CardDescription>
+              </div>
+
+              <div className="flex gap-2">
+                <Button onClick={handleRun}>
+                  <Play className="h-4 w-4 mr-2" />
+                  Run
+                </Button>
+                <Button variant="outline" size="icon">
+                  <Edit2 className="h-4 w-4" />
+                </Button>
+                <Button variant="outline" size="icon">
+                  <Copy className="h-4 w-4" />
+                </Button>
+                <Button
+                  variant="outline"
+                  size="icon"
+                  onClick={() => setShowDeleteDialog(true)}
+                >
+                  <Trash2 className="h-4 w-4" />
+                </Button>
+              </div>
+            </div>
+          </CardHeader>
+
+          <CardContent>
+            <div className="grid grid-cols-3 gap-4 text-sm">
+              <div>
+                <span className="text-muted-foreground">Status</span>
+                <div className="flex items-center gap-2 mt-1">
+                  {latestResult?.status === 'passed' ? (
+                    <>
+                      <CheckCircle className="h-4 w-4 text-green-500" />
+                      <span className="text-green-600">Passed</span>
+                    </>
+                  ) : latestResult?.status === 'failed' ? (
+                    <>
+                      <XCircle className="h-4 w-4 text-destructive" />
+                      <span className="text-destructive">Failed</span>
+                    </>
+                  ) : (
+                    <span className="text-muted-foreground">Not run</span>
+                  )}
+                </div>
+              </div>
+
+              <div>
+                <span className="text-muted-foreground">Last Run</span>
+                <div className="flex items-center gap-2 mt-1">
+                  <Clock className="h-4 w-4 text-muted-foreground" />
+                  <span>
+                    {latestResult?.durationMs
+                      ? `${latestResult.durationMs}ms`
+                      : 'Never'}
+                  </span>
+                </div>
+              </div>
+
+              <div>
+                <span className="text-muted-foreground">Created</span>
+                <div className="mt-1">
+                  {test.createdAt
+                    ? new Date(test.createdAt).toLocaleDateString()
+                    : 'Unknown'}
+                </div>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Tabs for Code, Screenshots, History */}
+        <Tabs defaultValue="code">
+          <TabsList>
+            <TabsTrigger value="code">Code</TabsTrigger>
+            <TabsTrigger value="screenshots">Screenshots</TabsTrigger>
+            <TabsTrigger value="history">Run History</TabsTrigger>
+          </TabsList>
+
+          <TabsContent value="code" className="mt-4">
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-sm">Test Code</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <pre className="bg-muted p-4 rounded-lg overflow-x-auto text-sm font-mono">
+                  {test.code || '// No code generated yet'}
+                </pre>
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          <TabsContent value="screenshots" className="mt-4">
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-sm">Screenshot Timeline</CardTitle>
+              </CardHeader>
+              <CardContent>
+                {latestResult?.screenshotPath ? (
+                  <div className="grid grid-cols-4 gap-4">
+                    <div className="aspect-video bg-muted rounded-lg" />
+                  </div>
+                ) : (
+                  <div className="text-center py-8 text-muted-foreground">
+                    No screenshots captured yet
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          <TabsContent value="history" className="mt-4">
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-sm">Run History</CardTitle>
+              </CardHeader>
+              <CardContent>
+                {results.length > 0 ? (
+                  <div className="space-y-2">
+                    {results.map((result) => (
+                      <div
+                        key={result.id}
+                        className="flex items-center justify-between p-3 border rounded-lg"
+                      >
+                        <div className="flex items-center gap-3">
+                          {result.status === 'passed' ? (
+                            <CheckCircle className="h-4 w-4 text-green-500" />
+                          ) : (
+                            <XCircle className="h-4 w-4 text-destructive" />
+                          )}
+                          <span className="capitalize">{result.status}</span>
+                        </div>
+                        <span className="text-sm text-muted-foreground">
+                          {result.durationMs}ms
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="text-center py-8 text-muted-foreground">
+                    No run history
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          </TabsContent>
+        </Tabs>
+      </div>
+
+      {/* Delete Confirmation Dialog */}
+      <Dialog open={showDeleteDialog} onOpenChange={setShowDeleteDialog}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Delete Test</DialogTitle>
+            <DialogDescription>
+              Are you sure you want to delete "{test.name}"? This action cannot be undone.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowDeleteDialog(false)}>
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={handleDelete}
+              disabled={isDeleting}
+            >
+              {isDeleting ? 'Deleting...' : 'Delete'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}
