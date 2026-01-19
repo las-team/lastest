@@ -11,6 +11,7 @@ import {
   pullRequests,
   githubAccounts,
   repositories,
+  playwrightSettings,
 } from './schema';
 import type {
   NewFunctionalArea,
@@ -24,7 +25,9 @@ import type {
   NewPullRequest,
   NewGithubAccount,
   NewRepository,
+  NewPlaywrightSettings,
   BuildStatus,
+  SelectorConfig,
 } from './schema';
 import { eq, desc, and, inArray } from 'drizzle-orm';
 import { v4 as uuid } from 'uuid';
@@ -424,4 +427,87 @@ export async function getTestResultsWithTestInfo(testRunId: string) {
     .all();
 
   return results;
+}
+
+// Playwright Settings
+export const DEFAULT_SELECTOR_PRIORITY: SelectorConfig[] = [
+  { type: 'data-testid', enabled: true, priority: 1 },
+  { type: 'id', enabled: true, priority: 2 },
+  { type: 'role-name', enabled: true, priority: 3 },
+  { type: 'aria-label', enabled: true, priority: 4 },
+  { type: 'text', enabled: true, priority: 5 },
+  { type: 'css-path', enabled: true, priority: 6 },
+  { type: 'ocr-text', enabled: false, priority: 7 },
+];
+
+export async function getPlaywrightSettings(repositoryId?: string | null) {
+  if (repositoryId) {
+    const settings = await db
+      .select()
+      .from(playwrightSettings)
+      .where(eq(playwrightSettings.repositoryId, repositoryId))
+      .get();
+    if (settings) return settings;
+  }
+
+  // Return global settings (no repositoryId) or defaults
+  const globalSettings = await db
+    .select()
+    .from(playwrightSettings)
+    .where(eq(playwrightSettings.repositoryId, ''))
+    .get();
+
+  if (globalSettings) return globalSettings;
+
+  // Return default settings object (not saved)
+  return {
+    id: '',
+    repositoryId: null,
+    selectorPriority: DEFAULT_SELECTOR_PRIORITY,
+    browser: 'chromium' as const,
+    viewportWidth: 1280,
+    viewportHeight: 720,
+    headless: false,
+    navigationTimeout: 30000,
+    actionTimeout: 5000,
+    createdAt: null,
+    updatedAt: null,
+  };
+}
+
+export async function createPlaywrightSettings(data: Omit<NewPlaywrightSettings, 'id' | 'createdAt' | 'updatedAt'>) {
+  const id = uuid();
+  const now = new Date();
+  await db.insert(playwrightSettings).values({
+    ...data,
+    id,
+    selectorPriority: data.selectorPriority || DEFAULT_SELECTOR_PRIORITY,
+    createdAt: now,
+    updatedAt: now,
+  });
+  return { id, ...data, createdAt: now, updatedAt: now };
+}
+
+export async function updatePlaywrightSettings(id: string, data: Partial<NewPlaywrightSettings>) {
+  await db.update(playwrightSettings).set({ ...data, updatedAt: new Date() }).where(eq(playwrightSettings.id, id));
+}
+
+export async function upsertPlaywrightSettings(repositoryId: string | null, data: Partial<NewPlaywrightSettings>) {
+  const repoIdValue = repositoryId || '';
+  const existing = await db
+    .select()
+    .from(playwrightSettings)
+    .where(eq(playwrightSettings.repositoryId, repoIdValue))
+    .get();
+
+  if (existing) {
+    await updatePlaywrightSettings(existing.id, data);
+    return { ...existing, ...data, updatedAt: new Date() };
+  } else {
+    return createPlaywrightSettings({ ...data, repositoryId: repoIdValue });
+  }
+}
+
+export async function deletePlaywrightSettings(id: string) {
+  await db.delete(playwrightSettings).where(eq(playwrightSettings.id, id));
 }

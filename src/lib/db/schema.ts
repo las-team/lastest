@@ -9,6 +9,27 @@ export interface NetworkRequest {
   resourceType: string;
 }
 
+// Selector configuration for multi-input recording
+export type SelectorType = 'data-testid' | 'id' | 'role-name' | 'text' | 'aria-label' | 'css-path' | 'ocr-text';
+
+export interface SelectorConfig {
+  type: SelectorType;
+  enabled: boolean;
+  priority: number;
+}
+
+export interface ActionSelector {
+  type: SelectorType;
+  value: string;
+}
+
+export interface RecordedAction {
+  action: 'click' | 'fill' | 'selectOption' | 'goto';
+  selectors: ActionSelector[];
+  value?: string;
+  timestamp: number;
+}
+
 export interface DiffMetadata {
   changedRegions: { x: number; y: number; width: number; height: number }[];
   affectedComponents?: string[];
@@ -180,6 +201,24 @@ export type Baseline = typeof baselines.$inferSelect;
 export type NewBaseline = typeof baselines.$inferInsert;
 export type IgnoreRegion = typeof ignoreRegions.$inferSelect;
 export type NewIgnoreRegion = typeof ignoreRegions.$inferInsert;
+
+// Playwright settings for recording and running tests
+export const playwrightSettings = sqliteTable('playwright_settings', {
+  id: text('id').primaryKey(),
+  repositoryId: text('repository_id').references(() => repositories.id),
+  selectorPriority: text('selector_priority', { mode: 'json' }).$type<SelectorConfig[]>(),
+  browser: text('browser').default('chromium'), // chromium | firefox | webkit
+  viewportWidth: integer('viewport_width').default(1280),
+  viewportHeight: integer('viewport_height').default(720),
+  headless: integer('headless', { mode: 'boolean' }).default(false),
+  navigationTimeout: integer('navigation_timeout').default(30000),
+  actionTimeout: integer('action_timeout').default(5000),
+  createdAt: integer('created_at', { mode: 'timestamp' }),
+  updatedAt: integer('updated_at', { mode: 'timestamp' }),
+});
+
+export type PlaywrightSettings = typeof playwrightSettings.$inferSelect;
+export type NewPlaywrightSettings = typeof playwrightSettings.$inferInsert;
 
 // Build status enum
 export type BuildStatus = 'safe_to_merge' | 'review_required' | 'blocked';
