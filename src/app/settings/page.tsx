@@ -1,4 +1,3 @@
-import Link from 'next/link';
 import { Header } from '@/components/layout/header';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -59,12 +58,14 @@ export default async function SettingsPage({
                         <div className="text-sm text-muted-foreground">Connected</div>
                       </div>
                     </div>
-                    <Link
+                    <a
                       href="/api/auth/github"
+                      target="_blank"
+                      rel="noopener noreferrer"
                       className="text-sm text-blue-600 hover:underline"
                     >
                       Reconnect
-                    </Link>
+                    </a>
                   </div>
                   <p className="text-sm text-muted-foreground">
                     Builds will automatically link to open PRs by branch name.
@@ -75,13 +76,15 @@ export default async function SettingsPage({
                   <p className="text-muted-foreground">
                     Connect your GitHub account to link builds with pull requests.
                   </p>
-                  <Link
+                  <a
                     href="/api/auth/github"
+                    target="_blank"
+                    rel="noopener noreferrer"
                     className="inline-flex items-center gap-2 px-4 py-2 bg-gray-900 text-white rounded-lg hover:bg-gray-800"
                   >
                     <Github className="w-5 h-5" />
                     Connect GitHub
-                  </Link>
+                  </a>
                 </>
               )}
             </CardContent>

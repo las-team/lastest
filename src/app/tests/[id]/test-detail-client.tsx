@@ -158,8 +158,19 @@ export function TestDetailClient({ test, results }: TestDetailClientProps) {
               </CardHeader>
               <CardContent>
                 {latestResult?.screenshotPath ? (
-                  <div className="grid grid-cols-4 gap-4">
-                    <div className="aspect-video bg-muted rounded-lg" />
+                  <div className="grid grid-cols-2 gap-4">
+                    <a
+                      href={latestResult.screenshotPath}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="block"
+                    >
+                      <img
+                        src={latestResult.screenshotPath}
+                        alt="Test screenshot"
+                        className="w-full rounded-lg border hover:opacity-90 transition-opacity"
+                      />
+                    </a>
                   </div>
                 ) : (
                   <div className="text-center py-8 text-muted-foreground">
