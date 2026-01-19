@@ -1,7 +1,30 @@
 import { db } from './index';
-import { functionalAreas, tests, testRuns, testResults } from './schema';
-import type { NewFunctionalArea, NewTest, NewTestRun, NewTestResult } from './schema';
-import { eq, desc } from 'drizzle-orm';
+import {
+  functionalAreas,
+  tests,
+  testRuns,
+  testResults,
+  builds,
+  visualDiffs,
+  baselines,
+  ignoreRegions,
+  pullRequests,
+  githubAccounts,
+} from './schema';
+import type {
+  NewFunctionalArea,
+  NewTest,
+  NewTestRun,
+  NewTestResult,
+  NewBuild,
+  NewVisualDiff,
+  NewBaseline,
+  NewIgnoreRegion,
+  NewPullRequest,
+  NewGithubAccount,
+  BuildStatus,
+} from './schema';
+import { eq, desc, and, inArray } from 'drizzle-orm';
 import { v4 as uuid } from 'uuid';
 
 // Functional Areas
@@ -113,4 +136,175 @@ export async function getTestsWithStatus() {
       };
     })
   );
+}
+
+// Builds
+export async function getBuilds(limit = 10) {
+  return db.select().from(builds).orderBy(desc(builds.createdAt)).limit(limit).all();
+}
+
+export async function getBuild(id: string) {
+  return db.select().from(builds).where(eq(builds.id, id)).get();
+}
+
+export async function getBuildByTestRun(testRunId: string) {
+  return db.select().from(builds).where(eq(builds.testRunId, testRunId)).get();
+}
+
+export async function createBuild(data: Omit<NewBuild, 'id'>) {
+  const id = uuid();
+  await db.insert(builds).values({ ...data, id, createdAt: new Date() });
+  return { id, ...data, createdAt: new Date() };
+}
+
+export async function updateBuild(id: string, data: Partial<NewBuild>) {
+  await db.update(builds).set(data).where(eq(builds.id, id));
+}
+
+export async function getRecentBuilds(limit = 5) {
+  return db.select().from(builds).orderBy(desc(builds.createdAt)).limit(limit).all();
+}
+
+// Visual Diffs
+export async function getVisualDiffsByBuild(buildId: string) {
+  return db.select().from(visualDiffs).where(eq(visualDiffs.buildId, buildId)).all();
+}
+
+export async function getVisualDiff(id: string) {
+  return db.select().from(visualDiffs).where(eq(visualDiffs.id, id)).get();
+}
+
+export async function getPendingDiffsByBuild(buildId: string) {
+  return db
+    .select()
+    .from(visualDiffs)
+    .where(and(eq(visualDiffs.buildId, buildId), eq(visualDiffs.status, 'pending')))
+    .all();
+}
+
+export async function createVisualDiff(data: Omit<NewVisualDiff, 'id'>) {
+  const id = uuid();
+  await db.insert(visualDiffs).values({ ...data, id, createdAt: new Date() });
+  return { id, ...data, createdAt: new Date() };
+}
+
+export async function updateVisualDiff(id: string, data: Partial<NewVisualDiff>) {
+  await db.update(visualDiffs).set(data).where(eq(visualDiffs.id, id));
+}
+
+export async function batchUpdateVisualDiffs(ids: string[], data: Partial<NewVisualDiff>) {
+  await db.update(visualDiffs).set(data).where(inArray(visualDiffs.id, ids));
+}
+
+// Baselines
+export async function getActiveBaseline(testId: string, branch: string) {
+  return db
+    .select()
+    .from(baselines)
+    .where(
+      and(
+        eq(baselines.testId, testId),
+        eq(baselines.branch, branch),
+        eq(baselines.isActive, true)
+      )
+    )
+    .get();
+}
+
+export async function getBaselineByHash(testId: string, imageHash: string) {
+  return db
+    .select()
+    .from(baselines)
+    .where(
+      and(
+        eq(baselines.testId, testId),
+        eq(baselines.imageHash, imageHash),
+        eq(baselines.isActive, true)
+      )
+    )
+    .get();
+}
+
+export async function createBaseline(data: Omit<NewBaseline, 'id'>) {
+  const id = uuid();
+  await db.insert(baselines).values({ ...data, id, createdAt: new Date() });
+  return { id, ...data, createdAt: new Date() };
+}
+
+export async function deactivateBaselines(testId: string, branch: string) {
+  await db
+    .update(baselines)
+    .set({ isActive: false })
+    .where(and(eq(baselines.testId, testId), eq(baselines.branch, branch)));
+}
+
+// Ignore Regions
+export async function getIgnoreRegions(testId: string) {
+  return db.select().from(ignoreRegions).where(eq(ignoreRegions.testId, testId)).all();
+}
+
+export async function createIgnoreRegion(data: Omit<NewIgnoreRegion, 'id'>) {
+  const id = uuid();
+  await db.insert(ignoreRegions).values({ ...data, id, createdAt: new Date() });
+  return { id, ...data, createdAt: new Date() };
+}
+
+export async function deleteIgnoreRegion(id: string) {
+  await db.delete(ignoreRegions).where(eq(ignoreRegions.id, id));
+}
+
+// Pull Requests
+export async function getPullRequest(id: string) {
+  return db.select().from(pullRequests).where(eq(pullRequests.id, id)).get();
+}
+
+export async function getPullRequestByBranch(headBranch: string) {
+  return db
+    .select()
+    .from(pullRequests)
+    .where(and(eq(pullRequests.headBranch, headBranch), eq(pullRequests.status, 'open')))
+    .get();
+}
+
+export async function createPullRequest(data: Omit<NewPullRequest, 'id'>) {
+  const id = uuid();
+  await db.insert(pullRequests).values({ ...data, id, createdAt: new Date() });
+  return { id, ...data, createdAt: new Date() };
+}
+
+export async function updatePullRequest(id: string, data: Partial<NewPullRequest>) {
+  await db.update(pullRequests).set({ ...data, updatedAt: new Date() }).where(eq(pullRequests.id, id));
+}
+
+// GitHub Accounts
+export async function getGithubAccount() {
+  return db.select().from(githubAccounts).get();
+}
+
+export async function createGithubAccount(data: Omit<NewGithubAccount, 'id'>) {
+  const id = uuid();
+  await db.insert(githubAccounts).values({ ...data, id, createdAt: new Date() });
+  return { id, ...data, createdAt: new Date() };
+}
+
+export async function updateGithubAccount(id: string, data: Partial<NewGithubAccount>) {
+  await db.update(githubAccounts).set(data).where(eq(githubAccounts.id, id));
+}
+
+export async function deleteGithubAccount(id: string) {
+  await db.delete(githubAccounts).where(eq(githubAccounts.id, id));
+}
+
+// Build Summary helpers
+export async function computeBuildStatus(buildId: string): Promise<BuildStatus> {
+  const diffs = await getVisualDiffsByBuild(buildId);
+
+  if (diffs.length === 0) return 'safe_to_merge';
+
+  const hasFailed = diffs.some(d => d.status === 'rejected');
+  const hasPending = diffs.some(d => d.status === 'pending');
+
+  if (hasFailed) return 'blocked';
+  if (hasPending) return 'review_required';
+  return 'safe_to_merge';
 }

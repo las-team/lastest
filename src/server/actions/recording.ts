@@ -5,17 +5,41 @@ import { createTest, createFunctionalArea, getFunctionalAreas } from '@/lib/db/q
 import { v4 as uuid } from 'uuid';
 import { revalidatePath } from 'next/cache';
 
-export async function startRecording(url: string) {
+export async function startRecording(url: string): Promise<{ sessionId?: string; error?: string }> {
   const recorder = getRecorder();
 
   if (recorder.isActive()) {
-    throw new Error('Recording already in progress');
+    return { error: 'Recording already in progress' };
+  }
+
+  // Validate URL format
+  try {
+    new URL(url);
+  } catch {
+    return { error: 'Invalid URL format. Please enter a valid URL (e.g., https://example.com)' };
   }
 
   const sessionId = uuid();
-  await recorder.startRecording(url, sessionId);
 
-  return { sessionId };
+  try {
+    await recorder.startRecording(url, sessionId);
+    return { sessionId };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Failed to start recording';
+
+    // Parse common Playwright errors
+    if (message.includes('ERR_NAME_NOT_RESOLVED')) {
+      return { error: `Could not resolve hostname. Please check the URL: ${url}` };
+    }
+    if (message.includes('ERR_CONNECTION_REFUSED')) {
+      return { error: `Connection refused. Make sure the server is running at: ${url}` };
+    }
+    if (message.includes('ERR_CONNECTION_TIMED_OUT')) {
+      return { error: `Connection timed out for: ${url}` };
+    }
+
+    return { error: message };
+  }
 }
 
 export async function stopRecording() {
@@ -35,6 +59,7 @@ export async function captureScreenshot() {
 export async function getRecordingStatus() {
   const recorder = getRecorder();
   const session = recorder.getSession();
+  const lastCompleted = recorder.getLastCompletedSession();
 
   return {
     isRecording: recorder.isActive(),
@@ -44,7 +69,16 @@ export async function getRecordingStatus() {
       startedAt: session.startedAt,
       eventsCount: session.events.length,
     } : null,
+    lastCompletedSession: lastCompleted ? {
+      id: lastCompleted.id,
+      generatedCode: lastCompleted.generatedCode,
+    } : null,
   };
+}
+
+export async function clearLastCompletedSession() {
+  const recorder = getRecorder();
+  recorder.clearLastCompletedSession();
 }
 
 export async function saveRecordedTest(data: {

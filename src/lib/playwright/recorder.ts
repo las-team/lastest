@@ -30,6 +30,7 @@ export class PlaywrightRecorder extends EventEmitter {
   private context: BrowserContext | null = null;
   private page: Page | null = null;
   private session: RecordingSession | null = null;
+  private lastCompletedSession: RecordingSession | null = null;
   private screenshotDir: string;
   private isRecording = false;
 
@@ -48,6 +49,7 @@ export class PlaywrightRecorder extends EventEmitter {
       fs.mkdirSync(this.screenshotDir, { recursive: true });
     }
 
+    this.lastCompletedSession = null; // Clear any previous completed session
     this.session = {
       id: sessionId,
       url,
@@ -64,15 +66,16 @@ export class PlaywrightRecorder extends EventEmitter {
 
       this.context = await this.browser.newContext({
         viewport: { width: 1280, height: 720 },
+        ignoreHTTPSErrors: true, // Ignore SSL errors for local dev
       });
 
       this.page = await this.context.newPage();
 
-      // Track interactions
-      this.setupEventListeners();
+      // Setup event listeners BEFORE navigation (must await these)
+      await this.setupEventListeners();
 
       // Navigate to initial URL
-      await this.page.goto(url);
+      await this.page.goto(url, { waitUntil: 'domcontentloaded' });
       this.addEvent('navigation', { url });
 
       this.isRecording = true;
@@ -83,7 +86,7 @@ export class PlaywrightRecorder extends EventEmitter {
     }
   }
 
-  private setupEventListeners() {
+  private async setupEventListeners(): Promise<void> {
     if (!this.page) return;
 
     // Track navigation
@@ -93,13 +96,20 @@ export class PlaywrightRecorder extends EventEmitter {
       }
     });
 
-    // We'll use page.exposeFunction to track interactions from the page
-    this.page.exposeFunction('__recordAction', (action: string, selector: string, value?: string) => {
+    // Track page close to stop recording
+    this.page.on('close', () => {
+      if (this.isRecording) {
+        this.stopRecording().catch(() => {});
+      }
+    });
+
+    // Expose function to track interactions from the page - MUST await
+    await this.page.exposeFunction('__recordAction', (action: string, selector: string, value?: string) => {
       this.addEvent('action', { action, selector, value });
     });
 
-    // Inject interaction tracking script
-    this.page.addInitScript(() => {
+    // Inject interaction tracking script - MUST await
+    await this.page.addInitScript(() => {
       document.addEventListener('click', (e) => {
         const target = e.target as HTMLElement;
         const selector = generateSelector(target);
@@ -192,7 +202,8 @@ export class PlaywrightRecorder extends EventEmitter {
 
   async stopRecording(): Promise<RecordingSession | null> {
     if (!this.isRecording || !this.session) {
-      return null;
+      // Return last completed session if available (for when browser was closed)
+      return this.lastCompletedSession;
     }
 
     this.isRecording = false;
@@ -202,11 +213,20 @@ export class PlaywrightRecorder extends EventEmitter {
     this.addEvent('complete', { code: this.session.generatedCode });
 
     const session = { ...this.session };
+    this.lastCompletedSession = session; // Store for retrieval
 
     await this.cleanup();
     this.emit('stopped', session);
 
     return session;
+  }
+
+  getLastCompletedSession(): RecordingSession | null {
+    return this.lastCompletedSession;
+  }
+
+  clearLastCompletedSession(): void {
+    this.lastCompletedSession = null;
   }
 
   private generateCode(): string {

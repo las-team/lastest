@@ -16,7 +16,7 @@ import {
   GitCommit,
   FileCode,
 } from 'lucide-react';
-import { runTests } from '@/server/actions/runs';
+import { createAndRunBuild } from '@/server/actions/builds';
 import type { Test, TestRun } from '@/lib/db/schema';
 import Link from 'next/link';
 
@@ -32,10 +32,10 @@ export function RunDashboardClient({ tests, runs }: RunDashboardClientProps) {
   const handleRunAll = async () => {
     setIsRunning(true);
     try {
-      const { runId } = await runTests();
-      router.push(`/run/${runId}`);
+      const { buildId, testRunId } = await createAndRunBuild('manual');
+      router.push(`/builds/${buildId}`);
     } catch (error) {
-      console.error('Failed to start test run:', error);
+      console.error('Failed to start build:', error);
     } finally {
       setIsRunning(false);
     }

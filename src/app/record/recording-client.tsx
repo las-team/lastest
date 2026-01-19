@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -19,6 +19,8 @@ import {
   captureScreenshot,
   saveRecordedTest,
   getOrCreateFunctionalArea,
+  getRecordingStatus,
+  clearLastCompletedSession,
 } from '@/server/actions/recording';
 import {
   Video,
@@ -62,11 +64,42 @@ export function RecordingClient({ areas: initialAreas }: RecordingClientProps) {
   const [screenshots, setScreenshots] = useState<string[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [generatedCode, setGeneratedCode] = useState('');
+  const [error, setError] = useState<string | null>(null);
+
+  // Poll for recording status when in recording step
+  useEffect(() => {
+    if (step !== 'recording') return;
+
+    const pollInterval = setInterval(async () => {
+      try {
+        const status = await getRecordingStatus();
+        // If recording stopped (browser was closed), check for completed session
+        if (!status.isRecording) {
+          if (status.lastCompletedSession) {
+            setGeneratedCode(status.lastCompletedSession.generatedCode);
+            await clearLastCompletedSession();
+            setStep('saving');
+          } else {
+            // Recording was stopped but no session - go back to setup
+            setStep('setup');
+            setError('Recording was stopped unexpectedly');
+          }
+          clearInterval(pollInterval);
+        }
+      } catch (err) {
+        console.error('Failed to poll recording status:', err);
+      }
+    }, 1000);
+
+    return () => clearInterval(pollInterval);
+  }, [step]);
 
   const handleStartRecording = async () => {
     if (!url || !testName) return;
 
     setIsLoading(true);
+    setError(null);
+
     try {
       // Create functional area if needed
       let finalAreaId = areaId;
@@ -77,16 +110,25 @@ export function RecordingClient({ areas: initialAreas }: RecordingClientProps) {
         setAreaId(area.id);
       }
 
-      const { sessionId } = await startRecording(url);
-      setSessionId(sessionId);
-      setStep('recording');
-      setEvents([{
-        type: 'navigation',
-        timestamp: Date.now(),
-        description: `Navigated to ${url}`,
-      }]);
-    } catch (error) {
-      console.error('Failed to start recording:', error);
+      const result = await startRecording(url);
+
+      if (result.error) {
+        setError(result.error);
+        return;
+      }
+
+      if (result.sessionId) {
+        setSessionId(result.sessionId);
+        setStep('recording');
+        setEvents([{
+          type: 'navigation',
+          timestamp: Date.now(),
+          description: `Navigated to ${url}`,
+        }]);
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to start recording';
+      setError(message);
     } finally {
       setIsLoading(false);
     }
@@ -238,6 +280,13 @@ export function RecordingClient({ areas: initialAreas }: RecordingClientProps) {
                   </label>
                 </div>
               </div>
+
+              {/* Error Display */}
+              {error && (
+                <div className="p-3 bg-destructive/10 border border-destructive/20 rounded-lg text-sm text-destructive">
+                  {error}
+                </div>
+              )}
 
               {/* Start Button */}
               <Button
