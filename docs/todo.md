@@ -1,11 +1,6 @@
-Repo wrapper
-    Repo selector under Github integrations
-    All data after on the UI is repo specific and is stored in the DB that way
-
-Repo overview screen n sidebar
-    For repo select baseline - what are we testing against 
-    For repo list open branches - show what's tested and what's not 
-        display as gh tree view
+intent /home/ewyct/dev/lastest2/docs/targeted-ui-spec.md
+dash /home/ewyct/.claude/plans/proud-yawning-noodle.md
+repo /home/ewyct/.claude/plans/replicated-forging-fountain.md
 
 When recording tests
     Scan playwright recording options and put them on UI - tucked away behind a setting putton
@@ -32,5 +27,5 @@ Having AI write tests
     assertions to fail them
 
 ## bugs
-
-
+refresh icon on next ot the repo selector - out of sidebar
+comarison doesnt respect gh synced repos

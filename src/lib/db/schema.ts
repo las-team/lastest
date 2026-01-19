@@ -17,12 +17,14 @@ export interface DiffMetadata {
 
 export const functionalAreas = sqliteTable('functional_areas', {
   id: text('id').primaryKey(),
+  repositoryId: text('repository_id'),
   name: text('name').notNull(),
   description: text('description'),
 });
 
 export const tests = sqliteTable('tests', {
   id: text('id').primaryKey(),
+  repositoryId: text('repository_id'),
   functionalAreaId: text('functional_area_id').references(() => functionalAreas.id),
   name: text('name').notNull(),
   pathType: text('path_type').notNull(), // 'happy' or 'unhappy'
@@ -34,6 +36,7 @@ export const tests = sqliteTable('tests', {
 
 export const testRuns = sqliteTable('test_runs', {
   id: text('id').primaryKey(),
+  repositoryId: text('repository_id'),
   gitBranch: text('git_branch').notNull(),
   gitCommit: text('git_commit').notNull(),
   startedAt: integer('started_at', { mode: 'timestamp' }),
@@ -56,6 +59,18 @@ export const testResults = sqliteTable('test_results', {
   networkRequests: text('network_requests', { mode: 'json' }).$type<NetworkRequest[]>(),
 });
 
+// Repositories synced from GitHub
+export const repositories = sqliteTable('repositories', {
+  id: text('id').primaryKey(),
+  githubRepoId: integer('github_repo_id').notNull(),
+  owner: text('owner').notNull(),
+  name: text('name').notNull(),
+  fullName: text('full_name').notNull(), // owner/name
+  defaultBranch: text('default_branch'),
+  selectedBaseline: text('selected_baseline'), // branch name for baseline comparison
+  createdAt: integer('created_at', { mode: 'timestamp' }),
+});
+
 // GitHub OAuth accounts
 export const githubAccounts = sqliteTable('github_accounts', {
   id: text('id').primaryKey(),
@@ -64,6 +79,7 @@ export const githubAccounts = sqliteTable('github_accounts', {
   accessToken: text('access_token').notNull(),
   refreshToken: text('refresh_token'),
   tokenExpiresAt: integer('token_expires_at', { mode: 'timestamp' }),
+  selectedRepositoryId: text('selected_repository_id').references(() => repositories.id),
   createdAt: integer('created_at', { mode: 'timestamp' }),
 });
 
@@ -120,6 +136,7 @@ export const visualDiffs = sqliteTable('visual_diffs', {
 // Baselines for carry-forward logic
 export const baselines = sqliteTable('baselines', {
   id: text('id').primaryKey(),
+  repositoryId: text('repository_id'),
   testId: text('test_id').references(() => tests.id).notNull(),
   imagePath: text('image_path').notNull(),
   imageHash: text('image_hash').notNull(), // SHA256 for carry-forward matching
@@ -141,6 +158,8 @@ export const ignoreRegions = sqliteTable('ignore_regions', {
   createdAt: integer('created_at', { mode: 'timestamp' }),
 });
 
+export type Repository = typeof repositories.$inferSelect;
+export type NewRepository = typeof repositories.$inferInsert;
 export type FunctionalArea = typeof functionalAreas.$inferSelect;
 export type NewFunctionalArea = typeof functionalAreas.$inferInsert;
 export type Test = typeof tests.$inferSelect;

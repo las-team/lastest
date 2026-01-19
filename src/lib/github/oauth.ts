@@ -92,3 +92,62 @@ export async function getOpenPRsForBranch(
     return [];
   }
 }
+
+export interface GitHubRepo {
+  id: number;
+  name: string;
+  full_name: string;
+  owner: { login: string };
+  default_branch: string;
+  private: boolean;
+}
+
+export async function getUserRepos(accessToken: string): Promise<GitHubRepo[]> {
+  try {
+    const response = await fetch(
+      'https://api.github.com/user/repos?type=all&sort=updated&per_page=100',
+      {
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          Accept: 'application/vnd.github.v3+json',
+        },
+      }
+    );
+
+    if (!response.ok) return [];
+
+    return response.json();
+  } catch {
+    return [];
+  }
+}
+
+export interface GitHubBranch {
+  name: string;
+  commit: { sha: string };
+  protected: boolean;
+}
+
+export async function getRepoBranches(
+  accessToken: string,
+  owner: string,
+  repo: string
+): Promise<GitHubBranch[]> {
+  try {
+    const response = await fetch(
+      `https://api.github.com/repos/${owner}/${repo}/branches?per_page=100`,
+      {
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          Accept: 'application/vnd.github.v3+json',
+        },
+      }
+    );
+
+    if (!response.ok) return [];
+
+    return response.json();
+  } catch {
+    return [];
+  }
+}

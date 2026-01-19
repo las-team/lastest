@@ -106,7 +106,7 @@ export function RecordingClient({ areas: initialAreas }: RecordingClientProps) {
       if (newAreaName && !areaId) {
         const area = await getOrCreateFunctionalArea(newAreaName);
         finalAreaId = area.id;
-        setAreas([...areas, { ...area, description: area.description ?? null }]);
+        setAreas([...areas, { ...area, description: area.description ?? null, repositoryId: area.repositoryId ?? null }]);
         setAreaId(area.id);
       }
 

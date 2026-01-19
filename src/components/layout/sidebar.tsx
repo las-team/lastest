@@ -9,11 +9,14 @@ import {
   Play,
   GitCompare,
   Settings,
-  Circle
+  Circle,
+  FolderGit2,
 } from 'lucide-react';
+import { RepoSelector } from './repo-selector';
 
 const navigation = [
   { name: 'Dashboard', href: '/', icon: LayoutDashboard },
+  { name: 'Repo', href: '/repo', icon: FolderGit2 },
   { name: 'Tests', href: '/tests', icon: FileCode },
   { name: 'Runs', href: '/run', icon: Play },
   { name: 'Compare', href: '/compare', icon: GitCompare },
@@ -30,6 +33,10 @@ export function Sidebar() {
           <Circle className="h-6 w-6 fill-primary text-primary" />
           LASTEST2
         </Link>
+      </div>
+
+      <div className="p-4 border-b">
+        <RepoSelector />
       </div>
 
       <nav className="flex-1 p-4">

@@ -2,14 +2,26 @@ import { Header } from '@/components/layout/header';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { CheckCircle, XCircle, Clock, FileCode, Folder } from 'lucide-react';
-import { getTests, getFunctionalAreas, getTestRuns, getTestResultsByRun } from '@/lib/db/queries';
+import {
+  getTests,
+  getFunctionalAreas,
+  getTestRuns,
+  getTestResultsByRun,
+  getSelectedRepository,
+  getTestsByRepo,
+  getFunctionalAreasByRepo,
+  getTestRunsByRepo,
+} from '@/lib/db/queries';
 import Link from 'next/link';
 
 export default async function DashboardPage() {
+  const selectedRepo = await getSelectedRepository();
+
+  // Fetch data filtered by selected repo if available
   const [tests, areas, runs] = await Promise.all([
-    getTests(),
-    getFunctionalAreas(),
-    getTestRuns(),
+    selectedRepo ? getTestsByRepo(selectedRepo.id) : getTests(),
+    selectedRepo ? getFunctionalAreasByRepo(selectedRepo.id) : getFunctionalAreas(),
+    selectedRepo ? getTestRunsByRepo(selectedRepo.id) : getTestRuns(),
   ]);
 
   // Get results from the latest run to calculate pass/fail

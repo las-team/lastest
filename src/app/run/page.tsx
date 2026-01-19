@@ -1,11 +1,19 @@
 import { Header } from '@/components/layout/header';
 import { RunDashboardClient } from './run-dashboard-client';
-import { getTests, getTestRuns } from '@/lib/db/queries';
+import {
+  getTests,
+  getTestRuns,
+  getSelectedRepository,
+  getTestsByRepo,
+  getTestRunsByRepo,
+} from '@/lib/db/queries';
 
 export default async function RunPage() {
+  const selectedRepo = await getSelectedRepository();
+
   const [tests, runs] = await Promise.all([
-    getTests(),
-    getTestRuns(),
+    selectedRepo ? getTestsByRepo(selectedRepo.id) : getTests(),
+    selectedRepo ? getTestRunsByRepo(selectedRepo.id) : getTestRuns(),
   ]);
 
   return (

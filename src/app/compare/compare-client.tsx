@@ -24,6 +24,7 @@ import type { TestRun } from '@/lib/db/schema';
 interface CompareClientProps {
   branches: string[];
   runs: TestRun[];
+  defaultBaseline?: string | null;
 }
 
 interface ComparisonResult {
@@ -35,8 +36,8 @@ interface ComparisonResult {
   match: boolean;
 }
 
-export function CompareClient({ branches, runs }: CompareClientProps) {
-  const [baseBranch, setBaseBranch] = useState<string>('');
+export function CompareClient({ branches, runs, defaultBaseline }: CompareClientProps) {
+  const [baseBranch, setBaseBranch] = useState<string>(defaultBaseline || '');
   const [targetBranch, setTargetBranch] = useState<string>('');
   const [isComparing, setIsComparing] = useState(false);
   const [results, setResults] = useState<ComparisonResult[]>([]);
