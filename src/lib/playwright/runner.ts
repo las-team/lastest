@@ -22,6 +22,12 @@ export interface TestRunResult {
   errorMessage?: string;
 }
 
+export interface ProgressCallback {
+  completed: number;
+  total: number;
+  currentTestName?: string;
+}
+
 export class PlaywrightRunner extends EventEmitter {
   private browser: Browser | null = null;
   private screenshotDir: string;
@@ -33,7 +39,11 @@ export class PlaywrightRunner extends EventEmitter {
     this.screenshotDir = screenshotDir;
   }
 
-  async runTests(tests: Test[], runId: string): Promise<TestRunResult[]> {
+  async runTests(
+    tests: Test[],
+    runId: string,
+    onProgress?: (progress: ProgressCallback) => void
+  ): Promise<TestRunResult[]> {
     if (this.isRunning) {
       throw new Error('Already running tests');
     }
@@ -55,11 +65,24 @@ export class PlaywrightRunner extends EventEmitter {
         timestamp: Date.now(),
       } as RunEvent);
 
-      for (const test of tests) {
+      for (let i = 0; i < tests.length; i++) {
+        const test = tests[i];
         if (this.aborted) break;
+
+        onProgress?.({
+          completed: i,
+          total: tests.length,
+          currentTestName: test.name,
+        });
 
         const result = await this.runSingleTest(test, runId);
         results.push(result);
+
+        onProgress?.({
+          completed: i + 1,
+          total: tests.length,
+          currentTestName: test.name,
+        });
       }
 
       this.emit('event', {

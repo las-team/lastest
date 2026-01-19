@@ -388,3 +388,40 @@ export async function getSelectedRepository() {
   const repo = await getRepository(account.selectedRepositoryId);
   return repo || null;
 }
+
+// Get latest test run for a specific branch
+export async function getLatestRunByBranch(branch: string, repositoryId?: string) {
+  const conditions = [eq(testRuns.gitBranch, branch)];
+  if (repositoryId) {
+    conditions.push(eq(testRuns.repositoryId, repositoryId));
+  }
+
+  return db
+    .select()
+    .from(testRuns)
+    .where(and(...conditions))
+    .orderBy(desc(testRuns.startedAt))
+    .limit(1)
+    .get();
+}
+
+// Get test results with test info (name, pathType) for a run
+export async function getTestResultsWithTestInfo(testRunId: string) {
+  const results = await db
+    .select({
+      id: testResults.id,
+      testId: testResults.testId,
+      status: testResults.status,
+      screenshotPath: testResults.screenshotPath,
+      errorMessage: testResults.errorMessage,
+      durationMs: testResults.durationMs,
+      testName: tests.name,
+      testPathType: tests.pathType,
+    })
+    .from(testResults)
+    .innerJoin(tests, eq(testResults.testId, tests.id))
+    .where(eq(testResults.testRunId, testRunId))
+    .all();
+
+  return results;
+}

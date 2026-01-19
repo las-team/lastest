@@ -1,0 +1,176 @@
+import { getRunner } from '@/lib/playwright/runner';
+import { getGitInfo } from '@/lib/git/utils';
+import * as queries from '@/lib/db/queries';
+import type { Test } from '@/lib/db/schema';
+
+export type QueuedRunStatus = 'queued' | 'running' | 'completed' | 'failed';
+
+export interface QueuedRun {
+  id: string;
+  branch: string;
+  testIds?: string[];
+  status: QueuedRunStatus;
+  progress: {
+    completed: number;
+    total: number;
+    currentTestName?: string;
+  };
+  startedAt?: Date;
+  completedAt?: Date;
+  runId?: string;
+  error?: string;
+}
+
+class RunQueue {
+  private queue: Map<string, QueuedRun> = new Map();
+  private isProcessing = false;
+
+  addToQueue(branch: string, testIds?: string[]): QueuedRun {
+    const id = `queue-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+    const queuedRun: QueuedRun = {
+      id,
+      branch,
+      testIds,
+      status: 'queued',
+      progress: { completed: 0, total: 0 },
+    };
+
+    this.queue.set(id, queuedRun);
+    this.processQueue();
+
+    return queuedRun;
+  }
+
+  private async processQueue() {
+    if (this.isProcessing) return;
+
+    const runner = getRunner();
+    if (runner.isActive()) return;
+
+    const nextItem = Array.from(this.queue.values()).find(
+      (item) => item.status === 'queued'
+    );
+
+    if (!nextItem) return;
+
+    this.isProcessing = true;
+    nextItem.status = 'running';
+    nextItem.startedAt = new Date();
+
+    try {
+      // Get tests to run
+      let tests: Test[];
+      if (nextItem.testIds && nextItem.testIds.length > 0) {
+        tests = await Promise.all(
+          nextItem.testIds.map((id) => queries.getTest(id))
+        ).then((results) => results.filter((t): t is Test => t !== undefined));
+      } else {
+        tests = await queries.getTests();
+      }
+
+      if (tests.length === 0) {
+        throw new Error('No tests to run');
+      }
+
+      nextItem.progress.total = tests.length;
+
+      // Create test run record
+      const gitInfo = await getGitInfo();
+      const run = await queries.createTestRun({
+        gitBranch: nextItem.branch,
+        gitCommit: gitInfo.commit,
+        startedAt: new Date(),
+        status: 'running',
+      });
+
+      nextItem.runId = run.id;
+
+      // Run tests
+      const results = await runner.runTests(tests, run.id, (progress) => {
+        nextItem.progress.completed = progress.completed;
+        nextItem.progress.currentTestName = progress.currentTestName;
+      });
+
+      // Save results
+      for (const result of results) {
+        await queries.createTestResult({
+          testRunId: run.id,
+          testId: result.testId,
+          status: result.status,
+          screenshotPath: result.screenshotPath,
+          errorMessage: result.errorMessage,
+          durationMs: result.durationMs,
+        });
+      }
+
+      // Update run status
+      const hasFailures = results.some((r) => r.status === 'failed');
+      await queries.updateTestRun(run.id, {
+        completedAt: new Date(),
+        status: hasFailures ? 'failed' : 'passed',
+      });
+
+      nextItem.status = 'completed';
+      nextItem.completedAt = new Date();
+    } catch (error) {
+      nextItem.status = 'failed';
+      nextItem.completedAt = new Date();
+      nextItem.error = error instanceof Error ? error.message : 'Unknown error';
+
+      if (nextItem.runId) {
+        await queries.updateTestRun(nextItem.runId, {
+          completedAt: new Date(),
+          status: 'failed',
+        });
+      }
+    } finally {
+      this.isProcessing = false;
+      // Process next item in queue
+      setTimeout(() => this.processQueue(), 100);
+    }
+  }
+
+  getStatus(): {
+    queue: QueuedRun[];
+    activeRun: QueuedRun | null;
+  } {
+    const items = Array.from(this.queue.values());
+    const activeRun = items.find((item) => item.status === 'running') || null;
+
+    // Clean up old completed/failed items (keep last 10)
+    const completed = items
+      .filter((item) => item.status === 'completed' || item.status === 'failed')
+      .sort((a, b) => (b.completedAt?.getTime() || 0) - (a.completedAt?.getTime() || 0));
+
+    if (completed.length > 10) {
+      completed.slice(10).forEach((item) => this.queue.delete(item.id));
+    }
+
+    return {
+      queue: items.filter((item) => item.status === 'queued' || item.status === 'running'),
+      activeRun,
+    };
+  }
+
+  getQueuedRun(id: string): QueuedRun | undefined {
+    return this.queue.get(id);
+  }
+
+  clearCompleted() {
+    Array.from(this.queue.entries()).forEach(([id, item]) => {
+      if (item.status === 'completed' || item.status === 'failed') {
+        this.queue.delete(id);
+      }
+    });
+  }
+}
+
+// Singleton instance
+let runQueueInstance: RunQueue | null = null;
+
+export function getRunQueue(): RunQueue {
+  if (!runQueueInstance) {
+    runQueueInstance = new RunQueue();
+  }
+  return runQueueInstance;
+}
