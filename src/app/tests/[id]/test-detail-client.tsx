@@ -14,8 +14,10 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { Play, Trash2, Copy, Edit2, Clock, CheckCircle, XCircle } from 'lucide-react';
-import { deleteTest } from '@/server/actions/tests';
+import { Input } from '@/components/ui/input';
+import { Textarea } from '@/components/ui/textarea';
+import { Play, Trash2, Copy, Edit2, Clock, CheckCircle, XCircle, X, Save } from 'lucide-react';
+import { deleteTest, updateTest } from '@/server/actions/tests';
 import type { Test, TestResult } from '@/lib/db/schema';
 
 interface TestDetailClientProps {
@@ -27,6 +29,11 @@ export function TestDetailClient({ test, results }: TestDetailClientProps) {
   const router = useRouter();
   const [isDeleting, setIsDeleting] = useState(false);
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
+  const [isEditing, setIsEditing] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const [editName, setEditName] = useState(test.name);
+  const [editUrl, setEditUrl] = useState(test.targetUrl || '');
+  const [editCode, setEditCode] = useState(test.code || '');
 
   const latestResult = results[0];
 
@@ -44,6 +51,28 @@ export function TestDetailClient({ test, results }: TestDetailClientProps) {
     router.push(`/run?testId=${test.id}`);
   };
 
+  const handleSave = async () => {
+    setIsSaving(true);
+    try {
+      await updateTest(test.id, {
+        name: editName,
+        targetUrl: editUrl || null,
+        code: editCode,
+      });
+      setIsEditing(false);
+      router.refresh();
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleCancel = () => {
+    setEditName(test.name);
+    setEditUrl(test.targetUrl || '');
+    setEditCode(test.code || '');
+    setIsEditing(false);
+  };
+
   return (
     <div className="flex-1 p-6 overflow-auto">
       <div className="max-w-4xl space-y-6">
@@ -51,36 +80,69 @@ export function TestDetailClient({ test, results }: TestDetailClientProps) {
         <Card>
           <CardHeader>
             <div className="flex items-start justify-between">
-              <div>
-                <CardTitle className="flex items-center gap-2">
-                  {test.name}
-                  <Badge variant={test.pathType === 'happy' ? 'default' : 'secondary'}>
-                    {test.pathType} path
-                  </Badge>
-                </CardTitle>
-                <CardDescription>
-                  {test.targetUrl || 'No target URL'}
-                </CardDescription>
+              <div className="flex-1 mr-4">
+                {isEditing ? (
+                  <div className="space-y-2">
+                    <Input
+                      value={editName}
+                      onChange={(e) => setEditName(e.target.value)}
+                      className="text-xl font-semibold"
+                    />
+                    <Input
+                      value={editUrl}
+                      onChange={(e) => setEditUrl(e.target.value)}
+                      placeholder="https://example.com"
+                      className="text-sm text-muted-foreground"
+                    />
+                  </div>
+                ) : (
+                  <>
+                    <CardTitle className="flex items-center gap-2">
+                      {test.name}
+                      <Badge variant={test.pathType === 'happy' ? 'default' : 'secondary'}>
+                        {test.pathType} path
+                      </Badge>
+                    </CardTitle>
+                    <CardDescription>
+                      {test.targetUrl || 'No target URL'}
+                    </CardDescription>
+                  </>
+                )}
               </div>
 
               <div className="flex gap-2">
-                <Button onClick={handleRun}>
-                  <Play className="h-4 w-4 mr-2" />
-                  Run
-                </Button>
-                <Button variant="outline" size="icon">
-                  <Edit2 className="h-4 w-4" />
-                </Button>
-                <Button variant="outline" size="icon">
-                  <Copy className="h-4 w-4" />
-                </Button>
-                <Button
-                  variant="outline"
-                  size="icon"
-                  onClick={() => setShowDeleteDialog(true)}
-                >
-                  <Trash2 className="h-4 w-4" />
-                </Button>
+                {isEditing ? (
+                  <>
+                    <Button onClick={handleSave} disabled={isSaving}>
+                      <Save className="h-4 w-4 mr-2" />
+                      {isSaving ? 'Saving...' : 'Save'}
+                    </Button>
+                    <Button variant="outline" onClick={handleCancel}>
+                      <X className="h-4 w-4 mr-2" />
+                      Cancel
+                    </Button>
+                  </>
+                ) : (
+                  <>
+                    <Button onClick={handleRun}>
+                      <Play className="h-4 w-4 mr-2" />
+                      Run
+                    </Button>
+                    <Button variant="outline" size="icon" onClick={() => setIsEditing(true)}>
+                      <Edit2 className="h-4 w-4" />
+                    </Button>
+                    <Button variant="outline" size="icon">
+                      <Copy className="h-4 w-4" />
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="icon"
+                      onClick={() => setShowDeleteDialog(true)}
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  </>
+                )}
               </div>
             </div>
           </CardHeader>
@@ -144,9 +206,17 @@ export function TestDetailClient({ test, results }: TestDetailClientProps) {
                 <CardTitle className="text-sm">Test Code</CardTitle>
               </CardHeader>
               <CardContent>
-                <pre className="bg-muted p-4 rounded-lg overflow-x-auto text-sm font-mono">
-                  {test.code || '// No code generated yet'}
-                </pre>
+                {isEditing ? (
+                  <Textarea
+                    value={editCode}
+                    onChange={(e) => setEditCode(e.target.value)}
+                    className="font-mono text-sm min-h-[300px]"
+                  />
+                ) : (
+                  <pre className="bg-muted p-4 rounded-lg overflow-x-auto text-sm font-mono">
+                    {test.code || '// No code generated yet'}
+                  </pre>
+                )}
               </CardContent>
             </Card>
           </TabsContent>
