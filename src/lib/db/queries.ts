@@ -12,6 +12,11 @@ import {
   githubAccounts,
   repositories,
   playwrightSettings,
+  routes,
+  scanStatus,
+} from './schema';
+import {
+  DEFAULT_SELECTOR_PRIORITY,
 } from './schema';
 import type {
   NewFunctionalArea,
@@ -26,9 +31,13 @@ import type {
   NewGithubAccount,
   NewRepository,
   NewPlaywrightSettings,
+  NewRoute,
+  NewScanStatus,
   BuildStatus,
   SelectorConfig,
 } from './schema';
+
+export { DEFAULT_SELECTOR_PRIORITY };
 import { eq, desc, and, inArray } from 'drizzle-orm';
 import { v4 as uuid } from 'uuid';
 
@@ -430,16 +439,6 @@ export async function getTestResultsWithTestInfo(testRunId: string) {
 }
 
 // Playwright Settings
-export const DEFAULT_SELECTOR_PRIORITY: SelectorConfig[] = [
-  { type: 'data-testid', enabled: true, priority: 1 },
-  { type: 'id', enabled: true, priority: 2 },
-  { type: 'role-name', enabled: true, priority: 3 },
-  { type: 'aria-label', enabled: true, priority: 4 },
-  { type: 'text', enabled: true, priority: 5 },
-  { type: 'css-path', enabled: true, priority: 6 },
-  { type: 'ocr-text', enabled: false, priority: 7 },
-];
-
 export async function getPlaywrightSettings(repositoryId?: string | null) {
   if (repositoryId) {
     const settings = await db
@@ -510,4 +509,71 @@ export async function upsertPlaywrightSettings(repositoryId: string | null, data
 
 export async function deletePlaywrightSettings(id: string) {
   await db.delete(playwrightSettings).where(eq(playwrightSettings.id, id));
+}
+
+// Routes
+export async function getRoutesByRepo(repositoryId: string) {
+  return db.select().from(routes).where(eq(routes.repositoryId, repositoryId)).all();
+}
+
+export async function getRoute(id: string) {
+  return db.select().from(routes).where(eq(routes.id, id)).get();
+}
+
+export async function getRoutesByIds(ids: string[]) {
+  if (ids.length === 0) return [];
+  return db.select().from(routes).where(inArray(routes.id, ids)).all();
+}
+
+export async function createRoute(data: Omit<NewRoute, 'id'>) {
+  const id = uuid();
+  await db.insert(routes).values({ ...data, id });
+  return { id, ...data };
+}
+
+export async function createRoutes(routeData: Omit<NewRoute, 'id'>[]) {
+  const routesWithIds = routeData.map(r => ({ ...r, id: uuid() }));
+  if (routesWithIds.length > 0) {
+    await db.insert(routes).values(routesWithIds);
+  }
+  return routesWithIds;
+}
+
+export async function updateRoute(id: string, data: Partial<NewRoute>) {
+  await db.update(routes).set(data).where(eq(routes.id, id));
+}
+
+export async function deleteRoutesByRepo(repositoryId: string) {
+  await db.delete(routes).where(eq(routes.repositoryId, repositoryId));
+}
+
+export async function getRouteCoverageStats(repositoryId: string) {
+  const allRoutes = await getRoutesByRepo(repositoryId);
+  const total = allRoutes.length;
+  const withTests = allRoutes.filter(r => r.hasTest).length;
+  const percentage = total > 0 ? Math.round((withTests / total) * 100) : 0;
+  return { total, withTests, percentage };
+}
+
+export async function linkRouteToFunctionalArea(routeId: string, functionalAreaId: string) {
+  await db.update(routes).set({ functionalAreaId }).where(eq(routes.id, routeId));
+}
+
+// Scan Status
+export async function getScanStatus(repositoryId: string) {
+  return db.select().from(scanStatus).where(eq(scanStatus.repositoryId, repositoryId)).get();
+}
+
+export async function createScanStatus(data: Omit<NewScanStatus, 'id'>) {
+  const id = uuid();
+  await db.insert(scanStatus).values({ ...data, id });
+  return { id, ...data };
+}
+
+export async function updateScanStatus(id: string, data: Partial<NewScanStatus>) {
+  await db.update(scanStatus).set(data).where(eq(scanStatus.id, id));
+}
+
+export async function deleteScanStatus(repositoryId: string) {
+  await db.delete(scanStatus).where(eq(scanStatus.repositoryId, repositoryId));
 }

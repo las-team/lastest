@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -13,6 +13,14 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetHeader,
+  SheetTitle,
+  SheetTrigger,
+} from '@/components/ui/sheet';
 import {
   startRecording,
   stopRecording,
@@ -31,11 +39,15 @@ import {
   Clock,
   MousePointer,
   Navigation,
+  Settings2,
 } from 'lucide-react';
-import type { FunctionalArea } from '@/lib/db/schema';
+import type { FunctionalArea, PlaywrightSettings } from '@/lib/db/schema';
+import { PlaywrightSettingsCard } from '@/components/settings/playwright-settings-card';
 
 interface RecordingClientProps {
   areas: FunctionalArea[];
+  settings: PlaywrightSettings;
+  repositoryId?: string | null;
 }
 
 type RecordingStep = 'setup' | 'recording' | 'saving';
@@ -46,9 +58,10 @@ interface RecordingEvent {
   description: string;
 }
 
-export function RecordingClient({ areas: initialAreas }: RecordingClientProps) {
+export function RecordingClient({ areas: initialAreas, settings, repositoryId }: RecordingClientProps) {
   const router = useRouter();
   const [step, setStep] = useState<RecordingStep>('setup');
+  const [settingsOpen, setSettingsOpen] = useState(false);
 
   // Setup form state
   const [url, setUrl] = useState('https://');
@@ -189,10 +202,36 @@ export function RecordingClient({ areas: initialAreas }: RecordingClientProps) {
         <div className="max-w-2xl mx-auto">
           <Card>
             <CardHeader>
-              <CardTitle>New Recording</CardTitle>
-              <CardDescription>
-                Configure your test and start recording browser interactions
-              </CardDescription>
+              <div className="flex items-center justify-between">
+                <div>
+                  <CardTitle>New Recording</CardTitle>
+                  <CardDescription>
+                    Configure your test and start recording browser interactions
+                  </CardDescription>
+                </div>
+                <Sheet open={settingsOpen} onOpenChange={setSettingsOpen}>
+                  <SheetTrigger asChild>
+                    <Button variant="outline" size="icon">
+                      <Settings2 className="h-4 w-4" />
+                    </Button>
+                  </SheetTrigger>
+                  <SheetContent className="w-[400px] sm:w-[540px] overflow-y-auto">
+                    <SheetHeader>
+                      <SheetTitle>Recording Settings</SheetTitle>
+                      <SheetDescription>
+                        Configure selector priority and browser settings
+                      </SheetDescription>
+                    </SheetHeader>
+                    <div className="mt-6">
+                      <PlaywrightSettingsCard
+                        settings={settings}
+                        repositoryId={repositoryId}
+                        compact
+                      />
+                    </div>
+                  </SheetContent>
+                </Sheet>
+              </div>
             </CardHeader>
             <CardContent className="space-y-6">
               {/* URL Input */}

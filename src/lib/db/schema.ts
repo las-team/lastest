@@ -220,6 +220,49 @@ export const playwrightSettings = sqliteTable('playwright_settings', {
 export type PlaywrightSettings = typeof playwrightSettings.$inferSelect;
 export type NewPlaywrightSettings = typeof playwrightSettings.$inferInsert;
 
+// Default selector priority - can be used in both server and client components
+export const DEFAULT_SELECTOR_PRIORITY: SelectorConfig[] = [
+  { type: 'data-testid', enabled: true, priority: 1 },
+  { type: 'id', enabled: true, priority: 2 },
+  { type: 'role-name', enabled: true, priority: 3 },
+  { type: 'aria-label', enabled: true, priority: 4 },
+  { type: 'text', enabled: true, priority: 5 },
+  { type: 'css-path', enabled: true, priority: 6 },
+  { type: 'ocr-text', enabled: false, priority: 7 },
+];
+
+// Discovered routes for coverage tracking
+export const routes = sqliteTable('routes', {
+  id: text('id').primaryKey(),
+  repositoryId: text('repository_id').references(() => repositories.id),
+  path: text('path').notNull(),
+  type: text('type').notNull(), // 'static' | 'dynamic'
+  filePath: text('file_path'),
+  framework: text('framework'), // 'nextjs-app' | 'nextjs-pages' | 'react-router' | 'vue'
+  routerType: text('router_type'), // 'hash' | 'browser'
+  functionalAreaId: text('functional_area_id').references(() => functionalAreas.id),
+  hasTest: integer('has_test', { mode: 'boolean' }).default(false),
+  scannedAt: integer('scanned_at', { mode: 'timestamp' }),
+});
+
+// Scan status for progress tracking
+export const scanStatus = sqliteTable('scan_status', {
+  id: text('id').primaryKey(),
+  repositoryId: text('repository_id').references(() => repositories.id),
+  status: text('status').notNull(), // 'idle' | 'scanning' | 'completed' | 'error'
+  progress: integer('progress').default(0),
+  routesFound: integer('routes_found').default(0),
+  framework: text('framework'),
+  errorMessage: text('error_message'),
+  startedAt: integer('started_at', { mode: 'timestamp' }),
+  completedAt: integer('completed_at', { mode: 'timestamp' }),
+});
+
+export type Route = typeof routes.$inferSelect;
+export type NewRoute = typeof routes.$inferInsert;
+export type ScanStatus = typeof scanStatus.$inferSelect;
+export type NewScanStatus = typeof scanStatus.$inferInsert;
+
 // Build status enum
 export type BuildStatus = 'safe_to_merge' | 'review_required' | 'blocked';
 export type DiffStatus = 'pending' | 'approved' | 'rejected' | 'auto_approved';

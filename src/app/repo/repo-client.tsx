@@ -10,20 +10,28 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
-import { GitBranch, CheckCircle2, Circle, FolderGit2, AlertCircle } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { GitBranch, CheckCircle2, Circle, FolderGit2, AlertCircle, Scan, Loader2 } from 'lucide-react';
 import { fetchRepoBranches, updateRepoBaseline } from '@/server/actions/repos';
-import type { Repository } from '@/lib/db/schema';
+import { startRouteScan } from '@/server/actions/scanner';
+import { CoverageBar } from '@/components/coverage/coverage-bar';
+import type { Repository, Route, ScanStatus } from '@/lib/db/schema';
 import type { GitHubBranch } from '@/lib/github/oauth';
 
 interface RepoClientProps {
   repository: Repository | null;
   branchTestStatus: Record<string, boolean>;
+  routes: Route[];
+  coverage: { total: number; withTests: number; percentage: number };
+  scanStatus?: ScanStatus;
 }
 
-export function RepoClient({ repository, branchTestStatus }: RepoClientProps) {
+export function RepoClient({ repository, branchTestStatus, routes, coverage, scanStatus }: RepoClientProps) {
   const [branches, setBranches] = useState<GitHubBranch[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [isPending, startTransition] = useTransition();
+  const [isScanning, setIsScanning] = useState(false);
+  const [scanProgress, setScanProgress] = useState(scanStatus?.progress ?? 0);
 
   useEffect(() => {
     if (repository) {
@@ -34,11 +42,29 @@ export function RepoClient({ repository, branchTestStatus }: RepoClientProps) {
     }
   }, [repository]);
 
+  useEffect(() => {
+    if (scanStatus?.status === 'scanning') {
+      setIsScanning(true);
+      setScanProgress(scanStatus.progress ?? 0);
+    }
+  }, [scanStatus]);
+
   const handleBaselineChange = (branch: string) => {
     if (!repository) return;
     startTransition(async () => {
       await updateRepoBaseline(repository.id, branch);
     });
+  };
+
+  const handleScan = async () => {
+    if (!repository) return;
+    setIsScanning(true);
+    setScanProgress(0);
+    try {
+      await startRouteScan(repository.id);
+    } finally {
+      setIsScanning(false);
+    }
   };
 
   if (!repository) {
@@ -101,6 +127,48 @@ export function RepoClient({ repository, branchTestStatus }: RepoClientProps) {
               ))}
             </SelectContent>
           </Select>
+        </CardContent>
+      </Card>
+
+      {/* Route Discovery */}
+      <Card>
+        <CardHeader>
+          <div className="flex items-center justify-between">
+            <div>
+              <CardTitle>Route Discovery</CardTitle>
+              <CardDescription>
+                Scan codebase to discover routes and track test coverage
+              </CardDescription>
+            </div>
+            <Button onClick={handleScan} disabled={isScanning}>
+              {isScanning ? (
+                <>
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  Scanning...
+                </>
+              ) : (
+                <>
+                  <Scan className="h-4 w-4 mr-2" />
+                  Scan Routes
+                </>
+              )}
+            </Button>
+          </div>
+        </CardHeader>
+        <CardContent>
+          <CoverageBar
+            covered={coverage.withTests}
+            total={coverage.total}
+            isScanning={isScanning}
+            scanProgress={scanProgress}
+          />
+          {routes.length > 0 && !isScanning && (
+            <div className="mt-4 text-sm text-muted-foreground">
+              {scanStatus?.framework && (
+                <span>Framework: <Badge variant="outline">{scanStatus.framework}</Badge></span>
+              )}
+            </div>
+          )}
         </CardContent>
       </Card>
 

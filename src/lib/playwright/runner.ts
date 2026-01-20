@@ -1,8 +1,9 @@
-import { chromium, Browser, Page, BrowserContext } from 'playwright';
+import { chromium, firefox, webkit, Browser, Page, BrowserContext, Locator } from 'playwright';
 import { EventEmitter } from 'events';
 import path from 'path';
 import fs from 'fs';
-import type { Test, TestResult } from '@/lib/db/schema';
+import { DEFAULT_SELECTOR_PRIORITY } from '@/lib/db/schema';
+import type { Test, TestResult, ActionSelector, SelectorConfig, PlaywrightSettings } from '@/lib/db/schema';
 
 export interface RunEvent {
   type: 'started' | 'test_started' | 'test_passed' | 'test_failed' | 'completed';
@@ -33,10 +34,39 @@ export class PlaywrightRunner extends EventEmitter {
   private screenshotDir: string;
   private isRunning = false;
   private aborted = false;
+  private settings: PlaywrightSettings | null = null;
 
   constructor(screenshotDir: string = './public/screenshots') {
     super();
     this.screenshotDir = screenshotDir;
+  }
+
+  setSettings(settings: PlaywrightSettings) {
+    this.settings = settings;
+  }
+
+  private getBrowserLauncher() {
+    const browserType = this.settings?.browser || 'chromium';
+    switch (browserType) {
+      case 'firefox': return firefox;
+      case 'webkit': return webkit;
+      default: return chromium;
+    }
+  }
+
+  private getViewport() {
+    return {
+      width: this.settings?.viewportWidth || 1280,
+      height: this.settings?.viewportHeight || 720,
+    };
+  }
+
+  private getSelectorPriority(): SelectorConfig[] {
+    return this.settings?.selectorPriority || DEFAULT_SELECTOR_PRIORITY;
+  }
+
+  private getActionTimeout() {
+    return this.settings?.actionTimeout || 5000;
   }
 
   async runTests(
@@ -58,7 +88,9 @@ export class PlaywrightRunner extends EventEmitter {
     }
 
     try {
-      this.browser = await chromium.launch({ headless: true });
+      const launcher = this.getBrowserLauncher();
+      const headless = this.settings?.headless ?? true;
+      this.browser = await launcher.launch({ headless });
 
       this.emit('event', {
         type: 'started',
@@ -122,7 +154,7 @@ export class PlaywrightRunner extends EventEmitter {
 
     try {
       context = await this.browser.newContext({
-        viewport: { width: 1280, height: 720 },
+        viewport: this.getViewport(),
       });
       page = await context.newPage();
 
@@ -225,14 +257,82 @@ export class PlaywrightRunner extends EventEmitter {
     }
   }
 
+  // Locate element using fallback selector strategy
+  private async locateWithFallback(
+    page: Page,
+    selectors: ActionSelector[],
+  ): Promise<Locator> {
+    const priority = this.getSelectorPriority();
+    const timeout = this.getActionTimeout();
+
+    // Sort selectors by user-defined priority
+    const sorted = selectors
+      .filter(s => priority.find(p => p.type === s.type && p.enabled))
+      .sort((a, b) => {
+        const aPriority = priority.find(p => p.type === a.type)?.priority ?? 999;
+        const bPriority = priority.find(p => p.type === b.type)?.priority ?? 999;
+        return aPriority - bPriority;
+      });
+
+    // Try each selector in priority order
+    const perSelectorTimeout = Math.max(Math.floor(timeout / sorted.length), 1000);
+
+    for (const sel of sorted) {
+      try {
+        const locator = page.locator(sel.value);
+        await locator.waitFor({ timeout: perSelectorTimeout, state: 'visible' });
+        return locator;
+      } catch {
+        continue;
+      }
+    }
+
+    // If no prioritized selectors worked, try all selectors as fallback
+    for (const sel of selectors) {
+      try {
+        const locator = page.locator(sel.value);
+        await locator.waitFor({ timeout: 1000, state: 'visible' });
+        return locator;
+      } catch {
+        continue;
+      }
+    }
+
+    throw new Error(`No selector matched: ${JSON.stringify(selectors)}`);
+  }
+
   private async executeLine(page: Page, line: string): Promise<void> {
     // Parse and execute individual Playwright commands
     if (line.startsWith('await page.goto(')) {
       const urlMatch = line.match(/goto\(['"]([^'"]+)['"]\)/);
       if (urlMatch) {
-        await page.goto(urlMatch[1]);
+        const timeout = this.settings?.navigationTimeout || 30000;
+        await page.goto(urlMatch[1], { timeout });
+      }
+    } else if (line.startsWith('await locateWithFallback(')) {
+      // Parse multi-selector format: await locateWithFallback(page, [...], 'action', 'value');
+      const match = line.match(/locateWithFallback\(page,\s*(\[.*?\]),\s*'(\w+)'(?:,\s*'([^']*)')?\)/);
+      if (match) {
+        const selectors: ActionSelector[] = JSON.parse(match[1]);
+        const action = match[2];
+        const value = match[3];
+
+        const locator = await this.locateWithFallback(page, selectors);
+
+        switch (action) {
+          case 'click':
+            await locator.click();
+            break;
+          case 'fill':
+            await locator.fill(value || '');
+            break;
+          case 'selectOption':
+            await locator.selectOption(value || '');
+            break;
+        }
       }
     } else if (line.startsWith('await page.locator(')) {
+      // Legacy single selector format
       const locatorMatch = line.match(/locator\(['"]([^'"]+)['"]\)/);
       const actionMatch = line.match(/\.(click|fill|selectOption)\(['"]?([^'")]*)?['"]?\)/);
 

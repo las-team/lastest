@@ -14,9 +14,12 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { createFunctionalArea } from '@/server/actions/tests';
-import { FileCode, Plus } from 'lucide-react';
+import { addRoutesAsFunctionalAreas, generateBasicTests } from '@/server/actions/scanner';
+import { CoverageBar } from '@/components/coverage/coverage-bar';
+import { RouteSelectorDialog } from '@/components/routes/route-selector-dialog';
+import { FileCode, Plus, FolderPlus, FlaskConical } from 'lucide-react';
 import Link from 'next/link';
-import type { FunctionalArea, Test } from '@/lib/db/schema';
+import type { FunctionalArea, Test, Route } from '@/lib/db/schema';
 
 interface TestWithStatus extends Test {
   latestStatus: string | null;
@@ -25,24 +28,40 @@ interface TestWithStatus extends Test {
 interface TestsPageClientProps {
   areas: FunctionalArea[];
   tests: TestWithStatus[];
+  routes: Route[];
+  coverage: { total: number; withTests: number; percentage: number };
+  repositoryId?: string;
 }
 
-export function TestsPageClient({ areas, tests }: TestsPageClientProps) {
+export function TestsPageClient({ areas, tests, routes, coverage, repositoryId }: TestsPageClientProps) {
   const [isNewAreaOpen, setIsNewAreaOpen] = useState(false);
   const [newAreaName, setNewAreaName] = useState('');
   const [isCreating, setIsCreating] = useState(false);
+  const [isAddAreasOpen, setIsAddAreasOpen] = useState(false);
+  const [isAddTestsOpen, setIsAddTestsOpen] = useState(false);
 
   const handleCreateArea = async () => {
     if (!newAreaName.trim()) return;
 
     setIsCreating(true);
     try {
-      await createFunctionalArea({ name: newAreaName.trim() });
+      await createFunctionalArea({ name: newAreaName.trim(), repositoryId });
       setNewAreaName('');
       setIsNewAreaOpen(false);
     } finally {
       setIsCreating(false);
     }
+  };
+
+  const handleAddAreas = async (routeIds: string[]) => {
+    if (!repositoryId) return;
+    await addRoutesAsFunctionalAreas(repositoryId, routeIds);
+  };
+
+  const handleAddTests = async (routeIds: string[]) => {
+    if (!repositoryId) return;
+    // Use localhost:3000 as default base URL for now
+    await generateBasicTests(repositoryId, routeIds, 'http://localhost:3000');
   };
 
   return (
@@ -58,7 +77,41 @@ export function TestsPageClient({ areas, tests }: TestsPageClientProps) {
 
       {/* Main Content */}
       <div className="flex-1 p-6 overflow-auto">
-        <div className="max-w-3xl">
+        <div className="max-w-3xl space-y-6">
+          {/* Coverage Bar */}
+          {coverage.total > 0 && (
+            <Card>
+              <CardHeader className="pb-2">
+                <div className="flex items-center justify-between">
+                  <CardTitle className="text-base">Route Coverage</CardTitle>
+                  <div className="flex gap-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setIsAddAreasOpen(true)}
+                      disabled={routes.filter(r => !r.functionalAreaId).length === 0}
+                    >
+                      <FolderPlus className="h-4 w-4 mr-2" />
+                      Add as Areas
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setIsAddTestsOpen(true)}
+                      disabled={routes.filter(r => !r.hasTest).length === 0}
+                    >
+                      <FlaskConical className="h-4 w-4 mr-2" />
+                      Add Basic Tests
+                    </Button>
+                  </div>
+                </div>
+              </CardHeader>
+              <CardContent>
+                <CoverageBar covered={coverage.withTests} total={coverage.total} />
+              </CardContent>
+            </Card>
+          )}
+
           <Card>
             <CardHeader>
               <CardTitle>Tests Overview</CardTitle>
@@ -160,6 +213,28 @@ export function TestsPageClient({ areas, tests }: TestsPageClientProps) {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Add Routes as Areas Dialog */}
+      <RouteSelectorDialog
+        open={isAddAreasOpen}
+        onOpenChange={setIsAddAreasOpen}
+        routes={routes.filter(r => !r.functionalAreaId)}
+        title="Add Routes as Functional Areas"
+        description="Select routes to create functional areas for"
+        actionLabel="Create Areas"
+        onAction={handleAddAreas}
+      />
+
+      {/* Add Basic Tests Dialog */}
+      <RouteSelectorDialog
+        open={isAddTestsOpen}
+        onOpenChange={setIsAddTestsOpen}
+        routes={routes.filter(r => !r.hasTest)}
+        title="Generate Basic Tests"
+        description="Select routes to generate smoke tests for (visit, screenshot, check errors)"
+        actionLabel="Generate Tests"
+        onAction={handleAddTests}
+      />
     </div>
   );
 }

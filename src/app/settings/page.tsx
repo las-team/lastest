@@ -4,6 +4,7 @@ import { Badge } from '@/components/ui/badge';
 import { getGitInfo } from '@/lib/git/utils';
 import * as queries from '@/lib/db/queries';
 import { Github, Check, X } from 'lucide-react';
+import { PlaywrightSettingsCard } from '@/components/settings/playwright-settings-card';
 
 export default async function SettingsPage({
   searchParams,
@@ -13,6 +14,8 @@ export default async function SettingsPage({
   const params = await searchParams;
   const gitInfo = await getGitInfo();
   const githubAccount = await queries.getGithubAccount();
+  const selectedRepo = await queries.getSelectedRepository();
+  const playwrightSettings = await queries.getPlaywrightSettings(selectedRepo?.id);
 
   return (
     <div className="flex flex-col h-full">
@@ -137,28 +140,10 @@ export default async function SettingsPage({
           </Card>
 
           {/* Playwright Config */}
-          <Card>
-            <CardHeader>
-              <CardTitle>Playwright</CardTitle>
-              <CardDescription>
-                Browser automation settings
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">Browser</span>
-                <span>Chromium</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">Viewport</span>
-                <span>1280 x 720</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">Screenshots</span>
-                <code className="text-sm">./public/screenshots</code>
-              </div>
-            </CardContent>
-          </Card>
+          <PlaywrightSettingsCard
+            settings={playwrightSettings}
+            repositoryId={selectedRepo?.id}
+          />
 
           {/* Version */}
           <Card>

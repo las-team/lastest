@@ -11,7 +11,9 @@ import {
   getTestsByRepo,
   getFunctionalAreasByRepo,
   getTestRunsByRepo,
+  getRouteCoverageStats,
 } from '@/lib/db/queries';
+import { CoverageBar } from '@/components/coverage/coverage-bar';
 import Link from 'next/link';
 
 export default async function DashboardPage() {
@@ -23,6 +25,11 @@ export default async function DashboardPage() {
     selectedRepo ? getFunctionalAreasByRepo(selectedRepo.id) : getFunctionalAreas(),
     selectedRepo ? getTestRunsByRepo(selectedRepo.id) : getTestRuns(),
   ]);
+
+  // Fetch route coverage stats
+  const coverage = selectedRepo
+    ? await getRouteCoverageStats(selectedRepo.id)
+    : { total: 0, withTests: 0, percentage: 0 };
 
   // Get results from the latest run to calculate pass/fail
   const latestRun = runs[0];
@@ -91,6 +98,21 @@ export default async function DashboardPage() {
             )}
           </Card>
         </div>
+
+        {/* Route Coverage */}
+        {coverage.total > 0 && (
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-base">Route Coverage</CardTitle>
+              <CardDescription>
+                Test coverage across discovered routes
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <CoverageBar covered={coverage.withTests} total={coverage.total} />
+            </CardContent>
+          </Card>
+        )}
 
         {/* Recent Runs */}
         <Card>

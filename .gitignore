@@ -47,6 +47,7 @@ next-env.d.ts
 
 # screenshots
 /public/screenshots/
+/public/diffs/
 
 # test results
 /lastest2-results/

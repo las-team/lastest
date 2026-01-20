@@ -2,13 +2,15 @@ import { chromium, Browser, Page, BrowserContext } from 'playwright';
 import { EventEmitter } from 'events';
 import path from 'path';
 import fs from 'fs';
+import type { ActionSelector, SelectorType } from '@/lib/db/schema';
 
 export interface RecordingEvent {
   type: 'action' | 'navigation' | 'screenshot' | 'error' | 'complete';
   timestamp: number;
   data: {
     action?: string;
-    selector?: string;
+    selector?: string; // Legacy single selector
+    selectors?: ActionSelector[]; // Multi-selector array
     value?: string;
     url?: string;
     screenshotPath?: string;
@@ -104,68 +106,140 @@ export class PlaywrightRecorder extends EventEmitter {
     });
 
     // Expose function to track interactions from the page - MUST await
-    await this.page.exposeFunction('__recordAction', (action: string, selector: string, value?: string) => {
-      this.addEvent('action', { action, selector, value });
+    await this.page.exposeFunction('__recordAction', (action: string, selectors: ActionSelector[], value?: string) => {
+      // Store both multi-selector array and legacy single selector for backwards compatibility
+      const primarySelector = selectors[0]?.value || '';
+      this.addEvent('action', { action, selector: primarySelector, selectors, value });
     });
 
     // Inject interaction tracking script - MUST await
     await this.page.addInitScript(() => {
+      // Type definition for selectors captured in browser context
+      interface BrowserActionSelector {
+        type: string;
+        value: string;
+      }
+
       document.addEventListener('click', (e) => {
         const target = e.target as HTMLElement;
-        const selector = generateSelector(target);
+        const selectors = generateAllSelectors(target);
         // @ts-ignore
-        window.__recordAction?.('click', selector);
+        window.__recordAction?.('click', selectors);
       }, true);
 
       document.addEventListener('input', (e) => {
         const target = e.target as HTMLInputElement;
-        const selector = generateSelector(target);
+        const selectors = generateAllSelectors(target);
         // @ts-ignore
-        window.__recordAction?.('fill', selector, target.value);
+        window.__recordAction?.('fill', selectors, target.value);
       }, true);
 
       document.addEventListener('change', (e) => {
         const target = e.target as HTMLSelectElement;
         if (target.tagName === 'SELECT') {
-          const selector = generateSelector(target);
+          const selectors = generateAllSelectors(target);
           // @ts-ignore
-          window.__recordAction?.('selectOption', selector, target.value);
+          window.__recordAction?.('selectOption', selectors, target.value);
         }
       }, true);
 
-      function generateSelector(element: HTMLElement): string {
-        // Try data-testid first
+      // Generate ALL available selectors for an element
+      function generateAllSelectors(element: HTMLElement): BrowserActionSelector[] {
+        const selectors: BrowserActionSelector[] = [];
+
+        // 1. data-testid (highest priority)
         if (element.dataset.testid) {
-          return `[data-testid="${element.dataset.testid}"]`;
+          selectors.push({
+            type: 'data-testid',
+            value: `[data-testid="${element.dataset.testid}"]`,
+          });
         }
 
-        // Try ID
+        // 2. ID
         if (element.id) {
-          return `#${element.id}`;
+          selectors.push({
+            type: 'id',
+            value: `#${element.id}`,
+          });
         }
 
-        // Try role + name
-        const role = element.getAttribute('role');
-        const name = element.getAttribute('aria-label') || element.textContent?.trim().slice(0, 30);
-        if (role && name) {
-          return `role=${role}[name="${name}"]`;
+        // 3. Role + name (ARIA)
+        const role = element.getAttribute('role') || getImplicitRole(element);
+        const accessibleName = element.getAttribute('aria-label') ||
+          element.getAttribute('title') ||
+          element.textContent?.trim().slice(0, 30);
+        if (role && accessibleName) {
+          selectors.push({
+            type: 'role-name',
+            value: `role=${role}[name="${accessibleName}"]`,
+          });
         }
 
-        // Try button/link text
-        if (element.tagName === 'BUTTON' || element.tagName === 'A') {
+        // 4. aria-label
+        const ariaLabel = element.getAttribute('aria-label');
+        if (ariaLabel) {
+          selectors.push({
+            type: 'aria-label',
+            value: `[aria-label="${ariaLabel}"]`,
+          });
+        }
+
+        // 5. Text content (for buttons/links)
+        if (element.tagName === 'BUTTON' || element.tagName === 'A' ||
+            element.getAttribute('role') === 'button') {
           const text = element.textContent?.trim().slice(0, 30);
           if (text) {
-            return `text="${text}"`;
+            selectors.push({
+              type: 'text',
+              value: `text="${text}"`,
+            });
           }
         }
 
-        // Fallback to CSS path
+        // 6. CSS path fallback
+        const cssPath = generateCssPath(element);
+        if (cssPath) {
+          selectors.push({
+            type: 'css-path',
+            value: cssPath,
+          });
+        }
+
+        return selectors;
+      }
+
+      // Get implicit ARIA role for common elements
+      function getImplicitRole(element: HTMLElement): string | null {
+        const tagRoles: Record<string, string> = {
+          'BUTTON': 'button',
+          'A': 'link',
+          'INPUT': element.getAttribute('type') === 'checkbox' ? 'checkbox' :
+                   element.getAttribute('type') === 'radio' ? 'radio' :
+                   element.getAttribute('type') === 'submit' ? 'button' : 'textbox',
+          'SELECT': 'combobox',
+          'TEXTAREA': 'textbox',
+          'IMG': 'img',
+          'NAV': 'navigation',
+          'MAIN': 'main',
+          'HEADER': 'banner',
+          'FOOTER': 'contentinfo',
+        };
+        return tagRoles[element.tagName] || null;
+      }
+
+      // Generate CSS path selector
+      function generateCssPath(element: HTMLElement): string {
         const path: string[] = [];
         let current: HTMLElement | null = element;
         while (current && current !== document.body) {
           let selector = current.tagName.toLowerCase();
           if (current.className) {
-            selector += '.' + current.className.split(' ').filter(c => c && !c.includes(':')).join('.');
+            const classes = current.className.split(' ')
+              .filter(c => c && !c.includes(':') && !c.startsWith('_'))
+              .slice(0, 2);
+            if (classes.length > 0) {
+              selector += '.' + classes.join('.');
+            }
           }
           path.unshift(selector);
           current = current.parentElement;
@@ -235,6 +309,21 @@ export class PlaywrightRecorder extends EventEmitter {
     const lines: string[] = [
       `import { test, expect } from '@playwright/test';`,
       '',
+      `// Multi-selector fallback helper`,
+      `async function locateWithFallback(page, selectors, action, value) {`,
+      `  for (const sel of selectors) {`,
+      `    try {`,
+      `      const locator = page.locator(sel.value);`,
+      `      await locator.waitFor({ timeout: 2000 });`,
+      `      if (action === 'click') await locator.click();`,
+      `      else if (action === 'fill') await locator.fill(value || '');`,
+      `      else if (action === 'selectOption') await locator.selectOption(value || '');`,
+      `      return;`,
+      `    } catch { continue; }`,
+      `  }`,
+      `  throw new Error('No selector matched: ' + JSON.stringify(selectors));`,
+      `}`,
+      '',
       `test('${this.session.id}', async ({ page }) => {`,
     ];
 
@@ -247,17 +336,35 @@ export class PlaywrightRecorder extends EventEmitter {
         }
         lastAction = 'goto';
       } else if (event.type === 'action') {
-        const { action, selector, value } = event.data;
-        switch (action) {
-          case 'click':
-            lines.push(`  await page.locator('${selector}').click();`);
-            break;
-          case 'fill':
-            lines.push(`  await page.locator('${selector}').fill('${value || ''}');`);
-            break;
-          case 'selectOption':
-            lines.push(`  await page.locator('${selector}').selectOption('${value || ''}');`);
-            break;
+        const { action, selector, selectors, value } = event.data;
+
+        // Use multi-selector format if available
+        if (selectors && selectors.length > 0) {
+          const selectorsJson = JSON.stringify(selectors);
+          switch (action) {
+            case 'click':
+              lines.push(`  await locateWithFallback(page, ${selectorsJson}, 'click');`);
+              break;
+            case 'fill':
+              lines.push(`  await locateWithFallback(page, ${selectorsJson}, 'fill', '${value || ''}');`);
+              break;
+            case 'selectOption':
+              lines.push(`  await locateWithFallback(page, ${selectorsJson}, 'selectOption', '${value || ''}');`);
+              break;
+          }
+        } else {
+          // Fallback to legacy single selector
+          switch (action) {
+            case 'click':
+              lines.push(`  await page.locator('${selector}').click();`);
+              break;
+            case 'fill':
+              lines.push(`  await page.locator('${selector}').fill('${value || ''}');`);
+              break;
+            case 'selectOption':
+              lines.push(`  await page.locator('${selector}').selectOption('${value || ''}');`);
+              break;
+          }
         }
         lastAction = action || '';
       } else if (event.type === 'screenshot') {
