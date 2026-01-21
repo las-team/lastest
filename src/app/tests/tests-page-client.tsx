@@ -39,6 +39,7 @@ export function TestsPageClient({ areas, tests, routes, coverage, repositoryId }
   const [isCreating, setIsCreating] = useState(false);
   const [isAddAreasOpen, setIsAddAreasOpen] = useState(false);
   const [isAddTestsOpen, setIsAddTestsOpen] = useState(false);
+  const [showAllTests, setShowAllTests] = useState(false);
 
   const handleCreateArea = async () => {
     if (!newAreaName.trim()) return;
@@ -146,7 +147,7 @@ export function TestsPageClient({ areas, tests, routes, coverage, repositoryId }
                   </div>
 
                   <div className="grid gap-2">
-                    {tests.slice(0, 5).map((test) => (
+                    {(showAllTests ? tests : tests.slice(0, 5)).map((test) => (
                       <Link
                         key={test.id}
                         href={`/tests/${test.id}`}
@@ -175,9 +176,16 @@ export function TestsPageClient({ areas, tests, routes, coverage, repositoryId }
                   </div>
 
                   {tests.length > 5 && (
-                    <p className="text-sm text-muted-foreground text-center">
-                      +{tests.length - 5} more tests
-                    </p>
+                    <div className="text-center">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => setShowAllTests(!showAllTests)}
+                        className="text-muted-foreground"
+                      >
+                        {showAllTests ? 'Show less' : `+${tests.length - 5} more tests`}
+                      </Button>
+                    </div>
                   )}
                 </div>
               )}
