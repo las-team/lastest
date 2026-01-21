@@ -1,0 +1,10 @@
+{
+  "discovered_files": {
+    "src/lib/playwright/runner.ts": {
+      "description": "TestRunResult interface now has consoleErrors and networkRequests fields for error tracking. The NetworkRequest type is defined in @/lib/db/schema.ts",
+      "category": "interface",
+      "discovered_at": "2026-01-21T09:11:28.084033+00:00"
+    }
+  },
+  "last_updated": "2026-01-21T09:11:28.084045+00:00"
+}
