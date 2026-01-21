@@ -149,6 +149,7 @@ export const visualDiffs = sqliteTable('visual_diffs', {
   status: text('status').notNull().default('pending'), // 'pending', 'approved', 'rejected', 'auto_approved'
   pixelDifference: integer('pixel_difference').default(0),
   percentageDifference: text('percentage_difference'), // stored as string for precision
+  classification: text('classification'), // 'unchanged' | 'flaky' | 'changed'
   metadata: text('metadata', { mode: 'json' }).$type<DiffMetadata>(),
   approvedBy: text('approved_by'),
   approvedAt: integer('approved_at', { mode: 'timestamp' }),
@@ -283,6 +284,28 @@ export const environmentConfigs = sqliteTable('environment_configs', {
 
 export type EnvironmentConfig = typeof environmentConfigs.$inferSelect;
 export type NewEnvironmentConfig = typeof environmentConfigs.$inferInsert;
+
+// Diff sensitivity settings for classification thresholds
+export const diffSensitivitySettings = sqliteTable('diff_sensitivity_settings', {
+  id: text('id').primaryKey(),
+  repositoryId: text('repository_id').references(() => repositories.id),
+  unchangedThreshold: integer('unchanged_threshold').default(1),  // percentage
+  flakyThreshold: integer('flaky_threshold').default(10),        // percentage
+  createdAt: integer('created_at', { mode: 'timestamp' }),
+  updatedAt: integer('updated_at', { mode: 'timestamp' }),
+});
+
+export type DiffSensitivitySettings = typeof diffSensitivitySettings.$inferSelect;
+export type NewDiffSensitivitySettings = typeof diffSensitivitySettings.$inferInsert;
+
+// Default diff sensitivity thresholds
+export const DEFAULT_DIFF_THRESHOLDS = {
+  unchangedThreshold: 1,
+  flakyThreshold: 10,
+};
+
+// Diff classification type
+export type DiffClassification = 'unchanged' | 'flaky' | 'changed';
 
 // Build status enum
 export type BuildStatus = 'safe_to_merge' | 'review_required' | 'blocked';

@@ -8,9 +8,11 @@ import {
   getTestRunsByRepo,
 } from '@/lib/db/queries';
 import { getBuilds, getBuildsByRepo } from '@/server/actions/builds';
+import { getGitInfo } from '@/lib/git/utils';
 
 export default async function RunPage() {
   const selectedRepo = await getSelectedRepository();
+  const gitInfo = await getGitInfo();
 
   const [tests, runs, builds] = await Promise.all([
     selectedRepo ? getTestsByRepo(selectedRepo.id) : getTests(),
@@ -21,7 +23,13 @@ export default async function RunPage() {
   return (
     <div className="flex flex-col h-full">
       <Header title="Test Runs" />
-      <RunDashboardClient tests={tests} runs={runs} builds={builds} repositoryId={selectedRepo?.id} />
+      <RunDashboardClient
+        tests={tests}
+        runs={runs}
+        builds={builds}
+        repositoryId={selectedRepo?.id}
+        activeBranch={gitInfo.branch}
+      />
     </div>
   );
 }

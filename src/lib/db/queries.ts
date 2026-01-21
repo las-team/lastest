@@ -15,9 +15,11 @@ import {
   routes,
   scanStatus,
   environmentConfigs,
+  diffSensitivitySettings,
 } from './schema';
 import {
   DEFAULT_SELECTOR_PRIORITY,
+  DEFAULT_DIFF_THRESHOLDS,
 } from './schema';
 import type {
   NewFunctionalArea,
@@ -35,11 +37,12 @@ import type {
   NewRoute,
   NewScanStatus,
   NewEnvironmentConfig,
+  NewDiffSensitivitySettings,
   BuildStatus,
   SelectorConfig,
 } from './schema';
 
-export { DEFAULT_SELECTOR_PRIORITY };
+export { DEFAULT_SELECTOR_PRIORITY, DEFAULT_DIFF_THRESHOLDS };
 import { eq, desc, and, inArray } from 'drizzle-orm';
 import { v4 as uuid } from 'uuid';
 
@@ -270,6 +273,7 @@ export async function getBuildsByRepo(repositoryId: string, limit = 10) {
       elapsedMs: builds.elapsedMs,
       createdAt: builds.createdAt,
       completedAt: builds.completedAt,
+      gitBranch: testRuns.gitBranch,
     })
     .from(builds)
     .innerJoin(testRuns, eq(builds.testRunId, testRuns.id))
@@ -298,6 +302,7 @@ export async function getVisualDiffsWithTestStatus(buildId: string) {
       status: visualDiffs.status,
       pixelDifference: visualDiffs.pixelDifference,
       percentageDifference: visualDiffs.percentageDifference,
+      classification: visualDiffs.classification,
       metadata: visualDiffs.metadata,
       approvedBy: visualDiffs.approvedBy,
       approvedAt: visualDiffs.approvedAt,
@@ -799,4 +804,71 @@ export async function upsertEnvironmentConfig(repositoryId: string | null, data:
 
 export async function deleteEnvironmentConfig(id: string) {
   await db.delete(environmentConfigs).where(eq(environmentConfigs.id, id));
+}
+
+// Diff Sensitivity Settings
+export async function getDiffSensitivitySettings(repositoryId?: string | null) {
+  if (repositoryId) {
+    const settings = await db
+      .select()
+      .from(diffSensitivitySettings)
+      .where(eq(diffSensitivitySettings.repositoryId, repositoryId))
+      .get();
+    if (settings) return settings;
+  }
+
+  // Return global settings (no repositoryId) or defaults
+  const globalSettings = await db
+    .select()
+    .from(diffSensitivitySettings)
+    .where(eq(diffSensitivitySettings.repositoryId, ''))
+    .get();
+
+  if (globalSettings) return globalSettings;
+
+  // Return default settings object (not saved)
+  return {
+    id: '',
+    repositoryId: null,
+    unchangedThreshold: DEFAULT_DIFF_THRESHOLDS.unchangedThreshold,
+    flakyThreshold: DEFAULT_DIFF_THRESHOLDS.flakyThreshold,
+    createdAt: null,
+    updatedAt: null,
+  };
+}
+
+export async function createDiffSensitivitySettings(data: Omit<NewDiffSensitivitySettings, 'id' | 'createdAt' | 'updatedAt'>) {
+  const id = uuid();
+  const now = new Date();
+  await db.insert(diffSensitivitySettings).values({
+    ...data,
+    id,
+    createdAt: now,
+    updatedAt: now,
+  });
+  return { id, ...data, createdAt: now, updatedAt: now };
+}
+
+export async function updateDiffSensitivitySettings(id: string, data: Partial<NewDiffSensitivitySettings>) {
+  await db.update(diffSensitivitySettings).set({ ...data, updatedAt: new Date() }).where(eq(diffSensitivitySettings.id, id));
+}
+
+export async function upsertDiffSensitivitySettings(repositoryId: string | null, data: Partial<NewDiffSensitivitySettings>) {
+  const repoIdValue = repositoryId || '';
+  const existing = await db
+    .select()
+    .from(diffSensitivitySettings)
+    .where(eq(diffSensitivitySettings.repositoryId, repoIdValue))
+    .get();
+
+  if (existing) {
+    await updateDiffSensitivitySettings(existing.id, data);
+    return { ...existing, ...data, updatedAt: new Date() };
+  } else {
+    return createDiffSensitivitySettings({ ...data, repositoryId: repoIdValue });
+  }
+}
+
+export async function deleteDiffSensitivitySettings(id: string) {
+  await db.delete(diffSensitivitySettings).where(eq(diffSensitivitySettings.id, id));
 }

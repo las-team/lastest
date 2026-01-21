@@ -14,14 +14,19 @@ import { createAndRunBuild } from '@/server/actions/builds';
 import type { Test, TestRun, Build } from '@/lib/db/schema';
 import { BuildSummaryCard } from '@/components/builds/build-summary-card';
 
+interface BuildWithBranch extends Build {
+  gitBranch?: string;
+}
+
 interface RunDashboardClientProps {
   tests: Test[];
   runs: TestRun[];
-  builds: Build[];
+  builds: BuildWithBranch[];
   repositoryId?: string | null;
+  activeBranch?: string;
 }
 
-export function RunDashboardClient({ tests, runs, builds, repositoryId }: RunDashboardClientProps) {
+export function RunDashboardClient({ tests, runs, builds, repositoryId, activeBranch }: RunDashboardClientProps) {
   const router = useRouter();
   const [isRunning, setIsRunning] = useState(false);
 
@@ -89,7 +94,12 @@ export function RunDashboardClient({ tests, runs, builds, repositoryId }: RunDas
               {builds.length > 0 ? (
                 <div className="space-y-3">
                   {builds.slice(0, 10).map((build) => (
-                    <BuildSummaryCard key={build.id} build={build} />
+                    <BuildSummaryCard
+                      key={build.id}
+                      build={build}
+                      gitBranch={build.gitBranch}
+                      isActiveBranch={build.gitBranch === activeBranch}
+                    />
                   ))}
                 </div>
               ) : (

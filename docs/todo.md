@@ -7,24 +7,31 @@ Determining test coverage /home/ewyct/.claude/plans/zazzy-tinkering-backus.md
 
 --------
 ## started
+Changed sensitivity slider
+    When viewing a build like http://localhost:3000/builds/dd06c677-0d62-4cb0-a236-8983f63aa041 there should be a slider-like control to define when a pixel difference for the build - that would persist as a repo-level setting, among unchanged, flaky, changed. default should be 
+        unachanged <1%
+        flaky <10%
+        changed >10%
 
 ## features
 
 UI & UX 
-    Revise frontend and make sure you havent steered far 
-
-
-Branch checkout & test run flow /home/ewyct/.claude/plans/breezy-riding-crane.md ---- not sure this still assumes the app is running 
-
-Implement the OCR feature to identify the selected UI element's text label
-
-## ideas
-Firecrawl?
-Research playwrights comparison options, how they work?
-Approve reject changes or create ticket -> gh issue
+    Use the frontend design skill and subagent for this
+    Revise frontend and make sure you havent steered far and try to use standard shadcn css where possible
+    make sure every page has a clear primary action if there are more than one. If you cant decide ask me a question about it
 
 AI
-    Use local claude -p and OpenRouter API key
+    see example from /home/ewyct/dev/lastest and research competitors on how they design UI around AI 
+    Add local claude -p command and OpenRouter API key as options
+    1. Determining routes
+        On the repo page in addition to Scan routes there should be a AI scan routes option
+    2. Fix tests that failed - accessible from the tests screen and from the build screen as well
+    3. Enhance tests - avalaible from the tests screen 
+    4. Create new tests w AI - request prompt from user and have the ai write a test for that - check prompt samples in referred project
+    5. Create new tests w MCP 
+    
+    
+    
     Determining test coverage
             check routes in repo/branch
             check functional specification in repo/branch
@@ -34,5 +41,14 @@ AI
     Having AI write tests
         Use MCP to "record them"
         assertions to fail them
+
+
+
+Implement the OCR feature to identify the selected UI element's text label
+
+## ideas
+Firecrawl?
+Research playwrights comparison options, how they work?
+Approve reject changes or create ticket -> gh issue
 
 ## bugs

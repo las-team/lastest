@@ -16,7 +16,7 @@ export function filterDiffs(diffs: VisualDiffWithTestStatus[], filter: FilterTyp
     case 'tests':
       return diffs;
     case 'changed':
-      return diffs.filter((d) => d.pixelDifference && d.pixelDifference > 0);
+      return diffs.filter((d) => d.classification === 'changed' || (d.pixelDifference && d.pixelDifference > 0 && !d.classification));
     case 'failed':
       // Filter by test execution failure (testResultStatus) OR user-rejected diffs
       return diffs.filter((d) => d.testResultStatus === 'failed' || d.status === 'rejected');
@@ -24,8 +24,8 @@ export function filterDiffs(diffs: VisualDiffWithTestStatus[], filter: FilterTyp
       // Filter by test execution passed
       return diffs.filter((d) => d.testResultStatus === 'passed');
     case 'flaky':
-      // Future: implement flaky detection
-      return diffs;
+      // Filter by flaky classification
+      return diffs.filter((d) => d.classification === 'flaky');
     default:
       return diffs;
   }

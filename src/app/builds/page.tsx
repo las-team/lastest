@@ -1,7 +1,10 @@
 import Link from 'next/link';
 import { getBuilds, getBuildsByRepo } from '@/server/actions/builds';
 import { getSelectedRepository } from '@/lib/db/queries';
-import { CheckCircle, AlertTriangle, XCircle, Clock } from 'lucide-react';
+import { getGitInfo } from '@/lib/git/utils';
+import { CheckCircle, AlertTriangle, XCircle, Clock, GitBranch } from 'lucide-react';
+import { Badge } from '@/components/ui/badge';
+import { cn } from '@/lib/utils';
 
 const statusIcons: Record<string, typeof CheckCircle> = {
   safe_to_merge: CheckCircle,
@@ -17,6 +20,7 @@ const statusColors: Record<string, string> = {
 
 export default async function BuildsPage() {
   const selectedRepo = await getSelectedRepository();
+  const gitInfo = await getGitInfo();
   const builds = selectedRepo
     ? await getBuildsByRepo(selectedRepo.id, 20)
     : await getBuilds(20);
@@ -48,12 +52,17 @@ export default async function BuildsPage() {
           {builds.map((build) => {
             const StatusIcon = statusIcons[build.overallStatus];
             const statusColor = statusColors[build.overallStatus];
+            const buildBranch = 'gitBranch' in build ? (build.gitBranch as string) : undefined;
+            const isActiveBranch = buildBranch === gitInfo.branch;
 
             return (
               <Link
                 key={build.id}
                 href={`/builds/${build.id}`}
-                className="block p-4 border rounded-lg hover:border-blue-300 hover:bg-blue-50/50 transition-colors"
+                className={cn(
+                  "block p-4 border rounded-lg hover:border-blue-300 hover:bg-blue-50/50 transition-colors",
+                  isActiveBranch && "ring-2 ring-primary/50"
+                )}
               >
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-3">
@@ -61,8 +70,14 @@ export default async function BuildsPage() {
                       <StatusIcon className="w-5 h-5" />
                     </div>
                     <div>
-                      <div className="font-medium">
+                      <div className="flex items-center gap-2 font-medium">
                         Build {build.id.slice(0, 8)}
+                        {buildBranch && (
+                          <Badge variant={isActiveBranch ? 'default' : 'secondary'} className="text-xs font-normal gap-1">
+                            <GitBranch className="h-3 w-3" />
+                            {buildBranch}
+                          </Badge>
+                        )}
                       </div>
                       <div className="text-sm text-gray-500">
                         {build.triggerType} · {formatTime(build.createdAt)}

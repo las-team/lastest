@@ -127,6 +127,7 @@ export function initializeDatabase() {
       status TEXT NOT NULL DEFAULT 'pending',
       pixel_difference INTEGER DEFAULT 0,
       percentage_difference TEXT,
+      classification TEXT,
       metadata TEXT,
       approved_by TEXT,
       approved_at INTEGER,
@@ -195,6 +196,28 @@ export function initializeDatabase() {
       completed_at INTEGER
     );
 
+    CREATE TABLE IF NOT EXISTS environment_configs (
+      id TEXT PRIMARY KEY,
+      repository_id TEXT REFERENCES repositories(id),
+      mode TEXT NOT NULL DEFAULT 'manual',
+      base_url TEXT NOT NULL DEFAULT 'http://localhost:3000',
+      start_command TEXT,
+      health_check_url TEXT,
+      health_check_timeout INTEGER DEFAULT 60000,
+      reuse_existing_server INTEGER DEFAULT 1,
+      created_at INTEGER,
+      updated_at INTEGER
+    );
+
+    CREATE TABLE IF NOT EXISTS diff_sensitivity_settings (
+      id TEXT PRIMARY KEY,
+      repository_id TEXT REFERENCES repositories(id),
+      unchanged_threshold INTEGER DEFAULT 1,
+      flaky_threshold INTEGER DEFAULT 10,
+      created_at INTEGER,
+      updated_at INTEGER
+    );
+
     CREATE INDEX IF NOT EXISTS idx_tests_functional_area ON tests(functional_area_id);
     CREATE INDEX IF NOT EXISTS idx_tests_repository ON tests(repository_id);
     CREATE INDEX IF NOT EXISTS idx_test_results_run ON test_results(test_run_id);
@@ -219,6 +242,15 @@ function runMigrations() {
   // Migration: Add local_path to repositories if missing
   if (!repoColumnNames.has('local_path')) {
     sqlite.exec('ALTER TABLE repositories ADD COLUMN local_path TEXT');
+  }
+
+  // Get existing columns in visual_diffs table
+  const diffColumns = sqlite.prepare('PRAGMA table_info(visual_diffs)').all() as { name: string }[];
+  const diffColumnNames = new Set(diffColumns.map(c => c.name));
+
+  // Migration: Add classification to visual_diffs if missing
+  if (!diffColumnNames.has('classification')) {
+    sqlite.exec('ALTER TABLE visual_diffs ADD COLUMN classification TEXT');
   }
 }
 

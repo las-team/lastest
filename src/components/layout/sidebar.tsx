@@ -13,6 +13,11 @@ import {
   FolderGit2,
 } from 'lucide-react';
 import { RepoSelector, SyncReposButton } from './repo-selector';
+import { ActiveBranchBadge } from './active-branch-badge';
+
+interface SidebarProps {
+  activeBranch?: string;
+}
 
 const navigation = [
   { name: 'Dashboard', href: '/', icon: LayoutDashboard },
@@ -23,7 +28,7 @@ const navigation = [
   { name: 'Settings', href: '/settings', icon: Settings },
 ];
 
-export function Sidebar() {
+export function Sidebar({ activeBranch }: SidebarProps) {
   const pathname = usePathname();
 
   return (
@@ -35,13 +40,16 @@ export function Sidebar() {
         </Link>
       </div>
 
-      <div className="p-4 border-b">
+      <div className="p-4 border-b space-y-3">
         <div className="flex items-center gap-2">
           <div className="flex-1 min-w-0">
             <RepoSelector />
           </div>
           <SyncReposButton />
         </div>
+        {activeBranch && activeBranch !== 'unknown' && (
+          <ActiveBranchBadge branch={activeBranch} />
+        )}
       </div>
 
       <nav className="flex-1 p-4">

@@ -40,3 +40,36 @@ export async function resetPlaywrightSettings(repositoryId?: string | null) {
 
   return { success: true };
 }
+
+// Diff Sensitivity Settings
+export async function getDiffSensitivitySettingsAction(repositoryId?: string | null) {
+  return queries.getDiffSensitivitySettings(repositoryId);
+}
+
+export async function saveDiffSensitivitySettings(data: {
+  repositoryId?: string | null;
+  unchangedThreshold?: number;
+  flakyThreshold?: number;
+}) {
+  const { repositoryId, ...settingsData } = data;
+
+  await queries.upsertDiffSensitivitySettings(repositoryId || null, settingsData);
+
+  revalidatePath('/settings');
+  revalidatePath('/builds');
+
+  return { success: true };
+}
+
+export async function resetDiffSensitivitySettings(repositoryId?: string | null) {
+  const settings = await queries.getDiffSensitivitySettings(repositoryId);
+
+  if (settings.id) {
+    await queries.deleteDiffSensitivitySettings(settings.id);
+  }
+
+  revalidatePath('/settings');
+  revalidatePath('/builds');
+
+  return { success: true };
+}

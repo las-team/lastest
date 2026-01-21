@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { Inter, JetBrains_Mono } from "next/font/google";
 import "./globals.css";
-import { Sidebar } from "@/components/layout/sidebar";
+import { SidebarServer } from "@/components/layout/sidebar-server";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { Toaster } from "sonner";
 
@@ -30,7 +30,7 @@ export default function RootLayout({
       <body className={`${inter.variable} ${jetbrainsMono.variable} antialiased`}>
         <TooltipProvider>
           <div className="flex h-screen">
-            <Sidebar />
+            <SidebarServer />
             <main className="flex-1 overflow-auto">
               {children}
             </main>

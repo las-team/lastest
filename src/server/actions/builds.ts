@@ -7,7 +7,7 @@ import { getRunner } from '@/lib/playwright/runner';
 import { getServerManager } from '@/lib/playwright/server-manager';
 import { generateDiff } from '@/lib/diff/generator';
 import { hashImage } from '@/lib/diff/hasher';
-import type { Test, TriggerType, BuildStatus, VisualDiffWithTestStatus } from '@/lib/db/schema';
+import type { Test, TriggerType, BuildStatus, VisualDiffWithTestStatus, DiffClassification, DiffStatus } from '@/lib/db/schema';
 import path from 'path';
 
 const SCREENSHOTS_DIR = path.join(process.cwd(), 'public', 'screenshots');
@@ -121,6 +121,7 @@ async function runBuildAsync(
     let passedCount = 0;
     let failedCount = 0;
     let changesDetected = 0;
+    let flakyCount = 0;
 
     for (const result of results) {
       // Save test result
@@ -145,9 +146,11 @@ async function runBuildAsync(
           testResult.id,
           result.testId,
           result.screenshotPath,
-          branch
+          branch,
+          repositoryId
         );
         if (diffResult.hasChanges) changesDetected++;
+        if (diffResult.classification === 'flaky') flakyCount++;
       }
     }
 
@@ -164,6 +167,7 @@ async function runBuildAsync(
       passedCount,
       failedCount,
       changesDetected,
+      flakyCount,
       overallStatus,
       elapsedMs: Date.now() - startTime,
       completedAt: new Date(),
@@ -192,8 +196,25 @@ async function processVisualDiff(
   testResultId: string,
   testId: string,
   currentScreenshotPath: string,
-  branch: string
-): Promise<{ hasChanges: boolean; diffId: string }> {
+  branch: string,
+  repositoryId?: string | null
+): Promise<{ hasChanges: boolean; diffId: string; classification: DiffClassification }> {
+  // Get diff sensitivity settings
+  const settings = await queries.getDiffSensitivitySettings(repositoryId);
+  const unchangedThreshold = settings.unchangedThreshold ?? 1;
+  const flakyThreshold = settings.flakyThreshold ?? 10;
+
+  // Helper to classify based on percentage
+  const classifyDiff = (pct: number): { classification: DiffClassification; status: DiffStatus } => {
+    if (pct < unchangedThreshold) {
+      return { classification: 'unchanged', status: 'auto_approved' };
+    } else if (pct < flakyThreshold) {
+      return { classification: 'flaky', status: 'pending' };
+    } else {
+      return { classification: 'changed', status: 'pending' };
+    }
+  };
+
   // Get active baseline for this test
   const baseline = await queries.getActiveBaseline(testId, branch);
 
@@ -210,11 +231,12 @@ async function processVisualDiff(
       baselineImagePath: matchingBaseline.imagePath,
       currentImagePath: currentScreenshotPath,
       status: 'auto_approved',
+      classification: 'unchanged',
       pixelDifference: 0,
       percentageDifference: '0',
       metadata: { changedRegions: [] },
     });
-    return { hasChanges: false, diffId: diff.id };
+    return { hasChanges: false, diffId: diff.id, classification: 'unchanged' };
   }
 
   // No baseline - this is a new test, auto-approve as initial
@@ -225,6 +247,7 @@ async function processVisualDiff(
       testId,
       currentImagePath: currentScreenshotPath,
       status: 'pending',
+      classification: 'changed',
       pixelDifference: 0,
       percentageDifference: '0',
       metadata: { changedRegions: [] },
@@ -239,7 +262,7 @@ async function processVisualDiff(
       approvedFromDiffId: diff.id,
     });
 
-    return { hasChanges: false, diffId: diff.id };
+    return { hasChanges: false, diffId: diff.id, classification: 'changed' };
   }
 
   // Generate diff against baseline
@@ -250,7 +273,9 @@ async function processVisualDiff(
       DIFFS_DIR
     );
 
-    const hasChanges = diffResult.pixelDifference > 0;
+    const pct = diffResult.percentageDifference;
+    const { classification, status } = classifyDiff(pct);
+    const hasChanges = classification !== 'unchanged';
     const diffImagePath = diffResult.diffImagePath.replace(process.cwd() + '/public', '');
 
     const diff = await queries.createVisualDiff({
@@ -260,13 +285,14 @@ async function processVisualDiff(
       baselineImagePath: baseline.imagePath,
       currentImagePath: currentScreenshotPath,
       diffImagePath,
-      status: hasChanges ? 'pending' : 'auto_approved',
+      status,
+      classification,
       pixelDifference: diffResult.pixelDifference,
       percentageDifference: diffResult.percentageDifference.toString(),
       metadata: diffResult.metadata,
     });
 
-    return { hasChanges, diffId: diff.id };
+    return { hasChanges, diffId: diff.id, classification };
   } catch (error) {
     // Diff generation failed, mark as pending for review
     const diff = await queries.createVisualDiff({
@@ -276,11 +302,12 @@ async function processVisualDiff(
       baselineImagePath: baseline.imagePath,
       currentImagePath: currentScreenshotPath,
       status: 'pending',
+      classification: 'changed',
       pixelDifference: -1,
       percentageDifference: '-1',
       metadata: { changedRegions: [] },
     });
-    return { hasChanges: true, diffId: diff.id };
+    return { hasChanges: true, diffId: diff.id, classification: 'changed' };
   }
 }
 

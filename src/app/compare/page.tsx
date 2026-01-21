@@ -1,11 +1,12 @@
 import { Header } from '@/components/layout/header';
 import { CompareClient } from './compare-client';
-import { getBranches } from '@/lib/git/utils';
+import { getBranches, getGitInfo } from '@/lib/git/utils';
 import { getTestRuns, getSelectedRepository, getTestRunsByRepo } from '@/lib/db/queries';
 import { fetchRepoBranches } from '@/server/actions/repos';
 
 export default async function ComparePage() {
   const selectedRepo = await getSelectedRepository();
+  const gitInfo = await getGitInfo();
 
   let branches: string[] = [];
   let runs: Awaited<ReturnType<typeof getTestRuns>> = [];
@@ -26,7 +27,13 @@ export default async function ComparePage() {
   return (
     <div className="flex flex-col h-full">
       <Header title="Compare Branches" />
-      <CompareClient branches={branches} runs={runs} defaultBaseline={defaultBaseline} repositoryId={selectedRepo?.id} />
+      <CompareClient
+        branches={branches}
+        runs={runs}
+        defaultBaseline={defaultBaseline}
+        repositoryId={selectedRepo?.id}
+        activeBranch={gitInfo.branch}
+      />
     </div>
   );
 }

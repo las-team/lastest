@@ -1,9 +1,13 @@
 import Link from 'next/link';
-import { CheckCircle, AlertTriangle, XCircle, Clock } from 'lucide-react';
+import { CheckCircle, AlertTriangle, XCircle, Clock, GitBranch } from 'lucide-react';
+import { Badge } from '@/components/ui/badge';
+import { cn } from '@/lib/utils';
 import type { Build, BuildStatus } from '@/lib/db/schema';
 
 interface BuildSummaryCardProps {
   build: Build;
+  gitBranch?: string;
+  isActiveBranch?: boolean;
 }
 
 const statusConfig: Record<BuildStatus, {
@@ -50,7 +54,7 @@ function formatDuration(elapsedMs: number | null): string {
   return `${(elapsedMs / 1000).toFixed(1)}s`;
 }
 
-export function BuildSummaryCard({ build }: BuildSummaryCardProps) {
+export function BuildSummaryCard({ build, gitBranch, isActiveBranch }: BuildSummaryCardProps) {
   const status = build.overallStatus as BuildStatus;
   const config = statusConfig[status];
   const StatusIcon = config.icon;
@@ -58,44 +62,46 @@ export function BuildSummaryCard({ build }: BuildSummaryCardProps) {
   return (
     <Link
       href={`/builds/${build.id}`}
-      className={`block p-4 rounded-lg border ${config.borderColor} ${config.bgColor} hover:border-blue-300 hover:bg-blue-50/50 transition-colors`}
+      className={cn(
+        `block p-3 rounded-lg border ${config.borderColor} ${config.bgColor} hover:border-blue-300 hover:bg-blue-50/50 transition-colors`,
+        isActiveBranch && 'ring-2 ring-primary/50'
+      )}
     >
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <div className={`p-2 rounded ${config.bgColor}`}>
-            <StatusIcon className={`w-5 h-5 ${config.iconColor}`} />
+      <div className="flex items-center gap-3">
+        <div className={`p-2 rounded ${config.bgColor}`}>
+          <StatusIcon className={`w-5 h-5 ${config.iconColor}`} />
+        </div>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2 font-medium">
+            <span className="truncate">Build {build.id.slice(0, 8)}</span>
+            {gitBranch && (
+              <Badge variant={isActiveBranch ? 'default' : 'secondary'} className="text-xs font-normal gap-1 shrink-0">
+                <GitBranch className="h-3 w-3" />
+                {gitBranch}
+              </Badge>
+            )}
           </div>
-          <div>
-            <div className="font-medium">
-              Build {build.id.slice(0, 8)}
-            </div>
-            <div className="text-sm text-gray-500">
-              {build.triggerType} · {formatTime(build.createdAt)}
-            </div>
+          <div className="text-xs text-gray-500">
+            {build.triggerType} · {formatTime(build.createdAt)}
           </div>
         </div>
-
-        <div className="flex items-center gap-6 text-sm">
-          <div className="text-center">
-            <div className="font-medium">{build.totalTests ?? 0}</div>
-            <div className="text-gray-500">Tests</div>
-          </div>
-          <div className="text-center">
-            <div className="font-medium text-yellow-600">
-              {build.changesDetected ?? 0}
-            </div>
-            <div className="text-gray-500">Changed</div>
-          </div>
-          <div className="text-center">
-            <div className="font-medium text-red-600">
-              {build.failedCount ?? 0}
-            </div>
-            <div className="text-gray-500">Failed</div>
-          </div>
-          <div className="flex items-center gap-1 text-gray-500">
-            <Clock className="w-4 h-4" />
-            {formatDuration(build.elapsedMs)}
-          </div>
+      </div>
+      <div className="flex items-center gap-4 mt-2 pt-2 border-t border-gray-200/50 text-xs">
+        <div className="flex items-center gap-1">
+          <span className="font-medium">{build.totalTests ?? 0}</span>
+          <span className="text-gray-500">tests</span>
+        </div>
+        <div className="flex items-center gap-1">
+          <span className="font-medium text-yellow-600">{build.changesDetected ?? 0}</span>
+          <span className="text-gray-500">changed</span>
+        </div>
+        <div className="flex items-center gap-1">
+          <span className="font-medium text-red-600">{build.failedCount ?? 0}</span>
+          <span className="text-gray-500">failed</span>
+        </div>
+        <div className="flex items-center gap-1 text-gray-500 ml-auto">
+          <Clock className="w-3 h-3" />
+          {formatDuration(build.elapsedMs)}
         </div>
       </div>
     </Link>
