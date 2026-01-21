@@ -62,6 +62,7 @@ export async function createAndRunBuild(
   // Create test run
   const gitInfo = await getGitInfo();
   const testRun = await queries.createTestRun({
+    repositoryId: repositoryId ?? undefined,
     gitBranch: gitInfo.branch,
     gitCommit: gitInfo.commit,
     startedAt: new Date(),

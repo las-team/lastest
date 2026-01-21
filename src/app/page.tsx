@@ -10,6 +10,7 @@ import {
   getFunctionalAreasByRepo,
   getRouteCoverageStats,
   getRecentBuilds,
+  getBuildsByRepo,
 } from '@/lib/db/queries';
 import { CoverageBar } from '@/components/coverage/coverage-bar';
 import Link from 'next/link';
@@ -21,7 +22,7 @@ export default async function DashboardPage() {
   const [tests, areas, recentBuilds] = await Promise.all([
     selectedRepo ? getTestsByRepo(selectedRepo.id) : getTests(),
     selectedRepo ? getFunctionalAreasByRepo(selectedRepo.id) : getFunctionalAreas(),
-    getRecentBuilds(5),
+    selectedRepo ? getBuildsByRepo(selectedRepo.id, 5) : getRecentBuilds(5),
   ]);
 
   // Fetch route coverage stats

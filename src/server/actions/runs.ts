@@ -46,6 +46,7 @@ export async function runTests(testIds?: string[], repositoryId?: string | null)
   // Create test run record
   const gitInfo = await getGitInfo();
   const run = await queries.createTestRun({
+    repositoryId: repositoryId ?? undefined,
     gitBranch: gitInfo.branch,
     gitCommit: gitInfo.commit,
     startedAt: new Date(),

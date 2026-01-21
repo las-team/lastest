@@ -1,5 +1,6 @@
 import Link from 'next/link';
-import { getBuilds } from '@/server/actions/builds';
+import { getBuilds, getBuildsByRepo } from '@/server/actions/builds';
+import { getSelectedRepository } from '@/lib/db/queries';
 import { CheckCircle, AlertTriangle, XCircle, Clock } from 'lucide-react';
 
 const statusIcons: Record<string, typeof CheckCircle> = {
@@ -15,7 +16,10 @@ const statusColors: Record<string, string> = {
 };
 
 export default async function BuildsPage() {
-  const builds = await getBuilds(20);
+  const selectedRepo = await getSelectedRepository();
+  const builds = selectedRepo
+    ? await getBuildsByRepo(selectedRepo.id, 20)
+    : await getBuilds(20);
 
   const formatTime = (date: Date | null) => {
     if (!date) return '-';
