@@ -17,15 +17,16 @@ import {
   FileCode,
 } from 'lucide-react';
 import { createAndRunBuild } from '@/server/actions/builds';
-import type { Test, TestRun } from '@/lib/db/schema';
+import type { Test, TestRun, Build } from '@/lib/db/schema';
 import Link from 'next/link';
 
 interface RunDashboardClientProps {
   tests: Test[];
   runs: TestRun[];
+  builds: Build[];
 }
 
-export function RunDashboardClient({ tests, runs }: RunDashboardClientProps) {
+export function RunDashboardClient({ tests, runs, builds }: RunDashboardClientProps) {
   const router = useRouter();
   const [isRunning, setIsRunning] = useState(false);
 
