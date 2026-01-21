@@ -154,11 +154,35 @@ export class PlaywrightRunner extends EventEmitter {
     let context: BrowserContext | null = null;
     let page: Page | null = null;
 
+    // Track errors during test execution
+    const consoleErrors: string[] = [];
+    const networkFailures: NetworkRequest[] = [];
+
     try {
       context = await this.browser.newContext({
         viewport: this.getViewport(),
       });
       page = await context.newPage();
+
+      // Capture console errors before navigation
+      page.on('console', msg => {
+        if (msg.type() === 'error') {
+          consoleErrors.push(msg.text());
+        }
+      });
+
+      // Capture network failures before navigation
+      page.on('response', response => {
+        if (response.status() >= 400) {
+          networkFailures.push({
+            url: response.url(),
+            method: response.request().method(),
+            status: response.status(),
+            duration: 0,
+            resourceType: response.request().resourceType(),
+          });
+        }
+      });
 
       // Execute the test code
       await this.executeTestCode(page, test);
