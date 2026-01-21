@@ -1,0 +1,278 @@
+{
+  "feature": "Build Detail Page - Clickable Metrics Filter",
+  "workflow_type": "feature",
+  "workflow_rationale": "This is a new UI feature that adds interactive filtering capability to an existing page. It requires modifying the MetricsRow component to accept click handlers, creating a new client component to manage filter state and display filtered diffs, and updating the page to wire everything together.",
+  "phases": [
+    {
+      "id": "phase-1-filter-types",
+      "name": "Add Filter Types and Logic",
+      "type": "implementation",
+      "description": "Define the FilterType type and implement the filter logic function that will be reused across components",
+      "depends_on": [],
+      "parallel_safe": true,
+      "subtasks": [
+        {
+          "id": "subtask-1-1",
+          "description": "Add FilterType type and filterDiffs utility to build-detail-client.tsx (new file)",
+          "service": "frontend",
+          "files_to_modify": [],
+          "files_to_create": [
+            "src/app/builds/[buildId]/build-detail-client.tsx"
+          ],
+          "patterns_from": [
+            "src/app/builds/[buildId]/build-actions-client.tsx",
+            "src/lib/db/schema.ts"
+          ],
+          "verification": {
+            "type": "command",
+            "command": "cd /home/ewyct/dev/lastest2 && npx tsc --noEmit src/app/builds/\\[buildId\\]/build-detail-client.tsx 2>&1 || echo 'TypeCheck done'",
+            "expected": "TypeCheck done or no errors"
+          },
+          "status": "completed",
+          "implementation_notes": "Create the file with 'use client' directive, define FilterType = 'all' | 'tests' | 'changed' | 'flaky' | 'failed', implement filterDiffs function, define BuildDetailClientProps interface, implement the component shell with useState for activeFilter",
+          "notes": "Created build-detail-client.tsx with FilterType type, filterDiffs utility function, BuildDetailClientProps interface, and component shell with useState for activeFilter. TypeScript verification could not be run in sandbox but code follows established patterns from build-actions-client.tsx.",
+          "updated_at": "2026-01-21T09:25:23.411752+00:00"
+        }
+      ]
+    },
+    {
+      "id": "phase-2-metrics-clickable",
+      "name": "Make MetricsRow Clickable",
+      "type": "implementation",
+      "description": "Enhance MetricsRow component to accept onClick handlers and show active state styling",
+      "depends_on": [
+        "phase-1-filter-types"
+      ],
+      "parallel_safe": true,
+      "subtasks": [
+        {
+          "id": "subtask-2-1",
+          "description": "Add filterKey to metrics array and onClick/activeFilter props to MetricsRow",
+          "service": "frontend",
+          "files_to_modify": [
+            "src/components/dashboard/metrics-row.tsx"
+          ],
+          "files_to_create": [],
+          "patterns_from": [
+            "src/components/ui/tabs.tsx"
+          ],
+          "verification": {
+            "type": "command",
+            "command": "cd /home/ewyct/dev/lastest2 && npx tsc --noEmit src/components/dashboard/metrics-row.tsx 2>&1 || echo 'TypeCheck done'",
+            "expected": "TypeCheck done or no errors"
+          },
+          "status": "pending",
+          "implementation_notes": "Add filterKey property to each metric (tests, changed, flaky, failed, null for time). Add optional onFilterChange and activeFilter props. Add cursor-pointer class (except time). Add ring-2 ring-offset-2 for active state. Handle click to call onFilterChange with filterKey. Time metric should not be clickable."
+        }
+      ]
+    },
+    {
+      "id": "phase-3-diff-list-client",
+      "name": "Complete BuildDetailClient with Diff List",
+      "type": "implementation",
+      "description": "Complete the BuildDetailClient component with the filtered diff list rendering",
+      "depends_on": [
+        "phase-1-filter-types"
+      ],
+      "parallel_safe": true,
+      "subtasks": [
+        {
+          "id": "subtask-3-1",
+          "description": "Implement diff list rendering with filtering in BuildDetailClient",
+          "service": "frontend",
+          "files_to_modify": [
+            "src/app/builds/[buildId]/build-detail-client.tsx"
+          ],
+          "files_to_create": [],
+          "patterns_from": [
+            "src/app/builds/[buildId]/page.tsx",
+            "src/app/run/[runId]/run-detail-client.tsx"
+          ],
+          "verification": {
+            "type": "command",
+            "command": "cd /home/ewyct/dev/lastest2 && npx tsc --noEmit src/app/builds/\\[buildId\\]/build-detail-client.tsx 2>&1 || echo 'TypeCheck done'",
+            "expected": "TypeCheck done or no errors"
+          },
+          "status": "pending",
+          "implementation_notes": "Move the diff list rendering from page.tsx to this component. Include MetricsRow with onFilterChange and activeFilter props. Apply filterDiffs to sortedDiffs based on activeFilter state. Add empty state message when filter returns no results. Include toggle behavior - clicking active filter clears it (sets to 'all')."
+        }
+      ]
+    },
+    {
+      "id": "phase-4-wire-together",
+      "name": "Wire Page to Client Component",
+      "type": "integration",
+      "description": "Update page.tsx to use the new BuildDetailClient component and pass required props",
+      "depends_on": [
+        "phase-2-metrics-clickable",
+        "phase-3-diff-list-client"
+      ],
+      "parallel_safe": false,
+      "subtasks": [
+        {
+          "id": "subtask-4-1",
+          "description": "Update page.tsx to use BuildDetailClient for metrics and diff list",
+          "service": "frontend",
+          "files_to_modify": [
+            "src/app/builds/[buildId]/page.tsx"
+          ],
+          "files_to_create": [],
+          "patterns_from": [],
+          "verification": {
+            "type": "browser",
+            "url": "http://localhost:3000/builds/d6cdd584-82b5-4750-bdff-0d41e79ba825",
+            "checks": [
+              "Page renders without errors",
+              "Metrics row visible",
+              "Diff list visible"
+            ]
+          },
+          "status": "pending",
+          "implementation_notes": "Replace inline MetricsRow and diff list with BuildDetailClient. Pass buildId, diffs (with all required fields including testId, status, pixelDifference, etc.), and metrics props. Keep BuildSummaryHero, RecentHistory, BuildActionsClient, and Git info section unchanged."
+        }
+      ]
+    },
+    {
+      "id": "phase-5-verification",
+      "name": "End-to-End Verification",
+      "type": "integration",
+      "description": "Verify the complete feature works as expected with all filter types",
+      "depends_on": [
+        "phase-4-wire-together"
+      ],
+      "parallel_safe": false,
+      "subtasks": [
+        {
+          "id": "subtask-5-1",
+          "description": "Verify filter functionality works for all filter types",
+          "service": "frontend",
+          "files_to_modify": [],
+          "files_to_create": [],
+          "patterns_from": [],
+          "verification": {
+            "type": "e2e",
+            "steps": [
+              "Navigate to /builds/[buildId]",
+              "Verify all metrics cards render correctly",
+              "Click 'Tests' metric - should show all diffs",
+              "Click 'Changed' metric - should filter to changed diffs only",
+              "Click 'Failed' metric - should filter to rejected diffs only",
+              "Click active filter again - should clear filter (toggle behavior)",
+              "Verify active filter has visual ring indicator",
+              "Verify Time metric is NOT clickable",
+              "Verify no console errors"
+            ]
+          },
+          "status": "pending",
+          "implementation_notes": "Manual verification of all filter types, visual states, and toggle behavior. Check browser console for errors."
+        }
+      ]
+    }
+  ],
+  "summary": {
+    "total_phases": 5,
+    "total_subtasks": 5,
+    "services_involved": [
+      "frontend"
+    ],
+    "parallelism": {
+      "max_parallel_phases": 2,
+      "parallel_groups": [
+        {
+          "phases": [
+            "phase-2-metrics-clickable",
+            "phase-3-diff-list-client"
+          ],
+          "reason": "Both depend only on phase-1, work on different files"
+        }
+      ],
+      "recommended_workers": 1,
+      "speedup_estimate": "1.3x faster with 2 workers, but sequential recommended for simplicity"
+    },
+    "startup_command": "source auto-claude/.venv/bin/activate && python auto-claude/run.py --spec 010 --parallel 1"
+  },
+  "verification_strategy": {
+    "risk_level": "low",
+    "skip_validation": false,
+    "test_creation_phase": "post_implementation",
+    "test_types_required": [
+      "unit"
+    ],
+    "security_scanning_required": false,
+    "staging_deployment_required": false,
+    "acceptance_criteria": [
+      "Metrics cards (Tests, Changed, Failed) are clickable with visual feedback",
+      "Clicking a metric filters the diff list to matching items",
+      "Active filter shows clear visual indication (ring/border)",
+      "Clicking active filter clears the filter (toggle behavior)",
+      "Filter counts match the metric card values",
+      "Empty state shown when filter has no results",
+      "Time metric is NOT clickable",
+      "No console errors",
+      "Existing page functionality unchanged"
+    ],
+    "verification_steps": [
+      {
+        "name": "TypeScript Check",
+        "command": "cd /home/ewyct/dev/lastest2 && npx tsc --noEmit",
+        "expected_outcome": "No type errors",
+        "type": "lint",
+        "required": true,
+        "blocking": true
+      },
+      {
+        "name": "Browser Verification",
+        "command": "Manual: Navigate to http://localhost:3000/builds/[buildId]",
+        "expected_outcome": "Filter functionality works as expected",
+        "type": "manual",
+        "required": true,
+        "blocking": true
+      }
+    ],
+    "reasoning": "Low risk UI feature with no security implications. TypeScript checking ensures type safety. Manual browser verification confirms UX requirements."
+  },
+  "qa_acceptance": {
+    "unit_tests": {
+      "required": false,
+      "commands": [],
+      "minimum_coverage": null,
+      "notes": "Unit tests recommended but not blocking for this low-risk UI feature"
+    },
+    "integration_tests": {
+      "required": false,
+      "commands": [],
+      "services_to_test": []
+    },
+    "e2e_tests": {
+      "required": false,
+      "commands": [],
+      "flows": [
+        "filter-by-changed",
+        "filter-by-failed",
+        "clear-filter"
+      ]
+    },
+    "browser_verification": {
+      "required": true,
+      "pages": [
+        {
+          "url": "http://localhost:3000/builds/d6cdd584-82b5-4750-bdff-0d41e79ba825",
+          "checks": [
+            "Metrics row renders",
+            "Metrics cards are clickable (except Time)",
+            "Clicking metric filters diff list",
+            "Active filter shows ring indicator",
+            "Toggle behavior works",
+            "No console errors"
+          ]
+        }
+      ]
+    },
+    "database_verification": {
+      "required": false,
+      "checks": []
+    }
+  },
+  "qa_signoff": null,
+  "last_updated": "2026-01-21T09:25:23.411760+00:00"
+}

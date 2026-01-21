@@ -1,0 +1,32 @@
+{
+  "project_type": "single",
+  "services": {
+    "frontend": {
+      "path": ".",
+      "tech_stack": ["typescript", "nextjs", "react", "tailwindcss", "radix-ui"],
+      "port": 3000,
+      "dev_command": "pnpm dev",
+      "test_command": "pnpm vitest",
+      "framework_version": {
+        "next": "16.1.3",
+        "react": "19.2.3",
+        "tailwindcss": "4"
+      }
+    }
+  },
+  "infrastructure": {
+    "docker": false,
+    "database": "sqlite",
+    "orm": "drizzle-orm",
+    "ci": "GitHub Actions",
+    "ci_workflows": ["regression.yml"]
+  },
+  "conventions": {
+    "linter": "eslint",
+    "formatter": null,
+    "testing": "vitest",
+    "typescript": true,
+    "client_directive": "'use client' for client components",
+    "component_pattern": "Functional components with TypeScript interfaces"
+  }
+}
