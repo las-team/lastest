@@ -23,16 +23,17 @@ import Link from 'next/link';
 interface RunDashboardClientProps {
   tests: Test[];
   runs: TestRun[];
+  repositoryId?: string | null;
 }
 
-export function RunDashboardClient({ tests, runs }: RunDashboardClientProps) {
+export function RunDashboardClient({ tests, runs, repositoryId }: RunDashboardClientProps) {
   const router = useRouter();
   const [isRunning, setIsRunning] = useState(false);
 
   const handleRunAll = async () => {
     setIsRunning(true);
     try {
-      const { buildId, testRunId } = await createAndRunBuild('manual');
+      const { buildId, testRunId } = await createAndRunBuild('manual', undefined, repositoryId);
       router.push(`/builds/${buildId}`);
     } catch (error) {
       console.error('Failed to start build:', error);

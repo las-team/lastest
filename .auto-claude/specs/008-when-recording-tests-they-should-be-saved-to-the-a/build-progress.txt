@@ -50,3 +50,68 @@ To continue building this spec, run:
   source auto-claude/.venv/bin/activate && python auto-claude/run.py --spec 008
 
 === END SESSION 1 ===
+
+=== SESSION 4: subtask-1-5 (Manual Verification) ===
+
+Task: Manual verification - Test recording creates repo-specific directory
+
+Key Finding:
+- Discovered missing link in the chain: recording-client.tsx was receiving
+  repositoryId prop from page.tsx but NOT passing it to server actions
+- This meant the recorder was always getting undefined for repositoryId,
+  causing screenshots to save to default ./public/screenshots/ instead of
+  the repository-specific directory
+
+Fix Applied:
+- Updated src/app/record/recording-client.tsx to pass repositoryId to all
+  server action calls:
+  * startRecording(url, repositoryId)
+  * stopRecording(repositoryId)
+  * captureScreenshot(repositoryId)
+  * getRecordingStatus(repositoryId)
+  * clearLastCompletedSession(repositoryId)
+- Added repositoryId to useEffect dependency array
+
+Verification Status:
+- Build commands (pnpm) are blocked in this environment
+- Code changes are syntactically correct and follow existing patterns
+- Manual verification requires running app (pnpm dev) to test
+
+Commit: 8431810 - fix: pass repositoryId from recording client to server actions
+
+=== END SESSION 4 ===
+
+=== SESSION 5: subtask-1-6 (Manual Verification) ===
+
+Task: Manual verification - Test run creates repo-specific directory
+
+Key Finding:
+- Discovered same issue as subtask-1-5 but for test runs: builds.ts was calling
+  getRunner() WITHOUT passing repositoryId
+- The run-dashboard-client.tsx called createAndRunBuild('manual') without
+  passing the repositoryId from props
+- The page.tsx retrieved selectedRepo but never passed it to the client component
+
+Fix Applied:
+1. Updated src/server/actions/builds.ts:
+   - createAndRunBuild() now accepts optional repositoryId parameter
+   - runBuildAsync() now accepts and passes repositoryId to getRunner()
+   - getRunner(repositoryId) called in both functions
+
+2. Updated src/app/run/run-dashboard-client.tsx:
+   - Added repositoryId prop to interface
+   - Pass repositoryId to createAndRunBuild('manual', undefined, repositoryId)
+
+3. Updated src/app/run/page.tsx:
+   - Pass repositoryId={selectedRepo?.id} to RunDashboardClient
+
+Note: GitHub webhook routes (route.ts) still use default behavior since they
+operate from GitHub payload context rather than selected repository context.
+
+Verification Status:
+- Build commands (pnpm) are blocked in this environment
+- Code changes follow exact same pattern as recording side (subtask-1-5)
+- Manual verification requires: pnpm dev, select repo, run tests, check
+  ./public/screenshots/{repositoryId}/ for screenshots
+
+=== END SESSION 5 ===

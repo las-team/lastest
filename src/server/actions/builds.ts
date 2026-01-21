@@ -34,9 +34,10 @@ export interface BuildSummary {
  */
 export async function createAndRunBuild(
   triggerType: TriggerType = 'manual',
-  testIds?: string[]
+  testIds?: string[],
+  repositoryId?: string | null
 ) {
-  const runner = getRunner();
+  const runner = getRunner(repositoryId);
 
   if (runner.isActive()) {
     throw new Error('Tests already running');
@@ -84,7 +85,7 @@ export async function createAndRunBuild(
   }
 
   // Run tests async
-  runBuildAsync(build.id, testRun.id, tests, gitInfo.branch);
+  runBuildAsync(build.id, testRun.id, tests, gitInfo.branch, repositoryId);
 
   return { buildId: build.id, testRunId: testRun.id, testCount: tests.length };
 }
@@ -96,9 +97,10 @@ async function runBuildAsync(
   buildId: string,
   testRunId: string,
   tests: Test[],
-  branch: string
+  branch: string,
+  repositoryId?: string | null
 ) {
-  const runner = getRunner();
+  const runner = getRunner(repositoryId);
   const startTime = Date.now();
 
   try {
