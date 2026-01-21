@@ -454,6 +454,7 @@ export function RecordingClient({ areas: initialAreas, settings, repositoryId }:
                         {event.type === 'navigation' && <Navigation className="h-3 w-3 text-blue-500" />}
                         {event.type === 'click' && <MousePointer className="h-3 w-3 text-green-500" />}
                         {event.type === 'screenshot' && <Camera className="h-3 w-3 text-yellow-500" />}
+                        {event.type === 'assertion' && <CheckCircle2 className="h-3 w-3 text-purple-500" />}
                       </div>
                       <div className="flex-1">
                         <span className="text-muted-foreground">
