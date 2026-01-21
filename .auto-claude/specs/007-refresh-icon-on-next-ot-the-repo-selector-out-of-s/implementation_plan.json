@@ -1,0 +1,59 @@
+{
+  "feature": "move-refresh-icon-next-to-repo-selector",
+  "spec_name": "move-refresh-icon-next-to-repo-selector",
+  "workflow_type": "simple",
+  "total_phases": 1,
+  "recommended_workers": 1,
+  "phases": [
+    {
+      "phase": 1,
+      "name": "Implementation",
+      "description": "Move refresh icon from sidebar to next to repo selector",
+      "depends_on": [],
+      "subtasks": [
+        {
+          "id": "subtask-1-1",
+          "description": "Locate and identify refresh icon in sidebar and repo selector components",
+          "service": "main",
+          "status": "completed",
+          "files_to_create": [],
+          "files_to_modify": [],
+          "patterns_from": [],
+          "verification": {
+            "type": "manual",
+            "run": "Confirm components identified"
+          },
+          "notes": "Identified refresh icon in src/components/layout/repo-selector.tsx lines 87-95. The RefreshCw button is inside RepoSelector component which is nested in the Sidebar. Documented all findings in build-progress.txt.",
+          "updated_at": "2026-01-21T09:19:05.947910+00:00"
+        },
+        {
+          "id": "subtask-1-2",
+          "description": "Move refresh icon from sidebar to position next to repo selector",
+          "service": "main",
+          "status": "pending",
+          "files_to_create": [],
+          "files_to_modify": [
+            "sidebar component",
+            "repo selector area"
+          ],
+          "patterns_from": [],
+          "verification": {
+            "type": "manual",
+            "run": "Check icon appears next to repo selector, test refresh functionality, verify no sidebar icon"
+          }
+        }
+      ]
+    }
+  ],
+  "metadata": {
+    "created_at": "2026-01-21T00:00:00Z",
+    "complexity": "simple",
+    "estimated_sessions": 1
+  },
+  "qa_signoff": {
+    "status": "pending",
+    "issues": "",
+    "tests_passed": ""
+  },
+  "last_updated": "2026-01-21T09:19:05.947919+00:00"
+}
