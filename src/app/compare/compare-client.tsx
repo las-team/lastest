@@ -22,6 +22,8 @@ import {
   RefreshCw,
   Clock,
   ImageIcon,
+  ChevronRight,
+  ChevronDown,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import type { TestRun } from '@/lib/db/schema';
@@ -150,26 +152,65 @@ function BranchColumn({
         {branchInfo?.allTests && branchInfo.allTests.length > 0 && (
           <div className="space-y-2">
             <div className="text-sm font-medium">Tests ({branchInfo.allTests.length})</div>
-            <div className="space-y-1 max-h-64 overflow-y-auto">
-              {branchInfo.allTests.map((test) => (
-                <div
-                  key={test.id}
-                  className="flex items-center gap-2 p-2 rounded-md bg-muted/50 text-sm"
-                >
-                  <TestStatusIcon status={test.status} />
-                  <span className="truncate flex-1">{test.name}</span>
-                  {test.screenshotPath && (
-                    <a
-                      href={test.screenshotPath}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="shrink-0"
+            <div className="space-y-1 max-h-96 overflow-y-auto">
+              {branchInfo.allTests.map((test) => {
+                const isExpanded = expandedTests.has(test.id);
+                const hasScreenshot = Boolean(test.screenshotPath);
+
+                return (
+                  <div key={test.id} className="rounded-md bg-muted/50">
+                    <button
+                      onClick={() => hasScreenshot && onToggleTest(test.id)}
+                      className={`flex items-center gap-2 p-2 w-full text-sm text-left ${hasScreenshot ? 'cursor-pointer hover:bg-muted/80' : 'cursor-default'}`}
                     >
-                      <ImageIcon className="h-4 w-4 text-muted-foreground hover:text-foreground" />
-                    </a>
-                  )}
-                </div>
-              ))}
+                      {hasScreenshot ? (
+                        isExpanded ? (
+                          <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground" />
+                        ) : (
+                          <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
+                        )
+                      ) : (
+                        <div className="h-4 w-4 shrink-0" />
+                      )}
+                      <TestStatusIcon status={test.status} />
+                      <span className="truncate flex-1">{test.name}</span>
+                      {hasScreenshot && (
+                        <ImageIcon className="h-4 w-4 text-muted-foreground shrink-0" />
+                      )}
+                    </button>
+
+                    {/* Expanded timeline view */}
+                    {isExpanded && hasScreenshot && (
+                      <div className="px-2 pb-3 pt-1">
+                        <div className="ml-6 pl-4 border-l-2 border-muted-foreground/20">
+                          <div className="text-xs font-medium text-muted-foreground mb-2">
+                            Screenshot Timeline
+                          </div>
+                          <div className="relative">
+                            {/* Timeline dot */}
+                            <div className="absolute -left-[21px] top-0 h-3 w-3 rounded-full bg-primary border-2 border-background" />
+                            <a
+                              href={test.screenshotPath!}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="block"
+                            >
+                              <img
+                                src={test.screenshotPath!}
+                                alt={`Screenshot for ${test.name}`}
+                                className="w-full rounded-md border hover:opacity-90 transition-opacity"
+                              />
+                            </a>
+                            <div className="text-xs text-muted-foreground mt-1">
+                              Final screenshot
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
             </div>
           </div>
         )}
