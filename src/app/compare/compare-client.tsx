@@ -142,25 +142,21 @@ function BranchColumn({
           )}
         </div>
 
-        {/* Test results */}
-        {branchInfo?.results && branchInfo.results.length > 0 && (
+        {/* All tests display */}
+        {branchInfo?.allTests && branchInfo.allTests.length > 0 && (
           <div className="space-y-2">
-            <div className="text-sm font-medium">Results ({branchInfo.results.length})</div>
+            <div className="text-sm font-medium">Tests ({branchInfo.allTests.length})</div>
             <div className="space-y-1 max-h-64 overflow-y-auto">
-              {branchInfo.results.map((result) => (
+              {branchInfo.allTests.map((test) => (
                 <div
-                  key={result.id}
+                  key={test.id}
                   className="flex items-center gap-2 p-2 rounded-md bg-muted/50 text-sm"
                 >
-                  {result.status === 'passed' ? (
-                    <CheckCircle className="h-4 w-4 text-green-500 shrink-0" />
-                  ) : (
-                    <XCircle className="h-4 w-4 text-destructive shrink-0" />
-                  )}
-                  <span className="truncate flex-1">{result.testName}</span>
-                  {result.screenshotPath && (
+                  <TestStatusIcon status={test.status} />
+                  <span className="truncate flex-1">{test.name}</span>
+                  {test.screenshotPath && (
                     <a
-                      href={result.screenshotPath}
+                      href={test.screenshotPath}
                       target="_blank"
                       rel="noopener noreferrer"
                       className="shrink-0"
@@ -174,10 +170,10 @@ function BranchColumn({
           </div>
         )}
 
-        {/* No results message */}
-        {(!branchInfo?.results || branchInfo.results.length === 0) && !isRunning && !isQueued && (
+        {/* No tests message */}
+        {(!branchInfo?.allTests || branchInfo.allTests.length === 0) && !isRunning && !isQueued && (
           <div className="text-center py-4 text-muted-foreground text-sm">
-            {hasRun ? 'No test results' : 'No runs yet'}
+            No tests available
           </div>
         )}
       </CardContent>
