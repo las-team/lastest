@@ -1,0 +1,4 @@
+{
+  "task_description": "when showing a branch - this is true for the runs and the compare pages\n    make sure the header sizes are uniform\n    even non-run tests (that are available for the branch) are shown (with a grey icon)\n    when a test has multiple steps/assertions/screenshots when clicking on it it should show them in order (timeline-ish look)",
+  "workflow_type": "feature"
+}
