@@ -4,8 +4,10 @@ import path from 'path';
 import fs from 'fs';
 import type { ActionSelector, SelectorType } from '@/lib/db/schema';
 
+export type AssertionType = 'pageLoad' | 'networkIdle' | 'urlMatch' | 'domContentLoaded';
+
 export interface RecordingEvent {
-  type: 'action' | 'navigation' | 'screenshot' | 'error' | 'complete';
+  type: 'action' | 'navigation' | 'screenshot' | 'error' | 'complete' | 'assertion';
   timestamp: number;
   data: {
     action?: string;
@@ -16,6 +18,7 @@ export interface RecordingEvent {
     screenshotPath?: string;
     error?: string;
     code?: string;
+    assertionType?: AssertionType;
   };
 }
 
@@ -272,6 +275,16 @@ export class PlaywrightRecorder extends EventEmitter {
     this.addEvent('screenshot', { screenshotPath: `/screenshots/${filename}` });
 
     return `/screenshots/${filename}`;
+  }
+
+  async createAssertion(assertionType: AssertionType): Promise<boolean> {
+    if (!this.page || !this.session) return false;
+
+    // Capture current URL for urlMatch assertions
+    const url = this.page.url();
+    this.addEvent('assertion', { assertionType, url });
+
+    return true;
   }
 
   async stopRecording(): Promise<RecordingSession | null> {
