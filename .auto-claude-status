@@ -3,7 +3,7 @@
   "spec": "006-when-showing-a-branch-this-is-true-for-the-runs-an",
   "state": "building",
   "subtasks": {
-    "completed": 2,
+    "completed": 3,
     "total": 9,
     "in_progress": 1,
     "failed": 0
@@ -18,8 +18,8 @@
     "max": 1
   },
   "session": {
-    "number": 3,
+    "number": 4,
     "started_at": "2026-01-21T10:22:37.188459"
   },
-  "last_update": "2026-01-21T10:25:45.748221"
+  "last_update": "2026-01-21T10:26:54.111594"
 }

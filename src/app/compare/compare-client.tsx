@@ -47,6 +47,17 @@ function formatTimestamp(date: Date | null): string {
   }).format(new Date(date));
 }
 
+function TestStatusIcon({ status }: { status: string | null }) {
+  switch (status) {
+    case 'passed':
+      return <CheckCircle className="h-4 w-4 text-green-500 shrink-0" />;
+    case 'failed':
+      return <XCircle className="h-4 w-4 text-destructive shrink-0" />;
+    default:
+      return <div className="h-4 w-4 rounded-full bg-muted shrink-0" />;
+  }
+}
+
 interface BranchColumnProps {
   branch: string;
   branchInfo: BranchRunInfo | null;

@@ -93,7 +93,9 @@
             "type": "manual",
             "instructions": "Navigate to /compare, select two branches (one with run, one without), verify headers are same height"
           },
-          "status": "pending"
+          "status": "completed",
+          "notes": "Added min-h-[72px] to CardHeader in BranchColumn component to ensure consistent header sizing across columns regardless of whether a branch has run data or not. Committed as 7df9e21.",
+          "updated_at": "2026-01-21T09:26:35.079220+00:00"
         },
         {
           "id": "subtask-3-2",
@@ -336,5 +338,5 @@
     }
   },
   "qa_signoff": null,
-  "last_updated": "2026-01-21T09:25:24.704922+00:00"
+  "last_updated": "2026-01-21T09:26:35.079231+00:00"
 }
