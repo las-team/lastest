@@ -3,7 +3,7 @@ import { EventEmitter } from 'events';
 import path from 'path';
 import fs from 'fs';
 import { DEFAULT_SELECTOR_PRIORITY } from '@/lib/db/schema';
-import type { Test, TestResult, ActionSelector, SelectorConfig, PlaywrightSettings } from '@/lib/db/schema';
+import type { Test, TestResult, ActionSelector, SelectorConfig, PlaywrightSettings, NetworkRequest } from '@/lib/db/schema';
 
 export interface RunEvent {
   type: 'started' | 'test_started' | 'test_passed' | 'test_failed' | 'completed';
@@ -21,6 +21,8 @@ export interface TestRunResult {
   durationMs: number;
   screenshotPath?: string;
   errorMessage?: string;
+  consoleErrors?: string[];
+  networkRequests?: NetworkRequest[];
 }
 
 export interface ProgressCallback {
@@ -152,14 +154,51 @@ export class PlaywrightRunner extends EventEmitter {
     let context: BrowserContext | null = null;
     let page: Page | null = null;
 
+    // Track errors during test execution
+    const consoleErrors: string[] = [];
+    const networkFailures: NetworkRequest[] = [];
+
     try {
       context = await this.browser.newContext({
         viewport: this.getViewport(),
       });
       page = await context.newPage();
 
+      // Capture console errors before navigation
+      page.on('console', msg => {
+        if (msg.type() === 'error') {
+          consoleErrors.push(msg.text());
+        }
+      });
+
+      // Capture network failures before navigation
+      page.on('response', response => {
+        if (response.status() >= 400) {
+          networkFailures.push({
+            url: response.url(),
+            method: response.request().method(),
+            status: response.status(),
+            duration: 0,
+            resourceType: response.request().resourceType(),
+          });
+        }
+      });
+
       // Execute the test code
       await this.executeTestCode(page, test);
+
+      // Check for console errors or network failures after test execution
+      if (consoleErrors.length > 0 || networkFailures.length > 0) {
+        const errorParts: string[] = [];
+        if (consoleErrors.length > 0) {
+          errorParts.push(`Console errors detected: ${consoleErrors.join('; ')}`);
+        }
+        if (networkFailures.length > 0) {
+          const failureDetails = networkFailures.map(f => `${f.method} ${f.url} (${f.status})`).join('; ');
+          errorParts.push(`Network failures detected: ${failureDetails}`);
+        }
+        throw new Error(errorParts.join(' | '));
+      }
 
       // Take screenshot on success
       const screenshotFilename = `${runId}-${test.id}-success.png`;
@@ -182,6 +221,8 @@ export class PlaywrightRunner extends EventEmitter {
         status: 'passed',
         durationMs,
         screenshotPath: `/screenshots/${screenshotFilename}`,
+        consoleErrors: consoleErrors.length > 0 ? consoleErrors : undefined,
+        networkRequests: networkFailures.length > 0 ? networkFailures : undefined,
       };
 
     } catch (error) {
@@ -217,6 +258,8 @@ export class PlaywrightRunner extends EventEmitter {
         durationMs,
         screenshotPath,
         errorMessage,
+        consoleErrors: consoleErrors.length > 0 ? consoleErrors : undefined,
+        networkRequests: networkFailures.length > 0 ? networkFailures : undefined,
       };
 
     } finally {
