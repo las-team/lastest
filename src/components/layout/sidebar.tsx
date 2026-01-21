@@ -12,7 +12,7 @@ import {
   Circle,
   FolderGit2,
 } from 'lucide-react';
-import { RepoSelector } from './repo-selector';
+import { RepoSelector, SyncReposButton } from './repo-selector';
 
 const navigation = [
   { name: 'Dashboard', href: '/', icon: LayoutDashboard },
@@ -36,7 +36,12 @@ export function Sidebar() {
       </div>
 
       <div className="p-4 border-b">
-        <RepoSelector />
+        <div className="flex items-center gap-2">
+          <div className="flex-1 min-w-0">
+            <RepoSelector />
+          </div>
+          <SyncReposButton />
+        </div>
       </div>
 
       <nav className="flex-1 p-4">
