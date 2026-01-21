@@ -89,6 +89,7 @@ export const repositories = sqliteTable('repositories', {
   fullName: text('full_name').notNull(), // owner/name
   defaultBranch: text('default_branch'),
   selectedBaseline: text('selected_baseline'), // branch name for baseline comparison
+  localPath: text('local_path'), // local filesystem path for route scanning
   createdAt: integer('created_at', { mode: 'timestamp' }),
 });
 
@@ -196,6 +197,7 @@ export type NewPullRequest = typeof pullRequests.$inferInsert;
 export type Build = typeof builds.$inferSelect;
 export type NewBuild = typeof builds.$inferInsert;
 export type VisualDiff = typeof visualDiffs.$inferSelect;
+export type VisualDiffWithTestStatus = VisualDiff & { testResultStatus: string | null };
 export type NewVisualDiff = typeof visualDiffs.$inferInsert;
 export type Baseline = typeof baselines.$inferSelect;
 export type NewBaseline = typeof baselines.$inferInsert;

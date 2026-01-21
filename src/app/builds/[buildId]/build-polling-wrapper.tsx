@@ -4,7 +4,7 @@ import { useState, useEffect, ReactNode } from 'react';
 import { useRouter } from 'next/navigation';
 import { BuildDetailClient } from './build-detail-client';
 import { BuildSummaryHero } from '@/components/dashboard/build-summary-hero';
-import type { VisualDiff, BuildStatus } from '@/lib/db/schema';
+import type { VisualDiffWithTestStatus, BuildStatus } from '@/lib/db/schema';
 
 interface BuildData {
   id: string;
@@ -16,7 +16,7 @@ interface BuildData {
   flakyCount: number;
   completedAt: Date | null;
   elapsedMs: number | null;
-  diffs: VisualDiff[];
+  diffs: VisualDiffWithTestStatus[];
 }
 
 interface BuildPollingWrapperProps {

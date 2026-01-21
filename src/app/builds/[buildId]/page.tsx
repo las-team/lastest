@@ -1,6 +1,6 @@
 import { notFound } from 'next/navigation';
-import { getBuildSummary, getRecentBuilds } from '@/server/actions/builds';
-import { BuildSummaryHero } from '@/components/dashboard/build-summary-hero';
+import { getBuildSummary, getRecentBuilds, getRecentBuildsByRepo } from '@/server/actions/builds';
+import { getSelectedRepository } from '@/lib/db/queries';
 import { RecentHistory } from '@/components/dashboard/recent-history';
 import { BuildActionsClient } from './build-actions-client';
 import { BuildPollingWrapper } from './build-polling-wrapper';
@@ -11,8 +11,13 @@ interface PageProps {
 
 export default async function BuildPage({ params }: PageProps) {
   const { buildId } = await params;
-  const build = await getBuildSummary(buildId);
-  const recentBuilds = await getRecentBuilds(5);
+  const [build, selectedRepo] = await Promise.all([
+    getBuildSummary(buildId),
+    getSelectedRepository(),
+  ]);
+  const recentBuilds = selectedRepo
+    ? await getRecentBuildsByRepo(selectedRepo.id, 5)
+    : await getRecentBuilds(5);
 
   if (!build) {
     notFound();

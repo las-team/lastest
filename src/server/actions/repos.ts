@@ -70,6 +70,11 @@ export async function updateRepoBaseline(repositoryId: string, branch: string) {
   revalidatePath('/repo');
 }
 
+export async function updateRepoLocalPath(repositoryId: string, localPath: string) {
+  await queries.updateRepository(repositoryId, { localPath });
+  revalidatePath('/repo');
+}
+
 export async function fetchRepoBranches(repositoryId: string): Promise<GitHubBranch[]> {
   const account = await queries.getGithubAccount();
   if (!account) return [];

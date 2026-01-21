@@ -7,7 +7,7 @@ import {
   getTestsByRepo,
   getTestRunsByRepo,
 } from '@/lib/db/queries';
-import { getBuilds } from '@/server/actions/builds';
+import { getBuilds, getBuildsByRepo } from '@/server/actions/builds';
 
 export default async function RunPage() {
   const selectedRepo = await getSelectedRepository();
@@ -15,7 +15,7 @@ export default async function RunPage() {
   const [tests, runs, builds] = await Promise.all([
     selectedRepo ? getTestsByRepo(selectedRepo.id) : getTests(),
     selectedRepo ? getTestRunsByRepo(selectedRepo.id) : getTestRuns(),
-    getBuilds(10),
+    selectedRepo ? getBuildsByRepo(selectedRepo.id, 10) : getBuilds(10),
   ]);
 
   return (

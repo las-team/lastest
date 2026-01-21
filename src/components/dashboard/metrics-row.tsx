@@ -54,7 +54,7 @@ export function MetricsRow({
       icon: CheckCircle,
       color: passedCount > 0 ? 'text-green-600' : 'text-gray-400',
       bgColor: passedCount > 0 ? 'bg-green-50' : 'bg-gray-50',
-      filterKey: null,
+      filterKey: 'passed',
     },
     {
       label: 'Failed',

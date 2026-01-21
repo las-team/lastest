@@ -5,6 +5,8 @@ export interface RouteInfo {
   component?: string;
   framework?: 'nextjs-app' | 'nextjs-pages' | 'react-router' | 'vue' | 'unknown';
   routerType?: 'hash' | 'browser';
+  label?: string; // Human-readable label from navigation
+  navSource?: string; // File where navigation link was found
 }
 
 export interface ScanProgress {

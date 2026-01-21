@@ -1,14 +1,132 @@
 'use server';
 
 import { revalidatePath } from 'next/cache';
+import * as fs from 'fs/promises';
+import * as path from 'path';
+import * as os from 'os';
 import * as queries from '@/lib/db/queries';
 import { RouteScanner } from '@/lib/scanner';
 import { generateSmokeTestCode } from '@/lib/scanner/test-generator';
 import type { RouteInfo } from '@/lib/scanner/types';
 
+export async function validateLocalPath(localPath: string): Promise<{
+  valid: boolean;
+  hasPackageJson: boolean;
+  framework?: string;
+  error?: string;
+  resolvedPath?: string;
+  isMonorepo?: boolean;
+  frontendPath?: string;
+}> {
+  try {
+    const resolvedPath = localPath.startsWith('~')
+      ? path.join(os.homedir(), localPath.slice(1))
+      : path.resolve(localPath);
+
+    // Check if directory exists
+    const stat = await fs.stat(resolvedPath);
+    if (!stat.isDirectory()) {
+      return { valid: false, hasPackageJson: false, error: 'Path is not a directory' };
+    }
+
+    // Check for package.json at root
+    let hasPackageJson = false;
+    let framework: string | undefined;
+    let isMonorepo = false;
+    let frontendPath: string | undefined;
+
+    try {
+      const packageJsonPath = path.join(resolvedPath, 'package.json');
+      const content = await fs.readFile(packageJsonPath, 'utf-8');
+      hasPackageJson = true;
+
+      const packageJson = JSON.parse(content);
+      const deps = { ...packageJson.dependencies, ...packageJson.devDependencies };
+      if (deps.next) framework = 'Next.js';
+      else if (deps['react-router'] || deps['react-router-dom']) framework = 'React Router';
+      else if (deps.vue && deps['vue-router']) framework = 'Vue';
+      else if (deps.react) framework = 'React';
+    } catch {
+      // No package.json at root - check for monorepo structure
+      const frontendDirs = ['frontend', 'client', 'web', 'app', 'packages/frontend', 'packages/web', 'packages/client'];
+
+      for (const dir of frontendDirs) {
+        const checkPath = path.join(resolvedPath, dir);
+        try {
+          const pkgPath = path.join(checkPath, 'package.json');
+          const content = await fs.readFile(pkgPath, 'utf-8');
+          const pkg = JSON.parse(content);
+          const deps = { ...pkg.dependencies, ...pkg.devDependencies };
+
+          if (deps.next || deps.react || deps.vue) {
+            isMonorepo = true;
+            frontendPath = checkPath;
+            hasPackageJson = true;
+
+            if (deps.next) framework = 'Next.js';
+            else if (deps['react-router'] || deps['react-router-dom']) framework = 'React Router';
+            else if (deps.vue && deps['vue-router']) framework = 'Vue';
+            else if (deps.react) framework = 'React';
+            break;
+          }
+        } catch {
+          // Not a valid frontend directory
+        }
+      }
+    }
+
+    if (!hasPackageJson) {
+      return {
+        valid: false,
+        hasPackageJson: false,
+        error: 'No package.json found (checked root and common frontend directories)',
+        resolvedPath,
+      };
+    }
+
+    return {
+      valid: true,
+      hasPackageJson,
+      framework,
+      resolvedPath,
+      isMonorepo,
+      frontendPath,
+    };
+  } catch (error) {
+    return {
+      valid: false,
+      hasPackageJson: false,
+      error: error instanceof Error ? error.message : 'Path does not exist',
+    };
+  }
+}
+
+export async function getDefaultLocalPath(repoName: string): Promise<string> {
+  const home = os.homedir();
+  return `${home}/dev/${repoName}`;
+}
+
 export async function startRouteScan(repositoryId: string, scanPath?: string) {
-  // Default to current working directory if no path provided
-  const pathToScan = scanPath || process.cwd();
+  // Use provided path, or get from repository's localPath
+  let pathToScan = scanPath;
+
+  if (!pathToScan) {
+    const repo = await queries.getRepository(repositoryId);
+    pathToScan = repo?.localPath || undefined;
+  }
+
+  if (!pathToScan) {
+    return {
+      success: false,
+      error: 'No local path configured. Please set the repository local path first.',
+    };
+  }
+
+  // Resolve ~ to home directory
+  if (pathToScan.startsWith('~')) {
+    pathToScan = path.join(os.homedir(), pathToScan.slice(1));
+  }
+  pathToScan = path.resolve(pathToScan);
 
   // Delete existing routes and scan status for this repo
   await queries.deleteRoutesByRepo(repositoryId);

@@ -19,6 +19,7 @@ export async function GET(
     passedCount: build.passedCount,
     failedCount: build.failedCount,
     changesDetected: build.changesDetected,
+    flakyCount: build.flakyCount,
     completedAt: build.completedAt,
     elapsedMs: build.elapsedMs,
     diffs: build.diffs,

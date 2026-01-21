@@ -3,7 +3,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Badge } from '@/components/ui/badge';
 import { getGitInfo } from '@/lib/git/utils';
 import * as queries from '@/lib/db/queries';
-import { Github, Check, X } from 'lucide-react';
+import { Github, Check, X, Database, ExternalLink } from 'lucide-react';
 import { PlaywrightSettingsCard } from '@/components/settings/playwright-settings-card';
 
 export default async function SettingsPage({
@@ -122,7 +122,10 @@ export default async function SettingsPage({
           {/* Database Info */}
           <Card>
             <CardHeader>
-              <CardTitle>Database</CardTitle>
+              <CardTitle className="flex items-center gap-2">
+                <Database className="w-5 h-5" />
+                Database
+              </CardTitle>
               <CardDescription>
                 SQLite database configuration
               </CardDescription>
@@ -135,6 +138,20 @@ export default async function SettingsPage({
               <div className="flex justify-between">
                 <span className="text-muted-foreground">Type</span>
                 <span>SQLite with WAL mode</span>
+              </div>
+              <div className="pt-2 border-t">
+                <a
+                  href="https://local.drizzle.studio"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-2 px-4 py-2 bg-gray-900 text-white rounded-lg hover:bg-gray-800 text-sm"
+                >
+                  <ExternalLink className="w-4 h-4" />
+                  Open Drizzle Studio
+                </a>
+                <p className="text-xs text-muted-foreground mt-2">
+                  Run <code className="bg-muted px-1 rounded">pnpm db:studio</code> first
+                </p>
               </div>
             </CardContent>
           </Card>

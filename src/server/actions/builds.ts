@@ -6,7 +6,7 @@ import { getGitInfo } from '@/lib/git/utils';
 import { getRunner } from '@/lib/playwright/runner';
 import { generateDiff } from '@/lib/diff/generator';
 import { hashImage } from '@/lib/diff/hasher';
-import type { Test, TriggerType, BuildStatus, VisualDiff } from '@/lib/db/schema';
+import type { Test, TriggerType, BuildStatus, VisualDiffWithTestStatus } from '@/lib/db/schema';
 import path from 'path';
 
 const SCREENSHOTS_DIR = path.join(process.cwd(), 'public', 'screenshots');
@@ -26,7 +26,7 @@ export interface BuildSummary {
   gitBranch: string;
   gitCommit: string;
   pullRequestId: string | null;
-  diffs: VisualDiff[];
+  diffs: VisualDiffWithTestStatus[];
 }
 
 /**
@@ -49,6 +49,8 @@ export async function createAndRunBuild(
     tests = await Promise.all(
       testIds.map((id) => queries.getTest(id))
     ).then((results) => results.filter((t): t is Test => t !== undefined));
+  } else if (repositoryId) {
+    tests = await queries.getTestsByRepo(repositoryId);
   } else {
     tests = await queries.getTests();
   }
@@ -280,7 +282,7 @@ export async function getBuildSummary(buildId: string): Promise<BuildSummary | n
   if (!build) return null;
 
   const testRun = build.testRunId ? await queries.getTestRun(build.testRunId) : null;
-  const diffs = await queries.getVisualDiffsByBuild(buildId);
+  const diffs = await queries.getVisualDiffsWithTestStatus(buildId);
 
   return {
     id: build.id,
@@ -308,10 +310,24 @@ export async function getRecentBuilds(limit = 5) {
 }
 
 /**
+ * Get recent builds for a specific repository
+ */
+export async function getRecentBuildsByRepo(repositoryId: string, limit = 5) {
+  return queries.getBuildsByRepo(repositoryId, limit);
+}
+
+/**
  * Get all builds
  */
 export async function getBuilds(limit = 10) {
   return queries.getBuilds(limit);
+}
+
+/**
+ * Get builds for a specific repository
+ */
+export async function getBuildsByRepo(repositoryId: string, limit = 10) {
+  return queries.getBuildsByRepo(repositoryId, limit);
 }
 
 /**

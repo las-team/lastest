@@ -9,17 +9,13 @@ Determining test coverage /home/ewyct/.claude/plans/zazzy-tinkering-backus.md
 ## started
 
 ## features
-Route scan - where does it lok for routes? -it seems to be fixated on the lastest2 repo instead of the selected one
-
 Branch checkout & test run flow /home/ewyct/.claude/plans/breezy-riding-crane.md
-
 Implement the OCR feature to identify the selected UI element's text label
 
 ## ideas
 Firecrawl?
 Research playwrights comparison options, how they work?
 Approve reject changes or create ticket -> gh issue
-
 
 AI
     Use local claude -p and OpenRouter API key
@@ -34,5 +30,3 @@ AI
         assertions to fail them
 
 ## bugs
-have the drizzle studio linked from the settings
-route coverage should be calculated on the number of routes having tests - please make sure it's correct

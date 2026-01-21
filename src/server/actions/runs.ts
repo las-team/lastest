@@ -33,6 +33,8 @@ export async function runTests(testIds?: string[], repositoryId?: string | null)
     tests = await Promise.all(
       testIds.map(id => queries.getTest(id))
     ).then(results => results.filter((t): t is Test => t !== undefined));
+  } else if (repositoryId) {
+    tests = await queries.getTestsByRepo(repositoryId);
   } else {
     tests = await queries.getTests();
   }

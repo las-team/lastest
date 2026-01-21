@@ -252,9 +252,62 @@ export async function getRecentBuilds(limit = 5) {
   return db.select().from(builds).orderBy(desc(builds.createdAt)).limit(limit).all();
 }
 
+export async function getBuildsByRepo(repositoryId: string, limit = 10) {
+  return db
+    .select({
+      id: builds.id,
+      testRunId: builds.testRunId,
+      pullRequestId: builds.pullRequestId,
+      triggerType: builds.triggerType,
+      overallStatus: builds.overallStatus,
+      totalTests: builds.totalTests,
+      changesDetected: builds.changesDetected,
+      flakyCount: builds.flakyCount,
+      failedCount: builds.failedCount,
+      passedCount: builds.passedCount,
+      elapsedMs: builds.elapsedMs,
+      createdAt: builds.createdAt,
+      completedAt: builds.completedAt,
+    })
+    .from(builds)
+    .innerJoin(testRuns, eq(builds.testRunId, testRuns.id))
+    .where(eq(testRuns.repositoryId, repositoryId))
+    .orderBy(desc(builds.createdAt))
+    .limit(limit)
+    .all();
+}
+
 // Visual Diffs
 export async function getVisualDiffsByBuild(buildId: string) {
   return db.select().from(visualDiffs).where(eq(visualDiffs.buildId, buildId)).all();
+}
+
+// Get visual diffs with test result status for proper filtering
+export async function getVisualDiffsWithTestStatus(buildId: string) {
+  const diffs = await db
+    .select({
+      id: visualDiffs.id,
+      buildId: visualDiffs.buildId,
+      testResultId: visualDiffs.testResultId,
+      testId: visualDiffs.testId,
+      baselineImagePath: visualDiffs.baselineImagePath,
+      currentImagePath: visualDiffs.currentImagePath,
+      diffImagePath: visualDiffs.diffImagePath,
+      status: visualDiffs.status,
+      pixelDifference: visualDiffs.pixelDifference,
+      percentageDifference: visualDiffs.percentageDifference,
+      metadata: visualDiffs.metadata,
+      approvedBy: visualDiffs.approvedBy,
+      approvedAt: visualDiffs.approvedAt,
+      createdAt: visualDiffs.createdAt,
+      testResultStatus: testResults.status,
+    })
+    .from(visualDiffs)
+    .leftJoin(testResults, eq(visualDiffs.testResultId, testResults.id))
+    .where(eq(visualDiffs.buildId, buildId))
+    .all();
+
+  return diffs;
 }
 
 export async function getVisualDiff(id: string) {
@@ -601,7 +654,18 @@ export async function deleteRoutesByRepo(repositoryId: string) {
 export async function getRouteCoverageStats(repositoryId: string) {
   const allRoutes = await getRoutesByRepo(repositoryId);
   const total = allRoutes.length;
-  const withTests = allRoutes.filter(r => r.hasTest).length;
+
+  // Get functional areas that have tests
+  const repoTests = await getTestsByRepo(repositoryId);
+  const areasWithTests = new Set(
+    repoTests.map(t => t.functionalAreaId).filter(Boolean)
+  );
+
+  // Route has coverage if its functional area has tests OR hasTest flag is true
+  const withTests = allRoutes.filter(r =>
+    r.hasTest || (r.functionalAreaId && areasWithTests.has(r.functionalAreaId))
+  ).length;
+
   const percentage = total > 0 ? Math.round((withTests / total) * 100) : 0;
   return { total, withTests, percentage };
 }

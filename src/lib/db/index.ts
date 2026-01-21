@@ -27,6 +27,7 @@ export function initializeDatabase() {
       full_name TEXT NOT NULL,
       default_branch TEXT,
       selected_baseline TEXT,
+      local_path TEXT,
       created_at INTEGER
     );
 
@@ -205,6 +206,20 @@ export function initializeDatabase() {
     CREATE INDEX IF NOT EXISTS idx_visual_diffs_build ON visual_diffs(build_id);
     CREATE INDEX IF NOT EXISTS idx_routes_repository ON routes(repository_id);
   `);
+
+  // Run migrations for existing databases (add columns that may be missing)
+  runMigrations();
+}
+
+function runMigrations() {
+  // Get existing columns in repositories table
+  const repoColumns = sqlite.prepare('PRAGMA table_info(repositories)').all() as { name: string }[];
+  const repoColumnNames = new Set(repoColumns.map(c => c.name));
+
+  // Migration: Add local_path to repositories if missing
+  if (!repoColumnNames.has('local_path')) {
+    sqlite.exec('ALTER TABLE repositories ADD COLUMN local_path TEXT');
+  }
 }
 
 // Initialize on first import

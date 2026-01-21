@@ -4,6 +4,8 @@ import { glob } from 'glob';
 import { RouteInfo, ScanProgress, ScanResult } from './types';
 
 export class RouteScanner {
+  private resolvedScanPath: string = '';
+
   constructor(
     private scanPath: string,
     private onProgress?: (progress: ScanProgress) => void
@@ -11,6 +13,9 @@ export class RouteScanner {
 
   async scan(): Promise<ScanResult> {
     this.emitProgress('detecting', 0, 0);
+
+    // Resolve monorepo structure first
+    this.resolvedScanPath = await this.resolveMonorepoPath();
 
     const projectType = await this.detectProjectType();
     const routes: RouteInfo[] = [];
@@ -34,9 +39,71 @@ export class RouteScanner {
         routes.push(...(await this.scanGeneric()));
     }
 
+    // Scan navigation components for labels
+    const navLinks = await this.scanNavigationLinks();
+
+    // Merge nav labels into routes
+    for (const route of routes) {
+      const navLink = navLinks.find(n => n.path === route.path);
+      if (navLink) {
+        route.label = navLink.label;
+        route.navSource = navLink.navSource;
+      }
+    }
+
+    // Add any nav links that weren't found as file routes
+    for (const navLink of navLinks) {
+      if (!routes.find(r => r.path === navLink.path)) {
+        routes.push({
+          path: navLink.path,
+          type: navLink.path.includes('[') || navLink.path.includes(':') ? 'dynamic' : 'static',
+          label: navLink.label,
+          navSource: navLink.navSource,
+          framework: projectType as RouteInfo['framework'],
+        });
+      }
+    }
+
     this.emitProgress('complete', 100, routes.length);
 
     return { routes, framework: projectType };
+  }
+
+  /**
+   * Detect monorepo structure and return the correct frontend path
+   */
+  private async resolveMonorepoPath(): Promise<string> {
+    const basePath = path.resolve(this.scanPath);
+
+    // Check if there's a package.json at root
+    try {
+      await fs.access(path.join(basePath, 'package.json'));
+      return basePath; // Has package.json, use as-is
+    } catch {
+      // No package.json at root, check for common monorepo structures
+    }
+
+    // Common frontend directory names in monorepos
+    const frontendDirs = ['frontend', 'client', 'web', 'app', 'packages/frontend', 'packages/web', 'packages/client'];
+
+    for (const dir of frontendDirs) {
+      const frontendPath = path.join(basePath, dir);
+      try {
+        const pkgPath = path.join(frontendPath, 'package.json');
+        const content = await fs.readFile(pkgPath, 'utf-8');
+        const pkg = JSON.parse(content);
+        const deps = { ...pkg.dependencies, ...pkg.devDependencies };
+
+        // Check if this looks like a frontend project
+        if (deps.next || deps.react || deps.vue) {
+          return frontendPath;
+        }
+      } catch {
+        // Not a valid frontend directory
+      }
+    }
+
+    return basePath; // Fall back to original path
   }
 
   private emitProgress(phase: ScanProgress['phase'], progress: number, routesFound: number, currentFile?: string) {
@@ -44,7 +111,7 @@ export class RouteScanner {
   }
 
   private async detectProjectType(): Promise<string> {
-    let searchPath = path.resolve(this.scanPath);
+    let searchPath = this.resolvedScanPath || path.resolve(this.scanPath);
     let packageJsonPath = path.join(searchPath, 'package.json');
 
     for (let i = 0; i < 3; i++) {
@@ -87,7 +154,7 @@ export class RouteScanner {
   }
 
   private async getProjectRoot(): Promise<string> {
-    let searchPath = path.resolve(this.scanPath);
+    let searchPath = this.resolvedScanPath || path.resolve(this.scanPath);
 
     for (let i = 0; i < 3; i++) {
       try {
@@ -98,7 +165,80 @@ export class RouteScanner {
       }
     }
 
-    return path.resolve(this.scanPath);
+    return this.resolvedScanPath || path.resolve(this.scanPath);
+  }
+
+  /**
+   * Scan for navigation/sidebar components and extract Link elements with labels
+   */
+  private async scanNavigationLinks(): Promise<Array<{ path: string; label: string; navSource: string }>> {
+    const navLinks: Array<{ path: string; label: string; navSource: string }> = [];
+    const projectRoot = await this.getProjectRoot();
+
+    // Find potential navigation files
+    const navFiles = await glob('**/{sidebar,nav,navigation,menu,header}*.{js,jsx,ts,tsx}', {
+      cwd: path.join(projectRoot, 'src'),
+      absolute: true,
+      ignore: ['**/node_modules/**'],
+      nocase: true,
+    });
+
+    // Also check components/ui directory specifically
+    const uiNavFiles = await glob('**/components/{ui,layout}/**/*.{js,jsx,ts,tsx}', {
+      cwd: projectRoot,
+      absolute: true,
+      ignore: ['**/node_modules/**'],
+    });
+
+    const allNavFiles = [...new Set([...navFiles, ...uiNavFiles])];
+
+    for (const file of allNavFiles) {
+      try {
+        const content = await fs.readFile(file, 'utf-8');
+
+        // Skip if no Link imports
+        if (!content.includes('Link') && !content.includes('href')) continue;
+
+        // Pattern 1: NavItem arrays like { label: 'Dashboard', href: '/dashboard' }
+        const navItemPattern = /\{\s*(?:label|name|title):\s*['"`]([^'"`]+)['"`],\s*(?:href|to|path):\s*['"`]([^'"`]+)['"`]/g;
+        let match;
+        while ((match = navItemPattern.exec(content)) !== null) {
+          const [, label, href] = match;
+          if (href.startsWith('/') && !href.includes('http')) {
+            navLinks.push({ path: href, label, navSource: file });
+          }
+        }
+
+        // Pattern 2: Reversed order { href: '/dashboard', label: 'Dashboard' }
+        const navItemReversedPattern = /\{\s*(?:href|to|path):\s*['"`]([^'"`]+)['"`],\s*(?:label|name|title):\s*['"`]([^'"`]+)['"`]/g;
+        while ((match = navItemReversedPattern.exec(content)) !== null) {
+          const [, href, label] = match;
+          if (href.startsWith('/') && !href.includes('http')) {
+            navLinks.push({ path: href, label, navSource: file });
+          }
+        }
+
+        // Pattern 3: JSX Link elements <Link href="/path">Label</Link>
+        const jsxLinkPattern = /<Link[^>]*href=["']([^"']+)["'][^>]*>([^<]+)</g;
+        while ((match = jsxLinkPattern.exec(content)) !== null) {
+          const [, href, label] = match;
+          if (href.startsWith('/') && !href.includes('http') && label.trim()) {
+            navLinks.push({ path: href, label: label.trim(), navSource: file });
+          }
+        }
+
+      } catch {
+        // Skip files that can't be read
+      }
+    }
+
+    // Deduplicate by path, keeping first occurrence
+    const seen = new Set<string>();
+    return navLinks.filter(link => {
+      if (seen.has(link.path)) return false;
+      seen.add(link.path);
+      return true;
+    });
   }
 
   private async scanNextJsApp(): Promise<RouteInfo[]> {

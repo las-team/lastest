@@ -3,14 +3,14 @@
 import { useState } from 'react';
 import Link from 'next/link';
 import { AlertTriangle, CheckCircle, XCircle, ExternalLink, XIcon } from 'lucide-react';
-import type { VisualDiff } from '@/lib/db/schema';
+import type { VisualDiffWithTestStatus } from '@/lib/db/schema';
 import { MetricsRow } from '@/components/dashboard/metrics-row';
 
 // Filter type for the build detail page metrics
-export type FilterType = 'all' | 'tests' | 'changed' | 'flaky' | 'failed';
+export type FilterType = 'all' | 'tests' | 'changed' | 'flaky' | 'failed' | 'passed';
 
 // Utility function to filter diffs based on the selected filter type
-export function filterDiffs(diffs: VisualDiff[], filter: FilterType): VisualDiff[] {
+export function filterDiffs(diffs: VisualDiffWithTestStatus[], filter: FilterType): VisualDiffWithTestStatus[] {
   switch (filter) {
     case 'all':
     case 'tests':
@@ -18,7 +18,11 @@ export function filterDiffs(diffs: VisualDiff[], filter: FilterType): VisualDiff
     case 'changed':
       return diffs.filter((d) => d.pixelDifference && d.pixelDifference > 0);
     case 'failed':
-      return diffs.filter((d) => d.status === 'rejected');
+      // Filter by test execution failure (testResultStatus) OR user-rejected diffs
+      return diffs.filter((d) => d.testResultStatus === 'failed' || d.status === 'rejected');
+    case 'passed':
+      // Filter by test execution passed
+      return diffs.filter((d) => d.testResultStatus === 'passed');
     case 'flaky':
       // Future: implement flaky detection
       return diffs;
@@ -50,11 +54,12 @@ const filterLabels: Record<FilterType, string> = {
   changed: 'Changed',
   flaky: 'Flaky',
   failed: 'Failed',
+  passed: 'Passed',
 };
 
 export interface BuildDetailClientProps {
   buildId: string;
-  diffs: VisualDiff[];
+  diffs: VisualDiffWithTestStatus[];
   metrics: {
     totalTests: number;
     changesDetected: number;
@@ -86,12 +91,12 @@ export function BuildDetailClient({
     }
   };
 
-  // Sort diffs: Failed first, then pending, then others
-  const failedDiffs = diffs.filter((d) => d.status === 'rejected');
-  const pendingDiffs = diffs.filter((d) => d.status === 'pending');
+  // Sort diffs: Failed first (execution failures or rejected), then pending, then others
+  const failedDiffs = diffs.filter((d) => d.testResultStatus === 'failed' || d.status === 'rejected');
+  const pendingDiffs = diffs.filter((d) => d.status === 'pending' && d.testResultStatus !== 'failed');
   const sortedDiffs = [
     ...failedDiffs,
-    ...pendingDiffs.filter((d) => !failedDiffs.includes(d)),
+    ...pendingDiffs,
     ...diffs.filter(
       (d) => !failedDiffs.includes(d) && !pendingDiffs.includes(d)
     ),
@@ -102,10 +107,6 @@ export function BuildDetailClient({
 
   // Check if filter is active (not 'all')
   const isFilterActive = activeFilter !== 'all';
-
-  // Separate failed tests for prominent display
-  const rejectedDiffs = diffs.filter((d) => d.status === 'rejected');
-  const hasFailures = metrics.failedCount > 0 || rejectedDiffs.length > 0;
 
   return (
     <div className="space-y-6">
@@ -122,61 +123,6 @@ export function BuildDetailClient({
         isRunning={isRunning}
         completedTests={completedTests}
       />
-
-      {/* Failed Tests Alert Section - Only show if not filtered and has failures */}
-      {hasFailures && activeFilter === 'all' && (
-        <div className="p-4 bg-red-50 border border-red-200 rounded-lg">
-          <div className="flex items-start gap-3">
-            <XCircle className="w-6 h-6 text-red-500 flex-shrink-0 mt-0.5" />
-            <div className="flex-1">
-              <h3 className="font-semibold text-red-800">
-                {metrics.failedCount} Test{metrics.failedCount !== 1 ? 's' : ''} Failed
-              </h3>
-              <p className="text-sm text-red-600 mt-1">
-                These tests require immediate attention before merging.
-              </p>
-              {rejectedDiffs.length > 0 && (
-                <div className="mt-3 space-y-2">
-                  {rejectedDiffs.slice(0, 3).map((diff) => (
-                    <Link
-                      key={diff.id}
-                      href={`/builds/${buildId}/diff/${diff.id}`}
-                      className="flex items-center gap-3 p-3 bg-white border border-red-200 rounded-lg hover:border-red-400 transition-colors"
-                    >
-                      <XCircle className="w-4 h-4 text-red-500" />
-                      <div className="flex-1 min-w-0">
-                        <div className="font-medium text-red-800 truncate">
-                          Test {diff.testId.slice(0, 8)}
-                        </div>
-                        <div className="text-xs text-red-600">
-                          {diff.pixelDifference
-                            ? `${diff.pixelDifference.toLocaleString()} pixels changed`
-                            : 'Rejected'}
-                        </div>
-                      </div>
-                      {diff.currentImagePath && (
-                        <img
-                          src={diff.currentImagePath}
-                          alt="Failed screenshot"
-                          className="w-16 h-10 object-cover rounded border border-red-200"
-                        />
-                      )}
-                    </Link>
-                  ))}
-                  {rejectedDiffs.length > 3 && (
-                    <button
-                      onClick={() => setActiveFilter('failed')}
-                      className="text-sm text-red-600 hover:text-red-800 underline"
-                    >
-                      View all {rejectedDiffs.length} failed tests
-                    </button>
-                  )}
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* Tests for Review Section */}
       <div>
@@ -216,9 +162,10 @@ export function BuildDetailClient({
         ) : (
           <div className="space-y-2">
             {filteredDiffs.map((diff) => {
-              const StatusIcon = diffStatusIcons[diff.status];
-              const statusColor = diffStatusColors[diff.status];
-              const isFailed = diff.status === 'rejected';
+              const isExecutionFailed = diff.testResultStatus === 'failed';
+              const StatusIcon = isExecutionFailed ? XCircle : diffStatusIcons[diff.status];
+              const statusColor = isExecutionFailed ? 'text-red-600 bg-red-50' : diffStatusColors[diff.status];
+              const isFailed = isExecutionFailed || diff.status === 'rejected';
 
               return (
                 <Link
@@ -239,9 +186,11 @@ export function BuildDetailClient({
                         Test {diff.testId.slice(0, 8)}
                       </div>
                       <div className={`text-sm ${isFailed ? 'text-red-600' : 'text-gray-500'}`}>
-                        {diff.pixelDifference
-                          ? `${diff.pixelDifference.toLocaleString()} pixels changed (${diff.percentageDifference}%)`
-                          : 'No changes detected'}
+                        {isExecutionFailed
+                          ? 'Test execution failed'
+                          : diff.pixelDifference
+                            ? `${diff.pixelDifference.toLocaleString()} pixels changed (${diff.percentageDifference}%)`
+                            : 'No changes detected'}
                       </div>
                     </div>
                   </div>
