@@ -1,0 +1,34 @@
+{
+  "project_type": "single",
+  "services": {
+    "frontend": {
+      "path": ".",
+      "tech_stack": ["typescript", "next.js", "react", "tailwindcss", "radix-ui", "drizzle-orm"],
+      "port": 3000,
+      "dev_command": "pnpm dev",
+      "test_command": "pnpm vitest run",
+      "build_command": "pnpm build"
+    }
+  },
+  "infrastructure": {
+    "docker": false,
+    "database": "sqlite",
+    "database_orm": "drizzle",
+    "ci": "GitHub Actions",
+    "ci_workflows": ["regression.yml"]
+  },
+  "conventions": {
+    "linter": "eslint",
+    "formatter": "prettier",
+    "testing": "vitest",
+    "ui_components": "shadcn-ui",
+    "state_management": "react-hooks"
+  },
+  "key_directories": {
+    "pages": "src/app",
+    "components": "src/components",
+    "server_actions": "src/server/actions",
+    "database": "src/lib/db",
+    "ui_primitives": "src/components/ui"
+  }
+}

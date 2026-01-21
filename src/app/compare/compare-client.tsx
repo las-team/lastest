@@ -71,7 +71,7 @@ function BranchColumn({
 
   return (
     <Card className="flex-1">
-      <CardHeader className="pb-3">
+      <CardHeader className="pb-3 min-h-[72px]">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
             <GitBranch className="h-4 w-4" />

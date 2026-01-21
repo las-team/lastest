@@ -1,0 +1,33 @@
+{
+  "subtasks": {
+    "subtask-1-1": {
+      "attempts": [
+        {
+          "session": 1,
+          "timestamp": "2026-01-21T10:23:59.485576",
+          "approach": "Implemented: Add getTestsWithRunStatus query to fetch all tests with their status from a specific run",
+          "success": true,
+          "error": null
+        }
+      ],
+      "status": "completed"
+    },
+    "subtask-2-1": {
+      "attempts": [
+        {
+          "session": 2,
+          "timestamp": "2026-01-21T10:25:34.479317",
+          "approach": "Implemented: Extend BranchRunInfo interface to include allTests array with test info and optional status",
+          "success": true,
+          "error": null
+        }
+      ],
+      "status": "completed"
+    }
+  },
+  "stuck_subtasks": [],
+  "metadata": {
+    "created_at": "2026-01-21T10:22:37.188295",
+    "last_updated": "2026-01-21T10:25:34.479323"
+  }
+}
