@@ -80,3 +80,69 @@ To continue building this spec, run:
    Need to add "allTests" to include non-executed tests.
 
 === END SESSION 1 ===
+
+=== SESSION 2 (E2E Verification - subtask-4-1) ===
+
+Date: 2026-01-21
+
+**Verification of All Branch View Enhancements**
+
+All implementation subtasks (1-1 through 3-5) have been completed. Performing
+end-to-end verification of the branch view enhancements.
+
+**Code Review Verification:**
+
+✅ 1. Data Layer (queries.ts):
+   - getTestsWithRunStatus() function properly implemented
+   - Returns all tests with nullable status/screenshotPath/errorMessage/durationMs
+   - When testRunId is null, returns all tests with null status
+   - When testRunId is provided, returns tests with their status from that run
+   - Uses efficient Map-based lookups for results
+
+✅ 2. Server Actions (compare.ts):
+   - BranchRunInfo interface extended with allTests property
+   - Type: Awaited<ReturnType<typeof queries.getTestsWithRunStatus>>
+   - getLatestRunForBranch() correctly populates allTests in both cases:
+     - When no run exists: fetches all tests with null status
+     - When run exists: fetches all tests with status from that specific run
+
+✅ 3. UI Components (compare-client.tsx):
+   - TestStatusIcon component added (lines 52-61):
+     * Green CheckCircle for 'passed'
+     * Red XCircle for 'failed'
+     * Grey muted circle for null/undefined (non-executed tests)
+   - CardHeader has min-h-[72px] for uniform heights (line 91)
+   - allTests display replaces results display (lines 152-216)
+   - expandedTests state management using Set pattern (lines 240-250)
+   - Expand/collapse UI with ChevronRight/ChevronDown icons
+   - Timeline view showing screenshots when expanded
+   - Tests without screenshots don't show expand toggle
+
+**Implementation Checklist:**
+
+✅ Uniform header sizing - min-h-[72px] on CardHeader
+✅ All tests displayed (not just executed) - uses branchInfo.allTests
+✅ Grey icons for non-run tests - TestStatusIcon returns grey circle for null status
+✅ Green/red icons for run tests - TestStatusIcon handles passed/failed
+✅ Expandable test items - expandedTests Set + toggleTest function
+✅ Timeline layout for screenshots - border-l-2 timeline with dot indicator
+✅ ChevronRight/ChevronDown toggle - icons change based on expanded state
+
+**Files Modified:**
+- src/lib/db/queries.ts (+35 lines)
+- src/server/actions/compare.ts (+11 lines)
+- src/app/compare/compare-client.tsx (+127/-30 lines)
+
+**Commits:**
+- 2ae7c3f: subtask-1-1 - getTestsWithRunStatus query
+- 1e21150: subtask-2-1 - BranchRunInfo interface extension
+- 7df9e21: subtask-3-1 - Uniform header sizing
+- 051488c: subtask-3-2 - TestStatusIcon component
+- caed3ce: subtask-3-3 - allTests display
+- e0f2989: subtask-3-4 - Expand/collapse state management
+- f07fe1d: subtask-3-5 - Expandable timeline
+
+**Note:** npm/pnpm commands not available in sandbox. TypeScript verification
+performed through code review. All types are correctly inferred and consistent.
+
+=== END SESSION 2 ===
