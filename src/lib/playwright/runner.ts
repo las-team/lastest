@@ -3,7 +3,7 @@ import { EventEmitter } from 'events';
 import path from 'path';
 import fs from 'fs';
 import { DEFAULT_SELECTOR_PRIORITY } from '@/lib/db/schema';
-import type { Test, TestResult, ActionSelector, SelectorConfig, PlaywrightSettings } from '@/lib/db/schema';
+import type { Test, TestResult, ActionSelector, SelectorConfig, PlaywrightSettings, NetworkRequest } from '@/lib/db/schema';
 
 export interface RunEvent {
   type: 'started' | 'test_started' | 'test_passed' | 'test_failed' | 'completed';
@@ -21,6 +21,8 @@ export interface TestRunResult {
   durationMs: number;
   screenshotPath?: string;
   errorMessage?: string;
+  consoleErrors?: string[];
+  networkRequests?: NetworkRequest[];
 }
 
 export interface ProgressCallback {
