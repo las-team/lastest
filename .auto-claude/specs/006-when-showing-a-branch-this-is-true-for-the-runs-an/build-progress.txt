@@ -146,3 +146,44 @@ end-to-end verification of the branch view enhancements.
 performed through code review. All types are correctly inferred and consistent.
 
 === END SESSION 2 ===
+
+=== SESSION 3 (Edge Case Verification - subtask-4-2) ===
+
+Date: 2026-01-21
+
+**Edge Case Verification Results:**
+
+✅ 1. Branch with no tests - shows 'No tests available'
+   - Location: compare-client.tsx lines 218-223
+   - Condition: (!branchInfo?.allTests || branchInfo.allTests.length === 0)
+   - Display: "No tests available" centered message with muted styling
+   - PASS: Empty state handled correctly
+
+✅ 2. Branch where all tests have been run - no grey icons
+   - Location: compare-client.tsx lines 52-61 (TestStatusIcon)
+   - Behavior: 'passed' → green CheckCircle, 'failed' → red XCircle
+   - Only null/undefined status shows grey (muted) circle
+   - PASS: When all tests have status, no grey icons appear
+
+✅ 3. Branch where no tests have been run - all grey icons
+   - Location: queries.ts lines 587-596, compare.ts lines 21-33
+   - When no testRunId exists, getTestsWithRunStatus returns status: null for all tests
+   - TestStatusIcon default case renders grey circle for null status
+   - PASS: All tests show grey icons when branch has no run
+
+✅ 4. Tests without screenshots - no expand toggle or empty timeline
+   - Location: compare-client.tsx lines 158-210
+   - hasScreenshot = Boolean(test.screenshotPath) controls expandability
+   - No screenshot → empty <div> placeholder instead of chevron icons
+   - Click handler disabled: onClick={() => hasScreenshot && onToggleTest(test.id)}
+   - Timeline guard: {isExpanded && hasScreenshot && (...)} prevents empty timeline
+   - PASS: Tests without screenshots are not expandable
+
+**Summary:**
+All 4 edge cases verified through code review. The implementation correctly handles:
+- Empty test lists with appropriate messaging
+- Full test coverage scenarios showing only pass/fail icons
+- No test coverage scenarios showing only grey icons
+- Non-expandable tests when screenshots are not available
+
+=== END SESSION 3 ===
