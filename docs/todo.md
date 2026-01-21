@@ -44,6 +44,3 @@ AI
 functional areas should be unique - if added again than merged into the previous value in a case-insensitive manner for the given repo
 auto-generated tests shouldnt be duplicated but updated if re-generated
 have the drizzle studio linked from the settings
-
-when recording tests they should be saved to the active repo - same for runs
-http://localhost:3000/builds/d6cdd584-82b5-4750-bdff-0d41e79ba825 should be possible to click the top menu elements to filter down the list

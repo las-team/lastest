@@ -26,7 +26,7 @@ export default async function ComparePage() {
   return (
     <div className="flex flex-col h-full">
       <Header title="Compare Branches" />
-      <CompareClient branches={branches} runs={runs} defaultBaseline={defaultBaseline} />
+      <CompareClient branches={branches} runs={runs} defaultBaseline={defaultBaseline} repositoryId={selectedRepo?.id} />
     </div>
   );
 }

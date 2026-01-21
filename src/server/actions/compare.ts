@@ -49,9 +49,9 @@ export async function getLatestRunForBranch(
   };
 }
 
-export async function queueRunForBranch(branch: string, testIds?: string[]) {
+export async function queueRunForBranch(branch: string, repositoryId?: string, testIds?: string[]) {
   const queue = getRunQueue();
-  const queuedRun = queue.addToQueue(branch, testIds);
+  const queuedRun = queue.addToQueue(branch, repositoryId, testIds);
 
   revalidatePath('/compare');
 

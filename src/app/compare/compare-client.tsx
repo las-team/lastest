@@ -39,6 +39,7 @@ interface CompareClientProps {
   branches: string[];
   runs: TestRun[];
   defaultBaseline?: string | null;
+  repositoryId?: string;
 }
 
 function formatTimestamp(date: Date | null): string {
@@ -85,6 +86,19 @@ function BranchColumn({
   const isRunning = queuedRun?.status === 'running';
   const isQueued = queuedRun?.status === 'queued';
   const progress = queuedRun?.progress;
+
+  // Merge allTests with real-time completedResults from running queue
+  const testsWithLiveStatus = branchInfo?.allTests?.map((test) => {
+    const liveResult = queuedRun?.completedResults?.find((r) => r.testId === test.id);
+    if (liveResult) {
+      return {
+        ...test,
+        status: liveResult.status,
+        screenshotPath: liveResult.screenshotPath || test.screenshotPath,
+      };
+    }
+    return test;
+  }) || [];
 
   return (
     <Card className="flex-1">
@@ -149,16 +163,16 @@ function BranchColumn({
         </div>
 
         {/* All tests display */}
-        {branchInfo?.allTests && branchInfo.allTests.length > 0 && (
+        {testsWithLiveStatus.length > 0 && (
           <div className="space-y-2">
-            <div className="text-sm font-medium">Tests ({branchInfo.allTests.length})</div>
+            <div className="text-sm font-medium">Tests ({testsWithLiveStatus.length})</div>
             <div className="space-y-1 max-h-96 overflow-y-auto">
-              {branchInfo.allTests.map((test) => {
+              {testsWithLiveStatus.map((test) => {
                 const isExpanded = expandedTests.has(test.id);
                 const hasScreenshot = Boolean(test.screenshotPath);
 
                 return (
-                  <div key={test.id} className="rounded-md bg-muted/50">
+                  <div key={test.id} className="rounded-md">
                     <button
                       onClick={() => hasScreenshot && onToggleTest(test.id)}
                       className={`flex items-center gap-2 p-2 w-full text-sm text-left ${hasScreenshot ? 'cursor-pointer hover:bg-muted/80' : 'cursor-default'}`}
@@ -216,7 +230,7 @@ function BranchColumn({
         )}
 
         {/* No tests message */}
-        {(!branchInfo?.allTests || branchInfo.allTests.length === 0) && !isRunning && !isQueued && (
+        {testsWithLiveStatus.length === 0 && !isRunning && !isQueued && (
           <div className="text-center py-4 text-muted-foreground text-sm">
             No tests available
           </div>
@@ -226,7 +240,7 @@ function BranchColumn({
   );
 }
 
-export function CompareClient({ branches, runs, defaultBaseline }: CompareClientProps) {
+export function CompareClient({ branches, runs, defaultBaseline, repositoryId }: CompareClientProps) {
   const [baseBranch, setBaseBranch] = useState<string>(defaultBaseline || '');
   const [targetBranch, setTargetBranch] = useState<string>('');
   const [baseInfo, setBaseInfo] = useState<BranchRunInfo | null>(null);
@@ -265,7 +279,7 @@ export function CompareClient({ branches, runs, defaultBaseline }: CompareClient
 
     setLoading(true);
     try {
-      const info = await getLatestRunForBranch(branch);
+      const info = await getLatestRunForBranch(branch, repositoryId);
       setInfo(info);
     } catch (error) {
       console.error('Failed to fetch branch info:', error);
@@ -273,7 +287,7 @@ export function CompareClient({ branches, runs, defaultBaseline }: CompareClient
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [repositoryId]);
 
   useEffect(() => {
     if (baseBranch) {
@@ -316,7 +330,7 @@ export function CompareClient({ branches, runs, defaultBaseline }: CompareClient
 
   const handleRunBranch = async (branch: string) => {
     try {
-      const result = await queueRunForBranch(branch);
+      await queueRunForBranch(branch, repositoryId);
       toast.info(`Tests queued for ${branch}`);
 
       // Immediate status refresh
@@ -329,6 +343,10 @@ export function CompareClient({ branches, runs, defaultBaseline }: CompareClient
   };
 
   const getQueuedRunForBranch = (branch: string): QueuedRun | null => {
+    // Check active run first, then queued
+    if (queueStatus.activeRun?.branch === branch) {
+      return queueStatus.activeRun;
+    }
     return queueStatus.queue.find((q) => q.branch === branch) || null;
   };
 
