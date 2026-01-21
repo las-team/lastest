@@ -1,6 +1,6 @@
 'use client';
 
-import { FileCheck2, AlertTriangle, XCircle, Clock, RefreshCw } from 'lucide-react';
+import { FileCheck2, AlertTriangle, XCircle, Clock, RefreshCw, CheckCircle } from 'lucide-react';
 import type { FilterType } from '@/app/builds/[buildId]/build-detail-client';
 import { cn } from '@/lib/utils';
 
@@ -9,9 +9,12 @@ interface MetricsRowProps {
   changesDetected: number;
   flakyCount: number;
   failedCount: number;
+  passedCount?: number;
   elapsedMs: number | null;
   activeFilter?: FilterType;
   onFilterChange?: (filter: FilterType) => void;
+  isRunning?: boolean;
+  completedTests?: number;
 }
 
 export function MetricsRow({
@@ -19,9 +22,12 @@ export function MetricsRow({
   changesDetected,
   flakyCount,
   failedCount,
+  passedCount = 0,
   elapsedMs,
   activeFilter,
   onFilterChange,
+  isRunning = false,
+  completedTests = 0,
 }: MetricsRowProps) {
   const formatTime = (ms: number | null) => {
     if (!ms) return '-';
@@ -29,6 +35,9 @@ export function MetricsRow({
     if (ms < 60000) return `${(ms / 1000).toFixed(1)}s`;
     return `${(ms / 60000).toFixed(1)}m`;
   };
+
+  const passRate = totalTests > 0 ? Math.round((passedCount / totalTests) * 100) : 0;
+  const progress = totalTests > 0 ? Math.round((completedTests / totalTests) * 100) : 0;
 
   const metrics: {
     label: string;
@@ -40,12 +49,20 @@ export function MetricsRow({
     isTime?: boolean;
   }[] = [
     {
-      label: 'Tests',
-      value: totalTests,
-      icon: FileCheck2,
-      color: 'text-blue-600',
-      bgColor: 'bg-blue-50',
-      filterKey: 'tests',
+      label: 'Passed',
+      value: passedCount,
+      icon: CheckCircle,
+      color: passedCount > 0 ? 'text-green-600' : 'text-gray-400',
+      bgColor: passedCount > 0 ? 'bg-green-50' : 'bg-gray-50',
+      filterKey: null,
+    },
+    {
+      label: 'Failed',
+      value: failedCount,
+      icon: XCircle,
+      color: failedCount > 0 ? 'text-red-600' : 'text-gray-400',
+      bgColor: failedCount > 0 ? 'bg-red-50' : 'bg-gray-50',
+      filterKey: 'failed',
     },
     {
       label: 'Changed',
@@ -64,20 +81,12 @@ export function MetricsRow({
       filterKey: 'flaky',
     },
     {
-      label: 'Failed',
-      value: failedCount,
-      icon: XCircle,
-      color: failedCount > 0 ? 'text-red-600' : 'text-gray-400',
-      bgColor: failedCount > 0 ? 'bg-red-50' : 'bg-gray-50',
-      filterKey: 'failed',
-    },
-    {
       label: 'Time',
       value: formatTime(elapsedMs),
       icon: Clock,
       color: 'text-gray-600',
       bgColor: 'bg-gray-50',
-      filterKey: null, // Time is not filterable
+      filterKey: null,
       isTime: true,
     },
   ];
@@ -89,45 +98,92 @@ export function MetricsRow({
   };
 
   return (
-    <div className="grid grid-cols-5 gap-4">
-      {metrics.map((metric) => {
-        const Icon = metric.icon;
-        const isClickable = metric.filterKey !== null;
-        const isActive = activeFilter && metric.filterKey === activeFilter;
-
-        return (
-          <div
-            key={metric.label}
-            onClick={() => handleClick(metric.filterKey)}
-            className={cn(
-              'p-4 rounded-lg flex flex-col items-center transition-all',
-              metric.bgColor,
-              isClickable && 'cursor-pointer hover:scale-105 hover:shadow-md',
-              isActive && 'ring-2 ring-offset-2 ring-blue-500'
-            )}
-            role={isClickable ? 'button' : undefined}
-            tabIndex={isClickable ? 0 : undefined}
-            onKeyDown={
-              isClickable
-                ? (e) => {
-                    if (e.key === 'Enter' || e.key === ' ') {
-                      e.preventDefault();
-                      handleClick(metric.filterKey);
-                    }
-                  }
-                : undefined
-            }
-          >
-            <div className={`text-3xl font-bold ${metric.color}`}>
-              {metric.value}
+    <div className="space-y-4">
+      {/* Pass Rate Bar */}
+      <div className="p-4 bg-white border rounded-lg">
+        <div className="flex items-center justify-between mb-2">
+          <span className="text-sm font-medium text-gray-700">
+            {isRunning ? 'Progress' : 'Pass Rate'}
+          </span>
+          <span className={cn(
+            'text-lg font-bold',
+            isRunning ? 'text-blue-600' :
+            passRate === 100 ? 'text-green-600' :
+            passRate >= 80 ? 'text-yellow-600' : 'text-red-600'
+          )}>
+            {isRunning ? `${completedTests}/${totalTests}` : `${passRate}%`}
+          </span>
+        </div>
+        <div className="w-full h-3 bg-gray-200 rounded-full overflow-hidden">
+          {isRunning ? (
+            <div
+              className="h-full bg-blue-500 transition-all duration-300 relative overflow-hidden"
+              style={{ width: `${progress}%` }}
+            >
+              <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/30 to-transparent animate-shimmer" />
             </div>
-            <div className="flex items-center gap-1 text-gray-600 text-sm mt-1">
-              <Icon className="w-4 h-4" />
-              {metric.label}
+          ) : (
+            <div className="h-full flex">
+              <div
+                className="bg-green-500 transition-all"
+                style={{ width: `${passRate}%` }}
+              />
+              <div
+                className="bg-red-500 transition-all"
+                style={{ width: `${100 - passRate}%` }}
+              />
             </div>
+          )}
+        </div>
+        {!isRunning && totalTests > 0 && (
+          <div className="flex justify-between mt-1 text-xs text-gray-500">
+            <span>{passedCount} passed</span>
+            <span>{failedCount} failed</span>
           </div>
-        );
-      })}
+        )}
+      </div>
+
+      {/* Metrics Grid */}
+      <div className="grid grid-cols-5 gap-4">
+        {metrics.map((metric) => {
+          const Icon = metric.icon;
+          const isClickable = metric.filterKey !== null;
+          const isActive = activeFilter && metric.filterKey === activeFilter;
+
+          return (
+            <div
+              key={metric.label}
+              onClick={() => handleClick(metric.filterKey)}
+              className={cn(
+                'p-4 rounded-lg flex flex-col items-center transition-all',
+                metric.bgColor,
+                isClickable && 'cursor-pointer hover:scale-105 hover:shadow-md',
+                isActive && 'ring-2 ring-offset-2 ring-blue-500'
+              )}
+              role={isClickable ? 'button' : undefined}
+              tabIndex={isClickable ? 0 : undefined}
+              onKeyDown={
+                isClickable
+                  ? (e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        handleClick(metric.filterKey);
+                      }
+                    }
+                  : undefined
+              }
+            >
+              <div className={`text-3xl font-bold ${metric.color}`}>
+                {metric.value}
+              </div>
+              <div className="flex items-center gap-1 text-gray-600 text-sm mt-1">
+                <Icon className="w-4 h-4" />
+                {metric.label}
+              </div>
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }

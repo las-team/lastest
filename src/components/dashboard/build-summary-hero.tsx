@@ -1,15 +1,25 @@
 'use client';
 
-import { CheckCircle, AlertTriangle, XCircle } from 'lucide-react';
+import { CheckCircle, AlertTriangle, XCircle, Loader2 } from 'lucide-react';
 import type { BuildStatus } from '@/lib/db/schema';
 
 interface BuildSummaryHeroProps {
   status: BuildStatus;
   prNumber?: number;
   changesDetected: number;
+  isRunning?: boolean;
 }
 
 const statusConfig = {
+  running: {
+    icon: Loader2,
+    label: 'RUNNING',
+    description: 'Tests are being executed...',
+    bgColor: 'bg-blue-50',
+    borderColor: 'border-blue-200',
+    textColor: 'text-blue-700',
+    iconColor: 'text-blue-500',
+  },
   safe_to_merge: {
     icon: CheckCircle,
     label: 'SAFE TO MERGE',
@@ -39,19 +49,20 @@ const statusConfig = {
   },
 };
 
-export function BuildSummaryHero({ status, prNumber, changesDetected }: BuildSummaryHeroProps) {
-  const config = statusConfig[status];
+export function BuildSummaryHero({ status, prNumber, changesDetected, isRunning = false }: BuildSummaryHeroProps) {
+  const effectiveStatus = isRunning ? 'running' : status;
+  const config = statusConfig[effectiveStatus];
   const Icon = config.icon;
 
   return (
     <div className={`p-6 rounded-lg border ${config.bgColor} ${config.borderColor}`}>
       <div className="flex items-start justify-between">
         <div className="flex items-center gap-4">
-          <Icon className={`w-12 h-12 ${config.iconColor}`} />
+          <Icon className={`w-12 h-12 ${config.iconColor} ${isRunning ? 'animate-spin' : ''}`} />
           <div>
             <h1 className={`text-2xl font-bold ${config.textColor}`}>{config.label}</h1>
             <p className="text-gray-600">
-              {status === 'review_required'
+              {effectiveStatus === 'review_required'
                 ? `${changesDetected} ${config.description}`
                 : config.description}
             </p>

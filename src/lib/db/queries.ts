@@ -64,6 +64,27 @@ export async function deleteFunctionalArea(id: string) {
   await db.delete(functionalAreas).where(eq(functionalAreas.id, id));
 }
 
+// Get or create functional area with case-insensitive name matching within a repo
+export async function getOrCreateFunctionalAreaByRepo(
+  repositoryId: string,
+  name: string,
+  description?: string
+) {
+  const areas = await getFunctionalAreasByRepo(repositoryId);
+  const existing = areas.find(a => a.name.toLowerCase() === name.toLowerCase());
+
+  if (existing) {
+    // Optionally merge description if provided and existing is empty
+    if (description && !existing.description) {
+      await updateFunctionalArea(existing.id, { description });
+      return { ...existing, description };
+    }
+    return existing;
+  }
+
+  return createFunctionalArea({ repositoryId, name, description });
+}
+
 // Tests
 export async function getTests() {
   return db.select().from(tests).orderBy(desc(tests.createdAt)).all();
@@ -90,6 +111,36 @@ export async function updateTest(id: string, data: Partial<NewTest>) {
 
 export async function deleteTest(id: string) {
   await db.delete(tests).where(eq(tests.id, id));
+}
+
+// Upsert test by targetUrl within a functional area (for auto-generated tests)
+export async function upsertTestByTargetUrl(
+  data: Omit<NewTest, 'id' | 'createdAt' | 'updatedAt'>
+) {
+  if (!data.targetUrl || !data.functionalAreaId) {
+    // Without targetUrl or functionalAreaId, just create new test
+    return createTest(data);
+  }
+
+  // Find existing test with same targetUrl in same functional area
+  const existing = await db
+    .select()
+    .from(tests)
+    .where(
+      and(
+        eq(tests.functionalAreaId, data.functionalAreaId),
+        eq(tests.targetUrl, data.targetUrl)
+      )
+    )
+    .get();
+
+  if (existing) {
+    // Update existing test
+    await updateTest(existing.id, data);
+    return { ...existing, ...data, updatedAt: new Date() };
+  }
+
+  return createTest(data);
 }
 
 // Test Runs

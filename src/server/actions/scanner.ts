@@ -95,40 +95,51 @@ export async function getRouteCoverage(repositoryId: string) {
 export async function addRoutesAsFunctionalAreas(repositoryId: string, routeIds: string[]) {
   const routesToAdd = await queries.getRoutesByIds(routeIds);
   let areasCreated = 0;
+  let areasMerged = 0;
 
   for (const route of routesToAdd) {
-    // Create functional area with route path as name
-    const area = await queries.createFunctionalArea({
-      repositoryId,
-      name: route.path,
-      description: `Auto-generated area for route ${route.path}`,
-    });
+    // Get or create functional area (case-insensitive deduplication)
+    const existingAreas = await queries.getFunctionalAreasByRepo(repositoryId);
+    const existing = existingAreas.find(a => a.name.toLowerCase() === route.path.toLowerCase());
+
+    let area;
+    if (existing) {
+      area = existing;
+      areasMerged++;
+    } else {
+      area = await queries.createFunctionalArea({
+        repositoryId,
+        name: route.path,
+        description: `Auto-generated area for route ${route.path}`,
+      });
+      areasCreated++;
+    }
 
     // Link route to area
     await queries.linkRouteToFunctionalArea(route.id, area.id);
-    areasCreated++;
   }
 
   revalidatePath('/tests');
   revalidatePath('/');
 
-  return { areasCreated };
+  return { areasCreated, areasMerged };
 }
 
 export async function generateBasicTests(repositoryId: string, routeIds: string[], baseUrl: string) {
   const routesToTest = await queries.getRoutesByIds(routeIds);
   let testsCreated = 0;
+  let testsUpdated = 0;
 
   for (const route of routesToTest) {
-    // Ensure route has a functional area
+    // Ensure route has a functional area (with case-insensitive deduplication)
     let functionalAreaId = route.functionalAreaId;
 
     if (!functionalAreaId) {
-      const area = await queries.createFunctionalArea({
+      const area = await queries.getOrCreateFunctionalAreaByRepo(
         repositoryId,
-        name: route.path,
-        description: `Auto-generated area for route ${route.path}`,
-      });
+        route.path,
+        `Auto-generated area for route ${route.path}`
+      );
       functionalAreaId = area.id;
       await queries.linkRouteToFunctionalArea(route.id, area.id);
     }
@@ -143,23 +154,31 @@ export async function generateBasicTests(repositoryId: string, routeIds: string[
       baseUrl
     );
 
-    // Create test
-    await queries.createTest({
+    const targetUrl = route.routerType === 'hash' ? `${baseUrl}/#${route.path}` : `${baseUrl}${route.path}`;
+
+    // Upsert test (update if exists, create if not)
+    const result = await queries.upsertTestByTargetUrl({
       repositoryId,
       functionalAreaId,
       name: `Smoke test: ${route.path}`,
       pathType: 'happy',
       code: testCode,
-      targetUrl: route.routerType === 'hash' ? `${baseUrl}/#${route.path}` : `${baseUrl}${route.path}`,
+      targetUrl,
     });
+
+    // Track if created or updated
+    if (result.createdAt && result.createdAt.getTime() === result.updatedAt?.getTime()) {
+      testsCreated++;
+    } else {
+      testsUpdated++;
+    }
 
     // Mark route as having a test
     await queries.updateRoute(route.id, { hasTest: true });
-    testsCreated++;
   }
 
   revalidatePath('/tests');
   revalidatePath('/');
 
-  return { testsCreated };
+  return { testsCreated, testsUpdated };
 }

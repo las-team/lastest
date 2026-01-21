@@ -1,17 +1,15 @@
 import { Header } from '@/components/layout/header';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { CheckCircle, XCircle, Clock, FileCode, Folder } from 'lucide-react';
+import { CheckCircle, XCircle, Clock, FileCode, Folder, AlertTriangle, Loader2 } from 'lucide-react';
 import {
   getTests,
   getFunctionalAreas,
-  getTestRuns,
-  getTestResultsByRun,
   getSelectedRepository,
   getTestsByRepo,
   getFunctionalAreasByRepo,
-  getTestRunsByRepo,
   getRouteCoverageStats,
+  getRecentBuilds,
 } from '@/lib/db/queries';
 import { CoverageBar } from '@/components/coverage/coverage-bar';
 import Link from 'next/link';
@@ -20,10 +18,10 @@ export default async function DashboardPage() {
   const selectedRepo = await getSelectedRepository();
 
   // Fetch data filtered by selected repo if available
-  const [tests, areas, runs] = await Promise.all([
+  const [tests, areas, recentBuilds] = await Promise.all([
     selectedRepo ? getTestsByRepo(selectedRepo.id) : getTests(),
     selectedRepo ? getFunctionalAreasByRepo(selectedRepo.id) : getFunctionalAreas(),
-    selectedRepo ? getTestRunsByRepo(selectedRepo.id) : getTestRuns(),
+    getRecentBuilds(5),
   ]);
 
   // Fetch route coverage stats
@@ -31,19 +29,13 @@ export default async function DashboardPage() {
     ? await getRouteCoverageStats(selectedRepo.id)
     : { total: 0, withTests: 0, percentage: 0 };
 
-  // Get results from the latest run to calculate pass/fail
-  const latestRun = runs[0];
-  let passingCount = 0;
-  let failingCount = 0;
+  // Get stats from the latest build
+  const latestBuild = recentBuilds[0];
+  const passingCount = latestBuild?.passedCount ?? 0;
+  const failingCount = latestBuild?.failedCount ?? 0;
 
-  if (latestRun) {
-    const results = await getTestResultsByRun(latestRun.id);
-    passingCount = results.filter(r => r.status === 'passed').length;
-    failingCount = results.filter(r => r.status === 'failed').length;
-  }
-
-  const lastRunTime = latestRun?.startedAt
-    ? new Date(latestRun.startedAt).toLocaleString()
+  const lastBuildTime = latestBuild?.createdAt
+    ? new Date(latestBuild.createdAt).toLocaleString()
     : 'Never';
 
   return (
@@ -85,15 +77,15 @@ export default async function DashboardPage() {
 
           <Card>
             <CardHeader className="pb-2">
-              <CardDescription>Last Run</CardDescription>
+              <CardDescription>Last Build</CardDescription>
               <CardTitle className="text-xl flex items-center gap-2 text-muted-foreground">
                 <Clock className="h-5 w-5" />
-                {latestRun ? 'Recent' : 'Never'}
+                {latestBuild ? 'Recent' : 'Never'}
               </CardTitle>
             </CardHeader>
-            {latestRun && (
+            {latestBuild && (
               <CardContent className="pt-0">
-                <p className="text-xs text-muted-foreground">{lastRunTime}</p>
+                <p className="text-xs text-muted-foreground">{lastBuildTime}</p>
               </CardContent>
             )}
           </Card>
@@ -114,46 +106,71 @@ export default async function DashboardPage() {
           </Card>
         )}
 
-        {/* Recent Runs */}
+        {/* Recent Builds */}
         <Card>
           <CardHeader>
-            <CardTitle>Recent Test Runs</CardTitle>
-            <CardDescription>Your latest test execution results</CardDescription>
+            <CardTitle>Recent Builds</CardTitle>
+            <CardDescription>Your latest build results with visual diff status</CardDescription>
           </CardHeader>
           <CardContent>
-            {runs.length > 0 ? (
+            {recentBuilds.length > 0 ? (
               <div className="space-y-2">
-                {runs.slice(0, 5).map((run) => (
-                  <Link
-                    key={run.id}
-                    href={`/run/${run.id}`}
-                    className="flex items-center justify-between p-3 border rounded-lg hover:bg-muted/50 transition-colors"
-                  >
-                    <div className="flex items-center gap-3">
-                      {run.status === 'passed' ? (
-                        <CheckCircle className="h-4 w-4 text-green-500" />
-                      ) : run.status === 'failed' ? (
-                        <XCircle className="h-4 w-4 text-destructive" />
-                      ) : (
-                        <Clock className="h-4 w-4 text-yellow-500" />
-                      )}
-                      <div>
-                        <span className="font-medium">Run #{run.id.slice(0, 8)}</span>
-                        <span className="text-xs text-muted-foreground ml-2">
-                          {run.gitBranch}
-                        </span>
+                {recentBuilds.map((build) => {
+                  const isRunning = !build.completedAt;
+                  const totalTests = build.totalTests ?? 0;
+                  const passRate = totalTests > 0
+                    ? Math.round(((build.passedCount ?? 0) / totalTests) * 100)
+                    : 0;
+                  return (
+                    <Link
+                      key={build.id}
+                      href={`/builds/${build.id}`}
+                      className="flex items-center justify-between p-3 border rounded-lg hover:bg-muted/50 transition-colors"
+                    >
+                      <div className="flex items-center gap-3">
+                        {isRunning ? (
+                          <Loader2 className="h-4 w-4 text-blue-500 animate-spin" />
+                        ) : build.overallStatus === 'safe_to_merge' ? (
+                          <CheckCircle className="h-4 w-4 text-green-500" />
+                        ) : build.overallStatus === 'blocked' ? (
+                          <XCircle className="h-4 w-4 text-destructive" />
+                        ) : (
+                          <AlertTriangle className="h-4 w-4 text-yellow-500" />
+                        )}
+                        <div>
+                          <span className="font-medium">Build #{build.id.slice(0, 8)}</span>
+                          <span className="text-xs text-muted-foreground ml-2">
+                            {totalTests} tests
+                          </span>
+                        </div>
                       </div>
-                    </div>
-                    <Badge variant={run.status === 'passed' ? 'default' : 'destructive'}>
-                      {run.status}
-                    </Badge>
-                  </Link>
-                ))}
+                      <div className="flex items-center gap-3">
+                        {/* Pass rate mini bar */}
+                        <div className="flex items-center gap-2">
+                          <div className="w-16 h-2 bg-gray-200 rounded-full overflow-hidden">
+                            <div
+                              className={`h-full transition-all ${passRate === 100 ? 'bg-green-500' : passRate > 80 ? 'bg-yellow-500' : 'bg-red-500'}`}
+                              style={{ width: `${passRate}%` }}
+                            />
+                          </div>
+                          <span className="text-xs text-muted-foreground w-8">{passRate}%</span>
+                        </div>
+                        <Badge variant={
+                          isRunning ? 'secondary' :
+                          build.overallStatus === 'safe_to_merge' ? 'default' :
+                          build.overallStatus === 'blocked' ? 'destructive' : 'outline'
+                        }>
+                          {isRunning ? 'running' : build.overallStatus?.replace(/_/g, ' ')}
+                        </Badge>
+                      </div>
+                    </Link>
+                  );
+                })}
               </div>
             ) : (
               <div className="text-center py-8 text-muted-foreground">
                 <FileCode className="h-12 w-12 mx-auto mb-4 opacity-50" />
-                <p>No test runs yet</p>
+                <p>No builds yet</p>
                 <p className="text-sm">Record your first test to get started</p>
               </div>
             )}

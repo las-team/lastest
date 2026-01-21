@@ -60,15 +60,20 @@ export interface BuildDetailClientProps {
     changesDetected: number;
     flakyCount: number;
     failedCount: number;
+    passedCount: number;
     elapsedMs: number | null;
   };
   hasPendingDiffs: boolean;
+  isRunning?: boolean;
+  completedTests?: number;
 }
 
 export function BuildDetailClient({
   buildId,
   diffs,
   metrics,
+  isRunning = false,
+  completedTests = 0,
 }: BuildDetailClientProps) {
   const [activeFilter, setActiveFilter] = useState<FilterType>('all');
 
@@ -98,6 +103,10 @@ export function BuildDetailClient({
   // Check if filter is active (not 'all')
   const isFilterActive = activeFilter !== 'all';
 
+  // Separate failed tests for prominent display
+  const rejectedDiffs = diffs.filter((d) => d.status === 'rejected');
+  const hasFailures = metrics.failedCount > 0 || rejectedDiffs.length > 0;
+
   return (
     <div className="space-y-6">
       {/* Metrics Row with Filter Support */}
@@ -106,16 +115,74 @@ export function BuildDetailClient({
         changesDetected={metrics.changesDetected}
         flakyCount={metrics.flakyCount}
         failedCount={metrics.failedCount}
+        passedCount={metrics.passedCount}
         elapsedMs={metrics.elapsedMs}
         activeFilter={activeFilter}
         onFilterChange={handleFilterChange}
+        isRunning={isRunning}
+        completedTests={completedTests}
       />
+
+      {/* Failed Tests Alert Section - Only show if not filtered and has failures */}
+      {hasFailures && activeFilter === 'all' && (
+        <div className="p-4 bg-red-50 border border-red-200 rounded-lg">
+          <div className="flex items-start gap-3">
+            <XCircle className="w-6 h-6 text-red-500 flex-shrink-0 mt-0.5" />
+            <div className="flex-1">
+              <h3 className="font-semibold text-red-800">
+                {metrics.failedCount} Test{metrics.failedCount !== 1 ? 's' : ''} Failed
+              </h3>
+              <p className="text-sm text-red-600 mt-1">
+                These tests require immediate attention before merging.
+              </p>
+              {rejectedDiffs.length > 0 && (
+                <div className="mt-3 space-y-2">
+                  {rejectedDiffs.slice(0, 3).map((diff) => (
+                    <Link
+                      key={diff.id}
+                      href={`/builds/${buildId}/diff/${diff.id}`}
+                      className="flex items-center gap-3 p-3 bg-white border border-red-200 rounded-lg hover:border-red-400 transition-colors"
+                    >
+                      <XCircle className="w-4 h-4 text-red-500" />
+                      <div className="flex-1 min-w-0">
+                        <div className="font-medium text-red-800 truncate">
+                          Test {diff.testId.slice(0, 8)}
+                        </div>
+                        <div className="text-xs text-red-600">
+                          {diff.pixelDifference
+                            ? `${diff.pixelDifference.toLocaleString()} pixels changed`
+                            : 'Rejected'}
+                        </div>
+                      </div>
+                      {diff.currentImagePath && (
+                        <img
+                          src={diff.currentImagePath}
+                          alt="Failed screenshot"
+                          className="w-16 h-10 object-cover rounded border border-red-200"
+                        />
+                      )}
+                    </Link>
+                  ))}
+                  {rejectedDiffs.length > 3 && (
+                    <button
+                      onClick={() => setActiveFilter('failed')}
+                      className="text-sm text-red-600 hover:text-red-800 underline"
+                    >
+                      View all {rejectedDiffs.length} failed tests
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Tests for Review Section */}
       <div>
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-lg font-semibold">
-            Tests for Review ({filteredDiffs.length})
+            {activeFilter === 'failed' ? 'Failed Tests' : 'Tests for Review'} ({filteredDiffs.length})
           </h2>
 
           {/* Active Filter Badge with Clear Button */}
@@ -151,20 +218,27 @@ export function BuildDetailClient({
             {filteredDiffs.map((diff) => {
               const StatusIcon = diffStatusIcons[diff.status];
               const statusColor = diffStatusColors[diff.status];
+              const isFailed = diff.status === 'rejected';
 
               return (
                 <Link
                   key={diff.id}
                   href={`/builds/${buildId}/diff/${diff.id}`}
-                  className="flex items-center justify-between p-4 border rounded-lg hover:border-blue-300 hover:bg-blue-50/30 transition-colors"
+                  className={`flex items-center justify-between p-4 border rounded-lg transition-colors ${
+                    isFailed
+                      ? 'border-red-200 bg-red-50/50 hover:border-red-400'
+                      : 'hover:border-blue-300 hover:bg-blue-50/30'
+                  }`}
                 >
                   <div className="flex items-center gap-3">
                     <div className={`p-2 rounded ${statusColor}`}>
                       <StatusIcon className="w-4 h-4" />
                     </div>
                     <div>
-                      <div className="font-medium">Test {diff.testId.slice(0, 8)}</div>
-                      <div className="text-sm text-gray-500">
+                      <div className={`font-medium ${isFailed ? 'text-red-800' : ''}`}>
+                        Test {diff.testId.slice(0, 8)}
+                      </div>
+                      <div className={`text-sm ${isFailed ? 'text-red-600' : 'text-gray-500'}`}>
                         {diff.pixelDifference
                           ? `${diff.pixelDifference.toLocaleString()} pixels changed (${diff.percentageDifference}%)`
                           : 'No changes detected'}
@@ -177,10 +251,12 @@ export function BuildDetailClient({
                       <img
                         src={diff.currentImagePath}
                         alt="Screenshot"
-                        className="w-20 h-12 object-cover rounded border"
+                        className={`w-20 h-12 object-cover rounded border ${
+                          isFailed ? 'border-red-200' : ''
+                        }`}
                       />
                     )}
-                    <ExternalLink className="w-4 h-4 text-gray-400" />
+                    <ExternalLink className={`w-4 h-4 ${isFailed ? 'text-red-400' : 'text-gray-400'}`} />
                   </div>
                 </Link>
               );

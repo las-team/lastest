@@ -7,20 +7,13 @@ Determining test coverage /home/ewyct/.claude/plans/zazzy-tinkering-backus.md
 
 --------
 ## started
-Change the runs screen to a 2 column layout the right side showing the builds that have been run. Show a nice summary card for each. It should be possible to open them 
-
-when showing a branch - this is true for the runs and the compare pages
-    make sure the header sizes are uniform
-    even non-run tests (that are available for the branch) are shown (with a grey icon)
-    when a test has multiple steps/assertions/screenshots when clicking on it it should show them in order (timeline-ish look)
-
-Implement the OCR feature to identify the selected UI element's text label
-
 
 ## features
 Route scan - where does it lok for routes? -it seems to be fixated on the lastest2 repo instead of the selected one
 
 Branch checkout & test run flow /home/ewyct/.claude/plans/breezy-riding-crane.md
+
+Implement the OCR feature to identify the selected UI element's text label
 
 ## ideas
 Firecrawl?
@@ -41,6 +34,5 @@ AI
         assertions to fail them
 
 ## bugs
-functional areas should be unique - if added again than merged into the previous value in a case-insensitive manner for the given repo
-auto-generated tests shouldnt be duplicated but updated if re-generated
 have the drizzle studio linked from the settings
+route coverage should be calculated on the number of routes having tests - please make sure it's correct
