@@ -25,11 +25,19 @@ import {
   startRecording,
   stopRecording,
   captureScreenshot,
+  createAssertion,
   saveRecordedTest,
   getOrCreateFunctionalArea,
   getRecordingStatus,
   clearLastCompletedSession,
 } from '@/server/actions/recording';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
+import type { AssertionType } from '@/lib/playwright/recorder';
 import {
   Video,
   Square,
@@ -40,6 +48,8 @@ import {
   MousePointer,
   Navigation,
   Settings2,
+  CheckCircle2,
+  ChevronDown,
 } from 'lucide-react';
 import type { FunctionalArea, PlaywrightSettings } from '@/lib/db/schema';
 import { PlaywrightSettingsCard } from '@/components/settings/playwright-settings-card';
@@ -160,6 +170,27 @@ export function RecordingClient({ areas: initialAreas, settings, repositoryId }:
       }
     } catch (error) {
       console.error('Failed to capture screenshot:', error);
+    }
+  };
+
+  const handleCreateAssertion = async (type: AssertionType) => {
+    try {
+      const { success } = await createAssertion(type);
+      if (success) {
+        const assertionLabels: Record<AssertionType, string> = {
+          pageLoad: 'Page Load',
+          networkIdle: 'Network Idle',
+          urlMatch: 'URL Match',
+          domContentLoaded: 'DOM Content Loaded',
+        };
+        setEvents([...events, {
+          type: 'assertion',
+          timestamp: Date.now(),
+          description: `Assertion: ${assertionLabels[type]}`,
+        }]);
+      }
+    } catch (error) {
+      console.error('Failed to create assertion:', error);
     }
   };
 
@@ -370,6 +401,29 @@ export function RecordingClient({ areas: initialAreas, settings, repositoryId }:
                   <Camera className="h-4 w-4 mr-2" />
                   Screenshot
                 </Button>
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button variant="outline">
+                      <CheckCircle2 className="h-4 w-4 mr-2" />
+                      Create Assertion
+                      <ChevronDown className="h-4 w-4 ml-2" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent>
+                    <DropdownMenuItem onClick={() => handleCreateAssertion('pageLoad')}>
+                      Page Load
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => handleCreateAssertion('networkIdle')}>
+                      Network Idle
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => handleCreateAssertion('urlMatch')}>
+                      URL Match
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => handleCreateAssertion('domContentLoaded')}>
+                      DOM Content Loaded
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
                 <Button
                   onClick={handleStopRecording}
                   variant="destructive"
