@@ -1,10 +1,10 @@
 {
   "active": true,
-  "spec": "004-automatic-test",
+  "spec": "001-change-the-runs-screen-to-a-2-column-layout-the-ri",
   "state": "building",
   "subtasks": {
-    "completed": 3,
-    "total": 4,
+    "completed": 4,
+    "total": 5,
     "in_progress": 1,
     "failed": 0
   },
@@ -18,8 +18,8 @@
     "max": 1
   },
   "session": {
-    "number": 4,
-    "started_at": "2026-01-21T10:10:36.202884"
+    "number": 5,
+    "started_at": "2026-01-21T14:03:06.967402"
   },
-  "last_update": "2026-01-21T10:14:18.229085"
+  "last_update": "2026-01-21T14:09:20.304359"
 }
