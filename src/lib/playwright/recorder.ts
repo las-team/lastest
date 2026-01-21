@@ -4,8 +4,10 @@ import path from 'path';
 import fs from 'fs';
 import type { ActionSelector, SelectorType } from '@/lib/db/schema';
 
+export type AssertionType = 'pageLoad' | 'networkIdle' | 'urlMatch' | 'domContentLoaded';
+
 export interface RecordingEvent {
-  type: 'action' | 'navigation' | 'screenshot' | 'error' | 'complete';
+  type: 'action' | 'navigation' | 'screenshot' | 'error' | 'complete' | 'assertion';
   timestamp: number;
   data: {
     action?: string;
@@ -16,6 +18,7 @@ export interface RecordingEvent {
     screenshotPath?: string;
     error?: string;
     code?: string;
+    assertionType?: AssertionType;
   };
 }
 
@@ -274,6 +277,16 @@ export class PlaywrightRecorder extends EventEmitter {
     return `/screenshots/${filename}`;
   }
 
+  async createAssertion(assertionType: AssertionType): Promise<boolean> {
+    if (!this.page || !this.session) return false;
+
+    // Capture current URL for urlMatch assertions
+    const url = this.page.url();
+    this.addEvent('assertion', { assertionType, url });
+
+    return true;
+  }
+
   async stopRecording(): Promise<RecordingSession | null> {
     if (!this.isRecording || !this.session) {
       // Return last completed session if available (for when browser was closed)
@@ -369,6 +382,27 @@ export class PlaywrightRecorder extends EventEmitter {
         lastAction = action || '';
       } else if (event.type === 'screenshot') {
         lines.push(`  await page.screenshot({ path: '${event.data.screenshotPath}' });`);
+      } else if (event.type === 'assertion') {
+        const { assertionType, url } = event.data;
+        // Generate assertion code based on type
+        switch (assertionType) {
+          case 'pageLoad':
+            lines.push(`  // Assertion: Verify page has finished loading`);
+            lines.push(`  await page.waitForLoadState('load');`);
+            break;
+          case 'networkIdle':
+            lines.push(`  // Assertion: Verify no pending network requests`);
+            lines.push(`  await page.waitForLoadState('networkidle');`);
+            break;
+          case 'urlMatch':
+            lines.push(`  // Assertion: Verify current URL matches expected`);
+            lines.push(`  await expect(page).toHaveURL('${url}');`);
+            break;
+          case 'domContentLoaded':
+            lines.push(`  // Assertion: Verify DOM is ready`);
+            lines.push(`  await page.waitForLoadState('domcontentloaded');`);
+            break;
+        }
       }
     }
 
