@@ -5,6 +5,7 @@ import { BuildSummaryHero } from '@/components/dashboard/build-summary-hero';
 import { MetricsRow } from '@/components/dashboard/metrics-row';
 import { RecentHistory } from '@/components/dashboard/recent-history';
 import { BuildActionsClient } from './build-actions-client';
+import { BuildDetailClient } from './build-detail-client';
 import { AlertTriangle, CheckCircle, XCircle, ExternalLink } from 'lucide-react';
 
 interface PageProps {
@@ -147,6 +148,20 @@ export default async function BuildPage({ params }: PageProps) {
           </div>
         )}
       </div>
+
+      {/* Metrics Row and Diff List with Filter Support */}
+      <BuildDetailClient
+        buildId={buildId}
+        diffs={build.diffs}
+        metrics={{
+          totalTests: build.totalTests,
+          changesDetected: build.changesDetected,
+          flakyCount: build.flakyCount,
+          failedCount: build.failedCount,
+          elapsedMs: build.elapsedMs,
+        }}
+        hasPendingDiffs={pendingDiffs.length > 0}
+      />
     </div>
   );
 }
