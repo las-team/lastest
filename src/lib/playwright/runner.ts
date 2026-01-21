@@ -37,10 +37,16 @@ export class PlaywrightRunner extends EventEmitter {
   private isRunning = false;
   private aborted = false;
   private settings: PlaywrightSettings | null = null;
+  private repositoryId: string | null;
 
-  constructor(screenshotDir: string = './public/screenshots') {
+  constructor(repositoryId?: string | null, screenshotDir?: string) {
     super();
-    this.screenshotDir = screenshotDir;
+    this.repositoryId = repositoryId ?? null;
+    // Build screenshot directory path: include repositoryId if provided
+    const baseDir = screenshotDir ?? './public/screenshots';
+    this.screenshotDir = this.repositoryId
+      ? path.join(baseDir, this.repositoryId)
+      : baseDir;
   }
 
   setSettings(settings: PlaywrightSettings) {
@@ -207,12 +213,17 @@ export class PlaywrightRunner extends EventEmitter {
 
       const durationMs = Date.now() - startTime;
 
+      // Build public path with repositoryId if present
+      const publicPath = this.repositoryId
+        ? `/screenshots/${this.repositoryId}/${screenshotFilename}`
+        : `/screenshots/${screenshotFilename}`;
+
       this.emit('event', {
         type: 'test_passed',
         testId: test.id,
         testName: test.name,
         durationMs,
-        screenshotPath: `/screenshots/${screenshotFilename}`,
+        screenshotPath: publicPath,
         timestamp: Date.now(),
       } as RunEvent);
 
@@ -220,7 +231,7 @@ export class PlaywrightRunner extends EventEmitter {
         testId: test.id,
         status: 'passed',
         durationMs,
-        screenshotPath: `/screenshots/${screenshotFilename}`,
+        screenshotPath: publicPath,
         consoleErrors: consoleErrors.length > 0 ? consoleErrors : undefined,
         networkRequests: networkFailures.length > 0 ? networkFailures : undefined,
       };
@@ -236,7 +247,10 @@ export class PlaywrightRunner extends EventEmitter {
           const screenshotFilename = `${runId}-${test.id}-failure.png`;
           const fullPath = path.join(this.screenshotDir, screenshotFilename);
           await page.screenshot({ path: fullPath });
-          screenshotPath = `/screenshots/${screenshotFilename}`;
+          // Build public path with repositoryId if present
+          screenshotPath = this.repositoryId
+            ? `/screenshots/${this.repositoryId}/${screenshotFilename}`
+            : `/screenshots/${screenshotFilename}`;
         } catch {
           // Ignore screenshot errors
         }
@@ -419,12 +433,22 @@ export class PlaywrightRunner extends EventEmitter {
   }
 }
 
-// Singleton instance
+// Singleton instance for the runner (keyed by repositoryId)
 let runnerInstance: PlaywrightRunner | null = null;
+let currentRepositoryId: string | null = null;
 
-export function getRunner(): PlaywrightRunner {
-  if (!runnerInstance) {
-    runnerInstance = new PlaywrightRunner();
+export function getRunner(repositoryId?: string | null): PlaywrightRunner {
+  const repoId = repositoryId ?? null;
+
+  // If repositoryId changed, create a new runner instance
+  if (!runnerInstance || currentRepositoryId !== repoId) {
+    // Only create new instance if not currently running tests
+    if (runnerInstance?.isActive()) {
+      return runnerInstance;
+    }
+    currentRepositoryId = repoId;
+    runnerInstance = new PlaywrightRunner(repoId);
   }
+
   return runnerInstance;
 }

@@ -1,0 +1,15 @@
+{
+  "discovered_files": {
+    "src/lib/playwright/recorder.ts": {
+      "description": "PlaywrightRecorder singleton pattern uses getRecorder() function. Updated to support repositoryId parameter - creates new instance when repositoryId changes (unless actively recording).",
+      "category": "architecture",
+      "discovered_at": "2026-01-21T09:22:20.714043+00:00"
+    },
+    "src/server/actions/recording.ts": {
+      "description": "Recording server actions now accept optional repositoryId parameter to enable repository-specific screenshot directories. Functions: startRecording, stopRecording, captureScreenshot, getRecordingStatus, clearLastCompletedSession.",
+      "category": "pattern",
+      "discovered_at": "2026-01-21T09:25:42.375676+00:00"
+    }
+  },
+  "last_updated": "2026-01-21T09:25:42.375689+00:00"
+}

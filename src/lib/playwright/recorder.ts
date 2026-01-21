@@ -38,10 +38,16 @@ export class PlaywrightRecorder extends EventEmitter {
   private lastCompletedSession: RecordingSession | null = null;
   private screenshotDir: string;
   private isRecording = false;
+  private repositoryId: string | null;
 
-  constructor(screenshotDir: string = './public/screenshots') {
+  constructor(repositoryId?: string | null, screenshotDir?: string) {
     super();
-    this.screenshotDir = screenshotDir;
+    this.repositoryId = repositoryId ?? null;
+    // Build screenshot directory path: include repositoryId if provided
+    const baseDir = screenshotDir ?? './public/screenshots';
+    this.screenshotDir = this.repositoryId
+      ? path.join(baseDir, this.repositoryId)
+      : baseDir;
   }
 
   async startRecording(url: string, sessionId: string): Promise<void> {
@@ -272,9 +278,15 @@ export class PlaywrightRecorder extends EventEmitter {
     const filepath = path.join(this.screenshotDir, filename);
 
     await this.page.screenshot({ path: filepath, fullPage: false });
-    this.addEvent('screenshot', { screenshotPath: `/screenshots/${filename}` });
 
-    return `/screenshots/${filename}`;
+    // Build public path with repositoryId if present
+    const publicPath = this.repositoryId
+      ? `/screenshots/${this.repositoryId}/${filename}`
+      : `/screenshots/${filename}`;
+
+    this.addEvent('screenshot', { screenshotPath: publicPath });
+
+    return publicPath;
   }
 
   async createAssertion(assertionType: AssertionType): Promise<boolean> {
@@ -435,12 +447,22 @@ export class PlaywrightRecorder extends EventEmitter {
   }
 }
 
-// Singleton instance for the recorder
+// Singleton instance for the recorder (keyed by repositoryId)
 let recorderInstance: PlaywrightRecorder | null = null;
+let currentRepositoryId: string | null = null;
 
-export function getRecorder(): PlaywrightRecorder {
-  if (!recorderInstance) {
-    recorderInstance = new PlaywrightRecorder();
+export function getRecorder(repositoryId?: string | null): PlaywrightRecorder {
+  const repoId = repositoryId ?? null;
+
+  // If repositoryId changed, create a new recorder instance
+  if (!recorderInstance || currentRepositoryId !== repoId) {
+    // Only create new instance if not currently recording
+    if (recorderInstance?.isActive()) {
+      return recorderInstance;
+    }
+    currentRepositoryId = repoId;
+    recorderInstance = new PlaywrightRecorder(repoId);
   }
+
   return recorderInstance;
 }

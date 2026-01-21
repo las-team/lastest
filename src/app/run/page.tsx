@@ -21,7 +21,7 @@ export default async function RunPage() {
   return (
     <div className="flex flex-col h-full">
       <Header title="Test Runs" />
-      <RunDashboardClient tests={tests} runs={runs} builds={builds} />
+      <RunDashboardClient tests={tests} runs={runs} builds={builds} repositoryId={selectedRepo?.id} />
     </div>
   );
 }

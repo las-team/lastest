@@ -8,12 +8,6 @@ Determining test coverage /home/ewyct/.claude/plans/zazzy-tinkering-backus.md
 --------
 ## started
 Change the runs screen to a 2 column layout the right side showing the builds that have been run. Show a nice summary card for each. It should be possible to open them 
-Drizzle studio - backend view and editor
-Automatic test
-    tests that return a 404 or other errors should be failing e.g. http://localhost:3000/builds/d6cdd584-82b5-4750-bdff-0d41e79ba825/diff/853a212e-1733-46de-935e-77ecacbd533c Smoke test: /builds/[buildId]
-
-Test recording
-    When recording tests there should be a create assertion button to make sure the test have been executed up until that point e.g. pageload
 
 when showing a branch - this is true for the runs and the compare pages
     make sure the header sizes are uniform

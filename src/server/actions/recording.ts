@@ -5,8 +5,8 @@ import { createTest, createFunctionalArea, getFunctionalAreas } from '@/lib/db/q
 import { v4 as uuid } from 'uuid';
 import { revalidatePath } from 'next/cache';
 
-export async function startRecording(url: string): Promise<{ sessionId?: string; error?: string }> {
-  const recorder = getRecorder();
+export async function startRecording(url: string, repositoryId?: string | null): Promise<{ sessionId?: string; error?: string }> {
+  const recorder = getRecorder(repositoryId);
 
   if (recorder.isActive()) {
     return { error: 'Recording already in progress' };
@@ -42,15 +42,15 @@ export async function startRecording(url: string): Promise<{ sessionId?: string;
   }
 }
 
-export async function stopRecording() {
-  const recorder = getRecorder();
+export async function stopRecording(repositoryId?: string | null) {
+  const recorder = getRecorder(repositoryId);
   const session = await recorder.stopRecording();
 
   return session;
 }
 
-export async function captureScreenshot() {
-  const recorder = getRecorder();
+export async function captureScreenshot(repositoryId?: string | null) {
+  const recorder = getRecorder(repositoryId);
   const screenshotPath = await recorder.takeScreenshot();
 
   return { screenshotPath };
@@ -63,8 +63,8 @@ export async function createAssertion(type: AssertionType): Promise<{ success: b
   return { success };
 }
 
-export async function getRecordingStatus() {
-  const recorder = getRecorder();
+export async function getRecordingStatus(repositoryId?: string | null) {
+  const recorder = getRecorder(repositoryId);
   const session = recorder.getSession();
   const lastCompleted = recorder.getLastCompletedSession();
 
@@ -83,8 +83,8 @@ export async function getRecordingStatus() {
   };
 }
 
-export async function clearLastCompletedSession() {
-  const recorder = getRecorder();
+export async function clearLastCompletedSession(repositoryId?: string | null) {
+  const recorder = getRecorder(repositoryId);
   recorder.clearLastCompletedSession();
 }
 

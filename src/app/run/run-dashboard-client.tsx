@@ -18,16 +18,17 @@ interface RunDashboardClientProps {
   tests: Test[];
   runs: TestRun[];
   builds: Build[];
+  repositoryId?: string | null;
 }
 
-export function RunDashboardClient({ tests, runs, builds }: RunDashboardClientProps) {
+export function RunDashboardClient({ tests, runs, builds, repositoryId }: RunDashboardClientProps) {
   const router = useRouter();
   const [isRunning, setIsRunning] = useState(false);
 
   const handleRunAll = async () => {
     setIsRunning(true);
     try {
-      const { buildId, testRunId } = await createAndRunBuild('manual');
+      const { buildId, testRunId } = await createAndRunBuild('manual', undefined, repositoryId);
       router.push(`/builds/${buildId}`);
     } catch (error) {
       console.error('Failed to start build:', error);
