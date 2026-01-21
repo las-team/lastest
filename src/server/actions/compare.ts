@@ -36,7 +36,9 @@ export async function getLatestRunForBranch(
   const results = await queries.getTestResultsWithTestInfo(run.id);
 
   // Get all tests for the repository with their status from this run
-  const allTests = await queries.getTestsWithRunStatus(run.repositoryId, run.id);
+  const allTests = run.repositoryId
+    ? await queries.getTestsWithRunStatus(run.repositoryId, run.id)
+    : [];
 
   return {
     branch,
