@@ -577,3 +577,38 @@ export async function updateScanStatus(id: string, data: Partial<NewScanStatus>)
 export async function deleteScanStatus(repositoryId: string) {
   await db.delete(scanStatus).where(eq(scanStatus.repositoryId, repositoryId));
 }
+
+// Get all tests for a repository with their status from a specific run
+export async function getTestsWithRunStatus(repositoryId: string, testRunId?: string) {
+  const allTests = await getTestsByRepo(repositoryId);
+  const areas = await getFunctionalAreasByRepo(repositoryId);
+  const areaMap = new Map(areas.map(a => [a.id, a]));
+
+  // If no testRunId provided, return all tests with null status
+  if (!testRunId) {
+    return allTests.map(test => ({
+      ...test,
+      area: test.functionalAreaId ? areaMap.get(test.functionalAreaId) : null,
+      status: null as string | null,
+      screenshotPath: null as string | null,
+      errorMessage: null as string | null,
+      durationMs: null as number | null,
+    }));
+  }
+
+  // Get results for this specific run
+  const results = await getTestResultsByRun(testRunId);
+  const resultMap = new Map(results.map(r => [r.testId, r]));
+
+  return allTests.map(test => {
+    const result = resultMap.get(test.id);
+    return {
+      ...test,
+      area: test.functionalAreaId ? areaMap.get(test.functionalAreaId) : null,
+      status: result?.status || null,
+      screenshotPath: result?.screenshotPath || null,
+      errorMessage: result?.errorMessage || null,
+      durationMs: result?.durationMs || null,
+    };
+  });
+}
