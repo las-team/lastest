@@ -1,25 +1,25 @@
 {
   "active": true,
-  "spec": "006-when-showing-a-branch-this-is-true-for-the-runs-an",
+  "spec": "001-change-the-runs-screen-to-a-2-column-layout-the-ri",
   "state": "building",
   "subtasks": {
-    "completed": 8,
-    "total": 9,
+    "completed": 4,
+    "total": 5,
     "in_progress": 1,
     "failed": 0
   },
   "phase": {
-    "current": "Integration and Verification",
+    "current": "Integration Verification",
     "id": null,
-    "total": 2
+    "total": 1
   },
   "workers": {
     "active": 0,
     "max": 1
   },
   "session": {
-    "number": 9,
-    "started_at": "2026-01-21T10:22:37.188459"
+    "number": 5,
+    "started_at": "2026-01-21T14:03:06.967402"
   },
-  "last_update": "2026-01-21T10:35:41.312163"
+  "last_update": "2026-01-21T14:09:20.304359"
 }

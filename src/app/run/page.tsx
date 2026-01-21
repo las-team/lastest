@@ -7,19 +7,21 @@ import {
   getTestsByRepo,
   getTestRunsByRepo,
 } from '@/lib/db/queries';
+import { getBuilds } from '@/server/actions/builds';
 
 export default async function RunPage() {
   const selectedRepo = await getSelectedRepository();
 
-  const [tests, runs] = await Promise.all([
+  const [tests, runs, builds] = await Promise.all([
     selectedRepo ? getTestsByRepo(selectedRepo.id) : getTests(),
     selectedRepo ? getTestRunsByRepo(selectedRepo.id) : getTestRuns(),
+    getBuilds(10),
   ]);
 
   return (
     <div className="flex flex-col h-full">
       <Header title="Test Runs" />
-      <RunDashboardClient tests={tests} runs={runs} />
+      <RunDashboardClient tests={tests} runs={runs} builds={builds} />
     </div>
   );
 }
