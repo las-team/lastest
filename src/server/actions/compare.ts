@@ -8,6 +8,7 @@ export interface BranchRunInfo {
   branch: string;
   run: Awaited<ReturnType<typeof queries.getLatestRunByBranch>> | null;
   results: Awaited<ReturnType<typeof queries.getTestResultsWithTestInfo>>;
+  allTests: Awaited<ReturnType<typeof queries.getTestsWithRunStatus>>;
   timestamp: Date | null;
 }
 
@@ -18,20 +19,30 @@ export async function getLatestRunForBranch(
   const run = await queries.getLatestRunByBranch(branch, repositoryId);
 
   if (!run) {
+    // No run found - get all tests with null status if we have a repositoryId
+    const allTests = repositoryId
+      ? await queries.getTestsWithRunStatus(repositoryId)
+      : [];
+
     return {
       branch,
       run: null,
       results: [],
+      allTests,
       timestamp: null,
     };
   }
 
   const results = await queries.getTestResultsWithTestInfo(run.id);
 
+  // Get all tests for the repository with their status from this run
+  const allTests = await queries.getTestsWithRunStatus(run.repositoryId, run.id);
+
   return {
     branch,
     run,
     results,
+    allTests,
     timestamp: run.startedAt,
   };
 }

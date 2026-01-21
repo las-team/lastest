@@ -1,25 +1,25 @@
 {
   "active": true,
-  "spec": "010-http-localhost-3000-builds-d6cdd584-82b5-4750-bdff",
+  "spec": "006-when-showing-a-branch-this-is-true-for-the-runs-an",
   "state": "building",
   "subtasks": {
-    "completed": 1,
-    "total": 5,
+    "completed": 8,
+    "total": 9,
     "in_progress": 1,
     "failed": 0
   },
   "phase": {
-    "current": "Make MetricsRow Clickable",
+    "current": "Integration and Verification",
     "id": null,
-    "total": 1
+    "total": 2
   },
   "workers": {
     "active": 0,
     "max": 1
   },
   "session": {
-    "number": 2,
-    "started_at": "2026-01-21T10:24:20.710589"
+    "number": 9,
+    "started_at": "2026-01-21T10:22:37.188459"
   },
-  "last_update": "2026-01-21T10:25:49.920328"
+  "last_update": "2026-01-21T10:35:41.312163"
 }
