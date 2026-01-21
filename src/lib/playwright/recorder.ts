@@ -382,6 +382,27 @@ export class PlaywrightRecorder extends EventEmitter {
         lastAction = action || '';
       } else if (event.type === 'screenshot') {
         lines.push(`  await page.screenshot({ path: '${event.data.screenshotPath}' });`);
+      } else if (event.type === 'assertion') {
+        const { assertionType, url } = event.data;
+        // Generate assertion code based on type
+        switch (assertionType) {
+          case 'pageLoad':
+            lines.push(`  // Assertion: Verify page has finished loading`);
+            lines.push(`  await page.waitForLoadState('load');`);
+            break;
+          case 'networkIdle':
+            lines.push(`  // Assertion: Verify no pending network requests`);
+            lines.push(`  await page.waitForLoadState('networkidle');`);
+            break;
+          case 'urlMatch':
+            lines.push(`  // Assertion: Verify current URL matches expected`);
+            lines.push(`  await expect(page).toHaveURL('${url}');`);
+            break;
+          case 'domContentLoaded':
+            lines.push(`  // Assertion: Verify DOM is ready`);
+            lines.push(`  await page.waitForLoadState('domcontentloaded');`);
+            break;
+        }
       }
     }
 
