@@ -4,6 +4,7 @@ import { revalidatePath } from 'next/cache';
 import * as queries from '@/lib/db/queries';
 import { getGitInfo } from '@/lib/git/utils';
 import { getRunner } from '@/lib/playwright/runner';
+import { getServerManager } from '@/lib/playwright/server-manager';
 import { generateDiff } from '@/lib/diff/generator';
 import { hashImage } from '@/lib/diff/hasher';
 import type { Test, TriggerType, BuildStatus, VisualDiffWithTestStatus } from '@/lib/db/schema';
@@ -41,6 +42,14 @@ export async function createAndRunBuild(
 
   if (runner.isActive()) {
     throw new Error('Tests already running');
+  }
+
+  // Load and set environment config
+  const envConfig = await queries.getEnvironmentConfig(repositoryId);
+  if (envConfig && envConfig.id) {
+    runner.setEnvironmentConfig(envConfig);
+    const serverManager = getServerManager();
+    serverManager.setConfig(envConfig);
   }
 
   // Get tests to run

@@ -265,6 +265,25 @@ export type NewRoute = typeof routes.$inferInsert;
 export type ScanStatus = typeof scanStatus.$inferSelect;
 export type NewScanStatus = typeof scanStatus.$inferInsert;
 
+// Environment configuration for managed server startup
+export type EnvironmentMode = 'manual' | 'managed';
+
+export const environmentConfigs = sqliteTable('environment_configs', {
+  id: text('id').primaryKey(),
+  repositoryId: text('repository_id').references(() => repositories.id),
+  mode: text('mode').notNull().default('manual'), // 'manual' | 'managed'
+  baseUrl: text('base_url').notNull().default('http://localhost:3000'),
+  startCommand: text('start_command'), // e.g., 'pnpm dev'
+  healthCheckUrl: text('health_check_url'), // defaults to baseUrl if not set
+  healthCheckTimeout: integer('health_check_timeout').default(60000), // ms
+  reuseExistingServer: integer('reuse_existing_server', { mode: 'boolean' }).default(true),
+  createdAt: integer('created_at', { mode: 'timestamp' }),
+  updatedAt: integer('updated_at', { mode: 'timestamp' }),
+});
+
+export type EnvironmentConfig = typeof environmentConfigs.$inferSelect;
+export type NewEnvironmentConfig = typeof environmentConfigs.$inferInsert;
+
 // Build status enum
 export type BuildStatus = 'safe_to_merge' | 'review_required' | 'blocked';
 export type DiffStatus = 'pending' | 'approved' | 'rejected' | 'auto_approved';

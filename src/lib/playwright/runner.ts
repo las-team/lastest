@@ -3,7 +3,8 @@ import { EventEmitter } from 'events';
 import path from 'path';
 import fs from 'fs';
 import { DEFAULT_SELECTOR_PRIORITY } from '@/lib/db/schema';
-import type { Test, TestResult, ActionSelector, SelectorConfig, PlaywrightSettings, NetworkRequest } from '@/lib/db/schema';
+import type { Test, TestResult, ActionSelector, SelectorConfig, PlaywrightSettings, NetworkRequest, EnvironmentConfig } from '@/lib/db/schema';
+import { getServerManager } from './server-manager';
 
 export interface RunEvent {
   type: 'started' | 'test_started' | 'test_passed' | 'test_failed' | 'completed';
@@ -37,6 +38,7 @@ export class PlaywrightRunner extends EventEmitter {
   private isRunning = false;
   private aborted = false;
   private settings: PlaywrightSettings | null = null;
+  private environmentConfig: EnvironmentConfig | null = null;
   private repositoryId: string | null;
 
   constructor(repositoryId?: string | null, screenshotDir?: string) {
@@ -51,6 +53,25 @@ export class PlaywrightRunner extends EventEmitter {
 
   setSettings(settings: PlaywrightSettings) {
     this.settings = settings;
+  }
+
+  setEnvironmentConfig(config: EnvironmentConfig) {
+    this.environmentConfig = config;
+    // Also configure the server manager
+    const serverManager = getServerManager();
+    serverManager.setConfig(config);
+  }
+
+  getEnvironmentConfig(): EnvironmentConfig | null {
+    return this.environmentConfig;
+  }
+
+  /**
+   * Resolve URL using environment config base URL substitution
+   */
+  private resolveUrl(url: string): string {
+    const serverManager = getServerManager();
+    return serverManager.resolveUrl(url);
   }
 
   private getBrowserLauncher() {
@@ -94,6 +115,14 @@ export class PlaywrightRunner extends EventEmitter {
     // Ensure screenshot directory exists
     if (!fs.existsSync(this.screenshotDir)) {
       fs.mkdirSync(this.screenshotDir, { recursive: true });
+    }
+
+    // Ensure server is running (managed mode)
+    const serverManager = getServerManager();
+    const serverStatus = await serverManager.ensureServerRunning();
+    if (!serverStatus.ready) {
+      this.isRunning = false;
+      throw new Error(serverStatus.error || 'Server not ready');
     }
 
     try {
@@ -366,7 +395,9 @@ export class PlaywrightRunner extends EventEmitter {
       const urlMatch = line.match(/goto\(['"]([^'"]+)['"]\)/);
       if (urlMatch) {
         const timeout = this.settings?.navigationTimeout || 30000;
-        await page.goto(urlMatch[1], { timeout });
+        // Resolve URL using environment config for base URL substitution
+        const resolvedUrl = this.resolveUrl(urlMatch[1]);
+        await page.goto(resolvedUrl, { timeout });
       }
     } else if (line.startsWith('await locateWithFallback(')) {
       // Parse multi-selector format: await locateWithFallback(page, [...], 'action', 'value');

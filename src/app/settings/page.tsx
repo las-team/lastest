@@ -5,6 +5,7 @@ import { getGitInfo } from '@/lib/git/utils';
 import * as queries from '@/lib/db/queries';
 import { Github, Check, X, Database, ExternalLink } from 'lucide-react';
 import { PlaywrightSettingsCard } from '@/components/settings/playwright-settings-card';
+import { EnvironmentConfigCard } from '@/components/settings/environment-config-card';
 
 export default async function SettingsPage({
   searchParams,
@@ -16,6 +17,7 @@ export default async function SettingsPage({
   const githubAccount = await queries.getGithubAccount();
   const selectedRepo = await queries.getSelectedRepository();
   const playwrightSettings = await queries.getPlaywrightSettings(selectedRepo?.id);
+  const environmentConfig = await queries.getEnvironmentConfig(selectedRepo?.id);
 
   return (
     <div className="flex flex-col h-full">
@@ -155,6 +157,12 @@ export default async function SettingsPage({
               </div>
             </CardContent>
           </Card>
+
+          {/* Environment Config */}
+          <EnvironmentConfigCard
+            config={environmentConfig}
+            repositoryId={selectedRepo?.id}
+          />
 
           {/* Playwright Config */}
           <PlaywrightSettingsCard

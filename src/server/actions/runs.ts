@@ -2,6 +2,7 @@
 
 import { revalidatePath } from 'next/cache';
 import { getRunner } from '@/lib/playwright/runner';
+import { getServerManager } from '@/lib/playwright/server-manager';
 import { getGitInfo } from '@/lib/git/utils';
 import * as queries from '@/lib/db/queries';
 import { v4 as uuid } from 'uuid';
@@ -25,6 +26,14 @@ export async function runTests(testIds?: string[], repositoryId?: string | null)
 
   if (runner.isActive()) {
     throw new Error('Tests already running');
+  }
+
+  // Load and set environment config
+  const envConfig = await queries.getEnvironmentConfig(repositoryId);
+  if (envConfig && envConfig.id) {
+    runner.setEnvironmentConfig(envConfig);
+    const serverManager = getServerManager();
+    serverManager.setConfig(envConfig);
   }
 
   // Get tests to run

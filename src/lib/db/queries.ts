@@ -14,6 +14,7 @@ import {
   playwrightSettings,
   routes,
   scanStatus,
+  environmentConfigs,
 } from './schema';
 import {
   DEFAULT_SELECTOR_PRIORITY,
@@ -33,6 +34,7 @@ import type {
   NewPlaywrightSettings,
   NewRoute,
   NewScanStatus,
+  NewEnvironmentConfig,
   BuildStatus,
   SelectorConfig,
 } from './schema';
@@ -726,4 +728,75 @@ export async function getTestsWithRunStatus(repositoryId: string, testRunId?: st
       durationMs: result?.durationMs || null,
     };
   });
+}
+
+// Environment Configs
+export async function getEnvironmentConfig(repositoryId?: string | null) {
+  if (repositoryId) {
+    const config = await db
+      .select()
+      .from(environmentConfigs)
+      .where(eq(environmentConfigs.repositoryId, repositoryId))
+      .get();
+    if (config) return config;
+  }
+
+  // Return global config (no repositoryId) or defaults
+  const globalConfig = await db
+    .select()
+    .from(environmentConfigs)
+    .where(eq(environmentConfigs.repositoryId, ''))
+    .get();
+
+  if (globalConfig) return globalConfig;
+
+  // Return default config object (not saved)
+  return {
+    id: '',
+    repositoryId: null,
+    mode: 'manual' as const,
+    baseUrl: 'http://localhost:3000',
+    startCommand: null,
+    healthCheckUrl: null,
+    healthCheckTimeout: 60000,
+    reuseExistingServer: true,
+    createdAt: null,
+    updatedAt: null,
+  };
+}
+
+export async function createEnvironmentConfig(data: Omit<NewEnvironmentConfig, 'id' | 'createdAt' | 'updatedAt'>) {
+  const id = uuid();
+  const now = new Date();
+  await db.insert(environmentConfigs).values({
+    ...data,
+    id,
+    createdAt: now,
+    updatedAt: now,
+  });
+  return { id, ...data, createdAt: now, updatedAt: now };
+}
+
+export async function updateEnvironmentConfig(id: string, data: Partial<NewEnvironmentConfig>) {
+  await db.update(environmentConfigs).set({ ...data, updatedAt: new Date() }).where(eq(environmentConfigs.id, id));
+}
+
+export async function upsertEnvironmentConfig(repositoryId: string | null, data: Partial<NewEnvironmentConfig>) {
+  const repoIdValue = repositoryId || '';
+  const existing = await db
+    .select()
+    .from(environmentConfigs)
+    .where(eq(environmentConfigs.repositoryId, repoIdValue))
+    .get();
+
+  if (existing) {
+    await updateEnvironmentConfig(existing.id, data);
+    return { ...existing, ...data, updatedAt: new Date() };
+  } else {
+    return createEnvironmentConfig({ ...data, repositoryId: repoIdValue });
+  }
+}
+
+export async function deleteEnvironmentConfig(id: string) {
+  await db.delete(environmentConfigs).where(eq(environmentConfigs.id, id));
 }

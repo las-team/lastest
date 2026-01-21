@@ -9,7 +9,13 @@ Determining test coverage /home/ewyct/.claude/plans/zazzy-tinkering-backus.md
 ## started
 
 ## features
-Branch checkout & test run flow /home/ewyct/.claude/plans/breezy-riding-crane.md
+
+UI & UX 
+    Revise frontend and make sure you havent steered far 
+
+
+Branch checkout & test run flow /home/ewyct/.claude/plans/breezy-riding-crane.md ---- not sure this still assumes the app is running 
+
 Implement the OCR feature to identify the selected UI element's text label
 
 ## ideas
