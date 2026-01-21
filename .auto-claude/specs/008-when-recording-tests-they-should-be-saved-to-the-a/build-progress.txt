@@ -1,0 +1,52 @@
+=== AUTO-BUILD PROGRESS ===
+
+Project: lastest2 (Playwright Test Management App)
+Spec: 008 - Fix test recording/run screenshots to be saved per repository
+Workspace: Main project directory
+Started: 2026-01-21
+
+Workflow Type: simple
+Rationale: Single-service bug fix with clear root cause. Affects 4 files in one service.
+
+Session 1 (Planner):
+- Created implementation_plan.json
+- Phases: 1
+- Total subtasks: 6
+- Created init.sh
+
+Phase Summary:
+- Phase 1 (Fix Screenshot Path Resolution): 6 subtasks, no dependencies
+
+Services Involved:
+- web (Next.js app): TypeScript, Playwright, Drizzle ORM, SQLite
+
+Bug Analysis:
+- Current: Screenshots saved to ./public/screenshots (shared across all repos)
+- Root cause: Hardcoded path in PlaywrightRecorder and PlaywrightRunner constructors
+- Expected: Screenshots should be organized by repository ID
+- Fix: Update constructors to accept repositoryId and build path: ./public/screenshots/{repositoryId}/
+
+Files to Modify:
+1. src/lib/playwright/recorder.ts - Update constructor and screenshot path logic
+2. src/lib/playwright/runner.ts - Update constructor and screenshot path logic
+3. src/server/actions/recording.ts - Pass repositoryId to recorder
+4. src/server/actions/runs.ts - Pass repositoryId to runner
+
+Patterns to Follow:
+- Path construction: path.join() for cross-platform compatibility
+- Directory creation: fs.mkdirSync with recursive: true
+- Repository selection: getSelectedRepository() from database queries
+- Singleton pattern: Maintain existing getRecorder() and getRunner() singletons
+
+Parallelism Analysis:
+- Max parallel phases: 1
+- Recommended workers: 1
+- Sequential execution required (subtasks must run in order)
+
+=== STARTUP COMMAND ===
+
+To continue building this spec, run:
+
+  source auto-claude/.venv/bin/activate && python auto-claude/run.py --spec 008
+
+=== END SESSION 1 ===

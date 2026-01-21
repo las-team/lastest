@@ -1,0 +1,25 @@
+{
+  "active": true,
+  "spec": "008-when-recording-tests-they-should-be-saved-to-the-a",
+  "state": "building",
+  "subtasks": {
+    "completed": 3,
+    "total": 6,
+    "in_progress": 1,
+    "failed": 0
+  },
+  "phase": {
+    "current": "Fix Screenshot Path Resolution",
+    "id": null,
+    "total": 6
+  },
+  "workers": {
+    "active": 0,
+    "max": 1
+  },
+  "session": {
+    "number": 4,
+    "started_at": "2026-01-21T10:21:04.977995"
+  },
+  "last_update": "2026-01-21T10:26:01.034287"
+}

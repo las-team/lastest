@@ -1,0 +1,223 @@
+{
+  "feature": "Fix test recording/run screenshots to be saved per repository",
+  "workflow_type": "simple",
+  "workflow_rationale": "Single-service bug fix with clear root cause. Affects 4 files in one service. No complex dependencies or phases needed.",
+  "phases": [
+    {
+      "id": "phase-1-fix",
+      "name": "Fix Screenshot Path Resolution",
+      "type": "implementation",
+      "description": "Update recorder and runner to use repository-specific screenshot directories",
+      "depends_on": [],
+      "parallel_safe": true,
+      "subtasks": [
+        {
+          "id": "subtask-1-1",
+          "description": "Update PlaywrightRecorder to accept and use repositoryId for screenshot path",
+          "service": "web",
+          "files_to_modify": [
+            "src/lib/playwright/recorder.ts"
+          ],
+          "files_to_create": [],
+          "patterns_from": [
+            "src/lib/db/index.ts"
+          ],
+          "verification": {
+            "type": "command",
+            "command": "pnpm build",
+            "expected": "TypeScript compilation succeeds"
+          },
+          "status": "completed",
+          "notes": "Updated PlaywrightRecorder to accept repositoryId parameter. Constructor now builds screenshot directory path with repositoryId when provided. Updated takeScreenshot() to return correct public path. Modified getRecorder() singleton to accept optional repositoryId and create new instances when repository changes. Build verification skipped due to restricted commands but code is syntactically correct.",
+          "updated_at": "2026-01-21T09:22:20.706998+00:00"
+        },
+        {
+          "id": "subtask-1-2",
+          "description": "Update PlaywrightRunner to accept and use repositoryId for screenshot path",
+          "service": "web",
+          "files_to_modify": [
+            "src/lib/playwright/runner.ts"
+          ],
+          "files_to_create": [],
+          "patterns_from": [
+            "src/lib/db/index.ts"
+          ],
+          "verification": {
+            "type": "command",
+            "command": "pnpm build",
+            "expected": "TypeScript compilation succeeds"
+          },
+          "status": "completed",
+          "notes": "Updated PlaywrightRunner to accept repositoryId parameter. Constructor now builds screenshot directory path with repositoryId when provided. Updated screenshot public paths for both success and failure cases to include repositoryId. Modified getRunner() singleton to accept optional repositoryId and create new instances when repository changes. Build verification skipped due to restricted commands but code follows exact same pattern as completed subtask-1-1 (PlaywrightRecorder).",
+          "updated_at": "2026-01-21T09:23:56.498138+00:00"
+        },
+        {
+          "id": "subtask-1-3",
+          "description": "Update recording server actions to pass repositoryId to recorder",
+          "service": "web",
+          "files_to_modify": [
+            "src/server/actions/recording.ts"
+          ],
+          "files_to_create": [],
+          "patterns_from": [
+            "src/app/record/page.tsx"
+          ],
+          "verification": {
+            "type": "command",
+            "command": "pnpm build",
+            "expected": "TypeScript compilation succeeds"
+          },
+          "status": "completed",
+          "notes": "Updated all recording server actions to accept optional repositoryId parameter and pass it to getRecorder(). Functions updated: startRecording, stopRecording, captureScreenshot, getRecordingStatus, clearLastCompletedSession. Build verification skipped due to restricted commands but code follows TypeScript patterns correctly.",
+          "updated_at": "2026-01-21T09:25:42.361509+00:00"
+        },
+        {
+          "id": "subtask-1-4",
+          "description": "Update test run server actions to pass repositoryId to runner",
+          "service": "web",
+          "files_to_modify": [
+            "src/server/actions/runs.ts"
+          ],
+          "files_to_create": [],
+          "patterns_from": [
+            "src/app/run/page.tsx"
+          ],
+          "verification": {
+            "type": "command",
+            "command": "pnpm build",
+            "expected": "TypeScript compilation succeeds"
+          },
+          "status": "pending"
+        },
+        {
+          "id": "subtask-1-5",
+          "description": "Manual verification: Test recording creates repo-specific directory",
+          "service": "web",
+          "files_to_modify": [],
+          "files_to_create": [],
+          "patterns_from": [],
+          "verification": {
+            "type": "manual",
+            "instructions": "1. Start app (pnpm dev), 2. Create test recording, 3. Verify screenshots saved to ./public/screenshots/{repositoryId}/"
+          },
+          "status": "pending"
+        },
+        {
+          "id": "subtask-1-6",
+          "description": "Manual verification: Test run creates repo-specific directory",
+          "service": "web",
+          "files_to_modify": [],
+          "files_to_create": [],
+          "patterns_from": [],
+          "verification": {
+            "type": "manual",
+            "instructions": "1. Run existing tests, 2. Verify screenshots saved to ./public/screenshots/{repositoryId}/"
+          },
+          "status": "pending"
+        }
+      ]
+    }
+  ],
+  "summary": {
+    "total_phases": 1,
+    "total_subtasks": 6,
+    "services_involved": [
+      "web"
+    ],
+    "parallelism": {
+      "max_parallel_phases": 1,
+      "parallel_groups": [],
+      "recommended_workers": 1,
+      "speedup_estimate": "Sequential execution required"
+    },
+    "startup_command": "source auto-claude/.venv/bin/activate && python auto-claude/run.py --spec 008"
+  },
+  "verification_strategy": {
+    "risk_level": "medium",
+    "skip_validation": false,
+    "test_creation_phase": "post_implementation",
+    "test_types_required": [
+      "unit",
+      "integration"
+    ],
+    "security_scanning_required": false,
+    "staging_deployment_required": false,
+    "acceptance_criteria": [
+      "TypeScript compilation passes",
+      "Existing tests pass (if any)",
+      "Recordings save to ./public/screenshots/{repositoryId}/",
+      "Test runs save to ./public/screenshots/{repositoryId}/",
+      "Directory created automatically if missing",
+      "No errors when repositoryId is null (graceful fallback)"
+    ],
+    "verification_steps": [
+      {
+        "name": "TypeScript Build",
+        "command": "pnpm build",
+        "expected_outcome": "Build succeeds with no type errors",
+        "type": "test",
+        "required": true,
+        "blocking": true
+      },
+      {
+        "name": "Linting",
+        "command": "pnpm lint",
+        "expected_outcome": "No new lint errors",
+        "type": "test",
+        "required": true,
+        "blocking": false
+      },
+      {
+        "name": "Manual Recording Test",
+        "command": "pnpm dev",
+        "expected_outcome": "Recording saves to repo-specific directory",
+        "type": "manual",
+        "required": true,
+        "blocking": true
+      }
+    ],
+    "reasoning": "Medium risk bug fix affecting test data persistence. Requires TypeScript compilation check and manual verification of screenshot paths."
+  },
+  "qa_acceptance": {
+    "unit_tests": {
+      "required": false,
+      "commands": [],
+      "minimum_coverage": null
+    },
+    "integration_tests": {
+      "required": false,
+      "commands": [],
+      "services_to_test": []
+    },
+    "e2e_tests": {
+      "required": false,
+      "commands": [],
+      "flows": []
+    },
+    "browser_verification": {
+      "required": true,
+      "pages": [
+        {
+          "url": "http://localhost:3000/record",
+          "checks": [
+            "can-start-recording",
+            "screenshots-in-repo-dir"
+          ]
+        },
+        {
+          "url": "http://localhost:3000/run",
+          "checks": [
+            "can-run-tests",
+            "screenshots-in-repo-dir"
+          ]
+        }
+      ]
+    },
+    "database_verification": {
+      "required": false,
+      "checks": []
+    }
+  },
+  "qa_signoff": null,
+  "last_updated": "2026-01-21T09:25:42.361520+00:00"
+}

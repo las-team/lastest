@@ -20,8 +20,8 @@ export async function createTestRun(testIds?: string[]) {
   return run;
 }
 
-export async function runTests(testIds?: string[]) {
-  const runner = getRunner();
+export async function runTests(testIds?: string[], repositoryId?: string | null) {
+  const runner = getRunner(repositoryId);
 
   if (runner.isActive()) {
     throw new Error('Tests already running');
@@ -51,13 +51,13 @@ export async function runTests(testIds?: string[]) {
   });
 
   // Run tests (this happens async)
-  runTestsAsync(run.id, tests);
+  runTestsAsync(run.id, tests, repositoryId);
 
   return { runId: run.id, testCount: tests.length };
 }
 
-async function runTestsAsync(runId: string, tests: Test[]) {
-  const runner = getRunner();
+async function runTestsAsync(runId: string, tests: Test[], repositoryId?: string | null) {
+  const runner = getRunner(repositoryId);
 
   try {
     const results = await runner.runTests(tests, runId);
@@ -104,8 +104,8 @@ export async function getTestRuns() {
   return queries.getTestRuns();
 }
 
-export async function getRunStatus() {
-  const runner = getRunner();
+export async function getRunStatus(repositoryId?: string | null) {
+  const runner = getRunner(repositoryId);
   return {
     isRunning: runner.isActive(),
   };
