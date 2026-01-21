@@ -35,11 +35,35 @@
         }
       ],
       "status": "completed"
+    },
+    "subtask-3-2": {
+      "attempts": [
+        {
+          "session": 4,
+          "timestamp": "2026-01-21T10:28:04.616964",
+          "approach": "Implemented: Add TestStatusIcon component following existing StatusIcon pattern",
+          "success": true,
+          "error": null
+        }
+      ],
+      "status": "completed"
+    },
+    "subtask-3-3": {
+      "attempts": [
+        {
+          "session": 5,
+          "timestamp": "2026-01-21T10:29:38.679131",
+          "approach": "Implemented: Replace results display with allTests display showing all tests with status icons",
+          "success": true,
+          "error": null
+        }
+      ],
+      "status": "completed"
     }
   },
   "stuck_subtasks": [],
   "metadata": {
     "created_at": "2026-01-21T10:22:37.188295",
-    "last_updated": "2026-01-21T10:26:41.140091"
+    "last_updated": "2026-01-21T10:29:38.679136"
   }
 }

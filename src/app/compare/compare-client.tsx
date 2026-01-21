@@ -65,6 +65,8 @@ interface BranchColumnProps {
   isLoading: boolean;
   onRun: () => void;
   onRerun: () => void;
+  expandedTests: Set<string>;
+  onToggleTest: (testId: string) => void;
 }
 
 function BranchColumn({
@@ -74,6 +76,8 @@ function BranchColumn({
   isLoading,
   onRun,
   onRerun,
+  expandedTests,
+  onToggleTest,
 }: BranchColumnProps) {
   const hasRun = branchInfo?.run !== null;
   const isRunning = queuedRun?.status === 'running';
@@ -192,6 +196,17 @@ export function CompareClient({ branches, runs, defaultBaseline }: CompareClient
     queue: [],
     activeRun: null,
   });
+  const [expandedTests, setExpandedTests] = useState<Set<string>>(new Set());
+
+  const toggleTest = (testId: string) => {
+    const newExpanded = new Set(expandedTests);
+    if (newExpanded.has(testId)) {
+      newExpanded.delete(testId);
+    } else {
+      newExpanded.add(testId);
+    }
+    setExpandedTests(newExpanded);
+  };
 
   // Get runs grouped by branch for badge display
   const runsByBranch = runs.reduce((acc, run) => {
@@ -353,6 +368,8 @@ export function CompareClient({ branches, runs, defaultBaseline }: CompareClient
                 isLoading={isLoadingBase}
                 onRun={() => handleRunBranch(baseBranch)}
                 onRerun={() => handleRunBranch(baseBranch)}
+                expandedTests={expandedTests}
+                onToggleTest={toggleTest}
               />
             ) : (
               <Card className="flex-1 flex items-center justify-center min-h-[200px]">
@@ -368,6 +385,8 @@ export function CompareClient({ branches, runs, defaultBaseline }: CompareClient
                 isLoading={isLoadingTarget}
                 onRun={() => handleRunBranch(targetBranch)}
                 onRerun={() => handleRunBranch(targetBranch)}
+                expandedTests={expandedTests}
+                onToggleTest={toggleTest}
               />
             ) : (
               <Card className="flex-1 flex items-center justify-center min-h-[200px]">
