@@ -11,10 +11,9 @@ import {
 } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { GitBranch, CheckCircle2, Circle, FolderGit2, AlertCircle, Scan, Loader2 } from 'lucide-react';
+import { GitBranch, CheckCircle2, Circle, FolderGit2, AlertCircle, Scan, Loader2, PartyPopper } from 'lucide-react';
 import { fetchRepoBranches, updateRepoBaseline } from '@/server/actions/repos';
 import { startRouteScan } from '@/server/actions/scanner';
-import { CoverageBar } from '@/components/coverage/coverage-bar';
 import type { Repository, Route, ScanStatus } from '@/lib/db/schema';
 import type { GitHubBranch } from '@/lib/github/oauth';
 
@@ -30,8 +29,7 @@ export function RepoClient({ repository, branchTestStatus, routes, coverage, sca
   const [branches, setBranches] = useState<GitHubBranch[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [isPending, startTransition] = useTransition();
-  const [isScanning, setIsScanning] = useState(false);
-  const [scanProgress, setScanProgress] = useState(scanStatus?.progress ?? 0);
+  const [isScanning, setIsScanning] = useState(scanStatus?.status === 'scanning');
 
   useEffect(() => {
     if (repository) {
@@ -43,10 +41,7 @@ export function RepoClient({ repository, branchTestStatus, routes, coverage, sca
   }, [repository]);
 
   useEffect(() => {
-    if (scanStatus?.status === 'scanning') {
-      setIsScanning(true);
-      setScanProgress(scanStatus.progress ?? 0);
-    }
+    setIsScanning(scanStatus?.status === 'scanning');
   }, [scanStatus]);
 
   const handleBaselineChange = (branch: string) => {
@@ -59,7 +54,6 @@ export function RepoClient({ repository, branchTestStatus, routes, coverage, sca
   const handleScan = async () => {
     if (!repository) return;
     setIsScanning(true);
-    setScanProgress(0);
     try {
       await startRouteScan(repository.id);
     } finally {
@@ -156,17 +150,22 @@ export function RepoClient({ repository, branchTestStatus, routes, coverage, sca
           </div>
         </CardHeader>
         <CardContent>
-          <CoverageBar
-            covered={coverage.withTests}
-            total={coverage.total}
-            isScanning={isScanning}
-            scanProgress={scanProgress}
-          />
-          {routes.length > 0 && !isScanning && (
-            <div className="mt-4 text-sm text-muted-foreground">
+          {isScanning ? (
+            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+              <Loader2 className="h-4 w-4 animate-spin" />
+              <span>Scanning routes...</span>
+            </div>
+          ) : routes.length > 0 ? (
+            <div className="flex items-center gap-2 text-sm text-green-600">
+              <PartyPopper className="h-4 w-4" />
+              <span>{routes.length} routes found!</span>
               {scanStatus?.framework && (
-                <span>Framework: <Badge variant="outline">{scanStatus.framework}</Badge></span>
+                <Badge variant="outline" className="ml-2">{scanStatus.framework}</Badge>
               )}
+            </div>
+          ) : (
+            <div className="text-sm text-muted-foreground">
+              No routes discovered. Click Scan Routes to detect routes.
             </div>
           )}
         </CardContent>

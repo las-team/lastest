@@ -204,5 +204,8 @@
     }
   },
   "qa_signoff": null,
-  "last_updated": "2026-01-21T09:15:46.329363+00:00"
+  "last_updated": "2026-01-21T09:15:46.329363+00:00",
+  "status": "done",
+  "planStatus": "completed",
+  "updated_at": "2026-01-21T09:37:07.493Z"
 }

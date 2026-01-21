@@ -122,7 +122,7 @@ export default async function BuildPage({ params }: PageProps) {
                       <StatusIcon className="w-4 h-4" />
                     </div>
                     <div>
-                      <div className="font-medium">Test {diff.testId.slice(0, 8)}</div>
+                      <div className="font-medium">Test {diff.testId?.slice(0, 8) ?? 'Unknown'}</div>
                       <div className="text-sm text-gray-500">
                         {diff.pixelDifference
                           ? `${diff.pixelDifference.toLocaleString()} pixels changed (${diff.percentageDifference}%)`

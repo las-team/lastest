@@ -22,18 +22,16 @@ when showing a branch - this is true for the runs and the compare pages
 
 Implement the OCR feature to identify the selected UI element's text label
 
-## features
 
-Branch checkout & test run flow /home/ewyct/.claude/plans/breezy-riding-crane.md
+## features
 Route scan - where does it lok for routes? -it seems to be fixated on the lastest2 repo instead of the selected one
 
-
+Branch checkout & test run flow /home/ewyct/.claude/plans/breezy-riding-crane.md
 
 ## ideas
 Firecrawl?
 Research playwrights comparison options, how they work?
 Approve reject changes or create ticket -> gh issue
-
 
 
 AI
@@ -49,9 +47,9 @@ AI
         assertions to fail them
 
 ## bugs
-refresh icon on next ot the repo selector - out of sidebar
+functional areas should be unique - if added again than merged into the previous value in a case-insensitive manner for the given repo
+auto-generated tests shouldnt be duplicated but updated if re-generated
+have the drizzle studio linked from the settings
+
 when recording tests they should be saved to the active repo - same for runs
-
-
-http://localhost:3000/tests page the have the +x more tests working
 http://localhost:3000/builds/d6cdd584-82b5-4750-bdff-0d41e79ba825 should be possible to click the top menu elements to filter down the list
