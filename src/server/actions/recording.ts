@@ -1,6 +1,6 @@
 'use server';
 
-import { getRecorder } from '@/lib/playwright/recorder';
+import { getRecorder, type AssertionType } from '@/lib/playwright/recorder';
 import { createTest, createFunctionalArea, getFunctionalAreas } from '@/lib/db/queries';
 import { v4 as uuid } from 'uuid';
 import { revalidatePath } from 'next/cache';
@@ -54,6 +54,13 @@ export async function captureScreenshot() {
   const screenshotPath = await recorder.takeScreenshot();
 
   return { screenshotPath };
+}
+
+export async function createAssertion(type: AssertionType): Promise<{ success: boolean }> {
+  const recorder = getRecorder();
+  const success = await recorder.createAssertion(type);
+
+  return { success };
 }
 
 export async function getRecordingStatus() {
