@@ -47,9 +47,19 @@ export async function testAIConnection(provider: AIProvider, apiKey?: string): P
   try {
     if (provider === 'claude-cli') {
       // Test claude CLI by running a simple command
-      const { stdout } = await execAsync('claude -p "Say hello in one word"', {
+      // Use shell: true and set PATH to include common locations for claude
+      const homeDir = process.env.HOME || process.env.USERPROFILE || '';
+      const extendedPath = `${homeDir}/.local/bin:${process.env.PATH}`;
+
+      const { stdout, stderr } = await execAsync('claude -p "Say hello in one word"', {
         timeout: 30000,
+        shell: '/bin/bash',
+        env: { ...process.env, PATH: extendedPath },
       });
+
+      if (stderr && stderr.includes('error')) {
+        return { success: false, message: stderr.trim() };
+      }
 
       if (stdout && stdout.trim().length > 0) {
         return { success: true, message: 'Claude CLI connected successfully' };

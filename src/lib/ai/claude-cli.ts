@@ -4,6 +4,13 @@ import type { AIProvider, GenerateOptions, StreamCallbacks } from './types';
 
 const execAsync = promisify(exec);
 
+// Extend PATH to include common locations for claude CLI
+function getExtendedEnv(): NodeJS.ProcessEnv {
+  const homeDir = process.env.HOME || process.env.USERPROFILE || '';
+  const extendedPath = `${homeDir}/.local/bin:${process.env.PATH}`;
+  return { ...process.env, PATH: extendedPath };
+}
+
 function escapePrompt(prompt: string): string {
   // Escape special characters for shell
   return prompt
@@ -28,6 +35,8 @@ export class ClaudeCLIProvider implements AIProvider {
       const { stdout } = await execAsync(`claude -p "${escapedPrompt}"`, {
         timeout: 120000, // 2 minute timeout
         maxBuffer: 1024 * 1024 * 10, // 10MB buffer
+        shell: '/bin/bash',
+        env: getExtendedEnv(),
       });
 
       return stdout.trim();
@@ -51,7 +60,8 @@ export class ClaudeCLIProvider implements AIProvider {
 
     return new Promise((resolve, reject) => {
       const child = spawn('claude', ['-p', escapedPrompt], {
-        shell: true,
+        shell: '/bin/bash',
+        env: getExtendedEnv(),
       });
 
       let fullText = '';
