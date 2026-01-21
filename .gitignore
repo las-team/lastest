@@ -51,3 +51,6 @@ next-env.d.ts
 
 # test results
 /lastest2-results/
+
+# Auto Claude data directory
+.auto-claude/
