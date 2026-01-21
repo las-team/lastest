@@ -85,12 +85,12 @@ export function RecordingClient({ areas: initialAreas, settings, repositoryId }:
 
     const pollInterval = setInterval(async () => {
       try {
-        const status = await getRecordingStatus();
+        const status = await getRecordingStatus(repositoryId);
         // If recording stopped (browser was closed), check for completed session
         if (!status.isRecording) {
           if (status.lastCompletedSession) {
             setGeneratedCode(status.lastCompletedSession.generatedCode);
-            await clearLastCompletedSession();
+            await clearLastCompletedSession(repositoryId);
             setStep('saving');
           } else {
             // Recording was stopped but no session - go back to setup
@@ -105,7 +105,7 @@ export function RecordingClient({ areas: initialAreas, settings, repositoryId }:
     }, 1000);
 
     return () => clearInterval(pollInterval);
-  }, [step]);
+  }, [step, repositoryId]);
 
   const handleStartRecording = async () => {
     if (!url || !testName) return;
@@ -123,7 +123,7 @@ export function RecordingClient({ areas: initialAreas, settings, repositoryId }:
         setAreaId(area.id);
       }
 
-      const result = await startRecording(url);
+      const result = await startRecording(url, repositoryId);
 
       if (result.error) {
         setError(result.error);
@@ -149,7 +149,7 @@ export function RecordingClient({ areas: initialAreas, settings, repositoryId }:
 
   const handleCaptureScreenshot = async () => {
     try {
-      const { screenshotPath } = await captureScreenshot();
+      const { screenshotPath } = await captureScreenshot(repositoryId);
       if (screenshotPath) {
         setScreenshots([...screenshots, screenshotPath]);
         setEvents([...events, {
@@ -166,7 +166,7 @@ export function RecordingClient({ areas: initialAreas, settings, repositoryId }:
   const handleStopRecording = async () => {
     setIsLoading(true);
     try {
-      const session = await stopRecording();
+      const session = await stopRecording(repositoryId);
       if (session) {
         setGeneratedCode(session.generatedCode);
         setStep('saving');
