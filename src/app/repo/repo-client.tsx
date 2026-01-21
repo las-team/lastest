@@ -21,9 +21,11 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { GitBranch, CheckCircle2, Circle, FolderGit2, AlertCircle, Scan, Loader2, PartyPopper, FolderOpen, XCircle } from 'lucide-react';
+import { GitBranch, CheckCircle2, Circle, FolderGit2, AlertCircle, Scan, Loader2, FolderOpen, XCircle, Sparkles } from 'lucide-react';
+import { toast } from 'sonner';
 import { fetchRepoBranches, updateRepoBaseline, updateRepoLocalPath } from '@/server/actions/repos';
 import { startRouteScan, validateLocalPath, getDefaultLocalPath } from '@/server/actions/scanner';
+import { AIScanRoutesDialog } from '@/components/ai/ai-scan-routes-dialog';
 import type { Repository, Route, ScanStatus } from '@/lib/db/schema';
 import type { GitHubBranch } from '@/lib/github/oauth';
 
@@ -50,6 +52,7 @@ export function RepoClient({ repository, branchTestStatus, routes, coverage, sca
   const [isPending, startTransition] = useTransition();
   const [isScanning, setIsScanning] = useState(scanStatus?.status === 'scanning');
   const [showPathDialog, setShowPathDialog] = useState(false);
+  const [showAIScanDialog, setShowAIScanDialog] = useState(false);
   const [localPath, setLocalPath] = useState(repository?.localPath || '');
   const [pathValidation, setPathValidation] = useState<PathValidation | null>(null);
   const [isValidating, setIsValidating] = useState(false);
@@ -114,7 +117,10 @@ export function RepoClient({ repository, branchTestStatus, routes, coverage, sca
 
     setIsScanning(true);
     try {
-      await startRouteScan(repository.id);
+      const result = await startRouteScan(repository.id);
+      if (result?.routesFound !== undefined) {
+        toast.success(`${result.routesFound} routes found!`);
+      }
     } finally {
       setIsScanning(false);
     }
@@ -130,7 +136,10 @@ export function RepoClient({ repository, branchTestStatus, routes, coverage, sca
     // Now scan
     setIsScanning(true);
     try {
-      await startRouteScan(repository.id, localPath.trim());
+      const result = await startRouteScan(repository.id, localPath.trim());
+      if (result?.routesFound !== undefined) {
+        toast.success(`${result.routesFound} routes found!`);
+      }
     } finally {
       setIsScanning(false);
     }
@@ -278,19 +287,31 @@ export function RepoClient({ repository, branchTestStatus, routes, coverage, sca
                 Scan codebase to discover routes and track test coverage
               </CardDescription>
             </div>
-            <Button onClick={handleScan} disabled={isScanning}>
-              {isScanning ? (
-                <>
-                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                  Scanning...
-                </>
-              ) : (
-                <>
-                  <Scan className="h-4 w-4 mr-2" />
-                  Scan Routes
-                </>
+            <div className="flex gap-2">
+              <Button onClick={handleScan} disabled={isScanning}>
+                {isScanning ? (
+                  <>
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    Scanning...
+                  </>
+                ) : (
+                  <>
+                    <Scan className="h-4 w-4 mr-2" />
+                    Scan Routes
+                  </>
+                )}
+              </Button>
+              {repository?.localPath && pathValidation?.valid && (
+                <Button
+                  variant="outline"
+                  onClick={() => setShowAIScanDialog(true)}
+                  disabled={isScanning}
+                >
+                  <Sparkles className="h-4 w-4 mr-2" />
+                  AI Scan
+                </Button>
               )}
-            </Button>
+            </div>
           </div>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -330,22 +351,10 @@ export function RepoClient({ repository, branchTestStatus, routes, coverage, sca
               {repository.localPath ? 'Edit' : 'Configure'}
             </Button>
           </div>
-          {isScanning ? (
+          {isScanning && (
             <div className="flex items-center gap-2 text-sm text-muted-foreground">
               <Loader2 className="h-4 w-4 animate-spin" />
               <span>Scanning routes...</span>
-            </div>
-          ) : routes.length > 0 ? (
-            <div className="flex items-center gap-2 text-sm text-green-600">
-              <PartyPopper className="h-4 w-4" />
-              <span>{routes.length} routes found!</span>
-              {scanStatus?.framework && (
-                <Badge variant="outline" className="ml-2">{scanStatus.framework}</Badge>
-              )}
-            </div>
-          ) : (
-            <div className="text-sm text-muted-foreground">
-              No routes discovered. Click Scan Routes to detect routes.
             </div>
           )}
         </CardContent>
@@ -417,6 +426,16 @@ export function RepoClient({ repository, branchTestStatus, routes, coverage, sca
           )}
         </CardContent>
       </Card>
+
+      {/* AI Scan Routes Dialog */}
+      {repository?.localPath && (
+        <AIScanRoutesDialog
+          open={showAIScanDialog}
+          onOpenChange={setShowAIScanDialog}
+          repositoryId={repository.id}
+          localPath={repository.localPath}
+        />
+      )}
     </div>
   );
 }

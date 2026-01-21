@@ -16,10 +16,12 @@ import {
   scanStatus,
   environmentConfigs,
   diffSensitivitySettings,
+  aiSettings,
 } from './schema';
 import {
   DEFAULT_SELECTOR_PRIORITY,
   DEFAULT_DIFF_THRESHOLDS,
+  DEFAULT_AI_SETTINGS,
 } from './schema';
 import type {
   NewFunctionalArea,
@@ -38,11 +40,13 @@ import type {
   NewScanStatus,
   NewEnvironmentConfig,
   NewDiffSensitivitySettings,
+  NewAISettings,
   BuildStatus,
   SelectorConfig,
+  AIProvider,
 } from './schema';
 
-export { DEFAULT_SELECTOR_PRIORITY, DEFAULT_DIFF_THRESHOLDS };
+export { DEFAULT_SELECTOR_PRIORITY, DEFAULT_DIFF_THRESHOLDS, DEFAULT_AI_SETTINGS };
 import { eq, desc, and, inArray } from 'drizzle-orm';
 import { v4 as uuid } from 'uuid';
 
@@ -871,4 +875,73 @@ export async function upsertDiffSensitivitySettings(repositoryId: string | null,
 
 export async function deleteDiffSensitivitySettings(id: string) {
   await db.delete(diffSensitivitySettings).where(eq(diffSensitivitySettings.id, id));
+}
+
+// AI Settings
+export async function getAISettings(repositoryId?: string | null) {
+  if (repositoryId) {
+    const settings = await db
+      .select()
+      .from(aiSettings)
+      .where(eq(aiSettings.repositoryId, repositoryId))
+      .get();
+    if (settings) return settings;
+  }
+
+  // Return global settings (no repositoryId) or defaults
+  const globalSettings = await db
+    .select()
+    .from(aiSettings)
+    .where(eq(aiSettings.repositoryId, ''))
+    .get();
+
+  if (globalSettings) return globalSettings;
+
+  // Return default settings object (not saved)
+  return {
+    id: '',
+    repositoryId: null,
+    provider: DEFAULT_AI_SETTINGS.provider as AIProvider,
+    openrouterApiKey: null,
+    openrouterModel: DEFAULT_AI_SETTINGS.openrouterModel,
+    customInstructions: null,
+    createdAt: null,
+    updatedAt: null,
+  };
+}
+
+export async function createAISettings(data: Omit<NewAISettings, 'id' | 'createdAt' | 'updatedAt'>) {
+  const id = uuid();
+  const now = new Date();
+  await db.insert(aiSettings).values({
+    ...data,
+    id,
+    createdAt: now,
+    updatedAt: now,
+  });
+  return { id, ...data, createdAt: now, updatedAt: now };
+}
+
+export async function updateAISettings(id: string, data: Partial<NewAISettings>) {
+  await db.update(aiSettings).set({ ...data, updatedAt: new Date() }).where(eq(aiSettings.id, id));
+}
+
+export async function upsertAISettings(repositoryId: string | null, data: Partial<NewAISettings>) {
+  const repoIdValue = repositoryId || '';
+  const existing = await db
+    .select()
+    .from(aiSettings)
+    .where(eq(aiSettings.repositoryId, repoIdValue))
+    .get();
+
+  if (existing) {
+    await updateAISettings(existing.id, data);
+    return { ...existing, ...data, updatedAt: new Date() };
+  } else {
+    return createAISettings({ ...data, repositoryId: repoIdValue });
+  }
+}
+
+export async function deleteAISettings(id: string) {
+  await db.delete(aiSettings).where(eq(aiSettings.id, id));
 }

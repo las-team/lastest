@@ -7,6 +7,7 @@ import { Github, Check, X, Database, ExternalLink } from 'lucide-react';
 import { PlaywrightSettingsCard } from '@/components/settings/playwright-settings-card';
 import { EnvironmentConfigCard } from '@/components/settings/environment-config-card';
 import { DiffSensitivityCard } from '@/components/settings/diff-sensitivity-card';
+import { AISettingsCard } from '@/components/settings/ai-settings-card';
 
 export default async function SettingsPage({
   searchParams,
@@ -20,6 +21,7 @@ export default async function SettingsPage({
   const playwrightSettings = await queries.getPlaywrightSettings(selectedRepo?.id);
   const environmentConfig = await queries.getEnvironmentConfig(selectedRepo?.id);
   const diffSensitivitySettings = await queries.getDiffSensitivitySettings(selectedRepo?.id);
+  const aiSettings = await queries.getAISettings(selectedRepo?.id);
 
   return (
     <div className="flex flex-col h-full">
@@ -163,6 +165,12 @@ export default async function SettingsPage({
           {/* Environment Config */}
           <EnvironmentConfigCard
             config={environmentConfig}
+            repositoryId={selectedRepo?.id}
+          />
+
+          {/* AI Settings */}
+          <AISettingsCard
+            settings={aiSettings}
             repositoryId={selectedRepo?.id}
           />
 

@@ -1,5 +1,5 @@
 import { Header } from '@/components/layout/header';
-import { getTest, getTestResultsByTest } from '@/lib/db/queries';
+import { getTest, getTestResultsByTest, getSelectedRepository } from '@/lib/db/queries';
 import { TestDetailClient } from './test-detail-client';
 import { notFound } from 'next/navigation';
 
@@ -16,11 +16,16 @@ export default async function TestDetailPage({ params }: TestDetailPageProps) {
   }
 
   const results = await getTestResultsByTest(id);
+  const selectedRepo = await getSelectedRepository();
 
   return (
     <div className="flex flex-col h-full">
       <Header title={test.name} />
-      <TestDetailClient test={test} results={results} />
+      <TestDetailClient
+        test={test}
+        results={results}
+        repositoryId={test.repositoryId || selectedRepo?.id}
+      />
     </div>
   );
 }

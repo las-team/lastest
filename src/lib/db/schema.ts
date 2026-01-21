@@ -311,3 +311,25 @@ export type DiffClassification = 'unchanged' | 'flaky' | 'changed';
 export type BuildStatus = 'safe_to_merge' | 'review_required' | 'blocked';
 export type DiffStatus = 'pending' | 'approved' | 'rejected' | 'auto_approved';
 export type TriggerType = 'webhook' | 'manual' | 'push';
+
+// AI Provider settings for test generation
+export type AIProvider = 'claude-cli' | 'openrouter';
+
+export const aiSettings = sqliteTable('ai_settings', {
+  id: text('id').primaryKey(),
+  repositoryId: text('repository_id').references(() => repositories.id),
+  provider: text('provider').notNull().default('claude-cli'), // 'claude-cli' | 'openrouter'
+  openrouterApiKey: text('openrouter_api_key'),
+  openrouterModel: text('openrouter_model').default('anthropic/claude-sonnet-4'),
+  customInstructions: text('custom_instructions'),
+  createdAt: integer('created_at', { mode: 'timestamp' }),
+  updatedAt: integer('updated_at', { mode: 'timestamp' }),
+});
+
+export type AISettings = typeof aiSettings.$inferSelect;
+export type NewAISettings = typeof aiSettings.$inferInsert;
+
+export const DEFAULT_AI_SETTINGS = {
+  provider: 'claude-cli' as AIProvider,
+  openrouterModel: 'anthropic/claude-sonnet-4',
+};

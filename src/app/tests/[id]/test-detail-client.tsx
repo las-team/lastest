@@ -16,19 +16,24 @@ import {
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
-import { Play, Trash2, Copy, Edit2, Clock, CheckCircle, XCircle, X, Save } from 'lucide-react';
+import { Play, Trash2, Copy, Edit2, Clock, CheckCircle, XCircle, X, Save, Wrench, Wand2 } from 'lucide-react';
 import { deleteTest, updateTest } from '@/server/actions/tests';
+import { AIFixTestDialog } from '@/components/ai/ai-fix-test-dialog';
+import { AIEnhanceTestDialog } from '@/components/ai/ai-enhance-test-dialog';
 import type { Test, TestResult } from '@/lib/db/schema';
 
 interface TestDetailClientProps {
   test: Test;
   results: TestResult[];
+  repositoryId?: string | null;
 }
 
-export function TestDetailClient({ test, results }: TestDetailClientProps) {
+export function TestDetailClient({ test, results, repositoryId }: TestDetailClientProps) {
   const router = useRouter();
   const [isDeleting, setIsDeleting] = useState(false);
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
+  const [showFixDialog, setShowFixDialog] = useState(false);
+  const [showEnhanceDialog, setShowEnhanceDialog] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [editName, setEditName] = useState(test.name);
@@ -128,6 +133,26 @@ export function TestDetailClient({ test, results }: TestDetailClientProps) {
                       <Play className="h-4 w-4 mr-2" />
                       Run
                     </Button>
+                    {repositoryId && latestResult?.status === 'failed' && latestResult.errorMessage && (
+                      <Button
+                        variant="outline"
+                        onClick={() => setShowFixDialog(true)}
+                        title="Fix with AI"
+                      >
+                        <Wrench className="h-4 w-4 mr-2" />
+                        Fix
+                      </Button>
+                    )}
+                    {repositoryId && (
+                      <Button
+                        variant="outline"
+                        onClick={() => setShowEnhanceDialog(true)}
+                        title="Enhance with AI"
+                      >
+                        <Wand2 className="h-4 w-4 mr-2" />
+                        Enhance
+                      </Button>
+                    )}
                     <Button variant="outline" size="icon" onClick={() => setIsEditing(true)}>
                       <Edit2 className="h-4 w-4" />
                     </Button>
@@ -312,6 +337,33 @@ export function TestDetailClient({ test, results }: TestDetailClientProps) {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* AI Fix Test Dialog */}
+      {repositoryId && (
+        <AIFixTestDialog
+          open={showFixDialog}
+          onOpenChange={setShowFixDialog}
+          repositoryId={repositoryId}
+          testId={test.id}
+          testName={test.name}
+          originalCode={test.code || ''}
+          errorMessage={latestResult?.errorMessage || 'Unknown error'}
+          onFixed={() => router.refresh()}
+        />
+      )}
+
+      {/* AI Enhance Test Dialog */}
+      {repositoryId && (
+        <AIEnhanceTestDialog
+          open={showEnhanceDialog}
+          onOpenChange={setShowEnhanceDialog}
+          repositoryId={repositoryId}
+          testId={test.id}
+          testName={test.name}
+          originalCode={test.code || ''}
+          onEnhanced={() => router.refresh()}
+        />
+      )}
     </div>
   );
 }

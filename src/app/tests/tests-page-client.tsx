@@ -17,7 +17,9 @@ import { createFunctionalArea } from '@/server/actions/tests';
 import { addRoutesAsFunctionalAreas, generateBasicTests } from '@/server/actions/scanner';
 import { CoverageBar } from '@/components/coverage/coverage-bar';
 import { RouteSelectorDialog } from '@/components/routes/route-selector-dialog';
-import { FileCode, Plus, FolderPlus, FlaskConical } from 'lucide-react';
+import { AICreateTestDialog } from '@/components/ai/ai-create-test-dialog';
+import { MCPCreateTestDialog } from '@/components/ai/mcp-create-test-dialog';
+import { FileCode, Plus, FolderPlus, FlaskConical, Sparkles, Wand2 } from 'lucide-react';
 import Link from 'next/link';
 import type { FunctionalArea, Test, Route } from '@/lib/db/schema';
 
@@ -31,14 +33,17 @@ interface TestsPageClientProps {
   routes: Route[];
   coverage: { total: number; withTests: number; percentage: number };
   repositoryId?: string;
+  baseUrl?: string;
 }
 
-export function TestsPageClient({ areas, tests, routes, coverage, repositoryId }: TestsPageClientProps) {
+export function TestsPageClient({ areas, tests, routes, coverage, repositoryId, baseUrl = 'http://localhost:3000' }: TestsPageClientProps) {
   const [isNewAreaOpen, setIsNewAreaOpen] = useState(false);
   const [newAreaName, setNewAreaName] = useState('');
   const [isCreating, setIsCreating] = useState(false);
   const [isAddAreasOpen, setIsAddAreasOpen] = useState(false);
   const [isAddTestsOpen, setIsAddTestsOpen] = useState(false);
+  const [isAICreateOpen, setIsAICreateOpen] = useState(false);
+  const [isMCPCreateOpen, setIsMCPCreateOpen] = useState(false);
   const [showAllTests, setShowAllTests] = useState(false);
 
   const handleCreateArea = async () => {
@@ -138,12 +143,34 @@ export function TestsPageClient({ areas, tests, routes, coverage, repositoryId }
                     <span className="text-sm text-muted-foreground">
                       {tests.length} test{tests.length !== 1 ? 's' : ''} total
                     </span>
-                    <Button asChild size="sm">
-                      <Link href="/record">
-                        <Plus className="h-4 w-4 mr-2" />
-                        Record New Test
-                      </Link>
-                    </Button>
+                    <div className="flex gap-2">
+                      {repositoryId && (
+                        <>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => setIsAICreateOpen(true)}
+                          >
+                            <Sparkles className="h-4 w-4 mr-2" />
+                            Create with AI
+                          </Button>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => setIsMCPCreateOpen(true)}
+                          >
+                            <Wand2 className="h-4 w-4 mr-2" />
+                            Create with MCP
+                          </Button>
+                        </>
+                      )}
+                      <Button asChild size="sm">
+                        <Link href="/record">
+                          <Plus className="h-4 w-4 mr-2" />
+                          Record New Test
+                        </Link>
+                      </Button>
+                    </div>
                   </div>
 
                   <div className="grid gap-2">
@@ -243,6 +270,27 @@ export function TestsPageClient({ areas, tests, routes, coverage, repositoryId }
         actionLabel="Generate Tests"
         onAction={handleAddTests}
       />
+
+      {/* AI Create Test Dialog */}
+      {repositoryId && (
+        <AICreateTestDialog
+          open={isAICreateOpen}
+          onOpenChange={setIsAICreateOpen}
+          repositoryId={repositoryId}
+          areas={areas}
+        />
+      )}
+
+      {/* MCP Create Test Dialog */}
+      {repositoryId && (
+        <MCPCreateTestDialog
+          open={isMCPCreateOpen}
+          onOpenChange={setIsMCPCreateOpen}
+          repositoryId={repositoryId}
+          areas={areas}
+          baseUrl={baseUrl}
+        />
+      )}
     </div>
   );
 }
