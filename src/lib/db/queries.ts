@@ -123,6 +123,13 @@ export async function updateTest(id: string, data: Partial<NewTest>) {
 }
 
 export async function deleteTest(id: string) {
+  // Delete related records first (cascade)
+  await db.delete(routeTestSuggestions).where(eq(routeTestSuggestions.matchedTestId, id));
+  await db.delete(ignoreRegions).where(eq(ignoreRegions.testId, id));
+  await db.delete(baselines).where(eq(baselines.testId, id));
+  await db.delete(visualDiffs).where(eq(visualDiffs.testId, id));
+  await db.delete(testResults).where(eq(testResults.testId, id));
+  // Now delete the test
   await db.delete(tests).where(eq(tests.id, id));
 }
 
