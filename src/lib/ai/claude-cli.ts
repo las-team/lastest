@@ -32,7 +32,7 @@ export class ClaudeCLIProvider implements AIProvider {
     const escapedPrompt = escapePrompt(fullPrompt);
 
     try {
-      const { stdout } = await execAsync(`claude -p "${escapedPrompt}"`, {
+      const { stdout } = await execAsync(`claude -p "${escapedPrompt}" < /dev/null`, {
         timeout: 120000, // 2 minute timeout
         maxBuffer: 1024 * 1024 * 10, // 10MB buffer
         shell: '/bin/bash',
@@ -62,6 +62,7 @@ export class ClaudeCLIProvider implements AIProvider {
       const child = spawn('claude', ['-p', escapedPrompt], {
         shell: '/bin/bash',
         env: getExtendedEnv(),
+        stdio: ['ignore', 'pipe', 'pipe'],
       });
 
       let fullText = '';

@@ -181,16 +181,27 @@ export function BuildDetailClient({
                     <div className={`p-2 rounded ${statusColor}`}>
                       <StatusIcon className="w-4 h-4" />
                     </div>
-                    <div>
-                      <div className={`font-medium ${isFailed ? 'text-red-800' : ''}`}>
-                        Test {diff.testId.slice(0, 8)}
+                    <div className="min-w-0">
+                      <div className={`font-medium truncate ${isFailed ? 'text-red-800' : ''}`}>
+                        {diff.testName || 'Unnamed Test'}
                       </div>
-                      <div className={`text-sm ${isFailed ? 'text-red-600' : 'text-gray-500'}`}>
-                        {isExecutionFailed
-                          ? 'Test execution failed'
-                          : diff.pixelDifference
-                            ? `${diff.pixelDifference.toLocaleString()} pixels changed (${diff.percentageDifference}%)`
-                            : 'No changes detected'}
+                      <div className="flex items-center gap-2 text-sm">
+                        {diff.functionalAreaName && (
+                          <span className="text-blue-600 font-medium">
+                            {diff.functionalAreaName}
+                          </span>
+                        )}
+                        <span className="text-gray-400">·</span>
+                        <span className={isFailed ? 'text-red-600' : 'text-gray-500'}>
+                          {isExecutionFailed
+                            ? 'Execution failed'
+                            : diff.pixelDifference
+                              ? `${diff.pixelDifference.toLocaleString()}px diff`
+                              : 'No changes'}
+                        </span>
+                        <span className="text-gray-300 text-xs font-mono">
+                          {diff.testId.slice(0, 8)}
+                        </span>
                       </div>
                     </div>
                   </div>

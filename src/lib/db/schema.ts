@@ -198,7 +198,11 @@ export type NewPullRequest = typeof pullRequests.$inferInsert;
 export type Build = typeof builds.$inferSelect;
 export type NewBuild = typeof builds.$inferInsert;
 export type VisualDiff = typeof visualDiffs.$inferSelect;
-export type VisualDiffWithTestStatus = VisualDiff & { testResultStatus: string | null };
+export type VisualDiffWithTestStatus = VisualDiff & {
+  testResultStatus: string | null;
+  testName: string | null;
+  functionalAreaName: string | null;
+};
 export type NewVisualDiff = typeof visualDiffs.$inferInsert;
 export type Baseline = typeof baselines.$inferSelect;
 export type NewBaseline = typeof baselines.$inferInsert;
@@ -333,3 +337,25 @@ export const DEFAULT_AI_SETTINGS = {
   provider: 'claude-cli' as AIProvider,
   openrouterModel: 'anthropic/claude-sonnet-4',
 };
+
+// AI Prompt Logging for debugging and auditing
+export type AIActionType = 'create_test' | 'fix_test' | 'enhance_test' | 'scan_routes' | 'test_connection';
+export type AILogStatus = 'success' | 'error';
+
+export const aiPromptLogs = sqliteTable('ai_prompt_logs', {
+  id: text('id').primaryKey(),
+  repositoryId: text('repository_id').references(() => repositories.id),
+  actionType: text('action_type').notNull(), // 'create_test' | 'fix_test' | 'enhance_test' | 'scan_routes' | 'test_connection'
+  provider: text('provider').notNull(), // 'claude-cli' | 'openrouter'
+  model: text('model'),
+  systemPrompt: text('system_prompt'),
+  userPrompt: text('user_prompt').notNull(),
+  response: text('response'),
+  status: text('status').notNull(), // 'success' | 'error'
+  errorMessage: text('error_message'),
+  durationMs: integer('duration_ms'),
+  createdAt: integer('created_at', { mode: 'timestamp' }),
+});
+
+export type AIPromptLog = typeof aiPromptLogs.$inferSelect;
+export type NewAIPromptLog = typeof aiPromptLogs.$inferInsert;

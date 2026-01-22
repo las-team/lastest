@@ -103,7 +103,10 @@ export async function aiScanRoutes(
     }
 
     const prompt = createRouteScanPrompt(codebaseContext);
-    const response = await generateWithAI(config, prompt, SYSTEM_PROMPT);
+    const response = await generateWithAI(config, prompt, SYSTEM_PROMPT, {
+      actionType: 'scan_routes',
+      repositoryId,
+    });
 
     // Parse JSON response
     const jsonMatch = response.match(/\[[\s\S]*\]/);

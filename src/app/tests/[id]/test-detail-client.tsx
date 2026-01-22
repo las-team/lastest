@@ -16,10 +16,10 @@ import {
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
-import { Play, Trash2, Copy, Edit2, Clock, CheckCircle, XCircle, X, Save, Wrench, Wand2 } from 'lucide-react';
+import { Play, Trash2, Copy, Edit2, Clock, CheckCircle, XCircle, X, Save, Wrench, Wand2, Loader2 } from 'lucide-react';
 import { deleteTest, updateTest } from '@/server/actions/tests';
-import { AIFixTestDialog } from '@/components/ai/ai-fix-test-dialog';
-import { AIEnhanceTestDialog } from '@/components/ai/ai-enhance-test-dialog';
+import { aiFixTest, aiEnhanceTest, updateTestCode } from '@/server/actions/ai';
+import { toast } from 'sonner';
 import type { Test, TestResult } from '@/lib/db/schema';
 
 interface TestDetailClientProps {
@@ -32,13 +32,16 @@ export function TestDetailClient({ test, results, repositoryId }: TestDetailClie
   const router = useRouter();
   const [isDeleting, setIsDeleting] = useState(false);
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
-  const [showFixDialog, setShowFixDialog] = useState(false);
-  const [showEnhanceDialog, setShowEnhanceDialog] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [editName, setEditName] = useState(test.name);
   const [editUrl, setEditUrl] = useState(test.targetUrl || '');
   const [editCode, setEditCode] = useState(test.code || '');
+
+  // AI Fix/Enhance states
+  const [isFixing, setIsFixing] = useState(false);
+  const [isEnhancing, setIsEnhancing] = useState(false);
+  const [enhancePrompt, setEnhancePrompt] = useState('');
 
   const latestResult = results[0];
 
@@ -76,6 +79,46 @@ export function TestDetailClient({ test, results, repositoryId }: TestDetailClie
     setEditUrl(test.targetUrl || '');
     setEditCode(test.code || '');
     setIsEditing(false);
+  };
+
+  const handleFix = async () => {
+    if (!repositoryId) return;
+    setIsFixing(true);
+    try {
+      const errorMsg = latestResult?.errorMessage || 'Test needs fixing';
+      const result = await aiFixTest(repositoryId, test.id, errorMsg);
+      if (result.success && result.code) {
+        await updateTestCode(test.id, result.code);
+        toast.success('Test fixed and saved');
+        router.refresh();
+      } else {
+        toast.error(result.error || 'Failed to fix test');
+      }
+    } catch {
+      toast.error('Failed to fix test');
+    } finally {
+      setIsFixing(false);
+    }
+  };
+
+  const handleEnhance = async () => {
+    if (!repositoryId) return;
+    setIsEnhancing(true);
+    try {
+      const result = await aiEnhanceTest(repositoryId, test.id, enhancePrompt || undefined);
+      if (result.success && result.code) {
+        await updateTestCode(test.id, result.code);
+        toast.success('Test enhanced and saved');
+        setEnhancePrompt('');
+        router.refresh();
+      } else {
+        toast.error(result.error || 'Failed to enhance test');
+      }
+    } catch {
+      toast.error('Failed to enhance test');
+    } finally {
+      setIsEnhancing(false);
+    }
   };
 
   return (
@@ -133,24 +176,19 @@ export function TestDetailClient({ test, results, repositoryId }: TestDetailClie
                       <Play className="h-4 w-4 mr-2" />
                       Run
                     </Button>
-                    {repositoryId && latestResult?.status === 'failed' && latestResult.errorMessage && (
-                      <Button
-                        variant="outline"
-                        onClick={() => setShowFixDialog(true)}
-                        title="Fix with AI"
-                      >
-                        <Wrench className="h-4 w-4 mr-2" />
-                        Fix
-                      </Button>
-                    )}
                     {repositoryId && (
                       <Button
                         variant="outline"
-                        onClick={() => setShowEnhanceDialog(true)}
-                        title="Enhance with AI"
+                        onClick={handleFix}
+                        disabled={isFixing}
+                        title="Fix with AI"
                       >
-                        <Wand2 className="h-4 w-4 mr-2" />
-                        Enhance
+                        {isFixing ? (
+                          <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                        ) : (
+                          <Wrench className="h-4 w-4 mr-2" />
+                        )}
+                        {isFixing ? 'Fixing...' : 'Fix'}
                       </Button>
                     )}
                     <Button variant="outline" size="icon" onClick={() => setIsEditing(true)}>
@@ -225,7 +263,7 @@ export function TestDetailClient({ test, results, repositoryId }: TestDetailClie
             <TabsTrigger value="history">Run History</TabsTrigger>
           </TabsList>
 
-          <TabsContent value="code" className="mt-4">
+          <TabsContent value="code" className="mt-4 space-y-4">
             <Card>
               <CardHeader>
                 <CardTitle className="text-sm">Test Code</CardTitle>
@@ -244,6 +282,39 @@ export function TestDetailClient({ test, results, repositoryId }: TestDetailClie
                 )}
               </CardContent>
             </Card>
+
+            {/* Inline AI Enhance */}
+            {repositoryId && !isEditing && (
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-sm flex items-center gap-2">
+                    <Wand2 className="h-4 w-4" />
+                    Enhance with AI
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="flex gap-2">
+                    <Input
+                      value={enhancePrompt}
+                      onChange={(e) => setEnhancePrompt(e.target.value)}
+                      placeholder="Add assertions, improve selectors, test edge cases..."
+                      disabled={isEnhancing}
+                      onKeyDown={(e) => e.key === 'Enter' && !isEnhancing && handleEnhance()}
+                    />
+                    <Button onClick={handleEnhance} disabled={isEnhancing}>
+                      {isEnhancing ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <Wand2 className="h-4 w-4" />
+                      )}
+                    </Button>
+                  </div>
+                  <p className="text-xs text-muted-foreground mt-2">
+                    Leave empty for general improvements
+                  </p>
+                </CardContent>
+              </Card>
+            )}
           </TabsContent>
 
           <TabsContent value="screenshots" className="mt-4">
@@ -338,32 +409,6 @@ export function TestDetailClient({ test, results, repositoryId }: TestDetailClie
         </DialogContent>
       </Dialog>
 
-      {/* AI Fix Test Dialog */}
-      {repositoryId && (
-        <AIFixTestDialog
-          open={showFixDialog}
-          onOpenChange={setShowFixDialog}
-          repositoryId={repositoryId}
-          testId={test.id}
-          testName={test.name}
-          originalCode={test.code || ''}
-          errorMessage={latestResult?.errorMessage || 'Unknown error'}
-          onFixed={() => router.refresh()}
-        />
-      )}
-
-      {/* AI Enhance Test Dialog */}
-      {repositoryId && (
-        <AIEnhanceTestDialog
-          open={showEnhanceDialog}
-          onOpenChange={setShowEnhanceDialog}
-          repositoryId={repositoryId}
-          testId={test.id}
-          testName={test.name}
-          originalCode={test.code || ''}
-          onEnhanced={() => router.refresh()}
-        />
-      )}
     </div>
   );
 }

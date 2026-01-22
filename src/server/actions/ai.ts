@@ -29,7 +29,10 @@ export async function aiCreateTest(
   try {
     const config = await getAIConfig(repositoryId);
     const prompt = createTestPrompt(context);
-    const response = await generateWithAI(config, prompt, SYSTEM_PROMPT);
+    const response = await generateWithAI(config, prompt, SYSTEM_PROMPT, {
+      actionType: 'create_test',
+      repositoryId,
+    });
     const code = extractCodeFromResponse(response);
 
     return { success: true, code };
@@ -55,7 +58,10 @@ export async function aiFixTest(
       existingCode: test.code,
       errorMessage,
     });
-    const response = await generateWithAI(config, prompt, SYSTEM_PROMPT);
+    const response = await generateWithAI(config, prompt, SYSTEM_PROMPT, {
+      actionType: 'fix_test',
+      repositoryId,
+    });
     const code = extractCodeFromResponse(response);
 
     return { success: true, code };
@@ -81,7 +87,10 @@ export async function aiEnhanceTest(
       existingCode: test.code,
       userPrompt,
     });
-    const response = await generateWithAI(config, prompt, SYSTEM_PROMPT);
+    const response = await generateWithAI(config, prompt, SYSTEM_PROMPT, {
+      actionType: 'enhance_test',
+      repositoryId,
+    });
     const code = extractCodeFromResponse(response);
 
     return { success: true, code };

@@ -114,7 +114,7 @@ export function AICreateTestDialog({
     try {
       const result = await saveGeneratedTest({
         repositoryId,
-        functionalAreaId: functionalAreaId || undefined,
+        functionalAreaId: functionalAreaId && functionalAreaId !== '__none__' ? functionalAreaId : undefined,
         name: testName.trim(),
         code: generatedCode,
         targetUrl: targetUrl || undefined,
@@ -206,7 +206,7 @@ export function AICreateTestDialog({
                     <SelectValue placeholder="Select area (optional)" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="">None</SelectItem>
+                    <SelectItem value="__none__">None</SelectItem>
                     {areas.map((area) => (
                       <SelectItem key={area.id} value={area.id}>
                         {area.name}

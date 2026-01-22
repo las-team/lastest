@@ -10,6 +10,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
+import { Textarea } from '@/components/ui/textarea';
 import { AICodePreview } from './ai-code-preview';
 import { aiFixTest, updateTestCode } from '@/server/actions/ai';
 import { Loader2, Wrench, Save, RefreshCw } from 'lucide-react';
@@ -40,11 +41,12 @@ export function AIFixTestDialog({
   const [isSaving, setIsSaving] = useState(false);
   const [fixedCode, setFixedCode] = useState('');
   const [hasGenerated, setHasGenerated] = useState(false);
+  const [editableError, setEditableError] = useState(errorMessage);
 
   const handleGenerate = async () => {
     setIsGenerating(true);
     try {
-      const result = await aiFixTest(repositoryId, testId, errorMessage);
+      const result = await aiFixTest(repositoryId, testId, editableError);
 
       if (result.success && result.code) {
         setFixedCode(result.code);
@@ -82,6 +84,7 @@ export function AIFixTestDialog({
   const handleClose = () => {
     setFixedCode('');
     setHasGenerated(false);
+    setEditableError(errorMessage);
     onOpenChange(false);
   };
 
@@ -102,11 +105,12 @@ export function AIFixTestDialog({
           {/* Error Message */}
           <div className="space-y-2">
             <label className="text-sm font-medium">Error Message</label>
-            <div className="p-3 bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-900 rounded-lg">
-              <pre className="text-sm text-red-700 dark:text-red-300 whitespace-pre-wrap font-mono">
-                {errorMessage}
-              </pre>
-            </div>
+            <Textarea
+              value={editableError}
+              onChange={(e) => setEditableError(e.target.value)}
+              placeholder="Enter or paste the error message here..."
+              className="min-h-[100px] font-mono text-sm bg-red-50 dark:bg-red-950/30 border-red-200 dark:border-red-900 text-red-700 dark:text-red-300"
+            />
           </div>
 
           {/* Original Code (collapsed by default once fixed) */}

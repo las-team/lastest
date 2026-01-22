@@ -17,6 +17,7 @@ import {
   environmentConfigs,
   diffSensitivitySettings,
   aiSettings,
+  aiPromptLogs,
 } from './schema';
 import {
   DEFAULT_SELECTOR_PRIORITY,
@@ -41,6 +42,7 @@ import type {
   NewEnvironmentConfig,
   NewDiffSensitivitySettings,
   NewAISettings,
+  NewAIPromptLog,
   BuildStatus,
   SelectorConfig,
   AIProvider,
@@ -312,9 +314,13 @@ export async function getVisualDiffsWithTestStatus(buildId: string) {
       approvedAt: visualDiffs.approvedAt,
       createdAt: visualDiffs.createdAt,
       testResultStatus: testResults.status,
+      testName: tests.name,
+      functionalAreaName: functionalAreas.name,
     })
     .from(visualDiffs)
     .leftJoin(testResults, eq(visualDiffs.testResultId, testResults.id))
+    .leftJoin(tests, eq(visualDiffs.testId, tests.id))
+    .leftJoin(functionalAreas, eq(tests.functionalAreaId, functionalAreas.id))
     .where(eq(visualDiffs.buildId, buildId))
     .all();
 
@@ -944,4 +950,42 @@ export async function upsertAISettings(repositoryId: string | null, data: Partia
 
 export async function deleteAISettings(id: string) {
   await db.delete(aiSettings).where(eq(aiSettings.id, id));
+}
+
+// AI Prompt Logs
+export async function createAIPromptLog(data: Omit<NewAIPromptLog, 'id' | 'createdAt'>) {
+  const id = uuid();
+  const now = new Date();
+  await db.insert(aiPromptLogs).values({
+    ...data,
+    id,
+    createdAt: now,
+  });
+  return { id, ...data, createdAt: now };
+}
+
+export async function getAIPromptLogs(repositoryId?: string | null, limit = 50) {
+  if (repositoryId) {
+    return db
+      .select()
+      .from(aiPromptLogs)
+      .where(eq(aiPromptLogs.repositoryId, repositoryId))
+      .orderBy(desc(aiPromptLogs.createdAt))
+      .limit(limit)
+      .all();
+  }
+  return db
+    .select()
+    .from(aiPromptLogs)
+    .orderBy(desc(aiPromptLogs.createdAt))
+    .limit(limit)
+    .all();
+}
+
+export async function deleteAllAIPromptLogs(repositoryId?: string | null) {
+  if (repositoryId) {
+    await db.delete(aiPromptLogs).where(eq(aiPromptLogs.repositoryId, repositoryId));
+  } else {
+    await db.delete(aiPromptLogs);
+  }
 }

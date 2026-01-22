@@ -8,6 +8,7 @@ import { PlaywrightSettingsCard } from '@/components/settings/playwright-setting
 import { EnvironmentConfigCard } from '@/components/settings/environment-config-card';
 import { DiffSensitivityCard } from '@/components/settings/diff-sensitivity-card';
 import { AISettingsCard } from '@/components/settings/ai-settings-card';
+import { AILogsCard } from '@/components/settings/ai-logs-card';
 
 export default async function SettingsPage({
   searchParams,
@@ -22,6 +23,7 @@ export default async function SettingsPage({
   const environmentConfig = await queries.getEnvironmentConfig(selectedRepo?.id);
   const diffSensitivitySettings = await queries.getDiffSensitivitySettings(selectedRepo?.id);
   const aiSettings = await queries.getAISettings(selectedRepo?.id);
+  const aiLogs = await queries.getAIPromptLogs(selectedRepo?.id, 50);
 
   return (
     <div className="flex flex-col h-full">
@@ -171,6 +173,12 @@ export default async function SettingsPage({
           {/* AI Settings */}
           <AISettingsCard
             settings={aiSettings}
+            repositoryId={selectedRepo?.id}
+          />
+
+          {/* AI Prompt Logs */}
+          <AILogsCard
+            logs={aiLogs}
             repositoryId={selectedRepo?.id}
           />
 

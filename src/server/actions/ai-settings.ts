@@ -51,7 +51,7 @@ export async function testAIConnection(provider: AIProvider, apiKey?: string): P
       const homeDir = process.env.HOME || process.env.USERPROFILE || '';
       const extendedPath = `${homeDir}/.local/bin:${process.env.PATH}`;
 
-      const { stdout, stderr } = await execAsync('claude -p "Say hello in one word"', {
+      const { stdout, stderr } = await execAsync('claude -p "Say hello in one word" < /dev/null', {
         timeout: 30000,
         shell: '/bin/bash',
         env: { ...process.env, PATH: extendedPath },
