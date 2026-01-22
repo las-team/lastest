@@ -244,12 +244,22 @@ export const routes = sqliteTable('routes', {
   repositoryId: text('repository_id').references(() => repositories.id),
   path: text('path').notNull(),
   type: text('type').notNull(), // 'static' | 'dynamic'
+  description: text('description'),
   filePath: text('file_path'),
   framework: text('framework'), // 'nextjs-app' | 'nextjs-pages' | 'react-router' | 'vue'
   routerType: text('router_type'), // 'hash' | 'browser'
   functionalAreaId: text('functional_area_id').references(() => functionalAreas.id),
   hasTest: integer('has_test', { mode: 'boolean' }).default(false),
   scannedAt: integer('scanned_at', { mode: 'timestamp' }),
+});
+
+// Test suggestions for routes from AI discovery
+export const routeTestSuggestions = sqliteTable('route_test_suggestions', {
+  id: text('id').primaryKey(),
+  routeId: text('route_id').references(() => routes.id, { onDelete: 'cascade' }),
+  suggestion: text('suggestion').notNull(),
+  matchedTestId: text('matched_test_id').references(() => tests.id),
+  createdAt: integer('created_at', { mode: 'timestamp' }),
 });
 
 // Scan status for progress tracking
@@ -267,6 +277,8 @@ export const scanStatus = sqliteTable('scan_status', {
 
 export type Route = typeof routes.$inferSelect;
 export type NewRoute = typeof routes.$inferInsert;
+export type RouteTestSuggestion = typeof routeTestSuggestions.$inferSelect;
+export type NewRouteTestSuggestion = typeof routeTestSuggestions.$inferInsert;
 export type ScanStatus = typeof scanStatus.$inferSelect;
 export type NewScanStatus = typeof scanStatus.$inferInsert;
 

@@ -13,6 +13,7 @@ import {
   repositories,
   playwrightSettings,
   routes,
+  routeTestSuggestions,
   scanStatus,
   environmentConfigs,
   diffSensitivitySettings,
@@ -38,6 +39,7 @@ import type {
   NewRepository,
   NewPlaywrightSettings,
   NewRoute,
+  NewRouteTestSuggestion,
   NewScanStatus,
   NewEnvironmentConfig,
   NewDiffSensitivitySettings,
@@ -995,4 +997,163 @@ export async function deleteAllAIPromptLogs(repositoryId?: string | null) {
   } else {
     await db.delete(aiPromptLogs);
   }
+}
+
+// Route Test Suggestions
+export async function getSuggestionsByRoute(routeId: string) {
+  return db.select().from(routeTestSuggestions).where(eq(routeTestSuggestions.routeId, routeId)).all();
+}
+
+export async function getSuggestionsByRoutes(routeIds: string[]) {
+  if (routeIds.length === 0) return [];
+  return db.select().from(routeTestSuggestions).where(inArray(routeTestSuggestions.routeId, routeIds)).all();
+}
+
+export async function createRouteTestSuggestion(data: Omit<NewRouteTestSuggestion, 'id'>) {
+  const id = uuid();
+  await db.insert(routeTestSuggestions).values({ ...data, id, createdAt: new Date() });
+  return { id, ...data, createdAt: new Date() };
+}
+
+export async function createRouteTestSuggestions(suggestions: Omit<NewRouteTestSuggestion, 'id'>[]) {
+  if (suggestions.length === 0) return [];
+  const suggestionsWithIds = suggestions.map(s => ({ ...s, id: uuid(), createdAt: new Date() }));
+  await db.insert(routeTestSuggestions).values(suggestionsWithIds);
+  return suggestionsWithIds;
+}
+
+export async function updateRouteTestSuggestion(id: string, data: Partial<NewRouteTestSuggestion>) {
+  await db.update(routeTestSuggestions).set(data).where(eq(routeTestSuggestions.id, id));
+}
+
+export async function deleteRouteTestSuggestion(id: string) {
+  await db.delete(routeTestSuggestions).where(eq(routeTestSuggestions.id, id));
+}
+
+export async function deleteSuggestionsByRoute(routeId: string) {
+  await db.delete(routeTestSuggestions).where(eq(routeTestSuggestions.routeId, routeId));
+}
+
+// Auto-match suggestions against existing tests using fuzzy keyword matching
+function normalizeForMatch(text: string): string[] {
+  return text
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .split(/\s+/)
+    .filter(w => w.length > 2);
+}
+
+function calculateMatchScore(suggestion: string, testName: string): number {
+  const suggestionWords = normalizeForMatch(suggestion);
+  const testWords = normalizeForMatch(testName);
+
+  let matches = 0;
+  for (const sw of suggestionWords) {
+    if (testWords.some(tw => tw.includes(sw) || sw.includes(tw))) {
+      matches++;
+    }
+  }
+
+  return suggestionWords.length > 0 ? matches / suggestionWords.length : 0;
+}
+
+export async function autoMatchSuggestionsForRoute(routeId: string, repositoryId: string) {
+  const suggestions = await getSuggestionsByRoute(routeId);
+  const repoTests = await getTestsByRepo(repositoryId);
+
+  const updates: { suggestionId: string; testId: string }[] = [];
+
+  for (const suggestion of suggestions) {
+    if (suggestion.matchedTestId) continue; // Already matched
+
+    let bestMatch: { testId: string; score: number } | null = null;
+
+    for (const test of repoTests) {
+      const score = calculateMatchScore(suggestion.suggestion, test.name);
+      if (score >= 0.5 && (!bestMatch || score > bestMatch.score)) {
+        bestMatch = { testId: test.id, score };
+      }
+    }
+
+    if (bestMatch) {
+      updates.push({ suggestionId: suggestion.id, testId: bestMatch.testId });
+    }
+  }
+
+  // Apply updates
+  for (const update of updates) {
+    await updateRouteTestSuggestion(update.suggestionId, { matchedTestId: update.testId });
+  }
+
+  return updates.length;
+}
+
+// Get suggestions with matched/unmatched status for display
+export async function getSuggestionsWithMatchStatus(routeId: string) {
+  const suggestions = await db
+    .select({
+      id: routeTestSuggestions.id,
+      routeId: routeTestSuggestions.routeId,
+      suggestion: routeTestSuggestions.suggestion,
+      matchedTestId: routeTestSuggestions.matchedTestId,
+      createdAt: routeTestSuggestions.createdAt,
+      matchedTestName: tests.name,
+    })
+    .from(routeTestSuggestions)
+    .leftJoin(tests, eq(routeTestSuggestions.matchedTestId, tests.id))
+    .where(eq(routeTestSuggestions.routeId, routeId))
+    .all();
+
+  return suggestions;
+}
+
+// Get unmatched suggestions for a functional area (by routes linked to that area)
+export async function getUnmatchedSuggestionsByArea(functionalAreaId: string) {
+  const areaRoutes = await db
+    .select()
+    .from(routes)
+    .where(eq(routes.functionalAreaId, functionalAreaId))
+    .all();
+
+  if (areaRoutes.length === 0) return [];
+
+  const routeIds = areaRoutes.map(r => r.id);
+  const suggestions = await db
+    .select({
+      id: routeTestSuggestions.id,
+      routeId: routeTestSuggestions.routeId,
+      suggestion: routeTestSuggestions.suggestion,
+      matchedTestId: routeTestSuggestions.matchedTestId,
+      createdAt: routeTestSuggestions.createdAt,
+      routePath: routes.path,
+    })
+    .from(routeTestSuggestions)
+    .innerJoin(routes, eq(routeTestSuggestions.routeId, routes.id))
+    .where(inArray(routeTestSuggestions.routeId, routeIds))
+    .all();
+
+  return suggestions.filter(s => !s.matchedTestId);
+}
+
+// Get all unmatched suggestions for repository
+export async function getUnmatchedSuggestionsByRepo(repositoryId: string) {
+  const repoRoutes = await getRoutesByRepo(repositoryId);
+  if (repoRoutes.length === 0) return [];
+
+  const routeIds = repoRoutes.map(r => r.id);
+  const suggestions = await db
+    .select({
+      id: routeTestSuggestions.id,
+      routeId: routeTestSuggestions.routeId,
+      suggestion: routeTestSuggestions.suggestion,
+      matchedTestId: routeTestSuggestions.matchedTestId,
+      createdAt: routeTestSuggestions.createdAt,
+      routePath: routes.path,
+    })
+    .from(routeTestSuggestions)
+    .innerJoin(routes, eq(routeTestSuggestions.routeId, routes.id))
+    .where(inArray(routeTestSuggestions.routeId, routeIds))
+    .all();
+
+  return suggestions.filter(s => !s.matchedTestId);
 }

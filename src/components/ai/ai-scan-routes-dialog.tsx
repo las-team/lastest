@@ -163,7 +163,7 @@ export function AIScanRoutesDialog({
             </p>
           </div>
         ) : (
-          <div className="flex-1 overflow-hidden flex flex-col gap-4">
+          <div className="flex-1 overflow-hidden flex flex-col gap-4 min-h-0">
             <div className="flex items-center justify-between">
               <Button variant="ghost" size="sm" onClick={toggleAll}>
                 {selectedRoutes.size === discoveredRoutes.length ? 'Deselect All' : 'Select All'}
@@ -173,7 +173,7 @@ export function AIScanRoutesDialog({
               </span>
             </div>
 
-            <ScrollArea className="flex-1 border rounded-lg">
+            <ScrollArea className="flex-1 border rounded-lg min-h-0">
               <div className="p-2 space-y-1">
                 {discoveredRoutes.map((route) => (
                   <div

@@ -24,8 +24,6 @@ Implement the OCR feature to identify the selected UI element's text label
 
 Constant cursor recording
 
-Remove baseline branch concept
-
 ## ideas
 Firecrawl?
 Research playwrights comparison options, how they work?

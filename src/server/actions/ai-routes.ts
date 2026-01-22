@@ -138,15 +138,35 @@ export async function saveDiscoveredRoutes(
       return { success: true, count: 0 };
     }
 
-    // Create routes
+    // Create routes with description
     const routeData = newRoutes.map((r) => ({
       repositoryId,
       path: r.path,
       type: r.type,
+      description: r.description,
       scannedAt: new Date(),
     }));
 
-    await queries.createRoutes(routeData);
+    const createdRoutes = await queries.createRoutes(routeData);
+
+    // Create test suggestions for each route
+    const suggestionData: { routeId: string; suggestion: string }[] = [];
+    for (let i = 0; i < newRoutes.length; i++) {
+      const route = newRoutes[i];
+      const createdRoute = createdRoutes[i];
+      if (route.testSuggestions && route.testSuggestions.length > 0) {
+        for (const suggestion of route.testSuggestions) {
+          suggestionData.push({
+            routeId: createdRoute.id,
+            suggestion,
+          });
+        }
+      }
+    }
+
+    if (suggestionData.length > 0) {
+      await queries.createRouteTestSuggestions(suggestionData);
+    }
 
     revalidatePath('/repo');
     revalidatePath('/tests');

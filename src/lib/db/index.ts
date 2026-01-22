@@ -176,12 +176,21 @@ export function initializeDatabase() {
       repository_id TEXT REFERENCES repositories(id),
       path TEXT NOT NULL,
       type TEXT NOT NULL,
+      description TEXT,
       file_path TEXT,
       framework TEXT,
       router_type TEXT,
       functional_area_id TEXT REFERENCES functional_areas(id),
       has_test INTEGER DEFAULT 0,
       scanned_at INTEGER
+    );
+
+    CREATE TABLE IF NOT EXISTS route_test_suggestions (
+      id TEXT PRIMARY KEY,
+      route_id TEXT REFERENCES routes(id) ON DELETE CASCADE,
+      suggestion TEXT NOT NULL,
+      matched_test_id TEXT REFERENCES tests(id),
+      created_at INTEGER
     );
 
     CREATE TABLE IF NOT EXISTS scan_status (
@@ -228,6 +237,7 @@ export function initializeDatabase() {
     CREATE INDEX IF NOT EXISTS idx_baselines_repository ON baselines(repository_id);
     CREATE INDEX IF NOT EXISTS idx_visual_diffs_build ON visual_diffs(build_id);
     CREATE INDEX IF NOT EXISTS idx_routes_repository ON routes(repository_id);
+    CREATE INDEX IF NOT EXISTS idx_route_test_suggestions_route ON route_test_suggestions(route_id);
   `);
 
   // Run migrations for existing databases (add columns that may be missing)
@@ -251,6 +261,30 @@ function runMigrations() {
   // Migration: Add classification to visual_diffs if missing
   if (!diffColumnNames.has('classification')) {
     sqlite.exec('ALTER TABLE visual_diffs ADD COLUMN classification TEXT');
+  }
+
+  // Get existing columns in routes table
+  const routesColumns = sqlite.prepare('PRAGMA table_info(routes)').all() as { name: string }[];
+  const routesColumnNames = new Set(routesColumns.map(c => c.name));
+
+  // Migration: Add description to routes if missing
+  if (!routesColumnNames.has('description')) {
+    sqlite.exec('ALTER TABLE routes ADD COLUMN description TEXT');
+  }
+
+  // Migration: Create route_test_suggestions table if missing
+  const tables = sqlite.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='route_test_suggestions'").all();
+  if (tables.length === 0) {
+    sqlite.exec(`
+      CREATE TABLE IF NOT EXISTS route_test_suggestions (
+        id TEXT PRIMARY KEY,
+        route_id TEXT REFERENCES routes(id) ON DELETE CASCADE,
+        suggestion TEXT NOT NULL,
+        matched_test_id TEXT REFERENCES tests(id),
+        created_at INTEGER
+      );
+      CREATE INDEX IF NOT EXISTS idx_route_test_suggestions_route ON route_test_suggestions(route_id);
+    `);
   }
 }
 
