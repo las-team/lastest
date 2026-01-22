@@ -227,6 +227,32 @@ export function initializeDatabase() {
       updated_at INTEGER
     );
 
+    CREATE TABLE IF NOT EXISTS ai_settings (
+      id TEXT PRIMARY KEY,
+      repository_id TEXT REFERENCES repositories(id),
+      provider TEXT NOT NULL DEFAULT 'claude-cli',
+      openrouter_api_key TEXT,
+      openrouter_model TEXT DEFAULT 'anthropic/claude-sonnet-4',
+      custom_instructions TEXT,
+      created_at INTEGER,
+      updated_at INTEGER
+    );
+
+    CREATE TABLE IF NOT EXISTS ai_prompt_logs (
+      id TEXT PRIMARY KEY,
+      repository_id TEXT REFERENCES repositories(id),
+      action_type TEXT NOT NULL,
+      provider TEXT NOT NULL,
+      model TEXT,
+      system_prompt TEXT,
+      user_prompt TEXT NOT NULL,
+      response TEXT,
+      status TEXT NOT NULL,
+      error_message TEXT,
+      duration_ms INTEGER,
+      created_at INTEGER
+    );
+
     CREATE INDEX IF NOT EXISTS idx_tests_functional_area ON tests(functional_area_id);
     CREATE INDEX IF NOT EXISTS idx_tests_repository ON tests(repository_id);
     CREATE INDEX IF NOT EXISTS idx_test_results_run ON test_results(test_run_id);
