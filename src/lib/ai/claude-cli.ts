@@ -11,13 +11,14 @@ function getExtendedEnv(): NodeJS.ProcessEnv {
   return { ...process.env, PATH: extendedPath };
 }
 
-function escapePrompt(prompt: string): string {
-  // Escape special characters for shell
+function escapePromptForAnsiC(prompt: string): string {
+  // Escape for ANSI-C quoting ($'...') which properly handles special characters
   return prompt
     .replace(/\\/g, '\\\\')
-    .replace(/"/g, '\\"')
-    .replace(/`/g, '\\`')
-    .replace(/\$/g, '\\$');
+    .replace(/'/g, "\\'")
+    .replace(/\n/g, '\\n')
+    .replace(/\r/g, '\\r')
+    .replace(/\t/g, '\\t');
 }
 
 export class ClaudeCLIProvider implements AIProvider {
@@ -29,10 +30,10 @@ export class ClaudeCLIProvider implements AIProvider {
       fullPrompt = `${systemPrompt}\n\n---\n\n${prompt}`;
     }
 
-    const escapedPrompt = escapePrompt(fullPrompt);
+    const escapedPrompt = escapePromptForAnsiC(fullPrompt);
 
     try {
-      const { stdout } = await execAsync(`claude -p "${escapedPrompt}" < /dev/null`, {
+      const { stdout } = await execAsync(`claude -p $'${escapedPrompt}' < /dev/null`, {
         timeout: 120000, // 2 minute timeout
         maxBuffer: 1024 * 1024 * 10, // 10MB buffer
         shell: '/bin/bash',
@@ -56,11 +57,10 @@ export class ClaudeCLIProvider implements AIProvider {
       fullPrompt = `${systemPrompt}\n\n---\n\n${prompt}`;
     }
 
-    const escapedPrompt = escapePrompt(fullPrompt);
-
     return new Promise((resolve, reject) => {
-      const child = spawn('claude', ['-p', escapedPrompt], {
-        shell: '/bin/bash',
+      // For spawn, we pass arguments directly without shell escaping
+      const child = spawn('claude', ['-p', fullPrompt], {
+        shell: false,
         env: getExtendedEnv(),
         stdio: ['ignore', 'pipe', 'pipe'],
       });
