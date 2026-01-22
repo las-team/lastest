@@ -1,14 +1,7 @@
 'use client';
 
-import { useEffect, useState, useTransition } from 'react';
+import { useEffect, useState } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
 import {
   Dialog,
   DialogContent,
@@ -23,7 +16,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { GitBranch, CheckCircle2, Circle, FolderGit2, AlertCircle, Scan, Loader2, FolderOpen, XCircle, Sparkles } from 'lucide-react';
 import { toast } from 'sonner';
-import { fetchRepoBranches, updateRepoBaseline, updateRepoLocalPath } from '@/server/actions/repos';
+import { fetchRepoBranches, updateRepoLocalPath } from '@/server/actions/repos';
 import { startRouteScan, validateLocalPath, getDefaultLocalPath } from '@/server/actions/scanner';
 import { AIScanRoutesDialog } from '@/components/ai/ai-scan-routes-dialog';
 import type { Repository, Route, ScanStatus } from '@/lib/db/schema';
@@ -49,7 +42,6 @@ interface RepoClientProps {
 export function RepoClient({ repository, branchTestStatus, routes, coverage, scanStatus }: RepoClientProps) {
   const [branches, setBranches] = useState<GitHubBranch[]>([]);
   const [isLoading, setIsLoading] = useState(false);
-  const [isPending, startTransition] = useTransition();
   const [isScanning, setIsScanning] = useState(scanStatus?.status === 'scanning');
   const [showPathDialog, setShowPathDialog] = useState(false);
   const [showAIScanDialog, setShowAIScanDialog] = useState(false);
@@ -59,7 +51,10 @@ export function RepoClient({ repository, branchTestStatus, routes, coverage, sca
 
   // Validate path when it changes in the dialog
   useEffect(() => {
-    if (!showPathDialog || !localPath.trim()) {
+    // Only run validation when dialog is open
+    if (!showPathDialog) return;
+
+    if (!localPath.trim()) {
       setPathValidation(null);
       return;
     }
@@ -96,13 +91,6 @@ export function RepoClient({ repository, branchTestStatus, routes, coverage, sca
   useEffect(() => {
     setIsScanning(scanStatus?.status === 'scanning');
   }, [scanStatus]);
-
-  const handleBaselineChange = (branch: string) => {
-    if (!repository) return;
-    startTransition(async () => {
-      await updateRepoBaseline(repository.id, branch);
-    });
-  };
 
   const handleScan = async () => {
     if (!repository) return;
@@ -241,42 +229,6 @@ export function RepoClient({ repository, branchTestStatus, routes, coverage, sca
         </div>
       </div>
 
-      {/* Baseline Selection */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Baseline Branch</CardTitle>
-          <CardDescription>
-            Select which branch to use as the baseline for visual comparisons
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <Select
-            value={repository.selectedBaseline || repository.defaultBranch || ''}
-            onValueChange={handleBaselineChange}
-            disabled={isPending || isLoading || branches.length === 0}
-          >
-            <SelectTrigger className="w-[300px]">
-              <SelectValue placeholder="Select baseline branch">
-                {repository.selectedBaseline || repository.defaultBranch || 'Select branch'}
-              </SelectValue>
-            </SelectTrigger>
-            <SelectContent>
-              {branches.map((branch) => (
-                <SelectItem key={branch.name} value={branch.name}>
-                  <div className="flex items-center gap-2">
-                    <GitBranch className="h-4 w-4" />
-                    {branch.name}
-                    {branch.protected && (
-                      <Badge variant="secondary" className="text-xs">protected</Badge>
-                    )}
-                  </div>
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </CardContent>
-      </Card>
-
       {/* Route Discovery */}
       <Card>
         <CardHeader>
@@ -383,9 +335,6 @@ export function RepoClient({ repository, branchTestStatus, routes, coverage, sca
             <div className="space-y-1">
               {branches.map((branch) => {
                 const hasTested = branchTestStatus[branch.name] || false;
-                const isBaseline =
-                  branch.name === repository.selectedBaseline ||
-                  (!repository.selectedBaseline && branch.name === repository.defaultBranch);
 
                 return (
                   <div
@@ -395,11 +344,6 @@ export function RepoClient({ repository, branchTestStatus, routes, coverage, sca
                     <div className="flex items-center gap-3">
                       <GitBranch className="h-4 w-4 text-muted-foreground" />
                       <span className="font-mono text-sm">{branch.name}</span>
-                      {isBaseline && (
-                        <Badge variant="outline" className="text-xs">
-                          baseline
-                        </Badge>
-                      )}
                       {branch.protected && (
                         <Badge variant="secondary" className="text-xs">
                           protected

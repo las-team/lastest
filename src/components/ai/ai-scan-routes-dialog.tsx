@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import {
   Dialog,
   DialogContent,
@@ -44,6 +44,15 @@ export function AIScanRoutesDialog({
   const [discoveredRoutes, setDiscoveredRoutes] = useState<DiscoveredRoute[]>([]);
   const [selectedRoutes, setSelectedRoutes] = useState<Set<string>>(new Set());
   const [hasScanned, setHasScanned] = useState(false);
+  const [hasStartedScan, setHasStartedScan] = useState(false);
+
+  // Trigger scan when dialog opens
+  useEffect(() => {
+    if (open && !hasStartedScan && !hasScanned) {
+      setHasStartedScan(true);
+      handleScan();
+    }
+  }, [open, hasStartedScan, hasScanned]);
 
   const handleScan = async () => {
     setIsScanning(true);
@@ -118,13 +127,13 @@ export function AIScanRoutesDialog({
     setDiscoveredRoutes([]);
     setSelectedRoutes(new Set());
     setHasScanned(false);
+    setHasStartedScan(false);
     onOpenChange(false);
   };
 
-  // Start scanning when dialog opens
   const handleOpenChange = (newOpen: boolean) => {
     if (newOpen && !hasScanned) {
-      handleScan();
+      // Scan will be triggered by useEffect
     } else if (!newOpen) {
       handleClose();
     }

@@ -964,6 +964,13 @@ export async function createAIPromptLog(data: Omit<NewAIPromptLog, 'id' | 'creat
   return { id, ...data, createdAt: now };
 }
 
+export async function updateAIPromptLog(
+  id: string,
+  data: Partial<Pick<NewAIPromptLog, 'status' | 'response' | 'errorMessage' | 'durationMs'>>
+) {
+  await db.update(aiPromptLogs).set(data).where(eq(aiPromptLogs.id, id));
+}
+
 export async function getAIPromptLogs(repositoryId?: string | null, limit = 50) {
   if (repositoryId) {
     return db

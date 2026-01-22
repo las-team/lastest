@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import {
   DndContext,
   closestCenter,
@@ -103,6 +103,12 @@ interface SelectorPriorityListProps {
 }
 
 export function SelectorPriorityList({ value, onChange }: SelectorPriorityListProps) {
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
   const sensors = useSensors(
     useSensor(PointerSensor),
     useSensor(KeyboardSensor, {
@@ -132,6 +138,50 @@ export function SelectorPriorityList({ value, onChange }: SelectorPriorityListPr
     );
     onChange(newValue);
   };
+
+  // Render static list on server, sortable list on client (avoids hydration mismatch)
+  if (!mounted) {
+    return (
+      <div className="space-y-2">
+        <Label className="text-sm font-medium">Selector Priority</Label>
+        <p className="text-xs text-muted-foreground mb-3">
+          Drag to reorder. During recording, all selector types are captured.
+          During test runs, selectors are tried in this priority order.
+        </p>
+        <div className="space-y-2">
+          {value.map((item) => {
+            const label = SELECTOR_LABELS[item.type];
+            const isOcr = item.type === 'ocr-text';
+            return (
+              <div
+                key={item.type}
+                className={`flex items-center gap-3 p-3 bg-white border rounded-lg shadow-sm ${!item.enabled ? 'opacity-60' : ''}`}
+              >
+                <div className="cursor-grab text-gray-400">
+                  <GripVertical className="w-4 h-4" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2">
+                    <span className="font-medium text-sm">{label.name}</span>
+                    <span className="text-xs bg-gray-100 px-1.5 py-0.5 rounded text-gray-500">
+                      #{item.priority}
+                    </span>
+                    {isOcr && (
+                      <span className="text-xs bg-amber-100 px-1.5 py-0.5 rounded text-amber-600">
+                        Soon
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-xs text-gray-500 truncate">{label.description}</p>
+                </div>
+                <Switch checked={item.enabled} disabled />
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-2">

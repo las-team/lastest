@@ -150,6 +150,11 @@ export function AILogsCard({ logs, repositoryId }: AILogsCardProps) {
                       <CheckCircle2 className="w-3 h-3 mr-1" />
                       Success
                     </Badge>
+                  ) : log.status === 'pending' ? (
+                    <Badge variant="secondary" className="flex-shrink-0">
+                      <Loader2 className="w-3 h-3 mr-1 animate-spin" />
+                      Pending
+                    </Badge>
                   ) : (
                     <Badge variant="destructive" className="flex-shrink-0">
                       <XCircle className="w-3 h-3 mr-1" />

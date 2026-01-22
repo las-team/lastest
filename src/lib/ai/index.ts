@@ -1,7 +1,7 @@
 import type { AIProvider, AIProviderConfig } from './types';
 import { ClaudeCLIProvider } from './claude-cli';
 import { createOpenRouterProvider } from './openrouter';
-import { createAIPromptLog } from '@/lib/db/queries';
+import { createAIPromptLog, updateAIPromptLog } from '@/lib/db/queries';
 import type { AIActionType, AILogStatus } from '@/lib/db/schema';
 
 export * from './types';
@@ -45,40 +45,43 @@ export async function generateWithAI(
 
   const { actionType, repositoryId } = options || {};
 
+  // Create pending log entry before the call
+  let logId: string | undefined;
+  if (repositoryId && actionType) {
+    const log = await createAIPromptLog({
+      repositoryId,
+      actionType,
+      provider: config.provider,
+      model: config.provider === 'openrouter' ? config.openrouterModel : undefined,
+      systemPrompt: finalSystemPrompt || undefined,
+      userPrompt: prompt,
+      status: 'pending' as AILogStatus,
+    });
+    logId = log.id;
+  }
+
   try {
     const response = await provider.generate({
       prompt,
       systemPrompt: finalSystemPrompt || undefined,
     });
 
-    // Log success
-    if (repositoryId && actionType) {
+    // Update log with success
+    if (logId) {
       const durationMs = Date.now() - startTime;
-      await createAIPromptLog({
-        repositoryId,
-        actionType,
-        provider: config.provider,
-        model: config.provider === 'openrouter' ? config.openrouterModel : undefined,
-        systemPrompt: finalSystemPrompt || undefined,
-        userPrompt: prompt,
-        response,
+      await updateAIPromptLog(logId, {
         status: 'success' as AILogStatus,
+        response,
         durationMs,
       });
     }
 
     return response;
   } catch (error) {
-    // Log error
-    if (repositoryId && actionType) {
+    // Update log with error
+    if (logId) {
       const durationMs = Date.now() - startTime;
-      await createAIPromptLog({
-        repositoryId,
-        actionType,
-        provider: config.provider,
-        model: config.provider === 'openrouter' ? config.openrouterModel : undefined,
-        systemPrompt: finalSystemPrompt || undefined,
-        userPrompt: prompt,
+      await updateAIPromptLog(logId, {
         status: 'error' as AILogStatus,
         errorMessage: error instanceof Error ? error.message : String(error),
         durationMs,

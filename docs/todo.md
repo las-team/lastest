@@ -8,15 +8,6 @@ AI enablement /home/ewyct/.claude/plans/moonlit-fluttering-origami.md
 
 --------
 ## started
-AI
-    see example from /home/ewyct/dev/lastest and research competitors on how they design UI around AI 
-    Add local claude -p command and OpenRouter API key as options
-    1. Determining routes
-        On the repo page in addition to Scan routes there should be a AI scan routes option, it should look for pages to test based on the code
-    2. Fix tests that failed - accessible from the tests screen and from the build screen as well
-    3. Enhance tests - avalaible from the tests screen 
-    4. Create new tests w AI - request prompt from user and have the ai write a test for that - check prompt samples in referred project
-    5. Create new tests w MCP - same as above, but with 
 
 ## features
 

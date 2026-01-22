@@ -340,7 +340,7 @@ export const DEFAULT_AI_SETTINGS = {
 
 // AI Prompt Logging for debugging and auditing
 export type AIActionType = 'create_test' | 'fix_test' | 'enhance_test' | 'scan_routes' | 'test_connection';
-export type AILogStatus = 'success' | 'error';
+export type AILogStatus = 'pending' | 'success' | 'error';
 
 export const aiPromptLogs = sqliteTable('ai_prompt_logs', {
   id: text('id').primaryKey(),
