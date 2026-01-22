@@ -31,10 +31,8 @@ import {
   getLatestRunForBranch,
   queueRunForBranch,
   getQueueStatus,
-  checkoutBranchAction,
   type BranchRunInfo,
 } from '@/server/actions/compare';
-import { useRouter } from 'next/navigation';
 import type { QueuedRun } from '@/lib/run-queue';
 
 interface CompareClientProps {
@@ -71,7 +69,6 @@ interface BranchColumnProps {
   isLoading: boolean;
   onRun: () => void;
   onRerun: () => void;
-  onCheckout: () => void;
   expandedTests: Set<string>;
   onToggleTest: (testId: string) => void;
   activeBranch?: string;
@@ -84,7 +81,6 @@ function BranchColumn({
   isLoading,
   onRun,
   onRerun,
-  onCheckout,
   expandedTests,
   onToggleTest,
   activeBranch,
@@ -154,30 +150,19 @@ function BranchColumn({
           </div>
         )}
 
-        {/* Run/Re-run/Checkout buttons */}
+        {/* Run/Re-run buttons */}
         <div className="flex gap-2">
-          {isActiveBranch ? (
-            <>
-              {!hasRun && !isRunning && !isQueued && (
-                <Button onClick={onRun} disabled={isLoading} size="sm" className="flex-1">
-                  {isLoading ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Play className="h-4 w-4 mr-2" />}
-                  Run Tests
-                </Button>
-              )}
-              {hasRun && !isRunning && !isQueued && (
-                <Button onClick={onRerun} disabled={isLoading} variant="outline" size="sm" className="flex-1">
-                  {isLoading ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <RefreshCw className="h-4 w-4 mr-2" />}
-                  Re-run
-                </Button>
-              )}
-            </>
-          ) : (
-            !isRunning && !isQueued && (
-              <Button onClick={onCheckout} disabled={isLoading} variant="secondary" size="sm" className="flex-1">
-                <GitBranch className="h-4 w-4 mr-2" />
-                Checkout
-              </Button>
-            )
+          {!hasRun && !isRunning && !isQueued && (
+            <Button onClick={onRun} disabled={isLoading} size="sm" className="flex-1">
+              {isLoading ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Play className="h-4 w-4 mr-2" />}
+              Run Tests
+            </Button>
+          )}
+          {hasRun && !isRunning && !isQueued && (
+            <Button onClick={onRerun} disabled={isLoading} variant="outline" size="sm" className="flex-1">
+              {isLoading ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <RefreshCw className="h-4 w-4 mr-2" />}
+              Re-run
+            </Button>
           )}
         </div>
 
@@ -260,7 +245,6 @@ function BranchColumn({
 }
 
 export function CompareClient({ branches, runs, defaultBaseline, repositoryId, activeBranch }: CompareClientProps) {
-  const router = useRouter();
   const [baseBranch, setBaseBranch] = useState<string>(defaultBaseline || '');
   const [targetBranch, setTargetBranch] = useState<string>('');
   const [baseInfo, setBaseInfo] = useState<BranchRunInfo | null>(null);
@@ -362,21 +346,6 @@ export function CompareClient({ branches, runs, defaultBaseline, repositoryId, a
     }
   };
 
-  const handleCheckout = async (branch: string) => {
-    try {
-      const result = await checkoutBranchAction(branch);
-      if (result.success) {
-        toast.success(`Checked out to ${branch}`);
-        router.refresh();
-      } else {
-        toast.error(`Checkout failed: ${result.error}. Please checkout manually.`);
-      }
-    } catch (error) {
-      console.error('Failed to checkout branch:', error);
-      toast.error('Failed to checkout branch. Please checkout manually.');
-    }
-  };
-
   const getQueuedRunForBranch = (branch: string): QueuedRun | null => {
     // Check active run first, then queued
     if (queueStatus.activeRun?.branch === branch) {
@@ -462,7 +431,6 @@ export function CompareClient({ branches, runs, defaultBaseline, repositoryId, a
                 isLoading={isLoadingBase}
                 onRun={() => handleRunBranch(baseBranch)}
                 onRerun={() => handleRunBranch(baseBranch)}
-                onCheckout={() => handleCheckout(baseBranch)}
                 expandedTests={expandedTests}
                 onToggleTest={toggleTest}
                 activeBranch={activeBranch}
@@ -481,7 +449,6 @@ export function CompareClient({ branches, runs, defaultBaseline, repositoryId, a
                 isLoading={isLoadingTarget}
                 onRun={() => handleRunBranch(targetBranch)}
                 onRerun={() => handleRunBranch(targetBranch)}
-                onCheckout={() => handleCheckout(targetBranch)}
                 expandedTests={expandedTests}
                 onToggleTest={toggleTest}
                 activeBranch={activeBranch}

@@ -2,13 +2,43 @@
 
 import { revalidatePath } from 'next/cache';
 import * as queries from '@/lib/db/queries';
-import { getGitInfo } from '@/lib/git/utils';
+import { getBranchInfo } from '@/lib/github/content';
 import { getRunner } from '@/lib/playwright/runner';
 import { getServerManager } from '@/lib/playwright/server-manager';
 import { generateDiff } from '@/lib/diff/generator';
 import { hashImage } from '@/lib/diff/hasher';
 import type { Test, TriggerType, BuildStatus, VisualDiffWithTestStatus, DiffClassification, DiffStatus } from '@/lib/db/schema';
 import path from 'path';
+
+interface GitInfo {
+  branch: string;
+  commit: string;
+}
+
+async function getGitInfoFromGitHub(repositoryId: string | null): Promise<GitInfo> {
+  if (!repositoryId) {
+    return { branch: 'unknown', commit: 'unknown' };
+  }
+
+  const account = await queries.getGithubAccount();
+  const repo = await queries.getRepository(repositoryId);
+
+  if (!account || !repo) {
+    return { branch: 'unknown', commit: 'unknown' };
+  }
+
+  const branch = repo.selectedBranch || repo.defaultBranch || 'main';
+  const branchInfo = await getBranchInfo(account.accessToken, repo.owner, repo.name, branch);
+
+  if (!branchInfo) {
+    return { branch, commit: 'unknown' };
+  }
+
+  return {
+    branch: branchInfo.name,
+    commit: branchInfo.commit.sha.slice(0, 7),
+  };
+}
 
 const SCREENSHOTS_DIR = path.join(process.cwd(), 'public', 'screenshots');
 const DIFFS_DIR = path.join(process.cwd(), 'public', 'diffs');
@@ -68,10 +98,9 @@ export async function createAndRunBuild(
     throw new Error('No tests to run');
   }
 
-  // Get repo localPath for git info
+  // Get repo for git info via GitHub API
   const repo = repositoryId ? await queries.getRepository(repositoryId) : await queries.getSelectedRepository();
-  const repoPath = repo?.localPath || undefined;
-  const gitInfo = await getGitInfo(repoPath);
+  const gitInfo = await getGitInfoFromGitHub(repositoryId ?? repo?.id ?? null);
 
   // Create test run
   const testRun = await queries.createTestRun({

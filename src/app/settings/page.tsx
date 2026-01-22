@@ -1,7 +1,6 @@
 import { Header } from '@/components/layout/header';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { getGitInfo } from '@/lib/git/utils';
 import * as queries from '@/lib/db/queries';
 import { Github, Check, X, Database, ExternalLink } from 'lucide-react';
 import { PlaywrightSettingsCard } from '@/components/settings/playwright-settings-card';
@@ -16,7 +15,6 @@ export default async function SettingsPage({
   searchParams: Promise<{ success?: string; error?: string }>;
 }) {
   const params = await searchParams;
-  const gitInfo = await getGitInfo();
   const githubAccount = await queries.getGithubAccount();
   const selectedRepo = await queries.getSelectedRepository();
   const playwrightSettings = await queries.getPlaywrightSettings(selectedRepo?.id);
@@ -101,28 +99,26 @@ export default async function SettingsPage({
             </CardContent>
           </Card>
 
-          {/* Git Info */}
+          {/* Repository Info */}
           <Card>
             <CardHeader>
               <CardTitle>Repository</CardTitle>
               <CardDescription>
-                Git repository information
+                Selected repository information
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="flex justify-between">
-                <span className="text-muted-foreground">Branch</span>
-                <Badge variant="outline">{gitInfo.branch}</Badge>
+                <span className="text-muted-foreground">Repository</span>
+                <span className="font-medium">{selectedRepo?.fullName || 'None selected'}</span>
               </div>
               <div className="flex justify-between">
-                <span className="text-muted-foreground">Commit</span>
-                <code className="text-sm">{gitInfo.commit}</code>
+                <span className="text-muted-foreground">Selected Branch</span>
+                <Badge variant="outline">{selectedRepo?.selectedBranch || selectedRepo?.defaultBranch || '-'}</Badge>
               </div>
               <div className="flex justify-between">
-                <span className="text-muted-foreground">Status</span>
-                <Badge variant={gitInfo.isClean ? 'default' : 'secondary'}>
-                  {gitInfo.isClean ? 'Clean' : 'Uncommitted changes'}
-                </Badge>
+                <span className="text-muted-foreground">Default Branch</span>
+                <code className="text-sm">{selectedRepo?.defaultBranch || '-'}</code>
               </div>
             </CardContent>
           </Card>

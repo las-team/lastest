@@ -3,16 +3,45 @@
 import { revalidatePath } from 'next/cache';
 import { getRunner } from '@/lib/playwright/runner';
 import { getServerManager } from '@/lib/playwright/server-manager';
-import { getGitInfo } from '@/lib/git/utils';
+import { getBranchInfo } from '@/lib/github/content';
 import * as queries from '@/lib/db/queries';
 import { v4 as uuid } from 'uuid';
 import type { Test } from '@/lib/db/schema';
 
+interface GitInfo {
+  branch: string;
+  commit: string;
+}
+
+async function getGitInfoFromGitHub(repositoryId: string | null): Promise<GitInfo> {
+  if (!repositoryId) {
+    return { branch: 'unknown', commit: 'unknown' };
+  }
+
+  const account = await queries.getGithubAccount();
+  const repo = await queries.getRepository(repositoryId);
+
+  if (!account || !repo) {
+    return { branch: 'unknown', commit: 'unknown' };
+  }
+
+  const branch = repo.selectedBranch || repo.defaultBranch || 'main';
+  const branchInfo = await getBranchInfo(account.accessToken, repo.owner, repo.name, branch);
+
+  if (!branchInfo) {
+    return { branch, commit: 'unknown' };
+  }
+
+  return {
+    branch: branchInfo.name,
+    commit: branchInfo.commit.sha.slice(0, 7),
+  };
+}
+
 export async function createTestRun(testIds?: string[], repositoryId?: string | null) {
-  // Get repo localPath for git info
+  // Get repo for git info via GitHub API
   const repo = repositoryId ? await queries.getRepository(repositoryId) : await queries.getSelectedRepository();
-  const repoPath = repo?.localPath || undefined;
-  const gitInfo = await getGitInfo(repoPath);
+  const gitInfo = await getGitInfoFromGitHub(repositoryId ?? repo?.id ?? null);
 
   const run = await queries.createTestRun({
     repositoryId: repositoryId ?? repo?.id,
@@ -56,10 +85,9 @@ export async function runTests(testIds?: string[], repositoryId?: string | null)
     throw new Error('No tests to run');
   }
 
-  // Get repo localPath for git info
+  // Get repo for git info via GitHub API
   const repo = repositoryId ? await queries.getRepository(repositoryId) : await queries.getSelectedRepository();
-  const repoPath = repo?.localPath || undefined;
-  const gitInfo = await getGitInfo(repoPath);
+  const gitInfo = await getGitInfoFromGitHub(repositoryId ?? repo?.id ?? null);
 
   // Create test run record
   const run = await queries.createTestRun({

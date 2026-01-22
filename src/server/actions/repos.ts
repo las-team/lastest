@@ -70,8 +70,8 @@ export async function updateRepoBaseline(repositoryId: string, branch: string) {
   revalidatePath('/repo');
 }
 
-export async function updateRepoLocalPath(repositoryId: string, localPath: string) {
-  await queries.updateRepository(repositoryId, { localPath });
+export async function updateRepoSelectedBranch(repositoryId: string, branch: string) {
+  await queries.updateRepository(repositoryId, { selectedBranch: branch });
   revalidatePath('/repo');
 }
 

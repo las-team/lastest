@@ -2,7 +2,6 @@
 
 import * as queries from '@/lib/db/queries';
 import { getRunQueue } from '@/lib/run-queue';
-import { checkoutBranch } from '@/lib/git/utils';
 import { revalidatePath } from 'next/cache';
 
 export interface BranchRunInfo {
@@ -70,18 +69,4 @@ export async function getQueueStatus() {
 export async function getQueuedRunStatus(queueId: string) {
   const queue = getRunQueue();
   return queue.getQueuedRun(queueId);
-}
-
-export async function checkoutBranchAction(
-  branch: string
-): Promise<{ success: boolean; error?: string }> {
-  try {
-    await checkoutBranch(branch);
-    revalidatePath('/compare');
-    revalidatePath('/');
-    return { success: true };
-  } catch (error) {
-    const message = error instanceof Error ? error.message : 'Unknown error';
-    return { success: false, error: message };
-  }
 }

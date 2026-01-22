@@ -27,7 +27,7 @@ interface AIScanRoutesDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   repositoryId: string;
-  localPath: string;
+  branch: string;
   onSaved?: () => void;
 }
 
@@ -35,7 +35,7 @@ export function AIScanRoutesDialog({
   open,
   onOpenChange,
   repositoryId,
-  localPath,
+  branch,
   onSaved,
 }: AIScanRoutesDialogProps) {
   const [step, setStep] = useState<'scanning' | 'preview'>('scanning');
@@ -57,7 +57,7 @@ export function AIScanRoutesDialog({
   const handleScan = async () => {
     setIsScanning(true);
     try {
-      const result = await aiScanRoutes(repositoryId, localPath);
+      const result = await aiScanRoutes(repositoryId, branch);
 
       if (result.success && result.routes) {
         setDiscoveredRoutes(result.routes);

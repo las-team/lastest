@@ -1,7 +1,6 @@
 import Link from 'next/link';
 import { getBuilds, getBuildsByRepo } from '@/server/actions/builds';
 import { getSelectedRepository } from '@/lib/db/queries';
-import { getGitInfo } from '@/lib/git/utils';
 import { CheckCircle, AlertTriangle, XCircle, Clock, GitBranch } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
@@ -20,7 +19,7 @@ const statusColors: Record<string, string> = {
 
 export default async function BuildsPage() {
   const selectedRepo = await getSelectedRepository();
-  const gitInfo = await getGitInfo();
+  const activeBranch = selectedRepo?.selectedBranch || selectedRepo?.defaultBranch || 'main';
   const builds = selectedRepo
     ? await getBuildsByRepo(selectedRepo.id, 20)
     : await getBuilds(20);
@@ -53,7 +52,7 @@ export default async function BuildsPage() {
             const StatusIcon = statusIcons[build.overallStatus];
             const statusColor = statusColors[build.overallStatus];
             const buildBranch = 'gitBranch' in build ? (build.gitBranch as string) : undefined;
-            const isActiveBranch = buildBranch === gitInfo.branch;
+            const isActiveBranch = buildBranch === activeBranch;
 
             return (
               <Link

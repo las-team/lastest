@@ -4,8 +4,7 @@ import * as queries from '@/lib/db/queries';
 import { generateWithAI, createRouteScanPrompt, SYSTEM_PROMPT } from '@/lib/ai';
 import type { AIProviderConfig } from '@/lib/ai/types';
 import { revalidatePath } from 'next/cache';
-import { readdir, readFile } from 'fs/promises';
-import { join, extname } from 'path';
+import { getRepoTree, getFileContent, type TreeEntry } from '@/lib/github/content';
 
 async function getAIConfig(repositoryId?: string | null): Promise<AIProviderConfig> {
   const settings = await queries.getAISettings(repositoryId);
@@ -24,67 +23,73 @@ interface DiscoveredRoute {
   testSuggestions?: string[];
 }
 
-// Read directory structure for AI context
-async function getCodebaseContext(localPath: string, maxDepth = 3): Promise<string> {
+// Read directory structure for AI context via GitHub API
+async function getCodebaseContext(
+  accessToken: string,
+  owner: string,
+  repo: string,
+  branch: string,
+  maxDepth = 3
+): Promise<string> {
   const context: string[] = [];
 
-  async function scanDir(dir: string, depth: number, prefix = ''): Promise<void> {
-    if (depth > maxDepth) return;
-
-    try {
-      const entries = await readdir(dir, { withFileTypes: true });
-      const relevantEntries = entries.filter((e) => {
-        // Skip node_modules, .git, dist, build, etc.
-        if (e.name.startsWith('.') || e.name === 'node_modules' || e.name === 'dist' || e.name === 'build') {
-          return false;
-        }
-        // For files, only include relevant extensions
-        if (e.isFile()) {
-          const ext = extname(e.name);
-          return ['.tsx', '.ts', '.jsx', '.js', '.vue', '.svelte'].includes(ext);
-        }
-        return e.isDirectory();
-      });
-
-      for (const entry of relevantEntries) {
-        const fullPath = join(dir, entry.name);
-        if (entry.isDirectory()) {
-          context.push(`${prefix}${entry.name}/`);
-          await scanDir(fullPath, depth + 1, `${prefix}  `);
-        } else {
-          context.push(`${prefix}${entry.name}`);
-        }
-      }
-    } catch {
-      // Ignore permission errors
-    }
+  // Fetch repo tree
+  const repoTree = await getRepoTree(accessToken, owner, repo, branch);
+  if (!repoTree || repoTree.tree.length === 0) {
+    return '';
   }
+
+  const tree = repoTree.tree;
 
   // Focus on routing-related directories
   const routeDirs = ['pages', 'app', 'src/pages', 'src/app', 'src/routes', 'routes', 'views'];
 
   for (const routeDir of routeDirs) {
-    const fullPath = join(localPath, routeDir);
-    try {
-      await readdir(fullPath);
+    const filesInDir = tree.filter((entry) => {
+      if (entry.type !== 'blob') return false;
+      if (!entry.path.startsWith(routeDir + '/') && entry.path !== routeDir) return false;
+
+      // Filter by depth
+      const depth = entry.path.split('/').length - routeDir.split('/').length;
+      if (depth > maxDepth) return false;
+
+      // Skip node_modules, .git, dist, build
+      if (entry.path.includes('node_modules') || entry.path.includes('.git')) return false;
+
+      // Only include relevant extensions
+      const ext = entry.path.split('.').pop();
+      return ['tsx', 'ts', 'jsx', 'js', 'vue', 'svelte'].includes(ext || '');
+    });
+
+    if (filesInDir.length > 0) {
       context.push(`\n=== ${routeDir}/ ===`);
-      await scanDir(fullPath, 0, '  ');
-    } catch {
-      // Directory doesn't exist
+      for (const file of filesInDir) {
+        const relativePath = file.path.replace(routeDir + '/', '');
+        const indent = '  '.repeat(relativePath.split('/').length - 1);
+        context.push(`${indent}${relativePath.split('/').pop()}`);
+      }
     }
   }
 
   // Also include package.json for framework detection
-  try {
-    const packageJson = await readFile(join(localPath, 'package.json'), 'utf-8');
-    const pkg = JSON.parse(packageJson);
-    context.push('\n=== package.json (dependencies) ===');
-    context.push(JSON.stringify({
-      dependencies: Object.keys(pkg.dependencies || {}),
-      devDependencies: Object.keys(pkg.devDependencies || {}),
-    }, null, 2));
-  } catch {
-    // No package.json
+  const packageJsonContent = await getFileContent(accessToken, owner, repo, 'package.json', branch);
+  if (packageJsonContent) {
+    try {
+      const pkg = JSON.parse(packageJsonContent);
+      context.push('\n=== package.json (dependencies) ===');
+      context.push(
+        JSON.stringify(
+          {
+            dependencies: Object.keys(pkg.dependencies || {}),
+            devDependencies: Object.keys(pkg.devDependencies || {}),
+          },
+          null,
+          2
+        )
+      );
+    } catch {
+      // Invalid JSON
+    }
   }
 
   return context.join('\n');
@@ -92,11 +97,26 @@ async function getCodebaseContext(localPath: string, maxDepth = 3): Promise<stri
 
 export async function aiScanRoutes(
   repositoryId: string,
-  localPath: string
+  branch: string
 ): Promise<{ success: boolean; routes?: DiscoveredRoute[]; error?: string }> {
   try {
+    const account = await queries.getGithubAccount();
+    if (!account) {
+      return { success: false, error: 'GitHub account not connected' };
+    }
+
+    const repo = await queries.getRepository(repositoryId);
+    if (!repo) {
+      return { success: false, error: 'Repository not found' };
+    }
+
     const config = await getAIConfig(repositoryId);
-    const codebaseContext = await getCodebaseContext(localPath);
+    const codebaseContext = await getCodebaseContext(
+      account.accessToken,
+      repo.owner,
+      repo.name,
+      branch
+    );
 
     if (!codebaseContext.trim()) {
       return { success: false, error: 'Could not read codebase structure' };

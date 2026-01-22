@@ -1,11 +1,9 @@
-import { getGitInfo } from '@/lib/git/utils';
 import { getSelectedRepository } from '@/lib/db/queries';
 import { Sidebar } from './sidebar';
 
 export async function SidebarServer() {
   const selectedRepo = await getSelectedRepository();
-  const repoPath = selectedRepo?.localPath || undefined;
-  const gitInfo = await getGitInfo(repoPath);
+  const activeBranch = selectedRepo?.selectedBranch || selectedRepo?.defaultBranch || 'main';
 
-  return <Sidebar activeBranch={gitInfo.branch} />;
+  return <Sidebar activeBranch={activeBranch} />;
 }

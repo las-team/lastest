@@ -14,6 +14,8 @@
     "start": "next start",
     "lint": "eslint",
     "db:studio": "drizzle-kit studio",
+    "db:push": "drizzle-kit push",
+    "db:generate": "drizzle-kit generate",
     "db:reset": "node scripts/db-reset.js"
   },
   "dependencies": {

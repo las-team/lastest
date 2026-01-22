@@ -1,5 +1,5 @@
 import { getRunner } from '@/lib/playwright/runner';
-import { getGitInfo } from '@/lib/git/utils';
+import { getBranchInfo } from '@/lib/github/content';
 import * as queries from '@/lib/db/queries';
 import type { Test } from '@/lib/db/schema';
 
@@ -86,15 +86,24 @@ class RunQueue {
 
       nextItem.progress.total = tests.length;
 
-      // Get repo localPath for git info
+      // Get repo and git info via GitHub API
       const repo = nextItem.repositoryId ? await queries.getRepository(nextItem.repositoryId) : null;
-      const repoPath = repo?.localPath || undefined;
-      const gitInfo = await getGitInfo(repoPath);
+      const account = await queries.getGithubAccount();
+
+      let gitCommit = 'unknown';
+      const gitBranch = nextItem.branch || repo?.selectedBranch || repo?.defaultBranch || 'main';
+
+      if (account && repo) {
+        const branchInfo = await getBranchInfo(account.accessToken, repo.owner, repo.name, gitBranch);
+        if (branchInfo) {
+          gitCommit = branchInfo.commit.sha.slice(0, 7);
+        }
+      }
 
       // Create test run record
       const run = await queries.createTestRun({
-        gitBranch: nextItem.branch || gitInfo.branch,
-        gitCommit: gitInfo.commit,
+        gitBranch,
+        gitCommit,
         repositoryId: nextItem.repositoryId,
         startedAt: new Date(),
         status: 'running',

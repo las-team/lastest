@@ -8,11 +8,10 @@ import {
   getTestRunsByRepo,
 } from '@/lib/db/queries';
 import { getBuilds, getBuildsByRepo } from '@/server/actions/builds';
-import { getGitInfo } from '@/lib/git/utils';
 
 export default async function RunPage() {
   const selectedRepo = await getSelectedRepository();
-  const gitInfo = await getGitInfo();
+  const activeBranch = selectedRepo?.selectedBranch || selectedRepo?.defaultBranch || 'main';
 
   const [tests, runs, builds] = await Promise.all([
     selectedRepo ? getTestsByRepo(selectedRepo.id) : getTests(),
@@ -28,7 +27,7 @@ export default async function RunPage() {
         runs={runs}
         builds={builds}
         repositoryId={selectedRepo?.id}
-        activeBranch={gitInfo.branch}
+        activeBranch={activeBranch}
       />
     </div>
   );
