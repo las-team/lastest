@@ -8,10 +8,14 @@ import * as queries from '@/lib/db/queries';
 import { v4 as uuid } from 'uuid';
 import type { Test } from '@/lib/db/schema';
 
-export async function createTestRun(testIds?: string[]) {
-  const gitInfo = await getGitInfo();
+export async function createTestRun(testIds?: string[], repositoryId?: string | null) {
+  // Get repo localPath for git info
+  const repo = repositoryId ? await queries.getRepository(repositoryId) : await queries.getSelectedRepository();
+  const repoPath = repo?.localPath || undefined;
+  const gitInfo = await getGitInfo(repoPath);
 
   const run = await queries.createTestRun({
+    repositoryId: repositoryId ?? repo?.id,
     gitBranch: gitInfo.branch,
     gitCommit: gitInfo.commit,
     startedAt: new Date(),
@@ -52,10 +56,14 @@ export async function runTests(testIds?: string[], repositoryId?: string | null)
     throw new Error('No tests to run');
   }
 
+  // Get repo localPath for git info
+  const repo = repositoryId ? await queries.getRepository(repositoryId) : await queries.getSelectedRepository();
+  const repoPath = repo?.localPath || undefined;
+  const gitInfo = await getGitInfo(repoPath);
+
   // Create test run record
-  const gitInfo = await getGitInfo();
   const run = await queries.createTestRun({
-    repositoryId: repositoryId ?? undefined,
+    repositoryId: repositoryId ?? repo?.id,
     gitBranch: gitInfo.branch,
     gitCommit: gitInfo.commit,
     startedAt: new Date(),

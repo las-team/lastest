@@ -86,10 +86,14 @@ class RunQueue {
 
       nextItem.progress.total = tests.length;
 
+      // Get repo localPath for git info
+      const repo = nextItem.repositoryId ? await queries.getRepository(nextItem.repositoryId) : null;
+      const repoPath = repo?.localPath || undefined;
+      const gitInfo = await getGitInfo(repoPath);
+
       // Create test run record
-      const gitInfo = await getGitInfo();
       const run = await queries.createTestRun({
-        gitBranch: nextItem.branch,
+        gitBranch: nextItem.branch || gitInfo.branch,
         gitCommit: gitInfo.commit,
         repositoryId: nextItem.repositoryId,
         startedAt: new Date(),

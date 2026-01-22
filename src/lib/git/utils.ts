@@ -6,11 +6,12 @@ export interface GitInfo {
   isClean: boolean;
 }
 
-export async function getGitInfo(): Promise<GitInfo> {
+export async function getGitInfo(repoPath?: string): Promise<GitInfo> {
   try {
-    const branch = execSync('git rev-parse --abbrev-ref HEAD', { encoding: 'utf-8' }).trim();
-    const commit = execSync('git rev-parse --short HEAD', { encoding: 'utf-8' }).trim();
-    const status = execSync('git status --porcelain', { encoding: 'utf-8' }).trim();
+    const execOptions = repoPath ? { encoding: 'utf-8' as const, cwd: repoPath } : { encoding: 'utf-8' as const };
+    const branch = execSync('git rev-parse --abbrev-ref HEAD', execOptions).trim();
+    const commit = execSync('git rev-parse --short HEAD', execOptions).trim();
+    const status = execSync('git status --porcelain', execOptions).trim();
 
     return {
       branch,

@@ -68,10 +68,14 @@ export async function createAndRunBuild(
     throw new Error('No tests to run');
   }
 
+  // Get repo localPath for git info
+  const repo = repositoryId ? await queries.getRepository(repositoryId) : await queries.getSelectedRepository();
+  const repoPath = repo?.localPath || undefined;
+  const gitInfo = await getGitInfo(repoPath);
+
   // Create test run
-  const gitInfo = await getGitInfo();
   const testRun = await queries.createTestRun({
-    repositoryId: repositoryId ?? undefined,
+    repositoryId: repositoryId ?? repo?.id,
     gitBranch: gitInfo.branch,
     gitCommit: gitInfo.commit,
     startedAt: new Date(),
