@@ -218,6 +218,7 @@ export function RecordingClient({ areas: initialAreas, settings, repositoryId }:
         pathType,
         targetUrl: url,
         code: generatedCode,
+        repositoryId,
       });
       router.push(`/tests/${test.id}`);
     } catch (error) {

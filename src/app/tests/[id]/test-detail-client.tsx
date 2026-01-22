@@ -358,19 +358,28 @@ export function TestDetailClient({ test, results, repositoryId }: TestDetailClie
                     {results.map((result) => (
                       <div
                         key={result.id}
-                        className="flex items-center justify-between p-3 border rounded-lg"
+                        className="p-3 border rounded-lg"
                       >
-                        <div className="flex items-center gap-3">
-                          {result.status === 'passed' ? (
-                            <CheckCircle className="h-4 w-4 text-green-500" />
-                          ) : (
-                            <XCircle className="h-4 w-4 text-destructive" />
-                          )}
-                          <span className="capitalize">{result.status}</span>
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-3">
+                            {result.status === 'passed' ? (
+                              <CheckCircle className="h-4 w-4 text-green-500" />
+                            ) : (
+                              <XCircle className="h-4 w-4 text-destructive" />
+                            )}
+                            <span className="capitalize">{result.status}</span>
+                          </div>
+                          <span className="text-sm text-muted-foreground">
+                            {result.durationMs}ms
+                          </span>
                         </div>
-                        <span className="text-sm text-muted-foreground">
-                          {result.durationMs}ms
-                        </span>
+                        {result.status === 'failed' && result.errorMessage && (
+                          <div className="mt-2 p-2 bg-destructive/10 border border-destructive/20 rounded text-sm text-destructive">
+                            <pre className="whitespace-pre-wrap font-mono text-xs overflow-x-auto">
+                              {result.errorMessage}
+                            </pre>
+                          </div>
+                        )}
                       </div>
                     ))}
                   </div>

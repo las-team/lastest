@@ -94,6 +94,7 @@ export async function saveRecordedTest(data: {
   pathType: 'happy' | 'unhappy';
   targetUrl: string;
   code: string;
+  repositoryId?: string | null;
 }) {
   const test = await createTest({
     name: data.name,
@@ -101,6 +102,7 @@ export async function saveRecordedTest(data: {
     pathType: data.pathType,
     targetUrl: data.targetUrl,
     code: data.code,
+    repositoryId: data.repositoryId ?? null,
   });
 
   revalidatePath('/tests');
