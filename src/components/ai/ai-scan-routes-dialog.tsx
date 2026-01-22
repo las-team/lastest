@@ -173,7 +173,7 @@ export function AIScanRoutesDialog({
               </span>
             </div>
 
-            <ScrollArea className="flex-1 border rounded-lg min-h-0">
+            <ScrollArea className="flex-1 border rounded-lg min-h-0 max-h-[50vh]">
               <div className="p-2 space-y-1">
                 {discoveredRoutes.map((route) => (
                   <div

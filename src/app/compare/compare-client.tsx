@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -72,6 +72,8 @@ interface BranchColumnProps {
   expandedTests: Set<string>;
   onToggleTest: (testId: string) => void;
   activeBranch?: string;
+  scrollRef?: React.RefObject<HTMLDivElement | null>;
+  onScroll?: (e: React.UIEvent<HTMLDivElement>) => void;
 }
 
 function BranchColumn({
@@ -84,6 +86,8 @@ function BranchColumn({
   expandedTests,
   onToggleTest,
   activeBranch,
+  scrollRef,
+  onScroll,
 }: BranchColumnProps) {
   const hasRun = branchInfo?.run !== null;
   const isRunning = queuedRun?.status === 'running';
@@ -150,19 +154,23 @@ function BranchColumn({
           </div>
         )}
 
-        {/* Run/Re-run buttons */}
-        <div className="flex gap-2">
-          {!hasRun && !isRunning && !isQueued && (
-            <Button onClick={onRun} disabled={isLoading} size="sm" className="flex-1">
-              {isLoading ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Play className="h-4 w-4 mr-2" />}
-              Run Tests
-            </Button>
-          )}
-          {hasRun && !isRunning && !isQueued && (
-            <Button onClick={onRerun} disabled={isLoading} variant="outline" size="sm" className="flex-1">
-              {isLoading ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <RefreshCw className="h-4 w-4 mr-2" />}
-              Re-run
-            </Button>
+        {/* Run/Re-run buttons - only for active branch */}
+        <div className="flex gap-2 h-9">
+          {isActiveBranch && (
+            <>
+              {!hasRun && !isRunning && !isQueued && (
+                <Button onClick={onRun} disabled={isLoading} size="sm" className="flex-1">
+                  {isLoading ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Play className="h-4 w-4 mr-2" />}
+                  Run Tests
+                </Button>
+              )}
+              {hasRun && !isRunning && !isQueued && (
+                <Button onClick={onRerun} disabled={isLoading} variant="outline" size="sm" className="flex-1">
+                  {isLoading ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <RefreshCw className="h-4 w-4 mr-2" />}
+                  Re-run
+                </Button>
+              )}
+            </>
           )}
         </div>
 
@@ -170,7 +178,11 @@ function BranchColumn({
         {testsWithLiveStatus.length > 0 && (
           <div className="space-y-2">
             <div className="text-sm font-medium">Tests ({testsWithLiveStatus.length})</div>
-            <div className="space-y-1 max-h-96 overflow-y-auto">
+            <div
+              ref={scrollRef}
+              onScroll={onScroll}
+              className="space-y-1 max-h-96 overflow-y-auto"
+            >
               {testsWithLiveStatus.map((test) => {
                 const isExpanded = expandedTests.has(test.id);
                 const hasScreenshot = Boolean(test.screenshotPath);
@@ -256,6 +268,29 @@ export function CompareClient({ branches, runs, defaultBaseline, repositoryId, a
     activeRun: null,
   });
   const [expandedTests, setExpandedTests] = useState<Set<string>>(new Set());
+
+  // Synchronized scrolling refs
+  const baseScrollRef = useRef<HTMLDivElement>(null);
+  const targetScrollRef = useRef<HTMLDivElement>(null);
+  const isScrollSyncing = useRef(false);
+
+  const handleBaseScroll = (e: React.UIEvent<HTMLDivElement>) => {
+    if (isScrollSyncing.current) return;
+    isScrollSyncing.current = true;
+    if (targetScrollRef.current) {
+      targetScrollRef.current.scrollTop = e.currentTarget.scrollTop;
+    }
+    requestAnimationFrame(() => { isScrollSyncing.current = false; });
+  };
+
+  const handleTargetScroll = (e: React.UIEvent<HTMLDivElement>) => {
+    if (isScrollSyncing.current) return;
+    isScrollSyncing.current = true;
+    if (baseScrollRef.current) {
+      baseScrollRef.current.scrollTop = e.currentTarget.scrollTop;
+    }
+    requestAnimationFrame(() => { isScrollSyncing.current = false; });
+  };
 
   const toggleTest = (testId: string) => {
     const newExpanded = new Set(expandedTests);
@@ -434,6 +469,8 @@ export function CompareClient({ branches, runs, defaultBaseline, repositoryId, a
                 expandedTests={expandedTests}
                 onToggleTest={toggleTest}
                 activeBranch={activeBranch}
+                scrollRef={baseScrollRef}
+                onScroll={handleBaseScroll}
               />
             ) : (
               <Card className="flex-1 flex items-center justify-center min-h-[200px]">
@@ -452,6 +489,8 @@ export function CompareClient({ branches, runs, defaultBaseline, repositoryId, a
                 expandedTests={expandedTests}
                 onToggleTest={toggleTest}
                 activeBranch={activeBranch}
+                scrollRef={targetScrollRef}
+                onScroll={handleTargetScroll}
               />
             ) : (
               <Card className="flex-1 flex items-center justify-center min-h-[200px]">

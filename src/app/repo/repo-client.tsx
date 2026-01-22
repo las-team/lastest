@@ -4,16 +4,9 @@ import { useEffect, useState } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
 import { GitBranch, CheckCircle2, Circle, FolderGit2, AlertCircle, Scan, Loader2, Sparkles } from 'lucide-react';
 import { toast } from 'sonner';
-import { fetchRepoBranches } from '@/server/actions/repos';
+import { fetchRepoBranches, updateRepoSelectedBranch } from '@/server/actions/repos';
 import { startRemoteRouteScan } from '@/server/actions/scanner';
 import { AIScanRoutesDialog } from '@/components/ai/ai-scan-routes-dialog';
 import type { Repository, Route, ScanStatus } from '@/lib/db/schema';
@@ -62,6 +55,13 @@ export function RepoClient({ repository, branchTestStatus, routes, coverage, sca
       setSelectedBranch(repository.defaultBranch);
     }
   }, [repository?.selectedBranch, repository?.defaultBranch]);
+
+  const handleBranchSelect = async (branchName: string) => {
+    if (!repository || branchName === selectedBranch) return;
+
+    setSelectedBranch(branchName);
+    await updateRepoSelectedBranch(repository.id, branchName);
+  };
 
   const handleScan = async () => {
     if (!repository || !selectedBranch) {
@@ -120,21 +120,6 @@ export function RepoClient({ repository, branchTestStatus, routes, coverage, sca
               </CardDescription>
             </div>
             <div className="flex gap-2">
-              <Select value={selectedBranch} onValueChange={setSelectedBranch}>
-                <SelectTrigger className="w-[200px]">
-                  <SelectValue placeholder="Select branch" />
-                </SelectTrigger>
-                <SelectContent>
-                  {branches.map((branch) => (
-                    <SelectItem key={branch.name} value={branch.name}>
-                      <div className="flex items-center gap-2">
-                        <GitBranch className="h-4 w-4" />
-                        {branch.name}
-                      </div>
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
               <Button onClick={handleScan} disabled={isScanning || !selectedBranch}>
                 {isScanning ? (
                   <>
@@ -166,7 +151,7 @@ export function RepoClient({ repository, branchTestStatus, routes, coverage, sca
           <div className="flex items-center justify-between p-3 bg-muted/50 rounded-lg">
             <div className="flex items-center gap-2 text-sm">
               <GitBranch className="h-4 w-4 text-muted-foreground" />
-              <span className="text-muted-foreground">Selected branch:</span>
+              <span className="text-muted-foreground">Active branch:</span>
               <code className="font-mono text-xs px-2 py-1 rounded bg-background">
                 {selectedBranch || 'None selected'}
               </code>
@@ -189,7 +174,7 @@ export function RepoClient({ repository, branchTestStatus, routes, coverage, sca
         <CardHeader>
           <CardTitle>Branches</CardTitle>
           <CardDescription>
-            View all branches and their test status
+            Click a branch to set it as active for scanning
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -207,18 +192,29 @@ export function RepoClient({ repository, branchTestStatus, routes, coverage, sca
             <div className="space-y-1">
               {branches.map((branch) => {
                 const hasTested = branchTestStatus[branch.name] || false;
+                const isActive = selectedBranch === branch.name;
 
                 return (
                   <div
                     key={branch.name}
-                    className="flex items-center justify-between p-3 rounded-lg hover:bg-muted/50 border"
+                    onClick={() => handleBranchSelect(branch.name)}
+                    className={`flex items-center justify-between p-3 rounded-lg cursor-pointer transition-colors ${
+                      isActive
+                        ? 'border-2 border-primary bg-primary/5'
+                        : 'border hover:bg-muted/50'
+                    }`}
                   >
                     <div className="flex items-center gap-3">
-                      <GitBranch className="h-4 w-4 text-muted-foreground" />
+                      <GitBranch className={`h-4 w-4 ${isActive ? 'text-primary' : 'text-muted-foreground'}`} />
                       <span className="font-mono text-sm">{branch.name}</span>
                       {branch.protected && (
                         <Badge variant="secondary" className="text-xs">
                           protected
+                        </Badge>
+                      )}
+                      {isActive && (
+                        <Badge variant="default" className="text-xs">
+                          Active
                         </Badge>
                       )}
                     </div>

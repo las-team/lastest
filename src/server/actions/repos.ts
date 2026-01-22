@@ -72,7 +72,10 @@ export async function updateRepoBaseline(repositoryId: string, branch: string) {
 
 export async function updateRepoSelectedBranch(repositoryId: string, branch: string) {
   await queries.updateRepository(repositoryId, { selectedBranch: branch });
+  revalidatePath('/');
   revalidatePath('/repo');
+  revalidatePath('/run');
+  revalidatePath('/builds');
 }
 
 export async function fetchRepoBranches(repositoryId: string): Promise<GitHubBranch[]> {
