@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
-import { GitBranch, RefreshCw } from 'lucide-react';
+import { Layers, RefreshCw } from 'lucide-react';
 import {
   Select,
   SelectContent,
@@ -82,7 +82,7 @@ export function RepoSelector({ initialRepos = [], initialSelected = null }: Repo
       disabled={isPending || repos.length === 0}
     >
       <SelectTrigger className="w-full">
-        <GitBranch className="h-4 w-4 mr-2 shrink-0" />
+        <Layers className="h-4 w-4 mr-2 shrink-0" />
         <SelectValue placeholder="Select repository">
           {selected?.fullName || 'Select repository'}
         </SelectValue>

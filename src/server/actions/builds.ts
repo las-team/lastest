@@ -149,7 +149,7 @@ async function runBuildAsync(
           branch,
           repositoryId
         );
-        if (diffResult.hasChanges) changesDetected++;
+        if (diffResult.classification === 'changed') changesDetected++;
         if (diffResult.classification === 'flaky') flakyCount++;
       }
     }

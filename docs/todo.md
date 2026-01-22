@@ -41,6 +41,3 @@ Research playwrights comparison options, how they work?
 Approve reject changes or create ticket -> gh issue
 
 ## bugs
-changed count is not correct on http://localhost:3000/builds/84fae06d-bf5a-4add-85e8-f4c2708bed3b 
-
-Change the repo icon in the sidebar to something other than a branch
