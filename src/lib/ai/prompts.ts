@@ -33,7 +33,9 @@ When testing routes with parameters like /users/[id] or /posts/[slug]:
 4. Explore the actual page with real data
 
 FINAL OUTPUT FORMAT:
-After exploration, generate standard Playwright test code:
+After exploration, generate standard Playwright test code.
+IMPORTANT: The function body must use plain JavaScript only - do NOT use TypeScript type annotations (no ": string", ": Type[]", "as Type", etc.) inside the function body. The signature uses types but the body is executed at runtime as JavaScript.
+
 \`\`\`typescript
 import { Page } from 'playwright';
 
@@ -43,6 +45,9 @@ ${TEST_SIGNATURE} {
 
   // Use selectors discovered from MCP exploration
   await page.locator('[data-testid="discovered-element"]').click();
+
+  // Use plain JS - no type annotations in the body
+  const items = [];
 
   stepLogger.log('Taking screenshot');
   await page.screenshot({ path: screenshotPath, fullPage: true });
@@ -83,7 +88,8 @@ Guidelines:
 - Add appropriate waits for dynamic content
 - Take screenshot at the end using the provided screenshotPath
 - Handle loading states and animations
-- Keep tests focused and atomic`;
+- Keep tests focused and atomic
+- IMPORTANT: Do NOT use TypeScript type annotations inside the function body (no ": string", ": number", ": string[]", etc). The function signature uses types but the body must be plain JavaScript since it is executed at runtime via eval.`;
 
 export function createTestPrompt(context: TestGenerationContext): string {
   const parts: string[] = [];
@@ -138,7 +144,7 @@ export function createTestPrompt(context: TestGenerationContext): string {
     }
   }
 
-  parts.push(`\nReturn ONLY the TypeScript code, no explanations. The code must start with the import and function signature.`);
+  parts.push(`\nReturn ONLY the code, no explanations. The code must start with the import and function signature. Do NOT use TypeScript type annotations inside the function body - only plain JavaScript.`);
 
   return parts.join('\n');
 }
@@ -160,7 +166,7 @@ Instructions:
 3. Keep the test's original intent
 4. Add better error handling if needed
 
-Return ONLY the fixed TypeScript code, no explanations.`;
+Return ONLY the fixed code, no explanations. Do NOT use TypeScript type annotations inside the function body - only plain JavaScript.`;
 }
 
 export function createEnhancePrompt(context: TestGenerationContext): string {
@@ -184,7 +190,7 @@ ${context.existingCode}
 - Add waits for dynamic content`);
   }
 
-  parts.push(`\nReturn ONLY the enhanced TypeScript code, no explanations.`);
+  parts.push(`\nReturn ONLY the enhanced code, no explanations. Do NOT use TypeScript type annotations inside the function body - only plain JavaScript.`);
 
   return parts.join('\n');
 }

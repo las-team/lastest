@@ -363,6 +363,30 @@ export class PlaywrightRunner extends EventEmitter {
     }
   }
 
+  /**
+   * Strip TypeScript type annotations from code so it can execute as plain JavaScript.
+   */
+  private stripTypeAnnotations(code: string): string {
+    let result = code;
+    // Remove variable type annotations: `const x: Type = ...` → `const x = ...`
+    // Handles generics like Array<string>, Record<string, number>, etc.
+    result = result.replace(
+      /\b(const|let|var)\s+(\w+)\s*:\s*[^=\n;]+(\s*=)/g,
+      '$1 $2$3'
+    );
+    // Remove type annotations on destructured assignments: `const { a, b }: Type = ...`
+    result = result.replace(
+      /\b(const|let|var)\s+(\{[^}]+\}|\[[^\]]+\])\s*:\s*[^=\n;]+(\s*=)/g,
+      '$1 $2$3'
+    );
+    // Remove `as Type` assertions (but not 'as' in other contexts like aliases)
+    result = result.replace(/\)\s+as\s+\w[\w<>\[\],\s|]*/g, ')');
+    result = result.replace(/(\w)\s+as\s+\w[\w<>\[\],\s|]*/g, '$1');
+    // Remove angle-bracket type assertions: `<Type>expr`
+    result = result.replace(/<\w[\w<>\[\],\s|]*>\s*(?=\(|[\w])/g, '');
+    return result;
+  }
+
   private async executeTestCode(page: Page, test: Test, runId: string, screenshotPath: string, onStepLabel?: (label: string) => void): Promise<void> {
     const code = test.code;
     if (!code) {
@@ -392,7 +416,8 @@ export class PlaywrightRunner extends EventEmitter {
       };
 
       // Strip import statements and the function wrapper, execute the body
-      const body = funcMatch[1];
+      // Also strip TypeScript annotations since code runs as plain JavaScript
+      const body = this.stripTypeAnnotations(funcMatch[1]);
 
       // Build an async function from the body
       const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
