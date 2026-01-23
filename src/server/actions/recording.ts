@@ -28,6 +28,11 @@ export async function startRecording(url: string, repositoryId?: string | null):
     cursorFPS: settings.cursorFPS ?? 30,
   });
 
+  // Check if OCR is enabled in selector priority settings
+  const selectorPriority = settings.selectorPriority;
+  const ocrConfig = selectorPriority?.find(s => s.type === 'ocr-text');
+  recorder.setOcrEnabled(ocrConfig?.enabled ?? false);
+
   try {
     await recorder.startRecording(url, sessionId);
     return { sessionId };

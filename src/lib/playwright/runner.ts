@@ -555,7 +555,11 @@ export class PlaywrightRunner extends EventEmitter {
       const fullPageMatch = line.match(/fullPage:\s*(true|false)/);
 
       if (pathMatch) {
-        const screenshotPath = pathMatch[1];
+        const rawPath = pathMatch[1];
+        // Resolve public URL paths (e.g. /screenshots/...) to filesystem paths
+        const screenshotPath = rawPath.startsWith('/screenshots/')
+          ? path.join('./public', rawPath)
+          : rawPath;
         const fullPage = fullPageMatch ? fullPageMatch[1] === 'true' : false;
         await page.screenshot({ path: screenshotPath, fullPage });
       }

@@ -8,8 +8,8 @@ AI enablement /home/ewyct/.claude/plans/moonlit-fluttering-origami.md
 
 --------
 ## test
-cursor recroding
-
+cursor recroding w excalidraw
+OCR
 
 ## features
 
@@ -17,9 +17,6 @@ UI & UX
     Use the frontend design skill and subagent for this
     Revise frontend and make sure you havent steered far and try to use standard shadcn css where possible
     make sure every page has a clear primary action if there are more than one. If you cant decide ask me a question about it
-
-Implement the OCR feature to identify the selected UI element's text label
-
 
 ## ideas
 Imported document -> US & AC -> tests - US checklist overview

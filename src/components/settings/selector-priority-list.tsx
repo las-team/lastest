@@ -30,7 +30,7 @@ const SELECTOR_LABELS: Record<SelectorType, { name: string; description: string 
   'aria-label': { name: 'aria-label', description: 'Elements with aria-label attribute' },
   'text': { name: 'Text Content', description: 'Visible text in buttons/links' },
   'css-path': { name: 'CSS Path', description: 'CSS selector path (fallback)' },
-  'ocr-text': { name: 'OCR Text', description: 'Text via OCR (coming soon)' },
+  'ocr-text': { name: 'OCR Text', description: 'Text extracted via OCR' },
 };
 
 interface SortableItemProps {
@@ -55,7 +55,6 @@ function SortableItem({ item, onToggle }: SortableItemProps) {
   };
 
   const label = SELECTOR_LABELS[item.type];
-  const isOcr = item.type === 'ocr-text';
 
   return (
     <div
@@ -79,11 +78,6 @@ function SortableItem({ item, onToggle }: SortableItemProps) {
           <span className="text-xs bg-gray-100 px-1.5 py-0.5 rounded text-gray-500">
             #{item.priority}
           </span>
-          {isOcr && (
-            <span className="text-xs bg-amber-100 px-1.5 py-0.5 rounded text-amber-600">
-              Soon
-            </span>
-          )}
         </div>
         <p className="text-xs text-gray-500 truncate">{label.description}</p>
       </div>
@@ -91,7 +85,6 @@ function SortableItem({ item, onToggle }: SortableItemProps) {
       <Switch
         checked={item.enabled}
         onCheckedChange={(checked) => onToggle(item.type, checked)}
-        disabled={isOcr}
       />
     </div>
   );
@@ -151,7 +144,6 @@ export function SelectorPriorityList({ value, onChange }: SelectorPriorityListPr
         <div className="space-y-2">
           {value.map((item) => {
             const label = SELECTOR_LABELS[item.type];
-            const isOcr = item.type === 'ocr-text';
             return (
               <div
                 key={item.type}
@@ -166,11 +158,6 @@ export function SelectorPriorityList({ value, onChange }: SelectorPriorityListPr
                     <span className="text-xs bg-gray-100 px-1.5 py-0.5 rounded text-gray-500">
                       #{item.priority}
                     </span>
-                    {isOcr && (
-                      <span className="text-xs bg-amber-100 px-1.5 py-0.5 rounded text-amber-600">
-                        Soon
-                      </span>
-                    )}
                   </div>
                   <p className="text-xs text-gray-500 truncate">{label.description}</p>
                 </div>

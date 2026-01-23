@@ -3,6 +3,7 @@ import { EventEmitter } from 'events';
 import path from 'path';
 import fs from 'fs';
 import type { ActionSelector, SelectorType } from '@/lib/db/schema';
+import { extractText, terminateWorker } from './ocr';
 
 export type AssertionType = 'pageLoad' | 'networkIdle' | 'urlMatch' | 'domContentLoaded';
 
@@ -46,6 +47,8 @@ export class PlaywrightRecorder extends EventEmitter {
   private isRecording = false;
   private repositoryId: string | null;
   private settings: CursorSettings = { pointerGestures: false, cursorFPS: 30 };
+  private ocrEnabled = false;
+  private pendingOcrPromises: Promise<void>[] = [];
 
   constructor(repositoryId?: string | null, screenshotDir?: string) {
     super();
@@ -59,6 +62,10 @@ export class PlaywrightRecorder extends EventEmitter {
 
   setSettings(settings: CursorSettings) {
     this.settings = settings;
+  }
+
+  setOcrEnabled(enabled: boolean) {
+    this.ocrEnabled = enabled;
   }
 
   async startRecording(url: string, sessionId: string): Promise<void> {
@@ -126,10 +133,34 @@ export class PlaywrightRecorder extends EventEmitter {
     });
 
     // Expose function to track interactions from the page - MUST await
-    await this.page.exposeFunction('__recordAction', (action: string, selectors: ActionSelector[], value?: string) => {
+    await this.page.exposeFunction('__recordAction', (action: string, selectors: ActionSelector[], value?: string, boundingBox?: { x: number; y: number; width: number; height: number }) => {
       // Store both multi-selector array and legacy single selector for backwards compatibility
       const primarySelector = selectors[0]?.value || '';
-      this.addEvent('action', { action, selector: primarySelector, selectors, value });
+      const event: RecordingEvent = {
+        type: 'action',
+        timestamp: Date.now(),
+        data: { action, selector: primarySelector, selectors, value },
+      };
+      if (this.session) {
+        this.session.events.push(event);
+        this.emit('event', event);
+      }
+
+      // Run OCR asynchronously if enabled and bounding box is large enough
+      if (this.ocrEnabled && boundingBox && boundingBox.width > 10 && boundingBox.height > 10 && this.page) {
+        const ocrPromise = (async () => {
+          try {
+            const buffer = await this.page!.screenshot({
+              clip: { x: boundingBox.x, y: boundingBox.y, width: boundingBox.width, height: boundingBox.height },
+            });
+            const text = await extractText(Buffer.from(buffer));
+            if (text && event.data.selectors) {
+              event.data.selectors.push({ type: 'ocr-text' as SelectorType, value: `ocr-text="${text}"` });
+            }
+          } catch { /* OCR failure is non-fatal */ }
+        })();
+        this.pendingOcrPromises.push(ocrPromise);
+      }
     });
 
     // Expose cursor move tracking if pointer gestures enabled
@@ -153,8 +184,10 @@ export class PlaywrightRecorder extends EventEmitter {
       document.addEventListener('click', (e) => {
         const target = e.target as HTMLElement;
         const selectors = generateAllSelectors(target);
+        const rect = target.getBoundingClientRect();
+        const boundingBox = { x: rect.x, y: rect.y, width: rect.width, height: rect.height };
         // @ts-ignore
-        window.__recordAction?.('click', selectors);
+        window.__recordAction?.('click', selectors, undefined, boundingBox);
       }, true);
 
       document.addEventListener('input', (e) => {
@@ -342,6 +375,13 @@ export class PlaywrightRecorder extends EventEmitter {
 
     this.isRecording = false;
 
+    // Await all pending OCR extractions before generating code
+    if (this.pendingOcrPromises.length > 0) {
+      await Promise.allSettled(this.pendingOcrPromises);
+      this.pendingOcrPromises = [];
+    }
+    await terminateWorker();
+
     // Generate Playwright code from events
     this.session.generatedCode = this.generateCode();
     this.addEvent('complete', { code: this.session.generatedCode });
@@ -375,7 +415,13 @@ export class PlaywrightRecorder extends EventEmitter {
       `async function locateWithFallback(page, selectors, action, value) {`,
       `  for (const sel of selectors) {`,
       `    try {`,
-      `      const locator = page.locator(sel.value);`,
+      `      let locator;`,
+      `      if (sel.type === 'ocr-text') {`,
+      `        const text = sel.value.replace(/^ocr-text="/, '').replace(/"$/, '');`,
+      `        locator = page.getByText(text, { exact: false });`,
+      `      } else {`,
+      `        locator = page.locator(sel.value);`,
+      `      }`,
       `      await locator.waitFor({ timeout: 2000 });`,
       `      if (action === 'click') await locator.click();`,
       `      else if (action === 'fill') await locator.fill(value || '');`,
