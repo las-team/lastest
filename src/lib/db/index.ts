@@ -170,6 +170,8 @@ export function initializeDatabase() {
       headless INTEGER DEFAULT 0,
       navigation_timeout INTEGER DEFAULT 30000,
       action_timeout INTEGER DEFAULT 5000,
+      pointer_gestures INTEGER DEFAULT 0,
+      cursor_fps INTEGER DEFAULT 30,
       created_at INTEGER,
       updated_at INTEGER
     );
@@ -339,6 +341,20 @@ function runMigrations() {
   // Migration: Add base_url to builds if missing
   if (!buildColumnNames.has('base_url')) {
     sqlite.exec('ALTER TABLE builds ADD COLUMN base_url TEXT');
+  }
+
+  // Get existing columns in playwright_settings table
+  const pwColumns = sqlite.prepare('PRAGMA table_info(playwright_settings)').all() as { name: string }[];
+  const pwColumnNames = new Set(pwColumns.map(c => c.name));
+
+  // Migration: Add pointer_gestures to playwright_settings if missing
+  if (!pwColumnNames.has('pointer_gestures')) {
+    sqlite.exec('ALTER TABLE playwright_settings ADD COLUMN pointer_gestures INTEGER DEFAULT 0');
+  }
+
+  // Migration: Add cursor_fps to playwright_settings if missing
+  if (!pwColumnNames.has('cursor_fps')) {
+    sqlite.exec('ALTER TABLE playwright_settings ADD COLUMN cursor_fps INTEGER DEFAULT 30');
   }
 
   // Migration: Create route_test_suggestions table if missing

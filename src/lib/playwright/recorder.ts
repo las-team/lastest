@@ -7,7 +7,7 @@ import type { ActionSelector, SelectorType } from '@/lib/db/schema';
 export type AssertionType = 'pageLoad' | 'networkIdle' | 'urlMatch' | 'domContentLoaded';
 
 export interface RecordingEvent {
-  type: 'action' | 'navigation' | 'screenshot' | 'error' | 'complete' | 'assertion';
+  type: 'action' | 'navigation' | 'screenshot' | 'error' | 'complete' | 'assertion' | 'cursor-move';
   timestamp: number;
   data: {
     action?: string;
@@ -19,6 +19,7 @@ export interface RecordingEvent {
     error?: string;
     code?: string;
     assertionType?: AssertionType;
+    coordinates?: { x: number; y: number };
   };
 }
 
@@ -30,6 +31,11 @@ export interface RecordingSession {
   generatedCode: string;
 }
 
+export interface CursorSettings {
+  pointerGestures: boolean;
+  cursorFPS: number;
+}
+
 export class PlaywrightRecorder extends EventEmitter {
   private browser: Browser | null = null;
   private context: BrowserContext | null = null;
@@ -39,6 +45,7 @@ export class PlaywrightRecorder extends EventEmitter {
   private screenshotDir: string;
   private isRecording = false;
   private repositoryId: string | null;
+  private settings: CursorSettings = { pointerGestures: false, cursorFPS: 30 };
 
   constructor(repositoryId?: string | null, screenshotDir?: string) {
     super();
@@ -48,6 +55,10 @@ export class PlaywrightRecorder extends EventEmitter {
     this.screenshotDir = this.repositoryId
       ? path.join(baseDir, this.repositoryId)
       : baseDir;
+  }
+
+  setSettings(settings: CursorSettings) {
+    this.settings = settings;
   }
 
   async startRecording(url: string, sessionId: string): Promise<void> {
@@ -121,8 +132,18 @@ export class PlaywrightRecorder extends EventEmitter {
       this.addEvent('action', { action, selector: primarySelector, selectors, value });
     });
 
+    // Expose cursor move tracking if pointer gestures enabled
+    if (this.settings.pointerGestures) {
+      await this.page.exposeFunction('__recordCursorMove', (x: number, y: number) => {
+        this.addEvent('cursor-move', { coordinates: { x, y } });
+      });
+    }
+
+    const pointerGestures = this.settings.pointerGestures;
+    const cursorFPS = this.settings.cursorFPS;
+
     // Inject interaction tracking script - MUST await
-    await this.page.addInitScript(() => {
+    await this.page.addInitScript(({ pointerGestures: pg, cursorFPS: fps }) => {
       // Type definition for selectors captured in browser context
       interface BrowserActionSelector {
         type: string;
@@ -255,7 +276,21 @@ export class PlaywrightRecorder extends EventEmitter {
         }
         return path.slice(-3).join(' > ');
       }
-    });
+
+      // Throttled cursor move tracking
+      if (pg) {
+        const interval = Math.round(1000 / fps);
+        let lastTime = 0;
+        document.addEventListener('mousemove', (e: MouseEvent) => {
+          const now = Date.now();
+          if (now - lastTime >= interval) {
+            lastTime = now;
+            // @ts-ignore
+            window.__recordCursorMove?.(e.clientX, e.clientY);
+          }
+        }, true);
+      }
+    }, { pointerGestures, cursorFPS });
   }
 
   private addEvent(type: RecordingEvent['type'], data: RecordingEvent['data']) {
@@ -331,6 +366,8 @@ export class PlaywrightRecorder extends EventEmitter {
   private generateCode(): string {
     if (!this.session) return '';
 
+    const hasCursorEvents = this.session.events.some(e => e.type === 'cursor-move');
+
     const lines: string[] = [
       `import { test, expect } from '@playwright/test';`,
       '',
@@ -349,11 +386,47 @@ export class PlaywrightRecorder extends EventEmitter {
       `  throw new Error('No selector matched: ' + JSON.stringify(selectors));`,
       `}`,
       '',
-      `test('${this.session.id}', async ({ page }) => {`,
     ];
 
+    if (hasCursorEvents) {
+      lines.push(
+        `// Replay cursor path helper`,
+        `async function replayCursorPath(page, moves) {`,
+        `  for (const [x, y, delay] of moves) {`,
+        `    await page.mouse.move(x, y);`,
+        `    if (delay > 0) await page.waitForTimeout(delay);`,
+        `  }`,
+        `}`,
+        '',
+      );
+    }
+
+    lines.push(`test('${this.session.id}', async ({ page }) => {`);
+
     let lastAction = '';
+    let cursorBatch: [number, number, number][] = [];
+    let lastCursorTimestamp = 0;
+
+    const flushCursorBatch = () => {
+      if (cursorBatch.length > 0) {
+        const tuples = cursorBatch.map(t => `[${t[0]},${t[1]},${t[2]}]`).join(',');
+        lines.push(`  await replayCursorPath(page, [${tuples}]);`);
+        cursorBatch = [];
+      }
+    };
+
     for (const event of this.session.events) {
+      if (event.type === 'cursor-move' && event.data.coordinates) {
+        const { x, y } = event.data.coordinates;
+        const delay = lastCursorTimestamp > 0 ? event.timestamp - lastCursorTimestamp : 0;
+        cursorBatch.push([x, y, delay]);
+        lastCursorTimestamp = event.timestamp;
+        continue;
+      }
+
+      // Flush any pending cursor moves before other events
+      flushCursorBatch();
+
       if (event.type === 'navigation' && event.data.url) {
         // Only add goto for the first navigation or if URL changed significantly
         if (!lastAction.includes('goto')) {
@@ -418,6 +491,7 @@ export class PlaywrightRecorder extends EventEmitter {
       }
     }
 
+    flushCursorBatch();
     lines.push('});', '');
     return lines.join('\n');
   }

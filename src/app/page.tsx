@@ -1,7 +1,7 @@
 import { Header } from '@/components/layout/header';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { CheckCircle, XCircle, Clock, FileCode, Folder, AlertTriangle, Loader2 } from 'lucide-react';
+import { CheckCircle, XCircle, Clock, FileCode, Folder, AlertTriangle, Loader2, PenLine, FolderSearch, Sparkles, Globe, FileSearch } from 'lucide-react';
 import {
   getTests,
   getFunctionalAreas,
@@ -115,19 +115,41 @@ export default async function DashboardPage() {
         </div>
 
         {/* Route Coverage */}
-        {coverage.total > 0 && (
-          <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-base">Route Coverage</CardTitle>
-              <CardDescription>
-                Test coverage across discovered routes
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-base">Route Coverage</CardTitle>
+            <CardDescription>
+              {coverage.total > 0
+                ? 'Test coverage across discovered routes'
+                : 'No routes detected — get started with one of these options'}
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            {coverage.total > 0 ? (
               <CoverageBar covered={coverage.withTests} total={coverage.total} />
-            </CardContent>
-          </Card>
-        )}
+            ) : (
+              <div className="grid grid-cols-5 gap-4">
+                {[
+                  { label: 'Manual', description: 'Add tests & areas manually', icon: PenLine, href: '/tests' },
+                  { label: 'Scan Routes', description: 'Discover routes from repo', icon: FolderSearch, href: '/repo' },
+                  { label: 'AI Routes', description: 'AI-powered route discovery', icon: Sparkles, href: '/repo' },
+                  { label: 'MCP Routes', description: 'MCP-based exploration', icon: Globe, href: '/repo' },
+                  { label: 'Analyze Specs', description: 'Parse API/route specs', icon: FileSearch, href: '/repo' },
+                ].map((card) => (
+                  <Link
+                    key={card.label}
+                    href={card.href}
+                    className="flex flex-col items-center gap-2 p-4 border rounded-lg hover:bg-muted/50 hover:border-primary/50 transition-colors text-center"
+                  >
+                    <card.icon className="h-6 w-6 text-primary" />
+                    <span className="font-medium text-sm">{card.label}</span>
+                    <span className="text-xs text-muted-foreground">{card.description}</span>
+                  </Link>
+                ))}
+              </div>
+            )}
+          </CardContent>
+        </Card>
 
         {/* Recent Builds */}
         <Card>

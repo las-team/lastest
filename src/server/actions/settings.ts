@@ -17,6 +17,8 @@ export async function savePlaywrightSettings(data: {
   headless?: boolean;
   navigationTimeout?: number;
   actionTimeout?: number;
+  pointerGestures?: boolean;
+  cursorFPS?: number;
 }) {
   const { repositoryId, ...settingsData } = data;
 

@@ -7,18 +7,11 @@ Determining test coverage /home/ewyct/.claude/plans/zazzy-tinkering-backus.md
 AI enablement /home/ewyct/.claude/plans/moonlit-fluttering-origami.md
 
 --------
-## started
+## test
+cursor recroding
+
 
 ## features
-
-
-Welcome
-    Setup github
-    Setup AI
-    Scan for routes NLP, AI, Explore, Spec, Manual
-    Add AI enhanced tests
-
-Constant cursor recording
 
 UI & UX 
     Use the frontend design skill and subagent for this

@@ -223,6 +223,8 @@ export const playwrightSettings = sqliteTable('playwright_settings', {
   headless: integer('headless', { mode: 'boolean' }).default(false),
   navigationTimeout: integer('navigation_timeout').default(30000),
   actionTimeout: integer('action_timeout').default(5000),
+  pointerGestures: integer('pointer_gestures', { mode: 'boolean' }).default(false),
+  cursorFPS: integer('cursor_fps').default(30),
   createdAt: integer('created_at', { mode: 'timestamp' }),
   updatedAt: integer('updated_at', { mode: 'timestamp' }),
 });

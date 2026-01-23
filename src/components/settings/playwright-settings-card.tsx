@@ -40,6 +40,8 @@ export function PlaywrightSettingsCard({
   const [headless, setHeadless] = useState(settings.headless || false);
   const [navigationTimeout, setNavigationTimeout] = useState(settings.navigationTimeout || 30000);
   const [actionTimeout, setActionTimeout] = useState(settings.actionTimeout || 5000);
+  const [pointerGestures, setPointerGestures] = useState(settings.pointerGestures ?? false);
+  const [cursorFPS, setCursorFPS] = useState(settings.cursorFPS ?? 30);
 
   const handleSave = () => {
     startTransition(async () => {
@@ -52,6 +54,8 @@ export function PlaywrightSettingsCard({
         headless,
         navigationTimeout,
         actionTimeout,
+        pointerGestures,
+        cursorFPS,
       });
     });
   };
@@ -66,6 +70,8 @@ export function PlaywrightSettingsCard({
       setHeadless(false);
       setNavigationTimeout(30000);
       setActionTimeout(5000);
+      setPointerGestures(false);
+      setCursorFPS(30);
     });
   };
 
@@ -73,6 +79,33 @@ export function PlaywrightSettingsCard({
     <div className="space-y-6">
       {/* Selector Priority */}
       <SelectorPriorityList value={selectorPriority} onChange={setSelectorPriority} />
+
+      {/* Cursor Movement Tracking */}
+      <div className="space-y-3">
+        <div className="flex items-center justify-between">
+          <div className="space-y-0.5">
+            <Label>Cursor Movement Tracking</Label>
+            <p className="text-xs text-muted-foreground">
+              Record mouse movements during test recording
+            </p>
+          </div>
+          <Switch checked={pointerGestures} onCheckedChange={setPointerGestures} />
+        </div>
+        {pointerGestures && (
+          <div className="flex items-center gap-2 pl-1">
+            <Label htmlFor="cursorFPS" className="text-sm whitespace-nowrap">Capture FPS</Label>
+            <Input
+              id="cursorFPS"
+              type="number"
+              min={1}
+              max={60}
+              value={cursorFPS}
+              onChange={(e) => setCursorFPS(Math.max(1, Math.min(60, parseInt(e.target.value) || 30)))}
+              className="w-20"
+            />
+          </div>
+        )}
+      </div>
 
       {/* Browser Settings */}
       {!compact && (

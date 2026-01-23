@@ -612,6 +612,8 @@ export async function getPlaywrightSettings(repositoryId?: string | null) {
     headless: false,
     navigationTimeout: 30000,
     actionTimeout: 5000,
+    pointerGestures: false,
+    cursorFPS: 30,
     createdAt: null,
     updatedAt: null,
   };

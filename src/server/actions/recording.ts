@@ -1,7 +1,7 @@
 'use server';
 
 import { getRecorder, type AssertionType } from '@/lib/playwright/recorder';
-import { createTest, createFunctionalArea, getFunctionalAreas } from '@/lib/db/queries';
+import { createTest, createFunctionalArea, getFunctionalAreas, getPlaywrightSettings } from '@/lib/db/queries';
 import { v4 as uuid } from 'uuid';
 import { revalidatePath } from 'next/cache';
 
@@ -20,6 +20,13 @@ export async function startRecording(url: string, repositoryId?: string | null):
   }
 
   const sessionId = uuid();
+
+  // Fetch settings and pass cursor tracking config to recorder
+  const settings = await getPlaywrightSettings(repositoryId);
+  recorder.setSettings({
+    pointerGestures: settings.pointerGestures ?? false,
+    cursorFPS: settings.cursorFPS ?? 30,
+  });
 
   try {
     await recorder.startRecording(url, sessionId);
