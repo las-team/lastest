@@ -127,6 +127,36 @@ export async function saveGeneratedTest(data: {
   }
 }
 
+export async function aiFixAllFailedTests(
+  repositoryId: string
+): Promise<{ success: boolean; fixed: number; failed: number; errors: string[] }> {
+  const allTests = await queries.getTestsByRepo(repositoryId);
+  const errors: string[] = [];
+  let fixed = 0;
+  let failed = 0;
+
+  for (const test of allTests) {
+    const results = await queries.getTestResultsByTest(test.id);
+    const latestResult = results[results.length - 1];
+
+    if (latestResult?.status !== 'failed') continue;
+
+    const errorMessage = latestResult.errorMessage || 'Test failed with unknown error';
+    const result = await aiFixTest(repositoryId, test.id, errorMessage);
+
+    if (result.success && result.code) {
+      await queries.updateTest(test.id, { code: result.code });
+      fixed++;
+    } else {
+      failed++;
+      errors.push(`${test.name}: ${result.error || 'Unknown error'}`);
+    }
+  }
+
+  revalidatePath('/tests');
+  return { success: true, fixed, failed, errors };
+}
+
 export async function updateTestCode(
   testId: string,
   code: string

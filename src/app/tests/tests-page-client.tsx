@@ -15,11 +15,12 @@ import {
 } from '@/components/ui/dialog';
 import { createFunctionalArea } from '@/server/actions/tests';
 import { generateBasicTests } from '@/server/actions/scanner';
+import { aiFixAllFailedTests } from '@/server/actions/ai';
 import { CoverageBar } from '@/components/coverage/coverage-bar';
 import { RouteSelectorDialog } from '@/components/routes/route-selector-dialog';
 import { AICreateTestDialog } from '@/components/ai/ai-create-test-dialog';
 import { MCPCreateTestDialog } from '@/components/ai/mcp-create-test-dialog';
-import { FileCode, Plus, FlaskConical, Sparkles, Wand2 } from 'lucide-react';
+import { FileCode, Plus, FlaskConical, Sparkles, Wand2, Wrench } from 'lucide-react';
 import Link from 'next/link';
 import type { FunctionalArea, Test, Route } from '@/lib/db/schema';
 
@@ -44,6 +45,22 @@ export function TestsPageClient({ areas, tests, routes, coverage, repositoryId, 
   const [isAICreateOpen, setIsAICreateOpen] = useState(false);
   const [isMCPCreateOpen, setIsMCPCreateOpen] = useState(false);
   const [showAllTests, setShowAllTests] = useState(false);
+  const [isFixingAll, setIsFixingAll] = useState(false);
+  const [fixResult, setFixResult] = useState<{ fixed: number; failed: number } | null>(null);
+
+  const failedTests = tests.filter(t => t.latestStatus === 'failed');
+
+  const handleFixAllFailed = async () => {
+    if (!repositoryId || failedTests.length === 0) return;
+    setIsFixingAll(true);
+    setFixResult(null);
+    try {
+      const result = await aiFixAllFailedTests(repositoryId);
+      setFixResult({ fixed: result.fixed, failed: result.failed });
+    } finally {
+      setIsFixingAll(false);
+    }
+  };
 
   const handleCreateArea = async () => {
     if (!newAreaName.trim()) return;
@@ -131,6 +148,17 @@ export function TestsPageClient({ areas, tests, routes, coverage, repositoryId, 
                     <div className="flex gap-2">
                       {repositoryId && (
                         <>
+                          {failedTests.length > 0 && (
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={handleFixAllFailed}
+                              disabled={isFixingAll}
+                            >
+                              <Wrench className="h-4 w-4 mr-2" />
+                              {isFixingAll ? 'Fixing...' : `Fix All Failed (${failedTests.length})`}
+                            </Button>
+                          )}
                           <Button
                             variant="outline"
                             size="sm"
@@ -157,6 +185,13 @@ export function TestsPageClient({ areas, tests, routes, coverage, repositoryId, 
                       </Button>
                     </div>
                   </div>
+
+                  {fixResult && (
+                    <div className="text-sm p-2 rounded bg-muted">
+                      Fixed {fixResult.fixed} test{fixResult.fixed !== 1 ? 's' : ''}.
+                      {fixResult.failed > 0 && ` ${fixResult.failed} could not be fixed.`}
+                    </div>
+                  )}
 
                   <div className="grid gap-2">
                     {(showAllTests ? tests : tests.slice(0, 5)).map((test) => (
