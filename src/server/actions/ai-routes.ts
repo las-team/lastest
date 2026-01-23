@@ -1,7 +1,7 @@
 'use server';
 
 import * as queries from '@/lib/db/queries';
-import { generateWithAI, createRouteScanPrompt, SYSTEM_PROMPT } from '@/lib/ai';
+import { generateWithAI, createRouteScanPrompt, createMCPExploreRoutesPrompt, SYSTEM_PROMPT, MCP_SYSTEM_PROMPT } from '@/lib/ai';
 import type { AIProviderConfig } from '@/lib/ai/types';
 import { revalidatePath } from 'next/cache';
 import { getRepoTree, getFileContent, type TreeEntry } from '@/lib/github/content';
@@ -138,6 +138,37 @@ export async function aiScanRoutes(
     return { success: true, routes };
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Failed to scan routes';
+    return { success: false, error: message };
+  }
+}
+
+export async function mcpExploreRoutes(
+  repositoryId: string,
+  baseURL: string
+): Promise<{ success: boolean; routes?: DiscoveredRoute[]; error?: string }> {
+  try {
+    const config = await getAIConfig(repositoryId);
+
+    // Get existing routes as seeds
+    const existingRoutes = await queries.getRoutesByRepo(repositoryId);
+    const existingPaths = existingRoutes.map((r) => r.path);
+
+    const prompt = createMCPExploreRoutesPrompt(baseURL, existingPaths);
+    const response = await generateWithAI(config, prompt, MCP_SYSTEM_PROMPT, {
+      actionType: 'mcp_explore',
+      repositoryId,
+    });
+
+    // Parse JSON response
+    const jsonMatch = response.match(/\[[\s\S]*\]/);
+    if (!jsonMatch) {
+      return { success: false, error: 'AI did not return valid JSON' };
+    }
+
+    const routes: DiscoveredRoute[] = JSON.parse(jsonMatch[0]);
+    return { success: true, routes };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Failed to explore routes';
     return { success: false, error: message };
   }
 }

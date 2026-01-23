@@ -17,6 +17,7 @@ import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Play, Trash2, Copy, Edit2, Clock, CheckCircle, XCircle, X, Save, Wrench, Wand2, Loader2 } from 'lucide-react';
 import { deleteTest, updateTest } from '@/server/actions/tests';
+import { runTests, getRunStatus } from '@/server/actions/runs';
 import { aiFixTest, aiEnhanceTest, updateTestCode } from '@/server/actions/ai';
 import { toast } from 'sonner';
 import type { Test, TestResult } from '@/lib/db/schema';
@@ -38,6 +39,9 @@ export function TestDetailClient({ test, results, repositoryId, screenshots = []
   const [editUrl, setEditUrl] = useState(test.targetUrl || '');
   const [editCode, setEditCode] = useState(test.code || '');
 
+  // Run state
+  const [isRunning, setIsRunning] = useState(false);
+
   // AI Fix/Enhance states
   const [isFixing, setIsFixing] = useState(false);
   const [isEnhancing, setIsEnhancing] = useState(false);
@@ -55,8 +59,25 @@ export function TestDetailClient({ test, results, repositoryId, screenshots = []
     }
   };
 
-  const handleRun = () => {
-    router.push(`/run?testId=${test.id}`);
+  const handleRun = async () => {
+    setIsRunning(true);
+    try {
+      const { runId } = await runTests([test.id], repositoryId);
+      toast.success('Test started');
+      // Poll for completion
+      const poll = setInterval(async () => {
+        const { isRunning: stillRunning } = await getRunStatus(repositoryId);
+        if (!stillRunning) {
+          clearInterval(poll);
+          setIsRunning(false);
+          router.refresh();
+          toast.success('Test completed');
+        }
+      }, 1000);
+    } catch (error) {
+      setIsRunning(false);
+      toast.error(error instanceof Error ? error.message : 'Failed to run test');
+    }
   };
 
   const handleSave = async () => {
@@ -169,9 +190,13 @@ export function TestDetailClient({ test, results, repositoryId, screenshots = []
                   </>
                 ) : (
                   <>
-                    <Button onClick={handleRun}>
-                      <Play className="h-4 w-4 mr-2" />
-                      Run
+                    <Button onClick={handleRun} disabled={isRunning}>
+                      {isRunning ? (
+                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                      ) : (
+                        <Play className="h-4 w-4 mr-2" />
+                      )}
+                      {isRunning ? 'Running...' : 'Run'}
                     </Button>
                     {repositoryId && (
                       <Button

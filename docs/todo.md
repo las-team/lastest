@@ -10,18 +10,16 @@ AI enablement /home/ewyct/.claude/plans/moonlit-fluttering-origami.md
 ## started
 
 ## features
-MCP explore for routes
-
-Automatically set first ever run as baseline
-
-Complete Setup
+Setup
     Add to the Dashboard a Setup guide that instructs the user to the following steps and navigates them to the right UI elements to perfom the action:
     Setup Github
     Setup AI
     Scan routes
     Add tests
     Run
-    Set as baseline    
+    Set a baseline 
+    Change stuff/or URL   
+
 
 Welcome
     Setup github
@@ -40,6 +38,7 @@ Implement the OCR feature to identify the selected UI element's text label
 
 
 ## ideas
+Imported document -> US & AC -> tests - US checklist overview
 Firecrawl?
 Research playwrights comparison options, how they work?
 Approve reject changes or create ticket -> gh issue

@@ -137,6 +137,7 @@ async function runTestsAsync(runId: string, tests: Test[], repositoryId?: string
   }
 
   revalidatePath('/run');
+  revalidatePath('/tests', 'layout');
   revalidatePath('/');
 }
 

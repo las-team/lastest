@@ -267,6 +267,40 @@ Guidelines:
 Return ONLY the JSON object, no explanations or markdown formatting.`;
 }
 
+export function createMCPExploreRoutesPrompt(baseURL: string, existingRoutes: string[]): string {
+  const seedSection = existingRoutes.length > 0
+    ? `\nAlready known routes (use as seed starting points to explore deeper):\n${existingRoutes.map(r => `- ${r}`).join('\n')}`
+    : '';
+
+  return `You are exploring a live web application to discover all available routes/pages.
+
+Base URL: ${baseURL}
+${seedSection}
+
+EXPLORATION INSTRUCTIONS:
+1. Navigate to ${baseURL} and take a snapshot to find navigation links, sidebars, menus
+2. Click through all discovered links and record each unique URL pathname
+3. After visiting top-level pages, look for sub-navigation, tabs, or nested links
+4. Visit any known routes listed above as additional starting points
+5. For each discovered page, note whether the route is static or dynamic (has IDs/slugs in the URL)
+
+IMPORTANT:
+- Only record routes that belong to this application (same origin as baseURL)
+- Convert dynamic segments to bracket notation (e.g., /users/123 → /users/[id])
+- Do NOT include hash fragments, query parameters, or external links
+- Explore as many unique pages as possible
+
+Return your findings as a JSON array with this exact structure:
+\`\`\`json
+[
+  {"path": "/dashboard", "type": "static", "description": "Main dashboard page"},
+  {"path": "/users/[id]", "type": "dynamic", "description": "User profile page"}
+]
+\`\`\`
+
+Return ONLY the JSON array inside a code block, no other text.`;
+}
+
 export function extractCodeFromResponse(response: string): string {
   // Try to extract code from markdown code blocks
   const codeBlockMatch = response.match(/```(?:typescript|ts|javascript|js)?\n([\s\S]*?)```/);
