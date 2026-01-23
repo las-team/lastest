@@ -285,6 +285,7 @@ export async function getBuildsByRepo(repositoryId: string, limit = 10) {
       flakyCount: builds.flakyCount,
       failedCount: builds.failedCount,
       passedCount: builds.passedCount,
+      baseUrl: builds.baseUrl,
       elapsedMs: builds.elapsedMs,
       createdAt: builds.createdAt,
       completedAt: builds.completedAt,

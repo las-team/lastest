@@ -19,15 +19,16 @@ Specification analysis
 
 MCP explore for routes
 
+Automatically set first ever run as baseline
 
-Run 
-    Reformat Base URLto look nice
-    Identify URL as local - remote - show on UI
-    If remote then the build run with it should show the baseURL instead of the branch it was ran on.
-    Add a Changes section under Base URL
-        It should show the top 5 larges changes between baseline and current builds
-        It should show how the number of passing tests changed since baseline
-    If a build has been completely accepted it should get a baseline 
+Complete Setup
+    Add to the Dashboard a Setup guide that instructs the user to the following steps and navigates them to the right UI elements to perfom the action:
+    Setup Github
+    Setup AI
+    Scan routes
+    Add tests
+    Run
+    Set as baseline    
 
 Welcome
     Setup github

@@ -111,6 +111,7 @@ export function initializeDatabase() {
       flaky_count INTEGER DEFAULT 0,
       failed_count INTEGER DEFAULT 0,
       passed_count INTEGER DEFAULT 0,
+      base_url TEXT,
       elapsed_ms INTEGER,
       created_at INTEGER,
       completed_at INTEGER
@@ -312,6 +313,15 @@ function runMigrations() {
   // Migration: Add description to routes if missing
   if (!routesColumnNames.has('description')) {
     sqlite.exec('ALTER TABLE routes ADD COLUMN description TEXT');
+  }
+
+  // Get existing columns in builds table
+  const buildColumns = sqlite.prepare('PRAGMA table_info(builds)').all() as { name: string }[];
+  const buildColumnNames = new Set(buildColumns.map(c => c.name));
+
+  // Migration: Add base_url to builds if missing
+  if (!buildColumnNames.has('base_url')) {
+    sqlite.exec('ALTER TABLE builds ADD COLUMN base_url TEXT');
   }
 
   // Migration: Create route_test_suggestions table if missing

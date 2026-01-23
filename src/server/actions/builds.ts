@@ -121,6 +121,7 @@ export async function createAndRunBuild(
     flakyCount: 0,
     failedCount: 0,
     passedCount: 0,
+    baseUrl: envConfig?.baseUrl || 'http://localhost:3000',
   });
 
   // Try to link to existing PR
@@ -419,4 +420,41 @@ export async function getBuildsByRepo(repositoryId: string, limit = 10) {
  */
 export async function getBuild(buildId: string) {
   return queries.getBuild(buildId);
+}
+
+/**
+ * Get latest build changes for the run dashboard
+ */
+export interface BuildChanges {
+  topChanges: { testName: string; percentageDifference: number }[];
+  passingDelta: number | null; // +/- compared to previous baseline build
+}
+
+export async function getLatestBuildChanges(repositoryId: string): Promise<BuildChanges | null> {
+  const recentBuilds = await queries.getBuildsByRepo(repositoryId, 10);
+  if (recentBuilds.length === 0) return null;
+
+  const latestBuild = recentBuilds[0];
+
+  // Get visual diffs for the latest build, sorted by percentage difference
+  const diffs = await queries.getVisualDiffsWithTestStatus(latestBuild.id);
+  const topChanges = diffs
+    .filter(d => d.percentageDifference && parseFloat(d.percentageDifference) > 0)
+    .sort((a, b) => parseFloat(b.percentageDifference!) - parseFloat(a.percentageDifference!))
+    .slice(0, 5)
+    .map(d => ({
+      testName: d.testName || 'Unknown test',
+      percentageDifference: parseFloat(d.percentageDifference!),
+    }));
+
+  // Find passing delta: compare latest build's passedCount to the previous baseline build
+  let passingDelta: number | null = null;
+  const baselineBuild = recentBuilds.find(
+    (b, i) => i > 0 && b.overallStatus === 'safe_to_merge'
+  );
+  if (baselineBuild && latestBuild.passedCount != null && baselineBuild.passedCount != null) {
+    passingDelta = (latestBuild.passedCount ?? 0) - (baselineBuild.passedCount ?? 0);
+  }
+
+  return { topChanges, passingDelta };
 }

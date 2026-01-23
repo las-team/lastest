@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { CheckCircle, AlertTriangle, XCircle, Clock, GitBranch } from 'lucide-react';
+import { CheckCircle, AlertTriangle, XCircle, Clock, GitBranch, Globe, Shield } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
 import type { Build, BuildStatus } from '@/lib/db/schema';
@@ -8,6 +8,26 @@ interface BuildSummaryCardProps {
   build: Build;
   gitBranch?: string;
   isActiveBranch?: boolean;
+  baseUrl?: string;
+  isBaseline?: boolean;
+}
+
+function isRemoteUrl(url?: string): boolean {
+  if (!url) return false;
+  try {
+    const hostname = new URL(url).hostname;
+    return hostname !== 'localhost' && hostname !== '127.0.0.1' && hostname !== '0.0.0.0';
+  } catch {
+    return false;
+  }
+}
+
+function getHostname(url: string): string {
+  try {
+    return new URL(url).host;
+  } catch {
+    return url;
+  }
 }
 
 const statusConfig: Record<BuildStatus, {
@@ -54,7 +74,7 @@ function formatDuration(elapsedMs: number | null): string {
   return `${(elapsedMs / 1000).toFixed(1)}s`;
 }
 
-export function BuildSummaryCard({ build, gitBranch, isActiveBranch }: BuildSummaryCardProps) {
+export function BuildSummaryCard({ build, gitBranch, isActiveBranch, baseUrl, isBaseline }: BuildSummaryCardProps) {
   const status = build.overallStatus as BuildStatus;
   const config = statusConfig[status];
   const StatusIcon = config.icon;
@@ -74,10 +94,21 @@ export function BuildSummaryCard({ build, gitBranch, isActiveBranch }: BuildSumm
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 font-medium">
             <span className="truncate">Build {build.id.slice(0, 8)}</span>
-            {gitBranch && (
+            {isRemoteUrl(baseUrl) ? (
+              <Badge variant="outline" className="text-xs font-normal gap-1 shrink-0">
+                <Globe className="h-3 w-3" />
+                {getHostname(baseUrl!)}
+              </Badge>
+            ) : gitBranch ? (
               <Badge variant={isActiveBranch ? 'default' : 'secondary'} className="text-xs font-normal gap-1 shrink-0">
                 <GitBranch className="h-3 w-3" />
                 {gitBranch}
+              </Badge>
+            ) : null}
+            {isBaseline && (
+              <Badge variant="outline" className="text-xs font-normal gap-1 shrink-0 border-green-300 text-green-700 bg-green-50">
+                <Shield className="h-3 w-3" />
+                Baseline
               </Badge>
             )}
           </div>

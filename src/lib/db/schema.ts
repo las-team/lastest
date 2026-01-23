@@ -131,6 +131,7 @@ export const builds = sqliteTable('builds', {
   flakyCount: integer('flaky_count').default(0),
   failedCount: integer('failed_count').default(0),
   passedCount: integer('passed_count').default(0),
+  baseUrl: text('base_url'),
   elapsedMs: integer('elapsed_ms'),
   createdAt: integer('created_at', { mode: 'timestamp' }),
   completedAt: integer('completed_at', { mode: 'timestamp' }),

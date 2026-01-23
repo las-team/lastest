@@ -12,8 +12,15 @@ import {
   Package,
   CheckCircle2,
   XCircle,
+  Globe,
+  Monitor,
+  TrendingUp,
+  TrendingDown,
+  Minus,
 } from 'lucide-react';
+import { Badge } from '@/components/ui/badge';
 import { createAndRunBuild } from '@/server/actions/builds';
+import type { BuildChanges } from '@/server/actions/builds';
 import { testServerConnection, saveEnvironmentConfig } from '@/server/actions/environment';
 import type { Test, TestRun, Build } from '@/lib/db/schema';
 import { BuildSummaryCard } from '@/components/builds/build-summary-card';
@@ -29,6 +36,7 @@ interface RunDashboardClientProps {
   repositoryId?: string | null;
   activeBranch?: string;
   baseUrl: string;
+  buildChanges?: BuildChanges | null;
 }
 
 const HISTORY_KEY = 'baseurl-history';
@@ -48,12 +56,22 @@ function pushUrlHistory(url: string) {
   localStorage.setItem(HISTORY_KEY, JSON.stringify(history.slice(0, 5)));
 }
 
-export function RunDashboardClient({ tests, runs, builds, repositoryId, activeBranch, baseUrl: initialBaseUrl }: RunDashboardClientProps) {
+function isLocalUrl(url: string): boolean {
+  try {
+    const hostname = new URL(url).hostname;
+    return hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '0.0.0.0';
+  } catch {
+    return true;
+  }
+}
+
+export function RunDashboardClient({ tests, runs, builds, repositoryId, activeBranch, baseUrl: initialBaseUrl, buildChanges }: RunDashboardClientProps) {
   const router = useRouter();
   const [isRunning, setIsRunning] = useState(false);
   const [baseUrl, setBaseUrl] = useState(initialBaseUrl);
   const [isTesting, setIsTesting] = useState(false);
-  const [testResult, setTestResult] = useState<{ success: boolean; responseTime?: number } | null>(null);
+  const [testResult, setTestResult] = useState<{ success: boolean; responseTime?: number; statusCode?: number; error?: string } | null>(null);
+  const [showHistory, setShowHistory] = useState(false);
   const [urlHistory, setUrlHistory] = useState<string[]>([]);
   const initialBaseUrlRef = useRef(initialBaseUrl);
 
@@ -61,34 +79,33 @@ export function RunDashboardClient({ tests, runs, builds, repositoryId, activeBr
     setUrlHistory(getUrlHistory());
     // Auto-test on mount
     testServerConnection(initialBaseUrl).then((result) => {
-      setTestResult({ success: result.success, responseTime: result.responseTime });
+      setTestResult({ success: result.success, responseTime: result.responseTime, statusCode: result.statusCode, error: result.error });
     });
   }, []);
 
-  const saveBaseUrl = async () => {
-    if (baseUrl === initialBaseUrlRef.current) return;
-    pushUrlHistory(baseUrl);
-    setUrlHistory(getUrlHistory());
-    initialBaseUrlRef.current = baseUrl;
-    await saveEnvironmentConfig({
-      repositoryId,
-      mode: 'manual',
-      baseUrl,
-    });
-  };
-
-  const handleTest = async () => {
+  const saveAndTestBaseUrl = async () => {
+    if (baseUrl !== initialBaseUrlRef.current) {
+      pushUrlHistory(baseUrl);
+      setUrlHistory(getUrlHistory());
+      initialBaseUrlRef.current = baseUrl;
+      await saveEnvironmentConfig({
+        repositoryId,
+        mode: 'manual',
+        baseUrl,
+      });
+    }
+    // Always test on blur
     setIsTesting(true);
     setTestResult(null);
     const result = await testServerConnection(baseUrl);
-    setTestResult({ success: result.success, responseTime: result.responseTime });
+    setTestResult({ success: result.success, responseTime: result.responseTime, statusCode: result.statusCode, error: result.error });
     setIsTesting(false);
   };
 
   const handleRunAll = async () => {
     setIsRunning(true);
     try {
-      await saveBaseUrl();
+      await saveAndTestBaseUrl();
       const { buildId, testRunId } = await createAndRunBuild('manual', undefined, repositoryId);
       router.push(`/builds/${buildId}`);
     } catch (error) {
@@ -137,41 +154,108 @@ export function RunDashboardClient({ tests, runs, builds, repositoryId, activeBr
           </Card>
 
           <Card>
-            <CardHeader className="pb-3">
-              <CardTitle className="text-sm font-medium">Base URL</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="flex items-center gap-2">
-                <Input
-                  value={baseUrl}
-                  onChange={(e) => { setBaseUrl(e.target.value); setTestResult(null); }}
-                  onBlur={saveBaseUrl}
-                  onKeyDown={(e) => { if (e.key === 'Enter') { e.currentTarget.blur(); } }}
-                  list="baseurl-history"
-                  placeholder="http://localhost:3000"
-                  className="text-sm"
-                />
-                <datalist id="baseurl-history">
-                  {urlHistory.map((url) => (
-                    <option key={url} value={url} />
-                  ))}
-                </datalist>
-                <Button variant="outline" size="sm" onClick={handleTest} disabled={isTesting}>
-                  {isTesting ? <Loader2 className="h-3 w-3 animate-spin" /> : 'Test'}
-                </Button>
-                {testResult && (
-                  <div className="flex items-center gap-1 text-xs whitespace-nowrap">
-                    {testResult.success ? (
-                      <CheckCircle2 className="h-3.5 w-3.5 text-green-500" />
+            <CardContent className="pt-4 pb-3 px-4">
+              <div className="flex items-center justify-between mb-2">
+                <div className="flex items-center gap-2">
+                  <span className="text-sm font-medium">Base URL</span>
+                  <Badge variant="outline" className="text-[10px] gap-0.5 px-1.5 py-0">
+                    {isLocalUrl(baseUrl) ? (
+                      <><Monitor className="h-2.5 w-2.5" /> Local</>
                     ) : (
-                      <XCircle className="h-3.5 w-3.5 text-red-500" />
+                      <><Globe className="h-2.5 w-2.5" /> Remote</>
                     )}
-                    {testResult.responseTime != null && (
-                      <span className="text-muted-foreground">{testResult.responseTime}ms</span>
+                  </Badge>
+                </div>
+                {isTesting ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />
+                ) : testResult && (
+                  <div className="flex items-center gap-1 text-xs">
+                    {testResult.success ? (
+                      <>
+                        <CheckCircle2 className="h-3.5 w-3.5 text-green-500" />
+                        {testResult.responseTime != null && (
+                          <span className="text-muted-foreground">{testResult.responseTime}ms</span>
+                        )}
+                      </>
+                    ) : (
+                      <>
+                        <XCircle className="h-3.5 w-3.5 text-red-500" />
+                        <span className="text-red-500">
+                          {testResult.statusCode ? testResult.statusCode : 'unreachable'}
+                        </span>
+                      </>
                     )}
                   </div>
                 )}
               </div>
+              <div className="relative">
+                <Input
+                  value={baseUrl}
+                  onChange={(e) => { setBaseUrl(e.target.value); setTestResult(null); setShowHistory(false); }}
+                  onBlur={() => { setTimeout(() => setShowHistory(false), 150); saveAndTestBaseUrl(); }}
+                  onFocus={() => { if (urlHistory.length > 0) setShowHistory(true); }}
+                  onKeyDown={(e) => { if (e.key === 'Enter') { e.currentTarget.blur(); } }}
+                  placeholder="http://localhost:3000"
+                  className="text-sm pr-8"
+                />
+                {showHistory && urlHistory.length > 0 && (
+                  <div className="absolute top-full left-0 right-0 z-50 mt-1 bg-popover border rounded-md shadow-md py-1">
+                    {urlHistory.filter(u => u !== baseUrl).map((url) => (
+                      <button
+                        key={url}
+                        type="button"
+                        className="w-full text-left px-3 py-1.5 text-sm hover:bg-accent truncate"
+                        onMouseDown={(e) => { e.preventDefault(); setBaseUrl(url); setShowHistory(false); setTestResult(null); }}
+                      >
+                        {url}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="text-sm font-medium">Changes</CardTitle>
+              <CardDescription className="text-xs">Latest build vs. baseline</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              {!buildChanges ? (
+                <p className="text-sm text-muted-foreground">Run builds to see changes here</p>
+              ) : buildChanges.topChanges.length === 0 && (!buildChanges.passingDelta) ? (
+                <p className="text-sm text-muted-foreground">No changes found :)</p>
+              ) : (
+                <>
+                  {buildChanges.passingDelta !== null && (
+                    <div className="flex items-center gap-2 text-sm">
+                      {buildChanges.passingDelta > 0 ? (
+                        <TrendingUp className="h-4 w-4 text-green-500" />
+                      ) : buildChanges.passingDelta < 0 ? (
+                        <TrendingDown className="h-4 w-4 text-red-500" />
+                      ) : (
+                        <Minus className="h-4 w-4 text-muted-foreground" />
+                      )}
+                      <span className="text-muted-foreground">Passing tests:</span>
+                      <span className={buildChanges.passingDelta > 0 ? 'text-green-600 font-medium' : buildChanges.passingDelta < 0 ? 'text-red-600 font-medium' : 'text-muted-foreground'}>
+                        {buildChanges.passingDelta > 0 ? '+' : ''}{buildChanges.passingDelta}
+                      </span>
+                    </div>
+                  )}
+                  {buildChanges.topChanges.length > 0 && (
+                    <div className="space-y-1.5">
+                      <div className="text-xs text-muted-foreground font-medium">Top changes</div>
+                      {buildChanges.topChanges.map((change, i) => (
+                        <div key={i} className="flex items-center justify-between text-xs">
+                          <span className="truncate flex-1 mr-2">{change.testName}</span>
+                          <span className="text-yellow-600 font-medium shrink-0">{change.percentageDifference.toFixed(1)}%</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </>
+              )}
             </CardContent>
           </Card>
         </div>
@@ -188,14 +272,19 @@ export function RunDashboardClient({ tests, runs, builds, repositoryId, activeBr
             <CardContent>
               {builds.length > 0 ? (
                 <div className="space-y-3">
-                  {builds.slice(0, 10).map((build) => (
-                    <BuildSummaryCard
-                      key={build.id}
-                      build={build}
-                      gitBranch={build.gitBranch}
-                      isActiveBranch={build.gitBranch === activeBranch}
-                    />
-                  ))}
+                  {(() => {
+                    const baselineBuildId = builds.find(b => b.overallStatus === 'safe_to_merge')?.id;
+                    return builds.slice(0, 10).map((build) => (
+                      <BuildSummaryCard
+                        key={build.id}
+                        build={build}
+                        gitBranch={build.gitBranch}
+                        isActiveBranch={build.gitBranch === activeBranch}
+                        baseUrl={build.baseUrl || undefined}
+                        isBaseline={build.id === baselineBuildId}
+                      />
+                    ));
+                  })()}
                 </div>
               ) : (
                 <div className="text-center py-8 text-muted-foreground">
