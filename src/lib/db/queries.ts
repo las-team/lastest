@@ -1178,6 +1178,42 @@ export async function getUnmatchedSuggestionsByRepo(repositoryId: string) {
   return suggestions.filter(s => !s.matchedTestId);
 }
 
+// Counts for setup guide
+export async function hasApprovedDiffs(repositoryId?: string | null) {
+  if (repositoryId) {
+    const row = await db
+      .select({ id: visualDiffs.id })
+      .from(visualDiffs)
+      .innerJoin(builds, eq(visualDiffs.buildId, builds.id))
+      .innerJoin(testRuns, eq(builds.testRunId, testRuns.id))
+      .where(and(eq(testRuns.repositoryId, repositoryId), eq(visualDiffs.status, 'approved')))
+      .limit(1)
+      .get();
+    return !!row;
+  }
+  const row = await db
+    .select({ id: visualDiffs.id })
+    .from(visualDiffs)
+    .where(eq(visualDiffs.status, 'approved'))
+    .limit(1)
+    .get();
+  return !!row;
+}
+
+export async function getBuildCount(repositoryId?: string | null) {
+  if (repositoryId) {
+    const rows = await db
+      .select({ id: builds.id })
+      .from(builds)
+      .innerJoin(testRuns, eq(builds.testRunId, testRuns.id))
+      .where(eq(testRuns.repositoryId, repositoryId))
+      .all();
+    return rows.length;
+  }
+  const rows = await db.select({ id: builds.id }).from(builds).all();
+  return rows.length;
+}
+
 // Background Jobs
 export async function createBackgroundJob(data: {
   type: BackgroundJobType;

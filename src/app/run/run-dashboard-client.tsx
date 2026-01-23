@@ -14,9 +14,6 @@ import {
   XCircle,
   Globe,
   Monitor,
-  TrendingUp,
-  TrendingDown,
-  Minus,
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { createAndRunBuild } from '@/server/actions/builds';
@@ -228,21 +225,51 @@ export function RunDashboardClient({ tests, runs, builds, repositoryId, activeBr
                 <p className="text-sm text-muted-foreground">No changes found :)</p>
               ) : (
                 <>
-                  {buildChanges.passingDelta !== null && (
-                    <div className="flex items-center gap-2 text-sm">
-                      {buildChanges.passingDelta > 0 ? (
-                        <TrendingUp className="h-4 w-4 text-green-500" />
-                      ) : buildChanges.passingDelta < 0 ? (
-                        <TrendingDown className="h-4 w-4 text-red-500" />
-                      ) : (
-                        <Minus className="h-4 w-4 text-muted-foreground" />
-                      )}
-                      <span className="text-muted-foreground">Passing tests:</span>
-                      <span className={buildChanges.passingDelta > 0 ? 'text-green-600 font-medium' : buildChanges.passingDelta < 0 ? 'text-red-600 font-medium' : 'text-muted-foreground'}>
-                        {buildChanges.passingDelta > 0 ? '+' : ''}{buildChanges.passingDelta}
-                      </span>
-                    </div>
-                  )}
+                  {builds.length >= 2 && (() => {
+                    const chartBuilds = [...builds].reverse();
+                    const data = chartBuilds.map(b => b.passedCount ?? 0);
+                    const max = Math.max(...data, 1);
+                    const min = Math.min(...data, 0);
+                    const range = max - min || 1;
+                    const w = 200, h = 48, px = 8, py = 6;
+                    const points = data.map((v, i) => ({
+                      x: px + (i / (data.length - 1)) * (w - 2 * px),
+                      y: py + (1 - (v - min) / range) * (h - 2 * py),
+                    }));
+                    const line = points.map((p, i) => `${i === 0 ? 'M' : 'L'}${p.x},${p.y}`).join(' ');
+                    const areaPath = `${line} L${points[points.length - 1].x},${h - py} L${points[0].x},${h - py} Z`;
+                    const latest = data[data.length - 1];
+                    const prev = data[data.length - 2];
+                    const delta = latest - prev;
+                    return (
+                      <div className="space-y-1">
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs text-muted-foreground">Passing tests</span>
+                          <div className="flex items-center gap-1.5 text-xs">
+                            <span className="font-medium">{latest}</span>
+                            {delta !== 0 && (
+                              <span className={delta > 0 ? 'text-green-600' : 'text-red-600'}>
+                                {delta > 0 ? '+' : ''}{delta}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                        <svg viewBox={`0 0 ${w} ${h}`} className="w-full h-12" preserveAspectRatio="none">
+                          <defs>
+                            <linearGradient id="passGrad" x1="0" y1="0" x2="0" y2="1">
+                              <stop offset="0%" stopColor="rgb(34,197,94)" stopOpacity="0.2" />
+                              <stop offset="100%" stopColor="rgb(34,197,94)" stopOpacity="0" />
+                            </linearGradient>
+                          </defs>
+                          <path d={areaPath} fill="url(#passGrad)" />
+                          <path d={line} fill="none" stroke="rgb(34,197,94)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                          {points.map((p, i) => (
+                            <circle key={i} cx={p.x} cy={p.y} r={i === points.length - 1 ? 3 : 1.5} fill="rgb(34,197,94)" />
+                          ))}
+                        </svg>
+                      </div>
+                    );
+                  })()}
                   {buildChanges.topChanges.length > 0 && (
                     <div className="space-y-1.5">
                       <div className="text-xs text-muted-foreground font-medium">Top changes</div>

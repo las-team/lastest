@@ -8,6 +8,7 @@ import { EnvironmentConfigCard } from '@/components/settings/environment-config-
 import { DiffSensitivityCard } from '@/components/settings/diff-sensitivity-card';
 import { AISettingsCard } from '@/components/settings/ai-settings-card';
 import { AILogsCard } from '@/components/settings/ai-logs-card';
+import { ResetSetupGuide } from '@/components/setup-guide/reset-setup-guide';
 
 export default async function SettingsPage({
   searchParams,
@@ -203,6 +204,10 @@ export default async function SettingsPage({
               <div className="flex justify-between">
                 <span className="text-muted-foreground">Framework</span>
                 <span>Next.js 16</span>
+              </div>
+              <div className="flex justify-between items-center pt-2 border-t">
+                <span className="text-muted-foreground">Setup Guide</span>
+                <ResetSetupGuide />
               </div>
             </CardContent>
           </Card>

@@ -28,6 +28,11 @@ interface BuildPollingWrapperProps {
 export function BuildPollingWrapper({ initialBuild, buildId, children }: BuildPollingWrapperProps) {
   const [build, setBuild] = useState<BuildData>(initialBuild);
   const [isPolling, setIsPolling] = useState(!initialBuild.completedAt);
+
+  // Mark "Check Results" setup guide step as complete on page visit
+  useEffect(() => {
+    try { localStorage.setItem('lastest2-results-viewed', 'true'); } catch {}
+  }, []);
   const router = useRouter();
 
   useEffect(() => {

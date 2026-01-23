@@ -11,7 +11,12 @@ import {
   getRouteCoverageStats,
   getRecentBuilds,
   getBuildsByRepo,
+  getGithubAccount,
+  hasApprovedDiffs,
+  getBuildCount,
+  getRoutesByRepo,
 } from '@/lib/db/queries';
+import { SetupGuide } from '@/components/setup-guide/setup-guide';
 import { CoverageBar } from '@/components/coverage/coverage-bar';
 import Link from 'next/link';
 
@@ -19,10 +24,14 @@ export default async function DashboardPage() {
   const selectedRepo = await getSelectedRepository();
 
   // Fetch data filtered by selected repo if available
-  const [tests, areas, recentBuilds] = await Promise.all([
+  const [tests, areas, recentBuilds, githubAccount, diffsApproved, buildCount, routesCount] = await Promise.all([
     selectedRepo ? getTestsByRepo(selectedRepo.id) : getTests(),
     selectedRepo ? getFunctionalAreasByRepo(selectedRepo.id) : getFunctionalAreas(),
     selectedRepo ? getBuildsByRepo(selectedRepo.id, 5) : getRecentBuilds(5),
+    getGithubAccount(),
+    hasApprovedDiffs(selectedRepo?.id),
+    getBuildCount(selectedRepo?.id),
+    selectedRepo ? getRoutesByRepo(selectedRepo.id).then(r => r.length) : Promise.resolve(0),
   ]);
 
   // Fetch route coverage stats
@@ -44,6 +53,19 @@ export default async function DashboardPage() {
       <Header title="Dashboard" />
 
       <div className="flex-1 p-6 space-y-6">
+        {/* Setup Guide */}
+        <SetupGuide
+          initialStatus={{
+            githubConnected: !!githubAccount,
+            routesExist: routesCount > 0,
+            testsExist: tests.length > 0,
+            buildsExist: buildCount > 0,
+            baselinesApproved: diffsApproved,
+            buildCount,
+          }}
+          latestBuildId={recentBuilds[0]?.id}
+        />
+
         {/* Stats Cards */}
         <div className="grid grid-cols-4 gap-4">
           <Card>
