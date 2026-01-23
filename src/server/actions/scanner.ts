@@ -70,7 +70,17 @@ export async function startRemoteRouteScan(repositoryId: string, branch: string)
       scannedAt: new Date(),
     }));
 
-    await queries.createRoutes(routesToCreate);
+    const createdRoutes = await queries.createRoutes(routesToCreate);
+
+    // Auto-create functional areas for each new route
+    for (const route of createdRoutes) {
+      const area = await queries.getOrCreateFunctionalAreaByRepo(
+        repositoryId,
+        route.path,
+        `Auto-generated area for route ${route.path}`
+      );
+      await queries.linkRouteToFunctionalArea(route.id, area.id);
+    }
 
     // Update scan status to completed
     await queries.updateScanStatus(status.id, {

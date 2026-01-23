@@ -11,22 +11,14 @@ AI enablement /home/ewyct/.claude/plans/moonlit-fluttering-origami.md
 
 ## features
 
-UI & UX 
-    Use the frontend design skill and subagent for this
-    Revise frontend and make sure you havent steered far and try to use standard shadcn css where possible
-    make sure every page has a clear primary action if there are more than one. If you cant decide ask me a question about it
+
 
 Specification analysis
     check functional specification in repo/branch
     upload functional specifications manually and try to derive scenarios from that
 
-Implement the OCR feature to identify the selected UI element's text label
-
-Constant cursor recording
-
 MCP explore for routes
 
-Add Routes as Areas automatically - remove button on Tests page
 
 Run 
     Reformat Base URLto look nice
@@ -42,6 +34,16 @@ Welcome
     Setup AI
     Scan for routes NLP, AI, Explore, Spec, Manual
     Add AI enhanced tests
+
+Constant cursor recording
+
+UI & UX 
+    Use the frontend design skill and subagent for this
+    Revise frontend and make sure you havent steered far and try to use standard shadcn css where possible
+    make sure every page has a clear primary action if there are more than one. If you cant decide ask me a question about it
+
+Implement the OCR feature to identify the selected UI element's text label
+
 
 ## ideas
 Firecrawl?

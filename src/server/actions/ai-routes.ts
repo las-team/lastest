@@ -169,6 +169,16 @@ export async function saveDiscoveredRoutes(
 
     const createdRoutes = await queries.createRoutes(routeData);
 
+    // Auto-create functional areas for each new route
+    for (const route of createdRoutes) {
+      const area = await queries.getOrCreateFunctionalAreaByRepo(
+        repositoryId,
+        route.path,
+        `Auto-generated area for route ${route.path}`
+      );
+      await queries.linkRouteToFunctionalArea(route.id, area.id);
+    }
+
     // Create test suggestions for each route
     const suggestionData: { routeId: string; suggestion: string }[] = [];
     for (let i = 0; i < newRoutes.length; i++) {

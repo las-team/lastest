@@ -14,12 +14,12 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { createFunctionalArea } from '@/server/actions/tests';
-import { addRoutesAsFunctionalAreas, generateBasicTests } from '@/server/actions/scanner';
+import { generateBasicTests } from '@/server/actions/scanner';
 import { CoverageBar } from '@/components/coverage/coverage-bar';
 import { RouteSelectorDialog } from '@/components/routes/route-selector-dialog';
 import { AICreateTestDialog } from '@/components/ai/ai-create-test-dialog';
 import { MCPCreateTestDialog } from '@/components/ai/mcp-create-test-dialog';
-import { FileCode, Plus, FolderPlus, FlaskConical, Sparkles, Wand2 } from 'lucide-react';
+import { FileCode, Plus, FlaskConical, Sparkles, Wand2 } from 'lucide-react';
 import Link from 'next/link';
 import type { FunctionalArea, Test, Route } from '@/lib/db/schema';
 
@@ -40,7 +40,6 @@ export function TestsPageClient({ areas, tests, routes, coverage, repositoryId, 
   const [isNewAreaOpen, setIsNewAreaOpen] = useState(false);
   const [newAreaName, setNewAreaName] = useState('');
   const [isCreating, setIsCreating] = useState(false);
-  const [isAddAreasOpen, setIsAddAreasOpen] = useState(false);
   const [isAddTestsOpen, setIsAddTestsOpen] = useState(false);
   const [isAICreateOpen, setIsAICreateOpen] = useState(false);
   const [isMCPCreateOpen, setIsMCPCreateOpen] = useState(false);
@@ -57,11 +56,6 @@ export function TestsPageClient({ areas, tests, routes, coverage, repositoryId, 
     } finally {
       setIsCreating(false);
     }
-  };
-
-  const handleAddAreas = async (routeIds: string[]) => {
-    if (!repositoryId) return;
-    await addRoutesAsFunctionalAreas(repositoryId, routeIds);
   };
 
   const handleAddTests = async (routeIds: string[]) => {
@@ -91,15 +85,6 @@ export function TestsPageClient({ areas, tests, routes, coverage, repositoryId, 
                 <div className="flex items-center justify-between">
                   <CardTitle className="text-base">Route Coverage</CardTitle>
                   <div className="flex gap-2">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => setIsAddAreasOpen(true)}
-                      disabled={routes.filter(r => !r.functionalAreaId).length === 0}
-                    >
-                      <FolderPlus className="h-4 w-4 mr-2" />
-                      Add as Areas
-                    </Button>
                     <Button
                       variant="outline"
                       size="sm"
@@ -245,17 +230,6 @@ export function TestsPageClient({ areas, tests, routes, coverage, repositoryId, 
           </DialogFooter>
         </DialogContent>
       </Dialog>
-
-      {/* Add Routes as Areas Dialog */}
-      <RouteSelectorDialog
-        open={isAddAreasOpen}
-        onOpenChange={setIsAddAreasOpen}
-        routes={routes.filter(r => !r.functionalAreaId)}
-        title="Add Routes as Functional Areas"
-        description="Select routes to create functional areas for"
-        actionLabel="Create Areas"
-        onAction={handleAddAreas}
-      />
 
       {/* Add Basic Tests Dialog */}
       <RouteSelectorDialog
