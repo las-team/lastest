@@ -4,7 +4,6 @@ import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import {
   Dialog,
@@ -148,9 +147,6 @@ export function TestDetailClient({ test, results, repositoryId, screenshots = []
                   <>
                     <CardTitle className="flex items-center gap-2">
                       {test.name}
-                      <Badge variant={test.pathType === 'happy' ? 'default' : 'secondary'}>
-                        {test.pathType} path
-                      </Badge>
                     </CardTitle>
                     <CardDescription>
                       {test.targetUrl || 'No target URL'}

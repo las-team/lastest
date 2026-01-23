@@ -34,7 +34,7 @@ This is a visual regression testing platform built with Next.js 16 App Router.
 ### Data Model
 
 - **Repositories** → synced from GitHub, have local paths for route scanning
-- **Tests** → belong to FunctionalAreas, have code and path type (happy/unhappy)
+- **Tests** → belong to FunctionalAreas, have code and target URL
 - **TestRuns** → grouped executions with git branch/commit
 - **Builds** → aggregated runs linked to PRs, have approval status
 - **VisualDiffs** → comparison results with approval workflow (classification: unchanged/flaky/changed)

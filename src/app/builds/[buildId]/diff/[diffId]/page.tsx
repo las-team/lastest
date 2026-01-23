@@ -36,6 +36,9 @@ export default async function DiffPage({ params }: PageProps) {
           <div>
             <h1 className="text-xl font-bold">
               {diff.test?.name || `Test ${diff.testId.slice(0, 8)}`}
+              {diff.stepLabel && (
+                <span className="text-gray-500 font-normal text-base ml-2">&rsaquo; {diff.stepLabel}</span>
+              )}
             </h1>
             <div className="text-sm text-gray-500">
               {diff.test?.targetUrl}

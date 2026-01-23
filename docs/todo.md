@@ -28,7 +28,14 @@ MCP explore for routes
 
 Add Routes as Areas automatically - remove button on Tests page
 
-Remove happy - unhappy path from UI and db as well
+Run 
+    Reformat Base URLto look nice
+    Identify URL as local - remote - show on UI
+    If remote then the build run with it should show the baseURL instead of the branch it was ran on.
+    Add a Changes section under Base URL
+        It should show the top 5 larges changes between baseline and current builds
+        It should show how the number of passing tests changed since baseline
+    If a build has been completely accepted it should get a baseline 
 
 Welcome
     Setup github
@@ -36,16 +43,9 @@ Welcome
     Scan for routes NLP, AI, Explore, Spec, Manual
     Add AI enhanced tests
 
-
-
-Launch if no data
-
-
-
 ## ideas
 Firecrawl?
 Research playwrights comparison options, how they work?
 Approve reject changes or create ticket -> gh issue
 
 ## bugs
-refresh sidebar control when gh is connected

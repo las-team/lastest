@@ -11,7 +11,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Button } from '@/components/ui/button';
-import { fetchAndSyncRepos, getRepos, selectRepo, getSelectedRepo } from '@/server/actions/repos';
+import { fetchAndSyncRepos, selectRepo } from '@/server/actions/repos';
 import type { Repository } from '@/lib/db/schema';
 
 // Separate sync button component that can be positioned independently
@@ -57,14 +57,12 @@ export function RepoSelector({ initialRepos = [], initialSelected = null }: Repo
   const [isPending, startTransition] = useTransition();
 
   useEffect(() => {
-    // Load repos on mount if not provided
-    if (initialRepos.length === 0) {
-      getRepos().then(setRepos);
-    }
-    if (!initialSelected) {
-      getSelectedRepo().then(setSelected);
-    }
-  }, [initialRepos.length, initialSelected]);
+    setRepos(initialRepos);
+  }, [initialRepos]);
+
+  useEffect(() => {
+    setSelected(initialSelected);
+  }, [initialSelected]);
 
   const handleSelect = (repoId: string) => {
     startTransition(async () => {

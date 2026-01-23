@@ -51,8 +51,6 @@ export function AICreateTestDialog({
   const [generatedCode, setGeneratedCode] = useState('');
   const [testName, setTestName] = useState('');
   const [functionalAreaId, setFunctionalAreaId] = useState<string>('');
-  const [pathType, setPathType] = useState<'happy' | 'unhappy'>('happy');
-
   const handleGenerate = async () => {
     if (!prompt.trim()) {
       toast.error('Please enter a prompt');
@@ -118,7 +116,6 @@ export function AICreateTestDialog({
         name: testName.trim(),
         code: generatedCode,
         targetUrl: targetUrl || undefined,
-        pathType,
       });
 
       if (result.success) {
@@ -141,7 +138,6 @@ export function AICreateTestDialog({
     setGeneratedCode('');
     setTestName('');
     setFunctionalAreaId('');
-    setPathType('happy');
     onOpenChange(false);
   };
 
@@ -215,19 +211,6 @@ export function AICreateTestDialog({
                   </SelectContent>
                 </Select>
               </div>
-            </div>
-
-            <div className="space-y-2">
-              <Label>Path Type</Label>
-              <Select value={pathType} onValueChange={(v) => setPathType(v as 'happy' | 'unhappy')}>
-                <SelectTrigger className="w-[200px]">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="happy">Happy Path</SelectItem>
-                  <SelectItem value="unhappy">Unhappy Path</SelectItem>
-                </SelectContent>
-              </Select>
             </div>
 
             <div className="space-y-2">

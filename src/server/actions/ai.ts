@@ -108,7 +108,6 @@ export async function saveGeneratedTest(data: {
   name: string;
   code: string;
   targetUrl?: string;
-  pathType?: string;
 }): Promise<{ success: boolean; testId?: string; error?: string }> {
   try {
     const test = await queries.createTest({
@@ -117,7 +116,6 @@ export async function saveGeneratedTest(data: {
       name: data.name,
       code: data.code,
       targetUrl: data.targetUrl || null,
-      pathType: data.pathType || 'happy',
     });
 
     revalidatePath('/tests');

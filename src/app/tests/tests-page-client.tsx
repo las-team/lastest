@@ -184,9 +184,6 @@ export function TestsPageClient({ areas, tests, routes, coverage, repositoryId, 
                           <FileCode className="h-4 w-4 text-muted-foreground" />
                           <div>
                             <div className="font-medium">{test.name}</div>
-                            <div className="text-xs text-muted-foreground">
-                              {test.pathType} path
-                            </div>
                           </div>
                         </div>
                         <div className={`text-xs px-2 py-1 rounded ${

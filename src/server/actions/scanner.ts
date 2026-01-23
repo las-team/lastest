@@ -185,7 +185,6 @@ export async function generateBasicTests(repositoryId: string, routeIds: string[
       repositoryId,
       functionalAreaId,
       name: `Smoke test: ${route.path}`,
-      pathType: 'happy',
       code: testCode,
       targetUrl,
     });

@@ -16,11 +16,17 @@ export interface RunEvent {
   timestamp: number;
 }
 
+export interface CapturedScreenshot {
+  path: string;
+  label: string;
+}
+
 export interface TestRunResult {
   testId: string;
   status: 'passed' | 'failed' | 'skipped';
   durationMs: number;
   screenshotPath?: string;
+  screenshots: CapturedScreenshot[];
   errorMessage?: string;
   consoleErrors?: string[];
   networkRequests?: NetworkRequest[];
@@ -184,6 +190,7 @@ export class PlaywrightRunner extends EventEmitter {
         testId: test.id,
         status: 'failed',
         durationMs: 0,
+        screenshots: [],
         errorMessage: 'Browser not initialized',
       };
     }
@@ -194,6 +201,10 @@ export class PlaywrightRunner extends EventEmitter {
     // Track errors during test execution
     const consoleErrors: string[] = [];
     const networkFailures: NetworkRequest[] = [];
+
+    // Track captured screenshots from within test code (outside try so catch can access)
+    const capturedScreenshots: CapturedScreenshot[] = [];
+    let currentStepLabel = 'initial';
 
     try {
       context = await this.browser.newContext({
@@ -224,8 +235,34 @@ export class PlaywrightRunner extends EventEmitter {
       // Compute screenshotPath for the test function
       const testScreenshotPath = path.join(this.screenshotDir, `${runId}-${test.id}.png`);
 
-      // Execute the test code
-      await this.executeTestCode(page, test, runId, testScreenshotPath);
+      // Create a proxy that intercepts page.screenshot() calls
+      const screenshotProxy = new Proxy(page, {
+        get: (target, prop) => {
+          if (prop === 'screenshot') {
+            return async (options?: Record<string, unknown>) => {
+              const result = await target.screenshot(options as any);
+              if (options?.path) {
+                const filename = path.basename(options.path as string);
+                const publicPath = this.repositoryId
+                  ? `/screenshots/${this.repositoryId}/${filename}`
+                  : `/screenshots/${filename}`;
+                capturedScreenshots.push({ path: publicPath, label: currentStepLabel });
+              }
+              return result;
+            };
+          }
+          const value = (target as any)[prop];
+          if (typeof value === 'function') {
+            return value.bind(target);
+          }
+          return value;
+        }
+      });
+
+      // Execute the test code with the proxy page
+      await this.executeTestCode(screenshotProxy, test, runId, testScreenshotPath, (label: string) => {
+        currentStepLabel = label;
+      });
 
       // Check for console errors or network failures after test execution
       if (consoleErrors.length > 0 || networkFailures.length > 0) {
@@ -240,24 +277,26 @@ export class PlaywrightRunner extends EventEmitter {
         throw new Error(errorParts.join(' | '));
       }
 
-      // Take screenshot on success
-      const screenshotFilename = `${runId}-${test.id}-success.png`;
-      const screenshotPath = path.join(this.screenshotDir, screenshotFilename);
-      await page.screenshot({ path: screenshotPath });
+      let screenshotPublicPath: string | undefined;
+
+      // Only take a fallback success screenshot if no screenshots were captured during the test
+      if (capturedScreenshots.length === 0) {
+        const screenshotFilename = `${runId}-${test.id}-success.png`;
+        const screenshotPath = path.join(this.screenshotDir, screenshotFilename);
+        await page.screenshot({ path: screenshotPath });
+        screenshotPublicPath = this.repositoryId
+          ? `/screenshots/${this.repositoryId}/${screenshotFilename}`
+          : `/screenshots/${screenshotFilename}`;
+      }
 
       const durationMs = Date.now() - startTime;
-
-      // Build public path with repositoryId if present
-      const publicPath = this.repositoryId
-        ? `/screenshots/${this.repositoryId}/${screenshotFilename}`
-        : `/screenshots/${screenshotFilename}`;
 
       this.emit('event', {
         type: 'test_passed',
         testId: test.id,
         testName: test.name,
         durationMs,
-        screenshotPath: publicPath,
+        screenshotPath: screenshotPublicPath || capturedScreenshots[0]?.path,
         timestamp: Date.now(),
       } as RunEvent);
 
@@ -265,7 +304,8 @@ export class PlaywrightRunner extends EventEmitter {
         testId: test.id,
         status: 'passed',
         durationMs,
-        screenshotPath: publicPath,
+        screenshotPath: screenshotPublicPath,
+        screenshots: capturedScreenshots,
         consoleErrors: consoleErrors.length > 0 ? consoleErrors : undefined,
         networkRequests: networkFailures.length > 0 ? networkFailures : undefined,
       };
@@ -300,11 +340,18 @@ export class PlaywrightRunner extends EventEmitter {
         timestamp: Date.now(),
       } as RunEvent);
 
+      // Combine any screenshots captured before the error with the failure screenshot
+      const allScreenshots = [...capturedScreenshots];
+      if (screenshotPath) {
+        allScreenshots.push({ path: screenshotPath, label: 'failure' });
+      }
+
       return {
         testId: test.id,
         status: 'failed',
         durationMs,
         screenshotPath,
+        screenshots: allScreenshots,
         errorMessage,
         consoleErrors: consoleErrors.length > 0 ? consoleErrors : undefined,
         networkRequests: networkFailures.length > 0 ? networkFailures : undefined,
@@ -316,7 +363,7 @@ export class PlaywrightRunner extends EventEmitter {
     }
   }
 
-  private async executeTestCode(page: Page, test: Test, runId: string, screenshotPath: string): Promise<void> {
+  private async executeTestCode(page: Page, test: Test, runId: string, screenshotPath: string, onStepLabel?: (label: string) => void): Promise<void> {
     const code = test.code;
     if (!code) {
       throw new Error('No test code');
@@ -334,6 +381,7 @@ export class PlaywrightRunner extends EventEmitter {
 
       const stepLogger = {
         log: (msg: string) => {
+          onStepLabel?.(msg);
           this.emit('event', {
             type: 'test_started',
             testId: test.id,

@@ -172,15 +172,23 @@ async function runBuildAsync(
       if (result.status === 'passed') passedCount++;
       else if (result.status === 'failed') failedCount++;
 
-      // Generate visual diff if screenshot exists
-      if (result.screenshotPath) {
+      // Build screenshots list: prefer captured screenshots, fall back to single screenshotPath
+      const screenshots = result.screenshots.length > 0
+        ? result.screenshots
+        : result.screenshotPath
+          ? [{ path: result.screenshotPath, label: 'final' }]
+          : [];
+
+      // Generate visual diff for each screenshot
+      for (const screenshot of screenshots) {
         const diffResult = await processVisualDiff(
           buildId,
           testResult.id,
           result.testId,
-          result.screenshotPath,
+          screenshot.path,
           branch,
-          repositoryId
+          repositoryId,
+          screenshot.label
         );
         if (diffResult.classification === 'changed') changesDetected++;
         if (diffResult.classification === 'flaky') flakyCount++;
@@ -230,7 +238,8 @@ async function processVisualDiff(
   testId: string,
   currentScreenshotPath: string,
   branch: string,
-  repositoryId?: string | null
+  repositoryId?: string | null,
+  stepLabel?: string
 ): Promise<{ hasChanges: boolean; diffId: string; classification: DiffClassification }> {
   // Get diff sensitivity settings
   const settings = await queries.getDiffSensitivitySettings(repositoryId);
@@ -248,12 +257,12 @@ async function processVisualDiff(
     }
   };
 
-  // Get active baseline for this test
-  const baseline = await queries.getActiveBaseline(testId, branch);
+  // Get active baseline for this test (filtered by stepLabel)
+  const baseline = await queries.getActiveBaseline(testId, branch, stepLabel);
 
   // Check for carry-forward (previously approved identical image)
   const currentHash = hashImage(path.join(process.cwd(), 'public', currentScreenshotPath));
-  const matchingBaseline = await queries.getBaselineByHash(testId, currentHash);
+  const matchingBaseline = await queries.getBaselineByHash(testId, currentHash, stepLabel);
 
   if (matchingBaseline) {
     // Auto-approve: identical to previously approved baseline
@@ -261,6 +270,7 @@ async function processVisualDiff(
       buildId,
       testResultId,
       testId,
+      stepLabel: stepLabel || null,
       baselineImagePath: matchingBaseline.imagePath,
       currentImagePath: currentScreenshotPath,
       status: 'auto_approved',
@@ -278,6 +288,7 @@ async function processVisualDiff(
       buildId,
       testResultId,
       testId,
+      stepLabel: stepLabel || null,
       currentImagePath: currentScreenshotPath,
       status: 'pending',
       classification: 'changed',
@@ -289,6 +300,7 @@ async function processVisualDiff(
     // Create initial baseline
     await queries.createBaseline({
       testId,
+      stepLabel: stepLabel || null,
       imagePath: currentScreenshotPath,
       imageHash: currentHash,
       branch,
@@ -315,6 +327,7 @@ async function processVisualDiff(
       buildId,
       testResultId,
       testId,
+      stepLabel: stepLabel || null,
       baselineImagePath: baseline.imagePath,
       currentImagePath: currentScreenshotPath,
       diffImagePath,
@@ -332,6 +345,7 @@ async function processVisualDiff(
       buildId,
       testResultId,
       testId,
+      stepLabel: stepLabel || null,
       baselineImagePath: baseline.imagePath,
       currentImagePath: currentScreenshotPath,
       status: 'pending',

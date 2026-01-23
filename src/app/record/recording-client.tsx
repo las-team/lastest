@@ -78,7 +78,6 @@ export function RecordingClient({ areas: initialAreas, settings, repositoryId }:
   const [testName, setTestName] = useState('');
   const [areaId, setAreaId] = useState<string>('');
   const [newAreaName, setNewAreaName] = useState('');
-  const [pathType, setPathType] = useState<'happy' | 'unhappy'>('happy');
   const [areas, setAreas] = useState(initialAreas);
 
   // Recording state
@@ -215,7 +214,6 @@ export function RecordingClient({ areas: initialAreas, settings, repositoryId }:
       const test = await saveRecordedTest({
         name: testName,
         functionalAreaId: areaId || null,
-        pathType,
         targetUrl: url,
         code: generatedCode,
         repositoryId,
@@ -322,33 +320,6 @@ export function RecordingClient({ areas: initialAreas, settings, repositoryId }:
                     }}
                     className="flex-1"
                   />
-                </div>
-              </div>
-
-              {/* Path Type */}
-              <div className="space-y-2">
-                <label className="text-sm font-medium">Path Type</label>
-                <div className="flex gap-4">
-                  <label className="flex items-center gap-2 cursor-pointer">
-                    <input
-                      type="radio"
-                      name="pathType"
-                      checked={pathType === 'happy'}
-                      onChange={() => setPathType('happy')}
-                      className="accent-primary"
-                    />
-                    <span>Happy path</span>
-                  </label>
-                  <label className="flex items-center gap-2 cursor-pointer">
-                    <input
-                      type="radio"
-                      name="pathType"
-                      checked={pathType === 'unhappy'}
-                      onChange={() => setPathType('unhappy')}
-                      className="accent-primary"
-                    />
-                    <span>Unhappy path</span>
-                  </label>
                 </div>
               </div>
 
@@ -524,10 +495,6 @@ export function RecordingClient({ areas: initialAreas, settings, repositoryId }:
               <div>
                 <span className="text-muted-foreground">Name:</span>
                 <span className="ml-2 font-medium">{testName}</span>
-              </div>
-              <div>
-                <span className="text-muted-foreground">Path Type:</span>
-                <Badge variant="outline" className="ml-2">{pathType}</Badge>
               </div>
             </div>
 

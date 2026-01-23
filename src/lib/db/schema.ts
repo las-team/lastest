@@ -48,7 +48,6 @@ export const tests = sqliteTable('tests', {
   repositoryId: text('repository_id'),
   functionalAreaId: text('functional_area_id').references(() => functionalAreas.id),
   name: text('name').notNull(),
-  pathType: text('path_type').notNull(), // 'happy' or 'unhappy'
   code: text('code').notNull(), // Playwright test code
   targetUrl: text('target_url'),
   createdAt: integer('created_at', { mode: 'timestamp' }),
@@ -143,6 +142,7 @@ export const visualDiffs = sqliteTable('visual_diffs', {
   buildId: text('build_id').references(() => builds.id).notNull(),
   testResultId: text('test_result_id').references(() => testResults.id).notNull(),
   testId: text('test_id').references(() => tests.id).notNull(),
+  stepLabel: text('step_label'),
   baselineImagePath: text('baseline_image_path'),
   currentImagePath: text('current_image_path').notNull(),
   diffImagePath: text('diff_image_path'),
@@ -161,6 +161,7 @@ export const baselines = sqliteTable('baselines', {
   id: text('id').primaryKey(),
   repositoryId: text('repository_id'),
   testId: text('test_id').references(() => tests.id).notNull(),
+  stepLabel: text('step_label'),
   imagePath: text('image_path').notNull(),
   imageHash: text('image_hash').notNull(), // SHA256 for carry-forward matching
   approvedFromDiffId: text('approved_from_diff_id').references(() => visualDiffs.id),
@@ -202,6 +203,7 @@ export type VisualDiffWithTestStatus = VisualDiff & {
   testResultStatus: string | null;
   testName: string | null;
   functionalAreaName: string | null;
+  stepLabel?: string | null;
 };
 export type NewVisualDiff = typeof visualDiffs.$inferInsert;
 export type Baseline = typeof baselines.$inferSelect;

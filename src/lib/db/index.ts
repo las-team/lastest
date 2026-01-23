@@ -26,6 +26,7 @@ export function initializeDatabase() {
       name TEXT NOT NULL,
       full_name TEXT NOT NULL,
       default_branch TEXT,
+      selected_branch TEXT,
       selected_baseline TEXT,
       local_path TEXT,
       created_at INTEGER
@@ -54,7 +55,6 @@ export function initializeDatabase() {
       repository_id TEXT,
       functional_area_id TEXT REFERENCES functional_areas(id),
       name TEXT NOT NULL,
-      path_type TEXT NOT NULL,
       code TEXT NOT NULL,
       target_url TEXT,
       created_at INTEGER,
@@ -121,6 +121,7 @@ export function initializeDatabase() {
       build_id TEXT NOT NULL REFERENCES builds(id),
       test_result_id TEXT NOT NULL REFERENCES test_results(id),
       test_id TEXT NOT NULL REFERENCES tests(id),
+      step_label TEXT,
       baseline_image_path TEXT,
       current_image_path TEXT NOT NULL,
       diff_image_path TEXT,
@@ -138,6 +139,7 @@ export function initializeDatabase() {
       id TEXT PRIMARY KEY,
       repository_id TEXT,
       test_id TEXT NOT NULL REFERENCES tests(id),
+      step_label TEXT,
       image_path TEXT NOT NULL,
       image_hash TEXT NOT NULL,
       approved_from_diff_id TEXT REFERENCES visual_diffs(id),
@@ -287,6 +289,20 @@ function runMigrations() {
   // Migration: Add classification to visual_diffs if missing
   if (!diffColumnNames.has('classification')) {
     sqlite.exec('ALTER TABLE visual_diffs ADD COLUMN classification TEXT');
+  }
+
+  // Migration: Add step_label to visual_diffs if missing
+  if (!diffColumnNames.has('step_label')) {
+    sqlite.exec('ALTER TABLE visual_diffs ADD COLUMN step_label TEXT');
+  }
+
+  // Get existing columns in baselines table
+  const baselineColumns = sqlite.prepare('PRAGMA table_info(baselines)').all() as { name: string }[];
+  const baselineColumnNames = new Set(baselineColumns.map(c => c.name));
+
+  // Migration: Add step_label to baselines if missing
+  if (!baselineColumnNames.has('step_label')) {
+    sqlite.exec('ALTER TABLE baselines ADD COLUMN step_label TEXT');
   }
 
   // Get existing columns in routes table

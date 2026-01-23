@@ -184,6 +184,9 @@ export function BuildDetailClient({
                     <div className="min-w-0">
                       <div className={`font-medium truncate ${isFailed ? 'text-red-800' : ''}`}>
                         {diff.testName || 'Unnamed Test'}
+                        {diff.stepLabel && (
+                          <span className="text-gray-500 font-normal"> &rsaquo; {diff.stepLabel}</span>
+                        )}
                       </div>
                       <div className="flex items-center gap-2 text-sm">
                         {diff.functionalAreaName && (

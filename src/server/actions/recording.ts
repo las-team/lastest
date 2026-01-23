@@ -91,7 +91,6 @@ export async function clearLastCompletedSession(repositoryId?: string | null) {
 export async function saveRecordedTest(data: {
   name: string;
   functionalAreaId: string | null;
-  pathType: 'happy' | 'unhappy';
   targetUrl: string;
   code: string;
   repositoryId?: string | null;
@@ -99,7 +98,6 @@ export async function saveRecordedTest(data: {
   const test = await createTest({
     name: data.name,
     functionalAreaId: data.functionalAreaId,
-    pathType: data.pathType,
     targetUrl: data.targetUrl,
     code: data.code,
     repositoryId: data.repositoryId ?? null,

@@ -311,6 +311,7 @@ export async function getVisualDiffsWithTestStatus(buildId: string) {
       buildId: visualDiffs.buildId,
       testResultId: visualDiffs.testResultId,
       testId: visualDiffs.testId,
+      stepLabel: visualDiffs.stepLabel,
       baselineImagePath: visualDiffs.baselineImagePath,
       currentImagePath: visualDiffs.currentImagePath,
       diffImagePath: visualDiffs.diffImagePath,
@@ -363,31 +364,35 @@ export async function batchUpdateVisualDiffs(ids: string[], data: Partial<NewVis
 }
 
 // Baselines
-export async function getActiveBaseline(testId: string, branch: string) {
+export async function getActiveBaseline(testId: string, branch: string, stepLabel?: string | null) {
+  const conditions = [
+    eq(baselines.testId, testId),
+    eq(baselines.branch, branch),
+    eq(baselines.isActive, true),
+  ];
+  if (stepLabel) {
+    conditions.push(eq(baselines.stepLabel, stepLabel));
+  }
   return db
     .select()
     .from(baselines)
-    .where(
-      and(
-        eq(baselines.testId, testId),
-        eq(baselines.branch, branch),
-        eq(baselines.isActive, true)
-      )
-    )
+    .where(and(...conditions))
     .get();
 }
 
-export async function getBaselineByHash(testId: string, imageHash: string) {
+export async function getBaselineByHash(testId: string, imageHash: string, stepLabel?: string | null) {
+  const conditions = [
+    eq(baselines.testId, testId),
+    eq(baselines.imageHash, imageHash),
+    eq(baselines.isActive, true),
+  ];
+  if (stepLabel) {
+    conditions.push(eq(baselines.stepLabel, stepLabel));
+  }
   return db
     .select()
     .from(baselines)
-    .where(
-      and(
-        eq(baselines.testId, testId),
-        eq(baselines.imageHash, imageHash),
-        eq(baselines.isActive, true)
-      )
-    )
+    .where(and(...conditions))
     .get();
 }
 
@@ -397,11 +402,15 @@ export async function createBaseline(data: Omit<NewBaseline, 'id'>) {
   return { id, ...data, createdAt: new Date() };
 }
 
-export async function deactivateBaselines(testId: string, branch: string) {
+export async function deactivateBaselines(testId: string, branch: string, stepLabel?: string | null) {
+  const conditions = [eq(baselines.testId, testId), eq(baselines.branch, branch)];
+  if (stepLabel) {
+    conditions.push(eq(baselines.stepLabel, stepLabel));
+  }
   await db
     .update(baselines)
     .set({ isActive: false })
-    .where(and(eq(baselines.testId, testId), eq(baselines.branch, branch)));
+    .where(and(...conditions));
 }
 
 // Ignore Regions
@@ -547,7 +556,7 @@ export async function getLatestRunByBranch(branch: string, repositoryId?: string
     .get();
 }
 
-// Get test results with test info (name, pathType) for a run
+// Get test results with test info for a run
 export async function getTestResultsWithTestInfo(testRunId: string) {
   const results = await db
     .select({
@@ -558,7 +567,6 @@ export async function getTestResultsWithTestInfo(testRunId: string) {
       errorMessage: testResults.errorMessage,
       durationMs: testResults.durationMs,
       testName: tests.name,
-      testPathType: tests.pathType,
     })
     .from(testResults)
     .innerJoin(tests, eq(testResults.testId, tests.id))

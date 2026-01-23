@@ -14,9 +14,12 @@ import {
 } from 'lucide-react';
 import { RepoSelector, SyncReposButton } from './repo-selector';
 import { ActiveBranchBadge } from './active-branch-badge';
+import type { Repository } from '@/lib/db/schema';
 
 interface SidebarProps {
   activeBranch?: string;
+  repos?: Repository[];
+  selectedRepo?: Repository | null;
 }
 
 const navigation = [
@@ -28,7 +31,7 @@ const navigation = [
   { name: 'Settings', href: '/settings', icon: Settings },
 ];
 
-export function Sidebar({ activeBranch }: SidebarProps) {
+export function Sidebar({ activeBranch, repos, selectedRepo }: SidebarProps) {
   const pathname = usePathname();
 
   return (
@@ -43,7 +46,7 @@ export function Sidebar({ activeBranch }: SidebarProps) {
       <div className="p-4 border-b space-y-3">
         <div className="flex items-center gap-2">
           <div className="flex-1 min-w-0">
-            <RepoSelector />
+            <RepoSelector initialRepos={repos} initialSelected={selectedRepo} />
           </div>
           <SyncReposButton />
         </div>
