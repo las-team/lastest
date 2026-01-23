@@ -291,8 +291,8 @@ async function processVisualDiff(
       testId,
       stepLabel: stepLabel || null,
       currentImagePath: currentScreenshotPath,
-      status: 'pending',
-      classification: 'changed',
+      status: 'auto_approved',
+      classification: 'unchanged',
       pixelDifference: 0,
       percentageDifference: '0',
       metadata: { changedRegions: [] },
@@ -308,7 +308,7 @@ async function processVisualDiff(
       approvedFromDiffId: diff.id,
     });
 
-    return { hasChanges: false, diffId: diff.id, classification: 'changed' };
+    return { hasChanges: false, diffId: diff.id, classification: 'unchanged' };
   }
 
   // Generate diff against baseline

@@ -11,7 +11,7 @@ AI enablement /home/ewyct/.claude/plans/moonlit-fluttering-origami.md
 
 ## features
 
-
+Fix all tests
 
 Specification analysis
     check functional specification in repo/branch
