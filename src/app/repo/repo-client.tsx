@@ -4,11 +4,12 @@ import { useEffect, useState } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { GitBranch, CheckCircle2, Circle, FolderGit2, AlertCircle, Scan, Loader2, Sparkles } from 'lucide-react';
+import { GitBranch, CheckCircle2, Circle, FolderGit2, AlertCircle, Scan, Loader2, Sparkles, FileText } from 'lucide-react';
 import { toast } from 'sonner';
 import { fetchRepoBranches, updateRepoSelectedBranch } from '@/server/actions/repos';
 import { startRemoteRouteScan } from '@/server/actions/scanner';
 import { AIScanRoutesDialog } from '@/components/ai/ai-scan-routes-dialog';
+import { SpecAnalysisDialog } from '@/components/ai/spec-analysis-dialog';
 import type { Repository, Route, ScanStatus } from '@/lib/db/schema';
 import type { GitHubBranch } from '@/lib/github/oauth';
 
@@ -25,6 +26,7 @@ export function RepoClient({ repository, branchTestStatus, routes, coverage, sca
   const [isLoading, setIsLoading] = useState(false);
   const [isScanning, setIsScanning] = useState(scanStatus?.status === 'scanning');
   const [showAIScanDialog, setShowAIScanDialog] = useState(false);
+  const [showSpecAnalysisDialog, setShowSpecAnalysisDialog] = useState(false);
   const [selectedBranch, setSelectedBranch] = useState(repository?.selectedBranch || repository?.defaultBranch || '');
 
   useEffect(() => {
@@ -134,14 +136,24 @@ export function RepoClient({ repository, branchTestStatus, routes, coverage, sca
                 )}
               </Button>
               {selectedBranch && (
-                <Button
-                  variant="outline"
-                  onClick={() => setShowAIScanDialog(true)}
-                  disabled={isScanning}
-                >
-                  <Sparkles className="h-4 w-4 mr-2" />
-                  AI Scan
-                </Button>
+                <>
+                  <Button
+                    variant="outline"
+                    onClick={() => setShowSpecAnalysisDialog(true)}
+                    disabled={isScanning}
+                  >
+                    <FileText className="h-4 w-4 mr-2" />
+                    Analyze Specs
+                  </Button>
+                  <Button
+                    variant="outline"
+                    onClick={() => setShowAIScanDialog(true)}
+                    disabled={isScanning}
+                  >
+                    <Sparkles className="h-4 w-4 mr-2" />
+                    AI Scan
+                  </Button>
+                </>
               )}
             </div>
           </div>
@@ -241,12 +253,20 @@ export function RepoClient({ repository, branchTestStatus, routes, coverage, sca
 
       {/* AI Scan Routes Dialog */}
       {selectedBranch && (
-        <AIScanRoutesDialog
-          open={showAIScanDialog}
-          onOpenChange={setShowAIScanDialog}
-          repositoryId={repository.id}
-          branch={selectedBranch}
-        />
+        <>
+          <AIScanRoutesDialog
+            open={showAIScanDialog}
+            onOpenChange={setShowAIScanDialog}
+            repositoryId={repository.id}
+            branch={selectedBranch}
+          />
+          <SpecAnalysisDialog
+            open={showSpecAnalysisDialog}
+            onOpenChange={setShowSpecAnalysisDialog}
+            repositoryId={repository.id}
+            branch={selectedBranch}
+          />
+        </>
       )}
     </div>
   );
