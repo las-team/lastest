@@ -374,3 +374,26 @@ export const aiPromptLogs = sqliteTable('ai_prompt_logs', {
 
 export type AIPromptLog = typeof aiPromptLogs.$inferSelect;
 export type NewAIPromptLog = typeof aiPromptLogs.$inferInsert;
+
+// Background Jobs for queue tracking
+export type BackgroundJobType = 'ai_scan' | 'spec_analysis' | 'build_tests' | 'test_run' | 'build_run';
+export type BackgroundJobStatus = 'pending' | 'running' | 'completed' | 'failed';
+
+export const backgroundJobs = sqliteTable('background_jobs', {
+  id: text('id').primaryKey(),
+  type: text('type').notNull(), // BackgroundJobType
+  status: text('status').notNull().default('pending'), // BackgroundJobStatus
+  progress: integer('progress').default(0), // 0-100
+  totalSteps: integer('total_steps'),
+  completedSteps: integer('completed_steps').default(0),
+  label: text('label').notNull(),
+  error: text('error'),
+  metadata: text('metadata', { mode: 'json' }).$type<Record<string, unknown>>(),
+  repositoryId: text('repository_id').references(() => repositories.id),
+  createdAt: integer('created_at', { mode: 'timestamp' }),
+  startedAt: integer('started_at', { mode: 'timestamp' }),
+  completedAt: integer('completed_at', { mode: 'timestamp' }),
+});
+
+export type BackgroundJob = typeof backgroundJobs.$inferSelect;
+export type NewBackgroundJob = typeof backgroundJobs.$inferInsert;

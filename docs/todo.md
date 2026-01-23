@@ -10,15 +10,6 @@ AI enablement /home/ewyct/.claude/plans/moonlit-fluttering-origami.md
 ## started
 
 ## features
-Setup
-    Add to the Dashboard a Setup guide that instructs the user to the following steps and navigates them to the right UI elements to perfom the action:
-    Setup Github
-    Setup AI
-    Scan routes
-    Add tests
-    Run
-    Set a baseline 
-    Change stuff/or URL   
 
 
 Welcome

@@ -19,6 +19,7 @@ import {
   diffSensitivitySettings,
   aiSettings,
   aiPromptLogs,
+  backgroundJobs,
 } from './schema';
 import {
   DEFAULT_SELECTOR_PRIORITY,
@@ -45,13 +46,16 @@ import type {
   NewDiffSensitivitySettings,
   NewAISettings,
   NewAIPromptLog,
+  NewBackgroundJob,
   BuildStatus,
   SelectorConfig,
   AIProvider,
+  BackgroundJobType,
+  BackgroundJobStatus,
 } from './schema';
 
 export { DEFAULT_SELECTOR_PRIORITY, DEFAULT_DIFF_THRESHOLDS, DEFAULT_AI_SETTINGS };
-import { eq, desc, and, inArray } from 'drizzle-orm';
+import { eq, desc, and, inArray, or, gte } from 'drizzle-orm';
 import { v4 as uuid } from 'uuid';
 
 // Functional Areas
@@ -1172,4 +1176,60 @@ export async function getUnmatchedSuggestionsByRepo(repositoryId: string) {
     .all();
 
   return suggestions.filter(s => !s.matchedTestId);
+}
+
+// Background Jobs
+export async function createBackgroundJob(data: {
+  type: BackgroundJobType;
+  label: string;
+  totalSteps?: number;
+  repositoryId?: string | null;
+  metadata?: Record<string, unknown>;
+}) {
+  const id = uuid();
+  const now = new Date();
+  await db.insert(backgroundJobs).values({
+    id,
+    type: data.type,
+    status: 'pending',
+    label: data.label,
+    totalSteps: data.totalSteps ?? null,
+    completedSteps: 0,
+    progress: 0,
+    repositoryId: data.repositoryId ?? null,
+    metadata: data.metadata ?? null,
+    createdAt: now,
+  });
+  return { id };
+}
+
+export async function updateBackgroundJob(id: string, data: Partial<NewBackgroundJob>) {
+  await db.update(backgroundJobs).set(data).where(eq(backgroundJobs.id, id));
+}
+
+export async function getActiveBackgroundJobs() {
+  return db
+    .select()
+    .from(backgroundJobs)
+    .where(or(eq(backgroundJobs.status, 'pending'), eq(backgroundJobs.status, 'running')))
+    .orderBy(desc(backgroundJobs.createdAt))
+    .all();
+}
+
+export async function getRecentBackgroundJobs(sinceMs = 10000) {
+  const since = new Date(Date.now() - sinceMs);
+  return db
+    .select()
+    .from(backgroundJobs)
+    .where(
+      or(
+        or(eq(backgroundJobs.status, 'pending'), eq(backgroundJobs.status, 'running')),
+        and(
+          or(eq(backgroundJobs.status, 'completed'), eq(backgroundJobs.status, 'failed')),
+          gte(backgroundJobs.completedAt, since)
+        )
+      )
+    )
+    .orderBy(desc(backgroundJobs.createdAt))
+    .all();
 }

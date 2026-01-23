@@ -9,6 +9,7 @@ import { generateDiff } from '@/lib/diff/generator';
 import { hashImage } from '@/lib/diff/hasher';
 import type { Test, TriggerType, BuildStatus, VisualDiffWithTestStatus, DiffClassification, DiffStatus } from '@/lib/db/schema';
 import path from 'path';
+import { createJob, updateJobProgress, completeJob, failJob } from './jobs';
 
 interface GitInfo {
   branch: string;
@@ -148,6 +149,7 @@ async function runBuildAsync(
 ) {
   const runner = getRunner(repositoryId);
   const startTime = Date.now();
+  const jobId = await createJob('build_run', `Build (${tests.length} tests)`, tests.length, repositoryId);
 
   try {
     const results = await runner.runTests(tests, testRunId);
@@ -156,8 +158,11 @@ async function runBuildAsync(
     let failedCount = 0;
     let changesDetected = 0;
     let flakyCount = 0;
+    let processedCount = 0;
 
     for (const result of results) {
+      processedCount++;
+      await updateJobProgress(jobId, processedCount, tests.length);
       // Save test result
       const testResult = await queries.createTestResult({
         testRunId,
@@ -214,6 +219,7 @@ async function runBuildAsync(
       elapsedMs: Date.now() - startTime,
       completedAt: new Date(),
     });
+    await completeJob(jobId);
   } catch (error) {
     await queries.updateTestRun(testRunId, {
       completedAt: new Date(),
@@ -224,6 +230,7 @@ async function runBuildAsync(
       completedAt: new Date(),
       elapsedMs: Date.now() - startTime,
     });
+    await failJob(jobId, error instanceof Error ? error.message : 'Build failed');
   }
 
   revalidatePath('/builds');

@@ -7,6 +7,7 @@ import { getBranchInfo } from '@/lib/github/content';
 import * as queries from '@/lib/db/queries';
 import { v4 as uuid } from 'uuid';
 import type { Test } from '@/lib/db/schema';
+import { createJob, updateJobProgress, completeJob, failJob } from './jobs';
 
 interface GitInfo {
   branch: string;
@@ -106,12 +107,14 @@ export async function runTests(testIds?: string[], repositoryId?: string | null)
 
 async function runTestsAsync(runId: string, tests: Test[], repositoryId?: string | null) {
   const runner = getRunner(repositoryId);
+  const jobId = await createJob('test_run', `Test Run (${tests.length} tests)`, tests.length, repositoryId);
 
   try {
     const results = await runner.runTests(tests, runId);
 
     // Save results
-    for (const result of results) {
+    for (let i = 0; i < results.length; i++) {
+      const result = results[i];
       await queries.createTestResult({
         testRunId: runId,
         testId: result.testId,
@@ -120,6 +123,7 @@ async function runTestsAsync(runId: string, tests: Test[], repositoryId?: string
         errorMessage: result.errorMessage,
         durationMs: result.durationMs,
       });
+      await updateJobProgress(jobId, i + 1, tests.length);
     }
 
     // Update run status
@@ -128,12 +132,13 @@ async function runTestsAsync(runId: string, tests: Test[], repositoryId?: string
       completedAt: new Date(),
       status: hasFailures ? 'failed' : 'passed',
     });
-
+    await completeJob(jobId);
   } catch (error) {
     await queries.updateTestRun(runId, {
       completedAt: new Date(),
       status: 'failed',
     });
+    await failJob(jobId, error instanceof Error ? error.message : 'Test run failed');
   }
 
   revalidatePath('/run');

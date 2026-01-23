@@ -265,8 +265,25 @@ export function initializeDatabase() {
     CREATE INDEX IF NOT EXISTS idx_baselines_test ON baselines(test_id);
     CREATE INDEX IF NOT EXISTS idx_baselines_repository ON baselines(repository_id);
     CREATE INDEX IF NOT EXISTS idx_visual_diffs_build ON visual_diffs(build_id);
+    CREATE TABLE IF NOT EXISTS background_jobs (
+      id TEXT PRIMARY KEY,
+      type TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'pending',
+      progress INTEGER DEFAULT 0,
+      total_steps INTEGER,
+      completed_steps INTEGER DEFAULT 0,
+      label TEXT NOT NULL,
+      error TEXT,
+      metadata TEXT,
+      repository_id TEXT REFERENCES repositories(id),
+      created_at INTEGER,
+      started_at INTEGER,
+      completed_at INTEGER
+    );
+
     CREATE INDEX IF NOT EXISTS idx_routes_repository ON routes(repository_id);
     CREATE INDEX IF NOT EXISTS idx_route_test_suggestions_route ON route_test_suggestions(route_id);
+    CREATE INDEX IF NOT EXISTS idx_background_jobs_status ON background_jobs(status);
   `);
 
   // Run migrations for existing databases (add columns that may be missing)

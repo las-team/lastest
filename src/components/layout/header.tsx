@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button';
 import { Video, Play, Settings, Loader2 } from 'lucide-react';
 import Link from 'next/link';
 import { createAndRunBuild } from '@/server/actions/builds';
+import { QueueIndicator } from '@/components/queue/queue-indicator';
 
 interface HeaderProps {
   title?: string;
@@ -32,6 +33,7 @@ export function Header({ title = 'Dashboard' }: HeaderProps) {
       <h1 className="text-lg font-semibold">{title}</h1>
 
       <div className="flex items-center gap-2">
+        <QueueIndicator />
         <Button asChild variant="outline" size="sm">
           <Link href="/record">
             <Video className="h-4 w-4 mr-2" />

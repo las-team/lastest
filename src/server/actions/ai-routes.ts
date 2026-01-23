@@ -5,6 +5,7 @@ import { generateWithAI, createRouteScanPrompt, createMCPExploreRoutesPrompt, SY
 import type { AIProviderConfig } from '@/lib/ai/types';
 import { revalidatePath } from 'next/cache';
 import { getRepoTree, getFileContent, type TreeEntry } from '@/lib/github/content';
+import { createJob, completeJob, failJob } from './jobs';
 
 async function getAIConfig(repositoryId?: string | null): Promise<AIProviderConfig> {
   const settings = await queries.getAISettings(repositoryId);
@@ -99,14 +100,17 @@ export async function aiScanRoutes(
   repositoryId: string,
   branch: string
 ): Promise<{ success: boolean; routes?: DiscoveredRoute[]; error?: string }> {
+  const jobId = await createJob('ai_scan', 'AI Route Scan', undefined, repositoryId);
   try {
     const account = await queries.getGithubAccount();
     if (!account) {
+      await failJob(jobId, 'GitHub account not connected');
       return { success: false, error: 'GitHub account not connected' };
     }
 
     const repo = await queries.getRepository(repositoryId);
     if (!repo) {
+      await failJob(jobId, 'Repository not found');
       return { success: false, error: 'Repository not found' };
     }
 
@@ -119,6 +123,7 @@ export async function aiScanRoutes(
     );
 
     if (!codebaseContext.trim()) {
+      await failJob(jobId, 'Could not read codebase structure');
       return { success: false, error: 'Could not read codebase structure' };
     }
 
@@ -131,13 +136,16 @@ export async function aiScanRoutes(
     // Parse JSON response
     const jsonMatch = response.match(/\[[\s\S]*\]/);
     if (!jsonMatch) {
+      await failJob(jobId, 'AI did not return valid JSON');
       return { success: false, error: 'AI did not return valid JSON' };
     }
 
     const routes: DiscoveredRoute[] = JSON.parse(jsonMatch[0]);
+    await completeJob(jobId);
     return { success: true, routes };
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Failed to scan routes';
+    await failJob(jobId, message);
     return { success: false, error: message };
   }
 }

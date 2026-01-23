@@ -6,6 +6,7 @@ import type { AIProviderConfig } from '@/lib/ai/types';
 import { revalidatePath } from 'next/cache';
 import { getRepoTree, getFileContent } from '@/lib/github/content';
 import { extractTextFromFile } from '@/lib/file-parser';
+import { createJob, updateJobProgress, completeJob, failJob } from './jobs';
 
 const SPEC_PATTERNS = ['docs/', 'specs/', 'specifications/', 'requirements/'];
 const SPEC_FILES = ['README.md', 'SPEC.md', 'PRD.md', 'SPECIFICATION.md'];
@@ -58,20 +59,24 @@ export async function scanRepoSpecs(
   repositoryId: string,
   branch: string
 ): Promise<SpecAnalysisResponse> {
+  const jobId = await createJob('spec_analysis', 'Scan Repo Specs', undefined, repositoryId);
   try {
     const account = await queries.getGithubAccount();
     if (!account) {
+      await failJob(jobId, 'GitHub account not connected');
       return { success: false, error: 'GitHub account not connected' };
     }
 
     const repo = await queries.getRepository(repositoryId);
     if (!repo) {
+      await failJob(jobId, 'Repository not found');
       return { success: false, error: 'Repository not found' };
     }
 
     // Get repo tree and find spec files
     const repoTree = await getRepoTree(account.accessToken, repo.owner, repo.name, branch);
     if (!repoTree || repoTree.tree.length === 0) {
+      await failJob(jobId, 'Could not read repository tree');
       return { success: false, error: 'Could not read repository tree' };
     }
 
@@ -80,6 +85,7 @@ export async function scanRepoSpecs(
     );
 
     if (specEntries.length === 0) {
+      await failJob(jobId, 'No specification files found in repository');
       return { success: false, error: 'No specification files found in repository' };
     }
 
@@ -87,21 +93,31 @@ export async function scanRepoSpecs(
     const filesToFetch = specEntries.slice(0, 10);
     const contents: string[] = [];
 
-    for (const entry of filesToFetch) {
+    for (let i = 0; i < filesToFetch.length; i++) {
+      const entry = filesToFetch[i];
       const content = await getFileContent(account.accessToken, repo.owner, repo.name, entry.path, branch);
       if (content) {
         contents.push(`--- ${entry.path} ---\n${content}`);
       }
+      await updateJobProgress(jobId, i + 1, filesToFetch.length);
     }
 
     if (contents.length === 0) {
+      await failJob(jobId, 'Could not read any specification files');
       return { success: false, error: 'Could not read any specification files' };
     }
 
     const specContent = contents.join('\n\n');
-    return await analyzeSpecContent(specContent, repositoryId);
+    const result = await analyzeSpecContent(specContent, repositoryId);
+    if (result.success) {
+      await completeJob(jobId);
+    } else {
+      await failJob(jobId, result.error || 'Analysis failed');
+    }
+    return result;
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Failed to scan specs';
+    await failJob(jobId, message);
     return { success: false, error: message };
   }
 }
@@ -110,28 +126,40 @@ export async function analyzeUploadedSpecs(
   formData: FormData,
   repositoryId: string
 ): Promise<SpecAnalysisResponse> {
+  const jobId = await createJob('spec_analysis', 'Analyze Uploaded Specs', undefined, repositoryId);
   try {
     const files = formData.getAll('files') as File[];
     if (files.length === 0) {
+      await failJob(jobId, 'No files uploaded');
       return { success: false, error: 'No files uploaded' };
     }
 
     const contents: string[] = [];
-    for (const file of files) {
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i];
       const text = await extractTextFromFile(file);
       if (text.trim()) {
         contents.push(`--- ${file.name} ---\n${text}`);
       }
+      await updateJobProgress(jobId, i + 1, files.length);
     }
 
     if (contents.length === 0) {
+      await failJob(jobId, 'Could not extract text from uploaded files');
       return { success: false, error: 'Could not extract text from uploaded files' };
     }
 
     const specContent = contents.join('\n\n');
-    return await analyzeSpecContent(specContent, repositoryId);
+    const result = await analyzeSpecContent(specContent, repositoryId);
+    if (result.success) {
+      await completeJob(jobId);
+    } else {
+      await failJob(jobId, result.error || 'Analysis failed');
+    }
+    return result;
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Failed to analyze uploaded specs';
+    await failJob(jobId, message);
     return { success: false, error: message };
   }
 }
@@ -217,15 +245,19 @@ export async function saveAndBuildTests(
   repositoryId: string,
   result: SpecAnalysisResult
 ): Promise<{ success: boolean; testsCreated: number; error?: string }> {
+  const totalRoutes = result.functionalAreas.reduce((sum, a) => sum + a.routes.length, 0);
+  const jobId = await createJob('build_tests', 'Building Tests from Specs', totalRoutes, repositoryId);
   try {
     // First save the areas/routes
     const saveResult = await saveSpecAnalysisResult(repositoryId, result);
     if (!saveResult.success) {
+      await failJob(jobId, saveResult.error || 'Failed to save results');
       return { success: false, testsCreated: 0, error: saveResult.error };
     }
 
     const config = await getAIConfig(repositoryId);
     let testsCreated = 0;
+    let routeIndex = 0;
 
     // Generate tests for each route
     for (const area of result.functionalAreas) {
@@ -236,6 +268,9 @@ export async function saveAndBuildTests(
       );
 
       for (const route of area.routes) {
+        routeIndex++;
+        await updateJobProgress(jobId, routeIndex, totalRoutes);
+
         const scenarios = result.testScenarios.find(s => s.route === route.path);
         const testDescription = scenarios?.suggestions?.[0] || `Visual test for ${route.path}`;
 
@@ -268,10 +303,12 @@ export async function saveAndBuildTests(
       }
     }
 
+    await completeJob(jobId);
     revalidatePath('/tests');
     return { success: true, testsCreated };
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Failed to build tests';
+    await failJob(jobId, message);
     return { success: false, testsCreated: 0, error: message };
   }
 }
