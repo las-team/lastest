@@ -26,9 +26,10 @@ interface TestDetailClientProps {
   test: Test;
   results: TestResult[];
   repositoryId?: string | null;
+  screenshots?: string[];
 }
 
-export function TestDetailClient({ test, results, repositoryId }: TestDetailClientProps) {
+export function TestDetailClient({ test, results, repositoryId, screenshots = [] }: TestDetailClientProps) {
   const router = useRouter();
   const [isDeleting, setIsDeleting] = useState(false);
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
@@ -323,20 +324,32 @@ export function TestDetailClient({ test, results, repositoryId }: TestDetailClie
                 <CardTitle className="text-sm">Screenshot Timeline</CardTitle>
               </CardHeader>
               <CardContent>
-                {latestResult?.screenshotPath ? (
+                {screenshots.length > 0 ? (
                   <div className="grid grid-cols-2 gap-4">
-                    <a
-                      href={latestResult.screenshotPath}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="block"
-                    >
-                      <img
-                        src={latestResult.screenshotPath}
-                        alt="Test screenshot"
-                        className="w-full rounded-lg border hover:opacity-90 transition-opacity"
-                      />
-                    </a>
+                    {screenshots.map((src, i) => {
+                      const filename = src.split('/').pop() || '';
+                      const label = filename
+                        .replace(/^[^-]+-[^-]+-/, '')
+                        .replace('.png', '')
+                        .replace(/-/g, ' ');
+                      return (
+                        <div key={i} className="space-y-1">
+                          <a
+                            href={src}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="block"
+                          >
+                            <img
+                              src={src}
+                              alt={label || 'Screenshot'}
+                              className="w-full rounded-lg border hover:opacity-90 transition-opacity"
+                            />
+                          </a>
+                          <p className="text-xs text-muted-foreground text-center capitalize">{label}</p>
+                        </div>
+                      );
+                    })}
                   </div>
                 ) : (
                   <div className="text-center py-8 text-muted-foreground">

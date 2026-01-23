@@ -1,6 +1,8 @@
 'use server';
 
 import { revalidatePath } from 'next/cache';
+import fs from 'fs';
+import path from 'path';
 import * as queries from '@/lib/db/queries';
 import type { NewTest, NewFunctionalArea } from '@/lib/db/schema';
 
@@ -56,4 +58,22 @@ export async function getTestsByArea(areaId: string) {
 
 export async function getFunctionalAreas() {
   return queries.getFunctionalAreas();
+}
+
+export async function getTestScreenshots(
+  testId: string,
+  repositoryId?: string | null
+): Promise<string[]> {
+  const baseDir = './public/screenshots';
+  const dir = repositoryId ? path.join(baseDir, repositoryId) : baseDir;
+
+  if (!fs.existsSync(dir)) return [];
+
+  const files = fs.readdirSync(dir);
+  const testFiles = files
+    .filter(f => f.includes(testId) && f.endsWith('.png'))
+    .sort();
+
+  const prefix = repositoryId ? `/screenshots/${repositoryId}` : '/screenshots';
+  return testFiles.map(f => `${prefix}/${f}`);
 }

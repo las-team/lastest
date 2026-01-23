@@ -31,6 +31,9 @@ export interface TestGenerationContext {
   existingCode?: string;
   errorMessage?: string;
   userPrompt?: string;
+  useMCP?: boolean;
+  isDynamicRoute?: boolean;
+  siblingRoutes?: string[];
 }
 
 export interface GeneratedTest {

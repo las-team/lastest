@@ -2,6 +2,53 @@ import type { TestGenerationContext } from './types';
 
 export const TEST_SIGNATURE = `export async function test(page: Page, baseUrl: string, screenshotPath: string, stepLogger: any)`;
 
+export const MCP_SYSTEM_PROMPT = `You are an expert visual regression test engineer. Use Playwright MCP tools to EXPLORE pages and discover accurate selectors, then OUTPUT standard Playwright test code.
+
+AVAILABLE MCP TOOLS FOR EXPLORATION:
+- mcp__plugin_playwright_playwright__browser_navigate - Navigate to URLs
+- mcp__plugin_playwright_playwright__browser_snapshot - Get accessibility tree with element refs and text content
+- mcp__plugin_playwright_playwright__browser_click - Click elements (requires ref from snapshot)
+- mcp__plugin_playwright_playwright__browser_type - Type into inputs (requires ref from snapshot)
+- mcp__plugin_playwright_playwright__browser_wait_for - Wait for text or time
+
+EXPLORATION WORKFLOW:
+1. browser_navigate to the target URL
+2. browser_snapshot to see the page structure, element refs, and text content
+3. Use browser_click/browser_type with refs to interact and explore
+4. browser_snapshot again after interactions to verify state changes
+5. Identify reliable selectors from the snapshot (data-testid, aria-labels, roles, text)
+
+CRITICAL RULES:
+- Use MCP tools to EXPLORE and DISCOVER what's on the page
+- NEVER guess selectors - always verify them via browser_snapshot first
+- Element refs (like "ref=s2e5") are for MCP exploration only, NOT for final test code
+- Do NOT use browser_take_screenshot during exploration - screenshots go in the OUTPUT test code
+- After exploring, OUTPUT standard Playwright test code using discovered selectors
+
+DYNAMIC ROUTE DISCOVERY:
+When testing routes with parameters like /users/[id] or /posts/[slug]:
+1. First browser_navigate to the parent list page (e.g., /users)
+2. browser_snapshot to find links with actual IDs/slugs in href attributes
+3. Extract the real URL and navigate to it
+4. Explore the actual page with real data
+
+FINAL OUTPUT FORMAT:
+After exploration, generate standard Playwright test code:
+\`\`\`typescript
+import { Page } from 'playwright';
+
+${TEST_SIGNATURE} {
+  stepLogger.log('Navigating to page');
+  await page.goto(\`\${baseUrl}/path\`);
+
+  // Use selectors discovered from MCP exploration
+  await page.locator('[data-testid="discovered-element"]').click();
+
+  stepLogger.log('Taking screenshot');
+  await page.screenshot({ path: screenshotPath, fullPage: true });
+}
+\`\`\``;
+
 export const SYSTEM_PROMPT = `You are an expert Playwright test engineer. Generate high-quality visual regression tests.
 
 IMPORTANT: All tests MUST follow this exact function signature:
@@ -41,6 +88,33 @@ Guidelines:
 export function createTestPrompt(context: TestGenerationContext): string {
   const parts: string[] = [];
 
+  if (context.useMCP) {
+    parts.push('Use MCP tools to explore the page, then generate standard Playwright test code.');
+
+    if (context.userPrompt) {
+      parts.push(`\nUser request: ${context.userPrompt}`);
+    }
+
+    if (context.targetUrl || context.routePath) {
+      const route = context.targetUrl || context.routePath;
+      parts.push(`\nTarget route: ${route}`);
+
+      if (context.isDynamicRoute) {
+        parts.push(`\nThis is a DYNAMIC route with parameters. You MUST:`);
+        parts.push(`1. First browser_navigate to a parent/list page`);
+        parts.push(`2. Use browser_snapshot to find links with actual IDs`);
+        parts.push(`3. Navigate to discovered URL with real parameters`);
+
+        if (context.siblingRoutes?.length) {
+          parts.push(`\nRelated routes that may help find real data: ${context.siblingRoutes.join(', ')}`);
+        }
+      }
+    }
+
+    parts.push(`\nWorkflow: navigate → snapshot → explore → OUTPUT Playwright test code with discovered selectors`);
+    return parts.join('\n');
+  }
+
   parts.push('Generate a Playwright visual regression test with the following requirements:');
 
   if (context.userPrompt) {
@@ -48,7 +122,20 @@ export function createTestPrompt(context: TestGenerationContext): string {
   }
 
   if (context.targetUrl || context.routePath) {
-    parts.push(`\nTarget route: ${context.targetUrl || context.routePath}`);
+    const route = context.targetUrl || context.routePath;
+    parts.push(`\nTarget route: ${route}`);
+
+    if (context.isDynamicRoute) {
+      parts.push(`\nIMPORTANT: This is a dynamic route. Before testing it directly:`);
+      parts.push(`1. Navigate to the parent list page first (e.g., for /users/[id], go to /users)`);
+      parts.push(`2. Wait for the list to load and find a valid link`);
+      parts.push(`3. Click the link or extract the href to get a real ID`);
+      parts.push(`4. Then test the actual page with real data`);
+
+      if (context.siblingRoutes?.length) {
+        parts.push(`\nRelated routes: ${context.siblingRoutes.join(', ')}`);
+      }
+    }
   }
 
   parts.push(`\nReturn ONLY the TypeScript code, no explanations. The code must start with the import and function signature.`);

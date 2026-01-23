@@ -25,6 +25,7 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { AICodePreview } from './ai-code-preview';
 import { aiCreateTest, saveGeneratedTest } from '@/server/actions/ai';
 import { mcpValidateTest } from '@/server/actions/ai-mcp';
+import { Switch } from '@/components/ui/switch';
 import { Loader2, Wand2, Save, RefreshCw, CheckCircle2, XCircle, Zap } from 'lucide-react';
 import { toast } from 'sonner';
 import type { FunctionalArea } from '@/lib/db/schema';
@@ -59,6 +60,7 @@ export function MCPCreateTestDialog({
   // Prompt step state
   const [prompt, setPrompt] = useState('');
   const [targetUrl, setTargetUrl] = useState('');
+  const [useMCP, setUseMCP] = useState(false);
 
   // Preview step state
   const [generatedCode, setGeneratedCode] = useState('');
@@ -67,7 +69,7 @@ export function MCPCreateTestDialog({
   const [pathType, setPathType] = useState<'happy' | 'unhappy'>('happy');
   const [validationResults, setValidationResults] = useState<ValidationResult[]>([]);
   const [iterationCount, setIterationCount] = useState(0);
-  const [maxIterations] = useState(3);
+  const [maxIterations, setMaxIterations] = useState(1);
 
   const handleGenerate = async () => {
     if (!prompt.trim()) {
@@ -82,6 +84,7 @@ export function MCPCreateTestDialog({
       const result = await aiCreateTest(repositoryId, {
         userPrompt: prompt,
         targetUrl: targetUrl || undefined,
+        useMCP,
       });
 
       if (result.success && result.code) {
@@ -103,7 +106,7 @@ export function MCPCreateTestDialog({
     }
   };
 
-  const validateCode = async (code: string) => {
+  const validateCode = async (code: string, currentIteration = 0) => {
     setIsValidating(true);
     setStep('validating');
 
@@ -116,22 +119,21 @@ export function MCPCreateTestDialog({
 
       if (result.success) {
         setValidationResults(result.results || []);
+        setGeneratedCode(code);
 
         if (result.valid) {
-          setStep('preview');
           toast.success('All selectors validated');
+          await autoSaveTest(code);
         } else {
           // Check if we can auto-fix
-          if (iterationCount < maxIterations) {
-            const shouldAutoFix = result.results?.some((r) => !r.valid);
-            if (shouldAutoFix) {
-              await handleAutoFix(code, result.results || []);
-            } else {
-              setStep('preview');
-            }
+          const hasInvalid = result.results?.some((r) => !r.valid);
+          if (hasInvalid && currentIteration < maxIterations) {
+            await handleAutoFix(code, result.results || [], currentIteration);
           } else {
-            setStep('preview');
-            toast.warning('Max iterations reached. Some selectors may be invalid.');
+            if (currentIteration >= maxIterations) {
+              toast.warning('Max iterations reached. Saving with current selectors.');
+            }
+            await autoSaveTest(code);
           }
         }
       } else {
@@ -146,8 +148,9 @@ export function MCPCreateTestDialog({
     }
   };
 
-  const handleAutoFix = async (code: string, results: ValidationResult[]) => {
-    setIterationCount((prev) => prev + 1);
+  const handleAutoFix = async (code: string, results: ValidationResult[], currentIteration: number) => {
+    const nextIteration = currentIteration + 1;
+    setIterationCount(nextIteration);
     setIsGenerating(true);
 
     const invalidSelectors = results
@@ -161,11 +164,12 @@ export function MCPCreateTestDialog({
       const result = await aiCreateTest(repositoryId, {
         userPrompt: fixPrompt,
         targetUrl: targetUrl || undefined,
+        useMCP,
       });
 
       if (result.success && result.code) {
         setGeneratedCode(result.code);
-        await validateCode(result.code);
+        await validateCode(result.code, nextIteration);
       } else {
         toast.error('Failed to auto-fix test');
         setStep('preview');
@@ -180,6 +184,40 @@ export function MCPCreateTestDialog({
 
   const handleManualRevalidate = async () => {
     await validateCode(generatedCode);
+  };
+
+  const generateTestName = (userPrompt: string): string => {
+    return userPrompt.slice(0, 50).replace(/[^a-zA-Z0-9\s]/g, '').trim() || 'AI Generated Test';
+  };
+
+  const autoSaveTest = async (code: string) => {
+    const name = generateTestName(prompt);
+    setTestName(name);
+    setIsSaving(true);
+
+    try {
+      const result = await saveGeneratedTest({
+        repositoryId,
+        functionalAreaId: functionalAreaId && functionalAreaId !== '__none__' ? functionalAreaId : undefined,
+        name,
+        code,
+        targetUrl: targetUrl || undefined,
+        pathType,
+      });
+
+      if (result.success) {
+        toast.success('Test created and saved');
+        handleClose();
+      } else {
+        toast.error(result.error || 'Failed to save test');
+        setStep('preview');
+      }
+    } catch (error) {
+      toast.error('Failed to save test');
+      setStep('preview');
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   const handleSave = async () => {
@@ -216,6 +254,8 @@ export function MCPCreateTestDialog({
     setStep('prompt');
     setPrompt('');
     setTargetUrl('');
+    setUseMCP(false);
+    setMaxIterations(1);
     setGeneratedCode('');
     setTestName('');
     setFunctionalAreaId('');
@@ -269,6 +309,50 @@ export function MCPCreateTestDialog({
               <p className="text-xs text-muted-foreground">
                 Full URL: {baseUrl}{targetUrl.startsWith('/') ? '' : '/'}{targetUrl || '/'}
               </p>
+            </div>
+
+            <div className="flex items-center justify-between p-3 bg-muted/50 rounded-lg">
+              <div className="space-y-0.5">
+                <Label htmlFor="useMCP" className="cursor-pointer">MCP Exploration Mode</Label>
+                <p className="text-xs text-muted-foreground">
+                  AI navigates the live page to discover accurate selectors before generating test code
+                </p>
+              </div>
+              <Switch
+                id="useMCP"
+                checked={useMCP}
+                onCheckedChange={setUseMCP}
+              />
+            </div>
+
+            <div className="flex items-center justify-between p-3 bg-muted/50 rounded-lg">
+              <div className="space-y-0.5">
+                <Label>Auto-fix Iterations</Label>
+                <p className="text-xs text-muted-foreground">
+                  Retry count when selectors fail validation
+                </p>
+              </div>
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="outline"
+                  size="icon"
+                  className="h-8 w-8"
+                  onClick={() => setMaxIterations(Math.max(0, maxIterations - 1))}
+                  disabled={maxIterations <= 0}
+                >
+                  -
+                </Button>
+                <span className="w-6 text-center font-medium">{maxIterations}</span>
+                <Button
+                  variant="outline"
+                  size="icon"
+                  className="h-8 w-8"
+                  onClick={() => setMaxIterations(Math.min(5, maxIterations + 1))}
+                  disabled={maxIterations >= 5}
+                >
+                  +
+                </Button>
+              </div>
             </div>
           </div>
         ) : step === 'validating' ? (

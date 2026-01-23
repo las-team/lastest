@@ -8,15 +8,17 @@ import {
   getTestRunsByRepo,
 } from '@/lib/db/queries';
 import { getBuilds, getBuildsByRepo } from '@/server/actions/builds';
+import { getEnvironmentConfig } from '@/server/actions/environment';
 
 export default async function RunPage() {
   const selectedRepo = await getSelectedRepository();
   const activeBranch = selectedRepo?.selectedBranch || selectedRepo?.defaultBranch || 'main';
 
-  const [tests, runs, builds] = await Promise.all([
+  const [tests, runs, builds, envConfig] = await Promise.all([
     selectedRepo ? getTestsByRepo(selectedRepo.id) : getTests(),
     selectedRepo ? getTestRunsByRepo(selectedRepo.id) : getTestRuns(),
     selectedRepo ? getBuildsByRepo(selectedRepo.id, 10) : getBuilds(10),
+    getEnvironmentConfig(selectedRepo?.id),
   ]);
 
   return (
@@ -28,6 +30,7 @@ export default async function RunPage() {
         builds={builds}
         repositoryId={selectedRepo?.id}
         activeBranch={activeBranch}
+        baseUrl={envConfig?.baseUrl || 'http://localhost:3000'}
       />
     </div>
   );

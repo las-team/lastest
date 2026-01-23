@@ -24,9 +24,28 @@ Implement the OCR feature to identify the selected UI element's text label
 
 Constant cursor recording
 
+MCP explore for routes
+
+Add Routes as Areas automatically - remove button on Tests page
+
+Remove happy - unhappy path from UI and db as well
+
+Welcome
+    Setup github
+    Setup AI
+    Scan for routes NLP, AI, Explore, Spec, Manual
+    Add AI enhanced tests
+
+
+
+Launch if no data
+
+
+
 ## ideas
 Firecrawl?
 Research playwrights comparison options, how they work?
 Approve reject changes or create ticket -> gh issue
 
 ## bugs
+refresh sidebar control when gh is connected

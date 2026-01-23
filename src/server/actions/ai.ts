@@ -4,6 +4,7 @@ import * as queries from '@/lib/db/queries';
 import {
   generateWithAI,
   SYSTEM_PROMPT,
+  MCP_SYSTEM_PROMPT,
   createTestPrompt,
   createFixPrompt,
   createEnhancePrompt,
@@ -29,7 +30,8 @@ export async function aiCreateTest(
   try {
     const config = await getAIConfig(repositoryId);
     const prompt = createTestPrompt(context);
-    const response = await generateWithAI(config, prompt, SYSTEM_PROMPT, {
+    const systemPrompt = context.useMCP ? MCP_SYSTEM_PROMPT : SYSTEM_PROMPT;
+    const response = await generateWithAI(config, prompt, systemPrompt, {
       actionType: 'create_test',
       repositoryId,
     });

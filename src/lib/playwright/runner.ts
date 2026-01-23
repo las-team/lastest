@@ -221,8 +221,11 @@ export class PlaywrightRunner extends EventEmitter {
         }
       });
 
+      // Compute screenshotPath for the test function
+      const testScreenshotPath = path.join(this.screenshotDir, `${runId}-${test.id}.png`);
+
       // Execute the test code
-      await this.executeTestCode(page, test);
+      await this.executeTestCode(page, test, runId, testScreenshotPath);
 
       // Check for console errors or network failures after test execution
       if (consoleErrors.length > 0 || networkFailures.length > 0) {
@@ -313,16 +316,44 @@ export class PlaywrightRunner extends EventEmitter {
     }
   }
 
-  private async executeTestCode(page: Page, test: Test): Promise<void> {
-    // Parse and execute the generated Playwright code
-    // This is a simplified execution - in production, you'd use a proper sandbox
-
+  private async executeTestCode(page: Page, test: Test, runId: string, screenshotPath: string): Promise<void> {
     const code = test.code;
     if (!code) {
       throw new Error('No test code');
     }
 
-    // Extract the test body (everything between test('...', async ({ page }) => { and });)
+    // Try to execute as a proper function with signature:
+    // export async function test(page, baseUrl, screenshotPath, stepLogger)
+    const funcMatch = code.match(
+      /export\s+async\s+function\s+test\s*\(\s*page[^)]*\)\s*\{([\s\S]*)\}\s*$/
+    );
+
+    if (funcMatch) {
+      const serverManager = getServerManager();
+      const baseUrl = this.environmentConfig?.baseUrl || serverManager.resolveUrl('http://localhost:3000').replace(/\/$/, '') || 'http://localhost:3000';
+
+      const stepLogger = {
+        log: (msg: string) => {
+          this.emit('event', {
+            type: 'test_started',
+            testId: test.id,
+            testName: `${test.name}: ${msg}`,
+            timestamp: Date.now(),
+          } as RunEvent);
+        },
+      };
+
+      // Strip import statements and the function wrapper, execute the body
+      const body = funcMatch[1];
+
+      // Build an async function from the body
+      const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
+      const testFn = new AsyncFunction('page', 'baseUrl', 'screenshotPath', 'stepLogger', body);
+      await testFn(page, baseUrl, screenshotPath, stepLogger);
+      return;
+    }
+
+    // Legacy: try Playwright test format
     const bodyMatch = code.match(/test\([^,]+,\s*async\s*\(\{\s*page\s*\}\)\s*=>\s*\{([\s\S]*)\}\);?\s*$/);
 
     if (!bodyMatch) {
@@ -446,7 +477,15 @@ export class PlaywrightRunner extends EventEmitter {
         }
       }
     } else if (line.startsWith('await page.screenshot(')) {
-      // Skip screenshot commands during test execution
+      // Execute screenshot commands from AI-generated tests
+      const pathMatch = line.match(/path:\s*['"]([^'"]+)['"]/);
+      const fullPageMatch = line.match(/fullPage:\s*(true|false)/);
+
+      if (pathMatch) {
+        const screenshotPath = pathMatch[1];
+        const fullPage = fullPageMatch ? fullPageMatch[1] === 'true' : false;
+        await page.screenshot({ path: screenshotPath, fullPage });
+      }
     }
   }
 
