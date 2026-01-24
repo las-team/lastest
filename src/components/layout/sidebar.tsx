@@ -37,7 +37,11 @@ export function Sidebar({ activeBranch, repos, selectedRepo }: SidebarProps) {
   return (
     <aside className="w-64 border-r bg-muted/30 flex flex-col">
       <div className="p-4 border-b">
-        <Link href="/" className="flex items-center gap-2 font-bold text-lg">
+        <Link
+          href="/"
+          className="flex items-center gap-2 font-bold text-lg"
+          style={{ height: 36 }}
+        >
           <Circle className="h-6 w-6 fill-primary text-primary" />
           LASTEST2
         </Link>
