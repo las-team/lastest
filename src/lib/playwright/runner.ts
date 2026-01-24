@@ -108,7 +108,7 @@ export class PlaywrightRunner extends EventEmitter {
     tests: Test[],
     runId: string,
     onProgress?: (progress: ProgressCallback) => void,
-    onResult?: (result: TestRunResult) => void
+    onResult?: (result: TestRunResult) => void | Promise<void>
   ): Promise<TestRunResult[]> {
     if (this.isRunning) {
       throw new Error('Already running tests');
@@ -153,7 +153,7 @@ export class PlaywrightRunner extends EventEmitter {
 
         const result = await this.runSingleTest(test, runId);
         results.push(result);
-        onResult?.(result);
+        await onResult?.(result);
 
         onProgress?.({
           completed: i + 1,

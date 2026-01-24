@@ -151,19 +151,17 @@ async function runBuildAsync(
   const startTime = Date.now();
   const jobId = await createJob('build_run', `Build (${tests.length} tests)`, tests.length, repositoryId);
 
+  let passedCount = 0;
+  let failedCount = 0;
+  let changesDetected = 0;
+  let flakyCount = 0;
+  let processedCount = 0;
+
   try {
-    const results = await runner.runTests(tests, testRunId);
-
-    let passedCount = 0;
-    let failedCount = 0;
-    let changesDetected = 0;
-    let flakyCount = 0;
-    let processedCount = 0;
-
-    for (const result of results) {
+    await runner.runTests(tests, testRunId, undefined, async (result) => {
       processedCount++;
-      await updateJobProgress(jobId, processedCount, tests.length);
-      // Save test result
+
+      // Save test result immediately
       const testResult = await queries.createTestResult({
         testRunId,
         testId: result.testId,
@@ -199,7 +197,16 @@ async function runBuildAsync(
         if (diffResult.classification === 'changed') changesDetected++;
         if (diffResult.classification === 'flaky') flakyCount++;
       }
-    }
+
+      // Update build progress incrementally
+      await updateJobProgress(jobId, processedCount, tests.length);
+      await queries.updateBuild(buildId, {
+        passedCount,
+        failedCount,
+        changesDetected,
+        flakyCount,
+      });
+    });
 
     // Update test run status
     const hasFailures = failedCount > 0;
@@ -208,7 +215,7 @@ async function runBuildAsync(
       status: hasFailures ? 'failed' : 'passed',
     });
 
-    // Update build metrics and status
+    // Update build final metrics and status
     const overallStatus = await queries.computeBuildStatus(buildId);
     await queries.updateBuild(buildId, {
       passedCount,

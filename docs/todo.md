@@ -13,6 +13,10 @@ OCR
 
 ## features
 
+When navigating in manual mode each URL opened should be recorded and screenshots should be taken on those pages
+
+Test classification
+
 UI & UX 
     Use the frontend design skill and subagent for this
     Revise frontend and make sure you havent steered far and try to use standard shadcn css where possible
@@ -20,6 +24,7 @@ UI & UX
 
 ## ideas
 Imported document -> US & AC -> tests - US checklist overview
+Sitemap -flow
 Firecrawl?
 Research playwrights comparison options, how they work?
 Approve reject changes or create ticket -> gh issue
