@@ -120,6 +120,7 @@ async function runTestsAsync(runId: string, tests: Test[], repositoryId?: string
         testId: result.testId,
         status: result.status,
         screenshotPath: result.screenshotPath,
+        screenshots: result.screenshots,
         errorMessage: result.errorMessage,
         durationMs: result.durationMs,
       });

@@ -321,7 +321,7 @@ export function CompareClient({ branches, runs, defaultBaseline, repositoryId, a
       const info = await getLatestRunForBranch(branch, repositoryId);
       setInfo(info);
     } catch (error) {
-      console.error('Failed to fetch branch info:', error);
+      console.warn('Failed to fetch branch info:', error);
       toast.error(`Failed to load ${branch} info`);
     } finally {
       setLoading(false);

@@ -541,7 +541,7 @@ export class PlaywrightRecorder extends EventEmitter {
     const hasCursorEvents = this.session.events.some(e => e.type === 'cursor-move');
 
     const lines: string[] = [
-      `import { test, expect } from '@playwright/test';`,
+      `import { Page } from 'playwright';`,
       '',
       `// Multi-selector fallback helper`,
       `async function locateWithFallback(page, selectors, action, value) {`,
@@ -579,7 +579,7 @@ export class PlaywrightRecorder extends EventEmitter {
       );
     }
 
-    lines.push(`test('${this.session.id}', async ({ page }) => {`);
+    lines.push(`export async function test(page: Page, baseUrl: string, screenshotPath: string, stepLogger: any) {`);
 
     let lastAction = '';
     let cursorBatch: [number, number, number][] = [];
@@ -605,10 +605,11 @@ export class PlaywrightRecorder extends EventEmitter {
       // Flush any pending cursor moves before other events
       flushCursorBatch();
 
-      if (event.type === 'navigation' && event.data.url) {
+      if (event.type === 'navigation' && event.data.relativePath) {
         // Only add goto for the first navigation or if URL changed significantly
         if (!lastAction.includes('goto')) {
-          lines.push(`  await page.goto('${event.data.url}');`);
+          const relativePath = event.data.relativePath;
+          lines.push(`  await page.goto(\`\${baseUrl}${relativePath}\`);`);
         }
         lastAction = 'goto';
       } else if (event.type === 'action') {
@@ -659,7 +660,8 @@ export class PlaywrightRecorder extends EventEmitter {
             break;
           case 'urlMatch':
             lines.push(`  // Assertion: Verify current URL matches expected`);
-            lines.push(`  await expect(page).toHaveURL('${url}');`);
+            const relativePath = this.getRelativePath(url || '');
+            lines.push(`  await expect(page).toHaveURL(\`\${baseUrl}${relativePath}\`);`);
             break;
           case 'domContentLoaded':
             lines.push(`  // Assertion: Verify DOM is ready`);
@@ -670,7 +672,7 @@ export class PlaywrightRecorder extends EventEmitter {
     }
 
     flushCursorBatch();
-    lines.push('});', '');
+    lines.push('}', '');
     return lines.join('\n');
   }
 

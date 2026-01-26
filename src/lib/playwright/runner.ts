@@ -212,10 +212,24 @@ export class PlaywrightRunner extends EventEmitter {
       });
       page = await context.newPage();
 
-      // Capture console errors before navigation
+      // Patterns for console errors that should be ignored (React dev warnings, hydration, etc.)
+      const ignoredErrorPatterns = [
+        /hydrat(ion|ed)/i,
+        /server rendered HTML/i,
+        /This won't be patched up/i,
+        /react\.dev\/link\/hydration-mismatch/i,
+        /Warning: .* did not match/i,
+        /Text content does not match/i,
+      ];
+
+      // Capture console errors before navigation (filtered)
       page.on('console', msg => {
         if (msg.type() === 'error') {
-          consoleErrors.push(msg.text());
+          const text = msg.text();
+          const isIgnored = ignoredErrorPatterns.some(p => p.test(text));
+          if (!isIgnored) {
+            consoleErrors.push(text);
+          }
         }
       });
 
@@ -304,7 +318,8 @@ export class PlaywrightRunner extends EventEmitter {
         testId: test.id,
         status: 'passed',
         durationMs,
-        screenshotPath: screenshotPublicPath,
+        // Use first captured screenshot if any, otherwise fallback screenshot
+        screenshotPath: capturedScreenshots[0]?.path || screenshotPublicPath,
         screenshots: capturedScreenshots,
         consoleErrors: consoleErrors.length > 0 ? consoleErrors : undefined,
         networkRequests: networkFailures.length > 0 ? networkFailures : undefined,

@@ -126,6 +126,7 @@ class RunQueue {
             testId: result.testId,
             status: result.status,
             screenshotPath: result.screenshotPath,
+            screenshots: result.screenshots,
             errorMessage: result.errorMessage,
             durationMs: result.durationMs,
           });

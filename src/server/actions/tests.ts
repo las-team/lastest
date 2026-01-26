@@ -88,39 +88,44 @@ export async function getTestScreenshotsGrouped(
   testId: string,
   repositoryId?: string | null
 ): Promise<ScreenshotGroup[]> {
-  const baseDir = './public/screenshots';
-  const dir = repositoryId ? path.join(baseDir, repositoryId) : baseDir;
+  // Primary: Get screenshots from database (stored in test results)
+  const testResults = await queries.getTestResultsByTest(testId);
+  const groups: Map<string, { startedAt: Date | null; screenshots: string[] }> = new Map();
 
-  if (!fs.existsSync(dir)) return [];
+  for (const result of testResults) {
+    const runId = result.testRunId;
+    if (!runId) continue;
 
-  const files = fs.readdirSync(dir);
-  const testFiles = files
-    .filter(f => f.includes(testId) && f.endsWith('.png'))
-    .sort();
-
-  const prefix = repositoryId ? `/screenshots/${repositoryId}` : '/screenshots';
-
-  // Group screenshots by runId (first UUID in filename)
-  const groups: Map<string, string[]> = new Map();
-  for (const file of testFiles) {
-    // Filename format: {runId}-{testId}-{label}.png
-    const runId = file.split('-').slice(0, 5).join('-'); // UUID has 5 parts
     if (!groups.has(runId)) {
-      groups.set(runId, []);
+      groups.set(runId, { startedAt: null, screenshots: [] });
     }
-    groups.get(runId)!.push(`${prefix}/${file}`);
+    const group = groups.get(runId)!;
+
+    // Add screenshots from the JSON array
+    if (result.screenshots && Array.isArray(result.screenshots)) {
+      for (const s of result.screenshots) {
+        if (s.path && !group.screenshots.includes(s.path)) {
+          group.screenshots.push(s.path);
+        }
+      }
+    }
+
+    // Fallback to single screenshotPath if no array
+    if (result.screenshotPath && !group.screenshots.includes(result.screenshotPath)) {
+      group.screenshots.push(result.screenshotPath);
+    }
   }
 
-  // Get run timestamps from database
+  // Get run timestamps
   const runIds = Array.from(groups.keys());
   const runs = await queries.getTestRunsByIds(runIds);
   const runMap = new Map(runs.map(r => [r.id, r.startedAt]));
 
-  // Build result sorted by startedAt desc (newest first)
+  // Build result
   const result: ScreenshotGroup[] = runIds.map(runId => ({
     runId,
     startedAt: runMap.get(runId) || null,
-    screenshots: groups.get(runId) || [],
+    screenshots: groups.get(runId)?.screenshots || [],
   }));
 
   // Sort by startedAt descending (newest first)

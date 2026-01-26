@@ -221,6 +221,7 @@ export async function getTestResultsByTest(testId: string) {
       testId: testResults.testId,
       status: testResults.status,
       screenshotPath: testResults.screenshotPath,
+      screenshots: testResults.screenshots,
       diffPath: testResults.diffPath,
       errorMessage: testResults.errorMessage,
       durationMs: testResults.durationMs,

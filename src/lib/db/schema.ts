@@ -64,12 +64,18 @@ export const testRuns = sqliteTable('test_runs', {
   status: text('status'), // 'passed', 'failed', 'running'
 });
 
+export interface CapturedScreenshot {
+  path: string;
+  label?: string;
+}
+
 export const testResults = sqliteTable('test_results', {
   id: text('id').primaryKey(),
   testRunId: text('test_run_id').references(() => testRuns.id),
   testId: text('test_id').references(() => tests.id),
   status: text('status'), // 'passed', 'failed', 'skipped'
   screenshotPath: text('screenshot_path'),
+  screenshots: text('screenshots', { mode: 'json' }).$type<CapturedScreenshot[]>(),
   diffPath: text('diff_path'),
   errorMessage: text('error_message'),
   durationMs: integer('duration_ms'),
