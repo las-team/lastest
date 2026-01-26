@@ -60,6 +60,12 @@ export async function getFunctionalAreas() {
   return queries.getFunctionalAreas();
 }
 
+export interface ScreenshotGroup {
+  runId: string;
+  startedAt: Date | null;
+  screenshots: string[];
+}
+
 export async function getTestScreenshots(
   testId: string,
   repositoryId?: string | null
@@ -76,6 +82,56 @@ export async function getTestScreenshots(
 
   const prefix = repositoryId ? `/screenshots/${repositoryId}` : '/screenshots';
   return testFiles.map(f => `${prefix}/${f}`);
+}
+
+export async function getTestScreenshotsGrouped(
+  testId: string,
+  repositoryId?: string | null
+): Promise<ScreenshotGroup[]> {
+  const baseDir = './public/screenshots';
+  const dir = repositoryId ? path.join(baseDir, repositoryId) : baseDir;
+
+  if (!fs.existsSync(dir)) return [];
+
+  const files = fs.readdirSync(dir);
+  const testFiles = files
+    .filter(f => f.includes(testId) && f.endsWith('.png'))
+    .sort();
+
+  const prefix = repositoryId ? `/screenshots/${repositoryId}` : '/screenshots';
+
+  // Group screenshots by runId (first UUID in filename)
+  const groups: Map<string, string[]> = new Map();
+  for (const file of testFiles) {
+    // Filename format: {runId}-{testId}-{label}.png
+    const runId = file.split('-').slice(0, 5).join('-'); // UUID has 5 parts
+    if (!groups.has(runId)) {
+      groups.set(runId, []);
+    }
+    groups.get(runId)!.push(`${prefix}/${file}`);
+  }
+
+  // Get run timestamps from database
+  const runIds = Array.from(groups.keys());
+  const runs = await queries.getTestRunsByIds(runIds);
+  const runMap = new Map(runs.map(r => [r.id, r.startedAt]));
+
+  // Build result sorted by startedAt desc (newest first)
+  const result: ScreenshotGroup[] = runIds.map(runId => ({
+    runId,
+    startedAt: runMap.get(runId) || null,
+    screenshots: groups.get(runId) || [],
+  }));
+
+  // Sort by startedAt descending (newest first)
+  result.sort((a, b) => {
+    if (!a.startedAt && !b.startedAt) return 0;
+    if (!a.startedAt) return 1;
+    if (!b.startedAt) return -1;
+    return b.startedAt.getTime() - a.startedAt.getTime();
+  });
+
+  return result;
 }
 
 // Test Version Actions

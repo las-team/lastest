@@ -20,16 +20,33 @@ import { deleteTest, updateTest, getTestVersionHistory, restoreTestVersion } fro
 import { runTests, getRunStatus } from '@/server/actions/runs';
 import { aiFixTest, aiEnhanceTest, updateTestCode } from '@/server/actions/ai';
 import { toast } from 'sonner';
-import type { Test, TestResult, TestVersion } from '@/lib/db/schema';
+import type { Test, TestVersion } from '@/lib/db/schema';
+import type { ScreenshotGroup } from '@/server/actions/tests';
+
+interface TestResult {
+  id: string;
+  testRunId: string | null;
+  testId: string | null;
+  status: string | null;
+  screenshotPath: string | null;
+  diffPath: string | null;
+  errorMessage: string | null;
+  durationMs: number | null;
+  viewport: string | null;
+  browser: string | null;
+  consoleErrors: string[] | null;
+  networkRequests: unknown[] | null;
+  startedAt: Date | null;
+}
 
 interface TestDetailClientProps {
   test: Test;
   results: TestResult[];
   repositoryId?: string | null;
-  screenshots?: string[];
+  screenshotGroups?: ScreenshotGroup[];
 }
 
-export function TestDetailClient({ test, results, repositoryId, screenshots = [] }: TestDetailClientProps) {
+export function TestDetailClient({ test, results, repositoryId, screenshotGroups = [] }: TestDetailClientProps) {
   const router = useRouter();
   const [isDeleting, setIsDeleting] = useState(false);
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
@@ -396,32 +413,45 @@ export function TestDetailClient({ test, results, repositoryId, screenshots = []
                 <CardTitle className="text-sm">Screenshot Timeline</CardTitle>
               </CardHeader>
               <CardContent>
-                {screenshots.length > 0 ? (
-                  <div className="grid grid-cols-2 gap-4">
-                    {screenshots.map((src, i) => {
-                      const filename = src.split('/').pop() || '';
-                      const label = filename
-                        .replace(/^[^-]+-[^-]+-/, '')
-                        .replace('.png', '')
-                        .replace(/-/g, ' ');
-                      return (
-                        <div key={i} className="space-y-1">
-                          <a
-                            href={src}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="block"
-                          >
-                            <img
-                              src={src}
-                              alt={label || 'Screenshot'}
-                              className="w-full rounded-lg border hover:opacity-90 transition-opacity"
-                            />
-                          </a>
-                          <p className="text-xs text-muted-foreground text-center capitalize">{label}</p>
+                {screenshotGroups.length > 0 ? (
+                  <div className="space-y-6">
+                    {screenshotGroups.map((group) => (
+                      <div key={group.runId} className="space-y-3">
+                        <div className="flex items-center gap-2 text-sm text-muted-foreground border-b pb-2">
+                          <Clock className="h-4 w-4" />
+                          <span>
+                            {group.startedAt
+                              ? new Date(group.startedAt).toLocaleString()
+                              : 'Unknown time'}
+                          </span>
                         </div>
-                      );
-                    })}
+                        <div className="grid grid-cols-2 gap-4">
+                          {group.screenshots.map((src, i) => {
+                            const filename = src.split('/').pop() || '';
+                            // Extract label from filename (after runId-testId-)
+                            const parts = filename.split('-');
+                            const label = parts.slice(10).join(' ').replace('.png', '') || 'screenshot';
+                            return (
+                              <div key={i} className="space-y-1">
+                                <a
+                                  href={src}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="block"
+                                >
+                                  <img
+                                    src={src}
+                                    alt={label || 'Screenshot'}
+                                    className="w-full rounded-lg border hover:opacity-90 transition-opacity"
+                                  />
+                                </a>
+                                <p className="text-xs text-muted-foreground text-center capitalize">{label}</p>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    ))}
                   </div>
                 ) : (
                   <div className="text-center py-8 text-muted-foreground">
@@ -454,9 +484,14 @@ export function TestDetailClient({ test, results, repositoryId, screenshots = []
                             )}
                             <span className="capitalize">{result.status}</span>
                           </div>
-                          <span className="text-sm text-muted-foreground">
-                            {result.durationMs}ms
-                          </span>
+                          <div className="flex items-center gap-4 text-sm text-muted-foreground">
+                            <span>{result.durationMs}ms</span>
+                            <span>
+                              {result.startedAt
+                                ? new Date(result.startedAt).toLocaleString()
+                                : 'Unknown'}
+                            </span>
+                          </div>
                         </div>
                         {result.status === 'failed' && result.errorMessage && (
                           <div className="mt-2 p-2 bg-destructive/10 border border-destructive/20 rounded text-sm text-destructive">

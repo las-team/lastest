@@ -1,6 +1,6 @@
 import { Header } from '@/components/layout/header';
 import { getTest, getTestResultsByTest, getSelectedRepository } from '@/lib/db/queries';
-import { getTestScreenshots } from '@/server/actions/tests';
+import { getTestScreenshotsGrouped } from '@/server/actions/tests';
 import { TestDetailClient } from './test-detail-client';
 import { notFound } from 'next/navigation';
 
@@ -19,7 +19,7 @@ export default async function TestDetailPage({ params }: TestDetailPageProps) {
   const results = await getTestResultsByTest(id);
   const selectedRepo = await getSelectedRepository();
   const repoId = test.repositoryId || selectedRepo?.id;
-  const screenshots = await getTestScreenshots(id, repoId);
+  const screenshotGroups = await getTestScreenshotsGrouped(id, repoId);
 
   return (
     <div className="flex flex-col h-full">
@@ -28,7 +28,7 @@ export default async function TestDetailPage({ params }: TestDetailPageProps) {
         test={test}
         results={results}
         repositoryId={repoId}
-        screenshots={screenshots}
+        screenshotGroups={screenshotGroups}
       />
     </div>
   );

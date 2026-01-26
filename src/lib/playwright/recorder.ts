@@ -289,6 +289,18 @@ export class PlaywrightRecorder extends EventEmitter {
           }
         }
 
+        // Placeholder (for inputs/textareas)
+        const placeholder = element.getAttribute('placeholder');
+        if (placeholder) {
+          allSelectors.set('placeholder', `[placeholder="${placeholder}"]`);
+        }
+
+        // Name attribute (for form elements)
+        const name = element.getAttribute('name');
+        if (name) {
+          allSelectors.set('name', `[name="${name}"]`);
+        }
+
         // CSS path fallback
         const cssPath = generateCssPath(element);
         if (cssPath) {
@@ -341,7 +353,9 @@ export class PlaywrightRecorder extends EventEmitter {
           if (classAttr) {
             const classes = classAttr.split(' ')
               .filter(c => c && !c.includes(':') && !c.startsWith('_'))
-              .slice(0, 2);
+              .slice(0, 2)
+              // Escape special CSS characters in class names (Tailwind arbitrary values like rounded-[inherit])
+              .map(c => c.replace(/([[\]()#.>+~=|^$*!@])/g, '\\$1'));
             if (classes.length > 0) {
               selector += '.' + classes.join('.');
             }

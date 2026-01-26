@@ -29,6 +29,8 @@ const SELECTOR_LABELS: Record<SelectorType, { name: string; description: string 
   'role-name': { name: 'Role + Name', description: 'ARIA role with accessible name' },
   'aria-label': { name: 'aria-label', description: 'Elements with aria-label attribute' },
   'text': { name: 'Text Content', description: 'Visible text in buttons/links' },
+  'placeholder': { name: 'Placeholder', description: 'Input placeholder attribute' },
+  'name': { name: 'Name', description: 'Form element name attribute' },
   'css-path': { name: 'CSS Path', description: 'CSS selector path (fallback)' },
   'ocr-text': { name: 'OCR Text', description: 'Text extracted via OCR' },
 };

@@ -62,6 +62,7 @@ interface RecordingClientProps {
   areas: FunctionalArea[];
   settings: PlaywrightSettings;
   repositoryId?: string | null;
+  defaultBaseUrl?: string;
 }
 
 type RecordingStep = 'setup' | 'recording' | 'saving';
@@ -132,13 +133,13 @@ interface RecordingEvent {
   };
 }
 
-export function RecordingClient({ areas: initialAreas, settings, repositoryId }: RecordingClientProps) {
+export function RecordingClient({ areas: initialAreas, settings, repositoryId, defaultBaseUrl }: RecordingClientProps) {
   const router = useRouter();
   const [step, setStep] = useState<RecordingStep>('setup');
   const [settingsOpen, setSettingsOpen] = useState(false);
 
   // Setup form state
-  const [url, setUrl] = useState('https://');
+  const [url, setUrl] = useState(defaultBaseUrl || 'https://');
   const [testName, setTestName] = useState('');
   const [areaId, setAreaId] = useState<string>('');
   const [newAreaName, setNewAreaName] = useState('');

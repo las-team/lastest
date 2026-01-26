@@ -192,6 +192,11 @@ export async function getTestRun(id: string) {
   return db.select().from(testRuns).where(eq(testRuns.id, id)).get();
 }
 
+export async function getTestRunsByIds(ids: string[]) {
+  if (ids.length === 0) return [];
+  return db.select().from(testRuns).where(inArray(testRuns.id, ids)).all();
+}
+
 export async function createTestRun(data: Omit<NewTestRun, 'id'>) {
   const id = uuid();
   await db.insert(testRuns).values({ ...data, id });
@@ -223,6 +228,7 @@ export async function getTestResultsByTest(testId: string) {
       browser: testResults.browser,
       consoleErrors: testResults.consoleErrors,
       networkRequests: testResults.networkRequests,
+      startedAt: testRuns.startedAt,
     })
     .from(testResults)
     .innerJoin(testRuns, eq(testResults.testRunId, testRuns.id))
