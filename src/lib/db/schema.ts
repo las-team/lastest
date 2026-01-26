@@ -334,14 +334,17 @@ export type DiffStatus = 'pending' | 'approved' | 'rejected' | 'auto_approved';
 export type TriggerType = 'webhook' | 'manual' | 'push';
 
 // AI Provider settings for test generation
-export type AIProvider = 'claude-cli' | 'openrouter';
+export type AIProvider = 'claude-cli' | 'openrouter' | 'claude-agent-sdk';
+export type AgentSdkPermissionMode = 'plan' | 'default' | 'acceptEdits';
 
 export const aiSettings = sqliteTable('ai_settings', {
   id: text('id').primaryKey(),
   repositoryId: text('repository_id').references(() => repositories.id),
-  provider: text('provider').notNull().default('claude-cli'), // 'claude-cli' | 'openrouter'
+  provider: text('provider').notNull().default('claude-cli'), // 'claude-cli' | 'openrouter' | 'claude-agent-sdk'
   openrouterApiKey: text('openrouter_api_key'),
   openrouterModel: text('openrouter_model').default('anthropic/claude-sonnet-4'),
+  agentSdkPermissionMode: text('agent_sdk_permission_mode').default('plan'), // 'plan' | 'default' | 'acceptEdits'
+  agentSdkWorkingDir: text('agent_sdk_working_dir'),
   customInstructions: text('custom_instructions'),
   createdAt: integer('created_at', { mode: 'timestamp' }),
   updatedAt: integer('updated_at', { mode: 'timestamp' }),
@@ -353,6 +356,7 @@ export type NewAISettings = typeof aiSettings.$inferInsert;
 export const DEFAULT_AI_SETTINGS = {
   provider: 'claude-cli' as AIProvider,
   openrouterModel: 'anthropic/claude-sonnet-4',
+  agentSdkPermissionMode: 'plan' as AgentSdkPermissionMode,
 };
 
 // AI Prompt Logging for debugging and auditing
@@ -399,3 +403,20 @@ export const backgroundJobs = sqliteTable('background_jobs', {
 
 export type BackgroundJob = typeof backgroundJobs.$inferSelect;
 export type NewBackgroundJob = typeof backgroundJobs.$inferInsert;
+
+// Test versions for version history
+export type TestChangeReason = 'manual_edit' | 'ai_fix' | 'ai_enhance' | 'restored';
+
+export const testVersions = sqliteTable('test_versions', {
+  id: text('id').primaryKey(),
+  testId: text('test_id').references(() => tests.id, { onDelete: 'cascade' }).notNull(),
+  version: integer('version').notNull(),
+  code: text('code').notNull(),
+  name: text('name').notNull(),
+  targetUrl: text('target_url'),
+  changeReason: text('change_reason'), // 'manual_edit' | 'ai_fix' | 'ai_enhance' | 'restored_from_vN'
+  createdAt: integer('created_at', { mode: 'timestamp' }),
+});
+
+export type TestVersion = typeof testVersions.$inferSelect;
+export type NewTestVersion = typeof testVersions.$inferInsert;

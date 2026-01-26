@@ -33,7 +33,7 @@ export async function createTest(data: Omit<NewTest, 'id' | 'createdAt' | 'updat
 }
 
 export async function updateTest(id: string, data: Partial<NewTest>) {
-  await queries.updateTest(id, data);
+  await queries.updateTestWithVersion(id, data, 'manual_edit');
   revalidatePath('/tests');
   revalidatePath(`/tests/${id}`);
 }
@@ -76,4 +76,31 @@ export async function getTestScreenshots(
 
   const prefix = repositoryId ? `/screenshots/${repositoryId}` : '/screenshots';
   return testFiles.map(f => `${prefix}/${f}`);
+}
+
+// Test Version Actions
+export async function getTestVersionHistory(testId: string) {
+  return queries.getTestVersions(testId);
+}
+
+export async function restoreTestVersion(testId: string, version: number) {
+  const versionData = await queries.getTestVersion(testId, version);
+  if (!versionData) {
+    throw new Error(`Version ${version} not found`);
+  }
+
+  // Update test with the version data, marking as restored
+  await queries.updateTestWithVersion(
+    testId,
+    {
+      code: versionData.code,
+      name: versionData.name,
+      targetUrl: versionData.targetUrl,
+    },
+    `restored_from_v${version}`
+  );
+
+  revalidatePath('/tests');
+  revalidatePath(`/tests/${testId}`);
+  return { success: true };
 }

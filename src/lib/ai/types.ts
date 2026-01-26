@@ -1,4 +1,4 @@
-export type AIProviderType = 'claude-cli' | 'openrouter';
+export type AIProviderType = 'claude-cli' | 'openrouter' | 'claude-agent-sdk';
 
 export interface GenerateOptions {
   prompt: string;
@@ -23,6 +23,8 @@ export interface AIProviderConfig {
   openrouterApiKey?: string | null;
   openrouterModel?: string;
   customInstructions?: string | null;
+  agentSdkPermissionMode?: 'plan' | 'default' | 'acceptEdits';
+  agentSdkWorkingDir?: string;
 }
 
 export interface TestGenerationContext {

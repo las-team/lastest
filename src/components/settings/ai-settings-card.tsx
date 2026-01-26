@@ -15,8 +15,8 @@ import {
 } from '@/components/ui/select';
 import { saveAISettings, resetAISettings, testAIConnection } from '@/server/actions/ai-settings';
 import { DEFAULT_AI_SETTINGS } from '@/lib/db/schema';
-import type { AISettings, AIProvider } from '@/lib/db/schema';
-import { Loader2, RotateCcw, Save, Sparkles, CheckCircle2, XCircle, Zap } from 'lucide-react';
+import type { AISettings, AIProvider, AgentSdkPermissionMode } from '@/lib/db/schema';
+import { Loader2, RotateCcw, Save, Sparkles, CheckCircle2, XCircle, Zap, Bot } from 'lucide-react';
 import { toast } from 'sonner';
 
 interface AISettingsCardProps {
@@ -45,6 +45,10 @@ export function AISettingsCard({ settings, repositoryId }: AISettingsCardProps) 
     settings.openrouterModel || DEFAULT_AI_SETTINGS.openrouterModel
   );
   const [customInstructions, setCustomInstructions] = useState(settings.customInstructions || '');
+  const [agentSdkPermissionMode, setAgentSdkPermissionMode] = useState<AgentSdkPermissionMode>(
+    (settings.agentSdkPermissionMode as AgentSdkPermissionMode) || 'plan'
+  );
+  const [agentSdkWorkingDir, setAgentSdkWorkingDir] = useState(settings.agentSdkWorkingDir || '');
 
   const handleSave = () => {
     startTransition(async () => {
@@ -53,6 +57,8 @@ export function AISettingsCard({ settings, repositoryId }: AISettingsCardProps) 
         provider,
         openrouterApiKey: openrouterApiKey || null,
         openrouterModel,
+        agentSdkPermissionMode,
+        agentSdkWorkingDir: agentSdkWorkingDir || null,
         customInstructions: customInstructions || null,
       });
       toast.success('AI settings saved');
@@ -66,6 +72,8 @@ export function AISettingsCard({ settings, repositoryId }: AISettingsCardProps) 
       setOpenrouterApiKey('');
       setOpenrouterModel(DEFAULT_AI_SETTINGS.openrouterModel);
       setCustomInstructions('');
+      setAgentSdkPermissionMode('plan');
+      setAgentSdkWorkingDir('');
       setTestResult(null);
       toast.success('AI settings reset to defaults');
     });
@@ -75,7 +83,7 @@ export function AISettingsCard({ settings, repositoryId }: AISettingsCardProps) 
     setIsTesting(true);
     setTestResult(null);
     try {
-      const result = await testAIConnection(provider, openrouterApiKey || undefined);
+      const result = await testAIConnection(provider, openrouterApiKey || undefined, agentSdkPermissionMode);
       setTestResult(result);
       if (result.success) {
         toast.success(result.message);
@@ -120,12 +128,20 @@ export function AISettingsCard({ settings, repositoryId }: AISettingsCardProps) 
                   OpenRouter API
                 </div>
               </SelectItem>
+              <SelectItem value="claude-agent-sdk">
+                <div className="flex items-center gap-2">
+                  <Bot className="h-4 w-4" />
+                  Claude Agent SDK
+                </div>
+              </SelectItem>
             </SelectContent>
           </Select>
           <p className="text-xs text-muted-foreground">
             {provider === 'claude-cli'
               ? 'Uses the Claude CLI tool. Run `claude login` to authenticate.'
-              : 'Uses OpenRouter API with your API key.'}
+              : provider === 'openrouter'
+              ? 'Uses OpenRouter API with your API key.'
+              : 'Uses Claude Agent SDK for agentic interactions.'}
           </p>
         </div>
 
@@ -168,6 +184,44 @@ export function AISettingsCard({ settings, repositoryId }: AISettingsCardProps) 
                   ))}
                 </SelectContent>
               </Select>
+            </div>
+          </>
+        )}
+
+        {/* Claude Agent SDK Settings */}
+        {provider === 'claude-agent-sdk' && (
+          <>
+            <div className="space-y-2">
+              <Label>Permission Mode</Label>
+              <Select
+                value={agentSdkPermissionMode}
+                onValueChange={(v) => setAgentSdkPermissionMode(v as AgentSdkPermissionMode)}
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="plan">Plan (Read-only, safest)</SelectItem>
+                  <SelectItem value="default">Default (Standard permissions)</SelectItem>
+                  <SelectItem value="acceptEdits">Accept Edits (Allow file modifications)</SelectItem>
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-muted-foreground">
+                Controls what actions the agent can perform. &quot;Plan&quot; is read-only and safest.
+              </p>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="workingDir">Working Directory (Optional)</Label>
+              <Input
+                id="workingDir"
+                value={agentSdkWorkingDir}
+                onChange={(e) => setAgentSdkWorkingDir(e.target.value)}
+                placeholder="/path/to/project"
+              />
+              <p className="text-xs text-muted-foreground">
+                The directory where the agent will operate. Defaults to current working directory.
+              </p>
             </div>
           </>
         )}

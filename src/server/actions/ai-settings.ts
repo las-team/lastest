@@ -1,7 +1,7 @@
 'use server';
 
 import * as queries from '@/lib/db/queries';
-import type { AIProvider } from '@/lib/db/schema';
+import type { AIProvider, AgentSdkPermissionMode } from '@/lib/db/schema';
 import { revalidatePath } from 'next/cache';
 import { exec } from 'child_process';
 import { promisify } from 'util';
@@ -17,6 +17,8 @@ export async function saveAISettings(data: {
   provider?: AIProvider;
   openrouterApiKey?: string | null;
   openrouterModel?: string;
+  agentSdkPermissionMode?: AgentSdkPermissionMode;
+  agentSdkWorkingDir?: string | null;
   customInstructions?: string | null;
 }) {
   const { repositoryId, ...settingsData } = data;
@@ -40,7 +42,11 @@ export async function resetAISettings(repositoryId?: string | null) {
   return { success: true };
 }
 
-export async function testAIConnection(provider: AIProvider, apiKey?: string): Promise<{
+export async function testAIConnection(
+  provider: AIProvider,
+  apiKey?: string,
+  permissionMode?: AgentSdkPermissionMode
+): Promise<{
   success: boolean;
   message: string;
 }> {
@@ -90,6 +96,35 @@ export async function testAIConnection(provider: AIProvider, apiKey?: string): P
 
       const error = await response.json().catch(() => ({ error: { message: response.statusText } }));
       return { success: false, message: error.error?.message || 'OpenRouter connection failed' };
+    } else if (provider === 'claude-agent-sdk') {
+      // Test Claude Agent SDK by importing and running a simple query
+      const { query } = await import('@anthropic-ai/claude-agent-sdk');
+
+      const mode = permissionMode || 'plan';
+      let result = '';
+
+      for await (const message of query({
+        prompt: 'Say hello in one word',
+        options: {
+          permissionMode: mode,
+        },
+      })) {
+        if (message.type === 'assistant' && message.message?.content) {
+          for (const block of message.message.content) {
+            if (block.type === 'text') {
+              result += block.text;
+            }
+          }
+        }
+        if (message.type === 'result' && message.subtype === 'success' && message.result) {
+          result += message.result;
+        }
+      }
+
+      if (result.trim().length > 0) {
+        return { success: true, message: 'Claude Agent SDK connected successfully' };
+      }
+      return { success: false, message: 'Claude Agent SDK returned empty response' };
     }
 
     return { success: false, message: 'Unknown provider' };

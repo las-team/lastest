@@ -15,12 +15,12 @@ import {
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
-import { Play, Trash2, Copy, Edit2, Clock, CheckCircle, XCircle, X, Save, Wrench, Wand2, Loader2 } from 'lucide-react';
-import { deleteTest, updateTest } from '@/server/actions/tests';
+import { Play, Trash2, Copy, Edit2, Clock, CheckCircle, XCircle, X, Save, Wrench, Wand2, Loader2, History, RotateCcw } from 'lucide-react';
+import { deleteTest, updateTest, getTestVersionHistory, restoreTestVersion } from '@/server/actions/tests';
 import { runTests, getRunStatus } from '@/server/actions/runs';
 import { aiFixTest, aiEnhanceTest, updateTestCode } from '@/server/actions/ai';
 import { toast } from 'sonner';
-import type { Test, TestResult } from '@/lib/db/schema';
+import type { Test, TestResult, TestVersion } from '@/lib/db/schema';
 
 interface TestDetailClientProps {
   test: Test;
@@ -47,7 +47,38 @@ export function TestDetailClient({ test, results, repositoryId, screenshots = []
   const [isEnhancing, setIsEnhancing] = useState(false);
   const [enhancePrompt, setEnhancePrompt] = useState('');
 
+  // Version history state
+  const [versions, setVersions] = useState<TestVersion[]>([]);
+  const [isLoadingVersions, setIsLoadingVersions] = useState(false);
+  const [isRestoring, setIsRestoring] = useState<number | null>(null);
+
   const latestResult = results[0];
+
+  const loadVersions = async () => {
+    setIsLoadingVersions(true);
+    try {
+      const history = await getTestVersionHistory(test.id);
+      setVersions(history);
+    } catch {
+      toast.error('Failed to load version history');
+    } finally {
+      setIsLoadingVersions(false);
+    }
+  };
+
+  const handleRestore = async (version: number) => {
+    setIsRestoring(version);
+    try {
+      await restoreTestVersion(test.id, version);
+      toast.success(`Restored to version ${version}`);
+      router.refresh();
+      loadVersions();
+    } catch {
+      toast.error('Failed to restore version');
+    } finally {
+      setIsRestoring(null);
+    }
+  };
 
   const handleDelete = async () => {
     setIsDeleting(true);
@@ -109,7 +140,7 @@ export function TestDetailClient({ test, results, repositoryId, screenshots = []
       const errorMsg = latestResult?.errorMessage || 'Test needs fixing';
       const result = await aiFixTest(repositoryId, test.id, errorMsg);
       if (result.success && result.code) {
-        await updateTestCode(test.id, result.code);
+        await updateTestCode(test.id, result.code, 'ai_fix');
         toast.success('Test fixed and saved');
         router.refresh();
       } else {
@@ -128,7 +159,7 @@ export function TestDetailClient({ test, results, repositoryId, screenshots = []
     try {
       const result = await aiEnhanceTest(repositoryId, test.id, enhancePrompt || undefined);
       if (result.success && result.code) {
-        await updateTestCode(test.id, result.code);
+        await updateTestCode(test.id, result.code, 'ai_enhance');
         toast.success('Test enhanced and saved');
         setEnhancePrompt('');
         router.refresh();
@@ -283,6 +314,7 @@ export function TestDetailClient({ test, results, repositoryId, screenshots = []
             <TabsTrigger value="code">Code</TabsTrigger>
             <TabsTrigger value="screenshots">Screenshots</TabsTrigger>
             <TabsTrigger value="history">Run History</TabsTrigger>
+            <TabsTrigger value="versions" onClick={loadVersions}>Versions</TabsTrigger>
           </TabsList>
 
           <TabsContent value="code" className="mt-4 space-y-4">
@@ -425,6 +457,68 @@ export function TestDetailClient({ test, results, repositoryId, screenshots = []
               </CardContent>
             </Card>
           </TabsContent>
+
+          <TabsContent value="versions" className="mt-4">
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-sm flex items-center gap-2">
+                  <History className="h-4 w-4" />
+                  Version History
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                {isLoadingVersions ? (
+                  <div className="flex items-center justify-center py-8">
+                    <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+                  </div>
+                ) : versions.length > 0 ? (
+                  <div className="space-y-2">
+                    {versions.map((version) => (
+                      <div
+                        key={version.id}
+                        className="p-3 border rounded-lg"
+                      >
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-3">
+                            <span className="font-mono text-sm font-medium">v{version.version}</span>
+                            <span className="text-xs px-2 py-0.5 rounded bg-muted capitalize">
+                              {version.changeReason?.replace(/_/g, ' ') || 'manual edit'}
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <span className="text-xs text-muted-foreground">
+                              {version.createdAt
+                                ? new Date(version.createdAt).toLocaleString()
+                                : 'Unknown'}
+                            </span>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => handleRestore(version.version)}
+                              disabled={isRestoring !== null}
+                            >
+                              {isRestoring === version.version ? (
+                                <Loader2 className="h-4 w-4 animate-spin" />
+                              ) : (
+                                <RotateCcw className="h-4 w-4" />
+                              )}
+                            </Button>
+                          </div>
+                        </div>
+                        <div className="mt-2 text-xs text-muted-foreground truncate">
+                          {version.name}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="text-center py-8 text-muted-foreground">
+                    No version history yet. Versions are created when you edit the test.
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          </TabsContent>
         </Tabs>
       </div>
 
@@ -434,7 +528,7 @@ export function TestDetailClient({ test, results, repositoryId, screenshots = []
           <DialogHeader>
             <DialogTitle>Delete Test</DialogTitle>
             <DialogDescription>
-              Are you sure you want to delete "{test.name}"? This action cannot be undone.
+              Are you sure you want to delete &quot;{test.name}&quot;? This action cannot be undone.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>

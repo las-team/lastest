@@ -1,6 +1,7 @@
 import type { AIProvider, AIProviderConfig } from './types';
 import { ClaudeCLIProvider } from './claude-cli';
 import { createOpenRouterProvider } from './openrouter';
+import { ClaudeAgentSDKProvider } from './claude-agent-sdk';
 import { createAIPromptLog, updateAIPromptLog } from '@/lib/db/queries';
 import type { AIActionType, AILogStatus } from '@/lib/db/schema';
 
@@ -15,6 +16,13 @@ export function getAIProvider(config: AIProviderConfig): AIProvider {
     return createOpenRouterProvider({
       apiKey: config.openrouterApiKey,
       model: config.openrouterModel || 'anthropic/claude-sonnet-4',
+    });
+  }
+
+  if (config.provider === 'claude-agent-sdk') {
+    return new ClaudeAgentSDKProvider({
+      permissionMode: config.agentSdkPermissionMode,
+      workingDirectory: config.agentSdkWorkingDir,
     });
   }
 

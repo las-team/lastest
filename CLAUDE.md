@@ -10,11 +10,13 @@ pnpm build        # Production build
 pnpm lint         # Run ESLint
 pnpm db:studio    # Open Drizzle Studio for database inspection
 pnpm db:reset     # Reset database (removes SQLite DB + screenshots/baselines)
+pnpm db:push      # Push schema changes to database
+pnpm db:generate  # Generate Drizzle migrations
 ```
 
 ## Architecture
 
-This is a visual regression testing platform built with Next.js 16 App Router.
+Visual regression testing platform built with Next.js 16 App Router.
 
 ### Core Flow
 1. **Record**: User records browser interactions via Playwright (`/record`) → generates test code
@@ -25,10 +27,16 @@ This is a visual regression testing platform built with Next.js 16 App Router.
 ### Key Directories
 
 - `src/lib/playwright/` - Browser automation core
-  - `recorder.ts` - Captures user interactions, generates Playwright code
-  - `runner.ts` - Executes tests, captures screenshots
-  - `differ.ts` - Visual comparison with pixelmatch
+  - `recorder.ts` - Captures user interactions, generates Playwright code with multi-selector fallback
+  - `runner.ts` - Executes tests, captures screenshots, manages server lifecycle
+  - `server-manager.ts` - Manages target server startup/health checks for test runs
+  - `ocr.ts` - Tesseract.js integration for OCR-based selectors
+- `src/lib/diff/` - Visual comparison engine
+  - `generator.ts` - pixelmatch-based image diffing
+  - `hasher.ts` - SHA256 hashing for baseline carry-forward
 - `src/lib/db/` - Drizzle ORM schema and queries (SQLite with WAL mode)
+- `src/lib/ai/` - AI test generation (Claude CLI or OpenRouter)
+- `src/lib/scanner/` - Route discovery from source code
 - `src/server/actions/` - Server actions for all domain operations
 
 ### Data Model
@@ -41,6 +49,11 @@ This is a visual regression testing platform built with Next.js 16 App Router.
 - **Baselines** → approved screenshots with SHA256 hash for carry-forward matching
 - **Routes** → discovered routes for test coverage tracking
 - **EnvironmentConfigs** → managed server startup settings (manual vs auto-start)
+- **BackgroundJobs** → queue tracking for long-running operations (AI scans, builds)
+
+### Test Code Format
+
+Tests use a function signature: `export async function test(page, baseUrl, screenshotPath, stepLogger)`. The runner strips TypeScript annotations and executes as JavaScript. Supports multi-selector fallback strategy based on user-configured priority (data-testid → id → role-name → aria-label → text → css-path → ocr-text).
 
 ### Environment Variables
 

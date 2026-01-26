@@ -20,6 +20,7 @@ import {
   aiSettings,
   aiPromptLogs,
   backgroundJobs,
+  testVersions,
 } from './schema';
 import {
   DEFAULT_SELECTOR_PRIORITY,
@@ -47,11 +48,13 @@ import type {
   NewAISettings,
   NewAIPromptLog,
   NewBackgroundJob,
+  NewTestVersion,
   BuildStatus,
   SelectorConfig,
   AIProvider,
   BackgroundJobType,
   BackgroundJobStatus,
+  TestChangeReason,
 } from './schema';
 
 export { DEFAULT_SELECTOR_PRIORITY, DEFAULT_DIFF_THRESHOLDS, DEFAULT_AI_SETTINGS };
@@ -934,6 +937,8 @@ export async function getAISettings(repositoryId?: string | null) {
     provider: DEFAULT_AI_SETTINGS.provider as AIProvider,
     openrouterApiKey: null,
     openrouterModel: DEFAULT_AI_SETTINGS.openrouterModel,
+    agentSdkPermissionMode: DEFAULT_AI_SETTINGS.agentSdkPermissionMode,
+    agentSdkWorkingDir: null,
     customInstructions: null,
     createdAt: null,
     updatedAt: null,
@@ -1270,4 +1275,65 @@ export async function getRecentBackgroundJobs(sinceMs = 10000) {
     )
     .orderBy(desc(backgroundJobs.createdAt))
     .all();
+}
+
+// Test Versions
+export async function getTestVersions(testId: string) {
+  return db
+    .select()
+    .from(testVersions)
+    .where(eq(testVersions.testId, testId))
+    .orderBy(desc(testVersions.version))
+    .all();
+}
+
+export async function getTestVersion(testId: string, version: number) {
+  return db
+    .select()
+    .from(testVersions)
+    .where(and(eq(testVersions.testId, testId), eq(testVersions.version, version)))
+    .get();
+}
+
+export async function getLatestVersionNumber(testId: string): Promise<number> {
+  const latest = await db
+    .select({ version: testVersions.version })
+    .from(testVersions)
+    .where(eq(testVersions.testId, testId))
+    .orderBy(desc(testVersions.version))
+    .limit(1)
+    .get();
+  return latest?.version ?? 0;
+}
+
+export async function createTestVersion(data: Omit<NewTestVersion, 'id'>) {
+  const id = uuid();
+  await db.insert(testVersions).values({ ...data, id, createdAt: new Date() });
+  return { id, ...data, createdAt: new Date() };
+}
+
+// Update test with versioning - saves current state before updating
+export async function updateTestWithVersion(
+  id: string,
+  data: Partial<NewTest>,
+  changeReason?: TestChangeReason | string
+) {
+  const test = await getTest(id);
+  if (!test) throw new Error('Test not found');
+
+  // Get next version number
+  const nextVersion = (await getLatestVersionNumber(id)) + 1;
+
+  // Save current state as a version
+  await createTestVersion({
+    testId: id,
+    version: nextVersion,
+    code: test.code,
+    name: test.name,
+    targetUrl: test.targetUrl,
+    changeReason: changeReason ?? 'manual_edit',
+  });
+
+  // Update the test
+  await db.update(tests).set({ ...data, updatedAt: new Date() }).where(eq(tests.id, id));
 }

@@ -13,9 +13,15 @@ OCR
 
 ## features
 
-When navigating in manual mode each URL opened should be recorded and screenshots should be taken on those pages
+Proper event streaming
+    When navigating in manual mode each URL opened should be recorded and screenshots should be taken on those pages
+
+Full-page screenshots, only pay attention to the width - example from lastest
 
 Test classification
+
+Build/change approval
+    Test version or result on the build screen
 
 UI & UX 
     Use the frontend design skill and subagent for this

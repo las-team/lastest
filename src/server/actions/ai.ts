@@ -145,7 +145,7 @@ export async function aiFixAllFailedTests(
     const result = await aiFixTest(repositoryId, test.id, errorMessage);
 
     if (result.success && result.code) {
-      await queries.updateTest(test.id, { code: result.code });
+      await queries.updateTestWithVersion(test.id, { code: result.code }, 'ai_fix');
       fixed++;
     } else {
       failed++;
@@ -159,10 +159,11 @@ export async function aiFixAllFailedTests(
 
 export async function updateTestCode(
   testId: string,
-  code: string
+  code: string,
+  changeReason: 'ai_fix' | 'ai_enhance' = 'ai_fix'
 ): Promise<{ success: boolean; error?: string }> {
   try {
-    await queries.updateTest(testId, { code });
+    await queries.updateTestWithVersion(testId, { code }, changeReason);
     revalidatePath('/tests');
     revalidatePath(`/tests/${testId}`);
     return { success: true };
