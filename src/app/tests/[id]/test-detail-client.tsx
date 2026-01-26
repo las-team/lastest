@@ -15,7 +15,13 @@ import {
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
-import { Play, Trash2, Copy, Edit2, Clock, CheckCircle, XCircle, X, Save, Wrench, Wand2, Loader2, History, RotateCcw } from 'lucide-react';
+import { Play, Trash2, Copy, Edit2, Clock, CheckCircle, XCircle, X, Save, Wrench, Wand2, Loader2, History, RotateCcw, ChevronDown, Monitor } from 'lucide-react';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { deleteTest, updateTest, getTestVersionHistory, restoreTestVersion } from '@/server/actions/tests';
 import { runTests, getRunStatus } from '@/server/actions/runs';
 import { aiFixTest, aiEnhanceTest, updateTestCode } from '@/server/actions/ai';
@@ -117,7 +123,7 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
     }
   };
 
-  const handleRun = async () => {
+  const handleRun = async (headless = true) => {
     // Clear any existing poll interval
     if (pollIntervalRef.current) {
       clearInterval(pollIntervalRef.current);
@@ -126,8 +132,8 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
 
     setIsRunning(true);
     try {
-      await runTests([test.id], repositoryId);
-      toast.success('Test started');
+      await runTests([test.id], repositoryId, headless);
+      toast.success(headless ? 'Test started' : 'Test started (headed mode)');
       // Poll for completion
       pollIntervalRef.current = setInterval(async () => {
         const { isRunning: stillRunning } = await getRunStatus(repositoryId);
@@ -257,14 +263,42 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
                   </>
                 ) : (
                   <>
-                    <Button onClick={handleRun} disabled={isRunning}>
-                      {isRunning ? (
-                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                      ) : (
-                        <Play className="h-4 w-4 mr-2" />
-                      )}
-                      {isRunning ? 'Running...' : 'Run'}
-                    </Button>
+                    <div className="flex">
+                      <Button
+                        onClick={() => handleRun(true)}
+                        disabled={isRunning}
+                        className="rounded-r-none"
+                      >
+                        {isRunning ? (
+                          <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                        ) : (
+                          <Play className="h-4 w-4 mr-2" />
+                        )}
+                        {isRunning ? 'Running...' : 'Run'}
+                      </Button>
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button
+                            variant="default"
+                            size="icon"
+                            disabled={isRunning}
+                            className="rounded-l-none border-l border-l-primary-foreground/20"
+                          >
+                            <ChevronDown className="h-4 w-4" />
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end">
+                          <DropdownMenuItem onClick={() => handleRun(true)}>
+                            <Play className="h-4 w-4 mr-2" />
+                            Run (Headless)
+                          </DropdownMenuItem>
+                          <DropdownMenuItem onClick={() => handleRun(false)}>
+                            <Monitor className="h-4 w-4 mr-2" />
+                            Run Headed
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    </div>
                     {repositoryId && (
                       <Button
                         variant="outline"

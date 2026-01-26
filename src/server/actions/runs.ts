@@ -55,7 +55,7 @@ export async function createTestRun(testIds?: string[], repositoryId?: string | 
   return run;
 }
 
-export async function runTests(testIds?: string[], repositoryId?: string | null) {
+export async function runTests(testIds?: string[], repositoryId?: string | null, headless?: boolean) {
   const runner = getRunner(repositoryId);
 
   if (runner.isActive()) {
@@ -100,17 +100,17 @@ export async function runTests(testIds?: string[], repositoryId?: string | null)
   });
 
   // Run tests (this happens async)
-  runTestsAsync(run.id, tests, repositoryId);
+  runTestsAsync(run.id, tests, repositoryId, headless);
 
   return { runId: run.id, testCount: tests.length };
 }
 
-async function runTestsAsync(runId: string, tests: Test[], repositoryId?: string | null) {
+async function runTestsAsync(runId: string, tests: Test[], repositoryId?: string | null, headless?: boolean) {
   const runner = getRunner(repositoryId);
   const jobId = await createJob('test_run', `Test Run (${tests.length} tests)`, tests.length, repositoryId);
 
   try {
-    const results = await runner.runTests(tests, runId);
+    const results = await runner.runTests(tests, runId, undefined, undefined, headless);
 
     // Save results
     for (let i = 0; i < results.length; i++) {

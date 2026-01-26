@@ -108,7 +108,8 @@ export class PlaywrightRunner extends EventEmitter {
     tests: Test[],
     runId: string,
     onProgress?: (progress: ProgressCallback) => void,
-    onResult?: (result: TestRunResult) => void | Promise<void>
+    onResult?: (result: TestRunResult) => void | Promise<void>,
+    headlessOverride?: boolean
   ): Promise<TestRunResult[]> {
     if (this.isRunning) {
       throw new Error('Already running tests');
@@ -133,7 +134,7 @@ export class PlaywrightRunner extends EventEmitter {
 
     try {
       const launcher = this.getBrowserLauncher();
-      const headless = this.settings?.headless ?? true;
+      const headless = headlessOverride ?? this.settings?.headless ?? true;
       this.browser = await launcher.launch({ headless });
 
       this.emit('event', {

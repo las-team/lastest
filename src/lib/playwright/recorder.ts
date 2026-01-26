@@ -245,7 +245,34 @@ export class PlaywrightRecorder extends EventEmitter {
         priority: number;
       }
 
+      // Track mousedown for drag/draw detection
+      let mouseDownState: { x: number; y: number; time: number } | null = null;
+      const DRAG_THRESHOLD_PX = 10; // Movement threshold to consider it a drag
+      const DRAG_THRESHOLD_MS = 300; // Time threshold for long press + movement
+
+      document.addEventListener('mousedown', (e) => {
+        mouseDownState = { x: e.clientX, y: e.clientY, time: Date.now() };
+      }, true);
+
+      document.addEventListener('mouseup', () => {
+        // Clear after a short delay to allow click event to check it
+        setTimeout(() => { mouseDownState = null; }, 50);
+      }, true);
+
       document.addEventListener('click', (e) => {
+        // Skip if this was a drag/draw operation (mouse moved significantly while held)
+        if (mouseDownState) {
+          const dx = Math.abs(e.clientX - mouseDownState.x);
+          const dy = Math.abs(e.clientY - mouseDownState.y);
+          const distance = Math.sqrt(dx * dx + dy * dy);
+          const duration = Date.now() - mouseDownState.time;
+
+          // Skip recording if: moved > threshold OR (long press AND any movement)
+          if (distance > DRAG_THRESHOLD_PX || (duration > DRAG_THRESHOLD_MS && distance > 3)) {
+            return; // This was a drag/draw, not a click
+          }
+        }
+
         const target = e.target as HTMLElement;
         const selectors = generateAllSelectors(target);
         const rect = target.getBoundingClientRect();
@@ -256,6 +283,11 @@ export class PlaywrightRecorder extends EventEmitter {
 
       document.addEventListener('input', (e) => {
         const target = e.target as HTMLInputElement;
+        // Skip non-fillable input types (radio, checkbox, etc.)
+        const inputType = target.type?.toLowerCase();
+        if (inputType === 'radio' || inputType === 'checkbox' || inputType === 'submit' || inputType === 'button' || inputType === 'reset' || inputType === 'file') {
+          return;
+        }
         const selectors = generateAllSelectors(target);
         // @ts-ignore
         window.__recordAction?.('fill', selectors, target.value);
@@ -280,8 +312,8 @@ export class PlaywrightRecorder extends EventEmitter {
           allSelectors.set('data-testid', `[data-testid="${element.dataset.testid}"]`);
         }
 
-        // ID
-        if (element.id) {
+        // ID (skip dynamic/invalid IDs containing 'undefined' or random-looking patterns)
+        if (element.id && !element.id.includes('undefined')) {
           allSelectors.set('id', `#${element.id}`);
         }
 
@@ -543,43 +575,52 @@ export class PlaywrightRecorder extends EventEmitter {
     const lines: string[] = [
       `import { Page } from 'playwright';`,
       '',
-      `// Multi-selector fallback helper`,
-      `async function locateWithFallback(page, selectors, action, value) {`,
-      `  for (const sel of selectors) {`,
-      `    try {`,
-      `      let locator;`,
-      `      if (sel.type === 'ocr-text') {`,
-      `        const text = sel.value.replace(/^ocr-text="/, '').replace(/"$/, '');`,
-      `        locator = page.getByText(text, { exact: false });`,
-      `      } else {`,
-      `        locator = page.locator(sel.value);`,
-      `      }`,
-      `      await locator.waitFor({ timeout: 2000 });`,
-      `      if (action === 'click') await locator.click();`,
-      `      else if (action === 'fill') await locator.fill(value || '');`,
-      `      else if (action === 'selectOption') await locator.selectOption(value || '');`,
-      `      return;`,
-      `    } catch { continue; }`,
+      `export async function test(page: Page, baseUrl: string, screenshotPath: string, stepLogger: any) {`,
+      `  // Multi-selector fallback helper`,
+      `  async function locateWithFallback(page, selectors, action, value) {`,
+      `    const validSelectors = selectors.filter(sel => sel.value && sel.value.trim() && !sel.value.includes('undefined'));`,
+      `    if (validSelectors.length === 0) throw new Error('No valid selectors provided');`,
+      `    for (const sel of validSelectors) {`,
+      `      try {`,
+      `        let locator;`,
+      `        if (sel.type === 'ocr-text') {`,
+      `          const text = sel.value.replace(/^ocr-text="/, '').replace(/"$/, '');`,
+      `          locator = page.getByText(text, { exact: false });`,
+      `        } else if (sel.type === 'role-name') {`,
+      `          // Parse role=button[name="Label"] format and use getByRole`,
+      `          const match = sel.value.match(/^role=(\\w+)\\[name="(.+)"\\]$/);`,
+      `          if (match) {`,
+      `            locator = page.getByRole(match[1], { name: match[2] });`,
+      `          } else {`,
+      `            locator = page.locator(sel.value);`,
+      `          }`,
+      `        } else {`,
+      `          locator = page.locator(sel.value);`,
+      `        }`,
+      `        await locator.waitFor({ timeout: 3000 });`,
+      `        if (action === 'click') await locator.click();`,
+      `        else if (action === 'fill') await locator.fill(value || '');`,
+      `        else if (action === 'selectOption') await locator.selectOption(value || '');`,
+      `        return;`,
+      `      } catch { continue; }`,
+      `    }`,
+      `    throw new Error('No selector matched: ' + JSON.stringify(validSelectors));`,
       `  }`,
-      `  throw new Error('No selector matched: ' + JSON.stringify(selectors));`,
-      `}`,
-      '',
+      ``,
     ];
 
     if (hasCursorEvents) {
       lines.push(
-        `// Replay cursor path helper`,
-        `async function replayCursorPath(page, moves) {`,
-        `  for (const [x, y, delay] of moves) {`,
-        `    await page.mouse.move(x, y);`,
-        `    if (delay > 0) await page.waitForTimeout(delay);`,
+        `  // Replay cursor path helper`,
+        `  async function replayCursorPath(page, moves) {`,
+        `    for (const [x, y, delay] of moves) {`,
+        `      await page.mouse.move(x, y);`,
+        `      if (delay > 0) await page.waitForTimeout(delay);`,
+        `    }`,
         `  }`,
-        `}`,
-        '',
+        ``,
       );
     }
-
-    lines.push(`export async function test(page: Page, baseUrl: string, screenshotPath: string, stepLogger: any) {`);
 
     let lastAction = '';
     let cursorBatch: [number, number, number][] = [];
@@ -629,8 +670,8 @@ export class PlaywrightRecorder extends EventEmitter {
               lines.push(`  await locateWithFallback(page, ${selectorsJson}, 'selectOption', '${value || ''}');`);
               break;
           }
-        } else {
-          // Fallback to legacy single selector
+        } else if (selector && selector.trim()) {
+          // Fallback to legacy single selector (only if non-empty)
           switch (action) {
             case 'click':
               lines.push(`  await page.locator('${selector}').click();`);
@@ -642,6 +683,9 @@ export class PlaywrightRecorder extends EventEmitter {
               lines.push(`  await page.locator('${selector}').selectOption('${value || ''}');`);
               break;
           }
+        } else {
+          // Skip action with no valid selector - add comment for debugging
+          lines.push(`  // Skipped ${action}: no valid selector found`);
         }
         lastAction = action || '';
       } else if (event.type === 'screenshot') {
