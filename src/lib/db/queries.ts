@@ -656,7 +656,7 @@ export async function getPlaywrightSettings(repositoryId?: string | null) {
   const globalSettings = await db
     .select()
     .from(playwrightSettings)
-    .where(eq(playwrightSettings.repositoryId, ''))
+    .where(isNull(playwrightSettings.repositoryId))
     .get();
 
   if (globalSettings) {

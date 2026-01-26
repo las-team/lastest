@@ -178,7 +178,7 @@ export function MCPExploreRoutesDialog({
               </span>
             </div>
 
-            <ScrollArea className="flex-1 border rounded-lg min-h-0 max-h-[50vh]">
+            <ScrollArea className="h-[40vh] border rounded-lg">
               <div className="p-2 space-y-1">
                 {discoveredRoutes.map((route) => (
                   <div
