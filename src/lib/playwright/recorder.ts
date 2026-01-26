@@ -2,25 +2,39 @@ import { chromium, Browser, Page, BrowserContext } from 'playwright';
 import { EventEmitter } from 'events';
 import path from 'path';
 import fs from 'fs';
-import type { ActionSelector, SelectorType } from '@/lib/db/schema';
+import type { ActionSelector, SelectorType, SelectorConfig } from '@/lib/db/schema';
+import { DEFAULT_SELECTOR_PRIORITY } from '@/lib/db/schema';
 import { extractText, terminateWorker } from './ocr';
 
 export type AssertionType = 'pageLoad' | 'networkIdle' | 'urlMatch' | 'domContentLoaded';
 
+export interface ElementInfo {
+  tagName: string;
+  id?: string;
+  textContent?: string;
+  potentialAction?: 'click' | 'fill' | 'select';
+  potentialSelector?: string;
+}
+
 export interface RecordingEvent {
-  type: 'action' | 'navigation' | 'screenshot' | 'error' | 'complete' | 'assertion' | 'cursor-move';
+  type: 'action' | 'navigation' | 'screenshot' | 'error' | 'complete' | 'assertion' | 'cursor-move' | 'mouse-down' | 'mouse-up' | 'hover-preview';
   timestamp: number;
+  sequence: number;
+  status: 'preview' | 'committed';
   data: {
     action?: string;
     selector?: string; // Legacy single selector
     selectors?: ActionSelector[]; // Multi-selector array
     value?: string;
     url?: string;
+    relativePath?: string; // baseURL-relative path
     screenshotPath?: string;
     error?: string;
     code?: string;
     assertionType?: AssertionType;
     coordinates?: { x: number; y: number };
+    button?: number; // mouse button for mouse-down/up
+    elementInfo?: ElementInfo; // for hover-preview
   };
 }
 
@@ -48,7 +62,10 @@ export class PlaywrightRecorder extends EventEmitter {
   private repositoryId: string | null;
   private settings: CursorSettings = { pointerGestures: false, cursorFPS: 30 };
   private ocrEnabled = false;
+  private selectorPriority: SelectorConfig[] = DEFAULT_SELECTOR_PRIORITY;
   private pendingOcrPromises: Promise<void>[] = [];
+  private baseOrigin: string = '';
+  private sequenceCounter: number = 0;
 
   constructor(repositoryId?: string | null, screenshotDir?: string) {
     super();
@@ -68,6 +85,10 @@ export class PlaywrightRecorder extends EventEmitter {
     this.ocrEnabled = enabled;
   }
 
+  setSelectorPriority(priority: SelectorConfig[]) {
+    this.selectorPriority = priority;
+  }
+
   async startRecording(url: string, sessionId: string): Promise<void> {
     if (this.isRecording) {
       throw new Error('Already recording');
@@ -79,6 +100,8 @@ export class PlaywrightRecorder extends EventEmitter {
     }
 
     this.lastCompletedSession = null; // Clear any previous completed session
+    this.baseOrigin = new URL(url).origin;
+    this.sequenceCounter = 0;
     this.session = {
       id: sessionId,
       url,
@@ -105,7 +128,8 @@ export class PlaywrightRecorder extends EventEmitter {
 
       // Navigate to initial URL
       await this.page.goto(url, { waitUntil: 'domcontentloaded' });
-      this.addEvent('navigation', { url });
+      const relativePath = this.getRelativePath(url);
+      this.addEvent('navigation', { url, relativePath });
 
       this.isRecording = true;
       this.emit('started', { sessionId, url });
@@ -121,7 +145,9 @@ export class PlaywrightRecorder extends EventEmitter {
     // Track navigation
     this.page.on('framenavigated', (frame) => {
       if (frame === this.page?.mainFrame()) {
-        this.addEvent('navigation', { url: frame.url() });
+        const frameUrl = frame.url();
+        const relativePath = this.getRelativePath(frameUrl);
+        this.addEvent('navigation', { url: frameUrl, relativePath });
       }
     });
 
@@ -136,18 +162,11 @@ export class PlaywrightRecorder extends EventEmitter {
     await this.page.exposeFunction('__recordAction', (action: string, selectors: ActionSelector[], value?: string, boundingBox?: { x: number; y: number; width: number; height: number }) => {
       // Store both multi-selector array and legacy single selector for backwards compatibility
       const primarySelector = selectors[0]?.value || '';
-      const event: RecordingEvent = {
-        type: 'action',
-        timestamp: Date.now(),
-        data: { action, selector: primarySelector, selectors, value },
-      };
-      if (this.session) {
-        this.session.events.push(event);
-        this.emit('event', event);
-      }
+      this.addEvent('action', { action, selector: primarySelector, selectors, value });
+      const event = this.session?.events[this.session.events.length - 1];
 
       // Run OCR asynchronously if enabled and bounding box is large enough
-      if (this.ocrEnabled && boundingBox && boundingBox.width > 10 && boundingBox.height > 10 && this.page) {
+      if (this.ocrEnabled && boundingBox && boundingBox.width > 10 && boundingBox.height > 10 && this.page && event) {
         const ocrPromise = (async () => {
           try {
             const buffer = await this.page!.screenshot({
@@ -168,17 +187,42 @@ export class PlaywrightRecorder extends EventEmitter {
       await this.page.exposeFunction('__recordCursorMove', (x: number, y: number) => {
         this.addEvent('cursor-move', { coordinates: { x, y } });
       });
+
+      // Mouse down/up tracking for pointer gestures
+      await this.page.exposeFunction('__recordMouseEvent', (type: 'down' | 'up', x: number, y: number, button: number) => {
+        this.addEvent(type === 'down' ? 'mouse-down' : 'mouse-up', { coordinates: { x, y }, button });
+      });
     }
+
+    // Hover preview tracking (always enabled)
+    await this.page.exposeFunction('__recordHoverPreview', (elementInfo: ElementInfo) => {
+      // Replace any existing preview event (only keep latest)
+      if (this.session) {
+        const lastEvent = this.session.events[this.session.events.length - 1];
+        if (lastEvent?.type === 'hover-preview' && lastEvent.status === 'preview') {
+          this.session.events.pop();
+          this.sequenceCounter--; // Reuse the sequence number
+        }
+      }
+      this.addEvent('hover-preview', { elementInfo }, 'preview');
+    });
 
     const pointerGestures = this.settings.pointerGestures;
     const cursorFPS = this.settings.cursorFPS;
+    const selectorPriority = this.selectorPriority;
 
     // Inject interaction tracking script - MUST await
-    await this.page.addInitScript(({ pointerGestures: pg, cursorFPS: fps }) => {
+    await this.page.addInitScript(({ pointerGestures: pg, cursorFPS: fps, selectorPriority: priority }) => {
       // Type definition for selectors captured in browser context
       interface BrowserActionSelector {
         type: string;
         value: string;
+      }
+
+      interface BrowserSelectorConfig {
+        type: string;
+        enabled: boolean;
+        priority: number;
       }
 
       document.addEventListener('click', (e) => {
@@ -206,66 +250,62 @@ export class PlaywrightRecorder extends EventEmitter {
         }
       }, true);
 
-      // Generate ALL available selectors for an element
+      // Generate ALL available selectors for an element, filtered and ordered by priority settings
       function generateAllSelectors(element: HTMLElement): BrowserActionSelector[] {
-        const selectors: BrowserActionSelector[] = [];
+        // Build a map of all possible selectors
+        const allSelectors: Map<string, string> = new Map();
 
-        // 1. data-testid (highest priority)
+        // data-testid
         if (element.dataset.testid) {
-          selectors.push({
-            type: 'data-testid',
-            value: `[data-testid="${element.dataset.testid}"]`,
-          });
+          allSelectors.set('data-testid', `[data-testid="${element.dataset.testid}"]`);
         }
 
-        // 2. ID
+        // ID
         if (element.id) {
-          selectors.push({
-            type: 'id',
-            value: `#${element.id}`,
-          });
+          allSelectors.set('id', `#${element.id}`);
         }
 
-        // 3. Role + name (ARIA)
+        // Role + name (ARIA)
         const role = element.getAttribute('role') || getImplicitRole(element);
         const accessibleName = element.getAttribute('aria-label') ||
           element.getAttribute('title') ||
           element.textContent?.trim().slice(0, 30);
         if (role && accessibleName) {
-          selectors.push({
-            type: 'role-name',
-            value: `role=${role}[name="${accessibleName}"]`,
-          });
+          allSelectors.set('role-name', `role=${role}[name="${accessibleName}"]`);
         }
 
-        // 4. aria-label
+        // aria-label
         const ariaLabel = element.getAttribute('aria-label');
         if (ariaLabel) {
-          selectors.push({
-            type: 'aria-label',
-            value: `[aria-label="${ariaLabel}"]`,
-          });
+          allSelectors.set('aria-label', `[aria-label="${ariaLabel}"]`);
         }
 
-        // 5. Text content (for buttons/links)
+        // Text content (for buttons/links)
         if (element.tagName === 'BUTTON' || element.tagName === 'A' ||
             element.getAttribute('role') === 'button') {
           const text = element.textContent?.trim().slice(0, 30);
           if (text) {
-            selectors.push({
-              type: 'text',
-              value: `text="${text}"`,
-            });
+            allSelectors.set('text', `text="${text}"`);
           }
         }
 
-        // 6. CSS path fallback
+        // CSS path fallback
         const cssPath = generateCssPath(element);
         if (cssPath) {
-          selectors.push({
-            type: 'css-path',
-            value: cssPath,
-          });
+          allSelectors.set('css-path', cssPath);
+        }
+
+        // Filter by enabled selectors and sort by priority
+        const enabledConfigs = (priority as BrowserSelectorConfig[])
+          .filter(config => config.enabled && config.type !== 'ocr-text') // OCR is handled separately
+          .sort((a, b) => a.priority - b.priority);
+
+        const selectors: BrowserActionSelector[] = [];
+        for (const config of enabledConfigs) {
+          const value = allSelectors.get(config.type);
+          if (value) {
+            selectors.push({ type: config.type, value });
+          }
         }
 
         return selectors;
@@ -296,8 +336,10 @@ export class PlaywrightRecorder extends EventEmitter {
         let current: HTMLElement | null = element;
         while (current && current !== document.body) {
           let selector = current.tagName.toLowerCase();
-          if (current.className) {
-            const classes = current.className.split(' ')
+          // Use getAttribute to handle SVG elements (className is SVGAnimatedString, not string)
+          const classAttr = current.getAttribute('class');
+          if (classAttr) {
+            const classes = classAttr.split(' ')
               .filter(c => c && !c.includes(':') && !c.startsWith('_'))
               .slice(0, 2);
             if (classes.length > 0) {
@@ -322,16 +364,72 @@ export class PlaywrightRecorder extends EventEmitter {
             window.__recordCursorMove?.(e.clientX, e.clientY);
           }
         }, true);
+
+        // Mouse down/up events
+        document.addEventListener('mousedown', (e: MouseEvent) => {
+          // @ts-ignore
+          window.__recordMouseEvent?.('down', e.clientX, e.clientY, e.button);
+        }, true);
+
+        document.addEventListener('mouseup', (e: MouseEvent) => {
+          // @ts-ignore
+          window.__recordMouseEvent?.('up', e.clientX, e.clientY, e.button);
+        }, true);
       }
-    }, { pointerGestures, cursorFPS });
+
+      // Hover preview tracking (throttled, always enabled)
+      let lastHoverTime = 0;
+      document.addEventListener('mouseover', (e: MouseEvent) => {
+        const now = Date.now();
+        if (now - lastHoverTime < 200) return;
+        lastHoverTime = now;
+        const target = e.target as HTMLElement;
+        if (!target || target === document.body || target === document.documentElement) return;
+
+        // Determine potential action based on element type
+        let potentialAction: 'click' | 'fill' | 'select' | undefined;
+        const tagName = target.tagName.toUpperCase();
+        if (tagName === 'INPUT' || tagName === 'TEXTAREA') {
+          potentialAction = 'fill';
+        } else if (tagName === 'SELECT') {
+          potentialAction = 'select';
+        } else if (tagName === 'BUTTON' || tagName === 'A' || target.getAttribute('role') === 'button' || target.onclick) {
+          potentialAction = 'click';
+        } else {
+          potentialAction = 'click'; // Default to click for most elements
+        }
+
+        // Generate primary selector for preview
+        const selectors = generateAllSelectors(target);
+        const primarySelector = selectors[0]?.value || '';
+
+        // @ts-ignore
+        window.__recordHoverPreview?.({
+          tagName: target.tagName.toLowerCase(),
+          id: target.id || undefined,
+          textContent: target.textContent?.trim().slice(0, 30) || undefined,
+          potentialAction,
+          potentialSelector: primarySelector,
+        });
+      }, true);
+    }, { pointerGestures, cursorFPS, selectorPriority });
   }
 
-  private addEvent(type: RecordingEvent['type'], data: RecordingEvent['data']) {
+  private getRelativePath(url: string): string {
+    if (url.startsWith(this.baseOrigin)) {
+      return url.slice(this.baseOrigin.length) || '/';
+    }
+    return url;
+  }
+
+  private addEvent(type: RecordingEvent['type'], data: RecordingEvent['data'], status: 'preview' | 'committed' = 'committed') {
     if (!this.session) return;
 
     const event: RecordingEvent = {
       type,
       timestamp: Date.now(),
+      sequence: ++this.sequenceCounter,
+      status,
       data,
     };
 
@@ -345,7 +443,7 @@ export class PlaywrightRecorder extends EventEmitter {
     const filename = `${this.session.id}-${Date.now()}.png`;
     const filepath = path.join(this.screenshotDir, filename);
 
-    await this.page.screenshot({ path: filepath, fullPage: false });
+    await this.page.screenshot({ path: filepath, fullPage: true });
 
     // Build public path with repositoryId if present
     const publicPath = this.repositoryId

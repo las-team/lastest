@@ -32,4 +32,13 @@ fs.mkdirSync(BASELINES_DIR, { recursive: true });
 console.log(`Created: ${SCREENSHOTS_DIR}`);
 console.log(`Created: ${BASELINES_DIR}`);
 
-console.log('\nDatabase reset complete. Tables will be recreated on next app start.');
+console.log('\nDatabase files removed. Running db:push to recreate schema...\n');
+
+const { execSync } = require('child_process');
+try {
+  execSync('pnpm db:push', { stdio: 'inherit' });
+  console.log('\nDatabase reset complete.');
+} catch (error) {
+  console.error('Failed to push schema:', error.message);
+  process.exit(1);
+}

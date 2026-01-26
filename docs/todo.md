@@ -7,17 +7,16 @@ Determining test coverage /home/ewyct/.claude/plans/zazzy-tinkering-backus.md
 AI enablement /home/ewyct/.claude/plans/moonlit-fluttering-origami.md
 
 --------
+## in progress
+Proper event streaming
+    When navigating in manual mode each URL opened should be recorded and screenshots should be taken on those pages
+Full-page screenshots, only pay attention to the width - example from lastest
+
 ## test
 cursor recroding w excalidraw
 OCR
 
 ## features
-
-Proper event streaming
-    When navigating in manual mode each URL opened should be recorded and screenshots should be taken on those pages
-
-Full-page screenshots, only pay attention to the width - example from lastest
-
 Test classification
 
 Build/change approval

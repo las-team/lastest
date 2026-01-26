@@ -283,7 +283,7 @@ export class PlaywrightRunner extends EventEmitter {
       if (capturedScreenshots.length === 0) {
         const screenshotFilename = `${runId}-${test.id}-success.png`;
         const screenshotPath = path.join(this.screenshotDir, screenshotFilename);
-        await page.screenshot({ path: screenshotPath });
+        await page.screenshot({ path: screenshotPath, fullPage: true });
         screenshotPublicPath = this.repositoryId
           ? `/screenshots/${this.repositoryId}/${screenshotFilename}`
           : `/screenshots/${screenshotFilename}`;
@@ -320,7 +320,7 @@ export class PlaywrightRunner extends EventEmitter {
         try {
           const screenshotFilename = `${runId}-${test.id}-failure.png`;
           const fullPath = path.join(this.screenshotDir, screenshotFilename);
-          await page.screenshot({ path: fullPath });
+          await page.screenshot({ path: fullPath, fullPage: true });
           // Build public path with repositoryId if present
           screenshotPath = this.repositoryId
             ? `/screenshots/${this.repositoryId}/${screenshotFilename}`
@@ -505,11 +505,33 @@ export class PlaywrightRunner extends EventEmitter {
       }
     } else if (line.startsWith('await locateWithFallback(')) {
       // Parse multi-selector format: await locateWithFallback(page, [...], 'action', 'value');
-      const match = line.match(/locateWithFallback\(page,\s*(\[.*?\]),\s*'(\w+)'(?:,\s*'([^']*)')?\)/);
-      if (match) {
-        const selectors: ActionSelector[] = JSON.parse(match[1]);
-        const action = match[2];
-        const value = match[3];
+      // Use bracket-balanced extraction instead of regex to handle selectors with brackets like `div[data-test]`
+      const startIdx = line.indexOf('[');
+      if (startIdx === -1) return;
+
+      let depth = 0;
+      let endIdx = -1;
+      for (let i = startIdx; i < line.length; i++) {
+        if (line[i] === '[') depth++;
+        else if (line[i] === ']') {
+          depth--;
+          if (depth === 0) {
+            endIdx = i;
+            break;
+          }
+        }
+      }
+
+      if (endIdx === -1) return;
+
+      const jsonStr = line.slice(startIdx, endIdx + 1);
+      const remainder = line.slice(endIdx + 1);
+      const argsMatch = remainder.match(/,\s*'(\w+)'(?:,\s*'([^']*)')?/);
+
+      if (argsMatch) {
+        const selectors: ActionSelector[] = JSON.parse(jsonStr);
+        const action = argsMatch[1];
+        const value = argsMatch[2];
 
         const locator = await this.locateWithFallback(page, selectors);
 

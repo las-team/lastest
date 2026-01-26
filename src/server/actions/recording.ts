@@ -2,6 +2,7 @@
 
 import { getRecorder, type AssertionType } from '@/lib/playwright/recorder';
 import { createTest, createFunctionalArea, getFunctionalAreas, getPlaywrightSettings } from '@/lib/db/queries';
+import { DEFAULT_SELECTOR_PRIORITY } from '@/lib/db/schema';
 import { v4 as uuid } from 'uuid';
 import { revalidatePath } from 'next/cache';
 
@@ -29,9 +30,12 @@ export async function startRecording(url: string, repositoryId?: string | null):
   });
 
   // Check if OCR is enabled in selector priority settings
-  const selectorPriority = settings.selectorPriority;
-  const ocrConfig = selectorPriority?.find(s => s.type === 'ocr-text');
+  const selectorPriority = settings.selectorPriority ?? DEFAULT_SELECTOR_PRIORITY;
+  const ocrConfig = selectorPriority.find(s => s.type === 'ocr-text');
   recorder.setOcrEnabled(ocrConfig?.enabled ?? false);
+
+  // Pass selector priority to recorder for filtering/ordering
+  recorder.setSelectorPriority(selectorPriority);
 
   try {
     await recorder.startRecording(url, sessionId);
@@ -75,13 +79,22 @@ export async function createAssertion(type: AssertionType): Promise<{ success: b
   return { success };
 }
 
-export async function getRecordingStatus(repositoryId?: string | null) {
+export async function getRecordingStatus(repositoryId?: string | null, sinceSequence?: number) {
   const recorder = getRecorder(repositoryId);
   const session = recorder.getSession();
   const lastCompleted = recorder.getLastCompletedSession();
 
+  // Get events since the specified sequence number
+  const allEvents = session?.events ?? [];
+  const events = sinceSequence !== undefined
+    ? allEvents.filter(e => e.sequence > sinceSequence)
+    : allEvents;
+  const lastSequence = allEvents.at(-1)?.sequence ?? 0;
+
   return {
     isRecording: recorder.isActive(),
+    events,
+    lastSequence,
     session: session ? {
       id: session.id,
       url: session.url,

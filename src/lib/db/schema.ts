@@ -405,7 +405,7 @@ export type BackgroundJob = typeof backgroundJobs.$inferSelect;
 export type NewBackgroundJob = typeof backgroundJobs.$inferInsert;
 
 // Test versions for version history
-export type TestChangeReason = 'manual_edit' | 'ai_fix' | 'ai_enhance' | 'restored';
+export type TestChangeReason = 'initial' | 'manual_edit' | 'ai_fix' | 'ai_enhance' | 'restored';
 
 export const testVersions = sqliteTable('test_versions', {
   id: text('id').primaryKey(),

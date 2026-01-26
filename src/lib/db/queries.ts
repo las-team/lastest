@@ -58,7 +58,7 @@ import type {
 } from './schema';
 
 export { DEFAULT_SELECTOR_PRIORITY, DEFAULT_DIFF_THRESHOLDS, DEFAULT_AI_SETTINGS };
-import { eq, desc, and, inArray, or, gte } from 'drizzle-orm';
+import { eq, desc, and, inArray, or, gte, isNull } from 'drizzle-orm';
 import { v4 as uuid } from 'uuid';
 
 // Functional Areas
@@ -122,6 +122,19 @@ export async function createTest(data: Omit<NewTest, 'id' | 'createdAt' | 'updat
   const id = uuid();
   const now = new Date();
   await db.insert(tests).values({ ...data, id, createdAt: now, updatedAt: now });
+
+  // Create initial version (version 1)
+  await db.insert(testVersions).values({
+    id: uuid(),
+    testId: id,
+    version: 1,
+    code: data.code,
+    name: data.name,
+    targetUrl: data.targetUrl ?? null,
+    changeReason: 'initial',
+    createdAt: now,
+  });
+
   return { id, ...data, createdAt: now, updatedAt: now };
 }
 
@@ -195,7 +208,27 @@ export async function getTestResultsByRun(testRunId: string) {
 }
 
 export async function getTestResultsByTest(testId: string) {
-  return db.select().from(testResults).where(eq(testResults.testId, testId)).all();
+  // Join with testRuns to sort by startedAt descending (latest first)
+  return db
+    .select({
+      id: testResults.id,
+      testRunId: testResults.testRunId,
+      testId: testResults.testId,
+      status: testResults.status,
+      screenshotPath: testResults.screenshotPath,
+      diffPath: testResults.diffPath,
+      errorMessage: testResults.errorMessage,
+      durationMs: testResults.durationMs,
+      viewport: testResults.viewport,
+      browser: testResults.browser,
+      consoleErrors: testResults.consoleErrors,
+      networkRequests: testResults.networkRequests,
+    })
+    .from(testResults)
+    .innerJoin(testRuns, eq(testResults.testRunId, testRuns.id))
+    .where(eq(testResults.testId, testId))
+    .orderBy(desc(testRuns.startedAt))
+    .all();
 }
 
 export async function createTestResult(data: Omit<NewTestResult, 'id'>) {
@@ -217,9 +250,8 @@ export async function getTestsWithStatus() {
   return Promise.all(
     allTests.map(async (test) => {
       const results = await getTestResultsByTest(test.id);
-      const latestResult = results.sort((a, b) =>
-        (b.durationMs || 0) - (a.durationMs || 0)
-      )[0];
+      // Results are already sorted by startedAt desc, so first is latest
+      const latestResult = results[0];
 
       return {
         ...test,
@@ -239,9 +271,8 @@ export async function getTestsWithStatusByRepo(repositoryId: string) {
   return Promise.all(
     allTests.map(async (test) => {
       const results = await getTestResultsByTest(test.id);
-      const latestResult = results.sort((a, b) =>
-        (b.durationMs || 0) - (a.durationMs || 0)
-      )[0];
+      // Results are already sorted by startedAt desc, so first is latest
+      const latestResult = results[0];
 
       return {
         ...test,
@@ -640,18 +671,21 @@ export async function updatePlaywrightSettings(id: string, data: Partial<NewPlay
 }
 
 export async function upsertPlaywrightSettings(repositoryId: string | null, data: Partial<NewPlaywrightSettings>) {
-  const repoIdValue = repositoryId || '';
+  const whereClause = repositoryId
+    ? eq(playwrightSettings.repositoryId, repositoryId)
+    : isNull(playwrightSettings.repositoryId);
+
   const existing = await db
     .select()
     .from(playwrightSettings)
-    .where(eq(playwrightSettings.repositoryId, repoIdValue))
+    .where(whereClause)
     .get();
 
   if (existing) {
     await updatePlaywrightSettings(existing.id, data);
     return { ...existing, ...data, updatedAt: new Date() };
   } else {
-    return createPlaywrightSettings({ ...data, repositoryId: repoIdValue });
+    return createPlaywrightSettings({ ...data, repositoryId: repositoryId ?? undefined });
   }
 }
 
@@ -824,18 +858,21 @@ export async function updateEnvironmentConfig(id: string, data: Partial<NewEnvir
 }
 
 export async function upsertEnvironmentConfig(repositoryId: string | null, data: Partial<NewEnvironmentConfig>) {
-  const repoIdValue = repositoryId || '';
+  const whereClause = repositoryId
+    ? eq(environmentConfigs.repositoryId, repositoryId)
+    : isNull(environmentConfigs.repositoryId);
+
   const existing = await db
     .select()
     .from(environmentConfigs)
-    .where(eq(environmentConfigs.repositoryId, repoIdValue))
+    .where(whereClause)
     .get();
 
   if (existing) {
     await updateEnvironmentConfig(existing.id, data);
     return { ...existing, ...data, updatedAt: new Date() };
   } else {
-    return createEnvironmentConfig({ ...data, repositoryId: repoIdValue });
+    return createEnvironmentConfig({ ...data, repositoryId: repositoryId ?? undefined });
   }
 }
 
@@ -891,18 +928,21 @@ export async function updateDiffSensitivitySettings(id: string, data: Partial<Ne
 }
 
 export async function upsertDiffSensitivitySettings(repositoryId: string | null, data: Partial<NewDiffSensitivitySettings>) {
-  const repoIdValue = repositoryId || '';
+  const whereClause = repositoryId
+    ? eq(diffSensitivitySettings.repositoryId, repositoryId)
+    : isNull(diffSensitivitySettings.repositoryId);
+
   const existing = await db
     .select()
     .from(diffSensitivitySettings)
-    .where(eq(diffSensitivitySettings.repositoryId, repoIdValue))
+    .where(whereClause)
     .get();
 
   if (existing) {
     await updateDiffSensitivitySettings(existing.id, data);
     return { ...existing, ...data, updatedAt: new Date() };
   } else {
-    return createDiffSensitivitySettings({ ...data, repositoryId: repoIdValue });
+    return createDiffSensitivitySettings({ ...data, repositoryId: repositoryId ?? undefined });
   }
 }
 
@@ -962,18 +1002,21 @@ export async function updateAISettings(id: string, data: Partial<NewAISettings>)
 }
 
 export async function upsertAISettings(repositoryId: string | null, data: Partial<NewAISettings>) {
-  const repoIdValue = repositoryId || '';
+  const whereClause = repositoryId
+    ? eq(aiSettings.repositoryId, repositoryId)
+    : isNull(aiSettings.repositoryId);
+
   const existing = await db
     .select()
     .from(aiSettings)
-    .where(eq(aiSettings.repositoryId, repoIdValue))
+    .where(whereClause)
     .get();
 
   if (existing) {
     await updateAISettings(existing.id, data);
     return { ...existing, ...data, updatedAt: new Date() };
   } else {
-    return createAISettings({ ...data, repositoryId: repoIdValue });
+    return createAISettings({ ...data, repositoryId: repositoryId ?? undefined });
   }
 }
 

@@ -16,10 +16,12 @@ import { revalidatePath } from 'next/cache';
 async function getAIConfig(repositoryId?: string | null): Promise<AIProviderConfig> {
   const settings = await queries.getAISettings(repositoryId);
   return {
-    provider: settings.provider as 'claude-cli' | 'openrouter',
+    provider: settings.provider as 'claude-cli' | 'openrouter' | 'claude-agent-sdk',
     openrouterApiKey: settings.openrouterApiKey,
     openrouterModel: settings.openrouterModel || 'anthropic/claude-sonnet-4',
     customInstructions: settings.customInstructions,
+    agentSdkPermissionMode: settings.agentSdkPermissionMode as 'plan' | 'default' | 'acceptEdits' | undefined,
+    agentSdkWorkingDir: settings.agentSdkWorkingDir || undefined,
   };
 }
 

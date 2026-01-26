@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -41,6 +41,16 @@ export function TestDetailClient({ test, results, repositoryId, screenshots = []
 
   // Run state
   const [isRunning, setIsRunning] = useState(false);
+  const pollIntervalRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Cleanup poll interval on unmount
+  useEffect(() => {
+    return () => {
+      if (pollIntervalRef.current) {
+        clearInterval(pollIntervalRef.current);
+      }
+    };
+  }, []);
 
   // AI Fix/Enhance states
   const [isFixing, setIsFixing] = useState(false);
@@ -91,15 +101,24 @@ export function TestDetailClient({ test, results, repositoryId, screenshots = []
   };
 
   const handleRun = async () => {
+    // Clear any existing poll interval
+    if (pollIntervalRef.current) {
+      clearInterval(pollIntervalRef.current);
+      pollIntervalRef.current = null;
+    }
+
     setIsRunning(true);
     try {
-      const { runId } = await runTests([test.id], repositoryId);
+      await runTests([test.id], repositoryId);
       toast.success('Test started');
       // Poll for completion
-      const poll = setInterval(async () => {
+      pollIntervalRef.current = setInterval(async () => {
         const { isRunning: stillRunning } = await getRunStatus(repositoryId);
         if (!stillRunning) {
-          clearInterval(poll);
+          if (pollIntervalRef.current) {
+            clearInterval(pollIntervalRef.current);
+            pollIntervalRef.current = null;
+          }
           setIsRunning(false);
           router.refresh();
           toast.success('Test completed');

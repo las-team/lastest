@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -50,6 +50,10 @@ import {
   Settings2,
   CheckCircle2,
   ChevronDown,
+  MousePointerClick,
+  Eye,
+  FormInput,
+  ListFilter,
 } from 'lucide-react';
 import type { FunctionalArea, PlaywrightSettings } from '@/lib/db/schema';
 import { PlaywrightSettingsCard } from '@/components/settings/playwright-settings-card';
@@ -62,10 +66,70 @@ interface RecordingClientProps {
 
 type RecordingStep = 'setup' | 'recording' | 'saving';
 
+function getEventDescription(event: RecordingEvent): string {
+  switch (event.type) {
+    case 'navigation':
+      return `Navigate to ${event.data.relativePath || event.data.url || 'page'}`;
+    case 'action':
+      if (event.data.action === 'click') {
+        return `Click ${event.data.selector?.slice(0, 40) || 'element'}`;
+      }
+      if (event.data.action === 'fill') {
+        return `Fill ${event.data.selector?.slice(0, 30) || 'input'} with "${event.data.value?.slice(0, 20) || ''}"`;
+      }
+      if (event.data.action === 'selectOption') {
+        return `Select "${event.data.value?.slice(0, 20) || ''}"`;
+      }
+      return event.data.action || 'action';
+    case 'screenshot':
+      return 'Screenshot captured';
+    case 'assertion':
+      const labels: Record<string, string> = {
+        pageLoad: 'Page Load',
+        networkIdle: 'Network Idle',
+        urlMatch: 'URL Match',
+        domContentLoaded: 'DOM Ready',
+      };
+      return `Assert: ${labels[event.data.assertionType || ''] || event.data.assertionType}`;
+    case 'mouse-down':
+      return `Mouse down at (${event.data.coordinates?.x}, ${event.data.coordinates?.y})`;
+    case 'mouse-up':
+      return `Mouse up at (${event.data.coordinates?.x}, ${event.data.coordinates?.y})`;
+    case 'hover-preview':
+      const info = event.data.elementInfo;
+      if (info) {
+        const target = info.id ? `#${info.id}` : info.textContent?.slice(0, 20) || info.tagName;
+        return `${info.potentialAction || 'interact'} → ${target}`;
+      }
+      return 'Hovering...';
+    default:
+      return event.type;
+  }
+}
+
 interface RecordingEvent {
   type: string;
   timestamp: number;
-  description: string;
+  sequence: number;
+  status: 'preview' | 'committed';
+  data: {
+    action?: string;
+    selector?: string;
+    value?: string;
+    url?: string;
+    relativePath?: string;
+    screenshotPath?: string;
+    assertionType?: string;
+    coordinates?: { x: number; y: number };
+    button?: number;
+    elementInfo?: {
+      tagName: string;
+      id?: string;
+      textContent?: string;
+      potentialAction?: 'click' | 'fill' | 'select';
+      potentialSelector?: string;
+    };
+  };
 }
 
 export function RecordingClient({ areas: initialAreas, settings, repositoryId }: RecordingClientProps) {
@@ -87,14 +151,17 @@ export function RecordingClient({ areas: initialAreas, settings, repositoryId }:
   const [isLoading, setIsLoading] = useState(false);
   const [generatedCode, setGeneratedCode] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const lastSequenceRef = useRef(0);
+  const timelineRef = useRef<HTMLDivElement>(null);
 
-  // Poll for recording status when in recording step
+  // Poll for recording status and events when in recording step
   useEffect(() => {
     if (step !== 'recording') return;
 
     const pollInterval = setInterval(async () => {
       try {
-        const status = await getRecordingStatus(repositoryId);
+        const status = await getRecordingStatus(repositoryId, lastSequenceRef.current);
+
         // If recording stopped (browser was closed), check for completed session
         if (!status.isRecording) {
           if (status.lastCompletedSession) {
@@ -107,11 +174,43 @@ export function RecordingClient({ areas: initialAreas, settings, repositoryId }:
             setError('Recording was stopped unexpectedly');
           }
           clearInterval(pollInterval);
+          return;
+        }
+
+        // Process new events
+        if (status.events.length > 0) {
+          setEvents(prev => {
+            // Replace any preview events with committed versions or add new ones
+            const newEvents = [...prev];
+            for (const event of status.events) {
+              // Skip cursor-move events for display (too noisy)
+              if (event.type === 'cursor-move') continue;
+
+              // For hover-preview, replace the last one if exists
+              if (event.type === 'hover-preview') {
+                const lastIdx = newEvents.findLastIndex(e => e.type === 'hover-preview');
+                if (lastIdx !== -1) {
+                  newEvents.splice(lastIdx, 1);
+                }
+              }
+              newEvents.push(event);
+            }
+            return newEvents;
+          });
+          lastSequenceRef.current = status.lastSequence;
+
+          // Auto-scroll timeline
+          setTimeout(() => {
+            timelineRef.current?.scrollTo({
+              top: timelineRef.current.scrollHeight,
+              behavior: 'smooth',
+            });
+          }, 50);
         }
       } catch (err) {
         console.error('Failed to poll recording status:', err);
       }
-    }, 1000);
+    }, 500); // Poll every 500ms for better responsiveness
 
     return () => clearInterval(pollInterval);
   }, [step, repositoryId]);
@@ -142,11 +241,8 @@ export function RecordingClient({ areas: initialAreas, settings, repositoryId }:
       if (result.sessionId) {
         setSessionId(result.sessionId);
         setStep('recording');
-        setEvents([{
-          type: 'navigation',
-          timestamp: Date.now(),
-          description: `Navigated to ${url}`,
-        }]);
+        setEvents([]);
+        lastSequenceRef.current = 0;
       }
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to start recording';
@@ -161,11 +257,7 @@ export function RecordingClient({ areas: initialAreas, settings, repositoryId }:
       const { screenshotPath } = await captureScreenshot(repositoryId);
       if (screenshotPath) {
         setScreenshots([...screenshots, screenshotPath]);
-        setEvents([...events, {
-          type: 'screenshot',
-          timestamp: Date.now(),
-          description: 'Screenshot captured',
-        }]);
+        // Event will come through polling
       }
     } catch (error) {
       console.error('Failed to capture screenshot:', error);
@@ -174,20 +266,8 @@ export function RecordingClient({ areas: initialAreas, settings, repositoryId }:
 
   const handleCreateAssertion = async (type: AssertionType) => {
     try {
-      const { success } = await createAssertion(type);
-      if (success) {
-        const assertionLabels: Record<AssertionType, string> = {
-          pageLoad: 'Page Load',
-          networkIdle: 'Network Idle',
-          urlMatch: 'URL Match',
-          domContentLoaded: 'DOM Content Loaded',
-        };
-        setEvents([...events, {
-          type: 'assertion',
-          timestamp: Date.now(),
-          description: `Assertion: ${assertionLabels[type]}`,
-        }]);
-      }
+      await createAssertion(type);
+      // Event will come through polling
     } catch (error) {
       console.error('Failed to create assertion:', error);
     }
@@ -419,23 +499,41 @@ export function RecordingClient({ areas: initialAreas, settings, repositoryId }:
                 <CardTitle className="text-sm">Interaction Timeline</CardTitle>
               </CardHeader>
               <CardContent>
-                <div className="space-y-2 max-h-64 overflow-y-auto">
-                  {events.map((event, i) => (
-                    <div key={i} className="flex items-start gap-2 text-sm">
-                      <div className="mt-0.5">
-                        {event.type === 'navigation' && <Navigation className="h-3 w-3 text-blue-500" />}
-                        {event.type === 'click' && <MousePointer className="h-3 w-3 text-green-500" />}
-                        {event.type === 'screenshot' && <Camera className="h-3 w-3 text-yellow-500" />}
-                        {event.type === 'assertion' && <CheckCircle2 className="h-3 w-3 text-purple-500" />}
-                      </div>
-                      <div className="flex-1">
-                        <span className="text-muted-foreground">
-                          {new Date(event.timestamp).toLocaleTimeString()}
-                        </span>
-                        <span className="ml-2">{event.description}</span>
-                      </div>
+                <div ref={timelineRef} className="space-y-2 max-h-64 overflow-y-auto">
+                  {events.length === 0 ? (
+                    <div className="text-center py-4 text-muted-foreground text-sm">
+                      Waiting for interactions...
                     </div>
-                  ))}
+                  ) : (
+                    events.map((event, i) => (
+                      <div
+                        key={`${event.sequence}-${i}`}
+                        className={`flex items-start gap-2 text-sm ${
+                          event.status === 'preview' ? 'opacity-50 border-l-2 border-dashed border-muted-foreground pl-2' : ''
+                        }`}
+                      >
+                        <div className="mt-0.5">
+                          {event.type === 'navigation' && <Navigation className="h-3 w-3 text-blue-500" />}
+                          {event.type === 'action' && event.data.action === 'click' && <MousePointer className="h-3 w-3 text-green-500" />}
+                          {event.type === 'action' && event.data.action === 'fill' && <FormInput className="h-3 w-3 text-orange-500" />}
+                          {event.type === 'action' && event.data.action === 'selectOption' && <ListFilter className="h-3 w-3 text-cyan-500" />}
+                          {event.type === 'screenshot' && <Camera className="h-3 w-3 text-yellow-500" />}
+                          {event.type === 'assertion' && <CheckCircle2 className="h-3 w-3 text-purple-500" />}
+                          {event.type === 'mouse-down' && <MousePointerClick className="h-3 w-3 text-red-500" />}
+                          {event.type === 'mouse-up' && <MousePointerClick className="h-3 w-3 text-red-300" />}
+                          {event.type === 'hover-preview' && <Eye className="h-3 w-3 text-gray-400" />}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <span className="text-muted-foreground text-xs">
+                            {new Date(event.timestamp).toLocaleTimeString()}
+                          </span>
+                          <span className="ml-2 truncate">
+                            {getEventDescription(event)}
+                          </span>
+                        </div>
+                      </div>
+                    ))
+                  )}
                 </div>
               </CardContent>
             </Card>
@@ -513,6 +611,7 @@ export function RecordingClient({ areas: initialAreas, settings, repositoryId }:
                   setGeneratedCode('');
                   setEvents([]);
                   setScreenshots([]);
+                  lastSequenceRef.current = 0;
                 }}
               >
                 Discard
