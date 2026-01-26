@@ -182,7 +182,9 @@ export class PlaywrightRecorder extends EventEmitter {
     await this.page.exposeFunction('__recordAction', (action: string, selectors: ActionSelector[], value?: string, boundingBox?: { x: number; y: number; width: number; height: number }) => {
       // Store both multi-selector array and legacy single selector for backwards compatibility
       const primarySelector = selectors[0]?.value || '';
-      this.addEvent('action', { action, selector: primarySelector, selectors, value });
+      // Include coordinates for fallback clicking when selectors fail
+      const coordinates = boundingBox ? { x: Math.round(boundingBox.x + boundingBox.width / 2), y: Math.round(boundingBox.y + boundingBox.height / 2) } : undefined;
+      this.addEvent('action', { action, selector: primarySelector, selectors, value, coordinates });
       const event = this.session?.events[this.session.events.length - 1];
 
       // Run OCR asynchronously if enabled and bounding box is large enough
@@ -571,15 +573,15 @@ export class PlaywrightRecorder extends EventEmitter {
     if (!this.session) return '';
 
     const hasCursorEvents = this.session.events.some(e => e.type === 'cursor-move');
+    const coordsEnabled = this.selectorPriority.find(s => s.type === 'coords')?.enabled ?? true;
 
     const lines: string[] = [
       `import { Page } from 'playwright';`,
       '',
       `export async function test(page: Page, baseUrl: string, screenshotPath: string, stepLogger: any) {`,
-      `  // Multi-selector fallback helper`,
-      `  async function locateWithFallback(page, selectors, action, value) {`,
+      `  // Multi-selector fallback helper with coordinate fallback for clicks`,
+      `  async function locateWithFallback(page, selectors, action, value, coords) {`,
       `    const validSelectors = selectors.filter(sel => sel.value && sel.value.trim() && !sel.value.includes('undefined'));`,
-      `    if (validSelectors.length === 0) throw new Error('No valid selectors provided');`,
       `    for (const sel of validSelectors) {`,
       `      try {`,
       `        let locator;`,
@@ -604,6 +606,14 @@ export class PlaywrightRecorder extends EventEmitter {
       `        return;`,
       `      } catch { continue; }`,
       `    }`,
+      ...(coordsEnabled ? [
+      `    // Coordinate fallback for clicks when all selectors fail`,
+      `    if (action === 'click' && coords) {`,
+      `      console.log('Falling back to coordinate click at', coords.x, coords.y);`,
+      `      await page.mouse.click(coords.x, coords.y);`,
+      `      return;`,
+      `    }`,
+      ] : []),
       `    throw new Error('No selector matched: ' + JSON.stringify(validSelectors));`,
       `  }`,
       ``,
@@ -654,20 +664,21 @@ export class PlaywrightRecorder extends EventEmitter {
         }
         lastAction = 'goto';
       } else if (event.type === 'action') {
-        const { action, selector, selectors, value } = event.data;
+        const { action, selector, selectors, value, coordinates } = event.data;
 
         // Use multi-selector format if available
         if (selectors && selectors.length > 0) {
           const selectorsJson = JSON.stringify(selectors);
+          const coordsArg = coordinates ? JSON.stringify(coordinates) : 'null';
           switch (action) {
             case 'click':
-              lines.push(`  await locateWithFallback(page, ${selectorsJson}, 'click');`);
+              lines.push(`  await locateWithFallback(page, ${selectorsJson}, 'click', null, ${coordsArg});`);
               break;
             case 'fill':
-              lines.push(`  await locateWithFallback(page, ${selectorsJson}, 'fill', '${value || ''}');`);
+              lines.push(`  await locateWithFallback(page, ${selectorsJson}, 'fill', '${value || ''}', null);`);
               break;
             case 'selectOption':
-              lines.push(`  await locateWithFallback(page, ${selectorsJson}, 'selectOption', '${value || ''}');`);
+              lines.push(`  await locateWithFallback(page, ${selectorsJson}, 'selectOption', '${value || ''}', null);`);
               break;
           }
         } else if (selector && selector.trim()) {
@@ -684,12 +695,17 @@ export class PlaywrightRecorder extends EventEmitter {
               break;
           }
         } else {
-          // Skip action with no valid selector - add comment for debugging
-          lines.push(`  // Skipped ${action}: no valid selector found`);
+          // No selectors available - use coordinate fallback for clicks
+          if (action === 'click' && coordinates) {
+            lines.push(`  // Coordinate-only click (no selectors found)`);
+            lines.push(`  await page.mouse.click(${coordinates.x}, ${coordinates.y});`);
+          } else {
+            lines.push(`  // Skipped ${action}: no valid selector or coordinates found`);
+          }
         }
         lastAction = action || '';
       } else if (event.type === 'screenshot') {
-        lines.push(`  await page.screenshot({ path: '${event.data.screenshotPath}' });`);
+        lines.push(`  await page.screenshot({ path: screenshotPath });`);
       } else if (event.type === 'assertion') {
         const { assertionType, url } = event.data;
         // Generate assertion code based on type

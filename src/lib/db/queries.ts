@@ -622,6 +622,23 @@ export async function getTestResultsWithTestInfo(testRunId: string) {
   return results;
 }
 
+// Helper to merge saved selector priority with defaults (adds new types)
+function mergeSelectorPriority(saved: SelectorConfig[] | null | undefined): SelectorConfig[] {
+  if (!saved || saved.length === 0) return DEFAULT_SELECTOR_PRIORITY;
+
+  const savedTypes = new Set(saved.map(s => s.type));
+  const maxPriority = Math.max(...saved.map(s => s.priority));
+
+  // Add any new selector types from defaults that aren't in saved
+  const newTypes = DEFAULT_SELECTOR_PRIORITY.filter(d => !savedTypes.has(d.type));
+  if (newTypes.length === 0) return saved;
+
+  return [
+    ...saved,
+    ...newTypes.map((t, i) => ({ ...t, priority: maxPriority + 1 + i })),
+  ];
+}
+
 // Playwright Settings
 export async function getPlaywrightSettings(repositoryId?: string | null) {
   if (repositoryId) {
@@ -630,7 +647,9 @@ export async function getPlaywrightSettings(repositoryId?: string | null) {
       .from(playwrightSettings)
       .where(eq(playwrightSettings.repositoryId, repositoryId))
       .get();
-    if (settings) return settings;
+    if (settings) {
+      return { ...settings, selectorPriority: mergeSelectorPriority(settings.selectorPriority) };
+    }
   }
 
   // Return global settings (no repositoryId) or defaults
@@ -640,7 +659,9 @@ export async function getPlaywrightSettings(repositoryId?: string | null) {
     .where(eq(playwrightSettings.repositoryId, ''))
     .get();
 
-  if (globalSettings) return globalSettings;
+  if (globalSettings) {
+    return { ...globalSettings, selectorPriority: mergeSelectorPriority(globalSettings.selectorPriority) };
+  }
 
   // Return default settings object (not saved)
   return {

@@ -33,6 +33,7 @@ const SELECTOR_LABELS: Record<SelectorType, { name: string; description: string 
   'name': { name: 'Name', description: 'Form element name attribute' },
   'css-path': { name: 'CSS Path', description: 'CSS selector path (fallback)' },
   'ocr-text': { name: 'OCR Text', description: 'Text extracted via OCR' },
+  'coords': { name: 'Coordinates', description: 'Click by X/Y coordinates (fallback)' },
 };
 
 interface SortableItemProps {
