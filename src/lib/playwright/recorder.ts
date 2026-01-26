@@ -1,4 +1,4 @@
-import { chromium, Browser, Page, BrowserContext } from 'playwright';
+import { chromium, firefox, webkit, Browser, Page, BrowserContext } from 'playwright';
 import { EventEmitter } from 'events';
 import path from 'path';
 import fs from 'fs';
@@ -66,6 +66,10 @@ export class PlaywrightRecorder extends EventEmitter {
   private pendingOcrPromises: Promise<void>[] = [];
   private baseOrigin: string = '';
   private sequenceCounter: number = 0;
+  private viewportWidth: number = 1280;
+  private viewportHeight: number = 720;
+  private browserType: 'chromium' | 'firefox' | 'webkit' = 'chromium';
+  private headless: boolean = false;
 
   constructor(repositoryId?: string | null, screenshotDir?: string) {
     super();
@@ -87,6 +91,19 @@ export class PlaywrightRecorder extends EventEmitter {
 
   setSelectorPriority(priority: SelectorConfig[]) {
     this.selectorPriority = priority;
+  }
+
+  setViewport(width: number, height: number) {
+    this.viewportWidth = width;
+    this.viewportHeight = height;
+  }
+
+  setBrowserType(browser: 'chromium' | 'firefox' | 'webkit') {
+    this.browserType = browser;
+  }
+
+  setHeadless(headless: boolean) {
+    this.headless = headless;
   }
 
   async startRecording(url: string, sessionId: string): Promise<void> {
@@ -111,13 +128,16 @@ export class PlaywrightRecorder extends EventEmitter {
     };
 
     try {
-      this.browser = await chromium.launch({
-        headless: false,
+      const browserLauncher = this.browserType === 'firefox' ? firefox
+        : this.browserType === 'webkit' ? webkit
+        : chromium;
+      this.browser = await browserLauncher.launch({
+        headless: this.headless,
         args: ['--start-maximized'],
       });
 
       this.context = await this.browser.newContext({
-        viewport: { width: 1280, height: 720 },
+        viewport: { width: this.viewportWidth, height: this.viewportHeight },
         ignoreHTTPSErrors: true, // Ignore SSL errors for local dev
       });
 
