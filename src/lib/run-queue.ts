@@ -68,6 +68,12 @@ class RunQueue {
     nextItem.startedAt = new Date();
 
     try {
+      // Load and set playwright settings (viewport, browser, timeouts, etc.)
+      const playwrightSettings = await queries.getPlaywrightSettings(nextItem.repositoryId);
+      if (playwrightSettings) {
+        runner.setSettings(playwrightSettings);
+      }
+
       // Get tests to run
       let tests: Test[];
       if (nextItem.testIds && nextItem.testIds.length > 0) {

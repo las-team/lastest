@@ -728,6 +728,14 @@ export class PlaywrightRecorder extends EventEmitter {
             lines.push(`  await page.waitForLoadState('domcontentloaded');`);
             break;
         }
+      } else if (event.type === 'mouse-down' && event.data.coordinates) {
+        const { x, y } = event.data.coordinates;
+        lines.push(`  await page.mouse.move(${x}, ${y});`);
+        lines.push(`  await page.mouse.down();`);
+      } else if (event.type === 'mouse-up' && event.data.coordinates) {
+        const { x, y } = event.data.coordinates;
+        lines.push(`  await page.mouse.move(${x}, ${y});`);
+        lines.push(`  await page.mouse.up();`);
       }
     }
 

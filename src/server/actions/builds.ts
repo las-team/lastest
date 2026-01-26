@@ -83,6 +83,12 @@ export async function createAndRunBuild(
     serverManager.setConfig(envConfig);
   }
 
+  // Load and set playwright settings (viewport, browser, timeouts, etc.)
+  const playwrightSettings = await queries.getPlaywrightSettings(repositoryId);
+  if (playwrightSettings) {
+    runner.setSettings(playwrightSettings);
+  }
+
   // Get tests to run
   let tests: Test[];
   if (testIds && testIds.length > 0) {
