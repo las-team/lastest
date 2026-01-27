@@ -54,6 +54,8 @@ import {
   Eye,
   FormInput,
   ListFilter,
+  AlertTriangle,
+  Check,
 } from 'lucide-react';
 import type { FunctionalArea, PlaywrightSettings } from '@/lib/db/schema';
 import { PlaywrightSettingsCard } from '@/components/settings/playwright-settings-card';
@@ -66,6 +68,27 @@ interface RecordingClientProps {
 }
 
 type RecordingStep = 'setup' | 'recording' | 'saving';
+
+// Check if an action event can be replayed by the runner
+function isActionReplayable(event: RecordingEvent): { replayable: boolean; reason?: 'valid-selectors' | 'coords-only' | 'no-selectors' } {
+  if (event.type !== 'action') {
+    return { replayable: true }; // Non-action events are always replayable
+  }
+
+  const selectors = event.data.selectors || [];
+  const validSelectors = selectors.filter(sel => sel.value && sel.value.trim() && !sel.value.includes('undefined'));
+  const hasCoords = event.data.coordinates !== undefined;
+
+  if (validSelectors.length > 0) {
+    return { replayable: true, reason: 'valid-selectors' };
+  }
+
+  if (event.data.action === 'click' && hasCoords) {
+    return { replayable: true, reason: 'coords-only' };
+  }
+
+  return { replayable: false, reason: 'no-selectors' };
+}
 
 function getEventDescription(event: RecordingEvent): string {
   switch (event.type) {
@@ -99,8 +122,14 @@ function getEventDescription(event: RecordingEvent): string {
     case 'hover-preview':
       const info = event.data.elementInfo;
       if (info) {
-        const target = info.id ? `#${info.id}` : info.textContent?.slice(0, 20) || info.tagName;
-        return `${info.potentialAction || 'interact'} → ${target}`;
+        // Enhanced hover preview: show tagName, id, text, and selector count
+        const parts: string[] = [];
+        parts.push(`<${info.tagName}>`);
+        if (info.id) parts.push(`#${info.id}`);
+        if (info.textContent) parts.push(`"${info.textContent.slice(0, 15)}${info.textContent.length > 15 ? '...' : ''}"`);
+        const selectorCount = info.selectors?.length || 0;
+        if (selectorCount > 0) parts.push(`(${selectorCount} sel)`);
+        return `${info.potentialAction || 'interact'} → ${parts.join(' ')}`;
       }
       return 'Hovering...';
     default:
@@ -108,14 +137,27 @@ function getEventDescription(event: RecordingEvent): string {
   }
 }
 
+interface ActionSelector {
+  type: string;
+  value: string;
+}
+
+interface VerificationStatus {
+  syntaxValid: boolean;
+  domVerified?: boolean;
+  lastChecked?: number;
+}
+
 interface RecordingEvent {
   type: string;
   timestamp: number;
   sequence: number;
   status: 'preview' | 'committed';
+  verification?: VerificationStatus;
   data: {
     action?: string;
     selector?: string;
+    selectors?: ActionSelector[];
     value?: string;
     url?: string;
     relativePath?: string;
@@ -123,12 +165,14 @@ interface RecordingEvent {
     assertionType?: string;
     coordinates?: { x: number; y: number };
     button?: number;
+    actionId?: string;
     elementInfo?: {
       tagName: string;
       id?: string;
       textContent?: string;
       potentialAction?: 'click' | 'fill' | 'select';
       potentialSelector?: string;
+      selectors?: ActionSelector[];
     };
   };
 }
@@ -176,6 +220,24 @@ export function RecordingClient({ areas: initialAreas, settings, repositoryId, d
           }
           clearInterval(pollInterval);
           return;
+        }
+
+        // Apply verification updates to existing events
+        if (status.verificationUpdates && status.verificationUpdates.length > 0) {
+          setEvents(prev => {
+            const updated = [...prev];
+            for (const update of status.verificationUpdates) {
+              const event = updated.find(e => e.data.actionId === update.actionId);
+              if (event && event.verification) {
+                event.verification = {
+                  ...event.verification,
+                  domVerified: update.verified,
+                  lastChecked: Date.now(),
+                };
+              }
+            }
+            return updated;
+          });
         }
 
         // Process new events
@@ -493,47 +555,77 @@ export function RecordingClient({ areas: initialAreas, settings, repositoryId, d
             </CardContent>
           </Card>
 
-          <div className="grid grid-cols-2 gap-6">
+          <div className="grid grid-cols-3 gap-6">
             {/* Interaction Timeline */}
-            <Card>
+            <Card className="col-span-2">
               <CardHeader>
                 <CardTitle className="text-sm">Interaction Timeline</CardTitle>
               </CardHeader>
               <CardContent>
-                <div ref={timelineRef} className="space-y-2 max-h-64 overflow-y-auto">
+                <div ref={timelineRef} className="space-y-2 max-h-64 overflow-y-auto overflow-x-hidden">
                   {events.length === 0 ? (
                     <div className="text-center py-4 text-muted-foreground text-sm">
                       Waiting for interactions...
                     </div>
                   ) : (
-                    events.map((event, i) => (
-                      <div
-                        key={`${event.sequence}-${i}`}
-                        className={`flex items-start gap-2 text-sm ${
-                          event.status === 'preview' ? 'opacity-50 border-l-2 border-dashed border-muted-foreground pl-2' : ''
-                        }`}
-                      >
-                        <div className="mt-0.5">
-                          {event.type === 'navigation' && <Navigation className="h-3 w-3 text-blue-500" />}
-                          {event.type === 'action' && event.data.action === 'click' && <MousePointer className="h-3 w-3 text-green-500" />}
-                          {event.type === 'action' && event.data.action === 'fill' && <FormInput className="h-3 w-3 text-orange-500" />}
-                          {event.type === 'action' && event.data.action === 'selectOption' && <ListFilter className="h-3 w-3 text-cyan-500" />}
-                          {event.type === 'screenshot' && <Camera className="h-3 w-3 text-yellow-500" />}
-                          {event.type === 'assertion' && <CheckCircle2 className="h-3 w-3 text-purple-500" />}
-                          {event.type === 'mouse-down' && <MousePointerClick className="h-3 w-3 text-red-500" />}
-                          {event.type === 'mouse-up' && <MousePointerClick className="h-3 w-3 text-red-300" />}
-                          {event.type === 'hover-preview' && <Eye className="h-3 w-3 text-gray-400" />}
+                    events.map((event, i) => {
+                      const replayStatus = isActionReplayable(event);
+                      const verification = event.verification;
+                      return (
+                        <div
+                          key={`${event.sequence}-${i}`}
+                          className={`flex items-start gap-2 text-sm ${
+                            event.status === 'preview' ? 'opacity-50 border-l-2 border-dashed border-muted-foreground pl-2' : ''
+                          }`}
+                        >
+                          <div className="mt-0.5">
+                            {event.type === 'navigation' && <Navigation className="h-3 w-3 text-blue-500" />}
+                            {event.type === 'action' && event.data.action === 'click' && <MousePointer className="h-3 w-3 text-green-500" />}
+                            {event.type === 'action' && event.data.action === 'fill' && <FormInput className="h-3 w-3 text-orange-500" />}
+                            {event.type === 'action' && event.data.action === 'selectOption' && <ListFilter className="h-3 w-3 text-cyan-500" />}
+                            {event.type === 'screenshot' && <Camera className="h-3 w-3 text-yellow-500" />}
+                            {event.type === 'assertion' && <CheckCircle2 className="h-3 w-3 text-purple-500" />}
+                            {event.type === 'mouse-down' && <MousePointerClick className="h-3 w-3 text-red-500" />}
+                            {event.type === 'mouse-up' && <MousePointerClick className="h-3 w-3 text-red-300" />}
+                            {event.type === 'hover-preview' && <Eye className="h-3 w-3 text-gray-400" />}
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <span className="text-muted-foreground text-xs">
+                              {new Date(event.timestamp).toLocaleTimeString()}
+                            </span>
+                            <span className="ml-2 truncate">
+                              {getEventDescription(event)}
+                            </span>
+                          </div>
+                          {/* Verification indicator - fixed width to prevent layout shift */}
+                          <div className="mt-0.5 flex items-center justify-end w-5 shrink-0">
+                            {event.type === 'action' && event.status === 'committed' && (
+                              <div title={
+                                !replayStatus.replayable ? 'No selectors - may not replay' :
+                                replayStatus.reason === 'coords-only' ? 'Coords fallback only' :
+                                verification?.domVerified ? 'Verified' :
+                                verification?.syntaxValid ? 'Verifying...' : 'Checking...'
+                              }>
+                                {!replayStatus.replayable ? (
+                                  <AlertTriangle className="h-3 w-3 text-red-500" />
+                                ) : replayStatus.reason === 'coords-only' ? (
+                                  <Check className="h-3 w-3 text-yellow-500" />
+                                ) : verification?.domVerified ? (
+                                  <CheckCircle2 className="h-3 w-3 text-green-500" />
+                                ) : verification?.syntaxValid ? (
+                                  <div className="flex items-center">
+                                    <Check className="h-3 w-3 text-green-500" />
+                                    <Loader2 className="h-2.5 w-2.5 text-muted-foreground animate-spin ml-0.5" />
+                                  </div>
+                                ) : (
+                                  <Loader2 className="h-3 w-3 text-muted-foreground animate-spin" />
+                                )}
+                              </div>
+                            )}
+                          </div>
                         </div>
-                        <div className="flex-1 min-w-0">
-                          <span className="text-muted-foreground text-xs">
-                            {new Date(event.timestamp).toLocaleTimeString()}
-                          </span>
-                          <span className="ml-2 truncate">
-                            {getEventDescription(event)}
-                          </span>
-                        </div>
-                      </div>
-                    ))
+                      );
+                    })
                   )}
                 </div>
               </CardContent>

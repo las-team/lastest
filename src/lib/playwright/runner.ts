@@ -134,8 +134,16 @@ export class PlaywrightRunner extends EventEmitter {
 
     try {
       const launcher = this.getBrowserLauncher();
-      const headless = headlessOverride ?? this.settings?.headless ?? true;
-      this.browser = await launcher.launch({ headless });
+      const headlessMode = this.settings?.headlessMode ?? 'true';
+      // Support headlessOverride for backward compatibility
+      // 'shell' uses new headless mode that better avoids bot detection
+      const headless = headlessOverride !== undefined
+        ? headlessOverride
+        : headlessMode === 'shell'
+          ? 'shell'
+          : headlessMode === 'true';
+      // Cast needed as Playwright types may not include 'shell' yet
+      this.browser = await launcher.launch({ headless: headless as boolean | undefined });
 
       this.emit('event', {
         type: 'started',

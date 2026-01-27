@@ -97,10 +97,14 @@ export async function getRecordingStatus(repositoryId?: string | null, sinceSequ
     : allEvents;
   const lastSequence = allEvents.at(-1)?.sequence ?? 0;
 
+  // Get verification updates (DOM verification results)
+  const verificationUpdates = recorder.getVerificationUpdates();
+
   return {
     isRecording: recorder.isActive(),
     events,
     lastSequence,
+    verificationUpdates,
     session: session ? {
       id: session.id,
       url: session.url,

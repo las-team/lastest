@@ -16,7 +16,7 @@ import {
 import { SelectorPriorityList } from './selector-priority-list';
 import { savePlaywrightSettings, resetPlaywrightSettings } from '@/server/actions/settings';
 import { DEFAULT_SELECTOR_PRIORITY } from '@/lib/db/schema';
-import type { SelectorConfig, PlaywrightSettings } from '@/lib/db/schema';
+import type { SelectorConfig, PlaywrightSettings, HeadlessMode } from '@/lib/db/schema';
 import { Loader2, RotateCcw, Save } from 'lucide-react';
 
 interface PlaywrightSettingsCardProps {
@@ -37,7 +37,7 @@ export function PlaywrightSettingsCard({
   const [browser, setBrowser] = useState(settings.browser || 'chromium');
   const [viewportWidth, setViewportWidth] = useState(settings.viewportWidth || 1280);
   const [viewportHeight, setViewportHeight] = useState(settings.viewportHeight || 720);
-  const [headless, setHeadless] = useState(settings.headless || false);
+  const [headlessMode, setHeadlessMode] = useState<HeadlessMode>(settings.headlessMode as HeadlessMode || 'true');
   const [navigationTimeout, setNavigationTimeout] = useState(settings.navigationTimeout || 30000);
   const [actionTimeout, setActionTimeout] = useState(settings.actionTimeout || 5000);
   const [pointerGestures, setPointerGestures] = useState(settings.pointerGestures ?? false);
@@ -51,7 +51,7 @@ export function PlaywrightSettingsCard({
         browser,
         viewportWidth,
         viewportHeight,
-        headless,
+        headlessMode,
         navigationTimeout,
         actionTimeout,
         pointerGestures,
@@ -67,7 +67,7 @@ export function PlaywrightSettingsCard({
       setBrowser('chromium');
       setViewportWidth(1280);
       setViewportHeight(720);
-      setHeadless(false);
+      setHeadlessMode('true');
       setNavigationTimeout(30000);
       setActionTimeout(5000);
       setPointerGestures(false);
@@ -126,13 +126,17 @@ export function PlaywrightSettingsCard({
             </div>
 
             <div className="space-y-2">
-              <Label>Headless Mode</Label>
-              <div className="flex items-center gap-2 h-10">
-                <Switch checked={headless} onCheckedChange={setHeadless} />
-                <span className="text-sm text-muted-foreground">
-                  {headless ? 'Enabled' : 'Disabled'}
-                </span>
-              </div>
+              <Label htmlFor="headlessMode">Headless Mode</Label>
+              <Select value={headlessMode} onValueChange={(v) => setHeadlessMode(v as HeadlessMode)}>
+                <SelectTrigger id="headlessMode">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="false">Headed (visible browser)</SelectItem>
+                  <SelectItem value="true">Headless (standard)</SelectItem>
+                  <SelectItem value="shell">Headless Shell (better bot avoidance)</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
           </div>
 

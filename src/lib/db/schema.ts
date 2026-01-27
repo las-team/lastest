@@ -218,6 +218,9 @@ export type NewBaseline = typeof baselines.$inferInsert;
 export type IgnoreRegion = typeof ignoreRegions.$inferSelect;
 export type NewIgnoreRegion = typeof ignoreRegions.$inferInsert;
 
+// Headless mode options: 'true' (standard headless), 'false' (headed), 'shell' (new headless mode with better bot detection avoidance)
+export type HeadlessMode = 'true' | 'false' | 'shell';
+
 // Playwright settings for recording and running tests
 export const playwrightSettings = sqliteTable('playwright_settings', {
   id: text('id').primaryKey(),
@@ -226,7 +229,7 @@ export const playwrightSettings = sqliteTable('playwright_settings', {
   browser: text('browser').default('chromium'), // chromium | firefox | webkit
   viewportWidth: integer('viewport_width').default(1280),
   viewportHeight: integer('viewport_height').default(720),
-  headless: integer('headless', { mode: 'boolean' }).default(true),
+  headlessMode: text('headless_mode').default('true'), // 'true' | 'false' | 'shell'
   navigationTimeout: integer('navigation_timeout').default(30000),
   actionTimeout: integer('action_timeout').default(5000),
   pointerGestures: integer('pointer_gestures', { mode: 'boolean' }).default(false),

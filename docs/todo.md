@@ -8,21 +8,13 @@ AI enablement /home/ewyct/.claude/plans/moonlit-fluttering-origami.md
 
 --------
 ## in progress
-click item id finding with CI
-
-Playwright inspectors
-
-Check prognosis, verify it captured the element correctly, test if it can re-click it?
-
 check the recorder and the runner so that they are compatible and identify the root cause of the issue
-
 
 ## test
 OCR
 
 ## features
-PW inspector like streaming
-Alternative engine PW Inspector
+playwright
 Build/change approval
     Test version or result on the build screen
 
@@ -34,6 +26,7 @@ UI & UX
 Remove compare
 
 ## ideas
+Alternative engine PW Inspector
 Imported document -> US & AC -> tests - US checklist overview
 Sitemap -flow
 Firecrawl?
@@ -50,3 +43,4 @@ Test classification
     Visual
     Functional / User Story
 ## bugs
+DOM inspector runs indefinitely

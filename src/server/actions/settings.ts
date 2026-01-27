@@ -14,7 +14,7 @@ export async function savePlaywrightSettings(data: {
   browser?: string;
   viewportWidth?: number;
   viewportHeight?: number;
-  headless?: boolean;
+  headlessMode?: string;
   navigationTimeout?: number;
   actionTimeout?: number;
   pointerGestures?: boolean;
