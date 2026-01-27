@@ -671,7 +671,7 @@ export async function getPlaywrightSettings(repositoryId?: string | null) {
     browser: 'chromium' as const,
     viewportWidth: 1280,
     viewportHeight: 720,
-    headless: false,
+    headless: true,
     navigationTimeout: 30000,
     actionTimeout: 5000,
     pointerGestures: false,

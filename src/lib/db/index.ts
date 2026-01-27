@@ -167,7 +167,7 @@ export function initializeDatabase() {
       browser TEXT DEFAULT 'chromium',
       viewport_width INTEGER DEFAULT 1280,
       viewport_height INTEGER DEFAULT 720,
-      headless INTEGER DEFAULT 0,
+      headless INTEGER DEFAULT 1,
       navigation_timeout INTEGER DEFAULT 30000,
       action_timeout INTEGER DEFAULT 5000,
       pointer_gestures INTEGER DEFAULT 0,

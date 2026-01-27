@@ -579,6 +579,24 @@ export class PlaywrightRecorder extends EventEmitter {
       `import { Page } from 'playwright';`,
       '',
       `export async function test(page: Page, baseUrl: string, screenshotPath: string, stepLogger: any) {`,
+      `  // Helper to build URLs safely (handles trailing/leading slashes)`,
+      `  function buildUrl(base, path) {`,
+      `    const cleanBase = base.endsWith('/') ? base.slice(0, -1) : base;`,
+      `    const cleanPath = path.startsWith('/') ? path : '/' + path;`,
+      `    return cleanBase + cleanPath;`,
+      `  }`,
+      ``,
+      `  // Helper to generate unique screenshot paths`,
+      `  let screenshotStep = 0;`,
+      `  function getScreenshotPath() {`,
+      `    screenshotStep++;`,
+      `    const ext = screenshotPath.lastIndexOf('.');`,
+      `    if (ext > 0) {`,
+      `      return screenshotPath.slice(0, ext) + '-step' + screenshotStep + screenshotPath.slice(ext);`,
+      `    }`,
+      `    return screenshotPath + '-step' + screenshotStep;`,
+      `  }`,
+      ``,
       `  // Multi-selector fallback helper with coordinate fallback for clicks`,
       `  async function locateWithFallback(page, selectors, action, value, coords) {`,
       `    const validSelectors = selectors.filter(sel => sel.value && sel.value.trim() && !sel.value.includes('undefined'));`,
@@ -599,10 +617,12 @@ export class PlaywrightRecorder extends EventEmitter {
       `        } else {`,
       `          locator = page.locator(sel.value);`,
       `        }`,
-      `        await locator.waitFor({ timeout: 3000 });`,
-      `        if (action === 'click') await locator.click();`,
-      `        else if (action === 'fill') await locator.fill(value || '');`,
-      `        else if (action === 'selectOption') await locator.selectOption(value || '');`,
+      `        // Use .first() to handle multiple matches (e.g., header + footer nav links)`,
+      `        const target = locator.first();`,
+      `        await target.waitFor({ timeout: 3000 });`,
+      `        if (action === 'click') await target.click();`,
+      `        else if (action === 'fill') await target.fill(value || '');`,
+      `        else if (action === 'selectOption') await target.selectOption(value || '');`,
       `        return;`,
       `      } catch { continue; }`,
       `    }`,
@@ -660,7 +680,7 @@ export class PlaywrightRecorder extends EventEmitter {
         // Only add goto for the first navigation or if URL changed significantly
         if (!lastAction.includes('goto')) {
           const relativePath = event.data.relativePath;
-          lines.push(`  await page.goto(\`\${baseUrl}${relativePath}\`);`);
+          lines.push(`  await page.goto(buildUrl(baseUrl, '${relativePath}'));`);
         }
         lastAction = 'goto';
       } else if (event.type === 'action') {
@@ -705,7 +725,7 @@ export class PlaywrightRecorder extends EventEmitter {
         }
         lastAction = action || '';
       } else if (event.type === 'screenshot') {
-        lines.push(`  await page.screenshot({ path: screenshotPath });`);
+        lines.push(`  await page.screenshot({ path: getScreenshotPath(), fullPage: true });`);
       } else if (event.type === 'assertion') {
         const { assertionType, url } = event.data;
         // Generate assertion code based on type
@@ -721,7 +741,7 @@ export class PlaywrightRecorder extends EventEmitter {
           case 'urlMatch':
             lines.push(`  // Assertion: Verify current URL matches expected`);
             const relativePath = this.getRelativePath(url || '');
-            lines.push(`  await expect(page).toHaveURL(\`\${baseUrl}${relativePath}\`);`);
+            lines.push(`  await expect(page).toHaveURL(buildUrl(baseUrl, '${relativePath}'));`);
             break;
           case 'domContentLoaded':
             lines.push(`  // Assertion: Verify DOM is ready`);

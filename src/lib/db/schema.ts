@@ -226,7 +226,7 @@ export const playwrightSettings = sqliteTable('playwright_settings', {
   browser: text('browser').default('chromium'), // chromium | firefox | webkit
   viewportWidth: integer('viewport_width').default(1280),
   viewportHeight: integer('viewport_height').default(720),
-  headless: integer('headless', { mode: 'boolean' }).default(false),
+  headless: integer('headless', { mode: 'boolean' }).default(true),
   navigationTimeout: integer('navigation_timeout').default(30000),
   actionTimeout: integer('action_timeout').default(5000),
   pointerGestures: integer('pointer_gestures', { mode: 'boolean' }).default(false),

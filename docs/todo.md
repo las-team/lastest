@@ -8,7 +8,11 @@ AI enablement /home/ewyct/.claude/plans/moonlit-fluttering-origami.md
 
 --------
 ## in progress
-cursor recroding w excalidraw
+click item id finding with CI
+
+Playwright inspectors
+
+Check prognosis, verify it captured the element correctly, test if it can re-click it?
 
 check the recorder and the runner so that they are compatible and identify the root cause of the issue
 
@@ -17,6 +21,7 @@ check the recorder and the runner so that they are compatible and identify the r
 OCR
 
 ## features
+
 Test classification
 
 Build/change approval
