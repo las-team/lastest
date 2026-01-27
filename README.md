@@ -1,48 +1,206 @@
-# Lastest2
+<p align="center">
+  <h1 align="center">Lastest2</h1>
+  <p align="center">
+    <strong>Free visual regression testing with AI-generated tests</strong>
+  </p>
+  <p align="center">
+    Record it. Test it. Ship it. — $0 forever.
+  </p>
+</p>
 
-Visual regression testing platform built with Next.js 16 App Router.
+<p align="center">
+  <a href="#features">Features</a> •
+  <a href="#quick-start">Quick Start</a> •
+  <a href="#how-it-works">How It Works</a> •
+  <a href="#why-lastest2">Why Lastest2</a> •
+  <a href="#documentation">Docs</a>
+</p>
+
+<p align="center">
+  <img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License" />
+  <img src="https://img.shields.io/badge/PRs-welcome-brightgreen.svg" alt="PRs Welcome" />
+  <img src="https://img.shields.io/badge/self--hosted-yes-green" alt="Self Hosted" />
+</p>
+
+---
+
+<!-- TODO: Add demo GIF here -->
+<!-- ![Demo](./docs/demo.gif) -->
+
+## The Problem
+
+You ship fast with AI tools. You break things faster.
+
+- Percy costs **$399/mo** for teams
+- Chromatic starts at **$149/mo**
+- BackstopJS requires manual test writing
+
+Meanwhile, you're a solo founder who just needs to know: **"Did my last commit break the UI?"**
+
+## The Solution
+
+Lastest2 is free, self-hosted visual regression testing that writes tests for you.
+
+```
+1. Point it at your app
+2. Record your user flows
+3. AI generates the test code
+4. Screenshots are compared on every run
+5. Approve or reject visual changes
+```
+
+Your data stays local. Your wallet stays full.
+
+---
 
 ## Features
 
-- **Record** browser interactions via Playwright → generates test code
-- **Run** tests individually or as builds
-- **Diff** screenshots against baselines using pixelmatch
-- **Review** visual diffs with approval workflow
+### 🎬 Record Browser Interactions
+Point-and-click test recording via Playwright. No code required.
 
-## Getting Started
+### 🤖 AI Test Generation
+Claude generates robust test code with multi-selector fallback (data-testid → id → role → aria-label → text → css → OCR).
+
+### 📸 Visual Diffing
+Pixel-perfect comparison using pixelmatch. See exactly what changed.
+
+### ✅ Approval Workflow
+Review visual diffs before they become baselines. Catch regressions, approve intentional changes.
+
+### 🔄 Git-Aware Builds
+Run tests per branch/commit. Compare across PRs. Track coverage.
+
+### 🏠 100% Self-Hosted
+SQLite database, local file storage. No external dependencies. No data leaves your machine.
+
+---
+
+## Quick Start
 
 ```bash
+# Clone
+git clone https://github.com/YOUR_USERNAME/lastest2.git
+cd lastest2
+
+# Install
 pnpm install
-pnpm dev          # Start development server on localhost:3000
+
+# Start
+pnpm dev
 ```
 
 Open [http://localhost:3000](http://localhost:3000)
 
+### Requirements
+- Node.js 18+
+- pnpm
+
+---
+
+## How It Works
+
+```
+┌─────────────┐     ┌─────────────┐     ┌─────────────┐
+│   Record    │ ──▶ │   Test      │ ──▶ │   Review    │
+│             │     │             │     │             │
+│ Click around│     │ Run tests   │     │ Approve/    │
+│ your app    │     │ Get diffs   │     │ Reject      │
+└─────────────┘     └─────────────┘     └─────────────┘
+        │                  │                   │
+        ▼                  ▼                   ▼
+   AI generates       Screenshots         New baseline
+   test code          compared            saved
+```
+
+### Core Flow
+
+1. **Record**: Interact with your app in the browser. Lastest2 captures every click, type, and navigation.
+
+2. **Generate**: AI writes Playwright test code with resilient selectors that survive DOM changes.
+
+3. **Run**: Execute tests locally. Screenshots are captured at key steps.
+
+4. **Compare**: New screenshots are diffed against baselines using pixelmatch.
+
+5. **Review**: Visual diffs are classified (unchanged/flaky/changed). Approve intentional changes.
+
+---
+
+## Why Lastest2
+
+| Feature | Lastest2 | Percy | Chromatic |
+|---------|----------|-------|-----------|
+| Price | **Free** | $399/mo | $149/mo |
+| Self-hosted | ✅ | ❌ | ❌ |
+| AI test generation | ✅ | ❌ | ❌ |
+| Data privacy | ✅ Local | Cloud | Cloud |
+| Open source | ✅ | ❌ | ❌ |
+
+### Built for Vibe Coders
+
+- **Ship fast**: Record tests in seconds, not hours
+- **Stay lean**: $0 visual testing means more runway
+- **Own your data**: No vendor lock-in, no cloud uploads
+- **AI-native**: Works with your Cursor/Claude/Copilot workflow
+
+---
+
 ## Commands
 
 ```bash
-pnpm dev          # Start development server
+pnpm dev          # Start development server on localhost:3000
 pnpm build        # Production build
 pnpm lint         # Run ESLint
 pnpm db:studio    # Open Drizzle Studio for database inspection
 pnpm db:reset     # Reset database (removes SQLite DB + screenshots/baselines)
 pnpm db:push      # Push schema changes to database
-pnpm db:generate  # Generate Drizzle migrations
 ```
+
+---
+
+## Tech Stack
+
+- **Framework**: Next.js 16 (App Router)
+- **Browser Automation**: Playwright
+- **Visual Diffing**: pixelmatch
+- **Database**: SQLite + Drizzle ORM
+- **AI**: Claude (via Agent SDK, CLI, or OpenRouter)
+- **OCR Fallback**: Tesseract.js
+
+---
 
 ## Environment Variables
 
-```
-GITHUB_CLIENT_ID      # GitHub OAuth app client ID
-GITHUB_CLIENT_SECRET  # GitHub OAuth app secret
-```
-
-## Database
-
-SQLite with WAL mode. Database file: `./lastest2.db`
-
-Reset to empty state:
 ```bash
-pnpm db:reset
+# Optional: GitHub OAuth for repository sync
+GITHUB_CLIENT_ID=
+GITHUB_CLIENT_SECRET=
 ```
-Tables are recreated on next app start.
+
+---
+
+## Roadmap
+
+- [ ] GitHub Actions integration
+- [ ] Slack/Discord notifications
+- [ ] Team collaboration features
+- [ ] Component-level testing
+- [ ] Storybook integration
+
+---
+
+## Contributing
+
+PRs welcome! See [CONTRIBUTING.md](./CONTRIBUTING.md) for guidelines.
+
+---
+
+## License
+
+MIT
+
+---
+
+<p align="center">
+  <sub>Built for solo founders who ship fast and break things (then fix them before users notice).</sub>
+</p>

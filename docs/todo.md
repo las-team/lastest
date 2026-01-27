@@ -14,7 +14,6 @@ check the recorder and the runner so that they are compatible and identify the r
 OCR
 
 ## features
-Alternative engine PW Inspector
 Lastest2 extra assertions (with right click?)
 
 Build/change approval
@@ -34,6 +33,12 @@ Firecrawl?
 Approve reject changes or create ticket -> gh issue
 Issues view
 
+CI/CD integration
+Docker
+
+Tweet
+Bugriport
+
 ### UX
 Find test cases
     From code
@@ -45,3 +50,41 @@ Test classification
     Functional / User Story
 ## bugs
 DOM inspector runs indefinitely
+
+ 1. Integration > Awareness                                                                                      
+                                                                                                                  
+  Posts create awareness. Integrations create adoption.                                                           
+  ┌───────────────────────────┬────────────────────┐                                                              
+  │        High Impact        │    Lower Impact    │                                                              
+  ├───────────────────────────┼────────────────────┤                                                              
+  │ GitHub Action marketplace │ Blog posts         │                                                              
+  ├───────────────────────────┼────────────────────┤                                                              
+  │ VS Code extension         │ Twitter threads    │                                                              
+  ├───────────────────────────┼────────────────────┤                                                              
+  │ Cursor plugin/template    │ ProductHunt launch │                                                              
+  ├───────────────────────────┼────────────────────┤                                                              
+  │ npm/CLI one-liner install │ Reddit posts       │                                                              
+  └───────────────────────────┴────────────────────┘                                                              
+  Action: Build a npx create-lastest2 or GitHub Action that makes setup trivial.
+
+  2. Distribution = Existing Audience                                                                             
+                                                                                                                  
+  Per https://www.indiehackers.com, you need distribution from day one. Without an existing audience, posting is  
+  shouting into void.                                                                                             
+                                                                                                                  
+  Options if you don't have audience:                                                                             
+  - Borrow someone else's: Get featured by https://youtube.com/fireship, Theo, or smaller YouTubers (5-20k subs)  
+  who review dev tools                                                                                            
+  - Piggyback platforms: Cursor Discord, Claude Discord, Vercel Discord - be helpful first, mention tool when     
+  relevant                                                                                                        
+  - Create a "list": Publish "Best free alternatives to Percy/Chromatic" article, include yourself        
+
+    4. The "Build in Public" Flywheel                                                                               
+                                                                                                                  
+  Per https://thebootstrappedfounder.com/indie-hacking-isnt-dead-its-just-less-hacky/:                            
+                                                                                                                  
+  Share progress → Attract followers → They try tool →                                                            
+  Some convert → They share → Repeat                                                                              
+                                                                                                                  
+  This takes 3-6 months of consistent posting before compounding.          
+                                                                                                        
