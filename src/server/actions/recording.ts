@@ -40,9 +40,8 @@ export async function startRecording(url: string, repositoryId?: string | null):
   // Set viewport from settings
   recorder.setViewport(settings.viewportWidth ?? 1280, settings.viewportHeight ?? 720);
 
-  // Set browser type and headless mode
+  // Set browser type (headless is always false for recording - user needs to see the browser)
   recorder.setBrowserType((settings.browser as 'chromium' | 'firefox' | 'webkit') ?? 'chromium');
-  recorder.setHeadless(settings.headless ?? false);
 
   try {
     await recorder.startRecording(url, sessionId);

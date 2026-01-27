@@ -21,9 +21,8 @@ check the recorder and the runner so that they are compatible and identify the r
 OCR
 
 ## features
-
-Test classification
-
+PW inspector like streaming
+Alternative engine PW Inspector
 Build/change approval
     Test version or result on the build screen
 
@@ -32,11 +31,22 @@ UI & UX
     Revise frontend and make sure you havent steered far and try to use standard shadcn css where possible
     make sure every page has a clear primary action if there are more than one. If you cant decide ask me a question about it
 
+Remove compare
+
 ## ideas
 Imported document -> US & AC -> tests - US checklist overview
 Sitemap -flow
 Firecrawl?
 Research playwrights comparison options, how they work?
 Approve reject changes or create ticket -> gh issue
-
+Issues view
+### UX
+Find test cases
+    From code
+    From site
+    From documentation
+Test classification
+    Technical
+    Visual
+    Functional / User Story
 ## bugs
