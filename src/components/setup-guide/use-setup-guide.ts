@@ -41,6 +41,22 @@ export function useSetupGuide(initialStatus: SetupStatus) {
 
   useEffect(() => {
     const loaded = loadState();
+
+    // Check if database is essentially empty (fresh after reset)
+    const isDatabaseEmpty = !initialStatus.githubConnected &&
+      !initialStatus.routesExist &&
+      !initialStatus.testsExist &&
+      !initialStatus.buildsExist;
+
+    // If database is empty but guide was dismissed, reset the guide state
+    if (isDatabaseEmpty && loaded.dismissed) {
+      localStorage.removeItem(STORAGE_KEY);
+      localStorage.removeItem('lastest2-ai-configured');
+      localStorage.removeItem('lastest2-results-viewed');
+      loaded.completedSteps = [];
+      loaded.dismissed = false;
+    }
+
     // Merge server-detected + localStorage-detected completions
     const autoDetected: number[] = [];
     if (initialStatus.githubConnected) autoDetected.push(1);

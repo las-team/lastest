@@ -77,6 +77,7 @@ export function initializeDatabase() {
       test_id TEXT REFERENCES tests(id),
       status TEXT,
       screenshot_path TEXT,
+      screenshots TEXT,
       diff_path TEXT,
       error_message TEXT,
       duration_ms INTEGER,
@@ -167,7 +168,7 @@ export function initializeDatabase() {
       browser TEXT DEFAULT 'chromium',
       viewport_width INTEGER DEFAULT 1280,
       viewport_height INTEGER DEFAULT 720,
-      headless INTEGER DEFAULT 1,
+      headless_mode TEXT DEFAULT 'true',
       navigation_timeout INTEGER DEFAULT 30000,
       action_timeout INTEGER DEFAULT 5000,
       pointer_gestures INTEGER DEFAULT 0,
@@ -238,6 +239,8 @@ export function initializeDatabase() {
       provider TEXT NOT NULL DEFAULT 'claude-cli',
       openrouter_api_key TEXT,
       openrouter_model TEXT DEFAULT 'anthropic/claude-sonnet-4',
+      agent_sdk_permission_mode TEXT DEFAULT 'plan',
+      agent_sdk_working_dir TEXT,
       custom_instructions TEXT,
       created_at INTEGER,
       updated_at INTEGER
@@ -283,7 +286,19 @@ export function initializeDatabase() {
       completed_at INTEGER
     );
 
+    CREATE TABLE IF NOT EXISTS test_versions (
+      id TEXT PRIMARY KEY,
+      test_id TEXT NOT NULL REFERENCES tests(id) ON DELETE CASCADE,
+      version INTEGER NOT NULL,
+      code TEXT NOT NULL,
+      name TEXT NOT NULL,
+      target_url TEXT,
+      change_reason TEXT,
+      created_at INTEGER
+    );
+
     CREATE INDEX IF NOT EXISTS idx_routes_repository ON routes(repository_id);
+    CREATE INDEX IF NOT EXISTS idx_test_versions_test ON test_versions(test_id);
     CREATE INDEX IF NOT EXISTS idx_route_test_suggestions_route ON route_test_suggestions(route_id);
     CREATE INDEX IF NOT EXISTS idx_background_jobs_status ON background_jobs(status);
   `);
@@ -369,6 +384,46 @@ function runMigrations() {
         created_at INTEGER
       );
       CREATE INDEX IF NOT EXISTS idx_route_test_suggestions_route ON route_test_suggestions(route_id);
+    `);
+  }
+
+  // Migration: Add screenshots to test_results if missing
+  const testResultsColumns = sqlite.prepare('PRAGMA table_info(test_results)').all() as { name: string }[];
+  const testResultsColumnNames = new Set(testResultsColumns.map(c => c.name));
+  if (!testResultsColumnNames.has('screenshots')) {
+    sqlite.exec('ALTER TABLE test_results ADD COLUMN screenshots TEXT');
+  }
+
+  // Migration: Add headless_mode to playwright_settings (replacing headless)
+  if (!pwColumnNames.has('headless_mode')) {
+    sqlite.exec('ALTER TABLE playwright_settings ADD COLUMN headless_mode TEXT DEFAULT \'true\'');
+  }
+
+  // Migration: Add agent_sdk columns to ai_settings
+  const aiColumns = sqlite.prepare('PRAGMA table_info(ai_settings)').all() as { name: string }[];
+  const aiColumnNames = new Set(aiColumns.map(c => c.name));
+  if (!aiColumnNames.has('agent_sdk_permission_mode')) {
+    sqlite.exec('ALTER TABLE ai_settings ADD COLUMN agent_sdk_permission_mode TEXT DEFAULT \'plan\'');
+  }
+  if (!aiColumnNames.has('agent_sdk_working_dir')) {
+    sqlite.exec('ALTER TABLE ai_settings ADD COLUMN agent_sdk_working_dir TEXT');
+  }
+
+  // Migration: Create test_versions table if missing
+  const testVersionsTables = sqlite.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='test_versions'").all();
+  if (testVersionsTables.length === 0) {
+    sqlite.exec(`
+      CREATE TABLE IF NOT EXISTS test_versions (
+        id TEXT PRIMARY KEY,
+        test_id TEXT NOT NULL REFERENCES tests(id) ON DELETE CASCADE,
+        version INTEGER NOT NULL,
+        code TEXT NOT NULL,
+        name TEXT NOT NULL,
+        target_url TEXT,
+        change_reason TEXT,
+        created_at INTEGER
+      );
+      CREATE INDEX IF NOT EXISTS idx_test_versions_test ON test_versions(test_id);
     `);
   }
 }
