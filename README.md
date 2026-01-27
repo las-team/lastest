@@ -1,39 +1,48 @@
+# Lastest2
+
+Visual regression testing platform built with Next.js 16 App Router.
+
+## Features
+
+- **Record** browser interactions via Playwright → generates test code
+- **Run** tests individually or as builds
+- **Diff** screenshots against baselines using pixelmatch
+- **Review** visual diffs with approval workflow
 
 ## Getting Started
 
-First, run the development server:
+```bash
+pnpm install
+pnpm dev          # Start development server on localhost:3000
+```
+
+Open [http://localhost:3000](http://localhost:3000)
+
+## Commands
 
 ```bash
-pnpm dev
+pnpm dev          # Start development server
+pnpm build        # Production build
+pnpm lint         # Run ESLint
+pnpm db:studio    # Open Drizzle Studio for database inspection
+pnpm db:reset     # Reset database (removes SQLite DB + screenshots/baselines)
+pnpm db:push      # Push schema changes to database
+pnpm db:generate  # Generate Drizzle migrations
+```
+
+## Environment Variables
+
+```
+GITHUB_CLIENT_ID      # GitHub OAuth app client ID
+GITHUB_CLIENT_SECRET  # GitHub OAuth app secret
 ```
 
 ## Database
 
-Reset the database to an empty state:
+SQLite with WAL mode. Database file: `./lastest2.db`
 
+Reset to empty state:
 ```bash
 pnpm db:reset
 ```
-
-This removes the SQLite database and clears screenshots/baselines directories. Tables are recreated on next app start.
-
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
-
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
-
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
-
-## Learn More
-
-To learn more about Next.js, take a look at the following resources:
-
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+Tables are recreated on next app start.
