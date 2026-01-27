@@ -1,6 +1,15 @@
 'use server';
 
 import { getRecorder, type AssertionType } from '@/lib/playwright/recorder';
+import {
+  launchInspector,
+  isInspectorRunning,
+  getInspectorOutput,
+  cancelInspector,
+  cleanupSession,
+  getSessionInfo,
+} from '@/lib/playwright/inspector-manager';
+import { transformPlaywrightCode } from '@/lib/playwright/code-transformer';
 import { createTest, createFunctionalArea, getFunctionalAreas, getPlaywrightSettings } from '@/lib/db/queries';
 import { DEFAULT_SELECTOR_PRIORITY } from '@/lib/db/schema';
 import { v4 as uuid } from 'uuid';
@@ -197,4 +206,107 @@ export async function getOrCreateFunctionalArea(name: string) {
   }
 
   return createFunctionalArea({ name });
+}
+
+// ============================================
+// Playwright Inspector Recording Actions
+// ============================================
+
+export async function startPlaywrightInspector(
+  url: string,
+  repositoryId?: string | null
+): Promise<{ sessionId?: string; error?: string }> {
+  // Validate URL format
+  try {
+    new URL(url);
+  } catch {
+    return { error: 'Invalid URL format. Please enter a valid URL (e.g., https://example.com)' };
+  }
+
+  const sessionId = uuid();
+
+  // Get settings for browser/viewport config
+  const settings = await getPlaywrightSettings(repositoryId);
+
+  const result = await launchInspector(sessionId, url, {
+    browser: (settings.browser as 'chromium' | 'firefox' | 'webkit') ?? 'chromium',
+    viewport: {
+      width: settings.viewportWidth ?? 1280,
+      height: settings.viewportHeight ?? 720,
+    },
+  });
+
+  if (!result.success) {
+    return { error: result.error };
+  }
+
+  return { sessionId };
+}
+
+export interface InspectorStatus {
+  isRunning: boolean;
+  code?: string;
+  transformedCode?: string;
+  error?: string;
+  startedAt?: Date;
+  url?: string;
+}
+
+export async function getInspectorStatus(sessionId: string): Promise<InspectorStatus> {
+  const info = getSessionInfo(sessionId);
+
+  if (!info.exists) {
+    return { isRunning: false, error: 'Session not found' };
+  }
+
+  const running = info.isRunning;
+
+  // Get the output code
+  const output = getInspectorOutput(sessionId);
+
+  // Transform the code if we have any
+  let transformedCode: string | undefined;
+  if (output.code) {
+    transformedCode = transformPlaywrightCode(output.code, info.url);
+  }
+
+  return {
+    isRunning: running,
+    code: output.code ?? undefined,
+    transformedCode,
+    startedAt: info.startedAt,
+    url: info.url,
+  };
+}
+
+export async function cancelPlaywrightInspector(sessionId: string): Promise<{ success: boolean; error?: string }> {
+  return cancelInspector(sessionId);
+}
+
+export async function finalizeInspectorSession(sessionId: string): Promise<{
+  success: boolean;
+  code?: string;
+  error?: string;
+}> {
+  const info = getSessionInfo(sessionId);
+
+  if (!info.exists) {
+    return { success: false, error: 'Session not found' };
+  }
+
+  // Get the final output
+  const output = getInspectorOutput(sessionId);
+
+  if (!output.code) {
+    cleanupSession(sessionId);
+    return { success: false, error: 'No code was generated' };
+  }
+
+  // Transform to runner format
+  const transformedCode = transformPlaywrightCode(output.code, info.url);
+
+  // Clean up the session
+  cleanupSession(sessionId);
+
+  return { success: true, code: transformedCode };
 }

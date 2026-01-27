@@ -31,6 +31,10 @@ import {
   getRecordingStatus,
   clearLastCompletedSession,
   checkPlaywrightAvailability,
+  startPlaywrightInspector,
+  getInspectorStatus,
+  cancelPlaywrightInspector,
+  finalizeInspectorSession,
   type PlaywrightAvailability,
 } from '@/server/actions/recording';
 import {
@@ -61,7 +65,8 @@ import {
   RefreshCw,
   Terminal,
 } from 'lucide-react';
-import type { FunctionalArea, PlaywrightSettings } from '@/lib/db/schema';
+import type { FunctionalArea, PlaywrightSettings, RecordingEngine } from '@/lib/db/schema';
+import { DEFAULT_RECORDING_ENGINES } from '@/lib/db/schema';
 import { PlaywrightSettingsCard } from '@/components/settings/playwright-settings-card';
 
 interface RecordingClientProps {
@@ -69,9 +74,11 @@ interface RecordingClientProps {
   settings: PlaywrightSettings;
   repositoryId?: string | null;
   defaultBaseUrl?: string;
+  enabledEngines?: RecordingEngine[];
+  defaultEngine?: RecordingEngine;
 }
 
-type RecordingStep = 'setup' | 'recording' | 'saving';
+type RecordingStep = 'setup' | 'recording' | 'inspector-running' | 'saving';
 
 // Check if an action event can be replayed by the runner
 function isActionReplayable(event: RecordingEvent): { replayable: boolean; reason?: 'valid-selectors' | 'coords-only' | 'no-selectors' } {
@@ -181,11 +188,20 @@ interface RecordingEvent {
   };
 }
 
-export function RecordingClient({ areas: initialAreas, settings, repositoryId, defaultBaseUrl }: RecordingClientProps) {
+export function RecordingClient({
+  areas: initialAreas,
+  settings,
+  repositoryId,
+  defaultBaseUrl,
+  enabledEngines = DEFAULT_RECORDING_ENGINES,
+  defaultEngine = 'lastest',
+}: RecordingClientProps) {
   const router = useRouter();
   const [step, setStep] = useState<RecordingStep>('setup');
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [playwrightStatus, setPlaywrightStatus] = useState<PlaywrightAvailability | null>(null);
+  const [selectedEngine, setSelectedEngine] = useState<RecordingEngine>(defaultEngine);
+  const [inspectorSessionId, setInspectorSessionId] = useState<string | null>(null);
 
   // Check Playwright availability on mount
   useEffect(() => {
@@ -292,6 +308,35 @@ export function RecordingClient({ areas: initialAreas, settings, repositoryId, d
     return () => clearInterval(pollInterval);
   }, [step, repositoryId]);
 
+  // Poll for inspector status when in inspector-running step
+  useEffect(() => {
+    if (step !== 'inspector-running' || !inspectorSessionId) return;
+
+    const pollInterval = setInterval(async () => {
+      try {
+        const status = await getInspectorStatus(inspectorSessionId);
+
+        // If inspector stopped (user closed the window), finalize session
+        if (!status.isRunning) {
+          const result = await finalizeInspectorSession(inspectorSessionId);
+          if (result.success && result.code) {
+            setGeneratedCode(result.code);
+            setStep('saving');
+          } else {
+            setStep('setup');
+            setError(result.error || 'No code was generated. Try recording some interactions.');
+          }
+          setInspectorSessionId(null);
+          clearInterval(pollInterval);
+        }
+      } catch (err) {
+        console.error('Failed to poll inspector status:', err);
+      }
+    }, 1000); // Poll every 1s for inspector
+
+    return () => clearInterval(pollInterval);
+  }, [step, inspectorSessionId]);
+
   const handleStartRecording = async () => {
     if (!url || !testName) return;
 
@@ -300,26 +345,40 @@ export function RecordingClient({ areas: initialAreas, settings, repositoryId, d
 
     try {
       // Create functional area if needed
-      let finalAreaId = areaId;
       if (newAreaName && !areaId) {
         const area = await getOrCreateFunctionalArea(newAreaName);
-        finalAreaId = area.id;
         setAreas([...areas, { ...area, description: area.description ?? null, repositoryId: area.repositoryId ?? null }]);
         setAreaId(area.id);
       }
 
-      const result = await startRecording(url, repositoryId);
+      if (selectedEngine === 'playwright-inspector') {
+        // Start Playwright Inspector
+        const result = await startPlaywrightInspector(url, repositoryId);
 
-      if (result.error) {
-        setError(result.error);
-        return;
-      }
+        if (result.error) {
+          setError(result.error);
+          return;
+        }
 
-      if (result.sessionId) {
-        setSessionId(result.sessionId);
-        setStep('recording');
-        setEvents([]);
-        lastSequenceRef.current = 0;
+        if (result.sessionId) {
+          setInspectorSessionId(result.sessionId);
+          setStep('inspector-running');
+        }
+      } else {
+        // Start Lastest recorder
+        const result = await startRecording(url, repositoryId);
+
+        if (result.error) {
+          setError(result.error);
+          return;
+        }
+
+        if (result.sessionId) {
+          setSessionId(result.sessionId);
+          setStep('recording');
+          setEvents([]);
+          lastSequenceRef.current = 0;
+        }
       }
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to start recording';
@@ -360,6 +419,21 @@ export function RecordingClient({ areas: initialAreas, settings, repositoryId, d
       }
     } catch (error) {
       console.error('Failed to stop recording:', error);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleCancelInspector = async () => {
+    if (!inspectorSessionId) return;
+
+    setIsLoading(true);
+    try {
+      await cancelPlaywrightInspector(inspectorSessionId);
+      setInspectorSessionId(null);
+      setStep('setup');
+    } catch (error) {
+      console.error('Failed to cancel inspector:', error);
     } finally {
       setIsLoading(false);
     }
@@ -538,6 +612,31 @@ export function RecordingClient({ areas: initialAreas, settings, repositoryId, d
                 </div>
               </div>
 
+              {/* Recording Engine */}
+              {enabledEngines.length > 1 && (
+                <div className="space-y-2">
+                  <label className="text-sm font-medium">Recording Engine</label>
+                  <Select value={selectedEngine} onValueChange={(v) => setSelectedEngine(v as RecordingEngine)}>
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {enabledEngines.includes('lastest') && (
+                        <SelectItem value="lastest">Lastest Recorder</SelectItem>
+                      )}
+                      {enabledEngines.includes('playwright-inspector') && (
+                        <SelectItem value="playwright-inspector">Playwright Inspector</SelectItem>
+                      )}
+                    </SelectContent>
+                  </Select>
+                  <p className="text-xs text-muted-foreground">
+                    {selectedEngine === 'lastest'
+                      ? 'Multi-selector recording with real-time preview'
+                      : 'Official Playwright codegen tool'}
+                  </p>
+                </div>
+              )}
+
               {/* Error Display */}
               {error && (
                 <div className="p-3 bg-destructive/10 border border-destructive/20 rounded-lg text-sm text-destructive">
@@ -561,6 +660,60 @@ export function RecordingClient({ areas: initialAreas, settings, repositoryId, d
               </Button>
             </CardContent>
           </Card>
+        </div>
+      </div>
+    );
+  }
+
+  if (step === 'inspector-running') {
+    return (
+      <div className="flex-1 p-6 overflow-auto">
+        <div className="max-w-2xl mx-auto space-y-6">
+          <Card className="border-primary">
+            <CardHeader className="pb-3">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="h-3 w-3 rounded-full bg-blue-500 animate-pulse" />
+                  <CardTitle>Playwright Inspector Running</CardTitle>
+                </div>
+                <Badge variant="outline">{testName}</Badge>
+              </div>
+              <CardDescription>{url}</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="p-4 bg-muted rounded-lg space-y-3">
+                <div className="flex items-center gap-2 text-sm">
+                  <Terminal className="h-4 w-4 text-muted-foreground" />
+                  <span className="font-medium">Playwright Inspector is open</span>
+                </div>
+                <ul className="text-sm text-muted-foreground space-y-1 ml-6">
+                  <li>Interact with the browser to record actions</li>
+                  <li>Use the Inspector toolbar for assertions</li>
+                  <li>Close the Inspector window when done</li>
+                </ul>
+              </div>
+
+              <div className="flex gap-2">
+                <Button
+                  onClick={handleCancelInspector}
+                  variant="destructive"
+                  disabled={isLoading}
+                >
+                  {isLoading ? (
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  ) : (
+                    <Square className="h-4 w-4 mr-2" />
+                  )}
+                  Cancel Recording
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+
+          <div className="text-sm text-muted-foreground text-center">
+            <Clock className="h-4 w-4 inline mr-1" />
+            Recording... Close the Inspector window to save.
+          </div>
         </div>
       </div>
     );

@@ -3,6 +3,214 @@ import { EventEmitter } from 'events';
 import path from 'path';
 import fs from 'fs';
 import { DEFAULT_SELECTOR_PRIORITY } from '@/lib/db/schema';
+
+/**
+ * Simple expect implementation for Playwright Inspector-generated tests.
+ * Provides common assertion matchers that wrap Playwright's built-in locator assertions.
+ * Supports both Page-level assertions (toHaveURL, toHaveTitle) and Locator assertions.
+ */
+function createExpect(timeout = 5000) {
+  return function expect(target: Page | Locator) {
+    // Check if target is a Page (has 'goto' method) vs Locator
+    const isPage = typeof (target as any).goto === 'function';
+
+    if (isPage) {
+      const page = target as Page;
+      return {
+        async toHaveURL(expected: string | RegExp, options?: { timeout?: number }) {
+          const t = options?.timeout ?? timeout;
+          const start = Date.now();
+          while (Date.now() - start < t) {
+            const url = page.url();
+            if (typeof expected === 'string' && url === expected) return;
+            if (expected instanceof RegExp && expected.test(url)) return;
+            await new Promise(r => setTimeout(r, 100));
+          }
+          const actual = page.url();
+          throw new Error(`Expected URL "${expected}" but got "${actual}"`);
+        },
+        async toHaveTitle(expected: string | RegExp, options?: { timeout?: number }) {
+          const t = options?.timeout ?? timeout;
+          const start = Date.now();
+          while (Date.now() - start < t) {
+            const title = await page.title();
+            if (typeof expected === 'string' && title === expected) return;
+            if (expected instanceof RegExp && expected.test(title)) return;
+            await new Promise(r => setTimeout(r, 100));
+          }
+          const actual = await page.title();
+          throw new Error(`Expected title "${expected}" but got "${actual}"`);
+        },
+        not: {
+          async toHaveURL(expected: string | RegExp, options?: { timeout?: number }) {
+            const t = options?.timeout ?? timeout;
+            const start = Date.now();
+            while (Date.now() - start < t) {
+              const url = page.url();
+              if (typeof expected === 'string' && url !== expected) return;
+              if (expected instanceof RegExp && !expected.test(url)) return;
+              await new Promise(r => setTimeout(r, 100));
+            }
+            throw new Error(`Expected URL not to match "${expected}"`);
+          },
+          async toHaveTitle(expected: string | RegExp, options?: { timeout?: number }) {
+            const t = options?.timeout ?? timeout;
+            const start = Date.now();
+            while (Date.now() - start < t) {
+              const title = await page.title();
+              if (typeof expected === 'string' && title !== expected) return;
+              if (expected instanceof RegExp && !expected.test(title)) return;
+              await new Promise(r => setTimeout(r, 100));
+            }
+            throw new Error(`Expected title not to match "${expected}"`);
+          },
+        },
+      };
+    }
+
+    // Locator matchers
+    const locator = target as Locator;
+    return {
+      async toBeVisible(options?: { timeout?: number }) {
+        await locator.waitFor({ state: 'visible', timeout: options?.timeout ?? timeout });
+      },
+      async toBeHidden(options?: { timeout?: number }) {
+        await locator.waitFor({ state: 'hidden', timeout: options?.timeout ?? timeout });
+      },
+      async toBeAttached(options?: { timeout?: number }) {
+        await locator.waitFor({ state: 'attached', timeout: options?.timeout ?? timeout });
+      },
+      async toBeDetached(options?: { timeout?: number }) {
+        await locator.waitFor({ state: 'detached', timeout: options?.timeout ?? timeout });
+      },
+      async toHaveText(expected: string | RegExp, options?: { timeout?: number }) {
+        const t = options?.timeout ?? timeout;
+        const start = Date.now();
+        while (Date.now() - start < t) {
+          const text = await locator.textContent();
+          if (typeof expected === 'string' && text === expected) return;
+          if (expected instanceof RegExp && text && expected.test(text)) return;
+          await new Promise(r => setTimeout(r, 100));
+        }
+        const actual = await locator.textContent();
+        throw new Error(`Expected text "${expected}" but got "${actual}"`);
+      },
+      async toContainText(expected: string | RegExp, options?: { timeout?: number }) {
+        const t = options?.timeout ?? timeout;
+        const start = Date.now();
+        while (Date.now() - start < t) {
+          const text = await locator.textContent();
+          if (typeof expected === 'string' && text?.includes(expected)) return;
+          if (expected instanceof RegExp && text && expected.test(text)) return;
+          await new Promise(r => setTimeout(r, 100));
+        }
+        const actual = await locator.textContent();
+        throw new Error(`Expected text to contain "${expected}" but got "${actual}"`);
+      },
+      async toHaveValue(expected: string | RegExp, options?: { timeout?: number }) {
+        const t = options?.timeout ?? timeout;
+        const start = Date.now();
+        while (Date.now() - start < t) {
+          const value = await locator.inputValue();
+          if (typeof expected === 'string' && value === expected) return;
+          if (expected instanceof RegExp && expected.test(value)) return;
+          await new Promise(r => setTimeout(r, 100));
+        }
+        const actual = await locator.inputValue();
+        throw new Error(`Expected value "${expected}" but got "${actual}"`);
+      },
+      async toBeEnabled(options?: { timeout?: number }) {
+        const t = options?.timeout ?? timeout;
+        const start = Date.now();
+        while (Date.now() - start < t) {
+          if (await locator.isEnabled()) return;
+          await new Promise(r => setTimeout(r, 100));
+        }
+        throw new Error('Expected element to be enabled');
+      },
+      async toBeDisabled(options?: { timeout?: number }) {
+        const t = options?.timeout ?? timeout;
+        const start = Date.now();
+        while (Date.now() - start < t) {
+          if (await locator.isDisabled()) return;
+          await new Promise(r => setTimeout(r, 100));
+        }
+        throw new Error('Expected element to be disabled');
+      },
+      async toBeChecked(options?: { timeout?: number }) {
+        const t = options?.timeout ?? timeout;
+        const start = Date.now();
+        while (Date.now() - start < t) {
+          if (await locator.isChecked()) return;
+          await new Promise(r => setTimeout(r, 100));
+        }
+        throw new Error('Expected element to be checked');
+      },
+      async toHaveAttribute(name: string, value?: string | RegExp, options?: { timeout?: number }) {
+        const t = options?.timeout ?? timeout;
+        const start = Date.now();
+        while (Date.now() - start < t) {
+          const attr = await locator.getAttribute(name);
+          if (value === undefined && attr !== null) return;
+          if (typeof value === 'string' && attr === value) return;
+          if (value instanceof RegExp && attr && value.test(attr)) return;
+          await new Promise(r => setTimeout(r, 100));
+        }
+        const actual = await locator.getAttribute(name);
+        throw new Error(`Expected attribute "${name}" to be "${value}" but got "${actual}"`);
+      },
+      async toHaveCount(count: number, options?: { timeout?: number }) {
+        const t = options?.timeout ?? timeout;
+        const start = Date.now();
+        while (Date.now() - start < t) {
+          const actual = await locator.count();
+          if (actual === count) return;
+          await new Promise(r => setTimeout(r, 100));
+        }
+        const actual = await locator.count();
+        throw new Error(`Expected count ${count} but got ${actual}`);
+      },
+      // Add 'not' modifier for negative assertions
+      not: {
+        async toBeVisible(options?: { timeout?: number }) {
+          await locator.waitFor({ state: 'hidden', timeout: options?.timeout ?? timeout });
+        },
+        async toBeHidden(options?: { timeout?: number }) {
+          await locator.waitFor({ state: 'visible', timeout: options?.timeout ?? timeout });
+        },
+        async toHaveText(expected: string | RegExp, options?: { timeout?: number }) {
+          const t = options?.timeout ?? timeout;
+          const start = Date.now();
+          while (Date.now() - start < t) {
+            const text = await locator.textContent();
+            if (typeof expected === 'string' && text !== expected) return;
+            if (expected instanceof RegExp && (!text || !expected.test(text))) return;
+            await new Promise(r => setTimeout(r, 100));
+          }
+          throw new Error(`Expected text not to be "${expected}"`);
+        },
+        async toBeEnabled(options?: { timeout?: number }) {
+          const t = options?.timeout ?? timeout;
+          const start = Date.now();
+          while (Date.now() - start < t) {
+            if (await locator.isDisabled()) return;
+            await new Promise(r => setTimeout(r, 100));
+          }
+          throw new Error('Expected element not to be enabled');
+        },
+        async toBeChecked(options?: { timeout?: number }) {
+          const t = options?.timeout ?? timeout;
+          const start = Date.now();
+          while (Date.now() - start < t) {
+            if (!(await locator.isChecked())) return;
+            await new Promise(r => setTimeout(r, 100));
+          }
+          throw new Error('Expected element not to be checked');
+        },
+      },
+    };
+  };
+}
 import type { Test, TestResult, ActionSelector, SelectorConfig, PlaywrightSettings, NetworkRequest, EnvironmentConfig } from '@/lib/db/schema';
 import { getServerManager } from './server-manager';
 
@@ -444,9 +652,11 @@ export class PlaywrightRunner extends EventEmitter {
       const body = this.stripTypeAnnotations(funcMatch[1]);
 
       // Build an async function from the body
+      // Include 'expect' for Playwright Inspector-generated tests that use assertions
+      const expectFn = createExpect(this.getActionTimeout());
       const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
-      const testFn = new AsyncFunction('page', 'baseUrl', 'screenshotPath', 'stepLogger', body);
-      await testFn(page, baseUrl, screenshotPath, stepLogger);
+      const testFn = new AsyncFunction('page', 'baseUrl', 'screenshotPath', 'stepLogger', 'expect', body);
+      await testFn(page, baseUrl, screenshotPath, stepLogger, expectFn);
       return;
     }
 

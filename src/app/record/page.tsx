@@ -1,6 +1,7 @@
 import { Header } from '@/components/layout/header';
 import { RecordingClient } from './recording-client';
 import { getFunctionalAreas, getPlaywrightSettings, getSelectedRepository, getEnvironmentConfig } from '@/lib/db/queries';
+import type { RecordingEngine } from '@/lib/db/schema';
 
 export default async function RecordPage() {
   const areas = await getFunctionalAreas();
@@ -16,6 +17,8 @@ export default async function RecordPage() {
         settings={settings}
         repositoryId={selectedRepo?.id}
         defaultBaseUrl={envConfig.baseUrl}
+        enabledEngines={settings.enabledRecordingEngines as RecordingEngine[]}
+        defaultEngine={settings.defaultRecordingEngine as RecordingEngine}
       />
     </div>
   );

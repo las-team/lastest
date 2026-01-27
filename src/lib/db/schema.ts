@@ -221,6 +221,10 @@ export type NewIgnoreRegion = typeof ignoreRegions.$inferInsert;
 // Headless mode options: 'true' (standard headless), 'false' (headed), 'shell' (new headless mode with better bot detection avoidance)
 export type HeadlessMode = 'true' | 'false' | 'shell';
 
+// Recording engine options
+export type RecordingEngine = 'lastest' | 'playwright-inspector';
+export const DEFAULT_RECORDING_ENGINES: RecordingEngine[] = ['lastest', 'playwright-inspector'];
+
 // Playwright settings for recording and running tests
 export const playwrightSettings = sqliteTable('playwright_settings', {
   id: text('id').primaryKey(),
@@ -234,6 +238,8 @@ export const playwrightSettings = sqliteTable('playwright_settings', {
   actionTimeout: integer('action_timeout').default(5000),
   pointerGestures: integer('pointer_gestures', { mode: 'boolean' }).default(false),
   cursorFPS: integer('cursor_fps').default(30),
+  enabledRecordingEngines: text('enabled_recording_engines', { mode: 'json' }).$type<RecordingEngine[]>(),
+  defaultRecordingEngine: text('default_recording_engine').default('lastest'),
   createdAt: integer('created_at', { mode: 'timestamp' }),
   updatedAt: integer('updated_at', { mode: 'timestamp' }),
 });

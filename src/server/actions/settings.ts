@@ -1,7 +1,7 @@
 'use server';
 
 import * as queries from '@/lib/db/queries';
-import type { SelectorConfig } from '@/lib/db/schema';
+import type { SelectorConfig, RecordingEngine } from '@/lib/db/schema';
 import { revalidatePath } from 'next/cache';
 
 export async function getPlaywrightSettings(repositoryId?: string | null) {
@@ -19,6 +19,8 @@ export async function savePlaywrightSettings(data: {
   actionTimeout?: number;
   pointerGestures?: boolean;
   cursorFPS?: number;
+  enabledRecordingEngines?: RecordingEngine[];
+  defaultRecordingEngine?: string;
 }) {
   const { repositoryId, ...settingsData } = data;
 

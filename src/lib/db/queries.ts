@@ -26,6 +26,7 @@ import {
   DEFAULT_SELECTOR_PRIORITY,
   DEFAULT_DIFF_THRESHOLDS,
   DEFAULT_AI_SETTINGS,
+  DEFAULT_RECORDING_ENGINES,
 } from './schema';
 import type {
   NewFunctionalArea,
@@ -57,7 +58,7 @@ import type {
   TestChangeReason,
 } from './schema';
 
-export { DEFAULT_SELECTOR_PRIORITY, DEFAULT_DIFF_THRESHOLDS, DEFAULT_AI_SETTINGS };
+export { DEFAULT_SELECTOR_PRIORITY, DEFAULT_DIFF_THRESHOLDS, DEFAULT_AI_SETTINGS, DEFAULT_RECORDING_ENGINES };
 import { eq, desc, and, inArray, or, gte, isNull } from 'drizzle-orm';
 import { v4 as uuid } from 'uuid';
 
@@ -648,7 +649,12 @@ export async function getPlaywrightSettings(repositoryId?: string | null) {
       .where(eq(playwrightSettings.repositoryId, repositoryId))
       .get();
     if (settings) {
-      return { ...settings, selectorPriority: mergeSelectorPriority(settings.selectorPriority) };
+      return {
+        ...settings,
+        selectorPriority: mergeSelectorPriority(settings.selectorPriority),
+        enabledRecordingEngines: settings.enabledRecordingEngines ?? DEFAULT_RECORDING_ENGINES,
+        defaultRecordingEngine: settings.defaultRecordingEngine ?? 'lastest',
+      };
     }
   }
 
@@ -660,7 +666,12 @@ export async function getPlaywrightSettings(repositoryId?: string | null) {
     .get();
 
   if (globalSettings) {
-    return { ...globalSettings, selectorPriority: mergeSelectorPriority(globalSettings.selectorPriority) };
+    return {
+      ...globalSettings,
+      selectorPriority: mergeSelectorPriority(globalSettings.selectorPriority),
+      enabledRecordingEngines: globalSettings.enabledRecordingEngines ?? DEFAULT_RECORDING_ENGINES,
+      defaultRecordingEngine: globalSettings.defaultRecordingEngine ?? 'lastest',
+    };
   }
 
   // Return default settings object (not saved)
@@ -676,6 +687,8 @@ export async function getPlaywrightSettings(repositoryId?: string | null) {
     actionTimeout: 5000,
     pointerGestures: false,
     cursorFPS: 30,
+    enabledRecordingEngines: DEFAULT_RECORDING_ENGINES,
+    defaultRecordingEngine: 'lastest' as const,
     createdAt: null,
     updatedAt: null,
   };

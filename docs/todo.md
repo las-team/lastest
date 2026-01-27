@@ -7,15 +7,16 @@ Determining test coverage /home/ewyct/.claude/plans/zazzy-tinkering-backus.md
 AI enablement /home/ewyct/.claude/plans/moonlit-fluttering-origami.md
 
 --------
-## in progress
+## reuse
 check the recorder and the runner so that they are compatible and identify the root cause of the issue
-
+## in progress
 ## test
 OCR
 
 ## features
-playwright check
-extra assertions (with right click?)
+Alternative engine PW Inspector
+Lastest2 extra assertions (with right click?)
+
 Build/change approval
     Test version or result on the build screen
 
@@ -27,13 +28,12 @@ UI & UX
 Remove compare
 
 ## ideas
-Alternative engine PW Inspector
 Imported document -> US & AC -> tests - US checklist overview
 Sitemap -flow
 Firecrawl?
-Research playwrights comparison options, how they work?
 Approve reject changes or create ticket -> gh issue
 Issues view
+
 ### UX
 Find test cases
     From code
