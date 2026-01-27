@@ -14,7 +14,8 @@ check the recorder and the runner so that they are compatible and identify the r
 OCR
 
 ## features
-playwright
+playwright check
+extra assertions (with right click?)
 Build/change approval
     Test version or result on the build screen
 

@@ -30,6 +30,8 @@ import {
   getOrCreateFunctionalArea,
   getRecordingStatus,
   clearLastCompletedSession,
+  checkPlaywrightAvailability,
+  type PlaywrightAvailability,
 } from '@/server/actions/recording';
 import {
   DropdownMenu,
@@ -56,6 +58,8 @@ import {
   ListFilter,
   AlertTriangle,
   Check,
+  RefreshCw,
+  Terminal,
 } from 'lucide-react';
 import type { FunctionalArea, PlaywrightSettings } from '@/lib/db/schema';
 import { PlaywrightSettingsCard } from '@/components/settings/playwright-settings-card';
@@ -181,6 +185,16 @@ export function RecordingClient({ areas: initialAreas, settings, repositoryId, d
   const router = useRouter();
   const [step, setStep] = useState<RecordingStep>('setup');
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [playwrightStatus, setPlaywrightStatus] = useState<PlaywrightAvailability | null>(null);
+
+  // Check Playwright availability on mount
+  useEffect(() => {
+    async function verifyPlaywright() {
+      const status = await checkPlaywrightAvailability(repositoryId);
+      setPlaywrightStatus(status);
+    }
+    verifyPlaywright();
+  }, [repositoryId]);
 
   // Setup form state
   const [url, setUrl] = useState(defaultBaseUrl || 'https://');
@@ -370,9 +384,67 @@ export function RecordingClient({ areas: initialAreas, settings, repositoryId, d
   };
 
   if (step === 'setup') {
+    // Playwright status section component
+    const PlaywrightStatusSection = () => {
+      if (!playwrightStatus) {
+        return (
+          <Card>
+            <CardContent className="py-3">
+              <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                <Loader2 className="h-4 w-4 animate-spin" />
+                <span>Checking browser availability...</span>
+              </div>
+            </CardContent>
+          </Card>
+        );
+      }
+
+      if (playwrightStatus.available) {
+        return (
+          <Card>
+            <CardContent className="py-3">
+              <div className="flex items-center gap-2 text-sm text-green-600">
+                <CheckCircle2 className="h-4 w-4" />
+                <span>{playwrightStatus.browser.charAt(0).toUpperCase() + playwrightStatus.browser.slice(1)} browser ready</span>
+              </div>
+            </CardContent>
+          </Card>
+        );
+      }
+
+      return (
+        <Card className="border-destructive/50">
+          <CardContent className="py-3 space-y-3">
+            <div className="flex items-center gap-2 text-sm text-destructive">
+              <AlertTriangle className="h-4 w-4" />
+              <span>{playwrightStatus.error}</span>
+            </div>
+            {playwrightStatus.installCommand && (
+              <div className="flex items-center gap-2 p-2 bg-muted rounded font-mono text-xs">
+                <Terminal className="h-3 w-3 text-muted-foreground shrink-0" />
+                <code>{playwrightStatus.installCommand}</code>
+              </div>
+            )}
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={async () => {
+                setPlaywrightStatus(null);
+                const status = await checkPlaywrightAvailability(repositoryId);
+                setPlaywrightStatus(status);
+              }}
+            >
+              <RefreshCw className="h-3 w-3 mr-1" />
+              Retry
+            </Button>
+          </CardContent>
+        </Card>
+      );
+    };
     return (
       <div className="flex-1 p-6 overflow-auto">
-        <div className="max-w-2xl mx-auto">
+        <div className="max-w-2xl mx-auto space-y-4">
+          <PlaywrightStatusSection />
           <Card>
             <CardHeader>
               <div className="flex items-center justify-between">
@@ -476,7 +548,7 @@ export function RecordingClient({ areas: initialAreas, settings, repositoryId, d
               {/* Start Button */}
               <Button
                 onClick={handleStartRecording}
-                disabled={!url || !testName || isLoading}
+                disabled={!url || !testName || isLoading || !playwrightStatus?.available}
                 className="w-full"
                 size="lg"
               >

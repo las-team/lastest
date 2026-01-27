@@ -5,6 +5,50 @@ import { createTest, createFunctionalArea, getFunctionalAreas, getPlaywrightSett
 import { DEFAULT_SELECTOR_PRIORITY } from '@/lib/db/schema';
 import { v4 as uuid } from 'uuid';
 import { revalidatePath } from 'next/cache';
+import { chromium, firefox, webkit } from 'playwright';
+
+export interface PlaywrightAvailability {
+  available: boolean;
+  browser: string;
+  error?: string;
+  installCommand?: string;
+}
+
+export async function checkPlaywrightAvailability(repositoryId?: string | null): Promise<PlaywrightAvailability> {
+  const settings = await getPlaywrightSettings(repositoryId);
+  const browserType = (settings.browser as 'chromium' | 'firefox' | 'webkit') ?? 'chromium';
+
+  const browsers = { chromium, firefox, webkit };
+  const launcher = browsers[browserType];
+
+  try {
+    const browser = await launcher.launch({
+      headless: true,
+      timeout: 5000,
+    });
+    await browser.close();
+    return { available: true, browser: browserType };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Unknown error';
+    console.error(`Playwright ${browserType} check failed:`, message);
+
+    // Check for missing browser executable
+    if (message.includes("Executable doesn't exist") || message.includes('browserType.launch')) {
+      return {
+        available: false,
+        browser: browserType,
+        error: `${browserType} browser is not installed`,
+        installCommand: `npx playwright install ${browserType}`,
+      };
+    }
+
+    return {
+      available: false,
+      browser: browserType,
+      error: message,
+    };
+  }
+}
 
 export async function startRecording(url: string, repositoryId?: string | null): Promise<{ sessionId?: string; error?: string }> {
   const recorder = getRecorder(repositoryId);

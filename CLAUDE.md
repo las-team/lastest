@@ -14,6 +14,8 @@ pnpm db:push      # Push schema changes to database
 pnpm db:generate  # Generate Drizzle migrations
 ```
 
+Database file: `./lastest2.db` (SQLite with WAL mode)
+
 ## Architecture
 
 Visual regression testing platform built with Next.js 16 App Router.
@@ -35,7 +37,7 @@ Visual regression testing platform built with Next.js 16 App Router.
   - `generator.ts` - pixelmatch-based image diffing
   - `hasher.ts` - SHA256 hashing for baseline carry-forward
 - `src/lib/db/` - Drizzle ORM schema and queries (SQLite with WAL mode)
-- `src/lib/ai/` - AI test generation (Claude CLI or OpenRouter)
+- `src/lib/ai/` - AI test generation (Claude CLI, OpenRouter, or Claude Agent SDK)
 - `src/lib/scanner/` - Route discovery from source code
 - `src/server/actions/` - Server actions for all domain operations
 
@@ -62,4 +64,7 @@ GITHUB_CLIENT_ID      # GitHub OAuth app client ID
 GITHUB_CLIENT_SECRET  # GitHub OAuth app secret
 ```
 
-Screenshots stored in `public/screenshots/`, baselines in `public/baselines/`.
+### File Storage
+
+- Screenshots: `public/screenshots/{repositoryId}/`
+- Baselines: `public/baselines/`
