@@ -7,6 +7,47 @@ import { revalidatePath } from 'next/cache';
 import { getRepoTree, getFileContent, type TreeEntry } from '@/lib/github/content';
 import { createJob, completeJob, failJob } from './jobs';
 
+/** Extract first valid JSON array from text, handling nested brackets correctly */
+function extractJsonArray(text: string): string | null {
+  const start = text.indexOf('[');
+  if (start === -1) return null;
+
+  let depth = 0;
+  let inString = false;
+  let escape = false;
+
+  for (let i = start; i < text.length; i++) {
+    const char = text[i];
+
+    if (escape) {
+      escape = false;
+      continue;
+    }
+
+    if (char === '\\' && inString) {
+      escape = true;
+      continue;
+    }
+
+    if (char === '"') {
+      inString = !inString;
+      continue;
+    }
+
+    if (inString) continue;
+
+    if (char === '[') depth++;
+    else if (char === ']') {
+      depth--;
+      if (depth === 0) {
+        return text.slice(start, i + 1);
+      }
+    }
+  }
+
+  return null;
+}
+
 async function getAIConfig(repositoryId?: string | null): Promise<AIProviderConfig> {
   const settings = await queries.getAISettings(repositoryId);
   return {
@@ -135,14 +176,14 @@ export async function aiScanRoutes(
       repositoryId,
     });
 
-    // Parse JSON response
-    const jsonMatch = response.match(/\[[\s\S]*\]/);
-    if (!jsonMatch) {
+    // Parse JSON response - extract first valid JSON array
+    const jsonStr = extractJsonArray(response);
+    if (!jsonStr) {
       await failJob(jobId, 'AI did not return valid JSON');
       return { success: false, error: 'AI did not return valid JSON' };
     }
 
-    const routes: DiscoveredRoute[] = JSON.parse(jsonMatch[0]);
+    const routes: DiscoveredRoute[] = JSON.parse(jsonStr);
     await completeJob(jobId);
     return { success: true, routes };
   } catch (error) {
@@ -169,13 +210,13 @@ export async function mcpExploreRoutes(
       repositoryId,
     });
 
-    // Parse JSON response
-    const jsonMatch = response.match(/\[[\s\S]*\]/);
-    if (!jsonMatch) {
+    // Parse JSON response - extract first valid JSON array
+    const jsonStr = extractJsonArray(response);
+    if (!jsonStr) {
       return { success: false, error: 'AI did not return valid JSON' };
     }
 
-    const routes: DiscoveredRoute[] = JSON.parse(jsonMatch[0]);
+    const routes: DiscoveredRoute[] = JSON.parse(jsonStr);
     return { success: true, routes };
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Failed to explore routes';

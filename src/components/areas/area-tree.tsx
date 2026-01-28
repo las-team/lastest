@@ -82,6 +82,7 @@ interface AreaNodeProps {
   onDeleteArea: (id: string) => void;
   onMoveTest: (testId: string, areaId: string | null) => void;
   onMoveSuite: (suiteId: string, areaId: string | null) => void;
+  onMoveArea: (areaId: string, newParentId: string | null) => void;
 }
 
 function AreaNode({
@@ -96,25 +97,42 @@ function AreaNode({
   onDeleteArea,
   onMoveTest,
   onMoveSuite,
+  onMoveArea,
 }: AreaNodeProps) {
   const isExpanded = expandedIds.has(area.id);
   const isSelected = selection?.type === 'area' && selection.id === area.id;
   const hasChildren = area.children.length > 0 || area.tests.length > 0 || area.suites.length > 0;
   const FolderIcon = area.isRouteFolder ? Route : isExpanded ? FolderOpen : Folder;
 
+  const handleDragStart = (e: React.DragEvent) => {
+    e.dataTransfer.setData('text/area-id', area.id);
+    e.dataTransfer.effectAllowed = 'move';
+  };
+
   const handleDragOver = (e: React.DragEvent) => {
     e.preventDefault();
-    e.dataTransfer.dropEffect = 'move';
+    // Check if dragging an area - don't allow dropping on itself
+    const draggedAreaId = e.dataTransfer.types.includes('text/area-id');
+    if (draggedAreaId) {
+      e.dataTransfer.dropEffect = 'move';
+    } else {
+      e.dataTransfer.dropEffect = 'move';
+    }
   };
 
   const handleDrop = (e: React.DragEvent) => {
     e.preventDefault();
+    e.stopPropagation();
     const testId = e.dataTransfer.getData('text/test-id');
     const suiteId = e.dataTransfer.getData('text/suite-id');
+    const areaId = e.dataTransfer.getData('text/area-id');
     if (testId) {
       onMoveTest(testId, area.id);
     } else if (suiteId) {
       onMoveSuite(suiteId, area.id);
+    } else if (areaId && areaId !== area.id) {
+      // Move the dragged area to become a child of this area
+      onMoveArea(areaId, area.id);
     }
   };
 
@@ -127,6 +145,8 @@ function AreaNode({
         )}
         style={{ paddingLeft: `${depth * 16 + 8}px` }}
         onClick={() => onSelect({ type: 'area', id: area.id })}
+        draggable
+        onDragStart={handleDragStart}
         onDragOver={handleDragOver}
         onDrop={handleDrop}
       >
@@ -197,6 +217,7 @@ function AreaNode({
               onDeleteArea={onDeleteArea}
               onMoveTest={onMoveTest}
               onMoveSuite={onMoveSuite}
+              onMoveArea={onMoveArea}
             />
           ))}
           {area.suites.map((suite) => (
@@ -302,6 +323,7 @@ export function AreaTree({
   onDeleteArea,
   onMoveTest,
   onMoveSuite,
+  onMoveArea,
 }: AreaTreeProps) {
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
 
@@ -317,14 +339,18 @@ export function AreaTree({
     });
   }, []);
 
-  const handleUncategorizedDrop = (e: React.DragEvent) => {
+  const handleUnsortedDrop = (e: React.DragEvent) => {
     e.preventDefault();
     const testId = e.dataTransfer.getData('text/test-id');
     const suiteId = e.dataTransfer.getData('text/suite-id');
+    const areaId = e.dataTransfer.getData('text/area-id');
     if (testId) {
       onMoveTest(testId, null);
     } else if (suiteId) {
       onMoveSuite(suiteId, null);
+    } else if (areaId) {
+      // Move area to root level
+      onMoveArea(areaId, null);
     }
   };
 
@@ -354,44 +380,50 @@ export function AreaTree({
               onDeleteArea={onDeleteArea}
               onMoveTest={onMoveTest}
               onMoveSuite={onMoveSuite}
+              onMoveArea={onMoveArea}
             />
           ))}
 
-          {/* Unsorted section (tests and suites without an area) */}
-          {(uncategorizedTests.length > 0 || unsortedSuites.length > 0) && (
-            <div
-              className="mt-2 pt-2 border-t"
-              onDragOver={(e) => {
-                e.preventDefault();
-                e.dataTransfer.dropEffect = 'move';
-              }}
-              onDrop={handleUncategorizedDrop}
-            >
-              <div className="flex items-center gap-2 py-1 px-2 text-sm text-muted-foreground">
-                <FolderInput className="h-4 w-4" />
-                <span>Unsorted</span>
+          {/* Unsorted section (tests, suites, and drop zone for moving areas to root) */}
+          <div
+            className="mt-2 pt-2 border-t"
+            onDragOver={(e) => {
+              e.preventDefault();
+              e.dataTransfer.dropEffect = 'move';
+            }}
+            onDrop={handleUnsortedDrop}
+          >
+            <div className="flex items-center gap-2 py-1 px-2 text-sm text-muted-foreground">
+              <FolderInput className="h-4 w-4" />
+              <span>Unsorted</span>
+              {(uncategorizedTests.length > 0 || unsortedSuites.length > 0) && (
                 <span className="text-xs">({uncategorizedTests.length + unsortedSuites.length})</span>
-              </div>
-              {unsortedSuites.map((suite) => (
-                <SuiteNode
-                  key={suite.id}
-                  suite={suite}
-                  depth={0}
-                  selection={selection}
-                  onSelect={onSelect}
-                />
-              ))}
-              {uncategorizedTests.map((test) => (
-                <TestNode
-                  key={test.id}
-                  test={test}
-                  depth={0}
-                  selection={selection}
-                  onSelect={onSelect}
-                />
-              ))}
+              )}
             </div>
-          )}
+            {unsortedSuites.map((suite) => (
+              <SuiteNode
+                key={suite.id}
+                suite={suite}
+                depth={0}
+                selection={selection}
+                onSelect={onSelect}
+              />
+            ))}
+            {uncategorizedTests.map((test) => (
+              <TestNode
+                key={test.id}
+                test={test}
+                depth={0}
+                selection={selection}
+                onSelect={onSelect}
+              />
+            ))}
+            {uncategorizedTests.length === 0 && unsortedSuites.length === 0 && (
+              <div className="py-2 px-2 text-xs text-muted-foreground/60 italic">
+                Drop items here to unsort
+              </div>
+            )}
+          </div>
 
           {tree.length === 0 && uncategorizedTests.length === 0 && unsortedSuites.length === 0 && (
             <div className="text-center py-8 text-muted-foreground text-sm">

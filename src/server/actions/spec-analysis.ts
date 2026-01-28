@@ -8,6 +8,47 @@ import { getRepoTree, getFileContent } from '@/lib/github/content';
 import { extractTextFromFile } from '@/lib/file-parser';
 import { createJob, updateJobProgress, completeJob, failJob } from './jobs';
 
+/** Extract first valid JSON object from text, handling nested brackets correctly */
+function extractJsonObject(text: string): string | null {
+  const start = text.indexOf('{');
+  if (start === -1) return null;
+
+  let depth = 0;
+  let inString = false;
+  let escape = false;
+
+  for (let i = start; i < text.length; i++) {
+    const char = text[i];
+
+    if (escape) {
+      escape = false;
+      continue;
+    }
+
+    if (char === '\\' && inString) {
+      escape = true;
+      continue;
+    }
+
+    if (char === '"') {
+      inString = !inString;
+      continue;
+    }
+
+    if (inString) continue;
+
+    if (char === '{') depth++;
+    else if (char === '}') {
+      depth--;
+      if (depth === 0) {
+        return text.slice(start, i + 1);
+      }
+    }
+  }
+
+  return null;
+}
+
 const SPEC_PATTERNS = ['docs/', 'specs/', 'specifications/', 'requirements/'];
 const SPEC_FILES = ['README.md', 'SPEC.md', 'PRD.md', 'SPECIFICATION.md'];
 
@@ -177,13 +218,13 @@ async function analyzeSpecContent(
     repositoryId,
   });
 
-  // Parse JSON response
-  const jsonMatch = response.match(/\{[\s\S]*\}/);
-  if (!jsonMatch) {
+  // Parse JSON response - extract first valid JSON object
+  const jsonStr = extractJsonObject(response);
+  if (!jsonStr) {
     return { success: false, error: 'AI did not return valid JSON' };
   }
 
-  const result: SpecAnalysisResult = JSON.parse(jsonMatch[0]);
+  const result: SpecAnalysisResult = JSON.parse(jsonStr);
   return { success: true, result };
 }
 

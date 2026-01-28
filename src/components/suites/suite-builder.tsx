@@ -46,14 +46,30 @@ interface TestWithStatus {
   area: FunctionalArea | null;
 }
 
+interface TestResult {
+  testId: string | null;
+  status: string | null;
+  errorMessage: string | null;
+  durationMs: number | null;
+}
+
+interface RunProgress {
+  status: string | null;
+  completedAt: Date | null;
+  results: TestResult[];
+}
+
 interface SuiteBuilderProps {
   suiteId: string;
   suiteTests: SuiteTest[];
   availableTests: TestWithStatus[];
   areas: FunctionalArea[];
+  isRunning?: boolean;
+  runProgress?: RunProgress | null;
+  completedCount?: number;
 }
 
-export function SuiteBuilder({ suiteId, suiteTests, availableTests, areas }: SuiteBuilderProps) {
+export function SuiteBuilder({ suiteId, suiteTests, availableTests, areas, isRunning, runProgress, completedCount = 0 }: SuiteBuilderProps) {
   const router = useRouter();
   const [mounted, setMounted] = useState(false);
   const [orderedTests, setOrderedTests] = useState(suiteTests);
@@ -139,6 +155,11 @@ export function SuiteBuilder({ suiteId, suiteTests, availableTests, areas }: Sui
     }
     setExpandedAreas(next);
   };
+
+  // Build a map of test results by testId
+  const resultsByTestId = new Map(
+    runProgress?.results.map((r) => [r.testId, r]) ?? []
+  );
 
   if (!mounted) {
     return (
@@ -245,14 +266,23 @@ export function SuiteBuilder({ suiteId, suiteTests, availableTests, areas }: Sui
                 strategy={verticalListSortingStrategy}
               >
                 <div className="space-y-2">
-                  {orderedTests.map((test, index) => (
-                    <SuiteTestItem
-                      key={test.testId}
-                      test={test}
-                      index={index}
-                      onRemove={() => handleRemoveTest(test.testId)}
-                    />
-                  ))}
+                  {orderedTests.map((test, index) => {
+                    const result = resultsByTestId.get(test.testId);
+                    const isCurrent = isRunning && !result && index === completedCount;
+                    return (
+                      <SuiteTestItem
+                        key={test.testId}
+                        test={test}
+                        index={index}
+                        onRemove={() => handleRemoveTest(test.testId)}
+                        isRunning={isRunning}
+                        isCurrent={isCurrent}
+                        status={result?.status ?? null}
+                        durationMs={result?.durationMs ?? null}
+                        disabled={isRunning}
+                      />
+                    );
+                  })}
                 </div>
               </SortableContext>
             </DndContext>

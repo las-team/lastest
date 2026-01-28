@@ -53,6 +53,20 @@ export async function reorderSuiteTests(suiteId: string, orderedTestIds: string[
   revalidatePath(`/suites/${suiteId}`);
 }
 
+async function getGitInfo(repositoryId: string | null) {
+  if (!repositoryId) return { branch: 'unknown', commit: 'unknown' };
+
+  const account = await queries.getGithubAccount();
+  const repo = await queries.getRepository(repositoryId);
+  if (!account || !repo) return { branch: 'unknown', commit: 'unknown' };
+
+  const branch = repo.selectedBranch || repo.defaultBranch || 'main';
+  const branchInfo = await getBranchInfo(account.accessToken, repo.owner, repo.name, branch);
+  if (!branchInfo) return { branch, commit: 'unknown' };
+
+  return { branch: branchInfo.name, commit: branchInfo.commit.sha.slice(0, 7) };
+}
+
 export async function runSuite(suiteId: string) {
   const suiteWithTests = await queries.getSuiteWithTests(suiteId);
   if (!suiteWithTests) {
@@ -63,12 +77,108 @@ export async function runSuite(suiteId: string) {
     throw new Error('Suite has no tests');
   }
 
-  // Get ordered test IDs
-  const testIds = suiteWithTests.tests.map((t) => t.testId);
+  const repositoryId = suiteWithTests.repositoryId;
+  const runner = getRunner(repositoryId);
 
-  // Run tests in order and return the run ID for progress tracking
-  const result = await runTests(testIds, suiteWithTests.repositoryId);
-  return result;
+  if (runner.isActive()) {
+    throw new Error('Tests already running');
+  }
+
+  // Load environment config
+  const envConfig = await queries.getEnvironmentConfig(repositoryId);
+  if (envConfig?.id) {
+    runner.setEnvironmentConfig(envConfig);
+    getServerManager().setConfig(envConfig);
+  }
+
+  // Load playwright settings
+  const playwrightSettings = await queries.getPlaywrightSettings(repositoryId);
+  if (playwrightSettings) {
+    runner.setSettings(playwrightSettings);
+  }
+
+  // Get tests in order
+  const testIds = suiteWithTests.tests.map((t) => t.testId);
+  const tests: Test[] = [];
+  for (const id of testIds) {
+    const test = await queries.getTest(id);
+    if (test) tests.push(test);
+  }
+
+  // Get git info
+  const gitInfo = await getGitInfo(repositoryId);
+
+  // Create test run
+  const run = await queries.createTestRun({
+    repositoryId,
+    gitBranch: gitInfo.branch,
+    gitCommit: gitInfo.commit,
+    startedAt: new Date(),
+    status: 'running',
+  });
+
+  // Run tests async (halt on error)
+  runSuiteTestsAsync(run.id, tests, repositoryId, suiteWithTests.name);
+
+  return { runId: run.id, testCount: tests.length };
+}
+
+async function runSuiteTestsAsync(
+  runId: string,
+  tests: Test[],
+  repositoryId: string | null | undefined,
+  suiteName: string
+) {
+  const runner = getRunner(repositoryId);
+  const jobId = await createJob('test_run', `Suite: ${suiteName}`, tests.length, repositoryId);
+
+  try {
+    // Run tests one by one, halt on first failure
+    for (let i = 0; i < tests.length; i++) {
+      const test = tests[i];
+      const results = await runner.runTests([test], runId);
+      const result = results[0];
+
+      // Save result
+      await queries.createTestResult({
+        testRunId: runId,
+        testId: result.testId,
+        status: result.status,
+        screenshotPath: result.screenshotPath,
+        screenshots: result.screenshots,
+        errorMessage: result.errorMessage,
+        durationMs: result.durationMs,
+      });
+
+      await updateJobProgress(jobId, i + 1, tests.length);
+
+      // Halt on failure
+      if (result.status === 'failed') {
+        await queries.updateTestRun(runId, {
+          completedAt: new Date(),
+          status: 'failed',
+        });
+        await failJob(jobId, `Test failed: ${test.name}`);
+        revalidatePath('/suites');
+        return;
+      }
+    }
+
+    // All passed
+    await queries.updateTestRun(runId, {
+      completedAt: new Date(),
+      status: 'passed',
+    });
+    await completeJob(jobId);
+  } catch (error) {
+    await queries.updateTestRun(runId, {
+      completedAt: new Date(),
+      status: 'failed',
+    });
+    await failJob(jobId, error instanceof Error ? error.message : 'Suite run failed');
+  }
+
+  revalidatePath('/suites');
 }
 
 export async function getSuiteRunProgress(runId: string) {

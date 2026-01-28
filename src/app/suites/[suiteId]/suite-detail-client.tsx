@@ -2,14 +2,13 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
-import { Play, Pencil, Trash2, CheckCircle, XCircle, Loader2, Clock } from 'lucide-react';
+import { Play, Pencil, Trash2, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Progress } from '@/components/ui/progress';
 import { SuiteBuilder } from '@/components/suites/suite-builder';
 import { CreateSuiteDialog } from '@/components/suites/create-suite-dialog';
 import { deleteSuite, runSuite, getSuiteRunProgress } from '@/server/actions/suites';
 import type { Suite, FunctionalArea } from '@/lib/db/schema';
-import { cn } from '@/lib/utils';
 
 interface SuiteTest {
   id: string;
@@ -148,68 +147,33 @@ export function SuiteDetailClient({ suite, availableTests, areas }: SuiteDetailC
           </div>
         </div>
 
-        {/* Progress display */}
+        {/* Progress bar */}
         {(isRunning || progress) && (
           <div className="mt-4 p-4 border rounded-lg bg-background">
             <div className="flex items-center justify-between mb-2">
               <span className="text-sm font-medium">
-                {isRunning ? 'Running tests...' : progress?.status === 'passed' ? 'All tests passed' : 'Run completed'}
+                {isRunning ? 'Running tests...' : progress?.status === 'passed' ? 'All tests passed' : 'Run completed with errors'}
               </span>
-              <span className="text-sm text-muted-foreground">
-                {completedCount} / {totalCount}
-              </span>
-            </div>
-            <Progress value={progressPct} className="h-2 mb-4" />
-
-            <div className="space-y-2 max-h-64 overflow-auto">
-              {suite.tests.map((test, idx) => {
-                const result = resultsByTestId.get(test.testId);
-                const isPending = !result && isRunning;
-                const isCurrent = !result && isRunning && idx === completedCount;
-
-                return (
-                  <div
-                    key={test.testId}
-                    className={cn(
-                      'flex items-center gap-3 p-2 rounded text-sm',
-                      isCurrent && 'bg-blue-50 dark:bg-blue-950',
-                      result?.status === 'passed' && 'bg-green-50 dark:bg-green-950',
-                      result?.status === 'failed' && 'bg-red-50 dark:bg-red-950'
-                    )}
-                  >
-                    <span className="w-6 text-center text-muted-foreground">{idx + 1}</span>
-                    {isCurrent ? (
-                      <Loader2 className="w-4 h-4 animate-spin text-blue-500" />
-                    ) : result?.status === 'passed' ? (
-                      <CheckCircle className="w-4 h-4 text-green-500" />
-                    ) : result?.status === 'failed' ? (
-                      <XCircle className="w-4 h-4 text-red-500" />
-                    ) : (
-                      <Clock className="w-4 h-4 text-muted-foreground" />
-                    )}
-                    <span className="flex-1 truncate">{test.testName}</span>
-                    {result?.durationMs && (
-                      <span className="text-xs text-muted-foreground">
-                        {(result.durationMs / 1000).toFixed(1)}s
-                      </span>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-
-            {!isRunning && progress && (
-              <div className="mt-4 flex justify-end">
-                <Button variant="outline" size="sm" onClick={handleDismissResults}>
-                  Dismiss
-                </Button>
+              <div className="flex items-center gap-3">
+                <span className="text-sm text-muted-foreground">
+                  {completedCount} / {totalCount}
+                </span>
+                {!isRunning && progress && (
+                  <Button variant="outline" size="sm" onClick={handleDismissResults}>
+                    Dismiss
+                  </Button>
+                )}
               </div>
-            )}
+            </div>
+            <Progress value={progressPct} className="h-2" />
           </div>
         )}
       </div>
 
       <SuiteBuilder
+        isRunning={isRunning}
+        runProgress={progress}
+        completedCount={completedCount}
         suiteId={suite.id}
         suiteTests={suite.tests}
         availableTests={availableTests}

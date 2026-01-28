@@ -17,8 +17,13 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { createArea, deleteArea, moveTestToArea, moveSuiteToArea } from '@/server/actions/areas';
-import { Folder, FolderTree, FileCode, ListChecks } from 'lucide-react';
+import { createArea, deleteArea, moveTestToArea, moveSuiteToArea, moveArea } from '@/server/actions/areas';
+import { Folder, FolderTree, FileCode, ListChecks, FolderSearch, Sparkles, Globe, FileText, Loader2 } from 'lucide-react';
+import { startRemoteRouteScan } from '@/server/actions/scanner';
+import { AIScanRoutesDialog } from '@/components/ai/ai-scan-routes-dialog';
+import { SpecAnalysisDialog } from '@/components/ai/spec-analysis-dialog';
+import { MCPExploreRoutesDialog } from '@/components/ai/mcp-explore-routes-dialog';
+import { toast } from 'sonner';
 import type { FunctionalAreaWithChildren } from '@/lib/db/queries';
 
 export interface SuiteItem {
@@ -33,9 +38,10 @@ interface AreasPageClientProps {
   uncategorizedTests: { id: string; name: string; latestStatus: string | null }[];
   unsortedSuites: SuiteItem[];
   repositoryId: string;
+  selectedBranch: string;
 }
 
-export function AreasPageClient({ tree, uncategorizedTests, unsortedSuites, repositoryId }: AreasPageClientProps) {
+export function AreasPageClient({ tree, uncategorizedTests, unsortedSuites, repositoryId, selectedBranch }: AreasPageClientProps) {
   const router = useRouter();
   const [selection, setSelection] = useState<TreeSelection | null>(null);
   const [isNewAreaOpen, setIsNewAreaOpen] = useState(false);
@@ -45,6 +51,10 @@ export function AreasPageClient({ tree, uncategorizedTests, unsortedSuites, repo
   const [isCreating, setIsCreating] = useState(false);
   const [deleteAreaId, setDeleteAreaId] = useState<string | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [isScanning, setIsScanning] = useState(false);
+  const [showAIScanDialog, setShowAIScanDialog] = useState(false);
+  const [showSpecAnalysisDialog, setShowSpecAnalysisDialog] = useState(false);
+  const [showMCPExploreDialog, setShowMCPExploreDialog] = useState(false);
 
   const totalAreas = countAreas(tree);
   const totalTests = countTests(tree) + uncategorizedTests.length;
@@ -111,6 +121,26 @@ export function AreasPageClient({ tree, uncategorizedTests, unsortedSuites, repo
     router.refresh();
   };
 
+  const handleMoveArea = async (areaId: string, newParentId: string | null) => {
+    await moveArea(areaId, newParentId);
+    router.refresh();
+  };
+
+  const handleScan = async () => {
+    setIsScanning(true);
+    try {
+      const result = await startRemoteRouteScan(repositoryId, selectedBranch);
+      if (result.success) {
+        toast.success(`${result.routesFound} routes found!`);
+        router.refresh();
+      } else {
+        toast.error(result.error || 'Failed to scan routes');
+      }
+    } finally {
+      setIsScanning(false);
+    }
+  };
+
   // Collect all suites (sorted and unsorted) for the detail section
   const allSuites: SuiteItem[] = [
     ...unsortedSuites,
@@ -141,12 +171,64 @@ export function AreasPageClient({ tree, uncategorizedTests, unsortedSuites, repo
           onDeleteArea={setDeleteAreaId}
           onMoveTest={handleMoveTest}
           onMoveSuite={handleMoveSuite}
+          onMoveArea={handleMoveArea}
         />
       </div>
 
       {/* Main Content */}
       <div className="flex-1 p-6 overflow-auto">
         <div className="max-w-3xl space-y-6">
+          {/* Discovery Actions */}
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-base">Discovery Actions</CardTitle>
+              <CardDescription>
+                Discover and import routes using these tools
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="grid grid-cols-4 gap-4">
+                <button
+                  onClick={handleScan}
+                  disabled={isScanning}
+                  className="flex flex-col items-center gap-2 p-4 border rounded-lg hover:bg-muted/50 hover:border-primary/50 transition-colors text-center disabled:opacity-50"
+                >
+                  {isScanning ? (
+                    <Loader2 className="h-6 w-6 text-primary animate-spin" />
+                  ) : (
+                    <FolderSearch className="h-6 w-6 text-primary" />
+                  )}
+                  <span className="font-medium text-sm">Scan Routes</span>
+                  <span className="text-xs text-muted-foreground">Discover from repo</span>
+                </button>
+                <button
+                  onClick={() => setShowSpecAnalysisDialog(true)}
+                  className="flex flex-col items-center gap-2 p-4 border rounded-lg hover:bg-muted/50 hover:border-primary/50 transition-colors text-center"
+                >
+                  <FileText className="h-6 w-6 text-primary" />
+                  <span className="font-medium text-sm">Analyze Specs</span>
+                  <span className="text-xs text-muted-foreground">Parse API/route specs</span>
+                </button>
+                <button
+                  onClick={() => setShowAIScanDialog(true)}
+                  className="flex flex-col items-center gap-2 p-4 border rounded-lg hover:bg-muted/50 hover:border-primary/50 transition-colors text-center"
+                >
+                  <Sparkles className="h-6 w-6 text-primary" />
+                  <span className="font-medium text-sm">AI Scan</span>
+                  <span className="text-xs text-muted-foreground">AI-powered discovery</span>
+                </button>
+                <button
+                  onClick={() => setShowMCPExploreDialog(true)}
+                  className="flex flex-col items-center gap-2 p-4 border rounded-lg hover:bg-muted/50 hover:border-primary/50 transition-colors text-center"
+                >
+                  <Globe className="h-6 w-6 text-primary" />
+                  <span className="font-medium text-sm">MCP Explore</span>
+                  <span className="text-xs text-muted-foreground">MCP-based exploration</span>
+                </button>
+              </div>
+            </CardContent>
+          </Card>
+
           <Card>
             <CardHeader>
               <CardTitle>Areas Overview</CardTitle>
@@ -256,6 +338,27 @@ export function AreasPageClient({ tree, uncategorizedTests, unsortedSuites, repo
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Discovery Dialogs */}
+      <AIScanRoutesDialog
+        open={showAIScanDialog}
+        onOpenChange={setShowAIScanDialog}
+        repositoryId={repositoryId}
+        branch={selectedBranch}
+        onSaved={() => router.refresh()}
+      />
+      <SpecAnalysisDialog
+        open={showSpecAnalysisDialog}
+        onOpenChange={setShowSpecAnalysisDialog}
+        repositoryId={repositoryId}
+        branch={selectedBranch}
+      />
+      <MCPExploreRoutesDialog
+        open={showMCPExploreDialog}
+        onOpenChange={setShowMCPExploreDialog}
+        repositoryId={repositoryId}
+        onSaved={() => router.refresh()}
+      />
     </div>
   );
 }

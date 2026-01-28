@@ -53,6 +53,7 @@ export default async function AreasPage() {
         uncategorizedTests={uncategorizedTests}
         unsortedSuites={unsortedSuites}
         repositoryId={selectedRepo.id}
+        selectedBranch={selectedRepo.selectedBranch || selectedRepo.defaultBranch || 'main'}
       />
     </div>
   );
