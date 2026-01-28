@@ -1,10 +1,10 @@
 'use client';
 
 import { useState } from 'react';
-import { TreeView } from '@/components/test-browser/tree-view';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Badge } from '@/components/ui/badge';
 import {
   Dialog,
   DialogContent,
@@ -16,11 +16,22 @@ import {
 import { createFunctionalArea } from '@/server/actions/tests';
 import { generateBasicTests } from '@/server/actions/scanner';
 import { aiFixAllFailedTests } from '@/server/actions/ai';
-import { CoverageBar } from '@/components/coverage/coverage-bar';
 import { RouteSelectorDialog } from '@/components/routes/route-selector-dialog';
 import { AICreateTestDialog } from '@/components/ai/ai-create-test-dialog';
 import { MCPCreateTestDialog } from '@/components/ai/mcp-create-test-dialog';
-import { FileCode, Plus, FlaskConical, Sparkles, Wand2, Wrench } from 'lucide-react';
+import {
+  FlaskConical,
+  Plus,
+  Sparkles,
+  Wand2,
+  Wrench,
+  CheckCircle2,
+  XCircle,
+  Clock,
+  Search,
+  ChevronRight,
+  FolderOpen
+} from 'lucide-react';
 import Link from 'next/link';
 import type { FunctionalArea, Test, Route } from '@/lib/db/schema';
 
@@ -32,23 +43,31 @@ interface TestsPageClientProps {
   areas: FunctionalArea[];
   tests: TestWithStatus[];
   routes: Route[];
-  coverage: { total: number; withTests: number; percentage: number };
   repositoryId?: string;
   baseUrl?: string;
 }
 
-export function TestsPageClient({ areas, tests, routes, coverage, repositoryId, baseUrl = 'http://localhost:3000' }: TestsPageClientProps) {
+export function TestsPageClient({ areas, tests, routes, repositoryId, baseUrl = 'http://localhost:3000' }: TestsPageClientProps) {
   const [isNewAreaOpen, setIsNewAreaOpen] = useState(false);
   const [newAreaName, setNewAreaName] = useState('');
   const [isCreating, setIsCreating] = useState(false);
   const [isAddTestsOpen, setIsAddTestsOpen] = useState(false);
   const [isAICreateOpen, setIsAICreateOpen] = useState(false);
   const [isMCPCreateOpen, setIsMCPCreateOpen] = useState(false);
-  const [showAllTests, setShowAllTests] = useState(false);
   const [isFixingAll, setIsFixingAll] = useState(false);
   const [fixResult, setFixResult] = useState<{ fixed: number; failed: number } | null>(null);
+  const [searchQuery, setSearchQuery] = useState('');
 
   const failedTests = tests.filter(t => t.latestStatus === 'failed');
+
+  const filteredTests = tests.filter(test =>
+    test.name.toLowerCase().includes(searchQuery.toLowerCase())
+  );
+
+  const getAreaName = (areaId: string | null) => {
+    if (!areaId) return null;
+    return areas.find(a => a.id === areaId)?.name;
+  };
 
   const handleFixAllFailed = async () => {
     if (!repositoryId || failedTests.length === 0) return;
@@ -77,165 +96,180 @@ export function TestsPageClient({ areas, tests, routes, coverage, repositoryId, 
 
   const handleAddTests = async (routeIds: string[]) => {
     if (!repositoryId) return;
-    // Use localhost:3000 as default base URL for now
     await generateBasicTests(repositoryId, routeIds, 'http://localhost:3000');
   };
 
+  const StatusBadge = ({ status }: { status: string | null }) => {
+    if (status === 'passed') {
+      return (
+        <Badge className="bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20 hover:bg-emerald-500/20">
+          <CheckCircle2 className="h-3 w-3 mr-1" />
+          Passed
+        </Badge>
+      );
+    }
+    if (status === 'failed') {
+      return (
+        <Badge className="bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-500/20 hover:bg-rose-500/20">
+          <XCircle className="h-3 w-3 mr-1" />
+          Failed
+        </Badge>
+      );
+    }
+    return (
+      <Badge variant="outline" className="text-muted-foreground">
+        <Clock className="h-3 w-3 mr-1" />
+        Not run
+      </Badge>
+    );
+  };
+
+  const statsData = [
+    { label: 'Total', value: tests.length, color: 'text-foreground' },
+    { label: 'Passed', value: tests.filter(t => t.latestStatus === 'passed').length, color: 'text-emerald-600 dark:text-emerald-400' },
+    { label: 'Failed', value: failedTests.length, color: 'text-rose-600 dark:text-rose-400' },
+    { label: 'Pending', value: tests.filter(t => !t.latestStatus).length, color: 'text-muted-foreground' },
+  ];
+
   return (
-    <div className="flex flex-1 overflow-hidden">
-      {/* Left Sidebar - Test Browser */}
-      <div className="w-64 border-r bg-muted/30">
-        <TreeView
-          areas={areas}
-          tests={tests}
-          onNewArea={() => setIsNewAreaOpen(true)}
-        />
-      </div>
-
-      {/* Main Content */}
-      <div className="flex-1 p-6 overflow-auto">
-        <div className="max-w-3xl space-y-6">
-          {/* Coverage Bar */}
-          {coverage.total > 0 && (
-            <Card>
-              <CardHeader className="pb-2">
-                <div className="flex items-center justify-between">
-                  <CardTitle className="text-base">Route Coverage</CardTitle>
-                  <div className="flex gap-2">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => setIsAddTestsOpen(true)}
-                      disabled={routes.filter(r => !r.hasTest).length === 0}
-                    >
-                      <FlaskConical className="h-4 w-4 mr-2" />
-                      Add Basic Tests
-                    </Button>
-                  </div>
-                </div>
-              </CardHeader>
-              <CardContent>
-                <CoverageBar covered={coverage.withTests} total={coverage.total} />
-              </CardContent>
-            </Card>
-          )}
-
-          <Card>
-            <CardHeader>
-              <CardTitle>Tests Overview</CardTitle>
-              <CardDescription>
-                Select a test from the sidebar or create a new one
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              {tests.length === 0 ? (
-                <div className="text-center py-8">
-                  <FileCode className="h-12 w-12 mx-auto mb-4 text-muted-foreground opacity-50" />
-                  <p className="text-muted-foreground mb-4">No tests created yet</p>
-                  <Button asChild>
-                    <Link href="/record">
-                      <Plus className="h-4 w-4 mr-2" />
-                      Record First Test
-                    </Link>
-                  </Button>
-                </div>
-              ) : (
-                <div className="space-y-4">
-                  <div className="flex justify-between items-center">
-                    <span className="text-sm text-muted-foreground">
-                      {tests.length} test{tests.length !== 1 ? 's' : ''} total
-                    </span>
-                    <div className="flex gap-2">
-                      {repositoryId && (
-                        <>
-                          {failedTests.length > 0 && (
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              onClick={handleFixAllFailed}
-                              disabled={isFixingAll}
-                            >
-                              <Wrench className="h-4 w-4 mr-2" />
-                              {isFixingAll ? 'Fixing...' : `Fix All Failed (${failedTests.length})`}
-                            </Button>
-                          )}
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => setIsAICreateOpen(true)}
-                          >
-                            <Sparkles className="h-4 w-4 mr-2" />
-                            Create with AI
-                          </Button>
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => setIsMCPCreateOpen(true)}
-                          >
-                            <Wand2 className="h-4 w-4 mr-2" />
-                            Create with MCP
-                          </Button>
-                        </>
-                      )}
-                      <Button asChild size="sm">
-                        <Link href="/record">
-                          <Plus className="h-4 w-4 mr-2" />
-                          Record New Test
-                        </Link>
-                      </Button>
-                    </div>
-                  </div>
-
-                  {fixResult && (
-                    <div className="text-sm p-2 rounded bg-muted">
-                      Fixed {fixResult.fixed} test{fixResult.fixed !== 1 ? 's' : ''}.
-                      {fixResult.failed > 0 && ` ${fixResult.failed} could not be fixed.`}
-                    </div>
-                  )}
-
-                  <div className="grid gap-2">
-                    {(showAllTests ? tests : tests.slice(0, 5)).map((test) => (
-                      <Link
-                        key={test.id}
-                        href={`/tests/${test.id}`}
-                        className="flex items-center justify-between p-3 border rounded-lg hover:bg-muted/50 transition-colors"
-                      >
-                        <div className="flex items-center gap-3">
-                          <FileCode className="h-4 w-4 text-muted-foreground" />
-                          <div>
-                            <div className="font-medium">{test.name}</div>
-                          </div>
-                        </div>
-                        <div className={`text-xs px-2 py-1 rounded ${
-                          test.latestStatus === 'passed'
-                            ? 'bg-green-100 text-green-700'
-                            : test.latestStatus === 'failed'
-                            ? 'bg-red-100 text-red-700'
-                            : 'bg-muted text-muted-foreground'
-                        }`}>
-                          {test.latestStatus || 'Not run'}
-                        </div>
-                      </Link>
-                    ))}
-                  </div>
-
-                  {tests.length > 5 && (
-                    <div className="text-center">
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => setShowAllTests(!showAllTests)}
-                        className="text-muted-foreground"
-                      >
-                        {showAllTests ? 'Show less' : `+${tests.length - 5} more tests`}
-                      </Button>
-                    </div>
-                  )}
-                </div>
-              )}
-            </CardContent>
-          </Card>
+    <div className="flex-1 overflow-auto">
+      <div className="max-w-5xl mx-auto p-6 space-y-6">
+        {/* Header */}
+        <div className="flex items-center justify-between">
+          <div>
+            <h1 className="text-2xl font-semibold tracking-tight">Tests</h1>
+            <p className="text-sm text-muted-foreground mt-1">
+              Manage and run your visual regression tests
+            </p>
+          </div>
+          <div className="flex gap-2">
+            {repositoryId && failedTests.length > 0 && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleFixAllFailed}
+                disabled={isFixingAll}
+              >
+                <Wrench className="h-4 w-4 mr-2" />
+                {isFixingAll ? 'Fixing...' : `Fix Failed (${failedTests.length})`}
+              </Button>
+            )}
+            {repositoryId && (
+              <>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setIsAddTestsOpen(true)}
+                  disabled={routes.filter(r => !r.hasTest).length === 0}
+                >
+                  <FlaskConical className="h-4 w-4 mr-2" />
+                  Add Basic Tests
+                </Button>
+                <Button variant="outline" size="sm" onClick={() => setIsAICreateOpen(true)}>
+                  <Sparkles className="h-4 w-4 mr-2" />
+                  AI Create
+                </Button>
+                <Button variant="outline" size="sm" onClick={() => setIsMCPCreateOpen(true)}>
+                  <Wand2 className="h-4 w-4 mr-2" />
+                  MCP Create
+                </Button>
+              </>
+            )}
+            <Button asChild size="sm">
+              <Link href="/record">
+                <Plus className="h-4 w-4 mr-2" />
+                Record Test
+              </Link>
+            </Button>
+          </div>
         </div>
+
+        {/* Stats Row */}
+        <div className="grid grid-cols-4 gap-4">
+          {statsData.map((stat, i) => (
+            <div
+              key={stat.label}
+              className="p-4 rounded-lg bg-card border border-border/50"
+            >
+              <div className={`text-2xl font-semibold tabular-nums ${stat.color}`}>
+                {stat.value}
+              </div>
+              <div className="text-xs text-muted-foreground mt-1">{stat.label}</div>
+            </div>
+          ))}
+        </div>
+
+        {fixResult && (
+          <div className="text-sm p-3 rounded-lg bg-muted/50 border border-border/50">
+            Fixed {fixResult.fixed} test{fixResult.fixed !== 1 ? 's' : ''}.
+            {fixResult.failed > 0 && ` ${fixResult.failed} could not be fixed.`}
+          </div>
+        )}
+
+        {/* Tests Table */}
+        <Card className="border-border/50 overflow-hidden">
+          <CardHeader className="border-b border-border/50 bg-muted/30">
+            <div className="flex items-center justify-between">
+              <CardTitle className="text-sm font-medium">All Tests</CardTitle>
+              <div className="relative w-64">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                <Input
+                  placeholder="Search tests..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="pl-9 h-8 text-sm bg-background"
+                />
+              </div>
+            </div>
+          </CardHeader>
+          <CardContent className="p-0">
+            {tests.length === 0 ? (
+              <div className="text-center py-16">
+                <div className="w-12 h-12 rounded-full bg-muted/50 flex items-center justify-center mx-auto mb-4">
+                  <FolderOpen className="h-6 w-6 text-muted-foreground" />
+                </div>
+                <p className="text-muted-foreground mb-4">No tests created yet</p>
+                <Button asChild size="sm">
+                  <Link href="/record">
+                    <Plus className="h-4 w-4 mr-2" />
+                    Record First Test
+                  </Link>
+                </Button>
+              </div>
+            ) : filteredTests.length === 0 ? (
+              <div className="text-center py-12 text-muted-foreground">
+                No tests match &quot;{searchQuery}&quot;
+              </div>
+            ) : (
+              <div className="divide-y divide-border/50">
+                {filteredTests.map((test) => (
+                  <Link
+                    key={test.id}
+                    href={`/tests/${test.id}`}
+                    className="flex items-center justify-between px-4 py-3 hover:bg-muted/30 transition-colors group"
+                  >
+                    <div className="flex items-center gap-4 min-w-0">
+                      <div className="min-w-0">
+                        <div className="font-medium text-sm truncate group-hover:text-primary transition-colors">
+                          {test.name}
+                        </div>
+                        {getAreaName(test.functionalAreaId) && (
+                          <div className="text-xs text-muted-foreground mt-0.5">
+                            {getAreaName(test.functionalAreaId)}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <StatusBadge status={test.latestStatus} />
+                      <ChevronRight className="h-4 w-4 text-muted-foreground/50 group-hover:text-muted-foreground transition-colors" />
+                    </div>
+                  </Link>
+                ))}
+              </div>
+            )}
+          </CardContent>
+        </Card>
       </div>
 
       {/* New Area Dialog */}

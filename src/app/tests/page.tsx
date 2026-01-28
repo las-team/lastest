@@ -7,7 +7,6 @@ import {
   getFunctionalAreasByRepo,
   getTestsWithStatusByRepo,
   getRoutesByRepo,
-  getRouteCoverageStats,
   getEnvironmentConfig,
 } from '@/lib/db/queries';
 
@@ -15,7 +14,6 @@ export default async function TestsPage() {
   const selectedRepo = await getSelectedRepository();
 
   let routes: Awaited<ReturnType<typeof getRoutesByRepo>> = [];
-  let coverage = { total: 0, withTests: 0, percentage: 0 };
 
   const [areas, tests, envConfig] = await Promise.all([
     selectedRepo ? getFunctionalAreasByRepo(selectedRepo.id) : getFunctionalAreas(),
@@ -24,10 +22,7 @@ export default async function TestsPage() {
   ]);
 
   if (selectedRepo) {
-    [routes, coverage] = await Promise.all([
-      getRoutesByRepo(selectedRepo.id),
-      getRouteCoverageStats(selectedRepo.id),
-    ]);
+    routes = await getRoutesByRepo(selectedRepo.id);
   }
 
   return (
@@ -37,7 +32,6 @@ export default async function TestsPage() {
         areas={areas}
         tests={tests}
         routes={routes}
-        coverage={coverage}
         repositoryId={selectedRepo?.id}
         baseUrl={envConfig.baseUrl}
       />
