@@ -10,32 +10,28 @@ import {
   GitCompare,
   Settings,
   Circle,
-  FolderGit2,
   Layers,
   FolderTree,
 } from 'lucide-react';
 import { RepoSelector, SyncReposButton } from './repo-selector';
-import { ActiveBranchBadge } from './active-branch-badge';
 import type { Repository } from '@/lib/db/schema';
 
 interface SidebarProps {
-  activeBranch?: string;
   repos?: Repository[];
   selectedRepo?: Repository | null;
 }
 
 const navigation = [
   { name: 'Dashboard', href: '/', icon: LayoutDashboard },
-  { name: 'Repo', href: '/repo', icon: FolderGit2 },
-  { name: 'Tests', href: '/tests', icon: FileCode },
   { name: 'Areas', href: '/areas', icon: FolderTree },
+  { name: 'Tests', href: '/tests', icon: FileCode },
   { name: 'Suites', href: '/suites', icon: Layers },
   { name: 'Runs', href: '/run', icon: Play },
   { name: 'Compare', href: '/compare', icon: GitCompare },
   { name: 'Settings', href: '/settings', icon: Settings },
 ];
 
-export function Sidebar({ activeBranch, repos, selectedRepo }: SidebarProps) {
+export function Sidebar({ repos, selectedRepo }: SidebarProps) {
   const pathname = usePathname();
 
   return (
@@ -58,9 +54,6 @@ export function Sidebar({ activeBranch, repos, selectedRepo }: SidebarProps) {
           </div>
           <SyncReposButton />
         </div>
-        {activeBranch && activeBranch !== 'unknown' && (
-          <ActiveBranchBadge branch={activeBranch} />
-        )}
       </div>
 
       <nav className="flex-1 p-4">

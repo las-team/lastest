@@ -274,7 +274,6 @@ export async function saveSpecAnalysisResult(
       }
     }
 
-    revalidatePath('/repo');
     revalidatePath('/tests');
 
     return { success: true };

@@ -280,7 +280,6 @@ export async function saveDiscoveredRoutes(
       await queries.createRouteTestSuggestions(suggestionData);
     }
 
-    revalidatePath('/repo');
     revalidatePath('/tests');
 
     return { success: true, count: newRoutes.length };

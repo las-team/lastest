@@ -37,7 +37,6 @@ export async function fetchAndSyncRepos(): Promise<{ success: boolean; count: nu
   }
 
   revalidatePath('/');
-  revalidatePath('/repo');
   revalidatePath('/settings');
   return { success: true, count: ghRepos.length };
 }
@@ -50,7 +49,6 @@ export async function selectRepo(repositoryId: string | null) {
   revalidatePath('/');
   revalidatePath('/tests');
   revalidatePath('/run');
-  revalidatePath('/repo');
 }
 
 export async function getSelectedRepo() {
@@ -67,13 +65,11 @@ export async function getRepo(id: string) {
 
 export async function updateRepoBaseline(repositoryId: string, branch: string) {
   await queries.updateRepository(repositoryId, { selectedBaseline: branch });
-  revalidatePath('/repo');
 }
 
 export async function updateRepoSelectedBranch(repositoryId: string, branch: string) {
   await queries.updateRepository(repositoryId, { selectedBranch: branch });
   revalidatePath('/');
-  revalidatePath('/repo');
   revalidatePath('/run');
   revalidatePath('/builds');
 }

@@ -131,10 +131,10 @@ export default async function DashboardPage() {
               <div className="grid grid-cols-5 gap-4">
                 {[
                   { label: 'Manual', description: 'Add tests & areas manually', icon: PenLine, href: '/tests' },
-                  { label: 'Scan Routes', description: 'Discover routes from repo', icon: FolderSearch, href: '/repo' },
-                  { label: 'AI Routes', description: 'AI-powered route discovery', icon: Sparkles, href: '/repo' },
-                  { label: 'MCP Routes', description: 'MCP-based exploration', icon: Globe, href: '/repo' },
-                  { label: 'Analyze Specs', description: 'Parse API/route specs', icon: FileSearch, href: '/repo' },
+                  { label: 'Scan Routes', description: 'Discover routes from repo', icon: FolderSearch, href: '/areas' },
+                  { label: 'AI Routes', description: 'AI-powered route discovery', icon: Sparkles, href: '/areas' },
+                  { label: 'MCP Routes', description: 'MCP-based exploration', icon: Globe, href: '/areas' },
+                  { label: 'Analyze Specs', description: 'Parse API/route specs', icon: FileSearch, href: '/areas' },
                 ].map((card) => (
                   <Link
                     key={card.label}

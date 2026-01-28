@@ -6,7 +6,6 @@ export async function SidebarServer() {
     getSelectedRepository(),
     getRepositories(),
   ]);
-  const activeBranch = selectedRepo?.selectedBranch || selectedRepo?.defaultBranch || 'main';
 
-  return <Sidebar activeBranch={activeBranch} repos={repos} selectedRepo={selectedRepo ?? null} />;
+  return <Sidebar repos={repos} selectedRepo={selectedRepo ?? null} />;
 }

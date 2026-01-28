@@ -57,7 +57,7 @@ export function SetupGuide({ initialStatus, latestBuildId }: SetupGuideProps) {
   const steps: StepDefinition[] = [
     { label: 'Connect GitHub', description: 'Link your GitHub account to sync repositories', actionLabel: 'Connect GitHub', href: '/settings' },
     { label: 'Configure AI', description: 'Set up AI provider for test generation', actionLabel: 'Configure AI', href: '/settings' },
-    { label: 'Scan Routes', description: 'Discover routes in your repository', actionLabel: 'Go to Repo', href: '/repo' },
+    { label: 'Scan Routes', description: 'Discover routes in your repository', actionLabel: 'Go to Areas', href: '/areas' },
     { label: 'Record a Test', description: 'Create your first visual regression test', actionLabel: 'Record Test', href: '/record' },
     { label: 'Run Tests', description: 'Execute all tests to capture screenshots', actionLabel: 'Run All', onClick: handleRunBuild },
     { label: 'Set Baseline', description: 'Approve screenshots as visual baselines', actionLabel: 'Review Diffs', href: latestBuildId ? `/builds/${latestBuildId}` : '/builds' },

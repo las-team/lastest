@@ -96,7 +96,6 @@ export async function startRemoteRouteScan(repositoryId: string, branch: string)
       completedAt: new Date(),
     });
 
-    revalidatePath('/repo');
     revalidatePath('/tests');
     revalidatePath('/');
 
