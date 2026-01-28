@@ -72,13 +72,18 @@ export async function startRemoteRouteScan(repositoryId: string, branch: string)
 
     const createdRoutes = await queries.createRoutes(routesToCreate);
 
-    // Auto-create functional areas for each new route
+    // Create or get the "Routes" folder
+    const routesFolder = await queries.getOrCreateRoutesFolder(repositoryId);
+
+    // Create sub-folders for each discovered route under the Routes folder
     for (const route of createdRoutes) {
-      const area = await queries.getOrCreateFunctionalAreaByRepo(
+      const area = await queries.createFunctionalArea({
         repositoryId,
-        route.path,
-        `Auto-generated area for route ${route.path}`
-      );
+        name: route.path,
+        description: `Route: ${route.path}`,
+        parentId: routesFolder.id,
+        isRouteFolder: true,
+      });
       await queries.linkRouteToFunctionalArea(route.id, area.id);
     }
 

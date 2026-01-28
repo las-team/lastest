@@ -1,0 +1,220 @@
+'use client';
+
+import { useState } from 'react';
+import { useRouter } from 'next/navigation';
+import { AreaTree, type TreeSelection } from '@/components/areas/area-tree';
+import { AreaDetailSection } from '@/components/areas/area-detail-section';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Textarea } from '@/components/ui/textarea';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import { createArea, deleteArea, moveTestToArea } from '@/server/actions/areas';
+import { Folder, FolderTree, FileCode } from 'lucide-react';
+import type { FunctionalAreaWithChildren } from '@/lib/db/queries';
+
+interface AreasPageClientProps {
+  tree: FunctionalAreaWithChildren[];
+  uncategorizedTests: { id: string; name: string; latestStatus: string | null }[];
+  repositoryId: string;
+}
+
+export function AreasPageClient({ tree, uncategorizedTests, repositoryId }: AreasPageClientProps) {
+  const router = useRouter();
+  const [selection, setSelection] = useState<TreeSelection | null>(null);
+  const [isNewAreaOpen, setIsNewAreaOpen] = useState(false);
+  const [newAreaParentId, setNewAreaParentId] = useState<string | undefined>();
+  const [newAreaName, setNewAreaName] = useState('');
+  const [newAreaDescription, setNewAreaDescription] = useState('');
+  const [isCreating, setIsCreating] = useState(false);
+  const [deleteAreaId, setDeleteAreaId] = useState<string | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
+
+  const totalAreas = countAreas(tree);
+  const totalTests = countTests(tree) + uncategorizedTests.length;
+
+  function countAreas(items: FunctionalAreaWithChildren[]): number {
+    return items.reduce((acc, item) => acc + 1 + countAreas(item.children), 0);
+  }
+
+  function countTests(items: FunctionalAreaWithChildren[]): number {
+    return items.reduce((acc, item) => acc + item.tests.length + countTests(item.children), 0);
+  }
+
+  const handleNewArea = (parentId?: string) => {
+    setNewAreaParentId(parentId);
+    setNewAreaName('');
+    setNewAreaDescription('');
+    setIsNewAreaOpen(true);
+  };
+
+  const handleCreateArea = async () => {
+    if (!newAreaName.trim()) return;
+    setIsCreating(true);
+    try {
+      await createArea({
+        name: newAreaName.trim(),
+        description: newAreaDescription.trim() || undefined,
+        repositoryId,
+        parentId: newAreaParentId,
+      });
+      setIsNewAreaOpen(false);
+      router.refresh();
+    } finally {
+      setIsCreating(false);
+    }
+  };
+
+  const handleDeleteArea = async () => {
+    if (!deleteAreaId) return;
+    setIsDeleting(true);
+    try {
+      await deleteArea(deleteAreaId);
+      if (selection?.type === 'area' && selection.id === deleteAreaId) {
+        setSelection(null);
+      }
+      setDeleteAreaId(null);
+      router.refresh();
+    } finally {
+      setIsDeleting(false);
+    }
+  };
+
+  const handleMoveTest = async (testId: string, areaId: string | null) => {
+    await moveTestToArea(testId, areaId);
+    router.refresh();
+  };
+
+  return (
+    <div className="flex flex-1 overflow-hidden">
+      {/* Left Sidebar - Area Tree */}
+      <div className="w-72 border-r bg-muted/30">
+        <AreaTree
+          tree={tree}
+          uncategorizedTests={uncategorizedTests}
+          selection={selection}
+          onSelect={setSelection}
+          onNewArea={handleNewArea}
+          onEditArea={(id) => setSelection({ type: 'area', id })}
+          onDeleteArea={setDeleteAreaId}
+          onMoveTest={handleMoveTest}
+        />
+      </div>
+
+      {/* Main Content */}
+      <div className="flex-1 p-6 overflow-auto">
+        <div className="max-w-3xl space-y-6">
+          <Card>
+            <CardHeader>
+              <CardTitle>Areas Overview</CardTitle>
+              <CardDescription>
+                Organize your tests into functional areas for better management
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="grid grid-cols-3 gap-4">
+                <div className="text-center p-4 bg-muted/50 rounded-lg">
+                  <FolderTree className="h-8 w-8 mx-auto mb-2 text-primary" />
+                  <div className="text-2xl font-bold">{totalAreas}</div>
+                  <div className="text-sm text-muted-foreground">Areas</div>
+                </div>
+                <div className="text-center p-4 bg-muted/50 rounded-lg">
+                  <FileCode className="h-8 w-8 mx-auto mb-2 text-primary" />
+                  <div className="text-2xl font-bold">{totalTests}</div>
+                  <div className="text-sm text-muted-foreground">Tests</div>
+                </div>
+                <div className="text-center p-4 bg-muted/50 rounded-lg">
+                  <Folder className="h-8 w-8 mx-auto mb-2 text-muted-foreground" />
+                  <div className="text-2xl font-bold">{uncategorizedTests.length}</div>
+                  <div className="text-sm text-muted-foreground">Uncategorized</div>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          <AreaDetailSection
+            selection={selection}
+            areas={tree}
+            onUpdate={() => router.refresh()}
+          />
+        </div>
+      </div>
+
+      {/* New Area Dialog */}
+      <Dialog open={isNewAreaOpen} onOpenChange={setIsNewAreaOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Create Area</DialogTitle>
+            <DialogDescription>
+              {newAreaParentId
+                ? 'Create a new sub-folder inside the selected area'
+                : 'Create a new top-level area'}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <Label htmlFor="area-name">Name</Label>
+              <Input
+                id="area-name"
+                value={newAreaName}
+                onChange={(e) => setNewAreaName(e.target.value)}
+                placeholder="e.g., Authentication, Dashboard"
+                autoFocus
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="area-description">Description (optional)</Label>
+              <Textarea
+                id="area-description"
+                value={newAreaDescription}
+                onChange={(e) => setNewAreaDescription(e.target.value)}
+                placeholder="What tests belong in this area?"
+                rows={3}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsNewAreaOpen(false)}>
+              Cancel
+            </Button>
+            <Button onClick={handleCreateArea} disabled={isCreating || !newAreaName.trim()}>
+              {isCreating ? 'Creating...' : 'Create'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Delete Confirmation Dialog */}
+      <Dialog open={!!deleteAreaId} onOpenChange={(open) => !open && setDeleteAreaId(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Delete Area</DialogTitle>
+            <DialogDescription>
+              Are you sure you want to delete this area? Tests in this area will be moved to Uncategorized, and sub-folders will be moved to the root level.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDeleteAreaId(null)}>
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={handleDeleteArea}
+              disabled={isDeleting}
+            >
+              {isDeleting ? 'Deleting...' : 'Delete'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}

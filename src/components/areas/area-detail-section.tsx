@@ -1,0 +1,335 @@
+'use client';
+
+import { useState, useEffect } from 'react';
+import { useRouter } from 'next/navigation';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Textarea } from '@/components/ui/textarea';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import { Badge } from '@/components/ui/badge';
+import { Separator } from '@/components/ui/separator';
+import { ExternalLink, Play, Pencil, Save, X, Folder, FileCode } from 'lucide-react';
+import Link from 'next/link';
+import { updateArea, getArea } from '@/server/actions/areas';
+import { getTest, updateTest } from '@/server/actions/tests';
+import type { TreeSelection } from './area-tree';
+import type { FunctionalArea, Test } from '@/lib/db/schema';
+import type { FunctionalAreaWithChildren } from '@/lib/db/queries';
+
+interface AreaDetailSectionProps {
+  selection: TreeSelection | null;
+  areas: FunctionalAreaWithChildren[];
+  onUpdate: () => void;
+}
+
+export function AreaDetailSection({ selection, areas, onUpdate }: AreaDetailSectionProps) {
+  const router = useRouter();
+  const [isEditing, setIsEditing] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const [areaData, setAreaData] = useState<FunctionalArea | null>(null);
+  const [testData, setTestData] = useState<Test | null>(null);
+
+  // Form states
+  const [name, setName] = useState('');
+  const [description, setDescription] = useState('');
+  const [parentId, setParentId] = useState<string | null>(null);
+  const [targetUrl, setTargetUrl] = useState('');
+
+  // Flatten areas for parent selector
+  const flattenAreas = (items: FunctionalAreaWithChildren[], exclude?: string): { id: string; name: string; depth: number }[] => {
+    const result: { id: string; name: string; depth: number }[] = [];
+    const flatten = (arr: FunctionalAreaWithChildren[], depth: number) => {
+      for (const item of arr) {
+        if (item.id !== exclude) {
+          result.push({ id: item.id, name: item.name, depth });
+          flatten(item.children, depth + 1);
+        }
+      }
+    };
+    flatten(items, 0);
+    return result;
+  };
+
+  useEffect(() => {
+    if (!selection) {
+      setAreaData(null);
+      setTestData(null);
+      setIsEditing(false);
+      return;
+    }
+
+    const loadData = async () => {
+      if (selection.type === 'area') {
+        const area = await getArea(selection.id);
+        setAreaData(area || null);
+        setTestData(null);
+        if (area) {
+          setName(area.name);
+          setDescription(area.description || '');
+          setParentId(area.parentId || null);
+        }
+      } else {
+        const test = await getTest(selection.id);
+        setTestData(test || null);
+        setAreaData(null);
+        if (test) {
+          setName(test.name);
+          setTargetUrl(test.targetUrl || '');
+        }
+      }
+      setIsEditing(false);
+    };
+
+    loadData();
+  }, [selection]);
+
+  const handleSave = async () => {
+    if (!selection) return;
+    setIsSaving(true);
+
+    try {
+      if (selection.type === 'area' && areaData) {
+        await updateArea(areaData.id, {
+          name,
+          description: description || undefined,
+          parentId: parentId || undefined,
+        });
+        setAreaData({ ...areaData, name, description, parentId });
+      } else if (selection.type === 'test' && testData) {
+        await updateTest(testData.id, { name, targetUrl: targetUrl || undefined });
+        setTestData({ ...testData, name, targetUrl });
+      }
+      setIsEditing(false);
+      onUpdate();
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleCancel = () => {
+    if (areaData) {
+      setName(areaData.name);
+      setDescription(areaData.description || '');
+      setParentId(areaData.parentId || null);
+    } else if (testData) {
+      setName(testData.name);
+      setTargetUrl(testData.targetUrl || '');
+    }
+    setIsEditing(false);
+  };
+
+  const availableParents = selection?.type === 'area' ? flattenAreas(areas, selection.id) : [];
+
+  // Empty state
+  if (!selection) {
+    return (
+      <Card>
+        <CardContent className="py-12 text-center text-muted-foreground">
+          <Folder className="h-12 w-12 mx-auto mb-4 opacity-50" />
+          <p>Select an area or test from the tree to view details</p>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  // Area details
+  if (selection.type === 'area' && areaData) {
+    const areaNode = findAreaNode(areas, areaData.id);
+    const testCount = areaNode?.tests.length || 0;
+
+    return (
+      <Card>
+        <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-4">
+          <CardTitle className="flex items-center gap-2">
+            <Folder className="h-5 w-5 text-primary" />
+            Area Details
+          </CardTitle>
+          {!isEditing ? (
+            <Button variant="ghost" size="sm" onClick={() => setIsEditing(true)}>
+              <Pencil className="h-4 w-4 mr-2" />
+              Edit
+            </Button>
+          ) : (
+            <div className="flex gap-2">
+              <Button variant="ghost" size="sm" onClick={handleCancel}>
+                <X className="h-4 w-4 mr-2" />
+                Cancel
+              </Button>
+              <Button size="sm" onClick={handleSave} disabled={isSaving}>
+                <Save className="h-4 w-4 mr-2" />
+                {isSaving ? 'Saving...' : 'Save'}
+              </Button>
+            </div>
+          )}
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="space-y-2">
+            <Label htmlFor="name">Name</Label>
+            {isEditing ? (
+              <Input
+                id="name"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+              />
+            ) : (
+              <div className="flex items-center gap-2">
+                <span className="text-lg font-medium">{areaData.name}</span>
+                {areaData.isRouteFolder && (
+                  <Badge variant="secondary">Route Folder</Badge>
+                )}
+              </div>
+            )}
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="description">Description</Label>
+            {isEditing ? (
+              <Textarea
+                id="description"
+                value={description}
+                onChange={(e) => setDescription(e.target.value)}
+                rows={3}
+              />
+            ) : (
+              <p className="text-sm text-muted-foreground">
+                {areaData.description || 'No description'}
+              </p>
+            )}
+          </div>
+
+          {isEditing && (
+            <div className="space-y-2">
+              <Label htmlFor="parent">Parent Folder</Label>
+              <Select
+                value={parentId || 'none'}
+                onValueChange={(v) => setParentId(v === 'none' ? null : v)}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="No parent (root level)" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">No parent (root level)</SelectItem>
+                  {availableParents.map((p) => (
+                    <SelectItem key={p.id} value={p.id}>
+                      {'  '.repeat(p.depth)}{p.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
+
+          <Separator />
+
+          <div>
+            <Label>Tests in this area</Label>
+            <p className="text-2xl font-bold mt-1">{testCount}</p>
+          </div>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  // Test details
+  if (selection.type === 'test' && testData) {
+    return (
+      <Card>
+        <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-4">
+          <CardTitle className="flex items-center gap-2">
+            <FileCode className="h-5 w-5 text-primary" />
+            Test Details
+          </CardTitle>
+          {!isEditing ? (
+            <Button variant="ghost" size="sm" onClick={() => setIsEditing(true)}>
+              <Pencil className="h-4 w-4 mr-2" />
+              Edit
+            </Button>
+          ) : (
+            <div className="flex gap-2">
+              <Button variant="ghost" size="sm" onClick={handleCancel}>
+                <X className="h-4 w-4 mr-2" />
+                Cancel
+              </Button>
+              <Button size="sm" onClick={handleSave} disabled={isSaving}>
+                <Save className="h-4 w-4 mr-2" />
+                {isSaving ? 'Saving...' : 'Save'}
+              </Button>
+            </div>
+          )}
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="space-y-2">
+            <Label htmlFor="name">Name</Label>
+            {isEditing ? (
+              <Input
+                id="name"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+              />
+            ) : (
+              <span className="text-lg font-medium">{testData.name}</span>
+            )}
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="targetUrl">Target URL</Label>
+            {isEditing ? (
+              <Input
+                id="targetUrl"
+                value={targetUrl}
+                onChange={(e) => setTargetUrl(e.target.value)}
+                placeholder="http://localhost:3000"
+              />
+            ) : (
+              <p className="text-sm text-muted-foreground">
+                {testData.targetUrl || 'No URL set'}
+              </p>
+            )}
+          </div>
+
+          <Separator />
+
+          <div className="flex gap-2">
+            <Button asChild variant="outline" className="flex-1">
+              <Link href={`/tests/${testData.id}`}>
+                <ExternalLink className="h-4 w-4 mr-2" />
+                View Details
+              </Link>
+            </Button>
+            <Button asChild className="flex-1">
+              <Link href={`/run?testId=${testData.id}`}>
+                <Play className="h-4 w-4 mr-2" />
+                Run Test
+              </Link>
+            </Button>
+          </div>
+
+          {testData.createdAt && (
+            <div className="text-xs text-muted-foreground">
+              Created: {new Date(testData.createdAt).toLocaleDateString()}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+    );
+  }
+
+  return null;
+}
+
+function findAreaNode(areas: FunctionalAreaWithChildren[], id: string): FunctionalAreaWithChildren | null {
+  for (const area of areas) {
+    if (area.id === id) return area;
+    const found = findAreaNode(area.children, id);
+    if (found) return found;
+  }
+  return null;
+}

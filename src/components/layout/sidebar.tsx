@@ -11,6 +11,8 @@ import {
   Settings,
   Circle,
   FolderGit2,
+  Layers,
+  FolderTree,
 } from 'lucide-react';
 import { RepoSelector, SyncReposButton } from './repo-selector';
 import { ActiveBranchBadge } from './active-branch-badge';
@@ -26,6 +28,8 @@ const navigation = [
   { name: 'Dashboard', href: '/', icon: LayoutDashboard },
   { name: 'Repo', href: '/repo', icon: FolderGit2 },
   { name: 'Tests', href: '/tests', icon: FileCode },
+  { name: 'Areas', href: '/areas', icon: FolderTree },
+  { name: 'Suites', href: '/suites', icon: Layers },
   { name: 'Runs', href: '/run', icon: Play },
   { name: 'Compare', href: '/compare', icon: GitCompare },
   { name: 'Settings', href: '/settings', icon: Settings },

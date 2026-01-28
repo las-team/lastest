@@ -347,7 +347,14 @@ export function RecordingClient({
       // Create functional area if needed
       if (newAreaName && !areaId) {
         const area = await getOrCreateFunctionalArea(newAreaName);
-        setAreas([...areas, { ...area, description: area.description ?? null, repositoryId: area.repositoryId ?? null }]);
+        setAreas([...areas, {
+          ...area,
+          description: area.description ?? null,
+          repositoryId: area.repositoryId ?? null,
+          parentId: area.parentId ?? null,
+          isRouteFolder: area.isRouteFolder ?? null,
+          orderIndex: area.orderIndex ?? null,
+        }]);
         setAreaId(area.id);
       }
 

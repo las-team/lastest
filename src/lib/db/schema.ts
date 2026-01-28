@@ -41,6 +41,9 @@ export const functionalAreas = sqliteTable('functional_areas', {
   repositoryId: text('repository_id'),
   name: text('name').notNull(),
   description: text('description'),
+  parentId: text('parent_id'),
+  isRouteFolder: integer('is_route_folder', { mode: 'boolean' }).default(false),
+  orderIndex: integer('order_index').default(0),
 });
 
 export const tests = sqliteTable('tests', {
@@ -438,3 +441,26 @@ export const testVersions = sqliteTable('test_versions', {
 
 export type TestVersion = typeof testVersions.$inferSelect;
 export type NewTestVersion = typeof testVersions.$inferInsert;
+
+// Test Suites - ordered collections of tests
+export const suites = sqliteTable('suites', {
+  id: text('id').primaryKey(),
+  repositoryId: text('repository_id').references(() => repositories.id),
+  name: text('name').notNull(),
+  description: text('description'),
+  createdAt: integer('created_at', { mode: 'timestamp' }),
+  updatedAt: integer('updated_at', { mode: 'timestamp' }),
+});
+
+export const suiteTests = sqliteTable('suite_tests', {
+  id: text('id').primaryKey(),
+  suiteId: text('suite_id').references(() => suites.id, { onDelete: 'cascade' }).notNull(),
+  testId: text('test_id').references(() => tests.id, { onDelete: 'cascade' }).notNull(),
+  orderIndex: integer('order_index').notNull().default(0),
+  createdAt: integer('created_at', { mode: 'timestamp' }),
+});
+
+export type Suite = typeof suites.$inferSelect;
+export type NewSuite = typeof suites.$inferInsert;
+export type SuiteTest = typeof suiteTests.$inferSelect;
+export type NewSuiteTest = typeof suiteTests.$inferInsert;
