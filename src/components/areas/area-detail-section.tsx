@@ -1,7 +1,6 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { useRouter } from 'next/navigation';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -16,26 +15,28 @@ import {
 } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
-import { ExternalLink, Play, Pencil, Save, X, Folder, FileCode } from 'lucide-react';
+import { ExternalLink, Play, Pencil, Save, X, Folder, FileCode, ListChecks } from 'lucide-react';
 import Link from 'next/link';
 import { updateArea, getArea } from '@/server/actions/areas';
 import { getTest, updateTest } from '@/server/actions/tests';
-import type { TreeSelection } from './area-tree';
-import type { FunctionalArea, Test } from '@/lib/db/schema';
+import { getSuite, updateSuite } from '@/server/actions/suites';
+import type { TreeSelection, SuiteItem } from './area-tree';
+import type { FunctionalArea, Test, Suite } from '@/lib/db/schema';
 import type { FunctionalAreaWithChildren } from '@/lib/db/queries';
 
 interface AreaDetailSectionProps {
   selection: TreeSelection | null;
   areas: FunctionalAreaWithChildren[];
+  suites: SuiteItem[];
   onUpdate: () => void;
 }
 
-export function AreaDetailSection({ selection, areas, onUpdate }: AreaDetailSectionProps) {
-  const router = useRouter();
+export function AreaDetailSection({ selection, areas, suites, onUpdate }: AreaDetailSectionProps) {
   const [isEditing, setIsEditing] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [areaData, setAreaData] = useState<FunctionalArea | null>(null);
   const [testData, setTestData] = useState<Test | null>(null);
+  const [suiteData, setSuiteData] = useState<Suite | null>(null);
 
   // Form states
   const [name, setName] = useState('');
@@ -62,6 +63,7 @@ export function AreaDetailSection({ selection, areas, onUpdate }: AreaDetailSect
     if (!selection) {
       setAreaData(null);
       setTestData(null);
+      setSuiteData(null);
       setIsEditing(false);
       return;
     }
@@ -71,18 +73,29 @@ export function AreaDetailSection({ selection, areas, onUpdate }: AreaDetailSect
         const area = await getArea(selection.id);
         setAreaData(area || null);
         setTestData(null);
+        setSuiteData(null);
         if (area) {
           setName(area.name);
           setDescription(area.description || '');
           setParentId(area.parentId || null);
         }
-      } else {
+      } else if (selection.type === 'test') {
         const test = await getTest(selection.id);
         setTestData(test || null);
         setAreaData(null);
+        setSuiteData(null);
         if (test) {
           setName(test.name);
           setTargetUrl(test.targetUrl || '');
+        }
+      } else if (selection.type === 'suite') {
+        const suite = await getSuite(selection.id);
+        setSuiteData(suite || null);
+        setAreaData(null);
+        setTestData(null);
+        if (suite) {
+          setName(suite.name);
+          setDescription(suite.description || '');
         }
       }
       setIsEditing(false);
@@ -106,6 +119,9 @@ export function AreaDetailSection({ selection, areas, onUpdate }: AreaDetailSect
       } else if (selection.type === 'test' && testData) {
         await updateTest(testData.id, { name, targetUrl: targetUrl || undefined });
         setTestData({ ...testData, name, targetUrl });
+      } else if (selection.type === 'suite' && suiteData) {
+        await updateSuite(suiteData.id, { name, description: description || undefined });
+        setSuiteData({ ...suiteData, name, description });
       }
       setIsEditing(false);
       onUpdate();
@@ -122,6 +138,9 @@ export function AreaDetailSection({ selection, areas, onUpdate }: AreaDetailSect
     } else if (testData) {
       setName(testData.name);
       setTargetUrl(testData.targetUrl || '');
+    } else if (suiteData) {
+      setName(suiteData.name);
+      setDescription(suiteData.description || '');
     }
     setIsEditing(false);
   };
@@ -134,7 +153,7 @@ export function AreaDetailSection({ selection, areas, onUpdate }: AreaDetailSect
       <Card>
         <CardContent className="py-12 text-center text-muted-foreground">
           <Folder className="h-12 w-12 mx-auto mb-4 opacity-50" />
-          <p>Select an area or test from the tree to view details</p>
+          <p>Select an area, test, or suite from the tree to view details</p>
         </CardContent>
       </Card>
     );
@@ -315,6 +334,98 @@ export function AreaDetailSection({ selection, areas, onUpdate }: AreaDetailSect
           {testData.createdAt && (
             <div className="text-xs text-muted-foreground">
               Created: {new Date(testData.createdAt).toLocaleDateString()}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+    );
+  }
+
+  // Suite details
+  if (selection.type === 'suite' && suiteData) {
+    const suiteItem = suites.find((s) => s.id === suiteData.id);
+    const testCount = suiteItem?.testCount || 0;
+
+    return (
+      <Card>
+        <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-4">
+          <CardTitle className="flex items-center gap-2">
+            <ListChecks className="h-5 w-5 text-violet-500" />
+            Suite Details
+          </CardTitle>
+          {!isEditing ? (
+            <Button variant="ghost" size="sm" onClick={() => setIsEditing(true)}>
+              <Pencil className="h-4 w-4 mr-2" />
+              Edit
+            </Button>
+          ) : (
+            <div className="flex gap-2">
+              <Button variant="ghost" size="sm" onClick={handleCancel}>
+                <X className="h-4 w-4 mr-2" />
+                Cancel
+              </Button>
+              <Button size="sm" onClick={handleSave} disabled={isSaving}>
+                <Save className="h-4 w-4 mr-2" />
+                {isSaving ? 'Saving...' : 'Save'}
+              </Button>
+            </div>
+          )}
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="space-y-2">
+            <Label htmlFor="name">Name</Label>
+            {isEditing ? (
+              <Input
+                id="name"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+              />
+            ) : (
+              <span className="text-lg font-medium">{suiteData.name}</span>
+            )}
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="description">Description</Label>
+            {isEditing ? (
+              <Textarea
+                id="description"
+                value={description}
+                onChange={(e) => setDescription(e.target.value)}
+                rows={3}
+              />
+            ) : (
+              <p className="text-sm text-muted-foreground">
+                {suiteData.description || 'No description'}
+              </p>
+            )}
+          </div>
+
+          <Separator />
+
+          <div>
+            <Label>Tests in this suite</Label>
+            <p className="text-2xl font-bold mt-1">{testCount}</p>
+          </div>
+
+          <div className="flex gap-2">
+            <Button asChild variant="outline" className="flex-1">
+              <Link href={`/suites/${suiteData.id}`}>
+                <ExternalLink className="h-4 w-4 mr-2" />
+                View Suite
+              </Link>
+            </Button>
+            <Button asChild className="flex-1">
+              <Link href={`/suites/${suiteData.id}`}>
+                <Play className="h-4 w-4 mr-2" />
+                Run Suite
+              </Link>
+            </Button>
+          </div>
+
+          {suiteData.createdAt && (
+            <div className="text-xs text-muted-foreground">
+              Created: {new Date(suiteData.createdAt).toLocaleDateString()}
             </div>
           )}
         </CardContent>

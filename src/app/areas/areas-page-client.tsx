@@ -17,17 +17,25 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { createArea, deleteArea, moveTestToArea } from '@/server/actions/areas';
-import { Folder, FolderTree, FileCode } from 'lucide-react';
+import { createArea, deleteArea, moveTestToArea, moveSuiteToArea } from '@/server/actions/areas';
+import { Folder, FolderTree, FileCode, ListChecks } from 'lucide-react';
 import type { FunctionalAreaWithChildren } from '@/lib/db/queries';
+
+export interface SuiteItem {
+  id: string;
+  name: string;
+  description: string | null;
+  testCount: number;
+}
 
 interface AreasPageClientProps {
   tree: FunctionalAreaWithChildren[];
   uncategorizedTests: { id: string; name: string; latestStatus: string | null }[];
+  unsortedSuites: SuiteItem[];
   repositoryId: string;
 }
 
-export function AreasPageClient({ tree, uncategorizedTests, repositoryId }: AreasPageClientProps) {
+export function AreasPageClient({ tree, uncategorizedTests, unsortedSuites, repositoryId }: AreasPageClientProps) {
   const router = useRouter();
   const [selection, setSelection] = useState<TreeSelection | null>(null);
   const [isNewAreaOpen, setIsNewAreaOpen] = useState(false);
@@ -40,6 +48,7 @@ export function AreasPageClient({ tree, uncategorizedTests, repositoryId }: Area
 
   const totalAreas = countAreas(tree);
   const totalTests = countTests(tree) + uncategorizedTests.length;
+  const totalSuites = countSuites(tree) + unsortedSuites.length;
 
   function countAreas(items: FunctionalAreaWithChildren[]): number {
     return items.reduce((acc, item) => acc + 1 + countAreas(item.children), 0);
@@ -47,6 +56,10 @@ export function AreasPageClient({ tree, uncategorizedTests, repositoryId }: Area
 
   function countTests(items: FunctionalAreaWithChildren[]): number {
     return items.reduce((acc, item) => acc + item.tests.length + countTests(item.children), 0);
+  }
+
+  function countSuites(items: FunctionalAreaWithChildren[]): number {
+    return items.reduce((acc, item) => acc + item.suites.length + countSuites(item.children), 0);
   }
 
   const handleNewArea = (parentId?: string) => {
@@ -93,6 +106,26 @@ export function AreasPageClient({ tree, uncategorizedTests, repositoryId }: Area
     router.refresh();
   };
 
+  const handleMoveSuite = async (suiteId: string, areaId: string | null) => {
+    await moveSuiteToArea(suiteId, areaId);
+    router.refresh();
+  };
+
+  // Collect all suites (sorted and unsorted) for the detail section
+  const allSuites: SuiteItem[] = [
+    ...unsortedSuites,
+    ...collectSuites(tree),
+  ];
+
+  function collectSuites(items: FunctionalAreaWithChildren[]): SuiteItem[] {
+    const result: SuiteItem[] = [];
+    for (const item of items) {
+      result.push(...item.suites);
+      result.push(...collectSuites(item.children));
+    }
+    return result;
+  }
+
   return (
     <div className="flex flex-1 overflow-hidden">
       {/* Left Sidebar - Area Tree */}
@@ -100,12 +133,14 @@ export function AreasPageClient({ tree, uncategorizedTests, repositoryId }: Area
         <AreaTree
           tree={tree}
           uncategorizedTests={uncategorizedTests}
+          unsortedSuites={unsortedSuites}
           selection={selection}
           onSelect={setSelection}
           onNewArea={handleNewArea}
           onEditArea={(id) => setSelection({ type: 'area', id })}
           onDeleteArea={setDeleteAreaId}
           onMoveTest={handleMoveTest}
+          onMoveSuite={handleMoveSuite}
         />
       </div>
 
@@ -116,11 +151,11 @@ export function AreasPageClient({ tree, uncategorizedTests, repositoryId }: Area
             <CardHeader>
               <CardTitle>Areas Overview</CardTitle>
               <CardDescription>
-                Organize your tests into functional areas for better management
+                Organize your tests and suites into functional areas
               </CardDescription>
             </CardHeader>
             <CardContent>
-              <div className="grid grid-cols-3 gap-4">
+              <div className="grid grid-cols-4 gap-4">
                 <div className="text-center p-4 bg-muted/50 rounded-lg">
                   <FolderTree className="h-8 w-8 mx-auto mb-2 text-primary" />
                   <div className="text-2xl font-bold">{totalAreas}</div>
@@ -130,6 +165,11 @@ export function AreasPageClient({ tree, uncategorizedTests, repositoryId }: Area
                   <FileCode className="h-8 w-8 mx-auto mb-2 text-primary" />
                   <div className="text-2xl font-bold">{totalTests}</div>
                   <div className="text-sm text-muted-foreground">Tests</div>
+                </div>
+                <div className="text-center p-4 bg-muted/50 rounded-lg">
+                  <ListChecks className="h-8 w-8 mx-auto mb-2 text-violet-500" />
+                  <div className="text-2xl font-bold">{totalSuites}</div>
+                  <div className="text-sm text-muted-foreground">Suites</div>
                 </div>
                 <div className="text-center p-4 bg-muted/50 rounded-lg">
                   <Folder className="h-8 w-8 mx-auto mb-2 text-muted-foreground" />
@@ -143,6 +183,7 @@ export function AreasPageClient({ tree, uncategorizedTests, repositoryId }: Area
           <AreaDetailSection
             selection={selection}
             areas={tree}
+            suites={allSuites}
             onUpdate={() => router.refresh()}
           />
         </div>
@@ -198,7 +239,7 @@ export function AreasPageClient({ tree, uncategorizedTests, repositoryId }: Area
           <DialogHeader>
             <DialogTitle>Delete Area</DialogTitle>
             <DialogDescription>
-              Are you sure you want to delete this area? Tests in this area will be moved to Uncategorized, and sub-folders will be moved to the root level.
+              Are you sure you want to delete this area? Tests and suites in this area will be moved to Unsorted, and sub-folders will be moved to the root level.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>

@@ -1,13 +1,15 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
-import { Play, Pencil, Trash2 } from 'lucide-react';
+import { Play, Pencil, Trash2, CheckCircle, XCircle, Loader2, Clock } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { Progress } from '@/components/ui/progress';
 import { SuiteBuilder } from '@/components/suites/suite-builder';
 import { CreateSuiteDialog } from '@/components/suites/create-suite-dialog';
-import { deleteSuite, runSuite } from '@/server/actions/suites';
+import { deleteSuite, runSuite, getSuiteRunProgress } from '@/server/actions/suites';
 import type { Suite, FunctionalArea } from '@/lib/db/schema';
+import { cn } from '@/lib/utils';
 
 interface SuiteTest {
   id: string;
@@ -40,10 +42,43 @@ interface SuiteDetailClientProps {
   areas: FunctionalArea[];
 }
 
+interface TestResult {
+  testId: string | null;
+  status: string | null;
+  errorMessage: string | null;
+  durationMs: number | null;
+}
+
+interface RunProgress {
+  status: string | null;
+  completedAt: Date | null;
+  results: TestResult[];
+}
+
 export function SuiteDetailClient({ suite, availableTests, areas }: SuiteDetailClientProps) {
   const router = useRouter();
   const [isEditOpen, setIsEditOpen] = useState(false);
   const [isRunning, setIsRunning] = useState(false);
+  const [runId, setRunId] = useState<string | null>(null);
+  const [progress, setProgress] = useState<RunProgress | null>(null);
+
+  const pollProgress = useCallback(async (id: string) => {
+    const data = await getSuiteRunProgress(id);
+    if (data) {
+      setProgress(data);
+      if (data.status === 'running') {
+        setTimeout(() => pollProgress(id), 1000);
+      } else {
+        setIsRunning(false);
+      }
+    }
+  }, []);
+
+  useEffect(() => {
+    if (runId && isRunning) {
+      pollProgress(runId);
+    }
+  }, [runId, isRunning, pollProgress]);
 
   const handleDelete = async () => {
     if (!confirm(`Delete suite "${suite.name}"? This cannot be undone.`)) return;
@@ -57,15 +92,30 @@ export function SuiteDetailClient({ suite, availableTests, areas }: SuiteDetailC
       return;
     }
     setIsRunning(true);
+    setProgress(null);
     try {
-      await runSuite(suite.id);
-      router.push('/run');
+      const result = await runSuite(suite.id);
+      setRunId(result.runId);
     } catch (error) {
       alert(error instanceof Error ? error.message : 'Failed to run suite');
-    } finally {
       setIsRunning(false);
     }
   };
+
+  const handleDismissResults = () => {
+    setProgress(null);
+    setRunId(null);
+    router.refresh();
+  };
+
+  // Build a map of test results by testId
+  const resultsByTestId = new Map(
+    progress?.results.map((r) => [r.testId, r]) ?? []
+  );
+
+  const completedCount = progress?.results.length ?? 0;
+  const totalCount = suite.tests.length;
+  const progressPct = totalCount > 0 ? (completedCount / totalCount) * 100 : 0;
 
   return (
     <div className="flex-1 overflow-hidden flex flex-col">
@@ -82,17 +132,81 @@ export function SuiteDetailClient({ suite, availableTests, areas }: SuiteDetailC
           </div>
           <div className="flex items-center gap-2">
             <Button onClick={handleRun} disabled={isRunning || suite.tests.length === 0}>
-              <Play className="w-4 h-4 mr-2" />
-              {isRunning ? 'Starting...' : 'Run Suite'}
+              {isRunning ? (
+                <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+              ) : (
+                <Play className="w-4 h-4 mr-2" />
+              )}
+              {isRunning ? 'Running...' : 'Run Suite'}
             </Button>
-            <Button variant="outline" size="icon" onClick={() => setIsEditOpen(true)}>
+            <Button variant="outline" size="icon" onClick={() => setIsEditOpen(true)} disabled={isRunning}>
               <Pencil className="w-4 h-4" />
             </Button>
-            <Button variant="outline" size="icon" className="text-destructive" onClick={handleDelete}>
+            <Button variant="outline" size="icon" className="text-destructive" onClick={handleDelete} disabled={isRunning}>
               <Trash2 className="w-4 h-4" />
             </Button>
           </div>
         </div>
+
+        {/* Progress display */}
+        {(isRunning || progress) && (
+          <div className="mt-4 p-4 border rounded-lg bg-background">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-sm font-medium">
+                {isRunning ? 'Running tests...' : progress?.status === 'passed' ? 'All tests passed' : 'Run completed'}
+              </span>
+              <span className="text-sm text-muted-foreground">
+                {completedCount} / {totalCount}
+              </span>
+            </div>
+            <Progress value={progressPct} className="h-2 mb-4" />
+
+            <div className="space-y-2 max-h-64 overflow-auto">
+              {suite.tests.map((test, idx) => {
+                const result = resultsByTestId.get(test.testId);
+                const isPending = !result && isRunning;
+                const isCurrent = !result && isRunning && idx === completedCount;
+
+                return (
+                  <div
+                    key={test.testId}
+                    className={cn(
+                      'flex items-center gap-3 p-2 rounded text-sm',
+                      isCurrent && 'bg-blue-50 dark:bg-blue-950',
+                      result?.status === 'passed' && 'bg-green-50 dark:bg-green-950',
+                      result?.status === 'failed' && 'bg-red-50 dark:bg-red-950'
+                    )}
+                  >
+                    <span className="w-6 text-center text-muted-foreground">{idx + 1}</span>
+                    {isCurrent ? (
+                      <Loader2 className="w-4 h-4 animate-spin text-blue-500" />
+                    ) : result?.status === 'passed' ? (
+                      <CheckCircle className="w-4 h-4 text-green-500" />
+                    ) : result?.status === 'failed' ? (
+                      <XCircle className="w-4 h-4 text-red-500" />
+                    ) : (
+                      <Clock className="w-4 h-4 text-muted-foreground" />
+                    )}
+                    <span className="flex-1 truncate">{test.testName}</span>
+                    {result?.durationMs && (
+                      <span className="text-xs text-muted-foreground">
+                        {(result.durationMs / 1000).toFixed(1)}s
+                      </span>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+
+            {!isRunning && progress && (
+              <div className="mt-4 flex justify-end">
+                <Button variant="outline" size="sm" onClick={handleDismissResults}>
+                  Dismiss
+                </Button>
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       <SuiteBuilder

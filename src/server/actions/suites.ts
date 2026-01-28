@@ -2,8 +2,11 @@
 
 import { revalidatePath } from 'next/cache';
 import * as queries from '@/lib/db/queries';
-import { createAndRunBuild } from './builds';
-import type { NewSuite } from '@/lib/db/schema';
+import { getRunner } from '@/lib/playwright/runner';
+import { getServerManager } from '@/lib/playwright/server-manager';
+import { getBranchInfo } from '@/lib/github/content';
+import { createJob, updateJobProgress, completeJob, failJob } from './jobs';
+import type { NewSuite, Test } from '@/lib/db/schema';
 
 export async function createSuite(data: { name: string; description?: string; repositoryId?: string }) {
   const result = await queries.createSuite(data);
@@ -63,6 +66,25 @@ export async function runSuite(suiteId: string) {
   // Get ordered test IDs
   const testIds = suiteWithTests.tests.map((t) => t.testId);
 
-  // Create and run build with the suite's tests in order
-  return createAndRunBuild('manual', testIds, suiteWithTests.repositoryId);
+  // Run tests in order and return the run ID for progress tracking
+  const result = await runTests(testIds, suiteWithTests.repositoryId);
+  return result;
+}
+
+export async function getSuiteRunProgress(runId: string) {
+  const run = await queries.getTestRun(runId);
+  if (!run) return null;
+
+  const results = await queries.getTestResultsByRun(runId);
+
+  return {
+    status: run.status,
+    completedAt: run.completedAt,
+    results: results.map((r) => ({
+      testId: r.testId,
+      status: r.status,
+      errorMessage: r.errorMessage,
+      durationMs: r.durationMs,
+    })),
+  };
 }

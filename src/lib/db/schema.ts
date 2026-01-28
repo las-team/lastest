@@ -446,8 +446,10 @@ export type NewTestVersion = typeof testVersions.$inferInsert;
 export const suites = sqliteTable('suites', {
   id: text('id').primaryKey(),
   repositoryId: text('repository_id').references(() => repositories.id),
+  functionalAreaId: text('functional_area_id').references(() => functionalAreas.id),
   name: text('name').notNull(),
   description: text('description'),
+  orderIndex: integer('order_index').default(0),
   createdAt: integer('created_at', { mode: 'timestamp' }),
   updatedAt: integer('updated_at', { mode: 'timestamp' }),
 });

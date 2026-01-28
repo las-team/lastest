@@ -1559,6 +1559,7 @@ export interface FunctionalAreaWithChildren {
   orderIndex: number | null;
   children: FunctionalAreaWithChildren[];
   tests: { id: string; name: string; latestStatus: string | null }[];
+  suites: { id: string; name: string; description: string | null; testCount: number }[];
 }
 
 export async function getFunctionalAreasTree(repositoryId: string): Promise<FunctionalAreaWithChildren[]> {
@@ -1571,16 +1572,32 @@ export async function getFunctionalAreasTree(repositoryId: string): Promise<Func
 
   const allTests = await getTestsByRepo(repositoryId);
   const testsByArea = new Map<string, typeof allTests>();
-  const uncategorizedTests: typeof allTests = [];
 
   for (const test of allTests) {
     if (test.functionalAreaId) {
       const existing = testsByArea.get(test.functionalAreaId) || [];
       existing.push(test);
       testsByArea.set(test.functionalAreaId, existing);
-    } else {
-      uncategorizedTests.push(test);
     }
+  }
+
+  // Get all suites with their test counts
+  const allSuites = await getSuites(repositoryId);
+  const suitesByArea = new Map<string, typeof allSuites>();
+
+  for (const suite of allSuites) {
+    if (suite.functionalAreaId) {
+      const existing = suitesByArea.get(suite.functionalAreaId) || [];
+      existing.push(suite);
+      suitesByArea.set(suite.functionalAreaId, existing);
+    }
+  }
+
+  // Get test counts for suites
+  const suiteTestCounts = new Map<string, number>();
+  for (const suite of allSuites) {
+    const suiteTestList = await getSuiteTests(suite.id);
+    suiteTestCounts.set(suite.id, suiteTestList.length);
   }
 
   // Get latest status for each test
@@ -1598,10 +1615,12 @@ export async function getFunctionalAreasTree(repositoryId: string): Promise<Func
 
   for (const area of areas) {
     const areaTests = testsByArea.get(area.id) || [];
+    const areaSuites = suitesByArea.get(area.id) || [];
     areaMap.set(area.id, {
       ...area,
       children: [],
       tests: areaTests.map(t => ({ id: t.id, name: t.name, latestStatus: statusMap.get(t.id) || null })),
+      suites: areaSuites.map(s => ({ id: s.id, name: s.name, description: s.description, testCount: suiteTestCounts.get(s.id) || 0 })),
     });
   }
 
@@ -1654,4 +1673,21 @@ export async function getOrCreateRoutesFolder(repositoryId: string) {
 
 export async function moveTestToArea(testId: string, areaId: string | null) {
   await db.update(tests).set({ functionalAreaId: areaId, updatedAt: new Date() }).where(eq(tests.id, testId));
+}
+
+export async function moveSuiteToArea(suiteId: string, areaId: string | null) {
+  await db.update(suites).set({ functionalAreaId: areaId, updatedAt: new Date() }).where(eq(suites.id, suiteId));
+}
+
+export async function getSuitesByArea(areaId: string) {
+  return db.select().from(suites).where(eq(suites.functionalAreaId, areaId)).orderBy(suites.orderIndex).all();
+}
+
+export async function getUnsortedSuites(repositoryId: string) {
+  return db
+    .select()
+    .from(suites)
+    .where(and(eq(suites.repositoryId, repositoryId), isNull(suites.functionalAreaId)))
+    .orderBy(suites.orderIndex)
+    .all();
 }

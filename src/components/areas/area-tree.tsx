@@ -16,6 +16,8 @@ import {
   X,
   Pause,
   Route,
+  ListChecks,
+  GripVertical,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -30,19 +32,29 @@ import { cn } from '@/lib/utils';
 import type { FunctionalAreaWithChildren } from '@/lib/db/queries';
 
 export interface TreeSelection {
-  type: 'area' | 'test';
+  type: 'area' | 'test' | 'suite';
   id: string;
+}
+
+export interface SuiteItem {
+  id: string;
+  name: string;
+  description: string | null;
+  testCount: number;
 }
 
 interface AreaTreeProps {
   tree: FunctionalAreaWithChildren[];
   uncategorizedTests: { id: string; name: string; latestStatus: string | null }[];
+  unsortedSuites: SuiteItem[];
   selection: TreeSelection | null;
   onSelect: (selection: TreeSelection | null) => void;
   onNewArea: (parentId?: string) => void;
   onEditArea: (id: string) => void;
   onDeleteArea: (id: string) => void;
   onMoveTest: (testId: string, areaId: string | null) => void;
+  onMoveSuite: (suiteId: string, areaId: string | null) => void;
+  onMoveArea: (areaId: string, newParentId: string | null) => void;
 }
 
 function StatusIcon({ status }: { status: string | null }) {
@@ -69,6 +81,7 @@ interface AreaNodeProps {
   onEditArea: (id: string) => void;
   onDeleteArea: (id: string) => void;
   onMoveTest: (testId: string, areaId: string | null) => void;
+  onMoveSuite: (suiteId: string, areaId: string | null) => void;
 }
 
 function AreaNode({
@@ -82,10 +95,11 @@ function AreaNode({
   onEditArea,
   onDeleteArea,
   onMoveTest,
+  onMoveSuite,
 }: AreaNodeProps) {
   const isExpanded = expandedIds.has(area.id);
   const isSelected = selection?.type === 'area' && selection.id === area.id;
-  const hasChildren = area.children.length > 0 || area.tests.length > 0;
+  const hasChildren = area.children.length > 0 || area.tests.length > 0 || area.suites.length > 0;
   const FolderIcon = area.isRouteFolder ? Route : isExpanded ? FolderOpen : Folder;
 
   const handleDragOver = (e: React.DragEvent) => {
@@ -96,8 +110,11 @@ function AreaNode({
   const handleDrop = (e: React.DragEvent) => {
     e.preventDefault();
     const testId = e.dataTransfer.getData('text/test-id');
+    const suiteId = e.dataTransfer.getData('text/suite-id');
     if (testId) {
       onMoveTest(testId, area.id);
+    } else if (suiteId) {
+      onMoveSuite(suiteId, area.id);
     }
   };
 
@@ -132,7 +149,7 @@ function AreaNode({
         </button>
         <FolderIcon className={cn('h-4 w-4', area.isRouteFolder ? 'text-blue-500' : 'text-primary')} />
         <span className="flex-1 truncate text-sm">{area.name}</span>
-        <span className="text-xs text-muted-foreground">{area.tests.length}</span>
+        <span className="text-xs text-muted-foreground">{area.tests.length + area.suites.length}</span>
         <DropdownMenu>
           <DropdownMenuTrigger asChild onClick={(e) => e.stopPropagation()}>
             <Button
@@ -179,6 +196,16 @@ function AreaNode({
               onEditArea={onEditArea}
               onDeleteArea={onDeleteArea}
               onMoveTest={onMoveTest}
+              onMoveSuite={onMoveSuite}
+            />
+          ))}
+          {area.suites.map((suite) => (
+            <SuiteNode
+              key={suite.id}
+              suite={suite}
+              depth={depth + 1}
+              selection={selection}
+              onSelect={onSelect}
             />
           ))}
           {area.tests.map((test) => (
@@ -222,7 +249,7 @@ function TestNode({ test, depth, selection, onSelect }: TestNodeProps) {
       draggable
       onDragStart={handleDragStart}
     >
-      <div className="w-4" />
+      <GripVertical className="h-3 w-3 text-muted-foreground opacity-0 group-hover:opacity-100 cursor-grab" />
       <StatusIcon status={test.latestStatus} />
       <FileCode className="h-4 w-4 text-muted-foreground" />
       <span className="flex-1 truncate text-sm">{test.name}</span>
@@ -230,15 +257,51 @@ function TestNode({ test, depth, selection, onSelect }: TestNodeProps) {
   );
 }
 
+interface SuiteNodeProps {
+  suite: SuiteItem;
+  depth: number;
+  selection: TreeSelection | null;
+  onSelect: (selection: TreeSelection | null) => void;
+}
+
+function SuiteNode({ suite, depth, selection, onSelect }: SuiteNodeProps) {
+  const isSelected = selection?.type === 'suite' && selection.id === suite.id;
+
+  const handleDragStart = (e: React.DragEvent) => {
+    e.dataTransfer.setData('text/suite-id', suite.id);
+    e.dataTransfer.effectAllowed = 'move';
+  };
+
+  return (
+    <div
+      className={cn(
+        'group flex items-center gap-2 py-1 px-2 rounded cursor-pointer hover:bg-muted',
+        isSelected && 'bg-primary/10 hover:bg-primary/15'
+      )}
+      style={{ paddingLeft: `${depth * 16 + 8}px` }}
+      onClick={() => onSelect({ type: 'suite', id: suite.id })}
+      draggable
+      onDragStart={handleDragStart}
+    >
+      <GripVertical className="h-3 w-3 text-muted-foreground opacity-0 group-hover:opacity-100 cursor-grab" />
+      <ListChecks className="h-4 w-4 text-violet-500" />
+      <span className="flex-1 truncate text-sm">{suite.name}</span>
+      <span className="text-xs text-muted-foreground">{suite.testCount}</span>
+    </div>
+  );
+}
+
 export function AreaTree({
   tree,
   uncategorizedTests,
+  unsortedSuites,
   selection,
   onSelect,
   onNewArea,
   onEditArea,
   onDeleteArea,
   onMoveTest,
+  onMoveSuite,
 }: AreaTreeProps) {
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
 
@@ -257,8 +320,11 @@ export function AreaTree({
   const handleUncategorizedDrop = (e: React.DragEvent) => {
     e.preventDefault();
     const testId = e.dataTransfer.getData('text/test-id');
+    const suiteId = e.dataTransfer.getData('text/suite-id');
     if (testId) {
       onMoveTest(testId, null);
+    } else if (suiteId) {
+      onMoveSuite(suiteId, null);
     }
   };
 
@@ -273,6 +339,7 @@ export function AreaTree({
 
       <ScrollArea className="flex-1">
         <div className="p-2">
+          {/* Areas */}
           {tree.map((area) => (
             <AreaNode
               key={area.id}
@@ -286,10 +353,12 @@ export function AreaTree({
               onEditArea={onEditArea}
               onDeleteArea={onDeleteArea}
               onMoveTest={onMoveTest}
+              onMoveSuite={onMoveSuite}
             />
           ))}
 
-          {uncategorizedTests.length > 0 && (
+          {/* Unsorted section (tests and suites without an area) */}
+          {(uncategorizedTests.length > 0 || unsortedSuites.length > 0) && (
             <div
               className="mt-2 pt-2 border-t"
               onDragOver={(e) => {
@@ -300,9 +369,18 @@ export function AreaTree({
             >
               <div className="flex items-center gap-2 py-1 px-2 text-sm text-muted-foreground">
                 <FolderInput className="h-4 w-4" />
-                <span>Uncategorized</span>
-                <span className="text-xs">({uncategorizedTests.length})</span>
+                <span>Unsorted</span>
+                <span className="text-xs">({uncategorizedTests.length + unsortedSuites.length})</span>
               </div>
+              {unsortedSuites.map((suite) => (
+                <SuiteNode
+                  key={suite.id}
+                  suite={suite}
+                  depth={0}
+                  selection={selection}
+                  onSelect={onSelect}
+                />
+              ))}
               {uncategorizedTests.map((test) => (
                 <TestNode
                   key={test.id}
@@ -315,7 +393,7 @@ export function AreaTree({
             </div>
           )}
 
-          {tree.length === 0 && uncategorizedTests.length === 0 && (
+          {tree.length === 0 && uncategorizedTests.length === 0 && unsortedSuites.length === 0 && (
             <div className="text-center py-8 text-muted-foreground text-sm">
               <Folder className="h-8 w-8 mx-auto mb-2 opacity-50" />
               <p>No areas yet</p>

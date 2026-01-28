@@ -74,6 +74,13 @@ export async function moveTestToArea(testId: string, areaId: string | null) {
   revalidatePath(`/tests/${testId}`);
 }
 
+export async function moveSuiteToArea(suiteId: string, areaId: string | null) {
+  await queries.moveSuiteToArea(suiteId, areaId);
+  revalidatePath('/areas');
+  revalidatePath('/suites');
+  revalidatePath(`/suites/${suiteId}`);
+}
+
 export async function reorderAreas(repositoryId: string, orderedIds: string[]) {
   await queries.reorderFunctionalAreas(repositoryId, orderedIds);
   revalidatePath('/areas');
