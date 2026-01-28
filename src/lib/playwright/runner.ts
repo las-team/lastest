@@ -5,6 +5,77 @@ import fs from 'fs';
 import { DEFAULT_SELECTOR_PRIORITY } from '@/lib/db/schema';
 
 /**
+ * Create appState helper for internal state inspection.
+ * Allows tests to access app state like undo/redo stack length, Redux store, etc.
+ * Requires target app to expose state on window (e.g., window.__APP_STATE__).
+ */
+function createAppState(page: Page) {
+  return {
+    /**
+     * Get a value from the app's exposed state by dot-notation path.
+     * Looks for state in common locations: window.__APP_STATE__, window.store, window.__EXCALIDRAW_STATE__
+     * @param path - Dot-notation path like 'history.length' or 'selectedElements.0.id'
+     */
+    get: async (path: string): Promise<unknown> => {
+      return page.evaluate((p) => {
+        const state = (window as any).__APP_STATE__ ||
+                      (window as any).store?.getState?.() ||
+                      (window as any).__EXCALIDRAW_STATE__ ||
+                      (window as any).app?.state;
+        if (!state) return undefined;
+        return p.split('.').reduce((obj, key) => obj?.[key], state);
+      }, path);
+    },
+
+    /**
+     * Get Excalidraw-specific history length (undo/redo stack).
+     * Returns -1 if Excalidraw API is not available.
+     */
+    getHistoryLength: async (): Promise<number> => {
+      return page.evaluate(() => {
+        const api = (window as any).excalidrawAPI;
+        if (api?.getAppState) {
+          const appState = api.getAppState();
+          // History can be accessed differently depending on Excalidraw version
+          return appState?.history?.length ??
+                 (window as any).excalidrawHistory?.length ??
+                 -1;
+        }
+        // Fallback: check common state patterns
+        const state = (window as any).__EXCALIDRAW_STATE__ || (window as any).__APP_STATE__;
+        return state?.history?.length ?? -1;
+      });
+    },
+
+    /**
+     * Get the entire app state object.
+     * Useful for debugging or complex assertions.
+     */
+    getAll: async (): Promise<unknown> => {
+      return page.evaluate(() => {
+        return (window as any).__APP_STATE__ ||
+               (window as any).store?.getState?.() ||
+               (window as any).__EXCALIDRAW_STATE__ ||
+               (window as any).app?.state ||
+               null;
+      });
+    },
+
+    /**
+     * Execute a custom state accessor function in the page context.
+     * @param accessor - Function that receives window and returns the desired value
+     */
+    evaluate: async <T>(accessor: string): Promise<T> => {
+      return page.evaluate((fn) => {
+        // Create function from string and execute it
+        const func = new Function('window', `return ${fn}`);
+        return func(window);
+      }, accessor);
+    },
+  };
+}
+
+/**
  * Simple expect implementation for Playwright Inspector-generated tests.
  * Provides common assertion matchers that wrap Playwright's built-in locator assertions.
  * Supports both Page-level assertions (toHaveURL, toHaveTitle) and Locator assertions.
@@ -169,6 +240,81 @@ function createExpect(timeout = 5000) {
         }
         const actual = await locator.count();
         throw new Error(`Expected count ${count} but got ${actual}`);
+      },
+      // Coordinate assertion: verify element is at expected position
+      async toBeAtPosition(x: number, y: number, tolerance = 5, options?: { timeout?: number }) {
+        const t = options?.timeout ?? timeout;
+        const start = Date.now();
+        while (Date.now() - start < t) {
+          const box = await locator.boundingBox();
+          if (box) {
+            const centerX = box.x + box.width / 2;
+            const centerY = box.y + box.height / 2;
+            if (Math.abs(centerX - x) <= tolerance && Math.abs(centerY - y) <= tolerance) {
+              return;
+            }
+          }
+          await new Promise(r => setTimeout(r, 100));
+        }
+        const box = await locator.boundingBox();
+        const centerX = box ? box.x + box.width / 2 : 'N/A';
+        const centerY = box ? box.y + box.height / 2 : 'N/A';
+        throw new Error(`Expected position (${x}, ${y}) but got (${centerX}, ${centerY})`);
+      },
+      // Bounding box assertion: verify element dimensions and position
+      async toHaveBoundingBox(expected: { x?: number; y?: number; width?: number; height?: number }, tolerance = 5, options?: { timeout?: number }) {
+        const t = options?.timeout ?? timeout;
+        const start = Date.now();
+        while (Date.now() - start < t) {
+          const box = await locator.boundingBox();
+          if (box) {
+            const matches =
+              (expected.x === undefined || Math.abs(box.x - expected.x) <= tolerance) &&
+              (expected.y === undefined || Math.abs(box.y - expected.y) <= tolerance) &&
+              (expected.width === undefined || Math.abs(box.width - expected.width) <= tolerance) &&
+              (expected.height === undefined || Math.abs(box.height - expected.height) <= tolerance);
+            if (matches) return;
+          }
+          await new Promise(r => setTimeout(r, 100));
+        }
+        const box = await locator.boundingBox();
+        throw new Error(`Expected bounding box ${JSON.stringify(expected)} but got ${JSON.stringify(box)}`);
+      },
+      // CSS style assertion: verify computed style property
+      async toHaveStyle(property: string, expected: string | RegExp, options?: { timeout?: number }) {
+        const t = options?.timeout ?? timeout;
+        const start = Date.now();
+        while (Date.now() - start < t) {
+          const value = await locator.evaluate((el, prop) => {
+            return window.getComputedStyle(el).getPropertyValue(prop);
+          }, property);
+          if (typeof expected === 'string' && value === expected) return;
+          if (expected instanceof RegExp && expected.test(value)) return;
+          await new Promise(r => setTimeout(r, 100));
+        }
+        const actual = await locator.evaluate((el, prop) => {
+          return window.getComputedStyle(el).getPropertyValue(prop);
+        }, property);
+        throw new Error(`Expected style "${property}" to be "${expected}" but got "${actual}"`);
+      },
+      // Transform assertion: verify CSS transform matrix
+      async toHaveTransform(expected?: string | RegExp, options?: { timeout?: number }) {
+        const t = options?.timeout ?? timeout;
+        const start = Date.now();
+        while (Date.now() - start < t) {
+          const value = await locator.evaluate((el) => {
+            return window.getComputedStyle(el).transform;
+          });
+          // If no expected value, just check that transform is not 'none'
+          if (expected === undefined && value !== 'none') return;
+          if (typeof expected === 'string' && value === expected) return;
+          if (expected instanceof RegExp && expected.test(value)) return;
+          await new Promise(r => setTimeout(r, 100));
+        }
+        const actual = await locator.evaluate((el) => {
+          return window.getComputedStyle(el).transform;
+        });
+        throw new Error(`Expected transform "${expected ?? 'not none'}" but got "${actual}"`);
       },
       // Add 'not' modifier for negative assertions
       not: {
@@ -653,10 +799,12 @@ export class PlaywrightRunner extends EventEmitter {
 
       // Build an async function from the body
       // Include 'expect' for Playwright Inspector-generated tests that use assertions
+      // Include 'appState' for internal state inspection (Excalidraw undo/redo, etc.)
       const expectFn = createExpect(this.getActionTimeout());
+      const appStateFn = createAppState(page);
       const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
-      const testFn = new AsyncFunction('page', 'baseUrl', 'screenshotPath', 'stepLogger', 'expect', body);
-      await testFn(page, baseUrl, screenshotPath, stepLogger, expectFn);
+      const testFn = new AsyncFunction('page', 'baseUrl', 'screenshotPath', 'stepLogger', 'expect', 'appState', body);
+      await testFn(page, baseUrl, screenshotPath, stepLogger, expectFn, appStateFn);
       return;
     }
 
