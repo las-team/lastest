@@ -294,7 +294,7 @@ export function AreaDetailSection({ selection, areas, suites, onUpdate }: AreaDe
                 onChange={(e) => setName(e.target.value)}
               />
             ) : (
-              <span className="text-lg font-medium">{testData.name}</span>
+              <div className="text-lg font-medium">{testData.name}</div>
             )}
           </div>
 
@@ -381,7 +381,7 @@ export function AreaDetailSection({ selection, areas, suites, onUpdate }: AreaDe
                 onChange={(e) => setName(e.target.value)}
               />
             ) : (
-              <span className="text-lg font-medium">{suiteData.name}</span>
+              <div className="text-lg font-medium">{suiteData.name}</div>
             )}
           </div>
 
