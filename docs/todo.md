@@ -5,7 +5,7 @@ compare /home/ewyct/.claude/plans/partitioned-bouncing-metcalfe.md
 playwright settings /home/ewyct/.claude/plans/replicated-tinkering-papert.md
 Determining test coverage /home/ewyct/.claude/plans/zazzy-tinkering-backus.md
 AI enablement /home/ewyct/.claude/plans/moonlit-fluttering-origami.md
-
+Excalidraw tests: ~/.claude/plans/recursive-wondering-dongarra.md
 --------
 ## reuse
 check the recorder and the runner so that they are compatible and identify the root cause of the issue
@@ -14,6 +14,8 @@ check the recorder and the runner so that they are compatible and identify the r
 OCR
 
 ## features
+Support https://github.com/excalidraw/excalidraw/tree/master/packages/excalidraw/tests
+
 Lastest2 extra assertions (with right click?)
 
 Build/change approval
@@ -48,8 +50,11 @@ Test classification
     Technical
     Visual
     Functional / User Story
+Test suite
 ## bugs
 DOM inspector runs indefinitely
+
+## marketing
 
  1. Integration > Awareness                                                                                      
                                                                                                                   
