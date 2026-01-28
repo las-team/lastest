@@ -1,4 +1,3 @@
-import { Header } from '@/components/layout/header';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import * as queries from '@/lib/db/queries';
@@ -26,8 +25,6 @@ export default async function SettingsPage({
 
   return (
     <div className="flex flex-col h-full">
-      <Header title="Settings" />
-
       <div className="flex-1 p-6 overflow-auto">
         <div className="max-w-2xl mx-auto space-y-6">
           {/* Status Messages */}

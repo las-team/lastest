@@ -1,4 +1,3 @@
-import { Header } from '@/components/layout/header';
 import { CompareClient } from './compare-client';
 import { getTestRuns, getSelectedRepository, getTestRunsByRepo } from '@/lib/db/queries';
 import { fetchRepoBranches } from '@/server/actions/repos';
@@ -26,7 +25,6 @@ export default async function ComparePage() {
 
   return (
     <div className="flex flex-col h-full">
-      <Header title="Compare Branches" />
       <CompareClient
         branches={branches}
         runs={runs}

@@ -1,4 +1,3 @@
-import { Header } from '@/components/layout/header';
 import { getTest, getTestResultsByTest, getSelectedRepository } from '@/lib/db/queries';
 import { getTestScreenshotsGrouped } from '@/server/actions/tests';
 import { TestDetailClient } from './test-detail-client';
@@ -23,7 +22,6 @@ export default async function TestDetailPage({ params }: TestDetailPageProps) {
 
   return (
     <div className="flex flex-col h-full">
-      <Header title={test.name} />
       <TestDetailClient
         test={test}
         results={results}

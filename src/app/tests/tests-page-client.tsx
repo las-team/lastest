@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -13,6 +13,11 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from '@/components/ui/collapsible';
 import { createFunctionalArea } from '@/server/actions/tests';
 import { generateBasicTests } from '@/server/actions/scanner';
 import { aiFixAllFailedTests } from '@/server/actions/ai';
@@ -30,7 +35,10 @@ import {
   Clock,
   Search,
   ChevronRight,
-  FolderOpen
+  ChevronDown,
+  FolderOpen,
+  Folder,
+  FileText
 } from 'lucide-react';
 import Link from 'next/link';
 import type { FunctionalArea, Test, Route } from '@/lib/db/schema';

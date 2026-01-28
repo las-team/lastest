@@ -1,4 +1,3 @@
-import { Header } from '@/components/layout/header';
 import { SuitesPageClient } from './suites-page-client';
 import { getSuites, getSelectedRepository } from '@/lib/db/queries';
 
@@ -8,7 +7,6 @@ export default async function SuitesPage() {
 
   return (
     <div className="flex flex-col h-full">
-      <Header title="Suites" />
       <SuitesPageClient suites={suites} repositoryId={selectedRepo?.id} />
     </div>
   );

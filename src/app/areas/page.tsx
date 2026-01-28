@@ -1,4 +1,3 @@
-import { Header } from '@/components/layout/header';
 import { AreasPageClient } from './areas-page-client';
 import {
   getSelectedRepository,
@@ -14,7 +13,6 @@ export default async function AreasPage() {
   if (!selectedRepo) {
     return (
       <div className="flex flex-col h-full">
-        <Header title="Areas" />
         <div className="flex-1 flex items-center justify-center">
           <p className="text-muted-foreground">Select a repository first</p>
         </div>
@@ -47,7 +45,6 @@ export default async function AreasPage() {
 
   return (
     <div className="flex flex-col h-full">
-      <Header title="Areas" />
       <AreasPageClient
         tree={tree}
         uncategorizedTests={uncategorizedTests}

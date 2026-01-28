@@ -1,5 +1,4 @@
 import { notFound } from 'next/navigation';
-import { Header } from '@/components/layout/header';
 import { SuiteDetailClient } from './suite-detail-client';
 import {
   getSuiteWithTests,
@@ -52,7 +51,6 @@ export default async function SuiteDetailPage({ params }: Props) {
 
   return (
     <div className="flex flex-col h-full">
-      <Header title={suite.name} />
       <SuiteDetailClient suite={suite} availableTests={tests} areas={areas} />
     </div>
   );

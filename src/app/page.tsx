@@ -1,4 +1,3 @@
-import { Header } from '@/components/layout/header';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { CheckCircle, XCircle, Clock, FileCode, Folder, AlertTriangle, Loader2, PenLine, FolderSearch, Sparkles, Globe, FileSearch } from 'lucide-react';
@@ -50,8 +49,6 @@ export default async function DashboardPage() {
 
   return (
     <div className="flex flex-col h-full">
-      <Header title="Dashboard" />
-
       <div className="flex-1 p-6 space-y-6">
         {/* Setup Guide */}
         <SetupGuide
