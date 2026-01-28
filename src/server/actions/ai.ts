@@ -174,3 +174,42 @@ export async function updateTestCode(
     return { success: false, error: message };
   }
 }
+
+export async function aiFixTests(
+  testIds: string[],
+  repositoryId: string
+): Promise<{ success: boolean; fixed: number; failed: number; errors: string[] }> {
+  const errors: string[] = [];
+  let fixed = 0;
+  let failed = 0;
+
+  for (const testId of testIds) {
+    const test = await queries.getTest(testId);
+    if (!test) {
+      failed++;
+      errors.push(`Test ${testId}: Not found`);
+      continue;
+    }
+
+    const results = await queries.getTestResultsByTest(testId);
+    const latestResult = results[results.length - 1];
+
+    if (latestResult?.status !== 'failed') {
+      continue;
+    }
+
+    const errorMessage = latestResult.errorMessage || 'Test failed with unknown error';
+    const result = await aiFixTest(repositoryId, testId, errorMessage);
+
+    if (result.success && result.code) {
+      await queries.updateTestWithVersion(testId, { code: result.code }, 'ai_fix');
+      fixed++;
+    } else {
+      failed++;
+      errors.push(`${test.name}: ${result.error || 'Unknown error'}`);
+    }
+  }
+
+  revalidatePath('/tests');
+  return { success: true, fixed, failed, errors };
+}

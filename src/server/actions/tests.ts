@@ -44,6 +44,14 @@ export async function deleteTest(id: string) {
   revalidatePath('/');
 }
 
+export async function deleteTests(testIds: string[]) {
+  for (const id of testIds) {
+    await queries.deleteTest(id);
+  }
+  revalidatePath('/tests');
+  revalidatePath('/');
+}
+
 export async function getTest(id: string) {
   return queries.getTest(id);
 }

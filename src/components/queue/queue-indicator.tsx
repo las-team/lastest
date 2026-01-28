@@ -25,8 +25,6 @@ export function QueueIndicator() {
     return () => document.removeEventListener('mousedown', handleClick);
   }, [open]);
 
-  if (jobs.length === 0) return null;
-
   // Aggregate progress for the indicator bar
   const avgProgress = hasActive
     ? Math.round(activeJobs.reduce((sum, j) => sum + (j.progress ?? 0), 0) / activeJobs.length)
@@ -55,7 +53,7 @@ export function QueueIndicator() {
       </Button>
 
       {open && (
-        <div className="absolute right-0 top-full mt-1 w-80 bg-popover border rounded-md shadow-md z-50">
+        <div className="absolute left-full bottom-0 ml-1 w-80 bg-popover border rounded-md shadow-md z-50">
           <QueueDropdown jobs={jobs} />
         </div>
       )}

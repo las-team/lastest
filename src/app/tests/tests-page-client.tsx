@@ -5,6 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
+import { Checkbox } from '@/components/ui/checkbox';
 import {
   Dialog,
   DialogContent,
@@ -18,9 +19,10 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from '@/components/ui/collapsible';
-import { createFunctionalArea } from '@/server/actions/tests';
+import { createFunctionalArea, deleteTests } from '@/server/actions/tests';
 import { generateBasicTests } from '@/server/actions/scanner';
-import { aiFixAllFailedTests } from '@/server/actions/ai';
+import { aiFixAllFailedTests, aiFixTests } from '@/server/actions/ai';
+import { runTests } from '@/server/actions/runs';
 import { RouteSelectorDialog } from '@/components/routes/route-selector-dialog';
 import { AICreateTestDialog } from '@/components/ai/ai-create-test-dialog';
 import { MCPCreateTestDialog } from '@/components/ai/mcp-create-test-dialog';
@@ -38,7 +40,10 @@ import {
   ChevronDown,
   FolderOpen,
   Folder,
-  FileText
+  FileText,
+  Play,
+  Trash2,
+  X
 } from 'lucide-react';
 import Link from 'next/link';
 import type { FunctionalArea, Test, Route } from '@/lib/db/schema';
@@ -65,12 +70,76 @@ export function TestsPageClient({ areas, tests, routes, repositoryId, baseUrl = 
   const [isFixingAll, setIsFixingAll] = useState(false);
   const [fixResult, setFixResult] = useState<{ fixed: number; failed: number } | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [isBulkRunning, setIsBulkRunning] = useState(false);
+  const [isBulkDeleting, setIsBulkDeleting] = useState(false);
+  const [isBulkFixing, setIsBulkFixing] = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
   const failedTests = tests.filter(t => t.latestStatus === 'failed');
 
   const filteredTests = tests.filter(test =>
     test.name.toLowerCase().includes(searchQuery.toLowerCase())
   );
+
+  const selectedFailedTests = Array.from(selectedIds).filter(id => {
+    const test = tests.find(t => t.id === id);
+    return test?.latestStatus === 'failed';
+  });
+
+  const allFilteredSelected = filteredTests.length > 0 && filteredTests.every(t => selectedIds.has(t.id));
+
+  const toggleSelectAll = () => {
+    if (allFilteredSelected) {
+      setSelectedIds(new Set());
+    } else {
+      setSelectedIds(new Set(filteredTests.map(t => t.id)));
+    }
+  };
+
+  const toggleSelect = (id: string) => {
+    const newSet = new Set(selectedIds);
+    if (newSet.has(id)) {
+      newSet.delete(id);
+    } else {
+      newSet.add(id);
+    }
+    setSelectedIds(newSet);
+  };
+
+  const handleBulkRun = async () => {
+    if (selectedIds.size === 0) return;
+    setIsBulkRunning(true);
+    try {
+      await runTests(Array.from(selectedIds), repositoryId);
+    } finally {
+      setIsBulkRunning(false);
+    }
+  };
+
+  const handleBulkDelete = async () => {
+    if (selectedIds.size === 0) return;
+    setIsBulkDeleting(true);
+    try {
+      await deleteTests(Array.from(selectedIds));
+      setSelectedIds(new Set());
+      setShowDeleteConfirm(false);
+    } finally {
+      setIsBulkDeleting(false);
+    }
+  };
+
+  const handleBulkFix = async () => {
+    if (!repositoryId || selectedFailedTests.length === 0) return;
+    setIsBulkFixing(true);
+    setFixResult(null);
+    try {
+      const result = await aiFixTests(selectedFailedTests, repositoryId);
+      setFixResult({ fixed: result.fixed, failed: result.failed });
+    } finally {
+      setIsBulkFixing(false);
+    }
+  };
 
   const getAreaName = (areaId: string | null) => {
     if (!areaId) return null;
@@ -218,7 +287,14 @@ export function TestsPageClient({ areas, tests, routes, repositoryId, baseUrl = 
         <Card className="border-border/50 overflow-hidden">
           <CardHeader className="border-b border-border/50 bg-muted/30">
             <div className="flex items-center justify-between">
-              <CardTitle className="text-sm font-medium">All Tests</CardTitle>
+              <div className="flex items-center gap-3">
+                <Checkbox
+                  checked={allFilteredSelected}
+                  onCheckedChange={toggleSelectAll}
+                  disabled={filteredTests.length === 0}
+                />
+                <CardTitle className="text-sm font-medium">All Tests</CardTitle>
+              </div>
               <div className="relative w-64">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                 <Input
@@ -229,6 +305,50 @@ export function TestsPageClient({ areas, tests, routes, repositoryId, baseUrl = 
                 />
               </div>
             </div>
+            {selectedIds.size > 0 && (
+              <div className="flex items-center gap-2 mt-3 pt-3 border-t border-border/50">
+                <span className="text-sm text-muted-foreground">
+                  Selected: {selectedIds.size}
+                </span>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleBulkRun}
+                  disabled={isBulkRunning}
+                >
+                  <Play className="h-3.5 w-3.5 mr-1.5" />
+                  {isBulkRunning ? 'Running...' : 'Run'}
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setShowDeleteConfirm(true)}
+                  disabled={isBulkDeleting}
+                >
+                  <Trash2 className="h-3.5 w-3.5 mr-1.5" />
+                  Delete
+                </Button>
+                {repositoryId && selectedFailedTests.length > 0 && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={handleBulkFix}
+                    disabled={isBulkFixing}
+                  >
+                    <Wrench className="h-3.5 w-3.5 mr-1.5" />
+                    {isBulkFixing ? 'Fixing...' : `AI Fix (${selectedFailedTests.length})`}
+                  </Button>
+                )}
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setSelectedIds(new Set())}
+                >
+                  <X className="h-3.5 w-3.5 mr-1.5" />
+                  Clear
+                </Button>
+              </div>
+            )}
           </CardHeader>
           <CardContent className="p-0">
             {tests.length === 0 ? (
@@ -251,13 +371,17 @@ export function TestsPageClient({ areas, tests, routes, repositoryId, baseUrl = 
             ) : (
               <div className="divide-y divide-border/50">
                 {filteredTests.map((test) => (
-                  <Link
+                  <div
                     key={test.id}
-                    href={`/tests/${test.id}`}
                     className="flex items-center justify-between px-4 py-3 hover:bg-muted/30 transition-colors group"
                   >
                     <div className="flex items-center gap-4 min-w-0">
-                      <div className="min-w-0">
+                      <Checkbox
+                        checked={selectedIds.has(test.id)}
+                        onCheckedChange={() => toggleSelect(test.id)}
+                        onClick={(e) => e.stopPropagation()}
+                      />
+                      <Link href={`/tests/${test.id}`} className="min-w-0 flex-1">
                         <div className="font-medium text-sm truncate group-hover:text-primary transition-colors">
                           {test.name}
                         </div>
@@ -266,13 +390,13 @@ export function TestsPageClient({ areas, tests, routes, repositoryId, baseUrl = 
                             {getAreaName(test.functionalAreaId)}
                           </div>
                         )}
-                      </div>
+                      </Link>
                     </div>
-                    <div className="flex items-center gap-3">
+                    <Link href={`/tests/${test.id}`} className="flex items-center gap-3">
                       <StatusBadge status={test.latestStatus} />
                       <ChevronRight className="h-4 w-4 text-muted-foreground/50 group-hover:text-muted-foreground transition-colors" />
-                    </div>
-                  </Link>
+                    </Link>
+                  </div>
                 ))}
               </div>
             )}
@@ -339,6 +463,26 @@ export function TestsPageClient({ areas, tests, routes, repositoryId, baseUrl = 
           baseUrl={baseUrl}
         />
       )}
+
+      {/* Bulk Delete Confirmation */}
+      <Dialog open={showDeleteConfirm} onOpenChange={setShowDeleteConfirm}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Delete {selectedIds.size} test{selectedIds.size !== 1 ? 's' : ''}?</DialogTitle>
+            <DialogDescription>
+              This action cannot be undone. The selected tests will be permanently deleted.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowDeleteConfirm(false)}>
+              Cancel
+            </Button>
+            <Button variant="destructive" onClick={handleBulkDelete} disabled={isBulkDeleting}>
+              {isBulkDeleting ? 'Deleting...' : 'Delete'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

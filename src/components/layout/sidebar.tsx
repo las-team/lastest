@@ -14,6 +14,7 @@ import {
   FolderTree,
 } from 'lucide-react';
 import { RepoSelector, SyncReposButton } from './repo-selector';
+import { QueueIndicator } from '@/components/queue/queue-indicator';
 import type { Repository } from '@/lib/db/schema';
 
 interface SidebarProps {
@@ -82,8 +83,9 @@ export function Sidebar({ repos, selectedRepo }: SidebarProps) {
         </ul>
       </nav>
 
-      <div className="p-4 border-t text-xs text-muted-foreground">
-        Visual Regression Testing
+      <div className="p-4 border-t flex items-center justify-between">
+        <span className="text-xs text-muted-foreground">Visual Regression Testing</span>
+        <QueueIndicator />
       </div>
     </aside>
   );

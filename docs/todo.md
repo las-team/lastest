@@ -49,13 +49,11 @@ Test classification
     Technical
     Visual
     Functional / User Story
-Test suite
 ## bugs
-DOM inspector runs indefinitely
 
 ## marketing
 
- 1. Integration > Awareness                                                                                      
+ 1. Integration > Awareness                                       
                                                                                                                   
   Posts create awareness. Integrations create adoption.                                                           
   ┌───────────────────────────┬────────────────────┐                                                              
