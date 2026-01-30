@@ -23,6 +23,7 @@ import { createFunctionalArea, deleteTests } from '@/server/actions/tests';
 import { generateBasicTests } from '@/server/actions/scanner';
 import { aiFixAllFailedTests, aiFixTests } from '@/server/actions/ai';
 import { runTests } from '@/server/actions/runs';
+import { useNotifyJobStarted } from '@/components/queue/job-polling-context';
 import { RouteSelectorDialog } from '@/components/routes/route-selector-dialog';
 import { AICreateTestDialog } from '@/components/ai/ai-create-test-dialog';
 import { MCPCreateTestDialog } from '@/components/ai/mcp-create-test-dialog';
@@ -61,6 +62,7 @@ interface TestsPageClientProps {
 }
 
 export function TestsPageClient({ areas, tests, routes, repositoryId, baseUrl = 'http://localhost:3000' }: TestsPageClientProps) {
+  const notifyJobStarted = useNotifyJobStarted();
   const [isNewAreaOpen, setIsNewAreaOpen] = useState(false);
   const [newAreaName, setNewAreaName] = useState('');
   const [isCreating, setIsCreating] = useState(false);
@@ -112,6 +114,7 @@ export function TestsPageClient({ areas, tests, routes, repositoryId, baseUrl = 
     setIsBulkRunning(true);
     try {
       await runTests(Array.from(selectedIds), repositoryId);
+      notifyJobStarted();
     } finally {
       setIsBulkRunning(false);
     }

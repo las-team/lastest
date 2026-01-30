@@ -19,6 +19,7 @@ import { Badge } from '@/components/ui/badge';
 import { createAndRunBuild } from '@/server/actions/builds';
 import type { BuildChanges } from '@/server/actions/builds';
 import { testServerConnection, saveEnvironmentConfig } from '@/server/actions/environment';
+import { useNotifyJobStarted } from '@/components/queue/job-polling-context';
 import type { Test, TestRun, Build } from '@/lib/db/schema';
 import { BuildSummaryCard } from '@/components/builds/build-summary-card';
 
@@ -64,6 +65,7 @@ function isLocalUrl(url: string): boolean {
 
 export function RunDashboardClient({ tests, runs, builds, repositoryId, activeBranch, baseUrl: initialBaseUrl, buildChanges }: RunDashboardClientProps) {
   const router = useRouter();
+  const notifyJobStarted = useNotifyJobStarted();
   const [isRunning, setIsRunning] = useState(false);
   const [baseUrl, setBaseUrl] = useState(initialBaseUrl);
   const [isTesting, setIsTesting] = useState(false);
@@ -104,6 +106,7 @@ export function RunDashboardClient({ tests, runs, builds, repositoryId, activeBr
     try {
       await saveAndTestBaseUrl();
       const { buildId, testRunId } = await createAndRunBuild('manual', undefined, repositoryId);
+      notifyJobStarted();
       router.push(`/builds/${buildId}`);
     } catch (error) {
       console.error('Failed to start build:', error);

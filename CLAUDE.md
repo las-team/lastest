@@ -12,6 +12,7 @@ pnpm db:studio    # Open Drizzle Studio for database inspection
 pnpm db:reset     # Reset database (removes SQLite DB + screenshots/baselines)
 pnpm db:push      # Push schema changes to database
 pnpm db:generate  # Generate Drizzle migrations
+pnpm start        # Start production server
 ```
 
 Database file: `./lastest2.db` (SQLite with WAL mode)

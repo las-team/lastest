@@ -8,6 +8,7 @@ import { Progress } from '@/components/ui/progress';
 import { SuiteBuilder } from '@/components/suites/suite-builder';
 import { CreateSuiteDialog } from '@/components/suites/create-suite-dialog';
 import { deleteSuite, runSuite, getSuiteRunProgress } from '@/server/actions/suites';
+import { useNotifyJobStarted } from '@/components/queue/job-polling-context';
 import type { Suite, FunctionalArea } from '@/lib/db/schema';
 
 interface SuiteTest {
@@ -56,6 +57,7 @@ interface RunProgress {
 
 export function SuiteDetailClient({ suite, availableTests, areas }: SuiteDetailClientProps) {
   const router = useRouter();
+  const notifyJobStarted = useNotifyJobStarted();
   const [isEditOpen, setIsEditOpen] = useState(false);
   const [isRunning, setIsRunning] = useState(false);
   const [runId, setRunId] = useState<string | null>(null);
@@ -94,6 +96,7 @@ export function SuiteDetailClient({ suite, availableTests, areas }: SuiteDetailC
     setProgress(null);
     try {
       const result = await runSuite(suite.id);
+      notifyJobStarted();
       setRunId(result.runId);
     } catch (error) {
       alert(error instanceof Error ? error.message : 'Failed to run suite');

@@ -26,6 +26,7 @@ import { deleteTest, updateTest, getTestVersionHistory, restoreTestVersion } fro
 import { runTests, getRunStatus } from '@/server/actions/runs';
 import { aiFixTest, aiEnhanceTest, updateTestCode } from '@/server/actions/ai';
 import { toast } from 'sonner';
+import { useNotifyJobStarted } from '@/components/queue/job-polling-context';
 import type { Test, TestVersion } from '@/lib/db/schema';
 import type { ScreenshotGroup } from '@/server/actions/tests';
 
@@ -54,6 +55,7 @@ interface TestDetailClientProps {
 
 export function TestDetailClient({ test, results, repositoryId, screenshotGroups = [] }: TestDetailClientProps) {
   const router = useRouter();
+  const notifyJobStarted = useNotifyJobStarted();
   const [isDeleting, setIsDeleting] = useState(false);
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
@@ -133,6 +135,7 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
     setIsRunning(true);
     try {
       await runTests([test.id], repositoryId, headless);
+      notifyJobStarted();
       toast.success(headless ? 'Test started' : 'Test started (headed mode)');
       // Poll for completion
       pollIntervalRef.current = setInterval(async () => {

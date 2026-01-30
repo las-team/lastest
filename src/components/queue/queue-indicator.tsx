@@ -3,11 +3,11 @@
 import { useState, useRef, useEffect } from 'react';
 import { Activity } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { useJobPolling } from './use-job-polling';
+import { useJobPollingContext } from './job-polling-context';
 import { QueueDropdown } from './queue-dropdown';
 
 export function QueueIndicator() {
-  const { jobs } = useJobPolling(2000);
+  const { jobs } = useJobPollingContext();
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 

@@ -4,6 +4,7 @@ import "./globals.css";
 import { SidebarServer } from "@/components/layout/sidebar-server";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { Toaster } from "sonner";
+import { JobPollingProvider } from "@/components/queue/job-polling-context";
 
 const inter = Inter({
   variable: "--font-sans",
@@ -29,13 +30,15 @@ export default function RootLayout({
     <html lang="en">
       <body className={`${inter.variable} ${jetbrainsMono.variable} antialiased`}>
         <TooltipProvider>
-          <div className="flex h-screen">
-            <SidebarServer />
-            <main className="flex-1 overflow-auto">
-              {children}
-            </main>
-          </div>
-          <Toaster richColors position="bottom-right" />
+          <JobPollingProvider>
+            <div className="flex h-screen">
+              <SidebarServer />
+              <main className="flex-1 overflow-auto">
+                {children}
+              </main>
+            </div>
+            <Toaster richColors position="bottom-right" />
+          </JobPollingProvider>
         </TooltipProvider>
       </body>
     </html>

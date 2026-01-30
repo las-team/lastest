@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card';
 import { CreateSuiteDialog } from '@/components/suites/create-suite-dialog';
 import { deleteSuite, runSuite } from '@/server/actions/suites';
+import { useNotifyJobStarted } from '@/components/queue/job-polling-context';
 import type { Suite } from '@/lib/db/schema';
 
 interface SuitesPageClientProps {
@@ -17,6 +18,7 @@ interface SuitesPageClientProps {
 
 export function SuitesPageClient({ suites, repositoryId }: SuitesPageClientProps) {
   const router = useRouter();
+  const notifyJobStarted = useNotifyJobStarted();
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [runningId, setRunningId] = useState<string | null>(null);
 
@@ -30,6 +32,7 @@ export function SuitesPageClient({ suites, repositoryId }: SuitesPageClientProps
     setRunningId(id);
     try {
       await runSuite(id);
+      notifyJobStarted();
       router.push('/run');
     } catch (error) {
       alert(error instanceof Error ? error.message : 'Failed to run suite');

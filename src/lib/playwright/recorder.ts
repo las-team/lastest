@@ -27,7 +27,7 @@ export interface VerificationStatus {
 export type KeyboardModifier = 'Alt' | 'Control' | 'Shift' | 'Meta';
 
 export interface RecordingEvent {
-  type: 'action' | 'navigation' | 'screenshot' | 'error' | 'complete' | 'assertion' | 'cursor-move' | 'mouse-down' | 'mouse-up' | 'hover-preview';
+  type: 'action' | 'navigation' | 'screenshot' | 'error' | 'complete' | 'assertion' | 'cursor-move' | 'mouse-down' | 'mouse-up' | 'hover-preview' | 'keypress';
   timestamp: number;
   sequence: number;
   status: 'preview' | 'committed';
@@ -46,6 +46,7 @@ export interface RecordingEvent {
     coordinates?: { x: number; y: number };
     button?: number; // mouse button for mouse-down/up
     modifiers?: KeyboardModifier[]; // active keyboard modifiers during action
+    key?: string; // key name for keypress events
     elementInfo?: ElementInfo; // for hover-preview
     actionId?: string; // unique ID for verification tracking
   };
@@ -243,6 +244,11 @@ export class PlaywrightRecorder extends EventEmitter {
       });
     }
 
+    // Keypress tracking for keyboard interactions
+    await this.page.exposeFunction('__recordKeypress', (key: string, modifiers?: KeyboardModifier[]) => {
+      this.addEvent('keypress', { key, modifiers: modifiers && modifiers.length > 0 ? modifiers : undefined });
+    });
+
     // Hover preview tracking (always enabled)
     await this.page.exposeFunction('__recordHoverPreview', (elementInfo: ElementInfo) => {
       // Replace any existing preview event (only keep latest)
@@ -294,6 +300,17 @@ export class PlaywrightRecorder extends EventEmitter {
       document.addEventListener('keydown', (e) => {
         if (e.key === 'Alt' || e.key === 'Control' || e.key === 'Shift' || e.key === 'Meta') {
           activeModifiers.add(e.key as BrowserKeyboardModifier);
+        } else {
+          // Record non-modifier keypresses (skip if inside input/textarea to avoid duplicate recording with fill)
+          const target = e.target as HTMLElement;
+          const isEditable = target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable;
+          // Only record special keys (Enter, Escape, Tab, Arrow keys, etc.) or keypresses with modifiers
+          const isSpecialKey = e.key.length > 1 || activeModifiers.size > 0;
+          if (!isEditable || isSpecialKey) {
+            const modifiers = getActiveModifiers();
+            // @ts-ignore
+            window.__recordKeypress?.(e.key, modifiers);
+          }
         }
       }, true);
 
@@ -916,6 +933,21 @@ export class PlaywrightRecorder extends EventEmitter {
         // Release modifier keys after mouse up
         if (modifiers && modifiers.length > 0) {
           for (const mod of modifiers) {
+            lines.push(`  await page.keyboard.up('${mod}');`);
+          }
+        }
+      } else if (event.type === 'keypress' && event.data.key) {
+        const { key, modifiers } = event.data;
+        // Press modifier keys before the key
+        if (modifiers && modifiers.length > 0) {
+          for (const mod of modifiers) {
+            lines.push(`  await page.keyboard.down('${mod}');`);
+          }
+        }
+        lines.push(`  await page.keyboard.press('${key}');`);
+        // Release modifier keys after the key
+        if (modifiers && modifiers.length > 0) {
+          for (const mod of [...modifiers].reverse()) {
             lines.push(`  await page.keyboard.up('${mod}');`);
           }
         }

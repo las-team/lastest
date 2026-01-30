@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/button';
 import { useSetupGuide, type SetupStatus } from './use-setup-guide';
 import { SetupGuideStep, type StepDefinition } from './setup-guide-step';
 import { createAndRunBuild } from '@/server/actions/builds';
+import { useNotifyJobStarted } from '@/components/queue/job-polling-context';
 import { useRouter } from 'next/navigation';
 
 interface SetupGuideProps {
@@ -17,6 +18,7 @@ interface SetupGuideProps {
 
 export function SetupGuide({ initialStatus, latestBuildId }: SetupGuideProps) {
   const router = useRouter();
+  const notifyJobStarted = useNotifyJobStarted();
   const {
     isVisible,
     currentStep,
@@ -51,6 +53,7 @@ export function SetupGuide({ initialStatus, latestBuildId }: SetupGuideProps) {
 
   const handleRunBuild = async () => {
     await createAndRunBuild('manual');
+    notifyJobStarted();
     router.refresh();
   };
 

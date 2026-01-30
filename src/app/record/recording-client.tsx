@@ -64,6 +64,7 @@ import {
   Check,
   RefreshCw,
   Terminal,
+  Keyboard,
 } from 'lucide-react';
 import type { FunctionalArea, PlaywrightSettings, RecordingEngine } from '@/lib/db/schema';
 import { DEFAULT_RECORDING_ENGINES } from '@/lib/db/schema';
@@ -101,13 +102,19 @@ function isActionReplayable(event: RecordingEvent): { replayable: boolean; reaso
   return { replayable: false, reason: 'no-selectors' };
 }
 
+function formatModifiers(modifiers?: KeyboardModifier[]): string {
+  if (!modifiers || modifiers.length === 0) return '';
+  return `[${modifiers.join('+')}] `;
+}
+
 function getEventDescription(event: RecordingEvent): string {
+  const modPrefix = formatModifiers(event.data.modifiers);
   switch (event.type) {
     case 'navigation':
       return `Navigate to ${event.data.relativePath || event.data.url || 'page'}`;
     case 'action':
       if (event.data.action === 'click') {
-        return `Click ${event.data.selector?.slice(0, 40) || 'element'}`;
+        return `${modPrefix}Click ${event.data.selector?.slice(0, 40) || 'element'}`;
       }
       if (event.data.action === 'fill') {
         return `Fill ${event.data.selector?.slice(0, 30) || 'input'} with "${event.data.value?.slice(0, 20) || ''}"`;
@@ -127,9 +134,9 @@ function getEventDescription(event: RecordingEvent): string {
       };
       return `Assert: ${labels[event.data.assertionType || ''] || event.data.assertionType}`;
     case 'mouse-down':
-      return `Mouse down at (${event.data.coordinates?.x}, ${event.data.coordinates?.y})`;
+      return `${modPrefix}Mouse down at (${event.data.coordinates?.x}, ${event.data.coordinates?.y})`;
     case 'mouse-up':
-      return `Mouse up at (${event.data.coordinates?.x}, ${event.data.coordinates?.y})`;
+      return `${modPrefix}Mouse up at (${event.data.coordinates?.x}, ${event.data.coordinates?.y})`;
     case 'hover-preview':
       const info = event.data.elementInfo;
       if (info) {
@@ -143,6 +150,8 @@ function getEventDescription(event: RecordingEvent): string {
         return `${info.potentialAction || 'interact'} → ${parts.join(' ')}`;
       }
       return 'Hovering...';
+    case 'keypress':
+      return `${modPrefix}Press "${event.data.key || 'key'}"`;
     default:
       return event.type;
   }
@@ -158,6 +167,8 @@ interface VerificationStatus {
   domVerified?: boolean;
   lastChecked?: number;
 }
+
+type KeyboardModifier = 'Alt' | 'Control' | 'Shift' | 'Meta';
 
 interface RecordingEvent {
   type: string;
@@ -177,6 +188,8 @@ interface RecordingEvent {
     coordinates?: { x: number; y: number };
     button?: number;
     actionId?: string;
+    modifiers?: KeyboardModifier[];
+    key?: string;
     elementInfo?: {
       tagName: string;
       id?: string;
@@ -820,6 +833,7 @@ export function RecordingClient({
                             {event.type === 'mouse-down' && <MousePointerClick className="h-3 w-3 text-red-500" />}
                             {event.type === 'mouse-up' && <MousePointerClick className="h-3 w-3 text-red-300" />}
                             {event.type === 'hover-preview' && <Eye className="h-3 w-3 text-gray-400" />}
+                            {event.type === 'keypress' && <Keyboard className="h-3 w-3 text-indigo-500" />}
                           </div>
                           <div className="flex-1 min-w-0">
                             <span className="text-muted-foreground text-xs">
