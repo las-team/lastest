@@ -8,6 +8,27 @@ import { extractText, terminateWorker } from './ocr';
 
 export type AssertionType = 'pageLoad' | 'networkIdle' | 'urlMatch' | 'domContentLoaded';
 
+// Element-specific assertion types for Shift+right-click menu
+export type ElementAssertionType =
+  | 'toBeVisible'
+  | 'toBeHidden'
+  | 'toBeAttached'
+  | 'toHaveAttribute'
+  | 'toHaveText'
+  | 'toContainText'
+  | 'toHaveValue'
+  | 'toBeEnabled'
+  | 'toBeDisabled'
+  | 'toBeChecked';
+
+export interface ElementAssertion {
+  type: ElementAssertionType;
+  selectors: ActionSelector[];
+  expectedValue?: string; // For toHaveText, toContainText, toHaveValue
+  attributeName?: string; // For toHaveAttribute
+  attributeValue?: string; // For toHaveAttribute
+}
+
 export interface ElementInfo {
   tagName: string;
   id?: string;
@@ -49,6 +70,7 @@ export interface RecordingEvent {
     key?: string; // key name for keypress events
     elementInfo?: ElementInfo; // for hover-preview
     actionId?: string; // unique ID for verification tracking
+    elementAssertion?: ElementAssertion; // for element assertions via Shift+right-click
   };
 }
 
@@ -260,6 +282,11 @@ export class PlaywrightRecorder extends EventEmitter {
         }
       }
       this.addEvent('hover-preview', { elementInfo }, 'preview');
+    });
+
+    // Element assertion recording via Shift+right-click menu
+    await this.page.exposeFunction('__recordElementAssertion', (assertion: ElementAssertion) => {
+      this.addEvent('assertion', { elementAssertion: assertion });
     });
 
     // Async DOM verification callback - updates event verification status
@@ -573,6 +600,201 @@ export class PlaywrightRecorder extends EventEmitter {
         });
       }, true);
 
+      // ========== Element Assertion Menu (Shift+Right-Click) ==========
+      type ElementAssertionTypeInBrowser =
+        | 'toBeVisible' | 'toBeHidden' | 'toBeAttached' | 'toHaveAttribute'
+        | 'toHaveText' | 'toContainText' | 'toHaveValue'
+        | 'toBeEnabled' | 'toBeDisabled' | 'toBeChecked';
+
+      interface AssertionOption {
+        type: ElementAssertionTypeInBrowser;
+        label: string;
+        needsValue?: boolean;
+        needsAttribute?: boolean;
+      }
+
+      let assertionMenuElement: HTMLDivElement | null = null;
+      let assertionMenuTarget: HTMLElement | null = null;
+
+      function getAssertionOptions(element: HTMLElement): AssertionOption[] {
+        const options: AssertionOption[] = [
+          { type: 'toBeVisible', label: 'Assert visible' },
+          { type: 'toBeHidden', label: 'Assert hidden' },
+          { type: 'toBeAttached', label: 'Assert attached' },
+          { type: 'toHaveAttribute', label: 'Assert has attribute...', needsAttribute: true },
+        ];
+
+        const tagName = element.tagName.toUpperCase();
+        const inputType = (element as HTMLInputElement).type?.toLowerCase();
+
+        // Text assertions for elements with text content
+        if (element.textContent?.trim()) {
+          options.push({ type: 'toHaveText', label: 'Assert text equals', needsValue: true });
+          options.push({ type: 'toContainText', label: 'Assert text contains', needsValue: true });
+        }
+
+        // Input-specific assertions
+        if (tagName === 'INPUT' || tagName === 'TEXTAREA') {
+          options.push({ type: 'toHaveValue', label: 'Assert value equals', needsValue: true });
+          options.push({ type: 'toBeEnabled', label: 'Assert enabled' });
+          options.push({ type: 'toBeDisabled', label: 'Assert disabled' });
+        }
+
+        // Checkbox/radio-specific assertions
+        if (inputType === 'checkbox' || inputType === 'radio') {
+          options.push({ type: 'toBeChecked', label: 'Assert checked' });
+        }
+
+        return options;
+      }
+
+      function showAssertionMenu(x: number, y: number, element: HTMLElement): void {
+        hideAssertionMenu();
+
+        assertionMenuTarget = element;
+        const options = getAssertionOptions(element);
+
+        const menu = document.createElement('div');
+        menu.id = '__lastest_assertion_menu';
+        menu.style.cssText = `
+          position: fixed;
+          z-index: 2147483647;
+          background: #1f2937;
+          border: 1px solid #374151;
+          border-radius: 6px;
+          padding: 4px 0;
+          min-width: 180px;
+          box-shadow: 0 10px 25px rgba(0,0,0,0.3);
+          font-family: system-ui, -apple-system, sans-serif;
+          font-size: 13px;
+          color: #e5e7eb;
+        `;
+
+        // Header showing element info
+        const header = document.createElement('div');
+        header.style.cssText = `
+          padding: 6px 12px;
+          border-bottom: 1px solid #374151;
+          font-size: 11px;
+          color: #9ca3af;
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
+        `;
+        const tagDisplay = element.tagName.toLowerCase();
+        const idDisplay = element.id ? `#${element.id}` : '';
+        header.textContent = `<${tagDisplay}>${idDisplay}`;
+        menu.appendChild(header);
+
+        // Add assertion options
+        for (const opt of options) {
+          const item = document.createElement('div');
+          item.style.cssText = `
+            padding: 6px 12px;
+            cursor: pointer;
+            transition: background 0.1s;
+          `;
+          item.textContent = opt.label;
+          item.addEventListener('mouseenter', () => {
+            item.style.background = '#374151';
+          });
+          item.addEventListener('mouseleave', () => {
+            item.style.background = 'transparent';
+          });
+          item.addEventListener('click', (e) => {
+            e.stopPropagation();
+            handleAssertionSelection(opt, element);
+          });
+          menu.appendChild(item);
+        }
+
+        // Position menu, ensuring it stays on screen
+        let finalX = x;
+        let finalY = y;
+        document.body.appendChild(menu);
+        const rect = menu.getBoundingClientRect();
+        if (finalX + rect.width > window.innerWidth) {
+          finalX = window.innerWidth - rect.width - 10;
+        }
+        if (finalY + rect.height > window.innerHeight) {
+          finalY = window.innerHeight - rect.height - 10;
+        }
+        menu.style.left = `${finalX}px`;
+        menu.style.top = `${finalY}px`;
+
+        assertionMenuElement = menu;
+
+        // Close menu on click outside or Escape
+        setTimeout(() => {
+          document.addEventListener('click', hideAssertionMenu, { once: true });
+          document.addEventListener('keydown', handleEscapeKey);
+        }, 0);
+      }
+
+      function hideAssertionMenu(): void {
+        if (assertionMenuElement) {
+          assertionMenuElement.remove();
+          assertionMenuElement = null;
+          assertionMenuTarget = null;
+          document.removeEventListener('keydown', handleEscapeKey);
+        }
+      }
+
+      function handleEscapeKey(e: KeyboardEvent): void {
+        if (e.key === 'Escape') {
+          hideAssertionMenu();
+        }
+      }
+
+      function handleAssertionSelection(opt: AssertionOption, element: HTMLElement): void {
+        const selectors = generateAllSelectors(element);
+        let expectedValue: string | undefined;
+        let attributeName: string | undefined;
+        let attributeValue: string | undefined;
+
+        if (opt.needsAttribute) {
+          const promptResult = prompt('Enter attribute name (e.g., "href", "class"):');
+          if (!promptResult) {
+            hideAssertionMenu();
+            return;
+          }
+          attributeName = promptResult;
+          attributeValue = element.getAttribute(attributeName) || '';
+        }
+
+        if (opt.needsValue) {
+          if (opt.type === 'toHaveText' || opt.type === 'toContainText') {
+            expectedValue = element.textContent?.trim() || '';
+          } else if (opt.type === 'toHaveValue') {
+            expectedValue = (element as HTMLInputElement).value || '';
+          }
+        }
+
+        // @ts-ignore
+        window.__recordElementAssertion?.({
+          type: opt.type,
+          selectors,
+          expectedValue,
+          attributeName,
+          attributeValue,
+        });
+
+        hideAssertionMenu();
+      }
+
+      // Shift+Right-click to show assertion menu
+      document.addEventListener('contextmenu', (e) => {
+        if (!e.shiftKey) return; // Only trigger with Shift held
+
+        e.preventDefault();
+        e.stopPropagation();
+
+        const target = e.target as HTMLElement;
+        if (!target || target === document.body || target === document.documentElement) return;
+
+        showAssertionMenu(e.clientX, e.clientY, target);
+      }, true);
+
       // Async DOM verification system
       // Track pending verifications for actions by actionId
       interface PendingVerification {
@@ -786,10 +1008,11 @@ export class PlaywrightRecorder extends EventEmitter {
       `        // Use .first() to handle multiple matches (e.g., header + footer nav links)`,
       `        const target = locator.first();`,
       `        await target.waitFor({ timeout: 3000 });`,
+      `        if (action === 'locate') return target; // Return locator for assertions`,
       `        if (action === 'click') await target.click();`,
       `        else if (action === 'fill') await target.fill(value || '');`,
       `        else if (action === 'selectOption') await target.selectOption(value || '');`,
-      `        return;`,
+      `        return target;`,
       `      } catch { continue; }`,
       `    }`,
       ...(coordsEnabled ? [
@@ -893,26 +1116,71 @@ export class PlaywrightRecorder extends EventEmitter {
       } else if (event.type === 'screenshot') {
         lines.push(`  await page.screenshot({ path: getScreenshotPath(), fullPage: true });`);
       } else if (event.type === 'assertion') {
-        const { assertionType, url } = event.data;
-        // Generate assertion code based on type
-        switch (assertionType) {
-          case 'pageLoad':
-            lines.push(`  // Assertion: Verify page has finished loading`);
-            lines.push(`  await page.waitForLoadState('load');`);
-            break;
-          case 'networkIdle':
-            lines.push(`  // Assertion: Verify no pending network requests`);
-            lines.push(`  await page.waitForLoadState('networkidle');`);
-            break;
-          case 'urlMatch':
-            lines.push(`  // Assertion: Verify current URL matches expected`);
-            const relativePath = this.getRelativePath(url || '');
-            lines.push(`  await expect(page).toHaveURL(buildUrl(baseUrl, '${relativePath}'));`);
-            break;
-          case 'domContentLoaded':
-            lines.push(`  // Assertion: Verify DOM is ready`);
-            lines.push(`  await page.waitForLoadState('domcontentloaded');`);
-            break;
+        const { assertionType, url, elementAssertion } = event.data;
+
+        // Handle element assertions (from Shift+right-click menu)
+        if (elementAssertion) {
+          const selectorsJson = JSON.stringify(elementAssertion.selectors);
+          const assertType = elementAssertion.type;
+          lines.push(`  // Element assertion: ${assertType}`);
+          lines.push(`  {`);
+          lines.push(`    const el = await locateWithFallback(page, ${selectorsJson}, 'locate', null, null);`);
+
+          // Generate the appropriate expect() call based on assertion type
+          switch (assertType) {
+            case 'toBeVisible':
+              lines.push(`    await expect(el).toBeVisible();`);
+              break;
+            case 'toBeHidden':
+              lines.push(`    await expect(el).toBeHidden();`);
+              break;
+            case 'toBeAttached':
+              lines.push(`    await expect(el).toBeAttached();`);
+              break;
+            case 'toHaveAttribute':
+              lines.push(`    await expect(el).toHaveAttribute('${elementAssertion.attributeName || ''}', '${elementAssertion.attributeValue || ''}');`);
+              break;
+            case 'toHaveText':
+              lines.push(`    await expect(el).toHaveText('${(elementAssertion.expectedValue || '').replace(/'/g, "\\'")}');`);
+              break;
+            case 'toContainText':
+              lines.push(`    await expect(el).toContainText('${(elementAssertion.expectedValue || '').replace(/'/g, "\\'")}');`);
+              break;
+            case 'toHaveValue':
+              lines.push(`    await expect(el).toHaveValue('${(elementAssertion.expectedValue || '').replace(/'/g, "\\'")}');`);
+              break;
+            case 'toBeEnabled':
+              lines.push(`    await expect(el).toBeEnabled();`);
+              break;
+            case 'toBeDisabled':
+              lines.push(`    await expect(el).toBeDisabled();`);
+              break;
+            case 'toBeChecked':
+              lines.push(`    await expect(el).toBeChecked();`);
+              break;
+          }
+          lines.push(`  }`);
+        } else {
+          // Handle page-level assertions
+          switch (assertionType) {
+            case 'pageLoad':
+              lines.push(`  // Assertion: Verify page has finished loading`);
+              lines.push(`  await page.waitForLoadState('load');`);
+              break;
+            case 'networkIdle':
+              lines.push(`  // Assertion: Verify no pending network requests`);
+              lines.push(`  await page.waitForLoadState('networkidle');`);
+              break;
+            case 'urlMatch':
+              lines.push(`  // Assertion: Verify current URL matches expected`);
+              const relativePath = this.getRelativePath(url || '');
+              lines.push(`  await expect(page).toHaveURL(buildUrl(baseUrl, '${relativePath}'));`);
+              break;
+            case 'domContentLoaded':
+              lines.push(`  // Assertion: Verify DOM is ready`);
+              lines.push(`  await page.waitForLoadState('domcontentloaded');`);
+              break;
+          }
         }
       } else if (event.type === 'mouse-down' && event.data.coordinates) {
         const { x, y } = event.data.coordinates;

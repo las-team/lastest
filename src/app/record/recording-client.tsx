@@ -66,6 +66,7 @@ import {
   RefreshCw,
   Terminal,
   Keyboard,
+  ShieldCheck,
 } from 'lucide-react';
 import type { FunctionalArea, PlaywrightSettings, RecordingEngine, Test } from '@/lib/db/schema';
 import { DEFAULT_RECORDING_ENGINES } from '@/lib/db/schema';
@@ -128,6 +129,14 @@ function getEventDescription(event: RecordingEvent): string {
     case 'screenshot':
       return 'Screenshot captured';
     case 'assertion':
+      // Handle element assertions from Shift+right-click
+      if (event.data.elementAssertion) {
+        const ea = event.data.elementAssertion;
+        const assertLabel = ea.type.replace(/^to/, '').replace(/([A-Z])/g, ' $1').trim();
+        const selectorHint = ea.selectors[0]?.value?.slice(0, 25) || 'element';
+        return `Assert: ${assertLabel} on ${selectorHint}`;
+      }
+      // Page-level assertions
       const labels: Record<string, string> = {
         pageLoad: 'Page Load',
         networkIdle: 'Network Idle',
@@ -187,6 +196,13 @@ interface RecordingEvent {
     relativePath?: string;
     screenshotPath?: string;
     assertionType?: string;
+    elementAssertion?: {
+      type: string;
+      selectors: ActionSelector[];
+      expectedValue?: string;
+      attributeName?: string;
+      attributeValue?: string;
+    };
     coordinates?: { x: number; y: number };
     button?: number;
     actionId?: string;
@@ -856,7 +872,8 @@ export function RecordingClient({
                             {event.type === 'action' && event.data.action === 'fill' && <FormInput className="h-3 w-3 text-orange-500" />}
                             {event.type === 'action' && event.data.action === 'selectOption' && <ListFilter className="h-3 w-3 text-cyan-500" />}
                             {event.type === 'screenshot' && <Camera className="h-3 w-3 text-yellow-500" />}
-                            {event.type === 'assertion' && <CheckCircle2 className="h-3 w-3 text-purple-500" />}
+                            {event.type === 'assertion' && !event.data.elementAssertion && <CheckCircle2 className="h-3 w-3 text-purple-500" />}
+                            {event.type === 'assertion' && event.data.elementAssertion && <ShieldCheck className="h-3 w-3 text-teal-500" />}
                             {event.type === 'mouse-down' && <MousePointerClick className="h-3 w-3 text-red-500" />}
                             {event.type === 'mouse-up' && <MousePointerClick className="h-3 w-3 text-red-300" />}
                             {event.type === 'hover-preview' && <Eye className="h-3 w-3 text-gray-400" />}
@@ -934,9 +951,15 @@ export function RecordingClient({
             </Card>
           </div>
 
-          <div className="text-sm text-muted-foreground text-center">
-            <Clock className="h-4 w-4 inline mr-1" />
-            Recording... Interact with the browser window to capture actions.
+          <div className="text-sm text-muted-foreground text-center space-y-1">
+            <div>
+              <Clock className="h-4 w-4 inline mr-1" />
+              Recording... Interact with the browser window to capture actions.
+            </div>
+            <div>
+              <ShieldCheck className="h-4 w-4 inline mr-1" />
+              Tip: <span className="font-medium">Shift+Right-click</span> on any element to add assertions.
+            </div>
           </div>
         </div>
       </div>

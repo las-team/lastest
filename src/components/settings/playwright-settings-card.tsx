@@ -15,7 +15,7 @@ import {
 } from '@/components/ui/select';
 import { SelectorPriorityList } from './selector-priority-list';
 import { savePlaywrightSettings, resetPlaywrightSettings } from '@/server/actions/settings';
-import { DEFAULT_SELECTOR_PRIORITY, DEFAULT_RECORDING_ENGINES } from '@/lib/db/schema';
+import { DEFAULT_SELECTOR_PRIORITY } from '@/lib/db/schema';
 import type { SelectorConfig, PlaywrightSettings, HeadlessMode, RecordingEngine } from '@/lib/db/schema';
 import { Loader2, RotateCcw, Save } from 'lucide-react';
 
@@ -42,9 +42,6 @@ export function PlaywrightSettingsCard({
   const [actionTimeout, setActionTimeout] = useState(settings.actionTimeout || 5000);
   const [pointerGestures, setPointerGestures] = useState(settings.pointerGestures ?? false);
   const [cursorFPS, setCursorFPS] = useState(settings.cursorFPS ?? 30);
-  const [enabledRecordingEngines, setEnabledRecordingEngines] = useState<RecordingEngine[]>(
-    settings.enabledRecordingEngines ?? DEFAULT_RECORDING_ENGINES
-  );
   const [defaultRecordingEngine, setDefaultRecordingEngine] = useState<RecordingEngine>(
     (settings.defaultRecordingEngine as RecordingEngine) ?? 'lastest'
   );
@@ -62,7 +59,6 @@ export function PlaywrightSettingsCard({
         actionTimeout,
         pointerGestures,
         cursorFPS,
-        enabledRecordingEngines,
         defaultRecordingEngine,
       });
     });
@@ -80,7 +76,6 @@ export function PlaywrightSettingsCard({
       setActionTimeout(5000);
       setPointerGestures(false);
       setCursorFPS(30);
-      setEnabledRecordingEngines(DEFAULT_RECORDING_ENGINES);
       setDefaultRecordingEngine('lastest');
     });
   };
@@ -90,86 +85,18 @@ export function PlaywrightSettingsCard({
       {/* Selector Priority */}
       <SelectorPriorityList value={selectorPriority} onChange={setSelectorPriority} />
 
-      {/* Recording Engines */}
-      <div className="space-y-3">
-        <div className="space-y-0.5">
-          <Label>Recording Engines</Label>
-          <p className="text-xs text-muted-foreground">
-            Choose which recording engines are available
-          </p>
-        </div>
-        <div className="space-y-2">
-          <div className="flex items-center justify-between">
-            <div className="space-y-0.5">
-              <span className="text-sm font-medium">Lastest Recorder</span>
-              <p className="text-xs text-muted-foreground">
-                Built-in recorder with multi-selector fallback
-              </p>
-            </div>
-            <Switch
-              checked={enabledRecordingEngines.includes('lastest')}
-              onCheckedChange={(checked) => {
-                if (checked) {
-                  setEnabledRecordingEngines([...enabledRecordingEngines, 'lastest']);
-                } else {
-                  // Must keep at least one engine enabled
-                  if (enabledRecordingEngines.length > 1) {
-                    setEnabledRecordingEngines(enabledRecordingEngines.filter(e => e !== 'lastest'));
-                    // If this was the default, switch to another
-                    if (defaultRecordingEngine === 'lastest') {
-                      setDefaultRecordingEngine('playwright-inspector');
-                    }
-                  }
-                }
-              }}
-              disabled={enabledRecordingEngines.length === 1 && enabledRecordingEngines.includes('lastest')}
-            />
-          </div>
-          <div className="flex items-center justify-between">
-            <div className="space-y-0.5">
-              <span className="text-sm font-medium">Playwright Inspector</span>
-              <p className="text-xs text-muted-foreground">
-                Official Playwright codegen tool
-              </p>
-            </div>
-            <Switch
-              checked={enabledRecordingEngines.includes('playwright-inspector')}
-              onCheckedChange={(checked) => {
-                if (checked) {
-                  setEnabledRecordingEngines([...enabledRecordingEngines, 'playwright-inspector']);
-                } else {
-                  // Must keep at least one engine enabled
-                  if (enabledRecordingEngines.length > 1) {
-                    setEnabledRecordingEngines(enabledRecordingEngines.filter(e => e !== 'playwright-inspector'));
-                    // If this was the default, switch to another
-                    if (defaultRecordingEngine === 'playwright-inspector') {
-                      setDefaultRecordingEngine('lastest');
-                    }
-                  }
-                }
-              }}
-              disabled={enabledRecordingEngines.length === 1 && enabledRecordingEngines.includes('playwright-inspector')}
-            />
-          </div>
-        </div>
-        {enabledRecordingEngines.length > 1 && (
-          <div className="flex items-center gap-2">
-            <Label htmlFor="defaultEngine" className="text-sm whitespace-nowrap">Default Engine</Label>
-            <Select value={defaultRecordingEngine} onValueChange={(v) => setDefaultRecordingEngine(v as RecordingEngine)}>
-              <SelectTrigger id="defaultEngine" className="w-48">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {enabledRecordingEngines.includes('lastest') && (
-                  <SelectItem value="lastest">Lastest Recorder</SelectItem>
-                )}
-                {enabledRecordingEngines.includes('playwright-inspector') && (
-                  <SelectItem value="playwright-inspector">Playwright Inspector</SelectItem>
-                )}
-              </SelectContent>
-            </Select>
-          </div>
-        )}
+      {/* Default Recording Engine */}
+      <div className="space-y-2">
+        <Label htmlFor="defaultEngine">Default Recording Engine</Label>
+        <Select value={defaultRecordingEngine} onValueChange={(v) => setDefaultRecordingEngine(v as RecordingEngine)}>
+          <SelectTrigger id="defaultEngine" className="w-48">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="lastest">Lastest Recorder</SelectItem>
+            <SelectItem value="playwright-inspector">Playwright Inspector</SelectItem>
+          </SelectContent>
+        </Select>
       </div>
 
       {/* Cursor Movement Tracking */}
