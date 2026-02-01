@@ -419,6 +419,7 @@ export const backgroundJobs = sqliteTable('background_jobs', {
   repositoryId: text('repository_id').references(() => repositories.id),
   createdAt: integer('created_at', { mode: 'timestamp' }),
   startedAt: integer('started_at', { mode: 'timestamp' }),
+  lastActivityAt: integer('last_activity_at', { mode: 'timestamp' }),
   completedAt: integer('completed_at', { mode: 'timestamp' }),
 });
 

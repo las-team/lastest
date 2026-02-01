@@ -18,9 +18,11 @@ export async function createJob(
     repositoryId,
     metadata,
   });
+  const now = new Date();
   await queries.updateBackgroundJob(id, {
     status: 'running',
-    startedAt: new Date(),
+    startedAt: now,
+    lastActivityAt: now,
   });
   return id;
 }
@@ -43,9 +45,11 @@ export async function createPendingJob(
 }
 
 export async function startJob(jobId: string) {
+  const now = new Date();
   await queries.updateBackgroundJob(jobId, {
     status: 'running',
-    startedAt: new Date(),
+    startedAt: now,
+    lastActivityAt: now,
   });
 }
 
@@ -61,6 +65,7 @@ export async function updateJobProgress(
     completedSteps,
     ...(totalSteps !== undefined ? { totalSteps } : {}),
     progress,
+    lastActivityAt: new Date(),
   });
 }
 

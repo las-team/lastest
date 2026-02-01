@@ -1387,13 +1387,26 @@ export async function getPendingBuildJobs(repositoryId?: string | null) {
 
 export async function markStaleJobsAsCrashed(staleThresholdMs = 300000) {
   const threshold = new Date(Date.now() - staleThresholdMs);
+  // Check lastActivityAt first (if set), otherwise fall back to startedAt
+  // This prevents killing jobs that are actively making progress
   const staleJobs = await db
     .select()
     .from(backgroundJobs)
     .where(
       and(
         eq(backgroundJobs.status, 'running'),
-        lt(backgroundJobs.startedAt, threshold)
+        or(
+          // Job has lastActivityAt set and it's stale
+          and(
+            backgroundJobs.lastActivityAt,
+            lt(backgroundJobs.lastActivityAt, threshold)
+          ),
+          // Job has no lastActivityAt (legacy) and startedAt is stale
+          and(
+            isNull(backgroundJobs.lastActivityAt),
+            lt(backgroundJobs.startedAt, threshold)
+          )
+        )
       )
     )
     .all();
