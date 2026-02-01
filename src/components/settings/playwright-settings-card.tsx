@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useTransition } from 'react';
+import { useState, useTransition, useEffect, useRef, useCallback } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -15,9 +15,9 @@ import {
 } from '@/components/ui/select';
 import { SelectorPriorityList } from './selector-priority-list';
 import { savePlaywrightSettings, resetPlaywrightSettings } from '@/server/actions/settings';
-import { DEFAULT_SELECTOR_PRIORITY, DEFAULT_RECORDING_ENGINES } from '@/lib/db/schema';
+import { DEFAULT_SELECTOR_PRIORITY } from '@/lib/db/schema';
 import type { SelectorConfig, PlaywrightSettings, HeadlessMode, RecordingEngine } from '@/lib/db/schema';
-import { Loader2, RotateCcw, Save } from 'lucide-react';
+import { Loader2, RotateCcw, Save, List, Video, MousePointer, Check } from 'lucide-react';
 
 interface PlaywrightSettingsCardProps {
   settings: PlaywrightSettings;
@@ -31,6 +31,7 @@ export function PlaywrightSettingsCard({
   compact = false,
 }: PlaywrightSettingsCardProps) {
   const [isPending, startTransition] = useTransition();
+  const [showSaved, setShowSaved] = useState(false);
   const [selectorPriority, setSelectorPriority] = useState<SelectorConfig[]>(
     settings.selectorPriority || DEFAULT_SELECTOR_PRIORITY
   );
@@ -42,14 +43,15 @@ export function PlaywrightSettingsCard({
   const [actionTimeout, setActionTimeout] = useState(settings.actionTimeout || 5000);
   const [pointerGestures, setPointerGestures] = useState(settings.pointerGestures ?? false);
   const [cursorFPS, setCursorFPS] = useState(settings.cursorFPS ?? 30);
-  const [enabledRecordingEngines, setEnabledRecordingEngines] = useState<RecordingEngine[]>(
-    settings.enabledRecordingEngines ?? DEFAULT_RECORDING_ENGINES
-  );
   const [defaultRecordingEngine, setDefaultRecordingEngine] = useState<RecordingEngine>(
     (settings.defaultRecordingEngine as RecordingEngine) ?? 'lastest'
   );
 
-  const handleSave = () => {
+  // Track if initial mount to prevent auto-save on first render
+  const isInitialMount = useRef(true);
+  const debounceRef = useRef<NodeJS.Timeout | null>(null);
+
+  const doSave = useCallback(() => {
     startTransition(async () => {
       await savePlaywrightSettings({
         repositoryId,
@@ -62,10 +64,40 @@ export function PlaywrightSettingsCard({
         actionTimeout,
         pointerGestures,
         cursorFPS,
-        enabledRecordingEngines,
         defaultRecordingEngine,
       });
+      if (compact) {
+        setShowSaved(true);
+        setTimeout(() => setShowSaved(false), 1500);
+      }
     });
+  }, [repositoryId, selectorPriority, browser, viewportWidth, viewportHeight, headlessMode, navigationTimeout, actionTimeout, pointerGestures, cursorFPS, defaultRecordingEngine, compact]);
+
+  // Auto-save in compact mode with debounce
+  useEffect(() => {
+    if (!compact) return;
+    if (isInitialMount.current) {
+      isInitialMount.current = false;
+      return;
+    }
+
+    if (debounceRef.current) {
+      clearTimeout(debounceRef.current);
+    }
+
+    debounceRef.current = setTimeout(() => {
+      doSave();
+    }, 500);
+
+    return () => {
+      if (debounceRef.current) {
+        clearTimeout(debounceRef.current);
+      }
+    };
+  }, [compact, selectorPriority, browser, viewportWidth, viewportHeight, headlessMode, navigationTimeout, actionTimeout, pointerGestures, cursorFPS, defaultRecordingEngine, doSave]);
+
+  const handleSave = () => {
+    doSave();
   };
 
   const handleReset = () => {
@@ -80,112 +112,77 @@ export function PlaywrightSettingsCard({
       setActionTimeout(5000);
       setPointerGestures(false);
       setCursorFPS(30);
-      setEnabledRecordingEngines(DEFAULT_RECORDING_ENGINES);
       setDefaultRecordingEngine('lastest');
     });
   };
 
   const content = (
-    <div className="space-y-6">
-      {/* Selector Priority */}
-      <SelectorPriorityList value={selectorPriority} onChange={setSelectorPriority} />
+    <div className={compact ? 'space-y-3' : 'space-y-6'}>
+      {/* Auto-save indicator for compact mode */}
+      {compact && (
+        <div className="flex items-center justify-end h-4 text-xs text-muted-foreground">
+          {isPending && (
+            <span className="flex items-center gap-1">
+              <Loader2 className="w-3 h-3 animate-spin" />
+              Saving...
+            </span>
+          )}
+          {showSaved && !isPending && (
+            <span className="flex items-center gap-1 text-green-600">
+              <Check className="w-3 h-3" />
+              Saved
+            </span>
+          )}
+        </div>
+      )}
 
-      {/* Recording Engines */}
-      <div className="space-y-3">
-        <div className="space-y-0.5">
-          <Label>Recording Engines</Label>
-          <p className="text-xs text-muted-foreground">
-            Choose which recording engines are available
-          </p>
+      {/* Selector Priority */}
+      <div className={compact ? 'space-y-1' : 'space-y-2'}>
+        <div className="flex items-center gap-2">
+          <List className="w-4 h-4 text-muted-foreground" />
+          <Label className="text-sm font-medium">Selector Priority</Label>
         </div>
-        <div className="space-y-2">
-          <div className="flex items-center justify-between">
-            <div className="space-y-0.5">
-              <span className="text-sm font-medium">Lastest Recorder</span>
-              <p className="text-xs text-muted-foreground">
-                Built-in recorder with multi-selector fallback
-              </p>
-            </div>
-            <Switch
-              checked={enabledRecordingEngines.includes('lastest')}
-              onCheckedChange={(checked) => {
-                if (checked) {
-                  setEnabledRecordingEngines([...enabledRecordingEngines, 'lastest']);
-                } else {
-                  // Must keep at least one engine enabled
-                  if (enabledRecordingEngines.length > 1) {
-                    setEnabledRecordingEngines(enabledRecordingEngines.filter(e => e !== 'lastest'));
-                    // If this was the default, switch to another
-                    if (defaultRecordingEngine === 'lastest') {
-                      setDefaultRecordingEngine('playwright-inspector');
-                    }
-                  }
-                }
-              }}
-              disabled={enabledRecordingEngines.length === 1 && enabledRecordingEngines.includes('lastest')}
-            />
-          </div>
-          <div className="flex items-center justify-between">
-            <div className="space-y-0.5">
-              <span className="text-sm font-medium">Playwright Inspector</span>
-              <p className="text-xs text-muted-foreground">
-                Official Playwright codegen tool
-              </p>
-            </div>
-            <Switch
-              checked={enabledRecordingEngines.includes('playwright-inspector')}
-              onCheckedChange={(checked) => {
-                if (checked) {
-                  setEnabledRecordingEngines([...enabledRecordingEngines, 'playwright-inspector']);
-                } else {
-                  // Must keep at least one engine enabled
-                  if (enabledRecordingEngines.length > 1) {
-                    setEnabledRecordingEngines(enabledRecordingEngines.filter(e => e !== 'playwright-inspector'));
-                    // If this was the default, switch to another
-                    if (defaultRecordingEngine === 'playwright-inspector') {
-                      setDefaultRecordingEngine('lastest');
-                    }
-                  }
-                }
-              }}
-              disabled={enabledRecordingEngines.length === 1 && enabledRecordingEngines.includes('playwright-inspector')}
-            />
-          </div>
-        </div>
-        {enabledRecordingEngines.length > 1 && (
-          <div className="flex items-center gap-2">
-            <Label htmlFor="defaultEngine" className="text-sm whitespace-nowrap">Default Engine</Label>
-            <Select value={defaultRecordingEngine} onValueChange={(v) => setDefaultRecordingEngine(v as RecordingEngine)}>
-              <SelectTrigger id="defaultEngine" className="w-48">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {enabledRecordingEngines.includes('lastest') && (
-                  <SelectItem value="lastest">Lastest Recorder</SelectItem>
-                )}
-                {enabledRecordingEngines.includes('playwright-inspector') && (
-                  <SelectItem value="playwright-inspector">Playwright Inspector</SelectItem>
-                )}
-              </SelectContent>
-            </Select>
-          </div>
-        )}
+        <SelectorPriorityList value={selectorPriority} onChange={setSelectorPriority} compact={compact} />
       </div>
 
+      {/* Default Recording Engine - only in full mode */}
+      {!compact && (
+        <div className="space-y-2">
+          <div className="flex items-center gap-2">
+            <Video className="w-4 h-4 text-muted-foreground" />
+            <Label htmlFor="defaultEngine" className="text-sm">Default Recording Engine</Label>
+          </div>
+          <Select value={defaultRecordingEngine} onValueChange={(v) => setDefaultRecordingEngine(v as RecordingEngine)}>
+            <SelectTrigger id="defaultEngine" className="w-48">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="lastest">Lastest Recorder</SelectItem>
+              <SelectItem value="playwright-inspector">Playwright Inspector</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+      )}
+
       {/* Cursor Movement Tracking */}
-      <div className="space-y-3">
+      <div className={compact ? 'space-y-2' : 'space-y-3'}>
         <div className="flex items-center justify-between">
-          <div className="space-y-0.5">
-            <Label>Cursor Movement Tracking</Label>
-            <p className="text-xs text-muted-foreground">
-              Record mouse movements during test recording
-            </p>
+          <div className="flex items-center gap-2">
+            <MousePointer className="w-4 h-4 text-muted-foreground" />
+            <div className="space-y-0.5">
+              <Label className="text-sm">Cursor Tracking</Label>
+              {!compact && (
+                <p className="text-xs text-muted-foreground">
+                  Record mouse movements during test recording
+                </p>
+              )}
+            </div>
           </div>
           <Switch checked={pointerGestures} onCheckedChange={setPointerGestures} />
         </div>
         {pointerGestures && (
-          <div className="flex items-center gap-2 pl-1">
-            <Label htmlFor="cursorFPS" className="text-sm whitespace-nowrap">Capture FPS</Label>
+          <div className="flex items-center gap-2 pl-6">
+            <Label htmlFor="cursorFPS" className="text-xs whitespace-nowrap">FPS</Label>
             <Input
               id="cursorFPS"
               type="number"
@@ -193,7 +190,7 @@ export function PlaywrightSettingsCard({
               max={60}
               value={cursorFPS}
               onChange={(e) => setCursorFPS(Math.max(1, Math.min(60, parseInt(e.target.value) || 30)))}
-              className="w-20"
+              className={compact ? 'w-16 h-7 text-sm' : 'w-20'}
             />
           </div>
         )}
@@ -286,21 +283,23 @@ export function PlaywrightSettingsCard({
         </>
       )}
 
-      {/* Actions */}
-      <div className="flex gap-2 pt-2">
-        <Button onClick={handleSave} disabled={isPending}>
-          {isPending ? (
-            <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-          ) : (
-            <Save className="w-4 h-4 mr-2" />
-          )}
-          Save Settings
-        </Button>
-        <Button variant="outline" onClick={handleReset} disabled={isPending}>
-          <RotateCcw className="w-4 h-4 mr-2" />
-          Reset
-        </Button>
-      </div>
+      {/* Actions - hidden in compact mode (auto-save) */}
+      {!compact && (
+        <div className="flex gap-2 pt-2">
+          <Button onClick={handleSave} disabled={isPending}>
+            {isPending ? (
+              <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+            ) : (
+              <Save className="w-4 h-4 mr-2" />
+            )}
+            Save Settings
+          </Button>
+          <Button variant="outline" onClick={handleReset} disabled={isPending}>
+            <RotateCcw className="w-4 h-4 mr-2" />
+            Reset
+          </Button>
+        </div>
+      )}
     </div>
   );
 

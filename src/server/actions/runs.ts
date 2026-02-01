@@ -105,15 +105,20 @@ export async function runTests(testIds?: string[], repositoryId?: string | null,
     status: 'running',
   });
 
-  // Run tests (this happens async)
-  runTestsAsync(run.id, tests, repositoryId, headless);
+  // Create job first so we can return the jobId
+  const jobId = await createJob('test_run', `Test Run (${tests.length} tests)`, tests.length, repositoryId);
 
-  return { runId: run.id, testCount: tests.length };
+  // Run tests (this happens async)
+  runTestsAsync(run.id, tests, repositoryId, headless, jobId);
+
+  return { runId: run.id, testCount: tests.length, jobId };
 }
 
-async function runTestsAsync(runId: string, tests: Test[], repositoryId?: string | null, headless?: boolean) {
+async function runTestsAsync(runId: string, tests: Test[], repositoryId?: string | null, headless?: boolean, jobId?: string) {
   const runner = getRunner(repositoryId);
-  const jobId = await createJob('test_run', `Test Run (${tests.length} tests)`, tests.length, repositoryId);
+
+  // Use provided jobId or create new one (for backwards compatibility)
+  const activeJobId = jobId ?? await createJob('test_run', `Test Run (${tests.length} tests)`, tests.length, repositoryId);
 
   try {
     const results = await runner.runTests(tests, runId, undefined, undefined, headless);
@@ -130,7 +135,7 @@ async function runTestsAsync(runId: string, tests: Test[], repositoryId?: string
         errorMessage: result.errorMessage,
         durationMs: result.durationMs,
       });
-      await updateJobProgress(jobId, i + 1, tests.length);
+      await updateJobProgress(activeJobId, i + 1, tests.length);
     }
 
     // Update run status
@@ -139,13 +144,13 @@ async function runTestsAsync(runId: string, tests: Test[], repositoryId?: string
       completedAt: new Date(),
       status: hasFailures ? 'failed' : 'passed',
     });
-    await completeJob(jobId);
+    await completeJob(activeJobId);
   } catch (error) {
     await queries.updateTestRun(runId, {
       completedAt: new Date(),
       status: 'failed',
     });
-    await failJob(jobId, error instanceof Error ? error.message : 'Test run failed');
+    await failJob(activeJobId, error instanceof Error ? error.message : 'Test run failed');
   }
 
   revalidatePath('/run');
@@ -169,5 +174,13 @@ export async function getRunStatus(repositoryId?: string | null) {
   const runner = getRunner(repositoryId);
   return {
     isRunning: runner.isActive(),
+  };
+}
+
+export async function getJobStatus(jobId: string) {
+  const job = await queries.getBackgroundJob(jobId);
+  return {
+    status: job?.status || 'unknown',
+    isComplete: job?.status === 'completed' || job?.status === 'failed',
   };
 }

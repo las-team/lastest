@@ -39,9 +39,10 @@ const SELECTOR_LABELS: Record<SelectorType, { name: string; description: string 
 interface SortableItemProps {
   item: SelectorConfig;
   onToggle: (type: SelectorType, enabled: boolean) => void;
+  compact?: boolean;
 }
 
-function SortableItem({ item, onToggle }: SortableItemProps) {
+function SortableItem({ item, onToggle, compact = false }: SortableItemProps) {
   const {
     attributes,
     listeners,
@@ -63,7 +64,7 @@ function SortableItem({ item, onToggle }: SortableItemProps) {
     <div
       ref={setNodeRef}
       style={style}
-      className={`flex items-center gap-3 p-3 bg-white border rounded-lg ${
+      className={`flex items-center gap-2 ${compact ? 'p-2' : 'p-3'} bg-white border rounded-lg ${
         isDragging ? 'shadow-lg' : 'shadow-sm'
       } ${!item.enabled ? 'opacity-60' : ''}`}
     >
@@ -72,22 +73,23 @@ function SortableItem({ item, onToggle }: SortableItemProps) {
         {...attributes}
         {...listeners}
       >
-        <GripVertical className="w-4 h-4" />
+        <GripVertical className={compact ? 'w-3 h-3' : 'w-4 h-4'} />
       </button>
 
       <div className="flex-1 min-w-0">
-        <div className="flex items-center gap-2">
-          <span className="font-medium text-sm">{label.name}</span>
-          <span className="text-xs bg-gray-100 px-1.5 py-0.5 rounded text-gray-500">
+        <div className="flex items-center gap-1.5">
+          <span className={`font-medium ${compact ? 'text-xs' : 'text-sm'}`}>{label.name}</span>
+          <span className={`bg-gray-100 rounded text-gray-500 ${compact ? 'text-[10px] px-1 py-0.5' : 'text-xs px-1.5 py-0.5'}`}>
             #{item.priority}
           </span>
         </div>
-        <p className="text-xs text-gray-500 truncate">{label.description}</p>
+        {!compact && <p className="text-xs text-gray-500 truncate">{label.description}</p>}
       </div>
 
       <Switch
         checked={item.enabled}
         onCheckedChange={(checked) => onToggle(item.type, checked)}
+        className={compact ? 'scale-90' : ''}
       />
     </div>
   );
@@ -96,9 +98,10 @@ function SortableItem({ item, onToggle }: SortableItemProps) {
 interface SelectorPriorityListProps {
   value: SelectorConfig[];
   onChange: (value: SelectorConfig[]) => void;
+  compact?: boolean;
 }
 
-export function SelectorPriorityList({ value, onChange }: SelectorPriorityListProps) {
+export function SelectorPriorityList({ value, onChange, compact = false }: SelectorPriorityListProps) {
   const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
@@ -138,33 +141,37 @@ export function SelectorPriorityList({ value, onChange }: SelectorPriorityListPr
   // Render static list on server, sortable list on client (avoids hydration mismatch)
   if (!mounted) {
     return (
-      <div className="space-y-2">
-        <Label className="text-sm font-medium">Selector Priority</Label>
-        <p className="text-xs text-muted-foreground mb-3">
-          Drag to reorder. During recording, all selector types are captured.
-          During test runs, selectors are tried in this priority order.
-        </p>
-        <div className="space-y-2">
+      <div className={compact ? 'space-y-1.5' : 'space-y-2'}>
+        {!compact && (
+          <>
+            <Label className="text-sm font-medium">Selector Priority</Label>
+            <p className="text-xs text-muted-foreground mb-3">
+              Drag to reorder. During recording, all selector types are captured.
+              During test runs, selectors are tried in this priority order.
+            </p>
+          </>
+        )}
+        <div className={compact ? 'space-y-1' : 'space-y-2'}>
           {value.map((item) => {
             const label = SELECTOR_LABELS[item.type];
             return (
               <div
                 key={item.type}
-                className={`flex items-center gap-3 p-3 bg-white border rounded-lg shadow-sm ${!item.enabled ? 'opacity-60' : ''}`}
+                className={`flex items-center gap-2 ${compact ? 'p-2' : 'p-3'} bg-white border rounded-lg shadow-sm ${!item.enabled ? 'opacity-60' : ''}`}
               >
                 <div className="cursor-grab text-gray-400">
-                  <GripVertical className="w-4 h-4" />
+                  <GripVertical className={compact ? 'w-3 h-3' : 'w-4 h-4'} />
                 </div>
                 <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2">
-                    <span className="font-medium text-sm">{label.name}</span>
-                    <span className="text-xs bg-gray-100 px-1.5 py-0.5 rounded text-gray-500">
+                  <div className="flex items-center gap-1.5">
+                    <span className={`font-medium ${compact ? 'text-xs' : 'text-sm'}`}>{label.name}</span>
+                    <span className={`bg-gray-100 rounded text-gray-500 ${compact ? 'text-[10px] px-1 py-0.5' : 'text-xs px-1.5 py-0.5'}`}>
                       #{item.priority}
                     </span>
                   </div>
-                  <p className="text-xs text-gray-500 truncate">{label.description}</p>
+                  {!compact && <p className="text-xs text-gray-500 truncate">{label.description}</p>}
                 </div>
-                <Switch checked={item.enabled} disabled />
+                <Switch checked={item.enabled} disabled className={compact ? 'scale-90' : ''} />
               </div>
             );
           })}
@@ -174,12 +181,16 @@ export function SelectorPriorityList({ value, onChange }: SelectorPriorityListPr
   }
 
   return (
-    <div className="space-y-2">
-      <Label className="text-sm font-medium">Selector Priority</Label>
-      <p className="text-xs text-muted-foreground mb-3">
-        Drag to reorder. During recording, all selector types are captured.
-        During test runs, selectors are tried in this priority order.
-      </p>
+    <div className={compact ? 'space-y-1.5' : 'space-y-2'}>
+      {!compact && (
+        <>
+          <Label className="text-sm font-medium">Selector Priority</Label>
+          <p className="text-xs text-muted-foreground mb-3">
+            Drag to reorder. During recording, all selector types are captured.
+            During test runs, selectors are tried in this priority order.
+          </p>
+        </>
+      )}
 
       <DndContext
         sensors={sensors}
@@ -190,12 +201,13 @@ export function SelectorPriorityList({ value, onChange }: SelectorPriorityListPr
           items={value.map((item) => item.type)}
           strategy={verticalListSortingStrategy}
         >
-          <div className="space-y-2">
+          <div className={compact ? 'space-y-1' : 'space-y-2'}>
             {value.map((item) => (
               <SortableItem
                 key={item.type}
                 item={item}
                 onToggle={handleToggle}
+                compact={compact}
               />
             ))}
           </div>
