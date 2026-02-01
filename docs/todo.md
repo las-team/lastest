@@ -6,13 +6,19 @@ playwright settings /home/ewyct/.claude/plans/replicated-tinkering-papert.md
 Determining test coverage /home/ewyct/.claude/plans/zazzy-tinkering-backus.md
 AI enablement /home/ewyct/.claude/plans/moonlit-fluttering-origami.md
 Excalidraw tests: ~/.claude/plans/recursive-wondering-dongarra.md
+
 --------
 ## reuse
 check the recorder and the runner so that they are compatible and identify the root cause of the issue
 ## in progress
 ## test
 OCR
+Seed script: scripts/seed-excalidraw-tests.ts (run with npx tsx scripts/seed-excalidraw-tests.ts)   
 ## features
+Execution agent and cloud ~/.claude/plans/cozy-sniffing-hopcroft.md  
+Electron app ~/.claude/plans/rippling-roaming-snail.md
+Github actions integration ~/.claude/plans/rippling-roaming-snail.md  
+
 UI & UX 
     Use the frontend design skill and subagent for this
     Revise frontend and make sure you havent steered far and try to use standard shadcn css where possible
@@ -54,7 +60,6 @@ Support https://github.com/excalidraw/excalidraw/tree/master/packages/excalidraw
   ┌───────────────────────────┬────────────────────┐                                                              
   │        High Impact        │    Lower Impact    │                                                              
   ├───────────────────────────┼────────────────────┤                                                              
-  │ GitHub Action marketplace │ Blog posts         │                                                              
   ├───────────────────────────┼────────────────────┤                                                              
   │ VS Code extension         │ Twitter threads    │                                                              
   ├───────────────────────────┼────────────────────┤                                                              
@@ -62,13 +67,12 @@ Support https://github.com/excalidraw/excalidraw/tree/master/packages/excalidraw
   ├───────────────────────────┼────────────────────┤                                                              
   │ npm/CLI one-liner install │ Reddit posts       │                                                              
   └───────────────────────────┴────────────────────┘                                                              
-  Action: Build a npx create-lastest2 or GitHub Action that makes setup trivial.
+  Action: Build a npx create-lastest2 orthat makes setup trivial.
 
-  2. Distribution = Existing Audience                                                                             
+  2. Distribution = Existing Audience                                                                    
                                                                                                                   
   Per https://www.indiehackers.com, you need distribution from day one. Without an existing audience, posting is  
-  shouting into void.                                                                                             
-                                                                                                                  
+  shouting into void.                                                                                                                                                                                               
   Options if you don't have audience:                                                                             
   - Borrow someone else's: Get featured by https://youtube.com/fireship, Theo, or smaller YouTubers (5-20k subs)  
   who review dev tools                                                                                            
@@ -76,8 +80,7 @@ Support https://github.com/excalidraw/excalidraw/tree/master/packages/excalidraw
   relevant                                                                                                        
   - Create a "list": Publish "Best free alternatives to Percy/Chromatic" article, include yourself        
 
-    4. The "Build in Public" Flywheel                                                                               
-                                                                                                                  
+    4. The "Build in Public" Flywheel                                                                                               
   Per https://thebootstrappedfounder.com/indie-hacking-isnt-dead-its-just-less-hacky/:                            
                                                                                                                   
   Share progress → Attract followers → They try tool →                                                            
