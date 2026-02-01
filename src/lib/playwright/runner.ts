@@ -974,6 +974,16 @@ export class PlaywrightRunner extends EventEmitter {
     this.aborted = true;
   }
 
+  /**
+   * Force reset the runner state. Use when runner is stuck in "running" state.
+   */
+  async forceReset(): Promise<void> {
+    this.aborted = true;
+    await this.cleanup();
+    this.isRunning = false;
+    this.aborted = false;
+  }
+
   private async cleanup(): Promise<void> {
     if (this.browser) {
       await this.browser.close().catch(() => {});

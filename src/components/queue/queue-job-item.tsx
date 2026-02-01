@@ -1,7 +1,9 @@
 'use client';
 
-import { Loader2, CheckCircle2, XCircle, Clock } from 'lucide-react';
+import { Loader2, CheckCircle2, XCircle, Clock, X } from 'lucide-react';
 import type { BackgroundJob } from '@/lib/db/schema';
+import { cancelJob } from '@/server/actions/jobs';
+import { useTransition } from 'react';
 
 const TYPE_LABELS: Record<string, string> = {
   ai_scan: 'AI Scan',
@@ -25,11 +27,18 @@ function StatusIcon({ status }: { status: string }) {
 }
 
 export function QueueJobItem({ job }: { job: BackgroundJob }) {
+  const [isPending, startTransition] = useTransition();
   const typeLabel = TYPE_LABELS[job.type] || job.type;
   const isActive = job.status === 'running' || job.status === 'pending';
 
+  const handleCancel = () => {
+    startTransition(async () => {
+      await cancelJob(job.id, job.repositoryId);
+    });
+  };
+
   return (
-    <div className="flex items-center gap-3 px-3 py-2">
+    <div className="flex items-center gap-3 px-3 py-2 group">
       <StatusIcon status={job.status} />
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2">
@@ -52,6 +61,16 @@ export function QueueJobItem({ job }: { job: BackgroundJob }) {
         <span className="text-xs text-muted-foreground whitespace-nowrap">
           {job.completedSteps}/{job.totalSteps}
         </span>
+      )}
+      {isActive && (
+        <button
+          onClick={handleCancel}
+          disabled={isPending}
+          className="opacity-0 group-hover:opacity-100 p-1 hover:bg-muted rounded transition-opacity"
+          title="Cancel job"
+        >
+          <X className="h-3.5 w-3.5 text-muted-foreground hover:text-destructive" />
+        </button>
       )}
     </div>
   );

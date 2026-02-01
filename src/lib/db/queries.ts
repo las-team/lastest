@@ -63,7 +63,7 @@ import type {
 } from './schema';
 
 export { DEFAULT_SELECTOR_PRIORITY, DEFAULT_DIFF_THRESHOLDS, DEFAULT_AI_SETTINGS, DEFAULT_RECORDING_ENGINES };
-import { eq, desc, and, inArray, or, gte, isNull } from 'drizzle-orm';
+import { eq, desc, and, inArray, or, gte, lt, isNull } from 'drizzle-orm';
 import { v4 as uuid } from 'uuid';
 
 // Functional Areas
@@ -1363,6 +1363,50 @@ export async function getRecentBackgroundJobs(sinceMs = 10000) {
     )
     .orderBy(desc(backgroundJobs.createdAt))
     .all();
+}
+
+export async function getBackgroundJob(id: string) {
+  return db.select().from(backgroundJobs).where(eq(backgroundJobs.id, id)).get();
+}
+
+export async function getPendingBuildJobs(repositoryId?: string | null) {
+  const conditions = [
+    eq(backgroundJobs.status, 'pending'),
+    eq(backgroundJobs.type, 'build_run'),
+  ];
+  if (repositoryId) {
+    conditions.push(eq(backgroundJobs.repositoryId, repositoryId));
+  }
+  return db
+    .select()
+    .from(backgroundJobs)
+    .where(and(...conditions))
+    .orderBy(backgroundJobs.createdAt)
+    .all();
+}
+
+export async function markStaleJobsAsCrashed(staleThresholdMs = 300000) {
+  const threshold = new Date(Date.now() - staleThresholdMs);
+  const staleJobs = await db
+    .select()
+    .from(backgroundJobs)
+    .where(
+      and(
+        eq(backgroundJobs.status, 'running'),
+        lt(backgroundJobs.startedAt, threshold)
+      )
+    )
+    .all();
+
+  for (const job of staleJobs) {
+    await db.update(backgroundJobs).set({
+      status: 'failed',
+      error: 'Job timed out (no progress for 5 minutes)',
+      completedAt: new Date(),
+    }).where(eq(backgroundJobs.id, job.id));
+  }
+
+  return staleJobs.length;
 }
 
 // Test Versions

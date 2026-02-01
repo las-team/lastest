@@ -9,7 +9,7 @@ import { generateDiff } from '@/lib/diff/generator';
 import { hashImage } from '@/lib/diff/hasher';
 import type { Test, TriggerType, BuildStatus, VisualDiffWithTestStatus, DiffClassification, DiffStatus } from '@/lib/db/schema';
 import path from 'path';
-import { createJob, updateJobProgress, completeJob, failJob } from './jobs';
+import { createJob, createPendingJob, startJob, updateJobProgress, completeJob, failJob } from './jobs';
 
 interface GitInfo {
   branch: string;
@@ -62,7 +62,16 @@ export interface BuildSummary {
 }
 
 /**
- * Create and run a new build
+ * Force reset the test runner if stuck in "running" state
+ */
+export async function forceResetRunner(repositoryId?: string | null) {
+  const runner = getRunner(repositoryId);
+  await runner.forceReset();
+  return { success: true };
+}
+
+/**
+ * Create and run a new build (queues if tests already running)
  */
 export async function createAndRunBuild(
   triggerType: TriggerType = 'manual',
@@ -71,8 +80,9 @@ export async function createAndRunBuild(
 ) {
   const runner = getRunner(repositoryId);
 
+  // If tests are running, queue this build
   if (runner.isActive()) {
-    throw new Error('Tests already running');
+    return queueBuild(triggerType, testIds, repositoryId);
   }
 
   // Load and set environment config
@@ -249,6 +259,87 @@ async function runBuildAsync(
 
   revalidatePath('/builds');
   revalidatePath('/');
+
+  // Process next queued build if any
+  processNextQueuedBuild(repositoryId);
+}
+
+/**
+ * Queue a build for later execution
+ */
+async function queueBuild(
+  triggerType: TriggerType = 'manual',
+  testIds?: string[],
+  repositoryId?: string | null
+) {
+  // Get tests to determine label
+  let tests: Test[];
+  if (testIds && testIds.length > 0) {
+    tests = await Promise.all(
+      testIds.map((id) => queries.getTest(id))
+    ).then((results) => results.filter((t): t is Test => t !== undefined));
+  } else if (repositoryId) {
+    tests = await queries.getTestsByRepo(repositoryId);
+  } else {
+    tests = await queries.getTests();
+  }
+
+  if (tests.length === 0) {
+    throw new Error('No tests to run');
+  }
+
+  // Create a pending job
+  const jobId = await createPendingJob(
+    'build_run',
+    `Queued Build (${tests.length} tests)`,
+    tests.length,
+    repositoryId,
+    { triggerType, testIds: testIds || null }
+  );
+
+  return {
+    buildId: null,
+    testRunId: null,
+    testCount: tests.length,
+    queued: true,
+    jobId
+  };
+}
+
+/**
+ * Process the next queued build if any
+ */
+async function processNextQueuedBuild(repositoryId?: string | null) {
+  const runner = getRunner(repositoryId);
+
+  // Don't process if runner is still active
+  if (runner.isActive()) return;
+
+  // Get pending builds
+  const pendingJobs = await queries.getPendingBuildJobs(repositoryId);
+  if (pendingJobs.length === 0) return;
+
+  const nextJob = pendingJobs[0];
+  const metadata = nextJob.metadata as { triggerType?: TriggerType; testIds?: string[] | null } | null;
+
+  // Start the job
+  await startJob(nextJob.id);
+
+  // Run the build
+  try {
+    await createAndRunBuild(
+      metadata?.triggerType || 'manual',
+      metadata?.testIds || undefined,
+      nextJob.repositoryId
+    );
+  } catch (error) {
+    // Job failed to start, mark as failed
+    await queries.updateBackgroundJob(nextJob.id, {
+      status: 'failed',
+      error: error instanceof Error ? error.message : 'Failed to start build',
+      completedAt: new Date(),
+    });
+  }
 }
 
 /**

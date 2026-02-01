@@ -2,6 +2,7 @@
 
 import * as queries from '@/lib/db/queries';
 import type { BackgroundJobType } from '@/lib/db/schema';
+import { getRunner } from '@/lib/playwright/runner';
 
 export async function createJob(
   type: BackgroundJobType,
@@ -20,6 +21,30 @@ export async function createJob(
     startedAt: new Date(),
   });
   return id;
+}
+
+export async function createPendingJob(
+  type: BackgroundJobType,
+  label: string,
+  totalSteps?: number,
+  repositoryId?: string | null,
+  metadata?: Record<string, unknown>
+) {
+  const { id } = await queries.createBackgroundJob({
+    type,
+    label,
+    totalSteps,
+    repositoryId,
+    metadata,
+  });
+  return id;
+}
+
+export async function startJob(jobId: string) {
+  await queries.updateBackgroundJob(jobId, {
+    status: 'running',
+    startedAt: new Date(),
+  });
 }
 
 export async function updateJobProgress(
@@ -53,6 +78,43 @@ export async function failJob(jobId: string, error: string) {
   });
 }
 
+export async function cancelJob(jobId: string, repositoryId?: string | null) {
+  const job = await queries.getBackgroundJob(jobId);
+  if (!job) return { success: false, error: 'Job not found' };
+
+  // If job is running and it's a build, abort the runner
+  if (job.status === 'running' && job.type === 'build_run') {
+    const runner = getRunner(repositoryId);
+    runner.abort();
+    await runner.forceReset();
+  }
+
+  await queries.updateBackgroundJob(jobId, {
+    status: 'failed',
+    error: 'Cancelled by user',
+    completedAt: new Date(),
+  });
+
+  return { success: true };
+}
+
 export async function getActiveJobs() {
   return queries.getRecentBackgroundJobs(10000);
+}
+
+export async function cleanupStaleJobs(staleThresholdMs = 300000) {
+  const count = await queries.markStaleJobsAsCrashed(staleThresholdMs);
+
+  // Also reset runner if it's stuck
+  const runner = getRunner();
+  if (runner.isActive()) {
+    const activeJobs = await queries.getActiveBackgroundJobs();
+    const hasRunningBuild = activeJobs.some(j => j.type === 'build_run' && j.status === 'running');
+    if (!hasRunningBuild) {
+      // Runner thinks it's active but no job is running - reset it
+      await runner.forceReset();
+    }
+  }
+
+  return { cleanedUp: count };
 }
