@@ -14,14 +14,6 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import {
-  Sheet,
-  SheetContent,
-  SheetDescription,
-  SheetHeader,
-  SheetTitle,
-  SheetTrigger,
-} from '@/components/ui/sheet';
-import {
   startRecording,
   stopRecording,
   captureScreenshot,
@@ -230,7 +222,6 @@ export function RecordingClient({
 }: RecordingClientProps) {
   const router = useRouter();
   const [step, setStep] = useState<RecordingStep>('setup');
-  const [settingsOpen, setSettingsOpen] = useState(false);
   const [playwrightStatus, setPlaywrightStatus] = useState<PlaywrightAvailability | null>(null);
   const [selectedEngine, setSelectedEngine] = useState<RecordingEngine>(defaultEngine);
   const [inspectorSessionId, setInspectorSessionId] = useState<string | null>(null);
@@ -570,159 +561,153 @@ export function RecordingClient({
     };
     return (
       <div className="flex-1 p-6 overflow-auto">
-        <div className="max-w-2xl mx-auto space-y-4">
+        <div className="max-w-5xl mx-auto space-y-4">
           <PlaywrightStatusSection />
-          <Card>
-            <CardHeader>
-              <div className="flex items-center justify-between">
-                <div>
-                  <CardTitle>{isRerecording ? 'Re-record Test' : 'New Recording'}</CardTitle>
-                  <CardDescription>
-                    {isRerecording
-                      ? `Re-recording "${rerecordTest?.name}" - new code will replace current version`
-                      : 'Configure your test and start recording browser interactions'}
-                  </CardDescription>
-                </div>
-                <Sheet open={settingsOpen} onOpenChange={setSettingsOpen}>
-                  <SheetTrigger asChild>
-                    <Button variant="outline" size="icon">
-                      <Settings2 className="h-4 w-4" />
-                    </Button>
-                  </SheetTrigger>
-                  <SheetContent className="w-[400px] sm:w-[540px] overflow-y-auto">
-                    <SheetHeader>
-                      <SheetTitle>Recording Settings</SheetTitle>
-                      <SheetDescription>
-                        Configure selector priority and browser settings
-                      </SheetDescription>
-                    </SheetHeader>
-                    <div className="mt-6">
-                      <PlaywrightSettingsCard
-                        settings={settings}
-                        repositoryId={repositoryId}
-                        compact
-                      />
-                    </div>
-                  </SheetContent>
-                </Sheet>
-              </div>
-            </CardHeader>
-            <CardContent className="space-y-6">
-              {/* URL Input */}
-              <div className="space-y-2">
-                <label className="text-sm font-medium">Target URL</label>
-                <div className="flex gap-2">
-                  <Input
-                    placeholder="https://example.com"
-                    value={url}
-                    onChange={(e) => setUrl(e.target.value)}
-                  />
-                  <Button
-                    variant="outline"
-                    size="icon"
-                    onClick={() => window.open(url, '_blank')}
-                    disabled={!url.startsWith('http')}
-                  >
-                    <ExternalLink className="h-4 w-4" />
-                  </Button>
-                </div>
-              </div>
-
-              {/* Test Name */}
-              <div className="space-y-2">
-                <label className="text-sm font-medium">Test Name</label>
-                <Input
-                  placeholder="login-success"
-                  value={testName}
-                  onChange={(e) => setTestName(e.target.value)}
-                  disabled={isRerecording}
-                />
-                {isRerecording && (
-                  <p className="text-xs text-muted-foreground">
-                    Test name cannot be changed when re-recording
-                  </p>
-                )}
-              </div>
-
-              {/* Functional Area - hidden when re-recording */}
-              {!isRerecording && (
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            {/* Left Column - Form */}
+            <Card>
+              <CardHeader>
+                <CardTitle>{isRerecording ? 'Re-record Test' : 'New Recording'}</CardTitle>
+                <CardDescription>
+                  {isRerecording
+                    ? `Re-recording "${rerecordTest?.name}" - new code will replace current version`
+                    : 'Configure your test and start recording browser interactions'}
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-6">
+                {/* URL Input */}
                 <div className="space-y-2">
-                  <label className="text-sm font-medium">Functional Area</label>
+                  <label className="text-sm font-medium">Target URL</label>
                   <div className="flex gap-2">
-                    <Select value={areaId} onValueChange={setAreaId}>
-                      <SelectTrigger className="flex-1">
-                        <SelectValue placeholder="Select or create new" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {areas.map((area) => (
-                          <SelectItem key={area.id} value={area.id}>
-                            {area.name}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                    <span className="text-sm text-muted-foreground self-center">or</span>
                     <Input
-                      placeholder="New area name"
-                      value={newAreaName}
-                      onChange={(e) => {
-                        setNewAreaName(e.target.value);
-                        setAreaId('');
-                      }}
-                      className="flex-1"
+                      placeholder="https://example.com"
+                      value={url}
+                      onChange={(e) => setUrl(e.target.value)}
                     />
+                    <Button
+                      variant="outline"
+                      size="icon"
+                      onClick={() => window.open(url, '_blank')}
+                      disabled={!url.startsWith('http')}
+                    >
+                      <ExternalLink className="h-4 w-4" />
+                    </Button>
                   </div>
                 </div>
-              )}
 
-              {/* Recording Engine */}
-              {enabledEngines.length > 1 && (
+                {/* Test Name */}
                 <div className="space-y-2">
-                  <label className="text-sm font-medium">Recording Engine</label>
-                  <Select value={selectedEngine} onValueChange={(v) => setSelectedEngine(v as RecordingEngine)}>
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {enabledEngines.includes('lastest') && (
-                        <SelectItem value="lastest">Lastest Recorder</SelectItem>
-                      )}
-                      {enabledEngines.includes('playwright-inspector') && (
-                        <SelectItem value="playwright-inspector">Playwright Inspector</SelectItem>
-                      )}
-                    </SelectContent>
-                  </Select>
-                  <p className="text-xs text-muted-foreground">
-                    {selectedEngine === 'lastest'
-                      ? 'Multi-selector recording with real-time preview'
-                      : 'Official Playwright codegen tool'}
-                  </p>
+                  <label className="text-sm font-medium">Test Name</label>
+                  <Input
+                    placeholder="login-success"
+                    value={testName}
+                    onChange={(e) => setTestName(e.target.value)}
+                    disabled={isRerecording}
+                  />
+                  {isRerecording && (
+                    <p className="text-xs text-muted-foreground">
+                      Test name cannot be changed when re-recording
+                    </p>
+                  )}
                 </div>
-              )}
 
-              {/* Error Display */}
-              {error && (
-                <div className="p-3 bg-destructive/10 border border-destructive/20 rounded-lg text-sm text-destructive">
-                  {error}
-                </div>
-              )}
-
-              {/* Start Button */}
-              <Button
-                onClick={handleStartRecording}
-                disabled={!url || !testName || isLoading || !playwrightStatus?.available}
-                className="w-full"
-                size="lg"
-              >
-                {isLoading ? (
-                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                ) : (
-                  <Video className="h-4 w-4 mr-2" />
+                {/* Functional Area - hidden when re-recording */}
+                {!isRerecording && (
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium">Functional Area</label>
+                    <div className="flex gap-2">
+                      <Select value={areaId} onValueChange={setAreaId}>
+                        <SelectTrigger className="flex-1">
+                          <SelectValue placeholder="Select or create new" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {areas.map((area) => (
+                            <SelectItem key={area.id} value={area.id}>
+                              {area.name}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <span className="text-sm text-muted-foreground self-center">or</span>
+                      <Input
+                        placeholder="New area name"
+                        value={newAreaName}
+                        onChange={(e) => {
+                          setNewAreaName(e.target.value);
+                          setAreaId('');
+                        }}
+                        className="flex-1"
+                      />
+                    </div>
+                  </div>
                 )}
-                Start Recording
-              </Button>
-            </CardContent>
-          </Card>
+
+                {/* Recording Engine */}
+                {enabledEngines.length > 1 && (
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium">Recording Engine</label>
+                    <Select value={selectedEngine} onValueChange={(v) => setSelectedEngine(v as RecordingEngine)}>
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {enabledEngines.includes('lastest') && (
+                          <SelectItem value="lastest">Lastest Recorder</SelectItem>
+                        )}
+                        {enabledEngines.includes('playwright-inspector') && (
+                          <SelectItem value="playwright-inspector">Playwright Inspector</SelectItem>
+                        )}
+                      </SelectContent>
+                    </Select>
+                    <p className="text-xs text-muted-foreground">
+                      {selectedEngine === 'lastest'
+                        ? 'Multi-selector recording with real-time preview'
+                        : 'Official Playwright codegen tool'}
+                    </p>
+                  </div>
+                )}
+
+                {/* Error Display */}
+                {error && (
+                  <div className="p-3 bg-destructive/10 border border-destructive/20 rounded-lg text-sm text-destructive">
+                    {error}
+                  </div>
+                )}
+
+                {/* Start Button */}
+                <Button
+                  onClick={handleStartRecording}
+                  disabled={!url || !testName || isLoading || !playwrightStatus?.available}
+                  className="w-full"
+                  size="lg"
+                >
+                  {isLoading ? (
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  ) : (
+                    <Video className="h-4 w-4 mr-2" />
+                  )}
+                  Start Recording
+                </Button>
+              </CardContent>
+            </Card>
+
+            {/* Right Column - Settings */}
+            <Card>
+              <CardHeader className="pb-3">
+                <div className="flex items-center gap-2">
+                  <Settings2 className="h-4 w-4 text-muted-foreground" />
+                  <CardTitle className="text-base">Recording Settings</CardTitle>
+                </div>
+              </CardHeader>
+              <CardContent>
+                <PlaywrightSettingsCard
+                  settings={settings}
+                  repositoryId={repositoryId}
+                  compact
+                />
+              </CardContent>
+            </Card>
+          </div>
         </div>
       </div>
     );

@@ -15,8 +15,6 @@ OCR
 Seed script: scripts/seed-excalidraw-tests.ts (run with npx tsx scripts/seed-excalidraw-tests.ts)   
 
 ## features
-Lastest2 extra assertions (with right click?)
-
 Build/change approval
     Test version or result on the build screen
 
