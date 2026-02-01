@@ -165,7 +165,7 @@ async function runBuildAsync(
 ) {
   const runner = getRunner(repositoryId);
   const startTime = Date.now();
-  const jobId = await createJob('build_run', `Build (${tests.length} tests)`, tests.length, repositoryId);
+  const jobId = await createJob('build_run', `Build (${tests.length} tests)`, tests.length, repositoryId, { buildId, testRunId });
 
   let passedCount = 0;
   let failedCount = 0;

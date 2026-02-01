@@ -15,8 +15,6 @@ OCR
 Seed script: scripts/seed-excalidraw-tests.ts (run with npx tsx scripts/seed-excalidraw-tests.ts)   
 
 ## features
-Support https://github.com/excalidraw/excalidraw/tree/master/packages/excalidraw/tests
-
 Lastest2 extra assertions (with right click?)
 
 Build/change approval
@@ -53,6 +51,7 @@ Test classification
 ## bugs
 
 ## marketing
+Support https://github.com/excalidraw/excalidraw/tree/master/packages/excalidraw/tests
 
  1. Integration > Awareness                                       
                                                                                                                   

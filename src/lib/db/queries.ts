@@ -1398,12 +1398,30 @@ export async function markStaleJobsAsCrashed(staleThresholdMs = 300000) {
     )
     .all();
 
+  const now = new Date();
   for (const job of staleJobs) {
     await db.update(backgroundJobs).set({
       status: 'failed',
       error: 'Job timed out (no progress for 5 minutes)',
-      completedAt: new Date(),
+      completedAt: now,
     }).where(eq(backgroundJobs.id, job.id));
+
+    // Also update associated build and test run if this is a build_run job
+    if (job.type === 'build_run' && job.metadata) {
+      const meta = job.metadata as { buildId?: string; testRunId?: string };
+      if (meta.buildId) {
+        await db.update(builds).set({
+          overallStatus: 'blocked',
+          completedAt: now,
+        }).where(eq(builds.id, meta.buildId));
+      }
+      if (meta.testRunId) {
+        await db.update(testRuns).set({
+          status: 'failed',
+          completedAt: now,
+        }).where(eq(testRuns.id, meta.testRunId));
+      }
+    }
   }
 
   return staleJobs.length;

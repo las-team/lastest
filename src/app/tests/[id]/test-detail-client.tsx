@@ -15,7 +15,7 @@ import {
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
-import { Play, Trash2, Copy, Edit2, Clock, CheckCircle, XCircle, X, Save, Wrench, Wand2, Loader2, History, RotateCcw, ChevronDown, Monitor } from 'lucide-react';
+import { Play, Trash2, Copy, Edit2, Clock, CheckCircle, XCircle, X, Save, Wrench, Wand2, Loader2, History, RotateCcw, ChevronDown, Monitor, Video } from 'lucide-react';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -317,10 +317,18 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
                         {isFixing ? 'Fixing...' : 'Fix'}
                       </Button>
                     )}
-                    <Button variant="outline" size="icon" onClick={() => setIsEditing(true)}>
+                    <Button variant="outline" size="icon" onClick={() => setIsEditing(true)} title="Edit">
                       <Edit2 className="h-4 w-4" />
                     </Button>
-                    <Button variant="outline" size="icon">
+                    <Button
+                      variant="outline"
+                      size="icon"
+                      onClick={() => router.push(`/record?rerecordId=${test.id}`)}
+                      title="Re-record"
+                    >
+                      <Video className="h-4 w-4" />
+                    </Button>
+                    <Button variant="outline" size="icon" title="Copy">
                       <Copy className="h-4 w-4" />
                     </Button>
                     <Button

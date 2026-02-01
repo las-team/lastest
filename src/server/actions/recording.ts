@@ -197,6 +197,28 @@ export async function saveRecordedTest(data: {
   return test;
 }
 
+export async function updateRerecordedTest(data: {
+  testId: string;
+  code: string;
+  targetUrl?: string;
+}) {
+  const { updateTestWithVersion } = await import('@/lib/db/queries');
+
+  await updateTestWithVersion(
+    data.testId,
+    {
+      code: data.code,
+      ...(data.targetUrl && { targetUrl: data.targetUrl }),
+    },
+    'rerecorded'
+  );
+
+  revalidatePath('/tests');
+  revalidatePath(`/tests/${data.testId}`);
+
+  return { id: data.testId };
+}
+
 export async function getOrCreateFunctionalArea(name: string) {
   const areas = await getFunctionalAreas();
   const existing = areas.find(a => a.name.toLowerCase() === name.toLowerCase());

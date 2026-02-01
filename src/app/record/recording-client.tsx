@@ -27,6 +27,7 @@ import {
   captureScreenshot,
   createAssertion,
   saveRecordedTest,
+  updateRerecordedTest,
   getOrCreateFunctionalArea,
   getRecordingStatus,
   clearLastCompletedSession,
@@ -66,7 +67,7 @@ import {
   Terminal,
   Keyboard,
 } from 'lucide-react';
-import type { FunctionalArea, PlaywrightSettings, RecordingEngine } from '@/lib/db/schema';
+import type { FunctionalArea, PlaywrightSettings, RecordingEngine, Test } from '@/lib/db/schema';
 import { DEFAULT_RECORDING_ENGINES } from '@/lib/db/schema';
 import { PlaywrightSettingsCard } from '@/components/settings/playwright-settings-card';
 
@@ -77,6 +78,7 @@ interface RecordingClientProps {
   defaultBaseUrl?: string;
   enabledEngines?: RecordingEngine[];
   defaultEngine?: RecordingEngine;
+  rerecordTest?: Test | null;
 }
 
 type RecordingStep = 'setup' | 'recording' | 'inspector-running' | 'saving';
@@ -208,6 +210,7 @@ export function RecordingClient({
   defaultBaseUrl,
   enabledEngines = DEFAULT_RECORDING_ENGINES,
   defaultEngine = 'lastest',
+  rerecordTest,
 }: RecordingClientProps) {
   const router = useRouter();
   const [step, setStep] = useState<RecordingStep>('setup');
@@ -215,6 +218,9 @@ export function RecordingClient({
   const [playwrightStatus, setPlaywrightStatus] = useState<PlaywrightAvailability | null>(null);
   const [selectedEngine, setSelectedEngine] = useState<RecordingEngine>(defaultEngine);
   const [inspectorSessionId, setInspectorSessionId] = useState<string | null>(null);
+
+  // Re-record mode
+  const isRerecording = !!rerecordTest;
 
   // Check Playwright availability on mount
   useEffect(() => {
@@ -225,10 +231,10 @@ export function RecordingClient({
     verifyPlaywright();
   }, [repositoryId]);
 
-  // Setup form state
-  const [url, setUrl] = useState(defaultBaseUrl || 'https://');
-  const [testName, setTestName] = useState('');
-  const [areaId, setAreaId] = useState<string>('');
+  // Setup form state - pre-fill from rerecordTest if available
+  const [url, setUrl] = useState(rerecordTest?.targetUrl || defaultBaseUrl || 'https://');
+  const [testName, setTestName] = useState(rerecordTest?.name || '');
+  const [areaId, setAreaId] = useState<string>(rerecordTest?.functionalAreaId || '');
   const [newAreaName, setNewAreaName] = useState('');
   const [areas, setAreas] = useState(initialAreas);
 
@@ -462,14 +468,25 @@ export function RecordingClient({
   const handleSaveTest = async () => {
     setIsLoading(true);
     try {
-      const test = await saveRecordedTest({
-        name: testName,
-        functionalAreaId: areaId || null,
-        targetUrl: url,
-        code: generatedCode,
-        repositoryId,
-      });
-      router.push(`/tests/${test.id}`);
+      if (isRerecording && rerecordTest) {
+        // Update existing test with new code
+        await updateRerecordedTest({
+          testId: rerecordTest.id,
+          code: generatedCode,
+          targetUrl: url,
+        });
+        router.push(`/tests/${rerecordTest.id}`);
+      } else {
+        // Create new test
+        const test = await saveRecordedTest({
+          name: testName,
+          functionalAreaId: areaId || null,
+          targetUrl: url,
+          code: generatedCode,
+          repositoryId,
+        });
+        router.push(`/tests/${test.id}`);
+      }
     } catch (error) {
       console.error('Failed to save test:', error);
     } finally {
@@ -543,9 +560,11 @@ export function RecordingClient({
             <CardHeader>
               <div className="flex items-center justify-between">
                 <div>
-                  <CardTitle>New Recording</CardTitle>
+                  <CardTitle>{isRerecording ? 'Re-record Test' : 'New Recording'}</CardTitle>
                   <CardDescription>
-                    Configure your test and start recording browser interactions
+                    {isRerecording
+                      ? `Re-recording "${rerecordTest?.name}" - new code will replace current version`
+                      : 'Configure your test and start recording browser interactions'}
                   </CardDescription>
                 </div>
                 <Sheet open={settingsOpen} onOpenChange={setSettingsOpen}>
@@ -600,37 +619,45 @@ export function RecordingClient({
                   placeholder="login-success"
                   value={testName}
                   onChange={(e) => setTestName(e.target.value)}
+                  disabled={isRerecording}
                 />
+                {isRerecording && (
+                  <p className="text-xs text-muted-foreground">
+                    Test name cannot be changed when re-recording
+                  </p>
+                )}
               </div>
 
-              {/* Functional Area */}
-              <div className="space-y-2">
-                <label className="text-sm font-medium">Functional Area</label>
-                <div className="flex gap-2">
-                  <Select value={areaId} onValueChange={setAreaId}>
-                    <SelectTrigger className="flex-1">
-                      <SelectValue placeholder="Select or create new" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {areas.map((area) => (
-                        <SelectItem key={area.id} value={area.id}>
-                          {area.name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  <span className="text-sm text-muted-foreground self-center">or</span>
-                  <Input
-                    placeholder="New area name"
-                    value={newAreaName}
-                    onChange={(e) => {
-                      setNewAreaName(e.target.value);
-                      setAreaId('');
-                    }}
-                    className="flex-1"
-                  />
+              {/* Functional Area - hidden when re-recording */}
+              {!isRerecording && (
+                <div className="space-y-2">
+                  <label className="text-sm font-medium">Functional Area</label>
+                  <div className="flex gap-2">
+                    <Select value={areaId} onValueChange={setAreaId}>
+                      <SelectTrigger className="flex-1">
+                        <SelectValue placeholder="Select or create new" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {areas.map((area) => (
+                          <SelectItem key={area.id} value={area.id}>
+                            {area.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <span className="text-sm text-muted-foreground self-center">or</span>
+                    <Input
+                      placeholder="New area name"
+                      value={newAreaName}
+                      onChange={(e) => {
+                        setNewAreaName(e.target.value);
+                        setAreaId('');
+                      }}
+                      className="flex-1"
+                    />
+                  </div>
                 </div>
-              </div>
+              )}
 
               {/* Recording Engine */}
               {enabledEngines.length > 1 && (
@@ -922,9 +949,11 @@ export function RecordingClient({
       <div className="max-w-4xl mx-auto space-y-6">
         <Card>
           <CardHeader>
-            <CardTitle>Save Recording</CardTitle>
+            <CardTitle>{isRerecording ? 'Update Test' : 'Save Recording'}</CardTitle>
             <CardDescription>
-              Review the generated test code and save
+              {isRerecording
+                ? 'Review the generated code - this will create a new version of the test'
+                : 'Review the generated test code and save'}
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
@@ -959,7 +988,7 @@ export function RecordingClient({
                 {isLoading ? (
                   <Loader2 className="h-4 w-4 mr-2 animate-spin" />
                 ) : null}
-                Save Test
+                {isRerecording ? 'Update Test' : 'Save Test'}
               </Button>
             </div>
           </CardContent>

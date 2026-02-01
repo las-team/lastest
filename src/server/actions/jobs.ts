@@ -8,13 +8,15 @@ export async function createJob(
   type: BackgroundJobType,
   label: string,
   totalSteps?: number,
-  repositoryId?: string | null
+  repositoryId?: string | null,
+  metadata?: Record<string, unknown>
 ) {
   const { id } = await queries.createBackgroundJob({
     type,
     label,
     totalSteps,
     repositoryId,
+    metadata,
   });
   await queries.updateBackgroundJob(id, {
     status: 'running',
@@ -105,14 +107,19 @@ export async function getActiveJobs() {
 export async function cleanupStaleJobs(staleThresholdMs = 300000) {
   const count = await queries.markStaleJobsAsCrashed(staleThresholdMs);
 
-  // Also reset runner if it's stuck
-  const runner = getRunner();
-  if (runner.isActive()) {
-    const activeJobs = await queries.getActiveBackgroundJobs();
-    const hasRunningBuild = activeJobs.some(j => j.type === 'build_run' && j.status === 'running');
-    if (!hasRunningBuild) {
-      // Runner thinks it's active but no job is running - reset it
-      await runner.forceReset();
+  // Reset runner if jobs were cleaned up or if it's stuck
+  if (count > 0) {
+    const runner = getRunner();
+    await runner.forceReset();
+  } else {
+    // Also check if runner is stuck without any running jobs
+    const runner = getRunner();
+    if (runner.isActive()) {
+      const activeJobs = await queries.getActiveBackgroundJobs();
+      const hasRunningBuild = activeJobs.some(j => j.type === 'build_run' && j.status === 'running');
+      if (!hasRunningBuild) {
+        await runner.forceReset();
+      }
     }
   }
 
