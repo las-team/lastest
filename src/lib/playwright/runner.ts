@@ -567,7 +567,8 @@ export class PlaywrightRunner extends EventEmitter {
 
     // Track captured screenshots from within test code (outside try so catch can access)
     const capturedScreenshots: CapturedScreenshot[] = [];
-    let currentStepLabel = 'initial';
+    let stepCounter = 1;
+    let currentStepLabel = `step ${stepCounter}`;
 
     try {
       context = await this.browser.newContext({
@@ -624,6 +625,9 @@ export class PlaywrightRunner extends EventEmitter {
                   ? `/screenshots/${this.repositoryId}/${filename}`
                   : `/screenshots/${filename}`;
                 capturedScreenshots.push({ path: publicPath, label: currentStepLabel });
+                // Increment step counter for next screenshot
+                stepCounter++;
+                currentStepLabel = `step ${stepCounter}`;
               }
               return result;
             };

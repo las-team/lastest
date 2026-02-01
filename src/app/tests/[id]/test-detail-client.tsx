@@ -15,20 +15,27 @@ import {
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
-import { Play, Trash2, Copy, Edit2, Clock, CheckCircle, XCircle, X, Save, Wrench, Wand2, Loader2, History, RotateCcw, ChevronDown, Monitor, Video } from 'lucide-react';
+import { Play, Trash2, Copy, Edit2, Clock, CheckCircle, XCircle, X, Save, Wrench, Wand2, Loader2, History, RotateCcw, ChevronDown, ChevronRight, Monitor, Video, AlertTriangle, Image } from 'lucide-react';
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { deleteTest, updateTest, getTestVersionHistory, restoreTestVersion } from '@/server/actions/tests';
-import { runTests, getRunStatus } from '@/server/actions/runs';
+import { deleteTest, updateTest, getTestVersionHistory, restoreTestVersion, getVisualDiffsForTestResult } from '@/server/actions/tests';
+import { runTests, getJobStatus } from '@/server/actions/runs';
 import { aiFixTest, aiEnhanceTest, updateTestCode } from '@/server/actions/ai';
 import { toast } from 'sonner';
 import { useNotifyJobStarted } from '@/components/queue/job-polling-context';
-import type { Test, TestVersion } from '@/lib/db/schema';
+import type { Test, TestVersion, VisualDiff } from '@/lib/db/schema';
 import type { ScreenshotGroup } from '@/server/actions/tests';
+
+interface StepDiff {
+  stepLabel: string | null;
+  classification: string | null;
+  status: string | null;
+  currentImagePath: string | null;
+}
 
 interface TestResult {
   id: string;
@@ -87,7 +94,56 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
   const [isLoadingVersions, setIsLoadingVersions] = useState(false);
   const [isRestoring, setIsRestoring] = useState<number | null>(null);
 
+  // Run history expand state
+  const [expandedRuns, setExpandedRuns] = useState<Set<string>>(new Set());
+  const [runDiffs, setRunDiffs] = useState<Map<string, StepDiff[]>>(new Map());
+  const [loadingDiffs, setLoadingDiffs] = useState<Set<string>>(new Set());
+
   const latestResult = results[0];
+
+  const toggleRunExpanded = async (resultId: string) => {
+    const newExpanded = new Set(expandedRuns);
+    if (newExpanded.has(resultId)) {
+      newExpanded.delete(resultId);
+    } else {
+      newExpanded.add(resultId);
+      // Load diffs if not already loaded
+      if (!runDiffs.has(resultId)) {
+        setLoadingDiffs(prev => new Set(prev).add(resultId));
+        try {
+          const diffs = await getVisualDiffsForTestResult(resultId);
+          setRunDiffs(prev => new Map(prev).set(resultId, diffs.map(d => ({
+            stepLabel: d.stepLabel,
+            classification: d.classification,
+            status: d.status,
+            currentImagePath: d.currentImagePath,
+          }))));
+        } catch {
+          // Ignore errors
+        } finally {
+          setLoadingDiffs(prev => {
+            const next = new Set(prev);
+            next.delete(resultId);
+            return next;
+          });
+        }
+      }
+    }
+    setExpandedRuns(newExpanded);
+  };
+
+  const getDiffStatusIcon = (diff: StepDiff) => {
+    if (diff.status === 'approved' || diff.classification === 'unchanged') {
+      return <CheckCircle className="h-3 w-3 text-green-500" />;
+    }
+    if (diff.classification === 'flaky') {
+      return <AlertTriangle className="h-3 w-3 text-yellow-500" />;
+    }
+    if (diff.classification === 'changed') {
+      return <XCircle className="h-3 w-3 text-red-500" />;
+    }
+    return <Image className="h-3 w-3 text-muted-foreground" />;
+  };
 
   const loadVersions = async () => {
     setIsLoadingVersions(true);
@@ -134,13 +190,13 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
 
     setIsRunning(true);
     try {
-      await runTests([test.id], repositoryId, headless);
+      const { jobId } = await runTests([test.id], repositoryId, headless);
       notifyJobStarted();
       toast.success(headless ? 'Test started' : 'Test started (headed mode)');
-      // Poll for completion
+      // Poll job status for completion (ensures results are saved before refresh)
       pollIntervalRef.current = setInterval(async () => {
-        const { isRunning: stillRunning } = await getRunStatus(repositoryId);
-        if (!stillRunning) {
+        const { isComplete } = await getJobStatus(jobId);
+        if (isComplete) {
           if (pollIntervalRef.current) {
             clearInterval(pollIntervalRef.current);
             pollIntervalRef.current = null;
@@ -518,10 +574,18 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
                     {results.map((result) => (
                       <div
                         key={result.id}
-                        className="p-3 border rounded-lg"
+                        className="border rounded-lg"
                       >
-                        <div className="flex items-center justify-between">
+                        <button
+                          onClick={() => toggleRunExpanded(result.id)}
+                          className="w-full p-3 flex items-center justify-between hover:bg-muted/50 transition-colors"
+                        >
                           <div className="flex items-center gap-3">
+                            {expandedRuns.has(result.id) ? (
+                              <ChevronDown className="h-4 w-4 text-muted-foreground" />
+                            ) : (
+                              <ChevronRight className="h-4 w-4 text-muted-foreground" />
+                            )}
                             {result.status === 'passed' ? (
                               <CheckCircle className="h-4 w-4 text-green-500" />
                             ) : (
@@ -537,12 +601,58 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
                                 : 'Unknown'}
                             </span>
                           </div>
-                        </div>
-                        {result.status === 'failed' && result.errorMessage && (
-                          <div className="mt-2 p-2 bg-destructive/10 border border-destructive/20 rounded text-sm text-destructive">
-                            <pre className="whitespace-pre-wrap font-mono text-xs overflow-x-auto">
-                              {result.errorMessage}
-                            </pre>
+                        </button>
+
+                        {expandedRuns.has(result.id) && (
+                          <div className="px-3 pb-3 border-t">
+                            {result.status === 'failed' && result.errorMessage && (
+                              <div className="mt-2 p-2 bg-destructive/10 border border-destructive/20 rounded text-sm text-destructive">
+                                <pre className="whitespace-pre-wrap font-mono text-xs overflow-x-auto">
+                                  {result.errorMessage}
+                                </pre>
+                              </div>
+                            )}
+
+                            {loadingDiffs.has(result.id) ? (
+                              <div className="flex items-center gap-2 mt-3 text-sm text-muted-foreground">
+                                <Loader2 className="h-4 w-4 animate-spin" />
+                                Loading steps...
+                              </div>
+                            ) : runDiffs.has(result.id) && runDiffs.get(result.id)!.length > 0 ? (
+                              <div className="mt-3 space-y-2">
+                                <div className="text-xs font-medium text-muted-foreground uppercase">Steps</div>
+                                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2">
+                                  {runDiffs.get(result.id)!.map((diff, i) => (
+                                    <div key={i} className="border rounded p-2 space-y-1">
+                                      <div className="flex items-center gap-1.5">
+                                        {getDiffStatusIcon(diff)}
+                                        <span className="text-xs font-medium capitalize">
+                                          {diff.stepLabel || `step ${i + 1}`}
+                                        </span>
+                                      </div>
+                                      {diff.currentImagePath && (
+                                        <a
+                                          href={diff.currentImagePath}
+                                          target="_blank"
+                                          rel="noopener noreferrer"
+                                          className="block"
+                                        >
+                                          <img
+                                            src={diff.currentImagePath}
+                                            alt={diff.stepLabel || `step ${i + 1}`}
+                                            className="w-full h-16 object-cover rounded border hover:opacity-90"
+                                          />
+                                        </a>
+                                      )}
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            ) : (
+                              <div className="mt-3 text-xs text-muted-foreground">
+                                No visual diff data for this run
+                              </div>
+                            )}
                           </div>
                         )}
                       </div>

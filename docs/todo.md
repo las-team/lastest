@@ -12,12 +12,7 @@ check the recorder and the runner so that they are compatible and identify the r
 ## in progress
 ## test
 OCR
-Seed script: scripts/seed-excalidraw-tests.ts (run with npx tsx scripts/seed-excalidraw-tests.ts)   
-
 ## features
-Build/change approval
-    Test version or result on the build screen
-
 UI & UX 
     Use the frontend design skill and subagent for this
     Revise frontend and make sure you havent steered far and try to use standard shadcn css where possible
@@ -26,6 +21,8 @@ UI & UX
 Remove compare
 
 ## ideas
+Build/change approval
+    Test version or result on the build screen
 Imported document -> US & AC -> tests - US checklist overview
 Sitemap -flow
 Firecrawl?

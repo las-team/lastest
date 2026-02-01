@@ -1766,3 +1766,8 @@ export async function getUnsortedSuites(repositoryId: string) {
     .orderBy(suites.orderIndex)
     .all();
 }
+
+// Get visual diffs for a specific test result (step-level diffs)
+export async function getVisualDiffsByTestResult(testResultId: string) {
+  return db.select().from(visualDiffs).where(eq(visualDiffs.testResultId, testResultId)).all();
+}

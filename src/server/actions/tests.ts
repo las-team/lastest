@@ -173,3 +173,8 @@ export async function restoreTestVersion(testId: string, version: number) {
   revalidatePath(`/tests/${testId}`);
   return { success: true };
 }
+
+// Get visual diffs for a specific test result (step-level diffs)
+export async function getVisualDiffsForTestResult(testResultId: string) {
+  return queries.getVisualDiffsByTestResult(testResultId);
+}
