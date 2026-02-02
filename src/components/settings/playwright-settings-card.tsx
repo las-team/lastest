@@ -23,12 +23,14 @@ interface PlaywrightSettingsCardProps {
   settings: PlaywrightSettings;
   repositoryId?: string | null;
   compact?: boolean;
+  onSaveStatusChange?: (status: { isPending: boolean; showSaved: boolean }) => void;
 }
 
 export function PlaywrightSettingsCard({
   settings,
   repositoryId,
   compact = false,
+  onSaveStatusChange,
 }: PlaywrightSettingsCardProps) {
   const [isPending, startTransition] = useTransition();
   const [showSaved, setShowSaved] = useState(false);
@@ -100,6 +102,11 @@ export function PlaywrightSettingsCard({
     };
   }, [compact, selectorPriority, browser, viewportWidth, viewportHeight, headlessMode, navigationTimeout, actionTimeout, pointerGestures, cursorFPS, defaultRecordingEngine, freezeAnimations, screenshotDelay, doSave]);
 
+  // Notify parent of save status changes
+  useEffect(() => {
+    onSaveStatusChange?.({ isPending, showSaved });
+  }, [isPending, showSaved, onSaveStatusChange]);
+
   const handleSave = () => {
     doSave();
   };
@@ -124,24 +131,6 @@ export function PlaywrightSettingsCard({
 
   const content = (
     <div className={compact ? 'space-y-3' : 'space-y-6'}>
-      {/* Auto-save indicator for compact mode */}
-      {compact && (
-        <div className="flex items-center justify-end h-4 text-xs text-muted-foreground">
-          {isPending && (
-            <span className="flex items-center gap-1">
-              <Loader2 className="w-3 h-3 animate-spin" />
-              Saving...
-            </span>
-          )}
-          {showSaved && !isPending && (
-            <span className="flex items-center gap-1 text-green-600">
-              <Check className="w-3 h-3" />
-              Saved
-            </span>
-          )}
-        </div>
-      )}
-
       {/* Selector Priority */}
       <div className={compact ? 'space-y-1' : 'space-y-2'}>
         <div className="flex items-center gap-2">
@@ -203,51 +192,53 @@ export function PlaywrightSettingsCard({
       </div>
 
       {/* Snapshot Stabilization */}
-      {!compact && (
-        <div className="space-y-4">
-          <Label className="text-sm font-medium">Snapshot Stabilization</Label>
+      <div className={compact ? 'space-y-2' : 'space-y-4'}>
+        {!compact && <Label className="text-sm font-medium">Snapshot Stabilization</Label>}
 
-          {/* Freeze Animations */}
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <Pause className="w-4 h-4 text-muted-foreground" />
-              <div className="space-y-0.5">
-                <Label className="text-sm">Freeze Animations</Label>
+        {/* Freeze Animations */}
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Pause className="w-4 h-4 text-muted-foreground" />
+            <div className="space-y-0.5">
+              <Label className="text-sm">Freeze Animations</Label>
+              {!compact && (
                 <p className="text-xs text-muted-foreground">
                   Disable CSS animations and transitions before screenshots
                 </p>
-              </div>
+              )}
             </div>
-            <Switch checked={freezeAnimations} onCheckedChange={setFreezeAnimations} />
           </div>
+          <Switch checked={freezeAnimations} onCheckedChange={setFreezeAnimations} />
+        </div>
 
-          {/* Screenshot Delay */}
-          <div className="flex items-center gap-4">
-            <div className="flex items-center gap-2">
-              <Clock className="w-4 h-4 text-muted-foreground" />
-              <div className="space-y-0.5">
-                <Label htmlFor="screenshotDelay" className="text-sm">Screenshot Delay</Label>
+        {/* Screenshot Delay */}
+        <div className={compact ? 'flex items-center justify-between' : 'flex items-center gap-4'}>
+          <div className="flex items-center gap-2">
+            <Clock className="w-4 h-4 text-muted-foreground" />
+            <div className="space-y-0.5">
+              <Label htmlFor="screenshotDelay" className="text-sm">Screenshot Delay</Label>
+              {!compact && (
                 <p className="text-xs text-muted-foreground">
                   Wait before capturing screenshot for content to stabilize
                 </p>
-              </div>
-            </div>
-            <div className="flex items-center gap-2 ml-auto">
-              <Input
-                id="screenshotDelay"
-                type="number"
-                min={0}
-                max={5000}
-                step={100}
-                value={screenshotDelay}
-                onChange={(e) => setScreenshotDelay(Math.max(0, parseInt(e.target.value) || 0))}
-                className="w-24"
-              />
-              <span className="text-xs text-muted-foreground">ms</span>
+              )}
             </div>
           </div>
+          <div className={compact ? 'flex items-center gap-1' : 'flex items-center gap-2 ml-auto'}>
+            <Input
+              id="screenshotDelay"
+              type="number"
+              min={0}
+              max={5000}
+              step={100}
+              value={screenshotDelay}
+              onChange={(e) => setScreenshotDelay(Math.max(0, parseInt(e.target.value) || 0))}
+              className={compact ? 'w-16 h-7 text-sm' : 'w-24'}
+            />
+            <span className="text-xs text-muted-foreground">ms</span>
+          </div>
         </div>
-      )}
+      </div>
 
       {/* Browser Settings */}
       {!compact && (

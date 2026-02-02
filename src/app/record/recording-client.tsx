@@ -254,6 +254,7 @@ export function RecordingClient({
   const [error, setError] = useState<string | null>(null);
   const lastSequenceRef = useRef(0);
   const timelineRef = useRef<HTMLDivElement>(null);
+  const [settingsSaveStatus, setSettingsSaveStatus] = useState({ isPending: false, showSaved: false });
 
   // Poll for recording status and events when in recording step
   useEffect(() => {
@@ -693,10 +694,27 @@ export function RecordingClient({
 
             {/* Right Column - Settings */}
             <Card>
-              <CardHeader className="pb-3">
-                <div className="flex items-center gap-2">
-                  <Settings2 className="h-4 w-4 text-muted-foreground" />
-                  <CardTitle className="text-base">Recording Settings</CardTitle>
+              <CardHeader className="pb-1">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Settings2 className="h-4 w-4 text-muted-foreground" />
+                    <CardTitle className="text-base">Recording Settings</CardTitle>
+                  </div>
+                  {(settingsSaveStatus.isPending || settingsSaveStatus.showSaved) && (
+                    <div className="text-xs text-muted-foreground">
+                      {settingsSaveStatus.isPending ? (
+                        <span className="flex items-center gap-1">
+                          <Loader2 className="w-3 h-3 animate-spin" />
+                          Saving...
+                        </span>
+                      ) : (
+                        <span className="flex items-center gap-1 text-green-600">
+                          <Check className="w-3 h-3" />
+                          Saved
+                        </span>
+                      )}
+                    </div>
+                  )}
                 </div>
               </CardHeader>
               <CardContent>
@@ -704,6 +722,7 @@ export function RecordingClient({
                   settings={settings}
                   repositoryId={repositoryId}
                   compact
+                  onSaveStatusChange={setSettingsSaveStatus}
                 />
               </CardContent>
             </Card>
