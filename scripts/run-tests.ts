@@ -106,8 +106,8 @@ async function main() {
   const testRun = await createTestRun({
     repositoryId: repoId,
     status: 'running',
-    gitBranch: process.env.GITHUB_HEAD_REF || process.env.GITHUB_REF_NAME || 'unknown',
-    gitCommit: process.env.GITHUB_SHA || null,
+    gitBranch: process.env.GITHUB_HEAD_REF || process.env.GITHUB_REF_NAME || 'local',
+    gitCommit: process.env.GITHUB_SHA || 'local-' + Date.now(),
     startedAt: new Date(),
   });
 
