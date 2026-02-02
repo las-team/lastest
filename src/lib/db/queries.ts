@@ -24,6 +24,7 @@ import {
   suites,
   suiteTests,
   notificationSettings,
+  selectorStats,
 } from './schema';
 import {
   DEFAULT_SELECTOR_PRIORITY,
@@ -57,6 +58,7 @@ import type {
   NewSuite,
   NewSuiteTest,
   NewNotificationSettings,
+  NewSelectorStat,
   BuildStatus,
   SelectorConfig,
   AIProvider,
@@ -1842,5 +1844,113 @@ export async function upsertNotificationSettings(repositoryId: string | null, da
     return { ...existing, ...data, updatedAt: new Date() };
   } else {
     return createNotificationSettings({ ...data, repositoryId: repositoryId ?? undefined });
+  }
+}
+
+// Selector Stats - for optimizing fallback selector strategy
+export async function getSelectorStats(testId: string, selectorArrayHash: string) {
+  return db
+    .select()
+    .from(selectorStats)
+    .where(and(eq(selectorStats.testId, testId), eq(selectorStats.selectorArrayHash, selectorArrayHash)))
+    .all();
+}
+
+export async function recordSelectorSuccess(
+  testId: string,
+  selectorArrayHash: string,
+  selectorType: string,
+  selectorValue: string,
+  responseTimeMs: number
+) {
+  const now = new Date();
+  const existing = await db
+    .select()
+    .from(selectorStats)
+    .where(
+      and(
+        eq(selectorStats.testId, testId),
+        eq(selectorStats.selectorArrayHash, selectorArrayHash),
+        eq(selectorStats.selectorType, selectorType),
+        eq(selectorStats.selectorValue, selectorValue)
+      )
+    )
+    .get();
+
+  if (existing) {
+    const newSuccessCount = (existing.successCount ?? 0) + 1;
+    const newTotalAttempts = (existing.totalAttempts ?? 0) + 1;
+    const oldAvg = existing.avgResponseTimeMs ?? responseTimeMs;
+    const newAvg = Math.round((oldAvg * (newSuccessCount - 1) + responseTimeMs) / newSuccessCount);
+
+    await db
+      .update(selectorStats)
+      .set({
+        successCount: newSuccessCount,
+        totalAttempts: newTotalAttempts,
+        avgResponseTimeMs: newAvg,
+        lastUsedAt: now,
+      })
+      .where(eq(selectorStats.id, existing.id));
+  } else {
+    await db.insert(selectorStats).values({
+      id: uuid(),
+      testId,
+      selectorArrayHash,
+      selectorType,
+      selectorValue,
+      successCount: 1,
+      failureCount: 0,
+      totalAttempts: 1,
+      avgResponseTimeMs: responseTimeMs,
+      lastUsedAt: now,
+      createdAt: now,
+    });
+  }
+}
+
+export async function recordSelectorFailure(
+  testId: string,
+  selectorArrayHash: string,
+  selectorType: string,
+  selectorValue: string
+) {
+  const now = new Date();
+  const existing = await db
+    .select()
+    .from(selectorStats)
+    .where(
+      and(
+        eq(selectorStats.testId, testId),
+        eq(selectorStats.selectorArrayHash, selectorArrayHash),
+        eq(selectorStats.selectorType, selectorType),
+        eq(selectorStats.selectorValue, selectorValue)
+      )
+    )
+    .get();
+
+  if (existing) {
+    await db
+      .update(selectorStats)
+      .set({
+        failureCount: (existing.failureCount ?? 0) + 1,
+        totalAttempts: (existing.totalAttempts ?? 0) + 1,
+        lastUsedAt: now,
+      })
+      .where(eq(selectorStats.id, existing.id));
+  } else {
+    await db.insert(selectorStats).values({
+      id: uuid(),
+      testId,
+      selectorArrayHash,
+      selectorType,
+      selectorValue,
+      successCount: 0,
+      failureCount: 1,
+      totalAttempts: 1,
+      avgResponseTimeMs: null,
+      lastUsedAt: now,
+      createdAt: now,
+    });
   }
 }

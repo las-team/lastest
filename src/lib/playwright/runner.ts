@@ -2,9 +2,11 @@ import { chromium, firefox, webkit, Browser, Page, BrowserContext, Locator } fro
 import { EventEmitter } from 'events';
 import path from 'path';
 import fs from 'fs';
+import crypto from 'crypto';
 import AxeBuilder from '@axe-core/playwright';
 import { DEFAULT_SELECTOR_PRIORITY } from '@/lib/db/schema';
 import type { A11yViolation } from '@/lib/db/schema';
+import { getSelectorStats, recordSelectorSuccess, recordSelectorFailure } from '@/lib/db/queries';
 
 /**
  * Create appState helper for internal state inspection.
@@ -838,16 +840,113 @@ export class PlaywrightRunner extends EventEmitter {
 
       // Strip import statements and the function wrapper, execute the body
       // Also strip TypeScript annotations since code runs as plain JavaScript
-      const body = this.stripTypeAnnotations(funcMatch[1]);
+      let body = this.stripTypeAnnotations(funcMatch[1]);
 
       // Build an async function from the body
       // Include 'expect' for Playwright Inspector-generated tests that use assertions
       // Include 'appState' for internal state inspection (Excalidraw undo/redo, etc.)
       const expectFn = createExpect(this.getActionTimeout());
       const appStateFn = createAppState(page);
+
+      // Create stats-tracking locateWithFallback that tests can use
+      const testId = test.id;
+      const statsLocateWithFallback = async (
+        pg: Page,
+        selectors: { type: string; value: string }[],
+        action: string,
+        value?: string | null,
+        coords?: { x: number; y: number } | null
+      ) => {
+        const hash = crypto.createHash('sha256').update(JSON.stringify(selectors)).digest('hex').slice(0, 16);
+        let validSelectors = selectors.filter(s => s.value && s.value.trim() && !s.value.includes('undefined'));
+
+        // Load stats and apply optimization
+        try {
+          const stats = await getSelectorStats(testId, hash);
+          if (stats.length > 0) {
+            const statsMap = new Map(stats.map(s => [`${s.selectorType}:${s.selectorValue}`, s]));
+
+            // Sort by success count (successful selectors first)
+            validSelectors = validSelectors.sort((a, b) => {
+              const aStats = statsMap.get(`${a.type}:${a.value}`);
+              const bStats = statsMap.get(`${b.type}:${b.value}`);
+              const aSuccess = aStats?.successCount ?? 0;
+              const bSuccess = bStats?.successCount ?? 0;
+              if (aSuccess > 0 && bSuccess === 0) return -1;
+              if (bSuccess > 0 && aSuccess === 0) return 1;
+              return bSuccess - aSuccess;
+            });
+
+            // Skip selectors with 0 successes after 3+ attempts
+            validSelectors = validSelectors.filter(s => {
+              const stat = statsMap.get(`${s.type}:${s.value}`);
+              if (!stat) return true;
+              if ((stat.totalAttempts ?? 0) >= 3 && (stat.successCount ?? 0) === 0) {
+                return false; // Skip this selector
+              }
+              return true;
+            });
+          }
+        } catch {
+          // Stats unavailable, continue without optimization
+        }
+
+        for (const sel of validSelectors) {
+          const start = Date.now();
+          try {
+            let locator;
+            if (sel.type === 'ocr-text') {
+              const text = sel.value.replace(/^ocr-text="/, '').replace(/"$/, '');
+              locator = pg.getByText(text, { exact: false });
+            } else if (sel.type === 'role-name') {
+              const match = sel.value.match(/^role=(\w+)\[name="(.+)"\]$/);
+              if (match) locator = pg.getByRole(match[1] as 'button' | 'link' | 'heading', { name: match[2] });
+              else locator = pg.locator(sel.value);
+            } else {
+              locator = pg.locator(sel.value);
+            }
+            const target = locator.first();
+            await target.waitFor({ timeout: 3000 });
+            if (action === 'click') await target.click();
+            else if (action === 'fill') await target.fill(value || '');
+            else if (action === 'selectOption') await target.selectOption(value || '');
+            recordSelectorSuccess(testId, hash, sel.type, sel.value, Date.now() - start).catch(() => {});
+            return;
+          } catch {
+            recordSelectorFailure(testId, hash, sel.type, sel.value).catch(() => {});
+            continue;
+          }
+        }
+        // Coordinate fallback
+        if (action === 'click' && coords) {
+          await pg.mouse.click(coords.x, coords.y);
+          return;
+        }
+        throw new Error('No selector matched: ' + JSON.stringify(validSelectors));
+      };
+
+      // Remove the test's local locateWithFallback function declaration so the parameter is used
+      // Match: async function locateWithFallback(...) { ... } with balanced braces
+      if (body.includes('async function locateWithFallback(')) {
+        const startMatch = body.match(/async function locateWithFallback\s*\([^)]*\)\s*\{/);
+        if (startMatch && startMatch.index !== undefined) {
+          const startIdx = startMatch.index;
+          const braceStart = body.indexOf('{', startIdx);
+          let depth = 1;
+          let endIdx = braceStart + 1;
+          while (depth > 0 && endIdx < body.length) {
+            if (body[endIdx] === '{') depth++;
+            else if (body[endIdx] === '}') depth--;
+            endIdx++;
+          }
+          // Replace the function with a comment
+          body = body.slice(0, startIdx) + '/* locateWithFallback provided by runner */' + body.slice(endIdx);
+        }
+      }
+
       const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
-      const testFn = new AsyncFunction('page', 'baseUrl', 'screenshotPath', 'stepLogger', 'expect', 'appState', body);
-      await testFn(page, baseUrl, screenshotPath, stepLogger, expectFn, appStateFn);
+      const testFn = new AsyncFunction('page', 'baseUrl', 'screenshotPath', 'stepLogger', 'expect', 'appState', 'locateWithFallback', body);
+      await testFn(page, baseUrl, screenshotPath, stepLogger, expectFn, appStateFn, statsLocateWithFallback);
       return;
     }
 
@@ -861,7 +960,7 @@ export class PlaywrightRunner extends EventEmitter {
       );
 
       for (const line of lines) {
-        await this.executeLine(page, line.trim());
+        await this.executeLine(page, line.trim(), test.id);
       }
       return;
     }
@@ -870,20 +969,39 @@ export class PlaywrightRunner extends EventEmitter {
     const lines = body.split('\n').filter(line => line.trim() && !line.trim().startsWith('//'));
 
     for (const line of lines) {
-      await this.executeLine(page, line.trim());
+      await this.executeLine(page, line.trim(), test.id);
     }
   }
 
-  // Locate element using fallback selector strategy
+  // Locate element using fallback selector strategy with stats-based optimization
   private async locateWithFallback(
     page: Page,
     selectors: ActionSelector[],
+    testId?: string,
   ): Promise<Locator> {
     const priority = this.getSelectorPriority();
     const timeout = this.getActionTimeout();
 
+    // Compute hash of selector array for stats lookup
+    const selectorArrayHash = crypto
+      .createHash('sha256')
+      .update(JSON.stringify(selectors))
+      .digest('hex')
+      .slice(0, 16);
+
+    // Load stats if testId provided
+    let stats: Awaited<ReturnType<typeof getSelectorStats>> = [];
+    if (testId) {
+      try {
+        stats = await getSelectorStats(testId, selectorArrayHash);
+      } catch {
+        // Stats unavailable, continue without optimization
+      }
+    }
+    const statsMap = new Map(stats.map(s => [`${s.selectorType}:${s.selectorValue}`, s]));
+
     // Sort selectors by user-defined priority
-    const sorted = selectors
+    let sorted = selectors
       .filter(s => priority.find(p => p.type === s.type && p.enabled))
       .sort((a, b) => {
         const aPriority = priority.find(p => p.type === a.type)?.priority ?? 999;
@@ -891,26 +1009,75 @@ export class PlaywrightRunner extends EventEmitter {
         return aPriority - bPriority;
       });
 
+    // Re-sort based on stats: successful selectors first, ordered by success count desc
+    if (stats.length > 0) {
+      sorted = sorted.sort((a, b) => {
+        const aStats = statsMap.get(`${a.type}:${a.value}`);
+        const bStats = statsMap.get(`${b.type}:${b.value}`);
+        const aSuccess = aStats?.successCount ?? 0;
+        const bSuccess = bStats?.successCount ?? 0;
+        // Put successful selectors first
+        if (aSuccess > 0 && bSuccess === 0) return -1;
+        if (bSuccess > 0 && aSuccess === 0) return 1;
+        // Among successful, sort by success count desc
+        if (aSuccess !== bSuccess) return bSuccess - aSuccess;
+        // Fall back to original priority
+        const aPriority = priority.find(p => p.type === a.type)?.priority ?? 999;
+        const bPriority = priority.find(p => p.type === b.type)?.priority ?? 999;
+        return aPriority - bPriority;
+      });
+
+      // Skip selectors with 0 successes after 3+ attempts
+      sorted = sorted.filter(s => {
+        const stat = statsMap.get(`${s.type}:${s.value}`);
+        if (!stat) return true; // No history, try it
+        if ((stat.totalAttempts ?? 0) >= 3 && (stat.successCount ?? 0) === 0) {
+          return false; // Skip: tried 3+ times, never worked
+        }
+        return true;
+      });
+    }
+
     // Try each selector in priority order
-    const perSelectorTimeout = Math.max(Math.floor(timeout / sorted.length), 1000);
+    const perSelectorTimeout = Math.max(Math.floor(timeout / Math.max(sorted.length, 1)), 1000);
 
     for (const sel of sorted) {
+      const startTime = Date.now();
       try {
         const locator = page.locator(sel.value);
         await locator.waitFor({ timeout: perSelectorTimeout, state: 'visible' });
+        // Record success
+        if (testId) {
+          const elapsed = Date.now() - startTime;
+          recordSelectorSuccess(testId, selectorArrayHash, sel.type, sel.value, elapsed).catch(() => {});
+        }
         return locator;
       } catch {
+        // Record failure
+        if (testId) {
+          recordSelectorFailure(testId, selectorArrayHash, sel.type, sel.value).catch(() => {});
+        }
         continue;
       }
     }
 
     // If no prioritized selectors worked, try all selectors as fallback
     for (const sel of selectors) {
+      const startTime = Date.now();
       try {
         const locator = page.locator(sel.value);
         await locator.waitFor({ timeout: 1000, state: 'visible' });
+        // Record success
+        if (testId) {
+          const elapsed = Date.now() - startTime;
+          recordSelectorSuccess(testId, selectorArrayHash, sel.type, sel.value, elapsed).catch(() => {});
+        }
         return locator;
       } catch {
+        // Record failure
+        if (testId) {
+          recordSelectorFailure(testId, selectorArrayHash, sel.type, sel.value).catch(() => {});
+        }
         continue;
       }
     }
@@ -918,7 +1085,7 @@ export class PlaywrightRunner extends EventEmitter {
     throw new Error(`No selector matched: ${JSON.stringify(selectors)}`);
   }
 
-  private async executeLine(page: Page, line: string): Promise<void> {
+  private async executeLine(page: Page, line: string, testId?: string): Promise<void> {
     // Parse and execute individual Playwright commands
     if (line.startsWith('await page.goto(')) {
       const urlMatch = line.match(/goto\(['"]([^'"]+)['"]\)/);
@@ -958,7 +1125,7 @@ export class PlaywrightRunner extends EventEmitter {
         const action = argsMatch[1];
         const value = argsMatch[2];
 
-        const locator = await this.locateWithFallback(page, selectors);
+        const locator = await this.locateWithFallback(page, selectors, testId);
 
         switch (action) {
           case 'click':

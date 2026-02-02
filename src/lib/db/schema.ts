@@ -509,3 +509,21 @@ export const DEFAULT_NOTIFICATION_SETTINGS = {
   slackEnabled: false,
   githubPrCommentsEnabled: false,
 };
+
+// Selector statistics for optimizing fallback strategy
+export const selectorStats = sqliteTable('selector_stats', {
+  id: text('id').primaryKey(),
+  testId: text('test_id').references(() => tests.id, { onDelete: 'cascade' }),
+  selectorArrayHash: text('selector_array_hash').notNull(),
+  selectorType: text('selector_type').notNull(),
+  selectorValue: text('selector_value').notNull(),
+  successCount: integer('success_count').default(0),
+  failureCount: integer('failure_count').default(0),
+  totalAttempts: integer('total_attempts').default(0),
+  avgResponseTimeMs: integer('avg_response_time_ms'),
+  lastUsedAt: integer('last_used_at', { mode: 'timestamp' }),
+  createdAt: integer('created_at', { mode: 'timestamp' }),
+});
+
+export type SelectorStat = typeof selectorStats.$inferSelect;
+export type NewSelectorStat = typeof selectorStats.$inferInsert;
