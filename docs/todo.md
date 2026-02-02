@@ -13,8 +13,7 @@ check the recorder and the runner so that they are compatible and identify the r
 ## in progress
 ## test
 OCR
-Seed script: scripts/seed-excalidraw-tests.ts (run with npx tsx scripts/seed-excalidraw-tests.ts)
-  1. GitHub PR Comments                                                                  2. Slack Notifications                                                               3. Page Shift Detection                                                                    4. Accessibility Testing                                                                Anti-Aliasing Handling      
+GitHub PR Comments                                                                  2. Slack Notifications                                                               3. Page Shift Detection                                                                    4. Accessibility Testing                                                                Anti-Aliasing Handling      
   Animation Freezing       
   Screenshot Stabilization Delay                                      
 ## features

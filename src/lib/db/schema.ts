@@ -491,12 +491,14 @@ export type NewSuite = typeof suites.$inferInsert;
 export type SuiteTest = typeof suiteTests.$inferSelect;
 export type NewSuiteTest = typeof suiteTests.$inferInsert;
 
-// Notification settings for Slack and GitHub PR comments
+// Notification settings for Slack, Discord, and GitHub PR comments
 export const notificationSettings = sqliteTable('notification_settings', {
   id: text('id').primaryKey(),
   repositoryId: text('repository_id').references(() => repositories.id),
   slackWebhookUrl: text('slack_webhook_url'),
   slackEnabled: integer('slack_enabled', { mode: 'boolean' }).default(false),
+  discordWebhookUrl: text('discord_webhook_url'),
+  discordEnabled: integer('discord_enabled', { mode: 'boolean' }).default(false),
   githubPrCommentsEnabled: integer('github_pr_comments_enabled', { mode: 'boolean' }).default(false),
   createdAt: integer('created_at', { mode: 'timestamp' }),
   updatedAt: integer('updated_at', { mode: 'timestamp' }),
@@ -507,6 +509,7 @@ export type NewNotificationSettings = typeof notificationSettings.$inferInsert;
 
 export const DEFAULT_NOTIFICATION_SETTINGS = {
   slackEnabled: false,
+  discordEnabled: false,
   githubPrCommentsEnabled: false,
 };
 
