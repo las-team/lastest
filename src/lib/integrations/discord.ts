@@ -26,6 +26,7 @@ export async function sendDiscordNotification(
 
   const embed = {
     title: `${statusEmoji} Visual Test Build ${statusText}`,
+    url: notification.buildUrl,
     color,
     fields: [
       {
@@ -36,11 +37,6 @@ export async function sendDiscordNotification(
       {
         name: 'Commit',
         value: `\`${notification.gitCommit}\``,
-        inline: true,
-      },
-      {
-        name: '\u200B', // Empty field for spacing
-        value: '\u200B',
         inline: true,
       },
       {
@@ -63,13 +59,7 @@ export async function sendDiscordNotification(
         value: `${notification.changesDetected}`,
         inline: true,
       },
-      {
-        name: 'Flaky',
-        value: `${notification.flakyCount}`,
-        inline: true,
-      },
     ],
-    url: notification.buildUrl,
     timestamp: new Date().toISOString(),
   };
 

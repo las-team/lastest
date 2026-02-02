@@ -637,9 +637,13 @@ async function sendBuildNotifications(data: {
   }
 
   // Send Discord notification
+  console.log('[Notifications] Discord settings:', {
+    enabled: notificationSettings.discordEnabled,
+    hasUrl: !!notificationSettings.discordWebhookUrl,
+  });
   if (notificationSettings.discordEnabled && notificationSettings.discordWebhookUrl) {
     try {
-      await sendDiscordNotification(notificationSettings.discordWebhookUrl, {
+      const result = await sendDiscordNotification(notificationSettings.discordWebhookUrl, {
         buildId: data.buildId,
         status: data.status,
         totalTests: data.totalTests,
@@ -651,6 +655,7 @@ async function sendBuildNotifications(data: {
         gitCommit: testRun?.gitCommit || 'unknown',
         buildUrl,
       });
+      console.log('[Notifications] Discord result:', result);
     } catch (error) {
       console.error('Failed to send Discord notification:', error);
     }

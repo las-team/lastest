@@ -13,7 +13,7 @@ check the recorder and the runner so that they are compatible and identify the r
 ## in progress
 ## test
 OCR
-GitHub PR Comments
+GitHub PR Comments - CLI runner
 Page Shift Detection  
 Accessibility Testing
 Anti-Aliasing Handling 
@@ -25,7 +25,10 @@ Login and user management
 
 Execution local client and cloud ~/.claude/plans/cozy-sniffing-hopcroft.md  
 Electron app ~/.claude/plans/rippling-roaming-snail.md
-Github actions integration ~/.claude/plans/rippling-roaming-snail.md  
+Github actions integration
+
+VS Code extension
+npm/CLI one-liner install
 
 Percy catchup ~/.claude/plans/staged-seeking-lecun.md 
 Chromatic catchup ~/.claude/plans/rustling-launching-kitten.md     
@@ -67,24 +70,11 @@ Test classification
 Support https://github.com/excalidraw/excalidraw/tree/master/packages/excalidraw/tests
 
  1. Integration > Awareness                                       
-                                                                                                                  
-  Posts create awareness. Integrations create adoption.                                                           
-  ┌───────────────────────────┬────────────────────┐                                                              
-  │        High Impact        │    Lower Impact    │                                                              
-  ├───────────────────────────┼────────────────────┤                                                              
-  ├───────────────────────────┼────────────────────┤                                                              
-  │ VS Code extension         │ Twitter threads    │                                                              
-  ├───────────────────────────┼────────────────────┤                                                              
-  │ Cursor plugin/template    │ ProductHunt launch │                                                              
-  ├───────────────────────────┼────────────────────┤                                                              
-  │ npm/CLI one-liner install │ Reddit posts       │                                                              
-  └───────────────────────────┴────────────────────┘                                                              
-  Action: Build a npx create-lastest2 orthat makes setup trivial.
+                                                                       
 
-  2. Distribution = Existing Audience                                                                    
-                                                                                                                  
+  2. Distribution = Existing Audience                         
   Per https://www.indiehackers.com, you need distribution from day one. Without an existing audience, posting is  
-  shouting into void.                                                                                                                                                                                               
+  shouting into void.                     
   Options if you don't have audience:                                                                             
   - Borrow someone else's: Get featured by https://youtube.com/fireship, Theo, or smaller YouTubers (5-20k subs)  
   who review dev tools                                                                                            
