@@ -13,20 +13,29 @@ check the recorder and the runner so that they are compatible and identify the r
 ## in progress
 ## test
 OCR
-Seed script: scripts/seed-excalidraw-tests.ts (run with npx tsx scripts/seed-excalidraw-tests.ts)   
+Seed script: scripts/seed-excalidraw-tests.ts (run with npx tsx scripts/seed-excalidraw-tests.ts)
+  1. GitHub PR Comments                                                                  2. Slack Notifications                                                               3. Page Shift Detection                                                                    4. Accessibility Testing                                                                Anti-Aliasing Handling      
+  Animation Freezing       
+  Screenshot Stabilization Delay                                      
 ## features
-Execution agent and cloud ~/.claude/plans/cozy-sniffing-hopcroft.md  
+Login and user management
+
+Execution local client and cloud ~/.claude/plans/cozy-sniffing-hopcroft.md  
 Electron app ~/.claude/plans/rippling-roaming-snail.md
 Github actions integration ~/.claude/plans/rippling-roaming-snail.md  
+
+Percy catchup ~/.claude/plans/staged-seeking-lecun.md 
+Chromatic catchup ~/.claude/plans/rustling-launching-kitten.md     
 
 UI & UX 
     Use the frontend design skill and subagent for this
     Revise frontend and make sure you havent steered far and try to use standard shadcn css where possible
     make sure every page has a clear primary action if there are more than one. If you cant decide ask me a question about it
 
-Remove compare
+Fix compare and branch selection
 
 ## ideas
+Tooltip: Did you know tests are getting faster as selectors are optimized to save runtime?
 Build/change approval
     Test version or result on the build screen
 Imported document -> US & AC -> tests - US checklist overview

@@ -30,10 +30,18 @@ export interface RecordedAction {
   timestamp: number;
 }
 
+export interface PageShiftInfo {
+  detected: boolean;
+  deltaY: number;
+  confidence: number;
+  excludedFromDiff: boolean;
+}
+
 export interface DiffMetadata {
   changedRegions: { x: number; y: number; width: number; height: number }[];
   affectedComponents?: string[];
   changeCategories?: ('layout' | 'color' | 'text' | 'image' | 'style')[];
+  pageShift?: PageShiftInfo;
 }
 
 export const functionalAreas = sqliteTable('functional_areas', {
@@ -72,6 +80,16 @@ export interface CapturedScreenshot {
   label?: string;
 }
 
+// Accessibility violation from axe-core
+export interface A11yViolation {
+  id: string;
+  impact: 'critical' | 'serious' | 'moderate' | 'minor';
+  description: string;
+  help: string;
+  helpUrl: string;
+  nodes: number;
+}
+
 export const testResults = sqliteTable('test_results', {
   id: text('id').primaryKey(),
   testRunId: text('test_run_id').references(() => testRuns.id),
@@ -86,6 +104,7 @@ export const testResults = sqliteTable('test_results', {
   browser: text('browser').default('chromium'),
   consoleErrors: text('console_errors', { mode: 'json' }).$type<string[]>(),
   networkRequests: text('network_requests', { mode: 'json' }).$type<NetworkRequest[]>(),
+  a11yViolations: text('a11y_violations', { mode: 'json' }).$type<A11yViolation[]>(),
 });
 
 // Repositories synced from GitHub
@@ -243,6 +262,8 @@ export const playwrightSettings = sqliteTable('playwright_settings', {
   cursorFPS: integer('cursor_fps').default(30),
   enabledRecordingEngines: text('enabled_recording_engines', { mode: 'json' }).$type<RecordingEngine[]>(),
   defaultRecordingEngine: text('default_recording_engine').default('lastest'),
+  freezeAnimations: integer('freeze_animations', { mode: 'boolean' }).default(false), // freeze CSS animations/transitions
+  screenshotDelay: integer('screenshot_delay').default(0), // ms delay before screenshot
   createdAt: integer('created_at', { mode: 'timestamp' }),
   updatedAt: integer('updated_at', { mode: 'timestamp' }),
 });
@@ -333,6 +354,7 @@ export const diffSensitivitySettings = sqliteTable('diff_sensitivity_settings', 
   repositoryId: text('repository_id').references(() => repositories.id),
   unchangedThreshold: integer('unchanged_threshold').default(1),  // percentage
   flakyThreshold: integer('flaky_threshold').default(10),        // percentage
+  includeAntiAliasing: integer('include_anti_aliasing', { mode: 'boolean' }).default(false), // include AA pixels in diff
   createdAt: integer('created_at', { mode: 'timestamp' }),
   updatedAt: integer('updated_at', { mode: 'timestamp' }),
 });
@@ -344,6 +366,7 @@ export type NewDiffSensitivitySettings = typeof diffSensitivitySettings.$inferIn
 export const DEFAULT_DIFF_THRESHOLDS = {
   unchangedThreshold: 1,
   flakyThreshold: 10,
+  includeAntiAliasing: false,
 };
 
 // Diff classification type
@@ -467,3 +490,40 @@ export type Suite = typeof suites.$inferSelect;
 export type NewSuite = typeof suites.$inferInsert;
 export type SuiteTest = typeof suiteTests.$inferSelect;
 export type NewSuiteTest = typeof suiteTests.$inferInsert;
+
+// Notification settings for Slack and GitHub PR comments
+export const notificationSettings = sqliteTable('notification_settings', {
+  id: text('id').primaryKey(),
+  repositoryId: text('repository_id').references(() => repositories.id),
+  slackWebhookUrl: text('slack_webhook_url'),
+  slackEnabled: integer('slack_enabled', { mode: 'boolean' }).default(false),
+  githubPrCommentsEnabled: integer('github_pr_comments_enabled', { mode: 'boolean' }).default(false),
+  createdAt: integer('created_at', { mode: 'timestamp' }),
+  updatedAt: integer('updated_at', { mode: 'timestamp' }),
+});
+
+export type NotificationSettings = typeof notificationSettings.$inferSelect;
+export type NewNotificationSettings = typeof notificationSettings.$inferInsert;
+
+export const DEFAULT_NOTIFICATION_SETTINGS = {
+  slackEnabled: false,
+  githubPrCommentsEnabled: false,
+};
+
+// Selector statistics for optimizing fallback strategy
+export const selectorStats = sqliteTable('selector_stats', {
+  id: text('id').primaryKey(),
+  testId: text('test_id').references(() => tests.id, { onDelete: 'cascade' }),
+  selectorArrayHash: text('selector_array_hash').notNull(),
+  selectorType: text('selector_type').notNull(),
+  selectorValue: text('selector_value').notNull(),
+  successCount: integer('success_count').default(0),
+  failureCount: integer('failure_count').default(0),
+  totalAttempts: integer('total_attempts').default(0),
+  avgResponseTimeMs: integer('avg_response_time_ms'),
+  lastUsedAt: integer('last_used_at', { mode: 'timestamp' }),
+  createdAt: integer('created_at', { mode: 'timestamp' }),
+});
+
+export type SelectorStat = typeof selectorStats.$inferSelect;
+export type NewSelectorStat = typeof selectorStats.$inferInsert;

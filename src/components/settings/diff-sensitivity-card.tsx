@@ -5,6 +5,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Switch } from '@/components/ui/switch';
 import { saveDiffSensitivitySettings, resetDiffSensitivitySettings } from '@/server/actions/settings';
 import type { DiffSensitivitySettings } from '@/lib/db/schema';
 import { DEFAULT_DIFF_THRESHOLDS } from '@/lib/db/schema';
@@ -26,6 +27,9 @@ export function DiffSensitivityCard({
   const [flakyThreshold, setFlakyThreshold] = useState(
     settings.flakyThreshold ?? DEFAULT_DIFF_THRESHOLDS.flakyThreshold
   );
+  const [includeAntiAliasing, setIncludeAntiAliasing] = useState(
+    settings.includeAntiAliasing ?? DEFAULT_DIFF_THRESHOLDS.includeAntiAliasing
+  );
 
   const handleSave = () => {
     startTransition(async () => {
@@ -33,6 +37,7 @@ export function DiffSensitivityCard({
         repositoryId,
         unchangedThreshold,
         flakyThreshold,
+        includeAntiAliasing,
       });
     });
   };
@@ -42,6 +47,7 @@ export function DiffSensitivityCard({
       await resetDiffSensitivitySettings(repositoryId);
       setUnchangedThreshold(DEFAULT_DIFF_THRESHOLDS.unchangedThreshold);
       setFlakyThreshold(DEFAULT_DIFF_THRESHOLDS.flakyThreshold);
+      setIncludeAntiAliasing(DEFAULT_DIFF_THRESHOLDS.includeAntiAliasing);
     });
   };
 
@@ -187,6 +193,20 @@ export function DiffSensitivityCard({
         <div className="p-3 bg-muted rounded-lg text-sm">
           <span className="font-medium">Changed ({'\u2265'}{flakyThreshold}%): </span>
           Diffs at or above the flaky threshold are marked as significant changes requiring review.
+        </div>
+
+        {/* Anti-aliasing Toggle */}
+        <div className="flex items-center justify-between p-3 bg-muted rounded-lg">
+          <div className="space-y-0.5">
+            <Label className="text-sm font-medium">Include Anti-aliasing</Label>
+            <p className="text-xs text-muted-foreground">
+              Count anti-aliased pixels in diff calculations. Disable to reduce false positives from font rendering.
+            </p>
+          </div>
+          <Switch
+            checked={includeAntiAliasing}
+            onCheckedChange={setIncludeAntiAliasing}
+          />
         </div>
 
         {/* Actions */}
