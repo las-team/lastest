@@ -3,10 +3,13 @@
 import { revalidatePath } from 'next/cache';
 import * as queries from '@/lib/db/queries';
 import { getBranchInfo } from '@/lib/github/content';
+import { getOpenPRsForBranch } from '@/lib/github/oauth';
 import { getRunner } from '@/lib/playwright/runner';
 import { getServerManager } from '@/lib/playwright/server-manager';
 import { generateDiff } from '@/lib/diff/generator';
 import { hashImage } from '@/lib/diff/hasher';
+import { sendSlackNotification } from '@/lib/integrations/slack';
+import { postPRComment } from '@/lib/integrations/github-pr';
 import type { Test, TriggerType, BuildStatus, VisualDiffWithTestStatus, DiffClassification, DiffStatus } from '@/lib/db/schema';
 import path from 'path';
 import { createJob, createPendingJob, startJob, updateJobProgress, completeJob, failJob } from './jobs';
@@ -188,6 +191,7 @@ async function runBuildAsync(
         durationMs: result.durationMs,
         viewport: '1280x720',
         browser: 'chromium',
+        a11yViolations: result.a11yViolations,
       });
 
       if (result.status === 'passed') passedCount++;
@@ -244,6 +248,19 @@ async function runBuildAsync(
       completedAt: new Date(),
     });
     await completeJob(jobId);
+
+    // Send notifications after build completion
+    await sendBuildNotifications({
+      buildId,
+      status: overallStatus,
+      totalTests: tests.length,
+      passedCount,
+      changesDetected,
+      flakyCount,
+      failedCount,
+      gitBranch: branch,
+      repositoryId,
+    });
   } catch (error) {
     await queries.updateTestRun(testRunId, {
       completedAt: new Date(),
@@ -358,6 +375,7 @@ async function processVisualDiff(
   const settings = await queries.getDiffSensitivitySettings(repositoryId);
   const unchangedThreshold = settings.unchangedThreshold ?? 1;
   const flakyThreshold = settings.flakyThreshold ?? 10;
+  const includeAntiAliasing = settings.includeAntiAliasing ?? false;
 
   // Helper to classify based on percentage
   const classifyDiff = (pct: number): { classification: DiffClassification; status: DiffStatus } => {
@@ -428,7 +446,9 @@ async function processVisualDiff(
     const diffResult = await generateDiff(
       path.join(process.cwd(), 'public', baseline.imagePath),
       path.join(process.cwd(), 'public', currentScreenshotPath),
-      DIFFS_DIR
+      DIFFS_DIR,
+      0.1,
+      includeAntiAliasing
     );
 
     const pct = diffResult.percentageDifference;
@@ -569,4 +589,88 @@ export async function getLatestBuildChanges(repositoryId: string): Promise<Build
   }
 
   return { topChanges, passingDelta };
+}
+
+/**
+ * Send notifications (Slack and/or GitHub PR comment) after build completion
+ */
+async function sendBuildNotifications(data: {
+  buildId: string;
+  status: BuildStatus;
+  totalTests: number;
+  passedCount: number;
+  changesDetected: number;
+  flakyCount: number;
+  failedCount: number;
+  gitBranch: string;
+  repositoryId?: string | null;
+}) {
+  const build = await queries.getBuild(data.buildId);
+  if (!build) return;
+
+  const testRun = build.testRunId ? await queries.getTestRun(build.testRunId) : null;
+  const notificationSettings = await queries.getNotificationSettings(data.repositoryId);
+
+  // Get base URL for links (default to localhost for now)
+  const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:3000';
+  const buildUrl = `${baseUrl}/builds/${data.buildId}`;
+
+  // Send Slack notification
+  if (notificationSettings.slackEnabled && notificationSettings.slackWebhookUrl) {
+    try {
+      await sendSlackNotification(notificationSettings.slackWebhookUrl, {
+        buildId: data.buildId,
+        status: data.status,
+        totalTests: data.totalTests,
+        passedCount: data.passedCount,
+        changesDetected: data.changesDetected,
+        flakyCount: data.flakyCount,
+        failedCount: data.failedCount,
+        gitBranch: data.gitBranch,
+        gitCommit: testRun?.gitCommit || 'unknown',
+        buildUrl,
+      });
+    } catch (error) {
+      console.error('Failed to send Slack notification:', error);
+    }
+  }
+
+  // Post GitHub PR comment
+  if (notificationSettings.githubPrCommentsEnabled) {
+    try {
+      const account = await queries.getGithubAccount();
+      const repo = data.repositoryId ? await queries.getRepository(data.repositoryId) : null;
+
+      if (account && repo) {
+        // Find open PRs for this branch
+        const prs = await getOpenPRsForBranch(
+          account.accessToken,
+          repo.owner,
+          repo.name,
+          data.gitBranch
+        );
+
+        for (const pr of prs) {
+          await postPRComment(
+            account.accessToken,
+            repo.owner,
+            repo.name,
+            pr.number,
+            {
+              buildId: data.buildId,
+              status: data.status,
+              totalTests: data.totalTests,
+              passedCount: data.passedCount,
+              changesDetected: data.changesDetected,
+              flakyCount: data.flakyCount,
+              failedCount: data.failedCount,
+              buildUrl,
+            }
+          );
+        }
+      }
+    } catch (error) {
+      console.error('Failed to post GitHub PR comment:', error);
+    }
+  }
 }

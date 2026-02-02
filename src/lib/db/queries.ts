@@ -23,12 +23,14 @@ import {
   testVersions,
   suites,
   suiteTests,
+  notificationSettings,
 } from './schema';
 import {
   DEFAULT_SELECTOR_PRIORITY,
   DEFAULT_DIFF_THRESHOLDS,
   DEFAULT_AI_SETTINGS,
   DEFAULT_RECORDING_ENGINES,
+  DEFAULT_NOTIFICATION_SETTINGS,
 } from './schema';
 import type {
   NewFunctionalArea,
@@ -54,6 +56,7 @@ import type {
   NewTestVersion,
   NewSuite,
   NewSuiteTest,
+  NewNotificationSettings,
   BuildStatus,
   SelectorConfig,
   AIProvider,
@@ -62,7 +65,7 @@ import type {
   TestChangeReason,
 } from './schema';
 
-export { DEFAULT_SELECTOR_PRIORITY, DEFAULT_DIFF_THRESHOLDS, DEFAULT_AI_SETTINGS, DEFAULT_RECORDING_ENGINES };
+export { DEFAULT_SELECTOR_PRIORITY, DEFAULT_DIFF_THRESHOLDS, DEFAULT_AI_SETTINGS, DEFAULT_RECORDING_ENGINES, DEFAULT_NOTIFICATION_SETTINGS };
 import { eq, desc, and, inArray, or, gte, lt, isNull } from 'drizzle-orm';
 import { v4 as uuid } from 'uuid';
 
@@ -693,6 +696,8 @@ export async function getPlaywrightSettings(repositoryId?: string | null) {
     cursorFPS: 30,
     enabledRecordingEngines: DEFAULT_RECORDING_ENGINES,
     defaultRecordingEngine: 'lastest' as const,
+    freezeAnimations: false,
+    screenshotDelay: 0,
     createdAt: null,
     updatedAt: null,
   };
@@ -951,6 +956,7 @@ export async function getDiffSensitivitySettings(repositoryId?: string | null) {
     repositoryId: null,
     unchangedThreshold: DEFAULT_DIFF_THRESHOLDS.unchangedThreshold,
     flakyThreshold: DEFAULT_DIFF_THRESHOLDS.flakyThreshold,
+    includeAntiAliasing: DEFAULT_DIFF_THRESHOLDS.includeAntiAliasing,
     createdAt: null,
     updatedAt: null,
   };
@@ -1770,4 +1776,71 @@ export async function getUnsortedSuites(repositoryId: string) {
 // Get visual diffs for a specific test result (step-level diffs)
 export async function getVisualDiffsByTestResult(testResultId: string) {
   return db.select().from(visualDiffs).where(eq(visualDiffs.testResultId, testResultId)).all();
+}
+
+// Notification Settings
+export async function getNotificationSettings(repositoryId?: string | null) {
+  if (repositoryId) {
+    const settings = await db
+      .select()
+      .from(notificationSettings)
+      .where(eq(notificationSettings.repositoryId, repositoryId))
+      .get();
+    if (settings) return settings;
+  }
+
+  // Return global settings (no repositoryId) or defaults
+  const globalSettings = await db
+    .select()
+    .from(notificationSettings)
+    .where(isNull(notificationSettings.repositoryId))
+    .get();
+
+  if (globalSettings) return globalSettings;
+
+  // Return default settings object (not saved)
+  return {
+    id: '',
+    repositoryId: null,
+    slackWebhookUrl: null,
+    slackEnabled: DEFAULT_NOTIFICATION_SETTINGS.slackEnabled,
+    githubPrCommentsEnabled: DEFAULT_NOTIFICATION_SETTINGS.githubPrCommentsEnabled,
+    createdAt: null,
+    updatedAt: null,
+  };
+}
+
+export async function createNotificationSettings(data: Omit<NewNotificationSettings, 'id' | 'createdAt' | 'updatedAt'>) {
+  const id = uuid();
+  const now = new Date();
+  await db.insert(notificationSettings).values({
+    ...data,
+    id,
+    createdAt: now,
+    updatedAt: now,
+  });
+  return { id, ...data, createdAt: now, updatedAt: now };
+}
+
+export async function updateNotificationSettings(id: string, data: Partial<NewNotificationSettings>) {
+  await db.update(notificationSettings).set({ ...data, updatedAt: new Date() }).where(eq(notificationSettings.id, id));
+}
+
+export async function upsertNotificationSettings(repositoryId: string | null, data: Partial<NewNotificationSettings>) {
+  const whereClause = repositoryId
+    ? eq(notificationSettings.repositoryId, repositoryId)
+    : isNull(notificationSettings.repositoryId);
+
+  const existing = await db
+    .select()
+    .from(notificationSettings)
+    .where(whereClause)
+    .get();
+
+  if (existing) {
+    await updateNotificationSettings(existing.id, data);
+    return { ...existing, ...data, updatedAt: new Date() };
+  } else {
+    return createNotificationSettings({ ...data, repositoryId: repositoryId ?? undefined });
+  }
 }

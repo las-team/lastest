@@ -2,7 +2,9 @@ import { chromium, firefox, webkit, Browser, Page, BrowserContext, Locator } fro
 import { EventEmitter } from 'events';
 import path from 'path';
 import fs from 'fs';
+import AxeBuilder from '@axe-core/playwright';
 import { DEFAULT_SELECTOR_PRIORITY } from '@/lib/db/schema';
+import type { A11yViolation } from '@/lib/db/schema';
 
 /**
  * Create appState helper for internal state inspection.
@@ -384,6 +386,7 @@ export interface TestRunResult {
   errorMessage?: string;
   consoleErrors?: string[];
   networkRequests?: NetworkRequest[];
+  a11yViolations?: A11yViolation[];
 }
 
 export interface ProgressCallback {
@@ -576,6 +579,18 @@ export class PlaywrightRunner extends EventEmitter {
       });
       page = await context.newPage();
 
+      // Freeze CSS animations/transitions if enabled
+      if (this.settings?.freezeAnimations) {
+        await page.addStyleTag({
+          content: `*, *::before, *::after {
+            animation: none !important;
+            transition: none !important;
+            animation-delay: 0s !important;
+            transition-delay: 0s !important;
+          }`
+        });
+      }
+
       // Patterns for console errors that should be ignored (React dev warnings, hydration, etc.)
       const ignoredErrorPatterns = [
         /hydrat(ion|ed)/i,
@@ -614,10 +629,15 @@ export class PlaywrightRunner extends EventEmitter {
       const testScreenshotPath = path.join(this.screenshotDir, `${runId}-${test.id}.png`);
 
       // Create a proxy that intercepts page.screenshot() calls
+      const screenshotDelay = this.settings?.screenshotDelay ?? 0;
       const screenshotProxy = new Proxy(page, {
         get: (target, prop) => {
           if (prop === 'screenshot') {
             return async (options?: Record<string, unknown>) => {
+              // Apply screenshot delay for visual stabilization
+              if (screenshotDelay > 0) {
+                await target.waitForTimeout(screenshotDelay);
+              }
               const result = await target.screenshot(options as any);
               if (options?.path) {
                 const filename = path.basename(options.path as string);
@@ -658,6 +678,24 @@ export class PlaywrightRunner extends EventEmitter {
         throw new Error(errorParts.join(' | '));
       }
 
+      // Run accessibility check with axe-core
+      let a11yViolations: A11yViolation[] | undefined;
+      try {
+        const a11yResults = await new AxeBuilder({ page }).analyze();
+        if (a11yResults.violations.length > 0) {
+          a11yViolations = a11yResults.violations.map(v => ({
+            id: v.id,
+            impact: v.impact as A11yViolation['impact'],
+            description: v.description,
+            help: v.help,
+            helpUrl: v.helpUrl,
+            nodes: v.nodes.length,
+          }));
+        }
+      } catch {
+        // Ignore a11y check errors - don't fail the test
+      }
+
       let screenshotPublicPath: string | undefined;
 
       // Only take a fallback success screenshot if no screenshots were captured during the test
@@ -690,6 +728,7 @@ export class PlaywrightRunner extends EventEmitter {
         screenshots: capturedScreenshots,
         consoleErrors: consoleErrors.length > 0 ? consoleErrors : undefined,
         networkRequests: networkFailures.length > 0 ? networkFailures : undefined,
+        a11yViolations,
       };
 
     } catch (error) {

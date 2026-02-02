@@ -21,6 +21,8 @@ export async function savePlaywrightSettings(data: {
   cursorFPS?: number;
   enabledRecordingEngines?: RecordingEngine[];
   defaultRecordingEngine?: string;
+  freezeAnimations?: boolean;
+  screenshotDelay?: number;
 }) {
   const { repositoryId, ...settingsData } = data;
 
@@ -54,6 +56,7 @@ export async function saveDiffSensitivitySettings(data: {
   repositoryId?: string | null;
   unchangedThreshold?: number;
   flakyThreshold?: number;
+  includeAntiAliasing?: boolean;
 }) {
   const { repositoryId, ...settingsData } = data;
 
@@ -74,6 +77,26 @@ export async function resetDiffSensitivitySettings(repositoryId?: string | null)
 
   revalidatePath('/settings');
   revalidatePath('/builds');
+
+  return { success: true };
+}
+
+// Notification Settings
+export async function getNotificationSettingsAction(repositoryId?: string | null) {
+  return queries.getNotificationSettings(repositoryId);
+}
+
+export async function saveNotificationSettings(data: {
+  repositoryId?: string | null;
+  slackWebhookUrl?: string | null;
+  slackEnabled?: boolean;
+  githubPrCommentsEnabled?: boolean;
+}) {
+  const { repositoryId, ...settingsData } = data;
+
+  await queries.upsertNotificationSettings(repositoryId || null, settingsData);
+
+  revalidatePath('/settings');
 
   return { success: true };
 }

@@ -7,6 +7,7 @@ import { EnvironmentConfigCard } from '@/components/settings/environment-config-
 import { DiffSensitivityCard } from '@/components/settings/diff-sensitivity-card';
 import { AISettingsCard } from '@/components/settings/ai-settings-card';
 import { AILogsCard } from '@/components/settings/ai-logs-card';
+import { NotificationSettingsCard } from '@/components/settings/notification-settings-card';
 import { ResetSetupGuide } from '@/components/setup-guide/reset-setup-guide';
 
 export default async function SettingsPage({
@@ -22,6 +23,7 @@ export default async function SettingsPage({
   const diffSensitivitySettings = await queries.getDiffSensitivitySettings(selectedRepo?.id);
   const aiSettings = await queries.getAISettings(selectedRepo?.id);
   const aiLogs = await queries.getAIPromptLogs(selectedRepo?.id, 50);
+  const notificationSettings = await queries.getNotificationSettings(selectedRepo?.id);
 
   return (
     <div className="flex flex-col h-full">
@@ -174,6 +176,13 @@ export default async function SettingsPage({
           <AILogsCard
             logs={aiLogs}
             repositoryId={selectedRepo?.id}
+          />
+
+          {/* Notifications */}
+          <NotificationSettingsCard
+            settings={notificationSettings}
+            repositoryId={selectedRepo?.id}
+            hasGithubAccount={!!githubAccount}
           />
 
           {/* Diff Sensitivity */}

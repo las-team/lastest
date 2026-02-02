@@ -19,6 +19,9 @@ Execution agent and cloud ~/.claude/plans/cozy-sniffing-hopcroft.md
 Electron app ~/.claude/plans/rippling-roaming-snail.md
 Github actions integration ~/.claude/plans/rippling-roaming-snail.md  
 
+Percy catchup ~/.claude/plans/staged-seeking-lecun.md 
+Chromatic catchup ~/.claude/plans/rustling-launching-kitten.md     
+
 UI & UX 
     Use the frontend design skill and subagent for this
     Revise frontend and make sure you havent steered far and try to use standard shadcn css where possible

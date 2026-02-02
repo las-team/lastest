@@ -2,13 +2,19 @@ import fs from 'fs';
 import path from 'path';
 import { PNG } from 'pngjs';
 import pixelmatch from 'pixelmatch';
-import type { DiffMetadata } from '../db/schema';
+import type { DiffMetadata, PageShiftInfo } from '../db/schema';
 
 interface Rectangle {
   x: number;
   y: number;
   width: number;
   height: number;
+}
+
+interface RegionCentroid {
+  x: number;
+  y: number;
+  region: Rectangle;
 }
 
 export interface DiffResult {
@@ -25,7 +31,8 @@ export async function generateDiff(
   baselinePath: string,
   currentPath: string,
   outputDir: string,
-  threshold = 0.1
+  threshold = 0.1,
+  includeAntiAliasing = false
 ): Promise<DiffResult> {
   const baseline = PNG.sync.read(fs.readFileSync(baselinePath));
   const current = PNG.sync.read(fs.readFileSync(currentPath));
@@ -45,7 +52,7 @@ export async function generateDiff(
     diff.data,
     width,
     height,
-    { threshold, includeAA: false }
+    { threshold, includeAA: includeAntiAliasing }
   );
 
   // Save diff image
@@ -64,6 +71,7 @@ export async function generateDiff(
   const changedRegions = findChangedRegions(diff.data, width, height);
   const changeCategories = categorizeChanges(changedRegions, percentageDifference);
   const affectedComponents = detectAffectedComponents(changedRegions);
+  const pageShift = detectPageShift(changedRegions);
 
   return {
     pixelDifference: numDiffPixels,
@@ -73,6 +81,7 @@ export async function generateDiff(
       changedRegions,
       affectedComponents,
       changeCategories,
+      pageShift,
     },
   };
 }
@@ -211,4 +220,98 @@ function detectAffectedComponents(regions: Rectangle[]): string[] {
   });
 
   return Array.from(new Set(components));
+}
+
+/**
+ * Detect page shift by analyzing vertical displacement of changed regions.
+ * If multiple regions show the same vertical shift, it's likely a page-level shift
+ * (e.g., banner added/removed, content insertion).
+ */
+function detectPageShift(regions: Rectangle[]): PageShiftInfo | undefined {
+  if (regions.length < 2) {
+    return undefined;
+  }
+
+  // Calculate centroids for each region
+  const centroids: RegionCentroid[] = regions.map(r => ({
+    x: r.x + r.width / 2,
+    y: r.y + r.height / 2,
+    region: r,
+  }));
+
+  // Analyze vertical shifts between regions
+  // If most regions are at similar Y positions but shifted, it's a page shift
+  const yPositions = centroids.map(c => c.y).sort((a, b) => a - b);
+
+  // Group regions by their Y position (with tolerance)
+  const yGroups = new Map<number, number>();
+  const tolerance = 50; // pixels
+
+  for (const y of yPositions) {
+    let foundGroup = false;
+    for (const [groupY, count] of yGroups) {
+      if (Math.abs(y - groupY) <= tolerance) {
+        yGroups.set(groupY, count + 1);
+        foundGroup = true;
+        break;
+      }
+    }
+    if (!foundGroup) {
+      yGroups.set(y, 1);
+    }
+  }
+
+  // If we have exactly 2 major Y groups, compute the shift
+  const significantGroups = Array.from(yGroups.entries())
+    .filter(([, count]) => count >= 2)
+    .sort((a, b) => b[1] - a[1]);
+
+  if (significantGroups.length >= 2) {
+    const [y1] = significantGroups[0];
+    const [y2] = significantGroups[1];
+    const deltaY = Math.round(Math.abs(y1 - y2));
+
+    // Page shift detected if delta is significant and consistent
+    if (deltaY > 20) {
+      const confidence = Math.min(
+        (significantGroups[0][1] + significantGroups[1][1]) / regions.length,
+        1
+      );
+
+      return {
+        detected: true,
+        deltaY: y1 > y2 ? deltaY : -deltaY,
+        confidence: Math.round(confidence * 100) / 100,
+        excludedFromDiff: false,
+      };
+    }
+  }
+
+  // Check for uniform vertical shift across most regions
+  // This handles cases where content shifted down/up uniformly
+  if (regions.length >= 3) {
+    const heights = regions.map(r => r.y);
+    const avgY = heights.reduce((a, b) => a + b, 0) / heights.length;
+
+    // Check if regions cluster in bottom half (content pushed down)
+    const bottomCount = heights.filter(y => y > avgY).length;
+    const topCount = heights.filter(y => y <= avgY).length;
+
+    if (bottomCount >= regions.length * 0.7 || topCount >= regions.length * 0.7) {
+      // Estimate shift from region distribution
+      const minY = Math.min(...heights);
+      const maxY = Math.max(...heights);
+
+      if (maxY - minY > 100) {
+        return {
+          detected: true,
+          deltaY: bottomCount > topCount ? Math.round(avgY) : -Math.round(avgY),
+          confidence: 0.6,
+          excludedFromDiff: false,
+        };
+      }
+    }
+  }
+
+  return undefined;
 }
