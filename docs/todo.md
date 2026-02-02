@@ -15,7 +15,6 @@ check the recorder and the runner so that they are compatible and identify the r
 OCR
 GitHub PR Comments - CLI runner
 Page Shift Detection  
-Accessibility Testing
 Anti-Aliasing Handling 
 Animation Freezing
 Screenshot Stabilization Delay       

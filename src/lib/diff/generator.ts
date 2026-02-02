@@ -206,17 +206,41 @@ function detectAffectedComponents(regions: Rectangle[]): string[] {
   const components: string[] = [];
 
   regions.forEach(region => {
-    if (region.y < 100) {
-      components.push('header');
-    } else if (region.y > 500) {
-      components.push('footer');
-    } else if (region.width > 200) {
+    const regionBottom = region.y + region.height;
+    const regionRight = region.x + region.width;
+
+    // Full page or main content (large regions)
+    if (region.width > 800 || region.height > 400) {
       components.push('main-content');
-    } else if (region.width < 100 && region.height < 50) {
-      components.push('button');
-    } else {
-      components.push('content');
+      return;
     }
+
+    // Sidebar (left or right edge, tall)
+    if ((region.x < 50 || regionRight > 1200) && region.height > 200) {
+      components.push('sidebar');
+      return;
+    }
+
+    // Header (top 100px, doesn't extend far down)
+    if (region.y < 100 && regionBottom < 150) {
+      components.push('header');
+      return;
+    }
+
+    // Footer (bottom area)
+    if (region.y > 500) {
+      components.push('footer');
+      return;
+    }
+
+    // Button (small regions)
+    if (region.width < 100 && region.height < 50) {
+      components.push('button');
+      return;
+    }
+
+    // Default
+    components.push('content');
   });
 
   return Array.from(new Set(components));
