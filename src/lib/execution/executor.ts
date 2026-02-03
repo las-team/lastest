@@ -176,6 +176,7 @@ async function executeViaRunner(
       targetUrl: test.targetUrl || baseUrl,
       screenshotPath: `${runId}-${test.id}.png`,
       timeout: options.playwrightSettings?.navigationTimeout || 30000,
+      repositoryId: options.repositoryId || undefined,
       viewport,
     });
 
@@ -248,12 +249,15 @@ async function waitForTestResult(
           );
         }
 
+        // Find screenshots saved to disk by the route handler
+        const diskScreenshots = await findScreenshotsOnDisk(runId, testId, repositoryId);
+
         return {
           testId: payload.testId,
           status: payload.status === 'error' || payload.status === 'timeout' || payload.status === 'cancelled' ? 'failed' : payload.status,
           durationMs: payload.durationMs,
-          screenshotPath,
-          screenshots: [], // Will be populated from saved screenshots
+          screenshotPath: screenshotPath || diskScreenshots[0]?.path,
+          screenshots: diskScreenshots,
           errorMessage: payload.error?.message,
         };
       }
@@ -293,6 +297,60 @@ async function saveScreenshotFromBase64(
 
   // Return public path
   return repositoryId ? `/screenshots/${repositoryId}/${filename}` : `/screenshots/${filename}`;
+}
+
+/**
+ * Find screenshots saved to disk by the route handler.
+ * Screenshots are saved with pattern: {runId}-{testId}-{label}.png
+ * Checks both repository subfolder and root screenshots folder (for remote runner uploads).
+ */
+async function findScreenshotsOnDisk(
+  runId: string,
+  testId: string,
+  repositoryId?: string | null
+): Promise<{ path: string; label: string }[]> {
+  const baseDir = './public/screenshots';
+  const screenshots: { path: string; label: string }[] = [];
+  const prefix = `${runId}-${testId}-`;
+
+  // Check repository-specific directory first
+  if (repositoryId) {
+    const repoDir = path.join(baseDir, repositoryId);
+    try {
+      const files = await fs.readdir(repoDir);
+      for (const f of files) {
+        if (f.startsWith(prefix) && f.endsWith('.png')) {
+          const label = f.replace(prefix, '').replace('.png', '');
+          screenshots.push({ path: `/screenshots/${repositoryId}/${f}`, label });
+        }
+      }
+    } catch {
+      // Directory might not exist
+    }
+  }
+
+  // Also check root screenshots directory (for remote runner uploads)
+  try {
+    const files = await fs.readdir(baseDir);
+    for (const f of files) {
+      if (f.startsWith(prefix) && f.endsWith('.png')) {
+        const label = f.replace(prefix, '').replace('.png', '');
+        const publicPath = `/screenshots/${f}`;
+        // Avoid duplicates
+        if (!screenshots.some(s => s.label === label)) {
+          screenshots.push({ path: publicPath, label });
+        }
+      }
+    }
+  } catch {
+    // Directory might not exist
+  }
+
+  if (screenshots.length > 0) {
+    console.log(`[Executor] Found ${screenshots.length} screenshots on disk for ${testId}`);
+  }
+
+  return screenshots;
 }
 
 /**

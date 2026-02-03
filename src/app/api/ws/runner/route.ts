@@ -16,7 +16,9 @@ import { NextRequest, NextResponse } from 'next/server';
 import { validateRunnerToken, updateRunnerStatus, markStaleRunnersOffline } from '@/server/actions/runners';
 // runnerRegistry is used for WebSocket mode (not polling mode)
 // import { runnerRegistry } from '@/lib/ws/runner-registry';
-import type { Message, HeartbeatMessage, TestResultResponse } from '@/lib/ws/protocol';
+import type { Message, HeartbeatMessage, TestResultResponse, ScreenshotUploadResponse } from '@/lib/ws/protocol';
+import fs from 'fs/promises';
+import path from 'path';
 
 // Track active polling sessions by runner ID
 // Use globalThis to ensure shared state across Next.js module contexts
@@ -142,9 +144,24 @@ export async function POST(request: NextRequest) {
       }
 
       case 'response:screenshot': {
-        // Handle screenshot upload
-        console.log(`[Screenshot] Received screenshot from runner ${runner.id}`);
-        storeScreenshot(runner.id, message);
+        // Handle screenshot upload - save directly to disk
+        const screenshotMsg = message as ScreenshotUploadResponse;
+        const payload = screenshotMsg.payload;
+        console.log(`[Screenshot] Received screenshot from runner ${runner.id}: ${payload.filename}`);
+
+        try {
+          // Save to disk immediately (to repository folder if provided)
+          const savedPath = await saveScreenshotToDisk(payload.data, payload.filename, payload.repositoryId);
+          console.log(`[Screenshot] Saved to disk: ${savedPath}`);
+
+          // Also store in memory for backward compatibility
+          storeScreenshot(runner.id, message);
+        } catch (error) {
+          console.error(`[Screenshot] Failed to save to disk:`, error);
+          // Still store in memory as fallback
+          storeScreenshot(runner.id, message);
+        }
+
         return NextResponse.json({ ok: true });
       }
 
@@ -274,6 +291,25 @@ function storeScreenshot(runnerId: string, screenshot: Message) {
   const screenshots = screenshotsMap.get(runnerId) || [];
   screenshots.push(screenshot);
   screenshotsMap.set(runnerId, screenshots);
+  console.log(`[storeScreenshot] Stored screenshot for runner ${runnerId}, total: ${screenshots.length}`);
+}
+
+/**
+ * Save screenshot directly to disk from base64 data.
+ * This ensures screenshots are persisted even if in-memory state is lost.
+ */
+async function saveScreenshotToDisk(base64Data: string, filename: string, repositoryId?: string): Promise<string> {
+  const baseDir = './public/screenshots';
+  const dir = repositoryId ? path.join(baseDir, repositoryId) : baseDir;
+
+  // Ensure directory exists
+  await fs.mkdir(dir, { recursive: true });
+
+  const filePath = path.join(dir, filename);
+  const buffer = Buffer.from(base64Data, 'base64');
+  await fs.writeFile(filePath, buffer);
+
+  return repositoryId ? `/screenshots/${repositoryId}/${filename}` : `/screenshots/${filename}`;
 }
 
 /**
@@ -317,6 +353,9 @@ export function getTestResults(runnerId: string): TestResultResponse[] {
  */
 export function getScreenshots(runnerId: string): Message[] {
   const screenshots = screenshotsMap.get(runnerId) || [];
+  if (screenshots.length > 0) {
+    console.log(`[getScreenshots] Retrieved ${screenshots.length} screenshots for runner ${runnerId}`);
+  }
   screenshotsMap.set(runnerId, []); // Clear after fetching
   return screenshots;
 }

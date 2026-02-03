@@ -292,11 +292,10 @@ export class TestRunner {
     // Create simple expect implementation
     const expect = this.createExpect();
 
-    // Create screenshotPath generator
-    let screenshotStep = 0;
+    // Create screenshotPath generator (start from 1 to match local runner)
+    let screenshotStep = 1;
     const getScreenshotPath = () => {
-      screenshotStep++;
-      return `step-${screenshotStep}`;
+      return `step${screenshotStep++}`;
     };
 
     // Override page.screenshot to capture screenshots
@@ -304,7 +303,7 @@ export class TestRunner {
     (page as any).screenshot = async (options?: any) => {
       const result = await originalScreenshot(options);
       if (options?.path) {
-        const label = `step-${screenshotStep++}`;
+        const label = `step${screenshotStep++}`;
         await captureScreenshot(label);
       }
       return result;

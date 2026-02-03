@@ -39,6 +39,7 @@ export interface RunTestCommandPayload {
   targetUrl: string;
   screenshotPath: string;
   timeout: number;
+  repositoryId?: string; // For screenshot storage location
   viewport?: { width: number; height: number };
   serverConfig?: ServerConfig;
 }
@@ -102,6 +103,7 @@ export interface TestProgressResponse extends BaseMessage {
 export interface ScreenshotUploadPayload {
   correlationId: string;
   testRunId: string;
+  repositoryId?: string; // For screenshot storage location
   filename: string;
   data: string;
   width: number;

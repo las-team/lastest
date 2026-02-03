@@ -243,6 +243,7 @@ export class RunnerClient {
         const screenshotMsg = createMessage<ScreenshotUploadResponse>('response:screenshot', {
           correlationId: command.id,
           testRunId: command.payload.testRunId,
+          repositoryId: command.payload.repositoryId,
           filename: screenshot.filename,
           data: screenshot.data,
           width: screenshot.width,
