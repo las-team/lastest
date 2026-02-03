@@ -15,6 +15,7 @@ export type MessageType =
   | 'command:start_recording'
   | 'command:stop_recording'
   | 'command:ping'
+  | 'command:shutdown'
   // Agent → Server (Responses)
   | 'response:test_result'
   | 'response:test_progress'
@@ -97,6 +98,15 @@ export interface CancelTestCommandPayload {
 export interface CancelTestCommand extends BaseMessage {
   type: 'command:cancel_test';
   payload: CancelTestCommandPayload;
+}
+
+export interface ShutdownCommandPayload {
+  reason?: string;
+}
+
+export interface ShutdownCommand extends BaseMessage {
+  type: 'command:shutdown';
+  payload: ShutdownCommandPayload;
 }
 
 // ============================================
@@ -264,6 +274,7 @@ export interface ConnectionEstablishedMessage extends BaseMessage {
 export type ServerCommand =
   | RunTestCommand
   | CancelTestCommand
+  | ShutdownCommand
   | StartRecordingCommand
   | StopRecordingCommand
   | PingCommand;

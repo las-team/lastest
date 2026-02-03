@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { formatDistanceToNow } from 'date-fns';
-import { Bot, MoreVertical, Trash2, RefreshCw, Copy, Check, Settings, Layers } from 'lucide-react';
+import { Bot, MoreVertical, Trash2, RefreshCw, Copy, Check, Settings, Layers, Square } from 'lucide-react';
 import type { Runner } from '@/lib/db/schema';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -21,7 +21,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { deleteRunner, regenerateRunnerToken, updateRunnerSettings } from '@/server/actions/runners';
+import { deleteRunner, regenerateRunnerToken, updateRunnerSettings, stopRunner } from '@/server/actions/runners';
 import { Slider } from '@/components/ui/slider';
 import { Label } from '@/components/ui/label';
 import { useRouter } from 'next/navigation';
@@ -72,6 +72,16 @@ export function RunnerList({ runners }: RunnerListProps) {
     if (!('error' in result)) {
       setSettingsDialogOpen(false);
       router.refresh();
+    }
+  };
+
+  const handleStopRunner = async (runner: Runner) => {
+    const result = await stopRunner(runner.id);
+    if ('error' in result) {
+      console.error('Failed to stop runner:', result.error);
+    } else {
+      // Refresh to show updated status
+      setTimeout(() => router.refresh(), 1000);
     }
   };
 
@@ -147,6 +157,12 @@ export function RunnerList({ runners }: RunnerListProps) {
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end">
+                {runner.status !== 'offline' && (
+                  <DropdownMenuItem onClick={() => handleStopRunner(runner)}>
+                    <Square className="w-4 h-4 mr-2" />
+                    Stop Runner
+                  </DropdownMenuItem>
+                )}
                 <DropdownMenuItem onClick={() => openSettingsDialog(runner)}>
                   <Settings className="w-4 h-4 mr-2" />
                   Settings

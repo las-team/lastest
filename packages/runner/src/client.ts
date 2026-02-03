@@ -8,6 +8,7 @@ import type {
   Message,
   RunTestCommand,
   CancelTestCommand,
+  ShutdownCommand,
   HeartbeatMessage,
   TestResultResponse,
   TestProgressResponse,
@@ -225,6 +226,10 @@ export class RunnerClient {
         await this.handleCancelTest(message as CancelTestCommand);
         break;
 
+      case 'command:shutdown':
+        await this.handleShutdown(message as ShutdownCommand);
+        break;
+
       default:
         console.warn(`Unknown command type: ${message.type}`);
         await this.sendError(message.id, 'UNKNOWN_COMMAND', `Unknown command: ${message.type}`);
@@ -250,6 +255,15 @@ export class RunnerClient {
     } else {
       console.log(`No test running to cancel`);
     }
+  }
+
+  private async handleShutdown(command: ShutdownCommand): Promise<void> {
+    const reason = command.payload.reason || 'Remote shutdown requested';
+    console.log(`\n🛑 Shutdown command received: ${reason}`);
+    console.log('Stopping runner...');
+    await this.stop();
+    // Exit the process after graceful shutdown
+    process.exit(0);
   }
 
   private async handleRunTest(command: RunTestCommand): Promise<void> {

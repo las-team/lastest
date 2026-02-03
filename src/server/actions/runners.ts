@@ -172,6 +172,42 @@ export async function deleteRunner(runnerId: string): Promise<{ success: boolean
 }
 
 /**
+ * Stop a running runner remotely (admin only)
+ * Queues a shutdown command that the runner will receive on next heartbeat
+ */
+export async function stopRunner(runnerId: string): Promise<{ success: boolean } | { error: string }> {
+  const session = await requireTeamAdmin();
+
+  const runner = await db
+    .select()
+    .from(runners)
+    .where(and(eq(runners.id, runnerId), eq(runners.teamId, session.team.id)))
+    .get();
+
+  if (!runner) {
+    return { error: 'Runner not found' };
+  }
+
+  if (runner.status === 'offline') {
+    return { error: 'Runner is already offline' };
+  }
+
+  // Import dynamically to avoid circular dependency
+  const { queueCommand } = await import('@/app/api/ws/runner/route');
+
+  queueCommand(runnerId, {
+    id: crypto.randomUUID(),
+    type: 'command:shutdown',
+    timestamp: Date.now(),
+    payload: {
+      reason: 'Remote shutdown requested by admin',
+    },
+  });
+
+  return { success: true };
+}
+
+/**
  * Update runner status (internal use - called by WebSocket handler)
  * Emits SSE event when status changes
  */
@@ -198,7 +234,7 @@ export async function updateRunnerStatus(
       runnerId,
       teamId: current.teamId,
       status,
-      previousStatus,
+      previousStatus: previousStatus as 'online' | 'offline' | 'busy' | undefined,
       timestamp: Date.now(),
     });
   }

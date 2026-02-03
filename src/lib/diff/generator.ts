@@ -25,6 +25,97 @@ export interface DiffResult {
 }
 
 /**
+ * Detect background color by sampling corners and edges of the image.
+ * Returns the most common color found in these areas.
+ */
+function detectBackgroundColor(data: Buffer, width: number, height: number): { r: number; g: number; b: number } {
+  const samples: Map<string, number> = new Map();
+
+  // Sample corners and edges
+  const samplePoints = [
+    { x: 0, y: 0 },
+    { x: width - 1, y: 0 },
+    { x: 0, y: height - 1 },
+    { x: width - 1, y: height - 1 },
+    { x: Math.floor(width / 2), y: 0 },
+    { x: Math.floor(width / 2), y: height - 1 },
+    { x: 0, y: Math.floor(height / 2) },
+    { x: width - 1, y: Math.floor(height / 2) },
+  ];
+
+  for (const { x, y } of samplePoints) {
+    const idx = (y * width + x) * 4;
+    const key = `${data[idx]},${data[idx + 1]},${data[idx + 2]}`;
+    samples.set(key, (samples.get(key) || 0) + 1);
+  }
+
+  // Find most common color
+  let maxCount = 0;
+  let bgColor = { r: 255, g: 255, b: 255 }; // default white
+
+  for (const [key, count] of samples) {
+    if (count > maxCount) {
+      maxCount = count;
+      const [r, g, b] = key.split(',').map(Number);
+      bgColor = { r, g, b };
+    }
+  }
+
+  return bgColor;
+}
+
+/**
+ * Calculate the content area (non-background pixels) of an image.
+ * Returns bounding box of content and pixel count.
+ */
+function calculateContentArea(
+  data: Buffer,
+  width: number,
+  height: number,
+  bgColor: { r: number; g: number; b: number },
+  tolerance: number = 30
+): { contentPixels: number; boundingBox: Rectangle | null } {
+  let minX = width, minY = height, maxX = 0, maxY = 0;
+  let contentPixels = 0;
+
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const idx = (y * width + x) * 4;
+      const r = data[idx];
+      const g = data[idx + 1];
+      const b = data[idx + 2];
+
+      // Check if pixel differs from background
+      const diffR = Math.abs(r - bgColor.r);
+      const diffG = Math.abs(g - bgColor.g);
+      const diffB = Math.abs(b - bgColor.b);
+
+      if (diffR > tolerance || diffG > tolerance || diffB > tolerance) {
+        contentPixels++;
+        minX = Math.min(minX, x);
+        minY = Math.min(minY, y);
+        maxX = Math.max(maxX, x);
+        maxY = Math.max(maxY, y);
+      }
+    }
+  }
+
+  if (contentPixels === 0) {
+    return { contentPixels: 0, boundingBox: null };
+  }
+
+  return {
+    contentPixels,
+    boundingBox: {
+      x: minX,
+      y: minY,
+      width: maxX - minX + 1,
+      height: maxY - minY + 1,
+    },
+  };
+}
+
+/**
  * Compare two PNG images and generate a diff image
  */
 export async function generateDiff(
