@@ -180,5 +180,5 @@ export function createMessage<T extends BaseMessage>(
     type,
     timestamp: Date.now(),
     payload,
-  } as T;
+  } as unknown as T;
 }

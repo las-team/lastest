@@ -225,3 +225,26 @@ export async function getOnlineRunnersWithCapability(capability?: RunnerCapabili
 
   return onlineRunners;
 }
+
+/**
+ * Get all runners filtered by capability (for UI selection with offline shown as disabled)
+ */
+export async function getRunnersWithCapability(capability?: RunnerCapability): Promise<Runner[]> {
+  const session = await requireTeamAccess();
+  const allRunners = await db
+    .select()
+    .from(runners)
+    .where(eq(runners.teamId, session.team.id))
+    .orderBy(desc(runners.createdAt))
+    .all();
+
+  // Filter by capability if specified
+  if (capability) {
+    return allRunners.filter((runner) => {
+      const caps = runner.capabilities || ['run', 'record'];
+      return caps.includes(capability);
+    });
+  }
+
+  return allRunners;
+}

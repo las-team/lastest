@@ -210,16 +210,16 @@ Run tests on remote machines by deploying agents that connect back to your Laste
 ### Local Development Setup
 
 ```bash
-# From the repo root, build the agent package
-cd packages/agent
+# From the repo root, build the runner package
+cd packages/runner
 pnpm install
 pnpm build
 
 # Link globally for local testing
 pnpm link --global
 
-# Run the agent
-lastest2-agent --token YOUR_TOKEN --server http://localhost:3000
+# Run the runner
+lastest2-runner --token YOUR_TOKEN --server http://localhost:3000
 ```
 
 ### How It Works

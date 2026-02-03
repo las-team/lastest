@@ -10,7 +10,7 @@ import {
 } from '@/components/ui/select';
 import { Monitor, Cloud } from 'lucide-react';
 import type { Runner, RunnerCapability } from '@/lib/db/schema';
-import { getOnlineRunnersWithCapability } from '@/server/actions/runners';
+import { getRunnersWithCapability } from '@/server/actions/runners';
 
 interface ExecutionTargetSelectorProps {
   value: string;
@@ -35,8 +35,8 @@ export function ExecutionTargetSelector({
   useEffect(() => {
     async function loadRunners() {
       try {
-        const onlineRunners = await getOnlineRunnersWithCapability(capabilityFilter);
-        setRunners(onlineRunners);
+        const allRunners = await getRunnersWithCapability(capabilityFilter);
+        setRunners(allRunners);
       } catch (error) {
         console.error('Failed to load runners:', error);
         setRunners([]);
@@ -55,7 +55,7 @@ export function ExecutionTargetSelector({
   useEffect(() => {
     if (value !== 'local' && !isLoading) {
       const selectedRunner = runners.find((r) => r.id === value);
-      if (!selectedRunner) {
+      if (selectedRunner && selectedRunner.status !== 'online') {
         onChange('local');
       }
     }
@@ -73,17 +73,24 @@ export function ExecutionTargetSelector({
             <span>Local</span>
           </div>
         </SelectItem>
-        {runners.map((runner) => (
-          <SelectItem key={runner.id} value={runner.id}>
-            <div className="flex items-center gap-2">
-              <div className="relative">
-                <Cloud className="h-4 w-4" />
-                <div className="absolute -top-0.5 -right-0.5 h-2 w-2 rounded-full bg-green-500" />
+        {runners.map((runner) => {
+          const isOnline = runner.status === 'online';
+          return (
+            <SelectItem key={runner.id} value={runner.id} disabled={!isOnline}>
+              <div className="flex items-center gap-2">
+                <div className="relative">
+                  <Cloud className={`h-4 w-4 ${!isOnline ? 'text-muted-foreground' : ''}`} />
+                  <div
+                    className={`absolute -top-0.5 -right-0.5 h-2 w-2 rounded-full ${
+                      isOnline ? 'bg-green-500' : 'bg-gray-400'
+                    }`}
+                  />
+                </div>
+                <span className={!isOnline ? 'text-muted-foreground' : ''}>{runner.name}</span>
               </div>
-              <span>{runner.name}</span>
-            </div>
-          </SelectItem>
-        ))}
+            </SelectItem>
+          );
+        })}
       </SelectContent>
     </Select>
   );

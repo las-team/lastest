@@ -18,6 +18,17 @@ import type {
 import { createMessage } from './protocol.js';
 import { TestRunner } from './runner.js';
 
+interface ConnectResponse {
+  runnerId: string;
+  teamId: string;
+  capabilities?: string[];
+  commands?: Message[];
+}
+
+interface HeartbeatResponse {
+  commands?: Message[];
+}
+
 export interface RunnerClientOptions {
   token: string;
   serverUrl: string;
@@ -76,7 +87,7 @@ export class RunnerClient {
         return false;
       }
 
-      const data = await response.json();
+      const data = (await response.json()) as ConnectResponse;
       console.log(`Runner ID: ${data.runnerId}`);
       console.log(`Team ID: ${data.teamId}`);
       console.log(`Capabilities: ${data.capabilities?.join(', ') || 'run, record'}`);
@@ -114,7 +125,7 @@ export class RunnerClient {
         });
 
         if (response.ok) {
-          const data = await response.json();
+          const data = (await response.json()) as HeartbeatResponse;
 
           // Process any pending commands
           if (data.commands && data.commands.length > 0) {

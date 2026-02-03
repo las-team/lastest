@@ -19,14 +19,14 @@ Page Shift Detection
 Anti-Aliasing Handling 
 Animation Freezing
 Screenshot Stabilization Delay       
-Agents -> Runners
+Runners
 ## features
 please Execution local client and cloud ~/.claude/plans/cozy-sniffing-hopcroft.md  
 Electron app ~/.claude/plans/rippling-roaming-snail.md
 Github actions integration
 
+Publish lastest runner to npx npm
 User email sending with resend
-
 VS Code extension
 npm/CLI one-liner install
 
