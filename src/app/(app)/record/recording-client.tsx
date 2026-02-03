@@ -682,7 +682,7 @@ export function RecordingClient({
                   <p className="text-xs text-muted-foreground">
                     {executionTarget === 'local'
                       ? 'Record on this machine'
-                      : 'Record on a remote agent'}
+                      : 'Record on a remote runner'}
                   </p>
                 </div>
 

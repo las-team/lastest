@@ -3,7 +3,7 @@
  *
  * Unified interface for test execution that routes through either:
  * - Local Playwright runner (development, self-hosted)
- * - Remote agent (cloud deployment)
+ * - Remote runner (cloud deployment)
  *
  * Mode is determined by EXECUTION_MODE env variable or auto-detected.
  */
@@ -18,10 +18,10 @@ import type {
   ScreenshotUploadResponse,
 } from '@/lib/ws/protocol';
 import { createMessage } from '@/lib/ws/protocol';
-import { queueCommand, getTestResults, getScreenshots } from '@/app/api/ws/agent/route';
-import { agentRegistry } from '@/lib/ws/agent-registry';
+import { queueCommand, getTestResults, getScreenshots } from '@/app/api/ws/runner/route';
+import { runnerRegistry } from '@/lib/ws/runner-registry';
 import { db } from '@/lib/db';
-import { agents } from '@/lib/db/schema';
+import { runners } from '@/lib/db/schema';
 import { eq, and } from 'drizzle-orm';
 import fs from 'fs/promises';
 import path from 'path';
@@ -33,7 +33,7 @@ export interface ExecutionOptions {
   headless?: boolean;
   environmentConfig?: EnvironmentConfig | null;
   playwrightSettings?: PlaywrightSettings | null;
-  agentId?: string; // 'local' or specific agent ID - if set, overrides mode detection
+  runnerId?: string; // 'local' or specific runner ID - if set, overrides mode detection
 }
 
 export interface ExecutionProgress {
@@ -44,7 +44,7 @@ export interface ExecutionProgress {
 }
 
 /**
- * Execute tests using the appropriate runner (local or remote agent).
+ * Execute tests using the appropriate runner (local or remote runner).
  */
 export async function executeTests(
   tests: Test[],
@@ -53,23 +53,23 @@ export async function executeTests(
   onProgress?: (progress: ExecutionProgress) => void,
   onResult?: (result: TestRunResult) => Promise<void>
 ): Promise<TestRunResult[]> {
-  // If explicit agentId is provided, use that routing
-  if (options.agentId) {
-    if (options.agentId === 'local') {
+  // If explicit runnerId is provided, use that routing
+  if (options.runnerId) {
+    if (options.runnerId === 'local') {
       console.log('Execution target: local (explicit)');
       return executeLocally(tests, runId, options, onProgress, onResult);
     }
 
-    // Explicit agent ID provided - verify agent is available
+    // Explicit runner ID provided - verify runner is available
     if (options.teamId) {
-      const agent = await getAvailableAgentById(options.teamId, options.agentId);
-      if (agent) {
-        console.log(`Execution target: agent ${agent.id} (explicit)`);
-        return executeViaAgent(tests, runId, agent.id, options, onProgress, onResult);
+      const runner = await getAvailableRunnerById(options.teamId, options.runnerId);
+      if (runner) {
+        console.log(`Execution target: runner ${runner.id} (explicit)`);
+        return executeViaRunner(tests, runId, runner.id, options, onProgress, onResult);
       }
-      console.warn(`Agent ${options.agentId} not available, falling back to local`);
+      console.warn(`Runner ${options.runnerId} not available, falling back to local`);
     } else {
-      console.warn('No teamId provided for agent execution, falling back to local');
+      console.warn('No teamId provided for runner execution, falling back to local');
     }
     return executeLocally(tests, runId, options, onProgress, onResult);
   }
@@ -84,20 +84,20 @@ export async function executeTests(
     return executeLocally(tests, runId, options, onProgress, onResult);
   }
 
-  // Agent mode requires teamId
+  // Runner mode requires teamId
   if (!options.teamId) {
-    console.warn('No teamId provided for agent mode, falling back to local');
+    console.warn('No teamId provided for runner mode, falling back to local');
     return executeLocally(tests, runId, options, onProgress, onResult);
   }
 
-  // Check if agent is available
-  const agent = await getAvailableAgent(options.teamId);
-  if (!agent) {
-    console.warn('No agent available, falling back to local');
+  // Check if runner is available
+  const runner = await getAvailableRunner(options.teamId);
+  if (!runner) {
+    console.warn('No runner available, falling back to local');
     return executeLocally(tests, runId, options, onProgress, onResult);
   }
 
-  return executeViaAgent(tests, runId, agent.id, options, onProgress, onResult);
+  return executeViaRunner(tests, runId, runner.id, options, onProgress, onResult);
 }
 
 /**
@@ -134,12 +134,12 @@ async function executeLocally(
 }
 
 /**
- * Execute tests via remote agent.
+ * Execute tests via remote runner.
  */
-async function executeViaAgent(
+async function executeViaRunner(
   tests: Test[],
   runId: string,
-  agentId: string,
+  runnerId: string,
   options: ExecutionOptions,
   onProgress?: (progress: ExecutionProgress) => void,
   onResult?: (result: TestRunResult) => Promise<void>
@@ -173,11 +173,11 @@ async function executeViaAgent(
       viewport,
     });
 
-    // Queue command for agent (polling mode)
-    queueCommand(agentId, command);
+    // Queue command for runner (polling mode)
+    queueCommand(runnerId, command);
 
     // Wait for result (poll with timeout)
-    const result = await waitForTestResult(agentId, command.id, runId, test.id, options.repositoryId);
+    const result = await waitForTestResult(runnerId, command.id, runId, test.id, options.repositoryId);
     results.push(result);
 
     await onResult?.(result);
@@ -193,10 +193,10 @@ async function executeViaAgent(
 }
 
 /**
- * Wait for test result from agent (polling mode).
+ * Wait for test result from runner (polling mode).
  */
 async function waitForTestResult(
-  agentId: string,
+  runnerId: string,
   commandId: string,
   runId: string,
   testId: string,
@@ -208,7 +208,7 @@ async function waitForTestResult(
 
   while (Date.now() - startTime < timeout) {
     // Check for screenshots first (may arrive before result)
-    const screenshots = getScreenshots(agentId);
+    const screenshots = getScreenshots(runnerId);
     for (const screenshot of screenshots) {
       if (screenshot.type === 'response:screenshot') {
         const payload = (screenshot as ScreenshotUploadResponse).payload;
@@ -220,7 +220,7 @@ async function waitForTestResult(
     }
 
     // Check for test results
-    const results = getTestResults(agentId);
+    const results = getTestResults(runnerId);
     for (const result of results) {
       if (result.payload.correlationId === commandId) {
         // Found our result
@@ -285,59 +285,59 @@ async function saveScreenshotFromBase64(
 }
 
 /**
- * Get an available agent for a team.
+ * Get an available runner for a team.
  */
-async function getAvailableAgent(teamId: string) {
+async function getAvailableRunner(teamId: string) {
   // First try the in-memory registry (WebSocket connections)
-  const wsAgent = agentRegistry.getAvailableAgent(teamId);
-  if (wsAgent) {
-    return { id: wsAgent.agentId, status: wsAgent.status };
+  const wsRunner = runnerRegistry.getAvailableRunner(teamId);
+  if (wsRunner) {
+    return { id: wsRunner.runnerId, status: wsRunner.status };
   }
 
-  // Fall back to database (polling agents)
-  const dbAgent = await db
+  // Fall back to database (polling runners)
+  const dbRunner = await db
     .select()
-    .from(agents)
-    .where(and(eq(agents.teamId, teamId), eq(agents.status, 'online')))
+    .from(runners)
+    .where(and(eq(runners.teamId, teamId), eq(runners.status, 'online')))
     .limit(1)
     .get();
 
-  return dbAgent;
+  return dbRunner;
 }
 
 /**
- * Get a specific agent by ID if it's available.
+ * Get a specific runner by ID if it's available.
  */
-async function getAvailableAgentById(teamId: string, agentId: string) {
+async function getAvailableRunnerById(teamId: string, runnerId: string) {
   // First try the in-memory registry (WebSocket connections)
-  const wsAgent = agentRegistry.getAgent(agentId);
-  if (wsAgent && wsAgent.teamId === teamId && wsAgent.status !== 'offline') {
-    return { id: wsAgent.agentId, status: wsAgent.status };
+  const wsRunner = runnerRegistry.getRunner(runnerId);
+  if (wsRunner && wsRunner.teamId === teamId && wsRunner.status !== 'offline') {
+    return { id: wsRunner.runnerId, status: wsRunner.status };
   }
 
-  // Fall back to database (polling agents)
-  const dbAgent = await db
+  // Fall back to database (polling runners)
+  const dbRunner = await db
     .select()
-    .from(agents)
-    .where(and(eq(agents.id, agentId), eq(agents.teamId, teamId), eq(agents.status, 'online')))
+    .from(runners)
+    .where(and(eq(runners.id, runnerId), eq(runners.teamId, teamId), eq(runners.status, 'online')))
     .get();
 
-  return dbAgent;
+  return dbRunner;
 }
 
 /**
- * Check if an agent is available for a team.
+ * Check if a runner is available for a team.
  */
-export async function hasAvailableAgent(teamId: string): Promise<boolean> {
-  const agent = await getAvailableAgent(teamId);
-  return !!agent;
+export async function hasAvailableRunner(teamId: string): Promise<boolean> {
+  const runner = await getAvailableRunner(teamId);
+  return !!runner;
 }
 
 /**
  * Get execution mode information for display.
  */
 export function getExecutionModeInfo(): {
-  mode: 'local' | 'agent';
+  mode: 'local' | 'runner';
   description: string;
 } {
   const mode = getExecutionMode();
@@ -346,6 +346,6 @@ export function getExecutionModeInfo(): {
     description:
       mode === 'local'
         ? 'Tests run directly on this machine using Playwright'
-        : 'Tests run on a remote agent connected to this server',
+        : 'Tests run on a remote runner connected to this server',
   };
 }

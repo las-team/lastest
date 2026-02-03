@@ -1,7 +1,7 @@
-export { getExecutionMode, isLocalMode, isAgentMode, shouldUseLocalRunner, type ExecutionMode } from './mode';
+export { getExecutionMode, isLocalMode, isRunnerMode, shouldUseLocalRunner, type ExecutionMode } from './mode';
 export {
   executeTests,
-  hasAvailableAgent,
+  hasAvailableRunner,
   getExecutionModeInfo,
   type ExecutionOptions,
   type ExecutionProgress,

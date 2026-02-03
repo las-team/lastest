@@ -1,5 +1,5 @@
 /**
- * Agent Client
+ * Runner Client
  * Connects to the server and handles commands.
  */
 
@@ -18,13 +18,13 @@ import type {
 import { createMessage } from './protocol.js';
 import { TestRunner } from './runner.js';
 
-export interface AgentClientOptions {
+export interface RunnerClientOptions {
   token: string;
   serverUrl: string;
   pollInterval?: number;
 }
 
-export class AgentClient {
+export class RunnerClient {
   private token: string;
   private serverUrl: string;
   private pollInterval: number;
@@ -33,7 +33,7 @@ export class AgentClient {
   private currentTask?: string;
   private runner: TestRunner;
 
-  constructor(options: AgentClientOptions) {
+  constructor(options: RunnerClientOptions) {
     this.token = options.token;
     this.serverUrl = options.serverUrl.replace(/\/$/, '');
     this.pollInterval = options.pollInterval ?? 5000;
@@ -58,12 +58,12 @@ export class AgentClient {
 
   async stop(): Promise<void> {
     this.running = false;
-    console.log('Agent stopped');
+    console.log('Runner stopped');
   }
 
   private async connect(): Promise<boolean> {
     try {
-      const response = await fetch(`${this.serverUrl}/api/ws/agent`, {
+      const response = await fetch(`${this.serverUrl}/api/ws/runner`, {
         method: 'GET',
         headers: {
           Authorization: `Bearer ${this.token}`,
@@ -77,7 +77,7 @@ export class AgentClient {
       }
 
       const data = await response.json();
-      console.log(`Agent ID: ${data.agentId}`);
+      console.log(`Runner ID: ${data.runnerId}`);
       console.log(`Team ID: ${data.teamId}`);
       console.log(`Capabilities: ${data.capabilities?.join(', ') || 'run, record'}`);
 
@@ -104,7 +104,7 @@ export class AgentClient {
           systemInfo: this.getSystemInfo(),
         });
 
-        const response = await fetch(`${this.serverUrl}/api/ws/agent`, {
+        const response = await fetch(`${this.serverUrl}/api/ws/runner`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -214,7 +214,7 @@ export class AgentClient {
 
   private async sendMessage(message: Message): Promise<void> {
     try {
-      await fetch(`${this.serverUrl}/api/ws/agent`, {
+      await fetch(`${this.serverUrl}/api/ws/runner`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

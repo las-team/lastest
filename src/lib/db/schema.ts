@@ -68,7 +68,7 @@ export const tests = sqliteTable('tests', {
 export const testRuns = sqliteTable('test_runs', {
   id: text('id').primaryKey(),
   repositoryId: text('repository_id'),
-  agentId: text('agent_id'), // nullable - set when run via remote agent, null for local runs
+  runnerId: text('runner_id'), // nullable - set when run via remote runner, null for local runs
   gitBranch: text('git_branch').notNull(),
   gitCommit: text('git_commit').notNull(),
   startedAt: integer('started_at', { mode: 'timestamp' }),
@@ -640,13 +640,13 @@ export type UserInvitation = typeof userInvitations.$inferSelect;
 export type NewUserInvitation = typeof userInvitations.$inferInsert;
 
 // ============================================
-// Agents Table (Remote Execution)
+// Runners Table (Remote Execution)
 // ============================================
 
-export type AgentStatus = 'online' | 'offline' | 'busy';
-export type AgentCapability = 'run' | 'record';
+export type RunnerStatus = 'online' | 'offline' | 'busy';
+export type RunnerCapability = 'run' | 'record';
 
-export const agents = sqliteTable('agents', {
+export const runners = sqliteTable('runners', {
   id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
   teamId: text('team_id').notNull().references(() => teams.id),
   createdById: text('created_by_id').notNull().references(() => users.id),
@@ -654,9 +654,9 @@ export const agents = sqliteTable('agents', {
   tokenHash: text('token_hash').notNull().unique(),
   status: text('status').notNull().default('offline'), // 'online' | 'offline' | 'busy'
   lastSeen: integer('last_seen', { mode: 'timestamp' }),
-  capabilities: text('capabilities', { mode: 'json' }).$type<AgentCapability[]>().default(['run', 'record']),
+  capabilities: text('capabilities', { mode: 'json' }).$type<RunnerCapability[]>().default(['run', 'record']),
   createdAt: integer('created_at', { mode: 'timestamp' }).$defaultFn(() => new Date()),
 });
 
-export type Agent = typeof agents.$inferSelect;
-export type NewAgent = typeof agents.$inferInsert;
+export type Runner = typeof runners.$inferSelect;
+export type NewRunner = typeof runners.$inferInsert;

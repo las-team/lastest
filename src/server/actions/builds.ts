@@ -83,7 +83,7 @@ export async function createAndRunBuild(
   triggerType: TriggerType = 'manual',
   testIds?: string[],
   repositoryId?: string | null,
-  agentId?: string
+  runnerId?: string
 ) {
   const runner = getRunner(repositoryId);
 
@@ -155,7 +155,7 @@ export async function createAndRunBuild(
   }
 
   // Run tests async
-  runBuildAsync(build.id, testRun.id, tests, gitInfo.branch, repositoryId, agentId);
+  runBuildAsync(build.id, testRun.id, tests, gitInfo.branch, repositoryId, runnerId);
 
   return { buildId: build.id, testRunId: testRun.id, testCount: tests.length };
 }
@@ -169,7 +169,7 @@ async function runBuildAsync(
   tests: Test[],
   branch: string,
   repositoryId?: string | null,
-  agentId?: string
+  runnerId?: string
 ) {
   const runner = getRunner(repositoryId);
   const startTime = Date.now();
@@ -183,7 +183,7 @@ async function runBuildAsync(
 
   // Get teamId for agent execution
   let teamId: string | undefined;
-  if (agentId && agentId !== 'local') {
+  if (runnerId && runnerId !== 'local') {
     const session = await getCurrentSession();
     teamId = session?.user?.teamId ?? undefined;
   }
@@ -247,7 +247,7 @@ async function runBuildAsync(
 
   try {
     // Use executor for agent routing, or direct runner for local
-    if (agentId && agentId !== 'local' && teamId) {
+    if (runnerId && runnerId !== 'local' && teamId) {
       // Load environment config for executor
       if (envConfig?.id) {
         runner.setEnvironmentConfig(envConfig);
@@ -260,7 +260,7 @@ async function runBuildAsync(
       await executeTests(tests, testRunId, {
         repositoryId,
         teamId,
-        agentId,
+        runnerId,
         environmentConfig: envConfig,
         playwrightSettings,
       }, undefined, onResult);

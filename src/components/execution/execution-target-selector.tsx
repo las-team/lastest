@@ -9,14 +9,14 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Monitor, Cloud } from 'lucide-react';
-import type { Agent, AgentCapability } from '@/lib/db/schema';
-import { getOnlineAgentsWithCapability } from '@/server/actions/agents';
+import type { Runner, RunnerCapability } from '@/lib/db/schema';
+import { getOnlineRunnersWithCapability } from '@/server/actions/runners';
 
 interface ExecutionTargetSelectorProps {
   value: string;
   onChange: (value: string) => void;
   disabled?: boolean;
-  capabilityFilter?: AgentCapability;
+  capabilityFilter?: RunnerCapability;
   size?: 'sm' | 'default';
   className?: string;
 }
@@ -29,37 +29,37 @@ export function ExecutionTargetSelector({
   size = 'default',
   className,
 }: ExecutionTargetSelectorProps) {
-  const [agents, setAgents] = useState<Agent[]>([]);
+  const [runners, setRunners] = useState<Runner[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
-    async function loadAgents() {
+    async function loadRunners() {
       try {
-        const onlineAgents = await getOnlineAgentsWithCapability(capabilityFilter);
-        setAgents(onlineAgents);
+        const onlineRunners = await getOnlineRunnersWithCapability(capabilityFilter);
+        setRunners(onlineRunners);
       } catch (error) {
-        console.error('Failed to load agents:', error);
-        setAgents([]);
+        console.error('Failed to load runners:', error);
+        setRunners([]);
       } finally {
         setIsLoading(false);
       }
     }
 
-    loadAgents();
-    // Refresh agents periodically
-    const interval = setInterval(loadAgents, 30000);
+    loadRunners();
+    // Refresh runners periodically
+    const interval = setInterval(loadRunners, 30000);
     return () => clearInterval(interval);
   }, [capabilityFilter]);
 
-  // If selected agent goes offline, reset to local
+  // If selected runner goes offline, reset to local
   useEffect(() => {
     if (value !== 'local' && !isLoading) {
-      const selectedAgent = agents.find((a) => a.id === value);
-      if (!selectedAgent) {
+      const selectedRunner = runners.find((r) => r.id === value);
+      if (!selectedRunner) {
         onChange('local');
       }
     }
-  }, [agents, value, isLoading, onChange]);
+  }, [runners, value, isLoading, onChange]);
 
   return (
     <Select value={value} onValueChange={onChange} disabled={disabled}>
@@ -73,14 +73,14 @@ export function ExecutionTargetSelector({
             <span>Local</span>
           </div>
         </SelectItem>
-        {agents.map((agent) => (
-          <SelectItem key={agent.id} value={agent.id}>
+        {runners.map((runner) => (
+          <SelectItem key={runner.id} value={runner.id}>
             <div className="flex items-center gap-2">
               <div className="relative">
                 <Cloud className="h-4 w-4" />
                 <div className="absolute -top-0.5 -right-0.5 h-2 w-2 rounded-full bg-green-500" />
               </div>
-              <span>{agent.name}</span>
+              <span>{runner.name}</span>
             </div>
           </SelectItem>
         ))}

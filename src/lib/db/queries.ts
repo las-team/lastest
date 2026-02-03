@@ -32,7 +32,7 @@ import {
   passwordResetTokens,
   emailVerificationTokens,
   userInvitations,
-  agents,
+  runners,
 } from './schema';
 import {
   DEFAULT_SELECTOR_PRIORITY,
@@ -73,11 +73,11 @@ import type {
   NewOAuthAccount,
   NewPasswordResetToken,
   NewUserInvitation,
-  NewAgent,
+  NewRunner,
   Team,
   User,
-  Agent,
-  AgentStatus,
+  Runner,
+  RunnerStatus,
   BuildStatus,
   SelectorConfig,
   AIProvider,

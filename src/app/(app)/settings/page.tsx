@@ -225,22 +225,22 @@ export default async function SettingsPage({
             </Card>
           )}
 
-          {/* Remote Agents (Admin only) */}
+          {/* Remote Runners (Admin only) */}
           {(currentUser?.role === 'admin' || currentUser?.role === 'owner') && (
             <Card>
               <CardHeader>
                 <CardTitle className="flex items-center gap-2">
                   <Bot className="w-5 h-5" />
-                  Remote Agents
+                  Remote Runners
                 </CardTitle>
                 <CardDescription>
-                  Manage remote test execution agents for cloud deployment
+                  Manage remote test execution runners for cloud deployment
                 </CardDescription>
               </CardHeader>
               <CardContent>
-                <Link href="/settings/agents">
+                <Link href="/settings/runners">
                   <Button variant="outline">
-                    Manage Agents
+                    Manage Runners
                   </Button>
                 </Link>
               </CardContent>

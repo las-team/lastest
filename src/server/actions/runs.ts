@@ -57,7 +57,7 @@ export async function createTestRun(testIds?: string[], repositoryId?: string | 
   return run;
 }
 
-export async function runTests(testIds?: string[], repositoryId?: string | null, headless?: boolean, agentId?: string) {
+export async function runTests(testIds?: string[], repositoryId?: string | null, headless?: boolean, runnerId?: string) {
   const runner = getRunner(repositoryId);
 
   if (runner.isActive()) {
@@ -111,12 +111,12 @@ export async function runTests(testIds?: string[], repositoryId?: string | null,
   const jobId = await createJob('test_run', `Test Run (${tests.length} tests)`, tests.length, repositoryId);
 
   // Run tests (this happens async)
-  runTestsAsync(run.id, tests, repositoryId, headless, jobId, agentId);
+  runTestsAsync(run.id, tests, repositoryId, headless, jobId, runnerId);
 
   return { runId: run.id, testCount: tests.length, jobId };
 }
 
-async function runTestsAsync(runId: string, tests: Test[], repositoryId?: string | null, headless?: boolean, jobId?: string, agentId?: string) {
+async function runTestsAsync(runId: string, tests: Test[], repositoryId?: string | null, headless?: boolean, jobId?: string, runnerId?: string) {
   const runner = getRunner(repositoryId);
 
   // Use provided jobId or create new one (for backwards compatibility)
@@ -124,7 +124,7 @@ async function runTestsAsync(runId: string, tests: Test[], repositoryId?: string
 
   // Get teamId for agent execution
   let teamId: string | undefined;
-  if (agentId && agentId !== 'local') {
+  if (runnerId && runnerId !== 'local') {
     const session = await getCurrentSession();
     teamId = session?.user?.teamId ?? undefined;
   }
@@ -136,12 +136,12 @@ async function runTestsAsync(runId: string, tests: Test[], repositoryId?: string
   try {
     let results;
 
-    if (agentId && agentId !== 'local' && teamId) {
+    if (runnerId && runnerId !== 'local' && teamId) {
       // Use executor for agent routing
       results = await executeTests(tests, runId, {
         repositoryId,
         teamId,
-        agentId,
+        runnerId,
         headless,
         environmentConfig: envConfig,
         playwrightSettings,

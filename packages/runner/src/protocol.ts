@@ -148,9 +148,11 @@ export interface HeartbeatMessage extends BaseMessage {
 }
 
 export interface ConnectionEstablishedPayload {
-  agentId: string;
+  runnerId: string;
   teamId: string;
   capabilities: string[];
+  /** @deprecated Use runnerId instead */
+  agentId?: string;
 }
 
 export interface ConnectionEstablishedMessage extends BaseMessage {

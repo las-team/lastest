@@ -1,32 +1,32 @@
 /**
  * Execution Mode Detection
  *
- * Determines whether tests should run locally or via remote agent.
+ * Determines whether tests should run locally or via remote runner.
  *
  * Modes:
  * - 'local': Direct Playwright execution on same machine (development, self-hosted)
- * - 'agent': Route through remote agent via WebSocket (cloud deployment)
+ * - 'runner': Route through remote runner via WebSocket (cloud deployment)
  */
 
-export type ExecutionMode = 'local' | 'agent';
+export type ExecutionMode = 'local' | 'runner';
 
 /**
  * Get the current execution mode from environment.
- * Defaults to 'local' in development, 'agent' in production.
+ * Defaults to 'local' in development, 'runner' in production.
  */
 export function getExecutionMode(): ExecutionMode {
   const envMode = process.env.EXECUTION_MODE as ExecutionMode | undefined;
 
-  if (envMode === 'local' || envMode === 'agent') {
+  if (envMode === 'local' || envMode === 'runner') {
     return envMode;
   }
 
-  // Default: local in development, agent in production
+  // Default: local in development, runner in production
   if (process.env.NODE_ENV === 'development') {
     return 'local';
   }
 
-  return 'agent';
+  return 'runner';
 }
 
 /**
@@ -37,10 +37,10 @@ export function isLocalMode(): boolean {
 }
 
 /**
- * Check if running in agent execution mode.
+ * Check if running in runner execution mode.
  */
-export function isAgentMode(): boolean {
-  return getExecutionMode() === 'agent';
+export function isRunnerMode(): boolean {
+  return getExecutionMode() === 'runner';
 }
 
 /**

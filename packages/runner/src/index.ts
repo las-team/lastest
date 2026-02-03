@@ -1,13 +1,13 @@
 #!/usr/bin/env node
 /**
- * Lastest2 Agent CLI
- * Remote test execution agent for cloud deployment.
+ * Lastest2 Runner CLI
+ * Remote test execution runner for cloud deployment.
  */
 
 import { Command } from 'commander';
-import { AgentClient } from './client.js';
+import { RunnerClient } from './client.js';
 
-export { AgentClient } from './client.js';
+export { RunnerClient } from './client.js';
 export { TestRunner } from './runner.js';
 export * from './protocol.js';
 
@@ -15,19 +15,19 @@ export async function main() {
   const program = new Command();
 
   program
-    .name('lastest2-agent')
-    .description('Remote test execution agent for Lastest2')
+    .name('lastest2-runner')
+    .description('Remote test execution runner for Lastest2')
     .version('0.1.0')
-    .requiredOption('-t, --token <token>', 'Agent authentication token')
+    .requiredOption('-t, --token <token>', 'Runner authentication token')
     .requiredOption('-s, --server <url>', 'Server URL (e.g., https://your-app.vercel.app)')
     .option('-i, --interval <ms>', 'Poll interval in milliseconds', '5000')
     .action(async (options) => {
       console.log('');
-      console.log('  Lastest2 Agent');
-      console.log('  ==============');
+      console.log('  Lastest2 Runner');
+      console.log('  ===============');
       console.log('');
 
-      const client = new AgentClient({
+      const client = new RunnerClient({
         token: options.token,
         serverUrl: options.server,
         pollInterval: parseInt(options.interval, 10),
@@ -49,7 +49,7 @@ export async function main() {
       try {
         await client.start();
       } catch (error) {
-        console.error('Failed to start agent:', error);
+        console.error('Failed to start runner:', error);
         process.exit(1);
       }
     });

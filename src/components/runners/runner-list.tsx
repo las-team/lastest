@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import { formatDistanceToNow } from 'date-fns';
 import { Bot, MoreVertical, Trash2, RefreshCw, Copy, Check } from 'lucide-react';
-import type { Agent } from '@/lib/db/schema';
+import type { Runner } from '@/lib/db/schema';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import {
@@ -21,26 +21,26 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { deleteAgent, regenerateAgentToken } from '@/server/actions/agents';
+import { deleteRunner, regenerateRunnerToken } from '@/server/actions/runners';
 import { useRouter } from 'next/navigation';
 
-interface AgentListProps {
-  agents: Agent[];
+interface RunnerListProps {
+  runners: Runner[];
 }
 
-export function AgentList({ agents }: AgentListProps) {
+export function RunnerList({ runners }: RunnerListProps) {
   const router = useRouter();
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [tokenDialogOpen, setTokenDialogOpen] = useState(false);
-  const [selectedAgent, setSelectedAgent] = useState<Agent | null>(null);
+  const [selectedRunner, setSelectedRunner] = useState<Runner | null>(null);
   const [newToken, setNewToken] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const [loading, setLoading] = useState(false);
 
   const handleDelete = async () => {
-    if (!selectedAgent) return;
+    if (!selectedRunner) return;
     setLoading(true);
-    const result = await deleteAgent(selectedAgent.id);
+    const result = await deleteRunner(selectedRunner.id);
     setLoading(false);
     setDeleteDialogOpen(false);
     if (!('error' in result)) {
@@ -49,9 +49,9 @@ export function AgentList({ agents }: AgentListProps) {
   };
 
   const handleRegenerateToken = async () => {
-    if (!selectedAgent) return;
+    if (!selectedRunner) return;
     setLoading(true);
-    const result = await regenerateAgentToken(selectedAgent.id);
+    const result = await regenerateRunnerToken(selectedRunner.id);
     setLoading(false);
     if ('token' in result) {
       setNewToken(result.token);
@@ -79,31 +79,31 @@ export function AgentList({ agents }: AgentListProps) {
   return (
     <>
       <div className="space-y-2">
-        {agents.map((agent) => (
+        {runners.map((runner) => (
           <div
-            key={agent.id}
+            key={runner.id}
             className="flex items-center justify-between p-3 rounded-lg border bg-card"
           >
             <div className="flex items-center gap-3">
               <div className={`p-2 rounded-lg ${
-                agent.status === 'online' ? 'bg-green-500/10' :
-                agent.status === 'busy' ? 'bg-yellow-500/10' :
+                runner.status === 'online' ? 'bg-green-500/10' :
+                runner.status === 'busy' ? 'bg-yellow-500/10' :
                 'bg-muted'
               }`}>
                 <Bot className={`w-5 h-5 ${
-                  agent.status === 'online' ? 'text-green-500' :
-                  agent.status === 'busy' ? 'text-yellow-500' :
+                  runner.status === 'online' ? 'text-green-500' :
+                  runner.status === 'busy' ? 'text-yellow-500' :
                   'text-muted-foreground'
                 }`} />
               </div>
               <div>
                 <div className="flex items-center gap-2">
-                  <span className="font-medium">{agent.name}</span>
-                  {getStatusBadge(agent.status)}
+                  <span className="font-medium">{runner.name}</span>
+                  {getStatusBadge(runner.status)}
                 </div>
                 <div className="text-sm text-muted-foreground">
-                  {agent.lastSeen ? (
-                    <>Last seen {formatDistanceToNow(agent.lastSeen, { addSuffix: true })}</>
+                  {runner.lastSeen ? (
+                    <>Last seen {formatDistanceToNow(runner.lastSeen, { addSuffix: true })}</>
                   ) : (
                     <>Never connected</>
                   )}
@@ -120,7 +120,7 @@ export function AgentList({ agents }: AgentListProps) {
               <DropdownMenuContent align="end">
                 <DropdownMenuItem
                   onClick={() => {
-                    setSelectedAgent(agent);
+                    setSelectedRunner(runner);
                     setNewToken(null);
                     setTokenDialogOpen(true);
                   }}
@@ -132,7 +132,7 @@ export function AgentList({ agents }: AgentListProps) {
                 <DropdownMenuItem
                   className="text-destructive"
                   onClick={() => {
-                    setSelectedAgent(agent);
+                    setSelectedRunner(runner);
                     setDeleteDialogOpen(true);
                   }}
                 >
@@ -149,9 +149,9 @@ export function AgentList({ agents }: AgentListProps) {
       <Dialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Delete Agent</DialogTitle>
+            <DialogTitle>Delete Runner</DialogTitle>
             <DialogDescription>
-              Are you sure you want to delete &quot;{selectedAgent?.name}&quot;? This action cannot be undone.
+              Are you sure you want to delete &quot;{selectedRunner?.name}&quot;? This action cannot be undone.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
@@ -174,7 +174,7 @@ export function AgentList({ agents }: AgentListProps) {
               {newToken ? (
                 'Copy this token now. It will not be shown again.'
               ) : (
-                `Regenerating the token for "${selectedAgent?.name}" will invalidate the current token. The agent will need to be reconfigured with the new token.`
+                `Regenerating the token for "${selectedRunner?.name}" will invalidate the current token. The runner will need to be reconfigured with the new token.`
               )}
             </DialogDescription>
           </DialogHeader>

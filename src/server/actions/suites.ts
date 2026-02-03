@@ -69,7 +69,7 @@ async function getGitInfo(repositoryId: string | null) {
   return { branch: branchInfo.name, commit: branchInfo.commit.sha.slice(0, 7) };
 }
 
-export async function runSuite(suiteId: string, agentId?: string) {
+export async function runSuite(suiteId: string, runnerId?: string) {
   const suiteWithTests = await queries.getSuiteWithTests(suiteId);
   if (!suiteWithTests) {
     throw new Error('Suite not found');
@@ -120,7 +120,7 @@ export async function runSuite(suiteId: string, agentId?: string) {
   });
 
   // Run tests async (halt on error)
-  runSuiteTestsAsync(run.id, tests, repositoryId, suiteWithTests.name, agentId);
+  runSuiteTestsAsync(run.id, tests, repositoryId, suiteWithTests.name, runnerId);
 
   return { runId: run.id, testCount: tests.length };
 }
@@ -130,14 +130,14 @@ async function runSuiteTestsAsync(
   tests: Test[],
   repositoryId: string | null | undefined,
   suiteName: string,
-  agentId?: string
+  runnerId?: string
 ) {
   const runner = getRunner(repositoryId);
   const jobId = await createJob('test_run', `Suite: ${suiteName}`, tests.length, repositoryId);
 
   // Get teamId for agent execution
   let teamId: string | undefined;
-  if (agentId && agentId !== 'local') {
+  if (runnerId && runnerId !== 'local') {
     const session = await getCurrentSession();
     teamId = session?.user?.teamId ?? undefined;
   }
@@ -147,7 +147,7 @@ async function runSuiteTestsAsync(
   const playwrightSettings = await queries.getPlaywrightSettings(repositoryId);
 
   // Setup runner for local execution
-  if (!agentId || agentId === 'local' || !teamId) {
+  if (!runnerId || runnerId === 'local' || !teamId) {
     if (envConfig?.id) {
       runner.setEnvironmentConfig(envConfig);
       getServerManager().setConfig(envConfig);
@@ -163,11 +163,11 @@ async function runSuiteTestsAsync(
       const test = tests[i];
 
       let results;
-      if (agentId && agentId !== 'local' && teamId) {
+      if (runnerId && runnerId !== 'local' && teamId) {
         results = await executeTests([test], runId, {
           repositoryId,
           teamId,
-          agentId,
+          runnerId,
           environmentConfig: envConfig,
           playwrightSettings,
         });

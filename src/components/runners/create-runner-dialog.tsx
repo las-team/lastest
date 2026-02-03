@@ -14,10 +14,10 @@ import {
   DialogTitle,
   DialogTrigger,
 } from '@/components/ui/dialog';
-import { createAgent } from '@/server/actions/agents';
+import { createRunner } from '@/server/actions/runners';
 import { useRouter } from 'next/navigation';
 
-export function CreateAgentDialog() {
+export function CreateRunnerDialog() {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [name, setName] = useState('');
@@ -35,7 +35,7 @@ export function CreateAgentDialog() {
     setLoading(true);
     setError(null);
 
-    const result = await createAgent(name.trim());
+    const result = await createRunner(name.trim());
 
     setLoading(false);
 
@@ -74,20 +74,20 @@ export function CreateAgentDialog() {
       <DialogTrigger asChild>
         <Button>
           <Plus className="w-4 h-4 mr-2" />
-          Create Agent
+          Create Runner
         </Button>
       </DialogTrigger>
       <DialogContent>
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Bot className="w-5 h-5" />
-            {token ? 'Agent Created' : 'Create Agent'}
+            {token ? 'Runner Created' : 'Create Runner'}
           </DialogTitle>
           <DialogDescription>
             {token ? (
               'Copy this token now. It will not be shown again.'
             ) : (
-              'Create a new agent to run tests remotely on your machine.'
+              'Create a new runner to run tests remotely on your machine.'
             )}
           </DialogDescription>
         </DialogHeader>
@@ -125,7 +125,7 @@ export function CreateAgentDialog() {
         ) : (
           <div className="space-y-4">
             <div className="space-y-2">
-              <Label htmlFor="name">Agent Name</Label>
+              <Label htmlFor="name">Runner Name</Label>
               <Input
                 id="name"
                 placeholder="e.g., My Laptop, CI Server, Local Dev"
@@ -138,7 +138,7 @@ export function CreateAgentDialog() {
                 }}
               />
               <p className="text-sm text-muted-foreground">
-                A descriptive name to identify this agent
+                A descriptive name to identify this runner
               </p>
             </div>
 
