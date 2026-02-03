@@ -43,8 +43,17 @@ export function EnvironmentConfigCard({
   const [healthCheckTimeout, setHealthCheckTimeout] = useState(config.healthCheckTimeout || 60000);
   const [reuseExistingServer, setReuseExistingServer] = useState(config.reuseExistingServer ?? true);
 
-  const isInitialMount = useRef(true);
   const debounceRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Store original values to compare against (prevents save on mount)
+  const originalValues = useRef({
+    mode: (config.mode as EnvironmentMode) || 'manual',
+    baseUrl: config.baseUrl || 'http://localhost:3000',
+    startCommand: config.startCommand || '',
+    healthCheckUrl: config.healthCheckUrl || '',
+    healthCheckTimeout: config.healthCheckTimeout || 60000,
+    reuseExistingServer: config.reuseExistingServer ?? true,
+  });
 
   const doSave = useCallback(() => {
     startTransition(async () => {
@@ -61,12 +70,18 @@ export function EnvironmentConfigCard({
     });
   }, [repositoryId, mode, baseUrl, startCommand, healthCheckUrl, healthCheckTimeout, reuseExistingServer]);
 
-  // Auto-save with debounce
+  // Auto-save with debounce - only when values differ from original props
   useEffect(() => {
-    if (isInitialMount.current) {
-      isInitialMount.current = false;
-      return;
-    }
+    const orig = originalValues.current;
+    const hasChanges =
+      mode !== orig.mode ||
+      baseUrl !== orig.baseUrl ||
+      startCommand !== orig.startCommand ||
+      healthCheckUrl !== orig.healthCheckUrl ||
+      healthCheckTimeout !== orig.healthCheckTimeout ||
+      reuseExistingServer !== orig.reuseExistingServer;
+
+    if (!hasChanges) return;
 
     if (debounceRef.current) {
       clearTimeout(debounceRef.current);

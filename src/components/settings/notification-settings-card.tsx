@@ -30,8 +30,16 @@ export function NotificationSettingsCard({
     settings.githubPrCommentsEnabled || false
   );
 
-  const isInitialMount = useRef(true);
   const debounceRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Store original values to compare against (prevents save on mount)
+  const originalValues = useRef({
+    slackWebhookUrl: settings.slackWebhookUrl || '',
+    slackEnabled: settings.slackEnabled || false,
+    discordWebhookUrl: settings.discordWebhookUrl || '',
+    discordEnabled: settings.discordEnabled || false,
+    githubPrCommentsEnabled: settings.githubPrCommentsEnabled || false,
+  });
 
   const doSave = useCallback(() => {
     startTransition(async () => {
@@ -47,12 +55,17 @@ export function NotificationSettingsCard({
     });
   }, [repositoryId, slackWebhookUrl, slackEnabled, discordWebhookUrl, discordEnabled, githubPrCommentsEnabled]);
 
-  // Auto-save with debounce
+  // Auto-save with debounce - only when values differ from original props
   useEffect(() => {
-    if (isInitialMount.current) {
-      isInitialMount.current = false;
-      return;
-    }
+    const orig = originalValues.current;
+    const hasChanges =
+      slackWebhookUrl !== orig.slackWebhookUrl ||
+      slackEnabled !== orig.slackEnabled ||
+      discordWebhookUrl !== orig.discordWebhookUrl ||
+      discordEnabled !== orig.discordEnabled ||
+      githubPrCommentsEnabled !== orig.githubPrCommentsEnabled;
+
+    if (!hasChanges) return;
 
     if (debounceRef.current) {
       clearTimeout(debounceRef.current);

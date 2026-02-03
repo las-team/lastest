@@ -32,8 +32,14 @@ export function DiffSensitivityCard({
     settings.includeAntiAliasing ?? DEFAULT_DIFF_THRESHOLDS.includeAntiAliasing
   );
 
-  const isInitialMount = useRef(true);
   const debounceRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Store original values to compare against (prevents save on mount)
+  const originalValues = useRef({
+    unchangedThreshold: settings.unchangedThreshold ?? DEFAULT_DIFF_THRESHOLDS.unchangedThreshold,
+    flakyThreshold: settings.flakyThreshold ?? DEFAULT_DIFF_THRESHOLDS.flakyThreshold,
+    includeAntiAliasing: settings.includeAntiAliasing ?? DEFAULT_DIFF_THRESHOLDS.includeAntiAliasing,
+  });
 
   const doSave = useCallback(() => {
     startTransition(async () => {
@@ -47,12 +53,15 @@ export function DiffSensitivityCard({
     });
   }, [repositoryId, unchangedThreshold, flakyThreshold, includeAntiAliasing]);
 
-  // Auto-save with debounce
+  // Auto-save with debounce - only when values differ from original props
   useEffect(() => {
-    if (isInitialMount.current) {
-      isInitialMount.current = false;
-      return;
-    }
+    const orig = originalValues.current;
+    const hasChanges =
+      unchangedThreshold !== orig.unchangedThreshold ||
+      flakyThreshold !== orig.flakyThreshold ||
+      includeAntiAliasing !== orig.includeAntiAliasing;
+
+    if (!hasChanges) return;
 
     if (debounceRef.current) {
       clearTimeout(debounceRef.current);

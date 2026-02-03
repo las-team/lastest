@@ -54,9 +54,24 @@ export function PlaywrightSettingsCard({
   const [screenshotDelay, setScreenshotDelay] = useState(settings.screenshotDelay ?? 0);
   const [maxParallelTests, setMaxParallelTests] = useState(settings.maxParallelTests ?? 1);
 
-  // Track if initial mount to prevent auto-save on first render
-  const isInitialMount = useRef(true);
   const debounceRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Store original values to compare against (prevents save on mount)
+  const originalValues = useRef({
+    selectorPriority: settings.selectorPriority || DEFAULT_SELECTOR_PRIORITY,
+    browser: settings.browser || 'chromium',
+    viewportWidth: settings.viewportWidth || 1280,
+    viewportHeight: settings.viewportHeight || 720,
+    headlessMode: (settings.headlessMode as HeadlessMode) || 'true',
+    navigationTimeout: settings.navigationTimeout || 30000,
+    actionTimeout: settings.actionTimeout || 5000,
+    pointerGestures: settings.pointerGestures ?? false,
+    cursorFPS: settings.cursorFPS ?? 30,
+    defaultRecordingEngine: (settings.defaultRecordingEngine as RecordingEngine) ?? 'lastest',
+    freezeAnimations: settings.freezeAnimations ?? false,
+    screenshotDelay: settings.screenshotDelay ?? 0,
+    maxParallelTests: settings.maxParallelTests ?? 1,
+  });
 
   const doSave = useCallback(() => {
     startTransition(async () => {
@@ -85,12 +100,25 @@ export function PlaywrightSettingsCard({
     });
   }, [repositoryId, selectorPriority, browser, viewportWidth, viewportHeight, headlessMode, navigationTimeout, actionTimeout, pointerGestures, cursorFPS, defaultRecordingEngine, freezeAnimations, screenshotDelay, maxParallelTests, compact]);
 
-  // Auto-save with debounce
+  // Auto-save with debounce - only when values differ from original props
   useEffect(() => {
-    if (isInitialMount.current) {
-      isInitialMount.current = false;
-      return;
-    }
+    const orig = originalValues.current;
+    const hasChanges =
+      JSON.stringify(selectorPriority) !== JSON.stringify(orig.selectorPriority) ||
+      browser !== orig.browser ||
+      viewportWidth !== orig.viewportWidth ||
+      viewportHeight !== orig.viewportHeight ||
+      headlessMode !== orig.headlessMode ||
+      navigationTimeout !== orig.navigationTimeout ||
+      actionTimeout !== orig.actionTimeout ||
+      pointerGestures !== orig.pointerGestures ||
+      cursorFPS !== orig.cursorFPS ||
+      defaultRecordingEngine !== orig.defaultRecordingEngine ||
+      freezeAnimations !== orig.freezeAnimations ||
+      screenshotDelay !== orig.screenshotDelay ||
+      maxParallelTests !== orig.maxParallelTests;
+
+    if (!hasChanges) return;
 
     if (debounceRef.current) {
       clearTimeout(debounceRef.current);

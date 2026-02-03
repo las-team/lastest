@@ -50,8 +50,17 @@ export function AISettingsCard({ settings, repositoryId }: AISettingsCardProps) 
   );
   const [agentSdkWorkingDir, setAgentSdkWorkingDir] = useState(settings.agentSdkWorkingDir || '');
 
-  const isInitialMount = useRef(true);
   const debounceRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Store original values to compare against (prevents save on mount)
+  const originalValues = useRef({
+    provider: (settings.provider as AIProvider) || DEFAULT_AI_SETTINGS.provider,
+    openrouterApiKey: settings.openrouterApiKey || '',
+    openrouterModel: settings.openrouterModel || DEFAULT_AI_SETTINGS.openrouterModel,
+    customInstructions: settings.customInstructions || '',
+    agentSdkPermissionMode: (settings.agentSdkPermissionMode as AgentSdkPermissionMode) || 'plan',
+    agentSdkWorkingDir: settings.agentSdkWorkingDir || '',
+  });
 
   const doSave = useCallback(() => {
     startTransition(async () => {
@@ -68,12 +77,18 @@ export function AISettingsCard({ settings, repositoryId }: AISettingsCardProps) 
     });
   }, [repositoryId, provider, openrouterApiKey, openrouterModel, agentSdkPermissionMode, agentSdkWorkingDir, customInstructions]);
 
-  // Auto-save with debounce
+  // Auto-save with debounce - only when values differ from original props
   useEffect(() => {
-    if (isInitialMount.current) {
-      isInitialMount.current = false;
-      return;
-    }
+    const orig = originalValues.current;
+    const hasChanges =
+      provider !== orig.provider ||
+      openrouterApiKey !== orig.openrouterApiKey ||
+      openrouterModel !== orig.openrouterModel ||
+      customInstructions !== orig.customInstructions ||
+      agentSdkPermissionMode !== orig.agentSdkPermissionMode ||
+      agentSdkWorkingDir !== orig.agentSdkWorkingDir;
+
+    if (!hasChanges) return;
 
     if (debounceRef.current) {
       clearTimeout(debounceRef.current);
