@@ -181,9 +181,9 @@ export function RunnerList({ runners }: RunnerListProps) {
 
           {newToken && (
             <div className="relative">
-              <pre className="bg-muted p-3 rounded-md text-sm overflow-x-auto pr-12">
-                <code className="break-all">{newToken}</code>
-              </pre>
+              <div className="bg-muted p-3 rounded-md text-sm pr-12 font-mono break-all">
+                {newToken}
+              </div>
               <Button
                 variant="ghost"
                 size="sm"
