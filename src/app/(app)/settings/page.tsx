@@ -1,7 +1,10 @@
+import Link from 'next/link';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
 import * as queries from '@/lib/db/queries';
-import { Github, Check, X, Database, ExternalLink } from 'lucide-react';
+import { getCurrentUser } from '@/lib/auth';
+import { Github, Check, X, Database, ExternalLink, Users } from 'lucide-react';
 import { PlaywrightSettingsCard } from '@/components/settings/playwright-settings-card';
 import { EnvironmentConfigCard } from '@/components/settings/environment-config-card';
 import { DiffSensitivityCard } from '@/components/settings/diff-sensitivity-card';
@@ -16,8 +19,11 @@ export default async function SettingsPage({
   searchParams: Promise<{ success?: string; error?: string }>;
 }) {
   const params = await searchParams;
-  const githubAccount = await queries.getGithubAccount();
-  const selectedRepo = await queries.getSelectedRepository();
+  const [currentUser, githubAccount, selectedRepo] = await Promise.all([
+    getCurrentUser(),
+    queries.getGithubAccount(),
+    queries.getSelectedRepository(),
+  ]);
   const playwrightSettings = await queries.getPlaywrightSettings(selectedRepo?.id);
   const environmentConfig = await queries.getEnvironmentConfig(selectedRepo?.id);
   const diffSensitivitySettings = await queries.getDiffSensitivitySettings(selectedRepo?.id);
@@ -196,6 +202,28 @@ export default async function SettingsPage({
             settings={playwrightSettings}
             repositoryId={selectedRepo?.id}
           />
+
+          {/* User Management (Admin only) */}
+          {currentUser?.role === 'admin' && (
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Users className="w-5 h-5" />
+                  User Management
+                </CardTitle>
+                <CardDescription>
+                  Manage users and invitations
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <Link href="/settings/users">
+                  <Button variant="outline">
+                    Manage Users
+                  </Button>
+                </Link>
+              </CardContent>
+            </Card>
+          )}
 
           {/* Version */}
           <Card>

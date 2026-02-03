@@ -25,6 +25,12 @@ import {
   suiteTests,
   notificationSettings,
   selectorStats,
+  users,
+  sessions,
+  oauthAccounts,
+  passwordResetTokens,
+  emailVerificationTokens,
+  userInvitations,
 } from './schema';
 import {
   DEFAULT_SELECTOR_PRIORITY,
@@ -59,12 +65,19 @@ import type {
   NewSuiteTest,
   NewNotificationSettings,
   NewSelectorStat,
+  NewUser,
+  NewSession,
+  NewOAuthAccount,
+  NewPasswordResetToken,
+  NewUserInvitation,
+  User,
   BuildStatus,
   SelectorConfig,
   AIProvider,
   BackgroundJobType,
   BackgroundJobStatus,
   TestChangeReason,
+  UserRole,
 } from './schema';
 
 export { DEFAULT_SELECTOR_PRIORITY, DEFAULT_DIFF_THRESHOLDS, DEFAULT_AI_SETTINGS, DEFAULT_RECORDING_ENGINES, DEFAULT_NOTIFICATION_SETTINGS };
@@ -1955,4 +1968,262 @@ export async function recordSelectorFailure(
       createdAt: now,
     });
   }
+}
+
+// ============================================
+// User Management
+// ============================================
+
+export async function getUsers() {
+  return db.select().from(users).orderBy(desc(users.createdAt)).all();
+}
+
+export async function getUserById(id: string) {
+  return db.select().from(users).where(eq(users.id, id)).get();
+}
+
+export async function getUserByEmail(email: string) {
+  return db.select().from(users).where(eq(users.email, email.toLowerCase())).get();
+}
+
+export async function getUserCount() {
+  const result = await db.select({ id: users.id }).from(users).all();
+  return result.length;
+}
+
+export async function createUser(data: Omit<NewUser, 'id' | 'createdAt' | 'updatedAt'>): Promise<User> {
+  const id = uuid();
+  const now = new Date();
+  await db.insert(users).values({
+    ...data,
+    id,
+    email: data.email.toLowerCase(),
+    createdAt: now,
+    updatedAt: now,
+  });
+  // Fetch the created user to get a properly typed User object
+  const user = await getUserById(id);
+  if (!user) {
+    throw new Error('Failed to create user');
+  }
+  return user;
+}
+
+export async function updateUser(id: string, data: Partial<NewUser>) {
+  await db.update(users).set({ ...data, updatedAt: new Date() }).where(eq(users.id, id));
+}
+
+export async function deleteUser(id: string) {
+  await db.delete(users).where(eq(users.id, id));
+}
+
+export async function updateUserRole(id: string, role: UserRole) {
+  await db.update(users).set({ role, updatedAt: new Date() }).where(eq(users.id, id));
+}
+
+// ============================================
+// Sessions
+// ============================================
+
+export async function getSessionByToken(token: string) {
+  return db.select().from(sessions).where(eq(sessions.token, token)).get();
+}
+
+export async function getSessionWithUser(token: string) {
+  const result = await db
+    .select({
+      session: sessions,
+      user: users,
+    })
+    .from(sessions)
+    .innerJoin(users, eq(sessions.userId, users.id))
+    .where(eq(sessions.token, token))
+    .get();
+  return result;
+}
+
+export async function createSession(data: Omit<NewSession, 'id' | 'createdAt'>) {
+  const id = uuid();
+  const now = new Date();
+  await db.insert(sessions).values({ ...data, id, createdAt: now });
+  return { id, ...data, createdAt: now };
+}
+
+export async function deleteSession(token: string) {
+  await db.delete(sessions).where(eq(sessions.token, token));
+}
+
+export async function deleteSessionsByUser(userId: string) {
+  await db.delete(sessions).where(eq(sessions.userId, userId));
+}
+
+export async function deleteExpiredSessions() {
+  const now = new Date();
+  await db.delete(sessions).where(lt(sessions.expiresAt, now));
+}
+
+// ============================================
+// OAuth Accounts
+// ============================================
+
+export async function getOAuthAccount(provider: string, providerAccountId: string) {
+  return db
+    .select()
+    .from(oauthAccounts)
+    .where(
+      and(
+        eq(oauthAccounts.provider, provider),
+        eq(oauthAccounts.providerAccountId, providerAccountId)
+      )
+    )
+    .get();
+}
+
+export async function getOAuthAccountsByUser(userId: string) {
+  return db.select().from(oauthAccounts).where(eq(oauthAccounts.userId, userId)).all();
+}
+
+export async function createOAuthAccount(data: Omit<NewOAuthAccount, 'id' | 'createdAt'>) {
+  const id = uuid();
+  const now = new Date();
+  await db.insert(oauthAccounts).values({ ...data, id, createdAt: now });
+  return { id, ...data, createdAt: now };
+}
+
+export async function updateOAuthAccount(id: string, data: Partial<NewOAuthAccount>) {
+  await db.update(oauthAccounts).set(data).where(eq(oauthAccounts.id, id));
+}
+
+export async function deleteOAuthAccount(id: string) {
+  await db.delete(oauthAccounts).where(eq(oauthAccounts.id, id));
+}
+
+// ============================================
+// Password Reset Tokens
+// ============================================
+
+export async function getPasswordResetToken(token: string) {
+  return db.select().from(passwordResetTokens).where(eq(passwordResetTokens.token, token)).get();
+}
+
+export async function createPasswordResetToken(userId: string): Promise<string> {
+  const id = uuid();
+  const token = uuid();
+  const now = new Date();
+  const expiresAt = new Date(now.getTime() + 60 * 60 * 1000); // 1 hour
+
+  // Delete any existing tokens for this user
+  await db.delete(passwordResetTokens).where(eq(passwordResetTokens.userId, userId));
+
+  await db.insert(passwordResetTokens).values({
+    id,
+    userId,
+    token,
+    expiresAt,
+    createdAt: now,
+  });
+  return token;
+}
+
+export async function markPasswordResetTokenUsed(token: string) {
+  await db
+    .update(passwordResetTokens)
+    .set({ usedAt: new Date() })
+    .where(eq(passwordResetTokens.token, token));
+}
+
+export async function deleteExpiredPasswordResetTokens() {
+  const now = new Date();
+  await db.delete(passwordResetTokens).where(lt(passwordResetTokens.expiresAt, now));
+}
+
+// ============================================
+// Email Verification Tokens
+// ============================================
+
+export async function getEmailVerificationToken(token: string) {
+  return db.select().from(emailVerificationTokens).where(eq(emailVerificationTokens.token, token)).get();
+}
+
+export async function createEmailVerificationToken(userId: string): Promise<string> {
+  const id = uuid();
+  const token = uuid();
+  const now = new Date();
+  const expiresAt = new Date(now.getTime() + 24 * 60 * 60 * 1000); // 24 hours
+
+  // Delete any existing tokens for this user
+  await db.delete(emailVerificationTokens).where(eq(emailVerificationTokens.userId, userId));
+
+  await db.insert(emailVerificationTokens).values({
+    id,
+    userId,
+    token,
+    expiresAt,
+    createdAt: now,
+  });
+  return token;
+}
+
+export async function deleteEmailVerificationToken(token: string) {
+  await db.delete(emailVerificationTokens).where(eq(emailVerificationTokens.token, token));
+}
+
+// ============================================
+// User Invitations
+// ============================================
+
+export async function getInvitations() {
+  return db.select().from(userInvitations).orderBy(desc(userInvitations.createdAt)).all();
+}
+
+export async function getPendingInvitations() {
+  const now = new Date();
+  return db
+    .select()
+    .from(userInvitations)
+    .where(and(isNull(userInvitations.acceptedAt), gte(userInvitations.expiresAt, now)))
+    .orderBy(desc(userInvitations.createdAt))
+    .all();
+}
+
+export async function getInvitationByToken(token: string) {
+  return db.select().from(userInvitations).where(eq(userInvitations.token, token)).get();
+}
+
+export async function getInvitationByEmail(email: string) {
+  return db.select().from(userInvitations).where(eq(userInvitations.email, email.toLowerCase())).get();
+}
+
+export async function createInvitation(data: { email: string; invitedById?: string; role?: UserRole }): Promise<string> {
+  const id = uuid();
+  const token = uuid();
+  const now = new Date();
+  const expiresAt = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000); // 7 days
+
+  await db.insert(userInvitations).values({
+    id,
+    email: data.email.toLowerCase(),
+    invitedById: data.invitedById ?? null,
+    token,
+    role: data.role ?? 'member',
+    expiresAt,
+    createdAt: now,
+  });
+  return token;
+}
+
+export async function markInvitationAccepted(token: string) {
+  await db
+    .update(userInvitations)
+    .set({ acceptedAt: new Date() })
+    .where(eq(userInvitations.token, token));
+}
+
+export async function deleteInvitation(id: string) {
+  await db.delete(userInvitations).where(eq(userInvitations.id, id));
+}
+
+export async function deleteExpiredInvitations() {
+  const now = new Date();
+  await db.delete(userInvitations).where(lt(userInvitations.expiresAt, now));
 }

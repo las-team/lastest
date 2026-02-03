@@ -15,11 +15,13 @@ import {
 } from 'lucide-react';
 import { RepoSelector, SyncReposButton } from './repo-selector';
 import { QueueIndicator } from '@/components/queue/queue-indicator';
-import type { Repository } from '@/lib/db/schema';
+import { UserMenu } from '@/components/auth/user-menu';
+import type { Repository, User } from '@/lib/db/schema';
 
 interface SidebarProps {
   repos?: Repository[];
   selectedRepo?: Repository | null;
+  currentUser?: User | null;
 }
 
 const navigation = [
@@ -32,7 +34,7 @@ const navigation = [
   { name: 'Settings', href: '/settings', icon: Settings },
 ];
 
-export function Sidebar({ repos, selectedRepo }: SidebarProps) {
+export function Sidebar({ repos, selectedRepo, currentUser }: SidebarProps) {
   const pathname = usePathname();
 
   return (
@@ -83,9 +85,12 @@ export function Sidebar({ repos, selectedRepo }: SidebarProps) {
         </ul>
       </nav>
 
-      <div className="p-4 border-t flex items-center justify-between">
-        <span className="text-xs text-muted-foreground">Visual Regression Testing</span>
-        <QueueIndicator />
+      <div className="p-4 border-t space-y-3">
+        {currentUser && <UserMenu user={currentUser} />}
+        <div className="flex items-center justify-between">
+          <span className="text-xs text-muted-foreground">Visual Regression Testing</span>
+          <QueueIndicator />
+        </div>
       </div>
     </aside>
   );
