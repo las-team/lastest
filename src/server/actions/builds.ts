@@ -9,6 +9,7 @@ import { getServerManager } from '@/lib/playwright/server-manager';
 import { generateDiff } from '@/lib/diff/generator';
 import { hashImage } from '@/lib/diff/hasher';
 import { sendSlackNotification } from '@/lib/integrations/slack';
+import { sendDiscordNotification } from '@/lib/integrations/discord';
 import { postPRComment } from '@/lib/integrations/github-pr';
 import type { Test, TriggerType, BuildStatus, VisualDiffWithTestStatus, DiffClassification, DiffStatus } from '@/lib/db/schema';
 import path from 'path';
@@ -632,6 +633,31 @@ async function sendBuildNotifications(data: {
       });
     } catch (error) {
       console.error('Failed to send Slack notification:', error);
+    }
+  }
+
+  // Send Discord notification
+  console.log('[Notifications] Discord settings:', {
+    enabled: notificationSettings.discordEnabled,
+    hasUrl: !!notificationSettings.discordWebhookUrl,
+  });
+  if (notificationSettings.discordEnabled && notificationSettings.discordWebhookUrl) {
+    try {
+      const result = await sendDiscordNotification(notificationSettings.discordWebhookUrl, {
+        buildId: data.buildId,
+        status: data.status,
+        totalTests: data.totalTests,
+        passedCount: data.passedCount,
+        changesDetected: data.changesDetected,
+        flakyCount: data.flakyCount,
+        failedCount: data.failedCount,
+        gitBranch: data.gitBranch,
+        gitCommit: testRun?.gitCommit || 'unknown',
+        buildUrl,
+      });
+      console.log('[Notifications] Discord result:', result);
+    } catch (error) {
+      console.error('Failed to send Discord notification:', error);
     }
   }
 

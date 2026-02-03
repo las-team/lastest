@@ -13,8 +13,6 @@ jobs:
           fetch-depth: 0  # Full history for branch comparison
 
       - uses: pnpm/action-setup@v4
-        with:
-          version: 9
 
       - uses: actions/setup-node@v4
         with:
@@ -27,24 +25,24 @@ jobs:
       - name: Install Playwright browsers
         run: pnpm exec playwright install chromium
 
+      - name: Setup database
+        run: pnpm db:push
+
       - name: Build application
         run: pnpm build
 
-      - name: Run regression tests
+      - name: Run visual regression tests
         run: |
-          # Start the app in the background
           pnpm start &
-          sleep 5
+          sleep 10
+          npx tsx scripts/run-tests.ts --repo-id "${{ vars.REPO_ID }}" --base-url http://localhost:3000 --output-dir ./test-output
+        env:
+          DATABASE_PATH: ./lastest2.db
 
-          # Run tests (would use CLI tool in production)
-          echo "Running regression tests..."
-
-      - name: Upload report
+      - name: Upload screenshots
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: regression-report
-          path: |
-            lastest2-results/
-            public/screenshots/
-          retention-days: 30
+          name: regression-screenshots
+          path: ./test-output/
+          retention-days: 7

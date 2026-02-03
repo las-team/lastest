@@ -90,6 +90,8 @@ export async function saveNotificationSettings(data: {
   repositoryId?: string | null;
   slackWebhookUrl?: string | null;
   slackEnabled?: boolean;
+  discordWebhookUrl?: string | null;
+  discordEnabled?: boolean;
   githubPrCommentsEnabled?: boolean;
 }) {
   const { repositoryId, ...settingsData } = data;

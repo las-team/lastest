@@ -1806,6 +1806,8 @@ export async function getNotificationSettings(repositoryId?: string | null) {
     repositoryId: null,
     slackWebhookUrl: null,
     slackEnabled: DEFAULT_NOTIFICATION_SETTINGS.slackEnabled,
+    discordWebhookUrl: null,
+    discordEnabled: DEFAULT_NOTIFICATION_SETTINGS.discordEnabled,
     githubPrCommentsEnabled: DEFAULT_NOTIFICATION_SETTINGS.githubPrCommentsEnabled,
     createdAt: null,
     updatedAt: null,
