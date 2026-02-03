@@ -503,5 +503,3 @@ function runMigrations() {
   }
 }
 
-// Initialize on first import
-initializeDatabase();

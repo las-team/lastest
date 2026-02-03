@@ -271,3 +271,56 @@ export async function getRunnersWithCapability(capability?: RunnerCapability): P
 
   return allRunners;
 }
+
+/**
+ * Mark stale runners as offline based on lastSeen timestamp
+ * Called on server startup and periodically to clean up runners
+ * that were marked online but haven't sent heartbeat
+ */
+export async function markStaleRunnersOffline(staleThresholdMs: number = 60_000): Promise<number> {
+  const staleThreshold = new Date(Date.now() - staleThresholdMs);
+
+  // Find all runners that are online/busy but haven't been seen recently
+  const staleRunners = await db
+    .select()
+    .from(runners)
+    .where(
+      and(
+        eq(runners.status, 'online'),
+      )
+    )
+    .all();
+
+  let markedOffline = 0;
+  for (const runner of staleRunners) {
+    // If lastSeen is null or older than threshold, mark offline
+    if (!runner.lastSeen || runner.lastSeen < staleThreshold) {
+      await db
+        .update(runners)
+        .set({ status: 'offline' })
+        .where(eq(runners.id, runner.id));
+      markedOffline++;
+      console.log(`[Stale Cleanup] Marked runner ${runner.id} (${runner.name}) as offline - lastSeen: ${runner.lastSeen?.toISOString() ?? 'never'}`);
+    }
+  }
+
+  // Also check busy runners
+  const busyRunners = await db
+    .select()
+    .from(runners)
+    .where(eq(runners.status, 'busy'))
+    .all();
+
+  for (const runner of busyRunners) {
+    if (!runner.lastSeen || runner.lastSeen < staleThreshold) {
+      await db
+        .update(runners)
+        .set({ status: 'offline' })
+        .where(eq(runners.id, runner.id));
+      markedOffline++;
+      console.log(`[Stale Cleanup] Marked busy runner ${runner.id} (${runner.name}) as offline - lastSeen: ${runner.lastSeen?.toISOString() ?? 'never'}`);
+    }
+  }
+
+  return markedOffline;
+}

@@ -215,11 +215,16 @@ async function waitForTestResult(
   while (Date.now() - startTime < timeout) {
     // Check for screenshots first (may arrive before result)
     const screenshots = getScreenshots(runnerId);
+    if (screenshots.length > 0) {
+      console.log(`[Executor] Got ${screenshots.length} screenshots for runner ${runnerId}`);
+    }
     for (const screenshot of screenshots) {
       if (screenshot.type === 'response:screenshot') {
         const payload = (screenshot as ScreenshotUploadResponse).payload;
+        console.log(`[Executor] Screenshot correlationId: ${payload.correlationId}, expected: ${commandId}`);
         if (payload.correlationId === commandId) {
           // Save screenshot to filesystem
+          console.log(`[Executor] Saving screenshot: ${payload.filename}`);
           await saveScreenshotFromBase64(payload.data, payload.filename, repositoryId);
         }
       }

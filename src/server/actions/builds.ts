@@ -698,10 +698,6 @@ async function sendBuildNotifications(data: {
   }
 
   // Send Discord notification
-  console.log('[Notifications] Discord settings:', {
-    enabled: notificationSettings.discordEnabled,
-    hasUrl: !!notificationSettings.discordWebhookUrl,
-  });
   if (notificationSettings.discordEnabled && notificationSettings.discordWebhookUrl) {
     try {
       const result = await sendDiscordNotification(notificationSettings.discordWebhookUrl, {

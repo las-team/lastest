@@ -42,6 +42,20 @@ pnpm test:visual --repo-id <id> [--base-url <url>] [--headless] [--output-dir <d
 
 Auto-captures `GITHUB_HEAD_REF`, `GITHUB_SHA` for git tracking. Exit code 1 on test failures.
 
+## Remote Runner CLI
+
+The `lastest2-runner` CLI manages a remote test execution runner:
+
+```bash
+lastest2-runner start -t <token> -s <server-url>  # Start as background daemon
+lastest2-runner stop                               # Stop the daemon
+lastest2-runner status                             # Show runner status
+lastest2-runner log [-f] [-n <lines>]              # View logs (-f to follow)
+lastest2-runner run -t <token> -s <server-url>    # Run in foreground
+```
+
+Config stored in `~/.lastest2/` (runner.pid, runner.log, runner.config.json).
+
 ## Architecture
 
 Visual regression testing platform built with Next.js 16 App Router.

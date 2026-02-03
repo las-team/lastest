@@ -238,6 +238,7 @@ export class RunnerClient {
       });
 
       // Upload screenshots
+      console.log(`Uploading ${result.screenshots.length} screenshots...`);
       for (const screenshot of result.screenshots) {
         const screenshotMsg = createMessage<ScreenshotUploadResponse>('response:screenshot', {
           correlationId: command.id,
@@ -248,6 +249,7 @@ export class RunnerClient {
           height: screenshot.height,
           capturedAt: Date.now(),
         });
+        console.log(`  Sending screenshot: ${screenshot.filename}`);
         await this.sendMessage(screenshotMsg);
       }
 

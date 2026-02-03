@@ -13,16 +13,20 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { validateRunnerToken, updateRunnerStatus } from '@/server/actions/runners';
+import { validateRunnerToken, updateRunnerStatus, markStaleRunnersOffline } from '@/server/actions/runners';
 // runnerRegistry is used for WebSocket mode (not polling mode)
 // import { runnerRegistry } from '@/lib/ws/runner-registry';
 import type { Message, HeartbeatMessage, TestResultResponse } from '@/lib/ws/protocol';
 
 // Track active polling sessions by runner ID
-const activeRunnerSessions = new Map<string, {
-  lastPoll: number;
-  sessionId: string;
-}>();
+// Use globalThis to ensure shared state across Next.js module contexts
+const globalSessionState = globalThis as typeof globalThis & {
+  __runnerActiveSessions?: Map<string, { lastPoll: number; sessionId: string }>;
+};
+if (!globalSessionState.__runnerActiveSessions) {
+  globalSessionState.__runnerActiveSessions = new Map<string, { lastPoll: number; sessionId: string }>();
+}
+const activeRunnerSessions = globalSessionState.__runnerActiveSessions;
 
 // Session timeout in milliseconds (30 seconds)
 const SESSION_TIMEOUT_MS = 30_000;
@@ -30,13 +34,36 @@ const SESSION_TIMEOUT_MS = 30_000;
 // Cleanup interval (60 seconds)
 const CLEANUP_INTERVAL_MS = 60_000;
 
-// Start cleanup interval to remove stale sessions
-setInterval(() => {
+// Mark stale runners offline on server startup
+markStaleRunnersOffline(SESSION_TIMEOUT_MS).then((count) => {
+  if (count > 0) {
+    console.log(`[Startup] Marked ${count} stale runner(s) as offline`);
+  }
+}).catch((error) => {
+  console.error('[Startup] Failed to mark stale runners offline:', error);
+});
+
+// Start cleanup interval to remove stale sessions and mark runners offline
+setInterval(async () => {
   const now = Date.now();
   for (const [runnerId, session] of activeRunnerSessions) {
     if (now - session.lastPoll > SESSION_TIMEOUT_MS) {
       activeRunnerSessions.delete(runnerId);
+      // Mark runner as offline in database
+      try {
+        await updateRunnerStatus(runnerId, 'offline');
+        console.log(`[Cleanup] Runner ${runnerId} marked offline (no heartbeat for ${SESSION_TIMEOUT_MS}ms)`);
+      } catch (error) {
+        console.error(`[Cleanup] Failed to mark runner ${runnerId} offline:`, error);
+      }
     }
+  }
+
+  // Also clean up any runners that might have been missed (e.g., server restart)
+  try {
+    await markStaleRunnersOffline(SESSION_TIMEOUT_MS);
+  } catch (error) {
+    console.error('[Cleanup] Failed to mark stale runners offline:', error);
   }
 }, CLEANUP_INTERVAL_MS);
 
@@ -116,6 +143,7 @@ export async function POST(request: NextRequest) {
 
       case 'response:screenshot': {
         // Handle screenshot upload
+        console.log(`[Screenshot] Received screenshot from runner ${runner.id}`);
         storeScreenshot(runner.id, message);
         return NextResponse.json({ ok: true });
       }
@@ -209,9 +237,26 @@ export async function GET(request: NextRequest) {
 
 // In-memory command queue (for polling mode)
 // In production, use Redis or database
-const pendingCommandsMap = new Map<string, Message[]>();
-const testResultsMap = new Map<string, TestResultResponse[]>();
-const screenshotsMap = new Map<string, Message[]>();
+// Use globalThis to ensure shared state across Next.js module contexts
+const globalState = globalThis as typeof globalThis & {
+  __runnerPendingCommands?: Map<string, Message[]>;
+  __runnerTestResults?: Map<string, TestResultResponse[]>;
+  __runnerScreenshots?: Map<string, Message[]>;
+};
+
+if (!globalState.__runnerPendingCommands) {
+  globalState.__runnerPendingCommands = new Map<string, Message[]>();
+}
+if (!globalState.__runnerTestResults) {
+  globalState.__runnerTestResults = new Map<string, TestResultResponse[]>();
+}
+if (!globalState.__runnerScreenshots) {
+  globalState.__runnerScreenshots = new Map<string, Message[]>();
+}
+
+const pendingCommandsMap = globalState.__runnerPendingCommands;
+const testResultsMap = globalState.__runnerTestResults;
+const screenshotsMap = globalState.__runnerScreenshots;
 
 function getPendingCommands(runnerId: string): Message[] {
   const commands = pendingCommandsMap.get(runnerId) || [];
