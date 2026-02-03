@@ -13,11 +13,16 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from '@/components/ui/collapsible';
 import { SelectorPriorityList } from './selector-priority-list';
 import { savePlaywrightSettings, resetPlaywrightSettings } from '@/server/actions/settings';
-import { DEFAULT_SELECTOR_PRIORITY } from '@/lib/db/schema';
-import type { SelectorConfig, PlaywrightSettings, HeadlessMode, RecordingEngine } from '@/lib/db/schema';
-import { Loader2, RotateCcw, List, Video, MousePointer, Pause, Clock, Layers } from 'lucide-react';
+import { DEFAULT_SELECTOR_PRIORITY, DEFAULT_STABILIZATION_SETTINGS } from '@/lib/db/schema';
+import type { SelectorConfig, PlaywrightSettings, HeadlessMode, RecordingEngine, StabilizationSettings } from '@/lib/db/schema';
+import { Loader2, RotateCcw, List, Video, MousePointer, Pause, Clock, Layers, ChevronDown, Shield, Hourglass, Type, Ban, Eye } from 'lucide-react';
 import { Slider } from '@/components/ui/slider';
 import { toast } from 'sonner';
 
@@ -53,6 +58,10 @@ export function PlaywrightSettingsCard({
   const [freezeAnimations, setFreezeAnimations] = useState(settings.freezeAnimations ?? false);
   const [screenshotDelay, setScreenshotDelay] = useState(settings.screenshotDelay ?? 0);
   const [maxParallelTests, setMaxParallelTests] = useState(settings.maxParallelTests ?? 1);
+  const [stabilization, setStabilization] = useState<StabilizationSettings>(
+    settings.stabilization || DEFAULT_STABILIZATION_SETTINGS
+  );
+  const [stabilizationOpen, setStabilizationOpen] = useState(false);
 
   const debounceRef = useRef<NodeJS.Timeout | null>(null);
 
@@ -71,6 +80,7 @@ export function PlaywrightSettingsCard({
     freezeAnimations: settings.freezeAnimations ?? false,
     screenshotDelay: settings.screenshotDelay ?? 0,
     maxParallelTests: settings.maxParallelTests ?? 1,
+    stabilization: settings.stabilization || DEFAULT_STABILIZATION_SETTINGS,
   });
 
   const doSave = useCallback(() => {
@@ -90,6 +100,7 @@ export function PlaywrightSettingsCard({
         freezeAnimations,
         screenshotDelay,
         maxParallelTests,
+        stabilization,
       });
       if (compact) {
         setShowSaved(true);
@@ -98,7 +109,7 @@ export function PlaywrightSettingsCard({
         toast.success('Playwright settings saved');
       }
     });
-  }, [repositoryId, selectorPriority, browser, viewportWidth, viewportHeight, headlessMode, navigationTimeout, actionTimeout, pointerGestures, cursorFPS, defaultRecordingEngine, freezeAnimations, screenshotDelay, maxParallelTests, compact]);
+  }, [repositoryId, selectorPriority, browser, viewportWidth, viewportHeight, headlessMode, navigationTimeout, actionTimeout, pointerGestures, cursorFPS, defaultRecordingEngine, freezeAnimations, screenshotDelay, maxParallelTests, stabilization, compact]);
 
   // Auto-save with debounce - only when values differ from original props
   useEffect(() => {
@@ -116,7 +127,8 @@ export function PlaywrightSettingsCard({
       defaultRecordingEngine !== orig.defaultRecordingEngine ||
       freezeAnimations !== orig.freezeAnimations ||
       screenshotDelay !== orig.screenshotDelay ||
-      maxParallelTests !== orig.maxParallelTests;
+      maxParallelTests !== orig.maxParallelTests ||
+      JSON.stringify(stabilization) !== JSON.stringify(orig.stabilization);
 
     if (!hasChanges) return;
 
@@ -133,7 +145,7 @@ export function PlaywrightSettingsCard({
         clearTimeout(debounceRef.current);
       }
     };
-  }, [selectorPriority, browser, viewportWidth, viewportHeight, headlessMode, navigationTimeout, actionTimeout, pointerGestures, cursorFPS, defaultRecordingEngine, freezeAnimations, screenshotDelay, maxParallelTests, doSave]);
+  }, [selectorPriority, browser, viewportWidth, viewportHeight, headlessMode, navigationTimeout, actionTimeout, pointerGestures, cursorFPS, defaultRecordingEngine, freezeAnimations, screenshotDelay, maxParallelTests, stabilization, doSave]);
 
   // Notify parent of save status changes
   useEffect(() => {
@@ -156,6 +168,7 @@ export function PlaywrightSettingsCard({
       setFreezeAnimations(false);
       setScreenshotDelay(0);
       setMaxParallelTests(1);
+      setStabilization(DEFAULT_STABILIZATION_SETTINGS);
       if (!compact) {
         toast.success('Playwright settings reset to defaults');
       }
@@ -297,6 +310,278 @@ export function PlaywrightSettingsCard({
             <span className="text-sm font-medium w-8 text-center">{maxParallelTests}</span>
           </div>
         </div>
+      )}
+
+      {/* Advanced Stabilization Settings */}
+      {!compact && (
+        <Collapsible open={stabilizationOpen} onOpenChange={setStabilizationOpen}>
+          <CollapsibleTrigger asChild>
+            <Button variant="ghost" className="w-full justify-between p-2 h-auto">
+              <div className="flex items-center gap-2">
+                <Shield className="w-4 h-4 text-muted-foreground" />
+                <span className="text-sm font-medium">Advanced Stabilization</span>
+              </div>
+              <ChevronDown className={`w-4 h-4 transition-transform ${stabilizationOpen ? 'rotate-180' : ''}`} />
+            </Button>
+          </CollapsibleTrigger>
+          <CollapsibleContent className="space-y-4 pt-2">
+            {/* Wait Strategies */}
+            <div className="space-y-3 border-l-2 border-muted pl-4">
+              <div className="flex items-center gap-2">
+                <Hourglass className="w-4 h-4 text-muted-foreground" />
+                <Label className="text-sm font-medium">Wait Strategies</Label>
+              </div>
+
+              {/* Network Idle */}
+              <div className="flex items-center justify-between">
+                <div className="space-y-0.5">
+                  <Label className="text-sm">Wait for Network Idle</Label>
+                  <p className="text-xs text-muted-foreground">Wait until no network requests for a period</p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Input
+                    type="number"
+                    min={0}
+                    max={30000}
+                    step={1000}
+                    value={stabilization.networkIdleTimeout}
+                    onChange={(e) => setStabilization({
+                      ...stabilization,
+                      networkIdleTimeout: Math.max(0, parseInt(e.target.value) || 5000)
+                    })}
+                    className="w-20"
+                    disabled={!stabilization.waitForNetworkIdle}
+                  />
+                  <span className="text-xs text-muted-foreground">ms</span>
+                  <Switch
+                    checked={stabilization.waitForNetworkIdle}
+                    onCheckedChange={(checked) => setStabilization({
+                      ...stabilization,
+                      waitForNetworkIdle: checked
+                    })}
+                  />
+                </div>
+              </div>
+
+              {/* DOM Stable */}
+              <div className="flex items-center justify-between">
+                <div className="space-y-0.5">
+                  <Label className="text-sm">Wait for DOM Stable</Label>
+                  <p className="text-xs text-muted-foreground">Wait until DOM mutations stop</p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Input
+                    type="number"
+                    min={0}
+                    max={10000}
+                    step={500}
+                    value={stabilization.domStableTimeout}
+                    onChange={(e) => setStabilization({
+                      ...stabilization,
+                      domStableTimeout: Math.max(0, parseInt(e.target.value) || 2000)
+                    })}
+                    className="w-20"
+                    disabled={!stabilization.waitForDomStable}
+                  />
+                  <span className="text-xs text-muted-foreground">ms</span>
+                  <Switch
+                    checked={stabilization.waitForDomStable}
+                    onCheckedChange={(checked) => setStabilization({
+                      ...stabilization,
+                      waitForDomStable: checked
+                    })}
+                  />
+                </div>
+              </div>
+
+              {/* Wait for Fonts */}
+              <div className="flex items-center justify-between">
+                <div className="space-y-0.5">
+                  <Label className="text-sm">Wait for Fonts</Label>
+                  <p className="text-xs text-muted-foreground">Wait for web fonts to load</p>
+                </div>
+                <Switch
+                  checked={stabilization.waitForFonts}
+                  onCheckedChange={(checked) => setStabilization({
+                    ...stabilization,
+                    waitForFonts: checked
+                  })}
+                />
+              </div>
+            </div>
+
+            {/* Content Freezing */}
+            <div className="space-y-3 border-l-2 border-muted pl-4">
+              <div className="flex items-center gap-2">
+                <Pause className="w-4 h-4 text-muted-foreground" />
+                <Label className="text-sm font-medium">Content Freezing</Label>
+              </div>
+
+              {/* Freeze Timestamps */}
+              <div className="flex items-center justify-between">
+                <div className="space-y-0.5">
+                  <Label className="text-sm">Freeze Timestamps</Label>
+                  <p className="text-xs text-muted-foreground">Use a fixed Date.now() value</p>
+                </div>
+                <Switch
+                  checked={stabilization.freezeTimestamps}
+                  onCheckedChange={(checked) => setStabilization({
+                    ...stabilization,
+                    freezeTimestamps: checked
+                  })}
+                />
+              </div>
+              {stabilization.freezeTimestamps && (
+                <div className="flex items-center gap-2 pl-4">
+                  <Label className="text-xs">Fixed timestamp:</Label>
+                  <Input
+                    type="text"
+                    value={stabilization.frozenTimestamp}
+                    onChange={(e) => setStabilization({
+                      ...stabilization,
+                      frozenTimestamp: e.target.value
+                    })}
+                    className="flex-1"
+                    placeholder="2024-01-01T12:00:00Z"
+                  />
+                </div>
+              )}
+
+              {/* Freeze Random */}
+              <div className="flex items-center justify-between">
+                <div className="space-y-0.5">
+                  <Label className="text-sm">Freeze Math.random()</Label>
+                  <p className="text-xs text-muted-foreground">Use seeded pseudo-random values</p>
+                </div>
+                <Switch
+                  checked={stabilization.freezeRandomValues}
+                  onCheckedChange={(checked) => setStabilization({
+                    ...stabilization,
+                    freezeRandomValues: checked
+                  })}
+                />
+              </div>
+              {stabilization.freezeRandomValues && (
+                <div className="flex items-center gap-2 pl-4">
+                  <Label className="text-xs">Seed:</Label>
+                  <Input
+                    type="number"
+                    value={stabilization.randomSeed}
+                    onChange={(e) => setStabilization({
+                      ...stabilization,
+                      randomSeed: parseInt(e.target.value) || 12345
+                    })}
+                    className="w-24"
+                  />
+                </div>
+              )}
+            </div>
+
+            {/* Third-Party Handling */}
+            <div className="space-y-3 border-l-2 border-muted pl-4">
+              <div className="flex items-center gap-2">
+                <Ban className="w-4 h-4 text-muted-foreground" />
+                <Label className="text-sm font-medium">Third-Party Handling</Label>
+              </div>
+
+              {/* Block Third Party */}
+              <div className="flex items-center justify-between">
+                <div className="space-y-0.5">
+                  <Label className="text-sm">Block Third-Party Scripts</Label>
+                  <p className="text-xs text-muted-foreground">Block external domain requests</p>
+                </div>
+                <Switch
+                  checked={stabilization.blockThirdParty}
+                  onCheckedChange={(checked) => setStabilization({
+                    ...stabilization,
+                    blockThirdParty: checked
+                  })}
+                />
+              </div>
+              {stabilization.blockThirdParty && (
+                <div className="space-y-2 pl-4">
+                  <Label className="text-xs">Allowed domains (comma separated):</Label>
+                  <Input
+                    type="text"
+                    value={stabilization.allowedDomains.join(', ')}
+                    onChange={(e) => setStabilization({
+                      ...stabilization,
+                      allowedDomains: e.target.value.split(',').map(d => d.trim()).filter(Boolean)
+                    })}
+                    placeholder="analytics.example.com, cdn.example.com"
+                  />
+                </div>
+              )}
+
+              {/* Mock Images */}
+              <div className="flex items-center justify-between">
+                <div className="space-y-0.5">
+                  <Label className="text-sm">Mock Third-Party Images</Label>
+                  <p className="text-xs text-muted-foreground">Replace with placeholders</p>
+                </div>
+                <Switch
+                  checked={stabilization.mockThirdPartyImages}
+                  onCheckedChange={(checked) => setStabilization({
+                    ...stabilization,
+                    mockThirdPartyImages: checked
+                  })}
+                />
+              </div>
+            </div>
+
+            {/* Loading Indicators */}
+            <div className="space-y-3 border-l-2 border-muted pl-4">
+              <div className="flex items-center gap-2">
+                <Eye className="w-4 h-4 text-muted-foreground" />
+                <Label className="text-sm font-medium">Loading Indicators</Label>
+              </div>
+
+              {/* Hide Spinners */}
+              <div className="flex items-center justify-between">
+                <div className="space-y-0.5">
+                  <Label className="text-sm">Hide Loading Spinners</Label>
+                  <p className="text-xs text-muted-foreground">CSS hide common loading indicators</p>
+                </div>
+                <Switch
+                  checked={stabilization.hideLoadingIndicators}
+                  onCheckedChange={(checked) => setStabilization({
+                    ...stabilization,
+                    hideLoadingIndicators: checked
+                  })}
+                />
+              </div>
+              {stabilization.hideLoadingIndicators && (
+                <div className="space-y-2 pl-4">
+                  <Label className="text-xs">Custom selectors (comma separated):</Label>
+                  <Input
+                    type="text"
+                    value={stabilization.loadingSelectors.join(', ')}
+                    onChange={(e) => setStabilization({
+                      ...stabilization,
+                      loadingSelectors: e.target.value.split(',').map(s => s.trim()).filter(Boolean)
+                    })}
+                    placeholder=".my-custom-loader, #loading-overlay"
+                  />
+                </div>
+              )}
+
+              {/* Disable Webfonts */}
+              <div className="flex items-center justify-between">
+                <div className="space-y-0.5">
+                  <Label className="text-sm">Force System Fonts</Label>
+                  <p className="text-xs text-muted-foreground">Use system fonts only (prevents FOUC)</p>
+                </div>
+                <Switch
+                  checked={stabilization.disableWebfonts}
+                  onCheckedChange={(checked) => setStabilization({
+                    ...stabilization,
+                    disableWebfonts: checked
+                  })}
+                />
+              </div>
+            </div>
+          </CollapsibleContent>
+        </Collapsible>
       )}
 
       {/* Browser Settings */}

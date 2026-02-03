@@ -14,6 +14,7 @@ check the recorder and the runner so that they are compatible and identify the r
 ## test
 OCR
 GitHub PR Comments - CLI runner
+Snapshot Stabilization Engine
 ## features
 Github actions integration
 Publish lastest runner to npx npm

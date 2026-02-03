@@ -40,6 +40,7 @@ import {
   DEFAULT_AI_SETTINGS,
   DEFAULT_RECORDING_ENGINES,
   DEFAULT_NOTIFICATION_SETTINGS,
+  DEFAULT_STABILIZATION_SETTINGS,
 } from './schema';
 import type {
   NewFunctionalArea,
@@ -683,6 +684,7 @@ export async function getPlaywrightSettings(repositoryId?: string | null) {
         selectorPriority: mergeSelectorPriority(settings.selectorPriority),
         enabledRecordingEngines: settings.enabledRecordingEngines ?? DEFAULT_RECORDING_ENGINES,
         defaultRecordingEngine: settings.defaultRecordingEngine ?? 'lastest',
+        stabilization: settings.stabilization ?? DEFAULT_STABILIZATION_SETTINGS,
       };
     }
   }
@@ -700,6 +702,7 @@ export async function getPlaywrightSettings(repositoryId?: string | null) {
       selectorPriority: mergeSelectorPriority(globalSettings.selectorPriority),
       enabledRecordingEngines: globalSettings.enabledRecordingEngines ?? DEFAULT_RECORDING_ENGINES,
       defaultRecordingEngine: globalSettings.defaultRecordingEngine ?? 'lastest',
+      stabilization: globalSettings.stabilization ?? DEFAULT_STABILIZATION_SETTINGS,
     };
   }
 
@@ -721,6 +724,7 @@ export async function getPlaywrightSettings(repositoryId?: string | null) {
     freezeAnimations: false,
     screenshotDelay: 0,
     maxParallelTests: 1,
+    stabilization: DEFAULT_STABILIZATION_SETTINGS,
     createdAt: null,
     updatedAt: null,
   };

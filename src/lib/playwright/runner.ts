@@ -5,9 +5,10 @@ import path from 'path';
 import fs from 'fs';
 import crypto from 'crypto';
 import AxeBuilder from '@axe-core/playwright';
-import { DEFAULT_SELECTOR_PRIORITY } from '@/lib/db/schema';
-import type { A11yViolation } from '@/lib/db/schema';
+import { DEFAULT_SELECTOR_PRIORITY, DEFAULT_STABILIZATION_SETTINGS } from '@/lib/db/schema';
+import type { A11yViolation, StabilizationSettings } from '@/lib/db/schema';
 import { getSelectorStats, recordSelectorSuccess, recordSelectorFailure } from '@/lib/db/queries';
+import { setupFreezeScripts, setupThirdPartyBlocking, applyStabilization } from './stabilization';
 
 /**
  * Create appState helper for internal state inspection.
@@ -470,6 +471,10 @@ export class PlaywrightRunner extends EventEmitter {
     return this.settings?.maxParallelTests || 1;
   }
 
+  private getStabilizationSettings(): StabilizationSettings {
+    return this.settings?.stabilization || DEFAULT_STABILIZATION_SETTINGS;
+  }
+
   async runTests(
     tests: Test[],
     runId: string,
@@ -680,6 +685,16 @@ export class PlaywrightRunner extends EventEmitter {
       });
       page = await context.newPage();
 
+      // Get stabilization settings
+      const stabilization = this.getStabilizationSettings();
+
+      // Setup freeze scripts BEFORE navigation (must be added as init scripts)
+      await setupFreezeScripts(page, stabilization);
+
+      // Setup third-party blocking if enabled
+      const targetUrl = test.targetUrl || this.environmentConfig?.baseUrl || 'http://localhost:3000';
+      await setupThirdPartyBlocking(page, targetUrl, stabilization);
+
       // Freeze CSS animations/transitions if enabled
       if (this.settings?.freezeAnimations) {
         await page.addStyleTag({ content: FREEZE_ANIMATIONS_CSS });
@@ -728,6 +743,9 @@ export class PlaywrightRunner extends EventEmitter {
         get: (target, prop) => {
           if (prop === 'screenshot') {
             return async (options?: Record<string, unknown>) => {
+              // Apply stabilization before screenshot
+              await applyStabilization(target, targetUrl, stabilization);
+
               // Apply screenshot delay for visual stabilization
               if (screenshotDelay > 0) {
                 await target.waitForTimeout(screenshotDelay);
@@ -794,6 +812,11 @@ export class PlaywrightRunner extends EventEmitter {
 
       // Only take a fallback success screenshot if no screenshots were captured during the test
       if (capturedScreenshots.length === 0) {
+        // Apply stabilization before fallback screenshot
+        await applyStabilization(page, targetUrl, stabilization);
+        if (screenshotDelay > 0) {
+          await page.waitForTimeout(screenshotDelay);
+        }
         const screenshotFilename = `${runId}-${test.id}-success.png`;
         const screenshotPath = path.join(this.screenshotDir, screenshotFilename);
         await page.screenshot({ path: screenshotPath, fullPage: true });

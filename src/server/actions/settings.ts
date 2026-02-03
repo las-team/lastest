@@ -1,7 +1,7 @@
 'use server';
 
 import * as queries from '@/lib/db/queries';
-import type { SelectorConfig, RecordingEngine } from '@/lib/db/schema';
+import type { SelectorConfig, RecordingEngine, StabilizationSettings } from '@/lib/db/schema';
 import { revalidatePath } from 'next/cache';
 
 export async function getPlaywrightSettings(repositoryId?: string | null) {
@@ -24,6 +24,7 @@ export async function savePlaywrightSettings(data: {
   freezeAnimations?: boolean;
   screenshotDelay?: number;
   maxParallelTests?: number;
+  stabilization?: StabilizationSettings;
 }) {
   const { repositoryId, ...settingsData } = data;
 

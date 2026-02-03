@@ -246,6 +246,53 @@ export type NewIgnoreRegion = typeof ignoreRegions.$inferInsert;
 // Headless mode options: 'true' (standard headless), 'false' (headed), 'shell' (new headless mode with better bot detection avoidance)
 export type HeadlessMode = 'true' | 'false' | 'shell';
 
+// Stabilization settings for flaky test prevention
+export interface StabilizationSettings {
+  // Wait strategies
+  waitForNetworkIdle: boolean;      // Wait for no network activity (default: true)
+  networkIdleTimeout: number;       // Max wait time in ms (default: 5000)
+  waitForDomStable: boolean;        // Wait for DOM mutations to stop (default: true)
+  domStableTimeout: number;         // Max wait time in ms (default: 2000)
+
+  // Content freezing
+  freezeTimestamps: boolean;        // Replace Date.now(), new Date() (default: true)
+  frozenTimestamp: string;          // ISO timestamp to use (default: "2024-01-01T12:00:00Z")
+  freezeRandomValues: boolean;      // Seed Math.random() (default: true)
+  randomSeed: number;               // Seed value (default: 12345)
+
+  // Third-party handling
+  blockThirdParty: boolean;         // Block external domains (default: false)
+  allowedDomains: string[];         // Whitelist (default: [])
+  mockThirdPartyImages: boolean;    // Replace with placeholders (default: true)
+
+  // Spinner/loader handling
+  hideLoadingIndicators: boolean;   // CSS hide common spinners (default: true)
+  loadingSelectors: string[];       // Custom selectors to wait for removal
+
+  // Style stabilization
+  waitForFonts: boolean;            // Wait for font loading (default: true)
+  disableWebfonts: boolean;         // Use system fonts only (default: false)
+}
+
+// Default stabilization settings
+export const DEFAULT_STABILIZATION_SETTINGS: StabilizationSettings = {
+  waitForNetworkIdle: true,
+  networkIdleTimeout: 5000,
+  waitForDomStable: true,
+  domStableTimeout: 2000,
+  freezeTimestamps: true,
+  frozenTimestamp: '2024-01-01T12:00:00Z',
+  freezeRandomValues: true,
+  randomSeed: 12345,
+  blockThirdParty: false,
+  allowedDomains: [],
+  mockThirdPartyImages: true,
+  hideLoadingIndicators: true,
+  loadingSelectors: [],
+  waitForFonts: true,
+  disableWebfonts: false,
+};
+
 // Recording engine options
 export type RecordingEngine = 'lastest' | 'playwright-inspector';
 export const DEFAULT_RECORDING_ENGINES: RecordingEngine[] = ['lastest', 'playwright-inspector'];
@@ -268,6 +315,7 @@ export const playwrightSettings = sqliteTable('playwright_settings', {
   freezeAnimations: integer('freeze_animations', { mode: 'boolean' }).default(false), // freeze CSS animations/transitions
   screenshotDelay: integer('screenshot_delay').default(0), // ms delay before screenshot
   maxParallelTests: integer('max_parallel_tests').default(1), // max tests to run in parallel locally
+  stabilization: text('stabilization', { mode: 'json' }).$type<StabilizationSettings>(), // snapshot stabilization settings
   createdAt: integer('created_at', { mode: 'timestamp' }),
   updatedAt: integer('updated_at', { mode: 'timestamp' }),
 });
