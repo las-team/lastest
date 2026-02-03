@@ -11,6 +11,13 @@ Excalidraw tests: ~/.claude/plans/recursive-wondering-dongarra.md
 ## reuse
 check the recorder and the runner so that they are compatible and identify the root cause of the issue
 ## in progress
+Login and user management
+Users should be able to login with email/pass (forgot pass reminder email) and social (gh, google) 
+first user should be admin
+in ui should be able to add more users that share the same instance, see the same tests, settings, etc... 
+plan for cloud usage when multiple teams would use 1 server so RLS would be relevant on the DB level
+Later there will potentially be roles introduced
+
 ## test
 OCR
 GitHub PR Comments - CLI runner
@@ -20,17 +27,15 @@ Animation Freezing
 Screenshot Stabilization Delay       
 
 ## features
-Login and user management
-
-Execution local client and cloud ~/.claude/plans/cozy-sniffing-hopcroft.md  
+please Execution local client and cloud ~/.claude/plans/cozy-sniffing-hopcroft.md  
 Electron app ~/.claude/plans/rippling-roaming-snail.md
 Github actions integration
 
 VS Code extension
 npm/CLI one-liner install
 
-Percy catchup ~/.claude/plans/staged-seeking-lecun.md 
-Chromatic catchup ~/.claude/plans/rustling-launching-kitten.md     
+├── Days 1-2: Diff comments (P2)
+└── Days 3-5: GitLab integration (P2)
 
 UI & UX 
     Use the frontend design skill and subagent for this

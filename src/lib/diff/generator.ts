@@ -118,70 +118,96 @@ export function imagesMatch(path1: string, path2: string, threshold = 0.1): bool
 /**
  * Find rectangular regions of changes in the diff data
  */
+/**
+ * Find changed regions using a grid-based approach.
+ * Divides image into cells, marks cells with enough diff pixels,
+ * then groups adjacent cells into regions. This prevents sparse
+ * scattered changes from merging into one giant region.
+ */
 function findChangedRegions(diffData: Buffer, width: number, height: number): Rectangle[] {
-  const regions: Rectangle[] = [];
-  const visited = new Set<string>();
+  const CELL_SIZE = 32; // Grid cell size in pixels
+  const CELL_THRESHOLD = 0.05; // 5% of cell pixels must differ to mark cell as changed
+  const GAP_TOLERANCE = 1; // Adjacent cells within this gap are grouped together
+
+  const cellsX = Math.ceil(width / CELL_SIZE);
+  const cellsY = Math.ceil(height / CELL_SIZE);
+
+  // Count diff pixels per cell
+  const cellCounts: number[][] = Array.from({ length: cellsY }, () => Array(cellsX).fill(0));
 
   for (let y = 0; y < height; y++) {
     for (let x = 0; x < width; x++) {
-      const key = `${x},${y}`;
-      if (visited.has(key)) continue;
-
       const pixelIndex = (y * width + x) * 4;
       const alpha = diffData[pixelIndex + 3];
-
       if (alpha > 0) {
-        const region = floodFillRegion(diffData, width, height, x, y, visited);
-        if (region.width > 5 && region.height > 5) {
-          regions.push(region);
+        const cellX = Math.floor(x / CELL_SIZE);
+        const cellY = Math.floor(y / CELL_SIZE);
+        cellCounts[cellY][cellX]++;
+      }
+    }
+  }
+
+  // Mark cells as changed if they exceed threshold
+  const changedCells: boolean[][] = cellCounts.map((row, cy) =>
+    row.map((count, cx) => {
+      const cellWidth = Math.min(CELL_SIZE, width - cx * CELL_SIZE);
+      const cellHeight = Math.min(CELL_SIZE, height - cy * CELL_SIZE);
+      const cellPixels = cellWidth * cellHeight;
+      return count / cellPixels >= CELL_THRESHOLD;
+    })
+  );
+
+  // Group adjacent changed cells into regions using flood fill on the grid
+  const visited = new Set<string>();
+  const regions: Rectangle[] = [];
+
+  for (let cy = 0; cy < cellsY; cy++) {
+    for (let cx = 0; cx < cellsX; cx++) {
+      if (!changedCells[cy][cx] || visited.has(`${cx},${cy}`)) continue;
+
+      // Flood fill on grid cells with gap tolerance
+      const stack = [{ cx, cy }];
+      let minCX = cx, maxCX = cx, minCY = cy, maxCY = cy;
+
+      while (stack.length > 0) {
+        const { cx: x, cy: y } = stack.pop()!;
+        const key = `${x},${y}`;
+
+        if (visited.has(key)) continue;
+        if (x < 0 || x >= cellsX || y < 0 || y >= cellsY) continue;
+        if (!changedCells[y][x]) continue;
+
+        visited.add(key);
+        minCX = Math.min(minCX, x);
+        maxCX = Math.max(maxCX, x);
+        minCY = Math.min(minCY, y);
+        maxCY = Math.max(maxCY, y);
+
+        // Check neighbors within gap tolerance
+        for (let dy = -GAP_TOLERANCE - 1; dy <= GAP_TOLERANCE + 1; dy++) {
+          for (let dx = -GAP_TOLERANCE - 1; dx <= GAP_TOLERANCE + 1; dx++) {
+            if (dx === 0 && dy === 0) continue;
+            stack.push({ cx: x + dx, cy: y + dy });
+          }
         }
+      }
+
+      // Convert cell coordinates back to pixel coordinates
+      const region: Rectangle = {
+        x: minCX * CELL_SIZE,
+        y: minCY * CELL_SIZE,
+        width: Math.min((maxCX + 1) * CELL_SIZE, width) - minCX * CELL_SIZE,
+        height: Math.min((maxCY + 1) * CELL_SIZE, height) - minCY * CELL_SIZE,
+      };
+
+      // Only include regions larger than minimum size
+      if (region.width > 10 && region.height > 10) {
+        regions.push(region);
       }
     }
   }
 
   return regions;
-}
-
-/**
- * Flood fill to find connected diff region
- */
-function floodFillRegion(
-  diffData: Buffer,
-  width: number,
-  height: number,
-  startX: number,
-  startY: number,
-  visited: Set<string>
-): Rectangle {
-  const stack = [{ x: startX, y: startY }];
-  let minX = startX, maxX = startX, minY = startY, maxY = startY;
-
-  while (stack.length > 0) {
-    const { x, y } = stack.pop()!;
-    const key = `${x},${y}`;
-
-    if (visited.has(key) || x < 0 || x >= width || y < 0 || y >= height) continue;
-
-    const pixelIndex = (y * width + x) * 4;
-    const alpha = diffData[pixelIndex + 3];
-
-    if (alpha === 0) continue;
-
-    visited.add(key);
-    minX = Math.min(minX, x);
-    maxX = Math.max(maxX, x);
-    minY = Math.min(minY, y);
-    maxY = Math.max(maxY, y);
-
-    stack.push({ x: x + 1, y }, { x: x - 1, y }, { x, y: y + 1 }, { x, y: y - 1 });
-  }
-
-  return {
-    x: minX,
-    y: minY,
-    width: maxX - minX + 1,
-    height: maxY - minY + 1,
-  };
 }
 
 /**
