@@ -16,15 +16,11 @@
  */
 
 import { db } from '../src/lib/db';
-import { tests, testVersions, repositories } from '../src/lib/db/schema';
-import { eq } from 'drizzle-orm';
+import { tests, testVersions } from '../src/lib/db/schema';
 import { v4 as uuid } from 'uuid';
 
-const EXCALIDRAW_REPO_NAME = 'ewyct/excalidraw_test';
+const LASTEST2_REPO_ID = '0d881179-1fed-4a44-bcbd-30809e3de39b';
 const EXCALIDRAW_URL = 'https://excalidraw.com';
-
-// Will be set dynamically
-let REPO_ID: string;
 
 // Common test helpers template
 const TEST_HELPERS = `import { Page } from 'playwright';
@@ -641,18 +637,7 @@ const TEST_DEFINITIONS = [
 ];
 
 async function seed() {
-  // Look up repository by name
-  const repo = await db.select().from(repositories).where(eq(repositories.fullName, EXCALIDRAW_REPO_NAME)).get();
-
-  if (!repo) {
-    console.error(`❌ Repository "${EXCALIDRAW_REPO_NAME}" not found in database.`);
-    console.error('   Please add the repository first via the UI, then run this script again.');
-    process.exit(1);
-  }
-
-  REPO_ID = repo.id;
-  console.log(`Found repository: ${EXCALIDRAW_REPO_NAME} (${REPO_ID})`);
-  console.log('Seeding Excalidraw tests...\n');
+  console.log('Seeding Excalidraw tests for lastest2 repository...\n');
 
   const now = new Date();
 
@@ -662,7 +647,7 @@ async function seed() {
 
     await db.insert(tests).values({
       id: testId,
-      repositoryId: REPO_ID,
+      repositoryId: LASTEST2_REPO_ID,
       functionalAreaId: null,
       name: def.name,
       code: fullCode,

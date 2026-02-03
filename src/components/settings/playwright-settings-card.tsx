@@ -17,8 +17,9 @@ import { SelectorPriorityList } from './selector-priority-list';
 import { savePlaywrightSettings, resetPlaywrightSettings } from '@/server/actions/settings';
 import { DEFAULT_SELECTOR_PRIORITY } from '@/lib/db/schema';
 import type { SelectorConfig, PlaywrightSettings, HeadlessMode, RecordingEngine } from '@/lib/db/schema';
-import { Loader2, RotateCcw, Save, List, Video, MousePointer, Check, Pause, Clock, Layers } from 'lucide-react';
+import { Loader2, RotateCcw, List, Video, MousePointer, Pause, Clock, Layers } from 'lucide-react';
 import { Slider } from '@/components/ui/slider';
+import { toast } from 'sonner';
 
 interface PlaywrightSettingsCardProps {
   settings: PlaywrightSettings;
@@ -78,13 +79,14 @@ export function PlaywrightSettingsCard({
       if (compact) {
         setShowSaved(true);
         setTimeout(() => setShowSaved(false), 1500);
+      } else {
+        toast.success('Playwright settings saved');
       }
     });
   }, [repositoryId, selectorPriority, browser, viewportWidth, viewportHeight, headlessMode, navigationTimeout, actionTimeout, pointerGestures, cursorFPS, defaultRecordingEngine, freezeAnimations, screenshotDelay, maxParallelTests, compact]);
 
-  // Auto-save in compact mode with debounce
+  // Auto-save with debounce
   useEffect(() => {
-    if (!compact) return;
     if (isInitialMount.current) {
       isInitialMount.current = false;
       return;
@@ -103,16 +105,12 @@ export function PlaywrightSettingsCard({
         clearTimeout(debounceRef.current);
       }
     };
-  }, [compact, selectorPriority, browser, viewportWidth, viewportHeight, headlessMode, navigationTimeout, actionTimeout, pointerGestures, cursorFPS, defaultRecordingEngine, freezeAnimations, screenshotDelay, maxParallelTests, doSave]);
+  }, [selectorPriority, browser, viewportWidth, viewportHeight, headlessMode, navigationTimeout, actionTimeout, pointerGestures, cursorFPS, defaultRecordingEngine, freezeAnimations, screenshotDelay, maxParallelTests, doSave]);
 
   // Notify parent of save status changes
   useEffect(() => {
     onSaveStatusChange?.({ isPending, showSaved });
   }, [isPending, showSaved, onSaveStatusChange]);
-
-  const handleSave = () => {
-    doSave();
-  };
 
   const handleReset = () => {
     startTransition(async () => {
@@ -130,6 +128,9 @@ export function PlaywrightSettingsCard({
       setFreezeAnimations(false);
       setScreenshotDelay(0);
       setMaxParallelTests(1);
+      if (!compact) {
+        toast.success('Playwright settings reset to defaults');
+      }
     });
   };
 
@@ -357,20 +358,16 @@ export function PlaywrightSettingsCard({
         </>
       )}
 
-      {/* Actions - hidden in compact mode (auto-save) */}
+      {/* Reset button - hidden in compact mode */}
       {!compact && (
         <div className="flex gap-2 pt-2">
-          <Button onClick={handleSave} disabled={isPending}>
+          <Button variant="outline" onClick={handleReset} disabled={isPending}>
             {isPending ? (
               <Loader2 className="w-4 h-4 mr-2 animate-spin" />
             ) : (
-              <Save className="w-4 h-4 mr-2" />
+              <RotateCcw className="w-4 h-4 mr-2" />
             )}
-            Save Settings
-          </Button>
-          <Button variant="outline" onClick={handleReset} disabled={isPending}>
-            <RotateCcw className="w-4 h-4 mr-2" />
-            Reset
+            Reset to Defaults
           </Button>
         </div>
       )}

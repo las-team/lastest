@@ -17,8 +17,8 @@ OCR
 GitHub PR Comments - CLI runner   
 
 ## features
-Electron app ~/.claude/plans/rippling-roaming-snail.md
 Github actions integration
+runner security
 
 Publish lastest runner to npx npm
 User email sending with resend
@@ -34,7 +34,7 @@ UI & UX
     make sure every page has a clear primary action if there are more than one. If you cant decide ask me a question about it
 
 Fix compare and branch selection
-
+Electron app ~/.claude/plans/rippling-roaming-snail.md
 ## ideas
 Tooltip: Did you know tests are getting faster as selectors are optimized to save runtime?
 Build/change approval

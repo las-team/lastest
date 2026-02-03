@@ -1,14 +1,14 @@
 'use client';
 
-import { useState, useTransition } from 'react';
+import { useState, useTransition, useEffect, useRef, useCallback } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import { saveNotificationSettings } from '@/server/actions/settings';
 import type { NotificationSettings } from '@/lib/db/schema';
-import { Loader2, Save, Bell, MessageSquare } from 'lucide-react';
+import { Bell, MessageSquare } from 'lucide-react';
+import { toast } from 'sonner';
 
 interface NotificationSettingsCardProps {
   settings: NotificationSettings;
@@ -21,7 +21,7 @@ export function NotificationSettingsCard({
   repositoryId,
   hasGithubAccount,
 }: NotificationSettingsCardProps) {
-  const [isPending, startTransition] = useTransition();
+  const [, startTransition] = useTransition();
   const [slackWebhookUrl, setSlackWebhookUrl] = useState(settings.slackWebhookUrl || '');
   const [slackEnabled, setSlackEnabled] = useState(settings.slackEnabled || false);
   const [discordWebhookUrl, setDiscordWebhookUrl] = useState(settings.discordWebhookUrl || '');
@@ -30,7 +30,10 @@ export function NotificationSettingsCard({
     settings.githubPrCommentsEnabled || false
   );
 
-  const handleSave = () => {
+  const isInitialMount = useRef(true);
+  const debounceRef = useRef<NodeJS.Timeout | null>(null);
+
+  const doSave = useCallback(() => {
     startTransition(async () => {
       await saveNotificationSettings({
         repositoryId,
@@ -40,8 +43,31 @@ export function NotificationSettingsCard({
         discordEnabled,
         githubPrCommentsEnabled,
       });
+      toast.success('Notification settings saved');
     });
-  };
+  }, [repositoryId, slackWebhookUrl, slackEnabled, discordWebhookUrl, discordEnabled, githubPrCommentsEnabled]);
+
+  // Auto-save with debounce
+  useEffect(() => {
+    if (isInitialMount.current) {
+      isInitialMount.current = false;
+      return;
+    }
+
+    if (debounceRef.current) {
+      clearTimeout(debounceRef.current);
+    }
+
+    debounceRef.current = setTimeout(() => {
+      doSave();
+    }, 500);
+
+    return () => {
+      if (debounceRef.current) {
+        clearTimeout(debounceRef.current);
+      }
+    };
+  }, [slackWebhookUrl, slackEnabled, discordWebhookUrl, discordEnabled, githubPrCommentsEnabled, doSave]);
 
   return (
     <Card>
@@ -146,17 +172,6 @@ export function NotificationSettingsCard({
           )}
         </div>
 
-        {/* Actions */}
-        <div className="flex gap-2 pt-2">
-          <Button onClick={handleSave} disabled={isPending}>
-            {isPending ? (
-              <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-            ) : (
-              <Save className="w-4 h-4 mr-2" />
-            )}
-            Save
-          </Button>
-        </div>
       </CardContent>
     </Card>
   );

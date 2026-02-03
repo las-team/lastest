@@ -85,9 +85,9 @@ export class RunnerClient {
       });
 
       if (response.status === 409) {
-        const data = await response.json();
+        const data = await response.json() as { error?: string };
         console.error('❌ Connection rejected: another runner instance is already connected with this token');
-        console.error(`   ${data.error}`);
+        console.error(`   ${data.error ?? 'Unknown error'}`);
         return false;
       }
 
@@ -159,12 +159,14 @@ export class RunnerClient {
 
           // Process any pending commands
           if (data.commands && data.commands.length > 0) {
+            console.log(`[Heartbeat] Received ${data.commands.length} commands:`, data.commands.map((c: Message) => c.type));
             for (const cmd of data.commands) {
               await this.handleCommand(cmd);
             }
           }
         } else {
-          console.error(`Heartbeat failed: ${response.status}`);
+          const text = await response.text();
+          console.error(`Heartbeat failed: ${response.status} - ${text}`);
         }
       } catch (error) {
         console.error('Heartbeat error:', error);

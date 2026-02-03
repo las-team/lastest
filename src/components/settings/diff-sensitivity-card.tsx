@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useTransition } from 'react';
+import { useState, useTransition, useEffect, useRef, useCallback } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -9,7 +9,8 @@ import { Switch } from '@/components/ui/switch';
 import { saveDiffSensitivitySettings, resetDiffSensitivitySettings } from '@/server/actions/settings';
 import type { DiffSensitivitySettings } from '@/lib/db/schema';
 import { DEFAULT_DIFF_THRESHOLDS } from '@/lib/db/schema';
-import { Loader2, Save, RotateCcw, Eye } from 'lucide-react';
+import { Loader2, RotateCcw, Eye } from 'lucide-react';
+import { toast } from 'sonner';
 
 interface DiffSensitivityCardProps {
   settings: DiffSensitivitySettings;
@@ -31,7 +32,10 @@ export function DiffSensitivityCard({
     settings.includeAntiAliasing ?? DEFAULT_DIFF_THRESHOLDS.includeAntiAliasing
   );
 
-  const handleSave = () => {
+  const isInitialMount = useRef(true);
+  const debounceRef = useRef<NodeJS.Timeout | null>(null);
+
+  const doSave = useCallback(() => {
     startTransition(async () => {
       await saveDiffSensitivitySettings({
         repositoryId,
@@ -39,8 +43,31 @@ export function DiffSensitivityCard({
         flakyThreshold,
         includeAntiAliasing,
       });
+      toast.success('Diff sensitivity settings saved');
     });
-  };
+  }, [repositoryId, unchangedThreshold, flakyThreshold, includeAntiAliasing]);
+
+  // Auto-save with debounce
+  useEffect(() => {
+    if (isInitialMount.current) {
+      isInitialMount.current = false;
+      return;
+    }
+
+    if (debounceRef.current) {
+      clearTimeout(debounceRef.current);
+    }
+
+    debounceRef.current = setTimeout(() => {
+      doSave();
+    }, 500);
+
+    return () => {
+      if (debounceRef.current) {
+        clearTimeout(debounceRef.current);
+      }
+    };
+  }, [unchangedThreshold, flakyThreshold, includeAntiAliasing, doSave]);
 
   const handleReset = () => {
     startTransition(async () => {
@@ -48,6 +75,7 @@ export function DiffSensitivityCard({
       setUnchangedThreshold(DEFAULT_DIFF_THRESHOLDS.unchangedThreshold);
       setFlakyThreshold(DEFAULT_DIFF_THRESHOLDS.flakyThreshold);
       setIncludeAntiAliasing(DEFAULT_DIFF_THRESHOLDS.includeAntiAliasing);
+      toast.success('Diff sensitivity reset to defaults');
     });
   };
 
@@ -209,18 +237,14 @@ export function DiffSensitivityCard({
           />
         </div>
 
-        {/* Actions */}
+        {/* Reset */}
         <div className="flex gap-2 pt-2">
-          <Button onClick={handleSave} disabled={isPending}>
+          <Button variant="outline" onClick={handleReset} disabled={isPending}>
             {isPending ? (
               <Loader2 className="w-4 h-4 mr-2 animate-spin" />
             ) : (
-              <Save className="w-4 h-4 mr-2" />
+              <RotateCcw className="w-4 h-4 mr-2" />
             )}
-            Save
-          </Button>
-          <Button variant="outline" onClick={handleReset} disabled={isPending}>
-            <RotateCcw className="w-4 h-4 mr-2" />
             Reset to Defaults
           </Button>
         </div>

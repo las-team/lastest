@@ -1,31 +1,38 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { exchangeCodeForToken, getGitHubUser } from '@/lib/github/oauth';
 import * as queries from '@/lib/db/queries';
-import { createSessionToken, setSessionCookie } from '@/lib/auth';
+import { createSessionToken, setSessionCookie, getCurrentUser } from '@/lib/auth';
 
 export async function GET(request: NextRequest) {
   const searchParams = request.nextUrl.searchParams;
   const code = searchParams.get('code');
   const error = searchParams.get('error');
 
+  // Check if user is already logged in (linking account vs login)
+  const currentUser = await getCurrentUser();
+
   if (error) {
-    return NextResponse.redirect(new URL('/login?error=github_auth_denied', request.url));
+    const redirectPath = currentUser ? '/settings?error=github_auth_denied' : '/login?error=github_auth_denied';
+    return NextResponse.redirect(new URL(redirectPath, request.url));
   }
 
   if (!code) {
-    return NextResponse.redirect(new URL('/login?error=no_code', request.url));
+    const redirectPath = currentUser ? '/settings?error=no_code' : '/login?error=no_code';
+    return NextResponse.redirect(new URL(redirectPath, request.url));
   }
 
   // Exchange code for token
   const tokenResponse = await exchangeCodeForToken(code);
   if (!tokenResponse) {
-    return NextResponse.redirect(new URL('/login?error=token_exchange_failed', request.url));
+    const redirectPath = currentUser ? '/settings?error=token_exchange_failed' : '/login?error=token_exchange_failed';
+    return NextResponse.redirect(new URL(redirectPath, request.url));
   }
 
   // Get GitHub user info
   const githubUser = await getGitHubUser(tokenResponse.access_token);
   if (!githubUser) {
-    return NextResponse.redirect(new URL('/login?error=user_fetch_failed', request.url));
+    const redirectPath = currentUser ? '/settings?error=user_fetch_failed' : '/login?error=user_fetch_failed';
+    return NextResponse.redirect(new URL(redirectPath, request.url));
   }
 
   // Check if OAuth account already exists
@@ -34,8 +41,32 @@ export async function GET(request: NextRequest) {
   let userId: string;
   let teamId: string | null = null;
 
-  if (existingOAuth) {
-    // Update OAuth tokens
+  // If user is already logged in, link the GitHub account to their existing account
+  if (currentUser) {
+    if (existingOAuth && existingOAuth.userId !== currentUser.id) {
+      // GitHub account is linked to a different user
+      return NextResponse.redirect(new URL('/settings?error=github_account_linked_to_another_user', request.url));
+    }
+
+    if (existingOAuth) {
+      // Update OAuth tokens
+      await queries.updateOAuthAccount(existingOAuth.id, {
+        accessToken: tokenResponse.access_token,
+      });
+    } else {
+      // Create OAuth account link for current user
+      await queries.createOAuthAccount({
+        userId: currentUser.id,
+        provider: 'github',
+        providerAccountId: githubUser.id.toString(),
+        accessToken: tokenResponse.access_token,
+      });
+    }
+
+    userId = currentUser.id;
+    teamId = currentUser.teamId;
+  } else if (existingOAuth) {
+    // Not logged in, but OAuth account exists - this is a login
     await queries.updateOAuthAccount(existingOAuth.id, {
       accessToken: tokenResponse.access_token,
     });
@@ -45,6 +76,7 @@ export async function GET(request: NextRequest) {
     const user = await queries.getUserById(userId);
     teamId = user?.teamId ?? null;
   } else {
+    // Not logged in and no existing OAuth - this is a new registration
     // Check if user exists with this email
     let user = githubUser.email
       ? await queries.getUserByEmail(githubUser.email)
@@ -103,7 +135,12 @@ export async function GET(request: NextRequest) {
     }
   }
 
-  // Create session
+  // If user was already logged in (linking account), redirect to settings
+  if (currentUser) {
+    return NextResponse.redirect(new URL('/settings?success=github_connected', request.url));
+  }
+
+  // Create session for new login/registration
   const sessionToken = await createSessionToken(userId, request);
   await setSessionCookie(sessionToken);
 

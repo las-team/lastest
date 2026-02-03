@@ -2,7 +2,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Badge } from '@/components/ui/badge';
 import * as queries from '@/lib/db/queries';
 import { getCurrentUser } from '@/lib/auth';
-import { Github, Check, X, Database, ExternalLink, Users, Bot, Mail, Terminal } from 'lucide-react';
+import { Github, Check, X, Database, ExternalLink, Users, Bot, Mail } from 'lucide-react';
 import { PlaywrightSettingsCard } from '@/components/settings/playwright-settings-card';
 import { EnvironmentConfigCard } from '@/components/settings/environment-config-card';
 import { DiffSensitivityCard } from '@/components/settings/diff-sensitivity-card';
@@ -293,51 +293,6 @@ export default async function SettingsPage({
                 </CardContent>
               </Card>
 
-              {/* Runner Installation Instructions */}
-              <Card>
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2">
-                    <Terminal className="w-5 h-5" />
-                    Runner Installation
-                  </CardTitle>
-                  <CardDescription>
-                    How to set up a runner on your machine
-                  </CardDescription>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                  <div>
-                    <h4 className="font-medium mb-2">1. Install the runner package</h4>
-                    <pre className="bg-muted p-3 rounded-md text-sm overflow-x-auto">
-                      <code>npm install -g @lastest2/runner</code>
-                    </pre>
-                  </div>
-
-                  <div>
-                    <h4 className="font-medium mb-2">2. Create a runner above and copy the token</h4>
-                    <p className="text-sm text-muted-foreground">
-                      The token is only shown once when you create the runner. Keep it secure.
-                    </p>
-                  </div>
-
-                  <div>
-                    <h4 className="font-medium mb-2">3. Run the runner</h4>
-                    <pre className="bg-muted p-3 rounded-md text-sm overflow-x-auto">
-                      <code>lastest2-runner --token YOUR_TOKEN --server https://your-app.vercel.app</code>
-                    </pre>
-                  </div>
-
-                  <div>
-                    <h4 className="font-medium mb-2">4. (Optional) Run as a background service</h4>
-                    <pre className="bg-muted p-3 rounded-md text-sm overflow-x-auto">
-                      <code>{`# Using PM2
-pm2 start lastest2-runner -- --token YOUR_TOKEN --server YOUR_SERVER
-
-# Or using systemd (Linux)
-# See documentation for systemd service file example`}</code>
-                    </pre>
-                  </div>
-                </CardContent>
-              </Card>
             </>
           )}
 

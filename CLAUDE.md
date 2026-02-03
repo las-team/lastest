@@ -2,6 +2,15 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## CRITICAL RULES
+
+**NEVER delete the database file (`lastest2.db`) without explicitly asking the user first.** This includes:
+- `rm` commands on `.db` files
+- `pnpm db:reset`
+- Any command that would destroy user data
+
+Always ask for explicit permission before running destructive database operations.
+
 ## Commands
 
 ```bash

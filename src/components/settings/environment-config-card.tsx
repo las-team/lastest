@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useTransition } from 'react';
+import { useState, useTransition, useEffect, useRef, useCallback } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -15,7 +15,8 @@ import {
 } from '@/components/ui/select';
 import { saveEnvironmentConfig, testServerConnection } from '@/server/actions/environment';
 import type { EnvironmentConfig, EnvironmentMode } from '@/lib/db/schema';
-import { Loader2, Save, Server, Wifi, WifiOff, CheckCircle, XCircle } from 'lucide-react';
+import { Loader2, Server, Wifi, CheckCircle, XCircle } from 'lucide-react';
+import { toast } from 'sonner';
 
 interface EnvironmentConfigCardProps {
   config: EnvironmentConfig;
@@ -26,7 +27,7 @@ export function EnvironmentConfigCard({
   config,
   repositoryId,
 }: EnvironmentConfigCardProps) {
-  const [isPending, startTransition] = useTransition();
+  const [, startTransition] = useTransition();
   const [isTesting, setIsTesting] = useState(false);
   const [testResult, setTestResult] = useState<{
     success: boolean;
@@ -42,7 +43,10 @@ export function EnvironmentConfigCard({
   const [healthCheckTimeout, setHealthCheckTimeout] = useState(config.healthCheckTimeout || 60000);
   const [reuseExistingServer, setReuseExistingServer] = useState(config.reuseExistingServer ?? true);
 
-  const handleSave = () => {
+  const isInitialMount = useRef(true);
+  const debounceRef = useRef<NodeJS.Timeout | null>(null);
+
+  const doSave = useCallback(() => {
     startTransition(async () => {
       await saveEnvironmentConfig({
         repositoryId,
@@ -53,8 +57,31 @@ export function EnvironmentConfigCard({
         healthCheckTimeout,
         reuseExistingServer,
       });
+      toast.success('Environment settings saved');
     });
-  };
+  }, [repositoryId, mode, baseUrl, startCommand, healthCheckUrl, healthCheckTimeout, reuseExistingServer]);
+
+  // Auto-save with debounce
+  useEffect(() => {
+    if (isInitialMount.current) {
+      isInitialMount.current = false;
+      return;
+    }
+
+    if (debounceRef.current) {
+      clearTimeout(debounceRef.current);
+    }
+
+    debounceRef.current = setTimeout(() => {
+      doSave();
+    }, 500);
+
+    return () => {
+      if (debounceRef.current) {
+        clearTimeout(debounceRef.current);
+      }
+    };
+  }, [mode, baseUrl, startCommand, healthCheckUrl, healthCheckTimeout, reuseExistingServer, doSave]);
 
   const handleTestConnection = async () => {
     setIsTesting(true);
@@ -210,17 +237,6 @@ export function EnvironmentConfigCard({
           </>
         )}
 
-        {/* Save Button */}
-        <div className="pt-2">
-          <Button onClick={handleSave} disabled={isPending}>
-            {isPending ? (
-              <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-            ) : (
-              <Save className="w-4 h-4 mr-2" />
-            )}
-            Save Configuration
-          </Button>
-        </div>
       </CardContent>
     </Card>
   );

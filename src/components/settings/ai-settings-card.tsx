@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useTransition } from 'react';
+import { useState, useTransition, useEffect, useRef, useCallback } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -16,7 +16,7 @@ import {
 import { saveAISettings, resetAISettings, testAIConnection } from '@/server/actions/ai-settings';
 import { DEFAULT_AI_SETTINGS } from '@/lib/db/schema';
 import type { AISettings, AIProvider, AgentSdkPermissionMode } from '@/lib/db/schema';
-import { Loader2, RotateCcw, Save, Sparkles, CheckCircle2, XCircle, Zap, Bot } from 'lucide-react';
+import { Loader2, RotateCcw, Sparkles, CheckCircle2, XCircle, Zap, Bot } from 'lucide-react';
 import { toast } from 'sonner';
 
 interface AISettingsCardProps {
@@ -50,7 +50,10 @@ export function AISettingsCard({ settings, repositoryId }: AISettingsCardProps) 
   );
   const [agentSdkWorkingDir, setAgentSdkWorkingDir] = useState(settings.agentSdkWorkingDir || '');
 
-  const handleSave = () => {
+  const isInitialMount = useRef(true);
+  const debounceRef = useRef<NodeJS.Timeout | null>(null);
+
+  const doSave = useCallback(() => {
     startTransition(async () => {
       await saveAISettings({
         repositoryId,
@@ -63,7 +66,29 @@ export function AISettingsCard({ settings, repositoryId }: AISettingsCardProps) 
       });
       toast.success('AI settings saved');
     });
-  };
+  }, [repositoryId, provider, openrouterApiKey, openrouterModel, agentSdkPermissionMode, agentSdkWorkingDir, customInstructions]);
+
+  // Auto-save with debounce
+  useEffect(() => {
+    if (isInitialMount.current) {
+      isInitialMount.current = false;
+      return;
+    }
+
+    if (debounceRef.current) {
+      clearTimeout(debounceRef.current);
+    }
+
+    debounceRef.current = setTimeout(() => {
+      doSave();
+    }, 500);
+
+    return () => {
+      if (debounceRef.current) {
+        clearTimeout(debounceRef.current);
+      }
+    };
+  }, [provider, openrouterApiKey, openrouterModel, agentSdkPermissionMode, agentSdkWorkingDir, customInstructions, doSave]);
 
   const handleReset = () => {
     startTransition(async () => {
@@ -268,19 +293,15 @@ export function AISettingsCard({ settings, repositoryId }: AISettingsCardProps) 
           )}
         </div>
 
-        {/* Actions */}
+        {/* Reset */}
         <div className="flex gap-2 pt-2">
-          <Button onClick={handleSave} disabled={isPending}>
+          <Button variant="outline" onClick={handleReset} disabled={isPending}>
             {isPending ? (
               <Loader2 className="w-4 h-4 mr-2 animate-spin" />
             ) : (
-              <Save className="w-4 h-4 mr-2" />
+              <RotateCcw className="w-4 h-4 mr-2" />
             )}
-            Save Settings
-          </Button>
-          <Button variant="outline" onClick={handleReset} disabled={isPending}>
-            <RotateCcw className="w-4 h-4 mr-2" />
-            Reset
+            Reset to Defaults
           </Button>
         </div>
       </CardContent>

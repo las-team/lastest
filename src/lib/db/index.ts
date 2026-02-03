@@ -17,7 +17,15 @@ sqlite.pragma('journal_mode = WAL');
 
 export const db = drizzle(sqlite, { schema });
 
+/**
+ * @deprecated Manual schema initialization is outdated. Use `pnpm db:push` instead.
+ * This function is kept for reference but should not be called.
+ * After a fresh database, always run: pnpm db:push
+ */
 export function initializeDatabase() {
+  console.warn('WARNING: initializeDatabase() is deprecated. Run `pnpm db:push` instead.');
+  // Skip manual table creation - use Drizzle schema push instead
+  return;
   sqlite.exec(`
     CREATE TABLE IF NOT EXISTS repositories (
       id TEXT PRIMARY KEY,

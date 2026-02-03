@@ -78,18 +78,29 @@ export async function POST(request: NextRequest) {
     const body = await request.json();
     const message = body as Message;
 
-    // Update runner status on each message
-    await updateRunnerStatus(runner.id, 'online', new Date());
-
     // Handle different message types
     switch (message.type) {
       case 'status:heartbeat': {
         const heartbeat = message as HeartbeatMessage;
-        const status = heartbeat.payload.status === 'idle' ? 'online' : heartbeat.payload.status;
-        await updateRunnerStatus(runner.id, status as 'online' | 'offline' | 'busy');
+        // Map all heartbeat statuses to valid runner statuses
+        let status: 'online' | 'offline' | 'busy';
+        switch (heartbeat.payload.status) {
+          case 'busy':
+            status = 'busy';
+            break;
+          case 'recording':
+            status = 'busy'; // Recording is a form of busy
+            break;
+          default:
+            status = 'online';
+        }
+        await updateRunnerStatus(runner.id, status);
 
         // Return any pending commands for this runner
         const pendingCommands = getPendingCommands(runner.id);
+        if (pendingCommands.length > 0) {
+          console.log(`[Runner ${runner.id}] Returning ${pendingCommands.length} pending commands:`, pendingCommands.map(c => c.type));
+        }
         return NextResponse.json({
           ok: true,
           commands: pendingCommands,
@@ -113,13 +124,20 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ ok: true });
       }
 
+      case 'response:test_progress': {
+        // Progress updates are informational, just acknowledge
+        return NextResponse.json({ ok: true });
+      }
+
       default:
-        return NextResponse.json({ error: 'Unknown message type' }, { status: 400 });
+        console.warn('Unknown message type:', message.type);
+        return NextResponse.json({ error: 'Unknown message type', type: message.type }, { status: 400 });
     }
   } catch (error) {
     console.error('Runner API error:', error);
+    console.error('Stack:', error instanceof Error ? error.stack : 'N/A');
     return NextResponse.json(
-      { error: 'Internal server error' },
+      { error: 'Internal server error', message: error instanceof Error ? error.message : String(error) },
       { status: 500 }
     );
   }
@@ -166,8 +184,8 @@ export async function GET(request: NextRequest) {
       sessionId,
     });
 
-    // Update last seen
-    await updateRunnerStatus(runner.id, 'online', new Date());
+    // Note: Runner status is only set to 'online' when heartbeat is received (POST)
+    // This ensures the runner is actually polling and not just connecting once
 
     // Return runner info and any pending commands
     const pendingCommands = getPendingCommands(runner.id);
@@ -181,8 +199,9 @@ export async function GET(request: NextRequest) {
     });
   } catch (error) {
     console.error('Runner API error:', error);
+    console.error('Stack:', error instanceof Error ? error.stack : 'N/A');
     return NextResponse.json(
-      { error: 'Internal server error' },
+      { error: 'Internal server error', message: error instanceof Error ? error.message : String(error) },
       { status: 500 }
     );
   }
@@ -216,9 +235,11 @@ function storeScreenshot(runnerId: string, screenshot: Message) {
  * Queue a command for a runner (called by test runner)
  */
 export function queueCommand(runnerId: string, command: Message): void {
+  console.log(`[queueCommand] Queuing ${command.type} for runner ${runnerId}`);
   const commands = pendingCommandsMap.get(runnerId) || [];
   commands.push(command);
   pendingCommandsMap.set(runnerId, commands);
+  console.log(`[queueCommand] Runner ${runnerId} now has ${commands.length} pending commands`);
 }
 
 /**
