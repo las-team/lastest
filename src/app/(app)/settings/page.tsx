@@ -12,6 +12,7 @@ import { AISettingsCard } from '@/components/settings/ai-settings-card';
 import { AILogsCard } from '@/components/settings/ai-logs-card';
 import { NotificationSettingsCard } from '@/components/settings/notification-settings-card';
 import { ResetSetupGuide } from '@/components/setup-guide/reset-setup-guide';
+import { BranchSelector } from '@/components/settings/branch-selector';
 
 export default async function SettingsPage({
   searchParams,
@@ -118,9 +119,17 @@ export default async function SettingsPage({
                 <span className="text-muted-foreground">Repository</span>
                 <span className="font-medium">{selectedRepo?.fullName || 'None selected'}</span>
               </div>
-              <div className="flex justify-between">
+              <div className="flex justify-between items-center">
                 <span className="text-muted-foreground">Selected Branch</span>
-                <Badge variant="outline">{selectedRepo?.selectedBranch || selectedRepo?.defaultBranch || '-'}</Badge>
+                {selectedRepo ? (
+                  <BranchSelector
+                    repositoryId={selectedRepo.id}
+                    currentBranch={selectedRepo.selectedBranch}
+                    defaultBranch={selectedRepo.defaultBranch}
+                  />
+                ) : (
+                  <Badge variant="outline">-</Badge>
+                )}
               </div>
               <div className="flex justify-between">
                 <span className="text-muted-foreground">Default Branch</span>
