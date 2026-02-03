@@ -20,6 +20,55 @@ import type { Message, HeartbeatMessage, TestResultResponse, ScreenshotUploadRes
 import fs from 'fs/promises';
 import path from 'path';
 
+// ============================================
+// Security Validation Functions
+// ============================================
+
+const MAX_SCREENSHOT_BYTES = 10 * 1024 * 1024; // 10MB limit
+
+/**
+ * Sanitize filename to prevent path traversal attacks.
+ * Only allows alphanumeric characters, dots, hyphens, and underscores.
+ * Must end with valid image extension.
+ */
+function sanitizeFilename(filename: string): string {
+  // Remove null bytes
+  let safe = filename.replace(/\0/g, '');
+  // Extract only the filename (no path components)
+  safe = safe.split(/[/\\]/).pop() || '';
+  // Remove any .. sequences
+  safe = safe.replace(/\.\./g, '');
+  // Only allow safe characters
+  safe = safe.replace(/[^a-zA-Z0-9._-]/g, '');
+  // Validate extension and length
+  if (!/\.(png|jpg|jpeg)$/i.test(safe) || safe.length > 255 || !safe) {
+    throw new Error('Invalid filename');
+  }
+  return safe;
+}
+
+/**
+ * Validate repository ID format (UUID only).
+ */
+function validateRepositoryId(id: string | undefined): string | undefined {
+  if (!id) return undefined;
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) {
+    throw new Error('Invalid repository ID format');
+  }
+  return id;
+}
+
+/**
+ * Validate screenshot size to prevent DoS via massive uploads.
+ */
+function validateScreenshotSize(base64Data: string): void {
+  // Base64 encoded data is ~4/3 the size of binary
+  const estimatedBytes = (base64Data.length * 3) / 4;
+  if (estimatedBytes > MAX_SCREENSHOT_BYTES) {
+    throw new Error(`Screenshot exceeds ${MAX_SCREENSHOT_BYTES / (1024 * 1024)}MB limit`);
+  }
+}
+
 // Track active polling sessions by runner ID
 // Use globalThis to ensure shared state across Next.js module contexts
 const globalSessionState = globalThis as typeof globalThis & {
@@ -147,19 +196,24 @@ export async function POST(request: NextRequest) {
         // Handle screenshot upload - save directly to disk
         const screenshotMsg = message as ScreenshotUploadResponse;
         const payload = screenshotMsg.payload;
-        console.log(`[Screenshot] Received screenshot from runner ${runner.id}: ${payload.filename}`);
 
         try {
+          // Validate inputs to prevent path traversal and DoS attacks
+          const safeFilename = sanitizeFilename(payload.filename);
+          const safeRepoId = validateRepositoryId(payload.repositoryId);
+          validateScreenshotSize(payload.data);
+
+          console.log(`[Screenshot] Received screenshot from runner ${runner.id}: ${safeFilename}`);
+
           // Save to disk immediately (to repository folder if provided)
-          const savedPath = await saveScreenshotToDisk(payload.data, payload.filename, payload.repositoryId);
+          const savedPath = await saveScreenshotToDisk(payload.data, safeFilename, safeRepoId);
           console.log(`[Screenshot] Saved to disk: ${savedPath}`);
 
-          // Also store in memory for backward compatibility
+          // Also store in memory for backward compatibility (with sanitized data)
           storeScreenshot(runner.id, message);
         } catch (error) {
-          console.error(`[Screenshot] Failed to save to disk:`, error);
-          // Still store in memory as fallback
-          storeScreenshot(runner.id, message);
+          console.error(`[Screenshot] Validation or save failed:`, error);
+          return NextResponse.json({ error: 'Screenshot upload failed' }, { status: 400 });
         }
 
         return NextResponse.json({ ok: true });
@@ -179,12 +233,10 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ error: 'Unknown message type', type: message.type }, { status: 400 });
     }
   } catch (error) {
+    // Log detailed error server-side only (never expose to client)
     console.error('Runner API error:', error);
     console.error('Stack:', error instanceof Error ? error.stack : 'N/A');
-    return NextResponse.json(
-      { error: 'Internal server error', message: error instanceof Error ? error.message : String(error) },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }
 
@@ -243,12 +295,10 @@ export async function GET(request: NextRequest) {
       sessionId,
     });
   } catch (error) {
+    // Log detailed error server-side only (never expose to client)
     console.error('Runner API error:', error);
     console.error('Stack:', error instanceof Error ? error.stack : 'N/A');
-    return NextResponse.json(
-      { error: 'Internal server error', message: error instanceof Error ? error.message : String(error) },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }
 

@@ -4,9 +4,18 @@
  */
 
 import { chromium, firefox, webkit, Browser, Page, BrowserContext } from 'playwright';
+import { createHash } from 'crypto';
 import fs from 'fs';
 import path from 'path';
 import type { RunTestCommandPayload, LogEntry } from './protocol.js';
+
+/**
+ * Verify code integrity by comparing SHA256 hash.
+ */
+function verifyCodeIntegrity(code: string, expectedHash: string): boolean {
+  const actualHash = createHash('sha256').update(code).digest('hex');
+  return actualHash === expectedHash;
+}
 
 export interface TestRunResult {
   status: 'passed' | 'failed' | 'error' | 'timeout' | 'cancelled';
@@ -71,6 +80,11 @@ export class TestRunner {
       // Check if already aborted
       if (this.abortController.signal.aborted) {
         throw new Error('Test cancelled before starting');
+      }
+
+      // Verify code integrity before execution (prevents MITM code injection)
+      if (!verifyCodeIntegrity(command.code, command.codeHash)) {
+        throw new Error('Code integrity check failed - hash mismatch');
       }
 
       this.log('info', 'Launching browser...');

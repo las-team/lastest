@@ -36,6 +36,7 @@ export interface RunTestCommandPayload {
   testId: string;
   testRunId: string;
   code: string;
+  codeHash: string; // SHA256 hash of code for integrity verification
   targetUrl: string;
   screenshotPath: string;
   timeout: number;

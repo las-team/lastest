@@ -21,10 +21,18 @@ import { createMessage } from '@/lib/ws/protocol';
 import { queueCommand, getTestResults, getScreenshots } from '@/app/api/ws/runner/route';
 import { runnerRegistry } from '@/lib/ws/runner-registry';
 import { db } from '@/lib/db';
-import { runners } from '@/lib/db/schema';
+import { runners, tests as testsTable } from '@/lib/db/schema';
 import { eq, and } from 'drizzle-orm';
+import { createHash } from 'crypto';
 import fs from 'fs/promises';
 import path from 'path';
+
+/**
+ * Generate SHA256 hash of test code for integrity verification.
+ */
+function hashCode(code: string): string {
+  return createHash('sha256').update(code).digest('hex');
+}
 
 export interface ExecutionOptions {
   repositoryId?: string | null;
@@ -168,11 +176,30 @@ async function executeViaRunner(
       currentTestName: test.name,
     });
 
-    // Create run_test command
+    // Validate test exists in database and code matches (prevents fake testId injection)
+    const dbTest = await db.query.tests.findFirst({
+      where: eq(testsTable.id, test.id),
+      columns: { id: true, code: true }
+    });
+
+    if (!dbTest || dbTest.code !== test.code) {
+      console.error(`[Executor] Test ${test.id} not found or code mismatch`);
+      results.push({
+        testId: test.id,
+        status: 'failed',
+        durationMs: 0,
+        screenshots: [],
+        errorMessage: `Test validation failed: test not found or code mismatch`,
+      });
+      continue;
+    }
+
+    // Create run_test command with code hash for integrity verification
     const command = createMessage<RunTestCommand>('command:run_test', {
       testId: test.id,
       testRunId: runId,
       code: test.code,
+      codeHash: hashCode(test.code),
       targetUrl: test.targetUrl || baseUrl,
       screenshotPath: `${runId}-${test.id}.png`,
       timeout: options.playwrightSettings?.navigationTimeout || 30000,
