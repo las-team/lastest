@@ -73,6 +73,18 @@ Run tests per branch/commit. Compare across PRs. Track coverage.
 ### 🏠 100% Self-Hosted
 SQLite database, local file storage. No external dependencies. No data leaves your machine.
 
+### 🔔 Notifications
+Slack, Discord webhooks, and GitHub PR comments for build results.
+
+### 👥 Team Management
+Multi-tenant support with teams, user roles (owner/admin/member/viewer), and invitations.
+
+### 📊 Test Suites
+Organize tests into ordered suites for structured execution.
+
+### 🧠 Multiple AI Providers
+Choose between Claude CLI, OpenRouter, or Claude Agent SDK for test generation.
+
 ---
 
 ## Quick Start
@@ -158,6 +170,37 @@ pnpm db:push      # Push schema changes to database
 
 ---
 
+## CLI Test Runner (CI/CD)
+
+Run visual regression tests directly from the command line for GitHub Actions or other CI pipelines:
+
+```bash
+pnpm test:visual --repo-id <id> [options]
+```
+
+### Options
+
+| Flag | Description | Default |
+|------|-------------|---------|
+| `--repo-id <id>` | Repository ID (required) | - |
+| `--base-url <url>` | Override target URL | `http://localhost:3000` |
+| `--headless` | Run in headless mode | `true` |
+| `--no-headless` | Run with visible browser | - |
+| `--output-dir <dir>` | Screenshot output directory | `./test-output` |
+
+### GitHub Actions Example
+
+```yaml
+- name: Run Visual Tests
+  run: pnpm test:visual --repo-id ${{ env.REPO_ID }} --base-url http://localhost:3000
+  env:
+    REPO_ID: your-repo-id
+```
+
+The runner automatically captures `GITHUB_HEAD_REF`, `GITHUB_REF_NAME`, and `GITHUB_SHA` for git tracking.
+
+---
+
 ## Tech Stack
 
 - **Framework**: Next.js 16 (App Router)
@@ -172,20 +215,24 @@ pnpm db:push      # Push schema changes to database
 ## Environment Variables
 
 ```bash
-# Optional: GitHub OAuth for repository sync
+# GitHub OAuth for repository sync + login
 GITHUB_CLIENT_ID=
 GITHUB_CLIENT_SECRET=
+
+# Session encryption (auto-generated if not set)
+BETTER_AUTH_SECRET=
 ```
 
 ---
 
 ## Roadmap
 
-- [ ] GitHub Actions integration
-- [ ] Slack/Discord notifications
-- [ ] Team collaboration features
+- [x] GitHub Actions integration (CLI runner)
+- [x] Slack/Discord notifications
+- [x] Team collaboration features
 - [ ] Component-level testing
 - [ ] Storybook integration
+- [ ] Cloud deployment with local agent
 
 ---
 

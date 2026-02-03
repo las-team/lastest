@@ -11,12 +11,6 @@ Excalidraw tests: ~/.claude/plans/recursive-wondering-dongarra.md
 ## reuse
 check the recorder and the runner so that they are compatible and identify the root cause of the issue
 ## in progress
-Login and user management
-Users should be able to login with email/pass (forgot pass reminder email) and social (gh, google) 
-first user should be admin
-in ui should be able to add more users that share the same instance, see the same tests, settings, etc... 
-plan for cloud usage when multiple teams would use 1 server so RLS would be relevant on the DB level
-Later there will potentially be roles introduced
 
 ## test
 OCR
@@ -30,6 +24,8 @@ Screenshot Stabilization Delay
 please Execution local client and cloud ~/.claude/plans/cozy-sniffing-hopcroft.md  
 Electron app ~/.claude/plans/rippling-roaming-snail.md
 Github actions integration
+
+User email sending with resend
 
 VS Code extension
 npm/CLI one-liner install
@@ -88,9 +84,8 @@ Support https://github.com/excalidraw/excalidraw/tree/master/packages/excalidraw
 
     4. The "Build in Public" Flywheel                                                                                               
   Per https://thebootstrappedfounder.com/indie-hacking-isnt-dead-its-just-less-hacky/:                            
-                                                                                                                  
+                                 
   Share progress → Attract followers → They try tool →                                                            
-  Some convert → They share → Repeat                                                                              
-                                                                                                                  
+  Some convert → They share → Repeat                                                                                                                                             
   This takes 3-6 months of consistent posting before compounding.          
                                                                                                         

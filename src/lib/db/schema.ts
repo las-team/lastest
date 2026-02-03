@@ -68,6 +68,7 @@ export const tests = sqliteTable('tests', {
 export const testRuns = sqliteTable('test_runs', {
   id: text('id').primaryKey(),
   repositoryId: text('repository_id'),
+  agentId: text('agent_id'), // nullable - set when run via remote agent, null for local runs
   gitBranch: text('git_branch').notNull(),
   gitCommit: text('git_commit').notNull(),
   startedAt: integer('started_at', { mode: 'timestamp' }),
@@ -110,6 +111,7 @@ export const testResults = sqliteTable('test_results', {
 // Repositories synced from GitHub
 export const repositories = sqliteTable('repositories', {
   id: text('id').primaryKey(),
+  teamId: text('team_id'), // Team ownership - FK added after teams table definition
   githubRepoId: integer('github_repo_id').notNull(),
   owner: text('owner').notNull(),
   name: text('name').notNull(),
@@ -120,9 +122,10 @@ export const repositories = sqliteTable('repositories', {
   createdAt: integer('created_at', { mode: 'timestamp' }),
 });
 
-// GitHub OAuth accounts
+// GitHub OAuth accounts - per-team GitHub connection
 export const githubAccounts = sqliteTable('github_accounts', {
   id: text('id').primaryKey(),
+  teamId: text('team_id'), // Team ownership - FK added after teams table definition
   githubUserId: text('github_user_id').notNull(),
   githubUsername: text('github_username').notNull(),
   accessToken: text('access_token').notNull(),
@@ -532,10 +535,22 @@ export type SelectorStat = typeof selectorStats.$inferSelect;
 export type NewSelectorStat = typeof selectorStats.$inferInsert;
 
 // ============================================
-// Auth Tables
+// Teams & Auth Tables
 // ============================================
 
-export type UserRole = 'admin' | 'member' | 'viewer';
+export type UserRole = 'owner' | 'admin' | 'member' | 'viewer';
+
+// Teams - Multi-tenancy support
+export const teams = sqliteTable('teams', {
+  id: text('id').primaryKey(),
+  name: text('name').notNull(),
+  slug: text('slug').notNull().unique(),
+  createdAt: integer('created_at', { mode: 'timestamp' }),
+  updatedAt: integer('updated_at', { mode: 'timestamp' }),
+});
+
+export type Team = typeof teams.$inferSelect;
+export type NewTeam = typeof teams.$inferInsert;
 
 // Users - Core identity
 export const users = sqliteTable('users', {
@@ -544,7 +559,8 @@ export const users = sqliteTable('users', {
   hashedPassword: text('hashed_password'),
   name: text('name'),
   avatarUrl: text('avatar_url'),
-  role: text('role').notNull().default('member'), // 'admin' | 'member' | 'viewer'
+  teamId: text('team_id').references(() => teams.id), // Single team membership
+  role: text('role').notNull().default('member'), // 'owner' | 'admin' | 'member' | 'viewer'
   emailVerified: integer('email_verified', { mode: 'boolean' }).default(false),
   createdAt: integer('created_at', { mode: 'timestamp' }),
   updatedAt: integer('updated_at', { mode: 'timestamp' }),
@@ -607,9 +623,10 @@ export const emailVerificationTokens = sqliteTable('email_verification_tokens', 
 export type EmailVerificationToken = typeof emailVerificationTokens.$inferSelect;
 export type NewEmailVerificationToken = typeof emailVerificationTokens.$inferInsert;
 
-// User invitations - Admin invites new users
+// User invitations - Team-scoped invitations
 export const userInvitations = sqliteTable('user_invitations', {
   id: text('id').primaryKey(),
+  teamId: text('team_id').references(() => teams.id), // Team to join on accept
   email: text('email').notNull(),
   invitedById: text('invited_by_id').references(() => users.id),
   token: text('token').notNull().unique(),
@@ -621,3 +638,25 @@ export const userInvitations = sqliteTable('user_invitations', {
 
 export type UserInvitation = typeof userInvitations.$inferSelect;
 export type NewUserInvitation = typeof userInvitations.$inferInsert;
+
+// ============================================
+// Agents Table (Remote Execution)
+// ============================================
+
+export type AgentStatus = 'online' | 'offline' | 'busy';
+export type AgentCapability = 'run' | 'record';
+
+export const agents = sqliteTable('agents', {
+  id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+  teamId: text('team_id').notNull().references(() => teams.id),
+  createdById: text('created_by_id').notNull().references(() => users.id),
+  name: text('name').notNull(),
+  tokenHash: text('token_hash').notNull().unique(),
+  status: text('status').notNull().default('offline'), // 'online' | 'offline' | 'busy'
+  lastSeen: integer('last_seen', { mode: 'timestamp' }),
+  capabilities: text('capabilities', { mode: 'json' }).$type<AgentCapability[]>().default(['run', 'record']),
+  createdAt: integer('created_at', { mode: 'timestamp' }).$defaultFn(() => new Date()),
+});
+
+export type Agent = typeof agents.$inferSelect;
+export type NewAgent = typeof agents.$inferInsert;

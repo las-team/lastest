@@ -48,6 +48,13 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    if (!invitation.teamId) {
+      return NextResponse.json(
+        { error: 'Invitation is missing team information' },
+        { status: 400 }
+      );
+    }
+
     // Check if user already exists
     const existingUser = await queries.getUserByEmail(invitation.email);
     if (existingUser) {
@@ -57,12 +64,13 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Hash password and create user
+    // Hash password and create user with team from invitation
     const hashedPassword = await hashPassword(password);
     const user = await queries.createUser({
       email: invitation.email,
       hashedPassword,
       name: name || invitation.email.split('@')[0],
+      teamId: invitation.teamId,
       role: invitation.role as UserRole,
       emailVerified: true, // Invited users have verified emails
     });
@@ -80,6 +88,7 @@ export async function POST(request: NextRequest) {
         email: user.email,
         name: user.name,
         role: user.role,
+        teamId: user.teamId,
       },
     });
   } catch (error) {

@@ -32,17 +32,18 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Check if this is the first user (make them admin)
-    const userCount = await queries.getUserCount();
-    const role = userCount === 0 ? 'admin' : 'member';
+    // Non-invited registration: create new team and make user the owner
+    const userName = name || email.split('@')[0];
+    const team = await queries.createTeam({ name: `${userName}'s Team` });
 
-    // Hash password and create user
+    // Hash password and create user as team owner
     const hashedPassword = await hashPassword(password);
     const user = await queries.createUser({
       email,
       hashedPassword,
-      name: name || email.split('@')[0],
-      role,
+      name: userName,
+      teamId: team.id,
+      role: 'owner',
       emailVerified: false,
     });
 
@@ -56,6 +57,7 @@ export async function POST(request: NextRequest) {
         email: user.email,
         name: user.name,
         role: user.role,
+        teamId: user.teamId,
       },
     });
   } catch (error) {

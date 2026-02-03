@@ -1,5 +1,5 @@
 import { redirect } from 'next/navigation';
-import { requireAdmin } from '@/lib/auth';
+import { requireTeamAdmin } from '@/lib/auth';
 import * as queries from '@/lib/db/queries';
 import { UserList } from '@/components/users/user-list';
 import { PendingInvitations } from '@/components/users/pending-invitations';
@@ -10,14 +10,14 @@ import { Users, Mail } from 'lucide-react';
 export default async function UsersPage() {
   let session;
   try {
-    session = await requireAdmin();
+    session = await requireTeamAdmin();
   } catch {
     redirect('/');
   }
 
   const [users, pendingInvitations] = await Promise.all([
-    queries.getUsers(),
-    queries.getPendingInvitations(),
+    queries.getTeamMembers(session.team.id),
+    queries.getPendingInvitationsByTeam(session.team.id),
   ]);
 
   return (
@@ -27,9 +27,9 @@ export default async function UsersPage() {
           {/* Header */}
           <div className="flex items-center justify-between">
             <div>
-              <h1 className="text-2xl font-bold">User Management</h1>
+              <h1 className="text-2xl font-bold">Team Members</h1>
               <p className="text-muted-foreground text-sm">
-                Manage users and their access levels
+                Manage members of {session.team.name}
               </p>
             </div>
             <InviteUserDialog />
@@ -58,10 +58,10 @@ export default async function UsersPage() {
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
                 <Users className="w-5 h-5" />
-                Users ({users.length})
+                Members ({users.length})
               </CardTitle>
               <CardDescription>
-                All registered users in the system
+                All members of this team
               </CardDescription>
             </CardHeader>
             <CardContent>

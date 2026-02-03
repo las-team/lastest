@@ -1,6 +1,6 @@
 import { cookies } from 'next/headers';
 import * as queries from '@/lib/db/queries';
-import type { User } from '@/lib/db/schema';
+import type { User, Team, UserRole } from '@/lib/db/schema';
 import { v4 as uuid } from 'uuid';
 
 const SESSION_COOKIE_NAME = 'session_token';
@@ -9,6 +9,7 @@ const SESSION_DURATION_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
 export interface SessionData {
   user: User;
   sessionId: string;
+  team: Team | null;
 }
 
 export async function createSessionToken(
@@ -69,9 +70,13 @@ export async function getCurrentSession(): Promise<SessionData | null> {
     return null;
   }
 
+  // Get user's team if they have one
+  const team = result.user.teamId ? await queries.getTeam(result.user.teamId) : null;
+
   return {
     user: result.user,
     sessionId: result.session.id,
+    team: team ?? null,
   };
 }
 
@@ -90,10 +95,31 @@ export async function requireAuth(): Promise<SessionData> {
 
 export async function requireAdmin(): Promise<SessionData> {
   const session = await requireAuth();
-  if (session.user.role !== 'admin') {
+  if (session.user.role !== 'admin' && session.user.role !== 'owner') {
     throw new Error('Forbidden: Admin access required');
   }
   return session;
+}
+
+// Team-aware auth helpers
+export async function requireTeamAccess(): Promise<SessionData & { team: Team }> {
+  const session = await requireAuth();
+  if (!session.team) {
+    throw new Error('Forbidden: No team access');
+  }
+  return session as SessionData & { team: Team };
+}
+
+export async function requireTeamRole(roles: UserRole[]): Promise<SessionData & { team: Team }> {
+  const session = await requireTeamAccess();
+  if (!roles.includes(session.user.role as UserRole)) {
+    throw new Error(`Forbidden: Requires one of these roles: ${roles.join(', ')}`);
+  }
+  return session;
+}
+
+export async function requireTeamAdmin(): Promise<SessionData & { team: Team }> {
+  return requireTeamRole(['owner', 'admin']);
 }
 
 export async function clearSessionCookie(): Promise<void> {

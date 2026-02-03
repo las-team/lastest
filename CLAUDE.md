@@ -13,9 +13,25 @@ pnpm db:reset     # Reset database (removes SQLite DB + screenshots/baselines)
 pnpm db:push      # Push schema changes to database
 pnpm db:generate  # Generate Drizzle migrations
 pnpm start        # Start production server
+pnpm test:visual  # Run visual tests via CLI (see below)
 ```
 
 Database file: `./lastest2.db` (SQLite with WAL mode)
+
+## CLI Test Runner
+
+For CI/CD integration (GitHub Actions, etc.):
+
+```bash
+pnpm test:visual --repo-id <id> [--base-url <url>] [--headless] [--output-dir <dir>]
+```
+
+- `--repo-id <id>` - Repository ID (required)
+- `--base-url <url>` - Target URL (default: `http://localhost:3000`)
+- `--no-headless` - Run with visible browser
+- `--output-dir <dir>` - Screenshot output (default: `./test-output`)
+
+Auto-captures `GITHUB_HEAD_REF`, `GITHUB_SHA` for git tracking. Exit code 1 on test failures.
 
 ## Architecture
 
@@ -44,15 +60,38 @@ Visual regression testing platform built with Next.js 16 App Router.
 
 ### Data Model
 
+**Core Testing:**
 - **Repositories** → synced from GitHub, have local paths for route scanning
 - **Tests** → belong to FunctionalAreas, have code and target URL
+- **TestVersions** → version history with change reasons (manual_edit, ai_fix, ai_enhance, restored)
 - **TestRuns** → grouped executions with git branch/commit
 - **Builds** → aggregated runs linked to PRs, have approval status
 - **VisualDiffs** → comparison results with approval workflow (classification: unchanged/flaky/changed)
 - **Baselines** → approved screenshots with SHA256 hash for carry-forward matching
-- **Routes** → discovered routes for test coverage tracking
+- **Suites** → ordered collections of tests for structured execution
+
+**Configuration:**
+- **PlaywrightSettings** → browser, viewport, headless mode, selector priority, animation freezing
 - **EnvironmentConfigs** → managed server startup settings (manual vs auto-start)
+- **DiffSensitivitySettings** → thresholds for unchanged/flaky classification
+- **AISettings** → provider selection (claude-cli, openrouter, claude-agent-sdk)
+- **NotificationSettings** → Slack/Discord webhooks, GitHub PR comments
+
+**Discovery:**
+- **Routes** → discovered routes for test coverage tracking
+- **RouteTestSuggestions** → AI-generated test suggestions per route
+- **SelectorStats** → success/failure rates per selector for optimization
+
+**Auth & Teams:**
+- **Teams** → multi-tenancy with slug-based identification
+- **Users** → email/password or OAuth, single team membership, roles (owner/admin/member/viewer)
+- **Sessions** → database-backed auth sessions
+- **OAuthAccounts** → linked GitHub/Google providers
+- **UserInvitations** → team invitations with expiry
+
+**Background:**
 - **BackgroundJobs** → queue tracking for long-running operations (AI scans, builds)
+- **AIPromptLogs** → audit trail for AI requests/responses
 
 ### Test Code Format
 
@@ -63,7 +102,16 @@ Tests use a function signature: `export async function test(page, baseUrl, scree
 ```
 GITHUB_CLIENT_ID      # GitHub OAuth app client ID
 GITHUB_CLIENT_SECRET  # GitHub OAuth app secret
+BETTER_AUTH_SECRET    # Session encryption secret (auto-generated if not set)
 ```
+
+### Auth System
+
+Uses `better-auth` with database sessions. Supports:
+- Email/password registration
+- GitHub OAuth
+- Team-based multi-tenancy
+- Role-based access (owner, admin, member, viewer)
 
 ### File Storage
 

@@ -4,7 +4,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import * as queries from '@/lib/db/queries';
 import { getCurrentUser } from '@/lib/auth';
-import { Github, Check, X, Database, ExternalLink, Users } from 'lucide-react';
+import { Github, Check, X, Database, ExternalLink, Users, Bot } from 'lucide-react';
 import { PlaywrightSettingsCard } from '@/components/settings/playwright-settings-card';
 import { EnvironmentConfigCard } from '@/components/settings/environment-config-card';
 import { DiffSensitivityCard } from '@/components/settings/diff-sensitivity-card';
@@ -204,7 +204,7 @@ export default async function SettingsPage({
           />
 
           {/* User Management (Admin only) */}
-          {currentUser?.role === 'admin' && (
+          {(currentUser?.role === 'admin' || currentUser?.role === 'owner') && (
             <Card>
               <CardHeader>
                 <CardTitle className="flex items-center gap-2">
@@ -219,6 +219,28 @@ export default async function SettingsPage({
                 <Link href="/settings/users">
                   <Button variant="outline">
                     Manage Users
+                  </Button>
+                </Link>
+              </CardContent>
+            </Card>
+          )}
+
+          {/* Remote Agents (Admin only) */}
+          {(currentUser?.role === 'admin' || currentUser?.role === 'owner') && (
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Bot className="w-5 h-5" />
+                  Remote Agents
+                </CardTitle>
+                <CardDescription>
+                  Manage remote test execution agents for cloud deployment
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <Link href="/settings/agents">
+                  <Button variant="outline">
+                    Manage Agents
                   </Button>
                 </Link>
               </CardContent>

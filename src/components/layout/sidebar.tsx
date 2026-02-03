@@ -12,16 +12,18 @@ import {
   Circle,
   Layers,
   FolderTree,
+  Building2,
 } from 'lucide-react';
 import { RepoSelector, SyncReposButton } from './repo-selector';
 import { QueueIndicator } from '@/components/queue/queue-indicator';
 import { UserMenu } from '@/components/auth/user-menu';
-import type { Repository, User } from '@/lib/db/schema';
+import type { Repository, User, Team } from '@/lib/db/schema';
 
 interface SidebarProps {
   repos?: Repository[];
   selectedRepo?: Repository | null;
   currentUser?: User | null;
+  team?: Team | null;
 }
 
 const navigation = [
@@ -34,7 +36,7 @@ const navigation = [
   { name: 'Settings', href: '/settings', icon: Settings },
 ];
 
-export function Sidebar({ repos, selectedRepo, currentUser }: SidebarProps) {
+export function Sidebar({ repos, selectedRepo, currentUser, team }: SidebarProps) {
   const pathname = usePathname();
 
   return (
@@ -48,6 +50,12 @@ export function Sidebar({ repos, selectedRepo, currentUser }: SidebarProps) {
           <Circle className="h-6 w-6 fill-primary text-primary" />
           LASTEST2
         </Link>
+        {team && (
+          <div className="flex items-center gap-2 mt-2 text-xs text-muted-foreground">
+            <Building2 className="h-3 w-3" />
+            <span className="truncate">{team.name}</span>
+          </div>
+        )}
       </div>
 
       <div className="p-4 border-b space-y-3">

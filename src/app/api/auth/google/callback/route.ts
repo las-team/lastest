@@ -108,16 +108,16 @@ export async function GET(request: NextRequest) {
     let user = await queries.getUserByEmail(googleUser.email);
 
     if (!user) {
-      // Check if this is the first user (make them admin)
-      const userCount = await queries.getUserCount();
-      const role = userCount === 0 ? 'admin' : 'member';
+      // Non-invited registration: create new team and make user the owner
+      const team = await queries.createTeam({ name: `${googleUser.name}'s Team` });
 
-      // Create new user
+      // Create new user as team owner
       user = await queries.createUser({
         email: googleUser.email,
         name: googleUser.name,
         avatarUrl: googleUser.picture,
-        role,
+        teamId: team.id,
+        role: 'owner',
         emailVerified: googleUser.email_verified,
       });
     } else {

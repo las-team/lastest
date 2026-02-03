@@ -25,12 +25,14 @@ import {
   suiteTests,
   notificationSettings,
   selectorStats,
+  teams,
   users,
   sessions,
   oauthAccounts,
   passwordResetTokens,
   emailVerificationTokens,
   userInvitations,
+  agents,
 } from './schema';
 import {
   DEFAULT_SELECTOR_PRIORITY,
@@ -65,12 +67,17 @@ import type {
   NewSuiteTest,
   NewNotificationSettings,
   NewSelectorStat,
+  NewTeam,
   NewUser,
   NewSession,
   NewOAuthAccount,
   NewPasswordResetToken,
   NewUserInvitation,
+  NewAgent,
+  Team,
   User,
+  Agent,
+  AgentStatus,
   BuildStatus,
   SelectorConfig,
   AIProvider,
@@ -602,8 +609,8 @@ export async function updateSelectedRepository(accountId: string, repositoryId: 
   await db.update(githubAccounts).set({ selectedRepositoryId: repositoryId }).where(eq(githubAccounts.id, accountId));
 }
 
-export async function getSelectedRepository() {
-  const account = await getGithubAccount();
+export async function getSelectedRepository(teamId?: string) {
+  const account = teamId ? await getGithubAccountByTeam(teamId) : await getGithubAccount();
   if (!account?.selectedRepositoryId) return null;
   const repo = await getRepository(account.selectedRepositoryId);
   return repo || null;
@@ -1971,6 +1978,94 @@ export async function recordSelectorFailure(
 }
 
 // ============================================
+// Team Management
+// ============================================
+
+function generateSlug(name: string): string {
+  return name
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-|-$/g, '')
+    .substring(0, 50);
+}
+
+export async function createTeam(data: { name: string; slug?: string }): Promise<Team> {
+  const id = uuid();
+  const now = new Date();
+  let slug = data.slug || generateSlug(data.name);
+
+  // Ensure slug is unique
+  let existing = await getTeamBySlug(slug);
+  let counter = 1;
+  while (existing) {
+    slug = `${generateSlug(data.name)}-${counter}`;
+    existing = await getTeamBySlug(slug);
+    counter++;
+  }
+
+  await db.insert(teams).values({
+    id,
+    name: data.name,
+    slug,
+    createdAt: now,
+    updatedAt: now,
+  });
+
+  const team = await getTeam(id);
+  if (!team) throw new Error('Failed to create team');
+  return team;
+}
+
+export async function getTeam(id: string) {
+  return db.select().from(teams).where(eq(teams.id, id)).get();
+}
+
+export async function getTeamBySlug(slug: string) {
+  return db.select().from(teams).where(eq(teams.slug, slug)).get();
+}
+
+export async function updateTeam(id: string, data: Partial<NewTeam>) {
+  await db.update(teams).set({ ...data, updatedAt: new Date() }).where(eq(teams.id, id));
+}
+
+export async function deleteTeam(id: string) {
+  await db.delete(teams).where(eq(teams.id, id));
+}
+
+export async function getTeamMembers(teamId: string) {
+  return db.select().from(users).where(eq(users.teamId, teamId)).orderBy(desc(users.createdAt)).all();
+}
+
+export async function getUsersByTeam(teamId: string) {
+  return getTeamMembers(teamId);
+}
+
+export async function removeUserFromTeam(userId: string) {
+  await db.update(users).set({ teamId: null, updatedAt: new Date() }).where(eq(users.id, userId));
+}
+
+// Team-scoped repositories
+export async function getRepositoriesByTeam(teamId: string) {
+  return db.select().from(repositories).where(eq(repositories.teamId, teamId)).orderBy(desc(repositories.createdAt)).all();
+}
+
+// Team-scoped GitHub account
+export async function getGithubAccountByTeam(teamId: string) {
+  return db.select().from(githubAccounts).where(eq(githubAccounts.teamId, teamId)).get();
+}
+
+// Team-scoped invitations
+export async function getPendingInvitationsByTeam(teamId: string) {
+  const now = new Date();
+  return db
+    .select()
+    .from(userInvitations)
+    .where(and(eq(userInvitations.teamId, teamId), isNull(userInvitations.acceptedAt), gte(userInvitations.expiresAt, now)))
+    .orderBy(desc(userInvitations.createdAt))
+    .all();
+}
+
+// ============================================
 // User Management
 // ============================================
 
@@ -2194,7 +2289,7 @@ export async function getInvitationByEmail(email: string) {
   return db.select().from(userInvitations).where(eq(userInvitations.email, email.toLowerCase())).get();
 }
 
-export async function createInvitation(data: { email: string; invitedById?: string; role?: UserRole }): Promise<string> {
+export async function createInvitation(data: { email: string; teamId: string; invitedById?: string; role?: UserRole }): Promise<string> {
   const id = uuid();
   const token = uuid();
   const now = new Date();
@@ -2202,6 +2297,7 @@ export async function createInvitation(data: { email: string; invitedById?: stri
 
   await db.insert(userInvitations).values({
     id,
+    teamId: data.teamId,
     email: data.email.toLowerCase(),
     invitedById: data.invitedById ?? null,
     token,
