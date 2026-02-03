@@ -157,9 +157,29 @@ export async function generateDiff(
   fs.writeFileSync(diffImagePath, PNG.sync.write(diff));
 
   // Calculate metadata
-  const totalPixels = width * height;
-  const percentageDifference = (numDiffPixels / totalPixels) * 100;
   const changedRegions = findChangedRegions(diff.data, width, height);
+
+  // Calculate content-aware percentage:
+  // Instead of dividing by total pixels (which includes empty background),
+  // divide by the union of content areas from both images
+  const baselineBg = detectBackgroundColor(baseline.data, width, height);
+  const currentBg = detectBackgroundColor(current.data, width, height);
+
+  const baselineContent = calculateContentArea(baseline.data, width, height, baselineBg);
+  const currentContent = calculateContentArea(current.data, width, height, currentBg);
+
+  // Use the larger content area as the denominator for a more meaningful percentage
+  const contentArea = Math.max(
+    baselineContent.contentPixels,
+    currentContent.contentPixels,
+    1 // prevent division by zero
+  );
+
+  // Calculate percentage based on content area, not total image
+  const contentPercentage = (numDiffPixels / contentArea) * 100;
+  // Cap at 100% since diff pixels can exceed content area when images are very different
+  const percentageDifference = Math.min(contentPercentage, 100);
+
   const changeCategories = categorizeChanges(changedRegions, percentageDifference);
   const affectedComponents = detectAffectedComponents(changedRegions);
   const pageShift = detectPageShift(changedRegions);
