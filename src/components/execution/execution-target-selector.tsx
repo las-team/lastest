@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect } from 'react';
 import {
   Select,
   SelectContent,
@@ -9,8 +9,8 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Monitor, Cloud } from 'lucide-react';
-import type { Runner, RunnerCapability } from '@/lib/db/schema';
-import { getRunnersWithCapability } from '@/server/actions/runners';
+import type { RunnerCapability } from '@/lib/db/schema';
+import { useRunnerStatus } from './use-runner-status';
 
 interface ExecutionTargetSelectorProps {
   value: string;
@@ -29,27 +29,7 @@ export function ExecutionTargetSelector({
   size = 'default',
   className,
 }: ExecutionTargetSelectorProps) {
-  const [runners, setRunners] = useState<Runner[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
-
-  useEffect(() => {
-    async function loadRunners() {
-      try {
-        const allRunners = await getRunnersWithCapability(capabilityFilter);
-        setRunners(allRunners);
-      } catch (error) {
-        console.error('Failed to load runners:', error);
-        setRunners([]);
-      } finally {
-        setIsLoading(false);
-      }
-    }
-
-    loadRunners();
-    // Refresh runners periodically
-    const interval = setInterval(loadRunners, 30000);
-    return () => clearInterval(interval);
-  }, [capabilityFilter]);
+  const { runners, isLoading } = useRunnerStatus(capabilityFilter);
 
   // If selected runner goes offline, reset to local
   useEffect(() => {

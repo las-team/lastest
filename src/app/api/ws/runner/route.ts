@@ -79,8 +79,9 @@ if (!globalSessionState.__runnerActiveSessions) {
 }
 const activeRunnerSessions = globalSessionState.__runnerActiveSessions;
 
-// Session timeout in milliseconds (30 seconds)
-const SESSION_TIMEOUT_MS = 30_000;
+// Session timeout in milliseconds (90 seconds = 3x heartbeat interval)
+// Allows for 2 missed heartbeats before marking offline
+const SESSION_TIMEOUT_MS = 90_000;
 
 // Cleanup interval (60 seconds)
 const CLEANUP_INTERVAL_MS = 60_000;
@@ -160,6 +161,14 @@ export async function POST(request: NextRequest) {
     switch (message.type) {
       case 'status:heartbeat': {
         const heartbeat = message as HeartbeatMessage;
+
+        // Handle graceful disconnect
+        if (heartbeat.payload.disconnect) {
+          await updateRunnerStatus(runner.id, 'offline');
+          activeRunnerSessions.delete(runner.id);
+          return NextResponse.json({ ok: true, goodbye: true });
+        }
+
         // Map all heartbeat statuses to valid runner statuses
         let status: 'online' | 'offline' | 'busy';
         switch (heartbeat.payload.status) {

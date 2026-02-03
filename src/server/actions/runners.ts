@@ -6,6 +6,7 @@ import { eq, and, desc } from 'drizzle-orm';
 import { v4 as uuid } from 'uuid';
 import crypto from 'crypto';
 import { requireTeamAdmin, requireTeamAccess } from '@/lib/auth';
+import { emitRunnerStatusChange } from '@/lib/ws/runner-events';
 
 /**
  * Hash a runner token using SHA256
@@ -172,12 +173,17 @@ export async function deleteRunner(runnerId: string): Promise<{ success: boolean
 
 /**
  * Update runner status (internal use - called by WebSocket handler)
+ * Emits SSE event when status changes
  */
 export async function updateRunnerStatus(
   runnerId: string,
   status: 'online' | 'offline' | 'busy',
   lastSeen?: Date
 ): Promise<void> {
+  // Get current status to detect changes
+  const current = await db.select().from(runners).where(eq(runners.id, runnerId)).get();
+  const previousStatus = current?.status;
+
   await db
     .update(runners)
     .set({
@@ -185,6 +191,17 @@ export async function updateRunnerStatus(
       lastSeen: lastSeen ?? new Date(),
     })
     .where(eq(runners.id, runnerId));
+
+  // Emit event if status actually changed
+  if (current && previousStatus !== status) {
+    emitRunnerStatusChange({
+      runnerId,
+      teamId: current.teamId,
+      status,
+      previousStatus,
+      timestamp: Date.now(),
+    });
+  }
 }
 
 /**

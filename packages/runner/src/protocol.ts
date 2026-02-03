@@ -154,6 +154,7 @@ export interface HeartbeatPayload {
   status: 'idle' | 'busy' | 'recording';
   currentTask?: string;
   systemInfo: SystemInfo;
+  disconnect?: boolean; // Signal graceful shutdown
 }
 
 export interface HeartbeatMessage extends BaseMessage {

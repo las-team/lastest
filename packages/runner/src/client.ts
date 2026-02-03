@@ -50,7 +50,7 @@ export class RunnerClient {
   constructor(options: RunnerClientOptions) {
     this.token = options.token;
     this.serverUrl = options.serverUrl.replace(/\/$/, '');
-    this.pollInterval = options.pollInterval ?? 5000;
+    this.pollInterval = options.pollInterval ?? 30000; // 30 seconds default
     this.runner = new TestRunner();
   }
 
@@ -71,8 +71,40 @@ export class RunnerClient {
   }
 
   async stop(): Promise<void> {
+    if (!this.running) return;
+
     this.running = false;
-    console.log('Runner stopped');
+    console.log('Sending offline notification...');
+
+    // Send explicit offline message before stopping
+    try {
+      const offlineMsg = createMessage<HeartbeatMessage>('status:heartbeat', {
+        status: 'idle', // Will be treated as 'offline' intent with disconnect flag
+        currentTask: undefined,
+        systemInfo: this.getSystemInfo(),
+        disconnect: true, // Signal graceful disconnect
+      });
+
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${this.token}`,
+      };
+
+      if (this.sessionId) {
+        headers['X-Session-ID'] = this.sessionId;
+      }
+
+      await fetch(`${this.serverUrl}/api/ws/runner`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(offlineMsg),
+      });
+
+      console.log('Runner stopped gracefully');
+    } catch (error) {
+      console.error('Failed to send offline notification:', error);
+      console.log('Runner stopped (ungraceful)');
+    }
   }
 
   private async connect(): Promise<boolean> {

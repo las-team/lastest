@@ -13,17 +13,29 @@ check the recorder and the runner so that they are compatible and identify the r
 ## in progress
 ## test
 OCR
-GitHub PR Comments - CLI runner   
-
+GitHub PR Comments - CLI runner
 ## features
 Github actions integration
 Publish lastest runner to npx npm
 User email sending with resend
 VS Code extension
 npm/CLI one-liner install
+Compare to figma designs/uploaded photos
 
 ├── Days 1-2: Diff comments (P2)
 └── Days 3-5: GitLab integration (P2)
+
+Smart test selection       
+
+  - Analyzes Git history to identify which components changed          
+  - Only runs visual tests on affected stories (skips unchanged)       
+  - Claims up to 80% reduction in snapshot usage/billing               
+  - Caveats: package.json changes trigger full runs; barrel file       
+  imports cause cascade re-testing 
+
+Steady
+  - Uses burst capture (multiple frames) to detect instability         
+  - Masks dynamic content (timestamps, random IDs)    
 
 UI & UX 
     Use the frontend design skill and subagent for this
