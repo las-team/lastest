@@ -3,6 +3,8 @@
 import { revalidatePath } from 'next/cache';
 import { getRunner } from '@/lib/playwright/runner';
 import { getServerManager } from '@/lib/playwright/server-manager';
+import { executeTests } from '@/lib/execution/executor';
+import { getCurrentSession } from '@/lib/auth';
 import { getBranchInfo } from '@/lib/github/content';
 import * as queries from '@/lib/db/queries';
 import { v4 as uuid } from 'uuid';
@@ -55,7 +57,7 @@ export async function createTestRun(testIds?: string[], repositoryId?: string | 
   return run;
 }
 
-export async function runTests(testIds?: string[], repositoryId?: string | null, headless?: boolean) {
+export async function runTests(testIds?: string[], repositoryId?: string | null, headless?: boolean, agentId?: string) {
   const runner = getRunner(repositoryId);
 
   if (runner.isActive()) {
@@ -109,19 +111,52 @@ export async function runTests(testIds?: string[], repositoryId?: string | null,
   const jobId = await createJob('test_run', `Test Run (${tests.length} tests)`, tests.length, repositoryId);
 
   // Run tests (this happens async)
-  runTestsAsync(run.id, tests, repositoryId, headless, jobId);
+  runTestsAsync(run.id, tests, repositoryId, headless, jobId, agentId);
 
   return { runId: run.id, testCount: tests.length, jobId };
 }
 
-async function runTestsAsync(runId: string, tests: Test[], repositoryId?: string | null, headless?: boolean, jobId?: string) {
+async function runTestsAsync(runId: string, tests: Test[], repositoryId?: string | null, headless?: boolean, jobId?: string, agentId?: string) {
   const runner = getRunner(repositoryId);
 
   // Use provided jobId or create new one (for backwards compatibility)
   const activeJobId = jobId ?? await createJob('test_run', `Test Run (${tests.length} tests)`, tests.length, repositoryId);
 
+  // Get teamId for agent execution
+  let teamId: string | undefined;
+  if (agentId && agentId !== 'local') {
+    const session = await getCurrentSession();
+    teamId = session?.user?.teamId ?? undefined;
+  }
+
+  // Load environment and playwright settings
+  const envConfig = await queries.getEnvironmentConfig(repositoryId);
+  const playwrightSettings = await queries.getPlaywrightSettings(repositoryId);
+
   try {
-    const results = await runner.runTests(tests, runId, undefined, undefined, headless);
+    let results;
+
+    if (agentId && agentId !== 'local' && teamId) {
+      // Use executor for agent routing
+      results = await executeTests(tests, runId, {
+        repositoryId,
+        teamId,
+        agentId,
+        headless,
+        environmentConfig: envConfig,
+        playwrightSettings,
+      });
+    } else {
+      // Local execution
+      if (envConfig?.id) {
+        runner.setEnvironmentConfig(envConfig);
+        getServerManager().setConfig(envConfig);
+      }
+      if (playwrightSettings) {
+        runner.setSettings(playwrightSettings);
+      }
+      results = await runner.runTests(tests, runId, undefined, undefined, headless);
+    }
 
     // Save results
     for (let i = 0; i < results.length; i++) {

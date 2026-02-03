@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button';
 import { Progress } from '@/components/ui/progress';
 import { SuiteBuilder } from '@/components/suites/suite-builder';
 import { CreateSuiteDialog } from '@/components/suites/create-suite-dialog';
+import { ExecutionTargetSelector } from '@/components/execution/execution-target-selector';
 import { deleteSuite, runSuite, getSuiteRunProgress } from '@/server/actions/suites';
 import { useNotifyJobStarted } from '@/components/queue/job-polling-context';
 import type { Suite, FunctionalArea } from '@/lib/db/schema';
@@ -62,6 +63,7 @@ export function SuiteDetailClient({ suite, availableTests, areas }: SuiteDetailC
   const [isRunning, setIsRunning] = useState(false);
   const [runId, setRunId] = useState<string | null>(null);
   const [progress, setProgress] = useState<RunProgress | null>(null);
+  const [executionTarget, setExecutionTarget] = useState<string>('local');
 
   const pollProgress = useCallback(async (id: string) => {
     const data = await getSuiteRunProgress(id);
@@ -95,7 +97,7 @@ export function SuiteDetailClient({ suite, availableTests, areas }: SuiteDetailC
     setIsRunning(true);
     setProgress(null);
     try {
-      const result = await runSuite(suite.id);
+      const result = await runSuite(suite.id, executionTarget);
       notifyJobStarted();
       setRunId(result.runId);
     } catch (error) {
@@ -133,6 +135,13 @@ export function SuiteDetailClient({ suite, availableTests, areas }: SuiteDetailC
             </p>
           </div>
           <div className="flex items-center gap-2">
+            <ExecutionTargetSelector
+              value={executionTarget}
+              onChange={setExecutionTarget}
+              disabled={isRunning}
+              capabilityFilter="run"
+              size="sm"
+            />
             <Button onClick={handleRun} disabled={isRunning || suite.tests.length === 0}>
               {isRunning ? (
                 <Loader2 className="w-4 h-4 mr-2 animate-spin" />

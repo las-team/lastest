@@ -201,6 +201,48 @@ The runner automatically captures `GITHUB_HEAD_REF`, `GITHUB_REF_NAME`, and `GIT
 
 ---
 
+## Remote Agent (Preview)
+
+Run tests on remote machines by deploying agents that connect back to your Lastest2 server.
+
+> ⚠️ **Status**: The agent package exists but is not yet published to NPM. Currently available for local development only.
+
+### Local Development Setup
+
+```bash
+# From the repo root, build the agent package
+cd packages/agent
+pnpm install
+pnpm build
+
+# Link globally for local testing
+pnpm link --global
+
+# Run the agent
+lastest2-agent --token YOUR_TOKEN --server http://localhost:3000
+```
+
+### How It Works
+
+1. **Create an agent** in Settings → Agents
+2. **Copy the token** (shown only once)
+3. **Run the agent** on your target machine
+4. **Execute tests** remotely via the web UI
+
+### Current Limitations
+
+- Uses HTTP polling (Next.js doesn't support native WebSocket in App Router)
+- In-memory command queue (restart clears pending commands)
+- Package not yet published to NPM
+
+### Coming Soon
+
+- [ ] NPM package publication (`npm install -g @lastest2/agent`)
+- [ ] Redis-backed command queue for production
+- [ ] Agent health monitoring dashboard
+
+---
+
 ## Tech Stack
 
 - **Framework**: Next.js 16 (App Router)
@@ -232,7 +274,8 @@ BETTER_AUTH_SECRET=
 - [x] Team collaboration features
 - [ ] Component-level testing
 - [ ] Storybook integration
-- [ ] Cloud deployment with local agent
+- [ ] Remote agent NPM package publication
+- [ ] Production-ready agent infrastructure (Redis queue)
 
 ---
 

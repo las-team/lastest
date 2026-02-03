@@ -4,6 +4,8 @@ import { revalidatePath } from 'next/cache';
 import * as queries from '@/lib/db/queries';
 import { getRunner } from '@/lib/playwright/runner';
 import { getServerManager } from '@/lib/playwright/server-manager';
+import { executeTests } from '@/lib/execution/executor';
+import { getCurrentSession } from '@/lib/auth';
 import { getBranchInfo } from '@/lib/github/content';
 import { createJob, updateJobProgress, completeJob, failJob } from './jobs';
 import type { NewSuite, Test } from '@/lib/db/schema';
@@ -67,7 +69,7 @@ async function getGitInfo(repositoryId: string | null) {
   return { branch: branchInfo.name, commit: branchInfo.commit.sha.slice(0, 7) };
 }
 
-export async function runSuite(suiteId: string) {
+export async function runSuite(suiteId: string, agentId?: string) {
   const suiteWithTests = await queries.getSuiteWithTests(suiteId);
   if (!suiteWithTests) {
     throw new Error('Suite not found');
@@ -118,7 +120,7 @@ export async function runSuite(suiteId: string) {
   });
 
   // Run tests async (halt on error)
-  runSuiteTestsAsync(run.id, tests, repositoryId, suiteWithTests.name);
+  runSuiteTestsAsync(run.id, tests, repositoryId, suiteWithTests.name, agentId);
 
   return { runId: run.id, testCount: tests.length };
 }
@@ -127,16 +129,52 @@ async function runSuiteTestsAsync(
   runId: string,
   tests: Test[],
   repositoryId: string | null | undefined,
-  suiteName: string
+  suiteName: string,
+  agentId?: string
 ) {
   const runner = getRunner(repositoryId);
   const jobId = await createJob('test_run', `Suite: ${suiteName}`, tests.length, repositoryId);
+
+  // Get teamId for agent execution
+  let teamId: string | undefined;
+  if (agentId && agentId !== 'local') {
+    const session = await getCurrentSession();
+    teamId = session?.user?.teamId ?? undefined;
+  }
+
+  // Load environment and playwright settings
+  const envConfig = await queries.getEnvironmentConfig(repositoryId);
+  const playwrightSettings = await queries.getPlaywrightSettings(repositoryId);
+
+  // Setup runner for local execution
+  if (!agentId || agentId === 'local' || !teamId) {
+    if (envConfig?.id) {
+      runner.setEnvironmentConfig(envConfig);
+      getServerManager().setConfig(envConfig);
+    }
+    if (playwrightSettings) {
+      runner.setSettings(playwrightSettings);
+    }
+  }
 
   try {
     // Run tests one by one, halt on first failure
     for (let i = 0; i < tests.length; i++) {
       const test = tests[i];
-      const results = await runner.runTests([test], runId);
+
+      let results;
+      if (agentId && agentId !== 'local' && teamId) {
+        results = await executeTests([test], runId, {
+          repositoryId,
+          teamId,
+          agentId,
+          environmentConfig: envConfig,
+          playwrightSettings,
+        });
+      } else {
+        results = await runner.runTests([test], runId);
+      }
+
       const result = results[0];
 
       // Save result

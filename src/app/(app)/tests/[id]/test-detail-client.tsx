@@ -27,6 +27,7 @@ import { runTests, getJobStatus } from '@/server/actions/runs';
 import { aiFixTest, aiEnhanceTest, updateTestCode } from '@/server/actions/ai';
 import { toast } from 'sonner';
 import { useNotifyJobStarted } from '@/components/queue/job-polling-context';
+import { ExecutionTargetSelector } from '@/components/execution/execution-target-selector';
 import type { Test, TestVersion, VisualDiff } from '@/lib/db/schema';
 import type { ScreenshotGroup } from '@/server/actions/tests';
 
@@ -74,6 +75,7 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
   // Run state
   const [isRunning, setIsRunning] = useState(false);
   const pollIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const [executionTarget, setExecutionTarget] = useState<string>('local');
 
   // Cleanup poll interval on unmount
   useEffect(() => {
@@ -190,7 +192,7 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
 
     setIsRunning(true);
     try {
-      const { jobId } = await runTests([test.id], repositoryId, headless);
+      const { jobId } = await runTests([test.id], repositoryId, headless, executionTarget);
       notifyJobStarted();
       toast.success(headless ? 'Test started' : 'Test started (headed mode)');
       // Poll job status for completion (ensures results are saved before refresh)
@@ -322,6 +324,13 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
                   </>
                 ) : (
                   <>
+                    <ExecutionTargetSelector
+                      value={executionTarget}
+                      onChange={setExecutionTarget}
+                      disabled={isRunning}
+                      capabilityFilter="run"
+                      size="sm"
+                    />
                     <div className="flex">
                       <Button
                         onClick={() => handleRun(true)}

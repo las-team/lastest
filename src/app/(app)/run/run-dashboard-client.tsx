@@ -20,6 +20,7 @@ import { createAndRunBuild } from '@/server/actions/builds';
 import type { BuildChanges } from '@/server/actions/builds';
 import { testServerConnection, saveEnvironmentConfig } from '@/server/actions/environment';
 import { useNotifyJobStarted } from '@/components/queue/job-polling-context';
+import { ExecutionTargetSelector } from '@/components/execution/execution-target-selector';
 import type { Test, TestRun, Build } from '@/lib/db/schema';
 import { BuildSummaryCard } from '@/components/builds/build-summary-card';
 
@@ -73,6 +74,7 @@ export function RunDashboardClient({ tests, runs, builds, repositoryId, activeBr
   const [showHistory, setShowHistory] = useState(false);
   const [urlHistory, setUrlHistory] = useState<string[]>([]);
   const initialBaseUrlRef = useRef(initialBaseUrl);
+  const [executionTarget, setExecutionTarget] = useState<string>('local');
 
   useEffect(() => {
     setUrlHistory(getUrlHistory());
@@ -105,7 +107,7 @@ export function RunDashboardClient({ tests, runs, builds, repositoryId, activeBr
     setIsRunning(true);
     try {
       await saveAndTestBaseUrl();
-      const { buildId, testRunId } = await createAndRunBuild('manual', undefined, repositoryId);
+      const { buildId, testRunId } = await createAndRunBuild('manual', undefined, repositoryId, executionTarget);
       notifyJobStarted();
       router.push(`/builds/${buildId}`);
     } catch (error) {
@@ -129,18 +131,27 @@ export function RunDashboardClient({ tests, runs, builds, repositoryId, activeBr
                     Execute all tests or select specific ones
                   </CardDescription>
                 </div>
-                <Button
-                  onClick={handleRunAll}
-                  disabled={isRunning || tests.length === 0}
-                  size="lg"
-                >
-                  {isRunning ? (
-                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                  ) : (
-                    <Play className="h-4 w-4 mr-2" />
-                  )}
-                  Run All Tests
-                </Button>
+                <div className="flex items-center gap-2">
+                  <ExecutionTargetSelector
+                    value={executionTarget}
+                    onChange={setExecutionTarget}
+                    disabled={isRunning}
+                    capabilityFilter="run"
+                    size="sm"
+                  />
+                  <Button
+                    onClick={handleRunAll}
+                    disabled={isRunning || tests.length === 0}
+                    size="lg"
+                  >
+                    {isRunning ? (
+                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    ) : (
+                      <Play className="h-4 w-4 mr-2" />
+                    )}
+                    Run All Tests
+                  </Button>
+                </div>
               </div>
             </CardHeader>
             <CardContent>

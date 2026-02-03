@@ -63,6 +63,7 @@ import {
 import type { FunctionalArea, PlaywrightSettings, RecordingEngine, Test } from '@/lib/db/schema';
 import { DEFAULT_RECORDING_ENGINES } from '@/lib/db/schema';
 import { PlaywrightSettingsCard } from '@/components/settings/playwright-settings-card';
+import { ExecutionTargetSelector } from '@/components/execution/execution-target-selector';
 
 interface RecordingClientProps {
   areas: FunctionalArea[];
@@ -225,6 +226,7 @@ export function RecordingClient({
   const [playwrightStatus, setPlaywrightStatus] = useState<PlaywrightAvailability | null>(null);
   const [selectedEngine, setSelectedEngine] = useState<RecordingEngine>(defaultEngine);
   const [inspectorSessionId, setInspectorSessionId] = useState<string | null>(null);
+  const [executionTarget, setExecutionTarget] = useState<string>('local');
 
   // Re-record mode
   const isRerecording = !!rerecordTest;
@@ -400,7 +402,7 @@ export function RecordingClient({
         }
       } else {
         // Start Lastest recorder
-        const result = await startRecording(url, repositoryId);
+        const result = await startRecording(url, repositoryId, executionTarget);
 
         if (result.error) {
           setError(result.error);
@@ -667,6 +669,22 @@ export function RecordingClient({
                     </p>
                   </div>
                 )}
+
+                {/* Execution Target */}
+                <div className="space-y-2">
+                  <label className="text-sm font-medium">Execution Target</label>
+                  <ExecutionTargetSelector
+                    value={executionTarget}
+                    onChange={setExecutionTarget}
+                    disabled={isLoading}
+                    capabilityFilter="record"
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    {executionTarget === 'local'
+                      ? 'Record on this machine'
+                      : 'Record on a remote agent'}
+                  </p>
+                </div>
 
                 {/* Error Display */}
                 {error && (

@@ -59,7 +59,7 @@ export async function checkPlaywrightAvailability(repositoryId?: string | null):
   }
 }
 
-export async function startRecording(url: string, repositoryId?: string | null): Promise<{ sessionId?: string; error?: string }> {
+export async function startRecording(url: string, repositoryId?: string | null, agentId?: string): Promise<{ sessionId?: string; error?: string }> {
   const recorder = getRecorder(repositoryId);
 
   if (recorder.isActive()) {

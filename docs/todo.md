@@ -19,7 +19,7 @@ Page Shift Detection
 Anti-Aliasing Handling 
 Animation Freezing
 Screenshot Stabilization Delay       
-
+Agents -> Runners
 ## features
 please Execution local client and cloud ~/.claude/plans/cozy-sniffing-hopcroft.md  
 Electron app ~/.claude/plans/rippling-roaming-snail.md

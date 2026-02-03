@@ -53,6 +53,28 @@ export async function executeTests(
   onProgress?: (progress: ExecutionProgress) => void,
   onResult?: (result: TestRunResult) => Promise<void>
 ): Promise<TestRunResult[]> {
+  // If explicit agentId is provided, use that routing
+  if (options.agentId) {
+    if (options.agentId === 'local') {
+      console.log('Execution target: local (explicit)');
+      return executeLocally(tests, runId, options, onProgress, onResult);
+    }
+
+    // Explicit agent ID provided - verify agent is available
+    if (options.teamId) {
+      const agent = await getAvailableAgentById(options.teamId, options.agentId);
+      if (agent) {
+        console.log(`Execution target: agent ${agent.id} (explicit)`);
+        return executeViaAgent(tests, runId, agent.id, options, onProgress, onResult);
+      }
+      console.warn(`Agent ${options.agentId} not available, falling back to local`);
+    } else {
+      console.warn('No teamId provided for agent execution, falling back to local');
+    }
+    return executeLocally(tests, runId, options, onProgress, onResult);
+  }
+
+  // Auto-detect mode (legacy behavior)
   const mode = getExecutionMode();
   const useLocal = shouldUseLocalRunner(options.forceLocal);
 
@@ -278,6 +300,26 @@ async function getAvailableAgent(teamId: string) {
     .from(agents)
     .where(and(eq(agents.teamId, teamId), eq(agents.status, 'online')))
     .limit(1)
+    .get();
+
+  return dbAgent;
+}
+
+/**
+ * Get a specific agent by ID if it's available.
+ */
+async function getAvailableAgentById(teamId: string, agentId: string) {
+  // First try the in-memory registry (WebSocket connections)
+  const wsAgent = agentRegistry.getAgent(agentId);
+  if (wsAgent && wsAgent.teamId === teamId && wsAgent.status !== 'offline') {
+    return { id: wsAgent.agentId, status: wsAgent.status };
+  }
+
+  // Fall back to database (polling agents)
+  const dbAgent = await db
+    .select()
+    .from(agents)
+    .where(and(eq(agents.id, agentId), eq(agents.teamId, teamId), eq(agents.status, 'online')))
     .get();
 
   return dbAgent;

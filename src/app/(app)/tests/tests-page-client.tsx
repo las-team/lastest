@@ -24,6 +24,7 @@ import { generateBasicTests } from '@/server/actions/scanner';
 import { aiFixAllFailedTests, aiFixTests } from '@/server/actions/ai';
 import { runTests } from '@/server/actions/runs';
 import { useNotifyJobStarted } from '@/components/queue/job-polling-context';
+import { ExecutionTargetSelector } from '@/components/execution/execution-target-selector';
 import { RouteSelectorDialog } from '@/components/routes/route-selector-dialog';
 import { AICreateTestDialog } from '@/components/ai/ai-create-test-dialog';
 import { MCPCreateTestDialog } from '@/components/ai/mcp-create-test-dialog';
@@ -77,6 +78,7 @@ export function TestsPageClient({ areas, tests, routes, repositoryId, baseUrl = 
   const [isBulkDeleting, setIsBulkDeleting] = useState(false);
   const [isBulkFixing, setIsBulkFixing] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [executionTarget, setExecutionTarget] = useState<string>('local');
 
   const failedTests = tests.filter(t => t.latestStatus === 'failed');
 
@@ -113,7 +115,7 @@ export function TestsPageClient({ areas, tests, routes, repositoryId, baseUrl = 
     if (selectedIds.size === 0) return;
     setIsBulkRunning(true);
     try {
-      await runTests(Array.from(selectedIds), repositoryId);
+      await runTests(Array.from(selectedIds), repositoryId, true, executionTarget);
       notifyJobStarted();
     } finally {
       setIsBulkRunning(false);
@@ -313,6 +315,13 @@ export function TestsPageClient({ areas, tests, routes, repositoryId, baseUrl = 
                 <span className="text-sm text-muted-foreground">
                   Selected: {selectedIds.size}
                 </span>
+                <ExecutionTargetSelector
+                  value={executionTarget}
+                  onChange={setExecutionTarget}
+                  disabled={isBulkRunning}
+                  capabilityFilter="run"
+                  size="sm"
+                />
                 <Button
                   variant="outline"
                   size="sm"
