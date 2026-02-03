@@ -23,6 +23,7 @@ export async function savePlaywrightSettings(data: {
   defaultRecordingEngine?: string;
   freezeAnimations?: boolean;
   screenshotDelay?: number;
+  maxParallelTests?: number;
 }) {
   const { repositoryId, ...settingsData } = data;
 

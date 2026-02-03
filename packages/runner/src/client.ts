@@ -7,6 +7,7 @@ import os from 'os';
 import type {
   Message,
   RunTestCommand,
+  CancelTestCommand,
   HeartbeatMessage,
   TestResultResponse,
   TestProgressResponse,
@@ -23,6 +24,7 @@ interface ConnectResponse {
   teamId: string;
   capabilities?: string[];
   commands?: Message[];
+  sessionId: string;
 }
 
 interface HeartbeatResponse {
@@ -43,6 +45,7 @@ export class RunnerClient {
   private status: 'idle' | 'busy' | 'recording' = 'idle';
   private currentTask?: string;
   private runner: TestRunner;
+  private sessionId?: string;
 
   constructor(options: RunnerClientOptions) {
     this.token = options.token;
@@ -81,6 +84,13 @@ export class RunnerClient {
         },
       });
 
+      if (response.status === 409) {
+        const data = await response.json();
+        console.error('❌ Connection rejected: another runner instance is already connected with this token');
+        console.error(`   ${data.error}`);
+        return false;
+      }
+
       if (!response.ok) {
         const text = await response.text();
         console.error(`Connection failed: ${response.status} ${text}`);
@@ -88,8 +98,13 @@ export class RunnerClient {
       }
 
       const data = (await response.json()) as ConnectResponse;
+
+      // Store session ID for subsequent requests
+      this.sessionId = data.sessionId;
+
       console.log(`Runner ID: ${data.runnerId}`);
       console.log(`Team ID: ${data.teamId}`);
+      console.log(`Session ID: ${data.sessionId}`);
       console.log(`Capabilities: ${data.capabilities?.join(', ') || 'run, record'}`);
 
       // Process any pending commands
@@ -115,14 +130,29 @@ export class RunnerClient {
           systemInfo: this.getSystemInfo(),
         });
 
+        const headers: Record<string, string> = {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${this.token}`,
+        };
+
+        // Include session ID if we have one
+        if (this.sessionId) {
+          headers['X-Session-ID'] = this.sessionId;
+        }
+
         const response = await fetch(`${this.serverUrl}/api/ws/runner`, {
           method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${this.token}`,
-          },
+          headers,
           body: JSON.stringify(heartbeat),
         });
+
+        if (response.status === 409) {
+          // Session conflict - another instance took over
+          console.error('❌ Session conflict: another runner instance has connected with this token');
+          console.error('   This instance will shut down gracefully.');
+          await this.stop();
+          return;
+        }
 
         if (response.ok) {
           const data = (await response.json()) as HeartbeatResponse;
@@ -157,6 +187,10 @@ export class RunnerClient {
         await this.handleRunTest(message as RunTestCommand);
         break;
 
+      case 'command:cancel_test':
+        await this.handleCancelTest(message as CancelTestCommand);
+        break;
+
       default:
         console.warn(`Unknown command type: ${message.type}`);
         await this.sendError(message.id, 'UNKNOWN_COMMAND', `Unknown command: ${message.type}`);
@@ -168,6 +202,20 @@ export class RunnerClient {
       correlationId,
     });
     await this.sendMessage(pong);
+  }
+
+  private async handleCancelTest(command: CancelTestCommand): Promise<void> {
+    const { testRunId, reason } = command.payload;
+    console.log(`Received cancel command for test run ${testRunId}: ${reason}`);
+
+    const aborted = this.runner.abort(testRunId);
+    if (aborted) {
+      console.log(`Test run ${testRunId} aborted successfully`);
+    } else if (this.runner.isRunning()) {
+      console.log(`Test run ${testRunId} is not the current test, ignoring cancel`);
+    } else {
+      console.log(`No test running to cancel`);
+    }
   }
 
   private async handleRunTest(command: RunTestCommand): Promise<void> {
@@ -225,12 +273,19 @@ export class RunnerClient {
 
   private async sendMessage(message: Message): Promise<void> {
     try {
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${this.token}`,
+      };
+
+      // Include session ID if we have one
+      if (this.sessionId) {
+        headers['X-Session-ID'] = this.sessionId;
+      }
+
       await fetch(`${this.serverUrl}/api/ws/runner`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${this.token}`,
-        },
+        headers,
         body: JSON.stringify(message),
       });
     } catch (error) {

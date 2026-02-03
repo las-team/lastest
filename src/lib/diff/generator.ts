@@ -277,7 +277,7 @@ function detectAffectedComponents(regions: Rectangle[]): string[] {
  * If multiple regions show the same vertical shift, it's likely a page-level shift
  * (e.g., banner added/removed, content insertion).
  */
-function detectPageShift(regions: Rectangle[]): PageShiftInfo | undefined {
+export function detectPageShift(regions: Rectangle[]): PageShiftInfo | undefined {
   if (regions.length < 2) {
     return undefined;
   }

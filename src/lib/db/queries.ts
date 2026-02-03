@@ -720,6 +720,7 @@ export async function getPlaywrightSettings(repositoryId?: string | null) {
     defaultRecordingEngine: 'lastest' as const,
     freezeAnimations: false,
     screenshotDelay: 0,
+    maxParallelTests: 1,
     createdAt: null,
     updatedAt: null,
   };
@@ -2322,4 +2323,9 @@ export async function deleteInvitation(id: string) {
 export async function deleteExpiredInvitations() {
   const now = new Date();
   await db.delete(userInvitations).where(lt(userInvitations.expiresAt, now));
+}
+
+// Runner queries
+export async function getRunnerById(runnerId: string) {
+  return db.select().from(runners).where(eq(runners.id, runnerId)).get();
 }

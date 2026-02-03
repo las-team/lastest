@@ -1,4 +1,5 @@
 import { chromium, firefox, webkit, Browser, Page, BrowserContext, Locator } from 'playwright';
+import { FREEZE_ANIMATIONS_CSS } from './constants';
 import { EventEmitter } from 'events';
 import path from 'path';
 import fs from 'fs';
@@ -395,6 +396,8 @@ export interface ProgressCallback {
   completed: number;
   total: number;
   currentTestName?: string;
+  activeCount?: number;
+  activeTests?: string[];
 }
 
 export class PlaywrightRunner extends EventEmitter {
@@ -463,12 +466,17 @@ export class PlaywrightRunner extends EventEmitter {
     return this.settings?.actionTimeout || 5000;
   }
 
+  private getMaxParallelTests() {
+    return this.settings?.maxParallelTests || 1;
+  }
+
   async runTests(
     tests: Test[],
     runId: string,
     onProgress?: (progress: ProgressCallback) => void,
     onResult?: (result: TestRunResult) => void | Promise<void>,
-    headlessOverride?: boolean
+    headlessOverride?: boolean,
+    maxParallelOverride?: number
   ): Promise<TestRunResult[]> {
     if (this.isRunning) {
       throw new Error('Already running tests');
@@ -509,25 +517,41 @@ export class PlaywrightRunner extends EventEmitter {
         timestamp: Date.now(),
       } as RunEvent);
 
-      for (let i = 0; i < tests.length; i++) {
-        const test = tests[i];
-        if (this.aborted) break;
+      // Get max parallel setting (override takes precedence)
+      const maxParallel = maxParallelOverride ?? this.getMaxParallelTests();
 
-        onProgress?.({
-          completed: i,
-          total: tests.length,
-          currentTestName: test.name,
-        });
+      if (maxParallel > 1) {
+        // Parallel execution
+        const parallelResults = await this.runTestsParallel(
+          tests,
+          runId,
+          maxParallel,
+          onProgress,
+          onResult
+        );
+        results.push(...parallelResults);
+      } else {
+        // Sequential execution (original behavior)
+        for (let i = 0; i < tests.length; i++) {
+          const test = tests[i];
+          if (this.aborted) break;
 
-        const result = await this.runSingleTest(test, runId);
-        results.push(result);
-        await onResult?.(result);
+          onProgress?.({
+            completed: i,
+            total: tests.length,
+            currentTestName: test.name,
+          });
 
-        onProgress?.({
-          completed: i + 1,
-          total: tests.length,
-          currentTestName: test.name,
-        });
+          const result = await this.runSingleTest(test, runId);
+          results.push(result);
+          await onResult?.(result);
+
+          onProgress?.({
+            completed: i + 1,
+            total: tests.length,
+            currentTestName: test.name,
+          });
+        }
       }
 
       this.emit('event', {
@@ -538,6 +562,81 @@ export class PlaywrightRunner extends EventEmitter {
     } finally {
       await this.cleanup();
       this.isRunning = false;
+    }
+
+    return results;
+  }
+
+  /**
+   * Run tests in parallel with a maximum concurrency limit.
+   */
+  private async runTestsParallel(
+    tests: Test[],
+    runId: string,
+    maxParallel: number,
+    onProgress?: (progress: ProgressCallback) => void,
+    onResult?: (result: TestRunResult) => void | Promise<void>
+  ): Promise<TestRunResult[]> {
+    const pending = [...tests];
+    const running = new Map<string, { promise: Promise<TestRunResult>; testName: string }>();
+    const results: TestRunResult[] = [];
+    let completedCount = 0;
+
+    const updateProgress = () => {
+      const activeTests = [...running.values()].map(r => r.testName);
+      onProgress?.({
+        completed: completedCount,
+        total: tests.length,
+        currentTestName: activeTests[0],
+        activeCount: running.size,
+        activeTests,
+      });
+    };
+
+    while (pending.length > 0 || running.size > 0) {
+      if (this.aborted) break;
+
+      // Fill up to maxParallel slots
+      while (running.size < maxParallel && pending.length > 0) {
+        const test = pending.shift()!;
+
+        const promise = this.runSingleTest(test, runId);
+        running.set(test.id, { promise, testName: test.name });
+      }
+
+      updateProgress();
+
+      if (running.size === 0) break;
+
+      // Wait for any test to complete and get its ID
+      const entries = [...running.entries()];
+      const racePromises = entries.map(([testId, { promise }]) =>
+        promise.then(result => ({ testId, result })).catch(err => ({ testId, error: err }))
+      );
+
+      const completed = await Promise.race(racePromises);
+
+      // Remove from running and process result
+      running.delete(completed.testId);
+      completedCount++;
+
+      if ('result' in completed) {
+        results.push(completed.result);
+        await onResult?.(completed.result);
+      } else {
+        // Handle error case - create a failed result
+        const failedResult: TestRunResult = {
+          testId: completed.testId,
+          status: 'failed',
+          durationMs: 0,
+          screenshots: [],
+          errorMessage: completed.error?.message || 'Unknown error',
+        };
+        results.push(failedResult);
+        await onResult?.(failedResult);
+      }
+
+      updateProgress();
     }
 
     return results;
@@ -583,14 +682,7 @@ export class PlaywrightRunner extends EventEmitter {
 
       // Freeze CSS animations/transitions if enabled
       if (this.settings?.freezeAnimations) {
-        await page.addStyleTag({
-          content: `*, *::before, *::after {
-            animation: none !important;
-            transition: none !important;
-            animation-delay: 0s !important;
-            transition-delay: 0s !important;
-          }`
-        });
+        await page.addStyleTag({ content: FREEZE_ANIMATIONS_CSS });
       }
 
       // Patterns for console errors that should be ignored (React dev warnings, hydration, etc.)

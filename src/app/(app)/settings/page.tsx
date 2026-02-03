@@ -1,10 +1,8 @@
-import Link from 'next/link';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
 import * as queries from '@/lib/db/queries';
 import { getCurrentUser } from '@/lib/auth';
-import { Github, Check, X, Database, ExternalLink, Users, Bot } from 'lucide-react';
+import { Github, Check, X, Database, ExternalLink, Users, Bot, Mail, Terminal } from 'lucide-react';
 import { PlaywrightSettingsCard } from '@/components/settings/playwright-settings-card';
 import { EnvironmentConfigCard } from '@/components/settings/environment-config-card';
 import { DiffSensitivityCard } from '@/components/settings/diff-sensitivity-card';
@@ -13,6 +11,12 @@ import { AILogsCard } from '@/components/settings/ai-logs-card';
 import { NotificationSettingsCard } from '@/components/settings/notification-settings-card';
 import { ResetSetupGuide } from '@/components/setup-guide/reset-setup-guide';
 import { BranchSelector } from '@/components/settings/branch-selector';
+import { UserList } from '@/components/users/user-list';
+import { PendingInvitations } from '@/components/users/pending-invitations';
+import { InviteUserDialog } from '@/components/users/invite-user-dialog';
+import { RunnerList } from '@/components/runners/runner-list';
+import { CreateRunnerDialog } from '@/components/runners/create-runner-dialog';
+import { getRunners } from '@/server/actions/runners';
 
 export default async function SettingsPage({
   searchParams,
@@ -31,6 +35,16 @@ export default async function SettingsPage({
   const aiSettings = await queries.getAISettings(selectedRepo?.id);
   const aiLogs = await queries.getAIPromptLogs(selectedRepo?.id, 50);
   const notificationSettings = await queries.getNotificationSettings(selectedRepo?.id);
+
+  // Fetch admin-only data
+  const isAdmin = currentUser?.role === 'admin' || currentUser?.role === 'owner';
+  const [teamMembers, pendingInvitations, runners] = isAdmin && currentUser?.teamId
+    ? await Promise.all([
+        queries.getTeamMembers(currentUser.teamId),
+        queries.getPendingInvitationsByTeam(currentUser.teamId),
+        getRunners(),
+      ])
+    : [[], [], []];
 
   return (
     <div className="flex flex-col h-full">
@@ -213,47 +227,118 @@ export default async function SettingsPage({
           />
 
           {/* User Management (Admin only) */}
-          {(currentUser?.role === 'admin' || currentUser?.role === 'owner') && (
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <Users className="w-5 h-5" />
-                  User Management
-                </CardTitle>
-                <CardDescription>
-                  Manage users and invitations
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                <Link href="/settings/users">
-                  <Button variant="outline">
-                    Manage Users
-                  </Button>
-                </Link>
-              </CardContent>
-            </Card>
-          )}
+          {isAdmin && currentUser?.teamId && (
+            <>
+              {/* Pending Invitations */}
+              {pendingInvitations.length > 0 && (
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="flex items-center gap-2">
+                      <Mail className="w-5 h-5" />
+                      Pending Invitations
+                    </CardTitle>
+                    <CardDescription>
+                      Invitations awaiting acceptance
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    <PendingInvitations invitations={pendingInvitations} />
+                  </CardContent>
+                </Card>
+              )}
 
-          {/* Remote Runners (Admin only) */}
-          {(currentUser?.role === 'admin' || currentUser?.role === 'owner') && (
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <Bot className="w-5 h-5" />
-                  Remote Runners
-                </CardTitle>
-                <CardDescription>
-                  Manage remote test execution runners for cloud deployment
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                <Link href="/settings/runners">
-                  <Button variant="outline">
-                    Manage Runners
-                  </Button>
-                </Link>
-              </CardContent>
-            </Card>
+              {/* Team Members */}
+              <Card>
+                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                  <div className="space-y-1">
+                    <CardTitle className="flex items-center gap-2">
+                      <Users className="w-5 h-5" />
+                      Team Members ({teamMembers.length})
+                    </CardTitle>
+                    <CardDescription>
+                      Manage members of your team
+                    </CardDescription>
+                  </div>
+                  <InviteUserDialog />
+                </CardHeader>
+                <CardContent>
+                  <UserList users={teamMembers} currentUserId={currentUser.id} />
+                </CardContent>
+              </Card>
+
+              {/* Remote Runners */}
+              <Card>
+                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                  <div className="space-y-1">
+                    <CardTitle className="flex items-center gap-2">
+                      <Bot className="w-5 h-5" />
+                      Remote Runners ({runners.length})
+                    </CardTitle>
+                    <CardDescription>
+                      Runners run tests on your local machine and report results to the cloud
+                    </CardDescription>
+                  </div>
+                  <CreateRunnerDialog />
+                </CardHeader>
+                <CardContent>
+                  {runners.length === 0 ? (
+                    <div className="text-center py-8 text-muted-foreground">
+                      <Bot className="w-12 h-12 mx-auto mb-4 opacity-50" />
+                      <p className="mb-2">No runners configured</p>
+                      <p className="text-sm">Create a runner to enable remote test execution</p>
+                    </div>
+                  ) : (
+                    <RunnerList runners={runners} />
+                  )}
+                </CardContent>
+              </Card>
+
+              {/* Runner Installation Instructions */}
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <Terminal className="w-5 h-5" />
+                    Runner Installation
+                  </CardTitle>
+                  <CardDescription>
+                    How to set up a runner on your machine
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div>
+                    <h4 className="font-medium mb-2">1. Install the runner package</h4>
+                    <pre className="bg-muted p-3 rounded-md text-sm overflow-x-auto">
+                      <code>npm install -g @lastest2/runner</code>
+                    </pre>
+                  </div>
+
+                  <div>
+                    <h4 className="font-medium mb-2">2. Create a runner above and copy the token</h4>
+                    <p className="text-sm text-muted-foreground">
+                      The token is only shown once when you create the runner. Keep it secure.
+                    </p>
+                  </div>
+
+                  <div>
+                    <h4 className="font-medium mb-2">3. Run the runner</h4>
+                    <pre className="bg-muted p-3 rounded-md text-sm overflow-x-auto">
+                      <code>lastest2-runner --token YOUR_TOKEN --server https://your-app.vercel.app</code>
+                    </pre>
+                  </div>
+
+                  <div>
+                    <h4 className="font-medium mb-2">4. (Optional) Run as a background service</h4>
+                    <pre className="bg-muted p-3 rounded-md text-sm overflow-x-auto">
+                      <code>{`# Using PM2
+pm2 start lastest2-runner -- --token YOUR_TOKEN --server YOUR_SERVER
+
+# Or using systemd (Linux)
+# See documentation for systemd service file example`}</code>
+                    </pre>
+                  </div>
+                </CardContent>
+              </Card>
+            </>
           )}
 
           {/* Version */}

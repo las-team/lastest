@@ -11,6 +11,7 @@
 export type MessageType =
   // Server → Agent (Commands)
   | 'command:run_test'
+  | 'command:cancel_test'
   | 'command:start_recording'
   | 'command:stop_recording'
   | 'command:ping'
@@ -86,6 +87,16 @@ export interface PingCommand extends BaseMessage {
   payload: Record<string, never>;
 }
 
+export interface CancelTestCommandPayload {
+  testRunId: string;
+  reason: string;
+}
+
+export interface CancelTestCommand extends BaseMessage {
+  type: 'command:cancel_test';
+  payload: CancelTestCommandPayload;
+}
+
 // ============================================
 // Agent → Server Responses
 // ============================================
@@ -111,7 +122,7 @@ export interface TestResultPayload {
   correlationId: string;
   testId: string;
   testRunId: string;
-  status: 'passed' | 'failed' | 'error' | 'timeout';
+  status: 'passed' | 'failed' | 'error' | 'timeout' | 'cancelled';
   durationMs: number;
   error?: {
     message: string;
@@ -248,6 +259,7 @@ export interface ConnectionEstablishedMessage extends BaseMessage {
 
 export type ServerCommand =
   | RunTestCommand
+  | CancelTestCommand
   | StartRecordingCommand
   | StopRecordingCommand
   | PingCommand;

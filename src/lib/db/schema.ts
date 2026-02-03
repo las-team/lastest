@@ -267,6 +267,7 @@ export const playwrightSettings = sqliteTable('playwright_settings', {
   defaultRecordingEngine: text('default_recording_engine').default('lastest'),
   freezeAnimations: integer('freeze_animations', { mode: 'boolean' }).default(false), // freeze CSS animations/transitions
   screenshotDelay: integer('screenshot_delay').default(0), // ms delay before screenshot
+  maxParallelTests: integer('max_parallel_tests').default(1), // max tests to run in parallel locally
   createdAt: integer('created_at', { mode: 'timestamp' }),
   updatedAt: integer('updated_at', { mode: 'timestamp' }),
 });
@@ -655,6 +656,7 @@ export const runners = sqliteTable('runners', {
   status: text('status').notNull().default('offline'), // 'online' | 'offline' | 'busy'
   lastSeen: integer('last_seen', { mode: 'timestamp' }),
   capabilities: text('capabilities', { mode: 'json' }).$type<RunnerCapability[]>().default(['run', 'record']),
+  maxParallelTests: integer('max_parallel_tests').default(1), // max tests to run in parallel on this runner
   createdAt: integer('created_at', { mode: 'timestamp' }).$defaultFn(() => new Date()),
 });
 

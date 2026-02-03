@@ -34,6 +34,7 @@ export interface ExecutionOptions {
   environmentConfig?: EnvironmentConfig | null;
   playwrightSettings?: PlaywrightSettings | null;
   runnerId?: string; // 'local' or specific runner ID - if set, overrides mode detection
+  maxParallelTests?: number; // Override parallel test setting (used for remote runners)
 }
 
 export interface ExecutionProgress {
@@ -41,6 +42,8 @@ export interface ExecutionProgress {
   total: number;
   currentTestName?: string;
   currentStep?: string;
+  activeCount?: number;
+  activeTests?: string[];
 }
 
 /**
@@ -126,11 +129,14 @@ async function executeLocally(
           completed: p.completed,
           total: p.total,
           currentTestName: p.currentTestName,
+          activeCount: p.activeCount,
+          activeTests: p.activeTests,
         });
       }
     : undefined;
 
-  return runner.runTests(tests, runId, progressCallback, onResult, options.headless);
+  // maxParallelTests from settings is used by runner internally, but can be overridden
+  return runner.runTests(tests, runId, progressCallback, onResult, options.headless, options.maxParallelTests);
 }
 
 /**
@@ -239,7 +245,7 @@ async function waitForTestResult(
 
         return {
           testId: payload.testId,
-          status: payload.status === 'error' || payload.status === 'timeout' ? 'failed' : payload.status,
+          status: payload.status === 'error' || payload.status === 'timeout' || payload.status === 'cancelled' ? 'failed' : payload.status,
           durationMs: payload.durationMs,
           screenshotPath,
           screenshots: [], // Will be populated from saved screenshots

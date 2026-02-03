@@ -5,6 +5,7 @@
 
 export type MessageType =
   | 'command:run_test'
+  | 'command:cancel_test'
   | 'command:start_recording'
   | 'command:stop_recording'
   | 'command:ping'
@@ -52,6 +53,16 @@ export interface PingCommand extends BaseMessage {
   payload: Record<string, never>;
 }
 
+export interface CancelTestCommandPayload {
+  testRunId: string;
+  reason: string;
+}
+
+export interface CancelTestCommand extends BaseMessage {
+  type: 'command:cancel_test';
+  payload: CancelTestCommandPayload;
+}
+
 export interface LogEntry {
   timestamp: number;
   level: 'info' | 'warn' | 'error';
@@ -62,7 +73,7 @@ export interface TestResultPayload {
   correlationId: string;
   testId: string;
   testRunId: string;
-  status: 'passed' | 'failed' | 'error' | 'timeout';
+  status: 'passed' | 'failed' | 'error' | 'timeout' | 'cancelled';
   durationMs: number;
   error?: {
     message: string;
@@ -151,6 +162,7 @@ export interface ConnectionEstablishedPayload {
   runnerId: string;
   teamId: string;
   capabilities: string[];
+  sessionId: string;
   /** @deprecated Use runnerId instead */
   agentId?: string;
 }
@@ -162,6 +174,7 @@ export interface ConnectionEstablishedMessage extends BaseMessage {
 
 export type Message =
   | RunTestCommand
+  | CancelTestCommand
   | PingCommand
   | TestResultResponse
   | TestProgressResponse

@@ -128,6 +128,29 @@ export async function regenerateRunnerToken(runnerId: string): Promise<{ token: 
 }
 
 /**
+ * Update runner settings (admin only)
+ */
+export async function updateRunnerSettings(
+  runnerId: string,
+  settings: { maxParallelTests?: number }
+): Promise<{ success: boolean } | { error: string }> {
+  const session = await requireTeamAdmin();
+
+  const runner = await db
+    .select()
+    .from(runners)
+    .where(and(eq(runners.id, runnerId), eq(runners.teamId, session.team.id)))
+    .get();
+
+  if (!runner) {
+    return { error: 'Runner not found' };
+  }
+
+  await db.update(runners).set(settings).where(eq(runners.id, runnerId));
+  return { success: true };
+}
+
+/**
  * Delete a runner (admin only)
  */
 export async function deleteRunner(runnerId: string): Promise<{ success: boolean } | { error: string }> {

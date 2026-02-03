@@ -245,6 +245,14 @@ async function runBuildAsync(
     });
   };
 
+  // Progress callback for parallel execution tracking
+  const onProgress = async (progress: { completed: number; total: number; activeCount?: number; activeTests?: string[] }) => {
+    await updateJobProgress(jobId, progress.completed, progress.total, {
+      activeCount: progress.activeCount,
+      activeTests: progress.activeTests,
+    });
+  };
+
   try {
     // Use executor for agent routing, or direct runner for local
     if (runnerId && runnerId !== 'local' && teamId) {
@@ -257,13 +265,18 @@ async function runBuildAsync(
         runner.setSettings(playwrightSettings);
       }
 
+      // Load runner's maxParallelTests setting
+      const remoteRunner = await queries.getRunnerById(runnerId);
+      const maxParallelTests = remoteRunner?.maxParallelTests ?? 1;
+
       await executeTests(tests, testRunId, {
         repositoryId,
         teamId,
         runnerId,
         environmentConfig: envConfig,
         playwrightSettings,
-      }, undefined, onResult);
+        maxParallelTests,
+      }, onProgress, onResult);
     } else {
       // Local execution - configure runner and run directly
       if (envConfig?.id) {
@@ -274,7 +287,8 @@ async function runBuildAsync(
         runner.setSettings(playwrightSettings);
       }
 
-      await runner.runTests(tests, testRunId, undefined, onResult);
+      // Local uses maxParallelTests from playwrightSettings (set via runner.setSettings)
+      await runner.runTests(tests, testRunId, onProgress, onResult);
     }
 
     // Update test run status

@@ -18,6 +18,28 @@ import { validateRunnerToken, updateRunnerStatus } from '@/server/actions/runner
 // import { runnerRegistry } from '@/lib/ws/runner-registry';
 import type { Message, HeartbeatMessage, TestResultResponse } from '@/lib/ws/protocol';
 
+// Track active polling sessions by runner ID
+const activeRunnerSessions = new Map<string, {
+  lastPoll: number;
+  sessionId: string;
+}>();
+
+// Session timeout in milliseconds (30 seconds)
+const SESSION_TIMEOUT_MS = 30_000;
+
+// Cleanup interval (60 seconds)
+const CLEANUP_INTERVAL_MS = 60_000;
+
+// Start cleanup interval to remove stale sessions
+setInterval(() => {
+  const now = Date.now();
+  for (const [runnerId, session] of activeRunnerSessions) {
+    if (now - session.lastPoll > SESSION_TIMEOUT_MS) {
+      activeRunnerSessions.delete(runnerId);
+    }
+  }
+}, CLEANUP_INTERVAL_MS);
+
 /**
  * POST /api/ws/runner
  * Polling endpoint for runners when WebSocket is not available
@@ -35,6 +57,22 @@ export async function POST(request: NextRequest) {
 
     if (!runner) {
       return NextResponse.json({ error: 'Invalid token' }, { status: 401 });
+    }
+
+    // Validate session ID for heartbeat requests
+    const sessionId = request.headers.get('x-session-id');
+    const activeSession = activeRunnerSessions.get(runner.id);
+
+    if (activeSession && sessionId !== activeSession.sessionId) {
+      return NextResponse.json(
+        { error: 'Session conflict: another runner instance is connected with this token' },
+        { status: 409 }
+      );
+    }
+
+    // Update last poll timestamp if session is valid
+    if (activeSession && sessionId === activeSession.sessionId) {
+      activeSession.lastPoll = Date.now();
     }
 
     const body = await request.json();
@@ -105,6 +143,29 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'Invalid token' }, { status: 401 });
     }
 
+    // Check for existing active session (duplicate detection)
+    const existingSession = activeRunnerSessions.get(runner.id);
+    const now = Date.now();
+
+    if (existingSession && now - existingSession.lastPoll < SESSION_TIMEOUT_MS) {
+      return NextResponse.json(
+        {
+          error: 'Duplicate connection: another runner instance is already connected with this token',
+          existingSessionId: existingSession.sessionId,
+        },
+        { status: 409 }
+      );
+    }
+
+    // Generate new session ID
+    const sessionId = crypto.randomUUID();
+
+    // Register this session
+    activeRunnerSessions.set(runner.id, {
+      lastPoll: now,
+      sessionId,
+    });
+
     // Update last seen
     await updateRunnerStatus(runner.id, 'online', new Date());
 
@@ -116,6 +177,7 @@ export async function GET(request: NextRequest) {
       teamId: runner.teamId,
       capabilities: runner.capabilities,
       commands: pendingCommands,
+      sessionId,
     });
   } catch (error) {
     console.error('Runner API error:', error);
@@ -157,6 +219,22 @@ export function queueCommand(runnerId: string, command: Message): void {
   const commands = pendingCommandsMap.get(runnerId) || [];
   commands.push(command);
   pendingCommandsMap.set(runnerId, commands);
+}
+
+/**
+ * Queue a cancel command for a runner
+ */
+export function queueCancelCommand(runnerId: string, testRunId: string, reason: string): void {
+  const command: Message = {
+    id: crypto.randomUUID(),
+    type: 'command:cancel_test',
+    timestamp: Date.now(),
+    payload: {
+      testRunId,
+      reason,
+    },
+  } as Message;
+  queueCommand(runnerId, command);
 }
 
 /**

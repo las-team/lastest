@@ -3,6 +3,7 @@
 import * as queries from '@/lib/db/queries';
 import type { BackgroundJobType } from '@/lib/db/schema';
 import { getRunner } from '@/lib/playwright/runner';
+import { queueCancelCommand } from '@/app/api/ws/runner/route';
 
 export async function createJob(
   type: BackgroundJobType,
@@ -56,16 +57,31 @@ export async function startJob(jobId: string) {
 export async function updateJobProgress(
   jobId: string,
   completedSteps: number,
-  totalSteps?: number
+  totalSteps?: number,
+  parallelInfo?: { activeCount?: number; activeTests?: string[] }
 ) {
   const progress = totalSteps && totalSteps > 0
     ? Math.round((completedSteps / totalSteps) * 100)
     : 0;
+
+  // Build metadata update for parallel execution info
+  const metadataUpdate = parallelInfo ? {
+    activeCount: parallelInfo.activeCount ?? 0,
+    activeTests: parallelInfo.activeTests ?? [],
+  } : undefined;
+
+  // Get existing job to merge metadata
+  const existingJob = await queries.getBackgroundJob(jobId);
+  const mergedMetadata = existingJob?.metadata
+    ? { ...(existingJob.metadata as Record<string, unknown>), ...metadataUpdate }
+    : metadataUpdate;
+
   await queries.updateBackgroundJob(jobId, {
     completedSteps,
     ...(totalSteps !== undefined ? { totalSteps } : {}),
     progress,
     lastActivityAt: new Date(),
+    ...(mergedMetadata ? { metadata: mergedMetadata } : {}),
   });
 }
 
@@ -85,7 +101,7 @@ export async function failJob(jobId: string, error: string) {
   });
 }
 
-export async function cancelJob(jobId: string, repositoryId?: string | null) {
+export async function cancelJob(jobId: string, repositoryId?: string | null, runnerId?: string | null) {
   const job = await queries.getBackgroundJob(jobId);
   if (!job) return { success: false, error: 'Job not found' };
 
@@ -94,6 +110,15 @@ export async function cancelJob(jobId: string, repositoryId?: string | null) {
     const runner = getRunner(repositoryId);
     runner.abort();
     await runner.forceReset();
+  }
+
+  // If a remote runner is assigned, send cancel command
+  if (runnerId && job.status === 'running') {
+    // Extract testRunId from job metadata if available
+    const testRunId = (job.metadata as Record<string, unknown>)?.testRunId as string | undefined;
+    if (testRunId) {
+      queueCancelCommand(runnerId, testRunId, 'Cancelled by user');
+    }
   }
 
   await queries.updateBackgroundJob(jobId, {

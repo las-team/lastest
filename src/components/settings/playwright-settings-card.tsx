@@ -17,7 +17,8 @@ import { SelectorPriorityList } from './selector-priority-list';
 import { savePlaywrightSettings, resetPlaywrightSettings } from '@/server/actions/settings';
 import { DEFAULT_SELECTOR_PRIORITY } from '@/lib/db/schema';
 import type { SelectorConfig, PlaywrightSettings, HeadlessMode, RecordingEngine } from '@/lib/db/schema';
-import { Loader2, RotateCcw, Save, List, Video, MousePointer, Check, Pause, Clock } from 'lucide-react';
+import { Loader2, RotateCcw, Save, List, Video, MousePointer, Check, Pause, Clock, Layers } from 'lucide-react';
+import { Slider } from '@/components/ui/slider';
 
 interface PlaywrightSettingsCardProps {
   settings: PlaywrightSettings;
@@ -50,6 +51,7 @@ export function PlaywrightSettingsCard({
   );
   const [freezeAnimations, setFreezeAnimations] = useState(settings.freezeAnimations ?? false);
   const [screenshotDelay, setScreenshotDelay] = useState(settings.screenshotDelay ?? 0);
+  const [maxParallelTests, setMaxParallelTests] = useState(settings.maxParallelTests ?? 1);
 
   // Track if initial mount to prevent auto-save on first render
   const isInitialMount = useRef(true);
@@ -71,13 +73,14 @@ export function PlaywrightSettingsCard({
         defaultRecordingEngine,
         freezeAnimations,
         screenshotDelay,
+        maxParallelTests,
       });
       if (compact) {
         setShowSaved(true);
         setTimeout(() => setShowSaved(false), 1500);
       }
     });
-  }, [repositoryId, selectorPriority, browser, viewportWidth, viewportHeight, headlessMode, navigationTimeout, actionTimeout, pointerGestures, cursorFPS, defaultRecordingEngine, freezeAnimations, screenshotDelay, compact]);
+  }, [repositoryId, selectorPriority, browser, viewportWidth, viewportHeight, headlessMode, navigationTimeout, actionTimeout, pointerGestures, cursorFPS, defaultRecordingEngine, freezeAnimations, screenshotDelay, maxParallelTests, compact]);
 
   // Auto-save in compact mode with debounce
   useEffect(() => {
@@ -100,7 +103,7 @@ export function PlaywrightSettingsCard({
         clearTimeout(debounceRef.current);
       }
     };
-  }, [compact, selectorPriority, browser, viewportWidth, viewportHeight, headlessMode, navigationTimeout, actionTimeout, pointerGestures, cursorFPS, defaultRecordingEngine, freezeAnimations, screenshotDelay, doSave]);
+  }, [compact, selectorPriority, browser, viewportWidth, viewportHeight, headlessMode, navigationTimeout, actionTimeout, pointerGestures, cursorFPS, defaultRecordingEngine, freezeAnimations, screenshotDelay, maxParallelTests, doSave]);
 
   // Notify parent of save status changes
   useEffect(() => {
@@ -126,6 +129,7 @@ export function PlaywrightSettingsCard({
       setDefaultRecordingEngine('lastest');
       setFreezeAnimations(false);
       setScreenshotDelay(0);
+      setMaxParallelTests(1);
     });
   };
 
@@ -239,6 +243,32 @@ export function PlaywrightSettingsCard({
           </div>
         </div>
       </div>
+
+      {/* Parallel Execution */}
+      {!compact && (
+        <div className="space-y-3">
+          <div className="flex items-center gap-2">
+            <Layers className="w-4 h-4 text-muted-foreground" />
+            <div className="space-y-0.5">
+              <Label className="text-sm">Parallel Tests (Local)</Label>
+              <p className="text-xs text-muted-foreground">
+                Number of tests to run simultaneously on local execution
+              </p>
+            </div>
+          </div>
+          <div className="flex items-center gap-4">
+            <Slider
+              value={[maxParallelTests]}
+              onValueChange={([value]) => setMaxParallelTests(value)}
+              min={1}
+              max={8}
+              step={1}
+              className="flex-1"
+            />
+            <span className="text-sm font-medium w-8 text-center">{maxParallelTests}</span>
+          </div>
+        </div>
+      )}
 
       {/* Browser Settings */}
       {!compact && (

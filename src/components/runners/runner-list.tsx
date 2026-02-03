@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { formatDistanceToNow } from 'date-fns';
-import { Bot, MoreVertical, Trash2, RefreshCw, Copy, Check } from 'lucide-react';
+import { Bot, MoreVertical, Trash2, RefreshCw, Copy, Check, Settings, Layers } from 'lucide-react';
 import type { Runner } from '@/lib/db/schema';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -21,7 +21,9 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { deleteRunner, regenerateRunnerToken } from '@/server/actions/runners';
+import { deleteRunner, regenerateRunnerToken, updateRunnerSettings } from '@/server/actions/runners';
+import { Slider } from '@/components/ui/slider';
+import { Label } from '@/components/ui/label';
 import { useRouter } from 'next/navigation';
 
 interface RunnerListProps {
@@ -32,10 +34,12 @@ export function RunnerList({ runners }: RunnerListProps) {
   const router = useRouter();
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [tokenDialogOpen, setTokenDialogOpen] = useState(false);
+  const [settingsDialogOpen, setSettingsDialogOpen] = useState(false);
   const [selectedRunner, setSelectedRunner] = useState<Runner | null>(null);
   const [newToken, setNewToken] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [parallelTests, setParallelTests] = useState(1);
 
   const handleDelete = async () => {
     if (!selectedRunner) return;
@@ -56,6 +60,25 @@ export function RunnerList({ runners }: RunnerListProps) {
     if ('token' in result) {
       setNewToken(result.token);
     }
+  };
+
+  const handleSaveSettings = async () => {
+    if (!selectedRunner) return;
+    setLoading(true);
+    const result = await updateRunnerSettings(selectedRunner.id, {
+      maxParallelTests: parallelTests,
+    });
+    setLoading(false);
+    if (!('error' in result)) {
+      setSettingsDialogOpen(false);
+      router.refresh();
+    }
+  };
+
+  const openSettingsDialog = (runner: Runner) => {
+    setSelectedRunner(runner);
+    setParallelTests(runner.maxParallelTests ?? 1);
+    setSettingsDialogOpen(true);
   };
 
   const copyToken = async () => {
@@ -100,6 +123,12 @@ export function RunnerList({ runners }: RunnerListProps) {
                 <div className="flex items-center gap-2">
                   <span className="font-medium">{runner.name}</span>
                   {getStatusBadge(runner.status)}
+                  {(runner.maxParallelTests ?? 1) > 1 && (
+                    <Badge variant="outline" className="text-xs">
+                      <Layers className="w-3 h-3 mr-1" />
+                      {runner.maxParallelTests}x
+                    </Badge>
+                  )}
                 </div>
                 <div className="text-sm text-muted-foreground">
                   {runner.lastSeen ? (
@@ -118,6 +147,10 @@ export function RunnerList({ runners }: RunnerListProps) {
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end">
+                <DropdownMenuItem onClick={() => openSettingsDialog(runner)}>
+                  <Settings className="w-4 h-4 mr-2" />
+                  Settings
+                </DropdownMenuItem>
                 <DropdownMenuItem
                   onClick={() => {
                     setSelectedRunner(runner);
@@ -160,6 +193,50 @@ export function RunnerList({ runners }: RunnerListProps) {
             </Button>
             <Button variant="destructive" onClick={handleDelete} disabled={loading}>
               {loading ? 'Deleting...' : 'Delete'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Settings Dialog */}
+      <Dialog open={settingsDialogOpen} onOpenChange={setSettingsDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Runner Settings</DialogTitle>
+            <DialogDescription>
+              Configure settings for &quot;{selectedRunner?.name}&quot;
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4 py-4">
+            <div className="space-y-3">
+              <div className="flex items-center gap-2">
+                <Layers className="w-4 h-4 text-muted-foreground" />
+                <Label className="text-sm">Parallel Tests</Label>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Number of tests to run simultaneously on this runner
+              </p>
+              <div className="flex items-center gap-4">
+                <Slider
+                  value={[parallelTests]}
+                  onValueChange={([value]) => setParallelTests(value)}
+                  min={1}
+                  max={8}
+                  step={1}
+                  className="flex-1"
+                />
+                <span className="text-sm font-medium w-8 text-center">{parallelTests}</span>
+              </div>
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setSettingsDialogOpen(false)}>
+              Cancel
+            </Button>
+            <Button onClick={handleSaveSettings} disabled={loading}>
+              {loading ? 'Saving...' : 'Save'}
             </Button>
           </DialogFooter>
         </DialogContent>

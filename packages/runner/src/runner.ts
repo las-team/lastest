@@ -9,7 +9,7 @@ import path from 'path';
 import type { RunTestCommandPayload, LogEntry } from './protocol.js';
 
 export interface TestRunResult {
-  status: 'passed' | 'failed' | 'error' | 'timeout';
+  status: 'passed' | 'failed' | 'error' | 'timeout' | 'cancelled';
   durationMs: number;
   error?: {
     message: string;
@@ -23,6 +23,30 @@ export interface TestRunResult {
 export class TestRunner {
   private browser: Browser | null = null;
   private logs: LogEntry[] = [];
+  private abortController: AbortController | null = null;
+  private currentTestRunId: string | null = null;
+
+  /**
+   * Abort the currently running test
+   */
+  abort(testRunId?: string): boolean {
+    if (testRunId && this.currentTestRunId !== testRunId) {
+      return false; // Not the current test
+    }
+    if (this.abortController) {
+      this.abortController.abort();
+      return true;
+    }
+    return false;
+  }
+
+  isRunning(): boolean {
+    return this.abortController !== null;
+  }
+
+  getCurrentTestRunId(): string | null {
+    return this.currentTestRunId;
+  }
 
   private log(level: 'info' | 'warn' | 'error', message: string) {
     this.logs.push({ timestamp: Date.now(), level, message });
@@ -35,6 +59,8 @@ export class TestRunner {
     onProgress?: (step: string, progress: number) => void
   ): Promise<TestRunResult> {
     this.logs = [];
+    this.abortController = new AbortController();
+    this.currentTestRunId = command.testRunId;
     const startTime = Date.now();
     const screenshots: Array<{ filename: string; data: string; width: number; height: number }> = [];
 
@@ -42,6 +68,11 @@ export class TestRunner {
     let page: Page | null = null;
 
     try {
+      // Check if already aborted
+      if (this.abortController.signal.aborted) {
+        throw new Error('Test cancelled before starting');
+      }
+
       this.log('info', 'Launching browser...');
       onProgress?.('Launching browser', 10);
 
@@ -70,8 +101,18 @@ export class TestRunner {
         }
       };
 
+      // Check abort before executing test
+      if (this.abortController?.signal.aborted) {
+        throw new Error('Test cancelled');
+      }
+
       // Execute test code
       await this.executeTestCode(page, command.code, command.targetUrl, captureScreenshot);
+
+      // Check abort after test
+      if (this.abortController?.signal.aborted) {
+        throw new Error('Test cancelled');
+      }
 
       onProgress?.('Test completed', 90);
 
@@ -93,6 +134,21 @@ export class TestRunner {
       const durationMs = Date.now() - startTime;
       const errorMessage = error instanceof Error ? error.message : String(error);
       const errorStack = error instanceof Error ? error.stack : undefined;
+
+      // Check if this was a cancellation
+      const isCancelled = errorMessage.includes('cancelled') || this.abortController?.signal.aborted;
+      if (isCancelled) {
+        this.log('info', 'Test cancelled');
+        return {
+          status: 'cancelled',
+          durationMs,
+          error: {
+            message: 'Test cancelled by user',
+          },
+          logs: this.logs,
+          screenshots,
+        };
+      }
 
       this.log('error', `Test failed: ${errorMessage}`);
 
@@ -127,6 +183,8 @@ export class TestRunner {
         screenshots,
       };
     } finally {
+      this.abortController = null;
+      this.currentTestRunId = null;
       if (page) await page.close().catch(() => {});
       if (context) await context.close().catch(() => {});
       if (this.browser) {

@@ -14,14 +14,9 @@ check the recorder and the runner so that they are compatible and identify the r
 
 ## test
 OCR
-GitHub PR Comments - CLI runner
-Page Shift Detection  
-Anti-Aliasing Handling 
-Animation Freezing
-Screenshot Stabilization Delay       
-Runners
+GitHub PR Comments - CLI runner   
+
 ## features
-please Execution local client and cloud ~/.claude/plans/cozy-sniffing-hopcroft.md  
 Electron app ~/.claude/plans/rippling-roaming-snail.md
 Github actions integration
 
