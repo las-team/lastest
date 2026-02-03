@@ -1,7 +1,7 @@
 'use client';
 
 import { FileCheck2, AlertTriangle, XCircle, Clock, RefreshCw, CheckCircle } from 'lucide-react';
-import type { FilterType } from '@/app/builds/[buildId]/build-detail-client';
+import type { FilterType } from '@/app/(app)/builds/[buildId]/build-detail-client';
 import { cn } from '@/lib/utils';
 
 interface MetricsRowProps {

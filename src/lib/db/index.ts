@@ -17,7 +17,15 @@ sqlite.pragma('journal_mode = WAL');
 
 export const db = drizzle(sqlite, { schema });
 
+/**
+ * @deprecated Manual schema initialization is outdated. Use `pnpm db:push` instead.
+ * This function is kept for reference but should not be called.
+ * After a fresh database, always run: pnpm db:push
+ */
 export function initializeDatabase() {
+  console.warn('WARNING: initializeDatabase() is deprecated. Run `pnpm db:push` instead.');
+  // Skip manual table creation - use Drizzle schema push instead
+  return;
   sqlite.exec(`
     CREATE TABLE IF NOT EXISTS repositories (
       id TEXT PRIMARY KEY,
@@ -301,6 +309,73 @@ export function initializeDatabase() {
     CREATE INDEX IF NOT EXISTS idx_test_versions_test ON test_versions(test_id);
     CREATE INDEX IF NOT EXISTS idx_route_test_suggestions_route ON route_test_suggestions(route_id);
     CREATE INDEX IF NOT EXISTS idx_background_jobs_status ON background_jobs(status);
+
+    -- Auth tables
+    CREATE TABLE IF NOT EXISTS users (
+      id TEXT PRIMARY KEY,
+      email TEXT NOT NULL UNIQUE,
+      hashed_password TEXT,
+      name TEXT,
+      avatar_url TEXT,
+      role TEXT NOT NULL DEFAULT 'member',
+      email_verified INTEGER DEFAULT 0,
+      created_at INTEGER,
+      updated_at INTEGER
+    );
+
+    CREATE TABLE IF NOT EXISTS sessions (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      token TEXT NOT NULL UNIQUE,
+      expires_at INTEGER NOT NULL,
+      ip_address TEXT,
+      user_agent TEXT,
+      created_at INTEGER
+    );
+
+    CREATE TABLE IF NOT EXISTS oauth_accounts (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      provider TEXT NOT NULL,
+      provider_account_id TEXT NOT NULL,
+      access_token TEXT,
+      refresh_token TEXT,
+      token_expires_at INTEGER,
+      created_at INTEGER
+    );
+
+    CREATE TABLE IF NOT EXISTS password_reset_tokens (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      token TEXT NOT NULL UNIQUE,
+      expires_at INTEGER NOT NULL,
+      used_at INTEGER,
+      created_at INTEGER
+    );
+
+    CREATE TABLE IF NOT EXISTS email_verification_tokens (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      token TEXT NOT NULL UNIQUE,
+      expires_at INTEGER NOT NULL,
+      created_at INTEGER
+    );
+
+    CREATE TABLE IF NOT EXISTS user_invitations (
+      id TEXT PRIMARY KEY,
+      email TEXT NOT NULL,
+      invited_by_id TEXT REFERENCES users(id),
+      token TEXT NOT NULL UNIQUE,
+      role TEXT NOT NULL DEFAULT 'member',
+      expires_at INTEGER NOT NULL,
+      accepted_at INTEGER,
+      created_at INTEGER
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id);
+    CREATE INDEX IF NOT EXISTS idx_sessions_token ON sessions(token);
+    CREATE INDEX IF NOT EXISTS idx_oauth_accounts_user ON oauth_accounts(user_id);
+    CREATE INDEX IF NOT EXISTS idx_oauth_accounts_provider ON oauth_accounts(provider, provider_account_id);
   `);
 
   // Run migrations for existing databases (add columns that may be missing)
@@ -428,5 +503,3 @@ function runMigrations() {
   }
 }
 
-// Initialize on first import
-initializeDatabase();

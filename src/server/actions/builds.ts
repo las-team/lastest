@@ -6,6 +6,8 @@ import { getBranchInfo } from '@/lib/github/content';
 import { getOpenPRsForBranch } from '@/lib/github/oauth';
 import { getRunner } from '@/lib/playwright/runner';
 import { getServerManager } from '@/lib/playwright/server-manager';
+import { executeTests } from '@/lib/execution/executor';
+import { getCurrentSession } from '@/lib/auth';
 import { generateDiff } from '@/lib/diff/generator';
 import { hashImage } from '@/lib/diff/hasher';
 import { sendSlackNotification } from '@/lib/integrations/slack';
@@ -80,7 +82,8 @@ export async function forceResetRunner(repositoryId?: string | null) {
 export async function createAndRunBuild(
   triggerType: TriggerType = 'manual',
   testIds?: string[],
-  repositoryId?: string | null
+  repositoryId?: string | null,
+  runnerId?: string
 ) {
   const runner = getRunner(repositoryId);
 
@@ -152,7 +155,7 @@ export async function createAndRunBuild(
   }
 
   // Run tests async
-  runBuildAsync(build.id, testRun.id, tests, gitInfo.branch, repositoryId);
+  runBuildAsync(build.id, testRun.id, tests, gitInfo.branch, repositoryId, runnerId);
 
   return { buildId: build.id, testRunId: testRun.id, testCount: tests.length };
 }
@@ -165,7 +168,8 @@ async function runBuildAsync(
   testRunId: string,
   tests: Test[],
   branch: string,
-  repositoryId?: string | null
+  repositoryId?: string | null,
+  runnerId?: string
 ) {
   const runner = getRunner(repositoryId);
   const startTime = Date.now();
@@ -177,58 +181,115 @@ async function runBuildAsync(
   let flakyCount = 0;
   let processedCount = 0;
 
+  // Get teamId for agent execution
+  let teamId: string | undefined;
+  if (runnerId && runnerId !== 'local') {
+    const session = await getCurrentSession();
+    teamId = session?.user?.teamId ?? undefined;
+  }
+
+  // Prepare environment and settings for executor
+  const envConfig = await queries.getEnvironmentConfig(repositoryId);
+  const playwrightSettings = await queries.getPlaywrightSettings(repositoryId);
+
+  // Result callback for processing diffs
+  const onResult = async (result: { testId: string; status: string; screenshotPath?: string; screenshots: { path: string; label?: string }[]; errorMessage?: string; durationMs?: number; a11yViolations?: { id: string; impact: 'critical' | 'serious' | 'moderate' | 'minor'; description: string; help: string; helpUrl: string; nodes: number }[] }) => {
+    processedCount++;
+
+    // Save test result immediately
+    const testResult = await queries.createTestResult({
+      testRunId,
+      testId: result.testId,
+      status: result.status,
+      screenshotPath: result.screenshotPath,
+      screenshots: result.screenshots,
+      errorMessage: result.errorMessage,
+      durationMs: result.durationMs,
+      viewport: '1280x720',
+      browser: 'chromium',
+      a11yViolations: result.a11yViolations,
+    });
+
+    if (result.status === 'passed') passedCount++;
+    else if (result.status === 'failed') failedCount++;
+
+    // Build screenshots list: prefer captured screenshots, fall back to single screenshotPath
+    const screenshots = result.screenshots.length > 0
+      ? result.screenshots
+      : result.screenshotPath
+        ? [{ path: result.screenshotPath, label: 'final' }]
+        : [];
+
+    // Generate visual diff for each screenshot
+    for (const screenshot of screenshots) {
+      const diffResult = await processVisualDiff(
+        buildId,
+        testResult.id,
+        result.testId,
+        screenshot.path,
+        branch,
+        repositoryId,
+        screenshot.label
+      );
+      if (diffResult.classification === 'changed') changesDetected++;
+      if (diffResult.classification === 'flaky') flakyCount++;
+    }
+
+    // Update build progress incrementally
+    await updateJobProgress(jobId, processedCount, tests.length);
+    await queries.updateBuild(buildId, {
+      passedCount,
+      failedCount,
+      changesDetected,
+      flakyCount,
+    });
+  };
+
+  // Progress callback for parallel execution tracking
+  const onProgress = async (progress: { completed: number; total: number; activeCount?: number; activeTests?: string[] }) => {
+    await updateJobProgress(jobId, progress.completed, progress.total, {
+      activeCount: progress.activeCount,
+      activeTests: progress.activeTests,
+    });
+  };
+
   try {
-    await runner.runTests(tests, testRunId, undefined, async (result) => {
-      processedCount++;
-
-      // Save test result immediately
-      const testResult = await queries.createTestResult({
-        testRunId,
-        testId: result.testId,
-        status: result.status,
-        screenshotPath: result.screenshotPath,
-        screenshots: result.screenshots,
-        errorMessage: result.errorMessage,
-        durationMs: result.durationMs,
-        viewport: '1280x720',
-        browser: 'chromium',
-        a11yViolations: result.a11yViolations,
-      });
-
-      if (result.status === 'passed') passedCount++;
-      else if (result.status === 'failed') failedCount++;
-
-      // Build screenshots list: prefer captured screenshots, fall back to single screenshotPath
-      const screenshots = result.screenshots.length > 0
-        ? result.screenshots
-        : result.screenshotPath
-          ? [{ path: result.screenshotPath, label: 'final' }]
-          : [];
-
-      // Generate visual diff for each screenshot
-      for (const screenshot of screenshots) {
-        const diffResult = await processVisualDiff(
-          buildId,
-          testResult.id,
-          result.testId,
-          screenshot.path,
-          branch,
-          repositoryId,
-          screenshot.label
-        );
-        if (diffResult.classification === 'changed') changesDetected++;
-        if (diffResult.classification === 'flaky') flakyCount++;
+    // Use executor for agent routing, or direct runner for local
+    if (runnerId && runnerId !== 'local' && teamId) {
+      // Load environment config for executor
+      if (envConfig?.id) {
+        runner.setEnvironmentConfig(envConfig);
+        getServerManager().setConfig(envConfig);
+      }
+      if (playwrightSettings) {
+        runner.setSettings(playwrightSettings);
       }
 
-      // Update build progress incrementally
-      await updateJobProgress(jobId, processedCount, tests.length);
-      await queries.updateBuild(buildId, {
-        passedCount,
-        failedCount,
-        changesDetected,
-        flakyCount,
-      });
-    });
+      // Load runner's maxParallelTests setting
+      const remoteRunner = await queries.getRunnerById(runnerId);
+      const maxParallelTests = remoteRunner?.maxParallelTests ?? 1;
+
+      await executeTests(tests, testRunId, {
+        repositoryId,
+        teamId,
+        runnerId,
+        environmentConfig: envConfig,
+        playwrightSettings,
+        maxParallelTests,
+      }, onProgress, onResult);
+    } else {
+      // Local execution - configure runner and run directly
+      if (envConfig?.id) {
+        runner.setEnvironmentConfig(envConfig);
+        getServerManager().setConfig(envConfig);
+      }
+      if (playwrightSettings) {
+        runner.setSettings(playwrightSettings);
+      }
+
+      // Local uses maxParallelTests from playwrightSettings (set via runner.setSettings)
+      await runner.runTests(tests, testRunId, onProgress, onResult);
+    }
 
     // Update test run status
     const hasFailures = failedCount > 0;
@@ -637,10 +698,6 @@ async function sendBuildNotifications(data: {
   }
 
   // Send Discord notification
-  console.log('[Notifications] Discord settings:', {
-    enabled: notificationSettings.discordEnabled,
-    hasUrl: !!notificationSettings.discordWebhookUrl,
-  });
   if (notificationSettings.discordEnabled && notificationSettings.discordWebhookUrl) {
     try {
       const result = await sendDiscordNotification(notificationSettings.discordWebhookUrl, {

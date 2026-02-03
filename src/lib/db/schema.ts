@@ -68,6 +68,7 @@ export const tests = sqliteTable('tests', {
 export const testRuns = sqliteTable('test_runs', {
   id: text('id').primaryKey(),
   repositoryId: text('repository_id'),
+  runnerId: text('runner_id'), // nullable - set when run via remote runner, null for local runs
   gitBranch: text('git_branch').notNull(),
   gitCommit: text('git_commit').notNull(),
   startedAt: integer('started_at', { mode: 'timestamp' }),
@@ -110,6 +111,7 @@ export const testResults = sqliteTable('test_results', {
 // Repositories synced from GitHub
 export const repositories = sqliteTable('repositories', {
   id: text('id').primaryKey(),
+  teamId: text('team_id'), // Team ownership - FK added after teams table definition
   githubRepoId: integer('github_repo_id').notNull(),
   owner: text('owner').notNull(),
   name: text('name').notNull(),
@@ -120,9 +122,10 @@ export const repositories = sqliteTable('repositories', {
   createdAt: integer('created_at', { mode: 'timestamp' }),
 });
 
-// GitHub OAuth accounts
+// GitHub OAuth accounts - per-team GitHub connection
 export const githubAccounts = sqliteTable('github_accounts', {
   id: text('id').primaryKey(),
+  teamId: text('team_id'), // Team ownership - FK added after teams table definition
   githubUserId: text('github_user_id').notNull(),
   githubUsername: text('github_username').notNull(),
   accessToken: text('access_token').notNull(),
@@ -243,6 +246,53 @@ export type NewIgnoreRegion = typeof ignoreRegions.$inferInsert;
 // Headless mode options: 'true' (standard headless), 'false' (headed), 'shell' (new headless mode with better bot detection avoidance)
 export type HeadlessMode = 'true' | 'false' | 'shell';
 
+// Stabilization settings for flaky test prevention
+export interface StabilizationSettings {
+  // Wait strategies
+  waitForNetworkIdle: boolean;      // Wait for no network activity (default: true)
+  networkIdleTimeout: number;       // Max wait time in ms (default: 5000)
+  waitForDomStable: boolean;        // Wait for DOM mutations to stop (default: true)
+  domStableTimeout: number;         // Max wait time in ms (default: 2000)
+
+  // Content freezing
+  freezeTimestamps: boolean;        // Replace Date.now(), new Date() (default: true)
+  frozenTimestamp: string;          // ISO timestamp to use (default: "2024-01-01T12:00:00Z")
+  freezeRandomValues: boolean;      // Seed Math.random() (default: true)
+  randomSeed: number;               // Seed value (default: 12345)
+
+  // Third-party handling
+  blockThirdParty: boolean;         // Block external domains (default: false)
+  allowedDomains: string[];         // Whitelist (default: [])
+  mockThirdPartyImages: boolean;    // Replace with placeholders (default: true)
+
+  // Spinner/loader handling
+  hideLoadingIndicators: boolean;   // CSS hide common spinners (default: true)
+  loadingSelectors: string[];       // Custom selectors to wait for removal
+
+  // Style stabilization
+  waitForFonts: boolean;            // Wait for font loading (default: true)
+  disableWebfonts: boolean;         // Use system fonts only (default: false)
+}
+
+// Default stabilization settings
+export const DEFAULT_STABILIZATION_SETTINGS: StabilizationSettings = {
+  waitForNetworkIdle: true,
+  networkIdleTimeout: 5000,
+  waitForDomStable: true,
+  domStableTimeout: 2000,
+  freezeTimestamps: true,
+  frozenTimestamp: '2024-01-01T12:00:00Z',
+  freezeRandomValues: true,
+  randomSeed: 12345,
+  blockThirdParty: false,
+  allowedDomains: [],
+  mockThirdPartyImages: true,
+  hideLoadingIndicators: true,
+  loadingSelectors: [],
+  waitForFonts: true,
+  disableWebfonts: false,
+};
+
 // Recording engine options
 export type RecordingEngine = 'lastest' | 'playwright-inspector';
 export const DEFAULT_RECORDING_ENGINES: RecordingEngine[] = ['lastest', 'playwright-inspector'];
@@ -264,6 +314,8 @@ export const playwrightSettings = sqliteTable('playwright_settings', {
   defaultRecordingEngine: text('default_recording_engine').default('lastest'),
   freezeAnimations: integer('freeze_animations', { mode: 'boolean' }).default(false), // freeze CSS animations/transitions
   screenshotDelay: integer('screenshot_delay').default(0), // ms delay before screenshot
+  maxParallelTests: integer('max_parallel_tests').default(1), // max tests to run in parallel locally
+  stabilization: text('stabilization', { mode: 'json' }).$type<StabilizationSettings>(), // snapshot stabilization settings
   createdAt: integer('created_at', { mode: 'timestamp' }),
   updatedAt: integer('updated_at', { mode: 'timestamp' }),
 });
@@ -530,3 +582,131 @@ export const selectorStats = sqliteTable('selector_stats', {
 
 export type SelectorStat = typeof selectorStats.$inferSelect;
 export type NewSelectorStat = typeof selectorStats.$inferInsert;
+
+// ============================================
+// Teams & Auth Tables
+// ============================================
+
+export type UserRole = 'owner' | 'admin' | 'member' | 'viewer';
+
+// Teams - Multi-tenancy support
+export const teams = sqliteTable('teams', {
+  id: text('id').primaryKey(),
+  name: text('name').notNull(),
+  slug: text('slug').notNull().unique(),
+  createdAt: integer('created_at', { mode: 'timestamp' }),
+  updatedAt: integer('updated_at', { mode: 'timestamp' }),
+});
+
+export type Team = typeof teams.$inferSelect;
+export type NewTeam = typeof teams.$inferInsert;
+
+// Users - Core identity
+export const users = sqliteTable('users', {
+  id: text('id').primaryKey(),
+  email: text('email').notNull().unique(),
+  hashedPassword: text('hashed_password'),
+  name: text('name'),
+  avatarUrl: text('avatar_url'),
+  teamId: text('team_id').references(() => teams.id), // Single team membership
+  role: text('role').notNull().default('member'), // 'owner' | 'admin' | 'member' | 'viewer'
+  emailVerified: integer('email_verified', { mode: 'boolean' }).default(false),
+  createdAt: integer('created_at', { mode: 'timestamp' }),
+  updatedAt: integer('updated_at', { mode: 'timestamp' }),
+});
+
+export type User = typeof users.$inferSelect;
+export type NewUser = typeof users.$inferInsert;
+
+// Sessions - Database sessions for auth
+export const sessions = sqliteTable('sessions', {
+  id: text('id').primaryKey(),
+  userId: text('user_id').references(() => users.id, { onDelete: 'cascade' }).notNull(),
+  token: text('token').notNull().unique(),
+  expiresAt: integer('expires_at', { mode: 'timestamp' }).notNull(),
+  ipAddress: text('ip_address'),
+  userAgent: text('user_agent'),
+  createdAt: integer('created_at', { mode: 'timestamp' }),
+});
+
+export type Session = typeof sessions.$inferSelect;
+export type NewSession = typeof sessions.$inferInsert;
+
+// OAuth accounts - Link providers to users
+export const oauthAccounts = sqliteTable('oauth_accounts', {
+  id: text('id').primaryKey(),
+  userId: text('user_id').references(() => users.id, { onDelete: 'cascade' }).notNull(),
+  provider: text('provider').notNull(), // 'github' | 'google'
+  providerAccountId: text('provider_account_id').notNull(),
+  accessToken: text('access_token'),
+  refreshToken: text('refresh_token'),
+  tokenExpiresAt: integer('token_expires_at', { mode: 'timestamp' }),
+  createdAt: integer('created_at', { mode: 'timestamp' }),
+});
+
+export type OAuthAccount = typeof oauthAccounts.$inferSelect;
+export type NewOAuthAccount = typeof oauthAccounts.$inferInsert;
+
+// Password reset tokens
+export const passwordResetTokens = sqliteTable('password_reset_tokens', {
+  id: text('id').primaryKey(),
+  userId: text('user_id').references(() => users.id, { onDelete: 'cascade' }).notNull(),
+  token: text('token').notNull().unique(),
+  expiresAt: integer('expires_at', { mode: 'timestamp' }).notNull(),
+  usedAt: integer('used_at', { mode: 'timestamp' }),
+  createdAt: integer('created_at', { mode: 'timestamp' }),
+});
+
+export type PasswordResetToken = typeof passwordResetTokens.$inferSelect;
+export type NewPasswordResetToken = typeof passwordResetTokens.$inferInsert;
+
+// Email verification tokens
+export const emailVerificationTokens = sqliteTable('email_verification_tokens', {
+  id: text('id').primaryKey(),
+  userId: text('user_id').references(() => users.id, { onDelete: 'cascade' }).notNull(),
+  token: text('token').notNull().unique(),
+  expiresAt: integer('expires_at', { mode: 'timestamp' }).notNull(),
+  createdAt: integer('created_at', { mode: 'timestamp' }),
+});
+
+export type EmailVerificationToken = typeof emailVerificationTokens.$inferSelect;
+export type NewEmailVerificationToken = typeof emailVerificationTokens.$inferInsert;
+
+// User invitations - Team-scoped invitations
+export const userInvitations = sqliteTable('user_invitations', {
+  id: text('id').primaryKey(),
+  teamId: text('team_id').references(() => teams.id), // Team to join on accept
+  email: text('email').notNull(),
+  invitedById: text('invited_by_id').references(() => users.id),
+  token: text('token').notNull().unique(),
+  role: text('role').notNull().default('member'), // Role to assign on accept
+  expiresAt: integer('expires_at', { mode: 'timestamp' }).notNull(),
+  acceptedAt: integer('accepted_at', { mode: 'timestamp' }),
+  createdAt: integer('created_at', { mode: 'timestamp' }),
+});
+
+export type UserInvitation = typeof userInvitations.$inferSelect;
+export type NewUserInvitation = typeof userInvitations.$inferInsert;
+
+// ============================================
+// Runners Table (Remote Execution)
+// ============================================
+
+export type RunnerStatus = 'online' | 'offline' | 'busy';
+export type RunnerCapability = 'run' | 'record';
+
+export const runners = sqliteTable('runners', {
+  id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+  teamId: text('team_id').notNull().references(() => teams.id),
+  createdById: text('created_by_id').notNull().references(() => users.id),
+  name: text('name').notNull(),
+  tokenHash: text('token_hash').notNull().unique(),
+  status: text('status').notNull().default('offline'), // 'online' | 'offline' | 'busy'
+  lastSeen: integer('last_seen', { mode: 'timestamp' }),
+  capabilities: text('capabilities', { mode: 'json' }).$type<RunnerCapability[]>().default(['run', 'record']),
+  maxParallelTests: integer('max_parallel_tests').default(1), // max tests to run in parallel on this runner
+  createdAt: integer('created_at', { mode: 'timestamp' }).$defaultFn(() => new Date()),
+});
+
+export type Runner = typeof runners.$inferSelect;
+export type NewRunner = typeof runners.$inferInsert;

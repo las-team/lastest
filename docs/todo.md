@@ -11,31 +11,32 @@ Excalidraw tests: ~/.claude/plans/recursive-wondering-dongarra.md
 ## reuse
 check the recorder and the runner so that they are compatible and identify the root cause of the issue
 ## in progress
-Login and user management
-Users should be able to login with email/pass (forgot pass reminder email) and social (gh, google) 
-first user should be admin
-in ui should be able to add more users that share the same instance, see the same tests, settings, etc... 
-plan for cloud usage when multiple teams would use 1 server so RLS would be relevant on the DB level
-Later there will potentially be roles introduced
-
 ## test
 OCR
 GitHub PR Comments - CLI runner
-Page Shift Detection  
-Anti-Aliasing Handling 
-Animation Freezing
-Screenshot Stabilization Delay       
-
+Snapshot Stabilization Engine
 ## features
-please Execution local client and cloud ~/.claude/plans/cozy-sniffing-hopcroft.md  
-Electron app ~/.claude/plans/rippling-roaming-snail.md
 Github actions integration
-
+Publish lastest runner to npx npm
+User email sending with resend
 VS Code extension
 npm/CLI one-liner install
+Compare to figma designs/uploaded photos
 
 ├── Days 1-2: Diff comments (P2)
 └── Days 3-5: GitLab integration (P2)
+
+Smart test selection       
+
+  - Analyzes Git history to identify which components changed          
+  - Only runs visual tests on affected stories (skips unchanged)       
+  - Claims up to 80% reduction in snapshot usage/billing               
+  - Caveats: package.json changes trigger full runs; barrel file       
+  imports cause cascade re-testing 
+
+Steady
+  - Uses burst capture (multiple frames) to detect instability         
+  - Masks dynamic content (timestamps, random IDs)    
 
 UI & UX 
     Use the frontend design skill and subagent for this
@@ -43,7 +44,7 @@ UI & UX
     make sure every page has a clear primary action if there are more than one. If you cant decide ask me a question about it
 
 Fix compare and branch selection
-
+Electron app ~/.claude/plans/rippling-roaming-snail.md
 ## ideas
 Tooltip: Did you know tests are getting faster as selectors are optimized to save runtime?
 Build/change approval
@@ -88,9 +89,8 @@ Support https://github.com/excalidraw/excalidraw/tree/master/packages/excalidraw
 
     4. The "Build in Public" Flywheel                                                                                               
   Per https://thebootstrappedfounder.com/indie-hacking-isnt-dead-its-just-less-hacky/:                            
-                                                                                                                  
+                                 
   Share progress → Attract followers → They try tool →                                                            
-  Some convert → They share → Repeat                                                                              
-                                                                                                                  
+  Some convert → They share → Repeat                                                                                                                                             
   This takes 3-6 months of consistent posting before compounding.          
                                                                                                         

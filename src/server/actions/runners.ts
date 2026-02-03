@@ -1,0 +1,343 @@
+'use server';
+
+import { db } from '@/lib/db';
+import { runners, type Runner, type RunnerCapability } from '@/lib/db/schema';
+import { eq, and, desc } from 'drizzle-orm';
+import { v4 as uuid } from 'uuid';
+import crypto from 'crypto';
+import { requireTeamAdmin, requireTeamAccess } from '@/lib/auth';
+import { emitRunnerStatusChange } from '@/lib/ws/runner-events';
+
+/**
+ * Hash a runner token using SHA256
+ */
+function hashToken(token: string): string {
+  return crypto.createHash('sha256').update(token).digest('hex');
+}
+
+/**
+ * Generate a secure runner token
+ * Format: lastest_runner_<random>
+ */
+function generateRunnerToken(): string {
+  const randomBytes = crypto.randomBytes(32).toString('hex');
+  return `lastest_runner_${randomBytes}`;
+}
+
+/**
+ * Get all runners for the current team
+ */
+export async function getRunners(): Promise<Runner[]> {
+  const session = await requireTeamAccess();
+  return db
+    .select()
+    .from(runners)
+    .where(eq(runners.teamId, session.team.id))
+    .orderBy(desc(runners.createdAt))
+    .all();
+}
+
+/**
+ * Get a specific runner by ID (team-scoped)
+ */
+export async function getRunner(runnerId: string): Promise<Runner | null> {
+  const session = await requireTeamAccess();
+  const runner = await db
+    .select()
+    .from(runners)
+    .where(and(eq(runners.id, runnerId), eq(runners.teamId, session.team.id)))
+    .get();
+  return runner ?? null;
+}
+
+/**
+ * Create a new runner (admin only)
+ * Returns the runner AND the plain token (only shown once)
+ */
+export async function createRunner(name: string, capabilities: RunnerCapability[] = ['run', 'record']): Promise<{
+  runner: Runner;
+  token: string;
+} | { error: string }> {
+  const session = await requireTeamAdmin();
+
+  const id = uuid();
+  const token = generateRunnerToken();
+  const tokenHash = hashToken(token);
+  const now = new Date();
+
+  await db.insert(runners).values({
+    id,
+    teamId: session.team.id,
+    createdById: session.user.id,
+    name,
+    tokenHash,
+    status: 'offline',
+    capabilities,
+    createdAt: now,
+  });
+
+  const runner = await db.select().from(runners).where(eq(runners.id, id)).get();
+  if (!runner) {
+    return { error: 'Failed to create runner' };
+  }
+
+  return { runner, token };
+}
+
+/**
+ * Update runner name (admin only)
+ */
+export async function updateRunnerName(runnerId: string, name: string): Promise<{ success: boolean } | { error: string }> {
+  const session = await requireTeamAdmin();
+
+  const runner = await db
+    .select()
+    .from(runners)
+    .where(and(eq(runners.id, runnerId), eq(runners.teamId, session.team.id)))
+    .get();
+
+  if (!runner) {
+    return { error: 'Runner not found' };
+  }
+
+  await db.update(runners).set({ name }).where(eq(runners.id, runnerId));
+  return { success: true };
+}
+
+/**
+ * Regenerate runner token (admin only)
+ * Returns the new plain token (only shown once)
+ */
+export async function regenerateRunnerToken(runnerId: string): Promise<{ token: string } | { error: string }> {
+  const session = await requireTeamAdmin();
+
+  const runner = await db
+    .select()
+    .from(runners)
+    .where(and(eq(runners.id, runnerId), eq(runners.teamId, session.team.id)))
+    .get();
+
+  if (!runner) {
+    return { error: 'Runner not found' };
+  }
+
+  const token = generateRunnerToken();
+  const tokenHash = hashToken(token);
+
+  await db.update(runners).set({ tokenHash }).where(eq(runners.id, runnerId));
+  return { token };
+}
+
+/**
+ * Update runner settings (admin only)
+ */
+export async function updateRunnerSettings(
+  runnerId: string,
+  settings: { maxParallelTests?: number }
+): Promise<{ success: boolean } | { error: string }> {
+  const session = await requireTeamAdmin();
+
+  const runner = await db
+    .select()
+    .from(runners)
+    .where(and(eq(runners.id, runnerId), eq(runners.teamId, session.team.id)))
+    .get();
+
+  if (!runner) {
+    return { error: 'Runner not found' };
+  }
+
+  await db.update(runners).set(settings).where(eq(runners.id, runnerId));
+  return { success: true };
+}
+
+/**
+ * Delete a runner (admin only)
+ */
+export async function deleteRunner(runnerId: string): Promise<{ success: boolean } | { error: string }> {
+  const session = await requireTeamAdmin();
+
+  const runner = await db
+    .select()
+    .from(runners)
+    .where(and(eq(runners.id, runnerId), eq(runners.teamId, session.team.id)))
+    .get();
+
+  if (!runner) {
+    return { error: 'Runner not found' };
+  }
+
+  await db.delete(runners).where(eq(runners.id, runnerId));
+  return { success: true };
+}
+
+/**
+ * Update runner status (internal use - called by WebSocket handler)
+ * Emits SSE event when status changes
+ */
+export async function updateRunnerStatus(
+  runnerId: string,
+  status: 'online' | 'offline' | 'busy',
+  lastSeen?: Date
+): Promise<void> {
+  // Get current status to detect changes
+  const current = await db.select().from(runners).where(eq(runners.id, runnerId)).get();
+  const previousStatus = current?.status;
+
+  await db
+    .update(runners)
+    .set({
+      status,
+      lastSeen: lastSeen ?? new Date(),
+    })
+    .where(eq(runners.id, runnerId));
+
+  // Emit event if status actually changed
+  if (current && previousStatus !== status) {
+    emitRunnerStatusChange({
+      runnerId,
+      teamId: current.teamId,
+      status,
+      previousStatus,
+      timestamp: Date.now(),
+    });
+  }
+}
+
+/**
+ * Validate runner token and return runner info
+ * Used by WebSocket connection handler
+ */
+export async function validateRunnerToken(token: string): Promise<Runner | null> {
+  const tokenHash = hashToken(token);
+  const runner = await db
+    .select()
+    .from(runners)
+    .where(eq(runners.tokenHash, tokenHash))
+    .get();
+  return runner ?? null;
+}
+
+/**
+ * Get online runners for a team (for UI status display)
+ */
+export async function getOnlineRunners(): Promise<Runner[]> {
+  const session = await requireTeamAccess();
+  return db
+    .select()
+    .from(runners)
+    .where(and(eq(runners.teamId, session.team.id), eq(runners.status, 'online')))
+    .all();
+}
+
+/**
+ * Check if team has any connected runners
+ */
+export async function hasConnectedRunners(): Promise<boolean> {
+  const session = await requireTeamAccess();
+  const onlineRunner = await db
+    .select()
+    .from(runners)
+    .where(and(eq(runners.teamId, session.team.id), eq(runners.status, 'online')))
+    .limit(1)
+    .get();
+  return !!onlineRunner;
+}
+
+/**
+ * Get online runners filtered by capability (for UI selection)
+ */
+export async function getOnlineRunnersWithCapability(capability?: RunnerCapability): Promise<Runner[]> {
+  const session = await requireTeamAccess();
+  const onlineRunners = await db
+    .select()
+    .from(runners)
+    .where(and(eq(runners.teamId, session.team.id), eq(runners.status, 'online')))
+    .all();
+
+  // Filter by capability if specified
+  if (capability) {
+    return onlineRunners.filter((runner) => {
+      const caps = runner.capabilities || ['run', 'record'];
+      return caps.includes(capability);
+    });
+  }
+
+  return onlineRunners;
+}
+
+/**
+ * Get all runners filtered by capability (for UI selection with offline shown as disabled)
+ */
+export async function getRunnersWithCapability(capability?: RunnerCapability): Promise<Runner[]> {
+  const session = await requireTeamAccess();
+  const allRunners = await db
+    .select()
+    .from(runners)
+    .where(eq(runners.teamId, session.team.id))
+    .orderBy(desc(runners.createdAt))
+    .all();
+
+  // Filter by capability if specified
+  if (capability) {
+    return allRunners.filter((runner) => {
+      const caps = runner.capabilities || ['run', 'record'];
+      return caps.includes(capability);
+    });
+  }
+
+  return allRunners;
+}
+
+/**
+ * Mark stale runners as offline based on lastSeen timestamp
+ * Called on server startup and periodically to clean up runners
+ * that were marked online but haven't sent heartbeat
+ */
+export async function markStaleRunnersOffline(staleThresholdMs: number = 60_000): Promise<number> {
+  const staleThreshold = new Date(Date.now() - staleThresholdMs);
+
+  // Find all runners that are online/busy but haven't been seen recently
+  const staleRunners = await db
+    .select()
+    .from(runners)
+    .where(
+      and(
+        eq(runners.status, 'online'),
+      )
+    )
+    .all();
+
+  let markedOffline = 0;
+  for (const runner of staleRunners) {
+    // If lastSeen is null or older than threshold, mark offline
+    if (!runner.lastSeen || runner.lastSeen < staleThreshold) {
+      await db
+        .update(runners)
+        .set({ status: 'offline' })
+        .where(eq(runners.id, runner.id));
+      markedOffline++;
+      console.log(`[Stale Cleanup] Marked runner ${runner.id} (${runner.name}) as offline - lastSeen: ${runner.lastSeen?.toISOString() ?? 'never'}`);
+    }
+  }
+
+  // Also check busy runners
+  const busyRunners = await db
+    .select()
+    .from(runners)
+    .where(eq(runners.status, 'busy'))
+    .all();
+
+  for (const runner of busyRunners) {
+    if (!runner.lastSeen || runner.lastSeen < staleThreshold) {
+      await db
+        .update(runners)
+        .set({ status: 'offline' })
+        .where(eq(runners.id, runner.id));
+      markedOffline++;
+      console.log(`[Stale Cleanup] Marked busy runner ${runner.id} (${runner.name}) as offline - lastSeen: ${runner.lastSeen?.toISOString() ?? 'never'}`);
+    }
+  }
+
+  return markedOffline;
+}

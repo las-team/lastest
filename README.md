@@ -73,6 +73,18 @@ Run tests per branch/commit. Compare across PRs. Track coverage.
 ### 🏠 100% Self-Hosted
 SQLite database, local file storage. No external dependencies. No data leaves your machine.
 
+### 🔔 Notifications
+Slack, Discord webhooks, and GitHub PR comments for build results.
+
+### 👥 Team Management
+Multi-tenant support with teams, user roles (owner/admin/member/viewer), and invitations.
+
+### 📊 Test Suites
+Organize tests into ordered suites for structured execution.
+
+### 🧠 Multiple AI Providers
+Choose between Claude CLI, OpenRouter, or Claude Agent SDK for test generation.
+
 ---
 
 ## Quick Start
@@ -158,6 +170,79 @@ pnpm db:push      # Push schema changes to database
 
 ---
 
+## CLI Test Runner (CI/CD)
+
+Run visual regression tests directly from the command line for GitHub Actions or other CI pipelines:
+
+```bash
+pnpm test:visual --repo-id <id> [options]
+```
+
+### Options
+
+| Flag | Description | Default |
+|------|-------------|---------|
+| `--repo-id <id>` | Repository ID (required) | - |
+| `--base-url <url>` | Override target URL | `http://localhost:3000` |
+| `--headless` | Run in headless mode | `true` |
+| `--no-headless` | Run with visible browser | - |
+| `--output-dir <dir>` | Screenshot output directory | `./test-output` |
+
+### GitHub Actions Example
+
+```yaml
+- name: Run Visual Tests
+  run: pnpm test:visual --repo-id ${{ env.REPO_ID }} --base-url http://localhost:3000
+  env:
+    REPO_ID: your-repo-id
+```
+
+The runner automatically captures `GITHUB_HEAD_REF`, `GITHUB_REF_NAME`, and `GITHUB_SHA` for git tracking.
+
+---
+
+## Remote Agent (Preview)
+
+Run tests on remote machines by deploying agents that connect back to your Lastest2 server.
+
+> ⚠️ **Status**: The agent package exists but is not yet published to NPM. Currently available for local development only.
+
+### Local Development Setup
+
+```bash
+# From the repo root, build the runner package
+cd packages/runner
+pnpm install
+pnpm build
+
+# Link globally for local testing
+pnpm link --global
+
+# Run the runner
+lastest2-runner --token YOUR_TOKEN --server http://localhost:3000
+```
+
+### How It Works
+
+1. **Create an agent** in Settings → Agents
+2. **Copy the token** (shown only once)
+3. **Run the agent** on your target machine
+4. **Execute tests** remotely via the web UI
+
+### Current Limitations
+
+- Uses HTTP polling (Next.js doesn't support native WebSocket in App Router)
+- In-memory command queue (restart clears pending commands)
+- Package not yet published to NPM
+
+### Coming Soon
+
+- [ ] NPM package publication (`npm install -g @lastest2/agent`)
+- [ ] Redis-backed command queue for production
+- [ ] Agent health monitoring dashboard
+
+---
+
 ## Tech Stack
 
 - **Framework**: Next.js 16 (App Router)
@@ -172,20 +257,25 @@ pnpm db:push      # Push schema changes to database
 ## Environment Variables
 
 ```bash
-# Optional: GitHub OAuth for repository sync
+# GitHub OAuth for repository sync + login
 GITHUB_CLIENT_ID=
 GITHUB_CLIENT_SECRET=
+
+# Session encryption (auto-generated if not set)
+BETTER_AUTH_SECRET=
 ```
 
 ---
 
 ## Roadmap
 
-- [ ] GitHub Actions integration
-- [ ] Slack/Discord notifications
-- [ ] Team collaboration features
+- [x] GitHub Actions integration (CLI runner)
+- [x] Slack/Discord notifications
+- [x] Team collaboration features
 - [ ] Component-level testing
 - [ ] Storybook integration
+- [ ] Remote agent NPM package publication
+- [ ] Production-ready agent infrastructure (Redis queue)
 
 ---
 

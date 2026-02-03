@@ -45,6 +45,7 @@ export async function getGitHubUser(accessToken: string): Promise<{
   id: number;
   login: string;
   name: string | null;
+  email: string | null;
   avatar_url: string;
 } | null> {
   try {
@@ -57,7 +58,30 @@ export async function getGitHubUser(accessToken: string): Promise<{
 
     if (!response.ok) return null;
 
-    return response.json();
+    const user = await response.json();
+
+    // If no public email, try to get primary email from /user/emails
+    if (!user.email) {
+      try {
+        const emailResponse = await fetch('https://api.github.com/user/emails', {
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+            Accept: 'application/vnd.github.v3+json',
+          },
+        });
+        if (emailResponse.ok) {
+          const emails = await emailResponse.json();
+          const primary = emails.find((e: { primary: boolean; verified: boolean }) => e.primary && e.verified);
+          if (primary) {
+            user.email = primary.email;
+          }
+        }
+      } catch {
+        // Ignore email fetch errors
+      }
+    }
+
+    return user;
   } catch {
     return null;
   }
