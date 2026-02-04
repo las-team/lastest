@@ -1,0 +1,127 @@
+{
+  "name": "lastest2-vscode",
+  "displayName": "Lastest2 Visual Testing",
+  "description": "Visual regression testing integration for Lastest2",
+  "version": "0.1.0",
+  "publisher": "lastest2",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Testing"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "lastest2",
+          "title": "Lastest2",
+          "icon": "$(beaker)"
+        }
+      ]
+    },
+    "views": {
+      "lastest2": [
+        {
+          "id": "lastest2.testExplorer",
+          "name": "Test Explorer"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "lastest2.runTest",
+        "title": "Run Test",
+        "icon": "$(play)"
+      },
+      {
+        "command": "lastest2.runAllTests",
+        "title": "Run All Tests",
+        "icon": "$(run-all)"
+      },
+      {
+        "command": "lastest2.refreshTests",
+        "title": "Refresh Tests",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "lastest2.openInBrowser",
+        "title": "Open in Browser",
+        "icon": "$(link-external)"
+      }
+    ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "lastest2.runAllTests",
+          "when": "view == lastest2.testExplorer",
+          "group": "navigation"
+        },
+        {
+          "command": "lastest2.refreshTests",
+          "when": "view == lastest2.testExplorer",
+          "group": "navigation"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "lastest2.runTest",
+          "when": "view == lastest2.testExplorer && viewItem == test",
+          "group": "inline"
+        },
+        {
+          "command": "lastest2.runTest",
+          "when": "view == lastest2.testExplorer && viewItem == functionalArea",
+          "group": "inline"
+        },
+        {
+          "command": "lastest2.openInBrowser",
+          "when": "view == lastest2.testExplorer && viewItem == test",
+          "group": "inline"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "Lastest2",
+      "properties": {
+        "lastest2.serverUrl": {
+          "type": "string",
+          "default": "http://localhost:3000",
+          "description": "URL of the Lastest2 server"
+        },
+        "lastest2.apiToken": {
+          "type": "string",
+          "default": "",
+          "description": "API token for authentication"
+        },
+        "lastest2.autoRefresh": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically refresh test list after runs"
+        },
+        "lastest2.showStatusBar": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show test status in status bar"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "esbuild src/extension.ts --bundle --outfile=dist/extension.js --external:vscode --format=cjs --platform=node",
+    "watch": "npm run compile -- --watch",
+    "package": "vsce package",
+    "lint": "eslint src"
+  },
+  "devDependencies": {
+    "@types/node": "^20",
+    "@types/vscode": "^1.85.0",
+    "esbuild": "^0.20.0",
+    "typescript": "^5"
+  }
+}

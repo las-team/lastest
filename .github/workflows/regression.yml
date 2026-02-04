@@ -5,12 +5,42 @@ on:
     branches: [main]
 
 jobs:
+  # Remote mode: Dispatch to existing runner (recommended)
+  # Uncomment this job and configure secrets/variables to use remote runner
+  # remote-regression:
+  #   runs-on: ubuntu-latest
+  #   steps:
+  #     - name: Run visual regression tests
+  #       id: visual
+  #       uses: ./action
+  #       with:
+  #         server-url: ${{ secrets.LASTEST_SERVER_URL }}
+  #         runner-token: ${{ secrets.LASTEST_RUNNER_TOKEN }}
+  #         repo-id: ${{ vars.LASTEST_REPO_ID }}
+  #         team-id: ${{ vars.LASTEST_TEAM_ID }}
+  #         runner-id: ${{ vars.LASTEST_RUNNER_ID }}
+  #         timeout: '300'
+  #         fail-on-changes: 'false'
+  #
+  #     - name: Summary
+  #       if: always()
+  #       run: |
+  #         echo "## Visual Regression Results" >> $GITHUB_STEP_SUMMARY
+  #         echo "" >> $GITHUB_STEP_SUMMARY
+  #         echo "**Status:** ${{ steps.visual.outputs.status }}" >> $GITHUB_STEP_SUMMARY
+  #         echo "**Passed:** ${{ steps.visual.outputs.passed-count }}" >> $GITHUB_STEP_SUMMARY
+  #         echo "**Failed:** ${{ steps.visual.outputs.failed-count }}" >> $GITHUB_STEP_SUMMARY
+  #         echo "**Changes:** ${{ steps.visual.outputs.changed-count }}" >> $GITHUB_STEP_SUMMARY
+  #         echo "" >> $GITHUB_STEP_SUMMARY
+  #         echo "[View Results](${{ steps.visual.outputs.build-url }})" >> $GITHUB_STEP_SUMMARY
+
+  # Local mode: Run Playwright directly in CI (requires browser installation)
   regression:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 0  # Full history for branch comparison
+          fetch-depth: 0
 
       - uses: pnpm/action-setup@v4
 
