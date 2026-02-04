@@ -95,6 +95,11 @@ export async function saveNotificationSettings(data: {
   discordWebhookUrl?: string | null;
   discordEnabled?: boolean;
   githubPrCommentsEnabled?: boolean;
+  gitlabMrCommentsEnabled?: boolean;
+  customWebhookEnabled?: boolean;
+  customWebhookUrl?: string | null;
+  customWebhookMethod?: string;
+  customWebhookHeaders?: string | null;
 }) {
   const { repositoryId, ...settingsData } = data;
 
@@ -103,4 +108,32 @@ export async function saveNotificationSettings(data: {
   revalidatePath('/settings');
 
   return { success: true };
+}
+
+export async function testCustomWebhookAction(data: {
+  url: string;
+  method: 'POST' | 'PUT';
+  headers?: string | null;
+}): Promise<{ success: boolean; statusCode?: number; error?: string }> {
+  const { testCustomWebhook } = await import('@/lib/integrations/custom-webhook');
+
+  let parsedHeaders: Record<string, string> | undefined;
+  if (data.headers) {
+    try {
+      parsedHeaders = JSON.parse(data.headers);
+    } catch {
+      return { success: false, error: 'Invalid JSON in headers' };
+    }
+  }
+
+  return testCustomWebhook({
+    url: data.url,
+    method: data.method,
+    headers: parsedHeaders,
+  });
+}
+
+// Selector Stats
+export async function getSelectorStatsAction(repositoryId: string) {
+  return queries.getAggregatedSelectorStats(repositoryId);
 }

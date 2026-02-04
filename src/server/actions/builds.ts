@@ -3,16 +3,22 @@
 import { revalidatePath } from 'next/cache';
 import * as queries from '@/lib/db/queries';
 import { getBranchInfo } from '@/lib/github/content';
+import { getBranchInfo as getGitLabBranchInfo } from '@/lib/gitlab/content';
 import { getOpenPRsForBranch } from '@/lib/github/oauth';
+import { getOpenMRsForBranch } from '@/lib/gitlab/oauth';
 import { getRunner } from '@/lib/playwright/runner';
 import { getServerManager } from '@/lib/playwright/server-manager';
+import { getSetupOrchestrator } from '@/lib/setup/setup-orchestrator';
+import type { SetupContext, SetupStatus } from '@/lib/setup/types';
 import { executeTests } from '@/lib/execution/executor';
 import { getCurrentSession } from '@/lib/auth';
 import { generateDiff } from '@/lib/diff/generator';
 import { hashImage } from '@/lib/diff/hasher';
 import { sendSlackNotification } from '@/lib/integrations/slack';
 import { sendDiscordNotification } from '@/lib/integrations/discord';
+import { sendCustomWebhookNotification } from '@/lib/integrations/custom-webhook';
 import { postPRComment } from '@/lib/integrations/github-pr';
+import { postMRComment } from '@/lib/integrations/gitlab-mr';
 import type { Test, TriggerType, BuildStatus, VisualDiffWithTestStatus, DiffClassification, DiffStatus } from '@/lib/db/schema';
 import path from 'path';
 import { createJob, createPendingJob, startJob, updateJobProgress, completeJob, failJob } from './jobs';
@@ -22,29 +28,56 @@ interface GitInfo {
   commit: string;
 }
 
-async function getGitInfoFromGitHub(repositoryId: string | null): Promise<GitInfo> {
+async function getGitInfoFromProvider(repositoryId: string | null): Promise<GitInfo> {
   if (!repositoryId) {
     return { branch: 'unknown', commit: 'unknown' };
   }
 
-  const account = await queries.getGithubAccount();
   const repo = await queries.getRepository(repositoryId);
-
-  if (!account || !repo) {
+  if (!repo) {
     return { branch: 'unknown', commit: 'unknown' };
   }
 
   const branch = repo.selectedBranch || repo.defaultBranch || 'main';
-  const branchInfo = await getBranchInfo(account.accessToken, repo.owner, repo.name, branch);
 
-  if (!branchInfo) {
-    return { branch, commit: 'unknown' };
+  if (repo.provider === 'gitlab') {
+    // Fetch from GitLab
+    const account = await queries.getGitlabAccount();
+    if (!account || !repo.gitlabProjectId) {
+      return { branch, commit: 'unknown' };
+    }
+
+    const branchInfo = await getGitLabBranchInfo(account.accessToken, repo.gitlabProjectId, branch, account.instanceUrl || undefined);
+    if (!branchInfo) {
+      return { branch, commit: 'unknown' };
+    }
+
+    return {
+      branch: branchInfo.name,
+      commit: branchInfo.commit.id.slice(0, 7),
+    };
+  } else {
+    // Fetch from GitHub
+    const account = await queries.getGithubAccount();
+    if (!account) {
+      return { branch, commit: 'unknown' };
+    }
+
+    const branchInfo = await getBranchInfo(account.accessToken, repo.owner, repo.name, branch);
+    if (!branchInfo) {
+      return { branch, commit: 'unknown' };
+    }
+
+    return {
+      branch: branchInfo.name,
+      commit: branchInfo.commit.sha.slice(0, 7),
+    };
   }
+}
 
-  return {
-    branch: branchInfo.name,
-    commit: branchInfo.commit.sha.slice(0, 7),
-  };
+// Alias for backwards compatibility
+async function getGitInfoFromGitHub(repositoryId: string | null): Promise<GitInfo> {
+  return getGitInfoFromProvider(repositoryId);
 }
 
 const SCREENSHOTS_DIR = path.join(process.cwd(), 'public', 'screenshots');
@@ -211,7 +244,7 @@ async function runBuildAsync(
     });
 
     if (result.status === 'passed') passedCount++;
-    else if (result.status === 'failed') failedCount++;
+    else if (result.status === 'failed' || result.status === 'setup_failed') failedCount++;
 
     // Build screenshots list: prefer captured screenshots, fall back to single screenshotPath
     const screenshots = result.screenshots.length > 0
@@ -254,17 +287,81 @@ async function runBuildAsync(
   };
 
   try {
+    // Configure runner with environment and settings
+    if (envConfig?.id) {
+      runner.setEnvironmentConfig(envConfig);
+      getServerManager().setConfig(envConfig);
+    }
+    if (playwrightSettings) {
+      runner.setSettings(playwrightSettings);
+    }
+
+    // Get the build to check for build-level setup
+    const build = await queries.getBuild(buildId);
+    const baseUrl = envConfig?.baseUrl || 'http://localhost:3000';
+
+    // Initialize setup context
+    let setupContext: SetupContext = {
+      baseUrl,
+      variables: {},
+      repositoryId: repositoryId || null,
+    };
+
+    // Run build-level setup if configured
+    if (build?.buildSetupTestId || build?.buildSetupScriptId) {
+      await queries.updateBuild(buildId, { setupStatus: 'running' });
+
+      const orchestrator = getSetupOrchestrator();
+      // For build-level setup, we need a browser page
+      // We'll use a temporary page for setup, then pass variables to tests
+      const { chromium } = await import('playwright');
+      const browser = await chromium.launch({ headless: true });
+      const page = await browser.newPage();
+
+      try {
+        setupContext.page = page;
+        const setupResult = await orchestrator.resolveAndRunSetup(
+          build.buildSetupTestId,
+          build.buildSetupScriptId,
+          page,
+          setupContext
+        );
+
+        if (!setupResult.success) {
+          // Build setup failed - abort the build
+          await queries.updateBuild(buildId, {
+            setupStatus: 'failed',
+            setupError: setupResult.error,
+            setupDurationMs: setupResult.duration,
+          });
+          throw new Error(`Build setup failed: ${setupResult.error}`);
+        }
+
+        // Merge setup variables
+        if (setupResult.variables) {
+          setupContext.variables = { ...setupContext.variables, ...setupResult.variables };
+        }
+
+        await queries.updateBuild(buildId, {
+          setupStatus: 'completed',
+          setupDurationMs: setupResult.duration,
+        });
+      } finally {
+        await page.close().catch(() => {});
+        await browser.close().catch(() => {});
+      }
+    } else {
+      await queries.updateBuild(buildId, { setupStatus: 'skipped' });
+    }
+
+    // Remove page from context (each test gets its own)
+    delete setupContext.page;
+
+    // Set the setup context on the runner so tests can access it
+    runner.setSetupContext(setupContext);
+
     // Use executor for agent routing, or direct runner for local
     if (runnerId && runnerId !== 'local' && teamId) {
-      // Load environment config for executor
-      if (envConfig?.id) {
-        runner.setEnvironmentConfig(envConfig);
-        getServerManager().setConfig(envConfig);
-      }
-      if (playwrightSettings) {
-        runner.setSettings(playwrightSettings);
-      }
-
       // Load runner's maxParallelTests setting
       const remoteRunner = await queries.getRunnerById(runnerId);
       const maxParallelTests = remoteRunner?.maxParallelTests ?? 1;
@@ -278,18 +375,12 @@ async function runBuildAsync(
         maxParallelTests,
       }, onProgress, onResult);
     } else {
-      // Local execution - configure runner and run directly
-      if (envConfig?.id) {
-        runner.setEnvironmentConfig(envConfig);
-        getServerManager().setConfig(envConfig);
-      }
-      if (playwrightSettings) {
-        runner.setSettings(playwrightSettings);
-      }
-
       // Local uses maxParallelTests from playwrightSettings (set via runner.setSettings)
       await runner.runTests(tests, testRunId, onProgress, onResult);
     }
+
+    // Clear setup context after tests complete
+    runner.clearSetupContext();
 
     // Update test run status
     const hasFailures = failedCount > 0;
@@ -451,14 +542,61 @@ async function processVisualDiff(
   };
 
   // Get active baseline for this test (filtered by stepLabel)
-  const baseline = await queries.getActiveBaseline(testId, branch, stepLabel);
+  const baseline = await queries.getActiveBaseline(testId, stepLabel);
 
   // Check for carry-forward (previously approved identical image)
   const currentHash = hashImage(path.join(process.cwd(), 'public', currentScreenshotPath));
   const matchingBaseline = await queries.getBaselineByHash(testId, currentHash, stepLabel);
 
+  // Get planned screenshot if exists (for design comparison)
+  const plannedScreenshot = await queries.getPlannedScreenshotByTest(testId, stepLabel || null);
+
+  // Helper to generate planned diff
+  const generatePlannedDiff = async (currentPath: string): Promise<{
+    plannedImagePath: string | null;
+    plannedDiffImagePath: string | null;
+    plannedPixelDifference: number | null;
+    plannedPercentageDifference: string | null;
+  }> => {
+    if (!plannedScreenshot) {
+      return {
+        plannedImagePath: null,
+        plannedDiffImagePath: null,
+        plannedPixelDifference: null,
+        plannedPercentageDifference: null,
+      };
+    }
+
+    try {
+      const plannedDiffResult = await generateDiff(
+        path.join(process.cwd(), 'public', plannedScreenshot.imagePath),
+        path.join(process.cwd(), 'public', currentPath),
+        DIFFS_DIR,
+        0.1,
+        includeAntiAliasing
+      );
+
+      return {
+        plannedImagePath: plannedScreenshot.imagePath,
+        plannedDiffImagePath: plannedDiffResult.diffImagePath.replace(process.cwd() + '/public', ''),
+        plannedPixelDifference: plannedDiffResult.pixelDifference,
+        plannedPercentageDifference: plannedDiffResult.percentageDifference.toString(),
+      };
+    } catch {
+      // Planned diff generation failed, just skip planned comparison
+      return {
+        plannedImagePath: plannedScreenshot.imagePath,
+        plannedDiffImagePath: null,
+        plannedPixelDifference: null,
+        plannedPercentageDifference: null,
+      };
+    }
+  };
+
   if (matchingBaseline) {
     // Auto-approve: identical to previously approved baseline
+    const plannedDiff = await generatePlannedDiff(currentScreenshotPath);
+
     const diff = await queries.createVisualDiff({
       buildId,
       testResultId,
@@ -471,12 +609,15 @@ async function processVisualDiff(
       pixelDifference: 0,
       percentageDifference: '0',
       metadata: { changedRegions: [] },
+      ...plannedDiff,
     });
     return { hasChanges: false, diffId: diff.id, classification: 'unchanged' };
   }
 
   // No baseline - this is a new test, requires manual review
   if (!baseline) {
+    const plannedDiff = await generatePlannedDiff(currentScreenshotPath);
+
     const diff = await queries.createVisualDiff({
       buildId,
       testResultId,
@@ -488,6 +629,7 @@ async function processVisualDiff(
       pixelDifference: 0,
       percentageDifference: '0',
       metadata: { changedRegions: [], isNewTest: true },
+      ...plannedDiff,
     });
 
     // Baseline will be created when the diff is approved
@@ -509,6 +651,9 @@ async function processVisualDiff(
     const hasChanges = classification !== 'unchanged';
     const diffImagePath = diffResult.diffImagePath.replace(process.cwd() + '/public', '');
 
+    // Also generate planned diff
+    const plannedDiff = await generatePlannedDiff(currentScreenshotPath);
+
     const diff = await queries.createVisualDiff({
       buildId,
       testResultId,
@@ -522,11 +667,14 @@ async function processVisualDiff(
       pixelDifference: diffResult.pixelDifference,
       percentageDifference: diffResult.percentageDifference.toString(),
       metadata: diffResult.metadata,
+      ...plannedDiff,
     });
 
     return { hasChanges, diffId: diff.id, classification };
   } catch (error) {
     // Diff generation failed, mark as pending for review
+    const plannedDiff = await generatePlannedDiff(currentScreenshotPath);
+
     const diff = await queries.createVisualDiff({
       buildId,
       testResultId,
@@ -539,6 +687,7 @@ async function processVisualDiff(
       pixelDifference: -1,
       percentageDifference: '-1',
       metadata: { changedRegions: [] },
+      ...plannedDiff,
     });
     return { hasChanges: true, diffId: diff.id, classification: 'changed' };
   }
@@ -709,13 +858,50 @@ async function sendBuildNotifications(data: {
     }
   }
 
+  // Send custom webhook notification
+  if (notificationSettings.customWebhookEnabled && notificationSettings.customWebhookUrl) {
+    try {
+      let headers: Record<string, string> | undefined;
+      if (notificationSettings.customWebhookHeaders) {
+        try {
+          headers = JSON.parse(notificationSettings.customWebhookHeaders);
+        } catch {
+          console.error('Failed to parse custom webhook headers');
+        }
+      }
+
+      const result = await sendCustomWebhookNotification(
+        {
+          url: notificationSettings.customWebhookUrl,
+          method: (notificationSettings.customWebhookMethod as 'POST' | 'PUT') || 'POST',
+          headers,
+        },
+        {
+          buildId: data.buildId,
+          status: data.status,
+          totalTests: data.totalTests,
+          passedCount: data.passedCount,
+          changesDetected: data.changesDetected,
+          flakyCount: data.flakyCount,
+          failedCount: data.failedCount,
+          gitBranch: data.gitBranch,
+          gitCommit: testRun?.gitCommit || 'unknown',
+          buildUrl,
+        }
+      );
+      console.log('[Notifications] Custom webhook result:', result);
+    } catch (error) {
+      console.error('Failed to send custom webhook notification:', error);
+    }
+  }
+
   // Post GitHub PR comment
   if (notificationSettings.githubPrCommentsEnabled) {
     try {
       const account = await queries.getGithubAccount();
       const repo = data.repositoryId ? await queries.getRepository(data.repositoryId) : null;
 
-      if (account && repo) {
+      if (account && repo && repo.provider === 'github') {
         // Find open PRs for this branch
         const prs = await getOpenPRsForBranch(
           account.accessToken,
@@ -745,6 +931,45 @@ async function sendBuildNotifications(data: {
       }
     } catch (error) {
       console.error('Failed to post GitHub PR comment:', error);
+    }
+  }
+
+  // Post GitLab MR comment
+  if (notificationSettings.gitlabMrCommentsEnabled) {
+    try {
+      const account = await queries.getGitlabAccount();
+      const repo = data.repositoryId ? await queries.getRepository(data.repositoryId) : null;
+
+      if (account && repo && repo.provider === 'gitlab' && repo.gitlabProjectId) {
+        // Find open MRs for this branch
+        const mrs = await getOpenMRsForBranch(
+          account.accessToken,
+          repo.gitlabProjectId,
+          data.gitBranch,
+          account.instanceUrl || undefined
+        );
+
+        for (const mr of mrs) {
+          await postMRComment(
+            account.accessToken,
+            repo.gitlabProjectId,
+            mr.iid,
+            {
+              buildId: data.buildId,
+              status: data.status,
+              totalTests: data.totalTests,
+              passedCount: data.passedCount,
+              changesDetected: data.changesDetected,
+              flakyCount: data.flakyCount,
+              failedCount: data.failedCount,
+              buildUrl,
+            },
+            account.instanceUrl || undefined
+          );
+        }
+      }
+    } catch (error) {
+      console.error('Failed to post GitLab MR comment:', error);
     }
   }
 }

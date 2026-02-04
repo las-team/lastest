@@ -266,6 +266,7 @@ export function AreasPageClient({ tree, uncategorizedTests, unsortedSuites, repo
             selection={selection}
             areas={tree}
             suites={allSuites}
+            repositoryId={repositoryId}
             onUpdate={() => router.refresh()}
           />
         </div>

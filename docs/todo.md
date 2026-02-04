@@ -11,18 +11,18 @@ Excalidraw tests: ~/.claude/plans/recursive-wondering-dongarra.md
 ## reuse
 check the recorder and the runner so that they are compatible and identify the root cause of the issue
 ## in progress
+
 ## test
 OCR
-GitHub PR Comments - CLI runner
 Snapshot Stabilization Engine
 VS Code extension
 Github actions integration
 Publish lastest runner to npx npm
+Docker
+Gitlab
 
 ## features
-Compare to figma designs/uploaded photos
-Docker
-GitLab integration (P2)
+Individual override for env settings
 
 Steady
   - Uses burst capture (multiple frames) to detect instability         
@@ -35,6 +35,8 @@ UI & UX
 
 Electron app ~/.claude/plans/rippling-roaming-snail.md replan
 ## ideas
+Reference database for test data
+Generate test data with AI
 Imported document -> US & AC -> tests - US checklist overview
 Sitemap -flow
 Firecrawl?

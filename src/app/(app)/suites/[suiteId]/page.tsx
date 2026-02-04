@@ -51,7 +51,11 @@ export default async function SuiteDetailPage({ params }: Props) {
 
   return (
     <div className="flex flex-col h-full">
-      <SuiteDetailClient suite={suite} availableTests={tests} areas={areas} />
+      <SuiteDetailClient
+        suite={suite}
+        availableTests={tests}
+        areas={areas}
+      />
     </div>
   );
 }

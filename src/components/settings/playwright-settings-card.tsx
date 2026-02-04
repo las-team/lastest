@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useTransition, useEffect, useRef, useCallback } from 'react';
+import { useState, useTransition, useEffect, useRef, useCallback, useMemo } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -19,12 +19,14 @@ import {
   CollapsibleTrigger,
 } from '@/components/ui/collapsible';
 import { SelectorPriorityList } from './selector-priority-list';
-import { savePlaywrightSettings, resetPlaywrightSettings } from '@/server/actions/settings';
+import { savePlaywrightSettings, resetPlaywrightSettings, getSelectorStatsAction } from '@/server/actions/settings';
 import { DEFAULT_SELECTOR_PRIORITY, DEFAULT_STABILIZATION_SETTINGS } from '@/lib/db/schema';
-import type { SelectorConfig, PlaywrightSettings, HeadlessMode, RecordingEngine, StabilizationSettings } from '@/lib/db/schema';
+import type { SelectorConfig, PlaywrightSettings, HeadlessMode, RecordingEngine, StabilizationSettings, SelectorType } from '@/lib/db/schema';
 import { Loader2, RotateCcw, List, Video, MousePointer, Pause, Clock, Layers, ChevronDown, Shield, Hourglass, Type, Ban, Eye } from 'lucide-react';
 import { Slider } from '@/components/ui/slider';
 import { toast } from 'sonner';
+import { calculateRecommendations, type SelectorRecommendation } from '@/lib/selector-recommendations';
+import type { SelectorTypeStats } from '@/lib/db/queries';
 
 interface PlaywrightSettingsCardProps {
   settings: PlaywrightSettings;
@@ -62,8 +64,22 @@ export function PlaywrightSettingsCard({
     settings.stabilization || DEFAULT_STABILIZATION_SETTINGS
   );
   const [stabilizationOpen, setStabilizationOpen] = useState(false);
+  const [selectorStats, setSelectorStats] = useState<SelectorTypeStats[]>([]);
 
   const debounceRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Fetch selector stats for recommendations
+  useEffect(() => {
+    if (!repositoryId) return;
+
+    getSelectorStatsAction(repositoryId).then(setSelectorStats).catch(console.error);
+  }, [repositoryId]);
+
+  // Calculate recommendations based on current priority and stats
+  const recommendations = useMemo(() => {
+    if (selectorStats.length === 0) return undefined;
+    return calculateRecommendations(selectorPriority, selectorStats);
+  }, [selectorPriority, selectorStats]);
 
   // Store original values to compare against (prevents save on mount)
   const originalValues = useRef({
@@ -183,7 +199,12 @@ export function PlaywrightSettingsCard({
           <List className="w-4 h-4 text-muted-foreground" />
           <Label className="text-sm font-medium">Selector Priority</Label>
         </div>
-        <SelectorPriorityList value={selectorPriority} onChange={setSelectorPriority} compact={compact} />
+        <SelectorPriorityList
+          value={selectorPriority}
+          onChange={setSelectorPriority}
+          compact={compact}
+          recommendations={recommendations}
+        />
       </div>
 
       {/* Default Recording Engine - only in full mode */}

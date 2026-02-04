@@ -74,7 +74,16 @@ Run tests per branch/commit. Compare across PRs. Track coverage.
 SQLite database, local file storage. No external dependencies. No data leaves your machine.
 
 ### 🔔 Notifications
-Slack, Discord webhooks, and GitHub PR comments for build results.
+Slack, Discord, custom webhooks, and GitHub/GitLab PR comments for build results.
+
+### 🦊 GitLab Support
+Full GitLab integration including OAuth, MR comments, and webhook triggers. Supports self-hosted GitLab instances.
+
+### ⚡ Smart Run
+Intelligent test selection that analyzes git diffs to run only tests affected by your changes. Save time on large test suites.
+
+### 🐳 Docker Deployment
+Production-ready Docker setup with persistent volumes for easy home server deployment.
 
 ### 👥 Team Management
 Multi-tenant support with teams, user roles (owner/admin/member/viewer), and invitations.
@@ -147,6 +156,9 @@ Open [http://localhost:3000](http://localhost:3000)
 | AI test generation | ✅ | ❌ | ❌ |
 | Data privacy | ✅ Local | Cloud | Cloud |
 | Open source | ✅ | ❌ | ❌ |
+| GitHub + GitLab | ✅ | ✅ | ✅ |
+| Smart run (diff-based) | ✅ | ❌ | ❌ |
+| Docker deploy | ✅ | N/A | N/A |
 
 ### Built for Vibe Coders
 
@@ -201,6 +213,52 @@ The runner automatically captures `GITHUB_HEAD_REF`, `GITHUB_REF_NAME`, and `GIT
 
 ---
 
+## Smart Run
+
+Run only tests affected by your code changes:
+
+1. Select a feature branch (not main/master)
+2. Lastest2 compares against the default branch via GitHub/GitLab API
+3. Tests are matched to changed files by URL patterns and code references
+4. Only affected tests run, skipping unchanged areas
+
+This dramatically reduces test time for large suites while maintaining coverage for changed code.
+
+---
+
+## Docker Deployment
+
+Deploy Lastest2 on your home server or any Docker host:
+
+```bash
+# Quick start
+docker-compose up -d
+
+# View logs
+docker-compose logs -f
+
+# Stop
+docker-compose down
+```
+
+### Volumes
+
+| Volume | Purpose |
+|--------|---------|
+| `lastest2-data` | SQLite database |
+| `lastest2-screenshots` | Test screenshots |
+| `lastest2-baselines` | Approved baselines |
+
+### Environment Variables for Docker
+
+```bash
+BETTER_AUTH_SECRET=your-secret-key
+GITHUB_CLIENT_ID=your-github-app-id
+GITHUB_CLIENT_SECRET=your-github-app-secret
+```
+
+---
+
 ## Remote Agent (Preview)
 
 Run tests on remote machines by deploying agents that connect back to your Lastest2 server.
@@ -243,6 +301,31 @@ lastest2-runner --token YOUR_TOKEN --server http://localhost:3000
 
 ---
 
+## Custom Webhooks
+
+Send build results to any HTTP endpoint. Configure in Settings → Notifications.
+
+### Payload Format
+
+```json
+{
+  "event": "build.completed",
+  "buildId": "abc123",
+  "status": "safe" | "needs_review" | "blocked",
+  "totalTests": 10,
+  "passedCount": 8,
+  "failedCount": 1,
+  "changesDetected": 1,
+  "flakyCount": 0,
+  "gitBranch": "main",
+  "gitCommit": "abc123",
+  "buildUrl": "https://your-instance/builds/abc123",
+  "timestamp": "2024-01-01T00:00:00.000Z"
+}
+```
+
+---
+
 ## Tech Stack
 
 - **Framework**: Next.js 16 (App Router)
@@ -257,12 +340,32 @@ lastest2-runner --token YOUR_TOKEN --server http://localhost:3000
 ## Environment Variables
 
 ```bash
-# GitHub OAuth for repository sync + login
-GITHUB_CLIENT_ID=
-GITHUB_CLIENT_SECRET=
-
 # Session encryption (auto-generated if not set)
 BETTER_AUTH_SECRET=
+
+# GitHub OAuth (for repository sync + login)
+GITHUB_CLIENT_ID=
+GITHUB_CLIENT_SECRET=
+GITHUB_WEBHOOK_SECRET=        # Optional: verify webhook signatures
+
+# GitLab OAuth (supports self-hosted instances)
+GITLAB_CLIENT_ID=
+GITLAB_CLIENT_SECRET=
+GITLAB_INSTANCE_URL=          # Default: https://gitlab.com
+GITLAB_WEBHOOK_SECRET=        # Optional: verify webhook signatures
+
+# Google OAuth (for login)
+GOOGLE_CLIENT_ID=
+GOOGLE_CLIENT_SECRET=
+
+# Email (optional, for invitations)
+RESEND_API_KEY=
+EMAIL_FROM=
+
+# Advanced
+DATABASE_PATH=                # Default: ./lastest2.db
+MONITORED_BRANCHES=           # Default: main,master,develop
+NEXT_PUBLIC_APP_URL=          # Your app's public URL
 ```
 
 ---
@@ -272,8 +375,11 @@ BETTER_AUTH_SECRET=
 - [x] GitHub Actions integration (CLI runner)
 - [x] Slack/Discord notifications
 - [x] Team collaboration features
-- [ ] Component-level testing
-- [ ] Storybook integration
+- [x] GitLab integration (OAuth, MR comments, webhooks)
+- [x] Docker deployment
+- [x] Smart run (git-diff based test selection)
+- [x] Custom webhook notifications
+- [x] Google OAuth
 - [ ] Remote agent NPM package publication
 - [ ] Production-ready agent infrastructure (Redis queue)
 

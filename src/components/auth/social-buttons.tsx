@@ -3,17 +3,32 @@
 import { Button } from '@/components/ui/button';
 import { Github } from 'lucide-react';
 
+// GitLab icon SVG
+function GitLabIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="currentColor">
+      <path d="M4.845.904c-.435 0-.82.28-.955.692C2.639 5.449 1.246 9.728.07 13.335a1.437 1.437 0 00.522 1.607l11.071 8.045c.2.145.472.144.67-.004l11.073-8.04a1.436 1.436 0 00.522-1.61c-1.285-3.942-2.683-8.256-3.817-11.746a1.004 1.004 0 00-.957-.684.987.987 0 00-.949.69l-2.405 7.408H8.203l-2.41-7.408a.987.987 0 00-.942-.69h-.006z" />
+    </svg>
+  );
+}
+
 interface SocialButtonsProps {
   mode: 'login' | 'register';
   githubEnabled?: boolean;
+  gitlabEnabled?: boolean;
   googleEnabled?: boolean;
 }
 
-export function SocialButtons({ mode, githubEnabled = true, googleEnabled = true }: SocialButtonsProps) {
-  const hasAny = githubEnabled || googleEnabled;
+export function SocialButtons({ mode, githubEnabled = true, gitlabEnabled = false, googleEnabled = true }: SocialButtonsProps) {
+  const hasAny = githubEnabled || gitlabEnabled || googleEnabled;
   if (!hasAny) return null;
+
   const handleGitHubLogin = () => {
     window.location.href = '/api/auth/github';
+  };
+
+  const handleGitLabLogin = () => {
+    window.location.href = '/api/auth/gitlab';
   };
 
   const handleGoogleLogin = () => {
@@ -31,6 +46,18 @@ export function SocialButtons({ mode, githubEnabled = true, googleEnabled = true
         >
           <Github className="h-4 w-4" />
           {mode === 'login' ? 'Sign in with GitHub' : 'Sign up with GitHub'}
+        </Button>
+      )}
+
+      {gitlabEnabled && (
+        <Button
+          type="button"
+          variant="outline"
+          className="w-full"
+          onClick={handleGitLabLogin}
+        >
+          <GitLabIcon className="h-4 w-4" />
+          {mode === 'login' ? 'Sign in with GitLab' : 'Sign up with GitLab'}
         </Button>
       )}
 

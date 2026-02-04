@@ -3,6 +3,15 @@ import { Badge } from '@/components/ui/badge';
 import * as queries from '@/lib/db/queries';
 import { getCurrentUser } from '@/lib/auth';
 import { Github, Check, X, Database, ExternalLink, Users, Bot, Mail } from 'lucide-react';
+
+// GitLab icon SVG component
+function GitLabIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="currentColor">
+      <path d="M4.845.904c-.435 0-.82.28-.955.692C2.639 5.449 1.246 9.728.07 13.335a1.437 1.437 0 00.522 1.607l11.071 8.045c.2.145.472.144.67-.004l11.073-8.04a1.436 1.436 0 00.522-1.61c-1.285-3.942-2.683-8.256-3.817-11.746a1.004 1.004 0 00-.957-.684.987.987 0 00-.949.69l-2.405 7.408H8.203l-2.41-7.408a.987.987 0 00-.942-.69h-.006z" />
+    </svg>
+  );
+}
 import { PlaywrightSettingsCard } from '@/components/settings/playwright-settings-card';
 import { EnvironmentConfigCard } from '@/components/settings/environment-config-card';
 import { DiffSensitivityCard } from '@/components/settings/diff-sensitivity-card';
@@ -24,9 +33,10 @@ export default async function SettingsPage({
   searchParams: Promise<{ success?: string; error?: string }>;
 }) {
   const params = await searchParams;
-  const [currentUser, githubAccount, selectedRepo] = await Promise.all([
+  const [currentUser, githubAccount, gitlabAccount, selectedRepo] = await Promise.all([
     getCurrentUser(),
     queries.getGithubAccount(),
+    queries.getGitlabAccount(),
     queries.getSelectedRepository(),
   ]);
   const playwrightSettings = await queries.getPlaywrightSettings(selectedRepo?.id);
@@ -55,6 +65,12 @@ export default async function SettingsPage({
             <div className="p-4 bg-green-50 border border-green-200 rounded-lg flex items-center gap-2 text-green-700">
               <Check className="w-5 h-5" />
               GitHub account connected successfully!
+            </div>
+          )}
+          {params.success === 'gitlab_connected' && (
+            <div className="p-4 bg-green-50 border border-green-200 rounded-lg flex items-center gap-2 text-green-700">
+              <Check className="w-5 h-5" />
+              GitLab account connected successfully!
             </div>
           )}
           {params.error && (
@@ -114,6 +130,64 @@ export default async function SettingsPage({
                   >
                     <Github className="w-5 h-5" />
                     Connect GitHub
+                  </a>
+                </>
+              )}
+            </CardContent>
+          </Card>
+
+          {/* GitLab Integration */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <GitLabIcon className="w-5 h-5" />
+                GitLab Integration
+              </CardTitle>
+              <CardDescription>
+                Connect GitLab for MR linking and automatic triggers
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {gitlabAccount ? (
+                <>
+                  <div className="flex items-center justify-between p-4 bg-orange-50 rounded-lg">
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 rounded-full bg-orange-200 flex items-center justify-center">
+                        <GitLabIcon className="w-6 h-6" />
+                      </div>
+                      <div>
+                        <div className="font-medium">@{gitlabAccount.gitlabUsername}</div>
+                        <div className="text-sm text-muted-foreground">
+                          {gitlabAccount.instanceUrl === 'https://gitlab.com' ? 'Connected' : gitlabAccount.instanceUrl}
+                        </div>
+                      </div>
+                    </div>
+                    <a
+                      href="/api/auth/gitlab"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-sm text-blue-600 hover:underline"
+                    >
+                      Reconnect
+                    </a>
+                  </div>
+                  <p className="text-sm text-muted-foreground">
+                    Builds will automatically link to open MRs by branch name.
+                  </p>
+                </>
+              ) : (
+                <>
+                  <p className="text-muted-foreground">
+                    Connect your GitLab account to link builds with merge requests.
+                  </p>
+                  <a
+                    href="/api/auth/gitlab"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-2 px-4 py-2 bg-orange-600 text-white rounded-lg hover:bg-orange-700"
+                  >
+                    <GitLabIcon className="w-5 h-5" />
+                    Connect GitLab
                   </a>
                 </>
               )}
@@ -212,6 +286,7 @@ export default async function SettingsPage({
             settings={notificationSettings}
             repositoryId={selectedRepo?.id}
             hasGithubAccount={!!githubAccount}
+            hasGitlabAccount={!!gitlabAccount}
           />
 
           {/* Diff Sensitivity */}

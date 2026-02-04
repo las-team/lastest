@@ -4,6 +4,7 @@ import { revalidatePath } from 'next/cache';
 import * as queries from '@/lib/db/queries';
 import { requireTeamAccess } from '@/lib/auth';
 import { getUserRepos, getRepoBranches, type GitHubRepo, type GitHubBranch } from '@/lib/github/oauth';
+import { getUserProjects, getProjectBranches, type GitLabProject, type GitLabBranch } from '@/lib/gitlab/oauth';
 
 export async function fetchAndSyncRepos(): Promise<{ success: boolean; count: number }> {
   const session = await requireTeamAccess();
@@ -44,12 +45,65 @@ export async function fetchAndSyncRepos(): Promise<{ success: boolean; count: nu
   return { success: true, count: ghRepos.length };
 }
 
+export async function fetchAndSyncGitlabRepos(): Promise<{ success: boolean; count: number }> {
+  const session = await requireTeamAccess();
+  const account = await queries.getGitlabAccountByTeam(session.team.id);
+  if (!account) {
+    return { success: false, count: 0 };
+  }
+
+  const glProjects = await getUserProjects(account.accessToken, account.instanceUrl || undefined);
+  if (!glProjects.length) {
+    return { success: false, count: 0 };
+  }
+
+  // Upsert repos for this team
+  for (const project of glProjects) {
+    const existing = await queries.getRepositoryByGitlabProjectId(project.id);
+    const [namespace, ...nameParts] = project.path_with_namespace.split('/');
+    const projectName = nameParts.join('/'); // Handle nested groups
+
+    if (existing && existing.teamId === session.team.id) {
+      await queries.updateRepository(existing.id, {
+        owner: namespace,
+        name: projectName,
+        fullName: project.path_with_namespace,
+        defaultBranch: project.default_branch,
+      });
+    } else if (!existing) {
+      await queries.createRepository({
+        teamId: session.team.id,
+        provider: 'gitlab',
+        gitlabProjectId: project.id,
+        owner: namespace,
+        name: projectName,
+        fullName: project.path_with_namespace,
+        defaultBranch: project.default_branch,
+      });
+    }
+  }
+
+  revalidatePath('/');
+  revalidatePath('/settings');
+  return { success: true, count: glProjects.length };
+}
+
 export async function selectRepo(repositoryId: string | null) {
   const session = await requireTeamAccess();
-  const account = await queries.getGithubAccountByTeam(session.team.id);
-  if (!account) return;
 
-  await queries.updateSelectedRepository(account.id, repositoryId);
+  // Update both GitHub and GitLab account selections
+  const [githubAccount, gitlabAccount] = await Promise.all([
+    queries.getGithubAccountByTeam(session.team.id),
+    queries.getGitlabAccountByTeam(session.team.id),
+  ]);
+
+  if (githubAccount) {
+    await queries.updateSelectedRepository(githubAccount.id, repositoryId);
+  }
+  if (gitlabAccount) {
+    await queries.updateGitlabSelectedRepository(gitlabAccount.id, repositoryId);
+  }
+
   revalidatePath('/');
   revalidatePath('/tests');
   revalidatePath('/run');
@@ -90,15 +144,43 @@ export async function updateRepoSelectedBranch(repositoryId: string, branch: str
   revalidatePath('/builds');
 }
 
-export async function fetchRepoBranches(repositoryId: string): Promise<GitHubBranch[]> {
-  const session = await requireTeamAccess();
-  const account = await queries.getGithubAccountByTeam(session.team.id);
-  if (!account) return [];
+// Branch interface that works for both providers
+interface RepoBranch {
+  name: string;
+  commit: { sha: string };
+  protected: boolean;
+}
 
+export async function fetchRepoBranches(repositoryId: string): Promise<RepoBranch[]> {
+  const session = await requireTeamAccess();
   const repo = await queries.getRepository(repositoryId);
   if (!repo || repo.teamId !== session.team.id) return [];
 
-  return getRepoBranches(account.accessToken, repo.owner, repo.name);
+  if (repo.provider === 'gitlab') {
+    // Fetch from GitLab
+    const account = await queries.getGitlabAccountByTeam(session.team.id);
+    if (!account || !repo.gitlabProjectId) return [];
+
+    const branches = await getProjectBranches(account.accessToken, repo.gitlabProjectId, account.instanceUrl || undefined);
+    // Transform GitLab branch format to common format
+    return branches.map(b => ({
+      name: b.name,
+      commit: { sha: b.commit.id },
+      protected: b.protected,
+    }));
+  } else {
+    // Fetch from GitHub
+    const account = await queries.getGithubAccountByTeam(session.team.id);
+    if (!account) return [];
+
+    const branches = await getRepoBranches(account.accessToken, repo.owner, repo.name);
+    // Transform GitHub branch format to common format
+    return branches.map(b => ({
+      name: b.name,
+      commit: { sha: b.commit.sha },
+      protected: b.protected,
+    }));
+  }
 }
 
 // Get branch test status (has runs or not)

@@ -1,0 +1,1 @@
+[    4688ms] [ERROR] Failed to load resource: the server responded with a status of 401 (Unauthorized) @ http://localhost:3000/api/auth/login:0

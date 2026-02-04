@@ -28,7 +28,8 @@ import { aiFixTest, aiEnhanceTest, updateTestCode } from '@/server/actions/ai';
 import { toast } from 'sonner';
 import { useNotifyJobStarted } from '@/components/queue/job-polling-context';
 import { ExecutionTargetSelector } from '@/components/execution/execution-target-selector';
-import type { Test, TestVersion, VisualDiff } from '@/lib/db/schema';
+import { StepScreenshotMatcher } from '@/components/planned/step-screenshot-matcher';
+import type { Test, TestVersion, VisualDiff, PlannedScreenshot } from '@/lib/db/schema';
 import type { ScreenshotGroup } from '@/server/actions/tests';
 
 interface StepDiff {
@@ -59,9 +60,10 @@ interface TestDetailClientProps {
   results: TestResult[];
   repositoryId?: string | null;
   screenshotGroups?: ScreenshotGroup[];
+  plannedScreenshots?: PlannedScreenshot[];
 }
 
-export function TestDetailClient({ test, results, repositoryId, screenshotGroups = [] }: TestDetailClientProps) {
+export function TestDetailClient({ test, results, repositoryId, screenshotGroups = [], plannedScreenshots = [] }: TestDetailClientProps) {
   const router = useRouter();
   const notifyJobStarted = useNotifyJobStarted();
   const [isDeleting, setIsDeleting] = useState(false);
@@ -459,6 +461,7 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
           <TabsList>
             <TabsTrigger value="code">Code</TabsTrigger>
             <TabsTrigger value="screenshots">Screenshots</TabsTrigger>
+            <TabsTrigger value="plans">Plans</TabsTrigger>
             <TabsTrigger value="history">Run History</TabsTrigger>
             <TabsTrigger value="versions" onClick={loadVersions}>Versions</TabsTrigger>
           </TabsList>
@@ -517,7 +520,7 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
             )}
           </TabsContent>
 
-          <TabsContent value="screenshots" className="mt-4">
+          <TabsContent value="screenshots" className="mt-4 space-y-6">
             <Card>
               <CardHeader>
                 <CardTitle className="text-sm">Screenshot Timeline</CardTitle>
@@ -570,6 +573,24 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
                 )}
               </CardContent>
             </Card>
+          </TabsContent>
+
+          <TabsContent value="plans" className="mt-4">
+            {repositoryId ? (
+              <StepScreenshotMatcher
+                testId={test.id}
+                repositoryId={repositoryId}
+                screenshotGroups={screenshotGroups}
+                plannedScreenshots={plannedScreenshots}
+                onUpdate={() => router.refresh()}
+              />
+            ) : (
+              <Card>
+                <CardContent className="py-8 text-center text-muted-foreground">
+                  Select a repository to manage planned screenshots
+                </CardContent>
+              </Card>
+            )}
           </TabsContent>
 
           <TabsContent value="history" className="mt-4">

@@ -7,9 +7,11 @@ import {
   builds,
   visualDiffs,
   baselines,
+  plannedScreenshots,
   ignoreRegions,
   pullRequests,
   githubAccounts,
+  gitlabAccounts,
   repositories,
   playwrightSettings,
   routes,
@@ -33,6 +35,9 @@ import {
   emailVerificationTokens,
   userInvitations,
   runners,
+  setupScripts,
+  setupConfigs,
+  defaultSetupSteps,
 } from './schema';
 import {
   DEFAULT_SELECTOR_PRIORITY,
@@ -50,9 +55,11 @@ import type {
   NewBuild,
   NewVisualDiff,
   NewBaseline,
+  NewPlannedScreenshot,
   NewIgnoreRegion,
   NewPullRequest,
   NewGithubAccount,
+  NewGitlabAccount,
   NewRepository,
   NewPlaywrightSettings,
   NewRoute,
@@ -75,6 +82,9 @@ import type {
   NewPasswordResetToken,
   NewUserInvitation,
   NewRunner,
+  NewSetupScript,
+  NewSetupConfig,
+  NewDefaultSetupStep,
   Team,
   User,
   Runner,
@@ -86,6 +96,7 @@ import type {
   BackgroundJobStatus,
   TestChangeReason,
   UserRole,
+  SetupScriptType,
 } from './schema';
 
 export { DEFAULT_SELECTOR_PRIORITY, DEFAULT_DIFF_THRESHOLDS, DEFAULT_AI_SETTINGS, DEFAULT_RECORDING_ENGINES, DEFAULT_NOTIFICATION_SETTINGS };
@@ -365,6 +376,11 @@ export async function getBuildsByRepo(repositoryId: string, limit = 10) {
       elapsedMs: builds.elapsedMs,
       createdAt: builds.createdAt,
       completedAt: builds.completedAt,
+      buildSetupTestId: builds.buildSetupTestId,
+      buildSetupScriptId: builds.buildSetupScriptId,
+      setupStatus: builds.setupStatus,
+      setupError: builds.setupError,
+      setupDurationMs: builds.setupDurationMs,
       gitBranch: testRuns.gitBranch,
     })
     .from(builds)
@@ -400,6 +416,10 @@ export async function getVisualDiffsWithTestStatus(buildId: string) {
       approvedBy: visualDiffs.approvedBy,
       approvedAt: visualDiffs.approvedAt,
       createdAt: visualDiffs.createdAt,
+      plannedImagePath: visualDiffs.plannedImagePath,
+      plannedDiffImagePath: visualDiffs.plannedDiffImagePath,
+      plannedPixelDifference: visualDiffs.plannedPixelDifference,
+      plannedPercentageDifference: visualDiffs.plannedPercentageDifference,
       testResultStatus: testResults.status,
       testName: tests.name,
       functionalAreaName: functionalAreas.name,
@@ -441,19 +461,21 @@ export async function batchUpdateVisualDiffs(ids: string[], data: Partial<NewVis
 }
 
 // Baselines
-export async function getActiveBaseline(testId: string, branch: string, stepLabel?: string | null) {
+export async function getActiveBaseline(testId: string, stepLabel?: string | null) {
   const conditions = [
     eq(baselines.testId, testId),
-    eq(baselines.branch, branch),
     eq(baselines.isActive, true),
   ];
   if (stepLabel) {
     conditions.push(eq(baselines.stepLabel, stepLabel));
+  } else {
+    conditions.push(isNull(baselines.stepLabel));
   }
   return db
     .select()
     .from(baselines)
     .where(and(...conditions))
+    .orderBy(desc(baselines.createdAt))
     .get();
 }
 
@@ -465,6 +487,8 @@ export async function getBaselineByHash(testId: string, imageHash: string, stepL
   ];
   if (stepLabel) {
     conditions.push(eq(baselines.stepLabel, stepLabel));
+  } else {
+    conditions.push(isNull(baselines.stepLabel));
   }
   return db
     .select()
@@ -479,10 +503,12 @@ export async function createBaseline(data: Omit<NewBaseline, 'id'>) {
   return { id, ...data, createdAt: new Date() };
 }
 
-export async function deactivateBaselines(testId: string, branch: string, stepLabel?: string | null) {
-  const conditions = [eq(baselines.testId, testId), eq(baselines.branch, branch)];
+export async function deactivateBaselines(testId: string, stepLabel?: string | null) {
+  const conditions = [eq(baselines.testId, testId)];
   if (stepLabel) {
     conditions.push(eq(baselines.stepLabel, stepLabel));
+  } else {
+    conditions.push(isNull(baselines.stepLabel));
   }
   await db
     .update(baselines)
@@ -547,6 +573,33 @@ export async function deleteGithubAccount(id: string) {
   await db.delete(githubAccounts).where(eq(githubAccounts.id, id));
 }
 
+// GitLab Accounts
+export async function getGitlabAccount() {
+  return db.select().from(gitlabAccounts).get();
+}
+
+export async function getGitlabAccountByTeam(teamId: string) {
+  return db.select().from(gitlabAccounts).where(eq(gitlabAccounts.teamId, teamId)).get();
+}
+
+export async function createGitlabAccount(data: Omit<NewGitlabAccount, 'id'>) {
+  const id = uuid();
+  await db.insert(gitlabAccounts).values({ ...data, id, createdAt: new Date() });
+  return { id, ...data, createdAt: new Date() };
+}
+
+export async function updateGitlabAccount(id: string, data: Partial<NewGitlabAccount>) {
+  await db.update(gitlabAccounts).set(data).where(eq(gitlabAccounts.id, id));
+}
+
+export async function deleteGitlabAccount(id: string) {
+  await db.delete(gitlabAccounts).where(eq(gitlabAccounts.id, id));
+}
+
+export async function updateGitlabSelectedRepository(accountId: string, repositoryId: string | null) {
+  await db.update(gitlabAccounts).set({ selectedRepositoryId: repositoryId }).where(eq(gitlabAccounts.id, accountId));
+}
+
 // Build Summary helpers
 export async function computeBuildStatus(buildId: string): Promise<BuildStatus> {
   const diffs = await getVisualDiffsByBuild(buildId);
@@ -572,6 +625,10 @@ export async function getRepository(id: string) {
 
 export async function getRepositoryByGithubId(githubRepoId: number) {
   return db.select().from(repositories).where(eq(repositories.githubRepoId, githubRepoId)).get();
+}
+
+export async function getRepositoryByGitlabProjectId(gitlabProjectId: number) {
+  return db.select().from(repositories).where(eq(repositories.gitlabProjectId, gitlabProjectId)).get();
 }
 
 export async function createRepository(data: Omit<NewRepository, 'id'>) {
@@ -1834,6 +1891,11 @@ export async function getNotificationSettings(repositoryId?: string | null) {
     discordWebhookUrl: null,
     discordEnabled: DEFAULT_NOTIFICATION_SETTINGS.discordEnabled,
     githubPrCommentsEnabled: DEFAULT_NOTIFICATION_SETTINGS.githubPrCommentsEnabled,
+    gitlabMrCommentsEnabled: DEFAULT_NOTIFICATION_SETTINGS.gitlabMrCommentsEnabled,
+    customWebhookEnabled: DEFAULT_NOTIFICATION_SETTINGS.customWebhookEnabled,
+    customWebhookUrl: null,
+    customWebhookMethod: DEFAULT_NOTIFICATION_SETTINGS.customWebhookMethod,
+    customWebhookHeaders: null,
     createdAt: null,
     updatedAt: null,
   };
@@ -1980,6 +2042,83 @@ export async function recordSelectorFailure(
       createdAt: now,
     });
   }
+}
+
+// Aggregated selector stats by selectorType for a repository
+export interface SelectorTypeStats {
+  selectorType: string;
+  totalSuccesses: number;
+  totalFailures: number;
+  totalAttempts: number;
+  avgResponseTimeMs: number | null;
+  successRate: number; // 0-100
+}
+
+export async function getAggregatedSelectorStats(repositoryId: string): Promise<SelectorTypeStats[]> {
+  // Get all tests for this repository
+  const repoTests = await db
+    .select({ id: tests.id })
+    .from(tests)
+    .where(eq(tests.repositoryId, repositoryId))
+    .all();
+
+  if (repoTests.length === 0) {
+    return [];
+  }
+
+  const testIds = repoTests.map((t) => t.id);
+
+  // Get all selector stats for these tests
+  const stats = await db
+    .select()
+    .from(selectorStats)
+    .where(inArray(selectorStats.testId, testIds))
+    .all();
+
+  // Aggregate by selectorType
+  const aggregated = new Map<
+    string,
+    { successes: number; failures: number; attempts: number; responseTimeSum: number; responseTimeCount: number }
+  >();
+
+  for (const stat of stats) {
+    const existing = aggregated.get(stat.selectorType) || {
+      successes: 0,
+      failures: 0,
+      attempts: 0,
+      responseTimeSum: 0,
+      responseTimeCount: 0,
+    };
+
+    existing.successes += stat.successCount ?? 0;
+    existing.failures += stat.failureCount ?? 0;
+    existing.attempts += stat.totalAttempts ?? 0;
+    if (stat.avgResponseTimeMs != null && stat.successCount != null && stat.successCount > 0) {
+      existing.responseTimeSum += stat.avgResponseTimeMs * stat.successCount;
+      existing.responseTimeCount += stat.successCount;
+    }
+
+    aggregated.set(stat.selectorType, existing);
+  }
+
+  // Convert to result array
+  const result: SelectorTypeStats[] = [];
+  for (const [selectorType, data] of aggregated) {
+    const successRate = data.attempts > 0 ? Math.round((data.successes / data.attempts) * 100) : 0;
+    const avgResponseTimeMs =
+      data.responseTimeCount > 0 ? Math.round(data.responseTimeSum / data.responseTimeCount) : null;
+
+    result.push({
+      selectorType,
+      totalSuccesses: data.successes,
+      totalFailures: data.failures,
+      totalAttempts: data.attempts,
+      avgResponseTimeMs,
+      successRate,
+    });
+  }
+
+  return result;
 }
 
 // ============================================
@@ -2332,4 +2471,402 @@ export async function deleteExpiredInvitations() {
 // Runner queries
 export async function getRunnerById(runnerId: string) {
   return db.select().from(runners).where(eq(runners.id, runnerId)).get();
+}
+
+// ============================================
+// Planned Screenshots
+// ============================================
+
+export async function createPlannedScreenshot(data: Omit<NewPlannedScreenshot, 'id' | 'createdAt' | 'updatedAt'>) {
+  const id = uuid();
+  const now = new Date();
+  await db.insert(plannedScreenshots).values({
+    ...data,
+    id,
+    createdAt: now,
+    updatedAt: now,
+  });
+  return { id, ...data, createdAt: now, updatedAt: now };
+}
+
+export async function getPlannedScreenshot(id: string) {
+  return db.select().from(plannedScreenshots).where(eq(plannedScreenshots.id, id)).get();
+}
+
+export async function getPlannedScreenshotByTest(testId: string, stepLabel?: string | null) {
+  const conditions = [
+    eq(plannedScreenshots.testId, testId),
+    eq(plannedScreenshots.isActive, true),
+  ];
+  if (stepLabel) {
+    conditions.push(eq(plannedScreenshots.stepLabel, stepLabel));
+  } else {
+    conditions.push(isNull(plannedScreenshots.stepLabel));
+  }
+  return db
+    .select()
+    .from(plannedScreenshots)
+    .where(and(...conditions))
+    .get();
+}
+
+export async function getPlannedScreenshotByRoute(routeId: string) {
+  return db
+    .select()
+    .from(plannedScreenshots)
+    .where(and(eq(plannedScreenshots.routeId, routeId), eq(plannedScreenshots.isActive, true)))
+    .get();
+}
+
+export async function getPlannedScreenshotsByRepo(repositoryId: string) {
+  return db
+    .select()
+    .from(plannedScreenshots)
+    .where(and(eq(plannedScreenshots.repositoryId, repositoryId), eq(plannedScreenshots.isActive, true)))
+    .orderBy(desc(plannedScreenshots.createdAt))
+    .all();
+}
+
+export async function getPlannedScreenshotsByTest(testId: string) {
+  return db
+    .select()
+    .from(plannedScreenshots)
+    .where(and(eq(plannedScreenshots.testId, testId), eq(plannedScreenshots.isActive, true)))
+    .orderBy(plannedScreenshots.stepLabel)
+    .all();
+}
+
+export async function updatePlannedScreenshot(id: string, data: Partial<NewPlannedScreenshot>) {
+  await db.update(plannedScreenshots).set({ ...data, updatedAt: new Date() }).where(eq(plannedScreenshots.id, id));
+}
+
+export async function deletePlannedScreenshot(id: string) {
+  // Soft delete - mark as inactive
+  await db.update(plannedScreenshots).set({ isActive: false, updatedAt: new Date() }).where(eq(plannedScreenshots.id, id));
+}
+
+export async function hardDeletePlannedScreenshot(id: string) {
+  await db.delete(plannedScreenshots).where(eq(plannedScreenshots.id, id));
+}
+
+// Get route with full context for AI test generation
+export interface RouteWithContext {
+  id: string;
+  path: string;
+  type: string;
+  description: string | null;
+  filePath: string | null;
+  framework: string | null;
+  routerType: string | null;
+  functionalAreaId: string | null;
+  functionalAreaName: string | null;
+  functionalAreaDescription: string | null;
+  testSuggestions: string[];
+}
+
+export async function getRouteWithContext(routeId: string): Promise<RouteWithContext | null> {
+  const route = await db
+    .select({
+      id: routes.id,
+      path: routes.path,
+      type: routes.type,
+      description: routes.description,
+      filePath: routes.filePath,
+      framework: routes.framework,
+      routerType: routes.routerType,
+      functionalAreaId: routes.functionalAreaId,
+      functionalAreaName: functionalAreas.name,
+      functionalAreaDescription: functionalAreas.description,
+    })
+    .from(routes)
+    .leftJoin(functionalAreas, eq(routes.functionalAreaId, functionalAreas.id))
+    .where(eq(routes.id, routeId))
+    .get();
+
+  if (!route) return null;
+
+  // Fetch associated test suggestions
+  const suggestions = await db
+    .select({ suggestion: routeTestSuggestions.suggestion })
+    .from(routeTestSuggestions)
+    .where(eq(routeTestSuggestions.routeId, routeId))
+    .all();
+
+  return {
+    ...route,
+    testSuggestions: suggestions.map(s => s.suggestion),
+  };
+}
+
+// ============================================
+// Setup Scripts
+// ============================================
+
+export async function getSetupScripts(repositoryId: string) {
+  return db
+    .select()
+    .from(setupScripts)
+    .where(eq(setupScripts.repositoryId, repositoryId))
+    .orderBy(desc(setupScripts.createdAt))
+    .all();
+}
+
+export async function getSetupScript(id: string) {
+  return db.select().from(setupScripts).where(eq(setupScripts.id, id)).get();
+}
+
+export async function createSetupScript(data: Omit<NewSetupScript, 'id' | 'createdAt' | 'updatedAt'>) {
+  const id = uuid();
+  const now = new Date();
+  await db.insert(setupScripts).values({
+    ...data,
+    id,
+    createdAt: now,
+    updatedAt: now,
+  });
+  return { id, ...data, createdAt: now, updatedAt: now };
+}
+
+export async function updateSetupScript(id: string, data: Partial<NewSetupScript>) {
+  await db.update(setupScripts).set({ ...data, updatedAt: new Date() }).where(eq(setupScripts.id, id));
+}
+
+export async function deleteSetupScript(id: string) {
+  await db.delete(setupScripts).where(eq(setupScripts.id, id));
+}
+
+export async function duplicateSetupScript(id: string) {
+  const original = await getSetupScript(id);
+  if (!original) return null;
+
+  return createSetupScript({
+    repositoryId: original.repositoryId ?? undefined,
+    name: `${original.name} (Copy)`,
+    type: original.type as SetupScriptType,
+    code: original.code,
+    description: original.description ?? undefined,
+  });
+}
+
+// ============================================
+// Setup Configs (API seeding configuration)
+// ============================================
+
+export async function getSetupConfigs(repositoryId: string) {
+  return db
+    .select()
+    .from(setupConfigs)
+    .where(eq(setupConfigs.repositoryId, repositoryId))
+    .orderBy(desc(setupConfigs.createdAt))
+    .all();
+}
+
+export async function getSetupConfig(id: string) {
+  return db.select().from(setupConfigs).where(eq(setupConfigs.id, id)).get();
+}
+
+export async function createSetupConfig(data: Omit<NewSetupConfig, 'id' | 'createdAt' | 'updatedAt'>) {
+  const id = uuid();
+  const now = new Date();
+  await db.insert(setupConfigs).values({
+    ...data,
+    id,
+    createdAt: now,
+    updatedAt: now,
+  });
+  return { id, ...data, createdAt: now, updatedAt: now };
+}
+
+export async function updateSetupConfig(id: string, data: Partial<NewSetupConfig>) {
+  await db.update(setupConfigs).set({ ...data, updatedAt: new Date() }).where(eq(setupConfigs.id, id));
+}
+
+export async function deleteSetupConfig(id: string) {
+  await db.delete(setupConfigs).where(eq(setupConfigs.id, id));
+}
+
+// ============================================
+// Setup-related test/suite/build/repo queries
+// ============================================
+
+// Get test with its setup configuration resolved
+export async function getTestWithSetup(testId: string) {
+  const test = await getTest(testId);
+  if (!test) return null;
+
+  let setupTest = null;
+  let setupScript = null;
+
+  // Test's own setup takes precedence
+  if (test.setupTestId) {
+    setupTest = await getTest(test.setupTestId);
+  } else if (test.setupScriptId) {
+    setupScript = await getSetupScript(test.setupScriptId);
+  } else if (test.repositoryId) {
+    // Fall back to repository default
+    const repo = await getRepository(test.repositoryId);
+    if (repo?.defaultSetupTestId) {
+      setupTest = await getTest(repo.defaultSetupTestId);
+    } else if (repo?.defaultSetupScriptId) {
+      setupScript = await getSetupScript(repo.defaultSetupScriptId);
+    }
+  }
+
+  return { ...test, setupTest, setupScript };
+}
+
+// Get suite with its setup configuration
+export async function getSuiteWithSetup(suiteId: string) {
+  const suite = await getSuite(suiteId);
+  if (!suite) return null;
+
+  let setupTest = null;
+  let setupScript = null;
+
+  if (suite.setupTestId) {
+    setupTest = await getTest(suite.setupTestId);
+  } else if (suite.setupScriptId) {
+    setupScript = await getSetupScript(suite.setupScriptId);
+  }
+
+  return { ...suite, setupTest, setupScript };
+}
+
+// Update test setup configuration
+export async function updateTestSetup(testId: string, setupTestId: string | null, setupScriptId: string | null) {
+  await db.update(tests).set({
+    setupTestId,
+    setupScriptId,
+    updatedAt: new Date(),
+  }).where(eq(tests.id, testId));
+}
+
+// Update suite setup configuration
+export async function updateSuiteSetup(suiteId: string, setupTestId: string | null, setupScriptId: string | null) {
+  await db.update(suites).set({
+    setupTestId,
+    setupScriptId,
+    updatedAt: new Date(),
+  }).where(eq(suites.id, suiteId));
+}
+
+// Update repository default setup configuration
+export async function updateRepositoryDefaultSetup(
+  repositoryId: string,
+  defaultSetupTestId: string | null,
+  defaultSetupScriptId: string | null
+) {
+  await db.update(repositories).set({
+    defaultSetupTestId,
+    defaultSetupScriptId,
+  }).where(eq(repositories.id, repositoryId));
+}
+
+// Get tests that use a specific test as their setup
+export async function getTestsUsingSetupTest(setupTestId: string) {
+  return db
+    .select()
+    .from(tests)
+    .where(eq(tests.setupTestId, setupTestId))
+    .all();
+}
+
+// Get tests that use a specific setup script
+export async function getTestsUsingSetupScript(setupScriptId: string) {
+  return db
+    .select()
+    .from(tests)
+    .where(eq(tests.setupScriptId, setupScriptId))
+    .all();
+}
+
+// Get suites that use a specific test as their setup
+export async function getSuitesUsingSetupTest(setupTestId: string) {
+  return db
+    .select()
+    .from(suites)
+    .where(eq(suites.setupTestId, setupTestId))
+    .all();
+}
+
+// Get suites that use a specific setup script
+export async function getSuitesUsingSetupScript(setupScriptId: string) {
+  return db
+    .select()
+    .from(suites)
+    .where(eq(suites.setupScriptId, setupScriptId))
+    .all();
+}
+
+// ============================================
+// Default Setup Steps (multi-step setup)
+// ============================================
+
+export async function getDefaultSetupSteps(repositoryId: string) {
+  return db
+    .select({
+      id: defaultSetupSteps.id,
+      repositoryId: defaultSetupSteps.repositoryId,
+      stepType: defaultSetupSteps.stepType,
+      testId: defaultSetupSteps.testId,
+      scriptId: defaultSetupSteps.scriptId,
+      orderIndex: defaultSetupSteps.orderIndex,
+      createdAt: defaultSetupSteps.createdAt,
+      // Join test name
+      testName: tests.name,
+      // Join script name
+      scriptName: setupScripts.name,
+    })
+    .from(defaultSetupSteps)
+    .leftJoin(tests, eq(defaultSetupSteps.testId, tests.id))
+    .leftJoin(setupScripts, eq(defaultSetupSteps.scriptId, setupScripts.id))
+    .where(eq(defaultSetupSteps.repositoryId, repositoryId))
+    .orderBy(defaultSetupSteps.orderIndex)
+    .all();
+}
+
+export async function createDefaultSetupStep(data: Omit<NewDefaultSetupStep, 'id' | 'createdAt'>) {
+  const id = uuid();
+  await db.insert(defaultSetupSteps).values({
+    ...data,
+    id,
+    createdAt: new Date(),
+  });
+  return { id, ...data, createdAt: new Date() };
+}
+
+export async function deleteDefaultSetupStep(id: string) {
+  await db.delete(defaultSetupSteps).where(eq(defaultSetupSteps.id, id));
+}
+
+export async function deleteAllDefaultSetupSteps(repositoryId: string) {
+  await db.delete(defaultSetupSteps).where(eq(defaultSetupSteps.repositoryId, repositoryId));
+}
+
+export async function updateDefaultSetupStepOrder(id: string, orderIndex: number) {
+  await db.update(defaultSetupSteps).set({ orderIndex }).where(eq(defaultSetupSteps.id, id));
+}
+
+export async function replaceDefaultSetupSteps(
+  repositoryId: string,
+  steps: Array<{ stepType: 'test' | 'script'; testId?: string | null; scriptId?: string | null }>
+) {
+  // Delete all existing steps
+  await deleteAllDefaultSetupSteps(repositoryId);
+
+  // Insert new steps with order
+  const results = [];
+  for (let i = 0; i < steps.length; i++) {
+    const step = steps[i];
+    const result = await createDefaultSetupStep({
+      repositoryId,
+      stepType: step.stepType,
+      testId: step.testId ?? null,
+      scriptId: step.scriptId ?? null,
+      orderIndex: i,
+    });
+    results.push(result);
+  }
+
+  return results;
 }

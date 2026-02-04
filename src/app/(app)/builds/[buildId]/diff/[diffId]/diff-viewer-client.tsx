@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import { SliderComparison } from '@/components/diff/slider-comparison';
 import { approveDiff, rejectDiff, undoApproval } from '@/server/actions/diffs';
 import type { VisualDiff, Test, DiffMetadata } from '@/lib/db/schema';
-import { CheckCircle, XCircle, SkipForward, Eye } from 'lucide-react';
+import { CheckCircle, XCircle, SkipForward, Eye, Image as ImageIcon } from 'lucide-react';
 
 interface DiffViewerClientProps {
   diff: VisualDiff & { test: Test | null };
@@ -125,7 +125,7 @@ export function DiffViewerClient({ diff, buildId, nextDiffId }: DiffViewerClient
   return (
     <div className="space-y-4">
       {/* Status Badge */}
-      <div className="flex items-center gap-4">
+      <div className="flex items-center gap-4 flex-wrap">
         <div
           className={`px-3 py-1 rounded-full text-sm font-medium ${
             diff.status === 'approved' || diff.status === 'auto_approved'
@@ -143,6 +143,19 @@ export function DiffViewerClient({ diff, buildId, nextDiffId }: DiffViewerClient
             {diff.pixelDifference.toLocaleString()} pixels changed ({diff.percentageDifference}%)
           </div>
         )}
+
+        {/* Planned screenshot indicator */}
+        {diff.plannedImagePath && (
+          <div className="flex items-center gap-2 px-3 py-1 rounded-full text-sm font-medium bg-purple-100 text-purple-700">
+            <ImageIcon className="w-4 h-4" />
+            Has Planned
+            {diff.plannedPercentageDifference && (
+              <span className="text-purple-500">
+                ({diff.plannedPercentageDifference}% from design)
+              </span>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Diff Comparison */}
@@ -151,6 +164,8 @@ export function DiffViewerClient({ diff, buildId, nextDiffId }: DiffViewerClient
           baselineImage={diff.baselineImagePath}
           currentImage={diff.currentImagePath}
           diffImage={diff.diffImagePath || undefined}
+          plannedImage={diff.plannedImagePath || undefined}
+          plannedDiffImage={diff.plannedDiffImagePath || undefined}
           className="border rounded-lg"
         />
       ) : diff.currentImagePath ? (
@@ -161,6 +176,36 @@ export function DiffViewerClient({ diff, buildId, nextDiffId }: DiffViewerClient
             alt="Current screenshot"
             className="w-full rounded"
           />
+          {/* Show planned comparison even for new screenshots */}
+          {diff.plannedImagePath && (
+            <div className="mt-4 pt-4 border-t">
+              <div className="text-sm text-purple-600 font-medium mb-2">
+                <ImageIcon className="w-4 h-4 inline mr-1" />
+                Planned (Design) Comparison
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <div className="text-xs text-gray-500 mb-1">Current</div>
+                  <img src={diff.currentImagePath} alt="Current" className="w-full border rounded" />
+                </div>
+                <div>
+                  <div className="text-xs text-purple-500 mb-1">Planned</div>
+                  <img src={diff.plannedImagePath} alt="Planned" className="w-full border-2 border-purple-300 rounded" />
+                </div>
+              </div>
+              {diff.plannedDiffImagePath && (
+                <div className="mt-2">
+                  <div className="text-xs text-purple-500 mb-1">Diff from Design</div>
+                  <img src={diff.plannedDiffImagePath} alt="Planned Diff" className="w-full border border-purple-300 rounded" />
+                </div>
+              )}
+              {diff.plannedPercentageDifference && (
+                <div className="mt-2 text-sm text-purple-600">
+                  {diff.plannedPixelDifference?.toLocaleString()} pixels different from design ({diff.plannedPercentageDifference}%)
+                </div>
+              )}
+            </div>
+          )}
         </div>
       ) : (
         <div className="border rounded-lg p-8 text-center text-gray-500">

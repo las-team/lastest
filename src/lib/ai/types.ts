@@ -27,6 +27,21 @@ export interface AIProviderConfig {
   agentSdkWorkingDir?: string;
 }
 
+export type DiscoverySource = 'file-scan' | 'nav-link' | 'spec-analysis' | 'mcp-explore' | 'manual';
+
+export interface ScanContext {
+  discoverySource: DiscoverySource;
+  sourceFilePath?: string;
+  framework?: string;
+  routerType?: 'hash' | 'browser';
+  navLabel?: string;
+  navSourceFile?: string;
+  specDescription?: string;
+  testSuggestions?: string[];
+  functionalAreaName?: string;
+  functionalAreaDescription?: string;
+}
+
 export interface TestGenerationContext {
   targetUrl?: string;
   routePath?: string;
@@ -36,6 +51,7 @@ export interface TestGenerationContext {
   useMCP?: boolean;
   isDynamicRoute?: boolean;
   siblingRoutes?: string[];
+  scanContext?: ScanContext;
 }
 
 export interface GeneratedTest {

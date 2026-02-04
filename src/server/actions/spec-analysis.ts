@@ -2,7 +2,7 @@
 
 import * as queries from '@/lib/db/queries';
 import { generateWithAI, createSpecAnalysisPrompt, createTestPrompt, extractCodeFromResponse, SYSTEM_PROMPT } from '@/lib/ai';
-import type { AIProviderConfig } from '@/lib/ai/types';
+import type { AIProviderConfig, ScanContext } from '@/lib/ai/types';
 import { revalidatePath } from 'next/cache';
 import { getRepoTree, getFileContent } from '@/lib/github/content';
 import { extractTextFromFile } from '@/lib/file-parser';
@@ -96,6 +96,112 @@ function isSpecFile(path: string): boolean {
     return lower.endsWith('.md') || lower.endsWith('.txt');
   }
   return false;
+}
+
+export interface DiscoveredSpecFile {
+  path: string;
+  size?: number;
+}
+
+export interface DiscoverSpecsResponse {
+  success: boolean;
+  files?: DiscoveredSpecFile[];
+  error?: string;
+}
+
+export async function discoverRepoSpecs(
+  repositoryId: string,
+  branch: string
+): Promise<DiscoverSpecsResponse> {
+  try {
+    const account = await queries.getGithubAccount();
+    if (!account) {
+      return { success: false, error: 'GitHub account not connected' };
+    }
+
+    const repo = await queries.getRepository(repositoryId);
+    if (!repo) {
+      return { success: false, error: 'Repository not found' };
+    }
+
+    const repoTree = await getRepoTree(account.accessToken, repo.owner, repo.name, branch);
+    if (!repoTree || repoTree.tree.length === 0) {
+      return { success: false, error: 'Could not read repository tree' };
+    }
+
+    const specEntries = repoTree.tree.filter(
+      entry => entry.type === 'blob' && isSpecFile(entry.path)
+    );
+
+    if (specEntries.length === 0) {
+      return { success: false, error: 'No specification files found in repository' };
+    }
+
+    const files: DiscoveredSpecFile[] = specEntries.map(entry => ({
+      path: entry.path,
+      size: entry.size,
+    }));
+
+    return { success: true, files };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Failed to discover specs';
+    return { success: false, error: message };
+  }
+}
+
+export async function analyzeSelectedSpecs(
+  repositoryId: string,
+  branch: string,
+  filePaths: string[]
+): Promise<SpecAnalysisResponse> {
+  const jobId = await createJob('spec_analysis', 'Analyze Selected Specs', filePaths.length, repositoryId);
+  try {
+    if (filePaths.length === 0) {
+      await failJob(jobId, 'No files selected');
+      return { success: false, error: 'No files selected' };
+    }
+
+    const account = await queries.getGithubAccount();
+    if (!account) {
+      await failJob(jobId, 'GitHub account not connected');
+      return { success: false, error: 'GitHub account not connected' };
+    }
+
+    const repo = await queries.getRepository(repositoryId);
+    if (!repo) {
+      await failJob(jobId, 'Repository not found');
+      return { success: false, error: 'Repository not found' };
+    }
+
+    const contents: string[] = [];
+
+    for (let i = 0; i < filePaths.length; i++) {
+      const path = filePaths[i];
+      const content = await getFileContent(account.accessToken, repo.owner, repo.name, path, branch);
+      if (content) {
+        contents.push(`--- ${path} ---\n${content}`);
+      }
+      await updateJobProgress(jobId, i + 1, filePaths.length);
+    }
+
+    if (contents.length === 0) {
+      await failJob(jobId, 'Could not read any selected files');
+      return { success: false, error: 'Could not read any selected files' };
+    }
+
+    const specContent = contents.join('\n\n');
+    const result = await analyzeSpecContent(specContent, repositoryId);
+    if (result.success) {
+      await completeJob(jobId);
+    } else {
+      await failJob(jobId, result.error || 'Analysis failed');
+    }
+    return result;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Failed to analyze selected specs';
+    await failJob(jobId, message);
+    return { success: false, error: message };
+  }
 }
 
 export async function scanRepoSpecs(
@@ -316,10 +422,20 @@ export async function saveAndBuildTests(
         const scenarios = result.testScenarios.find(s => s.route === route.path);
         const testDescription = scenarios?.suggestions?.[0] || `Visual test for ${route.path}`;
 
+        // Build scan context with spec-analysis source
+        const scanContext: ScanContext = {
+          discoverySource: 'spec-analysis',
+          specDescription: route.description,
+          testSuggestions: scenarios?.suggestions,
+          functionalAreaName: area.name,
+          functionalAreaDescription: area.description,
+        };
+
         const prompt = createTestPrompt({
           routePath: route.path,
           isDynamicRoute: route.type === 'dynamic',
           userPrompt: testDescription,
+          scanContext,
         });
 
         try {

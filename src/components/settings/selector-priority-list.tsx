@@ -18,10 +18,12 @@ import {
   verticalListSortingStrategy,
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import { GripVertical } from 'lucide-react';
+import { GripVertical, AlertTriangle, Power, ArrowUp } from 'lucide-react';
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import type { SelectorConfig, SelectorType } from '@/lib/db/schema';
+import type { SelectorRecommendation } from '@/lib/selector-recommendations';
 
 const SELECTOR_LABELS: Record<SelectorType, { name: string; description: string }> = {
   'data-testid': { name: 'data-testid', description: 'Elements with data-testid attribute' },
@@ -36,13 +38,54 @@ const SELECTOR_LABELS: Record<SelectorType, { name: string; description: string 
   'coords': { name: 'Coordinates', description: 'Click by X/Y coordinates (fallback)' },
 };
 
+function RecommendationBadge({ recommendation }: { recommendation: SelectorRecommendation }) {
+  const config = {
+    disable: {
+      icon: AlertTriangle,
+      label: 'Consider disabling',
+      className: 'bg-red-100 text-red-700 border-red-200',
+    },
+    enable: {
+      icon: Power,
+      label: 'Consider enabling',
+      className: 'bg-green-100 text-green-700 border-green-200',
+    },
+    move_up: {
+      icon: ArrowUp,
+      label: 'Move up',
+      className: 'bg-blue-100 text-blue-700 border-blue-200',
+    },
+  }[recommendation.type];
+
+  const Icon = config.icon;
+
+  return (
+    <TooltipProvider>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <span
+            className={`inline-flex items-center gap-1 px-1.5 py-0.5 text-[10px] font-medium rounded border ${config.className}`}
+          >
+            <Icon className="w-3 h-3" />
+            {config.label}
+          </span>
+        </TooltipTrigger>
+        <TooltipContent side="top" className="max-w-xs">
+          <p className="text-xs">{recommendation.reason}</p>
+        </TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
+  );
+}
+
 interface SortableItemProps {
   item: SelectorConfig;
   onToggle: (type: SelectorType, enabled: boolean) => void;
   compact?: boolean;
+  recommendation?: SelectorRecommendation;
 }
 
-function SortableItem({ item, onToggle, compact = false }: SortableItemProps) {
+function SortableItem({ item, onToggle, compact = false, recommendation }: SortableItemProps) {
   const {
     attributes,
     listeners,
@@ -77,11 +120,12 @@ function SortableItem({ item, onToggle, compact = false }: SortableItemProps) {
       </button>
 
       <div className="flex-1 min-w-0">
-        <div className="flex items-center gap-1.5">
+        <div className="flex items-center gap-1.5 flex-wrap">
           <span className={`font-medium ${compact ? 'text-xs' : 'text-sm'}`}>{label.name}</span>
           <span className={`bg-gray-100 rounded text-gray-500 ${compact ? 'text-[10px] px-1 py-0.5' : 'text-xs px-1.5 py-0.5'}`}>
             #{item.priority}
           </span>
+          {!compact && recommendation && <RecommendationBadge recommendation={recommendation} />}
         </div>
         {!compact && <p className="text-xs text-gray-500 truncate">{label.description}</p>}
       </div>
@@ -99,9 +143,10 @@ interface SelectorPriorityListProps {
   value: SelectorConfig[];
   onChange: (value: SelectorConfig[]) => void;
   compact?: boolean;
+  recommendations?: Map<SelectorType, SelectorRecommendation>;
 }
 
-export function SelectorPriorityList({ value, onChange, compact = false }: SelectorPriorityListProps) {
+export function SelectorPriorityList({ value, onChange, compact = false, recommendations }: SelectorPriorityListProps) {
   const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
@@ -154,6 +199,7 @@ export function SelectorPriorityList({ value, onChange, compact = false }: Selec
         <div className={compact ? 'space-y-1' : 'space-y-2'}>
           {value.map((item) => {
             const label = SELECTOR_LABELS[item.type];
+            const recommendation = recommendations?.get(item.type);
             return (
               <div
                 key={item.type}
@@ -163,11 +209,12 @@ export function SelectorPriorityList({ value, onChange, compact = false }: Selec
                   <GripVertical className={compact ? 'w-3 h-3' : 'w-4 h-4'} />
                 </div>
                 <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-1.5">
+                  <div className="flex items-center gap-1.5 flex-wrap">
                     <span className={`font-medium ${compact ? 'text-xs' : 'text-sm'}`}>{label.name}</span>
                     <span className={`bg-gray-100 rounded text-gray-500 ${compact ? 'text-[10px] px-1 py-0.5' : 'text-xs px-1.5 py-0.5'}`}>
                       #{item.priority}
                     </span>
+                    {!compact && recommendation && <RecommendationBadge recommendation={recommendation} />}
                   </div>
                   {!compact && <p className="text-xs text-gray-500 truncate">{label.description}</p>}
                 </div>
@@ -208,6 +255,7 @@ export function SelectorPriorityList({ value, onChange, compact = false }: Selec
                 item={item}
                 onToggle={handleToggle}
                 compact={compact}
+                recommendation={recommendations?.get(item.type)}
               />
             ))}
           </div>

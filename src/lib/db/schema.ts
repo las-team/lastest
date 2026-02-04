@@ -62,6 +62,9 @@ export const tests = sqliteTable('tests', {
   name: text('name').notNull(),
   code: text('code').notNull(), // Playwright test code
   targetUrl: text('target_url'),
+  // Setup configuration - setupTestId takes precedence over setupScriptId
+  setupTestId: text('setup_test_id'), // Use another test as setup (most common)
+  setupScriptId: text('setup_script_id'), // OR use dedicated setup script
   createdAt: integer('created_at', { mode: 'timestamp' }),
   updatedAt: integer('updated_at', { mode: 'timestamp' }),
 });
@@ -109,17 +112,25 @@ export const testResults = sqliteTable('test_results', {
   a11yViolations: text('a11y_violations', { mode: 'json' }).$type<A11yViolation[]>(),
 });
 
-// Repositories synced from GitHub
+// Repository provider type
+export type RepositoryProvider = 'github' | 'gitlab';
+
+// Repositories synced from GitHub or GitLab
 export const repositories = sqliteTable('repositories', {
   id: text('id').primaryKey(),
   teamId: text('team_id'), // Team ownership - FK added after teams table definition
-  githubRepoId: integer('github_repo_id').notNull(),
+  provider: text('provider').notNull().default('github'), // 'github' | 'gitlab'
+  githubRepoId: integer('github_repo_id'), // nullable for GitLab repos
+  gitlabProjectId: integer('gitlab_project_id'), // nullable for GitHub repos
   owner: text('owner').notNull(),
   name: text('name').notNull(),
-  fullName: text('full_name').notNull(), // owner/name
+  fullName: text('full_name').notNull(), // owner/name or namespace/project
   defaultBranch: text('default_branch'),
   selectedBaseline: text('selected_baseline'), // branch name for baseline comparison
-  selectedBranch: text('selected_branch'), // branch for remote scanning via GitHub API
+  selectedBranch: text('selected_branch'), // branch for remote scanning via API
+  // Default setup configuration applied to all tests in this repo
+  defaultSetupTestId: text('default_setup_test_id'), // Default test-as-setup for all tests
+  defaultSetupScriptId: text('default_setup_script_id'), // OR default script
   createdAt: integer('created_at', { mode: 'timestamp' }),
 });
 
@@ -136,10 +147,27 @@ export const githubAccounts = sqliteTable('github_accounts', {
   createdAt: integer('created_at', { mode: 'timestamp' }),
 });
 
-// Pull requests linked to builds
+// GitLab OAuth accounts - per-team GitLab connection
+export const gitlabAccounts = sqliteTable('gitlab_accounts', {
+  id: text('id').primaryKey(),
+  teamId: text('team_id'), // Team ownership - FK added after teams table definition
+  gitlabUserId: text('gitlab_user_id').notNull(),
+  gitlabUsername: text('gitlab_username').notNull(),
+  accessToken: text('access_token').notNull(),
+  refreshToken: text('refresh_token'),
+  tokenExpiresAt: integer('token_expires_at', { mode: 'timestamp' }),
+  instanceUrl: text('instance_url').default('https://gitlab.com'), // For self-hosted GitLab
+  selectedRepositoryId: text('selected_repository_id').references(() => repositories.id),
+  createdAt: integer('created_at', { mode: 'timestamp' }),
+});
+
+// Pull requests / Merge requests linked to builds
 export const pullRequests = sqliteTable('pull_requests', {
   id: text('id').primaryKey(),
-  githubPrNumber: integer('github_pr_number').notNull(),
+  provider: text('provider').notNull().default('github'), // 'github' | 'gitlab'
+  githubPrNumber: integer('github_pr_number'), // nullable for GitLab MRs
+  gitlabMrIid: integer('gitlab_mr_iid'), // GitLab MR internal ID (nullable for GitHub PRs)
+  gitlabProjectId: integer('gitlab_project_id'), // GitLab project ID (nullable for GitHub PRs)
   repoOwner: text('repo_owner').notNull(),
   repoName: text('repo_name').notNull(),
   headBranch: text('head_branch').notNull(),
@@ -165,6 +193,12 @@ export const builds = sqliteTable('builds', {
   passedCount: integer('passed_count').default(0),
   baseUrl: text('base_url'),
   elapsedMs: integer('elapsed_ms'),
+  // Build-level setup configuration
+  buildSetupTestId: text('build_setup_test_id'), // Use test as build-level setup
+  buildSetupScriptId: text('build_setup_script_id'), // OR use dedicated script
+  setupStatus: text('setup_status').default('pending'), // 'pending' | 'running' | 'completed' | 'failed' | 'skipped'
+  setupError: text('setup_error'),
+  setupDurationMs: integer('setup_duration_ms'),
   createdAt: integer('created_at', { mode: 'timestamp' }),
   completedAt: integer('completed_at', { mode: 'timestamp' }),
 });
@@ -187,6 +221,11 @@ export const visualDiffs = sqliteTable('visual_diffs', {
   approvedBy: text('approved_by'),
   approvedAt: integer('approved_at', { mode: 'timestamp' }),
   createdAt: integer('created_at', { mode: 'timestamp' }),
+  // Planned screenshot comparison fields
+  plannedImagePath: text('planned_image_path'),
+  plannedDiffImagePath: text('planned_diff_image_path'),
+  plannedPixelDifference: integer('planned_pixel_difference'),
+  plannedPercentageDifference: text('planned_percentage_difference'),
 });
 
 // Baselines for carry-forward logic
@@ -202,6 +241,27 @@ export const baselines = sqliteTable('baselines', {
   isActive: integer('is_active', { mode: 'boolean' }).default(true),
   createdAt: integer('created_at', { mode: 'timestamp' }),
 });
+
+// Planned/expected screenshots for design comparison
+export const plannedScreenshots = sqliteTable('planned_screenshots', {
+  id: text('id').primaryKey(),
+  repositoryId: text('repository_id').references(() => repositories.id),
+  testId: text('test_id').references(() => tests.id, { onDelete: 'cascade' }),
+  stepLabel: text('step_label'),
+  routeId: text('route_id').references(() => routes.id, { onDelete: 'cascade' }),
+  imagePath: text('image_path').notNull(),
+  imageHash: text('image_hash').notNull(),
+  name: text('name'),
+  description: text('description'),
+  uploadedBy: text('uploaded_by').references(() => users.id),
+  sourceUrl: text('source_url'), // Original design file URL (Figma, etc.)
+  isActive: integer('is_active', { mode: 'boolean' }).default(true),
+  createdAt: integer('created_at', { mode: 'timestamp' }),
+  updatedAt: integer('updated_at', { mode: 'timestamp' }),
+});
+
+export type PlannedScreenshot = typeof plannedScreenshots.$inferSelect;
+export type NewPlannedScreenshot = typeof plannedScreenshots.$inferInsert;
 
 // Ignore regions for masking areas during diff
 export const ignoreRegions = sqliteTable('ignore_regions', {
@@ -227,6 +287,8 @@ export type TestResult = typeof testResults.$inferSelect;
 export type NewTestResult = typeof testResults.$inferInsert;
 export type GithubAccount = typeof githubAccounts.$inferSelect;
 export type NewGithubAccount = typeof githubAccounts.$inferInsert;
+export type GitlabAccount = typeof gitlabAccounts.$inferSelect;
+export type NewGitlabAccount = typeof gitlabAccounts.$inferInsert;
 export type PullRequest = typeof pullRequests.$inferSelect;
 export type NewPullRequest = typeof pullRequests.$inferInsert;
 export type Build = typeof builds.$inferSelect;
@@ -527,6 +589,9 @@ export const suites = sqliteTable('suites', {
   name: text('name').notNull(),
   description: text('description'),
   orderIndex: integer('order_index').default(0),
+  // Setup configuration - setupTestId takes precedence over setupScriptId
+  setupTestId: text('setup_test_id'), // Use test as setup
+  setupScriptId: text('setup_script_id'), // OR use dedicated script
   createdAt: integer('created_at', { mode: 'timestamp' }),
   updatedAt: integer('updated_at', { mode: 'timestamp' }),
 });
@@ -544,7 +609,7 @@ export type NewSuite = typeof suites.$inferInsert;
 export type SuiteTest = typeof suiteTests.$inferSelect;
 export type NewSuiteTest = typeof suiteTests.$inferInsert;
 
-// Notification settings for Slack, Discord, and GitHub PR comments
+// Notification settings for Slack, Discord, GitHub PR comments, GitLab MR comments, and Custom Webhook
 export const notificationSettings = sqliteTable('notification_settings', {
   id: text('id').primaryKey(),
   repositoryId: text('repository_id').references(() => repositories.id),
@@ -553,6 +618,11 @@ export const notificationSettings = sqliteTable('notification_settings', {
   discordWebhookUrl: text('discord_webhook_url'),
   discordEnabled: integer('discord_enabled', { mode: 'boolean' }).default(false),
   githubPrCommentsEnabled: integer('github_pr_comments_enabled', { mode: 'boolean' }).default(false),
+  gitlabMrCommentsEnabled: integer('gitlab_mr_comments_enabled', { mode: 'boolean' }).default(false),
+  customWebhookEnabled: integer('custom_webhook_enabled', { mode: 'boolean' }).default(false),
+  customWebhookUrl: text('custom_webhook_url'),
+  customWebhookMethod: text('custom_webhook_method').default('POST'),
+  customWebhookHeaders: text('custom_webhook_headers'), // JSON: {"Authorization": "Bearer xxx"}
   createdAt: integer('created_at', { mode: 'timestamp' }),
   updatedAt: integer('updated_at', { mode: 'timestamp' }),
 });
@@ -564,6 +634,9 @@ export const DEFAULT_NOTIFICATION_SETTINGS = {
   slackEnabled: false,
   discordEnabled: false,
   githubPrCommentsEnabled: false,
+  gitlabMrCommentsEnabled: false,
+  customWebhookEnabled: false,
+  customWebhookMethod: 'POST' as const,
 };
 
 // Selector statistics for optimizing fallback strategy
@@ -711,3 +784,68 @@ export const runners = sqliteTable('runners', {
 
 export type Runner = typeof runners.$inferSelect;
 export type NewRunner = typeof runners.$inferInsert;
+
+// ============================================
+// Setup Scripts & Configs Tables
+// ============================================
+
+export type SetupScriptType = 'playwright' | 'api';
+
+// Setup Scripts - Reusable setup code blocks
+export const setupScripts = sqliteTable('setup_scripts', {
+  id: text('id').primaryKey(),
+  repositoryId: text('repository_id').references(() => repositories.id),
+  name: text('name').notNull(),
+  type: text('type').notNull().default('playwright'), // 'playwright' | 'api'
+  code: text('code').notNull(),
+  description: text('description'),
+  createdAt: integer('created_at', { mode: 'timestamp' }),
+  updatedAt: integer('updated_at', { mode: 'timestamp' }),
+});
+
+export type SetupScript = typeof setupScripts.$inferSelect;
+export type NewSetupScript = typeof setupScripts.$inferInsert;
+
+// Auth types for API seeding
+export type SetupAuthType = 'none' | 'bearer' | 'basic' | 'custom';
+
+export interface SetupAuthConfig {
+  token?: string;         // For bearer auth
+  username?: string;      // For basic auth
+  password?: string;      // For basic auth
+  headers?: Record<string, string>; // For custom auth
+}
+
+// Setup Configs - API seeding configuration per repository
+export const setupConfigs = sqliteTable('setup_configs', {
+  id: text('id').primaryKey(),
+  repositoryId: text('repository_id').references(() => repositories.id),
+  name: text('name').notNull(),
+  baseUrl: text('base_url').notNull(),
+  authType: text('auth_type').notNull().default('none'), // 'none' | 'bearer' | 'basic' | 'custom'
+  authConfig: text('auth_config', { mode: 'json' }).$type<SetupAuthConfig>(),
+  createdAt: integer('created_at', { mode: 'timestamp' }),
+  updatedAt: integer('updated_at', { mode: 'timestamp' }),
+});
+
+export type SetupConfig = typeof setupConfigs.$inferSelect;
+export type NewSetupConfig = typeof setupConfigs.$inferInsert;
+
+// Setup status for builds
+export type SetupStatus = 'pending' | 'running' | 'completed' | 'failed' | 'skipped';
+
+// Default Setup Steps - Ordered multi-step setup for repositories
+export type SetupStepType = 'test' | 'script';
+
+export const defaultSetupSteps = sqliteTable('default_setup_steps', {
+  id: text('id').primaryKey(),
+  repositoryId: text('repository_id').references(() => repositories.id, { onDelete: 'cascade' }).notNull(),
+  stepType: text('step_type').notNull(), // 'test' | 'script'
+  testId: text('test_id').references(() => tests.id, { onDelete: 'cascade' }),
+  scriptId: text('script_id').references(() => setupScripts.id, { onDelete: 'cascade' }),
+  orderIndex: integer('order_index').notNull().default(0),
+  createdAt: integer('created_at', { mode: 'timestamp' }),
+});
+
+export type DefaultSetupStep = typeof defaultSetupSteps.$inferSelect;
+export type NewDefaultSetupStep = typeof defaultSetupSteps.$inferInsert;

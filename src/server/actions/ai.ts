@@ -10,7 +10,7 @@ import {
   createEnhancePrompt,
   extractCodeFromResponse,
 } from '@/lib/ai';
-import type { AIProviderConfig, TestGenerationContext } from '@/lib/ai/types';
+import type { AIProviderConfig, TestGenerationContext, ScanContext, DiscoverySource } from '@/lib/ai/types';
 import { revalidatePath } from 'next/cache';
 
 async function getAIConfig(repositoryId?: string | null): Promise<AIProviderConfig> {
@@ -25,14 +25,58 @@ async function getAIConfig(repositoryId?: string | null): Promise<AIProviderConf
   };
 }
 
+// Build ScanContext from route data
+function buildScanContextFromRoute(
+  route: queries.RouteWithContext,
+  discoverySource: DiscoverySource = 'file-scan'
+): ScanContext {
+  return {
+    discoverySource,
+    sourceFilePath: route.filePath ?? undefined,
+    framework: route.framework ?? undefined,
+    routerType: route.routerType as 'hash' | 'browser' | undefined,
+    specDescription: route.description ?? undefined,
+    testSuggestions: route.testSuggestions.length > 0 ? route.testSuggestions : undefined,
+    functionalAreaName: route.functionalAreaName ?? undefined,
+    functionalAreaDescription: route.functionalAreaDescription ?? undefined,
+  };
+}
+
 export async function aiCreateTest(
   repositoryId: string,
-  context: TestGenerationContext
+  context: TestGenerationContext,
+  routeId?: string
 ): Promise<{ success: boolean; code?: string; error?: string }> {
   try {
+    // Enrich context with route information if routeId is provided
+    let enrichedContext = { ...context };
+
+    if (routeId) {
+      const routeWithContext = await queries.getRouteWithContext(routeId);
+      if (routeWithContext) {
+        // Determine discovery source based on available data
+        let discoverySource: DiscoverySource = 'file-scan';
+        if (routeWithContext.description && routeWithContext.testSuggestions.length > 0) {
+          discoverySource = 'spec-analysis';
+        }
+
+        enrichedContext.scanContext = buildScanContextFromRoute(routeWithContext, discoverySource);
+
+        // Also set routePath if not already set
+        if (!enrichedContext.routePath && !enrichedContext.targetUrl) {
+          enrichedContext.routePath = routeWithContext.path;
+        }
+
+        // Set isDynamicRoute based on route type
+        if (routeWithContext.type === 'dynamic') {
+          enrichedContext.isDynamicRoute = true;
+        }
+      }
+    }
+
     const config = await getAIConfig(repositoryId);
-    const prompt = createTestPrompt(context);
-    const systemPrompt = context.useMCP ? MCP_SYSTEM_PROMPT : SYSTEM_PROMPT;
+    const prompt = createTestPrompt(enrichedContext);
+    const systemPrompt = enrichedContext.useMCP ? MCP_SYSTEM_PROMPT : SYSTEM_PROMPT;
     const response = await generateWithAI(config, prompt, systemPrompt, {
       actionType: 'create_test',
       repositoryId,

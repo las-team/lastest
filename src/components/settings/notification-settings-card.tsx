@@ -5,21 +5,35 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
-import { saveNotificationSettings } from '@/server/actions/settings';
+import { Button } from '@/components/ui/button';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { saveNotificationSettings, testCustomWebhookAction } from '@/server/actions/settings';
+import { getPayloadPreview } from '@/lib/integrations/custom-webhook';
 import type { NotificationSettings } from '@/lib/db/schema';
-import { Bell, MessageSquare } from 'lucide-react';
+import { Bell, MessageSquare, Webhook, Plus, Trash2, Loader2, CheckCircle, XCircle } from 'lucide-react';
 import { toast } from 'sonner';
+
+// GitLab icon SVG component
+function GitLabIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="currentColor">
+      <path d="M4.845.904c-.435 0-.82.28-.955.692C2.639 5.449 1.246 9.728.07 13.335a1.437 1.437 0 00.522 1.607l11.071 8.045c.2.145.472.144.67-.004l11.073-8.04a1.436 1.436 0 00.522-1.61c-1.285-3.942-2.683-8.256-3.817-11.746a1.004 1.004 0 00-.957-.684.987.987 0 00-.949.69l-2.405 7.408H8.203l-2.41-7.408a.987.987 0 00-.942-.69h-.006z" />
+    </svg>
+  );
+}
 
 interface NotificationSettingsCardProps {
   settings: NotificationSettings;
   repositoryId?: string | null;
   hasGithubAccount: boolean;
+  hasGitlabAccount?: boolean;
 }
 
 export function NotificationSettingsCard({
   settings,
   repositoryId,
   hasGithubAccount,
+  hasGitlabAccount = false,
 }: NotificationSettingsCardProps) {
   const [, startTransition] = useTransition();
   const [slackWebhookUrl, setSlackWebhookUrl] = useState(settings.slackWebhookUrl || '');
@@ -29,6 +43,27 @@ export function NotificationSettingsCard({
   const [githubPrCommentsEnabled, setGithubPrCommentsEnabled] = useState(
     settings.githubPrCommentsEnabled || false
   );
+  const [gitlabMrCommentsEnabled, setGitlabMrCommentsEnabled] = useState(
+    settings.gitlabMrCommentsEnabled || false
+  );
+  const [customWebhookEnabled, setCustomWebhookEnabled] = useState(settings.customWebhookEnabled || false);
+  const [customWebhookUrl, setCustomWebhookUrl] = useState(settings.customWebhookUrl || '');
+  const [customWebhookMethod, setCustomWebhookMethod] = useState<'POST' | 'PUT'>(
+    (settings.customWebhookMethod as 'POST' | 'PUT') || 'POST'
+  );
+  const [customWebhookHeaders, setCustomWebhookHeaders] = useState<Array<{ key: string; value: string }>>(() => {
+    if (settings.customWebhookHeaders) {
+      try {
+        const parsed = JSON.parse(settings.customWebhookHeaders);
+        return Object.entries(parsed).map(([key, value]) => ({ key, value: value as string }));
+      } catch {
+        return [];
+      }
+    }
+    return [];
+  });
+  const [testingWebhook, setTestingWebhook] = useState(false);
+  const [webhookTestResult, setWebhookTestResult] = useState<{ success: boolean; error?: string } | null>(null);
 
   const debounceRef = useRef<NodeJS.Timeout | null>(null);
 
@@ -39,7 +74,22 @@ export function NotificationSettingsCard({
     discordWebhookUrl: settings.discordWebhookUrl || '',
     discordEnabled: settings.discordEnabled || false,
     githubPrCommentsEnabled: settings.githubPrCommentsEnabled || false,
+    gitlabMrCommentsEnabled: settings.gitlabMrCommentsEnabled || false,
+    customWebhookEnabled: settings.customWebhookEnabled || false,
+    customWebhookUrl: settings.customWebhookUrl || '',
+    customWebhookMethod: settings.customWebhookMethod || 'POST',
+    customWebhookHeaders: settings.customWebhookHeaders || '',
   });
+
+  // Convert headers array to JSON string
+  const headersToJson = useCallback((headers: Array<{ key: string; value: string }>): string | null => {
+    const filtered = headers.filter(h => h.key.trim() !== '');
+    if (filtered.length === 0) return null;
+    const obj = Object.fromEntries(filtered.map(h => [h.key, h.value]));
+    return JSON.stringify(obj);
+  }, []);
+
+  const headersJson = headersToJson(customWebhookHeaders);
 
   const doSave = useCallback(() => {
     startTransition(async () => {
@@ -50,10 +100,15 @@ export function NotificationSettingsCard({
         discordWebhookUrl: discordWebhookUrl || null,
         discordEnabled,
         githubPrCommentsEnabled,
+        gitlabMrCommentsEnabled,
+        customWebhookEnabled,
+        customWebhookUrl: customWebhookUrl || null,
+        customWebhookMethod,
+        customWebhookHeaders: headersJson,
       });
       toast.success('Notification settings saved');
     });
-  }, [repositoryId, slackWebhookUrl, slackEnabled, discordWebhookUrl, discordEnabled, githubPrCommentsEnabled]);
+  }, [repositoryId, slackWebhookUrl, slackEnabled, discordWebhookUrl, discordEnabled, githubPrCommentsEnabled, gitlabMrCommentsEnabled, customWebhookEnabled, customWebhookUrl, customWebhookMethod, headersJson]);
 
   // Auto-save with debounce - only when values differ from original props
   useEffect(() => {
@@ -63,7 +118,12 @@ export function NotificationSettingsCard({
       slackEnabled !== orig.slackEnabled ||
       discordWebhookUrl !== orig.discordWebhookUrl ||
       discordEnabled !== orig.discordEnabled ||
-      githubPrCommentsEnabled !== orig.githubPrCommentsEnabled;
+      githubPrCommentsEnabled !== orig.githubPrCommentsEnabled ||
+      gitlabMrCommentsEnabled !== orig.gitlabMrCommentsEnabled ||
+      customWebhookEnabled !== orig.customWebhookEnabled ||
+      customWebhookUrl !== orig.customWebhookUrl ||
+      customWebhookMethod !== orig.customWebhookMethod ||
+      (headersJson || '') !== orig.customWebhookHeaders;
 
     if (!hasChanges) return;
 
@@ -80,7 +140,52 @@ export function NotificationSettingsCard({
         clearTimeout(debounceRef.current);
       }
     };
-  }, [slackWebhookUrl, slackEnabled, discordWebhookUrl, discordEnabled, githubPrCommentsEnabled, doSave]);
+  }, [slackWebhookUrl, slackEnabled, discordWebhookUrl, discordEnabled, githubPrCommentsEnabled, gitlabMrCommentsEnabled, customWebhookEnabled, customWebhookUrl, customWebhookMethod, headersJson, doSave]);
+
+  const handleTestWebhook = async () => {
+    if (!customWebhookUrl) {
+      toast.error('Please enter a webhook URL');
+      return;
+    }
+
+    setTestingWebhook(true);
+    setWebhookTestResult(null);
+
+    try {
+      const result = await testCustomWebhookAction({
+        url: customWebhookUrl,
+        method: customWebhookMethod,
+        headers: headersJson,
+      });
+
+      setWebhookTestResult(result);
+      if (result.success) {
+        toast.success(`Webhook test successful (${result.statusCode})`);
+      } else {
+        toast.error(`Webhook test failed: ${result.error}`);
+      }
+    } catch (error) {
+      const errorMsg = error instanceof Error ? error.message : 'Unknown error';
+      setWebhookTestResult({ success: false, error: errorMsg });
+      toast.error(`Webhook test failed: ${errorMsg}`);
+    } finally {
+      setTestingWebhook(false);
+    }
+  };
+
+  const addHeader = () => {
+    setCustomWebhookHeaders([...customWebhookHeaders, { key: '', value: '' }]);
+  };
+
+  const removeHeader = (index: number) => {
+    setCustomWebhookHeaders(customWebhookHeaders.filter((_, i) => i !== index));
+  };
+
+  const updateHeader = (index: number, field: 'key' | 'value', value: string) => {
+    const updated = [...customWebhookHeaders];
+    updated[index][field] = value;
+    setCustomWebhookHeaders(updated);
+  };
 
   return (
     <Card>
@@ -182,6 +287,164 @@ export function NotificationSettingsCard({
             <p className="text-xs text-muted-foreground">
               Build results will be posted as comments on open PRs matching the build branch
             </p>
+          )}
+        </div>
+
+        {/* GitLab MR Comments */}
+        <div className="space-y-4 p-4 border rounded-lg">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <GitLabIcon className="w-4 h-4" />
+              <Label className="font-medium">GitLab MR Comments</Label>
+            </div>
+            <Switch
+              checked={gitlabMrCommentsEnabled}
+              onCheckedChange={setGitlabMrCommentsEnabled}
+              disabled={!hasGitlabAccount}
+            />
+          </div>
+
+          {!hasGitlabAccount && (
+            <p className="text-xs text-amber-600">
+              Connect your GitLab account in settings to enable MR comments
+            </p>
+          )}
+
+          {hasGitlabAccount && gitlabMrCommentsEnabled && (
+            <p className="text-xs text-muted-foreground">
+              Build results will be posted as notes on open MRs matching the build branch
+            </p>
+          )}
+        </div>
+
+        {/* Custom Webhook */}
+        <div className="space-y-4 p-4 border rounded-lg">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Webhook className="w-4 h-4" />
+              <Label className="font-medium">Custom Webhook</Label>
+            </div>
+            <Switch
+              checked={customWebhookEnabled}
+              onCheckedChange={setCustomWebhookEnabled}
+            />
+          </div>
+
+          {customWebhookEnabled && (
+            <div className="space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="customWebhookUrl">Webhook URL</Label>
+                <Input
+                  id="customWebhookUrl"
+                  type="url"
+                  placeholder="https://your-server.com/webhook"
+                  value={customWebhookUrl}
+                  onChange={(e) => setCustomWebhookUrl(e.target.value)}
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="customWebhookMethod">HTTP Method</Label>
+                <Select value={customWebhookMethod} onValueChange={(v) => setCustomWebhookMethod(v as 'POST' | 'PUT')}>
+                  <SelectTrigger id="customWebhookMethod">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="POST">POST</SelectItem>
+                    <SelectItem value="PUT">PUT</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <Label>Custom Headers</Label>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={addHeader}
+                    className="h-7 px-2"
+                  >
+                    <Plus className="w-3 h-3 mr-1" />
+                    Add Header
+                  </Button>
+                </div>
+                {customWebhookHeaders.length > 0 && (
+                  <div className="space-y-2">
+                    {customWebhookHeaders.map((header, index) => (
+                      <div key={index} className="flex gap-2">
+                        <Input
+                          placeholder="Header name"
+                          value={header.key}
+                          onChange={(e) => updateHeader(index, 'key', e.target.value)}
+                          className="flex-1"
+                        />
+                        <Input
+                          placeholder="Value"
+                          value={header.value}
+                          onChange={(e) => updateHeader(index, 'value', e.target.value)}
+                          className="flex-1"
+                        />
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => removeHeader(index)}
+                          className="h-9 w-9 shrink-0"
+                        >
+                          <Trash2 className="w-4 h-4 text-destructive" />
+                        </Button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                <p className="text-xs text-muted-foreground">
+                  Add custom headers like Authorization tokens
+                </p>
+              </div>
+
+              <div className="space-y-2">
+                <Label>Payload Preview</Label>
+                <pre className="p-3 bg-muted rounded-md text-xs overflow-auto max-h-48">
+                  {JSON.stringify(getPayloadPreview(), null, 2)}
+                </pre>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={handleTestWebhook}
+                  disabled={testingWebhook || !customWebhookUrl}
+                >
+                  {testingWebhook ? (
+                    <>
+                      <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                      Testing...
+                    </>
+                  ) : (
+                    'Test Webhook'
+                  )}
+                </Button>
+                {webhookTestResult && (
+                  <span className={`flex items-center gap-1 text-sm ${webhookTestResult.success ? 'text-green-600' : 'text-red-600'}`}>
+                    {webhookTestResult.success ? (
+                      <>
+                        <CheckCircle className="w-4 h-4" />
+                        Success
+                      </>
+                    ) : (
+                      <>
+                        <XCircle className="w-4 h-4" />
+                        Failed
+                      </>
+                    )}
+                  </span>
+                )}
+              </div>
+            </div>
           )}
         </div>
 

@@ -365,6 +365,8 @@ function createExpect(timeout = 5000) {
 }
 import type { Test, TestResult, ActionSelector, SelectorConfig, PlaywrightSettings, NetworkRequest, EnvironmentConfig } from '@/lib/db/schema';
 import { getServerManager } from './server-manager';
+import { getSetupOrchestrator, testNeedsSetup } from '@/lib/setup/setup-orchestrator';
+import type { SetupContext, SetupResult } from '@/lib/setup/types';
 
 export interface RunEvent {
   type: 'started' | 'test_started' | 'test_passed' | 'test_failed' | 'completed';
@@ -383,7 +385,7 @@ export interface CapturedScreenshot {
 
 export interface TestRunResult {
   testId: string;
-  status: 'passed' | 'failed' | 'skipped';
+  status: 'passed' | 'failed' | 'skipped' | 'setup_failed';
   durationMs: number;
   screenshotPath?: string;
   screenshots: CapturedScreenshot[];
@@ -391,6 +393,7 @@ export interface TestRunResult {
   consoleErrors?: string[];
   networkRequests?: NetworkRequest[];
   a11yViolations?: A11yViolation[];
+  setupDurationMs?: number;
 }
 
 export interface ProgressCallback {
@@ -409,6 +412,8 @@ export class PlaywrightRunner extends EventEmitter {
   private settings: PlaywrightSettings | null = null;
   private environmentConfig: EnvironmentConfig | null = null;
   private repositoryId: string | null;
+  // Setup context: variables passed from build/suite setup to tests
+  private setupContext: SetupContext | null = null;
 
   constructor(repositoryId?: string | null, screenshotDir?: string) {
     super();
@@ -433,6 +438,28 @@ export class PlaywrightRunner extends EventEmitter {
 
   getEnvironmentConfig(): EnvironmentConfig | null {
     return this.environmentConfig;
+  }
+
+  /**
+   * Set the setup context with variables from build/suite setup
+   * These variables will be available to all tests
+   */
+  setSetupContext(context: SetupContext) {
+    this.setupContext = context;
+  }
+
+  /**
+   * Get the current setup context
+   */
+  getSetupContext(): SetupContext | null {
+    return this.setupContext;
+  }
+
+  /**
+   * Clear the setup context
+   */
+  clearSetupContext() {
+    this.setupContext = null;
   }
 
   /**
@@ -679,6 +706,9 @@ export class PlaywrightRunner extends EventEmitter {
     let stepCounter = 1;
     let currentStepLabel = `step ${stepCounter}`;
 
+    // Track setup duration (outside try so catch can access)
+    let setupDurationMs = 0;
+
     try {
       context = await this.browser.newContext({
         viewport: this.getViewport(),
@@ -692,7 +722,18 @@ export class PlaywrightRunner extends EventEmitter {
       await setupFreezeScripts(page, stabilization);
 
       // Setup third-party blocking if enabled
-      const targetUrl = test.targetUrl || this.environmentConfig?.baseUrl || 'http://localhost:3000';
+      // Get the base URL from environment config (always a full URL like http://localhost:3000)
+      const envBaseUrl = this.environmentConfig?.baseUrl || 'http://localhost:3000';
+      // Resolve target URL - if test.targetUrl is relative, combine with envBaseUrl
+      let targetUrl = envBaseUrl;
+      if (test.targetUrl) {
+        if (test.targetUrl.startsWith('http://') || test.targetUrl.startsWith('https://')) {
+          targetUrl = test.targetUrl;
+        } else {
+          // Relative URL - combine with envBaseUrl
+          targetUrl = `${envBaseUrl.replace(/\/$/, '')}${test.targetUrl.startsWith('/') ? '' : '/'}${test.targetUrl}`;
+        }
+      }
       await setupThirdPartyBlocking(page, targetUrl, stabilization);
 
       // Freeze CSS animations/transitions if enabled
@@ -736,6 +777,66 @@ export class PlaywrightRunner extends EventEmitter {
 
       // Compute screenshotPath for the test function
       const testScreenshotPath = path.join(this.screenshotDir, `${runId}-${test.id}.png`);
+
+      // Run test-level setup if configured
+      const orchestrator = getSetupOrchestrator();
+      const baseContext: SetupContext = {
+        baseUrl: envBaseUrl.replace(/\/$/, ''), // Strip trailing slash to avoid double slashes
+        page,
+        variables: this.setupContext?.variables || {},
+        repositoryId: this.repositoryId,
+      };
+
+      // Check if test has setup (own or from repo defaults)
+      if (await testNeedsSetup(test)) {
+        const setupResult = await orchestrator.runTestSetup(test, page, baseContext);
+        setupDurationMs = setupResult.duration;
+
+        if (!setupResult.success) {
+          // Setup failed - return early with setup_failed status
+          const durationMs = Date.now() - startTime;
+
+          this.emit('event', {
+            type: 'test_failed',
+            testId: test.id,
+            testName: test.name,
+            durationMs,
+            error: `Setup failed: ${setupResult.error}`,
+            timestamp: Date.now(),
+          } as RunEvent);
+
+          // Take screenshot on setup failure if possible
+          let screenshotPath: string | undefined;
+          try {
+            const screenshotFilename = `${runId}-${test.id}-setup-failure.png`;
+            const fullPath = path.join(this.screenshotDir, screenshotFilename);
+            await page.screenshot({ path: fullPath, fullPage: true });
+            screenshotPath = this.repositoryId
+              ? `/screenshots/${this.repositoryId}/${screenshotFilename}`
+              : `/screenshots/${screenshotFilename}`;
+          } catch {
+            // Ignore screenshot errors
+          }
+
+          return {
+            testId: test.id,
+            status: 'setup_failed',
+            durationMs,
+            screenshotPath,
+            screenshots: screenshotPath ? [{ path: screenshotPath, label: 'setup-failure' }] : [],
+            errorMessage: `Setup failed: ${setupResult.error}`,
+            setupDurationMs,
+          };
+        }
+
+        // Merge setup variables into context
+        if (setupResult.variables) {
+          baseContext.variables = {
+            ...baseContext.variables,
+            ...setupResult.variables,
+          };
+        }
+      }
 
       // Create a proxy that intercepts page.screenshot() calls
       const screenshotDelay = this.settings?.screenshotDelay ?? 0;
@@ -846,6 +947,7 @@ export class PlaywrightRunner extends EventEmitter {
         consoleErrors: consoleErrors.length > 0 ? consoleErrors : undefined,
         networkRequests: networkFailures.length > 0 ? networkFailures : undefined,
         a11yViolations,
+        setupDurationMs: setupDurationMs > 0 ? setupDurationMs : undefined,
       };
 
     } catch (error) {
@@ -893,6 +995,7 @@ export class PlaywrightRunner extends EventEmitter {
         errorMessage,
         consoleErrors: consoleErrors.length > 0 ? consoleErrors : undefined,
         networkRequests: networkFailures.length > 0 ? networkFailures : undefined,
+        setupDurationMs: setupDurationMs > 0 ? setupDurationMs : undefined,
       };
 
     } finally {

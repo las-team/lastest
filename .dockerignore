@@ -1,0 +1,48 @@
+# Dependencies
+node_modules
+.pnpm-store
+
+# Build outputs
+.next
+dist
+*.tsbuildinfo
+
+# Database (handled via volumes)
+*.db
+*.db-shm
+*.db-wal
+
+# Git
+.git
+.gitignore
+
+# IDE
+.vscode
+.idea
+*.swp
+*.swo
+
+# Test outputs
+test-output
+coverage
+
+# Development
+.env.local
+.env.development
+.claude
+.auto-claude
+.auto-claude-status
+.claude_settings.json
+.playwright-mcp
+.worktrees
+
+# Documentation (not needed in image)
+docs
+*.md
+!README.md
+
+# Misc
+*.log
+*.tmp
+Thumbs.db
+.DS_Store
