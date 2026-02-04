@@ -3,7 +3,9 @@
 import { revalidatePath } from 'next/cache';
 import * as queries from '@/lib/db/queries';
 import { getBranchInfo } from '@/lib/github/content';
+import { getBranchInfo as getGitLabBranchInfo } from '@/lib/gitlab/content';
 import { getOpenPRsForBranch } from '@/lib/github/oauth';
+import { getOpenMRsForBranch } from '@/lib/gitlab/oauth';
 import { getRunner } from '@/lib/playwright/runner';
 import { getServerManager } from '@/lib/playwright/server-manager';
 import { getSetupOrchestrator } from '@/lib/setup/setup-orchestrator';
@@ -16,6 +18,7 @@ import { sendSlackNotification } from '@/lib/integrations/slack';
 import { sendDiscordNotification } from '@/lib/integrations/discord';
 import { sendCustomWebhookNotification } from '@/lib/integrations/custom-webhook';
 import { postPRComment } from '@/lib/integrations/github-pr';
+import { postMRComment } from '@/lib/integrations/gitlab-mr';
 import type { Test, TriggerType, BuildStatus, VisualDiffWithTestStatus, DiffClassification, DiffStatus } from '@/lib/db/schema';
 import path from 'path';
 import { createJob, createPendingJob, startJob, updateJobProgress, completeJob, failJob } from './jobs';
@@ -25,29 +28,56 @@ interface GitInfo {
   commit: string;
 }
 
-async function getGitInfoFromGitHub(repositoryId: string | null): Promise<GitInfo> {
+async function getGitInfoFromProvider(repositoryId: string | null): Promise<GitInfo> {
   if (!repositoryId) {
     return { branch: 'unknown', commit: 'unknown' };
   }
 
-  const account = await queries.getGithubAccount();
   const repo = await queries.getRepository(repositoryId);
-
-  if (!account || !repo) {
+  if (!repo) {
     return { branch: 'unknown', commit: 'unknown' };
   }
 
   const branch = repo.selectedBranch || repo.defaultBranch || 'main';
-  const branchInfo = await getBranchInfo(account.accessToken, repo.owner, repo.name, branch);
 
-  if (!branchInfo) {
-    return { branch, commit: 'unknown' };
+  if (repo.provider === 'gitlab') {
+    // Fetch from GitLab
+    const account = await queries.getGitlabAccount();
+    if (!account || !repo.gitlabProjectId) {
+      return { branch, commit: 'unknown' };
+    }
+
+    const branchInfo = await getGitLabBranchInfo(account.accessToken, repo.gitlabProjectId, branch, account.instanceUrl || undefined);
+    if (!branchInfo) {
+      return { branch, commit: 'unknown' };
+    }
+
+    return {
+      branch: branchInfo.name,
+      commit: branchInfo.commit.id.slice(0, 7),
+    };
+  } else {
+    // Fetch from GitHub
+    const account = await queries.getGithubAccount();
+    if (!account) {
+      return { branch, commit: 'unknown' };
+    }
+
+    const branchInfo = await getBranchInfo(account.accessToken, repo.owner, repo.name, branch);
+    if (!branchInfo) {
+      return { branch, commit: 'unknown' };
+    }
+
+    return {
+      branch: branchInfo.name,
+      commit: branchInfo.commit.sha.slice(0, 7),
+    };
   }
+}
 
-  return {
-    branch: branchInfo.name,
-    commit: branchInfo.commit.sha.slice(0, 7),
-  };
+// Alias for backwards compatibility
+async function getGitInfoFromGitHub(repositoryId: string | null): Promise<GitInfo> {
+  return getGitInfoFromProvider(repositoryId);
 }
 
 const SCREENSHOTS_DIR = path.join(process.cwd(), 'public', 'screenshots');
@@ -871,7 +901,7 @@ async function sendBuildNotifications(data: {
       const account = await queries.getGithubAccount();
       const repo = data.repositoryId ? await queries.getRepository(data.repositoryId) : null;
 
-      if (account && repo) {
+      if (account && repo && repo.provider === 'github') {
         // Find open PRs for this branch
         const prs = await getOpenPRsForBranch(
           account.accessToken,
@@ -901,6 +931,45 @@ async function sendBuildNotifications(data: {
       }
     } catch (error) {
       console.error('Failed to post GitHub PR comment:', error);
+    }
+  }
+
+  // Post GitLab MR comment
+  if (notificationSettings.gitlabMrCommentsEnabled) {
+    try {
+      const account = await queries.getGitlabAccount();
+      const repo = data.repositoryId ? await queries.getRepository(data.repositoryId) : null;
+
+      if (account && repo && repo.provider === 'gitlab' && repo.gitlabProjectId) {
+        // Find open MRs for this branch
+        const mrs = await getOpenMRsForBranch(
+          account.accessToken,
+          repo.gitlabProjectId,
+          data.gitBranch,
+          account.instanceUrl || undefined
+        );
+
+        for (const mr of mrs) {
+          await postMRComment(
+            account.accessToken,
+            repo.gitlabProjectId,
+            mr.iid,
+            {
+              buildId: data.buildId,
+              status: data.status,
+              totalTests: data.totalTests,
+              passedCount: data.passedCount,
+              changesDetected: data.changesDetected,
+              flakyCount: data.flakyCount,
+              failedCount: data.failedCount,
+              buildUrl,
+            },
+            account.instanceUrl || undefined
+          );
+        }
+      }
+    } catch (error) {
+      console.error('Failed to post GitLab MR comment:', error);
     }
   }
 }

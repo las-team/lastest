@@ -11,8 +11,7 @@ Excalidraw tests: ~/.claude/plans/recursive-wondering-dongarra.md
 ## reuse
 check the recorder and the runner so that they are compatible and identify the root cause of the issue
 ## in progress
-Env setup UI - tests page, suit page, dropdown control
-  Dropdown should show defaults, override to work enable/disable
+
 ## test
 OCR
 Snapshot Stabilization Engine
@@ -20,10 +19,10 @@ VS Code extension
 Github actions integration
 Publish lastest runner to npx npm
 Docker
-## features
-Custom webhook notifications
+Gitlab
 
-GitLab integration (P2)
+## features
+Individual override for env settings
 
 Steady
   - Uses burst capture (multiple frames) to detect instability         

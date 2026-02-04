@@ -95,6 +95,7 @@ export async function saveNotificationSettings(data: {
   discordWebhookUrl?: string | null;
   discordEnabled?: boolean;
   githubPrCommentsEnabled?: boolean;
+  gitlabMrCommentsEnabled?: boolean;
   customWebhookEnabled?: boolean;
   customWebhookUrl?: string | null;
   customWebhookMethod?: string;
@@ -130,4 +131,9 @@ export async function testCustomWebhookAction(data: {
     method: data.method,
     headers: parsedHeaders,
   });
+}
+
+// Selector Stats
+export async function getSelectorStatsAction(repositoryId: string) {
+  return queries.getAggregatedSelectorStats(repositoryId);
 }

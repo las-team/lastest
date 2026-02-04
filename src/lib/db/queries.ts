@@ -11,6 +11,7 @@ import {
   ignoreRegions,
   pullRequests,
   githubAccounts,
+  gitlabAccounts,
   repositories,
   playwrightSettings,
   routes,
@@ -58,6 +59,7 @@ import type {
   NewIgnoreRegion,
   NewPullRequest,
   NewGithubAccount,
+  NewGitlabAccount,
   NewRepository,
   NewPlaywrightSettings,
   NewRoute,
@@ -565,6 +567,33 @@ export async function deleteGithubAccount(id: string) {
   await db.delete(githubAccounts).where(eq(githubAccounts.id, id));
 }
 
+// GitLab Accounts
+export async function getGitlabAccount() {
+  return db.select().from(gitlabAccounts).get();
+}
+
+export async function getGitlabAccountByTeam(teamId: string) {
+  return db.select().from(gitlabAccounts).where(eq(gitlabAccounts.teamId, teamId)).get();
+}
+
+export async function createGitlabAccount(data: Omit<NewGitlabAccount, 'id'>) {
+  const id = uuid();
+  await db.insert(gitlabAccounts).values({ ...data, id, createdAt: new Date() });
+  return { id, ...data, createdAt: new Date() };
+}
+
+export async function updateGitlabAccount(id: string, data: Partial<NewGitlabAccount>) {
+  await db.update(gitlabAccounts).set(data).where(eq(gitlabAccounts.id, id));
+}
+
+export async function deleteGitlabAccount(id: string) {
+  await db.delete(gitlabAccounts).where(eq(gitlabAccounts.id, id));
+}
+
+export async function updateGitlabSelectedRepository(accountId: string, repositoryId: string | null) {
+  await db.update(gitlabAccounts).set({ selectedRepositoryId: repositoryId }).where(eq(gitlabAccounts.id, accountId));
+}
+
 // Build Summary helpers
 export async function computeBuildStatus(buildId: string): Promise<BuildStatus> {
   const diffs = await getVisualDiffsByBuild(buildId);
@@ -590,6 +619,10 @@ export async function getRepository(id: string) {
 
 export async function getRepositoryByGithubId(githubRepoId: number) {
   return db.select().from(repositories).where(eq(repositories.githubRepoId, githubRepoId)).get();
+}
+
+export async function getRepositoryByGitlabProjectId(gitlabProjectId: number) {
+  return db.select().from(repositories).where(eq(repositories.gitlabProjectId, gitlabProjectId)).get();
 }
 
 export async function createRepository(data: Omit<NewRepository, 'id'>) {
@@ -1852,6 +1885,7 @@ export async function getNotificationSettings(repositoryId?: string | null) {
     discordWebhookUrl: null,
     discordEnabled: DEFAULT_NOTIFICATION_SETTINGS.discordEnabled,
     githubPrCommentsEnabled: DEFAULT_NOTIFICATION_SETTINGS.githubPrCommentsEnabled,
+    gitlabMrCommentsEnabled: DEFAULT_NOTIFICATION_SETTINGS.gitlabMrCommentsEnabled,
     customWebhookEnabled: DEFAULT_NOTIFICATION_SETTINGS.customWebhookEnabled,
     customWebhookUrl: null,
     customWebhookMethod: DEFAULT_NOTIFICATION_SETTINGS.customWebhookMethod,
@@ -2002,6 +2036,83 @@ export async function recordSelectorFailure(
       createdAt: now,
     });
   }
+}
+
+// Aggregated selector stats by selectorType for a repository
+export interface SelectorTypeStats {
+  selectorType: string;
+  totalSuccesses: number;
+  totalFailures: number;
+  totalAttempts: number;
+  avgResponseTimeMs: number | null;
+  successRate: number; // 0-100
+}
+
+export async function getAggregatedSelectorStats(repositoryId: string): Promise<SelectorTypeStats[]> {
+  // Get all tests for this repository
+  const repoTests = await db
+    .select({ id: tests.id })
+    .from(tests)
+    .where(eq(tests.repositoryId, repositoryId))
+    .all();
+
+  if (repoTests.length === 0) {
+    return [];
+  }
+
+  const testIds = repoTests.map((t) => t.id);
+
+  // Get all selector stats for these tests
+  const stats = await db
+    .select()
+    .from(selectorStats)
+    .where(inArray(selectorStats.testId, testIds))
+    .all();
+
+  // Aggregate by selectorType
+  const aggregated = new Map<
+    string,
+    { successes: number; failures: number; attempts: number; responseTimeSum: number; responseTimeCount: number }
+  >();
+
+  for (const stat of stats) {
+    const existing = aggregated.get(stat.selectorType) || {
+      successes: 0,
+      failures: 0,
+      attempts: 0,
+      responseTimeSum: 0,
+      responseTimeCount: 0,
+    };
+
+    existing.successes += stat.successCount ?? 0;
+    existing.failures += stat.failureCount ?? 0;
+    existing.attempts += stat.totalAttempts ?? 0;
+    if (stat.avgResponseTimeMs != null && stat.successCount != null && stat.successCount > 0) {
+      existing.responseTimeSum += stat.avgResponseTimeMs * stat.successCount;
+      existing.responseTimeCount += stat.successCount;
+    }
+
+    aggregated.set(stat.selectorType, existing);
+  }
+
+  // Convert to result array
+  const result: SelectorTypeStats[] = [];
+  for (const [selectorType, data] of aggregated) {
+    const successRate = data.attempts > 0 ? Math.round((data.successes / data.attempts) * 100) : 0;
+    const avgResponseTimeMs =
+      data.responseTimeCount > 0 ? Math.round(data.responseTimeSum / data.responseTimeCount) : null;
+
+    result.push({
+      selectorType,
+      totalSuccesses: data.successes,
+      totalFailures: data.failures,
+      totalAttempts: data.attempts,
+      avgResponseTimeMs,
+      successRate,
+    });
+  }
+
+  return result;
 }
 
 // ============================================

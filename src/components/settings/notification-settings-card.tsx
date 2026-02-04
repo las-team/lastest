@@ -13,16 +13,27 @@ import type { NotificationSettings } from '@/lib/db/schema';
 import { Bell, MessageSquare, Webhook, Plus, Trash2, Loader2, CheckCircle, XCircle } from 'lucide-react';
 import { toast } from 'sonner';
 
+// GitLab icon SVG component
+function GitLabIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="currentColor">
+      <path d="M4.845.904c-.435 0-.82.28-.955.692C2.639 5.449 1.246 9.728.07 13.335a1.437 1.437 0 00.522 1.607l11.071 8.045c.2.145.472.144.67-.004l11.073-8.04a1.436 1.436 0 00.522-1.61c-1.285-3.942-2.683-8.256-3.817-11.746a1.004 1.004 0 00-.957-.684.987.987 0 00-.949.69l-2.405 7.408H8.203l-2.41-7.408a.987.987 0 00-.942-.69h-.006z" />
+    </svg>
+  );
+}
+
 interface NotificationSettingsCardProps {
   settings: NotificationSettings;
   repositoryId?: string | null;
   hasGithubAccount: boolean;
+  hasGitlabAccount?: boolean;
 }
 
 export function NotificationSettingsCard({
   settings,
   repositoryId,
   hasGithubAccount,
+  hasGitlabAccount = false,
 }: NotificationSettingsCardProps) {
   const [, startTransition] = useTransition();
   const [slackWebhookUrl, setSlackWebhookUrl] = useState(settings.slackWebhookUrl || '');
@@ -31,6 +42,9 @@ export function NotificationSettingsCard({
   const [discordEnabled, setDiscordEnabled] = useState(settings.discordEnabled || false);
   const [githubPrCommentsEnabled, setGithubPrCommentsEnabled] = useState(
     settings.githubPrCommentsEnabled || false
+  );
+  const [gitlabMrCommentsEnabled, setGitlabMrCommentsEnabled] = useState(
+    settings.gitlabMrCommentsEnabled || false
   );
   const [customWebhookEnabled, setCustomWebhookEnabled] = useState(settings.customWebhookEnabled || false);
   const [customWebhookUrl, setCustomWebhookUrl] = useState(settings.customWebhookUrl || '');
@@ -60,6 +74,7 @@ export function NotificationSettingsCard({
     discordWebhookUrl: settings.discordWebhookUrl || '',
     discordEnabled: settings.discordEnabled || false,
     githubPrCommentsEnabled: settings.githubPrCommentsEnabled || false,
+    gitlabMrCommentsEnabled: settings.gitlabMrCommentsEnabled || false,
     customWebhookEnabled: settings.customWebhookEnabled || false,
     customWebhookUrl: settings.customWebhookUrl || '',
     customWebhookMethod: settings.customWebhookMethod || 'POST',
@@ -85,6 +100,7 @@ export function NotificationSettingsCard({
         discordWebhookUrl: discordWebhookUrl || null,
         discordEnabled,
         githubPrCommentsEnabled,
+        gitlabMrCommentsEnabled,
         customWebhookEnabled,
         customWebhookUrl: customWebhookUrl || null,
         customWebhookMethod,
@@ -92,7 +108,7 @@ export function NotificationSettingsCard({
       });
       toast.success('Notification settings saved');
     });
-  }, [repositoryId, slackWebhookUrl, slackEnabled, discordWebhookUrl, discordEnabled, githubPrCommentsEnabled, customWebhookEnabled, customWebhookUrl, customWebhookMethod, headersJson]);
+  }, [repositoryId, slackWebhookUrl, slackEnabled, discordWebhookUrl, discordEnabled, githubPrCommentsEnabled, gitlabMrCommentsEnabled, customWebhookEnabled, customWebhookUrl, customWebhookMethod, headersJson]);
 
   // Auto-save with debounce - only when values differ from original props
   useEffect(() => {
@@ -103,6 +119,7 @@ export function NotificationSettingsCard({
       discordWebhookUrl !== orig.discordWebhookUrl ||
       discordEnabled !== orig.discordEnabled ||
       githubPrCommentsEnabled !== orig.githubPrCommentsEnabled ||
+      gitlabMrCommentsEnabled !== orig.gitlabMrCommentsEnabled ||
       customWebhookEnabled !== orig.customWebhookEnabled ||
       customWebhookUrl !== orig.customWebhookUrl ||
       customWebhookMethod !== orig.customWebhookMethod ||
@@ -123,7 +140,7 @@ export function NotificationSettingsCard({
         clearTimeout(debounceRef.current);
       }
     };
-  }, [slackWebhookUrl, slackEnabled, discordWebhookUrl, discordEnabled, githubPrCommentsEnabled, customWebhookEnabled, customWebhookUrl, customWebhookMethod, headersJson, doSave]);
+  }, [slackWebhookUrl, slackEnabled, discordWebhookUrl, discordEnabled, githubPrCommentsEnabled, gitlabMrCommentsEnabled, customWebhookEnabled, customWebhookUrl, customWebhookMethod, headersJson, doSave]);
 
   const handleTestWebhook = async () => {
     if (!customWebhookUrl) {
@@ -269,6 +286,33 @@ export function NotificationSettingsCard({
           {hasGithubAccount && githubPrCommentsEnabled && (
             <p className="text-xs text-muted-foreground">
               Build results will be posted as comments on open PRs matching the build branch
+            </p>
+          )}
+        </div>
+
+        {/* GitLab MR Comments */}
+        <div className="space-y-4 p-4 border rounded-lg">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <GitLabIcon className="w-4 h-4" />
+              <Label className="font-medium">GitLab MR Comments</Label>
+            </div>
+            <Switch
+              checked={gitlabMrCommentsEnabled}
+              onCheckedChange={setGitlabMrCommentsEnabled}
+              disabled={!hasGitlabAccount}
+            />
+          </div>
+
+          {!hasGitlabAccount && (
+            <p className="text-xs text-amber-600">
+              Connect your GitLab account in settings to enable MR comments
+            </p>
+          )}
+
+          {hasGitlabAccount && gitlabMrCommentsEnabled && (
+            <p className="text-xs text-muted-foreground">
+              Build results will be posted as notes on open MRs matching the build branch
             </p>
           )}
         </div>

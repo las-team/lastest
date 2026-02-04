@@ -112,17 +112,22 @@ export const testResults = sqliteTable('test_results', {
   a11yViolations: text('a11y_violations', { mode: 'json' }).$type<A11yViolation[]>(),
 });
 
-// Repositories synced from GitHub
+// Repository provider type
+export type RepositoryProvider = 'github' | 'gitlab';
+
+// Repositories synced from GitHub or GitLab
 export const repositories = sqliteTable('repositories', {
   id: text('id').primaryKey(),
   teamId: text('team_id'), // Team ownership - FK added after teams table definition
-  githubRepoId: integer('github_repo_id').notNull(),
+  provider: text('provider').notNull().default('github'), // 'github' | 'gitlab'
+  githubRepoId: integer('github_repo_id'), // nullable for GitLab repos
+  gitlabProjectId: integer('gitlab_project_id'), // nullable for GitHub repos
   owner: text('owner').notNull(),
   name: text('name').notNull(),
-  fullName: text('full_name').notNull(), // owner/name
+  fullName: text('full_name').notNull(), // owner/name or namespace/project
   defaultBranch: text('default_branch'),
   selectedBaseline: text('selected_baseline'), // branch name for baseline comparison
-  selectedBranch: text('selected_branch'), // branch for remote scanning via GitHub API
+  selectedBranch: text('selected_branch'), // branch for remote scanning via API
   // Default setup configuration applied to all tests in this repo
   defaultSetupTestId: text('default_setup_test_id'), // Default test-as-setup for all tests
   defaultSetupScriptId: text('default_setup_script_id'), // OR default script
@@ -142,10 +147,27 @@ export const githubAccounts = sqliteTable('github_accounts', {
   createdAt: integer('created_at', { mode: 'timestamp' }),
 });
 
-// Pull requests linked to builds
+// GitLab OAuth accounts - per-team GitLab connection
+export const gitlabAccounts = sqliteTable('gitlab_accounts', {
+  id: text('id').primaryKey(),
+  teamId: text('team_id'), // Team ownership - FK added after teams table definition
+  gitlabUserId: text('gitlab_user_id').notNull(),
+  gitlabUsername: text('gitlab_username').notNull(),
+  accessToken: text('access_token').notNull(),
+  refreshToken: text('refresh_token'),
+  tokenExpiresAt: integer('token_expires_at', { mode: 'timestamp' }),
+  instanceUrl: text('instance_url').default('https://gitlab.com'), // For self-hosted GitLab
+  selectedRepositoryId: text('selected_repository_id').references(() => repositories.id),
+  createdAt: integer('created_at', { mode: 'timestamp' }),
+});
+
+// Pull requests / Merge requests linked to builds
 export const pullRequests = sqliteTable('pull_requests', {
   id: text('id').primaryKey(),
-  githubPrNumber: integer('github_pr_number').notNull(),
+  provider: text('provider').notNull().default('github'), // 'github' | 'gitlab'
+  githubPrNumber: integer('github_pr_number'), // nullable for GitLab MRs
+  gitlabMrIid: integer('gitlab_mr_iid'), // GitLab MR internal ID (nullable for GitHub PRs)
+  gitlabProjectId: integer('gitlab_project_id'), // GitLab project ID (nullable for GitHub PRs)
   repoOwner: text('repo_owner').notNull(),
   repoName: text('repo_name').notNull(),
   headBranch: text('head_branch').notNull(),
@@ -265,6 +287,8 @@ export type TestResult = typeof testResults.$inferSelect;
 export type NewTestResult = typeof testResults.$inferInsert;
 export type GithubAccount = typeof githubAccounts.$inferSelect;
 export type NewGithubAccount = typeof githubAccounts.$inferInsert;
+export type GitlabAccount = typeof gitlabAccounts.$inferSelect;
+export type NewGitlabAccount = typeof gitlabAccounts.$inferInsert;
 export type PullRequest = typeof pullRequests.$inferSelect;
 export type NewPullRequest = typeof pullRequests.$inferInsert;
 export type Build = typeof builds.$inferSelect;
@@ -585,7 +609,7 @@ export type NewSuite = typeof suites.$inferInsert;
 export type SuiteTest = typeof suiteTests.$inferSelect;
 export type NewSuiteTest = typeof suiteTests.$inferInsert;
 
-// Notification settings for Slack, Discord, GitHub PR comments, and Custom Webhook
+// Notification settings for Slack, Discord, GitHub PR comments, GitLab MR comments, and Custom Webhook
 export const notificationSettings = sqliteTable('notification_settings', {
   id: text('id').primaryKey(),
   repositoryId: text('repository_id').references(() => repositories.id),
@@ -594,6 +618,7 @@ export const notificationSettings = sqliteTable('notification_settings', {
   discordWebhookUrl: text('discord_webhook_url'),
   discordEnabled: integer('discord_enabled', { mode: 'boolean' }).default(false),
   githubPrCommentsEnabled: integer('github_pr_comments_enabled', { mode: 'boolean' }).default(false),
+  gitlabMrCommentsEnabled: integer('gitlab_mr_comments_enabled', { mode: 'boolean' }).default(false),
   customWebhookEnabled: integer('custom_webhook_enabled', { mode: 'boolean' }).default(false),
   customWebhookUrl: text('custom_webhook_url'),
   customWebhookMethod: text('custom_webhook_method').default('POST'),
@@ -609,6 +634,7 @@ export const DEFAULT_NOTIFICATION_SETTINGS = {
   slackEnabled: false,
   discordEnabled: false,
   githubPrCommentsEnabled: false,
+  gitlabMrCommentsEnabled: false,
   customWebhookEnabled: false,
   customWebhookMethod: 'POST' as const,
 };
