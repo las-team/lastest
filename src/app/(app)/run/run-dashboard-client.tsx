@@ -208,6 +208,113 @@ export function RunDashboardClient({ tests, runs, builds, repositoryId, activeBr
             </CardContent>
           </Card>
 
+          {/* Smart Run Card - Compares selected branch to default branch via GitHub API */}
+          {repositoryId && (
+            <Card>
+              <CardHeader className="pb-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Zap className="w-4 h-4 text-yellow-500" />
+                    <CardTitle className="text-sm font-medium">Smart Run</CardTitle>
+                  </div>
+                  {isAnalyzing ? (
+                    <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+                  ) : smartAnalysis?.isAvailable ? (
+                    <Badge variant="outline" className="text-[10px] gap-0.5 px-1.5 py-0 bg-yellow-50 text-yellow-700 border-yellow-200">
+                      Available
+                    </Badge>
+                  ) : null}
+                </div>
+                <CardDescription className="text-xs">
+                  Run only tests affected by your git changes
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                {isAnalyzing ? (
+                  <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                    <Loader2 className="h-3 w-3 animate-spin" />
+                    Analyzing git diff...
+                  </div>
+                ) : !smartAnalysis?.isAvailable ? (
+                  <p className="text-sm text-muted-foreground">
+                    {smartAnalysis?.unavailableReason || 'Configure local path in Settings'}
+                  </p>
+                ) : (
+                  <>
+                    {/* Branch comparison */}
+                    <div className="flex items-center gap-2 text-xs">
+                      <GitBranch className="h-3.5 w-3.5 text-muted-foreground" />
+                      <span className="font-medium">{smartAnalysis.currentBranch}</span>
+                      <span className="text-muted-foreground">→</span>
+                      <span className="text-muted-foreground">{smartAnalysis.baseBranch}</span>
+                    </div>
+
+                    {/* Stats */}
+                    <div className="flex items-center gap-4 text-xs text-muted-foreground">
+                      <span>{smartAnalysis.changedFiles.length} files changed</span>
+                      <span className="text-green-600 font-medium">
+                        {smartAnalysis.affectedTests.length} tests to run
+                      </span>
+                      {smartAnalysis.skippedTests.length > 0 && (
+                        <span>{smartAnalysis.skippedTests.length} skipped</span>
+                      )}
+                    </div>
+
+                    {/* Expandable details */}
+                    {smartAnalysis.affectedTests.length > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => setShowSmartDetails(!showSmartDetails)}
+                        className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
+                      >
+                        {showSmartDetails ? (
+                          <ChevronDown className="h-3 w-3" />
+                        ) : (
+                          <ChevronRight className="h-3 w-3" />
+                        )}
+                        View affected tests
+                      </button>
+                    )}
+
+                    {showSmartDetails && (
+                      <div className="space-y-1 pl-4 border-l-2 border-muted">
+                        {smartAnalysis.affectedTests.slice(0, 5).map((test) => (
+                          <div key={test.testId} className="flex items-center justify-between text-xs">
+                            <span className="truncate flex-1 mr-2">{test.testName}</span>
+                            <Badge variant="outline" className="text-[9px] px-1 py-0">
+                              {test.matchReason.replace('_', ' ')}
+                            </Badge>
+                          </div>
+                        ))}
+                        {smartAnalysis.affectedTests.length > 5 && (
+                          <p className="text-xs text-muted-foreground">
+                            +{smartAnalysis.affectedTests.length - 5} more
+                          </p>
+                        )}
+                      </div>
+                    )}
+
+                    {/* Smart Run Button */}
+                    <Button
+                      onClick={handleSmartRun}
+                      disabled={isSmartRunning || smartAnalysis.affectedTests.length === 0}
+                      size="sm"
+                      variant="outline"
+                      className="w-full"
+                    >
+                      {isSmartRunning ? (
+                        <Loader2 className="h-3.5 w-3.5 mr-2 animate-spin" />
+                      ) : (
+                        <Zap className="h-3.5 w-3.5 mr-2" />
+                      )}
+                      Smart Run ({smartAnalysis.affectedTests.length} tests)
+                    </Button>
+                  </>
+                )}
+              </CardContent>
+            </Card>
+          )}
+
           <Card>
             <CardContent className="pt-4 pb-3 px-4">
               <div className="flex items-center justify-between mb-2">
@@ -343,113 +450,6 @@ export function RunDashboardClient({ tests, runs, builds, repositoryId, activeBr
               )}
             </CardContent>
           </Card>
-
-          {/* Smart Run Card - Compares selected branch to default branch via GitHub API */}
-          {repositoryId && (
-            <Card>
-              <CardHeader className="pb-3">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <Zap className="w-4 h-4 text-yellow-500" />
-                    <CardTitle className="text-sm font-medium">Smart Run</CardTitle>
-                  </div>
-                  {isAnalyzing ? (
-                    <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
-                  ) : smartAnalysis?.isAvailable ? (
-                    <Badge variant="outline" className="text-[10px] gap-0.5 px-1.5 py-0 bg-yellow-50 text-yellow-700 border-yellow-200">
-                      Available
-                    </Badge>
-                  ) : null}
-                </div>
-                <CardDescription className="text-xs">
-                  Run only tests affected by your git changes
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-3">
-                {isAnalyzing ? (
-                  <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                    <Loader2 className="h-3 w-3 animate-spin" />
-                    Analyzing git diff...
-                  </div>
-                ) : !smartAnalysis?.isAvailable ? (
-                  <p className="text-sm text-muted-foreground">
-                    {smartAnalysis?.unavailableReason || 'Configure local path in Settings'}
-                  </p>
-                ) : (
-                  <>
-                    {/* Branch comparison */}
-                    <div className="flex items-center gap-2 text-xs">
-                      <GitBranch className="h-3.5 w-3.5 text-muted-foreground" />
-                      <span className="font-medium">{smartAnalysis.currentBranch}</span>
-                      <span className="text-muted-foreground">→</span>
-                      <span className="text-muted-foreground">{smartAnalysis.baseBranch}</span>
-                    </div>
-
-                    {/* Stats */}
-                    <div className="flex items-center gap-4 text-xs text-muted-foreground">
-                      <span>{smartAnalysis.changedFiles.length} files changed</span>
-                      <span className="text-green-600 font-medium">
-                        {smartAnalysis.affectedTests.length} tests to run
-                      </span>
-                      {smartAnalysis.skippedTests.length > 0 && (
-                        <span>{smartAnalysis.skippedTests.length} skipped</span>
-                      )}
-                    </div>
-
-                    {/* Expandable details */}
-                    {smartAnalysis.affectedTests.length > 0 && (
-                      <button
-                        type="button"
-                        onClick={() => setShowSmartDetails(!showSmartDetails)}
-                        className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
-                      >
-                        {showSmartDetails ? (
-                          <ChevronDown className="h-3 w-3" />
-                        ) : (
-                          <ChevronRight className="h-3 w-3" />
-                        )}
-                        View affected tests
-                      </button>
-                    )}
-
-                    {showSmartDetails && (
-                      <div className="space-y-1 pl-4 border-l-2 border-muted">
-                        {smartAnalysis.affectedTests.slice(0, 5).map((test) => (
-                          <div key={test.testId} className="flex items-center justify-between text-xs">
-                            <span className="truncate flex-1 mr-2">{test.testName}</span>
-                            <Badge variant="outline" className="text-[9px] px-1 py-0">
-                              {test.matchReason.replace('_', ' ')}
-                            </Badge>
-                          </div>
-                        ))}
-                        {smartAnalysis.affectedTests.length > 5 && (
-                          <p className="text-xs text-muted-foreground">
-                            +{smartAnalysis.affectedTests.length - 5} more
-                          </p>
-                        )}
-                      </div>
-                    )}
-
-                    {/* Smart Run Button */}
-                    <Button
-                      onClick={handleSmartRun}
-                      disabled={isSmartRunning || smartAnalysis.affectedTests.length === 0}
-                      size="sm"
-                      variant="outline"
-                      className="w-full"
-                    >
-                      {isSmartRunning ? (
-                        <Loader2 className="h-3.5 w-3.5 mr-2 animate-spin" />
-                      ) : (
-                        <Zap className="h-3.5 w-3.5 mr-2" />
-                      )}
-                      Smart Run ({smartAnalysis.affectedTests.length} tests)
-                    </Button>
-                  </>
-                )}
-              </CardContent>
-            </Card>
-          )}
         </div>
 
         {/* Right Column - Build History */}
