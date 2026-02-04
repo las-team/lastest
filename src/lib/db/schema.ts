@@ -42,6 +42,7 @@ export interface DiffMetadata {
   affectedComponents?: string[];
   changeCategories?: ('layout' | 'color' | 'text' | 'image' | 'style')[];
   pageShift?: PageShiftInfo;
+  isNewTest?: boolean;
 }
 
 export const functionalAreas = sqliteTable('functional_areas', {

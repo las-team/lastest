@@ -41,7 +41,7 @@ export async function POST(request: Request) {
       buildId: result.buildId,
       testRunId: result.testRunId,
       testCount: result.testCount,
-      queued: result.queued || false,
+      queued: 'queued' in result ? result.queued : false,
     });
   } catch (error) {
     console.error('Failed to create build:', error);

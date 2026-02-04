@@ -37,8 +37,6 @@ UI & UX
 Fix compare and branch selection
 Electron app ~/.claude/plans/rippling-roaming-snail.md replan
 ## ideas
-Build/change approval
-    Test version or result on the build screen
 Imported document -> US & AC -> tests - US checklist overview
 Sitemap -flow
 Firecrawl?
