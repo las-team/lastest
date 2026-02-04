@@ -13,6 +13,7 @@ import {
   Layers,
   FolderTree,
   Building2,
+  Zap,
 } from 'lucide-react';
 import { RepoSelector, SyncReposButton } from './repo-selector';
 import { QueueIndicator } from '@/components/queue/queue-indicator';
@@ -33,6 +34,7 @@ const navigation = [
   { name: 'Suites', href: '/suites', icon: Layers },
   { name: 'Runs', href: '/run', icon: Play },
   { name: 'Compare', href: '/compare', icon: GitCompare },
+  { name: 'Env', href: '/env', icon: Zap },
   { name: 'Settings', href: '/settings', icon: Settings },
 ];
 

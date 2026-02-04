@@ -148,3 +148,46 @@ export async function updatePlannedScreenshot(
 export async function getPlannedScreenshotById(id: string) {
   return queries.getPlannedScreenshot(id);
 }
+
+/**
+ * Assign a planned screenshot to a specific test step
+ */
+export async function assignPlannedToStep(
+  plannedId: string,
+  testId: string,
+  stepLabel: string
+) {
+  // Verify the planned screenshot exists and belongs to this test
+  const planned = await queries.getPlannedScreenshot(plannedId);
+  if (!planned) {
+    return { success: false, error: 'Planned screenshot not found' };
+  }
+
+  // Update the stepLabel
+  await queries.updatePlannedScreenshot(plannedId, {
+    testId,
+    stepLabel,
+  });
+
+  revalidatePath(`/tests/${testId}`);
+  return { success: true };
+}
+
+/**
+ * Remove the step assignment from a planned screenshot
+ */
+export async function unassignPlannedFromStep(plannedId: string) {
+  const planned = await queries.getPlannedScreenshot(plannedId);
+  if (!planned) {
+    return { success: false, error: 'Planned screenshot not found' };
+  }
+
+  await queries.updatePlannedScreenshot(plannedId, {
+    stepLabel: null,
+  });
+
+  if (planned.testId) {
+    revalidatePath(`/tests/${planned.testId}`);
+  }
+  return { success: true };
+}

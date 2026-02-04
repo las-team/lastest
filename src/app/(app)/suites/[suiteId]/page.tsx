@@ -6,6 +6,7 @@ import {
   getFunctionalAreasByRepo,
   getSelectedRepository,
 } from '@/lib/db/queries';
+import { getSetupScripts, getAvailableSetupTests } from '@/server/actions/setup-scripts';
 import type { FunctionalArea } from '@/lib/db/schema';
 
 interface Props {
@@ -33,9 +34,11 @@ export default async function SuiteDetailPage({ params }: Props) {
   const selectedRepo = await getSelectedRepository();
   const repositoryId = suite.repositoryId || selectedRepo?.id;
 
-  const [testsRaw, areas] = await Promise.all([
+  const [testsRaw, areas, setupScripts, availableSetupTests] = await Promise.all([
     repositoryId ? getTestsWithStatusByRepo(repositoryId) : [],
     repositoryId ? getFunctionalAreasByRepo(repositoryId) : [],
+    repositoryId ? getSetupScripts(repositoryId) : [],
+    repositoryId ? getAvailableSetupTests(repositoryId) : [],
   ]);
 
   // Normalize the tests to match expected interface
@@ -51,7 +54,13 @@ export default async function SuiteDetailPage({ params }: Props) {
 
   return (
     <div className="flex flex-col h-full">
-      <SuiteDetailClient suite={suite} availableTests={tests} areas={areas} />
+      <SuiteDetailClient
+        suite={suite}
+        availableTests={tests}
+        areas={areas}
+        setupScripts={setupScripts}
+        availableSetupTests={availableSetupTests}
+      />
     </div>
   );
 }

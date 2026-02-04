@@ -20,10 +20,8 @@ import Link from 'next/link';
 import { updateArea, getArea } from '@/server/actions/areas';
 import { getTest, updateTest } from '@/server/actions/tests';
 import { getSuite, updateSuite } from '@/server/actions/suites';
-import { listPlannedScreenshotsForTest } from '@/server/actions/planned-screenshots';
-import { PlannedScreenshotsPanel } from '@/components/planned/planned-screenshots-panel';
 import type { TreeSelection, SuiteItem } from './area-tree';
-import type { FunctionalArea, Test, Suite, PlannedScreenshot } from '@/lib/db/schema';
+import type { FunctionalArea, Test, Suite } from '@/lib/db/schema';
 import type { FunctionalAreaWithChildren } from '@/lib/db/queries';
 
 interface AreaDetailSectionProps {
@@ -40,7 +38,6 @@ export function AreaDetailSection({ selection, areas, suites, repositoryId, onUp
   const [areaData, setAreaData] = useState<FunctionalArea | null>(null);
   const [testData, setTestData] = useState<Test | null>(null);
   const [suiteData, setSuiteData] = useState<Suite | null>(null);
-  const [plannedScreenshots, setPlannedScreenshots] = useState<PlannedScreenshot[]>([]);
 
   // Form states
   const [name, setName] = useState('');
@@ -63,17 +60,11 @@ export function AreaDetailSection({ selection, areas, suites, repositoryId, onUp
     return result;
   };
 
-  const loadPlannedScreenshots = async (testId: string) => {
-    const screenshots = await listPlannedScreenshotsForTest(testId);
-    setPlannedScreenshots(screenshots || []);
-  };
-
   useEffect(() => {
     if (!selection) {
       setAreaData(null);
       setTestData(null);
       setSuiteData(null);
-      setPlannedScreenshots([]);
       setIsEditing(false);
       return;
     }
@@ -84,7 +75,6 @@ export function AreaDetailSection({ selection, areas, suites, repositoryId, onUp
         setAreaData(area || null);
         setTestData(null);
         setSuiteData(null);
-        setPlannedScreenshots([]);
         if (area) {
           setName(area.name);
           setDescription(area.description || '');
@@ -98,14 +88,12 @@ export function AreaDetailSection({ selection, areas, suites, repositoryId, onUp
         if (test) {
           setName(test.name);
           setTargetUrl(test.targetUrl || '');
-          await loadPlannedScreenshots(test.id);
         }
       } else if (selection.type === 'suite') {
         const suite = await getSuite(selection.id);
         setSuiteData(suite || null);
         setAreaData(null);
         setTestData(null);
-        setPlannedScreenshots([]);
         if (suite) {
           setName(suite.name);
           setDescription(suite.description || '');
@@ -350,18 +338,6 @@ export function AreaDetailSection({ selection, areas, suites, repositoryId, onUp
                 Created: {new Date(testData.createdAt).toLocaleDateString()}
               </div>
             )}
-          </CardContent>
-        </Card>
-
-        {/* Planned Screenshots Panel */}
-        <Card>
-          <CardContent className="pt-6">
-            <PlannedScreenshotsPanel
-              repositoryId={repositoryId}
-              testId={testData.id}
-              plannedScreenshots={plannedScreenshots}
-              onUpdate={() => loadPlannedScreenshots(testData.id)}
-            />
           </CardContent>
         </Card>
       </div>
