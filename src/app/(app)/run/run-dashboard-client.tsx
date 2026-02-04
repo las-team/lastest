@@ -14,6 +14,7 @@ import {
   XCircle,
   Globe,
   Monitor,
+  HelpCircle,
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { createAndRunBuild } from '@/server/actions/builds';
@@ -159,6 +160,10 @@ export function RunDashboardClient({ tests, runs, builds, repositoryId, activeBr
                 <div className="flex items-center gap-1">
                   <FileCode className="h-4 w-4" />
                   {tests.length} test{tests.length !== 1 ? 's' : ''}
+                </div>
+                <div className="flex items-center gap-1 text-xs text-muted-foreground/70">
+                  <HelpCircle className="h-3 w-3" />
+                  <span>Tests get faster over time as selectors are optimized</span>
                 </div>
               </div>
             </CardContent>

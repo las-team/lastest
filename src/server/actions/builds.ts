@@ -475,7 +475,7 @@ async function processVisualDiff(
     return { hasChanges: false, diffId: diff.id, classification: 'unchanged' };
   }
 
-  // No baseline - this is a new test, auto-approve as initial
+  // No baseline - this is a new test, requires manual review
   if (!baseline) {
     const diff = await queries.createVisualDiff({
       buildId,
@@ -483,24 +483,15 @@ async function processVisualDiff(
       testId,
       stepLabel: stepLabel || null,
       currentImagePath: currentScreenshotPath,
-      status: 'auto_approved',
-      classification: 'unchanged',
+      status: 'pending',
+      classification: 'changed',
       pixelDifference: 0,
       percentageDifference: '0',
-      metadata: { changedRegions: [] },
+      metadata: { changedRegions: [], isNewTest: true },
     });
 
-    // Create initial baseline
-    await queries.createBaseline({
-      testId,
-      stepLabel: stepLabel || null,
-      imagePath: currentScreenshotPath,
-      imageHash: currentHash,
-      branch,
-      approvedFromDiffId: diff.id,
-    });
-
-    return { hasChanges: false, diffId: diff.id, classification: 'unchanged' };
+    // Baseline will be created when the diff is approved
+    return { hasChanges: true, diffId: diff.id, classification: 'changed' };
   }
 
   // Generate diff against baseline

@@ -15,23 +15,15 @@ check the recorder and the runner so that they are compatible and identify the r
 OCR
 GitHub PR Comments - CLI runner
 Snapshot Stabilization Engine
-## features
+VS Code extension
 Github actions integration
 Publish lastest runner to npx npm
-User email sending with resend
-VS Code extension
-npm/CLI one-liner install
-Compare to figma designs/uploaded photos
-
-GitLab integration (P2)
-
 Smart test selection       
 
-  - Analyzes Git history to identify which components changed          
-  - Only runs visual tests on affected stories (skips unchanged)       
-  - Claims up to 80% reduction in snapshot usage/billing               
-  - Caveats: package.json changes trigger full runs; barrel file       
-  imports cause cascade re-testing 
+## features
+Compare to figma designs/uploaded photos
+Docker
+GitLab integration (P2)
 
 Steady
   - Uses burst capture (multiple frames) to detect instability         
@@ -43,9 +35,8 @@ UI & UX
     make sure every page has a clear primary action if there are more than one. If you cant decide ask me a question about it
 
 Fix compare and branch selection
-Electron app ~/.claude/plans/rippling-roaming-snail.md
+Electron app ~/.claude/plans/rippling-roaming-snail.md replan
 ## ideas
-Tooltip: Did you know tests are getting faster as selectors are optimized to save runtime?
 Build/change approval
     Test version or result on the build screen
 Imported document -> US & AC -> tests - US checklist overview
