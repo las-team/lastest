@@ -1,14 +1,21 @@
-# @lastest2/runner
+# lastest2-runner
 
-Remote test execution runner for Lastest2 visual regression testing platform.
+Remote test execution runner for [Lastest2](https://github.com/dexilion-team/lastest2) visual regression testing platform.
 
 ## Installation
 
 ```bash
-npm install -g @lastest2/runner
-# or
-pnpm add -g @lastest2/runner
+# Global installation
+npm install -g lastest2-runner
+
+# Or run directly with npx
+npx lastest2-runner --help
 ```
+
+## Requirements
+
+- Node.js 18+
+- Playwright Chromium browser (auto-installed on package install)
 
 ## Usage
 
@@ -49,6 +56,8 @@ lastest2-runner log -f           # Follow log output (like tail -f)
 lastest2-runner run -t <token> -s <server-url>
 ```
 
+Useful for debugging or running in containers.
+
 ## Configuration
 
 Runner stores its files in `~/.lastest2/`:
@@ -74,3 +83,16 @@ lastest2-runner log -f
 # Stop when done
 lastest2-runner stop
 ```
+
+## CI/CD Integration
+
+For GitHub Actions or other CI environments, run in foreground mode:
+
+```yaml
+- name: Start Lastest2 Runner
+  run: npx lastest2-runner run -t ${{ secrets.LASTEST2_TOKEN }} -s ${{ vars.LASTEST2_SERVER }}
+```
+
+## License
+
+MIT

@@ -1,7 +1,7 @@
 {
-  "name": "@lastest2/runner",
+  "name": "lastest2-runner",
   "version": "0.1.0",
-  "description": "Remote test execution runner for Lastest2",
+  "description": "Remote test execution runner for Lastest2 visual regression testing platform",
   "type": "module",
   "bin": {
     "lastest2-runner": "./bin/lastest2-runner.js"
@@ -15,7 +15,9 @@
   "scripts": {
     "build": "tsup src/index.ts --format esm --dts",
     "dev": "tsx src/index.ts",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "prepublishOnly": "pnpm build",
+    "postinstall": "npx playwright install chromium"
   },
   "dependencies": {
     "playwright": "^1.48.0",
@@ -36,8 +38,23 @@
     "visual-regression",
     "playwright",
     "testing",
-    "runner"
+    "runner",
+    "lastest2",
+    "screenshot",
+    "ci-cd"
   ],
-  "author": "",
-  "license": "MIT"
+  "author": "Dexilion Team",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/dexilion-team/lastest2.git",
+    "directory": "packages/runner"
+  },
+  "homepage": "https://github.com/dexilion-team/lastest2#readme",
+  "bugs": {
+    "url": "https://github.com/dexilion-team/lastest2/issues"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
 }

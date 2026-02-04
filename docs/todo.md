@@ -23,8 +23,7 @@ VS Code extension
 npm/CLI one-liner install
 Compare to figma designs/uploaded photos
 
-├── Days 1-2: Diff comments (P2)
-└── Days 3-5: GitLab integration (P2)
+GitLab integration (P2)
 
 Smart test selection       
 
