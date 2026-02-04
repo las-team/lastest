@@ -15,7 +15,7 @@ import {
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
-import { Play, Trash2, Copy, Edit2, Clock, CheckCircle, XCircle, X, Save, Wrench, Wand2, Loader2, History, RotateCcw, ChevronDown, ChevronRight, Monitor, Video, AlertTriangle, Image, Zap } from 'lucide-react';
+import { Play, Trash2, Copy, Edit2, Clock, CheckCircle, XCircle, X, Save, Wrench, Wand2, Loader2, History, RotateCcw, ChevronDown, ChevronRight, Monitor, Video, AlertTriangle, Image } from 'lucide-react';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -29,9 +29,7 @@ import { toast } from 'sonner';
 import { useNotifyJobStarted } from '@/components/queue/job-polling-context';
 import { ExecutionTargetSelector } from '@/components/execution/execution-target-selector';
 import { StepScreenshotMatcher } from '@/components/planned/step-screenshot-matcher';
-import { SetupSelector, type SetupSelection } from '@/components/setup/setup-selector';
-import { assignSetupTestToTest, assignSetupScriptToTest, clearTestSetup } from '@/server/actions/setup-scripts';
-import type { Test, TestVersion, VisualDiff, PlannedScreenshot, SetupScript } from '@/lib/db/schema';
+import type { Test, TestVersion, VisualDiff, PlannedScreenshot } from '@/lib/db/schema';
 import type { ScreenshotGroup } from '@/server/actions/tests';
 
 interface StepDiff {
@@ -63,11 +61,9 @@ interface TestDetailClientProps {
   repositoryId?: string | null;
   screenshotGroups?: ScreenshotGroup[];
   plannedScreenshots?: PlannedScreenshot[];
-  setupScripts?: SetupScript[];
-  availableSetupTests?: Test[];
 }
 
-export function TestDetailClient({ test, results, repositoryId, screenshotGroups = [], plannedScreenshots = [], setupScripts = [], availableSetupTests = [] }: TestDetailClientProps) {
+export function TestDetailClient({ test, results, repositoryId, screenshotGroups = [], plannedScreenshots = [] }: TestDetailClientProps) {
   const router = useRouter();
   const notifyJobStarted = useNotifyJobStarted();
   const [isDeleting, setIsDeleting] = useState(false);
@@ -106,47 +102,6 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
   const [expandedRuns, setExpandedRuns] = useState<Set<string>>(new Set());
   const [runDiffs, setRunDiffs] = useState<Map<string, StepDiff[]>>(new Map());
   const [loadingDiffs, setLoadingDiffs] = useState<Set<string>>(new Set());
-
-  // Setup state
-  const [isSavingSetup, setIsSavingSetup] = useState(false);
-  const getInitialSetupSelection = (): SetupSelection => {
-    if (test.setupTestId) {
-      const setupTest = availableSetupTests.find(t => t.id === test.setupTestId);
-      if (setupTest) {
-        return { type: 'test', id: setupTest.id, name: setupTest.name };
-      }
-    }
-    if (test.setupScriptId) {
-      const script = setupScripts.find(s => s.id === test.setupScriptId);
-      if (script) {
-        return { type: 'script', id: script.id, name: script.name };
-      }
-    }
-    return { type: 'none' };
-  };
-  const [setupSelection, setSetupSelection] = useState<SetupSelection>(getInitialSetupSelection);
-
-  const handleSetupChange = async (selection: SetupSelection) => {
-    setSetupSelection(selection);
-    setIsSavingSetup(true);
-    try {
-      if (selection.type === 'none') {
-        await clearTestSetup(test.id);
-      } else if (selection.type === 'test') {
-        await assignSetupTestToTest(test.id, selection.id);
-      } else {
-        await assignSetupScriptToTest(test.id, selection.id);
-      }
-      toast.success('Setup updated');
-      router.refresh();
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'Failed to update setup');
-      // Revert on error
-      setSetupSelection(getInitialSetupSelection());
-    } finally {
-      setIsSavingSetup(false);
-    }
-  };
 
   const latestResult = results[0];
 
@@ -500,31 +455,6 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
             </div>
           </CardContent>
         </Card>
-
-        {/* Setup Configuration */}
-        {repositoryId && (setupScripts.length > 0 || availableSetupTests.length > 0) && (
-          <Card>
-            <CardHeader className="pb-3">
-              <CardTitle className="text-sm flex items-center gap-2">
-                <Zap className="h-4 w-4" />
-                Setup Configuration
-              </CardTitle>
-              <CardDescription>
-                Run a setup script or test before this test to prepare the environment.
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <SetupSelector
-                value={setupSelection}
-                onChange={handleSetupChange}
-                availableTests={availableSetupTests}
-                availableScripts={setupScripts}
-                excludeTestId={test.id}
-                disabled={isSavingSetup}
-              />
-            </CardContent>
-          </Card>
-        )}
 
         {/* Tabs for Code, Screenshots, History */}
         <Tabs defaultValue="code">

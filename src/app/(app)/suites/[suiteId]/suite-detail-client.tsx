@@ -2,18 +2,15 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
-import { Play, Pencil, Trash2, Loader2, Zap } from 'lucide-react';
+import { Play, Pencil, Trash2, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Progress } from '@/components/ui/progress';
 import { SuiteBuilder } from '@/components/suites/suite-builder';
 import { CreateSuiteDialog } from '@/components/suites/create-suite-dialog';
 import { ExecutionTargetSelector } from '@/components/execution/execution-target-selector';
-import { SetupSelector, type SetupSelection } from '@/components/setup/setup-selector';
 import { deleteSuite, runSuite, getSuiteRunProgress } from '@/server/actions/suites';
-import { assignSetupTestToSuite, assignSetupScriptToSuite, clearSuiteSetup } from '@/server/actions/setup-scripts';
 import { useNotifyJobStarted } from '@/components/queue/job-polling-context';
-import { toast } from 'sonner';
-import type { Suite, FunctionalArea, SetupScript, Test } from '@/lib/db/schema';
+import type { Suite, FunctionalArea } from '@/lib/db/schema';
 
 interface SuiteTest {
   id: string;
@@ -44,8 +41,6 @@ interface SuiteDetailClientProps {
   suite: SuiteWithTests;
   availableTests: TestWithStatus[];
   areas: FunctionalArea[];
-  setupScripts?: SetupScript[];
-  availableSetupTests?: Test[];
 }
 
 interface TestResult {
@@ -61,7 +56,7 @@ interface RunProgress {
   results: TestResult[];
 }
 
-export function SuiteDetailClient({ suite, availableTests, areas, setupScripts = [], availableSetupTests = [] }: SuiteDetailClientProps) {
+export function SuiteDetailClient({ suite, availableTests, areas }: SuiteDetailClientProps) {
   const router = useRouter();
   const notifyJobStarted = useNotifyJobStarted();
   const [isEditOpen, setIsEditOpen] = useState(false);
@@ -69,47 +64,6 @@ export function SuiteDetailClient({ suite, availableTests, areas, setupScripts =
   const [runId, setRunId] = useState<string | null>(null);
   const [progress, setProgress] = useState<RunProgress | null>(null);
   const [executionTarget, setExecutionTarget] = useState<string>('local');
-
-  // Setup state
-  const [isSavingSetup, setIsSavingSetup] = useState(false);
-  const getInitialSetupSelection = (): SetupSelection => {
-    if (suite.setupTestId) {
-      const setupTest = availableSetupTests.find(t => t.id === suite.setupTestId);
-      if (setupTest) {
-        return { type: 'test', id: setupTest.id, name: setupTest.name };
-      }
-    }
-    if (suite.setupScriptId) {
-      const script = setupScripts.find(s => s.id === suite.setupScriptId);
-      if (script) {
-        return { type: 'script', id: script.id, name: script.name };
-      }
-    }
-    return { type: 'none' };
-  };
-  const [setupSelection, setSetupSelection] = useState<SetupSelection>(getInitialSetupSelection);
-
-  const handleSetupChange = async (selection: SetupSelection) => {
-    setSetupSelection(selection);
-    setIsSavingSetup(true);
-    try {
-      if (selection.type === 'none') {
-        await clearSuiteSetup(suite.id);
-      } else if (selection.type === 'test') {
-        await assignSetupTestToSuite(suite.id, selection.id);
-      } else {
-        await assignSetupScriptToSuite(suite.id, selection.id);
-      }
-      toast.success('Setup updated');
-      router.refresh();
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'Failed to update setup');
-      // Revert on error
-      setSetupSelection(getInitialSetupSelection());
-    } finally {
-      setIsSavingSetup(false);
-    }
-  };
 
   const pollProgress = useCallback(async (id: string) => {
     const data = await getSuiteRunProgress(id);
@@ -224,26 +178,6 @@ export function SuiteDetailClient({ suite, availableTests, areas, setupScripts =
               </div>
             </div>
             <Progress value={progressPct} className="h-2" />
-          </div>
-        )}
-
-        {/* Setup Configuration */}
-        {(setupScripts.length > 0 || availableSetupTests.length > 0) && (
-          <div className="mt-4 p-4 border rounded-lg bg-background">
-            <div className="flex items-center gap-2 mb-2">
-              <Zap className="h-4 w-4" />
-              <span className="text-sm font-medium">Setup Configuration</span>
-            </div>
-            <SetupSelector
-              value={setupSelection}
-              onChange={handleSetupChange}
-              availableTests={availableSetupTests}
-              availableScripts={setupScripts}
-              disabled={isSavingSetup || isRunning}
-            />
-            <p className="text-xs text-muted-foreground mt-2">
-              Runs before the suite to prepare the environment.
-            </p>
           </div>
         )}
       </div>

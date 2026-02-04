@@ -1,6 +1,5 @@
 import { getTest, getTestResultsByTest, getSelectedRepository, getPlannedScreenshotsByTest } from '@/lib/db/queries';
 import { getTestScreenshotsGrouped } from '@/server/actions/tests';
-import { getSetupScripts, getAvailableSetupTests } from '@/server/actions/setup-scripts';
 import { TestDetailClient } from './test-detail-client';
 import { notFound } from 'next/navigation';
 
@@ -22,14 +21,6 @@ export default async function TestDetailPage({ params }: TestDetailPageProps) {
   const screenshotGroups = await getTestScreenshotsGrouped(id, repoId);
   const plannedScreenshots = await getPlannedScreenshotsByTest(id);
 
-  // Fetch setup data
-  const [setupScripts, availableSetupTests] = repoId
-    ? await Promise.all([
-        getSetupScripts(repoId),
-        getAvailableSetupTests(repoId, id),
-      ])
-    : [[], []];
-
   return (
     <div className="flex flex-col h-full">
       <TestDetailClient
@@ -38,8 +29,6 @@ export default async function TestDetailPage({ params }: TestDetailPageProps) {
         repositoryId={repoId}
         screenshotGroups={screenshotGroups}
         plannedScreenshots={plannedScreenshots}
-        setupScripts={setupScripts}
-        availableSetupTests={availableSetupTests}
       />
     </div>
   );
