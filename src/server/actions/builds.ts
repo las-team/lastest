@@ -14,6 +14,7 @@ import { generateDiff } from '@/lib/diff/generator';
 import { hashImage } from '@/lib/diff/hasher';
 import { sendSlackNotification } from '@/lib/integrations/slack';
 import { sendDiscordNotification } from '@/lib/integrations/discord';
+import { sendCustomWebhookNotification } from '@/lib/integrations/custom-webhook';
 import { postPRComment } from '@/lib/integrations/github-pr';
 import type { Test, TriggerType, BuildStatus, VisualDiffWithTestStatus, DiffClassification, DiffStatus } from '@/lib/db/schema';
 import path from 'path';
@@ -824,6 +825,43 @@ async function sendBuildNotifications(data: {
       console.log('[Notifications] Discord result:', result);
     } catch (error) {
       console.error('Failed to send Discord notification:', error);
+    }
+  }
+
+  // Send custom webhook notification
+  if (notificationSettings.customWebhookEnabled && notificationSettings.customWebhookUrl) {
+    try {
+      let headers: Record<string, string> | undefined;
+      if (notificationSettings.customWebhookHeaders) {
+        try {
+          headers = JSON.parse(notificationSettings.customWebhookHeaders);
+        } catch {
+          console.error('Failed to parse custom webhook headers');
+        }
+      }
+
+      const result = await sendCustomWebhookNotification(
+        {
+          url: notificationSettings.customWebhookUrl,
+          method: (notificationSettings.customWebhookMethod as 'POST' | 'PUT') || 'POST',
+          headers,
+        },
+        {
+          buildId: data.buildId,
+          status: data.status,
+          totalTests: data.totalTests,
+          passedCount: data.passedCount,
+          changesDetected: data.changesDetected,
+          flakyCount: data.flakyCount,
+          failedCount: data.failedCount,
+          gitBranch: data.gitBranch,
+          gitCommit: testRun?.gitCommit || 'unknown',
+          buildUrl,
+        }
+      );
+      console.log('[Notifications] Custom webhook result:', result);
+    } catch (error) {
+      console.error('Failed to send custom webhook notification:', error);
     }
   }
 

@@ -2,6 +2,7 @@ import * as queries from '@/lib/db/queries';
 import { EnvPageClient } from './env-page-client';
 import { getSetupScripts, getAvailableSetupTests } from '@/server/actions/setup-scripts';
 import { getSetupConfigs } from '@/server/actions/setup-configs';
+import { getDefaultSetupSteps } from '@/server/actions/setup-steps';
 
 export default async function EnvPage() {
   const selectedRepo = await queries.getSelectedRepository();
@@ -19,10 +20,11 @@ export default async function EnvPage() {
     );
   }
 
-  const [setupScripts, setupConfigs, availableTests] = await Promise.all([
+  const [setupScripts, setupConfigs, availableTests, defaultSetupSteps] = await Promise.all([
     getSetupScripts(selectedRepo.id),
     getSetupConfigs(selectedRepo.id),
     getAvailableSetupTests(selectedRepo.id),
+    getDefaultSetupSteps(selectedRepo.id),
   ]);
 
   return (
@@ -31,6 +33,7 @@ export default async function EnvPage() {
       setupScripts={setupScripts}
       setupConfigs={setupConfigs}
       availableTests={availableTests}
+      defaultSetupSteps={defaultSetupSteps}
     />
   );
 }

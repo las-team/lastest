@@ -36,6 +36,7 @@ import {
   runners,
   setupScripts,
   setupConfigs,
+  defaultSetupSteps,
 } from './schema';
 import {
   DEFAULT_SELECTOR_PRIORITY,
@@ -81,6 +82,7 @@ import type {
   NewRunner,
   NewSetupScript,
   NewSetupConfig,
+  NewDefaultSetupStep,
   Team,
   User,
   Runner,
@@ -1850,6 +1852,10 @@ export async function getNotificationSettings(repositoryId?: string | null) {
     discordWebhookUrl: null,
     discordEnabled: DEFAULT_NOTIFICATION_SETTINGS.discordEnabled,
     githubPrCommentsEnabled: DEFAULT_NOTIFICATION_SETTINGS.githubPrCommentsEnabled,
+    customWebhookEnabled: DEFAULT_NOTIFICATION_SETTINGS.customWebhookEnabled,
+    customWebhookUrl: null,
+    customWebhookMethod: DEFAULT_NOTIFICATION_SETTINGS.customWebhookMethod,
+    customWebhookHeaders: null,
     createdAt: null,
     updatedAt: null,
   };
@@ -2673,4 +2679,77 @@ export async function getSuitesUsingSetupScript(setupScriptId: string) {
     .from(suites)
     .where(eq(suites.setupScriptId, setupScriptId))
     .all();
+}
+
+// ============================================
+// Default Setup Steps (multi-step setup)
+// ============================================
+
+export async function getDefaultSetupSteps(repositoryId: string) {
+  return db
+    .select({
+      id: defaultSetupSteps.id,
+      repositoryId: defaultSetupSteps.repositoryId,
+      stepType: defaultSetupSteps.stepType,
+      testId: defaultSetupSteps.testId,
+      scriptId: defaultSetupSteps.scriptId,
+      orderIndex: defaultSetupSteps.orderIndex,
+      createdAt: defaultSetupSteps.createdAt,
+      // Join test name
+      testName: tests.name,
+      // Join script name
+      scriptName: setupScripts.name,
+    })
+    .from(defaultSetupSteps)
+    .leftJoin(tests, eq(defaultSetupSteps.testId, tests.id))
+    .leftJoin(setupScripts, eq(defaultSetupSteps.scriptId, setupScripts.id))
+    .where(eq(defaultSetupSteps.repositoryId, repositoryId))
+    .orderBy(defaultSetupSteps.orderIndex)
+    .all();
+}
+
+export async function createDefaultSetupStep(data: Omit<NewDefaultSetupStep, 'id' | 'createdAt'>) {
+  const id = uuid();
+  await db.insert(defaultSetupSteps).values({
+    ...data,
+    id,
+    createdAt: new Date(),
+  });
+  return { id, ...data, createdAt: new Date() };
+}
+
+export async function deleteDefaultSetupStep(id: string) {
+  await db.delete(defaultSetupSteps).where(eq(defaultSetupSteps.id, id));
+}
+
+export async function deleteAllDefaultSetupSteps(repositoryId: string) {
+  await db.delete(defaultSetupSteps).where(eq(defaultSetupSteps.repositoryId, repositoryId));
+}
+
+export async function updateDefaultSetupStepOrder(id: string, orderIndex: number) {
+  await db.update(defaultSetupSteps).set({ orderIndex }).where(eq(defaultSetupSteps.id, id));
+}
+
+export async function replaceDefaultSetupSteps(
+  repositoryId: string,
+  steps: Array<{ stepType: 'test' | 'script'; testId?: string | null; scriptId?: string | null }>
+) {
+  // Delete all existing steps
+  await deleteAllDefaultSetupSteps(repositoryId);
+
+  // Insert new steps with order
+  const results = [];
+  for (let i = 0; i < steps.length; i++) {
+    const step = steps[i];
+    const result = await createDefaultSetupStep({
+      repositoryId,
+      stepType: step.stepType,
+      testId: step.testId ?? null,
+      scriptId: step.scriptId ?? null,
+      orderIndex: i,
+    });
+    results.push(result);
+  }
+
+  return results;
 }

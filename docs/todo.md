@@ -15,7 +15,6 @@ Env setup UI - tests page, suit page, dropdown control
   Dropdown should show defaults, override to work enable/disable
 ## test
 OCR
-GitHub PR Comments - CLI runner
 Snapshot Stabilization Engine
 VS Code extension
 Github actions integration

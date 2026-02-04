@@ -585,7 +585,7 @@ export type NewSuite = typeof suites.$inferInsert;
 export type SuiteTest = typeof suiteTests.$inferSelect;
 export type NewSuiteTest = typeof suiteTests.$inferInsert;
 
-// Notification settings for Slack, Discord, and GitHub PR comments
+// Notification settings for Slack, Discord, GitHub PR comments, and Custom Webhook
 export const notificationSettings = sqliteTable('notification_settings', {
   id: text('id').primaryKey(),
   repositoryId: text('repository_id').references(() => repositories.id),
@@ -594,6 +594,10 @@ export const notificationSettings = sqliteTable('notification_settings', {
   discordWebhookUrl: text('discord_webhook_url'),
   discordEnabled: integer('discord_enabled', { mode: 'boolean' }).default(false),
   githubPrCommentsEnabled: integer('github_pr_comments_enabled', { mode: 'boolean' }).default(false),
+  customWebhookEnabled: integer('custom_webhook_enabled', { mode: 'boolean' }).default(false),
+  customWebhookUrl: text('custom_webhook_url'),
+  customWebhookMethod: text('custom_webhook_method').default('POST'),
+  customWebhookHeaders: text('custom_webhook_headers'), // JSON: {"Authorization": "Bearer xxx"}
   createdAt: integer('created_at', { mode: 'timestamp' }),
   updatedAt: integer('updated_at', { mode: 'timestamp' }),
 });
@@ -605,6 +609,8 @@ export const DEFAULT_NOTIFICATION_SETTINGS = {
   slackEnabled: false,
   discordEnabled: false,
   githubPrCommentsEnabled: false,
+  customWebhookEnabled: false,
+  customWebhookMethod: 'POST' as const,
 };
 
 // Selector statistics for optimizing fallback strategy
@@ -801,3 +807,19 @@ export type NewSetupConfig = typeof setupConfigs.$inferInsert;
 
 // Setup status for builds
 export type SetupStatus = 'pending' | 'running' | 'completed' | 'failed' | 'skipped';
+
+// Default Setup Steps - Ordered multi-step setup for repositories
+export type SetupStepType = 'test' | 'script';
+
+export const defaultSetupSteps = sqliteTable('default_setup_steps', {
+  id: text('id').primaryKey(),
+  repositoryId: text('repository_id').references(() => repositories.id, { onDelete: 'cascade' }).notNull(),
+  stepType: text('step_type').notNull(), // 'test' | 'script'
+  testId: text('test_id').references(() => tests.id, { onDelete: 'cascade' }),
+  scriptId: text('script_id').references(() => setupScripts.id, { onDelete: 'cascade' }),
+  orderIndex: integer('order_index').notNull().default(0),
+  createdAt: integer('created_at', { mode: 'timestamp' }),
+});
+
+export type DefaultSetupStep = typeof defaultSetupSteps.$inferSelect;
+export type NewDefaultSetupStep = typeof defaultSetupSteps.$inferInsert;
