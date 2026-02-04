@@ -1,0 +1,39 @@
+# =============================================================================
+# Lastest2 - Docker Compose for Development
+# =============================================================================
+#
+# Usage:
+#   docker-compose -f docker-compose.dev.yml up
+#
+# With rebuild:
+#   docker-compose -f docker-compose.dev.yml up --build
+#
+# =============================================================================
+
+services:
+  lastest2-dev:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    container_name: lastest2-dev
+    ports:
+      - "3000:3000"
+    volumes:
+      # Mount source for hot reload
+      - .:/app
+      # Preserve node_modules from container
+      - /app/node_modules
+      - /app/.next
+      # Persistent data
+      - lastest2-dev-data:/app/data
+    environment:
+      - NODE_ENV=development
+      - DATABASE_PATH=/app/data/lastest2.db
+      - BETTER_AUTH_SECRET=${BETTER_AUTH_SECRET:-dev-secret-change-in-production}
+      - GITHUB_CLIENT_ID=${GITHUB_CLIENT_ID:-}
+      - GITHUB_CLIENT_SECRET=${GITHUB_CLIENT_SECRET:-}
+    command: pnpm dev
+
+volumes:
+  lastest2-dev-data:
+    driver: local

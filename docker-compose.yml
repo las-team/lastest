@@ -1,0 +1,49 @@
+# =============================================================================
+# Lastest2 - Docker Compose for Home Server Deployment
+# =============================================================================
+#
+# Quick start:
+#   docker-compose up -d
+#
+# View logs:
+#   docker-compose logs -f
+#
+# Stop:
+#   docker-compose down
+#
+# =============================================================================
+
+services:
+  lastest2:
+    image: lastest2:latest
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: lastest2
+    ports:
+      - "3000:3000"
+    volumes:
+      - lastest2-data:/app/data
+      - lastest2-screenshots:/app/public/screenshots
+      - lastest2-baselines:/app/public/baselines
+    environment:
+      - NODE_ENV=production
+      - DATABASE_PATH=/app/data/lastest2.db
+      - BETTER_AUTH_SECRET=${BETTER_AUTH_SECRET:-}
+      - GITHUB_CLIENT_ID=${GITHUB_CLIENT_ID:-}
+      - GITHUB_CLIENT_SECRET=${GITHUB_CLIENT_SECRET:-}
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:3000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+volumes:
+  lastest2-data:
+    driver: local
+  lastest2-screenshots:
+    driver: local
+  lastest2-baselines:
+    driver: local

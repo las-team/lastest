@@ -11,6 +11,8 @@ Excalidraw tests: ~/.claude/plans/recursive-wondering-dongarra.md
 ## reuse
 check the recorder and the runner so that they are compatible and identify the root cause of the issue
 ## in progress
+Docker
+Gitlab
 ## test
 OCR
 GitHub PR Comments - CLI runner
@@ -21,7 +23,7 @@ Publish lastest runner to npx npm
 
 ## features
 Compare to figma designs/uploaded photos
-Docker
+
 GitLab integration (P2)
 
 Steady
