@@ -282,10 +282,10 @@ async function executeSetupCode(
     const appStateFn = createAppState(page);
     const locateWithFallbackFn = createLocateWithFallback(page);
 
-    // Create a no-op stepLogger
+    // Create a stepLogger that logs to console for debugging
     const stepLogger = {
       log: (msg: string) => {
-        // No-op for setup - we don't need to track steps
+        console.log(`[Setup] ${msg}`);
       },
     };
 
