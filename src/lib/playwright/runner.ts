@@ -722,7 +722,18 @@ export class PlaywrightRunner extends EventEmitter {
       await setupFreezeScripts(page, stabilization);
 
       // Setup third-party blocking if enabled
-      const targetUrl = test.targetUrl || this.environmentConfig?.baseUrl || 'http://localhost:3000';
+      // Get the base URL from environment config (always a full URL like http://localhost:3000)
+      const envBaseUrl = this.environmentConfig?.baseUrl || 'http://localhost:3000';
+      // Resolve target URL - if test.targetUrl is relative, combine with envBaseUrl
+      let targetUrl = envBaseUrl;
+      if (test.targetUrl) {
+        if (test.targetUrl.startsWith('http://') || test.targetUrl.startsWith('https://')) {
+          targetUrl = test.targetUrl;
+        } else {
+          // Relative URL - combine with envBaseUrl
+          targetUrl = `${envBaseUrl.replace(/\/$/, '')}${test.targetUrl.startsWith('/') ? '' : '/'}${test.targetUrl}`;
+        }
+      }
       await setupThirdPartyBlocking(page, targetUrl, stabilization);
 
       // Freeze CSS animations/transitions if enabled
@@ -770,7 +781,7 @@ export class PlaywrightRunner extends EventEmitter {
       // Run test-level setup if configured
       const orchestrator = getSetupOrchestrator();
       const baseContext: SetupContext = {
-        baseUrl: targetUrl,
+        baseUrl: envBaseUrl.replace(/\/$/, ''), // Strip trailing slash to avoid double slashes
         page,
         variables: this.setupContext?.variables || {},
         repositoryId: this.repositoryId,

@@ -180,6 +180,12 @@ export class SetupOrchestrator {
       }
     }
 
+    // Prevent self-referential setup (a test running itself as setup)
+    if (setupTestId === test.id) {
+      // Skip setup - test cannot be its own setup
+      return { success: true, duration: 0, variables: {} };
+    }
+
     const result = await this.resolveAndRunSetup(
       setupTestId,
       setupScriptId,
@@ -235,14 +241,22 @@ export function getSetupOrchestrator(): SetupOrchestrator {
  * Helper to check if a test needs setup
  */
 export async function testNeedsSetup(test: Test): Promise<boolean> {
-  if (test.setupTestId || test.setupScriptId) {
+  // Check test's own setup (but not if it references itself)
+  if (test.setupTestId && test.setupTestId !== test.id) {
+    return true;
+  }
+  if (test.setupScriptId) {
     return true;
   }
 
   // Check repository defaults
   if (test.repositoryId) {
     const repo = await queries.getRepository(test.repositoryId);
-    if (repo?.defaultSetupTestId || repo?.defaultSetupScriptId) {
+    // Skip if repo default would make test run itself as setup
+    if (repo?.defaultSetupTestId && repo.defaultSetupTestId !== test.id) {
+      return true;
+    }
+    if (repo?.defaultSetupScriptId) {
       return true;
     }
   }

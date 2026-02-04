@@ -274,8 +274,8 @@ async function executeSetupCode(
   if (funcMatch) {
     let body = funcMatch[1];
 
-    // Create page proxy that skips screenshots when running as setup
-    const pageProxy = isTestAsSetup ? createNoScreenshotProxy(page) : page;
+    // Create page proxy that handles screenshots and relative URLs
+    const pageProxy = createSetupPageProxy(page, context.baseUrl);
 
     // Create helper functions that tests expect
     const expectFn = createExpect(5000);
@@ -345,7 +345,7 @@ async function executeSetupCode(
     line.trim().startsWith('await page.')
   );
 
-  const pageProxy = isTestAsSetup ? createNoScreenshotProxy(page) : page;
+  const pageProxy = createSetupPageProxy(page, context.baseUrl);
 
   for (const line of lines) {
     await executeLine(pageProxy, line.trim(), context.baseUrl);
@@ -355,14 +355,27 @@ async function executeSetupCode(
 }
 
 /**
- * Create a proxy that intercepts and skips screenshot calls
+ * Create a proxy that intercepts screenshot calls and handles relative URLs
  */
-function createNoScreenshotProxy(page: Page): Page {
+function createSetupPageProxy(page: Page, baseUrl: string): Page {
   return new Proxy(page, {
     get: (target, prop) => {
       if (prop === 'screenshot') {
         // Return a no-op function for screenshots
         return async () => Buffer.alloc(0);
+      }
+      if (prop === 'goto') {
+        // Intercept goto to handle relative URLs
+        return async (url: string, options?: any) => {
+          let resolvedUrl = url;
+          // Handle relative URLs
+          if (url.startsWith('/')) {
+            resolvedUrl = `${baseUrl.replace(/\/$/, '')}${url}`;
+          } else if (!url.startsWith('http://') && !url.startsWith('https://')) {
+            resolvedUrl = `${baseUrl.replace(/\/$/, '')}/${url}`;
+          }
+          return target.goto(resolvedUrl, options);
+        };
       }
       const value = (target as any)[prop];
       if (typeof value === 'function') {
