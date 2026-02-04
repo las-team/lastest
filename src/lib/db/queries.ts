@@ -34,6 +34,8 @@ import {
   emailVerificationTokens,
   userInvitations,
   runners,
+  setupScripts,
+  setupConfigs,
 } from './schema';
 import {
   DEFAULT_SELECTOR_PRIORITY,
@@ -77,6 +79,8 @@ import type {
   NewPasswordResetToken,
   NewUserInvitation,
   NewRunner,
+  NewSetupScript,
+  NewSetupConfig,
   Team,
   User,
   Runner,
@@ -88,6 +92,7 @@ import type {
   BackgroundJobStatus,
   TestChangeReason,
   UserRole,
+  SetupScriptType,
 } from './schema';
 
 export { DEFAULT_SELECTOR_PRIORITY, DEFAULT_DIFF_THRESHOLDS, DEFAULT_AI_SETTINGS, DEFAULT_RECORDING_ENGINES, DEFAULT_NOTIFICATION_SETTINGS };
@@ -367,6 +372,11 @@ export async function getBuildsByRepo(repositoryId: string, limit = 10) {
       elapsedMs: builds.elapsedMs,
       createdAt: builds.createdAt,
       completedAt: builds.completedAt,
+      buildSetupTestId: builds.buildSetupTestId,
+      buildSetupScriptId: builds.buildSetupScriptId,
+      setupStatus: builds.setupStatus,
+      setupError: builds.setupError,
+      setupDurationMs: builds.setupDurationMs,
       gitBranch: testRuns.gitBranch,
     })
     .from(builds)
@@ -2463,4 +2473,204 @@ export async function getRouteWithContext(routeId: string): Promise<RouteWithCon
     ...route,
     testSuggestions: suggestions.map(s => s.suggestion),
   };
+}
+
+// ============================================
+// Setup Scripts
+// ============================================
+
+export async function getSetupScripts(repositoryId: string) {
+  return db
+    .select()
+    .from(setupScripts)
+    .where(eq(setupScripts.repositoryId, repositoryId))
+    .orderBy(desc(setupScripts.createdAt))
+    .all();
+}
+
+export async function getSetupScript(id: string) {
+  return db.select().from(setupScripts).where(eq(setupScripts.id, id)).get();
+}
+
+export async function createSetupScript(data: Omit<NewSetupScript, 'id' | 'createdAt' | 'updatedAt'>) {
+  const id = uuid();
+  const now = new Date();
+  await db.insert(setupScripts).values({
+    ...data,
+    id,
+    createdAt: now,
+    updatedAt: now,
+  });
+  return { id, ...data, createdAt: now, updatedAt: now };
+}
+
+export async function updateSetupScript(id: string, data: Partial<NewSetupScript>) {
+  await db.update(setupScripts).set({ ...data, updatedAt: new Date() }).where(eq(setupScripts.id, id));
+}
+
+export async function deleteSetupScript(id: string) {
+  await db.delete(setupScripts).where(eq(setupScripts.id, id));
+}
+
+export async function duplicateSetupScript(id: string) {
+  const original = await getSetupScript(id);
+  if (!original) return null;
+
+  return createSetupScript({
+    repositoryId: original.repositoryId ?? undefined,
+    name: `${original.name} (Copy)`,
+    type: original.type as SetupScriptType,
+    code: original.code,
+    description: original.description ?? undefined,
+  });
+}
+
+// ============================================
+// Setup Configs (API seeding configuration)
+// ============================================
+
+export async function getSetupConfigs(repositoryId: string) {
+  return db
+    .select()
+    .from(setupConfigs)
+    .where(eq(setupConfigs.repositoryId, repositoryId))
+    .orderBy(desc(setupConfigs.createdAt))
+    .all();
+}
+
+export async function getSetupConfig(id: string) {
+  return db.select().from(setupConfigs).where(eq(setupConfigs.id, id)).get();
+}
+
+export async function createSetupConfig(data: Omit<NewSetupConfig, 'id' | 'createdAt' | 'updatedAt'>) {
+  const id = uuid();
+  const now = new Date();
+  await db.insert(setupConfigs).values({
+    ...data,
+    id,
+    createdAt: now,
+    updatedAt: now,
+  });
+  return { id, ...data, createdAt: now, updatedAt: now };
+}
+
+export async function updateSetupConfig(id: string, data: Partial<NewSetupConfig>) {
+  await db.update(setupConfigs).set({ ...data, updatedAt: new Date() }).where(eq(setupConfigs.id, id));
+}
+
+export async function deleteSetupConfig(id: string) {
+  await db.delete(setupConfigs).where(eq(setupConfigs.id, id));
+}
+
+// ============================================
+// Setup-related test/suite/build/repo queries
+// ============================================
+
+// Get test with its setup configuration resolved
+export async function getTestWithSetup(testId: string) {
+  const test = await getTest(testId);
+  if (!test) return null;
+
+  let setupTest = null;
+  let setupScript = null;
+
+  // Test's own setup takes precedence
+  if (test.setupTestId) {
+    setupTest = await getTest(test.setupTestId);
+  } else if (test.setupScriptId) {
+    setupScript = await getSetupScript(test.setupScriptId);
+  } else if (test.repositoryId) {
+    // Fall back to repository default
+    const repo = await getRepository(test.repositoryId);
+    if (repo?.defaultSetupTestId) {
+      setupTest = await getTest(repo.defaultSetupTestId);
+    } else if (repo?.defaultSetupScriptId) {
+      setupScript = await getSetupScript(repo.defaultSetupScriptId);
+    }
+  }
+
+  return { ...test, setupTest, setupScript };
+}
+
+// Get suite with its setup configuration
+export async function getSuiteWithSetup(suiteId: string) {
+  const suite = await getSuite(suiteId);
+  if (!suite) return null;
+
+  let setupTest = null;
+  let setupScript = null;
+
+  if (suite.setupTestId) {
+    setupTest = await getTest(suite.setupTestId);
+  } else if (suite.setupScriptId) {
+    setupScript = await getSetupScript(suite.setupScriptId);
+  }
+
+  return { ...suite, setupTest, setupScript };
+}
+
+// Update test setup configuration
+export async function updateTestSetup(testId: string, setupTestId: string | null, setupScriptId: string | null) {
+  await db.update(tests).set({
+    setupTestId,
+    setupScriptId,
+    updatedAt: new Date(),
+  }).where(eq(tests.id, testId));
+}
+
+// Update suite setup configuration
+export async function updateSuiteSetup(suiteId: string, setupTestId: string | null, setupScriptId: string | null) {
+  await db.update(suites).set({
+    setupTestId,
+    setupScriptId,
+    updatedAt: new Date(),
+  }).where(eq(suites.id, suiteId));
+}
+
+// Update repository default setup configuration
+export async function updateRepositoryDefaultSetup(
+  repositoryId: string,
+  defaultSetupTestId: string | null,
+  defaultSetupScriptId: string | null
+) {
+  await db.update(repositories).set({
+    defaultSetupTestId,
+    defaultSetupScriptId,
+  }).where(eq(repositories.id, repositoryId));
+}
+
+// Get tests that use a specific test as their setup
+export async function getTestsUsingSetupTest(setupTestId: string) {
+  return db
+    .select()
+    .from(tests)
+    .where(eq(tests.setupTestId, setupTestId))
+    .all();
+}
+
+// Get tests that use a specific setup script
+export async function getTestsUsingSetupScript(setupScriptId: string) {
+  return db
+    .select()
+    .from(tests)
+    .where(eq(tests.setupScriptId, setupScriptId))
+    .all();
+}
+
+// Get suites that use a specific test as their setup
+export async function getSuitesUsingSetupTest(setupTestId: string) {
+  return db
+    .select()
+    .from(suites)
+    .where(eq(suites.setupTestId, setupTestId))
+    .all();
+}
+
+// Get suites that use a specific setup script
+export async function getSuitesUsingSetupScript(setupScriptId: string) {
+  return db
+    .select()
+    .from(suites)
+    .where(eq(suites.setupScriptId, setupScriptId))
+    .all();
 }

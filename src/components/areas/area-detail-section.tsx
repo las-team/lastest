@@ -20,23 +20,27 @@ import Link from 'next/link';
 import { updateArea, getArea } from '@/server/actions/areas';
 import { getTest, updateTest } from '@/server/actions/tests';
 import { getSuite, updateSuite } from '@/server/actions/suites';
+import { listPlannedScreenshotsForTest } from '@/server/actions/planned-screenshots';
+import { PlannedScreenshotsPanel } from '@/components/planned/planned-screenshots-panel';
 import type { TreeSelection, SuiteItem } from './area-tree';
-import type { FunctionalArea, Test, Suite } from '@/lib/db/schema';
+import type { FunctionalArea, Test, Suite, PlannedScreenshot } from '@/lib/db/schema';
 import type { FunctionalAreaWithChildren } from '@/lib/db/queries';
 
 interface AreaDetailSectionProps {
   selection: TreeSelection | null;
   areas: FunctionalAreaWithChildren[];
   suites: SuiteItem[];
+  repositoryId: string;
   onUpdate: () => void;
 }
 
-export function AreaDetailSection({ selection, areas, suites, onUpdate }: AreaDetailSectionProps) {
+export function AreaDetailSection({ selection, areas, suites, repositoryId, onUpdate }: AreaDetailSectionProps) {
   const [isEditing, setIsEditing] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [areaData, setAreaData] = useState<FunctionalArea | null>(null);
   const [testData, setTestData] = useState<Test | null>(null);
   const [suiteData, setSuiteData] = useState<Suite | null>(null);
+  const [plannedScreenshots, setPlannedScreenshots] = useState<PlannedScreenshot[]>([]);
 
   // Form states
   const [name, setName] = useState('');
@@ -59,11 +63,17 @@ export function AreaDetailSection({ selection, areas, suites, onUpdate }: AreaDe
     return result;
   };
 
+  const loadPlannedScreenshots = async (testId: string) => {
+    const screenshots = await listPlannedScreenshotsForTest(testId);
+    setPlannedScreenshots(screenshots || []);
+  };
+
   useEffect(() => {
     if (!selection) {
       setAreaData(null);
       setTestData(null);
       setSuiteData(null);
+      setPlannedScreenshots([]);
       setIsEditing(false);
       return;
     }
@@ -74,6 +84,7 @@ export function AreaDetailSection({ selection, areas, suites, onUpdate }: AreaDe
         setAreaData(area || null);
         setTestData(null);
         setSuiteData(null);
+        setPlannedScreenshots([]);
         if (area) {
           setName(area.name);
           setDescription(area.description || '');
@@ -87,12 +98,14 @@ export function AreaDetailSection({ selection, areas, suites, onUpdate }: AreaDe
         if (test) {
           setName(test.name);
           setTargetUrl(test.targetUrl || '');
+          await loadPlannedScreenshots(test.id);
         }
       } else if (selection.type === 'suite') {
         const suite = await getSuite(selection.id);
         setSuiteData(suite || null);
         setAreaData(null);
         setTestData(null);
+        setPlannedScreenshots([]);
         if (suite) {
           setName(suite.name);
           setDescription(suite.description || '');
@@ -260,84 +273,98 @@ export function AreaDetailSection({ selection, areas, suites, onUpdate }: AreaDe
   // Test details
   if (selection.type === 'test' && testData) {
     return (
-      <Card>
-        <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-4">
-          <CardTitle className="flex items-center gap-2">
-            <FileCode className="h-5 w-5 text-primary" />
-            Test Details
-          </CardTitle>
-          {!isEditing ? (
-            <Button variant="ghost" size="sm" onClick={() => setIsEditing(true)}>
-              <Pencil className="h-4 w-4 mr-2" />
-              Edit
-            </Button>
-          ) : (
+      <div className="space-y-4">
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-4">
+            <CardTitle className="flex items-center gap-2">
+              <FileCode className="h-5 w-5 text-primary" />
+              Test Details
+            </CardTitle>
+            {!isEditing ? (
+              <Button variant="ghost" size="sm" onClick={() => setIsEditing(true)}>
+                <Pencil className="h-4 w-4 mr-2" />
+                Edit
+              </Button>
+            ) : (
+              <div className="flex gap-2">
+                <Button variant="ghost" size="sm" onClick={handleCancel}>
+                  <X className="h-4 w-4 mr-2" />
+                  Cancel
+                </Button>
+                <Button size="sm" onClick={handleSave} disabled={isSaving}>
+                  <Save className="h-4 w-4 mr-2" />
+                  {isSaving ? 'Saving...' : 'Save'}
+                </Button>
+              </div>
+            )}
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="name">Name</Label>
+              {isEditing ? (
+                <Input
+                  id="name"
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                />
+              ) : (
+                <div className="text-lg font-medium">{testData.name}</div>
+              )}
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="targetUrl">Target URL</Label>
+              {isEditing ? (
+                <Input
+                  id="targetUrl"
+                  value={targetUrl}
+                  onChange={(e) => setTargetUrl(e.target.value)}
+                  placeholder="http://localhost:3000"
+                />
+              ) : (
+                <p className="text-sm text-muted-foreground">
+                  {testData.targetUrl || 'No URL set'}
+                </p>
+              )}
+            </div>
+
+            <Separator />
+
             <div className="flex gap-2">
-              <Button variant="ghost" size="sm" onClick={handleCancel}>
-                <X className="h-4 w-4 mr-2" />
-                Cancel
+              <Button asChild variant="outline" className="flex-1">
+                <Link href={`/tests/${testData.id}`}>
+                  <ExternalLink className="h-4 w-4 mr-2" />
+                  View Details
+                </Link>
               </Button>
-              <Button size="sm" onClick={handleSave} disabled={isSaving}>
-                <Save className="h-4 w-4 mr-2" />
-                {isSaving ? 'Saving...' : 'Save'}
+              <Button asChild className="flex-1">
+                <Link href={`/run?testId=${testData.id}`}>
+                  <Play className="h-4 w-4 mr-2" />
+                  Run Test
+                </Link>
               </Button>
             </div>
-          )}
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="space-y-2">
-            <Label htmlFor="name">Name</Label>
-            {isEditing ? (
-              <Input
-                id="name"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-              />
-            ) : (
-              <div className="text-lg font-medium">{testData.name}</div>
+
+            {testData.createdAt && (
+              <div className="text-xs text-muted-foreground">
+                Created: {new Date(testData.createdAt).toLocaleDateString()}
+              </div>
             )}
-          </div>
+          </CardContent>
+        </Card>
 
-          <div className="space-y-2">
-            <Label htmlFor="targetUrl">Target URL</Label>
-            {isEditing ? (
-              <Input
-                id="targetUrl"
-                value={targetUrl}
-                onChange={(e) => setTargetUrl(e.target.value)}
-                placeholder="http://localhost:3000"
-              />
-            ) : (
-              <p className="text-sm text-muted-foreground">
-                {testData.targetUrl || 'No URL set'}
-              </p>
-            )}
-          </div>
-
-          <Separator />
-
-          <div className="flex gap-2">
-            <Button asChild variant="outline" className="flex-1">
-              <Link href={`/tests/${testData.id}`}>
-                <ExternalLink className="h-4 w-4 mr-2" />
-                View Details
-              </Link>
-            </Button>
-            <Button asChild className="flex-1">
-              <Link href={`/run?testId=${testData.id}`}>
-                <Play className="h-4 w-4 mr-2" />
-                Run Test
-              </Link>
-            </Button>
-          </div>
-
-          {testData.createdAt && (
-            <div className="text-xs text-muted-foreground">
-              Created: {new Date(testData.createdAt).toLocaleDateString()}
-            </div>
-          )}
-        </CardContent>
-      </Card>
+        {/* Planned Screenshots Panel */}
+        <Card>
+          <CardContent className="pt-6">
+            <PlannedScreenshotsPanel
+              repositoryId={repositoryId}
+              testId={testData.id}
+              plannedScreenshots={plannedScreenshots}
+              onUpdate={() => loadPlannedScreenshots(testData.id)}
+            />
+          </CardContent>
+        </Card>
+      </div>
     );
   }
 

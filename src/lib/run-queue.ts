@@ -7,7 +7,7 @@ export type QueuedRunStatus = 'queued' | 'running' | 'completed' | 'failed';
 
 export interface CompletedTestResult {
   testId: string;
-  status: 'passed' | 'failed' | 'skipped';
+  status: 'passed' | 'failed' | 'skipped' | 'setup_failed';
   screenshotPath?: string;
 }
 

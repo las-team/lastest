@@ -62,6 +62,9 @@ export const tests = sqliteTable('tests', {
   name: text('name').notNull(),
   code: text('code').notNull(), // Playwright test code
   targetUrl: text('target_url'),
+  // Setup configuration - setupTestId takes precedence over setupScriptId
+  setupTestId: text('setup_test_id'), // Use another test as setup (most common)
+  setupScriptId: text('setup_script_id'), // OR use dedicated setup script
   createdAt: integer('created_at', { mode: 'timestamp' }),
   updatedAt: integer('updated_at', { mode: 'timestamp' }),
 });
@@ -120,6 +123,9 @@ export const repositories = sqliteTable('repositories', {
   defaultBranch: text('default_branch'),
   selectedBaseline: text('selected_baseline'), // branch name for baseline comparison
   selectedBranch: text('selected_branch'), // branch for remote scanning via GitHub API
+  // Default setup configuration applied to all tests in this repo
+  defaultSetupTestId: text('default_setup_test_id'), // Default test-as-setup for all tests
+  defaultSetupScriptId: text('default_setup_script_id'), // OR default script
   createdAt: integer('created_at', { mode: 'timestamp' }),
 });
 
@@ -165,6 +171,12 @@ export const builds = sqliteTable('builds', {
   passedCount: integer('passed_count').default(0),
   baseUrl: text('base_url'),
   elapsedMs: integer('elapsed_ms'),
+  // Build-level setup configuration
+  buildSetupTestId: text('build_setup_test_id'), // Use test as build-level setup
+  buildSetupScriptId: text('build_setup_script_id'), // OR use dedicated script
+  setupStatus: text('setup_status').default('pending'), // 'pending' | 'running' | 'completed' | 'failed' | 'skipped'
+  setupError: text('setup_error'),
+  setupDurationMs: integer('setup_duration_ms'),
   createdAt: integer('created_at', { mode: 'timestamp' }),
   completedAt: integer('completed_at', { mode: 'timestamp' }),
 });
@@ -553,6 +565,9 @@ export const suites = sqliteTable('suites', {
   name: text('name').notNull(),
   description: text('description'),
   orderIndex: integer('order_index').default(0),
+  // Setup configuration - setupTestId takes precedence over setupScriptId
+  setupTestId: text('setup_test_id'), // Use test as setup
+  setupScriptId: text('setup_script_id'), // OR use dedicated script
   createdAt: integer('created_at', { mode: 'timestamp' }),
   updatedAt: integer('updated_at', { mode: 'timestamp' }),
 });
@@ -737,3 +752,52 @@ export const runners = sqliteTable('runners', {
 
 export type Runner = typeof runners.$inferSelect;
 export type NewRunner = typeof runners.$inferInsert;
+
+// ============================================
+// Setup Scripts & Configs Tables
+// ============================================
+
+export type SetupScriptType = 'playwright' | 'api';
+
+// Setup Scripts - Reusable setup code blocks
+export const setupScripts = sqliteTable('setup_scripts', {
+  id: text('id').primaryKey(),
+  repositoryId: text('repository_id').references(() => repositories.id),
+  name: text('name').notNull(),
+  type: text('type').notNull().default('playwright'), // 'playwright' | 'api'
+  code: text('code').notNull(),
+  description: text('description'),
+  createdAt: integer('created_at', { mode: 'timestamp' }),
+  updatedAt: integer('updated_at', { mode: 'timestamp' }),
+});
+
+export type SetupScript = typeof setupScripts.$inferSelect;
+export type NewSetupScript = typeof setupScripts.$inferInsert;
+
+// Auth types for API seeding
+export type SetupAuthType = 'none' | 'bearer' | 'basic' | 'custom';
+
+export interface SetupAuthConfig {
+  token?: string;         // For bearer auth
+  username?: string;      // For basic auth
+  password?: string;      // For basic auth
+  headers?: Record<string, string>; // For custom auth
+}
+
+// Setup Configs - API seeding configuration per repository
+export const setupConfigs = sqliteTable('setup_configs', {
+  id: text('id').primaryKey(),
+  repositoryId: text('repository_id').references(() => repositories.id),
+  name: text('name').notNull(),
+  baseUrl: text('base_url').notNull(),
+  authType: text('auth_type').notNull().default('none'), // 'none' | 'bearer' | 'basic' | 'custom'
+  authConfig: text('auth_config', { mode: 'json' }).$type<SetupAuthConfig>(),
+  createdAt: integer('created_at', { mode: 'timestamp' }),
+  updatedAt: integer('updated_at', { mode: 'timestamp' }),
+});
+
+export type SetupConfig = typeof setupConfigs.$inferSelect;
+export type NewSetupConfig = typeof setupConfigs.$inferInsert;
+
+// Setup status for builds
+export type SetupStatus = 'pending' | 'running' | 'completed' | 'failed' | 'skipped';

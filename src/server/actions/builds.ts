@@ -6,6 +6,8 @@ import { getBranchInfo } from '@/lib/github/content';
 import { getOpenPRsForBranch } from '@/lib/github/oauth';
 import { getRunner } from '@/lib/playwright/runner';
 import { getServerManager } from '@/lib/playwright/server-manager';
+import { getSetupOrchestrator } from '@/lib/setup/setup-orchestrator';
+import type { SetupContext, SetupStatus } from '@/lib/setup/types';
 import { executeTests } from '@/lib/execution/executor';
 import { getCurrentSession } from '@/lib/auth';
 import { generateDiff } from '@/lib/diff/generator';
@@ -211,7 +213,7 @@ async function runBuildAsync(
     });
 
     if (result.status === 'passed') passedCount++;
-    else if (result.status === 'failed') failedCount++;
+    else if (result.status === 'failed' || result.status === 'setup_failed') failedCount++;
 
     // Build screenshots list: prefer captured screenshots, fall back to single screenshotPath
     const screenshots = result.screenshots.length > 0
@@ -254,17 +256,81 @@ async function runBuildAsync(
   };
 
   try {
+    // Configure runner with environment and settings
+    if (envConfig?.id) {
+      runner.setEnvironmentConfig(envConfig);
+      getServerManager().setConfig(envConfig);
+    }
+    if (playwrightSettings) {
+      runner.setSettings(playwrightSettings);
+    }
+
+    // Get the build to check for build-level setup
+    const build = await queries.getBuild(buildId);
+    const baseUrl = envConfig?.baseUrl || 'http://localhost:3000';
+
+    // Initialize setup context
+    let setupContext: SetupContext = {
+      baseUrl,
+      variables: {},
+      repositoryId: repositoryId || null,
+    };
+
+    // Run build-level setup if configured
+    if (build?.buildSetupTestId || build?.buildSetupScriptId) {
+      await queries.updateBuild(buildId, { setupStatus: 'running' });
+
+      const orchestrator = getSetupOrchestrator();
+      // For build-level setup, we need a browser page
+      // We'll use a temporary page for setup, then pass variables to tests
+      const { chromium } = await import('playwright');
+      const browser = await chromium.launch({ headless: true });
+      const page = await browser.newPage();
+
+      try {
+        setupContext.page = page;
+        const setupResult = await orchestrator.resolveAndRunSetup(
+          build.buildSetupTestId,
+          build.buildSetupScriptId,
+          page,
+          setupContext
+        );
+
+        if (!setupResult.success) {
+          // Build setup failed - abort the build
+          await queries.updateBuild(buildId, {
+            setupStatus: 'failed',
+            setupError: setupResult.error,
+            setupDurationMs: setupResult.duration,
+          });
+          throw new Error(`Build setup failed: ${setupResult.error}`);
+        }
+
+        // Merge setup variables
+        if (setupResult.variables) {
+          setupContext.variables = { ...setupContext.variables, ...setupResult.variables };
+        }
+
+        await queries.updateBuild(buildId, {
+          setupStatus: 'completed',
+          setupDurationMs: setupResult.duration,
+        });
+      } finally {
+        await page.close().catch(() => {});
+        await browser.close().catch(() => {});
+      }
+    } else {
+      await queries.updateBuild(buildId, { setupStatus: 'skipped' });
+    }
+
+    // Remove page from context (each test gets its own)
+    delete setupContext.page;
+
+    // Set the setup context on the runner so tests can access it
+    runner.setSetupContext(setupContext);
+
     // Use executor for agent routing, or direct runner for local
     if (runnerId && runnerId !== 'local' && teamId) {
-      // Load environment config for executor
-      if (envConfig?.id) {
-        runner.setEnvironmentConfig(envConfig);
-        getServerManager().setConfig(envConfig);
-      }
-      if (playwrightSettings) {
-        runner.setSettings(playwrightSettings);
-      }
-
       // Load runner's maxParallelTests setting
       const remoteRunner = await queries.getRunnerById(runnerId);
       const maxParallelTests = remoteRunner?.maxParallelTests ?? 1;
@@ -278,18 +344,12 @@ async function runBuildAsync(
         maxParallelTests,
       }, onProgress, onResult);
     } else {
-      // Local execution - configure runner and run directly
-      if (envConfig?.id) {
-        runner.setEnvironmentConfig(envConfig);
-        getServerManager().setConfig(envConfig);
-      }
-      if (playwrightSettings) {
-        runner.setSettings(playwrightSettings);
-      }
-
       // Local uses maxParallelTests from playwrightSettings (set via runner.setSettings)
       await runner.runTests(tests, testRunId, onProgress, onResult);
     }
+
+    // Clear setup context after tests complete
+    runner.clearSetupContext();
 
     // Update test run status
     const hasFailures = failedCount > 0;
