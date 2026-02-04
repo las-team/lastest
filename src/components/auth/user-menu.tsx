@@ -50,6 +50,7 @@ export function UserMenu({ user }: UserMenuProps) {
             src={user.avatarUrl}
             alt={user.name || user.email}
             className="h-8 w-8 rounded-full object-cover"
+            referrerPolicy="no-referrer"
           />
         ) : (
           <div className="h-8 w-8 rounded-full bg-primary text-primary-foreground flex items-center justify-center text-sm font-medium">

@@ -18,7 +18,6 @@ Snapshot Stabilization Engine
 VS Code extension
 Github actions integration
 Publish lastest runner to npx npm
-Smart test selection       
 
 ## features
 Compare to figma designs/uploaded photos
@@ -34,11 +33,8 @@ UI & UX
     Revise frontend and make sure you havent steered far and try to use standard shadcn css where possible
     make sure every page has a clear primary action if there are more than one. If you cant decide ask me a question about it
 
-Fix compare and branch selection
 Electron app ~/.claude/plans/rippling-roaming-snail.md replan
 ## ideas
-Build/change approval
-    Test version or result on the build screen
 Imported document -> US & AC -> tests - US checklist overview
 Sitemap -flow
 Firecrawl?

@@ -209,3 +209,78 @@ export function getDirectoryChildren(tree: TreeEntry[], directory: string): Tree
 export function clearCache(): void {
   cache.clear();
 }
+
+export interface CompareResult {
+  status: 'ahead' | 'behind' | 'diverged' | 'identical';
+  aheadBy: number;
+  behindBy: number;
+  totalCommits: number;
+  files: Array<{
+    filename: string;
+    status: 'added' | 'removed' | 'modified' | 'renamed' | 'copied' | 'changed' | 'unchanged';
+    additions: number;
+    deletions: number;
+    changes: number;
+  }>;
+  baseBranch: string;
+  headBranch: string;
+}
+
+/**
+ * Compare two branches and get the list of changed files
+ * Uses GitHub's Compare API: GET /repos/{owner}/{repo}/compare/{base}...{head}
+ */
+export async function compareBranches(
+  accessToken: string,
+  owner: string,
+  repo: string,
+  baseBranch: string,
+  headBranch: string
+): Promise<CompareResult | null> {
+  const cacheKey = `compare:${owner}/${repo}:${baseBranch}...${headBranch}`;
+  const cached = getCached<CompareResult>(cacheKey);
+  if (cached) return cached;
+
+  try {
+    const response = await fetch(
+      `https://api.github.com/repos/${owner}/${repo}/compare/${baseBranch}...${headBranch}`,
+      {
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          Accept: 'application/vnd.github.v3+json',
+        },
+      }
+    );
+
+    if (!response.ok) {
+      // Handle specific error cases
+      if (response.status === 404) {
+        return null; // Branch not found
+      }
+      return null;
+    }
+
+    const data = await response.json();
+
+    const result: CompareResult = {
+      status: data.status,
+      aheadBy: data.ahead_by,
+      behindBy: data.behind_by,
+      totalCommits: data.total_commits,
+      files: (data.files || []).map((f: { filename: string; status: string; additions: number; deletions: number; changes: number }) => ({
+        filename: f.filename,
+        status: f.status,
+        additions: f.additions,
+        deletions: f.deletions,
+        changes: f.changes,
+      })),
+      baseBranch,
+      headBranch,
+    };
+
+    setCache(cacheKey, result);
+    return result;
+  } catch {
+    return null;
+  }
+}
