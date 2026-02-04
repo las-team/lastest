@@ -9,7 +9,7 @@ export interface SelectorRecommendation {
 }
 
 // Thresholds for recommendations
-const MIN_ATTEMPTS_FOR_DISABLE = 10;
+const MIN_ATTEMPTS_FOR_DISABLE = 3;
 const FAILURE_RATE_THRESHOLD = 70; // percentage
 const LOW_SUCCESS_RATE_THRESHOLD = 30; // percentage
 const ENABLE_SUCCESS_RATE_THRESHOLD = 50; // percentage

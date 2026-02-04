@@ -469,6 +469,8 @@ export async function getActiveBaseline(testId: string, branch: string, stepLabe
   ];
   if (stepLabel) {
     conditions.push(eq(baselines.stepLabel, stepLabel));
+  } else {
+    conditions.push(isNull(baselines.stepLabel));
   }
   return db
     .select()
@@ -485,6 +487,8 @@ export async function getBaselineByHash(testId: string, imageHash: string, stepL
   ];
   if (stepLabel) {
     conditions.push(eq(baselines.stepLabel, stepLabel));
+  } else {
+    conditions.push(isNull(baselines.stepLabel));
   }
   return db
     .select()
@@ -503,6 +507,8 @@ export async function deactivateBaselines(testId: string, branch: string, stepLa
   const conditions = [eq(baselines.testId, testId), eq(baselines.branch, branch)];
   if (stepLabel) {
     conditions.push(eq(baselines.stepLabel, stepLabel));
+  } else {
+    conditions.push(isNull(baselines.stepLabel));
   }
   await db
     .update(baselines)
