@@ -295,20 +295,29 @@ export function RunDashboardClient({ tests, runs, builds, repositoryId, activeBr
                     )}
 
                     {/* Smart Run Button */}
-                    <Button
-                      onClick={handleSmartRun}
-                      disabled={isSmartRunning || smartAnalysis.affectedTests.length === 0}
-                      size="sm"
-                      variant="outline"
-                      className="w-full"
-                    >
-                      {isSmartRunning ? (
-                        <Loader2 className="h-3.5 w-3.5 mr-2 animate-spin" />
-                      ) : (
-                        <Zap className="h-3.5 w-3.5 mr-2" />
-                      )}
-                      Smart Run ({smartAnalysis.affectedTests.length} tests)
-                    </Button>
+                    <div className="flex items-center gap-2">
+                      <ExecutionTargetSelector
+                        value={executionTarget}
+                        onChange={setExecutionTarget}
+                        disabled={isSmartRunning}
+                        capabilityFilter="run"
+                        size="sm"
+                      />
+                      <Button
+                        onClick={handleSmartRun}
+                        disabled={isSmartRunning || smartAnalysis.affectedTests.length === 0}
+                        size="sm"
+                        variant="outline"
+                        className="flex-1"
+                      >
+                        {isSmartRunning ? (
+                          <Loader2 className="h-3.5 w-3.5 mr-2 animate-spin" />
+                        ) : (
+                          <Zap className="h-3.5 w-3.5 mr-2" />
+                        )}
+                        Smart Run ({smartAnalysis.affectedTests.length} tests)
+                      </Button>
+                    </div>
                   </>
                 )}
               </CardContent>

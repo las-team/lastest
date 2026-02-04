@@ -7,6 +7,7 @@ import {
   builds,
   visualDiffs,
   baselines,
+  plannedScreenshots,
   ignoreRegions,
   pullRequests,
   githubAccounts,
@@ -50,6 +51,7 @@ import type {
   NewBuild,
   NewVisualDiff,
   NewBaseline,
+  NewPlannedScreenshot,
   NewIgnoreRegion,
   NewPullRequest,
   NewGithubAccount,
@@ -400,6 +402,10 @@ export async function getVisualDiffsWithTestStatus(buildId: string) {
       approvedBy: visualDiffs.approvedBy,
       approvedAt: visualDiffs.approvedAt,
       createdAt: visualDiffs.createdAt,
+      plannedImagePath: visualDiffs.plannedImagePath,
+      plannedDiffImagePath: visualDiffs.plannedDiffImagePath,
+      plannedPixelDifference: visualDiffs.plannedPixelDifference,
+      plannedPercentageDifference: visualDiffs.plannedPercentageDifference,
       testResultStatus: testResults.status,
       testName: tests.name,
       functionalAreaName: functionalAreas.name,
@@ -2332,4 +2338,129 @@ export async function deleteExpiredInvitations() {
 // Runner queries
 export async function getRunnerById(runnerId: string) {
   return db.select().from(runners).where(eq(runners.id, runnerId)).get();
+}
+
+// ============================================
+// Planned Screenshots
+// ============================================
+
+export async function createPlannedScreenshot(data: Omit<NewPlannedScreenshot, 'id' | 'createdAt' | 'updatedAt'>) {
+  const id = uuid();
+  const now = new Date();
+  await db.insert(plannedScreenshots).values({
+    ...data,
+    id,
+    createdAt: now,
+    updatedAt: now,
+  });
+  return { id, ...data, createdAt: now, updatedAt: now };
+}
+
+export async function getPlannedScreenshot(id: string) {
+  return db.select().from(plannedScreenshots).where(eq(plannedScreenshots.id, id)).get();
+}
+
+export async function getPlannedScreenshotByTest(testId: string, stepLabel?: string | null) {
+  const conditions = [
+    eq(plannedScreenshots.testId, testId),
+    eq(plannedScreenshots.isActive, true),
+  ];
+  if (stepLabel) {
+    conditions.push(eq(plannedScreenshots.stepLabel, stepLabel));
+  } else {
+    conditions.push(isNull(plannedScreenshots.stepLabel));
+  }
+  return db
+    .select()
+    .from(plannedScreenshots)
+    .where(and(...conditions))
+    .get();
+}
+
+export async function getPlannedScreenshotByRoute(routeId: string) {
+  return db
+    .select()
+    .from(plannedScreenshots)
+    .where(and(eq(plannedScreenshots.routeId, routeId), eq(plannedScreenshots.isActive, true)))
+    .get();
+}
+
+export async function getPlannedScreenshotsByRepo(repositoryId: string) {
+  return db
+    .select()
+    .from(plannedScreenshots)
+    .where(and(eq(plannedScreenshots.repositoryId, repositoryId), eq(plannedScreenshots.isActive, true)))
+    .orderBy(desc(plannedScreenshots.createdAt))
+    .all();
+}
+
+export async function getPlannedScreenshotsByTest(testId: string) {
+  return db
+    .select()
+    .from(plannedScreenshots)
+    .where(and(eq(plannedScreenshots.testId, testId), eq(plannedScreenshots.isActive, true)))
+    .orderBy(plannedScreenshots.stepLabel)
+    .all();
+}
+
+export async function updatePlannedScreenshot(id: string, data: Partial<NewPlannedScreenshot>) {
+  await db.update(plannedScreenshots).set({ ...data, updatedAt: new Date() }).where(eq(plannedScreenshots.id, id));
+}
+
+export async function deletePlannedScreenshot(id: string) {
+  // Soft delete - mark as inactive
+  await db.update(plannedScreenshots).set({ isActive: false, updatedAt: new Date() }).where(eq(plannedScreenshots.id, id));
+}
+
+export async function hardDeletePlannedScreenshot(id: string) {
+  await db.delete(plannedScreenshots).where(eq(plannedScreenshots.id, id));
+}
+
+// Get route with full context for AI test generation
+export interface RouteWithContext {
+  id: string;
+  path: string;
+  type: string;
+  description: string | null;
+  filePath: string | null;
+  framework: string | null;
+  routerType: string | null;
+  functionalAreaId: string | null;
+  functionalAreaName: string | null;
+  functionalAreaDescription: string | null;
+  testSuggestions: string[];
+}
+
+export async function getRouteWithContext(routeId: string): Promise<RouteWithContext | null> {
+  const route = await db
+    .select({
+      id: routes.id,
+      path: routes.path,
+      type: routes.type,
+      description: routes.description,
+      filePath: routes.filePath,
+      framework: routes.framework,
+      routerType: routes.routerType,
+      functionalAreaId: routes.functionalAreaId,
+      functionalAreaName: functionalAreas.name,
+      functionalAreaDescription: functionalAreas.description,
+    })
+    .from(routes)
+    .leftJoin(functionalAreas, eq(routes.functionalAreaId, functionalAreas.id))
+    .where(eq(routes.id, routeId))
+    .get();
+
+  if (!route) return null;
+
+  // Fetch associated test suggestions
+  const suggestions = await db
+    .select({ suggestion: routeTestSuggestions.suggestion })
+    .from(routeTestSuggestions)
+    .where(eq(routeTestSuggestions.routeId, routeId))
+    .all();
+
+  return {
+    ...route,
+    testSuggestions: suggestions.map(s => s.suggestion),
+  };
 }

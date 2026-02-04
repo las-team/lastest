@@ -187,6 +187,11 @@ export const visualDiffs = sqliteTable('visual_diffs', {
   approvedBy: text('approved_by'),
   approvedAt: integer('approved_at', { mode: 'timestamp' }),
   createdAt: integer('created_at', { mode: 'timestamp' }),
+  // Planned screenshot comparison fields
+  plannedImagePath: text('planned_image_path'),
+  plannedDiffImagePath: text('planned_diff_image_path'),
+  plannedPixelDifference: integer('planned_pixel_difference'),
+  plannedPercentageDifference: text('planned_percentage_difference'),
 });
 
 // Baselines for carry-forward logic
@@ -202,6 +207,27 @@ export const baselines = sqliteTable('baselines', {
   isActive: integer('is_active', { mode: 'boolean' }).default(true),
   createdAt: integer('created_at', { mode: 'timestamp' }),
 });
+
+// Planned/expected screenshots for design comparison
+export const plannedScreenshots = sqliteTable('planned_screenshots', {
+  id: text('id').primaryKey(),
+  repositoryId: text('repository_id').references(() => repositories.id),
+  testId: text('test_id').references(() => tests.id, { onDelete: 'cascade' }),
+  stepLabel: text('step_label'),
+  routeId: text('route_id').references(() => routes.id, { onDelete: 'cascade' }),
+  imagePath: text('image_path').notNull(),
+  imageHash: text('image_hash').notNull(),
+  name: text('name'),
+  description: text('description'),
+  uploadedBy: text('uploaded_by').references(() => users.id),
+  sourceUrl: text('source_url'), // Original design file URL (Figma, etc.)
+  isActive: integer('is_active', { mode: 'boolean' }).default(true),
+  createdAt: integer('created_at', { mode: 'timestamp' }),
+  updatedAt: integer('updated_at', { mode: 'timestamp' }),
+});
+
+export type PlannedScreenshot = typeof plannedScreenshots.$inferSelect;
+export type NewPlannedScreenshot = typeof plannedScreenshots.$inferInsert;
 
 // Ignore regions for masking areas during diff
 export const ignoreRegions = sqliteTable('ignore_regions', {

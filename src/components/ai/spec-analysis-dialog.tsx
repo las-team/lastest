@@ -12,9 +12,9 @@ import {
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { scanRepoSpecs, analyzeUploadedSpecs, saveSpecAnalysisResult, saveAndBuildTests } from '@/server/actions/spec-analysis';
-import type { SpecAnalysisResponse } from '@/server/actions/spec-analysis';
-import { Loader2, FileText, Upload, Save, FolderSearch, Route, Sparkles } from 'lucide-react';
+import { discoverRepoSpecs, analyzeSelectedSpecs, analyzeUploadedSpecs, saveSpecAnalysisResult, saveAndBuildTests } from '@/server/actions/spec-analysis';
+import type { SpecAnalysisResponse, DiscoveredSpecFile } from '@/server/actions/spec-analysis';
+import { Loader2, FileText, Upload, Save, FolderSearch, Route, Sparkles, Check, Square, CheckSquare } from 'lucide-react';
 import { toast } from 'sonner';
 
 interface SpecAnalysisDialogProps {
@@ -30,19 +30,46 @@ export function SpecAnalysisDialog({
   repositoryId,
   branch,
 }: SpecAnalysisDialogProps) {
-  const [step, setStep] = useState<'input' | 'analyzing' | 'preview'>('input');
+  const [step, setStep] = useState<'input' | 'file-selection' | 'analyzing' | 'preview'>('input');
   const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [isDiscovering, setIsDiscovering] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [isBuilding, setIsBuilding] = useState(false);
   const [analysisResult, setAnalysisResult] = useState<SpecAnalysisResponse['result']>(undefined);
   const [uploadedFiles, setUploadedFiles] = useState<File[]>([]);
+  const [discoveredFiles, setDiscoveredFiles] = useState<DiscoveredSpecFile[]>([]);
+  const [selectedFiles, setSelectedFiles] = useState<Set<string>>(new Set());
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleGitHubScan = async () => {
+    setIsDiscovering(true);
+    try {
+      const response = await discoverRepoSpecs(repositoryId, branch);
+      if (response.success && response.files) {
+        setDiscoveredFiles(response.files);
+        setSelectedFiles(new Set(response.files.map(f => f.path)));
+        setStep('file-selection');
+        toast.success(`Found ${response.files.length} spec file(s)`);
+      } else {
+        toast.error(response.error || 'Failed to discover specs');
+      }
+    } catch {
+      toast.error('Failed to scan repository');
+    } finally {
+      setIsDiscovering(false);
+    }
+  };
+
+  const handleAnalyzeSelected = async () => {
+    if (selectedFiles.size === 0) {
+      toast.error('Please select at least one file');
+      return;
+    }
+
     setIsAnalyzing(true);
     setStep('analyzing');
     try {
-      const response = await scanRepoSpecs(repositoryId, branch);
+      const response = await analyzeSelectedSpecs(repositoryId, branch, Array.from(selectedFiles));
       if (response.success && response.result) {
         setAnalysisResult(response.result);
         setStep('preview');
@@ -51,15 +78,30 @@ export function SpecAnalysisDialog({
         toast.success(`Found ${areaCount} areas, ${routeCount} routes`);
       } else {
         toast.error(response.error || 'Failed to analyze specs');
-        setStep('input');
+        setStep('file-selection');
       }
     } catch {
-      toast.error('Failed to scan repository specs');
-      setStep('input');
+      toast.error('Failed to analyze selected specs');
+      setStep('file-selection');
     } finally {
       setIsAnalyzing(false);
     }
   };
+
+  const toggleFile = (path: string) => {
+    setSelectedFiles(prev => {
+      const next = new Set(prev);
+      if (next.has(path)) {
+        next.delete(path);
+      } else {
+        next.add(path);
+      }
+      return next;
+    });
+  };
+
+  const selectAll = () => setSelectedFiles(new Set(discoveredFiles.map(f => f.path)));
+  const deselectAll = () => setSelectedFiles(new Set());
 
   const handleFileUpload = async () => {
     if (uploadedFiles.length === 0) {
@@ -136,6 +178,8 @@ export function SpecAnalysisDialog({
     setStep('input');
     setAnalysisResult(undefined);
     setUploadedFiles([]);
+    setDiscoveredFiles([]);
+    setSelectedFiles(new Set());
     onOpenChange(false);
   };
 
@@ -155,6 +199,7 @@ export function SpecAnalysisDialog({
           </DialogTitle>
           <DialogDescription>
             {step === 'input' && 'Extract functional areas, routes, and test scenarios from spec documents.'}
+            {step === 'file-selection' && 'Select which spec files to analyze.'}
             {step === 'analyzing' && 'Analyzing specification content...'}
             {step === 'preview' && 'Review extracted areas and routes before saving.'}
           </DialogDescription>
@@ -175,8 +220,12 @@ export function SpecAnalysisDialog({
                   for spec files in <code className="text-xs">docs/</code>, <code className="text-xs">specs/</code>,
                   and common spec filenames.
                 </p>
-                <Button onClick={handleGitHubScan} disabled={isAnalyzing}>
-                  <FolderSearch className="h-4 w-4 mr-2" />
+                <Button onClick={handleGitHubScan} disabled={isDiscovering}>
+                  {isDiscovering ? (
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  ) : (
+                    <FolderSearch className="h-4 w-4 mr-2" />
+                  )}
                   Scan for Specs
                 </Button>
               </div>
@@ -217,6 +266,60 @@ export function SpecAnalysisDialog({
               </div>
             </TabsContent>
           </Tabs>
+        )}
+
+        {step === 'file-selection' && (
+          <div className="flex-1 min-h-0 space-y-3">
+            <div className="flex items-center justify-between">
+              <span className="text-sm text-muted-foreground">
+                {selectedFiles.size} of {discoveredFiles.length} file(s) selected
+              </span>
+              <div className="flex gap-2">
+                <Button variant="ghost" size="sm" onClick={selectAll}>
+                  <CheckSquare className="h-4 w-4 mr-1" />
+                  Select All
+                </Button>
+                <Button variant="ghost" size="sm" onClick={deselectAll}>
+                  <Square className="h-4 w-4 mr-1" />
+                  Deselect All
+                </Button>
+              </div>
+            </div>
+            <div className="border rounded-lg max-h-[40vh] overflow-y-auto">
+              {discoveredFiles.map((file) => (
+                <div
+                  key={file.path}
+                  className="flex items-center gap-3 px-3 py-2 hover:bg-muted/50 cursor-pointer border-b last:border-b-0"
+                  onClick={() => toggleFile(file.path)}
+                >
+                  <div className="flex-shrink-0">
+                    {selectedFiles.has(file.path) ? (
+                      <Check className="h-4 w-4 text-primary" />
+                    ) : (
+                      <Square className="h-4 w-4 text-muted-foreground" />
+                    )}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <code className="text-sm font-mono truncate block">{file.path}</code>
+                  </div>
+                  {file.size !== undefined && (
+                    <span className="text-xs text-muted-foreground flex-shrink-0">
+                      {file.size < 1024 ? `${file.size} B` : `${(file.size / 1024).toFixed(1)} KB`}
+                    </span>
+                  )}
+                </div>
+              ))}
+            </div>
+            <div className="flex gap-2 justify-end pt-2">
+              <Button variant="outline" onClick={() => setStep('input')}>
+                Back
+              </Button>
+              <Button onClick={handleAnalyzeSelected} disabled={selectedFiles.size === 0}>
+                <Sparkles className="h-4 w-4 mr-2" />
+                Analyze Selected
+              </Button>
+            </div>
+          </div>
         )}
 
         {step === 'analyzing' && (

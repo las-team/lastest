@@ -16,7 +16,7 @@ EXPLORATION WORKFLOW:
 2. browser_snapshot to see the page structure, element refs, and text content
 3. Use browser_click/browser_type with refs to interact and explore
 4. browser_snapshot again after interactions to verify state changes
-5. Identify reliable selectors from the snapshot (data-testid, aria-labels, roles, text)
+5. Identify reliable selectors from the snapshot
 
 CRITICAL RULES:
 - Use MCP tools to EXPLORE and DISCOVER what's on the page
@@ -31,6 +31,18 @@ When testing routes with parameters like /users/[id] or /posts/[slug]:
 2. browser_snapshot to find links with actual IDs/slugs in href attributes
 3. Extract the real URL and navigate to it
 4. Explore the actual page with real data
+
+FREEDOM:
+- Choose selectors that best match the page structure you discover
+- Design the test flow based on what you observe during exploration
+- Add meaningful assertions that verify the page behaves correctly
+- Take screenshots at states that best capture the visual appearance
+- Handle loading states and dynamic content as appropriate
+
+CONSTRAINTS:
+- Use baseUrl parameter for navigation (not hardcoded URLs)
+- Capture at least one screenshot using screenshotPath
+- Export async function "test" with exact signature: ${TEST_SIGNATURE}
 
 FINAL OUTPUT FORMAT:
 After exploration, generate standard Playwright test code.
@@ -50,41 +62,28 @@ ${TEST_SIGNATURE} {
 }
 \`\`\``;
 
-export const SYSTEM_PROMPT = `You are an expert Playwright test engineer. Generate high-quality visual regression tests.
+export const SYSTEM_PROMPT = `You are an expert Playwright test engineer creating visual regression tests.
 
-IMPORTANT: All tests MUST follow this exact function signature:
+FUNCTION SIGNATURE (required):
 ${TEST_SIGNATURE}
 
-The test function receives:
+PARAMETERS:
 - page: Playwright Page object
-- baseUrl: The base URL of the application (e.g., "http://localhost:3000")
-- screenshotPath: Path where the screenshot should be saved
-- stepLogger: Logger for recording test steps (use stepLogger.log('message'))
+- baseUrl: Application base URL (e.g., "http://localhost:3000")
+- screenshotPath: Path where screenshot should be saved
+- stepLogger: Step documentation (use stepLogger.log('message'))
 
-Example test structure:
-\`\`\`typescript
-import { Page } from 'playwright';
+FREEDOM:
+- Choose appropriate selectors (data-testid, aria-label, role, text, css)
+- Design the test flow that best verifies the objective
+- Add assertions that make sense for the scenario
+- Take screenshots at meaningful states
+- Handle loading states as needed for stable screenshots
 
-${TEST_SIGNATURE} {
-  stepLogger.log('Navigating to page');
-  await page.goto(\`\${baseUrl}/dashboard\`);
-
-  stepLogger.log('Waiting for content to load');
-  await page.waitForSelector('[data-testid="main-content"]');
-
-  stepLogger.log('Taking screenshot');
-  await page.screenshot({ path: screenshotPath, fullPage: true });
-}
-\`\`\`
-
-Guidelines:
-- Always use the baseUrl parameter for navigation, not hardcoded URLs
-- Use stepLogger.log() to document each significant action
-- Prefer data-testid selectors when available
-- Add appropriate waits for dynamic content
-- Take screenshot at the end using the provided screenshotPath
-- Handle loading states and animations
-- Keep tests focused and atomic`;
+CONSTRAINTS:
+- Use baseUrl parameter for navigation (not hardcoded URLs)
+- Capture at least one screenshot using screenshotPath
+- Export async function "test" with exact signature above`;
 
 export function createTestPrompt(context: TestGenerationContext): string {
   const parts: string[] = [];
@@ -93,12 +92,12 @@ export function createTestPrompt(context: TestGenerationContext): string {
     parts.push('Use MCP tools to explore the page, then generate standard Playwright test code.');
 
     if (context.userPrompt) {
-      parts.push(`\nUser request: ${context.userPrompt}`);
+      parts.push(`\nTest objective: ${context.userPrompt}`);
     }
 
     if (context.targetUrl || context.routePath) {
       const route = context.targetUrl || context.routePath;
-      parts.push(`\nTarget route: ${route}`);
+      parts.push(`\nTarget: ${route}`);
 
       if (context.isDynamicRoute) {
         parts.push(`\nThis is a DYNAMIC route with parameters. You MUST:`);
@@ -112,19 +111,24 @@ export function createTestPrompt(context: TestGenerationContext): string {
       }
     }
 
+    // Add scan context if available
+    if (context.scanContext) {
+      parts.push(buildScanContextSection(context.scanContext));
+    }
+
     parts.push(`\nWorkflow: navigate → snapshot → explore → OUTPUT Playwright test code with discovered selectors`);
     return parts.join('\n');
   }
 
-  parts.push('Generate a Playwright visual regression test with the following requirements:');
+  parts.push('Generate a Playwright visual regression test.');
 
   if (context.userPrompt) {
-    parts.push(`\nUser request: ${context.userPrompt}`);
+    parts.push(`\nTest objective: ${context.userPrompt}`);
   }
 
   if (context.targetUrl || context.routePath) {
     const route = context.targetUrl || context.routePath;
-    parts.push(`\nTarget route: ${route}`);
+    parts.push(`\nTarget: ${route}`);
 
     if (context.isDynamicRoute) {
       parts.push(`\nIMPORTANT: This is a dynamic route. Before testing it directly:`);
@@ -139,9 +143,75 @@ export function createTestPrompt(context: TestGenerationContext): string {
     }
   }
 
-  parts.push(`\nReturn ONLY the code, no explanations. The code must start with the import and function signature.`);
+  // Add scan context if available
+  if (context.scanContext) {
+    parts.push(buildScanContextSection(context.scanContext));
+  }
+
+  // Add guidelines and requirements sections
+  parts.push(`
+--- Guidelines ---
+- Be creative with test flow and assertions
+- Choose selectors that match the page structure
+- Add meaningful assertions for the test objective
+- Use stepLogger.log() to document key actions
+- Capture screenshot(s) at meaningful states
+
+--- Requirements ---
+- Function signature: export async function test(page, baseUrl, screenshotPath, stepLogger)
+- At least one screenshot must be captured
+- Use baseUrl parameter for navigation
+
+Return ONLY the code, no explanations.`);
 
   return parts.join('\n');
+}
+
+function buildScanContextSection(scanContext: import('./types').ScanContext): string {
+  const lines: string[] = ['\n--- Discovery Context ---'];
+
+  // Add source-specific context
+  if (scanContext.discoverySource === 'nav-link' && scanContext.navLabel) {
+    lines.push(`This route appears in navigation as "${scanContext.navLabel}".`);
+    lines.push('Verify the page matches its navigation label purpose.');
+  }
+
+  if (scanContext.discoverySource === 'spec-analysis' && scanContext.specDescription) {
+    lines.push(`From specification: ${scanContext.specDescription}`);
+    lines.push('Test the documented behavior.');
+  }
+
+  if (scanContext.discoverySource === 'file-scan' && scanContext.sourceFilePath) {
+    lines.push(`Source file: ${scanContext.sourceFilePath}`);
+  }
+
+  // Add framework hint
+  if (scanContext.framework) {
+    lines.push(`Framework: ${scanContext.framework}`);
+  }
+
+  // Add router type if relevant
+  if (scanContext.routerType) {
+    lines.push(`Router: ${scanContext.routerType}`);
+  }
+
+  // Add test suggestions as scenarios to consider
+  if (scanContext.testSuggestions && scanContext.testSuggestions.length > 0) {
+    lines.push('\nSuggested scenarios to consider:');
+    for (const suggestion of scanContext.testSuggestions) {
+      lines.push(`- ${suggestion}`);
+    }
+  }
+
+  // Add functional area context
+  if (scanContext.functionalAreaName) {
+    lines.push(`\nFunctional area: ${scanContext.functionalAreaName}`);
+    if (scanContext.functionalAreaDescription) {
+      lines.push(`Context: ${scanContext.functionalAreaDescription}`);
+    }
+  }
+
+  return lines.join('\n');
 }
 
 export function createFixPrompt(context: TestGenerationContext): string {

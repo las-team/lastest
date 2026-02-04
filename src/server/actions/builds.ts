@@ -457,8 +457,55 @@ async function processVisualDiff(
   const currentHash = hashImage(path.join(process.cwd(), 'public', currentScreenshotPath));
   const matchingBaseline = await queries.getBaselineByHash(testId, currentHash, stepLabel);
 
+  // Get planned screenshot if exists (for design comparison)
+  const plannedScreenshot = await queries.getPlannedScreenshotByTest(testId, stepLabel || null);
+
+  // Helper to generate planned diff
+  const generatePlannedDiff = async (currentPath: string): Promise<{
+    plannedImagePath: string | null;
+    plannedDiffImagePath: string | null;
+    plannedPixelDifference: number | null;
+    plannedPercentageDifference: string | null;
+  }> => {
+    if (!plannedScreenshot) {
+      return {
+        plannedImagePath: null,
+        plannedDiffImagePath: null,
+        plannedPixelDifference: null,
+        plannedPercentageDifference: null,
+      };
+    }
+
+    try {
+      const plannedDiffResult = await generateDiff(
+        path.join(process.cwd(), 'public', plannedScreenshot.imagePath),
+        path.join(process.cwd(), 'public', currentPath),
+        DIFFS_DIR,
+        0.1,
+        includeAntiAliasing
+      );
+
+      return {
+        plannedImagePath: plannedScreenshot.imagePath,
+        plannedDiffImagePath: plannedDiffResult.diffImagePath.replace(process.cwd() + '/public', ''),
+        plannedPixelDifference: plannedDiffResult.pixelDifference,
+        plannedPercentageDifference: plannedDiffResult.percentageDifference.toString(),
+      };
+    } catch {
+      // Planned diff generation failed, just skip planned comparison
+      return {
+        plannedImagePath: plannedScreenshot.imagePath,
+        plannedDiffImagePath: null,
+        plannedPixelDifference: null,
+        plannedPercentageDifference: null,
+      };
+    }
+  };
+
   if (matchingBaseline) {
     // Auto-approve: identical to previously approved baseline
+    const plannedDiff = await generatePlannedDiff(currentScreenshotPath);
+
     const diff = await queries.createVisualDiff({
       buildId,
       testResultId,
@@ -471,12 +518,15 @@ async function processVisualDiff(
       pixelDifference: 0,
       percentageDifference: '0',
       metadata: { changedRegions: [] },
+      ...plannedDiff,
     });
     return { hasChanges: false, diffId: diff.id, classification: 'unchanged' };
   }
 
   // No baseline - this is a new test, requires manual review
   if (!baseline) {
+    const plannedDiff = await generatePlannedDiff(currentScreenshotPath);
+
     const diff = await queries.createVisualDiff({
       buildId,
       testResultId,
@@ -488,6 +538,7 @@ async function processVisualDiff(
       pixelDifference: 0,
       percentageDifference: '0',
       metadata: { changedRegions: [], isNewTest: true },
+      ...plannedDiff,
     });
 
     // Baseline will be created when the diff is approved
@@ -509,6 +560,9 @@ async function processVisualDiff(
     const hasChanges = classification !== 'unchanged';
     const diffImagePath = diffResult.diffImagePath.replace(process.cwd() + '/public', '');
 
+    // Also generate planned diff
+    const plannedDiff = await generatePlannedDiff(currentScreenshotPath);
+
     const diff = await queries.createVisualDiff({
       buildId,
       testResultId,
@@ -522,11 +576,14 @@ async function processVisualDiff(
       pixelDifference: diffResult.pixelDifference,
       percentageDifference: diffResult.percentageDifference.toString(),
       metadata: diffResult.metadata,
+      ...plannedDiff,
     });
 
     return { hasChanges, diffId: diff.id, classification };
   } catch (error) {
     // Diff generation failed, mark as pending for review
+    const plannedDiff = await generatePlannedDiff(currentScreenshotPath);
+
     const diff = await queries.createVisualDiff({
       buildId,
       testResultId,
@@ -539,6 +596,7 @@ async function processVisualDiff(
       pixelDifference: -1,
       percentageDifference: '-1',
       metadata: { changedRegions: [] },
+      ...plannedDiff,
     });
     return { hasChanges: true, diffId: diff.id, classification: 'changed' };
   }
