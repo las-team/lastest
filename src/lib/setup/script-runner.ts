@@ -1,5 +1,166 @@
-import type { Page } from 'playwright';
+import type { Page, Locator } from 'playwright';
 import type { SetupScript, SetupContext, SetupResult } from './types';
+
+/**
+ * Simple expect implementation for setup scripts.
+ * Provides common assertion matchers.
+ */
+function createExpect(timeout = 5000) {
+  return function expect(target: Page | Locator) {
+    const isPage = typeof (target as any).goto === 'function';
+
+    if (isPage) {
+      const page = target as Page;
+      return {
+        async toHaveURL(expected: string | RegExp, options?: { timeout?: number }) {
+          const t = options?.timeout ?? timeout;
+          const start = Date.now();
+          while (Date.now() - start < t) {
+            const url = page.url();
+            if (typeof expected === 'string' ? url === expected : expected.test(url)) {
+              return;
+            }
+            await new Promise(r => setTimeout(r, 100));
+          }
+          throw new Error(`Expected URL to match ${expected}, but got ${page.url()}`);
+        },
+        async toHaveTitle(expected: string | RegExp, options?: { timeout?: number }) {
+          const t = options?.timeout ?? timeout;
+          const start = Date.now();
+          while (Date.now() - start < t) {
+            const title = await page.title();
+            if (typeof expected === 'string' ? title === expected : expected.test(title)) {
+              return;
+            }
+            await new Promise(r => setTimeout(r, 100));
+          }
+          const title = await page.title();
+          throw new Error(`Expected title to match ${expected}, but got ${title}`);
+        },
+      };
+    }
+
+    const locator = target as Locator;
+    return {
+      async toBeVisible(options?: { timeout?: number }) {
+        await locator.waitFor({ state: 'visible', timeout: options?.timeout ?? timeout });
+      },
+      async toBeHidden(options?: { timeout?: number }) {
+        await locator.waitFor({ state: 'hidden', timeout: options?.timeout ?? timeout });
+      },
+      async toHaveText(expected: string | RegExp, options?: { timeout?: number }) {
+        const t = options?.timeout ?? timeout;
+        const start = Date.now();
+        while (Date.now() - start < t) {
+          const text = await locator.textContent();
+          if (typeof expected === 'string' ? text === expected : expected.test(text || '')) {
+            return;
+          }
+          await new Promise(r => setTimeout(r, 100));
+        }
+        const text = await locator.textContent();
+        throw new Error(`Expected text to match ${expected}, but got ${text}`);
+      },
+      async toContainText(expected: string, options?: { timeout?: number }) {
+        const t = options?.timeout ?? timeout;
+        const start = Date.now();
+        while (Date.now() - start < t) {
+          const text = await locator.textContent();
+          if (text?.includes(expected)) {
+            return;
+          }
+          await new Promise(r => setTimeout(r, 100));
+        }
+        const text = await locator.textContent();
+        throw new Error(`Expected text to contain "${expected}", but got "${text}"`);
+      },
+      async toHaveValue(expected: string, options?: { timeout?: number }) {
+        const t = options?.timeout ?? timeout;
+        const start = Date.now();
+        while (Date.now() - start < t) {
+          const value = await locator.inputValue();
+          if (value === expected) {
+            return;
+          }
+          await new Promise(r => setTimeout(r, 100));
+        }
+        const value = await locator.inputValue();
+        throw new Error(`Expected value "${expected}", but got "${value}"`);
+      },
+    };
+  };
+}
+
+/**
+ * Create appState helper for internal state inspection (stub for setup)
+ */
+function createAppState(page: Page) {
+  return {
+    get: async (path: string): Promise<unknown> => {
+      return page.evaluate((p) => {
+        const state = (window as any).__APP_STATE__ ||
+                      (window as any).store?.getState?.() ||
+                      (window as any).__EXCALIDRAW_STATE__ ||
+                      (window as any).app?.state;
+        if (!state) return undefined;
+        return p.split('.').reduce((obj, key) => obj?.[key], state);
+      }, path);
+    },
+    getHistoryLength: async (): Promise<number> => -1,
+    getAll: async (): Promise<unknown> => null,
+    evaluate: async <T>(accessor: string): Promise<T> => {
+      return page.evaluate((fn) => {
+        const func = new Function('window', `return ${fn}`);
+        return func(window);
+      }, accessor);
+    },
+  };
+}
+
+/**
+ * Create a simple locateWithFallback function for setup scripts
+ */
+function createLocateWithFallback(page: Page) {
+  return async (
+    pg: Page,
+    selectors: { type: string; value: string }[],
+    action: string,
+    value?: string | null,
+    coords?: { x: number; y: number } | null
+  ) => {
+    const validSelectors = selectors.filter(s => s.value && s.value.trim() && !s.value.includes('undefined'));
+
+    for (const sel of validSelectors) {
+      try {
+        let locator: Locator;
+        if (sel.type === 'ocr-text') {
+          const text = sel.value.replace(/^ocr-text="/, '').replace(/"$/, '');
+          locator = pg.getByText(text, { exact: false });
+        } else if (sel.type === 'role-name') {
+          const match = sel.value.match(/^role=(\w+)\[name="(.+)"\]$/);
+          if (match) locator = pg.getByRole(match[1] as 'button' | 'link' | 'heading', { name: match[2] });
+          else locator = pg.locator(sel.value);
+        } else {
+          locator = pg.locator(sel.value);
+        }
+        const target = locator.first();
+        await target.waitFor({ timeout: 3000 });
+        if (action === 'click') await target.click();
+        else if (action === 'fill') await target.fill(value || '');
+        else if (action === 'selectOption') await target.selectOption(value || '');
+        return;
+      } catch {
+        continue;
+      }
+    }
+    // Coordinate fallback
+    if (action === 'click' && coords) {
+      await pg.mouse.click(coords.x, coords.y);
+      return;
+    }
+    throw new Error('No selector matched: ' + JSON.stringify(validSelectors));
+  };
+}
 
 /**
  * Run a Playwright setup script.
@@ -34,7 +195,7 @@ export async function runPlaywrightSetup(
     }
 
     // Execute the setup code
-    const extractedVariables = await executeSetupCode(page, code, context);
+    const extractedVariables = await executeSetupCode(page, code, context, false);
 
     return {
       success: true,
@@ -111,23 +272,65 @@ async function executeSetupCode(
   const funcMatch = setupMatch || testMatch;
 
   if (funcMatch) {
-    const body = funcMatch[1];
+    let body = funcMatch[1];
 
     // Create page proxy that skips screenshots when running as setup
     const pageProxy = isTestAsSetup ? createNoScreenshotProxy(page) : page;
 
-    // Build and execute the function
+    // Create helper functions that tests expect
+    const expectFn = createExpect(5000);
+    const appStateFn = createAppState(page);
+    const locateWithFallbackFn = createLocateWithFallback(page);
+
+    // Create a no-op stepLogger
+    const stepLogger = {
+      log: (msg: string) => {
+        // No-op for setup - we don't need to track steps
+      },
+    };
+
+    // Create a dummy screenshot path (won't be used since we skip screenshots)
+    const screenshotPath = '/tmp/setup-screenshot.png';
+
+    // Remove the test's local locateWithFallback function declaration so the parameter is used
+    if (body.includes('async function locateWithFallback(')) {
+      const startMatch = body.match(/async function locateWithFallback\s*\([^)]*\)\s*\{/);
+      if (startMatch && startMatch.index !== undefined) {
+        const startIdx = startMatch.index;
+        const braceStart = body.indexOf('{', startIdx);
+        let depth = 1;
+        let endIdx = braceStart + 1;
+        while (depth > 0 && endIdx < body.length) {
+          if (body[endIdx] === '{') depth++;
+          else if (body[endIdx] === '}') depth--;
+          endIdx++;
+        }
+        body = body.slice(0, startIdx) + '/* locateWithFallback provided by runner */' + body.slice(endIdx);
+      }
+    }
+
+    // Build and execute the function with all expected parameters
     const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
     const setupFn = new AsyncFunction(
       'page',
       'baseUrl',
-      'context',
-      `
-      ${body}
-      `
+      'screenshotPath',
+      'stepLogger',
+      'expect',
+      'appState',
+      'locateWithFallback',
+      body
     );
 
-    const result = await setupFn(pageProxy, context.baseUrl, context);
+    const result = await setupFn(
+      pageProxy,
+      context.baseUrl,
+      screenshotPath,
+      stepLogger,
+      expectFn,
+      appStateFn,
+      locateWithFallbackFn
+    );
 
     // If the setup returns an object, treat it as extracted variables
     if (result && typeof result === 'object') {

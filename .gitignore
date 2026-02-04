@@ -60,3 +60,4 @@ packages/runner/screenshot*
 .auto-claude/
 .worktrees/
 
+public/planned/*

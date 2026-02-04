@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 import {
   DndContext,
   DragOverlay,
@@ -13,10 +13,9 @@ import {
   useSensors,
 } from '@dnd-kit/core';
 import { CSS } from '@dnd-kit/utilities';
-import { Upload, Check, X, Image as ImageIcon, GripVertical, Link2 } from 'lucide-react';
+import { Upload, Check, X, Image as ImageIcon, GripVertical, Link2, Loader2 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { PlannedScreenshotUploader } from './planned-screenshot-uploader';
-import { assignPlannedToStep, unassignPlannedFromStep } from '@/server/actions/planned-screenshots';
+import { assignPlannedToStep, unassignPlannedFromStep, deletePlannedScreenshot } from '@/server/actions/planned-screenshots';
 import { toast } from 'sonner';
 import type { ScreenshotGroup } from '@/server/actions/tests';
 
@@ -62,13 +61,17 @@ function extractStepsFromGroups(groups: ScreenshotGroup[]): StepInfo[] {
   return steps;
 }
 
-// Draggable planned screenshot item
+// Draggable planned screenshot item with delete on hover
 function DraggablePlannedItem({
   screenshot,
   isDragging,
+  onDelete,
+  isDeleting,
 }: {
   screenshot: PlannedScreenshot;
   isDragging?: boolean;
+  onDelete: (id: string) => void;
+  isDeleting?: boolean;
 }) {
   const { attributes, listeners, setNodeRef, transform } = useDraggable({
     id: screenshot.id,
@@ -84,11 +87,30 @@ function DraggablePlannedItem({
     <div
       ref={setNodeRef}
       style={style}
-      {...listeners}
-      {...attributes}
-      className="border rounded-lg p-2 bg-white cursor-grab active:cursor-grabbing hover:border-purple-400 transition-colors"
+      className="group relative border rounded-lg p-2 bg-white hover:border-purple-400 transition-colors"
     >
-      <div className="flex items-start gap-2">
+      {/* Delete button - shown on hover */}
+      <button
+        onClick={(e) => {
+          e.stopPropagation();
+          onDelete(screenshot.id);
+        }}
+        disabled={isDeleting}
+        className="absolute -top-2 -right-2 p-1 bg-red-500 text-white rounded-full opacity-0 group-hover:opacity-100 transition-opacity hover:bg-red-600 z-10"
+        title="Delete"
+      >
+        {isDeleting ? (
+          <Loader2 className="h-3 w-3 animate-spin" />
+        ) : (
+          <X className="h-3 w-3" />
+        )}
+      </button>
+
+      <div
+        {...listeners}
+        {...attributes}
+        className="flex items-start gap-2 cursor-grab active:cursor-grabbing"
+      >
         <GripVertical className="h-4 w-4 text-muted-foreground mt-1 flex-shrink-0" />
         <div className="flex-1 min-w-0">
           <img
@@ -96,9 +118,6 @@ function DraggablePlannedItem({
             alt={screenshot.name || 'Planned'}
             className="w-full h-16 object-cover rounded border"
           />
-          <p className="text-xs text-muted-foreground mt-1 truncate">
-            {screenshot.name || 'Unnamed'}
-          </p>
         </div>
       </div>
     </div>
@@ -111,11 +130,15 @@ function DroppableStepSlot({
   matchedPlanned,
   isOver,
   onUnmatch,
+  onDeletePlanned,
+  isDeletingPlanned,
 }: {
   step: StepInfo;
   matchedPlanned: PlannedScreenshot | null;
   isOver: boolean;
   onUnmatch: (plannedId: string) => void;
+  onDeletePlanned: (plannedId: string) => void;
+  isDeletingPlanned?: boolean;
 }) {
   const { setNodeRef } = useDroppable({
     id: `step-${step.label}`,
@@ -145,7 +168,7 @@ function DroppableStepSlot({
         {/* Match indicator / drop zone */}
         <div className="flex-1 min-w-0">
           {matchedPlanned ? (
-            <div className="flex items-start gap-2 p-2 bg-green-50 border border-green-200 rounded-lg">
+            <div className="group relative flex items-start gap-2 p-2 bg-green-50 border border-green-200 rounded-lg">
               <Check className="h-4 w-4 text-green-600 mt-0.5 flex-shrink-0" />
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2">
@@ -157,17 +180,28 @@ function DroppableStepSlot({
                   alt={matchedPlanned.name || 'Planned'}
                   className="w-full h-12 object-cover rounded border mt-1"
                 />
-                <p className="text-xs text-muted-foreground mt-1 truncate">
-                  {matchedPlanned.name || 'Unnamed planned screenshot'}
-                </p>
               </div>
-              <button
-                onClick={() => onUnmatch(matchedPlanned.id)}
-                className="p-1 hover:bg-red-100 rounded text-red-500"
-                title="Remove match"
-              >
-                <X className="h-3 w-3" />
-              </button>
+              <div className="flex flex-col gap-1">
+                <button
+                  onClick={() => onUnmatch(matchedPlanned.id)}
+                  className="p-1 hover:bg-yellow-100 rounded text-yellow-600"
+                  title="Unmatch (keep image)"
+                >
+                  <Link2 className="h-3 w-3" />
+                </button>
+                <button
+                  onClick={() => onDeletePlanned(matchedPlanned.id)}
+                  disabled={isDeletingPlanned}
+                  className="p-1 hover:bg-red-100 rounded text-red-500"
+                  title="Delete image"
+                >
+                  {isDeletingPlanned ? (
+                    <Loader2 className="h-3 w-3 animate-spin" />
+                  ) : (
+                    <X className="h-3 w-3" />
+                  )}
+                </button>
+              </div>
             </div>
           ) : (
             <div
@@ -186,6 +220,110 @@ function DroppableStepSlot({
   );
 }
 
+// Simple inline uploader - immediately uploads on file select
+function InlineUploader({
+  repositoryId,
+  testId,
+  onUploadComplete,
+}: {
+  repositoryId: string;
+  testId: string;
+  onUploadComplete: () => void;
+}) {
+  const [isUploading, setIsUploading] = useState(false);
+  const [isDragging, setIsDragging] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const handleUpload = async (file: File) => {
+    // Validate file
+    const allowedTypes = ['image/png', 'image/jpeg', 'image/webp'];
+    if (!allowedTypes.includes(file.type)) {
+      toast.error('Invalid file type. Use PNG, JPEG, or WebP.');
+      return;
+    }
+    if (file.size > 10 * 1024 * 1024) {
+      toast.error('File too large. Max 10MB.');
+      return;
+    }
+
+    setIsUploading(true);
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      formData.append('repositoryId', repositoryId);
+      formData.append('testId', testId);
+
+      const response = await fetch('/api/planned-screenshots/upload', {
+        method: 'POST',
+        body: formData,
+      });
+
+      if (!response.ok) {
+        const result = await response.json();
+        throw new Error(result.error || 'Upload failed');
+      }
+
+      toast.success('Screenshot uploaded');
+      onUploadComplete();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Upload failed');
+    } finally {
+      setIsUploading(false);
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
+    }
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragging(false);
+    const file = e.dataTransfer.files[0];
+    if (file) handleUpload(file);
+  };
+
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) handleUpload(file);
+  };
+
+  return (
+    <div
+      onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
+      onDragLeave={() => setIsDragging(false)}
+      onDrop={handleDrop}
+      onClick={() => !isUploading && fileInputRef.current?.click()}
+      className={`border-2 border-dashed rounded-lg p-4 text-center cursor-pointer transition-colors ${
+        isDragging
+          ? 'border-purple-500 bg-purple-50'
+          : 'border-muted hover:border-purple-400 hover:bg-purple-50/50'
+      } ${isUploading ? 'opacity-50 cursor-wait' : ''}`}
+    >
+      {isUploading ? (
+        <>
+          <Loader2 className="h-6 w-6 mx-auto mb-2 text-purple-500 animate-spin" />
+          <p className="text-sm text-muted-foreground">Uploading...</p>
+        </>
+      ) : (
+        <>
+          <Upload className="h-6 w-6 mx-auto mb-2 text-muted-foreground" />
+          <p className="text-sm text-muted-foreground">
+            Drop image or click to upload
+          </p>
+        </>
+      )}
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="image/png,image/jpeg,image/webp"
+        onChange={handleChange}
+        className="hidden"
+        disabled={isUploading}
+      />
+    </div>
+  );
+}
+
 export function StepScreenshotMatcher({
   testId,
   repositoryId,
@@ -195,8 +333,8 @@ export function StepScreenshotMatcher({
 }: StepScreenshotMatcherProps) {
   const [activeId, setActiveId] = useState<string | null>(null);
   const [overId, setOverId] = useState<string | null>(null);
-  const [showUploader, setShowUploader] = useState(false);
   const [isAssigning, setIsAssigning] = useState(false);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   const sensors = useSensors(
     useSensor(PointerSensor, {
@@ -274,9 +412,17 @@ export function StepScreenshotMatcher({
     }
   };
 
-  const handleUploadComplete = () => {
-    setShowUploader(false);
-    onUpdate?.();
+  const handleDelete = async (plannedId: string) => {
+    setDeletingId(plannedId);
+    try {
+      await deletePlannedScreenshot(plannedId);
+      toast.success('Screenshot deleted');
+      onUpdate?.();
+    } catch {
+      toast.error('Failed to delete screenshot');
+    } finally {
+      setDeletingId(null);
+    }
   };
 
   const activePlanned = activeId
@@ -331,6 +477,8 @@ export function StepScreenshotMatcher({
                     matchedPlanned={matchedByStep.get(step.label) || null}
                     isOver={overId === `step-${step.label}`}
                     onUnmatch={handleUnmatch}
+                    onDeletePlanned={handleDelete}
+                    isDeletingPlanned={deletingId === matchedByStep.get(step.label)?.id}
                   />
                 ))}
               </div>
@@ -342,27 +490,12 @@ export function StepScreenshotMatcher({
                 Planned Screenshots (Drag to Match)
               </h4>
 
-              {/* Upload zone */}
-              {showUploader ? (
-                <div className="border border-purple-200 rounded-lg p-4 bg-purple-50/50">
-                  <PlannedScreenshotUploader
-                    repositoryId={repositoryId}
-                    testId={testId}
-                    onUploadComplete={handleUploadComplete}
-                    onCancel={() => setShowUploader(false)}
-                  />
-                </div>
-              ) : (
-                <button
-                  onClick={() => setShowUploader(true)}
-                  className="w-full border-2 border-dashed rounded-lg p-4 text-center hover:border-purple-400 hover:bg-purple-50/50 transition-colors"
-                >
-                  <Upload className="h-6 w-6 mx-auto mb-2 text-muted-foreground" />
-                  <p className="text-sm text-muted-foreground">
-                    Click to upload planned screenshot
-                  </p>
-                </button>
-              )}
+              {/* Always-visible upload zone */}
+              <InlineUploader
+                repositoryId={repositoryId}
+                testId={testId}
+                onUploadComplete={() => onUpdate?.()}
+              />
 
               {/* Unmatched planned screenshots */}
               {unmatchedPlanned.length > 0 && (
@@ -376,39 +509,15 @@ export function StepScreenshotMatcher({
                         key={ps.id}
                         screenshot={ps}
                         isDragging={activeId === ps.id}
+                        onDelete={handleDelete}
+                        isDeleting={deletingId === ps.id}
                       />
                     ))}
                   </div>
                 </div>
               )}
 
-              {/* Already matched (for reference) */}
-              {matchedByStep.size > 0 && (
-                <div className="space-y-2 pt-4 border-t">
-                  <p className="text-xs text-muted-foreground">
-                    Already Matched ({matchedByStep.size})
-                  </p>
-                  <div className="grid grid-cols-2 gap-2">
-                    {Array.from(matchedByStep.values()).map((ps) => (
-                      <div
-                        key={ps.id}
-                        className="border rounded-lg p-2 bg-green-50/50 border-green-200"
-                      >
-                        <img
-                          src={ps.imagePath}
-                          alt={ps.name || 'Planned'}
-                          className="w-full h-12 object-cover rounded border"
-                        />
-                        <p className="text-xs text-muted-foreground mt-1 truncate">
-                          {ps.stepLabel}
-                        </p>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {plannedScreenshots.length === 0 && !showUploader && (
+              {plannedScreenshots.length === 0 && (
                 <div className="text-center py-4 text-muted-foreground text-sm">
                   No planned screenshots uploaded yet
                 </div>
@@ -425,9 +534,6 @@ export function StepScreenshotMatcher({
                   alt={activePlanned.name || 'Planned'}
                   className="w-24 h-16 object-cover rounded border"
                 />
-                <p className="text-xs text-muted-foreground mt-1 truncate">
-                  {activePlanned.name || 'Unnamed'}
-                </p>
               </div>
             )}
           </DragOverlay>

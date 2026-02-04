@@ -11,7 +11,8 @@ Excalidraw tests: ~/.claude/plans/recursive-wondering-dongarra.md
 ## reuse
 check the recorder and the runner so that they are compatible and identify the root cause of the issue
 ## in progress
-
+Env setup UI - tests page, suit page, dropdown control
+  Dropdown should show defaults, override to work enable/disable
 ## test
 OCR
 GitHub PR Comments - CLI runner
@@ -21,9 +22,6 @@ Github actions integration
 Publish lastest runner to npx npm
 Docker
 ## features
-Issue: login restricted pages
-Define per build and per test runnable tests for setup 
-
 Custom webhook notifications
 
 GitLab integration (P2)
