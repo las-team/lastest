@@ -461,10 +461,9 @@ export async function batchUpdateVisualDiffs(ids: string[], data: Partial<NewVis
 }
 
 // Baselines
-export async function getActiveBaseline(testId: string, branch: string, stepLabel?: string | null) {
+export async function getActiveBaseline(testId: string, stepLabel?: string | null) {
   const conditions = [
     eq(baselines.testId, testId),
-    eq(baselines.branch, branch),
     eq(baselines.isActive, true),
   ];
   if (stepLabel) {
@@ -476,6 +475,7 @@ export async function getActiveBaseline(testId: string, branch: string, stepLabe
     .select()
     .from(baselines)
     .where(and(...conditions))
+    .orderBy(desc(baselines.createdAt))
     .get();
 }
 
@@ -503,8 +503,8 @@ export async function createBaseline(data: Omit<NewBaseline, 'id'>) {
   return { id, ...data, createdAt: new Date() };
 }
 
-export async function deactivateBaselines(testId: string, branch: string, stepLabel?: string | null) {
-  const conditions = [eq(baselines.testId, testId), eq(baselines.branch, branch)];
+export async function deactivateBaselines(testId: string, stepLabel?: string | null) {
+  const conditions = [eq(baselines.testId, testId)];
   if (stepLabel) {
     conditions.push(eq(baselines.stepLabel, stepLabel));
   } else {

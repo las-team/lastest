@@ -542,7 +542,7 @@ async function processVisualDiff(
   };
 
   // Get active baseline for this test (filtered by stepLabel)
-  const baseline = await queries.getActiveBaseline(testId, branch, stepLabel);
+  const baseline = await queries.getActiveBaseline(testId, stepLabel);
 
   // Check for carry-forward (previously approved identical image)
   const currentHash = hashImage(path.join(process.cwd(), 'public', currentScreenshotPath));
