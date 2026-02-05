@@ -335,7 +335,7 @@ export class PlaywrightRecorder extends EventEmitter {
           const isSpecialKey = e.key.length > 1 || activeModifiers.size > 0;
           if (!isEditable || isSpecialKey) {
             const modifiers = getActiveModifiers();
-            // @ts-ignore
+            // @ts-expect-error
             window.__recordKeypress?.(e.key, modifiers);
           }
         }
@@ -395,7 +395,7 @@ export class PlaywrightRecorder extends EventEmitter {
         const rect = target.getBoundingClientRect();
         const boundingBox = { x: rect.x, y: rect.y, width: rect.width, height: rect.height };
         const modifiers = getActiveModifiers();
-        // @ts-ignore
+        // @ts-expect-error
         window.__recordAction?.('click', selectors, undefined, boundingBox, generateActionId(), modifiers);
       }, true);
 
@@ -407,7 +407,7 @@ export class PlaywrightRecorder extends EventEmitter {
           return;
         }
         const selectors = generateAllSelectors(target);
-        // @ts-ignore
+        // @ts-expect-error
         window.__recordAction?.('fill', selectors, target.value, undefined, generateActionId());
       }, true);
 
@@ -415,7 +415,7 @@ export class PlaywrightRecorder extends EventEmitter {
         const target = e.target as HTMLSelectElement;
         if (target.tagName === 'SELECT') {
           const selectors = generateAllSelectors(target);
-          // @ts-ignore
+          // @ts-expect-error
           window.__recordAction?.('selectOption', selectors, target.value, undefined, generateActionId());
         }
       }, true);
@@ -544,7 +544,7 @@ export class PlaywrightRecorder extends EventEmitter {
           const now = Date.now();
           if (now - lastTime >= interval) {
             lastTime = now;
-            // @ts-ignore
+            // @ts-expect-error
             window.__recordCursorMove?.(e.clientX, e.clientY);
           }
         }, true);
@@ -552,13 +552,13 @@ export class PlaywrightRecorder extends EventEmitter {
         // Mouse down/up events with modifier tracking
         document.addEventListener('mousedown', (e: MouseEvent) => {
           const modifiers = getActiveModifiers();
-          // @ts-ignore
+          // @ts-expect-error
           window.__recordMouseEvent?.('down', e.clientX, e.clientY, e.button, modifiers);
         }, true);
 
         document.addEventListener('mouseup', (e: MouseEvent) => {
           const modifiers = getActiveModifiers();
-          // @ts-ignore
+          // @ts-expect-error
           window.__recordMouseEvent?.('up', e.clientX, e.clientY, e.button, modifiers);
         }, true);
       }
@@ -589,7 +589,7 @@ export class PlaywrightRecorder extends EventEmitter {
         const selectors = generateAllSelectors(target);
         const primarySelector = selectors[0]?.value || '';
 
-        // @ts-ignore
+        // @ts-expect-error
         window.__recordHoverPreview?.({
           tagName: target.tagName.toLowerCase(),
           id: target.id || undefined,
@@ -770,7 +770,7 @@ export class PlaywrightRecorder extends EventEmitter {
           }
         }
 
-        // @ts-ignore
+        // @ts-expect-error
         window.__recordElementAssertion?.({
           type: opt.type,
           selectors,
@@ -859,7 +859,7 @@ export class PlaywrightRecorder extends EventEmitter {
 
           if (found) {
             pending.verified = true;
-            // @ts-ignore
+            // @ts-expect-error
             window.__updateVerification?.(pending.actionId, true);
           }
         }

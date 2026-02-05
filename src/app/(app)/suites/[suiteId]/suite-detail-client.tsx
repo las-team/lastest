@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { Play, Pencil, Trash2, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -65,21 +65,31 @@ export function SuiteDetailClient({ suite, availableTests, areas }: SuiteDetailC
   const [progress, setProgress] = useState<RunProgress | null>(null);
   const [executionTarget, setExecutionTarget] = useState<string>('local');
 
+  // Use ref to allow self-referential polling without violating hooks rules
+  const pollProgressRef = useRef<((id: string) => Promise<void>) | undefined>(undefined);
+
   const pollProgress = useCallback(async (id: string) => {
     const data = await getSuiteRunProgress(id);
     if (data) {
       setProgress(data);
       if (data.status === 'running') {
-        setTimeout(() => pollProgress(id), 1000);
+        setTimeout(() => pollProgressRef.current?.(id), 1000);
       } else {
         setIsRunning(false);
       }
     }
   }, []);
 
+  // Update ref when callback changes
+  useEffect(() => {
+    pollProgressRef.current = pollProgress;
+  }, [pollProgress]);
+
   useEffect(() => {
     if (runId && isRunning) {
-      pollProgress(runId);
+      // Start polling in next tick to avoid setState in effect body
+      const timer = setTimeout(() => pollProgress(runId), 0);
+      return () => clearTimeout(timer);
     }
   }, [runId, isRunning, pollProgress]);
 
@@ -112,8 +122,8 @@ export function SuiteDetailClient({ suite, availableTests, areas }: SuiteDetailC
     router.refresh();
   };
 
-  // Build a map of test results by testId
-  const resultsByTestId = new Map(
+  // Build a map of test results by testId (available for future use)
+  const _resultsByTestId = new Map(
     progress?.results.map((r) => [r.testId, r]) ?? []
   );
 

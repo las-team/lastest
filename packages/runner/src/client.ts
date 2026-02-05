@@ -15,7 +15,7 @@ import type {
   ScreenshotUploadResponse,
   ErrorResponse,
   PongResponse,
-  ConnectionEstablishedMessage,
+  ErrorCode,
 } from './protocol.js';
 import { createMessage } from './protocol.js';
 import { TestRunner } from './runner.js';
@@ -344,10 +344,10 @@ export class RunnerClient {
     }
   }
 
-  private async sendError(correlationId: string, code: string, message: string): Promise<void> {
+  private async sendError(correlationId: string, code: ErrorCode, message: string): Promise<void> {
     const errorMsg = createMessage<ErrorResponse>('response:error', {
       correlationId,
-      code: code as any,
+      code,
       message,
     });
     await this.sendMessage(errorMsg);

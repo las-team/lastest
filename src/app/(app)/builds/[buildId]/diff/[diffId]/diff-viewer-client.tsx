@@ -74,11 +74,11 @@ export function DiffViewerClient({ diff, buildId, nextDiffId }: DiffViewerClient
     }
   };
 
-  const handleSkip = () => {
+  const handleSkip = useCallback(() => {
     if (nextDiffId) {
       router.push(`/builds/${buildId}/diff/${nextDiffId}`);
     }
-  };
+  }, [nextDiffId, buildId, router]);
 
   // Keyboard shortcuts
   useEffect(() => {

@@ -12,6 +12,10 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Ignore compiled output
+    "**/dist/**",
+    "packages/runner/dist/**",
+    "packages/vscode-extension/dist/**",
   ]),
 ]);
 

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useMemo } from 'react';
+import { useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -14,11 +14,12 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import {
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
-} from '@/components/ui/collapsible';
+// Collapsible imports - may be needed for grouped view
+// import {
+//   Collapsible,
+//   CollapsibleContent,
+//   CollapsibleTrigger,
+// } from '@/components/ui/collapsible';
 import { createFunctionalArea, deleteTests } from '@/server/actions/tests';
 import { generateBasicTests } from '@/server/actions/scanner';
 import { aiFixAllFailedTests, aiFixTests } from '@/server/actions/ai';
@@ -39,10 +40,7 @@ import {
   Clock,
   Search,
   ChevronRight,
-  ChevronDown,
   FolderOpen,
-  Folder,
-  FileText,
   Play,
   Trash2,
   X
@@ -268,7 +266,7 @@ export function TestsPageClient({ areas, tests, routes, repositoryId, baseUrl = 
 
         {/* Stats Row */}
         <div className="grid grid-cols-4 gap-4">
-          {statsData.map((stat, i) => (
+          {statsData.map((stat) => (
             <div
               key={stat.label}
               className="p-4 rounded-lg bg-card border border-border/50"

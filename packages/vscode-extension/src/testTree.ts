@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import type { Lastest2Api } from './api';
 import type { Lastest2WebSocket } from './websocket';
-import type { Repository, FunctionalArea, Test, TestTreeItem } from './types';
+import type { Repository, FunctionalArea, Test } from './types';
 
 type TreeNode = RepositoryNode | FunctionalAreaNode | TestNode;
 

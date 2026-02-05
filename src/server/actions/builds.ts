@@ -9,7 +9,7 @@ import { getOpenMRsForBranch } from '@/lib/gitlab/oauth';
 import { getRunner } from '@/lib/playwright/runner';
 import { getServerManager } from '@/lib/playwright/server-manager';
 import { getSetupOrchestrator } from '@/lib/setup/setup-orchestrator';
-import type { SetupContext, SetupStatus } from '@/lib/setup/types';
+import type { SetupContext } from '@/lib/setup/types';
 import { executeTests } from '@/lib/execution/executor';
 import { getCurrentSession } from '@/lib/auth';
 import { generateDiff } from '@/lib/diff/generator';
@@ -80,7 +80,6 @@ async function getGitInfoFromGitHub(repositoryId: string | null): Promise<GitInf
   return getGitInfoFromProvider(repositoryId);
 }
 
-const SCREENSHOTS_DIR = path.join(process.cwd(), 'public', 'screenshots');
 const DIFFS_DIR = path.join(process.cwd(), 'public', 'diffs');
 
 export interface BuildSummary {
@@ -301,7 +300,7 @@ async function runBuildAsync(
     const baseUrl = envConfig?.baseUrl || 'http://localhost:3000';
 
     // Initialize setup context
-    let setupContext: SetupContext = {
+    const setupContext: SetupContext = {
       baseUrl,
       variables: {},
       repositoryId: repositoryId || null,
@@ -671,7 +670,7 @@ async function processVisualDiff(
     });
 
     return { hasChanges, diffId: diff.id, classification };
-  } catch (error) {
+  } catch {
     // Diff generation failed, mark as pending for review
     const plannedDiff = await generatePlannedDiff(currentScreenshotPath);
 

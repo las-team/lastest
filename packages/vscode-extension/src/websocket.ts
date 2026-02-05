@@ -87,14 +87,14 @@ export class Lastest2WebSocket {
             try {
               const data = JSON.parse(line.slice(6));
               this.handleMessage(data as WSMessage);
-            } catch (e) {
+            } catch {
               // Ignore parse errors
             }
           }
         }
       }
-    } catch (e) {
-      if ((e as Error).name === 'AbortError') {
+    } catch (err) {
+      if ((err as Error).name === 'AbortError') {
         return; // Intentional disconnect
       }
       console.error('Lastest2 SSE error:', e);

@@ -24,10 +24,12 @@ function createAppState(page: Page) {
      */
     get: async (path: string): Promise<unknown> => {
       return page.evaluate((p) => {
+        /* eslint-disable @typescript-eslint/no-explicit-any */
         const state = (window as any).__APP_STATE__ ||
                       (window as any).store?.getState?.() ||
                       (window as any).__EXCALIDRAW_STATE__ ||
                       (window as any).app?.state;
+        /* eslint-enable @typescript-eslint/no-explicit-any */
         if (!state) return undefined;
         return p.split('.').reduce((obj, key) => obj?.[key], state);
       }, path);
@@ -39,6 +41,7 @@ function createAppState(page: Page) {
      */
     getHistoryLength: async (): Promise<number> => {
       return page.evaluate(() => {
+        /* eslint-disable @typescript-eslint/no-explicit-any */
         const api = (window as any).excalidrawAPI;
         if (api?.getAppState) {
           const appState = api.getAppState();
@@ -49,6 +52,7 @@ function createAppState(page: Page) {
         }
         // Fallback: check common state patterns
         const state = (window as any).__EXCALIDRAW_STATE__ || (window as any).__APP_STATE__;
+        /* eslint-enable @typescript-eslint/no-explicit-any */
         return state?.history?.length ?? -1;
       });
     },
@@ -59,11 +63,13 @@ function createAppState(page: Page) {
      */
     getAll: async (): Promise<unknown> => {
       return page.evaluate(() => {
+        /* eslint-disable @typescript-eslint/no-explicit-any */
         return (window as any).__APP_STATE__ ||
                (window as any).store?.getState?.() ||
                (window as any).__EXCALIDRAW_STATE__ ||
                (window as any).app?.state ||
                null;
+        /* eslint-enable @typescript-eslint/no-explicit-any */
       });
     },
 
@@ -89,7 +95,7 @@ function createAppState(page: Page) {
 function createExpect(timeout = 5000) {
   return function expect(target: Page | Locator) {
     // Check if target is a Page (has 'goto' method) vs Locator
-    const isPage = typeof (target as any).goto === 'function';
+    const isPage = typeof (target as unknown as { goto?: unknown }).goto === 'function';
 
     if (isPage) {
       const page = target as Page;
@@ -843,7 +849,7 @@ export class PlaywrightRunner extends EventEmitter {
       const screenshotProxy = new Proxy(page, {
         get: (target, prop) => {
           if (prop === 'screenshot') {
-            return async (options?: Record<string, unknown>) => {
+            return async (options?: Parameters<Page['screenshot']>[0]) => {
               // Apply stabilization before screenshot
               await applyStabilization(target, targetUrl, stabilization);
 
@@ -851,7 +857,7 @@ export class PlaywrightRunner extends EventEmitter {
               if (screenshotDelay > 0) {
                 await target.waitForTimeout(screenshotDelay);
               }
-              const result = await target.screenshot(options as any);
+              const result = await target.screenshot(options);
               if (options?.path) {
                 const filename = path.basename(options.path as string);
                 const publicPath = this.repositoryId
@@ -865,9 +871,9 @@ export class PlaywrightRunner extends EventEmitter {
               return result;
             };
           }
-          const value = (target as any)[prop];
+          const value = target[prop as keyof Page];
           if (typeof value === 'function') {
-            return value.bind(target);
+            return (value as (...args: unknown[]) => unknown).bind(target);
           }
           return value;
         }

@@ -7,7 +7,7 @@ import type { SetupScript, SetupContext, SetupResult } from './types';
  */
 function createExpect(timeout = 5000) {
   return function expect(target: Page | Locator) {
-    const isPage = typeof (target as any).goto === 'function';
+    const isPage = typeof (target as unknown as { goto?: unknown }).goto === 'function';
 
     if (isPage) {
       const page = target as Page;
@@ -98,12 +98,14 @@ function createAppState(page: Page) {
   return {
     get: async (path: string): Promise<unknown> => {
       return page.evaluate((p) => {
+        /* eslint-disable @typescript-eslint/no-explicit-any */
         const state = (window as any).__APP_STATE__ ||
                       (window as any).store?.getState?.() ||
                       (window as any).__EXCALIDRAW_STATE__ ||
                       (window as any).app?.state;
+        /* eslint-enable @typescript-eslint/no-explicit-any */
         if (!state) return undefined;
-        return p.split('.').reduce((obj, key) => obj?.[key], state);
+        return p.split('.').reduce((obj: Record<string, unknown>, key: string) => obj?.[key] as Record<string, unknown>, state);
       }, path);
     },
     getHistoryLength: async (): Promise<number> => -1,
@@ -120,7 +122,7 @@ function createAppState(page: Page) {
 /**
  * Create a simple locateWithFallback function for setup scripts
  */
-function createLocateWithFallback(page: Page) {
+function createLocateWithFallback(_page: Page) {
   return async (
     pg: Page,
     selectors: { type: string; value: string }[],
@@ -254,10 +256,10 @@ async function executeSetupCode(
   page: Page,
   code: string,
   context: SetupContext,
-  isTestAsSetup = false
+  _isTestAsSetup = false
 ): Promise<Record<string, unknown>> {
   // Strip TypeScript type annotations
-  let processedCode = stripTypeAnnotations(code);
+  const processedCode = stripTypeAnnotations(code);
 
   // Check for setup function format
   const setupMatch = processedCode.match(
@@ -366,7 +368,7 @@ function createSetupPageProxy(page: Page, baseUrl: string): Page {
       }
       if (prop === 'goto') {
         // Intercept goto to handle relative URLs
-        return async (url: string, options?: any) => {
+        return async (url: string, options?: Parameters<Page['goto']>[1]) => {
           let resolvedUrl = url;
           // Handle relative URLs
           if (url.startsWith('/')) {
@@ -377,9 +379,9 @@ function createSetupPageProxy(page: Page, baseUrl: string): Page {
           return target.goto(resolvedUrl, options);
         };
       }
-      const value = (target as any)[prop];
+      const value = target[prop as keyof Page];
       if (typeof value === 'function') {
-        return value.bind(target);
+        return (value as (...args: unknown[]) => unknown).bind(target);
       }
       return value;
     }

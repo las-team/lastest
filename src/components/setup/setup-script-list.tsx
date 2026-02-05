@@ -11,7 +11,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { Plus, Code, Globe, MoreVertical, Edit2, Trash2, Copy, Play, Loader2 } from 'lucide-react';
+import { Plus, Code, Globe, MoreVertical, Edit2, Trash2, Copy, Loader2 } from 'lucide-react';
 import { SetupScriptEditor } from './setup-script-editor';
 import { deleteSetupScript, duplicateSetupScript, getSetupScriptUsage } from '@/server/actions/setup-scripts';
 import { toast } from 'sonner';

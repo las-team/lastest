@@ -248,7 +248,7 @@ export function RecordingClient({
   const [areas, setAreas] = useState(initialAreas);
 
   // Recording state
-  const [sessionId, setSessionId] = useState<string | null>(null);
+  const [_sessionId, setSessionId] = useState<string | null>(null);
   const [events, setEvents] = useState<RecordingEvent[]>([]);
   const [screenshots, setScreenshots] = useState<string[]>([]);
   const [isLoading, setIsLoading] = useState(false);

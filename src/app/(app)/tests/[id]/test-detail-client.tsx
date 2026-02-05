@@ -29,7 +29,7 @@ import { toast } from 'sonner';
 import { useNotifyJobStarted } from '@/components/queue/job-polling-context';
 import { ExecutionTargetSelector } from '@/components/execution/execution-target-selector';
 import { StepScreenshotMatcher } from '@/components/planned/step-screenshot-matcher';
-import type { Test, TestVersion, VisualDiff, PlannedScreenshot } from '@/lib/db/schema';
+import type { Test, TestVersion, PlannedScreenshot } from '@/lib/db/schema';
 import type { ScreenshotGroup } from '@/server/actions/tests';
 
 interface StepDiff {

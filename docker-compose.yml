@@ -29,7 +29,7 @@ services:
     environment:
       - NODE_ENV=production
       - DATABASE_PATH=/app/data/lastest2.db
-      - BETTER_AUTH_SECRET=${BETTER_AUTH_SECRET:-}
+      - BETTER_AUTH_SECRET=${BETTER_AUTH_SECRET:?BETTER_AUTH_SECRET is required}
       - GITHUB_CLIENT_ID=${GITHUB_CLIENT_ID:-}
       - GITHUB_CLIENT_SECRET=${GITHUB_CLIENT_SECRET:-}
     restart: unless-stopped

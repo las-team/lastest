@@ -50,16 +50,15 @@ return { loggedIn: true };
 `;
 
 const API_TEMPLATE = `{
-  "steps": [
-    {
-      "method": "POST",
-      "endpoint": "/api/seed",
-      "body": {
-        "action": "reset"
-      },
-      "saveAs": "seedResult"
-    }
-  ]
+  "method": "POST",
+  "endpoint": "/api/seed",
+  "headers": {},
+  "body": {
+    "action": "reset"
+  },
+  "extractVariables": {
+    "seedResult": "data.id"
+  }
 }`;
 
 export function SetupScriptEditor({

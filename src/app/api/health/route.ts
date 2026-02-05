@@ -5,7 +5,7 @@ import { sql } from 'drizzle-orm';
 export async function GET() {
   try {
     // Check database connectivity
-    db.run(sql`SELECT 1`);
+    await db.run(sql`SELECT 1`);
 
     return NextResponse.json({
       status: 'healthy',

@@ -49,7 +49,7 @@ export async function aiCreateTest(
 ): Promise<{ success: boolean; code?: string; error?: string }> {
   try {
     // Enrich context with route information if routeId is provided
-    let enrichedContext = { ...context };
+    const enrichedContext = { ...context };
 
     if (routeId) {
       const routeWithContext = await queries.getRouteWithContext(routeId);

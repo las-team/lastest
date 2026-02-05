@@ -3,10 +3,8 @@
  * Executes Playwright tests and returns results.
  */
 
-import { chromium, firefox, webkit, Browser, Page, BrowserContext } from 'playwright';
+import { chromium, Browser, Page, BrowserContext } from 'playwright';
 import { createHash } from 'crypto';
-import fs from 'fs';
-import path from 'path';
 import type { RunTestCommandPayload, LogEntry } from './protocol.js';
 
 /**
@@ -271,7 +269,7 @@ export class TestRunner {
           } else if (sel.type === 'role-name') {
             const match = sel.value.match(/^role=(\w+)\[name="(.+)"\]$/);
             if (match) {
-              locator = pg.getByRole(match[1] as any, { name: match[2] });
+              locator = pg.getByRole(match[1] as 'button' | 'link' | 'heading', { name: match[2] });
             } else {
               locator = pg.locator(sel.value);
             }
@@ -308,13 +306,11 @@ export class TestRunner {
 
     // Create screenshotPath generator (start from 1 to match local runner)
     let screenshotStep = 1;
-    const getScreenshotPath = () => {
-      return `step${screenshotStep++}`;
-    };
 
     // Override page.screenshot to capture screenshots
     const originalScreenshot = page.screenshot.bind(page);
-    (page as any).screenshot = async (options?: any) => {
+    const pageWithScreenshot = page as Page & { screenshot: typeof originalScreenshot };
+    pageWithScreenshot.screenshot = async (options?: Parameters<typeof originalScreenshot>[0]) => {
       const result = await originalScreenshot(options);
       if (options?.path) {
         const label = `step${screenshotStep++}`;
@@ -349,7 +345,8 @@ export class TestRunner {
   }
 
   private createExpect(timeout = 5000) {
-    return (target: Page | any) => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    return (target: any) => {
       const isPage = typeof target?.goto === 'function';
 
       if (isPage) {

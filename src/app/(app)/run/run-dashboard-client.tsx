@@ -70,7 +70,7 @@ function isLocalUrl(url: string): boolean {
   }
 }
 
-export function RunDashboardClient({ tests, runs, builds, repositoryId, activeBranch, baseUrl: initialBaseUrl, buildChanges }: RunDashboardClientProps) {
+export function RunDashboardClient({ tests, runs: _runs, builds, repositoryId, activeBranch, baseUrl: initialBaseUrl, buildChanges }: RunDashboardClientProps) {
   const router = useRouter();
   const notifyJobStarted = useNotifyJobStarted();
   const [isRunning, setIsRunning] = useState(false);
@@ -122,7 +122,7 @@ export function RunDashboardClient({ tests, runs, builds, repositoryId, activeBr
     testServerConnection(initialBaseUrl).then((result) => {
       setTestResult({ success: result.success, responseTime: result.responseTime, statusCode: result.statusCode, error: result.error });
     });
-  }, []);
+  }, [initialBaseUrl]);
 
   const saveAndTestBaseUrl = async () => {
     if (baseUrl !== initialBaseUrlRef.current) {
@@ -147,7 +147,7 @@ export function RunDashboardClient({ tests, runs, builds, repositoryId, activeBr
     setIsRunning(true);
     try {
       await saveAndTestBaseUrl();
-      const { buildId, testRunId } = await createAndRunBuild('manual', undefined, repositoryId, executionTarget);
+      const { buildId } = await createAndRunBuild('manual', undefined, repositoryId, executionTarget);
       notifyJobStarted();
       router.push(`/builds/${buildId}`);
     } catch (error) {
