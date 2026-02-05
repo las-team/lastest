@@ -115,6 +115,19 @@ export async function getDiffsByBuild(buildId: string) {
 }
 
 /**
+ * Extract the step label from a screenshot filename.
+ * Filenames follow the pattern: {runId}-{testId}-{stepLabel}.png
+ * where runId and testId are UUIDs (5 dash-separated hex groups each = 10 parts).
+ */
+function extractStepLabelFromPath(imagePath: string): string | null {
+  const filename = imagePath.split('/').pop();
+  if (!filename) return null;
+  const parts = filename.split('-');
+  if (parts.length <= 10) return null;
+  return parts.slice(10).join('-').replace('.png', '') || null;
+}
+
+/**
  * Get a single diff with full details
  */
 export async function getDiff(diffId: string) {
@@ -124,8 +137,28 @@ export async function getDiff(diffId: string) {
   // Get test details
   const test = await queries.getTest(diff.testId);
 
+  // Look up planned screenshot if not already on the diff
+  let plannedImagePath = diff.plannedImagePath;
+  let plannedDiffImagePath = diff.plannedDiffImagePath;
+  let plannedPixelDifference = diff.plannedPixelDifference;
+  let plannedPercentageDifference = diff.plannedPercentageDifference;
+
+  if (!plannedImagePath) {
+    const stepLabel = extractStepLabelFromPath(diff.currentImagePath);
+    if (stepLabel) {
+      const planned = await queries.getPlannedScreenshotByTest(diff.testId, stepLabel);
+      if (planned) {
+        plannedImagePath = planned.imagePath;
+      }
+    }
+  }
+
   return {
     ...diff,
+    plannedImagePath,
+    plannedDiffImagePath,
+    plannedPixelDifference,
+    plannedPercentageDifference,
     test: test ?? null,
   };
 }
