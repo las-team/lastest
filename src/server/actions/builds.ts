@@ -12,7 +12,7 @@ import { getSetupOrchestrator } from '@/lib/setup/setup-orchestrator';
 import type { SetupContext } from '@/lib/setup/types';
 import { executeTests } from '@/lib/execution/executor';
 import { getCurrentSession } from '@/lib/auth';
-import { generateDiff } from '@/lib/diff/generator';
+import { generateDiff, type Rectangle } from '@/lib/diff/generator';
 import { hashImage } from '@/lib/diff/hasher';
 import { sendSlackNotification } from '@/lib/integrations/slack';
 import { sendDiscordNotification } from '@/lib/integrations/discord';
@@ -225,7 +225,7 @@ async function runBuildAsync(
   const playwrightSettings = await queries.getPlaywrightSettings(repositoryId);
 
   // Result callback for processing diffs
-  const onResult = async (result: { testId: string; status: string; screenshotPath?: string; screenshots: { path: string; label?: string }[]; errorMessage?: string; durationMs?: number; a11yViolations?: { id: string; impact: 'critical' | 'serious' | 'moderate' | 'minor'; description: string; help: string; helpUrl: string; nodes: number }[] }) => {
+  const onResult = async (result: { testId: string; status: string; screenshotPath?: string; screenshots: { path: string; label?: string }[]; errorMessage?: string; durationMs?: number; a11yViolations?: { id: string; impact: 'critical' | 'serious' | 'moderate' | 'minor'; description: string; help: string; helpUrl: string; nodes: number }[]; stabilityMetadata?: { frameCount: number; stableFrames: number; maxFrameDiff: number; isStable: boolean } }) => {
     processedCount++;
 
     // Save test result immediately
@@ -261,7 +261,8 @@ async function runBuildAsync(
         screenshot.path,
         branch,
         repositoryId,
-        screenshot.label
+        screenshot.label,
+        result.stabilityMetadata?.isStable === false
       );
       if (diffResult.classification === 'changed') changesDetected++;
       if (diffResult.classification === 'flaky') flakyCount++;
@@ -521,7 +522,8 @@ async function processVisualDiff(
   currentScreenshotPath: string,
   branch: string,
   repositoryId?: string | null,
-  stepLabel?: string
+  stepLabel?: string,
+  isUnstable?: boolean
 ): Promise<{ hasChanges: boolean; diffId: string; classification: DiffClassification }> {
   // Get diff sensitivity settings
   const settings = await queries.getDiffSensitivitySettings(repositoryId);
@@ -529,11 +531,24 @@ async function processVisualDiff(
   const flakyThreshold = settings.flakyThreshold ?? 10;
   const includeAntiAliasing = settings.includeAntiAliasing ?? false;
 
+  // Fetch ignore regions for this test
+  const testIgnoreRegions = await queries.getIgnoreRegions(testId);
+  const ignoreRects: Rectangle[] | undefined = testIgnoreRegions.length > 0
+    ? testIgnoreRegions.map(r => ({ x: r.x, y: r.y, width: r.width, height: r.height }))
+    : undefined;
+
   // Helper to classify based on percentage
   const classifyDiff = (pct: number): { classification: DiffClassification; status: DiffStatus } => {
+    // If burst capture flagged this as unstable, bias toward flaky classification
+    const effectiveFlakyThreshold = isUnstable ? Math.max(flakyThreshold, pct + 1) : flakyThreshold;
+
     if (pct < unchangedThreshold) {
+      // Even if below unchanged threshold, mark as flaky if frames were unstable
+      if (isUnstable) {
+        return { classification: 'flaky', status: 'pending' };
+      }
       return { classification: 'unchanged', status: 'auto_approved' };
-    } else if (pct < flakyThreshold) {
+    } else if (pct < effectiveFlakyThreshold) {
       return { classification: 'flaky', status: 'pending' };
     } else {
       return { classification: 'changed', status: 'pending' };
@@ -572,7 +587,8 @@ async function processVisualDiff(
         path.join(process.cwd(), 'public', currentPath),
         DIFFS_DIR,
         0.1,
-        includeAntiAliasing
+        includeAntiAliasing,
+        ignoreRects
       );
 
       return {
@@ -642,7 +658,8 @@ async function processVisualDiff(
       path.join(process.cwd(), 'public', currentScreenshotPath),
       DIFFS_DIR,
       0.1,
-      includeAntiAliasing
+      includeAntiAliasing,
+      ignoreRects
     );
 
     const pct = diffResult.percentageDifference;

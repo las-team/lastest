@@ -22,7 +22,7 @@ import { SelectorPriorityList } from './selector-priority-list';
 import { savePlaywrightSettings, resetPlaywrightSettings, getSelectorStatsAction } from '@/server/actions/settings';
 import { DEFAULT_SELECTOR_PRIORITY, DEFAULT_STABILIZATION_SETTINGS } from '@/lib/db/schema';
 import type { SelectorConfig, PlaywrightSettings, HeadlessMode, RecordingEngine, StabilizationSettings, SelectorType } from '@/lib/db/schema';
-import { Loader2, RotateCcw, List, Video, MousePointer, Pause, Clock, Layers, ChevronDown, Shield, Hourglass, Type, Ban, Eye } from 'lucide-react';
+import { Loader2, RotateCcw, List, Video, MousePointer, Pause, Clock, Layers, ChevronDown, Shield, Hourglass, Type, Ban, Eye, Camera, EyeOff } from 'lucide-react';
 import { Slider } from '@/components/ui/slider';
 import { toast } from 'sonner';
 import { calculateRecommendations, type SelectorRecommendation } from '@/lib/selector-recommendations';
@@ -61,7 +61,7 @@ export function PlaywrightSettingsCard({
   const [screenshotDelay, setScreenshotDelay] = useState(settings.screenshotDelay ?? 0);
   const [maxParallelTests, setMaxParallelTests] = useState(settings.maxParallelTests ?? 1);
   const [stabilization, setStabilization] = useState<StabilizationSettings>(
-    settings.stabilization || DEFAULT_STABILIZATION_SETTINGS
+    { ...DEFAULT_STABILIZATION_SETTINGS, ...settings.stabilization }
   );
   const [stabilizationOpen, setStabilizationOpen] = useState(false);
   const [selectorStats, setSelectorStats] = useState<SelectorTypeStats[]>([]);
@@ -96,7 +96,7 @@ export function PlaywrightSettingsCard({
     freezeAnimations: settings.freezeAnimations ?? false,
     screenshotDelay: settings.screenshotDelay ?? 0,
     maxParallelTests: settings.maxParallelTests ?? 1,
-    stabilization: settings.stabilization || DEFAULT_STABILIZATION_SETTINGS,
+    stabilization: { ...DEFAULT_STABILIZATION_SETTINGS, ...settings.stabilization },
   });
 
   const doSave = useCallback(() => {
@@ -600,6 +600,157 @@ export function PlaywrightSettingsCard({
                   })}
                 />
               </div>
+            </div>
+
+            {/* Burst Capture */}
+            <div className="space-y-3 border-l-2 border-muted pl-4">
+              <div className="flex items-center gap-2">
+                <Camera className="w-4 h-4 text-muted-foreground" />
+                <Label className="text-sm font-medium">Burst Capture</Label>
+              </div>
+
+              <div className="flex items-center justify-between">
+                <div className="space-y-0.5">
+                  <Label className="text-sm">Enable Burst Capture</Label>
+                  <p className="text-xs text-muted-foreground">Take multiple screenshots to detect instability</p>
+                </div>
+                <Switch
+                  checked={stabilization.burstCapture}
+                  onCheckedChange={(checked) => setStabilization({
+                    ...stabilization,
+                    burstCapture: checked
+                  })}
+                />
+              </div>
+              {stabilization.burstCapture && (
+                <>
+                  <div className="flex items-center justify-between pl-4">
+                    <Label className="text-sm">Frame Count</Label>
+                    <Input
+                      type="number"
+                      min={2}
+                      max={10}
+                      value={stabilization.burstFrameCount}
+                      onChange={(e) => setStabilization({
+                        ...stabilization,
+                        burstFrameCount: Math.max(2, Math.min(10, parseInt(e.target.value) || 3))
+                      })}
+                      className="w-20"
+                    />
+                  </div>
+                  <div className="flex items-center justify-between pl-4">
+                    <div className="space-y-0.5">
+                      <Label className="text-sm">Stability Threshold</Label>
+                      <p className="text-xs text-muted-foreground">% diff below which frames are stable</p>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Input
+                        type="number"
+                        min={0}
+                        max={10}
+                        step={0.1}
+                        value={stabilization.burstStabilityThreshold}
+                        onChange={(e) => setStabilization({
+                          ...stabilization,
+                          burstStabilityThreshold: Math.max(0, Math.min(10, parseFloat(e.target.value) || 0.5))
+                        })}
+                        className="w-20"
+                      />
+                      <span className="text-xs text-muted-foreground">%</span>
+                    </div>
+                  </div>
+                </>
+              )}
+            </div>
+
+            {/* Dynamic Content Masking */}
+            <div className="space-y-3 border-l-2 border-muted pl-4">
+              <div className="flex items-center gap-2">
+                <EyeOff className="w-4 h-4 text-muted-foreground" />
+                <Label className="text-sm font-medium">Dynamic Content Masking</Label>
+              </div>
+
+              <div className="flex items-center justify-between">
+                <div className="space-y-0.5">
+                  <Label className="text-sm">Auto-Mask Dynamic Content</Label>
+                  <p className="text-xs text-muted-foreground">Detect and mask timestamps, UUIDs, etc.</p>
+                </div>
+                <Switch
+                  checked={stabilization.autoMaskDynamicContent}
+                  onCheckedChange={(checked) => setStabilization({
+                    ...stabilization,
+                    autoMaskDynamicContent: checked
+                  })}
+                />
+              </div>
+              {stabilization.autoMaskDynamicContent && (
+                <>
+                  <div className="space-y-2 pl-4">
+                    <Label className="text-xs">Mask Patterns</Label>
+                    <div className="space-y-1">
+                      {['timestamps', 'uuids', 'relative-times', 'session-ids'].map((pattern) => (
+                        <div key={pattern} className="flex items-center gap-2">
+                          <input
+                            type="checkbox"
+                            id={`mask-${pattern}`}
+                            checked={stabilization.maskPatterns.includes(pattern)}
+                            onChange={(e) => {
+                              const patterns = e.target.checked
+                                ? [...stabilization.maskPatterns, pattern]
+                                : stabilization.maskPatterns.filter(p => p !== pattern);
+                              setStabilization({ ...stabilization, maskPatterns: patterns });
+                            }}
+                            className="rounded border-input"
+                          />
+                          <Label htmlFor={`mask-${pattern}`} className="text-xs">{pattern}</Label>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="flex items-center justify-between pl-4">
+                    <Label className="text-sm">Mask Style</Label>
+                    <Select
+                      value={stabilization.maskStyle}
+                      onValueChange={(v) => setStabilization({
+                        ...stabilization,
+                        maskStyle: v as 'solid-color' | 'placeholder-text'
+                      })}
+                    >
+                      <SelectTrigger className="w-40">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="solid-color">Solid Color</SelectItem>
+                        <SelectItem value="placeholder-text">Placeholder Text</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  {stabilization.maskStyle === 'solid-color' && (
+                    <div className="flex items-center gap-2 pl-4">
+                      <Label className="text-xs">Mask Color:</Label>
+                      <Input
+                        type="color"
+                        value={stabilization.maskColor}
+                        onChange={(e) => setStabilization({
+                          ...stabilization,
+                          maskColor: e.target.value
+                        })}
+                        className="w-12 h-8 p-0.5"
+                      />
+                      <Input
+                        type="text"
+                        value={stabilization.maskColor}
+                        onChange={(e) => setStabilization({
+                          ...stabilization,
+                          maskColor: e.target.value
+                        })}
+                        className="w-24"
+                        placeholder="#808080"
+                      />
+                    </div>
+                  )}
+                </>
+              )}
             </div>
           </CollapsibleContent>
         </Collapsible>

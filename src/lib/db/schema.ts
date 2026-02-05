@@ -45,6 +45,15 @@ export interface DiffMetadata {
   isNewTest?: boolean;
 }
 
+export interface TestSetupOverrides {
+  skippedDefaultStepIds: string[];  // IDs from default_setup_steps to skip
+  extraSteps: Array<{
+    stepType: 'test' | 'script';
+    testId?: string | null;
+    scriptId?: string | null;
+  }>;
+}
+
 export const functionalAreas = sqliteTable('functional_areas', {
   id: text('id').primaryKey(),
   repositoryId: text('repository_id'),
@@ -65,6 +74,7 @@ export const tests = sqliteTable('tests', {
   // Setup configuration - setupTestId takes precedence over setupScriptId
   setupTestId: text('setup_test_id'), // Use another test as setup (most common)
   setupScriptId: text('setup_script_id'), // OR use dedicated setup script
+  setupOverrides: text('setup_overrides', { mode: 'json' }).$type<TestSetupOverrides>(),
   createdAt: integer('created_at', { mode: 'timestamp' }),
   updatedAt: integer('updated_at', { mode: 'timestamp' }),
 });
@@ -335,6 +345,17 @@ export interface StabilizationSettings {
   // Style stabilization
   waitForFonts: boolean;            // Wait for font loading (default: true)
   disableWebfonts: boolean;         // Use system fonts only (default: false)
+
+  // Burst capture (multi-frame instability detection)
+  burstCapture: boolean;            // Take N screenshots and compare for stability (default: false)
+  burstFrameCount: number;          // Number of frames to capture (default: 3)
+  burstStabilityThreshold: number;  // % diff below which frames are considered stable (default: 0.5)
+
+  // Dynamic content masking
+  autoMaskDynamicContent: boolean;  // Detect and mask dynamic text before screenshot (default: false)
+  maskPatterns: string[];           // Pattern types to mask (default: ['timestamps', 'uuids', 'relative-times'])
+  maskStyle: 'solid-color' | 'placeholder-text'; // How to mask matched content (default: 'solid-color')
+  maskColor: string;                // Color for solid-color mask (default: '#808080')
 }
 
 // Default stabilization settings
@@ -354,7 +375,22 @@ export const DEFAULT_STABILIZATION_SETTINGS: StabilizationSettings = {
   loadingSelectors: [],
   waitForFonts: true,
   disableWebfonts: false,
+  burstCapture: false,
+  burstFrameCount: 3,
+  burstStabilityThreshold: 0.5,
+  autoMaskDynamicContent: false,
+  maskPatterns: ['timestamps', 'uuids', 'relative-times'],
+  maskStyle: 'solid-color',
+  maskColor: '#808080',
 };
+
+// Stability metadata from burst capture
+export interface StabilityMetadata {
+  frameCount: number;
+  stableFrames: number;
+  maxFrameDiff: number;
+  isStable: boolean;
+}
 
 // Recording engine options
 export type RecordingEngine = 'lastest' | 'playwright-inspector';

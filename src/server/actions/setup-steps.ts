@@ -2,6 +2,7 @@
 
 import { revalidatePath } from 'next/cache';
 import * as queries from '@/lib/db/queries';
+import type { TestSetupOverrides } from '@/lib/db/schema';
 
 export interface SetupStep {
   id: string;
@@ -95,5 +96,95 @@ export async function reorderDefaultSetupSteps(
   }
 
   revalidatePath('/env');
+  return { success: true };
+}
+
+// ============================================
+// Per-Test Setup Overrides
+// ============================================
+
+export async function getTestSetupOverrides(testId: string) {
+  const test = await queries.getTest(testId);
+  if (!test) return { overrides: null, resolvedSteps: [] };
+
+  const resolvedSteps = await queries.getResolvedSetupStepsForTest(test);
+  return { overrides: test.setupOverrides, resolvedSteps };
+}
+
+export async function saveTestSetupOverrides(testId: string, overrides: TestSetupOverrides | null) {
+  await queries.updateTestSetupOverrides(testId, overrides);
+  revalidatePath(`/tests/${testId}`);
+  return { success: true };
+}
+
+export async function skipDefaultStepForTest(testId: string, defaultStepId: string) {
+  const test = await queries.getTest(testId);
+  if (!test) return { success: false, error: 'Test not found' };
+
+  const overrides: TestSetupOverrides = test.setupOverrides ?? { skippedDefaultStepIds: [], extraSteps: [] };
+  if (!overrides.skippedDefaultStepIds.includes(defaultStepId)) {
+    overrides.skippedDefaultStepIds.push(defaultStepId);
+  }
+  await queries.updateTestSetupOverrides(testId, overrides);
+  revalidatePath(`/tests/${testId}`);
+  return { success: true };
+}
+
+export async function unskipDefaultStepForTest(testId: string, defaultStepId: string) {
+  const test = await queries.getTest(testId);
+  if (!test) return { success: false, error: 'Test not found' };
+
+  const overrides: TestSetupOverrides = test.setupOverrides ?? { skippedDefaultStepIds: [], extraSteps: [] };
+  overrides.skippedDefaultStepIds = overrides.skippedDefaultStepIds.filter((id) => id !== defaultStepId);
+  if (overrides.skippedDefaultStepIds.length === 0 && overrides.extraSteps.length === 0) {
+    await queries.updateTestSetupOverrides(testId, null);
+  } else {
+    await queries.updateTestSetupOverrides(testId, overrides);
+  }
+  revalidatePath(`/tests/${testId}`);
+  return { success: true };
+}
+
+export async function addExtraSetupStep(testId: string, stepType: 'test' | 'script', itemId: string) {
+  const test = await queries.getTest(testId);
+  if (!test) return { success: false, error: 'Test not found' };
+
+  const overrides: TestSetupOverrides = test.setupOverrides ?? { skippedDefaultStepIds: [], extraSteps: [] };
+  overrides.extraSteps.push({
+    stepType,
+    testId: stepType === 'test' ? itemId : null,
+    scriptId: stepType === 'script' ? itemId : null,
+  });
+  await queries.updateTestSetupOverrides(testId, overrides);
+  revalidatePath(`/tests/${testId}`);
+  return { success: true };
+}
+
+export async function removeExtraSetupStep(testId: string, index: number) {
+  const test = await queries.getTest(testId);
+  if (!test) return { success: false, error: 'Test not found' };
+
+  const overrides: TestSetupOverrides = test.setupOverrides ?? { skippedDefaultStepIds: [], extraSteps: [] };
+  if (index >= 0 && index < overrides.extraSteps.length) {
+    overrides.extraSteps.splice(index, 1);
+  }
+  if (overrides.skippedDefaultStepIds.length === 0 && overrides.extraSteps.length === 0) {
+    await queries.updateTestSetupOverrides(testId, null);
+  } else {
+    await queries.updateTestSetupOverrides(testId, overrides);
+  }
+  revalidatePath(`/tests/${testId}`);
+  return { success: true };
+}
+
+export async function reorderExtraSetupSteps(testId: string, newOrder: number[]) {
+  const test = await queries.getTest(testId);
+  if (!test) return { success: false, error: 'Test not found' };
+
+  const overrides: TestSetupOverrides = test.setupOverrides ?? { skippedDefaultStepIds: [], extraSteps: [] };
+  const reordered = newOrder.map((i) => overrides.extraSteps[i]).filter(Boolean);
+  overrides.extraSteps = reordered;
+  await queries.updateTestSetupOverrides(testId, overrides);
+  revalidatePath(`/tests/${testId}`);
   return { success: true };
 }

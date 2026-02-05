@@ -2,7 +2,7 @@ import { notFound } from 'next/navigation';
 import Link from 'next/link';
 import { getDiff, getDiffsByBuild } from '@/server/actions/diffs';
 import { DiffViewerClient } from './diff-viewer-client';
-import { ChevronLeft, ChevronRight } from 'lucide-react';
+import { ChevronLeft, ChevronRight, ExternalLink } from 'lucide-react';
 
 interface PageProps {
   params: Promise<{ buildId: string; diffId: string }>;
@@ -40,8 +40,15 @@ export default async function DiffPage({ params }: PageProps) {
                 <span className="text-gray-500 font-normal text-base ml-2">&rsaquo; {diff.stepLabel}</span>
               )}
             </h1>
-            <div className="text-sm text-gray-500">
-              {diff.test?.targetUrl}
+            <div className="flex items-center gap-3 text-sm text-gray-500">
+              <span>{diff.test?.targetUrl}</span>
+              <Link
+                href={`/tests/${diff.testId}`}
+                className="flex items-center gap-1 text-blue-600 hover:text-blue-800 hover:underline"
+              >
+                View Test
+                <ExternalLink className="w-3 h-3" />
+              </Link>
             </div>
           </div>
         </div>
