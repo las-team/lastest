@@ -59,11 +59,26 @@ import {
   Terminal,
   Keyboard,
   ShieldCheck,
+  Play,
 } from 'lucide-react';
+import { Switch } from '@/components/ui/switch';
+import { Label } from '@/components/ui/label';
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from '@/components/ui/tooltip';
 import type { FunctionalArea, PlaywrightSettings, RecordingEngine, Test } from '@/lib/db/schema';
 import { DEFAULT_RECORDING_ENGINES } from '@/lib/db/schema';
 import { PlaywrightSettingsCard } from '@/components/settings/playwright-settings-card';
 import { ExecutionTargetSelector } from '@/components/execution/execution-target-selector';
+
+interface RepositorySetup {
+  type: 'test' | 'script' | 'none';
+  name?: string;
+  id?: string;
+}
 
 interface RecordingClientProps {
   areas: FunctionalArea[];
@@ -73,6 +88,7 @@ interface RecordingClientProps {
   enabledEngines?: RecordingEngine[];
   defaultEngine?: RecordingEngine;
   rerecordTest?: Test | null;
+  repositorySetup?: RepositorySetup;
 }
 
 type RecordingStep = 'setup' | 'recording' | 'inspector-running' | 'saving';
@@ -220,6 +236,7 @@ export function RecordingClient({
   enabledEngines = DEFAULT_RECORDING_ENGINES,
   defaultEngine = 'lastest',
   rerecordTest,
+  repositorySetup,
 }: RecordingClientProps) {
   const router = useRouter();
   const [step, setStep] = useState<RecordingStep>('setup');
@@ -227,6 +244,7 @@ export function RecordingClient({
   const [selectedEngine, setSelectedEngine] = useState<RecordingEngine>(defaultEngine);
   const [inspectorSessionId, setInspectorSessionId] = useState<string | null>(null);
   const [executionTarget, setExecutionTarget] = useState<string>('local');
+  const [runSetupBeforeRecording, setRunSetupBeforeRecording] = useState(true);
 
   // Re-record mode
   const isRerecording = !!rerecordTest;
@@ -401,8 +419,15 @@ export function RecordingClient({
           setStep('inspector-running');
         }
       } else {
-        // Start Lastest recorder
-        const result = await startRecording(url, repositoryId, executionTarget);
+        // Start Lastest recorder with optional setup
+        const setupOptions = runSetupBeforeRecording && repositorySetup && repositorySetup.type !== 'none'
+          ? {
+              testId: repositorySetup.type === 'test' ? repositorySetup.id ?? null : null,
+              scriptId: repositorySetup.type === 'script' ? repositorySetup.id ?? null : null,
+            }
+          : undefined;
+
+        const result = await startRecording(url, repositoryId, executionTarget, setupOptions);
 
         if (result.error) {
           setError(result.error);
@@ -685,6 +710,47 @@ export function RecordingClient({
                       : 'Record on a remote runner'}
                   </p>
                 </div>
+
+                {/* Environment Setup Toggle */}
+                {(() => {
+                  const hasSetup = repositorySetup && repositorySetup.type !== 'none';
+                  const isDisabled = isLoading || !hasSetup;
+
+                  return (
+                    <TooltipProvider>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <div className={`flex items-center justify-between p-3 bg-muted/50 rounded-lg border ${!hasSetup ? 'opacity-60' : ''}`}>
+                            <div className="flex items-center gap-3">
+                              <Play className="h-4 w-4 text-muted-foreground" />
+                              <div className="space-y-0.5">
+                                <Label htmlFor="run-setup" className={`text-sm font-medium ${hasSetup ? 'cursor-pointer' : 'cursor-not-allowed'}`}>
+                                  Run Environment Setup
+                                </Label>
+                                <p className="text-xs text-muted-foreground">
+                                  {hasSetup
+                                    ? `${repositorySetup!.type === 'test' ? 'Test' : 'Script'}: ${repositorySetup!.name}`
+                                    : 'No setup configured'}
+                                </p>
+                              </div>
+                            </div>
+                            <Switch
+                              id="run-setup"
+                              checked={hasSetup && runSetupBeforeRecording}
+                              onCheckedChange={setRunSetupBeforeRecording}
+                              disabled={isDisabled}
+                            />
+                          </div>
+                        </TooltipTrigger>
+                        {!hasSetup && (
+                          <TooltipContent side="top">
+                            <p>Configure a default setup in Repository Settings</p>
+                          </TooltipContent>
+                        )}
+                      </Tooltip>
+                    </TooltipProvider>
+                  );
+                })()}
 
                 {/* Error Display */}
                 {error && (

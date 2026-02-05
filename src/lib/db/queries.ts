@@ -97,6 +97,7 @@ import type {
   TestChangeReason,
   UserRole,
   SetupScriptType,
+  TestSetupOverrides,
 } from './schema';
 
 export { DEFAULT_SELECTOR_PRIORITY, DEFAULT_DIFF_THRESHOLDS, DEFAULT_AI_SETTINGS, DEFAULT_RECORDING_ENGINES, DEFAULT_NOTIFICATION_SETTINGS };
@@ -2869,4 +2870,66 @@ export async function replaceDefaultSetupSteps(
   }
 
   return results;
+}
+
+// ============================================
+// Per-Test Setup Overrides
+// ============================================
+
+export async function updateTestSetupOverrides(testId: string, overrides: TestSetupOverrides | null) {
+  await db.update(tests).set({ setupOverrides: overrides, updatedAt: new Date() }).where(eq(tests.id, testId));
+}
+
+export async function getResolvedSetupStepsForTest(test: { id: string; repositoryId: string | null; setupOverrides: TestSetupOverrides | null }) {
+  if (!test.repositoryId) return [];
+
+  const defaults = await getDefaultSetupSteps(test.repositoryId);
+  const overrides = test.setupOverrides;
+
+  // Filter out skipped defaults
+  const skippedIds = new Set(overrides?.skippedDefaultStepIds ?? []);
+  const activeDefaults = defaults
+    .filter((s) => !skippedIds.has(s.id))
+    .map((s) => ({
+      source: 'default' as const,
+      id: s.id,
+      stepType: s.stepType as 'test' | 'script',
+      testId: s.testId,
+      scriptId: s.scriptId,
+      name: s.testName || s.scriptName || 'Unknown',
+    }));
+
+  // Resolve extra steps names
+  const extras: Array<{
+    source: 'extra';
+    id: string;
+    stepType: 'test' | 'script';
+    testId: string | null | undefined;
+    scriptId: string | null | undefined;
+    name: string;
+  }> = [];
+
+  if (overrides?.extraSteps) {
+    for (let i = 0; i < overrides.extraSteps.length; i++) {
+      const step = overrides.extraSteps[i];
+      let name = 'Unknown';
+      if (step.stepType === 'test' && step.testId) {
+        const t = await getTest(step.testId);
+        name = t?.name || 'Deleted test';
+      } else if (step.stepType === 'script' && step.scriptId) {
+        const s = await getSetupScript(step.scriptId);
+        name = s?.name || 'Deleted script';
+      }
+      extras.push({
+        source: 'extra',
+        id: `extra-${i}`,
+        stepType: step.stepType,
+        testId: step.testId,
+        scriptId: step.scriptId,
+        name,
+      });
+    }
+  }
+
+  return [...activeDefaults, ...extras];
 }

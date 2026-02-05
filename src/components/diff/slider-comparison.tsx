@@ -5,11 +5,13 @@ import { useState, useRef, useCallback } from 'react';
 type ViewMode = 'slider' | 'side-by-side' | 'overlay' | 'three-way' | 'planned-vs-actual';
 
 interface SliderComparisonProps {
-  baselineImage: string;
+  baselineImage?: string;
   currentImage: string;
   diffImage?: string;
   plannedImage?: string;
   plannedDiffImage?: string;
+  leftLabel?: string;
+  rightLabel?: string;
   className?: string;
 }
 
@@ -19,10 +21,20 @@ export function SliderComparison({
   diffImage,
   plannedImage,
   plannedDiffImage,
+  leftLabel = 'Baseline',
+  rightLabel = 'Current',
   className = '',
 }: SliderComparisonProps) {
+  const defaultMode: ViewMode = baselineImage && plannedImage
+    ? 'three-way'
+    : baselineImage
+      ? 'slider'
+      : plannedImage
+        ? 'planned-vs-actual'
+        : 'slider';
+
   const [sliderPosition, setSliderPosition] = useState(50);
-  const [viewMode, setViewMode] = useState<ViewMode>('slider');
+  const [viewMode, setViewMode] = useState<ViewMode>(defaultMode);
   const containerRef = useRef<HTMLDivElement>(null);
   const isDragging = useRef(false);
 
@@ -55,34 +67,40 @@ export function SliderComparison({
 
   const ViewModeButtons = () => (
     <div className="flex gap-2 mb-4 flex-wrap">
-      <button
-        className={`px-3 py-1 rounded text-sm ${viewMode === 'slider' ? 'bg-blue-600 text-white' : 'bg-gray-200'}`}
-        onClick={() => setViewMode('slider')}
-      >
-        Slider
-      </button>
-      <button
-        className={`px-3 py-1 rounded text-sm ${viewMode === 'side-by-side' ? 'bg-blue-600 text-white' : 'bg-gray-200'}`}
-        onClick={() => setViewMode('side-by-side')}
-      >
-        Side by Side
-      </button>
-      {diffImage && (
-        <button
-          className={`px-3 py-1 rounded text-sm ${viewMode === 'overlay' ? 'bg-blue-600 text-white' : 'bg-gray-200'}`}
-          onClick={() => setViewMode('overlay')}
-        >
-          Diff Overlay
-        </button>
+      {baselineImage && (
+        <>
+          <button
+            className={`px-3 py-1 rounded text-sm ${viewMode === 'slider' ? 'bg-blue-600 text-white' : 'bg-gray-200'}`}
+            onClick={() => setViewMode('slider')}
+          >
+            Slider
+          </button>
+          <button
+            className={`px-3 py-1 rounded text-sm ${viewMode === 'side-by-side' ? 'bg-blue-600 text-white' : 'bg-gray-200'}`}
+            onClick={() => setViewMode('side-by-side')}
+          >
+            Side by Side
+          </button>
+          {diffImage && (
+            <button
+              className={`px-3 py-1 rounded text-sm ${viewMode === 'overlay' ? 'bg-blue-600 text-white' : 'bg-gray-200'}`}
+              onClick={() => setViewMode('overlay')}
+            >
+              Diff Overlay
+            </button>
+          )}
+        </>
       )}
       {plannedImage && (
         <>
-          <button
-            className={`px-3 py-1 rounded text-sm ${viewMode === 'three-way' ? 'bg-purple-600 text-white' : 'bg-purple-100 text-purple-700'}`}
-            onClick={() => setViewMode('three-way')}
-          >
-            Three-Way
-          </button>
+          {baselineImage && (
+            <button
+              className={`px-3 py-1 rounded text-sm ${viewMode === 'three-way' ? 'bg-purple-600 text-white' : 'bg-purple-100 text-purple-700'}`}
+              onClick={() => setViewMode('three-way')}
+            >
+              Three-Way
+            </button>
+          )}
           <button
             className={`px-3 py-1 rounded text-sm ${viewMode === 'planned-vs-actual' ? 'bg-purple-600 text-white' : 'bg-purple-100 text-purple-700'}`}
             onClick={() => setViewMode('planned-vs-actual')}
@@ -94,36 +112,36 @@ export function SliderComparison({
     </div>
   );
 
-  if (viewMode === 'side-by-side') {
+  if (viewMode === 'side-by-side' && baselineImage) {
     return (
       <div className={className}>
         <ViewModeButtons />
         <div className="grid grid-cols-2 gap-4">
           <div>
-            <div className="text-sm text-gray-500 mb-2">Baseline</div>
-            <img src={baselineImage} alt="Baseline" className="w-full border rounded" />
+            <div className="text-sm text-gray-500 mb-2">{leftLabel}</div>
+            <img src={baselineImage} alt={leftLabel} className="w-full border rounded" />
           </div>
           <div>
-            <div className="text-sm text-gray-500 mb-2">Current</div>
-            <img src={currentImage} alt="Current" className="w-full border rounded" />
+            <div className="text-sm text-gray-500 mb-2">{rightLabel}</div>
+            <img src={currentImage} alt={rightLabel} className="w-full border rounded" />
           </div>
         </div>
       </div>
     );
   }
 
-  if (viewMode === 'three-way' && plannedImage) {
+  if (viewMode === 'three-way' && plannedImage && baselineImage) {
     return (
       <div className={className}>
         <ViewModeButtons />
         <div className="grid grid-cols-3 gap-4">
           <div>
-            <div className="text-sm text-gray-500 mb-2">Baseline</div>
-            <img src={baselineImage} alt="Baseline" className="w-full border rounded" />
+            <div className="text-sm text-gray-500 mb-2">{leftLabel}</div>
+            <img src={baselineImage} alt={leftLabel} className="w-full border rounded" />
           </div>
           <div>
-            <div className="text-sm text-gray-500 mb-2">Current</div>
-            <img src={currentImage} alt="Current" className="w-full border rounded" />
+            <div className="text-sm text-gray-500 mb-2">{rightLabel}</div>
+            <img src={currentImage} alt={rightLabel} className="w-full border rounded" />
           </div>
           <div>
             <div className="text-sm text-purple-600 mb-2 font-medium">Planned (Design)</div>
@@ -186,7 +204,7 @@ export function SliderComparison({
             Planned
           </div>
           <div className="absolute top-2 right-2 bg-black/50 text-white px-2 py-1 rounded text-xs">
-            Current
+            {rightLabel}
           </div>
         </div>
       </div>
@@ -209,6 +227,18 @@ export function SliderComparison({
     );
   }
 
+  // Default slider mode — requires baselineImage
+  if (!baselineImage) {
+    // Fallback: just show current image if no baseline and no planned mode matched
+    return (
+      <div className={className}>
+        <ViewModeButtons />
+        <div className="text-sm text-gray-500 mb-2">{rightLabel}</div>
+        <img src={currentImage} alt={rightLabel} className="w-full border rounded" />
+      </div>
+    );
+  }
+
   return (
     <div className={className}>
       <ViewModeButtons />
@@ -223,7 +253,7 @@ export function SliderComparison({
       >
         {/* Baseline (left side) */}
         <div className="relative">
-          <img src={baselineImage} alt="Baseline" className="w-full" draggable={false} />
+          <img src={baselineImage} alt={leftLabel} className="w-full" draggable={false} />
         </div>
 
         {/* Current (right side, clipped) */}
@@ -231,7 +261,7 @@ export function SliderComparison({
           className="absolute inset-0 overflow-hidden"
           style={{ clipPath: `inset(0 0 0 ${sliderPosition}%)` }}
         >
-          <img src={currentImage} alt="Current" className="w-full" draggable={false} />
+          <img src={currentImage} alt={rightLabel} className="w-full" draggable={false} />
         </div>
 
         {/* Slider handle */}
@@ -251,10 +281,10 @@ export function SliderComparison({
 
         {/* Labels */}
         <div className="absolute top-2 left-2 bg-black/50 text-white px-2 py-1 rounded text-xs">
-          Baseline
+          {leftLabel}
         </div>
         <div className="absolute top-2 right-2 bg-black/50 text-white px-2 py-1 rounded text-xs">
-          Current
+          {rightLabel}
         </div>
       </div>
     </div>

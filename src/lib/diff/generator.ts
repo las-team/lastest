@@ -4,7 +4,7 @@ import { PNG } from 'pngjs';
 import pixelmatch from 'pixelmatch';
 import type { DiffMetadata, PageShiftInfo } from '../db/schema';
 
-interface Rectangle {
+export interface Rectangle {
   x: number;
   y: number;
   width: number;
@@ -123,7 +123,8 @@ export async function generateDiff(
   currentPath: string,
   outputDir: string,
   threshold = 0.1,
-  includeAntiAliasing = false
+  includeAntiAliasing = false,
+  ignoreRegions?: Rectangle[]
 ): Promise<DiffResult> {
   const baseline = PNG.sync.read(fs.readFileSync(baselinePath));
   const current = PNG.sync.read(fs.readFileSync(currentPath));
@@ -133,6 +134,14 @@ export async function generateDiff(
   // Handle size mismatch - resize to baseline dimensions
   if (width !== current.width || height !== current.height) {
     throw new Error(`Image dimensions mismatch: baseline ${width}x${height}, current ${current.width}x${current.height}`);
+  }
+
+  // Blank out ignore regions in both images before comparison
+  if (ignoreRegions && ignoreRegions.length > 0) {
+    for (const region of ignoreRegions) {
+      blankRegion(baseline.data, width, height, region);
+      blankRegion(current.data, width, height, region);
+    }
   }
 
   const diff = new PNG({ width, height });
@@ -223,6 +232,28 @@ export function imagesMatch(path1: string, path2: string, threshold = 0.1): bool
     return diffPixels === 0;
   } catch {
     return false;
+  }
+}
+
+/**
+ * Fill a rectangular region in an image buffer with a solid color (magenta).
+ * Used to blank out ignore regions before diff comparison.
+ */
+function blankRegion(data: Buffer, imgWidth: number, imgHeight: number, region: Rectangle): void {
+  const x0 = Math.max(0, region.x);
+  const y0 = Math.max(0, region.y);
+  const x1 = Math.min(imgWidth, region.x + region.width);
+  const y1 = Math.min(imgHeight, region.y + region.height);
+
+  for (let y = y0; y < y1; y++) {
+    for (let x = x0; x < x1; x++) {
+      const idx = (y * imgWidth + x) * 4;
+      // Fill with magenta (same color in both images = zero diff)
+      data[idx] = 255;     // R
+      data[idx + 1] = 0;   // G
+      data[idx + 2] = 255; // B
+      data[idx + 3] = 255; // A
+    }
   }
 }
 

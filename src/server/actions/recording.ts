@@ -59,7 +59,12 @@ export async function checkPlaywrightAvailability(repositoryId?: string | null):
   }
 }
 
-export async function startRecording(url: string, repositoryId?: string | null, runnerId?: string): Promise<{ sessionId?: string; error?: string }> {
+export async function startRecording(
+  url: string,
+  repositoryId?: string | null,
+  runnerId?: string,
+  setupOptions?: { testId?: string | null; scriptId?: string | null }
+): Promise<{ sessionId?: string; error?: string }> {
   const recorder = getRecorder(repositoryId);
 
   if (recorder.isActive()) {
@@ -97,7 +102,7 @@ export async function startRecording(url: string, repositoryId?: string | null, 
   recorder.setBrowserType((settings.browser as 'chromium' | 'firefox' | 'webkit') ?? 'chromium');
 
   try {
-    await recorder.startRecording(url, sessionId);
+    await recorder.startRecording(url, sessionId, setupOptions);
     return { sessionId };
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Failed to start recording';

@@ -29,7 +29,8 @@ import { toast } from 'sonner';
 import { useNotifyJobStarted } from '@/components/queue/job-polling-context';
 import { ExecutionTargetSelector } from '@/components/execution/execution-target-selector';
 import { StepScreenshotMatcher } from '@/components/planned/step-screenshot-matcher';
-import type { Test, TestVersion, PlannedScreenshot } from '@/lib/db/schema';
+import { TestSetupOverrides } from '@/components/setup/test-setup-overrides';
+import type { Test, TestVersion, PlannedScreenshot, SetupScript } from '@/lib/db/schema';
 import type { ScreenshotGroup } from '@/server/actions/tests';
 
 interface StepDiff {
@@ -55,15 +56,28 @@ interface TestResult {
   startedAt: Date | null;
 }
 
+interface DefaultStepForUI {
+  id: string;
+  stepType: string;
+  testId: string | null;
+  scriptId: string | null;
+  orderIndex: number;
+  testName: string | null;
+  scriptName: string | null;
+}
+
 interface TestDetailClientProps {
   test: Test;
   results: TestResult[];
   repositoryId?: string | null;
   screenshotGroups?: ScreenshotGroup[];
   plannedScreenshots?: PlannedScreenshot[];
+  defaultSetupSteps?: DefaultStepForUI[];
+  availableTests?: Test[];
+  availableScripts?: SetupScript[];
 }
 
-export function TestDetailClient({ test, results, repositoryId, screenshotGroups = [], plannedScreenshots = [] }: TestDetailClientProps) {
+export function TestDetailClient({ test, results, repositoryId, screenshotGroups = [], plannedScreenshots = [], defaultSetupSteps = [], availableTests = [], availableScripts = [] }: TestDetailClientProps) {
   const router = useRouter();
   const notifyJobStarted = useNotifyJobStarted();
   const [isDeleting, setIsDeleting] = useState(false);
@@ -460,6 +474,7 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
         <Tabs defaultValue="code">
           <TabsList>
             <TabsTrigger value="code">Code</TabsTrigger>
+            <TabsTrigger value="setup">Setup</TabsTrigger>
             <TabsTrigger value="screenshots">Screenshots</TabsTrigger>
             <TabsTrigger value="plans">Plans</TabsTrigger>
             <TabsTrigger value="history">Run History</TabsTrigger>
@@ -518,6 +533,19 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
                 </CardContent>
               </Card>
             )}
+          </TabsContent>
+
+          <TabsContent value="setup" className="mt-4">
+            <TestSetupOverrides
+              testId={test.id}
+              setupOverrides={test.setupOverrides ?? null}
+              defaultSetupSteps={defaultSetupSteps.map((s) => ({
+                ...s,
+                stepType: s.stepType as 'test' | 'script',
+              }))}
+              availableTests={availableTests}
+              availableScripts={availableScripts}
+            />
           </TabsContent>
 
           <TabsContent value="screenshots" className="mt-4 space-y-6">

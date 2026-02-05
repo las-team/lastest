@@ -6,9 +6,11 @@ import fs from 'fs';
 import crypto from 'crypto';
 import AxeBuilder from '@axe-core/playwright';
 import { DEFAULT_SELECTOR_PRIORITY, DEFAULT_STABILIZATION_SETTINGS } from '@/lib/db/schema';
-import type { A11yViolation, StabilizationSettings } from '@/lib/db/schema';
+import type { A11yViolation, StabilizationSettings, StabilityMetadata } from '@/lib/db/schema';
 import { getSelectorStats, recordSelectorSuccess, recordSelectorFailure } from '@/lib/db/queries';
 import { setupFreezeScripts, setupThirdPartyBlocking, applyStabilization } from './stabilization';
+import { captureWithBurst } from './burst-capture';
+import { applyDynamicMasking } from './dynamic-masking';
 
 /**
  * Create appState helper for internal state inspection.
@@ -400,6 +402,7 @@ export interface TestRunResult {
   networkRequests?: NetworkRequest[];
   a11yViolations?: A11yViolation[];
   setupDurationMs?: number;
+  stabilityMetadata?: StabilityMetadata;
 }
 
 export interface ProgressCallback {
@@ -846,6 +849,7 @@ export class PlaywrightRunner extends EventEmitter {
 
       // Create a proxy that intercepts page.screenshot() calls
       const screenshotDelay = this.settings?.screenshotDelay ?? 0;
+      let aggregatedStabilityMetadata: StabilityMetadata | undefined;
       const screenshotProxy = new Proxy(page, {
         get: (target, prop) => {
           if (prop === 'screenshot') {
@@ -853,11 +857,38 @@ export class PlaywrightRunner extends EventEmitter {
               // Apply stabilization before screenshot
               await applyStabilization(target, targetUrl, stabilization);
 
+              // Apply dynamic content masking before screenshot
+              if (stabilization.autoMaskDynamicContent) {
+                await applyDynamicMasking(target, stabilization);
+              }
+
               // Apply screenshot delay for visual stabilization
               if (screenshotDelay > 0) {
                 await target.waitForTimeout(screenshotDelay);
               }
-              const result = await target.screenshot(options);
+
+              let result: Buffer;
+              if (stabilization.burstCapture) {
+                // Use burst capture for instability detection
+                const burst = await captureWithBurst(target, options, {
+                  frameCount: stabilization.burstFrameCount,
+                  stabilityThreshold: stabilization.burstStabilityThreshold,
+                });
+                result = burst.buffer;
+
+                // Track worst stability across all screenshots in this test
+                if (!aggregatedStabilityMetadata || burst.stabilityMetadata.maxFrameDiff > aggregatedStabilityMetadata.maxFrameDiff) {
+                  aggregatedStabilityMetadata = burst.stabilityMetadata;
+                }
+
+                // Write buffer to disk if path was specified
+                if (options?.path) {
+                  fs.writeFileSync(options.path as string, result);
+                }
+              } else {
+                result = await target.screenshot(options) as Buffer;
+              }
+
               if (options?.path) {
                 const filename = path.basename(options.path as string);
                 const publicPath = this.repositoryId
@@ -921,12 +952,31 @@ export class PlaywrightRunner extends EventEmitter {
       if (capturedScreenshots.length === 0) {
         // Apply stabilization before fallback screenshot
         await applyStabilization(page, targetUrl, stabilization);
+
+        // Apply dynamic content masking before fallback screenshot
+        if (stabilization.autoMaskDynamicContent) {
+          await applyDynamicMasking(page, stabilization);
+        }
+
         if (screenshotDelay > 0) {
           await page.waitForTimeout(screenshotDelay);
         }
         const screenshotFilename = `${runId}-${test.id}-success.png`;
         const screenshotPath = path.join(this.screenshotDir, screenshotFilename);
-        await page.screenshot({ path: screenshotPath, fullPage: true });
+
+        if (stabilization.burstCapture) {
+          const burst = await captureWithBurst(page, { fullPage: true }, {
+            frameCount: stabilization.burstFrameCount,
+            stabilityThreshold: stabilization.burstStabilityThreshold,
+          });
+          fs.writeFileSync(screenshotPath, burst.buffer);
+          if (!aggregatedStabilityMetadata || burst.stabilityMetadata.maxFrameDiff > aggregatedStabilityMetadata.maxFrameDiff) {
+            aggregatedStabilityMetadata = burst.stabilityMetadata;
+          }
+        } else {
+          await page.screenshot({ path: screenshotPath, fullPage: true });
+        }
+
         screenshotPublicPath = this.repositoryId
           ? `/screenshots/${this.repositoryId}/${screenshotFilename}`
           : `/screenshots/${screenshotFilename}`;
@@ -954,6 +1004,7 @@ export class PlaywrightRunner extends EventEmitter {
         networkRequests: networkFailures.length > 0 ? networkFailures : undefined,
         a11yViolations,
         setupDurationMs: setupDurationMs > 0 ? setupDurationMs : undefined,
+        stabilityMetadata: aggregatedStabilityMetadata,
       };
 
     } catch (error) {

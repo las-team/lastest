@@ -20,14 +20,9 @@ Github actions integration
 Publish lastest runner to npx npm
 Docker
 Gitlab
-
 ## features
-Individual override for env settings
-
-Steady
-  - Uses burst capture (multiple frames) to detect instability         
-  - Masks dynamic content (timestamps, random IDs)    
-
+ NEW: Page Shift Detection -- excludes vertical content shifts
+  from diffs
 UI & UX 
     Use the frontend design skill and subagent for this
     Revise frontend and make sure you havent steered far and try to use standard shadcn css where possible
@@ -35,6 +30,7 @@ UI & UX
 
 Electron app ~/.claude/plans/rippling-roaming-snail.md replan
 ## ideas
+Figma plugin
 Reference database for test data
 Generate test data with AI
 Imported document -> US & AC -> tests - US checklist overview
@@ -49,14 +45,6 @@ Bugriport
 Import from prior tools?
 
 ### UX
-Find test cases
-    From code
-    From site
-    From documentation
-Test classification
-    Technical
-    Visual
-    Functional / User Story
 ## bugs
 
 ## marketing

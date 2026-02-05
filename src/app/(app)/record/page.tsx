@@ -1,5 +1,5 @@
 import { RecordingClient } from './recording-client';
-import { getFunctionalAreas, getPlaywrightSettings, getSelectedRepository, getEnvironmentConfig, getTest } from '@/lib/db/queries';
+import { getFunctionalAreas, getPlaywrightSettings, getSelectedRepository, getEnvironmentConfig, getTest, getSetupScript } from '@/lib/db/queries';
 import type { RecordingEngine } from '@/lib/db/schema';
 
 interface RecordPageProps {
@@ -16,6 +16,20 @@ export default async function RecordPage({ searchParams }: RecordPageProps) {
   // Fetch test data if re-recording
   const rerecordTest = params.rerecordId ? await getTest(params.rerecordId) : null;
 
+  // Resolve repository setup configuration
+  let repositorySetup: { type: 'test' | 'script' | 'none'; name?: string; id?: string } = { type: 'none' };
+  if (selectedRepo?.defaultSetupTestId) {
+    const setupTest = await getTest(selectedRepo.defaultSetupTestId);
+    if (setupTest) {
+      repositorySetup = { type: 'test', name: setupTest.name, id: setupTest.id };
+    }
+  } else if (selectedRepo?.defaultSetupScriptId) {
+    const setupScript = await getSetupScript(selectedRepo.defaultSetupScriptId);
+    if (setupScript) {
+      repositorySetup = { type: 'script', name: setupScript.name, id: setupScript.id };
+    }
+  }
+
   return (
     <div className="flex flex-col h-full">
       <RecordingClient
@@ -26,6 +40,7 @@ export default async function RecordPage({ searchParams }: RecordPageProps) {
         enabledEngines={settings.enabledRecordingEngines as RecordingEngine[]}
         defaultEngine={settings.defaultRecordingEngine as RecordingEngine}
         rerecordTest={rerecordTest}
+        repositorySetup={repositorySetup}
       />
     </div>
   );

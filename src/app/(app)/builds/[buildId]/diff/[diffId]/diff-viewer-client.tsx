@@ -159,9 +159,9 @@ export function DiffViewerClient({ diff, buildId, nextDiffId }: DiffViewerClient
       </div>
 
       {/* Diff Comparison */}
-      {diff.baselineImagePath && diff.currentImagePath ? (
+      {diff.currentImagePath && (diff.baselineImagePath || diff.plannedImagePath) ? (
         <SliderComparison
-          baselineImage={diff.baselineImagePath}
+          baselineImage={diff.baselineImagePath || undefined}
           currentImage={diff.currentImagePath}
           diffImage={diff.diffImagePath || undefined}
           plannedImage={diff.plannedImagePath || undefined}
@@ -176,36 +176,6 @@ export function DiffViewerClient({ diff, buildId, nextDiffId }: DiffViewerClient
             alt="Current screenshot"
             className="w-full rounded"
           />
-          {/* Show planned comparison even for new screenshots */}
-          {diff.plannedImagePath && (
-            <div className="mt-4 pt-4 border-t">
-              <div className="text-sm text-purple-600 font-medium mb-2">
-                <ImageIcon className="w-4 h-4 inline mr-1" />
-                Planned (Design) Comparison
-              </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <div className="text-xs text-gray-500 mb-1">Current</div>
-                  <img src={diff.currentImagePath} alt="Current" className="w-full border rounded" />
-                </div>
-                <div>
-                  <div className="text-xs text-purple-500 mb-1">Planned</div>
-                  <img src={diff.plannedImagePath} alt="Planned" className="w-full border-2 border-purple-300 rounded" />
-                </div>
-              </div>
-              {diff.plannedDiffImagePath && (
-                <div className="mt-2">
-                  <div className="text-xs text-purple-500 mb-1">Diff from Design</div>
-                  <img src={diff.plannedDiffImagePath} alt="Planned Diff" className="w-full border border-purple-300 rounded" />
-                </div>
-              )}
-              {diff.plannedPercentageDifference && (
-                <div className="mt-2 text-sm text-purple-600">
-                  {diff.plannedPixelDifference?.toLocaleString()} pixels different from design ({diff.plannedPercentageDifference}%)
-                </div>
-              )}
-            </div>
-          )}
         </div>
       ) : (
         <div className="border rounded-lg p-8 text-center text-gray-500">

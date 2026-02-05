@@ -5,6 +5,12 @@ import fs from 'fs';
 import type { ActionSelector, SelectorType, SelectorConfig } from '@/lib/db/schema';
 import { DEFAULT_SELECTOR_PRIORITY } from '@/lib/db/schema';
 import { extractText, terminateWorker } from './ocr';
+import { getSetupOrchestrator } from '@/lib/setup/setup-orchestrator';
+
+export interface SetupOptions {
+  testId?: string | null;
+  scriptId?: string | null;
+}
 
 export type AssertionType = 'pageLoad' | 'networkIdle' | 'urlMatch' | 'domContentLoaded';
 
@@ -143,7 +149,7 @@ export class PlaywrightRecorder extends EventEmitter {
     this.headless = headless;
   }
 
-  async startRecording(url: string, sessionId: string): Promise<void> {
+  async startRecording(url: string, sessionId: string, setupOptions?: SetupOptions): Promise<void> {
     if (this.isRecording) {
       throw new Error('Already recording');
     }
@@ -180,13 +186,31 @@ export class PlaywrightRecorder extends EventEmitter {
 
       this.page = await this.context.newPage();
 
-      // Setup event listeners BEFORE navigation (must await these)
+      // Navigate to initial URL first
+      await this.page.goto(url, { waitUntil: 'domcontentloaded' });
+
+      // Run setup if configured (before setting up event listeners to avoid capturing setup actions)
+      if (setupOptions && (setupOptions.testId || setupOptions.scriptId)) {
+        const orchestrator = getSetupOrchestrator();
+        const setupResult = await orchestrator.resolveAndRunSetup(
+          setupOptions.testId,
+          setupOptions.scriptId,
+          this.page,
+          { baseUrl: this.baseOrigin, variables: {} }
+        );
+
+        if (!setupResult.success) {
+          throw new Error(`Setup failed: ${setupResult.error}`);
+        }
+      }
+
+      // Setup event listeners AFTER setup completes (to avoid capturing setup actions)
       await this.setupEventListeners();
 
-      // Navigate to initial URL
-      await this.page.goto(url, { waitUntil: 'domcontentloaded' });
-      const relativePath = this.getRelativePath(url);
-      this.addEvent('navigation', { url, relativePath });
+      // Record initial navigation event (after setup, page may be on a different URL)
+      const currentUrl = this.page.url();
+      const relativePath = this.getRelativePath(currentUrl);
+      this.addEvent('navigation', { url: currentUrl, relativePath });
 
       this.isRecording = true;
       this.emit('started', { sessionId, url });

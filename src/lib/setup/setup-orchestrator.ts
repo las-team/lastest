@@ -158,16 +158,71 @@ export class SetupOrchestrator {
   /**
    * Run test-level setup
    * Receives context from suite setup (which includes build setup variables)
+   *
+   * Uses multi-step default setup steps with per-test overrides:
+   * 1. Load default setup steps for repo
+   * 2. If no defaults → fall back to legacy setupTestId/setupScriptId
+   * 3. Filter out steps in test.setupOverrides.skippedDefaultStepIds
+   * 4. Append test.setupOverrides.extraSteps
+   * 5. Execute each step sequentially, accumulating variables
+   * 6. Stop on first failure
    */
   async runTestSetup(
     test: Test,
     page: Page,
     suiteContext: SetupContext
   ): Promise<SetupResult> {
-    // Test setup can come from:
-    // 1. Test's own setupTestId/setupScriptId
-    // 2. Repository's defaultSetupTestId/defaultSetupScriptId (if test has no setup)
+    const startTime = Date.now();
 
+    // Check for multi-step default setup
+    if (test.repositoryId) {
+      const defaultSteps = await queries.getDefaultSetupSteps(test.repositoryId);
+
+      if (defaultSteps.length > 0) {
+        const overrides = test.setupOverrides;
+        const skippedIds = new Set(overrides?.skippedDefaultStepIds ?? []);
+
+        // Filter out skipped defaults
+        const activeDefaults = defaultSteps.filter((s) => !skippedIds.has(s.id));
+
+        // Build step list: active defaults + extras
+        const stepsToRun: Array<{ stepType: string; testId: string | null; scriptId: string | null }> = [
+          ...activeDefaults.map((s) => ({ stepType: s.stepType, testId: s.testId, scriptId: s.scriptId })),
+        ];
+
+        if (overrides?.extraSteps) {
+          for (const extra of overrides.extraSteps) {
+            stepsToRun.push({
+              stepType: extra.stepType,
+              testId: extra.testId ?? null,
+              scriptId: extra.scriptId ?? null,
+            });
+          }
+        }
+
+        // Execute sequentially, accumulate variables, stop on first failure
+        let currentContext = suiteContext;
+        for (const step of stepsToRun) {
+          const stepTestId = step.stepType === 'test' ? step.testId : null;
+          const stepScriptId = step.stepType === 'script' ? step.scriptId : null;
+
+          // Prevent self-referential setup
+          if (stepTestId === test.id) continue;
+
+          const result = await this.resolveAndRunSetup(stepTestId, stepScriptId, page, currentContext);
+          if (!result.success) {
+            return { ...result, duration: Date.now() - startTime };
+          }
+          if (result.variables) {
+            currentContext = this.extendContext(currentContext, result.variables);
+          }
+        }
+
+        return { success: true, duration: Date.now() - startTime, variables: currentContext.variables };
+      }
+    }
+
+    // Legacy fallback: single setupTestId/setupScriptId
     let setupTestId = test.setupTestId;
     let setupScriptId = test.setupScriptId;
 
@@ -182,18 +237,10 @@ export class SetupOrchestrator {
 
     // Prevent self-referential setup (a test running itself as setup)
     if (setupTestId === test.id) {
-      // Skip setup - test cannot be its own setup
       return { success: true, duration: 0, variables: {} };
     }
 
-    const result = await this.resolveAndRunSetup(
-      setupTestId,
-      setupScriptId,
-      page,
-      suiteContext
-    );
-
-    return result;
+    return this.resolveAndRunSetup(setupTestId, setupScriptId, page, suiteContext);
   }
 
   /**
@@ -241,7 +288,23 @@ export function getSetupOrchestrator(): SetupOrchestrator {
  * Helper to check if a test needs setup
  */
 export async function testNeedsSetup(test: Test): Promise<boolean> {
-  // Check test's own setup (but not if it references itself)
+  // Check for extra steps in overrides
+  if (test.setupOverrides?.extraSteps?.length) {
+    return true;
+  }
+
+  // Check multi-step default setup steps
+  if (test.repositoryId) {
+    const defaultSteps = await queries.getDefaultSetupSteps(test.repositoryId);
+    if (defaultSteps.length > 0) {
+      const skippedIds = new Set(test.setupOverrides?.skippedDefaultStepIds ?? []);
+      // If not all defaults are skipped, setup is needed
+      const hasActiveDefaults = defaultSteps.some((s) => !skippedIds.has(s.id));
+      if (hasActiveDefaults) return true;
+    }
+  }
+
+  // Legacy fallback: check test's own setup (but not if it references itself)
   if (test.setupTestId && test.setupTestId !== test.id) {
     return true;
   }
@@ -249,10 +312,9 @@ export async function testNeedsSetup(test: Test): Promise<boolean> {
     return true;
   }
 
-  // Check repository defaults
+  // Legacy: check repository defaults
   if (test.repositoryId) {
     const repo = await queries.getRepository(test.repositoryId);
-    // Skip if repo default would make test run itself as setup
     if (repo?.defaultSetupTestId && repo.defaultSetupTestId !== test.id) {
       return true;
     }
