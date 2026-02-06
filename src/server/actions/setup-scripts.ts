@@ -2,6 +2,7 @@
 
 import { revalidatePath } from 'next/cache';
 import * as queries from '@/lib/db/queries';
+import { requireRepoAccess, requireTeamAccess } from '@/lib/auth';
 import type { SetupScriptType } from '@/lib/db/schema';
 import { validateApiScript } from '@/lib/setup/api-seeder';
 import { chromium } from 'playwright';
@@ -41,6 +42,7 @@ export async function getSetupScript(id: string) {
  * Create a new setup script
  */
 export async function createSetupScript(data: CreateSetupScriptInput) {
+  await requireRepoAccess(data.repositoryId);
   // Validate API scripts
   if (data.type === 'api') {
     const validation = validateApiScript(data.code);
@@ -65,6 +67,7 @@ export async function createSetupScript(data: CreateSetupScriptInput) {
  * Update a setup script
  */
 export async function updateSetupScript(id: string, data: UpdateSetupScriptInput) {
+  await requireTeamAccess();
   // Validate API scripts if code is being updated
   if (data.type === 'api' && data.code) {
     const validation = validateApiScript(data.code);
@@ -82,6 +85,7 @@ export async function updateSetupScript(id: string, data: UpdateSetupScriptInput
  * Delete a setup script
  */
 export async function deleteSetupScript(id: string) {
+  await requireTeamAccess();
   // Check if script is in use
   const testsUsing = await queries.getTestsUsingSetupScript(id);
   const suitesUsing = await queries.getSuitesUsingSetupScript(id);
@@ -101,6 +105,7 @@ export async function deleteSetupScript(id: string) {
  * Duplicate a setup script
  */
 export async function duplicateSetupScript(id: string) {
+  await requireTeamAccess();
   const result = await queries.duplicateSetupScript(id);
   if (!result) {
     throw new Error('Setup script not found');
@@ -117,6 +122,7 @@ export async function testSetupScript(
   id: string,
   targetUrl: string
 ): Promise<{ success: boolean; duration: number; error?: string; variables?: Record<string, unknown> }> {
+  await requireTeamAccess();
   const script = await queries.getSetupScript(id);
   if (!script) {
     return { success: false, duration: 0, error: 'Setup script not found' };
@@ -173,6 +179,7 @@ export async function testSetupScript(
  * Assign a setup script to a test
  */
 export async function assignSetupScriptToTest(testId: string, setupScriptId: string | null) {
+  await requireTeamAccess();
   await queries.updateTestSetup(testId, null, setupScriptId);
   revalidatePath('/tests');
   return { success: true };
@@ -182,6 +189,7 @@ export async function assignSetupScriptToTest(testId: string, setupScriptId: str
  * Assign a setup test to a test
  */
 export async function assignSetupTestToTest(testId: string, setupTestId: string | null) {
+  await requireTeamAccess();
   await queries.updateTestSetup(testId, setupTestId, null);
   revalidatePath('/tests');
   return { success: true };
@@ -191,6 +199,7 @@ export async function assignSetupTestToTest(testId: string, setupTestId: string 
  * Clear setup from a test
  */
 export async function clearTestSetup(testId: string) {
+  await requireTeamAccess();
   await queries.updateTestSetup(testId, null, null);
   revalidatePath('/tests');
   return { success: true };
@@ -200,6 +209,7 @@ export async function clearTestSetup(testId: string) {
  * Assign a setup script to a suite
  */
 export async function assignSetupScriptToSuite(suiteId: string, setupScriptId: string | null) {
+  await requireTeamAccess();
   await queries.updateSuiteSetup(suiteId, null, setupScriptId);
   revalidatePath('/suites');
   return { success: true };
@@ -209,6 +219,7 @@ export async function assignSetupScriptToSuite(suiteId: string, setupScriptId: s
  * Assign a setup test to a suite
  */
 export async function assignSetupTestToSuite(suiteId: string, setupTestId: string | null) {
+  await requireTeamAccess();
   await queries.updateSuiteSetup(suiteId, setupTestId, null);
   revalidatePath('/suites');
   return { success: true };
@@ -218,6 +229,7 @@ export async function assignSetupTestToSuite(suiteId: string, setupTestId: strin
  * Clear setup from a suite
  */
 export async function clearSuiteSetup(suiteId: string) {
+  await requireTeamAccess();
   await queries.updateSuiteSetup(suiteId, null, null);
   revalidatePath('/suites');
   return { success: true };
@@ -231,6 +243,7 @@ export async function updateRepositoryDefaultSetup(
   setupType: 'test' | 'script' | 'none',
   setupId: string | null
 ) {
+  await requireRepoAccess(repositoryId);
   if (setupType === 'test') {
     await queries.updateRepositoryDefaultSetup(repositoryId, setupId, null);
   } else if (setupType === 'script') {

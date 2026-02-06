@@ -1,6 +1,7 @@
 'use server';
 
 import * as queries from '@/lib/db/queries';
+import { requireTeamAccess, requireRepoAccess } from '@/lib/auth';
 import type { AIProvider, AgentSdkPermissionMode } from '@/lib/db/schema';
 import { revalidatePath } from 'next/cache';
 import { exec } from 'child_process';
@@ -26,6 +27,8 @@ export async function saveAISettings(data: {
   aiDiffingApiKey?: string | null;
   aiDiffingModel?: string | null;
 }) {
+  if (data.repositoryId) await requireRepoAccess(data.repositoryId);
+  else await requireTeamAccess();
   const { repositoryId, ...settingsData } = data;
 
   await queries.upsertAISettings(repositoryId || null, settingsData);
@@ -36,6 +39,8 @@ export async function saveAISettings(data: {
 }
 
 export async function resetAISettings(repositoryId?: string | null) {
+  if (repositoryId) await requireRepoAccess(repositoryId);
+  else await requireTeamAccess();
   const settings = await queries.getAISettings(repositoryId);
 
   if (settings.id) {
@@ -55,6 +60,7 @@ export async function testAIConnection(
   success: boolean;
   message: string;
 }> {
+  await requireTeamAccess();
   try {
     if (provider === 'claude-cli') {
       // Test claude CLI by running a simple command

@@ -600,6 +600,7 @@ export async function updatePullRequest(id: string, data: Partial<NewPullRequest
 }
 
 // GitHub Accounts
+/** @deprecated Use getGithubAccountByTeam(teamId) instead for proper tenant isolation */
 export async function getGithubAccount() {
   return db.select().from(githubAccounts).get();
 }
@@ -619,6 +620,7 @@ export async function deleteGithubAccount(id: string) {
 }
 
 // GitLab Accounts
+/** @deprecated Use getGitlabAccountByTeam(teamId) instead for proper tenant isolation */
 export async function getGitlabAccount() {
   return db.select().from(gitlabAccounts).get();
 }

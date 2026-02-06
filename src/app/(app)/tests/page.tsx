@@ -1,28 +1,24 @@
 import { TestsPageClient } from './tests-page-client';
 import {
-  getFunctionalAreas,
-  getTestsWithStatus,
   getSelectedRepository,
   getFunctionalAreasByRepo,
   getTestsWithStatusByRepo,
   getRoutesByRepo,
   getEnvironmentConfig,
 } from '@/lib/db/queries';
+import { getCurrentSession } from '@/lib/auth';
 
 export default async function TestsPage() {
-  const selectedRepo = await getSelectedRepository();
+  const session = await getCurrentSession();
+  const teamId = session?.team?.id;
+  const selectedRepo = teamId ? await getSelectedRepository(teamId) : null;
 
-  let routes: Awaited<ReturnType<typeof getRoutesByRepo>> = [];
-
-  const [areas, tests, envConfig] = await Promise.all([
-    selectedRepo ? getFunctionalAreasByRepo(selectedRepo.id) : getFunctionalAreas(),
-    selectedRepo ? getTestsWithStatusByRepo(selectedRepo.id) : getTestsWithStatus(),
+  const [areas, tests, envConfig, routes] = await Promise.all([
+    selectedRepo ? getFunctionalAreasByRepo(selectedRepo.id) : Promise.resolve([]),
+    selectedRepo ? getTestsWithStatusByRepo(selectedRepo.id) : Promise.resolve([]),
     getEnvironmentConfig(selectedRepo?.id),
+    selectedRepo ? getRoutesByRepo(selectedRepo.id) : Promise.resolve([]),
   ]);
-
-  if (selectedRepo) {
-    routes = await getRoutesByRepo(selectedRepo.id);
-  }
 
   return (
     <div className="flex flex-col h-full">

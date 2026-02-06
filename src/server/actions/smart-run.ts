@@ -1,6 +1,7 @@
 'use server';
 
 import * as queries from '@/lib/db/queries';
+import { requireRepoAccess } from '@/lib/auth';
 import { compareBranches } from '@/lib/github/content';
 import { findAffectedTests, findUnaffectedTests, type AffectedTest } from '@/lib/smart-selection/file-matcher';
 import { createAndRunBuild } from './builds';
@@ -24,6 +25,7 @@ export async function analyzeSmartRun(
   repositoryId: string | null
 ): Promise<SmartRunAnalysis> {
   // Check if we have a repository ID
+  if (repositoryId) await requireRepoAccess(repositoryId);
   if (!repositoryId) {
     return {
       currentBranch: '',
@@ -50,8 +52,8 @@ export async function analyzeSmartRun(
     };
   }
 
-  // Get GitHub account for API access
-  const account = await queries.getGithubAccount();
+  // Get GitHub account for API access (team-scoped)
+  const account = repo.teamId ? await queries.getGithubAccountByTeam(repo.teamId) : null;
   if (!account?.accessToken) {
     return {
       currentBranch: '',

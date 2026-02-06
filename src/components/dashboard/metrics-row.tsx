@@ -1,6 +1,6 @@
 'use client';
 
-import { FileCheck2, AlertTriangle, XCircle, Clock, RefreshCw, CheckCircle } from 'lucide-react';
+import { FileCheck2, AlertTriangle, XCircle, Clock, RefreshCw, CheckCircle, Sparkles, Flag } from 'lucide-react';
 import type { FilterType } from '@/app/(app)/builds/[buildId]/build-detail-client';
 import { cn } from '@/lib/utils';
 
@@ -15,6 +15,9 @@ interface MetricsRowProps {
   onFilterChange?: (filter: FilterType) => void;
   isRunning?: boolean;
   completedTests?: number;
+  aiSafeCount?: number;
+  aiReviewCount?: number;
+  aiFlagCount?: number;
 }
 
 export function MetricsRow({
@@ -28,6 +31,9 @@ export function MetricsRow({
   onFilterChange,
   isRunning = false,
   completedTests = 0,
+  aiSafeCount = 0,
+  aiReviewCount = 0,
+  aiFlagCount = 0,
 }: MetricsRowProps) {
   const formatTime = (ms: number | null) => {
     if (!ms) return '-';
@@ -38,6 +44,8 @@ export function MetricsRow({
 
   const passRate = totalTests > 0 ? Math.round((passedCount / totalTests) * 100) : 0;
   const progress = totalTests > 0 ? Math.round((completedTests / totalTests) * 100) : 0;
+
+  const hasAIMetrics = aiSafeCount + aiReviewCount + aiFlagCount > 0;
 
   const metrics: {
     label: string;
@@ -88,6 +96,40 @@ export function MetricsRow({
       bgColor: 'bg-gray-50',
       filterKey: null,
       isTime: true,
+    },
+  ];
+
+  const aiMetrics: {
+    label: string;
+    value: number;
+    icon: typeof Sparkles;
+    color: string;
+    bgColor: string;
+    filterKey: FilterType;
+  }[] = [
+    {
+      label: 'AI Safe',
+      value: aiSafeCount,
+      icon: Sparkles,
+      color: aiSafeCount > 0 ? 'text-green-600' : 'text-gray-400',
+      bgColor: aiSafeCount > 0 ? 'bg-green-50' : 'bg-gray-50',
+      filterKey: 'ai-approve',
+    },
+    {
+      label: 'AI Review',
+      value: aiReviewCount,
+      icon: AlertTriangle,
+      color: aiReviewCount > 0 ? 'text-yellow-600' : 'text-gray-400',
+      bgColor: aiReviewCount > 0 ? 'bg-yellow-50' : 'bg-gray-50',
+      filterKey: 'ai-review',
+    },
+    {
+      label: 'AI Flag',
+      value: aiFlagCount,
+      icon: Flag,
+      color: aiFlagCount > 0 ? 'text-red-600' : 'text-gray-400',
+      bgColor: aiFlagCount > 0 ? 'bg-red-50' : 'bg-gray-50',
+      filterKey: 'ai-flag',
     },
   ];
 
@@ -184,6 +226,43 @@ export function MetricsRow({
           );
         })}
       </div>
+
+      {/* AI Metrics Row */}
+      {hasAIMetrics && (
+        <div className="grid grid-cols-3 gap-3 p-3 bg-purple-50/50 rounded-lg border border-purple-100">
+          {aiMetrics.map((metric) => {
+            const Icon = metric.icon;
+            const isActive = activeFilter && metric.filterKey === activeFilter;
+
+            return (
+              <div
+                key={metric.label}
+                onClick={() => handleClick(metric.filterKey)}
+                className={cn(
+                  'p-3 rounded-lg flex flex-col items-center transition-all cursor-pointer hover:scale-105 hover:shadow-md bg-white/80',
+                  isActive && 'ring-2 ring-offset-2 ring-purple-500'
+                )}
+                role="button"
+                tabIndex={0}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    handleClick(metric.filterKey);
+                  }
+                }}
+              >
+                <div className={`text-2xl font-bold ${metric.color}`}>
+                  {metric.value}
+                </div>
+                <div className="flex items-center gap-1 text-purple-600 text-xs mt-1">
+                  <Icon className="w-3.5 h-3.5" />
+                  {metric.label}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }

@@ -2,6 +2,7 @@
 
 import { revalidatePath } from 'next/cache';
 import * as queries from '@/lib/db/queries';
+import { requireTeamAccess, requireRepoAccess } from '@/lib/auth';
 import type { SetupAuthType, SetupAuthConfig } from '@/lib/db/schema';
 import { runApiSetup } from '@/lib/setup/api-seeder';
 import type { SetupConfig, SetupContext } from '@/lib/setup/types';
@@ -39,6 +40,7 @@ export async function getSetupConfig(id: string) {
  * Create a new setup config
  */
 export async function createSetupConfig(data: CreateSetupConfigInput) {
+  await requireRepoAccess(data.repositoryId);
   // Validate base URL
   try {
     new URL(data.baseUrl);
@@ -73,6 +75,7 @@ export async function createSetupConfig(data: CreateSetupConfigInput) {
  * Update a setup config
  */
 export async function updateSetupConfig(id: string, data: UpdateSetupConfigInput) {
+  await requireTeamAccess();
   // Validate base URL if provided
   if (data.baseUrl) {
     try {
@@ -91,6 +94,7 @@ export async function updateSetupConfig(id: string, data: UpdateSetupConfigInput
  * Delete a setup config
  */
 export async function deleteSetupConfig(id: string) {
+  await requireTeamAccess();
   await queries.deleteSetupConfig(id);
   revalidatePath('/settings/setup');
   return { success: true };
@@ -100,6 +104,7 @@ export async function deleteSetupConfig(id: string) {
  * Test a setup config by making a simple request
  */
 export async function testSetupConfig(id: string): Promise<{ success: boolean; error?: string }> {
+  await requireTeamAccess();
   const config = await queries.getSetupConfig(id);
   if (!config) {
     return { success: false, error: 'Setup config not found' };
@@ -150,6 +155,7 @@ export async function testApiEndpoint(
   endpoint: string,
   body?: unknown
 ): Promise<{ success: boolean; error?: string; response?: unknown }> {
+  await requireTeamAccess();
   const config = await queries.getSetupConfig(configId);
   if (!config) {
     return { success: false, error: 'Setup config not found' };

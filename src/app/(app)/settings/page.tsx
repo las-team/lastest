@@ -1,7 +1,7 @@
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import * as queries from '@/lib/db/queries';
-import { getCurrentUser } from '@/lib/auth';
+import { getCurrentSession } from '@/lib/auth';
 import { Github, Check, X, Database, ExternalLink, Users, Bot, Mail } from 'lucide-react';
 
 // GitLab icon SVG component
@@ -34,11 +34,13 @@ export default async function SettingsPage({
   searchParams: Promise<{ success?: string; error?: string }>;
 }) {
   const params = await searchParams;
-  const [currentUser, githubAccount, gitlabAccount, selectedRepo] = await Promise.all([
-    getCurrentUser(),
-    queries.getGithubAccount(),
-    queries.getGitlabAccount(),
-    queries.getSelectedRepository(),
+  const session = await getCurrentSession();
+  const currentUser = session?.user ?? null;
+  const teamId = session?.team?.id;
+  const [githubAccount, gitlabAccount, selectedRepo] = await Promise.all([
+    teamId ? queries.getGithubAccountByTeam(teamId) : null,
+    teamId ? queries.getGitlabAccountByTeam(teamId) : null,
+    teamId ? queries.getSelectedRepository(teamId) : null,
   ]);
   const playwrightSettings = await queries.getPlaywrightSettings(selectedRepo?.id);
   const environmentConfig = await queries.getEnvironmentConfig(selectedRepo?.id);

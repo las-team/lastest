@@ -1,5 +1,6 @@
 import { getTest, getTestResultsByTest, getSelectedRepository, getPlannedScreenshotsByTest, getDefaultSetupSteps, getTestsByRepo, getSetupScripts } from '@/lib/db/queries';
 import { getTestScreenshotsGrouped } from '@/server/actions/tests';
+import { getCurrentSession } from '@/lib/auth';
 import { TestDetailClient } from './test-detail-client';
 import { notFound } from 'next/navigation';
 
@@ -15,8 +16,10 @@ export default async function TestDetailPage({ params }: TestDetailPageProps) {
     notFound();
   }
 
+  const session = await getCurrentSession();
+  const teamId = session?.team?.id;
   const results = await getTestResultsByTest(id);
-  const selectedRepo = await getSelectedRepository();
+  const selectedRepo = teamId ? await getSelectedRepository(teamId) : null;
   const repoId = test.repositoryId || selectedRepo?.id;
   const screenshotGroups = await getTestScreenshotsGrouped(id, repoId);
   const plannedScreenshots = await getPlannedScreenshotsByTest(id);

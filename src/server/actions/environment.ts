@@ -2,6 +2,7 @@
 
 import { revalidatePath } from 'next/cache';
 import * as queries from '@/lib/db/queries';
+import { requireTeamAccess, requireRepoAccess } from '@/lib/auth';
 import { getServerManager } from '@/lib/playwright/server-manager';
 import type { EnvironmentMode } from '@/lib/db/schema';
 
@@ -26,6 +27,8 @@ export async function getEnvironmentConfig(repositoryId?: string | null) {
  * Save environment config
  */
 export async function saveEnvironmentConfig(data: EnvironmentConfigInput) {
+  if (data.repositoryId) await requireRepoAccess(data.repositoryId);
+  else await requireTeamAccess();
   const result = await queries.upsertEnvironmentConfig(data.repositoryId ?? null, {
     mode: data.mode,
     baseUrl: data.baseUrl,
@@ -48,6 +51,7 @@ export async function testServerConnection(url: string): Promise<{
   error?: string;
   responseTime?: number;
 }> {
+  await requireTeamAccess();
   const serverManager = getServerManager();
   const startTime = Date.now();
 
@@ -105,6 +109,8 @@ export async function startManagedServer(repositoryId?: string | null): Promise<
   success: boolean;
   error?: string;
 }> {
+  if (repositoryId) await requireRepoAccess(repositoryId);
+  else await requireTeamAccess();
   const config = await queries.getEnvironmentConfig(repositoryId);
 
   if (!config || config.mode !== 'managed') {
@@ -129,6 +135,7 @@ export async function startManagedServer(repositoryId?: string | null): Promise<
  * Stop the managed server
  */
 export async function stopManagedServer(): Promise<void> {
+  await requireTeamAccess();
   const serverManager = getServerManager();
   await serverManager.stopManagedServer();
 }

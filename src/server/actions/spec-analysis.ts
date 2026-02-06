@@ -7,6 +7,7 @@ import { revalidatePath } from 'next/cache';
 import { getRepoTree, getFileContent } from '@/lib/github/content';
 import { extractTextFromFile } from '@/lib/file-parser';
 import { createJob, updateJobProgress, completeJob, failJob } from './jobs';
+import { requireRepoAccess } from '@/lib/auth';
 
 /** Extract first valid JSON object from text, handling nested brackets correctly */
 function extractJsonObject(text: string): string | null {
@@ -114,14 +115,11 @@ export async function discoverRepoSpecs(
   branch: string
 ): Promise<DiscoverSpecsResponse> {
   try {
-    const account = await queries.getGithubAccount();
+    const { repo } = await requireRepoAccess(repositoryId);
+
+    const account = repo.teamId ? await queries.getGithubAccountByTeam(repo.teamId) : null;
     if (!account) {
       return { success: false, error: 'GitHub account not connected' };
-    }
-
-    const repo = await queries.getRepository(repositoryId);
-    if (!repo) {
-      return { success: false, error: 'Repository not found' };
     }
 
     const repoTree = await getRepoTree(account.accessToken, repo.owner, repo.name, branch);
@@ -154,6 +152,7 @@ export async function analyzeSelectedSpecs(
   branch: string,
   filePaths: string[]
 ): Promise<SpecAnalysisResponse> {
+  const { repo } = await requireRepoAccess(repositoryId);
   const jobId = await createJob('spec_analysis', 'Analyze Selected Specs', filePaths.length, repositoryId);
   try {
     if (filePaths.length === 0) {
@@ -161,16 +160,10 @@ export async function analyzeSelectedSpecs(
       return { success: false, error: 'No files selected' };
     }
 
-    const account = await queries.getGithubAccount();
+    const account = repo.teamId ? await queries.getGithubAccountByTeam(repo.teamId) : null;
     if (!account) {
       await failJob(jobId, 'GitHub account not connected');
       return { success: false, error: 'GitHub account not connected' };
-    }
-
-    const repo = await queries.getRepository(repositoryId);
-    if (!repo) {
-      await failJob(jobId, 'Repository not found');
-      return { success: false, error: 'Repository not found' };
     }
 
     const contents: string[] = [];
@@ -208,18 +201,13 @@ export async function scanRepoSpecs(
   repositoryId: string,
   branch: string
 ): Promise<SpecAnalysisResponse> {
+  const { repo } = await requireRepoAccess(repositoryId);
   const jobId = await createJob('spec_analysis', 'Scan Repo Specs', undefined, repositoryId);
   try {
-    const account = await queries.getGithubAccount();
+    const account = repo.teamId ? await queries.getGithubAccountByTeam(repo.teamId) : null;
     if (!account) {
       await failJob(jobId, 'GitHub account not connected');
       return { success: false, error: 'GitHub account not connected' };
-    }
-
-    const repo = await queries.getRepository(repositoryId);
-    if (!repo) {
-      await failJob(jobId, 'Repository not found');
-      return { success: false, error: 'Repository not found' };
     }
 
     // Get repo tree and find spec files
@@ -275,6 +263,7 @@ export async function analyzeUploadedSpecs(
   formData: FormData,
   repositoryId: string
 ): Promise<SpecAnalysisResponse> {
+  await requireRepoAccess(repositoryId);
   const jobId = await createJob('spec_analysis', 'Analyze Uploaded Specs', undefined, repositoryId);
   try {
     const files = formData.getAll('files') as File[];
@@ -338,6 +327,7 @@ export async function saveSpecAnalysisResult(
   repositoryId: string,
   result: SpecAnalysisResult
 ): Promise<{ success: boolean; error?: string }> {
+  await requireRepoAccess(repositoryId);
   try {
     const existingRoutes = await queries.getRoutesByRepo(repositoryId);
     const existingPaths = new Set(existingRoutes.map(r => r.path));
@@ -393,6 +383,7 @@ export async function saveAndBuildTests(
   repositoryId: string,
   result: SpecAnalysisResult
 ): Promise<{ success: boolean; testsCreated: number; error?: string }> {
+  await requireRepoAccess(repositoryId);
   const totalRoutes = result.functionalAreas.reduce((sum, a) => sum + a.routes.length, 0);
   const jobId = await createJob('build_tests', 'Building Tests from Specs', totalRoutes, repositoryId);
   try {

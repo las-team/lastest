@@ -1,26 +1,24 @@
 import { CompareClient } from './compare-client';
-import { getTestRuns, getSelectedRepository, getTestRunsByRepo } from '@/lib/db/queries';
+import { getSelectedRepository, getTestRunsByRepo } from '@/lib/db/queries';
+import { getCurrentSession } from '@/lib/auth';
 import { fetchRepoBranches } from '@/server/actions/repos';
 
 export default async function ComparePage() {
-  const selectedRepo = await getSelectedRepository();
+  const session = await getCurrentSession();
+  const teamId = session?.team?.id;
+  const selectedRepo = teamId ? await getSelectedRepository(teamId) : null;
 
   let branches: string[] = [];
-  let runs: Awaited<ReturnType<typeof getTestRuns>> = [];
+  let runs: Awaited<ReturnType<typeof getTestRunsByRepo>> = [];
   let defaultBaseline: string | null = null;
   let activeBranch = 'main';
 
   if (selectedRepo) {
-    // Use GitHub API branches for selected repo
     const ghBranches = await fetchRepoBranches(selectedRepo.id);
     branches = ghBranches.map(b => b.name);
     runs = await getTestRunsByRepo(selectedRepo.id);
     defaultBaseline = selectedRepo.selectedBaseline || selectedRepo.defaultBranch;
     activeBranch = selectedRepo.selectedBranch || selectedRepo.defaultBranch || 'main';
-  } else {
-    // No repo selected - use empty state
-    branches = [];
-    runs = await getTestRuns();
   }
 
   return (

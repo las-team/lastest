@@ -4,7 +4,7 @@ import { revalidatePath } from 'next/cache';
 import { getRunner } from '@/lib/playwright/runner';
 import { getServerManager } from '@/lib/playwright/server-manager';
 import { executeTests } from '@/lib/execution/executor';
-import { getCurrentSession } from '@/lib/auth';
+import { getCurrentSession, requireTeamAccess, requireRepoAccess } from '@/lib/auth';
 import { getBranchInfo } from '@/lib/github/content';
 import * as queries from '@/lib/db/queries';
 import { v4 as uuid } from 'uuid';
@@ -21,11 +21,14 @@ async function getGitInfoFromGitHub(repositoryId: string | null): Promise<GitInf
     return { branch: 'unknown', commit: 'unknown' };
   }
 
-  const account = await queries.getGithubAccount();
   const repo = await queries.getRepository(repositoryId);
-
-  if (!account || !repo) {
+  if (!repo) {
     return { branch: 'unknown', commit: 'unknown' };
+  }
+
+  const account = repo.teamId ? await queries.getGithubAccountByTeam(repo.teamId) : null;
+  if (!account) {
+    return { branch: repo.selectedBranch || repo.defaultBranch || 'main', commit: 'unknown' };
   }
 
   const branch = repo.selectedBranch || repo.defaultBranch || 'main';
@@ -42,8 +45,10 @@ async function getGitInfoFromGitHub(repositoryId: string | null): Promise<GitInf
 }
 
 export async function createTestRun(testIds?: string[], repositoryId?: string | null) {
+  if (repositoryId) await requireRepoAccess(repositoryId);
+  else await requireTeamAccess();
   // Get repo for git info via GitHub API
-  const repo = repositoryId ? await queries.getRepository(repositoryId) : await queries.getSelectedRepository();
+  const repo = repositoryId ? await queries.getRepository(repositoryId) : null;
   const gitInfo = await getGitInfoFromGitHub(repositoryId ?? repo?.id ?? null);
 
   const run = await queries.createTestRun({
@@ -58,6 +63,8 @@ export async function createTestRun(testIds?: string[], repositoryId?: string | 
 }
 
 export async function runTests(testIds?: string[], repositoryId?: string | null, headless?: boolean, runnerId?: string) {
+  if (repositoryId) await requireRepoAccess(repositoryId);
+  else await requireTeamAccess();
   const runner = getRunner(repositoryId);
 
   if (runner.isActive()) {
@@ -87,7 +94,7 @@ export async function runTests(testIds?: string[], repositoryId?: string | null,
   } else if (repositoryId) {
     tests = await queries.getTestsByRepo(repositoryId);
   } else {
-    tests = await queries.getTests();
+    tests = [];
   }
 
   if (tests.length === 0) {
@@ -95,7 +102,7 @@ export async function runTests(testIds?: string[], repositoryId?: string | null,
   }
 
   // Get repo for git info via GitHub API
-  const repo = repositoryId ? await queries.getRepository(repositoryId) : await queries.getSelectedRepository();
+  const repo = repositoryId ? await queries.getRepository(repositoryId) : null;
   const gitInfo = await getGitInfoFromGitHub(repositoryId ?? repo?.id ?? null);
 
   // Create test run record

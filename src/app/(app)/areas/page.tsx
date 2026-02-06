@@ -6,9 +6,12 @@ import {
   getUnsortedSuites,
   getSuiteTests,
 } from '@/lib/db/queries';
+import { getCurrentSession } from '@/lib/auth';
 
 export default async function AreasPage() {
-  const selectedRepo = await getSelectedRepository();
+  const session = await getCurrentSession();
+  const teamId = session?.team?.id;
+  const selectedRepo = teamId ? await getSelectedRepository(teamId) : null;
 
   if (!selectedRepo) {
     return (

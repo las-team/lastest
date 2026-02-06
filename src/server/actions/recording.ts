@@ -11,6 +11,7 @@ import {
 } from '@/lib/playwright/inspector-manager';
 import { transformPlaywrightCode } from '@/lib/playwright/code-transformer';
 import { createTest, createFunctionalArea, getFunctionalAreas, getPlaywrightSettings } from '@/lib/db/queries';
+import { requireTeamAccess, requireRepoAccess } from '@/lib/auth';
 import { DEFAULT_SELECTOR_PRIORITY } from '@/lib/db/schema';
 import { v4 as uuid } from 'uuid';
 import { revalidatePath } from 'next/cache';
@@ -188,6 +189,8 @@ export async function saveRecordedTest(data: {
   code: string;
   repositoryId?: string | null;
 }) {
+  if (data.repositoryId) await requireRepoAccess(data.repositoryId);
+  else await requireTeamAccess();
   const test = await createTest({
     name: data.name,
     functionalAreaId: data.functionalAreaId,
@@ -207,6 +210,7 @@ export async function updateRerecordedTest(data: {
   code: string;
   targetUrl?: string;
 }) {
+  await requireTeamAccess();
   const { updateTestWithVersion } = await import('@/lib/db/queries');
 
   await updateTestWithVersion(

@@ -2,6 +2,7 @@
 
 import { revalidatePath } from 'next/cache';
 import * as queries from '@/lib/db/queries';
+import { requireTeamAccess } from '@/lib/auth';
 import { hashImage } from '@/lib/diff/hasher';
 import path from 'path';
 
@@ -9,6 +10,7 @@ import path from 'path';
  * Approve a single visual diff
  */
 export async function approveDiff(diffId: string, approvedBy?: string) {
+  await requireTeamAccess();
   const diff = await queries.getVisualDiff(diffId);
   if (!diff) throw new Error('Diff not found');
 
@@ -60,6 +62,7 @@ export async function approveDiff(diffId: string, approvedBy?: string) {
  * Reject a visual diff
  */
 export async function rejectDiff(diffId: string) {
+  await requireTeamAccess();
   const diff = await queries.getVisualDiff(diffId);
   if (!diff) throw new Error('Diff not found');
 
@@ -82,6 +85,7 @@ export async function rejectDiff(diffId: string) {
  * Approve all pending diffs in a build
  */
 export async function approveAllDiffs(buildId: string, approvedBy?: string) {
+  await requireTeamAccess();
   const pendingDiffs = await queries.getPendingDiffsByBuild(buildId);
 
   for (const diff of pendingDiffs) {
@@ -98,6 +102,7 @@ export async function approveAllDiffs(buildId: string, approvedBy?: string) {
  * Batch approve selected diffs
  */
 export async function batchApproveDiffs(diffIds: string[], approvedBy?: string) {
+  await requireTeamAccess();
   for (const diffId of diffIds) {
     await approveDiff(diffId, approvedBy);
   }
@@ -105,6 +110,20 @@ export async function batchApproveDiffs(diffIds: string[], approvedBy?: string) 
   revalidatePath('/builds');
 
   return { approvedCount: diffIds.length };
+}
+
+/**
+ * Batch reject selected diffs
+ */
+export async function batchRejectDiffs(diffIds: string[]) {
+  await requireTeamAccess();
+  for (const diffId of diffIds) {
+    await rejectDiff(diffId);
+  }
+
+  revalidatePath('/builds');
+
+  return { rejectedCount: diffIds.length };
 }
 
 /**
@@ -179,6 +198,7 @@ export async function addIgnoreRegion(
   region: { x: number; y: number; width: number; height: number },
   reason?: string
 ) {
+  await requireTeamAccess();
   return queries.createIgnoreRegion({
     testId,
     ...region,
@@ -190,6 +210,7 @@ export async function addIgnoreRegion(
  * Remove an ignore region
  */
 export async function removeIgnoreRegion(regionId: string) {
+  await requireTeamAccess();
   await queries.deleteIgnoreRegion(regionId);
   return { success: true };
 }
@@ -205,6 +226,7 @@ export async function getIgnoreRegions(testId: string) {
  * Undo an approval (revert to pending)
  */
 export async function undoApproval(diffId: string) {
+  await requireTeamAccess();
   const diff = await queries.getVisualDiff(diffId);
   if (!diff) throw new Error('Diff not found');
 
@@ -235,6 +257,7 @@ export async function undoApproval(diffId: string) {
  * Accept all diffs where AI recommends 'approve' and status is still 'pending'
  */
 export async function acceptAIApprovals(buildId: string, approvedBy?: string) {
+  await requireTeamAccess();
   const approvable = await queries.getPendingAIApprovableDiffs(buildId);
 
   for (const diff of approvable) {
@@ -251,6 +274,7 @@ export async function acceptAIApprovals(buildId: string, approvedBy?: string) {
  * Accept selected AI-recommended diffs
  */
 export async function acceptSelectedAIApprovals(diffIds: string[], approvedBy?: string) {
+  await requireTeamAccess();
   for (const diffId of diffIds) {
     await approveDiff(diffId, approvedBy || 'ai-recommendation');
   }
@@ -264,6 +288,7 @@ export async function acceptSelectedAIApprovals(diffIds: string[], approvedBy?: 
  * Discard AI recommendations for all diffs in a build (keeps status unchanged)
  */
 export async function discardAIRecommendations(buildId: string) {
+  await requireTeamAccess();
   const diffs = await queries.getVisualDiffsByBuild(buildId);
 
   for (const diff of diffs) {
@@ -286,6 +311,7 @@ export async function discardAIRecommendations(buildId: string) {
  * Reject all pending diffs in a build
  */
 export async function rejectAllDiffs(buildId: string) {
+  await requireTeamAccess();
   const pendingDiffs = await queries.getPendingDiffsByBuild(buildId);
 
   for (const diff of pendingDiffs) {

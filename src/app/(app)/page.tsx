@@ -2,32 +2,32 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Badge } from '@/components/ui/badge';
 import { CheckCircle, XCircle, Clock, FileCode, Folder, AlertTriangle, Loader2, PenLine, FolderSearch, Sparkles, Globe, FileSearch } from 'lucide-react';
 import {
-  getTests,
-  getFunctionalAreas,
   getSelectedRepository,
   getTestsByRepo,
   getFunctionalAreasByRepo,
   getRouteCoverageStats,
-  getRecentBuilds,
   getBuildsByRepo,
-  getGithubAccount,
+  getGithubAccountByTeam,
   hasApprovedDiffs,
   getBuildCount,
   getRoutesByRepo,
 } from '@/lib/db/queries';
+import { getCurrentSession } from '@/lib/auth';
 import { SetupGuide } from '@/components/setup-guide/setup-guide';
 import { CoverageBar } from '@/components/coverage/coverage-bar';
 import Link from 'next/link';
 
 export default async function DashboardPage() {
-  const selectedRepo = await getSelectedRepository();
+  const session = await getCurrentSession();
+  const teamId = session?.team?.id;
+  const selectedRepo = teamId ? await getSelectedRepository(teamId) : null;
+  const githubAccount = teamId ? await getGithubAccountByTeam(teamId) : null;
 
-  // Fetch data filtered by selected repo if available
-  const [tests, areas, recentBuilds, githubAccount, diffsApproved, buildCount, routesCount] = await Promise.all([
-    selectedRepo ? getTestsByRepo(selectedRepo.id) : getTests(),
-    selectedRepo ? getFunctionalAreasByRepo(selectedRepo.id) : getFunctionalAreas(),
-    selectedRepo ? getBuildsByRepo(selectedRepo.id, 5) : getRecentBuilds(5),
-    getGithubAccount(),
+  // Fetch data filtered by selected repo — no global fallbacks
+  const [tests, areas, recentBuilds, diffsApproved, buildCount, routesCount] = await Promise.all([
+    selectedRepo ? getTestsByRepo(selectedRepo.id) : Promise.resolve([]),
+    selectedRepo ? getFunctionalAreasByRepo(selectedRepo.id) : Promise.resolve([]),
+    selectedRepo ? getBuildsByRepo(selectedRepo.id, 5) : Promise.resolve([]),
     hasApprovedDiffs(selectedRepo?.id),
     getBuildCount(selectedRepo?.id),
     selectedRepo ? getRoutesByRepo(selectedRepo.id).then(r => r.length) : Promise.resolve(0),
