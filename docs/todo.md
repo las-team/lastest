@@ -20,13 +20,18 @@ Github actions integration
 Publish lastest runner to npx npm
 Docker
 Gitlab
+CROSS_OS_CHROMIUM_ARGS & FONTS
 ## features
+Select build as baseline
+
  NEW: Page Shift Detection -- excludes vertical content shifts
   from diffs
-Playwright trace replay:
-Settings ToC when scrolling
 
-Tier 3 — Perceptual diffing
+Playwright trace replay:
+Component specific testing
+Accessability re-check
+
+Tier 3 — Perceptual diffing engines
   (replace/augment pixelmatch)
   - Swap pixelmatch for SSIM or
   Butteraugli in

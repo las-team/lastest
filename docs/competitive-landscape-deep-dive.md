@@ -264,7 +264,7 @@ Sources: [Meticulous.ai](https://www.meticulous.ai/), [Seed Round](https://www.m
 
 | Capability | Lastest2 | Percy | Chromatic | Applitools | BackstopJS | Lost Pixel | Playwright | Meticulous | Argos | Happo |
 |---|---|---|---|---|---|---|---|---|---|---|
-| **AI Diffing** | No | Yes | No | Yes (best) | No | No | No | Deterministic | No | No |
+| **AI Diffing** | Yes | Yes | No | Yes (best) | No | No | No | Deterministic | No | No |
 | **AI Test Gen** | Yes | No | No | Yes (NLP) | No | No | No | Yes (sessions) | No | No |
 | **AI Auto-Fix** | Yes | No | No | No | No | No | No | Auto-maintain | No | No |
 | **Recording** | Yes | No | No | Low-code | No | No | Codegen | Session record | No | No |
@@ -325,9 +325,9 @@ Sources: [Tony Ward](https://www.tonyward.dev/articles/visual-regression-testing
 | # | Gap | Lastest2 Status |
 |---|-----|----------------|
 | 1 | **Self-hosted with SaaS-level UX** -- "an open source, free offering that is completely self-managed" | **SOLVED** -- OSS, self-hosted, full UI |
-| 2 | **AI diff that truly eliminates false positives** | Partial -- has configurable sensitivity but not AI-powered diffing |
+| 2 | **AI diff that truly eliminates false positives** | **SOLVED** -- AI-powered diffing added |
 | 3 | **Team-based pricing** instead of per-screenshot | **SOLVED** -- $0 forever, no per-screenshot model |
-| 4 | **Cross-OS consistency without Docker** | Partial -- runs Playwright locally, same env as CI possible |
+| 4 | **Cross-OS consistency without Docker** | **Partial → Improved** -- cross-OS consistency features added |
 | 5 | **Full-page + component testing in one tool** | **SOLVED** -- records full flows, tests any URL |
 | 6 | **Accessibility + visual regression in one pass** | **SOLVED** -- has accessibility testing |
 | 7 | **Zero-maintenance test generation** | **SOLVED** -- AI generates + auto-fixes tests |
@@ -335,7 +335,7 @@ Sources: [Tony Ward](https://www.tonyward.dev/articles/visual-regression-testing
 | 9 | **Transparent pricing** | **SOLVED** -- $0 forever, open source |
 | 10 | **Native mobile visual testing** | GAP -- not addressed yet |
 
-**Lastest2 addresses 7 of 10 top market gaps.** Remaining gaps: AI-powered diffing intelligence, cross-OS Docker-free consistency, and native mobile testing.
+**Lastest2 addresses 9 of 10 top market gaps.** Only remaining gap: native mobile visual testing.
 
 ---
 
@@ -386,10 +386,10 @@ Sources: [Tony Ward](https://www.tonyward.dev/articles/visual-regression-testing
 
 ### Gaps to watch:
 - Cross-browser rendering (Happo/Applitools advantage)
-- AI-powered diffing intelligence (Applitools/Percy advantage)
 - ARIA snapshot testing specifically (Argos's unique approach to accessibility-aware diffing)
 - Scale/infrastructure (cloud tools handle this)
 - SOC 2 / enterprise compliance (Argos has it)
+- Native mobile visual testing (only Applitools expanding here)
 
 ### Closest competitors by positioning:
 1. **Argos CI** -- affordable OSS + SaaS, similar target audience, but no AI/recording
@@ -399,3 +399,48 @@ Sources: [Tony Ward](https://www.tonyward.dev/articles/visual-regression-testing
 
 ### Pricing opportunity:
 The $100-$200/mo range (Lost Pixel, Percy Pro, Chromatic Starter) is the sweet spot for teams outgrowing free tools. Lastest2's self-hosted model eliminates per-screenshot pricing entirely -- a strong value proposition.
+
+
+
+## Proof links:
+
+  Tony Ward's Article                                              
+                                                                   
+  - https://www.tonyward.dev/articles/visual-regression-testing-dis
+  ruption (2024, updated Apr 2025)                                 
+    - "An open source, free, self-managed offering with no  
+  subscription requirement, where images are not uploaded to a     
+  third-party service"
+  - https://www.tonyward.dev/articles/visual-regression-testing-dis
+  ruption-2
+  - https://medium.com/@haleywardo/streamlining-playwright-visual-r
+  egression-testing-with-github-actions-e077fd33c27c (Oct 2024)
+
+  Hacker News (strongest signals)
+
+  - https://news.ycombinator.com/item?id=42429460 (Dec 2024) --
+  one-time payment self-hosted VRT, validates demand
+  - https://news.ycombinator.com/item?id=32897892 (Sep 2022) --
+  "SaaS prices are bonkers" sentiment
+  - https://news.ycombinator.com/item?id=34894231 (Feb 2023) -- OSS
+   core wasn't enough, users wanted hosted UI
+  - https://news.ycombinator.com/item?id=46518401 (2025) -- even
+  solo devs looking for solutions
+
+  GitHub Discussions
+
+  - https://github.com/modernweb-dev/web/discussions/427 --
+  community wants "compare UI and workflows for approving changes"
+  - https://github.com/garris/BackstopJS/issues/882 -- requests for
+   better review UI
+  - https://github.com/garris/BackstopJS/issues/1165 -- request for
+   "undo approve" in reports
+  - https://github.com/pixeleye-io/pixeleye (AGPL) --
+  self-hostable, validates same demand
+
+  Pricing pain comparisons
+
+  - https://vizzly.dev/pricing-comparison/ -- Percy ~$5,000/mo for
+  10-person team at 100k screenshots
+  - https://opensourcealternative.to/alternativesto/percy --
+  aggregates demand for OSS alternatives

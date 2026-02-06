@@ -1,7 +1,7 @@
 import type { Page, Route } from 'playwright';
 import type { StabilizationSettings } from '@/lib/db/schema';
 import { DEFAULT_STABILIZATION_SETTINGS } from '@/lib/db/schema';
-import { HIDE_SPINNERS_CSS, PLACEHOLDER_IMAGE_BUFFER, SYSTEM_FONTS_CSS } from './constants';
+import { HIDE_SPINNERS_CSS, PLACEHOLDER_IMAGE_BUFFER, SYSTEM_FONTS_CSS, getCrossOsFontCSS } from './constants';
 
 /**
  * JavaScript to inject for freezing timestamps.
@@ -237,8 +237,10 @@ export async function applyStabilization(
     await waitForStylesLoaded(page, 3000);
   }
 
-  // 3. Apply system fonts if webfonts disabled
-  if (s.disableWebfonts) {
+  // 3. Apply font override (cross-OS bundled font supersedes system fonts)
+  if (s.crossOsConsistency) {
+    await page.addStyleTag({ content: getCrossOsFontCSS() });
+  } else if (s.disableWebfonts) {
     await page.addStyleTag({ content: SYSTEM_FONTS_CSS });
   }
 

@@ -83,3 +83,42 @@ export function buildDiffAnalysisPrompt(metadata: {
 
   return parts.join('\n');
 }
+
+export function buildDiffAnalysisPromptWithPaths(metadata: {
+  testName: string;
+  percentageDifference: string;
+  changedRegions?: number;
+  changeCategories?: string[];
+  pageShift?: { detected: boolean; deltaY: number };
+  baselinePath: string;
+  currentPath: string;
+  diffPath: string;
+}): string {
+  const parts = [
+    `Analyze this visual diff for the test "${metadata.testName}".`,
+    '',
+    `Pixel difference: ${metadata.percentageDifference}%`,
+  ];
+
+  if (metadata.changedRegions !== undefined) {
+    parts.push(`Changed regions: ${metadata.changedRegions}`);
+  }
+
+  if (metadata.changeCategories && metadata.changeCategories.length > 0) {
+    parts.push(`Detected change categories: ${metadata.changeCategories.join(', ')}`);
+  }
+
+  if (metadata.pageShift?.detected) {
+    parts.push(`Page shift detected: ${metadata.pageShift.deltaY}px vertical`);
+  }
+
+  parts.push('');
+  parts.push('Read these 3 screenshot files to perform your analysis:');
+  parts.push(`1. Baseline: ${metadata.baselinePath}`);
+  parts.push(`2. Current:  ${metadata.currentPath}`);
+  parts.push(`3. Diff overlay: ${metadata.diffPath}`);
+  parts.push('');
+  parts.push('Respond with ONLY a JSON object.');
+
+  return parts.join('\n');
+}

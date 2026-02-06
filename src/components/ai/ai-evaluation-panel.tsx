@@ -25,6 +25,7 @@ export function AIEvaluationPanel({ buildId, diffs }: AIEvaluationPanelProps) {
   const pendingAnalysis = diffs.filter(d =>
     d.aiAnalysisStatus === 'pending' || d.aiAnalysisStatus === 'running'
   );
+  const failedAnalysis = diffs.filter(d => d.aiAnalysisStatus === 'failed');
   const totalAnalyzable = diffs.filter(d => d.classification !== 'unchanged').length;
 
   const approveDiffs = analyzedDiffs.filter(d => d.aiRecommendation === 'approve' && d.status === 'pending');
@@ -32,7 +33,7 @@ export function AIEvaluationPanel({ buildId, diffs }: AIEvaluationPanelProps) {
   const flagDiffs = analyzedDiffs.filter(d => d.aiRecommendation === 'flag');
 
   // Don't show panel if no AI analysis at all or dismissed
-  if (dismissed || (analyzedDiffs.length === 0 && pendingAnalysis.length === 0)) {
+  if (dismissed || (analyzedDiffs.length === 0 && pendingAnalysis.length === 0 && failedAnalysis.length === 0)) {
     return null;
   }
 
@@ -109,6 +110,11 @@ export function AIEvaluationPanel({ buildId, diffs }: AIEvaluationPanelProps) {
             <span className="flex items-center gap-1 text-xs text-purple-500">
               <Loader2 className="w-3 h-3 animate-spin" />
               {pendingAnalysis.length} analyzing...
+            </span>
+          )}
+          {failedAnalysis.length > 0 && (
+            <span className="text-xs text-red-500">
+              {failedAnalysis.length} failed
             </span>
           )}
         </div>

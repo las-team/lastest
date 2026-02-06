@@ -319,7 +319,7 @@ export type NewBuild = typeof builds.$inferInsert;
 export type VisualDiff = typeof visualDiffs.$inferSelect;
 export type AIDiffRecommendation = 'approve' | 'review' | 'flag';
 export type AIDiffAnalysisStatus = 'pending' | 'running' | 'completed' | 'failed' | 'skipped';
-export type AIDiffingProvider = 'openrouter' | 'anthropic';
+export type AIDiffingProvider = 'openrouter' | 'anthropic' | 'same-as-test-gen' | 'claude-agent-sdk';
 
 export type VisualDiffWithTestStatus = VisualDiff & {
   testResultStatus: string | null;
@@ -362,6 +362,7 @@ export interface StabilizationSettings {
   // Style stabilization
   waitForFonts: boolean;            // Wait for font loading (default: true)
   disableWebfonts: boolean;         // Use system fonts only (default: false)
+  crossOsConsistency: boolean;      // Bundled font + Chromium flags for identical screenshots across OS (default: false)
 
   // Burst capture (multi-frame instability detection)
   burstCapture: boolean;            // Take N screenshots and compare for stability (default: false)
@@ -392,6 +393,7 @@ export const DEFAULT_STABILIZATION_SETTINGS: StabilizationSettings = {
   loadingSelectors: [],
   waitForFonts: true,
   disableWebfonts: false,
+  crossOsConsistency: false,
   burstCapture: false,
   burstFrameCount: 3,
   burstStabilityThreshold: 0.5,
@@ -575,7 +577,7 @@ export const DEFAULT_AI_SETTINGS = {
   openrouterModel: 'anthropic/claude-sonnet-4',
   agentSdkPermissionMode: 'plan' as AgentSdkPermissionMode,
   aiDiffingEnabled: false,
-  aiDiffingProvider: 'openrouter' as AIDiffingProvider,
+  aiDiffingProvider: 'same-as-test-gen' as AIDiffingProvider,
   aiDiffingModel: 'anthropic/claude-sonnet-4-5-20250929',
 };
 

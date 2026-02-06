@@ -1,5 +1,5 @@
 import { chromium, firefox, webkit, Browser, Page, BrowserContext, Locator } from 'playwright';
-import { FREEZE_ANIMATIONS_CSS } from './constants';
+import { FREEZE_ANIMATIONS_CSS, CROSS_OS_CHROMIUM_ARGS } from './constants';
 import { EventEmitter } from 'events';
 import path from 'path';
 import fs from 'fs';
@@ -550,8 +550,19 @@ export class PlaywrightRunner extends EventEmitter {
         : headlessMode === 'shell'
           ? 'shell'
           : headlessMode === 'true';
+
+      // Cross-OS consistency: inject Chromium flags for identical rendering across OS
+      const stabilization = this.getStabilizationSettings();
+      const browserType = this.settings?.browser || 'chromium';
+      const launchArgs = (stabilization.crossOsConsistency && browserType === 'chromium')
+        ? CROSS_OS_CHROMIUM_ARGS
+        : [];
+
       // Cast needed as Playwright types may not include 'shell' yet
-      this.browser = await launcher.launch({ headless: headless as boolean | undefined });
+      this.browser = await launcher.launch({
+        headless: headless as boolean | undefined,
+        args: launchArgs.length > 0 ? launchArgs : undefined,
+      });
 
       this.emit('event', {
         type: 'started',

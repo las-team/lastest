@@ -137,7 +137,7 @@ export function AISettingsCard({ settings, repositoryId }: AISettingsCardProps) 
       setAgentSdkPermissionMode('plan');
       setAgentSdkWorkingDir('');
       setAiDiffingEnabled(false);
-      setAiDiffingProvider('openrouter');
+      setAiDiffingProvider(DEFAULT_AI_SETTINGS.aiDiffingProvider);
       setAiDiffingApiKey('');
       setAiDiffingModel(DEFAULT_AI_SETTINGS.aiDiffingModel);
       setTestResult(null);
@@ -315,7 +315,6 @@ export function AISettingsCard({ settings, repositoryId }: AISettingsCardProps) 
           </div>
           <p className="text-xs text-muted-foreground mb-4">
             Send screenshot diffs to a vision model for AI-powered classification and recommendations.
-            Uses a separate provider and API key from test generation.
           </p>
 
           {/* Enable Toggle */}
@@ -348,42 +347,54 @@ export function AISettingsCard({ settings, repositoryId }: AISettingsCardProps) 
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
+                    <SelectItem value="same-as-test-gen">Same as Test Generation</SelectItem>
                     <SelectItem value="openrouter">OpenRouter API</SelectItem>
                     <SelectItem value="anthropic">Anthropic Direct</SelectItem>
+                    <SelectItem value="claude-agent-sdk">Claude Agent SDK</SelectItem>
                   </SelectContent>
                 </Select>
                 <p className="text-xs text-muted-foreground">
-                  {aiDiffingProvider === 'openrouter'
+                  {aiDiffingProvider === 'same-as-test-gen'
+                    ? 'Will use your test generation provider settings. Claude CLI will be skipped (no vision support).'
+                    : aiDiffingProvider === 'claude-agent-sdk'
+                    ? 'Screenshots are read from disk by the agent. No API key needed. Requires `claude login`.'
+                    : aiDiffingProvider === 'openrouter'
                     ? 'Uses OpenRouter to access vision models.'
                     : 'Uses Anthropic Messages API directly with native image support.'}
                 </p>
               </div>
 
-              {/* API Key */}
-              <div className="space-y-2">
-                <Label htmlFor="aiDiffingApiKey">API Key</Label>
-                <Input
-                  id="aiDiffingApiKey"
-                  type="password"
-                  value={aiDiffingApiKey}
-                  onChange={(e) => setAiDiffingApiKey(e.target.value)}
-                  placeholder={aiDiffingProvider === 'openrouter' ? 'sk-or-v1-...' : 'sk-ant-...'}
-                />
-              </div>
+              {/* API Key — only for openrouter/anthropic */}
+              {(aiDiffingProvider === 'openrouter' || aiDiffingProvider === 'anthropic') && (
+                <div className="space-y-2">
+                  <Label htmlFor="aiDiffingApiKey">API Key</Label>
+                  <Input
+                    id="aiDiffingApiKey"
+                    type="password"
+                    value={aiDiffingApiKey}
+                    onChange={(e) => setAiDiffingApiKey(e.target.value)}
+                    placeholder={aiDiffingProvider === 'openrouter' ? 'sk-or-v1-...' : 'sk-ant-...'}
+                  />
+                </div>
+              )}
 
-              {/* Model */}
-              <div className="space-y-2">
-                <Label htmlFor="aiDiffingModel">Vision Model</Label>
-                <Input
-                  id="aiDiffingModel"
-                  value={aiDiffingModel}
-                  onChange={(e) => setAiDiffingModel(e.target.value)}
-                  placeholder="anthropic/claude-sonnet-4-5-20250929"
-                />
-                <p className="text-xs text-muted-foreground">
-                  Must be a vision-capable model. Default: anthropic/claude-sonnet-4-5-20250929
-                </p>
-              </div>
+              {/* Model — for all direct providers */}
+              {aiDiffingProvider !== 'same-as-test-gen' && (
+                <div className="space-y-2">
+                  <Label htmlFor="aiDiffingModel">Vision Model</Label>
+                  <Input
+                    id="aiDiffingModel"
+                    value={aiDiffingModel}
+                    onChange={(e) => setAiDiffingModel(e.target.value)}
+                    placeholder={aiDiffingProvider === 'claude-agent-sdk' ? 'claude-sonnet-4-5-20250929' : 'anthropic/claude-sonnet-4-5-20250929'}
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    {aiDiffingProvider === 'claude-agent-sdk'
+                      ? 'Model ID without vendor prefix (e.g. claude-sonnet-4-5-20250929)'
+                      : 'Must be a vision-capable model. Default: anthropic/claude-sonnet-4-5-20250929'}
+                  </p>
+                </div>
+              )}
             </div>
           )}
         </div>

@@ -123,7 +123,7 @@ export function BuildDetailClient({
   const isFilterActive = activeFilter !== 'all';
 
   // Check if any diffs have AI analysis
-  const hasAIAnalysis = diffs.some(d => d.aiRecommendation || d.aiAnalysisStatus === 'running' || d.aiAnalysisStatus === 'pending');
+  const hasAIAnalysis = diffs.some(d => d.aiRecommendation || d.aiAnalysisStatus === 'running' || d.aiAnalysisStatus === 'pending' || d.aiAnalysisStatus === 'failed');
 
   return (
     <div className="space-y-6">

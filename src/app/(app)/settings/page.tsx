@@ -20,6 +20,7 @@ import { AILogsCard } from '@/components/settings/ai-logs-card';
 import { NotificationSettingsCard } from '@/components/settings/notification-settings-card';
 import { ResetSetupGuide } from '@/components/setup-guide/reset-setup-guide';
 import { BranchSelector } from '@/components/settings/branch-selector';
+import { SettingsToC } from '@/components/settings/settings-toc';
 import { UserList } from '@/components/users/user-list';
 import { PendingInvitations } from '@/components/users/pending-invitations';
 import { InviteUserDialog } from '@/components/users/invite-user-dialog';
@@ -58,7 +59,8 @@ export default async function SettingsPage({
 
   return (
     <div className="flex flex-col h-full">
-      <div className="flex-1 p-6 overflow-auto">
+      <div id="settings-scroll" className="flex-1 p-6 overflow-auto">
+        <SettingsToC />
         <div className="max-w-2xl mx-auto space-y-6">
           {/* Status Messages */}
           {params.success === 'github_connected' && (
@@ -81,7 +83,7 @@ export default async function SettingsPage({
           )}
 
           {/* GitHub Integration */}
-          <Card>
+          <Card id="github">
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
                 <Github className="w-5 h-5" />
@@ -137,7 +139,7 @@ export default async function SettingsPage({
           </Card>
 
           {/* GitLab Integration */}
-          <Card>
+          <Card id="gitlab">
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
                 <GitLabIcon className="w-5 h-5" />
@@ -195,7 +197,7 @@ export default async function SettingsPage({
           </Card>
 
           {/* Repository Info */}
-          <Card>
+          <Card id="repository">
             <CardHeader>
               <CardTitle>Repository</CardTitle>
               <CardDescription>
@@ -227,7 +229,7 @@ export default async function SettingsPage({
           </Card>
 
           {/* Database Info */}
-          <Card>
+          <Card id="database">
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
                 <Database className="w-5 h-5" />
@@ -264,46 +266,58 @@ export default async function SettingsPage({
           </Card>
 
           {/* Environment Config */}
-          <EnvironmentConfigCard
-            config={environmentConfig}
-            repositoryId={selectedRepo?.id}
-          />
+          <div id="environment">
+            <EnvironmentConfigCard
+              config={environmentConfig}
+              repositoryId={selectedRepo?.id}
+            />
+          </div>
 
           {/* AI Settings */}
-          <AISettingsCard
-            settings={aiSettings}
-            repositoryId={selectedRepo?.id}
-          />
+          <div id="ai-settings">
+            <AISettingsCard
+              settings={aiSettings}
+              repositoryId={selectedRepo?.id}
+            />
+          </div>
 
           {/* AI Prompt Logs */}
-          <AILogsCard
-            logs={aiLogs}
-            repositoryId={selectedRepo?.id}
-          />
+          <div id="ai-logs">
+            <AILogsCard
+              logs={aiLogs}
+              repositoryId={selectedRepo?.id}
+            />
+          </div>
 
           {/* Notifications */}
-          <NotificationSettingsCard
-            settings={notificationSettings}
-            repositoryId={selectedRepo?.id}
-            hasGithubAccount={!!githubAccount}
-            hasGitlabAccount={!!gitlabAccount}
-          />
+          <div id="notifications">
+            <NotificationSettingsCard
+              settings={notificationSettings}
+              repositoryId={selectedRepo?.id}
+              hasGithubAccount={!!githubAccount}
+              hasGitlabAccount={!!gitlabAccount}
+            />
+          </div>
 
           {/* Diff Sensitivity */}
-          <DiffSensitivityCard
-            settings={diffSensitivitySettings}
-            repositoryId={selectedRepo?.id}
-          />
+          <div id="diff-sensitivity">
+            <DiffSensitivityCard
+              settings={diffSensitivitySettings}
+              repositoryId={selectedRepo?.id}
+            />
+          </div>
 
           {/* Playwright Config */}
-          <PlaywrightSettingsCard
-            settings={playwrightSettings}
-            repositoryId={selectedRepo?.id}
-          />
+          <div id="playwright">
+            <PlaywrightSettingsCard
+              settings={playwrightSettings}
+              repositoryId={selectedRepo?.id}
+            />
+          </div>
 
           {/* User Management (Admin only) */}
           {isAdmin && currentUser?.teamId && (
-            <>
+            <div id="team" className="space-y-6">
               {/* Pending Invitations */}
               {pendingInvitations.length > 0 && (
                 <Card>
@@ -368,11 +382,11 @@ export default async function SettingsPage({
                 </CardContent>
               </Card>
 
-            </>
+            </div>
           )}
 
           {/* Version */}
-          <Card>
+          <Card id="about">
             <CardHeader>
               <CardTitle>About</CardTitle>
             </CardHeader>

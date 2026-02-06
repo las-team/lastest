@@ -586,6 +586,21 @@ export function PlaywrightSettingsCard({
                 </div>
               )}
 
+              {/* Cross-OS Consistency */}
+              <div className="flex items-center justify-between">
+                <div className="space-y-0.5">
+                  <Label className="text-sm">Cross-OS Consistency</Label>
+                  <p className="text-xs text-muted-foreground">Bundled font + Chromium flags for identical screenshots across macOS/Linux/Windows</p>
+                </div>
+                <Switch
+                  checked={stabilization.crossOsConsistency ?? false}
+                  onCheckedChange={(checked) => setStabilization({
+                    ...stabilization,
+                    crossOsConsistency: checked
+                  })}
+                />
+              </div>
+
               {/* Disable Webfonts */}
               <div className="flex items-center justify-between">
                 <div className="space-y-0.5">
@@ -594,6 +609,7 @@ export function PlaywrightSettingsCard({
                 </div>
                 <Switch
                   checked={stabilization.disableWebfonts}
+                  disabled={stabilization.crossOsConsistency}
                   onCheckedChange={(checked) => setStabilization({
                     ...stabilization,
                     disableWebfonts: checked

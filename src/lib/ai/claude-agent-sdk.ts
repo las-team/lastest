@@ -4,15 +4,18 @@ import type { AIProvider, GenerateOptions, StreamCallbacks } from './types';
 export interface ClaudeAgentSDKOptions {
   permissionMode?: PermissionMode;
   workingDirectory?: string;
+  model?: string;
 }
 
 export class ClaudeAgentSDKProvider implements AIProvider {
   private permissionMode: PermissionMode;
   private workingDirectory?: string;
+  private model?: string;
 
   constructor(options: ClaudeAgentSDKOptions = {}) {
     this.permissionMode = options.permissionMode || 'plan';
     this.workingDirectory = options.workingDirectory;
+    this.model = options.model;
   }
 
   async generate(options: GenerateOptions): Promise<string> {
@@ -31,6 +34,7 @@ export class ClaudeAgentSDKProvider implements AIProvider {
         options: {
           permissionMode: this.permissionMode,
           cwd: this.workingDirectory,
+          model: this.model,
         },
       })) {
         // Collect text content from assistant messages
@@ -74,6 +78,7 @@ export class ClaudeAgentSDKProvider implements AIProvider {
         options: {
           permissionMode: this.permissionMode,
           cwd: this.workingDirectory,
+          model: this.model,
         },
       })) {
         // Stream text content from assistant messages

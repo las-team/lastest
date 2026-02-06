@@ -1,10 +1,29 @@
 import fs from 'fs';
 import path from 'path';
 import type { AIDiffAnalysis, DiffMetadata } from '@/lib/db/schema';
-import { DIFF_ANALYSIS_SYSTEM_PROMPT, buildDiffAnalysisPrompt } from './diff-prompts';
+import { DIFF_ANALYSIS_SYSTEM_PROMPT, buildDiffAnalysisPrompt, buildDiffAnalysisPromptWithPaths } from './diff-prompts';
 import { createOpenRouterProvider } from './openrouter';
 import { createAnthropicDirectProvider } from './anthropic-direct';
+import { ClaudeAgentSDKProvider } from './claude-agent-sdk';
 import type { AIProvider } from './types';
+
+function extractJsonObject(text: string): string | null {
+  const start = text.indexOf('{');
+  if (start === -1) return null;
+  let depth = 0;
+  let inString = false;
+  let escape = false;
+  for (let i = start; i < text.length; i++) {
+    const char = text[i];
+    if (escape) { escape = false; continue; }
+    if (char === '\\' && inString) { escape = true; continue; }
+    if (char === '"') { inString = !inString; continue; }
+    if (inString) continue;
+    if (char === '{') depth++;
+    else if (char === '}') { depth--; if (depth === 0) return text.slice(start, i + 1); }
+  }
+  return null;
+}
 
 interface AnalyzeDiffInput {
   baselineImagePath: string;
@@ -16,13 +35,13 @@ interface AnalyzeDiffInput {
 }
 
 export interface DiffingProviderConfig {
-  provider: 'openrouter' | 'anthropic';
+  provider: 'openrouter' | 'anthropic' | 'claude-agent-sdk';
   apiKey: string;
   model: string;
 }
 
 function readImageAsBase64(imagePath: string): { base64: string; mediaType: string } {
-  const fullPath = imagePath.startsWith('/')
+  const fullPath = imagePath.startsWith(process.cwd())
     ? imagePath
     : path.join(process.cwd(), 'public', imagePath);
 
@@ -35,6 +54,10 @@ function readImageAsBase64(imagePath: string): { base64: string; mediaType: stri
 }
 
 function createDiffingProvider(config: DiffingProviderConfig): AIProvider {
+  if (config.provider === 'claude-agent-sdk') {
+    return new ClaudeAgentSDKProvider({ permissionMode: 'plan', model: config.model || undefined });
+  }
+
   if (config.provider === 'anthropic') {
     return createAnthropicDirectProvider({
       apiKey: config.apiKey,
@@ -48,39 +71,72 @@ function createDiffingProvider(config: DiffingProviderConfig): AIProvider {
   });
 }
 
+function resolveAbsPath(imagePath: string): string {
+  if (imagePath.startsWith(process.cwd())) return imagePath;
+  return path.join(process.cwd(), 'public', imagePath);
+}
+
 export async function analyzeDiff(
   input: AnalyzeDiffInput,
   providerConfig: DiffingProviderConfig
 ): Promise<AIDiffAnalysis> {
-  const baselineImage = readImageAsBase64(input.baselineImagePath);
-  const currentImage = readImageAsBase64(input.currentImagePath);
-  const diffImage = readImageAsBase64(input.diffImagePath);
+  let response: string;
 
-  const userPrompt = buildDiffAnalysisPrompt({
-    testName: input.testName,
-    percentageDifference: input.percentageDifference,
-    changedRegions: input.metadata?.changedRegions?.length,
-    changeCategories: input.metadata?.changeCategories,
-    pageShift: input.metadata?.pageShift,
-  });
+  if (providerConfig.provider === 'claude-agent-sdk') {
+    // Agent SDK reads images from disk via file paths
+    const sdkPrompt = buildDiffAnalysisPromptWithPaths({
+      testName: input.testName,
+      percentageDifference: input.percentageDifference,
+      changedRegions: input.metadata?.changedRegions?.length,
+      changeCategories: input.metadata?.changeCategories,
+      pageShift: input.metadata?.pageShift,
+      baselinePath: resolveAbsPath(input.baselineImagePath),
+      currentPath: resolveAbsPath(input.currentImagePath),
+      diffPath: resolveAbsPath(input.diffImagePath),
+    });
 
-  const provider = createDiffingProvider(providerConfig);
+    const provider = createDiffingProvider(providerConfig);
+    response = await provider.generate({
+      prompt: sdkPrompt,
+      systemPrompt: DIFF_ANALYSIS_SYSTEM_PROMPT,
+    });
+  } else {
+    // OpenRouter / Anthropic Direct: send base64 images
+    const baselineImage = readImageAsBase64(input.baselineImagePath);
+    const currentImage = readImageAsBase64(input.currentImagePath);
+    const diffImage = readImageAsBase64(input.diffImagePath);
 
-  const response = await provider.generate({
-    prompt: userPrompt,
-    systemPrompt: DIFF_ANALYSIS_SYSTEM_PROMPT,
-    maxTokens: 1024,
-    temperature: 0.2,
-    images: [baselineImage, currentImage, diffImage],
-  });
+    const userPrompt = buildDiffAnalysisPrompt({
+      testName: input.testName,
+      percentageDifference: input.percentageDifference,
+      changedRegions: input.metadata?.changedRegions?.length,
+      changeCategories: input.metadata?.changeCategories,
+      pageShift: input.metadata?.pageShift,
+    });
 
-  // Parse JSON response
-  const jsonMatch = response.match(/\{[\s\S]*\}/);
-  if (!jsonMatch) {
-    throw new Error('AI response did not contain valid JSON');
+    const provider = createDiffingProvider(providerConfig);
+    response = await provider.generate({
+      prompt: userPrompt,
+      systemPrompt: DIFF_ANALYSIS_SYSTEM_PROMPT,
+      maxTokens: 1024,
+      temperature: 0.2,
+      images: [baselineImage, currentImage, diffImage],
+    });
   }
 
-  const parsed = JSON.parse(jsonMatch[0]);
+  // Parse JSON response
+  const jsonStr = extractJsonObject(response);
+  if (!jsonStr) {
+    throw new Error(`AI response did not contain valid JSON. Response: ${response.slice(0, 500)}`);
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let parsed: any;
+  try {
+    parsed = JSON.parse(jsonStr);
+  } catch (e) {
+    throw new Error(`Failed to parse extracted JSON: ${(e as Error).message}. Extracted: ${jsonStr.slice(0, 500)}`);
+  }
 
   // Validate and normalize
   const classification = ['insignificant', 'meaningful', 'noise'].includes(parsed.classification)
