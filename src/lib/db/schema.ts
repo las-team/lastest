@@ -37,6 +37,15 @@ export interface PageShiftInfo {
   excludedFromDiff: boolean;
 }
 
+export interface AIDiffAnalysis {
+  classification: 'insignificant' | 'meaningful' | 'noise';
+  recommendation: 'approve' | 'review' | 'flag';
+  summary: string;
+  confidence: number; // 0-1
+  categories?: string[];
+  analyzedAt: string;
+}
+
 export interface DiffMetadata {
   changedRegions: { x: number; y: number; width: number; height: number }[];
   affectedComponents?: string[];
@@ -236,6 +245,10 @@ export const visualDiffs = sqliteTable('visual_diffs', {
   plannedDiffImagePath: text('planned_diff_image_path'),
   plannedPixelDifference: integer('planned_pixel_difference'),
   plannedPercentageDifference: text('planned_percentage_difference'),
+  // AI diff analysis
+  aiAnalysis: text('ai_analysis', { mode: 'json' }).$type<AIDiffAnalysis>(),
+  aiRecommendation: text('ai_recommendation'), // 'approve' | 'review' | 'flag' | null
+  aiAnalysisStatus: text('ai_analysis_status'), // 'pending' | 'running' | 'completed' | 'failed' | 'skipped' | null
 });
 
 // Baselines for carry-forward logic
@@ -304,6 +317,10 @@ export type NewPullRequest = typeof pullRequests.$inferInsert;
 export type Build = typeof builds.$inferSelect;
 export type NewBuild = typeof builds.$inferInsert;
 export type VisualDiff = typeof visualDiffs.$inferSelect;
+export type AIDiffRecommendation = 'approve' | 'review' | 'flag';
+export type AIDiffAnalysisStatus = 'pending' | 'running' | 'completed' | 'failed' | 'skipped';
+export type AIDiffingProvider = 'openrouter' | 'anthropic';
+
 export type VisualDiffWithTestStatus = VisualDiff & {
   testResultStatus: string | null;
   testName: string | null;
@@ -541,6 +558,11 @@ export const aiSettings = sqliteTable('ai_settings', {
   agentSdkPermissionMode: text('agent_sdk_permission_mode').default('plan'), // 'plan' | 'default' | 'acceptEdits'
   agentSdkWorkingDir: text('agent_sdk_working_dir'),
   customInstructions: text('custom_instructions'),
+  // AI Diffing settings (separate from test generation)
+  aiDiffingEnabled: integer('ai_diffing_enabled', { mode: 'boolean' }).default(false),
+  aiDiffingProvider: text('ai_diffing_provider'), // 'openrouter' | 'anthropic'
+  aiDiffingApiKey: text('ai_diffing_api_key'),
+  aiDiffingModel: text('ai_diffing_model').default('anthropic/claude-sonnet-4-5-20250929'),
   createdAt: integer('created_at', { mode: 'timestamp' }),
   updatedAt: integer('updated_at', { mode: 'timestamp' }),
 });
@@ -552,10 +574,13 @@ export const DEFAULT_AI_SETTINGS = {
   provider: 'claude-cli' as AIProvider,
   openrouterModel: 'anthropic/claude-sonnet-4',
   agentSdkPermissionMode: 'plan' as AgentSdkPermissionMode,
+  aiDiffingEnabled: false,
+  aiDiffingProvider: 'openrouter' as AIDiffingProvider,
+  aiDiffingModel: 'anthropic/claude-sonnet-4-5-20250929',
 };
 
 // AI Prompt Logging for debugging and auditing
-export type AIActionType = 'create_test' | 'fix_test' | 'enhance_test' | 'scan_routes' | 'test_connection' | 'analyze_specs' | 'mcp_explore';
+export type AIActionType = 'create_test' | 'fix_test' | 'enhance_test' | 'scan_routes' | 'test_connection' | 'analyze_specs' | 'mcp_explore' | 'analyze_diff';
 export type AILogStatus = 'pending' | 'success' | 'error';
 
 export const aiPromptLogs = sqliteTable('ai_prompt_logs', {

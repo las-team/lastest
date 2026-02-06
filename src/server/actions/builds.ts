@@ -22,6 +22,7 @@ import { postMRComment } from '@/lib/integrations/gitlab-mr';
 import type { Test, TriggerType, BuildStatus, VisualDiffWithTestStatus, DiffClassification, DiffStatus } from '@/lib/db/schema';
 import path from 'path';
 import { createJob, createPendingJob, startJob, updateJobProgress, completeJob, failJob } from './jobs';
+import { triggerAIDiffAnalysis } from './ai-diffs';
 
 interface GitInfo {
   branch: string;
@@ -266,6 +267,11 @@ async function runBuildAsync(
       );
       if (diffResult.classification === 'changed') changesDetected++;
       if (diffResult.classification === 'flaky') flakyCount++;
+
+      // Fire-and-forget AI diff analysis for non-unchanged diffs
+      if (diffResult.classification !== 'unchanged') {
+        triggerAIDiffAnalysis(diffResult.diffId, repositoryId).catch(console.error);
+      }
     }
 
     // Update build progress incrementally

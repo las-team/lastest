@@ -63,11 +63,13 @@ jobs:
 
       - name: Run visual regression tests
         run: |
-          pnpm start &
+          node .next/standalone/server.js &
           sleep 10
           npx tsx scripts/run-tests.ts --repo-id "${{ vars.REPO_ID }}" --base-url http://localhost:3000 --output-dir ./test-output
         env:
           DATABASE_PATH: ./lastest2.db
+          PORT: 3000
+          HOSTNAME: 0.0.0.0
 
       - name: Upload screenshots
         if: always()

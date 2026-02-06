@@ -24,6 +24,9 @@ export default async function BuildPage({ params }: PageProps) {
   }
 
   const pendingDiffs = build.diffs.filter((d) => d.status === 'pending');
+  const aiApproveCount = build.diffs.filter(
+    (d) => d.aiRecommendation === 'approve' && d.status === 'pending'
+  ).length;
 
   return (
     <div className="p-6 max-w-6xl mx-auto space-y-6">
@@ -49,6 +52,7 @@ export default async function BuildPage({ params }: PageProps) {
           <BuildActionsClient
             buildId={buildId}
             hasPendingDiffs={pendingDiffs.length > 0}
+            aiApproveCount={aiApproveCount}
           />
         </div>
 

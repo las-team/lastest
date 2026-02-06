@@ -230,3 +230,77 @@ export async function undoApproval(diffId: string) {
 
   return { success: true };
 }
+
+/**
+ * Accept all diffs where AI recommends 'approve' and status is still 'pending'
+ */
+export async function acceptAIApprovals(buildId: string, approvedBy?: string) {
+  const approvable = await queries.getPendingAIApprovableDiffs(buildId);
+
+  for (const diff of approvable) {
+    await approveDiff(diff.id, approvedBy || 'ai-recommendation');
+  }
+
+  revalidatePath('/builds');
+  revalidatePath(`/builds/${buildId}`);
+
+  return { approvedCount: approvable.length };
+}
+
+/**
+ * Accept selected AI-recommended diffs
+ */
+export async function acceptSelectedAIApprovals(diffIds: string[], approvedBy?: string) {
+  for (const diffId of diffIds) {
+    await approveDiff(diffId, approvedBy || 'ai-recommendation');
+  }
+
+  revalidatePath('/builds');
+
+  return { approvedCount: diffIds.length };
+}
+
+/**
+ * Discard AI recommendations for all diffs in a build (keeps status unchanged)
+ */
+export async function discardAIRecommendations(buildId: string) {
+  const diffs = await queries.getVisualDiffsByBuild(buildId);
+
+  for (const diff of diffs) {
+    if (diff.aiRecommendation || diff.aiAnalysis) {
+      await queries.updateVisualDiff(diff.id, {
+        aiRecommendation: null,
+        aiAnalysis: null,
+        aiAnalysisStatus: null,
+      });
+    }
+  }
+
+  revalidatePath('/builds');
+  revalidatePath(`/builds/${buildId}`);
+
+  return { success: true };
+}
+
+/**
+ * Reject all pending diffs in a build
+ */
+export async function rejectAllDiffs(buildId: string) {
+  const pendingDiffs = await queries.getPendingDiffsByBuild(buildId);
+
+  for (const diff of pendingDiffs) {
+    await rejectDiff(diff.id);
+  }
+
+  revalidatePath('/builds');
+  revalidatePath(`/builds/${buildId}`);
+
+  return { rejectedCount: pendingDiffs.length };
+}
+
+/**
+ * Get AI diff summary counts for a build
+ */
+export async function getAIDiffSummary(buildId: string) {
+  return queries.getAIDiffSummaryForBuild(buildId);
+}

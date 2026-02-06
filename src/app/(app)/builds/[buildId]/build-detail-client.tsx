@@ -2,12 +2,13 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
-import { AlertTriangle, CheckCircle, XCircle, ExternalLink, XIcon } from 'lucide-react';
+import { AlertTriangle, CheckCircle, XCircle, ExternalLink, XIcon, Sparkles, Flag } from 'lucide-react';
 import type { VisualDiffWithTestStatus } from '@/lib/db/schema';
 import { MetricsRow } from '@/components/dashboard/metrics-row';
+import { AIEvaluationPanel } from '@/components/ai/ai-evaluation-panel';
 
 // Filter type for the build detail page metrics
-export type FilterType = 'all' | 'tests' | 'changed' | 'flaky' | 'failed' | 'passed';
+export type FilterType = 'all' | 'tests' | 'changed' | 'flaky' | 'failed' | 'passed' | 'ai-approve' | 'ai-review' | 'ai-flag';
 
 // Utility function to filter diffs based on the selected filter type
 export function filterDiffs(diffs: VisualDiffWithTestStatus[], filter: FilterType): VisualDiffWithTestStatus[] {
@@ -18,14 +19,17 @@ export function filterDiffs(diffs: VisualDiffWithTestStatus[], filter: FilterTyp
     case 'changed':
       return diffs.filter((d) => d.classification === 'changed' || (d.pixelDifference && d.pixelDifference > 0 && !d.classification));
     case 'failed':
-      // Filter by test execution failure (testResultStatus) OR user-rejected diffs
       return diffs.filter((d) => d.testResultStatus === 'failed' || d.status === 'rejected');
     case 'passed':
-      // Filter by test execution passed
       return diffs.filter((d) => d.testResultStatus === 'passed');
     case 'flaky':
-      // Filter by flaky classification
       return diffs.filter((d) => d.classification === 'flaky');
+    case 'ai-approve':
+      return diffs.filter((d) => d.aiRecommendation === 'approve');
+    case 'ai-review':
+      return diffs.filter((d) => d.aiRecommendation === 'review');
+    case 'ai-flag':
+      return diffs.filter((d) => d.aiRecommendation === 'flag');
     default:
       return diffs;
   }
@@ -55,6 +59,16 @@ const filterLabels: Record<FilterType, string> = {
   flaky: 'Flaky',
   failed: 'Failed',
   passed: 'Passed',
+  'ai-approve': 'AI: Safe',
+  'ai-review': 'AI: Review',
+  'ai-flag': 'AI: Flagged',
+};
+
+// AI recommendation badge config
+const aiRecommendationBadge: Record<string, { label: string; className: string; Icon: typeof CheckCircle }> = {
+  approve: { label: 'AI: Safe', className: 'bg-green-100 text-green-700', Icon: CheckCircle },
+  review: { label: 'AI: Review', className: 'bg-yellow-100 text-yellow-700', Icon: AlertTriangle },
+  flag: { label: 'AI: Flagged', className: 'bg-red-100 text-red-700', Icon: Flag },
 };
 
 export interface BuildDetailClientProps {
@@ -108,6 +122,9 @@ export function BuildDetailClient({
   // Check if filter is active (not 'all')
   const isFilterActive = activeFilter !== 'all';
 
+  // Check if any diffs have AI analysis
+  const hasAIAnalysis = diffs.some(d => d.aiRecommendation || d.aiAnalysisStatus === 'running' || d.aiAnalysisStatus === 'pending');
+
   return (
     <div className="space-y-6">
       {/* Metrics Row with Filter Support */}
@@ -123,6 +140,11 @@ export function BuildDetailClient({
         isRunning={isRunning}
         completedTests={completedTests}
       />
+
+      {/* AI Evaluation Panel */}
+      {hasAIAnalysis && (
+        <AIEvaluationPanel buildId={buildId} diffs={diffs} />
+      )}
 
       {/* Tests for Review Section */}
       <div>
@@ -166,6 +188,7 @@ export function BuildDetailClient({
               const StatusIcon = isExecutionFailed ? XCircle : diffStatusIcons[diff.status];
               const statusColor = isExecutionFailed ? 'text-red-600 bg-red-50' : diffStatusColors[diff.status];
               const isFailed = isExecutionFailed || diff.status === 'rejected';
+              const aiBadge = diff.aiRecommendation ? aiRecommendationBadge[diff.aiRecommendation] : null;
 
               return (
                 <Link
@@ -210,6 +233,13 @@ export function BuildDetailClient({
                   </div>
 
                   <div className="flex items-center gap-4">
+                    {/* AI Recommendation Badge */}
+                    {aiBadge && (
+                      <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium ${aiBadge.className}`}>
+                        <Sparkles className="w-3 h-3" />
+                        {aiBadge.label}
+                      </span>
+                    )}
                     {diff.currentImagePath && (
                       <img
                         src={diff.currentImagePath}

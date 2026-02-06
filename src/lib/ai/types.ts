@@ -5,6 +5,7 @@ export interface GenerateOptions {
   systemPrompt?: string;
   maxTokens?: number;
   temperature?: number;
+  images?: { base64: string; mediaType: string }[];
 }
 
 export interface StreamCallbacks {

@@ -20,6 +20,10 @@ export async function saveAISettings(data: {
   agentSdkPermissionMode?: AgentSdkPermissionMode;
   agentSdkWorkingDir?: string | null;
   customInstructions?: string | null;
+  aiDiffingEnabled?: boolean;
+  aiDiffingProvider?: string | null;
+  aiDiffingApiKey?: string | null;
+  aiDiffingModel?: string | null;
 }) {
   const { repositoryId, ...settingsData } = data;
 

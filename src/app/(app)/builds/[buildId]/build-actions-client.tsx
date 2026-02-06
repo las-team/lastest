@@ -2,17 +2,19 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { approveAllDiffs } from '@/server/actions/diffs';
-import { CheckCircle } from 'lucide-react';
+import { approveAllDiffs, acceptAIApprovals } from '@/server/actions/diffs';
+import { CheckCircle, Sparkles } from 'lucide-react';
 
 interface BuildActionsClientProps {
   buildId: string;
   hasPendingDiffs: boolean;
+  aiApproveCount?: number;
 }
 
-export function BuildActionsClient({ buildId, hasPendingDiffs }: BuildActionsClientProps) {
+export function BuildActionsClient({ buildId, hasPendingDiffs, aiApproveCount = 0 }: BuildActionsClientProps) {
   const router = useRouter();
   const [isApproving, setIsApproving] = useState(false);
+  const [isAIApproving, setIsAIApproving] = useState(false);
 
   const handleApproveAll = async () => {
     if (!hasPendingDiffs) return;
@@ -28,8 +30,30 @@ export function BuildActionsClient({ buildId, hasPendingDiffs }: BuildActionsCli
     }
   };
 
+  const handleAIApprove = async () => {
+    setIsAIApproving(true);
+    try {
+      await acceptAIApprovals(buildId);
+      router.refresh();
+    } catch (error) {
+      console.error('Failed to accept AI approvals:', error);
+    } finally {
+      setIsAIApproving(false);
+    }
+  };
+
   return (
     <div className="flex items-center gap-2">
+      {aiApproveCount > 0 && (
+        <button
+          onClick={handleAIApprove}
+          disabled={isAIApproving}
+          className="flex items-center gap-2 px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          <Sparkles className="w-4 h-4" />
+          {isAIApproving ? 'Approving...' : `Accept AI Approvals (${aiApproveCount})`}
+        </button>
+      )}
       {hasPendingDiffs && (
         <button
           onClick={handleApproveAll}
