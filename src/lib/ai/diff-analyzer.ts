@@ -55,7 +55,9 @@ function readImageAsBase64(imagePath: string): { base64: string; mediaType: stri
 
 function createDiffingProvider(config: DiffingProviderConfig): AIProvider {
   if (config.provider === 'claude-agent-sdk') {
-    return new ClaudeAgentSDKProvider({ permissionMode: 'plan', model: config.model || undefined });
+    // SDK expects bare model IDs (e.g. "claude-sonnet-4-5-20250929"), strip vendor prefix
+    const sdkModel = config.model?.replace(/^anthropic\//, '') || undefined;
+    return new ClaudeAgentSDKProvider({ permissionMode: 'plan', model: sdkModel });
   }
 
   if (config.provider === 'anthropic') {

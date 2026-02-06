@@ -558,6 +558,7 @@ export const aiSettings = sqliteTable('ai_settings', {
   openrouterApiKey: text('openrouter_api_key'),
   openrouterModel: text('openrouter_model').default('anthropic/claude-sonnet-4'),
   agentSdkPermissionMode: text('agent_sdk_permission_mode').default('plan'), // 'plan' | 'default' | 'acceptEdits'
+  agentSdkModel: text('agent_sdk_model'),
   agentSdkWorkingDir: text('agent_sdk_working_dir'),
   customInstructions: text('custom_instructions'),
   // AI Diffing settings (separate from test generation)
@@ -576,6 +577,7 @@ export const DEFAULT_AI_SETTINGS = {
   provider: 'claude-cli' as AIProvider,
   openrouterModel: 'anthropic/claude-sonnet-4',
   agentSdkPermissionMode: 'plan' as AgentSdkPermissionMode,
+  agentSdkModel: '',
   aiDiffingEnabled: false,
   aiDiffingProvider: 'same-as-test-gen' as AIDiffingProvider,
   aiDiffingModel: 'anthropic/claude-sonnet-4-5-20250929',

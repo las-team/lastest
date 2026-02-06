@@ -49,8 +49,10 @@ export async function triggerAIDiffAnalysis(diffId: string, repositoryId?: strin
         return;
       }
       effectiveProvider = settings.provider === 'claude-agent-sdk' ? 'claude-agent-sdk' : settings.provider;
-      effectiveApiKey = settings.openrouterApiKey || '';
-      effectiveModel = settings.openrouterModel || 'anthropic/claude-sonnet-4-5-20250929';
+      effectiveApiKey = settings.provider === 'claude-agent-sdk' ? '' : (settings.openrouterApiKey || '');
+      effectiveModel = settings.provider === 'claude-agent-sdk'
+        ? (settings.agentSdkModel || '')
+        : (settings.openrouterModel || 'anthropic/claude-sonnet-4-5-20250929');
     } else if (rawProvider === 'claude-agent-sdk') {
       effectiveProvider = 'claude-agent-sdk';
       effectiveApiKey = '';

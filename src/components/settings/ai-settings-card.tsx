@@ -48,6 +48,7 @@ export function AISettingsCard({ settings, repositoryId }: AISettingsCardProps) 
   const [agentSdkPermissionMode, setAgentSdkPermissionMode] = useState<AgentSdkPermissionMode>(
     (settings.agentSdkPermissionMode as AgentSdkPermissionMode) || 'plan'
   );
+  const [agentSdkModel, setAgentSdkModel] = useState(settings.agentSdkModel || '');
   const [agentSdkWorkingDir, setAgentSdkWorkingDir] = useState(settings.agentSdkWorkingDir || '');
 
   // AI Diffing settings
@@ -69,6 +70,7 @@ export function AISettingsCard({ settings, repositoryId }: AISettingsCardProps) 
     openrouterModel: settings.openrouterModel || DEFAULT_AI_SETTINGS.openrouterModel,
     customInstructions: settings.customInstructions || '',
     agentSdkPermissionMode: (settings.agentSdkPermissionMode as AgentSdkPermissionMode) || 'plan',
+    agentSdkModel: settings.agentSdkModel || '',
     agentSdkWorkingDir: settings.agentSdkWorkingDir || '',
     aiDiffingEnabled: settings.aiDiffingEnabled ?? false,
     aiDiffingProvider: (settings.aiDiffingProvider as AIDiffingProvider) || 'openrouter',
@@ -84,6 +86,7 @@ export function AISettingsCard({ settings, repositoryId }: AISettingsCardProps) 
         openrouterApiKey: openrouterApiKey || null,
         openrouterModel,
         agentSdkPermissionMode,
+        agentSdkModel: agentSdkModel || null,
         agentSdkWorkingDir: agentSdkWorkingDir || null,
         customInstructions: customInstructions || null,
         aiDiffingEnabled,
@@ -93,7 +96,7 @@ export function AISettingsCard({ settings, repositoryId }: AISettingsCardProps) 
       });
       toast.success('AI settings saved');
     });
-  }, [repositoryId, provider, openrouterApiKey, openrouterModel, agentSdkPermissionMode, agentSdkWorkingDir, customInstructions, aiDiffingEnabled, aiDiffingProvider, aiDiffingApiKey, aiDiffingModel]);
+  }, [repositoryId, provider, openrouterApiKey, openrouterModel, agentSdkPermissionMode, agentSdkModel, agentSdkWorkingDir, customInstructions, aiDiffingEnabled, aiDiffingProvider, aiDiffingApiKey, aiDiffingModel]);
 
   // Auto-save with debounce - only when values differ from original props
   useEffect(() => {
@@ -104,6 +107,7 @@ export function AISettingsCard({ settings, repositoryId }: AISettingsCardProps) 
       openrouterModel !== orig.openrouterModel ||
       customInstructions !== orig.customInstructions ||
       agentSdkPermissionMode !== orig.agentSdkPermissionMode ||
+      agentSdkModel !== orig.agentSdkModel ||
       agentSdkWorkingDir !== orig.agentSdkWorkingDir ||
       aiDiffingEnabled !== orig.aiDiffingEnabled ||
       aiDiffingProvider !== orig.aiDiffingProvider ||
@@ -125,7 +129,7 @@ export function AISettingsCard({ settings, repositoryId }: AISettingsCardProps) 
         clearTimeout(debounceRef.current);
       }
     };
-  }, [provider, openrouterApiKey, openrouterModel, agentSdkPermissionMode, agentSdkWorkingDir, customInstructions, aiDiffingEnabled, aiDiffingProvider, aiDiffingApiKey, aiDiffingModel, doSave]);
+  }, [provider, openrouterApiKey, openrouterModel, agentSdkPermissionMode, agentSdkModel, agentSdkWorkingDir, customInstructions, aiDiffingEnabled, aiDiffingProvider, aiDiffingApiKey, aiDiffingModel, doSave]);
 
   const handleReset = () => {
     startTransition(async () => {
@@ -135,6 +139,7 @@ export function AISettingsCard({ settings, repositoryId }: AISettingsCardProps) 
       setOpenrouterModel(DEFAULT_AI_SETTINGS.openrouterModel);
       setCustomInstructions('');
       setAgentSdkPermissionMode('plan');
+      setAgentSdkModel('');
       setAgentSdkWorkingDir('');
       setAiDiffingEnabled(false);
       setAiDiffingProvider(DEFAULT_AI_SETTINGS.aiDiffingProvider);
@@ -274,6 +279,19 @@ export function AISettingsCard({ settings, repositoryId }: AISettingsCardProps) 
               </Select>
               <p className="text-xs text-muted-foreground">
                 Controls what actions the agent can perform. &quot;Plan&quot; is read-only and safest.
+              </p>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="agentSdkModel">Model (Optional)</Label>
+              <Input
+                id="agentSdkModel"
+                value={agentSdkModel}
+                onChange={(e) => setAgentSdkModel(e.target.value)}
+                placeholder="claude-sonnet-4-5-20250929"
+              />
+              <p className="text-xs text-muted-foreground">
+                Claude model ID (e.g. claude-sonnet-4-5-20250929). Leave empty for CLI default.
               </p>
             </div>
 

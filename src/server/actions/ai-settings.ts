@@ -18,6 +18,7 @@ export async function saveAISettings(data: {
   openrouterApiKey?: string | null;
   openrouterModel?: string;
   agentSdkPermissionMode?: AgentSdkPermissionMode;
+  agentSdkModel?: string | null;
   agentSdkWorkingDir?: string | null;
   customInstructions?: string | null;
   aiDiffingEnabled?: boolean;

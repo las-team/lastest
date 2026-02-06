@@ -79,7 +79,7 @@ Import from prior tools?
 
 ### UX
 ## bugs
-
+Timestamp fixing
 ## marketing
 Support https://github.com/excalidraw/excalidraw/tree/master/packages/excalidraw/tests
 

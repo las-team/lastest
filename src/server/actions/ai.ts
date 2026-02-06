@@ -21,6 +21,7 @@ async function getAIConfig(repositoryId?: string | null): Promise<AIProviderConf
     openrouterModel: settings.openrouterModel || 'anthropic/claude-sonnet-4',
     customInstructions: settings.customInstructions,
     agentSdkPermissionMode: settings.agentSdkPermissionMode as 'plan' | 'default' | 'acceptEdits' | undefined,
+    agentSdkModel: settings.agentSdkModel || undefined,
     agentSdkWorkingDir: settings.agentSdkWorkingDir || undefined,
   };
 }

@@ -27,6 +27,7 @@ export class ClaudeAgentSDKProvider implements AIProvider {
     }
 
     const messages: string[] = [];
+    const stderrChunks: string[] = [];
 
     try {
       for await (const message of query({
@@ -35,6 +36,8 @@ export class ClaudeAgentSDKProvider implements AIProvider {
           permissionMode: this.permissionMode,
           cwd: this.workingDirectory,
           model: this.model,
+          maxTurns: 3,
+          stderr: (data: string) => { stderrChunks.push(data); },
         },
       })) {
         // Collect text content from assistant messages
@@ -51,12 +54,19 @@ export class ClaudeAgentSDKProvider implements AIProvider {
             messages.push(message.result);
           }
         }
+        // Capture error results
+        if (message.type === 'result' && message.subtype.startsWith('error')) {
+          const errMsg = (message as { error?: string }).error || message.subtype;
+          throw new Error(`Claude Agent SDK returned error: ${errMsg}`);
+        }
       }
 
       return messages.join('\n').trim();
     } catch (error) {
+      const stderr = stderrChunks.join('').trim();
       if (error instanceof Error) {
-        throw new Error(`Claude Agent SDK error: ${error.message}`);
+        const detail = stderr ? ` | stderr: ${stderr.slice(0, 500)}` : '';
+        throw new Error(`Claude Agent SDK error: ${error.message}${detail}`);
       }
       throw error;
     }
@@ -71,6 +81,7 @@ export class ClaudeAgentSDKProvider implements AIProvider {
     }
 
     let fullText = '';
+    const stderrChunks: string[] = [];
 
     try {
       for await (const message of query({
@@ -79,6 +90,8 @@ export class ClaudeAgentSDKProvider implements AIProvider {
           permissionMode: this.permissionMode,
           cwd: this.workingDirectory,
           model: this.model,
+          maxTurns: 3,
+          stderr: (data: string) => { stderrChunks.push(data); },
         },
       })) {
         // Stream text content from assistant messages
@@ -95,13 +108,22 @@ export class ClaudeAgentSDKProvider implements AIProvider {
           fullText += message.result;
           callbacks.onToken?.(message.result);
         }
+        // Capture error results
+        if (message.type === 'result' && message.subtype.startsWith('error')) {
+          const errMsg = (message as { error?: string }).error || message.subtype;
+          throw new Error(`Claude Agent SDK returned error: ${errMsg}`);
+        }
       }
 
       callbacks.onComplete?.(fullText.trim());
     } catch (error) {
-      const err = error instanceof Error ? error : new Error(String(error));
-      callbacks.onError?.(err);
-      throw err;
+      const stderr = stderrChunks.join('').trim();
+      const base = error instanceof Error ? error : new Error(String(error));
+      if (stderr) {
+        base.message = `${base.message} | stderr: ${stderr.slice(0, 500)}`;
+      }
+      callbacks.onError?.(base);
+      throw base;
     }
   }
 }

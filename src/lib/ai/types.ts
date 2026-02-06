@@ -25,6 +25,7 @@ export interface AIProviderConfig {
   openrouterModel?: string;
   customInstructions?: string | null;
   agentSdkPermissionMode?: 'plan' | 'default' | 'acceptEdits';
+  agentSdkModel?: string;
   agentSdkWorkingDir?: string;
 }
 

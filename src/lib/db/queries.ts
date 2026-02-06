@@ -1158,6 +1158,7 @@ export async function getAISettings(repositoryId?: string | null) {
     openrouterApiKey: null,
     openrouterModel: DEFAULT_AI_SETTINGS.openrouterModel,
     agentSdkPermissionMode: DEFAULT_AI_SETTINGS.agentSdkPermissionMode,
+    agentSdkModel: DEFAULT_AI_SETTINGS.agentSdkModel,
     agentSdkWorkingDir: null,
     customInstructions: null,
     aiDiffingEnabled: DEFAULT_AI_SETTINGS.aiDiffingEnabled,
