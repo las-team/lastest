@@ -1,4 +1,4 @@
-import { getTest, getTestResultsByTest, getSelectedRepository, getPlannedScreenshotsByTest, getDefaultSetupSteps, getTestsByRepo, getSetupScripts } from '@/lib/db/queries';
+import { getTest, getTestResultsByTest, getSelectedRepository, getPlannedScreenshotsByTest, getDefaultSetupSteps, getTestsByRepo, getSetupScripts, getGoogleSheetsDataSources } from '@/lib/db/queries';
 import { getTestScreenshotsGrouped } from '@/server/actions/tests';
 import { getCurrentSession } from '@/lib/auth';
 import { TestDetailClient } from './test-detail-client';
@@ -29,6 +29,9 @@ export default async function TestDetailPage({ params }: TestDetailPageProps) {
   const availableTests = repoId ? await getTestsByRepo(repoId) : [];
   const setupScripts = repoId ? await getSetupScripts(repoId) : [];
 
+  // Load Google Sheets data sources for data reference preview
+  const sheetDataSources = repoId ? await getGoogleSheetsDataSources(repoId) : [];
+
   return (
     <div className="flex flex-col h-full">
       <TestDetailClient
@@ -40,6 +43,7 @@ export default async function TestDetailPage({ params }: TestDetailPageProps) {
         defaultSetupSteps={defaultSetupSteps}
         availableTests={availableTests}
         availableScripts={setupScripts}
+        sheetDataSources={sheetDataSources}
       />
     </div>
   );

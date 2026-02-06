@@ -1,0 +1,108 @@
+import { NextRequest, NextResponse } from 'next/server';
+import * as queries from '@/lib/db/queries';
+import { getCurrentUser } from '@/lib/auth';
+
+const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || '';
+const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET || '';
+const GOOGLE_SHEETS_REDIRECT_URI = process.env.GOOGLE_SHEETS_REDIRECT_URI || 'http://localhost:3000/api/auth/google-sheets/callback';
+
+interface GoogleTokenResponse {
+  access_token: string;
+  refresh_token?: string;
+  expires_in: number;
+  token_type: string;
+  id_token: string;
+}
+
+interface GoogleUserInfo {
+  sub: string;
+  email: string;
+  name: string;
+  picture: string;
+}
+
+async function exchangeCodeForToken(code: string): Promise<GoogleTokenResponse | null> {
+  try {
+    const response = await fetch('https://oauth2.googleapis.com/token', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+      },
+      body: new URLSearchParams({
+        code,
+        client_id: GOOGLE_CLIENT_ID,
+        client_secret: GOOGLE_CLIENT_SECRET,
+        redirect_uri: GOOGLE_SHEETS_REDIRECT_URI,
+        grant_type: 'authorization_code',
+      }),
+    });
+
+    if (!response.ok) {
+      console.error('Google Sheets token exchange failed:', response.status, await response.text());
+      return null;
+    }
+    return response.json();
+  } catch (error) {
+    console.error('Google Sheets token exchange error:', error);
+    return null;
+  }
+}
+
+async function getGoogleUserInfo(accessToken: string): Promise<GoogleUserInfo | null> {
+  try {
+    const response = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+      },
+    });
+    if (!response.ok) return null;
+    return response.json();
+  } catch {
+    return null;
+  }
+}
+
+export async function GET(request: NextRequest) {
+  const searchParams = request.nextUrl.searchParams;
+  const code = searchParams.get('code');
+  const error = searchParams.get('error');
+
+  if (error) {
+    return NextResponse.redirect(new URL('/settings?error=google_sheets_denied', request.url));
+  }
+
+  if (!code) {
+    return NextResponse.redirect(new URL('/settings?error=no_code', request.url));
+  }
+
+  // Get current user - must be logged in
+  const currentUser = await getCurrentUser();
+  if (!currentUser || !currentUser.teamId) {
+    return NextResponse.redirect(new URL('/login', request.url));
+  }
+
+  // Exchange code for token
+  const tokenResponse = await exchangeCodeForToken(code);
+  if (!tokenResponse) {
+    return NextResponse.redirect(new URL('/settings?error=google_sheets_token_failed', request.url));
+  }
+
+  // Get Google user info
+  const googleUser = await getGoogleUserInfo(tokenResponse.access_token);
+  if (!googleUser) {
+    return NextResponse.redirect(new URL('/settings?error=google_sheets_user_failed', request.url));
+  }
+
+  // Upsert Google Sheets account for this team
+  await queries.upsertGoogleSheetsAccount({
+    teamId: currentUser.teamId,
+    googleUserId: googleUser.sub,
+    googleEmail: googleUser.email,
+    googleName: googleUser.name,
+    accessToken: tokenResponse.access_token,
+    refreshToken: tokenResponse.refresh_token || null,
+    tokenExpiresAt: new Date(Date.now() + tokenResponse.expires_in * 1000),
+  });
+
+  return NextResponse.redirect(new URL('/settings?success=google_sheets_connected', request.url));
+}

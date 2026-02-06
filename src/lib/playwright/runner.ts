@@ -1097,9 +1097,30 @@ export class PlaywrightRunner extends EventEmitter {
   }
 
   private async executeTestCode(page: Page, test: Test, runId: string, screenshotPath: string, onStepLabel?: (label: string) => void): Promise<void> {
-    const code = test.code;
+    let code = test.code;
     if (!code) {
       throw new Error('No test code');
+    }
+
+    // Resolve {{sheet:...}} data references from Google Sheets data sources
+    if (code.includes('{{sheet:')) {
+      try {
+        const { resolveSheetReferences } = await import('@/lib/google-sheets/resolver');
+        const { getGoogleSheetsDataSources } = await import('@/lib/db/queries');
+        const repoId = test.repositoryId || this.repositoryId;
+        if (repoId) {
+          const dataSources = await getGoogleSheetsDataSources(repoId);
+          if (dataSources.length > 0) {
+            const result = resolveSheetReferences(code, dataSources);
+            if (result.errors.length > 0) {
+              console.warn('Sheet data reference warnings:', result.errors);
+            }
+            code = result.resolvedCode;
+          }
+        }
+      } catch (err) {
+        console.warn('Failed to resolve sheet data references:', err);
+      }
     }
 
     // Try to execute as a proper function with signature:

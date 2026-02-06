@@ -28,6 +28,7 @@ import { InviteUserDialog } from '@/components/users/invite-user-dialog';
 import { RunnerList } from '@/components/runners/runner-list';
 import { CreateRunnerDialog } from '@/components/runners/create-runner-dialog';
 import { getRunners } from '@/server/actions/runners';
+import { GoogleSheetsSettingsCard } from '@/components/settings/google-sheets-settings-card';
 
 export default async function SettingsPage({
   searchParams,
@@ -49,6 +50,10 @@ export default async function SettingsPage({
   const aiSettings = await queries.getAISettings(selectedRepo?.id);
   const aiLogs = await queries.getAIPromptLogs(selectedRepo?.id, 50);
   const notificationSettings = await queries.getNotificationSettings(selectedRepo?.id);
+  const googleSheetsAccount = currentUser?.teamId
+    ? await queries.getGoogleSheetsAccount(currentUser.teamId)
+    : null;
+  const googleSheetsDataSources = await queries.getGoogleSheetsDataSources(selectedRepo?.id);
 
   // Fetch admin-only data
   const isAdmin = currentUser?.role === 'admin' || currentUser?.role === 'owner';
@@ -76,6 +81,12 @@ export default async function SettingsPage({
             <div className="p-4 bg-green-50 border border-green-200 rounded-lg flex items-center gap-2 text-green-700 dark:bg-green-950/30 dark:border-green-800 dark:text-green-400">
               <Check className="w-5 h-5" />
               GitLab account connected successfully!
+            </div>
+          )}
+          {params.success === 'google_sheets_connected' && (
+            <div className="p-4 bg-green-50 border border-green-200 rounded-lg flex items-center gap-2 text-green-700">
+              <Check className="w-5 h-5" />
+              Google Sheets connected successfully!
             </div>
           )}
           {params.error && (
@@ -278,6 +289,17 @@ export default async function SettingsPage({
               repositoryId={selectedRepo?.id}
             />
           </div>
+
+          {/* Google Sheets Test Data */}
+          <GoogleSheetsSettingsCard
+            account={googleSheetsAccount ? {
+              id: googleSheetsAccount.id,
+              googleEmail: googleSheetsAccount.googleEmail,
+              googleName: googleSheetsAccount.googleName,
+            } : null}
+            dataSources={googleSheetsDataSources}
+            repositoryId={selectedRepo?.id}
+          />
 
           {/* AI Settings */}
           <div id="ai-settings">

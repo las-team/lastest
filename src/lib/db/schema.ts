@@ -955,3 +955,61 @@ export const defaultSetupSteps = sqliteTable('default_setup_steps', {
 
 export type DefaultSetupStep = typeof defaultSetupSteps.$inferSelect;
 export type NewDefaultSetupStep = typeof defaultSetupSteps.$inferInsert;
+
+// ============================================
+// Google Sheets Test Data Sources
+// ============================================
+
+// Google Sheets accounts - per-team Google connection with Sheets API scope
+export const googleSheetsAccounts = sqliteTable('google_sheets_accounts', {
+  id: text('id').primaryKey(),
+  teamId: text('team_id').references(() => teams.id),
+  googleUserId: text('google_user_id').notNull(),
+  googleEmail: text('google_email').notNull(),
+  googleName: text('google_name'),
+  accessToken: text('access_token').notNull(),
+  refreshToken: text('refresh_token'),
+  tokenExpiresAt: integer('token_expires_at', { mode: 'timestamp' }),
+  createdAt: integer('created_at', { mode: 'timestamp' }),
+});
+
+export type GoogleSheetsAccount = typeof googleSheetsAccounts.$inferSelect;
+export type NewGoogleSheetsAccount = typeof googleSheetsAccounts.$inferInsert;
+
+// Cached cell data from a sheet range
+export interface SheetCellData {
+  row: number;
+  col: number;
+  value: string;
+}
+
+// Column metadata for a sheet
+export interface SheetColumnInfo {
+  index: number;       // 0-based column index
+  letter: string;      // Column letter (A, B, C...)
+  header: string;      // First row value as header
+  sampleValues: string[]; // First few values for preview
+}
+
+// Google Sheets data sources - linked spreadsheets for test data
+export const googleSheetsDataSources = sqliteTable('google_sheets_data_sources', {
+  id: text('id').primaryKey(),
+  repositoryId: text('repository_id').references(() => repositories.id),
+  teamId: text('team_id').references(() => teams.id),
+  googleSheetsAccountId: text('google_sheets_account_id').references(() => googleSheetsAccounts.id),
+  spreadsheetId: text('spreadsheet_id').notNull(),       // Google Sheets document ID
+  spreadsheetName: text('spreadsheet_name').notNull(),    // Document title
+  sheetName: text('sheet_name').notNull(),                // Tab/sheet name within the spreadsheet
+  sheetGid: integer('sheet_gid'),                         // Sheet tab GID
+  alias: text('alias').notNull(),                         // Short name used in test references (e.g. "users", "products")
+  headerRow: integer('header_row').default(1),            // Which row contains column headers (1-based)
+  dataRange: text('data_range'),                          // Optional fixed range like "A1:D100"
+  cachedHeaders: text('cached_headers', { mode: 'json' }).$type<string[]>(),
+  cachedData: text('cached_data', { mode: 'json' }).$type<string[][]>(),     // Cached rows of data
+  lastSyncedAt: integer('last_synced_at', { mode: 'timestamp' }),
+  createdAt: integer('created_at', { mode: 'timestamp' }),
+  updatedAt: integer('updated_at', { mode: 'timestamp' }),
+});
+
+export type GoogleSheetsDataSource = typeof googleSheetsDataSources.$inferSelect;
+export type NewGoogleSheetsDataSource = typeof googleSheetsDataSources.$inferInsert;

@@ -30,8 +30,10 @@ import { useNotifyJobStarted } from '@/components/queue/job-polling-context';
 import { ExecutionTargetSelector } from '@/components/execution/execution-target-selector';
 import { StepScreenshotMatcher } from '@/components/planned/step-screenshot-matcher';
 import { TestSetupOverrides } from '@/components/setup/test-setup-overrides';
-import type { Test, TestVersion, PlannedScreenshot, SetupScript } from '@/lib/db/schema';
+import type { Test, TestVersion, PlannedScreenshot, SetupScript, GoogleSheetsDataSource } from '@/lib/db/schema';
 import type { ScreenshotGroup } from '@/server/actions/tests';
+import { SheetDataPreview } from '@/components/test-data/sheet-data-preview';
+import { SheetReferenceInserter } from '@/components/test-data/sheet-reference-inserter';
 
 interface StepDiff {
   stepLabel: string | null;
@@ -75,9 +77,10 @@ interface TestDetailClientProps {
   defaultSetupSteps?: DefaultStepForUI[];
   availableTests?: Test[];
   availableScripts?: SetupScript[];
+  sheetDataSources?: GoogleSheetsDataSource[];
 }
 
-export function TestDetailClient({ test, results, repositoryId, screenshotGroups = [], plannedScreenshots = [], defaultSetupSteps = [], availableTests = [], availableScripts = [] }: TestDetailClientProps) {
+export function TestDetailClient({ test, results, repositoryId, screenshotGroups = [], plannedScreenshots = [], defaultSetupSteps = [], availableTests = [], availableScripts = [], sheetDataSources = [] }: TestDetailClientProps) {
   const router = useRouter();
   const notifyJobStarted = useNotifyJobStarted();
   const [isDeleting, setIsDeleting] = useState(false);
@@ -508,7 +511,17 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
           <TabsContent value="code" className="mt-4 space-y-4">
             <Card>
               <CardHeader>
-                <CardTitle className="text-sm">Test Code</CardTitle>
+                <div className="flex items-center justify-between">
+                  <CardTitle className="text-sm">Test Code</CardTitle>
+                  {isEditing && sheetDataSources.length > 0 && (
+                    <SheetReferenceInserter
+                      dataSources={sheetDataSources}
+                      onInsert={(ref) => {
+                        setEditCode((prev) => prev + ref);
+                      }}
+                    />
+                  )}
+                </div>
               </CardHeader>
               <CardContent>
                 {isEditing ? (
@@ -524,6 +537,14 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
                 )}
               </CardContent>
             </Card>
+
+            {/* Sheet Data Reference Preview */}
+            {sheetDataSources.length > 0 && (test.code || editCode)?.includes('{{sheet:') && (
+              <SheetDataPreview
+                code={isEditing ? editCode : (test.code || '')}
+                dataSources={sheetDataSources}
+              />
+            )}
 
             {/* Inline AI Enhance */}
             {repositoryId && !isEditing && (
