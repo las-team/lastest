@@ -38,6 +38,7 @@ import {
   setupScripts,
   setupConfigs,
   defaultSetupSteps,
+  specImports,
 } from './schema';
 import {
   DEFAULT_SELECTOR_PRIORITY,
@@ -85,6 +86,7 @@ import type {
   NewSetupScript,
   NewSetupConfig,
   NewDefaultSetupStep,
+  NewSpecImport,
   Team,
   User,
   Runner,
@@ -2983,4 +2985,32 @@ export async function getResolvedSetupStepsForTest(test: { id: string; repositor
   }
 
   return [...activeDefaults, ...extras];
+}
+
+// Spec Imports
+export async function createSpecImport(data: Omit<NewSpecImport, 'id' | 'createdAt'>) {
+  const id = uuid();
+  const now = new Date();
+  await db.insert(specImports).values({ ...data, id, createdAt: now });
+  return { id, ...data, createdAt: now };
+}
+
+export async function updateSpecImport(
+  id: string,
+  data: Partial<Pick<NewSpecImport, 'status' | 'extractedStories' | 'areasCreated' | 'testsCreated' | 'error' | 'completedAt'>>
+) {
+  await db.update(specImports).set(data).where(eq(specImports.id, id));
+}
+
+export async function getSpecImport(id: string) {
+  return db.select().from(specImports).where(eq(specImports.id, id)).get();
+}
+
+export async function getSpecImportsByRepo(repositoryId: string) {
+  return db
+    .select()
+    .from(specImports)
+    .where(eq(specImports.repositoryId, repositoryId))
+    .orderBy(desc(specImports.createdAt))
+    .all();
 }

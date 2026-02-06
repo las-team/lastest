@@ -366,6 +366,108 @@ Return your findings as a JSON array with this exact structure:
 Return ONLY the JSON array inside a code block, no other text.`;
 }
 
+export function createUserStoryExtractionPrompt(specContent: string): string {
+  return `Analyze the following specification/requirements document and extract all User Stories (US) and their Acceptance Criteria (AC).
+
+Document content:
+${specContent}
+
+Extract User Stories and Acceptance Criteria with the following rules:
+1. Each distinct feature or capability should be its own User Story
+2. Each User Story should have clear, testable Acceptance Criteria
+3. Group related ACs under the same User Story
+4. If an AC is complex enough to warrant multiple tests, split it
+5. If multiple ACs are closely related and could be tested together, suggest grouping them
+6. Provide a suggested test name for each AC
+
+Return a JSON array with this exact structure:
+[
+  {
+    "id": "US-1",
+    "title": "User Story title (as a functional area name)",
+    "description": "As a [role], I want [feature] so that [benefit]",
+    "acceptanceCriteria": [
+      {
+        "id": "AC-1.1",
+        "description": "Given [context], when [action], then [expected result]",
+        "testName": "Suggested test name for this AC"
+      },
+      {
+        "id": "AC-1.2",
+        "description": "Given [context], when [action], then [expected result]",
+        "testName": "Suggested test name for this AC",
+        "groupedWith": "AC-1.1"
+      }
+    ]
+  }
+]
+
+Guidelines:
+- User Story titles should be concise and work well as functional area names (e.g., "User Authentication", "Dashboard Analytics")
+- AC descriptions should be specific and testable
+- Use "groupedWith" only when two ACs are so closely related they should be a single test
+- Test names should be descriptive (e.g., "Login with valid credentials", "Dashboard shows correct metrics")
+- Extract as many meaningful stories and criteria as the document supports
+- If the document doesn't follow formal US/AC format, infer them from the requirements
+
+Return ONLY the JSON array, no explanations or markdown formatting.`;
+}
+
+export function createBranchAwareTestPrompt(context: {
+  testName: string;
+  acceptanceCriteria: string;
+  userStoryTitle: string;
+  userStoryDescription: string;
+  targetUrl?: string;
+  branchChanges?: {
+    changedFiles: string[];
+    fileDiffs?: string;
+  };
+}): string {
+  const parts: string[] = [];
+
+  parts.push(`Generate a Playwright visual regression test for the following acceptance criterion.
+
+User Story: ${context.userStoryTitle}
+${context.userStoryDescription}
+
+Acceptance Criterion: ${context.acceptanceCriteria}
+Test Name: ${context.testName}`);
+
+  if (context.targetUrl) {
+    parts.push(`\nTarget URL: ${context.targetUrl}`);
+  }
+
+  if (context.branchChanges) {
+    parts.push(`\n--- Branch Code Context ---`);
+    parts.push(`The following files have been changed in the branch:`);
+    for (const file of context.branchChanges.changedFiles) {
+      parts.push(`- ${file}`);
+    }
+    if (context.branchChanges.fileDiffs) {
+      parts.push(`\nRelevant code changes:\n${context.branchChanges.fileDiffs}`);
+    }
+    parts.push(`\nUse this context to write more accurate selectors and assertions based on the actual code changes.`);
+  }
+
+  parts.push(`
+--- Guidelines ---
+- Write the test to verify the acceptance criterion
+- Use descriptive stepLogger.log() messages matching the AC steps
+- Add assertions that verify the expected behavior
+- Capture screenshots at meaningful states
+- Handle loading states for stable screenshots
+
+--- Requirements ---
+- Function signature: export async function test(page, baseUrl, screenshotPath, stepLogger)
+- At least one screenshot must be captured
+- Use baseUrl parameter for navigation
+
+Return ONLY the code, no explanations.`);
+
+  return parts.join('\n');
+}
+
 export function extractCodeFromResponse(response: string): string {
   // Try to extract code from markdown code blocks
   const codeBlockMatch = response.match(/```(?:typescript|ts|javascript|js)?\n([\s\S]*?)```/);

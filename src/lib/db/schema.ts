@@ -584,7 +584,7 @@ export const DEFAULT_AI_SETTINGS = {
 };
 
 // AI Prompt Logging for debugging and auditing
-export type AIActionType = 'create_test' | 'fix_test' | 'enhance_test' | 'scan_routes' | 'test_connection' | 'analyze_specs' | 'mcp_explore' | 'analyze_diff';
+export type AIActionType = 'create_test' | 'fix_test' | 'enhance_test' | 'scan_routes' | 'test_connection' | 'analyze_specs' | 'mcp_explore' | 'analyze_diff' | 'extract_user_stories' | 'generate_spec_tests';
 export type AILogStatus = 'pending' | 'success' | 'error';
 
 export const aiPromptLogs = sqliteTable('ai_prompt_logs', {
@@ -849,6 +849,45 @@ export const runners = sqliteTable('runners', {
 
 export type Runner = typeof runners.$inferSelect;
 export type NewRunner = typeof runners.$inferInsert;
+
+// ============================================
+// Spec Import - Document-based US/AC extraction
+// ============================================
+
+export type SpecImportStatus = 'pending' | 'extracting' | 'extracted' | 'generating' | 'completed' | 'failed';
+
+export interface ExtractedUserStory {
+  id: string;
+  title: string;
+  description: string;
+  acceptanceCriteria: ExtractedAcceptanceCriterion[];
+}
+
+export interface ExtractedAcceptanceCriterion {
+  id: string;
+  description: string;
+  testName?: string; // AI-suggested test name
+  groupedWith?: string; // ID of another AC to group with for a single test
+}
+
+export const specImports = sqliteTable('spec_imports', {
+  id: text('id').primaryKey(),
+  repositoryId: text('repository_id').references(() => repositories.id),
+  name: text('name').notNull(), // Import session name
+  sourceType: text('source_type').notNull(), // 'github' | 'upload'
+  sourceFiles: text('source_files', { mode: 'json' }).$type<string[]>(), // file paths or names
+  branch: text('branch'), // Branch used for code analysis
+  status: text('status').notNull().default('pending'), // SpecImportStatus
+  extractedStories: text('extracted_stories', { mode: 'json' }).$type<ExtractedUserStory[]>(),
+  areasCreated: integer('areas_created').default(0),
+  testsCreated: integer('tests_created').default(0),
+  error: text('error'),
+  createdAt: integer('created_at', { mode: 'timestamp' }),
+  completedAt: integer('completed_at', { mode: 'timestamp' }),
+});
+
+export type SpecImport = typeof specImports.$inferSelect;
+export type NewSpecImport = typeof specImports.$inferInsert;
 
 // ============================================
 // Setup Scripts & Configs Tables

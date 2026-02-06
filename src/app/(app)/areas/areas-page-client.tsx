@@ -18,11 +18,12 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { createArea, deleteArea, moveTestToArea, moveSuiteToArea, moveArea } from '@/server/actions/areas';
-import { Folder, FolderTree, FileCode, ListChecks, FolderSearch, Sparkles, Globe, FileText, Loader2 } from 'lucide-react';
+import { Folder, FolderTree, FileCode, ListChecks, FolderSearch, Sparkles, Globe, FileText, Loader2, BookOpen } from 'lucide-react';
 import { startRemoteRouteScan } from '@/server/actions/scanner';
 import { AIScanRoutesDialog } from '@/components/ai/ai-scan-routes-dialog';
 import { SpecAnalysisDialog } from '@/components/ai/spec-analysis-dialog';
 import { MCPExploreRoutesDialog } from '@/components/ai/mcp-explore-routes-dialog';
+import { ImportFromSpecDialog } from '@/components/ai/import-from-spec-dialog';
 import { toast } from 'sonner';
 import type { FunctionalAreaWithChildren } from '@/lib/db/queries';
 
@@ -55,6 +56,7 @@ export function AreasPageClient({ tree, uncategorizedTests, unsortedSuites, repo
   const [showAIScanDialog, setShowAIScanDialog] = useState(false);
   const [showSpecAnalysisDialog, setShowSpecAnalysisDialog] = useState(false);
   const [showMCPExploreDialog, setShowMCPExploreDialog] = useState(false);
+  const [showImportFromSpecDialog, setShowImportFromSpecDialog] = useState(false);
 
   const totalAreas = countAreas(tree);
   const totalTests = countTests(tree) + uncategorizedTests.length;
@@ -187,7 +189,7 @@ export function AreasPageClient({ tree, uncategorizedTests, unsortedSuites, repo
               </CardDescription>
             </CardHeader>
             <CardContent>
-              <div className="grid grid-cols-4 gap-4">
+              <div className="grid grid-cols-5 gap-3">
                 <button
                   onClick={handleScan}
                   disabled={isScanning}
@@ -208,6 +210,14 @@ export function AreasPageClient({ tree, uncategorizedTests, unsortedSuites, repo
                   <FileText className="h-6 w-6 text-primary" />
                   <span className="font-medium text-sm">Analyze Specs</span>
                   <span className="text-xs text-muted-foreground">Parse API/route specs</span>
+                </button>
+                <button
+                  onClick={() => setShowImportFromSpecDialog(true)}
+                  className="flex flex-col items-center gap-2 p-4 border rounded-lg hover:bg-muted/50 hover:border-primary/50 transition-colors text-center"
+                >
+                  <BookOpen className="h-6 w-6 text-primary" />
+                  <span className="font-medium text-sm">Import Spec</span>
+                  <span className="text-xs text-muted-foreground">US/AC to tests</span>
                 </button>
                 <button
                   onClick={() => setShowAIScanDialog(true)}
@@ -359,6 +369,13 @@ export function AreasPageClient({ tree, uncategorizedTests, unsortedSuites, repo
         onOpenChange={setShowMCPExploreDialog}
         repositoryId={repositoryId}
         onSaved={() => router.refresh()}
+      />
+      <ImportFromSpecDialog
+        open={showImportFromSpecDialog}
+        onOpenChange={setShowImportFromSpecDialog}
+        repositoryId={repositoryId}
+        branch={selectedBranch}
+        onComplete={() => router.refresh()}
       />
     </div>
   );
