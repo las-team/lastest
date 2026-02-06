@@ -15,10 +15,10 @@ const statusConfig = {
     icon: Loader2,
     label: 'RUNNING',
     description: 'Tests are being executed...',
-    bgColor: 'bg-blue-50',
-    borderColor: 'border-blue-200',
-    textColor: 'text-blue-700',
-    iconColor: 'text-blue-500',
+    bgColor: 'bg-primary/5',
+    borderColor: 'border-primary/20',
+    textColor: 'text-primary',
+    iconColor: 'text-primary',
   },
   safe_to_merge: {
     icon: CheckCircle,
@@ -61,7 +61,7 @@ export function BuildSummaryHero({ status, prNumber, changesDetected, isRunning 
           <Icon className={`w-12 h-12 ${config.iconColor} ${isRunning ? 'animate-spin' : ''}`} />
           <div>
             <h1 className={`text-2xl font-bold ${config.textColor}`}>{config.label}</h1>
-            <p className="text-gray-600">
+            <p className="text-muted-foreground">
               {effectiveStatus === 'review_required'
                 ? `${changesDetected} ${config.description}`
                 : config.description}
@@ -69,7 +69,7 @@ export function BuildSummaryHero({ status, prNumber, changesDetected, isRunning 
           </div>
         </div>
         {prNumber && (
-          <div className="text-gray-500 text-sm">
+          <div className="text-muted-foreground text-sm">
             PR #{prNumber}
           </div>
         )}

@@ -6,6 +6,7 @@ import { SliderComparison } from '@/components/diff/slider-comparison';
 import { approveDiff, rejectDiff, undoApproval } from '@/server/actions/diffs';
 import type { VisualDiff, Test, DiffMetadata, AIDiffAnalysis } from '@/lib/db/schema';
 import { CheckCircle, XCircle, SkipForward, Eye, Image as ImageIcon, Sparkles, Loader2 } from 'lucide-react';
+import { Button } from '@/components/ui/button';
 
 interface DiffViewerClientProps {
   diff: VisualDiff & { test: Test | null };
@@ -133,7 +134,7 @@ export function DiffViewerClient({ diff, buildId, nextDiffId }: DiffViewerClient
             diff.status === 'approved' || diff.status === 'auto_approved'
               ? 'bg-green-100 text-green-700'
               : diff.status === 'rejected'
-                ? 'bg-red-100 text-red-700'
+                ? 'bg-destructive/10 text-destructive'
                 : 'bg-yellow-100 text-yellow-700'
           }`}
         >
@@ -141,18 +142,18 @@ export function DiffViewerClient({ diff, buildId, nextDiffId }: DiffViewerClient
         </div>
 
         {diff.pixelDifference !== null && diff.pixelDifference > 0 && (
-          <div className="text-sm text-gray-500">
+          <div className="text-sm text-muted-foreground">
             {diff.pixelDifference.toLocaleString()} pixels changed ({diff.percentageDifference}%)
           </div>
         )}
 
         {/* Planned screenshot indicator */}
         {diff.plannedImagePath && (
-          <div className="flex items-center gap-2 px-3 py-1 rounded-full text-sm font-medium bg-purple-100 text-purple-700">
+          <div className="flex items-center gap-2 px-3 py-1 rounded-full text-sm font-medium bg-primary/10 text-primary">
             <ImageIcon className="w-4 h-4" />
             Has Planned
             {diff.plannedPercentageDifference && (
-              <span className="text-purple-500">
+              <span className="text-primary/70">
                 ({diff.plannedPercentageDifference}% from design)
               </span>
             )}
@@ -222,7 +223,7 @@ export function DiffViewerClient({ diff, buildId, nextDiffId }: DiffViewerClient
         />
       ) : diff.currentImagePath ? (
         <div className="border rounded-lg p-4">
-          <div className="text-sm text-gray-500 mb-2">New Screenshot (No Baseline)</div>
+          <div className="text-sm text-muted-foreground mb-2">New Screenshot (No Baseline)</div>
           <img
             src={diff.currentImagePath}
             alt="Current screenshot"
@@ -230,45 +231,44 @@ export function DiffViewerClient({ diff, buildId, nextDiffId }: DiffViewerClient
           />
         </div>
       ) : (
-        <div className="border rounded-lg p-8 text-center text-gray-500">
+        <div className="border rounded-lg p-8 text-center text-muted-foreground">
           No screenshot available
         </div>
       )}
 
       {/* Action Bar */}
-      <div className="flex items-center justify-between p-4 bg-gray-50 rounded-lg">
+      <div className="flex items-center justify-between p-4 bg-muted rounded-lg">
         <div className="flex items-center gap-2">
-          <button
+          <Button
             onClick={handleApprove}
             disabled={isProcessing || diff.status === 'approved' || diff.status === 'auto_approved'}
-            className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed"
           >
             <CheckCircle className="w-4 h-4" />
             Approve
-          </button>
+          </Button>
 
-          <button
+          <Button
+            variant="destructive"
             onClick={handleReject}
             disabled={isProcessing || diff.status === 'rejected'}
-            className="flex items-center gap-2 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed"
           >
             <XCircle className="w-4 h-4" />
             Reject
-          </button>
+          </Button>
 
-          <button
+          <Button
+            variant="outline"
             onClick={handleSkip}
             disabled={!nextDiffId}
-            className="flex items-center gap-2 px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 disabled:opacity-50 disabled:cursor-not-allowed"
           >
             <SkipForward className="w-4 h-4" />
             Skip
-          </button>
+          </Button>
         </div>
 
         {/* Metadata Panel Toggle */}
         {metadata && metadata.changedRegions.length > 0 && (
-          <div className="text-sm text-gray-500">
+          <div className="text-sm text-muted-foreground">
             <Eye className="w-4 h-4 inline mr-1" />
             {metadata.changedRegions.length} region(s) changed
             {metadata.affectedComponents && metadata.affectedComponents.length > 0 && (
@@ -280,11 +280,11 @@ export function DiffViewerClient({ diff, buildId, nextDiffId }: DiffViewerClient
 
       {/* Undo Toast */}
       {showUndo && (
-        <div className="fixed bottom-4 right-4 bg-gray-900 text-white px-4 py-3 rounded-lg shadow-lg flex items-center gap-4">
+        <div className="fixed bottom-4 right-4 bg-foreground text-background px-4 py-3 rounded-lg shadow-lg flex items-center gap-4">
           <span>Diff approved</span>
           <button
             onClick={handleUndo}
-            className="text-blue-400 hover:text-blue-300 font-medium"
+            className="text-primary hover:text-primary/80 font-medium"
           >
             Undo
           </button>

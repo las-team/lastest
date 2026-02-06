@@ -70,20 +70,20 @@ export function SliderComparison({
       {baselineImage && (
         <>
           <button
-            className={`px-3 py-1 rounded text-sm ${viewMode === 'slider' ? 'bg-blue-600 text-white' : 'bg-gray-200'}`}
+            className={`px-3 py-1 rounded text-sm ${viewMode === 'slider' ? 'bg-primary text-primary-foreground' : 'bg-muted'}`}
             onClick={() => setViewMode('slider')}
           >
             Slider
           </button>
           <button
-            className={`px-3 py-1 rounded text-sm ${viewMode === 'side-by-side' ? 'bg-blue-600 text-white' : 'bg-gray-200'}`}
+            className={`px-3 py-1 rounded text-sm ${viewMode === 'side-by-side' ? 'bg-primary text-primary-foreground' : 'bg-muted'}`}
             onClick={() => setViewMode('side-by-side')}
           >
             Side by Side
           </button>
           {diffImage && (
             <button
-              className={`px-3 py-1 rounded text-sm ${viewMode === 'overlay' ? 'bg-blue-600 text-white' : 'bg-gray-200'}`}
+              className={`px-3 py-1 rounded text-sm ${viewMode === 'overlay' ? 'bg-primary text-primary-foreground' : 'bg-muted'}`}
               onClick={() => setViewMode('overlay')}
             >
               Diff Overlay
@@ -95,14 +95,14 @@ export function SliderComparison({
         <>
           {baselineImage && (
             <button
-              className={`px-3 py-1 rounded text-sm ${viewMode === 'three-way' ? 'bg-purple-600 text-white' : 'bg-purple-100 text-purple-700'}`}
+              className={`px-3 py-1 rounded text-sm ${viewMode === 'three-way' ? 'bg-primary text-primary-foreground' : 'bg-primary/10 text-primary'}`}
               onClick={() => setViewMode('three-way')}
             >
               Three-Way
             </button>
           )}
           <button
-            className={`px-3 py-1 rounded text-sm ${viewMode === 'planned-vs-actual' ? 'bg-purple-600 text-white' : 'bg-purple-100 text-purple-700'}`}
+            className={`px-3 py-1 rounded text-sm ${viewMode === 'planned-vs-actual' ? 'bg-primary text-primary-foreground' : 'bg-primary/10 text-primary'}`}
             onClick={() => setViewMode('planned-vs-actual')}
           >
             Planned vs Actual
@@ -118,11 +118,11 @@ export function SliderComparison({
         <ViewModeButtons />
         <div className="grid grid-cols-2 gap-4">
           <div>
-            <div className="text-sm text-gray-500 mb-2">{leftLabel}</div>
+            <div className="text-sm text-muted-foreground mb-2">{leftLabel}</div>
             <img src={baselineImage} alt={leftLabel} className="w-full border rounded" />
           </div>
           <div>
-            <div className="text-sm text-gray-500 mb-2">{rightLabel}</div>
+            <div className="text-sm text-muted-foreground mb-2">{rightLabel}</div>
             <img src={currentImage} alt={rightLabel} className="w-full border rounded" />
           </div>
         </div>
@@ -136,22 +136,22 @@ export function SliderComparison({
         <ViewModeButtons />
         <div className="grid grid-cols-3 gap-4">
           <div>
-            <div className="text-sm text-gray-500 mb-2">{leftLabel}</div>
+            <div className="text-sm text-muted-foreground mb-2">{leftLabel}</div>
             <img src={baselineImage} alt={leftLabel} className="w-full border rounded" />
           </div>
           <div>
-            <div className="text-sm text-gray-500 mb-2">{rightLabel}</div>
+            <div className="text-sm text-muted-foreground mb-2">{rightLabel}</div>
             <img src={currentImage} alt={rightLabel} className="w-full border rounded" />
           </div>
           <div>
-            <div className="text-sm text-purple-600 mb-2 font-medium">Planned (Design)</div>
-            <img src={plannedImage} alt="Planned" className="w-full border-2 border-purple-300 rounded" />
+            <div className="text-sm text-primary mb-2 font-medium">Planned (Design)</div>
+            <img src={plannedImage} alt="Planned" className="w-full border-2 border-primary/30 rounded" />
           </div>
         </div>
         {plannedDiffImage && (
           <div className="mt-4">
-            <div className="text-sm text-purple-600 mb-2 font-medium">Planned vs Current Diff</div>
-            <img src={plannedDiffImage} alt="Planned Diff" className="w-full border border-purple-300 rounded" />
+            <div className="text-sm text-primary mb-2 font-medium">Planned vs Current Diff</div>
+            <img src={plannedDiffImage} alt="Planned Diff" className="w-full border border-primary/30 rounded" />
           </div>
         )}
       </div>
@@ -165,7 +165,7 @@ export function SliderComparison({
 
         <div
           ref={containerRef}
-          className="relative select-none border-2 border-purple-300 rounded overflow-hidden"
+          className="relative select-none border-2 border-primary/30 rounded overflow-hidden"
           onMouseMove={handleMouseMove}
           onMouseUp={handleMouseUp}
           onMouseLeave={handleMouseUp}
@@ -186,12 +186,12 @@ export function SliderComparison({
 
           {/* Slider handle */}
           <div
-            className="absolute top-0 bottom-0 w-1 bg-purple-500 cursor-ew-resize shadow-lg"
+            className="absolute top-0 bottom-0 w-1 bg-primary cursor-ew-resize shadow-lg"
             style={{ left: `${sliderPosition}%`, transform: 'translateX(-50%)' }}
             onMouseDown={handleMouseDown}
             onTouchStart={handleMouseDown}
           >
-            <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-8 h-8 bg-purple-500 rounded-full shadow-lg flex items-center justify-center">
+            <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-8 h-8 bg-primary rounded-full shadow-lg flex items-center justify-center">
               <div className="flex gap-0.5">
                 <div className="w-0.5 h-4 bg-white" />
                 <div className="w-0.5 h-4 bg-white" />
@@ -200,7 +200,7 @@ export function SliderComparison({
           </div>
 
           {/* Labels */}
-          <div className="absolute top-2 left-2 bg-purple-600/80 text-white px-2 py-1 rounded text-xs">
+          <div className="absolute top-2 left-2 bg-primary/80 text-primary-foreground px-2 py-1 rounded text-xs">
             Planned
           </div>
           <div className="absolute top-2 right-2 bg-black/50 text-white px-2 py-1 rounded text-xs">
@@ -233,7 +233,7 @@ export function SliderComparison({
     return (
       <div className={className}>
         <ViewModeButtons />
-        <div className="text-sm text-gray-500 mb-2">{rightLabel}</div>
+        <div className="text-sm text-muted-foreground mb-2">{rightLabel}</div>
         <img src={currentImage} alt={rightLabel} className="w-full border rounded" />
       </div>
     );

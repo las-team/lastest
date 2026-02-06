@@ -17,7 +17,7 @@ const TYPE_LABELS: Record<string, string> = {
 function StatusIcon({ status }: { status: string }) {
   switch (status) {
     case 'running':
-      return <Loader2 className="h-4 w-4 animate-spin text-blue-500" />;
+      return <Loader2 className="h-4 w-4 animate-spin text-primary" />;
     case 'completed':
       return <CheckCircle2 className="h-4 w-4 text-green-500" />;
     case 'failed':
@@ -66,7 +66,7 @@ export function QueueJobItem({ job }: { job: BackgroundJob }) {
         {isActive && (
           <div className="mt-1 h-1.5 w-full bg-muted rounded-full overflow-hidden">
             <div
-              className="h-full bg-blue-500 rounded-full transition-all duration-300"
+              className="h-full bg-primary rounded-full transition-all duration-300"
               style={{ width: `${job.progress ?? 0}%` }}
             />
           </div>

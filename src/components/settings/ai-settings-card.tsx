@@ -234,7 +234,7 @@ export function AISettingsCard({ settings, repositoryId }: AISettingsCardProps) 
                   href="https://openrouter.ai/keys"
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="text-blue-600 hover:underline"
+                  className="text-primary hover:underline"
                 >
                   openrouter.ai/keys
                 </a>

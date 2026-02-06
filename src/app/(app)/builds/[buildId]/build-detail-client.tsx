@@ -6,6 +6,7 @@ import { AlertTriangle, CheckCircle, XCircle, ExternalLink, XIcon, Sparkles, Fla
 import type { AIDiffAnalysis, VisualDiffWithTestStatus } from '@/lib/db/schema';
 import { MetricsRow } from '@/components/dashboard/metrics-row';
 import { Checkbox } from '@/components/ui/checkbox';
+import { Badge } from '@/components/ui/badge';
 import { batchApproveDiffs, batchRejectDiffs, acceptAIApprovals } from '@/server/actions/diffs';
 
 // Filter type for the build detail page metrics
@@ -49,7 +50,7 @@ const diffStatusColors: Record<string, string> = {
   pending: 'text-yellow-600 bg-yellow-50',
   approved: 'text-green-600 bg-green-50',
   rejected: 'text-red-600 bg-red-50',
-  auto_approved: 'text-blue-600 bg-blue-50',
+  auto_approved: 'text-primary bg-primary/10',
 };
 
 // Filter labels for display
@@ -263,13 +264,13 @@ export function BuildDetailClient({
             )}
 
             {isFilterActive && (
-              <button
+              <Badge
+                className="cursor-pointer gap-1 bg-primary/10 text-primary border-primary/20 hover:bg-primary/20"
                 onClick={() => setActiveFilter('all')}
-                className="inline-flex items-center gap-1 px-3 py-1 text-sm font-medium text-blue-700 bg-blue-100 rounded-full hover:bg-blue-200 transition-colors"
               >
                 <span>Showing: {filterLabels[activeFilter]}</span>
                 <XIcon className="w-3 h-3" />
-              </button>
+              </Badge>
             )}
           </div>
         </div>
@@ -306,13 +307,13 @@ export function BuildDetailClient({
         )}
 
         {filteredDiffs.length === 0 ? (
-          <div className="text-center py-8 text-gray-500 border rounded-lg">
+          <div className="text-center py-8 text-muted-foreground border rounded-lg">
             {isFilterActive ? (
               <div className="space-y-2">
                 <p>No tests match the &quot;{filterLabels[activeFilter]}&quot; filter.</p>
                 <button
                   onClick={() => setActiveFilter('all')}
-                  className="text-blue-600 hover:text-blue-800 underline"
+                  className="text-primary hover:text-primary/80 underline"
                 >
                   Clear filter to show all tests
                 </button>
@@ -340,10 +341,10 @@ export function BuildDetailClient({
                   onClick={() => router.push(`/builds/${buildId}/diff/${diff.id}`)}
                   className={`flex items-center justify-between p-4 border rounded-lg transition-colors cursor-pointer ${
                     isSelected
-                      ? 'border-blue-300 bg-blue-50/50'
+                      ? 'border-primary/40 bg-primary/5'
                       : isFailed
-                        ? 'border-red-200 bg-red-50/50 hover:border-red-400'
-                        : 'hover:border-blue-300 hover:bg-blue-50/30'
+                        ? 'border-destructive/30 bg-destructive/5 hover:border-destructive/50'
+                        : 'hover:border-primary/30 hover:bg-primary/5'
                   }`}
                 >
                   <div className="flex items-center gap-3">
@@ -360,24 +361,24 @@ export function BuildDetailClient({
                       <div className={`font-medium truncate ${isFailed ? 'text-red-800' : ''}`}>
                         {diff.testName || 'Unnamed Test'}
                         {diff.stepLabel && (
-                          <span className="text-gray-500 font-normal"> &rsaquo; {diff.stepLabel}</span>
+                          <span className="text-muted-foreground font-normal"> &rsaquo; {diff.stepLabel}</span>
                         )}
                       </div>
                       <div className="flex items-center gap-2 text-sm">
                         {diff.functionalAreaName && (
-                          <span className="text-blue-600 font-medium">
+                          <span className="text-primary font-medium">
                             {diff.functionalAreaName}
                           </span>
                         )}
-                        <span className="text-gray-400">&middot;</span>
-                        <span className={isFailed ? 'text-red-600' : 'text-gray-500'}>
+                        <span className="text-muted-foreground/50">·</span>
+                        <span className={isFailed ? 'text-destructive' : 'text-muted-foreground'}>
                           {isExecutionFailed
                             ? 'Execution failed'
                             : diff.pixelDifference
                               ? `${diff.pixelDifference.toLocaleString()}px diff`
                               : 'No changes'}
                         </span>
-                        <span className="text-gray-300 text-xs font-mono">
+                        <span className="text-muted-foreground/40 text-xs font-mono">
                           {diff.testId.slice(0, 8)}
                         </span>
                       </div>
@@ -420,7 +421,7 @@ export function BuildDetailClient({
                         }`}
                       />
                     )}
-                    <ExternalLink className={`w-4 h-4 ${isFailed ? 'text-red-400' : 'text-gray-400'}`} />
+                    <ExternalLink className={`w-4 h-4 ${isFailed ? 'text-destructive/60' : 'text-muted-foreground/50'}`} />
                   </div>
                 </div>
               );

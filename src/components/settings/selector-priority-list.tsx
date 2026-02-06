@@ -53,7 +53,7 @@ function RecommendationBadge({ recommendation }: { recommendation: SelectorRecom
     move_up: {
       icon: ArrowUp,
       label: 'Move up',
-      className: 'bg-blue-100 text-blue-700 border-blue-200',
+      className: 'bg-primary/10 text-primary border-primary/20',
     },
   }[recommendation.type];
 

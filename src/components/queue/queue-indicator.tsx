@@ -38,13 +38,13 @@ export function QueueIndicator() {
         className="relative gap-2"
         onClick={() => setOpen(!open)}
       >
-        <Activity className={`h-4 w-4 ${hasActive ? 'text-blue-500' : 'text-muted-foreground'}`} />
+        <Activity className={`h-4 w-4 ${hasActive ? 'text-primary' : 'text-muted-foreground'}`} />
         {hasActive && (
           <>
             <span className="text-xs">{activeJobs.length}</span>
             <div className="absolute bottom-0 left-1 right-1 h-0.5 bg-muted rounded-full overflow-hidden">
               <div
-                className="h-full bg-blue-500 rounded-full transition-all duration-300"
+                className="h-full bg-primary rounded-full transition-all duration-300"
                 style={{ width: `${avgProgress}%` }}
               />
             </div>

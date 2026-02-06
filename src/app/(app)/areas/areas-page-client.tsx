@@ -249,7 +249,7 @@ export function AreasPageClient({ tree, uncategorizedTests, unsortedSuites, repo
                   <div className="text-sm text-muted-foreground">Tests</div>
                 </div>
                 <div className="text-center p-4 bg-muted/50 rounded-lg">
-                  <ListChecks className="h-8 w-8 mx-auto mb-2 text-violet-500" />
+                  <ListChecks className="h-8 w-8 mx-auto mb-2 text-primary" />
                   <div className="text-2xl font-bold">{totalSuites}</div>
                   <div className="text-sm text-muted-foreground">Suites</div>
                 </div>

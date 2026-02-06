@@ -60,20 +60,20 @@ export default async function BuildPage({ params }: PageProps) {
         </div>
 
         {/* Git Info */}
-        <div className="p-4 bg-gray-50 rounded-lg text-sm">
+        <div className="p-4 bg-muted rounded-lg text-sm">
           <div className="flex items-center gap-4">
             <div>
-              <span className="text-gray-500">Branch:</span>{' '}
+              <span className="text-muted-foreground">Branch:</span>{' '}
               <span className="font-mono">{build.gitBranch}</span>
             </div>
             <div>
-              <span className="text-gray-500">Commit:</span>{' '}
+              <span className="text-muted-foreground">Commit:</span>{' '}
               <span className="font-mono">{build.gitCommit.slice(0, 7)}</span>
             </div>
             {build.pullRequestId && (
               <div>
-                <span className="text-gray-500">PR:</span>{' '}
-                <span className="text-blue-600">#{build.pullRequestId}</span>
+                <span className="text-muted-foreground">PR:</span>{' '}
+                <span className="text-primary">#{build.pullRequestId}</span>
               </div>
             )}
           </div>

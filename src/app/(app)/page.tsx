@@ -189,7 +189,7 @@ export default async function DashboardPage() {
                       <div className="flex items-center gap-3">
                         {/* Pass rate mini bar */}
                         <div className="flex items-center gap-2">
-                          <div className="w-16 h-2 bg-gray-200 rounded-full overflow-hidden">
+                          <div className="w-16 h-2 bg-muted rounded-full overflow-hidden">
                             <div
                               className={`h-full transition-all ${passRate === 100 ? 'bg-green-500' : passRate > 80 ? 'bg-yellow-500' : 'bg-red-500'}`}
                               style={{ width: `${passRate}%` }}

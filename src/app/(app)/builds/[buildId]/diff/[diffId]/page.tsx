@@ -29,7 +29,7 @@ export default async function DiffPage({ params }: PageProps) {
         <div className="flex items-center gap-4">
           <Link
             href={`/builds/${buildId}`}
-            className="text-gray-500 hover:text-gray-700"
+            className="text-muted-foreground hover:text-gray-700"
           >
             ← Back to Build
           </Link>
@@ -37,14 +37,14 @@ export default async function DiffPage({ params }: PageProps) {
             <h1 className="text-xl font-bold">
               {diff.test?.name || `Test ${diff.testId.slice(0, 8)}`}
               {diff.stepLabel && (
-                <span className="text-gray-500 font-normal text-base ml-2">&rsaquo; {diff.stepLabel}</span>
+                <span className="text-muted-foreground font-normal text-base ml-2">&rsaquo; {diff.stepLabel}</span>
               )}
             </h1>
-            <div className="flex items-center gap-3 text-sm text-gray-500">
+            <div className="flex items-center gap-3 text-sm text-muted-foreground">
               <span>{diff.test?.targetUrl}</span>
               <Link
                 href={`/tests/${diff.testId}`}
-                className="flex items-center gap-1 text-blue-600 hover:text-blue-800 hover:underline"
+                className="flex items-center gap-1 text-primary hover:text-primary/80 hover:underline"
               >
                 View Test
                 <ExternalLink className="w-3 h-3" />
@@ -58,7 +58,7 @@ export default async function DiffPage({ params }: PageProps) {
           {prevDiff ? (
             <Link
               href={`/builds/${buildId}/diff/${prevDiff.id}`}
-              className="flex items-center gap-1 px-3 py-1 border rounded hover:bg-gray-50"
+              className="flex items-center gap-1 px-3 py-1 border rounded hover:bg-muted"
             >
               <ChevronLeft className="w-4 h-4" />
               Prev
@@ -70,14 +70,14 @@ export default async function DiffPage({ params }: PageProps) {
             </button>
           )}
 
-          <span className="text-sm text-gray-500">
+          <span className="text-sm text-muted-foreground">
             {currentIndex + 1} / {allDiffs.length}
           </span>
 
           {nextDiff ? (
             <Link
               href={`/builds/${buildId}/diff/${nextDiff.id}`}
-              className="flex items-center gap-1 px-3 py-1 border rounded hover:bg-gray-50"
+              className="flex items-center gap-1 px-3 py-1 border rounded hover:bg-muted"
             >
               Next
               <ChevronRight className="w-4 h-4" />
@@ -99,11 +99,11 @@ export default async function DiffPage({ params }: PageProps) {
       />
 
       {/* Keyboard shortcuts hint */}
-      <div className="mt-4 text-sm text-gray-500 text-center">
-        Keyboard shortcuts: <kbd className="px-1 bg-gray-100 rounded">A</kbd> Approve ·{' '}
-        <kbd className="px-1 bg-gray-100 rounded">R</kbd> Reject ·{' '}
-        <kbd className="px-1 bg-gray-100 rounded">←</kbd> <kbd className="px-1 bg-gray-100 rounded">→</kbd> Navigate ·{' '}
-        <kbd className="px-1 bg-gray-100 rounded">+</kbd> <kbd className="px-1 bg-gray-100 rounded">-</kbd> Zoom
+      <div className="mt-4 text-sm text-muted-foreground text-center">
+        Keyboard shortcuts: <kbd className="px-1 bg-muted rounded">A</kbd> Approve ·{' '}
+        <kbd className="px-1 bg-muted rounded">R</kbd> Reject ·{' '}
+        <kbd className="px-1 bg-muted rounded">←</kbd> <kbd className="px-1 bg-muted rounded">→</kbd> Navigate ·{' '}
+        <kbd className="px-1 bg-muted rounded">+</kbd> <kbd className="px-1 bg-muted rounded">-</kbd> Zoom
       </div>
     </div>
   );

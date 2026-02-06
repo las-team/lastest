@@ -28,7 +28,7 @@ export function SetupGuideStep({ step, stepNumber, state }: SetupGuideStepProps)
             <Check className="h-3.5 w-3.5 text-white" />
           </div>
         ) : state === 'current' ? (
-          <div className="h-6 w-6 rounded-full bg-blue-500 flex items-center justify-center">
+          <div className="h-6 w-6 rounded-full bg-primary flex items-center justify-center">
             <Circle className="h-3 w-3 text-white fill-white" />
           </div>
         ) : (

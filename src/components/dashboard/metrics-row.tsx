@@ -60,40 +60,40 @@ export function MetricsRow({
       label: 'Passed',
       value: passedCount,
       icon: CheckCircle,
-      color: passedCount > 0 ? 'text-green-600' : 'text-gray-400',
-      bgColor: passedCount > 0 ? 'bg-green-50' : 'bg-gray-50',
+      color: passedCount > 0 ? 'text-green-600' : 'text-muted-foreground/50',
+      bgColor: passedCount > 0 ? 'bg-green-50' : 'bg-muted',
       filterKey: 'passed',
     },
     {
       label: 'Failed',
       value: failedCount,
       icon: XCircle,
-      color: failedCount > 0 ? 'text-red-600' : 'text-gray-400',
-      bgColor: failedCount > 0 ? 'bg-red-50' : 'bg-gray-50',
+      color: failedCount > 0 ? 'text-red-600' : 'text-muted-foreground/50',
+      bgColor: failedCount > 0 ? 'bg-red-50' : 'bg-muted',
       filterKey: 'failed',
     },
     {
       label: 'Changed',
       value: changesDetected,
       icon: AlertTriangle,
-      color: changesDetected > 0 ? 'text-yellow-600' : 'text-gray-400',
-      bgColor: changesDetected > 0 ? 'bg-yellow-50' : 'bg-gray-50',
+      color: changesDetected > 0 ? 'text-yellow-600' : 'text-muted-foreground/50',
+      bgColor: changesDetected > 0 ? 'bg-yellow-50' : 'bg-muted',
       filterKey: 'changed',
     },
     {
       label: 'Flaky',
       value: flakyCount,
       icon: RefreshCw,
-      color: flakyCount > 0 ? 'text-orange-600' : 'text-gray-400',
-      bgColor: flakyCount > 0 ? 'bg-orange-50' : 'bg-gray-50',
+      color: flakyCount > 0 ? 'text-orange-600' : 'text-muted-foreground/50',
+      bgColor: flakyCount > 0 ? 'bg-orange-50' : 'bg-muted',
       filterKey: 'flaky',
     },
     {
       label: 'Time',
       value: formatTime(elapsedMs),
       icon: Clock,
-      color: 'text-gray-600',
-      bgColor: 'bg-gray-50',
+      color: 'text-muted-foreground',
+      bgColor: 'bg-muted',
       filterKey: null,
       isTime: true,
     },
@@ -142,24 +142,24 @@ export function MetricsRow({
   return (
     <div className="space-y-4">
       {/* Pass Rate Bar */}
-      <div className="p-4 bg-white border rounded-lg">
+      <div className="p-4 bg-card border rounded-lg">
         <div className="flex items-center justify-between mb-2">
-          <span className="text-sm font-medium text-gray-700">
+          <span className="text-sm font-medium text-foreground">
             {isRunning ? 'Progress' : 'Pass Rate'}
           </span>
           <span className={cn(
             'text-lg font-bold',
-            isRunning ? 'text-blue-600' :
+            isRunning ? 'text-primary' :
             passRate === 100 ? 'text-green-600' :
             passRate >= 80 ? 'text-yellow-600' : 'text-red-600'
           )}>
             {isRunning ? `${completedTests}/${totalTests}` : `${passRate}%`}
           </span>
         </div>
-        <div className="w-full h-3 bg-gray-200 rounded-full overflow-hidden">
+        <div className="w-full h-3 bg-muted rounded-full overflow-hidden">
           {isRunning ? (
             <div
-              className="h-full bg-blue-500 transition-all duration-300 relative overflow-hidden"
+              className="h-full bg-primary transition-all duration-300 relative overflow-hidden"
               style={{ width: `${progress}%` }}
             >
               <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/30 to-transparent animate-shimmer" />
@@ -178,7 +178,7 @@ export function MetricsRow({
           )}
         </div>
         {!isRunning && totalTests > 0 && (
-          <div className="flex justify-between mt-1 text-xs text-gray-500">
+          <div className="flex justify-between mt-1 text-xs text-muted-foreground">
             <span>{passedCount} passed</span>
             <span>{failedCount} failed</span>
           </div>
@@ -200,7 +200,7 @@ export function MetricsRow({
                 'p-4 rounded-lg flex flex-col items-center transition-all',
                 metric.bgColor,
                 isClickable && 'cursor-pointer hover:scale-105 hover:shadow-md',
-                isActive && 'ring-2 ring-offset-2 ring-blue-500'
+                isActive && 'ring-2 ring-offset-2 ring-primary'
               )}
               role={isClickable ? 'button' : undefined}
               tabIndex={isClickable ? 0 : undefined}
@@ -218,7 +218,7 @@ export function MetricsRow({
               <div className={`text-3xl font-bold ${metric.color}`}>
                 {metric.value}
               </div>
-              <div className="flex items-center gap-1 text-gray-600 text-sm mt-1">
+              <div className="flex items-center gap-1 text-muted-foreground text-sm mt-1">
                 <Icon className="w-4 h-4" />
                 {metric.label}
               </div>

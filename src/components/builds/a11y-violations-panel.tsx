@@ -75,7 +75,7 @@ export function A11yViolationsPanel({ violations }: A11yViolationsPanelProps) {
               href={violation.helpUrl}
               target="_blank"
               rel="noopener noreferrer"
-              className="inline-flex items-center gap-1 text-xs text-blue-600 hover:underline"
+              className="inline-flex items-center gap-1 text-xs text-primary hover:underline"
             >
               Learn more <ExternalLink className="w-3 h-3" />
             </a>

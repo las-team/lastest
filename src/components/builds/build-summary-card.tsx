@@ -83,7 +83,7 @@ export function BuildSummaryCard({ build, gitBranch, isActiveBranch, baseUrl, is
     <Link
       href={`/builds/${build.id}`}
       className={cn(
-        `block p-3 rounded-lg border ${config.borderColor} ${config.bgColor} hover:border-blue-300 hover:bg-blue-50/50 transition-colors`,
+        `block p-3 rounded-lg border ${config.borderColor} ${config.bgColor} hover:border-primary/30 hover:bg-primary/5 transition-colors`,
         isActiveBranch && 'ring-2 ring-primary/50'
       )}
     >
@@ -112,25 +112,25 @@ export function BuildSummaryCard({ build, gitBranch, isActiveBranch, baseUrl, is
               </Badge>
             )}
           </div>
-          <div className="text-xs text-gray-500">
+          <div className="text-xs text-muted-foreground">
             {build.triggerType} · {formatTime(build.createdAt)}
           </div>
         </div>
       </div>
-      <div className="flex items-center gap-4 mt-2 pt-2 border-t border-gray-200/50 text-xs">
+      <div className="flex items-center gap-4 mt-2 pt-2 border-t border-border/50 text-xs">
         <div className="flex items-center gap-1">
           <span className="font-medium">{build.totalTests ?? 0}</span>
-          <span className="text-gray-500">tests</span>
+          <span className="text-muted-foreground">tests</span>
         </div>
         <div className="flex items-center gap-1">
           <span className="font-medium text-yellow-600">{build.changesDetected ?? 0}</span>
-          <span className="text-gray-500">changed</span>
+          <span className="text-muted-foreground">changed</span>
         </div>
         <div className="flex items-center gap-1">
           <span className="font-medium text-red-600">{build.failedCount ?? 0}</span>
-          <span className="text-gray-500">failed</span>
+          <span className="text-muted-foreground">failed</span>
         </div>
-        <div className="flex items-center gap-1 text-gray-500 ml-auto">
+        <div className="flex items-center gap-1 text-muted-foreground ml-auto">
           <Clock className="w-3 h-3" />
           {formatDuration(build.elapsedMs)}
         </div>

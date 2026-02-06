@@ -3,6 +3,7 @@ import { Badge } from '@/components/ui/badge';
 import * as queries from '@/lib/db/queries';
 import { getCurrentSession } from '@/lib/auth';
 import { Github, Check, X, Database, ExternalLink, Users, Bot, Mail } from 'lucide-react';
+import { Button } from '@/components/ui/button';
 
 // GitLab icon SVG component
 function GitLabIcon({ className }: { className?: string }) {
@@ -66,19 +67,19 @@ export default async function SettingsPage({
         <div className="max-w-2xl mx-auto space-y-6">
           {/* Status Messages */}
           {params.success === 'github_connected' && (
-            <div className="p-4 bg-green-50 border border-green-200 rounded-lg flex items-center gap-2 text-green-700">
+            <div className="p-4 bg-green-50 border border-green-200 rounded-lg flex items-center gap-2 text-green-700 dark:bg-green-950/30 dark:border-green-800 dark:text-green-400">
               <Check className="w-5 h-5" />
               GitHub account connected successfully!
             </div>
           )}
           {params.success === 'gitlab_connected' && (
-            <div className="p-4 bg-green-50 border border-green-200 rounded-lg flex items-center gap-2 text-green-700">
+            <div className="p-4 bg-green-50 border border-green-200 rounded-lg flex items-center gap-2 text-green-700 dark:bg-green-950/30 dark:border-green-800 dark:text-green-400">
               <Check className="w-5 h-5" />
               GitLab account connected successfully!
             </div>
           )}
           {params.error && (
-            <div className="p-4 bg-red-50 border border-red-200 rounded-lg flex items-center gap-2 text-red-700">
+            <div className="p-4 bg-destructive/10 border border-destructive/20 rounded-lg flex items-center gap-2 text-destructive">
               <X className="w-5 h-5" />
               Failed to connect GitHub: {params.error.replace(/_/g, ' ')}
             </div>
@@ -98,9 +99,9 @@ export default async function SettingsPage({
             <CardContent className="space-y-4">
               {githubAccount ? (
                 <>
-                  <div className="flex items-center justify-between p-4 bg-green-50 rounded-lg">
+                  <div className="flex items-center justify-between p-4 bg-muted rounded-lg">
                     <div className="flex items-center gap-3">
-                      <div className="w-10 h-10 rounded-full bg-gray-200 flex items-center justify-center">
+                      <div className="w-10 h-10 rounded-full bg-secondary flex items-center justify-center">
                         <Github className="w-6 h-6" />
                       </div>
                       <div>
@@ -112,7 +113,7 @@ export default async function SettingsPage({
                       href="/api/auth/github"
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="text-sm text-blue-600 hover:underline"
+                      className="text-sm text-primary hover:underline"
                     >
                       Reconnect
                     </a>
@@ -126,15 +127,16 @@ export default async function SettingsPage({
                   <p className="text-muted-foreground">
                     Connect your GitHub account to link builds with pull requests.
                   </p>
-                  <a
-                    href="/api/auth/github"
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="inline-flex items-center gap-2 px-4 py-2 bg-gray-900 text-white rounded-lg hover:bg-gray-800"
-                  >
-                    <Github className="w-5 h-5" />
-                    Connect GitHub
-                  </a>
+                  <Button asChild variant="outline">
+                    <a
+                      href="/api/auth/github"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                    >
+                      <Github className="w-5 h-5" />
+                      Connect GitHub
+                    </a>
+                  </Button>
                 </>
               )}
             </CardContent>
@@ -154,9 +156,9 @@ export default async function SettingsPage({
             <CardContent className="space-y-4">
               {gitlabAccount ? (
                 <>
-                  <div className="flex items-center justify-between p-4 bg-orange-50 rounded-lg">
+                  <div className="flex items-center justify-between p-4 bg-muted rounded-lg">
                     <div className="flex items-center gap-3">
-                      <div className="w-10 h-10 rounded-full bg-orange-200 flex items-center justify-center">
+                      <div className="w-10 h-10 rounded-full bg-secondary flex items-center justify-center">
                         <GitLabIcon className="w-6 h-6" />
                       </div>
                       <div>
@@ -170,7 +172,7 @@ export default async function SettingsPage({
                       href="/api/auth/gitlab"
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="text-sm text-blue-600 hover:underline"
+                      className="text-sm text-primary hover:underline"
                     >
                       Reconnect
                     </a>
@@ -184,15 +186,16 @@ export default async function SettingsPage({
                   <p className="text-muted-foreground">
                     Connect your GitLab account to link builds with merge requests.
                   </p>
-                  <a
-                    href="/api/auth/gitlab"
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="inline-flex items-center gap-2 px-4 py-2 bg-orange-600 text-white rounded-lg hover:bg-orange-700"
-                  >
-                    <GitLabIcon className="w-5 h-5" />
-                    Connect GitLab
-                  </a>
+                  <Button asChild variant="outline">
+                    <a
+                      href="/api/auth/gitlab"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                    >
+                      <GitLabIcon className="w-5 h-5" />
+                      Connect GitLab
+                    </a>
+                  </Button>
                 </>
               )}
             </CardContent>
@@ -251,15 +254,16 @@ export default async function SettingsPage({
                 <span>SQLite with WAL mode</span>
               </div>
               <div className="pt-2 border-t">
-                <a
-                  href="https://local.drizzle.studio"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-flex items-center gap-2 px-4 py-2 bg-gray-900 text-white rounded-lg hover:bg-gray-800 text-sm"
-                >
-                  <ExternalLink className="w-4 h-4" />
-                  Open Drizzle Studio
-                </a>
+                <Button asChild variant="outline" size="sm">
+                  <a
+                    href="https://local.drizzle.studio"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >
+                    <ExternalLink className="w-4 h-4" />
+                    Open Drizzle Studio
+                  </a>
+                </Button>
                 <p className="text-xs text-muted-foreground mt-2">
                   Run <code className="bg-muted px-1 rounded">pnpm db:studio</code> first
                 </p>
