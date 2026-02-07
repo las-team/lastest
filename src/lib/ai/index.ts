@@ -1,6 +1,7 @@
 import type { AIProvider, AIProviderConfig } from './types';
 import { ClaudeCLIProvider } from './claude-cli';
 import { createOpenRouterProvider } from './openrouter';
+import { createOllamaProvider } from './ollama';
 import { ClaudeAgentSDKProvider } from './claude-agent-sdk';
 import { createAIPromptLog, updateAIPromptLog } from '@/lib/db/queries';
 import type { AIActionType, AILogStatus } from '@/lib/db/schema';
@@ -24,6 +25,16 @@ export function getAIProvider(config: AIProviderConfig): AIProvider {
       permissionMode: config.agentSdkPermissionMode,
       model: config.agentSdkModel || undefined,
       workingDirectory: config.agentSdkWorkingDir,
+    });
+  }
+
+  if (config.provider === 'ollama') {
+    if (!config.ollamaModel) {
+      throw new Error('Ollama model is required');
+    }
+    return createOllamaProvider({
+      baseUrl: config.ollamaBaseUrl || 'http://localhost:11434',
+      model: config.ollamaModel,
     });
   }
 
@@ -61,7 +72,11 @@ export async function generateWithAI(
       repositoryId,
       actionType,
       provider: config.provider,
-      model: config.provider === 'openrouter' ? config.openrouterModel : undefined,
+      model: config.provider === 'openrouter'
+        ? config.openrouterModel
+        : config.provider === 'ollama'
+          ? config.ollamaModel
+          : undefined,
       systemPrompt: finalSystemPrompt || undefined,
       userPrompt: prompt,
       status: 'pending' as AILogStatus,

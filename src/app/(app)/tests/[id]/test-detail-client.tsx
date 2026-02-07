@@ -297,7 +297,7 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
 
   return (
     <div className="flex-1 p-6 overflow-auto">
-      <div className="max-w-4xl space-y-6">
+      <div className="max-w-4xl mx-auto space-y-6">
         {/* Test Info Card */}
         <Card>
           <CardHeader>

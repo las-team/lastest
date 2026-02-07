@@ -16,7 +16,7 @@ import {
 import { saveAISettings, resetAISettings, testAIConnection } from '@/server/actions/ai-settings';
 import { DEFAULT_AI_SETTINGS } from '@/lib/db/schema';
 import type { AISettings, AIProvider, AgentSdkPermissionMode, AIDiffingProvider } from '@/lib/db/schema';
-import { Loader2, RotateCcw, Sparkles, CheckCircle2, XCircle, Zap, Bot, Eye } from 'lucide-react';
+import { Loader2, RotateCcw, Sparkles, CheckCircle2, XCircle, Zap, Bot, Eye, Server } from 'lucide-react';
 import { toast } from 'sonner';
 
 interface AISettingsCardProps {
@@ -50,6 +50,10 @@ export function AISettingsCard({ settings, repositoryId }: AISettingsCardProps) 
   );
   const [agentSdkModel, setAgentSdkModel] = useState(settings.agentSdkModel || '');
   const [agentSdkWorkingDir, setAgentSdkWorkingDir] = useState(settings.agentSdkWorkingDir || '');
+  const [ollamaBaseUrl, setOllamaBaseUrl] = useState(
+    settings.ollamaBaseUrl || DEFAULT_AI_SETTINGS.ollamaBaseUrl
+  );
+  const [ollamaModel, setOllamaModel] = useState(settings.ollamaModel || '');
 
   // AI Diffing settings
   const [aiDiffingEnabled, setAiDiffingEnabled] = useState(settings.aiDiffingEnabled ?? false);
@@ -60,6 +64,10 @@ export function AISettingsCard({ settings, repositoryId }: AISettingsCardProps) 
   const [aiDiffingModel, setAiDiffingModel] = useState(
     settings.aiDiffingModel || DEFAULT_AI_SETTINGS.aiDiffingModel
   );
+  const [aiDiffingOllamaBaseUrl, setAiDiffingOllamaBaseUrl] = useState(
+    settings.aiDiffingOllamaBaseUrl || 'http://localhost:11434'
+  );
+  const [aiDiffingOllamaModel, setAiDiffingOllamaModel] = useState(settings.aiDiffingOllamaModel || '');
 
   const debounceRef = useRef<NodeJS.Timeout | null>(null);
 
@@ -72,10 +80,14 @@ export function AISettingsCard({ settings, repositoryId }: AISettingsCardProps) 
     agentSdkPermissionMode: (settings.agentSdkPermissionMode as AgentSdkPermissionMode) || 'plan',
     agentSdkModel: settings.agentSdkModel || '',
     agentSdkWorkingDir: settings.agentSdkWorkingDir || '',
+    ollamaBaseUrl: settings.ollamaBaseUrl || DEFAULT_AI_SETTINGS.ollamaBaseUrl,
+    ollamaModel: settings.ollamaModel || '',
     aiDiffingEnabled: settings.aiDiffingEnabled ?? false,
     aiDiffingProvider: (settings.aiDiffingProvider as AIDiffingProvider) || 'openrouter',
     aiDiffingApiKey: settings.aiDiffingApiKey || '',
     aiDiffingModel: settings.aiDiffingModel || DEFAULT_AI_SETTINGS.aiDiffingModel,
+    aiDiffingOllamaBaseUrl: settings.aiDiffingOllamaBaseUrl || 'http://localhost:11434',
+    aiDiffingOllamaModel: settings.aiDiffingOllamaModel || '',
   });
 
   const doSave = useCallback(() => {
@@ -88,15 +100,19 @@ export function AISettingsCard({ settings, repositoryId }: AISettingsCardProps) 
         agentSdkPermissionMode,
         agentSdkModel: agentSdkModel || null,
         agentSdkWorkingDir: agentSdkWorkingDir || null,
+        ollamaBaseUrl: ollamaBaseUrl || null,
+        ollamaModel: ollamaModel || null,
         customInstructions: customInstructions || null,
         aiDiffingEnabled,
         aiDiffingProvider: aiDiffingProvider || null,
         aiDiffingApiKey: aiDiffingApiKey || null,
         aiDiffingModel: aiDiffingModel || null,
+        aiDiffingOllamaBaseUrl: aiDiffingOllamaBaseUrl || null,
+        aiDiffingOllamaModel: aiDiffingOllamaModel || null,
       });
       toast.success('AI settings saved');
     });
-  }, [repositoryId, provider, openrouterApiKey, openrouterModel, agentSdkPermissionMode, agentSdkModel, agentSdkWorkingDir, customInstructions, aiDiffingEnabled, aiDiffingProvider, aiDiffingApiKey, aiDiffingModel]);
+  }, [repositoryId, provider, openrouterApiKey, openrouterModel, agentSdkPermissionMode, agentSdkModel, agentSdkWorkingDir, ollamaBaseUrl, ollamaModel, customInstructions, aiDiffingEnabled, aiDiffingProvider, aiDiffingApiKey, aiDiffingModel, aiDiffingOllamaBaseUrl, aiDiffingOllamaModel]);
 
   // Auto-save with debounce - only when values differ from original props
   useEffect(() => {
@@ -109,10 +125,14 @@ export function AISettingsCard({ settings, repositoryId }: AISettingsCardProps) 
       agentSdkPermissionMode !== orig.agentSdkPermissionMode ||
       agentSdkModel !== orig.agentSdkModel ||
       agentSdkWorkingDir !== orig.agentSdkWorkingDir ||
+      ollamaBaseUrl !== orig.ollamaBaseUrl ||
+      ollamaModel !== orig.ollamaModel ||
       aiDiffingEnabled !== orig.aiDiffingEnabled ||
       aiDiffingProvider !== orig.aiDiffingProvider ||
       aiDiffingApiKey !== orig.aiDiffingApiKey ||
-      aiDiffingModel !== orig.aiDiffingModel;
+      aiDiffingModel !== orig.aiDiffingModel ||
+      aiDiffingOllamaBaseUrl !== orig.aiDiffingOllamaBaseUrl ||
+      aiDiffingOllamaModel !== orig.aiDiffingOllamaModel;
 
     if (!hasChanges) return;
 
@@ -129,7 +149,7 @@ export function AISettingsCard({ settings, repositoryId }: AISettingsCardProps) 
         clearTimeout(debounceRef.current);
       }
     };
-  }, [provider, openrouterApiKey, openrouterModel, agentSdkPermissionMode, agentSdkModel, agentSdkWorkingDir, customInstructions, aiDiffingEnabled, aiDiffingProvider, aiDiffingApiKey, aiDiffingModel, doSave]);
+  }, [provider, openrouterApiKey, openrouterModel, agentSdkPermissionMode, agentSdkModel, agentSdkWorkingDir, ollamaBaseUrl, ollamaModel, customInstructions, aiDiffingEnabled, aiDiffingProvider, aiDiffingApiKey, aiDiffingModel, aiDiffingOllamaBaseUrl, aiDiffingOllamaModel, doSave]);
 
   const handleReset = () => {
     startTransition(async () => {
@@ -141,10 +161,14 @@ export function AISettingsCard({ settings, repositoryId }: AISettingsCardProps) 
       setAgentSdkPermissionMode('plan');
       setAgentSdkModel('');
       setAgentSdkWorkingDir('');
+      setOllamaBaseUrl(DEFAULT_AI_SETTINGS.ollamaBaseUrl);
+      setOllamaModel('');
       setAiDiffingEnabled(false);
       setAiDiffingProvider(DEFAULT_AI_SETTINGS.aiDiffingProvider);
       setAiDiffingApiKey('');
       setAiDiffingModel(DEFAULT_AI_SETTINGS.aiDiffingModel);
+      setAiDiffingOllamaBaseUrl('http://localhost:11434');
+      setAiDiffingOllamaModel('');
       setTestResult(null);
       toast.success('AI settings reset to defaults');
     });
@@ -154,7 +178,13 @@ export function AISettingsCard({ settings, repositoryId }: AISettingsCardProps) 
     setIsTesting(true);
     setTestResult(null);
     try {
-      const result = await testAIConnection(provider, openrouterApiKey || undefined, agentSdkPermissionMode);
+      const result = await testAIConnection(
+        provider,
+        openrouterApiKey || undefined,
+        agentSdkPermissionMode,
+        ollamaBaseUrl,
+        ollamaModel
+      );
       setTestResult(result);
       if (result.success) {
         toast.success(result.message);
@@ -205,6 +235,12 @@ export function AISettingsCard({ settings, repositoryId }: AISettingsCardProps) 
                   Claude Agent SDK
                 </div>
               </SelectItem>
+              <SelectItem value="ollama">
+                <div className="flex items-center gap-2">
+                  <Server className="h-4 w-4" />
+                  Ollama (Local)
+                </div>
+              </SelectItem>
             </SelectContent>
           </Select>
           <p className="text-xs text-muted-foreground">
@@ -212,6 +248,8 @@ export function AISettingsCard({ settings, repositoryId }: AISettingsCardProps) 
               ? 'Uses the Claude CLI tool. Run `claude login` to authenticate.'
               : provider === 'openrouter'
               ? 'Uses OpenRouter API with your API key.'
+              : provider === 'ollama'
+              ? 'Uses Ollama for local open-source LLMs (Llama, Qwen, DeepSeek, etc.)'
               : 'Uses Claude Agent SDK for agentic interactions.'}
           </p>
         </div>
@@ -310,6 +348,39 @@ export function AISettingsCard({ settings, repositoryId }: AISettingsCardProps) 
           </>
         )}
 
+        {/* Ollama Settings */}
+        {provider === 'ollama' && (
+          <>
+            <div className="space-y-2">
+              <Label htmlFor="ollamaBaseUrl">Ollama Server URL</Label>
+              <Input
+                id="ollamaBaseUrl"
+                type="text"
+                value={ollamaBaseUrl}
+                onChange={(e) => setOllamaBaseUrl(e.target.value)}
+                placeholder="http://localhost:11434"
+              />
+              <p className="text-xs text-muted-foreground">
+                Base URL of your Ollama server. Default: http://localhost:11434
+              </p>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="ollamaModel">Model Name</Label>
+              <Input
+                id="ollamaModel"
+                type="text"
+                value={ollamaModel}
+                onChange={(e) => setOllamaModel(e.target.value)}
+                placeholder="llama3.3, qwen2.5-coder, deepseek-r1, etc."
+              />
+              <p className="text-xs text-muted-foreground">
+                Model to use (e.g., llama3.3, llava for vision). Run `ollama list` to see installed models.
+              </p>
+            </div>
+          </>
+        )}
+
         {/* Custom Instructions */}
         <div className="space-y-2">
           <Label htmlFor="customInstructions">Custom Instructions (Optional)</Label>
@@ -369,6 +440,7 @@ export function AISettingsCard({ settings, repositoryId }: AISettingsCardProps) 
                     <SelectItem value="openrouter">OpenRouter API</SelectItem>
                     <SelectItem value="anthropic">Anthropic Direct</SelectItem>
                     <SelectItem value="claude-agent-sdk">Claude Agent SDK</SelectItem>
+                    <SelectItem value="ollama">Ollama (Local)</SelectItem>
                   </SelectContent>
                 </Select>
                 <p className="text-xs text-muted-foreground">
@@ -378,6 +450,8 @@ export function AISettingsCard({ settings, repositoryId }: AISettingsCardProps) 
                     ? 'Screenshots are read from disk by the agent. No API key needed. Requires `claude login`.'
                     : aiDiffingProvider === 'openrouter'
                     ? 'Uses OpenRouter to access vision models.'
+                    : aiDiffingProvider === 'ollama'
+                    ? 'Uses Ollama for local vision models (llava, bakllava, etc.)'
                     : 'Uses Anthropic Messages API directly with native image support.'}
                 </p>
               </div>
@@ -396,8 +470,41 @@ export function AISettingsCard({ settings, repositoryId }: AISettingsCardProps) 
                 </div>
               )}
 
-              {/* Model — for all direct providers */}
-              {aiDiffingProvider !== 'same-as-test-gen' && (
+              {/* Ollama Settings — only for ollama */}
+              {aiDiffingProvider === 'ollama' && (
+                <>
+                  <div className="space-y-2">
+                    <Label htmlFor="aiDiffingOllamaBaseUrl">Ollama Server URL</Label>
+                    <Input
+                      id="aiDiffingOllamaBaseUrl"
+                      type="text"
+                      value={aiDiffingOllamaBaseUrl}
+                      onChange={(e) => setAiDiffingOllamaBaseUrl(e.target.value)}
+                      placeholder="http://localhost:11434"
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      Base URL of your Ollama server. Default: http://localhost:11434
+                    </p>
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="aiDiffingOllamaModel">Vision Model Name</Label>
+                    <Input
+                      id="aiDiffingOllamaModel"
+                      type="text"
+                      value={aiDiffingOllamaModel}
+                      onChange={(e) => setAiDiffingOllamaModel(e.target.value)}
+                      placeholder="llava, bakllava, llava-llama3, etc."
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      Vision-capable model (e.g., llava, bakllava). Run `ollama list` to see installed models.
+                    </p>
+                  </div>
+                </>
+              )}
+
+              {/* Model — for all direct providers except ollama */}
+              {aiDiffingProvider !== 'same-as-test-gen' && aiDiffingProvider !== 'ollama' && (
                 <div className="space-y-2">
                   <Label htmlFor="aiDiffingModel">Vision Model</Label>
                   <Input
@@ -423,7 +530,7 @@ export function AISettingsCard({ settings, repositoryId }: AISettingsCardProps) 
             variant="outline"
             size="sm"
             onClick={handleTestConnection}
-            disabled={isTesting || (provider === 'openrouter' && !openrouterApiKey)}
+            disabled={isTesting || (provider === 'openrouter' && !openrouterApiKey) || (provider === 'ollama' && !ollamaModel)}
           >
             {isTesting ? (
               <Loader2 className="w-4 h-4 mr-2 animate-spin" />

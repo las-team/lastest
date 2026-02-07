@@ -21,11 +21,15 @@ export async function saveAISettings(data: {
   agentSdkPermissionMode?: AgentSdkPermissionMode;
   agentSdkModel?: string | null;
   agentSdkWorkingDir?: string | null;
+  ollamaBaseUrl?: string | null;
+  ollamaModel?: string | null;
   customInstructions?: string | null;
   aiDiffingEnabled?: boolean;
   aiDiffingProvider?: string | null;
   aiDiffingApiKey?: string | null;
   aiDiffingModel?: string | null;
+  aiDiffingOllamaBaseUrl?: string | null;
+  aiDiffingOllamaModel?: string | null;
 }) {
   if (data.repositoryId) await requireRepoAccess(data.repositoryId);
   else await requireTeamAccess();
@@ -55,7 +59,9 @@ export async function resetAISettings(repositoryId?: string | null) {
 export async function testAIConnection(
   provider: AIProvider,
   apiKey?: string,
-  permissionMode?: AgentSdkPermissionMode
+  permissionMode?: AgentSdkPermissionMode,
+  ollamaBaseUrl?: string,
+  ollamaModel?: string
 ): Promise<{
   success: boolean;
   message: string;
@@ -136,6 +142,45 @@ export async function testAIConnection(
         return { success: true, message: 'Claude Agent SDK connected successfully' };
       }
       return { success: false, message: 'Claude Agent SDK returned empty response' };
+    } else if (provider === 'ollama') {
+      if (!ollamaModel) {
+        return { success: false, message: 'Model name is required for Ollama' };
+      }
+
+      const baseUrl = ollamaBaseUrl || 'http://localhost:11434';
+
+      try {
+        const response = await fetch(`${baseUrl}/v1/chat/completions`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            model: ollamaModel,
+            messages: [{ role: 'user', content: 'Say hello in one word' }],
+            max_tokens: 10,
+          }),
+        });
+
+        if (response.ok) {
+          return { success: true, message: `Ollama connected successfully (${ollamaModel})` };
+        }
+
+        const error = await response.json().catch(() => ({
+          error: { message: response.statusText }
+        }));
+        return {
+          success: false,
+          message: error.error?.message || 'Ollama connection failed. Is the server running?'
+        };
+      } catch (error) {
+        return {
+          success: false,
+          message: error instanceof Error
+            ? error.message
+            : 'Cannot reach Ollama server. Is it running on the configured URL?'
+        };
+      }
     }
 
     return { success: false, message: 'Unknown provider' };

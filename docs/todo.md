@@ -23,7 +23,6 @@ Docker
 Gitlab
 CROSS_OS_CHROMIUM_ARGS & FONTS
 ## features
-Ollama
 
  NEW: Page Shift Detection -- excludes vertical content shifts
   from diffs
@@ -60,7 +59,6 @@ Tier 3 — Perceptual diffing engines
 
 Move to background what's possible
 Linting
-Test file errors
 
 Electron app ~/.claude/plans/rippling-roaming-snail.md replan
 ## ideas

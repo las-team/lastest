@@ -321,7 +321,7 @@ export type NewBuild = typeof builds.$inferInsert;
 export type VisualDiff = typeof visualDiffs.$inferSelect;
 export type AIDiffRecommendation = 'approve' | 'review' | 'flag';
 export type AIDiffAnalysisStatus = 'pending' | 'running' | 'completed' | 'failed' | 'skipped';
-export type AIDiffingProvider = 'openrouter' | 'anthropic' | 'same-as-test-gen' | 'claude-agent-sdk';
+export type AIDiffingProvider = 'openrouter' | 'anthropic' | 'same-as-test-gen' | 'claude-agent-sdk' | 'ollama';
 
 export type VisualDiffWithTestStatus = VisualDiff & {
   testResultStatus: string | null;
@@ -550,7 +550,7 @@ export type DiffStatus = 'pending' | 'approved' | 'rejected' | 'auto_approved';
 export type TriggerType = 'webhook' | 'manual' | 'push';
 
 // AI Provider settings for test generation
-export type AIProvider = 'claude-cli' | 'openrouter' | 'claude-agent-sdk';
+export type AIProvider = 'claude-cli' | 'openrouter' | 'claude-agent-sdk' | 'ollama';
 export type AgentSdkPermissionMode = 'plan' | 'default' | 'acceptEdits';
 
 export const aiSettings = sqliteTable('ai_settings', {
@@ -562,12 +562,16 @@ export const aiSettings = sqliteTable('ai_settings', {
   agentSdkPermissionMode: text('agent_sdk_permission_mode').default('plan'), // 'plan' | 'default' | 'acceptEdits'
   agentSdkModel: text('agent_sdk_model'),
   agentSdkWorkingDir: text('agent_sdk_working_dir'),
+  ollamaBaseUrl: text('ollama_base_url'),
+  ollamaModel: text('ollama_model'),
   customInstructions: text('custom_instructions'),
   // AI Diffing settings (separate from test generation)
   aiDiffingEnabled: integer('ai_diffing_enabled', { mode: 'boolean' }).default(false),
   aiDiffingProvider: text('ai_diffing_provider'), // 'openrouter' | 'anthropic'
   aiDiffingApiKey: text('ai_diffing_api_key'),
   aiDiffingModel: text('ai_diffing_model').default('anthropic/claude-sonnet-4-5-20250929'),
+  aiDiffingOllamaBaseUrl: text('ai_diffing_ollama_base_url'),
+  aiDiffingOllamaModel: text('ai_diffing_ollama_model'),
   createdAt: integer('created_at', { mode: 'timestamp' }),
   updatedAt: integer('updated_at', { mode: 'timestamp' }),
 });
@@ -580,6 +584,8 @@ export const DEFAULT_AI_SETTINGS = {
   openrouterModel: 'anthropic/claude-sonnet-4',
   agentSdkPermissionMode: 'plan' as AgentSdkPermissionMode,
   agentSdkModel: '',
+  ollamaBaseUrl: 'http://localhost:11434',
+  ollamaModel: '',
   aiDiffingEnabled: false,
   aiDiffingProvider: 'same-as-test-gen' as AIDiffingProvider,
   aiDiffingModel: 'anthropic/claude-sonnet-4-5-20250929',

@@ -63,7 +63,8 @@
       "WebFetch(domain:www.chromatic.com)",
       "WebFetch(domain:medium.com)",
       "Bash(docker build:*)",
-      "WebFetch(domain:argos-ci.com)"
+      "WebFetch(domain:argos-ci.com)",
+      "Bash(pnpm test:*)"
     ]
   },
   "disabledMcpjsonServers": [

@@ -1,4 +1,4 @@
-export type AIProviderType = 'claude-cli' | 'openrouter' | 'claude-agent-sdk';
+export type AIProviderType = 'claude-cli' | 'openrouter' | 'claude-agent-sdk' | 'ollama';
 
 export interface GenerateOptions {
   prompt: string;
@@ -27,6 +27,8 @@ export interface AIProviderConfig {
   agentSdkPermissionMode?: 'plan' | 'default' | 'acceptEdits';
   agentSdkModel?: string;
   agentSdkWorkingDir?: string;
+  ollamaBaseUrl?: string;
+  ollamaModel?: string;
 }
 
 export type DiscoverySource = 'file-scan' | 'nav-link' | 'spec-analysis' | 'mcp-explore' | 'manual';
