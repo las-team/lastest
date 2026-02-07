@@ -17,6 +17,8 @@ Always ask for explicit permission before running destructive database operation
 pnpm dev          # Start development server on localhost:3000
 pnpm build        # Production build
 pnpm lint         # Run ESLint
+pnpm test         # Run unit tests (vitest, single run)
+pnpm test:watch   # Run unit tests in watch mode
 pnpm db:studio    # Open Drizzle Studio for database inspection
 pnpm db:reset     # Reset database (removes SQLite DB + screenshots/baselines)
 pnpm db:push      # Push schema changes to database
@@ -140,3 +142,38 @@ Uses `better-auth` with database sessions. Supports:
 
 - Screenshots: `public/screenshots/{repositoryId}/`
 - Baselines: `public/baselines/`
+
+## Development Patterns
+
+### Schema Changes
+1. Edit `src/lib/db/schema.ts`
+2. Update default constants (e.g., `DEFAULT_AI_SETTINGS`) at top of schema if adding settings fields
+3. Run `pnpm db:push`
+4. Update related query functions in `src/lib/db/queries.ts` (select/insert statements)
+
+### Key Conventions
+- **UI**: shadcn/ui (New York variant) + Radix primitives + Tailwind CSS + `cn()` from `src/lib/utils.ts`
+- **Icons**: lucide-react
+- **Toasts**: sonner (bottom-right)
+- **Image processing**: `pngjs` + `pixelmatch` — do NOT use `sharp`
+- **Imports**: Always use `@/` alias, not relative paths
+- **Client components**: Named `*-client.tsx` (e.g., `build-detail-client.tsx`)
+- **Server actions**: Must call `revalidatePath()` after mutations; use `requireRepoAccess()` / `requireTeamAccess()` for auth
+- **Settings auto-save**: 500ms debounce pattern — when adding fields, update `originalValues`, `hasChanges`, `doSave`, and `useEffect` deps
+- **Next.js config**: Standalone output, server actions body limit 10mb, `tesseract.js` as external package
+
+### AI Providers (`src/lib/ai/`)
+4 providers: `claude-cli`, `openrouter`, `claude-agent-sdk`, `anthropic-direct`. Settings use upsert pattern — `getAISettings()` returns `DEFAULT_AI_SETTINGS` when no DB record exists, so all new fields must be added to the default.
+
+### Build Polling
+`/api/builds/[buildId]/status` → `getBuildSummary()` → `BuildPollingWrapper` → `BuildDetailClient`
+
+### Route Organization
+- Auth routes: `src/app/(auth)/` (login, register, invite)
+- App routes: `src/app/(app)/` (tests, builds, suites, run, record, settings)
+
+## Gotchas
+- `src/lib/db/queries.ts` is 1900+ lines — use offset/limit when reading
+- `VisualDiffWithTestStatus` type must stay in sync with `getVisualDiffsWithTestStatus` query select
+- Pre-existing lint warnings (~119) — new code should pass clean
+- Schema type exports use `$inferSelect` / `$inferInsert` patterns

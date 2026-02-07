@@ -23,7 +23,7 @@ Docker
 Gitlab
 CROSS_OS_CHROMIUM_ARGS & FONTS
 ## features
-Select build as baseline
+Ollama
 
  NEW: Page Shift Detection -- excludes vertical content shifts
   from diffs

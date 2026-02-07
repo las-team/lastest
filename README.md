@@ -13,7 +13,8 @@
   <a href="#quick-start">Quick Start</a> •
   <a href="#how-it-works">How It Works</a> •
   <a href="#why-lastest2">Why Lastest2</a> •
-  <a href="#documentation">Docs</a>
+  <a href="#commands">Commands</a> •
+  <a href="#environment-variables">Config</a>
 </p>
 
 <p align="center">
@@ -55,44 +56,57 @@ Your data stays local. Your wallet stays full.
 
 ## Features
 
-### 🎬 Record Browser Interactions
-Point-and-click test recording via Playwright. No code required.
+### Core
 
-### 🤖 AI Test Generation
-Claude generates robust test code with multi-selector fallback (data-testid → id → role → aria-label → text → css → OCR).
+- **Record Browser Interactions** — Point-and-click test recording via Playwright. No code required.
+- **AI Test Generation** — Claude generates robust test code with multi-selector fallback (data-testid → id → role → aria-label → text → css → OCR).
+- **Visual Diffing** — Pixel-perfect comparison using pixelmatch. See exactly what changed.
+- **Approval Workflow** — Review visual diffs before they become baselines. Catch regressions, approve intentional changes.
+- **Git-Aware Builds** — Run tests per branch/commit. Compare across PRs. Track coverage.
+- **Test Suites** — Organize tests into ordered suites for structured execution.
+- **Test Versioning** — Full version history with change reasons (manual edit, AI fix, AI enhance, restored).
 
-### 📸 Visual Diffing
-Pixel-perfect comparison using pixelmatch. See exactly what changed.
+### AI-Powered
 
-### ✅ Approval Workflow
-Review visual diffs before they become baselines. Catch regressions, approve intentional changes.
+- **Multiple AI Providers** — Claude CLI, OpenRouter, Claude Agent SDK, or direct Anthropic API.
+- **AI Diff Analysis** — AI-powered visual diff classification with confidence scores.
+- **AI Test Fixing** — Automatically fix failing tests or enhance existing ones.
+- **Spec-Driven Testing** — Import and generate tests from OpenAPI specs, user stories, or markdown files.
+- **Route Discovery** — AI scans your source code to discover routes and suggest tests.
+- **MCP Selector Validation** — Real-time selector validation on live pages via Claude MCP.
 
-### 🔄 Git-Aware Builds
-Run tests per branch/commit. Compare across PRs. Track coverage.
+### Integrations
 
-### 🏠 100% Self-Hosted
-SQLite database, local file storage. No external dependencies. No data leaves your machine.
+- **GitHub** — OAuth login, repo sync, PR comments, webhook-triggered builds.
+- **GitLab** — OAuth login (self-hosted supported), MR comments, webhook triggers.
+- **Google OAuth** — Sign in with Google.
+- **Google Sheets** — Use spreadsheet data as test data sources with per-team OAuth and caching.
+- **Notifications** — Slack, Discord, custom webhooks, and GitHub/GitLab PR comments for build results.
 
-### 🔔 Notifications
-Slack, Discord, custom webhooks, and GitHub/GitLab PR comments for build results.
+### Infrastructure
 
-### 🦊 GitLab Support
-Full GitLab integration including OAuth, MR comments, and webhook triggers. Supports self-hosted GitLab instances.
+- **Smart Run** — Analyzes git diffs to run only tests affected by your changes.
+- **Remote Runners** — Distributed test execution on remote machines with capability tracking.
+- **Docker Deployment** — Production-ready multi-stage Docker setup with persistent volumes.
+- **VSCode Extension API** — REST + SSE API (`/api/v1/`) for IDE integration.
+- **Accessibility Audits** — Automated axe-core checks on every screenshot capture.
 
-### ⚡ Smart Run
-Intelligent test selection that analyzes git diffs to run only tests affected by your changes. Save time on large test suites.
+### Advanced
 
-### 🐳 Docker Deployment
-Production-ready Docker setup with persistent volumes for easy home server deployment.
+- **Ignore Regions** — Mask dynamic areas (timestamps, ads, counters) from diff comparison.
+- **Planned Screenshots** — Compare against design files (Figma exports, etc.).
+- **Carry-Forward Baselines** — SHA256-based automatic baseline matching across branches.
+- **Setup Orchestration** — Repository-default, build-level, and per-test setup scripts with skip/override.
+- **Selector Stats** — Track selector success/failure rates for optimization.
+- **Diff Sensitivity** — Configurable pixel/percentage thresholds for unchanged/flaky/changed classification.
+- **AI Prompt Logs** — Full audit trail of all AI requests and responses.
+- **Background Jobs** — Queue tracking for long-running operations (AI scans, builds).
 
-### 👥 Team Management
-Multi-tenant support with teams, user roles (owner/admin/member/viewer), and invitations.
+### Team & Auth
 
-### 📊 Test Suites
-Organize tests into ordered suites for structured execution.
-
-### 🧠 Multiple AI Providers
-Choose between Claude CLI, OpenRouter, or Claude Agent SDK for test generation.
+- **Multi-Tenant Teams** — Slug-based team workspaces with invitations.
+- **Role-Based Access** — Owner, admin, member, viewer roles.
+- **Multiple Auth Methods** — Email/password, GitHub OAuth, GitLab OAuth, Google OAuth.
 
 ---
 
@@ -139,11 +153,11 @@ Open [http://localhost:3000](http://localhost:3000)
 
 2. **Generate**: AI writes Playwright test code with resilient selectors that survive DOM changes.
 
-3. **Run**: Execute tests locally. Screenshots are captured at key steps.
+3. **Run**: Execute tests locally or on remote runners. Screenshots are captured at key steps.
 
-4. **Compare**: New screenshots are diffed against baselines using pixelmatch.
+4. **Compare**: New screenshots are diffed against baselines using pixelmatch. Accessibility audits run automatically.
 
-5. **Review**: Visual diffs are classified (unchanged/flaky/changed). Approve intentional changes.
+5. **Review**: Visual diffs are classified (unchanged/flaky/changed). AI can auto-classify with confidence scores. Approve intentional changes.
 
 ---
 
@@ -152,13 +166,17 @@ Open [http://localhost:3000](http://localhost:3000)
 | Feature | Lastest2 | Percy | Chromatic |
 |---------|----------|-------|-----------|
 | Price | **Free** | $399/mo | $149/mo |
-| Self-hosted | ✅ | ❌ | ❌ |
-| AI test generation | ✅ | ❌ | ❌ |
-| Data privacy | ✅ Local | Cloud | Cloud |
-| Open source | ✅ | ❌ | ❌ |
-| GitHub + GitLab | ✅ | ✅ | ✅ |
-| Smart run (diff-based) | ✅ | ❌ | ❌ |
-| Docker deploy | ✅ | N/A | N/A |
+| Self-hosted | Yes | No | No |
+| AI test generation | Yes | No | No |
+| AI diff analysis | Yes | No | No |
+| Data privacy | Local | Cloud | Cloud |
+| Open source | Yes | No | No |
+| GitHub + GitLab | Yes | Yes | Yes |
+| Google Sheets test data | Yes | No | No |
+| Smart run (diff-based) | Yes | No | No |
+| Accessibility audits | Yes | No | Yes |
+| Remote runners | Yes | N/A | N/A |
+| Docker deploy | Yes | N/A | N/A |
 
 ### Built for Vibe Coders
 
@@ -174,17 +192,23 @@ Open [http://localhost:3000](http://localhost:3000)
 ```bash
 pnpm dev          # Start development server on localhost:3000
 pnpm build        # Production build
+pnpm start        # Start production server
 pnpm lint         # Run ESLint
+pnpm test         # Run unit tests (Vitest)
+pnpm test:watch   # Run unit tests in watch mode
 pnpm db:studio    # Open Drizzle Studio for database inspection
-pnpm db:reset     # Reset database (removes SQLite DB + screenshots/baselines)
 pnpm db:push      # Push schema changes to database
+pnpm db:generate  # Generate Drizzle migrations
+pnpm db:reset     # Reset database (removes SQLite DB + screenshots/baselines)
+pnpm db:seed      # Seed test data
+pnpm test:visual  # Run visual tests via CLI (see below)
 ```
 
 ---
 
 ## CLI Test Runner (CI/CD)
 
-Run visual regression tests directly from the command line for GitHub Actions or other CI pipelines:
+Run visual regression tests from the command line for GitHub Actions or other CI pipelines:
 
 ```bash
 pnpm test:visual --repo-id <id> [options]
@@ -241,6 +265,8 @@ docker-compose logs -f
 docker-compose down
 ```
 
+Uses a multi-stage Alpine build (`node:20-alpine`) with health checks via `GET /api/health`.
+
 ### Volumes
 
 | Volume | Purpose |
@@ -257,47 +283,56 @@ GITHUB_CLIENT_ID=your-github-app-id
 GITHUB_CLIENT_SECRET=your-github-app-secret
 ```
 
+A development compose file (`docker-compose.dev.yml`) is also available.
+
 ---
 
-## Remote Agent (Preview)
+## Remote Runners
 
-Run tests on remote machines by deploying agents that connect back to your Lastest2 server.
+Run tests on remote machines by deploying runners that connect back to your Lastest2 server via WebSocket.
 
-> ⚠️ **Status**: The agent package exists but is not yet published to NPM. Currently available for local development only.
+### Setup
 
-### Local Development Setup
+1. **Register a runner** in Settings → Runners
+2. **Copy the token** (shown only once)
+3. **Install and run** on your target machine
 
 ```bash
-# From the repo root, build the runner package
+# From the repo root
 cd packages/runner
-pnpm install
-pnpm build
-
-# Link globally for local testing
+pnpm install && pnpm build
 pnpm link --global
 
-# Run the runner
-lastest2-runner --token YOUR_TOKEN --server http://localhost:3000
+# Start as daemon
+lastest2-runner start -t YOUR_TOKEN -s https://your-lastest2-server
+
+# Or run in foreground
+lastest2-runner run -t YOUR_TOKEN -s https://your-lastest2-server
 ```
 
-### How It Works
+### Runner CLI
 
-1. **Create an agent** in Settings → Agents
-2. **Copy the token** (shown only once)
-3. **Run the agent** on your target machine
-4. **Execute tests** remotely via the web UI
+```bash
+lastest2-runner start -t <token> -s <server-url>  # Start as background daemon
+lastest2-runner stop                               # Stop the daemon
+lastest2-runner status                             # Show runner status
+lastest2-runner log [-f] [-n <lines>]              # View logs (-f to follow)
+lastest2-runner run -t <token> -s <server-url>     # Run in foreground
+```
 
-### Current Limitations
+Config stored in `~/.lastest2/` (runner.pid, runner.log, runner.config.json).
 
-- Uses HTTP polling (Next.js doesn't support native WebSocket in App Router)
-- In-memory command queue (restart clears pending commands)
-- Package not yet published to NPM
+---
 
-### Coming Soon
+## Google Sheets Integration
 
-- [ ] NPM package publication (`npm install -g @lastest2/agent`)
-- [ ] Redis-backed command queue for production
-- [ ] Agent health monitoring dashboard
+Use spreadsheet data as test data sources:
+
+1. **Connect** your Google account in Settings → Google Sheets
+2. **Select spreadsheets** and configure data sources with aliases (e.g., "users", "products")
+3. **Reference data** in test code via the cached headers and rows
+
+Supports per-team OAuth, automatic token refresh, custom header row selection, and fixed data ranges.
 
 ---
 
@@ -311,7 +346,7 @@ Send build results to any HTTP endpoint. Configure in Settings → Notifications
 {
   "event": "build.completed",
   "buildId": "abc123",
-  "status": "safe" | "needs_review" | "blocked",
+  "status": "safe_to_merge | review_required | blocked",
   "totalTests": 10,
   "passedCount": 8,
   "failedCount": 1,
@@ -326,14 +361,55 @@ Send build results to any HTTP endpoint. Configure in Settings → Notifications
 
 ---
 
+## VSCode Extension API
+
+A REST + SSE API is available at `/api/v1/` for IDE integration:
+
+- **Repos** — list, get repositories
+- **Functional Areas** — list, create, manage test areas
+- **Tests** — CRUD operations, run individual tests
+- **Builds** — trigger and monitor builds
+- **Runs** — view test run results
+- **Events** — SSE stream at `/api/v1/events` for real-time test updates
+
+---
+
+## Settings
+
+All configuration lives under a unified Settings page:
+
+| Section | Description |
+|---------|-------------|
+| **GitHub** | Connect account, select repositories |
+| **GitLab** | Connect account, supports self-hosted instances |
+| **Google Sheets** | Connect to Google Drive, manage data sources |
+| **Playwright** | Browser type, viewport, headless mode, selector priority, animation freezing |
+| **Environment** | Server startup (manual vs auto-start), health check URLs |
+| **Diff Sensitivity** | Pixel/percentage thresholds for unchanged/flaky/changed |
+| **AI** | Provider selection, API keys, model, custom instructions |
+| **Notifications** | Slack, Discord, custom webhook configuration |
+| **Branches** | Baseline and scanning branch selection |
+| **AI Logs** | Audit trail of all AI requests (last 50 entries) |
+| **Setup** | Default repository-wide setup scripts |
+| **Users** | Team member management, invitations (admin only) |
+| **Runners** | Remote runner registration and management (admin only) |
+
+---
+
 ## Tech Stack
 
 - **Framework**: Next.js 16 (App Router)
+- **UI**: React 19, Radix UI, Tailwind CSS 4
 - **Browser Automation**: Playwright
 - **Visual Diffing**: pixelmatch
-- **Database**: SQLite + Drizzle ORM
-- **AI**: Claude (via Agent SDK, CLI, or OpenRouter)
+- **Accessibility**: axe-core
+- **Database**: SQLite + Drizzle ORM (WAL mode)
+- **Auth**: better-auth (email/password, GitHub, GitLab, Google OAuth)
+- **AI**: Claude (Agent SDK, CLI, OpenRouter, or direct Anthropic API)
 - **OCR Fallback**: Tesseract.js
+- **Test Data**: Google Sheets integration
+- **Testing**: Vitest (unit), Playwright (visual)
+- **State**: TanStack React Query
 
 ---
 
@@ -346,26 +422,33 @@ BETTER_AUTH_SECRET=
 # GitHub OAuth (for repository sync + login)
 GITHUB_CLIENT_ID=
 GITHUB_CLIENT_SECRET=
-GITHUB_WEBHOOK_SECRET=        # Optional: verify webhook signatures
+GITHUB_REDIRECT_URI=              # Optional
+GITHUB_WEBHOOK_SECRET=            # Optional: verify webhook signatures
 
 # GitLab OAuth (supports self-hosted instances)
 GITLAB_CLIENT_ID=
 GITLAB_CLIENT_SECRET=
-GITLAB_INSTANCE_URL=          # Default: https://gitlab.com
-GITLAB_WEBHOOK_SECRET=        # Optional: verify webhook signatures
+GITLAB_REDIRECT_URI=              # Optional
+GITLAB_INSTANCE_URL=              # Default: https://gitlab.com
+GITLAB_WEBHOOK_SECRET=            # Optional: verify webhook signatures
 
 # Google OAuth (for login)
 GOOGLE_CLIENT_ID=
 GOOGLE_CLIENT_SECRET=
+GOOGLE_REDIRECT_URI=              # Optional
+
+# Google Sheets OAuth (separate scope from login)
+GOOGLE_SHEETS_REDIRECT_URI=       # Separate redirect for Sheets OAuth
 
 # Email (optional, for invitations)
 RESEND_API_KEY=
 EMAIL_FROM=
 
 # Advanced
-DATABASE_PATH=                # Default: ./lastest2.db
-MONITORED_BRANCHES=           # Default: main,master,develop
-NEXT_PUBLIC_APP_URL=          # Your app's public URL
+DATABASE_PATH=                    # Default: ./lastest2.db
+MONITORED_BRANCHES=               # Default: main,master,develop
+NEXT_PUBLIC_APP_URL=              # Your app's public URL
+NEXT_PUBLIC_BASE_URL=             # Base URL for API calls
 ```
 
 ---
@@ -380,8 +463,18 @@ NEXT_PUBLIC_APP_URL=          # Your app's public URL
 - [x] Smart run (git-diff based test selection)
 - [x] Custom webhook notifications
 - [x] Google OAuth
-- [ ] Remote agent NPM package publication
-- [ ] Production-ready agent infrastructure (Redis queue)
+- [x] Google Sheets test data integration
+- [x] AI diff analysis with confidence scoring
+- [x] Spec-driven test generation
+- [x] Accessibility audits (axe-core)
+- [x] VSCode Extension API
+- [x] Remote runners with WebSocket
+- [x] Test versioning and history
+- [x] Planned screenshots (design comparison)
+- [x] Ignore regions for dynamic content
+- [x] Setup script orchestration
+- [ ] Remote runner NPM package publication
+- [ ] Production-ready runner infrastructure (Redis queue)
 
 ---
 
