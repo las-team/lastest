@@ -366,7 +366,7 @@ export function AreaTree({
         </Button>
       </div>
 
-      <ScrollArea className="flex-1" type="auto">
+      <ScrollArea className="flex-1 overflow-hidden" type="auto">
         <div className="p-2 overflow-x-auto">
           {/* Areas */}
           {tree.map((area) => (
