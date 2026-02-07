@@ -100,7 +100,7 @@ export function SheetReferenceInserter({ dataSources, onInsert }: SheetReference
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
         <Button variant="outline" size="sm" className="h-7 text-xs gap-1">
-          <Table2 className="h-3 w-3" />
+          <Table2 className="h-3 w-3 text-[#0F9D58]" />
           Insert Data
         </Button>
       </DialogTrigger>
