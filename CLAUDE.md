@@ -4,6 +4,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## CRITICAL RULES
 
+**ALWAYS use `pnpm` for package management and running scripts.** Never use `npm` or `npx` - this project uses pnpm exclusively.
+
 **NEVER delete the database file (`lastest2.db`) without explicitly asking the user first.** This includes:
 - `rm` commands on `.db` files
 - `pnpm db:reset`

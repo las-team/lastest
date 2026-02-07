@@ -21,7 +21,9 @@
     "db:seed": "tsx scripts/seed-excalidraw-tests.ts",
     "test:visual": "tsx scripts/run-tests.ts",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "test:ui": "vitest --ui"
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.2.19",

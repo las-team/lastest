@@ -64,7 +64,8 @@
       "WebFetch(domain:medium.com)",
       "Bash(docker build:*)",
       "WebFetch(domain:argos-ci.com)",
-      "Bash(pnpm test:*)"
+      "Bash(pnpm test:*)",
+      "Bash(pnpm exec tsx:*)"
     ]
   },
   "disabledMcpjsonServers": [
