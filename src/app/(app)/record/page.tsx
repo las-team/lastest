@@ -1,5 +1,6 @@
 import { RecordingClient } from './recording-client';
-import { getFunctionalAreas, getPlaywrightSettings, getSelectedRepository, getEnvironmentConfig, getTest, getSetupScript } from '@/lib/db/queries';
+import { getFunctionalAreasByRepo, getPlaywrightSettings, getSelectedRepository, getEnvironmentConfig, getTest, getSetupScript } from '@/lib/db/queries';
+import { getCurrentSession } from '@/lib/auth';
 import type { RecordingEngine } from '@/lib/db/schema';
 
 interface RecordPageProps {
@@ -8,8 +9,10 @@ interface RecordPageProps {
 
 export default async function RecordPage({ searchParams }: RecordPageProps) {
   const params = await searchParams;
-  const areas = await getFunctionalAreas();
-  const selectedRepo = await getSelectedRepository();
+  const session = await getCurrentSession();
+  const teamId = session?.team?.id;
+  const selectedRepo = teamId ? await getSelectedRepository(teamId) : null;
+  const areas = selectedRepo ? await getFunctionalAreasByRepo(selectedRepo.id) : [];
   const settings = await getPlaywrightSettings(selectedRepo?.id);
   const envConfig = await getEnvironmentConfig(selectedRepo?.id);
 

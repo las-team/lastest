@@ -4,7 +4,7 @@ import path from 'path';
 import fs from 'fs';
 import type { ActionSelector, SelectorType, SelectorConfig } from '@/lib/db/schema';
 import { DEFAULT_SELECTOR_PRIORITY } from '@/lib/db/schema';
-import { extractText, terminateWorker } from './ocr';
+import { extractText, terminateWorker, warmupWorker } from './ocr';
 import { getSetupOrchestrator } from '@/lib/setup/setup-orchestrator';
 
 export interface SetupOptions {
@@ -189,6 +189,11 @@ export class PlaywrightRecorder extends EventEmitter {
       // Navigate to initial URL first
       await this.page.goto(url, { waitUntil: 'domcontentloaded' });
 
+      // Eagerly start OCR worker initialization (runs in parallel with setup/listener setup)
+      if (this.ocrEnabled) {
+        warmupWorker();
+      }
+
       // Run setup if configured (before setting up event listeners to avoid capturing setup actions)
       if (setupOptions && (setupOptions.testId || setupOptions.scriptId)) {
         const orchestrator = getSetupOrchestrator();
@@ -263,6 +268,7 @@ export class PlaywrightRecorder extends EventEmitter {
 
       // Run OCR asynchronously if enabled and bounding box is large enough
       if (this.ocrEnabled && boundingBox && boundingBox.width > 10 && boundingBox.height > 10 && this.page && event) {
+        console.log(`[Recorder OCR] Enabled, capturing region ${boundingBox.width}x${boundingBox.height} at (${Math.round(boundingBox.x)},${Math.round(boundingBox.y)})`);
         const ocrPromise = (async () => {
           try {
             const buffer = await this.page!.screenshot({
@@ -270,9 +276,14 @@ export class PlaywrightRecorder extends EventEmitter {
             });
             const text = await extractText(Buffer.from(buffer));
             if (text && event.data.selectors) {
+              console.log(`[Recorder OCR] Success: "${text.slice(0, 50)}"`);
               event.data.selectors.push({ type: 'ocr-text' as SelectorType, value: `ocr-text="${text}"` });
+            } else {
+              console.log('[Recorder OCR] No text extracted');
             }
-          } catch { /* OCR failure is non-fatal */ }
+          } catch (err) {
+            console.warn('[Recorder OCR] Failed:', err instanceof Error ? err.message : String(err));
+          }
         })();
         this.pendingOcrPromises.push(ocrPromise);
       }
@@ -330,8 +341,11 @@ export class PlaywrightRecorder extends EventEmitter {
     const cursorFPS = this.settings.cursorFPS;
     const selectorPriority = this.selectorPriority;
 
+    const initArgs = { pointerGestures, cursorFPS, selectorPriority };
+
     // Inject interaction tracking script - MUST await
-    await this.page.addInitScript(({ pointerGestures: pg, cursorFPS: fps, selectorPriority: priority }) => {
+    // This function is used both for addInitScript (future navigations) and evaluate (current page)
+    const initFn = ({ pointerGestures: pg, cursorFPS: fps, selectorPriority: priority }: { pointerGestures: boolean; cursorFPS: number; selectorPriority: typeof selectorPriority }) => {
       // Type definition for selectors captured in browser context
       interface BrowserActionSelector {
         type: string;
@@ -888,7 +902,13 @@ export class PlaywrightRecorder extends EventEmitter {
           }
         }
       }, 1000);
-    }, { pointerGestures, cursorFPS, selectorPriority });
+    };
+
+    // addInitScript handles future navigations (SPA route changes that create new documents)
+    await this.page.addInitScript(initFn, initArgs);
+
+    // evaluate injects into the CURRENT page immediately (addInitScript doesn't retroactively inject)
+    await this.page.evaluate(initFn, initArgs);
   }
 
   private getRelativePath(url: string): string {

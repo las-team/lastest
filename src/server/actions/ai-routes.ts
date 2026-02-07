@@ -6,6 +6,7 @@ import type { AIProviderConfig } from '@/lib/ai/types';
 import { revalidatePath } from 'next/cache';
 import { getRepoTree, getFileContent, type TreeEntry } from '@/lib/github/content';
 import { createJob, completeJob, failJob } from './jobs';
+import { requireRepoAccess } from '@/lib/auth';
 
 /** Extract first valid JSON array from text, handling nested brackets correctly */
 function extractJsonArray(text: string): string | null {
@@ -143,18 +144,13 @@ export async function aiScanRoutes(
   repositoryId: string,
   branch: string
 ): Promise<{ success: boolean; routes?: DiscoveredRoute[]; error?: string }> {
+  const { repo } = await requireRepoAccess(repositoryId);
   const jobId = await createJob('ai_scan', 'AI Route Scan', undefined, repositoryId);
   try {
-    const account = await queries.getGithubAccount();
+    const account = repo.teamId ? await queries.getGithubAccountByTeam(repo.teamId) : null;
     if (!account) {
       await failJob(jobId, 'GitHub account not connected');
       return { success: false, error: 'GitHub account not connected' };
-    }
-
-    const repo = await queries.getRepository(repositoryId);
-    if (!repo) {
-      await failJob(jobId, 'Repository not found');
-      return { success: false, error: 'Repository not found' };
     }
 
     const config = await getAIConfig(repositoryId);
@@ -197,6 +193,7 @@ export async function mcpExploreRoutes(
   repositoryId: string,
   baseURL: string
 ): Promise<{ success: boolean; routes?: DiscoveredRoute[]; error?: string }> {
+  await requireRepoAccess(repositoryId);
   try {
     const config = await getAIConfig(repositoryId);
 
@@ -228,6 +225,7 @@ export async function saveDiscoveredRoutes(
   repositoryId: string,
   routes: DiscoveredRoute[]
 ): Promise<{ success: boolean; count?: number; error?: string }> {
+  await requireRepoAccess(repositoryId);
   try {
     // Get existing routes to avoid duplicates
     const existingRoutes = await queries.getRoutesByRepo(repositoryId);

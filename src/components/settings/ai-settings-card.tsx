@@ -15,8 +15,8 @@ import {
 } from '@/components/ui/select';
 import { saveAISettings, resetAISettings, testAIConnection } from '@/server/actions/ai-settings';
 import { DEFAULT_AI_SETTINGS } from '@/lib/db/schema';
-import type { AISettings, AIProvider, AgentSdkPermissionMode } from '@/lib/db/schema';
-import { Loader2, RotateCcw, Sparkles, CheckCircle2, XCircle, Zap, Bot } from 'lucide-react';
+import type { AISettings, AIProvider, AgentSdkPermissionMode, AIDiffingProvider } from '@/lib/db/schema';
+import { Loader2, RotateCcw, Sparkles, CheckCircle2, XCircle, Zap, Bot, Eye } from 'lucide-react';
 import { toast } from 'sonner';
 
 interface AISettingsCardProps {
@@ -48,7 +48,18 @@ export function AISettingsCard({ settings, repositoryId }: AISettingsCardProps) 
   const [agentSdkPermissionMode, setAgentSdkPermissionMode] = useState<AgentSdkPermissionMode>(
     (settings.agentSdkPermissionMode as AgentSdkPermissionMode) || 'plan'
   );
+  const [agentSdkModel, setAgentSdkModel] = useState(settings.agentSdkModel || '');
   const [agentSdkWorkingDir, setAgentSdkWorkingDir] = useState(settings.agentSdkWorkingDir || '');
+
+  // AI Diffing settings
+  const [aiDiffingEnabled, setAiDiffingEnabled] = useState(settings.aiDiffingEnabled ?? false);
+  const [aiDiffingProvider, setAiDiffingProvider] = useState<AIDiffingProvider>(
+    (settings.aiDiffingProvider as AIDiffingProvider) || 'openrouter'
+  );
+  const [aiDiffingApiKey, setAiDiffingApiKey] = useState(settings.aiDiffingApiKey || '');
+  const [aiDiffingModel, setAiDiffingModel] = useState(
+    settings.aiDiffingModel || DEFAULT_AI_SETTINGS.aiDiffingModel
+  );
 
   const debounceRef = useRef<NodeJS.Timeout | null>(null);
 
@@ -59,7 +70,12 @@ export function AISettingsCard({ settings, repositoryId }: AISettingsCardProps) 
     openrouterModel: settings.openrouterModel || DEFAULT_AI_SETTINGS.openrouterModel,
     customInstructions: settings.customInstructions || '',
     agentSdkPermissionMode: (settings.agentSdkPermissionMode as AgentSdkPermissionMode) || 'plan',
+    agentSdkModel: settings.agentSdkModel || '',
     agentSdkWorkingDir: settings.agentSdkWorkingDir || '',
+    aiDiffingEnabled: settings.aiDiffingEnabled ?? false,
+    aiDiffingProvider: (settings.aiDiffingProvider as AIDiffingProvider) || 'openrouter',
+    aiDiffingApiKey: settings.aiDiffingApiKey || '',
+    aiDiffingModel: settings.aiDiffingModel || DEFAULT_AI_SETTINGS.aiDiffingModel,
   });
 
   const doSave = useCallback(() => {
@@ -70,12 +86,17 @@ export function AISettingsCard({ settings, repositoryId }: AISettingsCardProps) 
         openrouterApiKey: openrouterApiKey || null,
         openrouterModel,
         agentSdkPermissionMode,
+        agentSdkModel: agentSdkModel || null,
         agentSdkWorkingDir: agentSdkWorkingDir || null,
         customInstructions: customInstructions || null,
+        aiDiffingEnabled,
+        aiDiffingProvider: aiDiffingProvider || null,
+        aiDiffingApiKey: aiDiffingApiKey || null,
+        aiDiffingModel: aiDiffingModel || null,
       });
       toast.success('AI settings saved');
     });
-  }, [repositoryId, provider, openrouterApiKey, openrouterModel, agentSdkPermissionMode, agentSdkWorkingDir, customInstructions]);
+  }, [repositoryId, provider, openrouterApiKey, openrouterModel, agentSdkPermissionMode, agentSdkModel, agentSdkWorkingDir, customInstructions, aiDiffingEnabled, aiDiffingProvider, aiDiffingApiKey, aiDiffingModel]);
 
   // Auto-save with debounce - only when values differ from original props
   useEffect(() => {
@@ -86,7 +107,12 @@ export function AISettingsCard({ settings, repositoryId }: AISettingsCardProps) 
       openrouterModel !== orig.openrouterModel ||
       customInstructions !== orig.customInstructions ||
       agentSdkPermissionMode !== orig.agentSdkPermissionMode ||
-      agentSdkWorkingDir !== orig.agentSdkWorkingDir;
+      agentSdkModel !== orig.agentSdkModel ||
+      agentSdkWorkingDir !== orig.agentSdkWorkingDir ||
+      aiDiffingEnabled !== orig.aiDiffingEnabled ||
+      aiDiffingProvider !== orig.aiDiffingProvider ||
+      aiDiffingApiKey !== orig.aiDiffingApiKey ||
+      aiDiffingModel !== orig.aiDiffingModel;
 
     if (!hasChanges) return;
 
@@ -103,7 +129,7 @@ export function AISettingsCard({ settings, repositoryId }: AISettingsCardProps) 
         clearTimeout(debounceRef.current);
       }
     };
-  }, [provider, openrouterApiKey, openrouterModel, agentSdkPermissionMode, agentSdkWorkingDir, customInstructions, doSave]);
+  }, [provider, openrouterApiKey, openrouterModel, agentSdkPermissionMode, agentSdkModel, agentSdkWorkingDir, customInstructions, aiDiffingEnabled, aiDiffingProvider, aiDiffingApiKey, aiDiffingModel, doSave]);
 
   const handleReset = () => {
     startTransition(async () => {
@@ -113,7 +139,12 @@ export function AISettingsCard({ settings, repositoryId }: AISettingsCardProps) 
       setOpenrouterModel(DEFAULT_AI_SETTINGS.openrouterModel);
       setCustomInstructions('');
       setAgentSdkPermissionMode('plan');
+      setAgentSdkModel('');
       setAgentSdkWorkingDir('');
+      setAiDiffingEnabled(false);
+      setAiDiffingProvider(DEFAULT_AI_SETTINGS.aiDiffingProvider);
+      setAiDiffingApiKey('');
+      setAiDiffingModel(DEFAULT_AI_SETTINGS.aiDiffingModel);
       setTestResult(null);
       toast.success('AI settings reset to defaults');
     });
@@ -252,6 +283,19 @@ export function AISettingsCard({ settings, repositoryId }: AISettingsCardProps) 
             </div>
 
             <div className="space-y-2">
+              <Label htmlFor="agentSdkModel">Model (Optional)</Label>
+              <Input
+                id="agentSdkModel"
+                value={agentSdkModel}
+                onChange={(e) => setAgentSdkModel(e.target.value)}
+                placeholder="claude-sonnet-4-5-20250929"
+              />
+              <p className="text-xs text-muted-foreground">
+                Claude model ID (e.g. claude-sonnet-4-5-20250929). Leave empty for CLI default.
+              </p>
+            </div>
+
+            <div className="space-y-2">
               <Label htmlFor="workingDir">Working Directory (Optional)</Label>
               <Input
                 id="workingDir"
@@ -279,6 +323,98 @@ export function AISettingsCard({ settings, repositoryId }: AISettingsCardProps) 
           <p className="text-xs text-muted-foreground">
             These instructions will be included in all AI prompts.
           </p>
+        </div>
+
+        {/* Visual Diff Analysis Section */}
+        <div className="border-t pt-6">
+          <div className="flex items-center gap-2 mb-4">
+            <Eye className="w-4 h-4 text-purple-600" />
+            <h3 className="font-medium">Visual Diff Analysis</h3>
+          </div>
+          <p className="text-xs text-muted-foreground mb-4">
+            Send screenshot diffs to a vision model for AI-powered classification and recommendations.
+          </p>
+
+          {/* Enable Toggle */}
+          <div className="flex items-center gap-3 mb-4">
+            <button
+              type="button"
+              role="switch"
+              aria-checked={aiDiffingEnabled}
+              onClick={() => setAiDiffingEnabled(!aiDiffingEnabled)}
+              className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+                aiDiffingEnabled ? 'bg-purple-600' : 'bg-gray-200'
+              }`}
+            >
+              <span
+                className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                  aiDiffingEnabled ? 'translate-x-6' : 'translate-x-1'
+                }`}
+              />
+            </button>
+            <Label>Enable AI Diff Analysis</Label>
+          </div>
+
+          {aiDiffingEnabled && (
+            <div className="space-y-4 pl-2 border-l-2 border-purple-200 ml-2">
+              {/* Provider */}
+              <div className="space-y-2">
+                <Label>Vision Provider</Label>
+                <Select value={aiDiffingProvider} onValueChange={(v) => setAiDiffingProvider(v as AIDiffingProvider)}>
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="same-as-test-gen">Same as Test Generation</SelectItem>
+                    <SelectItem value="openrouter">OpenRouter API</SelectItem>
+                    <SelectItem value="anthropic">Anthropic Direct</SelectItem>
+                    <SelectItem value="claude-agent-sdk">Claude Agent SDK</SelectItem>
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground">
+                  {aiDiffingProvider === 'same-as-test-gen'
+                    ? 'Will use your test generation provider settings. Claude CLI will be skipped (no vision support).'
+                    : aiDiffingProvider === 'claude-agent-sdk'
+                    ? 'Screenshots are read from disk by the agent. No API key needed. Requires `claude login`.'
+                    : aiDiffingProvider === 'openrouter'
+                    ? 'Uses OpenRouter to access vision models.'
+                    : 'Uses Anthropic Messages API directly with native image support.'}
+                </p>
+              </div>
+
+              {/* API Key — only for openrouter/anthropic */}
+              {(aiDiffingProvider === 'openrouter' || aiDiffingProvider === 'anthropic') && (
+                <div className="space-y-2">
+                  <Label htmlFor="aiDiffingApiKey">API Key</Label>
+                  <Input
+                    id="aiDiffingApiKey"
+                    type="password"
+                    value={aiDiffingApiKey}
+                    onChange={(e) => setAiDiffingApiKey(e.target.value)}
+                    placeholder={aiDiffingProvider === 'openrouter' ? 'sk-or-v1-...' : 'sk-ant-...'}
+                  />
+                </div>
+              )}
+
+              {/* Model — for all direct providers */}
+              {aiDiffingProvider !== 'same-as-test-gen' && (
+                <div className="space-y-2">
+                  <Label htmlFor="aiDiffingModel">Vision Model</Label>
+                  <Input
+                    id="aiDiffingModel"
+                    value={aiDiffingModel}
+                    onChange={(e) => setAiDiffingModel(e.target.value)}
+                    placeholder={aiDiffingProvider === 'claude-agent-sdk' ? 'claude-sonnet-4-5-20250929' : 'anthropic/claude-sonnet-4-5-20250929'}
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    {aiDiffingProvider === 'claude-agent-sdk'
+                      ? 'Model ID without vendor prefix (e.g. claude-sonnet-4-5-20250929)'
+                      : 'Must be a vision-capable model. Default: anthropic/claude-sonnet-4-5-20250929'}
+                  </p>
+                </div>
+              )}
+            </div>
+          )}
         </div>
 
         {/* Test Connection */}

@@ -3,7 +3,7 @@
 import { revalidatePath } from 'next/cache';
 import * as queries from '@/lib/db/queries';
 import { hashImage } from '@/lib/diff/hasher';
-import { getCurrentSession } from '@/lib/auth';
+import { getCurrentSession, requireRepoAccess, requireTeamAccess } from '@/lib/auth';
 import path from 'path';
 import fs from 'fs/promises';
 
@@ -34,6 +34,7 @@ export async function uploadPlannedScreenshot(
   fileBuffer: Buffer,
   fileName: string
 ) {
+  await requireRepoAccess(input.repositoryId);
   const session = await getCurrentSession();
   const userId = session?.user?.id;
 
@@ -123,6 +124,7 @@ export async function listPlannedScreenshotsForTest(testId: string) {
  * Delete a planned screenshot (soft delete)
  */
 export async function deletePlannedScreenshot(id: string) {
+  await requireTeamAccess();
   await queries.deletePlannedScreenshot(id);
   revalidatePath('/tests');
   revalidatePath('/routes');
@@ -136,6 +138,7 @@ export async function updatePlannedScreenshot(
   id: string,
   data: { name?: string; description?: string; sourceUrl?: string }
 ) {
+  await requireTeamAccess();
   await queries.updatePlannedScreenshot(id, data);
   revalidatePath('/tests');
   revalidatePath('/routes');
@@ -157,6 +160,7 @@ export async function assignPlannedToStep(
   testId: string,
   stepLabel: string
 ) {
+  await requireTeamAccess();
   // Verify the planned screenshot exists and belongs to this test
   const planned = await queries.getPlannedScreenshot(plannedId);
   if (!planned) {
@@ -177,6 +181,7 @@ export async function assignPlannedToStep(
  * Remove the step assignment from a planned screenshot
  */
 export async function unassignPlannedFromStep(plannedId: string) {
+  await requireTeamAccess();
   const planned = await queries.getPlannedScreenshot(plannedId);
   if (!planned) {
     return { success: false, error: 'Planned screenshot not found' };

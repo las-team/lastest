@@ -1,11 +1,14 @@
 import * as queries from '@/lib/db/queries';
+import { getCurrentSession } from '@/lib/auth';
 import { EnvPageClient } from './env-page-client';
 import { getSetupScripts, getAvailableSetupTests } from '@/server/actions/setup-scripts';
 import { getSetupConfigs } from '@/server/actions/setup-configs';
 import { getDefaultSetupSteps } from '@/server/actions/setup-steps';
 
 export default async function EnvPage() {
-  const selectedRepo = await queries.getSelectedRepository();
+  const session = await getCurrentSession();
+  const teamId = session?.team?.id;
+  const selectedRepo = teamId ? await queries.getSelectedRepository(teamId) : null;
 
   if (!selectedRepo) {
     return (

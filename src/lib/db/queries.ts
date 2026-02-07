@@ -421,6 +421,9 @@ export async function getVisualDiffsWithTestStatus(buildId: string) {
       plannedDiffImagePath: visualDiffs.plannedDiffImagePath,
       plannedPixelDifference: visualDiffs.plannedPixelDifference,
       plannedPercentageDifference: visualDiffs.plannedPercentageDifference,
+      aiAnalysis: visualDiffs.aiAnalysis,
+      aiRecommendation: visualDiffs.aiRecommendation,
+      aiAnalysisStatus: visualDiffs.aiAnalysisStatus,
       testResultStatus: testResults.status,
       testName: tests.name,
       functionalAreaName: functionalAreas.name,
@@ -459,6 +462,47 @@ export async function updateVisualDiff(id: string, data: Partial<NewVisualDiff>)
 
 export async function batchUpdateVisualDiffs(ids: string[], data: Partial<NewVisualDiff>) {
   await db.update(visualDiffs).set(data).where(inArray(visualDiffs.id, ids));
+}
+
+export async function getAIDiffSummaryForBuild(buildId: string) {
+  const diffs = await db
+    .select({
+      aiRecommendation: visualDiffs.aiRecommendation,
+      aiAnalysisStatus: visualDiffs.aiAnalysisStatus,
+      status: visualDiffs.status,
+      classification: visualDiffs.classification,
+    })
+    .from(visualDiffs)
+    .where(eq(visualDiffs.buildId, buildId))
+    .all();
+
+  // Only count non-unchanged diffs (AI analysis only runs on changed diffs)
+  const analyzable = diffs.filter(d => d.classification !== 'unchanged');
+
+  return {
+    approveCount: analyzable.filter(d => d.aiRecommendation === 'approve').length,
+    reviewCount: analyzable.filter(d => d.aiRecommendation === 'review').length,
+    flagCount: analyzable.filter(d => d.aiRecommendation === 'flag').length,
+    pendingAnalysis: analyzable.filter(d =>
+      d.aiAnalysisStatus === 'pending' || d.aiAnalysisStatus === 'running'
+    ).length,
+    totalAnalyzable: analyzable.length,
+    completedAnalysis: analyzable.filter(d => d.aiAnalysisStatus === 'completed').length,
+  };
+}
+
+export async function getPendingAIApprovableDiffs(buildId: string) {
+  return db
+    .select()
+    .from(visualDiffs)
+    .where(
+      and(
+        eq(visualDiffs.buildId, buildId),
+        eq(visualDiffs.status, 'pending'),
+        eq(visualDiffs.aiRecommendation, 'approve')
+      )
+    )
+    .all();
 }
 
 // Baselines
@@ -556,6 +600,7 @@ export async function updatePullRequest(id: string, data: Partial<NewPullRequest
 }
 
 // GitHub Accounts
+/** @deprecated Use getGithubAccountByTeam(teamId) instead for proper tenant isolation */
 export async function getGithubAccount() {
   return db.select().from(githubAccounts).get();
 }
@@ -575,6 +620,7 @@ export async function deleteGithubAccount(id: string) {
 }
 
 // GitLab Accounts
+/** @deprecated Use getGitlabAccountByTeam(teamId) instead for proper tenant isolation */
 export async function getGitlabAccount() {
   return db.select().from(gitlabAccounts).get();
 }
@@ -1114,8 +1160,13 @@ export async function getAISettings(repositoryId?: string | null) {
     openrouterApiKey: null,
     openrouterModel: DEFAULT_AI_SETTINGS.openrouterModel,
     agentSdkPermissionMode: DEFAULT_AI_SETTINGS.agentSdkPermissionMode,
+    agentSdkModel: DEFAULT_AI_SETTINGS.agentSdkModel,
     agentSdkWorkingDir: null,
     customInstructions: null,
+    aiDiffingEnabled: DEFAULT_AI_SETTINGS.aiDiffingEnabled,
+    aiDiffingProvider: null,
+    aiDiffingApiKey: null,
+    aiDiffingModel: DEFAULT_AI_SETTINGS.aiDiffingModel,
     createdAt: null,
     updatedAt: null,
   };

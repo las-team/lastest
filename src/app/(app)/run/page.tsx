@@ -1,22 +1,23 @@
 import { RunDashboardClient } from './run-dashboard-client';
 import {
-  getTests,
-  getTestRuns,
   getSelectedRepository,
   getTestsByRepo,
   getTestRunsByRepo,
 } from '@/lib/db/queries';
-import { getBuilds, getBuildsByRepo, getLatestBuildChanges } from '@/server/actions/builds';
+import { getBuildsByRepo, getLatestBuildChanges } from '@/server/actions/builds';
 import { getEnvironmentConfig } from '@/server/actions/environment';
+import { getCurrentSession } from '@/lib/auth';
 
 export default async function RunPage() {
-  const selectedRepo = await getSelectedRepository();
+  const session = await getCurrentSession();
+  const teamId = session?.team?.id;
+  const selectedRepo = teamId ? await getSelectedRepository(teamId) : null;
   const activeBranch = selectedRepo?.selectedBranch || selectedRepo?.defaultBranch || 'main';
 
   const [tests, runs, builds, envConfig, buildChanges] = await Promise.all([
-    selectedRepo ? getTestsByRepo(selectedRepo.id) : getTests(),
-    selectedRepo ? getTestRunsByRepo(selectedRepo.id) : getTestRuns(),
-    selectedRepo ? getBuildsByRepo(selectedRepo.id, 10) : getBuilds(10),
+    selectedRepo ? getTestsByRepo(selectedRepo.id) : Promise.resolve([]),
+    selectedRepo ? getTestRunsByRepo(selectedRepo.id) : Promise.resolve([]),
+    selectedRepo ? getBuildsByRepo(selectedRepo.id, 10) : Promise.resolve([]),
     getEnvironmentConfig(selectedRepo?.id),
     selectedRepo ? getLatestBuildChanges(selectedRepo.id) : null,
   ]);

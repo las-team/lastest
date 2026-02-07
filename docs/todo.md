@@ -20,9 +20,42 @@ Github actions integration
 Publish lastest runner to npx npm
 Docker
 Gitlab
+CROSS_OS_CHROMIUM_ARGS & FONTS
 ## features
+Select build as baseline
+
  NEW: Page Shift Detection -- excludes vertical content shifts
   from diffs
+
+Playwright trace replay:
+Component specific testing
+Accessability re-check
+
+Tier 3 — Perceptual diffing engines
+  (replace/augment pixelmatch)
+  - Swap pixelmatch for SSIM or
+  Butteraugli in
+  src/lib/diff/generator.ts
+  - These algorithms ignore
+  sub-pixel anti-aliasing
+  differences that humans can't
+  see
+  - Argos calls this
+  "stabilization engine" —
+  Lastest2 could leapfrog with
+  structural similarity
+
+  Tier 4 — Text-region-aware
+  diffing
+  - Detect text regions (OCR
+  infrastructure already exists in
+   src/lib/playwright/ocr.ts)
+  - Apply higher tolerance to text
+   areas (where OS rendering
+  differs most) while keeping
+  strict pixel comparison for
+  images/layout
+
 UI & UX 
     Use the frontend design skill and subagent for this
     Revise frontend and make sure you havent steered far and try to use standard shadcn css where possible
@@ -46,7 +79,7 @@ Import from prior tools?
 
 ### UX
 ## bugs
-
+Timestamp fixing
 ## marketing
 Support https://github.com/excalidraw/excalidraw/tree/master/packages/excalidraw/tests
 

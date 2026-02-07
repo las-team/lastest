@@ -15,14 +15,30 @@ export class OpenRouterProvider implements AIProvider {
   }
 
   async generate(options: GenerateOptions): Promise<string> {
-    const { prompt, systemPrompt, maxTokens = 4096, temperature = 0.7 } = options;
+    const { prompt, systemPrompt, maxTokens = 4096, temperature = 0.7, images } = options;
 
-    const messages: { role: string; content: string }[] = [];
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const messages: { role: string; content: any }[] = [];
 
     if (systemPrompt) {
       messages.push({ role: 'system', content: systemPrompt });
     }
-    messages.push({ role: 'user', content: prompt });
+
+    if (images && images.length > 0) {
+      // Multimodal message with images
+      messages.push({
+        role: 'user',
+        content: [
+          { type: 'text', text: prompt },
+          ...images.map(img => ({
+            type: 'image_url',
+            image_url: { url: `data:${img.mediaType};base64,${img.base64}` },
+          })),
+        ],
+      });
+    } else {
+      messages.push({ role: 'user', content: prompt });
+    }
 
     const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
       method: 'POST',

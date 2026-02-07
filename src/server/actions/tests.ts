@@ -4,9 +4,12 @@ import { revalidatePath } from 'next/cache';
 import fs from 'fs';
 import path from 'path';
 import * as queries from '@/lib/db/queries';
+import { requireRepoAccess, requireTeamAccess } from '@/lib/auth';
 import type { NewTest, NewFunctionalArea } from '@/lib/db/schema';
 
 export async function createFunctionalArea(data: Omit<NewFunctionalArea, 'id'>) {
+  if (data.repositoryId) await requireRepoAccess(data.repositoryId);
+  else await requireTeamAccess();
   const result = await queries.createFunctionalArea(data);
   revalidatePath('/tests');
   revalidatePath('/');
@@ -14,18 +17,22 @@ export async function createFunctionalArea(data: Omit<NewFunctionalArea, 'id'>) 
 }
 
 export async function updateFunctionalArea(id: string, data: Partial<NewFunctionalArea>) {
+  await requireTeamAccess();
   await queries.updateFunctionalArea(id, data);
   revalidatePath('/tests');
   revalidatePath('/');
 }
 
 export async function deleteFunctionalArea(id: string) {
+  await requireTeamAccess();
   await queries.deleteFunctionalArea(id);
   revalidatePath('/tests');
   revalidatePath('/');
 }
 
 export async function createTest(data: Omit<NewTest, 'id' | 'createdAt' | 'updatedAt'>) {
+  if (data.repositoryId) await requireRepoAccess(data.repositoryId);
+  else await requireTeamAccess();
   const result = await queries.createTest(data);
   revalidatePath('/tests');
   revalidatePath('/');
@@ -33,18 +40,21 @@ export async function createTest(data: Omit<NewTest, 'id' | 'createdAt' | 'updat
 }
 
 export async function updateTest(id: string, data: Partial<NewTest>) {
+  await requireTeamAccess();
   await queries.updateTestWithVersion(id, data, 'manual_edit');
   revalidatePath('/tests');
   revalidatePath(`/tests/${id}`);
 }
 
 export async function deleteTest(id: string) {
+  await requireTeamAccess();
   await queries.deleteTest(id);
   revalidatePath('/tests');
   revalidatePath('/');
 }
 
 export async function deleteTests(testIds: string[]) {
+  await requireTeamAccess();
   for (const id of testIds) {
     await queries.deleteTest(id);
   }
@@ -153,6 +163,7 @@ export async function getTestVersionHistory(testId: string) {
 }
 
 export async function restoreTestVersion(testId: string, version: number) {
+  await requireTeamAccess();
   const versionData = await queries.getTestVersion(testId, version);
   if (!versionData) {
     throw new Error(`Version ${version} not found`);

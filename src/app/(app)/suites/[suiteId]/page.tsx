@@ -6,6 +6,7 @@ import {
   getFunctionalAreasByRepo,
   getSelectedRepository,
 } from '@/lib/db/queries';
+import { getCurrentSession } from '@/lib/auth';
 import type { FunctionalArea } from '@/lib/db/schema';
 
 interface Props {
@@ -30,7 +31,9 @@ export default async function SuiteDetailPage({ params }: Props) {
     notFound();
   }
 
-  const selectedRepo = await getSelectedRepository();
+  const session = await getCurrentSession();
+  const teamId = session?.team?.id;
+  const selectedRepo = teamId ? await getSelectedRepository(teamId) : null;
   const repositoryId = suite.repositoryId || selectedRepo?.id;
 
   const [testsRaw, areas] = await Promise.all([

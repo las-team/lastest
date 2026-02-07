@@ -1,6 +1,7 @@
 'use server';
 
 import * as queries from '@/lib/db/queries';
+import { requireTeamAccess, requireRepoAccess } from '@/lib/auth';
 import {
   generateWithAI,
   SYSTEM_PROMPT,
@@ -21,6 +22,7 @@ async function getAIConfig(repositoryId?: string | null): Promise<AIProviderConf
     openrouterModel: settings.openrouterModel || 'anthropic/claude-sonnet-4',
     customInstructions: settings.customInstructions,
     agentSdkPermissionMode: settings.agentSdkPermissionMode as 'plan' | 'default' | 'acceptEdits' | undefined,
+    agentSdkModel: settings.agentSdkModel || undefined,
     agentSdkWorkingDir: settings.agentSdkWorkingDir || undefined,
   };
 }
@@ -47,6 +49,7 @@ export async function aiCreateTest(
   context: TestGenerationContext,
   routeId?: string
 ): Promise<{ success: boolean; code?: string; error?: string }> {
+  await requireRepoAccess(repositoryId);
   try {
     // Enrich context with route information if routeId is provided
     const enrichedContext = { ...context };
@@ -95,6 +98,7 @@ export async function aiFixTest(
   testId: string,
   errorMessage: string
 ): Promise<{ success: boolean; code?: string; error?: string }> {
+  await requireRepoAccess(repositoryId);
   try {
     const test = await queries.getTest(testId);
     if (!test) {
@@ -124,6 +128,7 @@ export async function aiEnhanceTest(
   testId: string,
   userPrompt?: string
 ): Promise<{ success: boolean; code?: string; error?: string }> {
+  await requireRepoAccess(repositoryId);
   try {
     const test = await queries.getTest(testId);
     if (!test) {
@@ -155,6 +160,7 @@ export async function saveGeneratedTest(data: {
   code: string;
   targetUrl?: string;
 }): Promise<{ success: boolean; testId?: string; error?: string }> {
+  await requireRepoAccess(data.repositoryId);
   try {
     const test = await queries.createTest({
       repositoryId: data.repositoryId,
@@ -176,6 +182,7 @@ export async function saveGeneratedTest(data: {
 export async function aiFixAllFailedTests(
   repositoryId: string
 ): Promise<{ success: boolean; fixed: number; failed: number; errors: string[] }> {
+  await requireRepoAccess(repositoryId);
   const allTests = await queries.getTestsByRepo(repositoryId);
   const errors: string[] = [];
   let fixed = 0;
@@ -208,6 +215,7 @@ export async function updateTestCode(
   code: string,
   changeReason: 'ai_fix' | 'ai_enhance' = 'ai_fix'
 ): Promise<{ success: boolean; error?: string }> {
+  await requireTeamAccess();
   try {
     await queries.updateTestWithVersion(testId, { code }, changeReason);
     revalidatePath('/tests');
@@ -223,6 +231,7 @@ export async function aiFixTests(
   testIds: string[],
   repositoryId: string
 ): Promise<{ success: boolean; fixed: number; failed: number; errors: string[] }> {
+  await requireRepoAccess(repositoryId);
   const errors: string[] = [];
   let fixed = 0;
   let failed = 0;

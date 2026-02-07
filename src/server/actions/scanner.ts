@@ -2,24 +2,18 @@
 
 import { revalidatePath } from 'next/cache';
 import * as queries from '@/lib/db/queries';
+import { requireRepoAccess } from '@/lib/auth';
 import { RemoteRouteScanner } from '@/lib/scanner/remote-scanner';
 import { generateSmokeTestCode } from '@/lib/scanner/test-generator';
 import type { RouteInfo } from '@/lib/scanner/types';
 
 export async function startRemoteRouteScan(repositoryId: string, branch: string) {
-  const account = await queries.getGithubAccount();
+  const { repo } = await requireRepoAccess(repositoryId);
+  const account = repo.teamId ? await queries.getGithubAccountByTeam(repo.teamId) : null;
   if (!account) {
     return {
       success: false,
       error: 'GitHub account not connected. Please connect your GitHub account first.',
-    };
-  }
-
-  const repo = await queries.getRepository(repositoryId);
-  if (!repo) {
-    return {
-      success: false,
-      error: 'Repository not found.',
     };
   }
 
@@ -131,6 +125,7 @@ export async function getRouteCoverage(repositoryId: string) {
 }
 
 export async function addRoutesAsFunctionalAreas(repositoryId: string, routeIds: string[]) {
+  await requireRepoAccess(repositoryId);
   const routesToAdd = await queries.getRoutesByIds(routeIds);
   let areasCreated = 0;
   let areasMerged = 0;
@@ -164,6 +159,7 @@ export async function addRoutesAsFunctionalAreas(repositoryId: string, routeIds:
 }
 
 export async function generateBasicTests(repositoryId: string, routeIds: string[], baseUrl: string) {
+  await requireRepoAccess(repositoryId);
   const routesToTest = await queries.getRoutesByIds(routeIds);
   let testsCreated = 0;
   let testsUpdated = 0;

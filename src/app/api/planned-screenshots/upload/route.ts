@@ -1,11 +1,19 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { uploadPlannedScreenshot } from '@/server/actions/planned-screenshots';
+import { getCurrentSession } from '@/lib/auth';
+import * as queries from '@/lib/db/queries';
 
 const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
 const ALLOWED_TYPES = ['image/png', 'image/jpeg', 'image/webp'];
 
 export async function POST(request: NextRequest) {
   try {
+    // Auth check
+    const session = await getCurrentSession();
+    if (!session?.team) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
     const formData = await request.formData();
 
     const file = formData.get('file') as File | null;
@@ -24,6 +32,12 @@ export async function POST(request: NextRequest) {
 
     if (!repositoryId) {
       return NextResponse.json({ error: 'repositoryId is required' }, { status: 400 });
+    }
+
+    // Verify repo belongs to team
+    const repo = await queries.getRepository(repositoryId);
+    if (!repo || repo.teamId !== session.team.id) {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }
 
     if (!testId && !routeId) {

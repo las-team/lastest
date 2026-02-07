@@ -8,6 +8,7 @@ export {
   requireAuth,
   requireAdmin,
   requireTeamAccess,
+  requireRepoAccess,
   requireTeamRole,
   requireTeamAdmin,
   clearSessionCookie,

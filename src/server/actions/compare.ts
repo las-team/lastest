@@ -1,6 +1,7 @@
 'use server';
 
 import * as queries from '@/lib/db/queries';
+import { requireTeamAccess, requireRepoAccess } from '@/lib/auth';
 import { getRunQueue } from '@/lib/run-queue';
 import { revalidatePath } from 'next/cache';
 
@@ -50,6 +51,8 @@ export async function getLatestRunForBranch(
 }
 
 export async function queueRunForBranch(branch: string, repositoryId?: string, testIds?: string[]) {
+  if (repositoryId) await requireRepoAccess(repositoryId);
+  else await requireTeamAccess();
   const queue = getRunQueue();
   const queuedRun = queue.addToQueue(branch, repositoryId, testIds);
 

@@ -2,6 +2,7 @@
 
 import { revalidatePath } from 'next/cache';
 import * as queries from '@/lib/db/queries';
+import { requireRepoAccess, requireTeamAccess } from '@/lib/auth';
 import type { NewFunctionalArea } from '@/lib/db/schema';
 
 export async function createArea(data: {
@@ -10,6 +11,8 @@ export async function createArea(data: {
   repositoryId?: string;
   parentId?: string;
 }) {
+  if (data.repositoryId) await requireRepoAccess(data.repositoryId);
+  else await requireTeamAccess();
   const result = await queries.createFunctionalArea({
     name: data.name,
     description: data.description,
@@ -22,12 +25,14 @@ export async function createArea(data: {
 }
 
 export async function updateArea(id: string, data: Partial<Pick<NewFunctionalArea, 'name' | 'description' | 'parentId'>>) {
+  await requireTeamAccess();
   await queries.updateFunctionalArea(id, data);
   revalidatePath('/areas');
   revalidatePath('/tests');
 }
 
 export async function deleteArea(id: string) {
+  await requireTeamAccess();
   // Get all tests in this area and move them to uncategorized
   const tests = await queries.getTestsByFunctionalArea(id);
   for (const test of tests) {
@@ -47,6 +52,7 @@ export async function deleteArea(id: string) {
 }
 
 export async function moveArea(id: string, newParentId: string | null) {
+  await requireTeamAccess();
   // Prevent circular references
   if (newParentId) {
     const allAreas = await queries.getFunctionalAreas();
@@ -68,6 +74,7 @@ export async function moveArea(id: string, newParentId: string | null) {
 }
 
 export async function moveTestToArea(testId: string, areaId: string | null) {
+  await requireTeamAccess();
   await queries.moveTestToArea(testId, areaId);
   revalidatePath('/areas');
   revalidatePath('/tests');
@@ -75,6 +82,7 @@ export async function moveTestToArea(testId: string, areaId: string | null) {
 }
 
 export async function moveSuiteToArea(suiteId: string, areaId: string | null) {
+  await requireTeamAccess();
   await queries.moveSuiteToArea(suiteId, areaId);
   revalidatePath('/areas');
   revalidatePath('/suites');
@@ -82,6 +90,7 @@ export async function moveSuiteToArea(suiteId: string, areaId: string | null) {
 }
 
 export async function reorderAreas(repositoryId: string, orderedIds: string[]) {
+  await requireRepoAccess(repositoryId);
   await queries.reorderFunctionalAreas(repositoryId, orderedIds);
   revalidatePath('/areas');
 }

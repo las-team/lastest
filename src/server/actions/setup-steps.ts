@@ -2,6 +2,7 @@
 
 import { revalidatePath } from 'next/cache';
 import * as queries from '@/lib/db/queries';
+import { requireTeamAccess, requireRepoAccess } from '@/lib/auth';
 import type { TestSetupOverrides } from '@/lib/db/schema';
 
 export interface SetupStep {
@@ -43,6 +44,7 @@ export async function updateDefaultSetupSteps(
   repositoryId: string,
   steps: SetupStepInput[]
 ) {
+  await requireRepoAccess(repositoryId);
   await queries.replaceDefaultSetupSteps(repositoryId, steps);
   revalidatePath('/env');
   return { success: true };
@@ -56,6 +58,7 @@ export async function addDefaultSetupStep(
   stepType: 'test' | 'script',
   itemId: string
 ) {
+  await requireRepoAccess(repositoryId);
   // Get current max order index
   const existing = await queries.getDefaultSetupSteps(repositoryId);
   const maxOrder = existing.length > 0
@@ -78,6 +81,7 @@ export async function addDefaultSetupStep(
  * Remove a step from the default setup
  */
 export async function removeDefaultSetupStep(stepId: string) {
+  await requireTeamAccess();
   await queries.deleteDefaultSetupStep(stepId);
   revalidatePath('/env');
   return { success: true };
@@ -90,6 +94,7 @@ export async function reorderDefaultSetupSteps(
   repositoryId: string,
   stepIds: string[]
 ) {
+  await requireRepoAccess(repositoryId);
   // Update each step's order index
   for (let i = 0; i < stepIds.length; i++) {
     await queries.updateDefaultSetupStepOrder(stepIds[i], i);
@@ -112,12 +117,14 @@ export async function getTestSetupOverrides(testId: string) {
 }
 
 export async function saveTestSetupOverrides(testId: string, overrides: TestSetupOverrides | null) {
+  await requireTeamAccess();
   await queries.updateTestSetupOverrides(testId, overrides);
   revalidatePath(`/tests/${testId}`);
   return { success: true };
 }
 
 export async function skipDefaultStepForTest(testId: string, defaultStepId: string) {
+  await requireTeamAccess();
   const test = await queries.getTest(testId);
   if (!test) return { success: false, error: 'Test not found' };
 
@@ -131,6 +138,7 @@ export async function skipDefaultStepForTest(testId: string, defaultStepId: stri
 }
 
 export async function unskipDefaultStepForTest(testId: string, defaultStepId: string) {
+  await requireTeamAccess();
   const test = await queries.getTest(testId);
   if (!test) return { success: false, error: 'Test not found' };
 
@@ -146,6 +154,7 @@ export async function unskipDefaultStepForTest(testId: string, defaultStepId: st
 }
 
 export async function addExtraSetupStep(testId: string, stepType: 'test' | 'script', itemId: string) {
+  await requireTeamAccess();
   const test = await queries.getTest(testId);
   if (!test) return { success: false, error: 'Test not found' };
 
@@ -161,6 +170,7 @@ export async function addExtraSetupStep(testId: string, stepType: 'test' | 'scri
 }
 
 export async function removeExtraSetupStep(testId: string, index: number) {
+  await requireTeamAccess();
   const test = await queries.getTest(testId);
   if (!test) return { success: false, error: 'Test not found' };
 
@@ -178,6 +188,7 @@ export async function removeExtraSetupStep(testId: string, index: number) {
 }
 
 export async function reorderExtraSetupSteps(testId: string, newOrder: number[]) {
+  await requireTeamAccess();
   const test = await queries.getTest(testId);
   if (!test) return { success: false, error: 'Test not found' };
 

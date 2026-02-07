@@ -98,7 +98,6 @@ export async function applyDynamicMasking(
               z-index: 999999;
               pointer-events: none;
             `;
-            parent.style.position = 'relative';
             parent.appendChild(overlay);
           }
         } else {

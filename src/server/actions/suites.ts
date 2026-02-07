@@ -5,24 +5,28 @@ import * as queries from '@/lib/db/queries';
 import { getRunner } from '@/lib/playwright/runner';
 import { getServerManager } from '@/lib/playwright/server-manager';
 import { executeTests } from '@/lib/execution/executor';
-import { getCurrentSession } from '@/lib/auth';
+import { getCurrentSession, requireTeamAccess, requireRepoAccess } from '@/lib/auth';
 import { getBranchInfo } from '@/lib/github/content';
 import { createJob, updateJobProgress, completeJob, failJob } from './jobs';
 import type { NewSuite, Test } from '@/lib/db/schema';
 
 export async function createSuite(data: { name: string; description?: string; repositoryId?: string }) {
+  if (data.repositoryId) await requireRepoAccess(data.repositoryId);
+  else await requireTeamAccess();
   const result = await queries.createSuite(data);
   revalidatePath('/suites');
   return result;
 }
 
 export async function updateSuite(id: string, data: Partial<Pick<NewSuite, 'name' | 'description'>>) {
+  await requireTeamAccess();
   await queries.updateSuite(id, data);
   revalidatePath('/suites');
   revalidatePath(`/suites/${id}`);
 }
 
 export async function deleteSuite(id: string) {
+  await requireTeamAccess();
   await queries.deleteSuite(id);
   revalidatePath('/suites');
 }
@@ -40,17 +44,20 @@ export async function getSuiteWithTests(id: string) {
 }
 
 export async function addTestsToSuite(suiteId: string, testIds: string[]) {
+  await requireTeamAccess();
   const result = await queries.addTestsToSuite(suiteId, testIds);
   revalidatePath(`/suites/${suiteId}`);
   return result;
 }
 
 export async function removeTestFromSuite(suiteId: string, testId: string) {
+  await requireTeamAccess();
   await queries.removeTestFromSuite(suiteId, testId);
   revalidatePath(`/suites/${suiteId}`);
 }
 
 export async function reorderSuiteTests(suiteId: string, orderedTestIds: string[]) {
+  await requireTeamAccess();
   await queries.reorderSuiteTests(suiteId, orderedTestIds);
   revalidatePath(`/suites/${suiteId}`);
 }
@@ -58,9 +65,11 @@ export async function reorderSuiteTests(suiteId: string, orderedTestIds: string[
 async function getGitInfo(repositoryId: string | null) {
   if (!repositoryId) return { branch: 'unknown', commit: 'unknown' };
 
-  const account = await queries.getGithubAccount();
   const repo = await queries.getRepository(repositoryId);
-  if (!account || !repo) return { branch: 'unknown', commit: 'unknown' };
+  if (!repo) return { branch: 'unknown', commit: 'unknown' };
+
+  const account = repo.teamId ? await queries.getGithubAccountByTeam(repo.teamId) : null;
+  if (!account) return { branch: repo.selectedBranch || repo.defaultBranch || 'main', commit: 'unknown' };
 
   const branch = repo.selectedBranch || repo.defaultBranch || 'main';
   const branchInfo = await getBranchInfo(account.accessToken, repo.owner, repo.name, branch);
@@ -70,6 +79,7 @@ async function getGitInfo(repositoryId: string | null) {
 }
 
 export async function runSuite(suiteId: string, runnerId?: string) {
+  await requireTeamAccess();
   const suiteWithTests = await queries.getSuiteWithTests(suiteId);
   if (!suiteWithTests) {
     throw new Error('Suite not found');

@@ -22,6 +22,7 @@ export function getAIProvider(config: AIProviderConfig): AIProvider {
   if (config.provider === 'claude-agent-sdk') {
     return new ClaudeAgentSDKProvider({
       permissionMode: config.agentSdkPermissionMode,
+      model: config.agentSdkModel || undefined,
       workingDirectory: config.agentSdkWorkingDir,
     });
   }

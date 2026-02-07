@@ -1,6 +1,7 @@
 import Link from 'next/link';
-import { getBuilds, getBuildsByRepo } from '@/server/actions/builds';
+import { getBuildsByRepo } from '@/server/actions/builds';
 import { getSelectedRepository } from '@/lib/db/queries';
+import { getCurrentSession } from '@/lib/auth';
 import { CheckCircle, AlertTriangle, XCircle, Clock, GitBranch } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
@@ -18,11 +19,13 @@ const statusColors: Record<string, string> = {
 };
 
 export default async function BuildsPage() {
-  const selectedRepo = await getSelectedRepository();
+  const session = await getCurrentSession();
+  const teamId = session?.team?.id;
+  const selectedRepo = teamId ? await getSelectedRepository(teamId) : null;
   const activeBranch = selectedRepo?.selectedBranch || selectedRepo?.defaultBranch || 'main';
   const builds = selectedRepo
     ? await getBuildsByRepo(selectedRepo.id, 20)
-    : await getBuilds(20);
+    : [];
 
   const formatTime = (date: Date | null) => {
     if (!date) return '-';

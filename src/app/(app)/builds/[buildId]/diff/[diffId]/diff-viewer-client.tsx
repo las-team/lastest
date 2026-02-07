@@ -4,8 +4,8 @@ import { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { SliderComparison } from '@/components/diff/slider-comparison';
 import { approveDiff, rejectDiff, undoApproval } from '@/server/actions/diffs';
-import type { VisualDiff, Test, DiffMetadata } from '@/lib/db/schema';
-import { CheckCircle, XCircle, SkipForward, Eye, Image as ImageIcon } from 'lucide-react';
+import type { VisualDiff, Test, DiffMetadata, AIDiffAnalysis } from '@/lib/db/schema';
+import { CheckCircle, XCircle, SkipForward, Eye, Image as ImageIcon, Sparkles, Loader2 } from 'lucide-react';
 
 interface DiffViewerClientProps {
   diff: VisualDiff & { test: Test | null };
@@ -121,6 +121,8 @@ export function DiffViewerClient({ diff, buildId, nextDiffId }: DiffViewerClient
   }, [undoTimeout]);
 
   const metadata = diff.metadata as DiffMetadata | null;
+  const aiAnalysis = diff.aiAnalysis as AIDiffAnalysis | null;
+  const aiStatus = diff.aiAnalysisStatus;
 
   return (
     <div className="space-y-4">
@@ -157,6 +159,56 @@ export function DiffViewerClient({ diff, buildId, nextDiffId }: DiffViewerClient
           </div>
         )}
       </div>
+
+      {/* AI Analysis Card */}
+      {(aiAnalysis || aiStatus === 'running' || aiStatus === 'pending') && (
+        <div className="border border-purple-200 bg-purple-50/50 rounded-lg p-4">
+          <div className="flex items-start gap-3">
+            <Sparkles className="w-5 h-5 text-purple-600 mt-0.5 flex-shrink-0" />
+            <div className="flex-1 min-w-0">
+              {aiStatus === 'running' || aiStatus === 'pending' ? (
+                <div className="flex items-center gap-2 text-sm text-purple-600">
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  AI analysis in progress...
+                </div>
+              ) : aiAnalysis ? (
+                <>
+                  <div className="flex items-center gap-2 mb-1">
+                    <span className={`px-2 py-0.5 rounded text-xs font-medium ${
+                      aiAnalysis.classification === 'insignificant' ? 'bg-green-100 text-green-700'
+                        : aiAnalysis.classification === 'noise' ? 'bg-blue-100 text-blue-700'
+                        : 'bg-yellow-100 text-yellow-700'
+                    }`}>
+                      {aiAnalysis.classification}
+                    </span>
+                    <span className={`px-2 py-0.5 rounded text-xs font-medium ${
+                      aiAnalysis.recommendation === 'approve' ? 'bg-green-100 text-green-700'
+                        : aiAnalysis.recommendation === 'flag' ? 'bg-red-100 text-red-700'
+                        : 'bg-yellow-100 text-yellow-700'
+                    }`}>
+                      {aiAnalysis.recommendation}
+                    </span>
+                    <span className="text-xs text-gray-400">
+                      {Math.round(aiAnalysis.confidence * 100)}% confidence
+                    </span>
+                  </div>
+                  <p className="text-sm text-gray-700">{aiAnalysis.summary}</p>
+                  {aiAnalysis.recommendation === 'approve' && diff.status === 'pending' && (
+                    <button
+                      onClick={handleApprove}
+                      disabled={isProcessing}
+                      className="mt-2 flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-white bg-purple-600 rounded-md hover:bg-purple-700 disabled:opacity-50"
+                    >
+                      <CheckCircle className="w-3.5 h-3.5" />
+                      Accept AI Recommendation
+                    </button>
+                  )}
+                </>
+              ) : null}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Diff Comparison */}
       {diff.currentImagePath && (diff.baselineImagePath || diff.plannedImagePath) ? (

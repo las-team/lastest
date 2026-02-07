@@ -11,7 +11,7 @@ import { getServerManager } from '@/lib/playwright/server-manager';
 import { getSetupOrchestrator } from '@/lib/setup/setup-orchestrator';
 import type { SetupContext } from '@/lib/setup/types';
 import { executeTests } from '@/lib/execution/executor';
-import { getCurrentSession } from '@/lib/auth';
+import { getCurrentSession, requireTeamAccess, requireRepoAccess } from '@/lib/auth';
 import { generateDiff, type Rectangle } from '@/lib/diff/generator';
 import { hashImage } from '@/lib/diff/hasher';
 import { sendSlackNotification } from '@/lib/integrations/slack';
@@ -22,6 +22,7 @@ import { postMRComment } from '@/lib/integrations/gitlab-mr';
 import type { Test, TriggerType, BuildStatus, VisualDiffWithTestStatus, DiffClassification, DiffStatus } from '@/lib/db/schema';
 import path from 'path';
 import { createJob, createPendingJob, startJob, updateJobProgress, completeJob, failJob } from './jobs';
+import { triggerAIDiffAnalysis } from './ai-diffs';
 
 interface GitInfo {
   branch: string;
@@ -41,8 +42,8 @@ async function getGitInfoFromProvider(repositoryId: string | null): Promise<GitI
   const branch = repo.selectedBranch || repo.defaultBranch || 'main';
 
   if (repo.provider === 'gitlab') {
-    // Fetch from GitLab
-    const account = await queries.getGitlabAccount();
+    // Fetch from GitLab (team-scoped)
+    const account = repo.teamId ? await queries.getGitlabAccountByTeam(repo.teamId) : null;
     if (!account || !repo.gitlabProjectId) {
       return { branch, commit: 'unknown' };
     }
@@ -57,8 +58,8 @@ async function getGitInfoFromProvider(repositoryId: string | null): Promise<GitI
       commit: branchInfo.commit.id.slice(0, 7),
     };
   } else {
-    // Fetch from GitHub
-    const account = await queries.getGithubAccount();
+    // Fetch from GitHub (team-scoped)
+    const account = repo.teamId ? await queries.getGithubAccountByTeam(repo.teamId) : null;
     if (!account) {
       return { branch, commit: 'unknown' };
     }
@@ -117,6 +118,8 @@ export async function createAndRunBuild(
   repositoryId?: string | null,
   runnerId?: string
 ) {
+  if (repositoryId) await requireRepoAccess(repositoryId);
+  else await requireTeamAccess();
   const runner = getRunner(repositoryId);
 
   // If tests are running, queue this build
@@ -147,7 +150,7 @@ export async function createAndRunBuild(
   } else if (repositoryId) {
     tests = await queries.getTestsByRepo(repositoryId);
   } else {
-    tests = await queries.getTests();
+    tests = [];
   }
 
   if (tests.length === 0) {
@@ -155,7 +158,7 @@ export async function createAndRunBuild(
   }
 
   // Get repo for git info via GitHub API
-  const repo = repositoryId ? await queries.getRepository(repositoryId) : await queries.getSelectedRepository();
+  const repo = repositoryId ? await queries.getRepository(repositoryId) : null;
   const gitInfo = await getGitInfoFromGitHub(repositoryId ?? repo?.id ?? null);
 
   // Create test run
@@ -266,6 +269,11 @@ async function runBuildAsync(
       );
       if (diffResult.classification === 'changed') changesDetected++;
       if (diffResult.classification === 'flaky') flakyCount++;
+
+      // Fire-and-forget AI diff analysis for non-unchanged diffs
+      if (diffResult.classification !== 'unchanged') {
+        triggerAIDiffAnalysis(diffResult.diffId, repositoryId).catch(console.error);
+      }
     }
 
     // Update build progress incrementally
@@ -914,8 +922,8 @@ async function sendBuildNotifications(data: {
   // Post GitHub PR comment
   if (notificationSettings.githubPrCommentsEnabled) {
     try {
-      const account = await queries.getGithubAccount();
       const repo = data.repositoryId ? await queries.getRepository(data.repositoryId) : null;
+      const account = repo?.teamId ? await queries.getGithubAccountByTeam(repo.teamId) : null;
 
       if (account && repo && repo.provider === 'github') {
         // Find open PRs for this branch
@@ -953,8 +961,8 @@ async function sendBuildNotifications(data: {
   // Post GitLab MR comment
   if (notificationSettings.gitlabMrCommentsEnabled) {
     try {
-      const account = await queries.getGitlabAccount();
       const repo = data.repositoryId ? await queries.getRepository(data.repositoryId) : null;
+      const account = repo?.teamId ? await queries.getGitlabAccountByTeam(repo.teamId) : null;
 
       if (account && repo && repo.provider === 'gitlab' && repo.gitlabProjectId) {
         // Find open MRs for this branch

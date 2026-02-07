@@ -64,8 +64,8 @@ RUN apt-get update && apt-get install -y curl && \
     rm -rf /var/lib/apt/lists/*
 
 # Create non-root user
-RUN groupadd --gid 1001 nodejs && \
-    useradd --uid 1001 --gid nodejs --shell /bin/bash --create-home nextjs
+RUN groupadd --gid 1002 nodejs && \
+    useradd --uid 1002 --gid nodejs --shell /bin/bash --create-home nextjs
 
 # Copy standalone build (includes node_modules)
 COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./

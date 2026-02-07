@@ -1,6 +1,6 @@
 import { cookies } from 'next/headers';
 import * as queries from '@/lib/db/queries';
-import type { User, Team, UserRole } from '@/lib/db/schema';
+import type { User, Team, UserRole, Repository } from '@/lib/db/schema';
 import { v4 as uuid } from 'uuid';
 
 const SESSION_COOKIE_NAME = 'session_token';
@@ -120,6 +120,15 @@ export async function requireTeamRole(roles: UserRole[]): Promise<SessionData & 
 
 export async function requireTeamAdmin(): Promise<SessionData & { team: Team }> {
   return requireTeamRole(['owner', 'admin']);
+}
+
+export async function requireRepoAccess(repoId: string): Promise<SessionData & { team: Team; repo: Repository }> {
+  const session = await requireTeamAccess();
+  const repo = await queries.getRepository(repoId);
+  if (!repo || repo.teamId !== session.team.id) {
+    throw new Error('Forbidden: Repository does not belong to your team');
+  }
+  return { ...session, repo };
 }
 
 export async function clearSessionCookie(): Promise<void> {

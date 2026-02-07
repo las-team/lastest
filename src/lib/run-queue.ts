@@ -94,7 +94,7 @@ class RunQueue {
 
       // Get repo and git info via GitHub API
       const repo = nextItem.repositoryId ? await queries.getRepository(nextItem.repositoryId) : null;
-      const account = await queries.getGithubAccount();
+      const account = repo?.teamId ? await queries.getGithubAccountByTeam(repo.teamId) : null;
 
       let gitCommit = 'unknown';
       const gitBranch = nextItem.branch || repo?.selectedBranch || repo?.defaultBranch || 'main';

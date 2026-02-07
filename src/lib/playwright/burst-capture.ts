@@ -67,7 +67,7 @@ export async function captureWithBurst(
     }
   }
 
-  const isStable = stableFrames === frames.length - 1;
+  const isStable = frames.length <= 1 ? false : stableFrames === frames.length - 1;
 
   return {
     buffer: frames[frames.length - 1], // Use last frame as canonical

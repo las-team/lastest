@@ -1,6 +1,7 @@
 import { notFound } from 'next/navigation';
-import { getBuildSummary, getRecentBuilds, getRecentBuildsByRepo } from '@/server/actions/builds';
+import { getBuildSummary, getRecentBuildsByRepo } from '@/server/actions/builds';
 import { getSelectedRepository } from '@/lib/db/queries';
+import { getCurrentSession } from '@/lib/auth';
 import { RecentHistory } from '@/components/dashboard/recent-history';
 import { BuildActionsClient } from './build-actions-client';
 import { BuildPollingWrapper } from './build-polling-wrapper';
@@ -11,19 +12,24 @@ interface PageProps {
 
 export default async function BuildPage({ params }: PageProps) {
   const { buildId } = await params;
+  const session = await getCurrentSession();
+  const teamId = session?.team?.id;
   const [build, selectedRepo] = await Promise.all([
     getBuildSummary(buildId),
-    getSelectedRepository(),
+    teamId ? getSelectedRepository(teamId) : null,
   ]);
   const recentBuilds = selectedRepo
     ? await getRecentBuildsByRepo(selectedRepo.id, 5)
-    : await getRecentBuilds(5);
+    : [];
 
   if (!build) {
     notFound();
   }
 
   const pendingDiffs = build.diffs.filter((d) => d.status === 'pending');
+  const aiApproveCount = build.diffs.filter(
+    (d) => d.aiRecommendation === 'approve' && d.status === 'pending'
+  ).length;
 
   return (
     <div className="p-6 max-w-6xl mx-auto space-y-6">
@@ -49,6 +55,7 @@ export default async function BuildPage({ params }: PageProps) {
           <BuildActionsClient
             buildId={buildId}
             hasPendingDiffs={pendingDiffs.length > 0}
+            aiApproveCount={aiApproveCount}
           />
         </div>
 
