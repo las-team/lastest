@@ -213,6 +213,8 @@ export async function updateRerecordedTest(data: {
   await requireTeamAccess();
   const { updateTestWithVersion } = await import('@/lib/db/queries');
 
+  const { updateTest } = await import('@/lib/db/queries');
+
   await updateTestWithVersion(
     data.testId,
     {
@@ -221,6 +223,9 @@ export async function updateRerecordedTest(data: {
     },
     'rerecorded'
   );
+
+  // Clear placeholder flag after re-recording
+  await updateTest(data.testId, { isPlaceholder: false });
 
   revalidatePath('/tests');
   revalidatePath(`/tests/${data.testId}`);

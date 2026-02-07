@@ -44,10 +44,10 @@ export default async function AreasPage() {
 
   const uncategorizedTests = tests
     .filter((t) => !t.functionalAreaId)
-    .map((t) => ({ id: t.id, name: t.name, latestStatus: t.latestStatus }));
+    .map((t) => ({ id: t.id, name: t.name, latestStatus: t.latestStatus, isPlaceholder: t.isPlaceholder ?? false }));
 
   return (
-    <div className="flex flex-col h-full">
+    <div className="absolute inset-0 flex flex-col overflow-hidden">
       <AreasPageClient
         tree={tree}
         uncategorizedTests={uncategorizedTests}

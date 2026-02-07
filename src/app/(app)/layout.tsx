@@ -18,7 +18,7 @@ export default async function AppLayout({
     <JobPollingProvider>
       <div className="flex h-screen">
         <SidebarServer />
-        <main className="flex-1 overflow-auto">
+        <main className="flex-1 overflow-auto relative">
           {children}
         </main>
       </div>

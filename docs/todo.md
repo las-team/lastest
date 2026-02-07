@@ -13,7 +13,8 @@ check the recorder and the runner so that they are compatible and identify the r
 ## in progress
 
 ## test
-OCR
+Figma plugin
+Reference database for test data
 Snapshot Stabilization Engine
 VS Code extension
 Github actions integration
@@ -56,17 +57,17 @@ Tier 3 — Perceptual diffing engines
   strict pixel comparison for
   images/layout
 
-UI & UX 
+UI & UX
     Use the frontend design skill and subagent for this
     Revise frontend and make sure you havent steered far and try to use standard shadcn css where possible
     make sure every page has a clear primary action if there are more than one. If you cant decide ask me a question about it
+Move to background what's possible
+Linting
+Test file errors
 
 Electron app ~/.claude/plans/rippling-roaming-snail.md replan
 ## ideas
-Figma plugin
-Reference database for test data
 Generate test data with AI
-Imported document -> US & AC -> tests - US checklist overview
 Sitemap -flow
 Firecrawl?
 Approve reject changes or create ticket -> gh issue

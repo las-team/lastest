@@ -249,18 +249,24 @@ async function extractStoriesFromContent(
 
   const stories: ExtractedUserStory[] = JSON.parse(jsonStr);
 
-  // Create import record
-  const importRecord = await queries.createSpecImport({
-    repositoryId,
-    name: `Import from ${sourceFiles.length} file(s)`,
-    sourceType,
-    sourceFiles,
-    branch,
-    status: 'extracted',
-    extractedStories: stories,
-  });
+  // Create import record (non-fatal — stories are still usable if DB tracking fails)
+  let importId: string | null = null;
+  try {
+    const importRecord = await queries.createSpecImport({
+      repositoryId,
+      name: `Import from ${sourceFiles.length} file(s)`,
+      sourceType,
+      sourceFiles,
+      branch,
+      status: 'extracted',
+      extractedStories: stories,
+    });
+    importId = importRecord.id;
+  } catch (err) {
+    console.error('Failed to create spec import record:', err);
+  }
 
-  return { success: true, stories, importId: importRecord.id };
+  return { success: true, stories, importId: importId ?? undefined };
 }
 
 // ============================================
@@ -367,7 +373,7 @@ async function fetchBranchDiffs(
 
 export async function generateTestsFromStories(
   repositoryId: string,
-  importId: string,
+  importId: string | null,
   stories: ExtractedUserStory[],
   branch: string,
   options?: {
@@ -392,7 +398,7 @@ export async function generateTestsFromStories(
 
   try {
     // Update import status
-    await queries.updateSpecImport(importId, { status: 'generating' });
+    if (importId) await queries.updateSpecImport(importId, { status: 'generating' });
 
     const config = await getAIConfig(repositoryId);
     let areasCreated = 0;
@@ -452,6 +458,7 @@ export async function generateTestsFromStories(
               functionalAreaId: area.id,
               name: testName,
               code,
+              description: acDescription,
               targetUrl: options?.targetUrl || null,
             });
             testsCreated++;
@@ -464,12 +471,14 @@ export async function generateTestsFromStories(
     }
 
     // Update import record
-    await queries.updateSpecImport(importId, {
-      status: 'completed',
-      areasCreated,
-      testsCreated,
-      completedAt: new Date(),
-    });
+    if (importId) {
+      await queries.updateSpecImport(importId, {
+        status: 'completed',
+        areasCreated,
+        testsCreated,
+        completedAt: new Date(),
+      });
+    }
 
     await completeJob(jobId);
     revalidatePath('/areas');
@@ -478,10 +487,115 @@ export async function generateTestsFromStories(
     return { success: true, areasCreated, testsCreated, errors };
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Failed to generate tests';
-    await queries.updateSpecImport(importId, {
-      status: 'failed',
-      error: message,
-    });
+    if (importId) {
+      await queries.updateSpecImport(importId, {
+        status: 'failed',
+        error: message,
+      });
+    }
+    await failJob(jobId, message);
+    return { success: false, areasCreated: 0, testsCreated: 0, errors: [message], error: message };
+  }
+}
+
+// ============================================
+// Step 3b: Create placeholder tests (no AI)
+// ============================================
+
+const PLACEHOLDER_CODE = `export async function test(page, baseUrl, screenshotPath, stepLogger) {
+  // Placeholder test — record real interactions to replace this stub
+  await page.goto(baseUrl);
+  await page.screenshot({ path: screenshotPath });
+}`;
+
+export async function createPlaceholdersFromStories(
+  repositoryId: string,
+  importId: string | null,
+  stories: ExtractedUserStory[],
+  _branch: string,
+  options?: {
+    targetUrl?: string;
+  }
+): Promise<GenerateTestsResponse> {
+  const totalTests = stories.reduce((sum, story) => {
+    const grouped = new Set<string>();
+    let count = 0;
+    for (const ac of story.acceptanceCriteria) {
+      if (ac.groupedWith && grouped.has(ac.groupedWith)) continue;
+      grouped.add(ac.id);
+      count++;
+    }
+    return sum + count;
+  }, 0);
+
+  const jobId = await createJob('build_tests', `Creating ${totalTests} placeholder tests`, totalTests, repositoryId);
+
+  try {
+    if (importId) await queries.updateSpecImport(importId, { status: 'generating' });
+
+    let areasCreated = 0;
+    let testsCreated = 0;
+    const errors: string[] = [];
+    let testIndex = 0;
+
+    for (const story of stories) {
+      const area = await queries.getOrCreateFunctionalAreaByRepo(
+        repositoryId,
+        story.title,
+        story.description
+      );
+
+      const existingAreas = await queries.getFunctionalAreasByRepo(repositoryId);
+      const wasNew = existingAreas.filter(a => a.name.toLowerCase() === story.title.toLowerCase()).length <= 1;
+      if (wasNew) areasCreated++;
+
+      const acGroups = groupAcceptanceCriteria(story.acceptanceCriteria);
+
+      for (const group of acGroups) {
+        testIndex++;
+        await updateJobProgress(jobId, testIndex, totalTests);
+
+        const primaryAC = group[0];
+        const testName = primaryAC.testName || `${story.title}: ${primaryAC.description.slice(0, 60)}`;
+        const acDescription = group.map(ac => ac.description).join('\n');
+
+        try {
+          await queries.createTest({
+            repositoryId,
+            functionalAreaId: area.id,
+            name: testName,
+            code: PLACEHOLDER_CODE,
+            description: acDescription,
+            isPlaceholder: true,
+            targetUrl: options?.targetUrl || null,
+          });
+          testsCreated++;
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : 'Unknown error';
+          errors.push(`${testName}: ${msg}`);
+        }
+      }
+    }
+
+    if (importId) {
+      await queries.updateSpecImport(importId, {
+        status: 'completed',
+        areasCreated,
+        testsCreated,
+        completedAt: new Date(),
+      });
+    }
+
+    await completeJob(jobId);
+    revalidatePath('/areas');
+    revalidatePath('/tests');
+
+    return { success: true, areasCreated, testsCreated, errors };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Failed to create placeholder tests';
+    if (importId) {
+      await queries.updateSpecImport(importId, { status: 'failed', error: message });
+    }
     await failJob(jobId, message);
     return { success: false, areasCreated: 0, testsCreated: 0, errors: [message], error: message };
   }

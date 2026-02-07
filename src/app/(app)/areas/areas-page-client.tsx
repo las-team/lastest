@@ -25,6 +25,7 @@ import { SpecAnalysisDialog } from '@/components/ai/spec-analysis-dialog';
 import { MCPExploreRoutesDialog } from '@/components/ai/mcp-explore-routes-dialog';
 import { ImportFromSpecDialog } from '@/components/ai/import-from-spec-dialog';
 import { toast } from 'sonner';
+import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from '@/components/ui/resizable';
 import type { FunctionalAreaWithChildren } from '@/lib/db/queries';
 
 export interface SuiteItem {
@@ -159,9 +160,9 @@ export function AreasPageClient({ tree, uncategorizedTests, unsortedSuites, repo
   }
 
   return (
-    <div className="flex flex-1 overflow-hidden">
+    <ResizablePanelGroup orientation="horizontal" className="flex-1 overflow-hidden">
       {/* Left Sidebar - Area Tree */}
-      <div className="w-72 border-r bg-muted/30">
+      <ResizablePanel defaultSize="20%" minSize="10%" maxSize="40%" className="bg-muted/30 h-full overflow-hidden">
         <AreaTree
           tree={tree}
           uncategorizedTests={uncategorizedTests}
@@ -175,10 +176,12 @@ export function AreasPageClient({ tree, uncategorizedTests, unsortedSuites, repo
           onMoveSuite={handleMoveSuite}
           onMoveArea={handleMoveArea}
         />
-      </div>
+      </ResizablePanel>
+      <ResizableHandle withHandle />
 
       {/* Main Content */}
-      <div className="flex-1 p-6 overflow-auto">
+      <ResizablePanel defaultSize="80%" className="overflow-auto">
+        <div className="p-6">
         <div className="max-w-3xl space-y-6">
           {/* Discovery Actions */}
           <Card>
@@ -280,7 +283,8 @@ export function AreasPageClient({ tree, uncategorizedTests, unsortedSuites, repo
             onUpdate={() => router.refresh()}
           />
         </div>
-      </div>
+        </div>
+      </ResizablePanel>
 
       {/* New Area Dialog */}
       <Dialog open={isNewAreaOpen} onOpenChange={setIsNewAreaOpen}>
@@ -377,6 +381,6 @@ export function AreasPageClient({ tree, uncategorizedTests, unsortedSuites, repo
         branch={selectedBranch}
         onComplete={() => router.refresh()}
       />
-    </div>
+    </ResizablePanelGroup>
   );
 }

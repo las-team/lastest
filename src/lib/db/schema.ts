@@ -79,6 +79,8 @@ export const tests = sqliteTable('tests', {
   functionalAreaId: text('functional_area_id').references(() => functionalAreas.id),
   name: text('name').notNull(),
   code: text('code').notNull(), // Playwright test code
+  description: text('description'),
+  isPlaceholder: integer('is_placeholder', { mode: 'boolean' }).default(false),
   targetUrl: text('target_url'),
   // Setup configuration - setupTestId takes precedence over setupScriptId
   setupTestId: text('setup_test_id'), // Use another test as setup (most common)

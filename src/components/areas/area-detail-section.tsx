@@ -267,6 +267,11 @@ export function AreaDetailSection({ selection, areas, suites, repositoryId, onUp
             <CardTitle className="flex items-center gap-2">
               <FileCode className="h-5 w-5 text-primary" />
               Test Details
+              {testData.isPlaceholder && (
+                <Badge variant="outline" className="text-amber-600 border-amber-500/50 text-xs">
+                  Placeholder
+                </Badge>
+              )}
             </CardTitle>
             {!isEditing ? (
               <Button variant="ghost" size="sm" onClick={() => setIsEditing(true)}>
@@ -298,6 +303,9 @@ export function AreaDetailSection({ selection, areas, suites, repositoryId, onUp
               ) : (
                 <div className="text-lg font-medium">{testData.name}</div>
               )}
+              {testData.description && !isEditing && (
+                <p className="text-sm text-muted-foreground mt-1">{testData.description}</p>
+              )}
             </div>
 
             <div className="space-y-2">
@@ -325,12 +333,21 @@ export function AreaDetailSection({ selection, areas, suites, repositoryId, onUp
                   View Details
                 </Link>
               </Button>
-              <Button asChild className="flex-1">
-                <Link href={`/run?testId=${testData.id}`}>
-                  <Play className="h-4 w-4 mr-2" />
-                  Run Test
-                </Link>
-              </Button>
+              {testData.isPlaceholder ? (
+                <Button asChild className="flex-1">
+                  <Link href={`/record?rerecordId=${testData.id}`}>
+                    <Play className="h-4 w-4 mr-2" />
+                    Record Test
+                  </Link>
+                </Button>
+              ) : (
+                <Button asChild className="flex-1">
+                  <Link href={`/run?testId=${testData.id}`}>
+                    <Play className="h-4 w-4 mr-2" />
+                    Run Test
+                  </Link>
+                </Button>
+              )}
             </div>
 
             {testData.createdAt && (

@@ -1777,7 +1777,7 @@ export interface FunctionalAreaWithChildren {
   isRouteFolder: boolean | null;
   orderIndex: number | null;
   children: FunctionalAreaWithChildren[];
-  tests: { id: string; name: string; latestStatus: string | null }[];
+  tests: { id: string; name: string; latestStatus: string | null; isPlaceholder?: boolean }[];
   suites: { id: string; name: string; description: string | null; testCount: number }[];
 }
 
@@ -1838,7 +1838,7 @@ export async function getFunctionalAreasTree(repositoryId: string): Promise<Func
     areaMap.set(area.id, {
       ...area,
       children: [],
-      tests: areaTests.map(t => ({ id: t.id, name: t.name, latestStatus: statusMap.get(t.id) || null })),
+      tests: areaTests.map(t => ({ id: t.id, name: t.name, latestStatus: statusMap.get(t.id) || null, isPlaceholder: t.isPlaceholder ?? false })),
       suites: areaSuites.map(s => ({ id: s.id, name: s.name, description: s.description, testCount: suiteTestCounts.get(s.id) || 0 })),
     });
   }

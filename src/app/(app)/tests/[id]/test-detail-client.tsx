@@ -470,6 +470,30 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
           </CardContent>
         </Card>
 
+        {/* Placeholder banner */}
+        {test.isPlaceholder && (
+          <Card className="border-amber-500/50 bg-amber-50 dark:bg-amber-950/20">
+            <CardContent className="py-4 space-y-3">
+              <div className="flex items-center gap-2">
+                <AlertTriangle className="h-5 w-5 text-amber-600" />
+                <span className="font-semibold text-sm">Placeholder Test &mdash; Ready to Record</span>
+              </div>
+              {test.description && (
+                <div className="bg-background/60 rounded-md px-3 py-2 text-sm text-muted-foreground">
+                  {test.description}
+                </div>
+              )}
+              <Button
+                size="sm"
+                onClick={() => router.push(`/record?rerecordId=${test.id}`)}
+              >
+                <Video className="h-4 w-4 mr-2" />
+                Record Now
+              </Button>
+            </CardContent>
+          </Card>
+        )}
+
         {/* Tabs for Code, Screenshots, History */}
         <Tabs defaultValue="code">
           <TabsList>

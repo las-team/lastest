@@ -45,7 +45,7 @@ export interface SuiteItem {
 
 interface AreaTreeProps {
   tree: FunctionalAreaWithChildren[];
-  uncategorizedTests: { id: string; name: string; latestStatus: string | null }[];
+  uncategorizedTests: { id: string; name: string; latestStatus: string | null; isPlaceholder?: boolean }[];
   unsortedSuites: SuiteItem[];
   selection: TreeSelection | null;
   onSelect: (selection: TreeSelection | null) => void;
@@ -245,7 +245,7 @@ function AreaNode({
 }
 
 interface TestNodeProps {
-  test: { id: string; name: string; latestStatus: string | null };
+  test: { id: string; name: string; latestStatus: string | null; isPlaceholder?: boolean };
   depth: number;
   selection: TreeSelection | null;
   onSelect: (selection: TreeSelection | null) => void;
@@ -272,8 +272,11 @@ function TestNode({ test, depth, selection, onSelect }: TestNodeProps) {
     >
       <GripVertical className="h-3 w-3 text-muted-foreground opacity-0 group-hover:opacity-100 cursor-grab" />
       <StatusIcon status={test.latestStatus} />
-      <FileCode className="h-4 w-4 text-muted-foreground" />
-      <span className="flex-1 truncate text-sm">{test.name}</span>
+      <FileCode className={cn("h-4 w-4", test.isPlaceholder ? "text-amber-500" : "text-muted-foreground")} />
+      <span className="flex-1 truncate text-sm">
+        {test.name}
+        {test.isPlaceholder && <span className="text-xs text-muted-foreground ml-1">(placeholder)</span>}
+      </span>
     </div>
   );
 }
@@ -363,8 +366,8 @@ export function AreaTree({
         </Button>
       </div>
 
-      <ScrollArea className="flex-1">
-        <div className="p-2">
+      <ScrollArea className="flex-1" type="auto">
+        <div className="p-2 overflow-x-auto">
           {/* Areas */}
           {tree.map((area) => (
             <AreaNode

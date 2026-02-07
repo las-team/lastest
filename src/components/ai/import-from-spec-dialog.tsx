@@ -18,6 +18,7 @@ import {
   extractUserStoriesFromFiles,
   extractUserStoriesFromUpload,
   generateTestsFromStories,
+  createPlaceholdersFromStories,
   getBranchChanges,
   validateAllTestsWithMCP,
 } from '@/server/actions/spec-import';
@@ -68,6 +69,7 @@ export function ImportFromSpecDialog({
   const [step, setStep] = useState<Step>('input');
   const [isDiscovering, setIsDiscovering] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
+  const [isCreatingPlaceholders, setIsCreatingPlaceholders] = useState(false);
   const [isValidating, setIsValidating] = useState(false);
 
   // File selection
@@ -94,6 +96,7 @@ export function ImportFromSpecDialog({
     testsCreated: number;
     errors: string[];
     testIds?: string[];
+    usedPlaceholders?: boolean;
   } | null>(null);
 
   // ============================================
@@ -297,11 +300,6 @@ export function ImportFromSpecDialog({
       return;
     }
 
-    if (!importId) {
-      toast.error('Import session not found');
-      return;
-    }
-
     setIsGenerating(true);
     setStep('generating');
     try {
@@ -333,6 +331,44 @@ export function ImportFromSpecDialog({
       setStep('review');
     } finally {
       setIsGenerating(false);
+    }
+  };
+
+  const handleCreatePlaceholders = async () => {
+    if (stories.length === 0) {
+      toast.error('No user stories to create placeholders from');
+      return;
+    }
+
+    setIsCreatingPlaceholders(true);
+    setStep('generating');
+    try {
+      const response = await createPlaceholdersFromStories(
+        repositoryId,
+        importId,
+        stories,
+        branch,
+        { targetUrl: targetUrl.trim() || undefined }
+      );
+
+      setResults({
+        areasCreated: response.areasCreated,
+        testsCreated: response.testsCreated,
+        errors: response.errors,
+        usedPlaceholders: true,
+      });
+      setStep('results');
+
+      if (response.success) {
+        toast.success(`Created ${response.areasCreated} areas and ${response.testsCreated} placeholder tests`);
+      } else {
+        toast.error(response.error || 'Failed to create placeholders');
+      }
+    } catch {
+      toast.error('Failed to create placeholder tests');
+      setStep('review');
+    } finally {
+      setIsCreatingPlaceholders(false);
     }
   };
 
@@ -398,7 +434,7 @@ export function ImportFromSpecDialog({
             {step === 'file-selection' && 'Select which spec files to analyze for User Stories.'}
             {step === 'extracting' && 'Extracting User Stories and Acceptance Criteria...'}
             {step === 'review' && `Review ${stories.length} User Stories with ${totalAC} Acceptance Criteria before generating tests.`}
-            {step === 'generating' && 'Generating test scripts for each acceptance criterion...'}
+            {step === 'generating' && (isCreatingPlaceholders ? 'Creating placeholder tests for each acceptance criterion...' : 'Generating test scripts for each acceptance criterion...')}
             {step === 'results' && 'Import complete. Review the results below.'}
           </DialogDescription>
         </DialogHeader>
@@ -692,12 +728,18 @@ export function ImportFromSpecDialog({
         {step === 'generating' && (
           <div className="flex flex-col items-center justify-center py-12">
             <Loader2 className="h-12 w-12 animate-spin text-muted-foreground mb-4" />
-            <p className="text-muted-foreground">Generating test scripts...</p>
+            <p className="text-muted-foreground">
+              {isCreatingPlaceholders ? 'Creating placeholder tests...' : 'Generating test scripts...'}
+            </p>
             <p className="text-xs text-muted-foreground mt-2">
-              Creating areas from User Stories and tests from Acceptance Criteria
-              {useBranchContext && changedFiles.length > 0 && (
-                <span> (with branch code context)</span>
-              )}
+              {isCreatingPlaceholders
+                ? 'Creating areas and placeholder tests from Acceptance Criteria'
+                : <>Creating areas from User Stories and tests from Acceptance Criteria
+                    {useBranchContext && changedFiles.length > 0 && (
+                      <span> (with branch code context)</span>
+                    )}
+                  </>
+              }
             </p>
           </div>
         )}
@@ -714,7 +756,9 @@ export function ImportFromSpecDialog({
               <div className="text-center p-4 bg-muted/50 rounded-lg">
                 <FileCode className="h-8 w-8 mx-auto mb-2 text-primary" />
                 <div className="text-2xl font-bold">{results.testsCreated}</div>
-                <div className="text-sm text-muted-foreground">Tests Generated</div>
+                <div className="text-sm text-muted-foreground">
+                  {results.usedPlaceholders ? 'Placeholders Created' : 'Tests Generated'}
+                </div>
               </div>
               <div className="text-center p-4 bg-muted/50 rounded-lg">
                 <GitBranch className="h-8 w-8 mx-auto mb-2 text-muted-foreground" />
@@ -771,14 +815,28 @@ export function ImportFromSpecDialog({
             {step === 'results' ? 'Done' : 'Cancel'}
           </Button>
           {step === 'review' && (
-            <Button onClick={handleGenerate} disabled={stories.length === 0 || isGenerating}>
-              {isGenerating ? (
-                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-              ) : (
-                <ArrowRight className="h-4 w-4 mr-2" />
-              )}
-              Generate {totalAC} Test{totalAC !== 1 ? 's' : ''}
-            </Button>
+            <>
+              <Button
+                variant="outline"
+                onClick={handleCreatePlaceholders}
+                disabled={stories.length === 0 || isGenerating || isCreatingPlaceholders}
+              >
+                {isCreatingPlaceholders ? (
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                ) : (
+                  <FileCode className="h-4 w-4 mr-2" />
+                )}
+                Create as Placeholders
+              </Button>
+              <Button onClick={handleGenerate} disabled={stories.length === 0 || isGenerating || isCreatingPlaceholders}>
+                {isGenerating ? (
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                ) : (
+                  <ArrowRight className="h-4 w-4 mr-2" />
+                )}
+                Generate {totalAC} Test{totalAC !== 1 ? 's' : ''}
+              </Button>
+            </>
           )}
         </DialogFooter>
       </DialogContent>
