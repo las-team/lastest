@@ -57,10 +57,7 @@ Tier 3 — Perceptual diffing engines
   strict pixel comparison for
   images/layout
 
-UI & UX
-    Use the frontend design skill and subagent for this
-    Revise frontend and make sure you havent steered far and try to use standard shadcn css where possible
-    make sure every page has a clear primary action if there are more than one. If you cant decide ask me a question about it
+
 Move to background what's possible
 Linting
 Test file errors
