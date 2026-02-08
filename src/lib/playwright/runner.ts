@@ -92,12 +92,113 @@ function createAppState(page: Page) {
 /**
  * Simple expect implementation for Playwright Inspector-generated tests.
  * Provides common assertion matchers that wrap Playwright's built-in locator assertions.
- * Supports both Page-level assertions (toHaveURL, toHaveTitle) and Locator assertions.
+ * Supports Page-level assertions (toHaveURL, toHaveTitle), Locator assertions,
+ * and generic value assertions (toHaveLength, toBe, toEqual, etc.)
  */
 function createExpect(timeout = 5000) {
-  return function expect(target: Page | Locator) {
+  return function expect(target: unknown, message?: string) {
     // Check if target is a Page (has 'goto' method) vs Locator
-    const isPage = typeof (target as unknown as { goto?: unknown }).goto === 'function';
+    const isPage = typeof (target as { goto?: unknown })?.goto === 'function';
+    const isLocator = typeof (target as { click?: unknown })?.click === 'function' &&
+                      typeof (target as { fill?: unknown })?.fill === 'function';
+
+    // Generic value matchers (arrays, primitives, objects)
+    if (!isPage && !isLocator) {
+      const msgPrefix = message ? `${message}: ` : '';
+      return {
+        toHaveLength(expected: number) {
+          const actual = (target as { length?: number })?.length;
+          if (actual !== expected) {
+            throw new Error(`${msgPrefix}Expected length ${expected} but got ${actual}`);
+          }
+        },
+        toBe(expected: unknown) {
+          if (target !== expected) {
+            throw new Error(`${msgPrefix}Expected ${JSON.stringify(expected)} but got ${JSON.stringify(target)}`);
+          }
+        },
+        toEqual(expected: unknown) {
+          const isEqual = JSON.stringify(target) === JSON.stringify(expected);
+          if (!isEqual) {
+            throw new Error(`${msgPrefix}Expected ${JSON.stringify(expected)} but got ${JSON.stringify(target)}`);
+          }
+        },
+        toBeTruthy() {
+          if (!target) {
+            throw new Error(`${msgPrefix}Expected value to be truthy but got ${target}`);
+          }
+        },
+        toBeFalsy() {
+          if (target) {
+            throw new Error(`${msgPrefix}Expected value to be falsy but got ${target}`);
+          }
+        },
+        toBeNull() {
+          if (target !== null) {
+            throw new Error(`${msgPrefix}Expected null but got ${JSON.stringify(target)}`);
+          }
+        },
+        toBeUndefined() {
+          if (target !== undefined) {
+            throw new Error(`${msgPrefix}Expected undefined but got ${JSON.stringify(target)}`);
+          }
+        },
+        toBeDefined() {
+          if (target === undefined) {
+            throw new Error(`${msgPrefix}Expected value to be defined`);
+          }
+        },
+        toContain(expected: unknown) {
+          if (Array.isArray(target)) {
+            if (!target.includes(expected)) {
+              throw new Error(`${msgPrefix}Expected array to contain ${JSON.stringify(expected)}`);
+            }
+          } else if (typeof target === 'string') {
+            if (!target.includes(expected as string)) {
+              throw new Error(`${msgPrefix}Expected string to contain "${expected}"`);
+            }
+          } else {
+            throw new Error(`${msgPrefix}toContain only works on arrays and strings`);
+          }
+        },
+        toBeGreaterThan(expected: number) {
+          if (typeof target !== 'number' || target <= expected) {
+            throw new Error(`${msgPrefix}Expected ${target} to be greater than ${expected}`);
+          }
+        },
+        toBeLessThan(expected: number) {
+          if (typeof target !== 'number' || target >= expected) {
+            throw new Error(`${msgPrefix}Expected ${target} to be less than ${expected}`);
+          }
+        },
+        not: {
+          toHaveLength(expected: number) {
+            const actual = (target as { length?: number })?.length;
+            if (actual === expected) {
+              throw new Error(`${msgPrefix}Expected length not to be ${expected}`);
+            }
+          },
+          toBe(expected: unknown) {
+            if (target === expected) {
+              throw new Error(`${msgPrefix}Expected not to be ${JSON.stringify(expected)}`);
+            }
+          },
+          toEqual(expected: unknown) {
+            const isEqual = JSON.stringify(target) === JSON.stringify(expected);
+            if (isEqual) {
+              throw new Error(`${msgPrefix}Expected not to equal ${JSON.stringify(expected)}`);
+            }
+          },
+          toContain(expected: unknown) {
+            if (Array.isArray(target) && target.includes(expected)) {
+              throw new Error(`${msgPrefix}Expected array not to contain ${JSON.stringify(expected)}`);
+            } else if (typeof target === 'string' && target.includes(expected as string)) {
+              throw new Error(`${msgPrefix}Expected string not to contain "${expected}"`);
+            }
+          },
+        },
+      };
+    }
 
     if (isPage) {
       const page = target as Page;
@@ -856,6 +957,21 @@ export class PlaywrightRunner extends EventEmitter {
             ...setupResult.variables,
           };
         }
+
+        // Wait for page to settle after setup (e.g., login click + redirect)
+        // Setup may return before the browser dispatches the fetch, so
+        // waitForLoadState resolves instantly. Instead, wait for the URL to
+        // actually change (e.g., /login → /) which blocks until the POST
+        // completes and the redirect finishes loading.
+        const setupPageUrl = page.url();
+        try {
+          await page.waitForURL(
+            url => url.toString() !== setupPageUrl,
+            { timeout: 10000, waitUntil: 'networkidle' }
+          );
+        } catch {
+          // URL didn't change within timeout — setup didn't trigger navigation
+        }
       }
 
       // Create a proxy that intercepts page.screenshot() calls
@@ -909,6 +1025,18 @@ export class PlaywrightRunner extends EventEmitter {
                 // Increment step counter for next screenshot
                 stepCounter++;
                 currentStepLabel = `step ${stepCounter}`;
+              } else {
+                // Auto-save screenshot when test code doesn't specify a path
+                const autoFilename = `${runId}-${test.id}-step${stepCounter}.png`;
+                const autoPath = path.join(this.screenshotDir, autoFilename);
+                fs.writeFileSync(autoPath, result);
+                const publicPath = this.repositoryId
+                  ? `/screenshots/${this.repositoryId}/${autoFilename}`
+                  : `/screenshots/${autoFilename}`;
+                capturedScreenshots.push({ path: publicPath, label: currentStepLabel });
+                stepCounter++;
+                currentStepLabel = `step ${stepCounter}`;
+
               }
               return result;
             };
@@ -1058,7 +1186,8 @@ export class PlaywrightRunner extends EventEmitter {
         testId: test.id,
         status: 'failed',
         durationMs,
-        screenshotPath,
+        // Prefer screenshot captured during test execution over late failure screenshot
+        screenshotPath: capturedScreenshots[0]?.path || screenshotPath,
         screenshots: allScreenshots,
         errorMessage,
         consoleErrors: consoleErrors.length > 0 ? consoleErrors : undefined,
@@ -1261,11 +1390,9 @@ export class PlaywrightRunner extends EventEmitter {
     const bodyMatch = code.match(/test\([^,]+,\s*async\s*\(\{\s*page\s*\}\)\s*=>\s*\{([\s\S]*)\}\);?\s*$/);
 
     if (!bodyMatch) {
-      // Try to run it as direct commands
       const lines = code.split('\n').filter(line =>
         line.trim().startsWith('await page.')
       );
-
       for (const line of lines) {
         await this.executeLine(page, line.trim(), test.id);
       }
@@ -1483,6 +1610,37 @@ export class PlaywrightRunner extends EventEmitter {
           : rawPath;
         const fullPage = fullPageMatch ? fullPageMatch[1] === 'true' : false;
         await page.screenshot({ path: screenshotPath, fullPage });
+      } else {
+        // Handle screenshot without explicit path (just fullPage option)
+        const fullPage = fullPageMatch ? fullPageMatch[1] === 'true' : false;
+        await page.screenshot({ fullPage });
+      }
+    } else if (line.startsWith('await page.waitForLoadState(')) {
+      // Handle waitForLoadState
+      const stateMatch = line.match(/waitForLoadState\(['"]([^'"]+)['"]\)/);
+      if (stateMatch) {
+        const state = stateMatch[1] as 'load' | 'domcontentloaded' | 'networkidle';
+        // networkidle can hang on pages with persistent connections (SSE/polling)
+        const timeout = state === 'networkidle' ? 10000 : 30000;
+        await page.waitForLoadState(state, { timeout }).catch(() => {});
+      }
+    } else if (line.startsWith('await page.waitForTimeout(')) {
+      // Handle waitForTimeout
+      const timeMatch = line.match(/waitForTimeout\((\d+)\)/);
+      if (timeMatch) {
+        await page.waitForTimeout(parseInt(timeMatch[1], 10));
+      }
+    } else if (line.startsWith('await page.fill(')) {
+      // Handle legacy page.fill() format
+      const fillMatch = line.match(/fill\(['"]([^'"]+)['"],\s*['"]([^'"]*)['"]\)/);
+      if (fillMatch) {
+        await page.fill(fillMatch[1], fillMatch[2]);
+      }
+    } else if (line.startsWith('await page.click(')) {
+      // Handle legacy page.click() format
+      const clickMatch = line.match(/click\(['"]([^'"]+)['"]\)/);
+      if (clickMatch) {
+        await page.click(clickMatch[1]);
       }
     }
   }
