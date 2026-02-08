@@ -14,13 +14,40 @@ export interface DebugStep {
 
 /**
  * Extract the function body from test code.
- * Matches: export async function test(page, ...) { BODY }
+ * Supports:
+ *   1. export async function test(page, ...) { BODY }
+ *   2. Legacy Playwright test format: test('name', async ({ page }) => { BODY });
+ *   3. Raw code (no wrapper) — returned as-is
  */
 export function extractTestBody(code: string): string | null {
+  if (!code || !code.trim()) return null;
+
+  // Standard format: export async function test(page, ...) { BODY }
   const funcMatch = code.match(
     /export\s+async\s+function\s+test\s*\(\s*page[^)]*\)\s*\{([\s\S]*)\}\s*$/
   );
-  return funcMatch ? funcMatch[1] : null;
+  if (funcMatch) return funcMatch[1];
+
+  // Legacy Playwright test format: test('...', async ({ page }) => { BODY });
+  const legacyMatch = code.match(
+    /test\([^,]+,\s*async\s*\(\{\s*page\s*\}\)\s*=>\s*\{([\s\S]*)\}\);?\s*$/
+  );
+  if (legacyMatch) return legacyMatch[1];
+
+  // Raw code (no function wrapper) — treat entire code as body.
+  // Strip import lines at the top before returning.
+  const lines = code.split('\n');
+  const bodyLines: string[] = [];
+  let pastImports = false;
+  for (const line of lines) {
+    if (!pastImports && (line.trim().startsWith('import ') || line.trim() === '')) {
+      continue;
+    }
+    pastImports = true;
+    bodyLines.push(line);
+  }
+  const body = bodyLines.join('\n').trim();
+  return body || null;
 }
 
 /**

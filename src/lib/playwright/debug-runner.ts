@@ -58,6 +58,7 @@ export class DebugRunner {
   private state: DebugState | null = null;
   private commandResolve: ((cmd: DebugCommand) => void) | null = null;
   private idleTimer: ReturnType<typeof setTimeout> | null = null;
+  private generation = 0; // incremented on each start(), stale runSession() bails out
 
   getState(): DebugState | null {
     return this.state;
@@ -80,6 +81,7 @@ export class DebugRunner {
       await this.stop();
     }
 
+    this.generation++;
     this.test = test;
     this.settings = settings;
     this.environmentConfig = environmentConfig;
@@ -117,8 +119,10 @@ export class DebugRunner {
     };
 
     // Launch browser and run initialization in background
-    this.runSession().catch(err => {
-      if (this.state) {
+    // Capture generation so stale calls from prior start() bail out
+    const gen = this.generation;
+    this.runSession(gen).catch(err => {
+      if (this.state && this.generation === gen) {
         this.state.status = 'error';
         this.state.error = err?.message || String(err);
       }
@@ -342,13 +346,21 @@ export class DebugRunner {
     };
   }
 
+  /** Check if this runSession invocation is still current */
+  private isStale(gen: number): boolean {
+    return this.generation !== gen;
+  }
+
   /**
    * Main session loop. Runs in background after start().
    */
-  private async runSession(): Promise<void> {
+  private async runSession(gen: number): Promise<void> {
     if (!this.state || !this.test) return;
 
     try {
+      // Bail out if a newer start() was called
+      if (this.isStale(gen)) return;
+
       // Ensure server is running
       const serverManager = getServerManager();
       if (this.environmentConfig) {
@@ -358,6 +370,8 @@ export class DebugRunner {
       if (!serverStatus.ready) {
         throw new Error(serverStatus.error || 'Server not ready');
       }
+
+      if (this.isStale(gen)) return;
 
       // Launch browser (always headed for debug)
       const launcher = this.getBrowserLauncher();
@@ -371,6 +385,13 @@ export class DebugRunner {
         headless: false,
         args: launchArgs.length > 0 ? launchArgs : undefined,
       });
+
+      // If a newer start() fired while we were launching, close and bail
+      if (this.isStale(gen)) {
+        await this.browser.close().catch(() => {});
+        this.browser = null;
+        return;
+      }
 
       await this.createPageAndContext();
 

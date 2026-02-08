@@ -947,7 +947,14 @@ export class PlaywrightRunner extends EventEmitter {
       };
 
       // Check if test has setup (own or from repo defaults)
-      if (await testNeedsSetup(test)) {
+      // Skip per-test setup if storageState was already injected into this context
+      // (from build-level setup or a prior test's setup) — the session cookies
+      // are already present, re-running login would fail (app redirects away from /login).
+      const setupAlreadyInjected = !!parsedStorageState;
+      if (setupAlreadyInjected && await testNeedsSetup(test)) {
+        console.log(`[test-setup] Skipping per-test setup for "${test.name}" — storageState already injected`);
+      }
+      if (!setupAlreadyInjected && await testNeedsSetup(test)) {
         const setupResult = await orchestrator.runTestSetup(test, page, baseContext);
         setupDurationMs = setupResult.duration;
 
