@@ -31,7 +31,7 @@ Explore and implement:
   Component specific testing
 
 Linting
-
+Recently deleted test
 ## ideas
 Electron app ~/.claude/plans/rippling-roaming-snail.md replan
 Figma plugin

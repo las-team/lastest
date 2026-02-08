@@ -36,7 +36,6 @@ export class ClaudeAgentSDKProvider implements AIProvider {
           permissionMode: this.permissionMode,
           cwd: this.workingDirectory,
           model: this.model,
-          maxTurns: 3,
           stderr: (data: string) => { stderrChunks.push(data); },
         },
       })) {
@@ -90,7 +89,6 @@ export class ClaudeAgentSDKProvider implements AIProvider {
           permissionMode: this.permissionMode,
           cwd: this.workingDirectory,
           model: this.model,
-          maxTurns: 3,
           stderr: (data: string) => { stderrChunks.push(data); },
         },
       })) {

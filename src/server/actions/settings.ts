@@ -64,6 +64,7 @@ export async function saveDiffSensitivitySettings(data: {
   unchangedThreshold?: number;
   flakyThreshold?: number;
   includeAntiAliasing?: boolean;
+  ignorePageShift?: boolean;
 }) {
   if (data.repositoryId) await requireRepoAccess(data.repositoryId);
   else await requireTeamAccess();

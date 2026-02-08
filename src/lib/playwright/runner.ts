@@ -17,7 +17,7 @@ import { applyDynamicMasking } from './dynamic-masking';
  * Allows tests to access app state like undo/redo stack length, Redux store, etc.
  * Requires target app to expose state on window (e.g., window.__APP_STATE__).
  */
-function createAppState(page: Page) {
+export function createAppState(page: Page) {
   return {
     /**
      * Get a value from the app's exposed state by dot-notation path.
@@ -92,12 +92,113 @@ function createAppState(page: Page) {
 /**
  * Simple expect implementation for Playwright Inspector-generated tests.
  * Provides common assertion matchers that wrap Playwright's built-in locator assertions.
- * Supports both Page-level assertions (toHaveURL, toHaveTitle) and Locator assertions.
+ * Supports Page-level assertions (toHaveURL, toHaveTitle), Locator assertions,
+ * and generic value assertions (toHaveLength, toBe, toEqual, etc.)
  */
-function createExpect(timeout = 5000) {
-  return function expect(target: Page | Locator) {
+export function createExpect(timeout = 5000) {
+  return function expect(target: unknown, message?: string) {
     // Check if target is a Page (has 'goto' method) vs Locator
-    const isPage = typeof (target as unknown as { goto?: unknown }).goto === 'function';
+    const isPage = typeof (target as { goto?: unknown })?.goto === 'function';
+    const isLocator = typeof (target as { click?: unknown })?.click === 'function' &&
+                      typeof (target as { fill?: unknown })?.fill === 'function';
+
+    // Generic value matchers (arrays, primitives, objects)
+    if (!isPage && !isLocator) {
+      const msgPrefix = message ? `${message}: ` : '';
+      return {
+        toHaveLength(expected: number) {
+          const actual = (target as { length?: number })?.length;
+          if (actual !== expected) {
+            throw new Error(`${msgPrefix}Expected length ${expected} but got ${actual}`);
+          }
+        },
+        toBe(expected: unknown) {
+          if (target !== expected) {
+            throw new Error(`${msgPrefix}Expected ${JSON.stringify(expected)} but got ${JSON.stringify(target)}`);
+          }
+        },
+        toEqual(expected: unknown) {
+          const isEqual = JSON.stringify(target) === JSON.stringify(expected);
+          if (!isEqual) {
+            throw new Error(`${msgPrefix}Expected ${JSON.stringify(expected)} but got ${JSON.stringify(target)}`);
+          }
+        },
+        toBeTruthy() {
+          if (!target) {
+            throw new Error(`${msgPrefix}Expected value to be truthy but got ${target}`);
+          }
+        },
+        toBeFalsy() {
+          if (target) {
+            throw new Error(`${msgPrefix}Expected value to be falsy but got ${target}`);
+          }
+        },
+        toBeNull() {
+          if (target !== null) {
+            throw new Error(`${msgPrefix}Expected null but got ${JSON.stringify(target)}`);
+          }
+        },
+        toBeUndefined() {
+          if (target !== undefined) {
+            throw new Error(`${msgPrefix}Expected undefined but got ${JSON.stringify(target)}`);
+          }
+        },
+        toBeDefined() {
+          if (target === undefined) {
+            throw new Error(`${msgPrefix}Expected value to be defined`);
+          }
+        },
+        toContain(expected: unknown) {
+          if (Array.isArray(target)) {
+            if (!target.includes(expected)) {
+              throw new Error(`${msgPrefix}Expected array to contain ${JSON.stringify(expected)}`);
+            }
+          } else if (typeof target === 'string') {
+            if (!target.includes(expected as string)) {
+              throw new Error(`${msgPrefix}Expected string to contain "${expected}"`);
+            }
+          } else {
+            throw new Error(`${msgPrefix}toContain only works on arrays and strings`);
+          }
+        },
+        toBeGreaterThan(expected: number) {
+          if (typeof target !== 'number' || target <= expected) {
+            throw new Error(`${msgPrefix}Expected ${target} to be greater than ${expected}`);
+          }
+        },
+        toBeLessThan(expected: number) {
+          if (typeof target !== 'number' || target >= expected) {
+            throw new Error(`${msgPrefix}Expected ${target} to be less than ${expected}`);
+          }
+        },
+        not: {
+          toHaveLength(expected: number) {
+            const actual = (target as { length?: number })?.length;
+            if (actual === expected) {
+              throw new Error(`${msgPrefix}Expected length not to be ${expected}`);
+            }
+          },
+          toBe(expected: unknown) {
+            if (target === expected) {
+              throw new Error(`${msgPrefix}Expected not to be ${JSON.stringify(expected)}`);
+            }
+          },
+          toEqual(expected: unknown) {
+            const isEqual = JSON.stringify(target) === JSON.stringify(expected);
+            if (isEqual) {
+              throw new Error(`${msgPrefix}Expected not to equal ${JSON.stringify(expected)}`);
+            }
+          },
+          toContain(expected: unknown) {
+            if (Array.isArray(target) && target.includes(expected)) {
+              throw new Error(`${msgPrefix}Expected array not to contain ${JSON.stringify(expected)}`);
+            } else if (typeof target === 'string' && target.includes(expected as string)) {
+              throw new Error(`${msgPrefix}Expected string not to contain "${expected}"`);
+            }
+          },
+        },
+      };
+    }
 
     if (isPage) {
       const page = target as Page;
@@ -372,6 +473,30 @@ function createExpect(timeout = 5000) {
   };
 }
 import type { Test, TestResult, ActionSelector, SelectorConfig, PlaywrightSettings, NetworkRequest, EnvironmentConfig } from '@/lib/db/schema';
+
+/**
+ * Strip TypeScript type annotations from code so it can execute as plain JavaScript.
+ */
+export function stripTypeAnnotations(code: string): string {
+  let result = code;
+  // Remove variable type annotations: `const x: Type = ...` → `const x = ...`
+  // Handles generics like Array<string>, Record<string, number>, etc.
+  result = result.replace(
+    /\b(const|let|var)\s+(\w+)\s*:\s*[^=\n;]+(\s*=)/g,
+    '$1 $2$3'
+  );
+  // Remove type annotations on destructured assignments: `const { a, b }: Type = ...`
+  result = result.replace(
+    /\b(const|let|var)\s+(\{[^}]+\}|\[[^\]]+\])\s*:\s*[^=\n;]+(\s*=)/g,
+    '$1 $2$3'
+  );
+  // Remove `as Type` assertions (but not 'as' in other contexts like aliases)
+  result = result.replace(/\)\s+as\s+\w[\w<>\[\],\s|]*/g, ')');
+  result = result.replace(/(\w)\s+as\s+\w[\w<>\[\],\s|]*/g, '$1');
+  // Remove angle-bracket type assertions: `<Type>expr`
+  result = result.replace(/<\w[\w<>\[\],\s|]*>\s*(?=\(|[\w])/g, '');
+  return result;
+}
 import { getServerManager } from './server-manager';
 import { getSetupOrchestrator, testNeedsSetup } from '@/lib/setup/setup-orchestrator';
 import type { SetupContext, SetupResult } from '@/lib/setup/types';
@@ -730,8 +855,22 @@ export class PlaywrightRunner extends EventEmitter {
     let setupDurationMs = 0;
 
     try {
+      // If build-level setup captured storageState (cookies/localStorage),
+      // inject it into the new context so tests inherit the login session
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      let parsedStorageState: any;
+      if (this.setupContext?.storageState) {
+        try {
+          parsedStorageState = JSON.parse(this.setupContext.storageState);
+          console.log(`[test-context] Injecting storageState: ${parsedStorageState.cookies?.length ?? 0} cookies`);
+        } catch {
+          console.warn('[test-context] Failed to parse storageState');
+        }
+      }
+
       context = await this.browser.newContext({
         viewport: this.getViewport(),
+        ...(parsedStorageState ? { storageState: parsedStorageState } : {}),
       });
       page = await context.newPage();
 
@@ -808,7 +947,14 @@ export class PlaywrightRunner extends EventEmitter {
       };
 
       // Check if test has setup (own or from repo defaults)
-      if (await testNeedsSetup(test)) {
+      // Skip per-test setup if storageState was already injected into this context
+      // (from build-level setup or a prior test's setup) — the session cookies
+      // are already present, re-running login would fail (app redirects away from /login).
+      const setupAlreadyInjected = !!parsedStorageState;
+      if (setupAlreadyInjected && await testNeedsSetup(test)) {
+        console.log(`[test-setup] Skipping per-test setup for "${test.name}" — storageState already injected`);
+      }
+      if (!setupAlreadyInjected && await testNeedsSetup(test)) {
         const setupResult = await orchestrator.runTestSetup(test, page, baseContext);
         setupDurationMs = setupResult.duration;
 
@@ -855,6 +1001,55 @@ export class PlaywrightRunner extends EventEmitter {
             ...baseContext.variables,
             ...setupResult.variables,
           };
+        }
+
+        // Wait for page to settle after setup (e.g., login click + redirect)
+        // First, wait for URL change (login → redirect target)
+        const setupPageUrl = page.url();
+        try {
+          await page.waitForURL(
+            url => url.toString() !== setupPageUrl,
+            { timeout: 10000, waitUntil: 'networkidle' }
+          );
+        } catch {
+          // URL didn't change within timeout — setup didn't trigger navigation
+        }
+
+        // Then verify the session cookie actually exists before proceeding.
+        // The redirect may have completed but the Set-Cookie hasn't been
+        // processed by the browser yet.
+        try {
+          const ctx = page.context();
+          const deadline = Date.now() + 5000;
+          while (Date.now() < deadline) {
+            const cookies = await ctx.cookies();
+            const hasSession = cookies.some(c =>
+              c.name.includes('session') || c.name.includes('auth') || c.name.includes('token')
+            );
+            if (hasSession) {
+              console.log(`[per-test-setup] Session cookie found after setup (${cookies.length} total cookies)`);
+              break;
+            }
+            await page.waitForTimeout(200);
+          }
+        } catch {
+          // Cookie check failed — continue anyway
+        }
+
+        // Capture storageState after per-test setup so it can seed future contexts
+        if (!this.setupContext?.storageState) {
+          try {
+            const state = await page.context().storageState();
+            if (state.cookies.length > 0) {
+              if (!this.setupContext) {
+                this.setupContext = { baseUrl: envBaseUrl, variables: {} };
+              }
+              this.setupContext.storageState = JSON.stringify(state);
+              console.log(`[per-test-setup] Captured storageState: ${state.cookies.length} cookies`);
+            }
+          } catch {
+            // Ignore storageState capture errors
+          }
         }
       }
 
@@ -909,6 +1104,18 @@ export class PlaywrightRunner extends EventEmitter {
                 // Increment step counter for next screenshot
                 stepCounter++;
                 currentStepLabel = `step ${stepCounter}`;
+              } else {
+                // Auto-save screenshot when test code doesn't specify a path
+                const autoFilename = `${runId}-${test.id}-step${stepCounter}.png`;
+                const autoPath = path.join(this.screenshotDir, autoFilename);
+                fs.writeFileSync(autoPath, result);
+                const publicPath = this.repositoryId
+                  ? `/screenshots/${this.repositoryId}/${autoFilename}`
+                  : `/screenshots/${autoFilename}`;
+                capturedScreenshots.push({ path: publicPath, label: currentStepLabel });
+                stepCounter++;
+                currentStepLabel = `step ${stepCounter}`;
+
               }
               return result;
             };
@@ -1058,7 +1265,8 @@ export class PlaywrightRunner extends EventEmitter {
         testId: test.id,
         status: 'failed',
         durationMs,
-        screenshotPath,
+        // Prefer screenshot captured during test execution over late failure screenshot
+        screenshotPath: capturedScreenshots[0]?.path || screenshotPath,
         screenshots: allScreenshots,
         errorMessage,
         consoleErrors: consoleErrors.length > 0 ? consoleErrors : undefined,
@@ -1076,24 +1284,7 @@ export class PlaywrightRunner extends EventEmitter {
    * Strip TypeScript type annotations from code so it can execute as plain JavaScript.
    */
   private stripTypeAnnotations(code: string): string {
-    let result = code;
-    // Remove variable type annotations: `const x: Type = ...` → `const x = ...`
-    // Handles generics like Array<string>, Record<string, number>, etc.
-    result = result.replace(
-      /\b(const|let|var)\s+(\w+)\s*:\s*[^=\n;]+(\s*=)/g,
-      '$1 $2$3'
-    );
-    // Remove type annotations on destructured assignments: `const { a, b }: Type = ...`
-    result = result.replace(
-      /\b(const|let|var)\s+(\{[^}]+\}|\[[^\]]+\])\s*:\s*[^=\n;]+(\s*=)/g,
-      '$1 $2$3'
-    );
-    // Remove `as Type` assertions (but not 'as' in other contexts like aliases)
-    result = result.replace(/\)\s+as\s+\w[\w<>\[\],\s|]*/g, ')');
-    result = result.replace(/(\w)\s+as\s+\w[\w<>\[\],\s|]*/g, '$1');
-    // Remove angle-bracket type assertions: `<Type>expr`
-    result = result.replace(/<\w[\w<>\[\],\s|]*>\s*(?=\(|[\w])/g, '');
-    return result;
+    return stripTypeAnnotations(code);
   }
 
   private async executeTestCode(page: Page, test: Test, runId: string, screenshotPath: string, onStepLabel?: (label: string) => void): Promise<void> {
@@ -1261,11 +1452,9 @@ export class PlaywrightRunner extends EventEmitter {
     const bodyMatch = code.match(/test\([^,]+,\s*async\s*\(\{\s*page\s*\}\)\s*=>\s*\{([\s\S]*)\}\);?\s*$/);
 
     if (!bodyMatch) {
-      // Try to run it as direct commands
       const lines = code.split('\n').filter(line =>
         line.trim().startsWith('await page.')
       );
-
       for (const line of lines) {
         await this.executeLine(page, line.trim(), test.id);
       }
@@ -1483,6 +1672,37 @@ export class PlaywrightRunner extends EventEmitter {
           : rawPath;
         const fullPage = fullPageMatch ? fullPageMatch[1] === 'true' : false;
         await page.screenshot({ path: screenshotPath, fullPage });
+      } else {
+        // Handle screenshot without explicit path (just fullPage option)
+        const fullPage = fullPageMatch ? fullPageMatch[1] === 'true' : false;
+        await page.screenshot({ fullPage });
+      }
+    } else if (line.startsWith('await page.waitForLoadState(')) {
+      // Handle waitForLoadState
+      const stateMatch = line.match(/waitForLoadState\(['"]([^'"]+)['"]\)/);
+      if (stateMatch) {
+        const state = stateMatch[1] as 'load' | 'domcontentloaded' | 'networkidle';
+        // networkidle can hang on pages with persistent connections (SSE/polling)
+        const timeout = state === 'networkidle' ? 10000 : 30000;
+        await page.waitForLoadState(state, { timeout }).catch(() => {});
+      }
+    } else if (line.startsWith('await page.waitForTimeout(')) {
+      // Handle waitForTimeout
+      const timeMatch = line.match(/waitForTimeout\((\d+)\)/);
+      if (timeMatch) {
+        await page.waitForTimeout(parseInt(timeMatch[1], 10));
+      }
+    } else if (line.startsWith('await page.fill(')) {
+      // Handle legacy page.fill() format
+      const fillMatch = line.match(/fill\(['"]([^'"]+)['"],\s*['"]([^'"]*)['"]\)/);
+      if (fillMatch) {
+        await page.fill(fillMatch[1], fillMatch[2]);
+      }
+    } else if (line.startsWith('await page.click(')) {
+      // Handle legacy page.click() format
+      const clickMatch = line.match(/click\(['"]([^'"]+)['"]\)/);
+      if (clickMatch) {
+        await page.click(clickMatch[1]);
       }
     }
   }

@@ -72,7 +72,7 @@ page.on('response', response => {
 });
 
 await page.goto('${url}');
-await page.waitForLoadState('networkidle');
+await page.waitForLoadState('load');
 await page.screenshot({ fullPage: true });
 
 expect(consoleErrors, 'Console errors detected').toHaveLength(0);

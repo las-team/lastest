@@ -41,6 +41,7 @@ export interface SetupContext {
   page?: Page;              // For Playwright scripts
   variables: Record<string, unknown>;  // Shared state between setups
   repositoryId?: string | null;
+  storageState?: string;    // JSON from context.storageState() — carries cookies/localStorage across browser contexts
 }
 
 // Result returned from running a setup

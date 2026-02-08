@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import { SliderComparison } from '@/components/diff/slider-comparison';
 import { approveDiff, rejectDiff, undoApproval } from '@/server/actions/diffs';
 import type { VisualDiff, Test, DiffMetadata, AIDiffAnalysis } from '@/lib/db/schema';
-import { CheckCircle, XCircle, SkipForward, Eye, Image as ImageIcon, Sparkles, Loader2 } from 'lucide-react';
+import { CheckCircle, XCircle, SkipForward, Eye, Image as ImageIcon, Sparkles, Loader2, ArrowUpDown } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 
 interface DiffViewerClientProps {
@@ -159,6 +159,17 @@ export function DiffViewerClient({ diff, buildId, nextDiffId }: DiffViewerClient
             )}
           </div>
         )}
+
+        {/* Page shift indicator */}
+        {metadata?.pageShift?.detected && (
+          <div className="flex items-center gap-2 px-3 py-1 rounded-full text-sm font-medium bg-blue-100 text-blue-700">
+            <ArrowUpDown className="w-4 h-4" />
+            Page Shift {metadata.pageShift.deltaY > 0 ? '+' : ''}{metadata.pageShift.deltaY}px
+            {metadata.pageShift.excludedFromDiff && (
+              <span className="text-blue-500">(excluded)</span>
+            )}
+          </div>
+        )}
       </div>
 
       {/* AI Analysis Card */}
@@ -267,15 +278,25 @@ export function DiffViewerClient({ diff, buildId, nextDiffId }: DiffViewerClient
         </div>
 
         {/* Metadata Panel Toggle */}
-        {metadata && metadata.changedRegions.length > 0 && (
-          <div className="text-sm text-muted-foreground">
-            <Eye className="w-4 h-4 inline mr-1" />
-            {metadata.changedRegions.length} region(s) changed
-            {metadata.affectedComponents && metadata.affectedComponents.length > 0 && (
-              <span> · {metadata.affectedComponents.join(', ')}</span>
-            )}
-          </div>
-        )}
+        <div className="text-sm text-muted-foreground">
+          {metadata && metadata.changedRegions.length > 0 && (
+            <span>
+              <Eye className="w-4 h-4 inline mr-1" />
+              {metadata.changedRegions.length} region(s) changed
+              {metadata.affectedComponents && metadata.affectedComponents.length > 0 && (
+                <span> · {metadata.affectedComponents.join(', ')}</span>
+              )}
+            </span>
+          )}
+          {metadata?.pageShift?.detected && metadata.pageShift.excludedFromDiff && (
+            <span className="ml-3 text-blue-600">
+              · Shift excluded: {metadata.pageShift.insertedRows ?? 0} rows added, {metadata.pageShift.deletedRows ?? 0} removed
+              {metadata.pageShift.originalPercentage != null && metadata.pageShift.adjustedPercentage != null && (
+                <span> · {metadata.pageShift.originalPercentage}% → {metadata.pageShift.adjustedPercentage}%</span>
+              )}
+            </span>
+          )}
+        </div>
       </div>
 
       {/* Undo Toast */}

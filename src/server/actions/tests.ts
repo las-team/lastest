@@ -189,3 +189,13 @@ export async function restoreTestVersion(testId: string, version: number) {
 export async function getVisualDiffsForTestResult(testResultId: string) {
   return queries.getVisualDiffsByTestResult(testResultId);
 }
+
+// Clean up orphaned setup references (tests/scripts that no longer exist)
+export async function cleanupOrphanedSetupReferences() {
+  await requireTeamAccess();
+  const result = await queries.cleanupOrphanedSetupReferences();
+  revalidatePath('/tests');
+  revalidatePath('/settings');
+  revalidatePath('/');
+  return result;
+}

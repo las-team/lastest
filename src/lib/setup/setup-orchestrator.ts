@@ -62,10 +62,12 @@ export class SetupOrchestrator {
   ): Promise<SetupResult> {
     const test = await queries.getTest(testId);
     if (!test) {
+      // Log warning and skip instead of failing - allows graceful handling of orphaned references
+      console.warn(`Setup test not found: ${testId} - skipping setup (orphaned reference)`);
       return {
-        success: false,
-        error: `Setup test not found: ${testId}`,
+        success: true,
         duration: 0,
+        variables: {},
       };
     }
 
@@ -82,10 +84,12 @@ export class SetupOrchestrator {
   ): Promise<SetupResult> {
     const script = await queries.getSetupScript(scriptId);
     if (!script) {
+      // Log warning and skip instead of failing - allows graceful handling of orphaned references
+      console.warn(`Setup script not found: ${scriptId} - skipping setup (orphaned reference)`);
       return {
-        success: false,
-        error: `Setup script not found: ${scriptId}`,
+        success: true,
         duration: 0,
+        variables: {},
       };
     }
 

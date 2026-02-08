@@ -350,6 +350,16 @@ async function runBuildAsync(
           setupContext.variables = { ...setupContext.variables, ...setupResult.variables };
         }
 
+        // Capture storageState (cookies/localStorage) before closing browser
+        // so test contexts can be seeded with the login session
+        try {
+          const state = await page.context().storageState();
+          setupContext.storageState = JSON.stringify(state);
+          console.log(`[build-setup] Captured storageState: ${state.cookies.length} cookies, ${state.origins.length} origins`);
+        } catch (e) {
+          console.warn('[build-setup] Failed to capture storageState:', e);
+        }
+
         await queries.updateBuild(buildId, {
           setupStatus: 'completed',
           setupDurationMs: setupResult.duration,
@@ -538,6 +548,7 @@ async function processVisualDiff(
   const unchangedThreshold = settings.unchangedThreshold ?? 1;
   const flakyThreshold = settings.flakyThreshold ?? 10;
   const includeAntiAliasing = settings.includeAntiAliasing ?? false;
+  const ignorePageShift = settings.ignorePageShift ?? false;
 
   // Fetch ignore regions for this test
   const testIgnoreRegions = await queries.getIgnoreRegions(testId);
@@ -667,7 +678,8 @@ async function processVisualDiff(
       DIFFS_DIR,
       0.1,
       includeAntiAliasing,
-      ignoreRects
+      ignoreRects,
+      ignorePageShift
     );
 
     const pct = diffResult.percentageDifference;

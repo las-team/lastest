@@ -35,6 +35,11 @@ export interface PageShiftInfo {
   deltaY: number;
   confidence: number;
   excludedFromDiff: boolean;
+  insertedRows?: number;
+  deletedRows?: number;
+  originalPercentage?: number;  // diff percentage before shift exclusion
+  adjustedPercentage?: number;  // diff percentage after shift exclusion
+  fuzzyMatchedRows?: number;    // rows reclassified from insert/delete to match via fuzzy comparison
 }
 
 export interface AIDiffAnalysis {
@@ -527,6 +532,7 @@ export const diffSensitivitySettings = sqliteTable('diff_sensitivity_settings', 
   unchangedThreshold: integer('unchanged_threshold').default(1),  // percentage
   flakyThreshold: integer('flaky_threshold').default(10),        // percentage
   includeAntiAliasing: integer('include_anti_aliasing', { mode: 'boolean' }).default(false), // include AA pixels in diff
+  ignorePageShift: integer('ignore_page_shift', { mode: 'boolean' }).default(false), // exclude vertical content shifts from diff
   createdAt: integer('created_at', { mode: 'timestamp' }),
   updatedAt: integer('updated_at', { mode: 'timestamp' }),
 });
@@ -539,6 +545,7 @@ export const DEFAULT_DIFF_THRESHOLDS = {
   unchangedThreshold: 1,
   flakyThreshold: 10,
   includeAntiAliasing: false,
+  ignorePageShift: false,
 };
 
 // Diff classification type

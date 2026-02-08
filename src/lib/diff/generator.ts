@@ -1,5 +1,6 @@
 import fs from 'fs';
 import path from 'path';
+import crypto from 'crypto';
 import { PNG } from 'pngjs';
 import pixelmatch from 'pixelmatch';
 import type { DiffMetadata, PageShiftInfo } from '../db/schema';
@@ -22,6 +23,18 @@ export interface DiffResult {
   percentageDifference: number;
   diffImagePath: string;
   metadata: DiffMetadata;
+}
+
+// Alignment operation types for LCS row alignment
+type AlignOp = 'match' | 'insert' | 'delete';
+
+interface AlignmentResult {
+  ops: AlignOp[];
+  baselineRows: number[];  // maps aligned row index -> baseline row (-1 for inserts)
+  currentRows: number[];   // maps aligned row index -> current row (-1 for deletes)
+  insertedRows: number;
+  deletedRows: number;
+  matchedRows: number;
 }
 
 /**
@@ -116,7 +129,347 @@ function calculateContentArea(
 }
 
 /**
- * Compare two PNG images and generate a diff image
+ * Hash a single row of pixel data using MD5 for fast comparison.
+ * We use MD5 because we only need collision resistance within a single image pair,
+ * and it's significantly faster than SHA256 for this use case.
+ */
+function hashRow(data: Buffer | Uint8Array, width: number, row: number): string {
+  const start = row * width * 4;
+  const end = start + width * 4;
+  const slice = Buffer.from(data.buffer, data.byteOffset + start, end - start);
+  return crypto.createHash('md5').update(slice).digest('hex');
+}
+
+/**
+ * Compare two pixel rows and return the fraction of pixels that differ (0.0–1.0).
+ * Uses a tolerance on the per-channel sum to ignore anti-aliasing noise.
+ */
+function computeRowDiffRatio(
+  dataA: Buffer | Uint8Array,
+  dataB: Buffer | Uint8Array,
+  width: number,
+  rowA: number,
+  rowB: number,
+  tolerance: number = 30
+): number {
+  const rowBytes = width * 4;
+  const startA = rowA * rowBytes;
+  const startB = rowB * rowBytes;
+  let diffCount = 0;
+
+  for (let x = 0; x < width; x++) {
+    const iA = startA + x * 4;
+    const iB = startB + x * 4;
+    const dr = Math.abs(dataA[iA] - dataB[iB]);
+    const dg = Math.abs(dataA[iA + 1] - dataB[iB + 1]);
+    const db = Math.abs(dataA[iA + 2] - dataB[iB + 2]);
+    if (dr + dg + db > tolerance) {
+      diffCount++;
+    }
+  }
+
+  return diffCount / width;
+}
+
+/**
+ * LCS-based row alignment algorithm.
+ * Hashes each pixel row in both images, then computes the longest common
+ * subsequence to find the optimal vertical alignment. Rows present in LCS
+ * are "matched", rows only in the current image are "insertions", rows only
+ * in the baseline are "deletions".
+ *
+ * Inspired by Chromatic's Page Shift Detection and Happo's lcs-image-diff.
+ */
+function alignRows(
+  baselineData: Buffer | Uint8Array,
+  baselineWidth: number,
+  baselineHeight: number,
+  currentData: Buffer | Uint8Array,
+  currentWidth: number,
+  currentHeight: number
+): AlignmentResult {
+  // Both images must have the same width for row alignment
+  if (baselineWidth !== currentWidth) {
+    // Fall back: no alignment possible with different widths
+    const maxH = Math.max(baselineHeight, currentHeight);
+    return {
+      ops: Array(maxH).fill('match' as AlignOp),
+      baselineRows: Array.from({ length: maxH }, (_, i) => i < baselineHeight ? i : -1),
+      currentRows: Array.from({ length: maxH }, (_, i) => i < currentHeight ? i : -1),
+      insertedRows: Math.max(0, currentHeight - baselineHeight),
+      deletedRows: Math.max(0, baselineHeight - currentHeight),
+      matchedRows: Math.min(baselineHeight, currentHeight),
+    };
+  }
+
+  // Hash all rows
+  const baselineHashes: string[] = [];
+  for (let y = 0; y < baselineHeight; y++) {
+    baselineHashes.push(hashRow(baselineData, baselineWidth, y));
+  }
+
+  const currentHashes: string[] = [];
+  for (let y = 0; y < currentHeight; y++) {
+    currentHashes.push(hashRow(currentData, currentWidth, y));
+  }
+
+  // Compute LCS using space-optimized DP (we only need the traceback)
+  const m = baselineHeight;
+  const n = currentHeight;
+
+  // Full DP table for traceback
+  const dp: Uint16Array[] = Array.from({ length: m + 1 }, () => new Uint16Array(n + 1));
+
+  for (let i = 1; i <= m; i++) {
+    for (let j = 1; j <= n; j++) {
+      if (baselineHashes[i - 1] === currentHashes[j - 1]) {
+        dp[i][j] = dp[i - 1][j - 1] + 1;
+      } else {
+        dp[i][j] = Math.max(dp[i - 1][j], dp[i][j - 1]);
+      }
+    }
+  }
+
+  // Traceback to build alignment operations
+  const ops: AlignOp[] = [];
+  const baselineRows: number[] = [];
+  const currentRows: number[] = [];
+  let i = m, j = n;
+
+  while (i > 0 || j > 0) {
+    if (i > 0 && j > 0 && baselineHashes[i - 1] === currentHashes[j - 1]) {
+      ops.push('match');
+      baselineRows.push(i - 1);
+      currentRows.push(j - 1);
+      i--;
+      j--;
+    } else if (j > 0 && (i === 0 || dp[i][j - 1] >= dp[i - 1][j])) {
+      ops.push('insert');
+      baselineRows.push(-1);
+      currentRows.push(j - 1);
+      j--;
+    } else {
+      ops.push('delete');
+      baselineRows.push(i - 1);
+      currentRows.push(-1);
+      i--;
+    }
+  }
+
+  // Reverse since we traced back from the end
+  ops.reverse();
+  baselineRows.reverse();
+  currentRows.reverse();
+
+  const insertedRows = ops.filter(o => o === 'insert').length;
+  const deletedRows = ops.filter(o => o === 'delete').length;
+  const matchedRows = ops.filter(o => o === 'match').length;
+
+  return { ops, baselineRows, currentRows, insertedRows, deletedRows, matchedRows };
+}
+
+/**
+ * Post-process an alignment result to fuzzy-match nearby delete/insert pairs
+ * whose pixel data is similar. Rows that differ by less than `maxDiffRatio`
+ * are reclassified as 'match' so they go through pixelmatch instead of being
+ * painted solid red/green.
+ */
+function fuzzyMatchUnalignedRows(
+  alignment: AlignmentResult,
+  baselineData: Buffer | Uint8Array,
+  currentData: Buffer | Uint8Array,
+  width: number,
+  maxDiffRatio: number = 0.35,
+  windowSize: number = 5
+): AlignmentResult {
+  const ops = [...alignment.ops];
+  const baselineRows = [...alignment.baselineRows];
+  const currentRows = [...alignment.currentRows];
+
+  // Collect indices of unpaired deletes and inserts
+  const deleteIndices: number[] = [];
+  const insertIndices: number[] = [];
+  for (let i = 0; i < ops.length; i++) {
+    if (ops[i] === 'delete') deleteIndices.push(i);
+    else if (ops[i] === 'insert') insertIndices.push(i);
+  }
+
+  // Nothing to fuzzy-match
+  if (deleteIndices.length === 0 || insertIndices.length === 0) {
+    return alignment;
+  }
+
+  const usedInserts = new Set<number>();
+
+  for (const di of deleteIndices) {
+    const bRow = baselineRows[di];
+    if (bRow === -1) continue;
+
+    let bestIdx = -1;
+    let bestRatio = maxDiffRatio;
+
+    // Search for the closest unpaired insert within the window
+    for (const ii of insertIndices) {
+      if (usedInserts.has(ii)) continue;
+      if (Math.abs(ii - di) > windowSize) continue;
+
+      const cRow = currentRows[ii];
+      if (cRow === -1) continue;
+
+      const ratio = computeRowDiffRatio(baselineData, currentData, width, bRow, cRow);
+      if (ratio < bestRatio) {
+        bestRatio = ratio;
+        bestIdx = ii;
+      }
+    }
+
+    if (bestIdx !== -1) {
+      // Reclassify: keep whichever index comes first as 'match', remove the other
+      const first = Math.min(di, bestIdx);
+      const second = Math.max(di, bestIdx);
+
+      // The 'match' op gets both row references
+      ops[first] = 'match';
+      baselineRows[first] = bRow;
+      currentRows[first] = currentRows[bestIdx];
+
+      // Mark the second op for removal
+      ops[second] = 'match' as AlignOp; // placeholder — will be spliced
+      baselineRows[second] = -2; // sentinel for removal
+      currentRows[second] = -2;
+
+      usedInserts.add(bestIdx);
+    }
+  }
+
+  // Remove sentinel entries (spliced in reverse to preserve indices)
+  const finalOps: AlignOp[] = [];
+  const finalBaselineRows: number[] = [];
+  const finalCurrentRows: number[] = [];
+
+  for (let i = 0; i < ops.length; i++) {
+    if (baselineRows[i] === -2 && currentRows[i] === -2) continue;
+    finalOps.push(ops[i]);
+    finalBaselineRows.push(baselineRows[i]);
+    finalCurrentRows.push(currentRows[i]);
+  }
+
+  return {
+    ops: finalOps,
+    baselineRows: finalBaselineRows,
+    currentRows: finalCurrentRows,
+    insertedRows: finalOps.filter(o => o === 'insert').length,
+    deletedRows: finalOps.filter(o => o === 'delete').length,
+    matchedRows: finalOps.filter(o => o === 'match').length,
+  };
+}
+
+/**
+ * Build aligned image buffers from an alignment result.
+ * Matched rows are placed side-by-side for pixelmatch comparison.
+ * Inserted/deleted rows are excluded from the pixel diff but tracked in metadata.
+ */
+function buildAlignedImages(
+  baselineData: Buffer | Uint8Array,
+  currentData: Buffer | Uint8Array,
+  width: number,
+  alignment: AlignmentResult
+): { alignedBaseline: Buffer; alignedCurrent: Buffer; alignedHeight: number } {
+  // Only include matched rows for aligned comparison
+  const matchedOps = alignment.ops
+    .map((op, idx) => ({ op, idx }))
+    .filter(({ op }) => op === 'match');
+
+  const alignedHeight = matchedOps.length;
+  const rowBytes = width * 4;
+
+  const alignedBaseline = Buffer.alloc(alignedHeight * rowBytes);
+  const alignedCurrent = Buffer.alloc(alignedHeight * rowBytes);
+
+  for (let i = 0; i < matchedOps.length; i++) {
+    const { idx } = matchedOps[i];
+    const bRow = alignment.baselineRows[idx];
+    const cRow = alignment.currentRows[idx];
+
+    // Copy baseline row
+    const bStart = bRow * rowBytes;
+    Buffer.from(baselineData.buffer, baselineData.byteOffset + bStart, rowBytes)
+      .copy(alignedBaseline, i * rowBytes);
+
+    // Copy current row
+    const cStart = cRow * rowBytes;
+    Buffer.from(currentData.buffer, currentData.byteOffset + cStart, rowBytes)
+      .copy(alignedCurrent, i * rowBytes);
+  }
+
+  return { alignedBaseline, alignedCurrent, alignedHeight };
+}
+
+/**
+ * Generate a shift-aware diff image that shows:
+ * - Green tinted rows for insertions (new content in current)
+ * - Red tinted rows for deletions (removed content from baseline)
+ * - Standard pixelmatch diff for matched rows that actually changed
+ */
+function buildShiftAwareDiffImage(
+  baselineData: Buffer | Uint8Array,
+  currentData: Buffer | Uint8Array,
+  alignedDiffData: Buffer | Uint8Array,
+  width: number,
+  alignment: AlignmentResult
+): PNG {
+  const totalHeight = alignment.ops.length;
+  const diffImage = new PNG({ width, height: totalHeight });
+  const rowBytes = width * 4;
+
+  let matchIdx = 0;
+
+  for (let i = 0; i < alignment.ops.length; i++) {
+    const op = alignment.ops[i];
+    const destOffset = i * rowBytes;
+
+    if (op === 'match') {
+      // Copy diff data for matched rows
+      Buffer.from(alignedDiffData.buffer, alignedDiffData.byteOffset + matchIdx * rowBytes, rowBytes)
+        .copy(diffImage.data as Buffer, destOffset);
+      matchIdx++;
+    } else if (op === 'insert') {
+      // Green tint for inserted rows (new content)
+      const cRow = alignment.currentRows[i];
+      const srcOffset = cRow * rowBytes;
+      for (let x = 0; x < width; x++) {
+        const si = srcOffset + x * 4;
+        const di = destOffset + x * 4;
+        // Blend with green overlay
+        diffImage.data[di] = Math.floor(currentData[si] * 0.4);       // R dimmed
+        diffImage.data[di + 1] = Math.min(255, Math.floor(currentData[si + 1] * 0.4 + 150)); // G boosted
+        diffImage.data[di + 2] = Math.floor(currentData[si + 2] * 0.4); // B dimmed
+        diffImage.data[di + 3] = 255;
+      }
+    } else {
+      // Red tint for deleted rows (removed content)
+      const bRow = alignment.baselineRows[i];
+      const srcOffset = bRow * rowBytes;
+      for (let x = 0; x < width; x++) {
+        const si = srcOffset + x * 4;
+        const di = destOffset + x * 4;
+        // Blend with red overlay
+        diffImage.data[di] = Math.min(255, Math.floor(baselineData[si] * 0.4 + 150));     // R boosted
+        diffImage.data[di + 1] = Math.floor(baselineData[si + 1] * 0.4); // G dimmed
+        diffImage.data[di + 2] = Math.floor(baselineData[si + 2] * 0.4); // B dimmed
+        diffImage.data[di + 3] = 255;
+      }
+    }
+  }
+
+  return diffImage;
+}
+
+/**
+ * Compare two PNG images and generate a diff image.
+ * When ignorePageShift is true and images have different heights (or a vertical
+ * content shift is detected), uses LCS row-alignment to exclude displaced content
+ * from the diff, reporting only genuinely changed pixels.
  */
 export async function generateDiff(
   baselinePath: string,
@@ -124,17 +477,30 @@ export async function generateDiff(
   outputDir: string,
   threshold = 0.1,
   includeAntiAliasing = false,
-  ignoreRegions?: Rectangle[]
+  ignoreRegions?: Rectangle[],
+  ignorePageShift = false
 ): Promise<DiffResult> {
   const baseline = PNG.sync.read(fs.readFileSync(baselinePath));
   const current = PNG.sync.read(fs.readFileSync(currentPath));
 
-  const { width, height } = baseline;
-
-  // Handle size mismatch - resize to baseline dimensions
-  if (width !== current.width || height !== current.height) {
-    throw new Error(`Image dimensions mismatch: baseline ${width}x${height}, current ${current.width}x${current.height}`);
+  if (!fs.existsSync(outputDir)) {
+    fs.mkdirSync(outputDir, { recursive: true });
   }
+
+  const hasSameSize = baseline.width === current.width && baseline.height === current.height;
+  const hasSameWidth = baseline.width === current.width;
+
+  // Use shift-aware diffing when enabled and widths match
+  if (ignorePageShift && hasSameWidth) {
+    return generateShiftAwareDiff(baseline, current, outputDir, threshold, includeAntiAliasing, ignoreRegions);
+  }
+
+  // Standard diff path: requires same dimensions
+  if (!hasSameSize) {
+    throw new Error(`Image dimensions mismatch: baseline ${baseline.width}x${baseline.height}, current ${current.width}x${current.height}`);
+  }
+
+  const { width, height } = baseline;
 
   // Blank out ignore regions in both images before comparison
   if (ignoreRegions && ignoreRegions.length > 0) {
@@ -159,34 +525,18 @@ export async function generateDiff(
   const diffFileName = `diff-${Date.now()}.png`;
   const diffImagePath = path.join(outputDir, diffFileName);
 
-  if (!fs.existsSync(outputDir)) {
-    fs.mkdirSync(outputDir, { recursive: true });
-  }
-
   fs.writeFileSync(diffImagePath, PNG.sync.write(diff));
 
   // Calculate metadata
   const changedRegions = findChangedRegions(diff.data, width, height);
 
-  // Calculate content-aware percentage:
-  // Instead of dividing by total pixels (which includes empty background),
-  // divide by the union of content areas from both images
   const baselineBg = detectBackgroundColor(baseline.data, width, height);
   const currentBg = detectBackgroundColor(current.data, width, height);
-
   const baselineContent = calculateContentArea(baseline.data, width, height, baselineBg);
   const currentContent = calculateContentArea(current.data, width, height, currentBg);
 
-  // Use the larger content area as the denominator for a more meaningful percentage
-  const contentArea = Math.max(
-    baselineContent.contentPixels,
-    currentContent.contentPixels,
-    1 // prevent division by zero
-  );
-
-  // Calculate percentage based on content area, not total image
+  const contentArea = Math.max(baselineContent.contentPixels, currentContent.contentPixels, 1);
   const contentPercentage = (numDiffPixels / contentArea) * 100;
-  // Cap at 100% since diff pixels can exceed content area when images are very different
   const percentageDifference = Math.min(contentPercentage, 100);
 
   const changeCategories = categorizeChanges(changedRegions, percentageDifference);
@@ -196,6 +546,136 @@ export async function generateDiff(
   return {
     pixelDifference: numDiffPixels,
     percentageDifference: Math.round(percentageDifference * 100) / 100,
+    diffImagePath,
+    metadata: {
+      changedRegions,
+      affectedComponents,
+      changeCategories,
+      pageShift,
+    },
+  };
+}
+
+/**
+ * Shift-aware diff: aligns images using LCS row matching, then runs pixelmatch
+ * only on matched (non-shifted) rows. Produces a diff image that color-codes
+ * insertions (green), deletions (red), and actual pixel changes (standard diff).
+ */
+async function generateShiftAwareDiff(
+  baseline: PNG,
+  current: PNG,
+  outputDir: string,
+  threshold: number,
+  includeAntiAliasing: boolean,
+  ignoreRegions?: Rectangle[]
+): Promise<DiffResult> {
+  const width = baseline.width;
+
+  // Blank out ignore regions before alignment hashing
+  if (ignoreRegions && ignoreRegions.length > 0) {
+    for (const region of ignoreRegions) {
+      blankRegion(baseline.data, baseline.width, baseline.height, region);
+      blankRegion(current.data, current.width, current.height, region);
+    }
+  }
+
+  // Align rows using LCS
+  const rawAlignment = alignRows(
+    baseline.data, baseline.width, baseline.height,
+    current.data, current.width, current.height
+  );
+
+  // Fuzzy-match nearby delete/insert pairs that are pixel-similar
+  const alignment = fuzzyMatchUnalignedRows(
+    rawAlignment, baseline.data, current.data, width
+  );
+
+  // Build aligned buffers containing only matched rows
+  const { alignedBaseline, alignedCurrent, alignedHeight } = buildAlignedImages(
+    baseline.data, current.data, width, alignment
+  );
+
+  // Run pixelmatch on aligned (matched) rows only
+  let numDiffPixels = 0;
+  let alignedDiffData: Buffer;
+
+  if (alignedHeight > 0) {
+    const alignedDiff = new PNG({ width, height: alignedHeight });
+    numDiffPixels = pixelmatch(
+      alignedBaseline,
+      alignedCurrent,
+      alignedDiff.data,
+      width,
+      alignedHeight,
+      { threshold, includeAA: includeAntiAliasing }
+    );
+    alignedDiffData = alignedDiff.data as Buffer;
+  } else {
+    alignedDiffData = Buffer.alloc(0);
+  }
+
+  // Build the full shift-aware diff image
+  const diffImage = buildShiftAwareDiffImage(
+    baseline.data, current.data, alignedDiffData, width, alignment
+  );
+
+  const diffFileName = `diff-${Date.now()}.png`;
+  const diffImagePath = path.join(outputDir, diffFileName);
+  fs.writeFileSync(diffImagePath, PNG.sync.write(diffImage));
+
+  // Calculate percentages: original (naive) vs adjusted (shift-excluded)
+  const baselineBg = detectBackgroundColor(baseline.data, baseline.width, baseline.height);
+  const currentBg = detectBackgroundColor(current.data, current.width, current.height);
+  const baselineContent = calculateContentArea(baseline.data, baseline.width, baseline.height, baselineBg);
+  const currentContent = calculateContentArea(current.data, current.width, current.height, currentBg);
+  const contentArea = Math.max(baselineContent.contentPixels, currentContent.contentPixels, 1);
+
+  // Adjusted percentage based only on matched-row diffs
+  const adjustedPercentage = Math.min((numDiffPixels / contentArea) * 100, 100);
+
+  // Estimate original percentage (what it would be without shift exclusion)
+  const totalShiftedPixels = (alignment.insertedRows + alignment.deletedRows) * width;
+  const originalPercentage = Math.min(((numDiffPixels + totalShiftedPixels) / contentArea) * 100, 100);
+
+  // Find changed regions from the aligned diff
+  const changedRegions = alignedHeight > 0
+    ? findChangedRegions(alignedDiffData, width, alignedHeight)
+    : [];
+
+  const changeCategories = categorizeChanges(changedRegions, adjustedPercentage);
+  const affectedComponents = detectAffectedComponents(changedRegions);
+
+  // Compute dominant shift direction
+  let dominantDeltaY = 0;
+  if (alignment.insertedRows > 0 && alignment.deletedRows === 0) {
+    dominantDeltaY = alignment.insertedRows; // content pushed down
+  } else if (alignment.deletedRows > 0 && alignment.insertedRows === 0) {
+    dominantDeltaY = -alignment.deletedRows; // content pulled up
+  } else {
+    dominantDeltaY = alignment.insertedRows - alignment.deletedRows;
+  }
+
+  const fuzzyMatchedCount = alignment.matchedRows - rawAlignment.matchedRows;
+  const shiftDetected = alignment.insertedRows > 0 || alignment.deletedRows > 0;
+  const confidence = shiftDetected
+    ? Math.round((alignment.matchedRows / alignment.ops.length) * 100) / 100
+    : 0;
+
+  const pageShift: PageShiftInfo = {
+    detected: shiftDetected,
+    deltaY: dominantDeltaY,
+    confidence,
+    excludedFromDiff: shiftDetected,
+    insertedRows: alignment.insertedRows,
+    deletedRows: alignment.deletedRows,
+    originalPercentage: Math.round(originalPercentage * 100) / 100,
+    adjustedPercentage: Math.round(adjustedPercentage * 100) / 100,
+    fuzzyMatchedRows: fuzzyMatchedCount > 0 ? fuzzyMatchedCount : undefined,
+  };
+
+  return {
+    pixelDifference: numDiffPixels,
+    percentageDifference: Math.round(adjustedPercentage * 100) / 100,
     diffImagePath,
     metadata: {
       changedRegions,
