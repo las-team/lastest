@@ -13,7 +13,6 @@ check the recorder and the runner so that they are compatible and identify the r
 ## in progress
 
 ## test
-Figma plugin
 Reference database for test data
 Snapshot Stabilization Engine
 VS Code extension
@@ -22,46 +21,20 @@ Publish lastest runner to npx npm
 Docker
 Gitlab
 CROSS_OS_CHROMIUM_ARGS & FONTS
-## features
 
  NEW: Page Shift Detection -- excludes vertical content shifts
   from diffs
 
-Playwright trace replay:
-Component specific testing
-Accessability re-check
+## features
+Explore and implement:
+  Playwright trace replay:
+  Component specific testing
 
-Tier 3 — Perceptual diffing engines
-  (replace/augment pixelmatch)
-  - Swap pixelmatch for SSIM or
-  Butteraugli in
-  src/lib/diff/generator.ts
-  - These algorithms ignore
-  sub-pixel anti-aliasing
-  differences that humans can't
-  see
-  - Argos calls this
-  "stabilization engine" —
-  Lastest2 could leapfrog with
-  structural similarity
-
-  Tier 4 — Text-region-aware
-  diffing
-  - Detect text regions (OCR
-  infrastructure already exists in
-   src/lib/playwright/ocr.ts)
-  - Apply higher tolerance to text
-   areas (where OS rendering
-  differs most) while keeping
-  strict pixel comparison for
-  images/layout
-
-
-Move to background what's possible
 Linting
 
-Electron app ~/.claude/plans/rippling-roaming-snail.md replan
 ## ideas
+Electron app ~/.claude/plans/rippling-roaming-snail.md replan
+Figma plugin
 Generate test data with AI
 Sitemap -flow
 Firecrawl?
