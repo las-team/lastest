@@ -15,7 +15,7 @@ import {
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
-import { Play, Trash2, Copy, Edit2, Clock, CheckCircle, XCircle, X, Save, Wrench, Wand2, Loader2, History, RotateCcw, ChevronDown, ChevronRight, Monitor, Video, AlertTriangle, Image } from 'lucide-react';
+import { Play, Trash2, Copy, Edit2, Clock, CheckCircle, XCircle, X, Save, Wrench, Wand2, Loader2, History, RotateCcw, ChevronDown, ChevronRight, Monitor, Video, AlertTriangle, Image, Bug } from 'lucide-react';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -382,6 +382,10 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
                           <DropdownMenuItem onClick={() => handleRun(false)}>
                             <Monitor className="h-4 w-4 mr-2" />
                             Run Headed
+                          </DropdownMenuItem>
+                          <DropdownMenuItem onClick={() => router.push(`/tests/${test.id}/debug`)}>
+                            <Bug className="h-4 w-4 mr-2" />
+                            Debug
                           </DropdownMenuItem>
                         </DropdownMenuContent>
                       </DropdownMenu>

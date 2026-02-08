@@ -39,6 +39,7 @@ export interface PageShiftInfo {
   deletedRows?: number;
   originalPercentage?: number;  // diff percentage before shift exclusion
   adjustedPercentage?: number;  // diff percentage after shift exclusion
+  fuzzyMatchedRows?: number;    // rows reclassified from insert/delete to match via fuzzy comparison
 }
 
 export interface AIDiffAnalysis {

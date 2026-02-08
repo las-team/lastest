@@ -17,7 +17,7 @@ import { applyDynamicMasking } from './dynamic-masking';
  * Allows tests to access app state like undo/redo stack length, Redux store, etc.
  * Requires target app to expose state on window (e.g., window.__APP_STATE__).
  */
-function createAppState(page: Page) {
+export function createAppState(page: Page) {
   return {
     /**
      * Get a value from the app's exposed state by dot-notation path.
@@ -95,7 +95,7 @@ function createAppState(page: Page) {
  * Supports Page-level assertions (toHaveURL, toHaveTitle), Locator assertions,
  * and generic value assertions (toHaveLength, toBe, toEqual, etc.)
  */
-function createExpect(timeout = 5000) {
+export function createExpect(timeout = 5000) {
   return function expect(target: unknown, message?: string) {
     // Check if target is a Page (has 'goto' method) vs Locator
     const isPage = typeof (target as { goto?: unknown })?.goto === 'function';
@@ -473,6 +473,30 @@ function createExpect(timeout = 5000) {
   };
 }
 import type { Test, TestResult, ActionSelector, SelectorConfig, PlaywrightSettings, NetworkRequest, EnvironmentConfig } from '@/lib/db/schema';
+
+/**
+ * Strip TypeScript type annotations from code so it can execute as plain JavaScript.
+ */
+export function stripTypeAnnotations(code: string): string {
+  let result = code;
+  // Remove variable type annotations: `const x: Type = ...` → `const x = ...`
+  // Handles generics like Array<string>, Record<string, number>, etc.
+  result = result.replace(
+    /\b(const|let|var)\s+(\w+)\s*:\s*[^=\n;]+(\s*=)/g,
+    '$1 $2$3'
+  );
+  // Remove type annotations on destructured assignments: `const { a, b }: Type = ...`
+  result = result.replace(
+    /\b(const|let|var)\s+(\{[^}]+\}|\[[^\]]+\])\s*:\s*[^=\n;]+(\s*=)/g,
+    '$1 $2$3'
+  );
+  // Remove `as Type` assertions (but not 'as' in other contexts like aliases)
+  result = result.replace(/\)\s+as\s+\w[\w<>\[\],\s|]*/g, ')');
+  result = result.replace(/(\w)\s+as\s+\w[\w<>\[\],\s|]*/g, '$1');
+  // Remove angle-bracket type assertions: `<Type>expr`
+  result = result.replace(/<\w[\w<>\[\],\s|]*>\s*(?=\(|[\w])/g, '');
+  return result;
+}
 import { getServerManager } from './server-manager';
 import { getSetupOrchestrator, testNeedsSetup } from '@/lib/setup/setup-orchestrator';
 import type { SetupContext, SetupResult } from '@/lib/setup/types';
@@ -831,8 +855,22 @@ export class PlaywrightRunner extends EventEmitter {
     let setupDurationMs = 0;
 
     try {
+      // If build-level setup captured storageState (cookies/localStorage),
+      // inject it into the new context so tests inherit the login session
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      let parsedStorageState: any;
+      if (this.setupContext?.storageState) {
+        try {
+          parsedStorageState = JSON.parse(this.setupContext.storageState);
+          console.log(`[test-context] Injecting storageState: ${parsedStorageState.cookies?.length ?? 0} cookies`);
+        } catch {
+          console.warn('[test-context] Failed to parse storageState');
+        }
+      }
+
       context = await this.browser.newContext({
         viewport: this.getViewport(),
+        ...(parsedStorageState ? { storageState: parsedStorageState } : {}),
       });
       page = await context.newPage();
 
@@ -959,10 +997,7 @@ export class PlaywrightRunner extends EventEmitter {
         }
 
         // Wait for page to settle after setup (e.g., login click + redirect)
-        // Setup may return before the browser dispatches the fetch, so
-        // waitForLoadState resolves instantly. Instead, wait for the URL to
-        // actually change (e.g., /login → /) which blocks until the POST
-        // completes and the redirect finishes loading.
+        // First, wait for URL change (login → redirect target)
         const setupPageUrl = page.url();
         try {
           await page.waitForURL(
@@ -971,6 +1006,43 @@ export class PlaywrightRunner extends EventEmitter {
           );
         } catch {
           // URL didn't change within timeout — setup didn't trigger navigation
+        }
+
+        // Then verify the session cookie actually exists before proceeding.
+        // The redirect may have completed but the Set-Cookie hasn't been
+        // processed by the browser yet.
+        try {
+          const ctx = page.context();
+          const deadline = Date.now() + 5000;
+          while (Date.now() < deadline) {
+            const cookies = await ctx.cookies();
+            const hasSession = cookies.some(c =>
+              c.name.includes('session') || c.name.includes('auth') || c.name.includes('token')
+            );
+            if (hasSession) {
+              console.log(`[per-test-setup] Session cookie found after setup (${cookies.length} total cookies)`);
+              break;
+            }
+            await page.waitForTimeout(200);
+          }
+        } catch {
+          // Cookie check failed — continue anyway
+        }
+
+        // Capture storageState after per-test setup so it can seed future contexts
+        if (!this.setupContext?.storageState) {
+          try {
+            const state = await page.context().storageState();
+            if (state.cookies.length > 0) {
+              if (!this.setupContext) {
+                this.setupContext = { baseUrl: envBaseUrl, variables: {} };
+              }
+              this.setupContext.storageState = JSON.stringify(state);
+              console.log(`[per-test-setup] Captured storageState: ${state.cookies.length} cookies`);
+            }
+          } catch {
+            // Ignore storageState capture errors
+          }
         }
       }
 
@@ -1205,24 +1277,7 @@ export class PlaywrightRunner extends EventEmitter {
    * Strip TypeScript type annotations from code so it can execute as plain JavaScript.
    */
   private stripTypeAnnotations(code: string): string {
-    let result = code;
-    // Remove variable type annotations: `const x: Type = ...` → `const x = ...`
-    // Handles generics like Array<string>, Record<string, number>, etc.
-    result = result.replace(
-      /\b(const|let|var)\s+(\w+)\s*:\s*[^=\n;]+(\s*=)/g,
-      '$1 $2$3'
-    );
-    // Remove type annotations on destructured assignments: `const { a, b }: Type = ...`
-    result = result.replace(
-      /\b(const|let|var)\s+(\{[^}]+\}|\[[^\]]+\])\s*:\s*[^=\n;]+(\s*=)/g,
-      '$1 $2$3'
-    );
-    // Remove `as Type` assertions (but not 'as' in other contexts like aliases)
-    result = result.replace(/\)\s+as\s+\w[\w<>\[\],\s|]*/g, ')');
-    result = result.replace(/(\w)\s+as\s+\w[\w<>\[\],\s|]*/g, '$1');
-    // Remove angle-bracket type assertions: `<Type>expr`
-    result = result.replace(/<\w[\w<>\[\],\s|]*>\s*(?=\(|[\w])/g, '');
-    return result;
+    return stripTypeAnnotations(code);
   }
 
   private async executeTestCode(page: Page, test: Test, runId: string, screenshotPath: string, onStepLabel?: (label: string) => void): Promise<void> {

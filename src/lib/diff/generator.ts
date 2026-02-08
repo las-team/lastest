@@ -141,6 +141,37 @@ function hashRow(data: Buffer | Uint8Array, width: number, row: number): string 
 }
 
 /**
+ * Compare two pixel rows and return the fraction of pixels that differ (0.0–1.0).
+ * Uses a tolerance on the per-channel sum to ignore anti-aliasing noise.
+ */
+function computeRowDiffRatio(
+  dataA: Buffer | Uint8Array,
+  dataB: Buffer | Uint8Array,
+  width: number,
+  rowA: number,
+  rowB: number,
+  tolerance: number = 30
+): number {
+  const rowBytes = width * 4;
+  const startA = rowA * rowBytes;
+  const startB = rowB * rowBytes;
+  let diffCount = 0;
+
+  for (let x = 0; x < width; x++) {
+    const iA = startA + x * 4;
+    const iB = startB + x * 4;
+    const dr = Math.abs(dataA[iA] - dataB[iB]);
+    const dg = Math.abs(dataA[iA + 1] - dataB[iB + 1]);
+    const db = Math.abs(dataA[iA + 2] - dataB[iB + 2]);
+    if (dr + dg + db > tolerance) {
+      diffCount++;
+    }
+  }
+
+  return diffCount / width;
+}
+
+/**
  * LCS-based row alignment algorithm.
  * Hashes each pixel row in both images, then computes the longest common
  * subsequence to find the optimal vertical alignment. Rows present in LCS
@@ -235,6 +266,102 @@ function alignRows(
   const matchedRows = ops.filter(o => o === 'match').length;
 
   return { ops, baselineRows, currentRows, insertedRows, deletedRows, matchedRows };
+}
+
+/**
+ * Post-process an alignment result to fuzzy-match nearby delete/insert pairs
+ * whose pixel data is similar. Rows that differ by less than `maxDiffRatio`
+ * are reclassified as 'match' so they go through pixelmatch instead of being
+ * painted solid red/green.
+ */
+function fuzzyMatchUnalignedRows(
+  alignment: AlignmentResult,
+  baselineData: Buffer | Uint8Array,
+  currentData: Buffer | Uint8Array,
+  width: number,
+  maxDiffRatio: number = 0.35,
+  windowSize: number = 5
+): AlignmentResult {
+  const ops = [...alignment.ops];
+  const baselineRows = [...alignment.baselineRows];
+  const currentRows = [...alignment.currentRows];
+
+  // Collect indices of unpaired deletes and inserts
+  const deleteIndices: number[] = [];
+  const insertIndices: number[] = [];
+  for (let i = 0; i < ops.length; i++) {
+    if (ops[i] === 'delete') deleteIndices.push(i);
+    else if (ops[i] === 'insert') insertIndices.push(i);
+  }
+
+  // Nothing to fuzzy-match
+  if (deleteIndices.length === 0 || insertIndices.length === 0) {
+    return alignment;
+  }
+
+  const usedInserts = new Set<number>();
+
+  for (const di of deleteIndices) {
+    const bRow = baselineRows[di];
+    if (bRow === -1) continue;
+
+    let bestIdx = -1;
+    let bestRatio = maxDiffRatio;
+
+    // Search for the closest unpaired insert within the window
+    for (const ii of insertIndices) {
+      if (usedInserts.has(ii)) continue;
+      if (Math.abs(ii - di) > windowSize) continue;
+
+      const cRow = currentRows[ii];
+      if (cRow === -1) continue;
+
+      const ratio = computeRowDiffRatio(baselineData, currentData, width, bRow, cRow);
+      if (ratio < bestRatio) {
+        bestRatio = ratio;
+        bestIdx = ii;
+      }
+    }
+
+    if (bestIdx !== -1) {
+      // Reclassify: keep whichever index comes first as 'match', remove the other
+      const first = Math.min(di, bestIdx);
+      const second = Math.max(di, bestIdx);
+
+      // The 'match' op gets both row references
+      ops[first] = 'match';
+      baselineRows[first] = bRow;
+      currentRows[first] = currentRows[bestIdx];
+
+      // Mark the second op for removal
+      ops[second] = 'match' as AlignOp; // placeholder — will be spliced
+      baselineRows[second] = -2; // sentinel for removal
+      currentRows[second] = -2;
+
+      usedInserts.add(bestIdx);
+    }
+  }
+
+  // Remove sentinel entries (spliced in reverse to preserve indices)
+  const finalOps: AlignOp[] = [];
+  const finalBaselineRows: number[] = [];
+  const finalCurrentRows: number[] = [];
+
+  for (let i = 0; i < ops.length; i++) {
+    if (baselineRows[i] === -2 && currentRows[i] === -2) continue;
+    finalOps.push(ops[i]);
+    finalBaselineRows.push(baselineRows[i]);
+    finalCurrentRows.push(currentRows[i]);
+  }
+
+  return {
+    ops: finalOps,
+    baselineRows: finalBaselineRows,
+    currentRows: finalCurrentRows,
+    insertedRows: finalOps.filter(o => o === 'insert').length,
+    deletedRows: finalOps.filter(o => o === 'delete').length,
+    matchedRows: finalOps.filter(o => o === 'match').length,
+  };
 }
 
 /**
@@ -453,9 +580,14 @@ async function generateShiftAwareDiff(
   }
 
   // Align rows using LCS
-  const alignment = alignRows(
+  const rawAlignment = alignRows(
     baseline.data, baseline.width, baseline.height,
     current.data, current.width, current.height
+  );
+
+  // Fuzzy-match nearby delete/insert pairs that are pixel-similar
+  const alignment = fuzzyMatchUnalignedRows(
+    rawAlignment, baseline.data, current.data, width
   );
 
   // Build aligned buffers containing only matched rows
@@ -523,6 +655,7 @@ async function generateShiftAwareDiff(
     dominantDeltaY = alignment.insertedRows - alignment.deletedRows;
   }
 
+  const fuzzyMatchedCount = alignment.matchedRows - rawAlignment.matchedRows;
   const shiftDetected = alignment.insertedRows > 0 || alignment.deletedRows > 0;
   const confidence = shiftDetected
     ? Math.round((alignment.matchedRows / alignment.ops.length) * 100) / 100
@@ -537,6 +670,7 @@ async function generateShiftAwareDiff(
     deletedRows: alignment.deletedRows,
     originalPercentage: Math.round(originalPercentage * 100) / 100,
     adjustedPercentage: Math.round(adjustedPercentage * 100) / 100,
+    fuzzyMatchedRows: fuzzyMatchedCount > 0 ? fuzzyMatchedCount : undefined,
   };
 
   return {
