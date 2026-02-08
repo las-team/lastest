@@ -31,6 +31,9 @@ export function DiffSensitivityCard({
   const [includeAntiAliasing, setIncludeAntiAliasing] = useState(
     settings.includeAntiAliasing ?? DEFAULT_DIFF_THRESHOLDS.includeAntiAliasing
   );
+  const [ignorePageShift, setIgnorePageShift] = useState(
+    settings.ignorePageShift ?? DEFAULT_DIFF_THRESHOLDS.ignorePageShift
+  );
 
   const debounceRef = useRef<NodeJS.Timeout | null>(null);
 
@@ -39,6 +42,7 @@ export function DiffSensitivityCard({
     unchangedThreshold: settings.unchangedThreshold ?? DEFAULT_DIFF_THRESHOLDS.unchangedThreshold,
     flakyThreshold: settings.flakyThreshold ?? DEFAULT_DIFF_THRESHOLDS.flakyThreshold,
     includeAntiAliasing: settings.includeAntiAliasing ?? DEFAULT_DIFF_THRESHOLDS.includeAntiAliasing,
+    ignorePageShift: settings.ignorePageShift ?? DEFAULT_DIFF_THRESHOLDS.ignorePageShift,
   });
 
   const doSave = useCallback(() => {
@@ -48,10 +52,11 @@ export function DiffSensitivityCard({
         unchangedThreshold,
         flakyThreshold,
         includeAntiAliasing,
+        ignorePageShift,
       });
       toast.success('Diff sensitivity settings saved');
     });
-  }, [repositoryId, unchangedThreshold, flakyThreshold, includeAntiAliasing]);
+  }, [repositoryId, unchangedThreshold, flakyThreshold, includeAntiAliasing, ignorePageShift]);
 
   // Auto-save with debounce - only when values differ from original props
   useEffect(() => {
@@ -59,7 +64,8 @@ export function DiffSensitivityCard({
     const hasChanges =
       unchangedThreshold !== orig.unchangedThreshold ||
       flakyThreshold !== orig.flakyThreshold ||
-      includeAntiAliasing !== orig.includeAntiAliasing;
+      includeAntiAliasing !== orig.includeAntiAliasing ||
+      ignorePageShift !== orig.ignorePageShift;
 
     if (!hasChanges) return;
 
@@ -76,7 +82,7 @@ export function DiffSensitivityCard({
         clearTimeout(debounceRef.current);
       }
     };
-  }, [unchangedThreshold, flakyThreshold, includeAntiAliasing, doSave]);
+  }, [unchangedThreshold, flakyThreshold, includeAntiAliasing, ignorePageShift, doSave]);
 
   const handleReset = () => {
     startTransition(async () => {
@@ -84,6 +90,7 @@ export function DiffSensitivityCard({
       setUnchangedThreshold(DEFAULT_DIFF_THRESHOLDS.unchangedThreshold);
       setFlakyThreshold(DEFAULT_DIFF_THRESHOLDS.flakyThreshold);
       setIncludeAntiAliasing(DEFAULT_DIFF_THRESHOLDS.includeAntiAliasing);
+      setIgnorePageShift(DEFAULT_DIFF_THRESHOLDS.ignorePageShift);
       toast.success('Diff sensitivity reset to defaults');
     });
   };
@@ -243,6 +250,20 @@ export function DiffSensitivityCard({
           <Switch
             checked={includeAntiAliasing}
             onCheckedChange={setIncludeAntiAliasing}
+          />
+        </div>
+
+        {/* Page Shift Detection Toggle */}
+        <div className="flex items-center justify-between p-3 bg-muted rounded-lg">
+          <div className="space-y-0.5">
+            <Label className="text-sm font-medium">Ignore Page Shifts</Label>
+            <p className="text-xs text-muted-foreground">
+              Exclude vertical content shifts from diffs. When content is inserted or removed (e.g. a banner), only genuinely changed pixels are counted — displaced content is aligned and excluded.
+            </p>
+          </div>
+          <Switch
+            checked={ignorePageShift}
+            onCheckedChange={setIgnorePageShift}
           />
         </div>
 

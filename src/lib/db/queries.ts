@@ -1094,6 +1094,7 @@ export async function getDiffSensitivitySettings(repositoryId?: string | null) {
     unchangedThreshold: DEFAULT_DIFF_THRESHOLDS.unchangedThreshold,
     flakyThreshold: DEFAULT_DIFF_THRESHOLDS.flakyThreshold,
     includeAntiAliasing: DEFAULT_DIFF_THRESHOLDS.includeAntiAliasing,
+    ignorePageShift: DEFAULT_DIFF_THRESHOLDS.ignorePageShift,
     createdAt: null,
     updatedAt: null,
   };

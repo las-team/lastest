@@ -538,6 +538,7 @@ async function processVisualDiff(
   const unchangedThreshold = settings.unchangedThreshold ?? 1;
   const flakyThreshold = settings.flakyThreshold ?? 10;
   const includeAntiAliasing = settings.includeAntiAliasing ?? false;
+  const ignorePageShift = settings.ignorePageShift ?? false;
 
   // Fetch ignore regions for this test
   const testIgnoreRegions = await queries.getIgnoreRegions(testId);
@@ -667,7 +668,8 @@ async function processVisualDiff(
       DIFFS_DIR,
       0.1,
       includeAntiAliasing,
-      ignoreRects
+      ignoreRects,
+      ignorePageShift
     );
 
     const pct = diffResult.percentageDifference;
