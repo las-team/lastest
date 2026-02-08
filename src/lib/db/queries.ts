@@ -107,7 +107,7 @@ import type {
 } from './schema';
 
 export { DEFAULT_SELECTOR_PRIORITY, DEFAULT_DIFF_THRESHOLDS, DEFAULT_AI_SETTINGS, DEFAULT_RECORDING_ENGINES, DEFAULT_NOTIFICATION_SETTINGS };
-import { eq, desc, and, inArray, or, gte, lt, isNull } from 'drizzle-orm';
+import { eq, desc, and, inArray, or, gte, lt, isNull, isNotNull, sql } from 'drizzle-orm';
 import { v4 as uuid } from 'uuid';
 
 // Functional Areas
@@ -198,8 +198,163 @@ export async function deleteTest(id: string) {
   await db.delete(baselines).where(eq(baselines.testId, id));
   await db.delete(visualDiffs).where(eq(visualDiffs.testId, id));
   await db.delete(testResults).where(eq(testResults.testId, id));
+
+  // Clear setup test references before deletion
+  // 1. Clear from other tests using this as setupTestId
+  await db.update(tests)
+    .set({ setupTestId: null })
+    .where(eq(tests.setupTestId, id));
+
+  // 2. Clear from repositories using this as defaultSetupTestId
+  await db.update(repositories)
+    .set({ defaultSetupTestId: null })
+    .where(eq(repositories.defaultSetupTestId, id));
+
+  // 3. Clear from suites using this as setupTestId
+  await db.update(suites)
+    .set({ setupTestId: null })
+    .where(eq(suites.setupTestId, id));
+
+  // 4. Clear from builds using this as buildSetupTestId
+  await db.update(builds)
+    .set({ buildSetupTestId: null })
+    .where(eq(builds.buildSetupTestId, id));
+
+  // 5. Clean up setupOverrides that reference this test in extraSteps
+  const testsWithOverrides = await db.select()
+    .from(tests)
+    .where(isNotNull(tests.setupOverrides));
+
+  for (const test of testsWithOverrides) {
+    if (test.setupOverrides && test.setupOverrides.extraSteps) {
+      const filteredSteps = test.setupOverrides.extraSteps.filter(
+        step => step.stepType !== 'test' || step.testId !== id
+      );
+
+      // Only update if we actually removed steps
+      if (filteredSteps.length !== test.setupOverrides.extraSteps.length) {
+        await db.update(tests)
+          .set({
+            setupOverrides: {
+              ...test.setupOverrides,
+              extraSteps: filteredSteps
+            }
+          })
+          .where(eq(tests.id, test.id));
+      }
+    }
+  }
+
+  // Note: defaultSetupSteps.testId will cascade automatically due to FK constraint
+
   // Now delete the test
   await db.delete(tests).where(eq(tests.id, id));
+}
+
+// Clean up orphaned setup references (setup tests/scripts that no longer exist)
+export async function cleanupOrphanedSetupReferences() {
+  const allTests = await db.select({ id: sql<string>`${tests.id}` }).from(tests);
+  const testIds = new Set(allTests.map(t => t.id));
+
+  const allScripts = await db.select({ id: sql<string>`${setupScripts.id}` }).from(setupScripts);
+  const scriptIds = new Set(allScripts.map(s => s.id));
+
+  let cleanedCount = 0;
+
+  // 1. Clean tests.setupTestId
+  const testsWithSetup = await db.select().from(tests).where(isNotNull(tests.setupTestId));
+  for (const test of testsWithSetup) {
+    if (test.setupTestId && !testIds.has(test.setupTestId)) {
+      await db.update(tests).set({ setupTestId: null }).where(eq(tests.id, test.id));
+      cleanedCount++;
+    }
+  }
+
+  // 2. Clean tests.setupScriptId
+  const testsWithScript = await db.select().from(tests).where(isNotNull(tests.setupScriptId));
+  for (const test of testsWithScript) {
+    if (test.setupScriptId && !scriptIds.has(test.setupScriptId)) {
+      await db.update(tests).set({ setupScriptId: null }).where(eq(tests.id, test.id));
+      cleanedCount++;
+    }
+  }
+
+  // 3. Clean repositories.defaultSetupTestId
+  const reposWithSetupTest = await db.select().from(repositories).where(isNotNull(repositories.defaultSetupTestId));
+  for (const repo of reposWithSetupTest) {
+    if (repo.defaultSetupTestId && !testIds.has(repo.defaultSetupTestId)) {
+      await db.update(repositories).set({ defaultSetupTestId: null }).where(eq(repositories.id, repo.id));
+      cleanedCount++;
+    }
+  }
+
+  // 4. Clean repositories.defaultSetupScriptId
+  const reposWithSetupScript = await db.select().from(repositories).where(isNotNull(repositories.defaultSetupScriptId));
+  for (const repo of reposWithSetupScript) {
+    if (repo.defaultSetupScriptId && !scriptIds.has(repo.defaultSetupScriptId)) {
+      await db.update(repositories).set({ defaultSetupScriptId: null }).where(eq(repositories.id, repo.id));
+      cleanedCount++;
+    }
+  }
+
+  // 5. Clean suites.setupTestId
+  const suitesWithSetupTest = await db.select().from(suites).where(isNotNull(suites.setupTestId));
+  for (const suite of suitesWithSetupTest) {
+    if (suite.setupTestId && !testIds.has(suite.setupTestId)) {
+      await db.update(suites).set({ setupTestId: null }).where(eq(suites.id, suite.id));
+      cleanedCount++;
+    }
+  }
+
+  // 6. Clean suites.setupScriptId
+  const suitesWithSetupScript = await db.select().from(suites).where(isNotNull(suites.setupScriptId));
+  for (const suite of suitesWithSetupScript) {
+    if (suite.setupScriptId && !scriptIds.has(suite.setupScriptId)) {
+      await db.update(suites).set({ setupScriptId: null }).where(eq(suites.id, suite.id));
+      cleanedCount++;
+    }
+  }
+
+  // 7. Clean builds.buildSetupTestId
+  const buildsWithSetupTest = await db.select().from(builds).where(isNotNull(builds.buildSetupTestId));
+  for (const build of buildsWithSetupTest) {
+    if (build.buildSetupTestId && !testIds.has(build.buildSetupTestId)) {
+      await db.update(builds).set({ buildSetupTestId: null }).where(eq(builds.id, build.id));
+      cleanedCount++;
+    }
+  }
+
+  // 8. Clean builds.buildSetupScriptId
+  const buildsWithSetupScript = await db.select().from(builds).where(isNotNull(builds.buildSetupScriptId));
+  for (const build of buildsWithSetupScript) {
+    if (build.buildSetupScriptId && !scriptIds.has(build.buildSetupScriptId)) {
+      await db.update(builds).set({ buildSetupScriptId: null }).where(eq(builds.id, build.id));
+      cleanedCount++;
+    }
+  }
+
+  // 9. Clean setupOverrides.extraSteps
+  const testsWithOverrides = await db.select().from(tests).where(isNotNull(tests.setupOverrides));
+  for (const test of testsWithOverrides) {
+    if (test.setupOverrides && test.setupOverrides.extraSteps) {
+      const filteredSteps = test.setupOverrides.extraSteps.filter(step => {
+        if (step.stepType === 'test' && step.testId && !testIds.has(step.testId)) return false;
+        if (step.stepType === 'script' && step.scriptId && !scriptIds.has(step.scriptId)) return false;
+        return true;
+      });
+
+      if (filteredSteps.length !== test.setupOverrides.extraSteps.length) {
+        await db.update(tests)
+          .set({ setupOverrides: { ...test.setupOverrides, extraSteps: filteredSteps } })
+          .where(eq(tests.id, test.id));
+        cleanedCount++;
+      }
+    }
+  }
+
+  // Note: defaultSetupSteps cascade deletes automatically via FK
+
+  return { cleanedCount };
 }
 
 // Upsert test by targetUrl within a functional area (for auto-generated tests)
