@@ -597,6 +597,8 @@ export const DEFAULT_AI_SETTINGS = {
   aiDiffingEnabled: false,
   aiDiffingProvider: 'same-as-test-gen' as AIDiffingProvider,
   aiDiffingModel: 'anthropic/claude-sonnet-4-5-20250929',
+  aiDiffingOllamaBaseUrl: 'http://localhost:11434',
+  aiDiffingOllamaModel: '',
 };
 
 // AI Prompt Logging for debugging and auditing

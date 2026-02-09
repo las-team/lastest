@@ -92,7 +92,18 @@ export class TestRunner {
       this.browser = await chromium.launch({ headless: true });
 
       const viewport = command.viewport || { width: 1280, height: 720 };
-      context = await this.browser.newContext({ viewport });
+      // Inject storageState from setup scripts (e.g. login session cookies/localStorage)
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      let parsedStorageState: any;
+      if (command.storageState) {
+        try {
+          parsedStorageState = JSON.parse(command.storageState);
+          this.log('info', `Injecting storageState: ${parsedStorageState.cookies?.length ?? 0} cookies, ${parsedStorageState.origins?.length ?? 0} origins`);
+        } catch (e) {
+          this.log('warn', `Failed to parse storageState: ${e}`);
+        }
+      }
+      context = await this.browser.newContext({ viewport, ...(parsedStorageState ? { storageState: parsedStorageState } : {}) });
       page = await context.newPage();
 
       this.log('info', `Browser launched, viewport: ${viewport.width}x${viewport.height}`);

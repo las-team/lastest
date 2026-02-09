@@ -59,6 +59,8 @@ export interface RunTestCommandPayload {
     height: number;
   };
   serverConfig?: ServerConfig;
+  storageState?: string; // Serialized JSON from page.context().storageState() — carries auth session
+  setupVariables?: Record<string, unknown>; // Variables from setup scripts
 }
 
 export interface RunTestCommand extends BaseMessage {

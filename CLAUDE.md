@@ -21,6 +21,7 @@ pnpm build        # Production build
 pnpm lint         # Run ESLint
 pnpm test         # Run unit tests (vitest, single run)
 pnpm test:watch   # Run unit tests in watch mode
+pnpm test -- src/lib/diff  # Run tests in a specific directory
 pnpm db:studio    # Open Drizzle Studio for database inspection
 pnpm db:reset     # Reset database (removes SQLite DB + screenshots/baselines)
 pnpm db:push      # Push schema changes to database
@@ -83,7 +84,10 @@ Visual regression testing platform built with Next.js 16 App Router.
 - `src/lib/db/` - Drizzle ORM schema and queries (SQLite with WAL mode)
 - `src/lib/ai/` - AI test generation (Claude CLI, OpenRouter, or Claude Agent SDK)
 - `src/lib/scanner/` - Route discovery from source code
+- `src/lib/setup/` - Setup orchestrator for test prerequisites (login flows, API seeding, script execution)
 - `src/server/actions/` - Server actions for all domain operations
+- `packages/runner/` - Remote test runner CLI (`lastest2-runner`)
+- `packages/vscode-extension/` - VS Code extension
 
 ### Data Model
 
@@ -101,7 +105,7 @@ Visual regression testing platform built with Next.js 16 App Router.
 - **PlaywrightSettings** → browser, viewport, headless mode, selector priority, animation freezing
 - **EnvironmentConfigs** → managed server startup settings (manual vs auto-start)
 - **DiffSensitivitySettings** → thresholds for unchanged/flaky classification
-- **AISettings** → provider selection (claude-cli, openrouter, claude-agent-sdk)
+- **AISettings** → provider selection (claude-cli, openrouter, claude-agent-sdk, anthropic-direct)
 - **NotificationSettings** → Slack/Discord webhooks, GitHub PR comments
 
 **Discovery:**
@@ -179,3 +183,4 @@ Uses `better-auth` with database sessions. Supports:
 - `VisualDiffWithTestStatus` type must stay in sync with `getVisualDiffsWithTestStatus` query select
 - Pre-existing lint warnings (~119) — new code should pass clean
 - Schema type exports use `$inferSelect` / `$inferInsert` patterns
+- `pnpm build` may have a pre-existing type error in `ai-settings-card.tsx` related to Ollama fields — verify errors are from your changes before debugging

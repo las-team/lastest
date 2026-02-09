@@ -43,6 +43,7 @@ export interface ExecutionOptions {
   playwrightSettings?: PlaywrightSettings | null;
   runnerId?: string; // 'local' or specific runner ID - if set, overrides mode detection
   maxParallelTests?: number; // Override parallel test setting (used for remote runners)
+  setupContext?: { storageState?: string; variables?: Record<string, unknown> }; // Auth session + variables from setup scripts
 }
 
 export interface ExecutionProgress {
@@ -205,6 +206,8 @@ async function executeViaRunner(
       timeout: options.playwrightSettings?.navigationTimeout || 30000,
       repositoryId: options.repositoryId || undefined,
       viewport,
+      storageState: options.setupContext?.storageState,
+      setupVariables: options.setupContext?.variables,
     });
 
     // Queue command for runner (polling mode)

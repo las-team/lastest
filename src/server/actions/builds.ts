@@ -391,6 +391,10 @@ async function runBuildAsync(
         environmentConfig: envConfig,
         playwrightSettings,
         maxParallelTests,
+        setupContext: {
+          storageState: setupContext.storageState,
+          variables: setupContext.variables,
+        },
       }, onProgress, onResult);
     } else {
       // Local uses maxParallelTests from playwrightSettings (set via runner.setSettings)
