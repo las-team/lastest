@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useTransition } from 'react';
+import { useState, useTransition, useEffect } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -13,6 +13,7 @@ import {
   FileText,
   ChevronDown,
   ChevronRight,
+  ChevronLeft,
   CheckCircle2,
   XCircle,
   Clock,
@@ -46,9 +47,17 @@ function formatTimeAgo(date: Date | null): string {
   return `${diffDays}d ago`;
 }
 
+const PAGE_SIZE = 10;
+
 export function AILogsCard({ logs, repositoryId }: AILogsCardProps) {
   const [isPending, startTransition] = useTransition();
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [currentPage, setCurrentPage] = useState(0);
+
+  useEffect(() => { setCurrentPage(0); }, [logs.length]);
+
+  const totalPages = Math.max(1, Math.ceil(logs.length / PAGE_SIZE));
+  const paginatedLogs = logs.slice(currentPage * PAGE_SIZE, (currentPage + 1) * PAGE_SIZE);
 
   const toggleExpand = (id: string) => {
     setExpandedId((prev) => (prev === id ? null : id));
@@ -116,8 +125,9 @@ export function AILogsCard({ logs, repositoryId }: AILogsCardProps) {
             No AI logs yet. Logs will appear here when you use AI features.
           </div>
         ) : (
+          <>
           <div className="border rounded-lg overflow-hidden divide-y">
-            {logs.map((log) => (
+            {paginatedLogs.map((log) => (
               <div key={log.id}>
                 {/* Row Header */}
                 <div
@@ -221,6 +231,37 @@ export function AILogsCard({ logs, repositoryId }: AILogsCardProps) {
               </div>
             ))}
           </div>
+
+          {/* Pagination */}
+          {totalPages > 1 && (
+            <div className="flex items-center justify-between pt-2">
+              <span className="text-sm text-muted-foreground">
+                {currentPage * PAGE_SIZE + 1}-{Math.min((currentPage + 1) * PAGE_SIZE, logs.length)} of {logs.length}
+              </span>
+              <div className="flex items-center gap-1">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => { setCurrentPage((p) => p - 1); setExpandedId(null); }}
+                  disabled={currentPage === 0}
+                >
+                  <ChevronLeft className="w-4 h-4" />
+                </Button>
+                <span className="text-sm px-2">
+                  {currentPage + 1} / {totalPages}
+                </span>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => { setCurrentPage((p) => p + 1); setExpandedId(null); }}
+                  disabled={currentPage >= totalPages - 1}
+                >
+                  <ChevronRight className="w-4 h-4" />
+                </Button>
+              </div>
+            </div>
+          )}
+          </>
         )}
       </CardContent>
     </Card>

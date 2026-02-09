@@ -6,8 +6,8 @@ Publish lastest runner to npx npm
 Docker
 Gitlab
 ## features
-Component specific testing
 ## ideas
+Component specific testing
 Electron app ~/.claude/plans/rippling-roaming-snail.md replan
 Figma plugin
 Generate test data with AI
@@ -21,7 +21,6 @@ Bugriport
 Import from prior tools?
 ### UX
 ## bugs
-Timestamp fixing
 ## marketing
 Support https://github.com/excalidraw/excalidraw/tree/master/packages/excalidraw/tests
 

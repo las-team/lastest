@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from '@/components/ui/resizable';
+import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import {
   Play,
   StepForward,
@@ -18,11 +19,14 @@ import {
   Loader2,
   Pause,
   FastForward,
+  FileSearch,
+  Globe,
+  Terminal,
 } from 'lucide-react';
-import { startDebugSession, getDebugState, sendDebugCommand, stopDebugSession } from '@/server/actions/debug';
+import { startDebugSession, getDebugState, sendDebugCommand, stopDebugSession, flushDebugTrace } from '@/server/actions/debug';
 import { toast } from 'sonner';
 import type { Test } from '@/lib/db/schema';
-import type { DebugState } from '@/lib/playwright/debug-runner';
+import type { DebugState, DebugNetworkEntry, DebugConsoleEntry } from '@/lib/playwright/debug-runner';
 
 interface DebugClientProps {
   test: Test;
@@ -244,6 +248,29 @@ export function DebugClient({ test, repositoryId }: DebugClientProps) {
           >
             <Square className="h-4 w-4" />
           </Button>
+          <div className="w-px h-5 bg-border mx-1" />
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={async () => {
+              if (!sessionId) return;
+              const result = await flushDebugTrace(sessionId);
+              const traceUrl = result.url || state?.traceUrl;
+              if (traceUrl) {
+                window.open(
+                  `https://trace.playwright.dev/?trace=${window.location.origin}${traceUrl}`,
+                  '_blank'
+                );
+              } else {
+                toast.error('No trace available');
+              }
+            }}
+            disabled={!sessionId}
+            title="Export Playwright Trace"
+          >
+            <FileSearch className="h-4 w-4 mr-1" />
+            Trace
+          </Button>
         </div>
       </div>
 
@@ -309,105 +336,130 @@ export function DebugClient({ test, repositoryId }: DebugClientProps) {
 
           <ResizableHandle withHandle />
 
-          {/* Right Panel — Steps & Results */}
+          {/* Right Panel — Tabbed: Steps / Network / Console */}
           <ResizablePanel defaultSize={40} minSize={20}>
-            <div className="flex flex-col h-full">
-              <div className="px-3 py-1.5 border-b bg-muted/50">
-                <span className="text-xs font-medium text-muted-foreground">Steps</span>
+            <Tabs defaultValue="steps" className="flex flex-col h-full gap-0">
+              <div className="px-2 py-1.5 border-b bg-muted/50">
+                <TabsList className="h-7">
+                  <TabsTrigger value="steps" className="text-xs px-2 py-0.5 h-6">
+                    Steps
+                  </TabsTrigger>
+                  <TabsTrigger value="network" className="text-xs px-2 py-0.5 h-6">
+                    <Globe className="h-3 w-3 mr-1" />
+                    Network{(state?.networkEntries?.length ?? 0) > 0 && ` (${state!.networkEntries.length})`}
+                  </TabsTrigger>
+                  <TabsTrigger value="console" className="text-xs px-2 py-0.5 h-6">
+                    <Terminal className="h-3 w-3 mr-1" />
+                    Console{(state?.consoleEntries?.length ?? 0) > 0 && ` (${state!.consoleEntries.length})`}
+                  </TabsTrigger>
+                </TabsList>
               </div>
 
-              {/* Error banner */}
-              {isError && state?.error && (
-                <div className="mx-3 mt-2 p-2 rounded bg-destructive/10 border border-destructive/20">
-                  <p className="text-xs text-destructive font-mono">{state.error}</p>
-                </div>
-              )}
+              {/* Steps Tab */}
+              <TabsContent value="steps" className="flex flex-col flex-1 min-h-0 mt-0">
+                {/* Error banner */}
+                {isError && state?.error && (
+                  <div className="mx-3 mt-2 p-2 rounded bg-destructive/10 border border-destructive/20">
+                    <p className="text-xs text-destructive font-mono">{state.error}</p>
+                  </div>
+                )}
 
-              {/* Completed banner */}
-              {isCompleted && (
-                <div className="mx-3 mt-2 p-2 rounded bg-green-500/10 border border-green-500/20">
-                  <p className="text-xs text-green-600">All steps completed successfully.</p>
-                </div>
-              )}
+                {/* Completed banner */}
+                {isCompleted && (
+                  <div className="mx-3 mt-2 p-2 rounded bg-green-500/10 border border-green-500/20">
+                    <p className="text-xs text-green-600">All steps completed successfully.</p>
+                  </div>
+                )}
 
-              <ScrollArea className="flex-1">
-                <div ref={stepListRef} className="p-2 space-y-1">
-                  {(state?.steps || []).map((step, idx) => {
-                    const result = state?.stepResults?.[idx];
-                    const isCurrent = idx === (state?.currentStepIndex ?? -1);
-                    const isPassed = result?.status === 'passed';
-                    const isFailed = result?.status === 'failed';
-                    const isPending = result?.status === 'pending';
+                <ScrollArea className="flex-1">
+                  <div ref={stepListRef} className="p-2 space-y-1">
+                    {(state?.steps || []).map((step, idx) => {
+                      const result = state?.stepResults?.[idx];
+                      const isCurrent = idx === (state?.currentStepIndex ?? -1);
+                      const isStepPassed = result?.status === 'passed';
+                      const isFailed = result?.status === 'failed';
+                      const isPending = result?.status === 'pending';
 
-                    return (
-                      <div
-                        key={step.id}
-                        data-step-index={idx}
-                        className={`flex items-center gap-2 px-2 py-1.5 rounded text-xs cursor-pointer hover:bg-muted/50 ${
-                          isCurrent ? 'bg-blue-500/10 border border-blue-500/30' : ''
-                        }`}
-                        onClick={() => {
-                          if (isPaused && idx > (state?.currentStepIndex ?? -1)) {
-                            sendCmd({ type: 'run_to_step', stepIndex: idx });
-                          }
-                        }}
-                      >
-                        {/* Status icon */}
-                        <div className="w-4 h-4 flex-shrink-0">
-                          {isFailed ? (
-                            <XCircle className="h-4 w-4 text-destructive" />
-                          ) : isPassed ? (
-                            <CheckCircle className="h-4 w-4 text-green-500" />
-                          ) : isCurrent && (state?.status === 'stepping' || state?.status === 'running') ? (
-                            <Loader2 className="h-4 w-4 animate-spin text-blue-500" />
-                          ) : isCurrent ? (
-                            <Play className="h-4 w-4 text-blue-500" />
-                          ) : isPending ? (
-                            <Clock className="h-4 w-4 text-muted-foreground/40" />
-                          ) : (
-                            <Pause className="h-4 w-4 text-muted-foreground/40" />
-                          )}
-                        </div>
-
-                        {/* Step info */}
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-1.5">
-                            <span className="text-muted-foreground">{idx + 1}.</span>
-                            <span className={`truncate ${isCurrent ? 'font-medium' : ''}`}>
-                              {step.label}
-                            </span>
-                            <Badge variant="outline" className="text-[10px] px-1 py-0 h-4 flex-shrink-0">
-                              {step.type}
-                            </Badge>
+                      return (
+                        <div
+                          key={step.id}
+                          data-step-index={idx}
+                          className={`flex items-center gap-2 px-2 py-1.5 rounded text-xs cursor-pointer hover:bg-muted/50 ${
+                            isCurrent ? 'bg-blue-500/10 border border-blue-500/30' : ''
+                          }`}
+                          onClick={() => {
+                            if (isPaused && idx > (state?.currentStepIndex ?? -1)) {
+                              sendCmd({ type: 'run_to_step', stepIndex: idx });
+                            }
+                          }}
+                        >
+                          {/* Status icon */}
+                          <div className="w-4 h-4 flex-shrink-0">
+                            {isFailed ? (
+                              <XCircle className="h-4 w-4 text-destructive" />
+                            ) : isStepPassed ? (
+                              <CheckCircle className="h-4 w-4 text-green-500" />
+                            ) : isCurrent && (state?.status === 'stepping' || state?.status === 'running') ? (
+                              <Loader2 className="h-4 w-4 animate-spin text-blue-500" />
+                            ) : isCurrent ? (
+                              <Play className="h-4 w-4 text-blue-500" />
+                            ) : isPending ? (
+                              <Clock className="h-4 w-4 text-muted-foreground/40" />
+                            ) : (
+                              <Pause className="h-4 w-4 text-muted-foreground/40" />
+                            )}
                           </div>
-                          {isFailed && result?.error && (
-                            <p className="text-destructive mt-0.5 truncate font-mono">{result.error}</p>
+
+                          {/* Step info */}
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-1.5">
+                              <span className="text-muted-foreground">{idx + 1}.</span>
+                              <span className={`truncate ${isCurrent ? 'font-medium' : ''}`}>
+                                {step.label}
+                              </span>
+                              <Badge variant="outline" className="text-[10px] px-1 py-0 h-4 flex-shrink-0">
+                                {step.type}
+                              </Badge>
+                            </div>
+                            {isFailed && result?.error && (
+                              <p className="text-destructive mt-0.5 truncate font-mono">{result.error}</p>
+                            )}
+                          </div>
+
+                          {/* Duration */}
+                          {result && result.durationMs > 0 && (
+                            <span className="text-[10px] text-muted-foreground flex-shrink-0">
+                              {result.durationMs}ms
+                            </span>
                           )}
                         </div>
+                      );
+                    })}
+                  </div>
+                </ScrollArea>
 
-                        {/* Duration */}
-                        {result && result.durationMs > 0 && (
-                          <span className="text-[10px] text-muted-foreground flex-shrink-0">
-                            {result.durationMs}ms
-                          </span>
-                        )}
-                      </div>
-                    );
-                  })}
+                {/* Keyboard shortcuts hint */}
+                <div className="border-t px-3 py-1.5 bg-muted/30">
+                  <p className="text-[10px] text-muted-foreground">
+                    <kbd className="px-1 py-0.5 bg-muted rounded text-[9px]">Enter</kbd> Step
+                    {' '}<kbd className="px-1 py-0.5 bg-muted rounded text-[9px]">Shift+Enter</kbd> Back
+                    {' '}<kbd className="px-1 py-0.5 bg-muted rounded text-[9px]">F5</kbd> Run all
+                    {' '}<kbd className="px-1 py-0.5 bg-muted rounded text-[9px]">Space</kbd> Fast-forward
+                    {' '}<kbd className="px-1 py-0.5 bg-muted rounded text-[9px]">Esc</kbd> Stop
+                  </p>
                 </div>
-              </ScrollArea>
+              </TabsContent>
 
-              {/* Keyboard shortcuts hint */}
-              <div className="border-t px-3 py-1.5 bg-muted/30">
-                <p className="text-[10px] text-muted-foreground">
-                  <kbd className="px-1 py-0.5 bg-muted rounded text-[9px]">Enter</kbd> Step
-                  {' '}<kbd className="px-1 py-0.5 bg-muted rounded text-[9px]">Shift+Enter</kbd> Back
-                  {' '}<kbd className="px-1 py-0.5 bg-muted rounded text-[9px]">F5</kbd> Run all
-                  {' '}<kbd className="px-1 py-0.5 bg-muted rounded text-[9px]">Space</kbd> Fast-forward
-                  {' '}<kbd className="px-1 py-0.5 bg-muted rounded text-[9px]">Esc</kbd> Stop
-                </p>
-              </div>
-            </div>
+              {/* Network Tab */}
+              <TabsContent value="network" className="flex flex-col flex-1 min-h-0 mt-0">
+                <NetworkPanel entries={state?.networkEntries || []} />
+              </TabsContent>
+
+              {/* Console Tab */}
+              <TabsContent value="console" className="flex flex-col flex-1 min-h-0 mt-0">
+                <ConsolePanel entries={state?.consoleEntries || []} />
+              </TabsContent>
+            </Tabs>
           </ResizablePanel>
         </ResizablePanelGroup>
       )}
@@ -424,6 +476,124 @@ interface CodeDisplayProps {
   stepResults: DebugState['stepResults'];
   onClickStep: (idx: number) => void;
 }
+
+// -------- Network Panel Component --------
+
+function NetworkPanel({ entries }: { entries: DebugNetworkEntry[] }) {
+  const getStatusColor = (entry: DebugNetworkEntry) => {
+    if (entry.failed) return 'text-red-500';
+    if (entry.status === null) return 'text-muted-foreground';
+    if (entry.status >= 200 && entry.status < 300) return 'text-green-500';
+    if (entry.status >= 300 && entry.status < 400) return 'text-yellow-500';
+    return 'text-red-500';
+  };
+
+  if (entries.length === 0) {
+    return (
+      <div className="flex-1 flex items-center justify-center">
+        <p className="text-xs text-muted-foreground">No network requests captured yet.</p>
+      </div>
+    );
+  }
+
+  return (
+    <ScrollArea className="flex-1">
+      <div className="text-xs">
+        {/* Header */}
+        <div className="flex items-center gap-2 px-3 py-1 border-b bg-muted/30 text-muted-foreground font-medium sticky top-0">
+          <span className="w-12">Method</span>
+          <span className="flex-1 min-w-0">URL</span>
+          <span className="w-10 text-right">Status</span>
+          <span className="w-14 text-right">Time</span>
+          <span className="w-16">Type</span>
+        </div>
+        {entries.map((entry) => (
+          <div
+            key={entry.id}
+            className={`flex items-center gap-2 px-3 py-1 border-b border-border/50 hover:bg-muted/30 ${entry.failed ? 'bg-red-500/5' : ''}`}
+          >
+            <span className="w-12 font-mono font-medium flex-shrink-0">{entry.method}</span>
+            <span className="flex-1 min-w-0 truncate font-mono text-muted-foreground" title={entry.url}>
+              {truncateUrl(entry.url)}
+            </span>
+            <span className={`w-10 text-right font-mono flex-shrink-0 ${getStatusColor(entry)}`}>
+              {entry.failed ? 'ERR' : entry.status ?? '...'}
+            </span>
+            <span className="w-14 text-right text-muted-foreground flex-shrink-0">
+              {entry.duration !== null ? `${entry.duration}ms` : '...'}
+            </span>
+            <span className="w-16 truncate text-muted-foreground flex-shrink-0">{entry.resourceType}</span>
+          </div>
+        ))}
+      </div>
+    </ScrollArea>
+  );
+}
+
+function truncateUrl(url: string): string {
+  try {
+    const u = new URL(url);
+    return u.pathname + u.search;
+  } catch {
+    return url.length > 80 ? url.slice(0, 80) + '...' : url;
+  }
+}
+
+// -------- Console Panel Component --------
+
+function ConsolePanel({ entries }: { entries: DebugConsoleEntry[] }) {
+  const getTypeColor = (type: string) => {
+    switch (type) {
+      case 'error': return 'text-red-500 bg-red-500/10';
+      case 'warning': return 'text-yellow-500 bg-yellow-500/10';
+      case 'info': return 'text-blue-500 bg-blue-500/10';
+      default: return 'text-muted-foreground bg-muted/50';
+    }
+  };
+
+  const getTypeBadge = (type: string) => {
+    switch (type) {
+      case 'error': return 'ERR';
+      case 'warning': return 'WARN';
+      case 'info': return 'INFO';
+      case 'log': return 'LOG';
+      default: return type.toUpperCase().slice(0, 4);
+    }
+  };
+
+  if (entries.length === 0) {
+    return (
+      <div className="flex-1 flex items-center justify-center">
+        <p className="text-xs text-muted-foreground">No console messages captured yet.</p>
+      </div>
+    );
+  }
+
+  return (
+    <ScrollArea className="flex-1">
+      <div className="text-xs">
+        {entries.map((entry) => (
+          <div
+            key={entry.id}
+            className={`flex items-start gap-2 px-3 py-1 border-b border-border/50 ${
+              entry.type === 'error' ? 'bg-red-500/5' : entry.type === 'warning' ? 'bg-yellow-500/5' : ''
+            }`}
+          >
+            <span className={`px-1 py-0.5 rounded text-[10px] font-medium flex-shrink-0 ${getTypeColor(entry.type)}`}>
+              {getTypeBadge(entry.type)}
+            </span>
+            <span className="flex-1 min-w-0 font-mono break-all whitespace-pre-wrap">{entry.text}</span>
+            <span className="text-[10px] text-muted-foreground flex-shrink-0">
+              s{entry.stepIndex >= 0 ? entry.stepIndex + 1 : '-'}
+            </span>
+          </div>
+        ))}
+      </div>
+    </ScrollArea>
+  );
+}
+
+// -------- Code Display Component --------
 
 function CodeDisplay({ code, steps, currentStepIndex, stepResults, onClickStep }: CodeDisplayProps) {
   const lines = code.split('\n');
