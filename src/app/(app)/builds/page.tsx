@@ -55,6 +55,7 @@ export default async function BuildsPage() {
             const StatusIcon = statusIcons[build.overallStatus];
             const statusColor = statusColors[build.overallStatus];
             const buildBranch = 'gitBranch' in build ? (build.gitBranch as string) : undefined;
+            const buildCommit = 'gitCommit' in build ? (build.gitCommit as string) : undefined;
             const isActiveBranch = buildBranch === activeBranch;
 
             return (
@@ -78,6 +79,11 @@ export default async function BuildsPage() {
                           <Badge variant={isActiveBranch ? 'default' : 'secondary'} className="text-xs font-normal gap-1">
                             <GitBranch className="h-3 w-3" />
                             {buildBranch}
+                          </Badge>
+                        )}
+                        {buildCommit && (
+                          <Badge variant="outline" className="text-xs font-mono font-normal">
+                            {buildCommit.slice(0, 7)}
                           </Badge>
                         )}
                       </div>

@@ -33,6 +33,7 @@ import { BranchSelector } from '@/components/settings/branch-selector';
 
 interface BuildWithBranch extends Build {
   gitBranch?: string;
+  gitCommit?: string;
 }
 
 interface RunDashboardClientProps {
@@ -496,6 +497,7 @@ export function RunDashboardClient({ tests, runs: _runs, builds, repositoryId, a
                         key={build.id}
                         build={build}
                         gitBranch={build.gitBranch}
+                        gitCommit={build.gitCommit}
                         isActiveBranch={build.gitBranch === activeBranch}
                         baseUrl={build.baseUrl || undefined}
                         isBaseline={build.id === baselineBuildId}

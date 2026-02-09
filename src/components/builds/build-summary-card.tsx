@@ -7,6 +7,7 @@ import type { Build, BuildStatus } from '@/lib/db/schema';
 interface BuildSummaryCardProps {
   build: Build;
   gitBranch?: string;
+  gitCommit?: string;
   isActiveBranch?: boolean;
   baseUrl?: string;
   isBaseline?: boolean;
@@ -74,7 +75,7 @@ function formatDuration(elapsedMs: number | null): string {
   return `${(elapsedMs / 1000).toFixed(1)}s`;
 }
 
-export function BuildSummaryCard({ build, gitBranch, isActiveBranch, baseUrl, isBaseline }: BuildSummaryCardProps) {
+export function BuildSummaryCard({ build, gitBranch, gitCommit, isActiveBranch, baseUrl, isBaseline }: BuildSummaryCardProps) {
   const status = build.overallStatus as BuildStatus;
   const config = statusConfig[status];
   const StatusIcon = config.icon;
@@ -105,6 +106,11 @@ export function BuildSummaryCard({ build, gitBranch, isActiveBranch, baseUrl, is
                 {gitBranch}
               </Badge>
             ) : null}
+            {gitCommit && (
+              <Badge variant="outline" className="text-xs font-mono font-normal shrink-0">
+                {gitCommit.slice(0, 7)}
+              </Badge>
+            )}
             {isBaseline && (
               <Badge variant="outline" className="text-xs font-normal gap-1 shrink-0 border-green-300 text-green-700 bg-green-50">
                 <Shield className="h-3 w-3" />

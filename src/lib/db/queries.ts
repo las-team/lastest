@@ -589,6 +589,7 @@ export async function getBuildsByRepo(repositoryId: string, limit = 10) {
       setupError: builds.setupError,
       setupDurationMs: builds.setupDurationMs,
       gitBranch: testRuns.gitBranch,
+      gitCommit: testRuns.gitCommit,
     })
     .from(builds)
     .innerJoin(testRuns, eq(builds.testRunId, testRuns.id))
