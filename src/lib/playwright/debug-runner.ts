@@ -87,6 +87,7 @@ export class DebugRunner {
 
   // Network/console capture
   private networkEntries: DebugNetworkEntry[] = [];
+  private networkSeq = 0;
   private consoleEntries: DebugConsoleEntry[] = [];
 
   // Trace capture
@@ -338,7 +339,7 @@ export class DebugRunner {
 
     // Attach network listeners
     page.on('request', (req) => {
-      const id = `${req.method()}-${req.url()}-${Date.now()}`;
+      const id = `${req.method()}-${req.url()}-${Date.now()}-${this.networkSeq++}`;
       const entry: DebugNetworkEntry = {
         id,
         stepIndex: this.state?.currentStepIndex ?? -1,
@@ -683,6 +684,7 @@ export class DebugRunner {
 
           // Clear network/console entries for replay
           this.networkEntries = [];
+          this.networkSeq = 0;
           this.consoleEntries = [];
           if (this.state) {
             this.state.networkEntries = this.networkEntries;
