@@ -7,7 +7,7 @@ Docker
 Gitlab
 Timestamp fixing
 ## features
-Support https://github.com/excalidraw/excalidraw/tree/master/packages/excalidraw/tests ~/.claude/plans/declarative-kindling-coral.md
+Support https://github.com/excalidraw/excalidraw/tree/master/packages/excalidraw/tests ~/.claude/plans/declarative-kindling-coral.md 55%
 
 ## ideas
 Component specific testing
@@ -24,8 +24,5 @@ Bugriport
 Import from prior tools?
 ### UX
 ## bugs
-debugging when a runner is used
-gh build stuff
-double / login in rule
 ## marketing    
                                                                                                         
