@@ -5,6 +5,7 @@
 
 import { chromium, firefox, webkit, Browser, Page, BrowserContext } from 'playwright';
 import { FREEZE_ANIMATIONS_CSS, CROSS_OS_CHROMIUM_ARGS } from './constants';
+import { setupFreezeScripts } from './stabilization';
 import path from 'path';
 import fs from 'fs';
 import crypto from 'crypto';
@@ -320,6 +321,10 @@ export class DebugRunner {
     const viewport = this.getViewport();
     const context = await this.browser.newContext({ viewport });
     const page = await context.newPage();
+
+    // Freeze timestamps/random values if configured
+    const stabilization = this.settings?.stabilization || DEFAULT_STABILIZATION_SETTINGS;
+    await setupFreezeScripts(page, stabilization);
 
     // Freeze animations if configured
     if (this.settings?.freezeAnimations) {

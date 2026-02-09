@@ -5,6 +5,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Switch } from '@/components/ui/switch';
 import { Textarea } from '@/components/ui/textarea';
 import {
   Select,
@@ -408,26 +409,15 @@ export function AISettingsCard({ settings, repositoryId }: AISettingsCardProps) 
 
           {/* Enable Toggle */}
           <div className="flex items-center gap-3 mb-4">
-            <button
-              type="button"
-              role="switch"
-              aria-checked={aiDiffingEnabled}
-              onClick={() => setAiDiffingEnabled(!aiDiffingEnabled)}
-              className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
-                aiDiffingEnabled ? 'bg-purple-600' : 'bg-gray-200'
-              }`}
-            >
-              <span
-                className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
-                  aiDiffingEnabled ? 'translate-x-6' : 'translate-x-1'
-                }`}
-              />
-            </button>
+            <Switch
+              checked={aiDiffingEnabled}
+              onCheckedChange={setAiDiffingEnabled}
+            />
             <Label>Enable AI Diff Analysis</Label>
           </div>
 
           {aiDiffingEnabled && (
-            <div className="space-y-4 pl-2 border-l-2 border-purple-200 ml-2">
+            <div className="space-y-4 pl-2 border-l-2 border-border ml-2">
               {/* Provider */}
               <div className="space-y-2">
                 <Label>Vision Provider</Label>

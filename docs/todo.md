@@ -21,6 +21,9 @@ Bugriport
 Import from prior tools?
 ### UX
 ## bugs
+debugging when a runner is used
+build errors
+
 ## marketing
 Support https://github.com/excalidraw/excalidraw/tree/master/packages/excalidraw/tests
 
