@@ -86,38 +86,45 @@ const SESSION_TIMEOUT_MS = 90_000;
 // Cleanup interval (60 seconds)
 const CLEANUP_INTERVAL_MS = 60_000;
 
-// Mark stale runners offline on server startup
-markStaleRunnersOffline(SESSION_TIMEOUT_MS).then((count) => {
-  if (count > 0) {
-    console.log(`[Startup] Marked ${count} stale runner(s) as offline`);
-  }
-}).catch((error) => {
-  console.error('[Startup] Failed to mark stale runners offline:', error);
-});
+// Lazy initialization guard — defers DB calls until first request
+// so that `next build` can import this module without hitting the database.
+let initialized = false;
 
-// Start cleanup interval to remove stale sessions and mark runners offline
-setInterval(async () => {
-  const now = Date.now();
-  for (const [runnerId, session] of activeRunnerSessions) {
-    if (now - session.lastPoll > SESSION_TIMEOUT_MS) {
-      activeRunnerSessions.delete(runnerId);
-      // Mark runner as offline in database
-      try {
-        await updateRunnerStatus(runnerId, 'offline');
-        console.log(`[Cleanup] Runner ${runnerId} marked offline (no heartbeat for ${SESSION_TIMEOUT_MS}ms)`);
-      } catch (error) {
-        console.error(`[Cleanup] Failed to mark runner ${runnerId} offline:`, error);
+function ensureInitialized() {
+  if (initialized) return;
+  initialized = true;
+
+  // Mark stale runners offline on first request
+  markStaleRunnersOffline(SESSION_TIMEOUT_MS).then((count) => {
+    if (count > 0) {
+      console.log(`[Startup] Marked ${count} stale runner(s) as offline`);
+    }
+  }).catch((error) => {
+    console.error('[Startup] Failed to mark stale runners offline:', error);
+  });
+
+  // Start cleanup interval to remove stale sessions and mark runners offline
+  setInterval(async () => {
+    const now = Date.now();
+    for (const [runnerId, session] of activeRunnerSessions) {
+      if (now - session.lastPoll > SESSION_TIMEOUT_MS) {
+        activeRunnerSessions.delete(runnerId);
+        try {
+          await updateRunnerStatus(runnerId, 'offline');
+          console.log(`[Cleanup] Runner ${runnerId} marked offline (no heartbeat for ${SESSION_TIMEOUT_MS}ms)`);
+        } catch (error) {
+          console.error(`[Cleanup] Failed to mark runner ${runnerId} offline:`, error);
+        }
       }
     }
-  }
 
-  // Also clean up any runners that might have been missed (e.g., server restart)
-  try {
-    await markStaleRunnersOffline(SESSION_TIMEOUT_MS);
-  } catch (error) {
-    console.error('[Cleanup] Failed to mark stale runners offline:', error);
-  }
-}, CLEANUP_INTERVAL_MS);
+    try {
+      await markStaleRunnersOffline(SESSION_TIMEOUT_MS);
+    } catch (error) {
+      console.error('[Cleanup] Failed to mark stale runners offline:', error);
+    }
+  }, CLEANUP_INTERVAL_MS);
+}
 
 /**
  * POST /api/ws/runner
@@ -125,6 +132,7 @@ setInterval(async () => {
  * Runners poll this endpoint to receive commands and send responses
  */
 export async function POST(request: NextRequest) {
+  ensureInitialized();
   try {
     const authHeader = request.headers.get('authorization');
     if (!authHeader?.startsWith('Bearer ')) {
@@ -254,6 +262,7 @@ export async function POST(request: NextRequest) {
  * Runner connects and polls for commands
  */
 export async function GET(request: NextRequest) {
+  ensureInitialized();
   try {
     const authHeader = request.headers.get('authorization');
     if (!authHeader?.startsWith('Bearer ')) {

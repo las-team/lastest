@@ -74,12 +74,12 @@ class RunQueue {
         runner.setSettings(playwrightSettings);
       }
 
-      // Get tests to run
+      // Get tests to run (filter out soft-deleted tests)
       let tests: Test[];
       if (nextItem.testIds && nextItem.testIds.length > 0) {
         tests = await Promise.all(
           nextItem.testIds.map((id) => queries.getTest(id))
-        ).then((results) => results.filter((t): t is Test => t !== undefined));
+        ).then((results) => results.filter((t): t is Test => t !== undefined && !t.deletedAt));
       } else if (nextItem.repositoryId) {
         tests = await queries.getTestsByRepo(nextItem.repositoryId);
       } else {

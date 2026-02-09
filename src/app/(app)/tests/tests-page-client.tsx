@@ -20,7 +20,7 @@ import {
 //   CollapsibleContent,
 //   CollapsibleTrigger,
 // } from '@/components/ui/collapsible';
-import { createFunctionalArea, deleteTests } from '@/server/actions/tests';
+import { createFunctionalArea, deleteTests, restoreTests, permanentlyDeleteTests } from '@/server/actions/tests';
 import { generateBasicTests } from '@/server/actions/scanner';
 import { aiFixAllFailedTests, aiFixTests } from '@/server/actions/ai';
 import { runTests } from '@/server/actions/runs';
@@ -40,10 +40,12 @@ import {
   Clock,
   Search,
   ChevronRight,
+  ChevronDown,
   FolderOpen,
   Play,
   Trash2,
-  X
+  X,
+  RotateCcw,
 } from 'lucide-react';
 import Link from 'next/link';
 import type { FunctionalArea, Test, Route } from '@/lib/db/schema';
@@ -58,9 +60,10 @@ interface TestsPageClientProps {
   routes: Route[];
   repositoryId?: string;
   baseUrl?: string;
+  deletedTests?: Test[];
 }
 
-export function TestsPageClient({ areas, tests, routes, repositoryId, baseUrl = 'http://localhost:3000' }: TestsPageClientProps) {
+export function TestsPageClient({ areas, tests, routes, repositoryId, baseUrl = 'http://localhost:3000', deletedTests = [] }: TestsPageClientProps) {
   const notifyJobStarted = useNotifyJobStarted();
   const [isNewAreaOpen, setIsNewAreaOpen] = useState(false);
   const [newAreaName, setNewAreaName] = useState('');
@@ -77,6 +80,11 @@ export function TestsPageClient({ areas, tests, routes, repositoryId, baseUrl = 
   const [isBulkFixing, setIsBulkFixing] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [executionTarget, setExecutionTarget] = useState<string>('local');
+  const [showDeleted, setShowDeleted] = useState(false);
+  const [isRestoring, setIsRestoring] = useState(false);
+  const [isPermanentlyDeleting, setIsPermanentlyDeleting] = useState(false);
+  const [showPermanentDeleteConfirm, setShowPermanentDeleteConfirm] = useState(false);
+  const [selectedDeletedIds, setSelectedDeletedIds] = useState<Set<string>>(new Set());
 
   const failedTests = tests.filter(t => t.latestStatus === 'failed');
 
@@ -142,6 +150,39 @@ export function TestsPageClient({ areas, tests, routes, repositoryId, baseUrl = 
     } finally {
       setIsBulkFixing(false);
     }
+  };
+
+  const handleBulkRestore = async () => {
+    if (selectedDeletedIds.size === 0) return;
+    setIsRestoring(true);
+    try {
+      await restoreTests(Array.from(selectedDeletedIds));
+      setSelectedDeletedIds(new Set());
+    } finally {
+      setIsRestoring(false);
+    }
+  };
+
+  const handlePermanentDelete = async () => {
+    if (selectedDeletedIds.size === 0) return;
+    setIsPermanentlyDeleting(true);
+    try {
+      await permanentlyDeleteTests(Array.from(selectedDeletedIds));
+      setSelectedDeletedIds(new Set());
+      setShowPermanentDeleteConfirm(false);
+    } finally {
+      setIsPermanentlyDeleting(false);
+    }
+  };
+
+  const toggleDeletedSelect = (id: string) => {
+    const newSet = new Set(selectedDeletedIds);
+    if (newSet.has(id)) {
+      newSet.delete(id);
+    } else {
+      newSet.add(id);
+    }
+    setSelectedDeletedIds(newSet);
   };
 
   const getAreaName = (areaId: string | null) => {
@@ -336,7 +377,7 @@ export function TestsPageClient({ areas, tests, routes, repositoryId, baseUrl = 
                   disabled={isBulkDeleting}
                 >
                   <Trash2 className="h-3.5 w-3.5 mr-1.5" />
-                  Delete
+                  Move to Trash
                 </Button>
                 {repositoryId && selectedFailedTests.length > 0 && (
                   <Button
@@ -412,6 +453,114 @@ export function TestsPageClient({ areas, tests, routes, repositoryId, baseUrl = 
             )}
           </CardContent>
         </Card>
+
+        {/* Recently Deleted Section */}
+        {deletedTests.length > 0 && (
+          <Card className="border-border/50 overflow-hidden">
+            <CardHeader
+              className="border-b border-border/50 bg-muted/30 cursor-pointer select-none"
+              onClick={() => setShowDeleted(!showDeleted)}
+            >
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  {showDeleted ? (
+                    <ChevronDown className="h-4 w-4 text-muted-foreground" />
+                  ) : (
+                    <ChevronRight className="h-4 w-4 text-muted-foreground" />
+                  )}
+                  <CardTitle className="text-sm font-medium text-muted-foreground">
+                    Recently Deleted ({deletedTests.length})
+                  </CardTitle>
+                </div>
+              </div>
+              {showDeleted && selectedDeletedIds.size > 0 && (
+                <div className="flex items-center gap-2 mt-3 pt-3 border-t border-border/50" onClick={(e) => e.stopPropagation()}>
+                  <span className="text-sm text-muted-foreground">
+                    Selected: {selectedDeletedIds.size}
+                  </span>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={handleBulkRestore}
+                    disabled={isRestoring}
+                  >
+                    <RotateCcw className="h-3.5 w-3.5 mr-1.5" />
+                    {isRestoring ? 'Restoring...' : 'Restore'}
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setShowPermanentDeleteConfirm(true)}
+                    disabled={isPermanentlyDeleting}
+                  >
+                    <Trash2 className="h-3.5 w-3.5 mr-1.5" />
+                    Delete Forever
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setSelectedDeletedIds(new Set())}
+                  >
+                    <X className="h-3.5 w-3.5 mr-1.5" />
+                    Clear
+                  </Button>
+                </div>
+              )}
+            </CardHeader>
+            {showDeleted && (
+              <CardContent className="p-0">
+                <div className="divide-y divide-border/50">
+                  {deletedTests.map((test) => (
+                    <div
+                      key={test.id}
+                      className="flex items-center justify-between px-4 py-3 hover:bg-muted/30 transition-colors group"
+                    >
+                      <div className="flex items-center gap-4 min-w-0">
+                        <Checkbox
+                          checked={selectedDeletedIds.has(test.id)}
+                          onCheckedChange={() => toggleDeletedSelect(test.id)}
+                        />
+                        <div className="min-w-0 flex-1">
+                          <div className="font-medium text-sm truncate text-muted-foreground">
+                            {test.name}
+                          </div>
+                          {test.deletedAt && (
+                            <div className="text-xs text-muted-foreground/70 mt-0.5">
+                              Deleted {new Date(test.deletedAt).toLocaleDateString()}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-1">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={async () => {
+                            await restoreTests([test.id]);
+                          }}
+                          title="Restore"
+                        >
+                          <RotateCcw className="h-3.5 w-3.5" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => {
+                            setSelectedDeletedIds(new Set([test.id]));
+                            setShowPermanentDeleteConfirm(true);
+                          }}
+                          title="Permanently delete"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </Button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </CardContent>
+            )}
+          </Card>
+        )}
       </div>
 
       {/* New Area Dialog */}
@@ -478,9 +627,9 @@ export function TestsPageClient({ areas, tests, routes, repositoryId, baseUrl = 
       <Dialog open={showDeleteConfirm} onOpenChange={setShowDeleteConfirm}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Delete {selectedIds.size} test{selectedIds.size !== 1 ? 's' : ''}?</DialogTitle>
+            <DialogTitle>Move {selectedIds.size} test{selectedIds.size !== 1 ? 's' : ''} to trash?</DialogTitle>
             <DialogDescription>
-              This action cannot be undone. The selected tests will be permanently deleted.
+              Tests will be moved to the Recently Deleted section. You can restore them or permanently delete them later.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
@@ -488,7 +637,27 @@ export function TestsPageClient({ areas, tests, routes, repositoryId, baseUrl = 
               Cancel
             </Button>
             <Button variant="destructive" onClick={handleBulkDelete} disabled={isBulkDeleting}>
-              {isBulkDeleting ? 'Deleting...' : 'Delete'}
+              {isBulkDeleting ? 'Moving...' : 'Move to Trash'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Permanent Delete Confirmation */}
+      <Dialog open={showPermanentDeleteConfirm} onOpenChange={setShowPermanentDeleteConfirm}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Permanently delete {selectedDeletedIds.size} test{selectedDeletedIds.size !== 1 ? 's' : ''}?</DialogTitle>
+            <DialogDescription>
+              This action cannot be undone. All related data (results, baselines, diffs) will also be deleted.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowPermanentDeleteConfirm(false)}>
+              Cancel
+            </Button>
+            <Button variant="destructive" onClick={handlePermanentDelete} disabled={isPermanentlyDeleting}>
+              {isPermanentlyDeleting ? 'Deleting...' : 'Permanently Delete'}
             </Button>
           </DialogFooter>
         </DialogContent>

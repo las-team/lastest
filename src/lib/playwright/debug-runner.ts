@@ -5,6 +5,7 @@
 
 import { chromium, firefox, webkit, Browser, Page, BrowserContext } from 'playwright';
 import { FREEZE_ANIMATIONS_CSS, CROSS_OS_CHROMIUM_ARGS } from './constants';
+import { setupFreezeScripts } from './stabilization';
 import path from 'path';
 import fs from 'fs';
 import crypto from 'crypto';
@@ -25,6 +26,27 @@ export interface StepResult {
   error?: string;
 }
 
+export interface DebugNetworkEntry {
+  id: string;
+  stepIndex: number;
+  method: string;
+  url: string;
+  status: number | null;
+  resourceType: string;
+  startTime: number;
+  duration: number | null;
+  failed: boolean;
+  errorText?: string;
+}
+
+export interface DebugConsoleEntry {
+  id: string;
+  stepIndex: number;
+  type: string;
+  text: string;
+  timestamp: number;
+}
+
 export interface DebugState {
   sessionId: string;
   testId: string;
@@ -34,6 +56,9 @@ export interface DebugState {
   stepResults: StepResult[];
   code: string;
   error?: string;
+  networkEntries: DebugNetworkEntry[];
+  consoleEntries: DebugConsoleEntry[];
+  traceUrl?: string;
 }
 
 export type DebugCommand =
@@ -59,6 +84,16 @@ export class DebugRunner {
   private commandResolve: ((cmd: DebugCommand) => void) | null = null;
   private idleTimer: ReturnType<typeof setTimeout> | null = null;
   private generation = 0; // incremented on each start(), stale runSession() bails out
+
+  // Network/console capture
+  private networkEntries: DebugNetworkEntry[] = [];
+  private networkSeq = 0;
+  private consoleEntries: DebugConsoleEntry[] = [];
+
+  // Trace capture
+  private traceDir = '';
+  private traceChunkIndex = 0;
+  private tracingActive = false;
 
   getState(): DebugState | null {
     return this.state;
@@ -101,6 +136,8 @@ export class DebugRunner {
         stepResults: [],
         code,
         error: 'Could not parse test function body',
+        networkEntries: [],
+        consoleEntries: [],
       };
       return sessionId;
     }
@@ -116,6 +153,8 @@ export class DebugRunner {
       steps,
       stepResults: steps.map(s => ({ stepId: s.id, status: 'pending' as const, durationMs: 0 })),
       code,
+      networkEntries: [],
+      consoleEntries: [],
     };
 
     // Launch browser and run initialization in background
@@ -174,6 +213,16 @@ export class DebugRunner {
 
     // Small delay to let the run loop process the stop
     await new Promise(r => setTimeout(r, 100));
+
+    // Save final trace before closing context
+    if (this.context && this.tracingActive && this.state) {
+      const traceFile = `debug-${this.state.sessionId}-${this.traceChunkIndex}.zip`;
+      const tracePath = path.join(this.traceDir || './public/traces', traceFile);
+      fs.mkdirSync(path.dirname(tracePath), { recursive: true });
+      await this.context.tracing.stop({ path: tracePath }).catch(() => {});
+      this.state.traceUrl = `/traces/${traceFile}`;
+      this.tracingActive = false;
+    }
 
     if (this.context) {
       await this.context.close().catch(() => {});
@@ -274,14 +323,120 @@ export class DebugRunner {
     const context = await this.browser.newContext({ viewport });
     const page = await context.newPage();
 
+    // Freeze timestamps/random values if configured
+    const stabilization = this.settings?.stabilization || DEFAULT_STABILIZATION_SETTINGS;
+    await setupFreezeScripts(page, stabilization);
+
     // Freeze animations if configured
     if (this.settings?.freezeAnimations) {
       await page.addStyleTag({ content: FREEZE_ANIMATIONS_CSS });
     }
 
+    // Start Playwright tracing
+    const testName = this.test?.name || 'unknown';
+    await context.tracing.start({ screenshots: true, snapshots: true, title: `Debug: ${testName}` });
+    this.tracingActive = true;
+
+    // Attach network listeners
+    page.on('request', (req) => {
+      const id = `${req.method()}-${req.url()}-${Date.now()}-${this.networkSeq++}`;
+      const entry: DebugNetworkEntry = {
+        id,
+        stepIndex: this.state?.currentStepIndex ?? -1,
+        method: req.method(),
+        url: req.url(),
+        status: null,
+        resourceType: req.resourceType(),
+        startTime: Date.now(),
+        duration: null,
+        failed: false,
+      };
+      this.networkEntries.push(entry);
+      // Memory cap
+      if (this.networkEntries.length > 500) {
+        this.networkEntries = this.networkEntries.slice(-500);
+      }
+      if (this.state) this.state.networkEntries = this.networkEntries;
+    });
+
+    page.on('response', (resp) => {
+      const entry = this.networkEntries.findLast(
+        e => e.url === resp.url() && e.status === null
+      );
+      if (entry) {
+        entry.status = resp.status();
+        entry.duration = Date.now() - entry.startTime;
+      }
+      if (this.state) this.state.networkEntries = this.networkEntries;
+    });
+
+    page.on('requestfailed', (req) => {
+      const entry = this.networkEntries.findLast(
+        e => e.url === req.url() && e.status === null
+      );
+      if (entry) {
+        entry.failed = true;
+        entry.errorText = req.failure()?.errorText;
+        entry.duration = Date.now() - entry.startTime;
+      }
+      if (this.state) this.state.networkEntries = this.networkEntries;
+    });
+
+    // Attach console listener
+    page.on('console', (msg) => {
+      this.consoleEntries.push({
+        id: `console-${Date.now()}-${this.consoleEntries.length}`,
+        stepIndex: this.state?.currentStepIndex ?? -1,
+        type: msg.type(),
+        text: msg.text(),
+        timestamp: Date.now(),
+      });
+      // Memory cap
+      if (this.consoleEntries.length > 500) {
+        this.consoleEntries = this.consoleEntries.slice(-500);
+      }
+      if (this.state) this.state.consoleEntries = this.consoleEntries;
+    });
+
     this.context = context;
     this.page = page;
     return { context, page };
+  }
+
+  /**
+   * Flush the current trace chunk and start a new one. Returns the URL of the saved trace.
+   */
+  async flushTrace(): Promise<string | null> {
+    if (!this.context || !this.tracingActive || !this.state) return null;
+    const traceFile = `debug-${this.state.sessionId}-${this.traceChunkIndex}.zip`;
+    const tracePath = path.join(this.traceDir || './public/traces', traceFile);
+    fs.mkdirSync(path.dirname(tracePath), { recursive: true });
+    await this.context.tracing.stop({ path: tracePath });
+    this.state.traceUrl = `/traces/${traceFile}`;
+    this.traceChunkIndex++;
+    await this.context.tracing.start({
+      screenshots: true,
+      snapshots: true,
+      title: `Debug chunk ${this.traceChunkIndex}`,
+    });
+    return this.state.traceUrl;
+  }
+
+  private cleanOldTraces() {
+    try {
+      const dir = this.traceDir;
+      if (!fs.existsSync(dir)) return;
+      const files = fs.readdirSync(dir);
+      const oneHourAgo = Date.now() - 60 * 60 * 1000;
+      for (const file of files) {
+        if (!file.endsWith('.zip')) continue;
+        const filePath = path.join(dir, file);
+        const stat = fs.statSync(filePath);
+        if (stat.mtimeMs < oneHourAgo) {
+          fs.unlinkSync(filePath);
+        }
+      }
+    } catch { /* ignore cleanup errors */ }
   }
 
   private createLocateWithFallback(page: Page, testId: string) {
@@ -372,6 +527,12 @@ export class DebugRunner {
       }
 
       if (this.isStale(gen)) return;
+
+      // Init trace directory
+      this.traceDir = path.join('./public/traces');
+      fs.mkdirSync(this.traceDir, { recursive: true });
+      this.traceChunkIndex = 0;
+      this.cleanOldTraces();
 
       // Launch browser (always headed for debug)
       const launcher = this.getBrowserLauncher();
@@ -503,12 +664,33 @@ export class DebugRunner {
           this.state.status = 'stepping';
           this.state.error = undefined;
 
+          // Save trace chunk before closing context
+          if (this.context && this.tracingActive) {
+            const traceFile = `debug-${this.state.sessionId}-${this.traceChunkIndex}.zip`;
+            const tracePath = path.join(this.traceDir || './public/traces', traceFile);
+            fs.mkdirSync(path.dirname(tracePath), { recursive: true });
+            await this.context.tracing.stop({ path: tracePath }).catch(() => {});
+            this.state.traceUrl = `/traces/${traceFile}`;
+            this.traceChunkIndex++;
+            this.tracingActive = false;
+          }
+
           // Reset: close page/context, recreate, re-execute 0..targetIdx
           if (this.context) {
             await this.context.close().catch(() => {});
             this.context = null;
             this.page = null;
           }
+
+          // Clear network/console entries for replay
+          this.networkEntries = [];
+          this.networkSeq = 0;
+          this.consoleEntries = [];
+          if (this.state) {
+            this.state.networkEntries = this.networkEntries;
+            this.state.consoleEntries = this.consoleEntries;
+          }
+
           await this.createPageAndContext();
           if (!this.page) throw new Error('Failed to recreate page');
 

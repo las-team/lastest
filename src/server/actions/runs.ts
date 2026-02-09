@@ -4,6 +4,7 @@ import { revalidatePath } from 'next/cache';
 import { getRunner } from '@/lib/playwright/runner';
 import { getServerManager } from '@/lib/playwright/server-manager';
 import { executeTests } from '@/lib/execution/executor';
+import { captureSetupForRemoteRunner } from '@/lib/execution/setup-capture';
 import { getCurrentSession, requireTeamAccess, requireRepoAccess } from '@/lib/auth';
 import { getBranchInfo } from '@/lib/github/content';
 import * as queries from '@/lib/db/queries';
@@ -85,12 +86,12 @@ export async function runTests(testIds?: string[], repositoryId?: string | null,
     runner.setSettings(playwrightSettings);
   }
 
-  // Get tests to run
+  // Get tests to run (filter out soft-deleted tests)
   let tests: Test[];
   if (testIds && testIds.length > 0) {
     tests = await Promise.all(
       testIds.map(id => queries.getTest(id))
-    ).then(results => results.filter((t): t is Test => t !== undefined));
+    ).then(results => results.filter((t): t is Test => t !== undefined && !t.deletedAt));
   } else if (repositoryId) {
     tests = await queries.getTestsByRepo(repositoryId);
   } else {
@@ -144,6 +145,10 @@ async function runTestsAsync(runId: string, tests: Test[], repositoryId?: string
     let results;
 
     if (runnerId && runnerId !== 'local' && teamId) {
+      // Run setup locally and capture storageState for remote runner
+      const baseUrl = envConfig?.baseUrl || 'http://localhost:3000';
+      const setupResult = await captureSetupForRemoteRunner(tests, baseUrl, repositoryId);
+
       // Use executor for agent routing
       results = await executeTests(tests, runId, {
         repositoryId,
@@ -152,6 +157,7 @@ async function runTestsAsync(runId: string, tests: Test[], repositoryId?: string
         headless,
         environmentConfig: envConfig,
         playwrightSettings,
+        setupContext: setupResult,
       });
     } else {
       // Local execution

@@ -156,11 +156,11 @@ export async function getOrCreateFunctionalAreaByRepo(
 
 // Tests
 export async function getTests() {
-  return db.select().from(tests).orderBy(desc(tests.createdAt)).all();
+  return db.select().from(tests).where(isNull(tests.deletedAt)).orderBy(desc(tests.createdAt)).all();
 }
 
 export async function getTestsByFunctionalArea(functionalAreaId: string) {
-  return db.select().from(tests).where(eq(tests.functionalAreaId, functionalAreaId)).all();
+  return db.select().from(tests).where(and(eq(tests.functionalAreaId, functionalAreaId), isNull(tests.deletedAt))).all();
 }
 
 export async function getTest(id: string) {
@@ -191,7 +191,60 @@ export async function updateTest(id: string, data: Partial<NewTest>) {
   await db.update(tests).set({ ...data, updatedAt: new Date() }).where(eq(tests.id, id));
 }
 
-export async function deleteTest(id: string) {
+export async function softDeleteTest(id: string) {
+  // Clear setup test references so other tests don't reference a deleted test
+  await db.update(tests)
+    .set({ setupTestId: null })
+    .where(eq(tests.setupTestId, id));
+  await db.update(repositories)
+    .set({ defaultSetupTestId: null })
+    .where(eq(repositories.defaultSetupTestId, id));
+  await db.update(suites)
+    .set({ setupTestId: null })
+    .where(eq(suites.setupTestId, id));
+  await db.update(builds)
+    .set({ buildSetupTestId: null })
+    .where(eq(builds.buildSetupTestId, id));
+
+  // Clean up setupOverrides that reference this test in extraSteps
+  const testsWithOverrides = await db.select()
+    .from(tests)
+    .where(isNotNull(tests.setupOverrides));
+  for (const test of testsWithOverrides) {
+    if (test.setupOverrides && test.setupOverrides.extraSteps) {
+      const filteredSteps = test.setupOverrides.extraSteps.filter(
+        step => step.stepType !== 'test' || step.testId !== id
+      );
+      if (filteredSteps.length !== test.setupOverrides.extraSteps.length) {
+        await db.update(tests)
+          .set({ setupOverrides: { ...test.setupOverrides, extraSteps: filteredSteps } })
+          .where(eq(tests.id, test.id));
+      }
+    }
+  }
+
+  // Set deletedAt timestamp (soft delete)
+  await db.update(tests).set({ deletedAt: new Date() }).where(eq(tests.id, id));
+}
+
+export async function restoreTest(id: string) {
+  await db.update(tests).set({ deletedAt: null }).where(eq(tests.id, id));
+}
+
+export async function getDeletedTests(repositoryId?: string) {
+  if (repositoryId) {
+    return db.select().from(tests)
+      .where(and(eq(tests.repositoryId, repositoryId), isNotNull(tests.deletedAt)))
+      .orderBy(desc(tests.deletedAt))
+      .all();
+  }
+  return db.select().from(tests)
+    .where(isNotNull(tests.deletedAt))
+    .orderBy(desc(tests.deletedAt))
+    .all();
+}
+
+export async function permanentlyDeleteTest(id: string) {
   // Delete related records first (cascade)
   await db.delete(routeTestSuggestions).where(eq(routeTestSuggestions.matchedTestId, id));
   await db.delete(ignoreRegions).where(eq(ignoreRegions.testId, id));
@@ -200,27 +253,20 @@ export async function deleteTest(id: string) {
   await db.delete(testResults).where(eq(testResults.testId, id));
 
   // Clear setup test references before deletion
-  // 1. Clear from other tests using this as setupTestId
   await db.update(tests)
     .set({ setupTestId: null })
     .where(eq(tests.setupTestId, id));
-
-  // 2. Clear from repositories using this as defaultSetupTestId
   await db.update(repositories)
     .set({ defaultSetupTestId: null })
     .where(eq(repositories.defaultSetupTestId, id));
-
-  // 3. Clear from suites using this as setupTestId
   await db.update(suites)
     .set({ setupTestId: null })
     .where(eq(suites.setupTestId, id));
-
-  // 4. Clear from builds using this as buildSetupTestId
   await db.update(builds)
     .set({ buildSetupTestId: null })
     .where(eq(builds.buildSetupTestId, id));
 
-  // 5. Clean up setupOverrides that reference this test in extraSteps
+  // Clean up setupOverrides that reference this test in extraSteps
   const testsWithOverrides = await db.select()
     .from(tests)
     .where(isNotNull(tests.setupOverrides));
@@ -244,8 +290,6 @@ export async function deleteTest(id: string) {
       }
     }
   }
-
-  // Note: defaultSetupSteps.testId will cascade automatically due to FK constraint
 
   // Now delete the test
   await db.delete(tests).where(eq(tests.id, id));
@@ -373,7 +417,8 @@ export async function upsertTestByTargetUrl(
     .where(
       and(
         eq(tests.functionalAreaId, data.functionalAreaId),
-        eq(tests.targetUrl, data.targetUrl)
+        eq(tests.targetUrl, data.targetUrl),
+        isNull(tests.deletedAt)
       )
     )
     .get();
@@ -859,7 +904,7 @@ export async function getFunctionalAreasByRepo(repositoryId: string) {
 }
 
 export async function getTestsByRepo(repositoryId: string) {
-  return db.select().from(tests).where(eq(tests.repositoryId, repositoryId)).orderBy(desc(tests.createdAt)).all();
+  return db.select().from(tests).where(and(eq(tests.repositoryId, repositoryId), isNull(tests.deletedAt))).orderBy(desc(tests.createdAt)).all();
 }
 
 export async function getTestRunsByRepo(repositoryId: string) {
@@ -1329,6 +1374,10 @@ export async function getAISettings(repositoryId?: string | null) {
     aiDiffingProvider: null,
     aiDiffingApiKey: null,
     aiDiffingModel: DEFAULT_AI_SETTINGS.aiDiffingModel,
+    aiDiffingOllamaBaseUrl: DEFAULT_AI_SETTINGS.aiDiffingOllamaBaseUrl,
+    aiDiffingOllamaModel: DEFAULT_AI_SETTINGS.aiDiffingOllamaModel,
+    ollamaBaseUrl: DEFAULT_AI_SETTINGS.ollamaBaseUrl,
+    ollamaModel: DEFAULT_AI_SETTINGS.ollamaModel,
     createdAt: null,
     updatedAt: null,
   };
@@ -2981,7 +3030,7 @@ export async function getTestsUsingSetupTest(setupTestId: string) {
   return db
     .select()
     .from(tests)
-    .where(eq(tests.setupTestId, setupTestId))
+    .where(and(eq(tests.setupTestId, setupTestId), isNull(tests.deletedAt)))
     .all();
 }
 
@@ -2990,7 +3039,7 @@ export async function getTestsUsingSetupScript(setupScriptId: string) {
   return db
     .select()
     .from(tests)
-    .where(eq(tests.setupScriptId, setupScriptId))
+    .where(and(eq(tests.setupScriptId, setupScriptId), isNull(tests.deletedAt)))
     .all();
 }
 

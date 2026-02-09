@@ -22,7 +22,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { deleteTest, updateTest, getTestVersionHistory, restoreTestVersion, getVisualDiffsForTestResult } from '@/server/actions/tests';
+import { deleteTest, updateTest, getTestVersionHistory, restoreTestVersion, getVisualDiffsForTestResult, restoreTest, permanentlyDeleteTest } from '@/server/actions/tests';
 import { runTests, getJobStatus } from '@/server/actions/runs';
 import { aiFixTest, aiEnhanceTest, updateTestCode } from '@/server/actions/ai';
 import { toast } from 'sonner';
@@ -85,6 +85,9 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
   const notifyJobStarted = useNotifyJobStarted();
   const [isDeleting, setIsDeleting] = useState(false);
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
+  const [isRestoringDeleted, setIsRestoringDeleted] = useState(false);
+  const [isPermanentlyDeleting, setIsPermanentlyDeleting] = useState(false);
+  const [showPermanentDeleteDialog, setShowPermanentDeleteDialog] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [editName, setEditName] = useState(test.name);
@@ -202,6 +205,26 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
     }
   };
 
+  const handleRestoreDeleted = async () => {
+    setIsRestoringDeleted(true);
+    try {
+      await restoreTest(test.id);
+      router.refresh();
+    } finally {
+      setIsRestoringDeleted(false);
+    }
+  };
+
+  const handlePermanentDelete = async () => {
+    setIsPermanentlyDeleting(true);
+    try {
+      await permanentlyDeleteTest(test.id);
+      router.push('/tests');
+    } finally {
+      setIsPermanentlyDeleting(false);
+    }
+  };
+
   const handleRun = async (headless = true) => {
     // Clear any existing poll interval
     if (pollIntervalRef.current) {
@@ -298,6 +321,36 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
   return (
     <div className="flex-1 p-6 overflow-auto">
       <div className="max-w-4xl mx-auto space-y-6">
+        {/* Deleted Banner */}
+        {test.deletedAt && (
+          <div className="flex items-center justify-between p-4 rounded-lg bg-destructive/10 border border-destructive/20">
+            <div className="flex items-center gap-2 text-sm">
+              <Trash2 className="h-4 w-4 text-destructive" />
+              <span>This test was deleted on {new Date(test.deletedAt).toLocaleDateString()}</span>
+            </div>
+            <div className="flex gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleRestoreDeleted}
+                disabled={isRestoringDeleted}
+              >
+                <RotateCcw className="h-3.5 w-3.5 mr-1.5" />
+                {isRestoringDeleted ? 'Restoring...' : 'Restore'}
+              </Button>
+              <Button
+                variant="destructive"
+                size="sm"
+                onClick={() => setShowPermanentDeleteDialog(true)}
+                disabled={isPermanentlyDeleting}
+              >
+                <Trash2 className="h-3.5 w-3.5 mr-1.5" />
+                Delete Forever
+              </Button>
+            </div>
+          </div>
+        )}
+
         {/* Test Info Card */}
         <Card>
           <CardHeader>
@@ -842,9 +895,9 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
       <Dialog open={showDeleteDialog} onOpenChange={setShowDeleteDialog}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Delete Test</DialogTitle>
+            <DialogTitle>Move to Trash</DialogTitle>
             <DialogDescription>
-              Are you sure you want to delete &quot;{test.name}&quot;? This action cannot be undone.
+              &quot;{test.name}&quot; will be moved to the Recently Deleted section. You can restore it later.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
@@ -856,7 +909,31 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
               onClick={handleDelete}
               disabled={isDeleting}
             >
-              {isDeleting ? 'Deleting...' : 'Delete'}
+              {isDeleting ? 'Moving...' : 'Move to Trash'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Permanent Delete Confirmation Dialog */}
+      <Dialog open={showPermanentDeleteDialog} onOpenChange={setShowPermanentDeleteDialog}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Permanently Delete Test</DialogTitle>
+            <DialogDescription>
+              Are you sure you want to permanently delete &quot;{test.name}&quot;? All related data (results, baselines, diffs) will also be deleted. This action cannot be undone.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowPermanentDeleteDialog(false)}>
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={handlePermanentDelete}
+              disabled={isPermanentlyDeleting}
+            >
+              {isPermanentlyDeleting ? 'Deleting...' : 'Permanently Delete'}
             </Button>
           </DialogFooter>
         </DialogContent>

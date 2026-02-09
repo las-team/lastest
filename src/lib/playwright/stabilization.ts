@@ -4,37 +4,6 @@ import { DEFAULT_STABILIZATION_SETTINGS } from '@/lib/db/schema';
 import { HIDE_SPINNERS_CSS, PLACEHOLDER_IMAGE_BUFFER, SYSTEM_FONTS_CSS, getCrossOsFontCSS } from './constants';
 
 /**
- * JavaScript to inject for freezing timestamps.
- * Replaces Date.now() and new Date() with a frozen timestamp.
- */
-export function getFreezeTimestampsScript(frozenTimestamp: string): string {
-  return `
-    (function() {
-      const frozenDate = new Date('${frozenTimestamp}');
-      const frozenTime = frozenDate.getTime();
-      const OriginalDate = Date;
-
-      // Create a new Date constructor that returns frozen dates when called without args
-      function FrozenDate(...args) {
-        if (args.length === 0) {
-          return new OriginalDate(frozenTime);
-        }
-        return new OriginalDate(...args);
-      }
-
-      // Copy static methods
-      FrozenDate.now = function() { return frozenTime; };
-      FrozenDate.parse = OriginalDate.parse;
-      FrozenDate.UTC = OriginalDate.UTC;
-      FrozenDate.prototype = OriginalDate.prototype;
-
-      // Replace global Date
-      window.Date = FrozenDate;
-    })();
-  `;
-}
-
-/**
  * JavaScript to inject for seeding Math.random().
  * Uses a simple Linear Congruential Generator (LCG) for reproducible random values.
  */
@@ -270,9 +239,9 @@ export async function setupFreezeScripts(
 ): Promise<void> {
   const s = { ...DEFAULT_STABILIZATION_SETTINGS, ...settings };
 
-  // Freeze timestamps
+  // Freeze timestamps using Playwright's built-in clock API
   if (s.freezeTimestamps) {
-    await page.addInitScript(getFreezeTimestampsScript(s.frozenTimestamp));
+    await page.clock.setFixedTime(new Date(s.frozenTimestamp));
   }
 
   // Freeze random values

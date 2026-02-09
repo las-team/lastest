@@ -48,18 +48,56 @@ export async function updateTest(id: string, data: Partial<NewTest>) {
 
 export async function deleteTest(id: string) {
   await requireTeamAccess();
-  await queries.deleteTest(id);
+  await queries.softDeleteTest(id);
   revalidatePath('/tests');
+  revalidatePath(`/tests/${id}`);
   revalidatePath('/');
 }
 
 export async function deleteTests(testIds: string[]) {
   await requireTeamAccess();
   for (const id of testIds) {
-    await queries.deleteTest(id);
+    await queries.softDeleteTest(id);
   }
   revalidatePath('/tests');
   revalidatePath('/');
+}
+
+export async function restoreTest(id: string) {
+  await requireTeamAccess();
+  await queries.restoreTest(id);
+  revalidatePath('/tests');
+  revalidatePath(`/tests/${id}`);
+  revalidatePath('/');
+}
+
+export async function restoreTests(testIds: string[]) {
+  await requireTeamAccess();
+  for (const id of testIds) {
+    await queries.restoreTest(id);
+  }
+  revalidatePath('/tests');
+  revalidatePath('/');
+}
+
+export async function permanentlyDeleteTest(id: string) {
+  await requireTeamAccess();
+  await queries.permanentlyDeleteTest(id);
+  revalidatePath('/tests');
+  revalidatePath('/');
+}
+
+export async function permanentlyDeleteTests(testIds: string[]) {
+  await requireTeamAccess();
+  for (const id of testIds) {
+    await queries.permanentlyDeleteTest(id);
+  }
+  revalidatePath('/tests');
+  revalidatePath('/');
+}
+
+export async function getDeletedTests(repositoryId?: string) {
+  return queries.getDeletedTests(repositoryId);
 }
 
 export async function getTest(id: string) {

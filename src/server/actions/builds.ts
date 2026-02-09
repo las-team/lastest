@@ -141,12 +141,12 @@ export async function createAndRunBuild(
     runner.setSettings(playwrightSettings);
   }
 
-  // Get tests to run
+  // Get tests to run (filter out soft-deleted tests)
   let tests: Test[];
   if (testIds && testIds.length > 0) {
     tests = await Promise.all(
       testIds.map((id) => queries.getTest(id))
-    ).then((results) => results.filter((t): t is Test => t !== undefined));
+    ).then((results) => results.filter((t): t is Test => t !== undefined && !t.deletedAt));
   } else if (repositoryId) {
     tests = await queries.getTestsByRepo(repositoryId);
   } else {
@@ -391,6 +391,10 @@ async function runBuildAsync(
         environmentConfig: envConfig,
         playwrightSettings,
         maxParallelTests,
+        setupContext: {
+          storageState: setupContext.storageState,
+          variables: setupContext.variables,
+        },
       }, onProgress, onResult);
     } else {
       // Local uses maxParallelTests from playwrightSettings (set via runner.setSettings)
@@ -460,12 +464,12 @@ async function queueBuild(
   testIds?: string[],
   repositoryId?: string | null
 ) {
-  // Get tests to determine label
+  // Get tests to determine label (filter out soft-deleted tests)
   let tests: Test[];
   if (testIds && testIds.length > 0) {
     tests = await Promise.all(
       testIds.map((id) => queries.getTest(id))
-    ).then((results) => results.filter((t): t is Test => t !== undefined));
+    ).then((results) => results.filter((t): t is Test => t !== undefined && !t.deletedAt));
   } else if (repositoryId) {
     tests = await queries.getTestsByRepo(repositoryId);
   } else {

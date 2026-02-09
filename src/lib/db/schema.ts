@@ -91,6 +91,7 @@ export const tests = sqliteTable('tests', {
   setupTestId: text('setup_test_id'), // Use another test as setup (most common)
   setupScriptId: text('setup_script_id'), // OR use dedicated setup script
   setupOverrides: text('setup_overrides', { mode: 'json' }).$type<TestSetupOverrides>(),
+  deletedAt: integer('deleted_at', { mode: 'timestamp' }),
   createdAt: integer('created_at', { mode: 'timestamp' }),
   updatedAt: integer('updated_at', { mode: 'timestamp' }),
 });
@@ -596,6 +597,8 @@ export const DEFAULT_AI_SETTINGS = {
   aiDiffingEnabled: false,
   aiDiffingProvider: 'same-as-test-gen' as AIDiffingProvider,
   aiDiffingModel: 'anthropic/claude-sonnet-4-5-20250929',
+  aiDiffingOllamaBaseUrl: 'http://localhost:11434',
+  aiDiffingOllamaModel: '',
 };
 
 // AI Prompt Logging for debugging and auditing

@@ -59,3 +59,15 @@ export async function stopDebugSession(
     await runner.stop();
   }
 }
+
+export async function flushDebugTrace(
+  sessionId: string
+): Promise<{ url: string | null }> {
+  const runner = getDebugRunner();
+  const state = runner.getState();
+  if (!state || state.sessionId !== sessionId) {
+    return { url: null };
+  }
+  const url = await runner.flushTrace();
+  return { url };
+}
