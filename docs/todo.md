@@ -8,7 +8,14 @@ Gitlab
 Timestamp fixing
 ## features
 Support https://github.com/excalidraw/excalidraw/tree/master/packages/excalidraw/tests ~/.claude/plans/declarative-kindling-coral.md 55%
-
+    Branch baseline 
+    Test chagnes per branch
+    PR-ra megy egy push, akkor triggereljen egy comparisont, nem baseline, master - PERSISTENT BRANCH
+Teardown
+Test defining
+Test running
+AI Optimize settings
+Play gomb - give in url and do everything 
 ## ideas
 Component specific testing
 Electron app ~/.claude/plans/rippling-roaming-snail.md replan

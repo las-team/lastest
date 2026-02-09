@@ -1,17 +1,20 @@
 # Visual Regression Testing: Competitive Landscape Deep Dive
 
-**Research Date:** February 6, 2026
+**Research Date:** February 9, 2026 (updated from February 6, 2026)
 
 ---
 
 ## Market Overview
 
 - Visual Regression Testing Market: USD 826M (2022) → USD 2.22B by 2030 (CAGR 13.18%)
+- Visual Testing Service Market: USD 2.5B (2024) → USD 5.8B by 2033 (CAGR 10.2%)
+- AI-Enabled Testing Market: USD 856.7M (2024) → USD 3.82B by 2032 (CAGR 20.9%)
 - Broader Automation Testing Market: USD 19.97B (2025) → USD 51.36B by 2031 (CAGR 17.05%)
-- Key drivers: AI/ML integration, DevOps adoption, cross-browser/device proliferation, shift toward VTaaS
+- Key drivers: AI/ML integration, DevOps adoption, cross-browser/device proliferation, shift toward VTaaS, agentic AI workflows
 - 61% of QA teams adopting AI-driven testing (Katalon 2025 State of Software Quality Report)
+- AI self-healing tests reducing maintenance by 80% (aqua-cloud.io 2026 report)
 
-Sources: [ReportPrime](https://www.reportprime.com/visual-regression-testing-r14088), [GlobeNewsWire](https://www.globenewswire.com/news-release/2026/01/28/3227292/0/en/Automation-Testing-Industry-Research-2026-Global-Market-Size-Share-Trends-Opportunities-and-Forecasts-2021-2025-2026-2031.html)
+Sources: [ReportPrime](https://www.reportprime.com/visual-regression-testing-r14088), [GlobeNewsWire](https://www.globenewswire.com/news-release/2026/01/28/3227292/0/en/Automation-Testing-Industry-Research-2026-Global-Market-Size-Share-Trends-Opportunities-and-Forecasts-2021-2025-2026-2031.html), [VerifiedMarketReports](https://www.verifiedmarketreports.com/product/visual-testing-service-market/), [FortuneBizInsights](https://www.fortunebusinessinsights.com/ai-enabled-testing-market-108825)
 
 ---
 
@@ -22,8 +25,8 @@ Sources: [ReportPrime](https://www.reportprime.com/visual-regression-testing-r14
 | Attribute | Detail |
 |---|---|
 | **Founded** | 2015 (SF); acquired by BrowserStack July 2020 |
-| **Parent** | BrowserStack ($4B valuation, $200M Series B 2021) |
-| **Employees** | Part of BrowserStack (~1,000+) |
+| **Parent** | BrowserStack ($4B valuation, $200M Series B 2021). $125M ESOP + share buyback (Jan 2026) |
+| **Employees** | Part of BrowserStack (~1,000+), 272 open positions |
 | **Pricing** | Free: 5k shots/mo. Pro: $199/mo ($149 annual), 25k shots. Enterprise: custom |
 | **Diffing** | Proprietary "snapshot equilibration" + AI Visual Engine + "Intelli-ignore" (OCR-based). Smart bounding boxes instead of raw pixel diffs |
 | **Recording** | None. SDKs add `percySnapshot()` to existing Cypress/Playwright/Selenium tests |
@@ -34,9 +37,14 @@ Sources: [ReportPrime](https://www.reportprime.com/visual-regression-testing-r14
 | **Reviews (4.3/5)** | Likes: CI integration, cross-browser. Dislikes: expensive at scale, limited sensitivity config |
 | **Target** | Mid-to-enterprise teams on BrowserStack |
 
-**Recent moves:** Visual Review Agent replaces pixel highlighting with smart highlights + NL summaries. 272 open positions (Feb 2026) -- major hiring push.
+**Recent moves (Feb 2026):**
+- **Tricentis Tosca integration** -- visual testing now available in Tosca workflows with cross-browser validation, AI noise suppression, and root-cause analysis
+- **Universal search** -- single entry point to find any project, build, or test run across entire BrowserStack dashboard
+- **One-click Jira bug reporting** -- create and link Jira issues directly from Percy snapshots with automatic metadata
+- 272 open positions -- major hiring push continues
+- BrowserStack $125M ESOP/share buyback (Jan 2026) -- signals strong financials
 
-Sources: [Percy AI Agents](https://www.browserstack.com/percy/ai-agents), [Visual Review Agent PR](https://www.prnewswire.com/news-releases/browserstack-introduces-visual-review-agent-to-scale-visual-testing-with-ai-302583514.html)
+Sources: [Percy AI Agents](https://www.browserstack.com/percy/ai-agents), [Visual Review Agent PR](https://www.prnewswire.com/news-releases/browserstack-introduces-visual-review-agent-to-scale-visual-testing-with-ai-302583514.html), [Release Notes](https://www.browserstack.com/release-notes/en?category=app%20percy,percy), [Releasebot](https://releasebot.io/updates/browserstack)
 
 ---
 
@@ -47,19 +55,25 @@ Sources: [Percy AI Agents](https://www.browserstack.com/percy/ai-agents), [Visua
 | **Founded** | 2017 (SF) by Zoltan Olah |
 | **Funding** | $10.5M |
 | **Employees** | ~30 |
-| **Pricing** | Free: limited. Starter: $179/mo (35k snaps). Pro: $399/mo (85k). Enterprise: custom. TurboSnaps at 1/5 cost |
+| **Pricing** | Free: 5k snaps/mo (Chrome only). Starter: $179/mo (35k snaps). Pro: $399/mo (85k). Enterprise: custom. TurboSnaps at 1/5 cost |
 | **Diffing** | Pixel-based. Custom anti-flake: SteadySnap (Sep 2025), Page Shift Detection |
 | **Recording** | None. Tests = Storybook stories. Interaction tests via `play()`. Now supports Playwright + Cypress E2E |
 | **CI/CD** | GitHub, GitLab, CircleCI, Buildkite, Jenkins, Azure, Travis |
 | **Self-hosted** | No |
-| **AI** | None. Deterministic pixel comparison only |
+| **AI** | **NEW: MCP integration for component sharing** (Q1 2026) |
 | **OSS** | Storybook is MIT. Chromatic platform is proprietary |
 | **Reviews** | Likes: Storybook integration, TurboSnaps, component isolation. Dislikes: Storybook lock-in, can't test dynamic content, play function bloat, opaque deployment errors |
 | **Target** | Frontend/design system teams using Storybook |
 
-**Recent moves:** Capture Cloud v8 (Oct 2025): Shadow DOM, auto-pause CSS animations. Accessibility testing added (Jul 2025). Expanding beyond Storybook to Playwright/Cypress. Mission: "safeguard all of the world's pixels." Profitable, hiring Senior OSS Engineers ($167-194k + equity).
+**Recent moves (Q1 2026):**
+- **MCP agent integration** (Q1 2026) -- connect AI agents via MCP to reuse validated components in UI generation. First move into AI territory
+- **Commit-level history** -- compare components across branches and commits, review past versions
+- **Team/agent sharing** -- invite teammates and agents to reference your UI library
+- Plan rename: Standard → Pro (Sep 2025). Legacy Pro grandfathered for existing customers
+- Better redirect detection, clipped element handling, improved video support
+- Still profitable, hiring Senior OSS Engineers ($167-194k + equity)
 
-Sources: [Chromatic Changelog Dec 2025](https://www.chromatic.com/blog/chromatic-changelog-dec-2025/), [Chromatic Pricing](https://www.chromatic.com/pricing)
+Sources: [Chromatic Changelog](https://www.chromatic.com/blog/releases/), [Chromatic Pricing](https://www.chromatic.com/pricing), [Chromatic MCP](https://glama.ai/mcp/servers/integrations/chromatic)
 
 ---
 
@@ -75,14 +89,20 @@ Sources: [Chromatic Changelog Dec 2025](https://www.chromatic.com/blog/chromatic
 | **Recording** | Preflight: low-code/no-code. Autonomous (Feb 2024): GenAI NLP test generation |
 | **CI/CD** | All platforms. Ultrafast Grid for parallel cross-browser |
 | **Self-hosted** | Enterprise on-prem available (Applitools Server) |
-| **AI** | Visual AI (core), Autonomous NLP test gen, Storybook + Figma (Eyes 10.22), MCP preview. Forrester Wave Strong Performer Q4 2025 |
+| **AI** | Visual AI (core), Autonomous NLP test gen, **Autonomous MCP server + Eyes MCP server** (2026), native mobile Ultrafast Test Cloud. Forrester Wave Strong Performer Q4 2025 |
 | **OSS** | SDKs only. Free for OSS projects |
 | **Reviews (4.4/5 G2)** | Likes: Visual AI accuracy, smooth integration. Dislikes: expensive, slow execution, steep learning curve, clunky web UI, baseline management confusion, inflexible pricing |
 | **Target** | Enterprise QA teams (Fortune 100) |
 
-**Recent moves:** New CEO Anand Sundaram. Autonomous 2.2: LLM-generated steps, auto test data, API validation. **Hiring Senior Algorithm Developers for "agentic workflows and LLMs"** -- signals deep AI investment. Expanding to native mobile (Autonomous for Native Mobile Apps).
+**Recent moves (2026):**
+- **Autonomous MCP server** -- translates high-level test cases/BDD scenarios into full test flows
+- **Eyes MCP server** -- moves Visual AI directly into developer workflow
+- **Native mobile Ultrafast Test Cloud** -- parallel visual testing across dozens of real devices
+- **AI-assisted authoring** -- natural-language test creation, built-in API/data support
+- New CEO Anand Sundaram driving "agentic automation" strategy
+- Still hiring Senior Algorithm Developers for "agentic workflows and LLMs"
 
-Sources: [Applitools Autonomous 2.2](https://applitools.com/blog/introducing-autonomous-2-2/), [Applitools Agentic Automation](https://applitools.com/blog/agentic-automation-ai-augmented-testing/), [G2 Reviews](https://www.g2.com/products/applitools/reviews)
+Sources: [Applitools AI Testing Updates](https://applitools.com/blog/applitools-autonomous-eyes-ai-testing-updates/), [Native Mobile](https://applitools.com/blog/introducing-next-generation-native-mobile-test-automation/), [MCP Blog](https://applitools.com/blog/model-context-protocol-ai-testing/), [G2 Reviews](https://www.g2.com/products/applitools/reviews)
 
 ---
 
@@ -109,6 +129,7 @@ Sources: [Applitools Autonomous 2.2](https://applitools.com/blog/introducing-aut
 - Usage-based, NOT seat-based ("Scale usage, not seats")
 - Failed build screenshots don't count
 - Optional GitHub SSO add-on: $50/mo
+- Free for open source projects (case-by-case sponsoring)
 - **Price comparison:** 100K E2E + 100K Storybook = $510/mo (Argos) vs $807+ (Percy) vs $8,999+ (Applitools)
 
 #### Key Features
@@ -221,16 +242,25 @@ Strengths: zero cost, zero vendor lock-in, tight Playwright integration. Weaknes
 | **Founded** | 2021 (London) by Gabriel & Quentin Spencer Harper |
 | **Funding** | $4.12M (YC + Coatue/Soma seed Jan 2024). Angels: Jason Warner (CTO GitHub), Scott Belsky (CPO Adobe), Guillermo Rauch (Vercel) |
 | **Employees** | ~15 |
-| **Pricing** | Custom only. No free plan |
+| **Pricing** | Custom only (enterprise pricing). No free plan |
 | **Diffing** | Deterministic replay-based. Built on Chromium with deterministic scheduler |
 | **Recording** | **Core differentiator.** JS snippet records real user sessions → auto-generates E2E visual tests. Zero maintenance, self-updating |
 | **Self-hosted** | No (cloud only) |
-| **AI** | AI session analysis + test generation. Automatic network mocking. Deterministic replay eliminates flakiness |
+| **AI** | AI session analysis + test generation. Automatic network mocking. Deterministic replay eliminates flakiness. Continually adds/removes tests as features change |
+| **Compliance** | SOC 2 Type II compliant |
+| **Frameworks** | React, Vue, Angular, Vite, Svelte, Next12-14+ |
 | **Target** | Frontend teams (Next.js/Vercel users) wanting zero-maintenance visual testing |
+
+**Recent moves (2026):**
+- **Vercel Marketplace integration** -- official Vercel integration for AI-generated E2E tests
+- **Expanded framework support** -- React, Vue, Angular, Vite, Svelte, and all Next.js versions
+- **SOC 2 Type II** compliance achieved
+- GitHub + GitLab + Vercel integrations, works on any CI provider
+- "Lightning fast" execution via deterministic Chromium-level scheduling
 
 Reviews: Strengths -- zero maintenance, no flaky tests, good support. Complaints -- learning curve, overwhelming with many changes, no free tier.
 
-Sources: [Meticulous.ai](https://www.meticulous.ai/), [Seed Round](https://www.meticulous.ai/blog/meticulous-announces-4m-seed-round), [G2 Reviews](https://www.g2.com/products/meticulous/reviews)
+Sources: [Meticulous.ai](https://www.meticulous.ai/), [Vercel Integration](https://vercel.com/integrations/meticulous), [Seed Round](https://www.meticulous.ai/blog/meticulous-announces-4m-seed-round), [G2 Reviews](https://www.g2.com/products/meticulous/reviews)
 
 ---
 
@@ -252,11 +282,19 @@ Sources: [Meticulous.ai](https://www.meticulous.ai/), [Seed Round](https://www.m
 
 | Tool | Description |
 |---|---|
-| **Panto AI** | RL-based Visual AI for mobile QA. NL test descriptions → deterministic scripts |
+| **TestSprite** | **NEW.** Seattle startup, $6.7M seed (Trilogy Equity Partners), total $8.1M. AI agent for testing AI-generated code. MCP integration. User base: 6K→35K in 3 months. Boosts AI-code pass rates 42%→93%. Founded by ex-Amazon/Google engineers |
+| **Panto AI** | RL-based Visual AI for mobile QA. NL test descriptions → deterministic scripts. Leading 2026 mobile visual QA guide |
+| **Owlity** | Auto-generates, maintains, and runs E2E tests for web apps. Ideal for startups without full QA staff |
+| **Reflect QA** | Visual checks + cross-browser + parallel execution + API+UI testing. Video replays, screenshot comparisons, CI/CD integration |
+| **Sauce Labs Visual** | Added visual testing add-on to Continuous Testing Cloud. AI noise suppression. Introducing "Sauce AI: Intelligent Agents." Partnered with Katalon |
+| **Katalon TrueTest** | Analyzes real production user behavior → auto-generates regression tests. AI embedded directly into testing lifecycle |
+| **testRigor** | LLM-powered test generation from plain English. Leader in NL-based test automation |
 | **Wopee.io** | AI testing agents. Autonomous visual testing + Robot Framework |
 | **Visual Regression Tracker** | OSS, self-hosted, Docker-based. SDKs for any test runner |
 | **Pixeleye** | OSS, multi-browser, self-hostable. Storybook/Cypress/Playwright |
 | **Creevey** | Self-hosted cross-browser screenshot testing for Storybook |
+
+Sources: [TestSprite Seed](https://techfundingnews.com/testsprite-raises-6-7m-seed-autonomous-ai-testing-platform/), [GeekWire TestSprite](https://www.geekwire.com/?p=897164), [testrigor.com](https://testrigor.com/blog/visual-testing-tools/), [Sauce Labs](https://saucelabs.com/products/visual-testing)
 
 ---
 
@@ -267,15 +305,26 @@ Sources: [Meticulous.ai](https://www.meticulous.ai/), [Seed Round](https://www.m
 | **AI Diffing** | Yes | Yes | No | Yes (best) | No | No | No | Deterministic | No | No |
 | **AI Test Gen** | Yes | No | No | Yes (NLP) | No | No | No | Yes (sessions) | No | No |
 | **AI Auto-Fix** | Yes | No | No | No | No | No | No | Auto-maintain | No | No |
+| **Spec-Driven Test Gen** | Yes | No | No | No | No | No | No | No | No | No |
 | **Recording** | Yes | No | No | Low-code | No | No | Codegen | Session record | No | No |
 | **Visual Diff UI** | Yes | Yes | Yes | Yes | Basic HTML | Yes (SaaS) | No | PR-based | Yes | Yes |
 | **Approval Flow** | Yes | Yes | Yes | Yes | No | Yes (SaaS) | No | PR-based | Yes | Yes |
 | **Self-hosted** | Yes | No | No | Enterprise | Yes | OSS core | Yes | No | OSS core | No |
-| **Free Screenshots** | Unlimited | 5k/mo | Limited | OSS only | Unlimited | OSS only | Unlimited | No | 5k/mo | OSS only |
+| **Free Screenshots** | Unlimited | 5k/mo | 5k/mo | OSS only | Unlimited | OSS only | Unlimited | No | 5k/mo | OSS only |
 | **Cross-browser** | Playwright | Yes | 4 browsers | Ultrafast Grid | Limited | Yes | 3 engines | Chromium | Via SDKs | Real 5 |
-| **Accessibility** | Yes | No | Enterprise | No | No | No | No | No | ARIA snaps | No |
+| **Accessibility** | Yes (axe-core) | No | Enterprise | No | No | No | No | No | ARIA snaps | No |
 | **Route Discovery** | Yes | No | No | No | No | No | No | No | No | No |
 | **Multi-tenancy** | Yes | Projects | Projects | Enterprise | No | SaaS | No | Projects | Teams | Teams |
+| **MCP Integration** | Yes | Yes | Q1 2026 | Yes (2x) | No | No | No | No | No | No |
+| **Perceptual Diffing** | Yes (SSIM+Butteraugli) | No | No | Yes (Visual AI) | No | No | No | No | No | No |
+| **Page Shift Detection** | Yes | No | Yes | No | No | No | No | No | No | No |
+| **Text-Region Diffing** | Yes (OCR) | Yes (OCR) | No | No | No | No | No | No | No | No |
+| **Figma Integration** | Yes (plugin) | No | No | Yes | No | No | No | No | No | No |
+| **Remote Runners** | Yes | Cloud | Cloud | Cloud | No | Cloud | No | Cloud | Cloud | Cloud |
+| **Debug Mode** | Yes | No | No | No | No | No | Trace | No | Playwright trace | No |
+| **Google Sheets Data** | Yes | No | No | No | No | No | No | No | No | No |
+| **VS Code Extension** | Yes (API) | No | No | Yes | No | No | Yes | No | No | No |
+| **GitLab Support** | Yes (OAuth+MR) | Yes | Yes | Yes | No | No | No | Yes | Yes | No |
 | **Open Source** | Yes | SDKs | Storybook | SDKs | Full | Core | Full | No | Core | Client |
 | **Price** | $0 | $199+/mo | $179+/mo | $699+/mo | $0 | $100+/mo | $0 | Custom | $100+/mo | $64+/mo |
 
@@ -325,17 +374,19 @@ Sources: [Tony Ward](https://www.tonyward.dev/articles/visual-regression-testing
 | # | Gap | Lastest2 Status |
 |---|-----|----------------|
 | 1 | **Self-hosted with SaaS-level UX** -- "an open source, free offering that is completely self-managed" | **SOLVED** -- OSS, self-hosted, full UI |
-| 2 | **AI diff that truly eliminates false positives** | **SOLVED** -- AI-powered diffing added |
+| 2 | **AI diff that truly eliminates false positives** | **SOLVED** -- AI-powered diffing + SSIM/Butteraugli perceptual engines |
 | 3 | **Team-based pricing** instead of per-screenshot | **SOLVED** -- $0 forever, no per-screenshot model |
-| 4 | **Cross-OS consistency without Docker** | **Partial → Improved** -- cross-OS consistency features added |
+| 4 | **Cross-OS consistency without Docker** | **SOLVED** -- bundled fonts, Chromium flags, timestamp freezing, random seeding, burst capture, DOM stability detection |
 | 5 | **Full-page + component testing in one tool** | **SOLVED** -- records full flows, tests any URL |
-| 6 | **Accessibility + visual regression in one pass** | **SOLVED** -- has accessibility testing |
-| 7 | **Zero-maintenance test generation** | **SOLVED** -- AI generates + auto-fixes tests |
+| 6 | **Accessibility + visual regression in one pass** | **SOLVED** -- automated axe-core audits on every screenshot capture |
+| 7 | **Zero-maintenance test generation** | **SOLVED** -- AI generates + auto-fixes tests + spec-driven generation |
 | 8 | **Git-native baseline management** with branching/merging | **SOLVED** -- SHA256 hash carry-forward, branch-aware |
 | 9 | **Transparent pricing** | **SOLVED** -- $0 forever, open source |
 | 10 | **Native mobile visual testing** | GAP -- not addressed yet |
+| 11 | **Test from design files** | **SOLVED** -- Figma plugin for importing screens as planned test screenshots |
+| 12 | **Data-driven testing from spreadsheets** | **SOLVED** -- Google Sheets integration with OAuth, multi-tab, caching |
 
-**Lastest2 addresses 9 of 10 top market gaps.** Only remaining gap: native mobile visual testing.
+**Lastest2 addresses 11 of 12 top market gaps.** Only remaining gap: native mobile visual testing.
 
 ---
 
@@ -346,6 +397,8 @@ Sources: [Tony Ward](https://www.tonyward.dev/articles/visual-regression-testing
 - **DIY gaining traction**: Playwright + S3 + custom CI to avoid SaaS costs
 - **OSS growing**: Lost Pixel + Argos gaining adoption for self-hosting needs
 - **AI trust gap**: Only 29% of devs trust AI outputs (Stack Overflow 2025, down from 40%)
+- **"Vibe testing" emerging**: testRigor, Reflect, Autify offer NL-based test creation -- signals demand for low-code/no-code testing
+- **MCP adoption accelerating**: 2026 called "The Year for Enterprise-Ready MCP Adoption" (CData)
 
 ---
 
@@ -353,22 +406,26 @@ Sources: [Tony Ward](https://www.tonyward.dev/articles/visual-regression-testing
 
 | Company | Hiring Signals | Direction |
 |---|---|---|
-| **Applitools** | Senior Algorithm Devs for "agentic workflows and LLMs" | Agentic AI, native mobile, autonomous testing |
-| **BrowserStack/Percy** | 272 open positions, AI roles | Visual Review Agent, OCR diffing, enterprise scale |
-| **Chromatic** | Senior OSS Engineers, DevRel, Customer Success | Storybook dominance, enterprise expansion |
-| **Meticulous** | Small team, YC-backed | Zero-effort test gen, Vercel integration |
+| **Applitools** | Senior Algorithm Devs for "agentic workflows and LLMs" | Agentic AI, native mobile, MCP server, autonomous testing |
+| **BrowserStack/Percy** | 272 open positions, AI roles, $125M ESOP buyback | Visual Review Agent, Tricentis Tosca integration, enterprise scale |
+| **Chromatic** | Senior OSS Engineers, DevRel, Customer Success | MCP component sharing, agent integration, enterprise expansion |
+| **Meticulous** | Small team, YC-backed, SOC 2 compliant | Zero-effort test gen, Vercel integration, framework expansion |
+| **TestSprite** | $6.7M seed, growing 6K→35K users in 3 months | AI testing for AI-generated code, MCP integration |
 
 ---
 
 ## Market Trends
 
-1. **AI is table stakes** -- Percy (Review Agent), Applitools (Visual AI + Autonomous), Meticulous (session-based). Tools without AI risk commoditization
-2. **Pixel → intelligent diffing** -- market moving to AI/ML that understands layout semantics
-3. **Test generation is the new frontier** -- biggest pain point is writing/maintaining tests
-4. **Component + E2E convergence** -- Chromatic expanding to Playwright/Cypress, Applitools adding Storybook
-5. **Accessibility-aware testing** -- Argos ARIA snapshots, EU Accessibility Act (Jun 2025)
-6. **Self-hosted demand persistent** -- Lost Pixel, Argos, VRT, Pixeleye
-7. **Pricing bifurcation** -- enterprise ($699+) vs affordable ($100). Screenshot pricing creates unpredictable costs
+1. **AI is table stakes** -- Percy (Review Agent), Applitools (Visual AI + Autonomous), Meticulous (session-based), Chromatic entering via MCP. Tools without AI risk commoditization
+2. **MCP is the new integration layer** -- Applitools (2 MCP servers), Percy (MCP), Chromatic (Q1 2026), TestSprite (MCP). Becoming standard for AI-tool interop
+3. **Pixel → intelligent diffing** -- market moving to AI/ML that understands layout semantics. SSIM/Butteraugli gaining as alternatives to pure pixel-match
+4. **Test generation is the new frontier** -- biggest pain point is writing/maintaining tests. "Vibe testing" / NL-based generation becoming mainstream
+5. **Component + E2E convergence** -- Chromatic expanding to Playwright/Cypress, Applitools adding Storybook
+6. **Accessibility-aware testing** -- Argos ARIA snapshots, EU Accessibility Act (Jun 2025), axe-core integration becoming expected
+7. **Self-hosted demand persistent** -- Lost Pixel, Argos, VRT, Pixeleye
+8. **Pricing bifurcation** -- enterprise ($699+) vs affordable ($100). Screenshot pricing creates unpredictable costs
+9. **Agentic testing** -- Applitools, Sauce Labs, Katalon all investing in autonomous AI agents for testing
+10. **Design-to-test pipeline** -- Figma integration becoming a differentiator (Applitools Eyes 10.22, Lastest2 Figma plugin)
 
 ---
 
@@ -383,33 +440,101 @@ Sources: [Tony Ward](https://www.tonyward.dev/articles/visual-regression-testing
 6. **Route auto-discovery** -- unique
 7. **$0 forever with unlimited screenshots** -- only BackstopJS/Playwright match on price, but lack UI/collaboration
 8. **Open source + accessibility testing + AI generation** -- no other OSS tool has all three
+9. **Spec-driven test generation** -- import OpenAPI/markdown/user stories → AI generates tests (unique)
+10. **SSIM + Butteraugli perceptual diffing** -- beyond pixel-match, approaching Applitools Visual AI quality at $0
+11. **Text-region-aware OCR diffing** -- only Percy has comparable OCR-based diffing
+12. **Page shift detection** -- only Chromatic has comparable feature
+13. **Figma plugin for planned screenshots** -- compare against design files (rare, only Applitools has similar)
+14. **Google Sheets test data integration** -- unique
+15. **Debug mode with step-by-step execution** -- unique for visual testing tools
+16. **5 AI providers including Ollama** -- local AI option nobody else offers
+17. **Remote runners with capability tracking** -- self-hosted distributed execution (unique)
+18. **Setup orchestration** -- multi-step setup sequences with browser + API script types (unique)
+19. **Comprehensive stabilization engine** -- timestamp freezing, random seeding, burst capture, DOM stability, network idle, font loading, third-party blocking, loading indicator hiding (most comprehensive in market)
 
 ### Gaps to watch:
 - Cross-browser rendering (Happo/Applitools advantage)
 - ARIA snapshot testing specifically (Argos's unique approach to accessibility-aware diffing)
 - Scale/infrastructure (cloud tools handle this)
-- SOC 2 / enterprise compliance (Argos has it)
-- Native mobile visual testing (only Applitools expanding here)
+- SOC 2 / enterprise compliance (Argos and Meticulous have it)
+- Native mobile visual testing (Applitools and Panto AI expanding here)
+- MCP server for external AI agents to consume Lastest2 (competitors adding this)
 
 ### Closest competitors by positioning:
 1. **Argos CI** -- affordable OSS + SaaS, similar target audience, but no AI/recording
 2. **Lost Pixel** -- affordable OSS alternative, but no AI/recording
-3. **Meticulous.ai** -- AI test generation, but cloud-only, no recording, custom pricing
+3. **Meticulous.ai** -- AI test generation + SOC 2, but cloud-only, no recording, custom pricing
 4. **Visual Regression Tracker** -- self-hosted, but minimal features
+5. **TestSprite** -- AI testing with MCP, but focused on AI-generated code testing, not visual regression specifically
 
 ### Pricing opportunity:
 The $100-$200/mo range (Lost Pixel, Percy Pro, Chromatic Starter) is the sweet spot for teams outgrowing free tools. Lastest2's self-hosted model eliminates per-screenshot pricing entirely -- a strong value proposition.
 
+---
 
+## New Lastest2 Features Since Last Update (Feb 6-9, 2026)
+
+Features added to Lastest2 since the original competitive analysis:
+
+### Diffing & Stabilization
+- **SSIM and Butteraugli perceptual diffing engines** -- beyond pixel-match comparison
+- **Page Shift Detection** -- LCS row-alignment to exclude vertical content shifts from diffs
+- **Text-region-aware diffing** -- OCR-based detection of text changes
+- **Burst capture** -- multi-frame instability detection
+- **Auto-mask dynamic content** -- automatically detect and mask timestamps, UUIDs, relative times
+- **DOM stability detection** -- wait for DOM mutations to stop before screenshot
+- **Network idle waiting** -- wait for network activity to settle
+- **Third-party blocking** -- block third-party domains with configurable allowlist
+- **Font loading wait** -- wait for webfonts to load
+- **Loading indicator hiding** -- auto-hide spinners with custom selectors
+
+### AI & Test Generation
+- **Spec-driven testing** -- import OpenAPI specs, user stories, or markdown → AI generates tests
+- **5 AI providers** -- Claude CLI, OpenRouter, Agent SDK, Anthropic Direct, Ollama (local)
+- **Separate AI diff provider** -- use different AI for diff analysis vs test generation
+- **AI diff classification** -- insignificant/meaningful/noise with confidence scores
+- **MCP selector validation** -- real-time selector validation via Claude MCP
+
+### Integrations
+- **Figma plugin** -- import design files as planned test step screenshots (marketplace-ready)
+- **Google Sheets test data** -- per-team OAuth, multi-tab, custom headers, fixed ranges, caching
+- **GitLab support** -- OAuth login (self-hosted), MR comments, webhook triggers
+- **Google OAuth** -- sign in with Google
+- **Email invitations** -- via Resend with verification tokens
+
+### Infrastructure
+- **Remote runners** -- distributed test execution with capability tracking, max parallel tests
+- **Smart Run** -- analyzes git diffs to run only affected tests
+- **Debug mode** -- step-by-step test execution with live feedback
+- **Background jobs** -- async queue for long-running operations with parallel AI
+- **VS Code Extension API** -- REST + SSE for IDE integration
+- **Docker deployment** -- multi-stage Docker setup with persistent volumes
+- **Setup orchestration** -- repository-default and build-level multi-step setup sequences
+
+### Comparison Matrix (rows that changed)
+| Capability | Previous | Current |
+|---|---|---|
+| Perceptual Diffing | No | SSIM + Butteraugli |
+| Spec-Driven Test Gen | No | Yes |
+| Figma Integration | No | Yes (plugin) |
+| Google Sheets Data | No | Yes |
+| GitLab Support | No | Yes (OAuth + MR) |
+| Remote Runners | No | Yes |
+| Debug Mode | No | Yes |
+| MCP Integration | No | Yes |
+| Cross-OS Consistency | Partial | Comprehensive (9 stabilization features) |
+| AI Providers | 4 | 5 (added Ollama) |
+
+---
 
 ## Proof links:
 
-  Tony Ward's Article                                              
-                                                                   
+  Tony Ward's Article
+
   - https://www.tonyward.dev/articles/visual-regression-testing-dis
-  ruption (2024, updated Apr 2025)                                 
-    - "An open source, free, self-managed offering with no  
-  subscription requirement, where images are not uploaded to a     
+  ruption (2024, updated Apr 2025)
+    - "An open source, free, self-managed offering with no
+  subscription requirement, where images are not uploaded to a
   third-party service"
   - https://www.tonyward.dev/articles/visual-regression-testing-dis
   ruption-2

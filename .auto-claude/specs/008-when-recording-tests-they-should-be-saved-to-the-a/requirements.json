@@ -1,4 +1,0 @@
-{
-  "task_description": "when recording tests they should be saved to the active repo - same for runs",
-  "workflow_type": "bug_fix"
-}

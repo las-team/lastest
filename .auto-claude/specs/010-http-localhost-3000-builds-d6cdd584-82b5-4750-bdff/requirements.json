@@ -1,4 +1,0 @@
-{
-  "task_description": "http://localhost:3000/builds/d6cdd584-82b5-4750-bdff-0d41e79ba825 should be possible to click the top menu elements to filter down the list",
-  "workflow_type": "feature"
-}

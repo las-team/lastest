@@ -29,6 +29,7 @@ import { useNotifyJobStarted } from '@/components/queue/job-polling-context';
 import { ExecutionTargetSelector } from '@/components/execution/execution-target-selector';
 import type { Test, TestRun, Build } from '@/lib/db/schema';
 import { BuildSummaryCard } from '@/components/builds/build-summary-card';
+import { BranchSelector } from '@/components/settings/branch-selector';
 
 interface BuildWithBranch extends Build {
   gitBranch?: string;
@@ -40,6 +41,8 @@ interface RunDashboardClientProps {
   builds: BuildWithBranch[];
   repositoryId?: string | null;
   activeBranch?: string;
+  currentBranch: string | null;
+  defaultBranch: string | null;
   baseUrl: string;
   buildChanges?: BuildChanges | null;
 }
@@ -70,7 +73,7 @@ function isLocalUrl(url: string): boolean {
   }
 }
 
-export function RunDashboardClient({ tests, runs: _runs, builds, repositoryId, activeBranch, baseUrl: initialBaseUrl, buildChanges }: RunDashboardClientProps) {
+export function RunDashboardClient({ tests, runs: _runs, builds, repositoryId, activeBranch, currentBranch, defaultBranch, baseUrl: initialBaseUrl, buildChanges }: RunDashboardClientProps) {
   const router = useRouter();
   const notifyJobStarted = useNotifyJobStarted();
   const [isRunning, setIsRunning] = useState(false);
@@ -384,6 +387,19 @@ export function RunDashboardClient({ tests, runs: _runs, builds, repositoryId, a
                   </div>
                 )}
               </div>
+              {repositoryId && (
+                <div className="flex items-center justify-between mt-3 pt-3 border-t">
+                  <div className="flex items-center gap-2">
+                    <GitBranch className="h-3.5 w-3.5 text-muted-foreground" />
+                    <span className="text-sm font-medium">Branch</span>
+                  </div>
+                  <BranchSelector
+                    repositoryId={repositoryId}
+                    currentBranch={currentBranch}
+                    defaultBranch={defaultBranch}
+                  />
+                </div>
+              )}
             </CardContent>
           </Card>
 

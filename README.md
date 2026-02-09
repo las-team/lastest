@@ -1,7 +1,7 @@
 <p align="center">
   <h1 align="center">Lastest2</h1>
   <p align="center">
-    <strong>Free visual regression testing with AI-generated tests</strong>
+    <strong>Free, open-source visual regression testing with AI-generated tests</strong>
   </p>
   <p align="center">
     Record it. Test it. Ship it. — $0 forever.
@@ -13,6 +13,7 @@
   <a href="#quick-start">Quick Start</a> •
   <a href="#how-it-works">How It Works</a> •
   <a href="#why-lastest2">Why Lastest2</a> •
+  <a href="#comparison">Comparison</a> •
   <a href="#commands">Commands</a> •
   <a href="#environment-variables">Config</a>
 </p>
@@ -21,36 +22,40 @@
   <img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License" />
   <img src="https://img.shields.io/badge/PRs-welcome-brightgreen.svg" alt="PRs Welcome" />
   <img src="https://img.shields.io/badge/self--hosted-yes-green" alt="Self Hosted" />
+  <img src="https://img.shields.io/badge/cost-%240%20forever-brightgreen" alt="$0 Forever" />
 </p>
 
 ---
 
-<!-- TODO: Add demo GIF here -->
-<!-- ![Demo](./docs/demo.gif) -->
+<p align="center">
+  <img src="./docs/demo.gif" alt="Lastest2 Demo — Record, Test, Diff, Approve" width="720" />
+</p>
 
 ## The Problem
 
-You ship fast with AI tools. You break things faster.
+Visual regression testing is either **expensive**, **flaky**, or **painful to maintain**.
 
-- Percy costs **$399/mo** for teams
-- Chromatic starts at **$149/mo**
-- BackstopJS requires manual test writing
+- Percy: **$199-5,000+/mo** depending on screenshots. Cloud-only
+- Applitools: **$699+/mo**. Enterprise pricing, steep learning curve
+- Chromatic: **$179+/mo**. Locked to Storybook
+- Playwright native: Free, but no dashboard, no collaboration, no AI
+- BackstopJS: Free, but maintenance mode and no UI
 
-Meanwhile, you're a solo founder who just needs to know: **"Did my last commit break the UI?"**
+Meanwhile, you just need to know: **"Did my last commit break the UI?"**
 
 ## The Solution
 
-Lastest2 is free, self-hosted visual regression testing that writes tests for you.
+Lastest2 is free, self-hosted visual regression testing that **writes tests for you and fixes them when they break**.
 
 ```
 1. Point it at your app
-2. Record your user flows
-3. AI generates the test code
-4. Screenshots are compared on every run
-5. Approve or reject visual changes
+2. Record your user flows (point-and-click, no code)
+3. AI generates resilient test code
+4. Screenshots compared with perceptual diffing (SSIM + Butteraugli)
+5. Approve or reject visual changes in a full review UI
 ```
 
-Your data stays local. Your wallet stays full.
+Your data stays on your server. Your screenshots never leave your infra. It costs $0 forever.
 
 ---
 
@@ -58,46 +63,68 @@ Your data stays local. Your wallet stays full.
 
 ### Core
 
-- **Record Browser Interactions** — Point-and-click test recording via Playwright. No code required.
+- **Record Browser Interactions** — Point-and-click test recording via Playwright with multiple engines (custom recorder or Playwright Inspector). No code required.
 - **AI Test Generation** — Claude generates robust test code with multi-selector fallback (data-testid → id → role → aria-label → text → css → OCR).
 - **Visual Diffing** — Pixel-perfect comparison using pixelmatch. See exactly what changed.
+- **Multi-Step Screenshots** — Capture multiple labeled screenshots per test run for multi-page flow testing.
 - **Approval Workflow** — Review visual diffs before they become baselines. Catch regressions, approve intentional changes.
 - **Git-Aware Builds** — Run tests per branch/commit. Compare across PRs. Track coverage.
+- **Branch Comparison** — Dedicated compare view for side-by-side branch-to-branch test result diffing.
 - **Test Suites** — Organize tests into ordered suites for structured execution.
 - **Test Versioning** — Full version history with change reasons (manual edit, AI fix, AI enhance, restored).
+- **Debug Mode** — Step-by-step test execution with live feedback for diagnosing failures.
 
 ### AI-Powered
 
-- **Multiple AI Providers** — Claude CLI, OpenRouter, Claude Agent SDK, or direct Anthropic API.
-- **AI Diff Analysis** — AI-powered visual diff classification with confidence scores.
+- **Multiple AI Providers** — Claude CLI, OpenRouter, Claude Agent SDK, direct Anthropic API, or **Ollama** (local models).
+- **Separate AI Diff Provider** — Use a different AI provider for diff analysis than test generation.
+- **AI Diff Analysis** — AI-powered visual diff classification (insignificant/meaningful/noise) with confidence scores and change categories.
 - **AI Test Fixing** — Automatically fix failing tests or enhance existing ones.
-- **Spec-Driven Testing** — Import and generate tests from OpenAPI specs, user stories, or markdown files.
+- **Spec-Driven Testing** — Import OpenAPI specs, user stories, or markdown files. AI extracts stories and generates tests automatically.
 - **Route Discovery** — AI scans your source code to discover routes and suggest tests.
 - **MCP Selector Validation** — Real-time selector validation on live pages via Claude MCP.
+
+### Stabilization & Flaky Test Prevention
+
+- **Timestamp Freezing** — Replace `Date.now()` and `new Date()` with fixed values for deterministic screenshots.
+- **Random Value Seeding** — Seed `Math.random()` for consistent outputs.
+- **Cross-OS Consistency** — Bundled fonts + Chromium flags for identical screenshots across operating systems.
+- **Burst Capture** — Multi-frame instability detection: take N screenshots and compare for stability before saving.
+- **Auto-Mask Dynamic Content** — Automatically detect and mask timestamps, UUIDs, and relative times before comparison.
+- **Network Idle Waiting** — Wait for network activity to settle before capture.
+- **DOM Stability Detection** — Wait for DOM mutations to stop before screenshot.
+- **Third-Party Blocking** — Block third-party domains with configurable allowlist, mock external images.
+- **Font Loading Wait** — Wait for webfonts to load, or disable them entirely.
+- **Loading Indicator Hiding** — Auto-hide spinners and loading states with custom selectors.
+- **Page Shift Detection** — Detect vertical content shifts (inserted/deleted rows) with fuzzy row matching.
 
 ### Integrations
 
 - **GitHub** — OAuth login, repo sync, PR comments, webhook-triggered builds.
 - **GitLab** — OAuth login (self-hosted supported), MR comments, webhook triggers.
 - **Google OAuth** — Sign in with Google.
-- **Google Sheets** — Use spreadsheet data as test data sources with per-team OAuth and caching.
+- **Google Sheets** — Use spreadsheet data as test data sources with per-team OAuth, multi-tab support, custom header rows, fixed ranges, and caching.
 - **Notifications** — Slack, Discord, custom webhooks, and GitHub/GitLab PR comments for build results.
+- **Email** — Team invitation emails via Resend.
 
 ### Infrastructure
 
 - **Smart Run** — Analyzes git diffs to run only tests affected by your changes.
-- **Remote Runners** — Distributed test execution on remote machines with capability tracking.
-- **Docker Deployment** — Production-ready multi-stage Docker setup with persistent volumes.
+- **Remote Runners** — Distributed test execution on remote machines with capability tracking (run/record), max parallel tests, and system info collection.
+- **Parallel Test Execution** — Configurable max parallel tests for local and remote runners.
+- **Docker Deployment** — Production-ready multi-stage Docker setup based on official Playwright image with persistent volumes.
 - **VSCode Extension API** — REST + SSE API (`/api/v1/`) for IDE integration.
 - **Accessibility Audits** — Automated axe-core checks on every screenshot capture.
+- **Network & Console Tracking** — Capture network requests and browser console errors during test runs.
 
 ### Advanced
 
-- **Ignore Regions** — Mask dynamic areas (timestamps, ads, counters) from diff comparison.
-- **Planned Screenshots** — Compare against design files (Figma exports, etc.).
+- **Ignore Regions** — Mask dynamic areas (timestamps, ads, counters) from diff comparison with configurable mask styles (solid-color or placeholder-text).
+- **Planned Screenshots** — Compare against design files (Figma exports, etc.) with separate planned vs actual diff tracking.
 - **Carry-Forward Baselines** — SHA256-based automatic baseline matching across branches.
-- **Setup Orchestration** — Repository-default, build-level, and per-test setup scripts with skip/override.
-- **Selector Stats** — Track selector success/failure rates for optimization.
+- **Setup Orchestration** — Repository-default multi-step setup sequences, build-level setup, and per-test setup scripts with skip/override. Supports Playwright (browser) and API (HTTP seeding) script types.
+- **App State Inspection** — Access internal app state during tests (`window.__APP_STATE__`, Redux stores, etc.) for complex assertions.
+- **Selector Stats** — Track selector success/failure rates and response times for automatic optimization recommendations.
 - **Diff Sensitivity** — Configurable pixel/percentage thresholds for unchanged/flaky/changed classification.
 - **AI Prompt Logs** — Full audit trail of all AI requests and responses.
 - **Background Jobs** — Queue tracking for long-running operations (AI scans, builds).
@@ -107,28 +134,45 @@ Your data stays local. Your wallet stays full.
 - **Multi-Tenant Teams** — Slug-based team workspaces with invitations.
 - **Role-Based Access** — Owner, admin, member, viewer roles.
 - **Multiple Auth Methods** — Email/password, GitHub OAuth, GitLab OAuth, Google OAuth.
+- **Email Invitations** — Send team invitations via Resend with verification and password reset tokens.
 
 ---
 
 ## Quick Start
 
+### Option 1: Docker (recommended)
+
 ```bash
-# Clone
-git clone https://github.com/YOUR_USERNAME/lastest2.git
+git clone https://github.com/dexilion-team/lastest2.git
 cd lastest2
+docker-compose up -d
+```
 
-# Install
+Open [http://localhost:3000](http://localhost:3000) — that's it.
+
+### Option 2: From source
+
+```bash
+git clone https://github.com/dexilion-team/lastest2.git
+cd lastest2
 pnpm install
-
-# Start
 pnpm dev
 ```
 
 Open [http://localhost:3000](http://localhost:3000)
 
+### First steps
+
+1. Create an account (local, no external auth required)
+2. Add a repository and set its local path or connect GitHub/GitLab
+3. Click **Record** — interact with your app, Lastest2 captures everything
+4. AI generates test code automatically
+5. **Run** the test — screenshots are captured and diffed against baselines
+6. **Review** visual changes and approve or reject
+
 ### Requirements
-- Node.js 18+
-- pnpm
+- **Docker**: Docker 20+ and Docker Compose
+- **From source**: Node.js 18+, pnpm
 
 ---
 
@@ -163,27 +207,41 @@ Open [http://localhost:3000](http://localhost:3000)
 
 ## Why Lastest2
 
-| Feature | Lastest2 | Percy | Chromatic |
-|---------|----------|-------|-----------|
-| Price | **Free** | $399/mo | $149/mo |
-| Self-hosted | Yes | No | No |
-| AI test generation | Yes | No | No |
-| AI diff analysis | Yes | No | No |
-| Data privacy | Local | Cloud | Cloud |
-| Open source | Yes | No | No |
-| GitHub + GitLab | Yes | Yes | Yes |
-| Google Sheets test data | Yes | No | No |
-| Smart run (diff-based) | Yes | No | No |
-| Accessibility audits | Yes | No | Yes |
-| Remote runners | Yes | N/A | N/A |
-| Docker deploy | Yes | N/A | N/A |
+<a id="comparison"></a>
 
-### Built for Vibe Coders
+### Comparison
 
-- **Ship fast**: Record tests in seconds, not hours
-- **Stay lean**: $0 visual testing means more runway
-- **Own your data**: No vendor lock-in, no cloud uploads
-- **AI-native**: Works with your Cursor/Claude/Copilot workflow
+| Capability | Lastest2 | Percy | Applitools | Chromatic | Argos | Meticulous | Playwright |
+|---|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
+| **Price** | **$0** | $199+/mo | $699+/mo | $179+/mo | $100+/mo | Custom | $0 |
+| **Free screenshots** | **Unlimited** | 5K/mo | OSS only | 5K/mo | 5K/mo | None | Unlimited |
+| **Self-hosted** | **Yes** | No | Enterprise | No | OSS core | No | Yes |
+| **Open source** | **MIT** | SDKs only | SDKs only | Storybook | MIT core | No | Apache-2.0 |
+| **Recording** | **Yes** | No | Low-code | No | No | Session | Codegen |
+| **AI test generation** | **Yes** | No | NLP | No | No | Session-based | No |
+| **AI auto-fix tests** | **Yes** | No | No | No | No | Auto-maintain | No |
+| **AI diff analysis** | **Yes** | AI Review Agent | Visual AI | No | No | Deterministic | No |
+| **Perceptual diffing** | **SSIM + Butteraugli** | No | Visual AI | No | No | No | No |
+| **Spec-driven test gen** | **Yes** | No | No | No | No | No | No |
+| **Approval workflow** | **Yes** | Yes | Yes | Yes | Yes | PR-based | No |
+| **Accessibility** | **axe-core** | No | No | Enterprise | ARIA snaps | No | No |
+| **Route discovery** | **Yes** | No | No | No | No | No | No |
+| **Multi-tenancy** | **Yes** | Projects | Enterprise | Projects | Teams | Projects | No |
+| **Figma integration** | **Yes** | No | Yes | No | No | No | No |
+| **Google Sheets data** | **Yes** | No | No | No | No | No | No |
+| **Debug mode** | **Yes** | No | No | No | Traces | No | Trace |
+| **Remote runners** | **Yes** | Cloud | Cloud | Cloud | Cloud | Cloud | No |
+| **Local AI (Ollama)** | **Yes** | No | No | No | No | No | No |
+| **Cross-OS consistency** | **9 stabilization features** | No | No | No | Stabilization engine | No | No |
+
+### What makes Lastest2 different
+
+- **Record + AI generate + diff + approve** in one self-hosted tool — no competitor does all four
+- **AI auto-fix**: tests break as your UI evolves, Lastest2 fixes them automatically
+- **$0 with unlimited screenshots** — Percy charges ~$5K/mo for 100K shots
+- **Your data never leaves your server** — screenshots stay local, no cloud dependency
+- **5 AI providers including Ollama** — run AI locally with zero API costs
+- **Spec-driven testing** — feed it OpenAPI specs or user stories, get tests back
 
 ---
 
@@ -196,6 +254,8 @@ pnpm start        # Start production server
 pnpm lint         # Run ESLint
 pnpm test         # Run unit tests (Vitest)
 pnpm test:watch   # Run unit tests in watch mode
+pnpm test:coverage # Run tests with coverage report
+pnpm test:ui      # Run tests with Vitest UI
 pnpm db:studio    # Open Drizzle Studio for database inspection
 pnpm db:push      # Push schema changes to database
 pnpm db:generate  # Generate Drizzle migrations
@@ -265,7 +325,7 @@ docker-compose logs -f
 docker-compose down
 ```
 
-Uses a multi-stage Alpine build (`node:20-alpine`) with health checks via `GET /api/health`.
+Uses the official Playwright base image (`mcr.microsoft.com/playwright`) with Node.js 20, multi-stage build, and health checks via `GET /api/health`. Runs as non-root user.
 
 ### Volumes
 
@@ -320,6 +380,13 @@ lastest2-runner log [-f] [-n <lines>]              # View logs (-f to follow)
 lastest2-runner run -t <token> -s <server-url>     # Run in foreground
 ```
 
+### Runner Capabilities
+
+- **Run**: Execute tests remotely
+- **Record**: Record new tests on remote machines
+- **Parallel**: Configurable max parallel tests per runner
+- **System Info**: Automatic OS, architecture, memory, and CPU reporting
+
 Config stored in `~/.lastest2/` (runner.pid, runner.log, runner.config.json).
 
 ---
@@ -332,13 +399,13 @@ Use spreadsheet data as test data sources:
 2. **Select spreadsheets** and configure data sources with aliases (e.g., "users", "products")
 3. **Reference data** in test code via the cached headers and rows
 
-Supports per-team OAuth, automatic token refresh, custom header row selection, and fixed data ranges.
+Supports per-team OAuth, automatic token refresh, multi-tab spreadsheets, custom header row selection, and fixed data ranges.
 
 ---
 
 ## Custom Webhooks
 
-Send build results to any HTTP endpoint. Configure in Settings → Notifications.
+Send build results to any HTTP endpoint. Configure in Settings → Notifications. Supports custom HTTP methods and headers.
 
 ### Payload Format
 
@@ -383,14 +450,15 @@ All configuration lives under a unified Settings page:
 | **GitHub** | Connect account, select repositories |
 | **GitLab** | Connect account, supports self-hosted instances |
 | **Google Sheets** | Connect to Google Drive, manage data sources |
-| **Playwright** | Browser type, viewport, headless mode, selector priority, animation freezing |
+| **Playwright** | Browser type, viewport, headless mode (including shell mode), selector priority, recording engine, animation freezing, screenshot delay, max parallel tests |
+| **Stabilization** | Network idle, DOM stability, timestamp freezing, random seeding, third-party blocking, font loading, loading indicator hiding, cross-OS consistency, burst capture, auto-mask dynamic content |
 | **Environment** | Server startup (manual vs auto-start), health check URLs |
-| **Diff Sensitivity** | Pixel/percentage thresholds for unchanged/flaky/changed |
-| **AI** | Provider selection, API keys, model, custom instructions |
+| **Diff Sensitivity** | Pixel/percentage thresholds for unchanged/flaky/changed, page shift detection |
+| **AI** | Test generation provider, diff analysis provider, API keys, model, custom instructions, Ollama support |
 | **Notifications** | Slack, Discord, custom webhook configuration |
 | **Branches** | Baseline and scanning branch selection |
 | **AI Logs** | Audit trail of all AI requests (last 50 entries) |
-| **Setup** | Default repository-wide setup scripts |
+| **Setup** | Default repository-wide multi-step setup scripts (Playwright and API types) |
 | **Users** | Team member management, invitations (admin only) |
 | **Runners** | Remote runner registration and management (admin only) |
 
@@ -405,9 +473,10 @@ All configuration lives under a unified Settings page:
 - **Accessibility**: axe-core
 - **Database**: SQLite + Drizzle ORM (WAL mode)
 - **Auth**: better-auth (email/password, GitHub, GitLab, Google OAuth)
-- **AI**: Claude (Agent SDK, CLI, OpenRouter, or direct Anthropic API)
+- **AI**: Claude (Agent SDK, CLI, OpenRouter, direct Anthropic API), Ollama
 - **OCR Fallback**: Tesseract.js
 - **Test Data**: Google Sheets integration
+- **Email**: Resend
 - **Testing**: Vitest (unit), Playwright (visual)
 - **State**: TanStack React Query
 
@@ -473,6 +542,16 @@ NEXT_PUBLIC_BASE_URL=             # Base URL for API calls
 - [x] Planned screenshots (design comparison)
 - [x] Ignore regions for dynamic content
 - [x] Setup script orchestration
+- [x] Ollama support (local AI models)
+- [x] Cross-OS screenshot consistency
+- [x] Flaky test prevention (timestamp/random freezing, burst capture)
+- [x] Auto-mask dynamic content
+- [x] Page shift detection
+- [x] Multi-step screenshots
+- [x] Debug mode
+- [x] Branch comparison view
+- [x] App state inspection
+- [x] Network & console error tracking
 - [ ] Remote runner NPM package publication
 - [ ] Production-ready runner infrastructure (Redis queue)
 

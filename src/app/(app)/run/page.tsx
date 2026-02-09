@@ -30,6 +30,8 @@ export default async function RunPage() {
         builds={builds}
         repositoryId={selectedRepo?.id}
         activeBranch={activeBranch}
+        currentBranch={selectedRepo?.selectedBranch ?? null}
+        defaultBranch={selectedRepo?.defaultBranch ?? null}
         baseUrl={envConfig?.baseUrl || 'http://localhost:3000'}
         buildChanges={buildChanges}
       />
