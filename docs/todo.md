@@ -7,7 +7,6 @@ Docker
 Gitlab
 ## features
 Component specific testing
-Linting
 ## ideas
 Electron app ~/.claude/plans/rippling-roaming-snail.md replan
 Figma plugin
@@ -16,7 +15,6 @@ Sitemap -flow
 Firecrawl?
 Approve reject changes or create ticket -> gh issue
 Issues view
-CI/CD integration
 Docker
 Tweet
 Bugriport

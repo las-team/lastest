@@ -85,12 +85,12 @@ export async function runTests(testIds?: string[], repositoryId?: string | null,
     runner.setSettings(playwrightSettings);
   }
 
-  // Get tests to run
+  // Get tests to run (filter out soft-deleted tests)
   let tests: Test[];
   if (testIds && testIds.length > 0) {
     tests = await Promise.all(
       testIds.map(id => queries.getTest(id))
-    ).then(results => results.filter((t): t is Test => t !== undefined));
+    ).then(results => results.filter((t): t is Test => t !== undefined && !t.deletedAt));
   } else if (repositoryId) {
     tests = await queries.getTestsByRepo(repositoryId);
   } else {

@@ -5,6 +5,7 @@ import {
   getTestsWithStatusByRepo,
   getRoutesByRepo,
   getEnvironmentConfig,
+  getDeletedTests,
 } from '@/lib/db/queries';
 import { getCurrentSession } from '@/lib/auth';
 
@@ -13,11 +14,12 @@ export default async function TestsPage() {
   const teamId = session?.team?.id;
   const selectedRepo = teamId ? await getSelectedRepository(teamId) : null;
 
-  const [areas, tests, envConfig, routes] = await Promise.all([
+  const [areas, tests, envConfig, routes, deletedTests] = await Promise.all([
     selectedRepo ? getFunctionalAreasByRepo(selectedRepo.id) : Promise.resolve([]),
     selectedRepo ? getTestsWithStatusByRepo(selectedRepo.id) : Promise.resolve([]),
     getEnvironmentConfig(selectedRepo?.id),
     selectedRepo ? getRoutesByRepo(selectedRepo.id) : Promise.resolve([]),
+    selectedRepo ? getDeletedTests(selectedRepo.id) : Promise.resolve([]),
   ]);
 
   return (
@@ -28,6 +30,7 @@ export default async function TestsPage() {
         routes={routes}
         repositoryId={selectedRepo?.id}
         baseUrl={envConfig.baseUrl}
+        deletedTests={deletedTests}
       />
     </div>
   );
