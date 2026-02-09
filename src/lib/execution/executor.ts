@@ -201,7 +201,7 @@ async function executeViaRunner(
       testRunId: runId,
       code: test.code,
       codeHash: hashCode(test.code),
-      targetUrl: test.targetUrl || baseUrl,
+      targetUrl: baseUrl,
       screenshotPath: `${runId}-${test.id}.png`,
       timeout: options.playwrightSettings?.navigationTimeout || 30000,
       repositoryId: options.repositoryId || undefined,

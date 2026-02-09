@@ -7,7 +7,8 @@ Docker
 Gitlab
 Timestamp fixing
 ## features
-Support https://github.com/excalidraw/excalidraw/tree/master/packages/excalidraw/tests
+Support https://github.com/excalidraw/excalidraw/tree/master/packages/excalidraw/tests ~/.claude/plans/declarative-kindling-coral.md
+
 ## ideas
 Component specific testing
 Electron app ~/.claude/plans/rippling-roaming-snail.md replan
@@ -24,6 +25,7 @@ Import from prior tools?
 ### UX
 ## bugs
 debugging when a runner is used
-
+gh build stuff
+double / login in rule
 ## marketing    
                                                                                                         

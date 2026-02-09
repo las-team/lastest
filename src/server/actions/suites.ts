@@ -5,6 +5,7 @@ import * as queries from '@/lib/db/queries';
 import { getRunner } from '@/lib/playwright/runner';
 import { getServerManager } from '@/lib/playwright/server-manager';
 import { executeTests } from '@/lib/execution/executor';
+import { captureSetupForRemoteRunner } from '@/lib/execution/setup-capture';
 import { getCurrentSession, requireTeamAccess, requireRepoAccess } from '@/lib/auth';
 import { getBranchInfo } from '@/lib/github/content';
 import { createJob, updateJobProgress, completeJob, failJob } from './jobs';
@@ -167,6 +168,13 @@ async function runSuiteTestsAsync(
     }
   }
 
+  // Capture setup context once for remote runner (before test loop)
+  let setupContext: { storageState?: string; variables?: Record<string, unknown> } | undefined;
+  if (runnerId && runnerId !== 'local' && teamId) {
+    const baseUrl = envConfig?.baseUrl || 'http://localhost:3000';
+    setupContext = await captureSetupForRemoteRunner(tests, baseUrl, repositoryId);
+  }
+
   try {
     // Run tests one by one, halt on first failure
     for (let i = 0; i < tests.length; i++) {
@@ -180,6 +188,7 @@ async function runSuiteTestsAsync(
           runnerId,
           environmentConfig: envConfig,
           playwrightSettings,
+          setupContext,
         });
       } else {
         results = await runner.runTests([test], runId);
