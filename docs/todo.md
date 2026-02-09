@@ -11,10 +11,17 @@ Support https://github.com/excalidraw/excalidraw/tree/master/packages/excalidraw
     Branch baseline 
     Test chagnes per branch
     PR-ra megy egy push, akkor triggereljen egy comparisont, nem baseline, master - PERSISTENT BRANCH
-Teardown
-Test defining
-Test running
-AI Optimize settings
+    Areas changed
+    Dev feeback - Baseline, Accepted changes, Test changes, new tests
+
+Teardown - after test scripts
+
+UX
+    Test defining
+    Test running
+
+AI Optimize playwright settings - select or identify testable app mode
+
 Play gomb - give in url and do everything 
 ## ideas
 Component specific testing
