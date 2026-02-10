@@ -8,9 +8,6 @@ Gitlab
 Timestamp fixing
 ## features
 Support https://github.com/excalidraw/excalidraw/tree/master/packages/excalidraw/tests ~/.claude/plans/declarative-kindling-coral.md 55%
-    Branch baseline 
-    Test chagnes per branch
-    PR-ra megy egy push, akkor triggereljen egy comparisont, nem baseline, master - PERSISTENT BRANCH
     Dev feeback - Baseline, Accepted changes, Test changes, new tests
 
 Revise labels (e.g. new change, main 2.5%) on build page
