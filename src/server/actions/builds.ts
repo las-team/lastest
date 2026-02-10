@@ -19,10 +19,11 @@ import { sendDiscordNotification } from '@/lib/integrations/discord';
 import { sendCustomWebhookNotification } from '@/lib/integrations/custom-webhook';
 import { postPRComment } from '@/lib/integrations/github-pr';
 import { postMRComment } from '@/lib/integrations/gitlab-mr';
-import type { Test, TriggerType, BuildStatus, VisualDiffWithTestStatus, DiffClassification, DiffStatus } from '@/lib/db/schema';
+import type { Test, TriggerType, BuildStatus, VisualDiffWithTestStatus, DiffClassification, DiffStatus, ComparisonMode } from '@/lib/db/schema';
 import path from 'path';
 import { createJob, createPendingJob, startJob, updateJobProgress, completeJob, failJob } from './jobs';
 import { triggerAIDiffAnalysis } from './ai-diffs';
+import { forkBaselinesForBranch } from './baselines';
 
 interface GitInfo {
   branch: string;
@@ -97,6 +98,7 @@ export interface BuildSummary {
   gitBranch: string;
   gitCommit: string;
   pullRequestId: string | null;
+  comparisonMode: string | null;
   diffs: VisualDiffWithTestStatus[];
 }
 
@@ -116,7 +118,8 @@ export async function createAndRunBuild(
   triggerType: TriggerType = 'manual',
   testIds?: string[],
   repositoryId?: string | null,
-  runnerId?: string
+  runnerId?: string,
+  comparisonMode?: ComparisonMode
 ) {
   if (repositoryId) await requireRepoAccess(repositoryId);
   else await requireTeamAccess();
@@ -161,6 +164,11 @@ export async function createAndRunBuild(
   const repo = repositoryId ? await queries.getRepository(repositoryId) : null;
   const gitInfo = await getGitInfoFromGitHub(repositoryId ?? repo?.id ?? null);
 
+  // Resolve comparison mode: explicit param > repo default > 'vs_main'
+  const resolvedComparisonMode: ComparisonMode = comparisonMode
+    || (repo?.defaultComparisonMode as ComparisonMode | null)
+    || 'vs_main';
+
   // Create test run
   const testRun = await queries.createTestRun({
     repositoryId: repositoryId ?? repo?.id,
@@ -181,6 +189,7 @@ export async function createAndRunBuild(
     failedCount: 0,
     passedCount: 0,
     baseUrl: envConfig?.baseUrl || 'http://localhost:3000',
+    comparisonMode: resolvedComparisonMode,
   });
 
   // Try to link to existing PR
@@ -190,7 +199,7 @@ export async function createAndRunBuild(
   }
 
   // Run tests async
-  runBuildAsync(build.id, testRun.id, tests, gitInfo.branch, repositoryId, runnerId);
+  runBuildAsync(build.id, testRun.id, tests, gitInfo.branch, repositoryId, runnerId, resolvedComparisonMode);
 
   return { buildId: build.id, testRunId: testRun.id, testCount: tests.length };
 }
@@ -204,11 +213,30 @@ async function runBuildAsync(
   tests: Test[],
   branch: string,
   repositoryId?: string | null,
-  runnerId?: string
+  runnerId?: string,
+  comparisonMode?: ComparisonMode
 ) {
   const runner = getRunner(repositoryId);
   const startTime = Date.now();
   const jobId = await createJob('build_run', `Build (${tests.length} tests)`, tests.length, repositoryId, { buildId, testRunId });
+
+  // Auto-fork baselines for branch-aware modes
+  if (repositoryId && (comparisonMode === 'vs_both' || comparisonMode === 'vs_branch')) {
+    const repo = await queries.getRepository(repositoryId);
+    const defaultBranch = repo?.defaultBranch || 'main';
+    if (branch !== defaultBranch) {
+      try {
+        const { forked, skipped } = await forkBaselinesForBranch(repositoryId, defaultBranch, branch);
+        if (forked > 0) {
+          console.log(`[build] Auto-forked ${forked} baselines from ${defaultBranch} → ${branch}`);
+        } else if (skipped) {
+          console.log(`[build] Branch ${branch} already has baselines, skipping fork`);
+        }
+      } catch (error) {
+        console.error('[build] Auto-fork failed:', error);
+      }
+    }
+  }
 
   let passedCount = 0;
   let failedCount = 0;
@@ -265,7 +293,8 @@ async function runBuildAsync(
         branch,
         repositoryId,
         screenshot.label,
-        result.stabilityMetadata?.isStable === false
+        result.stabilityMetadata?.isStable === false,
+        comparisonMode
       );
       if (diffResult.classification === 'changed') changesDetected++;
       if (diffResult.classification === 'flaky') flakyCount++;
@@ -535,7 +564,13 @@ async function processNextQueuedBuild(repositoryId?: string | null) {
 }
 
 /**
- * Process visual diff for a test result
+ * Process visual diff for a test result.
+ * Supports branch-aware comparison modes:
+ * - vs_main: compare against main/default branch baseline
+ * - vs_branch: compare against branch baseline only
+ * - vs_both: primary diff against branch baseline, secondary diff against main baseline
+ * - vs_previous: compare against previous run screenshot on same branch
+ * - vs_planned: compare against planned/design screenshot
  */
 async function processVisualDiff(
   buildId: string,
@@ -545,14 +580,21 @@ async function processVisualDiff(
   branch: string,
   repositoryId?: string | null,
   stepLabel?: string,
-  isUnstable?: boolean
+  isUnstable?: boolean,
+  comparisonMode?: ComparisonMode
 ): Promise<{ hasChanges: boolean; diffId: string; classification: DiffClassification }> {
+  const mode = comparisonMode || 'vs_main';
+
   // Get diff sensitivity settings
   const settings = await queries.getDiffSensitivitySettings(repositoryId);
   const unchangedThreshold = settings.unchangedThreshold ?? 1;
   const flakyThreshold = settings.flakyThreshold ?? 10;
   const includeAntiAliasing = settings.includeAntiAliasing ?? false;
   const ignorePageShift = settings.ignorePageShift ?? false;
+
+  // Get the repo's default branch
+  const repo = repositoryId ? await queries.getRepository(repositoryId) : null;
+  const defaultBranch = repo?.defaultBranch || 'main';
 
   // Fetch ignore regions for this test
   const testIgnoreRegions = await queries.getIgnoreRegions(testId);
@@ -562,11 +604,9 @@ async function processVisualDiff(
 
   // Helper to classify based on percentage
   const classifyDiff = (pct: number): { classification: DiffClassification; status: DiffStatus } => {
-    // If burst capture flagged this as unstable, bias toward flaky classification
     const effectiveFlakyThreshold = isUnstable ? Math.max(flakyThreshold, pct + 1) : flakyThreshold;
 
     if (pct < unchangedThreshold) {
-      // Even if below unchanged threshold, mark as flaky if frames were unstable
       if (isUnstable) {
         return { classification: 'flaky', status: 'pending' };
       }
@@ -578,12 +618,32 @@ async function processVisualDiff(
     }
   };
 
-  // Get active baseline for this test (filtered by stepLabel)
-  const baseline = await queries.getActiveBaseline(testId, stepLabel);
+  // Resolve primary baseline based on comparison mode
+  let baseline;
+  if (mode === 'vs_previous') {
+    // For vs_previous, we compare against the previous run's screenshot on the same branch
+    const prevScreenshot = await queries.getPreviousRunScreenshot(testId, buildId, branch, stepLabel);
+    if (prevScreenshot) {
+      // Synthesize a "baseline" object for the diff pipeline
+      baseline = { imagePath: prevScreenshot, imageHash: '', branch, id: '', testId, stepLabel: stepLabel || null, repositoryId, approvedFromDiffId: null, isActive: true, createdAt: null };
+    }
+  } else if (mode === 'vs_branch') {
+    // Branch baseline only — no fallback to main
+    baseline = await queries.getBranchBaseline(testId, stepLabel, branch);
+    if (!baseline) {
+      // Fallback to main if no branch baseline exists (auto-fork behavior)
+      baseline = await queries.getBranchBaseline(testId, stepLabel, defaultBranch);
+    }
+  } else {
+    // vs_main, vs_both, vs_planned — use branch-aware fallback chain
+    baseline = await queries.getActiveBaseline(testId, stepLabel, branch, defaultBranch);
+  }
 
   // Check for carry-forward (previously approved identical image)
   const currentHash = hashImage(path.join(process.cwd(), 'public', currentScreenshotPath));
-  const matchingBaseline = await queries.getBaselineByHash(testId, currentHash, stepLabel);
+  const matchingBaseline = mode !== 'vs_previous'
+    ? await queries.getBaselineByHash(testId, currentHash, stepLabel)
+    : null;
 
   // Get planned screenshot if exists (for design comparison)
   const plannedScreenshot = await queries.getPlannedScreenshotByTest(testId, stepLabel || null);
@@ -621,7 +681,6 @@ async function processVisualDiff(
         plannedPercentageDifference: plannedDiffResult.percentageDifference.toString(),
       };
     } catch {
-      // Planned diff generation failed, just skip planned comparison
       return {
         plannedImagePath: plannedScreenshot.imagePath,
         plannedDiffImagePath: null,
@@ -631,9 +690,59 @@ async function processVisualDiff(
     }
   };
 
+  // Helper to generate secondary main baseline diff (for vs_both mode)
+  const generateMainBaselineDiff = async (currentPath: string): Promise<{
+    mainBaselineImagePath: string | null;
+    mainDiffImagePath: string | null;
+    mainPixelDifference: number | null;
+    mainPercentageDifference: string | null;
+    mainClassification: DiffClassification | null;
+  }> => {
+    if (mode !== 'vs_both') {
+      return { mainBaselineImagePath: null, mainDiffImagePath: null, mainPixelDifference: null, mainPercentageDifference: null, mainClassification: null };
+    }
+
+    const mainBaseline = await queries.getBranchBaseline(testId, stepLabel, defaultBranch);
+    if (!mainBaseline) {
+      return { mainBaselineImagePath: null, mainDiffImagePath: null, mainPixelDifference: null, mainPercentageDifference: null, mainClassification: null };
+    }
+
+    try {
+      const mainDiffResult = await generateDiff(
+        path.join(process.cwd(), 'public', mainBaseline.imagePath),
+        path.join(process.cwd(), 'public', currentPath),
+        DIFFS_DIR,
+        0.1,
+        includeAntiAliasing,
+        ignoreRects,
+        ignorePageShift
+      );
+
+      const mainPct = mainDiffResult.percentageDifference;
+      const { classification: mainCls } = classifyDiff(mainPct);
+
+      return {
+        mainBaselineImagePath: mainBaseline.imagePath,
+        mainDiffImagePath: mainDiffResult.diffImagePath.replace(process.cwd() + '/public', ''),
+        mainPixelDifference: mainDiffResult.pixelDifference,
+        mainPercentageDifference: mainDiffResult.percentageDifference.toString(),
+        mainClassification: mainCls,
+      };
+    } catch {
+      return {
+        mainBaselineImagePath: mainBaseline.imagePath,
+        mainDiffImagePath: null,
+        mainPixelDifference: null,
+        mainPercentageDifference: null,
+        mainClassification: null,
+      };
+    }
+  };
+
   if (matchingBaseline) {
     // Auto-approve: identical to previously approved baseline
     const plannedDiff = await generatePlannedDiff(currentScreenshotPath);
+    const mainDiff = await generateMainBaselineDiff(currentScreenshotPath);
 
     const diff = await queries.createVisualDiff({
       buildId,
@@ -648,6 +757,7 @@ async function processVisualDiff(
       percentageDifference: '0',
       metadata: { changedRegions: [] },
       ...plannedDiff,
+      ...mainDiff,
     });
     return { hasChanges: false, diffId: diff.id, classification: 'unchanged' };
   }
@@ -655,6 +765,7 @@ async function processVisualDiff(
   // No baseline - this is a new test, requires manual review
   if (!baseline) {
     const plannedDiff = await generatePlannedDiff(currentScreenshotPath);
+    const mainDiff = await generateMainBaselineDiff(currentScreenshotPath);
 
     const diff = await queries.createVisualDiff({
       buildId,
@@ -668,13 +779,13 @@ async function processVisualDiff(
       percentageDifference: '0',
       metadata: { changedRegions: [], isNewTest: true },
       ...plannedDiff,
+      ...mainDiff,
     });
 
-    // Baseline will be created when the diff is approved
     return { hasChanges: true, diffId: diff.id, classification: 'changed' };
   }
 
-  // Generate diff against baseline
+  // Generate diff against primary baseline
   try {
     const diffResult = await generateDiff(
       path.join(process.cwd(), 'public', baseline.imagePath),
@@ -691,8 +802,8 @@ async function processVisualDiff(
     const hasChanges = classification !== 'unchanged';
     const diffImagePath = diffResult.diffImagePath.replace(process.cwd() + '/public', '');
 
-    // Also generate planned diff
     const plannedDiff = await generatePlannedDiff(currentScreenshotPath);
+    const mainDiff = await generateMainBaselineDiff(currentScreenshotPath);
 
     const diff = await queries.createVisualDiff({
       buildId,
@@ -708,12 +819,14 @@ async function processVisualDiff(
       percentageDifference: diffResult.percentageDifference.toString(),
       metadata: diffResult.metadata,
       ...plannedDiff,
+      ...mainDiff,
     });
 
     return { hasChanges, diffId: diff.id, classification };
   } catch {
     // Diff generation failed, mark as pending for review
     const plannedDiff = await generatePlannedDiff(currentScreenshotPath);
+    const mainDiff = await generateMainBaselineDiff(currentScreenshotPath);
 
     const diff = await queries.createVisualDiff({
       buildId,
@@ -728,6 +841,7 @@ async function processVisualDiff(
       percentageDifference: '-1',
       metadata: { changedRegions: [] },
       ...plannedDiff,
+      ...mainDiff,
     });
     return { hasChanges: true, diffId: diff.id, classification: 'changed' };
   }
@@ -755,6 +869,7 @@ export async function getBuildSummary(buildId: string): Promise<BuildSummary | n
     createdAt: build.createdAt,
     completedAt: build.completedAt,
     pullRequestId: build.pullRequestId,
+    comparisonMode: build.comparisonMode,
     gitBranch: testRun?.gitBranch || 'unknown',
     gitCommit: testRun?.gitCommit || 'unknown',
     diffs,
@@ -950,6 +1065,13 @@ async function sendBuildNotifications(data: {
           data.gitBranch
         );
 
+        // Compute branch-specific counts for enhanced PR comment
+        const buildDiffs = await queries.getVisualDiffsWithTestStatus(data.buildId);
+        const mainDriftCount = buildDiffs.filter(d =>
+          d.mainPercentageDifference && parseFloat(d.mainPercentageDifference) > 0
+        ).length;
+        const branchAcceptedCount = buildDiffs.filter(d => d.status === 'approved').length;
+
         for (const pr of prs) {
           await postPRComment(
             account.accessToken,
@@ -965,6 +1087,9 @@ async function sendBuildNotifications(data: {
               flakyCount: data.flakyCount,
               failedCount: data.failedCount,
               buildUrl,
+              comparisonMode: build.comparisonMode,
+              mainDriftCount,
+              branchAcceptedCount,
             }
           );
         }

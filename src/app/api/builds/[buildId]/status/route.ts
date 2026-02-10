@@ -41,6 +41,7 @@ export async function GET(
     flakyCount: build.flakyCount,
     completedAt: build.completedAt,
     elapsedMs: build.elapsedMs,
+    comparisonMode: build.comparisonMode,
     diffs: build.diffs,
   });
 }

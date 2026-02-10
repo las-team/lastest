@@ -14,6 +14,18 @@ Support https://github.com/excalidraw/excalidraw/tree/master/packages/excalidraw
     Areas changed
     Dev feeback - Baseline, Accepted changes, Test changes, new tests
 
+Phase 5: Areas Changed Grouping (planned, not implemented now)
+
+ - Group diffs by functionalAreaName in build detail
+ - Collapsible sections per area with summary counts
+ - Area-level status rollup
+
+ Phase 6: Branch-Specific Tests (planned, not implemented now)
+
+ - New branchTestOverrides table
+ - Test code resolution: check override before main test code
+ - Auto-merge test changes on PR close
+
 Teardown - after test scripts
 
 UX
@@ -53,106 +65,67 @@ Bugriport
 Import from prior tools?
 ### UX
 ## bugs
-## marketing  
-
----------------
+## marketing 
 
 
-                                                  GitHub Action: Native PR Comment Posting
-Context
-The action/ directory already has a fully functional composite GitHub Action that triggers remote builds and polls for results. However, posting PR comments requires a separate actions/github-script@v7 step — extra boilerplate for users. The goal is to make the action a single-step, marketplace-ready experience: trigger build, get results, post PR comment.
+# Action testing
 
-Current State
-action/action.yml — working composite action (curl + jq, no Docker needed)
-action/entrypoint.sh — standalone mirror of the inline script
-src/lib/integrations/github-pr.ts — server-side PR comment with deduplication signature *Posted by Lastest Visual Regression*
-PR comments, Job Summary, and marketplace polish are missing from the action
-Plan
-1. Add github-token input to action/action.yml
-New optional input github-token (default: '')
-Pass as env var alongside GITHUB_EVENT_NAME, GITHUB_REF, GITHUB_REPOSITORY
-When empty → skip PR comment (backwards compatible)
-2. Add PR comment bash logic to the inline script
-After build results are extracted (line ~177), add:
+ Local Lastest2 Config (Step by Step)
 
-find_existing_comment() — GET comments, filter by signature via jq
-post_or_update_pr_comment() — PATCH existing or POST new, with emoji/table matching github-pr.ts format
-write_job_summary() — write markdown to $GITHUB_STEP_SUMMARY (always, even without PR context)
-Integration logic — extract PR number from GITHUB_REF (refs/pull/{n}/merge), owner/repo from GITHUB_REPOSITORY
-Error handling: log failures but don't fail the action
-3. Sync action/entrypoint.sh
-Mirror all changes from action.yml (env reads, functions, integration logic).
+  1. Expose your server to the internet
 
-4. Update action/README.md
-Remove the separate github-script step from examples
-Show single-step usage with github-token: ${{ github.token }}
-Add github-token to inputs table
-Add "Native PR comments" and "Job summaries" to feature list
-5. Update .github/workflows/regression.yml
-Uncomment the remote-regression job
-Add github-token: ${{ github.token }}
-Remove the separate Summary step (now built-in)
-Files to Modify
-File	Change
-action/action.yml	Add input, env vars, PR comment + summary bash functions
-action/entrypoint.sh	Mirror action.yml changes
-action/README.md	Simplify examples, update inputs table
-.github/workflows/regression.yml	Uncomment remote job, add github-token
-Reference only (no changes): src/lib/integrations/github-pr.ts — comment format to match
+  Your local server (localhost:3000) needs to be reachable from
+  GitHub Actions. Pick one:
 
-PR Comment Format (matches server-side)
+  # Option A: Cloudflare Tunnel (recommended, persistent)
+  cloudflared tunnel --url http://localhost:3000
 
-## ✅ Visual Test Results
+  # Option B: ngrok (quick testing)
+  ngrok http 3000
 
-| Status | Tests | Passed | Changes | Flaky | Failed |
-|--------|-------|--------|---------|-------|--------|
-| Passed | 10    | 10     | 0       | 0     | 0      |
+  Save the public URL (e.g., https://xyz.trycloudflare.com).
 
-[View Build](https://your-server/builds/abc123)
+  2. Create a runner in Lastest2 UI
 
----
-*Posted by Lastest Visual Regression*
-Verification
-Push a PR branch → confirm PR comment appears
-Push again to same PR → confirm comment is updated (not duplicated)
-Run on push event (not PR) → confirm no comment, but Job Summary is written
-Run without github-token → confirm no error, comment skipped                                          
+  - Go to Settings > Runners > Create Runner
+  - Copy the generated token (shown once)
+  - Note the Runner ID from the runners list
 
-Option 1: Remote Mode (recommended — uses your running Lastest2 server + runner)
+  3. Start the runner locally
 
-# .github/workflows/visual-tests.yml
-name: Visual Regression Tests
+  npm i -g lastest2-runner
+  lastest2-runner start -t <token> -s http://localhost:3000
 
-on:
-  pull_request:
-    branches: [main]
+  4. Get your IDs
 
-jobs:
-  visual-tests:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
+  From the Lastest2 dashboard, note:
+  - Repo ID — from the repository page URL
+  - Team ID — from Settings or URL
+  - Runner ID — from Settings > Runners
 
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          cache: pnpm
+  5. Configure GitHub secrets/variables
 
-      - run: pnpm install --frozen-lockfile
+  In dexilion-team/lastest2 repo settings (Settings > Secrets and
+  variables > Actions):
 
-      - name: Run Visual Tests
-        run: |
-          pnpm test:visual \
-            --repo-id ${{ secrets.LASTEST2_REPO_ID }} \
-            --server-url ${{ secrets.LASTEST2_SERVER_URL }} \
-            --runner-token ${{ secrets.LASTEST2_RUNNER_TOKEN }} \
-            --runner-id ${{ secrets.LASTEST2_RUNNER_ID }} \
-            --team-id ${{ secrets.LASTEST2_TEAM_ID }}
-Required secrets:
+  Secrets:
+  Name: LASTEST_SERVER_URL
+  Value: Your tunnel URL (e.g., https://xyz.trycloudflare.com)
+  ────────────────────────────────────────
+  Name: LASTEST_RUNNER_TOKEN
+  Value: Runner token from step 2
+  Variables:
+  ┌───────────────────┬──────────────────────┐
+  │       Name        │        Value         │
+  ├───────────────────┼──────────────────────┤
+  │ LASTEST_REPO_ID   │ Your repository UUID │
+  ├───────────────────┼──────────────────────┤
+  │ LASTEST_TEAM_ID   │ Your team UUID       │
+  ├───────────────────┼──────────────────────┤
+  │ LASTEST_RUNNER_ID │ Your runner UUID     │
+  └───────────────────┴──────────────────────┘
+  6. Test it
 
-LASTEST2_SERVER_URL — your Lastest2 instance URL
-LASTEST2_REPO_ID — repository ID from the Lastest2 dashboard
-LASTEST2_RUNNER_TOKEN — API token for the remote runner
-LASTEST2_RUNNER_ID — runner ID (from lastest2-runner start)
-LASTEST2_TEAM_ID — your team ID
+  Create a PR against main — the workflow will trigger, call your
+  local server via the tunnel, dispatch tests to your runner, and
+  report results in the PR's job summary.

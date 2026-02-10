@@ -9,6 +9,9 @@ export interface PRCommentData {
   flakyCount: number;
   failedCount: number;
   buildUrl: string;
+  comparisonMode?: string | null;
+  mainDriftCount?: number; // Number of tests that have drifted from main baseline
+  branchAcceptedCount?: number; // Number of tests approved during branch lifecycle
 }
 
 /**
@@ -24,16 +27,20 @@ export async function postPRComment(
   const statusEmoji = getStatusEmoji(data.status);
   const statusText = getStatusText(data.status);
 
-  const body = `## ${statusEmoji} Visual Test Results
+  const baselineCount = data.totalTests - (data.changesDetected + data.flakyCount + data.failedCount);
+  const modeLabel = data.comparisonMode ? getComparisonModeLabel(data.comparisonMode) : '';
 
-| Status | Tests | Passed | Changes | Flaky | Failed |
-|--------|-------|--------|---------|-------|--------|
-| ${statusText} | ${data.totalTests} | ${data.passedCount} | ${data.changesDetected} | ${data.flakyCount} | ${data.failedCount} |
+  let body = `## ${statusEmoji} Visual Test Results${modeLabel ? ` (${modeLabel})` : ''}
 
-[View Build](${data.buildUrl})
+| Baseline | Branch Accepted | New Changes | Flaky | Failed |
+|----------|-----------------|-------------|-------|--------|
+| ${baselineCount} | ${data.branchAcceptedCount ?? 0} | ${data.changesDetected} | ${data.flakyCount} | ${data.failedCount} |`;
 
----
-*Posted by Lastest Visual Regression*`;
+  if (data.mainDriftCount && data.mainDriftCount > 0) {
+    body += `\n\n> **vs Main drift:** ${data.mainDriftCount} test${data.mainDriftCount !== 1 ? 's' : ''} have drifted from the main baseline`;
+  }
+
+  body += `\n\n[View Build](${data.buildUrl})\n\n---\n*Posted by Lastest Visual Regression*`;
 
   try {
     // First, try to find an existing comment from our bot
@@ -147,5 +154,16 @@ function getStatusText(status: BuildStatus): string {
       return 'Blocked';
     default:
       return 'Complete';
+  }
+}
+
+function getComparisonModeLabel(mode: string): string {
+  switch (mode) {
+    case 'vs_main': return 'vs Main';
+    case 'vs_branch': return 'vs Branch';
+    case 'vs_both': return 'vs Both';
+    case 'vs_previous': return 'vs Previous';
+    case 'vs_planned': return 'vs Design';
+    default: return '';
   }
 }

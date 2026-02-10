@@ -16,6 +16,7 @@ interface BuildData {
   flakyCount: number;
   completedAt: Date | null;
   elapsedMs: number | null;
+  comparisonMode?: string | null;
   diffs: VisualDiffWithTestStatus[];
 }
 
@@ -89,6 +90,7 @@ export function BuildPollingWrapper({ initialBuild, buildId, children }: BuildPo
         hasPendingDiffs={pendingDiffs.length > 0}
         isRunning={isRunning}
         completedTests={completedTests}
+        comparisonMode={build.comparisonMode}
       />
     </>
   );

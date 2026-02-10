@@ -588,6 +588,7 @@ export async function getBuildsByRepo(repositoryId: string, limit = 10) {
       setupStatus: builds.setupStatus,
       setupError: builds.setupError,
       setupDurationMs: builds.setupDurationMs,
+      comparisonMode: builds.comparisonMode,
       gitBranch: testRuns.gitBranch,
       gitCommit: testRuns.gitCommit,
     })
@@ -628,6 +629,11 @@ export async function getVisualDiffsWithTestStatus(buildId: string) {
       plannedDiffImagePath: visualDiffs.plannedDiffImagePath,
       plannedPixelDifference: visualDiffs.plannedPixelDifference,
       plannedPercentageDifference: visualDiffs.plannedPercentageDifference,
+      mainBaselineImagePath: visualDiffs.mainBaselineImagePath,
+      mainDiffImagePath: visualDiffs.mainDiffImagePath,
+      mainPixelDifference: visualDiffs.mainPixelDifference,
+      mainPercentageDifference: visualDiffs.mainPercentageDifference,
+      mainClassification: visualDiffs.mainClassification,
       aiAnalysis: visualDiffs.aiAnalysis,
       aiRecommendation: visualDiffs.aiRecommendation,
       aiAnalysisStatus: visualDiffs.aiAnalysisStatus,
@@ -713,22 +719,97 @@ export async function getPendingAIApprovableDiffs(buildId: string) {
 }
 
 // Baselines
-export async function getActiveBaseline(testId: string, stepLabel?: string | null) {
-  const conditions = [
-    eq(baselines.testId, testId),
-    eq(baselines.isActive, true),
-  ];
-  if (stepLabel) {
-    conditions.push(eq(baselines.stepLabel, stepLabel));
-  } else {
-    conditions.push(isNull(baselines.stepLabel));
+
+/**
+ * Get active baseline with branch-first fallback chain:
+ * 1. Branch-specific baseline (if branch provided)
+ * 2. Default branch baseline (if defaultBranch provided)
+ * 3. Any active baseline (legacy fallback)
+ */
+export async function getActiveBaseline(testId: string, stepLabel?: string | null, branch?: string, defaultBranch?: string) {
+  const stepConditions = stepLabel
+    ? [eq(baselines.stepLabel, stepLabel)]
+    : [isNull(baselines.stepLabel)];
+
+  // 1. Try branch-specific baseline
+  if (branch) {
+    const branchBaseline = await db
+      .select()
+      .from(baselines)
+      .where(and(
+        eq(baselines.testId, testId),
+        eq(baselines.isActive, true),
+        eq(baselines.branch, branch),
+        ...stepConditions,
+      ))
+      .orderBy(desc(baselines.createdAt))
+      .get();
+    if (branchBaseline) return branchBaseline;
   }
+
+  // 2. Try default branch baseline
+  if (defaultBranch && defaultBranch !== branch) {
+    const mainBaseline = await db
+      .select()
+      .from(baselines)
+      .where(and(
+        eq(baselines.testId, testId),
+        eq(baselines.isActive, true),
+        eq(baselines.branch, defaultBranch),
+        ...stepConditions,
+      ))
+      .orderBy(desc(baselines.createdAt))
+      .get();
+    if (mainBaseline) return mainBaseline;
+  }
+
+  // 3. Legacy fallback — any active baseline
   return db
     .select()
     .from(baselines)
-    .where(and(...conditions))
+    .where(and(
+      eq(baselines.testId, testId),
+      eq(baselines.isActive, true),
+      ...stepConditions,
+    ))
     .orderBy(desc(baselines.createdAt))
     .get();
+}
+
+/**
+ * Get baseline for a specific branch only (no fallback)
+ */
+export async function getBranchBaseline(testId: string, stepLabel: string | null | undefined, branch: string) {
+  const stepConditions = stepLabel
+    ? [eq(baselines.stepLabel, stepLabel)]
+    : [isNull(baselines.stepLabel)];
+
+  return db
+    .select()
+    .from(baselines)
+    .where(and(
+      eq(baselines.testId, testId),
+      eq(baselines.isActive, true),
+      eq(baselines.branch, branch),
+      ...stepConditions,
+    ))
+    .orderBy(desc(baselines.createdAt))
+    .get();
+}
+
+/**
+ * Get all active baselines for a branch in a repository
+ */
+export async function getBaselinesByBranch(repositoryId: string, branch: string) {
+  return db
+    .select()
+    .from(baselines)
+    .where(and(
+      eq(baselines.repositoryId, repositoryId),
+      eq(baselines.branch, branch),
+      eq(baselines.isActive, true),
+    ))
+    .all();
 }
 
 export async function getBaselineByHash(testId: string, imageHash: string, stepLabel?: string | null) {
@@ -755,17 +836,53 @@ export async function createBaseline(data: Omit<NewBaseline, 'id'>) {
   return { id, ...data, createdAt: new Date() };
 }
 
-export async function deactivateBaselines(testId: string, stepLabel?: string | null) {
+/**
+ * Deactivate baselines. If branch is provided, only deactivates for that branch.
+ */
+export async function deactivateBaselines(testId: string, stepLabel?: string | null, branch?: string) {
   const conditions = [eq(baselines.testId, testId)];
   if (stepLabel) {
     conditions.push(eq(baselines.stepLabel, stepLabel));
   } else {
     conditions.push(isNull(baselines.stepLabel));
   }
+  if (branch) {
+    conditions.push(eq(baselines.branch, branch));
+  }
   await db
     .update(baselines)
     .set({ isActive: false })
     .where(and(...conditions));
+}
+
+/**
+ * Get previous run's screenshot for a test on the same branch (for vs_previous mode)
+ */
+export async function getPreviousRunScreenshot(testId: string, buildId: string, branch: string, stepLabel?: string | null) {
+  // Find the most recent visual diff for this test on this branch that's not from the current build
+  const stepConditions = stepLabel
+    ? [eq(visualDiffs.stepLabel, stepLabel)]
+    : [isNull(visualDiffs.stepLabel)];
+
+  const result = await db
+    .select({
+      currentImagePath: visualDiffs.currentImagePath,
+    })
+    .from(visualDiffs)
+    .innerJoin(builds, eq(visualDiffs.buildId, builds.id))
+    .innerJoin(testRuns, eq(builds.testRunId, testRuns.id))
+    .where(and(
+      eq(visualDiffs.testId, testId),
+      eq(testRuns.gitBranch, branch),
+      // Exclude current build
+      sql`${visualDiffs.buildId} != ${buildId}`,
+      ...stepConditions,
+    ))
+    .orderBy(desc(visualDiffs.createdAt))
+    .limit(1)
+    .get();
+
+  return result?.currentImagePath ?? null;
 }
 
 // Ignore Regions

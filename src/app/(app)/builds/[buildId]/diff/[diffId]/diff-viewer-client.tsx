@@ -147,6 +147,20 @@ export function DiffViewerClient({ diff, buildId, nextDiffId }: DiffViewerClient
           </div>
         )}
 
+        {/* Main baseline drift indicator (for vs_both comparison) */}
+        {diff.mainBaselineImagePath && (
+          <div className="flex items-center gap-2 px-3 py-1 rounded-full text-sm font-medium bg-purple-100 text-purple-700">
+            vs Main
+            {diff.mainPercentageDifference && parseFloat(diff.mainPercentageDifference) > 0 ? (
+              <span className="text-purple-500">
+                ({diff.mainPercentageDifference}% drift)
+              </span>
+            ) : (
+              <span className="text-purple-500">(no drift)</span>
+            )}
+          </div>
+        )}
+
         {/* Planned screenshot indicator */}
         {diff.plannedImagePath && (
           <div className="flex items-center gap-2 px-3 py-1 rounded-full text-sm font-medium bg-primary/10 text-primary">

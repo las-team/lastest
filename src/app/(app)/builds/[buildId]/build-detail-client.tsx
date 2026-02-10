@@ -73,6 +73,23 @@ const aiRecommendationBadge: Record<string, { label: string; className: string; 
   flag: { label: 'AI: Flagged', className: 'bg-red-100 text-red-700', Icon: Flag },
 };
 
+// Branch status for each diff (derived from comparison data)
+export type BranchStatus = 'baseline' | 'branch_accepted' | 'new_change' | 'new_test';
+
+function deriveBranchStatus(diff: VisualDiffWithTestStatus): BranchStatus {
+  if (diff.metadata && (diff.metadata as { isNewTest?: boolean }).isNewTest) return 'new_test';
+  if (diff.status === 'approved') return 'branch_accepted';
+  if (diff.classification === 'unchanged' || diff.status === 'auto_approved') return 'baseline';
+  return 'new_change';
+}
+
+const branchStatusConfig: Record<BranchStatus, { label: string; className: string }> = {
+  baseline: { label: 'Baseline', className: 'bg-gray-100 text-gray-600' },
+  branch_accepted: { label: 'Branch Accepted', className: 'bg-blue-100 text-blue-700' },
+  new_change: { label: 'New Change', className: 'bg-yellow-100 text-yellow-700' },
+  new_test: { label: 'New Test', className: 'bg-purple-100 text-purple-700' },
+};
+
 export interface BuildDetailClientProps {
   buildId: string;
   diffs: VisualDiffWithTestStatus[];
@@ -87,6 +104,7 @@ export interface BuildDetailClientProps {
   hasPendingDiffs: boolean;
   isRunning?: boolean;
   completedTests?: number;
+  comparisonMode?: string | null;
 }
 
 export function BuildDetailClient({
@@ -95,6 +113,7 @@ export function BuildDetailClient({
   metrics,
   isRunning = false,
   completedTests = 0,
+  comparisonMode,
 }: BuildDetailClientProps) {
   const [activeFilter, setActiveFilter] = useState<FilterType>('all');
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -334,6 +353,9 @@ export function BuildDetailClient({
               const isSelected = selectedIds.has(diff.id);
               const isAnalyzing = diff.aiAnalysisStatus === 'running' || diff.aiAnalysisStatus === 'pending';
               const isAIFailed = diff.aiAnalysisStatus === 'failed';
+              const branchStatus = deriveBranchStatus(diff);
+              const bsConfig = branchStatusConfig[branchStatus];
+              const showDualComparison = comparisonMode === 'vs_both';
 
               return (
                 <div
@@ -391,6 +413,18 @@ export function BuildDetailClient({
                   </div>
 
                   <div className="flex items-center gap-4">
+                    {/* Branch Status Badge */}
+                    {comparisonMode && comparisonMode !== 'vs_main' && (
+                      <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium ${bsConfig.className}`}>
+                        {bsConfig.label}
+                      </span>
+                    )}
+                    {/* Dual Comparison: vs Main drift */}
+                    {showDualComparison && diff.mainPercentageDifference && parseFloat(diff.mainPercentageDifference) > 0 && (
+                      <span className="text-[10px] text-muted-foreground font-mono" title="Drift from main baseline">
+                        main: {parseFloat(diff.mainPercentageDifference).toFixed(1)}%
+                      </span>
+                    )}
                     {/* AI Badge */}
                     {isAnalyzing && (
                       <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-purple-100 text-purple-700">

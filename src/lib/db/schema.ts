@@ -153,6 +153,7 @@ export const repositories = sqliteTable('repositories', {
   name: text('name').notNull(),
   fullName: text('full_name').notNull(), // owner/name or namespace/project
   defaultBranch: text('default_branch'),
+  defaultComparisonMode: text('default_comparison_mode').default('vs_both'), // ComparisonMode
   selectedBaseline: text('selected_baseline'), // branch name for baseline comparison
   selectedBranch: text('selected_branch'), // branch for remote scanning via API
   // Default setup configuration applied to all tests in this repo
@@ -206,6 +207,9 @@ export const pullRequests = sqliteTable('pull_requests', {
   updatedAt: integer('updated_at', { mode: 'timestamp' }),
 });
 
+// Comparison mode for builds
+export type ComparisonMode = 'vs_main' | 'vs_branch' | 'vs_both' | 'vs_previous' | 'vs_planned';
+
 // Builds - aggregated test run with status
 export const builds = sqliteTable('builds', {
   id: text('id').primaryKey(),
@@ -220,6 +224,7 @@ export const builds = sqliteTable('builds', {
   passedCount: integer('passed_count').default(0),
   baseUrl: text('base_url'),
   elapsedMs: integer('elapsed_ms'),
+  comparisonMode: text('comparison_mode').default('vs_main'), // ComparisonMode
   // Build-level setup configuration
   buildSetupTestId: text('build_setup_test_id'), // Use test as build-level setup
   buildSetupScriptId: text('build_setup_script_id'), // OR use dedicated script
@@ -253,6 +258,12 @@ export const visualDiffs = sqliteTable('visual_diffs', {
   plannedDiffImagePath: text('planned_diff_image_path'),
   plannedPixelDifference: integer('planned_pixel_difference'),
   plannedPercentageDifference: text('planned_percentage_difference'),
+  // Main baseline comparison fields (for vs_both mode — secondary/informational)
+  mainBaselineImagePath: text('main_baseline_image_path'),
+  mainDiffImagePath: text('main_diff_image_path'),
+  mainPixelDifference: integer('main_pixel_difference'),
+  mainPercentageDifference: text('main_percentage_difference'),
+  mainClassification: text('main_classification'), // 'unchanged' | 'flaky' | 'changed'
   // AI diff analysis
   aiAnalysis: text('ai_analysis', { mode: 'json' }).$type<AIDiffAnalysis>(),
   aiRecommendation: text('ai_recommendation'), // 'approve' | 'review' | 'flag' | null
