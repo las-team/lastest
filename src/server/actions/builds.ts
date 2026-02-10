@@ -205,6 +205,90 @@ export async function createAndRunBuild(
 }
 
 /**
+ * Create and run a build from CI (token-authenticated, no session required).
+ * Auth is handled by the API route via runner token validation.
+ */
+export async function createAndRunBuildFromCI(opts: {
+  triggerType: TriggerType;
+  repositoryId: string;
+  runnerId: string;
+  gitBranch?: string;
+  gitCommit?: string;
+}) {
+  const { triggerType, repositoryId, runnerId, gitBranch, gitCommit } = opts;
+  const runner = getRunner(repositoryId);
+
+  // If tests are running, queue this build
+  if (runner.isActive()) {
+    return queueBuild(triggerType, undefined, repositoryId);
+  }
+
+  // Load and set environment config
+  const envConfig = await queries.getEnvironmentConfig(repositoryId);
+  if (envConfig && envConfig.id) {
+    runner.setEnvironmentConfig(envConfig);
+    const serverManager = getServerManager();
+    serverManager.setConfig(envConfig);
+  }
+
+  // Load and set playwright settings
+  const playwrightSettings = await queries.getPlaywrightSettings(repositoryId);
+  if (playwrightSettings) {
+    runner.setSettings(playwrightSettings);
+  }
+
+  // Get tests to run (filter out soft-deleted)
+  const tests = await queries.getTestsByRepo(repositoryId);
+  if (tests.length === 0) {
+    throw new Error('No tests to run');
+  }
+
+  const repo = await queries.getRepository(repositoryId);
+
+  // Use git info from CI if provided, otherwise fetch from provider
+  const gitInfo: GitInfo = (gitBranch || gitCommit)
+    ? { branch: gitBranch || 'unknown', commit: gitCommit?.slice(0, 7) || 'unknown' }
+    : await getGitInfoFromProvider(repositoryId);
+
+  const resolvedComparisonMode: ComparisonMode =
+    (repo?.defaultComparisonMode as ComparisonMode | null) || 'vs_main';
+
+  // Create test run
+  const testRun = await queries.createTestRun({
+    repositoryId,
+    gitBranch: gitInfo.branch,
+    gitCommit: gitInfo.commit,
+    startedAt: new Date(),
+    status: 'running',
+  });
+
+  // Create build
+  const build = await queries.createBuild({
+    testRunId: testRun.id,
+    triggerType,
+    overallStatus: 'review_required',
+    totalTests: tests.length,
+    changesDetected: 0,
+    flakyCount: 0,
+    failedCount: 0,
+    passedCount: 0,
+    baseUrl: envConfig?.baseUrl || 'http://localhost:3000',
+    comparisonMode: resolvedComparisonMode,
+  });
+
+  // Try to link to existing PR
+  const pr = await queries.getPullRequestByBranch(gitInfo.branch);
+  if (pr) {
+    await queries.updateBuild(build.id, { pullRequestId: pr.id });
+  }
+
+  // Run tests async
+  runBuildAsync(build.id, testRun.id, tests, gitInfo.branch, repositoryId, runnerId, resolvedComparisonMode);
+
+  return { buildId: build.id, testRunId: testRun.id, testCount: tests.length };
+}
+
+/**
  * Internal async build runner
  */
 async function runBuildAsync(

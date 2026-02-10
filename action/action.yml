@@ -13,15 +13,6 @@ inputs:
   runner-token:
     description: 'Runner authentication token from Lastest2'
     required: true
-  repo-id:
-    description: 'Repository ID in Lastest2'
-    required: true
-  team-id:
-    description: 'Team ID in Lastest2'
-    required: true
-  runner-id:
-    description: 'Remote runner ID to dispatch tests to'
-    required: true
   timeout:
     description: 'Timeout for build completion in seconds'
     required: false
@@ -60,8 +51,6 @@ runs:
       env:
         LASTEST_SERVER_URL: ${{ inputs.server-url }}
         LASTEST_TOKEN: ${{ inputs.runner-token }}
-        LASTEST_RUNNER_ID: ${{ inputs.runner-id }}
-        LASTEST_TEAM_ID: ${{ inputs.team-id }}
       run: |
         # Calculate timeout in milliseconds
         TIMEOUT_MS=$((${TIMEOUT_SECONDS:-300} * 1000))
@@ -73,15 +62,12 @@ runs:
 
         SERVER_URL="${LASTEST_SERVER_URL}"
         TOKEN="${LASTEST_TOKEN}"
-        REPO_ID="${REPO_ID}"
-        RUNNER_ID="${LASTEST_RUNNER_ID}"
-        TEAM_ID="${LASTEST_TEAM_ID}"
+        GITHUB_REPO="${GITHUB_REPOSITORY}"
         TIMEOUT_MS="${TIMEOUT_MS}"
 
         echo "=== Lastest2 Visual Regression Tests ==="
         echo "Server: ${SERVER_URL}"
-        echo "Repository ID: ${REPO_ID}"
-        echo "Runner ID: ${RUNNER_ID}"
+        echo "Repository: ${GITHUB_REPO}"
         echo ""
 
         # Create build
@@ -90,9 +76,7 @@ runs:
           -H "Content-Type: application/json" \
           -H "Authorization: Bearer ${TOKEN}" \
           -d "{
-            \"repositoryId\": \"${REPO_ID}\",
-            \"runnerId\": \"${RUNNER_ID}\",
-            \"teamId\": \"${TEAM_ID}\",
+            \"githubRepo\": \"${GITHUB_REPO}\",
             \"triggerType\": \"ci\",
             \"gitBranch\": \"${GITHUB_HEAD_REF:-${GITHUB_REF_NAME:-unknown}}\",
             \"gitCommit\": \"${GITHUB_SHA:-unknown}\"
@@ -193,7 +177,6 @@ runs:
         chmod +x /tmp/lastest2-run.sh
 
         # Export variables and run
-        export REPO_ID="${{ inputs.repo-id }}"
         export TIMEOUT_MS=$TIMEOUT_MS
         export FAIL_ON_CHANGES="${{ inputs.fail-on-changes }}"
 

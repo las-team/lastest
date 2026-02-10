@@ -14,9 +14,6 @@ jobs:
         with:
           server-url: ${{ secrets.LASTEST_SERVER_URL }}
           runner-token: ${{ secrets.LASTEST_RUNNER_TOKEN }}
-          repo-id: ${{ vars.LASTEST_REPO_ID }}
-          team-id: ${{ vars.LASTEST_TEAM_ID }}
-          runner-id: ${{ vars.LASTEST_RUNNER_ID }}
           timeout: '300'
           fail-on-changes: 'false'
 
