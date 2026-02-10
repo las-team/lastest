@@ -49,31 +49,18 @@ const statusConfig = {
   },
 };
 
-export function BuildSummaryHero({ status, prNumber, changesDetected, isRunning = false }: BuildSummaryHeroProps) {
+export function BuildSummaryHero({ status, changesDetected, isRunning = false }: BuildSummaryHeroProps) {
   const effectiveStatus = isRunning ? 'running' : status;
   const config = statusConfig[effectiveStatus];
   const Icon = config.icon;
 
   return (
-    <div className={`p-6 rounded-lg border ${config.bgColor} ${config.borderColor}`}>
-      <div className="flex items-start justify-between">
-        <div className="flex items-center gap-4">
-          <Icon className={`w-12 h-12 ${config.iconColor} ${isRunning ? 'animate-spin' : ''}`} />
-          <div>
-            <h1 className={`text-2xl font-bold ${config.textColor}`}>{config.label}</h1>
-            <p className="text-muted-foreground">
-              {effectiveStatus === 'review_required'
-                ? `${changesDetected} ${config.description}`
-                : config.description}
-            </p>
-          </div>
-        </div>
-        {prNumber && (
-          <div className="text-muted-foreground text-sm">
-            PR #{prNumber}
-          </div>
-        )}
-      </div>
+    <div className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-md border text-sm font-semibold ${config.bgColor} ${config.borderColor} ${config.textColor}`}>
+      <Icon className={`w-4 h-4 ${config.iconColor} ${isRunning ? 'animate-spin' : ''}`} />
+      <span>{config.label}</span>
+      {effectiveStatus === 'review_required' && changesDetected > 0 && (
+        <span className="text-xs font-normal opacity-70">({changesDetected})</span>
+      )}
     </div>
   );
 }

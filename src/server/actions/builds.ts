@@ -152,6 +152,7 @@ export async function createAndRunBuild(
   testIds?: string[],
   repositoryId?: string | null,
   runnerId?: string,
+  versionOverrides?: Record<string, string>,
 ) {
   if (repositoryId) await requireRepoAccess(repositoryId);
   else await requireTeamAccess();
@@ -226,7 +227,7 @@ export async function createAndRunBuild(
   }
 
   // Run tests async
-  runBuildAsync(build.id, testRun.id, tests, gitInfo.branch, repositoryId, runnerId);
+  runBuildAsync(build.id, testRun.id, tests, gitInfo.branch, repositoryId, runnerId, versionOverrides);
 
   // Fire-and-forget: compute code-change affected test IDs
   computeCodeChangeTestIds(build.id, repo, gitInfo.branch, repositoryId).catch(() => {});
@@ -327,6 +328,7 @@ async function runBuildAsync(
   branch: string,
   repositoryId?: string | null,
   runnerId?: string,
+  versionOverrides?: Record<string, string>,
 ) {
   const runner = getRunner(repositoryId);
   const startTime = Date.now();
@@ -346,6 +348,23 @@ async function runBuildAsync(
         }
       } catch (error) {
         console.error('[build] Auto-fork failed:', error);
+      }
+    }
+  }
+
+  // Apply version overrides — swap test code with specific version's code
+  const versionIdMap = new Map<string, string>(); // testId -> testVersionId
+  if (versionOverrides) {
+    for (const test of tests) {
+      const versionId = versionOverrides[test.id];
+      if (versionId) {
+        const version = await queries.getTestVersionById(versionId);
+        if (version) {
+          test.code = version.code;
+          if (version.name) test.name = version.name;
+          if (version.targetUrl) test.targetUrl = version.targetUrl;
+          versionIdMap.set(test.id, versionId);
+        }
       }
     }
   }
@@ -375,6 +394,7 @@ async function runBuildAsync(
     const testResult = await queries.createTestResult({
       testRunId,
       testId: result.testId,
+      testVersionId: versionIdMap.get(result.testId) ?? null,
       status: result.status,
       screenshotPath: result.screenshotPath,
       screenshots: result.screenshots,
@@ -1226,4 +1246,46 @@ async function sendBuildNotifications(data: {
       console.error('Failed to post GitLab MR comment:', error);
     }
   }
+}
+
+/**
+ * Save compose config (selected tests + version overrides) for a branch
+ */
+export async function saveComposeConfig(
+  repositoryId: string,
+  branch: string,
+  selectedTestIds: string[],
+  versionOverrides: Record<string, string>,
+) {
+  await requireRepoAccess(repositoryId);
+  await queries.upsertComposeConfig(repositoryId, branch, { selectedTestIds, versionOverrides });
+  revalidatePath('/compose');
+  revalidatePath('/run');
+}
+
+/**
+ * Get all tests with their version history for the compose page
+ */
+export async function getTestsWithVersions(repositoryId: string) {
+  await requireRepoAccess(repositoryId);
+
+  const repoTests = await queries.getTestsByRepo(repositoryId);
+  const testsWithVersions = await Promise.all(
+    repoTests.map(async (test) => {
+      const versions = await queries.getTestVersions(test.id);
+      return {
+        ...test,
+        versions: versions.slice(0, 10), // Last 10 versions
+      };
+    })
+  );
+
+  // Group by functional area
+  const areas = await queries.getFunctionalAreas();
+  const areaMap = new Map(areas.map(a => [a.id, a.name]));
+
+  return testsWithVersions.map(t => ({
+    ...t,
+    functionalAreaName: t.functionalAreaId ? areaMap.get(t.functionalAreaId) ?? null : null,
+  }));
 }

@@ -42,8 +42,9 @@ export function SuitesPageClient({ suites, repositoryId }: SuitesPageClientProps
   };
 
   return (
-    <div className="flex-1 overflow-auto p-6">
-      <div className="flex items-center justify-between mb-6">
+    <div className="flex-1 overflow-auto">
+      <div className="max-w-5xl mx-auto p-6 space-y-6">
+      <div className="flex items-center justify-between">
         <div>
           <h2 className="text-lg font-semibold">Test Suites</h2>
           <p className="text-sm text-muted-foreground">
@@ -121,6 +122,8 @@ export function SuitesPageClient({ suites, repositoryId }: SuitesPageClientProps
           ))}
         </div>
       )}
+
+      </div>
 
       <CreateSuiteDialog
         open={isCreateOpen}

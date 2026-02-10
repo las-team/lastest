@@ -11,6 +11,7 @@ import {
   Settings,
   Circle,
   Layers,
+  ListOrdered,
   FolderTree,
   Building2,
   Zap,
@@ -27,14 +28,24 @@ interface SidebarProps {
   team?: Team | null;
 }
 
-const navigation = [
+const dashboardNav = [
   { name: 'Dashboard', href: '/', icon: LayoutDashboard },
+];
+
+const definitionNav = [
   { name: 'Areas', href: '/areas', icon: FolderTree },
   { name: 'Tests', href: '/tests', icon: FileCode },
-  { name: 'Suites', href: '/suites', icon: Layers },
+  { name: 'Suites', href: '/suites', icon: ListOrdered },
+  { name: 'Compose', href: '/compose', icon: Layers },
+  { name: 'Env Setup', href: '/env', icon: Zap },
+];
+
+const executionNav = [
   { name: 'Runs', href: '/run', icon: Play },
   { name: 'Compare', href: '/compare', icon: GitCompare },
-  { name: 'Env', href: '/env', icon: Zap },
+];
+
+const settingsNav = [
   { name: 'Settings', href: '/settings', icon: Settings },
 ];
 
@@ -69,12 +80,10 @@ export function Sidebar({ repos, selectedRepo, currentUser, team }: SidebarProps
         </div>
       </div>
 
-      <nav className="flex-1 p-4">
+      <nav className="flex-1 p-4 space-y-4">
         <ul className="space-y-1">
-          {navigation.map((item) => {
-            const isActive = pathname === item.href ||
-              (item.href !== '/' && pathname.startsWith(item.href));
-
+          {dashboardNav.map((item) => {
+            const isActive = pathname === item.href;
             return (
               <li key={item.name}>
                 <Link
@@ -93,7 +102,73 @@ export function Sidebar({ repos, selectedRepo, currentUser, team }: SidebarProps
             );
           })}
         </ul>
+
+        <div>
+          <p className="px-3 pb-1 text-xs font-medium text-muted-foreground uppercase tracking-wider">Definition</p>
+          <ul className="space-y-1">
+            {definitionNav.map((item) => {
+              const isActive = pathname === item.href || pathname.startsWith(item.href);
+              return (
+                <li key={item.name}>
+                  <Link
+                    href={item.href}
+                    className={cn(
+                      'flex items-center gap-3 px-3 py-2 rounded-md text-sm transition-colors',
+                      isActive
+                        ? 'bg-primary text-primary-foreground'
+                        : 'hover:bg-muted'
+                    )}
+                  >
+                    <item.icon className="h-4 w-4" />
+                    {item.name}
+                  </Link>
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+
+        <div>
+          <p className="px-3 pb-1 text-xs font-medium text-muted-foreground uppercase tracking-wider">Execution</p>
+          <ul className="space-y-1">
+            {executionNav.map((item) => {
+              const isActive = pathname === item.href || pathname.startsWith(item.href);
+              return (
+                <li key={item.name}>
+                  <Link
+                    href={item.href}
+                    className={cn(
+                      'flex items-center gap-3 px-3 py-2 rounded-md text-sm transition-colors',
+                      isActive
+                        ? 'bg-primary text-primary-foreground'
+                        : 'hover:bg-muted'
+                    )}
+                  >
+                    <item.icon className="h-4 w-4" />
+                    {item.name}
+                  </Link>
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+
       </nav>
+
+      <div className="px-4 pb-2">
+        <Link
+          href="/settings"
+          className={cn(
+            'flex items-center gap-3 px-3 py-2 rounded-md text-sm transition-colors',
+            pathname === '/settings' || pathname.startsWith('/settings')
+              ? 'bg-primary text-primary-foreground'
+              : 'hover:bg-muted'
+          )}
+        >
+          <Settings className="h-4 w-4" />
+          Settings
+        </Link>
+      </div>
 
       <div className="p-4 border-t space-y-3">
         {currentUser && <UserMenu user={currentUser} />}

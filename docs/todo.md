@@ -6,24 +6,14 @@ Publish lastest runner to npx npm
 Docker
 Gitlab
 Timestamp fixing
+Teardown
 ## features
 Support https://github.com/excalidraw/excalidraw/tree/master/packages/excalidraw/tests ~/.claude/plans/declarative-kindling-coral.md 55%
-    Dev feeback - Baseline, Accepted changes, Test changes, new tests
-
-Revise labels (e.g. new change, main 2.5%) on build page
-
-Areas changed
-
-Branch Tests, Build compose /home/ewyct/.claude/plans/ancient-dreaming-lake.md
-
-Teardown - after test scripts
-
-UX
-    Test defining
-    Test running
+    Dev feeback
+    Actions with changes
 
 AI Optimize playwright settings
-    select or identify testable app mode 
+    select or identify testable app mode, classify it
     Repo specific pw settings,
 
 Play gomb - give in url and do everything 
@@ -38,10 +28,11 @@ Play gomb - give in url and do everything
     8. Prompt the user to have something to test 
     9. Run tests again, show comparison and AI assessment - areas that changed
     10. Ideal summary: 60 functional areas remain unchanged, 10 changed, out of those 8 new areas added, 1 pre-existing areas changed, 1 minor change in pre-existing function. 
- 
 
 Ban AI mode
     Remove all GenAI features from UI if enabled
+
+Revise labels (e.g. new change, main 2.5%) on build page
 
 ## ideas
 Component specific testing

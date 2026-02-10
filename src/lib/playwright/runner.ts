@@ -499,6 +499,7 @@ export function stripTypeAnnotations(code: string): string {
 }
 import { getServerManager } from './server-manager';
 import { getSetupOrchestrator, testNeedsSetup } from '@/lib/setup/setup-orchestrator';
+import { getTeardownOrchestrator, testNeedsTeardown } from '@/lib/setup/teardown-orchestrator';
 import type { SetupContext, SetupResult } from '@/lib/setup/types';
 
 export interface RunEvent {
@@ -527,6 +528,8 @@ export interface TestRunResult {
   networkRequests?: NetworkRequest[];
   a11yViolations?: A11yViolation[];
   setupDurationMs?: number;
+  teardownDurationMs?: number;
+  teardownError?: string;
   stabilityMetadata?: StabilityMetadata;
 }
 
@@ -1200,6 +1203,24 @@ export class PlaywrightRunner extends EventEmitter {
           : `/screenshots/${screenshotFilename}`;
       }
 
+      // Run teardown after test (non-blocking — errors don't affect test status)
+      let teardownDurationMs: number | undefined;
+      let teardownError: string | undefined;
+      if (await testNeedsTeardown(test)) {
+        try {
+          const teardownOrchestrator = getTeardownOrchestrator();
+          const teardownResult = await teardownOrchestrator.runTestTeardown(test, page, baseContext);
+          teardownDurationMs = teardownResult.duration > 0 ? teardownResult.duration : undefined;
+          if (!teardownResult.success) {
+            teardownError = teardownResult.error;
+            console.warn(`[teardown] Non-blocking error for "${test.name}": ${teardownResult.error}`);
+          }
+        } catch (e) {
+          teardownError = e instanceof Error ? e.message : String(e);
+          console.warn(`[teardown] Non-blocking exception for "${test.name}": ${teardownError}`);
+        }
+      }
+
       const durationMs = Date.now() - startTime;
 
       this.emit('event', {
@@ -1222,11 +1243,12 @@ export class PlaywrightRunner extends EventEmitter {
         networkRequests: networkFailures.length > 0 ? networkFailures : undefined,
         a11yViolations,
         setupDurationMs: setupDurationMs > 0 ? setupDurationMs : undefined,
+        teardownDurationMs,
+        teardownError,
         stabilityMetadata: aggregatedStabilityMetadata,
       };
 
     } catch (error) {
-      const durationMs = Date.now() - startTime;
       const errorMessage = error instanceof Error ? error.message : String(error);
 
       // Take screenshot on failure
@@ -1244,6 +1266,33 @@ export class PlaywrightRunner extends EventEmitter {
           // Ignore screenshot errors
         }
       }
+
+      // Run teardown even on failure (it's cleanup)
+      let teardownDurationMs: number | undefined;
+      let teardownError: string | undefined;
+      if (page && await testNeedsTeardown(test)) {
+        try {
+          const teardownOrchestrator = getTeardownOrchestrator();
+          const fallbackBaseUrl = this.environmentConfig?.baseUrl || 'http://localhost:3000';
+          const teardownContext: SetupContext = {
+            baseUrl: fallbackBaseUrl.replace(/\/$/, ''),
+            page,
+            variables: this.setupContext?.variables || {},
+            repositoryId: this.repositoryId,
+          };
+          const teardownResult = await teardownOrchestrator.runTestTeardown(test, page, teardownContext);
+          teardownDurationMs = teardownResult.duration > 0 ? teardownResult.duration : undefined;
+          if (!teardownResult.success) {
+            teardownError = teardownResult.error;
+            console.warn(`[teardown] Non-blocking error for "${test.name}": ${teardownResult.error}`);
+          }
+        } catch (e) {
+          teardownError = e instanceof Error ? e.message : String(e);
+          console.warn(`[teardown] Non-blocking exception for "${test.name}": ${teardownError}`);
+        }
+      }
+
+      const durationMs = Date.now() - startTime;
 
       this.emit('event', {
         type: 'test_failed',
@@ -1272,6 +1321,8 @@ export class PlaywrightRunner extends EventEmitter {
         consoleErrors: consoleErrors.length > 0 ? consoleErrors : undefined,
         networkRequests: networkFailures.length > 0 ? networkFailures : undefined,
         setupDurationMs: setupDurationMs > 0 ? setupDurationMs : undefined,
+        teardownDurationMs,
+        teardownError,
       };
 
     } finally {

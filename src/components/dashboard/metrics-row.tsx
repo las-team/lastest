@@ -1,6 +1,6 @@
 'use client';
 
-import { FileCheck2, AlertTriangle, XCircle, Clock, RefreshCw, CheckCircle, Sparkles, Flag, GitBranch, Shield } from 'lucide-react';
+import { FileCheck2, AlertTriangle, XCircle, Clock, RefreshCw, CheckCircle, Sparkles, Flag, GitBranch, Shield, Layers } from 'lucide-react';
 import type { FilterType } from '@/app/(app)/builds/[buildId]/build-detail-client';
 import { cn } from '@/lib/utils';
 
@@ -20,6 +20,8 @@ interface MetricsRowProps {
   aiFlagCount?: number;
   viewMode?: 'branch' | 'main';
   onViewModeChange?: (mode: 'branch' | 'main') => void;
+  groupByArea?: boolean;
+  onGroupByAreaChange?: (v: boolean) => void;
 }
 
 export function MetricsRow({
@@ -38,6 +40,8 @@ export function MetricsRow({
   aiFlagCount = 0,
   viewMode,
   onViewModeChange,
+  groupByArea = false,
+  onGroupByAreaChange,
 }: MetricsRowProps) {
   const formatTime = (ms: number | null) => {
     if (!ms) return '-';
@@ -268,49 +272,54 @@ export function MetricsRow({
         </div>
       )}
 
-      {/* Comparison Mode Toggle */}
-      {viewMode && onViewModeChange && (
-        <div className="grid grid-cols-2 gap-3">
-          <div
-            onClick={() => onViewModeChange('branch')}
-            className={cn(
-              'p-3 rounded-lg flex flex-col items-center transition-all cursor-pointer hover:scale-105 hover:shadow-md bg-muted',
-              viewMode === 'branch' && 'ring-2 ring-offset-2 ring-primary'
-            )}
-            role="button"
-            tabIndex={0}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' || e.key === ' ') {
-                e.preventDefault();
-                onViewModeChange('branch');
-              }
-            }}
-          >
-            <GitBranch className={cn('w-5 h-5', viewMode === 'branch' ? 'text-primary' : 'text-muted-foreground')} />
-            <span className={cn('text-sm font-medium mt-1', viewMode === 'branch' ? 'text-primary' : 'text-muted-foreground')}>
-              Branch
-            </span>
-          </div>
-          <div
-            onClick={() => onViewModeChange('main')}
-            className={cn(
-              'p-3 rounded-lg flex flex-col items-center transition-all cursor-pointer hover:scale-105 hover:shadow-md bg-muted',
-              viewMode === 'main' && 'ring-2 ring-offset-2 ring-primary'
-            )}
-            role="button"
-            tabIndex={0}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' || e.key === ' ') {
-                e.preventDefault();
-                onViewModeChange('main');
-              }
-            }}
-          >
-            <Shield className={cn('w-5 h-5', viewMode === 'main' ? 'text-primary' : 'text-muted-foreground')} />
-            <span className={cn('text-sm font-medium mt-1', viewMode === 'main' ? 'text-primary' : 'text-muted-foreground')}>
-              Main
-            </span>
-          </div>
+      {/* Controls Row */}
+      {(viewMode && onViewModeChange || onGroupByAreaChange) && (
+        <div className="flex items-center gap-3">
+          {/* Comparison Mode Toggle — segmented control */}
+          {viewMode && onViewModeChange && (
+            <div className="inline-flex rounded-lg border bg-muted p-1">
+              <button
+                onClick={() => onViewModeChange('branch')}
+                className={cn(
+                  'inline-flex items-center gap-2 px-4 py-1.5 text-sm font-medium rounded-md transition-colors',
+                  viewMode === 'branch'
+                    ? 'bg-background text-primary shadow-sm'
+                    : 'text-muted-foreground hover:text-foreground'
+                )}
+              >
+                <GitBranch className="w-4 h-4" />
+                Branch
+              </button>
+              <button
+                onClick={() => onViewModeChange('main')}
+                className={cn(
+                  'inline-flex items-center gap-2 px-4 py-1.5 text-sm font-medium rounded-md transition-colors',
+                  viewMode === 'main'
+                    ? 'bg-background text-primary shadow-sm'
+                    : 'text-muted-foreground hover:text-foreground'
+                )}
+              >
+                <Shield className="w-4 h-4" />
+                Main
+              </button>
+            </div>
+          )}
+
+          {/* Group by Area Toggle */}
+          {onGroupByAreaChange && (
+            <button
+              onClick={() => onGroupByAreaChange(!groupByArea)}
+              className={cn(
+                'inline-flex items-center gap-2 px-4 py-1.5 text-sm font-medium rounded-lg border transition-colors',
+                groupByArea
+                  ? 'bg-primary/10 text-primary border-primary/30'
+                  : 'bg-muted text-muted-foreground border-transparent hover:text-foreground'
+              )}
+            >
+              <Layers className="w-4 h-4" />
+              Group by Area
+            </button>
+          )}
         </div>
       )}
     </div>

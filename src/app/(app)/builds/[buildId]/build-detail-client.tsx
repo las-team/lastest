@@ -1,12 +1,13 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useMemo, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
-import { AlertTriangle, CheckCircle, XCircle, ExternalLink, XIcon, Sparkles, Flag, Loader2 } from 'lucide-react';
+import { AlertTriangle, CheckCircle, XCircle, ExternalLink, XIcon, Sparkles, Flag, Loader2, ChevronRight, ChevronsUpDown } from 'lucide-react';
 import type { AIDiffAnalysis, VisualDiffWithTestStatus } from '@/lib/db/schema';
 import { MetricsRow } from '@/components/dashboard/metrics-row';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Badge } from '@/components/ui/badge';
+import { Collapsible, CollapsibleTrigger, CollapsibleContent } from '@/components/ui/collapsible';
 import { batchApproveDiffs, batchRejectDiffs, acceptAIApprovals } from '@/server/actions/diffs';
 
 // Filter type for the build detail page metrics
@@ -120,7 +121,15 @@ export function BuildDetailClient({
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [isProcessing, setIsProcessing] = useState(false);
   const [viewMode, setViewMode] = useState<'branch' | 'main'>('branch');
+  const [groupByArea, setGroupByArea] = useState(false);
+  const [expandKey, setExpandKey] = useState(0);
+  const [allExpanded, setAllExpanded] = useState(true);
   const router = useRouter();
+
+  const toggleExpandAll = useCallback(() => {
+    setAllExpanded(prev => !prev);
+    setExpandKey(prev => prev + 1);
+  }, []);
 
   // Toggle filter - clicking active filter clears it
   const handleFilterChange = (filter: FilterType) => {
@@ -144,6 +153,18 @@ export function BuildDetailClient({
 
   // Apply filter to sorted diffs
   const filteredDiffs = filterDiffs(sortedDiffs, activeFilter);
+
+  // Group diffs by functional area
+  const groupedDiffs = useMemo(() => {
+    const groups: Record<string, VisualDiffWithTestStatus[]> = {};
+    for (const diff of filteredDiffs) {
+      const area = diff.functionalAreaName || 'Ungrouped';
+      (groups[area] ||= []).push(diff);
+    }
+    return Object.entries(groups).sort(([a], [b]) =>
+      a === 'Ungrouped' ? 1 : b === 'Ungrouped' ? -1 : a.localeCompare(b)
+    );
+  }, [filteredDiffs]);
 
   // Check if filter is active (not 'all')
   const isFilterActive = activeFilter !== 'all';
@@ -240,6 +261,8 @@ export function BuildDetailClient({
         aiFlagCount={aiFlagCount}
         viewMode={viewMode}
         onViewModeChange={setViewMode}
+        groupByArea={groupByArea}
+        onGroupByAreaChange={setGroupByArea}
       />
 
       {/* Tests for Review Section */}
@@ -345,136 +368,214 @@ export function BuildDetailClient({
               <p>No visual changes detected in this build.</p>
             )}
           </div>
-        ) : (
+        ) : !groupByArea ? (
+          /* Flat list — no grouping */
           <div className="space-y-2">
-            {filteredDiffs.map((diff) => {
-              const isExecutionFailed = diff.testResultStatus === 'failed';
-              const StatusIcon = isExecutionFailed ? XCircle : diffStatusIcons[diff.status];
-              const statusColor = isExecutionFailed ? 'text-red-600 bg-red-50' : diffStatusColors[diff.status];
-              const isFailed = isExecutionFailed || diff.status === 'rejected';
-              const aiBadge = diff.aiRecommendation ? aiRecommendationBadge[diff.aiRecommendation] : null;
-              const analysis = diff.aiAnalysis as AIDiffAnalysis | null;
-              const isSelected = selectedIds.has(diff.id);
-              const isAnalyzing = diff.aiAnalysisStatus === 'running' || diff.aiAnalysisStatus === 'pending';
-              const isAIFailed = diff.aiAnalysisStatus === 'failed';
-              const branchStatus = deriveBranchStatus(diff);
-              const bsConfig = branchStatusConfig[branchStatus];
-              const hasMainDrift = diff.mainPercentageDifference && parseFloat(diff.mainPercentageDifference) > 0;
+            {filteredDiffs.map((diff) => (
+              <DiffRow
+                key={diff.id}
+                diff={diff}
+                buildId={buildId}
+                viewMode={viewMode}
+                isSelected={selectedIds.has(diff.id)}
+                onToggleSelect={toggleSelect}
+                hasCodeChange={codeChangeTestIdSet.has(diff.testId)}
+              />
+            ))}
+          </div>
+        ) : (
+          /* Grouped view with collapsible sections */
+          <div className="space-y-3">
+            {/* Expand / Collapse All */}
+            <div className="flex justify-end">
+              <button
+                onClick={toggleExpandAll}
+                className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
+              >
+                <ChevronsUpDown className="w-3.5 h-3.5" />
+                {allExpanded ? 'Collapse All' : 'Expand All'}
+              </button>
+            </div>
 
-              const displayPixels = viewMode === 'main' ? diff.mainPixelDifference : diff.pixelDifference;
-              const hasViewData = viewMode === 'main' ? !!diff.mainBaselineImagePath : !!diff.baselineImagePath;
+            {groupedDiffs.map(([areaName, areaDiffs]) => {
+              const changedCount = areaDiffs.filter(d => d.classification === 'changed').length;
+              const pendingCount = areaDiffs.filter(d => d.status === 'pending').length;
+              const approvedCount = areaDiffs.filter(d => d.status === 'approved' || d.status === 'auto_approved').length;
+              const failedCount = areaDiffs.filter(d => d.testResultStatus === 'failed' || d.status === 'rejected').length;
 
               return (
-                <div
-                  key={diff.id}
-                  onClick={() => router.push(`/builds/${buildId}/diff/${diff.id}`)}
-                  className={`flex items-center justify-between p-4 border rounded-lg transition-colors cursor-pointer ${
-                    isSelected
-                      ? 'border-primary/40 bg-primary/5'
-                      : isFailed
-                        ? 'border-destructive/30 bg-destructive/5 hover:border-destructive/50'
-                        : 'hover:border-primary/30 hover:bg-primary/5'
-                  }`}
-                >
-                  <div className="flex items-center gap-3">
-                    <div onClick={(e) => e.stopPropagation()}>
-                      <Checkbox
-                        checked={isSelected}
-                        onCheckedChange={() => toggleSelect(diff.id)}
-                      />
-                    </div>
-                    <div className={`p-2 rounded ${statusColor}`}>
-                      <StatusIcon className="w-4 h-4" />
-                    </div>
-                    <div className="min-w-0">
-                      <div className={`font-medium truncate ${isFailed ? 'text-red-800' : ''}`}>
-                        {diff.testName || 'Unnamed Test'}
-                        {diff.stepLabel && (
-                          <span className="text-muted-foreground font-normal"> &rsaquo; {diff.stepLabel}</span>
-                        )}
+                <Collapsible key={`${areaName}-${expandKey}`} defaultOpen={allExpanded}>
+                  <div>
+                    <CollapsibleTrigger className="flex items-center justify-between w-full p-3 bg-muted/30 hover:bg-muted/50 transition-colors group">
+                      <div className="flex items-center gap-2">
+                        <ChevronRight className="w-4 h-4 text-muted-foreground transition-transform group-data-[state=open]:rotate-90" />
+                        <span className="font-medium text-sm">{areaName}</span>
+                        <Badge variant="secondary" className="text-xs">{areaDiffs.length}</Badge>
                       </div>
-                      <div className="flex items-center gap-2 text-sm">
-                        {diff.functionalAreaName && (
-                          <span className="text-primary font-medium">
-                            {diff.functionalAreaName}
-                          </span>
-                        )}
-                        <span className="text-muted-foreground/50">·</span>
-                        <span className={isFailed ? 'text-destructive' : 'text-muted-foreground'}>
-                          {isExecutionFailed
-                            ? 'Execution failed'
-                            : !hasViewData
-                              ? viewMode === 'main' ? 'No main baseline' : 'No branch baseline'
-                              : displayPixels
-                                ? `${displayPixels.toLocaleString()}px diff`
-                                : 'No changes'}
-                        </span>
-                        <span className="text-muted-foreground/40 text-xs font-mono">
-                          {diff.testId.slice(0, 8)}
-                        </span>
+                      <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                        {changedCount > 0 && <span className="text-yellow-600">{changedCount} changed</span>}
+                        {pendingCount > 0 && <span className="text-yellow-600">{pendingCount} pending</span>}
+                        {approvedCount > 0 && <span className="text-green-600">{approvedCount} approved</span>}
+                        {failedCount > 0 && <span className="text-red-600">{failedCount} failed</span>}
                       </div>
-                      {analysis && (
-                        <div className="text-xs text-gray-400 italic mt-0.5 truncate max-w-md">
-                          &ldquo;{analysis.summary}&rdquo;
-                        </div>
-                      )}
-                    </div>
+                    </CollapsibleTrigger>
+                    <CollapsibleContent>
+                      <div className="space-y-2 p-3">
+                        {areaDiffs.map((diff) => (
+                          <DiffRow
+                            key={diff.id}
+                            diff={diff}
+                            buildId={buildId}
+                            viewMode={viewMode}
+                            isSelected={selectedIds.has(diff.id)}
+                            onToggleSelect={toggleSelect}
+                            hasCodeChange={codeChangeTestIdSet.has(diff.testId)}
+                          />
+                        ))}
+                      </div>
+                    </CollapsibleContent>
                   </div>
-
-                  <div className="flex items-center gap-4">
-                    {/* Code Change Badge */}
-                    {codeChangeTestIdSet.has(diff.testId) && (
-                      <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium bg-orange-100 text-orange-700">
-                        Code Change
-                      </span>
-                    )}
-                    {/* Branch Status Badge */}
-                    <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium ${bsConfig.className}`}>
-                      {bsConfig.label}
-                    </span>
-                    {/* Main baseline drift */}
-                    {hasMainDrift && (
-                      <span className="text-[10px] text-muted-foreground font-mono" title="Drift from main baseline">
-                        main: {parseFloat(diff.mainPercentageDifference!).toFixed(1)}%
-                      </span>
-                    )}
-                    {/* AI Badge */}
-                    {isAnalyzing && (
-                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-purple-100 text-purple-700">
-                        <Loader2 className="w-3 h-3 animate-spin" />
-                        Analyzing...
-                      </span>
-                    )}
-                    {aiBadge && (
-                      <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium ${aiBadge.className}`}>
-                        <Sparkles className="w-3 h-3" />
-                        {aiBadge.label}
-                        {analysis && (
-                          <span className="opacity-70">{Math.round(analysis.confidence * 100)}%</span>
-                        )}
-                      </span>
-                    )}
-                    {isAIFailed && !aiBadge && (
-                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-600">
-                        AI Failed
-                      </span>
-                    )}
-                    {diff.currentImagePath && (
-                      <img
-                        src={diff.currentImagePath}
-                        alt="Screenshot"
-                        className={`w-20 h-12 object-cover rounded border ${
-                          isFailed ? 'border-red-200' : ''
-                        }`}
-                      />
-                    )}
-                    <ExternalLink className={`w-4 h-4 ${isFailed ? 'text-destructive/60' : 'text-muted-foreground/50'}`} />
-                  </div>
-                </div>
+                </Collapsible>
               );
             })}
           </div>
         )}
+      </div>
+    </div>
+  );
+}
+
+/** Reusable row for a single visual diff */
+function DiffRow({
+  diff,
+  buildId,
+  viewMode,
+  isSelected,
+  onToggleSelect,
+  hasCodeChange,
+}: {
+  diff: VisualDiffWithTestStatus;
+  buildId: string;
+  viewMode: 'branch' | 'main';
+  isSelected: boolean;
+  onToggleSelect: (id: string) => void;
+  hasCodeChange: boolean;
+}) {
+  const router = useRouter();
+  const isExecutionFailed = diff.testResultStatus === 'failed';
+  const StatusIcon = isExecutionFailed ? XCircle : diffStatusIcons[diff.status];
+  const statusColor = isExecutionFailed ? 'text-red-600 bg-red-50' : diffStatusColors[diff.status];
+  const isFailed = isExecutionFailed || diff.status === 'rejected';
+  const aiBadge = diff.aiRecommendation ? aiRecommendationBadge[diff.aiRecommendation] : null;
+  const analysis = diff.aiAnalysis as AIDiffAnalysis | null;
+  const isAnalyzing = diff.aiAnalysisStatus === 'running' || diff.aiAnalysisStatus === 'pending';
+  const isAIFailed = diff.aiAnalysisStatus === 'failed';
+  const branchStatus = deriveBranchStatus(diff);
+  const bsConfig = branchStatusConfig[branchStatus];
+  const hasMainDrift = diff.mainPercentageDifference && parseFloat(diff.mainPercentageDifference) > 0;
+  const displayPixels = viewMode === 'main' ? diff.mainPixelDifference : diff.pixelDifference;
+  const hasViewData = viewMode === 'main' ? !!diff.mainBaselineImagePath : !!diff.baselineImagePath;
+
+  return (
+    <div
+      onClick={() => router.push(`/builds/${buildId}/diff/${diff.id}`)}
+      className={`flex items-center justify-between p-4 border rounded-lg transition-colors cursor-pointer ${
+        isSelected
+          ? 'border-primary/40 bg-primary/5'
+          : isFailed
+            ? 'border-destructive/30 bg-destructive/5 hover:border-destructive/50'
+            : 'hover:border-primary/30 hover:bg-primary/5'
+      }`}
+    >
+      <div className="flex items-center gap-3">
+        <div onClick={(e) => e.stopPropagation()}>
+          <Checkbox
+            checked={isSelected}
+            onCheckedChange={() => onToggleSelect(diff.id)}
+          />
+        </div>
+        <div className={`p-2 rounded ${statusColor}`}>
+          <StatusIcon className="w-4 h-4" />
+        </div>
+        <div className="min-w-0">
+          <div className={`font-medium truncate ${isFailed ? 'text-red-800' : ''}`}>
+            {diff.testName || 'Unnamed Test'}
+            {diff.stepLabel && (
+              <span className="text-muted-foreground font-normal"> &rsaquo; {diff.stepLabel}</span>
+            )}
+          </div>
+          <div className="flex items-center gap-2 text-sm">
+            {diff.functionalAreaName && (
+              <span className="text-primary font-medium">
+                {diff.functionalAreaName}
+              </span>
+            )}
+            <span className="text-muted-foreground/50">·</span>
+            <span className={isFailed ? 'text-destructive' : 'text-muted-foreground'}>
+              {isExecutionFailed
+                ? 'Execution failed'
+                : !hasViewData
+                  ? viewMode === 'main' ? 'No main baseline' : 'No branch baseline'
+                  : displayPixels
+                    ? `${displayPixels.toLocaleString()}px diff`
+                    : 'No changes'}
+            </span>
+            <span className="text-muted-foreground/40 text-xs font-mono">
+              {diff.testId.slice(0, 8)}
+            </span>
+          </div>
+          {analysis && (
+            <div className="text-xs text-gray-400 italic mt-0.5 truncate max-w-md">
+              &ldquo;{analysis.summary}&rdquo;
+            </div>
+          )}
+        </div>
+      </div>
+
+      <div className="flex items-center gap-4">
+        {hasCodeChange && (
+          <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium bg-orange-100 text-orange-700">
+            Code Change
+          </span>
+        )}
+        <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium ${bsConfig.className}`}>
+          {bsConfig.label}
+        </span>
+        {hasMainDrift && (
+          <span className="text-[10px] text-muted-foreground font-mono" title="Drift from main baseline">
+            main: {parseFloat(diff.mainPercentageDifference!).toFixed(1)}%
+          </span>
+        )}
+        {isAnalyzing && (
+          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-purple-100 text-purple-700">
+            <Loader2 className="w-3 h-3 animate-spin" />
+            Analyzing...
+          </span>
+        )}
+        {aiBadge && (
+          <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium ${aiBadge.className}`}>
+            <Sparkles className="w-3 h-3" />
+            {aiBadge.label}
+            {analysis && (
+              <span className="opacity-70">{Math.round(analysis.confidence * 100)}%</span>
+            )}
+          </span>
+        )}
+        {isAIFailed && !aiBadge && (
+          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-600">
+            AI Failed
+          </span>
+        )}
+        {diff.currentImagePath && (
+          <img
+            src={diff.currentImagePath}
+            alt="Screenshot"
+            className={`w-20 h-12 object-cover rounded border ${
+              isFailed ? 'border-red-200' : ''
+            }`}
+          />
+        )}
+        <ExternalLink className={`w-4 h-4 ${isFailed ? 'text-destructive/60' : 'text-muted-foreground/50'}`} />
       </div>
     </div>
   );

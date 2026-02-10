@@ -36,6 +36,11 @@ interface BuildWithBranch extends Build {
   gitCommit?: string;
 }
 
+interface ComposeConfigProp {
+  selectedTestIds: string[] | null;
+  versionOverrides: Record<string, string> | null;
+}
+
 interface RunDashboardClientProps {
   tests: Test[];
   runs: TestRun[];
@@ -46,6 +51,7 @@ interface RunDashboardClientProps {
   defaultBranch: string | null;
   baseUrl: string;
   buildChanges?: BuildChanges | null;
+  composeConfig?: ComposeConfigProp | null;
 }
 
 const HISTORY_KEY = 'baseurl-history';
@@ -74,7 +80,7 @@ function isLocalUrl(url: string): boolean {
   }
 }
 
-export function RunDashboardClient({ tests, runs: _runs, builds, repositoryId, activeBranch, currentBranch, defaultBranch, baseUrl: initialBaseUrl, buildChanges }: RunDashboardClientProps) {
+export function RunDashboardClient({ tests, runs: _runs, builds, repositoryId, activeBranch, currentBranch, defaultBranch, baseUrl: initialBaseUrl, buildChanges, composeConfig }: RunDashboardClientProps) {
   const router = useRouter();
   const notifyJobStarted = useNotifyJobStarted();
   const [isRunning, setIsRunning] = useState(false);
@@ -106,12 +112,31 @@ export function RunDashboardClient({ tests, runs: _runs, builds, repositoryId, a
     setIsSmartRunning(true);
     try {
       await saveAndTestBaseUrl();
-      const result = await runSmartBuild(repositoryId ?? null, executionTarget);
-      if ('error' in result) {
-        console.error('Smart run failed:', result.error);
-      } else {
+
+      // If compose config exists, intersect smart-run tests with composed selection
+      if (composeConfig?.selectedTestIds) {
+        const composedSet = new Set(composeConfig.selectedTestIds);
+        const filteredTestIds = smartAnalysis.affectedTests
+          .map(t => t.testId)
+          .filter(id => composedSet.has(id));
+
+        if (filteredTestIds.length === 0) {
+          console.error('Smart run: no tests after intersecting with compose config');
+          return;
+        }
+
+        const versionOverrides = composeConfig.versionOverrides ?? undefined;
+        const { buildId } = await createAndRunBuild('manual', filteredTestIds, repositoryId, executionTarget, versionOverrides);
         notifyJobStarted();
-        router.push(`/builds/${result.buildId}`);
+        router.push(`/builds/${buildId}`);
+      } else {
+        const result = await runSmartBuild(repositoryId ?? null, executionTarget);
+        if ('error' in result) {
+          console.error('Smart run failed:', result.error);
+        } else {
+          notifyJobStarted();
+          router.push(`/builds/${result.buildId}`);
+        }
       }
     } catch (error) {
       console.error('Failed to start smart run:', error);
@@ -147,11 +172,17 @@ export function RunDashboardClient({ tests, runs: _runs, builds, repositoryId, a
     setIsTesting(false);
   };
 
+  // Determine composed test count for UI indicator
+  const composedTestCount = composeConfig?.selectedTestIds ? composeConfig.selectedTestIds.length : null;
+  const hasComposeConfig = composedTestCount !== null && composedTestCount < tests.length;
+
   const handleRunAll = async () => {
     setIsRunning(true);
     try {
       await saveAndTestBaseUrl();
-      const { buildId } = await createAndRunBuild('manual', undefined, repositoryId, executionTarget);
+      const testIds = composeConfig?.selectedTestIds ?? undefined;
+      const versionOverrides = composeConfig?.versionOverrides ?? undefined;
+      const { buildId } = await createAndRunBuild('manual', testIds, repositoryId, executionTarget, versionOverrides);
       notifyJobStarted();
       router.push(`/builds/${buildId}`);
     } catch (error) {
@@ -193,7 +224,7 @@ export function RunDashboardClient({ tests, runs: _runs, builds, repositoryId, a
                     ) : (
                       <Play className="h-4 w-4 mr-2" />
                     )}
-                    Run All Tests
+                    {hasComposeConfig ? `Run ${composedTestCount} Tests` : 'Run All Tests'}
                   </Button>
                 </div>
               </div>
@@ -204,6 +235,11 @@ export function RunDashboardClient({ tests, runs: _runs, builds, repositoryId, a
                   <FileCode className="h-4 w-4" />
                   {tests.length} test{tests.length !== 1 ? 's' : ''}
                 </div>
+                {hasComposeConfig && (
+                  <Badge variant="outline" className="text-[10px] gap-0.5 px-1.5 py-0 bg-blue-50 text-blue-700 border-blue-200">
+                    {composedTestCount} composed
+                  </Badge>
+                )}
                 <div className="flex items-center gap-1 text-xs text-muted-foreground/70">
                   <HelpCircle className="h-3 w-3" />
                   <span>Tests get faster over time as selectors are optimized</span>

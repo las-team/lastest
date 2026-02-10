@@ -36,6 +36,11 @@ interface SetupStepBuilderProps {
   setupSteps: SetupStep[];
   availableTests: Test[];
   availableScripts: SetupScript[];
+  onAddStep?: (repoId: string, stepType: 'test' | 'script', itemId: string) => Promise<unknown>;
+  onRemoveStep?: (stepId: string) => Promise<unknown>;
+  onReorderSteps?: (repoId: string, stepIds: string[]) => Promise<unknown>;
+  title?: string;
+  description?: string;
 }
 
 export function SetupStepBuilder({
@@ -43,6 +48,11 @@ export function SetupStepBuilder({
   setupSteps,
   availableTests,
   availableScripts,
+  onAddStep,
+  onRemoveStep,
+  onReorderSteps,
+  title = 'Default Setup Steps',
+  description = 'Configure the default setup sequence for all tests in this repository.',
 }: SetupStepBuilderProps) {
   const router = useRouter();
   const [mounted, setMounted] = useState(false);
@@ -99,6 +109,10 @@ export function SetupStepBuilder({
     return new Map(availableScripts.map((s) => [s.id, s]));
   }, [availableScripts]);
 
+  const addStepAction = onAddStep ?? addDefaultSetupStep;
+  const removeStepAction = onRemoveStep ?? removeDefaultSetupStep;
+  const reorderStepsAction = onReorderSteps ?? reorderDefaultSetupSteps;
+
   const handleDragEnd = async (event: DragEndEvent) => {
     const { active, over } = event;
     if (!over || active.id === over.id) return;
@@ -110,21 +124,21 @@ export function SetupStepBuilder({
     setOrderedSteps(newOrder);
 
     // Persist reorder
-    await reorderDefaultSetupSteps(repositoryId, newOrder.map((s) => s.id));
+    await reorderStepsAction(repositoryId, newOrder.map((s) => s.id));
   };
 
   const handleAddTest = async (testId: string) => {
-    await addDefaultSetupStep(repositoryId, 'test', testId);
+    await addStepAction(repositoryId, 'test', testId);
     router.refresh();
   };
 
   const handleAddScript = async (scriptId: string) => {
-    await addDefaultSetupStep(repositoryId, 'script', scriptId);
+    await addStepAction(repositoryId, 'script', scriptId);
     router.refresh();
   };
 
   const handleRemoveStep = async (stepId: string) => {
-    await removeDefaultSetupStep(stepId);
+    await removeStepAction(stepId);
     router.refresh();
   };
 
@@ -173,9 +187,9 @@ export function SetupStepBuilder({
           <div className="flex items-center gap-2">
             <Settings className="h-5 w-5 text-muted-foreground" />
             <div>
-              <h3 className="font-medium">Default Setup Steps</h3>
+              <h3 className="font-medium">{title}</h3>
               <p className="text-sm text-muted-foreground">
-                Configure the default setup sequence for all tests in this repository.
+                {description}
               </p>
             </div>
           </div>
