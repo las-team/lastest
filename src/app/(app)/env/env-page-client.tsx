@@ -40,9 +40,13 @@ export function EnvPageClient({
         </div>
 
         <Tabs defaultValue="setup">
-          <TabsList>
-            <TabsTrigger value="setup">Setup</TabsTrigger>
-            <TabsTrigger value="teardown">Teardown</TabsTrigger>
+          <TabsList className="h-11 w-full p-1">
+            <TabsTrigger value="setup" className="flex-1 px-6 text-sm">
+              Setup
+            </TabsTrigger>
+            <TabsTrigger value="teardown" className="flex-1 px-6 text-sm">
+              Teardown
+            </TabsTrigger>
           </TabsList>
 
           <TabsContent value="setup" className="space-y-8 mt-6">
@@ -83,6 +87,20 @@ export function EnvPageClient({
                 onReorderSteps={reorderDefaultTeardownSteps}
                 title="Default Teardown Steps"
                 description="Configure the default teardown sequence that runs after each test for cleanup."
+              />
+            </section>
+
+            {/* API Configs (shared) */}
+            <section className="space-y-4">
+              <div>
+                <h2 className="text-lg font-medium">API Configurations</h2>
+                <p className="text-sm text-muted-foreground">
+                  Configure API endpoints for data seeding scripts.
+                </p>
+              </div>
+              <ApiConfigList
+                repositoryId={repository.id}
+                configs={setupConfigs}
               />
             </section>
           </TabsContent>

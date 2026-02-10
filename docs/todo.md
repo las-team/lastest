@@ -6,14 +6,13 @@ Publish lastest runner to npx npm
 Docker
 Gitlab
 Timestamp fixing
+Teardown
 ## features
 Support https://github.com/excalidraw/excalidraw/tree/master/packages/excalidraw/tests ~/.claude/plans/declarative-kindling-coral.md 55%
     Dev feeback
     Actions with changes
 
 Revise labels (e.g. new change, main 2.5%) on build page
-
-Teardown - after test scripts
 
 
 AI Optimize playwright settings

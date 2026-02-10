@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useMemo, useCallback } from 'react';
+import { useState, useMemo, useCallback, useEffect, useRef } from 'react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Badge } from '@/components/ui/badge';
@@ -35,16 +35,64 @@ interface MainBuild {
   createdAt: Date | null;
 }
 
+interface ComposeConfig {
+  selectedTestIds: string[];
+  versionOverrides: Record<string, number>;
+}
+
+const STORAGE_KEY_PREFIX = 'compose-config';
+
+function storageKey(repositoryId: string, branch: string) {
+  return `${STORAGE_KEY_PREFIX}:${repositoryId}:${branch}`;
+}
+
+function loadConfig(repositoryId: string, branch: string, allTestIds: string[]): ComposeConfig {
+  if (typeof window === 'undefined') return { selectedTestIds: allTestIds, versionOverrides: {} };
+  try {
+    const raw = localStorage.getItem(storageKey(repositoryId, branch));
+    if (!raw) return { selectedTestIds: allTestIds, versionOverrides: {} };
+    const parsed = JSON.parse(raw) as ComposeConfig;
+    // Filter to only test IDs that still exist
+    const validIds = new Set(allTestIds);
+    return {
+      selectedTestIds: parsed.selectedTestIds.filter(id => validIds.has(id)),
+      versionOverrides: Object.fromEntries(
+        Object.entries(parsed.versionOverrides).filter(([id]) => validIds.has(id))
+      ),
+    };
+  } catch {
+    return { selectedTestIds: allTestIds, versionOverrides: {} };
+  }
+}
+
+function saveConfig(repositoryId: string, branch: string, config: ComposeConfig) {
+  try {
+    localStorage.setItem(storageKey(repositoryId, branch), JSON.stringify(config));
+  } catch { /* quota exceeded — ignore */ }
+}
+
 interface ComposeClientProps {
   tests: TestWithVersions[];
+  repositoryId: string;
+  currentBranch: string;
   defaultBranch: string;
   mainBuild: MainBuild | null;
   mainBuildTests: MainBuildTest[];
 }
 
-export function ComposeClient({ tests, defaultBranch, mainBuild, mainBuildTests }: ComposeClientProps) {
-  const [selectedTestIds, setSelectedTestIds] = useState<Set<string>>(new Set(tests.map(t => t.id)));
-  const [versionOverrides, setVersionOverrides] = useState<Record<string, number>>({});
+export function ComposeClient({ tests, repositoryId, currentBranch, defaultBranch, mainBuild, mainBuildTests }: ComposeClientProps) {
+  const allTestIds = useMemo(() => tests.map(t => t.id), [tests]);
+  const initial = useRef(loadConfig(repositoryId, currentBranch, allTestIds));
+  const [selectedTestIds, setSelectedTestIds] = useState<Set<string>>(() => new Set(initial.current.selectedTestIds));
+  const [versionOverrides, setVersionOverrides] = useState<Record<string, number>>(() => initial.current.versionOverrides);
+  // Persist config to localStorage on change
+  useEffect(() => {
+    saveConfig(repositoryId, currentBranch, {
+      selectedTestIds: Array.from(selectedTestIds),
+      versionOverrides,
+    });
+  }, [repositoryId, currentBranch, selectedTestIds, versionOverrides]);
+
   const [groupByArea, setGroupByArea] = useState(false);
   const [expandKey, setExpandKey] = useState(0);
   const [allExpanded, setAllExpanded] = useState(true);

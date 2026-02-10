@@ -28,6 +28,8 @@ export default async function ComposePage() {
     <div className="flex flex-col h-full">
       <ComposeClient
         tests={testsWithVersions}
+        repositoryId={selectedRepo.id}
+        currentBranch={selectedRepo.selectedBranch ?? defaultBranch}
         defaultBranch={defaultBranch}
         mainBuild={mainBuild ?? null}
         mainBuildTests={mainBuildTests}

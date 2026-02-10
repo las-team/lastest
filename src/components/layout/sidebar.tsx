@@ -11,6 +11,7 @@ import {
   Settings,
   Circle,
   Layers,
+  ListOrdered,
   FolderTree,
   Building2,
   Zap,
@@ -34,7 +35,7 @@ const dashboardNav = [
 const definitionNav = [
   { name: 'Areas', href: '/areas', icon: FolderTree },
   { name: 'Tests', href: '/tests', icon: FileCode },
-  { name: 'Suites', href: '/suites', icon: Layers },
+  { name: 'Suites', href: '/suites', icon: ListOrdered },
   { name: 'Compose', href: '/compose', icon: Layers },
   { name: 'Env Setup', href: '/env', icon: Zap },
 ];
