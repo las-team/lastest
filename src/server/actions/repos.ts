@@ -214,13 +214,15 @@ export async function applyTestingTemplate(
   }
 
   const template = TESTING_TEMPLATES[templateId];
-  const { stabilization, ...playwrightFields } = template.settings;
+  const { stabilization, diff, selectorPriority, ...playwrightFields } = template.settings;
 
   await queries.updateRepository(repositoryId, { testingTemplate: templateId });
   await queries.upsertPlaywrightSettings(repositoryId, {
     ...playwrightFields,
+    selectorPriority,
     stabilization,
   });
+  await queries.upsertDiffSensitivitySettings(repositoryId, diff);
 
   revalidatePath('/settings');
   return { success: true };

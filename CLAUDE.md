@@ -86,8 +86,12 @@ Visual regression testing platform built with Next.js 16 App Router.
 - `src/lib/scanner/` - Route discovery from source code
 - `src/lib/setup/` - Setup orchestrator for test prerequisites (login flows, API seeding, script execution)
 - `src/server/actions/` - Server actions for all domain operations
-- `packages/runner/` - Remote test runner CLI (`lastest2-runner`)
-- `packages/vscode-extension/` - VS Code extension
+- `src/lib/execution/` - Centralized test executor (`executor.ts` ~14k lines) with setup/teardown orchestration
+- `src/lib/ws/` - WebSocket protocol for remote runner communication (protocol, registry, events)
+- `src/lib/templates/` - Testing templates (saas, marketing, ecommerce, etc.) with preset browser/viewport/stabilization configs
+- `packages/runner/` - Remote test runner CLI (`lastest2-runner`), publishable npm package via tsup
+- `packages/vscode-extension/` - VS Code extension with test explorer, uses esbuild
+- `action/` - GitHub Action (composite, bash-based) for CI/CD integration — polls build status via REST API
 
 ### Data Model
 
@@ -158,13 +162,16 @@ Uses `better-auth` with database sessions. Supports:
 4. Update related query functions in `src/lib/db/queries.ts` (select/insert statements)
 
 ### Key Conventions
-- **UI**: shadcn/ui (New York variant) + Radix primitives + Tailwind CSS + `cn()` from `src/lib/utils.ts`
+- **UI**: shadcn/ui (New York variant) + Radix primitives + Tailwind CSS v4 + `cn()` from `src/lib/utils.ts`
+- **Tailwind v4**: CSS-first config (no `tailwind.config.js`), OKLCH color system, `@custom-variant dark`, `@theme inline` in `src/app/globals.css`
 - **Icons**: lucide-react
 - **Toasts**: sonner (bottom-right)
 - **Image processing**: `pngjs` + `pixelmatch` — do NOT use `sharp`
 - **Imports**: Always use `@/` alias, not relative paths
 - **Client components**: Named `*-client.tsx` (e.g., `build-detail-client.tsx`)
 - **Server actions**: Must call `revalidatePath()` after mutations; use `requireRepoAccess()` / `requireTeamAccess()` for auth
+- **Auth guards**: `requireAuth()`, `requireTeamAccess()`, `requireRepoAccess()`, `requireAdmin()`, `requireTeamRole()` in `src/lib/auth/`
+- **Password hashing**: `@node-rs/argon2` (not bcrypt)
 - **Settings auto-save**: 500ms debounce pattern — when adding fields, update `originalValues`, `hasChanges`, `doSave`, and `useEffect` deps
 - **Next.js config**: Standalone output, server actions body limit 10mb, `tesseract.js` as external package
 
@@ -174,13 +181,34 @@ Uses `better-auth` with database sessions. Supports:
 ### Build Polling
 `/api/builds/[buildId]/status` → `getBuildSummary()` → `BuildPollingWrapper` → `BuildDetailClient`
 
+### API Routes
+- `/api/auth/*` - Auth endpoints (login, register, OAuth callbacks)
+- `/api/v1/*` - VS Code extension API (catch-all handler)
+- `/api/v1/events` - SSE endpoint for real-time updates
+- `/api/builds/[buildId]/status` - Build status polling
+- `/api/webhooks/{github,gitlab}` - Webhook receivers
+- `/api/ws/runner/` - WebSocket endpoint for remote runners
+- `/api/health` - Docker health check
+
 ### Route Organization
 - Auth routes: `src/app/(auth)/` (login, register, invite)
 - App routes: `src/app/(app)/` (tests, builds, suites, run, record, settings)
 
+### Monorepo
+- pnpm workspace (`pnpm-workspace.yaml`), pnpm 10.x enforced via `packageManager` field
+- `onlyBuiltDependencies`: better-sqlite3, esbuild, tesseract.js
+
+### Docker
+- Multi-stage build: deps → builder (python3/make/g++ for native modules) → runner (Playwright base image)
+- Entrypoint runs `drizzle-kit push --force` on startup for schema migrations
+- Non-root user `nextjs` (uid 1002)
+
 ## Gotchas
 - `src/lib/db/queries.ts` is 1900+ lines — use offset/limit when reading
+- `src/lib/db/schema.ts` is ~3800 lines — use offset/limit when reading
+- `src/lib/execution/executor.ts` is ~14k lines — use offset/limit when reading
 - `VisualDiffWithTestStatus` type must stay in sync with `getVisualDiffsWithTestStatus` query select
 - Pre-existing lint warnings (~119) — new code should pass clean
 - Schema type exports use `$inferSelect` / `$inferInsert` patterns
 - `pnpm build` may have a pre-existing type error in `ai-settings-card.tsx` related to Ollama fields — verify errors are from your changes before debugging
+- Playwright traces stored in `public/traces/` with CORS headers for `trace.playwright.dev` viewing

@@ -72,7 +72,10 @@ Your data stays on your server. Your screenshots never leave your infra. It cost
 - **Branch Comparison** — Dedicated compare view for side-by-side branch-to-branch test result diffing.
 - **Test Suites** — Organize tests into ordered suites for structured execution.
 - **Test Versioning** — Full version history with change reasons (manual edit, AI fix, AI enhance, restored).
+- **Test Composition** — Cherry-pick tests and pin specific test versions per build via the Compose page. Override latest with any historical version.
+- **Functional Area Hierarchy** — Organize tests into nested parent/child functional areas with drag-and-drop reordering.
 - **Debug Mode** — Step-by-step test execution with live feedback for diagnosing failures.
+- **Testing Templates** — One-click preset configurations for common app types: SaaS/Dashboard, Marketing Website, Canvas/WebGL, E-commerce, Documentation, Mobile-First, SPA, and CMS.
 
 ### AI-Powered
 
@@ -100,7 +103,7 @@ Your data stays on your server. Your screenshots never leave your infra. It cost
 
 ### Integrations
 
-- **GitHub** — OAuth login, repo sync, PR comments, webhook-triggered builds.
+- **GitHub** — OAuth login, repo sync, PR comments, webhook-triggered builds, reusable GitHub Action.
 - **GitLab** — OAuth login (self-hosted supported), MR comments, webhook triggers.
 - **Google OAuth** — Sign in with Google.
 - **Google Sheets** — Use spreadsheet data as test data sources with per-team OAuth, multi-tab support, custom header rows, fixed ranges, and caching.
@@ -121,8 +124,8 @@ Your data stays on your server. Your screenshots never leave your infra. It cost
 
 - **Ignore Regions** — Mask dynamic areas (timestamps, ads, counters) from diff comparison with configurable mask styles (solid-color or placeholder-text).
 - **Planned Screenshots** — Compare against design files (Figma exports, etc.) with separate planned vs actual diff tracking.
-- **Carry-Forward Baselines** — SHA256-based automatic baseline matching across branches.
-- **Setup Orchestration** — Repository-default multi-step setup sequences, build-level setup, and per-test setup scripts with skip/override. Supports Playwright (browser) and API (HTTP seeding) script types.
+- **Branch Baseline Management** — Fork baselines per branch, merge back on PR merge, promote test versions across branches. SHA256-based carry-forward matching.
+- **Setup & Teardown Orchestration** — Repository-default multi-step setup and teardown sequences, build-level execution, and per-test overrides with skip/add extra steps. Supports Playwright (browser), API (HTTP seeding), and test-as-setup/teardown script types. Teardown errors are non-blocking.
 - **App State Inspection** — Access internal app state during tests (`window.__APP_STATE__`, Redux stores, etc.) for complex assertions.
 - **Selector Stats** — Track selector success/failure rates and response times for automatic optimization recommendations.
 - **Diff Sensitivity** — Configurable pixel/percentage thresholds for unchanged/flaky/changed classification.
@@ -232,7 +235,11 @@ Open [http://localhost:3000](http://localhost:3000)
 | **Debug mode** | **Yes** | No | No | No | Traces | No | Trace |
 | **Remote runners** | **Yes** | Cloud | Cloud | Cloud | Cloud | Cloud | No |
 | **Local AI (Ollama)** | **Yes** | No | No | No | No | No | No |
-| **Cross-OS consistency** | **9 stabilization features** | No | No | No | Stabilization engine | No | No |
+| **Cross-OS consistency** | **11 stabilization features** | No | No | No | Stabilization engine | No | No |
+| **GitHub Action** | **Yes** | Cloud-only | Cloud-only | Cloud-only | Cloud-only | Cloud-only | No |
+| **Test composition** | **Yes** | No | No | No | No | No | No |
+| **Testing templates** | **8 presets** | No | No | No | No | No | No |
+| **Setup/teardown orchestration** | **Yes** | No | No | No | No | No | No |
 
 ### What makes Lastest2 different
 
@@ -294,6 +301,44 @@ pnpm test:visual --repo-id <id> [options]
 ```
 
 The runner automatically captures `GITHUB_HEAD_REF`, `GITHUB_REF_NAME`, and `GITHUB_SHA` for git tracking.
+
+---
+
+## GitHub Action
+
+Use the reusable GitHub Action for zero-config CI/CD integration. No local Playwright install needed — tests run on your Lastest2 server via a remote runner.
+
+```yaml
+- name: Run visual regression tests
+  uses: dexilion-team/lastest2/action@main
+  with:
+    server-url: ${{ secrets.LASTEST_SERVER_URL }}
+    runner-token: ${{ secrets.LASTEST_RUNNER_TOKEN }}
+    timeout: '300'
+    fail-on-changes: 'false'
+```
+
+### Inputs
+
+| Input | Description | Required | Default |
+|-------|-------------|----------|---------|
+| `server-url` | Lastest2 server URL | Yes | - |
+| `runner-token` | Runner authentication token | Yes | - |
+| `timeout` | Build completion timeout (seconds) | No | `300` |
+| `fail-on-changes` | Fail when visual changes detected | No | `false` |
+
+### Outputs
+
+| Output | Description |
+|--------|-------------|
+| `status` | Build status (`passed`, `failed`, `review_required`, `safe_to_merge`, `blocked`) |
+| `build-url` | Link to build results in Lastest2 |
+| `changed-count` | Number of visual changes detected |
+| `passed-count` | Number of passed tests |
+| `failed-count` | Number of failed tests |
+| `total-tests` | Total number of tests run |
+
+Results are automatically posted to the GitHub Actions step summary.
 
 ---
 
@@ -458,7 +503,9 @@ All configuration lives under a unified Settings page:
 | **Notifications** | Slack, Discord, custom webhook configuration |
 | **Branches** | Baseline and scanning branch selection |
 | **AI Logs** | Audit trail of all AI requests (last 50 entries) |
+| **Testing Templates** | One-click preset configurations for SaaS, Marketing, Canvas, E-commerce, Documentation, Mobile-First, SPA, CMS |
 | **Setup** | Default repository-wide multi-step setup scripts (Playwright and API types) |
+| **Teardown** | Default repository-wide multi-step teardown scripts with per-test overrides |
 | **Users** | Team member management, invitations (admin only) |
 | **Runners** | Remote runner registration and management (admin only) |
 
@@ -552,6 +599,12 @@ NEXT_PUBLIC_BASE_URL=             # Base URL for API calls
 - [x] Branch comparison view
 - [x] App state inspection
 - [x] Network & console error tracking
+- [x] GitHub Action (reusable composite action)
+- [x] Test composition (cherry-pick tests + version overrides)
+- [x] Testing templates (8 preset configurations)
+- [x] Teardown orchestration (default + per-test overrides)
+- [x] Branch baseline management (fork/merge/promote)
+- [x] Functional area hierarchy (parent/child organization)
 - [ ] Remote runner NPM package publication
 - [ ] Production-ready runner infrastructure (Redis queue)
 
