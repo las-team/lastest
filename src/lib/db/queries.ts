@@ -589,6 +589,7 @@ export async function getBuildsByRepo(repositoryId: string, limit = 10) {
       setupError: builds.setupError,
       setupDurationMs: builds.setupDurationMs,
       comparisonMode: builds.comparisonMode,
+      codeChangeTestIds: builds.codeChangeTestIds,
       gitBranch: testRuns.gitBranch,
       gitCommit: testRuns.gitCommit,
     })

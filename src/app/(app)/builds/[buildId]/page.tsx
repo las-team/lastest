@@ -46,6 +46,7 @@ export default async function BuildPage({ params }: PageProps) {
           flakyCount: build.flakyCount,
           completedAt: build.completedAt,
           elapsedMs: build.elapsedMs,
+          codeChangeTestIds: build.codeChangeTestIds,
           diffs: build.diffs,
         }}
       >

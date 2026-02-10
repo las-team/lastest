@@ -233,6 +233,7 @@ export const builds = sqliteTable('builds', {
   setupStatus: text('setup_status').default('pending'), // 'pending' | 'running' | 'completed' | 'failed' | 'skipped'
   setupError: text('setup_error'),
   setupDurationMs: integer('setup_duration_ms'),
+  codeChangeTestIds: text('code_change_test_ids', { mode: 'json' }).$type<string[]>(),
   createdAt: integer('created_at', { mode: 'timestamp' }),
   completedAt: integer('completed_at', { mode: 'timestamp' }),
 });

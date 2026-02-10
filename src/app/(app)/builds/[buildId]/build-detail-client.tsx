@@ -104,6 +104,7 @@ export interface BuildDetailClientProps {
   hasPendingDiffs: boolean;
   isRunning?: boolean;
   completedTests?: number;
+  codeChangeTestIds?: string[] | null;
 }
 
 export function BuildDetailClient({
@@ -112,10 +113,13 @@ export function BuildDetailClient({
   metrics,
   isRunning = false,
   completedTests = 0,
+  codeChangeTestIds,
 }: BuildDetailClientProps) {
+  const codeChangeTestIdSet = new Set(codeChangeTestIds ?? []);
   const [activeFilter, setActiveFilter] = useState<FilterType>('all');
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [isProcessing, setIsProcessing] = useState(false);
+  const [viewMode, setViewMode] = useState<'branch' | 'main'>('branch');
   const router = useRouter();
 
   // Toggle filter - clicking active filter clears it
@@ -234,6 +238,8 @@ export function BuildDetailClient({
         aiSafeCount={aiSafeCount}
         aiReviewCount={aiReviewCount}
         aiFlagCount={aiFlagCount}
+        viewMode={viewMode}
+        onViewModeChange={setViewMode}
       />
 
       {/* Tests for Review Section */}
@@ -355,6 +361,9 @@ export function BuildDetailClient({
               const bsConfig = branchStatusConfig[branchStatus];
               const hasMainDrift = diff.mainPercentageDifference && parseFloat(diff.mainPercentageDifference) > 0;
 
+              const displayPixels = viewMode === 'main' ? diff.mainPixelDifference : diff.pixelDifference;
+              const hasViewData = viewMode === 'main' ? !!diff.mainBaselineImagePath : !!diff.baselineImagePath;
+
               return (
                 <div
                   key={diff.id}
@@ -394,9 +403,11 @@ export function BuildDetailClient({
                         <span className={isFailed ? 'text-destructive' : 'text-muted-foreground'}>
                           {isExecutionFailed
                             ? 'Execution failed'
-                            : diff.pixelDifference
-                              ? `${diff.pixelDifference.toLocaleString()}px diff`
-                              : 'No changes'}
+                            : !hasViewData
+                              ? viewMode === 'main' ? 'No main baseline' : 'No branch baseline'
+                              : displayPixels
+                                ? `${displayPixels.toLocaleString()}px diff`
+                                : 'No changes'}
                         </span>
                         <span className="text-muted-foreground/40 text-xs font-mono">
                           {diff.testId.slice(0, 8)}
@@ -411,6 +422,12 @@ export function BuildDetailClient({
                   </div>
 
                   <div className="flex items-center gap-4">
+                    {/* Code Change Badge */}
+                    {codeChangeTestIdSet.has(diff.testId) && (
+                      <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium bg-orange-100 text-orange-700">
+                        Code Change
+                      </span>
+                    )}
                     {/* Branch Status Badge */}
                     <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium ${bsConfig.className}`}>
                       {bsConfig.label}

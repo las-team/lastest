@@ -24,6 +24,8 @@ import path from 'path';
 import { createJob, createPendingJob, startJob, updateJobProgress, completeJob, failJob } from './jobs';
 import { triggerAIDiffAnalysis } from './ai-diffs';
 import { forkBaselinesForBranch } from './baselines';
+import { compareBranches } from '@/lib/github/content';
+import { findAffectedTests } from '@/lib/smart-selection/file-matcher';
 
 interface GitInfo {
   branch: string;
@@ -82,6 +84,36 @@ async function getGitInfoFromGitHub(repositoryId: string | null): Promise<GitInf
   return getGitInfoFromProvider(repositoryId);
 }
 
+/**
+ * Compute which tests are affected by code changes on this branch vs default branch.
+ * Stores the test IDs on the build record. Non-blocking — callers should catch errors.
+ */
+async function computeCodeChangeTestIds(
+  buildId: string,
+  repo: { provider: string; teamId: string | null; owner: string; name: string; defaultBranch: string | null } | null | undefined,
+  branch: string,
+  repositoryId: string | null | undefined,
+) {
+  if (!repo || !repositoryId) return;
+  if (repo.provider !== 'github') return;
+  const defaultBranch = repo.defaultBranch || 'main';
+  if (branch === defaultBranch) return;
+
+  const account = repo.teamId ? await queries.getGithubAccountByTeam(repo.teamId) : null;
+  if (!account) return;
+
+  const comparison = await compareBranches(account.accessToken, repo.owner, repo.name, defaultBranch, branch);
+  if (!comparison || comparison.files.length === 0) return;
+
+  const changedFiles = comparison.files.map(f => f.filename);
+  const affected = await findAffectedTests(changedFiles, repositoryId);
+  if (affected.length === 0) return;
+
+  await queries.updateBuild(buildId, {
+    codeChangeTestIds: affected.map(a => a.testId),
+  });
+}
+
 const DIFFS_DIR = path.join(process.cwd(), 'public', 'diffs');
 
 export interface BuildSummary {
@@ -99,6 +131,7 @@ export interface BuildSummary {
   gitCommit: string;
   pullRequestId: string | null;
   comparisonMode: string | null;
+  codeChangeTestIds: string[] | null;
   diffs: VisualDiffWithTestStatus[];
 }
 
@@ -195,6 +228,9 @@ export async function createAndRunBuild(
   // Run tests async
   runBuildAsync(build.id, testRun.id, tests, gitInfo.branch, repositoryId, runnerId);
 
+  // Fire-and-forget: compute code-change affected test IDs
+  computeCodeChangeTestIds(build.id, repo, gitInfo.branch, repositoryId).catch(() => {});
+
   return { buildId: build.id, testRunId: testRun.id, testCount: tests.length };
 }
 
@@ -273,6 +309,10 @@ export async function createAndRunBuildFromCI(opts: {
 
   // Run tests async
   runBuildAsync(build.id, testRun.id, tests, gitInfo.branch, repositoryId, runnerId);
+
+  // Fire-and-forget: compute code-change affected test IDs
+  const ciRepo = await queries.getRepository(repositoryId);
+  computeCodeChangeTestIds(build.id, ciRepo, gitInfo.branch, repositoryId).catch(() => {});
 
   return { buildId: build.id, testRunId: testRun.id, testCount: tests.length };
 }
@@ -918,6 +958,7 @@ export async function getBuildSummary(buildId: string): Promise<BuildSummary | n
     completedAt: build.completedAt,
     pullRequestId: build.pullRequestId,
     comparisonMode: build.comparisonMode,
+    codeChangeTestIds: (build.codeChangeTestIds as string[] | null) ?? null,
     gitBranch: testRun?.gitBranch || 'unknown',
     gitCommit: testRun?.gitCommit || 'unknown',
     diffs,
