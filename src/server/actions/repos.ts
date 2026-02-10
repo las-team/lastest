@@ -2,9 +2,10 @@
 
 import { revalidatePath } from 'next/cache';
 import * as queries from '@/lib/db/queries';
-import { requireTeamAccess } from '@/lib/auth';
+import { requireTeamAccess, requireRepoAccess } from '@/lib/auth';
 import { getUserRepos, getRepoBranches, type GitHubRepo, type GitHubBranch } from '@/lib/github/oauth';
 import { getUserProjects, getProjectBranches, type GitLabProject, type GitLabBranch } from '@/lib/gitlab/oauth';
+import { TESTING_TEMPLATES, isValidTemplateId } from '@/lib/templates/testing-templates';
 
 export async function fetchAndSyncRepos(): Promise<{ success: boolean; count: number }> {
   const session = await requireTeamAccess();
@@ -193,4 +194,34 @@ export async function getBranchTestStatus(repositoryId: string): Promise<Map<str
   }
 
   return branchStatus;
+}
+
+export async function applyTestingTemplate(
+  repositoryId: string,
+  templateId: string | null,
+): Promise<{ success: boolean; error?: string }> {
+  await requireRepoAccess(repositoryId);
+
+  // "custom" or null → just clear the template field
+  if (!templateId || templateId === 'custom') {
+    await queries.updateRepository(repositoryId, { testingTemplate: null });
+    revalidatePath('/settings');
+    return { success: true };
+  }
+
+  if (!isValidTemplateId(templateId) || templateId === 'custom') {
+    return { success: false, error: 'Invalid template' };
+  }
+
+  const template = TESTING_TEMPLATES[templateId];
+  const { stabilization, ...playwrightFields } = template.settings;
+
+  await queries.updateRepository(repositoryId, { testingTemplate: templateId });
+  await queries.upsertPlaywrightSettings(repositoryId, {
+    ...playwrightFields,
+    stabilization,
+  });
+
+  revalidatePath('/settings');
+  return { success: true };
 }

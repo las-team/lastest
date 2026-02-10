@@ -29,6 +29,7 @@ import { RunnerList } from '@/components/runners/runner-list';
 import { CreateRunnerDialog } from '@/components/runners/create-runner-dialog';
 import { getRunners } from '@/server/actions/runners';
 import { GoogleSheetsSettingsCard } from '@/components/settings/google-sheets-settings-card';
+import { TestingTemplateSelector } from '@/components/settings/testing-template-selector';
 
 export default async function SettingsPage({
   searchParams,
@@ -241,6 +242,15 @@ export default async function SettingsPage({
                 <span className="text-muted-foreground">Default Branch</span>
                 <code className="text-sm">{selectedRepo?.defaultBranch || '-'}</code>
               </div>
+              {selectedRepo && (
+                <div className="flex justify-between items-center">
+                  <span className="text-muted-foreground">Testing Template</span>
+                  <TestingTemplateSelector
+                    repositoryId={selectedRepo.id}
+                    currentTemplate={selectedRepo.testingTemplate}
+                  />
+                </div>
+              )}
             </CardContent>
           </Card>
 
