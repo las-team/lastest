@@ -38,6 +38,7 @@ import {
   setupScripts,
   setupConfigs,
   defaultSetupSteps,
+  defaultTeardownSteps,
   specImports,
   googleSheetsAccounts,
   googleSheetsDataSources,
@@ -88,6 +89,7 @@ import type {
   NewSetupScript,
   NewSetupConfig,
   NewDefaultSetupStep,
+  NewDefaultTeardownStep,
   NewSpecImport,
   NewGoogleSheetsAccount,
   NewGoogleSheetsDataSource,
@@ -104,6 +106,7 @@ import type {
   UserRole,
   SetupScriptType,
   TestSetupOverrides,
+  TestTeardownOverrides,
 } from './schema';
 
 export { DEFAULT_SELECTOR_PRIORITY, DEFAULT_DIFF_THRESHOLDS, DEFAULT_AI_SETTINGS, DEFAULT_RECORDING_ENGINES, DEFAULT_NOTIFICATION_SETTINGS };
@@ -588,6 +591,9 @@ export async function getBuildsByRepo(repositoryId: string, limit = 10) {
       setupStatus: builds.setupStatus,
       setupError: builds.setupError,
       setupDurationMs: builds.setupDurationMs,
+      teardownStatus: builds.teardownStatus,
+      teardownError: builds.teardownError,
+      teardownDurationMs: builds.teardownDurationMs,
       comparisonMode: builds.comparisonMode,
       codeChangeTestIds: builds.codeChangeTestIds,
       gitBranch: testRuns.gitBranch,
@@ -630,6 +636,101 @@ export async function getLastBuildByBranch(repositoryId: string, branch: string)
     .orderBy(desc(builds.createdAt))
     .limit(1)
     .get();
+}
+
+export async function getBuildTestSummaries(buildId: string) {
+  const rows = await db
+    .select({
+      testId: testResults.testId,
+      testName: tests.name,
+      functionalAreaName: functionalAreas.name,
+      testVersionId: testResults.testVersionId,
+      versionNumber: testVersions.version,
+      versionReason: testVersions.changeReason,
+      status: testResults.status,
+    })
+    .from(testResults)
+    .innerJoin(builds, eq(builds.testRunId, testResults.testRunId))
+    .leftJoin(tests, eq(testResults.testId, tests.id))
+    .leftJoin(testVersions, eq(testResults.testVersionId, testVersions.id))
+    .leftJoin(functionalAreas, eq(tests.functionalAreaId, functionalAreas.id))
+    .where(eq(builds.id, buildId))
+    .all();
+
+  // Get avg diff % per test from visualDiffs
+  const diffs = await db
+    .select({
+      testId: visualDiffs.testId,
+      percentageDifference: visualDiffs.percentageDifference,
+    })
+    .from(visualDiffs)
+    .where(eq(visualDiffs.buildId, buildId))
+    .all();
+
+  const diffMap = new Map<string, number[]>();
+  for (const d of diffs) {
+    if (!d.testId) continue;
+    const pct = typeof d.percentageDifference === 'string'
+      ? parseFloat(d.percentageDifference)
+      : (d.percentageDifference ?? 0);
+    if (!diffMap.has(d.testId)) diffMap.set(d.testId, []);
+    diffMap.get(d.testId)!.push(isNaN(pct) ? 0 : pct);
+  }
+
+  // For tests without a testVersionId (ran with current code), resolve the latest version number
+  const testIdsNeedingLatest = rows
+    .filter(r => !r.testVersionId && r.testId)
+    .map(r => r.testId!);
+
+  const latestVersionMap = new Map<string, number>();
+  if (testIdsNeedingLatest.length > 0) {
+    const latestVersions = await db
+      .select({
+        testId: testVersions.testId,
+        maxVersion: sql<number>`max(${testVersions.version})`,
+      })
+      .from(testVersions)
+      .where(inArray(testVersions.testId, testIdsNeedingLatest))
+      .groupBy(testVersions.testId)
+      .all();
+    for (const v of latestVersions) {
+      latestVersionMap.set(v.testId, v.maxVersion);
+    }
+  }
+
+  // Also build a set of all max versions to tag "isLatest"
+  const allTestIds = rows.filter(r => r.testId).map(r => r.testId!);
+  const allMaxVersions = new Map<string, number>();
+  if (allTestIds.length > 0) {
+    const maxRows = await db
+      .select({
+        testId: testVersions.testId,
+        maxVersion: sql<number>`max(${testVersions.version})`,
+      })
+      .from(testVersions)
+      .where(inArray(testVersions.testId, allTestIds))
+      .groupBy(testVersions.testId)
+      .all();
+    for (const v of maxRows) {
+      allMaxVersions.set(v.testId, v.maxVersion);
+    }
+  }
+
+  return rows.map(r => {
+    const resolvedVersion = r.versionNumber ?? (r.testId ? latestVersionMap.get(r.testId) ?? null : null);
+    const maxVersion = r.testId ? allMaxVersions.get(r.testId) ?? null : null;
+
+    return {
+      ...r,
+      versionNumber: resolvedVersion,
+      isLatest: resolvedVersion !== null && maxVersion !== null && resolvedVersion === maxVersion,
+      avgDiffPct: (() => {
+        const vals = r.testId ? diffMap.get(r.testId) : undefined;
+        if (!vals || vals.length === 0) return null;
+        return vals.reduce((a, b) => a + b, 0) / vals.length;
+      })(),
+    };
+  });
 }
 
 // Visual Diffs
@@ -3353,6 +3454,133 @@ export async function getResolvedSetupStepsForTest(test: { id: string; repositor
     }));
 
   // Resolve extra steps names
+  const extras: Array<{
+    source: 'extra';
+    id: string;
+    stepType: 'test' | 'script';
+    testId: string | null | undefined;
+    scriptId: string | null | undefined;
+    name: string;
+  }> = [];
+
+  if (overrides?.extraSteps) {
+    for (let i = 0; i < overrides.extraSteps.length; i++) {
+      const step = overrides.extraSteps[i];
+      let name = 'Unknown';
+      if (step.stepType === 'test' && step.testId) {
+        const t = await getTest(step.testId);
+        name = t?.name || 'Deleted test';
+      } else if (step.stepType === 'script' && step.scriptId) {
+        const s = await getSetupScript(step.scriptId);
+        name = s?.name || 'Deleted script';
+      }
+      extras.push({
+        source: 'extra',
+        id: `extra-${i}`,
+        stepType: step.stepType,
+        testId: step.testId,
+        scriptId: step.scriptId,
+        name,
+      });
+    }
+  }
+
+  return [...activeDefaults, ...extras];
+}
+
+// ============================================
+// Default Teardown Steps (multi-step teardown)
+// ============================================
+
+export async function getDefaultTeardownSteps(repositoryId: string) {
+  return db
+    .select({
+      id: defaultTeardownSteps.id,
+      repositoryId: defaultTeardownSteps.repositoryId,
+      stepType: defaultTeardownSteps.stepType,
+      testId: defaultTeardownSteps.testId,
+      scriptId: defaultTeardownSteps.scriptId,
+      orderIndex: defaultTeardownSteps.orderIndex,
+      createdAt: defaultTeardownSteps.createdAt,
+      testName: tests.name,
+      scriptName: setupScripts.name,
+    })
+    .from(defaultTeardownSteps)
+    .leftJoin(tests, eq(defaultTeardownSteps.testId, tests.id))
+    .leftJoin(setupScripts, eq(defaultTeardownSteps.scriptId, setupScripts.id))
+    .where(eq(defaultTeardownSteps.repositoryId, repositoryId))
+    .orderBy(defaultTeardownSteps.orderIndex)
+    .all();
+}
+
+export async function createDefaultTeardownStep(data: Omit<NewDefaultTeardownStep, 'id' | 'createdAt'>) {
+  const id = uuid();
+  await db.insert(defaultTeardownSteps).values({
+    ...data,
+    id,
+    createdAt: new Date(),
+  });
+  return { id, ...data, createdAt: new Date() };
+}
+
+export async function deleteDefaultTeardownStep(id: string) {
+  await db.delete(defaultTeardownSteps).where(eq(defaultTeardownSteps.id, id));
+}
+
+export async function deleteAllDefaultTeardownSteps(repositoryId: string) {
+  await db.delete(defaultTeardownSteps).where(eq(defaultTeardownSteps.repositoryId, repositoryId));
+}
+
+export async function updateDefaultTeardownStepOrder(id: string, orderIndex: number) {
+  await db.update(defaultTeardownSteps).set({ orderIndex }).where(eq(defaultTeardownSteps.id, id));
+}
+
+export async function replaceDefaultTeardownSteps(
+  repositoryId: string,
+  steps: Array<{ stepType: 'test' | 'script'; testId?: string | null; scriptId?: string | null }>
+) {
+  await deleteAllDefaultTeardownSteps(repositoryId);
+  const results = [];
+  for (let i = 0; i < steps.length; i++) {
+    const step = steps[i];
+    const result = await createDefaultTeardownStep({
+      repositoryId,
+      stepType: step.stepType,
+      testId: step.testId ?? null,
+      scriptId: step.scriptId ?? null,
+      orderIndex: i,
+    });
+    results.push(result);
+  }
+  return results;
+}
+
+// ============================================
+// Per-Test Teardown Overrides
+// ============================================
+
+export async function updateTestTeardownOverrides(testId: string, overrides: TestTeardownOverrides | null) {
+  await db.update(tests).set({ teardownOverrides: overrides, updatedAt: new Date() }).where(eq(tests.id, testId));
+}
+
+export async function getResolvedTeardownStepsForTest(test: { id: string; repositoryId: string | null; teardownOverrides: TestTeardownOverrides | null }) {
+  if (!test.repositoryId) return [];
+
+  const defaults = await getDefaultTeardownSteps(test.repositoryId);
+  const overrides = test.teardownOverrides;
+
+  const skippedIds = new Set(overrides?.skippedDefaultStepIds ?? []);
+  const activeDefaults = defaults
+    .filter((s) => !skippedIds.has(s.id))
+    .map((s) => ({
+      source: 'default' as const,
+      id: s.id,
+      stepType: s.stepType as 'test' | 'script',
+      testId: s.testId,
+      scriptId: s.scriptId,
+      name: s.testName || s.scriptName || 'Unknown',
+    }));
+
   const extras: Array<{
     source: 'extra';
     id: string;

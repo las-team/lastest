@@ -33,3 +33,10 @@ export {
   testNeedsSetup,
   getResolvedSetup,
 } from './setup-orchestrator';
+
+// Teardown Orchestrator
+export {
+  TeardownOrchestrator,
+  getTeardownOrchestrator,
+  testNeedsTeardown,
+} from './teardown-orchestrator';

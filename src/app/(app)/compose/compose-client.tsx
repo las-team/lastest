@@ -7,11 +7,23 @@ import { Badge } from '@/components/ui/badge';
 import { Slider } from '@/components/ui/slider';
 import { Collapsible, CollapsibleTrigger, CollapsibleContent } from '@/components/ui/collapsible';
 import { Layers, ChevronRight, ChevronsUpDown, GitBranch, Info } from 'lucide-react';
-import type { Test, TestVersion, VisualDiffWithTestStatus } from '@/lib/db/schema';
+import type { Test, TestVersion } from '@/lib/db/schema';
 
 interface TestWithVersions extends Test {
   versions: TestVersion[];
   functionalAreaName: string | null;
+}
+
+interface MainBuildTest {
+  testId: string | null;
+  testName: string | null;
+  functionalAreaName: string | null;
+  testVersionId: string | null;
+  versionNumber: number | null;
+  versionReason: string | null;
+  isLatest: boolean;
+  status: string | null;
+  avgDiffPct: number | null;
 }
 
 interface MainBuild {
@@ -25,13 +37,12 @@ interface MainBuild {
 
 interface ComposeClientProps {
   tests: TestWithVersions[];
-  repositoryId: string;
   defaultBranch: string;
   mainBuild: MainBuild | null;
-  mainBuildDiffs: VisualDiffWithTestStatus[];
+  mainBuildTests: MainBuildTest[];
 }
 
-export function ComposeClient({ tests, repositoryId, defaultBranch, mainBuild, mainBuildDiffs }: ComposeClientProps) {
+export function ComposeClient({ tests, defaultBranch, mainBuild, mainBuildTests }: ComposeClientProps) {
   const [selectedTestIds, setSelectedTestIds] = useState<Set<string>>(new Set(tests.map(t => t.id)));
   const [versionOverrides, setVersionOverrides] = useState<Record<string, number>>({});
   const [groupByArea, setGroupByArea] = useState(false);
@@ -43,44 +54,59 @@ export function ComposeClient({ tests, repositoryId, defaultBranch, mainBuild, m
     setExpandKey(prev => prev + 1);
   }, []);
 
-  // Group tests by functional area
+  // Canonical sort order: by area name then test name
+  const testOrder = useMemo(() => {
+    const map = new Map<string, number>();
+    const sorted = [...tests].sort((a, b) => {
+      const aArea = a.functionalAreaName || 'Ungrouped';
+      const bArea = b.functionalAreaName || 'Ungrouped';
+      if (aArea === 'Ungrouped' && bArea !== 'Ungrouped') return 1;
+      if (bArea === 'Ungrouped' && aArea !== 'Ungrouped') return -1;
+      const areaCmp = aArea.localeCompare(bArea);
+      if (areaCmp !== 0) return areaCmp;
+      return (a.name || '').localeCompare(b.name || '');
+    });
+    sorted.forEach((t, i) => map.set(t.id, i));
+    return map;
+  }, [tests]);
+
+  // Sort + group right-column tests
+  const sortedTests = useMemo(() =>
+    [...tests].sort((a, b) => (testOrder.get(a.id) ?? 0) - (testOrder.get(b.id) ?? 0)),
+    [tests, testOrder]
+  );
+
   const groupedTests = useMemo(() => {
     const groups: Record<string, TestWithVersions[]> = {};
-    for (const test of tests) {
+    for (const test of sortedTests) {
       const area = test.functionalAreaName || 'Ungrouped';
       (groups[area] ||= []).push(test);
     }
     return Object.entries(groups).sort(([a], [b]) =>
       a === 'Ungrouped' ? 1 : b === 'Ungrouped' ? -1 : a.localeCompare(b)
     );
-  }, [tests]);
+  }, [sortedTests]);
 
-  // Group main build diffs by functional area
-  const groupedMainDiffs = useMemo(() => {
-    const groups: Record<string, VisualDiffWithTestStatus[]> = {};
-    for (const diff of mainBuildDiffs) {
-      const area = diff.functionalAreaName || 'Ungrouped';
-      (groups[area] ||= []).push(diff);
+  // Sort + group left-column main build tests in the same order
+  const sortedMainTests = useMemo(() =>
+    [...mainBuildTests].sort((a, b) => {
+      const ai = a.testId ? (testOrder.get(a.testId) ?? Infinity) : Infinity;
+      const bi = b.testId ? (testOrder.get(b.testId) ?? Infinity) : Infinity;
+      return ai - bi;
+    }),
+    [mainBuildTests, testOrder]
+  );
+
+  const groupedMainTests = useMemo(() => {
+    const groups: Record<string, MainBuildTest[]> = {};
+    for (const t of sortedMainTests) {
+      const area = t.functionalAreaName || 'Ungrouped';
+      (groups[area] ||= []).push(t);
     }
     return Object.entries(groups).sort(([a], [b]) =>
       a === 'Ungrouped' ? 1 : b === 'Ungrouped' ? -1 : a.localeCompare(b)
     );
-  }, [mainBuildDiffs]);
-
-  // Build a map of testId -> best diff % from main build
-  const mainDiffByTestId = useMemo(() => {
-    const map = new Map<string, { percentageDifference: number | null; testName: string | null }>();
-    for (const diff of mainBuildDiffs) {
-      if (diff.testId) {
-        const existing = map.get(diff.testId);
-        const pct = diff.percentageDifference ?? 0;
-        if (!existing || (pct > (existing.percentageDifference ?? 0))) {
-          map.set(diff.testId, { percentageDifference: diff.percentageDifference, testName: diff.testName });
-        }
-      }
-    }
-    return map;
-  }, [mainBuildDiffs]);
+  }, [sortedMainTests]);
 
   const toggleTest = (testId: string) => {
     setSelectedTestIds(prev => {
@@ -116,12 +142,6 @@ export function ComposeClient({ tests, repositoryId, defaultBranch, mainBuild, m
     return `v${version.version}${reason ? ` - ${reason}` : ''}`;
   };
 
-  const formatDiffPct = (pct: number | null) => {
-    if (pct === null || pct === undefined) return '-';
-    if (pct === 0) return '0%';
-    return `${pct.toFixed(1)}%`;
-  };
-
   return (
     <div className="flex-1 p-6 overflow-auto">
       <div className="max-w-7xl mx-auto space-y-4">
@@ -137,7 +157,15 @@ export function ComposeClient({ tests, repositoryId, defaultBranch, mainBuild, m
             </p>
           </div>
           <div className="flex items-center gap-2">
-            {/* Group by Area toggle */}
+            {groupByArea && (
+              <button
+                onClick={toggleExpandAll}
+                className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
+              >
+                <ChevronsUpDown className="w-3.5 h-3.5" />
+                {allExpanded ? 'Collapse' : 'Expand'}
+              </button>
+            )}
             <button
               onClick={() => setGroupByArea(v => !v)}
               className={`inline-flex items-center gap-2 px-4 py-1.5 text-sm font-medium rounded-lg border transition-colors ${
@@ -149,15 +177,6 @@ export function ComposeClient({ tests, repositoryId, defaultBranch, mainBuild, m
               <Layers className="w-4 h-4" />
               Group by Area
             </button>
-            {groupByArea && (
-              <button
-                onClick={toggleExpandAll}
-                className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
-              >
-                <ChevronsUpDown className="w-3.5 h-3.5" />
-                {allExpanded ? 'Collapse' : 'Expand'}
-              </button>
-            )}
           </div>
         </div>
 
@@ -187,29 +206,29 @@ export function ComposeClient({ tests, repositoryId, defaultBranch, mainBuild, m
                 </div>
               ) : !groupByArea ? (
                 <div className="space-y-1">
-                  {mainBuildDiffs.map((diff) => (
-                    <MainDiffRow key={diff.id} diff={diff} formatDiffPct={formatDiffPct} />
+                  {mainBuildTests.map((t) => (
+                    <MainTestRow key={t.testId ?? t.testVersionId} test={t} />
                   ))}
-                  {mainBuildDiffs.length === 0 && (
-                    <p className="text-sm text-muted-foreground py-4 text-center">No diffs in this build</p>
+                  {mainBuildTests.length === 0 && (
+                    <p className="text-sm text-muted-foreground py-4 text-center">No tests in this build</p>
                   )}
                 </div>
               ) : (
                 <div className="space-y-2">
-                  {groupedMainDiffs.map(([areaName, areaDiffs]) => (
+                  {groupedMainTests.map(([areaName, areaTests]) => (
                     <Collapsible key={`main-${areaName}-${expandKey}`} defaultOpen={allExpanded}>
                       <div>
                         <CollapsibleTrigger className="flex items-center justify-between w-full p-2 bg-muted/30 hover:bg-muted/50 rounded transition-colors group">
                           <div className="flex items-center gap-2">
                             <ChevronRight className="w-3.5 h-3.5 text-muted-foreground transition-transform group-data-[state=open]:rotate-90" />
                             <span className="font-medium text-xs">{areaName}</span>
-                            <Badge variant="secondary" className="text-[10px]">{areaDiffs.length}</Badge>
+                            <Badge variant="secondary" className="text-[10px]">{areaTests.length}</Badge>
                           </div>
                         </CollapsibleTrigger>
                         <CollapsibleContent>
                           <div className="space-y-1 pt-1">
-                            {areaDiffs.map((diff) => (
-                              <MainDiffRow key={diff.id} diff={diff} formatDiffPct={formatDiffPct} />
+                            {areaTests.map((t) => (
+                              <MainTestRow key={t.testId ?? t.testVersionId} test={t} />
                             ))}
                           </div>
                         </CollapsibleContent>
@@ -298,33 +317,43 @@ export function ComposeClient({ tests, repositoryId, defaultBranch, mainBuild, m
   );
 }
 
-/** Read-only row showing a main branch diff */
-function MainDiffRow({ diff, formatDiffPct }: { diff: VisualDiffWithTestStatus; formatDiffPct: (pct: number | null) => string }) {
-  const pct = diff.percentageDifference ?? 0;
-  const pctColor = pct === 0 ? 'text-green-600' : pct < 1 ? 'text-yellow-600' : 'text-red-600';
+/** Read-only row showing a test from the main branch build — version is primary info */
+function MainTestRow({ test }: { test: MainBuildTest }) {
+  const reason = test.versionReason?.replace(/_/g, ' ') || '';
+  const diffPct = test.avgDiffPct;
+  const diffLabel = diffPct === null ? '-' : diffPct === 0 ? '0%' : `${diffPct.toFixed(1)}%`;
+  const diffColor = diffPct === null || diffPct === 0 ? 'text-green-600' : diffPct < 1 ? 'text-yellow-600' : 'text-red-600';
 
   return (
-    <div className="flex items-center justify-between p-2 border rounded-md text-sm">
+    <div className="flex items-start gap-3 p-2 border rounded-md min-h-[52px]">
+      {/* Spacer matching the checkbox width on the right side */}
+      <div className="w-4 shrink-0" />
       <div className="min-w-0 flex-1">
-        <div className="text-sm font-medium truncate">{diff.testName || 'Unknown test'}</div>
-        {diff.stepLabel && (
-          <div className="text-xs text-muted-foreground truncate">{diff.stepLabel}</div>
-        )}
-      </div>
-      <div className="flex items-center gap-2 shrink-0">
-        <span className={`text-xs font-medium ${pctColor}`}>{formatDiffPct(diff.percentageDifference)}</span>
-        {diff.classification && (
-          <Badge
-            variant="secondary"
-            className={`text-[10px] ${
-              diff.classification === 'unchanged' ? 'bg-green-100 text-green-700' :
-              diff.classification === 'flaky' ? 'bg-yellow-100 text-yellow-700' :
-              'bg-red-100 text-red-700'
-            }`}
-          >
-            {diff.classification}
+        <div className="text-sm font-medium truncate">{test.testName || 'Unknown test'}</div>
+        <div className="flex items-center gap-2 mt-1 h-4">
+          <Badge variant="secondary" className="text-[10px] font-mono">
+            v{test.versionNumber ?? '?'}
           </Badge>
-        )}
+          {test.isLatest && (
+            <span className="text-[10px] text-primary font-medium">latest</span>
+          )}
+          {reason && (
+            <span className="text-[10px] text-muted-foreground max-w-24 truncate">{reason}</span>
+          )}
+          <span className={`text-xs font-medium ${diffColor}`}>{diffLabel}</span>
+          {test.status && (
+            <Badge
+              variant="secondary"
+              className={`text-[10px] ${
+                test.status === 'passed' ? 'bg-green-100 text-green-700' :
+                test.status === 'failed' ? 'bg-red-100 text-red-700' :
+                'bg-gray-100 text-gray-600'
+              }`}
+            >
+              {test.status}
+            </Badge>
+          )}
+        </div>
       </div>
     </div>
   );
@@ -350,28 +379,34 @@ function ConfigTestRow({
 
   return (
     <div
-      className={`flex items-center gap-3 p-2 border rounded-md transition-colors ${
+      className={`flex items-start gap-3 p-2 border rounded-md transition-colors min-h-[52px] ${
         isSelected ? 'border-primary/30 bg-primary/5' : 'opacity-60'
       }`}
     >
-      <Checkbox checked={isSelected} onCheckedChange={onToggle} />
+      <div className="pt-0.5">
+        <Checkbox checked={isSelected} onCheckedChange={onToggle} />
+      </div>
       <div className="min-w-0 flex-1">
         <div className="text-sm font-medium truncate">{test.name}</div>
-        {hasVersions && (
-          <div className="flex items-center gap-2 mt-1">
-            <span className="text-[10px] text-muted-foreground shrink-0 w-28 truncate">
-              {getVersionLabel(test, sliderValue)}
-            </span>
-            <Slider
-              min={0}
-              max={test.versions.length}
-              step={1}
-              value={[sliderValue]}
-              onValueChange={([v]) => onSliderChange(v)}
-              className="w-40"
-            />
-          </div>
-        )}
+        <div className="flex items-center gap-2 mt-1 h-4">
+          {hasVersions ? (
+            <>
+              <span className="text-[10px] text-muted-foreground shrink-0 w-28 truncate">
+                {getVersionLabel(test, sliderValue)}
+              </span>
+              <Slider
+                min={0}
+                max={test.versions.length}
+                step={1}
+                value={[sliderValue]}
+                onValueChange={([v]) => onSliderChange(v)}
+                className="w-40"
+              />
+            </>
+          ) : (
+            <span className="text-[10px] text-muted-foreground">No versions</span>
+          )}
+        </div>
       </div>
     </div>
   );

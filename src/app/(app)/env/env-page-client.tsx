@@ -2,8 +2,15 @@
 
 import { ApiConfigList } from '@/components/setup/api-config-list';
 import { SetupStepBuilder } from '@/components/setup/setup-step-builder';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import {
+  addDefaultTeardownStep,
+  removeDefaultTeardownStep,
+  reorderDefaultTeardownSteps,
+} from '@/server/actions/teardown-steps';
 import type { Repository, Test, SetupScript, SetupConfig } from '@/lib/db/schema';
 import type { SetupStep } from '@/server/actions/setup-steps';
+import type { TeardownStep } from '@/server/actions/teardown-steps';
 
 interface EnvPageClientProps {
   repository: Repository;
@@ -11,6 +18,7 @@ interface EnvPageClientProps {
   setupConfigs: SetupConfig[];
   availableTests: Test[];
   defaultSetupSteps: SetupStep[];
+  defaultTeardownSteps: TeardownStep[];
 }
 
 export function EnvPageClient({
@@ -19,6 +27,7 @@ export function EnvPageClient({
   setupConfigs,
   availableTests,
   defaultSetupSteps,
+  defaultTeardownSteps,
 }: EnvPageClientProps) {
   return (
     <div className="flex-1 p-6 overflow-auto">
@@ -26,33 +35,58 @@ export function EnvPageClient({
         <div>
           <h1 className="text-2xl font-semibold">Environment Setup</h1>
           <p className="text-muted-foreground mt-1">
-            Configure default setup steps for test preparation.
+            Configure setup and teardown steps for test preparation and cleanup.
           </p>
         </div>
 
-        {/* Section 1: Default Setup Steps */}
-        <section>
-          <SetupStepBuilder
-            repositoryId={repository.id}
-            setupSteps={defaultSetupSteps}
-            availableTests={availableTests}
-            availableScripts={setupScripts}
-          />
-        </section>
+        <Tabs defaultValue="setup">
+          <TabsList>
+            <TabsTrigger value="setup">Setup</TabsTrigger>
+            <TabsTrigger value="teardown">Teardown</TabsTrigger>
+          </TabsList>
 
-        {/* Section 2: API Configs */}
-        <section className="space-y-4">
-          <div>
-            <h2 className="text-lg font-medium">API Configurations</h2>
-            <p className="text-sm text-muted-foreground">
-              Configure API endpoints for data seeding scripts.
-            </p>
-          </div>
-          <ApiConfigList
-            repositoryId={repository.id}
-            configs={setupConfigs}
-          />
-        </section>
+          <TabsContent value="setup" className="space-y-8 mt-6">
+            {/* Default Setup Steps */}
+            <section>
+              <SetupStepBuilder
+                repositoryId={repository.id}
+                setupSteps={defaultSetupSteps}
+                availableTests={availableTests}
+                availableScripts={setupScripts}
+              />
+            </section>
+
+            {/* API Configs */}
+            <section className="space-y-4">
+              <div>
+                <h2 className="text-lg font-medium">API Configurations</h2>
+                <p className="text-sm text-muted-foreground">
+                  Configure API endpoints for data seeding scripts.
+                </p>
+              </div>
+              <ApiConfigList
+                repositoryId={repository.id}
+                configs={setupConfigs}
+              />
+            </section>
+          </TabsContent>
+
+          <TabsContent value="teardown" className="space-y-8 mt-6">
+            <section>
+              <SetupStepBuilder
+                repositoryId={repository.id}
+                setupSteps={defaultTeardownSteps}
+                availableTests={availableTests}
+                availableScripts={setupScripts}
+                onAddStep={addDefaultTeardownStep}
+                onRemoveStep={removeDefaultTeardownStep}
+                onReorderSteps={reorderDefaultTeardownSteps}
+                title="Default Teardown Steps"
+                description="Configure the default teardown sequence that runs after each test for cleanup."
+              />
+            </section>
+          </TabsContent>
+        </Tabs>
       </div>
     </div>
   );

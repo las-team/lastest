@@ -68,6 +68,15 @@ export interface TestSetupOverrides {
   }>;
 }
 
+export interface TestTeardownOverrides {
+  skippedDefaultStepIds: string[];  // IDs from default_teardown_steps to skip
+  extraSteps: Array<{
+    stepType: 'test' | 'script';
+    testId?: string | null;
+    scriptId?: string | null;
+  }>;
+}
+
 export const functionalAreas = sqliteTable('functional_areas', {
   id: text('id').primaryKey(),
   repositoryId: text('repository_id'),
@@ -91,6 +100,7 @@ export const tests = sqliteTable('tests', {
   setupTestId: text('setup_test_id'), // Use another test as setup (most common)
   setupScriptId: text('setup_script_id'), // OR use dedicated setup script
   setupOverrides: text('setup_overrides', { mode: 'json' }).$type<TestSetupOverrides>(),
+  teardownOverrides: text('teardown_overrides', { mode: 'json' }).$type<TestTeardownOverrides>(),
   deletedAt: integer('deleted_at', { mode: 'timestamp' }),
   createdAt: integer('created_at', { mode: 'timestamp' }),
   updatedAt: integer('updated_at', { mode: 'timestamp' }),
@@ -234,6 +244,9 @@ export const builds = sqliteTable('builds', {
   setupStatus: text('setup_status').default('pending'), // 'pending' | 'running' | 'completed' | 'failed' | 'skipped'
   setupError: text('setup_error'),
   setupDurationMs: integer('setup_duration_ms'),
+  teardownStatus: text('teardown_status').default('pending'), // 'pending' | 'running' | 'completed' | 'failed' | 'skipped'
+  teardownError: text('teardown_error'),
+  teardownDurationMs: integer('teardown_duration_ms'),
   codeChangeTestIds: text('code_change_test_ids', { mode: 'json' }).$type<string[]>(),
   createdAt: integer('created_at', { mode: 'timestamp' }),
   completedAt: integer('completed_at', { mode: 'timestamp' }),
@@ -987,6 +1000,20 @@ export const defaultSetupSteps = sqliteTable('default_setup_steps', {
 
 export type DefaultSetupStep = typeof defaultSetupSteps.$inferSelect;
 export type NewDefaultSetupStep = typeof defaultSetupSteps.$inferInsert;
+
+// Default Teardown Steps - Ordered multi-step teardown for repositories
+export const defaultTeardownSteps = sqliteTable('default_teardown_steps', {
+  id: text('id').primaryKey(),
+  repositoryId: text('repository_id').references(() => repositories.id, { onDelete: 'cascade' }).notNull(),
+  stepType: text('step_type').notNull(), // 'test' | 'script'
+  testId: text('test_id').references(() => tests.id, { onDelete: 'cascade' }),
+  scriptId: text('script_id').references(() => setupScripts.id, { onDelete: 'cascade' }),
+  orderIndex: integer('order_index').notNull().default(0),
+  createdAt: integer('created_at', { mode: 'timestamp' }),
+});
+
+export type DefaultTeardownStep = typeof defaultTeardownSteps.$inferSelect;
+export type NewDefaultTeardownStep = typeof defaultTeardownSteps.$inferInsert;
 
 // ============================================
 // Google Sheets Test Data Sources

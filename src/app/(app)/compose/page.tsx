@@ -1,7 +1,6 @@
 import { ComposeClient } from './compose-client';
 import { getTestsWithVersions } from '@/server/actions/builds';
-import { getSelectedRepository } from '@/lib/db/queries';
-import { getLastBuildByBranch, getVisualDiffsWithTestStatus } from '@/lib/db/queries';
+import { getSelectedRepository, getLastBuildByBranch, getBuildTestSummaries } from '@/lib/db/queries';
 import { getCurrentSession } from '@/lib/auth';
 import { redirect } from 'next/navigation';
 
@@ -21,19 +20,17 @@ export default async function ComposePage() {
     getLastBuildByBranch(selectedRepo.id, defaultBranch),
   ]);
 
-  // If we found a main branch build, get its diffs
-  const mainBuildDiffs = mainBuild
-    ? await getVisualDiffsWithTestStatus(mainBuild.id)
+  const mainBuildTests = mainBuild
+    ? await getBuildTestSummaries(mainBuild.id)
     : [];
 
   return (
     <div className="flex flex-col h-full">
       <ComposeClient
         tests={testsWithVersions}
-        repositoryId={selectedRepo.id}
         defaultBranch={defaultBranch}
         mainBuild={mainBuild ?? null}
-        mainBuildDiffs={mainBuildDiffs}
+        mainBuildTests={mainBuildTests}
       />
     </div>
   );
