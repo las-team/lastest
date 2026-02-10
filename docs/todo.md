@@ -12,9 +12,6 @@ Support https://github.com/excalidraw/excalidraw/tree/master/packages/excalidraw
     Dev feeback
     Actions with changes
 
-Revise labels (e.g. new change, main 2.5%) on build page
-
-
 AI Optimize playwright settings
     select or identify testable app mode, classify it
     Repo specific pw settings,
@@ -31,10 +28,11 @@ Play gomb - give in url and do everything
     8. Prompt the user to have something to test 
     9. Run tests again, show comparison and AI assessment - areas that changed
     10. Ideal summary: 60 functional areas remain unchanged, 10 changed, out of those 8 new areas added, 1 pre-existing areas changed, 1 minor change in pre-existing function. 
- 
 
 Ban AI mode
     Remove all GenAI features from UI if enabled
+
+Revise labels (e.g. new change, main 2.5%) on build page
 
 ## ideas
 Component specific testing

@@ -42,6 +42,7 @@ import {
   specImports,
   googleSheetsAccounts,
   googleSheetsDataSources,
+  composeConfigs,
 } from './schema';
 import {
   DEFAULT_SELECTOR_PRIORITY,
@@ -93,6 +94,7 @@ import type {
   NewSpecImport,
   NewGoogleSheetsAccount,
   NewGoogleSheetsDataSource,
+  NewComposeConfig,
   Team,
   User,
   Runner,
@@ -3819,4 +3821,58 @@ export async function deleteGoogleSheetsDataSource(id: string) {
   await db
     .delete(googleSheetsDataSources)
     .where(eq(googleSheetsDataSources.id, id));
+}
+
+// ============================================
+// Compose Configs
+// ============================================
+
+export async function getComposeConfig(repositoryId: string, branch: string) {
+  return db
+    .select()
+    .from(composeConfigs)
+    .where(and(
+      eq(composeConfigs.repositoryId, repositoryId),
+      eq(composeConfigs.branch, branch),
+    ))
+    .get() ?? null;
+}
+
+export async function upsertComposeConfig(
+  repositoryId: string,
+  branch: string,
+  data: { selectedTestIds: string[]; versionOverrides: Record<string, string> },
+) {
+  const existing = await db
+    .select()
+    .from(composeConfigs)
+    .where(and(
+      eq(composeConfigs.repositoryId, repositoryId),
+      eq(composeConfigs.branch, branch),
+    ))
+    .get();
+
+  if (existing) {
+    await db
+      .update(composeConfigs)
+      .set({
+        selectedTestIds: data.selectedTestIds,
+        versionOverrides: data.versionOverrides,
+        updatedAt: new Date(),
+      })
+      .where(eq(composeConfigs.id, existing.id));
+    return { ...existing, ...data, updatedAt: new Date() };
+  } else {
+    const id = uuid();
+    const newConfig: NewComposeConfig = {
+      id,
+      repositoryId,
+      branch,
+      selectedTestIds: data.selectedTestIds,
+      versionOverrides: data.versionOverrides,
+      updatedAt: new Date(),
+    };
+    await db.insert(composeConfigs).values(newConfig);
+    return newConfig;
+  }
 }

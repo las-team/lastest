@@ -7,6 +7,7 @@ import { Badge } from '@/components/ui/badge';
 import { Slider } from '@/components/ui/slider';
 import { Collapsible, CollapsibleTrigger, CollapsibleContent } from '@/components/ui/collapsible';
 import { Layers, ChevronRight, ChevronsUpDown, GitBranch, Info } from 'lucide-react';
+import { saveComposeConfig } from '@/server/actions/builds';
 import type { Test, TestVersion } from '@/lib/db/schema';
 
 interface TestWithVersions extends Test {
@@ -35,40 +36,50 @@ interface MainBuild {
   createdAt: Date | null;
 }
 
-interface ComposeConfig {
+interface SavedConfig {
   selectedTestIds: string[];
-  versionOverrides: Record<string, number>;
+  versionOverrides: Record<string, string>; // testId -> testVersionId
 }
 
-const STORAGE_KEY_PREFIX = 'compose-config';
-
-function storageKey(repositoryId: string, branch: string) {
-  return `${STORAGE_KEY_PREFIX}:${repositoryId}:${branch}`;
-}
-
-function loadConfig(repositoryId: string, branch: string, allTestIds: string[]): ComposeConfig {
-  if (typeof window === 'undefined') return { selectedTestIds: allTestIds, versionOverrides: {} };
-  try {
-    const raw = localStorage.getItem(storageKey(repositoryId, branch));
-    if (!raw) return { selectedTestIds: allTestIds, versionOverrides: {} };
-    const parsed = JSON.parse(raw) as ComposeConfig;
-    // Filter to only test IDs that still exist
-    const validIds = new Set(allTestIds);
-    return {
-      selectedTestIds: parsed.selectedTestIds.filter(id => validIds.has(id)),
-      versionOverrides: Object.fromEntries(
-        Object.entries(parsed.versionOverrides).filter(([id]) => validIds.has(id))
-      ),
-    };
-  } catch {
-    return { selectedTestIds: allTestIds, versionOverrides: {} };
+/**
+ * Reverse-map saved versionOverrides (testId -> testVersionId) to slider positions.
+ * Slider 0 = latest, slider N = test.versions[N-1].
+ */
+function reverseMapVersionOverrides(
+  tests: TestWithVersions[],
+  overrides: Record<string, string>,
+): Record<string, number> {
+  const sliderPositions: Record<string, number> = {};
+  for (const [testId, versionId] of Object.entries(overrides)) {
+    const test = tests.find(t => t.id === testId);
+    if (!test) continue;
+    const idx = test.versions.findIndex(v => v.id === versionId);
+    if (idx >= 0) {
+      sliderPositions[testId] = idx + 1;
+    }
   }
+  return sliderPositions;
 }
 
-function saveConfig(repositoryId: string, branch: string, config: ComposeConfig) {
-  try {
-    localStorage.setItem(storageKey(repositoryId, branch), JSON.stringify(config));
-  } catch { /* quota exceeded — ignore */ }
+/**
+ * Resolve slider positions to testVersionIds for saving to DB.
+ * Slider 0 = no override, slider N = test.versions[N-1].id.
+ */
+function resolveVersionOverrides(
+  tests: TestWithVersions[],
+  sliderOverrides: Record<string, number>,
+): Record<string, string> {
+  const resolved: Record<string, string> = {};
+  for (const [testId, sliderValue] of Object.entries(sliderOverrides)) {
+    if (sliderValue === 0) continue;
+    const test = tests.find(t => t.id === testId);
+    if (!test) continue;
+    const version = test.versions[sliderValue - 1];
+    if (version) {
+      resolved[testId] = version.id;
+    }
+  }
+  return resolved;
 }
 
 interface ComposeClientProps {
@@ -78,20 +89,49 @@ interface ComposeClientProps {
   defaultBranch: string;
   mainBuild: MainBuild | null;
   mainBuildTests: MainBuildTest[];
+  savedConfig: SavedConfig | null;
 }
 
-export function ComposeClient({ tests, repositoryId, currentBranch, defaultBranch, mainBuild, mainBuildTests }: ComposeClientProps) {
+export function ComposeClient({ tests, repositoryId, currentBranch, defaultBranch, mainBuild, mainBuildTests, savedConfig }: ComposeClientProps) {
   const allTestIds = useMemo(() => tests.map(t => t.id), [tests]);
-  const initial = useRef(loadConfig(repositoryId, currentBranch, allTestIds));
-  const [selectedTestIds, setSelectedTestIds] = useState<Set<string>>(() => new Set(initial.current.selectedTestIds));
-  const [versionOverrides, setVersionOverrides] = useState<Record<string, number>>(() => initial.current.versionOverrides);
-  // Persist config to localStorage on change
+
+  // Initialize state from saved config or default to all tests selected
+  const [selectedTestIds, setSelectedTestIds] = useState<Set<string>>(() => {
+    if (savedConfig?.selectedTestIds && savedConfig.selectedTestIds.length > 0) {
+      const validIds = new Set(allTestIds);
+      return new Set(savedConfig.selectedTestIds.filter(id => validIds.has(id)));
+    }
+    return new Set(allTestIds);
+  });
+
+  const [versionOverrides, setVersionOverrides] = useState<Record<string, number>>(() => {
+    if (savedConfig?.versionOverrides && Object.keys(savedConfig.versionOverrides).length > 0) {
+      return reverseMapVersionOverrides(tests, savedConfig.versionOverrides);
+    }
+    return {};
+  });
+
+  // Debounced save to DB
+  const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const isInitialMount = useRef(true);
+
   useEffect(() => {
-    saveConfig(repositoryId, currentBranch, {
-      selectedTestIds: Array.from(selectedTestIds),
-      versionOverrides,
-    });
-  }, [repositoryId, currentBranch, selectedTestIds, versionOverrides]);
+    // Skip save on initial mount
+    if (isInitialMount.current) {
+      isInitialMount.current = false;
+      return;
+    }
+
+    if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+    saveTimerRef.current = setTimeout(() => {
+      const resolved = resolveVersionOverrides(tests, versionOverrides);
+      saveComposeConfig(repositoryId, currentBranch, Array.from(selectedTestIds), resolved);
+    }, 500);
+
+    return () => {
+      if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+    };
+  }, [repositoryId, currentBranch, selectedTestIds, versionOverrides, tests]);
 
   const [groupByArea, setGroupByArea] = useState(false);
   const [expandKey, setExpandKey] = useState(0);

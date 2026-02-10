@@ -1249,6 +1249,21 @@ async function sendBuildNotifications(data: {
 }
 
 /**
+ * Save compose config (selected tests + version overrides) for a branch
+ */
+export async function saveComposeConfig(
+  repositoryId: string,
+  branch: string,
+  selectedTestIds: string[],
+  versionOverrides: Record<string, string>,
+) {
+  await requireRepoAccess(repositoryId);
+  await queries.upsertComposeConfig(repositoryId, branch, { selectedTestIds, versionOverrides });
+  revalidatePath('/compose');
+  revalidatePath('/run');
+}
+
+/**
  * Get all tests with their version history for the compose page
  */
 export async function getTestsWithVersions(repositoryId: string) {

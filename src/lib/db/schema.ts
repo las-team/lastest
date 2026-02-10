@@ -1072,3 +1072,19 @@ export const googleSheetsDataSources = sqliteTable('google_sheets_data_sources',
 
 export type GoogleSheetsDataSource = typeof googleSheetsDataSources.$inferSelect;
 export type NewGoogleSheetsDataSource = typeof googleSheetsDataSources.$inferInsert;
+
+// ============================================
+// Compose Configs (per-branch build configuration)
+// ============================================
+
+export const composeConfigs = sqliteTable('compose_configs', {
+  id: text('id').primaryKey(),
+  repositoryId: text('repository_id').references(() => repositories.id, { onDelete: 'cascade' }).notNull(),
+  branch: text('branch').notNull(),
+  selectedTestIds: text('selected_test_ids', { mode: 'json' }).$type<string[]>(),
+  versionOverrides: text('version_overrides', { mode: 'json' }).$type<Record<string, string>>(),
+  updatedAt: integer('updated_at', { mode: 'timestamp' }),
+});
+
+export type ComposeConfig = typeof composeConfigs.$inferSelect;
+export type NewComposeConfig = typeof composeConfigs.$inferInsert;

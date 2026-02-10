@@ -3,6 +3,7 @@ import {
   getSelectedRepository,
   getTestsByRepo,
   getTestRunsByRepo,
+  getComposeConfig,
 } from '@/lib/db/queries';
 import { getBuildsByRepo, getLatestBuildChanges } from '@/server/actions/builds';
 import { getEnvironmentConfig } from '@/server/actions/environment';
@@ -14,12 +15,13 @@ export default async function RunPage() {
   const selectedRepo = teamId ? await getSelectedRepository(teamId) : null;
   const activeBranch = selectedRepo?.selectedBranch || selectedRepo?.defaultBranch || 'main';
 
-  const [tests, runs, builds, envConfig, buildChanges] = await Promise.all([
+  const [tests, runs, builds, envConfig, buildChanges, composeConfig] = await Promise.all([
     selectedRepo ? getTestsByRepo(selectedRepo.id) : Promise.resolve([]),
     selectedRepo ? getTestRunsByRepo(selectedRepo.id) : Promise.resolve([]),
     selectedRepo ? getBuildsByRepo(selectedRepo.id, 10) : Promise.resolve([]),
     getEnvironmentConfig(selectedRepo?.id),
     selectedRepo ? getLatestBuildChanges(selectedRepo.id) : null,
+    selectedRepo ? getComposeConfig(selectedRepo.id, activeBranch) : Promise.resolve(null),
   ]);
 
   return (
@@ -34,6 +36,10 @@ export default async function RunPage() {
         defaultBranch={selectedRepo?.defaultBranch ?? null}
         baseUrl={envConfig?.baseUrl || 'http://localhost:3000'}
         buildChanges={buildChanges}
+        composeConfig={composeConfig ? {
+          selectedTestIds: composeConfig.selectedTestIds ?? null,
+          versionOverrides: composeConfig.versionOverrides ?? null,
+        } : null}
       />
     </div>
   );

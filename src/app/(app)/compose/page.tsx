@@ -1,6 +1,6 @@
 import { ComposeClient } from './compose-client';
 import { getTestsWithVersions } from '@/server/actions/builds';
-import { getSelectedRepository, getLastBuildByBranch, getBuildTestSummaries } from '@/lib/db/queries';
+import { getSelectedRepository, getLastBuildByBranch, getBuildTestSummaries, getComposeConfig } from '@/lib/db/queries';
 import { getCurrentSession } from '@/lib/auth';
 import { redirect } from 'next/navigation';
 
@@ -14,10 +14,12 @@ export default async function ComposePage() {
   }
 
   const defaultBranch = selectedRepo.defaultBranch ?? 'main';
+  const currentBranch = selectedRepo.selectedBranch ?? defaultBranch;
 
-  const [testsWithVersions, mainBuild] = await Promise.all([
+  const [testsWithVersions, mainBuild, savedConfig] = await Promise.all([
     getTestsWithVersions(selectedRepo.id),
     getLastBuildByBranch(selectedRepo.id, defaultBranch),
+    getComposeConfig(selectedRepo.id, currentBranch),
   ]);
 
   const mainBuildTests = mainBuild
@@ -29,10 +31,14 @@ export default async function ComposePage() {
       <ComposeClient
         tests={testsWithVersions}
         repositoryId={selectedRepo.id}
-        currentBranch={selectedRepo.selectedBranch ?? defaultBranch}
+        currentBranch={currentBranch}
         defaultBranch={defaultBranch}
         mainBuild={mainBuild ?? null}
         mainBuildTests={mainBuildTests}
+        savedConfig={savedConfig ? {
+          selectedTestIds: savedConfig.selectedTestIds ?? [],
+          versionOverrides: savedConfig.versionOverrides ?? {},
+        } : null}
       />
     </div>
   );
