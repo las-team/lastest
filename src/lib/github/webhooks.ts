@@ -22,6 +22,7 @@ export interface PullRequestEvent {
     number: number;
     title: string;
     state: string;
+    merged?: boolean;
     head: {
       ref: string;
       sha: string;
@@ -31,6 +32,7 @@ export interface PullRequestEvent {
     };
   };
   repository: {
+    id?: number;
     name: string;
     owner: {
       login: string;
@@ -43,6 +45,7 @@ export interface PushEvent {
   after: string;
   before: string;
   repository: {
+    id?: number;
     name: string;
     owner: {
       login: string;

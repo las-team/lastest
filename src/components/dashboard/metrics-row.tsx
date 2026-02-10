@@ -1,6 +1,6 @@
 'use client';
 
-import { FileCheck2, AlertTriangle, XCircle, Clock, RefreshCw, CheckCircle, Sparkles, Flag } from 'lucide-react';
+import { FileCheck2, AlertTriangle, XCircle, Clock, RefreshCw, CheckCircle, Sparkles, Flag, GitBranch, Shield } from 'lucide-react';
 import type { FilterType } from '@/app/(app)/builds/[buildId]/build-detail-client';
 import { cn } from '@/lib/utils';
 
@@ -18,6 +18,8 @@ interface MetricsRowProps {
   aiSafeCount?: number;
   aiReviewCount?: number;
   aiFlagCount?: number;
+  viewMode?: 'branch' | 'main';
+  onViewModeChange?: (mode: 'branch' | 'main') => void;
 }
 
 export function MetricsRow({
@@ -34,6 +36,8 @@ export function MetricsRow({
   aiSafeCount = 0,
   aiReviewCount = 0,
   aiFlagCount = 0,
+  viewMode,
+  onViewModeChange,
 }: MetricsRowProps) {
   const formatTime = (ms: number | null) => {
     if (!ms) return '-';
@@ -261,6 +265,52 @@ export function MetricsRow({
               </div>
             );
           })}
+        </div>
+      )}
+
+      {/* Comparison Mode Toggle */}
+      {viewMode && onViewModeChange && (
+        <div className="grid grid-cols-2 gap-3">
+          <div
+            onClick={() => onViewModeChange('branch')}
+            className={cn(
+              'p-3 rounded-lg flex flex-col items-center transition-all cursor-pointer hover:scale-105 hover:shadow-md bg-muted',
+              viewMode === 'branch' && 'ring-2 ring-offset-2 ring-primary'
+            )}
+            role="button"
+            tabIndex={0}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                onViewModeChange('branch');
+              }
+            }}
+          >
+            <GitBranch className={cn('w-5 h-5', viewMode === 'branch' ? 'text-primary' : 'text-muted-foreground')} />
+            <span className={cn('text-sm font-medium mt-1', viewMode === 'branch' ? 'text-primary' : 'text-muted-foreground')}>
+              Branch
+            </span>
+          </div>
+          <div
+            onClick={() => onViewModeChange('main')}
+            className={cn(
+              'p-3 rounded-lg flex flex-col items-center transition-all cursor-pointer hover:scale-105 hover:shadow-md bg-muted',
+              viewMode === 'main' && 'ring-2 ring-offset-2 ring-primary'
+            )}
+            role="button"
+            tabIndex={0}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                onViewModeChange('main');
+              }
+            }}
+          >
+            <Shield className={cn('w-5 h-5', viewMode === 'main' ? 'text-primary' : 'text-muted-foreground')} />
+            <span className={cn('text-sm font-medium mt-1', viewMode === 'main' ? 'text-primary' : 'text-muted-foreground')}>
+              Main
+            </span>
+          </div>
         </div>
       )}
     </div>

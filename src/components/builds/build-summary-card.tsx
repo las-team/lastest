@@ -11,6 +11,8 @@ interface BuildSummaryCardProps {
   isActiveBranch?: boolean;
   baseUrl?: string;
   isBaseline?: boolean;
+  isMainBaseline?: boolean;
+  isBranchBaseline?: boolean;
 }
 
 function isRemoteUrl(url?: string): boolean {
@@ -75,7 +77,7 @@ function formatDuration(elapsedMs: number | null): string {
   return `${(elapsedMs / 1000).toFixed(1)}s`;
 }
 
-export function BuildSummaryCard({ build, gitBranch, gitCommit, isActiveBranch, baseUrl, isBaseline }: BuildSummaryCardProps) {
+export function BuildSummaryCard({ build, gitBranch, gitCommit, isActiveBranch, baseUrl, isBaseline, isMainBaseline, isBranchBaseline }: BuildSummaryCardProps) {
   const status = build.overallStatus as BuildStatus;
   const config = statusConfig[status];
   const StatusIcon = config.icon;
@@ -111,10 +113,22 @@ export function BuildSummaryCard({ build, gitBranch, gitCommit, isActiveBranch, 
                 {gitCommit.slice(0, 7)}
               </Badge>
             )}
-            {isBaseline && (
+            {isBaseline && !isMainBaseline && !isBranchBaseline && (
               <Badge variant="outline" className="text-xs font-normal gap-1 shrink-0 border-green-300 text-green-700 bg-green-50">
                 <Shield className="h-3 w-3" />
                 Baseline
+              </Badge>
+            )}
+            {isMainBaseline && (
+              <Badge variant="outline" className="text-xs font-normal gap-1 shrink-0 border-purple-300 text-purple-700 bg-purple-50">
+                <Shield className="h-3 w-3" />
+                Main Baseline
+              </Badge>
+            )}
+            {isBranchBaseline && (
+              <Badge variant="outline" className="text-xs font-normal gap-1 shrink-0 border-blue-300 text-blue-700 bg-blue-50">
+                <Shield className="h-3 w-3" />
+                Branch Baseline
               </Badge>
             )}
           </div>

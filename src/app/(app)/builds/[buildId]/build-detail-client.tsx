@@ -73,6 +73,23 @@ const aiRecommendationBadge: Record<string, { label: string; className: string; 
   flag: { label: 'AI: Flagged', className: 'bg-red-100 text-red-700', Icon: Flag },
 };
 
+// Branch status for each diff (derived from comparison data)
+export type BranchStatus = 'baseline' | 'branch_accepted' | 'new_change' | 'new_test';
+
+function deriveBranchStatus(diff: VisualDiffWithTestStatus): BranchStatus {
+  if (diff.metadata && (diff.metadata as { isNewTest?: boolean }).isNewTest) return 'new_test';
+  if (diff.status === 'approved') return 'branch_accepted';
+  if (diff.classification === 'unchanged' || diff.status === 'auto_approved') return 'baseline';
+  return 'new_change';
+}
+
+const branchStatusConfig: Record<BranchStatus, { label: string; className: string }> = {
+  baseline: { label: 'Baseline', className: 'bg-gray-100 text-gray-600' },
+  branch_accepted: { label: 'Branch Accepted', className: 'bg-blue-100 text-blue-700' },
+  new_change: { label: 'New Change', className: 'bg-yellow-100 text-yellow-700' },
+  new_test: { label: 'New Test', className: 'bg-purple-100 text-purple-700' },
+};
+
 export interface BuildDetailClientProps {
   buildId: string;
   diffs: VisualDiffWithTestStatus[];
@@ -87,6 +104,7 @@ export interface BuildDetailClientProps {
   hasPendingDiffs: boolean;
   isRunning?: boolean;
   completedTests?: number;
+  codeChangeTestIds?: string[] | null;
 }
 
 export function BuildDetailClient({
@@ -95,10 +113,13 @@ export function BuildDetailClient({
   metrics,
   isRunning = false,
   completedTests = 0,
+  codeChangeTestIds,
 }: BuildDetailClientProps) {
+  const codeChangeTestIdSet = new Set(codeChangeTestIds ?? []);
   const [activeFilter, setActiveFilter] = useState<FilterType>('all');
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [isProcessing, setIsProcessing] = useState(false);
+  const [viewMode, setViewMode] = useState<'branch' | 'main'>('branch');
   const router = useRouter();
 
   // Toggle filter - clicking active filter clears it
@@ -217,6 +238,8 @@ export function BuildDetailClient({
         aiSafeCount={aiSafeCount}
         aiReviewCount={aiReviewCount}
         aiFlagCount={aiFlagCount}
+        viewMode={viewMode}
+        onViewModeChange={setViewMode}
       />
 
       {/* Tests for Review Section */}
@@ -334,6 +357,12 @@ export function BuildDetailClient({
               const isSelected = selectedIds.has(diff.id);
               const isAnalyzing = diff.aiAnalysisStatus === 'running' || diff.aiAnalysisStatus === 'pending';
               const isAIFailed = diff.aiAnalysisStatus === 'failed';
+              const branchStatus = deriveBranchStatus(diff);
+              const bsConfig = branchStatusConfig[branchStatus];
+              const hasMainDrift = diff.mainPercentageDifference && parseFloat(diff.mainPercentageDifference) > 0;
+
+              const displayPixels = viewMode === 'main' ? diff.mainPixelDifference : diff.pixelDifference;
+              const hasViewData = viewMode === 'main' ? !!diff.mainBaselineImagePath : !!diff.baselineImagePath;
 
               return (
                 <div
@@ -374,9 +403,11 @@ export function BuildDetailClient({
                         <span className={isFailed ? 'text-destructive' : 'text-muted-foreground'}>
                           {isExecutionFailed
                             ? 'Execution failed'
-                            : diff.pixelDifference
-                              ? `${diff.pixelDifference.toLocaleString()}px diff`
-                              : 'No changes'}
+                            : !hasViewData
+                              ? viewMode === 'main' ? 'No main baseline' : 'No branch baseline'
+                              : displayPixels
+                                ? `${displayPixels.toLocaleString()}px diff`
+                                : 'No changes'}
                         </span>
                         <span className="text-muted-foreground/40 text-xs font-mono">
                           {diff.testId.slice(0, 8)}
@@ -391,6 +422,22 @@ export function BuildDetailClient({
                   </div>
 
                   <div className="flex items-center gap-4">
+                    {/* Code Change Badge */}
+                    {codeChangeTestIdSet.has(diff.testId) && (
+                      <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium bg-orange-100 text-orange-700">
+                        Code Change
+                      </span>
+                    )}
+                    {/* Branch Status Badge */}
+                    <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium ${bsConfig.className}`}>
+                      {bsConfig.label}
+                    </span>
+                    {/* Main baseline drift */}
+                    {hasMainDrift && (
+                      <span className="text-[10px] text-muted-foreground font-mono" title="Drift from main baseline">
+                        main: {parseFloat(diff.mainPercentageDifference!).toFixed(1)}%
+                      </span>
+                    )}
                     {/* AI Badge */}
                     {isAnalyzing && (
                       <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-purple-100 text-purple-700">

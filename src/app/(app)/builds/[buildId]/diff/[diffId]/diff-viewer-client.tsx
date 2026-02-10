@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { SliderComparison } from '@/components/diff/slider-comparison';
+import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { approveDiff, rejectDiff, undoApproval } from '@/server/actions/diffs';
 import type { VisualDiff, Test, DiffMetadata, AIDiffAnalysis } from '@/lib/db/schema';
 import { CheckCircle, XCircle, SkipForward, Eye, Image as ImageIcon, Sparkles, Loader2, ArrowUpDown } from 'lucide-react';
@@ -147,6 +148,20 @@ export function DiffViewerClient({ diff, buildId, nextDiffId }: DiffViewerClient
           </div>
         )}
 
+        {/* Main baseline drift indicator (for vs_both comparison) */}
+        {diff.mainBaselineImagePath && (
+          <div className="flex items-center gap-2 px-3 py-1 rounded-full text-sm font-medium bg-purple-100 text-purple-700">
+            vs Main
+            {diff.mainPercentageDifference && parseFloat(diff.mainPercentageDifference) > 0 ? (
+              <span className="text-purple-500">
+                ({diff.mainPercentageDifference}% drift)
+              </span>
+            ) : (
+              <span className="text-purple-500">(no drift)</span>
+            )}
+          </div>
+        )}
+
         {/* Planned screenshot indicator */}
         {diff.plannedImagePath && (
           <div className="flex items-center gap-2 px-3 py-1 rounded-full text-sm font-medium bg-primary/10 text-primary">
@@ -223,24 +238,116 @@ export function DiffViewerClient({ diff, buildId, nextDiffId }: DiffViewerClient
       )}
 
       {/* Diff Comparison */}
-      {diff.currentImagePath && (diff.baselineImagePath || diff.plannedImagePath) ? (
-        <SliderComparison
-          baselineImage={diff.baselineImagePath || undefined}
-          currentImage={diff.currentImagePath}
-          diffImage={diff.diffImagePath || undefined}
-          plannedImage={diff.plannedImagePath || undefined}
-          plannedDiffImage={diff.plannedDiffImagePath || undefined}
-          className="border rounded-lg"
-        />
-      ) : diff.currentImagePath ? (
-        <div className="border rounded-lg p-4">
-          <div className="text-sm text-muted-foreground mb-2">New Screenshot (No Baseline)</div>
-          <img
-            src={diff.currentImagePath}
-            alt="Current screenshot"
-            className="w-full rounded"
-          />
-        </div>
+      {diff.currentImagePath ? (
+        (() => {
+          // On main branch (no mainBaselineImagePath), only show one tab
+          const isMainBranch = !diff.mainBaselineImagePath && diff.baselineImagePath;
+
+          type TabDef = { id: string; label: string; pct: string | null; baseline: string | null; diffImg: string | null | undefined; leftLabel?: string };
+          const tabs: TabDef[] = [];
+
+          // Branch tab — always present
+          tabs.push({
+            id: 'branch', label: isMainBranch ? 'vs Baseline' : 'vs Branch',
+            pct: diff.baselineImagePath ? diff.percentageDifference : null,
+            baseline: diff.baselineImagePath,
+            diffImg: diff.diffImagePath,
+          });
+
+          // Main tab — present on feature branches
+          if (!isMainBranch) {
+            tabs.push({
+              id: 'main', label: 'vs Main',
+              pct: diff.mainBaselineImagePath ? diff.mainPercentageDifference : null,
+              baseline: diff.mainBaselineImagePath,
+              diffImg: diff.mainDiffImagePath,
+            });
+          }
+
+          // Planned tab — only when planned screenshot exists
+          if (diff.plannedImagePath) {
+            tabs.push({
+              id: 'planned', label: 'vs Planned',
+              pct: diff.plannedPercentageDifference,
+              baseline: diff.plannedImagePath,
+              diffImg: diff.plannedDiffImagePath,
+              leftLabel: 'Planned',
+            });
+          }
+
+          // Find first tab with data for default selection
+          const defaultTab = tabs.find(t => t.baseline) || tabs[0];
+
+          if (tabs.length <= 1) {
+            const tab = tabs[0];
+            return tab?.baseline ? (
+              <SliderComparison
+                baselineImage={tab.baseline}
+                currentImage={diff.currentImagePath!}
+                diffImage={tab.diffImg || undefined}
+                leftLabel={tab.leftLabel}
+                className="border rounded-lg"
+              />
+            ) : (
+              <div className="border rounded-lg p-4">
+                <div className="text-sm text-muted-foreground mb-2">New Screenshot (No Baseline)</div>
+                <img
+                  src={diff.currentImagePath!}
+                  alt="Current screenshot"
+                  className="w-full rounded"
+                />
+              </div>
+            );
+          }
+
+          return (
+            <Tabs defaultValue={defaultTab.id} className="w-full">
+              <TabsList>
+                {tabs.map((tab) => (
+                  <TabsTrigger key={tab.id} value={tab.id}>
+                    {tab.label}
+                    {tab.baseline && tab.pct && parseFloat(tab.pct) > 0 ? (
+                      <span className="ml-1 text-muted-foreground">({parseFloat(tab.pct).toFixed(1)}%)</span>
+                    ) : !tab.baseline ? (
+                      <span className="ml-1 text-muted-foreground/50">n/a</span>
+                    ) : null}
+                  </TabsTrigger>
+                ))}
+              </TabsList>
+              {tabs.map((tab) => (
+                <TabsContent key={tab.id} value={tab.id}>
+                  {tab.baseline ? (
+                    <SliderComparison
+                      baselineImage={tab.baseline}
+                      currentImage={diff.currentImagePath!}
+                      diffImage={tab.diffImg || undefined}
+                      leftLabel={tab.leftLabel}
+                      className="border rounded-lg"
+                    />
+                  ) : (
+                    <div className="border rounded-lg p-8 text-center text-muted-foreground space-y-2">
+                      <p className="font-medium">
+                        {tab.id === 'branch' ? 'No branch baseline yet' : 'No main baseline yet'}
+                      </p>
+                      <p className="text-sm">
+                        {tab.id === 'branch'
+                          ? 'A branch baseline will be created when you approve a diff on this branch.'
+                          : 'Run and approve a build on the default branch to create a main baseline.'}
+                      </p>
+                      <div className="pt-2">
+                        <img
+                          src={diff.currentImagePath!}
+                          alt="Current screenshot"
+                          className="w-full rounded opacity-60"
+                        />
+                      </div>
+                    </div>
+                  )}
+                </TabsContent>
+              ))}
+            </Tabs>
+          );
+        })()
       ) : (
         <div className="border rounded-lg p-8 text-center text-muted-foreground">
           No screenshot available

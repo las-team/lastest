@@ -35,8 +35,9 @@ export async function approveDiff(diffId: string, approvedBy?: string) {
     : null;
   const branch = testRun?.gitBranch || 'main';
 
-  // Deactivate old baselines and create new one (including stepLabel for multi-step tests)
-  await queries.deactivateBaselines(diff.testId, diff.stepLabel);
+  // Branch-scoped approval: only deactivate/create baselines for THIS branch
+  // Main baselines are only updated via PR merge promotion or direct main builds
+  await queries.deactivateBaselines(diff.testId, diff.stepLabel, branch);
   await queries.createBaseline({
     testId: diff.testId,
     stepLabel: diff.stepLabel,

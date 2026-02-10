@@ -5,7 +5,19 @@ import {
   isPushEvent,
 } from '@/lib/github/webhooks';
 import { createAndRunBuild } from '@/server/actions/builds';
+import { mergeBaselinesFromBranch, cleanupBranchBaselines } from '@/server/actions/baselines';
 import * as queries from '@/lib/db/queries';
+
+/**
+ * Resolve the internal repository ID from a GitHub webhook payload.
+ */
+async function resolveRepositoryId(data: { repository?: { id?: number } }): Promise<string | undefined> {
+  const githubRepoId = data.repository?.id;
+  if (!githubRepoId) return undefined;
+
+  const repo = await queries.getRepositoryByGithubId(githubRepoId);
+  return repo?.id;
+}
 
 export async function POST(request: NextRequest) {
   const signature = request.headers.get('x-hub-signature-256');
@@ -22,6 +34,8 @@ export async function POST(request: NextRequest) {
 
   try {
     if (event === 'pull_request' && isPullRequestEvent(data)) {
+      const repositoryId = await resolveRepositoryId(data);
+
       // Handle pull request events
       if (data.action === 'opened' || data.action === 'synchronize') {
         // Create or update PR record
@@ -46,8 +60,8 @@ export async function POST(request: NextRequest) {
           });
         }
 
-        // Trigger build
-        await createAndRunBuild('webhook');
+        // Trigger build for PR
+        await createAndRunBuild('webhook', undefined, repositoryId);
 
         return NextResponse.json({ message: 'Build triggered for PR' });
       }
@@ -57,9 +71,24 @@ export async function POST(request: NextRequest) {
         const existingPR = await queries.getPullRequestByBranch(data.pull_request.head.ref);
         if (existingPR) {
           await queries.updatePullRequest(existingPR.id, {
-            status: data.pull_request.state,
+            status: data.pull_request.merged ? 'merged' : 'closed',
           });
         }
+
+        // If PR was merged, promote branch baselines to target branch and cleanup
+        if (data.pull_request.merged && repositoryId) {
+          const headBranch = data.pull_request.head.ref;
+          const baseBranch = data.pull_request.base.ref;
+
+          try {
+            await mergeBaselinesFromBranch(repositoryId, headBranch, baseBranch);
+            await cleanupBranchBaselines(repositoryId, headBranch);
+            console.log(`[webhook] Merged baselines from ${headBranch} → ${baseBranch} and cleaned up`);
+          } catch (error) {
+            console.error('[webhook] Failed to merge/cleanup baselines:', error);
+          }
+        }
+
         return NextResponse.json({ message: 'PR status updated' });
       }
     }
@@ -67,12 +96,13 @@ export async function POST(request: NextRequest) {
     if (event === 'push' && isPushEvent(data)) {
       // Handle push events
       const branch = data.ref.replace('refs/heads/', '');
+      const repositoryId = await resolveRepositoryId(data);
 
       // Only trigger for certain branches (configurable)
       const monitoredBranches = (process.env.MONITORED_BRANCHES || 'main,develop').split(',');
 
       if (monitoredBranches.includes(branch)) {
-        await createAndRunBuild('push');
+        await createAndRunBuild('push', undefined, repositoryId);
         return NextResponse.json({ message: 'Build triggered for push' });
       }
 
