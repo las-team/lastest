@@ -607,6 +607,8 @@ async function runBuildAsync(
       elapsedMs: Date.now() - startTime,
     });
     await failJob(jobId, error instanceof Error ? error.message : 'Build failed');
+    // Clear setup context on error to prevent stale state leaking to future runs
+    runner.clearSetupContext();
   }
 
   revalidatePath('/builds');

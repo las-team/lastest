@@ -168,8 +168,13 @@ async function runTestsAsync(runId: string, tests: Test[], repositoryId?: string
       if (playwrightSettings) {
         runner.setSettings(playwrightSettings);
       }
+      // Clear any stale setup context before standalone run
+      runner.clearSetupContext();
       results = await runner.runTests(tests, runId, undefined, undefined, headless);
     }
+
+    // Clear any stale setup context from previous runs
+    runner.clearSetupContext();
 
     // Save results
     for (let i = 0; i < results.length; i++) {

@@ -7,7 +7,7 @@ import crypto from 'crypto';
 import AxeBuilder from '@axe-core/playwright';
 import { DEFAULT_SELECTOR_PRIORITY, DEFAULT_STABILIZATION_SETTINGS } from '@/lib/db/schema';
 import type { A11yViolation, StabilizationSettings, StabilityMetadata } from '@/lib/db/schema';
-import { getSelectorStats, recordSelectorSuccess, recordSelectorFailure } from '@/lib/db/queries';
+import { getSelectorStats, recordSelectorSuccess, recordSelectorFailure, getDefaultSetupSteps } from '@/lib/db/queries';
 import { setupFreezeScripts, setupThirdPartyBlocking, applyStabilization } from './stabilization';
 import { captureWithBurst } from './burst-capture';
 import { applyDynamicMasking } from './dynamic-masking';
@@ -860,9 +860,20 @@ export class PlaywrightRunner extends EventEmitter {
     try {
       // If build-level setup captured storageState (cookies/localStorage),
       // inject it into the new context so tests inherit the login session
+      // Check if this test IS a setup test — if so, don't inject storageState
+      // because setup tests need clean contexts (e.g., login test needs to see /login)
+      let skipStorageStateInjection = false;
+      if (this.setupContext?.storageState && test.repositoryId) {
+        const defaultSteps = await getDefaultSetupSteps(test.repositoryId);
+        if (defaultSteps.some(step => step.testId === test.id)) {
+          skipStorageStateInjection = true;
+          console.log(`[test-context] Skipping storageState for setup test "${test.name}"`);
+        }
+      }
+
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       let parsedStorageState: any;
-      if (this.setupContext?.storageState) {
+      if (this.setupContext?.storageState && !skipStorageStateInjection) {
         try {
           parsedStorageState = JSON.parse(this.setupContext.storageState);
           console.log(`[test-context] Injecting storageState: ${parsedStorageState.cookies?.length ?? 0} cookies`);
@@ -885,7 +896,7 @@ export class PlaywrightRunner extends EventEmitter {
 
       // Setup third-party blocking if enabled
       // Get the base URL from environment config (always a full URL like http://localhost:3000)
-      const envBaseUrl = this.environmentConfig?.baseUrl || 'http://localhost:3000';
+      const envBaseUrl = (this.environmentConfig?.baseUrl || 'http://localhost:3000').replace(/\/$/, '');
       // Resolve target URL - if test.targetUrl is relative, combine with envBaseUrl
       let targetUrl = envBaseUrl;
       if (test.targetUrl) {
@@ -1373,7 +1384,7 @@ export class PlaywrightRunner extends EventEmitter {
 
     if (funcMatch) {
       const serverManager = getServerManager();
-      const baseUrl = this.environmentConfig?.baseUrl || serverManager.resolveUrl('http://localhost:3000').replace(/\/$/, '') || 'http://localhost:3000';
+      const baseUrl = (this.environmentConfig?.baseUrl || serverManager.resolveUrl('http://localhost:3000') || 'http://localhost:3000').replace(/\/$/, '');
 
       const stepLogger = {
         log: (msg: string) => {
