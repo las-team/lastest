@@ -126,6 +126,7 @@ export const testResults = sqliteTable('test_results', {
   id: text('id').primaryKey(),
   testRunId: text('test_run_id').references(() => testRuns.id),
   testId: text('test_id').references(() => tests.id),
+  testVersionId: text('test_version_id'), // links to testVersions.id — which version was executed
   status: text('status'), // 'passed', 'failed', 'skipped'
   screenshotPath: text('screenshot_path'),
   screenshots: text('screenshots', { mode: 'json' }).$type<CapturedScreenshot[]>(),
@@ -662,7 +663,7 @@ export type BackgroundJob = typeof backgroundJobs.$inferSelect;
 export type NewBackgroundJob = typeof backgroundJobs.$inferInsert;
 
 // Test versions for version history
-export type TestChangeReason = 'initial' | 'manual_edit' | 'ai_fix' | 'ai_enhance' | 'restored';
+export type TestChangeReason = 'initial' | 'manual_edit' | 'ai_fix' | 'ai_enhance' | 'restored' | 'branch_merge';
 
 export const testVersions = sqliteTable('test_versions', {
   id: text('id').primaryKey(),
@@ -671,7 +672,8 @@ export const testVersions = sqliteTable('test_versions', {
   code: text('code').notNull(),
   name: text('name').notNull(),
   targetUrl: text('target_url'),
-  changeReason: text('change_reason'), // 'manual_edit' | 'ai_fix' | 'ai_enhance' | 'restored_from_vN'
+  changeReason: text('change_reason'), // 'manual_edit' | 'ai_fix' | 'ai_enhance' | 'restored_from_vN' | 'branch_merge'
+  branch: text('branch'), // nullable — tracks which branch this version was created on
   createdAt: integer('created_at', { mode: 'timestamp' }),
 });
 

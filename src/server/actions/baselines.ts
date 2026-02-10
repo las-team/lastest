@@ -1,6 +1,7 @@
 'use server';
 
 import * as queries from '@/lib/db/queries';
+import type { TestChangeReason } from '@/lib/db/schema';
 
 /**
  * Fork baselines from one branch to another.
@@ -108,4 +109,37 @@ export async function cleanupBranchBaselines(
   }
 
   return { deactivated: branchBaselines.length };
+}
+
+/**
+ * Promote test versions from a feature branch to main test code on merge.
+ * For each test, if the latest version on the branch has different code,
+ * update the test's code (creating a new version with 'branch_merge' reason).
+ */
+export async function promoteTestVersionsFromBranch(
+  repositoryId: string,
+  fromBranch: string
+): Promise<{ promoted: number; unchanged: number }> {
+  const branchVersions = await queries.getLatestBranchVersions(repositoryId, fromBranch);
+
+  let promoted = 0;
+  let unchanged = 0;
+
+  for (const { testId, version } of branchVersions) {
+    const test = await queries.getTest(testId);
+    if (!test) continue;
+
+    if (version.code !== test.code) {
+      await queries.updateTestWithVersion(
+        testId,
+        { code: version.code, name: version.name, targetUrl: version.targetUrl },
+        'branch_merge' as TestChangeReason
+      );
+      promoted++;
+    } else {
+      unchanged++;
+    }
+  }
+
+  return { promoted, unchanged };
 }

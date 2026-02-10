@@ -27,14 +27,23 @@ interface SidebarProps {
   team?: Team | null;
 }
 
-const navigation = [
+const dashboardNav = [
   { name: 'Dashboard', href: '/', icon: LayoutDashboard },
+];
+
+const definitionNav = [
   { name: 'Areas', href: '/areas', icon: FolderTree },
   { name: 'Tests', href: '/tests', icon: FileCode },
   { name: 'Suites', href: '/suites', icon: Layers },
+  { name: 'Env', href: '/env', icon: Zap },
+];
+
+const executionNav = [
   { name: 'Runs', href: '/run', icon: Play },
   { name: 'Compare', href: '/compare', icon: GitCompare },
-  { name: 'Env', href: '/env', icon: Zap },
+];
+
+const settingsNav = [
   { name: 'Settings', href: '/settings', icon: Settings },
 ];
 
@@ -69,12 +78,82 @@ export function Sidebar({ repos, selectedRepo, currentUser, team }: SidebarProps
         </div>
       </div>
 
-      <nav className="flex-1 p-4">
+      <nav className="flex-1 p-4 space-y-4">
         <ul className="space-y-1">
-          {navigation.map((item) => {
-            const isActive = pathname === item.href ||
-              (item.href !== '/' && pathname.startsWith(item.href));
+          {dashboardNav.map((item) => {
+            const isActive = pathname === item.href;
+            return (
+              <li key={item.name}>
+                <Link
+                  href={item.href}
+                  className={cn(
+                    'flex items-center gap-3 px-3 py-2 rounded-md text-sm transition-colors',
+                    isActive
+                      ? 'bg-primary text-primary-foreground'
+                      : 'hover:bg-muted'
+                  )}
+                >
+                  <item.icon className="h-4 w-4" />
+                  {item.name}
+                </Link>
+              </li>
+            );
+          })}
+        </ul>
 
+        <div>
+          <p className="px-3 pb-1 text-xs font-medium text-muted-foreground uppercase tracking-wider">Definition</p>
+          <ul className="space-y-1">
+            {definitionNav.map((item) => {
+              const isActive = pathname === item.href || pathname.startsWith(item.href);
+              return (
+                <li key={item.name}>
+                  <Link
+                    href={item.href}
+                    className={cn(
+                      'flex items-center gap-3 px-3 py-2 rounded-md text-sm transition-colors',
+                      isActive
+                        ? 'bg-primary text-primary-foreground'
+                        : 'hover:bg-muted'
+                    )}
+                  >
+                    <item.icon className="h-4 w-4" />
+                    {item.name}
+                  </Link>
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+
+        <div>
+          <p className="px-3 pb-1 text-xs font-medium text-muted-foreground uppercase tracking-wider">Execution</p>
+          <ul className="space-y-1">
+            {executionNav.map((item) => {
+              const isActive = pathname === item.href || pathname.startsWith(item.href);
+              return (
+                <li key={item.name}>
+                  <Link
+                    href={item.href}
+                    className={cn(
+                      'flex items-center gap-3 px-3 py-2 rounded-md text-sm transition-colors',
+                      isActive
+                        ? 'bg-primary text-primary-foreground'
+                        : 'hover:bg-muted'
+                    )}
+                  >
+                    <item.icon className="h-4 w-4" />
+                    {item.name}
+                  </Link>
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+
+        <ul className="space-y-1">
+          {settingsNav.map((item) => {
+            const isActive = pathname === item.href || pathname.startsWith(item.href);
             return (
               <li key={item.name}>
                 <Link

@@ -5,7 +5,7 @@ import {
   isPushEvent,
 } from '@/lib/github/webhooks';
 import { createAndRunBuild } from '@/server/actions/builds';
-import { mergeBaselinesFromBranch, cleanupBranchBaselines } from '@/server/actions/baselines';
+import { mergeBaselinesFromBranch, cleanupBranchBaselines, promoteTestVersionsFromBranch } from '@/server/actions/baselines';
 import * as queries from '@/lib/db/queries';
 
 /**
@@ -82,8 +82,9 @@ export async function POST(request: NextRequest) {
 
           try {
             await mergeBaselinesFromBranch(repositoryId, headBranch, baseBranch);
+            await promoteTestVersionsFromBranch(repositoryId, headBranch);
             await cleanupBranchBaselines(repositoryId, headBranch);
-            console.log(`[webhook] Merged baselines from ${headBranch} → ${baseBranch} and cleaned up`);
+            console.log(`[webhook] Merged baselines + test versions from ${headBranch} → ${baseBranch} and cleaned up`);
           } catch (error) {
             console.error('[webhook] Failed to merge/cleanup baselines:', error);
           }

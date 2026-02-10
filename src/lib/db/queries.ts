@@ -1947,11 +1947,51 @@ export async function createTestVersion(data: Omit<NewTestVersion, 'id'>) {
   return { id, ...data, createdAt: new Date() };
 }
 
+// Get a single test version by its ID
+export async function getTestVersionById(versionId: string) {
+  return db
+    .select()
+    .from(testVersions)
+    .where(eq(testVersions.id, versionId))
+    .get();
+}
+
+// Get test versions created on a specific branch
+export async function getTestVersionsByBranch(testId: string, branch: string) {
+  return db
+    .select()
+    .from(testVersions)
+    .where(and(eq(testVersions.testId, testId), eq(testVersions.branch, branch)))
+    .orderBy(desc(testVersions.version))
+    .all();
+}
+
+// For each test in a repo, get the latest version on a given branch
+export async function getLatestBranchVersions(repositoryId: string, branch: string) {
+  const repoTests = await getTestsByRepo(repositoryId);
+  const results: { testId: string; version: typeof testVersions.$inferSelect }[] = [];
+
+  for (const test of repoTests) {
+    const latest = await db
+      .select()
+      .from(testVersions)
+      .where(and(eq(testVersions.testId, test.id), eq(testVersions.branch, branch)))
+      .orderBy(desc(testVersions.version))
+      .limit(1)
+      .get();
+    if (latest) {
+      results.push({ testId: test.id, version: latest });
+    }
+  }
+  return results;
+}
+
 // Update test with versioning - saves current state before updating
 export async function updateTestWithVersion(
   id: string,
   data: Partial<NewTest>,
-  changeReason?: TestChangeReason | string
+  changeReason?: TestChangeReason | string,
+  branch?: string
 ) {
   const test = await getTest(id);
   if (!test) throw new Error('Test not found');
@@ -1967,6 +2007,7 @@ export async function updateTestWithVersion(
     name: test.name,
     targetUrl: test.targetUrl,
     changeReason: changeReason ?? 'manual_edit',
+    branch: branch ?? null,
   });
 
   // Update the test

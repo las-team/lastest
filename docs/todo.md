@@ -9,10 +9,10 @@ Timestamp fixing
 ## features
 Support https://github.com/excalidraw/excalidraw/tree/master/packages/excalidraw/tests ~/.claude/plans/declarative-kindling-coral.md 55%
     Dev feeback - Baseline, Accepted changes, Test changes, new tests
+    Areas changed
 
 Revise labels (e.g. new change, main 2.5%) on build page
 
-Areas changed
 
 Branch Tests, Build compose /home/ewyct/.claude/plans/ancient-dreaming-lake.md
 
