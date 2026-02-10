@@ -5,77 +5,41 @@ on:
     branches: [main]
 
 jobs:
-  # Remote mode: Dispatch to existing runner (recommended)
-  # Uncomment this job and configure secrets/variables to use remote runner
-  # remote-regression:
-  #   runs-on: ubuntu-latest
-  #   steps:
-  #     - name: Run visual regression tests
-  #       id: visual
-  #       uses: ./action
-  #       with:
-  #         server-url: ${{ secrets.LASTEST_SERVER_URL }}
-  #         runner-token: ${{ secrets.LASTEST_RUNNER_TOKEN }}
-  #         repo-id: ${{ vars.LASTEST_REPO_ID }}
-  #         team-id: ${{ vars.LASTEST_TEAM_ID }}
-  #         runner-id: ${{ vars.LASTEST_RUNNER_ID }}
-  #         timeout: '300'
-  #         fail-on-changes: 'false'
-  #
-  #     - name: Summary
-  #       if: always()
-  #       run: |
-  #         echo "## Visual Regression Results" >> $GITHUB_STEP_SUMMARY
-  #         echo "" >> $GITHUB_STEP_SUMMARY
-  #         echo "**Status:** ${{ steps.visual.outputs.status }}" >> $GITHUB_STEP_SUMMARY
-  #         echo "**Passed:** ${{ steps.visual.outputs.passed-count }}" >> $GITHUB_STEP_SUMMARY
-  #         echo "**Failed:** ${{ steps.visual.outputs.failed-count }}" >> $GITHUB_STEP_SUMMARY
-  #         echo "**Changes:** ${{ steps.visual.outputs.changed-count }}" >> $GITHUB_STEP_SUMMARY
-  #         echo "" >> $GITHUB_STEP_SUMMARY
-  #         echo "[View Results](${{ steps.visual.outputs.build-url }})" >> $GITHUB_STEP_SUMMARY
-
-  # Local mode: Run Playwright directly in CI (requires browser installation)
-  regression:
+  visual-regression:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - name: Run visual regression tests
+        id: visual
+        uses: dexilion-team/lastest2-action@v1
         with:
-          fetch-depth: 0
+          server-url: ${{ secrets.LASTEST_SERVER_URL }}
+          runner-token: ${{ secrets.LASTEST_RUNNER_TOKEN }}
+          repo-id: ${{ vars.LASTEST_REPO_ID }}
+          team-id: ${{ vars.LASTEST_TEAM_ID }}
+          runner-id: ${{ vars.LASTEST_RUNNER_ID }}
+          timeout: '300'
+          fail-on-changes: 'false'
 
-      - uses: pnpm/action-setup@v4
+      - name: Summary
+        if: always() && steps.visual.outputs.status != ''
+        run: |
+          STATUS="${{ steps.visual.outputs.status }}"
+          if [ "$STATUS" = "passed" ] || [ "$STATUS" = "safe_to_merge" ]; then
+            EMOJI="✅"
+          elif [ "$STATUS" = "review_required" ]; then
+            EMOJI="⚠️"
+          else
+            EMOJI="❌"
+          fi
 
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          cache: 'pnpm'
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-
-      - name: Install Playwright browsers
-        run: pnpm exec playwright install chromium
-
-      - name: Setup database
-        run: pnpm db:push
-
-      - name: Build application
-        run: pnpm build
-
-      # Visual regression test step removed — re-enable once vars.REPO_ID is configured
-      # - name: Run visual regression tests
-      #   run: |
-      #     node .next/standalone/server.js &
-      #     sleep 10
-      #     npx tsx scripts/run-tests.ts --repo-id "${{ vars.REPO_ID }}" --base-url http://localhost:3000 --output-dir ./test-output
-      #   env:
-      #     DATABASE_PATH: ./lastest2.db
-      #     PORT: 3000
-      #     HOSTNAME: 0.0.0.0
-      #
-      # - name: Upload screenshots
-      #   if: always()
-      #   uses: actions/upload-artifact@v4
-      #   with:
-      #     name: regression-screenshots
-      #     path: ./test-output/
-      #     retention-days: 7
+          echo "## ${EMOJI} Visual Regression Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Metric | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|--------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Status | **${STATUS}** |" >> $GITHUB_STEP_SUMMARY
+          echo "| Passed | ${{ steps.visual.outputs.passed-count }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Failed | ${{ steps.visual.outputs.failed-count }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Changes | ${{ steps.visual.outputs.changed-count }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Total | ${{ steps.visual.outputs.total-tests }} |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "[View Results](${{ steps.visual.outputs.build-url }})" >> $GITHUB_STEP_SUMMARY
