@@ -491,7 +491,10 @@ export function RunDashboardClient({ tests, runs: _runs, builds, repositoryId, a
               {builds.length > 0 ? (
                 <div className="space-y-3">
                   {(() => {
-                    const baselineBuildId = builds.find(b => b.overallStatus === 'safe_to_merge')?.id;
+                    const mainBaselineBuildId = builds.find(b => b.overallStatus === 'safe_to_merge' && b.gitBranch === defaultBranch)?.id;
+                    const branchBaselineBuildId = currentBranch && currentBranch !== defaultBranch
+                      ? builds.find(b => b.overallStatus === 'safe_to_merge' && b.gitBranch === currentBranch)?.id
+                      : undefined;
                     return builds.slice(0, 10).map((build) => (
                       <BuildSummaryCard
                         key={build.id}
@@ -500,7 +503,8 @@ export function RunDashboardClient({ tests, runs: _runs, builds, repositoryId, a
                         gitCommit={build.gitCommit}
                         isActiveBranch={build.gitBranch === activeBranch}
                         baseUrl={build.baseUrl || undefined}
-                        isBaseline={build.id === baselineBuildId}
+                        isMainBaseline={build.id === mainBaselineBuildId}
+                        isBranchBaseline={build.id === branchBaselineBuildId}
                       />
                     ));
                   })()}

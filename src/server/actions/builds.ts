@@ -685,8 +685,8 @@ async function processVisualDiff(
     }
   };
 
-  // Resolve primary baseline using branch-aware fallback chain
-  const baseline = await queries.getActiveBaseline(testId, stepLabel, branch, defaultBranch);
+  // Resolve primary baseline — branch-specific only, no fallback to main
+  const baseline = await queries.getBranchBaseline(testId, stepLabel, branch);
 
   // Check for carry-forward (previously approved identical image)
   const currentHash = hashImage(path.join(process.cwd(), 'public', currentScreenshotPath));
@@ -737,21 +737,16 @@ async function processVisualDiff(
     }
   };
 
-  // Helper to generate secondary main baseline diff
-  const generateMainBaselineDiff = async (currentPath: string, primaryBaselineBranch?: string): Promise<{
+  // Helper to generate main baseline diff (always runs on feature branches)
+  const generateMainBaselineDiff = async (currentPath: string): Promise<{
     mainBaselineImagePath: string | null;
     mainDiffImagePath: string | null;
     mainPixelDifference: number | null;
     mainPercentageDifference: string | null;
     mainClassification: DiffClassification | null;
   }> => {
-    // Skip when on main branch (redundant with primary diff)
+    // Skip when on main branch (branch diff IS the main diff)
     if (branch === defaultBranch) {
-      return { mainBaselineImagePath: null, mainDiffImagePath: null, mainPixelDifference: null, mainPercentageDifference: null, mainClassification: null };
-    }
-
-    // Skip if primary baseline already IS the main baseline (getActiveBaseline fell through)
-    if (primaryBaselineBranch === defaultBranch) {
       return { mainBaselineImagePath: null, mainDiffImagePath: null, mainPixelDifference: null, mainPercentageDifference: null, mainClassification: null };
     }
 
@@ -795,7 +790,7 @@ async function processVisualDiff(
   if (matchingBaseline) {
     // Auto-approve: identical to previously approved baseline
     const plannedDiff = await generatePlannedDiff(currentScreenshotPath);
-    const mainDiff = await generateMainBaselineDiff(currentScreenshotPath, matchingBaseline.branch);
+    const mainDiff = await generateMainBaselineDiff(currentScreenshotPath);
 
     const diff = await queries.createVisualDiff({
       buildId,
@@ -856,7 +851,7 @@ async function processVisualDiff(
     const diffImagePath = diffResult.diffImagePath.replace(process.cwd() + '/public', '');
 
     const plannedDiff = await generatePlannedDiff(currentScreenshotPath);
-    const mainDiff = await generateMainBaselineDiff(currentScreenshotPath, baseline.branch);
+    const mainDiff = await generateMainBaselineDiff(currentScreenshotPath);
 
     const diff = await queries.createVisualDiff({
       buildId,
@@ -879,7 +874,7 @@ async function processVisualDiff(
   } catch {
     // Diff generation failed, mark as pending for review
     const plannedDiff = await generatePlannedDiff(currentScreenshotPath);
-    const mainDiff = await generateMainBaselineDiff(currentScreenshotPath, baseline.branch);
+    const mainDiff = await generateMainBaselineDiff(currentScreenshotPath);
 
     const diff = await queries.createVisualDiff({
       buildId,

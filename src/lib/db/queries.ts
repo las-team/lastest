@@ -805,7 +805,7 @@ export async function getBaselinesByBranch(repositoryId: string, branch: string)
     .select()
     .from(baselines)
     .where(and(
-      eq(baselines.repositoryId, repositoryId),
+      or(eq(baselines.repositoryId, repositoryId), isNull(baselines.repositoryId)),
       eq(baselines.branch, branch),
       eq(baselines.isActive, true),
     ))
