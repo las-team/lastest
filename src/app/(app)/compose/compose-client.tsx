@@ -206,10 +206,10 @@ export function ComposeClient({ tests, defaultBranch, mainBuild, mainBuildTests 
                 </div>
               ) : !groupByArea ? (
                 <div className="space-y-1">
-                  {mainBuildTests.map((t) => (
+                  {sortedMainTests.map((t) => (
                     <MainTestRow key={t.testId ?? t.testVersionId} test={t} />
                   ))}
-                  {mainBuildTests.length === 0 && (
+                  {sortedMainTests.length === 0 && (
                     <p className="text-sm text-muted-foreground py-4 text-center">No tests in this build</p>
                   )}
                 </div>
@@ -262,7 +262,7 @@ export function ComposeClient({ tests, defaultBranch, mainBuild, mainBuildTests 
             <CardContent>
               {!groupByArea ? (
                 <div className="space-y-1">
-                  {tests.map((test) => (
+                  {sortedTests.map((test) => (
                     <ConfigTestRow
                       key={test.id}
                       test={test}
@@ -317,44 +317,35 @@ export function ComposeClient({ tests, defaultBranch, mainBuild, mainBuildTests 
   );
 }
 
-/** Read-only row showing a test from the main branch build — version is primary info */
+/** Read-only row showing a test from the main branch build */
 function MainTestRow({ test }: { test: MainBuildTest }) {
-  const reason = test.versionReason?.replace(/_/g, ' ') || '';
   const diffPct = test.avgDiffPct;
   const diffLabel = diffPct === null ? '-' : diffPct === 0 ? '0%' : `${diffPct.toFixed(1)}%`;
   const diffColor = diffPct === null || diffPct === 0 ? 'text-green-600' : diffPct < 1 ? 'text-yellow-600' : 'text-red-600';
 
   return (
-    <div className="flex items-start gap-3 p-2 border rounded-md min-h-[52px]">
-      {/* Spacer matching the checkbox width on the right side */}
+    <div className="flex items-center gap-2 px-2 h-9 border rounded-md">
       <div className="w-4 shrink-0" />
-      <div className="min-w-0 flex-1">
-        <div className="text-sm font-medium truncate">{test.testName || 'Unknown test'}</div>
-        <div className="flex items-center gap-2 mt-1 h-4">
-          <Badge variant="secondary" className="text-[10px] font-mono">
-            v{test.versionNumber ?? '?'}
-          </Badge>
-          {test.isLatest && (
-            <span className="text-[10px] text-primary font-medium">latest</span>
-          )}
-          {reason && (
-            <span className="text-[10px] text-muted-foreground max-w-24 truncate">{reason}</span>
-          )}
-          <span className={`text-xs font-medium ${diffColor}`}>{diffLabel}</span>
-          {test.status && (
-            <Badge
-              variant="secondary"
-              className={`text-[10px] ${
-                test.status === 'passed' ? 'bg-green-100 text-green-700' :
-                test.status === 'failed' ? 'bg-red-100 text-red-700' :
-                'bg-gray-100 text-gray-600'
-              }`}
-            >
-              {test.status}
-            </Badge>
-          )}
-        </div>
-      </div>
+      <span className="text-sm font-medium truncate flex-1 min-w-0">{test.testName || 'Unknown test'}</span>
+      <Badge variant="secondary" className="text-[10px] font-mono shrink-0">
+        v{test.versionNumber ?? '?'}
+      </Badge>
+      {test.isLatest && (
+        <span className="text-[10px] text-primary font-medium shrink-0">latest</span>
+      )}
+      <span className={`text-[10px] font-medium shrink-0 ${diffColor}`}>{diffLabel}</span>
+      {test.status && (
+        <Badge
+          variant="secondary"
+          className={`text-[10px] shrink-0 ${
+            test.status === 'passed' ? 'bg-green-100 text-green-700' :
+            test.status === 'failed' ? 'bg-red-100 text-red-700' :
+            'bg-gray-100 text-gray-600'
+          }`}
+        >
+          {test.status}
+        </Badge>
+      )}
     </div>
   );
 }
@@ -379,35 +370,27 @@ function ConfigTestRow({
 
   return (
     <div
-      className={`flex items-start gap-3 p-2 border rounded-md transition-colors min-h-[52px] ${
+      className={`flex items-center gap-2 px-2 h-9 border rounded-md transition-colors ${
         isSelected ? 'border-primary/30 bg-primary/5' : 'opacity-60'
       }`}
     >
-      <div className="pt-0.5">
-        <Checkbox checked={isSelected} onCheckedChange={onToggle} />
-      </div>
-      <div className="min-w-0 flex-1">
-        <div className="text-sm font-medium truncate">{test.name}</div>
-        <div className="flex items-center gap-2 mt-1 h-4">
-          {hasVersions ? (
-            <>
-              <span className="text-[10px] text-muted-foreground shrink-0 w-28 truncate">
-                {getVersionLabel(test, sliderValue)}
-              </span>
-              <Slider
-                min={0}
-                max={test.versions.length}
-                step={1}
-                value={[sliderValue]}
-                onValueChange={([v]) => onSliderChange(v)}
-                className="w-40"
-              />
-            </>
-          ) : (
-            <span className="text-[10px] text-muted-foreground">No versions</span>
-          )}
-        </div>
-      </div>
+      <Checkbox checked={isSelected} onCheckedChange={onToggle} />
+      <span className="text-sm font-medium truncate flex-1 min-w-0">{test.name}</span>
+      {hasVersions && (
+        <>
+          <span className="text-[10px] text-muted-foreground shrink-0 w-20 truncate text-right">
+            {getVersionLabel(test, sliderValue)}
+          </span>
+          <Slider
+            min={0}
+            max={test.versions.length}
+            step={1}
+            value={[sliderValue]}
+            onValueChange={([v]) => onSliderChange(v)}
+            className="w-28 shrink-0"
+          />
+        </>
+      )}
     </div>
   );
 }
