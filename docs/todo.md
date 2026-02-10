@@ -8,22 +8,16 @@ Gitlab
 Timestamp fixing
 ## features
 Support https://github.com/excalidraw/excalidraw/tree/master/packages/excalidraw/tests ~/.claude/plans/declarative-kindling-coral.md 55%
-    Dev feeback - Baseline, Accepted changes, Test changes, new tests
-    Areas changed
+    Dev feeback
+    Actions with changes
 
 Revise labels (e.g. new change, main 2.5%) on build page
 
-
-Branch Tests, Build compose /home/ewyct/.claude/plans/ancient-dreaming-lake.md
-
 Teardown - after test scripts
 
-UX
-    Test defining
-    Test running
 
 AI Optimize playwright settings
-    select or identify testable app mode 
+    select or identify testable app mode, classify it
     Repo specific pw settings,
 
 Play gomb - give in url and do everything 

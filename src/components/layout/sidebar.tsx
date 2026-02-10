@@ -35,7 +35,8 @@ const definitionNav = [
   { name: 'Areas', href: '/areas', icon: FolderTree },
   { name: 'Tests', href: '/tests', icon: FileCode },
   { name: 'Suites', href: '/suites', icon: Layers },
-  { name: 'Env', href: '/env', icon: Zap },
+  { name: 'Compose', href: '/compose', icon: Layers },
+  { name: 'Env Setup', href: '/env', icon: Zap },
 ];
 
 const executionNav = [

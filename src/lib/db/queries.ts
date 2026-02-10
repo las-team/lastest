@@ -601,6 +601,37 @@ export async function getBuildsByRepo(repositoryId: string, limit = 10) {
     .all();
 }
 
+export async function getLastBuildByBranch(repositoryId: string, branch: string) {
+  return db
+    .select({
+      id: builds.id,
+      testRunId: builds.testRunId,
+      pullRequestId: builds.pullRequestId,
+      triggerType: builds.triggerType,
+      overallStatus: builds.overallStatus,
+      totalTests: builds.totalTests,
+      changesDetected: builds.changesDetected,
+      flakyCount: builds.flakyCount,
+      failedCount: builds.failedCount,
+      passedCount: builds.passedCount,
+      baseUrl: builds.baseUrl,
+      elapsedMs: builds.elapsedMs,
+      createdAt: builds.createdAt,
+      completedAt: builds.completedAt,
+      gitBranch: testRuns.gitBranch,
+      gitCommit: testRuns.gitCommit,
+    })
+    .from(builds)
+    .innerJoin(testRuns, eq(builds.testRunId, testRuns.id))
+    .where(and(
+      eq(testRuns.repositoryId, repositoryId),
+      eq(testRuns.gitBranch, branch)
+    ))
+    .orderBy(desc(builds.createdAt))
+    .limit(1)
+    .get();
+}
+
 // Visual Diffs
 export async function getVisualDiffsByBuild(buildId: string) {
   return db.select().from(visualDiffs).where(eq(visualDiffs.buildId, buildId)).all();

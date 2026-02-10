@@ -19,7 +19,6 @@ import {
   Zap,
   ChevronDown,
   ChevronRight,
-  Layers,
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { createAndRunBuild } from '@/server/actions/builds';
@@ -177,15 +176,6 @@ export function RunDashboardClient({ tests, runs: _runs, builds, repositoryId, a
                   </CardDescription>
                 </div>
                 <div className="flex items-center gap-2">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => router.push('/run/compose')}
-                    disabled={tests.length === 0}
-                  >
-                    <Layers className="h-3.5 w-3.5 mr-1.5" />
-                    Compose
-                  </Button>
                   <ExecutionTargetSelector
                     value={executionTarget}
                     onChange={setExecutionTarget}
