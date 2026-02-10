@@ -8,9 +8,11 @@ jobs:
   visual-regression:
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
+
       - name: Run visual regression tests
         id: visual
-        uses: dexilion-team/lastest2-action@v1
+        uses: ./action
         with:
           server-url: ${{ secrets.LASTEST_SERVER_URL }}
           runner-token: ${{ secrets.LASTEST_RUNNER_TOKEN }}
