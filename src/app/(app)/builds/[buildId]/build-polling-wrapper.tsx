@@ -65,15 +65,15 @@ export function BuildPollingWrapper({ initialBuild, buildId, children }: BuildPo
 
   return (
     <>
-      {/* Hero Status */}
-      <BuildSummaryHero
-        status={build.overallStatus}
-        changesDetected={build.changesDetected}
-        isRunning={isRunning}
-      />
-
-      {/* Children (Quick Actions, Git Info, etc.) */}
-      {children}
+      {/* Top row: Hero + Quick Actions + Git Info */}
+      <div className="flex items-center gap-3">
+        <BuildSummaryHero
+          status={build.overallStatus}
+          changesDetected={build.changesDetected}
+          isRunning={isRunning}
+        />
+        {children}
+      </div>
 
       {/* Metrics Row and Diff List with Filter Support */}
       <BuildDetailClient

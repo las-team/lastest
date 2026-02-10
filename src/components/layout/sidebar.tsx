@@ -151,28 +151,22 @@ export function Sidebar({ repos, selectedRepo, currentUser, team }: SidebarProps
           </ul>
         </div>
 
-        <ul className="space-y-1">
-          {settingsNav.map((item) => {
-            const isActive = pathname === item.href || pathname.startsWith(item.href);
-            return (
-              <li key={item.name}>
-                <Link
-                  href={item.href}
-                  className={cn(
-                    'flex items-center gap-3 px-3 py-2 rounded-md text-sm transition-colors',
-                    isActive
-                      ? 'bg-primary text-primary-foreground'
-                      : 'hover:bg-muted'
-                  )}
-                >
-                  <item.icon className="h-4 w-4" />
-                  {item.name}
-                </Link>
-              </li>
-            );
-          })}
-        </ul>
       </nav>
+
+      <div className="px-4 pb-2">
+        <Link
+          href="/settings"
+          className={cn(
+            'flex items-center gap-3 px-3 py-2 rounded-md text-sm transition-colors',
+            pathname === '/settings' || pathname.startsWith('/settings')
+              ? 'bg-primary text-primary-foreground'
+              : 'hover:bg-muted'
+          )}
+        >
+          <Settings className="h-4 w-4" />
+          Settings
+        </Link>
+      </div>
 
       <div className="p-4 border-t space-y-3">
         {currentUser && <UserMenu user={currentUser} />}

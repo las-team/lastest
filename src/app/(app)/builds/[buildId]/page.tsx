@@ -50,34 +50,25 @@ export default async function BuildPage({ params }: PageProps) {
           diffs: build.diffs,
         }}
       >
-        {/* Quick Actions */}
-        <div className="flex items-center justify-between">
-          <RecentHistory builds={recentBuilds} />
+        {/* Inline: Recent History + Git Info + Actions */}
+        <RecentHistory builds={recentBuilds} />
+        <div className="flex items-center gap-2 text-xs text-muted-foreground">
+          <span className="font-mono">{build.gitBranch}</span>
+          <span>·</span>
+          <span className="font-mono">{build.gitCommit.slice(0, 7)}</span>
+          {build.pullRequestId && (
+            <>
+              <span>·</span>
+              <span className="text-primary font-medium">PR #{build.pullRequestId}</span>
+            </>
+          )}
+        </div>
+        <div className="ml-auto">
           <BuildActionsClient
             buildId={buildId}
             hasPendingDiffs={pendingDiffs.length > 0}
             aiApproveCount={aiApproveCount}
           />
-        </div>
-
-        {/* Git Info */}
-        <div className="p-4 bg-muted rounded-lg text-sm">
-          <div className="flex items-center gap-4">
-            <div>
-              <span className="text-muted-foreground">Branch:</span>{' '}
-              <span className="font-mono">{build.gitBranch}</span>
-            </div>
-            <div>
-              <span className="text-muted-foreground">Commit:</span>{' '}
-              <span className="font-mono">{build.gitCommit.slice(0, 7)}</span>
-            </div>
-            {build.pullRequestId && (
-              <div>
-                <span className="text-muted-foreground">PR:</span>{' '}
-                <span className="text-primary">#{build.pullRequestId}</span>
-              </div>
-            )}
-          </div>
         </div>
       </BuildPollingWrapper>
     </div>

@@ -1,8 +1,8 @@
 'use client';
 
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
-import { AlertTriangle, CheckCircle, XCircle, ExternalLink, XIcon, Sparkles, Flag, Loader2, ChevronRight } from 'lucide-react';
+import { AlertTriangle, CheckCircle, XCircle, ExternalLink, XIcon, Sparkles, Flag, Loader2, ChevronRight, ChevronsUpDown } from 'lucide-react';
 import type { AIDiffAnalysis, VisualDiffWithTestStatus } from '@/lib/db/schema';
 import { MetricsRow } from '@/components/dashboard/metrics-row';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -121,7 +121,15 @@ export function BuildDetailClient({
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [isProcessing, setIsProcessing] = useState(false);
   const [viewMode, setViewMode] = useState<'branch' | 'main'>('branch');
+  const [groupByArea, setGroupByArea] = useState(false);
+  const [expandKey, setExpandKey] = useState(0);
+  const [allExpanded, setAllExpanded] = useState(true);
   const router = useRouter();
+
+  const toggleExpandAll = useCallback(() => {
+    setAllExpanded(prev => !prev);
+    setExpandKey(prev => prev + 1);
+  }, []);
 
   // Toggle filter - clicking active filter clears it
   const handleFilterChange = (filter: FilterType) => {
@@ -253,6 +261,8 @@ export function BuildDetailClient({
         aiFlagCount={aiFlagCount}
         viewMode={viewMode}
         onViewModeChange={setViewMode}
+        groupByArea={groupByArea}
+        onGroupByAreaChange={setGroupByArea}
       />
 
       {/* Tests for Review Section */}
@@ -358,8 +368,8 @@ export function BuildDetailClient({
               <p>No visual changes detected in this build.</p>
             )}
           </div>
-        ) : groupedDiffs.length <= 1 ? (
-          /* Single group or no areas — render flat like before */
+        ) : !groupByArea ? (
+          /* Flat list — no grouping */
           <div className="space-y-2">
             {filteredDiffs.map((diff) => (
               <DiffRow
@@ -374,45 +384,57 @@ export function BuildDetailClient({
             ))}
           </div>
         ) : (
-          /* Multiple groups — render with collapsible sections */
+          /* Grouped view with collapsible sections */
           <div className="space-y-3">
+            {/* Expand / Collapse All */}
+            <div className="flex justify-end">
+              <button
+                onClick={toggleExpandAll}
+                className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
+              >
+                <ChevronsUpDown className="w-3.5 h-3.5" />
+                {allExpanded ? 'Collapse All' : 'Expand All'}
+              </button>
+            </div>
+
             {groupedDiffs.map(([areaName, areaDiffs]) => {
               const changedCount = areaDiffs.filter(d => d.classification === 'changed').length;
               const pendingCount = areaDiffs.filter(d => d.status === 'pending').length;
               const approvedCount = areaDiffs.filter(d => d.status === 'approved' || d.status === 'auto_approved').length;
               const failedCount = areaDiffs.filter(d => d.testResultStatus === 'failed' || d.status === 'rejected').length;
-              const defaultOpen = pendingCount > 0 || failedCount > 0;
 
               return (
-                <Collapsible key={areaName} defaultOpen={defaultOpen}>
-                  <CollapsibleTrigger className="flex items-center justify-between w-full p-3 rounded-lg border bg-muted/30 hover:bg-muted/50 transition-colors group">
-                    <div className="flex items-center gap-2">
-                      <ChevronRight className="w-4 h-4 text-muted-foreground transition-transform group-data-[state=open]:rotate-90" />
-                      <span className="font-medium text-sm">{areaName}</span>
-                      <Badge variant="secondary" className="text-xs">{areaDiffs.length}</Badge>
-                    </div>
-                    <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                      {changedCount > 0 && <span className="text-yellow-600">{changedCount} changed</span>}
-                      {pendingCount > 0 && <span className="text-yellow-600">{pendingCount} pending</span>}
-                      {approvedCount > 0 && <span className="text-green-600">{approvedCount} approved</span>}
-                      {failedCount > 0 && <span className="text-red-600">{failedCount} failed</span>}
-                    </div>
-                  </CollapsibleTrigger>
-                  <CollapsibleContent>
-                    <div className="space-y-2 mt-2 ml-6">
-                      {areaDiffs.map((diff) => (
-                        <DiffRow
-                          key={diff.id}
-                          diff={diff}
-                          buildId={buildId}
-                          viewMode={viewMode}
-                          isSelected={selectedIds.has(diff.id)}
-                          onToggleSelect={toggleSelect}
-                          hasCodeChange={codeChangeTestIdSet.has(diff.testId)}
-                        />
-                      ))}
-                    </div>
-                  </CollapsibleContent>
+                <Collapsible key={`${areaName}-${expandKey}`} defaultOpen={allExpanded}>
+                  <div>
+                    <CollapsibleTrigger className="flex items-center justify-between w-full p-3 bg-muted/30 hover:bg-muted/50 transition-colors group">
+                      <div className="flex items-center gap-2">
+                        <ChevronRight className="w-4 h-4 text-muted-foreground transition-transform group-data-[state=open]:rotate-90" />
+                        <span className="font-medium text-sm">{areaName}</span>
+                        <Badge variant="secondary" className="text-xs">{areaDiffs.length}</Badge>
+                      </div>
+                      <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                        {changedCount > 0 && <span className="text-yellow-600">{changedCount} changed</span>}
+                        {pendingCount > 0 && <span className="text-yellow-600">{pendingCount} pending</span>}
+                        {approvedCount > 0 && <span className="text-green-600">{approvedCount} approved</span>}
+                        {failedCount > 0 && <span className="text-red-600">{failedCount} failed</span>}
+                      </div>
+                    </CollapsibleTrigger>
+                    <CollapsibleContent>
+                      <div className="space-y-2 p-3">
+                        {areaDiffs.map((diff) => (
+                          <DiffRow
+                            key={diff.id}
+                            diff={diff}
+                            buildId={buildId}
+                            viewMode={viewMode}
+                            isSelected={selectedIds.has(diff.id)}
+                            onToggleSelect={toggleSelect}
+                            hasCodeChange={codeChangeTestIdSet.has(diff.testId)}
+                          />
+                        ))}
+                      </div>
+                    </CollapsibleContent>
+                  </div>
                 </Collapsible>
               );
             })}
