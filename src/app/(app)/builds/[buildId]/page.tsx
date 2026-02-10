@@ -5,7 +5,6 @@ import { getCurrentSession } from '@/lib/auth';
 import { RecentHistory } from '@/components/dashboard/recent-history';
 import { BuildActionsClient } from './build-actions-client';
 import { BuildPollingWrapper } from './build-polling-wrapper';
-import { ComparisonModeBadge } from '@/components/builds/comparison-mode-badge';
 
 interface PageProps {
   params: Promise<{ buildId: string }>;
@@ -47,7 +46,6 @@ export default async function BuildPage({ params }: PageProps) {
           flakyCount: build.flakyCount,
           completedAt: build.completedAt,
           elapsedMs: build.elapsedMs,
-          comparisonMode: build.comparisonMode,
           diffs: build.diffs,
         }}
       >
@@ -78,7 +76,6 @@ export default async function BuildPage({ params }: PageProps) {
                 <span className="text-primary">#{build.pullRequestId}</span>
               </div>
             )}
-            <ComparisonModeBadge mode={build.comparisonMode} />
           </div>
         </div>
       </BuildPollingWrapper>

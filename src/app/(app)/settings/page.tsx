@@ -29,7 +29,6 @@ import { RunnerList } from '@/components/runners/runner-list';
 import { CreateRunnerDialog } from '@/components/runners/create-runner-dialog';
 import { getRunners } from '@/server/actions/runners';
 import { GoogleSheetsSettingsCard } from '@/components/settings/google-sheets-settings-card';
-import { ComparisonModeCard } from '@/components/settings/comparison-mode-card';
 
 export default async function SettingsPage({
   searchParams,
@@ -327,16 +326,6 @@ export default async function SettingsPage({
               hasGitlabAccount={!!gitlabAccount}
             />
           </div>
-
-          {/* Comparison Mode */}
-          {selectedRepo && (
-            <div id="comparison-mode">
-              <ComparisonModeCard
-                repositoryId={selectedRepo.id}
-                currentMode={selectedRepo.defaultComparisonMode || 'vs_both'}
-              />
-            </div>
-          )}
 
           {/* Diff Sensitivity */}
           <div id="diff-sensitivity">

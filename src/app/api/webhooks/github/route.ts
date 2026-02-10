@@ -60,8 +60,8 @@ export async function POST(request: NextRequest) {
           });
         }
 
-        // Trigger build with vs_both comparison mode for PR builds
-        await createAndRunBuild('webhook', undefined, repositoryId, undefined, 'vs_both');
+        // Trigger build for PR
+        await createAndRunBuild('webhook', undefined, repositoryId);
 
         return NextResponse.json({ message: 'Build triggered for PR' });
       }
@@ -102,8 +102,7 @@ export async function POST(request: NextRequest) {
       const monitoredBranches = (process.env.MONITORED_BRANCHES || 'main,develop').split(',');
 
       if (monitoredBranches.includes(branch)) {
-        // Push to main/monitored branches always uses vs_main
-        await createAndRunBuild('push', undefined, repositoryId, undefined, 'vs_main');
+        await createAndRunBuild('push', undefined, repositoryId);
         return NextResponse.json({ message: 'Build triggered for push' });
       }
 

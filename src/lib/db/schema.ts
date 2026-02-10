@@ -153,6 +153,7 @@ export const repositories = sqliteTable('repositories', {
   name: text('name').notNull(),
   fullName: text('full_name').notNull(), // owner/name or namespace/project
   defaultBranch: text('default_branch'),
+  /** @deprecated Always vs_both now — kept for backward compat */
   defaultComparisonMode: text('default_comparison_mode').default('vs_both'), // ComparisonMode
   selectedBaseline: text('selected_baseline'), // branch name for baseline comparison
   selectedBranch: text('selected_branch'), // branch for remote scanning via API
@@ -207,7 +208,7 @@ export const pullRequests = sqliteTable('pull_requests', {
   updatedAt: integer('updated_at', { mode: 'timestamp' }),
 });
 
-// Comparison mode for builds
+/** @deprecated Always vs_both now — kept for backward compat */
 export type ComparisonMode = 'vs_main' | 'vs_branch' | 'vs_both' | 'vs_previous' | 'vs_planned';
 
 // Builds - aggregated test run with status
@@ -224,6 +225,7 @@ export const builds = sqliteTable('builds', {
   passedCount: integer('passed_count').default(0),
   baseUrl: text('base_url'),
   elapsedMs: integer('elapsed_ms'),
+  /** @deprecated Always vs_both now — kept for backward compat */
   comparisonMode: text('comparison_mode').default('vs_main'), // ComparisonMode
   // Build-level setup configuration
   buildSetupTestId: text('build_setup_test_id'), // Use test as build-level setup

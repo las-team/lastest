@@ -144,14 +144,6 @@ export async function updateRepoSelectedBranch(repositoryId: string, branch: str
   revalidatePath('/builds');
 }
 
-export async function updateRepoDefaultComparisonMode(repositoryId: string, mode: string) {
-  const session = await requireTeamAccess();
-  const repo = await queries.getRepository(repositoryId);
-  if (!repo || repo.teamId !== session.team.id) return;
-  await queries.updateRepository(repositoryId, { defaultComparisonMode: mode });
-  revalidatePath('/settings');
-}
-
 // Branch interface that works for both providers
 interface RepoBranch {
   name: string;

@@ -104,7 +104,6 @@ export interface BuildDetailClientProps {
   hasPendingDiffs: boolean;
   isRunning?: boolean;
   completedTests?: number;
-  comparisonMode?: string | null;
 }
 
 export function BuildDetailClient({
@@ -113,7 +112,6 @@ export function BuildDetailClient({
   metrics,
   isRunning = false,
   completedTests = 0,
-  comparisonMode,
 }: BuildDetailClientProps) {
   const [activeFilter, setActiveFilter] = useState<FilterType>('all');
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -355,7 +353,7 @@ export function BuildDetailClient({
               const isAIFailed = diff.aiAnalysisStatus === 'failed';
               const branchStatus = deriveBranchStatus(diff);
               const bsConfig = branchStatusConfig[branchStatus];
-              const showDualComparison = comparisonMode === 'vs_both';
+              const hasMainDrift = diff.mainPercentageDifference && parseFloat(diff.mainPercentageDifference) > 0;
 
               return (
                 <div
@@ -414,15 +412,13 @@ export function BuildDetailClient({
 
                   <div className="flex items-center gap-4">
                     {/* Branch Status Badge */}
-                    {comparisonMode && comparisonMode !== 'vs_main' && (
-                      <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium ${bsConfig.className}`}>
-                        {bsConfig.label}
-                      </span>
-                    )}
-                    {/* Dual Comparison: vs Main drift */}
-                    {showDualComparison && diff.mainPercentageDifference && parseFloat(diff.mainPercentageDifference) > 0 && (
+                    <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium ${bsConfig.className}`}>
+                      {bsConfig.label}
+                    </span>
+                    {/* Main baseline drift */}
+                    {hasMainDrift && (
                       <span className="text-[10px] text-muted-foreground font-mono" title="Drift from main baseline">
-                        main: {parseFloat(diff.mainPercentageDifference).toFixed(1)}%
+                        main: {parseFloat(diff.mainPercentageDifference!).toFixed(1)}%
                       </span>
                     )}
                     {/* AI Badge */}

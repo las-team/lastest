@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { SliderComparison } from '@/components/diff/slider-comparison';
+import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { approveDiff, rejectDiff, undoApproval } from '@/server/actions/diffs';
 import type { VisualDiff, Test, DiffMetadata, AIDiffAnalysis } from '@/lib/db/schema';
 import { CheckCircle, XCircle, SkipForward, Eye, Image as ImageIcon, Sparkles, Loader2, ArrowUpDown } from 'lucide-react';
@@ -237,15 +238,68 @@ export function DiffViewerClient({ diff, buildId, nextDiffId }: DiffViewerClient
       )}
 
       {/* Diff Comparison */}
-      {diff.currentImagePath && (diff.baselineImagePath || diff.plannedImagePath) ? (
-        <SliderComparison
-          baselineImage={diff.baselineImagePath || undefined}
-          currentImage={diff.currentImagePath}
-          diffImage={diff.diffImagePath || undefined}
-          plannedImage={diff.plannedImagePath || undefined}
-          plannedDiffImage={diff.plannedDiffImagePath || undefined}
-          className="border rounded-lg"
-        />
+      {diff.currentImagePath && (diff.baselineImagePath || diff.mainBaselineImagePath || diff.plannedImagePath) ? (
+        (() => {
+          const tabs: { id: string; label: string; pct: string | null; baseline: string; diffImg: string | null | undefined; leftLabel?: string }[] = [];
+          if (diff.baselineImagePath) tabs.push({
+            id: 'branch', label: 'vs Branch',
+            pct: diff.percentageDifference,
+            baseline: diff.baselineImagePath,
+            diffImg: diff.diffImagePath,
+          });
+          if (diff.mainBaselineImagePath) tabs.push({
+            id: 'main', label: 'vs Main',
+            pct: diff.mainPercentageDifference,
+            baseline: diff.mainBaselineImagePath,
+            diffImg: diff.mainDiffImagePath,
+          });
+          if (diff.plannedImagePath) tabs.push({
+            id: 'planned', label: 'vs Planned',
+            pct: diff.plannedPercentageDifference,
+            baseline: diff.plannedImagePath,
+            diffImg: diff.plannedDiffImagePath,
+            leftLabel: 'Planned',
+          });
+
+          if (tabs.length <= 1) {
+            const tab = tabs[0];
+            return tab ? (
+              <SliderComparison
+                baselineImage={tab.baseline}
+                currentImage={diff.currentImagePath!}
+                diffImage={tab.diffImg || undefined}
+                leftLabel={tab.leftLabel}
+                className="border rounded-lg"
+              />
+            ) : null;
+          }
+
+          return (
+            <Tabs defaultValue={tabs[0].id} className="w-full">
+              <TabsList>
+                {tabs.map((tab) => (
+                  <TabsTrigger key={tab.id} value={tab.id}>
+                    {tab.label}
+                    {tab.pct && parseFloat(tab.pct) > 0 && (
+                      <span className="ml-1 text-muted-foreground">({parseFloat(tab.pct).toFixed(1)}%)</span>
+                    )}
+                  </TabsTrigger>
+                ))}
+              </TabsList>
+              {tabs.map((tab) => (
+                <TabsContent key={tab.id} value={tab.id}>
+                  <SliderComparison
+                    baselineImage={tab.baseline}
+                    currentImage={diff.currentImagePath!}
+                    diffImage={tab.diffImg || undefined}
+                    leftLabel={tab.leftLabel}
+                    className="border rounded-lg"
+                  />
+                </TabsContent>
+              ))}
+            </Tabs>
+          );
+        })()
       ) : diff.currentImagePath ? (
         <div className="border rounded-lg p-4">
           <div className="text-sm text-muted-foreground mb-2">New Screenshot (No Baseline)</div>

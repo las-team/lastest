@@ -27,8 +27,7 @@ import { analyzeSmartRun, runSmartBuild, type SmartRunAnalysis } from '@/server/
 import { testServerConnection, saveEnvironmentConfig } from '@/server/actions/environment';
 import { useNotifyJobStarted } from '@/components/queue/job-polling-context';
 import { ExecutionTargetSelector } from '@/components/execution/execution-target-selector';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import type { Test, TestRun, Build, ComparisonMode } from '@/lib/db/schema';
+import type { Test, TestRun, Build } from '@/lib/db/schema';
 import { BuildSummaryCard } from '@/components/builds/build-summary-card';
 import { BranchSelector } from '@/components/settings/branch-selector';
 
@@ -86,7 +85,6 @@ export function RunDashboardClient({ tests, runs: _runs, builds, repositoryId, a
   const [urlHistory, setUrlHistory] = useState<string[]>([]);
   const initialBaseUrlRef = useRef(initialBaseUrl);
   const [executionTarget, setExecutionTarget] = useState<string>('local');
-  const [comparisonMode, setComparisonMode] = useState<ComparisonMode>('vs_both');
   const [smartAnalysis, setSmartAnalysis] = useState<SmartRunAnalysis | null>(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [isSmartRunning, setIsSmartRunning] = useState(false);
@@ -153,7 +151,7 @@ export function RunDashboardClient({ tests, runs: _runs, builds, repositoryId, a
     setIsRunning(true);
     try {
       await saveAndTestBaseUrl();
-      const { buildId } = await createAndRunBuild('manual', undefined, repositoryId, executionTarget, comparisonMode);
+      const { buildId } = await createAndRunBuild('manual', undefined, repositoryId, executionTarget);
       notifyJobStarted();
       router.push(`/builds/${buildId}`);
     } catch (error) {
@@ -178,18 +176,6 @@ export function RunDashboardClient({ tests, runs: _runs, builds, repositoryId, a
                   </CardDescription>
                 </div>
                 <div className="flex items-center gap-2">
-                  <Select value={comparisonMode} onValueChange={(v) => setComparisonMode(v as ComparisonMode)}>
-                    <SelectTrigger className="w-[130px] h-9 text-xs">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="vs_both">vs Both</SelectItem>
-                      <SelectItem value="vs_main">vs Main</SelectItem>
-                      <SelectItem value="vs_branch">vs Branch</SelectItem>
-                      <SelectItem value="vs_previous">vs Previous</SelectItem>
-                      <SelectItem value="vs_planned">vs Design</SelectItem>
-                    </SelectContent>
-                  </Select>
                   <ExecutionTargetSelector
                     value={executionTarget}
                     onChange={setExecutionTarget}
