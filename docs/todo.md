@@ -12,9 +12,10 @@ Support https://github.com/excalidraw/excalidraw/tree/master/packages/excalidraw
     Dev feeback
     Actions with changes
 
+Build graph
+
 AI Optimize playwright settings
     select or identify testable app mode, classify it
-    Repo specific pw settings,
 
 Play gomb - give in url and do everything 
     Runs setup and testing as an agent

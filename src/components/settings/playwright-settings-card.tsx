@@ -22,8 +22,10 @@ import { SelectorPriorityList } from './selector-priority-list';
 import { savePlaywrightSettings, resetPlaywrightSettings, getSelectorStatsAction } from '@/server/actions/settings';
 import { DEFAULT_SELECTOR_PRIORITY, DEFAULT_STABILIZATION_SETTINGS } from '@/lib/db/schema';
 import type { SelectorConfig, PlaywrightSettings, HeadlessMode, RecordingEngine, StabilizationSettings, SelectorType } from '@/lib/db/schema';
-import { Loader2, RotateCcw, List, Video, MousePointer, Pause, Clock, Layers, ChevronDown, Shield, Hourglass, Type, Ban, Eye, Camera, EyeOff } from 'lucide-react';
+import { Loader2, RotateCcw, List, Video, MousePointer, Pause, Clock, Layers, ChevronDown, Shield, Hourglass, Type, Ban, Eye, Camera, EyeOff, Info } from 'lucide-react';
 import { Slider } from '@/components/ui/slider';
+import { Badge } from '@/components/ui/badge';
+import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip';
 import { toast } from 'sonner';
 import { calculateRecommendations, type SelectorRecommendation } from '@/lib/selector-recommendations';
 import type { SelectorTypeStats } from '@/lib/db/queries';
@@ -80,6 +82,13 @@ export function PlaywrightSettingsCard({
     if (selectorStats.length === 0) return undefined;
     return calculateRecommendations(selectorPriority, selectorStats);
   }, [selectorPriority, selectorStats]);
+
+  // Derive settings source for UX indicator
+  const settingsSource = useMemo(() => {
+    if (!repositoryId) return 'global' as const;
+    if (settings.repositoryId === repositoryId) return 'repo-specific' as const;
+    return 'global-fallback' as const;
+  }, [repositoryId, settings.repositoryId]);
 
   // Store original values to compare against (prevents save on mount)
   const originalValues = useRef({
@@ -868,7 +877,7 @@ export function PlaywrightSettingsCard({
             ) : (
               <RotateCcw className="w-4 h-4 mr-2" />
             )}
-            Reset to Defaults
+            {settingsSource === 'repo-specific' ? 'Reset to Global Defaults' : 'Reset to Defaults'}
           </Button>
         </div>
       )}
@@ -882,7 +891,23 @@ export function PlaywrightSettingsCard({
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Playwright Settings</CardTitle>
+        <div className="flex items-center gap-2">
+          <CardTitle>Playwright Settings</CardTitle>
+          {settingsSource === 'repo-specific' && (
+            <Badge variant="default">Repo-specific</Badge>
+          )}
+          {settingsSource === 'global-fallback' && (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Badge variant="outline" className="flex items-center gap-1 cursor-help">
+                  <Info className="w-3 h-3" />
+                  Global defaults
+                </Badge>
+              </TooltipTrigger>
+              <TooltipContent>Changes will create repo-specific settings</TooltipContent>
+            </Tooltip>
+          )}
+        </div>
         <CardDescription>
           Configure browser automation settings for recording and running tests
         </CardDescription>
