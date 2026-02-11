@@ -53,6 +53,7 @@ interface RunDashboardClientProps {
   currentBranch: string | null;
   defaultBranch: string | null;
   baseUrl: string;
+  branchHeads?: Record<string, string>;
   buildChanges?: BuildChanges | null;
   composeConfig?: ComposeConfigProp | null;
 }
@@ -83,7 +84,7 @@ function isLocalUrl(url: string): boolean {
   }
 }
 
-export function RunDashboardClient({ tests, runs: _runs, builds, repositoryId, activeBranch, currentBranch, defaultBranch, baseUrl: initialBaseUrl, buildChanges, composeConfig }: RunDashboardClientProps) {
+export function RunDashboardClient({ tests, runs: _runs, builds, repositoryId, activeBranch, currentBranch, defaultBranch, baseUrl: initialBaseUrl, branchHeads, buildChanges, composeConfig }: RunDashboardClientProps) {
   const router = useRouter();
   const notifyJobStarted = useNotifyJobStarted();
   const [isRunning, setIsRunning] = useState(false);
@@ -572,6 +573,7 @@ export function RunDashboardClient({ tests, runs: _runs, builds, repositoryId, a
                       defaultBranch={defaultBranch}
                       mainBaselineBuildId={mainBaselineBuildId}
                       branchBaselineBuildId={branchBaselineBuildId}
+                      branchHeads={branchHeads}
                     />
                   ) : (
                     <div className="space-y-3">

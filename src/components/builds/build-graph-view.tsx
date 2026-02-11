@@ -15,6 +15,7 @@ interface BuildGraphViewProps {
   defaultBranch: string | null;
   mainBaselineBuildId?: string;
   branchBaselineBuildId?: string;
+  branchHeads?: Record<string, string>;
 }
 
 const COL_WIDTH = 100;
@@ -51,11 +52,11 @@ interface TooltipData {
   y: number;
 }
 
-export function BuildGraphView({ builds, defaultBranch, mainBaselineBuildId, branchBaselineBuildId }: BuildGraphViewProps) {
+export function BuildGraphView({ builds, defaultBranch, mainBaselineBuildId, branchBaselineBuildId, branchHeads }: BuildGraphViewProps) {
   const router = useRouter();
   const [tooltip, setTooltip] = useState<TooltipData | null>(null);
 
-  const { nodes, branchColumns, svgWidth, svgHeight, branchLines } = useMemo(() => {
+  const { nodes, branchColumns, svgWidth, svgHeight, branchLines, aheadIndicators } = useMemo(() => {
     // Sort builds newest first (top of graph)
     const sorted = [...builds].sort(
       (a, b) => new Date(b.createdAt!).getTime() - new Date(a.createdAt!).getTime()
@@ -75,24 +76,56 @@ export function BuildGraphView({ builds, defaultBranch, mainBaselineBuildId, bra
       }
     }
 
+    // Find branches that are ahead of their latest build
+    const aheadList: Array<{ branch: string; col: number; x: number; y: number; headSha: string }> = [];
+    if (branchHeads) {
+      for (const [branch, col] of colMap.entries()) {
+        const headSha = branchHeads[branch];
+        if (!headSha) continue;
+        // Find the latest build on this branch
+        const latestBuild = sorted.find(b => (b.gitBranch || defBranch) === branch);
+        if (!latestBuild?.gitCommit) continue;
+        // Compare: branch HEAD differs from latest build commit
+        if (!headSha.startsWith(latestBuild.gitCommit) && !latestBuild.gitCommit.startsWith(headSha)) {
+          aheadList.push({
+            branch,
+            col,
+            x: PAD_X + col * COL_WIDTH + COL_WIDTH / 2,
+            y: PAD_Y + ROW_HEIGHT / 2, // row 0 position (before offset)
+            headSha,
+          });
+        }
+      }
+    }
+
+    // If there are ahead indicators, shift all build nodes down by one row
+    const rowOffset = aheadList.length > 0 ? 1 : 0;
+
     const numCols = colMap.size;
     const width = PAD_X * 2 + numCols * COL_WIDTH;
-    const height = PAD_Y + sorted.length * ROW_HEIGHT + 20;
+    const totalRows = sorted.length + rowOffset;
+    const height = PAD_Y + totalRows * ROW_HEIGHT + 20;
 
-    // Build node positions (sorted = newest first = row 0 at top)
+    // Build node positions (sorted = newest first = row 0 at top, shifted if ahead indicators)
     const nodeList = sorted.map((build, rowIdx) => {
       const branch = build.gitBranch || defBranch;
       const col = colMap.get(branch) ?? 0;
       return {
         build,
         x: PAD_X + col * COL_WIDTH + COL_WIDTH / 2,
-        y: PAD_Y + rowIdx * ROW_HEIGHT + ROW_HEIGHT / 2,
+        y: PAD_Y + (rowIdx + rowOffset) * ROW_HEIGHT + ROW_HEIGHT / 2,
         branch,
         col,
       };
     });
 
-    // Compute vertical lines per branch (first to last node)
+    // Position ahead indicators in the first row
+    const positionedAhead = aheadList.map(a => ({
+      ...a,
+      y: PAD_Y + ROW_HEIGHT / 2,
+    }));
+
+    // Compute vertical lines per branch (first to last node, including ahead indicators)
     const branchExtents = new Map<string, { minY: number; maxY: number; col: number }>();
     for (const node of nodeList) {
       const ext = branchExtents.get(node.branch);
@@ -101,6 +134,13 @@ export function BuildGraphView({ builds, defaultBranch, mainBaselineBuildId, bra
       } else {
         ext.minY = Math.min(ext.minY, node.y);
         ext.maxY = Math.max(ext.maxY, node.y);
+      }
+    }
+    // Extend lines up to ahead indicators
+    for (const a of positionedAhead) {
+      const ext = branchExtents.get(a.branch);
+      if (ext) {
+        ext.minY = Math.min(ext.minY, a.y);
       }
     }
 
@@ -123,8 +163,9 @@ export function BuildGraphView({ builds, defaultBranch, mainBaselineBuildId, bra
       svgWidth: width,
       svgHeight: height,
       branchLines: lines,
+      aheadIndicators: positionedAhead,
     };
-  }, [builds, defaultBranch]);
+  }, [builds, defaultBranch, branchHeads]);
 
   const handleNodeClick = useCallback(
     (buildId: string) => {
@@ -182,6 +223,48 @@ export function BuildGraphView({ builds, defaultBranch, mainBaselineBuildId, bra
             opacity={0.3}
           />
         ))}
+
+        {/* Ahead-of-build indicators */}
+        {aheadIndicators.map((a) => {
+          const color = BRANCH_COLORS[a.col % BRANCH_COLORS.length];
+          return (
+            <g key={`ahead-${a.branch}`}>
+              {/* Diamond shape for unbuilt commit */}
+              <rect
+                x={a.x - 5}
+                y={a.y - 5}
+                width={10}
+                height={10}
+                rx={2}
+                fill="none"
+                stroke={color}
+                strokeWidth={1.5}
+                strokeDasharray="3 2"
+                transform={`rotate(45 ${a.x} ${a.y})`}
+              />
+              {/* Arrow-up icon inside */}
+              <path
+                d={`M${a.x} ${a.y - 3} L${a.x} ${a.y + 2} M${a.x - 2} ${a.y - 1} L${a.x} ${a.y - 3} L${a.x + 2} ${a.y - 1}`}
+                fill="none"
+                stroke={color}
+                strokeWidth={1.5}
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+              {/* Label */}
+              <text
+                x={a.x + 12}
+                y={a.y + 3}
+                fontSize={9}
+                fill={color}
+                opacity={0.8}
+              >
+                <tspan fontFamily="monospace">{a.headSha.slice(0, 7)}</tspan>
+                <tspan fill={color} opacity={0.6}> ahead</tspan>
+              </text>
+            </g>
+          );
+        })}
 
         {/* Build nodes */}
         {nodes.map((node) => {
