@@ -10,9 +10,10 @@ interface PlayAgentStepProps {
   step: AgentStepState;
   stepNumber: number;
   onResume?: () => void;
+  onSkipDiscover?: () => void;
 }
 
-export function PlayAgentStep({ step, stepNumber, onResume }: PlayAgentStepProps) {
+export function PlayAgentStep({ step, stepNumber, onResume, onSkipDiscover }: PlayAgentStepProps) {
   return (
     <div className="py-1.5">
       <div className="flex items-center gap-2.5">
@@ -82,12 +83,23 @@ export function PlayAgentStep({ step, stepNumber, onResume }: PlayAgentStepProps
         </div>
       )}
 
+      {/* Skip ahead button for discover step */}
+      {step.status === 'active' && onSkipDiscover && (
+        <div className="ml-7 mt-1.5 flex items-center gap-2">
+          <Button size="sm" variant="outline" onClick={onSkipDiscover} className="gap-1.5 h-6 text-xs">
+            <SkipForward className="h-3 w-3" />
+            Skip ahead
+          </Button>
+          <span className="text-[10px] text-muted-foreground">Continue with current tests, generate rest in background</span>
+        </div>
+      )}
+
       {/* Waiting user action */}
       {step.status === 'waiting_user' && step.userAction && (
         <div className="ml-7 mt-1.5 space-y-1.5">
           <p className="text-xs text-blue-600 dark:text-blue-400">{step.userAction}</p>
           <div className="flex gap-2">
-            {step.id === 'settings_check' && (
+            {(step.id === 'settings_check' || step.id === 'url_check') && (
               <Button size="sm" variant="outline" asChild>
                 <Link href="/settings">Open Settings</Link>
               </Button>

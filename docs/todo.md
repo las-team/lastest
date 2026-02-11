@@ -50,21 +50,20 @@ Docker
 Tweet
 Bugriport
 Import from prior tools?
+Formal verification of code?
 ### UX
 ## bugs
 ## marketing 
 
 ----------
 
-Ha van a mainen egy commit, lefut rá egy új baseline, és az én commitemet hasonlítom a legújabb
+Ha van a mainen egy commit, lefut rá egy új baseline, és az én commitemet hasonlítom a legújabb mainhez
 
-Auto-approve main, whatever makes it there is the baseline
+Setting: Auto-approve main, whatever makes it there is the baseline
 
-Diff list - Failed, Changed, Flaky
+Diff list - Failed, Changed, Flaky grouping - what does the dev need to address?
 
-Auto-onboardin
-
-Record video during test
+Record video during test setting
 
 Runner can execute on remote baseurl
 

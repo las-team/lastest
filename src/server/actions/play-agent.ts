@@ -140,10 +140,6 @@ async function runSettingsCheck(sessionId: string, repositoryId: string, teamId:
   const hasAI = aiSettings.provider && aiSettings.provider !== 'none';
   if (!hasAI) missing.push('AI provider');
 
-  // Check base URL
-  const envConfig = await getEnvironmentConfig(repositoryId);
-  if (!envConfig?.baseUrl) missing.push('Base URL');
-
   if (missing.length > 0) {
     await setStepWaitingUser(
       sessionId,
@@ -154,10 +150,8 @@ async function runSettingsCheck(sessionId: string, repositoryId: string, teamId:
   }
 
   await setStepCompleted(sessionId, 'settings_check', {
-    hasGithub: true,
-    hasAI: true,
-    hasBaseUrl: true,
-    baseUrl: envConfig?.baseUrl,
+    ghAccount: ghAccount?.githubUsername || 'Connected',
+    aiProvider: aiSettings.provider,
   });
   return true;
 }
@@ -171,7 +165,10 @@ async function runSelectRepo(sessionId: string, repositoryId: string) {
     return false;
   }
 
-  await setStepCompleted(sessionId, 'select_repo', { repoName: repo.name, repoId: repo.id });
+  await setStepCompleted(sessionId, 'select_repo', {
+    repoFullName: repo.owner ? `${repo.owner}/${repo.name}` : repo.name,
+    branch: repo.selectedBranch || repo.defaultBranch || 'main',
+  });
   return true;
 }
 
@@ -236,6 +233,8 @@ async function runScanAndTemplate(sessionId: string, repositoryId: string) {
   return true;
 }
 
+const DISCOVER_POLL_INTERVAL_MS = 2000;
+
 async function runDiscover(sessionId: string, repositoryId: string) {
   await setStepActive(sessionId, 'discover');
   if (await isCancelled(sessionId)) return false;
@@ -258,7 +257,6 @@ async function runDiscover(sessionId: string, repositoryId: string) {
   const specResult = await discoverSpecFiles(repositoryId, branch);
 
   if (!specResult.success || !specResult.files || specResult.files.length === 0) {
-    // No specs found — skip gracefully
     await updateSubsteps(sessionId, 'discover', [
       { label: 'Finding spec files', status: 'done', detail: 'No spec files found' },
       { label: 'Extracting user stories', status: 'done', detail: 'Skipped' },
@@ -292,15 +290,34 @@ async function runDiscover(sessionId: string, repositoryId: string) {
 
   if (await isCancelled(sessionId)) return false;
 
-  // Substep 3: Generate tests
+  // Count total tests to generate
+  let totalTests = 0;
+  for (const story of storiesResult.stories) {
+    if (!story.acceptanceCriteria) continue;
+    const grouped = new Set<string>();
+    for (const ac of story.acceptanceCriteria) {
+      if (ac.groupedWith && grouped.has(ac.groupedWith)) continue;
+      grouped.add(ac.id);
+      totalTests++;
+    }
+  }
+
+  // Snapshot initial test count before generation
+  const initialTestCount = (await queries.getTestsByRepo(repositoryId)).length;
+
+  // Substep 3: Generate tests — fire off in background
   await updateSubsteps(sessionId, 'discover', [
     { label: 'Finding spec files', status: 'done', detail: `${specResult.files.length} files` },
     { label: 'Extracting user stories', status: 'done', detail: `${storiesResult.stories.length} stories` },
-    { label: 'Generating tests', status: 'running' },
+    { label: `Generating tests (0/${totalTests})`, status: 'running' },
   ]);
 
   const envConfig = await getEnvironmentConfig(repositoryId);
-  const genResult = await generateTestsFromStories(
+
+  let genDone = false;
+  let genError: string | null = null;
+
+  const genPromise = generateTestsFromStories(
     repositoryId,
     storiesResult.importId ?? null,
     storiesResult.stories,
@@ -308,25 +325,88 @@ async function runDiscover(sessionId: string, repositoryId: string) {
     { targetUrl: envConfig?.baseUrl || undefined },
   );
 
-  // Update session metadata with tests created
+  genPromise
+    .then(() => { genDone = true; })
+    .catch((err) => {
+      genError = err instanceof Error ? err.message : 'Generation failed';
+      genDone = true;
+    });
+
+  // Poll progress until generation completes or user skips
+  while (!genDone) {
+    await new Promise((r) => setTimeout(r, DISCOVER_POLL_INTERVAL_MS));
+
+    if (await isCancelled(sessionId)) return false;
+
+    const currentTestCount = (await queries.getTestsByRepo(repositoryId)).length;
+    const generated = Math.max(0, currentTestCount - initialTestCount);
+
+    await updateSubsteps(sessionId, 'discover', [
+      { label: 'Finding spec files', status: 'done', detail: `${specResult.files.length} files` },
+      { label: 'Extracting user stories', status: 'done', detail: `${storiesResult.stories.length} stories` },
+      { label: `Generating tests (${generated}/${totalTests})`, status: 'running' },
+    ]);
+
+    // Check for skip flag
+    const sess = await queries.getAgentSession(sessionId);
+    if (sess?.metadata.skipDiscovery && generated >= 1) {
+      const remaining = totalTests - generated;
+      await updateSubsteps(sessionId, 'discover', [
+        { label: 'Finding spec files', status: 'done', detail: `${specResult.files.length} files` },
+        { label: 'Extracting user stories', status: 'done', detail: `${storiesResult.stories.length} stories` },
+        { label: `Generated ${generated} tests`, status: 'done', detail: remaining > 0 ? `+${remaining} in background` : undefined },
+      ]);
+
+      await queries.updateAgentSession(sessionId, {
+        metadata: { ...sess.metadata, testsCreated: generated },
+      });
+
+      await setStepCompleted(sessionId, 'discover', {
+        specsFound: specResult.files.length,
+        storiesExtracted: storiesResult.stories.length,
+        testsCreated: generated,
+        areasCreated: 0,
+        ...(remaining > 0 ? { skippedRemaining: remaining } : {}),
+      });
+      // Generation continues in background — we proceed with onboarding
+      return true;
+    }
+  }
+
+  // Generation completed normally
+  if (genError) {
+    await setStepFailed(sessionId, 'discover', genError);
+    return false;
+  }
+
+  // Re-await to get typed result (already resolved at this point)
+  let finalResult: { testsCreated: number; areasCreated: number };
+  try {
+    const r = await genPromise;
+    finalResult = { testsCreated: r.testsCreated, areasCreated: r.areasCreated };
+  } catch {
+    await setStepFailed(sessionId, 'discover', 'Generation failed');
+    return false;
+  }
+
   const session = await queries.getAgentSession(sessionId);
   if (session) {
     await queries.updateAgentSession(sessionId, {
-      metadata: { ...session.metadata, testsCreated: genResult.testsCreated },
+      metadata: { ...session.metadata, testsCreated: finalResult.testsCreated },
     });
   }
 
   await updateSubsteps(sessionId, 'discover', [
     { label: 'Finding spec files', status: 'done', detail: `${specResult.files.length} files` },
     { label: 'Extracting user stories', status: 'done', detail: `${storiesResult.stories.length} stories` },
-    { label: 'Generating tests', status: 'done', detail: `${genResult.testsCreated} tests` },
+    { label: 'Generating tests', status: 'done', detail: `${finalResult.testsCreated} tests` },
   ]);
 
   await setStepCompleted(sessionId, 'discover', {
     specsFound: specResult.files.length,
     storiesExtracted: storiesResult.stories.length,
-    testsCreated: genResult.testsCreated,
-    areasCreated: genResult.areasCreated,
+    testsCreated: finalResult.testsCreated,
+    areasCreated: finalResult.areasCreated,
   });
   return true;
 }
@@ -335,7 +415,16 @@ async function runUrlCheck(sessionId: string, repositoryId: string) {
   await setStepActive(sessionId, 'url_check');
 
   const envConfig = await getEnvironmentConfig(repositoryId);
-  const baseUrl = envConfig?.baseUrl || 'http://localhost:3000';
+  const baseUrl = envConfig?.baseUrl;
+
+  if (!baseUrl) {
+    await setStepWaitingUser(
+      sessionId,
+      'url_check',
+      'No Base URL configured. Go to Settings → Environment to set one.',
+    );
+    return false;
+  }
 
   const result = await testServerConnection(baseUrl);
   if (!result.success) {
@@ -776,4 +865,14 @@ export async function getPlayAgentSession(sessionId: string) {
 
 export async function getActivePlayAgentSession(repositoryId: string) {
   return queries.getActiveAgentSession(repositoryId);
+}
+
+export async function skipDiscoverStep(sessionId: string): Promise<{ success: boolean }> {
+  await requireTeamAccess();
+  const session = await queries.getAgentSession(sessionId);
+  if (!session) return { success: false };
+  await queries.updateAgentSession(sessionId, {
+    metadata: { ...session.metadata, skipDiscovery: true },
+  });
+  return { success: true };
 }
