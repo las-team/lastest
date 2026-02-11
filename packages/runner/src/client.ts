@@ -36,12 +36,14 @@ export interface RunnerClientOptions {
   token: string;
   serverUrl: string;
   pollInterval?: number;
+  baseUrl?: string;
 }
 
 export class RunnerClient {
   private token: string;
   private serverUrl: string;
   private pollInterval: number;
+  private baseUrl?: string;
   private running = false;
   private status: 'idle' | 'busy' | 'recording' = 'idle';
   private currentTask?: string;
@@ -52,6 +54,7 @@ export class RunnerClient {
     this.token = options.token;
     this.serverUrl = options.serverUrl.replace(/\/$/, '');
     this.pollInterval = options.pollInterval ?? 30000; // 30 seconds default
+    this.baseUrl = options.baseUrl;
     this.runner = new TestRunner();
   }
 
@@ -269,6 +272,12 @@ export class RunnerClient {
   private async handleRunTest(command: RunTestCommand): Promise<void> {
     this.status = 'busy';
     this.currentTask = command.payload.testRunId;
+
+    // Override targetUrl if baseUrl is configured
+    if (this.baseUrl) {
+      console.log(`Overriding targetUrl: ${command.payload.targetUrl} → ${this.baseUrl}`);
+      command.payload.targetUrl = this.baseUrl;
+    }
 
     try {
       console.log(`Running test: ${command.payload.testId}`);

@@ -59,10 +59,6 @@ Formal verification of code?
 
 Ha van a mainen egy commit, lefut rá egy új baseline, és az én commitemet hasonlítom a legújabb mainhez - already there
 
-Diff list - Failed, Changed, Flaky grouping - what does the dev need to address? - already defualt sort 
-
-Record video during test setting - 
-
 Runner can execute on remote baseurl - 
 
 Test - which pr it was added in, updated?
