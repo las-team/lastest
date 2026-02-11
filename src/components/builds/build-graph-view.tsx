@@ -243,20 +243,33 @@ export function BuildGraphView({ builds, defaultBranch, mainBaselineBuildId, bra
                 stroke="white"
                 strokeWidth={2}
               />
-              {/* Build ID + baseline label to the right */}
+              {/* Stats label to the right */}
               <text
                 x={node.x + NODE_R + 6}
-                y={node.y + 4}
+                y={node.y - 2}
                 fontSize={10}
-                fill={branchColor}
-                opacity={0.7}
+                fill="currentColor"
+                opacity={0.6}
               >
-                {node.build.id.slice(0, 7)}
+                <tspan fill="#22c55e">{node.build.passedCount ?? 0}</tspan>
+                <tspan fill="currentColor" opacity={0.3}>/</tspan>
+                <tspan fill="#eab308">{node.build.changesDetected ?? 0}</tspan>
+                <tspan fill="currentColor" opacity={0.3}>/</tspan>
+                <tspan fill="#ef4444">{node.build.failedCount ?? 0}</tspan>
+              </text>
+              <text
+                x={node.x + NODE_R + 6}
+                y={node.y + 10}
+                fontSize={9}
+                fill="currentColor"
+                opacity={0.4}
+              >
+                {formatDuration(node.build.elapsedMs)}
                 {isMainBaseline && (
-                  <tspan fill="#a855f7" opacity={1} fontSize={9}> baseline</tspan>
+                  <tspan fill="#a855f7" opacity={1}> baseline</tspan>
                 )}
                 {isBranchBaseline && (
-                  <tspan fill="#3b82f6" opacity={1} fontSize={9}> baseline</tspan>
+                  <tspan fill="#3b82f6" opacity={1}> baseline</tspan>
                 )}
               </text>
             </g>
