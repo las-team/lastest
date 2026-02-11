@@ -38,6 +38,7 @@ interface MainBuild {
 
 interface SavedConfig {
   selectedTestIds: string[];
+  excludedTestIds: string[];
   versionOverrides: Record<string, string>; // testId -> testVersionId
 }
 
@@ -95,8 +96,14 @@ interface ComposeClientProps {
 export function ComposeClient({ tests, repositoryId, currentBranch, defaultBranch, mainBuild, mainBuildTests, savedConfig }: ComposeClientProps) {
   const allTestIds = useMemo(() => tests.map(t => t.id), [tests]);
 
-  // Initialize state from saved config or default to all tests selected
+  // Initialize state from saved config or default to all tests selected.
+  // Uses excludedTestIds so new tests are automatically included.
   const [selectedTestIds, setSelectedTestIds] = useState<Set<string>>(() => {
+    if (savedConfig?.excludedTestIds) {
+      const excluded = new Set(savedConfig.excludedTestIds);
+      return new Set(allTestIds.filter(id => !excluded.has(id)));
+    }
+    // Legacy fallback: use selectedTestIds if excludedTestIds not yet saved
     if (savedConfig?.selectedTestIds && savedConfig.selectedTestIds.length > 0) {
       const validIds = new Set(allTestIds);
       return new Set(savedConfig.selectedTestIds.filter(id => validIds.has(id)));
@@ -125,7 +132,8 @@ export function ComposeClient({ tests, repositoryId, currentBranch, defaultBranc
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
     saveTimerRef.current = setTimeout(() => {
       const resolved = resolveVersionOverrides(tests, versionOverrides);
-      saveComposeConfig(repositoryId, currentBranch, Array.from(selectedTestIds), resolved);
+      const excluded = allTestIds.filter(id => !selectedTestIds.has(id));
+      saveComposeConfig(repositoryId, currentBranch, Array.from(selectedTestIds), excluded, resolved);
     }, 500);
 
     return () => {

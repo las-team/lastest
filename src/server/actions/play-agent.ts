@@ -16,7 +16,13 @@ import { testServerConnection } from './environment';
 import { aiFixTest } from './ai';
 import { getAISettings } from './ai-settings';
 import { getEnvironmentConfig } from './environment';
+import { addDefaultSetupStep } from './setup-steps';
 import { createHash } from 'crypto';
+import { generateWithAI, extractCodeFromResponse } from '@/lib/ai';
+import type { AIProviderConfig } from '@/lib/ai/types';
+import { chromium } from 'playwright';
+import type { SetupContext, SetupScript } from '@/lib/setup/types';
+import { runPlaywrightSetup } from '@/lib/setup/script-runner';
 
 // ============================================
 // Constants
@@ -27,7 +33,7 @@ const STEP_DEFINITIONS: Array<{ id: AgentStepId; label: string; description: str
   { id: 'select_repo', label: 'Select Repository', description: 'Ensure a repository is selected' },
   { id: 'scan_and_template', label: 'Scan & Template', description: 'Scan routes and apply testing template' },
   { id: 'discover', label: 'Discover Tests', description: 'Find specs and generate tests from user stories' },
-  { id: 'url_check', label: 'URL Check', description: 'Verify target server is reachable' },
+  { id: 'env_setup', label: 'Env Setup', description: 'Verify server, detect login, configure setup' },
   { id: 'run_tests', label: 'Run Tests', description: 'Create and run initial build' },
   { id: 'fix_tests', label: 'Fix Failing Tests', description: 'AI-fix failing tests (max 3 attempts each)' },
   { id: 'rerun_tests', label: 'Re-run Tests', description: 'Re-run build after fixes' },
@@ -411,35 +417,351 @@ async function runDiscover(sessionId: string, repositoryId: string) {
   return true;
 }
 
-async function runUrlCheck(sessionId: string, repositoryId: string) {
-  await setStepActive(sessionId, 'url_check');
+async function getAIConfig(repositoryId?: string | null): Promise<AIProviderConfig> {
+  const settings = await queries.getAISettings(repositoryId);
+  return {
+    provider: settings.provider as 'claude-cli' | 'openrouter' | 'claude-agent-sdk',
+    openrouterApiKey: settings.openrouterApiKey,
+    openrouterModel: settings.openrouterModel || 'anthropic/claude-sonnet-4',
+    customInstructions: settings.customInstructions,
+    agentSdkPermissionMode: settings.agentSdkPermissionMode as 'plan' | 'default' | 'acceptEdits' | undefined,
+    agentSdkModel: settings.agentSdkModel || undefined,
+    agentSdkWorkingDir: settings.agentSdkWorkingDir || undefined,
+  };
+}
+
+const LOGIN_SCRIPT_SYSTEM_PROMPT = `You are an expert Playwright setup script engineer.
+
+FUNCTION SIGNATURE (required):
+export async function setup(page, baseUrl, screenshotPath, stepLogger) { ... }
+
+PARAMETERS:
+- page: Playwright Page object
+- baseUrl: Application base URL
+- screenshotPath: unused (can ignore)
+- stepLogger: { log(msg) } for status messages
+
+CONSTRAINTS:
+- Use baseUrl for navigation (not hardcoded URLs)
+- Export async function "setup" with exact signature above
+- Return an object with variables for tests (e.g., { loggedIn: true })
+- Handle loading states with waitForLoadState or waitForSelector
+- Use realistic test data (test@example.com, Password123!, etc.)`;
+
+/**
+ * Detect if a page at the given URL requires login by checking page content.
+ */
+async function detectLoginRequired(
+  baseUrl: string,
+): Promise<{ needsLogin: boolean; loginUrl?: string; hasRegisterLink?: boolean; registerUrl?: string; pageContent: string }> {
+  let browser = null;
+  try {
+    browser = await chromium.launch({ headless: true });
+    const context = await browser.newContext({ viewport: { width: 1280, height: 720 } });
+    const page = await context.newPage();
+    await page.goto(baseUrl, { waitUntil: 'networkidle', timeout: 15000 }).catch(() => {});
+    await page.waitForLoadState('domcontentloaded').catch(() => {});
+
+    // Get page content for AI analysis
+    const url = page.url();
+    const title = await page.title();
+    const bodyText = await page.evaluate(() => document.body?.innerText?.slice(0, 3000) || '');
+    const forms = await page.evaluate(() => {
+      const formEls = document.querySelectorAll('form');
+      return Array.from(formEls).map(f => ({
+        action: f.action,
+        inputs: Array.from(f.querySelectorAll('input')).map(i => ({
+          type: i.type, name: i.name, placeholder: i.placeholder,
+        })),
+      }));
+    });
+    const links = await page.evaluate(() => {
+      return Array.from(document.querySelectorAll('a')).map(a => ({
+        href: a.href, text: a.textContent?.trim().slice(0, 50),
+      })).filter(l => l.text && l.text.length > 0).slice(0, 30);
+    });
+
+    const pageContent = JSON.stringify({ url, title, bodyText: bodyText.slice(0, 2000), forms, links }, null, 2);
+
+    // Quick heuristic before AI — check for obvious login indicators
+    const urlLower = url.toLowerCase();
+    const textLower = bodyText.toLowerCase();
+    const hasPasswordField = forms.some(f => f.inputs.some(i => i.type === 'password'));
+    const isLoginPage = urlLower.includes('/login') || urlLower.includes('/signin') || urlLower.includes('/auth');
+    const hasLoginText = textLower.includes('sign in') || textLower.includes('log in') || textLower.includes('login');
+
+    if (hasPasswordField || isLoginPage || hasLoginText) {
+      // Check for register link
+      const registerLink = links.find(l => {
+        const t = (l.text || '').toLowerCase();
+        const h = (l.href || '').toLowerCase();
+        return t.includes('register') || t.includes('sign up') || t.includes('create account')
+          || h.includes('/register') || h.includes('/signup');
+      });
+
+      return {
+        needsLogin: true,
+        loginUrl: isLoginPage ? url : undefined,
+        hasRegisterLink: !!registerLink,
+        registerUrl: registerLink?.href,
+        pageContent,
+      };
+    }
+
+    return { needsLogin: false, pageContent };
+  } catch {
+    return { needsLogin: false, pageContent: '' };
+  } finally {
+    if (browser) await browser.close().catch(() => {});
+  }
+}
+
+/**
+ * Generate a register+login setup script using AI, given page context.
+ */
+async function aiGenerateLoginScript(
+  repositoryId: string,
+  baseUrl: string,
+  pageContext: string,
+  hasRegister: boolean,
+  registerUrl?: string,
+  loginUrl?: string,
+): Promise<{ success: boolean; code?: string; error?: string }> {
+  try {
+    const config = await getAIConfig(repositoryId);
+    const prompt = `Generate a Playwright setup script for this web application at ${baseUrl}.
+
+${hasRegister ? `The app has a registration page${registerUrl ? ` at ${registerUrl}` : ''}.
+First register a new test account, then log in with it.` : `The app requires login${loginUrl ? ` at ${loginUrl}` : ''}.
+Generate a login script using test credentials (test@example.com / Password123!).`}
+
+PAGE CONTEXT:
+${pageContext}
+
+The script should:
+1. ${hasRegister ? 'Navigate to the register page and create a test account with realistic data' : 'Navigate to the login page'}
+2. Fill in the ${hasRegister ? 'registration' : 'login'} form and submit
+3. Wait for successful ${hasRegister ? 'registration and then log in' : 'login'} (check for redirect or dashboard content)
+4. Return { loggedIn: true } on success
+
+Use stepLogger.log() to report progress.`;
+
+    const response = await generateWithAI(config, prompt, LOGIN_SCRIPT_SYSTEM_PROMPT, {
+      actionType: 'create_test',
+      repositoryId,
+    });
+    const code = extractCodeFromResponse(response);
+    return { success: true, code };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Failed to generate login script';
+    return { success: false, error: message };
+  }
+}
+
+/**
+ * Test a login script by running it in a temporary browser.
+ */
+async function testLoginScript(
+  code: string,
+  baseUrl: string,
+  repositoryId: string,
+): Promise<{ success: boolean; error?: string; duration: number }> {
+  let browser = null;
+  try {
+    browser = await chromium.launch({ headless: true });
+    const context = await browser.newContext({ viewport: { width: 1280, height: 720 } });
+    const page = await context.newPage();
+
+    const script: SetupScript = {
+      id: 'temp-login-test',
+      repositoryId,
+      name: 'Login Test',
+      type: 'playwright',
+      code,
+      createdAt: null,
+      updatedAt: null,
+    };
+
+    const setupContext: SetupContext = {
+      baseUrl,
+      page,
+      variables: {},
+      repositoryId,
+    };
+
+    const result = await runPlaywrightSetup(page, script, setupContext);
+    return { success: result.success, error: result.error, duration: result.duration };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Script execution failed';
+    return { success: false, error: message, duration: 0 };
+  } finally {
+    if (browser) await browser.close().catch(() => {});
+  }
+}
+
+async function runEnvSetup(sessionId: string, repositoryId: string) {
+  await setStepActive(sessionId, 'env_setup');
+  if (await isCancelled(sessionId)) return false;
 
   const envConfig = await getEnvironmentConfig(repositoryId);
   const baseUrl = envConfig?.baseUrl;
 
+  // Substep 1: Check base URL
+  await updateSubsteps(sessionId, 'env_setup', [
+    { label: 'Checking base URL', status: 'running' },
+    { label: 'Detecting login', status: 'pending' },
+    { label: 'Login setup', status: 'pending' },
+  ]);
+
   if (!baseUrl) {
+    await updateSubsteps(sessionId, 'env_setup', [
+      { label: 'Checking base URL', status: 'error', detail: 'Not configured' },
+      { label: 'Detecting login', status: 'pending' },
+      { label: 'Login setup', status: 'pending' },
+    ]);
     await setStepWaitingUser(
       sessionId,
-      'url_check',
+      'env_setup',
       'No Base URL configured. Go to Settings → Environment to set one.',
     );
     return false;
   }
 
-  const result = await testServerConnection(baseUrl);
-  if (!result.success) {
+  const connResult = await testServerConnection(baseUrl);
+  if (!connResult.success) {
+    await updateSubsteps(sessionId, 'env_setup', [
+      { label: 'Checking base URL', status: 'error', detail: `Unreachable (${connResult.statusCode || 'timeout'})` },
+      { label: 'Detecting login', status: 'pending' },
+      { label: 'Login setup', status: 'pending' },
+    ]);
     await setStepWaitingUser(
       sessionId,
-      'url_check',
+      'env_setup',
       `Server unreachable at ${baseUrl}. Start your app and retry.`,
     );
     return false;
   }
 
-  await setStepCompleted(sessionId, 'url_check', {
+  if (await isCancelled(sessionId)) return false;
+
+  // Substep 2: Detect login
+  await updateSubsteps(sessionId, 'env_setup', [
+    { label: 'Checking base URL', status: 'done', detail: `${connResult.responseTime}ms` },
+    { label: 'Detecting login', status: 'running' },
+    { label: 'Login setup', status: 'pending' },
+  ]);
+
+  const loginDetection = await detectLoginRequired(baseUrl);
+
+  if (!loginDetection.needsLogin) {
+    // No login needed — done
+    await updateSubsteps(sessionId, 'env_setup', [
+      { label: 'Checking base URL', status: 'done', detail: `${connResult.responseTime}ms` },
+      { label: 'Detecting login', status: 'done', detail: 'Not required' },
+      { label: 'Login setup', status: 'done', detail: 'Skipped' },
+    ]);
+    await setStepCompleted(sessionId, 'env_setup', {
+      url: baseUrl,
+      responseTime: connResult.responseTime,
+      loginRequired: false,
+    });
+    return true;
+  }
+
+  if (await isCancelled(sessionId)) return false;
+
+  // Substep 3: Generate and test login script
+  await updateSubsteps(sessionId, 'env_setup', [
+    { label: 'Checking base URL', status: 'done', detail: `${connResult.responseTime}ms` },
+    { label: 'Detecting login', status: 'done', detail: loginDetection.hasRegisterLink ? 'Register + Login' : 'Login required' },
+    { label: 'Generating login script', status: 'running' },
+  ]);
+
+  const scriptResult = await aiGenerateLoginScript(
+    repositoryId,
+    baseUrl,
+    loginDetection.pageContent,
+    loginDetection.hasRegisterLink ?? false,
+    loginDetection.registerUrl,
+    loginDetection.loginUrl,
+  );
+
+  if (!scriptResult.success || !scriptResult.code) {
+    await updateSubsteps(sessionId, 'env_setup', [
+      { label: 'Checking base URL', status: 'done', detail: `${connResult.responseTime}ms` },
+      { label: 'Detecting login', status: 'done', detail: 'Login required' },
+      { label: 'Generating login script', status: 'error', detail: 'AI generation failed' },
+    ]);
+    await setStepFailed(sessionId, 'env_setup', scriptResult.error || 'Failed to generate login script');
+    return false;
+  }
+
+  if (await isCancelled(sessionId)) return false;
+
+  // Test the generated script
+  await updateSubsteps(sessionId, 'env_setup', [
+    { label: 'Checking base URL', status: 'done', detail: `${connResult.responseTime}ms` },
+    { label: 'Detecting login', status: 'done', detail: loginDetection.hasRegisterLink ? 'Register + Login' : 'Login required' },
+    { label: 'Testing login script', status: 'running' },
+  ]);
+
+  const testResult = await testLoginScript(scriptResult.code, baseUrl, repositoryId);
+
+  if (!testResult.success) {
+    // Script failed — save it as draft so user can fix, then pause
+    const savedScript = await queries.createSetupScript({
+      repositoryId,
+      name: 'Auto-generated Login (needs fix)',
+      type: 'playwright',
+      code: scriptResult.code,
+      description: `Auto-generated by onboarding agent. Error: ${testResult.error}`,
+    });
+
+    await updateSubsteps(sessionId, 'env_setup', [
+      { label: 'Checking base URL', status: 'done', detail: `${connResult.responseTime}ms` },
+      { label: 'Detecting login', status: 'done', detail: 'Login required' },
+      { label: 'Testing login script', status: 'error', detail: testResult.error?.slice(0, 80) },
+    ]);
+
+    // Store script ID in metadata for later reference
+    const session = await queries.getAgentSession(sessionId);
+    if (session) {
+      await queries.updateAgentSession(sessionId, {
+        metadata: { ...session.metadata, loginScriptId: savedScript.id },
+      });
+    }
+
+    await setStepWaitingUser(
+      sessionId,
+      'env_setup',
+      `Login script failed: ${testResult.error?.slice(0, 120)}. Fix the script in Settings → Setup and retry.`,
+    );
+    return false;
+  }
+
+  // Script works — save it and add as default setup step
+  const savedScript = await queries.createSetupScript({
+    repositoryId,
+    name: 'Login Setup',
+    type: 'playwright',
+    code: scriptResult.code,
+    description: 'Auto-generated login setup by onboarding agent',
+  });
+
+  await addDefaultSetupStep(repositoryId, 'script', savedScript.id);
+
+  await updateSubsteps(sessionId, 'env_setup', [
+    { label: 'Checking base URL', status: 'done', detail: `${connResult.responseTime}ms` },
+    { label: 'Detecting login', status: 'done', detail: loginDetection.hasRegisterLink ? 'Register + Login' : 'Login' },
+    { label: 'Login setup added', status: 'done', detail: `${testResult.duration}ms` },
+  ]);
+
+  await setStepCompleted(sessionId, 'env_setup', {
     url: baseUrl,
-    statusCode: result.statusCode,
-    responseTime: result.responseTime,
+    responseTime: connResult.responseTime,
+    loginRequired: true,
+    loginSetup: true,
+    loginScriptId: savedScript.id,
   });
   return true;
 }
@@ -747,7 +1069,7 @@ const STEP_ORDER: Array<{ id: AgentStepId; run: StepRunner }> = [
   { id: 'select_repo', run: (sid, rid) => runSelectRepo(sid, rid) },
   { id: 'scan_and_template', run: (sid, rid) => runScanAndTemplate(sid, rid) },
   { id: 'discover', run: (sid, rid) => runDiscover(sid, rid) },
-  { id: 'url_check', run: (sid, rid) => runUrlCheck(sid, rid) },
+  { id: 'env_setup', run: (sid, rid) => runEnvSetup(sid, rid) },
   { id: 'run_tests', run: (sid, rid) => runTests(sid, rid) },
   { id: 'fix_tests', run: (sid, rid) => runFixTests(sid, rid) },
   { id: 'rerun_tests', run: (sid, rid) => runRerunTests(sid, rid) },

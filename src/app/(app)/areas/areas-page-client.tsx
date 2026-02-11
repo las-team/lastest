@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { AreaTree, type TreeSelection } from '@/components/areas/area-tree';
 import { AreaDetailSection } from '@/components/areas/area-detail-section';
@@ -17,7 +17,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { createArea, deleteArea, moveTestToArea, moveSuiteToArea, moveArea } from '@/server/actions/areas';
+import { createArea, deleteArea, deleteAreaWithContents, moveTestToArea, moveSuiteToArea, moveArea } from '@/server/actions/areas';
 import { Folder, FolderTree, FileCode, ListChecks, FolderSearch, Sparkles, Globe, FileText, Loader2, BookOpen } from 'lucide-react';
 import { startRemoteRouteScan } from '@/server/actions/scanner';
 import { AIScanRoutesDialog } from '@/components/ai/ai-scan-routes-dialog';
@@ -58,6 +58,20 @@ export function AreasPageClient({ tree, uncategorizedTests, unsortedSuites, repo
   const [showSpecAnalysisDialog, setShowSpecAnalysisDialog] = useState(false);
   const [showMCPExploreDialog, setShowMCPExploreDialog] = useState(false);
   const [showImportFromSpecDialog, setShowImportFromSpecDialog] = useState(false);
+
+  // Delete key handler
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Delete' && selection?.type === 'area' && !deleteAreaId) {
+        // Don't trigger if user is typing in an input/textarea
+        const tag = (e.target as HTMLElement)?.tagName;
+        if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+        setDeleteAreaId(selection.id);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [selection, deleteAreaId]);
 
   const totalAreas = countAreas(tree);
   const totalTests = countTests(tree) + uncategorizedTests.length;
@@ -281,6 +295,7 @@ export function AreasPageClient({ tree, uncategorizedTests, unsortedSuites, repo
             suites={allSuites}
             repositoryId={repositoryId}
             onUpdate={() => router.refresh()}
+            onDeleteArea={setDeleteAreaId}
           />
         </div>
         </div>

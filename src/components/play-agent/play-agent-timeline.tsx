@@ -2,7 +2,7 @@
 
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Play, X, Check, Loader2, Pause, SkipForward, AlertCircle } from 'lucide-react';
+import { Play, X, Check, Loader2, Pause, SkipForward, AlertCircle, RotateCcw } from 'lucide-react';
 import { PlayAgentStep } from './play-agent-step';
 import { usePlayAgent } from './use-play-agent';
 import { cn } from '@/lib/utils';
@@ -12,14 +12,14 @@ interface PlayAgentTimelineProps {
   repositoryId?: string | null;
 }
 
-const USER_STEPS: Set<AgentStepId> = new Set(['settings_check', 'select_repo', 'url_check']);
+const USER_STEPS: Set<AgentStepId> = new Set(['settings_check', 'select_repo', 'env_setup']);
 
 const DEFAULT_STEPS: AgentStepState[] = [
   { id: 'settings_check', status: 'pending', label: 'Settings', description: 'Verify configuration' },
   { id: 'select_repo', status: 'pending', label: 'Repo', description: 'Ensure repo selected' },
   { id: 'scan_and_template', status: 'pending', label: 'Scan', description: 'Scan routes & template' },
   { id: 'discover', status: 'pending', label: 'Discover', description: 'Generate tests' },
-  { id: 'url_check', status: 'pending', label: 'URL', description: 'Verify server' },
+  { id: 'env_setup', status: 'pending', label: 'Env Setup', description: 'URL & login setup' },
   { id: 'run_tests', status: 'pending', label: 'Run', description: 'Run build' },
   { id: 'fix_tests', status: 'pending', label: 'Fix', description: 'AI-fix tests' },
   { id: 'rerun_tests', status: 'pending', label: 'Re-run', description: 'Re-run build' },
@@ -72,10 +72,12 @@ function getAnnotations(step: AgentStepState): Annotation[] | null {
         { label: `${r.testsCreated} tests`, ok: true },
         ...((r.skippedRemaining as number) > 0 ? [{ label: `+${r.skippedRemaining} in bg`, ok: true }] : []),
       ];
-    case 'url_check':
+    case 'env_setup':
       return [
         { label: r.url as string, ok: true },
         ...(r.responseTime ? [{ label: `${r.responseTime}ms`, ok: true }] : []),
+        ...(r.loginRequired === false ? [{ label: 'No login', ok: true }] : []),
+        ...(r.loginSetup ? [{ label: 'Login setup', ok: true }] : []),
       ];
     case 'run_tests':
       return [
@@ -185,8 +187,8 @@ export function PlayAgentTimeline({ repositoryId }: PlayAgentTimelineProps) {
               <span className="text-[11px] text-muted-foreground tabular-nums">{progress}%</span>
             )}
             {isTerminal && session?.status !== 'cancelled' && (
-              <Button size="icon" variant="ghost" className="h-5 w-5 shrink-0" onClick={dismiss} title="Dismiss">
-                <X className="h-3 w-3" />
+              <Button size="icon" variant="ghost" className="h-5 w-5 shrink-0" onClick={dismiss} title="Run again">
+                <RotateCcw className="h-3 w-3" />
               </Button>
             )}
           </div>

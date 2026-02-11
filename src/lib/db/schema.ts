@@ -85,6 +85,7 @@ export const functionalAreas = sqliteTable('functional_areas', {
   parentId: text('parent_id'),
   isRouteFolder: integer('is_route_folder', { mode: 'boolean' }).default(false),
   orderIndex: integer('order_index').default(0),
+  deletedAt: integer('deleted_at', { mode: 'timestamp' }),
 });
 
 export const tests = sqliteTable('tests', {
@@ -1083,6 +1084,7 @@ export const composeConfigs = sqliteTable('compose_configs', {
   repositoryId: text('repository_id').references(() => repositories.id, { onDelete: 'cascade' }).notNull(),
   branch: text('branch').notNull(),
   selectedTestIds: text('selected_test_ids', { mode: 'json' }).$type<string[]>(),
+  excludedTestIds: text('excluded_test_ids', { mode: 'json' }).$type<string[]>(),
   versionOverrides: text('version_overrides', { mode: 'json' }).$type<Record<string, string>>(),
   updatedAt: integer('updated_at', { mode: 'timestamp' }),
 });
@@ -1101,7 +1103,7 @@ export type AgentStepId =
   | 'select_repo'
   | 'scan_and_template'
   | 'discover'
-  | 'url_check'
+  | 'env_setup'
   | 'run_tests'
   | 'fix_tests'
   | 'rerun_tests'

@@ -123,17 +123,17 @@ import { v4 as uuid } from 'uuid';
 
 // Functional Areas
 export async function getFunctionalAreas() {
-  return db.select().from(functionalAreas).all();
+  return db.select().from(functionalAreas).where(isNull(functionalAreas.deletedAt)).all();
 }
 
 export async function getFunctionalArea(id: string) {
-  return db.select().from(functionalAreas).where(eq(functionalAreas.id, id)).get();
+  return db.select().from(functionalAreas).where(and(eq(functionalAreas.id, id), isNull(functionalAreas.deletedAt))).get();
 }
 
 export async function createFunctionalArea(data: Omit<NewFunctionalArea, 'id'>) {
   const id = uuid();
   await db.insert(functionalAreas).values({ ...data, id });
-  return { id, ...data };
+  return { id, deletedAt: null, ...data };
 }
 
 export async function updateFunctionalArea(id: string, data: Partial<NewFunctionalArea>) {
@@ -141,7 +141,7 @@ export async function updateFunctionalArea(id: string, data: Partial<NewFunction
 }
 
 export async function deleteFunctionalArea(id: string) {
-  await db.delete(functionalAreas).where(eq(functionalAreas.id, id));
+  await db.update(functionalAreas).set({ deletedAt: new Date() }).where(eq(functionalAreas.id, id));
 }
 
 // Get or create functional area with case-insensitive name matching within a repo
@@ -1159,7 +1159,7 @@ export async function deleteRepository(id: string) {
 
 // Repo-filtered queries
 export async function getFunctionalAreasByRepo(repositoryId: string) {
-  return db.select().from(functionalAreas).where(eq(functionalAreas.repositoryId, repositoryId)).all();
+  return db.select().from(functionalAreas).where(and(eq(functionalAreas.repositoryId, repositoryId), isNull(functionalAreas.deletedAt))).all();
 }
 
 export async function getTestsByRepo(repositoryId: string) {
@@ -2294,7 +2294,7 @@ export async function getFunctionalAreasTree(repositoryId: string): Promise<Func
   const areas = await db
     .select()
     .from(functionalAreas)
-    .where(eq(functionalAreas.repositoryId, repositoryId))
+    .where(and(eq(functionalAreas.repositoryId, repositoryId), isNull(functionalAreas.deletedAt)))
     .orderBy(functionalAreas.orderIndex)
     .all();
 
@@ -3847,7 +3847,7 @@ export async function getComposeConfig(repositoryId: string, branch: string) {
 export async function upsertComposeConfig(
   repositoryId: string,
   branch: string,
-  data: { selectedTestIds: string[]; versionOverrides: Record<string, string> },
+  data: { selectedTestIds: string[]; excludedTestIds: string[]; versionOverrides: Record<string, string> },
 ) {
   const existing = await db
     .select()
@@ -3863,6 +3863,7 @@ export async function upsertComposeConfig(
       .update(composeConfigs)
       .set({
         selectedTestIds: data.selectedTestIds,
+        excludedTestIds: data.excludedTestIds,
         versionOverrides: data.versionOverrides,
         updatedAt: new Date(),
       })
@@ -3875,6 +3876,7 @@ export async function upsertComposeConfig(
       repositoryId,
       branch,
       selectedTestIds: data.selectedTestIds,
+      excludedTestIds: data.excludedTestIds,
       versionOverrides: data.versionOverrides,
       updatedAt: new Date(),
     };

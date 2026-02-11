@@ -46,7 +46,9 @@ export default async function RunPage() {
         branchHeads={branchHeads}
         buildChanges={buildChanges}
         composeConfig={composeConfig ? {
-          selectedTestIds: composeConfig.selectedTestIds ?? null,
+          selectedTestIds: composeConfig.excludedTestIds
+            ? tests.map(t => t.id).filter(id => !composeConfig.excludedTestIds!.includes(id))
+            : composeConfig.selectedTestIds ?? null,
           versionOverrides: composeConfig.versionOverrides ?? null,
         } : null}
       />

@@ -1257,10 +1257,11 @@ export async function saveComposeConfig(
   repositoryId: string,
   branch: string,
   selectedTestIds: string[],
+  excludedTestIds: string[],
   versionOverrides: Record<string, string>,
 ) {
   await requireRepoAccess(repositoryId);
-  await queries.upsertComposeConfig(repositoryId, branch, { selectedTestIds, versionOverrides });
+  await queries.upsertComposeConfig(repositoryId, branch, { selectedTestIds, excludedTestIds, versionOverrides });
   revalidatePath('/compose');
   revalidatePath('/run');
 }

@@ -85,12 +85,19 @@ export function TestsPageClient({ areas, tests, routes, repositoryId, baseUrl = 
   const [isPermanentlyDeleting, setIsPermanentlyDeleting] = useState(false);
   const [showPermanentDeleteConfirm, setShowPermanentDeleteConfirm] = useState(false);
   const [selectedDeletedIds, setSelectedDeletedIds] = useState<Set<string>>(new Set());
+  const [statusFilter, setStatusFilter] = useState<'all' | 'passed' | 'failed' | 'pending'>('all');
 
   const failedTests = tests.filter(t => t.latestStatus === 'failed');
 
-  const filteredTests = tests.filter(test =>
-    test.name.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+  const filteredTests = tests.filter(test => {
+    const matchesSearch = test.name.toLowerCase().includes(searchQuery.toLowerCase());
+    if (!matchesSearch) return false;
+    if (statusFilter === 'all') return true;
+    if (statusFilter === 'passed') return test.latestStatus === 'passed';
+    if (statusFilter === 'failed') return test.latestStatus === 'failed';
+    if (statusFilter === 'pending') return !test.latestStatus;
+    return true;
+  });
 
   const selectedFailedTests = Array.from(selectedIds).filter(id => {
     const test = tests.find(t => t.id === id);
@@ -245,11 +252,11 @@ export function TestsPageClient({ areas, tests, routes, repositoryId, baseUrl = 
     );
   };
 
-  const statsData = [
-    { label: 'Total', value: tests.length, color: 'text-foreground' },
-    { label: 'Passed', value: tests.filter(t => t.latestStatus === 'passed').length, color: 'text-emerald-600 dark:text-emerald-400' },
-    { label: 'Failed', value: failedTests.length, color: 'text-rose-600 dark:text-rose-400' },
-    { label: 'Pending', value: tests.filter(t => !t.latestStatus).length, color: 'text-muted-foreground' },
+  const statsData: { label: string; value: number; color: string; filter: typeof statusFilter }[] = [
+    { label: 'Total', value: tests.length, color: 'text-foreground', filter: 'all' },
+    { label: 'Passed', value: tests.filter(t => t.latestStatus === 'passed').length, color: 'text-emerald-600 dark:text-emerald-400', filter: 'passed' },
+    { label: 'Failed', value: failedTests.length, color: 'text-rose-600 dark:text-rose-400', filter: 'failed' },
+    { label: 'Pending', value: tests.filter(t => !t.latestStatus).length, color: 'text-muted-foreground', filter: 'pending' },
   ];
 
   return (
@@ -308,15 +315,21 @@ export function TestsPageClient({ areas, tests, routes, repositoryId, baseUrl = 
         {/* Stats Row */}
         <div className="grid grid-cols-4 gap-4">
           {statsData.map((stat) => (
-            <div
+            <button
               key={stat.label}
-              className="p-4 rounded-lg bg-card border border-border/50"
+              type="button"
+              onClick={() => setStatusFilter(statusFilter === stat.filter ? 'all' : stat.filter)}
+              className={`p-4 rounded-lg bg-card border text-left transition-colors cursor-pointer ${
+                statusFilter === stat.filter
+                  ? 'border-primary ring-1 ring-primary/30'
+                  : 'border-border/50 hover:border-border'
+              }`}
             >
               <div className={`text-2xl font-semibold tabular-nums ${stat.color}`}>
                 {stat.value}
               </div>
               <div className="text-xs text-muted-foreground mt-1">{stat.label}</div>
-            </div>
+            </button>
           ))}
         </div>
 

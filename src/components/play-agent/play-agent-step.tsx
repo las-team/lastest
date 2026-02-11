@@ -99,7 +99,7 @@ export function PlayAgentStep({ step, stepNumber, onResume, onSkipDiscover }: Pl
         <div className="ml-7 mt-1.5 space-y-1.5">
           <p className="text-xs text-blue-600 dark:text-blue-400">{step.userAction}</p>
           <div className="flex gap-2">
-            {(step.id === 'settings_check' || step.id === 'url_check') && (
+            {(step.id === 'settings_check' || step.id === 'env_setup') && (
               <Button size="sm" variant="outline" asChild>
                 <Link href="/settings">Open Settings</Link>
               </Button>
