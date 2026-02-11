@@ -15,10 +15,13 @@ import {
   FolderTree,
   Building2,
   Zap,
+  Sparkles,
 } from 'lucide-react';
 import { RepoSelector, SyncReposButton } from './repo-selector';
 import { QueueIndicator } from '@/components/queue/queue-indicator';
 import { UserMenu } from '@/components/auth/user-menu';
+import { useRouter } from 'next/navigation';
+import { usePlayAgent } from '@/components/play-agent/use-play-agent';
 import type { Repository, User, Team } from '@/lib/db/schema';
 
 interface SidebarProps {
@@ -51,6 +54,8 @@ const settingsNav = [
 
 export function Sidebar({ repos, selectedRepo, currentUser, team }: SidebarProps) {
   const pathname = usePathname();
+  const router = useRouter();
+  const { isActive, progress, start, loading } = usePlayAgent(selectedRepo?.id);
 
   return (
     <aside className="w-64 border-r bg-muted/30 flex flex-col">
@@ -155,7 +160,30 @@ export function Sidebar({ repos, selectedRepo, currentUser, team }: SidebarProps
 
       </nav>
 
-      <div className="px-4 pb-2">
+      <div className="px-4 pb-2 space-y-1">
+        <button
+          onClick={() => {
+            if (isActive) {
+              router.push('/run');
+            } else {
+              start().then(() => router.push('/run'));
+            }
+          }}
+          disabled={loading || !selectedRepo}
+          className={cn(
+            'flex items-center gap-3 px-3 py-2 rounded-md text-sm transition-colors w-full text-left',
+            isActive
+              ? 'bg-primary/10 text-primary font-medium'
+              : 'hover:bg-muted text-muted-foreground',
+            (!selectedRepo || loading) && 'opacity-50 cursor-not-allowed',
+          )}
+        >
+          <Sparkles className={cn('h-4 w-4', isActive && 'animate-pulse')} />
+          <span className="flex-1">Auto Setup</span>
+          {isActive && (
+            <span className="text-xs tabular-nums">{progress}%</span>
+          )}
+        </button>
         <Link
           href="/settings"
           className={cn(

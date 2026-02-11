@@ -13,8 +13,29 @@ export async function createArea(data: {
 }) {
   if (data.repositoryId) await requireRepoAccess(data.repositoryId);
   else await requireTeamAccess();
+
+  // Deduplicate: find existing area with same name (case-insensitive) in same repo+parent
+  const allAreas = data.repositoryId
+    ? await queries.getFunctionalAreasByRepo(data.repositoryId)
+    : await queries.getFunctionalAreas();
+  const trimmedName = data.name.trim();
+  const existing = allAreas.find(
+    a => a.name.toLowerCase() === trimmedName.toLowerCase()
+      && a.parentId === (data.parentId ?? null)
+  );
+
+  if (existing) {
+    // Merge description if provided and existing is empty
+    if (data.description && !existing.description) {
+      await queries.updateFunctionalArea(existing.id, { description: data.description });
+    }
+    revalidatePath('/areas');
+    revalidatePath('/tests');
+    return existing;
+  }
+
   const result = await queries.createFunctionalArea({
-    name: data.name,
+    name: trimmedName,
     description: data.description,
     repositoryId: data.repositoryId,
     parentId: data.parentId,

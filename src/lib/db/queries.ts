@@ -43,6 +43,7 @@ import {
   googleSheetsAccounts,
   googleSheetsDataSources,
   composeConfigs,
+  agentSessions,
 } from './schema';
 import {
   DEFAULT_SELECTOR_PRIORITY,
@@ -95,6 +96,11 @@ import type {
   NewGoogleSheetsAccount,
   NewGoogleSheetsDataSource,
   NewComposeConfig,
+  NewAgentSession,
+  AgentSessionStatus,
+  AgentStepState,
+  AgentSessionMetadata,
+  AgentStepId,
   Team,
   User,
   Runner,
@@ -3875,4 +3881,57 @@ export async function upsertComposeConfig(
     await db.insert(composeConfigs).values(newConfig);
     return newConfig;
   }
+}
+
+// ============================================
+// Agent Sessions
+// ============================================
+
+export async function createAgentSession(data: Omit<NewAgentSession, 'id'>) {
+  const id = uuid();
+  const now = new Date();
+  await db.insert(agentSessions).values({
+    ...data,
+    id,
+    createdAt: now,
+    updatedAt: now,
+  });
+  return db.select().from(agentSessions).where(eq(agentSessions.id, id)).get()!;
+}
+
+export async function getAgentSession(id: string) {
+  return db.select().from(agentSessions).where(eq(agentSessions.id, id)).get();
+}
+
+export async function getActiveAgentSession(repositoryId: string) {
+  return db
+    .select()
+    .from(agentSessions)
+    .where(
+      and(
+        eq(agentSessions.repositoryId, repositoryId),
+        or(
+          eq(agentSessions.status, 'active'),
+          eq(agentSessions.status, 'paused'),
+        ),
+      ),
+    )
+    .orderBy(desc(agentSessions.createdAt))
+    .get();
+}
+
+export async function updateAgentSession(
+  id: string,
+  data: {
+    status?: AgentSessionStatus;
+    currentStepId?: AgentStepId;
+    steps?: AgentStepState[];
+    metadata?: AgentSessionMetadata;
+    completedAt?: Date;
+  },
+) {
+  await db
+    .update(agentSessions)
+    .set({ ...data, updatedAt: new Date() })
+    .where(eq(agentSessions.id, id));
 }

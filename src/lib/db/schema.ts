@@ -1089,3 +1089,69 @@ export const composeConfigs = sqliteTable('compose_configs', {
 
 export type ComposeConfig = typeof composeConfigs.$inferSelect;
 export type NewComposeConfig = typeof composeConfigs.$inferInsert;
+
+// ============================================
+// Agent Sessions (Play Agent onboarding flow)
+// ============================================
+
+export type AgentSessionStatus = 'active' | 'paused' | 'completed' | 'failed' | 'cancelled';
+
+export type AgentStepId =
+  | 'settings_check'
+  | 'select_repo'
+  | 'scan_and_template'
+  | 'discover'
+  | 'url_check'
+  | 'run_tests'
+  | 'fix_tests'
+  | 'rerun_tests'
+  | 'summary';
+
+export type AgentStepStatus = 'pending' | 'active' | 'waiting_user' | 'completed' | 'failed' | 'skipped';
+
+export interface AgentSubstep {
+  label: string;
+  status: 'pending' | 'running' | 'done' | 'error';
+  detail?: string;
+}
+
+export interface AgentStepState {
+  id: AgentStepId;
+  status: AgentStepStatus;
+  label: string;
+  description: string;
+  startedAt?: string;
+  completedAt?: string;
+  error?: string;
+  result?: Record<string, unknown>;
+  userAction?: string;
+  substeps?: AgentSubstep[];
+}
+
+export interface AgentSessionMetadata {
+  buildIds?: string[];
+  fixAttempts?: Record<string, number>;
+  codeHashes?: Record<string, string[]>;
+  testsCreated?: number;
+  initialPassedCount?: number;
+  initialFailedCount?: number;
+  finalPassedCount?: number;
+  finalFailedCount?: number;
+  [key: string]: unknown;
+}
+
+export const agentSessions = sqliteTable('agent_sessions', {
+  id: text('id').primaryKey(),
+  repositoryId: text('repository_id').references(() => repositories.id, { onDelete: 'cascade' }).notNull(),
+  teamId: text('team_id'),
+  status: text('status').$type<AgentSessionStatus>().notNull().default('active'),
+  currentStepId: text('current_step_id').$type<AgentStepId>(),
+  steps: text('steps', { mode: 'json' }).$type<AgentStepState[]>().notNull(),
+  metadata: text('metadata', { mode: 'json' }).$type<AgentSessionMetadata>().notNull(),
+  createdAt: integer('created_at', { mode: 'timestamp' }),
+  updatedAt: integer('updated_at', { mode: 'timestamp' }),
+  completedAt: integer('completed_at', { mode: 'timestamp' }),
+});
+
+export type AgentSession = typeof agentSessions.$inferSelect;
+export type NewAgentSession = typeof agentSessions.$inferInsert;
