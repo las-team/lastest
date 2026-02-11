@@ -70,6 +70,61 @@ export function PlaywrightSettingsCard({
 
   const debounceRef = useRef<NodeJS.Timeout | null>(null);
 
+  // Store original values to compare against (prevents save on mount)
+  const originalValues = useRef({
+    selectorPriority: settings.selectorPriority || DEFAULT_SELECTOR_PRIORITY,
+    browser: settings.browser || 'chromium',
+    viewportWidth: settings.viewportWidth || 1280,
+    viewportHeight: settings.viewportHeight || 720,
+    headlessMode: (settings.headlessMode as HeadlessMode) || 'true',
+    navigationTimeout: settings.navigationTimeout || 30000,
+    actionTimeout: settings.actionTimeout || 5000,
+    pointerGestures: settings.pointerGestures ?? false,
+    cursorFPS: settings.cursorFPS ?? 30,
+    defaultRecordingEngine: (settings.defaultRecordingEngine as RecordingEngine) ?? 'lastest',
+    freezeAnimations: settings.freezeAnimations ?? false,
+    screenshotDelay: settings.screenshotDelay ?? 0,
+    maxParallelTests: settings.maxParallelTests ?? 1,
+    stabilization: { ...DEFAULT_STABILIZATION_SETTINGS, ...settings.stabilization },
+  });
+
+  // Sync local state when settings prop changes (e.g. after template apply)
+  const settingsKey = `${settings.id}-${settings.updatedAt?.getTime?.() ?? 0}`;
+  useEffect(() => {
+    setSelectorPriority(settings.selectorPriority || DEFAULT_SELECTOR_PRIORITY);
+    setBrowser(settings.browser || 'chromium');
+    setViewportWidth(settings.viewportWidth || 1280);
+    setViewportHeight(settings.viewportHeight || 720);
+    setHeadlessMode((settings.headlessMode as HeadlessMode) || 'true');
+    setNavigationTimeout(settings.navigationTimeout || 30000);
+    setActionTimeout(settings.actionTimeout || 5000);
+    setPointerGestures(settings.pointerGestures ?? false);
+    setCursorFPS(settings.cursorFPS ?? 30);
+    setDefaultRecordingEngine((settings.defaultRecordingEngine as RecordingEngine) ?? 'lastest');
+    setFreezeAnimations(settings.freezeAnimations ?? false);
+    setScreenshotDelay(settings.screenshotDelay ?? 0);
+    setMaxParallelTests(settings.maxParallelTests ?? 1);
+    setStabilization({ ...DEFAULT_STABILIZATION_SETTINGS, ...settings.stabilization });
+
+    originalValues.current = {
+      selectorPriority: settings.selectorPriority || DEFAULT_SELECTOR_PRIORITY,
+      browser: settings.browser || 'chromium',
+      viewportWidth: settings.viewportWidth || 1280,
+      viewportHeight: settings.viewportHeight || 720,
+      headlessMode: (settings.headlessMode as HeadlessMode) || 'true',
+      navigationTimeout: settings.navigationTimeout || 30000,
+      actionTimeout: settings.actionTimeout || 5000,
+      pointerGestures: settings.pointerGestures ?? false,
+      cursorFPS: settings.cursorFPS ?? 30,
+      defaultRecordingEngine: (settings.defaultRecordingEngine as RecordingEngine) ?? 'lastest',
+      freezeAnimations: settings.freezeAnimations ?? false,
+      screenshotDelay: settings.screenshotDelay ?? 0,
+      maxParallelTests: settings.maxParallelTests ?? 1,
+      stabilization: { ...DEFAULT_STABILIZATION_SETTINGS, ...settings.stabilization },
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [settingsKey]);
+
   // Fetch selector stats for recommendations
   useEffect(() => {
     if (!repositoryId) return;
@@ -89,24 +144,6 @@ export function PlaywrightSettingsCard({
     if (settings.repositoryId === repositoryId) return 'repo-specific' as const;
     return 'global-fallback' as const;
   }, [repositoryId, settings.repositoryId]);
-
-  // Store original values to compare against (prevents save on mount)
-  const originalValues = useRef({
-    selectorPriority: settings.selectorPriority || DEFAULT_SELECTOR_PRIORITY,
-    browser: settings.browser || 'chromium',
-    viewportWidth: settings.viewportWidth || 1280,
-    viewportHeight: settings.viewportHeight || 720,
-    headlessMode: (settings.headlessMode as HeadlessMode) || 'true',
-    navigationTimeout: settings.navigationTimeout || 30000,
-    actionTimeout: settings.actionTimeout || 5000,
-    pointerGestures: settings.pointerGestures ?? false,
-    cursorFPS: settings.cursorFPS ?? 30,
-    defaultRecordingEngine: (settings.defaultRecordingEngine as RecordingEngine) ?? 'lastest',
-    freezeAnimations: settings.freezeAnimations ?? false,
-    screenshotDelay: settings.screenshotDelay ?? 0,
-    maxParallelTests: settings.maxParallelTests ?? 1,
-    stabilization: { ...DEFAULT_STABILIZATION_SETTINGS, ...settings.stabilization },
-  });
 
   const doSave = useCallback(() => {
     startTransition(async () => {

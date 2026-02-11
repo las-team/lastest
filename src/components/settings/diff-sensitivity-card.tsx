@@ -45,6 +45,23 @@ export function DiffSensitivityCard({
     ignorePageShift: settings.ignorePageShift ?? DEFAULT_DIFF_THRESHOLDS.ignorePageShift,
   });
 
+  // Sync local state when settings prop changes (e.g. after template apply)
+  const settingsKey = `${settings.id}-${settings.updatedAt?.getTime?.() ?? 0}`;
+  useEffect(() => {
+    setUnchangedThreshold(settings.unchangedThreshold ?? DEFAULT_DIFF_THRESHOLDS.unchangedThreshold);
+    setFlakyThreshold(settings.flakyThreshold ?? DEFAULT_DIFF_THRESHOLDS.flakyThreshold);
+    setIncludeAntiAliasing(settings.includeAntiAliasing ?? DEFAULT_DIFF_THRESHOLDS.includeAntiAliasing);
+    setIgnorePageShift(settings.ignorePageShift ?? DEFAULT_DIFF_THRESHOLDS.ignorePageShift);
+
+    originalValues.current = {
+      unchangedThreshold: settings.unchangedThreshold ?? DEFAULT_DIFF_THRESHOLDS.unchangedThreshold,
+      flakyThreshold: settings.flakyThreshold ?? DEFAULT_DIFF_THRESHOLDS.flakyThreshold,
+      includeAntiAliasing: settings.includeAntiAliasing ?? DEFAULT_DIFF_THRESHOLDS.includeAntiAliasing,
+      ignorePageShift: settings.ignorePageShift ?? DEFAULT_DIFF_THRESHOLDS.ignorePageShift,
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [settingsKey]);
+
   const doSave = useCallback(() => {
     startTransition(async () => {
       await saveDiffSensitivitySettings({
