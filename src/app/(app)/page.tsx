@@ -15,6 +15,7 @@ import {
 import { getCurrentSession } from '@/lib/auth';
 import { SetupGuide } from '@/components/setup-guide/setup-guide';
 import { CoverageBar } from '@/components/coverage/coverage-bar';
+import { PlayAgentTimeline } from '@/components/play-agent/play-agent-timeline';
 import Link from 'next/link';
 
 export default async function DashboardPage() {
@@ -110,6 +111,9 @@ export default async function DashboardPage() {
             )}
           </Card>
         </div>
+
+        {/* Auto Setup Agent */}
+        <PlayAgentTimeline repositoryId={selectedRepo?.id} />
 
         {/* Route Coverage */}
         <Card>

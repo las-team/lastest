@@ -32,7 +32,6 @@ import type { Test, TestRun, Build } from '@/lib/db/schema';
 import { BuildSummaryCard } from '@/components/builds/build-summary-card';
 import { BuildGraphView } from '@/components/builds/build-graph-view';
 import { BranchSelector } from '@/components/settings/branch-selector';
-import { PlayAgentTimeline } from '@/components/play-agent/play-agent-timeline';
 import { cn } from '@/lib/utils';
 
 interface BuildWithBranch extends Build {
@@ -203,7 +202,6 @@ export function RunDashboardClient({ tests, runs: _runs, builds, repositoryId, a
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 max-w-6xl mx-auto">
         {/* Left Column - Run Tests */}
         <div className="space-y-6">
-          <PlayAgentTimeline repositoryId={repositoryId} />
           <Card>
             <CardHeader>
               <div className="flex items-center justify-between">

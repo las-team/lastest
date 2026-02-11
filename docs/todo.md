@@ -53,3 +53,29 @@ Import from prior tools?
 ### UX
 ## bugs
 ## marketing 
+
+----------
+
+Ha van a mainen egy commit, lefut rá egy új baseline, és az én commitemet hasonlítom a legújabb
+
+Auto-approve main, whatever makes it there is the baseline
+
+Diff list - Failed, Changed, Flaky
+
+Auto-onboardin
+
+Record video during test
+
+Runner can execute on remote baseurl
+
+Test - which pr it was added in, 
+
+Run tests in CI container
+
+mark
+    hetzner
+    basic auth apira
+    runner secu review -> megy npmre
+
+auth0 -like - login manager - keycloak? - Stytch?
+    https://clerk.com/
