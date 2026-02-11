@@ -1,5 +1,5 @@
 import { RecordingClient } from './recording-client';
-import { getFunctionalAreasByRepo, getPlaywrightSettings, getSelectedRepository, getEnvironmentConfig, getTest, getSetupScript } from '@/lib/db/queries';
+import { getFunctionalAreasByRepo, getPlaywrightSettings, getSelectedRepository, getEnvironmentConfig, getTest, getDefaultSetupSteps } from '@/lib/db/queries';
 import { getCurrentSession } from '@/lib/auth';
 import type { RecordingEngine } from '@/lib/db/schema';
 
@@ -19,19 +19,14 @@ export default async function RecordPage({ searchParams }: RecordPageProps) {
   // Fetch test data if re-recording
   const rerecordTest = params.rerecordId ? await getTest(params.rerecordId) : null;
 
-  // Resolve repository setup configuration
-  let repositorySetup: { type: 'test' | 'script' | 'none'; name?: string; id?: string } = { type: 'none' };
-  if (selectedRepo?.defaultSetupTestId) {
-    const setupTest = await getTest(selectedRepo.defaultSetupTestId);
-    if (setupTest) {
-      repositorySetup = { type: 'test', name: setupTest.name, id: setupTest.id };
-    }
-  } else if (selectedRepo?.defaultSetupScriptId) {
-    const setupScript = await getSetupScript(selectedRepo.defaultSetupScriptId);
-    if (setupScript) {
-      repositorySetup = { type: 'script', name: setupScript.name, id: setupScript.id };
-    }
-  }
+  // Resolve repository setup configuration (multi-step system)
+  const defaultSteps = selectedRepo ? await getDefaultSetupSteps(selectedRepo.id) : [];
+  const repositorySetupSteps = defaultSteps.map(s => ({
+    stepType: s.stepType as 'test' | 'script',
+    testId: s.testId,
+    scriptId: s.scriptId,
+    name: s.testName || s.scriptName || 'Unknown',
+  }));
 
   return (
     <div className="flex flex-col h-full">
@@ -43,7 +38,7 @@ export default async function RecordPage({ searchParams }: RecordPageProps) {
         enabledEngines={settings.enabledRecordingEngines as RecordingEngine[]}
         defaultEngine={settings.defaultRecordingEngine as RecordingEngine}
         rerecordTest={rerecordTest}
-        repositorySetup={repositorySetup}
+        repositorySetupSteps={repositorySetupSteps}
       />
     </div>
   );

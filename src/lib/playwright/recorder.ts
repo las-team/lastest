@@ -7,9 +7,16 @@ import { DEFAULT_SELECTOR_PRIORITY } from '@/lib/db/schema';
 import { extractText, terminateWorker, warmupWorker } from './ocr';
 import { getSetupOrchestrator } from '@/lib/setup/setup-orchestrator';
 
+export interface SetupStep {
+  stepType: 'test' | 'script';
+  testId?: string | null;
+  scriptId?: string | null;
+}
+
 export interface SetupOptions {
   testId?: string | null;
   scriptId?: string | null;
+  steps?: SetupStep[];
 }
 
 export type AssertionType = 'pageLoad' | 'networkIdle' | 'urlMatch' | 'domContentLoaded';
@@ -195,17 +202,35 @@ export class PlaywrightRecorder extends EventEmitter {
       }
 
       // Run setup if configured (before setting up event listeners to avoid capturing setup actions)
-      if (setupOptions && (setupOptions.testId || setupOptions.scriptId)) {
+      if (setupOptions) {
         const orchestrator = getSetupOrchestrator();
-        const setupResult = await orchestrator.resolveAndRunSetup(
-          setupOptions.testId,
-          setupOptions.scriptId,
-          this.page,
-          { baseUrl: this.baseOrigin, variables: {} }
-        );
+        const context = { baseUrl: this.baseOrigin, variables: {} };
 
-        if (!setupResult.success) {
-          throw new Error(`Setup failed: ${setupResult.error}`);
+        if (setupOptions.steps && setupOptions.steps.length > 0) {
+          // Multi-step setup: run each step sequentially
+          let currentContext = context;
+          for (const step of setupOptions.steps) {
+            const stepTestId = step.stepType === 'test' ? step.testId : null;
+            const stepScriptId = step.stepType === 'script' ? step.scriptId : null;
+            const result = await orchestrator.resolveAndRunSetup(stepTestId, stepScriptId, this.page, currentContext);
+            if (!result.success) {
+              throw new Error(`Setup failed: ${result.error}`);
+            }
+            if (result.variables) {
+              currentContext = { ...currentContext, variables: { ...currentContext.variables, ...result.variables } };
+            }
+          }
+        } else if (setupOptions.testId || setupOptions.scriptId) {
+          // Legacy single-step setup
+          const setupResult = await orchestrator.resolveAndRunSetup(
+            setupOptions.testId,
+            setupOptions.scriptId,
+            this.page,
+            context
+          );
+          if (!setupResult.success) {
+            throw new Error(`Setup failed: ${setupResult.error}`);
+          }
         }
       }
 

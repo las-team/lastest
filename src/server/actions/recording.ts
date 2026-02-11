@@ -64,7 +64,7 @@ export async function startRecording(
   url: string,
   repositoryId?: string | null,
   runnerId?: string,
-  setupOptions?: { testId?: string | null; scriptId?: string | null }
+  setupOptions?: { testId?: string | null; scriptId?: string | null; steps?: Array<{ stepType: 'test' | 'script'; testId?: string | null; scriptId?: string | null }> }
 ): Promise<{ sessionId?: string; error?: string }> {
   const recorder = getRecorder(repositoryId);
 

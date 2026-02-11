@@ -62,3 +62,4 @@ packages/runner/screenshot*
 .worktrees/
 
 public/planned/*
+public/videos/*

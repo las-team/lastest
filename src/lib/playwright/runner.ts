@@ -858,8 +858,14 @@ export class PlaywrightRunner extends EventEmitter {
     // Track setup duration (outside try so catch can access)
     let setupDurationMs = 0;
 
-    // Video recording
-    let videoPath: string | undefined;
+    // Result object — assigned in try/catch, video path added in finally
+    let result: TestRunResult = {
+      testId: test.id,
+      status: 'failed',
+      durationMs: 0,
+      screenshots: [],
+      errorMessage: 'Unexpected error',
+    };
 
     try {
       // If build-level setup captured storageState (cookies/localStorage),
@@ -1257,7 +1263,7 @@ export class PlaywrightRunner extends EventEmitter {
         timestamp: Date.now(),
       } as RunEvent);
 
-      return {
+      result = {
         testId: test.id,
         status: 'passed',
         durationMs,
@@ -1271,7 +1277,6 @@ export class PlaywrightRunner extends EventEmitter {
         teardownDurationMs,
         teardownError,
         stabilityMetadata: aggregatedStabilityMetadata,
-        videoPath,
       };
 
     } catch (error) {
@@ -1336,7 +1341,7 @@ export class PlaywrightRunner extends EventEmitter {
         allScreenshots.push({ path: screenshotPath, label: 'failure' });
       }
 
-      return {
+      result = {
         testId: test.id,
         status: 'failed',
         durationMs,
@@ -1349,7 +1354,6 @@ export class PlaywrightRunner extends EventEmitter {
         setupDurationMs: setupDurationMs > 0 ? setupDurationMs : undefined,
         teardownDurationMs,
         teardownError,
-        videoPath,
       };
 
     } finally {
@@ -1367,12 +1371,14 @@ export class PlaywrightRunner extends EventEmitter {
           const dest = path.join(videoDestDir, `${runId}-${test.id}.webm`);
           await video.saveAs(dest);
           await video.delete(); // clean temp file
-          videoPath = dest.replace(/^.*\/public\//, '/');
+          result.videoPath = '/' + dest.replace(/^.*?public\//, '');
         } catch {
           // Video capture is best-effort
         }
       }
     }
+
+    return result;
   }
 
   /**
