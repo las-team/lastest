@@ -113,11 +113,15 @@ export function AreasPageClient({ tree, uncategorizedTests, unsortedSuites, repo
     }
   };
 
-  const handleDeleteArea = async () => {
+  const handleDeleteArea = async (withContents: boolean) => {
     if (!deleteAreaId) return;
     setIsDeleting(true);
     try {
-      await deleteArea(deleteAreaId);
+      if (withContents) {
+        await deleteAreaWithContents(deleteAreaId);
+      } else {
+        await deleteArea(deleteAreaId);
+      }
       if (selection?.type === 'area' && selection.id === deleteAreaId) {
         setSelection(null);
       }
@@ -351,21 +355,33 @@ export function AreasPageClient({ tree, uncategorizedTests, unsortedSuites, repo
           <DialogHeader>
             <DialogTitle>Delete Area</DialogTitle>
             <DialogDescription>
-              Are you sure you want to delete this area? Tests and suites in this area will be moved to Unsorted, and sub-folders will be moved to the root level.
+              What would you like to do with the tests, suites, and sub-folders inside this area?
             </DialogDescription>
           </DialogHeader>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setDeleteAreaId(null)}>
-              Cancel
+          <div className="flex flex-col gap-2 py-2">
+            <Button
+              variant="outline"
+              onClick={() => handleDeleteArea(false)}
+              disabled={isDeleting}
+              className="justify-start h-auto py-3 px-4"
+            >
+              <div className="text-left">
+                <div className="font-medium">{isDeleting ? 'Deleting...' : 'Delete area only'}</div>
+                <div className="text-xs text-muted-foreground font-normal">Move contents to Unsorted and sub-folders to root</div>
+              </div>
             </Button>
             <Button
               variant="destructive"
-              onClick={handleDeleteArea}
+              onClick={() => handleDeleteArea(true)}
               disabled={isDeleting}
+              className="justify-start h-auto py-3 px-4"
             >
-              {isDeleting ? 'Deleting...' : 'Delete'}
+              <div className="text-left">
+                <div className="font-medium">{isDeleting ? 'Deleting...' : 'Delete everything'}</div>
+                <div className="text-xs font-normal opacity-90">Remove the area and all its tests, suites, and sub-folders</div>
+              </div>
             </Button>
-          </DialogFooter>
+          </div>
         </DialogContent>
       </Dialog>
 
