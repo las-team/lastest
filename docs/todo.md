@@ -1,4 +1,18 @@
 ## in progress
+Play button 
+    Runs setup and testing as an agent
+    1. Show Timeline of what will happen between user and AI on dash
+    2. Settings - highlight areas for the user that need to be set up. GH, AI, Base URL (if hasnt been done) 
+    3. Select repo to be tested - highlight for user
+    4. Scan repo and set template if user havent selected one
+    5. Run discover: Scan repo and select best method to execute on the repo out of the ones available in the areas section. In most cases it should be the import spec flow, but have ai select the key document(s) and auto create areas and tests
+    6. Ask user to make sure URL is working in case it's not live (check for it)
+    7. Run tests
+    8. Fix tests with MCP or revise if they tests are failing
+    9. Run tests again
+    10. Prompt the user to have something to test
+    11. Run tests again, show comparison and AI assessment - areas that changed - show tooltip on this that it can be enabled in settings
+
 ## test
 VS Code extension
 Github actions integration
@@ -12,18 +26,11 @@ Support https://github.com/excalidraw/excalidraw/tree/master/packages/excalidraw
     Dev feeback
     Actions with changes
 
-Play button - give in url and do everything 
-    Runs setup and testing as an agent
-    1. Show Timeline of what will happen between user and AI
-    2. Settings - highlight areas that need to be set up. GH, AI (if wasnt done)
-    3. Select repo to be tested
-    4. Run discover on the repo, create areas and tests
-    5. Run tests
-    6. Fix tests, with MCP or revise if they are failing
-    7. Run tests again
-    8. Prompt the user to have something to test 
-    9. Run tests again, show comparison and AI assessment - areas that changed
-    10. Ideal summary: 60 functional areas remain unchanged, 10 changed, out of those 8 new areas added, 1 pre-existing areas changed, 1 minor change in pre-existing function. 
+Submit a bug
+    Autosubmit bug
+
+Ideal summary
+    60 functional areas remain unchanged, 10 changed, out of those 8 new areas added, 1 pre-existing areas changed, 1 minor change in pre-existing function. 
 
 Ban AI mode
     Remove all GenAI features from UI if enabled
