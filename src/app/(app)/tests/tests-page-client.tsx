@@ -65,6 +65,12 @@ interface TestsPageClientProps {
 
 export function TestsPageClient({ areas, tests, routes, repositoryId, baseUrl = 'http://localhost:3000', deletedTests = [] }: TestsPageClientProps) {
   const notifyJobStarted = useNotifyJobStarted();
+
+  // Compute uncovered routes dynamically — a route is covered only if its functional area has active (non-deleted) tests
+  const areasWithActiveTests = new Set(tests.map(t => t.functionalAreaId).filter(Boolean));
+  const uncoveredRoutes = routes.filter(r =>
+    !(r.functionalAreaId && areasWithActiveTests.has(r.functionalAreaId))
+  );
   const [isNewAreaOpen, setIsNewAreaOpen] = useState(false);
   const [newAreaName, setNewAreaName] = useState('');
   const [isCreating, setIsCreating] = useState(false);
@@ -224,7 +230,7 @@ export function TestsPageClient({ areas, tests, routes, repositoryId, baseUrl = 
 
   const handleAddTests = async (routeIds: string[]) => {
     if (!repositoryId) return;
-    await generateBasicTests(repositoryId, routeIds, 'http://localhost:3000');
+    await generateBasicTests(repositoryId, routeIds, baseUrl);
   };
 
   const StatusBadge = ({ status }: { status: string | null }) => {
@@ -288,7 +294,7 @@ export function TestsPageClient({ areas, tests, routes, repositoryId, baseUrl = 
                   variant="outline"
                   size="sm"
                   onClick={() => setIsAddTestsOpen(true)}
-                  disabled={routes.filter(r => !r.hasTest).length === 0}
+                  disabled={uncoveredRoutes.length === 0}
                 >
                   <FlaskConical className="h-4 w-4 mr-2" />
                   Add Basic Tests
@@ -608,7 +614,7 @@ export function TestsPageClient({ areas, tests, routes, repositoryId, baseUrl = 
       <RouteSelectorDialog
         open={isAddTestsOpen}
         onOpenChange={setIsAddTestsOpen}
-        routes={routes.filter(r => !r.hasTest)}
+        routes={uncoveredRoutes}
         title="Generate Basic Tests"
         description="Select routes to generate smoke tests for (visit, screenshot, check errors)"
         actionLabel="Generate Tests"

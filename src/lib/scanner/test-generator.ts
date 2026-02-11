@@ -47,12 +47,13 @@ test('${testName}', async ({ page }) => {
 `;
 }
 
-export function generateSmokeTestCode(route: RouteInfo, baseUrl: string): string {
-  const url = route.routerType === 'hash'
-    ? `${baseUrl}/#${route.path}`
-    : `${baseUrl}${route.path}`;
+export function generateSmokeTestCode(route: RouteInfo): string {
+  const routePath = route.routerType === 'hash'
+    ? `/#${route.path}`
+    : route.path;
 
   // Return just the test body code (for storing in DB)
+  // Uses the runtime `baseUrl` parameter from the test function signature
   return `const consoleErrors = [];
 const networkFailures = [];
 
@@ -71,7 +72,7 @@ page.on('response', response => {
   }
 });
 
-await page.goto('${url}');
+await page.goto(\`\${baseUrl}${routePath}\`);
 await page.waitForLoadState('load');
 await page.screenshot({ fullPage: true });
 

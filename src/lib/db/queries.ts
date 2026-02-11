@@ -203,6 +203,10 @@ export async function updateTest(id: string, data: Partial<NewTest>) {
 }
 
 export async function softDeleteTest(id: string) {
+  // Fetch the test before deleting so we can update route coverage
+  const deletingTest = await db.select({ functionalAreaId: tests.functionalAreaId })
+    .from(tests).where(eq(tests.id, id)).get();
+
   // Clear setup test references so other tests don't reference a deleted test
   await db.update(tests)
     .set({ setupTestId: null })
@@ -236,10 +240,37 @@ export async function softDeleteTest(id: string) {
 
   // Set deletedAt timestamp (soft delete)
   await db.update(tests).set({ deletedAt: new Date() }).where(eq(tests.id, id));
+
+  // Reset hasTest on routes whose functional area no longer has active tests
+  if (deletingTest?.functionalAreaId) {
+    const activeTestsInArea = await db.select({ id: tests.id })
+      .from(tests)
+      .where(and(
+        eq(tests.functionalAreaId, deletingTest.functionalAreaId),
+        isNull(tests.deletedAt),
+      ))
+      .limit(1)
+      .all();
+
+    if (activeTestsInArea.length === 0) {
+      await db.update(routes)
+        .set({ hasTest: false })
+        .where(eq(routes.functionalAreaId, deletingTest.functionalAreaId));
+    }
+  }
 }
 
 export async function restoreTest(id: string) {
   await db.update(tests).set({ deletedAt: null }).where(eq(tests.id, id));
+
+  // Re-mark routes as having a test when restoring
+  const restoredTest = await db.select({ functionalAreaId: tests.functionalAreaId })
+    .from(tests).where(eq(tests.id, id)).get();
+  if (restoredTest?.functionalAreaId) {
+    await db.update(routes)
+      .set({ hasTest: true })
+      .where(eq(routes.functionalAreaId, restoredTest.functionalAreaId));
+  }
 }
 
 export async function getDeletedTests(repositoryId?: string) {

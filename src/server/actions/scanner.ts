@@ -179,14 +179,11 @@ export async function generateBasicTests(repositoryId: string, routeIds: string[
     }
 
     // Generate smoke test code
-    const testCode = generateSmokeTestCode(
-      {
-        path: route.path,
-        type: route.type as 'static' | 'dynamic',
-        routerType: route.routerType as 'hash' | 'browser' | undefined,
-      },
-      baseUrl
-    );
+    const testCode = generateSmokeTestCode({
+      path: route.path,
+      type: route.type as 'static' | 'dynamic',
+      routerType: route.routerType as 'hash' | 'browser' | undefined,
+    });
 
     const targetUrl = route.routerType === 'hash' ? `${baseUrl}/#${route.path}` : `${baseUrl}${route.path}`;
 

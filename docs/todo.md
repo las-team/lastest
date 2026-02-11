@@ -33,6 +33,8 @@ Test - which pr it was added in, updated?
 
 Publish npm
 
+Docker deploy to local server
+
 Submit a bug
     Autosubmit bug
 
@@ -60,15 +62,12 @@ Import from prior tools?
 Formal verification of code?
 ### UX
 ## bugs
+Onboarding should only scan the target repo!
+AI and mcp explore dont add routes
+-\\- dont add tests
 ## marketing 
 
 ----------
-
-Ha van a mainen egy commit, lefut rá egy új baseline, és az én commitemet hasonlítom a legújabb mainhez - already there
-
-Runner can execute on remote baseurl - 
-
-
 mark
     hetzner
     basic auth apira
