@@ -76,54 +76,45 @@ export function BuildGraphView({ builds, defaultBranch, mainBaselineBuildId, bra
       }
     }
 
-    // Find branches that are ahead of their latest build
-    const aheadList: Array<{ branch: string; col: number; x: number; y: number; headSha: string }> = [];
-    if (branchHeads) {
-      for (const [branch, col] of colMap.entries()) {
-        const headSha = branchHeads[branch];
-        if (!headSha) continue;
-        // Find the latest build on this branch
-        const latestBuild = sorted.find(b => (b.gitBranch || defBranch) === branch);
-        if (!latestBuild?.gitCommit) continue;
-        // Compare: branch HEAD differs from latest build commit
-        if (!headSha.startsWith(latestBuild.gitCommit) && !latestBuild.gitCommit.startsWith(headSha)) {
-          aheadList.push({
-            branch,
-            col,
-            x: PAD_X + col * COL_WIDTH + COL_WIDTH / 2,
-            y: PAD_Y + ROW_HEIGHT / 2, // row 0 position (before offset)
-            headSha,
-          });
-        }
-      }
-    }
-
-    // If there are ahead indicators, shift all build nodes down by one row
-    const rowOffset = aheadList.length > 0 ? 1 : 0;
-
     const numCols = colMap.size;
     const width = PAD_X * 2 + numCols * COL_WIDTH;
-    const totalRows = sorted.length + rowOffset;
-    const height = PAD_Y + totalRows * ROW_HEIGHT + 20;
+    const height = PAD_Y + sorted.length * ROW_HEIGHT + 20;
 
-    // Build node positions (sorted = newest first = row 0 at top, shifted if ahead indicators)
+    // Build node positions (sorted = newest first = row 0 at top)
     const nodeList = sorted.map((build, rowIdx) => {
       const branch = build.gitBranch || defBranch;
       const col = colMap.get(branch) ?? 0;
       return {
         build,
         x: PAD_X + col * COL_WIDTH + COL_WIDTH / 2,
-        y: PAD_Y + (rowIdx + rowOffset) * ROW_HEIGHT + ROW_HEIGHT / 2,
+        y: PAD_Y + rowIdx * ROW_HEIGHT + ROW_HEIGHT / 2,
         branch,
         col,
       };
     });
 
-    // Position ahead indicators in the first row
-    const positionedAhead = aheadList.map(a => ({
-      ...a,
-      y: PAD_Y + ROW_HEIGHT / 2,
-    }));
+    // Find branches that are ahead — place one step above that branch's latest build
+    const positionedAhead: Array<{ branch: string; col: number; x: number; y: number; headSha: string }> = [];
+    if (branchHeads) {
+      for (const [branch, col] of colMap.entries()) {
+        const headSha = branchHeads[branch];
+        if (!headSha) continue;
+        const latestBuild = sorted.find(b => (b.gitBranch || defBranch) === branch);
+        if (!latestBuild?.gitCommit) continue;
+        if (!headSha.startsWith(latestBuild.gitCommit) && !latestBuild.gitCommit.startsWith(headSha)) {
+          // Find the y of the latest (topmost) node for this branch
+          const topNode = nodeList.find(n => n.branch === branch);
+          const aheadY = topNode ? topNode.y - ROW_HEIGHT * 0.6 : PAD_Y;
+          positionedAhead.push({
+            branch,
+            col,
+            x: PAD_X + col * COL_WIDTH + COL_WIDTH / 2,
+            y: aheadY,
+            headSha,
+          });
+        }
+      }
+    }
 
     // Compute vertical lines per branch (first to last node, including ahead indicators)
     const branchExtents = new Map<string, { minY: number; maxY: number; col: number }>();
