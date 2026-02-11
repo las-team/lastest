@@ -724,6 +724,7 @@ async function processVisualDiff(
   // Get the repo's default branch
   const repo = repositoryId ? await queries.getRepository(repositoryId) : null;
   const defaultBranch = repo?.defaultBranch || 'main';
+  const shouldAutoApprove = repo?.autoApproveDefaultBranch && branch === defaultBranch;
 
   // Fetch ignore regions for this test
   const testIgnoreRegions = await queries.getIgnoreRegions(testId);
@@ -872,7 +873,7 @@ async function processVisualDiff(
     return { hasChanges: false, diffId: diff.id, classification: 'unchanged' };
   }
 
-  // No baseline - this is a new test, requires manual review
+  // No baseline - this is a new test, requires manual review (or auto-approve on default branch)
   if (!baseline) {
     const plannedDiff = await generatePlannedDiff(currentScreenshotPath);
     const mainDiff = await generateMainBaselineDiff(currentScreenshotPath);
@@ -883,7 +884,7 @@ async function processVisualDiff(
       testId,
       stepLabel: stepLabel || null,
       currentImagePath: currentScreenshotPath,
-      status: 'pending',
+      status: shouldAutoApprove ? 'auto_approved' : 'pending',
       classification: 'changed',
       pixelDifference: 0,
       percentageDifference: '0',
@@ -892,7 +893,20 @@ async function processVisualDiff(
       ...mainDiff,
     });
 
-    return { hasChanges: true, diffId: diff.id, classification: 'changed' };
+    if (shouldAutoApprove) {
+      const autoHash = hashImage(path.join(process.cwd(), 'public', currentScreenshotPath));
+      await queries.deactivateBaselines(testId, stepLabel || null, branch);
+      await queries.createBaseline({
+        testId,
+        stepLabel: stepLabel || null,
+        imagePath: currentScreenshotPath,
+        imageHash: autoHash,
+        branch,
+        approvedFromDiffId: diff.id,
+      });
+    }
+
+    return { hasChanges: !shouldAutoApprove, diffId: diff.id, classification: 'changed' };
   }
 
   // Generate diff against primary baseline
@@ -909,7 +923,8 @@ async function processVisualDiff(
 
     const pct = diffResult.percentageDifference;
     const { classification, status } = classifyDiff(pct);
-    const hasChanges = classification !== 'unchanged';
+    const effectiveStatus = shouldAutoApprove ? 'auto_approved' : status;
+    const hasChanges = shouldAutoApprove ? false : classification !== 'unchanged';
     const diffImagePath = diffResult.diffImagePath.replace(process.cwd() + '/public', '');
 
     const plannedDiff = await generatePlannedDiff(currentScreenshotPath);
@@ -923,7 +938,7 @@ async function processVisualDiff(
       baselineImagePath: baseline.imagePath,
       currentImagePath: currentScreenshotPath,
       diffImagePath,
-      status,
+      status: effectiveStatus,
       classification,
       pixelDifference: diffResult.pixelDifference,
       percentageDifference: diffResult.percentageDifference.toString(),
@@ -931,6 +946,19 @@ async function processVisualDiff(
       ...plannedDiff,
       ...mainDiff,
     });
+
+    if (shouldAutoApprove && classification !== 'unchanged') {
+      const autoHash = hashImage(path.join(process.cwd(), 'public', currentScreenshotPath));
+      await queries.deactivateBaselines(testId, stepLabel || null, branch);
+      await queries.createBaseline({
+        testId,
+        stepLabel: stepLabel || null,
+        imagePath: currentScreenshotPath,
+        imageHash: autoHash,
+        branch,
+        approvedFromDiffId: diff.id,
+      });
+    }
 
     return { hasChanges, diffId: diff.id, classification };
   } catch {

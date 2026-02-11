@@ -173,6 +173,7 @@ export const repositories = sqliteTable('repositories', {
   defaultSetupTestId: text('default_setup_test_id'), // Default test-as-setup for all tests
   defaultSetupScriptId: text('default_setup_script_id'), // OR default script
   testingTemplate: text('testing_template'), // Testing template ID (e.g. 'saas', 'marketing', 'canvas')
+  autoApproveDefaultBranch: integer('auto_approve_default_branch', { mode: 'boolean' }).default(false),
   createdAt: integer('created_at', { mode: 'timestamp' }),
 });
 

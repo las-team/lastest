@@ -30,6 +30,7 @@ import { CreateRunnerDialog } from '@/components/runners/create-runner-dialog';
 import { getRunners } from '@/server/actions/runners';
 import { GoogleSheetsSettingsCard } from '@/components/settings/google-sheets-settings-card';
 import { TestingTemplateSelector } from '@/components/settings/testing-template-selector';
+import { AutoApproveToggle } from '@/components/settings/auto-approve-toggle';
 
 export default async function SettingsPage({
   searchParams,
@@ -250,6 +251,13 @@ export default async function SettingsPage({
                     currentTemplate={selectedRepo.testingTemplate}
                   />
                 </div>
+              )}
+              {selectedRepo && (
+                <AutoApproveToggle
+                  repositoryId={selectedRepo.id}
+                  enabled={selectedRepo.autoApproveDefaultBranch ?? false}
+                  defaultBranch={selectedRepo.defaultBranch || 'main'}
+                />
               )}
             </CardContent>
           </Card>

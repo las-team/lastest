@@ -57,17 +57,15 @@ Formal verification of code?
 
 ----------
 
-Ha van a mainen egy commit, lefut rá egy új baseline, és az én commitemet hasonlítom a legújabb mainhez
+Ha van a mainen egy commit, lefut rá egy új baseline, és az én commitemet hasonlítom a legújabb mainhez - already there
 
-Setting: Auto-approve main, whatever makes it there is the baseline
+Diff list - Failed, Changed, Flaky grouping - what does the dev need to address? - already defualt sort 
 
-Diff list - Failed, Changed, Flaky grouping - what does the dev need to address?
+Record video during test setting - 
 
-Record video during test setting
+Runner can execute on remote baseurl - 
 
-Runner can execute on remote baseurl
-
-Test - which pr it was added in, 
+Test - which pr it was added in, updated?
 
 Run tests in CI container
 

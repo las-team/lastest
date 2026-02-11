@@ -67,7 +67,8 @@
       "Bash(pnpm test:*)",
       "Bash(pnpm exec tsx:*)",
       "Bash(git add:*)",
-      "Bash(git commit:*)"
+      "Bash(git commit:*)",
+      "WebFetch(domain:playwright.dev)"
     ]
   },
   "disabledMcpjsonServers": [
