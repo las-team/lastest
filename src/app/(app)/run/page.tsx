@@ -18,7 +18,7 @@ export default async function RunPage() {
   const [tests, runs, builds, envConfig, buildChanges, composeConfig] = await Promise.all([
     selectedRepo ? getTestsByRepo(selectedRepo.id) : Promise.resolve([]),
     selectedRepo ? getTestRunsByRepo(selectedRepo.id) : Promise.resolve([]),
-    selectedRepo ? getBuildsByRepo(selectedRepo.id, 10) : Promise.resolve([]),
+    selectedRepo ? getBuildsByRepo(selectedRepo.id, 25) : Promise.resolve([]),
     getEnvironmentConfig(selectedRepo?.id),
     selectedRepo ? getLatestBuildChanges(selectedRepo.id) : null,
     selectedRepo ? getComposeConfig(selectedRepo.id, activeBranch) : Promise.resolve(null),

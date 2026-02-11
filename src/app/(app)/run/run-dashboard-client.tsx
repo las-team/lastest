@@ -19,6 +19,7 @@ import {
   Zap,
   ChevronDown,
   ChevronRight,
+  List,
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { createAndRunBuild } from '@/server/actions/builds';
@@ -29,7 +30,9 @@ import { useNotifyJobStarted } from '@/components/queue/job-polling-context';
 import { ExecutionTargetSelector } from '@/components/execution/execution-target-selector';
 import type { Test, TestRun, Build } from '@/lib/db/schema';
 import { BuildSummaryCard } from '@/components/builds/build-summary-card';
+import { BuildGraphView } from '@/components/builds/build-graph-view';
 import { BranchSelector } from '@/components/settings/branch-selector';
+import { cn } from '@/lib/utils';
 
 interface BuildWithBranch extends Build {
   gitBranch?: string;
@@ -95,6 +98,7 @@ export function RunDashboardClient({ tests, runs: _runs, builds, repositoryId, a
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [isSmartRunning, setIsSmartRunning] = useState(false);
   const [showSmartDetails, setShowSmartDetails] = useState(false);
+  const [buildView, setBuildView] = useState<'list' | 'graph'>('list');
 
   // Load smart run analysis (uses GitHub API to compare branches)
   useEffect(() => {
@@ -518,33 +522,69 @@ export function RunDashboardClient({ tests, runs: _runs, builds, repositoryId, a
         <div className="space-y-6">
           <Card>
             <CardHeader>
-              <CardTitle>Build History</CardTitle>
-              <CardDescription>
-                Recent build results and status
-              </CardDescription>
+              <div className="flex items-center justify-between">
+                <div>
+                  <CardTitle>Build History</CardTitle>
+                  <CardDescription>
+                    Recent build results and status
+                  </CardDescription>
+                </div>
+                {builds.length > 0 && (
+                  <div className="flex items-center rounded-md border p-0.5">
+                    <button
+                      type="button"
+                      onClick={() => setBuildView('list')}
+                      className={cn(
+                        'inline-flex items-center justify-center rounded-sm px-2 py-1 text-xs transition-colors',
+                        buildView === 'list'
+                          ? 'bg-primary text-primary-foreground'
+                          : 'text-muted-foreground hover:text-foreground'
+                      )}
+                    >
+                      <List className="h-3.5 w-3.5" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setBuildView('graph')}
+                      className={cn(
+                        'inline-flex items-center justify-center rounded-sm px-2 py-1 text-xs transition-colors',
+                        buildView === 'graph'
+                          ? 'bg-primary text-primary-foreground'
+                          : 'text-muted-foreground hover:text-foreground'
+                      )}
+                    >
+                      <GitBranch className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
+                )}
+              </div>
             </CardHeader>
             <CardContent>
               {builds.length > 0 ? (
-                <div className="space-y-3">
-                  {(() => {
-                    const mainBaselineBuildId = builds.find(b => b.overallStatus === 'safe_to_merge' && b.gitBranch === defaultBranch)?.id;
-                    const branchBaselineBuildId = currentBranch && currentBranch !== defaultBranch
-                      ? builds.find(b => b.overallStatus === 'safe_to_merge' && b.gitBranch === currentBranch)?.id
-                      : undefined;
-                    return builds.slice(0, 10).map((build) => (
-                      <BuildSummaryCard
-                        key={build.id}
-                        build={build}
-                        gitBranch={build.gitBranch}
-                        gitCommit={build.gitCommit}
-                        isActiveBranch={build.gitBranch === activeBranch}
-                        baseUrl={build.baseUrl || undefined}
-                        isMainBaseline={build.id === mainBaselineBuildId}
-                        isBranchBaseline={build.id === branchBaselineBuildId}
-                      />
-                    ));
-                  })()}
-                </div>
+                buildView === 'graph' ? (
+                  <BuildGraphView builds={builds} defaultBranch={defaultBranch} />
+                ) : (
+                  <div className="space-y-3">
+                    {(() => {
+                      const mainBaselineBuildId = builds.find(b => b.overallStatus === 'safe_to_merge' && b.gitBranch === defaultBranch)?.id;
+                      const branchBaselineBuildId = currentBranch && currentBranch !== defaultBranch
+                        ? builds.find(b => b.overallStatus === 'safe_to_merge' && b.gitBranch === currentBranch)?.id
+                        : undefined;
+                      return builds.slice(0, 25).map((build) => (
+                        <BuildSummaryCard
+                          key={build.id}
+                          build={build}
+                          gitBranch={build.gitBranch}
+                          gitCommit={build.gitCommit}
+                          isActiveBranch={build.gitBranch === activeBranch}
+                          baseUrl={build.baseUrl || undefined}
+                          isMainBaseline={build.id === mainBaselineBuildId}
+                          isBranchBaseline={build.id === branchBaselineBuildId}
+                        />
+                      ));
+                    })()}
+                  </div>
+                )
               ) : (
                 <div className="text-center py-8 text-muted-foreground">
                   <Package className="h-12 w-12 mx-auto mb-4 opacity-50" />
