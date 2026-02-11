@@ -149,6 +149,7 @@ export const testResults = sqliteTable('test_results', {
   consoleErrors: text('console_errors', { mode: 'json' }).$type<string[]>(),
   networkRequests: text('network_requests', { mode: 'json' }).$type<NetworkRequest[]>(),
   a11yViolations: text('a11y_violations', { mode: 'json' }).$type<A11yViolation[]>(),
+  videoPath: text('video_path'),
 });
 
 // Repository provider type
@@ -470,6 +471,7 @@ export const playwrightSettings = sqliteTable('playwright_settings', {
   enabledRecordingEngines: text('enabled_recording_engines', { mode: 'json' }).$type<RecordingEngine[]>(),
   defaultRecordingEngine: text('default_recording_engine').default('lastest'),
   freezeAnimations: integer('freeze_animations', { mode: 'boolean' }).default(false), // freeze CSS animations/transitions
+  enableVideoRecording: integer('enable_video_recording', { mode: 'boolean' }).default(false), // record test runs as WebM video
   screenshotDelay: integer('screenshot_delay').default(0), // ms delay before screenshot
   maxParallelTests: integer('max_parallel_tests').default(1), // max tests to run in parallel locally
   stabilization: text('stabilization', { mode: 'json' }).$type<StabilizationSettings>(), // snapshot stabilization settings

@@ -387,7 +387,7 @@ async function runBuildAsync(
   const playwrightSettings = await queries.getPlaywrightSettings(repositoryId);
 
   // Result callback for processing diffs
-  const onResult = async (result: { testId: string; status: string; screenshotPath?: string; screenshots: { path: string; label?: string }[]; errorMessage?: string; durationMs?: number; a11yViolations?: { id: string; impact: 'critical' | 'serious' | 'moderate' | 'minor'; description: string; help: string; helpUrl: string; nodes: number }[]; stabilityMetadata?: { frameCount: number; stableFrames: number; maxFrameDiff: number; isStable: boolean } }) => {
+  const onResult = async (result: { testId: string; status: string; screenshotPath?: string; screenshots: { path: string; label?: string }[]; errorMessage?: string; durationMs?: number; a11yViolations?: { id: string; impact: 'critical' | 'serious' | 'moderate' | 'minor'; description: string; help: string; helpUrl: string; nodes: number }[]; stabilityMetadata?: { frameCount: number; stableFrames: number; maxFrameDiff: number; isStable: boolean }; videoPath?: string }) => {
     processedCount++;
 
     // Save test result immediately
@@ -403,6 +403,7 @@ async function runBuildAsync(
       viewport: '1280x720',
       browser: 'chromium',
       a11yViolations: result.a11yViolations,
+      videoPath: result.videoPath,
     });
 
     if (result.status === 'passed') passedCount++;

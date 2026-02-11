@@ -26,6 +26,13 @@ Support https://github.com/excalidraw/excalidraw/tree/master/packages/excalidraw
     Dev feeback
     Actions with changes
 
+auth0 -like - login manager - keycloak? - Stytch?
+    https://clerk.com/
+
+Test - which pr it was added in, updated?
+
+Publish npm
+
 Submit a bug
     Autosubmit bug
 
@@ -61,14 +68,10 @@ Ha van a mainen egy commit, lefut rá egy új baseline, és az én commitemet ha
 
 Runner can execute on remote baseurl - 
 
-Test - which pr it was added in, updated?
-
-Run tests in CI container
 
 mark
     hetzner
     basic auth apira
     runner secu review -> megy npmre
 
-auth0 -like - login manager - keycloak? - Stytch?
-    https://clerk.com/
+

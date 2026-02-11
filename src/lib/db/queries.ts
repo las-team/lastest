@@ -489,6 +489,7 @@ export async function getTestResultsByTest(testId: string) {
       browser: testResults.browser,
       consoleErrors: testResults.consoleErrors,
       networkRequests: testResults.networkRequests,
+      videoPath: testResults.videoPath,
       startedAt: testRuns.startedAt,
     })
     .from(testResults)
@@ -1291,6 +1292,7 @@ export async function getPlaywrightSettings(repositoryId?: string | null) {
     enabledRecordingEngines: DEFAULT_RECORDING_ENGINES,
     defaultRecordingEngine: 'lastest' as const,
     freezeAnimations: false,
+    enableVideoRecording: false,
     screenshotDelay: 0,
     maxParallelTests: 1,
     stabilization: DEFAULT_STABILIZATION_SETTINGS,

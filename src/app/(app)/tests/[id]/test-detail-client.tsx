@@ -55,6 +55,7 @@ interface TestResult {
   browser: string | null;
   consoleErrors: string[] | null;
   networkRequests: unknown[] | null;
+  videoPath: string | null;
   startedAt: Date | null;
 }
 
@@ -562,6 +563,7 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
             <TabsTrigger value="screenshots">Screenshots</TabsTrigger>
             <TabsTrigger value="plans">Plans</TabsTrigger>
             <TabsTrigger value="history">Run History</TabsTrigger>
+            <TabsTrigger value="recordings">Recordings</TabsTrigger>
             <TabsTrigger value="versions" onClick={loadVersions}>Versions</TabsTrigger>
           </TabsList>
 
@@ -821,6 +823,55 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
                 ) : (
                   <div className="text-center py-8 text-muted-foreground">
                     No run history
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          <TabsContent value="recordings" className="mt-4">
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-sm">Recordings</CardTitle>
+                <CardDescription>Video recordings of test runs</CardDescription>
+              </CardHeader>
+              <CardContent>
+                {results.filter(r => r.videoPath).length > 0 ? (
+                  <div className="space-y-4">
+                    {results.filter(r => r.videoPath).map((result) => (
+                      <div key={result.id} className="border rounded-lg p-4 space-y-3">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-3">
+                            {result.status === 'passed' ? (
+                              <CheckCircle className="h-4 w-4 text-green-500" />
+                            ) : (
+                              <XCircle className="h-4 w-4 text-destructive" />
+                            )}
+                            <span className="text-sm font-medium capitalize">{result.status}</span>
+                            {result.durationMs && (
+                              <span className="text-xs text-muted-foreground">{result.durationMs}ms</span>
+                            )}
+                          </div>
+                          <span className="text-xs text-muted-foreground">
+                            {result.startedAt
+                              ? new Date(result.startedAt).toLocaleString()
+                              : 'Unknown'}
+                          </span>
+                        </div>
+                        <video
+                          src={result.videoPath!}
+                          controls
+                          preload="metadata"
+                          className="w-full rounded border bg-black"
+                        />
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="text-center py-8 text-muted-foreground">
+                    <Video className="h-8 w-8 mx-auto mb-2 opacity-50" />
+                    <p>No recordings yet</p>
+                    <p className="text-xs mt-1">Enable Video Recording in Settings &gt; Playwright to record test runs</p>
                   </div>
                 )}
               </CardContent>

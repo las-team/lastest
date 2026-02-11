@@ -60,6 +60,7 @@ export function PlaywrightSettingsCard({
     (settings.defaultRecordingEngine as RecordingEngine) ?? 'lastest'
   );
   const [freezeAnimations, setFreezeAnimations] = useState(settings.freezeAnimations ?? false);
+  const [enableVideoRecording, setEnableVideoRecording] = useState(settings.enableVideoRecording ?? false);
   const [screenshotDelay, setScreenshotDelay] = useState(settings.screenshotDelay ?? 0);
   const [maxParallelTests, setMaxParallelTests] = useState(settings.maxParallelTests ?? 1);
   const [stabilization, setStabilization] = useState<StabilizationSettings>(
@@ -83,6 +84,7 @@ export function PlaywrightSettingsCard({
     cursorFPS: settings.cursorFPS ?? 30,
     defaultRecordingEngine: (settings.defaultRecordingEngine as RecordingEngine) ?? 'lastest',
     freezeAnimations: settings.freezeAnimations ?? false,
+    enableVideoRecording: settings.enableVideoRecording ?? false,
     screenshotDelay: settings.screenshotDelay ?? 0,
     maxParallelTests: settings.maxParallelTests ?? 1,
     stabilization: { ...DEFAULT_STABILIZATION_SETTINGS, ...settings.stabilization },
@@ -102,6 +104,7 @@ export function PlaywrightSettingsCard({
     setCursorFPS(settings.cursorFPS ?? 30);
     setDefaultRecordingEngine((settings.defaultRecordingEngine as RecordingEngine) ?? 'lastest');
     setFreezeAnimations(settings.freezeAnimations ?? false);
+    setEnableVideoRecording(settings.enableVideoRecording ?? false);
     setScreenshotDelay(settings.screenshotDelay ?? 0);
     setMaxParallelTests(settings.maxParallelTests ?? 1);
     setStabilization({ ...DEFAULT_STABILIZATION_SETTINGS, ...settings.stabilization });
@@ -118,6 +121,7 @@ export function PlaywrightSettingsCard({
       cursorFPS: settings.cursorFPS ?? 30,
       defaultRecordingEngine: (settings.defaultRecordingEngine as RecordingEngine) ?? 'lastest',
       freezeAnimations: settings.freezeAnimations ?? false,
+      enableVideoRecording: settings.enableVideoRecording ?? false,
       screenshotDelay: settings.screenshotDelay ?? 0,
       maxParallelTests: settings.maxParallelTests ?? 1,
       stabilization: { ...DEFAULT_STABILIZATION_SETTINGS, ...settings.stabilization },
@@ -160,6 +164,7 @@ export function PlaywrightSettingsCard({
         cursorFPS,
         defaultRecordingEngine,
         freezeAnimations,
+        enableVideoRecording,
         screenshotDelay,
         maxParallelTests,
         stabilization,
@@ -171,7 +176,7 @@ export function PlaywrightSettingsCard({
         toast.success('Playwright settings saved');
       }
     });
-  }, [repositoryId, selectorPriority, browser, viewportWidth, viewportHeight, headlessMode, navigationTimeout, actionTimeout, pointerGestures, cursorFPS, defaultRecordingEngine, freezeAnimations, screenshotDelay, maxParallelTests, stabilization, compact]);
+  }, [repositoryId, selectorPriority, browser, viewportWidth, viewportHeight, headlessMode, navigationTimeout, actionTimeout, pointerGestures, cursorFPS, defaultRecordingEngine, freezeAnimations, enableVideoRecording, screenshotDelay, maxParallelTests, stabilization, compact]);
 
   // Auto-save with debounce - only when values differ from original props
   useEffect(() => {
@@ -188,6 +193,7 @@ export function PlaywrightSettingsCard({
       cursorFPS !== orig.cursorFPS ||
       defaultRecordingEngine !== orig.defaultRecordingEngine ||
       freezeAnimations !== orig.freezeAnimations ||
+      enableVideoRecording !== orig.enableVideoRecording ||
       screenshotDelay !== orig.screenshotDelay ||
       maxParallelTests !== orig.maxParallelTests ||
       JSON.stringify(stabilization) !== JSON.stringify(orig.stabilization);
@@ -207,7 +213,7 @@ export function PlaywrightSettingsCard({
         clearTimeout(debounceRef.current);
       }
     };
-  }, [selectorPriority, browser, viewportWidth, viewportHeight, headlessMode, navigationTimeout, actionTimeout, pointerGestures, cursorFPS, defaultRecordingEngine, freezeAnimations, screenshotDelay, maxParallelTests, stabilization, doSave]);
+  }, [selectorPriority, browser, viewportWidth, viewportHeight, headlessMode, navigationTimeout, actionTimeout, pointerGestures, cursorFPS, defaultRecordingEngine, freezeAnimations, enableVideoRecording, screenshotDelay, maxParallelTests, stabilization, doSave]);
 
   // Notify parent of save status changes
   useEffect(() => {
@@ -228,6 +234,7 @@ export function PlaywrightSettingsCard({
       setCursorFPS(30);
       setDefaultRecordingEngine('lastest');
       setFreezeAnimations(false);
+      setEnableVideoRecording(false);
       setScreenshotDelay(0);
       setMaxParallelTests(1);
       setStabilization(DEFAULT_STABILIZATION_SETTINGS);
@@ -322,6 +329,22 @@ export function PlaywrightSettingsCard({
             </div>
           </div>
           <Switch checked={freezeAnimations} onCheckedChange={setFreezeAnimations} />
+        </div>
+
+        {/* Video Recording */}
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Video className="w-4 h-4 text-muted-foreground" />
+            <div className="space-y-0.5">
+              <Label className="text-sm">Video Recording</Label>
+              {!compact && (
+                <p className="text-xs text-muted-foreground">
+                  Record test runs as WebM video for playback
+                </p>
+              )}
+            </div>
+          </div>
+          <Switch checked={enableVideoRecording} onCheckedChange={setEnableVideoRecording} />
         </div>
 
         {/* Screenshot Delay */}

@@ -205,6 +205,7 @@ async function runSuiteTestsAsync(
         screenshots: result.screenshots,
         errorMessage: result.errorMessage,
         durationMs: result.durationMs,
+        videoPath: result.videoPath,
       });
 
       await updateJobProgress(jobId, i + 1, tests.length);

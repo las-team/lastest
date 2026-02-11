@@ -531,6 +531,7 @@ export interface TestRunResult {
   teardownDurationMs?: number;
   teardownError?: string;
   stabilityMetadata?: StabilityMetadata;
+  videoPath?: string;
 }
 
 export interface ProgressCallback {
@@ -857,6 +858,9 @@ export class PlaywrightRunner extends EventEmitter {
     // Track setup duration (outside try so catch can access)
     let setupDurationMs = 0;
 
+    // Video recording
+    let videoPath: string | undefined;
+
     try {
       // If build-level setup captured storageState (cookies/localStorage),
       // inject it into the new context so tests inherit the login session
@@ -882,9 +886,19 @@ export class PlaywrightRunner extends EventEmitter {
         }
       }
 
+      // Set up video recording if enabled
+      const videoEnabled = this.settings?.enableVideoRecording ?? false;
+      const videoDir = videoEnabled
+        ? path.join('./public/videos', this.repositoryId || 'default')
+        : undefined;
+      if (videoDir && !fs.existsSync(videoDir)) {
+        fs.mkdirSync(videoDir, { recursive: true });
+      }
+
       context = await this.browser.newContext({
         viewport: this.getViewport(),
         ...(parsedStorageState ? { storageState: parsedStorageState } : {}),
+        ...(videoDir ? { recordVideo: { dir: videoDir, size: this.getViewport() } } : {}),
       });
       page = await context.newPage();
 
@@ -1257,6 +1271,7 @@ export class PlaywrightRunner extends EventEmitter {
         teardownDurationMs,
         teardownError,
         stabilityMetadata: aggregatedStabilityMetadata,
+        videoPath,
       };
 
     } catch (error) {
@@ -1334,11 +1349,29 @@ export class PlaywrightRunner extends EventEmitter {
         setupDurationMs: setupDurationMs > 0 ? setupDurationMs : undefined,
         teardownDurationMs,
         teardownError,
+        videoPath,
       };
 
     } finally {
+      // Capture video before closing context (video is finalized on close)
+      const video = page?.video();
       if (page) await page.close().catch(() => {});
       if (context) await context.close().catch(() => {});
+      // After context close, video file is finalized — relocate it
+      if (video) {
+        try {
+          const videoDestDir = path.join('./public/videos', this.repositoryId || 'default');
+          if (!fs.existsSync(videoDestDir)) {
+            fs.mkdirSync(videoDestDir, { recursive: true });
+          }
+          const dest = path.join(videoDestDir, `${runId}-${test.id}.webm`);
+          await video.saveAs(dest);
+          await video.delete(); // clean temp file
+          videoPath = dest.replace(/^.*\/public\//, '/');
+        } catch {
+          // Video capture is best-effort
+        }
+      }
     }
   }
 
