@@ -13,6 +13,8 @@ interface BuildWithBranch extends Build {
 interface BuildGraphViewProps {
   builds: BuildWithBranch[];
   defaultBranch: string | null;
+  mainBaselineBuildId?: string;
+  branchBaselineBuildId?: string;
 }
 
 const COL_WIDTH = 100;
@@ -49,7 +51,7 @@ interface TooltipData {
   y: number;
 }
 
-export function BuildGraphView({ builds, defaultBranch }: BuildGraphViewProps) {
+export function BuildGraphView({ builds, defaultBranch, mainBaselineBuildId, branchBaselineBuildId }: BuildGraphViewProps) {
   const router = useRouter();
   const [tooltip, setTooltip] = useState<TooltipData | null>(null);
 
@@ -59,15 +61,14 @@ export function BuildGraphView({ builds, defaultBranch }: BuildGraphViewProps) {
       (a, b) => new Date(b.createdAt!).getTime() - new Date(a.createdAt!).getTime()
     );
 
-    // Assign column indices: default branch = 0, others by first chronological appearance
+    // Assign column indices: default branch = 0, others by most recent build (newest first)
     const colMap = new Map<string, number>();
     const defBranch = defaultBranch || 'main';
     colMap.set(defBranch, 0);
 
-    // Walk chronologically (oldest first) to assign columns
-    const chronological = [...sorted].reverse();
+    // sorted is already newest-first, so first appearance = most recent
     let nextCol = 1;
-    for (const b of chronological) {
+    for (const b of sorted) {
       const branch = b.gitBranch || defBranch;
       if (!colMap.has(branch)) {
         colMap.set(branch, nextCol++);
@@ -187,6 +188,9 @@ export function BuildGraphView({ builds, defaultBranch }: BuildGraphViewProps) {
           const status = node.build.overallStatus as BuildStatus;
           const fill = STATUS_COLORS[status] || '#6b7280';
           const branchColor = BRANCH_COLORS[node.col % BRANCH_COLORS.length];
+          const isMainBaseline = node.build.id === mainBaselineBuildId;
+          const isBranchBaseline = node.build.id === branchBaselineBuildId;
+          const isBaseline = isMainBaseline || isBranchBaseline;
 
           return (
             <g
@@ -202,7 +206,6 @@ export function BuildGraphView({ builds, defaultBranch }: BuildGraphViewProps) {
                 }
               }}
               onMouseEnter={(e) => {
-                const svgRect = (e.currentTarget.ownerSVGElement as SVGSVGElement).getBoundingClientRect();
                 const scrollParent = (e.currentTarget.ownerSVGElement as SVGSVGElement).parentElement!;
                 handleNodeHover(
                   node.build,
@@ -219,6 +222,18 @@ export function BuildGraphView({ builds, defaultBranch }: BuildGraphViewProps) {
                 r={NODE_R + 8}
                 fill="transparent"
               />
+              {/* Baseline outer ring */}
+              {isBaseline && (
+                <circle
+                  cx={node.x}
+                  cy={node.y}
+                  r={NODE_R + 4}
+                  fill="none"
+                  stroke={isMainBaseline ? '#a855f7' : '#3b82f6'}
+                  strokeWidth={2}
+                  strokeDasharray="3 2"
+                />
+              )}
               {/* Visible node */}
               <circle
                 cx={node.x}
@@ -228,7 +243,7 @@ export function BuildGraphView({ builds, defaultBranch }: BuildGraphViewProps) {
                 stroke="white"
                 strokeWidth={2}
               />
-              {/* Build ID label to the right */}
+              {/* Build ID + baseline label to the right */}
               <text
                 x={node.x + NODE_R + 6}
                 y={node.y + 4}
@@ -237,6 +252,12 @@ export function BuildGraphView({ builds, defaultBranch }: BuildGraphViewProps) {
                 opacity={0.7}
               >
                 {node.build.id.slice(0, 7)}
+                {isMainBaseline && (
+                  <tspan fill="#a855f7" opacity={1} fontSize={9}> baseline</tspan>
+                )}
+                {isBranchBaseline && (
+                  <tspan fill="#3b82f6" opacity={1} fontSize={9}> baseline</tspan>
+                )}
               </text>
             </g>
           );
@@ -258,6 +279,12 @@ export function BuildGraphView({ builds, defaultBranch }: BuildGraphViewProps) {
               style={{ backgroundColor: STATUS_COLORS[tooltip.build.overallStatus as BuildStatus] }}
             />
             {STATUS_LABELS[tooltip.build.overallStatus as BuildStatus]}
+            {tooltip.build.id === mainBaselineBuildId && (
+              <span className="text-purple-500 font-normal ml-1">Main Baseline</span>
+            )}
+            {tooltip.build.id === branchBaselineBuildId && (
+              <span className="text-blue-500 font-normal ml-1">Branch Baseline</span>
+            )}
           </div>
           <div className="text-muted-foreground space-y-0.5">
             {tooltip.build.gitBranch && (

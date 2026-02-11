@@ -561,16 +561,21 @@ export function RunDashboardClient({ tests, runs: _runs, builds, repositoryId, a
             </CardHeader>
             <CardContent>
               {builds.length > 0 ? (
-                buildView === 'graph' ? (
-                  <BuildGraphView builds={builds} defaultBranch={defaultBranch} />
-                ) : (
-                  <div className="space-y-3">
-                    {(() => {
-                      const mainBaselineBuildId = builds.find(b => b.overallStatus === 'safe_to_merge' && b.gitBranch === defaultBranch)?.id;
-                      const branchBaselineBuildId = currentBranch && currentBranch !== defaultBranch
-                        ? builds.find(b => b.overallStatus === 'safe_to_merge' && b.gitBranch === currentBranch)?.id
-                        : undefined;
-                      return builds.slice(0, 25).map((build) => (
+                (() => {
+                  const mainBaselineBuildId = builds.find(b => b.overallStatus === 'safe_to_merge' && b.gitBranch === defaultBranch)?.id;
+                  const branchBaselineBuildId = currentBranch && currentBranch !== defaultBranch
+                    ? builds.find(b => b.overallStatus === 'safe_to_merge' && b.gitBranch === currentBranch)?.id
+                    : undefined;
+                  return buildView === 'graph' ? (
+                    <BuildGraphView
+                      builds={builds}
+                      defaultBranch={defaultBranch}
+                      mainBaselineBuildId={mainBaselineBuildId}
+                      branchBaselineBuildId={branchBaselineBuildId}
+                    />
+                  ) : (
+                    <div className="space-y-3">
+                      {builds.slice(0, 25).map((build) => (
                         <BuildSummaryCard
                           key={build.id}
                           build={build}
@@ -581,10 +586,10 @@ export function RunDashboardClient({ tests, runs: _runs, builds, repositoryId, a
                           isMainBaseline={build.id === mainBaselineBuildId}
                           isBranchBaseline={build.id === branchBaselineBuildId}
                         />
-                      ));
-                    })()}
-                  </div>
-                )
+                      ))}
+                    </div>
+                  );
+                })()
               ) : (
                 <div className="text-center py-8 text-muted-foreground">
                   <Package className="h-12 w-12 mx-auto mb-4 opacity-50" />
