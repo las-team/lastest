@@ -56,7 +56,7 @@ export function BuildGraphView({ builds, defaultBranch, mainBaselineBuildId, bra
   const router = useRouter();
   const [tooltip, setTooltip] = useState<TooltipData | null>(null);
 
-  const { nodes, branchColumns, svgWidth, svgHeight, branchLines, aheadIndicators } = useMemo(() => {
+  const { nodes, branchColumns, svgWidth, svgHeight, curvePath, aheadIndicators } = useMemo(() => {
     // Sort builds newest first (top of graph)
     const sorted = [...builds].sort(
       (a, b) => new Date(b.createdAt!).getTime() - new Date(a.createdAt!).getTime()
@@ -94,7 +94,7 @@ export function BuildGraphView({ builds, defaultBranch, mainBaselineBuildId, bra
     });
 
     // Find branches that are ahead — place one step above that branch's latest build
-    const positionedAhead: Array<{ branch: string; col: number; x: number; y: number; headSha: string }> = [];
+    const positionedAhead: Array<{ branch: string; col: number; x: number; y: number; buildY: number; headSha: string }> = [];
     if (branchHeads) {
       for (const [branch, col] of colMap.entries()) {
         const headSha = branchHeads[branch];
@@ -102,46 +102,40 @@ export function BuildGraphView({ builds, defaultBranch, mainBaselineBuildId, bra
         const latestBuild = sorted.find(b => (b.gitBranch || defBranch) === branch);
         if (!latestBuild?.gitCommit) continue;
         if (!headSha.startsWith(latestBuild.gitCommit) && !latestBuild.gitCommit.startsWith(headSha)) {
-          // Find the y of the latest (topmost) node for this branch
           const topNode = nodeList.find(n => n.branch === branch);
-          const aheadY = topNode ? topNode.y - ROW_HEIGHT * 0.6 : PAD_Y;
+          const buildY = topNode?.y ?? PAD_Y;
+          const aheadY = buildY - ROW_HEIGHT * 0.6;
           positionedAhead.push({
             branch,
             col,
             x: PAD_X + col * COL_WIDTH + COL_WIDTH / 2,
             y: aheadY,
+            buildY,
             headSha,
           });
         }
       }
     }
 
-    // Compute vertical lines per branch (first to last node, including ahead indicators)
-    const branchExtents = new Map<string, { minY: number; maxY: number; col: number }>();
-    for (const node of nodeList) {
-      const ext = branchExtents.get(node.branch);
-      if (!ext) {
-        branchExtents.set(node.branch, { minY: node.y, maxY: node.y, col: node.col });
-      } else {
-        ext.minY = Math.min(ext.minY, node.y);
-        ext.maxY = Math.max(ext.maxY, node.y);
+    // Build a single curved path through all nodes (bottom→top, i.e. reversed nodeList)
+    // Nodes are newest-first, so reverse to go oldest→newest (bottom→top)
+    const chronoNodes = [...nodeList].reverse();
+    let curvePath = '';
+    if (chronoNodes.length > 0) {
+      curvePath = `M${chronoNodes[0].x},${chronoNodes[0].y}`;
+      for (let i = 1; i < chronoNodes.length; i++) {
+        const prev = chronoNodes[i - 1];
+        const curr = chronoNodes[i];
+        if (prev.x === curr.x) {
+          // Same column — straight line
+          curvePath += ` L${curr.x},${curr.y}`;
+        } else {
+          // Different column — smooth cubic bezier S-curve
+          const midY = (prev.y + curr.y) / 2;
+          curvePath += ` C${prev.x},${midY} ${curr.x},${midY} ${curr.x},${curr.y}`;
+        }
       }
     }
-    // Extend lines up to ahead indicators
-    for (const a of positionedAhead) {
-      const ext = branchExtents.get(a.branch);
-      if (ext) {
-        ext.minY = Math.min(ext.minY, a.y);
-      }
-    }
-
-    const lines = Array.from(branchExtents.entries()).map(([branch, ext]) => ({
-      branch,
-      x: PAD_X + ext.col * COL_WIDTH + COL_WIDTH / 2,
-      y1: ext.minY,
-      y2: ext.maxY,
-      color: BRANCH_COLORS[ext.col % BRANCH_COLORS.length],
-    }));
 
     return {
       nodes: nodeList,
@@ -153,7 +147,7 @@ export function BuildGraphView({ builds, defaultBranch, mainBaselineBuildId, bra
       })),
       svgWidth: width,
       svgHeight: height,
-      branchLines: lines,
+      curvePath,
       aheadIndicators: positionedAhead,
     };
   }, [builds, defaultBranch, branchHeads]);
@@ -200,26 +194,35 @@ export function BuildGraphView({ builds, defaultBranch, mainBaselineBuildId, bra
           </text>
         ))}
 
-        {/* Vertical branch lines */}
-        {branchLines.map((line) => (
-          <line
-            key={line.branch}
-            x1={line.x}
-            y1={line.y1}
-            x2={line.x}
-            y2={line.y2}
-            stroke={line.color}
+        {/* Single curved line through all build nodes */}
+        {curvePath && (
+          <path
+            d={curvePath}
+            fill="none"
+            stroke="currentColor"
             strokeWidth={2}
-            strokeDasharray="4 4"
-            opacity={0.3}
+            opacity={0.15}
+            strokeLinecap="round"
+            strokeLinejoin="round"
           />
-        ))}
+        )}
 
         {/* Ahead-of-build indicators */}
         {aheadIndicators.map((a) => {
           const color = BRANCH_COLORS[a.col % BRANCH_COLORS.length];
           return (
             <g key={`ahead-${a.branch}`}>
+              {/* Dotted line from commit to latest build */}
+              <line
+                x1={a.x}
+                y1={a.y + 7}
+                x2={a.x}
+                y2={a.buildY - NODE_R}
+                stroke={color}
+                strokeWidth={1.5}
+                strokeDasharray="3 3"
+                opacity={0.4}
+              />
               {/* Diamond shape for unbuilt commit */}
               <rect
                 x={a.x - 5}
