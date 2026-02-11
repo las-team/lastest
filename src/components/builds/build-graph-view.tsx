@@ -173,7 +173,7 @@ export function BuildGraphView({ builds, defaultBranch, mainBaselineBuildId, bra
   if (builds.length === 0) return null;
 
   return (
-    <div className="relative overflow-auto max-h-[600px]">
+    <div className="relative overflow-auto h-full">
       <svg
         width={svgWidth}
         height={svgHeight}

@@ -520,8 +520,8 @@ export function RunDashboardClient({ tests, runs: _runs, builds, repositoryId, a
         </div>
 
         {/* Right Column - Build History */}
-        <div className="space-y-6">
-          <Card>
+        <div className="space-y-6 flex flex-col">
+          <Card className="flex-1 flex flex-col">
             <CardHeader>
               <div className="flex items-center justify-between">
                 <div>
@@ -560,7 +560,7 @@ export function RunDashboardClient({ tests, runs: _runs, builds, repositoryId, a
                 )}
               </div>
             </CardHeader>
-            <CardContent>
+            <CardContent className="flex-1">
               {builds.length > 0 ? (
                 (() => {
                   const mainBaselineBuildId = builds.find(b => b.overallStatus === 'safe_to_merge' && b.gitBranch === defaultBranch)?.id;
