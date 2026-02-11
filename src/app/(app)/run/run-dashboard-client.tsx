@@ -99,7 +99,7 @@ export function RunDashboardClient({ tests, runs: _runs, builds, repositoryId, a
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [isSmartRunning, setIsSmartRunning] = useState(false);
   const [showSmartDetails, setShowSmartDetails] = useState(false);
-  const [buildView, setBuildView] = useState<'list' | 'graph'>('list');
+  const [buildView, setBuildView] = useState<'list' | 'graph'>('graph');
 
   // Load smart run analysis (uses GitHub API to compare branches)
   useEffect(() => {
