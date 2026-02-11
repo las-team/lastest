@@ -12,8 +12,6 @@ Support https://github.com/excalidraw/excalidraw/tree/master/packages/excalidraw
     Dev feeback
     Actions with changes
 
-Build graph
-
 Play button - give in url and do everything 
     Runs setup and testing as an agent
     1. Show Timeline of what will happen between user and AI
