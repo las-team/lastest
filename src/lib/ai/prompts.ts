@@ -234,6 +234,30 @@ Instructions:
 Return ONLY the fixed code, no explanations.`;
 }
 
+export function createMcpFixPrompt(context: TestGenerationContext): string {
+  return `Fix this failing Playwright test by exploring the live page with MCP tools.
+
+Original test code:
+\`\`\`typescript
+${context.existingCode}
+\`\`\`
+
+Error message:
+${context.errorMessage}
+
+Target URL: ${context.targetUrl || 'unknown'}
+
+Instructions:
+1. Use browser_navigate to go to the target URL
+2. Use browser_snapshot to see the current page structure and available selectors
+3. Compare what the page actually has with the selectors/assertions in the failing test
+4. Identify what changed on the page that caused the failure
+5. Fix the test using selectors and content discovered from the live page
+6. Maintain the same function signature and test intent
+
+Return ONLY the fixed code, no explanations.`;
+}
+
 export function createEnhancePrompt(context: TestGenerationContext): string {
   const parts: string[] = [];
 

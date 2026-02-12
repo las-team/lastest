@@ -160,7 +160,26 @@ export async function addRoutesAsFunctionalAreas(repositoryId: string, routeIds:
 
 export async function generateBasicTests(repositoryId: string, routeIds: string[], baseUrl: string) {
   await requireRepoAccess(repositoryId);
-  const routesToTest = await queries.getRoutesByIds(routeIds);
+  let routesToTest = await queries.getRoutesByIds(routeIds);
+
+  // If no routes found, IDs might be functional area IDs — create route records from areas
+  if (routesToTest.length === 0) {
+    for (const id of routeIds) {
+      const area = await queries.getFunctionalArea(id);
+      if (!area || !area.name.startsWith('/')) continue;
+      const route = await queries.createRoute({
+        repositoryId,
+        path: area.name,
+        type: area.name.includes('[') ? 'dynamic' : 'static',
+        description: area.description,
+        functionalAreaId: area.id,
+        hasTest: false,
+        scannedAt: new Date(),
+      });
+      routesToTest.push(route as typeof routesToTest[number]);
+    }
+  }
+
   let testsCreated = 0;
   let testsUpdated = 0;
 
