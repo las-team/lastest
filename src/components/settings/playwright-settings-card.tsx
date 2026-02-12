@@ -62,6 +62,9 @@ export function PlaywrightSettingsCard({
   const [freezeAnimations, setFreezeAnimations] = useState(settings.freezeAnimations ?? false);
   const [enableVideoRecording, setEnableVideoRecording] = useState(settings.enableVideoRecording ?? false);
   const [acceptAnyCertificate, setAcceptAnyCertificate] = useState(settings.acceptAnyCertificate ?? false);
+  const [networkErrorMode, setNetworkErrorMode] = useState(settings.networkErrorMode ?? 'fail');
+  const [ignoreExternalNetworkErrors, setIgnoreExternalNetworkErrors] = useState(settings.ignoreExternalNetworkErrors ?? false);
+  const [consoleErrorMode, setConsoleErrorMode] = useState(settings.consoleErrorMode ?? 'fail');
   const [screenshotDelay, setScreenshotDelay] = useState(settings.screenshotDelay ?? 0);
   const [maxParallelTests, setMaxParallelTests] = useState(settings.maxParallelTests ?? 1);
   const [stabilization, setStabilization] = useState<StabilizationSettings>(
@@ -87,6 +90,9 @@ export function PlaywrightSettingsCard({
     freezeAnimations: settings.freezeAnimations ?? false,
     enableVideoRecording: settings.enableVideoRecording ?? false,
     acceptAnyCertificate: settings.acceptAnyCertificate ?? false,
+    networkErrorMode: settings.networkErrorMode ?? 'fail',
+    ignoreExternalNetworkErrors: settings.ignoreExternalNetworkErrors ?? false,
+    consoleErrorMode: settings.consoleErrorMode ?? 'fail',
     screenshotDelay: settings.screenshotDelay ?? 0,
     maxParallelTests: settings.maxParallelTests ?? 1,
     stabilization: { ...DEFAULT_STABILIZATION_SETTINGS, ...settings.stabilization },
@@ -108,6 +114,9 @@ export function PlaywrightSettingsCard({
     setFreezeAnimations(settings.freezeAnimations ?? false);
     setEnableVideoRecording(settings.enableVideoRecording ?? false);
     setAcceptAnyCertificate(settings.acceptAnyCertificate ?? false);
+    setNetworkErrorMode(settings.networkErrorMode ?? 'fail');
+    setIgnoreExternalNetworkErrors(settings.ignoreExternalNetworkErrors ?? false);
+    setConsoleErrorMode(settings.consoleErrorMode ?? 'fail');
     setScreenshotDelay(settings.screenshotDelay ?? 0);
     setMaxParallelTests(settings.maxParallelTests ?? 1);
     setStabilization({ ...DEFAULT_STABILIZATION_SETTINGS, ...settings.stabilization });
@@ -126,6 +135,9 @@ export function PlaywrightSettingsCard({
       freezeAnimations: settings.freezeAnimations ?? false,
       enableVideoRecording: settings.enableVideoRecording ?? false,
       acceptAnyCertificate: settings.acceptAnyCertificate ?? false,
+      networkErrorMode: settings.networkErrorMode ?? 'fail',
+      ignoreExternalNetworkErrors: settings.ignoreExternalNetworkErrors ?? false,
+      consoleErrorMode: settings.consoleErrorMode ?? 'fail',
       screenshotDelay: settings.screenshotDelay ?? 0,
       maxParallelTests: settings.maxParallelTests ?? 1,
       stabilization: { ...DEFAULT_STABILIZATION_SETTINGS, ...settings.stabilization },
@@ -170,6 +182,9 @@ export function PlaywrightSettingsCard({
         freezeAnimations,
         enableVideoRecording,
         acceptAnyCertificate,
+        networkErrorMode,
+        ignoreExternalNetworkErrors,
+        consoleErrorMode,
         screenshotDelay,
         maxParallelTests,
         stabilization,
@@ -181,7 +196,7 @@ export function PlaywrightSettingsCard({
         toast.success('Playwright settings saved');
       }
     });
-  }, [repositoryId, selectorPriority, browser, viewportWidth, viewportHeight, headlessMode, navigationTimeout, actionTimeout, pointerGestures, cursorFPS, defaultRecordingEngine, freezeAnimations, enableVideoRecording, acceptAnyCertificate, screenshotDelay, maxParallelTests, stabilization, compact]);
+  }, [repositoryId, selectorPriority, browser, viewportWidth, viewportHeight, headlessMode, navigationTimeout, actionTimeout, pointerGestures, cursorFPS, defaultRecordingEngine, freezeAnimations, enableVideoRecording, acceptAnyCertificate, networkErrorMode, ignoreExternalNetworkErrors, consoleErrorMode, screenshotDelay, maxParallelTests, stabilization, compact]);
 
   // Auto-save with debounce - only when values differ from original props
   useEffect(() => {
@@ -200,6 +215,9 @@ export function PlaywrightSettingsCard({
       freezeAnimations !== orig.freezeAnimations ||
       enableVideoRecording !== orig.enableVideoRecording ||
       acceptAnyCertificate !== orig.acceptAnyCertificate ||
+      networkErrorMode !== orig.networkErrorMode ||
+      ignoreExternalNetworkErrors !== orig.ignoreExternalNetworkErrors ||
+      consoleErrorMode !== orig.consoleErrorMode ||
       screenshotDelay !== orig.screenshotDelay ||
       maxParallelTests !== orig.maxParallelTests ||
       JSON.stringify(stabilization) !== JSON.stringify(orig.stabilization);
@@ -219,7 +237,7 @@ export function PlaywrightSettingsCard({
         clearTimeout(debounceRef.current);
       }
     };
-  }, [selectorPriority, browser, viewportWidth, viewportHeight, headlessMode, navigationTimeout, actionTimeout, pointerGestures, cursorFPS, defaultRecordingEngine, freezeAnimations, enableVideoRecording, acceptAnyCertificate, screenshotDelay, maxParallelTests, stabilization, doSave]);
+  }, [selectorPriority, browser, viewportWidth, viewportHeight, headlessMode, navigationTimeout, actionTimeout, pointerGestures, cursorFPS, defaultRecordingEngine, freezeAnimations, enableVideoRecording, acceptAnyCertificate, networkErrorMode, ignoreExternalNetworkErrors, consoleErrorMode, screenshotDelay, maxParallelTests, stabilization, doSave]);
 
   // Notify parent of save status changes
   useEffect(() => {
@@ -368,6 +386,56 @@ export function PlaywrightSettingsCard({
           </div>
           <Switch checked={acceptAnyCertificate} onCheckedChange={setAcceptAnyCertificate} />
         </div>
+
+        {/* Error Handling */}
+        <Collapsible>
+          <CollapsibleTrigger className="flex items-center justify-between w-full py-1">
+            <div className="flex items-center gap-2">
+              <Shield className="w-4 h-4 text-muted-foreground" />
+              <Label className="text-sm cursor-pointer">Error Handling</Label>
+            </div>
+            <ChevronDown className="w-4 h-4 text-muted-foreground" />
+          </CollapsibleTrigger>
+          <CollapsibleContent className="space-y-4 pt-3 pl-6">
+            <div className="space-y-1.5">
+              <Label className="text-xs font-medium">Network Error Mode</Label>
+              <Select value={networkErrorMode} onValueChange={setNetworkErrorMode}>
+                <SelectTrigger className="h-8 text-xs">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="fail">Fail test on HTTP 4xx/5xx</SelectItem>
+                  <SelectItem value="warn">Warn only (log, don&apos;t fail)</SelectItem>
+                  <SelectItem value="ignore">Ignore network errors</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="flex items-center justify-between">
+              <div className="space-y-0.5">
+                <Label className="text-xs">Ignore External Network Errors</Label>
+                <p className="text-xs text-muted-foreground">
+                  Skip errors from domains other than the target URL
+                </p>
+              </div>
+              <Switch checked={ignoreExternalNetworkErrors} onCheckedChange={setIgnoreExternalNetworkErrors} />
+            </div>
+
+            <div className="space-y-1.5">
+              <Label className="text-xs font-medium">Console Error Mode</Label>
+              <Select value={consoleErrorMode} onValueChange={setConsoleErrorMode}>
+                <SelectTrigger className="h-8 text-xs">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="fail">Fail test on console errors</SelectItem>
+                  <SelectItem value="warn">Warn only (log, don&apos;t fail)</SelectItem>
+                  <SelectItem value="ignore">Ignore console errors</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </CollapsibleContent>
+        </Collapsible>
 
         {/* Screenshot Delay */}
         <div className={compact ? 'flex items-center justify-between' : 'flex items-center gap-4'}>

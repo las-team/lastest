@@ -43,6 +43,18 @@ CONSTRAINTS:
 - Use baseUrl parameter for navigation (not hardcoded URLs)
 - Capture at least one screenshot using screenshotPath
 - Export async function "test" with exact signature: ${TEST_SIGNATURE}
+- Do NOT use \`import\` statements — \`expect\`, \`page\`, \`baseUrl\`, \`screenshotPath\`, and \`stepLogger\` are provided by the runner
+
+AVAILABLE expect MATCHERS (provided by the runner, do NOT import):
+- Generic: toBe, toEqual, toBeTruthy, toBeFalsy, toBeNull, toBeUndefined, toBeDefined, toContain, toHaveLength, toBeGreaterThan, toBeLessThan, toBeGreaterThanOrEqual, toBeLessThanOrEqual, toMatch(string|RegExp), toMatchObject
+- Page: toHaveURL(string|RegExp), toHaveTitle(string|RegExp)
+- Locator: toBeVisible, toBeHidden, toHaveText(string|RegExp), toContainText(string), toHaveAttribute(name, value), toHaveCount(n), toBeEnabled, toBeDisabled, toBeChecked, toHaveValue(string)
+- All matchers support .not (e.g. expect(x).not.toBe(y))
+
+SELECTOR RULES:
+- Never mix regex text selectors with CSS in one locator string (BAD: \`text=/pattern/i, [data-testid]\`)
+- Use page.getByText(/pattern/i) for regex text matching
+- Use page.locator('[data-testid="x"]') for CSS selectors
 
 FINAL OUTPUT FORMAT:
 After exploration, generate standard Playwright test code.
@@ -83,7 +95,20 @@ FREEDOM:
 CONSTRAINTS:
 - Use baseUrl parameter for navigation (not hardcoded URLs)
 - Capture at least one screenshot using screenshotPath
-- Export async function "test" with exact signature above`;
+- Export async function "test" with exact signature above
+- Do NOT use \`import\` statements — \`expect\`, \`page\`, \`baseUrl\`, \`screenshotPath\`, and \`stepLogger\` are provided by the runner
+
+AVAILABLE expect MATCHERS (provided by the runner, do NOT import):
+- Generic: toBe, toEqual, toBeTruthy, toBeFalsy, toBeNull, toBeUndefined, toBeDefined, toContain, toHaveLength, toBeGreaterThan, toBeLessThan, toBeGreaterThanOrEqual, toBeLessThanOrEqual, toMatch(string|RegExp), toMatchObject
+- Page: toHaveURL(string|RegExp), toHaveTitle(string|RegExp)
+- Locator: toBeVisible, toBeHidden, toHaveText(string|RegExp), toContainText(string), toHaveAttribute(name, value), toHaveCount(n), toBeEnabled, toBeDisabled, toBeChecked, toHaveValue(string)
+- All matchers support .not (e.g. expect(x).not.toBe(y))
+
+SELECTOR RULES:
+- Never mix regex text selectors with CSS in one locator string (BAD: \`text=/pattern/i, [data-testid]\`)
+- Use page.getByText(/pattern/i) for regex text matching
+- Use page.locator('[data-testid="x"]') for CSS selectors
+- Keep each locator type separate`;
 
 export function createTestPrompt(context: TestGenerationContext): string {
   const parts: string[] = [];
@@ -161,6 +186,10 @@ export function createTestPrompt(context: TestGenerationContext): string {
 - Function signature: export async function test(page, baseUrl, screenshotPath, stepLogger)
 - At least one screenshot must be captured
 - Use baseUrl parameter for navigation
+- Do NOT use \`import\` statements — expect and all parameters are provided by the runner
+- Available expect matchers: toBe, toEqual, toBeTruthy, toBeFalsy, toContain, toHaveLength, toBeGreaterThan, toBeLessThan, toBeGreaterThanOrEqual, toBeLessThanOrEqual, toMatch(string|RegExp), toMatchObject
+- Page matchers: toHaveURL, toHaveTitle. Locator: toBeVisible, toBeHidden, toHaveText, toContainText, toHaveAttribute, toHaveCount
+- Never mix regex text and CSS selectors in one locator (use page.getByText(/regex/i) for regex matching)
 
 Return ONLY the code, no explanations.`);
 
@@ -230,6 +259,15 @@ Instructions:
 2. Fix the test while maintaining the same function signature
 3. Keep the test's original intent
 4. Add better error handling if needed
+5. Do NOT use \`import\` — expect is provided by the runner
+6. Available matchers: toBe, toEqual, toBeTruthy, toBeFalsy, toContain, toHaveLength, toBeGreaterThan, toBeLessThan, toBeGreaterThanOrEqual, toBeLessThanOrEqual, toMatch(string|RegExp), toMatchObject
+7. Page matchers: toHaveURL, toHaveTitle. Locator matchers: toBeVisible, toBeHidden, toHaveText, toContainText, toHaveAttribute, toHaveCount
+8. Never mix regex text and CSS selectors in one locator string — use page.getByText(/pattern/i) for regex
+
+Common fix patterns:
+- "X is not a function" on expect → the matcher doesn't exist, use one from the list above
+- "text=/regex/i" selector errors → use page.getByText(/regex/i) instead
+- Timeout on waitForLoadState → use page.waitForLoadState('domcontentloaded') instead of 'networkidle'
 
 Return ONLY the fixed code, no explanations.`;
 }
@@ -254,6 +292,9 @@ Instructions:
 4. Identify what changed on the page that caused the failure
 5. Fix the test using selectors and content discovered from the live page
 6. Maintain the same function signature and test intent
+7. Do NOT use \`import\` — expect is provided by the runner
+8. Available matchers: toBe, toEqual, toBeTruthy, toBeFalsy, toContain, toHaveLength, toBeGreaterThan, toBeLessThan, toBeGreaterThanOrEqual, toBeLessThanOrEqual, toMatch(string|RegExp), toMatchObject
+9. Never mix regex text and CSS selectors in one locator string — use page.getByText(/regex/i) for regex
 
 Return ONLY the fixed code, no explanations.`;
 }

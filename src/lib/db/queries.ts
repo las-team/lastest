@@ -1328,6 +1328,9 @@ export async function getPlaywrightSettings(repositoryId?: string | null) {
     maxParallelTests: 1,
     stabilization: DEFAULT_STABILIZATION_SETTINGS,
     acceptAnyCertificate: false,
+    networkErrorMode: 'fail',
+    ignoreExternalNetworkErrors: false,
+    consoleErrorMode: 'fail',
     createdAt: null,
     updatedAt: null,
   };

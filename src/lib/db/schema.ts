@@ -476,6 +476,9 @@ export const playwrightSettings = sqliteTable('playwright_settings', {
   maxParallelTests: integer('max_parallel_tests').default(1), // max tests to run in parallel locally
   stabilization: text('stabilization', { mode: 'json' }).$type<StabilizationSettings>(), // snapshot stabilization settings
   acceptAnyCertificate: integer('accept_any_certificate', { mode: 'boolean' }).default(false), // ignore HTTPS/SSL cert errors
+  networkErrorMode: text('network_error_mode').default('fail'), // 'fail' | 'warn' | 'ignore'
+  ignoreExternalNetworkErrors: integer('ignore_external_network_errors', { mode: 'boolean' }).default(false), // skip errors from different origins
+  consoleErrorMode: text('console_error_mode').default('fail'), // 'fail' | 'warn' | 'ignore'
   createdAt: integer('created_at', { mode: 'timestamp' }),
   updatedAt: integer('updated_at', { mode: 'timestamp' }),
 });

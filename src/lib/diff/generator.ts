@@ -673,9 +673,16 @@ async function generateShiftAwareDiff(
     fuzzyMatchedRows: fuzzyMatchedCount > 0 ? fuzzyMatchedCount : undefined,
   };
 
+  // When confidence is too low (< 5% of rows matched), the images are fundamentally
+  // different — not merely shifted. Use the original percentage to avoid false "unchanged".
+  const MIN_SHIFT_CONFIDENCE = 0.05;
+  const effectivePercentage = (shiftDetected && confidence < MIN_SHIFT_CONFIDENCE)
+    ? originalPercentage
+    : adjustedPercentage;
+
   return {
     pixelDifference: numDiffPixels,
-    percentageDifference: Math.round(adjustedPercentage * 100) / 100,
+    percentageDifference: Math.round(effectivePercentage * 100) / 100,
     diffImagePath,
     metadata: {
       changedRegions,

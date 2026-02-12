@@ -171,6 +171,35 @@ export function createExpect(timeout = 5000) {
             throw new Error(`${msgPrefix}Expected ${target} to be less than ${expected}`);
           }
         },
+        toBeGreaterThanOrEqual(expected: number) {
+          if (typeof target !== 'number' || target < expected) {
+            throw new Error(`${msgPrefix}Expected ${target} to be greater than or equal to ${expected}`);
+          }
+        },
+        toBeLessThanOrEqual(expected: number) {
+          if (typeof target !== 'number' || target > expected) {
+            throw new Error(`${msgPrefix}Expected ${target} to be less than or equal to ${expected}`);
+          }
+        },
+        toMatch(expected: string | RegExp) {
+          const str = typeof target === 'string' ? target : String(target);
+          const regex = typeof expected === 'string' ? new RegExp(expected) : expected;
+          if (!regex.test(str)) {
+            throw new Error(`${msgPrefix}Expected "${str}" to match ${regex}`);
+          }
+        },
+        toMatchObject(expected: Record<string, unknown>) {
+          if (typeof target !== 'object' || target === null) {
+            throw new Error(`${msgPrefix}Expected an object but got ${typeof target}`);
+          }
+          for (const key of Object.keys(expected)) {
+            const actualVal = (target as Record<string, unknown>)[key];
+            const expectedVal = expected[key];
+            if (JSON.stringify(actualVal) !== JSON.stringify(expectedVal)) {
+              throw new Error(`${msgPrefix}Expected key "${key}" to be ${JSON.stringify(expectedVal)} but got ${JSON.stringify(actualVal)}`);
+            }
+          }
+        },
         not: {
           toHaveLength(expected: number) {
             const actual = (target as { length?: number })?.length;
@@ -194,6 +223,23 @@ export function createExpect(timeout = 5000) {
               throw new Error(`${msgPrefix}Expected array not to contain ${JSON.stringify(expected)}`);
             } else if (typeof target === 'string' && target.includes(expected as string)) {
               throw new Error(`${msgPrefix}Expected string not to contain "${expected}"`);
+            }
+          },
+          toMatch(expected: string | RegExp) {
+            const str = typeof target === 'string' ? target : String(target);
+            const regex = typeof expected === 'string' ? new RegExp(expected) : expected;
+            if (regex.test(str)) {
+              throw new Error(`${msgPrefix}Expected "${str}" not to match ${regex}`);
+            }
+          },
+          toBeGreaterThanOrEqual(expected: number) {
+            if (typeof target === 'number' && target >= expected) {
+              throw new Error(`${msgPrefix}Expected ${target} not to be greater than or equal to ${expected}`);
+            }
+          },
+          toBeLessThanOrEqual(expected: number) {
+            if (typeof target === 'number' && target <= expected) {
+              throw new Error(`${msgPrefix}Expected ${target} not to be less than or equal to ${expected}`);
             }
           },
         },
@@ -957,8 +1003,19 @@ export class PlaywrightRunner extends EventEmitter {
       });
 
       // Capture network failures before navigation
+      const ignoreExternalNetworkErrors = this.settings?.ignoreExternalNetworkErrors ?? false;
+      let targetOrigin: string | undefined;
+      try { targetOrigin = new URL(targetUrl).origin; } catch { /* ignore */ }
+
       page.on('response', response => {
         if (response.status() >= 400) {
+          // Skip external origin errors if configured
+          if (ignoreExternalNetworkErrors && targetOrigin) {
+            try {
+              const responseOrigin = new URL(response.url()).origin;
+              if (responseOrigin !== targetOrigin) return;
+            } catch { /* keep the error if URL parsing fails */ }
+          }
           networkFailures.push({
             url: response.url(),
             method: response.request().method(),
@@ -1169,15 +1226,28 @@ export class PlaywrightRunner extends EventEmitter {
       });
 
       // Check for console errors or network failures after test execution
-      if (consoleErrors.length > 0 || networkFailures.length > 0) {
-        const errorParts: string[] = [];
-        if (consoleErrors.length > 0) {
-          errorParts.push(`Console errors detected: ${consoleErrors.join('; ')}`);
+      const consoleErrorMode = (this.settings?.consoleErrorMode as string) || 'fail';
+      const networkErrorMode = (this.settings?.networkErrorMode as string) || 'fail';
+      const errorParts: string[] = [];
+
+      if (consoleErrors.length > 0 && consoleErrorMode !== 'ignore') {
+        const msg = `Console errors detected: ${consoleErrors.join('; ')}`;
+        if (consoleErrorMode === 'warn') {
+          console.warn(`[test] ${msg}`);
+        } else {
+          errorParts.push(msg);
         }
-        if (networkFailures.length > 0) {
-          const failureDetails = networkFailures.map(f => `${f.method} ${f.url} (${f.status})`).join('; ');
-          errorParts.push(`Network failures detected: ${failureDetails}`);
+      }
+      if (networkFailures.length > 0 && networkErrorMode !== 'ignore') {
+        const failureDetails = networkFailures.map(f => `${f.method} ${f.url} (${f.status})`).join('; ');
+        const msg = `Network failures detected: ${failureDetails}`;
+        if (networkErrorMode === 'warn') {
+          console.warn(`[test] ${msg}`);
+        } else {
+          errorParts.push(msg);
         }
+      }
+      if (errorParts.length > 0) {
         throw new Error(errorParts.join(' | '));
       }
 

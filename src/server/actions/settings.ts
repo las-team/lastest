@@ -28,6 +28,9 @@ export async function savePlaywrightSettings(data: {
   maxParallelTests?: number;
   stabilization?: StabilizationSettings;
   acceptAnyCertificate?: boolean;
+  networkErrorMode?: string;
+  ignoreExternalNetworkErrors?: boolean;
+  consoleErrorMode?: string;
 }) {
   if (data.repositoryId) await requireRepoAccess(data.repositoryId);
   else await requireTeamAccess();
