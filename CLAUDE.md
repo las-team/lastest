@@ -137,16 +137,20 @@ Tests use a function signature: `export async function test(page, baseUrl, scree
 ```
 GITHUB_CLIENT_ID      # GitHub OAuth app client ID
 GITHUB_CLIENT_SECRET  # GitHub OAuth app secret
-BETTER_AUTH_SECRET    # Session encryption secret (auto-generated if not set)
+BETTER_AUTH_SECRET    # Session encryption secret (legacy name, used in docker-compose)
 ```
 
 ### Auth System
 
-Uses `better-auth` with database sessions. Supports:
-- Email/password registration
-- GitHub OAuth
-- Team-based multi-tenancy
+Custom self-coded auth (no Auth0/NextAuth/better-auth). Supports:
+- Email/password registration (`@node-rs/argon2` for hashing)
+- GitHub, Google, GitLab OAuth (manual OAuth2 authorization code flow via raw HTTP)
+- DB-backed sessions (`createSessionToken()` + `setSessionCookie()`)
+- Team-based multi-tenancy (auto-creates team on first OAuth registration)
 - Role-based access (owner, admin, member, viewer)
+- Account linking (connect OAuth provider to existing logged-in user)
+- OAuth routes: `src/app/api/auth/{github,google,gitlab}/callback/route.ts`
+- GitHub OAuth helpers: `src/lib/github/oauth.ts`
 
 ### File Storage
 

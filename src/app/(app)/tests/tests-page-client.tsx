@@ -66,11 +66,8 @@ interface TestsPageClientProps {
 export function TestsPageClient({ areas, tests, routes, repositoryId, baseUrl = 'http://localhost:3000', deletedTests = [] }: TestsPageClientProps) {
   const notifyJobStarted = useNotifyJobStarted();
 
-  // Compute uncovered routes dynamically — a route is covered only if its functional area has active (non-deleted) tests
-  const areasWithActiveTests = new Set(tests.map(t => t.functionalAreaId).filter(Boolean));
-  const uncoveredRoutes = routes.filter(r =>
-    !(r.functionalAreaId && areasWithActiveTests.has(r.functionalAreaId))
-  );
+  // A route is uncovered if it has no test (hasTest is maintained by soft-delete/restore lifecycle)
+  const uncoveredRoutes = routes.filter(r => !r.hasTest);
   const [isNewAreaOpen, setIsNewAreaOpen] = useState(false);
   const [newAreaName, setNewAreaName] = useState('');
   const [isCreating, setIsCreating] = useState(false);
