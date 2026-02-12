@@ -260,9 +260,10 @@ ${context.existingCode}
   return parts.join('\n');
 }
 
-export function createRouteScanPrompt(codebaseContext: string): string {
+export function createRouteScanPrompt(codebaseContext: string, repoFullName?: string): string {
+  const repoLine = repoFullName ? `\nRepository: ${repoFullName}\n` : '';
   return `Analyze this codebase structure and identify all testable routes/pages, grouped into logical functional areas.
-
+${repoLine}
 Codebase context:
 ${codebaseContext}
 

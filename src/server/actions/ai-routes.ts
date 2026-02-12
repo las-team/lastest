@@ -157,8 +157,7 @@ async function getCodebaseContext(
       context.push(`\n=== ${routeDir}/ ===`);
       for (const file of filesInDir) {
         const relativePath = file.path.replace(routeDir + '/', '');
-        const indent = '  '.repeat(relativePath.split('/').length - 1);
-        context.push(`${indent}${relativePath.split('/').pop()}`);
+        context.push(`  ${relativePath}`);
       }
     }
   }
@@ -213,7 +212,7 @@ export async function aiScanRoutes(
       return { success: false, error: 'Could not read codebase structure' };
     }
 
-    const prompt = createRouteScanPrompt(codebaseContext);
+    const prompt = createRouteScanPrompt(codebaseContext, repo.fullName);
     const response = await generateWithAI(config, prompt, SYSTEM_PROMPT, {
       actionType: 'scan_routes',
       repositoryId,
