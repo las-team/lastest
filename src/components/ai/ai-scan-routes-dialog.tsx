@@ -13,17 +13,10 @@ import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
-import { aiScanRoutes, saveDiscoveredRoutes, type SavedRouteInfo } from '@/server/actions/ai-routes';
+import { aiScanRoutes, saveDiscoveredRoutes, type SavedRouteInfo, type DiscoveredArea } from '@/server/actions/ai-routes';
 import { aiCreateTest, saveGeneratedTest } from '@/server/actions/ai';
-import { Loader2, Sparkles, Save, RefreshCw, Check, Route, FlaskConical, CheckCircle2, XCircle } from 'lucide-react';
+import { Loader2, Sparkles, Save, RefreshCw, Check, Minus, Route, FlaskConical, CheckCircle2, XCircle, ChevronDown, ChevronRight, FolderOpen } from 'lucide-react';
 import { toast } from 'sonner';
-
-interface DiscoveredRoute {
-  path: string;
-  type: 'static' | 'dynamic';
-  description?: string;
-  testSuggestions?: string[];
-}
 
 interface AIScanRoutesDialogProps {
   open: boolean;
@@ -43,8 +36,9 @@ export function AIScanRoutesDialog({
   const [step, setStep] = useState<'scanning' | 'preview' | 'generate'>('scanning');
   const [isScanning, setIsScanning] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
-  const [discoveredRoutes, setDiscoveredRoutes] = useState<DiscoveredRoute[]>([]);
+  const [discoveredAreas, setDiscoveredAreas] = useState<DiscoveredArea[]>([]);
   const [selectedRoutes, setSelectedRoutes] = useState<Set<string>>(new Set());
+  const [expandedAreas, setExpandedAreas] = useState<Set<string>>(new Set());
   const [hasScanned, setHasScanned] = useState(false);
   const [hasStartedScan, setHasStartedScan] = useState(false);
 
@@ -55,6 +49,9 @@ export function AIScanRoutesDialog({
   const [generateProgress, setGenerateProgress] = useState(0);
   const [generateTotal, setGenerateTotal] = useState(0);
   const [generateResults, setGenerateResults] = useState<{ path: string; success: boolean }[]>([]);
+
+  const allRoutes = discoveredAreas.flatMap((a) => a.routes);
+  const totalRouteCount = allRoutes.length;
 
   // Trigger scan when dialog opens
   useEffect(() => {
@@ -69,32 +66,90 @@ export function AIScanRoutesDialog({
     try {
       const result = await aiScanRoutes(repositoryId, branch);
 
-      if (result.success && result.routes) {
-        setDiscoveredRoutes(result.routes);
-        setSelectedRoutes(new Set(result.routes.map((r) => r.path)));
+      if (result.success && result.functionalAreas) {
+        setDiscoveredAreas(result.functionalAreas);
+        const allPaths = result.functionalAreas.flatMap((a) => a.routes.map((r) => r.path));
+        setSelectedRoutes(new Set(allPaths));
+        setExpandedAreas(new Set(result.functionalAreas.map((a) => a.name)));
         setStep('preview');
         setHasScanned(true);
-        toast.success(`Found ${result.routes.length} routes`);
+        toast.success(`Found ${allPaths.length} routes in ${result.functionalAreas.length} areas`);
       } else {
         toast.error(result.error || 'Failed to scan routes');
       }
-    } catch (error) {
+    } catch {
       toast.error('Failed to scan routes');
     } finally {
       setIsScanning(false);
     }
   };
 
+  const toggleAreaExpansion = (areaName: string) => {
+    const next = new Set(expandedAreas);
+    if (next.has(areaName)) {
+      next.delete(areaName);
+    } else {
+      next.add(areaName);
+    }
+    setExpandedAreas(next);
+  };
+
+  const getAreaSelectionState = (area: DiscoveredArea): 'all' | 'some' | 'none' => {
+    const paths = area.routes.map((r) => r.path);
+    const selectedCount = paths.filter((p) => selectedRoutes.has(p)).length;
+    if (selectedCount === 0) return 'none';
+    if (selectedCount === paths.length) return 'all';
+    return 'some';
+  };
+
+  const toggleArea = (area: DiscoveredArea) => {
+    const next = new Set(selectedRoutes);
+    const state = getAreaSelectionState(area);
+    for (const route of area.routes) {
+      if (state === 'all') {
+        next.delete(route.path);
+      } else {
+        next.add(route.path);
+      }
+    }
+    setSelectedRoutes(next);
+  };
+
+  const toggleRoute = (path: string) => {
+    const next = new Set(selectedRoutes);
+    if (next.has(path)) {
+      next.delete(path);
+    } else {
+      next.add(path);
+    }
+    setSelectedRoutes(next);
+  };
+
+  const toggleAll = () => {
+    if (selectedRoutes.size === totalRouteCount) {
+      setSelectedRoutes(new Set());
+    } else {
+      setSelectedRoutes(new Set(allRoutes.map((r) => r.path)));
+    }
+  };
+
   const handleSave = async () => {
-    const routesToSave = discoveredRoutes.filter((r) => selectedRoutes.has(r.path));
-    if (routesToSave.length === 0) {
+    // Build areas with only selected routes
+    const areasToSave: DiscoveredArea[] = discoveredAreas
+      .map((area) => ({
+        ...area,
+        routes: area.routes.filter((r) => selectedRoutes.has(r.path)),
+      }))
+      .filter((area) => area.routes.length > 0);
+
+    if (areasToSave.length === 0) {
       toast.error('No routes selected');
       return;
     }
 
     setIsSaving(true);
     try {
-      const result = await saveDiscoveredRoutes(repositoryId, routesToSave);
+      const result = await saveDiscoveredRoutes(repositoryId, areasToSave);
 
       if (result.success) {
         if (result.count === 0) {
@@ -104,7 +159,6 @@ export function AIScanRoutesDialog({
         } else {
           toast.success(`Saved ${result.count} new routes`);
           onSaved?.();
-          // Transition to generate step if there are saved routes
           if (result.savedRoutes && result.savedRoutes.length > 0) {
             setSavedRoutes(result.savedRoutes);
             setSelectedForGeneration(new Set(result.savedRoutes.map(r => r.routeId)));
@@ -118,7 +172,7 @@ export function AIScanRoutesDialog({
       } else {
         toast.error(result.error || 'Failed to save routes');
       }
-    } catch (error) {
+    } catch {
       toast.error('Failed to save routes');
     } finally {
       setIsSaving(false);
@@ -179,32 +233,14 @@ export function AIScanRoutesDialog({
     onSaved?.();
   };
 
-  const toggleRoute = (path: string) => {
-    const newSelected = new Set(selectedRoutes);
-    if (newSelected.has(path)) {
-      newSelected.delete(path);
-    } else {
-      newSelected.add(path);
-    }
-    setSelectedRoutes(newSelected);
-  };
-
-  const toggleAll = () => {
-    if (selectedRoutes.size === discoveredRoutes.length) {
-      setSelectedRoutes(new Set());
-    } else {
-      setSelectedRoutes(new Set(discoveredRoutes.map((r) => r.path)));
-    }
-  };
-
   const toggleGenerateRoute = (routeId: string) => {
-    const newSelected = new Set(selectedForGeneration);
-    if (newSelected.has(routeId)) {
-      newSelected.delete(routeId);
+    const next = new Set(selectedForGeneration);
+    if (next.has(routeId)) {
+      next.delete(routeId);
     } else {
-      newSelected.add(routeId);
+      next.add(routeId);
     }
-    setSelectedForGeneration(newSelected);
+    setSelectedForGeneration(next);
   };
 
   const toggleAllGenerate = () => {
@@ -217,8 +253,9 @@ export function AIScanRoutesDialog({
 
   const handleClose = () => {
     setStep('scanning');
-    setDiscoveredRoutes([]);
+    setDiscoveredAreas([]);
     setSelectedRoutes(new Set());
+    setExpandedAreas(new Set());
     setHasScanned(false);
     setHasStartedScan(false);
     setSavedRoutes([]);
@@ -249,7 +286,7 @@ export function AIScanRoutesDialog({
             {step === 'scanning'
               ? 'AI is analyzing your codebase to discover testable routes...'
               : step === 'preview'
-                ? `Found ${discoveredRoutes.length} routes. Select which ones to add.`
+                ? `Found ${totalRouteCount} routes in ${discoveredAreas.length} areas. Select which ones to add.`
                 : isGenerating
                   ? `Generating test ${generateProgress + 1} of ${generateTotal}...`
                   : generateResults.length > 0
@@ -270,57 +307,100 @@ export function AIScanRoutesDialog({
           <div className="flex-1 overflow-hidden flex flex-col gap-4 min-h-0">
             <div className="flex items-center justify-between">
               <Button variant="ghost" size="sm" onClick={toggleAll}>
-                {selectedRoutes.size === discoveredRoutes.length ? 'Deselect All' : 'Select All'}
+                {selectedRoutes.size === totalRouteCount ? 'Deselect All' : 'Select All'}
               </Button>
               <span className="text-sm text-muted-foreground">
-                {selectedRoutes.size} of {discoveredRoutes.length} selected
+                {selectedRoutes.size} of {totalRouteCount} selected
               </span>
             </div>
 
             <ScrollArea className="flex-1 border rounded-lg min-h-0 max-h-[50vh]">
               <div className="p-2 space-y-1">
-                {discoveredRoutes.map((route) => (
-                  <div
-                    key={route.path}
-                    className={`flex items-start gap-3 p-3 rounded-lg cursor-pointer transition-colors ${
-                      selectedRoutes.has(route.path)
-                        ? 'bg-primary/10 border border-primary/20'
-                        : 'hover:bg-muted/50 border border-transparent'
-                    }`}
-                    onClick={() => toggleRoute(route.path)}
-                  >
-                    <div className={`w-5 h-5 rounded border flex items-center justify-center mt-0.5 ${
-                      selectedRoutes.has(route.path)
-                        ? 'bg-primary border-primary text-primary-foreground'
-                        : 'border-muted-foreground/30'
-                    }`}>
-                      {selectedRoutes.has(route.path) && <Check className="h-3 w-3" />}
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2">
-                        <Route className="h-4 w-4 text-muted-foreground flex-shrink-0" />
-                        <code className="font-mono text-sm">{route.path}</code>
-                        <Badge variant={route.type === 'static' ? 'default' : 'secondary'} className="text-xs">
-                          {route.type}
+                {discoveredAreas.map((area) => {
+                  const areaState = getAreaSelectionState(area);
+                  const isExpanded = expandedAreas.has(area.name);
+                  return (
+                    <div key={area.name}>
+                      <div
+                        className="flex items-center gap-2 p-2 rounded-lg cursor-pointer hover:bg-muted/50"
+                        onClick={() => toggleAreaExpansion(area.name)}
+                      >
+                        {isExpanded ? (
+                          <ChevronDown className="h-4 w-4 text-muted-foreground flex-shrink-0" />
+                        ) : (
+                          <ChevronRight className="h-4 w-4 text-muted-foreground flex-shrink-0" />
+                        )}
+                        <div
+                          className={`w-5 h-5 rounded border flex items-center justify-center ${
+                            areaState === 'all'
+                              ? 'bg-primary border-primary text-primary-foreground'
+                              : areaState === 'some'
+                                ? 'bg-primary/50 border-primary text-primary-foreground'
+                                : 'border-muted-foreground/30'
+                          }`}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            toggleArea(area);
+                          }}
+                        >
+                          {areaState === 'all' && <Check className="h-3 w-3" />}
+                          {areaState === 'some' && <Minus className="h-3 w-3" />}
+                        </div>
+                        <FolderOpen className="h-4 w-4 text-muted-foreground flex-shrink-0" />
+                        <span className="font-medium text-sm">{area.name}</span>
+                        <Badge variant="outline" className="text-xs ml-auto">
+                          {area.routes.length} route{area.routes.length !== 1 ? 's' : ''}
                         </Badge>
                       </div>
-                      {route.description && (
-                        <p className="text-xs text-muted-foreground mt-1 ml-6">
-                          {route.description}
-                        </p>
-                      )}
-                      {route.testSuggestions && route.testSuggestions.length > 0 && (
-                        <div className="flex flex-wrap gap-1 mt-2 ml-6">
-                          {route.testSuggestions.slice(0, 2).map((suggestion, i) => (
-                            <span key={i} className="text-xs bg-muted px-2 py-0.5 rounded">
-                              {suggestion}
-                            </span>
+                      {isExpanded && (
+                        <div className="ml-7 space-y-1">
+                          {area.routes.map((route) => (
+                            <div
+                              key={route.path}
+                              className={`flex items-start gap-3 p-2 pl-4 rounded-lg cursor-pointer transition-colors ${
+                                selectedRoutes.has(route.path)
+                                  ? 'bg-primary/10 border border-primary/20'
+                                  : 'hover:bg-muted/50 border border-transparent'
+                              }`}
+                              onClick={() => toggleRoute(route.path)}
+                            >
+                              <div className={`w-5 h-5 rounded border flex items-center justify-center mt-0.5 ${
+                                selectedRoutes.has(route.path)
+                                  ? 'bg-primary border-primary text-primary-foreground'
+                                  : 'border-muted-foreground/30'
+                              }`}>
+                                {selectedRoutes.has(route.path) && <Check className="h-3 w-3" />}
+                              </div>
+                              <div className="flex-1 min-w-0">
+                                <div className="flex items-center gap-2">
+                                  <Route className="h-4 w-4 text-muted-foreground flex-shrink-0" />
+                                  <code className="font-mono text-sm">{route.path}</code>
+                                  <Badge variant={route.type === 'static' ? 'default' : 'secondary'} className="text-xs">
+                                    {route.type}
+                                  </Badge>
+                                </div>
+                                {route.description && (
+                                  <p className="text-xs text-muted-foreground mt-1 ml-6">
+                                    {route.description}
+                                  </p>
+                                )}
+                                {route.testSuggestions && route.testSuggestions.length > 0 && (
+                                  <div className="flex flex-wrap gap-1 mt-2 ml-6">
+                                    {route.testSuggestions.slice(0, 2).map((suggestion, i) => (
+                                      <span key={i} className="text-xs bg-muted px-2 py-0.5 rounded">
+                                        {suggestion}
+                                      </span>
+                                    ))}
+                                  </div>
+                                )}
+                              </div>
+                            </div>
                           ))}
                         </div>
                       )}
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             </ScrollArea>
           </div>

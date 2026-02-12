@@ -49,6 +49,47 @@ function extractJsonArray(text: string): string | null {
   return null;
 }
 
+/** Extract first valid JSON object from text, handling nested brackets correctly */
+function extractJsonObject(text: string): string | null {
+  const start = text.indexOf('{');
+  if (start === -1) return null;
+
+  let depth = 0;
+  let inString = false;
+  let escape = false;
+
+  for (let i = start; i < text.length; i++) {
+    const char = text[i];
+
+    if (escape) {
+      escape = false;
+      continue;
+    }
+
+    if (char === '\\' && inString) {
+      escape = true;
+      continue;
+    }
+
+    if (char === '"') {
+      inString = !inString;
+      continue;
+    }
+
+    if (inString) continue;
+
+    if (char === '{') depth++;
+    else if (char === '}') {
+      depth--;
+      if (depth === 0) {
+        return text.slice(start, i + 1);
+      }
+    }
+  }
+
+  return null;
+}
+
 async function getAIConfig(repositoryId?: string | null): Promise<AIProviderConfig> {
   const settings = await queries.getAISettings(repositoryId);
   return {
@@ -66,6 +107,12 @@ interface DiscoveredRoute {
   type: 'static' | 'dynamic';
   description?: string;
   testSuggestions?: string[];
+}
+
+export interface DiscoveredArea {
+  name: string;
+  description?: string;
+  routes: DiscoveredRoute[];
 }
 
 // Read directory structure for AI context via GitHub API
@@ -143,7 +190,7 @@ async function getCodebaseContext(
 export async function aiScanRoutes(
   repositoryId: string,
   branch: string
-): Promise<{ success: boolean; routes?: DiscoveredRoute[]; error?: string }> {
+): Promise<{ success: boolean; functionalAreas?: DiscoveredArea[]; error?: string }> {
   const { repo } = await requireRepoAccess(repositoryId);
   const jobId = await createJob('ai_scan', 'AI Route Scan', undefined, repositoryId);
   try {
@@ -172,16 +219,26 @@ export async function aiScanRoutes(
       repositoryId,
     });
 
-    // Parse JSON response - extract first valid JSON array
-    const jsonStr = extractJsonArray(response);
-    if (!jsonStr) {
-      await failJob(jobId, 'AI did not return valid JSON');
-      return { success: false, error: 'AI did not return valid JSON' };
+    // Parse JSON response - try grouped object first, fall back to flat array
+    const objStr = extractJsonObject(response);
+    if (objStr) {
+      const parsed = JSON.parse(objStr);
+      if (parsed.functionalAreas && Array.isArray(parsed.functionalAreas)) {
+        await completeJob(jobId);
+        return { success: true, functionalAreas: parsed.functionalAreas };
+      }
     }
 
-    const routes: DiscoveredRoute[] = JSON.parse(jsonStr);
-    await completeJob(jobId);
-    return { success: true, routes };
+    // Fallback: try flat array and wrap in a single area
+    const arrStr = extractJsonArray(response);
+    if (arrStr) {
+      const routes: DiscoveredRoute[] = JSON.parse(arrStr);
+      await completeJob(jobId);
+      return { success: true, functionalAreas: [{ name: 'Discovered Routes', routes }] };
+    }
+
+    await failJob(jobId, 'AI did not return valid JSON');
+    return { success: false, error: 'AI did not return valid JSON' };
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Failed to scan routes';
     await failJob(jobId, message);
@@ -192,7 +249,7 @@ export async function aiScanRoutes(
 export async function mcpExploreRoutes(
   repositoryId: string,
   baseURL: string
-): Promise<{ success: boolean; routes?: DiscoveredRoute[]; error?: string }> {
+): Promise<{ success: boolean; functionalAreas?: DiscoveredArea[]; error?: string }> {
   await requireRepoAccess(repositoryId);
   try {
     const config = await getAIConfig(repositoryId);
@@ -207,14 +264,23 @@ export async function mcpExploreRoutes(
       repositoryId,
     });
 
-    // Parse JSON response - extract first valid JSON array
-    const jsonStr = extractJsonArray(response);
-    if (!jsonStr) {
-      return { success: false, error: 'AI did not return valid JSON' };
+    // Parse JSON response - try grouped object first, fall back to flat array
+    const objStr = extractJsonObject(response);
+    if (objStr) {
+      const parsed = JSON.parse(objStr);
+      if (parsed.functionalAreas && Array.isArray(parsed.functionalAreas)) {
+        return { success: true, functionalAreas: parsed.functionalAreas };
+      }
     }
 
-    const routes: DiscoveredRoute[] = JSON.parse(jsonStr);
-    return { success: true, routes };
+    // Fallback: try flat array and wrap in a single area
+    const arrStr = extractJsonArray(response);
+    if (arrStr) {
+      const routes: DiscoveredRoute[] = JSON.parse(arrStr);
+      return { success: true, functionalAreas: [{ name: 'Discovered Routes', routes }] };
+    }
+
+    return { success: false, error: 'AI did not return valid JSON' };
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Failed to explore routes';
     return { success: false, error: message };
@@ -231,7 +297,7 @@ export interface SavedRouteInfo {
 
 export async function saveDiscoveredRoutes(
   repositoryId: string,
-  routes: DiscoveredRoute[]
+  areas: DiscoveredArea[]
 ): Promise<{ success: boolean; count?: number; savedRoutes?: SavedRouteInfo[]; error?: string }> {
   await requireRepoAccess(repositoryId);
   try {
@@ -239,57 +305,61 @@ export async function saveDiscoveredRoutes(
     const existingRoutes = await queries.getRoutesByRepo(repositoryId);
     const existingPaths = new Set(existingRoutes.map((r) => r.path));
 
-    // Filter out duplicates
-    const newRoutes = routes.filter((r) => !existingPaths.has(r.path));
-
-    if (newRoutes.length === 0) {
-      return { success: true, count: 0 };
-    }
-
-    // Create routes with description
-    const routeData = newRoutes.map((r) => ({
-      repositoryId,
-      path: r.path,
-      type: r.type,
-      description: r.description,
-      scannedAt: new Date(),
-    }));
-
-    const createdRoutes = await queries.createRoutes(routeData);
-
-    // Auto-create functional areas for each new route
     const savedRoutes: SavedRouteInfo[] = [];
-    for (let i = 0; i < createdRoutes.length; i++) {
-      const createdRoute = createdRoutes[i];
-      const originalRoute = newRoutes[i];
-      const area = await queries.getOrCreateFunctionalAreaByRepo(
-        repositoryId,
-        createdRoute.path,
-        `Auto-generated area for route ${createdRoute.path}`
-      );
-      await queries.linkRouteToFunctionalArea(createdRoute.id, area.id);
-      savedRoutes.push({
-        path: createdRoute.path,
-        routeId: createdRoute.id,
-        areaId: area.id,
-        areaName: area.name,
-        testSuggestions: originalRoute.testSuggestions || [],
-      });
-    }
-
-    // Create test suggestions for each route
     const suggestionData: { routeId: string; suggestion: string }[] = [];
-    for (let i = 0; i < newRoutes.length; i++) {
-      const route = newRoutes[i];
-      const createdRoute = createdRoutes[i];
-      if (route.testSuggestions && route.testSuggestions.length > 0) {
-        for (const suggestion of route.testSuggestions) {
-          suggestionData.push({
-            routeId: createdRoute.id,
-            suggestion,
-          });
+    let totalNew = 0;
+
+    for (const area of areas) {
+      // Filter out duplicate routes within this area
+      const newRoutes = area.routes.filter((r) => !existingPaths.has(r.path));
+      if (newRoutes.length === 0) continue;
+
+      // Get or create the functional area with the AI-provided name
+      const dbArea = await queries.getOrCreateFunctionalAreaByRepo(
+        repositoryId,
+        area.name,
+        area.description
+      );
+
+      // Create routes with functionalAreaId set directly
+      const routeData = newRoutes.map((r) => ({
+        repositoryId,
+        path: r.path,
+        type: r.type,
+        description: r.description,
+        functionalAreaId: dbArea.id,
+        scannedAt: new Date(),
+      }));
+
+      const createdRoutes = await queries.createRoutes(routeData);
+      totalNew += createdRoutes.length;
+
+      // Track created paths to avoid cross-area duplicates
+      for (const r of newRoutes) {
+        existingPaths.add(r.path);
+      }
+
+      for (let i = 0; i < createdRoutes.length; i++) {
+        const createdRoute = createdRoutes[i];
+        const originalRoute = newRoutes[i];
+        savedRoutes.push({
+          path: createdRoute.path,
+          routeId: createdRoute.id,
+          areaId: dbArea.id,
+          areaName: dbArea.name,
+          testSuggestions: originalRoute.testSuggestions || [],
+        });
+
+        if (originalRoute.testSuggestions && originalRoute.testSuggestions.length > 0) {
+          for (const suggestion of originalRoute.testSuggestions) {
+            suggestionData.push({ routeId: createdRoute.id, suggestion });
+          }
         }
       }
+    }
+
+    if (totalNew === 0) {
+      return { success: true, count: 0 };
     }
 
     if (suggestionData.length > 0) {
@@ -298,7 +368,7 @@ export async function saveDiscoveredRoutes(
 
     revalidatePath('/tests');
 
-    return { success: true, count: newRoutes.length, savedRoutes };
+    return { success: true, count: totalNew, savedRoutes };
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Failed to save routes';
     return { success: false, error: message };

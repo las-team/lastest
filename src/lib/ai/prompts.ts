@@ -261,35 +261,57 @@ ${context.existingCode}
 }
 
 export function createRouteScanPrompt(codebaseContext: string): string {
-  return `Analyze this codebase structure and identify all testable routes/pages.
+  return `Analyze this codebase structure and identify all testable routes/pages, grouped into logical functional areas.
 
 Codebase context:
 ${codebaseContext}
 
-Return a JSON array of routes with this structure:
-[
-  {
-    "path": "/dashboard",
-    "type": "static",
-    "description": "Main dashboard page",
-    "testSuggestions": ["Verify dashboard loads", "Check metric widgets"]
-  },
-  {
-    "path": "/users/[id]",
-    "type": "dynamic",
-    "description": "User profile page",
-    "testSuggestions": ["Test with valid user ID", "Test error state for invalid ID"]
-  }
-]
+Return a JSON object with routes grouped into functional areas:
+{
+  "functionalAreas": [
+    {
+      "name": "User Management",
+      "description": "User profiles, settings, and account management",
+      "routes": [
+        {
+          "path": "/users",
+          "type": "static",
+          "description": "User listing page",
+          "testSuggestions": ["Verify user list loads", "Check pagination"]
+        },
+        {
+          "path": "/users/[id]",
+          "type": "dynamic",
+          "description": "User profile page",
+          "testSuggestions": ["Test with valid user ID", "Test error state for invalid ID"]
+        }
+      ]
+    },
+    {
+      "name": "Dashboard",
+      "description": "Main dashboard and analytics views",
+      "routes": [
+        {
+          "path": "/dashboard",
+          "type": "static",
+          "description": "Main dashboard page",
+          "testSuggestions": ["Verify dashboard loads", "Check metric widgets"]
+        }
+      ]
+    }
+  ]
+}
 
 Guidelines:
+- Group related routes under logical functional areas (e.g. "Authentication", "User Management", "Settings")
+- Use clear, human-readable area names (NOT route paths)
 - Include all user-facing pages
 - Mark routes as "static" or "dynamic" based on URL parameters
 - For dynamic routes, note the parameter pattern
 - Provide brief test suggestions for each route
 - Focus on routes that benefit from visual regression testing
 
-Return ONLY the JSON array, no explanations.`;
+Return ONLY the JSON object, no explanations.`;
 }
 
 export function createSpecAnalysisPrompt(specContent: string): string {
@@ -337,7 +359,7 @@ export function createMCPExploreRoutesPrompt(baseURL: string, existingRoutes: st
     ? `\nAlready known routes (use as seed starting points to explore deeper):\n${existingRoutes.map(r => `- ${r}`).join('\n')}`
     : '';
 
-  return `You are exploring a live web application to discover all available routes/pages.
+  return `You are exploring a live web application to discover all available routes/pages, grouped into logical functional areas.
 
 Base URL: ${baseURL}
 ${seedSection}
@@ -348,6 +370,7 @@ EXPLORATION INSTRUCTIONS:
 3. After visiting top-level pages, look for sub-navigation, tabs, or nested links
 4. Visit any known routes listed above as additional starting points
 5. For each discovered page, note whether the route is static or dynamic (has IDs/slugs in the URL)
+6. Group the discovered routes into logical functional areas
 
 IMPORTANT:
 - Only record routes that belong to this application (same origin as baseURL)
@@ -355,15 +378,33 @@ IMPORTANT:
 - Do NOT include hash fragments, query parameters, or external links
 - Explore as many unique pages as possible
 
-Return your findings as a JSON array with this exact structure:
+Return your findings as a JSON object with routes grouped into functional areas:
 \`\`\`json
-[
-  {"path": "/dashboard", "type": "static", "description": "Main dashboard page", "testSuggestions": ["Verify dashboard loads correctly", "Check navigation elements"]},
-  {"path": "/users/[id]", "type": "dynamic", "description": "User profile page", "testSuggestions": ["Test with valid user ID", "Test error state for invalid ID"]}
-]
+{
+  "functionalAreas": [
+    {
+      "name": "Dashboard",
+      "description": "Main dashboard and analytics views",
+      "routes": [
+        {"path": "/dashboard", "type": "static", "description": "Main dashboard page", "testSuggestions": ["Verify dashboard loads correctly", "Check navigation elements"]}
+      ]
+    },
+    {
+      "name": "User Management",
+      "description": "User profiles and account pages",
+      "routes": [
+        {"path": "/users/[id]", "type": "dynamic", "description": "User profile page", "testSuggestions": ["Test with valid user ID", "Test error state for invalid ID"]}
+      ]
+    }
+  ]
+}
 \`\`\`
 
-Return ONLY the JSON array inside a code block, no other text.`;
+Guidelines:
+- Group related routes under logical functional areas (e.g. "Authentication", "User Management", "Settings")
+- Use clear, human-readable area names (NOT route paths)
+
+Return ONLY the JSON object inside a code block, no other text.`;
 }
 
 export function createUserStoryExtractionPrompt(specContent: string): string {
