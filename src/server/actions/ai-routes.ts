@@ -221,10 +221,18 @@ export async function mcpExploreRoutes(
   }
 }
 
+export interface SavedRouteInfo {
+  path: string;
+  routeId: string;
+  areaId: string;
+  areaName: string;
+  testSuggestions: string[];
+}
+
 export async function saveDiscoveredRoutes(
   repositoryId: string,
   routes: DiscoveredRoute[]
-): Promise<{ success: boolean; count?: number; error?: string }> {
+): Promise<{ success: boolean; count?: number; savedRoutes?: SavedRouteInfo[]; error?: string }> {
   await requireRepoAccess(repositoryId);
   try {
     // Get existing routes to avoid duplicates
@@ -250,13 +258,23 @@ export async function saveDiscoveredRoutes(
     const createdRoutes = await queries.createRoutes(routeData);
 
     // Auto-create functional areas for each new route
-    for (const route of createdRoutes) {
+    const savedRoutes: SavedRouteInfo[] = [];
+    for (let i = 0; i < createdRoutes.length; i++) {
+      const createdRoute = createdRoutes[i];
+      const originalRoute = newRoutes[i];
       const area = await queries.getOrCreateFunctionalAreaByRepo(
         repositoryId,
-        route.path,
-        `Auto-generated area for route ${route.path}`
+        createdRoute.path,
+        `Auto-generated area for route ${createdRoute.path}`
       );
-      await queries.linkRouteToFunctionalArea(route.id, area.id);
+      await queries.linkRouteToFunctionalArea(createdRoute.id, area.id);
+      savedRoutes.push({
+        path: createdRoute.path,
+        routeId: createdRoute.id,
+        areaId: area.id,
+        areaName: area.name,
+        testSuggestions: originalRoute.testSuggestions || [],
+      });
     }
 
     // Create test suggestions for each route
@@ -280,7 +298,7 @@ export async function saveDiscoveredRoutes(
 
     revalidatePath('/tests');
 
-    return { success: true, count: newRoutes.length };
+    return { success: true, count: newRoutes.length, savedRoutes };
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Failed to save routes';
     return { success: false, error: message };

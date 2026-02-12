@@ -358,8 +358,8 @@ IMPORTANT:
 Return your findings as a JSON array with this exact structure:
 \`\`\`json
 [
-  {"path": "/dashboard", "type": "static", "description": "Main dashboard page"},
-  {"path": "/users/[id]", "type": "dynamic", "description": "User profile page"}
+  {"path": "/dashboard", "type": "static", "description": "Main dashboard page", "testSuggestions": ["Verify dashboard loads correctly", "Check navigation elements"]},
+  {"path": "/users/[id]", "type": "dynamic", "description": "User profile page", "testSuggestions": ["Test with valid user ID", "Test error state for invalid ID"]}
 ]
 \`\`\`
 
