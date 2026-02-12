@@ -905,6 +905,7 @@ export class PlaywrightRunner extends EventEmitter {
         viewport: this.getViewport(),
         ...(parsedStorageState ? { storageState: parsedStorageState } : {}),
         ...(videoDir ? { recordVideo: { dir: videoDir, size: this.getViewport() } } : {}),
+        ...(this.settings?.acceptAnyCertificate ? { ignoreHTTPSErrors: true } : {}),
       });
       page = await context.newPage();
 

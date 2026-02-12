@@ -64,3 +64,4 @@ packages/runner/screenshot*
 public/planned/*
 public/videos/*
 .playwright-mcp/*
+explore-*.mjs

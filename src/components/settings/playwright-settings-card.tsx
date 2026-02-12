@@ -22,7 +22,7 @@ import { SelectorPriorityList } from './selector-priority-list';
 import { savePlaywrightSettings, resetPlaywrightSettings, getSelectorStatsAction } from '@/server/actions/settings';
 import { DEFAULT_SELECTOR_PRIORITY, DEFAULT_STABILIZATION_SETTINGS } from '@/lib/db/schema';
 import type { SelectorConfig, PlaywrightSettings, HeadlessMode, RecordingEngine, StabilizationSettings, SelectorType } from '@/lib/db/schema';
-import { Loader2, RotateCcw, List, Video, MousePointer, Pause, Clock, Layers, ChevronDown, Shield, Hourglass, Type, Ban, Eye, Camera, EyeOff, Info } from 'lucide-react';
+import { Loader2, RotateCcw, List, Video, MousePointer, Pause, Clock, Layers, ChevronDown, Shield, ShieldCheck, Hourglass, Type, Ban, Eye, Camera, EyeOff, Info } from 'lucide-react';
 import { Slider } from '@/components/ui/slider';
 import { Badge } from '@/components/ui/badge';
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip';
@@ -61,6 +61,7 @@ export function PlaywrightSettingsCard({
   );
   const [freezeAnimations, setFreezeAnimations] = useState(settings.freezeAnimations ?? false);
   const [enableVideoRecording, setEnableVideoRecording] = useState(settings.enableVideoRecording ?? false);
+  const [acceptAnyCertificate, setAcceptAnyCertificate] = useState(settings.acceptAnyCertificate ?? false);
   const [screenshotDelay, setScreenshotDelay] = useState(settings.screenshotDelay ?? 0);
   const [maxParallelTests, setMaxParallelTests] = useState(settings.maxParallelTests ?? 1);
   const [stabilization, setStabilization] = useState<StabilizationSettings>(
@@ -85,6 +86,7 @@ export function PlaywrightSettingsCard({
     defaultRecordingEngine: (settings.defaultRecordingEngine as RecordingEngine) ?? 'lastest',
     freezeAnimations: settings.freezeAnimations ?? false,
     enableVideoRecording: settings.enableVideoRecording ?? false,
+    acceptAnyCertificate: settings.acceptAnyCertificate ?? false,
     screenshotDelay: settings.screenshotDelay ?? 0,
     maxParallelTests: settings.maxParallelTests ?? 1,
     stabilization: { ...DEFAULT_STABILIZATION_SETTINGS, ...settings.stabilization },
@@ -105,6 +107,7 @@ export function PlaywrightSettingsCard({
     setDefaultRecordingEngine((settings.defaultRecordingEngine as RecordingEngine) ?? 'lastest');
     setFreezeAnimations(settings.freezeAnimations ?? false);
     setEnableVideoRecording(settings.enableVideoRecording ?? false);
+    setAcceptAnyCertificate(settings.acceptAnyCertificate ?? false);
     setScreenshotDelay(settings.screenshotDelay ?? 0);
     setMaxParallelTests(settings.maxParallelTests ?? 1);
     setStabilization({ ...DEFAULT_STABILIZATION_SETTINGS, ...settings.stabilization });
@@ -122,6 +125,7 @@ export function PlaywrightSettingsCard({
       defaultRecordingEngine: (settings.defaultRecordingEngine as RecordingEngine) ?? 'lastest',
       freezeAnimations: settings.freezeAnimations ?? false,
       enableVideoRecording: settings.enableVideoRecording ?? false,
+      acceptAnyCertificate: settings.acceptAnyCertificate ?? false,
       screenshotDelay: settings.screenshotDelay ?? 0,
       maxParallelTests: settings.maxParallelTests ?? 1,
       stabilization: { ...DEFAULT_STABILIZATION_SETTINGS, ...settings.stabilization },
@@ -165,6 +169,7 @@ export function PlaywrightSettingsCard({
         defaultRecordingEngine,
         freezeAnimations,
         enableVideoRecording,
+        acceptAnyCertificate,
         screenshotDelay,
         maxParallelTests,
         stabilization,
@@ -176,7 +181,7 @@ export function PlaywrightSettingsCard({
         toast.success('Playwright settings saved');
       }
     });
-  }, [repositoryId, selectorPriority, browser, viewportWidth, viewportHeight, headlessMode, navigationTimeout, actionTimeout, pointerGestures, cursorFPS, defaultRecordingEngine, freezeAnimations, enableVideoRecording, screenshotDelay, maxParallelTests, stabilization, compact]);
+  }, [repositoryId, selectorPriority, browser, viewportWidth, viewportHeight, headlessMode, navigationTimeout, actionTimeout, pointerGestures, cursorFPS, defaultRecordingEngine, freezeAnimations, enableVideoRecording, acceptAnyCertificate, screenshotDelay, maxParallelTests, stabilization, compact]);
 
   // Auto-save with debounce - only when values differ from original props
   useEffect(() => {
@@ -194,6 +199,7 @@ export function PlaywrightSettingsCard({
       defaultRecordingEngine !== orig.defaultRecordingEngine ||
       freezeAnimations !== orig.freezeAnimations ||
       enableVideoRecording !== orig.enableVideoRecording ||
+      acceptAnyCertificate !== orig.acceptAnyCertificate ||
       screenshotDelay !== orig.screenshotDelay ||
       maxParallelTests !== orig.maxParallelTests ||
       JSON.stringify(stabilization) !== JSON.stringify(orig.stabilization);
@@ -213,7 +219,7 @@ export function PlaywrightSettingsCard({
         clearTimeout(debounceRef.current);
       }
     };
-  }, [selectorPriority, browser, viewportWidth, viewportHeight, headlessMode, navigationTimeout, actionTimeout, pointerGestures, cursorFPS, defaultRecordingEngine, freezeAnimations, enableVideoRecording, screenshotDelay, maxParallelTests, stabilization, doSave]);
+  }, [selectorPriority, browser, viewportWidth, viewportHeight, headlessMode, navigationTimeout, actionTimeout, pointerGestures, cursorFPS, defaultRecordingEngine, freezeAnimations, enableVideoRecording, acceptAnyCertificate, screenshotDelay, maxParallelTests, stabilization, doSave]);
 
   // Notify parent of save status changes
   useEffect(() => {
@@ -345,6 +351,22 @@ export function PlaywrightSettingsCard({
             </div>
           </div>
           <Switch checked={enableVideoRecording} onCheckedChange={setEnableVideoRecording} />
+        </div>
+
+        {/* Accept Any Certificate */}
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <ShieldCheck className="w-4 h-4 text-muted-foreground" />
+            <div className="space-y-0.5">
+              <Label className="text-sm">Accept Any Certificate</Label>
+              {!compact && (
+                <p className="text-xs text-muted-foreground">
+                  Ignore HTTPS/SSL certificate errors when testing external sites
+                </p>
+              )}
+            </div>
+          </div>
+          <Switch checked={acceptAnyCertificate} onCheckedChange={setAcceptAnyCertificate} />
         </div>
 
         {/* Screenshot Delay */}

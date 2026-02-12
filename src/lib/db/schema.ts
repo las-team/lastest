@@ -475,6 +475,7 @@ export const playwrightSettings = sqliteTable('playwright_settings', {
   screenshotDelay: integer('screenshot_delay').default(0), // ms delay before screenshot
   maxParallelTests: integer('max_parallel_tests').default(1), // max tests to run in parallel locally
   stabilization: text('stabilization', { mode: 'json' }).$type<StabilizationSettings>(), // snapshot stabilization settings
+  acceptAnyCertificate: integer('accept_any_certificate', { mode: 'boolean' }).default(false), // ignore HTTPS/SSL cert errors
   createdAt: integer('created_at', { mode: 'timestamp' }),
   updatedAt: integer('updated_at', { mode: 'timestamp' }),
 });

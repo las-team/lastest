@@ -120,7 +120,7 @@ export function BuildDetailClient({
   const [activeFilter, setActiveFilter] = useState<FilterType>('all');
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [isProcessing, setIsProcessing] = useState(false);
-  const [viewMode, setViewMode] = useState<'branch' | 'main'>('branch');
+  const [viewMode, setViewMode] = useState<'branch' | 'main'>('main');
   const [groupByArea, setGroupByArea] = useState(false);
   const [expandKey, setExpandKey] = useState(0);
   const [allExpanded, setAllExpanded] = useState(true);

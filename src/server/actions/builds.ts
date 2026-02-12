@@ -13,7 +13,9 @@ import type { SetupContext } from '@/lib/setup/types';
 import { executeTests } from '@/lib/execution/executor';
 import { getCurrentSession, requireTeamAccess, requireRepoAccess } from '@/lib/auth';
 import { generateDiff, type Rectangle } from '@/lib/diff/generator';
-import { hashImage } from '@/lib/diff/hasher';
+import { hashImage, hashImageWithDimensions } from '@/lib/diff/hasher';
+import { PNG } from 'pngjs';
+import fs from 'fs';
 import { sendSlackNotification } from '@/lib/integrations/slack';
 import { sendDiscordNotification } from '@/lib/integrations/discord';
 import { sendCustomWebhookNotification } from '@/lib/integrations/custom-webhook';
@@ -753,8 +755,13 @@ async function processVisualDiff(
   const baseline = await queries.getBranchBaseline(testId, stepLabel, branch);
 
   // Check for carry-forward (previously approved identical image)
-  const currentHash = hashImage(path.join(process.cwd(), 'public', currentScreenshotPath));
-  const matchingBaseline = await queries.getBaselineByHash(testId, currentHash, stepLabel);
+  // Try dimension-aware hash first, fall back to legacy hash for old baselines
+  const currentImageFullPath = path.join(process.cwd(), 'public', currentScreenshotPath);
+  const currentHashWithDims = hashImageWithDimensions(currentImageFullPath);
+  const currentHash = hashImage(currentImageFullPath);
+  const matchingBaseline =
+    await queries.getBaselineByHash(testId, currentHashWithDims, stepLabel) ||
+    await queries.getBaselineByHash(testId, currentHash, stepLabel);
 
   // Get planned screenshot if exists (for design comparison)
   const plannedScreenshot = await queries.getPlannedScreenshotByTest(testId, stepLabel || null);
@@ -852,26 +859,42 @@ async function processVisualDiff(
   };
 
   if (matchingBaseline) {
-    // Auto-approve: identical to previously approved baseline
-    const plannedDiff = await generatePlannedDiff(currentScreenshotPath);
-    const mainDiff = await generateMainBaselineDiff(currentScreenshotPath);
+    // Validate carry-forward: verify dimensions match before trusting hash
+    let carryForwardValid = false;
+    try {
+      const currentBuf = fs.readFileSync(path.join(process.cwd(), 'public', currentScreenshotPath));
+      const baselineBuf = fs.readFileSync(path.join(process.cwd(), 'public', matchingBaseline.imagePath));
+      const currentPng = PNG.sync.read(currentBuf);
+      const baselinePng = PNG.sync.read(baselineBuf);
+      carryForwardValid = currentPng.width === baselinePng.width && currentPng.height === baselinePng.height;
+    } catch {
+      // If we can't read either file, fall through to normal diff
+      carryForwardValid = false;
+    }
 
-    const diff = await queries.createVisualDiff({
-      buildId,
-      testResultId,
-      testId,
-      stepLabel: stepLabel || null,
-      baselineImagePath: matchingBaseline.imagePath,
-      currentImagePath: currentScreenshotPath,
-      status: 'auto_approved',
-      classification: 'unchanged',
-      pixelDifference: 0,
-      percentageDifference: '0',
-      metadata: { changedRegions: [] },
-      ...plannedDiff,
-      ...mainDiff,
-    });
-    return { hasChanges: false, diffId: diff.id, classification: 'unchanged' };
+    if (carryForwardValid) {
+      // Auto-approve: identical to previously approved baseline
+      const plannedDiff = await generatePlannedDiff(currentScreenshotPath);
+      const mainDiff = await generateMainBaselineDiff(currentScreenshotPath);
+
+      const diff = await queries.createVisualDiff({
+        buildId,
+        testResultId,
+        testId,
+        stepLabel: stepLabel || null,
+        baselineImagePath: matchingBaseline.imagePath,
+        currentImagePath: currentScreenshotPath,
+        status: 'auto_approved',
+        classification: 'unchanged',
+        pixelDifference: 0,
+        percentageDifference: '0',
+        metadata: { changedRegions: [] },
+        ...plannedDiff,
+        ...mainDiff,
+      });
+      return { hasChanges: false, diffId: diff.id, classification: 'unchanged' };
+    }
+    // Dimensions mismatch — hash is stale/wrong, fall through to normal diff
   }
 
   // No baseline - this is a new test, requires manual review (or auto-approve on default branch)
@@ -895,7 +918,7 @@ async function processVisualDiff(
     });
 
     if (shouldAutoApprove) {
-      const autoHash = hashImage(path.join(process.cwd(), 'public', currentScreenshotPath));
+      const autoHash = hashImageWithDimensions(path.join(process.cwd(), 'public', currentScreenshotPath));
       await queries.deactivateBaselines(testId, stepLabel || null, branch);
       await queries.createBaseline({
         testId,
@@ -949,7 +972,7 @@ async function processVisualDiff(
     });
 
     if (shouldAutoApprove && classification !== 'unchanged') {
-      const autoHash = hashImage(path.join(process.cwd(), 'public', currentScreenshotPath));
+      const autoHash = hashImageWithDimensions(path.join(process.cwd(), 'public', currentScreenshotPath));
       await queries.deactivateBaselines(testId, stepLabel || null, branch);
       await queries.createBaseline({
         testId,

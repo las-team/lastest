@@ -3,7 +3,7 @@
 import { revalidatePath } from 'next/cache';
 import * as queries from '@/lib/db/queries';
 import { requireTeamAccess } from '@/lib/auth';
-import { hashImage } from '@/lib/diff/hasher';
+import { hashImageWithDimensions } from '@/lib/diff/hasher';
 import path from 'path';
 
 /**
@@ -22,7 +22,7 @@ export async function approveDiff(diffId: string, approvedBy?: string) {
   });
 
   // Update baseline with the approved image
-  const currentHash = hashImage(
+  const currentHash = hashImageWithDimensions(
     path.join(process.cwd(), 'public', diff.currentImagePath)
   );
 

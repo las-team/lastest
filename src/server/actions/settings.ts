@@ -27,6 +27,7 @@ export async function savePlaywrightSettings(data: {
   screenshotDelay?: number;
   maxParallelTests?: number;
   stabilization?: StabilizationSettings;
+  acceptAnyCertificate?: boolean;
 }) {
   if (data.repositoryId) await requireRepoAccess(data.repositoryId);
   else await requireTeamAccess();

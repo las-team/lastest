@@ -1327,6 +1327,7 @@ export async function getPlaywrightSettings(repositoryId?: string | null) {
     screenshotDelay: 0,
     maxParallelTests: 1,
     stabilization: DEFAULT_STABILIZATION_SETTINGS,
+    acceptAnyCertificate: false,
     createdAt: null,
     updatedAt: null,
   };

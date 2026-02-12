@@ -456,7 +456,7 @@ export function DebugClient({ test, repositoryId }: DebugClientProps) {
               </TabsContent>
 
               {/* Console Tab */}
-              <TabsContent value="console" className="flex flex-col flex-1 min-h-0 mt-0">
+              <TabsContent value="console" className="flex flex-col flex-1 min-h-0 mt-0 overflow-hidden">
                 <ConsolePanel entries={state?.consoleEntries || []} />
               </TabsContent>
             </Tabs>
@@ -570,7 +570,7 @@ function ConsolePanel({ entries }: { entries: DebugConsoleEntry[] }) {
   }
 
   return (
-    <ScrollArea className="flex-1">
+    <ScrollArea className="flex-1 h-full">
       <div className="text-xs">
         {entries.map((entry) => (
           <div

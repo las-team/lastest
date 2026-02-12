@@ -276,7 +276,7 @@ export function DiffViewerClient({ diff, buildId, nextDiffId }: DiffViewerClient
           }
 
           // Find first tab with data for default selection
-          const defaultTab = tabs.find(t => t.baseline) || tabs[0];
+          const defaultTab = tabs.find(t => t.id === 'main' && t.baseline) || tabs.find(t => t.baseline) || tabs[0];
 
           if (tabs.length <= 1) {
             const tab = tabs[0];

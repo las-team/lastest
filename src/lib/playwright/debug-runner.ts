@@ -320,7 +320,10 @@ export class DebugRunner {
     if (!this.browser) throw new Error('Browser not launched');
 
     const viewport = this.getViewport();
-    const context = await this.browser.newContext({ viewport });
+    const context = await this.browser.newContext({
+      viewport,
+      ...(this.settings?.acceptAnyCertificate ? { ignoreHTTPSErrors: true } : {}),
+    });
     const page = await context.newPage();
 
     // Freeze timestamps/random values if configured
