@@ -41,6 +41,9 @@ docs
 *.md
 !README.md
 
+# Scripts (migration scripts not needed in build)
+scripts/migrate-to-multitenancy.ts
+
 # Misc
 *.log
 *.tmp

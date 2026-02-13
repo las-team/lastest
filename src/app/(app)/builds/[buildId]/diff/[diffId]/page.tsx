@@ -1,6 +1,7 @@
 import { notFound } from 'next/navigation';
 import Link from 'next/link';
 import { getDiff, getDiffsByBuild } from '@/server/actions/diffs';
+import { getBuild } from '@/server/actions/builds';
 import { DiffViewerClient } from './diff-viewer-client';
 import { ChevronLeft, ChevronRight, ExternalLink } from 'lucide-react';
 
@@ -14,6 +15,26 @@ export default async function DiffPage({ params }: PageProps) {
 
   if (!diff) {
     notFound();
+  }
+
+  // Get build to resolve the correct base URL for "Open Page" link
+  const build = await getBuild(buildId);
+
+  // Replace the test's targetUrl origin with the build's baseUrl
+  let openPageUrl = diff.test?.targetUrl ?? null;
+  if (openPageUrl && build?.baseUrl) {
+    try {
+      const testUrl = new URL(openPageUrl);
+      const buildBase = new URL(build.baseUrl);
+      testUrl.protocol = buildBase.protocol;
+      testUrl.host = buildBase.host;
+      openPageUrl = testUrl.toString();
+    } catch {
+      // targetUrl is a relative path — combine with build baseUrl
+      const base = build.baseUrl.replace(/\/+$/, '');
+      const path = openPageUrl.startsWith('/') ? openPageUrl : `/${openPageUrl}`;
+      openPageUrl = `${base}${path}`;
+    }
   }
 
   // Get all diffs for navigation
@@ -41,9 +62,9 @@ export default async function DiffPage({ params }: PageProps) {
               )}
             </h1>
             <div className="flex items-center gap-3 text-sm text-muted-foreground">
-              {diff.test?.targetUrl && (
+              {openPageUrl && (
                 <a
-                  href={diff.test.targetUrl}
+                  href={openPageUrl}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="flex items-center gap-1 text-primary hover:text-primary/80 hover:underline"

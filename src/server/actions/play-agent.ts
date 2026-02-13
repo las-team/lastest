@@ -568,6 +568,16 @@ CONSTRAINTS:
 - Handle loading states with waitForLoadState or waitForSelector
 - Use realistic test data (test@example.com, Password123!, etc.)`;
 
+function normalizeUrl(rawUrl: string): string {
+  try {
+    const parsed = new URL(rawUrl);
+    parsed.pathname = parsed.pathname.replace(/\/{2,}/g, '/');
+    return parsed.toString();
+  } catch {
+    return rawUrl;
+  }
+}
+
 /**
  * Detect if a page at the given URL requires login by checking page content.
  */
@@ -583,7 +593,7 @@ async function detectLoginRequired(
     await page.waitForLoadState('domcontentloaded').catch(() => {});
 
     // Get page content for AI analysis
-    const url = page.url();
+    const url = normalizeUrl(page.url());
     const title = await page.title();
     const bodyText = await page.evaluate(() => document.body?.innerText?.slice(0, 3000) || '');
     const forms = await page.evaluate(() => {
@@ -595,22 +605,21 @@ async function detectLoginRequired(
         })),
       }));
     });
-    const links = await page.evaluate(() => {
+    const links = (await page.evaluate(() => {
       return Array.from(document.querySelectorAll('a')).map(a => ({
         href: a.href, text: a.textContent?.trim().slice(0, 50),
       })).filter(l => l.text && l.text.length > 0).slice(0, 30);
-    });
+    })).map(l => ({ ...l, href: normalizeUrl(l.href) }));
 
     const pageContent = JSON.stringify({ url, title, bodyText: bodyText.slice(0, 2000), forms, links }, null, 2);
 
     // Quick heuristic before AI — check for obvious login indicators
-    const urlLower = url.toLowerCase();
-    const textLower = bodyText.toLowerCase();
     const hasPasswordField = forms.some(f => f.inputs.some(i => i.type === 'password'));
-    const isLoginPage = urlLower.includes('/login') || urlLower.includes('/signin') || urlLower.includes('/auth');
-    const hasLoginText = textLower.includes('sign in') || textLower.includes('log in') || textLower.includes('login');
+    const loginSegments = new Set(['login', 'signin', 'sign-in', 'auth', 'sign_in']);
+    const pathSegments = new URL(url).pathname.split('/').map(s => s.toLowerCase());
+    const isLoginPage = pathSegments.some(s => loginSegments.has(s));
 
-    if (hasPasswordField || isLoginPage || hasLoginText) {
+    if (hasPasswordField || isLoginPage) {
       // Check for register link
       const registerLink = links.find(l => {
         const t = (l.text || '').toLowerCase();
@@ -623,7 +632,7 @@ async function detectLoginRequired(
         needsLogin: true,
         loginUrl: isLoginPage ? url : undefined,
         hasRegisterLink: !!registerLink,
-        registerUrl: registerLink?.href,
+        registerUrl: registerLink?.href ? normalizeUrl(registerLink.href) : undefined,
         pageContent,
       };
     }
