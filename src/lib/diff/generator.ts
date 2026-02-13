@@ -511,8 +511,8 @@ export async function generateDiff(
   ignoreRegions?: Rectangle[],
   ignorePageShift = false
 ): Promise<DiffResult> {
-  let baseline = PNG.sync.read(fs.readFileSync(baselinePath));
-  let current = PNG.sync.read(fs.readFileSync(currentPath));
+  let baseline: PNG = PNG.sync.read(fs.readFileSync(baselinePath));
+  let current: PNG = PNG.sync.read(fs.readFileSync(currentPath));
 
   if (!fs.existsSync(outputDir)) {
     fs.mkdirSync(outputDir, { recursive: true });
