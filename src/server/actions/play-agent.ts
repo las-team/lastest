@@ -10,8 +10,9 @@ import type {
 import { createAndRunBuild } from './builds';
 import { getCurrentBranchForRepo } from '@/lib/git-utils';
 import { getBuildSummary } from './builds';
-import { startRemoteRouteScan } from './scanner';
+import { startRemoteRouteScan, generateBasicTests } from './scanner';
 import { applyTestingTemplate } from './repos';
+import { aiScanRoutes, saveDiscoveredRoutes } from './ai-routes';
 import { discoverSpecFiles, extractUserStoriesFromFiles, generateTestsFromStories } from './spec-import';
 import { testServerConnection } from './environment';
 import { aiFixTest } from './ai';
@@ -24,6 +25,7 @@ import type { AIProviderConfig } from '@/lib/ai/types';
 import { chromium } from 'playwright';
 import type { SetupContext, SetupScript } from '@/lib/setup/types';
 import { runPlaywrightSetup } from '@/lib/setup/script-runner';
+import { classifyTemplate } from '@/lib/templates/classifier';
 
 // ============================================
 // Constants
@@ -33,7 +35,7 @@ const STEP_DEFINITIONS: Array<{ id: AgentStepId; label: string; description: str
   { id: 'settings_check', label: 'Settings Check', description: 'Verify GitHub, AI, and environment configuration' },
   { id: 'select_repo', label: 'Select Repository', description: 'Ensure a repository is selected' },
   { id: 'scan_and_template', label: 'Scan & Template', description: 'Scan routes and apply testing template' },
-  { id: 'discover', label: 'Discover Tests', description: 'Find specs and generate tests from user stories' },
+  { id: 'discover', label: 'Discover Tests', description: 'Find specs, scan routes, or generate smoke tests' },
   { id: 'env_setup', label: 'Env Setup', description: 'Verify server, detect login, configure setup' },
   { id: 'run_tests', label: 'Run Tests', description: 'Create and run initial build' },
   { id: 'fix_tests', label: 'Fix Failing Tests', description: 'AI-fix failing tests (max 3 attempts each)' },
@@ -215,12 +217,21 @@ async function runScanAndTemplate(sessionId: string, repositoryId: string) {
     { label: 'Applying template', status: 'running' },
   ]);
 
-  // Auto-detect template based on framework
-  let templateId = 'saas'; // default
-  const framework = scanResult.framework?.toLowerCase() || '';
-  if (framework.includes('next') || framework.includes('react')) templateId = 'saas';
-  else if (framework.includes('vue') || framework.includes('nuxt')) templateId = 'spa';
-  else if (framework.includes('docs') || framework.includes('docusaurus') || framework.includes('mkdocs')) templateId = 'documentation';
+  // AI-powered template classification with heuristic fallback
+  const account = repo.teamId ? await queries.getGithubAccountByTeam(repo.teamId) : null;
+  const repoRoutes = await queries.getRoutesByRepo(repositoryId);
+  const routePaths = repoRoutes.map(r => r.path);
+
+  const classification = await classifyTemplate(
+    repositoryId,
+    scanResult.framework || 'unknown',
+    routePaths,
+    account?.accessToken || '',
+    repo.owner || '',
+    repo.name,
+    branch,
+  );
+  const templateId = classification.templateId;
 
   // Only apply if no template currently set
   if (!repo.testingTemplate) {
@@ -229,7 +240,7 @@ async function runScanAndTemplate(sessionId: string, repositoryId: string) {
 
   await updateSubsteps(sessionId, 'scan_and_template', [
     { label: 'Scanning routes', status: 'done', detail: `${scanResult.routesFound} routes found` },
-    { label: 'Applying template', status: 'done', detail: templateId },
+    { label: 'Applying template', status: 'done', detail: `${templateId} (${classification.confidence}%)` },
   ]);
 
   await setStepCompleted(sessionId, 'scan_and_template', {
@@ -241,6 +252,120 @@ async function runScanAndTemplate(sessionId: string, repositoryId: string) {
 }
 
 const DISCOVER_POLL_INTERVAL_MS = 2000;
+
+async function tryFallbackDiscovery(
+  sessionId: string,
+  repositoryId: string,
+  branch: string,
+): Promise<boolean> {
+  const envConfig = await getEnvironmentConfig(repositoryId);
+  const baseUrl = envConfig?.baseUrl || 'http://localhost:3000';
+
+  // Fallback 1: AI route scan
+  await updateSubsteps(sessionId, 'discover', [
+    { label: 'Finding spec files', status: 'done', detail: 'No spec files found' },
+    { label: 'AI route scan', status: 'running' },
+    { label: 'Generating tests', status: 'pending' },
+  ]);
+
+  try {
+    const scanResult = await aiScanRoutes(repositoryId, branch);
+
+    if (scanResult.success && scanResult.functionalAreas && scanResult.functionalAreas.length > 0) {
+      const saveResult = await saveDiscoveredRoutes(repositoryId, scanResult.functionalAreas);
+
+      if (saveResult.success && saveResult.savedRoutes && saveResult.savedRoutes.length > 0) {
+        const totalRoutes = saveResult.savedRoutes.length;
+        const areaCount = new Set(saveResult.savedRoutes.map((r) => r.areaName)).size;
+
+        await updateSubsteps(sessionId, 'discover', [
+          { label: 'Finding spec files', status: 'done', detail: 'No spec files found' },
+          { label: 'AI route scan', status: 'done', detail: `${areaCount} areas, ${totalRoutes} routes` },
+          { label: 'Generating tests', status: 'running' },
+        ]);
+
+        if (await isCancelled(sessionId)) return false;
+
+        const routeIds = saveResult.savedRoutes.map((r) => r.routeId);
+        const genResult = await generateBasicTests(repositoryId, routeIds, baseUrl);
+
+        const testsCreated = genResult.testsCreated + genResult.testsUpdated;
+
+        const session = await queries.getAgentSession(sessionId);
+        if (session) {
+          await queries.updateAgentSession(sessionId, {
+            metadata: { ...session.metadata, testsCreated },
+          });
+        }
+
+        await updateSubsteps(sessionId, 'discover', [
+          { label: 'Finding spec files', status: 'done', detail: 'No spec files found' },
+          { label: 'AI route scan', status: 'done', detail: `${areaCount} areas, ${totalRoutes} routes` },
+          { label: 'Generating tests', status: 'done', detail: `${testsCreated} tests` },
+        ]);
+
+        await setStepCompleted(sessionId, 'discover', {
+          method: 'ai_scan',
+          areasFound: areaCount,
+          routesFound: totalRoutes,
+          testsCreated,
+        });
+        return true;
+      }
+    }
+  } catch {
+    // AI scan failed, continue to next fallback
+  }
+
+  if (await isCancelled(sessionId)) return false;
+
+  // Fallback 2: Smoke tests from already-scanned routes
+  await updateSubsteps(sessionId, 'discover', [
+    { label: 'Finding spec files', status: 'done', detail: 'No spec files found' },
+    { label: 'AI route scan', status: 'done', detail: 'No routes discovered' },
+    { label: 'Generating smoke tests', status: 'running' },
+  ]);
+
+  const existingRoutes = await queries.getRoutesByRepo(repositoryId);
+
+  if (existingRoutes.length > 0) {
+    const routeIds = existingRoutes.map((r) => r.id);
+    const genResult = await generateBasicTests(repositoryId, routeIds, baseUrl);
+    const testsCreated = genResult.testsCreated + genResult.testsUpdated;
+
+    if (testsCreated > 0) {
+      const session = await queries.getAgentSession(sessionId);
+      if (session) {
+        await queries.updateAgentSession(sessionId, {
+          metadata: { ...session.metadata, testsCreated },
+        });
+      }
+
+      await updateSubsteps(sessionId, 'discover', [
+        { label: 'Finding spec files', status: 'done', detail: 'No spec files found' },
+        { label: 'AI route scan', status: 'done', detail: 'No routes discovered' },
+        { label: 'Generating smoke tests', status: 'done', detail: `${testsCreated} tests` },
+      ]);
+
+      await setStepCompleted(sessionId, 'discover', {
+        method: 'smoke_tests',
+        routesUsed: existingRoutes.length,
+        testsCreated,
+      });
+      return true;
+    }
+  }
+
+  // All fallbacks exhausted
+  await updateSubsteps(sessionId, 'discover', [
+    { label: 'Finding spec files', status: 'done', detail: 'No spec files found' },
+    { label: 'AI route scan', status: 'done', detail: 'No routes discovered' },
+    { label: 'Generating smoke tests', status: 'done', detail: 'No routes available' },
+  ]);
+
+  await setStepCompleted(sessionId, 'discover', { skipped: true, reason: 'No tests could be generated' });
+  return true;
+}
 
 async function runDiscover(sessionId: string, repositoryId: string) {
   await setStepActive(sessionId, 'discover');
@@ -264,13 +389,7 @@ async function runDiscover(sessionId: string, repositoryId: string) {
   const specResult = await discoverSpecFiles(repositoryId, branch);
 
   if (!specResult.success || !specResult.files || specResult.files.length === 0) {
-    await updateSubsteps(sessionId, 'discover', [
-      { label: 'Finding spec files', status: 'done', detail: 'No spec files found' },
-      { label: 'Extracting user stories', status: 'done', detail: 'Skipped' },
-      { label: 'Generating tests', status: 'done', detail: 'Skipped' },
-    ]);
-    await setStepCompleted(sessionId, 'discover', { skipped: true, reason: 'No spec files found' });
-    return true;
+    return tryFallbackDiscovery(sessionId, repositoryId, branch);
   }
 
   if (await isCancelled(sessionId)) return false;
