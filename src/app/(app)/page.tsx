@@ -1,42 +1,26 @@
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { CheckCircle, XCircle, Clock, FileCode, Folder, AlertTriangle, Loader2, PenLine, FolderSearch, Sparkles, Globe, FileSearch } from 'lucide-react';
+import { CheckCircle, XCircle, Clock, FileCode, Folder, AlertTriangle, Loader2 } from 'lucide-react';
 import {
   getSelectedRepository,
   getTestsByRepo,
   getFunctionalAreasByRepo,
-  getRouteCoverageStats,
   getBuildsByRepo,
-  getGithubAccountByTeam,
-  hasApprovedDiffs,
-  getBuildCount,
-  getRoutesByRepo,
 } from '@/lib/db/queries';
 import { getCurrentSession } from '@/lib/auth';
-import { SetupGuide } from '@/components/setup-guide/setup-guide';
-import { CoverageBar } from '@/components/coverage/coverage-bar';
+import { PlayAgentTimeline } from '@/components/play-agent/play-agent-timeline';
 import Link from 'next/link';
 
 export default async function DashboardPage() {
   const session = await getCurrentSession();
   const teamId = session?.team?.id;
   const selectedRepo = teamId ? await getSelectedRepository(teamId) : null;
-  const githubAccount = teamId ? await getGithubAccountByTeam(teamId) : null;
-
   // Fetch data filtered by selected repo — no global fallbacks
-  const [tests, areas, recentBuilds, diffsApproved, buildCount, routesCount] = await Promise.all([
+  const [tests, areas, recentBuilds] = await Promise.all([
     selectedRepo ? getTestsByRepo(selectedRepo.id) : Promise.resolve([]),
     selectedRepo ? getFunctionalAreasByRepo(selectedRepo.id) : Promise.resolve([]),
     selectedRepo ? getBuildsByRepo(selectedRepo.id, 5) : Promise.resolve([]),
-    hasApprovedDiffs(selectedRepo?.id),
-    getBuildCount(selectedRepo?.id),
-    selectedRepo ? getRoutesByRepo(selectedRepo.id).then(r => r.length) : Promise.resolve(0),
   ]);
-
-  // Fetch route coverage stats
-  const coverage = selectedRepo
-    ? await getRouteCoverageStats(selectedRepo.id)
-    : { total: 0, withTests: 0, percentage: 0 };
 
   // Get stats from the latest build
   const latestBuild = recentBuilds[0];
@@ -50,19 +34,6 @@ export default async function DashboardPage() {
   return (
     <div className="flex flex-col h-full">
       <div className="flex-1 p-6 space-y-6">
-        {/* Setup Guide */}
-        <SetupGuide
-          initialStatus={{
-            githubConnected: !!githubAccount,
-            routesExist: routesCount > 0,
-            testsExist: tests.length > 0,
-            buildsExist: buildCount > 0,
-            baselinesApproved: diffsApproved,
-            buildCount,
-          }}
-          latestBuildId={recentBuilds[0]?.id}
-        />
-
         {/* Stats Cards */}
         <div className="grid grid-cols-4 gap-4">
           <Card>
@@ -111,42 +82,8 @@ export default async function DashboardPage() {
           </Card>
         </div>
 
-        {/* Route Coverage */}
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-base">Route Coverage</CardTitle>
-            <CardDescription>
-              {coverage.total > 0
-                ? 'Test coverage across discovered routes'
-                : 'No routes detected — get started with one of these options'}
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            {coverage.total > 0 ? (
-              <CoverageBar covered={coverage.withTests} total={coverage.total} />
-            ) : (
-              <div className="grid grid-cols-5 gap-4">
-                {[
-                  { label: 'Manual', description: 'Add tests & areas manually', icon: PenLine, href: '/tests' },
-                  { label: 'Scan Routes', description: 'Discover routes from repo', icon: FolderSearch, href: '/areas' },
-                  { label: 'AI Routes', description: 'AI-powered route discovery', icon: Sparkles, href: '/areas' },
-                  { label: 'MCP Routes', description: 'MCP-based exploration', icon: Globe, href: '/areas' },
-                  { label: 'Analyze Specs', description: 'Parse API/route specs', icon: FileSearch, href: '/areas' },
-                ].map((card) => (
-                  <Link
-                    key={card.label}
-                    href={card.href}
-                    className="flex flex-col items-center gap-2 p-4 border rounded-lg hover:bg-muted/50 hover:border-primary/50 transition-colors text-center"
-                  >
-                    <card.icon className="h-6 w-6 text-primary" />
-                    <span className="font-medium text-sm">{card.label}</span>
-                    <span className="text-xs text-muted-foreground">{card.description}</span>
-                  </Link>
-                ))}
-              </div>
-            )}
-          </CardContent>
-        </Card>
+        {/* Auto Setup Agent */}
+        <PlayAgentTimeline repositoryId={selectedRepo?.id} />
 
         {/* Recent Builds */}
         <Card>

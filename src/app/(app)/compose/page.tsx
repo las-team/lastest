@@ -37,6 +37,7 @@ export default async function ComposePage() {
         mainBuildTests={mainBuildTests}
         savedConfig={savedConfig ? {
           selectedTestIds: savedConfig.selectedTestIds ?? [],
+          excludedTestIds: savedConfig.excludedTestIds ?? [],
           versionOverrides: savedConfig.versionOverrides ?? {},
         } : null}
       />

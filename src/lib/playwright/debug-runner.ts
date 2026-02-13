@@ -4,7 +4,7 @@
  */
 
 import { chromium, firefox, webkit, Browser, Page, BrowserContext } from 'playwright';
-import { FREEZE_ANIMATIONS_CSS, CROSS_OS_CHROMIUM_ARGS } from './constants';
+import { FREEZE_ANIMATIONS_SCRIPT, CROSS_OS_CHROMIUM_ARGS } from './constants';
 import { setupFreezeScripts } from './stabilization';
 import path from 'path';
 import fs from 'fs';
@@ -320,16 +320,19 @@ export class DebugRunner {
     if (!this.browser) throw new Error('Browser not launched');
 
     const viewport = this.getViewport();
-    const context = await this.browser.newContext({ viewport });
+    const context = await this.browser.newContext({
+      viewport,
+      ...(this.settings?.acceptAnyCertificate ? { ignoreHTTPSErrors: true } : {}),
+    });
     const page = await context.newPage();
 
     // Freeze timestamps/random values if configured
     const stabilization = this.settings?.stabilization || DEFAULT_STABILIZATION_SETTINGS;
     await setupFreezeScripts(page, stabilization);
 
-    // Freeze animations if configured
+    // Freeze CSS + JS animations if enabled (uses addInitScript to persist across navigations)
     if (this.settings?.freezeAnimations) {
-      await page.addStyleTag({ content: FREEZE_ANIMATIONS_CSS });
+      await page.addInitScript(FREEZE_ANIMATIONS_SCRIPT);
     }
 
     // Start Playwright tracing

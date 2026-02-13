@@ -13,8 +13,29 @@ export async function createArea(data: {
 }) {
   if (data.repositoryId) await requireRepoAccess(data.repositoryId);
   else await requireTeamAccess();
+
+  // Deduplicate: find existing area with same name (case-insensitive) in same repo+parent
+  const allAreas = data.repositoryId
+    ? await queries.getFunctionalAreasByRepo(data.repositoryId)
+    : await queries.getFunctionalAreas();
+  const trimmedName = data.name.trim();
+  const existing = allAreas.find(
+    a => a.name.toLowerCase() === trimmedName.toLowerCase()
+      && a.parentId === (data.parentId ?? null)
+  );
+
+  if (existing) {
+    // Merge description if provided and existing is empty
+    if (data.description && !existing.description) {
+      await queries.updateFunctionalArea(existing.id, { description: data.description });
+    }
+    revalidatePath('/areas');
+    revalidatePath('/tests');
+    return existing;
+  }
+
   const result = await queries.createFunctionalArea({
-    name: data.name,
+    name: trimmedName,
     description: data.description,
     repositoryId: data.repositoryId,
     parentId: data.parentId,
@@ -39,6 +60,12 @@ export async function deleteArea(id: string) {
     await queries.moveTestToArea(test.id, null);
   }
 
+  // Move suites to unsorted
+  const areaSuites = await queries.getSuitesByArea(id);
+  for (const suite of areaSuites) {
+    await queries.moveSuiteToArea(suite.id, null);
+  }
+
   // Get child areas and move them to root
   const allAreas = await queries.getFunctionalAreas();
   const childAreas = allAreas.filter(a => a.parentId === id);
@@ -49,6 +76,38 @@ export async function deleteArea(id: string) {
   await queries.deleteFunctionalArea(id);
   revalidatePath('/areas');
   revalidatePath('/tests');
+}
+
+export async function deleteAreaWithContents(id: string) {
+  await requireTeamAccess();
+  const allAreas = await queries.getFunctionalAreas();
+
+  // Collect this area and all descendant area IDs
+  const idsToDelete: string[] = [];
+  const collect = (parentId: string) => {
+    idsToDelete.push(parentId);
+    for (const area of allAreas.filter(a => a.parentId === parentId)) {
+      collect(area.id);
+    }
+  };
+  collect(id);
+
+  // Soft-delete all tests and suites in those areas
+  for (const areaId of idsToDelete) {
+    const areaTests = await queries.getTestsByFunctionalArea(areaId);
+    for (const test of areaTests) {
+      await queries.softDeleteTest(test.id);
+    }
+    const areaSuites = await queries.getSuitesByArea(areaId);
+    for (const suite of areaSuites) {
+      await queries.deleteSuite(suite.id);
+    }
+    await queries.deleteFunctionalArea(areaId);
+  }
+
+  revalidatePath('/areas');
+  revalidatePath('/tests');
+  revalidatePath('/suites');
 }
 
 export async function moveArea(id: string, newParentId: string | null) {

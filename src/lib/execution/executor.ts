@@ -160,7 +160,7 @@ async function executeViaRunner(
   onResult?: (result: TestRunResult) => Promise<void>
 ): Promise<TestRunResult[]> {
   const results: TestRunResult[] = [];
-  const baseUrl = options.environmentConfig?.baseUrl || 'http://localhost:3000';
+  const baseUrl = (options.environmentConfig?.baseUrl || 'http://localhost:3000').replace(/\/+$/, '');
   const viewport = options.playwrightSettings
     ? {
         width: options.playwrightSettings.viewportWidth || 1280,

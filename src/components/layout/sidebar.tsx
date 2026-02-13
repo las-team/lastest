@@ -35,7 +35,6 @@ const dashboardNav = [
 const definitionNav = [
   { name: 'Areas', href: '/areas', icon: FolderTree },
   { name: 'Tests', href: '/tests', icon: FileCode },
-  { name: 'Suites', href: '/suites', icon: ListOrdered },
   { name: 'Compose', href: '/compose', icon: Layers },
   { name: 'Env Setup', href: '/env', icon: Zap },
 ];
@@ -43,6 +42,7 @@ const definitionNav = [
 const executionNav = [
   { name: 'Runs', href: '/run', icon: Play },
   { name: 'Compare', href: '/compare', icon: GitCompare },
+  { name: 'Suites', href: '/suites', icon: ListOrdered },
 ];
 
 const settingsNav = [
@@ -155,7 +155,7 @@ export function Sidebar({ repos, selectedRepo, currentUser, team }: SidebarProps
 
       </nav>
 
-      <div className="px-4 pb-2">
+      <div className="px-4 pb-2 space-y-1">
         <Link
           href="/settings"
           className={cn(

@@ -1,5 +1,5 @@
 import { chromium, firefox, webkit, Browser, Page, BrowserContext, Locator } from 'playwright';
-import { FREEZE_ANIMATIONS_CSS, CROSS_OS_CHROMIUM_ARGS } from './constants';
+import { FREEZE_ANIMATIONS_CSS, FREEZE_ANIMATIONS_SCRIPT, CROSS_OS_CHROMIUM_ARGS } from './constants';
 import { EventEmitter } from 'events';
 import path from 'path';
 import fs from 'fs';
@@ -171,6 +171,35 @@ export function createExpect(timeout = 5000) {
             throw new Error(`${msgPrefix}Expected ${target} to be less than ${expected}`);
           }
         },
+        toBeGreaterThanOrEqual(expected: number) {
+          if (typeof target !== 'number' || target < expected) {
+            throw new Error(`${msgPrefix}Expected ${target} to be greater than or equal to ${expected}`);
+          }
+        },
+        toBeLessThanOrEqual(expected: number) {
+          if (typeof target !== 'number' || target > expected) {
+            throw new Error(`${msgPrefix}Expected ${target} to be less than or equal to ${expected}`);
+          }
+        },
+        toMatch(expected: string | RegExp) {
+          const str = typeof target === 'string' ? target : String(target);
+          const regex = typeof expected === 'string' ? new RegExp(expected) : expected;
+          if (!regex.test(str)) {
+            throw new Error(`${msgPrefix}Expected "${str}" to match ${regex}`);
+          }
+        },
+        toMatchObject(expected: Record<string, unknown>) {
+          if (typeof target !== 'object' || target === null) {
+            throw new Error(`${msgPrefix}Expected an object but got ${typeof target}`);
+          }
+          for (const key of Object.keys(expected)) {
+            const actualVal = (target as Record<string, unknown>)[key];
+            const expectedVal = expected[key];
+            if (JSON.stringify(actualVal) !== JSON.stringify(expectedVal)) {
+              throw new Error(`${msgPrefix}Expected key "${key}" to be ${JSON.stringify(expectedVal)} but got ${JSON.stringify(actualVal)}`);
+            }
+          }
+        },
         not: {
           toHaveLength(expected: number) {
             const actual = (target as { length?: number })?.length;
@@ -194,6 +223,23 @@ export function createExpect(timeout = 5000) {
               throw new Error(`${msgPrefix}Expected array not to contain ${JSON.stringify(expected)}`);
             } else if (typeof target === 'string' && target.includes(expected as string)) {
               throw new Error(`${msgPrefix}Expected string not to contain "${expected}"`);
+            }
+          },
+          toMatch(expected: string | RegExp) {
+            const str = typeof target === 'string' ? target : String(target);
+            const regex = typeof expected === 'string' ? new RegExp(expected) : expected;
+            if (regex.test(str)) {
+              throw new Error(`${msgPrefix}Expected "${str}" not to match ${regex}`);
+            }
+          },
+          toBeGreaterThanOrEqual(expected: number) {
+            if (typeof target === 'number' && target >= expected) {
+              throw new Error(`${msgPrefix}Expected ${target} not to be greater than or equal to ${expected}`);
+            }
+          },
+          toBeLessThanOrEqual(expected: number) {
+            if (typeof target === 'number' && target <= expected) {
+              throw new Error(`${msgPrefix}Expected ${target} not to be less than or equal to ${expected}`);
             }
           },
         },
@@ -531,6 +577,8 @@ export interface TestRunResult {
   teardownDurationMs?: number;
   teardownError?: string;
   stabilityMetadata?: StabilityMetadata;
+  videoPath?: string;
+  softErrors?: string[];
 }
 
 export interface ProgressCallback {
@@ -857,6 +905,18 @@ export class PlaywrightRunner extends EventEmitter {
     // Track setup duration (outside try so catch can access)
     let setupDurationMs = 0;
 
+    // Track soft errors (outside try so catch can access)
+    let testSoftErrors: string[] = [];
+
+    // Result object — assigned in try/catch, video path added in finally
+    let result: TestRunResult = {
+      testId: test.id,
+      status: 'failed',
+      durationMs: 0,
+      screenshots: [],
+      errorMessage: 'Unexpected error',
+    };
+
     try {
       // If build-level setup captured storageState (cookies/localStorage),
       // inject it into the new context so tests inherit the login session
@@ -882,9 +942,20 @@ export class PlaywrightRunner extends EventEmitter {
         }
       }
 
+      // Set up video recording if enabled
+      const videoEnabled = this.settings?.enableVideoRecording ?? false;
+      const videoDir = videoEnabled
+        ? path.join('./public/videos', this.repositoryId || 'default')
+        : undefined;
+      if (videoDir && !fs.existsSync(videoDir)) {
+        fs.mkdirSync(videoDir, { recursive: true });
+      }
+
       context = await this.browser.newContext({
         viewport: this.getViewport(),
         ...(parsedStorageState ? { storageState: parsedStorageState } : {}),
+        ...(videoDir ? { recordVideo: { dir: videoDir, size: this.getViewport() } } : {}),
+        ...(this.settings?.acceptAnyCertificate ? { ignoreHTTPSErrors: true } : {}),
       });
       page = await context.newPage();
 
@@ -909,9 +980,9 @@ export class PlaywrightRunner extends EventEmitter {
       }
       await setupThirdPartyBlocking(page, targetUrl, stabilization);
 
-      // Freeze CSS animations/transitions if enabled
+      // Freeze CSS + JS animations if enabled (uses addInitScript to persist across navigations)
       if (this.settings?.freezeAnimations) {
-        await page.addStyleTag({ content: FREEZE_ANIMATIONS_CSS });
+        await page.addInitScript(FREEZE_ANIMATIONS_SCRIPT);
       }
 
       // Patterns for console errors that should be ignored (React dev warnings, hydration, etc.)
@@ -936,8 +1007,19 @@ export class PlaywrightRunner extends EventEmitter {
       });
 
       // Capture network failures before navigation
+      const ignoreExternalNetworkErrors = this.settings?.ignoreExternalNetworkErrors ?? false;
+      let targetOrigin: string | undefined;
+      try { targetOrigin = new URL(targetUrl).origin; } catch { /* ignore */ }
+
       page.on('response', response => {
         if (response.status() >= 400) {
+          // Skip external origin errors if configured
+          if (ignoreExternalNetworkErrors && targetOrigin) {
+            try {
+              const responseOrigin = new URL(response.url()).origin;
+              if (responseOrigin !== targetOrigin) return;
+            } catch { /* keep the error if URL parsing fails */ }
+          }
           networkFailures.push({
             url: response.url(),
             method: response.request().method(),
@@ -1056,7 +1138,7 @@ export class PlaywrightRunner extends EventEmitter {
             const state = await page.context().storageState();
             if (state.cookies.length > 0) {
               if (!this.setupContext) {
-                this.setupContext = { baseUrl: envBaseUrl, variables: {} };
+                this.setupContext = { baseUrl: envBaseUrl.replace(/\/+$/, ''), variables: {} };
               }
               this.setupContext.storageState = JSON.stringify(state);
               console.log(`[per-test-setup] Captured storageState: ${state.cookies.length} cookies`);
@@ -1143,20 +1225,40 @@ export class PlaywrightRunner extends EventEmitter {
       });
 
       // Execute the test code with the proxy page
-      await this.executeTestCode(screenshotProxy, test, runId, testScreenshotPath, (label: string) => {
-        currentStepLabel = label;
-      });
+      // Errors are caught as soft errors so screenshot capture still happens
+      try {
+        testSoftErrors = await this.executeTestCode(screenshotProxy, test, runId, testScreenshotPath, (label: string) => {
+          currentStepLabel = label;
+        });
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        testSoftErrors.push(msg);
+        console.warn(`[soft-error] Test "${test.name}" error, continuing to screenshot: ${msg}`);
+      }
 
       // Check for console errors or network failures after test execution
-      if (consoleErrors.length > 0 || networkFailures.length > 0) {
-        const errorParts: string[] = [];
-        if (consoleErrors.length > 0) {
-          errorParts.push(`Console errors detected: ${consoleErrors.join('; ')}`);
+      const consoleErrorMode = (this.settings?.consoleErrorMode as string) || 'fail';
+      const networkErrorMode = (this.settings?.networkErrorMode as string) || 'fail';
+      const errorParts: string[] = [];
+
+      if (consoleErrors.length > 0 && consoleErrorMode !== 'ignore') {
+        const msg = `Console errors detected: ${consoleErrors.join('; ')}`;
+        if (consoleErrorMode === 'warn') {
+          console.warn(`[test] ${msg}`);
+        } else {
+          errorParts.push(msg);
         }
-        if (networkFailures.length > 0) {
-          const failureDetails = networkFailures.map(f => `${f.method} ${f.url} (${f.status})`).join('; ');
-          errorParts.push(`Network failures detected: ${failureDetails}`);
+      }
+      if (networkFailures.length > 0 && networkErrorMode !== 'ignore') {
+        const failureDetails = networkFailures.map(f => `${f.method} ${f.url} (${f.status})`).join('; ');
+        const msg = `Network failures detected: ${failureDetails}`;
+        if (networkErrorMode === 'warn') {
+          console.warn(`[test] ${msg}`);
+        } else {
+          errorParts.push(msg);
         }
+      }
+      if (errorParts.length > 0) {
         throw new Error(errorParts.join(' | '));
       }
 
@@ -1243,7 +1345,7 @@ export class PlaywrightRunner extends EventEmitter {
         timestamp: Date.now(),
       } as RunEvent);
 
-      return {
+      result = {
         testId: test.id,
         status: 'passed',
         durationMs,
@@ -1257,26 +1359,11 @@ export class PlaywrightRunner extends EventEmitter {
         teardownDurationMs,
         teardownError,
         stabilityMetadata: aggregatedStabilityMetadata,
+        softErrors: testSoftErrors.length > 0 ? testSoftErrors : undefined,
       };
 
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
-
-      // Take screenshot on failure
-      let screenshotPath: string | undefined;
-      if (page) {
-        try {
-          const screenshotFilename = `${runId}-${test.id}-failure.png`;
-          const fullPath = path.join(this.screenshotDir, screenshotFilename);
-          await page.screenshot({ path: fullPath, fullPage: true });
-          // Build public path with repositoryId if present
-          screenshotPath = this.repositoryId
-            ? `/screenshots/${this.repositoryId}/${screenshotFilename}`
-            : `/screenshots/${screenshotFilename}`;
-        } catch {
-          // Ignore screenshot errors
-        }
-      }
 
       // Run teardown even on failure (it's cleanup)
       let teardownDurationMs: number | undefined;
@@ -1311,35 +1398,48 @@ export class PlaywrightRunner extends EventEmitter {
         testName: test.name,
         durationMs,
         error: errorMessage,
-        screenshotPath,
+        screenshotPath: capturedScreenshots[0]?.path,
         timestamp: Date.now(),
       } as RunEvent);
 
-      // Combine any screenshots captured before the error with the failure screenshot
-      const allScreenshots = [...capturedScreenshots];
-      if (screenshotPath) {
-        allScreenshots.push({ path: screenshotPath, label: 'failure' });
-      }
-
-      return {
+      result = {
         testId: test.id,
         status: 'failed',
         durationMs,
-        // Prefer screenshot captured during test execution over late failure screenshot
-        screenshotPath: capturedScreenshots[0]?.path || screenshotPath,
-        screenshots: allScreenshots,
+        screenshotPath: capturedScreenshots[0]?.path,
+        screenshots: capturedScreenshots,
         errorMessage,
         consoleErrors: consoleErrors.length > 0 ? consoleErrors : undefined,
         networkRequests: networkFailures.length > 0 ? networkFailures : undefined,
         setupDurationMs: setupDurationMs > 0 ? setupDurationMs : undefined,
         teardownDurationMs,
         teardownError,
+        softErrors: testSoftErrors.length > 0 ? testSoftErrors : undefined,
       };
 
     } finally {
+      // Capture video before closing context (video is finalized on close)
+      const video = page?.video();
       if (page) await page.close().catch(() => {});
       if (context) await context.close().catch(() => {});
+      // After context close, video file is finalized — relocate it
+      if (video) {
+        try {
+          const videoDestDir = path.join('./public/videos', this.repositoryId || 'default');
+          if (!fs.existsSync(videoDestDir)) {
+            fs.mkdirSync(videoDestDir, { recursive: true });
+          }
+          const dest = path.join(videoDestDir, `${runId}-${test.id}.webm`);
+          await video.saveAs(dest);
+          await video.delete(); // clean temp file
+          result.videoPath = '/' + dest.replace(/^.*?public\//, '');
+        } catch {
+          // Video capture is best-effort
+        }
+      }
     }
+
+    return result;
   }
 
   /**
@@ -1349,7 +1449,7 @@ export class PlaywrightRunner extends EventEmitter {
     return stripTypeAnnotations(code);
   }
 
-  private async executeTestCode(page: Page, test: Test, runId: string, screenshotPath: string, onStepLabel?: (label: string) => void): Promise<void> {
+  private async executeTestCode(page: Page, test: Test, runId: string, screenshotPath: string, onStepLabel?: (label: string) => void): Promise<string[]> {
     let code = test.code;
     if (!code) {
       throw new Error('No test code');
@@ -1386,6 +1486,8 @@ export class PlaywrightRunner extends EventEmitter {
       const serverManager = getServerManager();
       const baseUrl = (this.environmentConfig?.baseUrl || serverManager.resolveUrl('http://localhost:3000') || 'http://localhost:3000').replace(/\/$/, '');
 
+      const softErrors: string[] = [];
+
       const stepLogger = {
         log: (msg: string) => {
           onStepLabel?.(msg);
@@ -1395,6 +1497,28 @@ export class PlaywrightRunner extends EventEmitter {
             testName: `${test.name}: ${msg}`,
             timestamp: Date.now(),
           } as RunEvent);
+        },
+        warn: (msg: string) => {
+          softErrors.push(msg);
+          onStepLabel?.(`[WARN] ${msg}`);
+        },
+        softExpect: async (fn: () => Promise<void>, label?: string) => {
+          try {
+            await fn();
+          } catch (e: unknown) {
+            const msg = label || (e instanceof Error ? e.message : String(e));
+            softErrors.push(msg);
+            onStepLabel?.(`[SOFT FAIL] ${msg}`);
+          }
+        },
+        softAction: async (fn: () => Promise<void>, label?: string) => {
+          try {
+            await fn();
+          } catch (e: unknown) {
+            const msg = label || (e instanceof Error ? e.message : String(e));
+            softErrors.push(msg);
+            onStepLabel?.(`[SOFT FAIL] ${msg}`);
+          }
         },
       };
 
@@ -1507,7 +1631,7 @@ export class PlaywrightRunner extends EventEmitter {
       const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
       const testFn = new AsyncFunction('page', 'baseUrl', 'screenshotPath', 'stepLogger', 'expect', 'appState', 'locateWithFallback', body);
       await testFn(page, baseUrl, screenshotPath, stepLogger, expectFn, appStateFn, statsLocateWithFallback);
-      return;
+      return softErrors;
     }
 
     // Legacy: try Playwright test format
@@ -1520,7 +1644,7 @@ export class PlaywrightRunner extends EventEmitter {
       for (const line of lines) {
         await this.executeLine(page, line.trim(), test.id);
       }
-      return;
+      return [];
     }
 
     const body = bodyMatch[1];
@@ -1529,6 +1653,7 @@ export class PlaywrightRunner extends EventEmitter {
     for (const line of lines) {
       await this.executeLine(page, line.trim(), test.id);
     }
+    return [];
   }
 
   // Locate element using fallback selector strategy with stats-based optimization

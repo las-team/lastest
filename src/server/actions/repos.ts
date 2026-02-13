@@ -145,6 +145,14 @@ export async function updateRepoSelectedBranch(repositoryId: string, branch: str
   revalidatePath('/builds');
 }
 
+export async function updateAutoApproveDefaultBranch(repositoryId: string, enabled: boolean) {
+  const session = await requireTeamAccess();
+  const repo = await queries.getRepository(repositoryId);
+  if (!repo || repo.teamId !== session.team.id) return;
+  await queries.updateRepository(repositoryId, { autoApproveDefaultBranch: enabled });
+  revalidatePath('/settings');
+}
+
 // Branch interface that works for both providers
 interface RepoBranch {
   name: string;

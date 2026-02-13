@@ -36,6 +36,7 @@ export default async function BuildPage({ params }: PageProps) {
       {/* Hero and Metrics with Polling Support */}
       <BuildPollingWrapper
         buildId={buildId}
+        isMainBranch={build.isMainBranch}
         initialBuild={{
           id: build.id,
           overallStatus: build.overallStatus,

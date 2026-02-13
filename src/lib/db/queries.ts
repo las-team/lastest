@@ -43,6 +43,7 @@ import {
   googleSheetsAccounts,
   googleSheetsDataSources,
   composeConfigs,
+  agentSessions,
 } from './schema';
 import {
   DEFAULT_SELECTOR_PRIORITY,
@@ -95,6 +96,11 @@ import type {
   NewGoogleSheetsAccount,
   NewGoogleSheetsDataSource,
   NewComposeConfig,
+  NewAgentSession,
+  AgentSessionStatus,
+  AgentStepState,
+  AgentSessionMetadata,
+  AgentStepId,
   Team,
   User,
   Runner,
@@ -117,17 +123,17 @@ import { v4 as uuid } from 'uuid';
 
 // Functional Areas
 export async function getFunctionalAreas() {
-  return db.select().from(functionalAreas).all();
+  return db.select().from(functionalAreas).where(isNull(functionalAreas.deletedAt)).all();
 }
 
 export async function getFunctionalArea(id: string) {
-  return db.select().from(functionalAreas).where(eq(functionalAreas.id, id)).get();
+  return db.select().from(functionalAreas).where(and(eq(functionalAreas.id, id), isNull(functionalAreas.deletedAt))).get();
 }
 
 export async function createFunctionalArea(data: Omit<NewFunctionalArea, 'id'>) {
   const id = uuid();
   await db.insert(functionalAreas).values({ ...data, id });
-  return { id, ...data };
+  return { id, deletedAt: null, ...data };
 }
 
 export async function updateFunctionalArea(id: string, data: Partial<NewFunctionalArea>) {
@@ -135,7 +141,7 @@ export async function updateFunctionalArea(id: string, data: Partial<NewFunction
 }
 
 export async function deleteFunctionalArea(id: string) {
-  await db.delete(functionalAreas).where(eq(functionalAreas.id, id));
+  await db.update(functionalAreas).set({ deletedAt: new Date() }).where(eq(functionalAreas.id, id));
 }
 
 // Get or create functional area with case-insensitive name matching within a repo
@@ -172,7 +178,7 @@ export async function getTest(id: string) {
   return db.select().from(tests).where(eq(tests.id, id)).get();
 }
 
-export async function createTest(data: Omit<NewTest, 'id' | 'createdAt' | 'updatedAt'>) {
+export async function createTest(data: Omit<NewTest, 'id' | 'createdAt' | 'updatedAt'>, branch?: string | null) {
   const id = uuid();
   const now = new Date();
   await db.insert(tests).values({ ...data, id, createdAt: now, updatedAt: now });
@@ -186,6 +192,7 @@ export async function createTest(data: Omit<NewTest, 'id' | 'createdAt' | 'updat
     name: data.name,
     targetUrl: data.targetUrl ?? null,
     changeReason: 'initial',
+    branch: branch ?? null,
     createdAt: now,
   });
 
@@ -197,6 +204,10 @@ export async function updateTest(id: string, data: Partial<NewTest>) {
 }
 
 export async function softDeleteTest(id: string) {
+  // Fetch the test before deleting so we can update route coverage
+  const deletingTest = await db.select({ functionalAreaId: tests.functionalAreaId })
+    .from(tests).where(eq(tests.id, id)).get();
+
   // Clear setup test references so other tests don't reference a deleted test
   await db.update(tests)
     .set({ setupTestId: null })
@@ -230,10 +241,37 @@ export async function softDeleteTest(id: string) {
 
   // Set deletedAt timestamp (soft delete)
   await db.update(tests).set({ deletedAt: new Date() }).where(eq(tests.id, id));
+
+  // Reset hasTest on routes whose functional area no longer has active tests
+  if (deletingTest?.functionalAreaId) {
+    const activeTestsInArea = await db.select({ id: tests.id })
+      .from(tests)
+      .where(and(
+        eq(tests.functionalAreaId, deletingTest.functionalAreaId),
+        isNull(tests.deletedAt),
+      ))
+      .limit(1)
+      .all();
+
+    if (activeTestsInArea.length === 0) {
+      await db.update(routes)
+        .set({ hasTest: false })
+        .where(eq(routes.functionalAreaId, deletingTest.functionalAreaId));
+    }
+  }
 }
 
 export async function restoreTest(id: string) {
   await db.update(tests).set({ deletedAt: null }).where(eq(tests.id, id));
+
+  // Re-mark routes as having a test when restoring
+  const restoredTest = await db.select({ functionalAreaId: tests.functionalAreaId })
+    .from(tests).where(eq(tests.id, id)).get();
+  if (restoredTest?.functionalAreaId) {
+    await db.update(routes)
+      .set({ hasTest: true })
+      .where(eq(routes.functionalAreaId, restoredTest.functionalAreaId));
+  }
 }
 
 export async function getDeletedTests(repositoryId?: string) {
@@ -462,6 +500,10 @@ export async function updateTestRun(id: string, data: Partial<NewTestRun>) {
 }
 
 // Test Results
+export async function getTestResultById(id: string) {
+  return db.select().from(testResults).where(eq(testResults.id, id)).get();
+}
+
 export async function getTestResultsByRun(testRunId: string) {
   return db.select().from(testResults).where(eq(testResults.testRunId, testRunId)).all();
 }
@@ -483,6 +525,7 @@ export async function getTestResultsByTest(testId: string) {
       browser: testResults.browser,
       consoleErrors: testResults.consoleErrors,
       networkRequests: testResults.networkRequests,
+      videoPath: testResults.videoPath,
       startedAt: testRuns.startedAt,
     })
     .from(testResults)
@@ -773,6 +816,7 @@ export async function getVisualDiffsWithTestStatus(buildId: string) {
       aiRecommendation: visualDiffs.aiRecommendation,
       aiAnalysisStatus: visualDiffs.aiAnalysisStatus,
       testResultStatus: testResults.status,
+      errorMessage: testResults.errorMessage,
       testName: tests.name,
       functionalAreaName: functionalAreas.name,
     })
@@ -1153,7 +1197,7 @@ export async function deleteRepository(id: string) {
 
 // Repo-filtered queries
 export async function getFunctionalAreasByRepo(repositoryId: string) {
-  return db.select().from(functionalAreas).where(eq(functionalAreas.repositoryId, repositoryId)).all();
+  return db.select().from(functionalAreas).where(and(eq(functionalAreas.repositoryId, repositoryId), isNull(functionalAreas.deletedAt))).all();
 }
 
 export async function getTestsByRepo(repositoryId: string) {
@@ -1285,9 +1329,14 @@ export async function getPlaywrightSettings(repositoryId?: string | null) {
     enabledRecordingEngines: DEFAULT_RECORDING_ENGINES,
     defaultRecordingEngine: 'lastest' as const,
     freezeAnimations: false,
+    enableVideoRecording: false,
     screenshotDelay: 0,
     maxParallelTests: 1,
     stabilization: DEFAULT_STABILIZATION_SETTINGS,
+    acceptAnyCertificate: false,
+    networkErrorMode: 'fail',
+    ignoreExternalNetworkErrors: false,
+    consoleErrorMode: 'fail',
     createdAt: null,
     updatedAt: null,
   };
@@ -1454,7 +1503,7 @@ export async function getEnvironmentConfig(repositoryId?: string | null) {
       .from(environmentConfigs)
       .where(eq(environmentConfigs.repositoryId, repositoryId))
       .get();
-    if (config) return config;
+    if (config) return { ...config, baseUrl: config.baseUrl.replace(/\/+$/, '') };
   }
 
   // Return global config (no repositoryId) or defaults
@@ -1464,7 +1513,7 @@ export async function getEnvironmentConfig(repositoryId?: string | null) {
     .where(eq(environmentConfigs.repositoryId, ''))
     .get();
 
-  if (globalConfig) return globalConfig;
+  if (globalConfig) return { ...globalConfig, baseUrl: globalConfig.baseUrl.replace(/\/+$/, '') };
 
   // Return default config object (not saved)
   return {
@@ -2081,6 +2130,28 @@ export async function createTestVersion(data: Omit<NewTestVersion, 'id'>) {
   return { id, ...data, createdAt: new Date() };
 }
 
+// Stamp the first build that executed this version (idempotent — only sets if not already set)
+export async function stampFirstBuild(
+  testVersionId: string,
+  buildId: string,
+  branch: string | null,
+  commit: string | null
+) {
+  await db
+    .update(testVersions)
+    .set({
+      firstBuildId: buildId,
+      firstBuildBranch: branch,
+      firstBuildCommit: commit,
+    })
+    .where(
+      and(
+        eq(testVersions.id, testVersionId),
+        isNull(testVersions.firstBuildId)
+      )
+    );
+}
+
 // Get a single test version by its ID
 export async function getTestVersionById(versionId: string) {
   return db
@@ -2288,7 +2359,7 @@ export async function getFunctionalAreasTree(repositoryId: string): Promise<Func
   const areas = await db
     .select()
     .from(functionalAreas)
-    .where(eq(functionalAreas.repositoryId, repositoryId))
+    .where(and(eq(functionalAreas.repositoryId, repositoryId), isNull(functionalAreas.deletedAt)))
     .orderBy(functionalAreas.orderIndex)
     .all();
 
@@ -3841,7 +3912,7 @@ export async function getComposeConfig(repositoryId: string, branch: string) {
 export async function upsertComposeConfig(
   repositoryId: string,
   branch: string,
-  data: { selectedTestIds: string[]; versionOverrides: Record<string, string> },
+  data: { selectedTestIds: string[]; excludedTestIds: string[]; versionOverrides: Record<string, string> },
 ) {
   const existing = await db
     .select()
@@ -3857,6 +3928,7 @@ export async function upsertComposeConfig(
       .update(composeConfigs)
       .set({
         selectedTestIds: data.selectedTestIds,
+        excludedTestIds: data.excludedTestIds,
         versionOverrides: data.versionOverrides,
         updatedAt: new Date(),
       })
@@ -3869,10 +3941,64 @@ export async function upsertComposeConfig(
       repositoryId,
       branch,
       selectedTestIds: data.selectedTestIds,
+      excludedTestIds: data.excludedTestIds,
       versionOverrides: data.versionOverrides,
       updatedAt: new Date(),
     };
     await db.insert(composeConfigs).values(newConfig);
     return newConfig;
   }
+}
+
+// ============================================
+// Agent Sessions
+// ============================================
+
+export async function createAgentSession(data: Omit<NewAgentSession, 'id'>) {
+  const id = uuid();
+  const now = new Date();
+  await db.insert(agentSessions).values({
+    ...data,
+    id,
+    createdAt: now,
+    updatedAt: now,
+  });
+  return db.select().from(agentSessions).where(eq(agentSessions.id, id)).get()!;
+}
+
+export async function getAgentSession(id: string) {
+  return db.select().from(agentSessions).where(eq(agentSessions.id, id)).get();
+}
+
+export async function getActiveAgentSession(repositoryId: string) {
+  return db
+    .select()
+    .from(agentSessions)
+    .where(
+      and(
+        eq(agentSessions.repositoryId, repositoryId),
+        or(
+          eq(agentSessions.status, 'active'),
+          eq(agentSessions.status, 'paused'),
+        ),
+      ),
+    )
+    .orderBy(desc(agentSessions.createdAt))
+    .get();
+}
+
+export async function updateAgentSession(
+  id: string,
+  data: {
+    status?: AgentSessionStatus;
+    currentStepId?: AgentStepId;
+    steps?: AgentStepState[];
+    metadata?: AgentSessionMetadata;
+    completedAt?: Date;
+  },
+) {
+  await db
+    .update(agentSessions)
+    .set({ ...data, updatedAt: new Date() })
+    .where(eq(agentSessions.id, id));
 }

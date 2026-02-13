@@ -1,6 +1,6 @@
 name: 'Lastest2 Visual Regression'
-description: 'Run visual regression tests via Lastest2 remote runner'
-author: 'Lastest2'
+description: 'Run visual regression tests on pull requests via Lastest2 remote runner. Lightweight — no browsers needed in CI.'
+author: 'Dexilion'
 
 branding:
   icon: 'image'
@@ -49,30 +49,27 @@ runs:
       id: run
       shell: bash
       env:
-        LASTEST_SERVER_URL: ${{ inputs.server-url }}
-        LASTEST_TOKEN: ${{ inputs.runner-token }}
+        INPUT_SERVER_URL: ${{ inputs.server-url }}
+        INPUT_RUNNER_TOKEN: ${{ inputs.runner-token }}
+        INPUT_TIMEOUT: ${{ inputs.timeout }}
+        INPUT_FAIL_ON_CHANGES: ${{ inputs.fail-on-changes }}
       run: |
-        # Calculate timeout in milliseconds
-        TIMEOUT_MS=$((${TIMEOUT_SECONDS:-300} * 1000))
-
-        # Create temporary script for the remote API calls
-        cat > /tmp/lastest2-run.sh << 'SCRIPT'
-        #!/bin/bash
         set -e
 
-        SERVER_URL="${LASTEST_SERVER_URL}"
-        TOKEN="${LASTEST_TOKEN}"
+        SERVER_URL="${INPUT_SERVER_URL}"
+        TOKEN="${INPUT_RUNNER_TOKEN}"
+        TIMEOUT_SEC="${INPUT_TIMEOUT:-300}"
+        FAIL_ON_CHANGES="${INPUT_FAIL_ON_CHANGES:-false}"
         GITHUB_REPO="${GITHUB_REPOSITORY}"
-        TIMEOUT_MS="${TIMEOUT_MS}"
 
         echo "=== Lastest2 Visual Regression Tests ==="
         echo "Server: ${SERVER_URL}"
         echo "Repository: ${GITHUB_REPO}"
         echo ""
 
-        # Create build
+        # Create build — repo is resolved server-side from GITHUB_REPOSITORY
         echo "Creating build..."
-        CREATE_RESPONSE=$(curl -s -X POST "${SERVER_URL}/api/builds/create" \
+        CREATE_RESPONSE=$(curl -sf -X POST "${SERVER_URL}/api/builds/create" \
           -H "Content-Type: application/json" \
           -H "Authorization: Bearer ${TOKEN}" \
           -d "{
@@ -80,12 +77,11 @@ runs:
             \"triggerType\": \"ci\",
             \"gitBranch\": \"${GITHUB_HEAD_REF:-${GITHUB_REF_NAME:-unknown}}\",
             \"gitCommit\": \"${GITHUB_SHA:-unknown}\"
-          }")
+          }" || { echo "::error::Failed to connect to Lastest2 server at ${SERVER_URL}"; exit 1; })
 
         BUILD_ID=$(echo "$CREATE_RESPONSE" | jq -r '.buildId // empty')
         if [ -z "$BUILD_ID" ]; then
-          echo "Error: Failed to create build"
-          echo "$CREATE_RESPONSE"
+          echo "::error::Failed to create build: ${CREATE_RESPONSE}"
           exit 1
         fi
 
@@ -94,10 +90,20 @@ runs:
         echo "Tests to run: ${TEST_COUNT}"
         echo ""
 
+        if [ "$TEST_COUNT" = "0" ]; then
+          echo "::warning::No tests found for repository ${GITHUB_REPO}"
+          echo "status=passed" >> $GITHUB_OUTPUT
+          echo "build-url=${SERVER_URL}/builds/${BUILD_ID}" >> $GITHUB_OUTPUT
+          echo "changed-count=0" >> $GITHUB_OUTPUT
+          echo "passed-count=0" >> $GITHUB_OUTPUT
+          echo "failed-count=0" >> $GITHUB_OUTPUT
+          echo "total-tests=0" >> $GITHUB_OUTPUT
+          exit 0
+        fi
+
         # Poll for completion
         echo "Waiting for build completion..."
         START_TIME=$(date +%s)
-        TIMEOUT_SEC=$((TIMEOUT_MS / 1000))
         LAST_PROGRESS=""
 
         while true; do
@@ -105,12 +111,14 @@ runs:
           ELAPSED=$((CURRENT_TIME - START_TIME))
 
           if [ $ELAPSED -gt $TIMEOUT_SEC ]; then
-            echo "Error: Build timed out after ${TIMEOUT_SEC}s"
+            echo "::error::Build timed out after ${TIMEOUT_SEC}s"
+            echo "status=timeout" >> $GITHUB_OUTPUT
+            echo "build-url=${SERVER_URL}/builds/${BUILD_ID}" >> $GITHUB_OUTPUT
             exit 1
           fi
 
-          STATUS_RESPONSE=$(curl -s "${SERVER_URL}/api/builds/${BUILD_ID}/status" \
-            -H "Authorization: Bearer ${TOKEN}")
+          STATUS_RESPONSE=$(curl -sf "${SERVER_URL}/api/builds/${BUILD_ID}/status" \
+            -H "Authorization: Bearer ${TOKEN}" || { echo "::warning::Failed to poll build status, retrying..."; sleep 3; continue; })
 
           COMPLETED_AT=$(echo "$STATUS_RESPONSE" | jq -r '.completedAt // empty')
           PASSED_COUNT=$(echo "$STATUS_RESPONSE" | jq -r '.passedCount // 0')
@@ -145,7 +153,7 @@ runs:
         echo "Changes Detected: ${CHANGES_DETECTED}"
         echo "Flaky: ${FLAKY_COUNT}"
         if [ "$ELAPSED_MS" != "null" ] && [ "$ELAPSED_MS" != "0" ]; then
-          DURATION_SEC=$(echo "scale=1; $ELAPSED_MS / 1000" | bc)
+          DURATION_SEC=$(awk "BEGIN{printf \"%.1f\", $ELAPSED_MS / 1000}")
           echo "Duration: ${DURATION_SEC}s"
         fi
         echo ""
@@ -163,21 +171,12 @@ runs:
         if [ "$OVERALL_STATUS" = "passed" ] || [ "$OVERALL_STATUS" = "safe_to_merge" ]; then
           exit 0
         elif [ "$OVERALL_STATUS" = "review_required" ]; then
-          if [ "${FAIL_ON_CHANGES}" = "true" ]; then
+          if [ "$FAIL_ON_CHANGES" = "true" ]; then
             echo ""
-            echo "Visual changes detected and fail-on-changes is enabled"
+            echo "::warning::Visual changes detected and fail-on-changes is enabled"
             exit 1
           fi
           exit 0
         else
           exit 1
         fi
-        SCRIPT
-
-        chmod +x /tmp/lastest2-run.sh
-
-        # Export variables and run
-        export TIMEOUT_MS=$TIMEOUT_MS
-        export FAIL_ON_CHANGES="${{ inputs.fail-on-changes }}"
-
-        /tmp/lastest2-run.sh

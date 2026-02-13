@@ -342,7 +342,7 @@ export class TestRunner {
       body
     );
 
-    await testFn(page, targetUrl, 'screenshot.png', stepLogger, expect, locateWithFallback);
+    await testFn(page, targetUrl.replace(/\/+$/, ''), 'screenshot.png', stepLogger, expect, locateWithFallback);
   }
 
   private stripTypeAnnotations(code: string): string {

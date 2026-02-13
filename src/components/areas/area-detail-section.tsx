@@ -15,7 +15,7 @@ import {
 } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
-import { ExternalLink, Play, Pencil, Save, X, Folder, FileCode, ListChecks } from 'lucide-react';
+import { ExternalLink, Play, Pencil, Save, X, Folder, FileCode, ListChecks, Trash2 } from 'lucide-react';
 import Link from 'next/link';
 import { updateArea, getArea } from '@/server/actions/areas';
 import { getTest, updateTest } from '@/server/actions/tests';
@@ -30,9 +30,10 @@ interface AreaDetailSectionProps {
   suites: SuiteItem[];
   repositoryId: string;
   onUpdate: () => void;
+  onDeleteArea?: (id: string) => void;
 }
 
-export function AreaDetailSection({ selection, areas, suites, repositoryId, onUpdate }: AreaDetailSectionProps) {
+export function AreaDetailSection({ selection, areas, suites, repositoryId, onUpdate, onDeleteArea }: AreaDetailSectionProps) {
   const [isEditing, setIsEditing] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [areaData, setAreaData] = useState<FunctionalArea | null>(null);
@@ -173,10 +174,17 @@ export function AreaDetailSection({ selection, areas, suites, repositoryId, onUp
             Area Details
           </CardTitle>
           {!isEditing ? (
-            <Button variant="ghost" size="sm" onClick={() => setIsEditing(true)}>
-              <Pencil className="h-4 w-4 mr-2" />
-              Edit
-            </Button>
+            <div className="flex gap-1">
+              <Button variant="ghost" size="sm" onClick={() => setIsEditing(true)}>
+                <Pencil className="h-4 w-4 mr-2" />
+                Edit
+              </Button>
+              {onDeleteArea && (
+                <Button variant="ghost" size="sm" className="text-destructive hover:text-destructive" onClick={() => onDeleteArea(areaData.id)}>
+                  <Trash2 className="h-4 w-4" />
+                </Button>
+              )}
+            </div>
           ) : (
             <div className="flex gap-2">
               <Button variant="ghost" size="sm" onClick={handleCancel}>

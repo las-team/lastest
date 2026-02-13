@@ -41,6 +41,9 @@ docs
 *.md
 !README.md
 
+# Scripts (not needed in build except entrypoint)
+scripts/*.ts
+
 # Misc
 *.log
 *.tmp

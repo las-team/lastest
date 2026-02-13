@@ -31,7 +31,7 @@ export async function saveEnvironmentConfig(data: EnvironmentConfigInput) {
   else await requireTeamAccess();
   const result = await queries.upsertEnvironmentConfig(data.repositoryId ?? null, {
     mode: data.mode,
-    baseUrl: data.baseUrl,
+    baseUrl: data.baseUrl.replace(/\/+$/, ''),
     startCommand: data.startCommand,
     healthCheckUrl: data.healthCheckUrl,
     healthCheckTimeout: data.healthCheckTimeout ?? 60000,

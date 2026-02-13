@@ -12,16 +12,11 @@ import {
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Badge } from '@/components/ui/badge';
-import { aiScanRoutes, saveDiscoveredRoutes } from '@/server/actions/ai-routes';
-import { Loader2, Sparkles, Save, RefreshCw, Check, Route } from 'lucide-react';
+import { Progress } from '@/components/ui/progress';
+import { aiScanRoutes, saveDiscoveredRoutes, type SavedRouteInfo, type DiscoveredArea } from '@/server/actions/ai-routes';
+import { aiCreateTest, saveGeneratedTest } from '@/server/actions/ai';
+import { Loader2, Sparkles, Save, RefreshCw, Check, Minus, Route, FlaskConical, CheckCircle2, XCircle, ChevronDown, ChevronRight, FolderOpen } from 'lucide-react';
 import { toast } from 'sonner';
-
-interface DiscoveredRoute {
-  path: string;
-  type: 'static' | 'dynamic';
-  description?: string;
-  testSuggestions?: string[];
-}
 
 interface AIScanRoutesDialogProps {
   open: boolean;
@@ -38,13 +33,25 @@ export function AIScanRoutesDialog({
   branch,
   onSaved,
 }: AIScanRoutesDialogProps) {
-  const [step, setStep] = useState<'scanning' | 'preview'>('scanning');
+  const [step, setStep] = useState<'scanning' | 'preview' | 'generate'>('scanning');
   const [isScanning, setIsScanning] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
-  const [discoveredRoutes, setDiscoveredRoutes] = useState<DiscoveredRoute[]>([]);
+  const [discoveredAreas, setDiscoveredAreas] = useState<DiscoveredArea[]>([]);
   const [selectedRoutes, setSelectedRoutes] = useState<Set<string>>(new Set());
+  const [expandedAreas, setExpandedAreas] = useState<Set<string>>(new Set());
   const [hasScanned, setHasScanned] = useState(false);
   const [hasStartedScan, setHasStartedScan] = useState(false);
+
+  // Generate step state
+  const [savedRoutes, setSavedRoutes] = useState<SavedRouteInfo[]>([]);
+  const [selectedForGeneration, setSelectedForGeneration] = useState<Set<string>>(new Set());
+  const [isGenerating, setIsGenerating] = useState(false);
+  const [generateProgress, setGenerateProgress] = useState(0);
+  const [generateTotal, setGenerateTotal] = useState(0);
+  const [generateResults, setGenerateResults] = useState<{ path: string; success: boolean }[]>([]);
+
+  const allRoutes = discoveredAreas.flatMap((a) => a.routes);
+  const totalRouteCount = allRoutes.length;
 
   // Trigger scan when dialog opens
   useEffect(() => {
@@ -59,75 +66,203 @@ export function AIScanRoutesDialog({
     try {
       const result = await aiScanRoutes(repositoryId, branch);
 
-      if (result.success && result.routes) {
-        setDiscoveredRoutes(result.routes);
-        setSelectedRoutes(new Set(result.routes.map((r) => r.path)));
+      if (result.success && result.functionalAreas) {
+        setDiscoveredAreas(result.functionalAreas);
+        const allPaths = result.functionalAreas.flatMap((a) => a.routes.map((r) => r.path));
+        setSelectedRoutes(new Set(allPaths));
+        setExpandedAreas(new Set(result.functionalAreas.map((a) => a.name)));
         setStep('preview');
         setHasScanned(true);
-        toast.success(`Found ${result.routes.length} routes`);
+        toast.success(`Found ${allPaths.length} routes in ${result.functionalAreas.length} areas`);
       } else {
         toast.error(result.error || 'Failed to scan routes');
       }
-    } catch (error) {
+    } catch {
       toast.error('Failed to scan routes');
     } finally {
       setIsScanning(false);
     }
   };
 
+  const toggleAreaExpansion = (areaName: string) => {
+    const next = new Set(expandedAreas);
+    if (next.has(areaName)) {
+      next.delete(areaName);
+    } else {
+      next.add(areaName);
+    }
+    setExpandedAreas(next);
+  };
+
+  const getAreaSelectionState = (area: DiscoveredArea): 'all' | 'some' | 'none' => {
+    const paths = area.routes.map((r) => r.path);
+    const selectedCount = paths.filter((p) => selectedRoutes.has(p)).length;
+    if (selectedCount === 0) return 'none';
+    if (selectedCount === paths.length) return 'all';
+    return 'some';
+  };
+
+  const toggleArea = (area: DiscoveredArea) => {
+    const next = new Set(selectedRoutes);
+    const state = getAreaSelectionState(area);
+    for (const route of area.routes) {
+      if (state === 'all') {
+        next.delete(route.path);
+      } else {
+        next.add(route.path);
+      }
+    }
+    setSelectedRoutes(next);
+  };
+
+  const toggleRoute = (path: string) => {
+    const next = new Set(selectedRoutes);
+    if (next.has(path)) {
+      next.delete(path);
+    } else {
+      next.add(path);
+    }
+    setSelectedRoutes(next);
+  };
+
+  const toggleAll = () => {
+    if (selectedRoutes.size === totalRouteCount) {
+      setSelectedRoutes(new Set());
+    } else {
+      setSelectedRoutes(new Set(allRoutes.map((r) => r.path)));
+    }
+  };
+
   const handleSave = async () => {
-    const routesToSave = discoveredRoutes.filter((r) => selectedRoutes.has(r.path));
-    if (routesToSave.length === 0) {
+    // Build areas with only selected routes
+    const areasToSave: DiscoveredArea[] = discoveredAreas
+      .map((area) => ({
+        ...area,
+        routes: area.routes.filter((r) => selectedRoutes.has(r.path)),
+      }))
+      .filter((area) => area.routes.length > 0);
+
+    if (areasToSave.length === 0) {
       toast.error('No routes selected');
       return;
     }
 
     setIsSaving(true);
     try {
-      const result = await saveDiscoveredRoutes(repositoryId, routesToSave);
+      const result = await saveDiscoveredRoutes(repositoryId, areasToSave);
 
       if (result.success) {
         if (result.count === 0) {
           toast.info('All routes already exist');
+          onSaved?.();
+          handleClose();
         } else {
           toast.success(`Saved ${result.count} new routes`);
+          onSaved?.();
+          if (result.savedRoutes && result.savedRoutes.length > 0) {
+            setSavedRoutes(result.savedRoutes);
+            setSelectedForGeneration(new Set(result.savedRoutes.map(r => r.routeId)));
+            setGenerateResults([]);
+            setGenerateProgress(0);
+            setStep('generate');
+          } else {
+            handleClose();
+          }
         }
-        onSaved?.();
-        handleClose();
       } else {
         toast.error(result.error || 'Failed to save routes');
       }
-    } catch (error) {
+    } catch {
       toast.error('Failed to save routes');
     } finally {
       setIsSaving(false);
     }
   };
 
-  const toggleRoute = (path: string) => {
-    const newSelected = new Set(selectedRoutes);
-    if (newSelected.has(path)) {
-      newSelected.delete(path);
-    } else {
-      newSelected.add(path);
+  const handleGenerateTests = async () => {
+    const routesToGenerate = savedRoutes.filter(r => selectedForGeneration.has(r.routeId));
+    if (routesToGenerate.length === 0) {
+      toast.error('No routes selected');
+      return;
     }
-    setSelectedRoutes(newSelected);
+
+    setIsGenerating(true);
+    setGenerateTotal(routesToGenerate.length);
+    setGenerateProgress(0);
+    setGenerateResults([]);
+
+    let successCount = 0;
+    for (const route of routesToGenerate) {
+      try {
+        const suggestionText = route.testSuggestions.length > 0
+          ? route.testSuggestions.join(', ')
+          : `Visual regression test for ${route.path}`;
+
+        const result = await aiCreateTest(repositoryId, {
+          userPrompt: `Create a visual regression test for the page at ${route.path}. Test suggestions: ${suggestionText}`,
+          routePath: route.path,
+        }, route.routeId);
+
+        if (result.success && result.code) {
+          const testName = route.path === '/' ? 'Homepage' : route.path.split('/').filter(Boolean).map(s => s.replace(/[\[\]]/g, '')).join(' - ');
+          await saveGeneratedTest({
+            repositoryId,
+            functionalAreaId: route.areaId,
+            name: `${testName} - Visual Test`,
+            code: result.code,
+            targetUrl: route.path,
+          });
+          successCount++;
+          setGenerateResults(prev => [...prev, { path: route.path, success: true }]);
+        } else {
+          setGenerateResults(prev => [...prev, { path: route.path, success: false }]);
+        }
+      } catch {
+        setGenerateResults(prev => [...prev, { path: route.path, success: false }]);
+      }
+      setGenerateProgress(prev => prev + 1);
+    }
+
+    setIsGenerating(false);
+    if (successCount > 0) {
+      toast.success(`Generated ${successCount} test${successCount > 1 ? 's' : ''}`);
+    }
+    if (successCount < routesToGenerate.length) {
+      toast.error(`${routesToGenerate.length - successCount} test${routesToGenerate.length - successCount > 1 ? 's' : ''} failed to generate`);
+    }
+    onSaved?.();
   };
 
-  const toggleAll = () => {
-    if (selectedRoutes.size === discoveredRoutes.length) {
-      setSelectedRoutes(new Set());
+  const toggleGenerateRoute = (routeId: string) => {
+    const next = new Set(selectedForGeneration);
+    if (next.has(routeId)) {
+      next.delete(routeId);
     } else {
-      setSelectedRoutes(new Set(discoveredRoutes.map((r) => r.path)));
+      next.add(routeId);
+    }
+    setSelectedForGeneration(next);
+  };
+
+  const toggleAllGenerate = () => {
+    if (selectedForGeneration.size === savedRoutes.length) {
+      setSelectedForGeneration(new Set());
+    } else {
+      setSelectedForGeneration(new Set(savedRoutes.map(r => r.routeId)));
     }
   };
 
   const handleClose = () => {
     setStep('scanning');
-    setDiscoveredRoutes([]);
+    setDiscoveredAreas([]);
     setSelectedRoutes(new Set());
+    setExpandedAreas(new Set());
     setHasScanned(false);
     setHasStartedScan(false);
+    setSavedRoutes([]);
+    setSelectedForGeneration(new Set());
+    setGenerateResults([]);
+    setGenerateProgress(0);
+    setIsGenerating(false);
     onOpenChange(false);
   };
 
@@ -150,7 +285,13 @@ export function AIScanRoutesDialog({
           <DialogDescription>
             {step === 'scanning'
               ? 'AI is analyzing your codebase to discover testable routes...'
-              : `Found ${discoveredRoutes.length} routes. Select which ones to add.`}
+              : step === 'preview'
+                ? `Found ${totalRouteCount} routes in ${discoveredAreas.length} areas. Select which ones to add.`
+                : isGenerating
+                  ? `Generating test ${generateProgress + 1} of ${generateTotal}...`
+                  : generateResults.length > 0
+                    ? 'Test generation complete.'
+                    : `${savedRoutes.length} routes saved. Generate tests for them?`}
           </DialogDescription>
         </DialogHeader>
 
@@ -162,72 +303,199 @@ export function AIScanRoutesDialog({
               This may take a minute depending on your codebase size
             </p>
           </div>
-        ) : (
+        ) : step === 'preview' ? (
           <div className="flex-1 overflow-hidden flex flex-col gap-4 min-h-0">
             <div className="flex items-center justify-between">
               <Button variant="ghost" size="sm" onClick={toggleAll}>
-                {selectedRoutes.size === discoveredRoutes.length ? 'Deselect All' : 'Select All'}
+                {selectedRoutes.size === totalRouteCount ? 'Deselect All' : 'Select All'}
               </Button>
               <span className="text-sm text-muted-foreground">
-                {selectedRoutes.size} of {discoveredRoutes.length} selected
+                {selectedRoutes.size} of {totalRouteCount} selected
               </span>
             </div>
 
             <ScrollArea className="flex-1 border rounded-lg min-h-0 max-h-[50vh]">
               <div className="p-2 space-y-1">
-                {discoveredRoutes.map((route) => (
-                  <div
-                    key={route.path}
-                    className={`flex items-start gap-3 p-3 rounded-lg cursor-pointer transition-colors ${
-                      selectedRoutes.has(route.path)
-                        ? 'bg-primary/10 border border-primary/20'
-                        : 'hover:bg-muted/50 border border-transparent'
-                    }`}
-                    onClick={() => toggleRoute(route.path)}
-                  >
-                    <div className={`w-5 h-5 rounded border flex items-center justify-center mt-0.5 ${
-                      selectedRoutes.has(route.path)
-                        ? 'bg-primary border-primary text-primary-foreground'
-                        : 'border-muted-foreground/30'
-                    }`}>
-                      {selectedRoutes.has(route.path) && <Check className="h-3 w-3" />}
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2">
-                        <Route className="h-4 w-4 text-muted-foreground flex-shrink-0" />
-                        <code className="font-mono text-sm">{route.path}</code>
-                        <Badge variant={route.type === 'static' ? 'default' : 'secondary'} className="text-xs">
-                          {route.type}
+                {discoveredAreas.map((area) => {
+                  const areaState = getAreaSelectionState(area);
+                  const isExpanded = expandedAreas.has(area.name);
+                  return (
+                    <div key={area.name}>
+                      <div
+                        className="flex items-center gap-2 p-2 rounded-lg cursor-pointer hover:bg-muted/50"
+                        onClick={() => toggleAreaExpansion(area.name)}
+                      >
+                        {isExpanded ? (
+                          <ChevronDown className="h-4 w-4 text-muted-foreground flex-shrink-0" />
+                        ) : (
+                          <ChevronRight className="h-4 w-4 text-muted-foreground flex-shrink-0" />
+                        )}
+                        <div
+                          className={`w-5 h-5 rounded border flex items-center justify-center ${
+                            areaState === 'all'
+                              ? 'bg-primary border-primary text-primary-foreground'
+                              : areaState === 'some'
+                                ? 'bg-primary/50 border-primary text-primary-foreground'
+                                : 'border-muted-foreground/30'
+                          }`}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            toggleArea(area);
+                          }}
+                        >
+                          {areaState === 'all' && <Check className="h-3 w-3" />}
+                          {areaState === 'some' && <Minus className="h-3 w-3" />}
+                        </div>
+                        <FolderOpen className="h-4 w-4 text-muted-foreground flex-shrink-0" />
+                        <span className="font-medium text-sm">{area.name}</span>
+                        <Badge variant="outline" className="text-xs ml-auto">
+                          {area.routes.length} route{area.routes.length !== 1 ? 's' : ''}
                         </Badge>
                       </div>
-                      {route.description && (
-                        <p className="text-xs text-muted-foreground mt-1 ml-6">
-                          {route.description}
-                        </p>
-                      )}
-                      {route.testSuggestions && route.testSuggestions.length > 0 && (
-                        <div className="flex flex-wrap gap-1 mt-2 ml-6">
-                          {route.testSuggestions.slice(0, 2).map((suggestion, i) => (
-                            <span key={i} className="text-xs bg-muted px-2 py-0.5 rounded">
-                              {suggestion}
-                            </span>
+                      {isExpanded && (
+                        <div className="ml-7 space-y-1">
+                          {area.routes.map((route) => (
+                            <div
+                              key={route.path}
+                              className={`flex items-start gap-3 p-2 pl-4 rounded-lg cursor-pointer transition-colors ${
+                                selectedRoutes.has(route.path)
+                                  ? 'bg-primary/10 border border-primary/20'
+                                  : 'hover:bg-muted/50 border border-transparent'
+                              }`}
+                              onClick={() => toggleRoute(route.path)}
+                            >
+                              <div className={`w-5 h-5 rounded border flex items-center justify-center mt-0.5 ${
+                                selectedRoutes.has(route.path)
+                                  ? 'bg-primary border-primary text-primary-foreground'
+                                  : 'border-muted-foreground/30'
+                              }`}>
+                                {selectedRoutes.has(route.path) && <Check className="h-3 w-3" />}
+                              </div>
+                              <div className="flex-1 min-w-0">
+                                <div className="flex items-center gap-2">
+                                  <Route className="h-4 w-4 text-muted-foreground flex-shrink-0" />
+                                  <code className="font-mono text-sm">{route.path}</code>
+                                  <Badge variant={route.type === 'static' ? 'default' : 'secondary'} className="text-xs">
+                                    {route.type}
+                                  </Badge>
+                                </div>
+                                {route.description && (
+                                  <p className="text-xs text-muted-foreground mt-1 ml-6">
+                                    {route.description}
+                                  </p>
+                                )}
+                                {route.testSuggestions && route.testSuggestions.length > 0 && (
+                                  <div className="flex flex-wrap gap-1 mt-2 ml-6">
+                                    {route.testSuggestions.slice(0, 2).map((suggestion, i) => (
+                                      <span key={i} className="text-xs bg-muted px-2 py-0.5 rounded">
+                                        {suggestion}
+                                      </span>
+                                    ))}
+                                  </div>
+                                )}
+                              </div>
+                            </div>
                           ))}
                         </div>
                       )}
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
+              </div>
+            </ScrollArea>
+          </div>
+        ) : (
+          <div className="flex-1 overflow-hidden flex flex-col gap-4 min-h-0">
+            {isGenerating && (
+              <div className="space-y-2">
+                <Progress value={(generateProgress / generateTotal) * 100} />
+                <p className="text-xs text-muted-foreground text-center">
+                  Generating test {generateProgress + 1} of {generateTotal}...
+                </p>
+              </div>
+            )}
+
+            {!isGenerating && generateResults.length === 0 && (
+              <div className="flex items-center justify-between">
+                <Button variant="ghost" size="sm" onClick={toggleAllGenerate}>
+                  {selectedForGeneration.size === savedRoutes.length ? 'Deselect All' : 'Select All'}
+                </Button>
+                <span className="text-sm text-muted-foreground">
+                  {selectedForGeneration.size} of {savedRoutes.length} selected
+                </span>
+              </div>
+            )}
+
+            <ScrollArea className="flex-1 border rounded-lg min-h-0 max-h-[50vh]">
+              <div className="p-2 space-y-1">
+                {savedRoutes.map((route) => {
+                  const result = generateResults.find(r => r.path === route.path);
+                  return (
+                    <div
+                      key={route.routeId}
+                      className={`flex items-start gap-3 p-3 rounded-lg transition-colors ${
+                        result
+                          ? result.success
+                            ? 'bg-green-500/10 border border-green-500/20'
+                            : 'bg-red-500/10 border border-red-500/20'
+                          : selectedForGeneration.has(route.routeId)
+                            ? 'bg-primary/10 border border-primary/20 cursor-pointer'
+                            : 'hover:bg-muted/50 border border-transparent cursor-pointer'
+                      }`}
+                      onClick={() => !isGenerating && !result && toggleGenerateRoute(route.routeId)}
+                    >
+                      <div className="w-5 h-5 flex items-center justify-center mt-0.5 flex-shrink-0">
+                        {result ? (
+                          result.success ? (
+                            <CheckCircle2 className="h-5 w-5 text-green-500" />
+                          ) : (
+                            <XCircle className="h-5 w-5 text-red-500" />
+                          )
+                        ) : (
+                          <div className={`w-5 h-5 rounded border flex items-center justify-center ${
+                            selectedForGeneration.has(route.routeId)
+                              ? 'bg-primary border-primary text-primary-foreground'
+                              : 'border-muted-foreground/30'
+                          }`}>
+                            {selectedForGeneration.has(route.routeId) && <Check className="h-3 w-3" />}
+                          </div>
+                        )}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2">
+                          <Route className="h-4 w-4 text-muted-foreground flex-shrink-0" />
+                          <code className="font-mono text-sm">{route.path}</code>
+                          <Badge variant="outline" className="text-xs">{route.areaName}</Badge>
+                        </div>
+                        {route.testSuggestions.length > 0 && (
+                          <div className="flex flex-wrap gap-1 mt-2 ml-6">
+                            {route.testSuggestions.slice(0, 3).map((suggestion, i) => (
+                              <span key={i} className="text-xs bg-muted px-2 py-0.5 rounded">
+                                {suggestion}
+                              </span>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
             </ScrollArea>
           </div>
         )}
 
         <DialogFooter>
-          <Button variant="outline" onClick={handleClose}>
-            Cancel
-          </Button>
+          {step === 'scanning' && (
+            <Button variant="outline" onClick={handleClose}>
+              Cancel
+            </Button>
+          )}
           {step === 'preview' && (
             <>
+              <Button variant="outline" onClick={handleClose}>
+                Cancel
+              </Button>
               <Button
                 variant="outline"
                 onClick={handleScan}
@@ -251,6 +519,31 @@ export function AIScanRoutesDialog({
                 )}
                 Save {selectedRoutes.size} Routes
               </Button>
+            </>
+          )}
+          {step === 'generate' && (
+            <>
+              <Button variant="outline" onClick={handleClose} disabled={isGenerating}>
+                {generateResults.length > 0 ? 'Done' : 'Skip'}
+              </Button>
+              {generateResults.length === 0 && (
+                <Button
+                  onClick={handleGenerateTests}
+                  disabled={isGenerating || selectedForGeneration.size === 0}
+                >
+                  {isGenerating ? (
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  ) : (
+                    <FlaskConical className="h-4 w-4 mr-2" />
+                  )}
+                  Generate {selectedForGeneration.size} Test{selectedForGeneration.size !== 1 ? 's' : ''}
+                </Button>
+              )}
+              {generateResults.length > 0 && !isGenerating && (
+                <Button onClick={handleClose}>
+                  Done
+                </Button>
+              )}
             </>
           )}
         </DialogFooter>

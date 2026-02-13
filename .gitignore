@@ -62,3 +62,6 @@ packages/runner/screenshot*
 .worktrees/
 
 public/planned/*
+public/videos/*
+.playwright-mcp/*
+explore-*.mjs

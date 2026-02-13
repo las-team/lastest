@@ -401,6 +401,7 @@ async function runLocal(args: CLIArgs): Promise<void> {
       browser: settings.browser || null,
       consoleErrors: result.consoleErrors || null,
       networkRequests: result.networkRequests || null,
+      softErrors: result.softErrors || null,
     });
 
     // Log result

@@ -105,7 +105,33 @@ export class RemoteRouteScanner {
   private async resolveMonorepoPath(): Promise<string> {
     // Check if there's a package.json at root
     if (this.tree.some(e => e.path === 'package.json')) {
-      return ''; // Has package.json at root, use root
+      // Check if this is a monorepo — if so, we need to find the frontend package
+      const isMonorepo = this.tree.some(e => e.path === 'pnpm-workspace.yaml');
+      if (!isMonorepo) {
+        // Check root package.json for npm/yarn workspaces field
+        const rootPkgContent = await getFileContent(
+          this.config.accessToken,
+          this.config.owner,
+          this.config.repo,
+          'package.json',
+          this.config.branch
+        );
+        if (rootPkgContent) {
+          try {
+            const rootPkg = JSON.parse(rootPkgContent);
+            if (rootPkg.workspaces) {
+              // Has workspaces field — it's a monorepo, continue to frontendDirs
+            } else {
+              return ''; // Simple single-package repo, use root
+            }
+          } catch {
+            return ''; // Invalid JSON, fall back to root
+          }
+        } else {
+          return ''; // Can't read package.json, fall back to root
+        }
+      }
+      // Monorepo detected — fall through to frontendDirs search
     }
 
     // Common frontend directory names in monorepos
@@ -236,7 +262,7 @@ export class RemoteRouteScanner {
     const navFiles = this.tree.filter(entry => {
       if (entry.type !== 'blob') return false;
       const path = entry.path;
-      if (!path.startsWith(srcPath) && !path.startsWith(basePath || '')) return false;
+      if (!path.startsWith(srcPath) && !(basePath && path.startsWith(basePath))) return false;
       if (path.includes('node_modules')) return false;
 
       const fileName = path.split('/').pop()?.toLowerCase() || '';

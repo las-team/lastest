@@ -10,7 +10,65 @@ export const FREEZE_ANIMATIONS_CSS = `*, *::before, *::after {
   transition: none !important;
   animation-delay: 0s !important;
   transition-delay: 0s !important;
+  scroll-behavior: auto !important;
 }`;
+
+/**
+ * Script injected via addInitScript to freeze both CSS and JS animations.
+ * Runs before any page scripts on every navigation.
+ * Handles: CSS animations/transitions, Web Animations API, requestAnimationFrame,
+ * setInterval-based carousels, element.animate(), and inline style transitions.
+ */
+export const FREEZE_ANIMATIONS_SCRIPT = `
+// 1. Inject CSS to kill CSS animations/transitions (including inline styles)
+(function injectFreezeCSS() {
+  var css = '*, *::before, *::after { animation: none !important; transition: none !important; animation-delay: 0s !important; transition-delay: 0s !important; scroll-behavior: auto !important; }';
+  function inject() {
+    if (!document.querySelector('[data-freeze-animations]') && (document.head || document.documentElement)) {
+      var style = document.createElement('style');
+      style.setAttribute('data-freeze-animations', 'true');
+      style.textContent = css;
+      (document.head || document.documentElement).appendChild(style);
+    }
+  }
+  inject();
+  document.addEventListener('DOMContentLoaded', inject);
+})();
+
+// 2. Block Element.prototype.animate (Web Animations API) — prevents libraries
+//    like slick-slider from creating new JS-driven animations
+var _origAnimate = Element.prototype.animate;
+Element.prototype.animate = function() {
+  // Return a minimal Animation-like object that does nothing
+  return { cancel: function(){}, finish: function(){}, pause: function(){}, play: function(){},
+           onfinish: null, oncancel: null, playState: 'finished', finished: Promise.resolve(),
+           effect: null, timeline: null, id: '', currentTime: 0, startTime: 0,
+           addEventListener: function(){}, removeEventListener: function(){} };
+};
+
+// 3. Override setInterval to prevent auto-advancing carousels/tickers.
+//    Returns valid IDs so clearInterval still works, but callbacks never fire.
+var _origSetInterval = window.setInterval;
+window.setInterval = function() {
+  return 0;
+};
+
+// 4. Cancel all existing Web Animations on DOMContentLoaded and load
+function cancelAllAnimations() {
+  try {
+    if (typeof document.getAnimations === 'function') {
+      document.getAnimations().forEach(function(a) { a.cancel(); });
+    }
+  } catch(e) {}
+}
+document.addEventListener('DOMContentLoaded', cancelAllAnimations);
+window.addEventListener('load', function() {
+  cancelAllAnimations();
+  // Also cancel after a brief delay for late-starting animations (React hydration, etc.)
+  setTimeout(cancelAllAnimations, 100);
+  setTimeout(cancelAllAnimations, 500);
+});
+`;
 
 /**
  * Default screenshot stabilization delay in milliseconds.

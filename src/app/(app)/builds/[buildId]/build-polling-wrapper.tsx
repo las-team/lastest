@@ -23,10 +23,11 @@ interface BuildData {
 interface BuildPollingWrapperProps {
   initialBuild: BuildData;
   buildId: string;
+  isMainBranch?: boolean;
   children?: ReactNode;
 }
 
-export function BuildPollingWrapper({ initialBuild, buildId, children }: BuildPollingWrapperProps) {
+export function BuildPollingWrapper({ initialBuild, buildId, isMainBranch = false, children }: BuildPollingWrapperProps) {
   const [build, setBuild] = useState<BuildData>(initialBuild);
   const [isPolling, setIsPolling] = useState(!initialBuild.completedAt);
 
@@ -85,12 +86,14 @@ export function BuildPollingWrapper({ initialBuild, buildId, children }: BuildPo
           flakyCount: build.flakyCount ?? 0,
           failedCount: build.failedCount,
           passedCount: build.passedCount,
+          errorsCount: build.diffs.filter(d => d.errorMessage).length,
           elapsedMs: build.elapsedMs,
         }}
         hasPendingDiffs={pendingDiffs.length > 0}
         isRunning={isRunning}
         completedTests={completedTests}
         codeChangeTestIds={build.codeChangeTestIds}
+        isMainBranch={isMainBranch}
       />
     </>
   );

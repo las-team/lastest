@@ -169,3 +169,19 @@
 .animate-shimmer {
   animation: shimmer 1.5s infinite;
 }
+
+/* Settings highlight pulse from onboarding navigation */
+@keyframes settings-pulse {
+  0%, 100% {
+    box-shadow: 0 0 0 0 oklch(0.75 0.15 85);
+  }
+  50% {
+    box-shadow: 0 0 0 4px oklch(0.75 0.15 85 / 0.4);
+  }
+}
+
+.settings-highlight {
+  animation: settings-pulse 1s ease-in-out 3;
+  border-color: oklch(0.75 0.15 85) !important;
+  scroll-margin-top: 2rem;
+}

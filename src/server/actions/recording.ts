@@ -64,7 +64,7 @@ export async function startRecording(
   url: string,
   repositoryId?: string | null,
   runnerId?: string,
-  setupOptions?: { testId?: string | null; scriptId?: string | null }
+  setupOptions?: { testId?: string | null; scriptId?: string | null; steps?: Array<{ stepType: 'test' | 'script'; testId?: string | null; scriptId?: string | null }> }
 ): Promise<{ sessionId?: string; error?: string }> {
   const recorder = getRecorder(repositoryId);
 
@@ -211,9 +211,13 @@ export async function updateRerecordedTest(data: {
   targetUrl?: string;
 }) {
   await requireTeamAccess();
-  const { updateTestWithVersion } = await import('@/lib/db/queries');
+  const { updateTestWithVersion, getTest } = await import('@/lib/db/queries');
+  const { getCurrentBranchForRepo } = await import('@/lib/git-utils');
 
   const { updateTest } = await import('@/lib/db/queries');
+
+  const test = await getTest(data.testId);
+  const branch = await getCurrentBranchForRepo(test?.repositoryId);
 
   await updateTestWithVersion(
     data.testId,
@@ -221,7 +225,8 @@ export async function updateRerecordedTest(data: {
       code: data.code,
       ...(data.targetUrl && { targetUrl: data.targetUrl }),
     },
-    'rerecorded'
+    'rerecorded',
+    branch ?? undefined
   );
 
   // Clear placeholder flag after re-recording

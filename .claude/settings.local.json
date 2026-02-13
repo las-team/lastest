@@ -65,7 +65,12 @@
       "Bash(docker build:*)",
       "WebFetch(domain:argos-ci.com)",
       "Bash(pnpm test:*)",
-      "Bash(pnpm exec tsx:*)"
+      "Bash(pnpm exec tsx:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "WebFetch(domain:playwright.dev)",
+      "Bash(git log:*)",
+      "WebFetch(domain:www.cursorinsight.com)"
     ]
   },
   "disabledMcpjsonServers": [

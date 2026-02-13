@@ -133,7 +133,8 @@ export async function promoteTestVersionsFromBranch(
       await queries.updateTestWithVersion(
         testId,
         { code: version.code, name: version.name, targetUrl: version.targetUrl },
-        'branch_merge' as TestChangeReason
+        'branch_merge' as TestChangeReason,
+        fromBranch
       );
       promoted++;
     } else {

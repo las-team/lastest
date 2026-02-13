@@ -13,7 +13,9 @@ import type { SetupContext } from '@/lib/setup/types';
 import { executeTests } from '@/lib/execution/executor';
 import { getCurrentSession, requireTeamAccess, requireRepoAccess } from '@/lib/auth';
 import { generateDiff, type Rectangle } from '@/lib/diff/generator';
-import { hashImage } from '@/lib/diff/hasher';
+import { hashImage, hashImageWithDimensions } from '@/lib/diff/hasher';
+import { PNG } from 'pngjs';
+import fs from 'fs';
 import { sendSlackNotification } from '@/lib/integrations/slack';
 import { sendDiscordNotification } from '@/lib/integrations/discord';
 import { sendCustomWebhookNotification } from '@/lib/integrations/custom-webhook';
@@ -132,6 +134,7 @@ export interface BuildSummary {
   pullRequestId: string | null;
   comparisonMode: string | null;
   codeChangeTestIds: string[] | null;
+  isMainBranch: boolean;
   diffs: VisualDiffWithTestStatus[];
 }
 
@@ -369,6 +372,20 @@ async function runBuildAsync(
     }
   }
 
+  // Populate versionIdMap for non-overridden tests (latest version)
+  for (const test of tests) {
+    if (!versionIdMap.has(test.id)) {
+      const versions = await queries.getTestVersions(test.id);
+      if (versions.length > 0) {
+        versionIdMap.set(test.id, versions[0].id);
+      }
+    }
+  }
+
+  // Get gitCommit from testRun for first-build stamping
+  const testRun = await queries.getTestRun(testRunId);
+  const gitCommit = testRun?.gitCommit ?? null;
+
   let passedCount = 0;
   let failedCount = 0;
   let changesDetected = 0;
@@ -387,7 +404,7 @@ async function runBuildAsync(
   const playwrightSettings = await queries.getPlaywrightSettings(repositoryId);
 
   // Result callback for processing diffs
-  const onResult = async (result: { testId: string; status: string; screenshotPath?: string; screenshots: { path: string; label?: string }[]; errorMessage?: string; durationMs?: number; a11yViolations?: { id: string; impact: 'critical' | 'serious' | 'moderate' | 'minor'; description: string; help: string; helpUrl: string; nodes: number }[]; stabilityMetadata?: { frameCount: number; stableFrames: number; maxFrameDiff: number; isStable: boolean } }) => {
+  const onResult = async (result: { testId: string; status: string; screenshotPath?: string; screenshots: { path: string; label?: string }[]; errorMessage?: string; durationMs?: number; a11yViolations?: { id: string; impact: 'critical' | 'serious' | 'moderate' | 'minor'; description: string; help: string; helpUrl: string; nodes: number }[]; stabilityMetadata?: { frameCount: number; stableFrames: number; maxFrameDiff: number; isStable: boolean }; videoPath?: string; softErrors?: string[] }) => {
     processedCount++;
 
     // Save test result immediately
@@ -403,7 +420,15 @@ async function runBuildAsync(
       viewport: '1280x720',
       browser: 'chromium',
       a11yViolations: result.a11yViolations,
+      videoPath: result.videoPath,
+      softErrors: result.softErrors,
     });
+
+    // Stamp first build on the test version (idempotent)
+    const versionId = versionIdMap.get(result.testId);
+    if (versionId) {
+      await queries.stampFirstBuild(versionId, buildId, branch, gitCommit);
+    }
 
     if (result.status === 'passed') passedCount++;
     else if (result.status === 'failed' || result.status === 'setup_failed') failedCount++;
@@ -434,6 +459,22 @@ async function runBuildAsync(
       if (diffResult.classification !== 'unchanged') {
         triggerAIDiffAnalysis(diffResult.diffId, repositoryId).catch(console.error);
       }
+    }
+
+    // Create placeholder diff for failed tests with no screenshots
+    if (screenshots.length === 0 && (result.status === 'failed' || result.status === 'setup_failed')) {
+      await queries.createVisualDiff({
+        buildId,
+        testResultId: testResult.id,
+        testId: result.testId,
+        stepLabel: null,
+        currentImagePath: null,
+        status: 'auto_approved',
+        classification: 'unchanged',
+        pixelDifference: 0,
+        percentageDifference: '0',
+        metadata: { changedRegions: [] },
+      });
     }
 
     // Update build progress incrementally
@@ -724,6 +765,7 @@ async function processVisualDiff(
   // Get the repo's default branch
   const repo = repositoryId ? await queries.getRepository(repositoryId) : null;
   const defaultBranch = repo?.defaultBranch || 'main';
+  const shouldAutoApprove = repo?.autoApproveDefaultBranch && branch === defaultBranch;
 
   // Fetch ignore regions for this test
   const testIgnoreRegions = await queries.getIgnoreRegions(testId);
@@ -751,8 +793,13 @@ async function processVisualDiff(
   const baseline = await queries.getBranchBaseline(testId, stepLabel, branch);
 
   // Check for carry-forward (previously approved identical image)
-  const currentHash = hashImage(path.join(process.cwd(), 'public', currentScreenshotPath));
-  const matchingBaseline = await queries.getBaselineByHash(testId, currentHash, stepLabel);
+  // Try dimension-aware hash first, fall back to legacy hash for old baselines
+  const currentImageFullPath = path.join(process.cwd(), 'public', currentScreenshotPath);
+  const currentHashWithDims = hashImageWithDimensions(currentImageFullPath);
+  const currentHash = hashImage(currentImageFullPath);
+  const matchingBaseline =
+    await queries.getBaselineByHash(testId, currentHashWithDims, stepLabel) ||
+    await queries.getBaselineByHash(testId, currentHash, stepLabel);
 
   // Get planned screenshot if exists (for design comparison)
   const plannedScreenshot = await queries.getPlannedScreenshotByTest(testId, stepLabel || null);
@@ -850,29 +897,45 @@ async function processVisualDiff(
   };
 
   if (matchingBaseline) {
-    // Auto-approve: identical to previously approved baseline
-    const plannedDiff = await generatePlannedDiff(currentScreenshotPath);
-    const mainDiff = await generateMainBaselineDiff(currentScreenshotPath);
+    // Validate carry-forward: verify dimensions match before trusting hash
+    let carryForwardValid = false;
+    try {
+      const currentBuf = fs.readFileSync(path.join(process.cwd(), 'public', currentScreenshotPath));
+      const baselineBuf = fs.readFileSync(path.join(process.cwd(), 'public', matchingBaseline.imagePath));
+      const currentPng = PNG.sync.read(currentBuf);
+      const baselinePng = PNG.sync.read(baselineBuf);
+      carryForwardValid = currentPng.width === baselinePng.width && currentPng.height === baselinePng.height;
+    } catch {
+      // If we can't read either file, fall through to normal diff
+      carryForwardValid = false;
+    }
 
-    const diff = await queries.createVisualDiff({
-      buildId,
-      testResultId,
-      testId,
-      stepLabel: stepLabel || null,
-      baselineImagePath: matchingBaseline.imagePath,
-      currentImagePath: currentScreenshotPath,
-      status: 'auto_approved',
-      classification: 'unchanged',
-      pixelDifference: 0,
-      percentageDifference: '0',
-      metadata: { changedRegions: [] },
-      ...plannedDiff,
-      ...mainDiff,
-    });
-    return { hasChanges: false, diffId: diff.id, classification: 'unchanged' };
+    if (carryForwardValid) {
+      // Auto-approve: identical to previously approved baseline
+      const plannedDiff = await generatePlannedDiff(currentScreenshotPath);
+      const mainDiff = await generateMainBaselineDiff(currentScreenshotPath);
+
+      const diff = await queries.createVisualDiff({
+        buildId,
+        testResultId,
+        testId,
+        stepLabel: stepLabel || null,
+        baselineImagePath: matchingBaseline.imagePath,
+        currentImagePath: currentScreenshotPath,
+        status: 'auto_approved',
+        classification: 'unchanged',
+        pixelDifference: 0,
+        percentageDifference: '0',
+        metadata: { changedRegions: [] },
+        ...plannedDiff,
+        ...mainDiff,
+      });
+      return { hasChanges: false, diffId: diff.id, classification: 'unchanged' };
+    }
+    // Dimensions mismatch — hash is stale/wrong, fall through to normal diff
   }
 
-  // No baseline - this is a new test, requires manual review
+  // No baseline - this is a new test, requires manual review (or auto-approve on default branch)
   if (!baseline) {
     const plannedDiff = await generatePlannedDiff(currentScreenshotPath);
     const mainDiff = await generateMainBaselineDiff(currentScreenshotPath);
@@ -883,7 +946,7 @@ async function processVisualDiff(
       testId,
       stepLabel: stepLabel || null,
       currentImagePath: currentScreenshotPath,
-      status: 'pending',
+      status: shouldAutoApprove ? 'auto_approved' : 'pending',
       classification: 'changed',
       pixelDifference: 0,
       percentageDifference: '0',
@@ -892,7 +955,20 @@ async function processVisualDiff(
       ...mainDiff,
     });
 
-    return { hasChanges: true, diffId: diff.id, classification: 'changed' };
+    if (shouldAutoApprove) {
+      const autoHash = hashImageWithDimensions(path.join(process.cwd(), 'public', currentScreenshotPath));
+      await queries.deactivateBaselines(testId, stepLabel || null, branch);
+      await queries.createBaseline({
+        testId,
+        stepLabel: stepLabel || null,
+        imagePath: currentScreenshotPath,
+        imageHash: autoHash,
+        branch,
+        approvedFromDiffId: diff.id,
+      });
+    }
+
+    return { hasChanges: !shouldAutoApprove, diffId: diff.id, classification: 'changed' };
   }
 
   // Generate diff against primary baseline
@@ -909,7 +985,8 @@ async function processVisualDiff(
 
     const pct = diffResult.percentageDifference;
     const { classification, status } = classifyDiff(pct);
-    const hasChanges = classification !== 'unchanged';
+    const effectiveStatus = shouldAutoApprove ? 'auto_approved' : status;
+    const hasChanges = shouldAutoApprove ? false : classification !== 'unchanged';
     const diffImagePath = diffResult.diffImagePath.replace(process.cwd() + '/public', '');
 
     const plannedDiff = await generatePlannedDiff(currentScreenshotPath);
@@ -923,7 +1000,7 @@ async function processVisualDiff(
       baselineImagePath: baseline.imagePath,
       currentImagePath: currentScreenshotPath,
       diffImagePath,
-      status,
+      status: effectiveStatus,
       classification,
       pixelDifference: diffResult.pixelDifference,
       percentageDifference: diffResult.percentageDifference.toString(),
@@ -931,6 +1008,19 @@ async function processVisualDiff(
       ...plannedDiff,
       ...mainDiff,
     });
+
+    if (shouldAutoApprove && classification !== 'unchanged') {
+      const autoHash = hashImageWithDimensions(path.join(process.cwd(), 'public', currentScreenshotPath));
+      await queries.deactivateBaselines(testId, stepLabel || null, branch);
+      await queries.createBaseline({
+        testId,
+        stepLabel: stepLabel || null,
+        imagePath: currentScreenshotPath,
+        imageHash: autoHash,
+        branch,
+        approvedFromDiffId: diff.id,
+      });
+    }
 
     return { hasChanges, diffId: diff.id, classification };
   } catch {
@@ -967,6 +1057,11 @@ export async function getBuildSummary(buildId: string): Promise<BuildSummary | n
   const testRun = build.testRunId ? await queries.getTestRun(build.testRunId) : null;
   const diffs = await queries.getVisualDiffsWithTestStatus(buildId);
 
+  // Determine if build is on the default branch
+  const repo = testRun?.repositoryId ? await queries.getRepository(testRun.repositoryId) : null;
+  const defaultBranch = repo?.defaultBranch || 'main';
+  const gitBranch = testRun?.gitBranch || 'unknown';
+
   return {
     id: build.id,
     overallStatus: build.overallStatus as BuildStatus,
@@ -981,7 +1076,8 @@ export async function getBuildSummary(buildId: string): Promise<BuildSummary | n
     pullRequestId: build.pullRequestId,
     comparisonMode: build.comparisonMode,
     codeChangeTestIds: (build.codeChangeTestIds as string[] | null) ?? null,
-    gitBranch: testRun?.gitBranch || 'unknown',
+    isMainBranch: gitBranch === defaultBranch,
+    gitBranch,
     gitCommit: testRun?.gitCommit || 'unknown',
     diffs,
   };
@@ -1257,10 +1353,11 @@ export async function saveComposeConfig(
   repositoryId: string,
   branch: string,
   selectedTestIds: string[],
+  excludedTestIds: string[],
   versionOverrides: Record<string, string>,
 ) {
   await requireRepoAccess(repositoryId);
-  await queries.upsertComposeConfig(repositoryId, branch, { selectedTestIds, versionOverrides });
+  await queries.upsertComposeConfig(repositoryId, branch, { selectedTestIds, excludedTestIds, versionOverrides });
   revalidatePath('/compose');
   revalidatePath('/run');
 }

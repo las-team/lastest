@@ -11,7 +11,7 @@ import { Collapsible, CollapsibleTrigger, CollapsibleContent } from '@/component
 import { batchApproveDiffs, batchRejectDiffs, acceptAIApprovals } from '@/server/actions/diffs';
 
 // Filter type for the build detail page metrics
-export type FilterType = 'all' | 'tests' | 'changed' | 'flaky' | 'failed' | 'passed' | 'ai-approve' | 'ai-review' | 'ai-flag';
+export type FilterType = 'all' | 'tests' | 'changed' | 'flaky' | 'failed' | 'passed' | 'errors' | 'ai-approve' | 'ai-review' | 'ai-flag';
 
 // Utility function to filter diffs based on the selected filter type
 export function filterDiffs(diffs: VisualDiffWithTestStatus[], filter: FilterType): VisualDiffWithTestStatus[] {
@@ -23,6 +23,8 @@ export function filterDiffs(diffs: VisualDiffWithTestStatus[], filter: FilterTyp
       return diffs.filter((d) => d.classification === 'changed' || (d.pixelDifference && d.pixelDifference > 0 && !d.classification));
     case 'failed':
       return diffs.filter((d) => d.testResultStatus === 'failed' || d.status === 'rejected');
+    case 'errors':
+      return diffs.filter((d) => d.errorMessage);
     case 'passed':
       return diffs.filter((d) => d.testResultStatus === 'passed');
     case 'flaky':
@@ -61,6 +63,7 @@ const filterLabels: Record<FilterType, string> = {
   changed: 'Changed',
   flaky: 'Flaky',
   failed: 'Failed',
+  errors: 'Errors',
   passed: 'Passed',
   'ai-approve': 'AI: Safe',
   'ai-review': 'AI: Review',
@@ -100,12 +103,14 @@ export interface BuildDetailClientProps {
     flakyCount: number;
     failedCount: number;
     passedCount: number;
+    errorsCount: number;
     elapsedMs: number | null;
   };
   hasPendingDiffs: boolean;
   isRunning?: boolean;
   completedTests?: number;
   codeChangeTestIds?: string[] | null;
+  isMainBranch?: boolean;
 }
 
 export function BuildDetailClient({
@@ -115,12 +120,13 @@ export function BuildDetailClient({
   isRunning = false,
   completedTests = 0,
   codeChangeTestIds,
+  isMainBranch = false,
 }: BuildDetailClientProps) {
   const codeChangeTestIdSet = new Set(codeChangeTestIds ?? []);
   const [activeFilter, setActiveFilter] = useState<FilterType>('all');
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [isProcessing, setIsProcessing] = useState(false);
-  const [viewMode, setViewMode] = useState<'branch' | 'main'>('branch');
+  const [viewMode, setViewMode] = useState<'branch' | 'main'>(isMainBranch ? 'branch' : 'main');
   const [groupByArea, setGroupByArea] = useState(false);
   const [expandKey, setExpandKey] = useState(0);
   const [allExpanded, setAllExpanded] = useState(true);
@@ -251,6 +257,7 @@ export function BuildDetailClient({
         flakyCount={metrics.flakyCount}
         failedCount={metrics.failedCount}
         passedCount={metrics.passedCount}
+        errorsCount={metrics.errorsCount}
         elapsedMs={metrics.elapsedMs}
         activeFilter={activeFilter}
         onFilterChange={handleFilterChange}
@@ -259,8 +266,8 @@ export function BuildDetailClient({
         aiSafeCount={aiSafeCount}
         aiReviewCount={aiReviewCount}
         aiFlagCount={aiFlagCount}
-        viewMode={viewMode}
-        onViewModeChange={setViewMode}
+        viewMode={isMainBranch ? undefined : viewMode}
+        onViewModeChange={isMainBranch ? undefined : setViewMode}
         groupByArea={groupByArea}
         onGroupByAreaChange={setGroupByArea}
       />

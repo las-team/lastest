@@ -1,6 +1,6 @@
 'use client';
 
-import { FileCheck2, AlertTriangle, XCircle, Clock, RefreshCw, CheckCircle, Sparkles, Flag, GitBranch, Shield, Layers } from 'lucide-react';
+import { FileCheck2, AlertTriangle, XCircle, Clock, RefreshCw, CheckCircle, Sparkles, Flag, GitBranch, Shield, Layers, Bug } from 'lucide-react';
 import type { FilterType } from '@/app/(app)/builds/[buildId]/build-detail-client';
 import { cn } from '@/lib/utils';
 
@@ -9,6 +9,7 @@ interface MetricsRowProps {
   changesDetected: number;
   flakyCount: number;
   failedCount: number;
+  errorsCount?: number;
   passedCount?: number;
   elapsedMs: number | null;
   activeFilter?: FilterType;
@@ -29,6 +30,7 @@ export function MetricsRow({
   changesDetected,
   flakyCount,
   failedCount,
+  errorsCount = 0,
   passedCount = 0,
   elapsedMs,
   activeFilter,
@@ -79,6 +81,14 @@ export function MetricsRow({
       color: failedCount > 0 ? 'text-red-600' : 'text-muted-foreground/50',
       bgColor: failedCount > 0 ? 'bg-red-50' : 'bg-muted',
       filterKey: 'failed',
+    },
+    {
+      label: 'Errors',
+      value: errorsCount,
+      icon: Bug,
+      color: errorsCount > 0 ? 'text-orange-600' : 'text-muted-foreground/50',
+      bgColor: errorsCount > 0 ? 'bg-orange-50' : 'bg-muted',
+      filterKey: 'errors',
     },
     {
       label: 'Changed',
@@ -194,7 +204,7 @@ export function MetricsRow({
       </div>
 
       {/* Metrics Grid */}
-      <div className="grid grid-cols-5 gap-4">
+      <div className="grid grid-cols-6 gap-4">
         {metrics.map((metric) => {
           const Icon = metric.icon;
           const isClickable = metric.filterKey !== null;

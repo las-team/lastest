@@ -34,12 +34,8 @@ export interface PageShiftInfo {
   detected: boolean;
   deltaY: number;
   confidence: number;
-  excludedFromDiff: boolean;
   insertedRows?: number;
   deletedRows?: number;
-  originalPercentage?: number;  // diff percentage before shift exclusion
-  adjustedPercentage?: number;  // diff percentage after shift exclusion
-  fuzzyMatchedRows?: number;    // rows reclassified from insert/delete to match via fuzzy comparison
 }
 
 export interface AIDiffAnalysis {
@@ -85,6 +81,7 @@ export const functionalAreas = sqliteTable('functional_areas', {
   parentId: text('parent_id'),
   isRouteFolder: integer('is_route_folder', { mode: 'boolean' }).default(false),
   orderIndex: integer('order_index').default(0),
+  deletedAt: integer('deleted_at', { mode: 'timestamp' }),
 });
 
 export const tests = sqliteTable('tests', {
@@ -148,6 +145,8 @@ export const testResults = sqliteTable('test_results', {
   consoleErrors: text('console_errors', { mode: 'json' }).$type<string[]>(),
   networkRequests: text('network_requests', { mode: 'json' }).$type<NetworkRequest[]>(),
   a11yViolations: text('a11y_violations', { mode: 'json' }).$type<A11yViolation[]>(),
+  videoPath: text('video_path'),
+  softErrors: text('soft_errors', { mode: 'json' }).$type<string[]>(),
 });
 
 // Repository provider type
@@ -172,6 +171,7 @@ export const repositories = sqliteTable('repositories', {
   defaultSetupTestId: text('default_setup_test_id'), // Default test-as-setup for all tests
   defaultSetupScriptId: text('default_setup_script_id'), // OR default script
   testingTemplate: text('testing_template'), // Testing template ID (e.g. 'saas', 'marketing', 'canvas')
+  autoApproveDefaultBranch: integer('auto_approve_default_branch', { mode: 'boolean' }).default(false),
   createdAt: integer('created_at', { mode: 'timestamp' }),
 });
 
@@ -261,7 +261,7 @@ export const visualDiffs = sqliteTable('visual_diffs', {
   testId: text('test_id').references(() => tests.id).notNull(),
   stepLabel: text('step_label'),
   baselineImagePath: text('baseline_image_path'),
-  currentImagePath: text('current_image_path').notNull(),
+  currentImagePath: text('current_image_path'),
   diffImagePath: text('diff_image_path'),
   status: text('status').notNull().default('pending'), // 'pending', 'approved', 'rejected', 'auto_approved'
   pixelDifference: integer('pixel_difference').default(0),
@@ -363,6 +363,7 @@ export type VisualDiffWithTestStatus = VisualDiff & {
   testName: string | null;
   functionalAreaName: string | null;
   stepLabel?: string | null;
+  errorMessage?: string | null;
 };
 export type NewVisualDiff = typeof visualDiffs.$inferInsert;
 export type Baseline = typeof baselines.$inferSelect;
@@ -468,9 +469,14 @@ export const playwrightSettings = sqliteTable('playwright_settings', {
   enabledRecordingEngines: text('enabled_recording_engines', { mode: 'json' }).$type<RecordingEngine[]>(),
   defaultRecordingEngine: text('default_recording_engine').default('lastest'),
   freezeAnimations: integer('freeze_animations', { mode: 'boolean' }).default(false), // freeze CSS animations/transitions
+  enableVideoRecording: integer('enable_video_recording', { mode: 'boolean' }).default(false), // record test runs as WebM video
   screenshotDelay: integer('screenshot_delay').default(0), // ms delay before screenshot
   maxParallelTests: integer('max_parallel_tests').default(1), // max tests to run in parallel locally
   stabilization: text('stabilization', { mode: 'json' }).$type<StabilizationSettings>(), // snapshot stabilization settings
+  acceptAnyCertificate: integer('accept_any_certificate', { mode: 'boolean' }).default(false), // ignore HTTPS/SSL cert errors
+  networkErrorMode: text('network_error_mode').default('fail'), // 'fail' | 'warn' | 'ignore'
+  ignoreExternalNetworkErrors: integer('ignore_external_network_errors', { mode: 'boolean' }).default(false), // skip errors from different origins
+  consoleErrorMode: text('console_error_mode').default('fail'), // 'fail' | 'warn' | 'ignore'
   createdAt: integer('created_at', { mode: 'timestamp' }),
   updatedAt: integer('updated_at', { mode: 'timestamp' }),
 });
@@ -631,7 +637,7 @@ export const DEFAULT_AI_SETTINGS = {
 };
 
 // AI Prompt Logging for debugging and auditing
-export type AIActionType = 'create_test' | 'fix_test' | 'enhance_test' | 'scan_routes' | 'test_connection' | 'analyze_specs' | 'mcp_explore' | 'analyze_diff' | 'extract_user_stories' | 'generate_spec_tests';
+export type AIActionType = 'create_test' | 'fix_test' | 'enhance_test' | 'scan_routes' | 'test_connection' | 'analyze_specs' | 'mcp_explore' | 'analyze_diff' | 'extract_user_stories' | 'generate_spec_tests' | 'classify_template';
 export type AILogStatus = 'pending' | 'success' | 'error';
 
 export const aiPromptLogs = sqliteTable('ai_prompt_logs', {
@@ -688,6 +694,9 @@ export const testVersions = sqliteTable('test_versions', {
   targetUrl: text('target_url'),
   changeReason: text('change_reason'), // 'manual_edit' | 'ai_fix' | 'ai_enhance' | 'restored_from_vN' | 'branch_merge'
   branch: text('branch'), // nullable — tracks which branch this version was created on
+  firstBuildId: text('first_build_id'), // nullable — first build that executed this version
+  firstBuildBranch: text('first_build_branch'), // denormalized branch name from first build
+  firstBuildCommit: text('first_build_commit'), // denormalized commit SHA from first build
   createdAt: integer('created_at', { mode: 'timestamp' }),
 });
 
@@ -1083,9 +1092,76 @@ export const composeConfigs = sqliteTable('compose_configs', {
   repositoryId: text('repository_id').references(() => repositories.id, { onDelete: 'cascade' }).notNull(),
   branch: text('branch').notNull(),
   selectedTestIds: text('selected_test_ids', { mode: 'json' }).$type<string[]>(),
+  excludedTestIds: text('excluded_test_ids', { mode: 'json' }).$type<string[]>(),
   versionOverrides: text('version_overrides', { mode: 'json' }).$type<Record<string, string>>(),
   updatedAt: integer('updated_at', { mode: 'timestamp' }),
 });
 
 export type ComposeConfig = typeof composeConfigs.$inferSelect;
 export type NewComposeConfig = typeof composeConfigs.$inferInsert;
+
+// ============================================
+// Agent Sessions (Play Agent onboarding flow)
+// ============================================
+
+export type AgentSessionStatus = 'active' | 'paused' | 'completed' | 'failed' | 'cancelled';
+
+export type AgentStepId =
+  | 'settings_check'
+  | 'select_repo'
+  | 'scan_and_template'
+  | 'discover'
+  | 'env_setup'
+  | 'run_tests'
+  | 'fix_tests'
+  | 'rerun_tests'
+  | 'summary';
+
+export type AgentStepStatus = 'pending' | 'active' | 'waiting_user' | 'completed' | 'failed' | 'skipped';
+
+export interface AgentSubstep {
+  label: string;
+  status: 'pending' | 'running' | 'done' | 'error';
+  detail?: string;
+}
+
+export interface AgentStepState {
+  id: AgentStepId;
+  status: AgentStepStatus;
+  label: string;
+  description: string;
+  startedAt?: string;
+  completedAt?: string;
+  error?: string;
+  result?: Record<string, unknown>;
+  userAction?: string;
+  substeps?: AgentSubstep[];
+}
+
+export interface AgentSessionMetadata {
+  buildIds?: string[];
+  fixAttempts?: Record<string, number>;
+  codeHashes?: Record<string, string[]>;
+  testsCreated?: number;
+  initialPassedCount?: number;
+  initialFailedCount?: number;
+  finalPassedCount?: number;
+  finalFailedCount?: number;
+  [key: string]: unknown;
+}
+
+export const agentSessions = sqliteTable('agent_sessions', {
+  id: text('id').primaryKey(),
+  repositoryId: text('repository_id').references(() => repositories.id, { onDelete: 'cascade' }).notNull(),
+  teamId: text('team_id'),
+  status: text('status').$type<AgentSessionStatus>().notNull().default('active'),
+  currentStepId: text('current_step_id').$type<AgentStepId>(),
+  steps: text('steps', { mode: 'json' }).$type<AgentStepState[]>().notNull(),
+  metadata: text('metadata', { mode: 'json' }).$type<AgentSessionMetadata>().notNull(),
+  createdAt: integer('created_at', { mode: 'timestamp' }),
+  updatedAt: integer('updated_at', { mode: 'timestamp' }),
+  completedAt: integer('completed_at', { mode: 'timestamp' }),
+});
+
+export type AgentSession = typeof agentSessions.$inferSelect;
+export type NewAgentSession = typeof agentSessions.$inferInsert;

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import {
   Dialog,
   DialogContent,
@@ -10,35 +10,36 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
-import { mcpExploreRoutes, saveDiscoveredRoutes, type SavedRouteInfo, type DiscoveredArea } from '@/server/actions/ai-routes';
+import { scanBranchDiff, saveDiscoveredRoutes, type SavedRouteInfo, type DiscoveredArea } from '@/server/actions/ai-routes';
 import { aiCreateTest, saveGeneratedTest } from '@/server/actions/ai';
-import { Loader2, Globe, Save, Check, Minus, Route, FlaskConical, CheckCircle2, XCircle, ChevronDown, ChevronRight, FolderOpen } from 'lucide-react';
+import { Loader2, GitCompare, Save, RefreshCw, Check, Minus, Route, FlaskConical, CheckCircle2, XCircle, ChevronDown, ChevronRight, FolderOpen } from 'lucide-react';
 import { toast } from 'sonner';
 
-interface MCPExploreRoutesDialogProps {
+interface CodeDiffScanDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   repositoryId: string;
   onSaved?: () => void;
 }
 
-export function MCPExploreRoutesDialog({
+export function CodeDiffScanDialog({
   open,
   onOpenChange,
   repositoryId,
   onSaved,
-}: MCPExploreRoutesDialogProps) {
-  const [step, setStep] = useState<'input' | 'exploring' | 'preview' | 'generate'>('input');
-  const [baseURL, setBaseURL] = useState('http://localhost:3000');
-  const [isExploring, setIsExploring] = useState(false);
+}: CodeDiffScanDialogProps) {
+  const [step, setStep] = useState<'scanning' | 'preview' | 'generate'>('scanning');
+  const [isScanning, setIsScanning] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [discoveredAreas, setDiscoveredAreas] = useState<DiscoveredArea[]>([]);
   const [selectedRoutes, setSelectedRoutes] = useState<Set<string>>(new Set());
   const [expandedAreas, setExpandedAreas] = useState<Set<string>>(new Set());
+  const [hasScanned, setHasScanned] = useState(false);
+  const [hasStartedScan, setHasStartedScan] = useState(false);
+  const [fileCount, setFileCount] = useState(0);
 
   // Generate step state
   const [savedRoutes, setSavedRoutes] = useState<SavedRouteInfo[]>([]);
@@ -51,33 +52,35 @@ export function MCPExploreRoutesDialog({
   const allRoutes = discoveredAreas.flatMap((a) => a.routes);
   const totalRouteCount = allRoutes.length;
 
-  const handleExplore = async () => {
-    if (!baseURL.trim()) {
-      toast.error('Please enter a base URL');
-      return;
+  // Trigger scan when dialog opens
+  useEffect(() => {
+    if (open && !hasStartedScan && !hasScanned) {
+      setHasStartedScan(true);
+      handleScan();
     }
+  }, [open, hasStartedScan, hasScanned]);
 
-    setStep('exploring');
-    setIsExploring(true);
+  const handleScan = async () => {
+    setIsScanning(true);
     try {
-      const result = await mcpExploreRoutes(repositoryId, baseURL.trim());
+      const result = await scanBranchDiff(repositoryId);
 
       if (result.success && result.functionalAreas) {
         setDiscoveredAreas(result.functionalAreas);
+        setFileCount(result.fileCount || 0);
         const allPaths = result.functionalAreas.flatMap((a) => a.routes.map((r) => r.path));
         setSelectedRoutes(new Set(allPaths));
         setExpandedAreas(new Set(result.functionalAreas.map((a) => a.name)));
         setStep('preview');
-        toast.success(`Found ${allPaths.length} routes in ${result.functionalAreas.length} areas`);
+        setHasScanned(true);
+        toast.success(`Found ${allPaths.length} affected routes from ${result.fileCount || 0} changed files`);
       } else {
-        toast.error(result.error || 'Failed to explore routes');
-        setStep('input');
+        toast.error(result.error || 'Failed to analyze branch diff');
       }
     } catch {
-      toast.error('Failed to explore routes');
-      setStep('input');
+      toast.error('Failed to analyze branch diff');
     } finally {
-      setIsExploring(false);
+      setIsScanning(false);
     }
   };
 
@@ -131,7 +134,6 @@ export function MCPExploreRoutesDialog({
   };
 
   const handleSave = async () => {
-    // Build areas with only selected routes
     const areasToSave: DiscoveredArea[] = discoveredAreas
       .map((area) => ({
         ...area,
@@ -191,14 +193,14 @@ export function MCPExploreRoutesDialog({
     let successCount = 0;
     for (const route of routesToGenerate) {
       try {
+        // Use the change-specific test suggestions from the AI diff analysis
         const suggestionText = route.testSuggestions.length > 0
-          ? route.testSuggestions.join(', ')
-          : `Visual regression test for ${route.path}`;
+          ? route.testSuggestions.join('. ')
+          : `Visual regression test for changes on ${route.path}`;
 
         const result = await aiCreateTest(repositoryId, {
-          userPrompt: `Create a visual regression test for the page at ${route.path}. Test suggestions: ${suggestionText}`,
+          userPrompt: `Create a visual regression test for ${route.path} that specifically targets these code changes: ${suggestionText}`,
           routePath: route.path,
-          useMCP: true,
         }, route.routeId);
 
         if (result.success && result.code) {
@@ -206,7 +208,7 @@ export function MCPExploreRoutesDialog({
           await saveGeneratedTest({
             repositoryId,
             functionalAreaId: route.areaId,
-            name: `${testName} - Visual Test`,
+            name: `${testName} - Diff Test`,
             code: result.code,
             targetUrl: route.path,
           });
@@ -250,11 +252,13 @@ export function MCPExploreRoutesDialog({
   };
 
   const handleClose = () => {
-    setStep('input');
+    setStep('scanning');
     setDiscoveredAreas([]);
     setSelectedRoutes(new Set());
     setExpandedAreas(new Set());
-    setIsExploring(false);
+    setHasScanned(false);
+    setHasStartedScan(false);
+    setFileCount(0);
     setSavedRoutes([]);
     setSelectedForGeneration(new Set());
     setGenerateResults([]);
@@ -263,55 +267,42 @@ export function MCPExploreRoutesDialog({
     onOpenChange(false);
   };
 
+  const handleOpenChange = (newOpen: boolean) => {
+    if (!newOpen) {
+      handleClose();
+    }
+  };
+
   return (
-    <Dialog open={open} onOpenChange={(newOpen) => !newOpen && handleClose()}>
+    <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent className="max-w-2xl max-h-[80vh] flex flex-col">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
-            <Globe className="h-5 w-5" />
-            MCP Route Explorer
+            <GitCompare className="h-5 w-5" />
+            Code Diff Analysis
           </DialogTitle>
           <DialogDescription>
-            {step === 'input' && 'Enter the base URL of your running application to discover routes by browsing it.'}
-            {step === 'exploring' && 'AI is browsing your application to discover routes...'}
-            {step === 'preview' && `Found ${totalRouteCount} routes in ${discoveredAreas.length} areas. Select which ones to add.`}
-            {step === 'generate' && (
-              isGenerating
-                ? `Generating test ${generateProgress + 1} of ${generateTotal}...`
-                : generateResults.length > 0
-                  ? 'Test generation complete.'
-                  : `${savedRoutes.length} routes saved. Generate tests for them?`
-            )}
+            {step === 'scanning'
+              ? 'Analyzing code changes between branches...'
+              : step === 'preview'
+                ? `Found ${totalRouteCount} affected routes from ${fileCount} changed files. Select which ones to add.`
+                : isGenerating
+                  ? `Generating test ${generateProgress + 1} of ${generateTotal}...`
+                  : generateResults.length > 0
+                    ? 'Test generation complete.'
+                    : `${savedRoutes.length} routes saved. Generate tests targeting the specific changes?`}
           </DialogDescription>
         </DialogHeader>
 
-        {step === 'input' && (
-          <div className="flex flex-col gap-4 py-4">
-            <div className="flex flex-col gap-2">
-              <label className="text-sm font-medium">Base URL</label>
-              <Input
-                value={baseURL}
-                onChange={(e) => setBaseURL(e.target.value)}
-                placeholder="http://localhost:3000"
-              />
-              <p className="text-xs text-muted-foreground">
-                Make sure your application is running at this URL before starting.
-              </p>
-            </div>
-          </div>
-        )}
-
-        {step === 'exploring' && (
+        {step === 'scanning' ? (
           <div className="flex flex-col items-center justify-center py-12">
             <Loader2 className="h-12 w-12 animate-spin text-muted-foreground mb-4" />
-            <p className="text-muted-foreground">Exploring application via MCP...</p>
+            <p className="text-muted-foreground">Comparing branches and analyzing changes...</p>
             <p className="text-xs text-muted-foreground mt-2">
-              The AI is navigating your app and discovering routes
+              Fetching changed files and sending to AI for analysis
             </p>
           </div>
-        )}
-
-        {step === 'preview' && (
+        ) : step === 'preview' ? (
           <div className="flex-1 overflow-hidden flex flex-col gap-4 min-h-0">
             <div className="flex items-center justify-between">
               <Button variant="ghost" size="sm" onClick={toggleAll}>
@@ -322,7 +313,7 @@ export function MCPExploreRoutesDialog({
               </span>
             </div>
 
-            <ScrollArea className="h-[40vh] border rounded-lg">
+            <ScrollArea className="flex-1 border rounded-lg min-h-0 max-h-[50vh]">
               <div className="p-2 space-y-1">
                 {discoveredAreas.map((area) => {
                   const areaState = getAreaSelectionState(area);
@@ -394,7 +385,7 @@ export function MCPExploreRoutesDialog({
                                 )}
                                 {route.testSuggestions && route.testSuggestions.length > 0 && (
                                   <div className="flex flex-wrap gap-1 mt-2 ml-6">
-                                    {route.testSuggestions.slice(0, 2).map((suggestion, i) => (
+                                    {route.testSuggestions.slice(0, 3).map((suggestion, i) => (
                                       <span key={i} className="text-xs bg-muted px-2 py-0.5 rounded">
                                         {suggestion}
                                       </span>
@@ -412,9 +403,7 @@ export function MCPExploreRoutesDialog({
               </div>
             </ScrollArea>
           </div>
-        )}
-
-        {step === 'generate' && (
+        ) : (
           <div className="flex-1 overflow-hidden flex flex-col gap-4 min-h-0">
             {isGenerating && (
               <div className="space-y-2">
@@ -496,21 +485,27 @@ export function MCPExploreRoutesDialog({
         )}
 
         <DialogFooter>
-          {step === 'input' && (
-            <>
-              <Button variant="outline" onClick={handleClose}>
-                Cancel
-              </Button>
-              <Button onClick={handleExplore} disabled={!baseURL.trim()}>
-                <Globe className="h-4 w-4 mr-2" />
-                Start Exploring
-              </Button>
-            </>
+          {step === 'scanning' && (
+            <Button variant="outline" onClick={handleClose}>
+              Cancel
+            </Button>
           )}
           {step === 'preview' && (
             <>
               <Button variant="outline" onClick={handleClose}>
                 Cancel
+              </Button>
+              <Button
+                variant="outline"
+                onClick={handleScan}
+                disabled={isScanning}
+              >
+                {isScanning ? (
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                ) : (
+                  <RefreshCw className="h-4 w-4 mr-2" />
+                )}
+                Rescan
               </Button>
               <Button
                 onClick={handleSave}

@@ -45,12 +45,12 @@ function getRunningPid(): number | null {
   return pid;
 }
 
-function saveConfig(token: string, server: string, interval: string) {
+function saveConfig(token: string, server: string, interval: string, baseUrl?: string) {
   ensureConfigDir();
-  fs.writeFileSync(CONFIG_FILE, JSON.stringify({ token, server, interval }, null, 2));
+  fs.writeFileSync(CONFIG_FILE, JSON.stringify({ token, server, interval, baseUrl }, null, 2));
 }
 
-function loadConfig(): { token?: string; server?: string; interval?: string } {
+function loadConfig(): { token?: string; server?: string; interval?: string; baseUrl?: string } {
   if (!fs.existsSync(CONFIG_FILE)) return {};
   try {
     return JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf-8'));
@@ -74,6 +74,7 @@ export async function main() {
     .requiredOption('-t, --token <token>', 'Runner authentication token')
     .requiredOption('-s, --server <url>', 'Server URL (e.g., https://your-app.vercel.app)')
     .option('-i, --interval <ms>', 'Poll interval in milliseconds', '5000')
+    .option('-b, --base-url <url>', 'Override target URL for test execution')
     .action(async (options) => {
       ensureConfigDir();
 
@@ -84,17 +85,21 @@ export async function main() {
       }
 
       // Save config for status command
-      saveConfig(options.token, options.server, options.interval);
+      saveConfig(options.token, options.server, options.interval, options.baseUrl);
 
       // Start the daemon process
       const logStream = fs.openSync(LOG_FILE, 'a');
-      const child = spawn(process.execPath, [
+      const args = [
         process.argv[1],
         'run',
         '--token', options.token,
         '--server', options.server,
         '--interval', options.interval,
-      ], {
+      ];
+      if (options.baseUrl) {
+        args.push('--base-url', options.baseUrl);
+      }
+      const child = spawn(process.execPath, args, {
         detached: true,
         stdio: ['ignore', logStream, logStream],
       });
@@ -104,6 +109,7 @@ export async function main() {
 
       console.log(`Runner started (PID: ${child.pid})`);
       console.log(`Server: ${options.server}`);
+      if (options.baseUrl) console.log(`Base URL override: ${options.baseUrl}`);
       console.log(`Logs: ${LOG_FILE}`);
     });
 
@@ -140,6 +146,7 @@ export async function main() {
         console.log('Runner Status: RUNNING');
         console.log(`  PID: ${pid}`);
         if (config.server) console.log(`  Server: ${config.server}`);
+        if (config.baseUrl) console.log(`  Base URL override: ${config.baseUrl}`);
         console.log(`  Logs: ${LOG_FILE}`);
       } else {
         console.log('Runner Status: STOPPED');
@@ -187,15 +194,20 @@ export async function main() {
     .requiredOption('-t, --token <token>', 'Runner authentication token')
     .requiredOption('-s, --server <url>', 'Server URL (e.g., https://your-app.vercel.app)')
     .option('-i, --interval <ms>', 'Poll interval in milliseconds', '5000')
+    .option('-b, --base-url <url>', 'Override target URL for test execution')
     .action(async (options) => {
       const timestamp = () => new Date().toISOString();
       console.log(`[${timestamp()}] Lastest2 Runner starting...`);
       console.log(`[${timestamp()}] Server: ${options.server}`);
+      if (options.baseUrl) {
+        console.log(`[${timestamp()}] Base URL override: ${options.baseUrl}`);
+      }
 
       const client = new RunnerClient({
         token: options.token,
         serverUrl: options.server,
         pollInterval: parseInt(options.interval, 10),
+        baseUrl: options.baseUrl,
       });
 
       // Handle shutdown

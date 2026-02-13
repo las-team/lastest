@@ -187,6 +187,8 @@ async function runTestsAsync(runId: string, tests: Test[], repositoryId?: string
         screenshots: result.screenshots,
         errorMessage: result.errorMessage,
         durationMs: result.durationMs,
+        videoPath: result.videoPath,
+        softErrors: result.softErrors,
       });
       await updateJobProgress(activeJobId, i + 1, tests.length);
     }

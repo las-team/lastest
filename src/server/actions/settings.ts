@@ -23,9 +23,14 @@ export async function savePlaywrightSettings(data: {
   enabledRecordingEngines?: RecordingEngine[];
   defaultRecordingEngine?: string;
   freezeAnimations?: boolean;
+  enableVideoRecording?: boolean;
   screenshotDelay?: number;
   maxParallelTests?: number;
   stabilization?: StabilizationSettings;
+  acceptAnyCertificate?: boolean;
+  networkErrorMode?: string;
+  ignoreExternalNetworkErrors?: boolean;
+  consoleErrorMode?: string;
 }) {
   if (data.repositoryId) await requireRepoAccess(data.repositoryId);
   else await requireTeamAccess();

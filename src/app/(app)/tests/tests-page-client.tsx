@@ -22,7 +22,7 @@ import {
 // } from '@/components/ui/collapsible';
 import { createFunctionalArea, deleteTests, restoreTests, permanentlyDeleteTests } from '@/server/actions/tests';
 import { generateBasicTests } from '@/server/actions/scanner';
-import { aiFixAllFailedTests, aiFixTests } from '@/server/actions/ai';
+import { aiFixAllFailedTests, aiFixTests, aiMcpFixTests } from '@/server/actions/ai';
 import { runTests } from '@/server/actions/runs';
 import { useNotifyJobStarted } from '@/components/queue/job-polling-context';
 import { ExecutionTargetSelector } from '@/components/execution/execution-target-selector';
@@ -65,6 +65,27 @@ interface TestsPageClientProps {
 
 export function TestsPageClient({ areas, tests, routes, repositoryId, baseUrl = 'http://localhost:3000', deletedTests = [] }: TestsPageClientProps) {
   const notifyJobStarted = useNotifyJobStarted();
+
+  // A route is uncovered if it has no test (hasTest is maintained by soft-delete/restore lifecycle)
+  // When routes table is empty, derive from path-like functional areas without active tests
+  const areasWithActiveTests = new Set(tests.map(t => t.functionalAreaId).filter(Boolean));
+  const uncoveredRoutes = routes.length > 0
+    ? routes.filter(r => !r.hasTest)
+    : areas
+        .filter(a => a.name.startsWith('/') && !areasWithActiveTests.has(a.id))
+        .map(a => ({
+          id: a.id,
+          repositoryId: a.repositoryId,
+          path: a.name,
+          type: a.name.includes('[') ? 'dynamic' : 'static',
+          description: a.description,
+          filePath: null,
+          framework: null,
+          routerType: null,
+          functionalAreaId: a.id,
+          hasTest: false,
+          scannedAt: null,
+        } as Route));
   const [isNewAreaOpen, setIsNewAreaOpen] = useState(false);
   const [newAreaName, setNewAreaName] = useState('');
   const [isCreating, setIsCreating] = useState(false);
@@ -78,6 +99,7 @@ export function TestsPageClient({ areas, tests, routes, repositoryId, baseUrl = 
   const [isBulkRunning, setIsBulkRunning] = useState(false);
   const [isBulkDeleting, setIsBulkDeleting] = useState(false);
   const [isBulkFixing, setIsBulkFixing] = useState(false);
+  const [isBulkMcpFixing, setIsBulkMcpFixing] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [executionTarget, setExecutionTarget] = useState<string>('local');
   const [showDeleted, setShowDeleted] = useState(false);
@@ -85,12 +107,19 @@ export function TestsPageClient({ areas, tests, routes, repositoryId, baseUrl = 
   const [isPermanentlyDeleting, setIsPermanentlyDeleting] = useState(false);
   const [showPermanentDeleteConfirm, setShowPermanentDeleteConfirm] = useState(false);
   const [selectedDeletedIds, setSelectedDeletedIds] = useState<Set<string>>(new Set());
+  const [statusFilter, setStatusFilter] = useState<'all' | 'passed' | 'failed' | 'pending'>('all');
 
   const failedTests = tests.filter(t => t.latestStatus === 'failed');
 
-  const filteredTests = tests.filter(test =>
-    test.name.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+  const filteredTests = tests.filter(test => {
+    const matchesSearch = test.name.toLowerCase().includes(searchQuery.toLowerCase());
+    if (!matchesSearch) return false;
+    if (statusFilter === 'all') return true;
+    if (statusFilter === 'passed') return test.latestStatus === 'passed';
+    if (statusFilter === 'failed') return test.latestStatus === 'failed';
+    if (statusFilter === 'pending') return !test.latestStatus;
+    return true;
+  });
 
   const selectedFailedTests = Array.from(selectedIds).filter(id => {
     const test = tests.find(t => t.id === id);
@@ -149,6 +178,18 @@ export function TestsPageClient({ areas, tests, routes, repositoryId, baseUrl = 
       setFixResult({ fixed: result.fixed, failed: result.failed });
     } finally {
       setIsBulkFixing(false);
+    }
+  };
+
+  const handleBulkMcpFix = async () => {
+    if (!repositoryId || selectedFailedTests.length === 0) return;
+    setIsBulkMcpFixing(true);
+    setFixResult(null);
+    try {
+      const result = await aiMcpFixTests(selectedFailedTests, repositoryId);
+      setFixResult({ fixed: result.fixed, failed: result.failed });
+    } finally {
+      setIsBulkMcpFixing(false);
     }
   };
 
@@ -217,7 +258,7 @@ export function TestsPageClient({ areas, tests, routes, repositoryId, baseUrl = 
 
   const handleAddTests = async (routeIds: string[]) => {
     if (!repositoryId) return;
-    await generateBasicTests(repositoryId, routeIds, 'http://localhost:3000');
+    await generateBasicTests(repositoryId, routeIds, baseUrl);
   };
 
   const StatusBadge = ({ status }: { status: string | null }) => {
@@ -245,11 +286,11 @@ export function TestsPageClient({ areas, tests, routes, repositoryId, baseUrl = 
     );
   };
 
-  const statsData = [
-    { label: 'Total', value: tests.length, color: 'text-foreground' },
-    { label: 'Passed', value: tests.filter(t => t.latestStatus === 'passed').length, color: 'text-emerald-600 dark:text-emerald-400' },
-    { label: 'Failed', value: failedTests.length, color: 'text-rose-600 dark:text-rose-400' },
-    { label: 'Pending', value: tests.filter(t => !t.latestStatus).length, color: 'text-muted-foreground' },
+  const statsData: { label: string; value: number; color: string; filter: typeof statusFilter }[] = [
+    { label: 'Total', value: tests.length, color: 'text-foreground', filter: 'all' },
+    { label: 'Passed', value: tests.filter(t => t.latestStatus === 'passed').length, color: 'text-emerald-600 dark:text-emerald-400', filter: 'passed' },
+    { label: 'Failed', value: failedTests.length, color: 'text-rose-600 dark:text-rose-400', filter: 'failed' },
+    { label: 'Pending', value: tests.filter(t => !t.latestStatus).length, color: 'text-muted-foreground', filter: 'pending' },
   ];
 
   return (
@@ -281,7 +322,7 @@ export function TestsPageClient({ areas, tests, routes, repositoryId, baseUrl = 
                   variant="outline"
                   size="sm"
                   onClick={() => setIsAddTestsOpen(true)}
-                  disabled={routes.filter(r => !r.hasTest).length === 0}
+                  disabled={uncoveredRoutes.length === 0}
                 >
                   <FlaskConical className="h-4 w-4 mr-2" />
                   Add Basic Tests
@@ -308,15 +349,21 @@ export function TestsPageClient({ areas, tests, routes, repositoryId, baseUrl = 
         {/* Stats Row */}
         <div className="grid grid-cols-4 gap-4">
           {statsData.map((stat) => (
-            <div
+            <button
               key={stat.label}
-              className="p-4 rounded-lg bg-card border border-border/50"
+              type="button"
+              onClick={() => setStatusFilter(statusFilter === stat.filter ? 'all' : stat.filter)}
+              className={`p-4 rounded-lg bg-card border text-left transition-colors cursor-pointer ${
+                statusFilter === stat.filter
+                  ? 'border-primary ring-1 ring-primary/30'
+                  : 'border-border/50 hover:border-border'
+              }`}
             >
               <div className={`text-2xl font-semibold tabular-nums ${stat.color}`}>
                 {stat.value}
               </div>
               <div className="text-xs text-muted-foreground mt-1">{stat.label}</div>
-            </div>
+            </button>
           ))}
         </div>
 
@@ -380,15 +427,26 @@ export function TestsPageClient({ areas, tests, routes, repositoryId, baseUrl = 
                   Move to Trash
                 </Button>
                 {repositoryId && selectedFailedTests.length > 0 && (
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={handleBulkFix}
-                    disabled={isBulkFixing}
-                  >
-                    <Wrench className="h-3.5 w-3.5 mr-1.5" />
-                    {isBulkFixing ? 'Fixing...' : `AI Fix (${selectedFailedTests.length})`}
-                  </Button>
+                  <>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={handleBulkFix}
+                      disabled={isBulkFixing}
+                    >
+                      <Wrench className="h-3.5 w-3.5 mr-1.5" />
+                      {isBulkFixing ? 'Fixing...' : `AI Fix (${selectedFailedTests.length})`}
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={handleBulkMcpFix}
+                      disabled={isBulkMcpFixing}
+                    >
+                      <Wand2 className="h-3.5 w-3.5 mr-1.5" />
+                      {isBulkMcpFixing ? 'MCP Fixing...' : `AI MCP Fix (${selectedFailedTests.length})`}
+                    </Button>
+                  </>
                 )}
                 <Button
                   variant="ghost"
@@ -595,7 +653,7 @@ export function TestsPageClient({ areas, tests, routes, repositoryId, baseUrl = 
       <RouteSelectorDialog
         open={isAddTestsOpen}
         onOpenChange={setIsAddTestsOpen}
-        routes={routes.filter(r => !r.hasTest)}
+        routes={uncoveredRoutes}
         title="Generate Basic Tests"
         description="Select routes to generate smoke tests for (visit, screenshot, check errors)"
         actionLabel="Generate Tests"

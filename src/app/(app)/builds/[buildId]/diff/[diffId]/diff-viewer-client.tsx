@@ -6,11 +6,11 @@ import { SliderComparison } from '@/components/diff/slider-comparison';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { approveDiff, rejectDiff, undoApproval } from '@/server/actions/diffs';
 import type { VisualDiff, Test, DiffMetadata, AIDiffAnalysis } from '@/lib/db/schema';
-import { CheckCircle, XCircle, SkipForward, Eye, Image as ImageIcon, Sparkles, Loader2, ArrowUpDown } from 'lucide-react';
+import { CheckCircle, XCircle, SkipForward, Eye, Image as ImageIcon, Sparkles, Loader2, ArrowUpDown, Bug, ChevronDown } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 
 interface DiffViewerClientProps {
-  diff: VisualDiff & { test: Test | null };
+  diff: VisualDiff & { test: Test | null; errorMessage?: string | null };
   buildId: string;
   nextDiffId?: string;
 }
@@ -180,12 +180,23 @@ export function DiffViewerClient({ diff, buildId, nextDiffId }: DiffViewerClient
           <div className="flex items-center gap-2 px-3 py-1 rounded-full text-sm font-medium bg-blue-100 text-blue-700">
             <ArrowUpDown className="w-4 h-4" />
             Page Shift {metadata.pageShift.deltaY > 0 ? '+' : ''}{metadata.pageShift.deltaY}px
-            {metadata.pageShift.excludedFromDiff && (
-              <span className="text-blue-500">(excluded)</span>
-            )}
           </div>
         )}
       </div>
+
+      {/* Execution Error Banner (collapsed by default) */}
+      {diff.errorMessage && (
+        <details className="border border-orange-200 bg-orange-50 rounded-lg">
+          <summary className="flex items-center gap-3 p-4 cursor-pointer select-none">
+            <Bug className="w-5 h-5 text-orange-600 flex-shrink-0" />
+            <span className="font-medium text-orange-800">Execution Error</span>
+            <ChevronDown className="w-4 h-4 text-orange-400 ml-auto transition-transform [[open]>&]:rotate-180" />
+          </summary>
+          <div className="px-4 pb-4">
+            <pre className="text-sm text-orange-700 whitespace-pre-wrap break-words">{diff.errorMessage}</pre>
+          </div>
+        </details>
+      )}
 
       {/* AI Analysis Card */}
       {(aiAnalysis || aiStatus === 'running' || aiStatus === 'pending') && (
@@ -276,7 +287,7 @@ export function DiffViewerClient({ diff, buildId, nextDiffId }: DiffViewerClient
           }
 
           // Find first tab with data for default selection
-          const defaultTab = tabs.find(t => t.baseline) || tabs[0];
+          const defaultTab = tabs.find(t => t.id === 'main' && t.baseline) || tabs.find(t => t.baseline) || tabs[0];
 
           if (tabs.length <= 1) {
             const tab = tabs[0];
@@ -395,12 +406,9 @@ export function DiffViewerClient({ diff, buildId, nextDiffId }: DiffViewerClient
               )}
             </span>
           )}
-          {metadata?.pageShift?.detected && metadata.pageShift.excludedFromDiff && (
+          {metadata?.pageShift?.detected && (
             <span className="ml-3 text-blue-600">
-              · Shift excluded: {metadata.pageShift.insertedRows ?? 0} rows added, {metadata.pageShift.deletedRows ?? 0} removed
-              {metadata.pageShift.originalPercentage != null && metadata.pageShift.adjustedPercentage != null && (
-                <span> · {metadata.pageShift.originalPercentage}% → {metadata.pageShift.adjustedPercentage}%</span>
-              )}
+              · Shift: {metadata.pageShift.insertedRows ?? 0} rows added, {metadata.pageShift.deletedRows ?? 0} removed
             </span>
           )}
         </div>

@@ -8,11 +8,13 @@ import {
   MCP_SYSTEM_PROMPT,
   createTestPrompt,
   createFixPrompt,
+  createMcpFixPrompt,
   createEnhancePrompt,
   extractCodeFromResponse,
 } from '@/lib/ai';
 import type { AIProviderConfig, TestGenerationContext, ScanContext, DiscoverySource } from '@/lib/ai/types';
 import { revalidatePath } from 'next/cache';
+import { getCurrentBranchForRepo } from '@/lib/git-utils';
 
 async function getAIConfig(repositoryId?: string | null): Promise<AIProviderConfig> {
   const settings = await queries.getAISettings(repositoryId);
@@ -180,10 +182,11 @@ export async function saveGeneratedTest(data: {
 }
 
 export async function aiFixAllFailedTests(
-  repositoryId: string
+  repositoryId: string,
 ): Promise<{ success: boolean; fixed: number; failed: number; errors: string[] }> {
   await requireRepoAccess(repositoryId);
   const allTests = await queries.getTestsByRepo(repositoryId);
+  const branch = await getCurrentBranchForRepo(repositoryId);
   const errors: string[] = [];
   let fixed = 0;
   let failed = 0;
@@ -198,7 +201,7 @@ export async function aiFixAllFailedTests(
     const result = await aiFixTest(repositoryId, test.id, errorMessage);
 
     if (result.success && result.code) {
-      await queries.updateTestWithVersion(test.id, { code: result.code }, 'ai_fix');
+      await queries.updateTestWithVersion(test.id, { code: result.code }, 'ai_fix', branch ?? undefined);
       fixed++;
     } else {
       failed++;
@@ -217,7 +220,9 @@ export async function updateTestCode(
 ): Promise<{ success: boolean; error?: string }> {
   await requireTeamAccess();
   try {
-    await queries.updateTestWithVersion(testId, { code }, changeReason);
+    const test = await queries.getTest(testId);
+    const branch = await getCurrentBranchForRepo(test?.repositoryId);
+    await queries.updateTestWithVersion(testId, { code }, changeReason, branch ?? undefined);
     revalidatePath('/tests');
     revalidatePath(`/tests/${testId}`);
     return { success: true };
@@ -232,6 +237,7 @@ export async function aiFixTests(
   repositoryId: string
 ): Promise<{ success: boolean; fixed: number; failed: number; errors: string[] }> {
   await requireRepoAccess(repositoryId);
+  const branch = await getCurrentBranchForRepo(repositoryId);
   const errors: string[] = [];
   let fixed = 0;
   let failed = 0;
@@ -255,7 +261,79 @@ export async function aiFixTests(
     const result = await aiFixTest(repositoryId, testId, errorMessage);
 
     if (result.success && result.code) {
-      await queries.updateTestWithVersion(testId, { code: result.code }, 'ai_fix');
+      await queries.updateTestWithVersion(testId, { code: result.code }, 'ai_fix', branch ?? undefined);
+      fixed++;
+    } else {
+      failed++;
+      errors.push(`${test.name}: ${result.error || 'Unknown error'}`);
+    }
+  }
+
+  revalidatePath('/tests');
+  return { success: true, fixed, failed, errors };
+}
+
+export async function aiMcpFixTest(
+  repositoryId: string,
+  testId: string,
+  errorMessage: string
+): Promise<{ success: boolean; code?: string; error?: string }> {
+  await requireRepoAccess(repositoryId);
+  try {
+    const test = await queries.getTest(testId);
+    if (!test) {
+      return { success: false, error: 'Test not found' };
+    }
+
+    const config = await getAIConfig(repositoryId);
+    const prompt = createMcpFixPrompt({
+      existingCode: test.code,
+      errorMessage,
+      targetUrl: test.targetUrl || undefined,
+    });
+    const response = await generateWithAI(config, prompt, MCP_SYSTEM_PROMPT, {
+      actionType: 'fix_test',
+      repositoryId,
+    });
+    const code = extractCodeFromResponse(response);
+
+    return { success: true, code };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Failed to fix test with MCP';
+    return { success: false, error: message };
+  }
+}
+
+export async function aiMcpFixTests(
+  testIds: string[],
+  repositoryId: string
+): Promise<{ success: boolean; fixed: number; failed: number; errors: string[] }> {
+  await requireRepoAccess(repositoryId);
+  const branch = await getCurrentBranchForRepo(repositoryId);
+  const errors: string[] = [];
+  let fixed = 0;
+  let failed = 0;
+
+  for (const testId of testIds) {
+    const test = await queries.getTest(testId);
+    if (!test) {
+      failed++;
+      errors.push(`Test ${testId}: Not found`);
+      continue;
+    }
+
+    const results = await queries.getTestResultsByTest(testId);
+    const latestResult = results[results.length - 1];
+
+    if (latestResult?.status !== 'failed') {
+      continue;
+    }
+
+    const errorMessage = latestResult.errorMessage || 'Test failed with unknown error';
+    const result = await aiMcpFixTest(repositoryId, testId, errorMessage);
+
+    if (result.success && result.code) {
+      await queries.updateTestWithVersion(testId, { code: result.code }, 'ai_fix', branch ?? undefined);
       fixed++;
     } else {
       failed++;

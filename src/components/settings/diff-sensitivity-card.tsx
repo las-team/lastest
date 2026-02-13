@@ -273,7 +273,7 @@ export function DiffSensitivityCard({
         {/* Page Shift Detection Toggle */}
         <div className="flex items-center justify-between p-3 bg-muted rounded-lg">
           <div className="space-y-0.5">
-            <Label className="text-sm font-medium">Ignore Page Shifts</Label>
+            <Label className="text-sm font-medium">Ignore Page Shifts <span className="ml-1 text-[10px] font-semibold uppercase text-muted-foreground">Beta</span></Label>
             <p className="text-xs text-muted-foreground">
               Exclude vertical content shifts from diffs. When content is inserted or removed (e.g. a banner), only genuinely changed pixels are counted — displaced content is aligned and excluded.
             </p>

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useMemo } from 'react';
 import {
   ChevronRight,
   ChevronDown,
@@ -83,6 +83,39 @@ interface AreaNodeProps {
   onMoveTest: (testId: string, areaId: string | null) => void;
   onMoveSuite: (suiteId: string, areaId: string | null) => void;
   onMoveArea: (areaId: string, newParentId: string | null) => void;
+}
+
+function computeAreaCoverage(area: FunctionalAreaWithChildren): { total: number; executed: number; rate: number } {
+  let passed = 0, failed = 0, notRun = 0;
+  function walk(a: FunctionalAreaWithChildren) {
+    for (const t of a.tests) {
+      if (t.isPlaceholder) continue;
+      if (t.latestStatus === 'passed') passed++;
+      else if (t.latestStatus === 'failed') failed++;
+      else notRun++;
+    }
+    for (const child of a.children) walk(child);
+  }
+  walk(area);
+  const total = passed + failed + notRun;
+  const executed = passed + failed;
+  const rate = total > 0 ? Math.round((executed / total) * 100) : 0;
+  return { total, executed, rate };
+}
+
+function CoverageBadge({ area }: { area: FunctionalAreaWithChildren }) {
+  const cov = useMemo(() => computeAreaCoverage(area), [area]);
+  if (cov.total === 0) return null;
+
+  let color = 'bg-red-500/15 text-red-600 dark:text-red-400';
+  if (cov.rate >= 80) color = 'bg-green-500/15 text-green-600 dark:text-green-400';
+  else if (cov.rate >= 50) color = 'bg-yellow-500/15 text-yellow-600 dark:text-yellow-400';
+
+  return (
+    <span className={cn('text-[10px] font-medium px-1 rounded', color)}>
+      {cov.rate}%
+    </span>
+  );
 }
 
 function AreaNode({
@@ -169,6 +202,7 @@ function AreaNode({
         </button>
         <FolderIcon className={cn('h-4 w-4', area.isRouteFolder ? 'text-blue-500' : 'text-primary')} />
         <span className="flex-1 truncate text-sm">{area.name}</span>
+        <CoverageBadge area={area} />
         <span className="text-xs text-muted-foreground">{area.tests.length + area.suites.length}</span>
         <DropdownMenu>
           <DropdownMenuTrigger asChild onClick={(e) => e.stopPropagation()}>

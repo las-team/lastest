@@ -74,10 +74,11 @@ import { DEFAULT_RECORDING_ENGINES } from '@/lib/db/schema';
 import { PlaywrightSettingsCard } from '@/components/settings/playwright-settings-card';
 import { ExecutionTargetSelector } from '@/components/execution/execution-target-selector';
 
-interface RepositorySetup {
-  type: 'test' | 'script' | 'none';
-  name?: string;
-  id?: string;
+interface SetupStepInfo {
+  stepType: 'test' | 'script';
+  testId: string | null;
+  scriptId: string | null;
+  name: string;
 }
 
 interface RecordingClientProps {
@@ -88,7 +89,7 @@ interface RecordingClientProps {
   enabledEngines?: RecordingEngine[];
   defaultEngine?: RecordingEngine;
   rerecordTest?: Test | null;
-  repositorySetup?: RepositorySetup;
+  repositorySetupSteps?: SetupStepInfo[];
 }
 
 type RecordingStep = 'setup' | 'recording' | 'inspector-running' | 'saving';
@@ -236,7 +237,7 @@ export function RecordingClient({
   enabledEngines = DEFAULT_RECORDING_ENGINES,
   defaultEngine = 'lastest',
   rerecordTest,
-  repositorySetup,
+  repositorySetupSteps = [],
 }: RecordingClientProps) {
   const router = useRouter();
   const [step, setStep] = useState<RecordingStep>('setup');
@@ -420,10 +421,13 @@ export function RecordingClient({
         }
       } else {
         // Start Lastest recorder with optional setup
-        const setupOptions = runSetupBeforeRecording && repositorySetup && repositorySetup.type !== 'none'
+        const setupOptions = runSetupBeforeRecording && repositorySetupSteps.length > 0
           ? {
-              testId: repositorySetup.type === 'test' ? repositorySetup.id ?? null : null,
-              scriptId: repositorySetup.type === 'script' ? repositorySetup.id ?? null : null,
+              steps: repositorySetupSteps.map(s => ({
+                stepType: s.stepType,
+                testId: s.testId,
+                scriptId: s.scriptId,
+              })),
             }
           : undefined;
 
@@ -713,8 +717,13 @@ export function RecordingClient({
 
                 {/* Environment Setup Toggle */}
                 {(() => {
-                  const hasSetup = repositorySetup && repositorySetup.type !== 'none';
+                  const hasSetup = repositorySetupSteps.length > 0;
                   const isDisabled = isLoading || !hasSetup;
+                  const stepSummary = hasSetup
+                    ? repositorySetupSteps.length === 1
+                      ? `${repositorySetupSteps[0].stepType === 'test' ? 'Test' : 'Script'}: ${repositorySetupSteps[0].name}`
+                      : `${repositorySetupSteps.length} setup steps`
+                    : 'No setup configured';
 
                   return (
                     <TooltipProvider>
@@ -728,9 +737,7 @@ export function RecordingClient({
                                   Run Environment Setup
                                 </Label>
                                 <p className="text-xs text-muted-foreground">
-                                  {hasSetup
-                                    ? `${repositorySetup!.type === 'test' ? 'Test' : 'Script'}: ${repositorySetup!.name}`
-                                    : 'No setup configured'}
+                                  {stepSummary}
                                 </p>
                               </div>
                             </div>
@@ -744,7 +751,7 @@ export function RecordingClient({
                         </TooltipTrigger>
                         {!hasSetup && (
                           <TooltipContent side="top">
-                            <p>Configure a default setup in Repository Settings</p>
+                            <p>Configure default setup steps in Environment Settings</p>
                           </TooltipContent>
                         )}
                       </Tooltip>

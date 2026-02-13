@@ -57,6 +57,7 @@ export async function GET(
     elapsedMs: build.elapsedMs,
     comparisonMode: build.comparisonMode,
     codeChangeTestIds: build.codeChangeTestIds,
+    isMainBranch: build.isMainBranch,
     diffs: build.diffs,
   });
 }

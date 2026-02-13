@@ -3,7 +3,7 @@
 import { revalidatePath } from 'next/cache';
 import * as queries from '@/lib/db/queries';
 import { requireTeamAccess } from '@/lib/auth';
-import { hashImage } from '@/lib/diff/hasher';
+import { hashImageWithDimensions } from '@/lib/diff/hasher';
 import path from 'path';
 
 /**
@@ -13,6 +13,7 @@ export async function approveDiff(diffId: string, approvedBy?: string) {
   await requireTeamAccess();
   const diff = await queries.getVisualDiff(diffId);
   if (!diff) throw new Error('Diff not found');
+  if (!diff.currentImagePath) throw new Error('Cannot approve diff without screenshot');
 
   // Update diff status
   await queries.updateVisualDiff(diffId, {
@@ -22,7 +23,7 @@ export async function approveDiff(diffId: string, approvedBy?: string) {
   });
 
   // Update baseline with the approved image
-  const currentHash = hashImage(
+  const currentHash = hashImageWithDimensions(
     path.join(process.cwd(), 'public', diff.currentImagePath)
   );
 
@@ -157,13 +158,20 @@ export async function getDiff(diffId: string) {
   // Get test details
   const test = await queries.getTest(diff.testId);
 
+  // Get error message from test result
+  let errorMessage: string | null = null;
+  if (diff.testResultId) {
+    const testResult = await queries.getTestResultById(diff.testResultId);
+    errorMessage = testResult?.errorMessage ?? null;
+  }
+
   // Look up planned screenshot if not already on the diff
   let plannedImagePath = diff.plannedImagePath;
   let plannedDiffImagePath = diff.plannedDiffImagePath;
   let plannedPixelDifference = diff.plannedPixelDifference;
   let plannedPercentageDifference = diff.plannedPercentageDifference;
 
-  if (!plannedImagePath) {
+  if (!plannedImagePath && diff.currentImagePath) {
     const stepLabel = extractStepLabelFromPath(diff.currentImagePath);
     if (stepLabel) {
       const planned = await queries.getPlannedScreenshotByTest(diff.testId, stepLabel);
@@ -179,6 +187,7 @@ export async function getDiff(diffId: string) {
     plannedDiffImagePath,
     plannedPixelDifference,
     plannedPercentageDifference,
+    errorMessage,
     test: test ?? null,
   };
 }
