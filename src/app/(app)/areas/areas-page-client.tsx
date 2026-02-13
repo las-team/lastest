@@ -18,7 +18,9 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { createArea, deleteArea, deleteAreaWithContents, moveTestToArea, moveSuiteToArea, moveArea } from '@/server/actions/areas';
-import { Folder, FolderTree, FileCode, ListChecks, FolderSearch, Sparkles, Globe, FileText, Loader2, BookOpen } from 'lucide-react';
+import { FolderSearch, Sparkles, Globe, FileText, Loader2, BookOpen, Check, X, Circle, FileWarning } from 'lucide-react';
+import { Progress } from '@/components/ui/progress';
+import { cn } from '@/lib/utils';
 import { startRemoteRouteScan } from '@/server/actions/scanner';
 import { AIScanRoutesDialog } from '@/components/ai/ai-scan-routes-dialog';
 import { SpecAnalysisDialog } from '@/components/ai/spec-analysis-dialog';
@@ -73,20 +75,49 @@ export function AreasPageClient({ tree, uncategorizedTests, unsortedSuites, repo
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [selection, deleteAreaId]);
 
-  const totalAreas = countAreas(tree);
-  const totalTests = countTests(tree) + uncategorizedTests.length;
-  const totalSuites = countSuites(tree) + unsortedSuites.length;
+  function computeCoverage(
+    items: FunctionalAreaWithChildren[],
+    uncategorized: { id: string; name: string; latestStatus: string | null }[]
+  ) {
+    let passed = 0, failed = 0, notRun = 0, placeholders = 0;
 
-  function countAreas(items: FunctionalAreaWithChildren[]): number {
-    return items.reduce((acc, item) => acc + 1 + countAreas(item.children), 0);
+    function walk(areas: FunctionalAreaWithChildren[]) {
+      for (const area of areas) {
+        for (const t of area.tests) {
+          if (t.isPlaceholder) { placeholders++; continue; }
+          if (t.latestStatus === 'passed') passed++;
+          else if (t.latestStatus === 'failed') failed++;
+          else notRun++;
+        }
+        walk(area.children);
+      }
+    }
+    walk(items);
+
+    for (const t of uncategorized) {
+      if (t.latestStatus === 'passed') passed++;
+      else if (t.latestStatus === 'failed') failed++;
+      else notRun++;
+    }
+
+    const total = passed + failed + notRun;
+    const executed = passed + failed;
+    const rate = total > 0 ? Math.round((executed / total) * 100) : 0;
+    return { passed, failed, notRun, placeholders, total, executed, rate };
   }
 
-  function countTests(items: FunctionalAreaWithChildren[]): number {
-    return items.reduce((acc, item) => acc + item.tests.length + countTests(item.children), 0);
+  const coverage = computeCoverage(tree, uncategorizedTests);
+
+  function getCoverageColor(rate: number) {
+    if (rate >= 80) return 'text-green-600 dark:text-green-400';
+    if (rate >= 50) return 'text-yellow-600 dark:text-yellow-400';
+    return 'text-red-600 dark:text-red-400';
   }
 
-  function countSuites(items: FunctionalAreaWithChildren[]): number {
-    return items.reduce((acc, item) => acc + item.suites.length + countSuites(item.children), 0);
+  function getCoverageBarClass(rate: number) {
+    if (rate >= 80) return '[&_[data-slot=progress-indicator]]:bg-green-500';
+    if (rate >= 50) return '[&_[data-slot=progress-indicator]]:bg-yellow-500';
+    return '[&_[data-slot=progress-indicator]]:bg-red-500';
   }
 
   const handleNewArea = (parentId?: string) => {
@@ -267,27 +298,50 @@ export function AreasPageClient({ tree, uncategorizedTests, unsortedSuites, repo
                 Organize your tests and suites into functional areas
               </CardDescription>
             </CardHeader>
-            <CardContent>
-              <div className="grid grid-cols-4 gap-4">
-                <div className="text-center p-4 bg-muted/50 rounded-lg">
-                  <FolderTree className="h-8 w-8 mx-auto mb-2 text-primary" />
-                  <div className="text-2xl font-bold">{totalAreas}</div>
-                  <div className="text-sm text-muted-foreground">Areas</div>
+            <CardContent className="space-y-4">
+              {/* Coverage progress bar */}
+              <div className="space-y-2">
+                <div className="flex items-center justify-between text-sm">
+                  <span className="text-muted-foreground">Test coverage</span>
+                  <span className={cn('font-semibold', getCoverageColor(coverage.rate))}>
+                    {coverage.executed}/{coverage.total} tested ({coverage.rate}%)
+                  </span>
                 </div>
-                <div className="text-center p-4 bg-muted/50 rounded-lg">
-                  <FileCode className="h-8 w-8 mx-auto mb-2 text-primary" />
-                  <div className="text-2xl font-bold">{totalTests}</div>
-                  <div className="text-sm text-muted-foreground">Tests</div>
+                <Progress
+                  value={coverage.rate}
+                  className={cn('h-2.5', getCoverageBarClass(coverage.rate))}
+                />
+              </div>
+
+              {/* Status breakdown */}
+              <div className="grid grid-cols-4 gap-3">
+                <div className="flex items-center gap-2 p-3 bg-muted/50 rounded-lg">
+                  <Check className="h-4 w-4 text-green-500 shrink-0" />
+                  <div>
+                    <div className="text-lg font-bold leading-none">{coverage.passed}</div>
+                    <div className="text-xs text-muted-foreground">Passed</div>
+                  </div>
                 </div>
-                <div className="text-center p-4 bg-muted/50 rounded-lg">
-                  <ListChecks className="h-8 w-8 mx-auto mb-2 text-primary" />
-                  <div className="text-2xl font-bold">{totalSuites}</div>
-                  <div className="text-sm text-muted-foreground">Suites</div>
+                <div className="flex items-center gap-2 p-3 bg-muted/50 rounded-lg">
+                  <X className="h-4 w-4 text-red-500 shrink-0" />
+                  <div>
+                    <div className="text-lg font-bold leading-none">{coverage.failed}</div>
+                    <div className="text-xs text-muted-foreground">Failed</div>
+                  </div>
                 </div>
-                <div className="text-center p-4 bg-muted/50 rounded-lg">
-                  <Folder className="h-8 w-8 mx-auto mb-2 text-muted-foreground" />
-                  <div className="text-2xl font-bold">{uncategorizedTests.length}</div>
-                  <div className="text-sm text-muted-foreground">Uncategorized</div>
+                <div className="flex items-center gap-2 p-3 bg-muted/50 rounded-lg">
+                  <Circle className="h-4 w-4 text-muted-foreground shrink-0" />
+                  <div>
+                    <div className="text-lg font-bold leading-none">{coverage.notRun}</div>
+                    <div className="text-xs text-muted-foreground">Not Run</div>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2 p-3 bg-muted/50 rounded-lg">
+                  <FileWarning className="h-4 w-4 text-amber-500 shrink-0" />
+                  <div>
+                    <div className="text-lg font-bold leading-none">{coverage.placeholders}</div>
+                    <div className="text-xs text-muted-foreground">Placeholders</div>
+                  </div>
                 </div>
               </div>
             </CardContent>
