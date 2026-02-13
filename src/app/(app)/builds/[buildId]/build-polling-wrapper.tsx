@@ -86,6 +86,7 @@ export function BuildPollingWrapper({ initialBuild, buildId, isMainBranch = fals
           flakyCount: build.flakyCount ?? 0,
           failedCount: build.failedCount,
           passedCount: build.passedCount,
+          errorsCount: build.diffs.filter(d => d.errorMessage).length,
           elapsedMs: build.elapsedMs,
         }}
         hasPendingDiffs={pendingDiffs.length > 0}

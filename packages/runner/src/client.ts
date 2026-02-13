@@ -276,7 +276,7 @@ export class RunnerClient {
     // Override targetUrl if baseUrl is configured
     if (this.baseUrl) {
       console.log(`Overriding targetUrl: ${command.payload.targetUrl} → ${this.baseUrl}`);
-      command.payload.targetUrl = this.baseUrl;
+      command.payload.targetUrl = this.baseUrl.replace(/\/+$/, '');
     }
 
     try {

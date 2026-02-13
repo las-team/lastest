@@ -78,7 +78,7 @@ export async function triggerAIDiffAnalysis(diffId: string, repositoryId?: strin
 
     // Get the diff details
     const diff = await queries.getVisualDiff(diffId);
-    if (!diff || !diff.baselineImagePath || !diff.diffImagePath) {
+    if (!diff || !diff.baselineImagePath || !diff.currentImagePath || !diff.diffImagePath) {
       await queries.updateVisualDiff(diffId, { aiAnalysisStatus: 'skipped' });
       return;
     }

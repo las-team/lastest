@@ -2,9 +2,10 @@ import { RouteInfo } from './types';
 
 export function generateSmokeTest(route: RouteInfo, baseUrl: string): string {
   const testName = `Smoke test: ${route.path}`;
+  const cleanBaseUrl = baseUrl.replace(/\/+$/, '');
   const url = route.routerType === 'hash'
-    ? `${baseUrl}/#${route.path}`
-    : `${baseUrl}${route.path}`;
+    ? `${cleanBaseUrl}/#${route.path}`
+    : `${cleanBaseUrl}${route.path}`;
 
   return `import { test, expect } from '@playwright/test';
 

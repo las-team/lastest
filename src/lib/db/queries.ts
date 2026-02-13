@@ -500,6 +500,10 @@ export async function updateTestRun(id: string, data: Partial<NewTestRun>) {
 }
 
 // Test Results
+export async function getTestResultById(id: string) {
+  return db.select().from(testResults).where(eq(testResults.id, id)).get();
+}
+
 export async function getTestResultsByRun(testRunId: string) {
   return db.select().from(testResults).where(eq(testResults.testRunId, testRunId)).all();
 }
@@ -812,6 +816,7 @@ export async function getVisualDiffsWithTestStatus(buildId: string) {
       aiRecommendation: visualDiffs.aiRecommendation,
       aiAnalysisStatus: visualDiffs.aiAnalysisStatus,
       testResultStatus: testResults.status,
+      errorMessage: testResults.errorMessage,
       testName: tests.name,
       functionalAreaName: functionalAreas.name,
     })

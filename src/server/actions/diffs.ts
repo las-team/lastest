@@ -13,6 +13,7 @@ export async function approveDiff(diffId: string, approvedBy?: string) {
   await requireTeamAccess();
   const diff = await queries.getVisualDiff(diffId);
   if (!diff) throw new Error('Diff not found');
+  if (!diff.currentImagePath) throw new Error('Cannot approve diff without screenshot');
 
   // Update diff status
   await queries.updateVisualDiff(diffId, {
@@ -157,13 +158,20 @@ export async function getDiff(diffId: string) {
   // Get test details
   const test = await queries.getTest(diff.testId);
 
+  // Get error message from test result
+  let errorMessage: string | null = null;
+  if (diff.testResultId) {
+    const testResult = await queries.getTestResultById(diff.testResultId);
+    errorMessage = testResult?.errorMessage ?? null;
+  }
+
   // Look up planned screenshot if not already on the diff
   let plannedImagePath = diff.plannedImagePath;
   let plannedDiffImagePath = diff.plannedDiffImagePath;
   let plannedPixelDifference = diff.plannedPixelDifference;
   let plannedPercentageDifference = diff.plannedPercentageDifference;
 
-  if (!plannedImagePath) {
+  if (!plannedImagePath && diff.currentImagePath) {
     const stepLabel = extractStepLabelFromPath(diff.currentImagePath);
     if (stepLabel) {
       const planned = await queries.getPlannedScreenshotByTest(diff.testId, stepLabel);
@@ -179,6 +187,7 @@ export async function getDiff(diffId: string) {
     plannedDiffImagePath,
     plannedPixelDifference,
     plannedPercentageDifference,
+    errorMessage,
     test: test ?? null,
   };
 }

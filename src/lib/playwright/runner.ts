@@ -1134,7 +1134,7 @@ export class PlaywrightRunner extends EventEmitter {
             const state = await page.context().storageState();
             if (state.cookies.length > 0) {
               if (!this.setupContext) {
-                this.setupContext = { baseUrl: envBaseUrl, variables: {} };
+                this.setupContext = { baseUrl: envBaseUrl.replace(/\/+$/, ''), variables: {} };
               }
               this.setupContext.storageState = JSON.stringify(state);
               console.log(`[per-test-setup] Captured storageState: ${state.cookies.length} cookies`);
@@ -1353,22 +1353,6 @@ export class PlaywrightRunner extends EventEmitter {
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
 
-      // Take screenshot on failure
-      let screenshotPath: string | undefined;
-      if (page) {
-        try {
-          const screenshotFilename = `${runId}-${test.id}-failure.png`;
-          const fullPath = path.join(this.screenshotDir, screenshotFilename);
-          await page.screenshot({ path: fullPath, fullPage: true });
-          // Build public path with repositoryId if present
-          screenshotPath = this.repositoryId
-            ? `/screenshots/${this.repositoryId}/${screenshotFilename}`
-            : `/screenshots/${screenshotFilename}`;
-        } catch {
-          // Ignore screenshot errors
-        }
-      }
-
       // Run teardown even on failure (it's cleanup)
       let teardownDurationMs: number | undefined;
       let teardownError: string | undefined;
@@ -1402,23 +1386,16 @@ export class PlaywrightRunner extends EventEmitter {
         testName: test.name,
         durationMs,
         error: errorMessage,
-        screenshotPath,
+        screenshotPath: capturedScreenshots[0]?.path,
         timestamp: Date.now(),
       } as RunEvent);
-
-      // Combine any screenshots captured before the error with the failure screenshot
-      const allScreenshots = [...capturedScreenshots];
-      if (screenshotPath) {
-        allScreenshots.push({ path: screenshotPath, label: 'failure' });
-      }
 
       result = {
         testId: test.id,
         status: 'failed',
         durationMs,
-        // Prefer screenshot captured during test execution over late failure screenshot
-        screenshotPath: capturedScreenshots[0]?.path || screenshotPath,
-        screenshots: allScreenshots,
+        screenshotPath: capturedScreenshots[0]?.path,
+        screenshots: capturedScreenshots,
         errorMessage,
         consoleErrors: consoleErrors.length > 0 ? consoleErrors : undefined,
         networkRequests: networkFailures.length > 0 ? networkFailures : undefined,

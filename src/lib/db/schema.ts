@@ -260,7 +260,7 @@ export const visualDiffs = sqliteTable('visual_diffs', {
   testId: text('test_id').references(() => tests.id).notNull(),
   stepLabel: text('step_label'),
   baselineImagePath: text('baseline_image_path'),
-  currentImagePath: text('current_image_path').notNull(),
+  currentImagePath: text('current_image_path'),
   diffImagePath: text('diff_image_path'),
   status: text('status').notNull().default('pending'), // 'pending', 'approved', 'rejected', 'auto_approved'
   pixelDifference: integer('pixel_difference').default(0),
@@ -362,6 +362,7 @@ export type VisualDiffWithTestStatus = VisualDiff & {
   testName: string | null;
   functionalAreaName: string | null;
   stepLabel?: string | null;
+  errorMessage?: string | null;
 };
 export type NewVisualDiff = typeof visualDiffs.$inferInsert;
 export type Baseline = typeof baselines.$inferSelect;

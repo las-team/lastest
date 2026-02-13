@@ -6,11 +6,11 @@ import { SliderComparison } from '@/components/diff/slider-comparison';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { approveDiff, rejectDiff, undoApproval } from '@/server/actions/diffs';
 import type { VisualDiff, Test, DiffMetadata, AIDiffAnalysis } from '@/lib/db/schema';
-import { CheckCircle, XCircle, SkipForward, Eye, Image as ImageIcon, Sparkles, Loader2, ArrowUpDown } from 'lucide-react';
+import { CheckCircle, XCircle, SkipForward, Eye, Image as ImageIcon, Sparkles, Loader2, ArrowUpDown, Bug, ChevronDown } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 
 interface DiffViewerClientProps {
-  diff: VisualDiff & { test: Test | null };
+  diff: VisualDiff & { test: Test | null; errorMessage?: string | null };
   buildId: string;
   nextDiffId?: string;
 }
@@ -183,6 +183,20 @@ export function DiffViewerClient({ diff, buildId, nextDiffId }: DiffViewerClient
           </div>
         )}
       </div>
+
+      {/* Execution Error Banner (collapsed by default) */}
+      {diff.errorMessage && (
+        <details className="border border-orange-200 bg-orange-50 rounded-lg">
+          <summary className="flex items-center gap-3 p-4 cursor-pointer select-none">
+            <Bug className="w-5 h-5 text-orange-600 flex-shrink-0" />
+            <span className="font-medium text-orange-800">Execution Error</span>
+            <ChevronDown className="w-4 h-4 text-orange-400 ml-auto transition-transform [[open]>&]:rotate-180" />
+          </summary>
+          <div className="px-4 pb-4">
+            <pre className="text-sm text-orange-700 whitespace-pre-wrap break-words">{diff.errorMessage}</pre>
+          </div>
+        </details>
+      )}
 
       {/* AI Analysis Card */}
       {(aiAnalysis || aiStatus === 'running' || aiStatus === 'pending') && (

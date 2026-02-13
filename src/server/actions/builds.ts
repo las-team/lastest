@@ -460,6 +460,22 @@ async function runBuildAsync(
       }
     }
 
+    // Create placeholder diff for failed tests with no screenshots
+    if (screenshots.length === 0 && (result.status === 'failed' || result.status === 'setup_failed')) {
+      await queries.createVisualDiff({
+        buildId,
+        testResultId: testResult.id,
+        testId: result.testId,
+        stepLabel: null,
+        currentImagePath: null,
+        status: 'auto_approved',
+        classification: 'unchanged',
+        pixelDifference: 0,
+        percentageDifference: '0',
+        metadata: { changedRegions: [] },
+      });
+    }
+
     // Update build progress incrementally
     await updateJobProgress(jobId, processedCount, tests.length);
     await queries.updateBuild(buildId, {
