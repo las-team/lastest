@@ -184,6 +184,23 @@ export async function setupThirdPartyBlocking(
 }
 
 /**
+ * Inject CSS via CSSOM to bypass Content Security Policy restrictions.
+ * Falls back to addStyleTag if CSSOM injection fails.
+ */
+async function injectCSS(page: Page, css: string): Promise<void> {
+  try {
+    await page.evaluate((cssText) => {
+      const sheet = new CSSStyleSheet();
+      sheet.replaceSync(cssText);
+      document.adoptedStyleSheets = [...document.adoptedStyleSheets, sheet];
+    }, css);
+  } catch {
+    // Fallback for older browsers without adoptedStyleSheets
+    await page.addStyleTag({ content: css });
+  }
+}
+
+/**
  * Apply all stabilization techniques to a page before screenshot.
  * This is the main entry point called by the runner.
  */
@@ -208,14 +225,14 @@ export async function applyStabilization(
 
   // 3. Apply font override (cross-OS bundled font supersedes system fonts)
   if (s.crossOsConsistency) {
-    await page.addStyleTag({ content: getCrossOsFontCSS() });
+    await injectCSS(page, getCrossOsFontCSS());
   } else if (s.disableWebfonts) {
-    await page.addStyleTag({ content: SYSTEM_FONTS_CSS });
+    await injectCSS(page, SYSTEM_FONTS_CSS);
   }
 
   // 4. Hide loading spinners via CSS
   if (s.hideLoadingIndicators) {
-    await page.addStyleTag({ content: HIDE_SPINNERS_CSS });
+    await injectCSS(page, HIDE_SPINNERS_CSS);
   }
 
   // 5. Wait for spinners to actually disappear
