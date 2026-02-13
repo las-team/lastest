@@ -380,6 +380,61 @@ Guidelines:
 Return ONLY the JSON object, no explanations.`;
 }
 
+export function createCodeDiffScanPrompt(
+  changedFilesContext: string,
+  baseBranch: string,
+  headBranch: string,
+  repoFullName?: string
+): string {
+  const repoNote = repoFullName ? `\nRepository: ${repoFullName}` : '';
+  return `You are analyzing code changes between two git branches to identify what visual regression tests should be created to cover the specific changes.
+${repoNote}
+Base branch: ${baseBranch}
+Head branch: ${headBranch}
+
+Changed files and their contents:
+${changedFilesContext}
+
+Analyze the actual code changes above and identify:
+1. What specific functionality was added or modified
+2. Which user-facing pages/routes are affected by these changes
+3. What specific behaviors should be tested based on the diff
+
+For each affected route, generate test suggestions that target the EXACT changes — not generic page checks. For example:
+- If a new button was added → "Test the new [button name] button click behavior"
+- If form validation changed → "Verify updated validation rules for [field]"
+- If a component was restyled → "Check visual appearance of [component] after style changes"
+- If a new page was added → "Test the new [page] route renders correctly with expected elements"
+
+Return a JSON object with this exact structure:
+{
+  "functionalAreas": [
+    {
+      "name": "Area Name",
+      "description": "Brief description of what changed in this area",
+      "routes": [
+        {
+          "path": "/affected-route",
+          "type": "static",
+          "description": "What changed on this page",
+          "testSuggestions": ["Specific test targeting the actual code change"]
+        }
+      ]
+    }
+  ]
+}
+
+Guidelines:
+- Group changes under logical functional areas based on what was modified
+- Only include routes that are actually affected by the code changes
+- Test suggestions MUST reference the specific change, not generic "verify page loads"
+- Mark routes as "static" or "dynamic" based on URL parameters
+- For dynamic routes, use bracket notation: /users/[id]
+- If changes are purely backend/non-visual, still suggest routes where the effects would be visible
+
+Return ONLY the JSON object, no explanations or markdown formatting.`;
+}
+
 export function createSpecAnalysisPrompt(specContent: string): string {
   return `Analyze the following specification/documentation content and extract functional areas, routes, and test scenarios.
 

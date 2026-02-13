@@ -1,10 +1,10 @@
 'use server';
 
 import * as queries from '@/lib/db/queries';
-import { generateWithAI, createRouteScanPrompt, createMCPExploreRoutesPrompt, SYSTEM_PROMPT, MCP_SYSTEM_PROMPT } from '@/lib/ai';
+import { generateWithAI, createRouteScanPrompt, createMCPExploreRoutesPrompt, createCodeDiffScanPrompt, SYSTEM_PROMPT, MCP_SYSTEM_PROMPT } from '@/lib/ai';
 import type { AIProviderConfig } from '@/lib/ai/types';
 import { revalidatePath } from 'next/cache';
-import { getRepoTree, getFileContent, type TreeEntry } from '@/lib/github/content';
+import { getRepoTree, getFileContent, compareBranches, type TreeEntry } from '@/lib/github/content';
 import { createJob, completeJob, failJob } from './jobs';
 import { requireRepoAccess } from '@/lib/auth';
 
@@ -370,6 +370,133 @@ export async function saveDiscoveredRoutes(
     return { success: true, count: totalNew, savedRoutes };
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Failed to save routes';
+    return { success: false, error: message };
+  }
+}
+
+// --- Code Diff Scan ---
+
+const IGNORED_EXTENSIONS = new Set([
+  'png', 'jpg', 'jpeg', 'gif', 'svg', 'ico', 'webp', 'avif',
+  'woff', 'woff2', 'ttf', 'eot', 'otf',
+  'mp4', 'mp3', 'wav', 'ogg', 'webm',
+  'zip', 'tar', 'gz', 'br',
+  'pdf', 'doc', 'docx',
+  'lock', 'map',
+]);
+
+const IGNORED_PATHS = [
+  'node_modules/', '.git/', 'dist/', 'build/', '.next/', 'coverage/',
+  'public/screenshots/', 'public/baselines/', 'public/traces/',
+  '__snapshots__/', '.turbo/', '.cache/',
+];
+
+function filterRelevantSourceFiles(files: Array<{ filename: string; changes: number; status: string }>) {
+  return files.filter((f) => {
+    if (f.status === 'removed') return false;
+    const ext = f.filename.split('.').pop()?.toLowerCase() || '';
+    if (IGNORED_EXTENSIONS.has(ext)) return false;
+    if (IGNORED_PATHS.some((p) => f.filename.startsWith(p) || f.filename.includes('/' + p))) return false;
+    // Skip lock files by name
+    if (f.filename.endsWith('-lock.json') || f.filename.endsWith('.lock') || f.filename === 'yarn.lock') return false;
+    return true;
+  });
+}
+
+async function buildChangedFilesContext(
+  accessToken: string,
+  owner: string,
+  repo: string,
+  headBranch: string,
+  files: Array<{ filename: string; changes: number; status: string }>
+): Promise<string> {
+  // Sort by most changes, take top 20
+  const sorted = [...files].sort((a, b) => b.changes - a.changes).slice(0, 20);
+  const parts: string[] = [];
+
+  for (const file of sorted) {
+    const content = await getFileContent(accessToken, owner, repo, file.filename, headBranch);
+    if (content) {
+      const truncated = content.length > 5000 ? content.slice(0, 5000) + '\n... (truncated)' : content;
+      parts.push(`=== ${file.filename} (${file.status}, +${file.changes} changes) ===\n${truncated}`);
+    } else {
+      parts.push(`=== ${file.filename} (${file.status}, +${file.changes} changes) ===\n[Could not fetch content]`);
+    }
+  }
+
+  return parts.join('\n\n');
+}
+
+export async function scanBranchDiff(
+  repositoryId: string
+): Promise<{ success: boolean; functionalAreas?: DiscoveredArea[]; fileCount?: number; error?: string }> {
+  const { repo } = await requireRepoAccess(repositoryId);
+  const jobId = await createJob('ai_scan', 'Code Diff Scan', undefined, repositoryId);
+
+  try {
+    const account = repo.teamId ? await queries.getGithubAccountByTeam(repo.teamId) : null;
+    if (!account) {
+      await failJob(jobId, 'GitHub account not connected');
+      return { success: false, error: 'GitHub account not connected' };
+    }
+
+    const baseBranch = repo.defaultBranch || 'main';
+    const headBranch = repo.selectedBranch || baseBranch;
+
+    if (baseBranch === headBranch) {
+      await failJob(jobId, 'Selected branch is the same as the default branch. Select a feature branch first.');
+      return { success: false, error: 'Selected branch is the same as the default branch. Select a feature branch first.' };
+    }
+
+    const comparison = await compareBranches(account.accessToken, repo.owner, repo.name, baseBranch, headBranch);
+    if (!comparison) {
+      await failJob(jobId, 'Could not compare branches. Check that both branches exist.');
+      return { success: false, error: 'Could not compare branches. Check that both branches exist.' };
+    }
+
+    const relevantFiles = filterRelevantSourceFiles(comparison.files);
+    if (relevantFiles.length === 0) {
+      await failJob(jobId, 'No relevant source files changed between branches');
+      return { success: false, error: 'No relevant source files changed between branches' };
+    }
+
+    const context = await buildChangedFilesContext(
+      account.accessToken,
+      repo.owner,
+      repo.name,
+      headBranch,
+      relevantFiles
+    );
+
+    const config = await getAIConfig(repositoryId);
+    const prompt = createCodeDiffScanPrompt(context, baseBranch, headBranch, repo.fullName);
+    const response = await generateWithAI(config, prompt, SYSTEM_PROMPT, {
+      actionType: 'analyze_diff',
+      repositoryId,
+    });
+
+    // Parse JSON response - try grouped object first, fall back to flat array
+    const objStr = extractJsonObject(response);
+    if (objStr) {
+      const parsed = JSON.parse(objStr);
+      if (parsed.functionalAreas && Array.isArray(parsed.functionalAreas)) {
+        await completeJob(jobId);
+        return { success: true, functionalAreas: parsed.functionalAreas, fileCount: relevantFiles.length };
+      }
+    }
+
+    const arrStr = extractJsonArray(response);
+    if (arrStr) {
+      const routes: DiscoveredRoute[] = JSON.parse(arrStr);
+      await completeJob(jobId);
+      return { success: true, functionalAreas: [{ name: 'Changed Routes', routes }], fileCount: relevantFiles.length };
+    }
+
+    await failJob(jobId, 'AI did not return valid JSON');
+    return { success: false, error: 'AI did not return valid JSON' };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Failed to analyze branch diff';
+    await failJob(jobId, message);
     return { success: false, error: message };
   }
 }

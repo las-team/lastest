@@ -18,7 +18,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { createArea, deleteArea, deleteAreaWithContents, moveTestToArea, moveSuiteToArea, moveArea } from '@/server/actions/areas';
-import { FolderSearch, Sparkles, Globe, FileText, Loader2, BookOpen, Check, X, Circle, FileWarning } from 'lucide-react';
+import { FolderSearch, Sparkles, Globe, FileText, Loader2, BookOpen, Check, X, Circle, FileWarning, GitCompare } from 'lucide-react';
 import { Progress } from '@/components/ui/progress';
 import { cn } from '@/lib/utils';
 import { startRemoteRouteScan } from '@/server/actions/scanner';
@@ -26,6 +26,7 @@ import { AIScanRoutesDialog } from '@/components/ai/ai-scan-routes-dialog';
 import { SpecAnalysisDialog } from '@/components/ai/spec-analysis-dialog';
 import { MCPExploreRoutesDialog } from '@/components/ai/mcp-explore-routes-dialog';
 import { ImportFromSpecDialog } from '@/components/ai/import-from-spec-dialog';
+import { CodeDiffScanDialog } from '@/components/ai/code-diff-scan-dialog';
 import { toast } from 'sonner';
 import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from '@/components/ui/resizable';
 import type { FunctionalAreaWithChildren } from '@/lib/db/queries';
@@ -60,6 +61,7 @@ export function AreasPageClient({ tree, uncategorizedTests, unsortedSuites, repo
   const [showSpecAnalysisDialog, setShowSpecAnalysisDialog] = useState(false);
   const [showMCPExploreDialog, setShowMCPExploreDialog] = useState(false);
   const [showImportFromSpecDialog, setShowImportFromSpecDialog] = useState(false);
+  const [showCodeDiffDialog, setShowCodeDiffDialog] = useState(false);
 
   // Delete key handler
   useEffect(() => {
@@ -241,7 +243,7 @@ export function AreasPageClient({ tree, uncategorizedTests, unsortedSuites, repo
               </CardDescription>
             </CardHeader>
             <CardContent>
-              <div className="grid grid-cols-5 gap-3">
+              <div className="grid grid-cols-3 md:grid-cols-6 gap-3">
                 <button
                   onClick={handleScan}
                   disabled={isScanning}
@@ -286,6 +288,14 @@ export function AreasPageClient({ tree, uncategorizedTests, unsortedSuites, repo
                   <Globe className="h-6 w-6 text-primary" />
                   <span className="font-medium text-sm">MCP Explore</span>
                   <span className="text-xs text-muted-foreground">MCP-based exploration</span>
+                </button>
+                <button
+                  onClick={() => setShowCodeDiffDialog(true)}
+                  className="flex flex-col items-center gap-2 p-4 border rounded-lg hover:bg-muted/50 hover:border-primary/50 transition-colors text-center"
+                >
+                  <GitCompare className="h-6 w-6 text-primary" />
+                  <span className="font-medium text-sm">Code Diff</span>
+                  <span className="text-xs text-muted-foreground">Branch changes</span>
                 </button>
               </div>
             </CardContent>
@@ -465,6 +475,12 @@ export function AreasPageClient({ tree, uncategorizedTests, unsortedSuites, repo
         repositoryId={repositoryId}
         branch={selectedBranch}
         onComplete={() => router.refresh()}
+      />
+      <CodeDiffScanDialog
+        open={showCodeDiffDialog}
+        onOpenChange={setShowCodeDiffDialog}
+        repositoryId={repositoryId}
+        onSaved={() => router.refresh()}
       />
     </ResizablePanelGroup>
   );

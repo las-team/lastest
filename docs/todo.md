@@ -26,6 +26,9 @@ Scan branch changes and add new tests based on that.
 
 Explore/Cover instead of Areas
 
+Turn off page shift view 
+leadline
+
 ## ideas
 Ideal summary
     60 functional areas remain unchanged, 10 changed, out of those 8 new areas added, 1 pre-existing areas changed, 1 minor change in pre-existing function. 
