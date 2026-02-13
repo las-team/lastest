@@ -6,7 +6,7 @@
 # -----------------------------------------------------------------------------
 # Stage 1: Dependencies
 # -----------------------------------------------------------------------------
-FROM node:20-slim AS deps
+FROM node:24-slim AS deps
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     python3 make g++ && \
@@ -27,7 +27,7 @@ RUN pnpm install --frozen-lockfile
 # -----------------------------------------------------------------------------
 # Stage 2: Builder
 # -----------------------------------------------------------------------------
-FROM node:20-slim AS builder
+FROM node:24-slim AS builder
 
 # Install build dependencies for native modules
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -60,13 +60,6 @@ FROM mcr.microsoft.com/playwright:v1.57.0-noble AS runner
 
 WORKDIR /app
 
-# Install Node.js 20 (Playwright image may have older version)
-RUN apt-get update && apt-get install -y curl && \
-    curl -fsSL https://deb.nodesource.com/setup_20.x | bash - && \
-    apt-get install -y nodejs && \
-    apt-get clean && \
-    rm -rf /var/lib/apt/lists/*
-
 # Create non-root user
 RUN groupadd --gid 1002 nodejs && \
     useradd --uid 1002 --gid nodejs --shell /bin/bash --create-home nextjs
@@ -76,19 +69,10 @@ COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
 COPY --from=builder --chown=nextjs:nodejs /app/public ./public
 
-# Copy drizzle for schema push capability
+# Copy drizzle config for schema push on startup
 COPY --from=builder --chown=nextjs:nodejs /app/drizzle ./drizzle
 COPY --from=builder --chown=nextjs:nodejs /app/drizzle.config.ts ./drizzle.config.ts
 COPY --from=builder --chown=nextjs:nodejs /app/src/lib/db/schema.ts ./src/lib/db/schema.ts
-
-# Copy drizzle-kit and its deps for migrations
-COPY --from=builder --chown=nextjs:nodejs /app/node_modules/drizzle-kit ./node_modules/drizzle-kit
-COPY --from=builder --chown=nextjs:nodejs /app/node_modules/drizzle-orm ./node_modules/drizzle-orm
-COPY --from=builder --chown=nextjs:nodejs /app/node_modules/better-sqlite3 ./node_modules/better-sqlite3
-COPY --from=builder --chown=nextjs:nodejs /app/node_modules/bindings ./node_modules/bindings
-COPY --from=builder --chown=nextjs:nodejs /app/node_modules/file-uri-to-path ./node_modules/file-uri-to-path
-COPY --from=builder --chown=nextjs:nodejs /app/node_modules/prebuild-install ./node_modules/prebuild-install
-COPY --from=builder --chown=nextjs:nodejs /app/node_modules/node-addon-api ./node_modules/node-addon-api
 
 # Copy entrypoint script
 COPY --chown=nextjs:nodejs scripts/docker-entrypoint.sh /docker-entrypoint.sh

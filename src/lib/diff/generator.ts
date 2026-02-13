@@ -366,40 +366,59 @@ function fuzzyMatchUnalignedRows(
 
 /**
  * Build aligned image buffers from an alignment result.
- * Matched rows are placed side-by-side for pixelmatch comparison.
- * Inserted/deleted rows are excluded from the pixel diff but tracked in metadata.
+ * ALL rows (match, insert, delete) are included so pixelmatch sees the full picture.
+ * Inserted rows get baseline filled with background color; deleted rows get current filled.
  */
 function buildAlignedImages(
   baselineData: Buffer | Uint8Array,
   currentData: Buffer | Uint8Array,
   width: number,
-  alignment: AlignmentResult
+  alignment: AlignmentResult,
+  baselineBg: { r: number; g: number; b: number },
+  currentBg: { r: number; g: number; b: number }
 ): { alignedBaseline: Buffer; alignedCurrent: Buffer; alignedHeight: number } {
-  // Only include matched rows for aligned comparison
-  const matchedOps = alignment.ops
-    .map((op, idx) => ({ op, idx }))
-    .filter(({ op }) => op === 'match');
-
-  const alignedHeight = matchedOps.length;
+  const alignedHeight = alignment.ops.length;
   const rowBytes = width * 4;
 
   const alignedBaseline = Buffer.alloc(alignedHeight * rowBytes);
   const alignedCurrent = Buffer.alloc(alignedHeight * rowBytes);
 
-  for (let i = 0; i < matchedOps.length; i++) {
-    const { idx } = matchedOps[i];
-    const bRow = alignment.baselineRows[idx];
-    const cRow = alignment.currentRows[idx];
+  for (let i = 0; i < alignment.ops.length; i++) {
+    const op = alignment.ops[i];
+    const destOffset = i * rowBytes;
 
-    // Copy baseline row
-    const bStart = bRow * rowBytes;
-    Buffer.from(baselineData.buffer, baselineData.byteOffset + bStart, rowBytes)
-      .copy(alignedBaseline, i * rowBytes);
-
-    // Copy current row
-    const cStart = cRow * rowBytes;
-    Buffer.from(currentData.buffer, currentData.byteOffset + cStart, rowBytes)
-      .copy(alignedCurrent, i * rowBytes);
+    if (op === 'match') {
+      const bRow = alignment.baselineRows[i];
+      const cRow = alignment.currentRows[i];
+      Buffer.from(baselineData.buffer, baselineData.byteOffset + bRow * rowBytes, rowBytes)
+        .copy(alignedBaseline, destOffset);
+      Buffer.from(currentData.buffer, currentData.byteOffset + cRow * rowBytes, rowBytes)
+        .copy(alignedCurrent, destOffset);
+    } else if (op === 'insert') {
+      // No baseline row — fill with baseline background color
+      for (let x = 0; x < width; x++) {
+        const off = destOffset + x * 4;
+        alignedBaseline[off] = baselineBg.r;
+        alignedBaseline[off + 1] = baselineBg.g;
+        alignedBaseline[off + 2] = baselineBg.b;
+        alignedBaseline[off + 3] = 255;
+      }
+      const cRow = alignment.currentRows[i];
+      Buffer.from(currentData.buffer, currentData.byteOffset + cRow * rowBytes, rowBytes)
+        .copy(alignedCurrent, destOffset);
+    } else {
+      // delete — no current row — fill with current background color
+      const bRow = alignment.baselineRows[i];
+      Buffer.from(baselineData.buffer, baselineData.byteOffset + bRow * rowBytes, rowBytes)
+        .copy(alignedBaseline, destOffset);
+      for (let x = 0; x < width; x++) {
+        const off = destOffset + x * 4;
+        alignedCurrent[off] = currentBg.r;
+        alignedCurrent[off + 1] = currentBg.g;
+        alignedCurrent[off + 2] = currentBg.b;
+        alignedCurrent[off + 3] = 255;
+      }
+    }
   }
 
   return { alignedBaseline, alignedCurrent, alignedHeight };
@@ -422,17 +441,14 @@ function buildShiftAwareDiffImage(
   const diffImage = new PNG({ width, height: totalHeight });
   const rowBytes = width * 4;
 
-  let matchIdx = 0;
-
   for (let i = 0; i < alignment.ops.length; i++) {
     const op = alignment.ops[i];
     const destOffset = i * rowBytes;
 
     if (op === 'match') {
-      // Copy diff data for matched rows
-      Buffer.from(alignedDiffData.buffer, alignedDiffData.byteOffset + matchIdx * rowBytes, rowBytes)
+      // Copy diff data for matched rows (alignedDiffData includes all rows now)
+      Buffer.from(alignedDiffData.buffer, alignedDiffData.byteOffset + i * rowBytes, rowBytes)
         .copy(diffImage.data as Buffer, destOffset);
-      matchIdx++;
     } else if (op === 'insert') {
       // Green tint for inserted rows (new content)
       const cRow = alignment.currentRows[i];
@@ -579,23 +595,22 @@ async function generateShiftAwareDiff(
     }
   }
 
-  // Align rows using LCS
-  const rawAlignment = alignRows(
+  // Detect background colors before alignment (needed for blank-row fills)
+  const baselineBg = detectBackgroundColor(baseline.data, baseline.width, baseline.height);
+  const currentBg = detectBackgroundColor(current.data, current.width, current.height);
+
+  // Align rows using LCS (no fuzzy matching — pixelmatch handles anti-aliasing)
+  const alignment = alignRows(
     baseline.data, baseline.width, baseline.height,
     current.data, current.width, current.height
   );
 
-  // Fuzzy-match nearby delete/insert pairs that are pixel-similar
-  const alignment = fuzzyMatchUnalignedRows(
-    rawAlignment, baseline.data, current.data, width
-  );
-
-  // Build aligned buffers containing only matched rows
+  // Build aligned buffers with ALL rows (insert/delete filled with bg color)
   const { alignedBaseline, alignedCurrent, alignedHeight } = buildAlignedImages(
-    baseline.data, current.data, width, alignment
+    baseline.data, current.data, width, alignment, baselineBg, currentBg
   );
 
-  // Run pixelmatch on aligned (matched) rows only
+  // Run pixelmatch on the full aligned images
   let numDiffPixels = 0;
   let alignedDiffData: Buffer;
 
@@ -623,39 +638,30 @@ async function generateShiftAwareDiff(
   const diffImagePath = path.join(outputDir, diffFileName);
   fs.writeFileSync(diffImagePath, PNG.sync.write(diffImage));
 
-  // Calculate percentages: original (naive) vs adjusted (shift-excluded)
-  const baselineBg = detectBackgroundColor(baseline.data, baseline.width, baseline.height);
-  const currentBg = detectBackgroundColor(current.data, current.width, current.height);
+  // Single percentage from all rows (inserted/deleted content now compared against bg)
   const baselineContent = calculateContentArea(baseline.data, baseline.width, baseline.height, baselineBg);
   const currentContent = calculateContentArea(current.data, current.width, current.height, currentBg);
   const contentArea = Math.max(baselineContent.contentPixels, currentContent.contentPixels, 1);
+  const percentageDiff = Math.min((numDiffPixels / contentArea) * 100, 100);
 
-  // Adjusted percentage based only on matched-row diffs
-  const adjustedPercentage = Math.min((numDiffPixels / contentArea) * 100, 100);
-
-  // Estimate original percentage (what it would be without shift exclusion)
-  const totalShiftedPixels = (alignment.insertedRows + alignment.deletedRows) * width;
-  const originalPercentage = Math.min(((numDiffPixels + totalShiftedPixels) / contentArea) * 100, 100);
-
-  // Find changed regions from the aligned diff
+  // Find changed regions from the full aligned diff
   const changedRegions = alignedHeight > 0
     ? findChangedRegions(alignedDiffData, width, alignedHeight)
     : [];
 
-  const changeCategories = categorizeChanges(changedRegions, adjustedPercentage);
+  const changeCategories = categorizeChanges(changedRegions, percentageDiff);
   const affectedComponents = detectAffectedComponents(changedRegions);
 
   // Compute dominant shift direction
   let dominantDeltaY = 0;
   if (alignment.insertedRows > 0 && alignment.deletedRows === 0) {
-    dominantDeltaY = alignment.insertedRows; // content pushed down
+    dominantDeltaY = alignment.insertedRows;
   } else if (alignment.deletedRows > 0 && alignment.insertedRows === 0) {
-    dominantDeltaY = -alignment.deletedRows; // content pulled up
+    dominantDeltaY = -alignment.deletedRows;
   } else {
     dominantDeltaY = alignment.insertedRows - alignment.deletedRows;
   }
 
-  const fuzzyMatchedCount = alignment.matchedRows - rawAlignment.matchedRows;
   const shiftDetected = alignment.insertedRows > 0 || alignment.deletedRows > 0;
   const confidence = shiftDetected
     ? Math.round((alignment.matchedRows / alignment.ops.length) * 100) / 100
@@ -665,24 +671,13 @@ async function generateShiftAwareDiff(
     detected: shiftDetected,
     deltaY: dominantDeltaY,
     confidence,
-    excludedFromDiff: shiftDetected,
     insertedRows: alignment.insertedRows,
     deletedRows: alignment.deletedRows,
-    originalPercentage: Math.round(originalPercentage * 100) / 100,
-    adjustedPercentage: Math.round(adjustedPercentage * 100) / 100,
-    fuzzyMatchedRows: fuzzyMatchedCount > 0 ? fuzzyMatchedCount : undefined,
   };
-
-  // When confidence is too low (< 5% of rows matched), the images are fundamentally
-  // different — not merely shifted. Use the original percentage to avoid false "unchanged".
-  const MIN_SHIFT_CONFIDENCE = 0.05;
-  const effectivePercentage = (shiftDetected && confidence < MIN_SHIFT_CONFIDENCE)
-    ? originalPercentage
-    : adjustedPercentage;
 
   return {
     pixelDifference: numDiffPixels,
-    percentageDifference: Math.round(effectivePercentage * 100) / 100,
+    percentageDifference: Math.round(percentageDiff * 100) / 100,
     diffImagePath,
     metadata: {
       changedRegions,
@@ -961,7 +956,6 @@ export function detectPageShift(regions: Rectangle[]): PageShiftInfo | undefined
         detected: true,
         deltaY: y1 > y2 ? deltaY : -deltaY,
         confidence: Math.round(confidence * 100) / 100,
-        excludedFromDiff: false,
       };
     }
   }
@@ -986,7 +980,6 @@ export function detectPageShift(regions: Rectangle[]): PageShiftInfo | undefined
           detected: true,
           deltaY: bottomCount > topCount ? Math.round(avgY) : -Math.round(avgY),
           confidence: 0.6,
-          excludedFromDiff: false,
         };
       }
     }

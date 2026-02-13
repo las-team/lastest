@@ -180,9 +180,6 @@ export function DiffViewerClient({ diff, buildId, nextDiffId }: DiffViewerClient
           <div className="flex items-center gap-2 px-3 py-1 rounded-full text-sm font-medium bg-blue-100 text-blue-700">
             <ArrowUpDown className="w-4 h-4" />
             Page Shift {metadata.pageShift.deltaY > 0 ? '+' : ''}{metadata.pageShift.deltaY}px
-            {metadata.pageShift.excludedFromDiff && (
-              <span className="text-blue-500">(excluded)</span>
-            )}
           </div>
         )}
       </div>
@@ -395,12 +392,9 @@ export function DiffViewerClient({ diff, buildId, nextDiffId }: DiffViewerClient
               )}
             </span>
           )}
-          {metadata?.pageShift?.detected && metadata.pageShift.excludedFromDiff && (
+          {metadata?.pageShift?.detected && (
             <span className="ml-3 text-blue-600">
-              · Shift excluded: {metadata.pageShift.insertedRows ?? 0} rows added, {metadata.pageShift.deletedRows ?? 0} removed
-              {metadata.pageShift.originalPercentage != null && metadata.pageShift.adjustedPercentage != null && (
-                <span> · {metadata.pageShift.originalPercentage}% → {metadata.pageShift.adjustedPercentage}%</span>
-              )}
+              · Shift: {metadata.pageShift.insertedRows ?? 0} rows added, {metadata.pageShift.deletedRows ?? 0} removed
             </span>
           )}
         </div>
