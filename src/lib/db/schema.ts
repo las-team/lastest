@@ -146,6 +146,7 @@ export const testResults = sqliteTable('test_results', {
   networkRequests: text('network_requests', { mode: 'json' }).$type<NetworkRequest[]>(),
   a11yViolations: text('a11y_violations', { mode: 'json' }).$type<A11yViolation[]>(),
   videoPath: text('video_path'),
+  softErrors: text('soft_errors', { mode: 'json' }).$type<string[]>(),
 });
 
 // Repository provider type

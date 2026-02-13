@@ -62,7 +62,7 @@ export async function createSetupConfig(data: CreateSetupConfigInput) {
   const result = await queries.createSetupConfig({
     repositoryId: data.repositoryId,
     name: data.name,
-    baseUrl: data.baseUrl,
+    baseUrl: data.baseUrl.replace(/\/+$/, ''),
     authType: data.authType,
     authConfig: data.authConfig || null,
   });

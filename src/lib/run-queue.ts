@@ -136,6 +136,7 @@ class RunQueue {
             errorMessage: result.errorMessage,
             durationMs: result.durationMs,
             videoPath: result.videoPath,
+            softErrors: result.softErrors,
           });
           nextItem.completedResults.push({
             testId: result.testId,

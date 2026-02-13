@@ -578,6 +578,7 @@ export interface TestRunResult {
   teardownError?: string;
   stabilityMetadata?: StabilityMetadata;
   videoPath?: string;
+  softErrors?: string[];
 }
 
 export interface ProgressCallback {
@@ -904,6 +905,9 @@ export class PlaywrightRunner extends EventEmitter {
     // Track setup duration (outside try so catch can access)
     let setupDurationMs = 0;
 
+    // Track soft errors (outside try so catch can access)
+    let testSoftErrors: string[] = [];
+
     // Result object — assigned in try/catch, video path added in finally
     let result: TestRunResult = {
       testId: test.id,
@@ -1221,9 +1225,16 @@ export class PlaywrightRunner extends EventEmitter {
       });
 
       // Execute the test code with the proxy page
-      await this.executeTestCode(screenshotProxy, test, runId, testScreenshotPath, (label: string) => {
-        currentStepLabel = label;
-      });
+      // Errors are caught as soft errors so screenshot capture still happens
+      try {
+        testSoftErrors = await this.executeTestCode(screenshotProxy, test, runId, testScreenshotPath, (label: string) => {
+          currentStepLabel = label;
+        });
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        testSoftErrors.push(msg);
+        console.warn(`[soft-error] Test "${test.name}" error, continuing to screenshot: ${msg}`);
+      }
 
       // Check for console errors or network failures after test execution
       const consoleErrorMode = (this.settings?.consoleErrorMode as string) || 'fail';
@@ -1348,6 +1359,7 @@ export class PlaywrightRunner extends EventEmitter {
         teardownDurationMs,
         teardownError,
         stabilityMetadata: aggregatedStabilityMetadata,
+        softErrors: testSoftErrors.length > 0 ? testSoftErrors : undefined,
       };
 
     } catch (error) {
@@ -1402,6 +1414,7 @@ export class PlaywrightRunner extends EventEmitter {
         setupDurationMs: setupDurationMs > 0 ? setupDurationMs : undefined,
         teardownDurationMs,
         teardownError,
+        softErrors: testSoftErrors.length > 0 ? testSoftErrors : undefined,
       };
 
     } finally {
@@ -1436,7 +1449,7 @@ export class PlaywrightRunner extends EventEmitter {
     return stripTypeAnnotations(code);
   }
 
-  private async executeTestCode(page: Page, test: Test, runId: string, screenshotPath: string, onStepLabel?: (label: string) => void): Promise<void> {
+  private async executeTestCode(page: Page, test: Test, runId: string, screenshotPath: string, onStepLabel?: (label: string) => void): Promise<string[]> {
     let code = test.code;
     if (!code) {
       throw new Error('No test code');
@@ -1473,6 +1486,8 @@ export class PlaywrightRunner extends EventEmitter {
       const serverManager = getServerManager();
       const baseUrl = (this.environmentConfig?.baseUrl || serverManager.resolveUrl('http://localhost:3000') || 'http://localhost:3000').replace(/\/$/, '');
 
+      const softErrors: string[] = [];
+
       const stepLogger = {
         log: (msg: string) => {
           onStepLabel?.(msg);
@@ -1482,6 +1497,28 @@ export class PlaywrightRunner extends EventEmitter {
             testName: `${test.name}: ${msg}`,
             timestamp: Date.now(),
           } as RunEvent);
+        },
+        warn: (msg: string) => {
+          softErrors.push(msg);
+          onStepLabel?.(`[WARN] ${msg}`);
+        },
+        softExpect: async (fn: () => Promise<void>, label?: string) => {
+          try {
+            await fn();
+          } catch (e: unknown) {
+            const msg = label || (e instanceof Error ? e.message : String(e));
+            softErrors.push(msg);
+            onStepLabel?.(`[SOFT FAIL] ${msg}`);
+          }
+        },
+        softAction: async (fn: () => Promise<void>, label?: string) => {
+          try {
+            await fn();
+          } catch (e: unknown) {
+            const msg = label || (e instanceof Error ? e.message : String(e));
+            softErrors.push(msg);
+            onStepLabel?.(`[SOFT FAIL] ${msg}`);
+          }
         },
       };
 
@@ -1594,7 +1631,7 @@ export class PlaywrightRunner extends EventEmitter {
       const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
       const testFn = new AsyncFunction('page', 'baseUrl', 'screenshotPath', 'stepLogger', 'expect', 'appState', 'locateWithFallback', body);
       await testFn(page, baseUrl, screenshotPath, stepLogger, expectFn, appStateFn, statsLocateWithFallback);
-      return;
+      return softErrors;
     }
 
     // Legacy: try Playwright test format
@@ -1607,7 +1644,7 @@ export class PlaywrightRunner extends EventEmitter {
       for (const line of lines) {
         await this.executeLine(page, line.trim(), test.id);
       }
-      return;
+      return [];
     }
 
     const body = bodyMatch[1];
@@ -1616,6 +1653,7 @@ export class PlaywrightRunner extends EventEmitter {
     for (const line of lines) {
       await this.executeLine(page, line.trim(), test.id);
     }
+    return [];
   }
 
   // Locate element using fallback selector strategy with stats-based optimization

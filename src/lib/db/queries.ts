@@ -1503,7 +1503,7 @@ export async function getEnvironmentConfig(repositoryId?: string | null) {
       .from(environmentConfigs)
       .where(eq(environmentConfigs.repositoryId, repositoryId))
       .get();
-    if (config) return config;
+    if (config) return { ...config, baseUrl: config.baseUrl.replace(/\/+$/, '') };
   }
 
   // Return global config (no repositoryId) or defaults
@@ -1513,7 +1513,7 @@ export async function getEnvironmentConfig(repositoryId?: string | null) {
     .where(eq(environmentConfigs.repositoryId, ''))
     .get();
 
-  if (globalConfig) return globalConfig;
+  if (globalConfig) return { ...globalConfig, baseUrl: globalConfig.baseUrl.replace(/\/+$/, '') };
 
   // Return default config object (not saved)
   return {

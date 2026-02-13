@@ -204,7 +204,8 @@ export async function generateBasicTests(repositoryId: string, routeIds: string[
       routerType: route.routerType as 'hash' | 'browser' | undefined,
     });
 
-    const targetUrl = route.routerType === 'hash' ? `${baseUrl}/#${route.path}` : `${baseUrl}${route.path}`;
+    const cleanBase = baseUrl.replace(/\/+$/, '');
+    const targetUrl = route.routerType === 'hash' ? `${cleanBase}/#${route.path}` : `${cleanBase}${route.path}`;
 
     // Upsert test (update if exists, create if not)
     const result = await queries.upsertTestByTargetUrl({
