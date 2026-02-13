@@ -46,6 +46,7 @@ export const createMockPage = () => {
     waitForTimeout: vi.fn().mockResolvedValue(undefined),
     waitForLoadState: vi.fn().mockResolvedValue(undefined),
     addStyleTag: vi.fn().mockResolvedValue(undefined),
+    addInitScript: vi.fn().mockResolvedValue(undefined),
     evaluate: vi.fn().mockResolvedValue(undefined),
     locator: vi.fn().mockReturnValue(mockLocator),
     getByTestId: vi.fn().mockReturnValue(mockLocator),

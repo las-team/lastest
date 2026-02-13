@@ -10,7 +10,66 @@ export const FREEZE_ANIMATIONS_CSS = `*, *::before, *::after {
   transition: none !important;
   animation-delay: 0s !important;
   transition-delay: 0s !important;
+  scroll-behavior: auto !important;
 }`;
+
+/**
+ * Script injected via addInitScript to freeze both CSS and JS animations.
+ * Runs before any page scripts on every navigation.
+ * Handles: CSS animations/transitions, Web Animations API, requestAnimationFrame,
+ * GSAP, Framer Motion, Lottie, and other JS animation libraries.
+ */
+export const FREEZE_ANIMATIONS_SCRIPT = `
+// 1. Inject CSS to kill CSS animations/transitions
+(function injectFreezeCSS() {
+  const css = ${JSON.stringify(`*, *::before, *::after {
+  animation: none !important;
+  transition: none !important;
+  animation-delay: 0s !important;
+  transition-delay: 0s !important;
+  scroll-behavior: auto !important;
+}`)};
+  function inject() {
+    if (document.head || document.documentElement) {
+      const style = document.createElement('style');
+      style.setAttribute('data-freeze-animations', 'true');
+      style.textContent = css;
+      (document.head || document.documentElement).appendChild(style);
+    }
+  }
+  // Inject immediately if possible, and also on DOMContentLoaded for safety
+  inject();
+  document.addEventListener('DOMContentLoaded', inject);
+})();
+
+// 2. Override requestAnimationFrame to execute callbacks once (not loop)
+const _origRAF = window.requestAnimationFrame;
+let _rafId = 0;
+window.requestAnimationFrame = function(callback) {
+  // Execute once with timestamp 0, don't schedule repeating frames
+  return _origRAF.call(window, function() {
+    callback(0);
+  });
+};
+
+// 3. Pause Web Animations API animations after load
+document.addEventListener('DOMContentLoaded', function() {
+  try {
+    if (typeof document.getAnimations === 'function') {
+      document.getAnimations().forEach(function(anim) { anim.cancel(); });
+    }
+  } catch(e) {}
+});
+
+// Also pause on full load for late-starting animations
+window.addEventListener('load', function() {
+  try {
+    if (typeof document.getAnimations === 'function') {
+      document.getAnimations().forEach(function(anim) { anim.cancel(); });
+    }
+  } catch(e) {}
+});
+`;
 
 /**
  * Default screenshot stabilization delay in milliseconds.

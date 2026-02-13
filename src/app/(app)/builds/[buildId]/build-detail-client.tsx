@@ -106,6 +106,7 @@ export interface BuildDetailClientProps {
   isRunning?: boolean;
   completedTests?: number;
   codeChangeTestIds?: string[] | null;
+  isMainBranch?: boolean;
 }
 
 export function BuildDetailClient({
@@ -115,12 +116,13 @@ export function BuildDetailClient({
   isRunning = false,
   completedTests = 0,
   codeChangeTestIds,
+  isMainBranch = false,
 }: BuildDetailClientProps) {
   const codeChangeTestIdSet = new Set(codeChangeTestIds ?? []);
   const [activeFilter, setActiveFilter] = useState<FilterType>('all');
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [isProcessing, setIsProcessing] = useState(false);
-  const [viewMode, setViewMode] = useState<'branch' | 'main'>('main');
+  const [viewMode, setViewMode] = useState<'branch' | 'main'>(isMainBranch ? 'branch' : 'main');
   const [groupByArea, setGroupByArea] = useState(false);
   const [expandKey, setExpandKey] = useState(0);
   const [allExpanded, setAllExpanded] = useState(true);
@@ -259,8 +261,8 @@ export function BuildDetailClient({
         aiSafeCount={aiSafeCount}
         aiReviewCount={aiReviewCount}
         aiFlagCount={aiFlagCount}
-        viewMode={viewMode}
-        onViewModeChange={setViewMode}
+        viewMode={isMainBranch ? undefined : viewMode}
+        onViewModeChange={isMainBranch ? undefined : setViewMode}
         groupByArea={groupByArea}
         onGroupByAreaChange={setGroupByArea}
       />

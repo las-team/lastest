@@ -1,5 +1,5 @@
 import { chromium, firefox, webkit, Browser, Page, BrowserContext, Locator } from 'playwright';
-import { FREEZE_ANIMATIONS_CSS, CROSS_OS_CHROMIUM_ARGS } from './constants';
+import { FREEZE_ANIMATIONS_CSS, FREEZE_ANIMATIONS_SCRIPT, CROSS_OS_CHROMIUM_ARGS } from './constants';
 import { EventEmitter } from 'events';
 import path from 'path';
 import fs from 'fs';
@@ -976,9 +976,9 @@ export class PlaywrightRunner extends EventEmitter {
       }
       await setupThirdPartyBlocking(page, targetUrl, stabilization);
 
-      // Freeze CSS animations/transitions if enabled
+      // Freeze CSS + JS animations if enabled (uses addInitScript to persist across navigations)
       if (this.settings?.freezeAnimations) {
-        await page.addStyleTag({ content: FREEZE_ANIMATIONS_CSS });
+        await page.addInitScript(FREEZE_ANIMATIONS_SCRIPT);
       }
 
       // Patterns for console errors that should be ignored (React dev warnings, hydration, etc.)

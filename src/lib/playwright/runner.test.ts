@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { FREEZE_ANIMATIONS_CSS, DEFAULT_SCREENSHOT_DELAY } from './constants';
+import { FREEZE_ANIMATIONS_CSS, FREEZE_ANIMATIONS_SCRIPT, DEFAULT_SCREENSHOT_DELAY } from './constants';
 import { createMockPage } from '../__tests__/setup';
 
 describe('Animation Freezing', () => {
@@ -32,15 +32,38 @@ describe('Animation Freezing', () => {
     });
   });
 
+  describe('FREEZE_ANIMATIONS_SCRIPT', () => {
+    it('exports init script for comprehensive animation freezing', () => {
+      expect(FREEZE_ANIMATIONS_SCRIPT).toBeDefined();
+      expect(typeof FREEZE_ANIMATIONS_SCRIPT).toBe('string');
+    });
+
+    it('contains CSS injection for animations and transitions', () => {
+      expect(FREEZE_ANIMATIONS_SCRIPT).toContain('animation: none !important');
+      expect(FREEZE_ANIMATIONS_SCRIPT).toContain('transition: none !important');
+    });
+
+    it('overrides requestAnimationFrame', () => {
+      expect(FREEZE_ANIMATIONS_SCRIPT).toContain('requestAnimationFrame');
+    });
+
+    it('pauses Web Animations API', () => {
+      expect(FREEZE_ANIMATIONS_SCRIPT).toContain('getAnimations');
+    });
+
+    it('handles both DOMContentLoaded and load events', () => {
+      expect(FREEZE_ANIMATIONS_SCRIPT).toContain('DOMContentLoaded');
+      expect(FREEZE_ANIMATIONS_SCRIPT).toContain("'load'");
+    });
+  });
+
   describe('freezeAnimations setting behavior', () => {
-    it('when enabled, injects CSS to disable all animations', () => {
-      // The runner checks this.settings?.freezeAnimations
-      // If true, it calls page.addStyleTag({ content: FREEZE_ANIMATIONS_CSS })
+    it('when enabled, injects init script to freeze all animations', () => {
       const settings = { freezeAnimations: true };
       expect(settings.freezeAnimations).toBe(true);
     });
 
-    it('when disabled, does not inject animation CSS', () => {
+    it('when disabled, does not inject animation script', () => {
       const settings = { freezeAnimations: false };
       expect(settings.freezeAnimations).toBe(false);
     });
@@ -58,36 +81,36 @@ describe('Animation Freezing', () => {
       mockPage = createMockPage();
     });
 
-    it('injects CSS when freezeAnimations is true', async () => {
+    it('injects init script when freezeAnimations is true', async () => {
       const settings = { freezeAnimations: true };
 
       if (settings.freezeAnimations) {
-        await mockPage.addStyleTag({ content: FREEZE_ANIMATIONS_CSS });
+        await mockPage.addInitScript(FREEZE_ANIMATIONS_SCRIPT);
       }
 
-      expect(mockPage.addStyleTag).toHaveBeenCalledWith({
-        content: FREEZE_ANIMATIONS_CSS,
-      });
+      expect(mockPage.addInitScript).toHaveBeenCalledWith(FREEZE_ANIMATIONS_SCRIPT);
     });
 
-    it('does not inject CSS when freezeAnimations is false', async () => {
+    it('does not inject script when freezeAnimations is false', async () => {
       const settings = { freezeAnimations: false };
 
       if (settings.freezeAnimations) {
-        await mockPage.addStyleTag({ content: FREEZE_ANIMATIONS_CSS });
+        await mockPage.addInitScript(FREEZE_ANIMATIONS_SCRIPT);
       }
 
-      expect(mockPage.addStyleTag).not.toHaveBeenCalled();
+      expect(mockPage.addInitScript).not.toHaveBeenCalled();
     });
 
-    it('verifies injected CSS content is correct', async () => {
-      await mockPage.addStyleTag({ content: FREEZE_ANIMATIONS_CSS });
+    it('uses addInitScript (persists across navigations) not addStyleTag', async () => {
+      const settings = { freezeAnimations: true };
 
-      expect(mockPage.addStyleTag).toHaveBeenCalledWith(
-        expect.objectContaining({
-          content: expect.stringContaining('animation: none'),
-        })
-      );
+      if (settings.freezeAnimations) {
+        await mockPage.addInitScript(FREEZE_ANIMATIONS_SCRIPT);
+      }
+
+      // Should use addInitScript, NOT addStyleTag for animation freezing
+      expect(mockPage.addInitScript).toHaveBeenCalled();
+      expect(mockPage.addStyleTag).not.toHaveBeenCalled();
     });
   });
 });
@@ -203,7 +226,7 @@ describe('Screenshot Stabilization Delay', () => {
 
 describe('Selector Fallback Strategy', () => {
   describe('selector priority', () => {
-    it('follows priority: data-testid → id → role → aria → text → css → ocr', () => {
+    it('follows priority: data-testid -> id -> role -> aria -> text -> css -> ocr', () => {
       const priority = [
         'data-testid',
         'id',

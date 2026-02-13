@@ -17,17 +17,15 @@ Support https://github.com/excalidraw/excalidraw/tree/master/packages/excalidraw
 auth0 -like - login manager - keycloak? - Stytch?
     https://clerk.com/
 
+Failure - not all screenshots taken
+    Errors during execution - important and highlight
 
 Publish npm
-
 Docker deploy to local server
-
-Scan branch changes and add new tests based on that.
 
 Explore/Cover instead of Areas
 
 Turn off page shift view 
-leadline
 
 ## ideas
 Ideal summary
@@ -51,7 +49,7 @@ Formal verification of code?
 ### UX
 ## bugs
 Automated test add
-Play / discover doesnt work if no spec files
+Page Shift
 ## marketing 
 
 ----------

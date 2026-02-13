@@ -134,6 +134,7 @@ export interface BuildSummary {
   pullRequestId: string | null;
   comparisonMode: string | null;
   codeChangeTestIds: string[] | null;
+  isMainBranch: boolean;
   diffs: VisualDiffWithTestStatus[];
 }
 
@@ -1039,6 +1040,11 @@ export async function getBuildSummary(buildId: string): Promise<BuildSummary | n
   const testRun = build.testRunId ? await queries.getTestRun(build.testRunId) : null;
   const diffs = await queries.getVisualDiffsWithTestStatus(buildId);
 
+  // Determine if build is on the default branch
+  const repo = testRun?.repositoryId ? await queries.getRepository(testRun.repositoryId) : null;
+  const defaultBranch = repo?.defaultBranch || 'main';
+  const gitBranch = testRun?.gitBranch || 'unknown';
+
   return {
     id: build.id,
     overallStatus: build.overallStatus as BuildStatus,
@@ -1053,7 +1059,8 @@ export async function getBuildSummary(buildId: string): Promise<BuildSummary | n
     pullRequestId: build.pullRequestId,
     comparisonMode: build.comparisonMode,
     codeChangeTestIds: (build.codeChangeTestIds as string[] | null) ?? null,
-    gitBranch: testRun?.gitBranch || 'unknown',
+    isMainBranch: gitBranch === defaultBranch,
+    gitBranch,
     gitCommit: testRun?.gitCommit || 'unknown',
     diffs,
   };
