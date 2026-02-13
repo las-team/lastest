@@ -482,6 +482,21 @@ function buildShiftAwareDiffImage(
 }
 
 /**
+ * Crop a PNG image to a narrower width, keeping the left portion.
+ * Used to normalize widths when fullPage screenshots capture different scrollWidths.
+ */
+function cropToWidth(img: PNG, targetWidth: number): PNG {
+  if (img.width === targetWidth) return img;
+  const cropped = new PNG({ width: targetWidth, height: img.height });
+  for (let y = 0; y < img.height; y++) {
+    const srcOffset = y * img.width * 4;
+    const destOffset = y * targetWidth * 4;
+    (img.data as Buffer).copy(cropped.data as Buffer, destOffset, srcOffset, srcOffset + targetWidth * 4);
+  }
+  return cropped;
+}
+
+/**
  * Compare two PNG images and generate a diff image.
  * When ignorePageShift is true and images have different heights (or a vertical
  * content shift is detected), uses LCS row-alignment to exclude displaced content
@@ -496,11 +511,18 @@ export async function generateDiff(
   ignoreRegions?: Rectangle[],
   ignorePageShift = false
 ): Promise<DiffResult> {
-  const baseline = PNG.sync.read(fs.readFileSync(baselinePath));
-  const current = PNG.sync.read(fs.readFileSync(currentPath));
+  let baseline = PNG.sync.read(fs.readFileSync(baselinePath));
+  let current = PNG.sync.read(fs.readFileSync(currentPath));
 
   if (!fs.existsSync(outputDir)) {
     fs.mkdirSync(outputDir, { recursive: true });
+  }
+
+  // Crop to common width if widths differ (horizontal overflow from fullPage screenshots)
+  const minWidth = Math.min(baseline.width, current.width);
+  if (baseline.width !== current.width) {
+    baseline = cropToWidth(baseline, minWidth);
+    current = cropToWidth(current, minWidth);
   }
 
   const hasSameSize = baseline.width === current.width && baseline.height === current.height;

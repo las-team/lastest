@@ -1,8 +1,9 @@
 'use client';
 
+import { useEffect, useRef } from 'react';
+import { useRouter } from 'next/navigation';
 import { Check, Circle, Loader2, Pause, X, SkipForward } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import Link from 'next/link';
 import { cn } from '@/lib/utils';
 import type { AgentStepState } from '@/lib/db/schema';
 
@@ -14,6 +15,21 @@ interface PlayAgentStepProps {
 }
 
 export function PlayAgentStep({ step, stepNumber, onResume, onSkipDiscover }: PlayAgentStepProps) {
+  const router = useRouter();
+  const navigatedRef = useRef(false);
+
+  // Auto-navigate to settings with highlight when waiting for user to configure settings
+  useEffect(() => {
+    if (step.status !== 'waiting_user') return;
+    if (navigatedRef.current) return;
+    const highlightIds = step.result?.highlight as string[] | undefined;
+    if (!highlightIds?.length) return;
+    if (step.id !== 'settings_check' && step.id !== 'env_setup') return;
+
+    navigatedRef.current = true;
+    router.push(`/settings?highlight=${highlightIds.join(',')}`);
+  }, [step.status, step.result, step.id, router]);
+
   return (
     <div className="py-1.5">
       <div className="flex items-center gap-2.5">
@@ -99,11 +115,15 @@ export function PlayAgentStep({ step, stepNumber, onResume, onSkipDiscover }: Pl
         <div className="ml-7 mt-1.5 space-y-1.5">
           <p className="text-xs text-blue-600 dark:text-blue-400">{step.userAction}</p>
           <div className="flex gap-2">
-            {(step.id === 'settings_check' || step.id === 'env_setup') && (
-              <Button size="sm" variant="outline" asChild>
-                <Link href="/settings">Open Settings</Link>
-              </Button>
-            )}
+            {(step.id === 'settings_check' || step.id === 'env_setup') && (() => {
+              const ids = (step.result?.highlight as string[] | undefined) ?? [];
+              const href = ids.length > 0 ? `/settings?highlight=${ids.join(',')}` : '/settings';
+              return (
+                <Button size="sm" variant="outline" onClick={() => router.push(href)}>
+                  Go to Settings
+                </Button>
+              );
+            })()}
             {onResume && (
               <Button size="sm" onClick={onResume}>Retry</Button>
             )}

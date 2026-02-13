@@ -150,11 +150,17 @@ async function runSettingsCheck(sessionId: string, repositoryId: string, teamId:
   if (!hasAI) missing.push('AI provider');
 
   if (missing.length > 0) {
-    await setStepWaitingUser(
-      sessionId,
-      'settings_check',
-      `Configure: ${missing.join(', ')}. Go to Settings to set them up.`,
-    );
+    // Map missing items to settings page element IDs for highlight navigation
+    const highlightIds: string[] = [];
+    if (!ghAccount) highlightIds.push('github');
+    if (!hasAI) highlightIds.push('ai-settings');
+
+    await updateStep(sessionId, 'settings_check', {
+      status: 'waiting_user',
+      userAction: `Configure: ${missing.join(', ')}`,
+      result: { highlight: highlightIds },
+    });
+    await queries.updateAgentSession(sessionId, { status: 'paused' });
     return false;
   }
 
@@ -748,11 +754,12 @@ async function runEnvSetup(sessionId: string, repositoryId: string) {
       { label: 'Detecting login', status: 'pending' },
       { label: 'Login setup', status: 'pending' },
     ]);
-    await setStepWaitingUser(
-      sessionId,
-      'env_setup',
-      'No Base URL configured. Go to Settings → Environment to set one.',
-    );
+    await updateStep(sessionId, 'env_setup', {
+      status: 'waiting_user',
+      userAction: 'No Base URL configured',
+      result: { highlight: ['environment'] },
+    });
+    await queries.updateAgentSession(sessionId, { status: 'paused' });
     return false;
   }
 

@@ -20,6 +20,7 @@ import { AISettingsCard } from '@/components/settings/ai-settings-card';
 import { AILogsCard } from '@/components/settings/ai-logs-card';
 import { NotificationSettingsCard } from '@/components/settings/notification-settings-card';
 import { ResetSetupGuide } from '@/components/setup-guide/reset-setup-guide';
+import { SettingsHighlighter } from '@/components/settings/settings-highlighter';
 import { BranchSelector } from '@/components/settings/branch-selector';
 import { SettingsToC } from '@/components/settings/settings-toc';
 import { UserList } from '@/components/users/user-list';
@@ -97,6 +98,9 @@ export default async function SettingsPage({
               Failed to connect GitHub: {params.error.replace(/_/g, ' ')}
             </div>
           )}
+
+          {/* Highlight settings cards when navigated from onboarding */}
+          <SettingsHighlighter />
 
           {/* GitHub Integration */}
           <Card id="github">
