@@ -43,8 +43,12 @@ describe('Animation Freezing', () => {
       expect(FREEZE_ANIMATIONS_SCRIPT).toContain('transition: none !important');
     });
 
-    it('overrides requestAnimationFrame', () => {
-      expect(FREEZE_ANIMATIONS_SCRIPT).toContain('requestAnimationFrame');
+    it('blocks Element.prototype.animate', () => {
+      expect(FREEZE_ANIMATIONS_SCRIPT).toContain('Element.prototype.animate');
+    });
+
+    it('overrides setInterval to prevent auto-advancing', () => {
+      expect(FREEZE_ANIMATIONS_SCRIPT).toContain('setInterval');
     });
 
     it('pauses Web Animations API', () => {
