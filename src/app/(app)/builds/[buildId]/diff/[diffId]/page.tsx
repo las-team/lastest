@@ -41,7 +41,18 @@ export default async function DiffPage({ params }: PageProps) {
               )}
             </h1>
             <div className="flex items-center gap-3 text-sm text-muted-foreground">
-              <span>{diff.test?.targetUrl}</span>
+              {diff.test?.targetUrl && (
+                <a
+                  href={diff.test.targetUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center gap-1 text-primary hover:text-primary/80 hover:underline"
+                >
+                  Open Page
+                  <ExternalLink className="w-3 h-3" />
+                </a>
+              )}
+              <span>·</span>
               <Link
                 href={`/tests/${diff.testId}`}
                 className="flex items-center gap-1 text-primary hover:text-primary/80 hover:underline"
