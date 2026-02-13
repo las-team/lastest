@@ -8,6 +8,7 @@ import type {
   AgentStepId,
 } from '@/lib/db/schema';
 import { createAndRunBuild } from './builds';
+import { getCurrentBranchForRepo } from '@/lib/git-utils';
 import { getBuildSummary } from './builds';
 import { startRemoteRouteScan } from './scanner';
 import { applyTestingTemplate } from './repos';
@@ -922,6 +923,7 @@ async function runFixTests(sessionId: string, repositoryId: string) {
       // Apply the fix
       await queries.updateTest(testId, { code: fixResult.code });
       if (test) {
+        const branch = await getCurrentBranchForRepo(repositoryId);
         const versions = await queries.getTestVersions(testId);
         await queries.createTestVersion({
           testId,
@@ -929,6 +931,7 @@ async function runFixTests(sessionId: string, repositoryId: string) {
           code: fixResult.code,
           version: (versions.length || 0) + 1,
           changeReason: 'ai_fix',
+          branch: branch ?? null,
         });
       }
       fixedCount++;

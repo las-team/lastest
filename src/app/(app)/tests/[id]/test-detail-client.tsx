@@ -15,7 +15,7 @@ import {
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
-import { Play, Trash2, Copy, Edit2, Clock, CheckCircle, XCircle, X, Save, Wrench, Wand2, Loader2, History, RotateCcw, ChevronDown, ChevronRight, Monitor, Video, AlertTriangle, Image, Bug } from 'lucide-react';
+import { Play, Trash2, Copy, Edit2, Clock, CheckCircle, XCircle, X, Save, Wrench, Wand2, Loader2, History, RotateCcw, ChevronDown, ChevronRight, Monitor, Video, AlertTriangle, Image, Bug, GitBranch, GitCommit } from 'lucide-react';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -928,6 +928,26 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
                         <div className="mt-2 text-xs text-muted-foreground truncate">
                           {version.name}
                         </div>
+                        {(version.branch || version.firstBuildId) && (
+                          <div className="mt-1.5 flex items-center gap-3 text-xs text-muted-foreground">
+                            {version.branch && (
+                              <span className="inline-flex items-center gap-1">
+                                <GitBranch className="h-3 w-3" />
+                                {version.branch}
+                              </span>
+                            )}
+                            {version.firstBuildId && (
+                              <a
+                                href={`/builds/${version.firstBuildId}`}
+                                className="inline-flex items-center gap-1 hover:text-foreground transition-colors"
+                              >
+                                <GitCommit className="h-3 w-3" />
+                                {version.firstBuildBranch}
+                                {version.firstBuildCommit && `@${version.firstBuildCommit.slice(0, 7)}`}
+                              </a>
+                            )}
+                          </div>
+                        )}
                       </div>
                     ))}
                   </div>

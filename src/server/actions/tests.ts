@@ -6,6 +6,7 @@ import path from 'path';
 import * as queries from '@/lib/db/queries';
 import { requireRepoAccess, requireTeamAccess } from '@/lib/auth';
 import type { NewTest, NewFunctionalArea } from '@/lib/db/schema';
+import { getCurrentBranchForRepo } from '@/lib/git-utils';
 
 export async function createFunctionalArea(data: Omit<NewFunctionalArea, 'id'>) {
   if (data.repositoryId) await requireRepoAccess(data.repositoryId);
@@ -41,7 +42,9 @@ export async function createTest(data: Omit<NewTest, 'id' | 'createdAt' | 'updat
 
 export async function updateTest(id: string, data: Partial<NewTest>) {
   await requireTeamAccess();
-  await queries.updateTestWithVersion(id, data, 'manual_edit');
+  const test = await queries.getTest(id);
+  const branch = await getCurrentBranchForRepo(test?.repositoryId);
+  await queries.updateTestWithVersion(id, data, 'manual_edit', branch ?? undefined);
   revalidatePath('/tests');
   revalidatePath(`/tests/${id}`);
 }
@@ -207,6 +210,9 @@ export async function restoreTestVersion(testId: string, version: number) {
     throw new Error(`Version ${version} not found`);
   }
 
+  const test = await queries.getTest(testId);
+  const branch = await getCurrentBranchForRepo(test?.repositoryId);
+
   // Update test with the version data, marking as restored
   await queries.updateTestWithVersion(
     testId,
@@ -215,7 +221,8 @@ export async function restoreTestVersion(testId: string, version: number) {
       name: versionData.name,
       targetUrl: versionData.targetUrl,
     },
-    `restored_from_v${version}`
+    `restored_from_v${version}`,
+    branch ?? undefined
   );
 
   revalidatePath('/tests');

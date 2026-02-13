@@ -696,6 +696,9 @@ export const testVersions = sqliteTable('test_versions', {
   targetUrl: text('target_url'),
   changeReason: text('change_reason'), // 'manual_edit' | 'ai_fix' | 'ai_enhance' | 'restored_from_vN' | 'branch_merge'
   branch: text('branch'), // nullable — tracks which branch this version was created on
+  firstBuildId: text('first_build_id'), // nullable — first build that executed this version
+  firstBuildBranch: text('first_build_branch'), // denormalized branch name from first build
+  firstBuildCommit: text('first_build_commit'), // denormalized commit SHA from first build
   createdAt: integer('created_at', { mode: 'timestamp' }),
 });
 

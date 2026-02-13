@@ -178,7 +178,7 @@ export async function getTest(id: string) {
   return db.select().from(tests).where(eq(tests.id, id)).get();
 }
 
-export async function createTest(data: Omit<NewTest, 'id' | 'createdAt' | 'updatedAt'>) {
+export async function createTest(data: Omit<NewTest, 'id' | 'createdAt' | 'updatedAt'>, branch?: string | null) {
   const id = uuid();
   const now = new Date();
   await db.insert(tests).values({ ...data, id, createdAt: now, updatedAt: now });
@@ -192,6 +192,7 @@ export async function createTest(data: Omit<NewTest, 'id' | 'createdAt' | 'updat
     name: data.name,
     targetUrl: data.targetUrl ?? null,
     changeReason: 'initial',
+    branch: branch ?? null,
     createdAt: now,
   });
 
@@ -2122,6 +2123,28 @@ export async function createTestVersion(data: Omit<NewTestVersion, 'id'>) {
   const id = uuid();
   await db.insert(testVersions).values({ ...data, id, createdAt: new Date() });
   return { id, ...data, createdAt: new Date() };
+}
+
+// Stamp the first build that executed this version (idempotent — only sets if not already set)
+export async function stampFirstBuild(
+  testVersionId: string,
+  buildId: string,
+  branch: string | null,
+  commit: string | null
+) {
+  await db
+    .update(testVersions)
+    .set({
+      firstBuildId: buildId,
+      firstBuildBranch: branch,
+      firstBuildCommit: commit,
+    })
+    .where(
+      and(
+        eq(testVersions.id, testVersionId),
+        isNull(testVersions.firstBuildId)
+      )
+    );
 }
 
 // Get a single test version by its ID

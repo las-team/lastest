@@ -22,19 +22,15 @@ Publish npm
 
 Docker deploy to local server
 
-
-Ideal summary
-    60 functional areas remain unchanged, 10 changed, out of those 8 new areas added, 1 pre-existing areas changed, 1 minor change in pre-existing function. 
-
-Ban AI mode
-    Remove all GenAI features from UI if enabled
-
-
 Scan branch changes and add new tests based on that.
 
 Explore/Cover instead of Areas
 
 ## ideas
+Ideal summary
+    60 functional areas remain unchanged, 10 changed, out of those 8 new areas added, 1 pre-existing areas changed, 1 minor change in pre-existing function. 
+Ban AI mode
+    Remove all GenAI features from UI if enabled
 Revise labels (e.g. new change, main 2.5%) on build page
 Component specific testing
 Electron app ~/.claude/plans/rippling-roaming-snail.md replan

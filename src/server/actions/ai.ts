@@ -14,6 +14,7 @@ import {
 } from '@/lib/ai';
 import type { AIProviderConfig, TestGenerationContext, ScanContext, DiscoverySource } from '@/lib/ai/types';
 import { revalidatePath } from 'next/cache';
+import { getCurrentBranchForRepo } from '@/lib/git-utils';
 
 async function getAIConfig(repositoryId?: string | null): Promise<AIProviderConfig> {
   const settings = await queries.getAISettings(repositoryId);
@@ -181,10 +182,11 @@ export async function saveGeneratedTest(data: {
 }
 
 export async function aiFixAllFailedTests(
-  repositoryId: string
+  repositoryId: string,
 ): Promise<{ success: boolean; fixed: number; failed: number; errors: string[] }> {
   await requireRepoAccess(repositoryId);
   const allTests = await queries.getTestsByRepo(repositoryId);
+  const branch = await getCurrentBranchForRepo(repositoryId);
   const errors: string[] = [];
   let fixed = 0;
   let failed = 0;
@@ -199,7 +201,7 @@ export async function aiFixAllFailedTests(
     const result = await aiFixTest(repositoryId, test.id, errorMessage);
 
     if (result.success && result.code) {
-      await queries.updateTestWithVersion(test.id, { code: result.code }, 'ai_fix');
+      await queries.updateTestWithVersion(test.id, { code: result.code }, 'ai_fix', branch ?? undefined);
       fixed++;
     } else {
       failed++;
@@ -218,7 +220,9 @@ export async function updateTestCode(
 ): Promise<{ success: boolean; error?: string }> {
   await requireTeamAccess();
   try {
-    await queries.updateTestWithVersion(testId, { code }, changeReason);
+    const test = await queries.getTest(testId);
+    const branch = await getCurrentBranchForRepo(test?.repositoryId);
+    await queries.updateTestWithVersion(testId, { code }, changeReason, branch ?? undefined);
     revalidatePath('/tests');
     revalidatePath(`/tests/${testId}`);
     return { success: true };
@@ -233,6 +237,7 @@ export async function aiFixTests(
   repositoryId: string
 ): Promise<{ success: boolean; fixed: number; failed: number; errors: string[] }> {
   await requireRepoAccess(repositoryId);
+  const branch = await getCurrentBranchForRepo(repositoryId);
   const errors: string[] = [];
   let fixed = 0;
   let failed = 0;
@@ -256,7 +261,7 @@ export async function aiFixTests(
     const result = await aiFixTest(repositoryId, testId, errorMessage);
 
     if (result.success && result.code) {
-      await queries.updateTestWithVersion(testId, { code: result.code }, 'ai_fix');
+      await queries.updateTestWithVersion(testId, { code: result.code }, 'ai_fix', branch ?? undefined);
       fixed++;
     } else {
       failed++;
@@ -304,6 +309,7 @@ export async function aiMcpFixTests(
   repositoryId: string
 ): Promise<{ success: boolean; fixed: number; failed: number; errors: string[] }> {
   await requireRepoAccess(repositoryId);
+  const branch = await getCurrentBranchForRepo(repositoryId);
   const errors: string[] = [];
   let fixed = 0;
   let failed = 0;
@@ -327,7 +333,7 @@ export async function aiMcpFixTests(
     const result = await aiMcpFixTest(repositoryId, testId, errorMessage);
 
     if (result.success && result.code) {
-      await queries.updateTestWithVersion(testId, { code: result.code }, 'ai_fix');
+      await queries.updateTestWithVersion(testId, { code: result.code }, 'ai_fix', branch ?? undefined);
       fixed++;
     } else {
       failed++;

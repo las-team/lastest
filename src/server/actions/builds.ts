@@ -371,6 +371,20 @@ async function runBuildAsync(
     }
   }
 
+  // Populate versionIdMap for non-overridden tests (latest version)
+  for (const test of tests) {
+    if (!versionIdMap.has(test.id)) {
+      const versions = await queries.getTestVersions(test.id);
+      if (versions.length > 0) {
+        versionIdMap.set(test.id, versions[0].id);
+      }
+    }
+  }
+
+  // Get gitCommit from testRun for first-build stamping
+  const testRun = await queries.getTestRun(testRunId);
+  const gitCommit = testRun?.gitCommit ?? null;
+
   let passedCount = 0;
   let failedCount = 0;
   let changesDetected = 0;
@@ -407,6 +421,12 @@ async function runBuildAsync(
       a11yViolations: result.a11yViolations,
       videoPath: result.videoPath,
     });
+
+    // Stamp first build on the test version (idempotent)
+    const versionId = versionIdMap.get(result.testId);
+    if (versionId) {
+      await queries.stampFirstBuild(versionId, buildId, branch, gitCommit);
+    }
 
     if (result.status === 'passed') passedCount++;
     else if (result.status === 'failed' || result.status === 'setup_failed') failedCount++;

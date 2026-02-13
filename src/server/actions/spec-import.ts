@@ -15,6 +15,7 @@ import { revalidatePath } from 'next/cache';
 import { getRepoTree, getFileContent, compareBranches } from '@/lib/github/content';
 import { extractTextFromFile } from '@/lib/file-parser';
 import { createJob, updateJobProgress, completeJob, failJob } from './jobs';
+import { getCurrentBranchForRepo } from '@/lib/git-utils';
 
 // ============================================
 // Types
@@ -671,7 +672,8 @@ Return ONLY the code (fixed or original), no explanations.`;
 
     if (codeChanged && fixedCode) {
       // Save the fixed version
-      await queries.updateTestWithVersion(testId, { code: fixedCode }, 'ai_fix');
+      const branch = await getCurrentBranchForRepo(repositoryId);
+      await queries.updateTestWithVersion(testId, { code: fixedCode }, 'ai_fix', branch ?? undefined);
       revalidatePath('/tests');
       revalidatePath(`/tests/${testId}`);
       return { success: true, passed: false, fixedCode };
