@@ -69,6 +69,12 @@ COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
 COPY --from=builder --chown=nextjs:nodejs /app/public ./public
 
+# Copy full playwright packages for runtime (standalone prunes them since they're dynamically loaded)
+COPY --from=deps --chown=nextjs:nodejs /app/node_modules/.pnpm/playwright@1.57.0/node_modules/playwright ./node_modules/.pnpm/playwright@1.57.0/node_modules/playwright
+COPY --from=deps --chown=nextjs:nodejs /app/node_modules/.pnpm/playwright-core@1.57.0/node_modules/playwright-core ./node_modules/.pnpm/playwright-core@1.57.0/node_modules/playwright-core
+RUN ln -sf .pnpm/playwright@1.57.0/node_modules/playwright ./node_modules/playwright && \
+    ln -sf .pnpm/playwright-core@1.57.0/node_modules/playwright-core ./node_modules/playwright-core
+
 # Copy drizzle config for schema push on startup
 COPY --from=builder --chown=nextjs:nodejs /app/drizzle ./drizzle
 COPY --from=builder --chown=nextjs:nodejs /app/drizzle.config.ts ./drizzle.config.ts

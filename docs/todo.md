@@ -23,11 +23,9 @@ Failure - not all screenshots taken
 Publish npm
 Docker deploy to local server
 
-Explore/Cover instead of Areas
-
-Turn off page shift view 
 
 ## ideas
+Explore/Cover instead of Areas
 Ideal summary
     60 functional areas remain unchanged, 10 changed, out of those 8 new areas added, 1 pre-existing areas changed, 1 minor change in pre-existing function. 
 Ban AI mode

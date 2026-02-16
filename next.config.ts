@@ -2,7 +2,7 @@ import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
   output: "standalone",
-  serverExternalPackages: ["tesseract.js"],
+  serverExternalPackages: ["tesseract.js", "playwright", "playwright-core"],
   experimental: {
     serverActions: {
       bodySizeLimit: "10mb",
