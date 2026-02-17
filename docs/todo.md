@@ -1,6 +1,4 @@
 ## in progress
-Test - which pr it was added in, updated?
-
 ## test
 VS Code extension
 Github actions integration
@@ -9,16 +7,17 @@ Docker
 Gitlab
 Timestamp fixing
 Teardown
+Test - which pr it was added in, updated?
 ## features
 Support https://github.com/excalidraw/excalidraw/tree/master/packages/excalidraw/tests ~/.claude/plans/declarative-kindling-coral.md 55%
-    Dev feeback, approved, what do I need to fix - todo list
+     
+Dev feeback, approved, what do I need to fix - todo list
     Actions with changes
     Manager review of changes
+    Issues view
+    Approve reject changes or create ticket -> gh issue
 
 Publish npm
-Docker deploy to local server
-
-
 
 ## ideas
 Explore/Cover instead of Areas
@@ -32,24 +31,14 @@ Electron app ~/.claude/plans/rippling-roaming-snail.md replan
 Figma plugin
 Generate test data with AI
 Sitemap -flow
-Firecrawl?
-Approve reject changes or create ticket -> gh issue
-Issues view
-Docker
-Tweet
-Bugriport
+
+Tweet about us
+
 Import from prior tools?
 Formal verification of code?
+
 ### UX
 ## bugs
 Automated test add
 Page Shift
 ## marketing 
-
-----------
-mark
-    hetzner
-    basic auth apira
-    runner secu review -> megy npmre
-
-

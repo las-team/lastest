@@ -10,6 +10,7 @@ import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
+import { chromium } from 'playwright';
 import { RunnerClient } from './client.js';
 
 export { RunnerClient } from './client.js';
@@ -89,6 +90,21 @@ function loadConfig(): { token?: string; server?: string; interval?: string; bas
     return raw;
   } catch {
     return {};
+  }
+}
+
+async function ensurePlaywrightBrowsers(): Promise<boolean> {
+  try {
+    const browser = await chromium.launch({ headless: true });
+    await browser.close();
+    return true;
+  } catch {
+    console.error('\n  Playwright Chromium browser is not installed.\n');
+    console.error('  Run the following command to install it:\n');
+    console.error('    npx playwright install chromium\n');
+    console.error('  Or install all browsers with:\n');
+    console.error('    npx playwright install\n');
+    return false;
   }
 }
 
@@ -269,6 +285,14 @@ export async function main() {
       if (!options.token || !options.server) {
         console.log(`[${timestamp()}] Using saved config from ~/.lastest2/runner.config.json`);
       }
+
+      // Verify Playwright Chromium is installed before connecting
+      console.log(`[${timestamp()}] Checking Playwright Chromium installation...`);
+      const browsersReady = await ensurePlaywrightBrowsers();
+      if (!browsersReady) {
+        process.exit(1);
+      }
+      console.log(`[${timestamp()}] Playwright Chromium is ready.`);
 
       const client = new RunnerClient({
         token,
