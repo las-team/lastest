@@ -5,7 +5,11 @@ import { getPublicUrl } from '@/lib/utils';
 
 const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || '';
 const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET || '';
-const GOOGLE_SHEETS_REDIRECT_URI = process.env.GOOGLE_SHEETS_REDIRECT_URI || 'http://localhost:3000/api/auth/google-sheets/callback';
+
+function getGoogleSheetsRedirectUri() {
+  return process.env.GOOGLE_SHEETS_REDIRECT_URI
+    || `${process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'}/api/auth/google-sheets/callback`;
+}
 
 interface GoogleTokenResponse {
   access_token: string;
@@ -33,7 +37,7 @@ async function exchangeCodeForToken(code: string): Promise<GoogleTokenResponse |
         code,
         client_id: GOOGLE_CLIENT_ID,
         client_secret: GOOGLE_CLIENT_SECRET,
-        redirect_uri: GOOGLE_SHEETS_REDIRECT_URI,
+        redirect_uri: getGoogleSheetsRedirectUri(),
         grant_type: 'authorization_code',
       }),
     });

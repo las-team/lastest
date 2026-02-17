@@ -12,6 +12,13 @@ mkdir -p /app/public/baselines
 echo "Starting Lastest2..."
 echo "Database path: ${DATABASE_PATH:-/app/data/lastest2.db}"
 
+# Check data directory is writable (volume mounts may have wrong ownership)
+if ! touch /app/data/.write-test 2>/dev/null; then
+  echo "ERROR: /app/data is not writable by user $(id -u). Fix with: docker exec -u 0 <container> chown -R $(id -u):$(id -g) /app/data"
+  exit 1
+fi
+rm -f /app/data/.write-test
+
 # Run database migrations if drizzle-kit is available
 if [ -f "/app/drizzle.config.ts" ]; then
   echo "Running database migrations..."

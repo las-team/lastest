@@ -44,21 +44,32 @@ export function RunnerList({ runners }: RunnerListProps) {
   const handleDelete = async () => {
     if (!selectedRunner) return;
     setLoading(true);
-    const result = await deleteRunner(selectedRunner.id);
-    setLoading(false);
-    setDeleteDialogOpen(false);
-    if (!('error' in result)) {
-      router.refresh();
+    try {
+      const result = await deleteRunner(selectedRunner.id);
+      setDeleteDialogOpen(false);
+      if (!('error' in result)) {
+        router.refresh();
+      }
+    } catch {
+      setDeleteDialogOpen(false);
+    } finally {
+      setLoading(false);
     }
   };
 
   const handleRegenerateToken = async () => {
     if (!selectedRunner) return;
     setLoading(true);
-    const result = await regenerateRunnerToken(selectedRunner.id);
-    setLoading(false);
-    if ('token' in result) {
-      setNewToken(result.token);
+    try {
+      const result = await regenerateRunnerToken(selectedRunner.id);
+      if ('token' in result) {
+        setNewToken(result.token);
+      }
+    } catch {
+      // Server action threw — close dialog so it doesn't get stuck
+      setTokenDialogOpen(false);
+    } finally {
+      setLoading(false);
     }
   };
 
