@@ -1167,3 +1167,38 @@ export const agentSessions = sqliteTable('agent_sessions', {
 
 export type AgentSession = typeof agentSessions.$inferSelect;
 export type NewAgentSession = typeof agentSessions.$inferInsert;
+
+// ── Bug Reports ──────────────────────────────────────────────────────────────
+
+export type BugReportSeverity = 'low' | 'medium' | 'high';
+
+export interface BugReportContext {
+  url: string;
+  viewport: { width: number; height: number };
+  userAgent: string;
+  appVersion: string | null;
+  gitHash: string | null;
+  buildDate: string | null;
+  consoleErrors: { message: string; timestamp: number }[];
+  failedRequests: { url: string; status: number; method: string }[];
+  breadcrumbs: { action: string; target: string; timestamp: number }[];
+  selectedRepoId?: string | null;
+  selectedRepoName?: string | null;
+}
+
+export const bugReports = sqliteTable('bug_reports', {
+  id: text('id').primaryKey(),
+  teamId: text('team_id').references(() => teams.id, { onDelete: 'cascade' }).notNull(),
+  reportedById: text('reported_by_id').references(() => users.id, { onDelete: 'cascade' }).notNull(),
+  description: text('description').notNull(),
+  severity: text('severity').$type<BugReportSeverity>().notNull().default('medium'),
+  context: text('context', { mode: 'json' }).$type<BugReportContext>(),
+  screenshotPath: text('screenshot_path'),
+  contentHash: text('content_hash'),
+  githubIssueUrl: text('github_issue_url'),
+  githubIssueNumber: integer('github_issue_number'),
+  createdAt: integer('created_at', { mode: 'timestamp' }).$defaultFn(() => new Date()),
+});
+
+export type BugReport = typeof bugReports.$inferSelect;
+export type NewBugReport = typeof bugReports.$inferInsert;

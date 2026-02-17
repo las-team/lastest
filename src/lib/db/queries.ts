@@ -44,6 +44,7 @@ import {
   googleSheetsDataSources,
   composeConfigs,
   agentSessions,
+  bugReports,
 } from './schema';
 import {
   DEFAULT_SELECTOR_PRIORITY,
@@ -4009,4 +4010,50 @@ export async function updateAgentSession(
     .update(agentSessions)
     .set({ ...data, updatedAt: new Date() })
     .where(eq(agentSessions.id, id));
+}
+
+// Bug Reports
+export async function createBugReport(data: {
+  teamId: string;
+  reportedById: string;
+  description: string;
+  severity: string;
+  context?: unknown;
+  screenshotPath?: string | null;
+  contentHash?: string | null;
+}) {
+  const id = uuid();
+  await db.insert(bugReports).values({
+    id,
+    teamId: data.teamId,
+    reportedById: data.reportedById,
+    description: data.description,
+    severity: data.severity,
+    context: data.context as never,
+    screenshotPath: data.screenshotPath ?? null,
+    contentHash: data.contentHash ?? null,
+    createdAt: new Date(),
+  });
+  return { id };
+}
+
+export async function countRecentBugReports(userId: string, since: Date) {
+  const rows = await db
+    .select({ id: bugReports.id })
+    .from(bugReports)
+    .where(and(eq(bugReports.reportedById, userId), gte(bugReports.createdAt, since)))
+    .all();
+  return rows.length;
+}
+
+export async function getBugReportByHash(teamId: string, contentHash: string) {
+  return db
+    .select()
+    .from(bugReports)
+    .where(and(eq(bugReports.teamId, teamId), eq(bugReports.contentHash, contentHash)))
+    .get();
+}
+
+export async function updateBugReport(id: string, data: { githubIssueUrl?: string; githubIssueNumber?: number }) {
+  await db.update(bugReports).set(data).where(eq(bugReports.id, id));
 }
