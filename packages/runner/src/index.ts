@@ -64,17 +64,17 @@ export async function main() {
 
   program
     .name('lastest2-runner')
-    .description('Remote test execution runner for Lastest2')
+    .description('Remote test execution runner for the Lastest2 visual regression testing platform.\n\nConnects to a Lastest2 server via WebSocket, receives test jobs, executes them\nlocally using Playwright, and reports results back. Can run as a background daemon\nor in the foreground.\n\nConfig directory: ~/.lastest2/')
     .version('0.1.0');
 
   // Start command - runs in background
   program
     .command('start')
-    .description('Start the runner as a background daemon')
-    .requiredOption('-t, --token <token>', 'Runner authentication token')
-    .requiredOption('-s, --server <url>', 'Server URL (e.g., https://your-app.vercel.app)')
-    .option('-i, --interval <ms>', 'Poll interval in milliseconds', '5000')
-    .option('-b, --base-url <url>', 'Override target URL for test execution')
+    .description('Start the runner as a background daemon.\n\nSpawns a detached background process that connects to the Lastest2 server,\nlistens for test execution jobs, and runs them using a local Playwright browser.\nThe daemon PID is saved to ~/.lastest2/runner.pid and logs are written to\n~/.lastest2/runner.log. Use "lastest2-runner stop" to terminate the daemon.')
+    .requiredOption('-t, --token <token>', 'Runner authentication token (from Settings > Runners in the Lastest2 UI)')
+    .requiredOption('-s, --server <url>', 'Lastest2 server URL to connect to (e.g., https://your-app.vercel.app)')
+    .option('-i, --interval <ms>', 'Poll interval in milliseconds (default: 5000)', '5000')
+    .option('-b, --base-url <url>', 'Override the target URL for test execution (useful for testing against local or staging environments)')
     .action(async (options) => {
       ensureConfigDir();
 
@@ -116,7 +116,7 @@ export async function main() {
   // Stop command
   program
     .command('stop')
-    .description('Stop the running daemon')
+    .description('Stop the running background daemon.\n\nSends SIGTERM to the process identified in ~/.lastest2/runner.pid and removes\nthe PID file. Exits with code 1 if no runner is currently running.')
     .action(() => {
       const pid = getRunningPid();
       if (!pid) {
@@ -137,7 +137,7 @@ export async function main() {
   // Status command
   program
     .command('status')
-    .description('Show runner status')
+    .description('Show the current runner status.\n\nDisplays whether the daemon is running, its PID, connected server URL,\nbase URL override (if set), and log file path.')
     .action(() => {
       const pid = getRunningPid();
       const config = loadConfig();
@@ -157,9 +157,9 @@ export async function main() {
   program
     .command('log')
     .alias('logs')
-    .description('Show runner logs')
-    .option('-f, --follow', 'Follow log output')
-    .option('-n, --lines <number>', 'Number of lines to show', '50')
+    .description('Show runner logs from ~/.lastest2/runner.log.\n\nBy default shows the last 50 lines. Use -f to follow output in real-time\n(like "tail -f"). Use -n to control how many lines are displayed.')
+    .option('-f, --follow', 'Follow log output in real-time (Ctrl+C to stop)')
+    .option('-n, --lines <number>', 'Number of recent lines to show (default: 50)', '50')
     .action((options) => {
       if (!fs.existsSync(LOG_FILE)) {
         console.log('No logs found');
@@ -190,11 +190,11 @@ export async function main() {
   // Run command - runs in foreground (used by start, or for direct execution)
   program
     .command('run')
-    .description('Run the runner in foreground')
-    .requiredOption('-t, --token <token>', 'Runner authentication token')
-    .requiredOption('-s, --server <url>', 'Server URL (e.g., https://your-app.vercel.app)')
-    .option('-i, --interval <ms>', 'Poll interval in milliseconds', '5000')
-    .option('-b, --base-url <url>', 'Override target URL for test execution')
+    .description('Run the runner in the foreground.\n\nSame as "start" but keeps the process attached to the current terminal.\nUseful for debugging, Docker containers, or CI/CD environments where you\nwant to see output directly. Handles SIGINT and SIGTERM for graceful shutdown.')
+    .requiredOption('-t, --token <token>', 'Runner authentication token (from Settings > Runners in the Lastest2 UI)')
+    .requiredOption('-s, --server <url>', 'Lastest2 server URL to connect to (e.g., https://your-app.vercel.app)')
+    .option('-i, --interval <ms>', 'Poll interval in milliseconds (default: 5000)', '5000')
+    .option('-b, --base-url <url>', 'Override the target URL for test execution (useful for testing against local or staging environments)')
     .action(async (options) => {
       const timestamp = () => new Date().toISOString();
       console.log(`[${timestamp()}] Lastest2 Runner starting...`);

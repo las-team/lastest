@@ -9,6 +9,7 @@ const SECTIONS = [
   { id: 'repository', label: 'Repository' },
   { id: 'database', label: 'Database' },
   { id: 'environment', label: 'Environment' },
+  { id: 'google-sheets', label: 'Google Sheets' },
   { id: 'ai-settings', label: 'AI Settings' },
   { id: 'ai-logs', label: 'AI Logs' },
   { id: 'notifications', label: 'Notifications' },
