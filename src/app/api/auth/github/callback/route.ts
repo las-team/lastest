@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { exchangeCodeForToken, getGitHubUser } from '@/lib/github/oauth';
 import * as queries from '@/lib/db/queries';
 import { createSessionToken, setSessionCookie, getCurrentUser } from '@/lib/auth';
+import { getPublicUrl } from '@/lib/utils';
 
 export async function GET(request: NextRequest) {
   const searchParams = request.nextUrl.searchParams;
@@ -13,26 +14,26 @@ export async function GET(request: NextRequest) {
 
   if (error) {
     const redirectPath = currentUser ? '/settings?error=github_auth_denied' : '/login?error=github_auth_denied';
-    return NextResponse.redirect(new URL(redirectPath, request.url));
+    return NextResponse.redirect(new URL(redirectPath, getPublicUrl(request)));
   }
 
   if (!code) {
     const redirectPath = currentUser ? '/settings?error=no_code' : '/login?error=no_code';
-    return NextResponse.redirect(new URL(redirectPath, request.url));
+    return NextResponse.redirect(new URL(redirectPath, getPublicUrl(request)));
   }
 
   // Exchange code for token
   const tokenResponse = await exchangeCodeForToken(code);
   if (!tokenResponse) {
     const redirectPath = currentUser ? '/settings?error=token_exchange_failed' : '/login?error=token_exchange_failed';
-    return NextResponse.redirect(new URL(redirectPath, request.url));
+    return NextResponse.redirect(new URL(redirectPath, getPublicUrl(request)));
   }
 
   // Get GitHub user info
   const githubUser = await getGitHubUser(tokenResponse.access_token);
   if (!githubUser) {
     const redirectPath = currentUser ? '/settings?error=user_fetch_failed' : '/login?error=user_fetch_failed';
-    return NextResponse.redirect(new URL(redirectPath, request.url));
+    return NextResponse.redirect(new URL(redirectPath, getPublicUrl(request)));
   }
 
   // Check if OAuth account already exists
@@ -45,7 +46,7 @@ export async function GET(request: NextRequest) {
   if (currentUser) {
     if (existingOAuth && existingOAuth.userId !== currentUser.id) {
       // GitHub account is linked to a different user
-      return NextResponse.redirect(new URL('/settings?error=github_account_linked_to_another_user', request.url));
+      return NextResponse.redirect(new URL('/settings?error=github_account_linked_to_another_user', getPublicUrl(request)));
     }
 
     if (existingOAuth) {
@@ -137,12 +138,12 @@ export async function GET(request: NextRequest) {
 
   // If user was already logged in (linking account), redirect to settings
   if (currentUser) {
-    return NextResponse.redirect(new URL('/settings?success=github_connected', request.url));
+    return NextResponse.redirect(new URL('/settings?success=github_connected', getPublicUrl(request)));
   }
 
   // Create session for new login/registration
   const sessionToken = await createSessionToken(userId, request);
   await setSessionCookie(sessionToken);
 
-  return NextResponse.redirect(new URL('/', request.url));
+  return NextResponse.redirect(new URL('/', getPublicUrl(request)));
 }

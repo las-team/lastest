@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import * as queries from '@/lib/db/queries';
 import { createSessionToken, setSessionCookie } from '@/lib/auth';
+import { getPublicUrl } from '@/lib/utils';
 
 const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || '';
 const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET || '';
@@ -71,23 +72,23 @@ export async function GET(request: NextRequest) {
   const error = searchParams.get('error');
 
   if (error) {
-    return NextResponse.redirect(new URL('/login?error=google_auth_denied', request.url));
+    return NextResponse.redirect(new URL('/login?error=google_auth_denied', getPublicUrl(request)));
   }
 
   if (!code) {
-    return NextResponse.redirect(new URL('/login?error=no_code', request.url));
+    return NextResponse.redirect(new URL('/login?error=no_code', getPublicUrl(request)));
   }
 
   // Exchange code for token
   const tokenResponse = await exchangeCodeForToken(code);
   if (!tokenResponse) {
-    return NextResponse.redirect(new URL('/login?error=token_exchange_failed', request.url));
+    return NextResponse.redirect(new URL('/login?error=token_exchange_failed', getPublicUrl(request)));
   }
 
   // Get Google user info
   const googleUser = await getGoogleUserInfo(tokenResponse.access_token);
   if (!googleUser) {
-    return NextResponse.redirect(new URL('/login?error=user_fetch_failed', request.url));
+    return NextResponse.redirect(new URL('/login?error=user_fetch_failed', getPublicUrl(request)));
   }
 
   // Check if OAuth account already exists
@@ -144,5 +145,5 @@ export async function GET(request: NextRequest) {
   const sessionToken = await createSessionToken(userId, request);
   await setSessionCookie(sessionToken);
 
-  return NextResponse.redirect(new URL('/', request.url));
+  return NextResponse.redirect(new URL('/', getPublicUrl(request)));
 }

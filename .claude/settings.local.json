@@ -70,7 +70,8 @@
       "Bash(git commit:*)",
       "WebFetch(domain:playwright.dev)",
       "Bash(git log:*)",
-      "WebFetch(domain:www.cursorinsight.com)"
+      "WebFetch(domain:www.cursorinsight.com)",
+      "Bash(ssh:*)"
     ]
   },
   "disabledMcpjsonServers": [

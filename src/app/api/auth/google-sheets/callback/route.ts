@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import * as queries from '@/lib/db/queries';
 import { getCurrentUser } from '@/lib/auth';
+import { getPublicUrl } from '@/lib/utils';
 
 const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || '';
 const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET || '';
@@ -68,29 +69,29 @@ export async function GET(request: NextRequest) {
   const error = searchParams.get('error');
 
   if (error) {
-    return NextResponse.redirect(new URL('/settings?error=google_sheets_denied', request.url));
+    return NextResponse.redirect(new URL('/settings?error=google_sheets_denied', getPublicUrl(request)));
   }
 
   if (!code) {
-    return NextResponse.redirect(new URL('/settings?error=no_code', request.url));
+    return NextResponse.redirect(new URL('/settings?error=no_code', getPublicUrl(request)));
   }
 
   // Get current user - must be logged in
   const currentUser = await getCurrentUser();
   if (!currentUser || !currentUser.teamId) {
-    return NextResponse.redirect(new URL('/login', request.url));
+    return NextResponse.redirect(new URL('/login', getPublicUrl(request)));
   }
 
   // Exchange code for token
   const tokenResponse = await exchangeCodeForToken(code);
   if (!tokenResponse) {
-    return NextResponse.redirect(new URL('/settings?error=google_sheets_token_failed', request.url));
+    return NextResponse.redirect(new URL('/settings?error=google_sheets_token_failed', getPublicUrl(request)));
   }
 
   // Get Google user info
   const googleUser = await getGoogleUserInfo(tokenResponse.access_token);
   if (!googleUser) {
-    return NextResponse.redirect(new URL('/settings?error=google_sheets_user_failed', request.url));
+    return NextResponse.redirect(new URL('/settings?error=google_sheets_user_failed', getPublicUrl(request)));
   }
 
   // Upsert Google Sheets account for this team
@@ -104,5 +105,5 @@ export async function GET(request: NextRequest) {
     tokenExpiresAt: new Date(Date.now() + tokenResponse.expires_in * 1000),
   });
 
-  return NextResponse.redirect(new URL('/settings?success=google_sheets_connected', request.url));
+  return NextResponse.redirect(new URL('/settings?success=google_sheets_connected', getPublicUrl(request)));
 }

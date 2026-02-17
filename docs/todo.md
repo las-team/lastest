@@ -11,14 +11,12 @@ Timestamp fixing
 Teardown
 ## features
 Support https://github.com/excalidraw/excalidraw/tree/master/packages/excalidraw/tests ~/.claude/plans/declarative-kindling-coral.md 55%
-    Dev feeback
+    Dev feeback, approved, what do I need to fix - todo list
     Actions with changes
+    Manager review of changes
 
 auth0 -like - login manager - keycloak? - Stytch?
     https://clerk.com/
-
-Failure - not all screenshots taken
-    Errors during execution - important and highlight
 
 Publish npm
 Docker deploy to local server
