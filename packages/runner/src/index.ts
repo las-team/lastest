@@ -6,6 +6,7 @@
 
 import { Command } from 'commander';
 import { spawn, execSync } from 'child_process';
+import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
@@ -45,15 +46,47 @@ function getRunningPid(): number | null {
   return pid;
 }
 
+// Derive a machine-bound encryption key from hostname + username
+function deriveKey(): Buffer {
+  const material = `lastest2-runner:${os.hostname()}:${os.userInfo().username}`;
+  return crypto.createHash('sha256').update(material).digest();
+}
+
+function encryptToken(token: string): { encrypted: string; iv: string } {
+  const key = deriveKey();
+  const iv = crypto.randomBytes(16);
+  const cipher = crypto.createCipheriv('aes-256-cbc', key, iv);
+  const encrypted = Buffer.concat([cipher.update(token, 'utf-8'), cipher.final()]);
+  return { encrypted: encrypted.toString('base64'), iv: iv.toString('base64') };
+}
+
+function decryptToken(encrypted: string, iv: string): string {
+  const key = deriveKey();
+  const decipher = crypto.createDecipheriv('aes-256-cbc', key, Buffer.from(iv, 'base64'));
+  const decrypted = Buffer.concat([decipher.update(Buffer.from(encrypted, 'base64')), decipher.final()]);
+  return decrypted.toString('utf-8');
+}
+
 function saveConfig(token: string, server: string, interval: string, baseUrl?: string) {
   ensureConfigDir();
-  fs.writeFileSync(CONFIG_FILE, JSON.stringify({ token, server, interval, baseUrl }, null, 2));
+  const { encrypted, iv } = encryptToken(token);
+  fs.writeFileSync(CONFIG_FILE, JSON.stringify({ token: encrypted, tokenIv: iv, server, interval, baseUrl }, null, 2));
 }
 
 function loadConfig(): { token?: string; server?: string; interval?: string; baseUrl?: string } {
   if (!fs.existsSync(CONFIG_FILE)) return {};
   try {
-    return JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf-8'));
+    const raw = JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf-8'));
+    // Decrypt token if stored encrypted
+    if (raw.token && raw.tokenIv) {
+      try {
+        raw.token = decryptToken(raw.token, raw.tokenIv);
+      } catch {
+        // Decryption failed (machine changed, corrupted) — clear token
+        delete raw.token;
+      }
+    }
+    return raw;
   } catch {
     return {};
   }
@@ -70,10 +103,10 @@ export async function main() {
   // Start command - runs in background
   program
     .command('start')
-    .description('Start the runner as a background daemon.\n\nSpawns a detached background process that connects to the Lastest2 server,\nlistens for test execution jobs, and runs them using a local Playwright browser.\nThe daemon PID is saved to ~/.lastest2/runner.pid and logs are written to\n~/.lastest2/runner.log. Use "lastest2-runner stop" to terminate the daemon.')
-    .requiredOption('-t, --token <token>', 'Runner authentication token (from Settings > Runners in the Lastest2 UI)')
-    .requiredOption('-s, --server <url>', 'Lastest2 server URL to connect to (e.g., https://your-app.vercel.app)')
-    .option('-i, --interval <ms>', 'Poll interval in milliseconds (default: 5000)', '5000')
+    .description('Start the runner as a background daemon.\n\nSpawns a detached background process that connects to the Lastest2 server,\nlistens for test execution jobs, and runs them using a local Playwright browser.\nThe daemon PID is saved to ~/.lastest2/runner.pid and logs are written to\n~/.lastest2/runner.log. Use "lastest2-runner stop" to terminate the daemon.\n\nIf no options are provided, uses the config saved from the last run.')
+    .option('-t, --token <token>', 'Runner authentication token (from Settings > Runners in the Lastest2 UI)')
+    .option('-s, --server <url>', 'Lastest2 server URL to connect to (e.g., https://your-app.vercel.app)')
+    .option('-i, --interval <ms>', 'Poll interval in milliseconds (default: 5000)')
     .option('-b, --base-url <url>', 'Override the target URL for test execution (useful for testing against local or staging environments)')
     .action(async (options) => {
       ensureConfigDir();
@@ -84,20 +117,33 @@ export async function main() {
         process.exit(1);
       }
 
-      // Save config for status command
-      saveConfig(options.token, options.server, options.interval, options.baseUrl);
+      // Merge with saved config — CLI args override saved values
+      const saved = loadConfig();
+      const token = options.token || saved.token;
+      const server = options.server || saved.server;
+      const interval = options.interval || saved.interval || '5000';
+      const baseUrl = options.baseUrl ?? saved.baseUrl;
+
+      if (!token || !server) {
+        console.error('Error: --token and --server are required (no saved config found)');
+        console.error('Run with: lastest2-runner start -t <token> -s <server-url>');
+        process.exit(1);
+      }
+
+      // Save merged config for future runs
+      saveConfig(token, server, interval, baseUrl);
 
       // Start the daemon process
       const logStream = fs.openSync(LOG_FILE, 'a');
       const args = [
         process.argv[1],
         'run',
-        '--token', options.token,
-        '--server', options.server,
-        '--interval', options.interval,
+        '--token', token,
+        '--server', server,
+        '--interval', interval,
       ];
-      if (options.baseUrl) {
-        args.push('--base-url', options.baseUrl);
+      if (baseUrl) {
+        args.push('--base-url', baseUrl);
       }
       const child = spawn(process.execPath, args, {
         detached: true,
@@ -108,8 +154,8 @@ export async function main() {
       child.unref();
 
       console.log(`Runner started (PID: ${child.pid})`);
-      console.log(`Server: ${options.server}`);
-      if (options.baseUrl) console.log(`Base URL override: ${options.baseUrl}`);
+      console.log(`Server: ${server}`);
+      if (baseUrl) console.log(`Base URL override: ${baseUrl}`);
       console.log(`Logs: ${LOG_FILE}`);
     });
 
@@ -190,24 +236,45 @@ export async function main() {
   // Run command - runs in foreground (used by start, or for direct execution)
   program
     .command('run')
-    .description('Run the runner in the foreground.\n\nSame as "start" but keeps the process attached to the current terminal.\nUseful for debugging, Docker containers, or CI/CD environments where you\nwant to see output directly. Handles SIGINT and SIGTERM for graceful shutdown.')
-    .requiredOption('-t, --token <token>', 'Runner authentication token (from Settings > Runners in the Lastest2 UI)')
-    .requiredOption('-s, --server <url>', 'Lastest2 server URL to connect to (e.g., https://your-app.vercel.app)')
-    .option('-i, --interval <ms>', 'Poll interval in milliseconds (default: 5000)', '5000')
+    .description('Run the runner in the foreground.\n\nSame as "start" but keeps the process attached to the current terminal.\nUseful for debugging, Docker containers, or CI/CD environments where you\nwant to see output directly. Handles SIGINT and SIGTERM for graceful shutdown.\n\nIf no options are provided, uses the config saved from the last run.')
+    .option('-t, --token <token>', 'Runner authentication token (from Settings > Runners in the Lastest2 UI)')
+    .option('-s, --server <url>', 'Lastest2 server URL to connect to (e.g., https://your-app.vercel.app)')
+    .option('-i, --interval <ms>', 'Poll interval in milliseconds (default: 5000)')
     .option('-b, --base-url <url>', 'Override the target URL for test execution (useful for testing against local or staging environments)')
     .action(async (options) => {
+      ensureConfigDir();
+
+      // Merge with saved config — CLI args override saved values
+      const saved = loadConfig();
+      const token = options.token || saved.token;
+      const server = options.server || saved.server;
+      const interval = options.interval || saved.interval || '5000';
+      const baseUrl = options.baseUrl ?? saved.baseUrl;
+
+      if (!token || !server) {
+        console.error('Error: --token and --server are required (no saved config found)');
+        console.error('Run with: lastest2-runner run -t <token> -s <server-url>');
+        process.exit(1);
+      }
+
+      // Save merged config for future runs
+      saveConfig(token, server, interval, baseUrl);
+
       const timestamp = () => new Date().toISOString();
       console.log(`[${timestamp()}] Lastest2 Runner starting...`);
-      console.log(`[${timestamp()}] Server: ${options.server}`);
-      if (options.baseUrl) {
-        console.log(`[${timestamp()}] Base URL override: ${options.baseUrl}`);
+      console.log(`[${timestamp()}] Server: ${server}`);
+      if (baseUrl) {
+        console.log(`[${timestamp()}] Base URL override: ${baseUrl}`);
+      }
+      if (!options.token || !options.server) {
+        console.log(`[${timestamp()}] Using saved config from ~/.lastest2/runner.config.json`);
       }
 
       const client = new RunnerClient({
-        token: options.token,
-        serverUrl: options.server,
-        pollInterval: parseInt(options.interval, 10),
-        baseUrl: options.baseUrl,
+        token,
+        serverUrl: server,
+        pollInterval: parseInt(interval, 10),
+        baseUrl,
       });
 
       // Handle shutdown
