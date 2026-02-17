@@ -9,16 +9,23 @@ import type {
   RunTestCommand,
   CancelTestCommand,
   ShutdownCommand,
+  StartRecordingCommand,
+  StopRecordingCommand,
+  CaptureScreenshotCommand,
   HeartbeatMessage,
   TestResultResponse,
   TestProgressResponse,
   ScreenshotUploadResponse,
+  RecordingEventResponse,
+  RecordingStoppedResponse,
+  RecordingEventData,
   ErrorResponse,
   PongResponse,
   ErrorCode,
 } from './protocol.js';
 import { createMessage } from './protocol.js';
 import { TestRunner } from './runner.js';
+import { RemoteRecorder } from './recorder.js';
 
 interface ConnectResponse {
   runnerId: string;
@@ -48,6 +55,7 @@ export class RunnerClient {
   private status: 'idle' | 'busy' | 'recording' = 'idle';
   private currentTask?: string;
   private runner: TestRunner;
+  private recorder: RemoteRecorder;
   private sessionId?: string;
 
   constructor(options: RunnerClientOptions) {
@@ -56,6 +64,7 @@ export class RunnerClient {
     this.pollInterval = options.pollInterval ?? 30000; // 30 seconds default
     this.baseUrl = options.baseUrl;
     this.runner = new TestRunner();
+    this.recorder = new RemoteRecorder();
   }
 
   async start(): Promise<void> {
@@ -229,6 +238,18 @@ export class RunnerClient {
         await this.handleCancelTest(message as CancelTestCommand);
         break;
 
+      case 'command:start_recording':
+        await this.handleStartRecording(message as StartRecordingCommand);
+        break;
+
+      case 'command:stop_recording':
+        await this.handleStopRecording(message as StopRecordingCommand);
+        break;
+
+      case 'command:capture_screenshot':
+        await this.handleCaptureScreenshot(message as CaptureScreenshotCommand);
+        break;
+
       case 'command:shutdown':
         await this.handleShutdown(message as ShutdownCommand);
         break;
@@ -328,6 +349,104 @@ export class RunnerClient {
     } finally {
       this.status = 'idle';
       this.currentTask = undefined;
+    }
+  }
+
+  private async handleStartRecording(command: StartRecordingCommand): Promise<void> {
+    if (this.recorder.isActive()) {
+      await this.sendError(command.id, 'INTERNAL_ERROR', 'Recording already in progress');
+      return;
+    }
+
+    this.status = 'recording';
+    this.currentTask = command.payload.sessionId;
+
+    try {
+      console.log(`Starting recording: ${command.payload.targetUrl}`);
+
+      await this.recorder.start(
+        command.payload,
+        // onEvent callback — send events back to server
+        (events: RecordingEventData[]) => {
+          const msg = createMessage<RecordingEventResponse>('response:recording_event', {
+            sessionId: command.payload.sessionId,
+            events,
+          });
+          this.sendMessage(msg);
+        },
+        // onStopped callback — browser was closed by user
+        () => {
+          console.log('Recording stopped (browser closed)');
+          const msg = createMessage<RecordingStoppedResponse>('response:recording_stopped', {
+            sessionId: command.payload.sessionId,
+            generatedCode: '', // Server will generate code from stored events
+          });
+          this.sendMessage(msg);
+          this.status = 'idle';
+          this.currentTask = undefined;
+        }
+      );
+
+      console.log('Recording started successfully');
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      console.error('Failed to start recording:', errorMessage);
+      await this.sendError(command.id, 'BROWSER_LAUNCH_FAILED', errorMessage);
+      this.status = 'idle';
+      this.currentTask = undefined;
+    }
+  }
+
+  private async handleStopRecording(command: StopRecordingCommand): Promise<void> {
+    if (!this.recorder.isActive()) {
+      await this.sendError(command.id, 'INTERNAL_ERROR', 'No recording in progress');
+      return;
+    }
+
+    try {
+      console.log('Stopping recording...');
+      await this.recorder.stop();
+
+      const msg = createMessage<RecordingStoppedResponse>('response:recording_stopped', {
+        sessionId: command.payload.sessionId,
+        generatedCode: '', // Server generates code from stored events
+      });
+      await this.sendMessage(msg);
+
+      console.log('Recording stopped successfully');
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      console.error('Failed to stop recording:', errorMessage);
+      await this.sendError(command.id, 'INTERNAL_ERROR', errorMessage);
+    } finally {
+      this.status = 'idle';
+      this.currentTask = undefined;
+    }
+  }
+
+  private async handleCaptureScreenshot(command: CaptureScreenshotCommand): Promise<void> {
+    if (!this.recorder.isActive()) {
+      await this.sendError(command.id, 'INTERNAL_ERROR', 'No recording in progress');
+      return;
+    }
+
+    try {
+      const screenshot = await this.recorder.takeScreenshot();
+      if (screenshot) {
+        const msg = createMessage<ScreenshotUploadResponse>('response:screenshot', {
+          correlationId: command.id,
+          testRunId: '', // Not a test run
+          filename: `recording-screenshot-${Date.now()}.png`,
+          data: screenshot.data,
+          width: screenshot.width,
+          height: screenshot.height,
+          capturedAt: Date.now(),
+        });
+        await this.sendMessage(msg);
+      }
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      await this.sendError(command.id, 'SCREENSHOT_FAILED', errorMessage);
     }
   }
 
