@@ -16,6 +16,16 @@ import { DEFAULT_SELECTOR_PRIORITY } from '@/lib/db/schema';
 import { v4 as uuid } from 'uuid';
 import { revalidatePath } from 'next/cache';
 import { chromium, firefox, webkit } from 'playwright';
+import { createMessage } from '@/lib/ws/protocol';
+import type { StartRecordingCommand, StopRecordingCommand, CaptureScreenshotCommand } from '@/lib/ws/protocol';
+import {
+  queueCommand,
+  createRemoteRecordingSession,
+  getRemoteRecordingSession,
+  completeRemoteRecordingSession,
+  clearRemoteRecordingSession,
+  type RemoteRecordingEvent,
+} from '@/app/api/ws/runner/route';
 
 export interface PlaywrightAvailability {
   available: boolean;
@@ -66,12 +76,6 @@ export async function startRecording(
   runnerId?: string,
   setupOptions?: { testId?: string | null; scriptId?: string | null; steps?: Array<{ stepType: 'test' | 'script'; testId?: string | null; scriptId?: string | null }> }
 ): Promise<{ sessionId?: string; error?: string }> {
-  const recorder = getRecorder(repositoryId);
-
-  if (recorder.isActive()) {
-    return { error: 'Recording already in progress' };
-  }
-
   // Validate URL format
   try {
     new URL(url);
@@ -80,26 +84,56 @@ export async function startRecording(
   }
 
   const sessionId = uuid();
-
-  // Fetch settings and pass cursor tracking config to recorder
   const settings = await getPlaywrightSettings(repositoryId);
+  const selectorPriority = settings.selectorPriority ?? DEFAULT_SELECTOR_PRIORITY;
+
+  // Dispatch to remote runner if specified
+  if (runnerId && runnerId !== 'local') {
+    // Check if there's already an active remote session
+    const existingSession = getRemoteRecordingSession(repositoryId);
+    if (existingSession?.isRecording) {
+      return { error: 'Recording already in progress on remote runner' };
+    }
+
+    // Create the remote recording session on the server
+    createRemoteRecordingSession(sessionId, runnerId, repositoryId ?? null, url, selectorPriority);
+
+    // Queue start_recording command to the runner
+    const command = createMessage<StartRecordingCommand>('command:start_recording', {
+      sessionId,
+      targetUrl: url,
+      viewport: {
+        width: settings.viewportWidth ?? 1280,
+        height: settings.viewportHeight ?? 720,
+      },
+      browser: (settings.browser as 'chromium' | 'firefox' | 'webkit') ?? 'chromium',
+      selectorPriority,
+      ocrEnabled: selectorPriority.find(s => s.type === 'ocr-text')?.enabled ?? false,
+      pointerGestures: settings.pointerGestures ?? false,
+      cursorFPS: settings.cursorFPS ?? 30,
+    });
+    queueCommand(runnerId, command);
+
+    console.log(`[Recording] Dispatched recording to runner ${runnerId}, session ${sessionId}`);
+    return { sessionId };
+  }
+
+  // Local recording
+  const recorder = getRecorder(repositoryId);
+
+  if (recorder.isActive()) {
+    return { error: 'Recording already in progress' };
+  }
+
   recorder.setSettings({
     pointerGestures: settings.pointerGestures ?? false,
     cursorFPS: settings.cursorFPS ?? 30,
   });
 
-  // Check if OCR is enabled in selector priority settings
-  const selectorPriority = settings.selectorPriority ?? DEFAULT_SELECTOR_PRIORITY;
   const ocrConfig = selectorPriority.find(s => s.type === 'ocr-text');
   recorder.setOcrEnabled(ocrConfig?.enabled ?? false);
-
-  // Pass selector priority to recorder for filtering/ordering
   recorder.setSelectorPriority(selectorPriority);
-
-  // Set viewport from settings
   recorder.setViewport(settings.viewportWidth ?? 1280, settings.viewportHeight ?? 720);
-
-  // Set browser type (headless is always false for recording - user needs to see the browser)
   recorder.setBrowserType((settings.browser as 'chromium' | 'firefox' | 'webkit') ?? 'chromium');
 
   try {
@@ -108,7 +142,6 @@ export async function startRecording(
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Failed to start recording';
 
-    // Parse common Playwright errors
     if (message.includes('ERR_NAME_NOT_RESOLVED')) {
       return { error: `Could not resolve hostname. Please check the URL: ${url}` };
     }
@@ -124,16 +157,63 @@ export async function startRecording(
 }
 
 export async function stopRecording(repositoryId?: string | null) {
+  // Check for remote recording session first
+  const remoteSession = getRemoteRecordingSession(repositoryId);
+  if (remoteSession?.isRecording) {
+    // Queue stop command to the runner
+    const command = createMessage<StopRecordingCommand>('command:stop_recording', {
+      sessionId: remoteSession.sessionId,
+    });
+    queueCommand(remoteSession.runnerId, command);
+
+    // Wait for the runner to confirm stop (poll for up to 10 seconds)
+    for (let i = 0; i < 20; i++) {
+      await new Promise(resolve => setTimeout(resolve, 500));
+      const session = getRemoteRecordingSession(repositoryId);
+      if (!session?.isRecording) break;
+    }
+
+    // Generate code from the stored events
+    const generatedCode = generateCodeFromRemoteEvents(
+      remoteSession.events,
+      remoteSession.selectorPriority,
+      remoteSession.targetUrl
+    );
+    completeRemoteRecordingSession(repositoryId, generatedCode);
+
+    return {
+      id: remoteSession.sessionId,
+      url: remoteSession.targetUrl,
+      startedAt: remoteSession.startedAt,
+      events: remoteSession.events,
+      generatedCode,
+    };
+  }
+
+  // Local recording
   const recorder = getRecorder(repositoryId);
   const session = await recorder.stopRecording();
-
   return session;
 }
 
 export async function captureScreenshot(repositoryId?: string | null) {
+  // Check for remote recording session
+  const remoteSession = getRemoteRecordingSession(repositoryId);
+  if (remoteSession?.isRecording) {
+    // Queue screenshot command to the runner
+    const command = createMessage<CaptureScreenshotCommand>('command:capture_screenshot', {
+      sessionId: remoteSession.sessionId,
+    });
+    queueCommand(remoteSession.runnerId, command);
+
+    // The screenshot event will come back through recording events
+    // Return a placeholder - the UI will get the actual screenshot through event polling
+    return { screenshotPath: null };
+  }
+
+  // Local recording
   const recorder = getRecorder(repositoryId);
   const screenshotPath = await recorder.takeScreenshot();
-
   return { screenshotPath };
 }
 
@@ -145,18 +225,47 @@ export async function createAssertion(type: AssertionType): Promise<{ success: b
 }
 
 export async function getRecordingStatus(repositoryId?: string | null, sinceSequence?: number) {
+  // Check for remote recording session first
+  const remoteSession = getRemoteRecordingSession(repositoryId);
+  if (remoteSession) {
+    const allEvents = remoteSession.events;
+    const events = sinceSequence !== undefined
+      ? allEvents.filter(e => e.sequence > sinceSequence)
+      : allEvents;
+    const lastSequence = allEvents.at(-1)?.sequence ?? 0;
+
+    // If recording stopped and we have generated code, return as completed session
+    const isCompleted = !remoteSession.isRecording && remoteSession.generatedCode;
+
+    return {
+      isRecording: remoteSession.isRecording,
+      events,
+      lastSequence,
+      verificationUpdates: [] as Array<{ actionId: string; verified: boolean }>,
+      session: remoteSession.isRecording ? {
+        id: remoteSession.sessionId,
+        url: remoteSession.targetUrl,
+        startedAt: remoteSession.startedAt,
+        eventsCount: allEvents.length,
+      } : null,
+      lastCompletedSession: isCompleted ? {
+        id: remoteSession.sessionId,
+        generatedCode: remoteSession.generatedCode!,
+      } : null,
+    };
+  }
+
+  // Local recording
   const recorder = getRecorder(repositoryId);
   const session = recorder.getSession();
   const lastCompleted = recorder.getLastCompletedSession();
 
-  // Get events since the specified sequence number
   const allEvents = session?.events ?? [];
   const events = sinceSequence !== undefined
     ? allEvents.filter(e => e.sequence > sinceSequence)
     : allEvents;
   const lastSequence = allEvents.at(-1)?.sequence ?? 0;
 
-  // Get verification updates (DOM verification results)
   const verificationUpdates = recorder.getVerificationUpdates();
 
   return {
@@ -178,6 +287,14 @@ export async function getRecordingStatus(repositoryId?: string | null, sinceSequ
 }
 
 export async function clearLastCompletedSession(repositoryId?: string | null) {
+  // Clear remote session if it exists and is completed
+  const remoteSession = getRemoteRecordingSession(repositoryId);
+  if (remoteSession && !remoteSession.isRecording) {
+    clearRemoteRecordingSession(repositoryId);
+    return;
+  }
+
+  // Clear local session
   const recorder = getRecorder(repositoryId);
   recorder.clearLastCompletedSession();
 }
@@ -350,4 +467,270 @@ export async function finalizeInspectorSession(sessionId: string): Promise<{
   cleanupSession(sessionId);
 
   return { success: true, code: transformedCode };
+}
+
+// ============================================
+// Code Generation from Remote Recording Events
+// ============================================
+
+/**
+ * Generates Playwright test code from remote recording events.
+ * This mirrors PlaywrightRecorder.generateCode() but works with serialized events.
+ */
+function generateCodeFromRemoteEvents(
+  events: RemoteRecordingEvent[],
+  selectorPriority: Array<{ type: string; enabled: boolean; priority: number }>,
+  targetUrl: string
+): string {
+  const baseOrigin = new URL(targetUrl).origin;
+  const coordsEnabled = selectorPriority.find(s => s.type === 'coords')?.enabled ?? true;
+  const hasCursorEvents = events.some(e => e.type === 'cursor-move');
+
+  function getRelativePath(url: string): string {
+    if (url.startsWith(baseOrigin)) {
+      return url.slice(baseOrigin.length) || '/';
+    }
+    return url;
+  }
+
+  const lines: string[] = [
+    `import { Page } from 'playwright';`,
+    '',
+    `export async function test(page: Page, baseUrl: string, screenshotPath: string, stepLogger: any) {`,
+    `  // Helper to build URLs safely (handles trailing/leading slashes)`,
+    `  function buildUrl(base, path) {`,
+    `    const cleanBase = base.endsWith('/') ? base.slice(0, -1) : base;`,
+    `    const cleanPath = path.startsWith('/') ? path : '/' + path;`,
+    `    return cleanBase + cleanPath;`,
+    `  }`,
+    ``,
+    `  // Helper to generate unique screenshot paths`,
+    `  let screenshotStep = 0;`,
+    `  function getScreenshotPath() {`,
+    `    screenshotStep++;`,
+    `    const ext = screenshotPath.lastIndexOf('.');`,
+    `    if (ext > 0) {`,
+    `      return screenshotPath.slice(0, ext) + '-step' + screenshotStep + screenshotPath.slice(ext);`,
+    `    }`,
+    `    return screenshotPath + '-step' + screenshotStep;`,
+    `  }`,
+    ``,
+    `  // Multi-selector fallback helper with coordinate fallback for clicks`,
+    `  async function locateWithFallback(page, selectors, action, value, coords) {`,
+    `    const validSelectors = selectors.filter(sel => sel.value && sel.value.trim() && !sel.value.includes('undefined'));`,
+    `    for (const sel of validSelectors) {`,
+    `      try {`,
+    `        let locator;`,
+    `        if (sel.type === 'ocr-text') {`,
+    `          const text = sel.value.replace(/^ocr-text="/, '').replace(/"$/, '');`,
+    `          locator = page.getByText(text, { exact: false });`,
+    `        } else if (sel.type === 'role-name') {`,
+    `          const match = sel.value.match(/^role=(\\w+)\\[name="(.+)"\\]$/);`,
+    `          if (match) {`,
+    `            locator = page.getByRole(match[1], { name: match[2] });`,
+    `          } else {`,
+    `            locator = page.locator(sel.value);`,
+    `          }`,
+    `        } else {`,
+    `          locator = page.locator(sel.value);`,
+    `        }`,
+    `        const target = locator.first();`,
+    `        await target.waitFor({ timeout: 3000 });`,
+    `        if (action === 'locate') return target;`,
+    `        if (action === 'click') await target.click();`,
+    `        else if (action === 'fill') await target.fill(value || '');`,
+    `        else if (action === 'selectOption') await target.selectOption(value || '');`,
+    `        return target;`,
+    `      } catch { continue; }`,
+    `    }`,
+    ...(coordsEnabled ? [
+    `    if (action === 'click' && coords) {`,
+    `      console.log('Falling back to coordinate click at', coords.x, coords.y);`,
+    `      await page.mouse.click(coords.x, coords.y);`,
+    `      return;`,
+    `    }`,
+    ] : []),
+    `    throw new Error('No selector matched: ' + JSON.stringify(validSelectors));`,
+    `  }`,
+    ``,
+  ];
+
+  if (hasCursorEvents) {
+    lines.push(
+      `  async function replayCursorPath(page, moves) {`,
+      `    for (const [x, y, delay] of moves) {`,
+      `      await page.mouse.move(x, y);`,
+      `      if (delay > 0) await page.waitForTimeout(delay);`,
+      `    }`,
+      `  }`,
+      ``,
+    );
+  }
+
+  let lastAction = '';
+  let cursorBatch: [number, number, number][] = [];
+  let lastCursorTimestamp = 0;
+
+  const flushCursorBatch = () => {
+    if (cursorBatch.length > 0) {
+      const tuples = cursorBatch.map(t => `[${t[0]},${t[1]},${t[2]}]`).join(',');
+      lines.push(`  await replayCursorPath(page, [${tuples}]);`);
+      cursorBatch = [];
+    }
+  };
+
+  for (const event of events) {
+    if (event.type === 'cursor-move' && event.data.coordinates) {
+      const { x, y } = event.data.coordinates as { x: number; y: number };
+      const delay = lastCursorTimestamp > 0 ? event.timestamp - lastCursorTimestamp : 0;
+      cursorBatch.push([x, y, delay]);
+      lastCursorTimestamp = event.timestamp;
+      continue;
+    }
+
+    flushCursorBatch();
+
+    if (event.type === 'navigation' && event.data.relativePath) {
+      if (!lastAction.includes('goto')) {
+        const relativePath = event.data.relativePath as string;
+        lines.push(`  await page.goto(buildUrl(baseUrl, '${relativePath}'));`);
+      }
+      lastAction = 'goto';
+    } else if (event.type === 'action') {
+      const { action, selector, selectors, value, coordinates } = event.data as {
+        action?: string; selector?: string;
+        selectors?: Array<{ type: string; value: string }>;
+        value?: string; coordinates?: { x: number; y: number };
+      };
+
+      if (selectors && selectors.length > 0) {
+        const selectorsJson = JSON.stringify(selectors);
+        const coordsArg = coordinates ? JSON.stringify(coordinates) : 'null';
+        switch (action) {
+          case 'click':
+            lines.push(`  await locateWithFallback(page, ${selectorsJson}, 'click', null, ${coordsArg});`);
+            break;
+          case 'fill':
+            lines.push(`  await locateWithFallback(page, ${selectorsJson}, 'fill', '${value || ''}', null);`);
+            break;
+          case 'selectOption':
+            lines.push(`  await locateWithFallback(page, ${selectorsJson}, 'selectOption', '${value || ''}', null);`);
+            break;
+        }
+      } else if (selector && (selector as string).trim()) {
+        switch (action) {
+          case 'click':
+            lines.push(`  await page.locator('${selector}').click();`);
+            break;
+          case 'fill':
+            lines.push(`  await page.locator('${selector}').fill('${value || ''}');`);
+            break;
+          case 'selectOption':
+            lines.push(`  await page.locator('${selector}').selectOption('${value || ''}');`);
+            break;
+        }
+      } else if (action === 'click' && coordinates) {
+        lines.push(`  // Coordinate-only click (no selectors found)`);
+        lines.push(`  await page.mouse.click(${coordinates.x}, ${coordinates.y});`);
+      } else {
+        lines.push(`  // Skipped ${action}: no valid selector or coordinates found`);
+      }
+      lastAction = action || '';
+    } else if (event.type === 'screenshot') {
+      lines.push(`  await page.screenshot({ path: getScreenshotPath(), fullPage: true });`);
+    } else if (event.type === 'assertion') {
+      const { assertionType, url, elementAssertion } = event.data as {
+        assertionType?: string; url?: string;
+        elementAssertion?: { type: string; selectors: Array<{ type: string; value: string }>; expectedValue?: string; attributeName?: string; attributeValue?: string };
+      };
+
+      if (elementAssertion) {
+        const selectorsJson = JSON.stringify(elementAssertion.selectors);
+        const assertType = elementAssertion.type;
+        lines.push(`  // Element assertion: ${assertType}`);
+        lines.push(`  {`);
+        lines.push(`    const el = await locateWithFallback(page, ${selectorsJson}, 'locate', null, null);`);
+
+        switch (assertType) {
+          case 'toBeVisible': lines.push(`    await expect(el).toBeVisible();`); break;
+          case 'toBeHidden': lines.push(`    await expect(el).toBeHidden();`); break;
+          case 'toBeAttached': lines.push(`    await expect(el).toBeAttached();`); break;
+          case 'toHaveAttribute':
+            lines.push(`    await expect(el).toHaveAttribute('${elementAssertion.attributeName || ''}', '${elementAssertion.attributeValue || ''}');`);
+            break;
+          case 'toHaveText':
+            lines.push(`    await expect(el).toHaveText('${(elementAssertion.expectedValue || '').replace(/'/g, "\\'")}');`);
+            break;
+          case 'toContainText':
+            lines.push(`    await expect(el).toContainText('${(elementAssertion.expectedValue || '').replace(/'/g, "\\'")}');`);
+            break;
+          case 'toHaveValue':
+            lines.push(`    await expect(el).toHaveValue('${(elementAssertion.expectedValue || '').replace(/'/g, "\\'")}');`);
+            break;
+          case 'toBeEnabled': lines.push(`    await expect(el).toBeEnabled();`); break;
+          case 'toBeDisabled': lines.push(`    await expect(el).toBeDisabled();`); break;
+          case 'toBeChecked': lines.push(`    await expect(el).toBeChecked();`); break;
+        }
+        lines.push(`  }`);
+      } else {
+        switch (assertionType) {
+          case 'pageLoad':
+            lines.push(`  // Assertion: Verify page has finished loading`);
+            lines.push(`  await page.waitForLoadState('load');`);
+            break;
+          case 'networkIdle':
+            lines.push(`  // Assertion: Verify no pending network requests`);
+            lines.push(`  await page.waitForLoadState('networkidle');`);
+            break;
+          case 'urlMatch': {
+            lines.push(`  // Assertion: Verify current URL matches expected`);
+            const relativePath = getRelativePath(url || '');
+            lines.push(`  await expect(page).toHaveURL(buildUrl(baseUrl, '${relativePath}'));`);
+            break;
+          }
+          case 'domContentLoaded':
+            lines.push(`  // Assertion: Verify DOM is ready`);
+            lines.push(`  await page.waitForLoadState('domcontentloaded');`);
+            break;
+        }
+      }
+    } else if (event.type === 'mouse-down' && event.data.coordinates) {
+      const { x, y } = event.data.coordinates as { x: number; y: number };
+      const modifiers = event.data.modifiers as string[] | undefined;
+      if (modifiers && modifiers.length > 0) {
+        for (const mod of modifiers) {
+          lines.push(`  await page.keyboard.down('${mod}');`);
+        }
+      }
+      lines.push(`  await page.mouse.move(${x}, ${y});`);
+      lines.push(`  await page.mouse.down();`);
+    } else if (event.type === 'mouse-up' && event.data.coordinates) {
+      const { x, y } = event.data.coordinates as { x: number; y: number };
+      const modifiers = event.data.modifiers as string[] | undefined;
+      lines.push(`  await page.mouse.move(${x}, ${y});`);
+      lines.push(`  await page.mouse.up();`);
+      if (modifiers && modifiers.length > 0) {
+        for (const mod of modifiers) {
+          lines.push(`  await page.keyboard.up('${mod}');`);
+        }
+      }
+    } else if (event.type === 'keypress' && event.data.key) {
+      const { key, modifiers } = event.data as { key: string; modifiers?: string[] };
+      if (modifiers && modifiers.length > 0) {
+        for (const mod of modifiers) {
+          lines.push(`  await page.keyboard.down('${mod}');`);
+        }
+      }
+      lines.push(`  await page.keyboard.press('${key}');`);
+      if (modifiers && modifiers.length > 0) {
+        for (const mod of [...modifiers].reverse()) {
+          lines.push(`  await page.keyboard.up('${mod}');`);
+        }
+      }
+    }
+  }
+
+  flushCursorBatch();
+  lines.push('}', '');
+  return lines.join('\n');
 }

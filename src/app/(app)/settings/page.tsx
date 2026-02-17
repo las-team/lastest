@@ -313,6 +313,7 @@ export default async function SettingsPage({
           </div>
 
           {/* Google Sheets Test Data */}
+          <div id="google-sheets">
           <GoogleSheetsSettingsCard
             account={googleSheetsAccount ? {
               id: googleSheetsAccount.id,
@@ -322,6 +323,7 @@ export default async function SettingsPage({
             dataSources={googleSheetsDataSources}
             repositoryId={selectedRepo?.id}
           />
+          </div>
 
           {/* AI Settings */}
           <div id="ai-settings">

@@ -15,10 +15,12 @@ export type MessageType =
   | 'response:recording_event'
   | 'response:screenshot'
   | 'response:screenshot_ack'
+  | 'response:recording_stopped'
   | 'response:error'
   | 'response:pong'
   | 'status:heartbeat'
-  | 'connection:established';
+  | 'connection:established'
+  | 'command:capture_screenshot';
 
 export interface BaseMessage {
   id: string;
@@ -75,6 +77,99 @@ export interface ShutdownCommandPayload {
 export interface ShutdownCommand extends BaseMessage {
   type: 'command:shutdown';
   payload: ShutdownCommandPayload;
+}
+
+export interface StartRecordingCommandPayload {
+  sessionId: string;
+  targetUrl: string;
+  viewport?: { width: number; height: number };
+  browser?: 'chromium' | 'firefox' | 'webkit';
+  selectorPriority?: Array<{ type: string; enabled: boolean; priority: number }>;
+  ocrEnabled?: boolean;
+  pointerGestures?: boolean;
+  cursorFPS?: number;
+}
+
+export interface StartRecordingCommand extends BaseMessage {
+  type: 'command:start_recording';
+  payload: StartRecordingCommandPayload;
+}
+
+export interface StopRecordingCommandPayload {
+  sessionId: string;
+}
+
+export interface StopRecordingCommand extends BaseMessage {
+  type: 'command:stop_recording';
+  payload: StopRecordingCommandPayload;
+}
+
+export interface CaptureScreenshotCommand extends BaseMessage {
+  type: 'command:capture_screenshot';
+  payload: { sessionId: string };
+}
+
+export interface RecordingEventData {
+  type: string;
+  timestamp: number;
+  sequence: number;
+  status: 'preview' | 'committed';
+  verification?: {
+    syntaxValid: boolean;
+    domVerified?: boolean;
+    lastChecked?: number;
+  };
+  data: {
+    action?: string;
+    selector?: string;
+    selectors?: Array<{ type: string; value: string; enabled?: boolean; priority?: number }>;
+    value?: string;
+    url?: string;
+    relativePath?: string;
+    screenshotPath?: string;
+    assertionType?: string;
+    coordinates?: { x: number; y: number };
+    button?: number;
+    modifiers?: string[];
+    key?: string;
+    actionId?: string;
+    elementInfo?: {
+      tagName: string;
+      id?: string;
+      textContent?: string;
+      potentialAction?: string;
+      potentialSelector?: string;
+      selectors?: Array<{ type: string; value: string; enabled?: boolean; priority?: number }>;
+    };
+    elementAssertion?: {
+      type: string;
+      selectors: Array<{ type: string; value: string; enabled?: boolean; priority?: number }>;
+      expectedValue?: string;
+      attributeName?: string;
+      attributeValue?: string;
+    };
+  };
+}
+
+export interface RecordingEventPayload {
+  sessionId: string;
+  events: RecordingEventData[];
+  generatedCode?: string;
+}
+
+export interface RecordingEventResponse extends BaseMessage {
+  type: 'response:recording_event';
+  payload: RecordingEventPayload;
+}
+
+export interface RecordingStoppedPayload {
+  sessionId: string;
+  generatedCode: string;
+}
+
+export interface RecordingStoppedResponse extends BaseMessage {
+  type: 'response:recording_stopped';
+  payload: RecordingStoppedPayload;
 }
 
 export interface LogEntry {
@@ -193,9 +288,14 @@ export type Message =
   | CancelTestCommand
   | ShutdownCommand
   | PingCommand
+  | StartRecordingCommand
+  | StopRecordingCommand
+  | CaptureScreenshotCommand
   | TestResultResponse
   | TestProgressResponse
   | ScreenshotUploadResponse
+  | RecordingEventResponse
+  | RecordingStoppedResponse
   | ErrorResponse
   | PongResponse
   | HeartbeatMessage

@@ -20,6 +20,8 @@ export type MessageType =
   | 'response:test_result'
   | 'response:test_progress'
   | 'response:recording_event'
+  | 'response:recording_stopped'
+  | 'command:capture_screenshot'
   | 'response:screenshot'
   | 'response:screenshot_ack'
   | 'response:error'
@@ -72,7 +74,11 @@ export interface StartRecordingCommandPayload {
   sessionId: string;
   targetUrl: string;
   viewport?: { width: number; height: number };
-  selectorPriority: string[];
+  browser?: 'chromium' | 'firefox' | 'webkit';
+  selectorPriority?: Array<{ type: string; enabled: boolean; priority: number }>;
+  ocrEnabled?: boolean;
+  pointerGestures?: boolean;
+  cursorFPS?: number;
 }
 
 export interface StartRecordingCommand extends BaseMessage {
@@ -167,13 +173,38 @@ export interface RecordingEventData {
 
 export interface RecordingEventPayload {
   sessionId: string;
-  event: RecordingEventData;
-  generatedCode: string;
+  events: Array<{
+    type: string;
+    timestamp: number;
+    sequence: number;
+    status: 'preview' | 'committed';
+    verification?: {
+      syntaxValid: boolean;
+      domVerified?: boolean;
+      lastChecked?: number;
+    };
+    data: Record<string, unknown>;
+  }>;
 }
 
 export interface RecordingEventResponse extends BaseMessage {
   type: 'response:recording_event';
   payload: RecordingEventPayload;
+}
+
+export interface RecordingStoppedPayload {
+  sessionId: string;
+  generatedCode: string;
+}
+
+export interface RecordingStoppedResponse extends BaseMessage {
+  type: 'response:recording_stopped';
+  payload: RecordingStoppedPayload;
+}
+
+export interface CaptureScreenshotCommand extends BaseMessage {
+  type: 'command:capture_screenshot';
+  payload: { sessionId: string };
 }
 
 export interface ScreenshotUploadPayload {
@@ -279,12 +310,14 @@ export type ServerCommand =
   | ShutdownCommand
   | StartRecordingCommand
   | StopRecordingCommand
+  | CaptureScreenshotCommand
   | PingCommand;
 
 export type AgentResponse =
   | TestProgressResponse
   | TestResultResponse
   | RecordingEventResponse
+  | RecordingStoppedResponse
   | ScreenshotUploadResponse
   | ErrorResponse
   | PongResponse

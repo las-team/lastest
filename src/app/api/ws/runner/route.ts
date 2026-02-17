@@ -16,7 +16,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { validateRunnerToken, updateRunnerStatus, markStaleRunnersOffline } from '@/server/actions/runners';
 // runnerRegistry is used for WebSocket mode (not polling mode)
 // import { runnerRegistry } from '@/lib/ws/runner-registry';
-import type { Message, HeartbeatMessage, TestResultResponse, ScreenshotUploadResponse } from '@/lib/ws/protocol';
+import type { Message, HeartbeatMessage, TestResultResponse, ScreenshotUploadResponse, RecordingEventResponse, RecordingStoppedResponse } from '@/lib/ws/protocol';
 import fs from 'fs/promises';
 import path from 'path';
 
@@ -245,6 +245,37 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ ok: true });
       }
 
+      case 'response:recording_event': {
+        const recordingMsg = message as RecordingEventResponse;
+        const { sessionId, events } = recordingMsg.payload;
+
+        // Find the remote recording session
+        const session = findRemoteSessionBySessionId(sessionId);
+        if (session) {
+          // Append events to the session
+          for (const event of events) {
+            session.events.push(event as RemoteRecordingEvent);
+          }
+        } else {
+          console.warn(`[Recording] Received events for unknown session: ${sessionId}`);
+        }
+
+        return NextResponse.json({ ok: true });
+      }
+
+      case 'response:recording_stopped': {
+        const stoppedMsg = message as RecordingStoppedResponse;
+        const { sessionId } = stoppedMsg.payload;
+
+        const session = findRemoteSessionBySessionId(sessionId);
+        if (session) {
+          session.isRecording = false;
+          console.log(`[Recording] Session ${sessionId} stopped, ${session.events.length} events`);
+        }
+
+        return NextResponse.json({ ok: true });
+      }
+
       default:
         console.warn('Unknown message type:', message.type);
         return NextResponse.json({ error: 'Unknown message type', type: message.type }, { status: 400 });
@@ -327,6 +358,7 @@ const globalState = globalThis as typeof globalThis & {
   __runnerPendingCommands?: Map<string, Message[]>;
   __runnerTestResults?: Map<string, TestResultResponse[]>;
   __runnerScreenshots?: Map<string, Message[]>;
+  __remoteRecordingSessions?: Map<string, RemoteRecordingSession>;
 };
 
 if (!globalState.__runnerPendingCommands) {
@@ -338,10 +370,41 @@ if (!globalState.__runnerTestResults) {
 if (!globalState.__runnerScreenshots) {
   globalState.__runnerScreenshots = new Map<string, Message[]>();
 }
+if (!globalState.__remoteRecordingSessions) {
+  globalState.__remoteRecordingSessions = new Map<string, RemoteRecordingSession>();
+}
 
 const pendingCommandsMap = globalState.__runnerPendingCommands;
 const testResultsMap = globalState.__runnerTestResults;
 const screenshotsMap = globalState.__runnerScreenshots;
+const remoteRecordingSessionsMap = globalState.__remoteRecordingSessions;
+
+// Remote recording session state
+export interface RemoteRecordingEvent {
+  type: string;
+  timestamp: number;
+  sequence: number;
+  status: 'preview' | 'committed';
+  verification?: {
+    syntaxValid: boolean;
+    domVerified?: boolean;
+    lastChecked?: number;
+  };
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  data: Record<string, any>;
+}
+
+export interface RemoteRecordingSession {
+  sessionId: string;
+  runnerId: string;
+  repositoryId: string | null;
+  targetUrl: string;
+  isRecording: boolean;
+  events: RemoteRecordingEvent[];
+  generatedCode: string | null;
+  startedAt: Date;
+  selectorPriority: Array<{ type: string; enabled: boolean; priority: number }>;
+}
 
 function getPendingCommands(runnerId: string): Message[] {
   const commands = pendingCommandsMap.get(runnerId) || [];
@@ -426,4 +489,85 @@ export function getScreenshots(runnerId: string): Message[] {
   }
   screenshotsMap.set(runnerId, []); // Clear after fetching
   return screenshots;
+}
+
+// ============================================
+// Remote Recording Session Management
+// ============================================
+
+function findRemoteSessionBySessionId(sessionId: string): RemoteRecordingSession | undefined {
+  for (const session of remoteRecordingSessionsMap.values()) {
+    if (session.sessionId === sessionId) return session;
+  }
+  return undefined;
+}
+
+/**
+ * Create a new remote recording session (called by recording action)
+ */
+export function createRemoteRecordingSession(
+  sessionId: string,
+  runnerId: string,
+  repositoryId: string | null,
+  targetUrl: string,
+  selectorPriority: Array<{ type: string; enabled: boolean; priority: number }>
+): void {
+  const session: RemoteRecordingSession = {
+    sessionId,
+    runnerId,
+    repositoryId,
+    targetUrl,
+    isRecording: true,
+    events: [],
+    generatedCode: null,
+    startedAt: new Date(),
+    selectorPriority,
+  };
+  // Key by repositoryId so getRecordingStatus can find it
+  const key = repositoryId ?? '__no_repo__';
+  remoteRecordingSessionsMap.set(key, session);
+  console.log(`[Recording] Created remote session ${sessionId} for runner ${runnerId}`);
+}
+
+/**
+ * Get the active remote recording session for a repository
+ */
+export function getRemoteRecordingSession(repositoryId?: string | null): RemoteRecordingSession | null {
+  const key = repositoryId ?? '__no_repo__';
+  const session = remoteRecordingSessionsMap.get(key);
+  return session ?? null;
+}
+
+/**
+ * Get events from a remote recording session since a given sequence number
+ */
+export function getRemoteRecordingEvents(repositoryId?: string | null, sinceSequence?: number): RemoteRecordingEvent[] {
+  const session = getRemoteRecordingSession(repositoryId);
+  if (!session) return [];
+
+  if (sinceSequence !== undefined) {
+    return session.events.filter(e => e.sequence > sinceSequence);
+  }
+  return session.events;
+}
+
+/**
+ * Mark a remote recording session as stopped and store generated code
+ */
+export function completeRemoteRecordingSession(repositoryId?: string | null, generatedCode?: string): void {
+  const session = getRemoteRecordingSession(repositoryId);
+  if (session) {
+    session.isRecording = false;
+    if (generatedCode) {
+      session.generatedCode = generatedCode;
+    }
+  }
+}
+
+/**
+ * Remove a remote recording session
+ */
+export function clearRemoteRecordingSession(repositoryId?: string | null): void {
+  const key = repositoryId ?? '__no_repo__';
+  remoteRecordingSessionsMap.delete(key);
 }

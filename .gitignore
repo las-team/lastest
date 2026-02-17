@@ -65,3 +65,4 @@ public/planned/*
 public/videos/*
 .playwright-mcp/*
 explore-*.mjs
+.claude/settings.local.json

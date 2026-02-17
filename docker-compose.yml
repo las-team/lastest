@@ -15,7 +15,7 @@
 
 services:
   lastest2:
-    image: lastest2:latest
+    image: ewyc/lastest:latest
     build:
       context: .
       dockerfile: Dockerfile
