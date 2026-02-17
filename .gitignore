@@ -66,3 +66,6 @@ public/videos/*
 .playwright-mcp/*
 explore-*.mjs
 .claude/settings.local.json
+
+# clerk configuration (can include secrets)
+/.clerk/

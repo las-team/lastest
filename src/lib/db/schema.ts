@@ -790,6 +790,7 @@ export const teams = sqliteTable('teams', {
   id: text('id').primaryKey(),
   name: text('name').notNull(),
   slug: text('slug').notNull().unique(),
+  clerkOrgId: text('clerk_org_id').unique(),
   createdAt: integer('created_at', { mode: 'timestamp' }),
   updatedAt: integer('updated_at', { mode: 'timestamp' }),
 });
@@ -804,6 +805,7 @@ export const users = sqliteTable('users', {
   hashedPassword: text('hashed_password'),
   name: text('name'),
   avatarUrl: text('avatar_url'),
+  clerkId: text('clerk_id').unique(),
   teamId: text('team_id').references(() => teams.id), // Single team membership
   role: text('role').notNull().default('member'), // 'owner' | 'admin' | 'member' | 'viewer'
   emailVerified: integer('email_verified', { mode: 'boolean' }).default(false),

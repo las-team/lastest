@@ -15,11 +15,10 @@ Support https://github.com/excalidraw/excalidraw/tree/master/packages/excalidraw
     Actions with changes
     Manager review of changes
 
-auth0 -like - login manager - keycloak? - Stytch?
-    https://clerk.com/
-
 Publish npm
 Docker deploy to local server
+
+
 
 ## ideas
 Explore/Cover instead of Areas

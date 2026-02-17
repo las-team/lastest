@@ -8,7 +8,7 @@ export async function GET(
   request: Request,
   { params }: { params: Promise<{ buildId: string }> }
 ) {
-  // Auth: session cookie OR runner Bearer token
+  // Auth: Clerk session OR runner Bearer token
   let teamId: string | null = null;
 
   const authHeader = request.headers.get('Authorization');

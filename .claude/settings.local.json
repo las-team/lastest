@@ -72,7 +72,9 @@
       "Bash(git log:*)",
       "WebFetch(domain:www.cursorinsight.com)",
       "Bash(ssh:*)",
-      "Bash(gh secret set:*)"
+      "Bash(gh secret set:*)",
+      "WebFetch(domain:clerk.com)",
+      "Bash(NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=pk_test_dXByaWdodC1iYXJuYWNsZS05My5jbGVyay5hY2NvdW50cy5kZXYk CLERK_SECRET_KEY=sk_test_yrc7hW67FCoDnsbEdcJfZWVXQVwu6JJIO83H02NqWP pnpm build:*)"
     ]
   },
   "disabledMcpjsonServers": [

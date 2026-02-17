@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { auth } from '@clerk/nextjs/server';
 import * as queries from '@/lib/db/queries';
-import { getCurrentUser } from '@/lib/auth';
 import { getPublicUrl } from '@/lib/utils';
 
 const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || '';
@@ -80,8 +80,13 @@ export async function GET(request: NextRequest) {
     return NextResponse.redirect(new URL('/settings?error=no_code', getPublicUrl(request)));
   }
 
-  // Get current user - must be logged in
-  const currentUser = await getCurrentUser();
+  // Get current user via Clerk
+  const { userId } = await auth();
+  if (!userId) {
+    return NextResponse.redirect(new URL('/login', getPublicUrl(request)));
+  }
+
+  const currentUser = await queries.getUserByClerkId(userId);
   if (!currentUser || !currentUser.teamId) {
     return NextResponse.redirect(new URL('/login', getPublicUrl(request)));
   }

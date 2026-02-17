@@ -20,11 +20,12 @@
 import { NextRequest, NextResponse } from 'next/server';
 import * as queries from '@/lib/db/queries';
 import { createAndRunBuild } from '@/server/actions/builds';
-import { getCurrentSession } from '@/lib/auth/session';
+import { getCurrentSession } from '@/lib/auth';
+import { verifyBearerToken } from '@/lib/auth/api-key';
 
-// Helper to verify API auth (session token or Bearer token)
+// Helper to verify API auth (Clerk session or Bearer token)
 async function verifyAuth(request: NextRequest) {
-  // Try session-based auth first
+  // Try Clerk session first
   const session = await getCurrentSession();
   if (session) {
     return session;
@@ -34,16 +35,7 @@ async function verifyAuth(request: NextRequest) {
   const authHeader = request.headers.get('authorization');
   if (authHeader?.startsWith('Bearer ')) {
     const token = authHeader.slice(7);
-    // Verify token against session tokens
-    const result = await queries.getSessionWithUser(token);
-    if (result && result.session.expiresAt > new Date()) {
-      const team = result.user.teamId ? await queries.getTeam(result.user.teamId) : null;
-      return {
-        user: result.user,
-        sessionId: result.session.id,
-        team,
-      };
-    }
+    return verifyBearerToken(token);
   }
 
   return null;
