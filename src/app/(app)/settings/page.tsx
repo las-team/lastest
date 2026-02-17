@@ -445,7 +445,15 @@ export default async function SettingsPage({
             <CardContent className="space-y-4">
               <div className="flex justify-between">
                 <span className="text-muted-foreground">Version</span>
-                <span>0.1.0</span>
+                <span className="font-mono">0.1.{process.env.NEXT_PUBLIC_GIT_COMMIT_COUNT ?? '0'}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-muted-foreground">Commit</span>
+                <span className="font-mono text-xs">{process.env.NEXT_PUBLIC_GIT_HASH ?? 'dev'}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-muted-foreground">Built</span>
+                <span>{process.env.NEXT_PUBLIC_BUILD_DATE ?? 'unknown'}</span>
               </div>
               <div className="flex justify-between">
                 <span className="text-muted-foreground">Framework</span>
