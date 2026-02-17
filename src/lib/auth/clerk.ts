@@ -1,4 +1,4 @@
-import { auth } from '@clerk/nextjs/server';
+import { auth, currentUser } from '@clerk/nextjs/server';
 import * as queries from '@/lib/db/queries';
 import type { User, Team, UserRole, Repository } from '@/lib/db/schema';
 
@@ -8,11 +8,46 @@ export interface SessionData {
   team: Team | null;
 }
 
+/**
+ * Ensure a local DB user exists for the given Clerk user.
+ * Handles the case where the webhook hasn't fired yet.
+ */
+async function ensureLocalUser(clerkUserId: string): Promise<User | null> {
+  const existing = await queries.getUserByClerkId(clerkUserId);
+  if (existing) return existing;
+
+  // Webhook hasn't synced yet — fetch from Clerk and create locally
+  const clerkUser = await currentUser();
+  if (!clerkUser) return null;
+
+  const email = clerkUser.emailAddresses[0]?.emailAddress;
+  if (!email) return null;
+
+  const name = [clerkUser.firstName, clerkUser.lastName].filter(Boolean).join(' ') || null;
+
+  // Check if a pre-existing user with this email exists (from before Clerk migration)
+  const existingByEmail = await queries.getUserByEmail(email);
+  if (existingByEmail) {
+    await queries.updateUser(existingByEmail.id, { clerkId: clerkUserId });
+    return queries.getUserById(existingByEmail.id) ?? null;
+  }
+
+  return queries.createUser({
+    email,
+    name,
+    avatarUrl: clerkUser.imageUrl ?? null,
+    clerkId: clerkUserId,
+    hashedPassword: null,
+    emailVerified: true,
+    role: 'owner',
+  });
+}
+
 export async function getCurrentSession(): Promise<SessionData | null> {
   const { userId, orgId } = await auth();
   if (!userId) return null;
 
-  const user = await queries.getUserByClerkId(userId);
+  const user = await ensureLocalUser(userId);
   if (!user) return null;
 
   const team = user.teamId ? await queries.getTeam(user.teamId) : null;
