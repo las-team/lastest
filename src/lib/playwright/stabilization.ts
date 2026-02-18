@@ -93,6 +93,40 @@ export async function waitForStylesLoaded(page: Page, timeout: number): Promise<
 }
 
 /**
+ * Wait for all visible images to finish loading.
+ * Skips images with no src and lazy images that haven't started loading.
+ */
+export async function waitForImagesLoaded(page: Page, timeout: number): Promise<void> {
+  await Promise.race([
+    page.evaluate(() => {
+      const imgs = Array.from(document.querySelectorAll('img'));
+      return Promise.all(
+        imgs
+          .filter((img) => {
+            // Skip images with no source
+            if (!img.src && !img.currentSrc) return false;
+            // Skip lazy images that haven't started loading
+            if (img.loading === 'lazy' && !img.complete) return false;
+            return true;
+          })
+          .map(
+            (img) =>
+              new Promise<void>((resolve) => {
+                if (img.complete && img.naturalWidth > 0) {
+                  resolve();
+                } else {
+                  img.addEventListener('load', () => resolve(), { once: true });
+                  img.addEventListener('error', () => resolve(), { once: true });
+                }
+              })
+          )
+      );
+    }),
+    page.waitForTimeout(timeout),
+  ]);
+}
+
+/**
  * Wait for DOM to stabilize (no mutations for a period).
  */
 export async function waitForDomStable(page: Page, timeout: number, stableMs = 200): Promise<void> {
@@ -218,29 +252,34 @@ export async function applyStabilization(
     });
   }
 
-  // 2. Wait for styles/fonts to load (FOUC prevention)
+  // 2. Wait for images to finish loading
+  if (s.waitForImages) {
+    await waitForImagesLoaded(page, s.waitForImagesTimeout).catch(() => {});
+  }
+
+  // 3. Wait for styles/fonts to load (FOUC prevention)
   if (s.waitForFonts) {
     await waitForStylesLoaded(page, 3000);
   }
 
-  // 3. Apply font override (cross-OS bundled font supersedes system fonts)
+  // 4. Apply font override (cross-OS bundled font supersedes system fonts)
   if (s.crossOsConsistency) {
     await injectCSS(page, getCrossOsFontCSS());
   } else if (s.disableWebfonts) {
     await injectCSS(page, SYSTEM_FONTS_CSS);
   }
 
-  // 4. Hide loading spinners via CSS
+  // 5. Hide loading spinners via CSS
   if (s.hideLoadingIndicators) {
     await injectCSS(page, HIDE_SPINNERS_CSS);
   }
 
-  // 5. Wait for spinners to actually disappear
+  // 6. Wait for spinners to actually disappear
   if (s.hideLoadingIndicators && s.loadingSelectors.length > 0) {
     await waitForSpinnersToDisappear(page, s.loadingSelectors, s.domStableTimeout);
   }
 
-  // 6. Wait for DOM stability
+  // 7. Wait for DOM stability
   if (s.waitForDomStable) {
     await waitForDomStable(page, s.domStableTimeout);
   }

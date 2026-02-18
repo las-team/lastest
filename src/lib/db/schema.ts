@@ -442,6 +442,8 @@ export const DEFAULT_STABILIZATION_SETTINGS: StabilizationSettings = {
   mockThirdPartyImages: true,
   hideLoadingIndicators: true,
   loadingSelectors: [],
+  waitForImages: true,
+  waitForImagesTimeout: 5000,
   waitForFonts: true,
   disableWebfonts: false,
   crossOsConsistency: false,
