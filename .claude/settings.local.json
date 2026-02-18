@@ -76,7 +76,8 @@
       "WebFetch(domain:clerk.com)",
       "Bash(NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=pk_test_dXByaWdodC1iYXJuYWNsZS05My5jbGVyay5hY2NvdW50cy5kZXYk CLERK_SECRET_KEY=sk_test_yrc7hW67FCoDnsbEdcJfZWVXQVwu6JJIO83H02NqWP pnpm build:*)",
       "Bash(pnpm typecheck:*)",
-      "Bash(wc:*)"
+      "Bash(wc:*)",
+      "Bash(git stash:*)"
     ]
   },
   "disabledMcpjsonServers": [

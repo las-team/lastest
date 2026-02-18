@@ -1,3 +1,4 @@
+import { cache } from 'react';
 import { auth, currentUser } from '@clerk/nextjs/server';
 import * as queries from '@/lib/db/queries';
 import type { User, Team, UserRole, Repository } from '@/lib/db/schema';
@@ -43,8 +44,12 @@ async function ensureLocalUser(clerkUserId: string): Promise<User | null> {
   });
 }
 
-export async function getCurrentSession(): Promise<SessionData | null> {
-  const { userId, orgId } = await auth();
+/**
+ * React cache() deduplicates this per-request so layout + page + server actions
+ * don't each trigger separate Clerk auth() + DB lookups.
+ */
+export const getCurrentSession = cache(async (): Promise<SessionData | null> => {
+  const { userId } = await auth();
   if (!userId) return null;
 
   const user = await ensureLocalUser(userId);
@@ -57,7 +62,7 @@ export async function getCurrentSession(): Promise<SessionData | null> {
     sessionId: userId,
     team: team ?? null,
   };
-}
+});
 
 export async function getCurrentUser(): Promise<User | null> {
   const session = await getCurrentSession();
