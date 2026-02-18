@@ -85,7 +85,7 @@ COPY --chown=nextjs:nodejs scripts/docker-entrypoint.sh /docker-entrypoint.sh
 RUN chmod +x /docker-entrypoint.sh
 
 # Create data directories
-RUN mkdir -p /app/data /app/public/screenshots /app/public/baselines && \
+RUN mkdir -p /app/data /app/storage/screenshots /app/storage/baselines /app/storage/diffs /app/storage/traces /app/storage/videos /app/storage/planned /app/storage/bug-reports && \
     chown -R nextjs:nodejs /app
 
 # Environment configuration
@@ -110,7 +110,7 @@ EXPOSE 3000
 USER nextjs
 
 # Volumes for persistent data
-VOLUME ["/app/data", "/app/public/screenshots", "/app/public/baselines"]
+VOLUME ["/app/data", "/app/storage"]
 
 ENTRYPOINT ["/docker-entrypoint.sh"]
 CMD ["node", "server.js"]

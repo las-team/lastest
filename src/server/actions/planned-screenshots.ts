@@ -6,8 +6,9 @@ import { hashImage } from '@/lib/diff/hasher';
 import { getCurrentSession, requireRepoAccess, requireTeamAccess } from '@/lib/auth';
 import path from 'path';
 import fs from 'fs/promises';
+import { STORAGE_DIRS } from '@/lib/storage/paths';
 
-const PLANNED_DIR = path.join(process.cwd(), 'public', 'planned');
+const PLANNED_DIR = STORAGE_DIRS.planned;
 
 // Ensure planned directory exists
 async function ensurePlannedDir(repositoryId: string) {

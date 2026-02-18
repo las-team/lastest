@@ -3,6 +3,7 @@
 import crypto from 'crypto';
 import { writeFile, mkdir } from 'fs/promises';
 import path from 'path';
+import { STORAGE_DIRS } from '@/lib/storage/paths';
 import * as queries from '@/lib/db/queries';
 import { requireTeamAccess } from '@/lib/auth';
 import type { BugReportContext, BugReportSeverity } from '@/lib/db/schema';
@@ -42,7 +43,7 @@ export async function submitBugReport(data: {
   let screenshotPath: string | null = null;
   const reportId = crypto.randomUUID();
   if (data.screenshotBase64) {
-    const dir = path.join(process.cwd(), 'public', 'bug-reports');
+    const dir = STORAGE_DIRS['bug-reports'];
     await mkdir(dir, { recursive: true });
     const fileName = `${reportId}.png`;
     const filePath = path.join(dir, fileName);

@@ -59,7 +59,7 @@ export function AISettingsCard({ settings, repositoryId }: AISettingsCardProps) 
   // AI Diffing settings
   const [aiDiffingEnabled, setAiDiffingEnabled] = useState(settings.aiDiffingEnabled ?? false);
   const [aiDiffingProvider, setAiDiffingProvider] = useState<AIDiffingProvider>(
-    (settings.aiDiffingProvider as AIDiffingProvider) || 'openrouter'
+    (settings.aiDiffingProvider as AIDiffingProvider) || 'same-as-test-gen'
   );
   const [aiDiffingApiKey, setAiDiffingApiKey] = useState(settings.aiDiffingApiKey || '');
   const [aiDiffingModel, setAiDiffingModel] = useState(
@@ -84,7 +84,7 @@ export function AISettingsCard({ settings, repositoryId }: AISettingsCardProps) 
     ollamaBaseUrl: settings.ollamaBaseUrl || DEFAULT_AI_SETTINGS.ollamaBaseUrl,
     ollamaModel: settings.ollamaModel || '',
     aiDiffingEnabled: settings.aiDiffingEnabled ?? false,
-    aiDiffingProvider: (settings.aiDiffingProvider as AIDiffingProvider) || 'openrouter',
+    aiDiffingProvider: (settings.aiDiffingProvider as AIDiffingProvider) || 'same-as-test-gen',
     aiDiffingApiKey: settings.aiDiffingApiKey || '',
     aiDiffingModel: settings.aiDiffingModel || DEFAULT_AI_SETTINGS.aiDiffingModel,
     aiDiffingOllamaBaseUrl: settings.aiDiffingOllamaBaseUrl || 'http://localhost:11434',

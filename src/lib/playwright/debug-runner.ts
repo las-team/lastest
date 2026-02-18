@@ -533,7 +533,7 @@ export class DebugRunner {
       if (this.isStale(gen)) return;
 
       // Init trace directory
-      this.traceDir = path.join('./public/traces');
+      this.traceDir = STORAGE_DIRS.traces;
       fs.mkdirSync(this.traceDir, { recursive: true });
       this.traceChunkIndex = 0;
       this.cleanOldTraces();
@@ -567,8 +567,8 @@ export class DebugRunner {
 
       // Prepare screenshot path
       const screenshotDir = this.repositoryId
-        ? path.join('./public/screenshots', this.repositoryId)
-        : './public/screenshots';
+        ? path.join(STORAGE_DIRS.screenshots, this.repositoryId)
+        : STORAGE_DIRS.screenshots;
       if (!fs.existsSync(screenshotDir)) {
         fs.mkdirSync(screenshotDir, { recursive: true });
       }
@@ -671,7 +671,7 @@ export class DebugRunner {
           // Save trace chunk before closing context
           if (this.context && this.tracingActive) {
             const traceFile = `debug-${this.state.sessionId}-${this.traceChunkIndex}.zip`;
-            const tracePath = path.join(this.traceDir || './public/traces', traceFile);
+            const tracePath = path.join(this.traceDir || STORAGE_DIRS.traces, traceFile);
             fs.mkdirSync(path.dirname(tracePath), { recursive: true });
             await this.context.tracing.stop({ path: tracePath }).catch(() => {});
             this.state.traceUrl = `/traces/${traceFile}`;

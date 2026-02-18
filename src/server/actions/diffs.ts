@@ -5,6 +5,7 @@ import * as queries from '@/lib/db/queries';
 import { requireTeamAccess } from '@/lib/auth';
 import { hashImageWithDimensions } from '@/lib/diff/hasher';
 import path from 'path';
+import { STORAGE_ROOT } from '@/lib/storage/paths';
 
 /**
  * Approve a single visual diff
@@ -24,7 +25,7 @@ export async function approveDiff(diffId: string, approvedBy?: string) {
 
   // Update baseline with the approved image
   const currentHash = hashImageWithDimensions(
-    path.join(process.cwd(), 'public', diff.currentImagePath)
+    path.join(STORAGE_ROOT, diff.currentImagePath)
   );
 
   // Get the test run to find the branch

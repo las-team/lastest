@@ -7,6 +7,7 @@ import * as queries from '@/lib/db/queries';
 import { requireRepoAccess, requireTeamAccess } from '@/lib/auth';
 import type { NewTest, NewFunctionalArea } from '@/lib/db/schema';
 import { getCurrentBranchForRepo } from '@/lib/git-utils';
+import { STORAGE_DIRS } from '@/lib/storage/paths';
 
 export async function createFunctionalArea(data: Omit<NewFunctionalArea, 'id'>) {
   if (data.repositoryId) await requireRepoAccess(data.repositoryId);
@@ -129,7 +130,7 @@ export async function getTestScreenshots(
   testId: string,
   repositoryId?: string | null
 ): Promise<string[]> {
-  const baseDir = './public/screenshots';
+  const baseDir = STORAGE_DIRS.screenshots;
   const dir = repositoryId ? path.join(baseDir, repositoryId) : baseDir;
 
   if (!fs.existsSync(dir)) return [];

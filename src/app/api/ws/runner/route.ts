@@ -19,6 +19,7 @@ import { validateRunnerToken, updateRunnerStatus, markStaleRunnersOffline } from
 import type { Message, HeartbeatMessage, TestResultResponse, ScreenshotUploadResponse, RecordingEventResponse, RecordingStoppedResponse } from '@/lib/ws/protocol';
 import fs from 'fs/promises';
 import path from 'path';
+import { STORAGE_DIRS } from '@/lib/storage/paths';
 
 // ============================================
 // Security Validation Functions
@@ -430,7 +431,7 @@ function storeScreenshot(runnerId: string, screenshot: Message) {
  * This ensures screenshots are persisted even if in-memory state is lost.
  */
 async function saveScreenshotToDisk(base64Data: string, filename: string, repositoryId?: string): Promise<string> {
-  const baseDir = './public/screenshots';
+  const baseDir = STORAGE_DIRS.screenshots;
   const dir = repositoryId ? path.join(baseDir, repositoryId) : baseDir;
 
   // Ensure directory exists

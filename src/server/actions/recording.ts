@@ -35,6 +35,7 @@ export interface PlaywrightAvailability {
 }
 
 export async function checkPlaywrightAvailability(repositoryId?: string | null): Promise<PlaywrightAvailability> {
+  await requireTeamAccess();
   const settings = await getPlaywrightSettings(repositoryId);
   const browserType = (settings.browser as 'chromium' | 'firefox' | 'webkit') ?? 'chromium';
 
@@ -76,6 +77,7 @@ export async function startRecording(
   runnerId?: string,
   setupOptions?: { testId?: string | null; scriptId?: string | null; steps?: Array<{ stepType: 'test' | 'script'; testId?: string | null; scriptId?: string | null }> }
 ): Promise<{ sessionId?: string; error?: string }> {
+  await requireTeamAccess();
   // Validate URL format
   try {
     new URL(url);
@@ -157,6 +159,7 @@ export async function startRecording(
 }
 
 export async function stopRecording(repositoryId?: string | null) {
+  await requireTeamAccess();
   // Check for remote recording session first
   const remoteSession = getRemoteRecordingSession(repositoryId);
   if (remoteSession?.isRecording) {
@@ -197,6 +200,7 @@ export async function stopRecording(repositoryId?: string | null) {
 }
 
 export async function captureScreenshot(repositoryId?: string | null) {
+  await requireTeamAccess();
   // Check for remote recording session
   const remoteSession = getRemoteRecordingSession(repositoryId);
   if (remoteSession?.isRecording) {
@@ -218,6 +222,7 @@ export async function captureScreenshot(repositoryId?: string | null) {
 }
 
 export async function createAssertion(type: AssertionType): Promise<{ success: boolean }> {
+  await requireTeamAccess();
   const recorder = getRecorder();
   const success = await recorder.createAssertion(type);
 
@@ -225,6 +230,7 @@ export async function createAssertion(type: AssertionType): Promise<{ success: b
 }
 
 export async function getRecordingStatus(repositoryId?: string | null, sinceSequence?: number) {
+  await requireTeamAccess();
   // Check for remote recording session first
   const remoteSession = getRemoteRecordingSession(repositoryId);
   if (remoteSession) {
@@ -287,6 +293,7 @@ export async function getRecordingStatus(repositoryId?: string | null, sinceSequ
 }
 
 export async function clearLastCompletedSession(repositoryId?: string | null) {
+  await requireTeamAccess();
   // Clear remote session if it exists and is completed
   const remoteSession = getRemoteRecordingSession(repositoryId);
   if (remoteSession && !remoteSession.isRecording) {
@@ -356,6 +363,7 @@ export async function updateRerecordedTest(data: {
 }
 
 export async function getOrCreateFunctionalArea(name: string) {
+  await requireTeamAccess();
   const areas = await getFunctionalAreas();
   const existing = areas.find(a => a.name.toLowerCase() === name.toLowerCase());
 
@@ -374,6 +382,7 @@ export async function startPlaywrightInspector(
   url: string,
   repositoryId?: string | null
 ): Promise<{ sessionId?: string; error?: string }> {
+  await requireTeamAccess();
   // Validate URL format
   try {
     new URL(url);
@@ -411,6 +420,7 @@ export interface InspectorStatus {
 }
 
 export async function getInspectorStatus(sessionId: string): Promise<InspectorStatus> {
+  await requireTeamAccess();
   const info = getSessionInfo(sessionId);
 
   if (!info.exists) {
@@ -438,6 +448,7 @@ export async function getInspectorStatus(sessionId: string): Promise<InspectorSt
 }
 
 export async function cancelPlaywrightInspector(sessionId: string): Promise<{ success: boolean; error?: string }> {
+  await requireTeamAccess();
   return cancelInspector(sessionId);
 }
 
@@ -446,6 +457,7 @@ export async function finalizeInspectorSession(sessionId: string): Promise<{
   code?: string;
   error?: string;
 }> {
+  await requireTeamAccess();
   const info = getSessionInfo(sessionId);
 
   if (!info.exists) {

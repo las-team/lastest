@@ -3,8 +3,26 @@ set -e
 
 # Create data directories if they don't exist
 mkdir -p /app/data
-mkdir -p /app/public/screenshots
-mkdir -p /app/public/baselines
+mkdir -p /app/storage/screenshots
+mkdir -p /app/storage/baselines
+mkdir -p /app/storage/diffs
+mkdir -p /app/storage/traces
+mkdir -p /app/storage/videos
+mkdir -p /app/storage/planned
+mkdir -p /app/storage/bug-reports
+
+# Migrate files from old public/ layout to storage/ (idempotent)
+for subdir in screenshots baselines diffs traces videos planned bug-reports; do
+  src="/app/public/${subdir}"
+  dst="/app/storage/${subdir}"
+  if [ -d "$src" ] && [ "$(ls -A "$src" 2>/dev/null)" ]; then
+    if [ ! "$(ls -A "$dst" 2>/dev/null)" ]; then
+      echo "Migrating $src -> $dst ..."
+      cp -a "$src"/. "$dst"/
+      echo "Migration complete for $subdir"
+    fi
+  fi
+done
 
 # Database will be auto-initialized by Drizzle on first connection
 # The app handles schema setup via drizzle-orm

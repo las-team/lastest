@@ -47,10 +47,11 @@ next-env.d.ts
 *.db-wal
 *.db-shm
 
-# screenshots
+# screenshots (legacy public/ and new storage/)
 /public/screenshots/
 /public/diffs/
 /public/traces/
+/storage/
 
 # test results
 /lastest2-results/
