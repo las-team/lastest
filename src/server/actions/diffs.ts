@@ -30,7 +30,7 @@ export async function approveDiff(diffId: string, approvedBy?: string) {
 
   // Get the test run to find the branch
   const testResult = diff.testResultId
-    ? await queries.getTestResultsByRun(diff.testResultId).then((r) => r[0])
+    ? await queries.getTestResultById(diff.testResultId)
     : null;
   const testRun = testResult?.testRunId
     ? await queries.getTestRun(testResult.testRunId)
