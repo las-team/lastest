@@ -6,6 +6,7 @@ import type { ActionSelector, SelectorType, SelectorConfig } from '@/lib/db/sche
 import { DEFAULT_SELECTOR_PRIORITY } from '@/lib/db/schema';
 import { extractText, terminateWorker, warmupWorker } from './ocr';
 import { getSetupOrchestrator } from '@/lib/setup/setup-orchestrator';
+import { STORAGE_DIRS } from '@/lib/storage/paths';
 
 export interface SetupStep {
   stepType: 'test' | 'script';
@@ -125,7 +126,7 @@ export class PlaywrightRecorder extends EventEmitter {
     super();
     this.repositoryId = repositoryId ?? null;
     // Build screenshot directory path: include repositoryId if provided
-    const baseDir = screenshotDir ?? './public/screenshots';
+    const baseDir = screenshotDir ?? STORAGE_DIRS.screenshots;
     this.screenshotDir = this.repositoryId
       ? path.join(baseDir, this.repositoryId)
       : baseDir;

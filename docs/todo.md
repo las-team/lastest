@@ -8,6 +8,7 @@ Gitlab
 Timestamp fixing
 Teardown
 Test - which pr it was added in, updated?
+AI review
 ## features
 Support https://github.com/excalidraw/excalidraw/tree/master/packages/excalidraw/tests ~/.claude/plans/declarative-kindling-coral.md 55%
 
@@ -15,8 +16,6 @@ Publish npm
 
 ## ideas
 Explore/Cover instead of Areas
-Ideal summary
-    60 functional areas remain unchanged, 10 changed, out of those 8 new areas added, 1 pre-existing areas changed, 1 minor change in pre-existing function. 
 Ban AI mode
     Remove all GenAI features from UI if enabled
 Revise labels (e.g. new change, main 2.5%) on build page

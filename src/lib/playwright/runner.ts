@@ -11,6 +11,7 @@ import { getSelectorStats, recordSelectorSuccess, recordSelectorFailure, getDefa
 import { setupFreezeScripts, setupThirdPartyBlocking, applyStabilization } from './stabilization';
 import { captureWithBurst } from './burst-capture';
 import { applyDynamicMasking } from './dynamic-masking';
+import { STORAGE_DIRS, toRelativePath } from '@/lib/storage/paths';
 
 /**
  * Create appState helper for internal state inspection.
@@ -641,7 +642,7 @@ export class PlaywrightRunner extends EventEmitter {
     super();
     this.repositoryId = repositoryId ?? null;
     // Build screenshot directory path: include repositoryId if provided
-    const baseDir = screenshotDir ?? './public/screenshots';
+    const baseDir = screenshotDir ?? STORAGE_DIRS.screenshots;
     this.screenshotDir = this.repositoryId
       ? path.join(baseDir, this.repositoryId)
       : baseDir;
@@ -982,7 +983,7 @@ export class PlaywrightRunner extends EventEmitter {
       // Set up video recording if enabled
       const videoEnabled = this.settings?.enableVideoRecording ?? false;
       const videoDir = videoEnabled
-        ? path.join('./public/videos', this.repositoryId || 'default')
+        ? path.join(STORAGE_DIRS.videos, this.repositoryId || 'default')
         : undefined;
       if (videoDir && !fs.existsSync(videoDir)) {
         fs.mkdirSync(videoDir, { recursive: true });
@@ -1471,14 +1472,14 @@ export class PlaywrightRunner extends EventEmitter {
       // After context close, video file is finalized — relocate it
       if (video) {
         try {
-          const videoDestDir = path.join('./public/videos', this.repositoryId || 'default');
+          const videoDestDir = path.join(STORAGE_DIRS.videos, this.repositoryId || 'default');
           if (!fs.existsSync(videoDestDir)) {
             fs.mkdirSync(videoDestDir, { recursive: true });
           }
           const dest = path.join(videoDestDir, `${runId}-${test.id}.webm`);
           await video.saveAs(dest);
           await video.delete(); // clean temp file
-          result.videoPath = '/' + dest.replace(/^.*?public\//, '');
+          result.videoPath = toRelativePath(dest);
         } catch {
           // Video capture is best-effort
         }

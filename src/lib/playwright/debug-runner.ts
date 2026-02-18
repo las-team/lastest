@@ -18,6 +18,7 @@ import { getSetupOrchestrator, testNeedsSetup } from '@/lib/setup/setup-orchestr
 import type { SetupContext } from '@/lib/setup/types';
 import { createAppState, createExpect, stripTypeAnnotations } from './runner';
 import { parseSteps, extractTestBody, removeInlineLocateWithFallback, type DebugStep } from './debug-parser';
+import { STORAGE_DIRS } from '@/lib/storage/paths';
 
 export interface StepResult {
   stepId: number;
@@ -217,7 +218,7 @@ export class DebugRunner {
     // Save final trace before closing context
     if (this.context && this.tracingActive && this.state) {
       const traceFile = `debug-${this.state.sessionId}-${this.traceChunkIndex}.zip`;
-      const tracePath = path.join(this.traceDir || './public/traces', traceFile);
+      const tracePath = path.join(this.traceDir || STORAGE_DIRS.traces, traceFile);
       fs.mkdirSync(path.dirname(tracePath), { recursive: true });
       await this.context.tracing.stop({ path: tracePath }).catch(() => {});
       this.state.traceUrl = `/traces/${traceFile}`;
@@ -412,7 +413,7 @@ export class DebugRunner {
   async flushTrace(): Promise<string | null> {
     if (!this.context || !this.tracingActive || !this.state) return null;
     const traceFile = `debug-${this.state.sessionId}-${this.traceChunkIndex}.zip`;
-    const tracePath = path.join(this.traceDir || './public/traces', traceFile);
+    const tracePath = path.join(this.traceDir || STORAGE_DIRS.traces, traceFile);
     fs.mkdirSync(path.dirname(tracePath), { recursive: true });
     await this.context.tracing.stop({ path: tracePath });
     this.state.traceUrl = `/traces/${traceFile}`;
