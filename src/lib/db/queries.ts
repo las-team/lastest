@@ -45,6 +45,7 @@ import {
   composeConfigs,
   agentSessions,
   bugReports,
+  reviewTodos,
 } from './schema';
 import {
   DEFAULT_SELECTOR_PRIORITY,
@@ -107,6 +108,7 @@ import type {
   Runner,
   RunnerStatus,
   BuildStatus,
+  NewReviewTodo,
   SelectorConfig,
   AIProvider,
   BackgroundJobType,
@@ -1159,9 +1161,11 @@ export async function computeBuildStatus(buildId: string): Promise<BuildStatus> 
 
   const hasFailed = diffs.some(d => d.status === 'rejected');
   const hasPending = diffs.some(d => d.status === 'pending');
+  const hasTodo = diffs.some(d => d.status === 'todo');
 
   if (hasFailed) return 'blocked';
   if (hasPending) return 'review_required';
+  if (hasTodo) return 'has_todos';
   return 'safe_to_merge';
 }
 
@@ -4056,4 +4060,81 @@ export async function getBugReportByHash(teamId: string, contentHash: string) {
 
 export async function updateBugReport(id: string, data: { githubIssueUrl?: string; githubIssueNumber?: number }) {
   await db.update(bugReports).set(data).where(eq(bugReports.id, id));
+}
+
+// ── Review Todos ──────────────────────────────────────────────────────
+
+export async function createReviewTodo(data: Omit<NewReviewTodo, 'id'>) {
+  const id = uuid();
+  await db.insert(reviewTodos).values({ ...data, id, createdAt: new Date() });
+  return { id, ...data, createdAt: new Date() };
+}
+
+export async function getReviewTodo(id: string) {
+  return db.select().from(reviewTodos).where(eq(reviewTodos.id, id)).get();
+}
+
+export async function getReviewTodosByBuild(buildId: string) {
+  return db
+    .select({
+      todo: reviewTodos,
+      testName: tests.name,
+      functionalAreaName: functionalAreas.name,
+    })
+    .from(reviewTodos)
+    .leftJoin(tests, eq(reviewTodos.testId, tests.id))
+    .leftJoin(functionalAreas, eq(tests.functionalAreaId, functionalAreas.id))
+    .where(eq(reviewTodos.buildId, buildId))
+    .orderBy(desc(reviewTodos.createdAt))
+    .all();
+}
+
+export async function getReviewTodosByBranch(repositoryId: string, branch: string) {
+  return db
+    .select({
+      todo: reviewTodos,
+      testName: tests.name,
+      functionalAreaName: functionalAreas.name,
+    })
+    .from(reviewTodos)
+    .leftJoin(tests, eq(reviewTodos.testId, tests.id))
+    .leftJoin(functionalAreas, eq(tests.functionalAreaId, functionalAreas.id))
+    .where(and(eq(reviewTodos.repositoryId, repositoryId), eq(reviewTodos.branch, branch)))
+    .orderBy(desc(reviewTodos.createdAt))
+    .all();
+}
+
+export async function getOpenTodoBranches(repositoryId: string) {
+  const rows = db
+    .selectDistinct({ branch: reviewTodos.branch })
+    .from(reviewTodos)
+    .where(and(eq(reviewTodos.repositoryId, repositoryId), eq(reviewTodos.status, 'open')))
+    .all();
+  return rows.map(r => r.branch);
+}
+
+export async function updateReviewTodo(id: string, data: Partial<NewReviewTodo>) {
+  await db.update(reviewTodos).set(data).where(eq(reviewTodos.id, id));
+}
+
+export async function deleteReviewTodo(id: string) {
+  await db.delete(reviewTodos).where(eq(reviewTodos.id, id));
+}
+
+export async function getReviewSummaryByBranch(repositoryId: string, branch: string) {
+  const todos = await getReviewTodosByBranch(repositoryId, branch);
+  const openCount = todos.filter(t => t.todo.status === 'open').length;
+  const resolvedCount = todos.filter(t => t.todo.status === 'resolved').length;
+
+  // Group by functional area
+  const byArea: Record<string, { total: number; open: number; resolved: number }> = {};
+  for (const t of todos) {
+    const area = t.functionalAreaName || 'Ungrouped';
+    if (!byArea[area]) byArea[area] = { total: 0, open: 0, resolved: 0 };
+    byArea[area].total++;
+    if (t.todo.status === 'open') byArea[area].open++;
+    else byArea[area].resolved++;
+  }
+
+  return { openCount, resolvedCount, totalCount: todos.length, byArea };
 }

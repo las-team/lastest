@@ -588,8 +588,8 @@ export const DEFAULT_DIFF_THRESHOLDS = {
 export type DiffClassification = 'unchanged' | 'flaky' | 'changed';
 
 // Build status enum
-export type BuildStatus = 'safe_to_merge' | 'review_required' | 'blocked';
-export type DiffStatus = 'pending' | 'approved' | 'rejected' | 'auto_approved';
+export type BuildStatus = 'safe_to_merge' | 'review_required' | 'blocked' | 'has_todos';
+export type DiffStatus = 'pending' | 'approved' | 'rejected' | 'auto_approved' | 'todo';
 export type TriggerType = 'webhook' | 'manual' | 'push';
 
 // AI Provider settings for test generation
@@ -1202,3 +1202,22 @@ export const bugReports = sqliteTable('bug_reports', {
 
 export type BugReport = typeof bugReports.$inferSelect;
 export type NewBugReport = typeof bugReports.$inferInsert;
+
+// Review todos — branch-specific actionable items created when reviewer flags a diff
+export const reviewTodos = sqliteTable('review_todos', {
+  id: text('id').primaryKey(),
+  repositoryId: text('repository_id').references(() => repositories.id),
+  diffId: text('diff_id').references(() => visualDiffs.id),
+  buildId: text('build_id').references(() => builds.id),
+  testId: text('test_id').references(() => tests.id),
+  branch: text('branch').notNull(),
+  description: text('description').notNull(),
+  status: text('status').notNull().default('open'), // 'open' | 'resolved'
+  createdBy: text('created_by'),
+  resolvedBy: text('resolved_by'),
+  resolvedAt: integer('resolved_at', { mode: 'timestamp' }),
+  createdAt: integer('created_at', { mode: 'timestamp' }).$defaultFn(() => new Date()),
+});
+
+export type ReviewTodo = typeof reviewTodos.$inferSelect;
+export type NewReviewTodo = typeof reviewTodos.$inferInsert;

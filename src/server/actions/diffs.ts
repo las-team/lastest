@@ -318,6 +318,71 @@ export async function discardAIRecommendations(buildId: string) {
 }
 
 /**
+ * Add a todo to a diff (replaces reject workflow)
+ */
+export async function addDiffTodo(diffId: string, description: string) {
+  const session = await requireTeamAccess();
+  const diff = await queries.getVisualDiff(diffId);
+  if (!diff) throw new Error('Diff not found');
+
+  // Set diff status to 'todo'
+  await queries.updateVisualDiff(diffId, { status: 'todo' });
+
+  // Resolve branch from the test result → test run
+  const testResult = diff.testResultId
+    ? await queries.getTestResultsByRun(diff.testResultId).then((r) => r[0])
+    : null;
+  const testRun = testResult?.testRunId
+    ? await queries.getTestRun(testResult.testRunId)
+    : null;
+  const branch = testRun?.gitBranch || 'main';
+
+  // Get repository from the build → test run chain
+  const build = diff.buildId ? await queries.getBuild(diff.buildId) : null;
+  const buildTestRun = build?.testRunId ? await queries.getTestRun(build.testRunId) : null;
+  const repositoryId = buildTestRun?.repositoryId || null;
+
+  // Create the review todo
+  await queries.createReviewTodo({
+    repositoryId,
+    diffId,
+    buildId: diff.buildId,
+    testId: diff.testId,
+    branch,
+    description,
+    status: 'open',
+    createdBy: session.user?.email || 'user',
+  });
+
+  // Recompute build status
+  if (diff.buildId) {
+    const newStatus = await queries.computeBuildStatus(diff.buildId);
+    await queries.updateBuild(diff.buildId, { overallStatus: newStatus });
+  }
+
+  revalidatePath('/builds');
+  revalidatePath(`/builds/${diff.buildId}`);
+  revalidatePath('/review');
+
+  return { success: true };
+}
+
+/**
+ * Batch add todos to selected diffs
+ */
+export async function batchAddDiffTodos(diffIds: string[], description: string) {
+  await requireTeamAccess();
+  for (const diffId of diffIds) {
+    await addDiffTodo(diffId, description);
+  }
+
+  revalidatePath('/builds');
+  revalidatePath('/review');
+
+  return { todoCount: diffIds.length };
+}
+
+/**
  * Reject all pending diffs in a build
  */
 export async function rejectAllDiffs(buildId: string) {

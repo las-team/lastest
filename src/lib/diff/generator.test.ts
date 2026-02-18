@@ -230,9 +230,9 @@ describe('generateDiff', () => {
       expect(result.metadata.changedRegions.length).toBeGreaterThanOrEqual(1);
     });
 
-    it('throws error for dimension mismatch', async () => {
-      const png1 = createMockPNG(800, 600);
-      const png2 = createMockPNG(1024, 768);
+    it('handles height mismatch by padding shorter image', async () => {
+      const png1 = createMockPNG(800, 600, [255, 255, 255, 255]);
+      const png2 = createMockPNG(800, 768, [255, 255, 255, 255]);
 
       const baseline = path.join(tempDir, 'baseline.png');
       const current = path.join(tempDir, 'current.png');
@@ -240,7 +240,9 @@ describe('generateDiff', () => {
       fs.writeFileSync(baseline, PNG.sync.write(png1));
       fs.writeFileSync(current, PNG.sync.write(png2));
 
-      await expect(generateDiff(baseline, current, tempDir)).rejects.toThrow('dimensions mismatch');
+      const result = await generateDiff(baseline, current, tempDir);
+      expect(result.diffImagePath).toBeTruthy();
+      expect(result.pixelDifference).toBeGreaterThanOrEqual(0);
     });
 
     it('respects includeAntiAliasing parameter', async () => {

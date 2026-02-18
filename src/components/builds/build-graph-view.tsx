@@ -33,12 +33,14 @@ const STATUS_COLORS: Record<BuildStatus, string> = {
   safe_to_merge: '#22c55e',
   review_required: '#eab308',
   blocked: '#ef4444',
+  has_todos: '#f59e0b',
 };
 
 const STATUS_LABELS: Record<BuildStatus, string> = {
   safe_to_merge: 'Safe to Merge',
   review_required: 'Review Required',
   blocked: 'Blocked',
+  has_todos: 'Has Todos',
 };
 
 function formatDuration(elapsedMs: number | null): string {

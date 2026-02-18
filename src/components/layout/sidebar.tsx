@@ -15,6 +15,7 @@ import {
   FolderTree,
   Building2,
   Zap,
+  ClipboardCheck,
 } from 'lucide-react';
 import { RepoSelector, SyncReposButton } from './repo-selector';
 import { QueueIndicator } from '@/components/queue/queue-indicator';
@@ -43,6 +44,7 @@ const executionNav = [
   { name: 'Runs', href: '/run', icon: Play },
   { name: 'Compare', href: '/compare', icon: GitCompare },
   { name: 'Suites', href: '/suites', icon: ListOrdered },
+  { name: 'Review', href: '/review', icon: ClipboardCheck },
 ];
 
 const settingsNav = [

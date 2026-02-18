@@ -90,12 +90,46 @@ export function createAppState(page: Page) {
 }
 
 /**
+ * Wrap matcher objects so assertion failures push to softErrors instead of throwing.
+ * Handles both sync and async matchers, and recursively wraps nested objects (e.g. `not`).
+ */
+function wrapMatchersForSoftErrors(matchers: Record<string, unknown>, softErrors: string[]): unknown {
+  return new Proxy(matchers, {
+    get(target, prop) {
+      const value = target[prop as string];
+      if (typeof value === 'function') {
+        return (...args: unknown[]) => {
+          try {
+            const result = (value as (...a: unknown[]) => unknown)(...args);
+            if (result && typeof (result as Promise<unknown>).then === 'function') {
+              return (result as Promise<unknown>).catch((e: unknown) => {
+                softErrors.push(e instanceof Error ? e.message : String(e));
+              });
+            }
+            return result;
+          } catch (e) {
+            softErrors.push(e instanceof Error ? e.message : String(e));
+          }
+        };
+      }
+      if (typeof value === 'object' && value !== null) {
+        return wrapMatchersForSoftErrors(value as Record<string, unknown>, softErrors);
+      }
+      return value;
+    }
+  });
+}
+
+/**
  * Simple expect implementation for Playwright Inspector-generated tests.
  * Provides common assertion matchers that wrap Playwright's built-in locator assertions.
  * Supports Page-level assertions (toHaveURL, toHaveTitle), Locator assertions,
  * and generic value assertions (toHaveLength, toBe, toEqual, etc.)
+ *
+ * When softErrors is provided, assertion failures are logged instead of thrown,
+ * allowing test execution to continue past failed assertions.
  */
-export function createExpect(timeout = 5000) {
+export function createExpect(timeout = 5000, softErrors?: string[]) {
   return function expect(target: unknown, message?: string) {
     // Check if target is a Page (has 'goto' method) vs Locator
     const isPage = typeof (target as { goto?: unknown })?.goto === 'function';
@@ -105,7 +139,7 @@ export function createExpect(timeout = 5000) {
     // Generic value matchers (arrays, primitives, objects)
     if (!isPage && !isLocator) {
       const msgPrefix = message ? `${message}: ` : '';
-      return {
+      const matchers = {
         toHaveLength(expected: number) {
           const actual = (target as { length?: number })?.length;
           if (actual !== expected) {
@@ -244,11 +278,12 @@ export function createExpect(timeout = 5000) {
           },
         },
       };
+      return softErrors ? wrapMatchersForSoftErrors(matchers as Record<string, unknown>, softErrors) : matchers;
     }
 
     if (isPage) {
       const page = target as Page;
-      return {
+      const matchers = {
         async toHaveURL(expected: string | RegExp, options?: { timeout?: number }) {
           const t = options?.timeout ?? timeout;
           const start = Date.now();
@@ -298,11 +333,12 @@ export function createExpect(timeout = 5000) {
           },
         },
       };
+      return softErrors ? wrapMatchersForSoftErrors(matchers as Record<string, unknown>, softErrors) : matchers;
     }
 
     // Locator matchers
     const locator = target as Locator;
-    return {
+    const matchers = {
       async toBeVisible(options?: { timeout?: number }) {
         await locator.waitFor({ state: 'visible', timeout: options?.timeout ?? timeout });
       },
@@ -516,6 +552,7 @@ export function createExpect(timeout = 5000) {
         },
       },
     };
+    return softErrors ? wrapMatchersForSoftErrors(matchers as Record<string, unknown>, softErrors) : matchers;
   };
 }
 import type { Test, TestResult, ActionSelector, SelectorConfig, PlaywrightSettings, NetworkRequest, EnvironmentConfig } from '@/lib/db/schema';
@@ -1538,7 +1575,7 @@ export class PlaywrightRunner extends EventEmitter {
       // Build an async function from the body
       // Include 'expect' for Playwright Inspector-generated tests that use assertions
       // Include 'appState' for internal state inspection (Excalidraw undo/redo, etc.)
-      const expectFn = createExpect(this.getActionTimeout());
+      const expectFn = createExpect(this.getActionTimeout(), softErrors);
       const appStateFn = createAppState(page);
 
       // Create stats-tracking locateWithFallback that tests can use

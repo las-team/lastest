@@ -482,6 +482,28 @@ function buildShiftAwareDiffImage(
 }
 
 /**
+ * Pad a PNG image to a taller height, filling extra rows with the detected background color.
+ * Used to normalize heights when fullPage screenshots capture different page lengths.
+ */
+function padToHeight(img: PNG, targetHeight: number): PNG {
+  if (img.height >= targetHeight) return img;
+  const padded = new PNG({ width: img.width, height: targetHeight, fill: true });
+  // Copy existing image data
+  (img.data as Buffer).copy(padded.data as Buffer, 0, 0, img.data.length);
+  // Fill remaining rows with background color
+  const bg = detectBackgroundColor(img.data, img.width, img.height);
+  const startByte = img.height * img.width * 4;
+  const endByte = targetHeight * img.width * 4;
+  for (let i = startByte; i < endByte; i += 4) {
+    padded.data[i] = bg.r;
+    padded.data[i + 1] = bg.g;
+    padded.data[i + 2] = bg.b;
+    padded.data[i + 3] = 255;
+  }
+  return padded;
+}
+
+/**
  * Crop a PNG image to a narrower width, keeping the left portion.
  * Used to normalize widths when fullPage screenshots capture different scrollWidths.
  */
@@ -533,8 +555,16 @@ export async function generateDiff(
     return generateShiftAwareDiff(baseline, current, outputDir, threshold, includeAntiAliasing, ignoreRegions);
   }
 
-  // Standard diff path: requires same dimensions
-  if (!hasSameSize) {
+  // Pad shorter image to match taller one when heights differ
+  if (hasSameWidth && !hasSameSize) {
+    const maxHeight = Math.max(baseline.height, current.height);
+    if (baseline.height < maxHeight) {
+      baseline = padToHeight(baseline, maxHeight);
+    }
+    if (current.height < maxHeight) {
+      current = padToHeight(current, maxHeight);
+    }
+  } else if (!hasSameSize) {
     throw new Error(`Image dimensions mismatch: baseline ${baseline.width}x${baseline.height}, current ${current.width}x${current.height}`);
   }
 
