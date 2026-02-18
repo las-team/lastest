@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useTransition } from 'react';
+import { useState, useTransition, useEffect } from 'react';
 import { Bug } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
@@ -26,12 +26,17 @@ import { submitBugReport } from '@/server/actions/bug-reports';
 import type { BugReportSeverity } from '@/lib/db/schema';
 
 export function BugReportWidget() {
+  const [mounted, setMounted] = useState(false);
   const [open, setOpen] = useState(false);
   const [description, setDescription] = useState('');
   const [severity, setSeverity] = useState<BugReportSeverity>('medium');
   const [includeScreenshot, setIncludeScreenshot] = useState(false);
   const [isPending, startTransition] = useTransition();
   const { getSnapshot } = useContextCollector();
+
+  useEffect(() => setMounted(true), []);
+
+  if (!mounted) return null;
 
   const handleSubmit = () => {
     if (description.trim().length < 10) {
