@@ -328,18 +328,10 @@ export async function addDiffTodo(diffId: string, description: string) {
   // Set diff status to 'todo'
   await queries.updateVisualDiff(diffId, { status: 'todo' });
 
-  // Resolve branch from the test result → test run
-  const testResult = diff.testResultId
-    ? await queries.getTestResultsByRun(diff.testResultId).then((r) => r[0])
-    : null;
-  const testRun = testResult?.testRunId
-    ? await queries.getTestRun(testResult.testRunId)
-    : null;
-  const branch = testRun?.gitBranch || 'main';
-
-  // Get repository from the build → test run chain
+  // Resolve branch + repo from build → test run
   const build = diff.buildId ? await queries.getBuild(diff.buildId) : null;
   const buildTestRun = build?.testRunId ? await queries.getTestRun(build.testRunId) : null;
+  const branch = buildTestRun?.gitBranch || 'main';
   const repositoryId = buildTestRun?.repositoryId || null;
 
   // Create the review todo

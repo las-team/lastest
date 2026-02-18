@@ -1674,6 +1674,13 @@ export class PlaywrightRunner extends EventEmitter {
         }
       }
 
+      // Wrap standalone await statements (except screenshots) in try/catch so
+      // execution continues past locator/action failures to reach screenshot calls
+      body = body.replace(/^(\s*)(await\s+.+;)\s*$/gm, (_match, indent, stmt) => {
+        if (stmt.includes('.screenshot(')) return `${indent}${stmt}`;
+        return `${indent}try { ${stmt} } catch(__softErr) { stepLogger.warn(typeof __softErr === 'object' && __softErr !== null && 'message' in __softErr ? __softErr.message : String(__softErr)); }`;
+      });
+
       const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
       const testFn = new AsyncFunction('page', 'baseUrl', 'screenshotPath', 'stepLogger', 'expect', 'appState', 'locateWithFallback', body);
       await testFn(page, baseUrl, screenshotPath, stepLogger, expectFn, appStateFn, statsLocateWithFallback);

@@ -11,12 +11,6 @@ Test - which pr it was added in, updated?
 ## features
 Support https://github.com/excalidraw/excalidraw/tree/master/packages/excalidraw/tests ~/.claude/plans/declarative-kindling-coral.md 55%
 
-Dev feeback, approved, what do I need to fix - todo list
-    Actions with changes
-    Manager review of changes
-    Issues view
-    Approve reject changes or create ticket -> gh issue    
-
 Publish npm
 
 ## ideas
