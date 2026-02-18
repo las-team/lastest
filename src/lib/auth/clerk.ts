@@ -1,3 +1,12 @@
+/**
+ * Clerk-based authentication for all browser/UI flows.
+ *
+ * Auth architecture:
+ * - Clerk handles sign-in, sign-up, session management, and OAuth for the web UI.
+ * - Programmatic API clients (VS Code extension, remote runners) use Bearer tokens
+ *   validated via verifyBearerToken() in api-key.ts against the DB sessions table.
+ * - On first Clerk sign-in, ensureLocalUser() syncs the Clerk user to the local DB.
+ */
 import { cache } from 'react';
 import { auth, currentUser } from '@clerk/nextjs/server';
 import * as queries from '@/lib/db/queries';

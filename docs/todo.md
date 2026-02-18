@@ -14,6 +14,14 @@ Support https://github.com/excalidraw/excalidraw/tree/master/packages/excalidraw
 
 Publish npm
 
+  #: 18
+  Issue: Mixed auth systems
+  Severity: Medium
+  Status: Not fixed
+  Fix: Architectural — requires full auth unification, out of
+  scope
+    for this pass
+
 ## ideas
 Explore/Cover instead of Areas
 Ban AI mode

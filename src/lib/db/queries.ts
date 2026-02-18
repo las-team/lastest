@@ -85,7 +85,7 @@ import type {
   NewSelectorStat,
   NewTeam,
   NewUser,
-  NewSession,
+
   NewOAuthAccount,
   NewPasswordResetToken,
   NewUserInvitation,
@@ -2920,13 +2920,6 @@ export async function getSessionWithUser(token: string) {
     .where(eq(sessions.token, token))
     .get();
   return result;
-}
-
-export async function createSession(data: Omit<NewSession, 'id' | 'createdAt'>) {
-  const id = uuid();
-  const now = new Date();
-  await db.insert(sessions).values({ ...data, id, createdAt: now });
-  return { id, ...data, createdAt: now };
 }
 
 export async function deleteSession(token: string) {
