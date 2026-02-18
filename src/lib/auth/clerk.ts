@@ -30,7 +30,7 @@ async function ensureLocalUser(clerkUserId: string): Promise<User | null> {
   const existingByEmail = await queries.getUserByEmail(email);
   if (existingByEmail) {
     await queries.updateUser(existingByEmail.id, { clerkId: clerkUserId });
-    return queries.getUserById(existingByEmail.id) ?? null;
+    return (await queries.getUserById(existingByEmail.id)) ?? null;
   }
 
   return queries.createUser({

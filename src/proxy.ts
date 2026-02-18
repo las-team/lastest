@@ -12,6 +12,13 @@ const isPublicRoute = createRouteMatcher([
   '/api/builds/(.*)',
   '/api/clerk/webhook',
   '/api/media/(.*)',
+  '/screenshots/(.*)',
+  '/diffs/(.*)',
+  '/baselines/(.*)',
+  '/traces/(.*)',
+  '/videos/(.*)',
+  '/planned/(.*)',
+  '/bug-reports/(.*)',
 ]);
 
 export default clerkMiddleware(async (auth, req) => {
@@ -26,5 +33,13 @@ export const config = {
     '/((?!_next|[^?]*\\.(?:html?|css|js(?!on)|jpe?g|webp|png|gif|svg|ttf|woff2?|ico|csv|docx?|xlsx?|zip|webmanifest)).*)',
     // Always run for API routes
     '/(api|trpc)(.*)',
+    // Media assets (rewritten to /api/media/* but need middleware to set up Clerk auth context)
+    '/screenshots/:path*',
+    '/diffs/:path*',
+    '/baselines/:path*',
+    '/traces/:path*',
+    '/videos/:path*',
+    '/planned/:path*',
+    '/bug-reports/:path*',
   ],
 };

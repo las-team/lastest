@@ -4021,7 +4021,7 @@ export async function createBugReport(data: {
   teamId: string;
   reportedById: string;
   description: string;
-  severity: string;
+  severity: 'low' | 'medium' | 'high';
   context?: unknown;
   screenshotPath?: string | null;
   contentHash?: string | null;
