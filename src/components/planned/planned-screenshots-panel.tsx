@@ -105,6 +105,8 @@ export function PlannedScreenshotsPanel({
                 <img
                   src={screenshot.imagePath}
                   alt={screenshot.name || 'Planned screenshot'}
+                  loading="lazy"
+                  decoding="async"
                   className="w-full h-full object-cover"
                 />
               </div>

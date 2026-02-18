@@ -294,6 +294,8 @@ export function ReviewClient({
                             <img
                               src={diff.currentImagePath}
                               alt=""
+                              loading="lazy"
+                              decoding="async"
                               className="w-12 h-7 object-cover rounded border ml-auto flex-shrink-0"
                             />
                           )}

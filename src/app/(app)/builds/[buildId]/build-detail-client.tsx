@@ -621,6 +621,8 @@ function DiffRow({
           <img
             src={diff.currentImagePath}
             alt="Screenshot"
+            loading="lazy"
+            decoding="async"
             className={`w-20 h-12 object-cover rounded border ${
               isFailed ? 'border-red-200' : ''
             }`}
