@@ -1226,14 +1226,23 @@ export class PlaywrightRunner extends EventEmitter {
 
       // Execute the test code with the proxy page
       // Errors are caught as soft errors so screenshot capture still happens
+      let testThrewError = false;
       try {
         testSoftErrors = await this.executeTestCode(screenshotProxy, test, runId, testScreenshotPath, (label: string) => {
           currentStepLabel = label;
         });
       } catch (e) {
+        testThrewError = true;
         const msg = e instanceof Error ? e.message : String(e);
         testSoftErrors.push(msg);
         console.warn(`[soft-error] Test "${test.name}" error, continuing to screenshot: ${msg}`);
+      }
+
+      // If test threw and captured zero screenshots, it's a hard failure —
+      // soft errors only count as passed when screenshots were still captured
+      if (testThrewError && capturedScreenshots.length === 0) {
+        const errorMsg = testSoftErrors[testSoftErrors.length - 1] || 'Test failed without capturing any screenshots';
+        throw new Error(errorMsg);
       }
 
       // Check for console errors or network failures after test execution
