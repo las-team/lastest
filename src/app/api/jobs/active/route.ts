@@ -10,7 +10,7 @@ const CLEANUP_INTERVAL_MS = 60000; // Run cleanup at most once per minute
 export async function GET() {
   const session = await getCurrentSession();
   if (!session?.team) {
-    return NextResponse.json([], { status: 200 });
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
   // Periodically clean up stale jobs (5 min timeout) and reset stuck runners

@@ -268,7 +268,7 @@ export function DiffViewerClient({ diff, buildId, nextDiffId }: DiffViewerClient
           // On main branch (no mainBaselineImagePath), only show one tab
           const isMainBranch = !diff.mainBaselineImagePath && diff.baselineImagePath;
 
-          type TabDef = { id: string; label: string; pct: string | null; baseline: string | null; diffImg: string | null | undefined; leftLabel?: string };
+          type TabDef = { id: string; label: string; pct: string | null; baseline: string | null; diffImg: string | null | undefined; leftLabel?: string; alignedBaseline?: string; alignedCurrent?: string; alignmentSegments?: import('@/lib/db/schema').AlignmentSegment[] };
           const tabs: TabDef[] = [];
 
           // Branch tab — always present
@@ -277,6 +277,9 @@ export function DiffViewerClient({ diff, buildId, nextDiffId }: DiffViewerClient
             pct: diff.baselineImagePath ? diff.percentageDifference : null,
             baseline: diff.baselineImagePath,
             diffImg: diff.diffImagePath,
+            alignedBaseline: metadata?.pageShift?.alignedBaselineImagePath ?? undefined,
+            alignedCurrent: metadata?.pageShift?.alignedCurrentImagePath ?? undefined,
+            alignmentSegments: metadata?.pageShift?.alignmentSegments ?? undefined,
           });
 
           // Main tab — present on feature branches
@@ -311,6 +314,9 @@ export function DiffViewerClient({ diff, buildId, nextDiffId }: DiffViewerClient
                 currentImage={diff.currentImagePath!}
                 diffImage={tab.diffImg || undefined}
                 leftLabel={tab.leftLabel}
+                alignedBaselineImage={tab.alignedBaseline}
+                alignedCurrentImage={tab.alignedCurrent}
+                alignmentSegments={tab.alignmentSegments}
                 className="border rounded-lg"
               />
             ) : (
@@ -347,6 +353,9 @@ export function DiffViewerClient({ diff, buildId, nextDiffId }: DiffViewerClient
                       currentImage={diff.currentImagePath!}
                       diffImage={tab.diffImg || undefined}
                       leftLabel={tab.leftLabel}
+                      alignedBaselineImage={tab.alignedBaseline}
+                      alignedCurrentImage={tab.alignedCurrent}
+                      alignmentSegments={tab.alignmentSegments}
                       className="border rounded-lg"
                     />
                   ) : (

@@ -41,11 +41,13 @@ export async function uploadPlannedScreenshot(
 
   const dir = await ensurePlannedDir(input.repositoryId);
 
-  // Generate unique filename
+  // Generate unique filename with sanitized inputs
   const timestamp = Date.now();
-  const ext = path.extname(fileName) || '.png';
+  const rawExt = path.extname(fileName).toLowerCase();
+  const ext = ['.png', '.jpg', '.jpeg', '.webp'].includes(rawExt) ? rawExt : '.png';
+  const safeStepLabel = input.stepLabel?.replace(/[^a-zA-Z0-9_-]/g, '') || '';
   const baseName = input.testId
-    ? `${input.testId}${input.stepLabel ? `-${input.stepLabel}` : ''}`
+    ? `${input.testId}${safeStepLabel ? `-${safeStepLabel}` : ''}`
     : input.routeId || 'planned';
   const newFileName = `${baseName}-${timestamp}${ext}`;
   const filePath = path.join(dir, newFileName);
@@ -97,6 +99,7 @@ export async function uploadPlannedScreenshot(
  * Get planned screenshot for a test (optionally with step label)
  */
 export async function getPlannedScreenshot(testId: string, stepLabel?: string) {
+  await requireTeamAccess();
   return queries.getPlannedScreenshotByTest(testId, stepLabel || null);
 }
 
@@ -104,6 +107,7 @@ export async function getPlannedScreenshot(testId: string, stepLabel?: string) {
  * Get planned screenshot by route
  */
 export async function getPlannedScreenshotByRoute(routeId: string) {
+  await requireTeamAccess();
   return queries.getPlannedScreenshotByRoute(routeId);
 }
 
@@ -111,6 +115,7 @@ export async function getPlannedScreenshotByRoute(routeId: string) {
  * List all planned screenshots for a repository
  */
 export async function listPlannedScreenshots(repositoryId: string) {
+  await requireRepoAccess(repositoryId);
   return queries.getPlannedScreenshotsByRepo(repositoryId);
 }
 
@@ -118,6 +123,7 @@ export async function listPlannedScreenshots(repositoryId: string) {
  * List all planned screenshots for a specific test
  */
 export async function listPlannedScreenshotsForTest(testId: string) {
+  await requireTeamAccess();
   return queries.getPlannedScreenshotsByTest(testId);
 }
 
@@ -150,6 +156,7 @@ export async function updatePlannedScreenshot(
  * Get planned screenshot by ID
  */
 export async function getPlannedScreenshotById(id: string) {
+  await requireTeamAccess();
   return queries.getPlannedScreenshot(id);
 }
 

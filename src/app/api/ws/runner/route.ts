@@ -316,7 +316,6 @@ export async function GET(request: NextRequest) {
       return NextResponse.json(
         {
           error: 'Duplicate connection: another runner instance is already connected with this token',
-          existingSessionId: existingSession.sessionId,
         },
         { status: 409 }
       );

@@ -13,12 +13,12 @@ export async function GET() {
       database: 'connected',
     });
   } catch (error) {
+    console.error('[health] Database check failed:', error);
     return NextResponse.json(
       {
         status: 'unhealthy',
         timestamp: new Date().toISOString(),
         database: 'disconnected',
-        error: error instanceof Error ? error.message : 'Unknown error',
       },
       { status: 503 }
     );

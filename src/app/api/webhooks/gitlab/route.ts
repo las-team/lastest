@@ -9,7 +9,7 @@ const GITLAB_WEBHOOK_SECRET = process.env.GITLAB_WEBHOOK_SECRET || '';
  * GitLab uses a simple token header, not HMAC signature
  */
 function verifyWebhookToken(token: string | null): boolean {
-  if (!GITLAB_WEBHOOK_SECRET) return true; // Skip in development if no secret set
+  if (!GITLAB_WEBHOOK_SECRET) return false; // Reject when secret is not configured
   return token === GITLAB_WEBHOOK_SECRET;
 }
 

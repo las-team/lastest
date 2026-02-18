@@ -1,8 +1,9 @@
 'use client';
 
 import { useState, useRef, useCallback } from 'react';
+import type { AlignmentSegment } from '@/lib/db/schema';
 
-type ViewMode = 'slider' | 'side-by-side' | 'overlay' | 'three-way' | 'planned-vs-actual';
+type ViewMode = 'slider' | 'side-by-side' | 'overlay' | 'three-way' | 'planned-vs-actual' | 'shift-compare';
 
 interface SliderComparisonProps {
   baselineImage?: string;
@@ -10,6 +11,9 @@ interface SliderComparisonProps {
   diffImage?: string;
   plannedImage?: string;
   plannedDiffImage?: string;
+  alignedBaselineImage?: string;
+  alignedCurrentImage?: string;
+  alignmentSegments?: AlignmentSegment[];
   leftLabel?: string;
   rightLabel?: string;
   className?: string;
@@ -21,17 +25,24 @@ export function SliderComparison({
   diffImage,
   plannedImage,
   plannedDiffImage,
+  alignedBaselineImage,
+  alignedCurrentImage,
+  alignmentSegments,
   leftLabel = 'Baseline',
   rightLabel = 'Current',
   className = '',
 }: SliderComparisonProps) {
-  const defaultMode: ViewMode = baselineImage && plannedImage
-    ? 'three-way'
-    : baselineImage
-      ? 'slider'
-      : plannedImage
-        ? 'planned-vs-actual'
-        : 'slider';
+  const hasAlignedImages = !!(alignedBaselineImage && alignedCurrentImage);
+
+  const defaultMode: ViewMode = hasAlignedImages
+    ? 'shift-compare'
+    : baselineImage && plannedImage
+      ? 'three-way'
+      : baselineImage
+        ? 'slider'
+        : plannedImage
+          ? 'planned-vs-actual'
+          : 'slider';
 
   const [sliderPosition, setSliderPosition] = useState(50);
   const [viewMode, setViewMode] = useState<ViewMode>(defaultMode);
@@ -91,6 +102,14 @@ export function SliderComparison({
           )}
         </>
       )}
+      {hasAlignedImages && (
+        <button
+          className={`px-3 py-1 rounded text-sm ${viewMode === 'shift-compare' ? 'bg-blue-600 text-white' : 'bg-blue-100 text-blue-700'}`}
+          onClick={() => setViewMode('shift-compare')}
+        >
+          Shift Compare
+        </button>
+      )}
       {plannedImage && (
         <>
           {baselineImage && (
@@ -111,6 +130,68 @@ export function SliderComparison({
       )}
     </div>
   );
+
+  if (viewMode === 'shift-compare' && hasAlignedImages) {
+    const totalRows = alignmentSegments?.reduce((sum, s) => sum + s.count, 0) ?? 1;
+    const markers: { op: 'insert' | 'delete'; topPct: number; heightPct: number }[] = [];
+    let rowOffset = 0;
+    for (const seg of alignmentSegments ?? []) {
+      if (seg.op === 'insert' || seg.op === 'delete') {
+        markers.push({
+          op: seg.op,
+          topPct: (rowOffset / totalRows) * 100,
+          heightPct: (seg.count / totalRows) * 100,
+        });
+      }
+      rowOffset += seg.count;
+    }
+
+    return (
+      <div className={className}>
+        <ViewModeButtons />
+        <div className="grid grid-cols-[16px_1fr_1fr_16px] gap-0 border rounded-lg overflow-hidden">
+          {/* Left gutter: delete markers */}
+          <div className="relative bg-muted/30">
+            {markers.filter(m => m.op === 'delete').map((m, i) => (
+              <div
+                key={i}
+                className="absolute left-0 right-0 bg-red-500/70"
+                style={{ top: `${m.topPct}%`, height: `${Math.max(m.heightPct, 0.3)}%` }}
+              />
+            ))}
+          </div>
+          {/* Aligned baseline */}
+          <div className="relative">
+            <div className="text-xs text-muted-foreground text-center py-1 bg-muted/20 border-b">
+              {leftLabel} (Aligned)
+            </div>
+            <img src={alignedBaselineImage} alt="Aligned baseline" className="w-full" />
+          </div>
+          {/* Aligned current */}
+          <div className="relative">
+            <div className="text-xs text-muted-foreground text-center py-1 bg-muted/20 border-b">
+              {rightLabel} (Aligned)
+            </div>
+            <img src={alignedCurrentImage} alt="Aligned current" className="w-full" />
+          </div>
+          {/* Right gutter: insert markers */}
+          <div className="relative bg-muted/30">
+            {markers.filter(m => m.op === 'insert').map((m, i) => (
+              <div
+                key={i}
+                className="absolute left-0 right-0 bg-green-500/70"
+                style={{ top: `${m.topPct}%`, height: `${Math.max(m.heightPct, 0.3)}%` }}
+              />
+            ))}
+          </div>
+        </div>
+        <div className="flex gap-4 mt-2 text-xs text-muted-foreground">
+          <span className="flex items-center gap-1"><span className="w-3 h-3 bg-red-500/70 rounded-sm" /> Deleted rows</span>
+          <span className="flex items-center gap-1"><span className="w-3 h-3 bg-green-500/70 rounded-sm" /> Inserted rows</span>
+        </div>
+      </div>
+    );
+  }
 
   if (viewMode === 'side-by-side' && baselineImage) {
     return (

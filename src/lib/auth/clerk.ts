@@ -40,7 +40,7 @@ async function ensureLocalUser(clerkUserId: string): Promise<User | null> {
     clerkId: clerkUserId,
     hashedPassword: null,
     emailVerified: true,
-    role: 'owner',
+    role: 'member',
   });
 }
 

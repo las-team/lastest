@@ -92,7 +92,11 @@ export async function removeUser(userId: string) {
 }
 
 export async function cancelInvitation(invitationId: string) {
-  await requireTeamAdmin();
+  const session = await requireTeamAdmin();
+  const invitation = await queries.getInvitationByToken(invitationId);
+  if (!invitation || invitation.teamId !== session.team.id) {
+    return { error: 'Invitation not found' };
+  }
   await queries.deleteInvitation(invitationId);
   return { success: true };
 }

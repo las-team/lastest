@@ -30,12 +30,20 @@ export interface RecordedAction {
   timestamp: number;
 }
 
+export interface AlignmentSegment {
+  op: 'match' | 'insert' | 'delete';
+  count: number;
+}
+
 export interface PageShiftInfo {
   detected: boolean;
   deltaY: number;
   confidence: number;
   insertedRows?: number;
   deletedRows?: number;
+  alignedBaselineImagePath?: string;
+  alignedCurrentImagePath?: string;
+  alignmentSegments?: AlignmentSegment[];
 }
 
 export interface AIDiffAnalysis {

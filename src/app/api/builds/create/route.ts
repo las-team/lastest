@@ -82,7 +82,7 @@ export async function POST(request: Request) {
   } catch (error) {
     console.error('Failed to create build:', error);
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : 'Failed to create build' },
+      { error: 'Failed to create build' },
       { status: 500 }
     );
   }

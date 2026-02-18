@@ -24,13 +24,23 @@ export async function POST(request: NextRequest) {
   const event = request.headers.get('x-github-event');
   const payload = await request.text();
 
-  // Verify webhook signature (skip in development if no secret set)
+  // Verify webhook signature (mandatory)
   const webhookSecret = process.env.GITHUB_WEBHOOK_SECRET;
-  if (webhookSecret && !verifyWebhookSignature(payload, signature)) {
+  if (!webhookSecret) {
+    console.error('[webhook] GITHUB_WEBHOOK_SECRET is not configured');
+    return NextResponse.json({ error: 'Webhook not configured' }, { status: 500 });
+  }
+  if (!verifyWebhookSignature(payload, signature)) {
     return NextResponse.json({ error: 'Invalid signature' }, { status: 401 });
   }
 
   const data = JSON.parse(payload);
+
+  // Sanitize webhook string fields to prevent injection
+  function sanitizeStr(val: unknown, maxLen = 500): string {
+    if (typeof val !== 'string') return '';
+    return val.replace(/[^\x20-\x7E]/g, '').slice(0, maxLen);
+  }
 
   try {
     if (event === 'pull_request' && isPullRequestEvent(data)) {
@@ -43,20 +53,20 @@ export async function POST(request: NextRequest) {
 
         if (existingPR) {
           await queries.updatePullRequest(existingPR.id, {
-            headCommit: data.pull_request.head.sha,
-            title: data.pull_request.title,
-            status: data.pull_request.state,
+            headCommit: sanitizeStr(data.pull_request.head.sha, 40),
+            title: sanitizeStr(data.pull_request.title, 300),
+            status: sanitizeStr(data.pull_request.state, 20),
           });
         } else {
           await queries.createPullRequest({
             githubPrNumber: data.pull_request.number,
-            repoOwner: data.repository.owner.login,
-            repoName: data.repository.name,
-            headBranch: data.pull_request.head.ref,
-            baseBranch: data.pull_request.base.ref,
-            headCommit: data.pull_request.head.sha,
-            title: data.pull_request.title,
-            status: data.pull_request.state,
+            repoOwner: sanitizeStr(data.repository.owner.login, 100),
+            repoName: sanitizeStr(data.repository.name, 100),
+            headBranch: sanitizeStr(data.pull_request.head.ref, 250),
+            baseBranch: sanitizeStr(data.pull_request.base.ref, 250),
+            headCommit: sanitizeStr(data.pull_request.head.sha, 40),
+            title: sanitizeStr(data.pull_request.title, 300),
+            status: sanitizeStr(data.pull_request.state, 20),
           });
         }
 

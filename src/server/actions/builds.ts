@@ -990,6 +990,15 @@ async function processVisualDiff(
     const hasChanges = shouldAutoApprove ? false : classification !== 'unchanged';
     const diffImagePath = toRelativePath(diffResult.diffImagePath);
 
+    // Strip absolute paths from aligned shift images before DB storage
+    const metadata = diffResult.metadata;
+    if (metadata.pageShift?.alignedBaselineImagePath) {
+      metadata.pageShift.alignedBaselineImagePath = toRelativePath(metadata.pageShift.alignedBaselineImagePath);
+    }
+    if (metadata.pageShift?.alignedCurrentImagePath) {
+      metadata.pageShift.alignedCurrentImagePath = toRelativePath(metadata.pageShift.alignedCurrentImagePath);
+    }
+
     const plannedDiff = await generatePlannedDiff(currentScreenshotPath);
     const mainDiff = await generateMainBaselineDiff(currentScreenshotPath);
 
@@ -1005,7 +1014,7 @@ async function processVisualDiff(
       classification,
       pixelDifference: diffResult.pixelDifference,
       percentageDifference: diffResult.percentageDifference.toString(),
-      metadata: diffResult.metadata,
+      metadata,
       ...plannedDiff,
       ...mainDiff,
     });

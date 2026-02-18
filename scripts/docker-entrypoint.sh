@@ -40,7 +40,7 @@ rm -f /app/data/.write-test
 # Run database migrations if drizzle-kit is available
 if [ -f "/app/drizzle.config.ts" ]; then
   echo "Running database migrations..."
-  npx drizzle-kit push --force 2>/dev/null || echo "Migration skipped (may already be current)"
+  ./node_modules/.bin/drizzle-kit push --force 2>/dev/null || echo "Migration skipped (may already be current)"
 fi
 
 # Execute the main command

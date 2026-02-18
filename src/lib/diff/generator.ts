@@ -3,7 +3,7 @@ import path from 'path';
 import crypto from 'crypto';
 import { PNG } from 'pngjs';
 import pixelmatch from 'pixelmatch';
-import type { DiffMetadata, PageShiftInfo } from '../db/schema';
+import type { AlignmentSegment, DiffMetadata, PageShiftInfo } from '../db/schema';
 
 export interface Rectangle {
   x: number;
@@ -35,6 +35,25 @@ interface AlignmentResult {
   insertedRows: number;
   deletedRows: number;
   matchedRows: number;
+}
+
+/**
+ * RLE-compress alignment ops into AlignmentSegment[] for efficient frontend rendering.
+ */
+function compressOpsToSegments(ops: AlignOp[]): AlignmentSegment[] {
+  if (ops.length === 0) return [];
+  const segments: AlignmentSegment[] = [];
+  let current: AlignmentSegment = { op: ops[0], count: 1 };
+  for (let i = 1; i < ops.length; i++) {
+    if (ops[i] === current.op) {
+      current.count++;
+    } else {
+      segments.push(current);
+      current = { op: ops[i], count: 1 };
+    }
+  }
+  segments.push(current);
+  return segments;
 }
 
 /**
@@ -662,6 +681,20 @@ async function generateShiftAwareDiff(
     baseline.data, current.data, width, alignment, baselineBg, currentBg
   );
 
+  // Save aligned images for side-by-side shift comparison view
+  const ts = Date.now();
+  const alignedBaselinePng = new PNG({ width, height: alignedHeight });
+  Buffer.from(alignedBaseline).copy(alignedBaselinePng.data as Buffer);
+  const alignedBaselinePath = path.join(outputDir, `aligned-baseline-${ts}.png`);
+  fs.writeFileSync(alignedBaselinePath, PNG.sync.write(alignedBaselinePng));
+
+  const alignedCurrentPng = new PNG({ width, height: alignedHeight });
+  Buffer.from(alignedCurrent).copy(alignedCurrentPng.data as Buffer);
+  const alignedCurrentPath = path.join(outputDir, `aligned-current-${ts}.png`);
+  fs.writeFileSync(alignedCurrentPath, PNG.sync.write(alignedCurrentPng));
+
+  const alignmentSegments = compressOpsToSegments(alignment.ops);
+
   // Run pixelmatch on the full aligned images
   let numDiffPixels = 0;
   let alignedDiffData: Buffer;
@@ -725,6 +758,9 @@ async function generateShiftAwareDiff(
     confidence,
     insertedRows: alignment.insertedRows,
     deletedRows: alignment.deletedRows,
+    alignedBaselineImagePath: alignedBaselinePath,
+    alignedCurrentImagePath: alignedCurrentPath,
+    alignmentSegments,
   };
 
   return {

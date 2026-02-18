@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { auth } from '@clerk/nextjs/server';
+import { cookies } from 'next/headers';
 import * as queries from '@/lib/db/queries';
 import { getPublicUrl } from '@/lib/utils';
 
@@ -78,6 +79,16 @@ export async function GET(request: NextRequest) {
 
   if (!code) {
     return NextResponse.redirect(new URL('/settings?error=no_code', getPublicUrl(request)));
+  }
+
+  // Validate OAuth state parameter to prevent CSRF
+  const stateParam = searchParams.get('state');
+  const cookieStore = await cookies();
+  const storedState = cookieStore.get('google_sheets_oauth_state')?.value;
+  cookieStore.delete('google_sheets_oauth_state');
+
+  if (!stateParam || !storedState || stateParam !== storedState) {
+    return NextResponse.redirect(new URL('/settings?error=google_sheets_csrf', getPublicUrl(request)));
   }
 
   // Get current user via Clerk

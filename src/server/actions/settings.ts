@@ -6,6 +6,7 @@ import type { SelectorConfig, RecordingEngine, StabilizationSettings } from '@/l
 import { revalidatePath } from 'next/cache';
 
 export async function getPlaywrightSettings(repositoryId?: string | null) {
+  await requireTeamAccess();
   return queries.getPlaywrightSettings(repositoryId);
 }
 
@@ -61,6 +62,7 @@ export async function resetPlaywrightSettings(repositoryId?: string | null) {
 
 // Diff Sensitivity Settings
 export async function getDiffSensitivitySettingsAction(repositoryId?: string | null) {
+  await requireTeamAccess();
   return queries.getDiffSensitivitySettings(repositoryId);
 }
 
@@ -99,8 +101,32 @@ export async function resetDiffSensitivitySettings(repositoryId?: string | null)
 }
 
 // Notification Settings
+function maskWebhookUrl(value: string | null | undefined): string | null {
+  if (!value) return null;
+  try {
+    const url = new URL(value);
+    return `${url.protocol}//${url.host}/••••••••`;
+  } catch {
+    return '••••••••';
+  }
+}
+
 export async function getNotificationSettingsAction(repositoryId?: string | null) {
-  return queries.getNotificationSettings(repositoryId);
+  await requireTeamAccess();
+  const settings = await queries.getNotificationSettings(repositoryId);
+  return {
+    ...settings,
+    slackWebhookUrl: maskWebhookUrl(settings.slackWebhookUrl),
+    discordWebhookUrl: maskWebhookUrl(settings.discordWebhookUrl),
+    customWebhookUrl: maskWebhookUrl(settings.customWebhookUrl),
+    _hasSlackWebhook: !!settings.slackWebhookUrl,
+    _hasDiscordWebhook: !!settings.discordWebhookUrl,
+    _hasCustomWebhook: !!settings.customWebhookUrl,
+  };
+}
+
+function isMaskedWebhookUrl(value: string | null | undefined): boolean {
+  return !!value && value.includes('••••••••');
 }
 
 export async function saveNotificationSettings(data: {
@@ -119,6 +145,11 @@ export async function saveNotificationSettings(data: {
   if (data.repositoryId) await requireRepoAccess(data.repositoryId);
   else await requireTeamAccess();
   const { repositoryId, ...settingsData } = data;
+
+  // Don't overwrite real URLs with masked placeholders
+  if (isMaskedWebhookUrl(settingsData.slackWebhookUrl)) delete settingsData.slackWebhookUrl;
+  if (isMaskedWebhookUrl(settingsData.discordWebhookUrl)) delete settingsData.discordWebhookUrl;
+  if (isMaskedWebhookUrl(settingsData.customWebhookUrl)) delete settingsData.customWebhookUrl;
 
   await queries.upsertNotificationSettings(repositoryId || null, settingsData);
 

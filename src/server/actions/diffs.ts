@@ -133,6 +133,7 @@ export async function batchRejectDiffs(diffIds: string[]) {
  * Get diffs for a build
  */
 export async function getDiffsByBuild(buildId: string) {
+  await requireTeamAccess();
   return queries.getVisualDiffsByBuild(buildId);
 }
 
@@ -153,6 +154,7 @@ function extractStepLabelFromPath(imagePath: string): string | null {
  * Get a single diff with full details
  */
 export async function getDiff(diffId: string) {
+  await requireTeamAccess();
   const diff = await queries.getVisualDiff(diffId);
   if (!diff) return null;
 
@@ -197,6 +199,7 @@ export async function getDiff(diffId: string) {
  * Get pending diffs count for a build
  */
 export async function getPendingDiffsCount(buildId: string) {
+  await requireTeamAccess();
   const pending = await queries.getPendingDiffsByBuild(buildId);
   return pending.length;
 }
@@ -230,6 +233,7 @@ export async function removeIgnoreRegion(regionId: string) {
  * Get ignore regions for a test
  */
 export async function getIgnoreRegions(testId: string) {
+  await requireTeamAccess();
   return queries.getIgnoreRegions(testId);
 }
 
@@ -396,5 +400,6 @@ export async function rejectAllDiffs(buildId: string) {
  * Get AI diff summary counts for a build
  */
 export async function getAIDiffSummary(buildId: string) {
+  await requireTeamAccess();
   return queries.getAIDiffSummaryForBuild(buildId);
 }

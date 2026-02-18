@@ -1,3 +1,5 @@
+'use server';
+
 import * as queries from '@/lib/db/queries';
 
 import { analyzeDiff, type DiffingProviderConfig } from '@/lib/ai/diff-analyzer';
