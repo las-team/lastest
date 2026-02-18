@@ -324,6 +324,7 @@ export class DebugRunner {
     const context = await this.browser.newContext({
       viewport,
       ...(this.settings?.acceptAnyCertificate ? { ignoreHTTPSErrors: true } : {}),
+      ...(this.settings?.freezeAnimations ? { reducedMotion: 'reduce' } : {}),
     });
     const page = await context.newPage();
 

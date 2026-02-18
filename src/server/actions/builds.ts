@@ -998,6 +998,9 @@ async function processVisualDiff(
     if (metadata.pageShift?.alignedCurrentImagePath) {
       metadata.pageShift.alignedCurrentImagePath = toRelativePath(metadata.pageShift.alignedCurrentImagePath);
     }
+    if (metadata.pageShift?.alignedDiffImagePath) {
+      metadata.pageShift.alignedDiffImagePath = toRelativePath(metadata.pageShift.alignedDiffImagePath);
+    }
 
     const plannedDiff = await generatePlannedDiff(currentScreenshotPath);
     const mainDiff = await generateMainBaselineDiff(currentScreenshotPath);

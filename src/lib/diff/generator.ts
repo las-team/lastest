@@ -714,6 +714,15 @@ async function generateShiftAwareDiff(
     alignedDiffData = Buffer.alloc(0);
   }
 
+  // Save aligned diff image for overlay in shift comparison view
+  let alignedDiffPath: string | undefined;
+  if (alignedHeight > 0) {
+    const alignedDiffPng = new PNG({ width, height: alignedHeight });
+    Buffer.from(alignedDiffData).copy(alignedDiffPng.data as Buffer);
+    alignedDiffPath = path.join(outputDir, `aligned-diff-${ts}.png`);
+    fs.writeFileSync(alignedDiffPath, PNG.sync.write(alignedDiffPng));
+  }
+
   // Build the full shift-aware diff image
   const diffImage = buildShiftAwareDiffImage(
     baseline.data, current.data, alignedDiffData, width, alignment
@@ -760,6 +769,7 @@ async function generateShiftAwareDiff(
     deletedRows: alignment.deletedRows,
     alignedBaselineImagePath: alignedBaselinePath,
     alignedCurrentImagePath: alignedCurrentPath,
+    alignedDiffImagePath: alignedDiffPath,
     alignmentSegments,
   };
 

@@ -994,6 +994,7 @@ export class PlaywrightRunner extends EventEmitter {
         ...(parsedStorageState ? { storageState: parsedStorageState } : {}),
         ...(videoDir ? { recordVideo: { dir: videoDir, size: this.getViewport() } } : {}),
         ...(this.settings?.acceptAnyCertificate ? { ignoreHTTPSErrors: true } : {}),
+        ...(this.settings?.freezeAnimations ? { reducedMotion: 'reduce' } : {}),
       });
       page = await context.newPage();
 

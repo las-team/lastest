@@ -43,6 +43,7 @@ export interface PageShiftInfo {
   deletedRows?: number;
   alignedBaselineImagePath?: string;
   alignedCurrentImagePath?: string;
+  alignedDiffImagePath?: string;
   alignmentSegments?: AlignmentSegment[];
 }
 
@@ -404,6 +405,10 @@ export interface StabilizationSettings {
   // Spinner/loader handling
   hideLoadingIndicators: boolean;   // CSS hide common spinners (default: true)
   loadingSelectors: string[];       // Custom selectors to wait for removal
+
+  // Image loading
+  waitForImages: boolean;           // Wait for all images to finish loading (default: true)
+  waitForImagesTimeout: number;     // Max wait time in ms (default: 5000)
 
   // Style stabilization
   waitForFonts: boolean;            // Wait for font loading (default: true)

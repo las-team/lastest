@@ -13,6 +13,7 @@ interface SliderComparisonProps {
   plannedDiffImage?: string;
   alignedBaselineImage?: string;
   alignedCurrentImage?: string;
+  alignedDiffImage?: string;
   alignmentSegments?: AlignmentSegment[];
   leftLabel?: string;
   rightLabel?: string;
@@ -27,6 +28,7 @@ export function SliderComparison({
   plannedDiffImage,
   alignedBaselineImage,
   alignedCurrentImage,
+  alignedDiffImage,
   alignmentSegments,
   leftLabel = 'Baseline',
   rightLabel = 'Current',
@@ -149,7 +151,18 @@ export function SliderComparison({
     return (
       <div className={className}>
         <ViewModeButtons />
-        <div className="grid grid-cols-[16px_1fr_1fr_16px] gap-0 border rounded-lg overflow-hidden">
+        {/* Headers above the grid so gutters + images align vertically */}
+        <div className="grid grid-cols-[16px_1fr_1fr_16px] gap-0 border-x border-t rounded-t-lg overflow-hidden">
+          <div />
+          <div className="text-xs text-muted-foreground text-center py-1 bg-muted/20 border-b">
+            {leftLabel} (Aligned)
+          </div>
+          <div className="text-xs text-muted-foreground text-center py-1 bg-muted/20 border-b">
+            {rightLabel} (Aligned)
+          </div>
+          <div />
+        </div>
+        <div className="grid grid-cols-[16px_1fr_1fr_16px] gap-0 border rounded-b-lg overflow-hidden">
           {/* Left gutter: delete markers */}
           <div className="relative bg-muted/30">
             {markers.filter(m => m.op === 'delete').map((m, i) => (
@@ -160,19 +173,27 @@ export function SliderComparison({
               />
             ))}
           </div>
-          {/* Aligned baseline */}
+          {/* Aligned baseline with diff overlay */}
           <div className="relative">
-            <div className="text-xs text-muted-foreground text-center py-1 bg-muted/20 border-b">
-              {leftLabel} (Aligned)
-            </div>
             <img src={alignedBaselineImage} alt="Aligned baseline" className="w-full" />
+            {alignedDiffImage && (
+              <img
+                src={alignedDiffImage}
+                alt="Diff overlay"
+                className="absolute inset-0 w-full h-full opacity-50 mix-blend-multiply pointer-events-none"
+              />
+            )}
           </div>
-          {/* Aligned current */}
+          {/* Aligned current with diff overlay */}
           <div className="relative">
-            <div className="text-xs text-muted-foreground text-center py-1 bg-muted/20 border-b">
-              {rightLabel} (Aligned)
-            </div>
             <img src={alignedCurrentImage} alt="Aligned current" className="w-full" />
+            {alignedDiffImage && (
+              <img
+                src={alignedDiffImage}
+                alt="Diff overlay"
+                className="absolute inset-0 w-full h-full opacity-50 mix-blend-multiply pointer-events-none"
+              />
+            )}
           </div>
           {/* Right gutter: insert markers */}
           <div className="relative bg-muted/30">
@@ -188,6 +209,9 @@ export function SliderComparison({
         <div className="flex gap-4 mt-2 text-xs text-muted-foreground">
           <span className="flex items-center gap-1"><span className="w-3 h-3 bg-red-500/70 rounded-sm" /> Deleted rows</span>
           <span className="flex items-center gap-1"><span className="w-3 h-3 bg-green-500/70 rounded-sm" /> Inserted rows</span>
+          {alignedDiffImage && (
+            <span className="flex items-center gap-1"><span className="w-3 h-3 bg-fuchsia-500/70 rounded-sm" /> Pixel differences</span>
+          )}
         </div>
       </div>
     );
