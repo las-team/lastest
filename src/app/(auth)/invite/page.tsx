@@ -1,29 +1,27 @@
 import { redirect } from 'next/navigation';
-import { SignUp } from '@clerk/nextjs';
+import * as queries from '@/lib/db/queries';
+import { InviteForm } from './invite-form';
 
 export default async function InvitePage({
   searchParams,
 }: {
-  searchParams: Promise<{ token?: string; ticket?: string }>;
+  searchParams: Promise<{ token?: string }>;
 }) {
   const params = await searchParams;
 
-  // If there's a Clerk invitation ticket, show the sign-up with it
-  if (params.ticket) {
-    return (
-      <div className="min-h-screen flex items-center justify-center">
-        <SignUp
-          forceRedirectUrl="/"
-          initialValues={{}}
-        />
-      </div>
-    );
+  if (!params.token) {
+    redirect('/register');
   }
 
-  // Legacy token — redirect to login
-  if (params.token) {
-    redirect('/login');
+  const invite = await queries.getInvitationByToken(params.token);
+
+  if (!invite || invite.acceptedAt || (invite.expiresAt && invite.expiresAt < new Date())) {
+    redirect('/register');
   }
 
-  redirect('/register');
+  return (
+    <div className="min-h-screen flex items-center justify-center">
+      <InviteForm email={invite.email} token={params.token} />
+    </div>
+  );
 }

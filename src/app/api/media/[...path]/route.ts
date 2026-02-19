@@ -23,7 +23,7 @@ function getContentType(filePath: string): string {
 }
 
 async function verifyAuth(request: NextRequest) {
-  // Try Clerk session first
+  // Try session first
   const session = await getCurrentSession();
   if (session) return session;
 

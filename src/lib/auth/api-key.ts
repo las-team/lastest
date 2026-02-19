@@ -2,11 +2,11 @@
  * Programmatic API authentication via Bearer tokens.
  *
  * This module is for non-browser clients only (VS Code extension, remote runners,
- * CI/CD integrations). Browser/UI auth is handled entirely by Clerk (see clerk.ts).
+ * CI/CD integrations). Browser/UI auth is handled by BetterAuth (see session.ts).
  * Tokens are validated against the `sessions` table in the DB.
  */
 import * as queries from '@/lib/db/queries';
-import type { SessionData } from './clerk';
+import type { SessionData } from './session';
 export async function verifyBearerToken(token: string): Promise<SessionData | null> {
   const result = await queries.getSessionWithUser(token);
   if (!result || result.session.expiresAt < new Date()) {

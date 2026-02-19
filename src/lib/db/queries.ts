@@ -2858,14 +2858,6 @@ export async function getUserByEmail(email: string) {
   return db.select().from(users).where(eq(users.email, email.toLowerCase())).get();
 }
 
-export async function getUserByClerkId(clerkId: string) {
-  return db.select().from(users).where(eq(users.clerkId, clerkId)).get();
-}
-
-export async function getTeamByClerkOrgId(clerkOrgId: string) {
-  return db.select().from(teams).where(eq(teams.clerkOrgId, clerkOrgId)).get();
-}
-
 export async function getUserCount() {
   const result = await db.select({ id: users.id }).from(users).all();
   return result.length;

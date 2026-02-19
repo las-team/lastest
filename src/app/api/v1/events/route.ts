@@ -17,9 +17,9 @@ import { subscribeToTestEvents, type TestEvent } from '@/lib/ws/test-events';
 
 export const dynamic = 'force-dynamic';
 
-// Helper to verify API auth (Clerk session or Bearer token)
+// Helper to verify API auth (session or Bearer token)
 async function verifyAuth(request: NextRequest) {
-  // Try Clerk session first
+  // Try session first
   const session = await getCurrentSession();
   if (session) {
     return session;

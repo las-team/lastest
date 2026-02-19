@@ -805,7 +805,6 @@ export const teams = sqliteTable('teams', {
   id: text('id').primaryKey(),
   name: text('name').notNull(),
   slug: text('slug').notNull().unique(),
-  clerkOrgId: text('clerk_org_id').unique(),
   createdAt: integer('created_at', { mode: 'timestamp' }),
   updatedAt: integer('updated_at', { mode: 'timestamp' }),
 });
@@ -820,7 +819,6 @@ export const users = sqliteTable('users', {
   hashedPassword: text('hashed_password'),
   name: text('name'),
   avatarUrl: text('avatar_url'),
-  clerkId: text('clerk_id').unique(),
   teamId: text('team_id').references(() => teams.id), // Single team membership
   role: text('role').notNull().default('member'), // 'owner' | 'admin' | 'member' | 'viewer'
   emailVerified: integer('email_verified', { mode: 'boolean' }).default(false),
@@ -840,6 +838,7 @@ export const sessions = sqliteTable('sessions', {
   ipAddress: text('ip_address'),
   userAgent: text('user_agent'),
   createdAt: integer('created_at', { mode: 'timestamp' }),
+  updatedAt: integer('updated_at', { mode: 'timestamp' }),
 });
 
 export type Session = typeof sessions.$inferSelect;
@@ -849,16 +848,28 @@ export type NewSession = typeof sessions.$inferInsert;
 export const oauthAccounts = sqliteTable('oauth_accounts', {
   id: text('id').primaryKey(),
   userId: text('user_id').references(() => users.id, { onDelete: 'cascade' }).notNull(),
-  provider: text('provider').notNull(), // 'github' | 'google'
+  provider: text('provider').notNull(), // 'github' | 'google' | 'credential'
   providerAccountId: text('provider_account_id').notNull(),
   accessToken: text('access_token'),
   refreshToken: text('refresh_token'),
   tokenExpiresAt: integer('token_expires_at', { mode: 'timestamp' }),
+  password: text('password'), // BetterAuth stores credential passwords here
   createdAt: integer('created_at', { mode: 'timestamp' }),
+  updatedAt: integer('updated_at', { mode: 'timestamp' }),
 });
 
 export type OAuthAccount = typeof oauthAccounts.$inferSelect;
 export type NewOAuthAccount = typeof oauthAccounts.$inferInsert;
+
+// BetterAuth verification table (email verification, password reset, etc.)
+export const verification = sqliteTable('verification', {
+  id: text('id').primaryKey(),
+  identifier: text('identifier').notNull(),
+  value: text('value').notNull(),
+  expiresAt: integer('expires_at', { mode: 'timestamp' }).notNull(),
+  createdAt: integer('created_at', { mode: 'timestamp' }),
+  updatedAt: integer('updated_at', { mode: 'timestamp' }),
+});
 
 // Password reset tokens
 export const passwordResetTokens = sqliteTable('password_reset_tokens', {

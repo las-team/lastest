@@ -180,7 +180,7 @@ export function Sidebar({ repos, selectedRepo, currentUser, team }: SidebarProps
       </div>
 
       <div className="p-4 border-t space-y-3">
-        {currentUser && <UserMenu />}
+        {currentUser && <UserMenu user={currentUser} />}
         <div className="flex items-center justify-between">
           <span className="text-xs text-muted-foreground">Visual Regression Testing</span>
           <QueueIndicator />

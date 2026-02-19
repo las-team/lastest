@@ -1,29 +1,37 @@
-import { clerkMiddleware, createRouteMatcher } from '@clerk/nextjs/server';
+import { NextRequest, NextResponse } from 'next/server';
+import { getSessionCookie } from 'better-auth/cookies';
 
-const isPublicRoute = createRouteMatcher([
-  '/login(.*)',
-  '/register(.*)',
-  '/invite(.*)',
-  '/api/auth/(.*)',
+const PUBLIC_PATHS = [
+  '/login',
+  '/register',
+  '/invite',
+  '/api/auth/',
   '/api/health',
-  '/api/webhooks/(.*)',
-  '/api/builds/(.*)',
-  '/api/clerk/webhook',
-  '/api/media/(.*)',
-  '/screenshots/(.*)',
-  '/diffs/(.*)',
-  '/baselines/(.*)',
-  '/traces/(.*)',
-  '/videos/(.*)',
-  '/planned/(.*)',
-  '/bug-reports/(.*)',
-]);
+  '/api/webhooks/',
+  '/api/builds/',
+  '/api/media/',
+  '/screenshots/',
+  '/diffs/',
+  '/baselines/',
+  '/traces/',
+  '/videos/',
+  '/planned/',
+  '/bug-reports/',
+];
 
-export default clerkMiddleware(async (auth, req) => {
-  if (!isPublicRoute(req)) {
-    await auth.protect();
+export default function proxy(request: NextRequest) {
+  const { pathname } = request.nextUrl;
+  if (PUBLIC_PATHS.some((p) => pathname.startsWith(p))) {
+    return NextResponse.next();
   }
-});
+
+  const session = getSessionCookie(request);
+  if (!session) {
+    return NextResponse.redirect(new URL('/login', request.url));
+  }
+
+  return NextResponse.next();
+}
 
 export const config = {
   matcher: [
@@ -31,7 +39,7 @@ export const config = {
     '/((?!_next|[^?]*\\.(?:html?|css|js(?!on)|jpe?g|webp|png|gif|svg|ttf|woff2?|ico|csv|docx?|xlsx?|zip|webmanifest)).*)',
     // Always run for API routes
     '/(api|trpc)(.*)',
-    // Media assets (rewritten to /api/media/* but need middleware to set up Clerk auth context)
+    // Media assets (rewritten to /api/media/*)
     '/screenshots/:path*',
     '/diffs/:path*',
     '/baselines/:path*',
