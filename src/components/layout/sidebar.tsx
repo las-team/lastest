@@ -9,7 +9,6 @@ import {
   Play,
   GitCompare,
   Settings,
-  Circle,
   Layers,
   ListOrdered,
   FolderTree,
@@ -17,6 +16,7 @@ import {
   Zap,
   ClipboardCheck,
 } from 'lucide-react';
+import Image from 'next/image';
 import dynamic from 'next/dynamic';
 import { SyncReposButton } from './repo-selector';
 
@@ -68,7 +68,8 @@ export function Sidebar({ repos, selectedRepo, currentUser, team }: SidebarProps
           className="flex items-center gap-2 font-bold text-lg"
           style={{ height: 36 }}
         >
-          <Circle className="h-6 w-6 fill-primary text-primary" />
+          <Image src="/icon-light.svg" alt="" width={28} height={28} className="rounded-full dark:hidden" />
+          <Image src="/icon-dark.svg" alt="" width={28} height={28} className="rounded-full hidden dark:block" />
           LASTEST2
         </Link>
         {team && (

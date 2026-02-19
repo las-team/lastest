@@ -18,6 +18,12 @@ const jetbrainsMono = JetBrains_Mono({
 export const metadata: Metadata = {
   title: "Lastest2 - Visual Regression Testing",
   description: "AI-powered visual regression testing tool",
+  icons: {
+    icon: [
+      { url: "/icon-light.svg", type: "image/svg+xml", media: "(prefers-color-scheme: light)" },
+      { url: "/icon-dark.svg", type: "image/svg+xml", media: "(prefers-color-scheme: dark)" },
+    ],
+  },
 };
 
 export default function RootLayout({
