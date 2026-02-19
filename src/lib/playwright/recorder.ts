@@ -300,10 +300,13 @@ export class PlaywrightRecorder extends EventEmitter {
       // Tier 1 syntax validation: check if action has valid selectors or coordinate fallback
       const validSelectors = selectors.filter(sel => sel.value && sel.value.trim() && !sel.value.includes('undefined'));
       const hasValidSelectors = validSelectors.length > 0;
-      const hasCoordsFallback = action === 'click' && coordinates !== undefined;
+      const hasCoordsFallback = (action === 'click' || action === 'rightclick') && coordinates !== undefined;
       const syntaxValid = hasValidSelectors || hasCoordsFallback;
 
-      this.addEvent('action', { action, selector: primarySelector, selectors, value, coordinates, actionId, modifiers: modifiers && modifiers.length > 0 ? modifiers : undefined }, 'committed', {
+      // Store button for right-clicks
+      const button = action === 'rightclick' ? 2 : undefined;
+
+      this.addEvent('action', { action, selector: primarySelector, selectors, value, coordinates, actionId, button, modifiers: modifiers && modifiers.length > 0 ? modifiers : undefined }, 'committed', {
         syntaxValid,
         domVerified: undefined, // Will be set by async verification
         lastChecked: undefined,
@@ -864,17 +867,27 @@ export class PlaywrightRecorder extends EventEmitter {
         hideAssertionMenu();
       }
 
-      // Shift+Right-click to show assertion menu
+      // Right-click handling: Shift+Right-click = assertion menu, plain right-click = record context menu click
       document.addEventListener('contextmenu', (e) => {
-        if (!e.shiftKey) return; // Only trigger with Shift held
+        if (e.shiftKey) {
+          // Shift+Right-click: show assertion menu
+          e.preventDefault();
+          e.stopPropagation();
 
-        e.preventDefault();
-        e.stopPropagation();
+          const target = e.target as HTMLElement;
+          if (!target || target === document.body || target === document.documentElement) return;
 
-        const target = e.target as HTMLElement;
-        if (!target || target === document.body || target === document.documentElement) return;
-
-        showAssertionMenu(e.clientX, e.clientY, target);
+          showAssertionMenu(e.clientX, e.clientY, target);
+        } else {
+          // Plain right-click: record as a right-click action
+          const target = e.target as HTMLElement;
+          const selectors = generateAllSelectors(target);
+          const rect = target.getBoundingClientRect();
+          const boundingBox = { x: rect.x, y: rect.y, width: rect.width, height: rect.height };
+          const modifiers = getActiveModifiers();
+          // @ts-expect-error
+          window.__recordAction?.('rightclick', selectors, undefined, boundingBox, generateActionId(), modifiers);
+        }
       }, true);
 
       // Async DOM verification system
@@ -1074,7 +1087,7 @@ export class PlaywrightRecorder extends EventEmitter {
       `  }`,
       ``,
       `  // Multi-selector fallback helper with coordinate fallback for clicks`,
-      `  async function locateWithFallback(page, selectors, action, value, coords) {`,
+      `  async function locateWithFallback(page, selectors, action, value, coords, options) {`,
       `    const validSelectors = selectors.filter(sel => sel.value && sel.value.trim() && !sel.value.includes('undefined'));`,
       `    for (const sel of validSelectors) {`,
       `      try {`,
@@ -1097,7 +1110,7 @@ export class PlaywrightRecorder extends EventEmitter {
       `        const target = locator.first();`,
       `        await target.waitFor({ timeout: 3000 });`,
       `        if (action === 'locate') return target; // Return locator for assertions`,
-      `        if (action === 'click') await target.click();`,
+      `        if (action === 'click') await target.click(options || {});`,
       `        else if (action === 'fill') await target.fill(value || '');`,
       `        else if (action === 'selectOption') await target.selectOption(value || '');`,
       `        return target;`,
@@ -1107,7 +1120,7 @@ export class PlaywrightRecorder extends EventEmitter {
       `    // Coordinate fallback for clicks when all selectors fail`,
       `    if (action === 'click' && coords) {`,
       `      console.log('Falling back to coordinate click at', coords.x, coords.y);`,
-      `      await page.mouse.click(coords.x, coords.y);`,
+      `      await page.mouse.click(coords.x, coords.y, options || {});`,
       `      return;`,
       `    }`,
       ] : []),
@@ -1161,7 +1174,9 @@ export class PlaywrightRecorder extends EventEmitter {
         }
         lastAction = 'goto';
       } else if (event.type === 'action') {
-        const { action, selector, selectors, value, coordinates } = event.data;
+        const { action, selector, selectors, value, coordinates, button } = event.data;
+        const isRightClick = action === 'rightclick' || button === 2;
+        const clickOptions = isRightClick ? `{ button: 'right' }` : 'null';
 
         // Use multi-selector format if available
         if (selectors && selectors.length > 0) {
@@ -1170,6 +1185,9 @@ export class PlaywrightRecorder extends EventEmitter {
           switch (action) {
             case 'click':
               lines.push(`  await locateWithFallback(page, ${selectorsJson}, 'click', null, ${coordsArg});`);
+              break;
+            case 'rightclick':
+              lines.push(`  await locateWithFallback(page, ${selectorsJson}, 'click', null, ${coordsArg}, ${clickOptions});`);
               break;
             case 'fill':
               lines.push(`  await locateWithFallback(page, ${selectorsJson}, 'fill', '${value || ''}', null);`);
@@ -1184,6 +1202,9 @@ export class PlaywrightRecorder extends EventEmitter {
             case 'click':
               lines.push(`  await page.locator('${selector}').click();`);
               break;
+            case 'rightclick':
+              lines.push(`  await page.locator('${selector}').click(${clickOptions});`);
+              break;
             case 'fill':
               lines.push(`  await page.locator('${selector}').fill('${value || ''}');`);
               break;
@@ -1193,9 +1214,9 @@ export class PlaywrightRecorder extends EventEmitter {
           }
         } else {
           // No selectors available - use coordinate fallback for clicks
-          if (action === 'click' && coordinates) {
-            lines.push(`  // Coordinate-only click (no selectors found)`);
-            lines.push(`  await page.mouse.click(${coordinates.x}, ${coordinates.y});`);
+          if ((action === 'click' || action === 'rightclick') && coordinates) {
+            lines.push(`  // Coordinate-only ${isRightClick ? 'right-' : ''}click (no selectors found)`);
+            lines.push(`  await page.mouse.click(${coordinates.x}, ${coordinates.y}${isRightClick ? `, ${clickOptions}` : ''});`);
           } else {
             lines.push(`  // Skipped ${action}: no valid selector or coordinates found`);
           }
@@ -1273,6 +1294,8 @@ export class PlaywrightRecorder extends EventEmitter {
       } else if (event.type === 'mouse-down' && event.data.coordinates) {
         const { x, y } = event.data.coordinates;
         const modifiers = event.data.modifiers;
+        const mouseButton = event.data.button;
+        const buttonOpt = mouseButton === 2 ? `{ button: 'right' }` : '';
         // Press modifier keys before mouse down
         if (modifiers && modifiers.length > 0) {
           for (const mod of modifiers) {
@@ -1280,12 +1303,14 @@ export class PlaywrightRecorder extends EventEmitter {
           }
         }
         lines.push(`  await page.mouse.move(${x}, ${y});`);
-        lines.push(`  await page.mouse.down();`);
+        lines.push(`  await page.mouse.down(${buttonOpt});`);
       } else if (event.type === 'mouse-up' && event.data.coordinates) {
         const { x, y } = event.data.coordinates;
         const modifiers = event.data.modifiers;
+        const mouseButton = event.data.button;
+        const buttonOpt = mouseButton === 2 ? `{ button: 'right' }` : '';
         lines.push(`  await page.mouse.move(${x}, ${y});`);
-        lines.push(`  await page.mouse.up();`);
+        lines.push(`  await page.mouse.up(${buttonOpt});`);
         // Release modifier keys after mouse up
         if (modifiers && modifiers.length > 0) {
           for (const mod of modifiers) {
