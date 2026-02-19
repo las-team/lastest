@@ -606,6 +606,15 @@ async function runBuildAsync(
     // Clear setup context after tests complete
     runner.clearSetupContext();
 
+    // Check if this build was cancelled while running
+    const currentJob = await queries.getBackgroundJob(jobId);
+    if (currentJob?.error === 'Cancelled by user') {
+      revalidatePath('/builds');
+      revalidatePath('/');
+      processNextQueuedBuild(repositoryId);
+      return;
+    }
+
     // Update test run status
     const hasFailures = failedCount > 0;
     await queries.updateTestRun(testRunId, {
@@ -639,18 +648,24 @@ async function runBuildAsync(
       repositoryId,
     });
   } catch (error) {
-    await queries.updateTestRun(testRunId, {
-      completedAt: new Date(),
-      status: 'failed',
-    });
-    await queries.updateBuild(buildId, {
-      overallStatus: 'blocked',
-      completedAt: new Date(),
-      elapsedMs: Date.now() - startTime,
-    });
-    await failJob(jobId, error instanceof Error ? error.message : 'Build failed');
-    // Clear setup context on error to prevent stale state leaking to future runs
-    runner.clearSetupContext();
+    // Check if this build was cancelled while running — don't overwrite cancelJob's statuses
+    const currentJob = await queries.getBackgroundJob(jobId);
+    if (currentJob?.error === 'Cancelled by user') {
+      runner.clearSetupContext();
+    } else {
+      await queries.updateTestRun(testRunId, {
+        completedAt: new Date(),
+        status: 'failed',
+      });
+      await queries.updateBuild(buildId, {
+        overallStatus: 'blocked',
+        completedAt: new Date(),
+        elapsedMs: Date.now() - startTime,
+      });
+      await failJob(jobId, error instanceof Error ? error.message : 'Build failed');
+      // Clear setup context on error to prevent stale state leaking to future runs
+      runner.clearSetupContext();
+    }
   }
 
   revalidatePath('/builds');

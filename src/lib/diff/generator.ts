@@ -160,34 +160,25 @@ function hashRow(data: Buffer | Uint8Array, width: number, row: number): string 
 }
 
 /**
- * Compare two pixel rows and return the fraction of pixels that differ (0.0–1.0).
- * Uses a tolerance on the per-channel sum to ignore anti-aliasing noise.
+ * Compare two pixel rows using pixelmatch and return the fraction of pixels
+ * that differ (0.0–1.0). Uses the same threshold and AA detection as the
+ * main comparison, so sub-pixel font rendering noise is properly filtered.
  */
-function computeRowDiffRatio(
+function rowDiffRatioPixelmatch(
   dataA: Buffer | Uint8Array,
   dataB: Buffer | Uint8Array,
   width: number,
   rowA: number,
   rowB: number,
-  tolerance: number = 30
+  threshold: number,
+  includeAA: boolean
 ): number {
   const rowBytes = width * 4;
-  const startA = rowA * rowBytes;
-  const startB = rowB * rowBytes;
-  let diffCount = 0;
-
-  for (let x = 0; x < width; x++) {
-    const iA = startA + x * 4;
-    const iB = startB + x * 4;
-    const dr = Math.abs(dataA[iA] - dataB[iB]);
-    const dg = Math.abs(dataA[iA + 1] - dataB[iB + 1]);
-    const db = Math.abs(dataA[iA + 2] - dataB[iB + 2]);
-    if (dr + dg + db > tolerance) {
-      diffCount++;
-    }
-  }
-
-  return diffCount / width;
+  const rowDataA = Buffer.from(dataA.buffer, dataA.byteOffset + rowA * rowBytes, rowBytes);
+  const rowDataB = Buffer.from(dataB.buffer, dataB.byteOffset + rowB * rowBytes, rowBytes);
+  const output = new Uint8Array(rowBytes);
+  const diff = pixelmatch(rowDataA, rowDataB, output, width, 1, { threshold, includeAA });
+  return diff / width;
 }
 
 /**
@@ -298,79 +289,98 @@ function fuzzyMatchUnalignedRows(
   baselineData: Buffer | Uint8Array,
   currentData: Buffer | Uint8Array,
   width: number,
-  maxDiffRatio: number = 0.35,
-  windowSize: number = 5
+  threshold: number,
+  includeAA: boolean,
+  maxDiffRatio: number = 0.5
 ): AlignmentResult {
   const ops = [...alignment.ops];
   const baselineRows = [...alignment.baselineRows];
   const currentRows = [...alignment.currentRows];
 
-  // Collect indices of unpaired deletes and inserts
-  const deleteIndices: number[] = [];
-  const insertIndices: number[] = [];
-  for (let i = 0; i < ops.length; i++) {
-    if (ops[i] === 'delete') deleteIndices.push(i);
-    else if (ops[i] === 'insert') insertIndices.push(i);
-  }
+  // Find consecutive blocks of deletes followed by inserts (or vice versa)
+  // and pair them sequentially. This handles the common LCS pattern where
+  // a block of N deletes is followed by N inserts for near-identical rows.
+  let i = 0;
+  while (i < ops.length) {
+    // Find a block of deletes
+    let delStart = i;
+    while (i < ops.length && ops[i] === 'delete') i++;
+    const delEnd = i;
+    const delCount = delEnd - delStart;
 
-  // Nothing to fuzzy-match
-  if (deleteIndices.length === 0 || insertIndices.length === 0) {
-    return alignment;
-  }
+    // Find a following block of inserts
+    let insStart = i;
+    while (i < ops.length && ops[i] === 'insert') i++;
+    const insEnd = i;
+    const insCount = insEnd - insStart;
 
-  const usedInserts = new Set<number>();
+    // Also check insert-then-delete pattern
+    if (delCount === 0 && insCount > 0) {
+      // Check if inserts are followed by deletes
+      const delStart2 = i;
+      while (i < ops.length && ops[i] === 'delete') i++;
+      const delEnd2 = i;
+      const delCount2 = delEnd2 - delStart2;
 
-  for (const di of deleteIndices) {
-    const bRow = baselineRows[di];
-    if (bRow === -1) continue;
+      if (delCount2 > 0) {
+        // Pair inserts with following deletes sequentially
+        const pairCount = Math.min(insCount, delCount2);
+        for (let p = 0; p < pairCount; p++) {
+          const ii = insStart + p;
+          const di = delStart2 + p;
+          const cRow = currentRows[ii];
+          const bRow = baselineRows[di];
+          if (cRow === -1 || bRow === -1) continue;
 
-    let bestIdx = -1;
-    let bestRatio = maxDiffRatio;
+          const ratio = rowDiffRatioPixelmatch(baselineData, currentData, width, bRow, cRow, threshold, includeAA);
+          if (ratio < maxDiffRatio) {
+            ops[ii] = 'match';
+            baselineRows[ii] = bRow;
+            ops[di] = 'match' as AlignOp;
+            baselineRows[di] = -2;
+            currentRows[di] = -2;
+          }
+        }
+      }
+      continue;
+    }
 
-    // Search for the closest unpaired insert within the window
-    for (const ii of insertIndices) {
-      if (usedInserts.has(ii)) continue;
-      if (Math.abs(ii - di) > windowSize) continue;
+    if (delCount === 0 || insCount === 0) {
+      if (delCount === 0 && insCount === 0) i++;
+      continue;
+    }
 
+    // Pair deletes with inserts sequentially
+    const pairCount = Math.min(delCount, insCount);
+    for (let p = 0; p < pairCount; p++) {
+      const di = delStart + p;
+      const ii = insStart + p;
+      const bRow = baselineRows[di];
       const cRow = currentRows[ii];
-      if (cRow === -1) continue;
+      if (bRow === -1 || cRow === -1) continue;
 
-      const ratio = computeRowDiffRatio(baselineData, currentData, width, bRow, cRow);
-      if (ratio < bestRatio) {
-        bestRatio = ratio;
-        bestIdx = ii;
+      const ratio = rowDiffRatioPixelmatch(baselineData, currentData, width, bRow, cRow, threshold, includeAA);
+      if (ratio < maxDiffRatio) {
+        // Keep the delete position as 'match' with both row refs, remove the insert
+        ops[di] = 'match';
+        currentRows[di] = cRow;
+        ops[ii] = 'match' as AlignOp;
+        baselineRows[ii] = -2;
+        currentRows[ii] = -2;
       }
     }
-
-    if (bestIdx !== -1) {
-      // Reclassify: keep whichever index comes first as 'match', remove the other
-      const first = Math.min(di, bestIdx);
-      const second = Math.max(di, bestIdx);
-
-      // The 'match' op gets both row references
-      ops[first] = 'match';
-      baselineRows[first] = bRow;
-      currentRows[first] = currentRows[bestIdx];
-
-      // Mark the second op for removal
-      ops[second] = 'match' as AlignOp; // placeholder — will be spliced
-      baselineRows[second] = -2; // sentinel for removal
-      currentRows[second] = -2;
-
-      usedInserts.add(bestIdx);
-    }
   }
 
-  // Remove sentinel entries (spliced in reverse to preserve indices)
+  // Remove sentinel entries
   const finalOps: AlignOp[] = [];
   const finalBaselineRows: number[] = [];
   const finalCurrentRows: number[] = [];
 
-  for (let i = 0; i < ops.length; i++) {
-    if (baselineRows[i] === -2 && currentRows[i] === -2) continue;
-    finalOps.push(ops[i]);
-    finalBaselineRows.push(baselineRows[i]);
-    finalCurrentRows.push(currentRows[i]);
+  for (let j = 0; j < ops.length; j++) {
+    if (baselineRows[j] === -2 && currentRows[j] === -2) continue;
+    finalOps.push(ops[j]);
+    finalBaselineRows.push(baselineRows[j]);
+    finalCurrentRows.push(currentRows[j]);
   }
 
   return {
@@ -670,10 +680,14 @@ async function generateShiftAwareDiff(
   const baselineBg = detectBackgroundColor(baseline.data, baseline.width, baseline.height);
   const currentBg = detectBackgroundColor(current.data, current.width, current.height);
 
-  // Align rows using LCS (no fuzzy matching — pixelmatch handles anti-aliasing)
-  const alignment = alignRows(
+  // Align rows using LCS, then fuzzy-match nearby insert/delete pairs
+  // whose pixels are similar (anti-aliasing, font rendering differences)
+  const rawAlignment = alignRows(
     baseline.data, baseline.width, baseline.height,
     current.data, current.width, current.height
+  );
+  const alignment = fuzzyMatchUnalignedRows(
+    rawAlignment, baseline.data, current.data, width, threshold, includeAntiAliasing
   );
 
   // Build aligned buffers with ALL rows (insert/delete filled with bg color)
