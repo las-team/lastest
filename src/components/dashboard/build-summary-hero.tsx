@@ -1,6 +1,6 @@
 'use client';
 
-import { CheckCircle, AlertTriangle, XCircle, Loader2 } from 'lucide-react';
+import { CheckCircle, AlertTriangle, XCircle, ListTodo, Loader2 } from 'lucide-react';
 import type { BuildStatus } from '@/lib/db/schema';
 
 interface BuildSummaryHeroProps {
@@ -46,6 +46,15 @@ const statusConfig = {
     borderColor: 'border-red-200',
     textColor: 'text-red-700',
     iconColor: 'text-red-500',
+  },
+  has_todos: {
+    icon: ListTodo,
+    label: 'HAS TODOS',
+    description: 'Review todos need to be resolved',
+    bgColor: 'bg-amber-50',
+    borderColor: 'border-amber-200',
+    textColor: 'text-amber-700',
+    iconColor: 'text-amber-500',
   },
 };
 

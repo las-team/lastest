@@ -9,8 +9,31 @@ import { promisify } from 'util';
 
 const execAsync = promisify(exec);
 
+function maskSecret(value: string | null | undefined): string | null {
+  if (!value) return null;
+  if (value.length <= 8) return '••••••••';
+  return '••••••••' + value.slice(-4);
+}
+
 export async function getAISettings(repositoryId?: string | null) {
+  await requireTeamAccess();
+  const settings = await queries.getAISettings(repositoryId);
+  return {
+    ...settings,
+    openrouterApiKey: maskSecret(settings.openrouterApiKey),
+    aiDiffingApiKey: maskSecret(settings.aiDiffingApiKey),
+    _hasOpenrouterKey: !!settings.openrouterApiKey,
+    _hasAiDiffingKey: !!settings.aiDiffingApiKey,
+  };
+}
+
+export async function getAISettingsRaw(repositoryId?: string | null) {
+  await requireTeamAccess();
   return queries.getAISettings(repositoryId);
+}
+
+function isMaskedValue(value: string | null | undefined): boolean {
+  return !!value && value.startsWith('••••••••');
 }
 
 export async function saveAISettings(data: {
@@ -34,6 +57,10 @@ export async function saveAISettings(data: {
   if (data.repositoryId) await requireRepoAccess(data.repositoryId);
   else await requireTeamAccess();
   const { repositoryId, ...settingsData } = data;
+
+  // Don't overwrite real keys with masked placeholders
+  if (isMaskedValue(settingsData.openrouterApiKey)) delete settingsData.openrouterApiKey;
+  if (isMaskedValue(settingsData.aiDiffingApiKey)) delete settingsData.aiDiffingApiKey;
 
   await queries.upsertAISettings(repositoryId || null, settingsData);
 

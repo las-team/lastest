@@ -5,6 +5,7 @@ import {
   validateSelectorsOnPage,
   type SelectorValidationResult,
 } from '@/lib/ai/mcp-validator';
+import { requireTeamAccess } from '@/lib/auth';
 
 export async function mcpValidateTest(
   code: string,
@@ -15,6 +16,7 @@ export async function mcpValidateTest(
   results?: SelectorValidationResult[];
   error?: string;
 }> {
+  await requireTeamAccess();
   try {
     // Extract selectors from the test code
     const selectors = extractSelectors(code);

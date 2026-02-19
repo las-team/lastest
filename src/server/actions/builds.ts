@@ -26,6 +26,7 @@ import path from 'path';
 import { createJob, createPendingJob, startJob, updateJobProgress, completeJob, failJob } from './jobs';
 import { triggerAIDiffAnalysis } from './ai-diffs';
 import { forkBaselinesForBranch } from './baselines';
+import { STORAGE_DIRS, STORAGE_ROOT, toRelativePath } from '@/lib/storage/paths';
 import { compareBranches } from '@/lib/github/content';
 import { findAffectedTests } from '@/lib/smart-selection/file-matcher';
 
@@ -116,7 +117,7 @@ async function computeCodeChangeTestIds(
   });
 }
 
-const DIFFS_DIR = path.join(process.cwd(), 'public', 'diffs');
+const DIFFS_DIR = STORAGE_DIRS.diffs;
 
 export interface BuildSummary {
   id: string;
@@ -605,6 +606,15 @@ async function runBuildAsync(
     // Clear setup context after tests complete
     runner.clearSetupContext();
 
+    // Check if this build was cancelled while running
+    const currentJob = await queries.getBackgroundJob(jobId);
+    if (currentJob?.error === 'Cancelled by user') {
+      revalidatePath('/builds');
+      revalidatePath('/');
+      processNextQueuedBuild(repositoryId);
+      return;
+    }
+
     // Update test run status
     const hasFailures = failedCount > 0;
     await queries.updateTestRun(testRunId, {
@@ -638,18 +648,24 @@ async function runBuildAsync(
       repositoryId,
     });
   } catch (error) {
-    await queries.updateTestRun(testRunId, {
-      completedAt: new Date(),
-      status: 'failed',
-    });
-    await queries.updateBuild(buildId, {
-      overallStatus: 'blocked',
-      completedAt: new Date(),
-      elapsedMs: Date.now() - startTime,
-    });
-    await failJob(jobId, error instanceof Error ? error.message : 'Build failed');
-    // Clear setup context on error to prevent stale state leaking to future runs
-    runner.clearSetupContext();
+    // Check if this build was cancelled while running — don't overwrite cancelJob's statuses
+    const currentJob = await queries.getBackgroundJob(jobId);
+    if (currentJob?.error === 'Cancelled by user') {
+      runner.clearSetupContext();
+    } else {
+      await queries.updateTestRun(testRunId, {
+        completedAt: new Date(),
+        status: 'failed',
+      });
+      await queries.updateBuild(buildId, {
+        overallStatus: 'blocked',
+        completedAt: new Date(),
+        elapsedMs: Date.now() - startTime,
+      });
+      await failJob(jobId, error instanceof Error ? error.message : 'Build failed');
+      // Clear setup context on error to prevent stale state leaking to future runs
+      runner.clearSetupContext();
+    }
   }
 
   revalidatePath('/builds');
@@ -794,7 +810,7 @@ async function processVisualDiff(
 
   // Check for carry-forward (previously approved identical image)
   // Try dimension-aware hash first, fall back to legacy hash for old baselines
-  const currentImageFullPath = path.join(process.cwd(), 'public', currentScreenshotPath);
+  const currentImageFullPath = path.join(STORAGE_ROOT, currentScreenshotPath);
   const currentHashWithDims = hashImageWithDimensions(currentImageFullPath);
   const currentHash = hashImage(currentImageFullPath);
   const matchingBaseline =
@@ -822,8 +838,8 @@ async function processVisualDiff(
 
     try {
       const plannedDiffResult = await generateDiff(
-        path.join(process.cwd(), 'public', plannedScreenshot.imagePath),
-        path.join(process.cwd(), 'public', currentPath),
+        path.join(STORAGE_ROOT, plannedScreenshot.imagePath),
+        path.join(STORAGE_ROOT, currentPath),
         DIFFS_DIR,
         0.1,
         includeAntiAliasing,
@@ -832,7 +848,7 @@ async function processVisualDiff(
 
       return {
         plannedImagePath: plannedScreenshot.imagePath,
-        plannedDiffImagePath: plannedDiffResult.diffImagePath.replace(process.cwd() + '/public', ''),
+        plannedDiffImagePath: toRelativePath(plannedDiffResult.diffImagePath),
         plannedPixelDifference: plannedDiffResult.pixelDifference,
         plannedPercentageDifference: plannedDiffResult.percentageDifference.toString(),
       };
@@ -866,8 +882,8 @@ async function processVisualDiff(
 
     try {
       const mainDiffResult = await generateDiff(
-        path.join(process.cwd(), 'public', mainBaseline.imagePath),
-        path.join(process.cwd(), 'public', currentPath),
+        path.join(STORAGE_ROOT, mainBaseline.imagePath),
+        path.join(STORAGE_ROOT, currentPath),
         DIFFS_DIR,
         0.1,
         includeAntiAliasing,
@@ -880,7 +896,7 @@ async function processVisualDiff(
 
       return {
         mainBaselineImagePath: mainBaseline.imagePath,
-        mainDiffImagePath: mainDiffResult.diffImagePath.replace(process.cwd() + '/public', ''),
+        mainDiffImagePath: toRelativePath(mainDiffResult.diffImagePath),
         mainPixelDifference: mainDiffResult.pixelDifference,
         mainPercentageDifference: mainDiffResult.percentageDifference.toString(),
         mainClassification: mainCls,
@@ -900,8 +916,8 @@ async function processVisualDiff(
     // Validate carry-forward: verify dimensions match before trusting hash
     let carryForwardValid = false;
     try {
-      const currentBuf = fs.readFileSync(path.join(process.cwd(), 'public', currentScreenshotPath));
-      const baselineBuf = fs.readFileSync(path.join(process.cwd(), 'public', matchingBaseline.imagePath));
+      const currentBuf = fs.readFileSync(path.join(STORAGE_ROOT, currentScreenshotPath));
+      const baselineBuf = fs.readFileSync(path.join(STORAGE_ROOT, matchingBaseline.imagePath));
       const currentPng = PNG.sync.read(currentBuf);
       const baselinePng = PNG.sync.read(baselineBuf);
       carryForwardValid = currentPng.width === baselinePng.width && currentPng.height === baselinePng.height;
@@ -956,7 +972,7 @@ async function processVisualDiff(
     });
 
     if (shouldAutoApprove) {
-      const autoHash = hashImageWithDimensions(path.join(process.cwd(), 'public', currentScreenshotPath));
+      const autoHash = hashImageWithDimensions(path.join(STORAGE_ROOT, currentScreenshotPath));
       await queries.deactivateBaselines(testId, stepLabel || null, branch);
       await queries.createBaseline({
         testId,
@@ -974,8 +990,8 @@ async function processVisualDiff(
   // Generate diff against primary baseline
   try {
     const diffResult = await generateDiff(
-      path.join(process.cwd(), 'public', baseline.imagePath),
-      path.join(process.cwd(), 'public', currentScreenshotPath),
+      path.join(STORAGE_ROOT, baseline.imagePath),
+      path.join(STORAGE_ROOT, currentScreenshotPath),
       DIFFS_DIR,
       0.1,
       includeAntiAliasing,
@@ -987,7 +1003,19 @@ async function processVisualDiff(
     const { classification, status } = classifyDiff(pct);
     const effectiveStatus = shouldAutoApprove ? 'auto_approved' : status;
     const hasChanges = shouldAutoApprove ? false : classification !== 'unchanged';
-    const diffImagePath = diffResult.diffImagePath.replace(process.cwd() + '/public', '');
+    const diffImagePath = toRelativePath(diffResult.diffImagePath);
+
+    // Strip absolute paths from aligned shift images before DB storage
+    const metadata = diffResult.metadata;
+    if (metadata.pageShift?.alignedBaselineImagePath) {
+      metadata.pageShift.alignedBaselineImagePath = toRelativePath(metadata.pageShift.alignedBaselineImagePath);
+    }
+    if (metadata.pageShift?.alignedCurrentImagePath) {
+      metadata.pageShift.alignedCurrentImagePath = toRelativePath(metadata.pageShift.alignedCurrentImagePath);
+    }
+    if (metadata.pageShift?.alignedDiffImagePath) {
+      metadata.pageShift.alignedDiffImagePath = toRelativePath(metadata.pageShift.alignedDiffImagePath);
+    }
 
     const plannedDiff = await generatePlannedDiff(currentScreenshotPath);
     const mainDiff = await generateMainBaselineDiff(currentScreenshotPath);
@@ -1004,13 +1032,13 @@ async function processVisualDiff(
       classification,
       pixelDifference: diffResult.pixelDifference,
       percentageDifference: diffResult.percentageDifference.toString(),
-      metadata: diffResult.metadata,
+      metadata,
       ...plannedDiff,
       ...mainDiff,
     });
 
     if (shouldAutoApprove && classification !== 'unchanged') {
-      const autoHash = hashImageWithDimensions(path.join(process.cwd(), 'public', currentScreenshotPath));
+      const autoHash = hashImageWithDimensions(path.join(STORAGE_ROOT, currentScreenshotPath));
       await queries.deactivateBaselines(testId, stepLabel || null, branch);
       await queries.createBaseline({
         testId,

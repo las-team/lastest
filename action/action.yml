@@ -67,9 +67,24 @@ runs:
         echo "Repository: ${GITHUB_REPO}"
         echo ""
 
+        # Pre-flight: check server connectivity
+        echo "Checking server connectivity..."
+        HEALTH_HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" --connect-timeout 10 "${SERVER_URL}/api/health" 2>/dev/null || echo "000")
+        if [ "$HEALTH_HTTP_CODE" = "000" ]; then
+          echo "::error::Cannot connect to Lastest2 server at ${SERVER_URL} (connection refused or DNS failure)"
+          echo "Ensure the server is running and accessible from GitHub Actions runners."
+          exit 1
+        elif [ "$HEALTH_HTTP_CODE" != "200" ]; then
+          echo "::warning::Server health check returned HTTP ${HEALTH_HTTP_CODE} (continuing anyway)"
+        else
+          echo "Server is reachable."
+        fi
+
         # Create build — repo is resolved server-side from GITHUB_REPOSITORY
         echo "Creating build..."
-        CREATE_RESPONSE=$(curl -sf -X POST "${SERVER_URL}/api/builds/create" \
+        HTTP_RESPONSE=$(mktemp)
+        HTTP_CODE=$(curl -s -w "%{http_code}" -o "$HTTP_RESPONSE" --connect-timeout 15 --max-time 30 \
+          -X POST "${SERVER_URL}/api/builds/create" \
           -H "Content-Type: application/json" \
           -H "Authorization: Bearer ${TOKEN}" \
           -d "{
@@ -77,11 +92,36 @@ runs:
             \"triggerType\": \"ci\",
             \"gitBranch\": \"${GITHUB_HEAD_REF:-${GITHUB_REF_NAME:-unknown}}\",
             \"gitCommit\": \"${GITHUB_SHA:-unknown}\"
-          }" || { echo "::error::Failed to connect to Lastest2 server at ${SERVER_URL}"; exit 1; })
+          }" 2>/dev/null || echo "000")
+        CREATE_RESPONSE=$(cat "$HTTP_RESPONSE" 2>/dev/null || echo "")
+        rm -f "$HTTP_RESPONSE"
+
+        if [ "$HTTP_CODE" = "000" ]; then
+          echo "::error::Failed to connect to Lastest2 server at ${SERVER_URL} (connection timeout)"
+          exit 1
+        elif [ "$HTTP_CODE" = "401" ]; then
+          echo "::error::Authentication failed (HTTP 401). Check that runner-token is valid."
+          exit 1
+        elif [ "$HTTP_CODE" = "403" ]; then
+          echo "::error::Access denied (HTTP 403). Repository may not belong to the runner's team."
+          echo "Response: ${CREATE_RESPONSE}"
+          exit 1
+        elif [ "$HTTP_CODE" = "404" ]; then
+          echo "::error::Repository '${GITHUB_REPO}' not found (HTTP 404). Ensure it's registered in Lastest2."
+          echo "Response: ${CREATE_RESPONSE}"
+          exit 1
+        elif [ "$HTTP_CODE" -ge 500 ] 2>/dev/null; then
+          echo "::error::Server error (HTTP ${HTTP_CODE}). Check Lastest2 server logs."
+          echo "Response: ${CREATE_RESPONSE}"
+          exit 1
+        elif [ "$HTTP_CODE" -ge 400 ] 2>/dev/null; then
+          echo "::error::Request failed (HTTP ${HTTP_CODE}): ${CREATE_RESPONSE}"
+          exit 1
+        fi
 
         BUILD_ID=$(echo "$CREATE_RESPONSE" | jq -r '.buildId // empty')
         if [ -z "$BUILD_ID" ]; then
-          echo "::error::Failed to create build: ${CREATE_RESPONSE}"
+          echo "::error::Unexpected response from server (HTTP ${HTTP_CODE}): ${CREATE_RESPONSE}"
           exit 1
         fi
 
@@ -117,8 +157,18 @@ runs:
             exit 1
           fi
 
-          STATUS_RESPONSE=$(curl -sf "${SERVER_URL}/api/builds/${BUILD_ID}/status" \
-            -H "Authorization: Bearer ${TOKEN}" || { echo "::warning::Failed to poll build status, retrying..."; sleep 3; continue; })
+          POLL_FILE=$(mktemp)
+          POLL_CODE=$(curl -s -w "%{http_code}" -o "$POLL_FILE" --connect-timeout 10 --max-time 15 \
+            "${SERVER_URL}/api/builds/${BUILD_ID}/status" \
+            -H "Authorization: Bearer ${TOKEN}" 2>/dev/null || echo "000")
+          STATUS_RESPONSE=$(cat "$POLL_FILE" 2>/dev/null || echo "")
+          rm -f "$POLL_FILE"
+
+          if [ "$POLL_CODE" != "200" ]; then
+            echo "::warning::Poll returned HTTP ${POLL_CODE}, retrying in 3s..."
+            sleep 3
+            continue
+          fi
 
           COMPLETED_AT=$(echo "$STATUS_RESPONSE" | jq -r '.completedAt // empty')
           PASSED_COUNT=$(echo "$STATUS_RESPONSE" | jq -r '.passedCount // 0')

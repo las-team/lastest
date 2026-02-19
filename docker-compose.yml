@@ -24,14 +24,13 @@ services:
       - "3000:3000"
     volumes:
       - lastest2-data:/app/data
-      - lastest2-screenshots:/app/public/screenshots
-      - lastest2-baselines:/app/public/baselines
+      - lastest2-storage:/app/storage
     environment:
       - NODE_ENV=production
       - DATABASE_PATH=/app/data/lastest2.db
-      - BETTER_AUTH_SECRET=${BETTER_AUTH_SECRET:?BETTER_AUTH_SECRET is required}
-      - GITHUB_CLIENT_ID=${GITHUB_CLIENT_ID:-}
-      - GITHUB_CLIENT_SECRET=${GITHUB_CLIENT_SECRET:-}
+      - NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=${NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY:?NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY is required}
+      - CLERK_SECRET_KEY=${CLERK_SECRET_KEY:?CLERK_SECRET_KEY is required}
+      - CLERK_WEBHOOK_SIGNING_SECRET=${CLERK_WEBHOOK_SIGNING_SECRET:-}
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "wget", "-q", "--spider", "http://localhost:3000/api/health"]
@@ -43,7 +42,5 @@ services:
 volumes:
   lastest2-data:
     driver: local
-  lastest2-screenshots:
-    driver: local
-  lastest2-baselines:
+  lastest2-storage:
     driver: local

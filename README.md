@@ -383,7 +383,8 @@ Uses the official Playwright base image (`mcr.microsoft.com/playwright`) with No
 ### Environment Variables for Docker
 
 ```bash
-BETTER_AUTH_SECRET=your-secret-key
+CLERK_SECRET_KEY=your-clerk-secret-key
+NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=your-clerk-publishable-key
 GITHUB_CLIENT_ID=your-github-app-id
 GITHUB_CLIENT_SECRET=your-github-app-secret
 ```
@@ -532,8 +533,9 @@ All configuration lives under a unified Settings page:
 ## Environment Variables
 
 ```bash
-# Session encryption (auto-generated if not set)
-BETTER_AUTH_SECRET=
+# Clerk authentication
+CLERK_SECRET_KEY=
+NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=
 
 # GitHub OAuth (for repository sync + login)
 GITHUB_CLIENT_ID=

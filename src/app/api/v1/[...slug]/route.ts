@@ -20,11 +20,12 @@
 import { NextRequest, NextResponse } from 'next/server';
 import * as queries from '@/lib/db/queries';
 import { createAndRunBuild } from '@/server/actions/builds';
-import { getCurrentSession } from '@/lib/auth/session';
+import { getCurrentSession } from '@/lib/auth';
+import { verifyBearerToken } from '@/lib/auth/api-key';
 
-// Helper to verify API auth (session token or Bearer token)
+// Helper to verify API auth (Clerk session or Bearer token)
 async function verifyAuth(request: NextRequest) {
-  // Try session-based auth first
+  // Try Clerk session first
   const session = await getCurrentSession();
   if (session) {
     return session;
@@ -34,16 +35,7 @@ async function verifyAuth(request: NextRequest) {
   const authHeader = request.headers.get('authorization');
   if (authHeader?.startsWith('Bearer ')) {
     const token = authHeader.slice(7);
-    // Verify token against session tokens
-    const result = await queries.getSessionWithUser(token);
-    if (result && result.session.expiresAt > new Date()) {
-      const team = result.user.teamId ? await queries.getTeam(result.user.teamId) : null;
-      return {
-        user: result.user,
-        sessionId: result.session.id,
-        team,
-      };
-    }
+    return verifyBearerToken(token);
   }
 
   return null;
@@ -115,15 +107,21 @@ export async function GET(
 
     // Functional areas
     if (resource === 'functional-areas' && id) {
+      const area = await queries.getFunctionalArea(id);
+      if (!area) {
+        return NextResponse.json({ error: 'Not found' }, { status: 404 });
+      }
+      // Verify team ownership via repository
+      if (area.repositoryId) {
+        const areaRepo = await queries.getRepository(area.repositoryId);
+        if (!areaRepo || areaRepo.teamId !== session.team?.id) {
+          return NextResponse.json({ error: 'Not found' }, { status: 404 });
+        }
+      }
       if (subResource === 'tests') {
         const tests = await queries.getTestsByFunctionalArea(id);
         const enrichedTests = await enrichTestsWithStatus(tests);
         return NextResponse.json(enrichedTests);
-      }
-
-      const area = await queries.getFunctionalArea(id);
-      if (!area) {
-        return NextResponse.json({ error: 'Not found' }, { status: 404 });
       }
       return NextResponse.json(area);
     }
@@ -134,7 +132,13 @@ export async function GET(
       if (!test) {
         return NextResponse.json({ error: 'Not found' }, { status: 404 });
       }
-      // Enrich with last run status
+      // Verify team ownership via repository
+      if (test.repositoryId) {
+        const testRepo = await queries.getRepository(test.repositoryId);
+        if (!testRepo || testRepo.teamId !== session.team?.id) {
+          return NextResponse.json({ error: 'Not found' }, { status: 404 });
+        }
+      }
       const [enriched] = await enrichTestsWithStatus([test]);
       return NextResponse.json(enriched);
     }
@@ -144,6 +148,13 @@ export async function GET(
       const run = await queries.getTestRun(id);
       if (!run) {
         return NextResponse.json({ error: 'Not found' }, { status: 404 });
+      }
+      // Verify team ownership via repository
+      if (run.repositoryId) {
+        const runRepo = await queries.getRepository(run.repositoryId);
+        if (!runRepo || runRepo.teamId !== session.team?.id) {
+          return NextResponse.json({ error: 'Not found' }, { status: 404 });
+        }
       }
       const results = await queries.getTestResultsByRun(id);
       return NextResponse.json({ run, results });
@@ -156,6 +167,13 @@ export async function GET(
         return NextResponse.json({ error: 'Not found' }, { status: 404 });
       }
       const testRun = build.testRunId ? await queries.getTestRun(build.testRunId) : null;
+      // Verify team ownership via repository on the test run
+      if (testRun?.repositoryId) {
+        const buildRepo = await queries.getRepository(testRun.repositoryId);
+        if (!buildRepo || buildRepo.teamId !== session.team?.id) {
+          return NextResponse.json({ error: 'Not found' }, { status: 404 });
+        }
+      }
       const diffs = await queries.getVisualDiffsWithTestStatus(id);
       return NextResponse.json({
         ...build,
@@ -169,7 +187,7 @@ export async function GET(
   } catch (error) {
     console.error('[API v1] GET error:', error);
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : 'Internal error' },
+      { error: 'Internal server error' },
       { status: 500 }
     );
   }
@@ -220,7 +238,7 @@ export async function POST(
   } catch (error) {
     console.error('[API v1] POST error:', error);
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : 'Internal error' },
+      { error: 'Internal server error' },
       { status: 500 }
     );
   }

@@ -30,12 +30,21 @@ export interface RecordedAction {
   timestamp: number;
 }
 
+export interface AlignmentSegment {
+  op: 'match' | 'insert' | 'delete';
+  count: number;
+}
+
 export interface PageShiftInfo {
   detected: boolean;
   deltaY: number;
   confidence: number;
   insertedRows?: number;
   deletedRows?: number;
+  alignedBaselineImagePath?: string;
+  alignedCurrentImagePath?: string;
+  alignedDiffImagePath?: string;
+  alignmentSegments?: AlignmentSegment[];
 }
 
 export interface AIDiffAnalysis {
@@ -397,6 +406,10 @@ export interface StabilizationSettings {
   hideLoadingIndicators: boolean;   // CSS hide common spinners (default: true)
   loadingSelectors: string[];       // Custom selectors to wait for removal
 
+  // Image loading
+  waitForImages: boolean;           // Wait for all images to finish loading (default: true)
+  waitForImagesTimeout: number;     // Max wait time in ms (default: 5000)
+
   // Style stabilization
   waitForFonts: boolean;            // Wait for font loading (default: true)
   disableWebfonts: boolean;         // Use system fonts only (default: false)
@@ -429,6 +442,8 @@ export const DEFAULT_STABILIZATION_SETTINGS: StabilizationSettings = {
   mockThirdPartyImages: true,
   hideLoadingIndicators: true,
   loadingSelectors: [],
+  waitForImages: true,
+  waitForImagesTimeout: 5000,
   waitForFonts: true,
   disableWebfonts: false,
   crossOsConsistency: false,
@@ -588,8 +603,8 @@ export const DEFAULT_DIFF_THRESHOLDS = {
 export type DiffClassification = 'unchanged' | 'flaky' | 'changed';
 
 // Build status enum
-export type BuildStatus = 'safe_to_merge' | 'review_required' | 'blocked';
-export type DiffStatus = 'pending' | 'approved' | 'rejected' | 'auto_approved';
+export type BuildStatus = 'safe_to_merge' | 'review_required' | 'blocked' | 'has_todos';
+export type DiffStatus = 'pending' | 'approved' | 'rejected' | 'auto_approved' | 'todo';
 export type TriggerType = 'webhook' | 'manual' | 'push';
 
 // AI Provider settings for test generation
@@ -790,6 +805,7 @@ export const teams = sqliteTable('teams', {
   id: text('id').primaryKey(),
   name: text('name').notNull(),
   slug: text('slug').notNull().unique(),
+  clerkOrgId: text('clerk_org_id').unique(),
   createdAt: integer('created_at', { mode: 'timestamp' }),
   updatedAt: integer('updated_at', { mode: 'timestamp' }),
 });
@@ -804,6 +820,7 @@ export const users = sqliteTable('users', {
   hashedPassword: text('hashed_password'),
   name: text('name'),
   avatarUrl: text('avatar_url'),
+  clerkId: text('clerk_id').unique(),
   teamId: text('team_id').references(() => teams.id), // Single team membership
   role: text('role').notNull().default('member'), // 'owner' | 'admin' | 'member' | 'viewer'
   emailVerified: integer('email_verified', { mode: 'boolean' }).default(false),
@@ -1165,3 +1182,57 @@ export const agentSessions = sqliteTable('agent_sessions', {
 
 export type AgentSession = typeof agentSessions.$inferSelect;
 export type NewAgentSession = typeof agentSessions.$inferInsert;
+
+// ── Bug Reports ──────────────────────────────────────────────────────────────
+
+export type BugReportSeverity = 'low' | 'medium' | 'high';
+
+export interface BugReportContext {
+  url: string;
+  viewport: { width: number; height: number };
+  userAgent: string;
+  appVersion: string | null;
+  gitHash: string | null;
+  buildDate: string | null;
+  consoleErrors: { message: string; timestamp: number }[];
+  failedRequests: { url: string; status: number; method: string }[];
+  breadcrumbs: { action: string; target: string; timestamp: number }[];
+  selectedRepoId?: string | null;
+  selectedRepoName?: string | null;
+}
+
+export const bugReports = sqliteTable('bug_reports', {
+  id: text('id').primaryKey(),
+  teamId: text('team_id').references(() => teams.id, { onDelete: 'cascade' }).notNull(),
+  reportedById: text('reported_by_id').references(() => users.id, { onDelete: 'cascade' }).notNull(),
+  description: text('description').notNull(),
+  severity: text('severity').$type<BugReportSeverity>().notNull().default('medium'),
+  context: text('context', { mode: 'json' }).$type<BugReportContext>(),
+  screenshotPath: text('screenshot_path'),
+  contentHash: text('content_hash'),
+  githubIssueUrl: text('github_issue_url'),
+  githubIssueNumber: integer('github_issue_number'),
+  createdAt: integer('created_at', { mode: 'timestamp' }).$defaultFn(() => new Date()),
+});
+
+export type BugReport = typeof bugReports.$inferSelect;
+export type NewBugReport = typeof bugReports.$inferInsert;
+
+// Review todos — branch-specific actionable items created when reviewer flags a diff
+export const reviewTodos = sqliteTable('review_todos', {
+  id: text('id').primaryKey(),
+  repositoryId: text('repository_id').references(() => repositories.id),
+  diffId: text('diff_id').references(() => visualDiffs.id),
+  buildId: text('build_id').references(() => builds.id),
+  testId: text('test_id').references(() => tests.id),
+  branch: text('branch').notNull(),
+  description: text('description').notNull(),
+  status: text('status').notNull().default('open'), // 'open' | 'resolved'
+  createdBy: text('created_by'),
+  resolvedBy: text('resolved_by'),
+  resolvedAt: integer('resolved_at', { mode: 'timestamp' }),
+  createdAt: integer('created_at', { mode: 'timestamp' }).$defaultFn(() => new Date()),
+});
+
+export type ReviewTodo = typeof reviewTodos.$inferSelect;
+export type NewReviewTodo = typeof reviewTodos.$inferInsert;

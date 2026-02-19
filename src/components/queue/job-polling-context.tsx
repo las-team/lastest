@@ -12,7 +12,7 @@ const JobPollingContext = createContext<JobPollingContextValue | null>(null);
 
 export function JobPollingProvider({ children }: { children: ReactNode }) {
   const [jobs, setJobs] = useState<BackgroundJob[]>([]);
-  const [isPolling, setIsPolling] = useState(true);
+  const [isPolling, setIsPolling] = useState(false);
   const timerRef = useRef<NodeJS.Timeout | null>(null);
 
   const fetchJobs = useCallback(async () => {
@@ -22,11 +22,7 @@ export function JobPollingProvider({ children }: { children: ReactNode }) {
         const data: BackgroundJob[] = await res.json();
         setJobs(data);
         const hasActive = data.some(j => j.status === 'pending' || j.status === 'running');
-        if (!hasActive && data.length === 0) {
-          setIsPolling(false);
-        } else {
-          setIsPolling(true);
-        }
+        setIsPolling(hasActive);
       }
     } catch {
       // Silently fail
@@ -39,7 +35,7 @@ export function JobPollingProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     if (isPolling) {
-      timerRef.current = setInterval(fetchJobs, 2000);
+      timerRef.current = setInterval(fetchJobs, 3000);
     } else {
       if (timerRef.current) clearInterval(timerRef.current);
     }

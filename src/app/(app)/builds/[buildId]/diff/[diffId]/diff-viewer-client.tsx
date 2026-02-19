@@ -1,13 +1,14 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { SliderComparison } from '@/components/diff/slider-comparison';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
-import { approveDiff, rejectDiff, undoApproval } from '@/server/actions/diffs';
+import { approveDiff, undoApproval, addDiffTodo } from '@/server/actions/diffs';
 import type { VisualDiff, Test, DiffMetadata, AIDiffAnalysis } from '@/lib/db/schema';
-import { CheckCircle, XCircle, SkipForward, Eye, Image as ImageIcon, Sparkles, Loader2, ArrowUpDown, Bug, ChevronDown } from 'lucide-react';
+import { CheckCircle, ListTodo, SkipForward, Eye, Image as ImageIcon, Sparkles, Loader2, ArrowUpDown, Bug, ChevronDown } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 
 interface DiffViewerClientProps {
   diff: VisualDiff & { test: Test | null; errorMessage?: string | null };
@@ -20,6 +21,9 @@ export function DiffViewerClient({ diff, buildId, nextDiffId }: DiffViewerClient
   const [isProcessing, setIsProcessing] = useState(false);
   const [showUndo, setShowUndo] = useState(false);
   const [undoTimeout, setUndoTimeout] = useState<NodeJS.Timeout | null>(null);
+  const [showTodoInput, setShowTodoInput] = useState(false);
+  const [todoDescription, setTodoDescription] = useState('');
+  const todoInputRef = useRef<HTMLInputElement>(null);
 
   const handleApprove = useCallback(async () => {
     if (isProcessing || diff.status === 'approved') return;
@@ -50,19 +54,27 @@ export function DiffViewerClient({ diff, buildId, nextDiffId }: DiffViewerClient
     }
   }, [diff.id, diff.status, isProcessing, nextDiffId, buildId, router]);
 
-  const handleReject = useCallback(async () => {
-    if (isProcessing || diff.status === 'rejected') return;
+  const handleAddTodo = useCallback(async () => {
+    if (!todoDescription.trim()) return;
+    if (isProcessing || diff.status === 'todo') return;
 
     setIsProcessing(true);
     try {
-      await rejectDiff(diff.id);
+      await addDiffTodo(diff.id, todoDescription.trim());
+      setShowTodoInput(false);
+      setTodoDescription('');
       router.refresh();
     } catch (error) {
-      console.error('Failed to reject:', error);
+      console.error('Failed to add todo:', error);
     } finally {
       setIsProcessing(false);
     }
-  }, [diff.id, diff.status, isProcessing, router]);
+  }, [diff.id, diff.status, isProcessing, todoDescription, router]);
+
+  const handleShowTodoInput = useCallback(() => {
+    setShowTodoInput(true);
+    setTimeout(() => todoInputRef.current?.focus(), 50);
+  }, []);
 
   const handleUndo = async () => {
     if (undoTimeout) clearTimeout(undoTimeout);
@@ -90,30 +102,30 @@ export function DiffViewerClient({ diff, buildId, nextDiffId }: DiffViewerClient
       }
 
       switch (e.key.toLowerCase()) {
-        case 'a':
+        case 'e':
           e.preventDefault();
           handleApprove();
           break;
-        case 'r':
+        case 't':
           e.preventDefault();
-          handleReject();
+          handleShowTodoInput();
           break;
         case 's':
           e.preventDefault();
           handleSkip();
           break;
-        case 'arrowleft':
-          // Navigate to prev (handled by link)
-          break;
-        case 'arrowright':
-          // Navigate to next (handled by link)
+        case 'escape':
+          if (showTodoInput) {
+            setShowTodoInput(false);
+            setTodoDescription('');
+          }
           break;
       }
     };
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [handleApprove, handleReject, handleSkip]);
+  }, [handleApprove, handleShowTodoInput, handleSkip, showTodoInput]);
 
   // Cleanup timeout on unmount
   useEffect(() => {
@@ -136,10 +148,12 @@ export function DiffViewerClient({ diff, buildId, nextDiffId }: DiffViewerClient
               ? 'bg-green-100 text-green-700'
               : diff.status === 'rejected'
                 ? 'bg-destructive/10 text-destructive'
-                : 'bg-yellow-100 text-yellow-700'
+                : diff.status === 'todo'
+                  ? 'bg-amber-100 text-amber-700'
+                  : 'bg-yellow-100 text-yellow-700'
           }`}
         >
-          {diff.status === 'auto_approved' ? 'Auto-Approved (Carry-Forward)' : diff.status}
+          {diff.status === 'auto_approved' ? 'Auto-Approved (Carry-Forward)' : diff.status === 'todo' ? 'Todo' : diff.status}
         </div>
 
         {diff.pixelDifference !== null && diff.pixelDifference > 0 && (
@@ -238,7 +252,7 @@ export function DiffViewerClient({ diff, buildId, nextDiffId }: DiffViewerClient
                       className="mt-2 flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-white bg-purple-600 rounded-md hover:bg-purple-700 disabled:opacity-50"
                     >
                       <CheckCircle className="w-3.5 h-3.5" />
-                      Accept AI Recommendation
+                      Mark as Expected Change
                     </button>
                   )}
                 </>
@@ -254,7 +268,7 @@ export function DiffViewerClient({ diff, buildId, nextDiffId }: DiffViewerClient
           // On main branch (no mainBaselineImagePath), only show one tab
           const isMainBranch = !diff.mainBaselineImagePath && diff.baselineImagePath;
 
-          type TabDef = { id: string; label: string; pct: string | null; baseline: string | null; diffImg: string | null | undefined; leftLabel?: string };
+          type TabDef = { id: string; label: string; pct: string | null; baseline: string | null; diffImg: string | null | undefined; leftLabel?: string; alignedBaseline?: string; alignedCurrent?: string; alignedDiffImage?: string; alignmentSegments?: import('@/lib/db/schema').AlignmentSegment[] };
           const tabs: TabDef[] = [];
 
           // Branch tab — always present
@@ -263,6 +277,10 @@ export function DiffViewerClient({ diff, buildId, nextDiffId }: DiffViewerClient
             pct: diff.baselineImagePath ? diff.percentageDifference : null,
             baseline: diff.baselineImagePath,
             diffImg: diff.diffImagePath,
+            alignedBaseline: metadata?.pageShift?.alignedBaselineImagePath ?? undefined,
+            alignedCurrent: metadata?.pageShift?.alignedCurrentImagePath ?? undefined,
+            alignedDiffImage: metadata?.pageShift?.alignedDiffImagePath ?? undefined,
+            alignmentSegments: metadata?.pageShift?.alignmentSegments ?? undefined,
           });
 
           // Main tab — present on feature branches
@@ -297,6 +315,10 @@ export function DiffViewerClient({ diff, buildId, nextDiffId }: DiffViewerClient
                 currentImage={diff.currentImagePath!}
                 diffImage={tab.diffImg || undefined}
                 leftLabel={tab.leftLabel}
+                alignedBaselineImage={tab.alignedBaseline}
+                alignedCurrentImage={tab.alignedCurrent}
+                alignedDiffImage={tab.alignedDiffImage}
+                alignmentSegments={tab.alignmentSegments}
                 className="border rounded-lg"
               />
             ) : (
@@ -333,6 +355,10 @@ export function DiffViewerClient({ diff, buildId, nextDiffId }: DiffViewerClient
                       currentImage={diff.currentImagePath!}
                       diffImage={tab.diffImg || undefined}
                       leftLabel={tab.leftLabel}
+                      alignedBaselineImage={tab.alignedBaseline}
+                      alignedCurrentImage={tab.alignedCurrent}
+                      alignedDiffImage={tab.alignedDiffImage}
+                      alignmentSegments={tab.alignmentSegments}
                       className="border rounded-lg"
                     />
                   ) : (
@@ -373,17 +399,49 @@ export function DiffViewerClient({ diff, buildId, nextDiffId }: DiffViewerClient
             disabled={isProcessing || diff.status === 'approved' || diff.status === 'auto_approved'}
           >
             <CheckCircle className="w-4 h-4" />
-            Approve
+            Expected Change
           </Button>
 
-          <Button
-            variant="destructive"
-            onClick={handleReject}
-            disabled={isProcessing || diff.status === 'rejected'}
-          >
-            <XCircle className="w-4 h-4" />
-            Reject
-          </Button>
+          {showTodoInput ? (
+            <div className="flex items-center gap-2">
+              <Input
+                ref={todoInputRef}
+                value={todoDescription}
+                onChange={(e) => setTodoDescription(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') handleAddTodo();
+                  if (e.key === 'Escape') { setShowTodoInput(false); setTodoDescription(''); }
+                }}
+                placeholder="Describe what needs fixing..."
+                className="w-64 h-9"
+              />
+              <Button
+                size="sm"
+                onClick={handleAddTodo}
+                disabled={isProcessing || !todoDescription.trim()}
+                className="bg-amber-600 hover:bg-amber-700 text-white"
+              >
+                Add
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => { setShowTodoInput(false); setTodoDescription(''); }}
+              >
+                Cancel
+              </Button>
+            </div>
+          ) : (
+            <Button
+              variant="outline"
+              onClick={handleShowTodoInput}
+              disabled={isProcessing || diff.status === 'todo'}
+              className="border-amber-300 text-amber-700 hover:bg-amber-50"
+            >
+              <ListTodo className="w-4 h-4" />
+              Add to Todo
+            </Button>
+          )}
 
           <Button
             variant="outline"

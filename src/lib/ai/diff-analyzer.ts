@@ -1,10 +1,12 @@
 import fs from 'fs';
 import path from 'path';
+import { STORAGE_ROOT } from '@/lib/storage/paths';
 import type { AIDiffAnalysis, DiffMetadata } from '@/lib/db/schema';
 import { DIFF_ANALYSIS_SYSTEM_PROMPT, buildDiffAnalysisPrompt, buildDiffAnalysisPromptWithPaths } from './diff-prompts';
 import { createOpenRouterProvider } from './openrouter';
 import { createAnthropicDirectProvider } from './anthropic-direct';
 import { ClaudeAgentSDKProvider } from './claude-agent-sdk';
+import { createOllamaProvider } from './ollama';
 import type { AIProvider } from './types';
 
 function extractJsonObject(text: string): string | null {
@@ -35,15 +37,16 @@ interface AnalyzeDiffInput {
 }
 
 export interface DiffingProviderConfig {
-  provider: 'openrouter' | 'anthropic' | 'claude-agent-sdk';
+  provider: 'openrouter' | 'anthropic' | 'claude-agent-sdk' | 'ollama';
   apiKey: string;
   model: string;
+  baseUrl?: string;
 }
 
 function readImageAsBase64(imagePath: string): { base64: string; mediaType: string } {
   const fullPath = imagePath.startsWith(process.cwd())
     ? imagePath
-    : path.join(process.cwd(), 'public', imagePath);
+    : path.join(STORAGE_ROOT, imagePath);
 
   const buffer = fs.readFileSync(fullPath);
 
@@ -58,6 +61,13 @@ function createDiffingProvider(config: DiffingProviderConfig): AIProvider {
     // SDK expects bare model IDs (e.g. "claude-sonnet-4-5-20250929"), strip vendor prefix
     const sdkModel = config.model?.replace(/^anthropic\//, '') || undefined;
     return new ClaudeAgentSDKProvider({ permissionMode: 'plan', model: sdkModel });
+  }
+
+  if (config.provider === 'ollama') {
+    return createOllamaProvider({
+      baseUrl: config.baseUrl || 'http://localhost:11434',
+      model: config.model,
+    });
   }
 
   if (config.provider === 'anthropic') {
@@ -75,7 +85,7 @@ function createDiffingProvider(config: DiffingProviderConfig): AIProvider {
 
 function resolveAbsPath(imagePath: string): string {
   if (imagePath.startsWith(process.cwd())) return imagePath;
-  return path.join(process.cwd(), 'public', imagePath);
+  return path.join(STORAGE_ROOT, imagePath);
 }
 
 export async function analyzeDiff(

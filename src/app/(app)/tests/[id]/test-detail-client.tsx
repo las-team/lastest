@@ -802,6 +802,8 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
                                           <img
                                             src={diff.currentImagePath}
                                             alt={diff.stepLabel || `step ${i + 1}`}
+                                            loading="lazy"
+                                            decoding="async"
                                             className="w-full h-16 object-cover rounded border hover:opacity-90"
                                           />
                                         </a>

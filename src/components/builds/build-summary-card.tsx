@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { CheckCircle, AlertTriangle, XCircle, Clock, GitBranch, Globe, Shield } from 'lucide-react';
+import { CheckCircle, AlertTriangle, XCircle, ListTodo, Clock, GitBranch, Globe, Shield } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
 import type { Build, BuildStatus } from '@/lib/db/schema';
@@ -64,6 +64,14 @@ const statusConfig: Record<BuildStatus, {
     borderColor: 'border-red-200',
     textColor: 'text-red-700',
     iconColor: 'text-red-500',
+  },
+  has_todos: {
+    icon: ListTodo,
+    label: 'Has Todos',
+    bgColor: 'bg-amber-50',
+    borderColor: 'border-amber-200',
+    textColor: 'text-amber-700',
+    iconColor: 'text-amber-500',
   },
 };
 

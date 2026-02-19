@@ -41,6 +41,7 @@ export async function triggerAIDiffAnalysis(diffId: string, repositoryId?: strin
     let effectiveProvider: string;
     let effectiveApiKey: string;
     let effectiveModel: string;
+    let effectiveBaseUrl: string | undefined;
 
     if (rawProvider === 'same-as-test-gen') {
       // Inherit from test generation settings
@@ -49,11 +50,23 @@ export async function triggerAIDiffAnalysis(diffId: string, repositoryId?: strin
         await queries.updateVisualDiff(diffId, { aiAnalysisStatus: 'skipped' });
         return;
       }
-      effectiveProvider = settings.provider === 'claude-agent-sdk' ? 'claude-agent-sdk' : settings.provider;
-      effectiveApiKey = settings.provider === 'claude-agent-sdk' ? '' : (settings.openrouterApiKey || '');
-      effectiveModel = settings.provider === 'claude-agent-sdk'
-        ? (settings.agentSdkModel || '')
-        : (settings.openrouterModel || 'anthropic/claude-sonnet-4-5-20250929');
+      if (settings.provider === 'ollama') {
+        effectiveProvider = 'ollama';
+        effectiveApiKey = '';
+        effectiveModel = settings.ollamaModel || '';
+        effectiveBaseUrl = settings.ollamaBaseUrl || 'http://localhost:11434';
+      } else {
+        effectiveProvider = settings.provider === 'claude-agent-sdk' ? 'claude-agent-sdk' : settings.provider;
+        effectiveApiKey = settings.provider === 'claude-agent-sdk' ? '' : (settings.openrouterApiKey || '');
+        effectiveModel = settings.provider === 'claude-agent-sdk'
+          ? (settings.agentSdkModel || '')
+          : (settings.openrouterModel || 'anthropic/claude-sonnet-4-5-20250929');
+      }
+    } else if (rawProvider === 'ollama') {
+      effectiveProvider = 'ollama';
+      effectiveApiKey = '';
+      effectiveModel = settings.aiDiffingOllamaModel || '';
+      effectiveBaseUrl = settings.aiDiffingOllamaBaseUrl || 'http://localhost:11434';
     } else if (rawProvider === 'claude-agent-sdk') {
       effectiveProvider = 'claude-agent-sdk';
       effectiveApiKey = '';
@@ -67,8 +80,8 @@ export async function triggerAIDiffAnalysis(diffId: string, repositoryId?: strin
       return;
     }
 
-    // Only require API key for non-SDK providers
-    if (effectiveProvider !== 'claude-agent-sdk' && !effectiveApiKey) {
+    // Only require API key for providers that need one
+    if (effectiveProvider !== 'claude-agent-sdk' && effectiveProvider !== 'ollama' && !effectiveApiKey) {
       await queries.updateVisualDiff(diffId, { aiAnalysisStatus: 'skipped' });
       return;
     }
@@ -91,6 +104,7 @@ export async function triggerAIDiffAnalysis(diffId: string, repositoryId?: strin
       provider: effectiveProvider as DiffingProviderConfig['provider'],
       apiKey: effectiveApiKey,
       model: effectiveModel,
+      baseUrl: effectiveBaseUrl,
     };
 
     const analysis = await analyzeDiff(

@@ -9,14 +9,21 @@ import {
   Play,
   GitCompare,
   Settings,
-  Circle,
   Layers,
   ListOrdered,
   FolderTree,
   Building2,
   Zap,
+  ClipboardCheck,
 } from 'lucide-react';
-import { RepoSelector, SyncReposButton } from './repo-selector';
+import Image from 'next/image';
+import dynamic from 'next/dynamic';
+import { SyncReposButton } from './repo-selector';
+
+const RepoSelector = dynamic(
+  () => import('./repo-selector').then((m) => ({ default: m.RepoSelector })),
+  { ssr: false }
+);
 import { QueueIndicator } from '@/components/queue/queue-indicator';
 import { UserMenu } from '@/components/auth/user-menu';
 import type { Repository, User, Team } from '@/lib/db/schema';
@@ -43,6 +50,7 @@ const executionNav = [
   { name: 'Runs', href: '/run', icon: Play },
   { name: 'Compare', href: '/compare', icon: GitCompare },
   { name: 'Suites', href: '/suites', icon: ListOrdered },
+  { name: 'Review', href: '/review', icon: ClipboardCheck },
 ];
 
 const settingsNav = [
@@ -60,7 +68,8 @@ export function Sidebar({ repos, selectedRepo, currentUser, team }: SidebarProps
           className="flex items-center gap-2 font-bold text-lg"
           style={{ height: 36 }}
         >
-          <Circle className="h-6 w-6 fill-primary text-primary" />
+          <Image src="/icon-light.svg" alt="" width={28} height={28} className="rounded-full dark:hidden" />
+          <Image src="/icon-dark.svg" alt="" width={28} height={28} className="rounded-full hidden dark:block" />
           LASTEST2
         </Link>
         {team && (
@@ -171,7 +180,7 @@ export function Sidebar({ repos, selectedRepo, currentUser, team }: SidebarProps
       </div>
 
       <div className="p-4 border-t space-y-3">
-        {currentUser && <UserMenu user={currentUser} />}
+        {currentUser && <UserMenu />}
         <div className="flex items-center justify-between">
           <span className="text-xs text-muted-foreground">Visual Regression Testing</span>
           <QueueIndicator />

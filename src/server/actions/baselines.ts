@@ -1,5 +1,3 @@
-'use server';
-
 import * as queries from '@/lib/db/queries';
 import type { TestChangeReason } from '@/lib/db/schema';
 

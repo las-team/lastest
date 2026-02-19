@@ -19,6 +19,7 @@ import { validateRunnerToken, updateRunnerStatus, markStaleRunnersOffline } from
 import type { Message, HeartbeatMessage, TestResultResponse, ScreenshotUploadResponse, RecordingEventResponse, RecordingStoppedResponse } from '@/lib/ws/protocol';
 import fs from 'fs/promises';
 import path from 'path';
+import { STORAGE_DIRS } from '@/lib/storage/paths';
 
 // ============================================
 // Security Validation Functions
@@ -315,7 +316,6 @@ export async function GET(request: NextRequest) {
       return NextResponse.json(
         {
           error: 'Duplicate connection: another runner instance is already connected with this token',
-          existingSessionId: existingSession.sessionId,
         },
         { status: 409 }
       );
@@ -430,7 +430,7 @@ function storeScreenshot(runnerId: string, screenshot: Message) {
  * This ensures screenshots are persisted even if in-memory state is lost.
  */
 async function saveScreenshotToDisk(base64Data: string, filename: string, repositoryId?: string): Promise<string> {
-  const baseDir = './public/screenshots';
+  const baseDir = STORAGE_DIRS.screenshots;
   const dir = repositoryId ? path.join(baseDir, repositoryId) : baseDir;
 
   // Ensure directory exists

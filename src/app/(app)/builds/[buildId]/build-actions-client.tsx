@@ -61,7 +61,7 @@ export function BuildActionsClient({ buildId, hasPendingDiffs, aiApproveCount = 
           disabled={isApproving}
         >
           <CheckCircle className="w-4 h-4" />
-          {isApproving ? 'Approving...' : 'Approve All Changes'}
+          {isApproving ? 'Marking...' : 'Mark All Expected'}
         </Button>
       )}
     </div>

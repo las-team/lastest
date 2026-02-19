@@ -5,6 +5,7 @@ import * as queries from '@/lib/db/queries';
 import { requireTeamAccess } from '@/lib/auth';
 import { hashImageWithDimensions } from '@/lib/diff/hasher';
 import path from 'path';
+import { STORAGE_ROOT } from '@/lib/storage/paths';
 
 /**
  * Approve a single visual diff
@@ -24,12 +25,12 @@ export async function approveDiff(diffId: string, approvedBy?: string) {
 
   // Update baseline with the approved image
   const currentHash = hashImageWithDimensions(
-    path.join(process.cwd(), 'public', diff.currentImagePath)
+    path.join(STORAGE_ROOT, diff.currentImagePath)
   );
 
   // Get the test run to find the branch
   const testResult = diff.testResultId
-    ? await queries.getTestResultsByRun(diff.testResultId).then((r) => r[0])
+    ? await queries.getTestResultById(diff.testResultId)
     : null;
   const testRun = testResult?.testRunId
     ? await queries.getTestRun(testResult.testRunId)
@@ -132,6 +133,7 @@ export async function batchRejectDiffs(diffIds: string[]) {
  * Get diffs for a build
  */
 export async function getDiffsByBuild(buildId: string) {
+  await requireTeamAccess();
   return queries.getVisualDiffsByBuild(buildId);
 }
 
@@ -152,6 +154,7 @@ function extractStepLabelFromPath(imagePath: string): string | null {
  * Get a single diff with full details
  */
 export async function getDiff(diffId: string) {
+  await requireTeamAccess();
   const diff = await queries.getVisualDiff(diffId);
   if (!diff) return null;
 
@@ -196,6 +199,7 @@ export async function getDiff(diffId: string) {
  * Get pending diffs count for a build
  */
 export async function getPendingDiffsCount(buildId: string) {
+  await requireTeamAccess();
   const pending = await queries.getPendingDiffsByBuild(buildId);
   return pending.length;
 }
@@ -229,6 +233,7 @@ export async function removeIgnoreRegion(regionId: string) {
  * Get ignore regions for a test
  */
 export async function getIgnoreRegions(testId: string) {
+  await requireTeamAccess();
   return queries.getIgnoreRegions(testId);
 }
 
@@ -318,6 +323,63 @@ export async function discardAIRecommendations(buildId: string) {
 }
 
 /**
+ * Add a todo to a diff (replaces reject workflow)
+ */
+export async function addDiffTodo(diffId: string, description: string) {
+  const session = await requireTeamAccess();
+  const diff = await queries.getVisualDiff(diffId);
+  if (!diff) throw new Error('Diff not found');
+
+  // Set diff status to 'todo'
+  await queries.updateVisualDiff(diffId, { status: 'todo' });
+
+  // Resolve branch + repo from build → test run
+  const build = diff.buildId ? await queries.getBuild(diff.buildId) : null;
+  const buildTestRun = build?.testRunId ? await queries.getTestRun(build.testRunId) : null;
+  const branch = buildTestRun?.gitBranch || 'main';
+  const repositoryId = buildTestRun?.repositoryId || null;
+
+  // Create the review todo
+  await queries.createReviewTodo({
+    repositoryId,
+    diffId,
+    buildId: diff.buildId,
+    testId: diff.testId,
+    branch,
+    description,
+    status: 'open',
+    createdBy: session.user?.email || 'user',
+  });
+
+  // Recompute build status
+  if (diff.buildId) {
+    const newStatus = await queries.computeBuildStatus(diff.buildId);
+    await queries.updateBuild(diff.buildId, { overallStatus: newStatus });
+  }
+
+  revalidatePath('/builds');
+  revalidatePath(`/builds/${diff.buildId}`);
+  revalidatePath('/review');
+
+  return { success: true };
+}
+
+/**
+ * Batch add todos to selected diffs
+ */
+export async function batchAddDiffTodos(diffIds: string[], description: string) {
+  await requireTeamAccess();
+  for (const diffId of diffIds) {
+    await addDiffTodo(diffId, description);
+  }
+
+  revalidatePath('/builds');
+  revalidatePath('/review');
+
+  return { todoCount: diffIds.length };
+}
+
+/**
  * Reject all pending diffs in a build
  */
 export async function rejectAllDiffs(buildId: string) {
@@ -338,5 +400,6 @@ export async function rejectAllDiffs(buildId: string) {
  * Get AI diff summary counts for a build
  */
 export async function getAIDiffSummary(buildId: string) {
+  await requireTeamAccess();
   return queries.getAIDiffSummaryForBuild(buildId);
 }

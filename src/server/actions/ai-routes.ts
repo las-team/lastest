@@ -388,6 +388,7 @@ const IGNORED_EXTENSIONS = new Set([
 const IGNORED_PATHS = [
   'node_modules/', '.git/', 'dist/', 'build/', '.next/', 'coverage/',
   'public/screenshots/', 'public/baselines/', 'public/traces/',
+  'storage/screenshots/', 'storage/baselines/', 'storage/traces/',
   '__snapshots__/', '.turbo/', '.cache/',
 ];
 

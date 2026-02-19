@@ -44,6 +44,8 @@ import {
   googleSheetsDataSources,
   composeConfigs,
   agentSessions,
+  bugReports,
+  reviewTodos,
 } from './schema';
 import {
   DEFAULT_SELECTOR_PRIORITY,
@@ -83,7 +85,7 @@ import type {
   NewSelectorStat,
   NewTeam,
   NewUser,
-  NewSession,
+
   NewOAuthAccount,
   NewPasswordResetToken,
   NewUserInvitation,
@@ -106,6 +108,7 @@ import type {
   Runner,
   RunnerStatus,
   BuildStatus,
+  NewReviewTodo,
   SelectorConfig,
   AIProvider,
   BackgroundJobType,
@@ -1158,9 +1161,11 @@ export async function computeBuildStatus(buildId: string): Promise<BuildStatus> 
 
   const hasFailed = diffs.some(d => d.status === 'rejected');
   const hasPending = diffs.some(d => d.status === 'pending');
+  const hasTodo = diffs.some(d => d.status === 'todo');
 
   if (hasFailed) return 'blocked';
   if (hasPending) return 'review_required';
+  if (hasTodo) return 'has_todos';
   return 'safe_to_merge';
 }
 
@@ -2853,6 +2858,14 @@ export async function getUserByEmail(email: string) {
   return db.select().from(users).where(eq(users.email, email.toLowerCase())).get();
 }
 
+export async function getUserByClerkId(clerkId: string) {
+  return db.select().from(users).where(eq(users.clerkId, clerkId)).get();
+}
+
+export async function getTeamByClerkOrgId(clerkOrgId: string) {
+  return db.select().from(teams).where(eq(teams.clerkOrgId, clerkOrgId)).get();
+}
+
 export async function getUserCount() {
   const result = await db.select({ id: users.id }).from(users).all();
   return result.length;
@@ -2907,13 +2920,6 @@ export async function getSessionWithUser(token: string) {
     .where(eq(sessions.token, token))
     .get();
   return result;
-}
-
-export async function createSession(data: Omit<NewSession, 'id' | 'createdAt'>) {
-  const id = uuid();
-  const now = new Date();
-  await db.insert(sessions).values({ ...data, id, createdAt: now });
-  return { id, ...data, createdAt: now };
 }
 
 export async function deleteSession(token: string) {
@@ -4001,4 +4007,127 @@ export async function updateAgentSession(
     .update(agentSessions)
     .set({ ...data, updatedAt: new Date() })
     .where(eq(agentSessions.id, id));
+}
+
+// Bug Reports
+export async function createBugReport(data: {
+  teamId: string;
+  reportedById: string;
+  description: string;
+  severity: 'low' | 'medium' | 'high';
+  context?: unknown;
+  screenshotPath?: string | null;
+  contentHash?: string | null;
+}) {
+  const id = uuid();
+  await db.insert(bugReports).values({
+    id,
+    teamId: data.teamId,
+    reportedById: data.reportedById,
+    description: data.description,
+    severity: data.severity,
+    context: data.context as never,
+    screenshotPath: data.screenshotPath ?? null,
+    contentHash: data.contentHash ?? null,
+    createdAt: new Date(),
+  });
+  return { id };
+}
+
+export async function countRecentBugReports(userId: string, since: Date) {
+  const rows = await db
+    .select({ id: bugReports.id })
+    .from(bugReports)
+    .where(and(eq(bugReports.reportedById, userId), gte(bugReports.createdAt, since)))
+    .all();
+  return rows.length;
+}
+
+export async function getBugReportByHash(teamId: string, contentHash: string) {
+  return db
+    .select()
+    .from(bugReports)
+    .where(and(eq(bugReports.teamId, teamId), eq(bugReports.contentHash, contentHash)))
+    .get();
+}
+
+export async function updateBugReport(id: string, data: { githubIssueUrl?: string; githubIssueNumber?: number }) {
+  await db.update(bugReports).set(data).where(eq(bugReports.id, id));
+}
+
+// ── Review Todos ──────────────────────────────────────────────────────
+
+export async function createReviewTodo(data: Omit<NewReviewTodo, 'id'>) {
+  const id = uuid();
+  await db.insert(reviewTodos).values({ ...data, id, createdAt: new Date() });
+  return { id, ...data, createdAt: new Date() };
+}
+
+export async function getReviewTodo(id: string) {
+  return db.select().from(reviewTodos).where(eq(reviewTodos.id, id)).get();
+}
+
+export async function getReviewTodosByBuild(buildId: string) {
+  return db
+    .select({
+      todo: reviewTodos,
+      testName: tests.name,
+      functionalAreaName: functionalAreas.name,
+    })
+    .from(reviewTodos)
+    .leftJoin(tests, eq(reviewTodos.testId, tests.id))
+    .leftJoin(functionalAreas, eq(tests.functionalAreaId, functionalAreas.id))
+    .where(eq(reviewTodos.buildId, buildId))
+    .orderBy(desc(reviewTodos.createdAt))
+    .all();
+}
+
+export async function getReviewTodosByBranch(repositoryId: string, branch: string) {
+  return db
+    .select({
+      todo: reviewTodos,
+      testName: tests.name,
+      functionalAreaName: functionalAreas.name,
+    })
+    .from(reviewTodos)
+    .leftJoin(tests, eq(reviewTodos.testId, tests.id))
+    .leftJoin(functionalAreas, eq(tests.functionalAreaId, functionalAreas.id))
+    .where(and(eq(reviewTodos.repositoryId, repositoryId), eq(reviewTodos.branch, branch)))
+    .orderBy(desc(reviewTodos.createdAt))
+    .all();
+}
+
+export async function getOpenTodoBranches(repositoryId: string) {
+  const rows = db
+    .selectDistinct({ branch: reviewTodos.branch })
+    .from(reviewTodos)
+    .where(and(eq(reviewTodos.repositoryId, repositoryId), eq(reviewTodos.status, 'open')))
+    .all();
+  return rows.map(r => r.branch);
+}
+
+export async function updateReviewTodo(id: string, data: Partial<NewReviewTodo>) {
+  await db.update(reviewTodos).set(data).where(eq(reviewTodos.id, id));
+}
+
+export async function deleteReviewTodo(id: string) {
+  await db.delete(reviewTodos).where(eq(reviewTodos.id, id));
+}
+
+export async function getReviewSummaryByBranch(repositoryId: string, branch: string) {
+  const todos = await getReviewTodosByBranch(repositoryId, branch);
+  const openCount = todos.filter(t => t.todo.status === 'open').length;
+  const resolvedCount = todos.filter(t => t.todo.status === 'resolved').length;
+
+  // Group by functional area
+  const byArea: Record<string, { total: number; open: number; resolved: number }> = {};
+  for (const t of todos) {
+    const area = t.functionalAreaName || 'Ungrouped';
+    if (!byArea[area]) byArea[area] = { total: 0, open: 0, resolved: 0 };
+    byArea[area].total++;
+    if (t.todo.status === 'open') byArea[area].open++;
+    else byArea[area].resolved++;
+  }
+
+  return { openCount, resolvedCount, totalCount: todos.length, byArea };
 }

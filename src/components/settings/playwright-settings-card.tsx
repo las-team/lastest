@@ -588,6 +588,34 @@ export function PlaywrightSettingsCard({
                   })}
                 />
               </div>
+
+              {/* Wait for Images */}
+              <div className="flex items-center justify-between">
+                <div className="space-y-0.5">
+                  <Label className="text-sm">Wait for Images</Label>
+                  <p className="text-xs text-muted-foreground">Wait for all images to finish loading</p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Input
+                    type="number"
+                    value={stabilization.waitForImagesTimeout}
+                    onChange={(e) => setStabilization({
+                      ...stabilization,
+                      waitForImagesTimeout: Math.max(0, parseInt(e.target.value) || 5000)
+                    })}
+                    className="w-20"
+                    disabled={!stabilization.waitForImages}
+                  />
+                  <span className="text-xs text-muted-foreground">ms</span>
+                  <Switch
+                    checked={stabilization.waitForImages}
+                    onCheckedChange={(checked) => setStabilization({
+                      ...stabilization,
+                      waitForImages: checked
+                    })}
+                  />
+                </div>
+              </div>
             </div>
 
             {/* Content Freezing */}

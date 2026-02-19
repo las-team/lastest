@@ -26,6 +26,7 @@ import { eq, and } from 'drizzle-orm';
 import { createHash } from 'crypto';
 import fs from 'fs/promises';
 import path from 'path';
+import { STORAGE_DIRS } from '@/lib/storage/paths';
 
 /**
  * Generate SHA256 hash of test code for integrity verification.
@@ -315,7 +316,7 @@ async function saveScreenshotFromBase64(
   filename: string,
   repositoryId?: string | null
 ): Promise<string> {
-  const baseDir = './public/screenshots';
+  const baseDir = STORAGE_DIRS.screenshots;
   const dir = repositoryId ? path.join(baseDir, repositoryId) : baseDir;
 
   // Ensure directory exists
@@ -339,7 +340,7 @@ async function findScreenshotsOnDisk(
   testId: string,
   repositoryId?: string | null
 ): Promise<{ path: string; label: string }[]> {
-  const baseDir = './public/screenshots';
+  const baseDir = STORAGE_DIRS.screenshots;
   const screenshots: { path: string; label: string }[] = [];
   const prefix = `${runId}-${testId}-`;
 

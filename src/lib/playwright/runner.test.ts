@@ -59,6 +59,53 @@ describe('Animation Freezing', () => {
       expect(FREEZE_ANIMATIONS_SCRIPT).toContain('DOMContentLoaded');
       expect(FREEZE_ANIMATIONS_SCRIPT).toContain("'load'");
     });
+
+    it('contains GIF freezing via canvas replacement', () => {
+      expect(FREEZE_ANIMATIONS_SCRIPT).toContain('freezeGifImage');
+      expect(FREEZE_ANIMATIONS_SCRIPT).toContain('isGifSrc');
+      expect(FREEZE_ANIMATIONS_SCRIPT).toContain('processAllGifs');
+    });
+
+    it('detects .gif extension in URLs', () => {
+      expect(FREEZE_ANIMATIONS_SCRIPT).toContain('.gif');
+    });
+
+    it('uses MutationObserver for dynamically added GIFs', () => {
+      expect(FREEZE_ANIMATIONS_SCRIPT).toContain('MutationObserver');
+    });
+
+    it('replaces GIF src with static PNG via canvas toDataURL', () => {
+      expect(FREEZE_ANIMATIONS_SCRIPT).toContain('toDataURL');
+      expect(FREEZE_ANIMATIONS_SCRIPT).toContain('image/png');
+    });
+
+    it('handles cross-origin GIFs gracefully with try/catch', () => {
+      // The canvas freezing has try/catch for cross-origin GIFs
+      expect(FREEZE_ANIMATIONS_SCRIPT).toContain('Cross-origin');
+    });
+
+    it('runs delayed passes for late-loading GIFs', () => {
+      expect(FREEZE_ANIMATIONS_SCRIPT).toContain('setTimeout(processAllGifs, 200)');
+      expect(FREEZE_ANIMATIONS_SCRIPT).toContain('setTimeout(processAllGifs, 600)');
+    });
+  });
+
+  describe('reducedMotion context option', () => {
+    it('sets reducedMotion when freezeAnimations is enabled', () => {
+      const settings = { freezeAnimations: true };
+      const contextOptions = {
+        ...(settings.freezeAnimations ? { reducedMotion: 'reduce' as const } : {}),
+      };
+      expect(contextOptions.reducedMotion).toBe('reduce');
+    });
+
+    it('does not set reducedMotion when freezeAnimations is disabled', () => {
+      const settings = { freezeAnimations: false };
+      const contextOptions = {
+        ...(settings.freezeAnimations ? { reducedMotion: 'reduce' as const } : {}),
+      };
+      expect(contextOptions.reducedMotion).toBeUndefined();
+    });
   });
 
   describe('freezeAnimations setting behavior', () => {

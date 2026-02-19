@@ -68,6 +68,94 @@ window.addEventListener('load', function() {
   setTimeout(cancelAllAnimations, 100);
   setTimeout(cancelAllAnimations, 500);
 });
+
+// 5. Freeze animated GIFs by replacing them with static canvas snapshots
+(function freezeGifs() {
+  function isGifSrc(src) {
+    if (!src) return false;
+    try {
+      var url = new URL(src, location.href);
+      return /\.gif(\\?|$)/i.test(url.pathname);
+    } catch(e) {
+      return /\.gif(\\?|$)/i.test(src);
+    }
+  }
+
+  function freezeGifImage(img) {
+    if (img.dataset.gifFrozen) return;
+    img.dataset.gifFrozen = '1';
+    try {
+      var w = img.naturalWidth;
+      var h = img.naturalHeight;
+      if (!w || !h) return;
+      var canvas = document.createElement('canvas');
+      canvas.width = w;
+      canvas.height = h;
+      var ctx = canvas.getContext('2d');
+      if (!ctx) return;
+      ctx.drawImage(img, 0, 0, w, h);
+      img.src = canvas.toDataURL('image/png');
+    } catch(e) {
+      // Cross-origin GIFs will throw — silently skip (Layer 1 handles them)
+    }
+  }
+
+  function processAllGifs() {
+    var imgs = document.querySelectorAll('img');
+    for (var i = 0; i < imgs.length; i++) {
+      var img = imgs[i];
+      if (isGifSrc(img.src) || isGifSrc(img.currentSrc)) {
+        if (img.complete && img.naturalWidth > 0) {
+          freezeGifImage(img);
+        } else {
+          img.addEventListener('load', function() { freezeGifImage(this); }, { once: true });
+        }
+      }
+    }
+  }
+
+  // Observe dynamically added GIF images
+  if (typeof MutationObserver !== 'undefined') {
+    var observer = new MutationObserver(function(mutations) {
+      for (var i = 0; i < mutations.length; i++) {
+        var nodes = mutations[i].addedNodes;
+        for (var j = 0; j < nodes.length; j++) {
+          var node = nodes[j];
+          if (node.nodeType === 1) {
+            if (node.tagName === 'IMG' && isGifSrc(node.src)) {
+              if (node.complete && node.naturalWidth > 0) {
+                freezeGifImage(node);
+              } else {
+                node.addEventListener('load', function() { freezeGifImage(this); }, { once: true });
+              }
+            }
+            // Check descendants
+            var childImgs = node.querySelectorAll ? node.querySelectorAll('img') : [];
+            for (var k = 0; k < childImgs.length; k++) {
+              if (isGifSrc(childImgs[k].src)) {
+                if (childImgs[k].complete && childImgs[k].naturalWidth > 0) {
+                  freezeGifImage(childImgs[k]);
+                } else {
+                  childImgs[k].addEventListener('load', function() { freezeGifImage(this); }, { once: true });
+                }
+              }
+            }
+          }
+        }
+      }
+    });
+    document.addEventListener('DOMContentLoaded', function() {
+      observer.observe(document.body || document.documentElement, { childList: true, subtree: true });
+    });
+  }
+
+  document.addEventListener('DOMContentLoaded', processAllGifs);
+  window.addEventListener('load', function() {
+    processAllGifs();
+    setTimeout(processAllGifs, 200);
+    setTimeout(processAllGifs, 600);
+  });
+})();
 `;
 
 /**

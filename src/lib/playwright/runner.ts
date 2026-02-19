@@ -11,6 +11,7 @@ import { getSelectorStats, recordSelectorSuccess, recordSelectorFailure, getDefa
 import { setupFreezeScripts, setupThirdPartyBlocking, applyStabilization } from './stabilization';
 import { captureWithBurst } from './burst-capture';
 import { applyDynamicMasking } from './dynamic-masking';
+import { STORAGE_DIRS, toRelativePath } from '@/lib/storage/paths';
 
 /**
  * Create appState helper for internal state inspection.
@@ -90,12 +91,46 @@ export function createAppState(page: Page) {
 }
 
 /**
+ * Wrap matcher objects so assertion failures push to softErrors instead of throwing.
+ * Handles both sync and async matchers, and recursively wraps nested objects (e.g. `not`).
+ */
+function wrapMatchersForSoftErrors(matchers: Record<string, unknown>, softErrors: string[]): unknown {
+  return new Proxy(matchers, {
+    get(target, prop) {
+      const value = target[prop as string];
+      if (typeof value === 'function') {
+        return (...args: unknown[]) => {
+          try {
+            const result = (value as (...a: unknown[]) => unknown)(...args);
+            if (result && typeof (result as Promise<unknown>).then === 'function') {
+              return (result as Promise<unknown>).catch((e: unknown) => {
+                softErrors.push(e instanceof Error ? e.message : String(e));
+              });
+            }
+            return result;
+          } catch (e) {
+            softErrors.push(e instanceof Error ? e.message : String(e));
+          }
+        };
+      }
+      if (typeof value === 'object' && value !== null) {
+        return wrapMatchersForSoftErrors(value as Record<string, unknown>, softErrors);
+      }
+      return value;
+    }
+  });
+}
+
+/**
  * Simple expect implementation for Playwright Inspector-generated tests.
  * Provides common assertion matchers that wrap Playwright's built-in locator assertions.
  * Supports Page-level assertions (toHaveURL, toHaveTitle), Locator assertions,
  * and generic value assertions (toHaveLength, toBe, toEqual, etc.)
+ *
+ * When softErrors is provided, assertion failures are logged instead of thrown,
+ * allowing test execution to continue past failed assertions.
  */
-export function createExpect(timeout = 5000) {
+export function createExpect(timeout = 5000, softErrors?: string[]) {
   return function expect(target: unknown, message?: string) {
     // Check if target is a Page (has 'goto' method) vs Locator
     const isPage = typeof (target as { goto?: unknown })?.goto === 'function';
@@ -105,7 +140,7 @@ export function createExpect(timeout = 5000) {
     // Generic value matchers (arrays, primitives, objects)
     if (!isPage && !isLocator) {
       const msgPrefix = message ? `${message}: ` : '';
-      return {
+      const matchers = {
         toHaveLength(expected: number) {
           const actual = (target as { length?: number })?.length;
           if (actual !== expected) {
@@ -244,11 +279,12 @@ export function createExpect(timeout = 5000) {
           },
         },
       };
+      return softErrors ? wrapMatchersForSoftErrors(matchers as Record<string, unknown>, softErrors) : matchers;
     }
 
     if (isPage) {
       const page = target as Page;
-      return {
+      const matchers = {
         async toHaveURL(expected: string | RegExp, options?: { timeout?: number }) {
           const t = options?.timeout ?? timeout;
           const start = Date.now();
@@ -298,11 +334,12 @@ export function createExpect(timeout = 5000) {
           },
         },
       };
+      return softErrors ? wrapMatchersForSoftErrors(matchers as Record<string, unknown>, softErrors) : matchers;
     }
 
     // Locator matchers
     const locator = target as Locator;
-    return {
+    const matchers = {
       async toBeVisible(options?: { timeout?: number }) {
         await locator.waitFor({ state: 'visible', timeout: options?.timeout ?? timeout });
       },
@@ -516,6 +553,7 @@ export function createExpect(timeout = 5000) {
         },
       },
     };
+    return softErrors ? wrapMatchersForSoftErrors(matchers as Record<string, unknown>, softErrors) : matchers;
   };
 }
 import type { Test, TestResult, ActionSelector, SelectorConfig, PlaywrightSettings, NetworkRequest, EnvironmentConfig } from '@/lib/db/schema';
@@ -604,7 +642,7 @@ export class PlaywrightRunner extends EventEmitter {
     super();
     this.repositoryId = repositoryId ?? null;
     // Build screenshot directory path: include repositoryId if provided
-    const baseDir = screenshotDir ?? './public/screenshots';
+    const baseDir = screenshotDir ?? STORAGE_DIRS.screenshots;
     this.screenshotDir = this.repositoryId
       ? path.join(baseDir, this.repositoryId)
       : baseDir;
@@ -945,7 +983,7 @@ export class PlaywrightRunner extends EventEmitter {
       // Set up video recording if enabled
       const videoEnabled = this.settings?.enableVideoRecording ?? false;
       const videoDir = videoEnabled
-        ? path.join('./public/videos', this.repositoryId || 'default')
+        ? path.join(STORAGE_DIRS.videos, this.repositoryId || 'default')
         : undefined;
       if (videoDir && !fs.existsSync(videoDir)) {
         fs.mkdirSync(videoDir, { recursive: true });
@@ -956,6 +994,7 @@ export class PlaywrightRunner extends EventEmitter {
         ...(parsedStorageState ? { storageState: parsedStorageState } : {}),
         ...(videoDir ? { recordVideo: { dir: videoDir, size: this.getViewport() } } : {}),
         ...(this.settings?.acceptAnyCertificate ? { ignoreHTTPSErrors: true } : {}),
+        ...(this.settings?.freezeAnimations ? { reducedMotion: 'reduce' } : {}),
       });
       page = await context.newPage();
 
@@ -1226,14 +1265,23 @@ export class PlaywrightRunner extends EventEmitter {
 
       // Execute the test code with the proxy page
       // Errors are caught as soft errors so screenshot capture still happens
+      let testThrewError = false;
       try {
         testSoftErrors = await this.executeTestCode(screenshotProxy, test, runId, testScreenshotPath, (label: string) => {
           currentStepLabel = label;
         });
       } catch (e) {
+        testThrewError = true;
         const msg = e instanceof Error ? e.message : String(e);
         testSoftErrors.push(msg);
         console.warn(`[soft-error] Test "${test.name}" error, continuing to screenshot: ${msg}`);
+      }
+
+      // If test threw and captured zero screenshots, it's a hard failure —
+      // soft errors only count as passed when screenshots were still captured
+      if (testThrewError && capturedScreenshots.length === 0) {
+        const errorMsg = testSoftErrors[testSoftErrors.length - 1] || 'Test failed without capturing any screenshots';
+        throw new Error(errorMsg);
       }
 
       // Check for console errors or network failures after test execution
@@ -1425,14 +1473,14 @@ export class PlaywrightRunner extends EventEmitter {
       // After context close, video file is finalized — relocate it
       if (video) {
         try {
-          const videoDestDir = path.join('./public/videos', this.repositoryId || 'default');
+          const videoDestDir = path.join(STORAGE_DIRS.videos, this.repositoryId || 'default');
           if (!fs.existsSync(videoDestDir)) {
             fs.mkdirSync(videoDestDir, { recursive: true });
           }
           const dest = path.join(videoDestDir, `${runId}-${test.id}.webm`);
           await video.saveAs(dest);
           await video.delete(); // clean temp file
-          result.videoPath = '/' + dest.replace(/^.*?public\//, '');
+          result.videoPath = toRelativePath(dest);
         } catch {
           // Video capture is best-effort
         }
@@ -1529,7 +1577,7 @@ export class PlaywrightRunner extends EventEmitter {
       // Build an async function from the body
       // Include 'expect' for Playwright Inspector-generated tests that use assertions
       // Include 'appState' for internal state inspection (Excalidraw undo/redo, etc.)
-      const expectFn = createExpect(this.getActionTimeout());
+      const expectFn = createExpect(this.getActionTimeout(), softErrors);
       const appStateFn = createAppState(page);
 
       // Create stats-tracking locateWithFallback that tests can use
@@ -1627,6 +1675,13 @@ export class PlaywrightRunner extends EventEmitter {
           body = body.slice(0, startIdx) + '/* locateWithFallback provided by runner */' + body.slice(endIdx);
         }
       }
+
+      // Wrap standalone await statements (except screenshots) in try/catch so
+      // execution continues past locator/action failures to reach screenshot calls
+      body = body.replace(/^(\s*)(await\s+.+;)\s*$/gm, (_match, indent, stmt) => {
+        if (stmt.includes('.screenshot(')) return `${indent}${stmt}`;
+        return `${indent}try { ${stmt} } catch(__softErr) { stepLogger.warn(typeof __softErr === 'object' && __softErr !== null && 'message' in __softErr ? __softErr.message : String(__softErr)); }`;
+      });
 
       const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
       const testFn = new AsyncFunction('page', 'baseUrl', 'screenshotPath', 'stepLogger', 'expect', 'appState', 'locateWithFallback', body);

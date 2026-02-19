@@ -25,12 +25,25 @@ const nextConfig: NextConfig = {
   async headers() {
     return [
       {
-        source: "/traces/:path*",
+        source: '/(.*)',
         headers: [
-          { key: "Access-Control-Allow-Origin", value: "https://trace.playwright.dev" },
-          { key: "Access-Control-Allow-Methods", value: "GET" },
+          { key: 'X-Frame-Options', value: 'DENY' },
+          { key: 'X-Content-Type-Options', value: 'nosniff' },
+          { key: 'Referrer-Policy', value: 'strict-origin-when-cross-origin' },
+          { key: 'Permissions-Policy', value: 'camera=(), microphone=(), geolocation=()' },
         ],
       },
+    ];
+  },
+  async rewrites() {
+    return [
+      { source: "/screenshots/:path*", destination: "/api/media/screenshots/:path*" },
+      { source: "/diffs/:path*", destination: "/api/media/diffs/:path*" },
+      { source: "/baselines/:path*", destination: "/api/media/baselines/:path*" },
+      { source: "/traces/:path*", destination: "/api/media/traces/:path*" },
+      { source: "/videos/:path*", destination: "/api/media/videos/:path*" },
+      { source: "/planned/:path*", destination: "/api/media/planned/:path*" },
+      { source: "/bug-reports/:path*", destination: "/api/media/bug-reports/:path*" },
     ];
   },
 };

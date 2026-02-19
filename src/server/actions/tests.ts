@@ -7,6 +7,7 @@ import * as queries from '@/lib/db/queries';
 import { requireRepoAccess, requireTeamAccess } from '@/lib/auth';
 import type { NewTest, NewFunctionalArea } from '@/lib/db/schema';
 import { getCurrentBranchForRepo } from '@/lib/git-utils';
+import { STORAGE_DIRS } from '@/lib/storage/paths';
 
 export async function createFunctionalArea(data: Omit<NewFunctionalArea, 'id'>) {
   if (data.repositoryId) await requireRepoAccess(data.repositoryId);
@@ -41,16 +42,31 @@ export async function createTest(data: Omit<NewTest, 'id' | 'createdAt' | 'updat
 }
 
 export async function updateTest(id: string, data: Partial<NewTest>) {
-  await requireTeamAccess();
+  const session = await requireTeamAccess();
   const test = await queries.getTest(id);
+  if (!test) throw new Error('Test not found');
+  if (test.repositoryId) {
+    const repo = await queries.getRepository(test.repositoryId);
+    if (!repo || repo.teamId !== session.team.id) throw new Error('Forbidden');
+  }
   const branch = await getCurrentBranchForRepo(test?.repositoryId);
   await queries.updateTestWithVersion(id, data, 'manual_edit', branch ?? undefined);
   revalidatePath('/tests');
   revalidatePath(`/tests/${id}`);
 }
 
+async function verifyTestOwnership(testId: string, teamId: string) {
+  const test = await queries.getTest(testId);
+  if (!test) throw new Error('Test not found');
+  if (test.repositoryId) {
+    const repo = await queries.getRepository(test.repositoryId);
+    if (!repo || repo.teamId !== teamId) throw new Error('Forbidden');
+  }
+}
+
 export async function deleteTest(id: string) {
-  await requireTeamAccess();
+  const session = await requireTeamAccess();
+  await verifyTestOwnership(id, session.team.id);
   await queries.softDeleteTest(id);
   revalidatePath('/tests');
   revalidatePath(`/tests/${id}`);
@@ -58,8 +74,9 @@ export async function deleteTest(id: string) {
 }
 
 export async function deleteTests(testIds: string[]) {
-  await requireTeamAccess();
+  const session = await requireTeamAccess();
   for (const id of testIds) {
+    await verifyTestOwnership(id, session.team.id);
     await queries.softDeleteTest(id);
   }
   revalidatePath('/tests');
@@ -67,7 +84,8 @@ export async function deleteTests(testIds: string[]) {
 }
 
 export async function restoreTest(id: string) {
-  await requireTeamAccess();
+  const session = await requireTeamAccess();
+  await verifyTestOwnership(id, session.team.id);
   await queries.restoreTest(id);
   revalidatePath('/tests');
   revalidatePath(`/tests/${id}`);
@@ -75,8 +93,9 @@ export async function restoreTest(id: string) {
 }
 
 export async function restoreTests(testIds: string[]) {
-  await requireTeamAccess();
+  const session = await requireTeamAccess();
   for (const id of testIds) {
+    await verifyTestOwnership(id, session.team.id);
     await queries.restoreTest(id);
   }
   revalidatePath('/tests');
@@ -84,15 +103,17 @@ export async function restoreTests(testIds: string[]) {
 }
 
 export async function permanentlyDeleteTest(id: string) {
-  await requireTeamAccess();
+  const session = await requireTeamAccess();
+  await verifyTestOwnership(id, session.team.id);
   await queries.permanentlyDeleteTest(id);
   revalidatePath('/tests');
   revalidatePath('/');
 }
 
 export async function permanentlyDeleteTests(testIds: string[]) {
-  await requireTeamAccess();
+  const session = await requireTeamAccess();
   for (const id of testIds) {
+    await verifyTestOwnership(id, session.team.id);
     await queries.permanentlyDeleteTest(id);
   }
   revalidatePath('/tests');
@@ -100,22 +121,27 @@ export async function permanentlyDeleteTests(testIds: string[]) {
 }
 
 export async function getDeletedTests(repositoryId?: string) {
+  await requireTeamAccess();
   return queries.getDeletedTests(repositoryId);
 }
 
 export async function getTest(id: string) {
+  await requireTeamAccess();
   return queries.getTest(id);
 }
 
 export async function getTests() {
+  await requireTeamAccess();
   return queries.getTests();
 }
 
 export async function getTestsByArea(areaId: string) {
+  await requireTeamAccess();
   return queries.getTestsByFunctionalArea(areaId);
 }
 
 export async function getFunctionalAreas() {
+  await requireTeamAccess();
   return queries.getFunctionalAreas();
 }
 
@@ -129,7 +155,7 @@ export async function getTestScreenshots(
   testId: string,
   repositoryId?: string | null
 ): Promise<string[]> {
-  const baseDir = './public/screenshots';
+  const baseDir = STORAGE_DIRS.screenshots;
   const dir = repositoryId ? path.join(baseDir, repositoryId) : baseDir;
 
   if (!fs.existsSync(dir)) return [];
@@ -200,6 +226,7 @@ export async function getTestScreenshotsGrouped(
 
 // Test Version Actions
 export async function getTestVersionHistory(testId: string) {
+  await requireTeamAccess();
   return queries.getTestVersions(testId);
 }
 
@@ -232,6 +259,7 @@ export async function restoreTestVersion(testId: string, version: number) {
 
 // Get visual diffs for a specific test result (step-level diffs)
 export async function getVisualDiffsForTestResult(testResultId: string) {
+  await requireTeamAccess();
   return queries.getVisualDiffsByTestResult(testResultId);
 }
 

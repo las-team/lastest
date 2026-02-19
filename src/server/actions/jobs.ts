@@ -121,6 +121,24 @@ export async function cancelJob(jobId: string, repositoryId?: string | null, run
     }
   }
 
+  // Update build/testRun statuses so they don't stay stuck
+  if (job.type === 'build_run' && job.status === 'running' && job.metadata) {
+    const meta = job.metadata as { buildId?: string; testRunId?: string };
+    const now = new Date();
+    if (meta.buildId) {
+      await queries.updateBuild(meta.buildId, {
+        overallStatus: 'blocked',
+        completedAt: now,
+      });
+    }
+    if (meta.testRunId) {
+      await queries.updateTestRun(meta.testRunId, {
+        status: 'failed',
+        completedAt: now,
+      });
+    }
+  }
+
   await queries.updateBackgroundJob(jobId, {
     status: 'failed',
     error: 'Cancelled by user',

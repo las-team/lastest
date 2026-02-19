@@ -1,4 +1,4 @@
-import type { BuildStatus } from '@/lib/db/schema';
+import type { BuildStatus, BugReportSeverity } from '@/lib/db/schema';
 
 export interface DiscordBuildNotification {
   buildId: string;
@@ -83,6 +83,72 @@ export async function sendDiscordNotification(
     return {
       success: false,
       error: error instanceof Error ? error.message : 'Unknown error sending Discord notification',
+    };
+  }
+}
+
+// Bug Report Notification
+
+export interface DiscordBugReportNotification {
+  description: string;
+  severity: BugReportSeverity;
+  reporterEmail: string;
+  url: string;
+  appVersion: string | null;
+  gitHash: string | null;
+  reportId: string;
+  screenshotUrl: string | null;
+}
+
+function getBugSeverityColor(severity: BugReportSeverity): number {
+  switch (severity) {
+    case 'high': return 0xef4444;
+    case 'medium': return 0xeab308;
+    case 'low': return 0x3b82f6;
+  }
+}
+
+export async function sendDiscordBugReport(
+  webhookUrl: string,
+  notification: DiscordBugReportNotification,
+): Promise<{ success: boolean; error?: string }> {
+  const embed: Record<string, unknown> = {
+    title: `🐛 Bug Report — ${notification.severity.toUpperCase()}`,
+    color: getBugSeverityColor(notification.severity),
+    fields: [
+      { name: 'Description', value: notification.description.slice(0, 1024) },
+      { name: 'Severity', value: notification.severity, inline: true },
+      { name: 'Reporter', value: notification.reporterEmail, inline: true },
+      { name: 'URL', value: notification.url, inline: false },
+      { name: 'Version', value: `${notification.appVersion ?? '?'} (${notification.gitHash ?? '?'})`, inline: true },
+      { name: 'Report ID', value: `\`${notification.reportId}\``, inline: true },
+    ],
+    timestamp: new Date().toISOString(),
+  };
+
+  if (notification.screenshotUrl) {
+    embed.image = { url: notification.screenshotUrl };
+  }
+
+  try {
+    const response = await fetch(webhookUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        embeds: [embed],
+        allowed_mentions: { parse: [] },
+      }),
+    });
+
+    if (!response.ok) {
+      const text = await response.text();
+      return { success: false, error: `Discord webhook failed: ${response.status} ${text}` };
+    }
+    return { success: true };
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : 'Unknown error sending Discord bug report',
     };
   }
 }

@@ -1,17 +1,18 @@
 'use client';
 
-import { useState, useMemo, useCallback } from 'react';
+import { useState, useMemo, useCallback, useRef } from 'react';
 import { useRouter } from 'next/navigation';
-import { AlertTriangle, CheckCircle, XCircle, ExternalLink, XIcon, Sparkles, Flag, Loader2, ChevronRight, ChevronsUpDown } from 'lucide-react';
+import { AlertTriangle, CheckCircle, XCircle, ListTodo, ExternalLink, XIcon, Sparkles, Flag, Loader2, ChevronRight, ChevronsUpDown } from 'lucide-react';
 import type { AIDiffAnalysis, VisualDiffWithTestStatus } from '@/lib/db/schema';
 import { MetricsRow } from '@/components/dashboard/metrics-row';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Badge } from '@/components/ui/badge';
 import { Collapsible, CollapsibleTrigger, CollapsibleContent } from '@/components/ui/collapsible';
-import { batchApproveDiffs, batchRejectDiffs, acceptAIApprovals } from '@/server/actions/diffs';
+import { batchApproveDiffs, batchAddDiffTodos, acceptAIApprovals } from '@/server/actions/diffs';
+import { Input } from '@/components/ui/input';
 
 // Filter type for the build detail page metrics
-export type FilterType = 'all' | 'tests' | 'changed' | 'flaky' | 'failed' | 'passed' | 'errors' | 'ai-approve' | 'ai-review' | 'ai-flag';
+export type FilterType = 'all' | 'tests' | 'changed' | 'flaky' | 'failed' | 'passed' | 'errors' | 'todo' | 'ai-approve' | 'ai-review' | 'ai-flag';
 
 // Utility function to filter diffs based on the selected filter type
 export function filterDiffs(diffs: VisualDiffWithTestStatus[], filter: FilterType): VisualDiffWithTestStatus[] {
@@ -23,6 +24,8 @@ export function filterDiffs(diffs: VisualDiffWithTestStatus[], filter: FilterTyp
       return diffs.filter((d) => d.classification === 'changed' || (d.pixelDifference && d.pixelDifference > 0 && !d.classification));
     case 'failed':
       return diffs.filter((d) => d.testResultStatus === 'failed' || d.status === 'rejected');
+    case 'todo':
+      return diffs.filter((d) => d.status === 'todo');
     case 'errors':
       return diffs.filter((d) => d.errorMessage);
     case 'passed':
@@ -46,6 +49,7 @@ const diffStatusIcons: Record<string, typeof CheckCircle> = {
   approved: CheckCircle,
   rejected: XCircle,
   auto_approved: CheckCircle,
+  todo: ListTodo,
 };
 
 // Status colors for visual diff items
@@ -54,6 +58,7 @@ const diffStatusColors: Record<string, string> = {
   approved: 'text-green-600 bg-green-50',
   rejected: 'text-red-600 bg-red-50',
   auto_approved: 'text-primary bg-primary/10',
+  todo: 'text-amber-600 bg-amber-50',
 };
 
 // Filter labels for display
@@ -63,6 +68,7 @@ const filterLabels: Record<FilterType, string> = {
   changed: 'Changed',
   flaky: 'Flaky',
   failed: 'Failed',
+  todo: 'Todos',
   errors: 'Errors',
   passed: 'Passed',
   'ai-approve': 'AI: Safe',
@@ -78,10 +84,11 @@ const aiRecommendationBadge: Record<string, { label: string; className: string; 
 };
 
 // Branch status for each diff (derived from comparison data)
-export type BranchStatus = 'baseline' | 'branch_accepted' | 'new_change' | 'new_test';
+export type BranchStatus = 'baseline' | 'branch_accepted' | 'new_change' | 'new_test' | 'has_todo';
 
 function deriveBranchStatus(diff: VisualDiffWithTestStatus): BranchStatus {
   if (diff.metadata && (diff.metadata as { isNewTest?: boolean }).isNewTest) return 'new_test';
+  if (diff.status === 'todo') return 'has_todo';
   if (diff.status === 'approved') return 'branch_accepted';
   if (diff.classification === 'unchanged' || diff.status === 'auto_approved') return 'baseline';
   return 'new_change';
@@ -92,6 +99,7 @@ const branchStatusConfig: Record<BranchStatus, { label: string; className: strin
   branch_accepted: { label: 'Branch Accepted', className: 'bg-blue-100 text-blue-700' },
   new_change: { label: 'New Change', className: 'bg-yellow-100 text-yellow-700' },
   new_test: { label: 'New Test', className: 'bg-purple-100 text-purple-700' },
+  has_todo: { label: 'Todo', className: 'bg-amber-100 text-amber-700' },
 };
 
 export interface BuildDetailClientProps {
@@ -221,15 +229,21 @@ export function BuildDetailClient({
     }
   };
 
-  const handleBulkReject = async () => {
-    if (selectedIds.size === 0) return;
+  const [showBulkTodoInput, setShowBulkTodoInput] = useState(false);
+  const [bulkTodoDescription, setBulkTodoDescription] = useState('');
+  const bulkTodoInputRef = useRef<HTMLInputElement>(null);
+
+  const handleBulkAddTodo = async () => {
+    if (selectedIds.size === 0 || !bulkTodoDescription.trim()) return;
     setIsProcessing(true);
     try {
-      await batchRejectDiffs(Array.from(selectedIds));
+      await batchAddDiffTodos(Array.from(selectedIds), bulkTodoDescription.trim());
       setSelectedIds(new Set());
+      setShowBulkTodoInput(false);
+      setBulkTodoDescription('');
       router.refresh();
     } catch (error) {
-      console.error('Failed to batch reject:', error);
+      console.error('Failed to batch add todos:', error);
     } finally {
       setIsProcessing(false);
     }
@@ -340,16 +354,46 @@ export function BuildDetailClient({
               className="flex items-center gap-1 px-3 py-1 text-sm font-medium text-white bg-green-600 rounded-md hover:bg-green-700 disabled:opacity-50"
             >
               {isProcessing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <CheckCircle className="w-3.5 h-3.5" />}
-              Approve
+              Expected Change
             </button>
-            <button
-              onClick={handleBulkReject}
-              disabled={isProcessing}
-              className="flex items-center gap-1 px-3 py-1 text-sm font-medium text-red-700 border border-red-300 rounded-md hover:bg-red-50 disabled:opacity-50"
-            >
-              <XCircle className="w-3.5 h-3.5" />
-              Reject
-            </button>
+            {showBulkTodoInput ? (
+              <div className="flex items-center gap-2">
+                <Input
+                  ref={bulkTodoInputRef}
+                  value={bulkTodoDescription}
+                  onChange={(e) => setBulkTodoDescription(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') handleBulkAddTodo();
+                    if (e.key === 'Escape') { setShowBulkTodoInput(false); setBulkTodoDescription(''); }
+                  }}
+                  placeholder="Describe what needs fixing..."
+                  className="w-56 h-8 text-sm"
+                  onClick={(e) => e.stopPropagation()}
+                />
+                <button
+                  onClick={handleBulkAddTodo}
+                  disabled={isProcessing || !bulkTodoDescription.trim()}
+                  className="flex items-center gap-1 px-3 py-1 text-sm font-medium text-white bg-amber-600 rounded-md hover:bg-amber-700 disabled:opacity-50"
+                >
+                  Add
+                </button>
+                <button
+                  onClick={() => { setShowBulkTodoInput(false); setBulkTodoDescription(''); }}
+                  className="text-sm text-gray-500 hover:text-gray-700"
+                >
+                  Cancel
+                </button>
+              </div>
+            ) : (
+              <button
+                onClick={() => { setShowBulkTodoInput(true); setTimeout(() => bulkTodoInputRef.current?.focus(), 50); }}
+                disabled={isProcessing}
+                className="flex items-center gap-1 px-3 py-1 text-sm font-medium text-amber-700 border border-amber-300 rounded-md hover:bg-amber-50 disabled:opacity-50"
+              >
+                <ListTodo className="w-3.5 h-3.5" />
+                Add to Todo
+              </button>
+            )}
             <button
               onClick={() => setSelectedIds(new Set())}
               className="ml-auto text-sm text-gray-500 hover:text-gray-700"
@@ -577,6 +621,8 @@ function DiffRow({
           <img
             src={diff.currentImagePath}
             alt="Screenshot"
+            loading="lazy"
+            decoding="async"
             className={`w-20 h-12 object-cover rounded border ${
               isFailed ? 'border-red-200' : ''
             }`}
