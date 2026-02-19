@@ -1,6 +1,6 @@
 const GITLAB_CLIENT_ID = process.env.GITLAB_CLIENT_ID || '';
 const GITLAB_CLIENT_SECRET = process.env.GITLAB_CLIENT_SECRET || '';
-const GITLAB_REDIRECT_URI = process.env.GITLAB_REDIRECT_URI || 'http://localhost:3000/api/auth/gitlab/callback';
+const GITLAB_REDIRECT_URI = process.env.GITLAB_REDIRECT_URI || 'http://localhost:3000/api/connect/gitlab/callback';
 const DEFAULT_GITLAB_INSTANCE = process.env.GITLAB_INSTANCE_URL || 'https://gitlab.com';
 
 export function getGitLabAuthUrl(state?: string, instanceUrl?: string): string {

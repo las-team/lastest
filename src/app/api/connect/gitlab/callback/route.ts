@@ -23,13 +23,11 @@ export async function GET(request: NextRequest) {
     return NextResponse.redirect(new URL('/settings?error=no_code', getPublicUrl(request)));
   }
 
-  // Exchange code for token
   const tokenResponse = await exchangeCodeForToken(code, instanceUrl);
   if (!tokenResponse) {
     return NextResponse.redirect(new URL('/settings?error=token_exchange_failed', getPublicUrl(request)));
   }
 
-  // Get GitLab user info
   const gitlabUser = await getGitLabUser(tokenResponse.access_token, instanceUrl);
   if (!gitlabUser) {
     return NextResponse.redirect(new URL('/settings?error=user_fetch_failed', getPublicUrl(request)));
@@ -44,7 +42,6 @@ export async function GET(request: NextRequest) {
     return NextResponse.redirect(new URL('/settings?error=no_team', getPublicUrl(request)));
   }
 
-  // Upsert GitLab account for this team
   const existingGitlabAccount = await queries.getGitlabAccountByTeam(teamId);
   if (existingGitlabAccount) {
     await queries.updateGitlabAccount(existingGitlabAccount.id, {

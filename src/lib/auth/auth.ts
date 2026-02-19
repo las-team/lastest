@@ -5,6 +5,7 @@ import { db } from "@/lib/db";
 import * as schema from "@/lib/db/schema";
 import { hash, verify } from "@node-rs/argon2";
 import * as queries from "@/lib/db/queries";
+import { getGitHubUser } from "@/lib/github/oauth";
 
 export const auth = betterAuth({
   baseURL: process.env.BETTER_AUTH_BASE_URL || process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000",
@@ -56,6 +57,7 @@ export const auth = betterAuth({
     github: {
       clientId: process.env.GITHUB_CLIENT_ID!,
       clientSecret: process.env.GITHUB_CLIENT_SECRET!,
+      scope: ["read:user", "user:email", "repo"],
     },
     google: {
       clientId: process.env.GOOGLE_CLIENT_ID!,
@@ -69,6 +71,37 @@ export const auth = betterAuth({
   },
 
   databaseHooks: {
+    account: {
+      create: {
+        after: async (account) => {
+          if (account.providerId === "github" && account.accessToken) {
+            try {
+              const ghUser = await getGitHubUser(account.accessToken);
+              if (!ghUser) return;
+              const user = await queries.getUserById(account.userId);
+              const teamId = user?.teamId ?? null;
+              const existing = teamId ? await queries.getGithubAccountByTeam(teamId) : null;
+              if (existing) {
+                await queries.updateGithubAccount(existing.id, {
+                  accessToken: account.accessToken,
+                  githubUserId: ghUser.id.toString(),
+                  githubUsername: ghUser.login,
+                });
+              } else {
+                await queries.createGithubAccount({
+                  githubUserId: ghUser.id.toString(),
+                  githubUsername: ghUser.login,
+                  accessToken: account.accessToken,
+                  teamId,
+                });
+              }
+            } catch {
+              // Don't block sign-in if github_accounts sync fails
+            }
+          }
+        },
+      },
+    },
     user: {
       create: {
         after: async (user) => {
