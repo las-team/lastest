@@ -12,17 +12,8 @@ AI review
 ## features
 Support https://github.com/excalidraw/excalidraw/tree/master/packages/excalidraw/tests ~/.claude/plans/declarative-kindling-coral.md 55%
 
-Publish npm
-
-  #: 18
-  Issue: Mixed auth systems
-  Severity: Medium
-  Status: Not fixed
-  Fix: Architectural — requires full auth unification, out of
-  scope
-    for this pass
-
 ## ideas
+Content comparison - compare text in 2 setups
 Explore/Cover instead of Areas
 Ban AI mode
     Remove all GenAI features from UI if enabled

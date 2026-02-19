@@ -28,6 +28,14 @@ export interface DiffResult {
 // Alignment operation types for LCS row alignment
 type AlignOp = 'match' | 'insert' | 'delete';
 
+/**
+ * Maximum number of DP cells (m * n) for the LCS alignment.
+ * Beyond this threshold we fall back to sequential row matching
+ * to avoid freezing the event loop / running out of memory.
+ * 25M cells ≈ 100MB RAM, covers images up to ~5000px each.
+ */
+const MAX_LCS_CELLS = 50_000_000;
+
 interface AlignmentResult {
   ops: AlignOp[];
   baselineRows: number[];  // maps aligned row index -> baseline row (-1 for inserts)
@@ -152,11 +160,29 @@ function calculateContentArea(
  * We use MD5 because we only need collision resistance within a single image pair,
  * and it's significantly faster than SHA256 for this use case.
  */
-function hashRow(data: Buffer | Uint8Array, width: number, row: number): string {
+function _hashRow(data: Buffer | Uint8Array, width: number, row: number): string {
   const start = row * width * 4;
   const end = start + width * 4;
   const slice = Buffer.from(data.buffer, data.byteOffset + start, end - start);
   return crypto.createHash('md5').update(slice).digest('hex');
+}
+
+/**
+ * Hash a single row with quantized RGB channels for fuzzy matching.
+ * Shift each RGB channel right by 4 bits (16 levels) so sub-pixel rendering
+ * differences hash identically. Alpha is kept as-is.
+ */
+function hashRowQuantized(data: Buffer | Uint8Array, width: number, row: number): string {
+  const rowBytes = width * 4;
+  const start = row * rowBytes;
+  const quantized = Buffer.allocUnsafe(rowBytes);
+  for (let i = 0; i < rowBytes; i += 4) {
+    quantized[i]     = data[start + i] >> 4;      // R
+    quantized[i + 1] = data[start + i + 1] >> 4;  // G
+    quantized[i + 2] = data[start + i + 2] >> 4;  // B
+    quantized[i + 3] = data[start + i + 3];        // A unchanged
+  }
+  return crypto.createHash('md5').update(quantized).digest('hex');
 }
 
 /**
@@ -212,15 +238,52 @@ function alignRows(
     };
   }
 
-  // Hash all rows
+  // Guard: fall back to sequential matching when images are too tall for LCS.
+  // The DP table is O(m*n) in both memory and time — tall full-page screenshots
+  // would freeze the event loop or OOM without this check.
+  if (baselineHeight * currentHeight > MAX_LCS_CELLS) {
+    const minH = Math.min(baselineHeight, currentHeight);
+    const maxH = Math.max(baselineHeight, currentHeight);
+    const ops: AlignOp[] = [];
+    const baselineRows: number[] = [];
+    const currentRows: number[] = [];
+    // Match rows 1:1 up to the shorter image
+    for (let y = 0; y < minH; y++) {
+      ops.push('match');
+      baselineRows.push(y);
+      currentRows.push(y);
+    }
+    // Remaining rows are inserts or deletes
+    for (let y = minH; y < maxH; y++) {
+      if (currentHeight > baselineHeight) {
+        ops.push('insert');
+        baselineRows.push(-1);
+        currentRows.push(y);
+      } else {
+        ops.push('delete');
+        baselineRows.push(y);
+        currentRows.push(-1);
+      }
+    }
+    return {
+      ops,
+      baselineRows,
+      currentRows,
+      insertedRows: Math.max(0, currentHeight - baselineHeight),
+      deletedRows: Math.max(0, baselineHeight - currentHeight),
+      matchedRows: minH,
+    };
+  }
+
+  // Hash all rows (quantized to tolerate sub-pixel rendering differences)
   const baselineHashes: string[] = [];
   for (let y = 0; y < baselineHeight; y++) {
-    baselineHashes.push(hashRow(baselineData, baselineWidth, y));
+    baselineHashes.push(hashRowQuantized(baselineData, baselineWidth, y));
   }
 
   const currentHashes: string[] = [];
   for (let y = 0; y < currentHeight; y++) {
-    currentHashes.push(hashRow(currentData, currentWidth, y));
+    currentHashes.push(hashRowQuantized(currentData, currentWidth, y));
   }
 
   // Compute LCS using space-optimized DP (we only need the traceback)
@@ -228,7 +291,7 @@ function alignRows(
   const n = currentHeight;
 
   // Full DP table for traceback
-  const dp: Uint16Array[] = Array.from({ length: m + 1 }, () => new Uint16Array(n + 1));
+  const dp: Uint32Array[] = Array.from({ length: m + 1 }, () => new Uint32Array(n + 1));
 
   for (let i = 1; i <= m; i++) {
     for (let j = 1; j <= n; j++) {
@@ -709,13 +772,12 @@ async function generateShiftAwareDiff(
 
   const alignmentSegments = compressOpsToSegments(alignment.ops);
 
-  // Run pixelmatch on the full aligned images
-  let numDiffPixels = 0;
+  // Run pixelmatch on the full aligned images (for visual diff image only)
   let alignedDiffData: Buffer;
 
   if (alignedHeight > 0) {
     const alignedDiff = new PNG({ width, height: alignedHeight });
-    numDiffPixels = pixelmatch(
+    pixelmatch(
       alignedBaseline,
       alignedCurrent,
       alignedDiff.data,
@@ -746,11 +808,28 @@ async function generateShiftAwareDiff(
   const diffImagePath = path.join(outputDir, diffFileName);
   fs.writeFileSync(diffImagePath, PNG.sync.write(diffImage));
 
-  // Single percentage from all rows (inserted/deleted content now compared against bg)
+  // Count diff pixels only from matched rows (exclude insert/delete rows
+  // which would compare content against background fill, inflating the percentage)
+  let matchedRowDiffPixels = 0;
+  const rowOutput = new Uint8Array(width * 4);
+  for (let idx = 0; idx < alignment.ops.length; idx++) {
+    if (alignment.ops[idx] !== 'match') continue;
+    const bRow = alignment.baselineRows[idx];
+    const cRow = alignment.currentRows[idx];
+    if (bRow < 0 || cRow < 0) continue;
+    const bStart = bRow * width * 4;
+    const cStart = cRow * width * 4;
+    const bSlice = baseline.data.subarray(bStart, bStart + width * 4);
+    const cSlice = current.data.subarray(cStart, cStart + width * 4);
+    matchedRowDiffPixels += pixelmatch(bSlice, cSlice, rowOutput, width, 1, {
+      threshold, includeAA: includeAntiAliasing,
+    });
+  }
+
   const baselineContent = calculateContentArea(baseline.data, baseline.width, baseline.height, baselineBg);
   const currentContent = calculateContentArea(current.data, current.width, current.height, currentBg);
   const contentArea = Math.max(baselineContent.contentPixels, currentContent.contentPixels, 1);
-  const percentageDiff = Math.min((numDiffPixels / contentArea) * 100, 100);
+  const percentageDiff = Math.min((matchedRowDiffPixels / contentArea) * 100, 100);
 
   // Find changed regions from the full aligned diff
   const changedRegions = alignedHeight > 0
@@ -788,7 +867,7 @@ async function generateShiftAwareDiff(
   };
 
   return {
-    pixelDifference: numDiffPixels,
+    pixelDifference: matchedRowDiffPixels,
     percentageDifference: Math.round(percentageDiff * 100) / 100,
     diffImagePath,
     metadata: {

@@ -79,7 +79,8 @@
       "Bash(wc:*)",
       "Bash(git stash:*)",
       "Bash(node check-build.js:*)",
-      "Bash(node:*)"
+      "Bash(node:*)",
+      "Bash(pnpm vitest run:*)"
     ]
   },
   "disabledMcpjsonServers": [

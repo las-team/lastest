@@ -576,3 +576,108 @@ describe('generateDiff - Anti-Aliasing Handling', () => {
     expect(includeAA).toBe(true);
   });
 });
+
+describe('generateDiff - shift-aware diff with different-height images', () => {
+  const tempDir = path.join(__dirname, '__temp_shift__');
+
+  beforeEach(() => {
+    if (!fs.existsSync(tempDir)) {
+      fs.mkdirSync(tempDir, { recursive: true });
+    }
+  });
+
+  afterEach(() => {
+    if (fs.existsSync(tempDir)) {
+      const files = fs.readdirSync(tempDir);
+      for (const file of files) {
+        fs.unlinkSync(path.join(tempDir, file));
+      }
+      fs.rmdirSync(tempDir);
+    }
+  });
+
+  it('reports ~0% diff when different-height images have identical matched content', async () => {
+    const width = 200;
+
+    // Baseline: 600px tall — white top 200px, black band 200px, white bottom 200px
+    const baselinePng = createMockPNG(width, 600, [255, 255, 255, 255]);
+    for (let y = 200; y < 400; y++) {
+      for (let x = 0; x < width; x++) {
+        const idx = (width * y + x) << 2;
+        baselinePng.data[idx] = 0;
+        baselinePng.data[idx + 1] = 0;
+        baselinePng.data[idx + 2] = 0;
+      }
+    }
+
+    // Current: 800px tall — white 200px, RED inserted section 200px, black band 200px, white 200px
+    const currentPng = createMockPNG(width, 800, [255, 255, 255, 255]);
+    // Red inserted section rows 200-399
+    for (let y = 200; y < 400; y++) {
+      for (let x = 0; x < width; x++) {
+        const idx = (width * y + x) << 2;
+        currentPng.data[idx] = 255;
+        currentPng.data[idx + 1] = 0;
+        currentPng.data[idx + 2] = 0;
+      }
+    }
+    // Black band rows 400-599 (same content as baseline rows 200-399)
+    for (let y = 400; y < 600; y++) {
+      for (let x = 0; x < width; x++) {
+        const idx = (width * y + x) << 2;
+        currentPng.data[idx] = 0;
+        currentPng.data[idx + 1] = 0;
+        currentPng.data[idx + 2] = 0;
+      }
+    }
+
+    const baselinePath = path.join(tempDir, 'baseline.png');
+    const currentPath = path.join(tempDir, 'current.png');
+    fs.writeFileSync(baselinePath, PNG.sync.write(baselinePng));
+    fs.writeFileSync(currentPath, PNG.sync.write(currentPng));
+
+    const result = await generateDiff(baselinePath, currentPath, tempDir, 0.1, false, undefined, true);
+
+    // Matched content is identical, so diff should be ~0%
+    expect(result.percentageDifference).toBeLessThan(1);
+    expect(result.metadata.pageShift).toBeDefined();
+    expect(result.metadata.pageShift!.detected).toBe(true);
+    expect(result.metadata.pageShift!.insertedRows).toBeGreaterThan(0);
+  });
+
+  it('reports low diff for same-height images with shifted content', async () => {
+    const width = 200;
+
+    // Baseline: white 100px, black 100px, white 400px
+    const baselinePng = createMockPNG(width, 600, [255, 255, 255, 255]);
+    for (let y = 100; y < 200; y++) {
+      for (let x = 0; x < width; x++) {
+        const idx = (width * y + x) << 2;
+        baselinePng.data[idx] = 0;
+        baselinePng.data[idx + 1] = 0;
+        baselinePng.data[idx + 2] = 0;
+      }
+    }
+
+    // Current: white 200px (100px inserted), black 100px, white 300px
+    const currentPng = createMockPNG(width, 600, [255, 255, 255, 255]);
+    for (let y = 200; y < 300; y++) {
+      for (let x = 0; x < width; x++) {
+        const idx = (width * y + x) << 2;
+        currentPng.data[idx] = 0;
+        currentPng.data[idx + 1] = 0;
+        currentPng.data[idx + 2] = 0;
+      }
+    }
+
+    const baselinePath = path.join(tempDir, 'baseline.png');
+    const currentPath = path.join(tempDir, 'current.png');
+    fs.writeFileSync(baselinePath, PNG.sync.write(baselinePng));
+    fs.writeFileSync(currentPath, PNG.sync.write(currentPng));
+
+    const result = await generateDiff(baselinePath, currentPath, tempDir, 0.1, false, undefined, true);
+
+    // The black band is displaced but content is identical — shift-aware should report low diff
+    expect(result.percentageDifference).toBeLessThan(5);
+  });
+});
