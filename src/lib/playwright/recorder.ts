@@ -300,7 +300,7 @@ export class PlaywrightRecorder extends EventEmitter {
       // Tier 1 syntax validation: check if action has valid selectors or coordinate fallback
       const validSelectors = selectors.filter(sel => sel.value && sel.value.trim() && !sel.value.includes('undefined'));
       const hasValidSelectors = validSelectors.length > 0;
-      const hasCoordsFallback = (action === 'click' || action === 'rightclick') && coordinates !== undefined;
+      const hasCoordsFallback = (action === 'click' || action === 'rightclick' || action === 'fill') && coordinates !== undefined;
       const syntaxValid = hasValidSelectors || hasCoordsFallback;
 
       // Store button for right-clicks
@@ -492,8 +492,10 @@ export class PlaywrightRecorder extends EventEmitter {
           return;
         }
         const selectors = generateAllSelectors(target);
+        const rect = target.getBoundingClientRect();
+        const boundingBox = { x: rect.x, y: rect.y, width: rect.width, height: rect.height };
         // @ts-expect-error
-        window.__recordAction?.('fill', selectors, target.value, undefined, generateActionId());
+        window.__recordAction?.('fill', selectors, target.value, boundingBox, generateActionId());
       }, true);
 
       document.addEventListener('change', (e) => {
@@ -1123,6 +1125,14 @@ export class PlaywrightRecorder extends EventEmitter {
       `      await page.mouse.click(coords.x, coords.y, options || {});`,
       `      return;`,
       `    }`,
+      `    // Coordinate fallback for fill - click to focus then type`,
+      `    if (action === 'fill' && coords) {`,
+      `      console.log('Falling back to coordinate fill at', coords.x, coords.y);`,
+      `      await page.mouse.click(coords.x, coords.y);`,
+      `      await page.keyboard.selectAll();`,
+      `      await page.keyboard.type(value || '');`,
+      `      return;`,
+      `    }`,
       ] : []),
       `    throw new Error('No selector matched: ' + JSON.stringify(validSelectors));`,
       `  }`,
@@ -1190,7 +1200,7 @@ export class PlaywrightRecorder extends EventEmitter {
               lines.push(`  await locateWithFallback(page, ${selectorsJson}, 'click', null, ${coordsArg}, ${clickOptions});`);
               break;
             case 'fill':
-              lines.push(`  await locateWithFallback(page, ${selectorsJson}, 'fill', '${value || ''}', null);`);
+              lines.push(`  await locateWithFallback(page, ${selectorsJson}, 'fill', '${value || ''}', ${coordsArg});`);
               break;
             case 'selectOption':
               lines.push(`  await locateWithFallback(page, ${selectorsJson}, 'selectOption', '${value || ''}', null);`);
@@ -1213,10 +1223,16 @@ export class PlaywrightRecorder extends EventEmitter {
               break;
           }
         } else {
-          // No selectors available - use coordinate fallback for clicks
+          // No selectors available - use coordinate fallback
           if ((action === 'click' || action === 'rightclick') && coordinates) {
             lines.push(`  // Coordinate-only ${isRightClick ? 'right-' : ''}click (no selectors found)`);
             lines.push(`  await page.mouse.click(${coordinates.x}, ${coordinates.y}${isRightClick ? `, ${clickOptions}` : ''});`);
+          } else if (action === 'fill' && coordinates) {
+            const escapedValue = (value || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+            lines.push(`  // Coordinate-only fill (no selectors found) - click to focus then type`);
+            lines.push(`  await page.mouse.click(${coordinates.x}, ${coordinates.y});`);
+            lines.push(`  await page.keyboard.selectAll();`);
+            lines.push(`  await page.keyboard.type('${escapedValue}');`);
           } else {
             lines.push(`  // Skipped ${action}: no valid selector or coordinates found`);
           }

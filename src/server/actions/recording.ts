@@ -562,6 +562,13 @@ function generateCodeFromRemoteEvents(
     `      await page.mouse.click(coords.x, coords.y);`,
     `      return;`,
     `    }`,
+    `    if (action === 'fill' && coords) {`,
+    `      console.log('Falling back to coordinate fill at', coords.x, coords.y);`,
+    `      await page.mouse.click(coords.x, coords.y);`,
+    `      await page.keyboard.selectAll();`,
+    `      await page.keyboard.type(value || '');`,
+    `      return;`,
+    `    }`,
     ] : []),
     `    throw new Error('No selector matched: ' + JSON.stringify(validSelectors));`,
     `  }`,
@@ -624,7 +631,7 @@ function generateCodeFromRemoteEvents(
             lines.push(`  await locateWithFallback(page, ${selectorsJson}, 'click', null, ${coordsArg});`);
             break;
           case 'fill':
-            lines.push(`  await locateWithFallback(page, ${selectorsJson}, 'fill', '${value || ''}', null);`);
+            lines.push(`  await locateWithFallback(page, ${selectorsJson}, 'fill', '${value || ''}', ${coordsArg});`);
             break;
           case 'selectOption':
             lines.push(`  await locateWithFallback(page, ${selectorsJson}, 'selectOption', '${value || ''}', null);`);
@@ -645,6 +652,12 @@ function generateCodeFromRemoteEvents(
       } else if (action === 'click' && coordinates) {
         lines.push(`  // Coordinate-only click (no selectors found)`);
         lines.push(`  await page.mouse.click(${coordinates.x}, ${coordinates.y});`);
+      } else if (action === 'fill' && coordinates) {
+        const escapedValue = (value || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+        lines.push(`  // Coordinate-only fill (no selectors found) - click to focus then type`);
+        lines.push(`  await page.mouse.click(${coordinates.x}, ${coordinates.y});`);
+        lines.push(`  await page.keyboard.selectAll();`);
+        lines.push(`  await page.keyboard.type('${escapedValue}');`);
       } else {
         lines.push(`  // Skipped ${action}: no valid selector or coordinates found`);
       }
