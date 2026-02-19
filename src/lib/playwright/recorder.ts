@@ -120,6 +120,7 @@ export class PlaywrightRecorder extends EventEmitter {
   private viewportHeight: number = 720;
   private browserType: 'chromium' | 'firefox' | 'webkit' = 'chromium';
   private headless: boolean = false;
+  private clipboardAccess: boolean = false;
   private verificationUpdates: Map<string, { verified: boolean; timestamp: number }> = new Map();
 
   constructor(repositoryId?: string | null, screenshotDir?: string) {
@@ -157,6 +158,10 @@ export class PlaywrightRecorder extends EventEmitter {
     this.headless = headless;
   }
 
+  setClipboardAccess(enabled: boolean) {
+    this.clipboardAccess = enabled;
+  }
+
   async startRecording(url: string, sessionId: string, setupOptions?: SetupOptions): Promise<void> {
     if (this.isRecording) {
       throw new Error('Already recording');
@@ -190,6 +195,7 @@ export class PlaywrightRecorder extends EventEmitter {
       this.context = await this.browser.newContext({
         viewport: { width: this.viewportWidth, height: this.viewportHeight },
         ignoreHTTPSErrors: true, // Ignore SSL errors for local dev
+        ...(this.clipboardAccess ? { permissions: ['clipboard-read', 'clipboard-write'] } : {}),
       });
 
       this.page = await this.context.newPage();
@@ -268,6 +274,18 @@ export class PlaywrightRecorder extends EventEmitter {
       if (this.isRecording) {
         this.stopRecording().catch(() => {});
       }
+    });
+
+    // Track file chooser dialogs for file upload recording
+    this.page.on('filechooser', (fileChooser) => {
+      const element = fileChooser.element();
+      const selector = element ? 'input[type="file"]' : 'input[type="file"]';
+      this.addEvent('action', {
+        action: 'setInputFiles',
+        selector,
+        selectors: [{ type: 'css-path' as SelectorType, value: selector }],
+        value: '/* replace with file path(s) */',
+      });
     });
 
     // Expose function to track interactions from the page - MUST await

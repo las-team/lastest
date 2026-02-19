@@ -9,6 +9,9 @@ Timestamp fixing
 Teardown
 Test - which pr it was added in, updated?
 AI review
+Clipboard Access
+Accept Downloads
+Network Interception
 ## features
 Support https://github.com/excalidraw/excalidraw/tree/master/packages/excalidraw/tests ~/.claude/plans/declarative-kindling-coral.md 55%
 

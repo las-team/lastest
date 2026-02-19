@@ -492,6 +492,9 @@ export const playwrightSettings = sqliteTable('playwright_settings', {
   networkErrorMode: text('network_error_mode').default('fail'), // 'fail' | 'warn' | 'ignore'
   ignoreExternalNetworkErrors: integer('ignore_external_network_errors', { mode: 'boolean' }).default(false), // skip errors from different origins
   consoleErrorMode: text('console_error_mode').default('fail'), // 'fail' | 'warn' | 'ignore'
+  grantClipboardAccess: integer('grant_clipboard_access', { mode: 'boolean' }).default(false), // grant clipboard-read/write permissions
+  acceptDownloads: integer('accept_downloads', { mode: 'boolean' }).default(false), // accept file downloads in tests
+  enableNetworkInterception: integer('enable_network_interception', { mode: 'boolean' }).default(false), // enable page.route() network mocking
   createdAt: integer('created_at', { mode: 'timestamp' }),
   updatedAt: integer('updated_at', { mode: 'timestamp' }),
 });

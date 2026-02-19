@@ -22,7 +22,7 @@ import { SelectorPriorityList } from './selector-priority-list';
 import { savePlaywrightSettings, resetPlaywrightSettings, getSelectorStatsAction } from '@/server/actions/settings';
 import { DEFAULT_SELECTOR_PRIORITY, DEFAULT_STABILIZATION_SETTINGS } from '@/lib/db/schema';
 import type { SelectorConfig, PlaywrightSettings, HeadlessMode, RecordingEngine, StabilizationSettings, SelectorType } from '@/lib/db/schema';
-import { Loader2, RotateCcw, List, Video, MousePointer, Pause, Clock, Layers, ChevronDown, Shield, ShieldCheck, Hourglass, Type, Ban, Eye, Camera, EyeOff, Info } from 'lucide-react';
+import { Loader2, RotateCcw, List, Video, MousePointer, Pause, Clock, Layers, ChevronDown, Shield, ShieldCheck, Hourglass, Type, Ban, Eye, Camera, EyeOff, Info, ClipboardCopy, Download, Globe } from 'lucide-react';
 import { Slider } from '@/components/ui/slider';
 import { Badge } from '@/components/ui/badge';
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip';
@@ -65,6 +65,9 @@ export function PlaywrightSettingsCard({
   const [networkErrorMode, setNetworkErrorMode] = useState(settings.networkErrorMode ?? 'fail');
   const [ignoreExternalNetworkErrors, setIgnoreExternalNetworkErrors] = useState(settings.ignoreExternalNetworkErrors ?? false);
   const [consoleErrorMode, setConsoleErrorMode] = useState(settings.consoleErrorMode ?? 'fail');
+  const [grantClipboardAccess, setGrantClipboardAccess] = useState(settings.grantClipboardAccess ?? false);
+  const [acceptDownloads, setAcceptDownloads] = useState(settings.acceptDownloads ?? false);
+  const [enableNetworkInterception, setEnableNetworkInterception] = useState(settings.enableNetworkInterception ?? false);
   const [screenshotDelay, setScreenshotDelay] = useState(settings.screenshotDelay ?? 0);
   const [maxParallelTests, setMaxParallelTests] = useState(settings.maxParallelTests ?? 1);
   const [stabilization, setStabilization] = useState<StabilizationSettings>(
@@ -93,6 +96,9 @@ export function PlaywrightSettingsCard({
     networkErrorMode: settings.networkErrorMode ?? 'fail',
     ignoreExternalNetworkErrors: settings.ignoreExternalNetworkErrors ?? false,
     consoleErrorMode: settings.consoleErrorMode ?? 'fail',
+    grantClipboardAccess: settings.grantClipboardAccess ?? false,
+    acceptDownloads: settings.acceptDownloads ?? false,
+    enableNetworkInterception: settings.enableNetworkInterception ?? false,
     screenshotDelay: settings.screenshotDelay ?? 0,
     maxParallelTests: settings.maxParallelTests ?? 1,
     stabilization: { ...DEFAULT_STABILIZATION_SETTINGS, ...settings.stabilization },
@@ -117,6 +123,9 @@ export function PlaywrightSettingsCard({
     setNetworkErrorMode(settings.networkErrorMode ?? 'fail');
     setIgnoreExternalNetworkErrors(settings.ignoreExternalNetworkErrors ?? false);
     setConsoleErrorMode(settings.consoleErrorMode ?? 'fail');
+    setGrantClipboardAccess(settings.grantClipboardAccess ?? false);
+    setAcceptDownloads(settings.acceptDownloads ?? false);
+    setEnableNetworkInterception(settings.enableNetworkInterception ?? false);
     setScreenshotDelay(settings.screenshotDelay ?? 0);
     setMaxParallelTests(settings.maxParallelTests ?? 1);
     setStabilization({ ...DEFAULT_STABILIZATION_SETTINGS, ...settings.stabilization });
@@ -138,6 +147,9 @@ export function PlaywrightSettingsCard({
       networkErrorMode: settings.networkErrorMode ?? 'fail',
       ignoreExternalNetworkErrors: settings.ignoreExternalNetworkErrors ?? false,
       consoleErrorMode: settings.consoleErrorMode ?? 'fail',
+      grantClipboardAccess: settings.grantClipboardAccess ?? false,
+      acceptDownloads: settings.acceptDownloads ?? false,
+      enableNetworkInterception: settings.enableNetworkInterception ?? false,
       screenshotDelay: settings.screenshotDelay ?? 0,
       maxParallelTests: settings.maxParallelTests ?? 1,
       stabilization: { ...DEFAULT_STABILIZATION_SETTINGS, ...settings.stabilization },
@@ -185,6 +197,9 @@ export function PlaywrightSettingsCard({
         networkErrorMode,
         ignoreExternalNetworkErrors,
         consoleErrorMode,
+        grantClipboardAccess,
+        acceptDownloads,
+        enableNetworkInterception,
         screenshotDelay,
         maxParallelTests,
         stabilization,
@@ -196,7 +211,7 @@ export function PlaywrightSettingsCard({
         toast.success('Playwright settings saved');
       }
     });
-  }, [repositoryId, selectorPriority, browser, viewportWidth, viewportHeight, headlessMode, navigationTimeout, actionTimeout, pointerGestures, cursorFPS, defaultRecordingEngine, freezeAnimations, enableVideoRecording, acceptAnyCertificate, networkErrorMode, ignoreExternalNetworkErrors, consoleErrorMode, screenshotDelay, maxParallelTests, stabilization, compact]);
+  }, [repositoryId, selectorPriority, browser, viewportWidth, viewportHeight, headlessMode, navigationTimeout, actionTimeout, pointerGestures, cursorFPS, defaultRecordingEngine, freezeAnimations, enableVideoRecording, acceptAnyCertificate, networkErrorMode, ignoreExternalNetworkErrors, consoleErrorMode, grantClipboardAccess, acceptDownloads, enableNetworkInterception, screenshotDelay, maxParallelTests, stabilization, compact]);
 
   // Auto-save with debounce - only when values differ from original props
   useEffect(() => {
@@ -218,6 +233,9 @@ export function PlaywrightSettingsCard({
       networkErrorMode !== orig.networkErrorMode ||
       ignoreExternalNetworkErrors !== orig.ignoreExternalNetworkErrors ||
       consoleErrorMode !== orig.consoleErrorMode ||
+      grantClipboardAccess !== orig.grantClipboardAccess ||
+      acceptDownloads !== orig.acceptDownloads ||
+      enableNetworkInterception !== orig.enableNetworkInterception ||
       screenshotDelay !== orig.screenshotDelay ||
       maxParallelTests !== orig.maxParallelTests ||
       JSON.stringify(stabilization) !== JSON.stringify(orig.stabilization);
@@ -237,7 +255,7 @@ export function PlaywrightSettingsCard({
         clearTimeout(debounceRef.current);
       }
     };
-  }, [selectorPriority, browser, viewportWidth, viewportHeight, headlessMode, navigationTimeout, actionTimeout, pointerGestures, cursorFPS, defaultRecordingEngine, freezeAnimations, enableVideoRecording, acceptAnyCertificate, networkErrorMode, ignoreExternalNetworkErrors, consoleErrorMode, screenshotDelay, maxParallelTests, stabilization, doSave]);
+  }, [selectorPriority, browser, viewportWidth, viewportHeight, headlessMode, navigationTimeout, actionTimeout, pointerGestures, cursorFPS, defaultRecordingEngine, freezeAnimations, enableVideoRecording, acceptAnyCertificate, networkErrorMode, ignoreExternalNetworkErrors, consoleErrorMode, grantClipboardAccess, acceptDownloads, enableNetworkInterception, screenshotDelay, maxParallelTests, stabilization, doSave]);
 
   // Notify parent of save status changes
   useEffect(() => {
@@ -259,6 +277,9 @@ export function PlaywrightSettingsCard({
       setDefaultRecordingEngine('lastest');
       setFreezeAnimations(false);
       setEnableVideoRecording(false);
+      setGrantClipboardAccess(false);
+      setAcceptDownloads(false);
+      setEnableNetworkInterception(false);
       setScreenshotDelay(0);
       setMaxParallelTests(1);
       setStabilization(DEFAULT_STABILIZATION_SETTINGS);
@@ -385,6 +406,54 @@ export function PlaywrightSettingsCard({
             </div>
           </div>
           <Switch checked={acceptAnyCertificate} onCheckedChange={setAcceptAnyCertificate} />
+        </div>
+
+        {/* Clipboard Access */}
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <ClipboardCopy className="w-4 h-4 text-muted-foreground" />
+            <div className="space-y-0.5">
+              <Label className="text-sm">Clipboard Access</Label>
+              {!compact && (
+                <p className="text-xs text-muted-foreground">
+                  Grant clipboard read/write permissions for copy/paste tests
+                </p>
+              )}
+            </div>
+          </div>
+          <Switch checked={grantClipboardAccess} onCheckedChange={setGrantClipboardAccess} />
+        </div>
+
+        {/* Accept Downloads */}
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Download className="w-4 h-4 text-muted-foreground" />
+            <div className="space-y-0.5">
+              <Label className="text-sm">Accept Downloads</Label>
+              {!compact && (
+                <p className="text-xs text-muted-foreground">
+                  Allow file downloads during tests for export verification
+                </p>
+              )}
+            </div>
+          </div>
+          <Switch checked={acceptDownloads} onCheckedChange={setAcceptDownloads} />
+        </div>
+
+        {/* Network Interception */}
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Globe className="w-4 h-4 text-muted-foreground" />
+            <div className="space-y-0.5">
+              <Label className="text-sm">Network Interception</Label>
+              {!compact && (
+                <p className="text-xs text-muted-foreground">
+                  Enable API mocking, request blocking, and network capture in tests
+                </p>
+              )}
+            </div>
+          </div>
+          <Switch checked={enableNetworkInterception} onCheckedChange={setEnableNetworkInterception} />
         </div>
 
         {/* Error Handling */}

@@ -1342,6 +1342,9 @@ export async function getPlaywrightSettings(repositoryId?: string | null) {
     networkErrorMode: 'fail',
     ignoreExternalNetworkErrors: false,
     consoleErrorMode: 'fail',
+    grantClipboardAccess: false,
+    acceptDownloads: false,
+    enableNetworkInterception: false,
     createdAt: null,
     updatedAt: null,
   };
