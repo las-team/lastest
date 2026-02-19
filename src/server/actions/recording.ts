@@ -617,10 +617,34 @@ function generateCodeFromRemoteEvents(
       }
       lastAction = 'goto';
     } else if (event.type === 'action') {
-      const { action, selector, selectors, value, coordinates } = event.data as {
+      const { action, selector, selectors, value, coordinates, button, modifiers } = event.data as {
         action?: string; selector?: string;
         selectors?: Array<{ type: string; value: string }>;
         value?: string; coordinates?: { x: number; y: number };
+        button?: number; modifiers?: string[];
+      };
+      const isRightClick = action === 'rightclick' || button === 2;
+      const hasModifiers = modifiers && modifiers.length > 0;
+
+      // Build click options with button and modifiers
+      const clickOptParts: string[] = [];
+      if (isRightClick) clickOptParts.push(`button: 'right'`);
+      if (hasModifiers) clickOptParts.push(`modifiers: [${modifiers!.map(m => `'${m}'`).join(', ')}]`);
+      const clickOptions = clickOptParts.length > 0 ? `{ ${clickOptParts.join(', ')} }` : 'null';
+
+      const emitModDown = () => {
+        if (hasModifiers) {
+          for (const mod of modifiers!) {
+            lines.push(`  await page.keyboard.down('${mod}');`);
+          }
+        }
+      };
+      const emitModUp = () => {
+        if (hasModifiers) {
+          for (const mod of [...modifiers!].reverse()) {
+            lines.push(`  await page.keyboard.up('${mod}');`);
+          }
+        }
       };
 
       if (selectors && selectors.length > 0) {
@@ -628,7 +652,10 @@ function generateCodeFromRemoteEvents(
         const coordsArg = coordinates ? JSON.stringify(coordinates) : 'null';
         switch (action) {
           case 'click':
-            lines.push(`  await locateWithFallback(page, ${selectorsJson}, 'click', null, ${coordsArg});`);
+            lines.push(`  await locateWithFallback(page, ${selectorsJson}, 'click', null, ${coordsArg}${clickOptions !== 'null' ? `, ${clickOptions}` : ''});`);
+            break;
+          case 'rightclick':
+            lines.push(`  await locateWithFallback(page, ${selectorsJson}, 'click', null, ${coordsArg}, ${clickOptions});`);
             break;
           case 'fill':
             lines.push(`  await locateWithFallback(page, ${selectorsJson}, 'fill', '${value || ''}', ${coordsArg});`);
@@ -640,7 +667,10 @@ function generateCodeFromRemoteEvents(
       } else if (selector && (selector as string).trim()) {
         switch (action) {
           case 'click':
-            lines.push(`  await page.locator('${selector}').click();`);
+            lines.push(`  await page.locator('${selector}').click(${clickOptions !== 'null' ? clickOptions : ''});`);
+            break;
+          case 'rightclick':
+            lines.push(`  await page.locator('${selector}').click(${clickOptions});`);
             break;
           case 'fill':
             lines.push(`  await page.locator('${selector}').fill('${value || ''}');`);
@@ -649,9 +679,11 @@ function generateCodeFromRemoteEvents(
             lines.push(`  await page.locator('${selector}').selectOption('${value || ''}');`);
             break;
         }
-      } else if (action === 'click' && coordinates) {
-        lines.push(`  // Coordinate-only click (no selectors found)`);
-        lines.push(`  await page.mouse.click(${coordinates.x}, ${coordinates.y});`);
+      } else if ((action === 'click' || action === 'rightclick') && coordinates) {
+        lines.push(`  // Coordinate-only ${isRightClick ? 'right-' : ''}click (no selectors found)`);
+        emitModDown();
+        lines.push(`  await page.mouse.click(${coordinates.x}, ${coordinates.y}${isRightClick ? `, { button: 'right' }` : ''});`);
+        emitModUp();
       } else if (action === 'fill' && coordinates) {
         const escapedValue = (value || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'");
         lines.push(`  // Coordinate-only fill (no selectors found) - click to focus then type`);

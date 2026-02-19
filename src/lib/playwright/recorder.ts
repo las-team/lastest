@@ -306,6 +306,18 @@ export class PlaywrightRecorder extends EventEmitter {
       // Store button for right-clicks
       const button = action === 'rightclick' ? 2 : undefined;
 
+      // Coalesce consecutive fill actions on the same element (input fires per-keystroke)
+      if (action === 'fill' && this.session?.events.length) {
+        const lastEvent = this.session.events[this.session.events.length - 1];
+        if (lastEvent.type === 'action' && lastEvent.data.action === 'fill' && lastEvent.data.selector === primarySelector) {
+          lastEvent.data.value = value;
+          lastEvent.data.coordinates = coordinates;
+          lastEvent.data.actionId = actionId;
+          this.emit('event', lastEvent);
+          return;
+        }
+      }
+
       this.addEvent('action', { action, selector: primarySelector, selectors, value, coordinates, actionId, button, modifiers: modifiers && modifiers.length > 0 ? modifiers : undefined }, 'committed', {
         syntaxValid,
         domVerified: undefined, // Will be set by async verification
@@ -1184,9 +1196,31 @@ export class PlaywrightRecorder extends EventEmitter {
         }
         lastAction = 'goto';
       } else if (event.type === 'action') {
-        const { action, selector, selectors, value, coordinates, button } = event.data;
+        const { action, selector, selectors, value, coordinates, button, modifiers } = event.data;
         const isRightClick = action === 'rightclick' || button === 2;
-        const clickOptions = isRightClick ? `{ button: 'right' }` : 'null';
+        const hasModifiers = modifiers && modifiers.length > 0;
+
+        // Build click options object with button and modifiers
+        const clickOptParts: string[] = [];
+        if (isRightClick) clickOptParts.push(`button: 'right'`);
+        if (hasModifiers) clickOptParts.push(`modifiers: [${modifiers!.map((m: string) => `'${m}'`).join(', ')}]`);
+        const clickOptions = clickOptParts.length > 0 ? `{ ${clickOptParts.join(', ')} }` : 'null';
+
+        // Press modifier keys before action (for coordinate fallback paths)
+        const emitModDown = () => {
+          if (hasModifiers) {
+            for (const mod of modifiers!) {
+              lines.push(`  await page.keyboard.down('${mod}');`);
+            }
+          }
+        };
+        const emitModUp = () => {
+          if (hasModifiers) {
+            for (const mod of [...modifiers!].reverse()) {
+              lines.push(`  await page.keyboard.up('${mod}');`);
+            }
+          }
+        };
 
         // Use multi-selector format if available
         if (selectors && selectors.length > 0) {
@@ -1194,7 +1228,7 @@ export class PlaywrightRecorder extends EventEmitter {
           const coordsArg = coordinates ? JSON.stringify(coordinates) : 'null';
           switch (action) {
             case 'click':
-              lines.push(`  await locateWithFallback(page, ${selectorsJson}, 'click', null, ${coordsArg});`);
+              lines.push(`  await locateWithFallback(page, ${selectorsJson}, 'click', null, ${coordsArg}${clickOptions !== 'null' ? `, ${clickOptions}` : ''});`);
               break;
             case 'rightclick':
               lines.push(`  await locateWithFallback(page, ${selectorsJson}, 'click', null, ${coordsArg}, ${clickOptions});`);
@@ -1210,7 +1244,7 @@ export class PlaywrightRecorder extends EventEmitter {
           // Fallback to legacy single selector (only if non-empty)
           switch (action) {
             case 'click':
-              lines.push(`  await page.locator('${selector}').click();`);
+              lines.push(`  await page.locator('${selector}').click(${clickOptions !== 'null' ? clickOptions : ''});`);
               break;
             case 'rightclick':
               lines.push(`  await page.locator('${selector}').click(${clickOptions});`);
@@ -1226,7 +1260,9 @@ export class PlaywrightRecorder extends EventEmitter {
           // No selectors available - use coordinate fallback
           if ((action === 'click' || action === 'rightclick') && coordinates) {
             lines.push(`  // Coordinate-only ${isRightClick ? 'right-' : ''}click (no selectors found)`);
-            lines.push(`  await page.mouse.click(${coordinates.x}, ${coordinates.y}${isRightClick ? `, ${clickOptions}` : ''});`);
+            emitModDown();
+            lines.push(`  await page.mouse.click(${coordinates.x}, ${coordinates.y}${isRightClick ? `, { button: 'right' }` : ''});`);
+            emitModUp();
           } else if (action === 'fill' && coordinates) {
             const escapedValue = (value || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'");
             lines.push(`  // Coordinate-only fill (no selectors found) - click to focus then type`);
