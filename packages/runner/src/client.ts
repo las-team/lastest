@@ -62,11 +62,15 @@ export class RunnerClient {
   private activeTasks = 0;
   private seenCommandIds = new Set<string>();
   private activeTestIds = new Set<string>();
+  // Retry queue for failed result/screenshot sends
+  private pendingResults: Message[] = [];
+  // Resolve this to wake the heartbeat sleep early (for fast shutdown)
+  private wakeHeartbeat: (() => void) | null = null;
 
   constructor(options: RunnerClientOptions) {
     this.token = options.token;
     this.serverUrl = options.serverUrl.replace(/\/$/, '');
-    this.pollInterval = options.pollInterval ?? 30000; // 30 seconds default
+    this.pollInterval = options.pollInterval ?? 3000; // 3 seconds default
     this.baseUrl = options.baseUrl;
     this.runner = new TestRunner();
     this.recorder = new RemoteRecorder();
@@ -92,15 +96,24 @@ export class RunnerClient {
     if (!this.running) return;
 
     this.running = false;
-    console.log('Sending offline notification...');
+    console.log('[Stop] Shutting down...');
 
-    // Send explicit offline message before stopping
+    // Wake heartbeat sleep immediately so the loop exits fast
+    this.wakeHeartbeat?.();
+
+    // Abort all active tests
+    for (const testId of this.activeTestIds) {
+      console.log(`[Stop] Aborting active test: ${testId}`);
+      this.runner.abort(testId);
+    }
+
+    // Send offline notification with a hard 5s timeout
     try {
       const offlineMsg = createMessage<HeartbeatMessage>('status:heartbeat', {
-        status: 'idle', // Will be treated as 'offline' intent with disconnect flag
+        status: 'idle',
         currentTask: undefined,
         systemInfo: this.getSystemInfo(),
-        disconnect: true, // Signal graceful disconnect
+        disconnect: true,
       });
 
       const headers: Record<string, string> = {
@@ -116,13 +129,17 @@ export class RunnerClient {
         method: 'POST',
         headers,
         body: JSON.stringify(offlineMsg),
+        signal: AbortSignal.timeout(5000),
       });
 
-      console.log('Runner stopped gracefully');
-    } catch (error) {
-      console.error('Failed to send offline notification:', error);
-      console.log('Runner stopped (ungraceful)');
+      console.log('[Stop] Server notified');
+    } catch {
+      console.log('[Stop] Server notification skipped (timeout or unreachable)');
     }
+
+    // Close browser
+    await this.runner.closeBrowserIfIdle();
+    console.log('[Stop] Done');
   }
 
   private async connect(): Promise<boolean> {
@@ -172,6 +189,23 @@ export class RunnerClient {
 
   private async heartbeatLoop(): Promise<void> {
     while (this.running) {
+      // Flush pending results retry queue before heartbeat
+      if (this.pendingResults.length > 0) {
+        const retrying = [...this.pendingResults];
+        this.pendingResults = [];
+        for (const msg of retrying) {
+          const ok = await this.sendMessage(msg);
+          if (!ok) {
+            this.pendingResults.push(msg);
+          }
+        }
+        // Cap retry queue to prevent unbounded growth
+        if (this.pendingResults.length > 100) {
+          console.warn(`[Retry] Dropping ${this.pendingResults.length - 100} oldest pending results`);
+          this.pendingResults = this.pendingResults.slice(-100);
+        }
+      }
+
       try {
         const heartbeat = createMessage<HeartbeatMessage>('status:heartbeat', {
           status: this.status,
@@ -220,8 +254,15 @@ export class RunnerClient {
         console.error('Heartbeat error:', error);
       }
 
-      // Wait for next poll
-      await new Promise((resolve) => setTimeout(resolve, this.pollInterval));
+      // Wait for next poll — interruptible via wakeHeartbeat() for fast shutdown
+      await new Promise<void>((resolve) => {
+        const timer = setTimeout(resolve, this.pollInterval);
+        this.wakeHeartbeat = () => {
+          clearTimeout(timer);
+          resolve();
+        };
+      });
+      this.wakeHeartbeat = null;
     }
   }
 
@@ -386,8 +427,13 @@ export class RunnerClient {
         logs: result.logs,
       });
       console.log(`[Test ${testId}] Sending result to server...`);
-      await this.sendMessage(resultMsg);
-      console.log(`[Test ${testId}] Result sent: ${result.status}`);
+      const resultSent = await this.sendMessage(resultMsg);
+      if (!resultSent) {
+        console.warn(`[Test ${testId}] Result send failed, queuing for retry`);
+        this.pendingResults.push(resultMsg);
+      } else {
+        console.log(`[Test ${testId}] Result sent: ${result.status}`);
+      }
 
       // Upload screenshots after result (non-blocking for server timeout)
       if (result.screenshots.length > 0) {
@@ -404,7 +450,11 @@ export class RunnerClient {
             capturedAt: Date.now(),
           });
           console.log(`[Test ${testId}]   Sending screenshot: ${screenshot.filename}`);
-          await this.sendMessage(screenshotMsg);
+          const screenshotSent = await this.sendMessage(screenshotMsg);
+          if (!screenshotSent) {
+            console.warn(`[Test ${testId}]   Screenshot send failed, queuing for retry`);
+            this.pendingResults.push(screenshotMsg);
+          }
         }
         console.log(`[Test ${testId}] All screenshots uploaded`);
       }
@@ -521,7 +571,7 @@ export class RunnerClient {
     }
   }
 
-  private async sendMessage(message: Message): Promise<void> {
+  private async sendMessage(message: Message): Promise<boolean> {
     try {
       const headers: Record<string, string> = {
         'Content-Type': 'application/json',
@@ -533,13 +583,20 @@ export class RunnerClient {
         headers['X-Session-ID'] = this.sessionId;
       }
 
-      await fetch(`${this.serverUrl}/api/ws/runner`, {
+      const response = await fetch(`${this.serverUrl}/api/ws/runner`, {
         method: 'POST',
         headers,
         body: JSON.stringify(message),
       });
+
+      if (!response.ok) {
+        console.error(`Send failed: ${response.status}`);
+        return false;
+      }
+      return true;
     } catch (error) {
       console.error('Failed to send message:', error);
+      return false;
     }
   }
 

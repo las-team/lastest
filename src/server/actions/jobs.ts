@@ -3,7 +3,7 @@
 import * as queries from '@/lib/db/queries';
 import type { BackgroundJobType } from '@/lib/db/schema';
 import { getRunner } from '@/lib/playwright/runner';
-import { queueCancelCommand } from '@/app/api/ws/runner/route';
+import { queueCancelCommandToDB } from '@/app/api/ws/runner/route';
 
 export async function createJob(
   type: BackgroundJobType,
@@ -117,7 +117,7 @@ export async function cancelJob(jobId: string, repositoryId?: string | null, run
     // Extract testRunId from job metadata if available
     const testRunId = (job.metadata as Record<string, unknown>)?.testRunId as string | undefined;
     if (testRunId) {
-      queueCancelCommand(runnerId, testRunId, 'Cancelled by user');
+      await queueCancelCommandToDB(runnerId, testRunId, 'Cancelled by user');
     }
   }
 

@@ -19,7 +19,7 @@ import { chromium, firefox, webkit } from 'playwright';
 import { createMessage } from '@/lib/ws/protocol';
 import type { StartRecordingCommand, StopRecordingCommand, CaptureScreenshotCommand } from '@/lib/ws/protocol';
 import {
-  queueCommand,
+  queueCommandToDB,
   createRemoteRecordingSession,
   getRemoteRecordingSession,
   completeRemoteRecordingSession,
@@ -114,7 +114,7 @@ export async function startRecording(
       pointerGestures: settings.pointerGestures ?? false,
       cursorFPS: settings.cursorFPS ?? 30,
     });
-    queueCommand(runnerId, command);
+    await queueCommandToDB(runnerId, command);
 
     console.log(`[Recording] Dispatched recording to runner ${runnerId}, session ${sessionId}`);
     return { sessionId };
@@ -168,7 +168,7 @@ export async function stopRecording(repositoryId?: string | null) {
     const command = createMessage<StopRecordingCommand>('command:stop_recording', {
       sessionId: remoteSession.sessionId,
     });
-    queueCommand(remoteSession.runnerId, command);
+    await queueCommandToDB(remoteSession.runnerId, command);
 
     // Wait for the runner to confirm stop (poll for up to 10 seconds)
     for (let i = 0; i < 20; i++) {
@@ -209,7 +209,7 @@ export async function captureScreenshot(repositoryId?: string | null) {
     const command = createMessage<CaptureScreenshotCommand>('command:capture_screenshot', {
       sessionId: remoteSession.sessionId,
     });
-    queueCommand(remoteSession.runnerId, command);
+    await queueCommandToDB(remoteSession.runnerId, command);
 
     // The screenshot event will come back through recording events
     // Return a placeholder - the UI will get the actual screenshot through event polling

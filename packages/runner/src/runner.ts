@@ -185,15 +185,26 @@ export class TestRunner {
         throw new Error('Test cancelled');
       }
 
-      // Execute test code with timeout enforcement
+      // Execute test code with timeout enforcement.
+      // When timeout/cancel fires, close the context to kill in-flight Playwright
+      // operations — otherwise test code keeps running on the page after timeout.
       logFn('info', 'Executing test code...');
       await Promise.race([
         this.executeTestCode(page, command.code, command.targetUrl, captureScreenshot, logFn),
         new Promise<never>((_, reject) => {
-          const timer = setTimeout(() => reject(new Error(`Test execution timed out after ${testTimeout}ms`)), testTimeout);
-          // Also reject on abort
+          const timer = setTimeout(() => {
+            logFn('warn', `Timeout fired (${testTimeout}ms) — closing context to kill in-flight operations`);
+            context?.close().catch(() => {});
+            context = null;
+            page = null;
+            reject(new Error(`Test execution timed out after ${testTimeout}ms`));
+          }, testTimeout);
           testAbort.signal.addEventListener('abort', () => {
             clearTimeout(timer);
+            logFn('info', 'Abort signal received — closing context');
+            context?.close().catch(() => {});
+            context = null;
+            page = null;
             reject(new Error('Test cancelled'));
           });
         }),

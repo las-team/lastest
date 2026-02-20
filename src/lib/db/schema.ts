@@ -1254,3 +1254,38 @@ export const reviewTodos = sqliteTable('review_todos', {
 
 export type ReviewTodo = typeof reviewTodos.$inferSelect;
 export type NewReviewTodo = typeof reviewTodos.$inferInsert;
+
+// ============================================
+// Runner Commands (DB-backed command queue)
+// ============================================
+
+export type RunnerCommandStatus = 'pending' | 'claimed' | 'completed' | 'failed' | 'timeout' | 'cancelled';
+
+export const runnerCommands = sqliteTable('runner_commands', {
+  id: text('id').primaryKey(), // Same as message UUID (becomes correlationId)
+  runnerId: text('runner_id').notNull().references(() => runners.id),
+  type: text('type').notNull(), // e.g. 'command:run_test', 'command:shutdown'
+  status: text('status').notNull().default('pending'), // RunnerCommandStatus
+  payload: text('payload', { mode: 'json' }).$type<Record<string, unknown>>(),
+  testId: text('test_id'), // Denormalized for dedup lookups
+  testRunId: text('test_run_id'), // Denormalized for grouping
+  createdAt: integer('created_at', { mode: 'timestamp' }).$defaultFn(() => new Date()),
+  claimedAt: integer('claimed_at', { mode: 'timestamp' }),
+  completedAt: integer('completed_at', { mode: 'timestamp' }),
+});
+
+export type RunnerCommand = typeof runnerCommands.$inferSelect;
+export type NewRunnerCommand = typeof runnerCommands.$inferInsert;
+
+export const runnerCommandResults = sqliteTable('runner_command_results', {
+  id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+  commandId: text('command_id').notNull().references(() => runnerCommands.id),
+  runnerId: text('runner_id').notNull().references(() => runners.id),
+  type: text('type').notNull(), // 'response:test_result', 'response:screenshot', 'response:error'
+  payload: text('payload', { mode: 'json' }).$type<Record<string, unknown>>(),
+  acknowledged: integer('acknowledged', { mode: 'boolean' }).default(false),
+  createdAt: integer('created_at', { mode: 'timestamp' }).$defaultFn(() => new Date()),
+});
+
+export type RunnerCommandResult = typeof runnerCommandResults.$inferSelect;
+export type NewRunnerCommandResult = typeof runnerCommandResults.$inferInsert;

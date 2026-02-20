@@ -301,18 +301,30 @@ export async function main() {
         baseUrl,
       });
 
-      // Handle shutdown
-      process.on('SIGINT', async () => {
-        console.log(`\n[${timestamp()}] Shutting down...`);
-        await client.stop();
+      // Handle shutdown — hard exit after 10s if graceful stop hangs
+      let stopping = false;
+      const shutdown = async (signal: string) => {
+        if (stopping) {
+          console.log(`[${timestamp()}] Force exit (second ${signal})`);
+          process.exit(1);
+        }
+        stopping = true;
+        console.log(`\n[${timestamp()}] ${signal} received, stopping...`);
+        const forceTimer = setTimeout(() => {
+          console.error(`[${timestamp()}] Graceful shutdown timed out, forcing exit`);
+          process.exit(1);
+        }, 10000);
+        forceTimer.unref(); // Don't keep process alive just for the timer
+        try {
+          await client.stop();
+        } catch (err) {
+          console.error(`[${timestamp()}] Error during shutdown:`, err);
+        }
+        clearTimeout(forceTimer);
         process.exit(0);
-      });
-
-      process.on('SIGTERM', async () => {
-        console.log(`\n[${timestamp()}] Shutting down...`);
-        await client.stop();
-        process.exit(0);
-      });
+      };
+      process.on('SIGINT', () => { shutdown('SIGINT'); });
+      process.on('SIGTERM', () => { shutdown('SIGTERM'); });
 
       try {
         await client.start();
