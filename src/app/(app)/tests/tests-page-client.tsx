@@ -20,6 +20,7 @@ import {
 //   CollapsibleContent,
 //   CollapsibleTrigger,
 // } from '@/components/ui/collapsible';
+import { toast } from 'sonner';
 import { createFunctionalArea, deleteTests, restoreTests, permanentlyDeleteTests } from '@/server/actions/tests';
 import { generateBasicTests } from '@/server/actions/scanner';
 import { aiFixAllFailedTests, aiFixTests, aiMcpFixTests } from '@/server/actions/ai';
@@ -150,8 +151,11 @@ export function TestsPageClient({ areas, tests, routes, repositoryId, baseUrl = 
     if (selectedIds.size === 0) return;
     setIsBulkRunning(true);
     try {
-      await runTests(Array.from(selectedIds), repositoryId, true, executionTarget);
+      const result = await runTests(Array.from(selectedIds), repositoryId, true, executionTarget);
       notifyJobStarted();
+      if ('queued' in result && result.queued) {
+        toast.success('Tests queued — will run when current tests finish');
+      }
     } finally {
       setIsBulkRunning(false);
     }

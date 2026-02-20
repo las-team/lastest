@@ -368,6 +368,11 @@ export class PlaywrightRecorder extends EventEmitter {
       });
     }
 
+    // Screenshot capture via Ctrl+Shift+S hotkey
+    await this.page.exposeFunction('__recordScreenshot', () => {
+      this.takeScreenshot();
+    });
+
     // Keypress tracking for keyboard interactions
     await this.page.exposeFunction('__recordKeypress', (key: string, modifiers?: KeyboardModifier[], keyCode?: string) => {
       this.addEvent('keypress', { key, modifiers: modifiers && modifiers.length > 0 ? modifiers : undefined, keyCode: keyCode || undefined });
@@ -462,6 +467,14 @@ export class PlaywrightRecorder extends EventEmitter {
       let spaceDown = false;
 
       document.addEventListener('keydown', (e) => {
+        // Ctrl+Shift+S → capture screenshot (don't record as keypress)
+        if (e.ctrlKey && e.shiftKey && e.key.toLowerCase() === 's') {
+          e.preventDefault();
+          e.stopPropagation();
+          // @ts-expect-error
+          window.__recordScreenshot?.();
+          return;
+        }
         if (e.key === 'Alt' || e.key === 'Control' || e.key === 'Shift' || e.key === 'Meta') {
           activeModifiers.add(e.key as BrowserKeyboardModifier);
         } else if (e.key === ' ') {

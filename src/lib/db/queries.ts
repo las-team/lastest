@@ -2048,6 +2048,22 @@ export async function getPendingBuildJobs(repositoryId?: string | null) {
     .all();
 }
 
+export async function getPendingTestRunJobs(repositoryId?: string | null) {
+  const conditions = [
+    eq(backgroundJobs.status, 'pending'),
+    eq(backgroundJobs.type, 'test_run'),
+  ];
+  if (repositoryId) {
+    conditions.push(eq(backgroundJobs.repositoryId, repositoryId));
+  }
+  return db
+    .select()
+    .from(backgroundJobs)
+    .where(and(...conditions))
+    .orderBy(backgroundJobs.createdAt)
+    .all();
+}
+
 export async function markStaleJobsAsCrashed(staleThresholdMs = 300000) {
   const threshold = new Date(Date.now() - staleThresholdMs);
   // Check lastActivityAt first (if set), otherwise fall back to startedAt
