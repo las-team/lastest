@@ -46,9 +46,15 @@ COPY --from=deps /app/packages/runner/node_modules ./packages/runner/node_module
 # Copy source code
 COPY . .
 
+# Git info (passed via --build-arg since .git is excluded)
+ARG GIT_HASH=unknown
+ARG GIT_COMMIT_COUNT=0
+
 # Set production environment for build
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
+ENV NEXT_PUBLIC_GIT_HASH=$GIT_HASH
+ENV NEXT_PUBLIC_GIT_COMMIT_COUNT=$GIT_COMMIT_COUNT
 
 # Build the application
 RUN pnpm build
