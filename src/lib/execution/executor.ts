@@ -13,8 +13,6 @@ import { getRunner, type TestRunResult, type ProgressCallback } from '@/lib/play
 import type { Test, EnvironmentConfig, PlaywrightSettings } from '@/lib/db/schema';
 import type {
   RunTestCommand,
-  TestResultResponse,
-  TestProgressResponse,
   ScreenshotUploadResponse,
 } from '@/lib/ws/protocol';
 import { createMessage } from '@/lib/ws/protocol';
@@ -172,23 +170,28 @@ async function executeViaRunner(
 
   const maxParallel = options.maxParallelTests ?? 1;
   const pending = [...tests];
-  const running = new Map<string, { promise: Promise<TestRunResult>; testName: string }>();
+  // Track in-flight tests: commandId → { testId, testName, startTime }
+  const inFlight = new Map<string, { testId: string; testName: string; startTime: number }>();
   let completedCount = 0;
+  const baseTimeout = options.playwrightSettings?.navigationTimeout || 120000;
+  // Scale timeout for concurrency — parallel tests compete for resources
+  const testTimeout = Math.max(baseTimeout * maxParallel, 300000);
+  const pollInterval = 1000;
 
   const updateProgress = () => {
-    const activeTests = [...running.values()].map(r => r.testName);
+    const activeTests = [...inFlight.values()].map(r => r.testName);
     onProgress?.({
       completed: completedCount,
       total: tests.length,
       currentTestName: activeTests[0],
-      activeCount: running.size,
+      activeCount: inFlight.size,
       activeTests,
     });
   };
 
-  while (pending.length > 0 || running.size > 0) {
-    // Fill up to maxParallel slots
-    while (running.size < maxParallel && pending.length > 0) {
+  // Fill slots by validating, creating commands, and queuing them
+  const fillSlots = async () => {
+    while (inFlight.size < maxParallel && pending.length > 0) {
       const test = pending.shift()!;
 
       // Validate test exists in database and code matches (prevents fake testId injection)
@@ -227,112 +230,86 @@ async function executeViaRunner(
 
       // Queue command for runner (polling mode)
       queueCommand(runnerId, command);
+      inFlight.set(command.id, { testId: test.id, testName: test.name, startTime: Date.now() });
+    }
+  };
 
-      // Start waiting for result (non-blocking)
-      const promise = waitForTestResult(runnerId, command.id, runId, test.id, options.repositoryId);
-      running.set(test.id, { promise, testName: test.name });
+  await fillSlots();
+  updateProgress();
+
+  // Single polling loop — avoids race condition where multiple pollers drain shared result queues
+  while (inFlight.size > 0) {
+    await new Promise((resolve) => setTimeout(resolve, pollInterval));
+
+    // Process screenshots — match by correlationId to in-flight commands
+    const screenshots = getScreenshots(runnerId);
+    for (const screenshot of screenshots) {
+      if (screenshot.type === 'response:screenshot') {
+        const payload = (screenshot as ScreenshotUploadResponse).payload;
+        if (inFlight.has(payload.correlationId)) {
+          console.log(`[Executor] Saving screenshot: ${payload.filename}`);
+          await saveScreenshotFromBase64(payload.data, payload.filename, options.repositoryId);
+        }
+      }
     }
 
-    updateProgress();
+    // Process test results — match by correlationId and dispatch
+    const testResults = getTestResults(runnerId);
+    for (const result of testResults) {
+      const commandId = result.payload.correlationId;
+      const info = inFlight.get(commandId);
+      if (!info) continue;
 
-    if (running.size === 0) break;
+      inFlight.delete(commandId);
+      completedCount++;
 
-    // Wait for any test to complete
-    const entries = [...running.entries()];
-    const racePromises = entries.map(([testId, { promise }]) =>
-      promise.then(result => ({ testId, result }))
-    );
+      const payload = result.payload;
 
-    const completed = await Promise.race(racePromises);
+      // Save error screenshot if present
+      let screenshotPath: string | undefined;
+      if (payload.error?.screenshot) {
+        const filename = `${runId}-${info.testId}-failure.png`;
+        screenshotPath = await saveScreenshotFromBase64(payload.error.screenshot, filename, options.repositoryId);
+      }
 
-    // Remove from running and process result
-    running.delete(completed.testId);
-    completedCount++;
-    results.push(completed.result);
-    await onResult?.(completed.result);
+      const diskScreenshots = await findScreenshotsOnDisk(runId, info.testId, options.repositoryId);
 
+      const testResult: TestRunResult = {
+        testId: payload.testId,
+        status: payload.status === 'error' || payload.status === 'timeout' || payload.status === 'cancelled' ? 'failed' : payload.status,
+        durationMs: payload.durationMs,
+        screenshotPath: screenshotPath || diskScreenshots[0]?.path,
+        screenshots: diskScreenshots,
+        errorMessage: payload.error?.message,
+      };
+      results.push(testResult);
+      await onResult?.(testResult);
+    }
+
+    // Check for timeouts
+    for (const [commandId, info] of inFlight) {
+      if (Date.now() - info.startTime > testTimeout) {
+        console.error(`[Executor] Test ${info.testId} timed out after ${testTimeout}ms`);
+        inFlight.delete(commandId);
+        completedCount++;
+        const timeoutResult: TestRunResult = {
+          testId: info.testId,
+          status: 'failed',
+          durationMs: testTimeout,
+          screenshots: [],
+          errorMessage: `Test execution timed out after ${testTimeout}ms`,
+        };
+        results.push(timeoutResult);
+        await onResult?.(timeoutResult);
+      }
+    }
+
+    // Fill more slots if any completed
+    await fillSlots();
     updateProgress();
   }
 
   return results;
-}
-
-/**
- * Wait for test result from runner (polling mode).
- */
-async function waitForTestResult(
-  runnerId: string,
-  commandId: string,
-  runId: string,
-  testId: string,
-  repositoryId?: string | null,
-  timeout: number = 120000
-): Promise<TestRunResult> {
-  const startTime = Date.now();
-  const pollInterval = 1000;
-
-  while (Date.now() - startTime < timeout) {
-    // Check for screenshots first (may arrive before result)
-    const screenshots = getScreenshots(runnerId);
-    if (screenshots.length > 0) {
-      console.log(`[Executor] Got ${screenshots.length} screenshots for runner ${runnerId}`);
-    }
-    for (const screenshot of screenshots) {
-      if (screenshot.type === 'response:screenshot') {
-        const payload = (screenshot as ScreenshotUploadResponse).payload;
-        console.log(`[Executor] Screenshot correlationId: ${payload.correlationId}, expected: ${commandId}`);
-        if (payload.correlationId === commandId) {
-          // Save screenshot to filesystem
-          console.log(`[Executor] Saving screenshot: ${payload.filename}`);
-          await saveScreenshotFromBase64(payload.data, payload.filename, repositoryId);
-        }
-      }
-    }
-
-    // Check for test results
-    const results = getTestResults(runnerId);
-    for (const result of results) {
-      if (result.payload.correlationId === commandId) {
-        // Found our result
-        const payload = result.payload;
-
-        // Build screenshot path
-        let screenshotPath: string | undefined;
-        if (payload.error?.screenshot) {
-          const filename = `${runId}-${testId}-failure.png`;
-          screenshotPath = await saveScreenshotFromBase64(
-            payload.error.screenshot,
-            filename,
-            repositoryId
-          );
-        }
-
-        // Find screenshots saved to disk by the route handler
-        const diskScreenshots = await findScreenshotsOnDisk(runId, testId, repositoryId);
-
-        return {
-          testId: payload.testId,
-          status: payload.status === 'error' || payload.status === 'timeout' || payload.status === 'cancelled' ? 'failed' : payload.status,
-          durationMs: payload.durationMs,
-          screenshotPath: screenshotPath || diskScreenshots[0]?.path,
-          screenshots: diskScreenshots,
-          errorMessage: payload.error?.message,
-        };
-      }
-    }
-
-    // Wait before next poll
-    await new Promise((resolve) => setTimeout(resolve, pollInterval));
-  }
-
-  // Timeout - return failed result
-  return {
-    testId,
-    status: 'failed',
-    durationMs: timeout,
-    screenshots: [],
-    errorMessage: `Test execution timed out after ${timeout}ms`,
-  };
 }
 
 /**

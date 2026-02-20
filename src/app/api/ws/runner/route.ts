@@ -330,8 +330,9 @@ export async function GET(request: NextRequest) {
       sessionId,
     });
 
-    // Note: Runner status is only set to 'online' when heartbeat is received (POST)
-    // This ensures the runner is actually polling and not just connecting once
+    // Set runner to 'online' immediately on connect so stale 'busy' status
+    // from a previous crashed session doesn't block task assignment
+    await updateRunnerStatus(runner.id, 'online');
 
     // Return runner info and any pending commands
     const pendingCommands = getPendingCommands(runner.id);

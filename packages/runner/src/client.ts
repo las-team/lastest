@@ -60,6 +60,7 @@ export class RunnerClient {
   private commandQueue: Message[] = [];
   private processingCommands = false;
   private activeTasks = 0;
+  private seenCommandIds = new Set<string>();
 
   constructor(options: RunnerClientOptions) {
     this.token = options.token;
@@ -239,7 +240,13 @@ export class RunnerClient {
       while (this.commandQueue.length > 0) {
         const cmd = this.commandQueue[0];
         if (cmd.type === 'command:run_test') {
-          testCommands.push(this.commandQueue.shift()!);
+          const shifted = this.commandQueue.shift()!;
+          if (this.seenCommandIds.has(shifted.id)) {
+            console.log(`[Queue] Skipping duplicate command ${shifted.id}`);
+            continue;
+          }
+          this.seenCommandIds.add(shifted.id);
+          testCommands.push(shifted);
         } else {
           // Stop draining — process other commands sequentially in order
           break;
@@ -260,12 +267,23 @@ export class RunnerClient {
       // Process one non-test command sequentially, then loop back
       if (this.commandQueue.length > 0 && this.commandQueue[0].type !== 'command:run_test') {
         const cmd = this.commandQueue.shift()!;
+        if (this.seenCommandIds.has(cmd.id)) {
+          console.log(`[Queue] Skipping duplicate command ${cmd.id}`);
+          continue;
+        }
+        this.seenCommandIds.add(cmd.id);
         try {
           await this.handleCommand(cmd);
         } catch (error) {
           console.error(`Command ${cmd.type} failed:`, error);
         }
       }
+    }
+
+    // Cap the dedup set to prevent unbounded growth
+    if (this.seenCommandIds.size > 1000) {
+      const entries = [...this.seenCommandIds];
+      this.seenCommandIds = new Set(entries.slice(entries.length - 500));
     }
 
     this.processingCommands = false;
@@ -363,7 +381,20 @@ export class RunnerClient {
         this.sendMessage(progressMsg);
       });
 
-      // Upload screenshots
+      // Send result FIRST so server sees pass/fail before timeout
+      const resultMsg = createMessage<TestResultResponse>('response:test_result', {
+        correlationId: command.id,
+        testId: command.payload.testId,
+        testRunId: command.payload.testRunId,
+        status: result.status,
+        durationMs: result.durationMs,
+        error: result.error,
+        logs: result.logs,
+      });
+      await this.sendMessage(resultMsg);
+      console.log(`Test ${result.status}: ${command.payload.testId}`);
+
+      // Upload screenshots after result (non-blocking for server timeout)
       console.log(`Uploading ${result.screenshots.length} screenshots...`);
       for (const screenshot of result.screenshots) {
         const screenshotMsg = createMessage<ScreenshotUploadResponse>('response:screenshot', {
@@ -379,20 +410,6 @@ export class RunnerClient {
         console.log(`  Sending screenshot: ${screenshot.filename}`);
         await this.sendMessage(screenshotMsg);
       }
-
-      // Send result
-      const resultMsg = createMessage<TestResultResponse>('response:test_result', {
-        correlationId: command.id,
-        testId: command.payload.testId,
-        testRunId: command.payload.testRunId,
-        status: result.status,
-        durationMs: result.durationMs,
-        error: result.error,
-        logs: result.logs,
-      });
-      await this.sendMessage(resultMsg);
-
-      console.log(`Test ${result.status}: ${command.payload.testId}`);
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
       await this.sendError(command.id, 'INTERNAL_ERROR', errorMessage);
