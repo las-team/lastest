@@ -44,7 +44,7 @@ function sanitizeFilename(filename: string): string {
   // Remove any .. sequences
   safe = safe.replace(/\.\./g, '');
   // Only allow safe characters
-  safe = safe.replace(/[^a-zA-Z0-9._-]/g, '');
+  safe = safe.replace(/[^a-zA-Z0-9_.-]/g, '');
   // Validate extension and length
   if (!/\.(png|jpg|jpeg)$/i.test(safe) || safe.length > 255 || !safe) {
     throw new Error('Invalid filename');

@@ -425,6 +425,7 @@ export class RunnerClient {
         durationMs: result.durationMs,
         error: result.error,
         logs: result.logs,
+        softErrors: result.softErrors,
       });
       console.log(`[Test ${testId}] Sending result to server...`);
       const resultSent = await this.sendMessage(resultMsg);

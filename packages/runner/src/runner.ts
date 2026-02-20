@@ -25,6 +25,7 @@ export interface TestRunResult {
   };
   logs: LogEntry[];
   screenshots: Array<{ filename: string; data: string; width: number; height: number }>;
+  softErrors?: string[];
 }
 
 export class TestRunner {
@@ -131,6 +132,7 @@ export class TestRunner {
     this.currentTestRunId = command.testRunId;
 
     const logs: LogEntry[] = [];
+    const softErrors: string[] = [];
     const logFn = (level: 'info' | 'warn' | 'error', message: string) => {
       logs.push({ timestamp: Date.now(), level, message });
       const prefix = level === 'error' ? '  [ERROR]' : level === 'warn' ? '  [WARN]' : '  [INFO]';
@@ -285,6 +287,7 @@ export class TestRunner {
         durationMs,
         logs,
         screenshots,
+        softErrors: softErrors.length > 0 ? softErrors : undefined,
       };
     } catch (error) {
       const durationMs = Date.now() - startTime;
@@ -341,6 +344,7 @@ export class TestRunner {
         },
         logs,
         screenshots,
+        softErrors: softErrors.length > 0 ? softErrors : undefined,
       };
     } finally {
       this.activeTests.delete(command.testId);
@@ -361,7 +365,8 @@ export class TestRunner {
     code: string,
     targetUrl: string,
     captureScreenshot: (label: string) => Promise<void>,
-    logFn?: (level: 'info' | 'warn' | 'error', message: string) => void
+    logFn?: (level: 'info' | 'warn' | 'error', message: string) => void,
+    softErrors?: string[]
   ): Promise<void> {
     const log = logFn ?? this.log.bind(this);
     // Extract function body from: export async function test(page, baseUrl, screenshotPath, stepLogger) { ... }
@@ -395,12 +400,26 @@ export class TestRunner {
       }
     }
 
+    // Fix legacy page.keyboard.selectAll() → keyboard.press('Control+a')
+    body = body.replace(/page\.keyboard\.selectAll\(\)/g, "page.keyboard.press('Control+a')");
+
+    // Wrap standalone await statements (except screenshots) in try/catch for soft error handling
+    // This matches the local runner behavior so tests continue past failures to reach screenshots
+    body = body.replace(/^(\s*)(await\s+.+;)\s*$/gm, (_match: string, indent: string, stmt: string) => {
+      if (stmt.includes('.screenshot(')) return `${indent}${stmt}`;
+      return `${indent}try { ${stmt} } catch(__softErr) { stepLogger.warn(typeof __softErr === 'object' && __softErr !== null && 'message' in __softErr ? __softErr.message : String(__softErr)); }`;
+    });
+
+    // Use caller-provided softErrors array, or create local one as fallback
+    const errors = softErrors ?? [];
+
     // Create stepLogger (matches local runner signature)
     const stepLogger = {
       log: (msg: string) => {
         log('info', `Step: ${msg}`);
       },
       warn: (msg: string) => {
+        errors.push(msg);
         log('warn', `[WARN] ${msg}`);
       },
       softExpect: async (fn: () => Promise<void>, label?: string) => {
@@ -408,6 +427,7 @@ export class TestRunner {
           await fn();
         } catch (e: unknown) {
           const msg = label || (e instanceof Error ? e.message : String(e));
+          errors.push(msg);
           log('warn', `[SOFT FAIL] ${msg}`);
         }
       },
@@ -416,6 +436,7 @@ export class TestRunner {
           await fn();
         } catch (e: unknown) {
           const msg = label || (e instanceof Error ? e.message : String(e));
+          errors.push(msg);
           log('warn', `[SOFT FAIL] ${msg}`);
         }
       },

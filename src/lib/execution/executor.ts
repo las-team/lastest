@@ -334,6 +334,7 @@ async function executeViaRunner(
         screenshotPath: diskScreenshots[0]?.path,
         screenshots: diskScreenshots,
         errorMessage: errorPayload?.message as string | undefined,
+        softErrors: Array.isArray(payload.softErrors) && payload.softErrors.length > 0 ? payload.softErrors as string[] : undefined,
       };
       results.push(testResult);
       await onResult?.(testResult);
