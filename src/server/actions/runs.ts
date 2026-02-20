@@ -279,7 +279,7 @@ async function queueTestRun(
   return { runId: null, testCount: tests.length, queued: true, jobId };
 }
 
-async function processNextQueuedTestRun(repositoryId?: string | null) {
+export async function processNextQueuedTestRun(repositoryId?: string | null) {
   const runner = getRunner(repositoryId);
 
   // Don't process if runner is still active

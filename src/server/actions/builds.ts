@@ -720,7 +720,7 @@ async function queueBuild(
 /**
  * Process the next queued build if any
  */
-async function processNextQueuedBuild(repositoryId?: string | null) {
+export async function processNextQueuedBuild(repositoryId?: string | null) {
   const runner = getRunner(repositoryId);
 
   // Don't process if runner is still active
