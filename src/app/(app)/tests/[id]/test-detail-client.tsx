@@ -794,7 +794,7 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
                                       <div className="flex items-center gap-1.5">
                                         {getDiffStatusIcon(diff)}
                                         <span className="text-xs font-medium capitalize">
-                                          {diff.stepLabel || `step ${i + 1}`}
+                                          {diff.stepLabel || `Step ${i + 1}`}
                                         </span>
                                       </div>
                                       {diff.currentImagePath && (
@@ -806,7 +806,7 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
                                         >
                                           <img
                                             src={diff.currentImagePath}
-                                            alt={diff.stepLabel || `step ${i + 1}`}
+                                            alt={diff.stepLabel || `Step ${i + 1}`}
                                             loading="lazy"
                                             decoding="async"
                                             className="w-full h-16 object-cover rounded border hover:opacity-90"

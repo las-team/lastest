@@ -941,7 +941,7 @@ export class PlaywrightRunner extends EventEmitter {
     // Track captured screenshots from within test code (outside try so catch can access)
     const capturedScreenshots: CapturedScreenshot[] = [];
     let stepCounter = 1;
-    let currentStepLabel = `step ${stepCounter}`;
+    let currentStepLabel = `Step ${stepCounter}`;
 
     // Track setup duration (outside try so catch can access)
     let setupDurationMs = 0;
@@ -1243,10 +1243,10 @@ export class PlaywrightRunner extends EventEmitter {
                 capturedScreenshots.push({ path: publicPath, label: currentStepLabel });
                 // Increment step counter for next screenshot
                 stepCounter++;
-                currentStepLabel = `step ${stepCounter}`;
+                currentStepLabel = `Step ${stepCounter}`;
               } else {
                 // Auto-save screenshot when test code doesn't specify a path
-                const autoFilename = `${runId}-${test.id}-step_${stepCounter}.png`;
+                const autoFilename = `${runId}-${test.id}-Step_${stepCounter}.png`;
                 const autoPath = path.join(this.screenshotDir, autoFilename);
                 fs.writeFileSync(autoPath, result);
                 const publicPath = this.repositoryId
@@ -1254,7 +1254,7 @@ export class PlaywrightRunner extends EventEmitter {
                   : `/screenshots/${autoFilename}`;
                 capturedScreenshots.push({ path: publicPath, label: currentStepLabel });
                 stepCounter++;
-                currentStepLabel = `step ${stepCounter}`;
+                currentStepLabel = `Step ${stepCounter}`;
 
               }
               return result;
@@ -1680,6 +1680,10 @@ export class PlaywrightRunner extends EventEmitter {
           body = body.slice(0, startIdx) + '/* locateWithFallback provided by runner */' + body.slice(endIdx);
         }
       }
+
+      // Fix legacy test code that uses non-existent page.keyboard.selectAll()
+      // Older recorder versions generated this; the correct Playwright API is keyboard.press('Control+a')
+      body = body.replace(/page\.keyboard\.selectAll\(\)/g, "page.keyboard.press('Control+a')");
 
       // Wrap standalone await statements (except screenshots) in try/catch so
       // execution continues past locator/action failures to reach screenshot calls

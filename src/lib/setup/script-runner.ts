@@ -311,6 +311,9 @@ async function executeSetupCode(
       }
     }
 
+    // Fix legacy page.keyboard.selectAll() → keyboard.press('Control+a')
+    body = body.replace(/page\.keyboard\.selectAll\(\)/g, "page.keyboard.press('Control+a')");
+
     // Build and execute the function with all expected parameters
     const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
     const setupFn = new AsyncFunction(

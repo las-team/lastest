@@ -348,5 +348,8 @@ export function removeInlineLocateWithFallback(body: string): string {
     endIdx++;
   }
 
-  return body.slice(0, startIdx) + '/* locateWithFallback provided by runner */' + body.slice(endIdx);
+  let result = body.slice(0, startIdx) + '/* locateWithFallback provided by runner */' + body.slice(endIdx);
+  // Fix legacy page.keyboard.selectAll() → keyboard.press('Control+a')
+  result = result.replace(/page\.keyboard\.selectAll\(\)/g, "page.keyboard.press('Control+a')");
+  return result;
 }

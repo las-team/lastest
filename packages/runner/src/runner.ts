@@ -212,7 +212,7 @@ export class TestRunner {
         if (!page) return;
         try {
           const buffer = await rawScreenshot!({ fullPage: true });
-          const filename = `${command.testRunId}-${command.testId}-${label}.png`;
+          const filename = `${command.testRunId}-${command.testId}-${label.replace(/ /g, '_')}.png`;
           const base64 = buffer.toString('base64');
           const { width, height } = viewport;
           screenshots.push({ filename, data: base64, width, height });
@@ -498,7 +498,7 @@ export class TestRunner {
     const pageWithScreenshot = page as Page & { screenshot: typeof originalScreenshot };
     pageWithScreenshot.screenshot = async (options?: Parameters<typeof originalScreenshot>[0]) => {
       const result = await originalScreenshot(options);
-      const label = `step ${screenshotStep++}`;
+      const label = `Step ${screenshotStep++}`;
       await captureScreenshot(label);
       return result;
     };
