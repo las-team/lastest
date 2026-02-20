@@ -314,7 +314,23 @@ async function executeSetupCode(
     // Fix legacy page.keyboard.selectAll() → keyboard.press('Control+a')
     body = body.replace(/page\.keyboard\.selectAll\(\)/g, "page.keyboard.press('Control+a')");
 
+    // File upload helper — always available (mirrors runner.ts)
+    const fileUploadHelper = async (selector: string, filePaths: string | string[]) => {
+      const locator = page.locator(selector);
+      await locator.setInputFiles(Array.isArray(filePaths) ? filePaths : [filePaths]);
+    };
+
+    // Clipboard helper — stub (setup runs without clipboard permissions by default)
+    const clipboardHelper = null;
+
+    // Downloads helper — stub (setup skips downloads by default)
+    const downloadsHelper = null;
+
+    // Network helper — stub (setup skips network interception by default)
+    const networkHelper = null;
+
     // Build and execute the function with all expected parameters
+    // Must match the runner's 11-parameter signature so test-as-setup works
     const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
     const setupFn = new AsyncFunction(
       'page',
@@ -324,6 +340,10 @@ async function executeSetupCode(
       'expect',
       'appState',
       'locateWithFallback',
+      'fileUpload',
+      'clipboard',
+      'downloads',
+      'network',
       body
     );
 
@@ -334,7 +354,11 @@ async function executeSetupCode(
       stepLogger,
       expectFn,
       appStateFn,
-      locateWithFallbackFn
+      locateWithFallbackFn,
+      fileUploadHelper,
+      clipboardHelper,
+      downloadsHelper,
+      networkHelper
     );
 
     // If the setup returns an object, treat it as extracted variables

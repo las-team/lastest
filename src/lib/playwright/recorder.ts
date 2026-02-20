@@ -1372,6 +1372,10 @@ export class PlaywrightRecorder extends EventEmitter {
             case 'selectOption':
               lines.push(`  await locateWithFallback(page, ${selectorsJson}, 'selectOption', '${escStr(value || '')}', null);`);
               break;
+            case 'setInputFiles':
+              lines.push(`  // File upload — replace the path with your actual test file`);
+              lines.push(`  await fileUpload('${escStr(selectors[0]?.value || selector || 'input[type="file"]')}', '${escStr(value || '')}');`);
+              break;
           }
         } else if (selector && selector.trim()) {
           // Fallback to legacy single selector (only if non-empty)
@@ -1387,6 +1391,10 @@ export class PlaywrightRecorder extends EventEmitter {
               break;
             case 'selectOption':
               lines.push(`  await page.locator('${selector}').selectOption('${escStr(value || '')}');`);
+              break;
+            case 'setInputFiles':
+              lines.push(`  // File upload — replace the path with your actual test file`);
+              lines.push(`  await fileUpload('${escStr(selector)}', '${escStr(value || '')}');`);
               break;
           }
         } else {
