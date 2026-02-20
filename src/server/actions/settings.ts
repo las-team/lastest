@@ -185,6 +185,14 @@ export async function testCustomWebhookAction(data: {
   });
 }
 
+// Early Adopter Mode
+export async function updateEarlyAdopterMode(enabled: boolean) {
+  const session = await requireTeamAccess();
+  await queries.updateTeam(session.team.id, { earlyAdopterMode: enabled });
+  revalidatePath('/settings');
+  revalidatePath('/');
+}
+
 // Selector Stats
 export async function getSelectorStatsAction(repositoryId: string) {
   await requireRepoAccess(repositoryId);
