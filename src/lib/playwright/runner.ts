@@ -866,7 +866,7 @@ export class PlaywrightRunner extends EventEmitter {
       if (this.aborted) break;
 
       // Fill up to maxParallel slots
-      while (running.size < maxParallel && pending.length > 0) {
+      while (running.size < maxParallel && pending.length > 0 && !this.aborted) {
         const test = pending.shift()!;
 
         const promise = this.runSingleTest(test, runId);

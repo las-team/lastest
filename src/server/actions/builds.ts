@@ -593,6 +593,7 @@ async function runBuildAsync(
         environmentConfig: envConfig,
         playwrightSettings,
         maxParallelTests,
+        jobId,
         setupContext: {
           storageState: setupContext.storageState,
           variables: setupContext.variables,

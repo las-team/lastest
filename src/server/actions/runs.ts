@@ -160,6 +160,7 @@ async function runTestsAsync(runId: string, tests: Test[], repositoryId?: string
         playwrightSettings,
         setupContext: setupResult,
         forceVideoRecording,
+        jobId: activeJobId,
       });
     } else {
       // Local execution

@@ -18,7 +18,7 @@ import { createMessage } from '@/lib/ws/protocol';
 import { queueCommandToDB, queueCancelCommandToDB } from '@/app/api/ws/runner/route';
 import { runnerRegistry } from '@/lib/ws/runner-registry';
 import { db } from '@/lib/db';
-import { runners, tests as testsTable } from '@/lib/db/schema';
+import { runners, tests as testsTable, backgroundJobs } from '@/lib/db/schema';
 import { eq, and } from 'drizzle-orm';
 import { createHash } from 'crypto';
 import fs from 'fs/promises';
@@ -48,6 +48,7 @@ export interface ExecutionOptions {
   maxParallelTests?: number; // Override parallel test setting (used for remote runners)
   setupContext?: { storageState?: string; variables?: Record<string, unknown> }; // Auth session + variables from setup scripts
   forceVideoRecording?: boolean; // Force video recording for this run regardless of global setting
+  jobId?: string; // Background job ID for cancellation checks
 }
 
 export interface ExecutionProgress {
@@ -179,10 +180,21 @@ async function executeViaRunner(
   // Track in-flight tests: commandId → { testId, testName, startTime }
   const inFlight = new Map<string, { testId: string; testName: string; startTime: number }>();
   let completedCount = 0;
+  let cancelled = false;
   const baseTimeout = options.playwrightSettings?.navigationTimeout || 120000;
   // Scale timeout for concurrency — parallel tests compete for resources
   const testTimeout = Math.max(baseTimeout * maxParallel, 300000);
   const pollInterval = 1000;
+
+  // Check if the background job has been cancelled
+  const checkCancelled = async (): Promise<boolean> => {
+    if (!options.jobId) return false;
+    const job = await db.query.backgroundJobs.findFirst({
+      where: eq(backgroundJobs.id, options.jobId),
+      columns: { status: true, error: true },
+    });
+    return job?.error === 'Cancelled by user' || job?.status === 'failed';
+  };
 
   const updateProgress = () => {
     const activeTests = [...inFlight.values()].map(r => r.testName);
@@ -197,6 +209,7 @@ async function executeViaRunner(
 
   // Fill slots by validating, creating commands, and queuing them to DB
   const fillSlots = async () => {
+    if (cancelled) return;
     while (inFlight.size < maxParallel && pending.length > 0) {
       const test = pending.shift()!;
 
@@ -246,6 +259,28 @@ async function executeViaRunner(
   // Poll DB for command completion and results
   while (inFlight.size > 0) {
     await new Promise((resolve) => setTimeout(resolve, pollInterval));
+
+    // Check if the job was cancelled — stop launching new tests and drain in-flight
+    if (!cancelled && await checkCancelled()) {
+      cancelled = true;
+      // Clear pending so no more tests get queued
+      pending.length = 0;
+      // Send cancel to the remote runner for in-flight tests
+      await queueCancelCommandToDB(runnerId, runId, 'Cancelled by user');
+      // Mark remaining in-flight as failed and break out
+      for (const [commandId, info] of inFlight) {
+        inFlight.delete(commandId);
+        completedCount++;
+        results.push({
+          testId: info.testId,
+          status: 'failed',
+          durationMs: 0,
+          screenshots: [],
+          errorMessage: 'Cancelled by user',
+        });
+      }
+      break;
+    }
 
     // Check command statuses in DB
     const dbCommands = await getCommandsByTestRun(runId);

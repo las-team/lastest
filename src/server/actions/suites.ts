@@ -189,6 +189,7 @@ async function runSuiteTestsAsync(
           environmentConfig: envConfig,
           playwrightSettings,
           setupContext,
+          jobId,
         });
       } else {
         results = await runner.runTests([test], runId);
