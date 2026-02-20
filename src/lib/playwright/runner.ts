@@ -1246,7 +1246,7 @@ export class PlaywrightRunner extends EventEmitter {
                 currentStepLabel = `step ${stepCounter}`;
               } else {
                 // Auto-save screenshot when test code doesn't specify a path
-                const autoFilename = `${runId}-${test.id}-step${stepCounter}.png`;
+                const autoFilename = `${runId}-${test.id}-step_${stepCounter}.png`;
                 const autoPath = path.join(this.screenshotDir, autoFilename);
                 fs.writeFileSync(autoPath, result);
                 const publicPath = this.repositoryId

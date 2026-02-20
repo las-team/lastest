@@ -30,7 +30,7 @@ export interface TestRunResult {
 export class TestRunner {
   private browser: Browser | null = null;
   private browserLaunchPromise: Promise<Browser> | null = null;
-  private activeTests = new Map<string, AbortController>();
+  private activeTests = new Map<string, { abort: AbortController; testRunId: string }>();
   private logs: LogEntry[] = [];
   // Legacy single-test tracking (for backward compat with abort/isRunning)
   private abortController: AbortController | null = null;
@@ -57,26 +57,42 @@ export class TestRunner {
 
   /**
    * Close the shared browser if no tests are running.
+   * Nulls the reference BEFORE closing so concurrent ensureBrowser()
+   * calls see null and launch a fresh browser instead of getting the
+   * dying one.
    */
   async closeBrowserIfIdle(): Promise<void> {
     if (this.activeTests.size === 0 && this.browser) {
-      await this.browser.close().catch(() => {});
+      const b = this.browser;
       this.browser = null;
+      await b.close().catch(() => {});
     }
   }
 
   /**
-   * Abort the currently running test
+   * Abort tests by testId, testRunId, or all.
+   * Checks both the map key (testId) and the entry's testRunId field,
+   * so cancelling a build run aborts all its tests.
    */
-  abort(testRunId?: string): boolean {
-    if (testRunId) {
-      const controller = this.activeTests.get(testRunId);
-      if (controller) {
-        controller.abort();
+  abort(id?: string): boolean {
+    if (id) {
+      // Direct lookup by testId
+      const direct = this.activeTests.get(id);
+      if (direct) {
+        direct.abort.abort();
         return true;
       }
+      // Scan for matching testRunId (cancel entire run)
+      let aborted = false;
+      for (const [, entry] of this.activeTests) {
+        if (entry.testRunId === id) {
+          entry.abort.abort();
+          aborted = true;
+        }
+      }
+      if (aborted) return true;
       // Legacy fallback
-      if (this.currentTestRunId === testRunId && this.abortController) {
+      if (this.currentTestRunId === id && this.abortController) {
         this.abortController.abort();
         return true;
       }
@@ -108,7 +124,8 @@ export class TestRunner {
     onProgress?: (step: string, progress: number) => void
   ): Promise<TestRunResult> {
     const testAbort = new AbortController();
-    this.activeTests.set(command.testRunId, testAbort);
+    // Key by testId (unique per test), NOT testRunId (shared per build)
+    this.activeTests.set(command.testId, { abort: testAbort, testRunId: command.testRunId });
     // Legacy single-test tracking
     this.abortController = testAbort;
     this.currentTestRunId = command.testRunId;
@@ -326,7 +343,7 @@ export class TestRunner {
         screenshots,
       };
     } finally {
-      this.activeTests.delete(command.testRunId);
+      this.activeTests.delete(command.testId);
       // Clear legacy tracking if this was the tracked test
       if (this.currentTestRunId === command.testRunId) {
         this.abortController = null;

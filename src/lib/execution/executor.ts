@@ -394,7 +394,7 @@ async function findScreenshotsOnDisk(
       const files = await fs.readdir(repoDir);
       for (const f of files) {
         if (f.startsWith(prefix) && f.endsWith('.png')) {
-          const label = f.replace(prefix, '').replace('.png', '');
+          const label = f.replace(prefix, '').replace('.png', '').replace(/_/g, ' ');
           screenshots.push({ path: `/screenshots/${repositoryId}/${f}`, label });
         }
       }
@@ -408,7 +408,7 @@ async function findScreenshotsOnDisk(
     const files = await fs.readdir(baseDir);
     for (const f of files) {
       if (f.startsWith(prefix) && f.endsWith('.png')) {
-        const label = f.replace(prefix, '').replace('.png', '');
+        const label = f.replace(prefix, '').replace('.png', '').replace(/_/g, ' ');
         const publicPath = `/screenshots/${f}`;
         // Avoid duplicates
         if (!screenshots.some(s => s.label === label)) {
