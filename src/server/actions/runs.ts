@@ -10,7 +10,7 @@ import { getBranchInfo } from '@/lib/github/content';
 import * as queries from '@/lib/db/queries';
 import { v4 as uuid } from 'uuid';
 import type { Test } from '@/lib/db/schema';
-import { createJob, updateJobProgress, completeJob, failJob } from './jobs';
+import { createJob, createPendingJob, startJob, updateJobProgress, completeJob, failJob } from './jobs';
 
 interface GitInfo {
   branch: string;
@@ -63,13 +63,14 @@ export async function createTestRun(testIds?: string[], repositoryId?: string | 
   return run;
 }
 
-export async function runTests(testIds?: string[], repositoryId?: string | null, headless?: boolean, runnerId?: string) {
+export async function runTests(testIds?: string[], repositoryId?: string | null, headless?: boolean, runnerId?: string, forceVideoRecording?: boolean) {
   if (repositoryId) await requireRepoAccess(repositoryId);
   else await requireTeamAccess();
   const runner = getRunner(repositoryId);
 
+  // If tests are running, queue this run
   if (runner.isActive()) {
-    throw new Error('Tests already running');
+    return queueTestRun(testIds, repositoryId, headless, runnerId, forceVideoRecording);
   }
 
   // Load and set environment config
@@ -119,12 +120,12 @@ export async function runTests(testIds?: string[], repositoryId?: string | null,
   const jobId = await createJob('test_run', `Test Run (${tests.length} tests)`, tests.length, repositoryId);
 
   // Run tests (this happens async)
-  runTestsAsync(run.id, tests, repositoryId, headless, jobId, runnerId);
+  runTestsAsync(run.id, tests, repositoryId, headless, jobId, runnerId, forceVideoRecording);
 
   return { runId: run.id, testCount: tests.length, jobId };
 }
 
-async function runTestsAsync(runId: string, tests: Test[], repositoryId?: string | null, headless?: boolean, jobId?: string, runnerId?: string) {
+async function runTestsAsync(runId: string, tests: Test[], repositoryId?: string | null, headless?: boolean, jobId?: string, runnerId?: string, forceVideoRecording?: boolean) {
   const runner = getRunner(repositoryId);
 
   // Use provided jobId or create new one (for backwards compatibility)
@@ -158,6 +159,8 @@ async function runTestsAsync(runId: string, tests: Test[], repositoryId?: string
         environmentConfig: envConfig,
         playwrightSettings,
         setupContext: setupResult,
+        forceVideoRecording,
+        jobId: activeJobId,
       });
     } else {
       // Local execution
@@ -170,7 +173,7 @@ async function runTestsAsync(runId: string, tests: Test[], repositoryId?: string
       }
       // Clear any stale setup context before standalone run
       runner.clearSetupContext();
-      results = await runner.runTests(tests, runId, undefined, undefined, headless);
+      results = await runner.runTests(tests, runId, undefined, undefined, headless, undefined, forceVideoRecording);
     }
 
     // Clear any stale setup context from previous runs
@@ -211,6 +214,9 @@ async function runTestsAsync(runId: string, tests: Test[], repositoryId?: string
   revalidatePath('/run');
   revalidatePath('/tests', 'layout');
   revalidatePath('/');
+
+  // Process next queued test run if any
+  processNextQueuedTestRun(repositoryId);
 }
 
 export async function getTestRun(runId: string) {
@@ -238,4 +244,76 @@ export async function getJobStatus(jobId: string) {
     status: job?.status || 'unknown',
     isComplete: job?.status === 'completed' || job?.status === 'failed',
   };
+}
+
+async function queueTestRun(
+  testIds?: string[],
+  repositoryId?: string | null,
+  headless?: boolean,
+  runnerId?: string,
+  forceVideoRecording?: boolean,
+) {
+  // Get tests to determine label (filter out soft-deleted tests)
+  let tests: Test[];
+  if (testIds && testIds.length > 0) {
+    tests = await Promise.all(
+      testIds.map(id => queries.getTest(id))
+    ).then(results => results.filter((t): t is Test => t !== undefined && !t.deletedAt));
+  } else if (repositoryId) {
+    tests = await queries.getTestsByRepo(repositoryId);
+  } else {
+    tests = [];
+  }
+
+  if (tests.length === 0) {
+    throw new Error('No tests to run');
+  }
+
+  const jobId = await createPendingJob(
+    'test_run',
+    `Queued Test Run (${tests.length} tests)`,
+    tests.length,
+    repositoryId,
+    { testIds: testIds || null, headless, runnerId, forceVideoRecording }
+  );
+
+  return { runId: null, testCount: tests.length, queued: true, jobId };
+}
+
+export async function processNextQueuedTestRun(repositoryId?: string | null) {
+  const runner = getRunner(repositoryId);
+
+  // Don't process if runner is still active
+  if (runner.isActive()) return;
+
+  const pendingJobs = await queries.getPendingTestRunJobs(repositoryId);
+  if (pendingJobs.length === 0) return;
+
+  const nextJob = pendingJobs[0];
+  const metadata = nextJob.metadata as {
+    testIds?: string[] | null;
+    headless?: boolean;
+    runnerId?: string;
+    forceVideoRecording?: boolean;
+  } | null;
+
+  // Start the job
+  await startJob(nextJob.id);
+
+  // Run the tests
+  try {
+    await runTests(
+      metadata?.testIds || undefined,
+      nextJob.repositoryId,
+      metadata?.headless,
+      metadata?.runnerId,
+      metadata?.forceVideoRecording,
+    );
+  } catch (error) {
+    await queries.updateBackgroundJob(nextJob.id, {
+      status: 'failed',
+      error: error instanceof Error ? error.message : 'Failed to start test run',
+      completedAt: new Date(),
+    });
+  }
 }

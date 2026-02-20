@@ -46,6 +46,8 @@ import {
   agentSessions,
   bugReports,
   reviewTodos,
+  runnerCommands,
+  runnerCommandResults,
 } from './schema';
 import {
   DEFAULT_SELECTOR_PRIORITY,
@@ -109,6 +111,9 @@ import type {
   RunnerStatus,
   BuildStatus,
   NewReviewTodo,
+  NewRunnerCommand,
+  NewRunnerCommandResult,
+  RunnerCommandStatus,
   SelectorConfig,
   AIProvider,
   BackgroundJobType,
@@ -1342,6 +1347,9 @@ export async function getPlaywrightSettings(repositoryId?: string | null) {
     networkErrorMode: 'fail',
     ignoreExternalNetworkErrors: false,
     consoleErrorMode: 'fail',
+    grantClipboardAccess: false,
+    acceptDownloads: false,
+    enableNetworkInterception: false,
     createdAt: null,
     updatedAt: null,
   };
@@ -2033,6 +2041,22 @@ export async function getPendingBuildJobs(repositoryId?: string | null) {
   const conditions = [
     eq(backgroundJobs.status, 'pending'),
     eq(backgroundJobs.type, 'build_run'),
+  ];
+  if (repositoryId) {
+    conditions.push(eq(backgroundJobs.repositoryId, repositoryId));
+  }
+  return db
+    .select()
+    .from(backgroundJobs)
+    .where(and(...conditions))
+    .orderBy(backgroundJobs.createdAt)
+    .all();
+}
+
+export async function getPendingTestRunJobs(repositoryId?: string | null) {
+  const conditions = [
+    eq(backgroundJobs.status, 'pending'),
+    eq(backgroundJobs.type, 'test_run'),
   ];
   if (repositoryId) {
     conditions.push(eq(backgroundJobs.repositoryId, repositoryId));
@@ -2856,14 +2880,6 @@ export async function getUserById(id: string) {
 
 export async function getUserByEmail(email: string) {
   return db.select().from(users).where(eq(users.email, email.toLowerCase())).get();
-}
-
-export async function getUserByClerkId(clerkId: string) {
-  return db.select().from(users).where(eq(users.clerkId, clerkId)).get();
-}
-
-export async function getTeamByClerkOrgId(clerkOrgId: string) {
-  return db.select().from(teams).where(eq(teams.clerkOrgId, clerkOrgId)).get();
 }
 
 export async function getUserCount() {
@@ -4130,4 +4146,121 @@ export async function getReviewSummaryByBranch(repositoryId: string, branch: str
   }
 
   return { openCount, resolvedCount, totalCount: todos.length, byArea };
+}
+
+// ============================================
+// Runner Commands (DB-backed command queue)
+// ============================================
+
+export async function createRunnerCommand(cmd: NewRunnerCommand) {
+  await db.insert(runnerCommands).values(cmd);
+  return cmd;
+}
+
+/**
+ * Atomically claim all pending commands for a runner.
+ * Sets status='claimed' and claimedAt=now, returns the updated rows.
+ */
+export async function claimPendingCommands(runnerId: string) {
+  const now = new Date();
+  const pending = await db
+    .select()
+    .from(runnerCommands)
+    .where(and(eq(runnerCommands.runnerId, runnerId), eq(runnerCommands.status, 'pending')))
+    .all();
+
+  if (pending.length === 0) return [];
+
+  const ids = pending.map(c => c.id);
+  await db
+    .update(runnerCommands)
+    .set({ status: 'claimed', claimedAt: now })
+    .where(inArray(runnerCommands.id, ids));
+
+  return pending;
+}
+
+export async function getCommandsByTestRun(testRunId: string) {
+  return db
+    .select()
+    .from(runnerCommands)
+    .where(eq(runnerCommands.testRunId, testRunId))
+    .all();
+}
+
+export async function completeRunnerCommand(commandId: string, status: 'completed' | 'failed') {
+  await db
+    .update(runnerCommands)
+    .set({ status, completedAt: new Date() })
+    .where(eq(runnerCommands.id, commandId));
+}
+
+export async function cancelPendingCommandsByTestRun(testRunId: string) {
+  await db
+    .update(runnerCommands)
+    .set({ status: 'cancelled' as RunnerCommandStatus, completedAt: new Date() })
+    .where(and(eq(runnerCommands.testRunId, testRunId), eq(runnerCommands.status, 'pending')));
+}
+
+export async function insertCommandResult(result: NewRunnerCommandResult) {
+  const id = result.id || crypto.randomUUID();
+  await db.insert(runnerCommandResults).values({ ...result, id });
+  return { id };
+}
+
+export async function getUnacknowledgedResults(commandIds: string[]) {
+  if (commandIds.length === 0) return [];
+  return db
+    .select()
+    .from(runnerCommandResults)
+    .where(and(inArray(runnerCommandResults.commandId, commandIds), eq(runnerCommandResults.acknowledged, false)))
+    .all();
+}
+
+export async function acknowledgeResults(resultIds: string[]) {
+  if (resultIds.length === 0) return;
+  await db
+    .update(runnerCommandResults)
+    .set({ acknowledged: true })
+    .where(inArray(runnerCommandResults.id, resultIds));
+}
+
+export async function cleanupOldCommands(olderThanMs: number) {
+  const cutoff = new Date(Date.now() - olderThanMs);
+  // Delete results first (FK constraint)
+  const oldCommandIds = (await db
+    .select({ id: runnerCommands.id })
+    .from(runnerCommands)
+    .where(and(
+      inArray(runnerCommands.status, ['completed', 'failed', 'cancelled', 'timeout']),
+      lt(runnerCommands.createdAt, cutoff)
+    ))
+    .all()).map(c => c.id);
+
+  if (oldCommandIds.length > 0) {
+    await db.delete(runnerCommandResults).where(inArray(runnerCommandResults.commandId, oldCommandIds));
+    await db.delete(runnerCommands).where(inArray(runnerCommands.id, oldCommandIds));
+  }
+  return oldCommandIds.length;
+}
+
+/**
+ * Mark unclaimed commands as timed out after maxAge ms.
+ */
+export async function timeoutStaleCommands(maxPendingAgeMs: number, maxClaimedAgeMs: number) {
+  const now = Date.now();
+  const pendingCutoff = new Date(now - maxPendingAgeMs);
+  const claimedCutoff = new Date(now - maxClaimedAgeMs);
+
+  // Timeout pending commands older than maxPendingAgeMs
+  await db
+    .update(runnerCommands)
+    .set({ status: 'timeout' as RunnerCommandStatus, completedAt: new Date() })
+    .where(and(eq(runnerCommands.status, 'pending'), lt(runnerCommands.createdAt, pendingCutoff)));
+
+  // Timeout claimed commands older than maxClaimedAgeMs
+  await db
+    .update(runnerCommands)
+    .set({ status: 'timeout' as RunnerCommandStatus, completedAt: new Date() })
+    .where(and(eq(runnerCommands.status, 'claimed'), lt(runnerCommands.claimedAt, claimedCutoff)));
 }

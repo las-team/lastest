@@ -19,7 +19,7 @@ import { chromium, firefox, webkit } from 'playwright';
 import { createMessage } from '@/lib/ws/protocol';
 import type { StartRecordingCommand, StopRecordingCommand, CaptureScreenshotCommand } from '@/lib/ws/protocol';
 import {
-  queueCommand,
+  queueCommandToDB,
   createRemoteRecordingSession,
   getRemoteRecordingSession,
   completeRemoteRecordingSession,
@@ -114,7 +114,7 @@ export async function startRecording(
       pointerGestures: settings.pointerGestures ?? false,
       cursorFPS: settings.cursorFPS ?? 30,
     });
-    queueCommand(runnerId, command);
+    await queueCommandToDB(runnerId, command);
 
     console.log(`[Recording] Dispatched recording to runner ${runnerId}, session ${sessionId}`);
     return { sessionId };
@@ -137,6 +137,7 @@ export async function startRecording(
   recorder.setSelectorPriority(selectorPriority);
   recorder.setViewport(settings.viewportWidth ?? 1280, settings.viewportHeight ?? 720);
   recorder.setBrowserType((settings.browser as 'chromium' | 'firefox' | 'webkit') ?? 'chromium');
+  recorder.setClipboardAccess(settings.grantClipboardAccess ?? false);
 
   try {
     await recorder.startRecording(url, sessionId, setupOptions);
@@ -167,7 +168,7 @@ export async function stopRecording(repositoryId?: string | null) {
     const command = createMessage<StopRecordingCommand>('command:stop_recording', {
       sessionId: remoteSession.sessionId,
     });
-    queueCommand(remoteSession.runnerId, command);
+    await queueCommandToDB(remoteSession.runnerId, command);
 
     // Wait for the runner to confirm stop (poll for up to 10 seconds)
     for (let i = 0; i < 20; i++) {
@@ -208,7 +209,7 @@ export async function captureScreenshot(repositoryId?: string | null) {
     const command = createMessage<CaptureScreenshotCommand>('command:capture_screenshot', {
       sessionId: remoteSession.sessionId,
     });
-    queueCommand(remoteSession.runnerId, command);
+    await queueCommandToDB(remoteSession.runnerId, command);
 
     // The screenshot event will come back through recording events
     // Return a placeholder - the UI will get the actual screenshot through event polling
@@ -561,6 +562,13 @@ function generateCodeFromRemoteEvents(
     `      await page.mouse.click(coords.x, coords.y);`,
     `      return;`,
     `    }`,
+    `    if (action === 'fill' && coords) {`,
+    `      console.log('Falling back to coordinate fill at', coords.x, coords.y);`,
+    `      await page.mouse.click(coords.x, coords.y);`,
+    `      await page.keyboard.press('Control+a');`,
+    `      await page.keyboard.type(value || '');`,
+    `      return;`,
+    `    }`,
     ] : []),
     `    throw new Error('No selector matched: ' + JSON.stringify(validSelectors));`,
     `  }`,
@@ -582,6 +590,8 @@ function generateCodeFromRemoteEvents(
   let lastAction = '';
   let cursorBatch: [number, number, number][] = [];
   let lastCursorTimestamp = 0;
+  let lastCursorX = 640;
+  let lastCursorY = 360;
 
   const flushCursorBatch = () => {
     if (cursorBatch.length > 0) {
@@ -597,6 +607,8 @@ function generateCodeFromRemoteEvents(
       const delay = lastCursorTimestamp > 0 ? event.timestamp - lastCursorTimestamp : 0;
       cursorBatch.push([x, y, delay]);
       lastCursorTimestamp = event.timestamp;
+      lastCursorX = x;
+      lastCursorY = y;
       continue;
     }
 
@@ -609,10 +621,34 @@ function generateCodeFromRemoteEvents(
       }
       lastAction = 'goto';
     } else if (event.type === 'action') {
-      const { action, selector, selectors, value, coordinates } = event.data as {
+      const { action, selector, selectors, value, coordinates, button, modifiers } = event.data as {
         action?: string; selector?: string;
         selectors?: Array<{ type: string; value: string }>;
         value?: string; coordinates?: { x: number; y: number };
+        button?: number; modifiers?: string[];
+      };
+      const isRightClick = action === 'rightclick' || button === 2;
+      const hasModifiers = modifiers && modifiers.length > 0;
+
+      // Build click options with button and modifiers
+      const clickOptParts: string[] = [];
+      if (isRightClick) clickOptParts.push(`button: 'right'`);
+      if (hasModifiers) clickOptParts.push(`modifiers: [${modifiers!.map(m => `'${m}'`).join(', ')}]`);
+      const clickOptions = clickOptParts.length > 0 ? `{ ${clickOptParts.join(', ')} }` : 'null';
+
+      const emitModDown = () => {
+        if (hasModifiers) {
+          for (const mod of modifiers!) {
+            lines.push(`  await page.keyboard.down('${mod}');`);
+          }
+        }
+      };
+      const emitModUp = () => {
+        if (hasModifiers) {
+          for (const mod of [...modifiers!].reverse()) {
+            lines.push(`  await page.keyboard.up('${mod}');`);
+          }
+        }
       };
 
       if (selectors && selectors.length > 0) {
@@ -620,10 +656,13 @@ function generateCodeFromRemoteEvents(
         const coordsArg = coordinates ? JSON.stringify(coordinates) : 'null';
         switch (action) {
           case 'click':
-            lines.push(`  await locateWithFallback(page, ${selectorsJson}, 'click', null, ${coordsArg});`);
+            lines.push(`  await locateWithFallback(page, ${selectorsJson}, 'click', null, ${coordsArg}${clickOptions !== 'null' ? `, ${clickOptions}` : ''});`);
+            break;
+          case 'rightclick':
+            lines.push(`  await locateWithFallback(page, ${selectorsJson}, 'click', null, ${coordsArg}, ${clickOptions});`);
             break;
           case 'fill':
-            lines.push(`  await locateWithFallback(page, ${selectorsJson}, 'fill', '${value || ''}', null);`);
+            lines.push(`  await locateWithFallback(page, ${selectorsJson}, 'fill', '${value || ''}', ${coordsArg});`);
             break;
           case 'selectOption':
             lines.push(`  await locateWithFallback(page, ${selectorsJson}, 'selectOption', '${value || ''}', null);`);
@@ -632,7 +671,10 @@ function generateCodeFromRemoteEvents(
       } else if (selector && (selector as string).trim()) {
         switch (action) {
           case 'click':
-            lines.push(`  await page.locator('${selector}').click();`);
+            lines.push(`  await page.locator('${selector}').click(${clickOptions !== 'null' ? clickOptions : ''});`);
+            break;
+          case 'rightclick':
+            lines.push(`  await page.locator('${selector}').click(${clickOptions});`);
             break;
           case 'fill':
             lines.push(`  await page.locator('${selector}').fill('${value || ''}');`);
@@ -641,9 +683,17 @@ function generateCodeFromRemoteEvents(
             lines.push(`  await page.locator('${selector}').selectOption('${value || ''}');`);
             break;
         }
-      } else if (action === 'click' && coordinates) {
-        lines.push(`  // Coordinate-only click (no selectors found)`);
+      } else if ((action === 'click' || action === 'rightclick') && coordinates) {
+        lines.push(`  // Coordinate-only ${isRightClick ? 'right-' : ''}click (no selectors found)`);
+        emitModDown();
+        lines.push(`  await page.mouse.click(${coordinates.x}, ${coordinates.y}${isRightClick ? `, { button: 'right' }` : ''});`);
+        emitModUp();
+      } else if (action === 'fill' && coordinates) {
+        const escapedValue = (value || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+        lines.push(`  // Coordinate-only fill (no selectors found) - click to focus then type`);
         lines.push(`  await page.mouse.click(${coordinates.x}, ${coordinates.y});`);
+        lines.push(`  await page.keyboard.press('Control+a');`);
+        lines.push(`  await page.keyboard.type('${escapedValue}');`);
       } else {
         lines.push(`  // Skipped ${action}: no valid selector or coordinates found`);
       }
@@ -738,6 +788,29 @@ function generateCodeFromRemoteEvents(
         for (const mod of [...modifiers].reverse()) {
           lines.push(`  await page.keyboard.up('${mod}');`);
         }
+      }
+    } else if (event.type === 'keydown' && event.data.key) {
+      const escapedKey = (event.data.key as string).replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+      lines.push(`  await page.keyboard.down('${escapedKey}');`);
+    } else if (event.type === 'keyup' && event.data.key) {
+      const escapedKey = (event.data.key as string).replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+      lines.push(`  await page.keyboard.up('${escapedKey}');`);
+    } else if (event.type === 'scroll') {
+      const deltaX = (event.data.deltaX as number) || 0;
+      const deltaY = (event.data.deltaY as number) || 0;
+      const scrollMods = event.data.modifiers as string[] | undefined;
+      if (scrollMods && scrollMods.length > 0) {
+        const modFlags: string[] = [];
+        if (scrollMods.includes('Control')) modFlags.push('ctrlKey: true');
+        if (scrollMods.includes('Shift')) modFlags.push('shiftKey: true');
+        if (scrollMods.includes('Alt')) modFlags.push('altKey: true');
+        if (scrollMods.includes('Meta')) modFlags.push('metaKey: true');
+        lines.push(`  await page.evaluate(({ x, y, dx, dy }) => {`);
+        lines.push(`    const el = document.elementFromPoint(x, y) || document.documentElement;`);
+        lines.push(`    el.dispatchEvent(new WheelEvent('wheel', { deltaX: dx, deltaY: dy, ${modFlags.join(', ')}, bubbles: true, cancelable: true, clientX: x, clientY: y }));`);
+        lines.push(`  }, { x: ${lastCursorX}, y: ${lastCursorY}, dx: ${deltaX}, dy: ${deltaY} });`);
+      } else {
+        lines.push(`  await page.mouse.wheel(${deltaX}, ${deltaY});`);
       }
     }
   }

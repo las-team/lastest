@@ -11,6 +11,7 @@ import {
 import { Monitor, Cloud } from 'lucide-react';
 import type { RunnerCapability } from '@/lib/db/schema';
 import { useRunnerStatus } from './use-runner-status';
+import { persistRunnerPreference } from '@/hooks/use-preferred-runner';
 
 interface ExecutionTargetSelectorProps {
   value: string;
@@ -42,7 +43,7 @@ export function ExecutionTargetSelector({
   }, [runners, value, isLoading, onChange]);
 
   return (
-    <Select value={value} onValueChange={onChange} disabled={disabled}>
+    <Select value={value} onValueChange={(v) => { persistRunnerPreference(v); onChange(v); }} disabled={disabled}>
       <SelectTrigger size={size} className={className}>
         <SelectValue placeholder="Select target" />
       </SelectTrigger>

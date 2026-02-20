@@ -190,6 +190,7 @@ export interface TestResultPayload {
     screenshot?: string;
   };
   logs: LogEntry[];
+  softErrors?: string[];
 }
 
 export interface TestResultResponse extends BaseMessage {

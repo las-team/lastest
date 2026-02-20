@@ -2,6 +2,7 @@
 
 import { useState, useRef, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
+import { usePreferredRunner } from '@/hooks/use-preferred-runner';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -98,7 +99,7 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
   // Run state
   const [isRunning, setIsRunning] = useState(false);
   const pollIntervalRef = useRef<NodeJS.Timeout | null>(null);
-  const [executionTarget, setExecutionTarget] = useState<string>('local');
+  const [executionTarget, setExecutionTarget] = usePreferredRunner();
 
   // Cleanup poll interval on unmount
   useEffect(() => {
@@ -226,7 +227,7 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
     }
   };
 
-  const handleRun = async (headless = true) => {
+  const handleRun = async (headless = true, forceVideoRecording?: boolean) => {
     // Clear any existing poll interval
     if (pollIntervalRef.current) {
       clearInterval(pollIntervalRef.current);
@@ -235,9 +236,14 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
 
     setIsRunning(true);
     try {
-      const { jobId } = await runTests([test.id], repositoryId, headless, executionTarget);
+      const result = await runTests([test.id], repositoryId, headless, executionTarget, forceVideoRecording);
+      const { jobId } = result;
       notifyJobStarted();
-      toast.success(headless ? 'Test started' : 'Test started (headed mode)');
+      if ('queued' in result && result.queued) {
+        toast.success('Test queued — will run when current tests finish');
+      } else {
+        toast.success(forceVideoRecording ? 'Test started with recording' : headless ? 'Test started' : 'Test started (headed mode)');
+      }
       // Poll job status for completion (ensures results are saved before refresh)
       pollIntervalRef.current = setInterval(async () => {
         const { isComplete } = await getJobStatus(jobId);
@@ -789,7 +795,7 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
                                       <div className="flex items-center gap-1.5">
                                         {getDiffStatusIcon(diff)}
                                         <span className="text-xs font-medium capitalize">
-                                          {diff.stepLabel || `step ${i + 1}`}
+                                          {diff.stepLabel || `Step ${i + 1}`}
                                         </span>
                                       </div>
                                       {diff.currentImagePath && (
@@ -801,7 +807,7 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
                                         >
                                           <img
                                             src={diff.currentImagePath}
-                                            alt={diff.stepLabel || `step ${i + 1}`}
+                                            alt={diff.stepLabel || `Step ${i + 1}`}
                                             loading="lazy"
                                             decoding="async"
                                             className="w-full h-16 object-cover rounded border hover:opacity-90"
@@ -833,9 +839,20 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
 
           <TabsContent value="recordings" className="mt-4">
             <Card>
-              <CardHeader>
-                <CardTitle className="text-sm">Recordings</CardTitle>
-                <CardDescription>Video recordings of test runs</CardDescription>
+              <CardHeader className="flex flex-row items-center justify-between">
+                <div>
+                  <CardTitle className="text-sm">Recordings</CardTitle>
+                  <CardDescription>Video recordings of test runs</CardDescription>
+                </div>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => handleRun(true, true)}
+                  disabled={isRunning}
+                >
+                  {isRunning ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : <Video className="h-4 w-4 mr-1" />}
+                  Run with Recording
+                </Button>
               </CardHeader>
               <CardContent>
                 {results.filter(r => r.videoPath).length > 0 ? (

@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
-import { auth } from '@clerk/nextjs/server';
+import { getCurrentSession } from '@/lib/auth';
 
 const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || '';
 
@@ -11,8 +11,8 @@ function getGoogleSheetsRedirectUri() {
 
 export async function GET() {
   // Require authentication before initiating OAuth flow
-  const { userId } = await auth();
-  if (!userId) {
+  const session = await getCurrentSession();
+  if (!session) {
     return NextResponse.redirect(new URL('/login', process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'));
   }
 

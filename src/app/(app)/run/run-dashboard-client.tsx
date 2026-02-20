@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
+import { usePreferredRunner } from '@/hooks/use-preferred-runner';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -94,7 +95,7 @@ export function RunDashboardClient({ tests, runs: _runs, builds, repositoryId, a
   const [showHistory, setShowHistory] = useState(false);
   const [urlHistory, setUrlHistory] = useState<string[]>([]);
   const initialBaseUrlRef = useRef(initialBaseUrl);
-  const [executionTarget, setExecutionTarget] = useState<string>('local');
+  const [executionTarget, setExecutionTarget] = usePreferredRunner();
   const [smartAnalysis, setSmartAnalysis] = useState<SmartRunAnalysis | null>(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [isSmartRunning, setIsSmartRunning] = useState(false);

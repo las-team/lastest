@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
+import { usePreferredRunner } from '@/hooks/use-preferred-runner';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -173,6 +174,10 @@ function getEventDescription(event: RecordingEvent): string {
       return 'Hovering...';
     case 'keypress':
       return `${modPrefix}Press "${event.data.key || 'key'}"`;
+    case 'keydown':
+      return `Hold "${event.data.key || 'key'}"`;
+    case 'keyup':
+      return `Release "${event.data.key || 'key'}"`;
     default:
       return event.type;
   }
@@ -218,6 +223,8 @@ interface RecordingEvent {
     actionId?: string;
     modifiers?: KeyboardModifier[];
     key?: string;
+    deltaX?: number;
+    deltaY?: number;
     elementInfo?: {
       tagName: string;
       id?: string;
@@ -244,7 +251,7 @@ export function RecordingClient({
   const [playwrightStatus, setPlaywrightStatus] = useState<PlaywrightAvailability | null>(null);
   const [selectedEngine, setSelectedEngine] = useState<RecordingEngine>(defaultEngine);
   const [inspectorSessionId, setInspectorSessionId] = useState<string | null>(null);
-  const [executionTarget, setExecutionTarget] = useState<string>('local');
+  const [executionTarget, setExecutionTarget] = usePreferredRunner();
   const [runSetupBeforeRecording, setRunSetupBeforeRecording] = useState(true);
 
   // Re-record mode
@@ -973,6 +980,8 @@ export function RecordingClient({
                             {event.type === 'mouse-up' && <MousePointerClick className="h-3 w-3 text-red-300" />}
                             {event.type === 'hover-preview' && <Eye className="h-3 w-3 text-gray-400" />}
                             {event.type === 'keypress' && <Keyboard className="h-3 w-3 text-indigo-500" />}
+                            {event.type === 'keydown' && <Keyboard className="h-3 w-3 text-green-500" />}
+                            {event.type === 'keyup' && <Keyboard className="h-3 w-3 text-orange-400" />}
                           </div>
                           <div className="flex-1 min-w-0">
                             <span className="text-muted-foreground text-xs">
@@ -1039,7 +1048,7 @@ export function RecordingClient({
                   </div>
                 ) : (
                   <div className="text-center py-4 text-muted-foreground text-sm">
-                    Press Screenshot or Ctrl+S to capture
+                    Press Screenshot or Ctrl+Shift+S to capture
                   </div>
                 )}
               </CardContent>

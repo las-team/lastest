@@ -9,6 +9,9 @@ Timestamp fixing
 Teardown
 Test - which pr it was added in, updated?
 AI review
+Clipboard Access
+Accept Downloads
+Network Interception
 ## features
 Support https://github.com/excalidraw/excalidraw/tree/master/packages/excalidraw/tests ~/.claude/plans/declarative-kindling-coral.md 55%
 
@@ -34,3 +37,21 @@ Formal verification of code?
 Automated test add
 Page Shift
 ## marketing 
+
+## Excalidraw 
+
+  Tier 3 — Needs product improvements first:
+
+  ┌─────┬─────────────────────┬─────────────────────────┬────────────────┐
+  │  #  │      Test Name      │       Blocked by        │    Maps to     │
+  ├─────┼─────────────────────┼─────────────────────────┼────────────────┤
+  │ 16  │ Copy/Paste Elements │ Clipboard support       │ clipboard.test │
+  ├─────┼─────────────────────┼─────────────────────────┼────────────────┤
+  │ 17  │ Export as PNG/SVG   │ Download interception   │ export.test    │
+  ├─────┼─────────────────────┼─────────────────────────┼────────────────┤
+  │ 18  │ Insert Image        │ File upload support     │ image.test     │
+  ├─────┼─────────────────────┼─────────────────────────┼────────────────┤
+  │ 19  │ Library Add/Use     │ File upload + clipboard │ library.test   │
+  ├─────┼─────────────────────┼─────────────────────────┼────────────────┤
+  │ 20  │ Paste CSV as Chart  │ Clipboard support       │ charts.test    │
+  └─────┴─────────────────────┴─────────────────────────┴────────────────┘

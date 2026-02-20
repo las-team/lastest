@@ -57,11 +57,20 @@ export class RunnerClient {
   private runner: TestRunner;
   private recorder: RemoteRecorder;
   private sessionId?: string;
+  private commandQueue: Message[] = [];
+  private processingCommands = false;
+  private activeTasks = 0;
+  private seenCommandIds = new Set<string>();
+  private activeTestIds = new Set<string>();
+  // Retry queue for failed result/screenshot sends
+  private pendingResults: Message[] = [];
+  // Resolve this to wake the heartbeat sleep early (for fast shutdown)
+  private wakeHeartbeat: (() => void) | null = null;
 
   constructor(options: RunnerClientOptions) {
     this.token = options.token;
     this.serverUrl = options.serverUrl.replace(/\/$/, '');
-    this.pollInterval = options.pollInterval ?? 30000; // 30 seconds default
+    this.pollInterval = options.pollInterval ?? 3000; // 3 seconds default
     this.baseUrl = options.baseUrl;
     this.runner = new TestRunner();
     this.recorder = new RemoteRecorder();
@@ -87,15 +96,24 @@ export class RunnerClient {
     if (!this.running) return;
 
     this.running = false;
-    console.log('Sending offline notification...');
+    console.log('[Stop] Shutting down...');
 
-    // Send explicit offline message before stopping
+    // Wake heartbeat sleep immediately so the loop exits fast
+    this.wakeHeartbeat?.();
+
+    // Abort all active tests
+    for (const testId of this.activeTestIds) {
+      console.log(`[Stop] Aborting active test: ${testId}`);
+      this.runner.abort(testId);
+    }
+
+    // Send offline notification with a hard 5s timeout
     try {
       const offlineMsg = createMessage<HeartbeatMessage>('status:heartbeat', {
-        status: 'idle', // Will be treated as 'offline' intent with disconnect flag
+        status: 'idle',
         currentTask: undefined,
         systemInfo: this.getSystemInfo(),
-        disconnect: true, // Signal graceful disconnect
+        disconnect: true,
       });
 
       const headers: Record<string, string> = {
@@ -111,13 +129,17 @@ export class RunnerClient {
         method: 'POST',
         headers,
         body: JSON.stringify(offlineMsg),
+        signal: AbortSignal.timeout(5000),
       });
 
-      console.log('Runner stopped gracefully');
-    } catch (error) {
-      console.error('Failed to send offline notification:', error);
-      console.log('Runner stopped (ungraceful)');
+      console.log('[Stop] Server notified');
+    } catch {
+      console.log('[Stop] Server notification skipped (timeout or unreachable)');
     }
+
+    // Close browser
+    await this.runner.closeBrowserIfIdle();
+    console.log('[Stop] Done');
   }
 
   private async connect(): Promise<boolean> {
@@ -152,11 +174,10 @@ export class RunnerClient {
       console.log(`Session ID: ${data.sessionId}`);
       console.log(`Capabilities: ${data.capabilities?.join(', ') || 'run, record'}`);
 
-      // Process any pending commands
+      // Enqueue any pending commands
       if (data.commands && data.commands.length > 0) {
-        for (const cmd of data.commands) {
-          await this.handleCommand(cmd);
-        }
+        this.commandQueue.push(...data.commands);
+        this.processCommandQueue();
       }
 
       return true;
@@ -168,6 +189,23 @@ export class RunnerClient {
 
   private async heartbeatLoop(): Promise<void> {
     while (this.running) {
+      // Flush pending results retry queue before heartbeat
+      if (this.pendingResults.length > 0) {
+        const retrying = [...this.pendingResults];
+        this.pendingResults = [];
+        for (const msg of retrying) {
+          const ok = await this.sendMessage(msg);
+          if (!ok) {
+            this.pendingResults.push(msg);
+          }
+        }
+        // Cap retry queue to prevent unbounded growth
+        if (this.pendingResults.length > 100) {
+          console.warn(`[Retry] Dropping ${this.pendingResults.length - 100} oldest pending results`);
+          this.pendingResults = this.pendingResults.slice(-100);
+        }
+      }
+
       try {
         const heartbeat = createMessage<HeartbeatMessage>('status:heartbeat', {
           status: this.status,
@@ -202,12 +240,11 @@ export class RunnerClient {
         if (response.ok) {
           const data = (await response.json()) as HeartbeatResponse;
 
-          // Process any pending commands
+          // Enqueue commands for sequential processing (non-blocking so heartbeats continue)
           if (data.commands && data.commands.length > 0) {
             console.log(`[Heartbeat] Received ${data.commands.length} commands:`, data.commands.map((c: Message) => c.type));
-            for (const cmd of data.commands) {
-              await this.handleCommand(cmd);
-            }
+            this.commandQueue.push(...data.commands);
+            this.processCommandQueue();
           }
         } else {
           const text = await response.text();
@@ -217,9 +254,71 @@ export class RunnerClient {
         console.error('Heartbeat error:', error);
       }
 
-      // Wait for next poll
-      await new Promise((resolve) => setTimeout(resolve, this.pollInterval));
+      // Wait for next poll — interruptible via wakeHeartbeat() for fast shutdown
+      await new Promise<void>((resolve) => {
+        const timer = setTimeout(resolve, this.pollInterval);
+        this.wakeHeartbeat = () => {
+          clearTimeout(timer);
+          resolve();
+        };
+      });
+      this.wakeHeartbeat = null;
     }
+  }
+
+  /**
+   * Process queued commands. run_test commands are fired concurrently
+   * WITHOUT blocking the queue — so cancel_test and other commands
+   * arriving on subsequent heartbeats get processed immediately.
+   */
+  private async processCommandQueue(): Promise<void> {
+    if (this.processingCommands) return; // Already processing
+    this.processingCommands = true;
+
+    while (this.commandQueue.length > 0) {
+      const cmd = this.commandQueue.shift()!;
+
+      // Dedup by command ID (except run_test which dedupes by testId)
+      if (cmd.type !== 'command:run_test') {
+        if (this.seenCommandIds.has(cmd.id)) {
+          console.log(`[Queue] Skipping duplicate command ${cmd.id}`);
+          continue;
+        }
+        this.seenCommandIds.add(cmd.id);
+      }
+
+      if (cmd.type === 'command:run_test') {
+        const testCmd = cmd as RunTestCommand;
+        const testId = testCmd.payload.testId;
+        if (this.activeTestIds.has(testId)) {
+          console.log(`[Queue] Skipping duplicate run_test for testId ${testId} (cmd ${testCmd.id.slice(0, 8)})`);
+          continue;
+        }
+        this.activeTestIds.add(testId);
+
+        // Fire and forget — don't block the queue processor
+        console.log(`[Queue] Launching test ${testId}`);
+        this.handleCommand(cmd).catch(error => {
+          console.error(`Command ${cmd.type} (${cmd.id}) failed:`, error);
+        });
+      } else {
+        // Non-test commands (cancel_test, ping, etc.) — process immediately
+        console.log(`[Queue] Processing ${cmd.type}`);
+        try {
+          await this.handleCommand(cmd);
+        } catch (error) {
+          console.error(`Command ${cmd.type} failed:`, error);
+        }
+      }
+    }
+
+    // Cap the dedup set to prevent unbounded growth
+    if (this.seenCommandIds.size > 1000) {
+      const entries = [...this.seenCommandIds];
+      this.seenCommandIds = new Set(entries.slice(entries.length - 500));
+    }
+
+    this.processingCommands = false;
   }
 
   private async handleCommand(message: Message): Promise<void> {
@@ -291,17 +390,19 @@ export class RunnerClient {
   }
 
   private async handleRunTest(command: RunTestCommand): Promise<void> {
+    this.activeTasks++;
     this.status = 'busy';
     this.currentTask = command.payload.testRunId;
+    const testId = command.payload.testId;
 
     // Override targetUrl if baseUrl is configured
     if (this.baseUrl) {
-      console.log(`Overriding targetUrl: ${command.payload.targetUrl} → ${this.baseUrl}`);
+      console.log(`[Test ${testId}] Overriding targetUrl: ${command.payload.targetUrl} → ${this.baseUrl}`);
       command.payload.targetUrl = this.baseUrl.replace(/\/+$/, '');
     }
 
     try {
-      console.log(`Running test: ${command.payload.testId}`);
+      console.log(`[Test ${testId}] Starting test execution (commandId: ${command.id.slice(0, 8)}, timeout: ${command.payload.timeout}ms)`);
 
       const result = await this.runner.runTest(command.payload, (step, progress) => {
         // Send progress update
@@ -313,24 +414,9 @@ export class RunnerClient {
         this.sendMessage(progressMsg);
       });
 
-      // Upload screenshots
-      console.log(`Uploading ${result.screenshots.length} screenshots...`);
-      for (const screenshot of result.screenshots) {
-        const screenshotMsg = createMessage<ScreenshotUploadResponse>('response:screenshot', {
-          correlationId: command.id,
-          testRunId: command.payload.testRunId,
-          repositoryId: command.payload.repositoryId,
-          filename: screenshot.filename,
-          data: screenshot.data,
-          width: screenshot.width,
-          height: screenshot.height,
-          capturedAt: Date.now(),
-        });
-        console.log(`  Sending screenshot: ${screenshot.filename}`);
-        await this.sendMessage(screenshotMsg);
-      }
+      console.log(`[Test ${testId}] runTest returned: status=${result.status}, screenshots=${result.screenshots.length}, duration=${result.durationMs}ms`);
 
-      // Send result
+      // Send result FIRST so server sees pass/fail before timeout
       const resultMsg = createMessage<TestResultResponse>('response:test_result', {
         correlationId: command.id,
         testId: command.payload.testId,
@@ -339,16 +425,52 @@ export class RunnerClient {
         durationMs: result.durationMs,
         error: result.error,
         logs: result.logs,
+        softErrors: result.softErrors,
       });
-      await this.sendMessage(resultMsg);
+      console.log(`[Test ${testId}] Sending result to server...`);
+      const resultSent = await this.sendMessage(resultMsg);
+      if (!resultSent) {
+        console.warn(`[Test ${testId}] Result send failed, queuing for retry`);
+        this.pendingResults.push(resultMsg);
+      } else {
+        console.log(`[Test ${testId}] Result sent: ${result.status}`);
+      }
 
-      console.log(`Test ${result.status}: ${command.payload.testId}`);
+      // Upload screenshots after result (non-blocking for server timeout)
+      if (result.screenshots.length > 0) {
+        console.log(`[Test ${testId}] Uploading ${result.screenshots.length} screenshots...`);
+        for (const screenshot of result.screenshots) {
+          const screenshotMsg = createMessage<ScreenshotUploadResponse>('response:screenshot', {
+            correlationId: command.id,
+            testRunId: command.payload.testRunId,
+            repositoryId: command.payload.repositoryId,
+            filename: screenshot.filename,
+            data: screenshot.data,
+            width: screenshot.width,
+            height: screenshot.height,
+            capturedAt: Date.now(),
+          });
+          console.log(`[Test ${testId}]   Sending screenshot: ${screenshot.filename}`);
+          const screenshotSent = await this.sendMessage(screenshotMsg);
+          if (!screenshotSent) {
+            console.warn(`[Test ${testId}]   Screenshot send failed, queuing for retry`);
+            this.pendingResults.push(screenshotMsg);
+          }
+        }
+        console.log(`[Test ${testId}] All screenshots uploaded`);
+      }
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
+      console.error(`[Test ${testId}] handleRunTest error: ${errorMessage}`);
       await this.sendError(command.id, 'INTERNAL_ERROR', errorMessage);
     } finally {
-      this.status = 'idle';
-      this.currentTask = undefined;
+      this.activeTestIds.delete(testId);
+      this.activeTasks--;
+      console.log(`[Test ${testId}] Cleanup done (activeTasks: ${this.activeTasks})`);
+      if (this.activeTasks === 0) {
+        this.status = 'idle';
+        this.currentTask = undefined;
+      }
     }
   }
 
@@ -450,7 +572,7 @@ export class RunnerClient {
     }
   }
 
-  private async sendMessage(message: Message): Promise<void> {
+  private async sendMessage(message: Message): Promise<boolean> {
     try {
       const headers: Record<string, string> = {
         'Content-Type': 'application/json',
@@ -462,13 +584,20 @@ export class RunnerClient {
         headers['X-Session-ID'] = this.sessionId;
       }
 
-      await fetch(`${this.serverUrl}/api/ws/runner`, {
+      const response = await fetch(`${this.serverUrl}/api/ws/runner`, {
         method: 'POST',
         headers,
         body: JSON.stringify(message),
       });
+
+      if (!response.ok) {
+        console.error(`Send failed: ${response.status}`);
+        return false;
+      }
+      return true;
     } catch (error) {
       console.error('Failed to send message:', error);
+      return false;
     }
   }
 

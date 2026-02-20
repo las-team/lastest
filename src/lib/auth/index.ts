@@ -9,4 +9,4 @@ export {
   requireTeamAdmin,
   isAuthenticated,
   type SessionData,
-} from './clerk';
+} from './session';

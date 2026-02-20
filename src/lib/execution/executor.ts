@@ -13,20 +13,22 @@ import { getRunner, type TestRunResult, type ProgressCallback } from '@/lib/play
 import type { Test, EnvironmentConfig, PlaywrightSettings } from '@/lib/db/schema';
 import type {
   RunTestCommand,
-  TestResultResponse,
-  TestProgressResponse,
-  ScreenshotUploadResponse,
 } from '@/lib/ws/protocol';
 import { createMessage } from '@/lib/ws/protocol';
-import { queueCommand, getTestResults, getScreenshots } from '@/app/api/ws/runner/route';
+import { queueCommandToDB, queueCancelCommandToDB } from '@/app/api/ws/runner/route';
 import { runnerRegistry } from '@/lib/ws/runner-registry';
 import { db } from '@/lib/db';
-import { runners, tests as testsTable } from '@/lib/db/schema';
+import { runners, tests as testsTable, backgroundJobs } from '@/lib/db/schema';
 import { eq, and } from 'drizzle-orm';
 import { createHash } from 'crypto';
 import fs from 'fs/promises';
 import path from 'path';
 import { STORAGE_DIRS } from '@/lib/storage/paths';
+import {
+  getCommandsByTestRun,
+  getUnacknowledgedResults,
+  acknowledgeResults,
+} from '@/lib/db/queries';
 
 /**
  * Generate SHA256 hash of test code for integrity verification.
@@ -45,6 +47,8 @@ export interface ExecutionOptions {
   runnerId?: string; // 'local' or specific runner ID - if set, overrides mode detection
   maxParallelTests?: number; // Override parallel test setting (used for remote runners)
   setupContext?: { storageState?: string; variables?: Record<string, unknown> }; // Auth session + variables from setup scripts
+  forceVideoRecording?: boolean; // Force video recording for this run regardless of global setting
+  jobId?: string; // Background job ID for cancellation checks
 }
 
 export interface ExecutionProgress {
@@ -146,11 +150,13 @@ async function executeLocally(
     : undefined;
 
   // maxParallelTests from settings is used by runner internally, but can be overridden
-  return runner.runTests(tests, runId, progressCallback, onResult, options.headless, options.maxParallelTests);
+  return runner.runTests(tests, runId, progressCallback, onResult, options.headless, options.maxParallelTests, options.forceVideoRecording);
 }
 
 /**
  * Execute tests via remote runner.
+ * Commands are queued to the DB. The runner claims them on heartbeat.
+ * Executor polls the DB for completion and results.
  */
 async function executeViaRunner(
   tests: Test[],
@@ -169,165 +175,226 @@ async function executeViaRunner(
       }
     : undefined;
 
-  for (let i = 0; i < tests.length; i++) {
-    const test = tests[i];
+  const maxParallel = options.maxParallelTests ?? 1;
+  const pending = [...tests];
+  // Track in-flight tests: commandId → { testId, testName, startTime }
+  const inFlight = new Map<string, { testId: string; testName: string; startTime: number; completedSeenAt?: number }>();
+  let completedCount = 0;
+  let cancelled = false;
+  const baseTimeout = options.playwrightSettings?.navigationTimeout || 120000;
+  // Scale timeout for concurrency — parallel tests compete for resources
+  const testTimeout = Math.max(baseTimeout * maxParallel, 300000);
+  const pollInterval = 1000;
 
+  // Check if the background job has been cancelled
+  const checkCancelled = async (): Promise<boolean> => {
+    if (!options.jobId) return false;
+    const job = await db.query.backgroundJobs.findFirst({
+      where: eq(backgroundJobs.id, options.jobId),
+      columns: { status: true, error: true },
+    });
+    return job?.error === 'Cancelled by user' || job?.status === 'failed';
+  };
+
+  const updateProgress = () => {
+    const activeTests = [...inFlight.values()].map(r => r.testName);
     onProgress?.({
-      completed: i,
+      completed: completedCount,
       total: tests.length,
-      currentTestName: test.name,
+      currentTestName: activeTests[0],
+      activeCount: inFlight.size,
+      activeTests,
     });
+  };
 
-    // Validate test exists in database and code matches (prevents fake testId injection)
-    const dbTest = await db.query.tests.findFirst({
-      where: eq(testsTable.id, test.id),
-      columns: { id: true, code: true }
-    });
+  // Fill slots by validating, creating commands, and queuing them to DB
+  const fillSlots = async () => {
+    if (cancelled) return;
+    while (inFlight.size < maxParallel && pending.length > 0) {
+      const test = pending.shift()!;
 
-    if (!dbTest || dbTest.code !== test.code) {
-      console.error(`[Executor] Test ${test.id} not found or code mismatch`);
-      results.push({
-        testId: test.id,
-        status: 'failed',
-        durationMs: 0,
-        screenshots: [],
-        errorMessage: `Test validation failed: test not found or code mismatch`,
+      // Validate test exists in database and code matches (prevents fake testId injection)
+      const dbTest = await db.query.tests.findFirst({
+        where: eq(testsTable.id, test.id),
+        columns: { id: true, code: true }
       });
-      continue;
+
+      if (!dbTest || dbTest.code !== test.code) {
+        console.error(`[Executor] Test ${test.id} not found or code mismatch`);
+        results.push({
+          testId: test.id,
+          status: 'failed',
+          durationMs: 0,
+          screenshots: [],
+          errorMessage: `Test validation failed: test not found or code mismatch`,
+        });
+        completedCount++;
+        continue;
+      }
+
+      // Create run_test command with code hash for integrity verification
+      const command = createMessage<RunTestCommand>('command:run_test', {
+        testId: test.id,
+        testRunId: runId,
+        code: test.code,
+        codeHash: hashCode(test.code),
+        targetUrl: baseUrl,
+        screenshotPath: `${runId}-${test.id}.png`,
+        timeout: testTimeout,
+        repositoryId: options.repositoryId || undefined,
+        viewport,
+        storageState: options.setupContext?.storageState,
+        setupVariables: options.setupContext?.variables,
+      });
+
+      // Queue command to DB
+      await queueCommandToDB(runnerId, command);
+      inFlight.set(command.id, { testId: test.id, testName: test.name, startTime: Date.now() });
+    }
+  };
+
+  await fillSlots();
+  updateProgress();
+
+  // Poll DB for command completion and results
+  while (inFlight.size > 0) {
+    await new Promise((resolve) => setTimeout(resolve, pollInterval));
+
+    // Check if the job was cancelled — stop launching new tests and drain in-flight
+    if (!cancelled && await checkCancelled()) {
+      cancelled = true;
+      // Clear pending so no more tests get queued
+      pending.length = 0;
+      // Send cancel to the remote runner for in-flight tests
+      await queueCancelCommandToDB(runnerId, runId, 'Cancelled by user');
+      // Mark remaining in-flight as failed and break out
+      for (const [commandId, info] of inFlight) {
+        inFlight.delete(commandId);
+        completedCount++;
+        results.push({
+          testId: info.testId,
+          status: 'failed',
+          durationMs: 0,
+          screenshots: [],
+          errorMessage: 'Cancelled by user',
+        });
+      }
+      break;
     }
 
-    // Create run_test command with code hash for integrity verification
-    const command = createMessage<RunTestCommand>('command:run_test', {
-      testId: test.id,
-      testRunId: runId,
-      code: test.code,
-      codeHash: hashCode(test.code),
-      targetUrl: baseUrl,
-      screenshotPath: `${runId}-${test.id}.png`,
-      timeout: options.playwrightSettings?.navigationTimeout || 30000,
-      repositoryId: options.repositoryId || undefined,
-      viewport,
-      storageState: options.setupContext?.storageState,
-      setupVariables: options.setupContext?.variables,
-    });
+    // Check command statuses in DB
+    const dbCommands = await getCommandsByTestRun(runId);
 
-    // Queue command for runner (polling mode)
-    queueCommand(runnerId, command);
+    for (const dbCmd of dbCommands) {
+      const info = inFlight.get(dbCmd.id);
+      if (!info) continue;
 
-    // Wait for result (poll with timeout)
-    const result = await waitForTestResult(runnerId, command.id, runId, test.id, options.repositoryId);
-    results.push(result);
+      // Only process completed/failed commands
+      if (dbCmd.status !== 'completed' && dbCmd.status !== 'failed' && dbCmd.status !== 'timeout') {
+        continue;
+      }
 
-    await onResult?.(result);
+      // Get unacknowledged results for this command
+      const unacked = await getUnacknowledgedResults([dbCmd.id]);
+      const testResultMsg = unacked.find(r => r.type === 'response:test_result');
 
-    onProgress?.({
-      completed: i + 1,
-      total: tests.length,
-      currentTestName: test.name,
-    });
+      if (!testResultMsg && dbCmd.status !== 'timeout') {
+        // Result not yet stored — wait for next poll
+        continue;
+      }
+
+      if (dbCmd.status === 'timeout') {
+        inFlight.delete(dbCmd.id);
+        completedCount++;
+        // Timed out — no result payload
+        const timeoutResult: TestRunResult = {
+          testId: info.testId,
+          status: 'failed',
+          durationMs: testTimeout,
+          screenshots: [],
+          errorMessage: `Test execution timed out`,
+        };
+        results.push(timeoutResult);
+        await onResult?.(timeoutResult);
+        continue;
+      }
+
+      // Parse the test result payload
+      const payload = testResultMsg!.payload as Record<string, unknown>;
+      const errorPayload = payload.error as Record<string, unknown> | undefined;
+
+      // Screenshots are uploaded AFTER the test result, so they may not be here yet.
+      // Defer processing until screenshots arrive (up to 10s), then proceed anyway.
+      const screenshotResults = unacked.filter(r => r.type === 'response:screenshot');
+      if (screenshotResults.length === 0 && payload.status === 'passed') {
+        if (!info.completedSeenAt) {
+          info.completedSeenAt = Date.now();
+          continue; // Wait for screenshots on next poll
+        }
+        if (Date.now() - info.completedSeenAt < 10_000) {
+          continue; // Still waiting for screenshots
+        }
+        // Exceeded 10s — process anyway with whatever we have
+      }
+
+      inFlight.delete(dbCmd.id);
+      completedCount++;
+
+      let allScreenshots: { path: string; label: string }[] = screenshotResults.map((r, idx) => {
+        const sp = r.payload as Record<string, unknown>;
+        return { path: sp.path as string, label: `Step ${idx + 1}` };
+      });
+
+      // Fallback to disk scan if no DB screenshot entries found
+      if (allScreenshots.length === 0) {
+        allScreenshots = await findScreenshotsOnDisk(runId, info.testId, options.repositoryId);
+      }
+
+      const testResult: TestRunResult = {
+        testId: (payload.testId as string) || info.testId,
+        status: payload.status === 'error' || payload.status === 'timeout' || payload.status === 'cancelled' ? 'failed' : (payload.status as 'passed' | 'failed'),
+        durationMs: (payload.durationMs as number) || 0,
+        screenshotPath: allScreenshots[0]?.path,
+        screenshots: allScreenshots,
+        errorMessage: errorPayload?.message as string | undefined,
+        softErrors: Array.isArray(payload.softErrors) && payload.softErrors.length > 0 ? payload.softErrors as string[] : undefined,
+      };
+      results.push(testResult);
+      await onResult?.(testResult);
+
+      // Acknowledge all results for this command (including screenshot entries)
+      const resultIds = unacked.map(r => r.id);
+      if (resultIds.length > 0) {
+        await acknowledgeResults(resultIds);
+      }
+    }
+
+    // Check for timeouts
+    for (const [commandId, info] of inFlight) {
+      if (Date.now() - info.startTime > testTimeout) {
+        console.error(`[Executor] Test ${info.testId} timed out after ${testTimeout}ms`);
+        // Cancel the stale test on the runner so it frees resources
+        await queueCancelCommandToDB(runnerId, runId, `Server-side timeout after ${testTimeout}ms`);
+        inFlight.delete(commandId);
+        completedCount++;
+        const timeoutResult: TestRunResult = {
+          testId: info.testId,
+          status: 'failed',
+          durationMs: testTimeout,
+          screenshots: [],
+          errorMessage: `Test execution timed out after ${testTimeout}ms`,
+        };
+        results.push(timeoutResult);
+        await onResult?.(timeoutResult);
+      }
+    }
+
+    // Fill more slots if any completed
+    await fillSlots();
+    updateProgress();
   }
 
   return results;
-}
-
-/**
- * Wait for test result from runner (polling mode).
- */
-async function waitForTestResult(
-  runnerId: string,
-  commandId: string,
-  runId: string,
-  testId: string,
-  repositoryId?: string | null,
-  timeout: number = 120000
-): Promise<TestRunResult> {
-  const startTime = Date.now();
-  const pollInterval = 1000;
-
-  while (Date.now() - startTime < timeout) {
-    // Check for screenshots first (may arrive before result)
-    const screenshots = getScreenshots(runnerId);
-    if (screenshots.length > 0) {
-      console.log(`[Executor] Got ${screenshots.length} screenshots for runner ${runnerId}`);
-    }
-    for (const screenshot of screenshots) {
-      if (screenshot.type === 'response:screenshot') {
-        const payload = (screenshot as ScreenshotUploadResponse).payload;
-        console.log(`[Executor] Screenshot correlationId: ${payload.correlationId}, expected: ${commandId}`);
-        if (payload.correlationId === commandId) {
-          // Save screenshot to filesystem
-          console.log(`[Executor] Saving screenshot: ${payload.filename}`);
-          await saveScreenshotFromBase64(payload.data, payload.filename, repositoryId);
-        }
-      }
-    }
-
-    // Check for test results
-    const results = getTestResults(runnerId);
-    for (const result of results) {
-      if (result.payload.correlationId === commandId) {
-        // Found our result
-        const payload = result.payload;
-
-        // Build screenshot path
-        let screenshotPath: string | undefined;
-        if (payload.error?.screenshot) {
-          const filename = `${runId}-${testId}-failure.png`;
-          screenshotPath = await saveScreenshotFromBase64(
-            payload.error.screenshot,
-            filename,
-            repositoryId
-          );
-        }
-
-        // Find screenshots saved to disk by the route handler
-        const diskScreenshots = await findScreenshotsOnDisk(runId, testId, repositoryId);
-
-        return {
-          testId: payload.testId,
-          status: payload.status === 'error' || payload.status === 'timeout' || payload.status === 'cancelled' ? 'failed' : payload.status,
-          durationMs: payload.durationMs,
-          screenshotPath: screenshotPath || diskScreenshots[0]?.path,
-          screenshots: diskScreenshots,
-          errorMessage: payload.error?.message,
-        };
-      }
-    }
-
-    // Wait before next poll
-    await new Promise((resolve) => setTimeout(resolve, pollInterval));
-  }
-
-  // Timeout - return failed result
-  return {
-    testId,
-    status: 'failed',
-    durationMs: timeout,
-    screenshots: [],
-    errorMessage: `Test execution timed out after ${timeout}ms`,
-  };
-}
-
-/**
- * Save base64 screenshot to filesystem.
- */
-async function saveScreenshotFromBase64(
-  base64Data: string,
-  filename: string,
-  repositoryId?: string | null
-): Promise<string> {
-  const baseDir = STORAGE_DIRS.screenshots;
-  const dir = repositoryId ? path.join(baseDir, repositoryId) : baseDir;
-
-  // Ensure directory exists
-  await fs.mkdir(dir, { recursive: true });
-
-  const filePath = path.join(dir, filename);
-  const buffer = Buffer.from(base64Data, 'base64');
-  await fs.writeFile(filePath, buffer);
-
-  // Return public path
-  return repositoryId ? `/screenshots/${repositoryId}/${filename}` : `/screenshots/${filename}`;
 }
 
 /**
@@ -351,7 +418,7 @@ async function findScreenshotsOnDisk(
       const files = await fs.readdir(repoDir);
       for (const f of files) {
         if (f.startsWith(prefix) && f.endsWith('.png')) {
-          const label = f.replace(prefix, '').replace('.png', '');
+          const label = f.replace(prefix, '').replace('.png', '').replace(/_/g, ' ');
           screenshots.push({ path: `/screenshots/${repositoryId}/${f}`, label });
         }
       }
@@ -365,7 +432,7 @@ async function findScreenshotsOnDisk(
     const files = await fs.readdir(baseDir);
     for (const f of files) {
       if (f.startsWith(prefix) && f.endsWith('.png')) {
-        const label = f.replace(prefix, '').replace('.png', '');
+        const label = f.replace(prefix, '').replace('.png', '').replace(/_/g, ' ');
         const publicPath = `/screenshots/${f}`;
         // Avoid duplicates
         if (!screenshots.some(s => s.label === label)) {

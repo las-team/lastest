@@ -3,7 +3,7 @@
 import * as queries from '@/lib/db/queries';
 import type { BackgroundJobType } from '@/lib/db/schema';
 import { getRunner } from '@/lib/playwright/runner';
-import { queueCancelCommand } from '@/app/api/ws/runner/route';
+import { queueCancelCommandToDB } from '@/app/api/ws/runner/route';
 
 export async function createJob(
   type: BackgroundJobType,
@@ -105,8 +105,8 @@ export async function cancelJob(jobId: string, repositoryId?: string | null, run
   const job = await queries.getBackgroundJob(jobId);
   if (!job) return { success: false, error: 'Job not found' };
 
-  // If job is running and it's a build, abort the runner
-  if (job.status === 'running' && job.type === 'build_run') {
+  // If job is running and it's a build or test run, abort the runner
+  if (job.status === 'running' && (job.type === 'build_run' || job.type === 'test_run')) {
     const runner = getRunner(repositoryId);
     runner.abort();
     await runner.forceReset();
@@ -117,7 +117,7 @@ export async function cancelJob(jobId: string, repositoryId?: string | null, run
     // Extract testRunId from job metadata if available
     const testRunId = (job.metadata as Record<string, unknown>)?.testRunId as string | undefined;
     if (testRunId) {
-      queueCancelCommand(runnerId, testRunId, 'Cancelled by user');
+      await queueCancelCommandToDB(runnerId, testRunId, 'Cancelled by user');
     }
   }
 
@@ -144,6 +144,18 @@ export async function cancelJob(jobId: string, repositoryId?: string | null, run
     error: 'Cancelled by user',
     completedAt: new Date(),
   });
+
+  // If this was the active job, process next queued job of the same type
+  if (job.status === 'running' && (job.type === 'build_run' || job.type === 'test_run')) {
+    // Dynamically import to avoid circular deps
+    if (job.type === 'build_run') {
+      const { processNextQueuedBuild } = await import('./builds');
+      processNextQueuedBuild(repositoryId);
+    } else {
+      const { processNextQueuedTestRun } = await import('./runs');
+      processNextQueuedTestRun(repositoryId);
+    }
+  }
 
   return { success: true };
 }

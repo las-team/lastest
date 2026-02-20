@@ -80,7 +80,20 @@
       "Bash(git stash:*)",
       "Bash(node check-build.js:*)",
       "Bash(node:*)",
-      "Bash(pnpm vitest run:*)"
+      "Bash(pnpm vitest run:*)",
+      "Bash(scp:*)",
+      "Bash(git -C /home/ewyct/dev/lastest2 ls-tree -r 4c9c5950a0d846d9fcdb5a9510a06ec55db59f08 --name-only)",
+      "Bash(git -C /home/ewyct/dev/lastest2 show 4c9c5950a0d846d9fcdb5a9510a06ec55db59f08:src/lib/auth/index.ts)",
+      "Bash(git -C /home/ewyct/dev/lastest2 show 4c9c5950a0d846d9fcdb5a9510a06ec55db59f08:src/lib/auth/password.ts)",
+      "Bash(git -C /home/ewyct/dev/lastest2 show 4c9c5950a0d846d9fcdb5a9510a06ec55db59f08:src/app/api/auth/login/route.ts)",
+      "Bash(git -C /home/ewyct/dev/lastest2 show 4c9c5950a0d846d9fcdb5a9510a06ec55db59f08:src/app/api/auth/google/callback/route.ts)",
+      "Bash(git -C /home/ewyct/dev/lastest2 show 4c9c5950a0d846d9fcdb5a9510a06ec55db59f08:src/app/api/auth/github/callback/route.ts)",
+      "Bash(git -C /home/ewyct/dev/lastest2 show 4c9c5950a0d846d9fcdb5a9510a06ec55db59f08:src/app/api/auth/register/route.ts)",
+      "Bash(git -C /home/ewyct/dev/lastest2 show 4c9c5950a0d846d9fcdb5a9510a06ec55db59f08:src/app/api/auth/logout/route.ts)",
+      "WebFetch(domain:www.better-auth.com)",
+      "Bash(curl:*)",
+      "Bash(timeout 15 tail:*)",
+      "Bash(docker push:*)"
     ]
   },
   "disabledMcpjsonServers": [

@@ -150,6 +150,7 @@ export interface TestResultPayload {
     screenshot?: string; // Base64 error screenshot
   };
   logs: LogEntry[];
+  softErrors?: string[];
 }
 
 export interface TestResultResponse extends BaseMessage {

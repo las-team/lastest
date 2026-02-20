@@ -32,6 +32,7 @@ import { getRunners } from '@/server/actions/runners';
 import { GoogleSheetsSettingsCard } from '@/components/settings/google-sheets-settings-card';
 import { TestingTemplateSelector } from '@/components/settings/testing-template-selector';
 import { AutoApproveToggle } from '@/components/settings/auto-approve-toggle';
+import { ConnectGithubButton, ReconnectGithubLink } from '@/components/settings/connect-github-button';
 
 export default async function SettingsPage({
   searchParams,
@@ -126,14 +127,7 @@ export default async function SettingsPage({
                         <div className="text-sm text-muted-foreground">Connected</div>
                       </div>
                     </div>
-                    <a
-                      href="/api/auth/github"
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="text-sm text-primary hover:underline"
-                    >
-                      Reconnect
-                    </a>
+                    <ReconnectGithubLink />
                   </div>
                   <p className="text-sm text-muted-foreground">
                     Builds will automatically link to open PRs by branch name.
@@ -144,16 +138,7 @@ export default async function SettingsPage({
                   <p className="text-muted-foreground">
                     Connect your GitHub account to link builds with pull requests.
                   </p>
-                  <Button asChild variant="outline">
-                    <a
-                      href="/api/auth/github"
-                      target="_blank"
-                      rel="noopener noreferrer"
-                    >
-                      <Github className="w-5 h-5" />
-                      Connect GitHub
-                    </a>
-                  </Button>
+                  <ConnectGithubButton />
                 </>
               )}
             </CardContent>
@@ -186,7 +171,7 @@ export default async function SettingsPage({
                       </div>
                     </div>
                     <a
-                      href="/api/auth/gitlab"
+                      href="/api/connect/gitlab"
                       target="_blank"
                       rel="noopener noreferrer"
                       className="text-sm text-primary hover:underline"
@@ -205,7 +190,7 @@ export default async function SettingsPage({
                   </p>
                   <Button asChild variant="outline">
                     <a
-                      href="/api/auth/gitlab"
+                      href="/api/connect/gitlab"
                       target="_blank"
                       rel="noopener noreferrer"
                     >

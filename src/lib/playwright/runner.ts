@@ -633,6 +633,7 @@ export class PlaywrightRunner extends EventEmitter {
   private isRunning = false;
   private aborted = false;
   private settings: PlaywrightSettings | null = null;
+  private forceVideoRecording = false;
   private environmentConfig: EnvironmentConfig | null = null;
   private repositoryId: string | null;
   // Setup context: variables passed from build/suite setup to tests
@@ -731,8 +732,10 @@ export class PlaywrightRunner extends EventEmitter {
     onProgress?: (progress: ProgressCallback) => void,
     onResult?: (result: TestRunResult) => void | Promise<void>,
     headlessOverride?: boolean,
-    maxParallelOverride?: number
+    maxParallelOverride?: number,
+    forceVideoRecording?: boolean
   ): Promise<TestRunResult[]> {
+    this.forceVideoRecording = forceVideoRecording ?? false;
     if (this.isRunning) {
       throw new Error('Already running tests');
     }
@@ -863,7 +866,7 @@ export class PlaywrightRunner extends EventEmitter {
       if (this.aborted) break;
 
       // Fill up to maxParallel slots
-      while (running.size < maxParallel && pending.length > 0) {
+      while (running.size < maxParallel && pending.length > 0 && !this.aborted) {
         const test = pending.shift()!;
 
         const promise = this.runSingleTest(test, runId);
@@ -938,7 +941,7 @@ export class PlaywrightRunner extends EventEmitter {
     // Track captured screenshots from within test code (outside try so catch can access)
     const capturedScreenshots: CapturedScreenshot[] = [];
     let stepCounter = 1;
-    let currentStepLabel = `step ${stepCounter}`;
+    let currentStepLabel = `Step ${stepCounter}`;
 
     // Track setup duration (outside try so catch can access)
     let setupDurationMs = 0;
@@ -981,7 +984,7 @@ export class PlaywrightRunner extends EventEmitter {
       }
 
       // Set up video recording if enabled
-      const videoEnabled = this.settings?.enableVideoRecording ?? false;
+      const videoEnabled = this.settings?.enableVideoRecording || this.forceVideoRecording;
       const videoDir = videoEnabled
         ? path.join(STORAGE_DIRS.videos, this.repositoryId || 'default')
         : undefined;
@@ -995,6 +998,8 @@ export class PlaywrightRunner extends EventEmitter {
         ...(videoDir ? { recordVideo: { dir: videoDir, size: this.getViewport() } } : {}),
         ...(this.settings?.acceptAnyCertificate ? { ignoreHTTPSErrors: true } : {}),
         ...(this.settings?.freezeAnimations ? { reducedMotion: 'reduce' } : {}),
+        ...(this.settings?.grantClipboardAccess ? { permissions: ['clipboard-read', 'clipboard-write'] } : {}),
+        ...(this.settings?.acceptDownloads ? { acceptDownloads: true } : {}),
       });
       page = await context.newPage();
 
@@ -1238,10 +1243,10 @@ export class PlaywrightRunner extends EventEmitter {
                 capturedScreenshots.push({ path: publicPath, label: currentStepLabel });
                 // Increment step counter for next screenshot
                 stepCounter++;
-                currentStepLabel = `step ${stepCounter}`;
+                currentStepLabel = `Step ${stepCounter}`;
               } else {
                 // Auto-save screenshot when test code doesn't specify a path
-                const autoFilename = `${runId}-${test.id}-step${stepCounter}.png`;
+                const autoFilename = `${runId}-${test.id}-Step_${stepCounter}.png`;
                 const autoPath = path.join(this.screenshotDir, autoFilename);
                 fs.writeFileSync(autoPath, result);
                 const publicPath = this.repositoryId
@@ -1249,7 +1254,7 @@ export class PlaywrightRunner extends EventEmitter {
                   : `/screenshots/${autoFilename}`;
                 capturedScreenshots.push({ path: publicPath, label: currentStepLabel });
                 stepCounter++;
-                currentStepLabel = `step ${stepCounter}`;
+                currentStepLabel = `Step ${stepCounter}`;
 
               }
               return result;
@@ -1676,6 +1681,10 @@ export class PlaywrightRunner extends EventEmitter {
         }
       }
 
+      // Fix legacy test code that uses non-existent page.keyboard.selectAll()
+      // Older recorder versions generated this; the correct Playwright API is keyboard.press('Control+a')
+      body = body.replace(/page\.keyboard\.selectAll\(\)/g, "page.keyboard.press('Control+a')");
+
       // Wrap standalone await statements (except screenshots) in try/catch so
       // execution continues past locator/action failures to reach screenshot calls
       body = body.replace(/^(\s*)(await\s+.+;)\s*$/gm, (_match, indent, stmt) => {
@@ -1683,9 +1692,79 @@ export class PlaywrightRunner extends EventEmitter {
         return `${indent}try { ${stmt} } catch(__softErr) { stepLogger.warn(typeof __softErr === 'object' && __softErr !== null && 'message' in __softErr ? __softErr.message : String(__softErr)); }`;
       });
 
+      // File upload helper — always available
+      const fileUploadHelper = async (selector: string, filePaths: string | string[]) => {
+        const locator = page.locator(selector);
+        await locator.setInputFiles(Array.isArray(filePaths) ? filePaths : [filePaths]);
+      };
+
+      // Clipboard helper — available when grantClipboardAccess is enabled
+      const clipboardHelper = this.settings?.grantClipboardAccess ? {
+        copy: async (text: string) => {
+          await page.evaluate((t) => navigator.clipboard.writeText(t), text);
+        },
+        paste: async () => {
+          return await page.evaluate(() => navigator.clipboard.readText());
+        },
+        pasteInto: async (selector: string) => {
+          await page.locator(selector).focus();
+          await page.keyboard.press('Control+V');
+        },
+      } : null;
+
+      // Downloads helper — available when acceptDownloads is enabled
+      const dlDir = this.settings?.acceptDownloads
+        ? path.join(STORAGE_DIRS.screenshots, this.repositoryId || 'default', 'downloads')
+        : '';
+      if (dlDir) {
+        fs.mkdirSync(dlDir, { recursive: true });
+      }
+      const dlList: Array<{ suggestedFilename: string; path: string }> = [];
+      const downloadsHelper = this.settings?.acceptDownloads ? {
+        waitForDownload: async (triggerAction: () => Promise<void>) => {
+          const [download] = await Promise.all([
+            page.waitForEvent('download'),
+            triggerAction(),
+          ]);
+          const savePath = path.join(dlDir, download.suggestedFilename());
+          await download.saveAs(savePath);
+          dlList.push({ suggestedFilename: download.suggestedFilename(), path: savePath });
+          return { filename: download.suggestedFilename(), path: savePath };
+        },
+        list: () => dlList,
+      } : null;
+
+      // Network interception helper — available when enableNetworkInterception is enabled
+      const networkHelper = this.settings?.enableNetworkInterception ? {
+        mock: async (urlPattern: string, response: { status?: number; body?: string; contentType?: string; json?: unknown }) => {
+          await page.route(urlPattern, async (route) => {
+            await route.fulfill({
+              status: response.status ?? 200,
+              contentType: response.contentType ?? (response.json ? 'application/json' : 'text/plain'),
+              body: response.json ? JSON.stringify(response.json) : (response.body ?? ''),
+            });
+          });
+        },
+        block: async (urlPattern: string) => {
+          await page.route(urlPattern, (route) => route.abort());
+        },
+        passthrough: async (urlPattern: string) => {
+          await page.unroute(urlPattern);
+        },
+        capture: (urlPattern: string) => {
+          const captured: Array<{ url: string; method: string; postData?: string }> = [];
+          page.on('request', (req) => {
+            if (new RegExp(urlPattern).test(req.url())) {
+              captured.push({ url: req.url(), method: req.method(), postData: req.postData() ?? undefined });
+            }
+          });
+          return { requests: captured };
+        },
+      } : null;
+
       const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
-      const testFn = new AsyncFunction('page', 'baseUrl', 'screenshotPath', 'stepLogger', 'expect', 'appState', 'locateWithFallback', body);
-      await testFn(page, baseUrl, screenshotPath, stepLogger, expectFn, appStateFn, statsLocateWithFallback);
+      const testFn = new AsyncFunction('page', 'baseUrl', 'screenshotPath', 'stepLogger', 'expect', 'appState', 'locateWithFallback', 'fileUpload', 'clipboard', 'downloads', 'network', body);
+      await testFn(page, baseUrl, screenshotPath, stepLogger, expectFn, appStateFn, statsLocateWithFallback, fileUploadHelper, clipboardHelper, downloadsHelper, networkHelper);
       return softErrors;
     }
 

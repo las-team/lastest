@@ -23,9 +23,9 @@ import { createAndRunBuild } from '@/server/actions/builds';
 import { getCurrentSession } from '@/lib/auth';
 import { verifyBearerToken } from '@/lib/auth/api-key';
 
-// Helper to verify API auth (Clerk session or Bearer token)
+// Helper to verify API auth (session or Bearer token)
 async function verifyAuth(request: NextRequest) {
-  // Try Clerk session first
+  // Try session first
   const session = await getCurrentSession();
   if (session) {
     return session;

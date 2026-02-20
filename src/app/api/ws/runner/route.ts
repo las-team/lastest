@@ -3,23 +3,27 @@
  *
  * Note: Next.js App Router doesn't natively support WebSocket upgrades.
  * This endpoint provides a fallback HTTP API for runner communication.
- * For full WebSocket support, use a custom server or deploy with a
- * WebSocket-capable runtime (e.g., Node.js server, not Vercel serverless).
  *
- * In production, consider using:
- * - A separate WebSocket server
- * - Socket.io with custom server
- * - Pusher/Ably for managed WebSocket
+ * Command queue and results are persisted in SQLite (runner_commands /
+ * runner_command_results tables).  In-memory Maps are used only for
+ * duplicate-session detection and real-time recording sessions.
  */
 
 import { NextRequest, NextResponse } from 'next/server';
 import { validateRunnerToken, updateRunnerStatus, markStaleRunnersOffline } from '@/server/actions/runners';
-// runnerRegistry is used for WebSocket mode (not polling mode)
-// import { runnerRegistry } from '@/lib/ws/runner-registry';
 import type { Message, HeartbeatMessage, TestResultResponse, ScreenshotUploadResponse, RecordingEventResponse, RecordingStoppedResponse } from '@/lib/ws/protocol';
 import fs from 'fs/promises';
 import path from 'path';
 import { STORAGE_DIRS } from '@/lib/storage/paths';
+import {
+  claimPendingCommands,
+  completeRunnerCommand,
+  insertCommandResult,
+  cleanupOldCommands,
+  timeoutStaleCommands,
+  createRunnerCommand,
+  cancelPendingCommandsByTestRun,
+} from '@/lib/db/queries';
 
 // ============================================
 // Security Validation Functions
@@ -40,7 +44,7 @@ function sanitizeFilename(filename: string): string {
   // Remove any .. sequences
   safe = safe.replace(/\.\./g, '');
   // Only allow safe characters
-  safe = safe.replace(/[^a-zA-Z0-9._-]/g, '');
+  safe = safe.replace(/[^a-zA-Z0-9_.-]/g, '');
   // Validate extension and length
   if (!/\.(png|jpg|jpeg)$/i.test(safe) || safe.length > 255 || !safe) {
     throw new Error('Invalid filename');
@@ -70,8 +74,7 @@ function validateScreenshotSize(base64Data: string): void {
   }
 }
 
-// Track active polling sessions by runner ID
-// Use globalThis to ensure shared state across Next.js module contexts
+// Track active polling sessions by runner ID (in-memory is fine — duplicate detection only)
 const globalSessionState = globalThis as typeof globalThis & {
   __runnerActiveSessions?: Map<string, { lastPoll: number; sessionId: string }>;
 };
@@ -80,9 +83,8 @@ if (!globalSessionState.__runnerActiveSessions) {
 }
 const activeRunnerSessions = globalSessionState.__runnerActiveSessions;
 
-// Session timeout in milliseconds (90 seconds = 3x heartbeat interval)
-// Allows for 2 missed heartbeats before marking offline
-const SESSION_TIMEOUT_MS = 90_000;
+// Session timeout in milliseconds (15 seconds = 5x heartbeat interval at 3s)
+const SESSION_TIMEOUT_MS = 15_000;
 
 // Cleanup interval (60 seconds)
 const CLEANUP_INTERVAL_MS = 60_000;
@@ -104,7 +106,7 @@ function ensureInitialized() {
     console.error('[Startup] Failed to mark stale runners offline:', error);
   });
 
-  // Start cleanup interval to remove stale sessions and mark runners offline
+  // Start cleanup interval to remove stale sessions, mark runners offline, and GC old commands
   setInterval(async () => {
     const now = Date.now();
     for (const [runnerId, session] of activeRunnerSessions) {
@@ -123,6 +125,23 @@ function ensureInitialized() {
       await markStaleRunnersOffline(SESSION_TIMEOUT_MS);
     } catch (error) {
       console.error('[Cleanup] Failed to mark stale runners offline:', error);
+    }
+
+    // Garbage collection: delete old completed commands (24h)
+    try {
+      const cleaned = await cleanupOldCommands(24 * 60 * 60 * 1000);
+      if (cleaned > 0) {
+        console.log(`[GC] Cleaned up ${cleaned} old runner commands`);
+      }
+    } catch (error) {
+      console.error('[GC] Failed to clean old commands:', error);
+    }
+
+    // Timeout stale commands: pending > 30min, claimed > 10min
+    try {
+      await timeoutStaleCommands(30 * 60 * 1000, 10 * 60 * 1000);
+    } catch (error) {
+      console.error('[GC] Failed to timeout stale commands:', error);
     }
   }, CLEANUP_INTERVAL_MS);
 }
@@ -192,21 +211,39 @@ export async function POST(request: NextRequest) {
         }
         await updateRunnerStatus(runner.id, status);
 
-        // Return any pending commands for this runner
-        const pendingCommands = getPendingCommands(runner.id);
-        if (pendingCommands.length > 0) {
-          console.log(`[Runner ${runner.id}] Returning ${pendingCommands.length} pending commands:`, pendingCommands.map(c => c.type));
+        // Claim pending commands from DB
+        const claimed = await claimPendingCommands(runner.id);
+        // Reconstruct Message objects from stored commands
+        const commands: Message[] = claimed.map(cmd => ({
+          id: cmd.id,
+          type: cmd.type,
+          timestamp: cmd.createdAt ? cmd.createdAt.getTime() : Date.now(),
+          payload: cmd.payload,
+        } as unknown as Message));
+
+        if (commands.length > 0) {
+          console.log(`[Runner ${runner.id}] Returning ${commands.length} claimed commands:`, commands.map(c => c.type));
         }
         return NextResponse.json({
           ok: true,
-          commands: pendingCommands,
+          commands,
         });
       }
 
       case 'response:test_result': {
         const result = message as TestResultResponse;
-        // Store test result - will be handled by the test runner
-        storeTestResult(runner.id, result);
+        const commandId = result.payload.correlationId;
+
+        // Store result in DB and mark command completed
+        const resultStatus = result.payload.status === 'passed' ? 'completed' : 'failed';
+        await insertCommandResult({
+          commandId,
+          runnerId: runner.id,
+          type: 'response:test_result',
+          payload: result.payload as unknown as Record<string, unknown>,
+        });
+        await completeRunnerCommand(commandId, resultStatus as 'completed' | 'failed');
+
         return NextResponse.json({ ok: true });
       }
 
@@ -223,12 +260,28 @@ export async function POST(request: NextRequest) {
 
           console.log(`[Screenshot] Received screenshot from runner ${runner.id}: ${safeFilename}`);
 
-          // Save to disk immediately (to repository folder if provided)
+          // Save to disk immediately
           const savedPath = await saveScreenshotToDisk(payload.data, safeFilename, safeRepoId);
           console.log(`[Screenshot] Saved to disk: ${savedPath}`);
 
-          // Also store in memory for backward compatibility (with sanitized data)
-          storeScreenshot(runner.id, message);
+          // Store metadata in DB (no base64 data — just path info)
+          const commandId = payload.correlationId;
+          if (commandId) {
+            await insertCommandResult({
+              commandId,
+              runnerId: runner.id,
+              type: 'response:screenshot',
+              payload: {
+                filename: safeFilename,
+                path: savedPath,
+                repositoryId: safeRepoId,
+                testRunId: payload.testRunId,
+                width: payload.width,
+                height: payload.height,
+                capturedAt: payload.capturedAt,
+              },
+            });
+          }
         } catch (error) {
           console.error(`[Screenshot] Validation or save failed:`, error);
           return NextResponse.json({ error: 'Screenshot upload failed' }, { status: 400 });
@@ -248,17 +301,17 @@ export async function POST(request: NextRequest) {
 
       case 'response:recording_event': {
         const recordingMsg = message as RecordingEventResponse;
-        const { sessionId, events } = recordingMsg.payload;
+        const { sessionId: recSessionId, events } = recordingMsg.payload;
 
         // Find the remote recording session
-        const session = findRemoteSessionBySessionId(sessionId);
+        const session = findRemoteSessionBySessionId(recSessionId);
         if (session) {
           // Append events to the session
           for (const event of events) {
             session.events.push(event as RemoteRecordingEvent);
           }
         } else {
-          console.warn(`[Recording] Received events for unknown session: ${sessionId}`);
+          console.warn(`[Recording] Received events for unknown session: ${recSessionId}`);
         }
 
         return NextResponse.json({ ok: true });
@@ -266,12 +319,12 @@ export async function POST(request: NextRequest) {
 
       case 'response:recording_stopped': {
         const stoppedMsg = message as RecordingStoppedResponse;
-        const { sessionId } = stoppedMsg.payload;
+        const { sessionId: stoppedSessionId } = stoppedMsg.payload;
 
-        const session = findRemoteSessionBySessionId(sessionId);
+        const session = findRemoteSessionBySessionId(stoppedSessionId);
         if (session) {
           session.isRecording = false;
-          console.log(`[Recording] Session ${sessionId} stopped, ${session.events.length} events`);
+          console.log(`[Recording] Session ${stoppedSessionId} stopped, ${session.events.length} events`);
         }
 
         return NextResponse.json({ ok: true });
@@ -330,17 +383,24 @@ export async function GET(request: NextRequest) {
       sessionId,
     });
 
-    // Note: Runner status is only set to 'online' when heartbeat is received (POST)
-    // This ensures the runner is actually polling and not just connecting once
+    // Set runner to 'online' immediately on connect so stale 'busy' status
+    // from a previous crashed session doesn't block task assignment
+    await updateRunnerStatus(runner.id, 'online');
 
-    // Return runner info and any pending commands
-    const pendingCommands = getPendingCommands(runner.id);
+    // Claim any pending commands from DB
+    const claimed = await claimPendingCommands(runner.id);
+    const commands: Message[] = claimed.map(cmd => ({
+      id: cmd.id,
+      type: cmd.type,
+      timestamp: cmd.createdAt ? cmd.createdAt.getTime() : Date.now(),
+      payload: cmd.payload,
+    } as unknown as Message));
 
     return NextResponse.json({
       runnerId: runner.id,
       teamId: runner.teamId,
       capabilities: runner.capabilities,
-      commands: pendingCommands,
+      commands,
       sessionId,
     });
   } catch (error) {
@@ -351,33 +411,73 @@ export async function GET(request: NextRequest) {
   }
 }
 
-// In-memory command queue (for polling mode)
-// In production, use Redis or database
-// Use globalThis to ensure shared state across Next.js module contexts
-const globalState = globalThis as typeof globalThis & {
-  __runnerPendingCommands?: Map<string, Message[]>;
-  __runnerTestResults?: Map<string, TestResultResponse[]>;
-  __runnerScreenshots?: Map<string, Message[]>;
+/**
+ * Save screenshot directly to disk from base64 data.
+ */
+async function saveScreenshotToDisk(base64Data: string, filename: string, repositoryId?: string): Promise<string> {
+  const baseDir = STORAGE_DIRS.screenshots;
+  const dir = repositoryId ? path.join(baseDir, repositoryId) : baseDir;
+
+  // Ensure directory exists
+  await fs.mkdir(dir, { recursive: true });
+
+  const filePath = path.join(dir, filename);
+  const buffer = Buffer.from(base64Data, 'base64');
+  await fs.writeFile(filePath, buffer);
+
+  return repositoryId ? `/screenshots/${repositoryId}/${filename}` : `/screenshots/${filename}`;
+}
+
+// ============================================
+// DB-backed command queue exports
+// ============================================
+
+/**
+ * Queue a command for a runner via DB (called by executor and server actions).
+ */
+export async function queueCommandToDB(runnerId: string, command: Message): Promise<void> {
+  console.log(`[queueCommandToDB] Queuing ${command.type} for runner ${runnerId}`);
+  const payload = 'payload' in command ? (command as unknown as { payload: Record<string, unknown> }).payload : {};
+  await createRunnerCommand({
+    id: command.id,
+    runnerId,
+    type: command.type,
+    status: 'pending',
+    payload,
+    testId: (payload as Record<string, unknown>).testId as string | undefined,
+    testRunId: (payload as Record<string, unknown>).testRunId as string | undefined,
+  });
+}
+
+/**
+ * Queue a cancel command for a runner via DB.
+ */
+export async function queueCancelCommandToDB(runnerId: string, testRunId: string, reason: string): Promise<void> {
+  const command: Message = {
+    id: crypto.randomUUID(),
+    type: 'command:cancel_test',
+    timestamp: Date.now(),
+    payload: {
+      testRunId,
+      reason,
+    },
+  } as Message;
+  await queueCommandToDB(runnerId, command);
+  // Also cancel any unclaimed run commands for this test run
+  await cancelPendingCommandsByTestRun(testRunId);
+}
+
+// ============================================
+// Remote Recording Session Management (in-memory — real-time, acceptable)
+// ============================================
+
+const globalRecordingState = globalThis as typeof globalThis & {
   __remoteRecordingSessions?: Map<string, RemoteRecordingSession>;
 };
-
-if (!globalState.__runnerPendingCommands) {
-  globalState.__runnerPendingCommands = new Map<string, Message[]>();
+if (!globalRecordingState.__remoteRecordingSessions) {
+  globalRecordingState.__remoteRecordingSessions = new Map<string, RemoteRecordingSession>();
 }
-if (!globalState.__runnerTestResults) {
-  globalState.__runnerTestResults = new Map<string, TestResultResponse[]>();
-}
-if (!globalState.__runnerScreenshots) {
-  globalState.__runnerScreenshots = new Map<string, Message[]>();
-}
-if (!globalState.__remoteRecordingSessions) {
-  globalState.__remoteRecordingSessions = new Map<string, RemoteRecordingSession>();
-}
-
-const pendingCommandsMap = globalState.__runnerPendingCommands;
-const testResultsMap = globalState.__runnerTestResults;
-const screenshotsMap = globalState.__runnerScreenshots;
-const remoteRecordingSessionsMap = globalState.__remoteRecordingSessions;
+const remoteRecordingSessionsMap = globalRecordingState.__remoteRecordingSessions;
 
 // Remote recording session state
 export interface RemoteRecordingEvent {
@@ -405,95 +505,6 @@ export interface RemoteRecordingSession {
   startedAt: Date;
   selectorPriority: Array<{ type: string; enabled: boolean; priority: number }>;
 }
-
-function getPendingCommands(runnerId: string): Message[] {
-  const commands = pendingCommandsMap.get(runnerId) || [];
-  pendingCommandsMap.set(runnerId, []); // Clear after fetching
-  return commands;
-}
-
-function storeTestResult(runnerId: string, result: TestResultResponse) {
-  const results = testResultsMap.get(runnerId) || [];
-  results.push(result);
-  testResultsMap.set(runnerId, results);
-}
-
-function storeScreenshot(runnerId: string, screenshot: Message) {
-  const screenshots = screenshotsMap.get(runnerId) || [];
-  screenshots.push(screenshot);
-  screenshotsMap.set(runnerId, screenshots);
-  console.log(`[storeScreenshot] Stored screenshot for runner ${runnerId}, total: ${screenshots.length}`);
-}
-
-/**
- * Save screenshot directly to disk from base64 data.
- * This ensures screenshots are persisted even if in-memory state is lost.
- */
-async function saveScreenshotToDisk(base64Data: string, filename: string, repositoryId?: string): Promise<string> {
-  const baseDir = STORAGE_DIRS.screenshots;
-  const dir = repositoryId ? path.join(baseDir, repositoryId) : baseDir;
-
-  // Ensure directory exists
-  await fs.mkdir(dir, { recursive: true });
-
-  const filePath = path.join(dir, filename);
-  const buffer = Buffer.from(base64Data, 'base64');
-  await fs.writeFile(filePath, buffer);
-
-  return repositoryId ? `/screenshots/${repositoryId}/${filename}` : `/screenshots/${filename}`;
-}
-
-/**
- * Queue a command for a runner (called by test runner)
- */
-export function queueCommand(runnerId: string, command: Message): void {
-  console.log(`[queueCommand] Queuing ${command.type} for runner ${runnerId}`);
-  const commands = pendingCommandsMap.get(runnerId) || [];
-  commands.push(command);
-  pendingCommandsMap.set(runnerId, commands);
-  console.log(`[queueCommand] Runner ${runnerId} now has ${commands.length} pending commands`);
-}
-
-/**
- * Queue a cancel command for a runner
- */
-export function queueCancelCommand(runnerId: string, testRunId: string, reason: string): void {
-  const command: Message = {
-    id: crypto.randomUUID(),
-    type: 'command:cancel_test',
-    timestamp: Date.now(),
-    payload: {
-      testRunId,
-      reason,
-    },
-  } as Message;
-  queueCommand(runnerId, command);
-}
-
-/**
- * Get test results for a runner (called by test runner)
- */
-export function getTestResults(runnerId: string): TestResultResponse[] {
-  const results = testResultsMap.get(runnerId) || [];
-  testResultsMap.set(runnerId, []); // Clear after fetching
-  return results;
-}
-
-/**
- * Get screenshots for a runner (called by test runner)
- */
-export function getScreenshots(runnerId: string): Message[] {
-  const screenshots = screenshotsMap.get(runnerId) || [];
-  if (screenshots.length > 0) {
-    console.log(`[getScreenshots] Retrieved ${screenshots.length} screenshots for runner ${runnerId}`);
-  }
-  screenshotsMap.set(runnerId, []); // Clear after fetching
-  return screenshots;
-}
-
-// ============================================
-// Remote Recording Session Management
-// ============================================
 
 function findRemoteSessionBySessionId(sessionId: string): RemoteRecordingSession | undefined {
   for (const session of remoteRecordingSessionsMap.values()) {

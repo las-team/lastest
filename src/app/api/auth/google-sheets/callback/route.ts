@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { auth } from '@clerk/nextjs/server';
 import { cookies } from 'next/headers';
+import { getCurrentSession } from '@/lib/auth';
 import * as queries from '@/lib/db/queries';
 import { getPublicUrl } from '@/lib/utils';
 
@@ -91,14 +91,14 @@ export async function GET(request: NextRequest) {
     return NextResponse.redirect(new URL('/settings?error=google_sheets_csrf', getPublicUrl(request)));
   }
 
-  // Get current user via Clerk
-  const { userId } = await auth();
-  if (!userId) {
+  // Get current user via BetterAuth session
+  const session = await getCurrentSession();
+  if (!session) {
     return NextResponse.redirect(new URL('/login', getPublicUrl(request)));
   }
 
-  const currentUser = await queries.getUserByClerkId(userId);
-  if (!currentUser || !currentUser.teamId) {
+  const currentUser = session.user;
+  if (!currentUser.teamId) {
     return NextResponse.redirect(new URL('/login', getPublicUrl(request)));
   }
 

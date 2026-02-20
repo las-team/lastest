@@ -193,9 +193,9 @@ export async function stopRunner(runnerId: string): Promise<{ success: boolean }
   }
 
   // Import dynamically to avoid circular dependency
-  const { queueCommand } = await import('@/app/api/ws/runner/route');
+  const { queueCommandToDB } = await import('@/app/api/ws/runner/route');
 
-  queueCommand(runnerId, {
+  await queueCommandToDB(runnerId, {
     id: crypto.randomUUID(),
     type: 'command:shutdown',
     timestamp: Date.now(),
