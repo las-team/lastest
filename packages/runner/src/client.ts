@@ -57,6 +57,8 @@ export class RunnerClient {
   private runner: TestRunner;
   private recorder: RemoteRecorder;
   private sessionId?: string;
+  private commandQueue: Message[] = [];
+  private processingCommands = false;
 
   constructor(options: RunnerClientOptions) {
     this.token = options.token;
@@ -152,11 +154,10 @@ export class RunnerClient {
       console.log(`Session ID: ${data.sessionId}`);
       console.log(`Capabilities: ${data.capabilities?.join(', ') || 'run, record'}`);
 
-      // Process any pending commands
+      // Enqueue any pending commands
       if (data.commands && data.commands.length > 0) {
-        for (const cmd of data.commands) {
-          await this.handleCommand(cmd);
-        }
+        this.commandQueue.push(...data.commands);
+        this.processCommandQueue();
       }
 
       return true;
@@ -202,12 +203,11 @@ export class RunnerClient {
         if (response.ok) {
           const data = (await response.json()) as HeartbeatResponse;
 
-          // Process any pending commands
+          // Enqueue commands for sequential processing (non-blocking so heartbeats continue)
           if (data.commands && data.commands.length > 0) {
             console.log(`[Heartbeat] Received ${data.commands.length} commands:`, data.commands.map((c: Message) => c.type));
-            for (const cmd of data.commands) {
-              await this.handleCommand(cmd);
-            }
+            this.commandQueue.push(...data.commands);
+            this.processCommandQueue();
           }
         } else {
           const text = await response.text();
@@ -220,6 +220,25 @@ export class RunnerClient {
       // Wait for next poll
       await new Promise((resolve) => setTimeout(resolve, this.pollInterval));
     }
+  }
+
+  /**
+   * Process queued commands sequentially without blocking the heartbeat loop.
+   */
+  private async processCommandQueue(): Promise<void> {
+    if (this.processingCommands) return; // Already processing
+    this.processingCommands = true;
+
+    while (this.commandQueue.length > 0) {
+      const cmd = this.commandQueue.shift()!;
+      try {
+        await this.handleCommand(cmd);
+      } catch (error) {
+        console.error(`Command ${cmd.type} failed:`, error);
+      }
+    }
+
+    this.processingCommands = false;
   }
 
   private async handleCommand(message: Message): Promise<void> {
