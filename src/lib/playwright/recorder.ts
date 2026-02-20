@@ -1266,7 +1266,7 @@ export class PlaywrightRecorder extends EventEmitter {
       `    if (action === 'fill' && coords) {`,
       `      console.log('Falling back to coordinate fill at', coords.x, coords.y);`,
       `      await page.mouse.click(coords.x, coords.y);`,
-      `      await page.keyboard.selectAll();`,
+      `      await page.keyboard.press('Control+a');`,
       `      await page.keyboard.type(value || '');`,
       `      return;`,
       `    }`,
@@ -1403,7 +1403,7 @@ export class PlaywrightRecorder extends EventEmitter {
             } else {
               lines.push(`  // Coordinate-only fill (no selectors found) - click to focus then type`);
               lines.push(`  await page.mouse.click(${coordinates.x}, ${coordinates.y});`);
-              lines.push(`  await page.keyboard.selectAll();`);
+              lines.push(`  await page.keyboard.press('Control+a');`);
               lines.push(`  await page.keyboard.type('${escStr(value || '')}');`);
             }
           } else {

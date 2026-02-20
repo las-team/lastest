@@ -252,20 +252,47 @@ export class TestRunner {
       }
     }
 
-    // Create stepLogger
+    // Wrap standalone await statements (except screenshots) in try/catch so
+    // execution continues past locator/action failures to reach screenshot calls
+    body = body.replace(/^(\s*)(await\s+.+;)\s*$/gm, (_match: string, indent: string, stmt: string) => {
+      if (stmt.includes('.screenshot(')) return `${indent}${stmt}`;
+      return `${indent}try { ${stmt} } catch(__softErr) { stepLogger.log(typeof __softErr === 'object' && __softErr !== null && 'message' in __softErr ? __softErr.message : String(__softErr)); }`;
+    });
+
+    // Create stepLogger (matches local runner signature)
     const stepLogger = {
       log: (msg: string) => {
         this.log('info', `Step: ${msg}`);
       },
+      warn: (msg: string) => {
+        this.log('warn', `[WARN] ${msg}`);
+      },
+      softExpect: async (fn: () => Promise<void>, label?: string) => {
+        try {
+          await fn();
+        } catch (e: unknown) {
+          const msg = label || (e instanceof Error ? e.message : String(e));
+          this.log('warn', `[SOFT FAIL] ${msg}`);
+        }
+      },
+      softAction: async (fn: () => Promise<void>, label?: string) => {
+        try {
+          await fn();
+        } catch (e: unknown) {
+          const msg = label || (e instanceof Error ? e.message : String(e));
+          this.log('warn', `[SOFT FAIL] ${msg}`);
+        }
+      },
     };
 
-    // Create locateWithFallback helper
+    // Create locateWithFallback helper (matches local runner signature)
     const locateWithFallback = async (
       pg: Page,
       selectors: Array<{ type: string; value: string }>,
       action: string,
       value?: string | null,
-      coords?: { x: number; y: number } | null
+      coords?: { x: number; y: number } | null,
+      options?: Record<string, unknown> | null
     ) => {
       const validSelectors = selectors.filter(
         (s) => s.value && s.value.trim() && !s.value.includes('undefined')
@@ -292,7 +319,7 @@ export class TestRunner {
           await target.waitFor({ timeout: 3000 });
 
           if (action === 'locate') return target;
-          if (action === 'click') await target.click();
+          if (action === 'click') await target.click(options || {});
           else if (action === 'fill') await target.fill(value || '');
           else if (action === 'selectOption') await target.selectOption(value || '');
 
@@ -305,7 +332,16 @@ export class TestRunner {
       // Coordinate fallback for clicks
       if (action === 'click' && coords) {
         this.log('info', `Falling back to coordinate click at (${coords.x}, ${coords.y})`);
+        await pg.mouse.click(coords.x, coords.y, options || {});
+        return;
+      }
+
+      // Coordinate fallback for fill - click to focus then type
+      if (action === 'fill' && coords) {
+        this.log('info', `Falling back to coordinate fill at (${coords.x}, ${coords.y})`);
         await pg.mouse.click(coords.x, coords.y);
+        await pg.keyboard.press('Control+a');
+        await pg.keyboard.type(value || '');
         return;
       }
 
@@ -323,10 +359,8 @@ export class TestRunner {
     const pageWithScreenshot = page as Page & { screenshot: typeof originalScreenshot };
     pageWithScreenshot.screenshot = async (options?: Parameters<typeof originalScreenshot>[0]) => {
       const result = await originalScreenshot(options);
-      if (options?.path) {
-        const label = `step${screenshotStep++}`;
-        await captureScreenshot(label);
-      }
+      const label = `step ${screenshotStep++}`;
+      await captureScreenshot(label);
       return result;
     };
 
