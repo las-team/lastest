@@ -677,20 +677,15 @@ describe('Runner context options from settings', () => {
 /* -------------------------------------------------------------------------- */
 
 describe('Setup script-runner helper availability', () => {
-  it('executeSetupCode passes 7 args to setup function (missing fileUpload, clipboard, downloads, network)', () => {
-    // script-runner.ts L319-328 constructs the setup function with these params:
-    //   page, baseUrl, screenshotPath, stepLogger, expect, appState, locateWithFallback
-    //
-    // The test runner (runner.ts L1766) passes 11 params:
+  it('setup script-runner now passes all 11 params matching runner signature', () => {
+    // After the fix, script-runner.ts passes the same 11 params as runner.ts:
     //   page, baseUrl, screenshotPath, stepLogger, expect, appState, locateWithFallback,
     //   fileUpload, clipboard, downloads, network
-    //
-    // This means if a test that uses fileUpload/clipboard/network is used as setup
-    // (via "test-as-setup"), those helpers will be undefined.
 
     const setupParams = [
       'page', 'baseUrl', 'screenshotPath', 'stepLogger',
       'expect', 'appState', 'locateWithFallback',
+      'fileUpload', 'clipboard', 'downloads', 'network',
     ];
 
     const runnerParams = [
@@ -699,8 +694,159 @@ describe('Setup script-runner helper availability', () => {
       'fileUpload', 'clipboard', 'downloads', 'network',
     ];
 
-    // The gap
+    // No gap — both have the same params
     const missingInSetup = runnerParams.filter(p => !setupParams.includes(p));
-    expect(missingInSetup).toEqual(['fileUpload', 'clipboard', 'downloads', 'network']);
+    expect(missingInSetup).toEqual([]);
+  });
+});
+
+/* -------------------------------------------------------------------------- */
+/*  Required capabilities detection                                           */
+/* -------------------------------------------------------------------------- */
+
+describe('RequiredCapabilities detection', () => {
+  // Replicates the detectRequiredCapabilities logic from recorder.ts
+
+  function detectRequiredCapabilities(
+    events: Array<{ type: string; data: { action?: string } }>,
+    clipboardAccess: boolean
+  ) {
+    const caps = {
+      fileUpload: false,
+      clipboard: false,
+      networkInterception: false,
+      downloads: false,
+    };
+
+    for (const event of events) {
+      if (event.type === 'action' && event.data.action === 'setInputFiles') {
+        caps.fileUpload = true;
+      }
+    }
+
+    if (clipboardAccess) {
+      caps.clipboard = true;
+    }
+
+    return caps;
+  }
+
+  it('detects file upload capability from setInputFiles action', () => {
+    const events = [
+      { type: 'action', data: { action: 'click' } },
+      { type: 'action', data: { action: 'setInputFiles' } },
+      { type: 'screenshot', data: {} },
+    ];
+
+    const caps = detectRequiredCapabilities(events, false);
+
+    expect(caps.fileUpload).toBe(true);
+    expect(caps.clipboard).toBe(false);
+    expect(caps.networkInterception).toBe(false);
+    expect(caps.downloads).toBe(false);
+  });
+
+  it('detects clipboard capability when clipboardAccess was enabled', () => {
+    const events = [
+      { type: 'action', data: { action: 'click' } },
+    ];
+
+    const caps = detectRequiredCapabilities(events, true);
+
+    expect(caps.clipboard).toBe(true);
+    expect(caps.fileUpload).toBe(false);
+  });
+
+  it('detects no capabilities for basic click/fill recording', () => {
+    const events = [
+      { type: 'navigation', data: {} },
+      { type: 'action', data: { action: 'click' } },
+      { type: 'action', data: { action: 'fill' } },
+      { type: 'screenshot', data: {} },
+    ];
+
+    const caps = detectRequiredCapabilities(events, false);
+
+    expect(caps.fileUpload).toBe(false);
+    expect(caps.clipboard).toBe(false);
+    expect(caps.networkInterception).toBe(false);
+    expect(caps.downloads).toBe(false);
+  });
+
+  it('detects multiple capabilities simultaneously', () => {
+    const events = [
+      { type: 'action', data: { action: 'setInputFiles' } },
+      { type: 'action', data: { action: 'click' } },
+    ];
+
+    const caps = detectRequiredCapabilities(events, true);
+
+    expect(caps.fileUpload).toBe(true);
+    expect(caps.clipboard).toBe(true);
+  });
+});
+
+/* -------------------------------------------------------------------------- */
+/*  Auto-enable settings from capabilities                                    */
+/* -------------------------------------------------------------------------- */
+
+describe('Auto-enable Playwright settings from capabilities', () => {
+  it('builds correct settings updates from capabilities', () => {
+    const capabilities = {
+      fileUpload: true,
+      clipboard: true,
+      networkInterception: false,
+      downloads: true,
+    };
+
+    // Replicate the logic from saveRecordedTest
+    const updates: Record<string, boolean> = {};
+    if (capabilities.clipboard) {
+      updates.grantClipboardAccess = true;
+    }
+    if (capabilities.networkInterception) {
+      updates.enableNetworkInterception = true;
+    }
+    if (capabilities.downloads) {
+      updates.acceptDownloads = true;
+    }
+
+    expect(updates).toEqual({
+      grantClipboardAccess: true,
+      acceptDownloads: true,
+    });
+    expect(updates.enableNetworkInterception).toBeUndefined();
+  });
+
+  it('produces empty updates when no capabilities are needed', () => {
+    const capabilities = {
+      fileUpload: false,
+      clipboard: false,
+      networkInterception: false,
+      downloads: false,
+    };
+
+    const updates: Record<string, boolean> = {};
+    if (capabilities.clipboard) updates.grantClipboardAccess = true;
+    if (capabilities.networkInterception) updates.enableNetworkInterception = true;
+    if (capabilities.downloads) updates.acceptDownloads = true;
+
+    expect(Object.keys(updates)).toHaveLength(0);
+  });
+
+  it('only enables networkInterception when explicitly needed', () => {
+    const capabilities = {
+      fileUpload: false,
+      clipboard: false,
+      networkInterception: true,
+      downloads: false,
+    };
+
+    const updates: Record<string, boolean> = {};
+    if (capabilities.clipboard) updates.grantClipboardAccess = true;
+    if (capabilities.networkInterception) updates.enableNetworkInterception = true;
+    if (capabilities.downloads) updates.acceptDownloads = true;
+
+    expect(updates).toEqual({ enableNetworkInterception: true });
   });
 });

@@ -289,6 +289,7 @@ export async function getRecordingStatus(repositoryId?: string | null, sinceSequ
     lastCompletedSession: lastCompleted ? {
       id: lastCompleted.id,
       generatedCode: lastCompleted.generatedCode,
+      requiredCapabilities: lastCompleted.requiredCapabilities,
     } : null,
   };
 }
@@ -313,6 +314,7 @@ export async function saveRecordedTest(data: {
   targetUrl: string;
   code: string;
   repositoryId?: string | null;
+  requiredCapabilities?: { fileUpload?: boolean; clipboard?: boolean; networkInterception?: boolean; downloads?: boolean } | null;
 }) {
   if (data.repositoryId) await requireRepoAccess(data.repositoryId);
   else await requireTeamAccess();
@@ -322,7 +324,29 @@ export async function saveRecordedTest(data: {
     targetUrl: data.targetUrl,
     code: data.code,
     repositoryId: data.repositoryId ?? null,
+    requiredCapabilities: data.requiredCapabilities ?? undefined,
   });
+
+  // Auto-enable Playwright settings for detected capabilities
+  if (data.requiredCapabilities && data.repositoryId) {
+    const { upsertPlaywrightSettings } = await import('@/lib/db/queries');
+    const updates: Record<string, boolean> = {};
+    if (data.requiredCapabilities.fileUpload) {
+      // fileUpload always works (no setting needed), but it's good to track
+    }
+    if (data.requiredCapabilities.clipboard) {
+      updates.grantClipboardAccess = true;
+    }
+    if (data.requiredCapabilities.networkInterception) {
+      updates.enableNetworkInterception = true;
+    }
+    if (data.requiredCapabilities.downloads) {
+      updates.acceptDownloads = true;
+    }
+    if (Object.keys(updates).length > 0) {
+      await upsertPlaywrightSettings(data.repositoryId, updates);
+    }
+  }
 
   revalidatePath('/tests');
   revalidatePath('/');
