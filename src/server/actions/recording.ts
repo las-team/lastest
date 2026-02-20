@@ -789,6 +789,12 @@ function generateCodeFromRemoteEvents(
           lines.push(`  await page.keyboard.up('${mod}');`);
         }
       }
+    } else if (event.type === 'keydown' && event.data.key) {
+      const escapedKey = (event.data.key as string).replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+      lines.push(`  await page.keyboard.down('${escapedKey}');`);
+    } else if (event.type === 'keyup' && event.data.key) {
+      const escapedKey = (event.data.key as string).replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+      lines.push(`  await page.keyboard.up('${escapedKey}');`);
     } else if (event.type === 'scroll') {
       const deltaX = (event.data.deltaX as number) || 0;
       const deltaY = (event.data.deltaY as number) || 0;

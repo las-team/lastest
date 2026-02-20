@@ -173,6 +173,10 @@ function getEventDescription(event: RecordingEvent): string {
       return 'Hovering...';
     case 'keypress':
       return `${modPrefix}Press "${event.data.key || 'key'}"`;
+    case 'keydown':
+      return `Hold "${event.data.key || 'key'}"`;
+    case 'keyup':
+      return `Release "${event.data.key || 'key'}"`;
     default:
       return event.type;
   }
@@ -189,7 +193,7 @@ interface VerificationStatus {
   lastChecked?: number;
 }
 
-type KeyboardModifier = 'Alt' | 'Control' | 'Shift' | 'Meta' | ' ';
+type KeyboardModifier = 'Alt' | 'Control' | 'Shift' | 'Meta';
 
 interface RecordingEvent {
   type: string;
@@ -975,6 +979,8 @@ export function RecordingClient({
                             {event.type === 'mouse-up' && <MousePointerClick className="h-3 w-3 text-red-300" />}
                             {event.type === 'hover-preview' && <Eye className="h-3 w-3 text-gray-400" />}
                             {event.type === 'keypress' && <Keyboard className="h-3 w-3 text-indigo-500" />}
+                            {event.type === 'keydown' && <Keyboard className="h-3 w-3 text-green-500" />}
+                            {event.type === 'keyup' && <Keyboard className="h-3 w-3 text-orange-400" />}
                           </div>
                           <div className="flex-1 min-w-0">
                             <span className="text-muted-foreground text-xs">

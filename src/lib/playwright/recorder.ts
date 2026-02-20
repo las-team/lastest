@@ -59,10 +59,10 @@ export interface VerificationStatus {
 }
 
 // Keyboard modifiers for modifier key tracking (ALT/CTRL+drag support)
-export type KeyboardModifier = 'Alt' | 'Control' | 'Shift' | 'Meta' | ' ';
+export type KeyboardModifier = 'Alt' | 'Control' | 'Shift' | 'Meta';
 
 export interface RecordingEvent {
-  type: 'action' | 'navigation' | 'screenshot' | 'error' | 'complete' | 'assertion' | 'cursor-move' | 'mouse-down' | 'mouse-up' | 'hover-preview' | 'keypress' | 'scroll';
+  type: 'action' | 'navigation' | 'screenshot' | 'error' | 'complete' | 'assertion' | 'cursor-move' | 'mouse-down' | 'mouse-up' | 'hover-preview' | 'keypress' | 'keydown' | 'keyup' | 'scroll';
   timestamp: number;
   sequence: number;
   status: 'preview' | 'committed';
@@ -373,6 +373,14 @@ export class PlaywrightRecorder extends EventEmitter {
       this.addEvent('keypress', { key, modifiers: modifiers && modifiers.length > 0 ? modifiers : undefined, keyCode: keyCode || undefined });
     });
 
+    // Keydown/keyup tracking for held keys (Space for tool activation in canvas apps)
+    await this.page.exposeFunction('__recordKeydown', (key: string, keyCode?: string) => {
+      this.addEvent('keydown', { key, keyCode: keyCode || undefined });
+    });
+    await this.page.exposeFunction('__recordKeyup', (key: string, keyCode?: string) => {
+      this.addEvent('keyup', { key, keyCode: keyCode || undefined });
+    });
+
     // Scroll tracking with coalescing
     await this.page.exposeFunction('__recordScroll', (deltaX: number, deltaY: number, modifiers?: KeyboardModifier[]) => {
       const mods = modifiers && modifiers.length > 0 ? modifiers : undefined;
@@ -446,13 +454,12 @@ export class PlaywrightRecorder extends EventEmitter {
       }
 
       // Keyboard modifier tracking for ALT/CTRL/Space+drag support
-      type BrowserKeyboardModifier = 'Alt' | 'Control' | 'Shift' | 'Meta' | ' ';
+      type BrowserKeyboardModifier = 'Alt' | 'Control' | 'Shift' | 'Meta';
       const activeModifiers: Set<BrowserKeyboardModifier> = new Set();
 
-      // Space-as-modifier: add Space to modifiers immediately on keydown.
-      // If released quickly without any mouse interaction, record as keypress instead.
+      // Space key tracking: record as explicit keydown/keyup events
+      // so apps (like Excalidraw) receive Space and can activate tools (e.g. hand/pan)
       let spaceDown = false;
-      let spaceUsedAsModifier = false;
 
       document.addEventListener('keydown', (e) => {
         if (e.key === 'Alt' || e.key === 'Control' || e.key === 'Shift' || e.key === 'Meta') {
@@ -461,12 +468,11 @@ export class PlaywrightRecorder extends EventEmitter {
           // Handle ALL space keydowns here (including repeats) to prevent them from falling through
           const target = e.target as HTMLElement;
           const isEditable = target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable;
-          if (!isEditable) {
-            if (!e.repeat) {
-              spaceDown = true;
-              spaceUsedAsModifier = false;
-              activeModifiers.add(' ');
-            }
+          if (!isEditable && !e.repeat && !spaceDown) {
+            spaceDown = true;
+            // Record as explicit keydown event so playback sends Space to the app
+            // @ts-expect-error
+            window.__recordKeydown?.(' ', 'Space');
           }
           // Repeat keydowns for space are intentionally ignored
         } else {
@@ -487,21 +493,11 @@ export class PlaywrightRecorder extends EventEmitter {
         if (e.key === 'Alt' || e.key === 'Control' || e.key === 'Shift' || e.key === 'Meta') {
           activeModifiers.delete(e.key as BrowserKeyboardModifier);
         } else if (e.key === ' ') {
-          activeModifiers.delete(' ');
           if (spaceDown) {
             spaceDown = false;
-            if (!spaceUsedAsModifier) {
-              // Quick tap with no mouse interaction — record as a normal Space keypress
-              const target = e.target as HTMLElement;
-              const isEditable = target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable;
-              if (!isEditable) {
-                // Remove space from modifiers list for this keypress
-                const modifiers = getActiveModifiers();
-                // @ts-expect-error
-                window.__recordKeypress?.(' ', modifiers.length > 0 ? modifiers : undefined, 'Space');
-              }
-            }
-            spaceUsedAsModifier = false;
+            // Record explicit keyup event
+            // @ts-expect-error
+            window.__recordKeyup?.(' ', 'Space');
           }
         }
       }, true);
@@ -510,7 +506,6 @@ export class PlaywrightRecorder extends EventEmitter {
       window.addEventListener('blur', () => {
         activeModifiers.clear();
         spaceDown = false;
-        spaceUsedAsModifier = false;
       });
 
       function getActiveModifiers(): BrowserKeyboardModifier[] {
@@ -708,7 +703,7 @@ export class PlaywrightRecorder extends EventEmitter {
       if (pg) {
         const interval = Math.round(1000 / fps);
         let lastTime = 0;
-        document.addEventListener('mousemove', (e: MouseEvent) => {
+        document.addEventListener('pointermove', (e: PointerEvent) => {
           const now = Date.now();
           if (now - lastTime >= interval) {
             lastTime = now;
@@ -717,16 +712,18 @@ export class PlaywrightRecorder extends EventEmitter {
           }
         }, true);
 
-        // Mouse down/up events with modifier tracking
-        document.addEventListener('mousedown', (e: MouseEvent) => {
-          // Mark Space as used-as-modifier if it's held during a mouse interaction
-          if (spaceDown) spaceUsedAsModifier = true;
+        // Pointer down/up events with modifier tracking
+        // Use pointer events instead of mouse events — some apps (e.g. Excalidraw hand tool)
+        // call preventDefault() on pointerdown which suppresses mousedown entirely
+        document.addEventListener('pointerdown', (e: PointerEvent) => {
+          if (e.pointerType !== 'mouse') return;
           const modifiers = getActiveModifiers();
           // @ts-expect-error
           window.__recordMouseEvent?.('down', e.clientX, e.clientY, e.button, modifiers);
         }, true);
 
-        document.addEventListener('mouseup', (e: MouseEvent) => {
+        document.addEventListener('pointerup', (e: PointerEvent) => {
+          if (e.pointerType !== 'mouse') return;
           const modifiers = getActiveModifiers();
           // @ts-expect-error
           window.__recordMouseEvent?.('up', e.clientX, e.clientY, e.button, modifiers);
@@ -1279,7 +1276,11 @@ export class PlaywrightRecorder extends EventEmitter {
       );
     }
 
+    // Escape a string value for embedding in single-quoted JS strings
+    const escStr = (s: string) => s.replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/\n/g, '\\n').replace(/\r/g, '\\r');
+
     let lastAction = '';
+    let lastEmittedEventType = ''; // Track last non-cursor event for context-aware code gen
     let cursorBatch: [number, number, number][] = [];
     let lastCursorTimestamp = 0;
     let lastCursorX = 640;
@@ -1353,10 +1354,10 @@ export class PlaywrightRecorder extends EventEmitter {
               lines.push(`  await locateWithFallback(page, ${selectorsJson}, 'click', null, ${coordsArg}, ${clickOptions});`);
               break;
             case 'fill':
-              lines.push(`  await locateWithFallback(page, ${selectorsJson}, 'fill', '${value || ''}', ${coordsArg});`);
+              lines.push(`  await locateWithFallback(page, ${selectorsJson}, 'fill', '${escStr(value || '')}', ${coordsArg});`);
               break;
             case 'selectOption':
-              lines.push(`  await locateWithFallback(page, ${selectorsJson}, 'selectOption', '${value || ''}', null);`);
+              lines.push(`  await locateWithFallback(page, ${selectorsJson}, 'selectOption', '${escStr(value || '')}', null);`);
               break;
           }
         } else if (selector && selector.trim()) {
@@ -1369,10 +1370,10 @@ export class PlaywrightRecorder extends EventEmitter {
               lines.push(`  await page.locator('${selector}').click(${clickOptions});`);
               break;
             case 'fill':
-              lines.push(`  await page.locator('${selector}').fill('${value || ''}');`);
+              lines.push(`  await page.locator('${selector}').fill('${escStr(value || '')}');`);
               break;
             case 'selectOption':
-              lines.push(`  await page.locator('${selector}').selectOption('${value || ''}');`);
+              lines.push(`  await page.locator('${selector}').selectOption('${escStr(value || '')}');`);
               break;
           }
         } else {
@@ -1383,16 +1384,21 @@ export class PlaywrightRecorder extends EventEmitter {
             lines.push(`  await page.mouse.click(${coordinates.x}, ${coordinates.y}${isRightClick ? `, { button: 'right' }` : ''});`);
             emitModUp();
           } else if (action === 'fill' && coordinates) {
-            const escapedValue = (value || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'");
-            lines.push(`  // Coordinate-only fill (no selectors found) - click to focus then type`);
-            lines.push(`  await page.mouse.click(${coordinates.x}, ${coordinates.y});`);
-            lines.push(`  await page.keyboard.selectAll();`);
-            lines.push(`  await page.keyboard.type('${escapedValue}');`);
+            if (lastEmittedEventType === 'mouse-up') {
+              // Text input already focused by previous click (e.g. canvas text editor) - just type
+              lines.push(`  await page.keyboard.type('${escStr(value || '')}');`);
+            } else {
+              lines.push(`  // Coordinate-only fill (no selectors found) - click to focus then type`);
+              lines.push(`  await page.mouse.click(${coordinates.x}, ${coordinates.y});`);
+              lines.push(`  await page.keyboard.selectAll();`);
+              lines.push(`  await page.keyboard.type('${escStr(value || '')}');`);
+            }
           } else {
             lines.push(`  // Skipped ${action}: no valid selector or coordinates found`);
           }
         }
         lastAction = action || '';
+        lastEmittedEventType = 'action';
       } else if (event.type === 'screenshot') {
         lines.push(`  await page.screenshot({ path: getScreenshotPath(), fullPage: true });`);
       } else if (event.type === 'assertion') {
@@ -1475,6 +1481,7 @@ export class PlaywrightRecorder extends EventEmitter {
         }
         lines.push(`  await page.mouse.move(${x}, ${y});`);
         lines.push(`  await page.mouse.down(${buttonOpt});`);
+        lastEmittedEventType = 'mouse-down';
       } else if (event.type === 'mouse-up' && event.data.coordinates) {
         const { x, y } = event.data.coordinates;
         const modifiers = event.data.modifiers;
@@ -1488,6 +1495,7 @@ export class PlaywrightRecorder extends EventEmitter {
             lines.push(`  await page.keyboard.up('${mod}');`);
           }
         }
+        lastEmittedEventType = 'mouse-up';
       } else if (event.type === 'keypress' && event.data.key) {
         const { key, modifiers, keyCode } = event.data;
         // When Shift is a modifier and e.key is a single char, e.key is the shifted result
@@ -1513,6 +1521,15 @@ export class PlaywrightRecorder extends EventEmitter {
             lines.push(`  await page.keyboard.up('${mod}');`);
           }
         }
+        lastEmittedEventType = 'keypress';
+      } else if (event.type === 'keydown' && event.data.key) {
+        const escapedKey = event.data.key.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+        lines.push(`  await page.keyboard.down('${escapedKey}');`);
+        lastEmittedEventType = 'keydown';
+      } else if (event.type === 'keyup' && event.data.key) {
+        const escapedKey = event.data.key.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+        lines.push(`  await page.keyboard.up('${escapedKey}');`);
+        lastEmittedEventType = 'keyup';
       } else if (event.type === 'scroll') {
         const deltaX = event.data.deltaX || 0;
         const deltaY = event.data.deltaY || 0;
@@ -1532,6 +1549,7 @@ export class PlaywrightRecorder extends EventEmitter {
         } else {
           lines.push(`  await page.mouse.wheel(${deltaX}, ${deltaY});`);
         }
+        lastEmittedEventType = 'scroll';
       }
     }
 
