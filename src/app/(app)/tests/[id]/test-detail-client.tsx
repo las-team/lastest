@@ -226,7 +226,7 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
     }
   };
 
-  const handleRun = async (headless = true) => {
+  const handleRun = async (headless = true, forceVideoRecording?: boolean) => {
     // Clear any existing poll interval
     if (pollIntervalRef.current) {
       clearInterval(pollIntervalRef.current);
@@ -235,9 +235,9 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
 
     setIsRunning(true);
     try {
-      const { jobId } = await runTests([test.id], repositoryId, headless, executionTarget);
+      const { jobId } = await runTests([test.id], repositoryId, headless, executionTarget, forceVideoRecording);
       notifyJobStarted();
-      toast.success(headless ? 'Test started' : 'Test started (headed mode)');
+      toast.success(forceVideoRecording ? 'Test started with recording' : headless ? 'Test started' : 'Test started (headed mode)');
       // Poll job status for completion (ensures results are saved before refresh)
       pollIntervalRef.current = setInterval(async () => {
         const { isComplete } = await getJobStatus(jobId);
@@ -833,9 +833,20 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
 
           <TabsContent value="recordings" className="mt-4">
             <Card>
-              <CardHeader>
-                <CardTitle className="text-sm">Recordings</CardTitle>
-                <CardDescription>Video recordings of test runs</CardDescription>
+              <CardHeader className="flex flex-row items-center justify-between">
+                <div>
+                  <CardTitle className="text-sm">Recordings</CardTitle>
+                  <CardDescription>Video recordings of test runs</CardDescription>
+                </div>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => handleRun(true, true)}
+                  disabled={isRunning}
+                >
+                  {isRunning ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : <Video className="h-4 w-4 mr-1" />}
+                  Run with Recording
+                </Button>
               </CardHeader>
               <CardContent>
                 {results.filter(r => r.videoPath).length > 0 ? (

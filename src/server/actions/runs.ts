@@ -63,7 +63,7 @@ export async function createTestRun(testIds?: string[], repositoryId?: string | 
   return run;
 }
 
-export async function runTests(testIds?: string[], repositoryId?: string | null, headless?: boolean, runnerId?: string) {
+export async function runTests(testIds?: string[], repositoryId?: string | null, headless?: boolean, runnerId?: string, forceVideoRecording?: boolean) {
   if (repositoryId) await requireRepoAccess(repositoryId);
   else await requireTeamAccess();
   const runner = getRunner(repositoryId);
@@ -119,12 +119,12 @@ export async function runTests(testIds?: string[], repositoryId?: string | null,
   const jobId = await createJob('test_run', `Test Run (${tests.length} tests)`, tests.length, repositoryId);
 
   // Run tests (this happens async)
-  runTestsAsync(run.id, tests, repositoryId, headless, jobId, runnerId);
+  runTestsAsync(run.id, tests, repositoryId, headless, jobId, runnerId, forceVideoRecording);
 
   return { runId: run.id, testCount: tests.length, jobId };
 }
 
-async function runTestsAsync(runId: string, tests: Test[], repositoryId?: string | null, headless?: boolean, jobId?: string, runnerId?: string) {
+async function runTestsAsync(runId: string, tests: Test[], repositoryId?: string | null, headless?: boolean, jobId?: string, runnerId?: string, forceVideoRecording?: boolean) {
   const runner = getRunner(repositoryId);
 
   // Use provided jobId or create new one (for backwards compatibility)
@@ -158,6 +158,7 @@ async function runTestsAsync(runId: string, tests: Test[], repositoryId?: string
         environmentConfig: envConfig,
         playwrightSettings,
         setupContext: setupResult,
+        forceVideoRecording,
       });
     } else {
       // Local execution
@@ -170,7 +171,7 @@ async function runTestsAsync(runId: string, tests: Test[], repositoryId?: string
       }
       // Clear any stale setup context before standalone run
       runner.clearSetupContext();
-      results = await runner.runTests(tests, runId, undefined, undefined, headless);
+      results = await runner.runTests(tests, runId, undefined, undefined, headless, undefined, forceVideoRecording);
     }
 
     // Clear any stale setup context from previous runs

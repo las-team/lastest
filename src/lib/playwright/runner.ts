@@ -633,6 +633,7 @@ export class PlaywrightRunner extends EventEmitter {
   private isRunning = false;
   private aborted = false;
   private settings: PlaywrightSettings | null = null;
+  private forceVideoRecording = false;
   private environmentConfig: EnvironmentConfig | null = null;
   private repositoryId: string | null;
   // Setup context: variables passed from build/suite setup to tests
@@ -731,8 +732,10 @@ export class PlaywrightRunner extends EventEmitter {
     onProgress?: (progress: ProgressCallback) => void,
     onResult?: (result: TestRunResult) => void | Promise<void>,
     headlessOverride?: boolean,
-    maxParallelOverride?: number
+    maxParallelOverride?: number,
+    forceVideoRecording?: boolean
   ): Promise<TestRunResult[]> {
+    this.forceVideoRecording = forceVideoRecording ?? false;
     if (this.isRunning) {
       throw new Error('Already running tests');
     }
@@ -981,7 +984,7 @@ export class PlaywrightRunner extends EventEmitter {
       }
 
       // Set up video recording if enabled
-      const videoEnabled = this.settings?.enableVideoRecording ?? false;
+      const videoEnabled = this.settings?.enableVideoRecording || this.forceVideoRecording;
       const videoDir = videoEnabled
         ? path.join(STORAGE_DIRS.videos, this.repositoryId || 'default')
         : undefined;

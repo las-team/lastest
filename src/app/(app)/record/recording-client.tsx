@@ -283,6 +283,21 @@ export function RecordingClient({
   const timelineRef = useRef<HTMLDivElement>(null);
   const [settingsSaveStatus, setSettingsSaveStatus] = useState({ isPending: false, showSaved: false });
 
+  // Ctrl+Shift+S hotkey to capture screenshot during recording
+  useEffect(() => {
+    if (step !== 'recording') return;
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.ctrlKey && e.shiftKey && e.key.toLowerCase() === 's') {
+        e.preventDefault();
+        handleCaptureScreenshot();
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [step]);
+
   // Poll for recording status and events when in recording step
   useEffect(() => {
     if (step !== 'recording') return;
@@ -1047,7 +1062,7 @@ export function RecordingClient({
                   </div>
                 ) : (
                   <div className="text-center py-4 text-muted-foreground text-sm">
-                    Press Screenshot or Ctrl+S to capture
+                    Press Screenshot or Ctrl+Shift+S to capture
                   </div>
                 )}
               </CardContent>

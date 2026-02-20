@@ -45,6 +45,7 @@ export interface ExecutionOptions {
   runnerId?: string; // 'local' or specific runner ID - if set, overrides mode detection
   maxParallelTests?: number; // Override parallel test setting (used for remote runners)
   setupContext?: { storageState?: string; variables?: Record<string, unknown> }; // Auth session + variables from setup scripts
+  forceVideoRecording?: boolean; // Force video recording for this run regardless of global setting
 }
 
 export interface ExecutionProgress {
@@ -146,7 +147,7 @@ async function executeLocally(
     : undefined;
 
   // maxParallelTests from settings is used by runner internally, but can be overridden
-  return runner.runTests(tests, runId, progressCallback, onResult, options.headless, options.maxParallelTests);
+  return runner.runTests(tests, runId, progressCallback, onResult, options.headless, options.maxParallelTests, options.forceVideoRecording);
 }
 
 /**
