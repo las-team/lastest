@@ -178,7 +178,7 @@ async function executeViaRunner(
   const maxParallel = options.maxParallelTests ?? 1;
   const pending = [...tests];
   // Track in-flight tests: commandId → { testId, testName, startTime }
-  const inFlight = new Map<string, { testId: string; testName: string; startTime: number }>();
+  const inFlight = new Map<string, { testId: string; testName: string; startTime: number; completedSeenAt?: number }>();
   let completedCount = 0;
   let cancelled = false;
   const baseTimeout = options.playwrightSettings?.navigationTimeout || 120000;
@@ -303,10 +303,9 @@ async function executeViaRunner(
         continue;
       }
 
-      inFlight.delete(dbCmd.id);
-      completedCount++;
-
       if (dbCmd.status === 'timeout') {
+        inFlight.delete(dbCmd.id);
+        completedCount++;
         // Timed out — no result payload
         const timeoutResult: TestRunResult = {
           testId: info.testId,
@@ -324,13 +323,23 @@ async function executeViaRunner(
       const payload = testResultMsg!.payload as Record<string, unknown>;
       const errorPayload = payload.error as Record<string, unknown> | undefined;
 
-      // Screenshots are uploaded AFTER the test result, so wait briefly
-      // then check both DB command results and disk for screenshots.
-      await new Promise(resolve => setTimeout(resolve, 3000));
+      // Screenshots are uploaded AFTER the test result, so they may not be here yet.
+      // Defer processing until screenshots arrive (up to 10s), then proceed anyway.
+      const screenshotResults = unacked.filter(r => r.type === 'response:screenshot');
+      if (screenshotResults.length === 0 && payload.status === 'passed') {
+        if (!info.completedSeenAt) {
+          info.completedSeenAt = Date.now();
+          continue; // Wait for screenshots on next poll
+        }
+        if (Date.now() - info.completedSeenAt < 10_000) {
+          continue; // Still waiting for screenshots
+        }
+        // Exceeded 10s — process anyway with whatever we have
+      }
 
-      // Re-fetch unacked results to pick up screenshots that arrived after the test result
-      const updatedResults = await getUnacknowledgedResults([dbCmd.id]);
-      const screenshotResults = updatedResults.filter(r => r.type === 'response:screenshot');
+      inFlight.delete(dbCmd.id);
+      completedCount++;
+
       let allScreenshots: { path: string; label: string }[] = screenshotResults.map((r, idx) => {
         const sp = r.payload as Record<string, unknown>;
         return { path: sp.path as string, label: `Step ${idx + 1}` };
@@ -354,7 +363,7 @@ async function executeViaRunner(
       await onResult?.(testResult);
 
       // Acknowledge all results for this command (including screenshot entries)
-      const resultIds = updatedResults.map(r => r.id);
+      const resultIds = unacked.map(r => r.id);
       if (resultIds.length > 0) {
         await acknowledgeResults(resultIds);
       }
