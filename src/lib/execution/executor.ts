@@ -16,7 +16,7 @@ import type {
   ScreenshotUploadResponse,
 } from '@/lib/ws/protocol';
 import { createMessage } from '@/lib/ws/protocol';
-import { queueCommand, getTestResults, getScreenshots } from '@/app/api/ws/runner/route';
+import { queueCommand, queueCancelCommand, getTestResults, getScreenshots } from '@/app/api/ws/runner/route';
 import { runnerRegistry } from '@/lib/ws/runner-registry';
 import { db } from '@/lib/db';
 import { runners, tests as testsTable } from '@/lib/db/schema';
@@ -221,7 +221,7 @@ async function executeViaRunner(
         codeHash: hashCode(test.code),
         targetUrl: baseUrl,
         screenshotPath: `${runId}-${test.id}.png`,
-        timeout: options.playwrightSettings?.navigationTimeout || 30000,
+        timeout: testTimeout,
         repositoryId: options.repositoryId || undefined,
         viewport,
         storageState: options.setupContext?.storageState,
@@ -290,6 +290,8 @@ async function executeViaRunner(
     for (const [commandId, info] of inFlight) {
       if (Date.now() - info.startTime > testTimeout) {
         console.error(`[Executor] Test ${info.testId} timed out after ${testTimeout}ms`);
+        // Cancel the stale test on the runner so it frees resources
+        queueCancelCommand(runnerId, runId, `Server-side timeout after ${testTimeout}ms`);
         inFlight.delete(commandId);
         completedCount++;
         const timeoutResult: TestRunResult = {

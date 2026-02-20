@@ -61,6 +61,7 @@ export class RunnerClient {
   private processingCommands = false;
   private activeTasks = 0;
   private seenCommandIds = new Set<string>();
+  private activeTestIds = new Set<string>();
 
   constructor(options: RunnerClientOptions) {
     this.token = options.token;
@@ -225,53 +226,43 @@ export class RunnerClient {
   }
 
   /**
-   * Process queued commands. run_test commands execute concurrently
-   * (the server controls concurrency by how many it queues at once).
-   * Other commands are processed sequentially.
+   * Process queued commands. run_test commands are fired concurrently
+   * WITHOUT blocking the queue — so cancel_test and other commands
+   * arriving on subsequent heartbeats get processed immediately.
    */
   private async processCommandQueue(): Promise<void> {
     if (this.processingCommands) return; // Already processing
     this.processingCommands = true;
 
     while (this.commandQueue.length > 0) {
-      // Drain all run_test commands and launch them concurrently
-      const testCommands: Message[] = [];
+      const cmd = this.commandQueue.shift()!;
 
-      while (this.commandQueue.length > 0) {
-        const cmd = this.commandQueue[0];
-        if (cmd.type === 'command:run_test') {
-          const shifted = this.commandQueue.shift()!;
-          if (this.seenCommandIds.has(shifted.id)) {
-            console.log(`[Queue] Skipping duplicate command ${shifted.id}`);
-            continue;
-          }
-          this.seenCommandIds.add(shifted.id);
-          testCommands.push(shifted);
-        } else {
-          // Stop draining — process other commands sequentially in order
-          break;
-        }
-      }
-
-      // Launch all test commands concurrently
-      if (testCommands.length > 0) {
-        console.log(`[Queue] Launching ${testCommands.length} test(s) concurrently`);
-        const promises = testCommands.map(cmd =>
-          this.handleCommand(cmd).catch(error => {
-            console.error(`Command ${cmd.type} (${cmd.id}) failed:`, error);
-          })
-        );
-        await Promise.all(promises);
-      }
-
-      // Process one non-test command sequentially, then loop back
-      if (this.commandQueue.length > 0 && this.commandQueue[0].type !== 'command:run_test') {
-        const cmd = this.commandQueue.shift()!;
+      // Dedup by command ID (except run_test which dedupes by testId)
+      if (cmd.type !== 'command:run_test') {
         if (this.seenCommandIds.has(cmd.id)) {
           console.log(`[Queue] Skipping duplicate command ${cmd.id}`);
           continue;
         }
         this.seenCommandIds.add(cmd.id);
+      }
+
+      if (cmd.type === 'command:run_test') {
+        const testCmd = cmd as RunTestCommand;
+        const testId = testCmd.payload.testId;
+        if (this.activeTestIds.has(testId)) {
+          console.log(`[Queue] Skipping duplicate run_test for testId ${testId} (cmd ${testCmd.id.slice(0, 8)})`);
+          continue;
+        }
+        this.activeTestIds.add(testId);
+
+        // Fire and forget — don't block the queue processor
+        console.log(`[Queue] Launching test ${testId}`);
+        this.handleCommand(cmd).catch(error => {
+          console.error(`Command ${cmd.type} (${cmd.id}) failed:`, error);
+        });
+      } else {
+        // Non-test commands (cancel_test, ping, etc.) — process immediately
+        console.log(`[Queue] Processing ${cmd.type}`);
         try {
           await this.handleCommand(cmd);
         } catch (error) {
@@ -361,15 +352,16 @@ export class RunnerClient {
     this.activeTasks++;
     this.status = 'busy';
     this.currentTask = command.payload.testRunId;
+    const testId = command.payload.testId;
 
     // Override targetUrl if baseUrl is configured
     if (this.baseUrl) {
-      console.log(`Overriding targetUrl: ${command.payload.targetUrl} → ${this.baseUrl}`);
+      console.log(`[Test ${testId}] Overriding targetUrl: ${command.payload.targetUrl} → ${this.baseUrl}`);
       command.payload.targetUrl = this.baseUrl.replace(/\/+$/, '');
     }
 
     try {
-      console.log(`Running test: ${command.payload.testId}`);
+      console.log(`[Test ${testId}] Starting test execution (commandId: ${command.id.slice(0, 8)}, timeout: ${command.payload.timeout}ms)`);
 
       const result = await this.runner.runTest(command.payload, (step, progress) => {
         // Send progress update
@@ -381,6 +373,8 @@ export class RunnerClient {
         this.sendMessage(progressMsg);
       });
 
+      console.log(`[Test ${testId}] runTest returned: status=${result.status}, screenshots=${result.screenshots.length}, duration=${result.durationMs}ms`);
+
       // Send result FIRST so server sees pass/fail before timeout
       const resultMsg = createMessage<TestResultResponse>('response:test_result', {
         correlationId: command.id,
@@ -391,30 +385,37 @@ export class RunnerClient {
         error: result.error,
         logs: result.logs,
       });
+      console.log(`[Test ${testId}] Sending result to server...`);
       await this.sendMessage(resultMsg);
-      console.log(`Test ${result.status}: ${command.payload.testId}`);
+      console.log(`[Test ${testId}] Result sent: ${result.status}`);
 
       // Upload screenshots after result (non-blocking for server timeout)
-      console.log(`Uploading ${result.screenshots.length} screenshots...`);
-      for (const screenshot of result.screenshots) {
-        const screenshotMsg = createMessage<ScreenshotUploadResponse>('response:screenshot', {
-          correlationId: command.id,
-          testRunId: command.payload.testRunId,
-          repositoryId: command.payload.repositoryId,
-          filename: screenshot.filename,
-          data: screenshot.data,
-          width: screenshot.width,
-          height: screenshot.height,
-          capturedAt: Date.now(),
-        });
-        console.log(`  Sending screenshot: ${screenshot.filename}`);
-        await this.sendMessage(screenshotMsg);
+      if (result.screenshots.length > 0) {
+        console.log(`[Test ${testId}] Uploading ${result.screenshots.length} screenshots...`);
+        for (const screenshot of result.screenshots) {
+          const screenshotMsg = createMessage<ScreenshotUploadResponse>('response:screenshot', {
+            correlationId: command.id,
+            testRunId: command.payload.testRunId,
+            repositoryId: command.payload.repositoryId,
+            filename: screenshot.filename,
+            data: screenshot.data,
+            width: screenshot.width,
+            height: screenshot.height,
+            capturedAt: Date.now(),
+          });
+          console.log(`[Test ${testId}]   Sending screenshot: ${screenshot.filename}`);
+          await this.sendMessage(screenshotMsg);
+        }
+        console.log(`[Test ${testId}] All screenshots uploaded`);
       }
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
+      console.error(`[Test ${testId}] handleRunTest error: ${errorMessage}`);
       await this.sendError(command.id, 'INTERNAL_ERROR', errorMessage);
     } finally {
+      this.activeTestIds.delete(testId);
       this.activeTasks--;
+      console.log(`[Test ${testId}] Cleanup done (activeTasks: ${this.activeTasks})`);
       if (this.activeTasks === 0) {
         this.status = 'idle';
         this.currentTask = undefined;

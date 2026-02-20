@@ -126,6 +126,10 @@ export class TestRunner {
     let context: BrowserContext | null = null;
     let page: Page | null = null;
 
+    // Enforce a hard timeout on the entire test execution
+    const testTimeout = Math.max(command.timeout || 120000, 30000);
+    logFn('info', `Test timeout: ${testTimeout}ms`);
+
     try {
       // Check if already aborted
       if (testAbort.signal.aborted) {
@@ -181,8 +185,20 @@ export class TestRunner {
         throw new Error('Test cancelled');
       }
 
-      // Execute test code
-      await this.executeTestCode(page, command.code, command.targetUrl, captureScreenshot, logFn);
+      // Execute test code with timeout enforcement
+      logFn('info', 'Executing test code...');
+      await Promise.race([
+        this.executeTestCode(page, command.code, command.targetUrl, captureScreenshot, logFn),
+        new Promise<never>((_, reject) => {
+          const timer = setTimeout(() => reject(new Error(`Test execution timed out after ${testTimeout}ms`)), testTimeout);
+          // Also reject on abort
+          testAbort.signal.addEventListener('abort', () => {
+            clearTimeout(timer);
+            reject(new Error('Test cancelled'));
+          });
+        }),
+      ]);
+      logFn('info', 'Test code execution completed');
 
       // Check abort after test
       if (testAbort.signal.aborted) {
@@ -197,7 +213,7 @@ export class TestRunner {
       }
 
       const durationMs = Date.now() - startTime;
-      logFn('info', `Test passed in ${durationMs}ms`);
+      logFn('info', `Test passed in ${durationMs}ms (${screenshots.length} screenshots)`);
 
       return {
         status: 'passed',
@@ -225,11 +241,15 @@ export class TestRunner {
         };
       }
 
-      logFn('error', `Test failed: ${errorMessage}`);
+      // Check if timeout
+      const isTimeout = errorMessage.includes('timed out');
+      logFn('error', `Test ${isTimeout ? 'timed out' : 'failed'}: ${errorMessage}`);
 
-      // Capture failure screenshot
+      // Capture failure screenshot — but NOT on timeout because the test code
+      // is still running on the page and Playwright can't screenshot while
+      // operations are in-flight (it would hang).
       let errorScreenshot: string | undefined;
-      if (page) {
+      if (page && !isTimeout) {
         try {
           const buffer = await page.screenshot({ fullPage: true });
           errorScreenshot = buffer.toString('base64');
@@ -247,7 +267,7 @@ export class TestRunner {
       }
 
       return {
-        status: 'failed',
+        status: isTimeout ? 'timeout' : 'failed',
         durationMs,
         error: {
           message: errorMessage,
@@ -290,6 +310,7 @@ export class TestRunner {
 
     // Strip TypeScript annotations
     let body = this.stripTypeAnnotations(funcMatch[1]);
+    log('info', `Extracted test body: ${body.length} chars`);
 
     // Remove the test's local locateWithFallback function if present
     if (body.includes('async function locateWithFallback(')) {
@@ -305,15 +326,9 @@ export class TestRunner {
           endIdx++;
         }
         body = body.slice(0, startIdx) + '/* locateWithFallback provided by runner */' + body.slice(endIdx);
+        log('info', 'Removed test-local locateWithFallback (using runner-provided version)');
       }
     }
-
-    // Wrap standalone await statements (except screenshots) in try/catch so
-    // execution continues past locator/action failures to reach screenshot calls
-    body = body.replace(/^(\s*)(await\s+.+;)\s*$/gm, (_match: string, indent: string, stmt: string) => {
-      if (stmt.includes('.screenshot(')) return `${indent}${stmt}`;
-      return `${indent}try { ${stmt} } catch(__softErr) { stepLogger.log(typeof __softErr === 'object' && __softErr !== null && 'message' in __softErr ? __softErr.message : String(__softErr)); }`;
-    });
 
     // Create stepLogger (matches local runner signature)
     const stepLogger = {
@@ -421,6 +436,7 @@ export class TestRunner {
     };
 
     // Execute the test
+    log('info', 'Compiling test function...');
     const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
     const testFn = new AsyncFunction(
       'page',
@@ -432,7 +448,9 @@ export class TestRunner {
       body
     );
 
+    log('info', `Running test against ${targetUrl}...`);
     await testFn(page, targetUrl.replace(/\/+$/, ''), 'screenshot.png', stepLogger, expect, locateWithFallback);
+    log('info', 'Test function returned successfully');
   }
 
   private stripTypeAnnotations(code: string): string {
