@@ -125,6 +125,8 @@ export class TestRunner {
 
     let context: BrowserContext | null = null;
     let page: Page | null = null;
+    // Raw screenshot function, saved before executeTestCode overrides page.screenshot
+    let rawScreenshot: ((options?: { fullPage?: boolean }) => Promise<Buffer>) | null = null;
 
     // Enforce a hard timeout on the entire test execution
     const testTimeout = Math.max(command.timeout || 120000, 30000);
@@ -162,14 +164,37 @@ export class TestRunner {
       context = await this.browser!.newContext({ viewport, ...(parsedStorageState ? { storageState: parsedStorageState } : {}) });
       page = await context.newPage();
 
+      // Set explicit timeouts to prevent indefinite hangs
+      page.setDefaultNavigationTimeout(30000);
+      page.setDefaultTimeout(15000);
+
+      // Log page-level events for visibility during test execution
+      page.on('console', msg => {
+        if (msg.type() === 'error') {
+          logFn('warn', `[browser] ${msg.text()}`);
+        }
+      });
+      page.on('pageerror', error => {
+        logFn('warn', `[page error] ${error.message}`);
+      });
+      page.on('requestfailed', request => {
+        const failure = request.failure();
+        if (failure) {
+          logFn('warn', `[request failed] ${request.url()} — ${failure.errorText}`);
+        }
+      });
+
       logFn('info', `Browser launched, viewport: ${viewport.width}x${viewport.height}`);
       onProgress?.('Running test', 30);
 
-      // Create screenshot capture function
+      // Save the raw screenshot method BEFORE executeTestCode overrides page.screenshot.
+      // captureScreenshot must use this to avoid infinite recursion:
+      //   override → captureScreenshot → page.screenshot (overridden) → captureScreenshot → ...
+      rawScreenshot = page.screenshot.bind(page);
       const captureScreenshot = async (label: string) => {
         if (!page) return;
         try {
-          const buffer = await page.screenshot({ fullPage: true });
+          const buffer = await rawScreenshot!({ fullPage: true });
           const filename = `${command.testRunId}-${command.testId}-${label}.png`;
           const base64 = buffer.toString('base64');
           const { width, height } = viewport;
@@ -189,26 +214,38 @@ export class TestRunner {
       // When timeout/cancel fires, close the context to kill in-flight Playwright
       // operations — otherwise test code keeps running on the page after timeout.
       logFn('info', 'Executing test code...');
-      await Promise.race([
-        this.executeTestCode(page, command.code, command.targetUrl, captureScreenshot, logFn),
-        new Promise<never>((_, reject) => {
-          const timer = setTimeout(() => {
-            logFn('warn', `Timeout fired (${testTimeout}ms) — closing context to kill in-flight operations`);
-            context?.close().catch(() => {});
-            context = null;
-            page = null;
-            reject(new Error(`Test execution timed out after ${testTimeout}ms`));
-          }, testTimeout);
-          testAbort.signal.addEventListener('abort', () => {
-            clearTimeout(timer);
-            logFn('info', 'Abort signal received — closing context');
-            context?.close().catch(() => {});
-            context = null;
-            page = null;
-            reject(new Error('Test cancelled'));
-          });
-        }),
-      ]);
+
+      // Heartbeat timer — logs every 15s so the user knows the test is still running
+      const heartbeatStart = Date.now();
+      const heartbeat = setInterval(() => {
+        const elapsed = Math.round((Date.now() - heartbeatStart) / 1000);
+        logFn('info', `Test still running... (${elapsed}s elapsed)`);
+      }, 15000);
+
+      try {
+        await Promise.race([
+          this.executeTestCode(page, command.code, command.targetUrl, captureScreenshot, logFn).catch(e => { throw e; }),
+          new Promise<never>((_, reject) => {
+            const timer = setTimeout(() => {
+              logFn('warn', `Timeout fired (${testTimeout}ms) — closing context to kill in-flight operations`);
+              context?.close().catch(() => {});
+              context = null;
+              page = null;
+              reject(new Error(`Test execution timed out after ${testTimeout}ms`));
+            }, testTimeout);
+            testAbort.signal.addEventListener('abort', () => {
+              clearTimeout(timer);
+              logFn('info', 'Abort signal received — closing context');
+              context?.close().catch(() => {});
+              context = null;
+              page = null;
+              reject(new Error('Test cancelled'));
+            });
+          }),
+        ]);
+      } finally {
+        clearInterval(heartbeat);
+      }
       logFn('info', 'Test code execution completed');
 
       // Check abort after test
@@ -260,9 +297,9 @@ export class TestRunner {
       // is still running on the page and Playwright can't screenshot while
       // operations are in-flight (it would hang).
       let errorScreenshot: string | undefined;
-      if (page && !isTimeout) {
+      if (page && rawScreenshot && !isTimeout) {
         try {
-          const buffer = await page.screenshot({ fullPage: true });
+          const buffer = await rawScreenshot({ fullPage: true });
           errorScreenshot = buffer.toString('base64');
           const filename = `${command.testRunId}-${command.testId}-failure.png`;
           const viewport = command.viewport || { width: 1280, height: 720 };
@@ -380,6 +417,8 @@ export class TestRunner {
         (s) => s.value && s.value.trim() && !s.value.includes('undefined')
       );
 
+      log('info', `[action] ${action}${value ? ` "${value}"` : ''} (${validSelectors.length} selectors)`);
+
       for (const sel of validSelectors) {
         try {
           let locator;
@@ -400,6 +439,7 @@ export class TestRunner {
           const target = locator.first();
           await target.waitFor({ timeout: 3000 });
 
+          log('info', `[action] ${action} matched via ${sel.type}`);
           if (action === 'locate') return target;
           if (action === 'click') await target.click(options || {});
           else if (action === 'fill') await target.fill(value || '');
@@ -444,6 +484,15 @@ export class TestRunner {
       const label = `step ${screenshotStep++}`;
       await captureScreenshot(label);
       return result;
+    };
+
+    // Intercept page.goto to log navigation attempts
+    const originalGoto = page.goto.bind(page);
+    (page as Page & { goto: typeof originalGoto }).goto = async (url: string, options?: Parameters<typeof originalGoto>[1]) => {
+      log('info', `Navigating to ${url}...`);
+      const response = await originalGoto(url, options);
+      log('info', `Navigation complete: ${response?.status() ?? 'no response'}`);
+      return response;
     };
 
     // Execute the test
