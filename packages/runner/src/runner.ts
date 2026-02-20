@@ -29,16 +29,58 @@ export interface TestRunResult {
 
 export class TestRunner {
   private browser: Browser | null = null;
+  private browserLaunchPromise: Promise<Browser> | null = null;
+  private activeTests = new Map<string, AbortController>();
   private logs: LogEntry[] = [];
+  // Legacy single-test tracking (for backward compat with abort/isRunning)
   private abortController: AbortController | null = null;
   private currentTestRunId: string | null = null;
+
+  /**
+   * Ensure a shared browser instance is running.
+   * Concurrent calls share the same launch promise.
+   */
+  private async ensureBrowser(): Promise<Browser> {
+    if (this.browser && this.browser.isConnected()) {
+      return this.browser;
+    }
+    if (this.browserLaunchPromise) {
+      return this.browserLaunchPromise;
+    }
+    this.browserLaunchPromise = chromium.launch({ headless: true }).then(b => {
+      this.browser = b;
+      this.browserLaunchPromise = null;
+      return b;
+    });
+    return this.browserLaunchPromise;
+  }
+
+  /**
+   * Close the shared browser if no tests are running.
+   */
+  async closeBrowserIfIdle(): Promise<void> {
+    if (this.activeTests.size === 0 && this.browser) {
+      await this.browser.close().catch(() => {});
+      this.browser = null;
+    }
+  }
 
   /**
    * Abort the currently running test
    */
   abort(testRunId?: string): boolean {
-    if (testRunId && this.currentTestRunId !== testRunId) {
-      return false; // Not the current test
+    if (testRunId) {
+      const controller = this.activeTests.get(testRunId);
+      if (controller) {
+        controller.abort();
+        return true;
+      }
+      // Legacy fallback
+      if (this.currentTestRunId === testRunId && this.abortController) {
+        this.abortController.abort();
+        return true;
+      }
+      return false;
     }
     if (this.abortController) {
       this.abortController.abort();
@@ -48,7 +90,7 @@ export class TestRunner {
   }
 
   isRunning(): boolean {
-    return this.abortController !== null;
+    return this.activeTests.size > 0 || this.abortController !== null;
   }
 
   getCurrentTestRunId(): string | null {
@@ -65,9 +107,19 @@ export class TestRunner {
     command: RunTestCommandPayload,
     onProgress?: (step: string, progress: number) => void
   ): Promise<TestRunResult> {
-    this.logs = [];
-    this.abortController = new AbortController();
+    const testAbort = new AbortController();
+    this.activeTests.set(command.testRunId, testAbort);
+    // Legacy single-test tracking
+    this.abortController = testAbort;
     this.currentTestRunId = command.testRunId;
+
+    const logs: LogEntry[] = [];
+    const logFn = (level: 'info' | 'warn' | 'error', message: string) => {
+      logs.push({ timestamp: Date.now(), level, message });
+      const prefix = level === 'error' ? '  [ERROR]' : level === 'warn' ? '  [WARN]' : '  [INFO]';
+      console.log(`${prefix} [${command.testId}] ${message}`);
+    };
+
     const startTime = Date.now();
     const screenshots: Array<{ filename: string; data: string; width: number; height: number }> = [];
 
@@ -76,7 +128,7 @@ export class TestRunner {
 
     try {
       // Check if already aborted
-      if (this.abortController.signal.aborted) {
+      if (testAbort.signal.aborted) {
         throw new Error('Test cancelled before starting');
       }
 
@@ -85,11 +137,11 @@ export class TestRunner {
         throw new Error('Code integrity check failed - hash mismatch');
       }
 
-      this.log('info', 'Launching browser...');
+      logFn('info', 'Launching browser...');
       onProgress?.('Launching browser', 10);
 
-      // TODO: Support browser selection
-      this.browser = await chromium.launch({ headless: true });
+      // Use shared browser instance
+      await this.ensureBrowser();
 
       const viewport = command.viewport || { width: 1280, height: 720 };
       // Inject storageState from setup scripts (e.g. login session cookies/localStorage)
@@ -98,15 +150,15 @@ export class TestRunner {
       if (command.storageState) {
         try {
           parsedStorageState = JSON.parse(command.storageState);
-          this.log('info', `Injecting storageState: ${parsedStorageState.cookies?.length ?? 0} cookies, ${parsedStorageState.origins?.length ?? 0} origins`);
+          logFn('info', `Injecting storageState: ${parsedStorageState.cookies?.length ?? 0} cookies, ${parsedStorageState.origins?.length ?? 0} origins`);
         } catch (e) {
-          this.log('warn', `Failed to parse storageState: ${e}`);
+          logFn('warn', `Failed to parse storageState: ${e}`);
         }
       }
-      context = await this.browser.newContext({ viewport, ...(parsedStorageState ? { storageState: parsedStorageState } : {}) });
+      context = await this.browser!.newContext({ viewport, ...(parsedStorageState ? { storageState: parsedStorageState } : {}) });
       page = await context.newPage();
 
-      this.log('info', `Browser launched, viewport: ${viewport.width}x${viewport.height}`);
+      logFn('info', `Browser launched, viewport: ${viewport.width}x${viewport.height}`);
       onProgress?.('Running test', 30);
 
       // Create screenshot capture function
@@ -118,22 +170,22 @@ export class TestRunner {
           const base64 = buffer.toString('base64');
           const { width, height } = viewport;
           screenshots.push({ filename, data: base64, width, height });
-          this.log('info', `Captured screenshot: ${filename}`);
+          logFn('info', `Captured screenshot: ${filename}`);
         } catch (err) {
-          this.log('warn', `Failed to capture screenshot: ${err}`);
+          logFn('warn', `Failed to capture screenshot: ${err}`);
         }
       };
 
       // Check abort before executing test
-      if (this.abortController?.signal.aborted) {
+      if (testAbort.signal.aborted) {
         throw new Error('Test cancelled');
       }
 
       // Execute test code
-      await this.executeTestCode(page, command.code, command.targetUrl, captureScreenshot);
+      await this.executeTestCode(page, command.code, command.targetUrl, captureScreenshot, logFn);
 
       // Check abort after test
-      if (this.abortController?.signal.aborted) {
+      if (testAbort.signal.aborted) {
         throw new Error('Test cancelled');
       }
 
@@ -145,12 +197,12 @@ export class TestRunner {
       }
 
       const durationMs = Date.now() - startTime;
-      this.log('info', `Test passed in ${durationMs}ms`);
+      logFn('info', `Test passed in ${durationMs}ms`);
 
       return {
         status: 'passed',
         durationMs,
-        logs: this.logs,
+        logs,
         screenshots,
       };
     } catch (error) {
@@ -159,21 +211,21 @@ export class TestRunner {
       const errorStack = error instanceof Error ? error.stack : undefined;
 
       // Check if this was a cancellation
-      const isCancelled = errorMessage.includes('cancelled') || this.abortController?.signal.aborted;
+      const isCancelled = errorMessage.includes('cancelled') || testAbort.signal.aborted;
       if (isCancelled) {
-        this.log('info', 'Test cancelled');
+        logFn('info', 'Test cancelled');
         return {
           status: 'cancelled',
           durationMs,
           error: {
             message: 'Test cancelled by user',
           },
-          logs: this.logs,
+          logs,
           screenshots,
         };
       }
 
-      this.log('error', `Test failed: ${errorMessage}`);
+      logFn('error', `Test failed: ${errorMessage}`);
 
       // Capture failure screenshot
       let errorScreenshot: string | undefined;
@@ -190,7 +242,7 @@ export class TestRunner {
             height: viewport.height,
           });
         } catch {
-          this.log('warn', 'Failed to capture error screenshot');
+          logFn('warn', 'Failed to capture error screenshot');
         }
       }
 
@@ -202,18 +254,20 @@ export class TestRunner {
           stack: errorStack,
           screenshot: errorScreenshot,
         },
-        logs: this.logs,
+        logs,
         screenshots,
       };
     } finally {
-      this.abortController = null;
-      this.currentTestRunId = null;
+      this.activeTests.delete(command.testRunId);
+      // Clear legacy tracking if this was the tracked test
+      if (this.currentTestRunId === command.testRunId) {
+        this.abortController = null;
+        this.currentTestRunId = null;
+      }
       if (page) await page.close().catch(() => {});
       if (context) await context.close().catch(() => {});
-      if (this.browser) {
-        await this.browser.close().catch(() => {});
-        this.browser = null;
-      }
+      // Close browser only when no tests are running
+      await this.closeBrowserIfIdle();
     }
   }
 
@@ -221,8 +275,10 @@ export class TestRunner {
     page: Page,
     code: string,
     targetUrl: string,
-    captureScreenshot: (label: string) => Promise<void>
+    captureScreenshot: (label: string) => Promise<void>,
+    logFn?: (level: 'info' | 'warn' | 'error', message: string) => void
   ): Promise<void> {
+    const log = logFn ?? this.log.bind(this);
     // Extract function body from: export async function test(page, baseUrl, screenshotPath, stepLogger) { ... }
     const funcMatch = code.match(
       /export\s+async\s+function\s+test\s*\(\s*page[^)]*\)\s*\{([\s\S]*)\}\s*$/
@@ -262,17 +318,17 @@ export class TestRunner {
     // Create stepLogger (matches local runner signature)
     const stepLogger = {
       log: (msg: string) => {
-        this.log('info', `Step: ${msg}`);
+        log('info', `Step: ${msg}`);
       },
       warn: (msg: string) => {
-        this.log('warn', `[WARN] ${msg}`);
+        log('warn', `[WARN] ${msg}`);
       },
       softExpect: async (fn: () => Promise<void>, label?: string) => {
         try {
           await fn();
         } catch (e: unknown) {
           const msg = label || (e instanceof Error ? e.message : String(e));
-          this.log('warn', `[SOFT FAIL] ${msg}`);
+          log('warn', `[SOFT FAIL] ${msg}`);
         }
       },
       softAction: async (fn: () => Promise<void>, label?: string) => {
@@ -280,7 +336,7 @@ export class TestRunner {
           await fn();
         } catch (e: unknown) {
           const msg = label || (e instanceof Error ? e.message : String(e));
-          this.log('warn', `[SOFT FAIL] ${msg}`);
+          log('warn', `[SOFT FAIL] ${msg}`);
         }
       },
     };
@@ -331,14 +387,14 @@ export class TestRunner {
 
       // Coordinate fallback for clicks
       if (action === 'click' && coords) {
-        this.log('info', `Falling back to coordinate click at (${coords.x}, ${coords.y})`);
+        log('info', `Falling back to coordinate click at (${coords.x}, ${coords.y})`);
         await pg.mouse.click(coords.x, coords.y, options || {});
         return;
       }
 
       // Coordinate fallback for fill - click to focus then type
       if (action === 'fill' && coords) {
-        this.log('info', `Falling back to coordinate fill at (${coords.x}, ${coords.y})`);
+        log('info', `Falling back to coordinate fill at (${coords.x}, ${coords.y})`);
         await pg.mouse.click(coords.x, coords.y);
         await pg.keyboard.press('Control+a');
         await pg.keyboard.type(value || '');

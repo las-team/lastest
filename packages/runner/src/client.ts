@@ -59,6 +59,7 @@ export class RunnerClient {
   private sessionId?: string;
   private commandQueue: Message[] = [];
   private processingCommands = false;
+  private activeTasks = 0;
 
   constructor(options: RunnerClientOptions) {
     this.token = options.token;
@@ -223,18 +224,47 @@ export class RunnerClient {
   }
 
   /**
-   * Process queued commands sequentially without blocking the heartbeat loop.
+   * Process queued commands. run_test commands execute concurrently
+   * (the server controls concurrency by how many it queues at once).
+   * Other commands are processed sequentially.
    */
   private async processCommandQueue(): Promise<void> {
     if (this.processingCommands) return; // Already processing
     this.processingCommands = true;
 
     while (this.commandQueue.length > 0) {
-      const cmd = this.commandQueue.shift()!;
-      try {
-        await this.handleCommand(cmd);
-      } catch (error) {
-        console.error(`Command ${cmd.type} failed:`, error);
+      // Drain all run_test commands and launch them concurrently
+      const testCommands: Message[] = [];
+
+      while (this.commandQueue.length > 0) {
+        const cmd = this.commandQueue[0];
+        if (cmd.type === 'command:run_test') {
+          testCommands.push(this.commandQueue.shift()!);
+        } else {
+          // Stop draining — process other commands sequentially in order
+          break;
+        }
+      }
+
+      // Launch all test commands concurrently
+      if (testCommands.length > 0) {
+        console.log(`[Queue] Launching ${testCommands.length} test(s) concurrently`);
+        const promises = testCommands.map(cmd =>
+          this.handleCommand(cmd).catch(error => {
+            console.error(`Command ${cmd.type} (${cmd.id}) failed:`, error);
+          })
+        );
+        await Promise.all(promises);
+      }
+
+      // Process one non-test command sequentially, then loop back
+      if (this.commandQueue.length > 0 && this.commandQueue[0].type !== 'command:run_test') {
+        const cmd = this.commandQueue.shift()!;
+        try {
+          await this.handleCommand(cmd);
+        } catch (error) {
+          console.error(`Command ${cmd.type} failed:`, error);
+        }
       }
     }
 
@@ -310,6 +340,7 @@ export class RunnerClient {
   }
 
   private async handleRunTest(command: RunTestCommand): Promise<void> {
+    this.activeTasks++;
     this.status = 'busy';
     this.currentTask = command.payload.testRunId;
 
@@ -366,8 +397,11 @@ export class RunnerClient {
       const errorMessage = error instanceof Error ? error.message : String(error);
       await this.sendError(command.id, 'INTERNAL_ERROR', errorMessage);
     } finally {
-      this.status = 'idle';
-      this.currentTask = undefined;
+      this.activeTasks--;
+      if (this.activeTasks === 0) {
+        this.status = 'idle';
+        this.currentTask = undefined;
+      }
     }
   }
 

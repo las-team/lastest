@@ -170,62 +170,88 @@ async function executeViaRunner(
       }
     : undefined;
 
-  for (let i = 0; i < tests.length; i++) {
-    const test = tests[i];
+  const maxParallel = options.maxParallelTests ?? 1;
+  const pending = [...tests];
+  const running = new Map<string, { promise: Promise<TestRunResult>; testName: string }>();
+  let completedCount = 0;
 
+  const updateProgress = () => {
+    const activeTests = [...running.values()].map(r => r.testName);
     onProgress?.({
-      completed: i,
+      completed: completedCount,
       total: tests.length,
-      currentTestName: test.name,
+      currentTestName: activeTests[0],
+      activeCount: running.size,
+      activeTests,
     });
+  };
 
-    // Validate test exists in database and code matches (prevents fake testId injection)
-    const dbTest = await db.query.tests.findFirst({
-      where: eq(testsTable.id, test.id),
-      columns: { id: true, code: true }
-    });
+  while (pending.length > 0 || running.size > 0) {
+    // Fill up to maxParallel slots
+    while (running.size < maxParallel && pending.length > 0) {
+      const test = pending.shift()!;
 
-    if (!dbTest || dbTest.code !== test.code) {
-      console.error(`[Executor] Test ${test.id} not found or code mismatch`);
-      results.push({
-        testId: test.id,
-        status: 'failed',
-        durationMs: 0,
-        screenshots: [],
-        errorMessage: `Test validation failed: test not found or code mismatch`,
+      // Validate test exists in database and code matches (prevents fake testId injection)
+      const dbTest = await db.query.tests.findFirst({
+        where: eq(testsTable.id, test.id),
+        columns: { id: true, code: true }
       });
-      continue;
+
+      if (!dbTest || dbTest.code !== test.code) {
+        console.error(`[Executor] Test ${test.id} not found or code mismatch`);
+        results.push({
+          testId: test.id,
+          status: 'failed',
+          durationMs: 0,
+          screenshots: [],
+          errorMessage: `Test validation failed: test not found or code mismatch`,
+        });
+        completedCount++;
+        continue;
+      }
+
+      // Create run_test command with code hash for integrity verification
+      const command = createMessage<RunTestCommand>('command:run_test', {
+        testId: test.id,
+        testRunId: runId,
+        code: test.code,
+        codeHash: hashCode(test.code),
+        targetUrl: baseUrl,
+        screenshotPath: `${runId}-${test.id}.png`,
+        timeout: options.playwrightSettings?.navigationTimeout || 30000,
+        repositoryId: options.repositoryId || undefined,
+        viewport,
+        storageState: options.setupContext?.storageState,
+        setupVariables: options.setupContext?.variables,
+      });
+
+      // Queue command for runner (polling mode)
+      queueCommand(runnerId, command);
+
+      // Start waiting for result (non-blocking)
+      const promise = waitForTestResult(runnerId, command.id, runId, test.id, options.repositoryId);
+      running.set(test.id, { promise, testName: test.name });
     }
 
-    // Create run_test command with code hash for integrity verification
-    const command = createMessage<RunTestCommand>('command:run_test', {
-      testId: test.id,
-      testRunId: runId,
-      code: test.code,
-      codeHash: hashCode(test.code),
-      targetUrl: baseUrl,
-      screenshotPath: `${runId}-${test.id}.png`,
-      timeout: options.playwrightSettings?.navigationTimeout || 30000,
-      repositoryId: options.repositoryId || undefined,
-      viewport,
-      storageState: options.setupContext?.storageState,
-      setupVariables: options.setupContext?.variables,
-    });
+    updateProgress();
 
-    // Queue command for runner (polling mode)
-    queueCommand(runnerId, command);
+    if (running.size === 0) break;
 
-    // Wait for result (poll with timeout)
-    const result = await waitForTestResult(runnerId, command.id, runId, test.id, options.repositoryId);
-    results.push(result);
+    // Wait for any test to complete
+    const entries = [...running.entries()];
+    const racePromises = entries.map(([testId, { promise }]) =>
+      promise.then(result => ({ testId, result }))
+    );
 
-    await onResult?.(result);
+    const completed = await Promise.race(racePromises);
 
-    onProgress?.({
-      completed: i + 1,
-      total: tests.length,
-      currentTestName: test.name,
-    });
+    // Remove from running and process result
+    running.delete(completed.testId);
+    completedCount++;
+    results.push(completed.result);
+    await onResult?.(completed.result);
+
+    updateProgress();
   }
 
   return results;
