@@ -243,7 +243,7 @@ export class TestRunner {
 
       try {
         await Promise.race([
-          this.executeTestCode(page, command.code, command.targetUrl, captureScreenshot, logFn).catch(e => { throw e; }),
+          this.executeTestCode(page, command.code, command.targetUrl, captureScreenshot, logFn, softErrors).catch(e => { throw e; }),
           new Promise<never>((_, reject) => {
             const timer = setTimeout(() => {
               logFn('warn', `Timeout fired (${testTimeout}ms) — closing context to kill in-flight operations`);
