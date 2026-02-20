@@ -785,6 +785,10 @@ function generateCodeFromRemoteEvents(
           lines.push(`  await page.keyboard.up('${mod}');`);
         }
       }
+    } else if (event.type === 'scroll') {
+      const deltaX = (event.data.deltaX as number) || 0;
+      const deltaY = (event.data.deltaY as number) || 0;
+      lines.push(`  await page.mouse.wheel(${deltaX}, ${deltaY});`);
     }
   }
 

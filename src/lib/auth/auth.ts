@@ -9,6 +9,9 @@ import { getGitHubUser } from "@/lib/github/oauth";
 
 export const auth = betterAuth({
   baseURL: process.env.BETTER_AUTH_BASE_URL || process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000",
+  trustedOrigins: process.env.BETTER_AUTH_TRUSTED_ORIGINS
+    ? process.env.BETTER_AUTH_TRUSTED_ORIGINS.split(",")
+    : undefined,
 
   database: drizzleAdapter(db, {
     provider: "sqlite",

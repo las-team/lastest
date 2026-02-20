@@ -189,7 +189,7 @@ interface VerificationStatus {
   lastChecked?: number;
 }
 
-type KeyboardModifier = 'Alt' | 'Control' | 'Shift' | 'Meta';
+type KeyboardModifier = 'Alt' | 'Control' | 'Shift' | 'Meta' | ' ';
 
 interface RecordingEvent {
   type: string;
@@ -218,6 +218,8 @@ interface RecordingEvent {
     actionId?: string;
     modifiers?: KeyboardModifier[];
     key?: string;
+    deltaX?: number;
+    deltaY?: number;
     elementInfo?: {
       tagName: string;
       id?: string;

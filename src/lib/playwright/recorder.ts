@@ -59,10 +59,10 @@ export interface VerificationStatus {
 }
 
 // Keyboard modifiers for modifier key tracking (ALT/CTRL+drag support)
-export type KeyboardModifier = 'Alt' | 'Control' | 'Shift' | 'Meta';
+export type KeyboardModifier = 'Alt' | 'Control' | 'Shift' | 'Meta' | ' ';
 
 export interface RecordingEvent {
-  type: 'action' | 'navigation' | 'screenshot' | 'error' | 'complete' | 'assertion' | 'cursor-move' | 'mouse-down' | 'mouse-up' | 'hover-preview' | 'keypress';
+  type: 'action' | 'navigation' | 'screenshot' | 'error' | 'complete' | 'assertion' | 'cursor-move' | 'mouse-down' | 'mouse-up' | 'hover-preview' | 'keypress' | 'scroll';
   timestamp: number;
   sequence: number;
   status: 'preview' | 'committed';
@@ -85,6 +85,8 @@ export interface RecordingEvent {
     elementInfo?: ElementInfo; // for hover-preview
     actionId?: string; // unique ID for verification tracking
     elementAssertion?: ElementAssertion; // for element assertions via Shift+right-click
+    deltaX?: number; // scroll delta X
+    deltaY?: number; // scroll delta Y
   };
 }
 
@@ -370,6 +372,21 @@ export class PlaywrightRecorder extends EventEmitter {
       this.addEvent('keypress', { key, modifiers: modifiers && modifiers.length > 0 ? modifiers : undefined });
     });
 
+    // Scroll tracking with coalescing
+    await this.page.exposeFunction('__recordScroll', (deltaX: number, deltaY: number) => {
+      // Coalesce with previous scroll event if it exists
+      if (this.session?.events.length) {
+        const lastEvent = this.session.events[this.session.events.length - 1];
+        if (lastEvent.type === 'scroll') {
+          lastEvent.data.deltaX = (lastEvent.data.deltaX || 0) + deltaX;
+          lastEvent.data.deltaY = (lastEvent.data.deltaY || 0) + deltaY;
+          this.emit('event', lastEvent);
+          return;
+        }
+      }
+      this.addEvent('scroll', { deltaX, deltaY });
+    });
+
     // Hover preview tracking (always enabled)
     await this.page.exposeFunction('__recordHoverPreview', (elementInfo: ElementInfo) => {
       // Replace any existing preview event (only keep latest)
@@ -422,13 +439,31 @@ export class PlaywrightRecorder extends EventEmitter {
         priority: number;
       }
 
-      // Keyboard modifier tracking for ALT/CTRL+drag support
-      type BrowserKeyboardModifier = 'Alt' | 'Control' | 'Shift' | 'Meta';
+      // Keyboard modifier tracking for ALT/CTRL/Space+drag support
+      type BrowserKeyboardModifier = 'Alt' | 'Control' | 'Shift' | 'Meta' | ' ';
       const activeModifiers: Set<BrowserKeyboardModifier> = new Set();
+
+      // Space-as-modifier: treat long-press Space (>150ms) as a modifier key (e.g., Excalidraw pan)
+      const SPACE_MODIFIER_THRESHOLD_MS = 150;
+      let spaceDownTime = 0;
+      let spaceModifierTimer: ReturnType<typeof setTimeout> | null = null;
+      let spaceIsModifier = false;
 
       document.addEventListener('keydown', (e) => {
         if (e.key === 'Alt' || e.key === 'Control' || e.key === 'Shift' || e.key === 'Meta') {
           activeModifiers.add(e.key as BrowserKeyboardModifier);
+        } else if (e.key === ' ' && !e.repeat) {
+          // Space key: defer decision — might be a modifier (long hold) or a keypress (quick tap)
+          const target = e.target as HTMLElement;
+          const isEditable = target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable;
+          if (!isEditable) {
+            spaceDownTime = Date.now();
+            spaceIsModifier = false;
+            spaceModifierTimer = setTimeout(() => {
+              spaceIsModifier = true;
+              activeModifiers.add(' ');
+            }, SPACE_MODIFIER_THRESHOLD_MS);
+          }
         } else {
           // Record non-modifier keypresses (skip if inside input/textarea to avoid duplicate recording with fill)
           const target = e.target as HTMLElement;
@@ -446,12 +481,33 @@ export class PlaywrightRecorder extends EventEmitter {
       document.addEventListener('keyup', (e) => {
         if (e.key === 'Alt' || e.key === 'Control' || e.key === 'Shift' || e.key === 'Meta') {
           activeModifiers.delete(e.key as BrowserKeyboardModifier);
+        } else if (e.key === ' ') {
+          if (spaceModifierTimer) {
+            clearTimeout(spaceModifierTimer);
+            spaceModifierTimer = null;
+          }
+          if (spaceIsModifier) {
+            // Was held as modifier — just release, don't record as keypress
+            activeModifiers.delete(' ');
+            spaceIsModifier = false;
+          } else {
+            // Quick tap — record as a normal Space keypress
+            const target = e.target as HTMLElement;
+            const isEditable = target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable;
+            if (!isEditable) {
+              const modifiers = getActiveModifiers();
+              // @ts-expect-error
+              window.__recordKeypress?.(' ', modifiers);
+            }
+          }
         }
       }, true);
 
       // Clear modifiers on window blur (user switched apps)
       window.addEventListener('blur', () => {
         activeModifiers.clear();
+        if (spaceModifierTimer) { clearTimeout(spaceModifierTimer); spaceModifierTimer = null; }
+        spaceIsModifier = false;
       });
 
       function getActiveModifiers(): BrowserKeyboardModifier[] {
@@ -671,6 +727,26 @@ export class PlaywrightRecorder extends EventEmitter {
           window.__recordMouseEvent?.('up', e.clientX, e.clientY, e.button, modifiers);
         }, true);
       }
+
+      // Wheel/scroll tracking with debounce
+      let scrollAccumX = 0;
+      let scrollAccumY = 0;
+      let scrollFlushTimer: ReturnType<typeof setTimeout> | null = null;
+      const SCROLL_DEBOUNCE_MS = 100;
+      document.addEventListener('wheel', (e: WheelEvent) => {
+        scrollAccumX += e.deltaX;
+        scrollAccumY += e.deltaY;
+        if (scrollFlushTimer) clearTimeout(scrollFlushTimer);
+        scrollFlushTimer = setTimeout(() => {
+          if (scrollAccumX !== 0 || scrollAccumY !== 0) {
+            // @ts-expect-error
+            window.__recordScroll?.(Math.round(scrollAccumX), Math.round(scrollAccumY));
+            scrollAccumX = 0;
+            scrollAccumY = 0;
+          }
+          scrollFlushTimer = null;
+        }, SCROLL_DEBOUNCE_MS);
+      }, { passive: true, capture: true });
 
       // Hover preview tracking (throttled, always enabled)
       let lastHoverTime = 0;
@@ -1394,6 +1470,10 @@ export class PlaywrightRecorder extends EventEmitter {
             lines.push(`  await page.keyboard.up('${mod}');`);
           }
         }
+      } else if (event.type === 'scroll') {
+        const deltaX = event.data.deltaX || 0;
+        const deltaY = event.data.deltaY || 0;
+        lines.push(`  await page.mouse.wheel(${deltaX}, ${deltaY});`);
       }
     }
 
