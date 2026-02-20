@@ -324,23 +324,37 @@ async function executeViaRunner(
       const payload = testResultMsg!.payload as Record<string, unknown>;
       const errorPayload = payload.error as Record<string, unknown> | undefined;
 
-      // Find screenshots on disk (already saved by route handler)
-      const diskScreenshots = await findScreenshotsOnDisk(runId, info.testId, options.repositoryId);
+      // Screenshots are uploaded AFTER the test result, so wait briefly
+      // then check both DB command results and disk for screenshots.
+      await new Promise(resolve => setTimeout(resolve, 3000));
+
+      // Re-fetch unacked results to pick up screenshots that arrived after the test result
+      const updatedResults = await getUnacknowledgedResults([dbCmd.id]);
+      const screenshotResults = updatedResults.filter(r => r.type === 'response:screenshot');
+      let allScreenshots: { path: string; label: string }[] = screenshotResults.map((r, idx) => {
+        const sp = r.payload as Record<string, unknown>;
+        return { path: sp.path as string, label: `Step ${idx + 1}` };
+      });
+
+      // Fallback to disk scan if no DB screenshot entries found
+      if (allScreenshots.length === 0) {
+        allScreenshots = await findScreenshotsOnDisk(runId, info.testId, options.repositoryId);
+      }
 
       const testResult: TestRunResult = {
         testId: (payload.testId as string) || info.testId,
         status: payload.status === 'error' || payload.status === 'timeout' || payload.status === 'cancelled' ? 'failed' : (payload.status as 'passed' | 'failed'),
         durationMs: (payload.durationMs as number) || 0,
-        screenshotPath: diskScreenshots[0]?.path,
-        screenshots: diskScreenshots,
+        screenshotPath: allScreenshots[0]?.path,
+        screenshots: allScreenshots,
         errorMessage: errorPayload?.message as string | undefined,
         softErrors: Array.isArray(payload.softErrors) && payload.softErrors.length > 0 ? payload.softErrors as string[] : undefined,
       };
       results.push(testResult);
       await onResult?.(testResult);
 
-      // Acknowledge all results for this command
-      const resultIds = unacked.map(r => r.id);
+      // Acknowledge all results for this command (including screenshot entries)
+      const resultIds = updatedResults.map(r => r.id);
       if (resultIds.length > 0) {
         await acknowledgeResults(resultIds);
       }
