@@ -856,6 +856,8 @@ export const oauthAccounts = sqliteTable('oauth_accounts', {
   accessToken: text('access_token'),
   refreshToken: text('refresh_token'),
   idToken: text('id_token'),
+  accessTokenExpiresAt: integer('access_token_expires_at', { mode: 'timestamp' }),
+  refreshTokenExpiresAt: integer('refresh_token_expires_at', { mode: 'timestamp' }),
   scope: text('scope'),
   tokenExpiresAt: integer('token_expires_at', { mode: 'timestamp' }),
   password: text('password'), // BetterAuth stores credential passwords here

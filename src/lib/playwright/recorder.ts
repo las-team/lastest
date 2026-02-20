@@ -82,6 +82,7 @@ export interface RecordingEvent {
     button?: number; // mouse button for mouse-down/up
     modifiers?: KeyboardModifier[]; // active keyboard modifiers during action
     key?: string; // key name for keypress events
+    keyCode?: string; // physical key code (e.g. 'Digit1', 'KeyA') for layout-independent replay
     elementInfo?: ElementInfo; // for hover-preview
     actionId?: string; // unique ID for verification tracking
     elementAssertion?: ElementAssertion; // for element assertions via Shift+right-click
@@ -368,23 +369,28 @@ export class PlaywrightRecorder extends EventEmitter {
     }
 
     // Keypress tracking for keyboard interactions
-    await this.page.exposeFunction('__recordKeypress', (key: string, modifiers?: KeyboardModifier[]) => {
-      this.addEvent('keypress', { key, modifiers: modifiers && modifiers.length > 0 ? modifiers : undefined });
+    await this.page.exposeFunction('__recordKeypress', (key: string, modifiers?: KeyboardModifier[], keyCode?: string) => {
+      this.addEvent('keypress', { key, modifiers: modifiers && modifiers.length > 0 ? modifiers : undefined, keyCode: keyCode || undefined });
     });
 
     // Scroll tracking with coalescing
-    await this.page.exposeFunction('__recordScroll', (deltaX: number, deltaY: number) => {
-      // Coalesce with previous scroll event if it exists
+    await this.page.exposeFunction('__recordScroll', (deltaX: number, deltaY: number, modifiers?: KeyboardModifier[]) => {
+      const mods = modifiers && modifiers.length > 0 ? modifiers : undefined;
+      // Coalesce with previous scroll event if same modifiers
       if (this.session?.events.length) {
         const lastEvent = this.session.events[this.session.events.length - 1];
         if (lastEvent.type === 'scroll') {
-          lastEvent.data.deltaX = (lastEvent.data.deltaX || 0) + deltaX;
-          lastEvent.data.deltaY = (lastEvent.data.deltaY || 0) + deltaY;
-          this.emit('event', lastEvent);
-          return;
+          const lastMods = lastEvent.data.modifiers;
+          const sameModifiers = JSON.stringify(lastMods) === JSON.stringify(mods);
+          if (sameModifiers) {
+            lastEvent.data.deltaX = (lastEvent.data.deltaX || 0) + deltaX;
+            lastEvent.data.deltaY = (lastEvent.data.deltaY || 0) + deltaY;
+            this.emit('event', lastEvent);
+            return;
+          }
         }
       }
-      this.addEvent('scroll', { deltaX, deltaY });
+      this.addEvent('scroll', { deltaX, deltaY, modifiers: mods });
     });
 
     // Hover preview tracking (always enabled)
@@ -443,27 +449,26 @@ export class PlaywrightRecorder extends EventEmitter {
       type BrowserKeyboardModifier = 'Alt' | 'Control' | 'Shift' | 'Meta' | ' ';
       const activeModifiers: Set<BrowserKeyboardModifier> = new Set();
 
-      // Space-as-modifier: treat long-press Space (>150ms) as a modifier key (e.g., Excalidraw pan)
-      const SPACE_MODIFIER_THRESHOLD_MS = 150;
-      let spaceDownTime = 0;
-      let spaceModifierTimer: ReturnType<typeof setTimeout> | null = null;
-      let spaceIsModifier = false;
+      // Space-as-modifier: add Space to modifiers immediately on keydown.
+      // If released quickly without any mouse interaction, record as keypress instead.
+      let spaceDown = false;
+      let spaceUsedAsModifier = false;
 
       document.addEventListener('keydown', (e) => {
         if (e.key === 'Alt' || e.key === 'Control' || e.key === 'Shift' || e.key === 'Meta') {
           activeModifiers.add(e.key as BrowserKeyboardModifier);
-        } else if (e.key === ' ' && !e.repeat) {
-          // Space key: defer decision — might be a modifier (long hold) or a keypress (quick tap)
+        } else if (e.key === ' ') {
+          // Handle ALL space keydowns here (including repeats) to prevent them from falling through
           const target = e.target as HTMLElement;
           const isEditable = target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable;
           if (!isEditable) {
-            spaceDownTime = Date.now();
-            spaceIsModifier = false;
-            spaceModifierTimer = setTimeout(() => {
-              spaceIsModifier = true;
+            if (!e.repeat) {
+              spaceDown = true;
+              spaceUsedAsModifier = false;
               activeModifiers.add(' ');
-            }, SPACE_MODIFIER_THRESHOLD_MS);
+            }
           }
+          // Repeat keydowns for space are intentionally ignored
         } else {
           // Record non-modifier keypresses (skip if inside input/textarea to avoid duplicate recording with fill)
           const target = e.target as HTMLElement;
@@ -473,7 +478,7 @@ export class PlaywrightRecorder extends EventEmitter {
           if (!isEditable || isSpecialKey) {
             const modifiers = getActiveModifiers();
             // @ts-expect-error
-            window.__recordKeypress?.(e.key, modifiers);
+            window.__recordKeypress?.(e.key, modifiers, e.code);
           }
         }
       }, true);
@@ -482,23 +487,21 @@ export class PlaywrightRecorder extends EventEmitter {
         if (e.key === 'Alt' || e.key === 'Control' || e.key === 'Shift' || e.key === 'Meta') {
           activeModifiers.delete(e.key as BrowserKeyboardModifier);
         } else if (e.key === ' ') {
-          if (spaceModifierTimer) {
-            clearTimeout(spaceModifierTimer);
-            spaceModifierTimer = null;
-          }
-          if (spaceIsModifier) {
-            // Was held as modifier — just release, don't record as keypress
-            activeModifiers.delete(' ');
-            spaceIsModifier = false;
-          } else {
-            // Quick tap — record as a normal Space keypress
-            const target = e.target as HTMLElement;
-            const isEditable = target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable;
-            if (!isEditable) {
-              const modifiers = getActiveModifiers();
-              // @ts-expect-error
-              window.__recordKeypress?.(' ', modifiers);
+          activeModifiers.delete(' ');
+          if (spaceDown) {
+            spaceDown = false;
+            if (!spaceUsedAsModifier) {
+              // Quick tap with no mouse interaction — record as a normal Space keypress
+              const target = e.target as HTMLElement;
+              const isEditable = target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable;
+              if (!isEditable) {
+                // Remove space from modifiers list for this keypress
+                const modifiers = getActiveModifiers();
+                // @ts-expect-error
+                window.__recordKeypress?.(' ', modifiers.length > 0 ? modifiers : undefined, 'Space');
+              }
             }
+            spaceUsedAsModifier = false;
           }
         }
       }, true);
@@ -506,8 +509,8 @@ export class PlaywrightRecorder extends EventEmitter {
       // Clear modifiers on window blur (user switched apps)
       window.addEventListener('blur', () => {
         activeModifiers.clear();
-        if (spaceModifierTimer) { clearTimeout(spaceModifierTimer); spaceModifierTimer = null; }
-        spaceIsModifier = false;
+        spaceDown = false;
+        spaceUsedAsModifier = false;
       });
 
       function getActiveModifiers(): BrowserKeyboardModifier[] {
@@ -716,6 +719,8 @@ export class PlaywrightRecorder extends EventEmitter {
 
         // Mouse down/up events with modifier tracking
         document.addEventListener('mousedown', (e: MouseEvent) => {
+          // Mark Space as used-as-modifier if it's held during a mouse interaction
+          if (spaceDown) spaceUsedAsModifier = true;
           const modifiers = getActiveModifiers();
           // @ts-expect-error
           window.__recordMouseEvent?.('down', e.clientX, e.clientY, e.button, modifiers);
@@ -728,21 +733,32 @@ export class PlaywrightRecorder extends EventEmitter {
         }, true);
       }
 
-      // Wheel/scroll tracking with debounce
+      // Wheel/scroll tracking with debounce and modifier capture
       let scrollAccumX = 0;
       let scrollAccumY = 0;
+      let scrollModifiers: BrowserKeyboardModifier[] = [];
       let scrollFlushTimer: ReturnType<typeof setTimeout> | null = null;
       const SCROLL_DEBOUNCE_MS = 100;
       document.addEventListener('wheel', (e: WheelEvent) => {
         scrollAccumX += e.deltaX;
         scrollAccumY += e.deltaY;
+        // Capture modifiers from the wheel event itself (more reliable than keydown tracking)
+        if (!scrollFlushTimer) {
+          const eventMods: BrowserKeyboardModifier[] = [];
+          if (e.ctrlKey) eventMods.push('Control');
+          if (e.shiftKey) eventMods.push('Shift');
+          if (e.altKey) eventMods.push('Alt');
+          if (e.metaKey) eventMods.push('Meta');
+          scrollModifiers = eventMods;
+        }
         if (scrollFlushTimer) clearTimeout(scrollFlushTimer);
         scrollFlushTimer = setTimeout(() => {
           if (scrollAccumX !== 0 || scrollAccumY !== 0) {
             // @ts-expect-error
-            window.__recordScroll?.(Math.round(scrollAccumX), Math.round(scrollAccumY));
+            window.__recordScroll?.(Math.round(scrollAccumX), Math.round(scrollAccumY), scrollModifiers.length > 0 ? scrollModifiers : undefined);
             scrollAccumX = 0;
             scrollAccumY = 0;
+            scrollModifiers = [];
           }
           scrollFlushTimer = null;
         }, SCROLL_DEBOUNCE_MS);
@@ -1158,6 +1174,19 @@ export class PlaywrightRecorder extends EventEmitter {
     this.lastCompletedSession = null;
   }
 
+  /** Map e.code (physical key) to the base unshifted key name for Playwright */
+  private static keyCodeToBaseKey(code: string): string | null {
+    if (code.startsWith('Digit')) return code[5]; // Digit1 → 1
+    if (code.startsWith('Key')) return code.slice(3).toLowerCase(); // KeyA → a
+    const map: Record<string, string> = {
+      Backquote: '`', Minus: '-', Equal: '=',
+      BracketLeft: '[', BracketRight: ']', Backslash: '\\',
+      Semicolon: ';', Quote: "'", Comma: ',', Period: '.', Slash: '/',
+      Space: ' ',
+    };
+    return map[code] ?? null;
+  }
+
   private generateCode(): string {
     if (!this.session) return '';
 
@@ -1253,6 +1282,8 @@ export class PlaywrightRecorder extends EventEmitter {
     let lastAction = '';
     let cursorBatch: [number, number, number][] = [];
     let lastCursorTimestamp = 0;
+    let lastCursorX = 640;
+    let lastCursorY = 360;
 
     const flushCursorBatch = () => {
       if (cursorBatch.length > 0) {
@@ -1268,6 +1299,8 @@ export class PlaywrightRecorder extends EventEmitter {
         const delay = lastCursorTimestamp > 0 ? event.timestamp - lastCursorTimestamp : 0;
         cursorBatch.push([x, y, delay]);
         lastCursorTimestamp = event.timestamp;
+        lastCursorX = x;
+        lastCursorY = y;
         continue;
       }
 
@@ -1456,14 +1489,24 @@ export class PlaywrightRecorder extends EventEmitter {
           }
         }
       } else if (event.type === 'keypress' && event.data.key) {
-        const { key, modifiers } = event.data;
+        const { key, modifiers, keyCode } = event.data;
+        // When Shift is a modifier and e.key is a single char, e.key is the shifted result
+        // (e.g. Shift+1 → '!' on US, '\'' on other layouts). Use the physical keyCode
+        // to get the base key so Shift+1 replays as Shift+1, not Shift+<shifted-char>.
+        let pressKey = key;
+        const hasShift = modifiers && modifiers.includes('Shift');
+        if (hasShift && key.length === 1 && keyCode) {
+          const baseKey = PlaywrightRecorder.keyCodeToBaseKey(keyCode);
+          if (baseKey) pressKey = baseKey;
+        }
+        const escapedKey = pressKey.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
         // Press modifier keys before the key
         if (modifiers && modifiers.length > 0) {
           for (const mod of modifiers) {
             lines.push(`  await page.keyboard.down('${mod}');`);
           }
         }
-        lines.push(`  await page.keyboard.press('${key}');`);
+        lines.push(`  await page.keyboard.press('${escapedKey}');`);
         // Release modifier keys after the key
         if (modifiers && modifiers.length > 0) {
           for (const mod of [...modifiers].reverse()) {
@@ -1473,7 +1516,22 @@ export class PlaywrightRecorder extends EventEmitter {
       } else if (event.type === 'scroll') {
         const deltaX = event.data.deltaX || 0;
         const deltaY = event.data.deltaY || 0;
-        lines.push(`  await page.mouse.wheel(${deltaX}, ${deltaY});`);
+        const scrollMods = event.data.modifiers;
+        if (scrollMods && scrollMods.length > 0) {
+          // Dispatch WheelEvent via evaluate with modifier flags set directly on the event
+          // (keyboard.down + mouse.wheel doesn't propagate modifier state to the wheel event)
+          const modFlags: string[] = [];
+          if (scrollMods.includes('Control')) modFlags.push('ctrlKey: true');
+          if (scrollMods.includes('Shift')) modFlags.push('shiftKey: true');
+          if (scrollMods.includes('Alt')) modFlags.push('altKey: true');
+          if (scrollMods.includes('Meta')) modFlags.push('metaKey: true');
+          lines.push(`  await page.evaluate(({ x, y, dx, dy }) => {`);
+          lines.push(`    const el = document.elementFromPoint(x, y) || document.documentElement;`);
+          lines.push(`    el.dispatchEvent(new WheelEvent('wheel', { deltaX: dx, deltaY: dy, ${modFlags.join(', ')}, bubbles: true, cancelable: true, clientX: x, clientY: y }));`);
+          lines.push(`  }, { x: ${lastCursorX}, y: ${lastCursorY}, dx: ${deltaX}, dy: ${deltaY} });`);
+        } else {
+          lines.push(`  await page.mouse.wheel(${deltaX}, ${deltaY});`);
+        }
       }
     }
 

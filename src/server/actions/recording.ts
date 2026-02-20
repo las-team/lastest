@@ -590,6 +590,8 @@ function generateCodeFromRemoteEvents(
   let lastAction = '';
   let cursorBatch: [number, number, number][] = [];
   let lastCursorTimestamp = 0;
+  let lastCursorX = 640;
+  let lastCursorY = 360;
 
   const flushCursorBatch = () => {
     if (cursorBatch.length > 0) {
@@ -605,6 +607,8 @@ function generateCodeFromRemoteEvents(
       const delay = lastCursorTimestamp > 0 ? event.timestamp - lastCursorTimestamp : 0;
       cursorBatch.push([x, y, delay]);
       lastCursorTimestamp = event.timestamp;
+      lastCursorX = x;
+      lastCursorY = y;
       continue;
     }
 
@@ -788,7 +792,20 @@ function generateCodeFromRemoteEvents(
     } else if (event.type === 'scroll') {
       const deltaX = (event.data.deltaX as number) || 0;
       const deltaY = (event.data.deltaY as number) || 0;
-      lines.push(`  await page.mouse.wheel(${deltaX}, ${deltaY});`);
+      const scrollMods = event.data.modifiers as string[] | undefined;
+      if (scrollMods && scrollMods.length > 0) {
+        const modFlags: string[] = [];
+        if (scrollMods.includes('Control')) modFlags.push('ctrlKey: true');
+        if (scrollMods.includes('Shift')) modFlags.push('shiftKey: true');
+        if (scrollMods.includes('Alt')) modFlags.push('altKey: true');
+        if (scrollMods.includes('Meta')) modFlags.push('metaKey: true');
+        lines.push(`  await page.evaluate(({ x, y, dx, dy }) => {`);
+        lines.push(`    const el = document.elementFromPoint(x, y) || document.documentElement;`);
+        lines.push(`    el.dispatchEvent(new WheelEvent('wheel', { deltaX: dx, deltaY: dy, ${modFlags.join(', ')}, bubbles: true, cancelable: true, clientX: x, clientY: y }));`);
+        lines.push(`  }, { x: ${lastCursorX}, y: ${lastCursorY}, dx: ${deltaX}, dy: ${deltaY} });`);
+      } else {
+        lines.push(`  await page.mouse.wheel(${deltaX}, ${deltaY});`);
+      }
     }
   }
 
