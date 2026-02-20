@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { usePreferredRunner } from '@/hooks/use-preferred-runner';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -102,7 +103,7 @@ export function TestsPageClient({ areas, tests, routes, repositoryId, baseUrl = 
   const [isBulkFixing, setIsBulkFixing] = useState(false);
   const [isBulkMcpFixing, setIsBulkMcpFixing] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
-  const [executionTarget, setExecutionTarget] = useState<string>('local');
+  const [executionTarget, setExecutionTarget] = usePreferredRunner();
   const [showDeleted, setShowDeleted] = useState(false);
   const [isRestoring, setIsRestoring] = useState(false);
   const [isPermanentlyDeleting, setIsPermanentlyDeleting] = useState(false);

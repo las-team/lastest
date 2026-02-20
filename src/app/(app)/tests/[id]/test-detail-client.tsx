@@ -2,6 +2,7 @@
 
 import { useState, useRef, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
+import { usePreferredRunner } from '@/hooks/use-preferred-runner';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -98,7 +99,7 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
   // Run state
   const [isRunning, setIsRunning] = useState(false);
   const pollIntervalRef = useRef<NodeJS.Timeout | null>(null);
-  const [executionTarget, setExecutionTarget] = useState<string>('local');
+  const [executionTarget, setExecutionTarget] = usePreferredRunner();
 
   // Cleanup poll interval on unmount
   useEffect(() => {

@@ -92,7 +92,8 @@
       "Bash(git -C /home/ewyct/dev/lastest2 show 4c9c5950a0d846d9fcdb5a9510a06ec55db59f08:src/app/api/auth/logout/route.ts)",
       "WebFetch(domain:www.better-auth.com)",
       "Bash(curl:*)",
-      "Bash(timeout 15 tail:*)"
+      "Bash(timeout 15 tail:*)",
+      "Bash(docker push:*)"
     ]
   },
   "disabledMcpjsonServers": [

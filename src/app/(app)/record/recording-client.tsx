@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
+import { usePreferredRunner } from '@/hooks/use-preferred-runner';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -250,7 +251,7 @@ export function RecordingClient({
   const [playwrightStatus, setPlaywrightStatus] = useState<PlaywrightAvailability | null>(null);
   const [selectedEngine, setSelectedEngine] = useState<RecordingEngine>(defaultEngine);
   const [inspectorSessionId, setInspectorSessionId] = useState<string | null>(null);
-  const [executionTarget, setExecutionTarget] = useState<string>('local');
+  const [executionTarget, setExecutionTarget] = usePreferredRunner();
   const [runSetupBeforeRecording, setRunSetupBeforeRecording] = useState(true);
 
   // Re-record mode
