@@ -1,16 +1,26 @@
 import { NextRequest, NextResponse } from 'next/server';
+import crypto from 'crypto';
 import { createAndRunBuild } from '@/server/actions/builds';
 import * as queries from '@/lib/db/queries';
 
 const GITLAB_WEBHOOK_SECRET = process.env.GITLAB_WEBHOOK_SECRET || '';
 
 /**
- * Verify GitLab webhook token
- * GitLab uses a simple token header, not HMAC signature
+ * Verify GitLab webhook token using timing-safe comparison.
+ * GitLab uses a simple token header, not HMAC signature.
  */
 function verifyWebhookToken(token: string | null): boolean {
-  if (!GITLAB_WEBHOOK_SECRET) return false; // Reject when secret is not configured
-  return token === GITLAB_WEBHOOK_SECRET;
+  if (!GITLAB_WEBHOOK_SECRET || !token) return false;
+  const expected = Buffer.from(GITLAB_WEBHOOK_SECRET);
+  const received = Buffer.from(token);
+  if (expected.length !== received.length) return false;
+  return crypto.timingSafeEqual(expected, received);
+}
+
+/** Sanitize webhook string fields to prevent injection */
+function sanitizeStr(val: unknown, maxLen = 500): string {
+  if (typeof val !== 'string') return '';
+  return val.replace(/[^\x20-\x7E]/g, '').slice(0, maxLen);
 }
 
 interface MergeRequestEvent {
@@ -71,22 +81,30 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'Invalid token' }, { status: 401 });
   }
 
-  const data = JSON.parse(payload);
+  let data: unknown;
+  try {
+    data = JSON.parse(payload);
+  } catch {
+    return NextResponse.json({ error: 'Malformed JSON' }, { status: 400 });
+  }
 
   try {
     if (isMergeRequestEvent(data)) {
       // Handle merge request events
       const { object_attributes: mr, project } = data;
-      const [namespace, projectName] = project.path_with_namespace.split('/');
+      const pathParts = sanitizeStr(project.path_with_namespace, 200).split('/');
+      const namespace = pathParts[0] || '';
+      const projectName = pathParts.slice(1).join('/') || '';
 
       if (mr.action === 'open' || mr.action === 'update' || mr.action === 'reopen') {
+        const sourceBranch = sanitizeStr(mr.source_branch, 250);
         // Create or update MR record
-        const existingMR = await queries.getPullRequestByBranch(mr.source_branch);
+        const existingMR = await queries.getPullRequestByBranch(sourceBranch);
 
         if (existingMR) {
           await queries.updatePullRequest(existingMR.id, {
-            headCommit: mr.last_commit.id,
-            title: mr.title,
+            headCommit: sanitizeStr(mr.last_commit.id, 40),
+            title: sanitizeStr(mr.title, 300),
             status: mr.state === 'opened' ? 'open' : mr.state,
           });
         } else {
@@ -94,12 +112,12 @@ export async function POST(request: NextRequest) {
             provider: 'gitlab',
             gitlabMrIid: mr.iid,
             gitlabProjectId: project.id,
-            repoOwner: namespace,
-            repoName: projectName,
-            headBranch: mr.source_branch,
-            baseBranch: mr.target_branch,
-            headCommit: mr.last_commit.id,
-            title: mr.title,
+            repoOwner: sanitizeStr(namespace, 100),
+            repoName: sanitizeStr(projectName, 100),
+            headBranch: sourceBranch,
+            baseBranch: sanitizeStr(mr.target_branch, 250),
+            headCommit: sanitizeStr(mr.last_commit.id, 40),
+            title: sanitizeStr(mr.title, 300),
             status: mr.state === 'opened' ? 'open' : mr.state,
           });
         }
@@ -112,7 +130,7 @@ export async function POST(request: NextRequest) {
 
       if (mr.action === 'close' || mr.action === 'merge') {
         // Update MR status
-        const existingMR = await queries.getPullRequestByBranch(mr.source_branch);
+        const existingMR = await queries.getPullRequestByBranch(sanitizeStr(mr.source_branch, 250));
         if (existingMR) {
           await queries.updatePullRequest(existingMR.id, {
             status: mr.state,
@@ -124,7 +142,7 @@ export async function POST(request: NextRequest) {
 
     if (isPushEvent(data)) {
       // Handle push events
-      const branch = data.ref.replace('refs/heads/', '');
+      const branch = sanitizeStr(data.ref, 500).replace('refs/heads/', '');
 
       // Only trigger for certain branches (configurable)
       const monitoredBranches = (process.env.MONITORED_BRANCHES || 'main,master,develop').split(',');

@@ -19,7 +19,7 @@ fastpath? auto-run fast version of test, if same results mark as fast and run li
 
 Tweet about us
 
-Test coverage assessment and recreation
+Test coverage assessment and recreation based on existing test set
 
 Online - support agent sdk via runner
 

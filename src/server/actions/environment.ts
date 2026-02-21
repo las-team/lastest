@@ -52,6 +52,10 @@ export async function testServerConnection(url: string): Promise<{
   responseTime?: number;
 }> {
   await requireTeamAccess();
+
+  // No SSRF check here — environment config is specifically for testing
+  // the user's own dev/staging server, which is typically localhost or LAN.
+
   const serverManager = getServerManager();
   const startTime = Date.now();
 

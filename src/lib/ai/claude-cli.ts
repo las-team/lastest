@@ -1,24 +1,11 @@
-import { exec, spawn } from 'child_process';
-import { promisify } from 'util';
+import { spawn } from 'child_process';
 import type { AIProvider, GenerateOptions, StreamCallbacks } from './types';
-
-const execAsync = promisify(exec);
 
 // Extend PATH to include common locations for claude CLI
 function getExtendedEnv(): NodeJS.ProcessEnv {
   const homeDir = process.env.HOME || process.env.USERPROFILE || '';
   const extendedPath = `${homeDir}/.local/bin:${process.env.PATH}`;
   return { ...process.env, PATH: extendedPath };
-}
-
-function escapePromptForAnsiC(prompt: string): string {
-  // Escape for ANSI-C quoting ($'...') which properly handles special characters
-  return prompt
-    .replace(/\\/g, '\\\\')
-    .replace(/'/g, "\\'")
-    .replace(/\n/g, '\\n')
-    .replace(/\r/g, '\\r')
-    .replace(/\t/g, '\\t');
 }
 
 export class ClaudeCLIProvider implements AIProvider {
@@ -30,23 +17,42 @@ export class ClaudeCLIProvider implements AIProvider {
       fullPrompt = `${systemPrompt}\n\n---\n\n${prompt}`;
     }
 
-    const escapedPrompt = escapePromptForAnsiC(fullPrompt);
-
-    try {
-      const { stdout } = await execAsync(`claude -p $'${escapedPrompt}' < /dev/null`, {
-        timeout: 120000, // 2 minute timeout
-        maxBuffer: 1024 * 1024 * 10, // 10MB buffer
-        shell: '/bin/bash',
+    return new Promise((resolve, reject) => {
+      const child = spawn('claude', ['-p', fullPrompt], {
+        shell: false,
         env: getExtendedEnv(),
+        stdio: ['ignore', 'pipe', 'pipe'],
       });
 
-      return stdout.trim();
-    } catch (error) {
-      if (error instanceof Error) {
-        throw new Error(`Claude CLI error: ${error.message}`);
-      }
-      throw error;
-    }
+      let stdout = '';
+      let stderr = '';
+
+      child.stdout.on('data', (data) => {
+        stdout += data.toString();
+      });
+
+      child.stderr.on('data', (data) => {
+        stderr += data.toString();
+      });
+
+      child.on('close', (code) => {
+        if (code === 0) {
+          resolve(stdout.trim());
+        } else {
+          reject(new Error(`Claude CLI error: exited with code ${code}${stderr ? ` — ${stderr.trim()}` : ''}`));
+        }
+      });
+
+      child.on('error', (error) => {
+        reject(new Error(`Claude CLI error: ${error.message}`));
+      });
+
+      // 2 minute timeout
+      setTimeout(() => {
+        child.kill('SIGTERM');
+        reject(new Error('Claude CLI error: timed out after 120s'));
+      }, 120000);
+    });
   }
 
   async generateStream(options: GenerateOptions, callbacks: StreamCallbacks): Promise<void> {
