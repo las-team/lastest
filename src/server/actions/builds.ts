@@ -11,7 +11,7 @@ import { getServerManager } from '@/lib/playwright/server-manager';
 import { getSetupOrchestrator } from '@/lib/setup/setup-orchestrator';
 import type { SetupContext } from '@/lib/setup/types';
 import { executeTests } from '@/lib/execution/executor';
-import { captureSetupForRemoteRunner } from '@/lib/execution/setup-capture';
+import { resolveSetupCodeForRunner } from '@/lib/execution/setup-capture';
 import { getCurrentSession, requireTeamAccess, requireRepoAccess } from '@/lib/auth';
 import { generateDiff, generateTextAwareDiffFromPaths, type Rectangle } from '@/lib/diff/generator';
 import { hashImage, hashImageWithDimensions } from '@/lib/diff/hasher';
@@ -613,14 +613,14 @@ async function runBuildAsync(
       const remoteRunner = await queries.getRunnerById(runnerId!);
       const maxParallelTests = remoteRunner?.maxParallelTests ?? 1;
 
-      // If no build-level setup, capture per-test setup locally (same as runs.ts)
-      // This handles tests with setupTestId/setupScriptId configured at the test level
-      if (!remoteSetupInfo && !setupContext.storageState) {
-        const perTestSetup = await captureSetupForRemoteRunner(tests, baseUrl, repositoryId);
-        if (perTestSetup) {
-          setupContext.storageState = perTestSetup.storageState;
-          setupContext.variables = { ...setupContext.variables, ...perTestSetup.variables };
-          console.log(`[build] Captured per-test setup for remote runner: storageState=${perTestSetup.storageState ? 'yes' : 'no'}`);
+      // If no build-level setup, resolve per-test setup code to run on the runner
+      // (don't run locally — cookies from a different server instance would be invalid)
+      if (!remoteSetupInfo) {
+        const resolved = await resolveSetupCodeForRunner(tests);
+        if (resolved) {
+          remoteSetupInfo = resolved;
+          await queries.updateBuild(buildId, { setupStatus: 'running' });
+          console.log(`[build] Resolved per-test setup for remote runner: setupId=${resolved.setupId}`);
         }
       }
 

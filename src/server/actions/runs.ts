@@ -4,7 +4,7 @@ import { revalidatePath } from 'next/cache';
 import { getRunner } from '@/lib/playwright/runner';
 import { getServerManager } from '@/lib/playwright/server-manager';
 import { executeTests } from '@/lib/execution/executor';
-import { captureSetupForRemoteRunner } from '@/lib/execution/setup-capture';
+import { resolveSetupCodeForRunner } from '@/lib/execution/setup-capture';
 import { getCurrentSession, requireTeamAccess, requireRepoAccess } from '@/lib/auth';
 import { getBranchInfo } from '@/lib/github/content';
 import * as queries from '@/lib/db/queries';
@@ -146,9 +146,8 @@ async function runTestsAsync(runId: string, tests: Test[], repositoryId?: string
     let results;
 
     if (runnerId && runnerId !== 'local' && teamId) {
-      // Run setup locally and capture storageState for remote runner
-      const baseUrl = envConfig?.baseUrl || 'http://localhost:3000';
-      const setupResult = await captureSetupForRemoteRunner(tests, baseUrl, repositoryId);
+      // Resolve setup code to run on the runner (not locally — different server instance)
+      const setupInfo = await resolveSetupCodeForRunner(tests);
 
       // Use executor for agent routing
       results = await executeTests(tests, runId, {
@@ -158,7 +157,7 @@ async function runTestsAsync(runId: string, tests: Test[], repositoryId?: string
         headless,
         environmentConfig: envConfig,
         playwrightSettings,
-        setupContext: setupResult,
+        setupInfo,
         forceVideoRecording,
         jobId: activeJobId,
       });

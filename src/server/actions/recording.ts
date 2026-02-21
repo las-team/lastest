@@ -192,6 +192,7 @@ export async function stopRecording(repositoryId?: string | null) {
       startedAt: remoteSession.startedAt,
       events: remoteSession.events,
       generatedCode,
+      requiredCapabilities: undefined,
     };
   }
 

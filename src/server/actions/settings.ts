@@ -21,6 +21,7 @@ export async function savePlaywrightSettings(data: {
   actionTimeout?: number;
   pointerGestures?: boolean;
   cursorFPS?: number;
+  cursorPlaybackSpeed?: number;
   enabledRecordingEngines?: RecordingEngine[];
   defaultRecordingEngine?: string;
   freezeAnimations?: boolean;
