@@ -12,7 +12,7 @@ import { getSetupOrchestrator } from '@/lib/setup/setup-orchestrator';
 import type { SetupContext } from '@/lib/setup/types';
 import { executeTests } from '@/lib/execution/executor';
 import { resolveSetupCodeForRunner } from '@/lib/execution/setup-capture';
-import { getCurrentSession, requireTeamAccess, requireRepoAccess } from '@/lib/auth';
+import { requireTeamAccess, requireRepoAccess } from '@/lib/auth';
 import { generateDiff, generateTextAwareDiffFromPaths, type Rectangle } from '@/lib/diff/generator';
 import { hashImage, hashImageWithDimensions } from '@/lib/diff/hasher';
 import { PNG } from 'pngjs';
@@ -394,11 +394,11 @@ async function runBuildAsync(
   let flakyCount = 0;
   let processedCount = 0;
 
-  // Get teamId for agent execution
+  // Get teamId from runner record (not session — session is unavailable in fire-and-forget context)
   let teamId: string | undefined;
   if (runnerId && runnerId !== 'local') {
-    const session = await getCurrentSession();
-    teamId = session?.user?.teamId ?? undefined;
+    const runnerRecord = await queries.getRunnerById(runnerId);
+    teamId = runnerRecord?.teamId;
   }
 
   // Prepare environment and settings for executor

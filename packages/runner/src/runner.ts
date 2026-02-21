@@ -411,6 +411,40 @@ export class TestRunner {
 
       logFn('info', 'Setup code executed successfully');
 
+      // Wait for page to settle after setup (e.g., login click + redirect)
+      if (page) {
+        const setupPageUrl = page.url();
+        try {
+          await page.waitForURL(
+            url => url.toString() !== setupPageUrl,
+            { timeout: 10000, waitUntil: 'networkidle' }
+          );
+          logFn('info', `Post-setup navigation: ${setupPageUrl} → ${page.url()}`);
+        } catch {
+          logFn('info', 'No post-setup navigation detected (URL unchanged)');
+        }
+
+        // Poll for session cookies — the redirect may have completed but
+        // Set-Cookie hasn't been processed by the browser yet
+        try {
+          const ctx = page.context();
+          const deadline = Date.now() + 5000;
+          while (Date.now() < deadline) {
+            const cookies = await ctx.cookies();
+            const hasSession = cookies.some(c =>
+              c.name.includes('session') || c.name.includes('auth') || c.name.includes('token')
+            );
+            if (hasSession) {
+              logFn('info', `Session cookie found after setup (${cookies.length} total cookies)`);
+              break;
+            }
+            await new Promise(r => setTimeout(r, 200));
+          }
+        } catch {
+          // Cookie polling failed — continue anyway
+        }
+      }
+
       // Capture storageState (cookies/localStorage)
       let storageState: string | undefined;
       if (context) {

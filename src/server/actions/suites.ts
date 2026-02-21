@@ -6,7 +6,7 @@ import { getRunner } from '@/lib/playwright/runner';
 import { getServerManager } from '@/lib/playwright/server-manager';
 import { executeTests } from '@/lib/execution/executor';
 import { resolveSetupCodeForRunner } from '@/lib/execution/setup-capture';
-import { getCurrentSession, requireTeamAccess, requireRepoAccess } from '@/lib/auth';
+import { requireTeamAccess, requireRepoAccess } from '@/lib/auth';
 import { getBranchInfo } from '@/lib/github/content';
 import { createJob, updateJobProgress, completeJob, failJob } from './jobs';
 import type { NewSuite, Test } from '@/lib/db/schema';
@@ -146,11 +146,11 @@ async function runSuiteTestsAsync(
   const runner = getRunner(repositoryId);
   const jobId = await createJob('test_run', `Suite: ${suiteName}`, tests.length, repositoryId);
 
-  // Get teamId for agent execution
+  // Get teamId from runner record (not session — session is unavailable in fire-and-forget context)
   let teamId: string | undefined;
   if (runnerId && runnerId !== 'local') {
-    const session = await getCurrentSession();
-    teamId = session?.user?.teamId ?? undefined;
+    const runnerRecord = await queries.getRunnerById(runnerId);
+    teamId = runnerRecord?.teamId;
   }
 
   // Load environment and playwright settings
