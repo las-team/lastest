@@ -2,217 +2,67 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-## CRITICAL RULES
+## Critical Rules
 
-**ALWAYS use `pnpm` for package management and running scripts.** Never use `npm` or `npx` - this project uses pnpm exclusively.
-
-**NEVER delete the database file (`lastest2.db`) without explicitly asking the user first.** This includes:
-- `rm` commands on `.db` files
-- `pnpm db:reset`
-- Any command that would destroy user data
-
-Always ask for explicit permission before running destructive database operations.
+- **ALWAYS use `pnpm`** — never `npm` or `npx`
+- **NEVER delete `lastest2.db`** without asking the user first (includes `pnpm db:reset`)
 
 ## Commands
 
 ```bash
-pnpm dev          # Start development server on localhost:3000
-pnpm build        # Production build
-pnpm lint         # Run ESLint
-pnpm test         # Run unit tests (vitest, single run)
-pnpm test:watch   # Run unit tests in watch mode
-pnpm test -- src/lib/diff  # Run tests in a specific directory
-pnpm db:studio    # Open Drizzle Studio for database inspection
-pnpm db:reset     # Reset database (removes SQLite DB + screenshots/baselines)
-pnpm db:push      # Push schema changes to database
-pnpm db:generate  # Generate Drizzle migrations
-pnpm start        # Start production server
-pnpm test:visual  # Run visual tests via CLI (see below)
+pnpm dev                        # Dev server on localhost:3000
+pnpm build                      # Production build
+pnpm lint                       # ESLint
+pnpm test                       # Unit tests (vitest)
+pnpm test -- src/lib/diff       # Tests in specific directory
+pnpm db:push                    # Push schema changes to DB
+pnpm db:studio                  # Drizzle Studio
 ```
-
-Database file: `./lastest2.db` (SQLite with WAL mode)
-
-## CLI Test Runner
-
-For CI/CD integration (GitHub Actions, etc.):
-
-```bash
-pnpm test:visual --repo-id <id> [--base-url <url>] [--headless] [--output-dir <dir>]
-```
-
-- `--repo-id <id>` - Repository ID (required)
-- `--base-url <url>` - Target URL (default: `http://localhost:3000`)
-- `--no-headless` - Run with visible browser
-- `--output-dir <dir>` - Screenshot output (default: `./test-output`)
-
-Auto-captures `GITHUB_HEAD_REF`, `GITHUB_SHA` for git tracking. Exit code 1 on test failures.
-
-## Remote Runner CLI
-
-The `lastest2-runner` CLI manages a remote test execution runner:
-
-```bash
-lastest2-runner start -t <token> -s <server-url>  # Start as background daemon
-lastest2-runner stop                               # Stop the daemon
-lastest2-runner status                             # Show runner status
-lastest2-runner log [-f] [-n <lines>]              # View logs (-f to follow)
-lastest2-runner run -t <token> -s <server-url>    # Run in foreground
-```
-
-Config stored in `~/.lastest2/` (runner.pid, runner.log, runner.config.json).
 
 ## Architecture
 
-Visual regression testing platform built with Next.js 16 App Router.
+Visual regression testing platform: Next.js 16 App Router, SQLite (Drizzle ORM), Playwright.
 
-### Core Flow
-1. **Record**: User records browser interactions via Playwright (`/record`) → generates test code
-2. **Test**: Tests are stored in SQLite and can be run individually or as builds
-3. **Diff**: Screenshots are compared against baselines using pixelmatch
-4. **Review**: Visual diffs require approval before becoming new baselines
+**Core flow:** Record browser interactions → Run tests → Diff screenshots (pixelmatch) → Review/approve baselines
 
-### Key Directories
+**Key paths:**
+- `src/lib/db/schema.ts` — all tables (~3800 lines, use offset/limit)
+- `src/lib/db/queries.ts` — all queries (~1900 lines, use offset/limit)
+- `src/lib/execution/executor.ts` — test executor (~14k lines, use offset/limit)
+- `src/lib/playwright/` — recorder, runner, server manager, OCR
+- `src/lib/diff/` — pixelmatch diffing + SHA256 baseline hashing
+- `src/lib/ai/` — 4 providers: claude-cli, openrouter, claude-agent-sdk, anthropic-direct
+- `src/server/actions/` — server actions for all domain ops
+- `src/lib/ws/` — WebSocket protocol for remote runners
+- `packages/runner/` — remote runner CLI (npm package via tsup)
+- `packages/vscode-extension/` — VS Code extension (esbuild)
 
-- `src/lib/playwright/` - Browser automation core
-  - `recorder.ts` - Captures user interactions, generates Playwright code with multi-selector fallback
-  - `runner.ts` - Executes tests, captures screenshots, manages server lifecycle
-  - `server-manager.ts` - Manages target server startup/health checks for test runs
-  - `ocr.ts` - Tesseract.js integration for OCR-based selectors
-- `src/lib/diff/` - Visual comparison engine
-  - `generator.ts` - pixelmatch-based image diffing
-  - `hasher.ts` - SHA256 hashing for baseline carry-forward
-- `src/lib/db/` - Drizzle ORM schema and queries (SQLite with WAL mode)
-- `src/lib/ai/` - AI test generation (Claude CLI, OpenRouter, or Claude Agent SDK)
-- `src/lib/scanner/` - Route discovery from source code
-- `src/lib/setup/` - Setup orchestrator for test prerequisites (login flows, API seeding, script execution)
-- `src/server/actions/` - Server actions for all domain operations
-- `src/lib/execution/` - Centralized test executor (`executor.ts` ~14k lines) with setup/teardown orchestration
-- `src/lib/ws/` - WebSocket protocol for remote runner communication (protocol, registry, events)
-- `src/lib/templates/` - Testing templates (saas, marketing, ecommerce, etc.) with preset browser/viewport/stabilization configs
-- `packages/runner/` - Remote test runner CLI (`lastest2-runner`), publishable npm package via tsup
-- `packages/vscode-extension/` - VS Code extension with test explorer, uses esbuild
-- `action/` - GitHub Action (composite, bash-based) for CI/CD integration — polls build status via REST API
+## Schema Changes
 
-### Data Model
-
-**Core Testing:**
-- **Repositories** → synced from GitHub, have local paths for route scanning
-- **Tests** → belong to FunctionalAreas, have code and target URL
-- **TestVersions** → version history with change reasons (manual_edit, ai_fix, ai_enhance, restored)
-- **TestRuns** → grouped executions with git branch/commit
-- **Builds** → aggregated runs linked to PRs, have approval status
-- **VisualDiffs** → comparison results with approval workflow (classification: unchanged/flaky/changed)
-- **Baselines** → approved screenshots with SHA256 hash for carry-forward matching
-- **Suites** → ordered collections of tests for structured execution
-
-**Configuration:**
-- **PlaywrightSettings** → browser, viewport, headless mode, selector priority, animation freezing
-- **EnvironmentConfigs** → managed server startup settings (manual vs auto-start)
-- **DiffSensitivitySettings** → thresholds for unchanged/flaky classification
-- **AISettings** → provider selection (claude-cli, openrouter, claude-agent-sdk, anthropic-direct)
-- **NotificationSettings** → Slack/Discord webhooks, GitHub PR comments
-
-**Discovery:**
-- **Routes** → discovered routes for test coverage tracking
-- **RouteTestSuggestions** → AI-generated test suggestions per route
-- **SelectorStats** → success/failure rates per selector for optimization
-
-**Auth & Teams:**
-- **Teams** → multi-tenancy with slug-based identification
-- **Users** → email/password or OAuth, single team membership, roles (owner/admin/member/viewer)
-- **Sessions** → database-backed auth sessions
-- **OAuthAccounts** → linked GitHub/Google providers
-- **UserInvitations** → team invitations with expiry
-
-**Background:**
-- **BackgroundJobs** → queue tracking for long-running operations (AI scans, builds)
-- **AIPromptLogs** → audit trail for AI requests/responses
-
-### Test Code Format
-
-Tests use a function signature: `export async function test(page, baseUrl, screenshotPath, stepLogger)`. The runner strips TypeScript annotations and executes as JavaScript. Supports multi-selector fallback strategy based on user-configured priority (data-testid → id → role-name → aria-label → text → css-path → ocr-text).
-
-### Environment Variables
-
-```
-GITHUB_CLIENT_ID      # GitHub OAuth app client ID
-GITHUB_CLIENT_SECRET  # GitHub OAuth app secret
-CLERK_SECRET_KEY      # Clerk auth secret key
-NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY  # Clerk publishable key
-```
-
-### Auth System
-
-Clerk handles all UI/server-action authentication. Programmatic API clients (VS Code extension, remote runners) use DB-backed session tokens via `verifyBearerToken()`. Supports:
-- Clerk-managed sign-in (email/password, GitHub, Google, GitLab OAuth)
-- DB-backed session tokens for programmatic API access (`verifyBearerToken()`)
-- Team-based multi-tenancy (auto-creates team on first OAuth registration)
-- Role-based access (owner, admin, member, viewer)
-- Account linking (connect OAuth provider to existing logged-in user)
-- OAuth routes: `src/app/api/auth/{github,google,gitlab}/callback/route.ts`
-- GitHub OAuth helpers: `src/lib/github/oauth.ts`
-
-### File Storage
-
-- Screenshots: `public/screenshots/{repositoryId}/`
-- Baselines: `public/baselines/`
-
-## Development Patterns
-
-### Schema Changes
 1. Edit `src/lib/db/schema.ts`
-2. Update default constants (e.g., `DEFAULT_AI_SETTINGS`) at top of schema if adding settings fields
+2. Update `DEFAULT_*` constants at top of schema for new settings fields
 3. Run `pnpm db:push`
-4. Update related query functions in `src/lib/db/queries.ts` (select/insert statements)
+4. Update queries in `src/lib/db/queries.ts`
 
-### Key Conventions
-- **UI**: shadcn/ui (New York variant) + Radix primitives + Tailwind CSS v4 + `cn()` from `src/lib/utils.ts`
-- **Tailwind v4**: CSS-first config (no `tailwind.config.js`), OKLCH color system, `@custom-variant dark`, `@theme inline` in `src/app/globals.css`
-- **Icons**: lucide-react
-- **Toasts**: sonner (bottom-right)
-- **Image processing**: `pngjs` + `pixelmatch` — do NOT use `sharp`
-- **Imports**: Always use `@/` alias, not relative paths
-- **Client components**: Named `*-client.tsx` (e.g., `build-detail-client.tsx`)
-- **Server actions**: Must call `revalidatePath()` after mutations; use `requireRepoAccess()` / `requireTeamAccess()` for auth
-- **Auth guards**: `requireAuth()`, `requireTeamAccess()`, `requireRepoAccess()`, `requireAdmin()`, `requireTeamRole()` in `src/lib/auth/`
-- **Password hashing**: `@node-rs/argon2` (not bcrypt)
-- **Settings auto-save**: 500ms debounce pattern — when adding fields, update `originalValues`, `hasChanges`, `doSave`, and `useEffect` deps
-- **Next.js config**: Standalone output, server actions body limit 10mb, `tesseract.js` as external package
+## Conventions
 
-### AI Providers (`src/lib/ai/`)
-4 providers: `claude-cli`, `openrouter`, `claude-agent-sdk`, `anthropic-direct`. Settings use upsert pattern — `getAISettings()` returns `DEFAULT_AI_SETTINGS` when no DB record exists, so all new fields must be added to the default.
-
-### Build Polling
-`/api/builds/[buildId]/status` → `getBuildSummary()` → `BuildPollingWrapper` → `BuildDetailClient`
-
-### API Routes
-- `/api/auth/*` - Auth endpoints (login, register, OAuth callbacks)
-- `/api/v1/*` - VS Code extension API (catch-all handler)
-- `/api/v1/events` - SSE endpoint for real-time updates
-- `/api/builds/[buildId]/status` - Build status polling
-- `/api/webhooks/{github,gitlab}` - Webhook receivers
-- `/api/ws/runner/` - WebSocket endpoint for remote runners
-- `/api/health` - Docker health check
-
-### Route Organization
-- Auth routes: `src/app/(auth)/` (login, register, invite)
-- App routes: `src/app/(app)/` (tests, builds, suites, run, record, settings)
-
-### Monorepo
-- pnpm workspace (`pnpm-workspace.yaml`), pnpm 10.x enforced via `packageManager` field
-- `onlyBuiltDependencies`: better-sqlite3, esbuild, tesseract.js
-
-### Docker
-- Multi-stage build: deps → builder (python3/make/g++ for native modules) → runner (Playwright base image)
-- Entrypoint runs `drizzle-kit push --force` on startup for schema migrations
-- Non-root user `nextjs` (uid 1002)
+- **UI:** shadcn/ui (New York) + Tailwind CSS v4 (CSS-first, OKLCH colors, `@theme inline` in `globals.css`) + lucide-react icons + sonner toasts
+- **Imports:** always `@/` alias, never relative
+- **Client components:** named `*-client.tsx`
+- **Server actions:** call `revalidatePath()` after mutations; use `requireRepoAccess()` / `requireTeamAccess()` for auth
+- **Auth guards:** `requireAuth()`, `requireTeamAccess()`, `requireRepoAccess()`, `requireAdmin()` in `src/lib/auth/`
+- **Auth:** Clerk for UI; DB-backed session tokens (`verifyBearerToken()`) for programmatic API access
+- **Image processing:** `pngjs` + `pixelmatch` — do NOT use `sharp`
+- **Password hashing:** `@node-rs/argon2` (not bcrypt)
+- **Settings auto-save:** 500ms debounce — when adding fields, update `originalValues`, `hasChanges`, `doSave`, and `useEffect` deps
+- **AI settings:** `getAISettings()` returns `DEFAULT_AI_SETTINGS` when no DB record — all new fields must be in the default
+- **Schema types:** use `$inferSelect` / `$inferInsert` patterns
+- **Monorepo:** pnpm workspaces, pnpm 10.x
 
 ## Gotchas
-- `src/lib/db/queries.ts` is 1900+ lines — use offset/limit when reading
-- `src/lib/db/schema.ts` is ~3800 lines — use offset/limit when reading
-- `src/lib/execution/executor.ts` is ~14k lines — use offset/limit when reading
+
 - `VisualDiffWithTestStatus` type must stay in sync with `getVisualDiffsWithTestStatus` query select
 - Pre-existing lint warnings (~119) — new code should pass clean
-- Schema type exports use `$inferSelect` / `$inferInsert` patterns
-- `pnpm build` may have a pre-existing type error in `ai-settings-card.tsx` related to Ollama fields — verify errors are from your changes before debugging
-- Playwright traces stored in `public/traces/` with CORS headers for `trace.playwright.dev` viewing
+- `pnpm build` may have a pre-existing type error in `ai-settings-card.tsx` (Ollama fields) — verify errors are from your changes
+- Test code signature: `export async function test(page, baseUrl, screenshotPath, stepLogger)` — runner strips TS annotations
+- Docker entrypoint runs `drizzle-kit push --force` on startup

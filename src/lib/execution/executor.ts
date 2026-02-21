@@ -13,6 +13,7 @@ import { getRunner, type TestRunResult, type ProgressCallback } from '@/lib/play
 import type { Test, EnvironmentConfig, PlaywrightSettings } from '@/lib/db/schema';
 import type {
   RunTestCommand,
+  RunSetupCommand,
 } from '@/lib/ws/protocol';
 import { createMessage } from '@/lib/ws/protocol';
 import { queueCommandToDB, queueCancelCommandToDB } from '@/app/api/ws/runner/route';
@@ -28,6 +29,7 @@ import {
   getCommandsByTestRun,
   getUnacknowledgedResults,
   acknowledgeResults,
+  getRunnerCommandById,
 } from '@/lib/db/queries';
 
 /**
@@ -49,6 +51,7 @@ export interface ExecutionOptions {
   setupContext?: { storageState?: string; variables?: Record<string, unknown> }; // Auth session + variables from setup scripts
   forceVideoRecording?: boolean; // Force video recording for this run regardless of global setting
   jobId?: string; // Background job ID for cancellation checks
+  setupInfo?: { code: string; setupId: string }; // Setup code to run on remote runner before tests
 }
 
 export interface ExecutionProgress {
@@ -154,6 +157,76 @@ async function executeLocally(
 }
 
 /**
+ * Execute setup on a remote runner before tests.
+ * Queues a command:run_setup to the DB, polls for completion, and returns storageState.
+ */
+async function executeSetupViaRunner(
+  setupCode: string,
+  setupId: string,
+  runnerId: string,
+  baseUrl: string,
+  viewport?: { width: number; height: number },
+  timeout?: number,
+): Promise<{ storageState?: string; variables?: Record<string, unknown> }> {
+  const setupTimeout = timeout || 120000;
+
+  const command = createMessage<RunSetupCommand>('command:run_setup', {
+    setupId,
+    code: setupCode,
+    codeHash: hashCode(setupCode),
+    targetUrl: baseUrl,
+    timeout: setupTimeout,
+    viewport,
+  });
+
+  console.log(`[Executor] Queuing setup command ${command.id.slice(0, 8)} for runner ${runnerId}`);
+  await queueCommandToDB(runnerId, command);
+
+  // Poll DB for setup completion
+  const pollInterval = 1000;
+  const maxWait = setupTimeout + 30000; // Allow extra time for network overhead
+  const startTime = Date.now();
+
+  while (Date.now() - startTime < maxWait) {
+    await new Promise((resolve) => setTimeout(resolve, pollInterval));
+
+    const dbCmd = await getRunnerCommandById(command.id);
+    if (!dbCmd) continue;
+
+    if (dbCmd.status === 'completed' || dbCmd.status === 'failed' || dbCmd.status === 'timeout') {
+      // Get the result
+      const results = await getUnacknowledgedResults([command.id]);
+      const setupResult = results.find(r => r.type === 'response:setup_result');
+
+      if (setupResult) {
+        await acknowledgeResults(results.map(r => r.id));
+        const payload = setupResult.payload as Record<string, unknown>;
+
+        if (payload.status === 'passed') {
+          console.log(`[Executor] Setup completed successfully on runner ${runnerId}`);
+          return {
+            storageState: payload.storageState as string | undefined,
+            variables: payload.variables as Record<string, unknown> | undefined,
+          };
+        } else {
+          throw new Error(`Remote setup failed: ${payload.error || 'Unknown error'}`);
+        }
+      }
+
+      if (dbCmd.status === 'timeout') {
+        throw new Error('Remote setup timed out');
+      }
+
+      if (dbCmd.status === 'failed') {
+        throw new Error('Remote setup command failed');
+      }
+    }
+  }
+
+  throw new Error(`Remote setup polling timed out after ${maxWait}ms`);
+}
+
+/**
  * Execute tests via remote runner.
  * Commands are queued to the DB. The runner claims them on heartbeat.
  * Executor polls the DB for completion and results.
@@ -174,6 +247,25 @@ async function executeViaRunner(
         height: options.playwrightSettings.viewportHeight || 720,
       }
     : undefined;
+
+  // Run setup on runner first if setupInfo is provided (remote setup)
+  if (options.setupInfo) {
+    console.log(`[Executor] Running setup on remote runner ${runnerId} before tests...`);
+    const setupResult = await executeSetupViaRunner(
+      options.setupInfo.code,
+      options.setupInfo.setupId,
+      runnerId,
+      baseUrl,
+      viewport,
+      options.playwrightSettings?.navigationTimeout ?? undefined,
+    );
+    // Merge remote setup results into setupContext for test commands
+    options.setupContext = {
+      storageState: setupResult.storageState ?? options.setupContext?.storageState,
+      variables: { ...options.setupContext?.variables, ...setupResult.variables },
+    };
+    console.log(`[Executor] Remote setup complete, storageState: ${setupResult.storageState ? 'yes' : 'no'}`);
+  }
 
   const maxParallel = options.maxParallelTests ?? 1;
   const pending = [...tests];

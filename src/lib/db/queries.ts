@@ -4196,6 +4196,12 @@ export async function getCommandsByTestRun(testRunId: string) {
     .all();
 }
 
+export async function getRunnerCommandById(commandId: string) {
+  return db.query.runnerCommands.findFirst({
+    where: eq(runnerCommands.id, commandId),
+  });
+}
+
 export async function completeRunnerCommand(commandId: string, status: 'completed' | 'failed') {
   await db
     .update(runnerCommands)

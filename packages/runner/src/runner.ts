@@ -5,7 +5,7 @@
 
 import { chromium, Browser, Page, BrowserContext } from 'playwright';
 import { createHash } from 'crypto';
-import type { RunTestCommandPayload, LogEntry } from './protocol.js';
+import type { RunTestCommandPayload, RunSetupCommandPayload, LogEntry } from './protocol.js';
 
 /**
  * Verify code integrity by comparing SHA256 hash.
@@ -360,6 +360,93 @@ export class TestRunner {
     }
   }
 
+  async runSetup(
+    command: RunSetupCommandPayload
+  ): Promise<{ status: 'passed' | 'failed' | 'error' | 'timeout'; storageState?: string; variables?: Record<string, unknown>; durationMs: number; error?: string; logs: LogEntry[] }> {
+    const logs: LogEntry[] = [];
+    const logFn = (level: 'info' | 'warn' | 'error', message: string) => {
+      logs.push({ timestamp: Date.now(), level, message });
+      const prefix = level === 'error' ? '  [ERROR]' : level === 'warn' ? '  [WARN]' : '  [INFO]';
+      console.log(`${prefix} [setup:${command.setupId}] ${message}`);
+    };
+
+    const startTime = Date.now();
+    let context: BrowserContext | null = null;
+    let page: Page | null = null;
+    const setupTimeout = Math.max(command.timeout || 120000, 30000);
+
+    try {
+      // Verify code integrity
+      if (!verifyCodeIntegrity(command.code, command.codeHash)) {
+        throw new Error('Code integrity check failed - hash mismatch');
+      }
+
+      logFn('info', 'Launching browser for setup...');
+      await this.ensureBrowser();
+
+      const viewport = command.viewport || { width: 1280, height: 720 };
+      // No storageState injection — this IS the setup that creates the session
+      context = await this.browser!.newContext({ viewport });
+      page = await context.newPage();
+      page.setDefaultNavigationTimeout(30000);
+      page.setDefaultTimeout(15000);
+
+      logFn('info', `Browser launched, viewport: ${viewport.width}x${viewport.height}`);
+
+      // Execute setup code with timeout
+      logFn('info', 'Executing setup code...');
+      const noopScreenshot = async () => {};
+      await Promise.race([
+        this.executeTestCode(page, command.code, command.targetUrl, noopScreenshot, logFn),
+        new Promise<never>((_, reject) => {
+          setTimeout(() => {
+            logFn('warn', `Setup timeout fired (${setupTimeout}ms)`);
+            context?.close().catch(() => {});
+            context = null;
+            page = null;
+            reject(new Error(`Setup timed out after ${setupTimeout}ms`));
+          }, setupTimeout);
+        }),
+      ]);
+
+      logFn('info', 'Setup code executed successfully');
+
+      // Capture storageState (cookies/localStorage)
+      let storageState: string | undefined;
+      if (context) {
+        try {
+          const state = await context.storageState();
+          storageState = JSON.stringify(state);
+          logFn('info', `Captured storageState: ${state.cookies.length} cookies, ${state.origins.length} origins`);
+        } catch (e) {
+          logFn('warn', `Failed to capture storageState: ${e}`);
+        }
+      }
+
+      return {
+        status: 'passed',
+        storageState,
+        durationMs: Date.now() - startTime,
+        logs,
+      };
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      const isTimeout = errorMessage.includes('timed out');
+      logFn('error', `Setup ${isTimeout ? 'timed out' : 'failed'}: ${errorMessage}`);
+
+      return {
+        status: isTimeout ? 'timeout' : 'failed',
+        durationMs: Date.now() - startTime,
+        error: errorMessage,
+        logs,
+      };
+    } finally {
+      if (page) await page.close().catch(() => {});
+      if (context) await context.close().catch(() => {});
+      await this.closeBrowserIfIdle();
+    }
+  }
+
   private async executeTestCode(
     page: Page,
     code: string,
@@ -374,12 +461,14 @@ export class TestRunner {
       /export\s+async\s+function\s+test\s*\(\s*page[^)]*\)\s*\{([\s\S]*)\}\s*$/
     );
 
-    if (!funcMatch) {
-      throw new Error('Invalid test code format: expected export async function test(page, ...)');
+    let body: string;
+    if (funcMatch) {
+      body = this.stripTypeAnnotations(funcMatch[1]);
+    } else {
+      // Fallback: treat entire code as the function body (unwrapped test code)
+      log('info', 'No export async function test(...) wrapper found — using code as body');
+      body = this.stripTypeAnnotations(code);
     }
-
-    // Strip TypeScript annotations
-    let body = this.stripTypeAnnotations(funcMatch[1]);
     log('info', `Extracted test body: ${body.length} chars`);
 
     // Remove the test's local locateWithFallback function if present
@@ -563,8 +652,107 @@ export class TestRunner {
 
   private createExpect(timeout = 5000) {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    return (target: any) => {
+    return (target: any, message?: string) => {
       const isPage = typeof target?.goto === 'function';
+      const isLocator = typeof target?.click === 'function' && typeof target?.fill === 'function';
+
+      // Generic value matchers (arrays, primitives, objects)
+      if (!isPage && !isLocator) {
+        const msgPrefix = message ? `${message}: ` : '';
+        return {
+          toHaveLength(expected: number) {
+            const actual = target?.length;
+            if (actual !== expected) {
+              const details = Array.isArray(target) ? `\nReceived: ${JSON.stringify(target.slice(0, 10))}` : '';
+              throw new Error(`${msgPrefix}Expected length ${expected} but got ${actual}${details}`);
+            }
+          },
+          toBe(expected: unknown) {
+            if (target !== expected) {
+              throw new Error(`${msgPrefix}Expected ${JSON.stringify(expected)} but got ${JSON.stringify(target)}`);
+            }
+          },
+          toEqual(expected: unknown) {
+            if (JSON.stringify(target) !== JSON.stringify(expected)) {
+              throw new Error(`${msgPrefix}Expected ${JSON.stringify(expected)} but got ${JSON.stringify(target)}`);
+            }
+          },
+          toBeTruthy() {
+            if (!target) {
+              throw new Error(`${msgPrefix}Expected value to be truthy but got ${target}`);
+            }
+          },
+          toBeFalsy() {
+            if (target) {
+              throw new Error(`${msgPrefix}Expected value to be falsy but got ${target}`);
+            }
+          },
+          toContain(expected: unknown) {
+            if (Array.isArray(target)) {
+              if (!target.includes(expected)) {
+                throw new Error(`${msgPrefix}Expected array to contain ${JSON.stringify(expected)}`);
+              }
+            } else if (typeof target === 'string') {
+              if (!target.includes(expected as string)) {
+                throw new Error(`${msgPrefix}Expected string to contain "${expected}"`);
+              }
+            } else {
+              throw new Error(`${msgPrefix}toContain only works on arrays and strings`);
+            }
+          },
+          toBeGreaterThan(expected: number) {
+            if (typeof target !== 'number' || target <= expected) {
+              throw new Error(`${msgPrefix}Expected ${target} to be greater than ${expected}`);
+            }
+          },
+          toBeLessThan(expected: number) {
+            if (typeof target !== 'number' || target >= expected) {
+              throw new Error(`${msgPrefix}Expected ${target} to be less than ${expected}`);
+            }
+          },
+          toMatch(expected: string | RegExp) {
+            const str = typeof target === 'string' ? target : String(target);
+            const regex = typeof expected === 'string' ? new RegExp(expected) : expected;
+            if (!regex.test(str)) {
+              throw new Error(`${msgPrefix}Expected "${str}" to match ${regex}`);
+            }
+          },
+          not: {
+            toHaveLength(expected: number) {
+              if (target?.length === expected) {
+                throw new Error(`${msgPrefix}Expected length not to be ${expected}`);
+              }
+            },
+            toBe(expected: unknown) {
+              if (target === expected) {
+                throw new Error(`${msgPrefix}Expected not to be ${JSON.stringify(expected)}`);
+              }
+            },
+            toEqual(expected: unknown) {
+              if (JSON.stringify(target) === JSON.stringify(expected)) {
+                throw new Error(`${msgPrefix}Expected not to equal ${JSON.stringify(expected)}`);
+              }
+            },
+            toBeTruthy() {
+              if (target) {
+                throw new Error(`${msgPrefix}Expected value not to be truthy`);
+              }
+            },
+            toBeFalsy() {
+              if (!target) {
+                throw new Error(`${msgPrefix}Expected value not to be falsy`);
+              }
+            },
+            toContain(expected: unknown) {
+              if (Array.isArray(target) && target.includes(expected)) {
+                throw new Error(`${msgPrefix}Expected array not to contain ${JSON.stringify(expected)}`);
+              } else if (typeof target === 'string' && target.includes(expected as string)) {
+                throw new Error(`${msgPrefix}Expected string not to contain "${expected}"`);
+              }
+            },
+          },
+        };
+      }
 
       if (isPage) {
         return {

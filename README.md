@@ -51,7 +51,7 @@ Lastest2 is free, self-hosted visual regression testing that **writes tests for 
 1. Point it at your app
 2. Record your user flows (point-and-click, no code)
 3. AI generates resilient test code
-4. Screenshots compared with perceptual diffing (SSIM + Butteraugli)
+4. Screenshots compared with 3 diff engines (pixelmatch, SSIM, Butteraugli)
 5. Approve or reject visual changes in a full review UI
 ```
 
@@ -65,7 +65,7 @@ Your data stays on your server. Your screenshots never leave your infra. It cost
 
 - **Record Browser Interactions** — Point-and-click test recording via Playwright with multiple engines (custom recorder or Playwright Inspector). No code required.
 - **AI Test Generation** — Claude generates robust test code with multi-selector fallback (data-testid → id → role → aria-label → text → css → OCR).
-- **Visual Diffing** — Pixel-perfect comparison using pixelmatch. See exactly what changed.
+- **Multi-Engine Visual Diffing** — Three comparison engines: pixelmatch (pixel-perfect), SSIM (structural similarity), and Butteraugli (human-perception-aligned). Choose the best trade-off between speed and accuracy.
 - **Multi-Step Screenshots** — Capture multiple labeled screenshots per test run for multi-page flow testing.
 - **Approval Workflow** — Review visual diffs before they become baselines. Catch regressions, approve intentional changes.
 - **Git-Aware Builds** — Run tests per branch/commit. Compare across PRs. Track coverage.
@@ -76,6 +76,8 @@ Your data stays on your server. Your screenshots never leave your infra. It cost
 - **Functional Area Hierarchy** — Organize tests into nested parent/child functional areas with drag-and-drop reordering.
 - **Debug Mode** — Step-by-step test execution with live feedback for diagnosing failures.
 - **Testing Templates** — One-click preset configurations for common app types: SaaS/Dashboard, Marketing Website, Canvas/WebGL, E-commerce, Documentation, Mobile-First, SPA, and CMS.
+- **Auto-Detect Capabilities** — Recording automatically detects required browser capabilities (file upload, clipboard, downloads, network interception) and enables corresponding Playwright settings.
+- **Early Adopter Mode** — Team-level toggle to access experimental features before general release.
 
 ### AI-Powered
 
@@ -89,6 +91,7 @@ Your data stays on your server. Your screenshots never leave your infra. It cost
 
 ### Stabilization & Flaky Test Prevention
 
+- **Text-Region-Aware Diffing** — OCR-based two-pass comparison with separate thresholds for text vs non-text regions. Reduces false positives from dynamic text and cross-OS font rendering.
 - **Timestamp Freezing** — Replace `Date.now()` and `new Date()` with fixed values for deterministic screenshots.
 - **Random Value Seeding** — Seed `Math.random()` for consistent outputs.
 - **Cross-OS Consistency** — Bundled fonts + Chromium flags for identical screenshots across operating systems.
@@ -113,7 +116,7 @@ Your data stays on your server. Your screenshots never leave your infra. It cost
 ### Infrastructure
 
 - **Smart Run** — Analyzes git diffs to run only tests affected by your changes.
-- **Remote Runners** — Distributed test execution on remote machines with capability tracking (run/record), max parallel tests, and system info collection.
+- **Remote Runners (v2)** — Distributed test execution with concurrent multi-task support, SHA256 code integrity verification, remote recording, heartbeat polling with command queuing, and per-test abort support.
 - **Parallel Test Execution** — Configurable max parallel tests for local and remote runners.
 - **Docker Deployment** — Production-ready multi-stage Docker setup based on official Playwright image with persistent volumes.
 - **VSCode Extension API** — REST + SSE API (`/api/v1/`) for IDE integration.
@@ -131,12 +134,13 @@ Your data stays on your server. Your screenshots never leave your infra. It cost
 - **Diff Sensitivity** — Configurable pixel/percentage thresholds for unchanged/flaky/changed classification.
 - **AI Prompt Logs** — Full audit trail of all AI requests and responses.
 - **Background Jobs** — Queue tracking for long-running operations (AI scans, builds).
+- **Diff Engine Benchmarks** — Built-in benchmark framework comparing all three diff engines across synthetic test scenarios with timing and accuracy metrics.
 
 ### Team & Auth
 
 - **Multi-Tenant Teams** — Slug-based team workspaces with invitations.
 - **Role-Based Access** — Owner, admin, member, viewer roles.
-- **Multiple Auth Methods** — Email/password, GitHub OAuth, GitLab OAuth, Google OAuth.
+- **Multiple Auth Methods** — Email/password (Argon2 hashing), GitHub OAuth, GitLab OAuth, Google OAuth via better-auth.
 - **Email Invitations** — Send team invitations via Resend with verification and password reset tokens.
 
 ---
@@ -202,7 +206,7 @@ Open [http://localhost:3000](http://localhost:3000)
 
 3. **Run**: Execute tests locally or on remote runners. Screenshots are captured at key steps.
 
-4. **Compare**: New screenshots are diffed against baselines using pixelmatch. Accessibility audits run automatically.
+4. **Compare**: New screenshots are diffed against baselines using your chosen engine (pixelmatch, SSIM, or Butteraugli). Text-region-aware comparison available. Accessibility audits run automatically.
 
 5. **Review**: Visual diffs are classified (unchanged/flaky/changed). AI can auto-classify with confidence scores. Approve intentional changes.
 
@@ -224,7 +228,8 @@ Open [http://localhost:3000](http://localhost:3000)
 | **AI test generation** | **Yes** | No | NLP | No | No | Session-based | No |
 | **AI auto-fix tests** | **Yes** | No | No | No | No | Auto-maintain | No |
 | **AI diff analysis** | **Yes** | AI Review Agent | Visual AI | No | No | Deterministic | No |
-| **Perceptual diffing** | **SSIM + Butteraugli** | No | Visual AI | No | No | No | No |
+| **Multi-engine diffing** | **3 engines** | No | Visual AI | No | No | No | No |
+| **Text-region-aware diffing** | **Yes** | No | No | No | No | No | No |
 | **Spec-driven test gen** | **Yes** | No | No | No | No | No | No |
 | **Approval workflow** | **Yes** | Yes | Yes | Yes | Yes | PR-based | No |
 | **Accessibility** | **axe-core** | No | No | Enterprise | ARIA snaps | No | No |
@@ -235,7 +240,7 @@ Open [http://localhost:3000](http://localhost:3000)
 | **Debug mode** | **Yes** | No | No | No | Traces | No | Trace |
 | **Remote runners** | **Yes** | Cloud | Cloud | Cloud | Cloud | Cloud | No |
 | **Local AI (Ollama)** | **Yes** | No | No | No | No | No | No |
-| **Cross-OS consistency** | **11 stabilization features** | No | No | No | Stabilization engine | No | No |
+| **Cross-OS consistency** | **12 stabilization features** | No | No | No | Stabilization engine | No | No |
 | **GitHub Action** | **Yes** | Cloud-only | Cloud-only | Cloud-only | Cloud-only | Cloud-only | No |
 | **Test composition** | **Yes** | No | No | No | No | No | No |
 | **Testing templates** | **8 presets** | No | No | No | No | No | No |
@@ -249,6 +254,8 @@ Open [http://localhost:3000](http://localhost:3000)
 - **Your data never leaves your server** — screenshots stay local, no cloud dependency
 - **5 AI providers including Ollama** — run AI locally with zero API costs
 - **Spec-driven testing** — feed it OpenAPI specs or user stories, get tests back
+- **3 diff engines** — pixelmatch, SSIM, and Butteraugli with text-region-aware comparison
+- **Auto-capability detection** — recordings auto-detect clipboard, upload, download, and network needs
 
 ---
 
@@ -383,8 +390,6 @@ Uses the official Playwright base image (`mcr.microsoft.com/playwright`) with No
 ### Environment Variables for Docker
 
 ```bash
-CLERK_SECRET_KEY=your-clerk-secret-key
-NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=your-clerk-publishable-key
 GITHUB_CLIENT_ID=your-github-app-id
 GITHUB_CLIENT_SECRET=your-github-app-secret
 ```
@@ -499,7 +504,7 @@ All configuration lives under a unified Settings page:
 | **Playwright** | Browser type, viewport, headless mode (including shell mode), selector priority, recording engine, animation freezing, screenshot delay, max parallel tests |
 | **Stabilization** | Network idle, DOM stability, timestamp freezing, random seeding, third-party blocking, font loading, loading indicator hiding, cross-OS consistency, burst capture, auto-mask dynamic content |
 | **Environment** | Server startup (manual vs auto-start), health check URLs |
-| **Diff Sensitivity** | Pixel/percentage thresholds for unchanged/flaky/changed, page shift detection |
+| **Diff Sensitivity** | Diff engine selection (pixelmatch/SSIM/Butteraugli), text-region-aware diffing, pixel/percentage thresholds, page shift detection |
 | **AI** | Test generation provider, diff analysis provider, API keys, model, custom instructions, Ollama support |
 | **Notifications** | Slack, Discord, custom webhook configuration |
 | **Branches** | Baseline and scanning branch selection |
@@ -517,10 +522,10 @@ All configuration lives under a unified Settings page:
 - **Framework**: Next.js 16 (App Router)
 - **UI**: React 19, Radix UI, Tailwind CSS 4
 - **Browser Automation**: Playwright
-- **Visual Diffing**: pixelmatch
+- **Visual Diffing**: pixelmatch, SSIM, Butteraugli
 - **Accessibility**: axe-core
 - **Database**: SQLite + Drizzle ORM (WAL mode)
-- **Auth**: better-auth (email/password, GitHub, GitLab, Google OAuth)
+- **Auth**: better-auth (email/password with Argon2, GitHub, GitLab, Google OAuth)
 - **AI**: Claude (Agent SDK, CLI, OpenRouter, direct Anthropic API), Ollama
 - **OCR Fallback**: Tesseract.js
 - **Test Data**: Google Sheets integration
@@ -533,10 +538,6 @@ All configuration lives under a unified Settings page:
 ## Environment Variables
 
 ```bash
-# Clerk authentication
-CLERK_SECRET_KEY=
-NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=
-
 # GitHub OAuth (for repository sync + login)
 GITHUB_CLIENT_ID=
 GITHUB_CLIENT_SECRET=
@@ -607,6 +608,13 @@ NEXT_PUBLIC_BASE_URL=             # Base URL for API calls
 - [x] Teardown orchestration (default + per-test overrides)
 - [x] Branch baseline management (fork/merge/promote)
 - [x] Functional area hierarchy (parent/child organization)
+- [x] Multi-engine diffing (SSIM, Butteraugli alongside pixelmatch)
+- [x] Text-region-aware diffing (OCR-based)
+- [x] Diff engine benchmark framework
+- [x] Auto-detect capabilities from recording
+- [x] Early adopter mode (experimental feature gating)
+- [x] Runner v2 (concurrent execution, code integrity, remote recording)
+- [x] better-auth migration (replaced Clerk)
 - [ ] Remote runner NPM package publication
 - [ ] Production-ready runner infrastructure (Redis queue)
 

@@ -13,18 +13,14 @@ Clipboard Access
 Accept Downloads
 Network Interception
 ## features
-Support https://github.com/excalidraw/excalidraw/tree/master/packages/excalidraw/tests ~/.claude/plans/declarative-kindling-coral.md 55%
-
-auto-run fast version of test, if same results mark as fast and run like that
-
-Tweet about us
-
-Test coverage assessment and recreation based on existing test set
+Support https://github.com/excalidraw/excalidraw/tree/master/packages/excalidraw/tests ~/.claude/plans/declarative-kindling-coral.md 70%
 
 Online - support agent sdk via runner
 Run runner on server in docker
 
 ## ideas
+Test coverage assessment and recreation based on existing test set
+Tweet about us
 Content comparison - compare text in 2 setups
 Explore/Cover instead of Areas
 Ban AI mode

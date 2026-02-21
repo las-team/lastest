@@ -11,6 +11,7 @@ import { getServerManager } from '@/lib/playwright/server-manager';
 import { getSetupOrchestrator } from '@/lib/setup/setup-orchestrator';
 import type { SetupContext } from '@/lib/setup/types';
 import { executeTests } from '@/lib/execution/executor';
+import { captureSetupForRemoteRunner } from '@/lib/execution/setup-capture';
 import { getCurrentSession, requireTeamAccess, requireRepoAccess } from '@/lib/auth';
 import { generateDiff, generateTextAwareDiffFromPaths, type Rectangle } from '@/lib/diff/generator';
 import { hashImage, hashImageWithDimensions } from '@/lib/diff/hasher';
@@ -517,58 +518,84 @@ async function runBuildAsync(
       repositoryId: repositoryId || null,
     };
 
+    // Resolve setup info for remote runner (run setup on the runner, not locally)
+    let remoteSetupInfo: { code: string; setupId: string } | undefined;
+    const isRemoteRunner = runnerId && runnerId !== 'local' && teamId;
+
     // Run build-level setup if configured
     if (build?.buildSetupTestId || build?.buildSetupScriptId) {
-      await queries.updateBuild(buildId, { setupStatus: 'running' });
+      if (isRemoteRunner) {
+        // Remote runner: resolve setup code locally, but execute it on the runner
+        await queries.updateBuild(buildId, { setupStatus: 'running' });
 
-      const orchestrator = getSetupOrchestrator();
-      // For build-level setup, we need a browser page
-      // We'll use a temporary page for setup, then pass variables to tests
-      const { chromium } = await import('playwright');
-      const browser = await chromium.launch({ headless: true });
-      const page = await browser.newPage();
+        if (build.buildSetupTestId) {
+          const setupTest = await queries.getTest(build.buildSetupTestId);
+          if (setupTest) {
+            remoteSetupInfo = { code: setupTest.code, setupId: setupTest.id };
+          } else {
+            console.warn(`[build-setup] Setup test not found: ${build.buildSetupTestId} - skipping`);
+          }
+        } else if (build.buildSetupScriptId) {
+          const setupScript = await queries.getSetupScript(build.buildSetupScriptId);
+          if (setupScript && setupScript.type === 'playwright') {
+            remoteSetupInfo = { code: setupScript.code, setupId: setupScript.id };
+          } else {
+            console.warn(`[build-setup] Setup script not found or not playwright type: ${build.buildSetupScriptId} - skipping`);
+          }
+        }
 
-      try {
-        setupContext.page = page;
-        const setupResult = await orchestrator.resolveAndRunSetup(
-          build.buildSetupTestId,
-          build.buildSetupScriptId,
-          page,
-          setupContext
-        );
+        if (!remoteSetupInfo) {
+          // No valid setup code found, mark as skipped
+          await queries.updateBuild(buildId, { setupStatus: 'skipped' });
+        }
+        // setupStatus will be updated after executor runs setup on the runner
+      } else {
+        // Local runner: run setup locally with a browser
+        await queries.updateBuild(buildId, { setupStatus: 'running' });
 
-        if (!setupResult.success) {
-          // Build setup failed - abort the build
+        const orchestrator = getSetupOrchestrator();
+        const { chromium } = await import('playwright');
+        const browser = await chromium.launch({ headless: true });
+        const page = await browser.newPage();
+
+        try {
+          setupContext.page = page;
+          const setupResult = await orchestrator.resolveAndRunSetup(
+            build.buildSetupTestId,
+            build.buildSetupScriptId,
+            page,
+            setupContext
+          );
+
+          if (!setupResult.success) {
+            await queries.updateBuild(buildId, {
+              setupStatus: 'failed',
+              setupError: setupResult.error,
+              setupDurationMs: setupResult.duration,
+            });
+            throw new Error(`Build setup failed: ${setupResult.error}`);
+          }
+
+          if (setupResult.variables) {
+            setupContext.variables = { ...setupContext.variables, ...setupResult.variables };
+          }
+
+          try {
+            const state = await page.context().storageState();
+            setupContext.storageState = JSON.stringify(state);
+            console.log(`[build-setup] Captured storageState: ${state.cookies.length} cookies, ${state.origins.length} origins`);
+          } catch (e) {
+            console.warn('[build-setup] Failed to capture storageState:', e);
+          }
+
           await queries.updateBuild(buildId, {
-            setupStatus: 'failed',
-            setupError: setupResult.error,
+            setupStatus: 'completed',
             setupDurationMs: setupResult.duration,
           });
-          throw new Error(`Build setup failed: ${setupResult.error}`);
+        } finally {
+          await page.close().catch(() => {});
+          await browser.close().catch(() => {});
         }
-
-        // Merge setup variables
-        if (setupResult.variables) {
-          setupContext.variables = { ...setupContext.variables, ...setupResult.variables };
-        }
-
-        // Capture storageState (cookies/localStorage) before closing browser
-        // so test contexts can be seeded with the login session
-        try {
-          const state = await page.context().storageState();
-          setupContext.storageState = JSON.stringify(state);
-          console.log(`[build-setup] Captured storageState: ${state.cookies.length} cookies, ${state.origins.length} origins`);
-        } catch (e) {
-          console.warn('[build-setup] Failed to capture storageState:', e);
-        }
-
-        await queries.updateBuild(buildId, {
-          setupStatus: 'completed',
-          setupDurationMs: setupResult.duration,
-        });
-      } finally {
-        await page.close().catch(() => {});
-        await browser.close().catch(() => {});
       }
     } else {
       await queries.updateBuild(buildId, { setupStatus: 'skipped' });
@@ -581,24 +608,52 @@ async function runBuildAsync(
     runner.setSetupContext(setupContext);
 
     // Use executor for agent routing, or direct runner for local
-    if (runnerId && runnerId !== 'local' && teamId) {
+    if (isRemoteRunner) {
       // Load runner's maxParallelTests setting
-      const remoteRunner = await queries.getRunnerById(runnerId);
+      const remoteRunner = await queries.getRunnerById(runnerId!);
       const maxParallelTests = remoteRunner?.maxParallelTests ?? 1;
 
-      await executeTests(tests, testRunId, {
-        repositoryId,
-        teamId,
-        runnerId,
-        environmentConfig: envConfig,
-        playwrightSettings,
-        maxParallelTests,
-        jobId,
-        setupContext: {
-          storageState: setupContext.storageState,
-          variables: setupContext.variables,
-        },
-      }, onProgress, onResult);
+      // If no build-level setup, capture per-test setup locally (same as runs.ts)
+      // This handles tests with setupTestId/setupScriptId configured at the test level
+      if (!remoteSetupInfo && !setupContext.storageState) {
+        const perTestSetup = await captureSetupForRemoteRunner(tests, baseUrl, repositoryId);
+        if (perTestSetup) {
+          setupContext.storageState = perTestSetup.storageState;
+          setupContext.variables = { ...setupContext.variables, ...perTestSetup.variables };
+          console.log(`[build] Captured per-test setup for remote runner: storageState=${perTestSetup.storageState ? 'yes' : 'no'}`);
+        }
+      }
+
+      try {
+        await executeTests(tests, testRunId, {
+          repositoryId,
+          teamId,
+          runnerId,
+          environmentConfig: envConfig,
+          playwrightSettings,
+          maxParallelTests,
+          jobId,
+          setupInfo: remoteSetupInfo,
+          setupContext: {
+            storageState: setupContext.storageState,
+            variables: setupContext.variables,
+          },
+        }, onProgress, onResult);
+
+        // If remote setup was used, mark it completed now
+        if (remoteSetupInfo) {
+          await queries.updateBuild(buildId, { setupStatus: 'completed' });
+        }
+      } catch (error) {
+        // If setup failed on the runner, mark it
+        if (remoteSetupInfo && error instanceof Error && error.message.includes('setup')) {
+          await queries.updateBuild(buildId, {
+            setupStatus: 'failed',
+            setupError: error.message,
+          });
+        }
+        throw error;
+      }
     } else {
       // Local uses maxParallelTests from playwrightSettings (set via runner.setSettings)
       await runner.runTests(tests, testRunId, onProgress, onResult);

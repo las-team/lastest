@@ -177,7 +177,8 @@ export function createExpect(timeout = 5000, softErrors?: string[]) {
         toHaveLength(expected: number) {
           const actual = (target as { length?: number })?.length;
           if (actual !== expected) {
-            throw new Error(`${msgPrefix}Expected length ${expected} but got ${actual}`);
+            const details = Array.isArray(target) ? `\nReceived: ${JSON.stringify(target.slice(0, 10))}` : '';
+            throw new Error(`${msgPrefix}Expected length ${expected} but got ${actual}${details}`);
           }
         },
         toBe(expected: unknown) {

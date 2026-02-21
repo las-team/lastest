@@ -11,7 +11,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { validateRunnerToken, updateRunnerStatus, markStaleRunnersOffline } from '@/server/actions/runners';
-import type { Message, HeartbeatMessage, TestResultResponse, ScreenshotUploadResponse, RecordingEventResponse, RecordingStoppedResponse } from '@/lib/ws/protocol';
+import type { Message, HeartbeatMessage, TestResultResponse, SetupResultResponse, ScreenshotUploadResponse, RecordingEventResponse, RecordingStoppedResponse } from '@/lib/ws/protocol';
 import fs from 'fs/promises';
 import path from 'path';
 import { STORAGE_DIRS } from '@/lib/storage/paths';
@@ -243,6 +243,23 @@ export async function POST(request: NextRequest) {
           payload: result.payload as unknown as Record<string, unknown>,
         });
         await completeRunnerCommand(commandId, resultStatus as 'completed' | 'failed');
+
+        return NextResponse.json({ ok: true });
+      }
+
+      case 'response:setup_result': {
+        const result = message as SetupResultResponse;
+        const commandId = result.payload.correlationId;
+
+        // Store result in DB and mark command completed
+        const setupStatus = result.payload.status === 'passed' ? 'completed' : 'failed';
+        await insertCommandResult({
+          commandId,
+          runnerId: runner.id,
+          type: 'response:setup_result',
+          payload: result.payload as unknown as Record<string, unknown>,
+        });
+        await completeRunnerCommand(commandId, setupStatus as 'completed' | 'failed');
 
         return NextResponse.json({ ok: true });
       }

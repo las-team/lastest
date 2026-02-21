@@ -5,6 +5,7 @@
 
 export type MessageType =
   | 'command:run_test'
+  | 'command:run_setup'
   | 'command:cancel_test'
   | 'command:start_recording'
   | 'command:stop_recording'
@@ -12,6 +13,7 @@ export type MessageType =
   | 'command:shutdown'
   | 'response:test_result'
   | 'response:test_progress'
+  | 'response:setup_result'
   | 'response:recording_event'
   | 'response:screenshot'
   | 'response:screenshot_ack'
@@ -53,6 +55,35 @@ export interface RunTestCommandPayload {
 export interface RunTestCommand extends BaseMessage {
   type: 'command:run_test';
   payload: RunTestCommandPayload;
+}
+
+export interface RunSetupCommandPayload {
+  setupId: string;
+  code: string;
+  codeHash: string;
+  targetUrl: string;
+  timeout: number;
+  viewport?: { width: number; height: number };
+}
+
+export interface RunSetupCommand extends BaseMessage {
+  type: 'command:run_setup';
+  payload: RunSetupCommandPayload;
+}
+
+export interface SetupResultPayload {
+  correlationId: string;
+  status: 'passed' | 'failed' | 'error' | 'timeout';
+  storageState?: string;
+  variables?: Record<string, unknown>;
+  durationMs: number;
+  error?: string;
+  logs: LogEntry[];
+}
+
+export interface SetupResultResponse extends BaseMessage {
+  type: 'response:setup_result';
+  payload: SetupResultPayload;
 }
 
 export interface PingCommand extends BaseMessage {
@@ -286,6 +317,7 @@ export interface ConnectionEstablishedMessage extends BaseMessage {
 
 export type Message =
   | RunTestCommand
+  | RunSetupCommand
   | CancelTestCommand
   | ShutdownCommand
   | PingCommand
@@ -294,6 +326,7 @@ export type Message =
   | CaptureScreenshotCommand
   | TestResultResponse
   | TestProgressResponse
+  | SetupResultResponse
   | ScreenshotUploadResponse
   | RecordingEventResponse
   | RecordingStoppedResponse

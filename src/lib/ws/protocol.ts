@@ -11,6 +11,7 @@
 export type MessageType =
   // Server → Agent (Commands)
   | 'command:run_test'
+  | 'command:run_setup'
   | 'command:cancel_test'
   | 'command:start_recording'
   | 'command:stop_recording'
@@ -19,6 +20,7 @@ export type MessageType =
   // Agent → Server (Responses)
   | 'response:test_result'
   | 'response:test_progress'
+  | 'response:setup_result'
   | 'response:recording_event'
   | 'response:recording_stopped'
   | 'command:capture_screenshot'
@@ -68,6 +70,38 @@ export interface RunTestCommandPayload {
 export interface RunTestCommand extends BaseMessage {
   type: 'command:run_test';
   payload: RunTestCommandPayload;
+}
+
+export interface RunSetupCommandPayload {
+  setupId: string;
+  code: string;
+  codeHash: string;
+  targetUrl: string;
+  timeout: number;
+  viewport?: {
+    width: number;
+    height: number;
+  };
+}
+
+export interface RunSetupCommand extends BaseMessage {
+  type: 'command:run_setup';
+  payload: RunSetupCommandPayload;
+}
+
+export interface SetupResultPayload {
+  correlationId: string;
+  status: 'passed' | 'failed' | 'error' | 'timeout';
+  storageState?: string;
+  variables?: Record<string, unknown>;
+  durationMs: number;
+  error?: string;
+  logs: LogEntry[];
+}
+
+export interface SetupResultResponse extends BaseMessage {
+  type: 'response:setup_result';
+  payload: SetupResultPayload;
 }
 
 export interface StartRecordingCommandPayload {
@@ -307,6 +341,7 @@ export interface ConnectionEstablishedMessage extends BaseMessage {
 
 export type ServerCommand =
   | RunTestCommand
+  | RunSetupCommand
   | CancelTestCommand
   | ShutdownCommand
   | StartRecordingCommand
@@ -317,6 +352,7 @@ export type ServerCommand =
 export type AgentResponse =
   | TestProgressResponse
   | TestResultResponse
+  | SetupResultResponse
   | RecordingEventResponse
   | RecordingStoppedResponse
   | ScreenshotUploadResponse
@@ -327,6 +363,7 @@ export type AgentResponse =
 export type Message =
   | ServerCommand
   | AgentResponse
+  | SetupResultResponse
   | ScreenshotAckResponse
   | ConnectionEstablishedMessage;
 

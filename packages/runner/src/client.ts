@@ -7,6 +7,7 @@ import os from 'os';
 import type {
   Message,
   RunTestCommand,
+  RunSetupCommand,
   CancelTestCommand,
   ShutdownCommand,
   StartRecordingCommand,
@@ -15,6 +16,7 @@ import type {
   HeartbeatMessage,
   TestResultResponse,
   TestProgressResponse,
+  SetupResultResponse,
   ScreenshotUploadResponse,
   RecordingEventResponse,
   RecordingStoppedResponse,
@@ -301,6 +303,12 @@ export class RunnerClient {
         this.handleCommand(cmd).catch(error => {
           console.error(`Command ${cmd.type} (${cmd.id}) failed:`, error);
         });
+      } else if (cmd.type === 'command:run_setup') {
+        // Fire and forget — setup is long-running, don't block the queue
+        console.log(`[Queue] Launching setup ${cmd.id.slice(0, 8)}`);
+        this.handleCommand(cmd).catch(error => {
+          console.error(`Command ${cmd.type} (${cmd.id}) failed:`, error);
+        });
       } else {
         // Non-test commands (cancel_test, ping, etc.) — process immediately
         console.log(`[Queue] Processing ${cmd.type}`);
@@ -331,6 +339,10 @@ export class RunnerClient {
 
       case 'command:run_test':
         await this.handleRunTest(message as RunTestCommand);
+        break;
+
+      case 'command:run_setup':
+        await this.handleRunSetup(message as RunSetupCommand);
         break;
 
       case 'command:cancel_test':
@@ -467,6 +479,54 @@ export class RunnerClient {
       this.activeTestIds.delete(testId);
       this.activeTasks--;
       console.log(`[Test ${testId}] Cleanup done (activeTasks: ${this.activeTasks})`);
+      if (this.activeTasks === 0) {
+        this.status = 'idle';
+        this.currentTask = undefined;
+      }
+    }
+  }
+
+  private async handleRunSetup(command: RunSetupCommand): Promise<void> {
+    this.activeTasks++;
+    this.status = 'busy';
+    this.currentTask = `setup:${command.payload.setupId}`;
+
+    // Override targetUrl if baseUrl is configured
+    if (this.baseUrl) {
+      console.log(`[Setup] Overriding targetUrl: ${command.payload.targetUrl} → ${this.baseUrl}`);
+      command.payload.targetUrl = this.baseUrl.replace(/\/+$/, '');
+    }
+
+    try {
+      console.log(`[Setup] Starting setup execution (commandId: ${command.id.slice(0, 8)}, timeout: ${command.payload.timeout}ms)`);
+
+      const result = await this.runner.runSetup(command.payload);
+
+      console.log(`[Setup] runSetup returned: status=${result.status}, duration=${result.durationMs}ms`);
+
+      const resultMsg = createMessage<SetupResultResponse>('response:setup_result', {
+        correlationId: command.id,
+        status: result.status,
+        storageState: result.storageState,
+        variables: result.variables,
+        durationMs: result.durationMs,
+        error: result.error,
+        logs: result.logs,
+      });
+
+      const sent = await this.sendMessage(resultMsg);
+      if (!sent) {
+        console.warn(`[Setup] Result send failed, queuing for retry`);
+        this.pendingResults.push(resultMsg);
+      } else {
+        console.log(`[Setup] Result sent: ${result.status}`);
+      }
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      console.error(`[Setup] handleRunSetup error: ${errorMessage}`);
+      await this.sendError(command.id, 'INTERNAL_ERROR', errorMessage);
+    } finally {
+      this.activeTasks--;
       if (this.activeTasks === 0) {
         this.status = 'idle';
         this.currentTask = undefined;
