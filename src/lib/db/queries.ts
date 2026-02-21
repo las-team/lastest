@@ -534,6 +534,7 @@ export async function getTestResultsByTest(testId: string) {
       consoleErrors: testResults.consoleErrors,
       networkRequests: testResults.networkRequests,
       videoPath: testResults.videoPath,
+      a11yViolations: testResults.a11yViolations,
       startedAt: testRuns.startedAt,
     })
     .from(testResults)
@@ -827,6 +828,7 @@ export async function getVisualDiffsWithTestStatus(buildId: string) {
       errorMessage: testResults.errorMessage,
       testName: tests.name,
       functionalAreaName: functionalAreas.name,
+      a11yViolations: testResults.a11yViolations,
     })
     .from(visualDiffs)
     .leftJoin(testResults, eq(visualDiffs.testResultId, testResults.id))

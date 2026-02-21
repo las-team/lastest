@@ -161,11 +161,13 @@ export async function getDiff(diffId: string) {
   // Get test details
   const test = await queries.getTest(diff.testId);
 
-  // Get error message from test result
+  // Get error message and a11y violations from test result
   let errorMessage: string | null = null;
+  let a11yViolations: import('@/lib/db/schema').A11yViolation[] | null = null;
   if (diff.testResultId) {
     const testResult = await queries.getTestResultById(diff.testResultId);
     errorMessage = testResult?.errorMessage ?? null;
+    a11yViolations = testResult?.a11yViolations ?? null;
   }
 
   // Look up planned screenshot if not already on the diff
@@ -191,6 +193,7 @@ export async function getDiff(diffId: string) {
     plannedPixelDifference,
     plannedPercentageDifference,
     errorMessage,
+    a11yViolations: a11yViolations ?? null,
     test: test ?? null,
   };
 }

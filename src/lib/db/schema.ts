@@ -382,6 +382,7 @@ export type VisualDiffWithTestStatus = VisualDiff & {
   functionalAreaName: string | null;
   stepLabel?: string | null;
   errorMessage?: string | null;
+  a11yViolations?: A11yViolation[] | null;
 };
 export type NewVisualDiff = typeof visualDiffs.$inferInsert;
 export type Baseline = typeof baselines.$inferSelect;

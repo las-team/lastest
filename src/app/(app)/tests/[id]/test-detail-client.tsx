@@ -31,7 +31,8 @@ import { useNotifyJobStarted } from '@/components/queue/job-polling-context';
 import { ExecutionTargetSelector } from '@/components/execution/execution-target-selector';
 import { StepScreenshotMatcher } from '@/components/planned/step-screenshot-matcher';
 import { TestSetupOverrides } from '@/components/setup/test-setup-overrides';
-import type { Test, TestVersion, PlannedScreenshot, SetupScript, GoogleSheetsDataSource } from '@/lib/db/schema';
+import type { Test, TestVersion, PlannedScreenshot, SetupScript, GoogleSheetsDataSource, A11yViolation } from '@/lib/db/schema';
+import { A11yViolationsPanel } from '@/components/builds/a11y-violations-panel';
 import type { ScreenshotGroup } from '@/server/actions/tests';
 import { SheetDataPreview } from '@/components/test-data/sheet-data-preview';
 import { SheetReferenceInserter } from '@/components/test-data/sheet-reference-inserter';
@@ -57,6 +58,7 @@ interface TestResult {
   consoleErrors: string[] | null;
   networkRequests: unknown[] | null;
   videoPath: string | null;
+  a11yViolations: A11yViolation[] | null;
   startedAt: Date | null;
 }
 
@@ -780,6 +782,8 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
                                 </pre>
                               </div>
                             )}
+
+                            <A11yViolationsPanel violations={result.a11yViolations ?? []} />
 
                             {loadingDiffs.has(result.id) ? (
                               <div className="flex items-center gap-2 mt-3 text-sm text-muted-foreground">
