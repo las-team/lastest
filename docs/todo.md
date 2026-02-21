@@ -15,13 +15,14 @@ Network Interception
 ## features
 Support https://github.com/excalidraw/excalidraw/tree/master/packages/excalidraw/tests ~/.claude/plans/declarative-kindling-coral.md 55%
 
-fastpath? auto-run fast version of test, if same results mark as fast and run like that
+auto-run fast version of test, if same results mark as fast and run like that
 
 Tweet about us
 
 Test coverage assessment and recreation based on existing test set
 
 Online - support agent sdk via runner
+Run runner on server in docker
 
 ## ideas
 Content comparison - compare text in 2 setups
@@ -37,8 +38,6 @@ Sitemap -flow
 Formal verification of code?
 ### UX
 ## bugs
-Automated test add
-Page Shift
 ## marketing 
 
 ## Excalidraw 
