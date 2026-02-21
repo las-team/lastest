@@ -22,6 +22,7 @@ import {
   FileSearch,
   Globe,
   Terminal,
+  Circle,
 } from 'lucide-react';
 import { startDebugSession, getDebugState, sendDebugCommand, stopDebugSession, flushDebugTrace } from '@/server/actions/debug';
 import { toast } from 'sonner';
@@ -37,13 +38,14 @@ export function DebugClient({ test, repositoryId }: DebugClientProps) {
   const router = useRouter();
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [state, setState] = useState<DebugState | null>(null);
-  const [editedCode, setEditedCode] = useState<string>(test.code || '');
-  const [isEditing, setIsEditing] = useState(false);
   const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const spaceHeldRef = useRef(false);
-  const fastForwardRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const codeAreaRef = useRef<HTMLTextAreaElement>(null);
   const stepListRef = useRef<HTMLDivElement>(null);
+
+  // Editable code state
+  const [localCode, setLocalCode] = useState<string>(test.code || '');
+  const lastSentCodeRef = useRef<string>(test.code || '');
+  const codeVersionRef = useRef<number>(0);
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Start session on mount
   useEffect(() => {
@@ -69,7 +71,17 @@ export function DebugClient({ test, repositoryId }: DebugClientProps) {
 
     const poll = async () => {
       const s = await getDebugState(sessionId);
-      if (s) setState(s);
+      if (s) {
+        setState(s);
+        // Sync server code → localCode when codeVersion changes (no pending local edits)
+        if (s.codeVersion !== codeVersionRef.current) {
+          codeVersionRef.current = s.codeVersion;
+          if (!debounceRef.current) {
+            setLocalCode(s.code);
+            lastSentCodeRef.current = s.code;
+          }
+        }
+      }
     };
 
     // Initial fetch
@@ -116,19 +128,35 @@ export function DebugClient({ test, repositoryId }: DebugClientProps) {
     router.push(`/tests/${test.id}`);
   }, [sessionId, router, test.id]);
 
-  const handleCodeSave = useCallback(() => {
-    if (!sessionId || !isEditing) return;
-    sendCmd({ type: 'update_code', code: editedCode });
-    setIsEditing(false);
-  }, [sessionId, isEditing, editedCode, sendCmd]);
+  // Debounced code update handler
+  const handleCodeChange = useCallback((newCode: string) => {
+    setLocalCode(newCode);
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(() => {
+      debounceRef.current = null;
+      if (newCode !== lastSentCodeRef.current) {
+        lastSentCodeRef.current = newCode;
+        sendCmd({ type: 'update_code', code: newCode });
+      }
+    }, 500);
+  }, [sendCmd]);
 
   // Keyboard shortcuts
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      // Don't handle shortcuts while editing code
-      if (isEditing && (e.target as HTMLElement)?.tagName === 'TEXTAREA') return;
+      const inTextarea = (e.target as HTMLElement)?.tagName === 'TEXTAREA';
 
-      if (e.key === 'Enter' || e.key === 'F10') {
+      // In textarea: only respond to Ctrl-modified shortcuts
+      if (inTextarea && !e.ctrlKey && !e.metaKey) return;
+
+      if ((e.key === 'Enter') && (e.ctrlKey || e.metaKey)) {
+        e.preventDefault();
+        if (e.shiftKey) {
+          sendCmd({ type: 'step_back' });
+        } else {
+          sendCmd({ type: 'step_forward' });
+        }
+      } else if (e.key === 'F10') {
         e.preventDefault();
         if (e.shiftKey) {
           sendCmd({ type: 'step_back' });
@@ -138,45 +166,30 @@ export function DebugClient({ test, repositoryId }: DebugClientProps) {
       } else if (e.key === 'F9') {
         e.preventDefault();
         sendCmd({ type: 'step_back' });
-      } else if (e.key === 'F5') {
+      } else if (e.key === 'F5' && (e.ctrlKey || e.metaKey || !inTextarea)) {
         e.preventDefault();
         sendCmd({ type: 'run_to_end' });
       } else if (e.key === 'Escape') {
         e.preventDefault();
         handleStop();
-      } else if (e.key === ' ' && !spaceHeldRef.current) {
-        e.preventDefault();
-        spaceHeldRef.current = true;
-        // Start fast-forward
-        fastForwardRef.current = setInterval(() => {
-          sendCmd({ type: 'step_forward' });
-        }, 200);
-      }
-    };
-
-    const handleKeyUp = (e: KeyboardEvent) => {
-      if (e.key === ' ') {
-        spaceHeldRef.current = false;
-        if (fastForwardRef.current) {
-          clearInterval(fastForwardRef.current);
-          fastForwardRef.current = null;
-        }
       }
     };
 
     window.addEventListener('keydown', handleKeyDown);
-    window.addEventListener('keyup', handleKeyUp);
     return () => {
       window.removeEventListener('keydown', handleKeyDown);
-      window.removeEventListener('keyup', handleKeyUp);
-      if (fastForwardRef.current) clearInterval(fastForwardRef.current);
     };
-  }, [sendCmd, handleStop, isEditing]);
+  }, [sendCmd, handleStop]);
 
   const isPaused = state?.status === 'paused';
   const isError = state?.status === 'error';
   const isCompleted = state?.status === 'completed';
   const isInitializing = state?.status === 'initializing' || !state;
+  const isRecording = state?.isRecording ?? false;
+  const isBusy = state?.status === 'stepping' || state?.status === 'running';
+
+  // Past-step edit warning
+  const hasPastStepWarning = state?.error?.includes('Step back to apply');
 
   const statusColor = {
     initializing: 'bg-yellow-500',
@@ -202,6 +215,12 @@ export function DebugClient({ test, repositoryId }: DebugClientProps) {
           >
             {state?.status || 'initializing'}
           </Badge>
+          {isRecording && (
+            <span className="flex items-center gap-1 text-xs text-red-500">
+              <Circle className="h-2 w-2 fill-red-500 animate-pulse" />
+              REC
+            </span>
+          )}
           {state && state.steps.length > 0 && (
             <span className="text-xs text-muted-foreground">
               Step {(state.currentStepIndex ?? -1) + 1} / {state.steps.length}
@@ -215,8 +234,8 @@ export function DebugClient({ test, repositoryId }: DebugClientProps) {
             variant="outline"
             size="sm"
             onClick={() => sendCmd({ type: 'step_back' })}
-            disabled={!isPaused && !isError || (state?.currentStepIndex ?? 0) <= 0}
-            title="Step Back (Shift+Enter / F9)"
+            disabled={isRecording || ((!isPaused && !isError) || (state?.currentStepIndex ?? 0) <= 0)}
+            title="Step Back (Ctrl+Shift+Enter / F9)"
           >
             <SkipBack className="h-4 w-4" />
           </Button>
@@ -224,8 +243,8 @@ export function DebugClient({ test, repositoryId }: DebugClientProps) {
             variant="default"
             size="sm"
             onClick={() => sendCmd({ type: 'step_forward' })}
-            disabled={!isPaused && !isError}
-            title="Step Forward (Enter / F10)"
+            disabled={isRecording || (!isPaused && !isError)}
+            title="Step Forward (Ctrl+Enter / F10)"
           >
             <StepForward className="h-4 w-4 mr-1" />
             Step
@@ -234,8 +253,8 @@ export function DebugClient({ test, repositoryId }: DebugClientProps) {
             variant="outline"
             size="sm"
             onClick={() => sendCmd({ type: 'run_to_end' })}
-            disabled={!isPaused && !isError}
-            title="Run to End (F5)"
+            disabled={isRecording || (!isPaused && !isError)}
+            title="Run to End (Ctrl+F5)"
           >
             <FastForward className="h-4 w-4 mr-1" />
             Run
@@ -249,6 +268,29 @@ export function DebugClient({ test, repositoryId }: DebugClientProps) {
             <Square className="h-4 w-4" />
           </Button>
           <div className="w-px h-5 bg-border mx-1" />
+          {/* Record toggle */}
+          {isRecording ? (
+            <Button
+              variant="destructive"
+              size="sm"
+              onClick={() => sendCmd({ type: 'stop_recording' })}
+              title="Stop Recording"
+            >
+              <Square className="h-3 w-3 mr-1" />
+              Stop Rec{(state?.recordedEventCount ?? 0) > 0 ? ` (${state!.recordedEventCount})` : ''}
+            </Button>
+          ) : (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => sendCmd({ type: 'start_recording' })}
+              disabled={!isPaused}
+              title="Record actions in browser"
+            >
+              <Circle className="h-3 w-3 mr-1 text-red-500 fill-red-500" />
+              Record
+            </Button>
+          )}
           <Button
             variant="outline"
             size="sm"
@@ -289,48 +331,35 @@ export function DebugClient({ test, repositoryId }: DebugClientProps) {
             <div className="flex flex-col h-full">
               <div className="flex items-center justify-between px-3 py-1.5 border-b bg-muted/50">
                 <span className="text-xs font-medium text-muted-foreground">Test Code</span>
-                {isPaused && (
-                  <div className="flex items-center gap-1">
-                    {isEditing ? (
-                      <>
-                        <Button variant="ghost" size="sm" className="h-6 text-xs" onClick={() => { setIsEditing(false); setEditedCode(state?.code || test.code || ''); }}>
-                          Cancel
-                        </Button>
-                        <Button variant="default" size="sm" className="h-6 text-xs" onClick={handleCodeSave}>
-                          Apply
-                        </Button>
-                      </>
-                    ) : (
-                      <Button variant="ghost" size="sm" className="h-6 text-xs" onClick={() => { setEditedCode(state?.code || test.code || ''); setIsEditing(true); }}>
-                        Edit
-                      </Button>
-                    )}
-                  </div>
-                )}
               </div>
-              <ScrollArea className="flex-1">
-                {isEditing ? (
-                  <textarea
-                    ref={codeAreaRef}
-                    value={editedCode}
-                    onChange={e => setEditedCode(e.target.value)}
-                    className="w-full h-full min-h-[600px] p-3 font-mono text-xs bg-background resize-none focus:outline-none"
-                    spellCheck={false}
-                  />
-                ) : (
-                  <CodeDisplay
-                    code={state?.code || test.code || ''}
-                    steps={state?.steps || []}
-                    currentStepIndex={state?.currentStepIndex ?? -1}
-                    stepResults={state?.stepResults || []}
-                    onClickStep={(idx) => {
-                      if (isPaused && idx > (state?.currentStepIndex ?? -1)) {
-                        sendCmd({ type: 'run_to_step', stepIndex: idx });
-                      }
-                    }}
-                  />
-                )}
-              </ScrollArea>
+              {/* Past-step edit warning */}
+              {hasPastStepWarning && (
+                <div className="flex items-center gap-2 px-3 py-1.5 bg-yellow-500/10 border-b border-yellow-500/20">
+                  <p className="text-xs text-yellow-600 flex-1">Code changed at an already-executed step. Step back to apply changes.</p>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-6 text-xs border-yellow-500/30 text-yellow-600"
+                    onClick={() => sendCmd({ type: 'step_back' })}
+                  >
+                    <SkipBack className="h-3 w-3 mr-1" />
+                    Step Back
+                  </Button>
+                </div>
+              )}
+              <EditableCodeDisplay
+                code={localCode}
+                steps={state?.steps || []}
+                currentStepIndex={state?.currentStepIndex ?? -1}
+                stepResults={state?.stepResults || []}
+                onCodeChange={handleCodeChange}
+                onClickStep={(idx) => {
+                  if (isPaused && idx > (state?.currentStepIndex ?? -1)) {
+                    sendCmd({ type: 'run_to_step', stepIndex: idx });
+                  }
+                }}
+                disabled={isBusy}
+              />
             </div>
           </ResizablePanel>
 
@@ -357,8 +386,8 @@ export function DebugClient({ test, repositoryId }: DebugClientProps) {
 
               {/* Steps Tab */}
               <TabsContent value="steps" className="flex flex-col flex-1 min-h-0 mt-0">
-                {/* Error banner */}
-                {isError && state?.error && (
+                {/* Error banner (non-past-step errors) */}
+                {isError && state?.error && !hasPastStepWarning && (
                   <div className="mx-3 mt-2 p-2 rounded bg-destructive/10 border border-destructive/20">
                     <p className="text-xs text-destructive font-mono">{state.error}</p>
                   </div>
@@ -378,7 +407,7 @@ export function DebugClient({ test, repositoryId }: DebugClientProps) {
                       const isCurrent = idx === (state?.currentStepIndex ?? -1);
                       const isStepPassed = result?.status === 'passed';
                       const isFailed = result?.status === 'failed';
-                      const isPending = result?.status === 'pending';
+                      const isPendingStep = result?.status === 'pending';
 
                       return (
                         <div
@@ -403,7 +432,7 @@ export function DebugClient({ test, repositoryId }: DebugClientProps) {
                               <Loader2 className="h-4 w-4 animate-spin text-blue-500" />
                             ) : isCurrent ? (
                               <Play className="h-4 w-4 text-blue-500" />
-                            ) : isPending ? (
+                            ) : isPendingStep ? (
                               <Clock className="h-4 w-4 text-muted-foreground/40" />
                             ) : (
                               <Pause className="h-4 w-4 text-muted-foreground/40" />
@@ -441,10 +470,9 @@ export function DebugClient({ test, repositoryId }: DebugClientProps) {
                 {/* Keyboard shortcuts hint */}
                 <div className="border-t px-3 py-1.5 bg-muted/30">
                   <p className="text-[10px] text-muted-foreground">
-                    <kbd className="px-1 py-0.5 bg-muted rounded text-[9px]">Enter</kbd> Step
-                    {' '}<kbd className="px-1 py-0.5 bg-muted rounded text-[9px]">Shift+Enter</kbd> Back
-                    {' '}<kbd className="px-1 py-0.5 bg-muted rounded text-[9px]">F5</kbd> Run all
-                    {' '}<kbd className="px-1 py-0.5 bg-muted rounded text-[9px]">Space</kbd> Fast-forward
+                    <kbd className="px-1 py-0.5 bg-muted rounded text-[9px]">Ctrl+Enter</kbd> Step
+                    {' '}<kbd className="px-1 py-0.5 bg-muted rounded text-[9px]">Ctrl+Shift+Enter</kbd> Back
+                    {' '}<kbd className="px-1 py-0.5 bg-muted rounded text-[9px]">Ctrl+F5</kbd> Run all
                     {' '}<kbd className="px-1 py-0.5 bg-muted rounded text-[9px]">Esc</kbd> Stop
                   </p>
                 </div>
@@ -467,14 +495,155 @@ export function DebugClient({ test, repositoryId }: DebugClientProps) {
   );
 }
 
-// -------- Code Display Component --------
+// -------- Editable Code Display Component --------
 
-interface CodeDisplayProps {
+interface EditableCodeDisplayProps {
   code: string;
   steps: DebugState['steps'];
   currentStepIndex: number;
   stepResults: DebugState['stepResults'];
+  onCodeChange: (code: string) => void;
   onClickStep: (idx: number) => void;
+  disabled: boolean;
+}
+
+function EditableCodeDisplay({ code, steps, currentStepIndex, stepResults, onCodeChange, onClickStep, disabled }: EditableCodeDisplayProps) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const highlightRef = useRef<HTMLDivElement>(null);
+
+  // Sync scroll between textarea and highlight layer
+  const handleScroll = useCallback(() => {
+    if (textareaRef.current && highlightRef.current) {
+      highlightRef.current.scrollTop = textareaRef.current.scrollTop;
+      highlightRef.current.scrollLeft = textareaRef.current.scrollLeft;
+    }
+  }, []);
+
+  return (
+    <div ref={containerRef} className="relative flex-1 overflow-hidden">
+      {/* Background: highlighted code display (pointer-events-none) */}
+      <div
+        ref={highlightRef}
+        className="absolute inset-0 overflow-hidden pointer-events-none"
+      >
+        <CodeHighlight
+          code={code}
+          steps={steps}
+          currentStepIndex={currentStepIndex}
+          stepResults={stepResults}
+        />
+      </div>
+      {/* Foreground: transparent textarea for editing */}
+      <textarea
+        ref={textareaRef}
+        value={code}
+        onChange={(e) => onCodeChange(e.target.value)}
+        onScroll={handleScroll}
+        readOnly={disabled}
+        className="absolute inset-0 w-full h-full font-mono text-xs leading-5 bg-transparent resize-none focus:outline-none pl-12 pr-4 py-0 overflow-auto"
+        style={{ color: 'transparent', caretColor: 'var(--foreground)' }}
+        spellCheck={false}
+        autoCapitalize="off"
+        autoCorrect="off"
+      />
+      {/* Click overlay for step navigation (only on the gutter area) */}
+      <div className="absolute inset-y-0 left-0 w-12">
+        {code.split('\n').map((_, lineIdx) => {
+          const lineNum = lineIdx + 1;
+          const funcMatch = code.match(/export\s+async\s+function\s+test\s*\([^)]*\)\s*\{/);
+          const bodyStartLine = funcMatch
+            ? code.slice(0, (funcMatch.index ?? 0) + funcMatch[0].length).split('\n').length
+            : 0;
+          const bodyLineNum = lineNum - bodyStartLine;
+          let stepIdx: number | undefined;
+          for (const step of steps) {
+            if (bodyLineNum >= step.lineStart && bodyLineNum <= step.lineEnd) {
+              stepIdx = steps.indexOf(step);
+              break;
+            }
+          }
+          if (stepIdx === undefined) return null;
+          const sIdx = stepIdx;
+          return (
+            <div
+              key={lineIdx}
+              className="h-5 cursor-pointer"
+              onClick={() => onClickStep(sIdx)}
+            />
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// -------- Code Highlight (read-only rendering layer) --------
+
+interface CodeHighlightProps {
+  code: string;
+  steps: DebugState['steps'];
+  currentStepIndex: number;
+  stepResults: DebugState['stepResults'];
+}
+
+function CodeHighlight({ code, steps, currentStepIndex, stepResults }: CodeHighlightProps) {
+  const lines = code.split('\n');
+
+  // Build line → step mapping
+  const lineStepMap = new Map<number, { stepIdx: number; isStart: boolean }>();
+  steps.forEach((step, idx) => {
+    for (let line = step.lineStart; line <= step.lineEnd; line++) {
+      lineStepMap.set(line, { stepIdx: idx, isStart: line === step.lineStart });
+    }
+  });
+
+  // Find the line offset
+  const funcMatch = code.match(/export\s+async\s+function\s+test\s*\([^)]*\)\s*\{/);
+  const bodyStartLine = funcMatch
+    ? code.slice(0, (funcMatch.index ?? 0) + funcMatch[0].length).split('\n').length
+    : 0;
+
+  return (
+    <div className="font-mono text-xs leading-5">
+      {lines.map((line, lineIdx) => {
+        const lineNum = lineIdx + 1;
+        const bodyLineNum = lineNum - bodyStartLine;
+        const stepInfo = lineStepMap.get(bodyLineNum);
+        const stepIdx = stepInfo?.stepIdx;
+
+        const isCurrent = stepIdx !== undefined && stepIdx === currentStepIndex;
+        const isPassed = stepIdx !== undefined && stepResults[stepIdx]?.status === 'passed';
+        const isFailed = stepIdx !== undefined && stepResults[stepIdx]?.status === 'failed';
+
+        let bgColor = '';
+        if (isCurrent) bgColor = 'bg-blue-500/10';
+        else if (isFailed) bgColor = 'bg-red-500/5';
+        else if (isPassed) bgColor = '';
+
+        let gutterColor = 'text-muted-foreground/40';
+        if (isFailed) gutterColor = 'text-red-500';
+        else if (isPassed) gutterColor = 'text-green-500';
+        else if (isCurrent) gutterColor = 'text-blue-500';
+
+        return (
+          <div
+            key={lineIdx}
+            className={`flex ${bgColor}`}
+          >
+            {/* Gutter */}
+            <div className={`w-12 flex-shrink-0 text-right pr-3 select-none ${gutterColor}`}>
+              {isCurrent && stepInfo?.isStart ? '>' : ' '}{lineNum}
+            </div>
+            {/* Code */}
+            <pre className="flex-1 whitespace-pre-wrap break-all pr-4">
+              {line}
+            </pre>
+          </div>
+        );
+      })}
+    </div>
+  );
 }
 
 // -------- Network Panel Component --------
@@ -590,70 +759,5 @@ function ConsolePanel({ entries }: { entries: DebugConsoleEntry[] }) {
         ))}
       </div>
     </ScrollArea>
-  );
-}
-
-// -------- Code Display Component --------
-
-function CodeDisplay({ code, steps, currentStepIndex, stepResults, onClickStep }: CodeDisplayProps) {
-  const lines = code.split('\n');
-
-  // Build line → step mapping
-  const lineStepMap = new Map<number, { stepIdx: number; isStart: boolean }>();
-  steps.forEach((step, idx) => {
-    for (let line = step.lineStart; line <= step.lineEnd; line++) {
-      lineStepMap.set(line, { stepIdx: idx, isStart: line === step.lineStart });
-    }
-  });
-
-  // Find the line offset — test body starts after the function signature
-  // Steps use 1-based line numbers relative to the function body
-  const funcMatch = code.match(/export\s+async\s+function\s+test\s*\([^)]*\)\s*\{/);
-  const bodyStartLine = funcMatch
-    ? code.slice(0, (funcMatch.index ?? 0) + funcMatch[0].length).split('\n').length
-    : 0;
-
-  return (
-    <div className="font-mono text-xs leading-5">
-      {lines.map((line, lineIdx) => {
-        const lineNum = lineIdx + 1;
-        const bodyLineNum = lineNum - bodyStartLine;
-        const stepInfo = lineStepMap.get(bodyLineNum);
-        const stepIdx = stepInfo?.stepIdx;
-
-        const isCurrent = stepIdx !== undefined && stepIdx === currentStepIndex;
-        const isPassed = stepIdx !== undefined && stepResults[stepIdx]?.status === 'passed';
-        const isFailed = stepIdx !== undefined && stepResults[stepIdx]?.status === 'failed';
-
-        let bgColor = '';
-        if (isCurrent) bgColor = 'bg-blue-500/10';
-        else if (isFailed) bgColor = 'bg-red-500/5';
-        else if (isPassed) bgColor = '';
-
-        let gutterColor = 'text-muted-foreground/40';
-        if (isFailed) gutterColor = 'text-red-500';
-        else if (isPassed) gutterColor = 'text-green-500';
-        else if (isCurrent) gutterColor = 'text-blue-500';
-
-        return (
-          <div
-            key={lineIdx}
-            className={`flex ${bgColor} hover:bg-muted/30 cursor-pointer`}
-            onClick={() => {
-              if (stepIdx !== undefined) onClickStep(stepIdx);
-            }}
-          >
-            {/* Gutter */}
-            <div className={`w-12 flex-shrink-0 text-right pr-3 select-none ${gutterColor}`}>
-              {isCurrent && stepInfo?.isStart ? '>' : ' '}{lineNum}
-            </div>
-            {/* Code */}
-            <pre className="flex-1 whitespace-pre-wrap break-all pr-4">
-              {line}
-            </pre>
-          </div>
-        );
-      })}
-    </div>
   );
 }

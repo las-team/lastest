@@ -20,6 +20,7 @@ import type { SetupContext } from '@/lib/setup/types';
 import { createAppState, createExpect, stripTypeAnnotations, validateTestCode } from './runner';
 import { parseSteps, extractTestBody, removeInlineLocateWithFallback, removeInlineReplayCursorPath, type DebugStep } from './debug-parser';
 import { STORAGE_DIRS } from '@/lib/storage/paths';
+import { injectRecordingListeners, generateBodyLinesFromEvents, type DebugRecordingSession } from './debug-recorder';
 
 export interface StepResult {
   stepId: number;
@@ -61,6 +62,9 @@ export interface DebugState {
   networkEntries: DebugNetworkEntry[];
   consoleEntries: DebugConsoleEntry[];
   traceUrl?: string;
+  codeVersion: number;
+  isRecording: boolean;
+  recordedEventCount: number;
 }
 
 export type DebugCommand =
@@ -69,6 +73,8 @@ export type DebugCommand =
   | { type: 'run_to_end' }
   | { type: 'run_to_step'; stepIndex: number }
   | { type: 'update_code'; code: string }
+  | { type: 'start_recording' }
+  | { type: 'stop_recording' }
   | { type: 'stop' };
 
 const IDLE_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
@@ -159,6 +165,11 @@ export class DebugRunner {
   private traceChunkIndex = 0;
   private tracingActive = false;
 
+  // Recording support
+  private debugRecordingSession: DebugRecordingSession | null = null;
+  private debugRecordingCleanup: (() => Promise<void>) | null = null;
+  private debugFunctionsExposed = false;
+
   getState(): DebugState | null {
     return this.state;
   }
@@ -202,6 +213,9 @@ export class DebugRunner {
         error: 'Could not parse test function body',
         networkEntries: [],
         consoleEntries: [],
+        codeVersion: 0,
+        isRecording: false,
+        recordedEventCount: 0,
       };
       return sessionId;
     }
@@ -221,6 +235,9 @@ export class DebugRunner {
       code,
       networkEntries: [],
       consoleEntries: [],
+      codeVersion: 0,
+      isRecording: false,
+      recordedEventCount: 0,
     };
 
     const gen = this.generation;
@@ -250,6 +267,16 @@ export class DebugRunner {
       return true;
     }
 
+    if (command.type === 'start_recording') {
+      this.handleStartRecording();
+      return true;
+    }
+
+    if (command.type === 'stop_recording') {
+      this.handleStopRecording().catch(() => {});
+      return true;
+    }
+
     if (this.commandResolve) {
       this.commandResolve(command);
       this.commandResolve = null;
@@ -265,8 +292,16 @@ export class DebugRunner {
   async stop(): Promise<void> {
     this.clearIdleTimer();
 
+    // Clean up recording if active (discard events)
+    if (this.debugRecordingCleanup) {
+      await this.debugRecordingCleanup().catch(() => {});
+      this.debugRecordingCleanup = null;
+      this.debugRecordingSession = null;
+    }
+
     if (this.state) {
       this.state.status = 'completed';
+      this.state.isRecording = false;
     }
 
     // Abort running instrumented function
@@ -328,6 +363,7 @@ export class DebugRunner {
 
   private handleCodeUpdate(newCode: string) {
     if (!this.state) return;
+    if (newCode === this.state.code) return; // no-op
 
     const body = extractTestBody(newCode);
     if (!body) return;
@@ -357,10 +393,112 @@ export class DebugRunner {
     this.state.steps = newSteps;
     this.state.stepResults = newResults;
     this.state.code = newCode;
+    this.state.codeVersion++;
 
     if (mismatchAt !== -1 && mismatchAt < executedCount) {
       this.state.error = `Code changed at step ${mismatchAt + 1}. Step back to apply changes.`;
     }
+  }
+
+  private async handleStartRecording(): Promise<void> {
+    if (!this.state || this.state.status !== 'paused' || !this.page) return;
+    if (this.state.isRecording) return;
+
+    try {
+      const baseUrl = this.environmentConfig?.baseUrl || 'http://localhost:3000';
+      const { session, cleanup } = await injectRecordingListeners(
+        this.page,
+        baseUrl,
+        this.debugFunctionsExposed,
+        {
+          onEvent: (count) => {
+            if (this.state) {
+              this.state.recordedEventCount = count;
+            }
+          },
+        }
+      );
+      this.debugFunctionsExposed = true;
+      this.debugRecordingSession = session;
+      this.debugRecordingCleanup = cleanup;
+      this.state.isRecording = true;
+      this.state.recordedEventCount = 0;
+    } catch (err) {
+      if (this.state) {
+        this.state.error = `Failed to start recording: ${err instanceof Error ? err.message : String(err)}`;
+      }
+    }
+  }
+
+  private async handleStopRecording(): Promise<void> {
+    if (!this.state || !this.debugRecordingSession) return;
+
+    const session = this.debugRecordingSession;
+
+    // Cleanup browser-side listeners
+    if (this.debugRecordingCleanup) {
+      await this.debugRecordingCleanup().catch(() => {});
+      this.debugRecordingCleanup = null;
+    }
+    this.debugRecordingSession = null;
+
+    this.state.isRecording = false;
+
+    // Generate code from recorded events
+    if (session.events.length === 0) return;
+
+    const baseUrl = this.environmentConfig?.baseUrl || 'http://localhost:3000';
+    let baseOrigin: string;
+    try {
+      baseOrigin = new URL(baseUrl).origin;
+    } catch {
+      baseOrigin = baseUrl;
+    }
+
+    const newLines = generateBodyLinesFromEvents(session.events, baseOrigin);
+    if (newLines.length === 0) return;
+
+    const newBlock = newLines.join('\n');
+    const splicedCode = this.spliceCodeAtCurrentStep(newBlock);
+    if (splicedCode) {
+      this.handleCodeUpdate(splicedCode);
+    }
+  }
+
+  /**
+   * Insert a block of code after the current step in the full test code.
+   * Returns the modified full code string, or null if splice failed.
+   */
+  private spliceCodeAtCurrentStep(newBlock: string): string | null {
+    if (!this.state) return null;
+
+    const code = this.state.code;
+    const lines = code.split('\n');
+
+    // Find the body start line (same calc as CodeDisplay)
+    const funcMatch = code.match(/export\s+async\s+function\s+test\s*\([^)]*\)\s*\{/);
+    const bodyStartLine = funcMatch
+      ? code.slice(0, (funcMatch.index ?? 0) + funcMatch[0].length).split('\n').length
+      : 0;
+
+    const currentIdx = this.state.currentStepIndex;
+    if (currentIdx < 0 || currentIdx >= this.state.steps.length) {
+      // No step executed yet — insert at start of body
+      const insertAfterLine = bodyStartLine;
+      const before = lines.slice(0, insertAfterLine);
+      const after = lines.slice(insertAfterLine);
+      return [...before, newBlock, ...after].join('\n');
+    }
+
+    const currentStep = this.state.steps[currentIdx];
+    // Map step lineEnd (body-relative, 1-based) to absolute line number
+    const absoluteLine = bodyStartLine + currentStep.lineEnd;
+
+    if (absoluteLine > lines.length) return null;
+
+    const before = lines.slice(0, absoluteLine);
+    const after = lines.slice(absoluteLine);
+    return [...before, newBlock, ...after].join('\n');
   }
 
   private getBrowserLauncher() {
@@ -1005,6 +1143,17 @@ export class DebugRunner {
             await this.context.close().catch(() => {});
             this.context = null;
             this.page = null;
+          }
+
+          // Reset recording state (exposed functions die with the context)
+          this.debugFunctionsExposed = false;
+          if (this.debugRecordingCleanup) {
+            this.debugRecordingCleanup = null;
+            this.debugRecordingSession = null;
+            if (this.state) {
+              this.state.isRecording = false;
+              this.state.recordedEventCount = 0;
+            }
           }
 
           // Clear network/console for replay
