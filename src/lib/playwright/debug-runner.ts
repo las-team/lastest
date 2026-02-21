@@ -75,7 +75,8 @@ export type DebugCommand =
   | { type: 'update_code'; code: string }
   | { type: 'start_recording' }
   | { type: 'stop_recording' }
-  | { type: 'stop' };
+  | { type: 'stop' }
+  | { type: '_execution_complete' };
 
 const IDLE_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
 
@@ -267,16 +268,6 @@ export class DebugRunner {
       return true;
     }
 
-    if (command.type === 'start_recording') {
-      this.handleStartRecording();
-      return true;
-    }
-
-    if (command.type === 'stop_recording') {
-      this.handleStopRecording().catch(() => {});
-      return true;
-    }
-
     if (this.commandResolve) {
       this.commandResolve(command);
       this.commandResolve = null;
@@ -401,7 +392,8 @@ export class DebugRunner {
   }
 
   private async handleStartRecording(): Promise<void> {
-    if (!this.state || this.state.status !== 'paused' || !this.page) return;
+    if (!this.state || !this.page) return;
+    if (this.state.status !== 'paused' && this.state.status !== 'completed') return;
     if (this.state.isRecording) return;
 
     try {
@@ -1073,13 +1065,13 @@ export class DebugRunner {
 
       // Launch instrumented execution in background
       const startExecution = (pc: PauseController, h: ReturnType<typeof this.createHelpers>, pg: Page) => {
-        this.launchExecution(steps, pc, pg, baseUrl, screenshotPath, h).then(() => {
+        this.launchExecution(this.state!.steps, pc, pg, baseUrl, screenshotPath, h).then(() => {
           if (this.state && this.state.status !== 'completed' && this.state.status !== 'error') {
             this.state.status = 'completed';
           }
-          // Unblock command loop
+          // Unblock command loop (keep alive for editing/recording)
           if (this.commandResolve) {
-            this.commandResolve({ type: 'stop' });
+            this.commandResolve({ type: '_execution_complete' });
             this.commandResolve = null;
           }
         }).catch((err) => {
@@ -1089,9 +1081,9 @@ export class DebugRunner {
             this.state.status = 'error';
             this.state.error = execError.message;
           }
-          // Unblock command loop
+          // Unblock command loop (keep alive for step_back/editing)
           if (this.commandResolve) {
-            this.commandResolve({ type: 'stop' });
+            this.commandResolve({ type: '_execution_complete' });
             this.commandResolve = null;
           }
         });
@@ -1099,9 +1091,8 @@ export class DebugRunner {
 
       startExecution(pauseCtrl, helpers, this.page);
 
-      // Command loop
+      // Command loop (stays alive after execution completes for editing/recording)
       while (true) {
-        if (this.state.status === 'completed') break;
         if (this.isStale(gen)) break;
 
         const cmd = await this.waitForCommand();
@@ -1114,7 +1105,10 @@ export class DebugRunner {
           break;
         }
 
-        // step_back — always allowed (even after error), requires currentStepIndex > 0
+        // Execution finished signal — keep loop alive
+        if (cmd.type === '_execution_complete') continue;
+
+        // step_back — always allowed (even after error/completed), requires currentStepIndex > 0
         if (cmd.type === 'step_back') {
           if (this.state.currentStepIndex <= 0) continue;
           const targetIdx = this.state.currentStepIndex - 1;
@@ -1175,7 +1169,7 @@ export class DebugRunner {
 
           // Reset all step results
           for (let i = 0; i < this.state.stepResults.length; i++) {
-            this.state.stepResults[i] = { stepId: steps[i].id, status: 'pending', durationMs: 0 };
+            this.state.stepResults[i] = { stepId: this.state.steps[i].id, status: 'pending', durationMs: 0 };
           }
 
           // New PauseController: run_to_step replaying 0..targetIdx, then pause
@@ -1189,30 +1183,145 @@ export class DebugRunner {
           continue;
         }
 
-        // Other commands require paused state
-        if (this.state.status !== 'paused') continue;
+        // Other commands require paused or completed state
+        if (this.state.status !== 'paused' && this.state.status !== 'completed') continue;
 
         if (cmd.type === 'step_forward') {
           const nextIdx = this.state.currentStepIndex + 1;
-          if (nextIdx >= steps.length) {
+          if (nextIdx >= this.state.steps.length) {
             this.state.status = 'completed';
-            break;
+            continue;
+          }
+          if (this.state.status === 'completed') {
+            // Execution finished but new steps added (via edit/recording) — restart
+            this.state.status = 'stepping';
+            this.state.error = undefined;
+            pauseCtrl.stop();
+            await new Promise(r => setTimeout(r, 50));
+
+            if (this.context && this.tracingActive) {
+              const traceFile = `debug-${this.state.sessionId}-${this.traceChunkIndex}.zip`;
+              const tracePath = path.join(this.traceDir || STORAGE_DIRS.traces, traceFile);
+              fs.mkdirSync(path.dirname(tracePath), { recursive: true });
+              await this.context.tracing.stop({ path: tracePath }).catch(() => {});
+              this.state.traceUrl = `/traces/${traceFile}`;
+              this.traceChunkIndex++;
+              this.tracingActive = false;
+            }
+            if (this.context) {
+              await this.context.close().catch(() => {});
+              this.context = null;
+              this.page = null;
+            }
+            this.debugFunctionsExposed = false;
+            this.networkEntries = [];
+            this.networkSeq = 0;
+            this.consoleEntries = [];
+            this.state.networkEntries = this.networkEntries;
+            this.state.consoleEntries = this.consoleEntries;
+            await this.createPageAndContext();
+            if (!this.page) throw new Error('Failed to recreate page');
+            await this.runSetupIfNeeded(test, this.page, baseUrl);
+            helpers = this.createHelpers(this.page, test.id);
+            for (let i = 0; i < this.state.stepResults.length; i++) {
+              this.state.stepResults[i] = { stepId: this.state.steps[i].id, status: 'pending', durationMs: 0 };
+            }
+            pauseCtrl = new PauseController('run_to_step', nextIdx + 1, () => {
+              if (this.state) this.state.status = 'paused';
+            });
+            this.pauseController = pauseCtrl;
+            startExecution(pauseCtrl, helpers, this.page);
+            continue;
           }
           this.state.status = 'stepping';
           pauseCtrl.resume('paused');
         }
 
         else if (cmd.type === 'run_to_end') {
+          if (this.state.status === 'completed') continue; // already at end
           this.state.status = 'running';
           pauseCtrl.resume('running');
         }
 
         else if (cmd.type === 'run_to_step') {
           const targetIdx = cmd.stepIndex;
-          if (targetIdx <= this.state.currentStepIndex || targetIdx >= steps.length) continue;
+          if (targetIdx <= this.state.currentStepIndex || targetIdx >= this.state.steps.length) continue;
+          if (this.state.status === 'completed') continue; // can't resume completed execution
           this.state.status = 'running';
           // Target is targetIdx+1 because checkpoint(targetIdx+1) fires AFTER step targetIdx completes
           pauseCtrl.resume('run_to_step', targetIdx + 1);
+        }
+
+        else if (cmd.type === 'start_recording') {
+          await this.handleStartRecording();
+        }
+
+        else if (cmd.type === 'stop_recording') {
+          const oldStepCount = this.state.steps.length;
+          const oldCurrentIdx = this.state.currentStepIndex;
+          await this.handleStopRecording();
+          const addedSteps = this.state.steps.length - oldStepCount;
+
+          if (addedSteps > 0) {
+            // Restart execution to compile the new steps
+            this.state.status = 'stepping';
+            pauseCtrl.stop();
+            await new Promise(r => setTimeout(r, 50));
+
+            // Save trace chunk before closing context
+            if (this.context && this.tracingActive) {
+              const traceFile = `debug-${this.state.sessionId}-${this.traceChunkIndex}.zip`;
+              const tracePath = path.join(this.traceDir || STORAGE_DIRS.traces, traceFile);
+              fs.mkdirSync(path.dirname(tracePath), { recursive: true });
+              await this.context.tracing.stop({ path: tracePath }).catch(() => {});
+              this.state.traceUrl = `/traces/${traceFile}`;
+              this.traceChunkIndex++;
+              this.tracingActive = false;
+            }
+
+            // Close context (keep browser)
+            if (this.context) {
+              await this.context.close().catch(() => {});
+              this.context = null;
+              this.page = null;
+            }
+
+            // Reset recording state (exposed functions die with context)
+            this.debugFunctionsExposed = false;
+            this.debugRecordingCleanup = null;
+            this.debugRecordingSession = null;
+
+            // Clear network/console for replay
+            this.networkEntries = [];
+            this.networkSeq = 0;
+            this.consoleEntries = [];
+            this.state.networkEntries = this.networkEntries;
+            this.state.consoleEntries = this.consoleEntries;
+
+            // Recreate page and context
+            await this.createPageAndContext();
+            if (!this.page) throw new Error('Failed to recreate page');
+
+            // Re-run setup
+            await this.runSetupIfNeeded(test, this.page, baseUrl);
+
+            // Recreate helpers with new page
+            helpers = this.createHelpers(this.page, test.id);
+
+            // Reset all step results
+            for (let i = 0; i < this.state.stepResults.length; i++) {
+              this.state.stepResults[i] = { stepId: this.state.steps[i].id, status: 'pending', durationMs: 0 };
+            }
+
+            // Replay to after the last recorded step, then pause
+            const replayTarget = oldCurrentIdx + addedSteps;
+            pauseCtrl = new PauseController('run_to_step', replayTarget + 1, () => {
+              if (this.state) this.state.status = 'paused';
+            });
+            this.pauseController = pauseCtrl;
+
+            startExecution(pauseCtrl, helpers, this.page);
+          }
         }
       }
 
