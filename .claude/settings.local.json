@@ -93,7 +93,9 @@
       "WebFetch(domain:www.better-auth.com)",
       "Bash(curl:*)",
       "Bash(timeout 15 tail:*)",
-      "Bash(docker push:*)"
+      "Bash(docker push:*)",
+      "Bash(git -C /home/ewyct/dev/lastest2 log --all --pretty=format:\"%h %s\" --grep=\"Agent\\\\|agent\\\\|SDK\\\\|sdk\")",
+      "Bash(git fetch:*)"
     ]
   },
   "disabledMcpjsonServers": [

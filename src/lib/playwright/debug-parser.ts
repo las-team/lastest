@@ -353,3 +353,27 @@ export function removeInlineLocateWithFallback(body: string): string {
   result = result.replace(/page\.keyboard\.selectAll\(\)/g, "page.keyboard.press('Control+a')");
   return result;
 }
+
+/**
+ * Remove the inline replayCursorPath function declaration from test body.
+ * Same balanced-brace pattern as removeInlineLocateWithFallback.
+ * The debug runner provides its own speed-aware version.
+ */
+export function removeInlineReplayCursorPath(body: string): string {
+  if (!body.includes('async function replayCursorPath(')) return body;
+
+  const startMatch = body.match(/async function replayCursorPath\s*\([^)]*\)\s*\{/);
+  if (!startMatch || startMatch.index === undefined) return body;
+
+  const startIdx = startMatch.index;
+  const braceStart = body.indexOf('{', startIdx);
+  let depth = 1;
+  let endIdx = braceStart + 1;
+  while (depth > 0 && endIdx < body.length) {
+    if (body[endIdx] === '{') depth++;
+    else if (body[endIdx] === '}') depth--;
+    endIdx++;
+  }
+
+  return body.slice(0, startIdx) + '/* replayCursorPath provided by runner */' + body.slice(endIdx);
+}

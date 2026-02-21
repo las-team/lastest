@@ -617,6 +617,12 @@ function DiffRow({
             AI Failed
           </span>
         )}
+        {diff.a11yViolations && diff.a11yViolations.length > 0 && (
+          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-700">
+            <AlertTriangle className="w-3 h-3" />
+            {diff.a11yViolations.length} a11y
+          </span>
+        )}
         {diff.currentImagePath && (
           <img
             src={diff.currentImagePath}

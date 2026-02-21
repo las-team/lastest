@@ -18,5 +18,10 @@ export async function GET(
     return NextResponse.json({ error: 'Session not found' }, { status: 404 });
   }
 
+  // Verify team ownership
+  if (session.teamId && session.teamId !== auth.team.id) {
+    return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+  }
+
   return NextResponse.json(session);
 }

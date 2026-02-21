@@ -56,6 +56,7 @@ export function PlaywrightSettingsCard({
   const [actionTimeout, setActionTimeout] = useState(settings.actionTimeout || 5000);
   const [pointerGestures, setPointerGestures] = useState(settings.pointerGestures ?? false);
   const [cursorFPS, setCursorFPS] = useState(settings.cursorFPS ?? 30);
+  const [cursorPlaybackSpeed, setCursorPlaybackSpeed] = useState(settings.cursorPlaybackSpeed ?? 1);
   const [defaultRecordingEngine, setDefaultRecordingEngine] = useState<RecordingEngine>(
     (settings.defaultRecordingEngine as RecordingEngine) ?? 'lastest'
   );
@@ -89,6 +90,7 @@ export function PlaywrightSettingsCard({
     actionTimeout: settings.actionTimeout || 5000,
     pointerGestures: settings.pointerGestures ?? false,
     cursorFPS: settings.cursorFPS ?? 30,
+    cursorPlaybackSpeed: settings.cursorPlaybackSpeed ?? 1,
     defaultRecordingEngine: (settings.defaultRecordingEngine as RecordingEngine) ?? 'lastest',
     freezeAnimations: settings.freezeAnimations ?? false,
     enableVideoRecording: settings.enableVideoRecording ?? false,
@@ -116,6 +118,7 @@ export function PlaywrightSettingsCard({
     setActionTimeout(settings.actionTimeout || 5000);
     setPointerGestures(settings.pointerGestures ?? false);
     setCursorFPS(settings.cursorFPS ?? 30);
+    setCursorPlaybackSpeed(settings.cursorPlaybackSpeed ?? 1);
     setDefaultRecordingEngine((settings.defaultRecordingEngine as RecordingEngine) ?? 'lastest');
     setFreezeAnimations(settings.freezeAnimations ?? false);
     setEnableVideoRecording(settings.enableVideoRecording ?? false);
@@ -140,6 +143,7 @@ export function PlaywrightSettingsCard({
       actionTimeout: settings.actionTimeout || 5000,
       pointerGestures: settings.pointerGestures ?? false,
       cursorFPS: settings.cursorFPS ?? 30,
+      cursorPlaybackSpeed: settings.cursorPlaybackSpeed ?? 1,
       defaultRecordingEngine: (settings.defaultRecordingEngine as RecordingEngine) ?? 'lastest',
       freezeAnimations: settings.freezeAnimations ?? false,
       enableVideoRecording: settings.enableVideoRecording ?? false,
@@ -190,6 +194,7 @@ export function PlaywrightSettingsCard({
         actionTimeout,
         pointerGestures,
         cursorFPS,
+        cursorPlaybackSpeed,
         defaultRecordingEngine,
         freezeAnimations,
         enableVideoRecording,
@@ -211,7 +216,7 @@ export function PlaywrightSettingsCard({
         toast.success('Playwright settings saved');
       }
     });
-  }, [repositoryId, selectorPriority, browser, viewportWidth, viewportHeight, headlessMode, navigationTimeout, actionTimeout, pointerGestures, cursorFPS, defaultRecordingEngine, freezeAnimations, enableVideoRecording, acceptAnyCertificate, networkErrorMode, ignoreExternalNetworkErrors, consoleErrorMode, grantClipboardAccess, acceptDownloads, enableNetworkInterception, screenshotDelay, maxParallelTests, stabilization, compact]);
+  }, [repositoryId, selectorPriority, browser, viewportWidth, viewportHeight, headlessMode, navigationTimeout, actionTimeout, pointerGestures, cursorFPS, cursorPlaybackSpeed, defaultRecordingEngine, freezeAnimations, enableVideoRecording, acceptAnyCertificate, networkErrorMode, ignoreExternalNetworkErrors, consoleErrorMode, grantClipboardAccess, acceptDownloads, enableNetworkInterception, screenshotDelay, maxParallelTests, stabilization, compact]);
 
   // Auto-save with debounce - only when values differ from original props
   useEffect(() => {
@@ -226,6 +231,7 @@ export function PlaywrightSettingsCard({
       actionTimeout !== orig.actionTimeout ||
       pointerGestures !== orig.pointerGestures ||
       cursorFPS !== orig.cursorFPS ||
+      cursorPlaybackSpeed !== orig.cursorPlaybackSpeed ||
       defaultRecordingEngine !== orig.defaultRecordingEngine ||
       freezeAnimations !== orig.freezeAnimations ||
       enableVideoRecording !== orig.enableVideoRecording ||
@@ -255,7 +261,7 @@ export function PlaywrightSettingsCard({
         clearTimeout(debounceRef.current);
       }
     };
-  }, [selectorPriority, browser, viewportWidth, viewportHeight, headlessMode, navigationTimeout, actionTimeout, pointerGestures, cursorFPS, defaultRecordingEngine, freezeAnimations, enableVideoRecording, acceptAnyCertificate, networkErrorMode, ignoreExternalNetworkErrors, consoleErrorMode, grantClipboardAccess, acceptDownloads, enableNetworkInterception, screenshotDelay, maxParallelTests, stabilization, doSave]);
+  }, [selectorPriority, browser, viewportWidth, viewportHeight, headlessMode, navigationTimeout, actionTimeout, pointerGestures, cursorFPS, cursorPlaybackSpeed, defaultRecordingEngine, freezeAnimations, enableVideoRecording, acceptAnyCertificate, networkErrorMode, ignoreExternalNetworkErrors, consoleErrorMode, grantClipboardAccess, acceptDownloads, enableNetworkInterception, screenshotDelay, maxParallelTests, stabilization, doSave]);
 
   // Notify parent of save status changes
   useEffect(() => {
@@ -352,6 +358,19 @@ export function PlaywrightSettingsCard({
               onChange={(e) => setCursorFPS(Math.max(1, Math.min(60, parseInt(e.target.value) || 30)))}
               className={compact ? 'w-16 h-7 text-sm' : 'w-20'}
             />
+            <Label htmlFor="cursorPlaybackSpeed" className="text-xs whitespace-nowrap">Speed</Label>
+            <Select value={String(cursorPlaybackSpeed)} onValueChange={(v) => setCursorPlaybackSpeed(Number(v))}>
+              <SelectTrigger id="cursorPlaybackSpeed" className={compact ? 'w-20 h-7 text-sm' : 'w-24'}>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="1">1x</SelectItem>
+                <SelectItem value="2">2x</SelectItem>
+                <SelectItem value="5">5x</SelectItem>
+                <SelectItem value="10">10x</SelectItem>
+                <SelectItem value="0">Instant</SelectItem>
+              </SelectContent>
+            </Select>
           </div>
         )}
       </div>

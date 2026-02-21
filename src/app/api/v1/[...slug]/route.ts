@@ -97,7 +97,8 @@ export async function GET(
       }
 
       if (subResource === 'builds') {
-        const limit = parseInt(request.nextUrl.searchParams.get('limit') || '10');
+        const rawLimit = parseInt(request.nextUrl.searchParams.get('limit') || '10');
+        const limit = Math.min(Math.max(Number.isNaN(rawLimit) ? 10 : rawLimit, 1), 100);
         const builds = await queries.getBuildsByRepo(id, limit);
         return NextResponse.json(builds);
       }

@@ -3,6 +3,7 @@
 import { useMemo, useState, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { formatDistanceToNow } from 'date-fns';
+import { Badge } from '@/components/ui/badge';
 import type { Build, BuildStatus } from '@/lib/db/schema';
 
 interface BuildWithBranch extends Build {
@@ -57,10 +58,17 @@ interface TooltipData {
 export function BuildGraphView({ builds, defaultBranch, mainBaselineBuildId, branchBaselineBuildId, branchHeads }: BuildGraphViewProps) {
   const router = useRouter();
   const [tooltip, setTooltip] = useState<TooltipData | null>(null);
+  const [hiddenBranches, setHiddenBranches] = useState<Set<string>>(new Set());
 
   const { nodes, branchColumns, svgWidth, svgHeight, curvePath, aheadIndicators } = useMemo(() => {
+    // Filter out hidden branches
+    const filtered = builds.filter(b => {
+      const branch = b.gitBranch || defaultBranch || 'main';
+      return !hiddenBranches.has(branch);
+    });
+
     // Sort builds newest first (top of graph)
-    const sorted = [...builds].sort(
+    const sorted = [...filtered].sort(
       (a, b) => new Date(b.createdAt!).getTime() - new Date(a.createdAt!).getTime()
     );
 
@@ -152,7 +160,7 @@ export function BuildGraphView({ builds, defaultBranch, mainBaselineBuildId, bra
       curvePath,
       aheadIndicators: positionedAhead,
     };
-  }, [builds, defaultBranch, branchHeads]);
+  }, [builds, defaultBranch, branchHeads, hiddenBranches]);
 
   const handleNodeClick = useCallback(
     (buildId: string) => {
@@ -172,28 +180,74 @@ export function BuildGraphView({ builds, defaultBranch, mainBaselineBuildId, bra
     setTooltip(null);
   }, []);
 
+  const handleHideBranch = useCallback((branch: string) => {
+    setHiddenBranches(prev => new Set(prev).add(branch));
+  }, []);
+
+  const handleRestoreBranch = useCallback((branch: string) => {
+    setHiddenBranches(prev => {
+      const next = new Set(prev);
+      next.delete(branch);
+      return next;
+    });
+  }, []);
+
   if (builds.length === 0) return null;
 
   return (
     <div className="relative overflow-auto h-full">
-      <svg
+      {/* Hidden branches restoration chips */}
+      {hiddenBranches.size > 0 && (
+        <div className="flex items-center gap-1.5 px-3 py-1.5 text-xs text-muted-foreground">
+          <span>Hidden:</span>
+          {Array.from(hiddenBranches).map(branch => (
+            <Badge
+              key={branch}
+              variant="secondary"
+              className="cursor-pointer text-xs px-2 py-0"
+              onClick={() => handleRestoreBranch(branch)}
+            >
+              {branch} &times;
+            </Badge>
+          ))}
+        </div>
+      )}
+
+      {nodes.length > 0 && <svg
         width={svgWidth}
         height={svgHeight}
         className="block"
       >
         {/* Branch header labels */}
         {branchColumns.map((bc) => (
-          <text
-            key={bc.name}
-            x={bc.x}
-            y={18}
-            textAnchor="middle"
-            fill={bc.color}
-            fontSize={11}
-            fontWeight={600}
-          >
-            {bc.name.length > 12 ? bc.name.slice(0, 12) + '\u2026' : bc.name}
-          </text>
+          <g key={bc.name}>
+            <text
+              x={bc.x}
+              y={18}
+              textAnchor="middle"
+              fill={bc.color}
+              fontSize={11}
+              fontWeight={600}
+            >
+              {bc.name.length > 12 ? bc.name.slice(0, 12) + '\u2026' : bc.name}
+            </text>
+            {/* Hide button — skip for default branch (col 0) */}
+            {bc.col > 0 && (
+              <text
+                x={bc.x + (bc.name.length > 12 ? 42 : bc.name.length * 3.3 + 8)}
+                y={18}
+                fontSize={11}
+                fill={bc.color}
+                opacity={0.4}
+                style={{ cursor: 'pointer' }}
+                onMouseEnter={(e) => e.currentTarget.setAttribute('opacity', '1')}
+                onMouseLeave={(e) => e.currentTarget.setAttribute('opacity', '0.4')}
+                onClick={(e) => { e.stopPropagation(); handleHideBranch(bc.name); }}
+              >
+                &times;
+              </text>
+            )}
+          </g>
         ))}
 
         {/* Single curved line through all build nodes */}
@@ -354,7 +408,7 @@ export function BuildGraphView({ builds, defaultBranch, mainBaselineBuildId, bra
             </g>
           );
         })}
-      </svg>
+      </svg>}
 
       {/* HTML Tooltip overlay */}
       {tooltip && (

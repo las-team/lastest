@@ -5,13 +5,14 @@ import { useRouter } from 'next/navigation';
 import { SliderComparison } from '@/components/diff/slider-comparison';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { approveDiff, undoApproval, addDiffTodo } from '@/server/actions/diffs';
-import type { VisualDiff, Test, DiffMetadata, AIDiffAnalysis } from '@/lib/db/schema';
+import type { VisualDiff, Test, DiffMetadata, AIDiffAnalysis, A11yViolation } from '@/lib/db/schema';
+import { A11yViolationsPanel } from '@/components/builds/a11y-violations-panel';
 import { CheckCircle, ListTodo, SkipForward, Eye, Image as ImageIcon, Sparkles, Loader2, ArrowUpDown, Bug, ChevronDown } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 
 interface DiffViewerClientProps {
-  diff: VisualDiff & { test: Test | null; errorMessage?: string | null };
+  diff: VisualDiff & { test: Test | null; errorMessage?: string | null; a11yViolations?: A11yViolation[] | null };
   buildId: string;
   nextDiffId?: string;
 }
@@ -261,6 +262,8 @@ export function DiffViewerClient({ diff, buildId, nextDiffId }: DiffViewerClient
           </div>
         </div>
       )}
+
+      <A11yViolationsPanel violations={diff.a11yViolations ?? []} />
 
       {/* Diff Comparison */}
       {diff.currentImagePath ? (

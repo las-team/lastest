@@ -25,6 +25,7 @@ export function getAIProvider(config: AIProviderConfig): AIProvider {
       permissionMode: config.agentSdkPermissionMode,
       model: config.agentSdkModel || undefined,
       workingDirectory: config.agentSdkWorkingDir,
+      mcpServers: config.agentSdkMcpServers,
     });
   }
 
@@ -45,6 +46,7 @@ export function getAIProvider(config: AIProviderConfig): AIProvider {
 export interface GenerateWithAIOptions {
   actionType?: AIActionType;
   repositoryId?: string | null;
+  useMCP?: boolean;
 }
 
 export async function generateWithAI(
@@ -53,7 +55,18 @@ export async function generateWithAI(
   systemPrompt?: string,
   options?: GenerateWithAIOptions
 ): Promise<string> {
-  const provider = getAIProvider(config);
+  // When MCP tools are needed and provider is claude-agent-sdk, inject the Playwright MCP server
+  const effectiveConfig = { ...config };
+  if (options?.useMCP && config.provider === 'claude-agent-sdk') {
+    effectiveConfig.agentSdkMcpServers = {
+      playwright: {
+        command: 'npx',
+        args: ['@anthropic-ai/mcp-server-playwright'],
+      },
+    };
+  }
+
+  const provider = getAIProvider(effectiveConfig);
   const startTime = Date.now();
 
   let finalSystemPrompt = systemPrompt || '';

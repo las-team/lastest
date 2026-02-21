@@ -75,6 +75,11 @@ export async function saveDiffSensitivitySettings(data: {
   flakyThreshold?: number;
   includeAntiAliasing?: boolean;
   ignorePageShift?: boolean;
+  diffEngine?: string;
+  textRegionAwareDiffing?: boolean;
+  textRegionThreshold?: number;
+  textRegionPadding?: number;
+  textDetectionGranularity?: string;
 }) {
   if (data.repositoryId) await requireRepoAccess(data.repositoryId);
   else await requireTeamAccess();

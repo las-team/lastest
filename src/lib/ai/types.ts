@@ -27,6 +27,7 @@ export interface AIProviderConfig {
   agentSdkPermissionMode?: 'plan' | 'default' | 'acceptEdits';
   agentSdkModel?: string;
   agentSdkWorkingDir?: string;
+  agentSdkMcpServers?: Record<string, { command: string; args?: string[]; env?: Record<string, string> }>;
   ollamaBaseUrl?: string;
   ollamaModel?: string;
 }

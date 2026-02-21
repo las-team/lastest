@@ -4,60 +4,27 @@ export const TEST_SIGNATURE = `export async function test(page: Page, baseUrl: s
 
 export const MCP_SYSTEM_PROMPT = `You are an expert visual regression test engineer. Use Playwright MCP tools to EXPLORE pages and discover accurate selectors, then OUTPUT standard Playwright test code.
 
-AVAILABLE MCP TOOLS FOR EXPLORATION:
-- mcp__plugin_playwright_playwright__browser_navigate - Navigate to URLs
-- mcp__plugin_playwright_playwright__browser_snapshot - Get accessibility tree with element refs and text content
-- mcp__plugin_playwright_playwright__browser_click - Click elements (requires ref from snapshot)
-- mcp__plugin_playwright_playwright__browser_type - Type into inputs (requires ref from snapshot)
-- mcp__plugin_playwright_playwright__browser_wait_for - Wait for text or time
+MCP TOOLS: browser_navigate, browser_snapshot (accessibility tree + refs), browser_click, browser_type, browser_wait_for
 
-EXPLORATION WORKFLOW:
-1. browser_navigate to the target URL
-2. browser_snapshot to see the page structure, element refs, and text content
-3. Use browser_click/browser_type with refs to interact and explore
-4. browser_snapshot again after interactions to verify state changes
-5. Identify reliable selectors from the snapshot
+WORKFLOW: navigate → snapshot → interact with refs → snapshot to verify → identify reliable selectors → OUTPUT test code
 
 CRITICAL RULES:
-- Use MCP tools to EXPLORE and DISCOVER what's on the page
-- NEVER guess selectors - always verify them via browser_snapshot first
-- Element refs (like "ref=s2e5") are for MCP exploration only, NOT for final test code
-- Do NOT use browser_take_screenshot during exploration - screenshots go in the OUTPUT test code
-- After exploring, OUTPUT standard Playwright test code using discovered selectors
+- NEVER guess selectors — always verify via browser_snapshot first
+- Element refs (e.g. "ref=s2e5") are for MCP exploration only, NOT for final test code
+- Do NOT use browser_take_screenshot during exploration — screenshots go in the OUTPUT test code
 
-DYNAMIC ROUTE DISCOVERY:
-When testing routes with parameters like /users/[id] or /posts/[slug]:
-1. First browser_navigate to the parent list page (e.g., /users)
-2. browser_snapshot to find links with actual IDs/slugs in href attributes
-3. Extract the real URL and navigate to it
-4. Explore the actual page with real data
-
-FREEDOM:
-- Choose selectors that best match the page structure you discover
-- Design the test flow based on what you observe during exploration
-- Add meaningful assertions that verify the page behaves correctly
-- Take screenshots at states that best capture the visual appearance
-- Handle loading states and dynamic content as appropriate
+DYNAMIC ROUTES (e.g. /users/[id]):
+Navigate to the parent list page first, snapshot to find links with real IDs, then navigate to the actual URL.
 
 CONSTRAINTS:
-- Use baseUrl parameter for navigation (not hardcoded URLs)
+- Use baseUrl for navigation (no hardcoded URLs)
 - Capture at least one screenshot using screenshotPath
 - Export async function "test" with exact signature: ${TEST_SIGNATURE}
-- Do NOT use \`import\` statements — \`expect\`, \`page\`, \`baseUrl\`, \`screenshotPath\`, and \`stepLogger\` are provided by the runner
+- Do NOT use \`import\` — \`expect\`, \`page\`, \`baseUrl\`, \`screenshotPath\`, \`stepLogger\` are provided by the runner
+- expect matchers: toBe, toEqual, toBeTruthy, toBeFalsy, toContain, toHaveLength, toMatch, toMatchObject, toHaveURL, toHaveTitle, toBeVisible, toBeHidden, toHaveText, toContainText, toHaveAttribute, toHaveCount, toBeEnabled, toBeDisabled, toBeChecked, toHaveValue (all support .not)
+- Never mix regex text and CSS selectors in one locator — use page.getByText(/pattern/i) for regex, page.locator('[attr="x"]') for CSS
 
-AVAILABLE expect MATCHERS (provided by the runner, do NOT import):
-- Generic: toBe, toEqual, toBeTruthy, toBeFalsy, toBeNull, toBeUndefined, toBeDefined, toContain, toHaveLength, toBeGreaterThan, toBeLessThan, toBeGreaterThanOrEqual, toBeLessThanOrEqual, toMatch(string|RegExp), toMatchObject
-- Page: toHaveURL(string|RegExp), toHaveTitle(string|RegExp)
-- Locator: toBeVisible, toBeHidden, toHaveText(string|RegExp), toContainText(string), toHaveAttribute(name, value), toHaveCount(n), toBeEnabled, toBeDisabled, toBeChecked, toHaveValue(string)
-- All matchers support .not (e.g. expect(x).not.toBe(y))
-
-SELECTOR RULES:
-- Never mix regex text selectors with CSS in one locator string (BAD: \`text=/pattern/i, [data-testid]\`)
-- Use page.getByText(/pattern/i) for regex text matching
-- Use page.locator('[data-testid="x"]') for CSS selectors
-
-FINAL OUTPUT FORMAT:
-After exploration, generate standard Playwright test code.
+FINAL OUTPUT: After exploration, generate standard Playwright test code using discovered selectors.
 
 \`\`\`typescript
 import { Page } from 'playwright';
@@ -65,10 +32,7 @@ import { Page } from 'playwright';
 ${TEST_SIGNATURE} {
   stepLogger.log('Navigating to page');
   await page.goto(\`\${baseUrl}/path\`);
-
-  // Use selectors discovered from MCP exploration
   await page.locator('[data-testid="discovered-element"]').click();
-
   stepLogger.log('Taking screenshot');
   await page.screenshot({ path: screenshotPath, fullPage: true });
 }
@@ -79,36 +43,20 @@ export const SYSTEM_PROMPT = `You are an expert Playwright test engineer creatin
 FUNCTION SIGNATURE (required):
 ${TEST_SIGNATURE}
 
-PARAMETERS:
-- page: Playwright Page object
-- baseUrl: Application base URL (e.g., "http://localhost:3000")
-- screenshotPath: Path where screenshot should be saved
-- stepLogger: Step documentation (use stepLogger.log('message'))
+PARAMETERS: page (Playwright Page), baseUrl (app URL), screenshotPath (save path), stepLogger (use .log('message'))
 
-FREEDOM:
+GUIDELINES:
 - Choose appropriate selectors (data-testid, aria-label, role, text, css)
-- Design the test flow that best verifies the objective
-- Add assertions that make sense for the scenario
-- Take screenshots at meaningful states
-- Handle loading states as needed for stable screenshots
+- Design test flow to verify the objective with meaningful assertions
+- Capture screenshots at meaningful states; handle loading states for stability
 
 CONSTRAINTS:
-- Use baseUrl parameter for navigation (not hardcoded URLs)
+- Use baseUrl for navigation (no hardcoded URLs)
 - Capture at least one screenshot using screenshotPath
 - Export async function "test" with exact signature above
-- Do NOT use \`import\` statements — \`expect\`, \`page\`, \`baseUrl\`, \`screenshotPath\`, and \`stepLogger\` are provided by the runner
-
-AVAILABLE expect MATCHERS (provided by the runner, do NOT import):
-- Generic: toBe, toEqual, toBeTruthy, toBeFalsy, toBeNull, toBeUndefined, toBeDefined, toContain, toHaveLength, toBeGreaterThan, toBeLessThan, toBeGreaterThanOrEqual, toBeLessThanOrEqual, toMatch(string|RegExp), toMatchObject
-- Page: toHaveURL(string|RegExp), toHaveTitle(string|RegExp)
-- Locator: toBeVisible, toBeHidden, toHaveText(string|RegExp), toContainText(string), toHaveAttribute(name, value), toHaveCount(n), toBeEnabled, toBeDisabled, toBeChecked, toHaveValue(string)
-- All matchers support .not (e.g. expect(x).not.toBe(y))
-
-SELECTOR RULES:
-- Never mix regex text selectors with CSS in one locator string (BAD: \`text=/pattern/i, [data-testid]\`)
-- Use page.getByText(/pattern/i) for regex text matching
-- Use page.locator('[data-testid="x"]') for CSS selectors
-- Keep each locator type separate`;
+- Do NOT use \`import\` — \`expect\`, \`page\`, \`baseUrl\`, \`screenshotPath\`, \`stepLogger\` are provided by the runner
+- expect matchers: toBe, toEqual, toBeTruthy, toBeFalsy, toContain, toHaveLength, toMatch, toMatchObject, toHaveURL, toHaveTitle, toBeVisible, toBeHidden, toHaveText, toContainText, toHaveAttribute, toHaveCount, toBeEnabled, toBeDisabled, toBeChecked, toHaveValue (all support .not)
+- Never mix regex text and CSS selectors in one locator — use page.getByText(/pattern/i) for regex, page.locator('[attr="x"]') for CSS`;
 
 export function createTestPrompt(context: TestGenerationContext): string {
   const parts: string[] = [];
@@ -255,19 +203,12 @@ Error message:
 ${context.errorMessage}
 
 Instructions:
-1. Analyze the error and identify the root cause
-2. Fix the test while maintaining the same function signature
-3. Keep the test's original intent
-4. Add better error handling if needed
-5. Do NOT use \`import\` — expect is provided by the runner
-6. Available matchers: toBe, toEqual, toBeTruthy, toBeFalsy, toContain, toHaveLength, toBeGreaterThan, toBeLessThan, toBeGreaterThanOrEqual, toBeLessThanOrEqual, toMatch(string|RegExp), toMatchObject
-7. Page matchers: toHaveURL, toHaveTitle. Locator matchers: toBeVisible, toBeHidden, toHaveText, toContainText, toHaveAttribute, toHaveCount
-8. Never mix regex text and CSS selectors in one locator string — use page.getByText(/pattern/i) for regex
+- Analyze the error, fix the root cause while keeping the same function signature and intent
+- Do NOT use \`import\` — expect is provided by the runner
+- Use only valid matchers (toBe, toEqual, toBeTruthy, toBeFalsy, toContain, toMatch, toHaveURL, toHaveTitle, toBeVisible, toHaveText, toContainText, toHaveAttribute, toHaveCount, etc.)
+- Never mix regex text and CSS selectors in one locator — use page.getByText(/pattern/i) for regex
 
-Common fix patterns:
-- "X is not a function" on expect → the matcher doesn't exist, use one from the list above
-- "text=/regex/i" selector errors → use page.getByText(/regex/i) instead
-- Timeout on waitForLoadState → use page.waitForLoadState('domcontentloaded') instead of 'networkidle'
+Common fixes: "X is not a function" → invalid matcher; "text=/regex/i" → use page.getByText(/regex/i); waitForLoadState timeout → use 'domcontentloaded' instead of 'networkidle'
 
 Return ONLY the fixed code, no explanations.`;
 }
@@ -286,15 +227,12 @@ ${context.errorMessage}
 Target URL: ${context.targetUrl || 'unknown'}
 
 Instructions:
-1. Use browser_navigate to go to the target URL
-2. Use browser_snapshot to see the current page structure and available selectors
-3. Compare what the page actually has with the selectors/assertions in the failing test
-4. Identify what changed on the page that caused the failure
-5. Fix the test using selectors and content discovered from the live page
-6. Maintain the same function signature and test intent
-7. Do NOT use \`import\` — expect is provided by the runner
-8. Available matchers: toBe, toEqual, toBeTruthy, toBeFalsy, toContain, toHaveLength, toBeGreaterThan, toBeLessThan, toBeGreaterThanOrEqual, toBeLessThanOrEqual, toMatch(string|RegExp), toMatchObject
-9. Never mix regex text and CSS selectors in one locator string — use page.getByText(/regex/i) for regex
+- browser_navigate to the target URL, then browser_snapshot to see current page structure
+- Compare actual page selectors/content with the failing test to identify what changed
+- Fix the test using discovered selectors; maintain the same function signature and intent
+- Do NOT use \`import\` — expect is provided by the runner
+- Use only valid matchers (toBe, toEqual, toBeTruthy, toBeFalsy, toContain, toMatch, toHaveURL, toHaveTitle, toBeVisible, toHaveText, toContainText, toHaveAttribute, toHaveCount, etc.)
+- Never mix regex text and CSS selectors in one locator — use page.getByText(/pattern/i) for regex
 
 Return ONLY the fixed code, no explanations.`;
 }
@@ -327,55 +265,43 @@ ${context.existingCode}
 
 export function createRouteScanPrompt(codebaseContext: string, repoFullName?: string): string {
   const repoLine = repoFullName ? `\nRepository: ${repoFullName}\n` : '';
-  return `Analyze this codebase structure and identify all testable routes/pages, grouped into logical functional areas.
+  return `Analyze this codebase structure and identify all testable routes/pages.
 ${repoLine}
 Codebase context:
 ${codebaseContext}
 
-Return a JSON object with routes grouped into functional areas:
+Return a JSON object with a flat array of routes:
 {
-  "functionalAreas": [
+  "routes": [
     {
-      "name": "User Management",
-      "description": "User profiles, settings, and account management",
-      "routes": [
-        {
-          "path": "/users",
-          "type": "static",
-          "description": "User listing page",
-          "testSuggestions": ["Verify user list loads", "Check pagination"]
-        },
-        {
-          "path": "/users/[id]",
-          "type": "dynamic",
-          "description": "User profile page",
-          "testSuggestions": ["Test with valid user ID", "Test error state for invalid ID"]
-        }
-      ]
+      "path": "/users",
+      "type": "static",
+      "functionalArea": "User Management",
+      "description": "User listing page",
+      "testSuggestions": ["Verify user list loads", "Check pagination"]
     },
     {
-      "name": "Dashboard",
-      "description": "Main dashboard and analytics views",
-      "routes": [
-        {
-          "path": "/dashboard",
-          "type": "static",
-          "description": "Main dashboard page",
-          "testSuggestions": ["Verify dashboard loads", "Check metric widgets"]
-        }
-      ]
+      "path": "/users/[id]",
+      "type": "dynamic",
+      "functionalArea": "User Management",
+      "description": "User profile page",
+      "testSuggestions": ["Test with valid user ID", "Test error state for invalid ID"]
+    },
+    {
+      "path": "/dashboard",
+      "type": "static",
+      "functionalArea": "Dashboard",
+      "description": "Main dashboard page",
+      "testSuggestions": ["Verify dashboard loads", "Check metric widgets"]
     }
   ]
 }
 
 Guidelines:
-- Group related routes under logical functional areas (e.g. "Authentication", "User Management", "Settings")
-- Use clear, human-readable area names (NOT route paths)
-- Include all user-facing pages
+- Include all user-facing pages that benefit from visual regression testing
 - Mark routes as "static" or "dynamic" based on URL parameters
-- For dynamic routes, note the parameter pattern
+- Use "functionalArea" to label the logical group (e.g. "Authentication", "Settings")
 - Provide brief test suggestions for each route
-- Focus on routes that benefit from visual regression testing
 
 Return ONLY the JSON object, no explanations.`;
 }
@@ -480,50 +406,34 @@ export function createMCPExploreRoutesPrompt(baseURL: string, existingRoutes: st
     ? `\nAlready known routes (use as seed starting points to explore deeper):\n${existingRoutes.map(r => `- ${r}`).join('\n')}`
     : '';
 
-  return `You are exploring a live web application to discover all available routes/pages, grouped into logical functional areas.
+  return `You are exploring a live web application to discover all available routes/pages.
 
 Base URL: ${baseURL}
 ${seedSection}
 
 EXPLORATION INSTRUCTIONS:
-1. Navigate to ${baseURL} and take a snapshot to find navigation links, sidebars, menus
-2. Click through all discovered links and record each unique URL pathname
-3. After visiting top-level pages, look for sub-navigation, tabs, or nested links
+1. Navigate to ${baseURL} and snapshot to find navigation links, sidebars, menus
+2. Click through discovered links and record each unique URL pathname
+3. Look for sub-navigation, tabs, or nested links on each page
 4. Visit any known routes listed above as additional starting points
-5. For each discovered page, note whether the route is static or dynamic (has IDs/slugs in the URL)
-6. Group the discovered routes into logical functional areas
+5. Note whether each route is static or dynamic (has IDs/slugs in the URL)
 
 IMPORTANT:
-- Only record routes that belong to this application (same origin as baseURL)
+- Only record routes belonging to this application (same origin as baseURL)
 - Convert dynamic segments to bracket notation (e.g., /users/123 → /users/[id])
 - Do NOT include hash fragments, query parameters, or external links
-- Explore as many unique pages as possible
 
-Return your findings as a JSON object with routes grouped into functional areas:
+Return a flat JSON array of discovered routes:
 \`\`\`json
 {
-  "functionalAreas": [
-    {
-      "name": "Dashboard",
-      "description": "Main dashboard and analytics views",
-      "routes": [
-        {"path": "/dashboard", "type": "static", "description": "Main dashboard page", "testSuggestions": ["Verify dashboard loads correctly", "Check navigation elements"]}
-      ]
-    },
-    {
-      "name": "User Management",
-      "description": "User profiles and account pages",
-      "routes": [
-        {"path": "/users/[id]", "type": "dynamic", "description": "User profile page", "testSuggestions": ["Test with valid user ID", "Test error state for invalid ID"]}
-      ]
-    }
+  "routes": [
+    {"path": "/dashboard", "type": "static", "functionalArea": "Dashboard", "description": "Main dashboard page", "testSuggestions": ["Verify dashboard loads correctly", "Check navigation elements"]},
+    {"path": "/users/[id]", "type": "dynamic", "functionalArea": "User Management", "description": "User profile page", "testSuggestions": ["Test with valid user ID", "Test error state for invalid ID"]}
   ]
 }
 \`\`\`
 
-Guidelines:
-- Group related routes under logical functional areas (e.g. "Authentication", "User Management", "Settings")
-- Use clear, human-readable area names (NOT route paths)
+Use "functionalArea" to label the logical group for each route (e.g. "Authentication", "Settings").
 
 Return ONLY the JSON object inside a code block, no other text.`;
 }

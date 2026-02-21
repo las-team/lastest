@@ -15,6 +15,15 @@ Network Interception
 ## features
 Support https://github.com/excalidraw/excalidraw/tree/master/packages/excalidraw/tests ~/.claude/plans/declarative-kindling-coral.md 55%
 
+auto-run fast version of test, if same results mark as fast and run like that
+
+Tweet about us
+
+Test coverage assessment and recreation based on existing test set
+
+Online - support agent sdk via runner
+Run runner on server in docker
+
 ## ideas
 Content comparison - compare text in 2 setups
 Explore/Cover instead of Areas
@@ -26,16 +35,9 @@ Electron app ~/.claude/plans/rippling-roaming-snail.md replan
 Figma plugin
 Generate test data with AI
 Sitemap -flow
-
-Tweet about us
-
-Import from prior tools?
 Formal verification of code?
-
 ### UX
 ## bugs
-Automated test add
-Page Shift
 ## marketing 
 
 ## Excalidraw 

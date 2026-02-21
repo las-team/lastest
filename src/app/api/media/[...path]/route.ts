@@ -5,6 +5,7 @@ import { Readable } from 'stream';
 import { getCurrentSession } from '@/lib/auth';
 import { verifyBearerToken } from '@/lib/auth/api-key';
 import { resolveStoragePath } from '@/lib/storage/paths';
+import * as queries from '@/lib/db/queries';
 
 const CONTENT_TYPES: Record<string, string> = {
   '.png': 'image/png',
@@ -48,6 +49,15 @@ export async function GET(
 
   const segments = (await params).path;
   const urlPath = '/' + segments.join('/');
+
+  // Verify team ownership for repo-scoped directories (screenshots use repoId subdirs)
+  if (segments[0] === 'screenshots' && segments[1]) {
+    const repoId = segments[1];
+    const repo = await queries.getRepository(repoId);
+    if (!repo || repo.teamId !== session.team?.id) {
+      return new Response('Forbidden', { status: 403 });
+    }
+  }
 
   // Resolve to filesystem
   const filePath = resolveStoragePath(urlPath);

@@ -58,15 +58,28 @@ class ServerManager {
   }
 
   /**
+   * Parse a shell command string into [command, ...args], respecting quoted arguments.
+   */
+  private parseCommand(command: string): string[] {
+    const tokens: string[] = [];
+    const regex = /"([^"]*?)"|'([^']*?)'|(\S+)/g;
+    let match;
+    while ((match = regex.exec(command)) !== null) {
+      tokens.push(match[1] ?? match[2] ?? match[3]);
+    }
+    return tokens;
+  }
+
+  /**
    * Start a server process with the given command
    */
   async startServer(command: string, cwd?: string): Promise<ChildProcess> {
     return new Promise((resolve, reject) => {
-      const [cmd, ...args] = command.split(' ');
+      const [cmd, ...args] = this.parseCommand(command);
 
       const proc = spawn(cmd, args, {
         cwd: cwd || process.cwd(),
-        shell: true,
+        shell: false,
         stdio: ['ignore', 'pipe', 'pipe'],
         detached: false,
       });

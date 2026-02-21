@@ -2,6 +2,9 @@ import * as queries from '@/lib/db/queries';
 import type { TestChangeReason } from '@/lib/db/schema';
 
 /**
+ * @internal — Called from webhook handlers and build actions only.
+ * Not intended for direct client invocation.
+ *
  * Fork baselines from one branch to another.
  * Copies active baselines from source branch to target branch.
  * Shares image files (no file duplication).
@@ -43,6 +46,8 @@ export async function forkBaselinesForBranch(
 }
 
 /**
+ * @internal — Called from webhook handlers only.
+ *
  * Merge baselines from a feature branch to a target branch (e.g., on PR merge).
  * Only promotes baselines where the image hash differs from the target branch.
  * Deactivates old target baselines and creates new ones.
@@ -93,6 +98,8 @@ export async function mergeBaselinesFromBranch(
 }
 
 /**
+ * @internal — Called from webhook handlers only.
+ *
  * Cleanup branch-specific baselines after merge.
  * Deactivates all baselines for the given branch.
  */
@@ -110,6 +117,8 @@ export async function cleanupBranchBaselines(
 }
 
 /**
+ * @internal — Called from webhook handlers only.
+ *
  * Promote test versions from a feature branch to main test code on merge.
  * For each test, if the latest version on the branch has different code,
  * update the test's code (creating a new version with 'branch_merge' reason).

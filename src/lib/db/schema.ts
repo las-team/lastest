@@ -62,6 +62,10 @@ export interface DiffMetadata {
   changeCategories?: ('layout' | 'color' | 'text' | 'image' | 'style')[];
   pageShift?: PageShiftInfo;
   isNewTest?: boolean;
+  textRegions?: { x: number; y: number; width: number; height: number }[];
+  textRegionDiffPixels?: number;
+  nonTextRegionDiffPixels?: number;
+  ocrDurationMs?: number;
 }
 
 /** Capabilities that a test requires from Playwright settings (detected during recording). */
@@ -382,6 +386,7 @@ export type VisualDiffWithTestStatus = VisualDiff & {
   functionalAreaName: string | null;
   stepLabel?: string | null;
   errorMessage?: string | null;
+  a11yViolations?: A11yViolation[] | null;
 };
 export type NewVisualDiff = typeof visualDiffs.$inferInsert;
 export type Baseline = typeof baselines.$inferSelect;
@@ -490,6 +495,7 @@ export const playwrightSettings = sqliteTable('playwright_settings', {
   actionTimeout: integer('action_timeout').default(5000),
   pointerGestures: integer('pointer_gestures', { mode: 'boolean' }).default(false),
   cursorFPS: integer('cursor_fps').default(30),
+  cursorPlaybackSpeed: integer('cursor_playback_speed').default(1), // 1 = realtime, 0 = instant (skip delays)
   enabledRecordingEngines: text('enabled_recording_engines', { mode: 'json' }).$type<RecordingEngine[]>(),
   defaultRecordingEngine: text('default_recording_engine').default('lastest'),
   freezeAnimations: integer('freeze_animations', { mode: 'boolean' }).default(false), // freeze CSS animations/transitions
@@ -588,6 +594,12 @@ export const environmentConfigs = sqliteTable('environment_configs', {
 export type EnvironmentConfig = typeof environmentConfigs.$inferSelect;
 export type NewEnvironmentConfig = typeof environmentConfigs.$inferInsert;
 
+// Diff engine types
+export type DiffEngineType = 'pixelmatch' | 'ssim' | 'butteraugli';
+
+// Text detection granularity for text-region-aware diffing
+export type TextDetectionGranularity = 'word' | 'line' | 'block';
+
 // Diff sensitivity settings for classification thresholds
 export const diffSensitivitySettings = sqliteTable('diff_sensitivity_settings', {
   id: text('id').primaryKey(),
@@ -596,6 +608,11 @@ export const diffSensitivitySettings = sqliteTable('diff_sensitivity_settings', 
   flakyThreshold: integer('flaky_threshold').default(10),        // percentage
   includeAntiAliasing: integer('include_anti_aliasing', { mode: 'boolean' }).default(false), // include AA pixels in diff
   ignorePageShift: integer('ignore_page_shift', { mode: 'boolean' }).default(false), // exclude vertical content shifts from diff
+  diffEngine: text('diff_engine').default('pixelmatch'), // 'pixelmatch' | 'ssim' | 'butteraugli'
+  textRegionAwareDiffing: integer('text_region_aware_diffing', { mode: 'boolean' }).default(false), // opt-in OCR-based text region diffing
+  textRegionThreshold: integer('text_region_threshold').default(30), // percentage, stored as 30 = 0.3
+  textRegionPadding: integer('text_region_padding').default(4), // pixels to expand text bounding boxes
+  textDetectionGranularity: text('text_detection_granularity').default('word'), // 'word' | 'line' | 'block'
   createdAt: integer('created_at', { mode: 'timestamp' }),
   updatedAt: integer('updated_at', { mode: 'timestamp' }),
 });
@@ -609,6 +626,11 @@ export const DEFAULT_DIFF_THRESHOLDS = {
   flakyThreshold: 10,
   includeAntiAliasing: false,
   ignorePageShift: false,
+  diffEngine: 'pixelmatch' as DiffEngineType,
+  textRegionAwareDiffing: false,
+  textRegionThreshold: 30,
+  textRegionPadding: 4,
+  textDetectionGranularity: 'word' as TextDetectionGranularity,
 };
 
 // Diff classification type
@@ -686,7 +708,7 @@ export type AIPromptLog = typeof aiPromptLogs.$inferSelect;
 export type NewAIPromptLog = typeof aiPromptLogs.$inferInsert;
 
 // Background Jobs for queue tracking
-export type BackgroundJobType = 'ai_scan' | 'spec_analysis' | 'build_tests' | 'test_run' | 'build_run';
+export type BackgroundJobType = 'ai_scan' | 'spec_analysis' | 'build_tests' | 'test_run' | 'build_run' | 'ai_fix' | 'ai_validate';
 export type BackgroundJobStatus = 'pending' | 'running' | 'completed' | 'failed';
 
 export const backgroundJobs = sqliteTable('background_jobs', {

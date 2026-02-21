@@ -10,6 +10,7 @@ import {
   getSessionInfo,
 } from '@/lib/playwright/inspector-manager';
 import { transformPlaywrightCode } from '@/lib/playwright/code-transformer';
+import { eventsToCodeLines } from '@/lib/playwright/event-to-code';
 import { createTest, createFunctionalArea, getFunctionalAreas, getPlaywrightSettings } from '@/lib/db/queries';
 import { requireTeamAccess, requireRepoAccess } from '@/lib/auth';
 import { DEFAULT_SELECTOR_PRIORITY } from '@/lib/db/schema';
@@ -523,13 +524,6 @@ function generateCodeFromRemoteEvents(
   const coordsEnabled = selectorPriority.find(s => s.type === 'coords')?.enabled ?? true;
   const hasCursorEvents = events.some(e => e.type === 'cursor-move');
 
-  function getRelativePath(url: string): string {
-    if (url.startsWith(baseOrigin)) {
-      return url.slice(baseOrigin.length) || '/';
-    }
-    return url;
-  }
-
   const lines: string[] = [
     `import { Page } from 'playwright';`,
     '',
@@ -611,235 +605,13 @@ function generateCodeFromRemoteEvents(
     );
   }
 
-  let lastAction = '';
-  let cursorBatch: [number, number, number][] = [];
-  let lastCursorTimestamp = 0;
-  let lastCursorX = 640;
-  let lastCursorY = 360;
+  // Use shared event-to-code conversion for the body
+  const bodyLines = eventsToCodeLines(events, baseOrigin, coordsEnabled, {
+    indent: '  ',
+    includeCursorReplay: hasCursorEvents,
+  });
+  lines.push(...bodyLines);
 
-  const flushCursorBatch = () => {
-    if (cursorBatch.length > 0) {
-      const tuples = cursorBatch.map(t => `[${t[0]},${t[1]},${t[2]}]`).join(',');
-      lines.push(`  await replayCursorPath(page, [${tuples}]);`);
-      cursorBatch = [];
-    }
-  };
-
-  for (const event of events) {
-    if (event.type === 'cursor-move' && event.data.coordinates) {
-      const { x, y } = event.data.coordinates as { x: number; y: number };
-      const delay = lastCursorTimestamp > 0 ? event.timestamp - lastCursorTimestamp : 0;
-      cursorBatch.push([x, y, delay]);
-      lastCursorTimestamp = event.timestamp;
-      lastCursorX = x;
-      lastCursorY = y;
-      continue;
-    }
-
-    flushCursorBatch();
-
-    if (event.type === 'navigation' && event.data.relativePath) {
-      if (!lastAction.includes('goto')) {
-        const relativePath = event.data.relativePath as string;
-        lines.push(`  await page.goto(buildUrl(baseUrl, '${relativePath}'));`);
-      }
-      lastAction = 'goto';
-    } else if (event.type === 'action') {
-      const { action, selector, selectors, value, coordinates, button, modifiers } = event.data as {
-        action?: string; selector?: string;
-        selectors?: Array<{ type: string; value: string }>;
-        value?: string; coordinates?: { x: number; y: number };
-        button?: number; modifiers?: string[];
-      };
-      const isRightClick = action === 'rightclick' || button === 2;
-      const hasModifiers = modifiers && modifiers.length > 0;
-
-      // Build click options with button and modifiers
-      const clickOptParts: string[] = [];
-      if (isRightClick) clickOptParts.push(`button: 'right'`);
-      if (hasModifiers) clickOptParts.push(`modifiers: [${modifiers!.map(m => `'${m}'`).join(', ')}]`);
-      const clickOptions = clickOptParts.length > 0 ? `{ ${clickOptParts.join(', ')} }` : 'null';
-
-      const emitModDown = () => {
-        if (hasModifiers) {
-          for (const mod of modifiers!) {
-            lines.push(`  await page.keyboard.down('${mod}');`);
-          }
-        }
-      };
-      const emitModUp = () => {
-        if (hasModifiers) {
-          for (const mod of [...modifiers!].reverse()) {
-            lines.push(`  await page.keyboard.up('${mod}');`);
-          }
-        }
-      };
-
-      if (selectors && selectors.length > 0) {
-        const selectorsJson = JSON.stringify(selectors);
-        const coordsArg = coordinates ? JSON.stringify(coordinates) : 'null';
-        switch (action) {
-          case 'click':
-            lines.push(`  await locateWithFallback(page, ${selectorsJson}, 'click', null, ${coordsArg}${clickOptions !== 'null' ? `, ${clickOptions}` : ''});`);
-            break;
-          case 'rightclick':
-            lines.push(`  await locateWithFallback(page, ${selectorsJson}, 'click', null, ${coordsArg}, ${clickOptions});`);
-            break;
-          case 'fill':
-            lines.push(`  await locateWithFallback(page, ${selectorsJson}, 'fill', '${value || ''}', ${coordsArg});`);
-            break;
-          case 'selectOption':
-            lines.push(`  await locateWithFallback(page, ${selectorsJson}, 'selectOption', '${value || ''}', null);`);
-            break;
-        }
-      } else if (selector && (selector as string).trim()) {
-        switch (action) {
-          case 'click':
-            lines.push(`  await page.locator('${selector}').click(${clickOptions !== 'null' ? clickOptions : ''});`);
-            break;
-          case 'rightclick':
-            lines.push(`  await page.locator('${selector}').click(${clickOptions});`);
-            break;
-          case 'fill':
-            lines.push(`  await page.locator('${selector}').fill('${value || ''}');`);
-            break;
-          case 'selectOption':
-            lines.push(`  await page.locator('${selector}').selectOption('${value || ''}');`);
-            break;
-        }
-      } else if ((action === 'click' || action === 'rightclick') && coordinates) {
-        lines.push(`  // Coordinate-only ${isRightClick ? 'right-' : ''}click (no selectors found)`);
-        emitModDown();
-        lines.push(`  await page.mouse.click(${coordinates.x}, ${coordinates.y}${isRightClick ? `, { button: 'right' }` : ''});`);
-        emitModUp();
-      } else if (action === 'fill' && coordinates) {
-        const escapedValue = (value || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'");
-        lines.push(`  // Coordinate-only fill (no selectors found) - click to focus then type`);
-        lines.push(`  await page.mouse.click(${coordinates.x}, ${coordinates.y});`);
-        lines.push(`  await page.keyboard.press('Control+a');`);
-        lines.push(`  await page.keyboard.type('${escapedValue}');`);
-      } else {
-        lines.push(`  // Skipped ${action}: no valid selector or coordinates found`);
-      }
-      lastAction = action || '';
-    } else if (event.type === 'screenshot') {
-      lines.push(`  await page.screenshot({ path: getScreenshotPath(), fullPage: true });`);
-    } else if (event.type === 'assertion') {
-      const { assertionType, url, elementAssertion } = event.data as {
-        assertionType?: string; url?: string;
-        elementAssertion?: { type: string; selectors: Array<{ type: string; value: string }>; expectedValue?: string; attributeName?: string; attributeValue?: string };
-      };
-
-      if (elementAssertion) {
-        const selectorsJson = JSON.stringify(elementAssertion.selectors);
-        const assertType = elementAssertion.type;
-        lines.push(`  // Element assertion: ${assertType}`);
-        lines.push(`  {`);
-        lines.push(`    const el = await locateWithFallback(page, ${selectorsJson}, 'locate', null, null);`);
-
-        switch (assertType) {
-          case 'toBeVisible': lines.push(`    await expect(el).toBeVisible();`); break;
-          case 'toBeHidden': lines.push(`    await expect(el).toBeHidden();`); break;
-          case 'toBeAttached': lines.push(`    await expect(el).toBeAttached();`); break;
-          case 'toHaveAttribute':
-            lines.push(`    await expect(el).toHaveAttribute('${elementAssertion.attributeName || ''}', '${elementAssertion.attributeValue || ''}');`);
-            break;
-          case 'toHaveText':
-            lines.push(`    await expect(el).toHaveText('${(elementAssertion.expectedValue || '').replace(/'/g, "\\'")}');`);
-            break;
-          case 'toContainText':
-            lines.push(`    await expect(el).toContainText('${(elementAssertion.expectedValue || '').replace(/'/g, "\\'")}');`);
-            break;
-          case 'toHaveValue':
-            lines.push(`    await expect(el).toHaveValue('${(elementAssertion.expectedValue || '').replace(/'/g, "\\'")}');`);
-            break;
-          case 'toBeEnabled': lines.push(`    await expect(el).toBeEnabled();`); break;
-          case 'toBeDisabled': lines.push(`    await expect(el).toBeDisabled();`); break;
-          case 'toBeChecked': lines.push(`    await expect(el).toBeChecked();`); break;
-        }
-        lines.push(`  }`);
-      } else {
-        switch (assertionType) {
-          case 'pageLoad':
-            lines.push(`  // Assertion: Verify page has finished loading`);
-            lines.push(`  await page.waitForLoadState('load');`);
-            break;
-          case 'networkIdle':
-            lines.push(`  // Assertion: Verify no pending network requests`);
-            lines.push(`  await page.waitForLoadState('networkidle');`);
-            break;
-          case 'urlMatch': {
-            lines.push(`  // Assertion: Verify current URL matches expected`);
-            const relativePath = getRelativePath(url || '');
-            lines.push(`  await expect(page).toHaveURL(buildUrl(baseUrl, '${relativePath}'));`);
-            break;
-          }
-          case 'domContentLoaded':
-            lines.push(`  // Assertion: Verify DOM is ready`);
-            lines.push(`  await page.waitForLoadState('domcontentloaded');`);
-            break;
-        }
-      }
-    } else if (event.type === 'mouse-down' && event.data.coordinates) {
-      const { x, y } = event.data.coordinates as { x: number; y: number };
-      const modifiers = event.data.modifiers as string[] | undefined;
-      if (modifiers && modifiers.length > 0) {
-        for (const mod of modifiers) {
-          lines.push(`  await page.keyboard.down('${mod}');`);
-        }
-      }
-      lines.push(`  await page.mouse.move(${x}, ${y});`);
-      lines.push(`  await page.mouse.down();`);
-    } else if (event.type === 'mouse-up' && event.data.coordinates) {
-      const { x, y } = event.data.coordinates as { x: number; y: number };
-      const modifiers = event.data.modifiers as string[] | undefined;
-      lines.push(`  await page.mouse.move(${x}, ${y});`);
-      lines.push(`  await page.mouse.up();`);
-      if (modifiers && modifiers.length > 0) {
-        for (const mod of modifiers) {
-          lines.push(`  await page.keyboard.up('${mod}');`);
-        }
-      }
-    } else if (event.type === 'keypress' && event.data.key) {
-      const { key, modifiers } = event.data as { key: string; modifiers?: string[] };
-      if (modifiers && modifiers.length > 0) {
-        for (const mod of modifiers) {
-          lines.push(`  await page.keyboard.down('${mod}');`);
-        }
-      }
-      lines.push(`  await page.keyboard.press('${key}');`);
-      if (modifiers && modifiers.length > 0) {
-        for (const mod of [...modifiers].reverse()) {
-          lines.push(`  await page.keyboard.up('${mod}');`);
-        }
-      }
-    } else if (event.type === 'keydown' && event.data.key) {
-      const escapedKey = (event.data.key as string).replace(/\\/g, '\\\\').replace(/'/g, "\\'");
-      lines.push(`  await page.keyboard.down('${escapedKey}');`);
-    } else if (event.type === 'keyup' && event.data.key) {
-      const escapedKey = (event.data.key as string).replace(/\\/g, '\\\\').replace(/'/g, "\\'");
-      lines.push(`  await page.keyboard.up('${escapedKey}');`);
-    } else if (event.type === 'scroll') {
-      const deltaX = (event.data.deltaX as number) || 0;
-      const deltaY = (event.data.deltaY as number) || 0;
-      const scrollMods = event.data.modifiers as string[] | undefined;
-      if (scrollMods && scrollMods.length > 0) {
-        const modFlags: string[] = [];
-        if (scrollMods.includes('Control')) modFlags.push('ctrlKey: true');
-        if (scrollMods.includes('Shift')) modFlags.push('shiftKey: true');
-        if (scrollMods.includes('Alt')) modFlags.push('altKey: true');
-        if (scrollMods.includes('Meta')) modFlags.push('metaKey: true');
-        lines.push(`  await page.evaluate(({ x, y, dx, dy }) => {`);
-        lines.push(`    const el = document.elementFromPoint(x, y) || document.documentElement;`);
-        lines.push(`    el.dispatchEvent(new WheelEvent('wheel', { deltaX: dx, deltaY: dy, ${modFlags.join(', ')}, bubbles: true, cancelable: true, clientX: x, clientY: y }));`);
-        lines.push(`  }, { x: ${lastCursorX}, y: ${lastCursorY}, dx: ${deltaX}, dy: ${deltaY} });`);
-      } else {
-        lines.push(`  await page.mouse.wheel(${deltaX}, ${deltaY});`);
-      }
-    }
-  }
-
-  flushCursorBatch();
   lines.push('}', '');
   return lines.join('\n');
 }

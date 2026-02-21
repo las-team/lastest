@@ -534,6 +534,7 @@ export async function getTestResultsByTest(testId: string) {
       consoleErrors: testResults.consoleErrors,
       networkRequests: testResults.networkRequests,
       videoPath: testResults.videoPath,
+      a11yViolations: testResults.a11yViolations,
       startedAt: testRuns.startedAt,
     })
     .from(testResults)
@@ -827,6 +828,7 @@ export async function getVisualDiffsWithTestStatus(buildId: string) {
       errorMessage: testResults.errorMessage,
       testName: tests.name,
       functionalAreaName: functionalAreas.name,
+      a11yViolations: testResults.a11yViolations,
     })
     .from(visualDiffs)
     .leftJoin(testResults, eq(visualDiffs.testResultId, testResults.id))
@@ -1336,6 +1338,7 @@ export async function getPlaywrightSettings(repositoryId?: string | null) {
     actionTimeout: 5000,
     pointerGestures: false,
     cursorFPS: 30,
+    cursorPlaybackSpeed: 1,
     enabledRecordingEngines: DEFAULT_RECORDING_ENGINES,
     defaultRecordingEngine: 'lastest' as const,
     freezeAnimations: false,
@@ -1610,6 +1613,11 @@ export async function getDiffSensitivitySettings(repositoryId?: string | null) {
     flakyThreshold: DEFAULT_DIFF_THRESHOLDS.flakyThreshold,
     includeAntiAliasing: DEFAULT_DIFF_THRESHOLDS.includeAntiAliasing,
     ignorePageShift: DEFAULT_DIFF_THRESHOLDS.ignorePageShift,
+    diffEngine: DEFAULT_DIFF_THRESHOLDS.diffEngine,
+    textRegionAwareDiffing: DEFAULT_DIFF_THRESHOLDS.textRegionAwareDiffing,
+    textRegionThreshold: DEFAULT_DIFF_THRESHOLDS.textRegionThreshold,
+    textRegionPadding: DEFAULT_DIFF_THRESHOLDS.textRegionPadding,
+    textDetectionGranularity: DEFAULT_DIFF_THRESHOLDS.textDetectionGranularity,
     createdAt: null,
     updatedAt: null,
   };

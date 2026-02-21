@@ -1,6 +1,7 @@
 /**
  * Debug runner for step-by-step test execution.
- * Singleton per repo (same pattern as PlaywrightRunner).
+ * Uses checkpoint-based execution: one instrumented function with
+ * pause points between steps, avoiding O(n^2) cumulative re-execution.
  */
 
 import { chromium, firefox, webkit, Browser, Page, BrowserContext } from 'playwright';
@@ -16,9 +17,10 @@ import { getSelectorStats, recordSelectorSuccess, recordSelectorFailure } from '
 import { getServerManager } from './server-manager';
 import { getSetupOrchestrator, testNeedsSetup } from '@/lib/setup/setup-orchestrator';
 import type { SetupContext } from '@/lib/setup/types';
-import { createAppState, createExpect, stripTypeAnnotations } from './runner';
-import { parseSteps, extractTestBody, removeInlineLocateWithFallback, type DebugStep } from './debug-parser';
+import { createAppState, createExpect, stripTypeAnnotations, validateTestCode } from './runner';
+import { parseSteps, extractTestBody, removeInlineLocateWithFallback, removeInlineReplayCursorPath, type DebugStep } from './debug-parser';
 import { STORAGE_DIRS } from '@/lib/storage/paths';
+import { injectRecordingListeners, generateBodyLinesFromEvents, type DebugRecordingSession } from './debug-recorder';
 
 export interface StepResult {
   stepId: number;
@@ -60,6 +62,9 @@ export interface DebugState {
   networkEntries: DebugNetworkEntry[];
   consoleEntries: DebugConsoleEntry[];
   traceUrl?: string;
+  codeVersion: number;
+  isRecording: boolean;
+  recordedEventCount: number;
 }
 
 export type DebugCommand =
@@ -68,9 +73,73 @@ export type DebugCommand =
   | { type: 'run_to_end' }
   | { type: 'run_to_step'; stepIndex: number }
   | { type: 'update_code'; code: string }
-  | { type: 'stop' };
+  | { type: 'start_recording' }
+  | { type: 'stop_recording' }
+  | { type: 'stop' }
+  | { type: '_execution_complete' };
 
 const IDLE_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
+
+// -------- Checkpoint Execution Support --------
+
+class StopError extends Error {
+  constructor() {
+    super('Debug execution stopped');
+    this.name = 'StopError';
+  }
+}
+
+/**
+ * Controls flow at checkpoint boundaries in the instrumented function.
+ * Modes: paused (wait), running (pass-through), run_to_step (pass until target), stopped (throw).
+ */
+class PauseController {
+  private mode: 'paused' | 'running' | 'run_to_step' | 'stopped';
+  private target: number;
+  private pendingResolve: (() => void) | null = null;
+  private pendingReject: ((err: Error) => void) | null = null;
+  private onPause: () => void;
+
+  constructor(mode: 'paused' | 'running' | 'run_to_step', target: number, onPause: () => void) {
+    this.mode = mode;
+    this.target = target;
+    this.onPause = onPause;
+  }
+
+  async waitIfNeeded(stepIdx: number): Promise<void> {
+    if (this.mode === 'stopped') throw new StopError();
+    if (this.mode === 'running') return;
+    if (this.mode === 'run_to_step' && stepIdx < this.target) return;
+
+    // Transition run_to_step → paused when target reached
+    if (this.mode === 'run_to_step') this.mode = 'paused';
+    this.onPause();
+
+    return new Promise<void>((resolve, reject) => {
+      this.pendingResolve = resolve;
+      this.pendingReject = reject;
+    });
+  }
+
+  resume(newMode: 'paused' | 'running' | 'run_to_step', target?: number): void {
+    this.mode = newMode;
+    if (target !== undefined) this.target = target;
+    const resolve = this.pendingResolve;
+    this.pendingResolve = null;
+    this.pendingReject = null;
+    resolve?.();
+  }
+
+  stop(): void {
+    this.mode = 'stopped';
+    const reject = this.pendingReject;
+    this.pendingResolve = null;
+    this.pendingReject = null;
+    reject?.(new StopError());
+  }
+}
+
+// -------- Debug Runner --------
 
 export class DebugRunner {
   private browser: Browser | null = null;
@@ -84,7 +153,8 @@ export class DebugRunner {
   private state: DebugState | null = null;
   private commandResolve: ((cmd: DebugCommand) => void) | null = null;
   private idleTimer: ReturnType<typeof setTimeout> | null = null;
-  private generation = 0; // incremented on each start(), stale runSession() bails out
+  private generation = 0;
+  private pauseController: PauseController | null = null;
 
   // Network/console capture
   private networkEntries: DebugNetworkEntry[] = [];
@@ -95,6 +165,11 @@ export class DebugRunner {
   private traceDir = '';
   private traceChunkIndex = 0;
   private tracingActive = false;
+
+  // Recording support
+  private debugRecordingSession: DebugRecordingSession | null = null;
+  private debugRecordingCleanup: (() => Promise<void>) | null = null;
+  private debugFunctionsExposed = false;
 
   getState(): DebugState | null {
     return this.state;
@@ -139,11 +214,16 @@ export class DebugRunner {
         error: 'Could not parse test function body',
         networkEntries: [],
         consoleEntries: [],
+        codeVersion: 0,
+        isRecording: false,
+        recordedEventCount: 0,
       };
       return sessionId;
     }
 
-    const cleanBody = removeInlineLocateWithFallback(stripTypeAnnotations(body));
+    const cleanBody = removeInlineReplayCursorPath(
+      removeInlineLocateWithFallback(stripTypeAnnotations(body))
+    );
     const steps = parseSteps(cleanBody);
 
     this.state = {
@@ -156,10 +236,11 @@ export class DebugRunner {
       code,
       networkEntries: [],
       consoleEntries: [],
+      codeVersion: 0,
+      isRecording: false,
+      recordedEventCount: 0,
     };
 
-    // Launch browser and run initialization in background
-    // Capture generation so stale calls from prior start() bail out
     const gen = this.generation;
     this.runSession(gen).catch(err => {
       if (this.state && this.generation === gen) {
@@ -202,9 +283,21 @@ export class DebugRunner {
   async stop(): Promise<void> {
     this.clearIdleTimer();
 
+    // Clean up recording if active (discard events)
+    if (this.debugRecordingCleanup) {
+      await this.debugRecordingCleanup().catch(() => {});
+      this.debugRecordingCleanup = null;
+      this.debugRecordingSession = null;
+    }
+
     if (this.state) {
       this.state.status = 'completed';
+      this.state.isRecording = false;
     }
+
+    // Abort running instrumented function
+    this.pauseController?.stop();
+    this.pauseController = null;
 
     // Resolve any pending command to unblock the run loop
     if (this.commandResolve) {
@@ -261,14 +354,16 @@ export class DebugRunner {
 
   private handleCodeUpdate(newCode: string) {
     if (!this.state) return;
+    if (newCode === this.state.code) return; // no-op
 
     const body = extractTestBody(newCode);
     if (!body) return;
 
-    const cleanBody = removeInlineLocateWithFallback(stripTypeAnnotations(body));
+    const cleanBody = removeInlineReplayCursorPath(
+      removeInlineLocateWithFallback(stripTypeAnnotations(body))
+    );
     const newSteps = parseSteps(cleanBody);
 
-    // Map executed steps to new indices
     const executedCount = this.state.currentStepIndex + 1;
     let mismatchAt = -1;
 
@@ -279,10 +374,8 @@ export class DebugRunner {
       }
     }
 
-    // Update steps
     const newResults: StepResult[] = newSteps.map((s, i) => {
       if (i < executedCount && (mismatchAt === -1 || i < mismatchAt)) {
-        // Keep existing results for matching steps
         return this.state!.stepResults[i] || { stepId: s.id, status: 'pending' as const, durationMs: 0 };
       }
       return { stepId: s.id, status: 'pending' as const, durationMs: 0 };
@@ -291,10 +384,113 @@ export class DebugRunner {
     this.state.steps = newSteps;
     this.state.stepResults = newResults;
     this.state.code = newCode;
+    this.state.codeVersion++;
 
     if (mismatchAt !== -1 && mismatchAt < executedCount) {
       this.state.error = `Code changed at step ${mismatchAt + 1}. Step back to apply changes.`;
     }
+  }
+
+  private async handleStartRecording(): Promise<void> {
+    if (!this.state || !this.page) return;
+    if (this.state.status !== 'paused' && this.state.status !== 'completed') return;
+    if (this.state.isRecording) return;
+
+    try {
+      const baseUrl = this.environmentConfig?.baseUrl || 'http://localhost:3000';
+      const { session, cleanup } = await injectRecordingListeners(
+        this.page,
+        baseUrl,
+        this.debugFunctionsExposed,
+        {
+          onEvent: (count) => {
+            if (this.state) {
+              this.state.recordedEventCount = count;
+            }
+          },
+        }
+      );
+      this.debugFunctionsExposed = true;
+      this.debugRecordingSession = session;
+      this.debugRecordingCleanup = cleanup;
+      this.state.isRecording = true;
+      this.state.recordedEventCount = 0;
+    } catch (err) {
+      if (this.state) {
+        this.state.error = `Failed to start recording: ${err instanceof Error ? err.message : String(err)}`;
+      }
+    }
+  }
+
+  private async handleStopRecording(): Promise<void> {
+    if (!this.state || !this.debugRecordingSession) return;
+
+    const session = this.debugRecordingSession;
+
+    // Cleanup browser-side listeners
+    if (this.debugRecordingCleanup) {
+      await this.debugRecordingCleanup().catch(() => {});
+      this.debugRecordingCleanup = null;
+    }
+    this.debugRecordingSession = null;
+
+    this.state.isRecording = false;
+
+    // Generate code from recorded events
+    if (session.events.length === 0) return;
+
+    const baseUrl = this.environmentConfig?.baseUrl || 'http://localhost:3000';
+    let baseOrigin: string;
+    try {
+      baseOrigin = new URL(baseUrl).origin;
+    } catch {
+      baseOrigin = baseUrl;
+    }
+
+    const newLines = generateBodyLinesFromEvents(session.events, baseOrigin);
+    if (newLines.length === 0) return;
+
+    const newBlock = newLines.join('\n');
+    const splicedCode = this.spliceCodeAtCurrentStep(newBlock);
+    if (splicedCode) {
+      this.handleCodeUpdate(splicedCode);
+    }
+  }
+
+  /**
+   * Insert a block of code after the current step in the full test code.
+   * Returns the modified full code string, or null if splice failed.
+   */
+  private spliceCodeAtCurrentStep(newBlock: string): string | null {
+    if (!this.state) return null;
+
+    const code = this.state.code;
+    const lines = code.split('\n');
+
+    // Find the body start line (same calc as CodeDisplay)
+    const funcMatch = code.match(/export\s+async\s+function\s+test\s*\([^)]*\)\s*\{/);
+    const bodyStartLine = funcMatch
+      ? code.slice(0, (funcMatch.index ?? 0) + funcMatch[0].length).split('\n').length
+      : 0;
+
+    const currentIdx = this.state.currentStepIndex;
+    if (currentIdx < 0 || currentIdx >= this.state.steps.length) {
+      // No step executed yet — insert at start of body
+      const insertAfterLine = bodyStartLine;
+      const before = lines.slice(0, insertAfterLine);
+      const after = lines.slice(insertAfterLine);
+      return [...before, newBlock, ...after].join('\n');
+    }
+
+    const currentStep = this.state.steps[currentIdx];
+    // Map step lineEnd (body-relative, 1-based) to absolute line number
+    const absoluteLine = bodyStartLine + currentStep.lineEnd;
+
+    if (absoluteLine > lines.length) return null;
+
+    const before = lines.slice(0, absoluteLine);
+    const after = lines.slice(absoluteLine);
+    return [...before, newBlock, ...after].join('\n');
   }
 
   private getBrowserLauncher() {
@@ -325,6 +521,8 @@ export class DebugRunner {
       viewport,
       ...(this.settings?.acceptAnyCertificate ? { ignoreHTTPSErrors: true } : {}),
       ...(this.settings?.freezeAnimations ? { reducedMotion: 'reduce' } : {}),
+      ...(this.settings?.grantClipboardAccess ? { permissions: ['clipboard-read', 'clipboard-write'] } : {}),
+      ...(this.settings?.acceptDownloads ? { acceptDownloads: true } : {}),
     });
     const page = await context.newPage();
 
@@ -332,7 +530,7 @@ export class DebugRunner {
     const stabilization = this.settings?.stabilization || DEFAULT_STABILIZATION_SETTINGS;
     await setupFreezeScripts(page, stabilization);
 
-    // Freeze CSS + JS animations if enabled (uses addInitScript to persist across navigations)
+    // Freeze CSS + JS animations if enabled
     if (this.settings?.freezeAnimations) {
       await page.addInitScript(FREEZE_ANIMATIONS_SCRIPT);
     }
@@ -357,7 +555,6 @@ export class DebugRunner {
         failed: false,
       };
       this.networkEntries.push(entry);
-      // Memory cap
       if (this.networkEntries.length > 500) {
         this.networkEntries = this.networkEntries.slice(-500);
       }
@@ -396,7 +593,6 @@ export class DebugRunner {
         text: msg.text(),
         timestamp: Date.now(),
       });
-      // Memory cap
       if (this.consoleEntries.length > 500) {
         this.consoleEntries = this.consoleEntries.slice(-500);
       }
@@ -409,7 +605,7 @@ export class DebugRunner {
   }
 
   /**
-   * Flush the current trace chunk and start a new one. Returns the URL of the saved trace.
+   * Flush the current trace chunk and start a new one.
    */
   async flushTrace(): Promise<string | null> {
     if (!this.context || !this.tracingActive || !this.state) return null;
@@ -506,9 +702,269 @@ export class DebugRunner {
     };
   }
 
-  /** Check if this runSession invocation is still current */
   private isStale(gen: number): boolean {
     return this.generation !== gen;
+  }
+
+  /**
+   * Create all 12 helper parameters matching the main runner's signature.
+   */
+  private createHelpers(page: Page, testId: string) {
+    const expectFn = createExpect(this.getActionTimeout());
+    const appStateFn = createAppState(page);
+    const locateWithFallback = this.createLocateWithFallback(page, testId);
+
+    /* eslint-disable @typescript-eslint/no-unused-vars */
+    const stepLogger = {
+      log: (_msg: string) => { /* no-op in debug mode */ },
+      warn: (_msg: string) => { /* captured by soft error wrapping */ },
+    };
+    /* eslint-enable @typescript-eslint/no-unused-vars */
+
+    // File upload helper
+    const fileUpload = async (selector: string, filePaths: string | string[]) => {
+      const locator = page.locator(selector);
+      await locator.setInputFiles(Array.isArray(filePaths) ? filePaths : [filePaths]);
+    };
+
+    // Clipboard helper — available when grantClipboardAccess is enabled
+    const clipboard = this.settings?.grantClipboardAccess ? {
+      copy: async (text: string) => {
+        await page.evaluate((t) => navigator.clipboard.writeText(t), text);
+      },
+      paste: async () => {
+        return await page.evaluate(() => navigator.clipboard.readText());
+      },
+      pasteInto: async (selector: string) => {
+        await page.locator(selector).focus();
+        await page.keyboard.press('Control+V');
+      },
+    } : null;
+
+    // Downloads helper — available when acceptDownloads is enabled
+    const dlDir = this.settings?.acceptDownloads
+      ? path.join(STORAGE_DIRS.screenshots, this.repositoryId || 'default', 'downloads')
+      : '';
+    if (dlDir) fs.mkdirSync(dlDir, { recursive: true });
+    const dlList: Array<{ suggestedFilename: string; path: string }> = [];
+    const downloads = this.settings?.acceptDownloads ? {
+      waitForDownload: async (triggerAction: () => Promise<void>) => {
+        const [download] = await Promise.all([
+          page.waitForEvent('download'),
+          triggerAction(),
+        ]);
+        const safeName = path.basename(download.suggestedFilename()).replace(/\.\./g, '_');
+        const savePath = path.join(dlDir, safeName);
+        await download.saveAs(savePath);
+        dlList.push({ suggestedFilename: safeName, path: savePath });
+        return { filename: safeName, path: savePath };
+      },
+      list: () => dlList,
+    } : null;
+
+    // Network interception helper — available when enableNetworkInterception is enabled
+    const network = this.settings?.enableNetworkInterception ? {
+      mock: async (urlPattern: string, response: { status?: number; body?: string; contentType?: string; json?: unknown }) => {
+        await page.route(urlPattern, async (route) => {
+          await route.fulfill({
+            status: response.status ?? 200,
+            contentType: response.contentType ?? (response.json ? 'application/json' : 'text/plain'),
+            body: response.json ? JSON.stringify(response.json) : (response.body ?? ''),
+          });
+        });
+      },
+      block: async (urlPattern: string) => {
+        await page.route(urlPattern, (route) => route.abort());
+      },
+      passthrough: async (urlPattern: string) => {
+        await page.unroute(urlPattern);
+      },
+      capture: (urlPattern: string) => {
+        const captured: Array<{ url: string; method: string; postData?: string }> = [];
+        page.on('request', (req) => {
+          if (new RegExp(urlPattern).test(req.url())) {
+            captured.push({ url: req.url(), method: req.method(), postData: req.postData() ?? undefined });
+          }
+        });
+        return { requests: captured };
+      },
+    } : null;
+
+    // Speed-aware replayCursorPath — respects cursorPlaybackSpeed setting
+    const cursorPlaybackSpeed = this.settings?.cursorPlaybackSpeed ?? 1;
+    const replayCursorPath = async (pg: Page, moves: [number, number, number][]) => {
+      for (const [x, y, delay] of moves) {
+        await pg.mouse.move(x, y);
+        if (delay > 0 && cursorPlaybackSpeed > 0) {
+          await pg.waitForTimeout(Math.round(delay / cursorPlaybackSpeed));
+        }
+      }
+    };
+
+    return { expectFn, appStateFn, locateWithFallback, stepLogger, fileUpload, clipboard, downloads, network, replayCursorPath };
+  }
+
+  /**
+   * Build instrumented code: step code interleaved with __checkpoint() calls,
+   * with soft error wrapping on await statements.
+   */
+  private buildInstrumentedCode(steps: DebugStep[]): string {
+    const parts: string[] = [];
+    for (let i = 0; i < steps.length; i++) {
+      parts.push(`await __checkpoint(${i});`);
+      parts.push(steps[i].code);
+    }
+    // Final checkpoint marks last step as done
+    parts.push(`await __checkpoint(${steps.length});`);
+
+    let code = parts.join('\n');
+
+    // Soft error wrapping: wrap standalone await statements in try/catch
+    // (same regex as main runner) — skip screenshots and checkpoints
+    code = code.replace(/^(\s*)(await\s+.+;)\s*$/gm, (_match, indent, stmt) => {
+      if (stmt.includes('.screenshot(')) return `${indent}${stmt}`;
+      if (stmt.includes('__checkpoint(')) return `${indent}${stmt}`;
+      return `${indent}try { ${stmt} } catch(__softErr) { stepLogger.warn(typeof __softErr === 'object' && __softErr !== null && 'message' in __softErr ? __softErr.message : String(__softErr)); }`;
+    });
+
+    return code;
+  }
+
+  /**
+   * Compute index of first non-variable/log step.
+   */
+  private getFirstActionIndex(steps: DebugStep[]): number {
+    for (let i = 0; i < steps.length; i++) {
+      if (steps[i].type !== 'variable' && steps[i].type !== 'log') return i;
+    }
+    return steps.length;
+  }
+
+  /**
+   * Run setup steps if the test requires them.
+   */
+  private async runSetupIfNeeded(test: Test, page: Page, baseUrl: string): Promise<void> {
+    if (!await testNeedsSetup(test)) return;
+    const orchestrator = getSetupOrchestrator();
+    const baseContext: SetupContext = {
+      baseUrl: baseUrl.replace(/\/$/, ''),
+      page,
+      variables: {},
+      repositoryId: this.repositoryId,
+    };
+    const setupResult = await orchestrator.runTestSetup(test, page, baseContext);
+    if (!setupResult.success) {
+      throw new Error(`Setup failed: ${setupResult.error}`);
+    }
+    const setupPageUrl = page.url();
+    try {
+      await page.waitForURL(
+        url => url.toString() !== setupPageUrl,
+        { timeout: 10000, waitUntil: 'networkidle' }
+      );
+    } catch { /* URL didn't change */ }
+  }
+
+  /**
+   * Resolve Google Sheets {{sheet:...}} references in step code.
+   */
+  private async resolveSheetReferences(steps: DebugStep[]): Promise<void> {
+    const hasSheetRefs = steps.some(s => s.code.includes('{{sheet:'));
+    if (!hasSheetRefs) return;
+
+    try {
+      const { resolveSheetReferences } = await import('@/lib/google-sheets/resolver');
+      const { getGoogleSheetsDataSources } = await import('@/lib/db/queries');
+      const repoId = this.test?.repositoryId || this.repositoryId;
+      if (!repoId) return;
+      const dataSources = await getGoogleSheetsDataSources(repoId);
+      if (dataSources.length === 0) return;
+      for (const step of steps) {
+        if (step.code.includes('{{sheet:')) {
+          const result = resolveSheetReferences(step.code, dataSources);
+          step.code = result.resolvedCode;
+        }
+      }
+    } catch { /* ignore resolution failures */ }
+  }
+
+  /**
+   * Launch instrumented execution. Returns a promise that resolves when all steps
+   * complete or rejects on hard error / StopError.
+   */
+  private launchExecution(
+    steps: DebugStep[],
+    pauseCtrl: PauseController,
+    page: Page,
+    baseUrl: string,
+    screenshotPath: string,
+    helpers: ReturnType<typeof this.createHelpers>,
+  ): Promise<void> {
+    const state = this.state!;
+    const totalSteps = steps.length;
+    const stepStartTimes: number[] = new Array(totalSteps).fill(0);
+    let executingStepIdx = -1;
+
+    const __checkpoint = async (n: number) => {
+      const now = Date.now();
+
+      // Mark previous step as passed
+      if (n > 0 && n <= totalSteps) {
+        const prev = n - 1;
+        state.stepResults[prev] = {
+          stepId: steps[prev].id,
+          status: 'passed',
+          durationMs: now - stepStartTimes[prev],
+        };
+        state.currentStepIndex = prev;
+      }
+
+      // All steps done
+      if (n >= totalSteps) return;
+
+      // About to start step n
+      executingStepIdx = n;
+      stepStartTimes[n] = now;
+
+      await pauseCtrl.waitIfNeeded(n);
+    };
+
+    const instrumentedCode = this.buildInstrumentedCode(steps);
+
+    // Validate before execution
+    try {
+      validateTestCode(instrumentedCode);
+    } catch (err) {
+      return Promise.reject(err);
+    }
+
+    const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
+    const fn = new AsyncFunction(
+      'page', 'baseUrl', 'screenshotPath', 'stepLogger', 'expect', 'appState',
+      'locateWithFallback', 'fileUpload', 'clipboard', 'downloads', 'network',
+      'replayCursorPath', '__checkpoint',
+      instrumentedCode,
+    );
+
+    return fn(
+      page, baseUrl, screenshotPath, helpers.stepLogger, helpers.expectFn, helpers.appStateFn,
+      helpers.locateWithFallback, helpers.fileUpload, helpers.clipboard, helpers.downloads,
+      helpers.network, helpers.replayCursorPath, __checkpoint,
+    ).catch((err: unknown) => {
+      if (err instanceof StopError) throw err; // propagate StopError as-is
+
+      // Mark current step as failed
+      if (executingStepIdx >= 0 && executingStepIdx < totalSteps) {
+        state.stepResults[executingStepIdx] = {
+          stepId: steps[executingStepIdx].id,
+          status: 'failed',
+          durationMs: Date.now() - stepStartTimes[executingStepIdx],
+          error: err instanceof Error ? err.message : String(err),
+        };
+        state.currentStepIndex = executingStepIdx;
+      }
+      throw err; // re-throw for runSession to handle
+    });
   }
 
   /**
@@ -518,7 +974,6 @@ export class DebugRunner {
     if (!this.state || !this.test) return;
 
     try {
-      // Bail out if a newer start() was called
       if (this.isStale(gen)) return;
 
       // Ensure server is running
@@ -552,7 +1007,6 @@ export class DebugRunner {
         args: launchArgs.length > 0 ? launchArgs : undefined,
       });
 
-      // If a newer start() fired while we were launching, close and bail
       if (this.isStale(gen)) {
         await this.browser.close().catch(() => {});
         this.browser = null;
@@ -560,7 +1014,6 @@ export class DebugRunner {
       }
 
       await this.createPageAndContext();
-
       if (!this.page || !this.context) throw new Error('Failed to create page');
 
       // Resolve base URL
@@ -577,97 +1030,96 @@ export class DebugRunner {
 
       // Run setup if needed
       const test = this.test;
-      if (await testNeedsSetup(test)) {
-        const orchestrator = getSetupOrchestrator();
-        const baseContext: SetupContext = {
-          baseUrl: baseUrl.replace(/\/$/, ''),
-          page: this.page,
-          variables: {},
-          repositoryId: this.repositoryId,
-        };
-        const setupResult = await orchestrator.runTestSetup(test, this.page, baseContext);
-        if (!setupResult.success) {
-          throw new Error(`Setup failed: ${setupResult.error}`);
-        }
-        // Wait for page to settle after setup
-        const setupPageUrl = this.page.url();
-        try {
-          await this.page.waitForURL(
-            url => url.toString() !== setupPageUrl,
-            { timeout: 10000, waitUntil: 'networkidle' }
-          );
-        } catch { /* URL didn't change */ }
-      }
+      await this.runSetupIfNeeded(test, this.page, baseUrl);
+
+      // Resolve Google Sheets references
+      const steps = this.state.steps;
+      await this.resolveSheetReferences(steps);
+
+      // Determine first action step (skip leading variable/log steps)
+      const firstActionIdx = this.getFirstActionIndex(steps);
 
       // Create helpers
-      const expectFn = createExpect(this.getActionTimeout());
-      const appStateFn = createAppState(this.page);
-      const locateWithFallback = this.createLocateWithFallback(this.page, test.id);
-      // eslint-disable-next-line @typescript-eslint/no-unused-vars
-      const stepLogger = { log: (_msg: string) => { /* no-op in debug mode */ } };
+      let helpers = this.createHelpers(this.page, test.id);
 
-      // Auto-execute variable and log steps at the start
-      let firstActionIdx = 0;
-      for (let i = 0; i < this.state.steps.length; i++) {
-        const step = this.state.steps[i];
-        if (step.type !== 'variable' && step.type !== 'log') {
-          firstActionIdx = i;
-          break;
-        }
-        if (i === this.state.steps.length - 1) {
-          firstActionIdx = this.state.steps.length;
-        }
+      // Choose initial PauseController mode
+      let initMode: 'paused' | 'running' | 'run_to_step';
+      let initTarget: number;
+      if (firstActionIdx >= steps.length) {
+        // All steps are variables/logs — run them all
+        initMode = 'running';
+        initTarget = 0;
+      } else if (firstActionIdx > 0) {
+        // Auto-execute leading variable/log steps
+        initMode = 'run_to_step';
+        initTarget = firstActionIdx;
+      } else {
+        initMode = 'paused';
+        initTarget = 0;
       }
 
-      // Execute initial variable/log steps
-      if (firstActionIdx > 0) {
-        await this.executeStepsRange(0, firstActionIdx - 1, {
-          page: this.page, baseUrl, screenshotPath, stepLogger, expectFn, appStateFn, locateWithFallback,
+      let pauseCtrl = new PauseController(initMode, initTarget, () => {
+        if (this.state) this.state.status = 'paused';
+      });
+      this.pauseController = pauseCtrl;
+
+      // Launch instrumented execution in background
+      const startExecution = (pc: PauseController, h: ReturnType<typeof this.createHelpers>, pg: Page) => {
+        this.launchExecution(this.state!.steps, pc, pg, baseUrl, screenshotPath, h).then(() => {
+          if (this.state && this.state.status !== 'completed' && this.state.status !== 'error') {
+            this.state.status = 'completed';
+          }
+          // Unblock command loop (keep alive for editing/recording)
+          if (this.commandResolve) {
+            this.commandResolve({ type: '_execution_complete' });
+            this.commandResolve = null;
+          }
+        }).catch((err) => {
+          if (err instanceof StopError) return; // expected abort
+          const execError = err instanceof Error ? err : new Error(String(err));
+          if (this.state) {
+            this.state.status = 'error';
+            this.state.error = execError.message;
+          }
+          // Unblock command loop (keep alive for step_back/editing)
+          if (this.commandResolve) {
+            this.commandResolve({ type: '_execution_complete' });
+            this.commandResolve = null;
+          }
         });
-      }
+      };
 
-      // Set initial position
-      this.state.currentStepIndex = firstActionIdx > 0 ? firstActionIdx - 1 : -1;
-      this.state.status = 'paused';
+      startExecution(pauseCtrl, helpers, this.page);
 
-      // Main command loop
+      // Command loop (stays alive after execution completes for editing/recording)
       while (true) {
-        if (this.state.status === 'completed' || this.state.status === 'error') break;
+        if (this.isStale(gen)) break;
+
         const cmd = await this.waitForCommand();
 
         if (cmd.type === 'stop') {
-          this.state.status = 'completed';
+          pauseCtrl.stop();
+          if (this.state.status !== 'error') {
+            this.state.status = 'completed';
+          }
           break;
         }
 
-        if (cmd.type === 'step_forward') {
-          const nextIdx = this.state.currentStepIndex + 1;
-          if (nextIdx >= this.state.steps.length) {
-            this.state.status = 'completed';
-            break;
-          }
-          this.state.status = 'stepping';
-          await this.executeSingleStep(nextIdx, {
-            page: this.page!, baseUrl, screenshotPath, stepLogger, expectFn, appStateFn, locateWithFallback,
-          });
-          this.state.currentStepIndex = nextIdx;
+        // Execution finished signal — keep loop alive
+        if (cmd.type === '_execution_complete') continue;
 
-          if (this.state.stepResults[nextIdx]?.status === 'failed') {
-            this.state.status = 'error';
-            this.state.error = this.state.stepResults[nextIdx].error;
-          } else if (nextIdx >= this.state.steps.length - 1) {
-            this.state.status = 'completed';
-          } else {
-            this.state.status = 'paused';
-          }
-        }
-
-        else if (cmd.type === 'step_back') {
+        // step_back — always allowed (even after error/completed), requires currentStepIndex > 0
+        if (cmd.type === 'step_back') {
           if (this.state.currentStepIndex <= 0) continue;
           const targetIdx = this.state.currentStepIndex - 1;
 
           this.state.status = 'stepping';
           this.state.error = undefined;
+
+          // Abort current execution
+          pauseCtrl.stop();
+          // Give execution promise time to settle
+          await new Promise(r => setTimeout(r, 50));
 
           // Save trace chunk before closing context
           if (this.context && this.tracingActive) {
@@ -680,115 +1132,195 @@ export class DebugRunner {
             this.tracingActive = false;
           }
 
-          // Reset: close page/context, recreate, re-execute 0..targetIdx
+          // Close context (keep browser)
           if (this.context) {
             await this.context.close().catch(() => {});
             this.context = null;
             this.page = null;
           }
 
-          // Clear network/console entries for replay
+          // Reset recording state (exposed functions die with the context)
+          this.debugFunctionsExposed = false;
+          if (this.debugRecordingCleanup) {
+            this.debugRecordingCleanup = null;
+            this.debugRecordingSession = null;
+            if (this.state) {
+              this.state.isRecording = false;
+              this.state.recordedEventCount = 0;
+            }
+          }
+
+          // Clear network/console for replay
           this.networkEntries = [];
           this.networkSeq = 0;
           this.consoleEntries = [];
-          if (this.state) {
-            this.state.networkEntries = this.networkEntries;
-            this.state.consoleEntries = this.consoleEntries;
-          }
+          this.state.networkEntries = this.networkEntries;
+          this.state.consoleEntries = this.consoleEntries;
 
+          // Recreate page and context
           await this.createPageAndContext();
           if (!this.page) throw new Error('Failed to recreate page');
 
-          // Re-run setup if needed
-          if (await testNeedsSetup(test)) {
-            const orchestrator = getSetupOrchestrator();
-            const baseContext: SetupContext = {
-              baseUrl: baseUrl.replace(/\/$/, ''),
-              page: this.page,
-              variables: {},
-              repositoryId: this.repositoryId,
-            };
-            const setupResult = await orchestrator.runTestSetup(test, this.page, baseContext);
-            if (!setupResult.success) {
-              this.state.status = 'error';
-              this.state.error = `Setup failed on replay: ${setupResult.error}`;
-              continue;
-            }
-            const setupPageUrl = this.page.url();
-            try {
-              await this.page.waitForURL(
-                url => url.toString() !== setupPageUrl,
-                { timeout: 10000, waitUntil: 'networkidle' }
-              );
-            } catch { /* URL didn't change */ }
-          }
+          // Re-run setup
+          await this.runSetupIfNeeded(test, this.page, baseUrl);
 
           // Recreate helpers with new page
-          const newExpect = createExpect(this.getActionTimeout());
-          const newAppState = createAppState(this.page);
-          const newLocate = this.createLocateWithFallback(this.page, test.id);
+          helpers = this.createHelpers(this.page, test.id);
 
           // Reset all step results
           for (let i = 0; i < this.state.stepResults.length; i++) {
-            this.state.stepResults[i] = { stepId: i, status: 'pending', durationMs: 0 };
+            this.state.stepResults[i] = { stepId: this.state.steps[i].id, status: 'pending', durationMs: 0 };
           }
 
-          // Re-execute steps 0..targetIdx
-          await this.executeStepsRange(0, targetIdx, {
-            page: this.page, baseUrl, screenshotPath, stepLogger, expectFn: newExpect, appStateFn: newAppState, locateWithFallback: newLocate,
+          // New PauseController: run_to_step replaying 0..targetIdx, then pause
+          pauseCtrl = new PauseController('run_to_step', targetIdx + 1, () => {
+            if (this.state) this.state.status = 'paused';
           });
+          this.pauseController = pauseCtrl;
 
-          this.state.currentStepIndex = targetIdx;
-          // Update helpers for subsequent steps
-          Object.assign(expectFn, newExpect);
-          Object.assign(appStateFn, newAppState);
+          // Restart execution
+          startExecution(pauseCtrl, helpers, this.page);
+          continue;
+        }
 
-          if (this.state.stepResults[targetIdx]?.status === 'failed') {
-            this.state.status = 'error';
-            this.state.error = this.state.stepResults[targetIdx].error;
-          } else {
-            this.state.status = 'paused';
+        // Other commands require paused or completed state
+        if (this.state.status !== 'paused' && this.state.status !== 'completed') continue;
+
+        if (cmd.type === 'step_forward') {
+          const nextIdx = this.state.currentStepIndex + 1;
+          if (nextIdx >= this.state.steps.length) {
+            this.state.status = 'completed';
+            continue;
           }
+          if (this.state.status === 'completed') {
+            // Execution finished but new steps added (via edit/recording) — restart
+            this.state.status = 'stepping';
+            this.state.error = undefined;
+            pauseCtrl.stop();
+            await new Promise(r => setTimeout(r, 50));
+
+            if (this.context && this.tracingActive) {
+              const traceFile = `debug-${this.state.sessionId}-${this.traceChunkIndex}.zip`;
+              const tracePath = path.join(this.traceDir || STORAGE_DIRS.traces, traceFile);
+              fs.mkdirSync(path.dirname(tracePath), { recursive: true });
+              await this.context.tracing.stop({ path: tracePath }).catch(() => {});
+              this.state.traceUrl = `/traces/${traceFile}`;
+              this.traceChunkIndex++;
+              this.tracingActive = false;
+            }
+            if (this.context) {
+              await this.context.close().catch(() => {});
+              this.context = null;
+              this.page = null;
+            }
+            this.debugFunctionsExposed = false;
+            this.networkEntries = [];
+            this.networkSeq = 0;
+            this.consoleEntries = [];
+            this.state.networkEntries = this.networkEntries;
+            this.state.consoleEntries = this.consoleEntries;
+            await this.createPageAndContext();
+            if (!this.page) throw new Error('Failed to recreate page');
+            await this.runSetupIfNeeded(test, this.page, baseUrl);
+            helpers = this.createHelpers(this.page, test.id);
+            for (let i = 0; i < this.state.stepResults.length; i++) {
+              this.state.stepResults[i] = { stepId: this.state.steps[i].id, status: 'pending', durationMs: 0 };
+            }
+            pauseCtrl = new PauseController('run_to_step', nextIdx + 1, () => {
+              if (this.state) this.state.status = 'paused';
+            });
+            this.pauseController = pauseCtrl;
+            startExecution(pauseCtrl, helpers, this.page);
+            continue;
+          }
+          this.state.status = 'stepping';
+          pauseCtrl.resume('paused');
         }
 
         else if (cmd.type === 'run_to_end') {
+          if (this.state.status === 'completed') continue; // already at end
           this.state.status = 'running';
-          const startIdx = this.state.currentStepIndex + 1;
-          for (let i = startIdx; i < this.state.steps.length; i++) {
-            if (this.state.status !== 'running') break;
-            await this.executeSingleStep(i, {
-              page: this.page!, baseUrl, screenshotPath, stepLogger, expectFn, appStateFn, locateWithFallback,
-            });
-            this.state.currentStepIndex = i;
-            if (this.state.stepResults[i]?.status === 'failed') {
-              this.state.status = 'error';
-              this.state.error = this.state.stepResults[i].error;
-              break;
-            }
-          }
-          if (this.state.status === 'running') {
-            this.state.status = 'completed';
-          }
+          pauseCtrl.resume('running');
         }
 
         else if (cmd.type === 'run_to_step') {
           const targetIdx = cmd.stepIndex;
           if (targetIdx <= this.state.currentStepIndex || targetIdx >= this.state.steps.length) continue;
+          if (this.state.status === 'completed') continue; // can't resume completed execution
           this.state.status = 'running';
-          for (let i = this.state.currentStepIndex + 1; i <= targetIdx; i++) {
-            if (this.state.status !== 'running') break;
-            await this.executeSingleStep(i, {
-              page: this.page!, baseUrl, screenshotPath, stepLogger, expectFn, appStateFn, locateWithFallback,
-            });
-            this.state.currentStepIndex = i;
-            if (this.state.stepResults[i]?.status === 'failed') {
-              this.state.status = 'error';
-              this.state.error = this.state.stepResults[i].error;
-              break;
+          // Target is targetIdx+1 because checkpoint(targetIdx+1) fires AFTER step targetIdx completes
+          pauseCtrl.resume('run_to_step', targetIdx + 1);
+        }
+
+        else if (cmd.type === 'start_recording') {
+          await this.handleStartRecording();
+        }
+
+        else if (cmd.type === 'stop_recording') {
+          const oldStepCount = this.state.steps.length;
+          const oldCurrentIdx = this.state.currentStepIndex;
+          await this.handleStopRecording();
+          const addedSteps = this.state.steps.length - oldStepCount;
+
+          if (addedSteps > 0) {
+            // Restart execution to compile the new steps
+            this.state.status = 'stepping';
+            pauseCtrl.stop();
+            await new Promise(r => setTimeout(r, 50));
+
+            // Save trace chunk before closing context
+            if (this.context && this.tracingActive) {
+              const traceFile = `debug-${this.state.sessionId}-${this.traceChunkIndex}.zip`;
+              const tracePath = path.join(this.traceDir || STORAGE_DIRS.traces, traceFile);
+              fs.mkdirSync(path.dirname(tracePath), { recursive: true });
+              await this.context.tracing.stop({ path: tracePath }).catch(() => {});
+              this.state.traceUrl = `/traces/${traceFile}`;
+              this.traceChunkIndex++;
+              this.tracingActive = false;
             }
-          }
-          if (this.state.status === 'running') {
-            this.state.status = 'paused';
+
+            // Close context (keep browser)
+            if (this.context) {
+              await this.context.close().catch(() => {});
+              this.context = null;
+              this.page = null;
+            }
+
+            // Reset recording state (exposed functions die with context)
+            this.debugFunctionsExposed = false;
+            this.debugRecordingCleanup = null;
+            this.debugRecordingSession = null;
+
+            // Clear network/console for replay
+            this.networkEntries = [];
+            this.networkSeq = 0;
+            this.consoleEntries = [];
+            this.state.networkEntries = this.networkEntries;
+            this.state.consoleEntries = this.consoleEntries;
+
+            // Recreate page and context
+            await this.createPageAndContext();
+            if (!this.page) throw new Error('Failed to recreate page');
+
+            // Re-run setup
+            await this.runSetupIfNeeded(test, this.page, baseUrl);
+
+            // Recreate helpers with new page
+            helpers = this.createHelpers(this.page, test.id);
+
+            // Reset all step results
+            for (let i = 0; i < this.state.stepResults.length; i++) {
+              this.state.stepResults[i] = { stepId: this.state.steps[i].id, status: 'pending', durationMs: 0 };
+            }
+
+            // Replay to after the last recorded step, then pause
+            const replayTarget = oldCurrentIdx + addedSteps;
+            pauseCtrl = new PauseController('run_to_step', replayTarget + 1, () => {
+              if (this.state) this.state.status = 'paused';
+            });
+            this.pauseController = pauseCtrl;
+
+            startExecution(pauseCtrl, helpers, this.page);
           }
         }
       }
@@ -800,119 +1332,6 @@ export class DebugRunner {
       }
     }
   }
-
-  /**
-   * Build and execute a single step using cumulative code approach.
-   */
-  private async executeSingleStep(
-    stepIdx: number,
-    ctx: StepContext
-  ): Promise<void> {
-    if (!this.state) return;
-    const step = this.state.steps[stepIdx];
-    if (!step) return;
-
-    const start = Date.now();
-    try {
-      // Build cumulative code: all previous steps + current step
-      const cumulativeCode = this.state.steps
-        .slice(0, stepIdx + 1)
-        .map(s => s.code)
-        .join('\n');
-
-      const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
-      const fn = new AsyncFunction(
-        'page', 'baseUrl', 'screenshotPath', 'stepLogger', 'expect', 'appState', 'locateWithFallback',
-        cumulativeCode
-      );
-
-      // For cumulative execution, we re-run everything but only care about errors on the last step
-      // However, this is inefficient. Instead, use scope tracking approach.
-
-      // Simpler: Just execute the current step's code directly.
-      // Variables from previous steps are captured via closure in cumulative mode.
-      // Actually, each step is a fresh AsyncFunction, so we need cumulative.
-
-      await fn(ctx.page, ctx.baseUrl, ctx.screenshotPath, ctx.stepLogger, ctx.expectFn, ctx.appStateFn, ctx.locateWithFallback);
-
-      this.state.stepResults[stepIdx] = {
-        stepId: step.id,
-        status: 'passed',
-        durationMs: Date.now() - start,
-      };
-    } catch (err) {
-      this.state.stepResults[stepIdx] = {
-        stepId: step.id,
-        status: 'failed',
-        durationMs: Date.now() - start,
-        error: err instanceof Error ? err.message : String(err),
-      };
-    }
-  }
-
-  /**
-   * Execute a range of steps rapidly (for replay/init).
-   */
-  private async executeStepsRange(
-    startIdx: number,
-    endIdx: number,
-    ctx: StepContext
-  ): Promise<void> {
-    if (!this.state) return;
-
-    // Execute all steps in range as a single block for efficiency
-    const cumulativeCode = this.state.steps
-      .slice(startIdx, endIdx + 1)
-      .map(s => s.code)
-      .join('\n');
-
-    if (!cumulativeCode.trim()) return;
-
-    const start = Date.now();
-    try {
-      const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
-      const fn = new AsyncFunction(
-        'page', 'baseUrl', 'screenshotPath', 'stepLogger', 'expect', 'appState', 'locateWithFallback',
-        cumulativeCode
-      );
-      await fn(ctx.page, ctx.baseUrl, ctx.screenshotPath, ctx.stepLogger, ctx.expectFn, ctx.appStateFn, ctx.locateWithFallback);
-
-      // Mark all steps as passed
-      for (let i = startIdx; i <= endIdx; i++) {
-        this.state.stepResults[i] = {
-          stepId: this.state.steps[i].id,
-          status: 'passed',
-          durationMs: Math.round((Date.now() - start) / (endIdx - startIdx + 1)),
-        };
-      }
-    } catch (err) {
-      // Mark the last step as failed (we don't know which one failed)
-      for (let i = startIdx; i <= endIdx; i++) {
-        this.state.stepResults[i] = {
-          stepId: this.state.steps[i].id,
-          status: i === endIdx ? 'failed' : 'passed',
-          durationMs: 0,
-          error: i === endIdx ? (err instanceof Error ? err.message : String(err)) : undefined,
-        };
-      }
-    }
-  }
-}
-
-interface StepContext {
-  page: Page;
-  baseUrl: string;
-  screenshotPath: string;
-  stepLogger: { log: (msg: string) => void };
-  expectFn: ReturnType<typeof createExpect>;
-  appStateFn: ReturnType<typeof createAppState>;
-  locateWithFallback: (
-    pg: Page,
-    selectors: { type: string; value: string }[],
-    action: string,
-    value?: string | null,
-    coords?: { x: number; y: number } | null
-  ) => Promise<void>;
 }
 
 // Singleton per repository
@@ -925,7 +1344,6 @@ let debugRepositoryId: string | null = null;
  * - Called with a repoId: creates a new instance if repo changed.
  */
 export function getDebugRunner(repositoryId?: string | null): DebugRunner {
-  // When called without a repositoryId, return existing instance (polling path)
   if (repositoryId === undefined) {
     if (!debugInstance) {
       debugInstance = new DebugRunner();
@@ -937,7 +1355,6 @@ export function getDebugRunner(repositoryId?: string | null): DebugRunner {
 
   if (!debugInstance || debugRepositoryId !== repoId) {
     if (debugInstance?.isActive()) {
-      // Force stop existing session
       debugInstance.stop().catch(() => {});
     }
     debugRepositoryId = repoId;

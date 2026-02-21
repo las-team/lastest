@@ -91,6 +91,39 @@ export function createAppState(page: Page) {
 }
 
 /**
+ * Validate test code for dangerous patterns before execution.
+ * Strips comments and string literals before scanning to reduce false positives.
+ */
+export function validateTestCode(code: string): void {
+  const stripped = code
+    .replace(/\/\/.*$/gm, '')           // single-line comments
+    .replace(/\/\*[\s\S]*?\*\//g, '')   // multi-line comments
+    .replace(/(["'`])(?:(?!\1|\\).|\\.)*\1/g, '""'); // string literals
+
+  const dangerous: [RegExp, string][] = [
+    [/\brequire\s*\(/, 'require() is not allowed in test code'],
+    [/\bimport\s*\(/, 'dynamic import() is not allowed in test code'],
+    [/\bprocess\./, 'process access is not allowed in test code'],
+    [/\bchild_process\b/, 'child_process is not allowed in test code'],
+    [/\beval\s*\(/, 'eval() is not allowed in test code'],
+    [/\bFunction\s*\(/, 'Function() constructor is not allowed in test code'],
+    [/\bfs\.\w+/, 'fs module access is not allowed in test code'],
+    [/\bglobal\./, 'global access is not allowed in test code'],
+    [/\bglobalThis\./, 'globalThis access is not allowed in test code'],
+    [/\b__dirname\b/, '__dirname is not allowed in test code'],
+    [/\b__filename\b/, '__filename is not allowed in test code'],
+    [/\bexecSync\b/, 'execSync is not allowed in test code'],
+    [/\bspawnSync\b/, 'spawnSync is not allowed in test code'],
+  ];
+
+  for (const [pattern, message] of dangerous) {
+    if (pattern.test(stripped)) {
+      throw new Error(`Dangerous test code blocked: ${message}`);
+    }
+  }
+}
+
+/**
  * Wrap matcher objects so assertion failures push to softErrors instead of throwing.
  * Handles both sync and async matchers, and recursively wraps nested objects (e.g. `not`).
  */
@@ -1502,11 +1535,21 @@ export class PlaywrightRunner extends EventEmitter {
     return stripTypeAnnotations(code);
   }
 
+  /**
+   * Validate test code for dangerous patterns before execution.
+   */
+  private validateTestCode(code: string): void {
+    validateTestCode(code);
+  }
+
   private async executeTestCode(page: Page, test: Test, runId: string, screenshotPath: string, onStepLabel?: (label: string) => void): Promise<string[]> {
     let code = test.code;
     if (!code) {
       throw new Error('No test code');
     }
+
+    // Validate test code before execution
+    this.validateTestCode(code);
 
     // Resolve {{sheet:...}} data references from Google Sheets data sources
     if (code.includes('{{sheet:')) {
@@ -1681,6 +1724,23 @@ export class PlaywrightRunner extends EventEmitter {
         }
       }
 
+      // Replace replayCursorPath with speed-aware version from runner
+      if (body.includes('async function replayCursorPath(')) {
+        const rcpMatch = body.match(/async function replayCursorPath\s*\([^)]*\)\s*\{/);
+        if (rcpMatch && rcpMatch.index !== undefined) {
+          const rcpStart = rcpMatch.index;
+          const rcpBraceStart = body.indexOf('{', rcpStart);
+          let rcpDepth = 1;
+          let rcpEnd = rcpBraceStart + 1;
+          while (rcpDepth > 0 && rcpEnd < body.length) {
+            if (body[rcpEnd] === '{') rcpDepth++;
+            else if (body[rcpEnd] === '}') rcpDepth--;
+            rcpEnd++;
+          }
+          body = body.slice(0, rcpStart) + '/* replayCursorPath provided by runner */' + body.slice(rcpEnd);
+        }
+      }
+
       // Fix legacy test code that uses non-existent page.keyboard.selectAll()
       // Older recorder versions generated this; the correct Playwright API is keyboard.press('Control+a')
       body = body.replace(/page\.keyboard\.selectAll\(\)/g, "page.keyboard.press('Control+a')");
@@ -1726,10 +1786,11 @@ export class PlaywrightRunner extends EventEmitter {
             page.waitForEvent('download'),
             triggerAction(),
           ]);
-          const savePath = path.join(dlDir, download.suggestedFilename());
+          const safeName = path.basename(download.suggestedFilename()).replace(/\.\./g, '_');
+          const savePath = path.join(dlDir, safeName);
           await download.saveAs(savePath);
-          dlList.push({ suggestedFilename: download.suggestedFilename(), path: savePath });
-          return { filename: download.suggestedFilename(), path: savePath };
+          dlList.push({ suggestedFilename: safeName, path: savePath });
+          return { filename: safeName, path: savePath };
         },
         list: () => dlList,
       } : null;
@@ -1762,9 +1823,20 @@ export class PlaywrightRunner extends EventEmitter {
         },
       } : null;
 
+      // Speed-aware replayCursorPath — respects cursorPlaybackSpeed setting
+      const cursorPlaybackSpeed = this.settings?.cursorPlaybackSpeed ?? 1;
+      const replayCursorPathFn = async (pg: Page, moves: [number, number, number][]) => {
+        for (const [x, y, delay] of moves) {
+          await pg.mouse.move(x, y);
+          if (delay > 0 && cursorPlaybackSpeed > 0) {
+            await pg.waitForTimeout(Math.round(delay / cursorPlaybackSpeed));
+          }
+        }
+      };
+
       const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
-      const testFn = new AsyncFunction('page', 'baseUrl', 'screenshotPath', 'stepLogger', 'expect', 'appState', 'locateWithFallback', 'fileUpload', 'clipboard', 'downloads', 'network', body);
-      await testFn(page, baseUrl, screenshotPath, stepLogger, expectFn, appStateFn, statsLocateWithFallback, fileUploadHelper, clipboardHelper, downloadsHelper, networkHelper);
+      const testFn = new AsyncFunction('page', 'baseUrl', 'screenshotPath', 'stepLogger', 'expect', 'appState', 'locateWithFallback', 'fileUpload', 'clipboard', 'downloads', 'network', 'replayCursorPath', body);
+      await testFn(page, baseUrl, screenshotPath, stepLogger, expectFn, appStateFn, statsLocateWithFallback, fileUploadHelper, clipboardHelper, downloadsHelper, networkHelper, replayCursorPathFn);
       return softErrors;
     }
 

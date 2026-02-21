@@ -16,7 +16,7 @@ const nextConfig: NextConfig = {
     NEXT_PUBLIC_GIT_COMMIT_COUNT: process.env.NEXT_PUBLIC_GIT_COMMIT_COUNT || git("rev-list --count HEAD"),
     NEXT_PUBLIC_BUILD_DATE: new Date().toISOString().split("T")[0],
   },
-  serverExternalPackages: ["tesseract.js", "playwright", "playwright-core"],
+  serverExternalPackages: ["tesseract.js", "playwright", "playwright-core", "@anthropic-ai/claude-agent-sdk"],
   experimental: {
     serverActions: {
       bodySizeLimit: "10mb",
@@ -31,6 +31,8 @@ const nextConfig: NextConfig = {
           { key: 'X-Content-Type-Options', value: 'nosniff' },
           { key: 'Referrer-Policy', value: 'strict-origin-when-cross-origin' },
           { key: 'Permissions-Policy', value: 'camera=(), microphone=(), geolocation=()' },
+          { key: 'Strict-Transport-Security', value: 'max-age=31536000; includeSubDomains' },
+          { key: 'Content-Security-Policy', value: "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://avatars.githubusercontent.com https://*.googleusercontent.com https://img.clerk.com https://*.gravatar.com; connect-src 'self' ws: wss:; font-src 'self' data:; frame-src 'self' https://trace.playwright.dev;" },
         ],
       },
     ];

@@ -85,6 +85,7 @@ export async function aiCreateTest(
     const response = await generateWithAI(config, prompt, systemPrompt, {
       actionType: 'create_test',
       repositoryId,
+      useMCP: enrichedContext.useMCP,
     });
     const code = extractCodeFromResponse(response);
 
@@ -294,6 +295,7 @@ export async function aiMcpFixTest(
     const response = await generateWithAI(config, prompt, MCP_SYSTEM_PROMPT, {
       actionType: 'fix_test',
       repositoryId,
+      useMCP: true,
     });
     const code = extractCodeFromResponse(response);
 

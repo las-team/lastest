@@ -6,6 +6,7 @@ import { requireTeamAccess, requireRepoAccess } from '@/lib/auth';
 import type { SetupAuthType, SetupAuthConfig } from '@/lib/db/schema';
 import { runApiSetup } from '@/lib/setup/api-seeder';
 import type { SetupConfig, SetupContext } from '@/lib/setup/types';
+import { validateUrl } from '@/lib/security/url-validation';
 
 export interface CreateSetupConfigInput {
   repositoryId: string;
@@ -48,6 +49,11 @@ export async function createSetupConfig(data: CreateSetupConfigInput) {
     throw new Error('Invalid base URL');
   }
 
+  const ssrfError = validateUrl(data.baseUrl);
+  if (ssrfError) {
+    throw new Error(ssrfError);
+  }
+
   // Validate auth config based on type
   if (data.authType === 'bearer' && !data.authConfig?.token) {
     throw new Error('Bearer auth requires a token');
@@ -82,6 +88,10 @@ export async function updateSetupConfig(id: string, data: UpdateSetupConfigInput
       new URL(data.baseUrl);
     } catch {
       throw new Error('Invalid base URL');
+    }
+    const ssrfError = validateUrl(data.baseUrl);
+    if (ssrfError) {
+      throw new Error(ssrfError);
     }
   }
 
@@ -163,6 +173,11 @@ export async function testApiEndpoint(
 
   try {
     const url = `${config.baseUrl}${endpoint}`;
+    const ssrfError = validateUrl(url);
+    if (ssrfError) {
+      return { success: false, error: ssrfError };
+    }
+
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
     };

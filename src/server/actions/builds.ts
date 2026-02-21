@@ -12,7 +12,7 @@ import { getSetupOrchestrator } from '@/lib/setup/setup-orchestrator';
 import type { SetupContext } from '@/lib/setup/types';
 import { executeTests } from '@/lib/execution/executor';
 import { getCurrentSession, requireTeamAccess, requireRepoAccess } from '@/lib/auth';
-import { generateDiff, type Rectangle } from '@/lib/diff/generator';
+import { generateDiff, generateTextAwareDiffFromPaths, type Rectangle } from '@/lib/diff/generator';
 import { hashImage, hashImageWithDimensions } from '@/lib/diff/hasher';
 import { PNG } from 'pngjs';
 import fs from 'fs';
@@ -778,6 +778,8 @@ async function processVisualDiff(
   const flakyThreshold = settings.flakyThreshold ?? 10;
   const includeAntiAliasing = settings.includeAntiAliasing ?? false;
   const ignorePageShift = settings.ignorePageShift ?? false;
+  const diffEngine = (settings.diffEngine as import('@/lib/db/schema').DiffEngineType) ?? 'pixelmatch';
+  const textRegionAwareDiffing = settings.textRegionAwareDiffing ?? false;
 
   // Get the repo's default branch
   const repo = repositoryId ? await queries.getRepository(repositoryId) : null;
@@ -844,7 +846,9 @@ async function processVisualDiff(
         DIFFS_DIR,
         0.1,
         includeAntiAliasing,
-        ignoreRects
+        ignoreRects,
+        false,
+        diffEngine
       );
 
       return {
@@ -889,7 +893,8 @@ async function processVisualDiff(
         0.1,
         includeAntiAliasing,
         ignoreRects,
-        ignorePageShift
+        ignorePageShift,
+        diffEngine
       );
 
       const mainPct = mainDiffResult.percentageDifference;
@@ -990,15 +995,31 @@ async function processVisualDiff(
 
   // Generate diff against primary baseline
   try {
-    const diffResult = await generateDiff(
-      path.join(STORAGE_ROOT, baseline.imagePath),
-      path.join(STORAGE_ROOT, currentScreenshotPath),
-      DIFFS_DIR,
-      0.1,
-      includeAntiAliasing,
-      ignoreRects,
-      ignorePageShift
-    );
+    const diffResult = textRegionAwareDiffing
+      ? await generateTextAwareDiffFromPaths(
+          path.join(STORAGE_ROOT, baseline.imagePath),
+          path.join(STORAGE_ROOT, currentScreenshotPath),
+          DIFFS_DIR,
+          {
+            textRegionThreshold: (settings.textRegionThreshold ?? 30) / 100,
+            nonTextThreshold: 0.1,
+            textRegionPadding: settings.textRegionPadding ?? 4,
+            includeAntiAliasing,
+            textDetectionGranularity: (settings.textDetectionGranularity as 'word' | 'line' | 'block') ?? 'word',
+            diffEngine,
+          },
+          ignoreRects,
+        )
+      : await generateDiff(
+          path.join(STORAGE_ROOT, baseline.imagePath),
+          path.join(STORAGE_ROOT, currentScreenshotPath),
+          DIFFS_DIR,
+          0.1,
+          includeAntiAliasing,
+          ignoreRects,
+          ignorePageShift,
+          diffEngine
+        );
 
     const pct = diffResult.percentageDifference;
     const { classification, status } = classifyDiff(pct);

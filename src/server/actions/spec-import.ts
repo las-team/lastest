@@ -16,6 +16,7 @@ import { getRepoTree, getFileContent, compareBranches } from '@/lib/github/conte
 import { extractTextFromFile } from '@/lib/file-parser';
 import { createJob, updateJobProgress, completeJob, failJob } from './jobs';
 import { getCurrentBranchForRepo } from '@/lib/git-utils';
+import { requireRepoAccess } from '@/lib/auth';
 
 // ============================================
 // Types
@@ -113,6 +114,7 @@ export async function discoverSpecFiles(
   repositoryId: string,
   branch: string
 ): Promise<{ success: boolean; files?: DiscoveredSpecFile[]; error?: string }> {
+  await requireRepoAccess(repositoryId);
   try {
     const account = await queries.getGithubAccount();
     if (!account) {
@@ -158,6 +160,7 @@ export async function extractUserStoriesFromFiles(
   branch: string,
   filePaths: string[]
 ): Promise<SpecImportResponse> {
+  await requireRepoAccess(repositoryId);
   try {
     if (filePaths.length === 0) {
       return { success: false, error: 'No files selected' };
@@ -199,6 +202,7 @@ export async function extractUserStoriesFromUpload(
   repositoryId: string,
   branch: string
 ): Promise<SpecImportResponse> {
+  await requireRepoAccess(repositoryId);
   try {
     const files = formData.getAll('files') as File[];
     if (files.length === 0) {
@@ -278,6 +282,7 @@ export async function getBranchChanges(
   repositoryId: string,
   branch: string
 ): Promise<{ success: boolean; changedFiles?: string[]; error?: string }> {
+  await requireRepoAccess(repositoryId);
   try {
     const account = await queries.getGithubAccount();
     if (!account) {
@@ -382,6 +387,7 @@ export async function generateTestsFromStories(
     targetUrl?: string;
   }
 ): Promise<GenerateTestsResponse> {
+  await requireRepoAccess(repositoryId);
   // Count total tests to generate
   const totalTests = stories.reduce((sum, story) => {
     // Count unique tests (grouped ACs = 1 test)
@@ -518,6 +524,7 @@ export async function createPlaceholdersFromStories(
     targetUrl?: string;
   }
 ): Promise<GenerateTestsResponse> {
+  await requireRepoAccess(repositoryId);
   const totalTests = stories.reduce((sum, story) => {
     const grouped = new Set<string>();
     let count = 0;
@@ -626,6 +633,7 @@ export async function validateTestWithMCP(
   testId: string,
   baseUrl: string
 ): Promise<ValidateTestResponse> {
+  await requireRepoAccess(repositoryId);
   try {
     // Check if baseUrl is localhost
     const url = new URL(baseUrl);
@@ -665,6 +673,7 @@ Return ONLY the code (fixed or original), no explanations.`;
     const response = await generateWithAI(config, prompt, MCP_SYSTEM_PROMPT, {
       actionType: 'fix_test',
       repositoryId,
+      useMCP: true,
     });
 
     const fixedCode = extractCodeFromResponse(response);
