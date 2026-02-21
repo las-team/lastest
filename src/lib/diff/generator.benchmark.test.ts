@@ -1,8 +1,10 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import fs from 'fs';
 import path from 'path';
+import { PNG } from 'pngjs';
 import { generateDiff } from './generator';
 import type { DiffResult } from './generator';
+import type { DiffEngineType } from '../db/schema';
 
 // ---------------------------------------------------------------------------
 // Paths
@@ -331,6 +333,641 @@ describe.skipIf(!allPairsAvailable)('Diff Engine Benchmark', () => {
           expect(result.percentageDifference).toBeLessThanOrEqual(100);
           expect(result.diffImagePath).toBeTruthy();
         }, 60_000); // 60s timeout per test
+      }
+    });
+  }
+});
+
+// ===========================================================================
+// Part 2 — Multi-Engine Accuracy Benchmark (synthetic, always runs)
+// ===========================================================================
+
+const ENGINE_TEMP_DIR = path.resolve('__temp_engine_benchmark__');
+
+// ---------------------------------------------------------------------------
+// Synthetic image generators
+// ---------------------------------------------------------------------------
+
+/** Create a solid-color PNG */
+function solidPNG(w: number, h: number, r: number, g: number, b: number, a = 255): PNG {
+  const png = new PNG({ width: w, height: h });
+  for (let i = 0; i < w * h; i++) {
+    const idx = i * 4;
+    png.data[idx] = r;
+    png.data[idx + 1] = g;
+    png.data[idx + 2] = b;
+    png.data[idx + 3] = a;
+  }
+  return png;
+}
+
+/** Create a PNG with a colored rectangle on a background */
+function rectPNG(
+  w: number, h: number,
+  rect: { x: number; y: number; rw: number; rh: number },
+  fg: [number, number, number, number] = [0, 0, 0, 255],
+  bg: [number, number, number, number] = [255, 255, 255, 255]
+): PNG {
+  const png = new PNG({ width: w, height: h });
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const idx = (y * w + x) * 4;
+      const inRect = x >= rect.x && x < rect.x + rect.rw && y >= rect.y && y < rect.y + rect.rh;
+      const c = inRect ? fg : bg;
+      png.data[idx] = c[0]; png.data[idx + 1] = c[1]; png.data[idx + 2] = c[2]; png.data[idx + 3] = c[3];
+    }
+  }
+  return png;
+}
+
+/** Create a PNG with horizontal gradient */
+function gradientPNG(w: number, h: number, fromR: number, fromG: number, fromB: number, toR: number, toG: number, toB: number): PNG {
+  const png = new PNG({ width: w, height: h });
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const t = x / (w - 1);
+      const idx = (y * w + x) * 4;
+      png.data[idx] = Math.round(fromR + t * (toR - fromR));
+      png.data[idx + 1] = Math.round(fromG + t * (toG - fromG));
+      png.data[idx + 2] = Math.round(fromB + t * (toB - fromB));
+      png.data[idx + 3] = 255;
+    }
+  }
+  return png;
+}
+
+/** Create a PNG with alternating pixel checkerboard (simulates anti-aliasing) */
+function checkerboardPNG(w: number, h: number, c1: [number, number, number], c2: [number, number, number]): PNG {
+  const png = new PNG({ width: w, height: h });
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const idx = (y * w + x) * 4;
+      const c = (x + y) % 2 === 0 ? c1 : c2;
+      png.data[idx] = c[0]; png.data[idx + 1] = c[1]; png.data[idx + 2] = c[2]; png.data[idx + 3] = 255;
+    }
+  }
+  return png;
+}
+
+/** Create a PNG with random noise */
+function noisePNG(w: number, h: number, seed: number): PNG {
+  const png = new PNG({ width: w, height: h });
+  let s = seed;
+  const rand = () => { s = (s * 1664525 + 1013904223) & 0xFFFFFFFF; return (s >>> 0) / 0xFFFFFFFF; };
+  for (let i = 0; i < w * h; i++) {
+    const idx = i * 4;
+    png.data[idx] = Math.floor(rand() * 256);
+    png.data[idx + 1] = Math.floor(rand() * 256);
+    png.data[idx + 2] = Math.floor(rand() * 256);
+    png.data[idx + 3] = 255;
+  }
+  return png;
+}
+
+/** Add scattered single-pixel noise to an existing PNG (simulates sub-pixel rendering) */
+function addSubPixelNoise(src: PNG, count: number, seed: number): PNG {
+  const png = new PNG({ width: src.width, height: src.height });
+  src.data.copy(png.data);
+  let s = seed;
+  const rand = () => { s = (s * 1664525 + 1013904223) & 0xFFFFFFFF; return (s >>> 0) / 0xFFFFFFFF; };
+  for (let i = 0; i < count; i++) {
+    const x = Math.floor(rand() * src.width);
+    const y = Math.floor(rand() * src.height);
+    const idx = (y * src.width + x) * 4;
+    for (let c = 0; c < 3; c++) {
+      const delta = Math.floor(rand() * 5) - 2; // -2 to +2
+      png.data[idx + c] = Math.max(0, Math.min(255, png.data[idx + c] + delta));
+    }
+  }
+  return png;
+}
+
+/** Create multi-element page-like image */
+function pagePNG(w: number, h: number, elements: Array<{ y: number; rh: number; color: [number, number, number, number] }>): PNG {
+  const png = solidPNG(w, h, 245, 245, 245); // light gray bg
+  for (const el of elements) {
+    const margin = 20;
+    for (let y = el.y; y < Math.min(el.y + el.rh, h); y++) {
+      for (let x = margin; x < w - margin; x++) {
+        const idx = (y * w + x) * 4;
+        png.data[idx] = el.color[0]; png.data[idx + 1] = el.color[1];
+        png.data[idx + 2] = el.color[2]; png.data[idx + 3] = el.color[3];
+      }
+    }
+  }
+  return png;
+}
+
+// ---------------------------------------------------------------------------
+// Test scenario definitions
+// ---------------------------------------------------------------------------
+
+interface Scenario {
+  name: string;
+  description: string;
+  expectedDiff: 'none' | 'subtle' | 'moderate' | 'major';
+  humanNoticeable: boolean;
+  baseline: () => PNG;
+  current: () => PNG;
+}
+
+const W = 200;
+const H = 200;
+
+const SCENARIOS: Scenario[] = [
+  // ── Category 1: Identical / near-identical ──
+  {
+    name: 'identical-solid',
+    description: 'Two identical solid white images',
+    expectedDiff: 'none',
+    humanNoticeable: false,
+    baseline: () => solidPNG(W, H, 255, 255, 255),
+    current: () => solidPNG(W, H, 255, 255, 255),
+  },
+  {
+    name: 'identical-complex',
+    description: 'Two identical gradient images',
+    expectedDiff: 'none',
+    humanNoticeable: false,
+    baseline: () => gradientPNG(W, H, 0, 0, 128, 255, 128, 0),
+    current: () => gradientPNG(W, H, 0, 0, 128, 255, 128, 0),
+  },
+  {
+    name: 'identical-with-rect',
+    description: 'Two identical images with black rectangle',
+    expectedDiff: 'none',
+    humanNoticeable: false,
+    baseline: () => rectPNG(W, H, { x: 50, y: 50, rw: 100, rh: 80 }),
+    current: () => rectPNG(W, H, { x: 50, y: 50, rw: 100, rh: 80 }),
+  },
+
+  // ── Category 2: Sub-pixel / anti-aliasing noise ──
+  {
+    name: 'subpixel-10',
+    description: '10 pixels with ±2 channel noise (0.025% area)',
+    expectedDiff: 'subtle',
+    humanNoticeable: false,
+    baseline: () => solidPNG(W, H, 200, 200, 200),
+    current: () => addSubPixelNoise(solidPNG(W, H, 200, 200, 200), 10, 42),
+  },
+  {
+    name: 'subpixel-100',
+    description: '100 pixels with ±2 channel noise (0.25% area)',
+    expectedDiff: 'subtle',
+    humanNoticeable: false,
+    baseline: () => solidPNG(W, H, 200, 200, 200),
+    current: () => addSubPixelNoise(solidPNG(W, H, 200, 200, 200), 100, 42),
+  },
+  {
+    name: 'subpixel-500',
+    description: '500 pixels with ±2 channel noise (1.25% area)',
+    expectedDiff: 'subtle',
+    humanNoticeable: false,
+    baseline: () => gradientPNG(W, H, 50, 50, 100, 200, 150, 50),
+    current: () => addSubPixelNoise(gradientPNG(W, H, 50, 50, 100, 200, 150, 50), 500, 42),
+  },
+  {
+    name: 'checkerboard-vs-shifted',
+    description: 'Checkerboard AA pattern shifted 1px (worst case for pixelmatch)',
+    expectedDiff: 'subtle',
+    humanNoticeable: false,
+    baseline: () => checkerboardPNG(W, H, [200, 200, 200], [220, 220, 220]),
+    current: () => checkerboardPNG(W, H, [220, 220, 220], [200, 200, 200]),
+  },
+
+  // ── Category 3: Color shifts (imperceptible to noticeable) ──
+  {
+    name: 'color-shift-1',
+    description: 'Global +1 on all channels (imperceptible)',
+    expectedDiff: 'subtle',
+    humanNoticeable: false,
+    baseline: () => solidPNG(W, H, 128, 128, 128),
+    current: () => solidPNG(W, H, 129, 129, 129),
+  },
+  {
+    name: 'color-shift-5',
+    description: 'Global +5 on all channels (barely perceptible)',
+    expectedDiff: 'subtle',
+    humanNoticeable: false,
+    baseline: () => solidPNG(W, H, 128, 128, 128),
+    current: () => solidPNG(W, H, 133, 133, 133),
+  },
+  {
+    name: 'color-shift-20',
+    description: 'Global +20 on all channels (clearly visible)',
+    expectedDiff: 'moderate',
+    humanNoticeable: true,
+    baseline: () => solidPNG(W, H, 128, 128, 128),
+    current: () => solidPNG(W, H, 148, 148, 148),
+  },
+  {
+    name: 'hue-shift-subtle',
+    description: 'Slight hue shift: blue→slightly purple (R+3)',
+    expectedDiff: 'subtle',
+    humanNoticeable: false,
+    baseline: () => solidPNG(W, H, 50, 50, 200),
+    current: () => solidPNG(W, H, 53, 50, 200),
+  },
+  {
+    name: 'hue-shift-visible',
+    description: 'Visible hue shift: blue→purple (R+40)',
+    expectedDiff: 'moderate',
+    humanNoticeable: true,
+    baseline: () => solidPNG(W, H, 50, 50, 200),
+    current: () => solidPNG(W, H, 90, 50, 200),
+  },
+
+  // ── Category 4: Geometric changes ──
+  {
+    name: 'rect-moved-1px',
+    description: 'Rectangle moved 1px right (sub-pixel repositioning)',
+    expectedDiff: 'subtle',
+    humanNoticeable: false,
+    baseline: () => rectPNG(W, H, { x: 50, y: 50, rw: 80, rh: 60 }),
+    current: () => rectPNG(W, H, { x: 51, y: 50, rw: 80, rh: 60 }),
+  },
+  {
+    name: 'rect-moved-5px',
+    description: 'Rectangle moved 5px right (visible shift)',
+    expectedDiff: 'moderate',
+    humanNoticeable: true,
+    baseline: () => rectPNG(W, H, { x: 50, y: 50, rw: 80, rh: 60 }),
+    current: () => rectPNG(W, H, { x: 55, y: 50, rw: 80, rh: 60 }),
+  },
+  {
+    name: 'rect-resized',
+    description: 'Rectangle grew 20px wider and 10px taller',
+    expectedDiff: 'moderate',
+    humanNoticeable: true,
+    baseline: () => rectPNG(W, H, { x: 50, y: 50, rw: 80, rh: 60 }),
+    current: () => rectPNG(W, H, { x: 50, y: 50, rw: 100, rh: 70 }),
+  },
+  {
+    name: 'rect-color-change',
+    description: 'Rectangle changed from black to dark blue',
+    expectedDiff: 'moderate',
+    humanNoticeable: true,
+    baseline: () => rectPNG(W, H, { x: 50, y: 50, rw: 80, rh: 60 }, [0, 0, 0, 255]),
+    current: () => rectPNG(W, H, { x: 50, y: 50, rw: 80, rh: 60 }, [0, 0, 80, 255]),
+  },
+  {
+    name: 'rect-added',
+    description: 'New element appeared (added red rectangle)',
+    expectedDiff: 'major',
+    humanNoticeable: true,
+    baseline: () => solidPNG(W, H, 255, 255, 255),
+    current: () => rectPNG(W, H, { x: 30, y: 30, rw: 120, rh: 80 }, [220, 50, 50, 255]),
+  },
+  {
+    name: 'rect-removed',
+    description: 'Element disappeared (removed black rectangle)',
+    expectedDiff: 'major',
+    humanNoticeable: true,
+    baseline: () => rectPNG(W, H, { x: 30, y: 30, rw: 120, rh: 80 }),
+    current: () => solidPNG(W, H, 255, 255, 255),
+  },
+
+  // ── Category 5: Page layout shifts ──
+  {
+    name: 'page-shift-20px',
+    description: 'Page content shifted down 20px (banner inserted)',
+    expectedDiff: 'moderate',
+    humanNoticeable: true,
+    baseline: () => pagePNG(W, 300, [
+      { y: 10, rh: 40, color: [70, 130, 180, 255] },
+      { y: 60, rh: 80, color: [100, 100, 100, 255] },
+      { y: 150, rh: 60, color: [180, 70, 70, 255] },
+      { y: 220, rh: 30, color: [70, 70, 70, 255] },
+    ]),
+    current: () => pagePNG(W, 320, [
+      { y: 10, rh: 40, color: [70, 130, 180, 255] },
+      { y: 60, rh: 20, color: [255, 200, 50, 255] },
+      { y: 80, rh: 80, color: [100, 100, 100, 255] },
+      { y: 170, rh: 60, color: [180, 70, 70, 255] },
+      { y: 240, rh: 30, color: [70, 70, 70, 255] },
+    ]),
+  },
+  {
+    name: 'page-shift-50px',
+    description: 'Page content shifted down 50px (large element inserted)',
+    expectedDiff: 'major',
+    humanNoticeable: true,
+    baseline: () => pagePNG(W, 300, [
+      { y: 10, rh: 40, color: [70, 130, 180, 255] },
+      { y: 60, rh: 80, color: [100, 100, 100, 255] },
+      { y: 150, rh: 60, color: [180, 70, 70, 255] },
+    ]),
+    current: () => pagePNG(W, 350, [
+      { y: 10, rh: 40, color: [70, 130, 180, 255] },
+      { y: 60, rh: 50, color: [50, 180, 50, 255] },
+      { y: 110, rh: 80, color: [100, 100, 100, 255] },
+      { y: 200, rh: 60, color: [180, 70, 70, 255] },
+    ]),
+  },
+
+  // ── Category 6: Random noise (stress tests) ──
+  {
+    name: 'noise-identical',
+    description: 'Two identical noisy images (same seed)',
+    expectedDiff: 'none',
+    humanNoticeable: false,
+    baseline: () => noisePNG(W, H, 12345),
+    current: () => noisePNG(W, H, 12345),
+  },
+  {
+    name: 'noise-different',
+    description: 'Two completely different noisy images',
+    expectedDiff: 'major',
+    humanNoticeable: true,
+    baseline: () => noisePNG(W, H, 12345),
+    current: () => noisePNG(W, H, 67890),
+  },
+
+  // ── Category 7: Gradient changes ──
+  {
+    name: 'gradient-identical',
+    description: 'Two identical gradients',
+    expectedDiff: 'none',
+    humanNoticeable: false,
+    baseline: () => gradientPNG(W, H, 0, 0, 0, 255, 255, 255),
+    current: () => gradientPNG(W, H, 0, 0, 0, 255, 255, 255),
+  },
+  {
+    name: 'gradient-slight-shift',
+    description: 'Gradient endpoints shifted by 5 values',
+    expectedDiff: 'subtle',
+    humanNoticeable: false,
+    baseline: () => gradientPNG(W, H, 0, 0, 0, 255, 255, 255),
+    current: () => gradientPNG(W, H, 0, 0, 0, 250, 250, 250),
+  },
+  {
+    name: 'gradient-direction-change',
+    description: 'Gradient direction reversed',
+    expectedDiff: 'major',
+    humanNoticeable: true,
+    baseline: () => gradientPNG(W, H, 0, 0, 0, 255, 255, 255),
+    current: () => gradientPNG(W, H, 255, 255, 255, 0, 0, 0),
+  },
+
+  // ── Category 8: Mixed realistic scenarios ──
+  {
+    name: 'button-hover-state',
+    description: 'Button color change simulating hover (blue→light blue)',
+    expectedDiff: 'moderate',
+    humanNoticeable: true,
+    baseline: () => rectPNG(W, H, { x: 50, y: 80, rw: 100, rh: 40 }, [59, 130, 246, 255], [245, 245, 245, 255]),
+    current: () => rectPNG(W, H, { x: 50, y: 80, rw: 100, rh: 40 }, [96, 165, 250, 255], [245, 245, 245, 255]),
+  },
+  {
+    name: 'text-reflow',
+    description: 'Simulated text reflow: multiple thin lines shifted',
+    expectedDiff: 'moderate',
+    humanNoticeable: true,
+    baseline: () => pagePNG(W, H, [
+      { y: 20, rh: 3, color: [30, 30, 30, 255] },
+      { y: 26, rh: 3, color: [30, 30, 30, 255] },
+      { y: 32, rh: 3, color: [30, 30, 30, 255] },
+      { y: 38, rh: 3, color: [30, 30, 30, 255] },
+      { y: 44, rh: 3, color: [30, 30, 30, 255] },
+    ]),
+    current: () => pagePNG(W, H, [
+      { y: 20, rh: 3, color: [30, 30, 30, 255] },
+      { y: 26, rh: 3, color: [30, 30, 30, 255] },
+      { y: 33, rh: 3, color: [30, 30, 30, 255] },
+      { y: 39, rh: 3, color: [30, 30, 30, 255] },
+      { y: 45, rh: 3, color: [30, 30, 30, 255] },
+    ]),
+  },
+];
+
+// ---------------------------------------------------------------------------
+// Engines to test
+// ---------------------------------------------------------------------------
+const ENGINES: DiffEngineType[] = ['pixelmatch', 'ssim', 'butteraugli'];
+
+// ---------------------------------------------------------------------------
+// Report types
+// ---------------------------------------------------------------------------
+interface EngineTestResult {
+  engine: DiffEngineType;
+  scenario: string;
+  expectedDiff: string;
+  humanNoticeable: boolean;
+  pixelDiff: number;
+  percentDiff: number;
+  durationMs: number;
+  detectedDiff: boolean;
+  error?: string;
+}
+
+const ENGINE_RESULTS: EngineTestResult[] = [];
+
+// ---------------------------------------------------------------------------
+// Test suite
+// ---------------------------------------------------------------------------
+describe('Multi-Engine Accuracy Benchmark', () => {
+  beforeAll(() => {
+    if (!fs.existsSync(ENGINE_TEMP_DIR)) {
+      fs.mkdirSync(ENGINE_TEMP_DIR, { recursive: true });
+    }
+  });
+
+  afterAll(() => {
+    // ═══════════════════════════════════════════════════════════════════════
+    // REPORT GENERATION
+    // ═══════════════════════════════════════════════════════════════════════
+    console.log('\n\n' + '='.repeat(130));
+    console.log('  DIFF ENGINE ACCURACY BENCHMARK REPORT');
+    console.log('='.repeat(130));
+
+    // ── Section 1: Per-scenario engine comparison ──
+    console.log('\n  PER-SCENARIO RESULTS');
+    console.log('-'.repeat(130));
+
+    const scenarioNames = [...new Set(ENGINE_RESULTS.map(r => r.scenario))];
+    for (const name of scenarioNames) {
+      const rows = ENGINE_RESULTS.filter(r => r.scenario === name);
+      const scenario = SCENARIOS.find(s => s.name === name)!;
+
+      console.log(`\n  ${name} — ${scenario.description}`);
+      console.log(`  Expected: ${scenario.expectedDiff} | Human noticeable: ${scenario.humanNoticeable ? 'YES' : 'no'}`);
+      console.table(
+        rows.map(r => ({
+          Engine: r.engine,
+          'Diff Pixels': r.error ? 'ERROR' : r.pixelDiff.toLocaleString(),
+          '% Diff': r.error ? r.error : `${r.percentDiff.toFixed(3)}%`,
+          Detected: r.detectedDiff ? 'YES' : 'no',
+          'Time (ms)': r.durationMs,
+        }))
+      );
+    }
+
+    // ── Section 2: Accuracy metrics per engine ──
+    console.log('\n' + '='.repeat(130));
+    console.log('  ACCURACY METRICS');
+    console.log('='.repeat(130));
+
+    for (const engine of ENGINES) {
+      const engineRows = ENGINE_RESULTS.filter(r => r.engine === engine && !r.error);
+
+      const tp = engineRows.filter(r => r.humanNoticeable && r.detectedDiff).length;
+      const fn = engineRows.filter(r => r.humanNoticeable && !r.detectedDiff).length;
+      const tn = engineRows.filter(r => !r.humanNoticeable && !r.detectedDiff).length;
+      const fp = engineRows.filter(r => !r.humanNoticeable && r.detectedDiff).length;
+
+      const sensitivity = tp + fn > 0 ? ((tp / (tp + fn)) * 100).toFixed(1) : 'N/A';
+      const specificity = tn + fp > 0 ? ((tn / (tn + fp)) * 100).toFixed(1) : 'N/A';
+      const precision = tp + fp > 0 ? ((tp / (tp + fp)) * 100).toFixed(1) : 'N/A';
+      const f1 = tp + fp > 0 && tp + fn > 0
+        ? ((2 * tp / (2 * tp + fp + fn)) * 100).toFixed(1)
+        : 'N/A';
+
+      const avgTime = engineRows.length > 0
+        ? Math.round(engineRows.reduce((s, r) => s + r.durationMs, 0) / engineRows.length)
+        : 0;
+
+      console.log(`\n  ${engine.toUpperCase()}`);
+      console.table({
+        'True Positives (detected real diffs)': tp,
+        'False Negatives (missed real diffs)': fn,
+        'True Negatives (ignored noise)': tn,
+        'False Positives (flagged noise)': fp,
+        'Sensitivity (recall)': `${sensitivity}%`,
+        'Specificity': `${specificity}%`,
+        'Precision': `${precision}%`,
+        'F1 Score': `${f1}%`,
+        'Avg Duration': `${avgTime}ms`,
+      });
+    }
+
+    // ── Section 3: Engine comparison matrix ──
+    console.log('\n' + '='.repeat(130));
+    console.log('  ENGINE COMPARISON MATRIX');
+    console.log('='.repeat(130));
+
+    const engineMatrix: Array<{
+      Scenario: string;
+      Expected: string;
+      'Human?': string;
+      'PM %': string;
+      'SSIM %': string;
+      'Btgl %': string;
+      'PM ok': string;
+      'SSIM ok': string;
+      'Btgl ok': string;
+    }> = [];
+
+    for (const scenario of SCENARIOS) {
+      const pm = ENGINE_RESULTS.find(r => r.scenario === scenario.name && r.engine === 'pixelmatch');
+      const ss = ENGINE_RESULTS.find(r => r.scenario === scenario.name && r.engine === 'ssim');
+      const bt = ENGINE_RESULTS.find(r => r.scenario === scenario.name && r.engine === 'butteraugli');
+
+      const judge = (r: EngineTestResult | undefined) => {
+        if (!r || r.error) return 'ERR';
+        if (scenario.humanNoticeable) return r.detectedDiff ? 'OK' : 'MISS';
+        return r.detectedDiff ? 'FP' : 'OK';
+      };
+
+      engineMatrix.push({
+        Scenario: scenario.name,
+        Expected: scenario.expectedDiff,
+        'Human?': scenario.humanNoticeable ? 'yes' : 'no',
+        'PM %': pm?.error ? 'ERR' : `${pm?.percentDiff.toFixed(2)}`,
+        'SSIM %': ss?.error ? 'ERR' : `${ss?.percentDiff.toFixed(2)}`,
+        'Btgl %': bt?.error ? 'ERR' : `${bt?.percentDiff.toFixed(2)}`,
+        'PM ok': judge(pm),
+        'SSIM ok': judge(ss),
+        'Btgl ok': judge(bt),
+      });
+    }
+
+    console.table(engineMatrix);
+
+    // ── Section 4: Performance comparison ──
+    console.log('\n' + '='.repeat(130));
+    console.log('  PERFORMANCE SUMMARY');
+    console.log('='.repeat(130));
+
+    for (const engine of ENGINES) {
+      const rows = ENGINE_RESULTS.filter(r => r.engine === engine && !r.error);
+      if (rows.length === 0) { console.log(`  ${engine}: no results`); continue; }
+      const times = rows.map(r => r.durationMs);
+      const avg = Math.round(times.reduce((a, b) => a + b, 0) / times.length);
+      const min = Math.min(...times);
+      const max = Math.max(...times);
+      const sorted = [...times].sort((a, b) => a - b);
+      const p50 = sorted[Math.floor(sorted.length / 2)];
+      console.log(`  ${engine}: avg=${avg}ms, p50=${p50}ms, min=${min}ms, max=${max}ms`);
+    }
+
+    console.log('\n' + '='.repeat(130) + '\n');
+
+    // Clean up
+    try { fs.rmSync(ENGINE_TEMP_DIR, { recursive: true, force: true }); } catch { /* ignore */ }
+  });
+
+  // ── Generate tests: SCENARIOS × ENGINES ──
+  for (const scenario of SCENARIOS) {
+    describe(scenario.name, () => {
+      for (const engine of ENGINES) {
+        it(`${engine}`, async () => {
+          const baselinePng = scenario.baseline();
+          const currentPng = scenario.current();
+
+          const outDir = path.join(ENGINE_TEMP_DIR, `${scenario.name}-${engine}`);
+          const baselinePath = path.join(outDir, 'baseline.png');
+          const currentPath = path.join(outDir, 'current.png');
+
+          fs.mkdirSync(outDir, { recursive: true });
+          fs.writeFileSync(baselinePath, PNG.sync.write(baselinePng));
+          fs.writeFileSync(currentPath, PNG.sync.write(currentPng));
+
+          const start = performance.now();
+          let result: DiffResult;
+          try {
+            result = await generateDiff(
+              baselinePath,
+              currentPath,
+              outDir,
+              0.1,                // threshold
+              false,              // includeAntiAliasing
+              undefined,          // ignoreRegions
+              false,              // ignorePageShift
+              engine,             // diffEngine
+            );
+          } catch (err) {
+            const durationMs = Math.round(performance.now() - start);
+            ENGINE_RESULTS.push({
+              engine,
+              scenario: scenario.name,
+              expectedDiff: scenario.expectedDiff,
+              humanNoticeable: scenario.humanNoticeable,
+              pixelDiff: 0,
+              percentDiff: 0,
+              durationMs,
+              detectedDiff: false,
+              error: (err as Error).message.slice(0, 80),
+            });
+            return;
+          }
+          const durationMs = Math.round(performance.now() - start);
+
+          ENGINE_RESULTS.push({
+            engine,
+            scenario: scenario.name,
+            expectedDiff: scenario.expectedDiff,
+            humanNoticeable: scenario.humanNoticeable,
+            pixelDiff: result.pixelDifference,
+            percentDiff: result.percentageDifference,
+            durationMs,
+            detectedDiff: result.pixelDifference > 0,
+          });
+
+          // Sanity: valid output
+          expect(result.pixelDifference).toBeGreaterThanOrEqual(0);
+          expect(result.percentageDifference).toBeGreaterThanOrEqual(0);
+          expect(result.percentageDifference).toBeLessThanOrEqual(100);
+        }, 30_000);
       }
     });
   }
