@@ -32,6 +32,7 @@ import { getRunners } from '@/server/actions/runners';
 import { GoogleSheetsSettingsCard } from '@/components/settings/google-sheets-settings-card';
 import { TestingTemplateSelector } from '@/components/settings/testing-template-selector';
 import { AutoApproveToggle } from '@/components/settings/auto-approve-toggle';
+import { EarlyAdopterToggle } from '@/components/settings/early-adopter-toggle';
 import { ConnectGithubButton, ReconnectGithubLink } from '@/components/settings/connect-github-button';
 
 export default async function SettingsPage({
@@ -248,6 +249,19 @@ export default async function SettingsPage({
                   defaultBranch={selectedRepo.defaultBranch || 'main'}
                 />
               )}
+            </CardContent>
+          </Card>
+
+          {/* Features */}
+          <Card id="features">
+            <CardHeader>
+              <CardTitle>Features</CardTitle>
+              <CardDescription>
+                Toggle experimental features
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <EarlyAdopterToggle enabled={session?.team?.earlyAdopterMode ?? false} />
             </CardContent>
           </Card>
 

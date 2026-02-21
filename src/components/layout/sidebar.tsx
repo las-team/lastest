@@ -39,6 +39,8 @@ const dashboardNav = [
   { name: 'Dashboard', href: '/', icon: LayoutDashboard },
 ];
 
+const EARLY_ADOPTER_ITEMS = new Set(['Compose', 'Suites', 'Compare']);
+
 const definitionNav = [
   { name: 'Areas', href: '/areas', icon: FolderTree },
   { name: 'Tests', href: '/tests', icon: FileCode },
@@ -59,6 +61,14 @@ const settingsNav = [
 
 export function Sidebar({ repos, selectedRepo, currentUser, team }: SidebarProps) {
   const pathname = usePathname();
+  const earlyAdopter = team?.earlyAdopterMode ?? false;
+
+  const filteredDefinitionNav = earlyAdopter
+    ? definitionNav
+    : definitionNav.filter((item) => !EARLY_ADOPTER_ITEMS.has(item.name));
+  const filteredExecutionNav = earlyAdopter
+    ? executionNav
+    : executionNav.filter((item) => !EARLY_ADOPTER_ITEMS.has(item.name));
 
   return (
     <aside className="w-64 border-r bg-muted/30 flex flex-col">
@@ -115,7 +125,7 @@ export function Sidebar({ repos, selectedRepo, currentUser, team }: SidebarProps
         <div>
           <p className="px-3 pb-1 text-xs font-medium text-muted-foreground uppercase tracking-wider">Definition</p>
           <ul className="space-y-1">
-            {definitionNav.map((item) => {
+            {filteredDefinitionNav.map((item) => {
               const isActive = pathname === item.href || pathname.startsWith(item.href);
               return (
                 <li key={item.name}>
@@ -140,7 +150,7 @@ export function Sidebar({ repos, selectedRepo, currentUser, team }: SidebarProps
         <div>
           <p className="px-3 pb-1 text-xs font-medium text-muted-foreground uppercase tracking-wider">Execution</p>
           <ul className="space-y-1">
-            {executionNav.map((item) => {
+            {filteredExecutionNav.map((item) => {
               const isActive = pathname === item.href || pathname.startsWith(item.href);
               return (
                 <li key={item.name}>
