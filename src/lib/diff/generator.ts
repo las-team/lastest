@@ -722,6 +722,98 @@ export async function generateDiff(
 }
 
 /**
+ * File-path wrapper around generateTextAwareDiff (text-regions.ts).
+ * Reads PNGs, normalises dimensions, applies ignore regions, runs two-pass
+ * OCR diff, writes the combined diff image, and returns a DiffResult
+ * compatible with the standard pipeline.
+ */
+export async function generateTextAwareDiffFromPaths(
+  baselinePath: string,
+  currentPath: string,
+  outputDir: string,
+  options: import('./text-regions').TextAwareDiffOptions,
+  ignoreRegions?: Rectangle[],
+): Promise<DiffResult> {
+  const { generateTextAwareDiff } = await import('./text-regions');
+
+  let baseline: PNG = PNG.sync.read(fs.readFileSync(baselinePath));
+  let current: PNG = PNG.sync.read(fs.readFileSync(currentPath));
+
+  if (!fs.existsSync(outputDir)) {
+    fs.mkdirSync(outputDir, { recursive: true });
+  }
+
+  // Normalise widths (crop to narrower)
+  const minWidth = Math.min(baseline.width, current.width);
+  if (baseline.width !== current.width) {
+    baseline = cropToWidth(baseline, minWidth);
+    current = cropToWidth(current, minWidth);
+  }
+
+  // Normalise heights (pad to taller)
+  if (baseline.height !== current.height) {
+    const maxHeight = Math.max(baseline.height, current.height);
+    if (baseline.height < maxHeight) baseline = padToHeight(baseline, maxHeight);
+    if (current.height < maxHeight) current = padToHeight(current, maxHeight);
+  }
+
+  const { width, height } = baseline;
+
+  // Blank ignore regions before diff
+  if (ignoreRegions && ignoreRegions.length > 0) {
+    for (const region of ignoreRegions) {
+      blankRegion(baseline.data, width, height, region);
+      blankRegion(current.data, width, height, region);
+    }
+  }
+
+  // Two-pass OCR diff
+  const result = await generateTextAwareDiff(
+    baseline.data as Buffer,
+    current.data as Buffer,
+    width,
+    height,
+    options,
+  );
+
+  // Write combined diff image
+  const diffPng = new PNG({ width, height });
+  result.diffData.copy(diffPng.data as Buffer);
+  const diffFileName = `diff-${Date.now()}.png`;
+  const diffImagePath = path.join(outputDir, diffFileName);
+  fs.writeFileSync(diffImagePath, PNG.sync.write(diffPng));
+
+  // Compute content-area-based percentage (same formula as generateDiff)
+  const baselineBg = detectBackgroundColor(baseline.data, width, height);
+  const currentBg = detectBackgroundColor(current.data, width, height);
+  const baselineContent = calculateContentArea(baseline.data, width, height, baselineBg);
+  const currentContent = calculateContentArea(current.data, width, height, currentBg);
+  const contentArea = Math.max(baselineContent.contentPixels, currentContent.contentPixels, 1);
+  const contentPercentage = (result.diffPixelCount / contentArea) * 100;
+  const percentageDifference = Math.round(Math.min(contentPercentage, 100) * 100) / 100;
+
+  // Metadata
+  const changedRegions = findChangedRegions(result.diffData, width, height);
+  const changeCategories = categorizeChanges(changedRegions, percentageDifference);
+  const affectedComponents = detectAffectedComponents(changedRegions);
+
+  return {
+    pixelDifference: result.diffPixelCount,
+    percentageDifference,
+    diffImagePath,
+    metadata: {
+      changedRegions,
+      affectedComponents,
+      changeCategories,
+      textRegions: result.textRegions,
+      textRegionDiffPixels: result.textRegionDiffPixels,
+      nonTextRegionDiffPixels: result.nonTextRegionDiffPixels,
+      ocrDurationMs: result.ocrDurationMs,
+    },
+  };
+}
+
+/**
  * Shift-aware diff: aligns images using LCS row matching, then runs pixelmatch
  * only on matched (non-shifted) rows. Produces a diff image that color-codes
  * insertions (green), deletions (red), and actual pixel changes (standard diff).

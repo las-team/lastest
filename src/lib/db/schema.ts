@@ -62,6 +62,10 @@ export interface DiffMetadata {
   changeCategories?: ('layout' | 'color' | 'text' | 'image' | 'style')[];
   pageShift?: PageShiftInfo;
   isNewTest?: boolean;
+  textRegions?: { x: number; y: number; width: number; height: number }[];
+  textRegionDiffPixels?: number;
+  nonTextRegionDiffPixels?: number;
+  ocrDurationMs?: number;
 }
 
 /** Capabilities that a test requires from Playwright settings (detected during recording). */

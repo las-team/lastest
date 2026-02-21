@@ -21,6 +21,8 @@ Tweet about us
 
 Test coverage assessment and recreation
 
+Online - support agent sdk via runner
+
 ## ideas
 Content comparison - compare text in 2 setups
 Explore/Cover instead of Areas
