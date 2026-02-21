@@ -1718,6 +1718,23 @@ export class PlaywrightRunner extends EventEmitter {
         }
       }
 
+      // Replace replayCursorPath with speed-aware version from runner
+      if (body.includes('async function replayCursorPath(')) {
+        const rcpMatch = body.match(/async function replayCursorPath\s*\([^)]*\)\s*\{/);
+        if (rcpMatch && rcpMatch.index !== undefined) {
+          const rcpStart = rcpMatch.index;
+          const rcpBraceStart = body.indexOf('{', rcpStart);
+          let rcpDepth = 1;
+          let rcpEnd = rcpBraceStart + 1;
+          while (rcpDepth > 0 && rcpEnd < body.length) {
+            if (body[rcpEnd] === '{') rcpDepth++;
+            else if (body[rcpEnd] === '}') rcpDepth--;
+            rcpEnd++;
+          }
+          body = body.slice(0, rcpStart) + '/* replayCursorPath provided by runner */' + body.slice(rcpEnd);
+        }
+      }
+
       // Fix legacy test code that uses non-existent page.keyboard.selectAll()
       // Older recorder versions generated this; the correct Playwright API is keyboard.press('Control+a')
       body = body.replace(/page\.keyboard\.selectAll\(\)/g, "page.keyboard.press('Control+a')");
@@ -1800,9 +1817,20 @@ export class PlaywrightRunner extends EventEmitter {
         },
       } : null;
 
+      // Speed-aware replayCursorPath — respects cursorPlaybackSpeed setting
+      const cursorPlaybackSpeed = this.settings?.cursorPlaybackSpeed ?? 1;
+      const replayCursorPathFn = async (pg: Page, moves: [number, number, number][]) => {
+        for (const [x, y, delay] of moves) {
+          await pg.mouse.move(x, y);
+          if (delay > 0 && cursorPlaybackSpeed > 0) {
+            await pg.waitForTimeout(Math.round(delay / cursorPlaybackSpeed));
+          }
+        }
+      };
+
       const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
-      const testFn = new AsyncFunction('page', 'baseUrl', 'screenshotPath', 'stepLogger', 'expect', 'appState', 'locateWithFallback', 'fileUpload', 'clipboard', 'downloads', 'network', body);
-      await testFn(page, baseUrl, screenshotPath, stepLogger, expectFn, appStateFn, statsLocateWithFallback, fileUploadHelper, clipboardHelper, downloadsHelper, networkHelper);
+      const testFn = new AsyncFunction('page', 'baseUrl', 'screenshotPath', 'stepLogger', 'expect', 'appState', 'locateWithFallback', 'fileUpload', 'clipboard', 'downloads', 'network', 'replayCursorPath', body);
+      await testFn(page, baseUrl, screenshotPath, stepLogger, expectFn, appStateFn, statsLocateWithFallback, fileUploadHelper, clipboardHelper, downloadsHelper, networkHelper, replayCursorPathFn);
       return softErrors;
     }
 

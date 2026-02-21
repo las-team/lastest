@@ -495,6 +495,7 @@ export const playwrightSettings = sqliteTable('playwright_settings', {
   actionTimeout: integer('action_timeout').default(5000),
   pointerGestures: integer('pointer_gestures', { mode: 'boolean' }).default(false),
   cursorFPS: integer('cursor_fps').default(30),
+  cursorPlaybackSpeed: integer('cursor_playback_speed').default(1), // 1 = realtime, 0 = instant (skip delays)
   enabledRecordingEngines: text('enabled_recording_engines', { mode: 'json' }).$type<RecordingEngine[]>(),
   defaultRecordingEngine: text('default_recording_engine').default('lastest'),
   freezeAnimations: integer('freeze_animations', { mode: 'boolean' }).default(false), // freeze CSS animations/transitions

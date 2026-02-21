@@ -1338,6 +1338,7 @@ export async function getPlaywrightSettings(repositoryId?: string | null) {
     actionTimeout: 5000,
     pointerGestures: false,
     cursorFPS: 30,
+    cursorPlaybackSpeed: 1,
     enabledRecordingEngines: DEFAULT_RECORDING_ENGINES,
     defaultRecordingEngine: 'lastest' as const,
     freezeAnimations: false,
