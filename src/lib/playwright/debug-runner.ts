@@ -584,10 +584,12 @@ export class DebugRunner {
     const appStateFn = createAppState(page);
     const locateWithFallback = this.createLocateWithFallback(page, testId);
 
+    /* eslint-disable @typescript-eslint/no-unused-vars */
     const stepLogger = {
       log: (_msg: string) => { /* no-op in debug mode */ },
       warn: (_msg: string) => { /* captured by soft error wrapping */ },
     };
+    /* eslint-enable @typescript-eslint/no-unused-vars */
 
     // File upload helper
     const fileUpload = async (selector: string, filePaths: string | string[]) => {
@@ -932,15 +934,8 @@ export class DebugRunner {
       this.pauseController = pauseCtrl;
 
       // Launch instrumented execution in background
-      let executionDone = false;
-      let executionError: Error | null = null;
-
       const startExecution = (pc: PauseController, h: ReturnType<typeof this.createHelpers>, pg: Page) => {
-        executionDone = false;
-        executionError = null;
-
         this.launchExecution(steps, pc, pg, baseUrl, screenshotPath, h).then(() => {
-          executionDone = true;
           if (this.state && this.state.status !== 'completed' && this.state.status !== 'error') {
             this.state.status = 'completed';
           }
@@ -950,12 +945,11 @@ export class DebugRunner {
             this.commandResolve = null;
           }
         }).catch((err) => {
-          executionDone = true;
           if (err instanceof StopError) return; // expected abort
-          executionError = err instanceof Error ? err : new Error(String(err));
+          const execError = err instanceof Error ? err : new Error(String(err));
           if (this.state) {
             this.state.status = 'error';
-            this.state.error = executionError.message;
+            this.state.error = execError.message;
           }
           // Unblock command loop
           if (this.commandResolve) {

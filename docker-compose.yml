@@ -25,6 +25,7 @@ services:
     volumes:
       - lastest2-data:/app/data
       - lastest2-storage:/app/storage
+      - lastest2-claude-auth:/home/nextjs/.claude
     environment:
       - NODE_ENV=production
       - DATABASE_PATH=/app/data/lastest2.db
@@ -45,4 +46,6 @@ volumes:
   lastest2-data:
     driver: local
   lastest2-storage:
+    driver: local
+  lastest2-claude-auth:
     driver: local
