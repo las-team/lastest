@@ -64,6 +64,14 @@ export interface DiffMetadata {
   isNewTest?: boolean;
 }
 
+/** Capabilities that a test requires from Playwright settings (detected during recording). */
+export interface TestRequiredCapabilities {
+  fileUpload?: boolean;
+  clipboard?: boolean;
+  networkInterception?: boolean;
+  downloads?: boolean;
+}
+
 export interface TestSetupOverrides {
   skippedDefaultStepIds: string[];  // IDs from default_setup_steps to skip
   extraSteps: Array<{
@@ -107,6 +115,7 @@ export const tests = sqliteTable('tests', {
   setupScriptId: text('setup_script_id'), // OR use dedicated setup script
   setupOverrides: text('setup_overrides', { mode: 'json' }).$type<TestSetupOverrides>(),
   teardownOverrides: text('teardown_overrides', { mode: 'json' }).$type<TestTeardownOverrides>(),
+  requiredCapabilities: text('required_capabilities', { mode: 'json' }).$type<TestRequiredCapabilities>(),
   deletedAt: integer('deleted_at', { mode: 'timestamp' }),
   createdAt: integer('created_at', { mode: 'timestamp' }),
   updatedAt: integer('updated_at', { mode: 'timestamp' }),

@@ -279,6 +279,7 @@ export function RecordingClient({
   const [screenshots, setScreenshots] = useState<string[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [generatedCode, setGeneratedCode] = useState('');
+  const [requiredCapabilities, setRequiredCapabilities] = useState<{ fileUpload?: boolean; clipboard?: boolean; networkInterception?: boolean; downloads?: boolean } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const lastSequenceRef = useRef(0);
   const timelineRef = useRef<HTMLDivElement>(null);
@@ -296,6 +297,7 @@ export function RecordingClient({
         if (!status.isRecording) {
           if (status.lastCompletedSession) {
             setGeneratedCode(status.lastCompletedSession.generatedCode);
+            setRequiredCapabilities(status.lastCompletedSession.requiredCapabilities ?? null);
             await clearLastCompletedSession(repositoryId);
             setStep('saving');
           } else {
@@ -487,6 +489,7 @@ export function RecordingClient({
       const session = await stopRecording(repositoryId);
       if (session) {
         setGeneratedCode(session.generatedCode);
+        setRequiredCapabilities(session.requiredCapabilities ?? null);
         setStep('saving');
       }
     } catch (error) {
@@ -530,6 +533,7 @@ export function RecordingClient({
           targetUrl: url,
           code: generatedCode,
           repositoryId,
+          requiredCapabilities,
         });
         router.push(`/tests/${test.id}`);
       }
@@ -1104,6 +1108,7 @@ export function RecordingClient({
                 onClick={() => {
                   setStep('setup');
                   setGeneratedCode('');
+                  setRequiredCapabilities(null);
                   setEvents([]);
                   setScreenshots([]);
                   lastSequenceRef.current = 0;

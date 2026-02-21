@@ -91,12 +91,21 @@ export interface RecordingEvent {
   };
 }
 
+/** Capabilities that a recorded test requires from Playwright settings. */
+export interface RequiredCapabilities {
+  fileUpload: boolean;
+  clipboard: boolean;
+  networkInterception: boolean;
+  downloads: boolean;
+}
+
 export interface RecordingSession {
   id: string;
   url: string;
   startedAt: Date;
   events: RecordingEvent[];
   generatedCode: string;
+  requiredCapabilities?: RequiredCapabilities;
 }
 
 export interface CursorSettings {
@@ -1165,6 +1174,7 @@ export class PlaywrightRecorder extends EventEmitter {
 
     // Generate Playwright code from events
     this.session.generatedCode = this.generateCode();
+    this.session.requiredCapabilities = this.detectRequiredCapabilities();
     this.addEvent('complete', { code: this.session.generatedCode });
 
     const session = { ...this.session };
@@ -1195,6 +1205,32 @@ export class PlaywrightRecorder extends EventEmitter {
       Space: ' ',
     };
     return map[code] ?? null;
+  }
+
+  /**
+   * Scan recorded events to detect which Playwright capabilities this test needs.
+   * Used by the save flow to auto-enable corresponding settings.
+   */
+  private detectRequiredCapabilities(): RequiredCapabilities {
+    const caps: RequiredCapabilities = {
+      fileUpload: false,
+      clipboard: false,
+      networkInterception: false,
+      downloads: false,
+    };
+
+    for (const event of this.session?.events ?? []) {
+      if (event.type === 'action' && event.data.action === 'setInputFiles') {
+        caps.fileUpload = true;
+      }
+    }
+
+    // Clipboard: detected if clipboard access was enabled during recording
+    if (this.clipboardAccess) {
+      caps.clipboard = true;
+    }
+
+    return caps;
   }
 
   private generateCode(): string {
@@ -1372,6 +1408,10 @@ export class PlaywrightRecorder extends EventEmitter {
             case 'selectOption':
               lines.push(`  await locateWithFallback(page, ${selectorsJson}, 'selectOption', '${escStr(value || '')}', null);`);
               break;
+            case 'setInputFiles':
+              lines.push(`  // File upload — replace the path with your actual test file`);
+              lines.push(`  await fileUpload('${escStr(selectors[0]?.value || selector || 'input[type="file"]')}', '${escStr(value || '')}');`);
+              break;
           }
         } else if (selector && selector.trim()) {
           // Fallback to legacy single selector (only if non-empty)
@@ -1387,6 +1427,10 @@ export class PlaywrightRecorder extends EventEmitter {
               break;
             case 'selectOption':
               lines.push(`  await page.locator('${selector}').selectOption('${escStr(value || '')}');`);
+              break;
+            case 'setInputFiles':
+              lines.push(`  // File upload — replace the path with your actual test file`);
+              lines.push(`  await fileUpload('${escStr(selector)}', '${escStr(value || '')}');`);
               break;
           }
         } else {
