@@ -283,6 +283,7 @@ export async function mcpExploreRoutes(
     const response = await generateWithAI(config, prompt, MCP_SYSTEM_PROMPT, {
       actionType: 'mcp_explore',
       repositoryId,
+      useMCP: true,
     });
 
     // Parse JSON response - try object first (grouped or flat), fall back to flat array

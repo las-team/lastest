@@ -16,7 +16,7 @@ const nextConfig: NextConfig = {
     NEXT_PUBLIC_GIT_COMMIT_COUNT: process.env.NEXT_PUBLIC_GIT_COMMIT_COUNT || git("rev-list --count HEAD"),
     NEXT_PUBLIC_BUILD_DATE: new Date().toISOString().split("T")[0],
   },
-  serverExternalPackages: ["tesseract.js", "playwright", "playwright-core"],
+  serverExternalPackages: ["tesseract.js", "playwright", "playwright-core", "@anthropic-ai/claude-agent-sdk"],
   experimental: {
     serverActions: {
       bodySizeLimit: "10mb",

@@ -665,6 +665,7 @@ Return ONLY the code (fixed or original), no explanations.`;
     const response = await generateWithAI(config, prompt, MCP_SYSTEM_PROMPT, {
       actionType: 'fix_test',
       repositoryId,
+      useMCP: true,
     });
 
     const fixedCode = extractCodeFromResponse(response);
