@@ -3,7 +3,8 @@ import path from 'path';
 import crypto from 'crypto';
 import { PNG } from 'pngjs';
 import pixelmatch from 'pixelmatch';
-import type { AlignmentSegment, DiffMetadata, PageShiftInfo } from '../db/schema';
+import type { AlignmentSegment, DiffMetadata, DiffEngineType, PageShiftInfo } from '../db/schema';
+import { runDiffEngine } from './engines';
 
 export interface Rectangle {
   x: number;
@@ -623,7 +624,8 @@ export async function generateDiff(
   threshold = 0.1,
   includeAntiAliasing = false,
   ignoreRegions?: Rectangle[],
-  ignorePageShift = false
+  ignorePageShift = false,
+  diffEngine: DiffEngineType = 'pixelmatch'
 ): Promise<DiffResult> {
   let baseline: PNG = PNG.sync.read(fs.readFileSync(baselinePath));
   let current: PNG = PNG.sync.read(fs.readFileSync(currentPath));
@@ -644,7 +646,7 @@ export async function generateDiff(
 
   // Use shift-aware diffing when enabled and widths match
   if (ignorePageShift && hasSameWidth) {
-    return generateShiftAwareDiff(baseline, current, outputDir, threshold, includeAntiAliasing, ignoreRegions);
+    return generateShiftAwareDiff(baseline, current, outputDir, threshold, includeAntiAliasing, ignoreRegions, diffEngine);
   }
 
   // Pad shorter image to match taller one when heights differ
@@ -672,14 +674,17 @@ export async function generateDiff(
 
   const diff = new PNG({ width, height });
 
-  const numDiffPixels = pixelmatch(
+  const engineResult = runDiffEngine(
+    diffEngine,
     baseline.data,
     current.data,
-    diff.data,
     width,
     height,
-    { threshold, includeAA: includeAntiAliasing }
+    threshold,
+    includeAntiAliasing
   );
+  const numDiffPixels = engineResult.diffPixelCount;
+  Buffer.from(engineResult.diffData).copy(diff.data as Buffer);
 
   // Save diff image
   const diffFileName = `diff-${Date.now()}.png`;
@@ -727,7 +732,8 @@ async function generateShiftAwareDiff(
   outputDir: string,
   threshold: number,
   includeAntiAliasing: boolean,
-  ignoreRegions?: Rectangle[]
+  ignoreRegions?: Rectangle[],
+  diffEngine: DiffEngineType = 'pixelmatch'
 ): Promise<DiffResult> {
   const width = baseline.width;
 
@@ -772,20 +778,20 @@ async function generateShiftAwareDiff(
 
   const alignmentSegments = compressOpsToSegments(alignment.ops);
 
-  // Run pixelmatch on the full aligned images (for visual diff image only)
+  // Run diff engine on the full aligned images (for visual diff image only)
   let alignedDiffData: Buffer;
 
   if (alignedHeight > 0) {
-    const alignedDiff = new PNG({ width, height: alignedHeight });
-    pixelmatch(
+    const alignedEngineResult = runDiffEngine(
+      diffEngine,
       alignedBaseline,
       alignedCurrent,
-      alignedDiff.data,
       width,
       alignedHeight,
-      { threshold, includeAA: includeAntiAliasing }
+      threshold,
+      includeAntiAliasing
     );
-    alignedDiffData = alignedDiff.data as Buffer;
+    alignedDiffData = Buffer.from(alignedEngineResult.diffData);
   } else {
     alignedDiffData = Buffer.alloc(0);
   }
@@ -811,7 +817,6 @@ async function generateShiftAwareDiff(
   // Count diff pixels only from matched rows (exclude insert/delete rows
   // which would compare content against background fill, inflating the percentage)
   let matchedRowDiffPixels = 0;
-  const rowOutput = new Uint8Array(width * 4);
   for (let idx = 0; idx < alignment.ops.length; idx++) {
     if (alignment.ops[idx] !== 'match') continue;
     const bRow = alignment.baselineRows[idx];
@@ -821,9 +826,8 @@ async function generateShiftAwareDiff(
     const cStart = cRow * width * 4;
     const bSlice = baseline.data.subarray(bStart, bStart + width * 4);
     const cSlice = current.data.subarray(cStart, cStart + width * 4);
-    matchedRowDiffPixels += pixelmatch(bSlice, cSlice, rowOutput, width, 1, {
-      threshold, includeAA: includeAntiAliasing,
-    });
+    const rowResult = runDiffEngine(diffEngine, Buffer.from(bSlice), Buffer.from(cSlice), width, 1, threshold, includeAntiAliasing);
+    matchedRowDiffPixels += rowResult.diffPixelCount;
   }
 
   const baselineContent = calculateContentArea(baseline.data, baseline.width, baseline.height, baselineBg);

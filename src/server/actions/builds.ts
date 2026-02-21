@@ -778,6 +778,7 @@ async function processVisualDiff(
   const flakyThreshold = settings.flakyThreshold ?? 10;
   const includeAntiAliasing = settings.includeAntiAliasing ?? false;
   const ignorePageShift = settings.ignorePageShift ?? false;
+  const diffEngine = (settings.diffEngine as import('@/lib/db/schema').DiffEngineType) ?? 'pixelmatch';
 
   // Get the repo's default branch
   const repo = repositoryId ? await queries.getRepository(repositoryId) : null;
@@ -844,7 +845,9 @@ async function processVisualDiff(
         DIFFS_DIR,
         0.1,
         includeAntiAliasing,
-        ignoreRects
+        ignoreRects,
+        false,
+        diffEngine
       );
 
       return {
@@ -889,7 +892,8 @@ async function processVisualDiff(
         0.1,
         includeAntiAliasing,
         ignoreRects,
-        ignorePageShift
+        ignorePageShift,
+        diffEngine
       );
 
       const mainPct = mainDiffResult.percentageDifference;
@@ -997,7 +1001,8 @@ async function processVisualDiff(
       0.1,
       includeAntiAliasing,
       ignoreRects,
-      ignorePageShift
+      ignorePageShift,
+      diffEngine
     );
 
     const pct = diffResult.percentageDifference;

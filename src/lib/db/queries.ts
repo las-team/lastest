@@ -1610,6 +1610,11 @@ export async function getDiffSensitivitySettings(repositoryId?: string | null) {
     flakyThreshold: DEFAULT_DIFF_THRESHOLDS.flakyThreshold,
     includeAntiAliasing: DEFAULT_DIFF_THRESHOLDS.includeAntiAliasing,
     ignorePageShift: DEFAULT_DIFF_THRESHOLDS.ignorePageShift,
+    diffEngine: DEFAULT_DIFF_THRESHOLDS.diffEngine,
+    textRegionAwareDiffing: DEFAULT_DIFF_THRESHOLDS.textRegionAwareDiffing,
+    textRegionThreshold: DEFAULT_DIFF_THRESHOLDS.textRegionThreshold,
+    textRegionPadding: DEFAULT_DIFF_THRESHOLDS.textRegionPadding,
+    textDetectionGranularity: DEFAULT_DIFF_THRESHOLDS.textDetectionGranularity,
     createdAt: null,
     updatedAt: null,
   };

@@ -90,6 +90,24 @@ function extractJsonObject(text: string): string | null {
   return null;
 }
 
+/** Group a flat array of routes (with optional functionalArea field) into DiscoveredArea[] */
+function groupRoutesByArea(routes: (DiscoveredRoute & { functionalArea?: string })[]): DiscoveredArea[] {
+  const areaMap = new Map<string, DiscoveredRoute[]>();
+  for (const route of routes) {
+    const areaName = route.functionalArea || 'Discovered Routes';
+    if (!areaMap.has(areaName)) {
+      areaMap.set(areaName, []);
+    }
+    // Strip functionalArea from the route object before storing
+    const { functionalArea: _, ...routeData } = route;
+    areaMap.get(areaName)!.push(routeData);
+  }
+  return Array.from(areaMap.entries()).map(([name, areaRoutes]) => ({
+    name,
+    routes: areaRoutes,
+  }));
+}
+
 async function getAIConfig(repositoryId?: string | null): Promise<AIProviderConfig> {
   const settings = await queries.getAISettings(repositoryId);
   return {
@@ -218,13 +236,17 @@ export async function aiScanRoutes(
       repositoryId,
     });
 
-    // Parse JSON response - try grouped object first, fall back to flat array
+    // Parse JSON response - try object first (grouped or flat), fall back to flat array
     const objStr = extractJsonObject(response);
     if (objStr) {
       const parsed = JSON.parse(objStr);
       if (parsed.functionalAreas && Array.isArray(parsed.functionalAreas)) {
         await completeJob(jobId);
         return { success: true, functionalAreas: parsed.functionalAreas };
+      }
+      if (parsed.routes && Array.isArray(parsed.routes)) {
+        await completeJob(jobId);
+        return { success: true, functionalAreas: groupRoutesByArea(parsed.routes) };
       }
     }
 
@@ -263,12 +285,15 @@ export async function mcpExploreRoutes(
       repositoryId,
     });
 
-    // Parse JSON response - try grouped object first, fall back to flat array
+    // Parse JSON response - try object first (grouped or flat), fall back to flat array
     const objStr = extractJsonObject(response);
     if (objStr) {
       const parsed = JSON.parse(objStr);
       if (parsed.functionalAreas && Array.isArray(parsed.functionalAreas)) {
         return { success: true, functionalAreas: parsed.functionalAreas };
+      }
+      if (parsed.routes && Array.isArray(parsed.routes)) {
+        return { success: true, functionalAreas: groupRoutesByArea(parsed.routes) };
       }
     }
 
