@@ -21,7 +21,7 @@ export default async function DebugPage({ params }: DebugPageProps) {
   const repositoryId = test.repositoryId || selectedRepo?.id || null;
 
   return (
-    <div className="flex flex-col h-full">
+    <div className="flex flex-col h-full overflow-hidden">
       <DebugClient
         test={test}
         repositoryId={repositoryId}

@@ -16,11 +16,12 @@ export async function approveDiff(diffId: string, approvedBy?: string) {
   if (!diff) throw new Error('Diff not found');
   if (!diff.currentImagePath) throw new Error('Cannot approve diff without screenshot');
 
-  // Update diff status
+  // Update diff status and set baseline to the approved image
   await queries.updateVisualDiff(diffId, {
     status: 'approved',
     approvedBy: approvedBy || 'user',
     approvedAt: new Date(),
+    baselineImagePath: diff.currentImagePath,
   });
 
   // Update baseline with the approved image

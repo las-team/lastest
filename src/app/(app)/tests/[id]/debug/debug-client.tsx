@@ -188,7 +188,7 @@ export function DebugClient({ test, repositoryId }: DebugClientProps) {
   };
 
   return (
-    <div className="flex flex-col h-full">
+    <div className="flex flex-col h-full overflow-hidden">
       {/* Header */}
       <div className="flex items-center justify-between border-b px-4 py-2 bg-background">
         <div className="flex items-center gap-3">
@@ -283,7 +283,7 @@ export function DebugClient({ test, repositoryId }: DebugClientProps) {
           </div>
         </div>
       ) : (
-        <ResizablePanelGroup orientation="horizontal" className="flex-1">
+        <ResizablePanelGroup orientation="horizontal" className="flex-1 min-h-0">
           {/* Left Panel — Code */}
           <ResizablePanel defaultSize={60} minSize={30}>
             <div className="flex flex-col h-full">
