@@ -50,9 +50,8 @@ export async function GET(
   const segments = (await params).path;
   const urlPath = '/' + segments.join('/');
 
-  // Verify team ownership for repo-scoped directories
-  const repoScopedDirs = ['screenshots', 'diffs', 'baselines', 'planned'];
-  if (repoScopedDirs.includes(segments[0]) && segments[1]) {
+  // Verify team ownership for repo-scoped directories (screenshots use repoId subdirs)
+  if (segments[0] === 'screenshots' && segments[1]) {
     const repoId = segments[1];
     const repo = await queries.getRepository(repoId);
     if (!repo || repo.teamId !== session.team?.id) {
