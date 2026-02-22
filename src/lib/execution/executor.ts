@@ -11,9 +11,11 @@
 import { getExecutionMode, shouldUseLocalRunner } from './mode';
 import { getRunner, type TestRunResult, type ProgressCallback } from '@/lib/playwright/runner';
 import type { Test, EnvironmentConfig, PlaywrightSettings } from '@/lib/db/schema';
+import { DEFAULT_STABILIZATION_SETTINGS } from '@/lib/db/schema';
 import type {
   RunTestCommand,
   RunSetupCommand,
+  StabilizationPayload,
 } from '@/lib/ws/protocol';
 import { createMessage } from '@/lib/ws/protocol';
 import { queueCommandToDB, queueCancelCommandToDB } from '@/app/api/ws/runner/route';
@@ -25,6 +27,7 @@ import { createHash } from 'crypto';
 import fs from 'fs/promises';
 import path from 'path';
 import { STORAGE_DIRS } from '@/lib/storage/paths';
+import { getCrossOsFontCSS } from '@/lib/playwright/constants';
 import {
   getCommandsByTestRun,
   getUnacknowledgedResults,
@@ -37,6 +40,29 @@ import {
  */
 function hashCode(code: string): string {
   return createHash('sha256').update(code).digest('hex');
+}
+
+/**
+ * Build a StabilizationPayload from PlaywrightSettings for remote runners.
+ */
+function buildStabilizationPayload(settings?: PlaywrightSettings | null): StabilizationPayload {
+  const stab = settings?.stabilization ?? DEFAULT_STABILIZATION_SETTINGS;
+  return {
+    freezeTimestamps: stab.freezeTimestamps,
+    frozenTimestamp: stab.frozenTimestamp,
+    freezeRandomValues: stab.freezeRandomValues,
+    randomSeed: stab.randomSeed,
+    freezeAnimations: settings?.freezeAnimations ?? false,
+    crossOsConsistency: stab.crossOsConsistency,
+    waitForNetworkIdle: stab.waitForNetworkIdle,
+    networkIdleTimeout: stab.networkIdleTimeout,
+    waitForDomStable: stab.waitForDomStable,
+    domStableTimeout: stab.domStableTimeout,
+    waitForFonts: stab.waitForFonts,
+    waitForImages: stab.waitForImages,
+    waitForImagesTimeout: stab.waitForImagesTimeout,
+    ...(stab.crossOsConsistency ? { crossOsFontCSS: getCrossOsFontCSS() } : {}),
+  };
 }
 
 export interface ExecutionOptions {
@@ -167,6 +193,7 @@ async function executeSetupViaRunner(
   baseUrl: string,
   viewport?: { width: number; height: number },
   timeout?: number,
+  playwrightSettings?: PlaywrightSettings | null,
 ): Promise<{ storageState?: string; variables?: Record<string, unknown> }> {
   const setupTimeout = timeout || 120000;
 
@@ -177,6 +204,7 @@ async function executeSetupViaRunner(
     targetUrl: baseUrl,
     timeout: setupTimeout,
     viewport,
+    stabilization: buildStabilizationPayload(playwrightSettings),
   });
 
   console.log(`[Executor] Queuing setup command ${command.id.slice(0, 8)} for runner ${runnerId}`);
@@ -258,6 +286,7 @@ async function executeViaRunner(
       baseUrl,
       viewport,
       options.playwrightSettings?.navigationTimeout ?? undefined,
+      options.playwrightSettings,
     );
     // Merge remote setup results into setupContext for test commands
     options.setupContext = {
@@ -338,6 +367,7 @@ async function executeViaRunner(
         storageState: options.setupContext?.storageState,
         setupVariables: options.setupContext?.variables,
         cursorPlaybackSpeed: options.playwrightSettings?.cursorPlaybackSpeed ?? 1,
+        stabilization: buildStabilizationPayload(options.playwrightSettings),
       });
 
       // Queue command to DB

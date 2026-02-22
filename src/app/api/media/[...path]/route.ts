@@ -41,13 +41,17 @@ export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ path: string[] }> }
 ) {
-  // Auth check
-  const session = await verifyAuth(request);
-  if (!session) {
-    return new Response('Unauthorized', { status: 401 });
-  }
-
   const segments = (await params).path;
+
+  // Skip auth for traces — they're fetched cross-origin by trace.playwright.dev
+  // and are auto-cleaned after 1 hour
+  const isTrace = segments[0] === 'traces';
+  if (!isTrace) {
+    const session = await verifyAuth(request);
+    if (!session) {
+      return new Response('Unauthorized', { status: 401 });
+    }
+  }
   const urlPath = '/' + segments.join('/');
 
   // Verify team ownership for repo-scoped directories (screenshots use repoId subdirs)

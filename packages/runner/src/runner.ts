@@ -6,6 +6,7 @@
 import { chromium, Browser, Page, BrowserContext } from 'playwright';
 import { createHash } from 'crypto';
 import type { RunTestCommandPayload, RunSetupCommandPayload, LogEntry } from './protocol.js';
+import { CROSS_OS_CHROMIUM_ARGS, setupFreezeScripts, applyPreScreenshotStabilization } from './stabilization.js';
 
 /**
  * Verify code integrity by comparing SHA256 hash.
@@ -31,6 +32,7 @@ export interface TestRunResult {
 export class TestRunner {
   private browser: Browser | null = null;
   private browserLaunchPromise: Promise<Browser> | null = null;
+  private currentLaunchArgs: string[] = [];
   private activeTests = new Map<string, { abort: AbortController; testRunId: string }>();
   private logs: LogEntry[] = [];
   // Legacy single-test tracking (for backward compat with abort/isRunning)
@@ -40,15 +42,29 @@ export class TestRunner {
   /**
    * Ensure a shared browser instance is running.
    * Concurrent calls share the same launch promise.
+   * If args differ from the current browser, close and relaunch.
    */
-  private async ensureBrowser(): Promise<Browser> {
+  private async ensureBrowser(args?: string[]): Promise<Browser> {
+    const requestedArgs = args ?? [];
+    const argsKey = requestedArgs.join(',');
+    const currentKey = this.currentLaunchArgs.join(',');
+
+    // If browser exists but args differ, close and relaunch
+    if (this.browser && this.browser.isConnected() && argsKey !== currentKey) {
+      const b = this.browser;
+      this.browser = null;
+      this.browserLaunchPromise = null;
+      await b.close().catch(() => {});
+    }
+
     if (this.browser && this.browser.isConnected()) {
       return this.browser;
     }
     if (this.browserLaunchPromise) {
       return this.browserLaunchPromise;
     }
-    this.browserLaunchPromise = chromium.launch({ headless: true }).then(b => {
+    this.currentLaunchArgs = requestedArgs;
+    this.browserLaunchPromise = chromium.launch({ headless: true, args: requestedArgs.length > 0 ? requestedArgs : undefined }).then(b => {
       this.browser = b;
       this.browserLaunchPromise = null;
       return b;
@@ -165,8 +181,11 @@ export class TestRunner {
       logFn('info', 'Launching browser...');
       onProgress?.('Launching browser', 10);
 
-      // Use shared browser instance
-      await this.ensureBrowser();
+      // Determine launch args based on stabilization settings
+      const launchArgs = command.stabilization?.crossOsConsistency ? CROSS_OS_CHROMIUM_ARGS : [];
+
+      // Use shared browser instance (will relaunch if args changed)
+      await this.ensureBrowser(launchArgs);
 
       const viewport = command.viewport || { width: 1280, height: 720 };
       // Inject storageState from setup scripts (e.g. login session cookies/localStorage)
@@ -180,12 +199,23 @@ export class TestRunner {
           logFn('warn', `Failed to parse storageState: ${e}`);
         }
       }
-      context = await this.browser!.newContext({ viewport, ...(parsedStorageState ? { storageState: parsedStorageState } : {}) });
+      context = await this.browser!.newContext({
+        viewport,
+        ...(parsedStorageState ? { storageState: parsedStorageState } : {}),
+        ...(command.stabilization?.crossOsConsistency ? { deviceScaleFactor: 1 } : {}),
+        ...(command.stabilization?.freezeAnimations ? { reducedMotion: 'reduce' as const } : {}),
+      });
       page = await context.newPage();
 
       // Set explicit timeouts to prevent indefinite hangs
       page.setDefaultNavigationTimeout(30000);
       page.setDefaultTimeout(15000);
+
+      // Setup freeze scripts (timestamps, random, animations) BEFORE any navigation
+      if (command.stabilization) {
+        await setupFreezeScripts(page, command.stabilization);
+        logFn('info', `Stabilization: freeze timestamps=${command.stabilization.freezeTimestamps}, random=${command.stabilization.freezeRandomValues}, animations=${command.stabilization.freezeAnimations}, crossOS=${command.stabilization.crossOsConsistency}`);
+      }
 
       // Log page-level events for visibility during test execution
       page.on('console', msg => {
@@ -213,6 +243,8 @@ export class TestRunner {
       const captureScreenshot = async (label: string) => {
         if (!page) return;
         try {
+          // Apply pre-screenshot stabilization (network idle, images, fonts, DOM)
+          await applyPreScreenshotStabilization(page, command.stabilization);
           const buffer = await rawScreenshot!({ fullPage: true });
           const filename = `${command.testRunId}-${command.testId}-${label.replace(/ /g, '_')}.png`;
           const base64 = buffer.toString('base64');
@@ -382,14 +414,24 @@ export class TestRunner {
       }
 
       logFn('info', 'Launching browser for setup...');
-      await this.ensureBrowser();
+      const setupLaunchArgs = command.stabilization?.crossOsConsistency ? CROSS_OS_CHROMIUM_ARGS : [];
+      await this.ensureBrowser(setupLaunchArgs);
 
       const viewport = command.viewport || { width: 1280, height: 720 };
       // No storageState injection — this IS the setup that creates the session
-      context = await this.browser!.newContext({ viewport });
+      context = await this.browser!.newContext({
+        viewport,
+        ...(command.stabilization?.crossOsConsistency ? { deviceScaleFactor: 1 } : {}),
+        ...(command.stabilization?.freezeAnimations ? { reducedMotion: 'reduce' as const } : {}),
+      });
       page = await context.newPage();
       page.setDefaultNavigationTimeout(30000);
       page.setDefaultTimeout(15000);
+
+      // Setup freeze scripts (timestamps, random, animations) BEFORE navigation
+      if (command.stabilization) {
+        await setupFreezeScripts(page, command.stabilization);
+      }
 
       logFn('info', `Browser launched, viewport: ${viewport.width}x${viewport.height}`);
 

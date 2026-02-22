@@ -1034,6 +1034,7 @@ export class PlaywrightRunner extends EventEmitter {
         ...(this.settings?.freezeAnimations ? { reducedMotion: 'reduce' } : {}),
         ...(this.settings?.grantClipboardAccess ? { permissions: ['clipboard-read', 'clipboard-write'] } : {}),
         ...(this.settings?.acceptDownloads ? { acceptDownloads: true } : {}),
+        ...(this.getStabilizationSettings().crossOsConsistency ? { deviceScaleFactor: 1 } : {}),
       });
       page = await context.newPage();
 

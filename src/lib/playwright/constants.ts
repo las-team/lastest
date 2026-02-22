@@ -218,6 +218,8 @@ export const CROSS_OS_CHROMIUM_ARGS = [
   '--disable-gpu',
   '--force-color-profile=srgb',
   '--hide-scrollbars',
+  '--disable-skia-runtime-opts',
+  '--disable-accelerated-2d-canvas',
 ];
 
 /**
