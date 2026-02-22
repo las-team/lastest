@@ -2,7 +2,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Badge } from '@/components/ui/badge';
 import * as queries from '@/lib/db/queries';
 import { getCurrentSession } from '@/lib/auth';
-import { Github, Check, X, Database, ExternalLink, Users, Bot, Mail } from 'lucide-react';
+import { Github, Check, X, Database, ExternalLink, Users, Bot, Mail, Terminal } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 
 // GitLab icon SVG component
@@ -69,6 +69,8 @@ export default async function SettingsPage({
         getRunners(),
       ])
     : [[], [], []];
+
+  const serverUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
 
   return (
     <div className="flex flex-col h-full">
@@ -420,16 +422,34 @@ export default async function SettingsPage({
                   </div>
                   <CreateRunnerDialog />
                 </CardHeader>
-                <CardContent>
+                <CardContent className="space-y-4">
                   {runners.length === 0 ? (
-                    <div className="text-center py-8 text-muted-foreground">
+                    <div className="text-center py-4 text-muted-foreground">
                       <Bot className="w-12 h-12 mx-auto mb-4 opacity-50" />
-                      <p className="mb-2">No runners configured</p>
-                      <p className="text-sm">Create a runner to enable remote test execution</p>
+                      <p className="mb-1">No runners configured</p>
+                      <p className="text-sm">Create a runner above to get a token, then start it with the CLI.</p>
                     </div>
                   ) : (
                     <RunnerList runners={runners} />
                   )}
+
+                  <details open={runners.length === 0 ? true : undefined}>
+                    <summary className="text-sm font-medium flex items-center gap-2 cursor-pointer select-none py-1">
+                      <Terminal className="w-4 h-4" />
+                      Setup Guide
+                    </summary>
+                    <div className="bg-muted/50 border rounded-md p-4 mt-2 space-y-2 text-xs text-muted-foreground">
+                      <p>1. Install Playwright browser:</p>
+                      <pre className="bg-muted p-2 rounded text-xs font-mono">npx playwright install chromium</pre>
+                      <p>2. Start the runner:</p>
+                      <pre className="bg-muted p-2 rounded text-xs font-mono">npx @lastest/runner start -t YOUR_TOKEN -s {serverUrl}</pre>
+                      <p>3. For Docker / foreground mode:</p>
+                      <pre className="bg-muted p-2 rounded text-xs font-mono">npx @lastest/runner run -t YOUR_TOKEN -s {serverUrl}</pre>
+                      <p className="pt-1">
+                        Options: <code className="bg-muted px-1 py-0.5 rounded">--base-url</code> override target URL, <code className="bg-muted px-1 py-0.5 rounded">--interval</code> poll frequency (ms)
+                      </p>
+                    </div>
+                  </details>
                 </CardContent>
               </Card>
 

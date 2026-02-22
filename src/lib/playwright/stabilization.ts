@@ -14,21 +14,28 @@ import { HIDE_SPINNERS_CSS, PLACEHOLDER_IMAGE_BUFFER, SYSTEM_FONTS_CSS, getCross
 export function getFreezeRandomScript(seed: number): string {
   return `
     (function() {
-      let state = ${seed};
-      function nextLCG() {
-        state = (state * 1103515245 + 12345) & 0x7fffffff;
-        return state;
+      // Separate LCG states so crypto calls (nanoid) don't shift Math.random sequence (rough.js seeds)
+      var mathState = ${seed};
+      var cryptoState = (${seed} * 2654435761 >>> 0) || 1;
+
+      function nextMath() {
+        mathState = (mathState * 1103515245 + 12345) & 0x7fffffff;
+        return mathState;
       }
+      function nextCrypto() {
+        cryptoState = (cryptoState * 1103515245 + 12345) & 0x7fffffff;
+        return cryptoState;
+      }
+
       Math.random = function() {
-        return nextLCG() / 0x7fffffff;
+        return nextMath() / 0x7fffffff;
       };
       // Override crypto.getRandomValues to produce deterministic bytes
-      var _origGetRandomValues = crypto.getRandomValues.bind(crypto);
       crypto.getRandomValues = function(array) {
         for (var i = 0; i < array.length; i++) {
-          array[i] = nextLCG() & (array instanceof Uint8Array ? 0xff :
-                                   array instanceof Uint16Array ? 0xffff :
-                                   0xffffffff);
+          array[i] = nextCrypto() & (array instanceof Uint8Array ? 0xff :
+                                      array instanceof Uint16Array ? 0xffff :
+                                      0xffffffff);
         }
         return array;
       };
@@ -37,10 +44,10 @@ export function getFreezeRandomScript(seed: number): string {
         crypto.randomUUID = function() {
           var hex = '';
           for (var i = 0; i < 32; i++) {
-            hex += (nextLCG() & 0xf).toString(16);
+            hex += (nextCrypto() & 0xf).toString(16);
           }
           return hex.slice(0,8)+'-'+hex.slice(8,12)+'-4'+hex.slice(13,16)+'-'+
-                 ((nextLCG() & 0x3 | 0x8).toString(16))+hex.slice(17,20)+'-'+hex.slice(20,32);
+                 ((nextCrypto() & 0x3 | 0x8).toString(16))+hex.slice(17,20)+'-'+hex.slice(20,32);
         };
       }
     })();

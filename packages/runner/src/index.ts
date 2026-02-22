@@ -249,6 +249,206 @@ export async function main() {
       }
     });
 
+  // Repos command — list available repositories
+  program
+    .command('repos')
+    .description('List repositories available for triggering builds.\n\nFetches the list of repositories accessible to the runner\'s team\nand displays them in a table with ID, name, and test count.')
+    .option('-t, --token <token>', 'Runner authentication token')
+    .option('-s, --server <url>', 'Lastest2 server URL')
+    .action(async (options) => {
+      const saved = loadConfig();
+      const token = options.token || saved.token;
+      const server = options.server || saved.server;
+
+      if (!token || !server) {
+        console.error('Error: --token and --server are required (no saved config found)');
+        process.exit(1);
+      }
+
+      try {
+        const res = await fetch(`${server.replace(/\/$/, '')}/api/runners/repos`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+
+        if (!res.ok) {
+          const body = await res.json().catch(() => ({}));
+          console.error(`Error: ${(body as { error?: string }).error || res.statusText}`);
+          process.exit(1);
+        }
+
+        const { repos } = await res.json() as { repos: { id: string; name: string; fullName: string; testCount: number }[] };
+
+        if (repos.length === 0) {
+          console.log('No repositories found for this team.');
+          return;
+        }
+
+        // Print table
+        const idWidth = Math.max(2, ...repos.map(r => r.id.length));
+        const nameWidth = Math.max(4, ...repos.map(r => r.fullName.length));
+        console.log(`${'ID'.padEnd(idWidth)}  ${'Name'.padEnd(nameWidth)}  Tests`);
+        console.log(`${'─'.repeat(idWidth)}  ${'─'.repeat(nameWidth)}  ${'─'.repeat(5)}`);
+        for (const repo of repos) {
+          console.log(`${repo.id.padEnd(idWidth)}  ${repo.fullName.padEnd(nameWidth)}  ${repo.testCount}`);
+        }
+      } catch (error) {
+        console.error('Failed to fetch repos:', (error as Error).message);
+        process.exit(1);
+      }
+    });
+
+  // Trigger command — create a build and poll for results
+  program
+    .command('trigger')
+    .description('Trigger a build for a repository and wait for results.\n\nCreates a new build via the Lastest2 server API, polls for progress,\nand prints a summary when complete. Exits 0 on pass/safe_to_merge/review_required,\nexits 1 on failed/blocked.')
+    .requiredOption('-r, --repo <id-or-name>', 'Repository ID or full name (e.g. "owner/repo")')
+    .option('-t, --token <token>', 'Runner authentication token')
+    .option('-s, --server <url>', 'Lastest2 server URL')
+    .option('--timeout <ms>', 'Timeout in milliseconds', '300000')
+    .action(async (options) => {
+      const saved = loadConfig();
+      const token = options.token || saved.token;
+      const server = (options.server || saved.server || '').replace(/\/$/, '');
+
+      if (!token || !server) {
+        console.error('Error: --token and --server are required (no saved config found)');
+        process.exit(1);
+      }
+
+      const timeout = parseInt(options.timeout, 10);
+      const repo: string = options.repo;
+      const isName = repo.includes('/');
+
+      // 1. Create build
+      console.log(`Creating build for ${repo}...`);
+      let buildId: string;
+      let testCount: number;
+      try {
+        const res = await fetch(`${server}/api/builds/create`, {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${token}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(isName ? { githubRepo: repo } : { repositoryId: repo }),
+        });
+
+        if (!res.ok) {
+          const body = await res.json().catch(() => ({}));
+          console.error(`Error creating build: ${(body as { error?: string }).error || res.statusText}`);
+          process.exit(1);
+        }
+
+        const data = await res.json() as { buildId: string; testCount: number };
+        buildId = data.buildId;
+        testCount = data.testCount;
+      } catch (error) {
+        console.error('Failed to create build:', (error as Error).message);
+        process.exit(1);
+        return; // unreachable but helps TS
+      }
+
+      console.log(`Build ${buildId} created (${testCount} tests)`);
+
+      // 2. Poll for status
+      const startTime = Date.now();
+      let lastCompleted = 0;
+
+      while (Date.now() - startTime < timeout) {
+        await new Promise(resolve => setTimeout(resolve, 3000));
+
+        try {
+          const res = await fetch(`${server}/api/builds/${buildId}/status`, {
+            headers: { Authorization: `Bearer ${token}` },
+          });
+
+          if (!res.ok) {
+            console.error(`Poll error: ${res.statusText}`);
+            continue;
+          }
+
+          interface DiffEntry {
+            id: string;
+            testId: string;
+            testName: string | null;
+            stepLabel: string | null;
+            classification: string | null;
+            status: string;
+            percentageDifference: string | null;
+            testResultStatus: string | null;
+            errorMessage: string | null;
+            functionalAreaName: string | null;
+          }
+
+          const status = await res.json() as {
+            id: string;
+            overallStatus: string;
+            totalTests: number;
+            passedCount: number;
+            failedCount: number;
+            changesDetected: number;
+            flakyCount: number;
+            completedAt: string | null;
+            elapsedMs: number | null;
+            diffs: DiffEntry[];
+          };
+
+          const completed = status.passedCount + status.failedCount + status.changesDetected + status.flakyCount;
+          if (completed > lastCompleted) {
+            console.log(`  Progress: ${completed}/${status.totalTests} tests complete`);
+            lastCompleted = completed;
+          }
+
+          // Build is done only when completedAt is set (overallStatus alone is unreliable —
+          // initial status is 'review_required' before execution even starts)
+          if (status.completedAt) {
+            const elapsed = status.elapsedMs ? `${(status.elapsedMs / 1000).toFixed(1)}s` : `${((Date.now() - startTime) / 1000).toFixed(1)}s`;
+
+            // Per-test diff results
+            if (status.diffs && status.diffs.length > 0) {
+              console.log('');
+              const nameWidth = Math.max(4, ...status.diffs.map(d => (d.testName || 'Unknown').length + (d.stepLabel ? d.stepLabel.length + 3 : 0)));
+              console.log(`${'Test'.padEnd(nameWidth)}  Result       Diff`);
+              console.log(`${'─'.repeat(nameWidth)}  ${'─'.repeat(11)}  ${'─'.repeat(8)}`);
+
+              for (const diff of status.diffs) {
+                const name = diff.testName || 'Unknown';
+                const label = diff.stepLabel ? `${name} > ${diff.stepLabel}` : name;
+                const cls = diff.testResultStatus === 'failed'
+                  ? 'FAILED'
+                  : diff.classification === 'changed'
+                    ? 'CHANGED'
+                    : diff.classification === 'flaky'
+                      ? 'FLAKY'
+                      : 'PASS';
+                const pct = diff.percentageDifference ? `${parseFloat(diff.percentageDifference).toFixed(2)}%` : '—';
+                console.log(`${label.padEnd(nameWidth)}  ${cls.padEnd(11)}  ${pct}`);
+                if (diff.errorMessage) {
+                  console.log(`${''.padEnd(nameWidth)}  └ ${diff.errorMessage}`);
+                }
+              }
+            }
+
+            console.log('');
+            console.log(`Build ${status.overallStatus.toUpperCase()} (${elapsed})`);
+            console.log(`  Passed: ${status.passedCount}`);
+            if (status.failedCount > 0) console.log(`  Failed: ${status.failedCount}`);
+            if (status.changesDetected > 0) console.log(`  Changes: ${status.changesDetected}`);
+            if (status.flakyCount > 0) console.log(`  Flaky: ${status.flakyCount}`);
+            console.log(`  URL: ${server}/builds/${buildId}`);
+
+            const failStatuses = ['failed', 'blocked'];
+            process.exit(failStatuses.includes(status.overallStatus) ? 1 : 0);
+          }
+        } catch (error) {
+          console.error(`Poll error: ${(error as Error).message}`);
+        }
+      }
+
+      console.error(`Timeout: build did not complete within ${timeout / 1000}s`);
+      process.exit(1);
+    });
+
   // Run command - runs in foreground (used by start, or for direct execution)
   program
     .command('run')

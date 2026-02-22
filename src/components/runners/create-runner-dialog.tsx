@@ -24,6 +24,7 @@ export function CreateRunnerDialog() {
   const [loading, setLoading] = useState(false);
   const [token, setToken] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const [copiedCommand, setCopiedCommand] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const handleCreate = async () => {
@@ -51,6 +52,15 @@ export function CreateRunnerDialog() {
     await navigator.clipboard.writeText(token);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
+  };
+
+  const copyCommand = async () => {
+    if (!token) return;
+    const serverUrl = typeof window !== 'undefined' ? window.location.origin : 'http://localhost:3000';
+    const command = `npx @lastest/runner start -t ${token} -s ${serverUrl}`;
+    await navigator.clipboard.writeText(command);
+    setCopiedCommand(true);
+    setTimeout(() => setCopiedCommand(false), 2000);
   };
 
   const handleClose = () => {
@@ -120,6 +130,30 @@ export function CreateRunnerDialog() {
                 This token provides access to run tests on behalf of your team.
                 Keep it secure and never share it publicly.
               </p>
+            </div>
+
+            <div className="space-y-2">
+              <p className="text-sm font-medium">Quick Start</p>
+              <p className="text-xs text-muted-foreground">
+                Install Playwright first: <code className="bg-muted px-1 py-0.5 rounded text-xs">npx playwright install chromium</code>
+              </p>
+              <div className="relative">
+                <pre className="bg-muted p-3 rounded-md text-xs font-mono whitespace-pre-wrap break-all pr-10">
+{`npx @lastest/runner start \\\n  -t ${token} \\\n  -s ${typeof window !== 'undefined' ? window.location.origin : 'http://localhost:3000'}`}
+                </pre>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="absolute top-2 right-2"
+                  onClick={copyCommand}
+                >
+                  {copiedCommand ? (
+                    <Check className="w-4 h-4 text-green-500" />
+                  ) : (
+                    <Copy className="w-4 h-4" />
+                  )}
+                </Button>
+              </div>
             </div>
           </div>
         ) : (
