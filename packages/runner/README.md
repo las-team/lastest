@@ -1,4 +1,4 @@
-# lastest2-runner
+# @lastest/runner
 
 Remote test execution runner for [Lastest2](https://github.com/dexilion-team/lastest2) — free, open-source visual regression testing with AI-generated tests.
 
@@ -10,10 +10,10 @@ Connects to your Lastest2 server, receives test jobs, executes them locally usin
 
 ```bash
 # Global installation
-npm install -g lastest2-runner
+npm install -g @lastest/runner
 
 # Or run directly with npx
-npx lastest2-runner --help
+npx @lastest/runner --help
 ```
 
 After installing, you need to install Playwright's Chromium browser:
@@ -136,7 +136,7 @@ jobs:
     steps:
       - name: Run Lastest2 Runner
         run: |
-          npx lastest2-runner run \
+          npx @lastest/runner run \
             -t ${{ secrets.LASTEST2_TOKEN }} \
             -s ${{ vars.LASTEST2_SERVER }}
 ```
@@ -146,7 +146,7 @@ jobs:
 ```dockerfile
 FROM node:18-slim
 
-RUN npm install -g lastest2-runner && \
+RUN npm install -g @lastest/runner && \
     npx playwright install chromium --with-deps
 
 CMD ["lastest2-runner", "run", "-t", "$TOKEN", "-s", "$SERVER"]
@@ -170,7 +170,7 @@ For zero-config CI/CD without installing the runner, use the reusable GitHub Act
 
 ```bash
 # Install globally
-npm install -g lastest2-runner
+npm install -g @lastest/runner
 
 # Install Playwright Chromium
 npx playwright install chromium
@@ -198,7 +198,7 @@ lastest2-runner stop
 The runner can also be used as a library:
 
 ```typescript
-import { RunnerClient, TestRunner } from 'lastest2-runner';
+import { RunnerClient, TestRunner } from '@lastest/runner';
 
 const client = new RunnerClient({
   token: 'your-token',

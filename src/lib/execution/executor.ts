@@ -337,6 +337,7 @@ async function executeViaRunner(
         viewport,
         storageState: options.setupContext?.storageState,
         setupVariables: options.setupContext?.variables,
+        cursorPlaybackSpeed: options.playwrightSettings?.cursorPlaybackSpeed ?? 1,
       });
 
       // Queue command to DB

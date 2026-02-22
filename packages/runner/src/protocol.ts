@@ -50,6 +50,7 @@ export interface RunTestCommandPayload {
   serverConfig?: ServerConfig;
   storageState?: string; // Serialized JSON from page.context().storageState() — carries auth session
   setupVariables?: Record<string, unknown>; // Variables from setup scripts
+  cursorPlaybackSpeed?: number; // 0 = instant (skip delays), 1 = realtime
 }
 
 export interface RunTestCommand extends BaseMessage {

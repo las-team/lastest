@@ -243,7 +243,7 @@ export class TestRunner {
 
       try {
         await Promise.race([
-          this.executeTestCode(page, command.code, command.targetUrl, captureScreenshot, logFn, softErrors).catch(e => { throw e; }),
+          this.executeTestCode(page, command.code, command.targetUrl, captureScreenshot, logFn, softErrors, command.cursorPlaybackSpeed).catch(e => { throw e; }),
           new Promise<never>((_, reject) => {
             const timer = setTimeout(() => {
               logFn('warn', `Timeout fired (${testTimeout}ms) — closing context to kill in-flight operations`);
@@ -397,7 +397,7 @@ export class TestRunner {
       logFn('info', 'Executing setup code...');
       const noopScreenshot = async () => {};
       await Promise.race([
-        this.executeTestCode(page, command.code, command.targetUrl, noopScreenshot, logFn),
+        this.executeTestCode(page, command.code, command.targetUrl, noopScreenshot, logFn, undefined, undefined),
         new Promise<never>((_, reject) => {
           setTimeout(() => {
             logFn('warn', `Setup timeout fired (${setupTimeout}ms)`);
@@ -487,7 +487,8 @@ export class TestRunner {
     targetUrl: string,
     captureScreenshot: (label: string) => Promise<void>,
     logFn?: (level: 'info' | 'warn' | 'error', message: string) => void,
-    softErrors?: string[]
+    softErrors?: string[],
+    cursorPlaybackSpeed?: number
   ): Promise<void> {
     const log = logFn ?? this.log.bind(this);
     // Extract function body from: export async function test(page, baseUrl, screenshotPath, stepLogger) { ... }
@@ -520,6 +521,24 @@ export class TestRunner {
         }
         body = body.slice(0, startIdx) + '/* locateWithFallback provided by runner */' + body.slice(endIdx);
         log('info', 'Removed test-local locateWithFallback (using runner-provided version)');
+      }
+    }
+
+    // Remove the test's local replayCursorPath function if present (runner provides speed-aware version)
+    if (body.includes('async function replayCursorPath(')) {
+      const rcpMatch = body.match(/async function replayCursorPath\s*\([^)]*\)\s*\{/);
+      if (rcpMatch && rcpMatch.index !== undefined) {
+        const rcpStart = rcpMatch.index;
+        const rcpBraceStart = body.indexOf('{', rcpStart);
+        let rcpDepth = 1;
+        let rcpEnd = rcpBraceStart + 1;
+        while (rcpDepth > 0 && rcpEnd < body.length) {
+          if (body[rcpEnd] === '{') rcpDepth++;
+          else if (body[rcpEnd] === '}') rcpDepth--;
+          rcpEnd++;
+        }
+        body = body.slice(0, rcpStart) + '/* replayCursorPath provided by runner */' + body.slice(rcpEnd);
+        log('info', 'Removed test-local replayCursorPath (using runner-provided version)');
       }
     }
 
@@ -656,6 +675,17 @@ export class TestRunner {
       return response;
     };
 
+    // Speed-aware replayCursorPath — respects cursorPlaybackSpeed setting
+    const speed = cursorPlaybackSpeed ?? 1;
+    const replayCursorPathFn = async (pg: Page, moves: [number, number, number][]) => {
+      for (const [x, y, delay] of moves) {
+        await pg.mouse.move(x, y);
+        if (delay > 0 && speed > 0) {
+          await pg.waitForTimeout(Math.round(delay / speed));
+        }
+      }
+    };
+
     // Execute the test
     log('info', 'Compiling test function...');
     const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
@@ -666,11 +696,12 @@ export class TestRunner {
       'stepLogger',
       'expect',
       'locateWithFallback',
+      'replayCursorPath',
       body
     );
 
     log('info', `Running test against ${targetUrl}...`);
-    await testFn(page, targetUrl.replace(/\/+$/, ''), 'screenshot.png', stepLogger, expect, locateWithFallback);
+    await testFn(page, targetUrl.replace(/\/+$/, ''), 'screenshot.png', stepLogger, expect, locateWithFallback, replayCursorPathFn);
     log('info', 'Test function returned successfully');
   }
 

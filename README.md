@@ -409,10 +409,8 @@ Run tests on remote machines by deploying runners that connect back to your Last
 3. **Install and run** on your target machine
 
 ```bash
-# From the repo root
-cd packages/runner
-pnpm install && pnpm build
-pnpm link --global
+# Install from npm
+npm install -g @lastest/runner
 
 # Start as daemon
 lastest2-runner start -t YOUR_TOKEN -s https://your-lastest2-server
