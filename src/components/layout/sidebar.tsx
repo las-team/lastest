@@ -17,13 +17,7 @@ import {
   ClipboardCheck,
 } from 'lucide-react';
 import Image from 'next/image';
-import dynamic from 'next/dynamic';
-import { SyncReposButton } from './repo-selector';
-
-const RepoSelector = dynamic(
-  () => import('./repo-selector').then((m) => ({ default: m.RepoSelector })),
-  { ssr: false }
-);
+import { RepoSelector, SyncReposButton } from './repo-selector';
 import { QueueIndicator } from '@/components/queue/queue-indicator';
 import { UserMenu } from '@/components/auth/user-menu';
 import type { Repository, User, Team } from '@/lib/db/schema';
