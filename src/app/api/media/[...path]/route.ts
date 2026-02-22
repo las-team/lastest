@@ -51,17 +51,18 @@ export async function GET(
     if (!session) {
       return new Response('Unauthorized', { status: 401 });
     }
-  }
-  const urlPath = '/' + segments.join('/');
 
-  // Verify team ownership for repo-scoped directories (screenshots use repoId subdirs)
-  if (segments[0] === 'screenshots' && segments[1]) {
-    const repoId = segments[1];
-    const repo = await queries.getRepository(repoId);
-    if (!repo || repo.teamId !== session.team?.id) {
-      return new Response('Forbidden', { status: 403 });
+    // Verify team ownership for repo-scoped directories (screenshots use repoId subdirs)
+    if (segments[0] === 'screenshots' && segments[1]) {
+      const repoId = segments[1];
+      const repo = await queries.getRepository(repoId);
+      if (!repo || repo.teamId !== session.team?.id) {
+        return new Response('Forbidden', { status: 403 });
+      }
     }
   }
+
+  const urlPath = '/' + segments.join('/');
 
   // Resolve to filesystem
   const filePath = resolveStoragePath(urlPath);
