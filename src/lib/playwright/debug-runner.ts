@@ -6,7 +6,7 @@
 
 import { chromium, firefox, webkit, Browser, Page, BrowserContext } from 'playwright';
 import { FREEZE_ANIMATIONS_SCRIPT, CROSS_OS_CHROMIUM_ARGS } from './constants';
-import { setupFreezeScripts } from './stabilization';
+import { setupFreezeScripts, applyStabilization } from './stabilization';
 import path from 'path';
 import fs from 'fs';
 import crypto from 'crypto';
@@ -517,17 +517,18 @@ export class DebugRunner {
     if (!this.browser) throw new Error('Browser not launched');
 
     const viewport = this.getViewport();
+    const stabilization = this.settings?.stabilization || DEFAULT_STABILIZATION_SETTINGS;
     const context = await this.browser.newContext({
       viewport,
       ...(this.settings?.acceptAnyCertificate ? { ignoreHTTPSErrors: true } : {}),
       ...(this.settings?.freezeAnimations ? { reducedMotion: 'reduce' } : {}),
       ...(this.settings?.grantClipboardAccess ? { permissions: ['clipboard-read', 'clipboard-write'] } : {}),
       ...(this.settings?.acceptDownloads ? { acceptDownloads: true } : {}),
+      ...(stabilization.crossOsConsistency ? { deviceScaleFactor: 1 } : {}),
     });
     const page = await context.newPage();
 
     // Freeze timestamps/random values if configured
-    const stabilization = this.settings?.stabilization || DEFAULT_STABILIZATION_SETTINGS;
     await setupFreezeScripts(page, stabilization);
 
     // Freeze CSS + JS animations if enabled
@@ -938,6 +939,20 @@ export class DebugRunner {
       return Promise.reject(err);
     }
 
+    // Create screenshot proxy that applies stabilization before each capture
+    const stabilization = this.settings?.stabilization || DEFAULT_STABILIZATION_SETTINGS;
+    const screenshotProxy = new Proxy(page, {
+      get: (target, prop) => {
+        if (prop === 'screenshot') {
+          return async (options?: Parameters<Page['screenshot']>[0]) => {
+            await applyStabilization(target, baseUrl, stabilization);
+            return target.screenshot(options);
+          };
+        }
+        return (target as any)[prop];
+      },
+    });
+
     const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
     const fn = new AsyncFunction(
       'page', 'baseUrl', 'screenshotPath', 'stepLogger', 'expect', 'appState',
@@ -947,7 +962,7 @@ export class DebugRunner {
     );
 
     return fn(
-      page, baseUrl, screenshotPath, helpers.stepLogger, helpers.expectFn, helpers.appStateFn,
+      screenshotProxy, baseUrl, screenshotPath, helpers.stepLogger, helpers.expectFn, helpers.appStateFn,
       helpers.locateWithFallback, helpers.fileUpload, helpers.clipboard, helpers.downloads,
       helpers.network, helpers.replayCursorPath, __checkpoint,
     ).catch((err: unknown) => {
