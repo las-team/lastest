@@ -713,9 +713,9 @@ export class TestRunner {
     const originalScreenshot = page.screenshot.bind(page);
     const pageWithScreenshot = page as Page & { screenshot: typeof originalScreenshot };
     pageWithScreenshot.screenshot = async (options?: Parameters<typeof originalScreenshot>[0]) => {
-      const result = await originalScreenshot(options);
       const label = `Step ${screenshotStep++}`;
       await captureScreenshot(label);
+      const result = await originalScreenshot(options);
       return result;
     };
 
