@@ -523,6 +523,8 @@ export function RecordingClient({
           testId: rerecordTest.id,
           code: generatedCode,
           targetUrl: url,
+          viewportWidth: settings.viewportWidth ?? 1280,
+          viewportHeight: settings.viewportHeight ?? 720,
         });
         router.push(`/tests/${rerecordTest.id}`);
       } else {
@@ -534,6 +536,8 @@ export function RecordingClient({
           code: generatedCode,
           repositoryId,
           requiredCapabilities,
+          viewportWidth: settings.viewportWidth ?? 1280,
+          viewportHeight: settings.viewportHeight ?? 720,
         });
         router.push(`/tests/${test.id}`);
       }

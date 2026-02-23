@@ -317,6 +317,8 @@ export async function saveRecordedTest(data: {
   code: string;
   repositoryId?: string | null;
   requiredCapabilities?: { fileUpload?: boolean; clipboard?: boolean; networkInterception?: boolean; downloads?: boolean } | null;
+  viewportWidth?: number;
+  viewportHeight?: number;
 }) {
   if (data.repositoryId) await requireRepoAccess(data.repositoryId);
   else await requireTeamAccess();
@@ -327,7 +329,7 @@ export async function saveRecordedTest(data: {
     code: data.code,
     repositoryId: data.repositoryId ?? null,
     requiredCapabilities: data.requiredCapabilities ?? undefined,
-  });
+  }, null, data.viewportWidth ? { width: data.viewportWidth, height: data.viewportHeight } : null);
 
   // Auto-enable Playwright settings for detected capabilities
   if (data.requiredCapabilities && data.repositoryId) {
@@ -360,15 +362,22 @@ export async function updateRerecordedTest(data: {
   testId: string;
   code: string;
   targetUrl?: string;
+  viewportWidth?: number;
+  viewportHeight?: number;
 }) {
   await requireTeamAccess();
-  const { updateTestWithVersion, getTest } = await import('@/lib/db/queries');
+  const { updateTestWithVersion, getTest, getPlaywrightSettings } = await import('@/lib/db/queries');
   const { getCurrentBranchForRepo } = await import('@/lib/git-utils');
 
   const { updateTest } = await import('@/lib/db/queries');
 
   const test = await getTest(data.testId);
   const branch = await getCurrentBranchForRepo(test?.repositoryId);
+
+  // Use passed viewport or look up from playwright settings
+  const viewport = data.viewportWidth
+    ? { width: data.viewportWidth, height: data.viewportHeight }
+    : null;
 
   await updateTestWithVersion(
     data.testId,
@@ -377,7 +386,8 @@ export async function updateRerecordedTest(data: {
       ...(data.targetUrl && { targetUrl: data.targetUrl }),
     },
     'rerecorded',
-    branch ?? undefined
+    branch ?? undefined,
+    viewport
   );
 
   // Clear placeholder flag after re-recording

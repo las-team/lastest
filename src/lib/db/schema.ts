@@ -758,6 +758,8 @@ export const testVersions = sqliteTable('test_versions', {
   firstBuildId: text('first_build_id'), // nullable — first build that executed this version
   firstBuildBranch: text('first_build_branch'), // denormalized branch name from first build
   firstBuildCommit: text('first_build_commit'), // denormalized commit SHA from first build
+  viewportWidth: integer('viewport_width'),
+  viewportHeight: integer('viewport_height'),
   createdAt: integer('created_at', { mode: 'timestamp' }),
 });
 

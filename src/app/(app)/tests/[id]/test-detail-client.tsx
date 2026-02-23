@@ -927,6 +927,11 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
                             <span className="text-xs px-2 py-0.5 rounded bg-muted capitalize">
                               {version.changeReason?.replace(/_/g, ' ') || 'manual edit'}
                             </span>
+                            {version.viewportWidth && version.viewportHeight && (
+                              <span className="text-xs px-2 py-0.5 rounded bg-muted font-mono text-muted-foreground">
+                                {version.viewportWidth}&times;{version.viewportHeight}
+                              </span>
+                            )}
                           </div>
                           <div className="flex items-center gap-2">
                             <span className="text-xs text-muted-foreground">
