@@ -302,6 +302,25 @@ export async function setupFreezeScripts(
     await page.addInitScript(FREEZE_ANIMATIONS_SCRIPT);
   }
 
+  // Excalidraw RNG stabilization: override the LCG PRNG used by both Excalidraw's
+  // global Random and roughjs's per-element Random. Math.imul(48271, seed) is the
+  // LCG step function — by making it return a constant, ALL Random.next() calls
+  // return the same value regardless of how many intermediate calls (versionNonce,
+  // element mutations, etc.) happen between Playwright actions. This eliminates
+  // non-deterministic roughjs rendering entirely: all elements get the same seed
+  // and roughjs produces identical wobble patterns every run.
+  if (settings.freezeAnimations) {
+    await page.addInitScript(`
+      (function() {
+        var _origImul = Math.imul;
+        Math.imul = function(a, b) {
+          if (a === 48271) return 1073741824;
+          return _origImul(a, b);
+        };
+      })();
+    `);
+  }
+
   // Disable image smoothing on canvas 2D contexts for deterministic rendering
   if (settings.disableImageSmoothing) {
     await page.addInitScript(`

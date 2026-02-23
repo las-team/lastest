@@ -1063,6 +1063,18 @@ export class PlaywrightRunner extends EventEmitter {
       // Freeze CSS + JS animations if enabled (uses addInitScript to persist across navigations)
       if (this.settings?.freezeAnimations) {
         await page.addInitScript(FREEZE_ANIMATIONS_SCRIPT);
+        // Freeze the LCG PRNG used by Excalidraw/roughjs — Math.imul(48271, seed)
+        // returns a constant so Random.next() never advances state, eliminating
+        // non-deterministic roughjs rendering from PRNG drift between actions.
+        await page.addInitScript(`
+          (function() {
+            var _origImul = Math.imul;
+            Math.imul = function(a, b) {
+              if (a === 48271) return 1073741824;
+              return _origImul(a, b);
+            };
+          })();
+        `);
       }
 
       // Patterns for console errors that should be ignored (React dev warnings, hydration, etc.)
