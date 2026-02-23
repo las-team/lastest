@@ -45,19 +45,80 @@ export const FREEZE_ANIMATIONS_SCRIPT = `
   document.addEventListener('DOMContentLoaded', inject);
 })();
 
-// 2. Block Element.prototype.animate (Web Animations API)
+// 2. Block Element.prototype.animate (Web Animations API) — prevents libraries
+//    like slick-slider from creating new JS-driven animations
 var _origAnimate = Element.prototype.animate;
 Element.prototype.animate = function() {
+  // Return a minimal Animation-like object that does nothing
   return { cancel: function(){}, finish: function(){}, pause: function(){}, play: function(){},
            onfinish: null, oncancel: null, playState: 'finished', finished: Promise.resolve(),
            effect: null, timeline: null, id: '', currentTime: 0, startTime: 0,
            addEventListener: function(){}, removeEventListener: function(){} };
 };
 
-// 3. Override setInterval to prevent auto-advancing carousels/tickers.
-var _origSetInterval = window.setInterval;
-window.setInterval = function() {
-  return 0;
+// 3b. Gate requestAnimationFrame — queue callbacks instead of firing them.
+// Gating is DISABLED during page load to allow initial rendering.
+// Enable via window.__enableRAFGating() after the page is interactive.
+var _origRAF = window.requestAnimationFrame;
+var _origCancelRAF = window.cancelAnimationFrame;
+var _rafQueue = new Map();
+var _rafNextId = 1;
+var _rafGatingEnabled = false;
+window.requestAnimationFrame = function(callback) {
+  if (!_rafGatingEnabled) {
+    return _origRAF(callback);
+  }
+  var id = _rafNextId++;
+  _rafQueue.set(id, callback);
+  return id;
+};
+window.cancelAnimationFrame = function(id) {
+  if (_rafGatingEnabled) {
+    _rafQueue.delete(id);
+  } else {
+    _origCancelRAF(id);
+  }
+};
+window.__enableRAFGating = function() { _rafGatingEnabled = true; };
+window.__disableRAFGating = function() { _rafGatingEnabled = false; };
+
+// 3c. Gate setTimeout with delay > 100ms — catches debounced operations.
+// Also deferred until __enableRAFGating() is called.
+var _origSetTimeout = window.setTimeout;
+var _origClearTimeout = window.clearTimeout;
+var _timeoutQueue = new Map();
+var _timeoutNextId = 1;
+window.setTimeout = function(callback, delay) {
+  if (typeof callback !== 'function') {
+    return _origSetTimeout.apply(window, arguments);
+  }
+  if (_rafGatingEnabled && delay > 100) {
+    var id = _timeoutNextId++;
+    _timeoutQueue.set(id, callback);
+    return id;
+  }
+  return _origSetTimeout.call(window, callback, delay);
+};
+window.clearTimeout = function(id) {
+  if (_timeoutQueue.has(id)) {
+    _timeoutQueue.delete(id);
+  } else {
+    _origClearTimeout.call(window, id);
+  }
+};
+
+// Flush gated RAF callbacks deterministically before screenshots.
+// Only flushes RAF — gated timeouts are intentionally NOT flushed because
+// they may cause side-effects (auto-save indicators, undo checkpoints) that
+// change the visual state. They are gated solely to prevent RNG drift.
+// Runs multiple iterations because each flush can schedule new callbacks.
+window.__flushAnimationFrames = function(maxIterations) {
+  maxIterations = maxIterations || 10;
+  for (var i = 0; i < maxIterations && _rafQueue.size > 0; i++) {
+    var rafCbs = Array.from(_rafQueue.values());
+    _rafQueue.clear();
+    rafCbs.forEach(function(cb) { try { cb(1000); } catch(e) {} });
+  }
 };
 
 // 4. Cancel all existing Web Animations on DOMContentLoaded and load
@@ -223,6 +284,14 @@ export async function setupFreezeScripts(
 
   if (settings.freezeTimestamps) {
     await page.clock.setFixedTime(new Date(settings.frozenTimestamp));
+    // Playwright's setFixedTime does NOT freeze performance.now() — override it
+    // so timing-dependent rendering (e.g. Excalidraw animations) is deterministic.
+    await page.addInitScript(`
+      (function() {
+        var frozen = 1000;
+        performance.now = function() { return frozen; };
+      })();
+    `);
   }
 
   if (settings.freezeRandomValues) {
@@ -231,6 +300,22 @@ export async function setupFreezeScripts(
 
   if (settings.freezeAnimations) {
     await page.addInitScript(FREEZE_ANIMATIONS_SCRIPT);
+  }
+
+  // Disable image smoothing on canvas 2D contexts for deterministic rendering
+  if (settings.disableImageSmoothing) {
+    await page.addInitScript(`
+      (function() {
+        var _origGetContext = HTMLCanvasElement.prototype.getContext;
+        HTMLCanvasElement.prototype.getContext = function(type, attrs) {
+          var ctx = _origGetContext.call(this, type, attrs);
+          if (ctx && type === '2d') {
+            ctx.imageSmoothingEnabled = false;
+          }
+          return ctx;
+        };
+      })();
+    `);
   }
 }
 
@@ -328,4 +413,53 @@ export async function applyPreScreenshotStabilization(
       { timeout: settings.domStableTimeout, stableMs: 200 }
     ).catch(() => {});
   }
+
+  // 6. Enable RAF/setTimeout gating then flush queued callbacks deterministically
+  await page.evaluate(() => {
+    if (typeof (window as any).__enableRAFGating === 'function') {
+      (window as any).__enableRAFGating();
+    }
+    if (typeof (window as any).__flushAnimationFrames === 'function') {
+      (window as any).__flushAnimationFrames(10);
+    }
+  }).catch(() => {});
+
+  // 7. Wait for canvas stability (flush + toDataURL comparison loop)
+  if (settings.waitForCanvasStable) {
+    await waitForCanvasStable(page, settings.canvasStableTimeout, settings.canvasStableThreshold);
+  }
+}
+
+/**
+ * Wait for canvas elements to produce stable output.
+ * Runs flush-then-check iterations synchronously in a single evaluate call.
+ */
+async function waitForCanvasStable(
+  page: Page,
+  _timeout: number,
+  threshold: number
+): Promise<void> {
+  await page.evaluate(({ stableNeeded }) => {
+    const flush = (window as any).__flushAnimationFrames;
+    if (typeof flush !== 'function') return;
+
+    let lastDataUrls = '';
+    let stableCount = 0;
+
+    for (let i = 0; i < 30; i++) {
+      flush(10);
+      const canvases = Array.from(document.querySelectorAll('canvas'));
+      const dataUrls = canvases.map((c: HTMLCanvasElement) => {
+        try { return c.toDataURL(); } catch { return ''; }
+      }).join('|');
+
+      if (dataUrls === lastDataUrls) {
+        stableCount++;
+        if (stableCount >= stableNeeded) return;
+      } else {
+        stableCount = 0;
+      }
+      lastDataUrls = dataUrls;
+    }
+  }, { stableNeeded: threshold }).catch(() => {});
 }

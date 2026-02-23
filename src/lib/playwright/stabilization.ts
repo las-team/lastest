@@ -270,6 +270,44 @@ async function injectCSS(page: Page, css: string): Promise<void> {
 }
 
 /**
+ * Wait for all canvas elements to produce stable output.
+ * Runs entirely within a single page.evaluate() call to avoid non-deterministic
+ * async callbacks (short timeouts, MessageChannel) firing between flush iterations.
+ * Flushes gated RAF and compares canvas.toDataURL() until stable.
+ */
+export async function waitForCanvasStable(
+  page: Page,
+  _timeout: number,
+  threshold: number
+): Promise<void> {
+  await page.evaluate(({ stableNeeded }) => {
+    const flush = (window as any).__flushAnimationFrames;
+    if (typeof flush !== 'function') return;
+
+    let lastDataUrls = '';
+    let stableCount = 0;
+
+    // Run up to 30 flush-then-check iterations in a single JS execution context.
+    // No delays between iterations — prevents non-deterministic async callbacks.
+    for (let i = 0; i < 30; i++) {
+      flush(10);
+      const canvases = Array.from(document.querySelectorAll('canvas'));
+      const dataUrls = canvases.map((c: HTMLCanvasElement) => {
+        try { return c.toDataURL(); } catch { return ''; }
+      }).join('|');
+
+      if (dataUrls === lastDataUrls) {
+        stableCount++;
+        if (stableCount >= stableNeeded) return;
+      } else {
+        stableCount = 0;
+      }
+      lastDataUrls = dataUrls;
+    }
+  }, { stableNeeded: threshold }).catch(() => {});
+}
+
+/**
  * Apply all stabilization techniques to a page before screenshot.
  * This is the main entry point called by the runner.
  */
@@ -318,6 +356,22 @@ export async function applyStabilization(
   if (s.waitForDomStable) {
     await waitForDomStable(page, s.domStableTimeout);
   }
+
+  // 8. Enable RAF/setTimeout gating (was deferred during page load for rendering)
+  //    then flush all queued callbacks deterministically before screenshot.
+  await page.evaluate(() => {
+    if (typeof (window as any).__enableRAFGating === 'function') {
+      (window as any).__enableRAFGating();
+    }
+    if (typeof (window as any).__flushAnimationFrames === 'function') {
+      (window as any).__flushAnimationFrames(10);
+    }
+  }).catch(() => {});
+
+  // 9. Wait for canvas stability (single-evaluate loop of flush + toDataURL comparison)
+  if (s.waitForCanvasStable) {
+    await waitForCanvasStable(page, s.canvasStableTimeout, s.canvasStableThreshold);
+  }
 }
 
 /**
@@ -333,10 +387,35 @@ export async function setupFreezeScripts(
   // Freeze timestamps using Playwright's built-in clock API
   if (s.freezeTimestamps) {
     await page.clock.setFixedTime(new Date(s.frozenTimestamp));
+    // Playwright's setFixedTime does NOT freeze performance.now() — it continues
+    // returning real elapsed time. Override it so timing-dependent rendering
+    // (e.g. Excalidraw animations, roughjs stroke timing) is deterministic.
+    await page.addInitScript(`
+      (function() {
+        var frozen = 1000;
+        performance.now = function() { return frozen; };
+      })();
+    `);
   }
 
   // Freeze random values
   if (s.freezeRandomValues) {
     await page.addInitScript(getFreezeRandomScript(s.randomSeed));
+  }
+
+  // Disable image smoothing on canvas 2D contexts for deterministic rendering
+  if (s.disableImageSmoothing) {
+    await page.addInitScript(`
+      (function() {
+        var _origGetContext = HTMLCanvasElement.prototype.getContext;
+        HTMLCanvasElement.prototype.getContext = function(type, attrs) {
+          var ctx = _origGetContext.call(this, type, attrs);
+          if (ctx && type === '2d') {
+            ctx.imageSmoothingEnabled = false;
+          }
+          return ctx;
+        };
+      })();
+    `);
   }
 }

@@ -52,6 +52,10 @@ export interface StabilizationPayload {
   waitForImages: boolean;
   waitForImagesTimeout: number;
   crossOsFontCSS?: string;
+  waitForCanvasStable: boolean;
+  canvasStableTimeout: number;
+  canvasStableThreshold: number;
+  disableImageSmoothing: boolean;
 }
 
 export interface RunTestCommandPayload {

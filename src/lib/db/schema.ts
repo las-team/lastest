@@ -439,6 +439,14 @@ export interface StabilizationSettings {
   maskPatterns: string[];           // Pattern types to mask (default: ['timestamps', 'uuids', 'relative-times'])
   maskStyle: 'solid-color' | 'placeholder-text'; // How to mask matched content (default: 'solid-color')
   maskColor: string;                // Color for solid-color mask (default: '#808080')
+
+  // Canvas stabilization
+  waitForCanvasStable: boolean;     // Loop canvas.toDataURL() comparisons until stable (default: false)
+  canvasStableTimeout: number;      // Max wait time in ms (default: 3000)
+  canvasStableThreshold: number;    // Consecutive stable checks needed (default: 2)
+
+  // Canvas rendering
+  disableImageSmoothing: boolean;   // Set imageSmoothingEnabled = false on 2D contexts (default: false)
 }
 
 // Default stabilization settings
@@ -468,6 +476,10 @@ export const DEFAULT_STABILIZATION_SETTINGS: StabilizationSettings = {
   maskPatterns: ['timestamps', 'uuids', 'relative-times'],
   maskStyle: 'solid-color',
   maskColor: '#808080',
+  waitForCanvasStable: false,
+  canvasStableTimeout: 3000,
+  canvasStableThreshold: 2,
+  disableImageSmoothing: false,
 };
 
 // Stability metadata from burst capture

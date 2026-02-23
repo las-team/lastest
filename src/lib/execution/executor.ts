@@ -45,8 +45,9 @@ function hashCode(code: string): string {
 /**
  * Build a StabilizationPayload from PlaywrightSettings for remote runners.
  */
-function buildStabilizationPayload(settings?: PlaywrightSettings | null): StabilizationPayload {
-  const stab = settings?.stabilization ?? DEFAULT_STABILIZATION_SETTINGS;
+function buildStabilizationPayload(settings?: PlaywrightSettings | null): StabilizationPayload | undefined {
+  if (!settings?.stabilization) return undefined;
+  const stab = settings.stabilization;
   return {
     freezeTimestamps: stab.freezeTimestamps,
     frozenTimestamp: stab.frozenTimestamp,
@@ -62,6 +63,10 @@ function buildStabilizationPayload(settings?: PlaywrightSettings | null): Stabil
     waitForImages: stab.waitForImages,
     waitForImagesTimeout: stab.waitForImagesTimeout,
     ...(stab.crossOsConsistency ? { crossOsFontCSS: getCrossOsFontCSS() } : {}),
+    waitForCanvasStable: stab.waitForCanvasStable,
+    canvasStableTimeout: stab.canvasStableTimeout,
+    canvasStableThreshold: stab.canvasStableThreshold,
+    disableImageSmoothing: stab.disableImageSmoothing,
   };
 }
 

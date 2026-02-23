@@ -14,12 +14,12 @@ Accept Downloads
 Network Interception
 ## features
 Support https://github.com/excalidraw/excalidraw/tree/master/packages/excalidraw/tests ~/.claude/plans/declarative-kindling-coral.md 70%
+    ● Summary saved to memory/excalidraw-stabilization.md. 
 
-Online - support agent sdk via runner
-Run runner on server in docker
-
+ai on zima
 branch specific url storage
 ## ideas
+Changed region detection via flood-fill algorithm
 Test coverage assessment and recreation based on existing test set
 Tweet about us
 Content comparison - compare text in 2 setups

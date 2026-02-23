@@ -805,9 +805,10 @@ export class PlaywrightRunner extends EventEmitter {
       // Cross-OS consistency: inject Chromium flags for identical rendering across OS
       const stabilization = this.getStabilizationSettings();
       const browserType = this.settings?.browser || 'chromium';
-      const launchArgs = (stabilization.crossOsConsistency && browserType === 'chromium')
-        ? CROSS_OS_CHROMIUM_ARGS
-        : [];
+      // Use deterministic rendering args when crossOsConsistency or freezeAnimations
+      // is enabled — GPU compositing causes non-deterministic canvas anti-aliasing.
+      const needsDeterministicRendering = (stabilization.crossOsConsistency || this.settings?.freezeAnimations) && browserType === 'chromium';
+      const launchArgs = needsDeterministicRendering ? CROSS_OS_CHROMIUM_ARGS : [];
 
       // Cast needed as Playwright types may not include 'shell' yet
       this.browser = await launcher.launch({
@@ -1292,6 +1293,13 @@ export class PlaywrightRunner extends EventEmitter {
                 currentStepLabel = `Step ${stepCounter}`;
 
               }
+              // Disable RAF gating after screenshot so page can render during subsequent test actions
+              await target.evaluate(() => {
+                if (typeof (window as any).__disableRAFGating === 'function') {
+                  (window as any).__disableRAFGating();
+                }
+              }).catch(() => {});
+
               return result;
             };
           }

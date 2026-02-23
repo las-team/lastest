@@ -181,8 +181,12 @@ export class TestRunner {
       logFn('info', 'Launching browser...');
       onProgress?.('Launching browser', 10);
 
-      // Determine launch args based on stabilization settings
-      const launchArgs = command.stabilization?.crossOsConsistency ? CROSS_OS_CHROMIUM_ARGS : [];
+      // Determine launch args based on stabilization settings.
+      // Use deterministic rendering args when EITHER crossOsConsistency or freezeAnimations
+      // is enabled — GPU compositing and Skia optimizations cause non-deterministic
+      // anti-aliasing on canvas elements (roughjs lines differ between runs).
+      const needsDeterministicRendering = command.stabilization?.crossOsConsistency || command.stabilization?.freezeAnimations;
+      const launchArgs = needsDeterministicRendering ? CROSS_OS_CHROMIUM_ARGS : [];
 
       // Use shared browser instance (will relaunch if args changed)
       await this.ensureBrowser(launchArgs);
@@ -251,6 +255,12 @@ export class TestRunner {
           const { width, height } = viewport;
           screenshots.push({ filename, data: base64, width, height });
           logFn('info', `Captured screenshot: ${filename}`);
+          // Disable RAF gating after screenshot so page can render during subsequent test actions
+          await page.evaluate(() => {
+            if (typeof (window as any).__disableRAFGating === 'function') {
+              (window as any).__disableRAFGating();
+            }
+          }).catch(() => {});
         } catch (err) {
           logFn('warn', `Failed to capture screenshot: ${err}`);
         }
@@ -414,7 +424,8 @@ export class TestRunner {
       }
 
       logFn('info', 'Launching browser for setup...');
-      const setupLaunchArgs = command.stabilization?.crossOsConsistency ? CROSS_OS_CHROMIUM_ARGS : [];
+      const needsDeterministicRendering = command.stabilization?.crossOsConsistency || command.stabilization?.freezeAnimations;
+      const setupLaunchArgs = needsDeterministicRendering ? CROSS_OS_CHROMIUM_ARGS : [];
       await this.ensureBrowser(setupLaunchArgs);
 
       const viewport = command.viewport || { width: 1280, height: 720 };
