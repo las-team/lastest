@@ -282,6 +282,11 @@ export const CROSS_OS_CHROMIUM_ARGS = [
   '--hide-scrollbars',
   '--disable-skia-runtime-opts',
   '--disable-accelerated-2d-canvas',
+  '--run-all-compositor-stages-before-draw',
+  '--disable-threaded-animation',
+  '--disable-partial-raster',
+  '--disable-checker-imaging',
+  '--force-device-scale-factor=1',
 ];
 
 /**
@@ -311,6 +316,22 @@ export function getCrossOsFontCSS(): string {
 `;
   return _crossOsFontCSSCache;
 }
+
+/**
+ * CSS injected for deterministic rendering: hides cursor, caret, text selection,
+ * and normalizes font smoothing. Applied when crossOsConsistency or freezeAnimations
+ * is enabled to eliminate visual non-determinism between runs.
+ */
+export const DETERMINISTIC_RENDERING_CSS = `*, *::before, *::after {
+  cursor: none !important;
+  caret-color: transparent !important;
+  -webkit-font-smoothing: antialiased !important;
+  -moz-osx-font-smoothing: grayscale !important;
+}
+::selection {
+  background: transparent !important;
+  color: inherit !important;
+}`;
 
 /**
  * 1x1 transparent PNG placeholder for mocked third-party images.

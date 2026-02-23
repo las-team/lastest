@@ -1,5 +1,5 @@
 import { chromium, firefox, webkit, Browser, Page, BrowserContext, Locator } from 'playwright';
-import { FREEZE_ANIMATIONS_CSS, FREEZE_ANIMATIONS_SCRIPT, CROSS_OS_CHROMIUM_ARGS } from './constants';
+import { FREEZE_ANIMATIONS_CSS, FREEZE_ANIMATIONS_SCRIPT, CROSS_OS_CHROMIUM_ARGS, DETERMINISTIC_RENDERING_CSS } from './constants';
 import { EventEmitter } from 'events';
 import path from 'path';
 import fs from 'fs';
@@ -1063,22 +1063,29 @@ export class PlaywrightRunner extends EventEmitter {
       // Freeze CSS + JS animations if enabled (uses addInitScript to persist across navigations)
       if (this.settings?.freezeAnimations) {
         await page.addInitScript(FREEZE_ANIMATIONS_SCRIPT);
-        // Deterministic counter-based LCG for Excalidraw/roughjs — produces varied
-        // values (proper hachure fills) but resets to known seed before each screenshot.
+        // Excalidraw RNG: roughjs uses each element's stored seed via Math.imul(48271, seed).
+        // Provide no-op __resetExcalidrawRNG for backward compatibility with call sites.
         await page.addInitScript(`
           (function() {
-            var _origImul = Math.imul;
-            var _excalidrawRNGState = 42;
-            window.__resetExcalidrawRNG = function() { _excalidrawRNGState = 42; };
-            Math.imul = function(a, b) {
-              if (a === 48271) {
-                _excalidrawRNGState = _origImul(48271, _excalidrawRNGState);
-                return _excalidrawRNGState;
-              }
-              return _origImul(a, b);
-            };
+            window.__resetExcalidrawRNG = function() {};
           })();
         `);
+        // Force willReadFrequently on canvas 2D contexts when freezeAnimations is
+        // enabled (but crossOsConsistency is not — that case is in setupFreezeScripts).
+        // This ensures CPU-backed canvas for deterministic toDataURL() results.
+        if (!stabilization.crossOsConsistency) {
+          await page.addInitScript(`
+            (function() {
+              var _origGetContext = HTMLCanvasElement.prototype.getContext;
+              HTMLCanvasElement.prototype.getContext = function(type, attrs) {
+                if (type === '2d') {
+                  attrs = Object.assign({}, attrs || {}, { willReadFrequently: true });
+                }
+                return _origGetContext.call(this, type, attrs);
+              };
+            })();
+          `);
+        }
       }
 
       // Patterns for console errors that should be ignored (React dev warnings, hydration, etc.)
@@ -1254,6 +1261,12 @@ export class PlaywrightRunner extends EventEmitter {
             return async (options?: Parameters<Page['screenshot']>[0]) => {
               // Apply stabilization before screenshot
               await applyStabilization(target, targetUrl, stabilization);
+
+              // Inject deterministic rendering CSS when freezeAnimations is enabled
+              // (crossOsConsistency case is already handled in applyStabilization)
+              if (this.settings?.freezeAnimations && !stabilization.crossOsConsistency) {
+                await target.addStyleTag({ content: DETERMINISTIC_RENDERING_CSS }).catch(() => {});
+              }
 
               // Apply dynamic content masking before screenshot
               if (stabilization.autoMaskDynamicContent) {

@@ -1,7 +1,7 @@
 import type { Page, Route } from 'playwright';
 import type { StabilizationSettings } from '@/lib/db/schema';
 import { DEFAULT_STABILIZATION_SETTINGS } from '@/lib/db/schema';
-import { HIDE_SPINNERS_CSS, PLACEHOLDER_IMAGE_BUFFER, SYSTEM_FONTS_CSS, getCrossOsFontCSS } from './constants';
+import { DETERMINISTIC_RENDERING_CSS, HIDE_SPINNERS_CSS, PLACEHOLDER_IMAGE_BUFFER, SYSTEM_FONTS_CSS, getCrossOsFontCSS } from './constants';
 
 /**
  * JavaScript to inject for seeding Math.random() AND crypto.getRandomValues().
@@ -335,10 +335,11 @@ export async function applyStabilization(
     await waitForStylesLoaded(page, 3000);
   }
 
-  // 4. Apply font override (cross-OS bundled font supersedes system fonts)
-  if (s.crossOsConsistency) {
-    await injectCSS(page, getCrossOsFontCSS());
-  } else if (s.disableWebfonts) {
+  // 4. Font + deterministic CSS injection moved to setupFreezeScripts (init scripts)
+  //    to avoid re-injecting <style> tags on every screenshot which triggers re-renders.
+  //    System font CSS (disableWebfonts without crossOsConsistency) still injected here
+  //    since it doesn't affect canvas rendering determinism.
+  if (!s.crossOsConsistency && s.disableWebfonts) {
     await injectCSS(page, SYSTEM_FONTS_CSS);
   }
 
@@ -406,14 +407,59 @@ export async function setupFreezeScripts(
     await page.addInitScript(getFreezeRandomScript(s.randomSeed));
   }
 
-  // Disable image smoothing on canvas 2D contexts for deterministic rendering
-  if (s.disableImageSmoothing) {
+  // Inject deterministic rendering CSS early via init script (before page scripts run).
+  // Previously injected via injectCSS/addStyleTag in applyStabilization, which added
+  // a new <style> tag on every screenshot and could trigger re-renders that advance RNG.
+  if (s.crossOsConsistency) {
+    await page.addInitScript(`
+      (function() {
+        function inject() {
+          if (!document.querySelector('[data-deterministic-css]') && (document.head || document.documentElement)) {
+            var style = document.createElement('style');
+            style.setAttribute('data-deterministic-css', 'true');
+            style.textContent = ${JSON.stringify(DETERMINISTIC_RENDERING_CSS)};
+            (document.head || document.documentElement).appendChild(style);
+          }
+        }
+        inject();
+        document.addEventListener('DOMContentLoaded', inject);
+      })();
+    `);
+
+    // Inject cross-OS font CSS early via init script (prevents FOUC from late injection)
+    const fontCSS = getCrossOsFontCSS();
+    await page.addInitScript(`
+      (function() {
+        var css = ${JSON.stringify(fontCSS)};
+        function inject() {
+          if (!document.querySelector('[data-cross-os-fonts]') && (document.head || document.documentElement)) {
+            var style = document.createElement('style');
+            style.setAttribute('data-cross-os-fonts', 'true');
+            style.textContent = css;
+            (document.head || document.documentElement).appendChild(style);
+          }
+        }
+        inject();
+        document.addEventListener('DOMContentLoaded', inject);
+      })();
+    `);
+  }
+
+  // Canvas determinism: force willReadFrequently for CPU-backed canvas (avoids GPU readback
+  // non-determinism) and optionally disable imageSmoothingEnabled.
+  const needsDeterministicCanvas = s.crossOsConsistency || s.disableImageSmoothing;
+  if (needsDeterministicCanvas) {
+    const forceWillReadFrequently = s.crossOsConsistency;
+    const disableSmoothing = s.disableImageSmoothing;
     await page.addInitScript(`
       (function() {
         var _origGetContext = HTMLCanvasElement.prototype.getContext;
         HTMLCanvasElement.prototype.getContext = function(type, attrs) {
+          if (type === '2d' && ${forceWillReadFrequently}) {
+            attrs = Object.assign({}, attrs || {}, { willReadFrequently: true });
+          }
           var ctx = _origGetContext.call(this, type, attrs);
-          if (ctx && type === '2d') {
+          if (ctx && type === '2d' && ${disableSmoothing}) {
             ctx.imageSmoothingEnabled = false;
           }
           return ctx;

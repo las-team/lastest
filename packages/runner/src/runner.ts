@@ -5,7 +5,7 @@
 
 import { chromium, Browser, Page, BrowserContext } from 'playwright';
 import { createHash } from 'crypto';
-import type { RunTestCommandPayload, RunSetupCommandPayload, LogEntry } from './protocol.js';
+import type { RunTestCommandPayload, RunSetupCommandPayload, LogEntry, StabilizationPayload } from './protocol.js';
 import { CROSS_OS_CHROMIUM_ARGS, setupFreezeScripts, applyPreScreenshotStabilization } from './stabilization.js';
 
 /**
@@ -285,7 +285,7 @@ export class TestRunner {
 
       try {
         await Promise.race([
-          this.executeTestCode(page, command.code, command.targetUrl, captureScreenshot, logFn, softErrors, command.cursorPlaybackSpeed).catch(e => { throw e; }),
+          this.executeTestCode(page, command.code, command.targetUrl, captureScreenshot, logFn, softErrors, command.cursorPlaybackSpeed, command.stabilization).catch(e => { throw e; }),
           new Promise<never>((_, reject) => {
             const timer = setTimeout(() => {
               logFn('warn', `Timeout fired (${testTimeout}ms) — closing context to kill in-flight operations`);
@@ -450,7 +450,7 @@ export class TestRunner {
       logFn('info', 'Executing setup code...');
       const noopScreenshot = async () => {};
       await Promise.race([
-        this.executeTestCode(page, command.code, command.targetUrl, noopScreenshot, logFn, undefined, undefined),
+        this.executeTestCode(page, command.code, command.targetUrl, noopScreenshot, logFn, undefined, undefined, command.stabilization),
         new Promise<never>((_, reject) => {
           setTimeout(() => {
             logFn('warn', `Setup timeout fired (${setupTimeout}ms)`);
@@ -541,7 +541,8 @@ export class TestRunner {
     captureScreenshot: (label: string) => Promise<void>,
     logFn?: (level: 'info' | 'warn' | 'error', message: string) => void,
     softErrors?: string[],
-    cursorPlaybackSpeed?: number
+    cursorPlaybackSpeed?: number,
+    stabilization?: StabilizationPayload
   ): Promise<void> {
     const log = logFn ?? this.log.bind(this);
     // Extract function body from: export async function test(page, baseUrl, screenshotPath, stepLogger) { ... }
@@ -738,6 +739,27 @@ export class TestRunner {
         }
       }
     };
+
+    // Wrap key Playwright action methods with RAF flushing to ensure consistent
+    // state going into each action (prevents animation frame timing differences).
+    if (stabilization?.freezeAnimations) {
+      const wrapAction = (obj: any, method: string) => {
+        const orig = obj[method].bind(obj);
+        obj[method] = async (...args: any[]) => {
+          await page.evaluate(() => {
+            (window as any).__enableRAFGating?.();
+            (window as any).__flushAnimationFrames?.(5);
+            (window as any).__disableRAFGating?.();
+          }).catch(() => {});
+          return orig(...args);
+        };
+      };
+      wrapAction(page.mouse, 'click');
+      wrapAction(page.mouse, 'down');
+      wrapAction(page.mouse, 'up');
+      wrapAction(page.keyboard, 'press');
+      wrapAction(page, 'click');
+    }
 
     // Execute the test
     log('info', 'Compiling test function...');

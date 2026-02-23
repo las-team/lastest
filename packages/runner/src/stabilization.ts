@@ -23,7 +23,27 @@ export const CROSS_OS_CHROMIUM_ARGS = [
   '--hide-scrollbars',
   '--disable-skia-runtime-opts',
   '--disable-accelerated-2d-canvas',
+  '--run-all-compositor-stages-before-draw',
+  '--disable-threaded-animation',
+  '--disable-partial-raster',
+  '--disable-checker-imaging',
+  '--force-device-scale-factor=1',
 ];
+
+/**
+ * CSS for deterministic rendering: hides cursor, caret, text selection,
+ * and normalizes font smoothing.
+ */
+const DETERMINISTIC_RENDERING_CSS = `*, *::before, *::after {
+  cursor: none !important;
+  caret-color: transparent !important;
+  -webkit-font-smoothing: antialiased !important;
+  -moz-osx-font-smoothing: grayscale !important;
+}
+::selection {
+  background: transparent !important;
+  color: inherit !important;
+}`;
 
 /**
  * Script injected via addInitScript to freeze both CSS and JS animations.
@@ -302,35 +322,72 @@ export async function setupFreezeScripts(
     await page.addInitScript(FREEZE_ANIMATIONS_SCRIPT);
   }
 
-  // Excalidraw RNG stabilization: deterministic counter-based LCG that produces
-  // varied values (proper hachure fills) but resets to a known seed before each
-  // screenshot via window.__resetExcalidrawRNG(). This eliminates PRNG drift
-  // between runs while keeping roughjs fill rendering intact.
+  // Excalidraw RNG: roughjs uses each element's stored seed via Math.imul(48271, seed).
+  // Intercepting Math.imul replaced per-element seeds with a single accumulated sequence,
+  // coupling rendering to total call count and making it non-deterministic.
+  // Instead, provide a no-op __resetExcalidrawRNG for backward compatibility with call sites.
   if (settings.freezeAnimations) {
     await page.addInitScript(`
       (function() {
-        var _origImul = Math.imul;
-        var _excalidrawRNGState = 42;
-        window.__resetExcalidrawRNG = function() { _excalidrawRNGState = 42; };
-        Math.imul = function(a, b) {
-          if (a === 48271) {
-            _excalidrawRNGState = _origImul(48271, _excalidrawRNGState);
-            return _excalidrawRNGState;
-          }
-          return _origImul(a, b);
-        };
+        window.__resetExcalidrawRNG = function() {};
       })();
     `);
   }
 
-  // Disable image smoothing on canvas 2D contexts for deterministic rendering
-  if (settings.disableImageSmoothing) {
+  // Inject deterministic rendering CSS early via init script (before page scripts run).
+  // Previously injected via addStyleTag in applyPreScreenshotStabilization, which added
+  // a new <style> tag on every screenshot and could trigger re-renders that advance RNG.
+  if (settings.crossOsConsistency || settings.freezeAnimations) {
+    await page.addInitScript(`
+      (function() {
+        function inject() {
+          if (!document.querySelector('[data-deterministic-css]') && (document.head || document.documentElement)) {
+            var style = document.createElement('style');
+            style.setAttribute('data-deterministic-css', 'true');
+            style.textContent = ${JSON.stringify(DETERMINISTIC_RENDERING_CSS)};
+            (document.head || document.documentElement).appendChild(style);
+          }
+        }
+        inject();
+        document.addEventListener('DOMContentLoaded', inject);
+      })();
+    `);
+  }
+
+  // Inject cross-OS font CSS early via init script (prevents FOUC from late injection)
+  if (settings.crossOsFontCSS) {
+    await page.addInitScript(`
+      (function() {
+        var css = ${JSON.stringify(settings.crossOsFontCSS)};
+        function inject() {
+          if (!document.querySelector('[data-cross-os-fonts]') && (document.head || document.documentElement)) {
+            var style = document.createElement('style');
+            style.setAttribute('data-cross-os-fonts', 'true');
+            style.textContent = css;
+            (document.head || document.documentElement).appendChild(style);
+          }
+        }
+        inject();
+        document.addEventListener('DOMContentLoaded', inject);
+      })();
+    `);
+  }
+
+  // Canvas determinism: force willReadFrequently for CPU-backed canvas (avoids GPU readback
+  // non-determinism) and optionally disable imageSmoothingEnabled.
+  const needsDeterministicCanvas = settings.crossOsConsistency || settings.freezeAnimations || settings.disableImageSmoothing;
+  if (needsDeterministicCanvas) {
+    const forceWillReadFrequently = settings.crossOsConsistency || settings.freezeAnimations;
+    const disableSmoothing = settings.disableImageSmoothing;
     await page.addInitScript(`
       (function() {
         var _origGetContext = HTMLCanvasElement.prototype.getContext;
         HTMLCanvasElement.prototype.getContext = function(type, attrs) {
+          if (type === '2d' && ${forceWillReadFrequently}) {
+            attrs = Object.assign({}, attrs || {}, { willReadFrequently: true });
+          }
           var ctx = _origGetContext.call(this, type, attrs);
-          if (ctx && type === '2d') {
+          if (ctx && type === '2d' && ${disableSmoothing}) {
             ctx.imageSmoothingEnabled = false;
           }
           return ctx;
@@ -394,10 +451,8 @@ export async function applyPreScreenshotStabilization(
     }, 3000).catch(() => {});
   }
 
-  // 4. Inject cross-OS font CSS (sent from server when crossOsConsistency is enabled)
-  if (settings.crossOsFontCSS) {
-    await page.addStyleTag({ content: settings.crossOsFontCSS });
-  }
+  // 4. CSS injection (font + deterministic rendering) moved to setupFreezeScripts
+  //    to avoid re-injecting <style> tags on every screenshot which triggers re-renders.
 
   // 5. Wait for DOM stability
   if (settings.waitForDomStable) {
