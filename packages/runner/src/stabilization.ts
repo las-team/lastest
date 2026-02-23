@@ -302,19 +302,21 @@ export async function setupFreezeScripts(
     await page.addInitScript(FREEZE_ANIMATIONS_SCRIPT);
   }
 
-  // Excalidraw RNG stabilization: override the LCG PRNG used by both Excalidraw's
-  // global Random and roughjs's per-element Random. Math.imul(48271, seed) is the
-  // LCG step function — by making it return a constant, ALL Random.next() calls
-  // return the same value regardless of how many intermediate calls (versionNonce,
-  // element mutations, etc.) happen between Playwright actions. This eliminates
-  // non-deterministic roughjs rendering entirely: all elements get the same seed
-  // and roughjs produces identical wobble patterns every run.
+  // Excalidraw RNG stabilization: deterministic counter-based LCG that produces
+  // varied values (proper hachure fills) but resets to a known seed before each
+  // screenshot via window.__resetExcalidrawRNG(). This eliminates PRNG drift
+  // between runs while keeping roughjs fill rendering intact.
   if (settings.freezeAnimations) {
     await page.addInitScript(`
       (function() {
         var _origImul = Math.imul;
+        var _excalidrawRNGState = 42;
+        window.__resetExcalidrawRNG = function() { _excalidrawRNGState = 42; };
         Math.imul = function(a, b) {
-          if (a === 48271) return 1073741824;
+          if (a === 48271) {
+            _excalidrawRNGState = _origImul(48271, _excalidrawRNGState);
+            return _excalidrawRNGState;
+          }
           return _origImul(a, b);
         };
       })();
@@ -433,8 +435,11 @@ export async function applyPreScreenshotStabilization(
     ).catch(() => {});
   }
 
-  // 6. Enable RAF/setTimeout gating then flush queued callbacks deterministically
+  // 6. Reset Excalidraw RNG + enable RAF gating + flush queued callbacks deterministically
   await page.evaluate(() => {
+    if (typeof (window as any).__resetExcalidrawRNG === 'function') {
+      (window as any).__resetExcalidrawRNG();
+    }
     if (typeof (window as any).__enableRAFGating === 'function') {
       (window as any).__enableRAFGating();
     }

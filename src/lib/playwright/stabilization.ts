@@ -357,9 +357,12 @@ export async function applyStabilization(
     await waitForDomStable(page, s.domStableTimeout);
   }
 
-  // 8. Enable RAF/setTimeout gating (was deferred during page load for rendering)
-  //    then flush all queued callbacks deterministically before screenshot.
+  // 8. Reset Excalidraw RNG + enable RAF gating + flush all queued callbacks
+  //    deterministically before screenshot.
   await page.evaluate(() => {
+    if (typeof (window as any).__resetExcalidrawRNG === 'function') {
+      (window as any).__resetExcalidrawRNG();
+    }
     if (typeof (window as any).__enableRAFGating === 'function') {
       (window as any).__enableRAFGating();
     }

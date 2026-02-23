@@ -1063,14 +1063,18 @@ export class PlaywrightRunner extends EventEmitter {
       // Freeze CSS + JS animations if enabled (uses addInitScript to persist across navigations)
       if (this.settings?.freezeAnimations) {
         await page.addInitScript(FREEZE_ANIMATIONS_SCRIPT);
-        // Freeze the LCG PRNG used by Excalidraw/roughjs — Math.imul(48271, seed)
-        // returns a constant so Random.next() never advances state, eliminating
-        // non-deterministic roughjs rendering from PRNG drift between actions.
+        // Deterministic counter-based LCG for Excalidraw/roughjs — produces varied
+        // values (proper hachure fills) but resets to known seed before each screenshot.
         await page.addInitScript(`
           (function() {
             var _origImul = Math.imul;
+            var _excalidrawRNGState = 42;
+            window.__resetExcalidrawRNG = function() { _excalidrawRNGState = 42; };
             Math.imul = function(a, b) {
-              if (a === 48271) return 1073741824;
+              if (a === 48271) {
+                _excalidrawRNGState = _origImul(48271, _excalidrawRNGState);
+                return _excalidrawRNGState;
+              }
               return _origImul(a, b);
             };
           })();

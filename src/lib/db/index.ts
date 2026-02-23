@@ -6,16 +6,33 @@ import fs from 'fs';
 
 const DB_PATH = process.env.DATABASE_PATH || path.join(process.cwd(), 'lastest2.db');
 
-// Ensure the directory exists
-const dbDir = path.dirname(DB_PATH);
-if (!fs.existsSync(dbDir)) {
-  fs.mkdirSync(dbDir, { recursive: true });
+let _sqlite: InstanceType<typeof Database> | null = null;
+let _db: ReturnType<typeof drizzle<typeof schema>> | null = null;
+
+function getSqlite() {
+  if (!_sqlite) {
+    const dbDir = path.dirname(DB_PATH);
+    if (!fs.existsSync(dbDir)) {
+      fs.mkdirSync(dbDir, { recursive: true });
+    }
+    _sqlite = new Database(DB_PATH);
+    _sqlite.pragma('journal_mode = WAL');
+  }
+  return _sqlite;
 }
 
-const sqlite = new Database(DB_PATH);
-sqlite.pragma('journal_mode = WAL');
+function getDb() {
+  if (!_db) {
+    _db = drizzle(getSqlite(), { schema });
+  }
+  return _db;
+}
 
-export const db = drizzle(sqlite, { schema });
+export const db = new Proxy({} as ReturnType<typeof drizzle<typeof schema>>, {
+  get(_target, prop, receiver) {
+    return Reflect.get(getDb(), prop, receiver);
+  },
+});
 
 /**
  * @deprecated Manual schema initialization is outdated. Use `pnpm db:push` instead.
@@ -26,7 +43,7 @@ export function initializeDatabase() {
   console.warn('WARNING: initializeDatabase() is deprecated. Run `pnpm db:push` instead.');
   // Skip manual table creation - use Drizzle schema push instead
   return;
-  sqlite.exec(`
+  getSqlite().exec(`
     CREATE TABLE IF NOT EXISTS repositories (
       id TEXT PRIMARY KEY,
       github_repo_id INTEGER NOT NULL,
@@ -384,73 +401,73 @@ export function initializeDatabase() {
 
 function runMigrations() {
   // Get existing columns in repositories table
-  const repoColumns = sqlite.prepare('PRAGMA table_info(repositories)').all() as { name: string }[];
+  const repoColumns = getSqlite().prepare('PRAGMA table_info(repositories)').all() as { name: string }[];
   const repoColumnNames = new Set(repoColumns.map(c => c.name));
 
   // Migration: Add local_path to repositories if missing
   if (!repoColumnNames.has('local_path')) {
-    sqlite.exec('ALTER TABLE repositories ADD COLUMN local_path TEXT');
+    getSqlite().exec('ALTER TABLE repositories ADD COLUMN local_path TEXT');
   }
 
   // Get existing columns in visual_diffs table
-  const diffColumns = sqlite.prepare('PRAGMA table_info(visual_diffs)').all() as { name: string }[];
+  const diffColumns = getSqlite().prepare('PRAGMA table_info(visual_diffs)').all() as { name: string }[];
   const diffColumnNames = new Set(diffColumns.map(c => c.name));
 
   // Migration: Add classification to visual_diffs if missing
   if (!diffColumnNames.has('classification')) {
-    sqlite.exec('ALTER TABLE visual_diffs ADD COLUMN classification TEXT');
+    getSqlite().exec('ALTER TABLE visual_diffs ADD COLUMN classification TEXT');
   }
 
   // Migration: Add step_label to visual_diffs if missing
   if (!diffColumnNames.has('step_label')) {
-    sqlite.exec('ALTER TABLE visual_diffs ADD COLUMN step_label TEXT');
+    getSqlite().exec('ALTER TABLE visual_diffs ADD COLUMN step_label TEXT');
   }
 
   // Get existing columns in baselines table
-  const baselineColumns = sqlite.prepare('PRAGMA table_info(baselines)').all() as { name: string }[];
+  const baselineColumns = getSqlite().prepare('PRAGMA table_info(baselines)').all() as { name: string }[];
   const baselineColumnNames = new Set(baselineColumns.map(c => c.name));
 
   // Migration: Add step_label to baselines if missing
   if (!baselineColumnNames.has('step_label')) {
-    sqlite.exec('ALTER TABLE baselines ADD COLUMN step_label TEXT');
+    getSqlite().exec('ALTER TABLE baselines ADD COLUMN step_label TEXT');
   }
 
   // Get existing columns in routes table
-  const routesColumns = sqlite.prepare('PRAGMA table_info(routes)').all() as { name: string }[];
+  const routesColumns = getSqlite().prepare('PRAGMA table_info(routes)').all() as { name: string }[];
   const routesColumnNames = new Set(routesColumns.map(c => c.name));
 
   // Migration: Add description to routes if missing
   if (!routesColumnNames.has('description')) {
-    sqlite.exec('ALTER TABLE routes ADD COLUMN description TEXT');
+    getSqlite().exec('ALTER TABLE routes ADD COLUMN description TEXT');
   }
 
   // Get existing columns in builds table
-  const buildColumns = sqlite.prepare('PRAGMA table_info(builds)').all() as { name: string }[];
+  const buildColumns = getSqlite().prepare('PRAGMA table_info(builds)').all() as { name: string }[];
   const buildColumnNames = new Set(buildColumns.map(c => c.name));
 
   // Migration: Add base_url to builds if missing
   if (!buildColumnNames.has('base_url')) {
-    sqlite.exec('ALTER TABLE builds ADD COLUMN base_url TEXT');
+    getSqlite().exec('ALTER TABLE builds ADD COLUMN base_url TEXT');
   }
 
   // Get existing columns in playwright_settings table
-  const pwColumns = sqlite.prepare('PRAGMA table_info(playwright_settings)').all() as { name: string }[];
+  const pwColumns = getSqlite().prepare('PRAGMA table_info(playwright_settings)').all() as { name: string }[];
   const pwColumnNames = new Set(pwColumns.map(c => c.name));
 
   // Migration: Add pointer_gestures to playwright_settings if missing
   if (!pwColumnNames.has('pointer_gestures')) {
-    sqlite.exec('ALTER TABLE playwright_settings ADD COLUMN pointer_gestures INTEGER DEFAULT 0');
+    getSqlite().exec('ALTER TABLE playwright_settings ADD COLUMN pointer_gestures INTEGER DEFAULT 0');
   }
 
   // Migration: Add cursor_fps to playwright_settings if missing
   if (!pwColumnNames.has('cursor_fps')) {
-    sqlite.exec('ALTER TABLE playwright_settings ADD COLUMN cursor_fps INTEGER DEFAULT 30');
+    getSqlite().exec('ALTER TABLE playwright_settings ADD COLUMN cursor_fps INTEGER DEFAULT 30');
   }
 
   // Migration: Create route_test_suggestions table if missing
-  const tables = sqlite.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='route_test_suggestions'").all();
+  const tables = getSqlite().prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='route_test_suggestions'").all();
   if (tables.length === 0) {
-    sqlite.exec(`
+    getSqlite().exec(`
       CREATE TABLE IF NOT EXISTS route_test_suggestions (
         id TEXT PRIMARY KEY,
         route_id TEXT REFERENCES routes(id) ON DELETE CASCADE,
@@ -463,31 +480,31 @@ function runMigrations() {
   }
 
   // Migration: Add screenshots to test_results if missing
-  const testResultsColumns = sqlite.prepare('PRAGMA table_info(test_results)').all() as { name: string }[];
+  const testResultsColumns = getSqlite().prepare('PRAGMA table_info(test_results)').all() as { name: string }[];
   const testResultsColumnNames = new Set(testResultsColumns.map(c => c.name));
   if (!testResultsColumnNames.has('screenshots')) {
-    sqlite.exec('ALTER TABLE test_results ADD COLUMN screenshots TEXT');
+    getSqlite().exec('ALTER TABLE test_results ADD COLUMN screenshots TEXT');
   }
 
   // Migration: Add headless_mode to playwright_settings (replacing headless)
   if (!pwColumnNames.has('headless_mode')) {
-    sqlite.exec('ALTER TABLE playwright_settings ADD COLUMN headless_mode TEXT DEFAULT \'true\'');
+    getSqlite().exec('ALTER TABLE playwright_settings ADD COLUMN headless_mode TEXT DEFAULT \'true\'');
   }
 
   // Migration: Add agent_sdk columns to ai_settings
-  const aiColumns = sqlite.prepare('PRAGMA table_info(ai_settings)').all() as { name: string }[];
+  const aiColumns = getSqlite().prepare('PRAGMA table_info(ai_settings)').all() as { name: string }[];
   const aiColumnNames = new Set(aiColumns.map(c => c.name));
   if (!aiColumnNames.has('agent_sdk_permission_mode')) {
-    sqlite.exec('ALTER TABLE ai_settings ADD COLUMN agent_sdk_permission_mode TEXT DEFAULT \'plan\'');
+    getSqlite().exec('ALTER TABLE ai_settings ADD COLUMN agent_sdk_permission_mode TEXT DEFAULT \'plan\'');
   }
   if (!aiColumnNames.has('agent_sdk_working_dir')) {
-    sqlite.exec('ALTER TABLE ai_settings ADD COLUMN agent_sdk_working_dir TEXT');
+    getSqlite().exec('ALTER TABLE ai_settings ADD COLUMN agent_sdk_working_dir TEXT');
   }
 
   // Migration: Create test_versions table if missing
-  const testVersionsTables = sqlite.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='test_versions'").all();
+  const testVersionsTables = getSqlite().prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='test_versions'").all();
   if (testVersionsTables.length === 0) {
-    sqlite.exec(`
+    getSqlite().exec(`
       CREATE TABLE IF NOT EXISTS test_versions (
         id TEXT PRIMARY KEY,
         test_id TEXT NOT NULL REFERENCES tests(id) ON DELETE CASCADE,
