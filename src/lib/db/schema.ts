@@ -443,7 +443,7 @@ export interface StabilizationSettings {
   // Canvas stabilization
   waitForCanvasStable: boolean;     // Loop canvas.toDataURL() comparisons until stable (default: false)
   canvasStableTimeout: number;      // Max wait time in ms (default: 3000)
-  canvasStableThreshold: number;    // Consecutive stable checks needed (default: 2)
+  canvasStableThreshold: number;    // Consecutive stable checks needed (default: 3)
 
   // Canvas rendering
   disableImageSmoothing: boolean;   // Set imageSmoothingEnabled = false on 2D contexts (default: false)

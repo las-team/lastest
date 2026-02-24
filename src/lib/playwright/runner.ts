@@ -1,5 +1,5 @@
 import { chromium, firefox, webkit, Browser, Page, BrowserContext, Locator } from 'playwright';
-import { FREEZE_ANIMATIONS_CSS, FREEZE_ANIMATIONS_SCRIPT, CROSS_OS_CHROMIUM_ARGS, DETERMINISTIC_RENDERING_CSS } from './constants';
+import { FREEZE_ANIMATIONS_CSS, FREEZE_ANIMATIONS_SCRIPT, CROSS_OS_CHROMIUM_ARGS } from './constants';
 import { EventEmitter } from 'events';
 import path from 'path';
 import fs from 'fs';

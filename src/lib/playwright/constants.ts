@@ -80,10 +80,8 @@ window.__disableRAFGating = function() {
   var leftover = Array.from(_rafQueue.values());
   _rafQueue.clear();
   leftover.forEach(function(cb) { try { _origRAF(cb); } catch(e) {} });
-  // Drain orphaned timeouts via real setTimeout
-  var timeouts = Array.from(_timeoutQueue.values());
+  // Drop gated timeouts — they were deferred to prevent side effects during stabilization
   _timeoutQueue.clear();
-  timeouts.forEach(function(cb) { try { _origSetTimeout(cb, 0); } catch(e) {} });
 };
 
 // 3c. Gate setTimeout with delay > 100ms — catches debounced operations.
