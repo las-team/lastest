@@ -1,6 +1,6 @@
 'use client';
 
-import { FileCheck2, AlertTriangle, XCircle, Clock, RefreshCw, CheckCircle, Sparkles, Flag, GitBranch, Shield, Layers, Bug } from 'lucide-react';
+import { FileCheck2, AlertTriangle, XCircle, Clock, RefreshCw, CheckCircle, Sparkles, Flag, GitBranch, Shield, Layers, Bug, ListTree } from 'lucide-react';
 import type { FilterType } from '@/app/(app)/builds/[buildId]/build-detail-client';
 import { cn } from '@/lib/utils';
 
@@ -23,6 +23,8 @@ interface MetricsRowProps {
   onViewModeChange?: (mode: 'branch' | 'main') => void;
   groupByArea?: boolean;
   onGroupByAreaChange?: (v: boolean) => void;
+  groupByTest?: boolean;
+  onGroupByTestChange?: (v: boolean) => void;
 }
 
 export function MetricsRow({
@@ -44,6 +46,8 @@ export function MetricsRow({
   onViewModeChange,
   groupByArea = false,
   onGroupByAreaChange,
+  groupByTest = true,
+  onGroupByTestChange,
 }: MetricsRowProps) {
   const formatTime = (ms: number | null) => {
     if (!ms) return '-';
@@ -157,6 +161,45 @@ export function MetricsRow({
     }
   };
 
+  const renderCard = (metric: (typeof metrics)[number]) => {
+    const Icon = metric.icon;
+    const isClickable = metric.filterKey !== null;
+    const isActive = activeFilter && metric.filterKey === activeFilter;
+
+    return (
+      <div
+        key={metric.label}
+        onClick={() => handleClick(metric.filterKey)}
+        className={cn(
+          'p-4 rounded-lg flex flex-col items-center transition-all',
+          metric.bgColor,
+          isClickable && 'cursor-pointer hover:scale-105 hover:shadow-md',
+          isActive && 'ring-2 ring-offset-2 ring-primary'
+        )}
+        role={isClickable ? 'button' : undefined}
+        tabIndex={isClickable ? 0 : undefined}
+        onKeyDown={
+          isClickable
+            ? (e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault();
+                  handleClick(metric.filterKey);
+                }
+              }
+            : undefined
+        }
+      >
+        <div className={`text-3xl font-bold ${metric.color}`}>
+          {metric.value}
+        </div>
+        <div className="flex items-center gap-1 text-muted-foreground text-sm mt-1">
+          <Icon className="w-4 h-4" />
+          {metric.label}
+        </div>
+      </div>
+    );
+  };
+
   return (
     <div className="space-y-4">
       {/* Pass Rate Bar */}
@@ -204,45 +247,25 @@ export function MetricsRow({
       </div>
 
       {/* Metrics Grid */}
-      <div className="grid grid-cols-6 gap-4">
-        {metrics.map((metric) => {
-          const Icon = metric.icon;
-          const isClickable = metric.filterKey !== null;
-          const isActive = activeFilter && metric.filterKey === activeFilter;
+      <div className="flex items-start gap-4">
+        {/* Tests section */}
+        <div>
+          <div className="text-xs font-medium text-muted-foreground mb-2 uppercase tracking-wider">Tests</div>
+          <div className="grid grid-cols-2 gap-4">
+            {metrics.slice(0, 2).map(renderCard)}
+          </div>
+        </div>
 
-          return (
-            <div
-              key={metric.label}
-              onClick={() => handleClick(metric.filterKey)}
-              className={cn(
-                'p-4 rounded-lg flex flex-col items-center transition-all',
-                metric.bgColor,
-                isClickable && 'cursor-pointer hover:scale-105 hover:shadow-md',
-                isActive && 'ring-2 ring-offset-2 ring-primary'
-              )}
-              role={isClickable ? 'button' : undefined}
-              tabIndex={isClickable ? 0 : undefined}
-              onKeyDown={
-                isClickable
-                  ? (e) => {
-                      if (e.key === 'Enter' || e.key === ' ') {
-                        e.preventDefault();
-                        handleClick(metric.filterKey);
-                      }
-                    }
-                  : undefined
-              }
-            >
-              <div className={`text-3xl font-bold ${metric.color}`}>
-                {metric.value}
-              </div>
-              <div className="flex items-center gap-1 text-muted-foreground text-sm mt-1">
-                <Icon className="w-4 h-4" />
-                {metric.label}
-              </div>
-            </div>
-          );
-        })}
+        {/* Vertical Divider */}
+        <div className="w-px bg-border self-stretch min-h-[80px]" />
+
+        {/* Cases section */}
+        <div className="flex-1">
+          <div className="text-xs font-medium text-muted-foreground mb-2 uppercase tracking-wider">Cases</div>
+          <div className="grid grid-cols-4 gap-4">
+            {metrics.slice(2).map(renderCard)}
+          </div>
+        </div>
       </div>
 
       {/* AI Metrics Row */}
@@ -283,7 +306,7 @@ export function MetricsRow({
       )}
 
       {/* Controls Row */}
-      {(viewMode && onViewModeChange || onGroupByAreaChange) && (
+      {(viewMode && onViewModeChange || onGroupByAreaChange || onGroupByTestChange) && (
         <div className="flex items-center gap-3">
           {/* Comparison Mode Toggle — segmented control */}
           {viewMode && onViewModeChange && (
@@ -313,6 +336,22 @@ export function MetricsRow({
                 Main
               </button>
             </div>
+          )}
+
+          {/* Group by Test Toggle */}
+          {onGroupByTestChange && (
+            <button
+              onClick={() => onGroupByTestChange(!groupByTest)}
+              className={cn(
+                'inline-flex items-center gap-2 px-4 py-1.5 text-sm font-medium rounded-lg border transition-colors',
+                groupByTest
+                  ? 'bg-primary/10 text-primary border-primary/30'
+                  : 'bg-muted text-muted-foreground border-transparent hover:text-foreground'
+              )}
+            >
+              <ListTree className="w-4 h-4" />
+              Group by Test
+            </button>
           )}
 
           {/* Group by Area Toggle */}
