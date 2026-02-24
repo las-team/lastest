@@ -449,6 +449,7 @@ export interface StabilizationSettings {
   disableImageSmoothing: boolean;   // Set imageSmoothingEnabled = false on 2D contexts (default: false)
   roundCanvasCoordinates: boolean;  // Snap stroke coords to pixel centers for deterministic lines (default: false)
   reseedRandomOnInput: boolean;     // Reseed LCG from event hash on user input (default: false)
+  freezeAnimations: boolean;        // Freeze CSS animations/transitions (default: false)
 }
 
 // Default stabilization settings
@@ -484,6 +485,7 @@ export const DEFAULT_STABILIZATION_SETTINGS: StabilizationSettings = {
   disableImageSmoothing: false,
   roundCanvasCoordinates: false,
   reseedRandomOnInput: false,
+  freezeAnimations: false,
 };
 
 // Stability metadata from burst capture
