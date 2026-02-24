@@ -203,10 +203,12 @@ export class TestRunner {
           logFn('warn', `Failed to parse storageState: ${e}`);
         }
       }
+      const needsStabilizedContext = command.stabilization?.crossOsConsistency || command.stabilization?.freezeAnimations;
       context = await this.browser!.newContext({
         viewport,
         ...(parsedStorageState ? { storageState: parsedStorageState } : {}),
-        ...(command.stabilization?.crossOsConsistency || command.stabilization?.freezeAnimations ? { deviceScaleFactor: 1 } : {}),
+        ...(needsStabilizedContext ? { deviceScaleFactor: 1 } : {}),
+        ...(needsStabilizedContext ? { locale: 'en-US', timezoneId: 'UTC', colorScheme: 'light' as const } : {}),
         ...(command.stabilization?.freezeAnimations ? { reducedMotion: 'reduce' as const } : {}),
       });
       page = await context.newPage();
@@ -431,9 +433,11 @@ export class TestRunner {
 
       const viewport = command.viewport || { width: 1280, height: 720 };
       // No storageState injection — this IS the setup that creates the session
+      const needsStabilizedSetupCtx = command.stabilization?.crossOsConsistency || command.stabilization?.freezeAnimations;
       context = await this.browser!.newContext({
         viewport,
-        ...(command.stabilization?.crossOsConsistency || command.stabilization?.freezeAnimations ? { deviceScaleFactor: 1 } : {}),
+        ...(needsStabilizedSetupCtx ? { deviceScaleFactor: 1 } : {}),
+        ...(needsStabilizedSetupCtx ? { locale: 'en-US', timezoneId: 'UTC', colorScheme: 'light' as const } : {}),
         ...(command.stabilization?.freezeAnimations ? { reducedMotion: 'reduce' as const } : {}),
       });
       page = await context.newPage();

@@ -26,7 +26,7 @@ import { Badge } from '@/components/ui/badge';
 import { createAndRunBuild } from '@/server/actions/builds';
 import type { BuildChanges } from '@/server/actions/builds';
 import { analyzeSmartRun, runSmartBuild, type SmartRunAnalysis } from '@/server/actions/smart-run';
-import { testServerConnection, saveEnvironmentConfig } from '@/server/actions/environment';
+import { testServerConnection, saveEnvironmentConfig, saveBranchBaseUrl } from '@/server/actions/environment';
 import { useNotifyJobStarted } from '@/components/queue/job-polling-context';
 import { ExecutionTargetSelector } from '@/components/execution/execution-target-selector';
 import type { Test, TestRun, Build } from '@/lib/db/schema';
@@ -169,6 +169,9 @@ export function RunDashboardClient({ tests, runs: _runs, builds, repositoryId, a
         mode: 'manual',
         baseUrl,
       });
+      if (repositoryId && activeBranch) {
+        await saveBranchBaseUrl(repositoryId, activeBranch, baseUrl);
+      }
     }
     // Always test on blur
     setIsTesting(true);

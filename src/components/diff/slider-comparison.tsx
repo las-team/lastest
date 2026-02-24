@@ -5,6 +5,39 @@ import type { AlignmentSegment } from '@/lib/db/schema';
 
 type ViewMode = 'slider' | 'side-by-side' | 'overlay' | 'three-way' | 'planned-vs-actual' | 'shift-compare';
 
+function RegionOverlay({ dims, regions }: { dims: { width: number; height: number } | null; regions: ChangedRegion[] }) {
+  if (!dims || regions.length === 0) return null;
+  return (
+    <svg
+      className="absolute inset-0 w-full h-full pointer-events-none"
+      viewBox={`0 0 ${dims.width} ${dims.height}`}
+      preserveAspectRatio="none"
+    >
+      {regions.map((r, i) => (
+        <rect
+          key={i}
+          x={r.x}
+          y={r.y}
+          width={r.width}
+          height={r.height}
+          fill="none"
+          stroke="rgba(255,0,0,0.7)"
+          strokeWidth="2"
+          strokeDasharray="4"
+          vectorEffect="non-scaling-stroke"
+        />
+      ))}
+    </svg>
+  );
+}
+
+interface ChangedRegion {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
 interface SliderComparisonProps {
   baselineImage?: string;
   currentImage: string;
@@ -15,6 +48,8 @@ interface SliderComparisonProps {
   alignedCurrentImage?: string;
   alignedDiffImage?: string;
   alignmentSegments?: AlignmentSegment[];
+  changedRegions?: ChangedRegion[];
+  showRegions?: boolean;
   leftLabel?: string;
   rightLabel?: string;
   className?: string;
@@ -30,6 +65,8 @@ export function SliderComparison({
   alignedCurrentImage,
   alignedDiffImage,
   alignmentSegments,
+  changedRegions,
+  showRegions: showRegionsProp = false,
   leftLabel = 'Baseline',
   rightLabel = 'Current',
   className = '',
@@ -48,8 +85,16 @@ export function SliderComparison({
 
   const [sliderPosition, setSliderPosition] = useState(50);
   const [viewMode, setViewMode] = useState<ViewMode>(defaultMode);
+  const [imageDims, setImageDims] = useState<{ width: number; height: number } | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const isDragging = useRef(false);
+
+  const handleImageLoad = useCallback((e: React.SyntheticEvent<HTMLImageElement>) => {
+    const img = e.currentTarget;
+    setImageDims({ width: img.naturalWidth, height: img.naturalHeight });
+  }, []);
+
+  const visibleRegions = showRegionsProp && changedRegions?.length ? changedRegions : [];
 
   const handleMouseDown = useCallback(() => {
     isDragging.current = true;
@@ -222,13 +267,19 @@ export function SliderComparison({
       <div className={className}>
         <ViewModeButtons />
         <div className="grid grid-cols-2 gap-4">
-          <div>
+          <div className="relative">
             <div className="text-sm text-muted-foreground mb-2">{leftLabel}</div>
-            <img src={baselineImage} alt={leftLabel} className="w-full border rounded" />
+            <div className="relative">
+              <img src={baselineImage} alt={leftLabel} className="w-full border rounded" onLoad={handleImageLoad} />
+              <RegionOverlay dims={imageDims} regions={visibleRegions} />
+            </div>
           </div>
-          <div>
+          <div className="relative">
             <div className="text-sm text-muted-foreground mb-2">{rightLabel}</div>
-            <img src={currentImage} alt={rightLabel} className="w-full border rounded" />
+            <div className="relative">
+              <img src={currentImage} alt={rightLabel} className="w-full border rounded" />
+              <RegionOverlay dims={imageDims} regions={visibleRegions} />
+            </div>
           </div>
         </div>
       </div>
@@ -321,12 +372,13 @@ export function SliderComparison({
       <div className={className}>
         <ViewModeButtons />
         <div className="relative">
-          <img src={currentImage} alt="Current" className="w-full border rounded" />
+          <img src={currentImage} alt="Current" className="w-full border rounded" onLoad={handleImageLoad} />
           <img
             src={diffImage}
             alt="Diff"
             className="absolute inset-0 w-full h-full opacity-70 mix-blend-multiply"
           />
+          <RegionOverlay dims={imageDims} regions={visibleRegions} />
         </div>
       </div>
     );
@@ -358,7 +410,7 @@ export function SliderComparison({
       >
         {/* Baseline (left side) */}
         <div className="relative">
-          <img src={baselineImage} alt={leftLabel} className="w-full" draggable={false} />
+          <img src={baselineImage} alt={leftLabel} className="w-full" draggable={false} onLoad={handleImageLoad} />
         </div>
 
         {/* Current (right side, clipped) */}
@@ -368,6 +420,9 @@ export function SliderComparison({
         >
           <img src={currentImage} alt={rightLabel} className="w-full" draggable={false} />
         </div>
+
+        {/* Region overlays */}
+        <RegionOverlay dims={imageDims} regions={visibleRegions} />
 
         {/* Slider handle */}
         <div

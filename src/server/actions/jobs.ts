@@ -101,6 +101,29 @@ export async function failJob(jobId: string, error: string) {
   });
 }
 
+export async function createChildJob(
+  type: BackgroundJobType,
+  label: string,
+  parentJobId: string,
+  repositoryId?: string | null,
+  metadata?: Record<string, unknown>
+) {
+  const { id } = await queries.createBackgroundJob({
+    type,
+    label,
+    repositoryId,
+    metadata,
+    parentJobId,
+  });
+  const now = new Date();
+  await queries.updateBackgroundJob(id, {
+    status: 'running',
+    startedAt: now,
+    lastActivityAt: now,
+  });
+  return id;
+}
+
 export async function cancelJob(jobId: string, repositoryId?: string | null, runnerId?: string | null) {
   const job = await queries.getBackgroundJob(jobId);
   if (!job) return { success: false, error: 'Job not found' };
@@ -135,6 +158,18 @@ export async function cancelJob(jobId: string, repositoryId?: string | null, run
       await queries.updateTestRun(meta.testRunId, {
         status: 'failed',
         completedAt: now,
+      });
+    }
+  }
+
+  // Cascade-cancel running/pending child jobs
+  const children = await queries.getChildJobs(jobId);
+  for (const child of children) {
+    if (child.status === 'running' || child.status === 'pending') {
+      await queries.updateBackgroundJob(child.id, {
+        status: 'failed',
+        error: 'Parent job cancelled',
+        completedAt: new Date(),
       });
     }
   }

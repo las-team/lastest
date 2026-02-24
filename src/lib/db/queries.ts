@@ -1620,6 +1620,7 @@ export async function getDiffSensitivitySettings(repositoryId?: string | null) {
     textRegionThreshold: DEFAULT_DIFF_THRESHOLDS.textRegionThreshold,
     textRegionPadding: DEFAULT_DIFF_THRESHOLDS.textRegionPadding,
     textDetectionGranularity: DEFAULT_DIFF_THRESHOLDS.textDetectionGranularity,
+    regionDetectionMode: DEFAULT_DIFF_THRESHOLDS.regionDetectionMode,
     createdAt: null,
     updatedAt: null,
   };
@@ -1994,6 +1995,7 @@ export async function createBackgroundJob(data: {
   totalSteps?: number;
   repositoryId?: string | null;
   metadata?: Record<string, unknown>;
+  parentJobId?: string | null;
 }) {
   const id = uuid();
   const now = new Date();
@@ -2007,6 +2009,7 @@ export async function createBackgroundJob(data: {
     progress: 0,
     repositoryId: data.repositoryId ?? null,
     metadata: data.metadata ?? null,
+    parentJobId: data.parentJobId ?? null,
     createdAt: now,
   });
   return { id };
@@ -2031,14 +2034,26 @@ export async function getRecentBackgroundJobs(sinceMs = 10000) {
     .select()
     .from(backgroundJobs)
     .where(
-      or(
-        or(eq(backgroundJobs.status, 'pending'), eq(backgroundJobs.status, 'running')),
-        and(
-          or(eq(backgroundJobs.status, 'completed'), eq(backgroundJobs.status, 'failed')),
-          gte(backgroundJobs.completedAt, since)
+      and(
+        isNull(backgroundJobs.parentJobId),
+        or(
+          or(eq(backgroundJobs.status, 'pending'), eq(backgroundJobs.status, 'running')),
+          and(
+            or(eq(backgroundJobs.status, 'completed'), eq(backgroundJobs.status, 'failed')),
+            gte(backgroundJobs.completedAt, since)
+          )
         )
       )
     )
+    .orderBy(desc(backgroundJobs.createdAt))
+    .all();
+}
+
+export async function getChildJobs(parentJobId: string) {
+  return db
+    .select()
+    .from(backgroundJobs)
+    .where(eq(backgroundJobs.parentJobId, parentJobId))
     .orderBy(desc(backgroundJobs.createdAt))
     .all();
 }

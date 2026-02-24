@@ -99,7 +99,11 @@
       "Bash(tail:*)",
       "Bash(pnpm lastest2-runner:*)",
       "WebFetch(domain:deepwiki.com)",
-      "WebFetch(domain:docs.excalidraw.com)"
+      "WebFetch(domain:docs.excalidraw.com)",
+      "WebFetch(domain:en.wikipedia.org)",
+      "WebFetch(domain:jacklj.github.io)",
+      "WebFetch(domain:www.adammil.net)",
+      "WebFetch(domain:lodev.org)"
     ]
   },
   "disabledMcpjsonServers": [

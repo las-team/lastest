@@ -3,7 +3,7 @@ import path from 'path';
 import crypto from 'crypto';
 import { PNG } from 'pngjs';
 import pixelmatch from 'pixelmatch';
-import type { AlignmentSegment, DiffMetadata, DiffEngineType, PageShiftInfo } from '../db/schema';
+import type { AlignmentSegment, DiffMetadata, DiffEngineType, PageShiftInfo, RegionDetectionMode } from '../db/schema';
 import { runDiffEngine } from './engines';
 
 export interface Rectangle {
@@ -625,7 +625,8 @@ export async function generateDiff(
   includeAntiAliasing = false,
   ignoreRegions?: Rectangle[],
   ignorePageShift = false,
-  diffEngine: DiffEngineType = 'pixelmatch'
+  diffEngine: DiffEngineType = 'pixelmatch',
+  regionDetectionMode: RegionDetectionMode = 'grid'
 ): Promise<DiffResult> {
   let baseline: PNG = PNG.sync.read(fs.readFileSync(baselinePath));
   let current: PNG = PNG.sync.read(fs.readFileSync(currentPath));
@@ -646,7 +647,7 @@ export async function generateDiff(
 
   // Use shift-aware diffing when enabled and widths match
   if (ignorePageShift && hasSameWidth) {
-    return generateShiftAwareDiff(baseline, current, outputDir, threshold, includeAntiAliasing, ignoreRegions, diffEngine);
+    return generateShiftAwareDiff(baseline, current, outputDir, threshold, includeAntiAliasing, ignoreRegions, diffEngine, regionDetectionMode);
   }
 
   // Pad shorter image to match taller one when heights differ
@@ -693,7 +694,9 @@ export async function generateDiff(
   fs.writeFileSync(diffImagePath, PNG.sync.write(diff));
 
   // Calculate metadata
-  const changedRegions = findChangedRegions(diff.data, width, height);
+  const changedRegions = regionDetectionMode === 'flood-fill'
+    ? findChangedRegionsFloodFill(diff.data, width, height)
+    : findChangedRegions(diff.data, width, height);
 
   const baselineBg = detectBackgroundColor(baseline.data, width, height);
   const currentBg = detectBackgroundColor(current.data, width, height);
@@ -733,6 +736,7 @@ export async function generateTextAwareDiffFromPaths(
   outputDir: string,
   options: import('./text-regions').TextAwareDiffOptions,
   ignoreRegions?: Rectangle[],
+  regionDetectionMode: RegionDetectionMode = 'grid',
 ): Promise<DiffResult> {
   const { generateTextAwareDiff } = await import('./text-regions');
 
@@ -793,7 +797,9 @@ export async function generateTextAwareDiffFromPaths(
   const percentageDifference = Math.round(Math.min(contentPercentage, 100) * 100) / 100;
 
   // Metadata
-  const changedRegions = findChangedRegions(result.diffData, width, height);
+  const changedRegions = regionDetectionMode === 'flood-fill'
+    ? findChangedRegionsFloodFill(result.diffData, width, height)
+    : findChangedRegions(result.diffData, width, height);
   const changeCategories = categorizeChanges(changedRegions, percentageDifference);
   const affectedComponents = detectAffectedComponents(changedRegions);
 
@@ -825,7 +831,8 @@ async function generateShiftAwareDiff(
   threshold: number,
   includeAntiAliasing: boolean,
   ignoreRegions?: Rectangle[],
-  diffEngine: DiffEngineType = 'pixelmatch'
+  diffEngine: DiffEngineType = 'pixelmatch',
+  regionDetectionMode: RegionDetectionMode = 'grid'
 ): Promise<DiffResult> {
   const width = baseline.width;
 
@@ -928,8 +935,9 @@ async function generateShiftAwareDiff(
   const percentageDiff = Math.min((matchedRowDiffPixels / contentArea) * 100, 100);
 
   // Find changed regions from the full aligned diff
+  const detectRegions = regionDetectionMode === 'flood-fill' ? findChangedRegionsFloodFill : findChangedRegions;
   const changedRegions = alignedHeight > 0
-    ? findChangedRegions(alignedDiffData, width, alignedHeight)
+    ? detectRegions(alignedDiffData, width, alignedHeight)
     : [];
 
   const changeCategories = categorizeChanges(changedRegions, percentageDiff);
@@ -1116,6 +1124,115 @@ function findChangedRegions(diffData: Buffer, width: number, height: number): Re
         regions.push(region);
       }
     }
+  }
+
+  return regions;
+}
+
+/**
+ * Find changed regions using pixel-level flood-fill with two-pass
+ * connected component labeling (8-connectivity) and union-find.
+ * Produces tighter bounding boxes than the grid-based approach.
+ */
+const MIN_FLOOD_REGION_PIXELS = 25;
+const MIN_FLOOD_REGION_DIMENSION = 3;
+
+function findChangedRegionsFloodFill(diffData: Buffer, width: number, height: number): Rectangle[] {
+  const totalPixels = width * height;
+  const labels = new Int32Array(totalPixels); // 0 = unlabeled
+  let nextLabel = 1;
+
+  // Union-Find with path compression and union by rank
+  const parent = new Int32Array(totalPixels + 1); // over-allocate; labels are 1-based
+  const rank = new Uint8Array(totalPixels + 1);
+
+  function find(x: number): number {
+    while (parent[x] !== x) {
+      parent[x] = parent[parent[x]]; // path halving
+      x = parent[x];
+    }
+    return x;
+  }
+
+  function union(a: number, b: number): void {
+    const ra = find(a);
+    const rb = find(b);
+    if (ra === rb) return;
+    if (rank[ra] < rank[rb]) { parent[ra] = rb; }
+    else if (rank[ra] > rank[rb]) { parent[rb] = ra; }
+    else { parent[rb] = ra; rank[ra]++; }
+  }
+
+  // Pass 1: Scan L→R, T→B. For each diff pixel (alpha > 0), check 4 already-visited neighbors.
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const idx = y * width + x;
+      const alpha = diffData[idx * 4 + 3];
+      if (alpha === 0) continue;
+
+      // Neighbors already visited: top-left, top, top-right, left
+      const neighbors: number[] = [];
+      if (y > 0 && x > 0)          { const n = (y - 1) * width + (x - 1); if (labels[n]) neighbors.push(labels[n]); }
+      if (y > 0)                     { const n = (y - 1) * width + x;       if (labels[n]) neighbors.push(labels[n]); }
+      if (y > 0 && x < width - 1)  { const n = (y - 1) * width + (x + 1); if (labels[n]) neighbors.push(labels[n]); }
+      if (x > 0)                     { const n = y * width + (x - 1);       if (labels[n]) neighbors.push(labels[n]); }
+
+      if (neighbors.length === 0) {
+        // New component
+        const lbl = nextLabel++;
+        labels[idx] = lbl;
+        parent[lbl] = lbl;
+        rank[lbl] = 0;
+      } else {
+        // Use the minimum label, union the rest
+        let minLabel = neighbors[0];
+        for (let i = 1; i < neighbors.length; i++) {
+          if (neighbors[i] < minLabel) minLabel = neighbors[i];
+        }
+        labels[idx] = minLabel;
+        for (let i = 0; i < neighbors.length; i++) {
+          if (neighbors[i] !== minLabel) {
+            union(minLabel, neighbors[i]);
+          }
+        }
+      }
+    }
+  }
+
+  // Pass 2: Resolve labels to canonical roots, accumulate bounding boxes per component
+  const bboxMap = new Map<number, { minX: number; minY: number; maxX: number; maxY: number; count: number }>();
+
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const idx = y * width + x;
+      const lbl = labels[idx];
+      if (lbl === 0) continue;
+
+      const root = find(lbl);
+      labels[idx] = root; // flatten for consistency
+
+      const box = bboxMap.get(root);
+      if (box) {
+        if (x < box.minX) box.minX = x;
+        if (x > box.maxX) box.maxX = x;
+        if (y < box.minY) box.minY = y;
+        if (y > box.maxY) box.maxY = y;
+        box.count++;
+      } else {
+        bboxMap.set(root, { minX: x, minY: y, maxX: x, maxY: y, count: 1 });
+      }
+    }
+  }
+
+  // Convert to Rectangle[], filtering small regions
+  const regions: Rectangle[] = [];
+  for (const box of bboxMap.values()) {
+    const w = box.maxX - box.minX + 1;
+    const h = box.maxY - box.minY + 1;
+    if (box.count < MIN_FLOOD_REGION_PIXELS || w < MIN_FLOOD_REGION_DIMENSION || h < MIN_FLOOD_REGION_DIMENSION) {
+      continue;
+    }
+    regions.push({ x: box.minX, y: box.minY, width: w, height: h });
   }
 
   return regions;

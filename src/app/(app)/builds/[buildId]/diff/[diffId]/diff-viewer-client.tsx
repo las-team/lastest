@@ -138,6 +138,8 @@ export function DiffViewerClient({ diff, buildId, nextDiffId }: DiffViewerClient
   const metadata = diff.metadata as DiffMetadata | null;
   const aiAnalysis = diff.aiAnalysis as AIDiffAnalysis | null;
   const aiStatus = diff.aiAnalysisStatus;
+  const [showRegions, setShowRegions] = useState(false);
+  const changedRegions = metadata?.changedRegions;
 
   return (
     <div className="space-y-4">
@@ -322,6 +324,8 @@ export function DiffViewerClient({ diff, buildId, nextDiffId }: DiffViewerClient
                 alignedCurrentImage={tab.alignedCurrent}
                 alignedDiffImage={tab.alignedDiffImage}
                 alignmentSegments={tab.alignmentSegments}
+                changedRegions={changedRegions}
+                showRegions={showRegions}
                 className="border rounded-lg"
               />
             ) : (
@@ -362,6 +366,8 @@ export function DiffViewerClient({ diff, buildId, nextDiffId }: DiffViewerClient
                       alignedCurrentImage={tab.alignedCurrent}
                       alignedDiffImage={tab.alignedDiffImage}
                       alignmentSegments={tab.alignmentSegments}
+                      changedRegions={changedRegions}
+                      showRegions={showRegions}
                       className="border rounded-lg"
                     />
                   ) : (
@@ -457,15 +463,27 @@ export function DiffViewerClient({ diff, buildId, nextDiffId }: DiffViewerClient
         </div>
 
         {/* Metadata Panel Toggle */}
-        <div className="text-sm text-muted-foreground">
+        <div className="text-sm text-muted-foreground flex items-center gap-2">
           {metadata && metadata.changedRegions.length > 0 && (
-            <span>
-              <Eye className="w-4 h-4 inline mr-1" />
-              {metadata.changedRegions.length} region(s) changed
-              {metadata.affectedComponents && metadata.affectedComponents.length > 0 && (
-                <span> · {metadata.affectedComponents.join(', ')}</span>
-              )}
-            </span>
+            <>
+              <button
+                onClick={() => setShowRegions(!showRegions)}
+                className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs transition-colors ${
+                  showRegions
+                    ? 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400'
+                    : 'bg-muted hover:bg-muted/80'
+                }`}
+              >
+                <Eye className="w-3 h-3" />
+                {showRegions ? 'Hide' : 'Show'} Regions
+              </button>
+              <span>
+                {metadata.changedRegions.length} region(s) changed
+                {metadata.affectedComponents && metadata.affectedComponents.length > 0 && (
+                  <span> · {metadata.affectedComponents.join(', ')}</span>
+                )}
+              </span>
+            </>
           )}
           {metadata?.pageShift?.detected && (
             <span className="ml-3 text-blue-600">

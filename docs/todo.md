@@ -18,7 +18,6 @@ Support https://github.com/excalidraw/excalidraw/tree/master/packages/excalidraw
 
 branch specific url storage
 ## ideas
-Changed region detection via flood-fill algorithm
 Test coverage assessment and recreation based on existing test set
 Tweet about us
 Content comparison - compare text in 2 setups
@@ -34,8 +33,8 @@ Sitemap -flow
 Formal verification of code?
 ### UX
 ## bugs
+Keyboard shortcuts: A Approve · R Reject · ← → Navigate · + - Zoom on the diff screen dont work
 ## marketing 
-
 ## Excalidraw 
 
   Tier 3 — Needs product improvements first:

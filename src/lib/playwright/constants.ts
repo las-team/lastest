@@ -80,8 +80,10 @@ window.__disableRAFGating = function() {
   var leftover = Array.from(_rafQueue.values());
   _rafQueue.clear();
   leftover.forEach(function(cb) { try { _origRAF(cb); } catch(e) {} });
-  // Drop gated timeouts — they were deferred to prevent side effects during stabilization
+  // Drain gated timeouts so deferred callbacks (e.g. laser fade-out) still execute
+  var timeouts = Array.from(_timeoutQueue.values());
   _timeoutQueue.clear();
+  timeouts.forEach(function(cb) { try { _origSetTimeout(cb, 0); } catch(e) {} });
 };
 
 // 3c. Gate setTimeout with delay > 100ms — catches debounced operations.
@@ -117,9 +119,14 @@ window.clearTimeout = function(id) {
 window.__flushAnimationFrames = function(maxIterations) {
   maxIterations = maxIterations || 10;
   for (var i = 0; i < maxIterations && _rafQueue.size > 0; i++) {
+    var t = 1000;
+    if (window.__perfNowFrozen !== false && typeof window.__perfNowFrozen === 'number') {
+      window.__perfNowFrozen += 16;
+      t = window.__perfNowFrozen;
+    }
     var rafCbs = Array.from(_rafQueue.values());
     _rafQueue.clear();
-    rafCbs.forEach(function(cb) { try { cb(1000); } catch(e) {} });
+    rafCbs.forEach(function(cb) { try { cb(t); } catch(e) {} });
   }
 };
 
@@ -295,6 +302,11 @@ export const CROSS_OS_CHROMIUM_ARGS = [
   '--disable-partial-raster',
   '--disable-checker-imaging',
   '--force-device-scale-factor=1',
+  '--disable-gpu-rasterization',
+  '--disable-oop-rasterization',
+  '--disable-background-timer-throttling',
+  '--disable-renderer-backgrounding',
+  '--disable-backgrounding-occluded-windows',
 ];
 
 /**

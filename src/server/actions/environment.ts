@@ -87,6 +87,19 @@ export async function testServerConnection(url: string): Promise<{
 }
 
 /**
+ * Save a branch-specific base URL on the repository
+ */
+export async function saveBranchBaseUrl(repositoryId: string, branch: string, baseUrl: string) {
+  await requireRepoAccess(repositoryId);
+  const repo = await queries.getRepository(repositoryId);
+  if (!repo) throw new Error('Repository not found');
+  const urls = (repo.branchBaseUrls as Record<string, string>) ?? {};
+  urls[branch] = baseUrl.replace(/\/+$/, '');
+  await queries.updateRepository(repositoryId, { branchBaseUrls: urls });
+  revalidatePath('/run');
+}
+
+/**
  * Get current server status
  */
 export async function getServerStatus(repositoryId?: string | null) {

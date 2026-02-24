@@ -194,6 +194,7 @@ export const repositories = sqliteTable('repositories', {
   defaultSetupScriptId: text('default_setup_script_id'), // OR default script
   testingTemplate: text('testing_template'), // Testing template ID (e.g. 'saas', 'marketing', 'canvas')
   autoApproveDefaultBranch: integer('auto_approve_default_branch', { mode: 'boolean' }).default(false),
+  branchBaseUrls: text('branch_base_urls', { mode: 'json' }).$type<Record<string, string>>(),
   createdAt: integer('created_at', { mode: 'timestamp' }),
 });
 
@@ -617,6 +618,7 @@ export type DiffEngineType = 'pixelmatch' | 'ssim' | 'butteraugli';
 
 // Text detection granularity for text-region-aware diffing
 export type TextDetectionGranularity = 'word' | 'line' | 'block';
+export type RegionDetectionMode = 'grid' | 'flood-fill';
 
 // Diff sensitivity settings for classification thresholds
 export const diffSensitivitySettings = sqliteTable('diff_sensitivity_settings', {
@@ -631,6 +633,7 @@ export const diffSensitivitySettings = sqliteTable('diff_sensitivity_settings', 
   textRegionThreshold: integer('text_region_threshold').default(30), // percentage, stored as 30 = 0.3
   textRegionPadding: integer('text_region_padding').default(4), // pixels to expand text bounding boxes
   textDetectionGranularity: text('text_detection_granularity').default('word'), // 'word' | 'line' | 'block'
+  regionDetectionMode: text('region_detection_mode').default('grid'), // 'grid' | 'flood-fill'
   createdAt: integer('created_at', { mode: 'timestamp' }),
   updatedAt: integer('updated_at', { mode: 'timestamp' }),
 });
@@ -649,6 +652,7 @@ export const DEFAULT_DIFF_THRESHOLDS = {
   textRegionThreshold: 30,
   textRegionPadding: 4,
   textDetectionGranularity: 'word' as TextDetectionGranularity,
+  regionDetectionMode: 'grid' as RegionDetectionMode,
 };
 
 // Diff classification type
@@ -726,7 +730,7 @@ export type AIPromptLog = typeof aiPromptLogs.$inferSelect;
 export type NewAIPromptLog = typeof aiPromptLogs.$inferInsert;
 
 // Background Jobs for queue tracking
-export type BackgroundJobType = 'ai_scan' | 'spec_analysis' | 'build_tests' | 'test_run' | 'build_run' | 'ai_fix' | 'ai_validate';
+export type BackgroundJobType = 'ai_scan' | 'spec_analysis' | 'build_tests' | 'test_run' | 'build_run' | 'ai_fix' | 'ai_validate' | 'ai_diff';
 export type BackgroundJobStatus = 'pending' | 'running' | 'completed' | 'failed';
 
 export const backgroundJobs = sqliteTable('background_jobs', {
@@ -739,6 +743,7 @@ export const backgroundJobs = sqliteTable('background_jobs', {
   label: text('label').notNull(),
   error: text('error'),
   metadata: text('metadata', { mode: 'json' }).$type<Record<string, unknown>>(),
+  parentJobId: text('parent_job_id'),
   repositoryId: text('repository_id').references(() => repositories.id),
   createdAt: integer('created_at', { mode: 'timestamp' }),
   startedAt: integer('started_at', { mode: 'timestamp' }),

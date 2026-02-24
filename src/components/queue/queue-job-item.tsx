@@ -1,9 +1,9 @@
 'use client';
 
-import { Loader2, CheckCircle2, XCircle, Clock, X, Layers } from 'lucide-react';
-import type { BackgroundJob } from '@/lib/db/schema';
+import { Loader2, CheckCircle2, XCircle, Clock, X, Layers, ChevronDown } from 'lucide-react';
+import type { JobWithChildren } from '@/components/queue/job-polling-context';
 import { cancelJob } from '@/server/actions/jobs';
-import { useTransition } from 'react';
+import { useState, useTransition } from 'react';
 import { Badge } from '@/components/ui/badge';
 
 const TYPE_LABELS: Record<string, string> = {
@@ -12,6 +12,7 @@ const TYPE_LABELS: Record<string, string> = {
   build_tests: 'Build Tests',
   test_run: 'Test Run',
   build_run: 'Build',
+  ai_diff: 'AI Diff',
 };
 
 function StatusIcon({ status }: { status: string }) {
@@ -27,10 +28,12 @@ function StatusIcon({ status }: { status: string }) {
   }
 }
 
-export function QueueJobItem({ job }: { job: BackgroundJob }) {
+export function QueueJobItem({ job }: { job: JobWithChildren }) {
   const [isPending, startTransition] = useTransition();
+  const [expanded, setExpanded] = useState(false);
   const typeLabel = TYPE_LABELS[job.type] || job.type;
   const isActive = job.status === 'running' || job.status === 'pending';
+  const hasChildren = job._childSummary && job._childSummary.total > 0;
 
   // Extract parallel execution info from metadata
   const metadata = job.metadata as { activeCount?: number; activeTests?: string[] } | null;
@@ -45,6 +48,7 @@ export function QueueJobItem({ job }: { job: BackgroundJob }) {
   };
 
   return (
+    <>
     <div className="flex items-center gap-3 px-3 py-2 group">
       <StatusIcon status={job.status} />
       <div className="flex-1 min-w-0">
@@ -90,6 +94,43 @@ export function QueueJobItem({ job }: { job: BackgroundJob }) {
           <X className="h-3.5 w-3.5 text-muted-foreground hover:text-destructive" />
         </button>
       )}
+      {hasChildren && (
+        <button
+          onClick={() => setExpanded(!expanded)}
+          className="p-1 hover:bg-muted rounded transition-all"
+          title={expanded ? 'Collapse' : 'Expand'}
+        >
+          <ChevronDown className={`h-3.5 w-3.5 text-muted-foreground transition-transform ${expanded ? 'rotate-180' : ''}`} />
+        </button>
+      )}
     </div>
+    {hasChildren && (
+      <div className="px-3 pb-1">
+        <button
+          onClick={() => setExpanded(!expanded)}
+          className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors"
+        >
+          <Badge variant="outline" className="text-xs px-1.5 py-0">
+            {job._childSummary!.completed}/{job._childSummary!.total} AI Diffs
+          </Badge>
+          {job._childSummary!.failed > 0 && (
+            <Badge variant="destructive" className="text-xs px-1.5 py-0">
+              {job._childSummary!.failed} failed
+            </Badge>
+          )}
+        </button>
+        {expanded && job._children && (
+          <div className="mt-1.5 ml-2 border-l border-border pl-2 space-y-1">
+            {job._children.map(child => (
+              <div key={child.id} className="flex items-center gap-2 py-0.5">
+                <StatusIcon status={child.status} />
+                <span className="text-xs truncate">{child.label}</span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    )}
+    </>
   );
 }
