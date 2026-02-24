@@ -123,6 +123,7 @@ import type {
   SetupScriptType,
   TestSetupOverrides,
   TestTeardownOverrides,
+  StabilizationSettings,
 } from './schema';
 
 export { DEFAULT_SELECTOR_PRIORITY, DEFAULT_DIFF_THRESHOLDS, DEFAULT_AI_SETTINGS, DEFAULT_RECORDING_ENGINES, DEFAULT_NOTIFICATION_SETTINGS };
@@ -3741,6 +3742,14 @@ export async function getResolvedTeardownStepsForTest(test: { id: string; reposi
   }
 
   return [...activeDefaults, ...extras];
+}
+
+// ============================================
+// Per-Test Stabilization Overrides
+// ============================================
+
+export async function updateTestStabilizationOverrides(testId: string, overrides: Partial<StabilizationSettings> | null) {
+  await db.update(tests).set({ stabilizationOverrides: overrides, updatedAt: new Date() }).where(eq(tests.id, testId));
 }
 
 // Spec Imports

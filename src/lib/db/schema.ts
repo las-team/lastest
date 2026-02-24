@@ -119,6 +119,7 @@ export const tests = sqliteTable('tests', {
   setupScriptId: text('setup_script_id'), // OR use dedicated setup script
   setupOverrides: text('setup_overrides', { mode: 'json' }).$type<TestSetupOverrides>(),
   teardownOverrides: text('teardown_overrides', { mode: 'json' }).$type<TestTeardownOverrides>(),
+  stabilizationOverrides: text('stabilization_overrides', { mode: 'json' }).$type<Partial<StabilizationSettings>>(),
   requiredCapabilities: text('required_capabilities', { mode: 'json' }).$type<TestRequiredCapabilities>(),
   deletedAt: integer('deleted_at', { mode: 'timestamp' }),
   createdAt: integer('created_at', { mode: 'timestamp' }),

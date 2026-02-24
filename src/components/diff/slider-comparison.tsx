@@ -53,6 +53,8 @@ interface SliderComparisonProps {
   leftLabel?: string;
   rightLabel?: string;
   className?: string;
+  initialViewMode?: ViewMode;
+  onViewModeChange?: (mode: ViewMode) => void;
 }
 
 export function SliderComparison({
@@ -70,6 +72,8 @@ export function SliderComparison({
   leftLabel = 'Baseline',
   rightLabel = 'Current',
   className = '',
+  initialViewMode,
+  onViewModeChange,
 }: SliderComparisonProps) {
   const hasAlignedImages = !!(alignedBaselineImage && alignedCurrentImage);
 
@@ -84,7 +88,12 @@ export function SliderComparison({
           : 'slider';
 
   const [sliderPosition, setSliderPosition] = useState(50);
-  const [viewMode, setViewMode] = useState<ViewMode>(defaultMode);
+  const [viewMode, setViewModeInternal] = useState<ViewMode>(initialViewMode ?? defaultMode);
+
+  const setViewMode = useCallback((mode: ViewMode) => {
+    setViewModeInternal(mode);
+    onViewModeChange?.(mode);
+  }, [onViewModeChange]);
   const [imageDims, setImageDims] = useState<{ width: number; height: number } | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const isDragging = useRef(false);

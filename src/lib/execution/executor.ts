@@ -10,7 +10,7 @@
 
 import { getExecutionMode, shouldUseLocalRunner } from './mode';
 import { getRunner, type TestRunResult, type ProgressCallback } from '@/lib/playwright/runner';
-import type { Test, EnvironmentConfig, PlaywrightSettings } from '@/lib/db/schema';
+import type { Test, EnvironmentConfig, PlaywrightSettings, StabilizationSettings } from '@/lib/db/schema';
 import { DEFAULT_STABILIZATION_SETTINGS } from '@/lib/db/schema';
 import type {
   RunTestCommand,
@@ -45,15 +45,15 @@ function hashCode(code: string): string {
 /**
  * Build a StabilizationPayload from PlaywrightSettings for remote runners.
  */
-function buildStabilizationPayload(settings?: PlaywrightSettings | null): StabilizationPayload | undefined {
-  if (!settings?.stabilization) return undefined;
-  const stab = settings.stabilization;
+function buildStabilizationPayload(settings?: PlaywrightSettings | null, testOverrides?: Partial<StabilizationSettings> | null): StabilizationPayload | undefined {
+  if (!settings?.stabilization && !testOverrides) return undefined;
+  const stab = { ...(settings?.stabilization || DEFAULT_STABILIZATION_SETTINGS), ...testOverrides };
   return {
     freezeTimestamps: stab.freezeTimestamps,
     frozenTimestamp: stab.frozenTimestamp,
     freezeRandomValues: stab.freezeRandomValues,
     randomSeed: stab.randomSeed,
-    freezeAnimations: settings?.freezeAnimations ?? false,
+    freezeAnimations: testOverrides?.freezeAnimations ?? settings?.freezeAnimations ?? false,
     crossOsConsistency: stab.crossOsConsistency,
     waitForNetworkIdle: stab.waitForNetworkIdle,
     networkIdleTimeout: stab.networkIdleTimeout,
@@ -374,7 +374,7 @@ async function executeViaRunner(
         storageState: options.setupContext?.storageState,
         setupVariables: options.setupContext?.variables,
         cursorPlaybackSpeed: options.playwrightSettings?.cursorPlaybackSpeed ?? 1,
-        stabilization: buildStabilizationPayload(options.playwrightSettings),
+        stabilization: buildStabilizationPayload(options.playwrightSettings, test.stabilizationOverrides),
       });
 
       // Queue command to DB

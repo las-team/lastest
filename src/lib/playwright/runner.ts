@@ -1027,6 +1027,9 @@ export class PlaywrightRunner extends EventEmitter {
         fs.mkdirSync(videoDir, { recursive: true });
       }
 
+      // Get stabilization settings (merge per-test overrides if present)
+      const stabilization = { ...this.getStabilizationSettings(), ...test.stabilizationOverrides };
+
       context = await this.browser.newContext({
         viewport: this.getViewport(),
         ...(parsedStorageState ? { storageState: parsedStorageState } : {}),
@@ -1035,12 +1038,9 @@ export class PlaywrightRunner extends EventEmitter {
         ...(this.settings?.freezeAnimations ? { reducedMotion: 'reduce' } : {}),
         ...(this.settings?.grantClipboardAccess ? { permissions: ['clipboard-read', 'clipboard-write'] } : {}),
         ...(this.settings?.acceptDownloads ? { acceptDownloads: true } : {}),
-        ...(this.getStabilizationSettings().crossOsConsistency ? { deviceScaleFactor: 1 } : {}),
+        ...(stabilization.crossOsConsistency ? { deviceScaleFactor: 1 } : {}),
       });
       page = await context.newPage();
-
-      // Get stabilization settings
-      const stabilization = this.getStabilizationSettings();
 
       // Setup freeze scripts BEFORE navigation (must be added as init scripts)
       // Pass freezeAnimations from PlaywrightSettings so setupFreezeScripts can apply
