@@ -329,7 +329,7 @@ export async function main() {
 
       // 1. Create build
       console.log(`Creating build for ${repo}...`);
-      let buildId: string;
+      let buildId = '';
       let testCount: number;
       try {
         const createBody: Record<string, string> = isName ? { githubRepo: repo } : { repositoryId: repo };
@@ -353,9 +353,44 @@ export async function main() {
           process.exit(1);
         }
 
-        const data = await res.json() as { buildId: string; testCount: number };
-        buildId = data.buildId;
+        const data = await res.json() as { buildId: string | null; testCount: number; queued?: boolean; jobId?: string };
         testCount = data.testCount;
+
+        if (data.queued && !data.buildId) {
+          // Build was queued — poll until it starts
+          console.log(`Build queued (${testCount} tests), waiting for active build to finish...`);
+          const queueStart = Date.now();
+          while (Date.now() - queueStart < timeout) {
+            await new Promise(resolve => setTimeout(resolve, 5000));
+            try {
+              const retryRes = await fetch(`${server}/api/builds/create`, {
+                method: 'POST',
+                headers: {
+                  Authorization: `Bearer ${token}`,
+                  'Content-Type': 'application/json',
+                },
+                body: JSON.stringify(createBody),
+              });
+              if (!retryRes.ok) continue;
+              const retryData = await retryRes.json() as { buildId: string | null; testCount: number; queued?: boolean };
+              if (retryData.buildId) {
+                buildId = retryData.buildId;
+                testCount = retryData.testCount;
+                break;
+              }
+              console.log('  Still queued, retrying...');
+            } catch {
+              // retry
+            }
+          }
+          if (!buildId) {
+            console.error('Timeout: queued build never started');
+            process.exit(1);
+            return;
+          }
+        } else {
+          buildId = data.buildId!;
+        }
       } catch (error) {
         console.error('Failed to create build:', (error as Error).message);
         process.exit(1);
