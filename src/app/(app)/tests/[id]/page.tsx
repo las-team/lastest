@@ -1,4 +1,4 @@
-import { getTest, getTestResultsByTest, getSelectedRepository, getPlannedScreenshotsByTest, getDefaultSetupSteps, getTestsByRepo, getSetupScripts, getGoogleSheetsDataSources } from '@/lib/db/queries';
+import { getTest, getTestResultsByTest, getSelectedRepository, getPlannedScreenshotsByTest, getDefaultSetupSteps, getTestsByRepo, getSetupScripts, getGoogleSheetsDataSources, getPlaywrightSettings } from '@/lib/db/queries';
 import { getTestScreenshotsGrouped } from '@/server/actions/tests';
 import { getCurrentSession } from '@/lib/auth';
 import { TestDetailClient } from './test-detail-client';
@@ -32,6 +32,9 @@ export default async function TestDetailPage({ params }: TestDetailPageProps) {
   // Load Google Sheets data sources for data reference preview
   const sheetDataSources = repoId ? await getGoogleSheetsDataSources(repoId) : [];
 
+  // Load playwright settings for stabilization defaults
+  const playwrightSettings = repoId ? await getPlaywrightSettings(repoId) : null;
+
   return (
     <div className="flex flex-col h-full">
       <TestDetailClient
@@ -44,6 +47,7 @@ export default async function TestDetailPage({ params }: TestDetailPageProps) {
         availableTests={availableTests}
         availableScripts={setupScripts}
         sheetDataSources={sheetDataSources}
+        stabilizationDefaults={playwrightSettings?.stabilization ?? null}
       />
     </div>
   );

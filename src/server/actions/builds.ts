@@ -250,8 +250,9 @@ export async function createAndRunBuildFromCI(opts: {
   runnerId: string;
   gitBranch?: string;
   gitCommit?: string;
+  targetUrl?: string;
 }) {
-  const { triggerType, repositoryId, runnerId, gitBranch, gitCommit } = opts;
+  const { triggerType, repositoryId, runnerId, gitBranch, gitCommit, targetUrl } = opts;
   const runner = getRunner(repositoryId);
 
   // If tests are running, queue this build
@@ -303,7 +304,7 @@ export async function createAndRunBuildFromCI(opts: {
     flakyCount: 0,
     failedCount: 0,
     passedCount: 0,
-    baseUrl: envConfig?.baseUrl || 'http://localhost:3000',
+    baseUrl: targetUrl || envConfig?.baseUrl || 'http://localhost:3000',
     comparisonMode: 'vs_both',
   });
 
@@ -459,7 +460,7 @@ async function runBuildAsync(
 
       // Fire-and-forget AI diff analysis for non-unchanged diffs
       if (diffResult.classification !== 'unchanged') {
-        triggerAIDiffAnalysis(diffResult.diffId, repositoryId).catch(console.error);
+        triggerAIDiffAnalysis(diffResult.diffId, repositoryId, jobId).catch(console.error);
       }
     }
 
@@ -835,6 +836,7 @@ async function processVisualDiff(
   const ignorePageShift = settings.ignorePageShift ?? false;
   const diffEngine = (settings.diffEngine as import('@/lib/db/schema').DiffEngineType) ?? 'pixelmatch';
   const textRegionAwareDiffing = settings.textRegionAwareDiffing ?? false;
+  const regionDetectionMode = (settings.regionDetectionMode as import('@/lib/db/schema').RegionDetectionMode) ?? 'grid';
 
   // Get the repo's default branch
   const repo = repositoryId ? await queries.getRepository(repositoryId) : null;
@@ -903,7 +905,8 @@ async function processVisualDiff(
         includeAntiAliasing,
         ignoreRects,
         false,
-        diffEngine
+        diffEngine,
+        regionDetectionMode
       );
 
       return {
@@ -949,7 +952,8 @@ async function processVisualDiff(
         includeAntiAliasing,
         ignoreRects,
         ignorePageShift,
-        diffEngine
+        diffEngine,
+        regionDetectionMode
       );
 
       const mainPct = mainDiffResult.percentageDifference;
@@ -1064,6 +1068,7 @@ async function processVisualDiff(
             diffEngine,
           },
           ignoreRects,
+          regionDetectionMode,
         )
       : await generateDiff(
           path.join(STORAGE_ROOT, baseline.imagePath),
@@ -1073,7 +1078,8 @@ async function processVisualDiff(
           includeAntiAliasing,
           ignoreRects,
           ignorePageShift,
-          diffEngine
+          diffEngine,
+          regionDetectionMode
         );
 
     const pct = diffResult.percentageDifference;

@@ -42,7 +42,7 @@ export default async function RunPage() {
         activeBranch={activeBranch}
         currentBranch={selectedRepo?.selectedBranch ?? null}
         defaultBranch={selectedRepo?.defaultBranch ?? null}
-        baseUrl={envConfig?.baseUrl || 'http://localhost:3000'}
+        baseUrl={selectedRepo?.branchBaseUrls?.[activeBranch] ?? envConfig?.baseUrl ?? 'http://localhost:3000'}
         branchHeads={branchHeads}
         buildChanges={buildChanges}
         composeConfig={composeConfig ? {

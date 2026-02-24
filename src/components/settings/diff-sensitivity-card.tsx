@@ -8,7 +8,7 @@ import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { saveDiffSensitivitySettings, resetDiffSensitivitySettings } from '@/server/actions/settings';
-import type { DiffSensitivitySettings, DiffEngineType, TextDetectionGranularity } from '@/lib/db/schema';
+import type { DiffSensitivitySettings, DiffEngineType, TextDetectionGranularity, RegionDetectionMode } from '@/lib/db/schema';
 import { DEFAULT_DIFF_THRESHOLDS } from '@/lib/db/schema';
 import { Loader2, RotateCcw, Eye, Zap, Brain, Sparkles, Type } from 'lucide-react';
 import { toast } from 'sonner';
@@ -74,6 +74,9 @@ export function DiffSensitivityCard({
   const [textDetectionGranularity, setTextDetectionGranularity] = useState<TextDetectionGranularity>(
     (settings.textDetectionGranularity as TextDetectionGranularity) ?? DEFAULT_DIFF_THRESHOLDS.textDetectionGranularity
   );
+  const [regionDetectionMode, setRegionDetectionMode] = useState<RegionDetectionMode>(
+    (settings.regionDetectionMode as RegionDetectionMode) ?? DEFAULT_DIFF_THRESHOLDS.regionDetectionMode
+  );
 
   const debounceRef = useRef<NodeJS.Timeout | null>(null);
 
@@ -87,6 +90,7 @@ export function DiffSensitivityCard({
     textRegionThreshold: settings.textRegionThreshold ?? DEFAULT_DIFF_THRESHOLDS.textRegionThreshold,
     textRegionPadding: settings.textRegionPadding ?? DEFAULT_DIFF_THRESHOLDS.textRegionPadding,
     textDetectionGranularity: (settings.textDetectionGranularity as TextDetectionGranularity) ?? DEFAULT_DIFF_THRESHOLDS.textDetectionGranularity,
+    regionDetectionMode: (settings.regionDetectionMode as RegionDetectionMode) ?? DEFAULT_DIFF_THRESHOLDS.regionDetectionMode,
   });
 
   const settingsKey = `${settings.id}-${settings.updatedAt?.getTime?.() ?? 0}`;
@@ -100,6 +104,7 @@ export function DiffSensitivityCard({
     setTextRegionThreshold(settings.textRegionThreshold ?? DEFAULT_DIFF_THRESHOLDS.textRegionThreshold);
     setTextRegionPadding(settings.textRegionPadding ?? DEFAULT_DIFF_THRESHOLDS.textRegionPadding);
     setTextDetectionGranularity((settings.textDetectionGranularity as TextDetectionGranularity) ?? DEFAULT_DIFF_THRESHOLDS.textDetectionGranularity);
+    setRegionDetectionMode((settings.regionDetectionMode as RegionDetectionMode) ?? DEFAULT_DIFF_THRESHOLDS.regionDetectionMode);
 
     originalValues.current = {
       unchangedThreshold: settings.unchangedThreshold ?? DEFAULT_DIFF_THRESHOLDS.unchangedThreshold,
@@ -111,6 +116,7 @@ export function DiffSensitivityCard({
       textRegionThreshold: settings.textRegionThreshold ?? DEFAULT_DIFF_THRESHOLDS.textRegionThreshold,
       textRegionPadding: settings.textRegionPadding ?? DEFAULT_DIFF_THRESHOLDS.textRegionPadding,
       textDetectionGranularity: (settings.textDetectionGranularity as TextDetectionGranularity) ?? DEFAULT_DIFF_THRESHOLDS.textDetectionGranularity,
+      regionDetectionMode: (settings.regionDetectionMode as RegionDetectionMode) ?? DEFAULT_DIFF_THRESHOLDS.regionDetectionMode,
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [settingsKey]);
@@ -128,10 +134,11 @@ export function DiffSensitivityCard({
         textRegionThreshold,
         textRegionPadding,
         textDetectionGranularity,
+        regionDetectionMode,
       });
       toast.success('Diff sensitivity settings saved');
     });
-  }, [repositoryId, unchangedThreshold, flakyThreshold, includeAntiAliasing, ignorePageShift, diffEngine, textRegionAwareDiffing, textRegionThreshold, textRegionPadding, textDetectionGranularity]);
+  }, [repositoryId, unchangedThreshold, flakyThreshold, includeAntiAliasing, ignorePageShift, diffEngine, textRegionAwareDiffing, textRegionThreshold, textRegionPadding, textDetectionGranularity, regionDetectionMode]);
 
   useEffect(() => {
     const orig = originalValues.current;
@@ -144,7 +151,8 @@ export function DiffSensitivityCard({
       textRegionAwareDiffing !== orig.textRegionAwareDiffing ||
       textRegionThreshold !== orig.textRegionThreshold ||
       textRegionPadding !== orig.textRegionPadding ||
-      textDetectionGranularity !== orig.textDetectionGranularity;
+      textDetectionGranularity !== orig.textDetectionGranularity ||
+      regionDetectionMode !== orig.regionDetectionMode;
 
     if (!hasChanges) return;
 
@@ -161,7 +169,7 @@ export function DiffSensitivityCard({
         clearTimeout(debounceRef.current);
       }
     };
-  }, [unchangedThreshold, flakyThreshold, includeAntiAliasing, ignorePageShift, diffEngine, textRegionAwareDiffing, textRegionThreshold, textRegionPadding, textDetectionGranularity, doSave]);
+  }, [unchangedThreshold, flakyThreshold, includeAntiAliasing, ignorePageShift, diffEngine, textRegionAwareDiffing, textRegionThreshold, textRegionPadding, textDetectionGranularity, regionDetectionMode, doSave]);
 
   const handleReset = () => {
     startTransition(async () => {
@@ -175,6 +183,7 @@ export function DiffSensitivityCard({
       setTextRegionThreshold(DEFAULT_DIFF_THRESHOLDS.textRegionThreshold);
       setTextRegionPadding(DEFAULT_DIFF_THRESHOLDS.textRegionPadding);
       setTextDetectionGranularity(DEFAULT_DIFF_THRESHOLDS.textDetectionGranularity);
+      setRegionDetectionMode(DEFAULT_DIFF_THRESHOLDS.regionDetectionMode);
       toast.success('Diff sensitivity reset to defaults');
     });
   };
@@ -381,6 +390,26 @@ export function DiffSensitivityCard({
             checked={ignorePageShift}
             onCheckedChange={setIgnorePageShift}
           />
+        </div>
+
+        {/* Region Detection Mode */}
+        <div className="space-y-2">
+          <Label>Region Detection</Label>
+          <Select
+            value={regionDetectionMode}
+            onValueChange={(v) => setRegionDetectionMode(v as RegionDetectionMode)}
+          >
+            <SelectTrigger>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="grid">Grid (32px cells)</SelectItem>
+              <SelectItem value="flood-fill">Flood Fill (pixel-precise)</SelectItem>
+            </SelectContent>
+          </Select>
+          <p className="text-xs text-muted-foreground">
+            Grid groups changes into 32px cells. Flood Fill uses connected-component analysis for tighter bounding boxes.
+          </p>
         </div>
 
         {/* Text-Region-Aware Diffing */}

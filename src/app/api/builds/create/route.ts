@@ -21,7 +21,7 @@ export async function POST(request: Request) {
 
     // Parse request body
     const body = await request.json();
-    const { repositoryId, githubRepo, triggerType, gitBranch, gitCommit } = body;
+    const { repositoryId, githubRepo, triggerType, gitBranch, gitCommit, targetUrl } = body;
 
     // Resolve repository: by ID (legacy) or by GitHub full name (e.g. "owner/repo")
     let resolvedRepoId = repositoryId;
@@ -71,6 +71,7 @@ export async function POST(request: Request) {
       runnerId: runner.id,
       gitBranch,
       gitCommit,
+      targetUrl,
     });
 
     return NextResponse.json({

@@ -529,7 +529,7 @@ export class DebugRunner {
     const page = await context.newPage();
 
     // Freeze timestamps/random values if configured
-    await setupFreezeScripts(page, stabilization);
+    await setupFreezeScripts(page, { ...stabilization, freezeAnimations: this.settings?.freezeAnimations ?? false } as any);
 
     // Freeze CSS + JS animations if enabled
     if (this.settings?.freezeAnimations) {
@@ -946,7 +946,15 @@ export class DebugRunner {
         if (prop === 'screenshot') {
           return async (options?: Parameters<Page['screenshot']>[0]) => {
             await applyStabilization(target, baseUrl, stabilization);
-            return target.screenshot(options);
+            const result = await target.screenshot(options);
+            // Disable RAF gating + unfreeze performance.now after screenshot
+            await target.evaluate(() => {
+              if (typeof (window as any).__disableRAFGating === 'function') {
+                (window as any).__disableRAFGating();
+              }
+              (window as any).__perfNowFrozen = false;
+            }).catch(() => {});
+            return result;
           };
         }
         return (target as any)[prop];

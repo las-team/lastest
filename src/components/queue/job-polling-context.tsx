@@ -3,15 +3,20 @@
 import { createContext, useContext, useState, useEffect, useRef, useCallback, type ReactNode } from 'react';
 import type { BackgroundJob } from '@/lib/db/schema';
 
+export type JobWithChildren = BackgroundJob & {
+  _children?: BackgroundJob[];
+  _childSummary?: { total: number; completed: number; failed: number; running: number; pending: number };
+};
+
 interface JobPollingContextValue {
-  jobs: BackgroundJob[];
+  jobs: JobWithChildren[];
   startPolling: () => void;
 }
 
 const JobPollingContext = createContext<JobPollingContextValue | null>(null);
 
 export function JobPollingProvider({ children }: { children: ReactNode }) {
-  const [jobs, setJobs] = useState<BackgroundJob[]>([]);
+  const [jobs, setJobs] = useState<JobWithChildren[]>([]);
   const [isPolling, setIsPolling] = useState(false);
   const timerRef = useRef<NodeJS.Timeout | null>(null);
 
@@ -19,7 +24,7 @@ export function JobPollingProvider({ children }: { children: ReactNode }) {
     try {
       const res = await fetch('/api/jobs/active');
       if (res.ok) {
-        const data: BackgroundJob[] = await res.json();
+        const data: JobWithChildren[] = await res.json();
         setJobs(data);
         const hasActive = data.some(j => j.status === 'pending' || j.status === 'running');
         setIsPolling(hasActive);

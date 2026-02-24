@@ -127,15 +127,16 @@ export default async function DiffPage({ params }: PageProps) {
       <DiffViewerClient
         diff={diff}
         buildId={buildId}
+        prevDiffId={prevDiff?.id}
         nextDiffId={nextDiff?.id}
       />
 
       {/* Keyboard shortcuts hint */}
       <div className="mt-4 text-sm text-muted-foreground text-center">
-        Keyboard shortcuts: <kbd className="px-1 bg-muted rounded">A</kbd> Approve ·{' '}
-        <kbd className="px-1 bg-muted rounded">R</kbd> Reject ·{' '}
-        <kbd className="px-1 bg-muted rounded">←</kbd> <kbd className="px-1 bg-muted rounded">→</kbd> Navigate ·{' '}
-        <kbd className="px-1 bg-muted rounded">+</kbd> <kbd className="px-1 bg-muted rounded">-</kbd> Zoom
+        Keyboard shortcuts: <kbd className="px-1 bg-muted rounded">E</kbd> Expected Change ·{' '}
+        <kbd className="px-1 bg-muted rounded">T</kbd> Todo ·{' '}
+        <kbd className="px-1 bg-muted rounded">S</kbd> Skip ·{' '}
+        <kbd className="px-1 bg-muted rounded">←</kbd> <kbd className="px-1 bg-muted rounded">→</kbd> Navigate
       </div>
     </div>
   );

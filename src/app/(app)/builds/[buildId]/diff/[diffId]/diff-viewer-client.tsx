@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { SliderComparison } from '@/components/diff/slider-comparison';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { approveDiff, undoApproval, addDiffTodo } from '@/server/actions/diffs';
@@ -14,17 +14,33 @@ import { Input } from '@/components/ui/input';
 interface DiffViewerClientProps {
   diff: VisualDiff & { test: Test | null; errorMessage?: string | null; a11yViolations?: A11yViolation[] | null };
   buildId: string;
+  prevDiffId?: string;
   nextDiffId?: string;
 }
 
-export function DiffViewerClient({ diff, buildId, nextDiffId }: DiffViewerClientProps) {
+export function DiffViewerClient({ diff, buildId, prevDiffId, nextDiffId }: DiffViewerClientProps) {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const viewParam = searchParams.get('view') as 'slider' | 'side-by-side' | 'overlay' | 'three-way' | 'planned-vs-actual' | 'shift-compare' | null;
   const [isProcessing, setIsProcessing] = useState(false);
   const [showUndo, setShowUndo] = useState(false);
   const [undoTimeout, setUndoTimeout] = useState<NodeJS.Timeout | null>(null);
   const [showTodoInput, setShowTodoInput] = useState(false);
   const [todoDescription, setTodoDescription] = useState('');
   const todoInputRef = useRef<HTMLInputElement>(null);
+  const currentViewMode = useRef(viewParam);
+
+  const buildDiffUrl = useCallback((diffId: string) => {
+    const base = `/builds/${buildId}/diff/${diffId}`;
+    return currentViewMode.current ? `${base}?view=${currentViewMode.current}` : base;
+  }, [buildId]);
+
+  const handleViewModeChange = useCallback((mode: string) => {
+    currentViewMode.current = mode as typeof viewParam;
+    const url = new URL(window.location.href);
+    url.searchParams.set('view', mode);
+    window.history.replaceState(null, '', url.toString());
+  }, []);
 
   const handleApprove = useCallback(async () => {
     if (isProcessing || diff.status === 'approved') return;
@@ -45,7 +61,7 @@ export function DiffViewerClient({ diff, buildId, nextDiffId }: DiffViewerClient
       // Navigate to next diff if available
       if (nextDiffId) {
         setTimeout(() => {
-          router.push(`/builds/${buildId}/diff/${nextDiffId}`);
+          router.push(buildDiffUrl(nextDiffId));
         }, 500);
       }
     } catch (error) {
@@ -53,7 +69,7 @@ export function DiffViewerClient({ diff, buildId, nextDiffId }: DiffViewerClient
     } finally {
       setIsProcessing(false);
     }
-  }, [diff.id, diff.status, isProcessing, nextDiffId, buildId, router]);
+  }, [diff.id, diff.status, isProcessing, nextDiffId, buildId, router, buildDiffUrl]);
 
   const handleAddTodo = useCallback(async () => {
     if (!todoDescription.trim()) return;
@@ -91,9 +107,15 @@ export function DiffViewerClient({ diff, buildId, nextDiffId }: DiffViewerClient
 
   const handleSkip = useCallback(() => {
     if (nextDiffId) {
-      router.push(`/builds/${buildId}/diff/${nextDiffId}`);
+      router.push(buildDiffUrl(nextDiffId));
     }
-  }, [nextDiffId, buildId, router]);
+  }, [nextDiffId, buildDiffUrl, router]);
+
+  const handlePrev = useCallback(() => {
+    if (prevDiffId) {
+      router.push(buildDiffUrl(prevDiffId));
+    }
+  }, [prevDiffId, buildDiffUrl, router]);
 
   // Keyboard shortcuts
   useEffect(() => {
@@ -102,20 +124,31 @@ export function DiffViewerClient({ diff, buildId, nextDiffId }: DiffViewerClient
         return;
       }
 
-      switch (e.key.toLowerCase()) {
+      switch (e.key) {
         case 'e':
+        case 'E':
           e.preventDefault();
           handleApprove();
           break;
         case 't':
+        case 'T':
           e.preventDefault();
           handleShowTodoInput();
           break;
         case 's':
+        case 'S':
           e.preventDefault();
           handleSkip();
           break;
-        case 'escape':
+        case 'ArrowLeft':
+          e.preventDefault();
+          handlePrev();
+          break;
+        case 'ArrowRight':
+          e.preventDefault();
+          handleSkip();
+          break;
+        case 'Escape':
           if (showTodoInput) {
             setShowTodoInput(false);
             setTodoDescription('');
@@ -126,7 +159,7 @@ export function DiffViewerClient({ diff, buildId, nextDiffId }: DiffViewerClient
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [handleApprove, handleShowTodoInput, handleSkip, showTodoInput]);
+  }, [handleApprove, handleShowTodoInput, handleSkip, handlePrev, showTodoInput]);
 
   // Cleanup timeout on unmount
   useEffect(() => {
@@ -138,6 +171,8 @@ export function DiffViewerClient({ diff, buildId, nextDiffId }: DiffViewerClient
   const metadata = diff.metadata as DiffMetadata | null;
   const aiAnalysis = diff.aiAnalysis as AIDiffAnalysis | null;
   const aiStatus = diff.aiAnalysisStatus;
+  const [showRegions, setShowRegions] = useState(false);
+  const changedRegions = metadata?.changedRegions;
 
   return (
     <div className="space-y-4">
@@ -322,7 +357,11 @@ export function DiffViewerClient({ diff, buildId, nextDiffId }: DiffViewerClient
                 alignedCurrentImage={tab.alignedCurrent}
                 alignedDiffImage={tab.alignedDiffImage}
                 alignmentSegments={tab.alignmentSegments}
+                changedRegions={changedRegions}
+                showRegions={showRegions}
                 className="border rounded-lg"
+                initialViewMode={viewParam || undefined}
+                onViewModeChange={handleViewModeChange}
               />
             ) : (
               <div className="border rounded-lg p-4">
@@ -362,7 +401,11 @@ export function DiffViewerClient({ diff, buildId, nextDiffId }: DiffViewerClient
                       alignedCurrentImage={tab.alignedCurrent}
                       alignedDiffImage={tab.alignedDiffImage}
                       alignmentSegments={tab.alignmentSegments}
+                      changedRegions={changedRegions}
+                      showRegions={showRegions}
                       className="border rounded-lg"
+                      initialViewMode={viewParam || undefined}
+                      onViewModeChange={handleViewModeChange}
                     />
                   ) : (
                     <div className="border rounded-lg p-8 text-center text-muted-foreground space-y-2">
@@ -457,15 +500,27 @@ export function DiffViewerClient({ diff, buildId, nextDiffId }: DiffViewerClient
         </div>
 
         {/* Metadata Panel Toggle */}
-        <div className="text-sm text-muted-foreground">
+        <div className="text-sm text-muted-foreground flex items-center gap-2">
           {metadata && metadata.changedRegions.length > 0 && (
-            <span>
-              <Eye className="w-4 h-4 inline mr-1" />
-              {metadata.changedRegions.length} region(s) changed
-              {metadata.affectedComponents && metadata.affectedComponents.length > 0 && (
-                <span> · {metadata.affectedComponents.join(', ')}</span>
-              )}
-            </span>
+            <>
+              <button
+                onClick={() => setShowRegions(!showRegions)}
+                className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs transition-colors ${
+                  showRegions
+                    ? 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400'
+                    : 'bg-muted hover:bg-muted/80'
+                }`}
+              >
+                <Eye className="w-3 h-3" />
+                {showRegions ? 'Hide' : 'Show'} Regions
+              </button>
+              <span>
+                {metadata.changedRegions.length} region(s) changed
+                {metadata.affectedComponents && metadata.affectedComponents.length > 0 && (
+                  <span> · {metadata.affectedComponents.join(', ')}</span>
+                )}
+              </span>
+            </>
           )}
           {metadata?.pageShift?.detected && (
             <span className="ml-3 text-blue-600">

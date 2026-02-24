@@ -305,6 +305,10 @@ export async function main() {
     .option('-t, --token <token>', 'Runner authentication token')
     .option('-s, --server <url>', 'Lastest2 server URL')
     .option('--timeout <ms>', 'Timeout in milliseconds', '300000')
+    .option('--branch <branch>', 'Git branch (defaults to $GITHUB_HEAD_REF || $GITHUB_REF_NAME)')
+    .option('--commit <sha>', 'Git commit SHA (defaults to $GITHUB_SHA)')
+    .option('--target-url <url>', 'Override base URL for test execution')
+    .option('--fail-on-changes', 'Exit 1 when visual changes are detected (review_required status)')
     .action(async (options) => {
       const saved = loadConfig();
       const token = options.token || saved.token;
@@ -316,21 +320,31 @@ export async function main() {
       }
 
       const timeout = parseInt(options.timeout, 10);
+      const failOnChanges = !!options.failOnChanges;
       const repo: string = options.repo;
       const isName = repo.includes('/');
+      const gitBranch = options.branch || process.env.GITHUB_HEAD_REF || process.env.GITHUB_REF_NAME;
+      const gitCommit = options.commit || process.env.GITHUB_SHA;
+      const targetUrl = options.targetUrl;
 
       // 1. Create build
       console.log(`Creating build for ${repo}...`);
-      let buildId: string;
+      let buildId = '';
       let testCount: number;
       try {
+        const createBody: Record<string, string> = isName ? { githubRepo: repo } : { repositoryId: repo };
+        createBody.triggerType = 'ci';
+        if (gitBranch) createBody.gitBranch = gitBranch;
+        if (gitCommit) createBody.gitCommit = gitCommit;
+        if (targetUrl) createBody.targetUrl = targetUrl;
+
         const res = await fetch(`${server}/api/builds/create`, {
           method: 'POST',
           headers: {
             Authorization: `Bearer ${token}`,
             'Content-Type': 'application/json',
           },
-          body: JSON.stringify(isName ? { githubRepo: repo } : { repositoryId: repo }),
+          body: JSON.stringify(createBody),
         });
 
         if (!res.ok) {
@@ -339,9 +353,44 @@ export async function main() {
           process.exit(1);
         }
 
-        const data = await res.json() as { buildId: string; testCount: number };
-        buildId = data.buildId;
+        const data = await res.json() as { buildId: string | null; testCount: number; queued?: boolean; jobId?: string };
         testCount = data.testCount;
+
+        if (data.queued && !data.buildId) {
+          // Build was queued — poll until it starts
+          console.log(`Build queued (${testCount} tests), waiting for active build to finish...`);
+          const queueStart = Date.now();
+          while (Date.now() - queueStart < timeout) {
+            await new Promise(resolve => setTimeout(resolve, 5000));
+            try {
+              const retryRes = await fetch(`${server}/api/builds/create`, {
+                method: 'POST',
+                headers: {
+                  Authorization: `Bearer ${token}`,
+                  'Content-Type': 'application/json',
+                },
+                body: JSON.stringify(createBody),
+              });
+              if (!retryRes.ok) continue;
+              const retryData = await retryRes.json() as { buildId: string | null; testCount: number; queued?: boolean };
+              if (retryData.buildId) {
+                buildId = retryData.buildId;
+                testCount = retryData.testCount;
+                break;
+              }
+              console.log('  Still queued, retrying...');
+            } catch {
+              // retry
+            }
+          }
+          if (!buildId) {
+            console.error('Timeout: queued build never started');
+            process.exit(1);
+            return;
+          }
+        } else {
+          buildId = data.buildId!;
+        }
       } catch (error) {
         console.error('Failed to create build:', (error as Error).message);
         process.exit(1);
@@ -435,10 +484,58 @@ export async function main() {
             if (status.failedCount > 0) console.log(`  Failed: ${status.failedCount}`);
             if (status.changesDetected > 0) console.log(`  Changes: ${status.changesDetected}`);
             if (status.flakyCount > 0) console.log(`  Flaky: ${status.flakyCount}`);
-            console.log(`  URL: ${server}/builds/${buildId}`);
 
+            const buildUrl = `${server}/builds/${buildId}`;
+            console.log(`  URL: ${buildUrl}`);
+
+            // Write GitHub Actions outputs
+            const ghOutput = process.env.GITHUB_OUTPUT;
+            if (ghOutput) {
+              const lines = [
+                `status=${status.overallStatus}`,
+                `build-url=${buildUrl}`,
+                `changed-count=${status.changesDetected}`,
+                `passed-count=${status.passedCount}`,
+                `failed-count=${status.failedCount}`,
+                `total-tests=${status.totalTests}`,
+              ];
+              fs.appendFileSync(ghOutput, lines.join('\n') + '\n');
+            }
+
+            // Write GitHub Actions step summary
+            const ghSummary = process.env.GITHUB_STEP_SUMMARY;
+            if (ghSummary) {
+              const emoji = status.overallStatus === 'passed' || status.overallStatus === 'safe_to_merge'
+                ? '✅' : status.overallStatus === 'review_required' ? '⚠️' : '❌';
+              const md = [
+                `## ${emoji} Visual Regression Results`,
+                '',
+                '| Metric | Value |',
+                '|--------|-------|',
+                `| Status | **${status.overallStatus}** |`,
+                `| Passed | ${status.passedCount} |`,
+                `| Failed | ${status.failedCount} |`,
+                `| Changes | ${status.changesDetected} |`,
+                `| Flaky | ${status.flakyCount} |`,
+                `| Total | ${status.totalTests} |`,
+                `| Duration | ${elapsed} |`,
+                '',
+                `[View Results](${buildUrl})`,
+                '',
+              ];
+              fs.appendFileSync(ghSummary, md.join('\n'));
+            }
+
+            // Determine exit code
             const failStatuses = ['failed', 'blocked'];
-            process.exit(failStatuses.includes(status.overallStatus) ? 1 : 0);
+            if (failStatuses.includes(status.overallStatus)) {
+              process.exit(1);
+            }
+            if (status.overallStatus === 'review_required' && failOnChanges) {
+              console.log('\nVisual changes detected and --fail-on-changes is enabled');
+              process.exit(1);
+            }
+            process.exit(0);
           }
         } catch (error) {
           console.error(`Poll error: ${(error as Error).message}`);

@@ -66,6 +66,14 @@ FROM mcr.microsoft.com/playwright:v1.57.0-noble AS runner
 
 WORKDIR /app
 
+# Install locale and set timezone for deterministic rendering
+RUN apt-get update && apt-get install -y --no-install-recommends locales && \
+    sed -i '/en_US.UTF-8/s/^# //g' /etc/locale.gen && locale-gen && \
+    rm -rf /var/lib/apt/lists/*
+ENV LANG=en_US.UTF-8
+ENV LC_ALL=en_US.UTF-8
+ENV TZ=UTC
+
 # Create non-root user
 RUN groupadd --gid 1002 nodejs && \
     useradd --uid 1002 --gid nodejs --shell /bin/bash --create-home nextjs

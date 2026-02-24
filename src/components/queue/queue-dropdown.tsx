@@ -1,9 +1,9 @@
 'use client';
 
-import type { BackgroundJob } from '@/lib/db/schema';
+import type { JobWithChildren } from './job-polling-context';
 import { QueueJobItem } from './queue-job-item';
 
-export function QueueDropdown({ jobs }: { jobs: BackgroundJob[] }) {
+export function QueueDropdown({ jobs }: { jobs: JobWithChildren[] }) {
   const active = jobs.filter(j => j.status === 'running' || j.status === 'pending');
   const completed = jobs.filter(j => j.status === 'completed' || j.status === 'failed');
 

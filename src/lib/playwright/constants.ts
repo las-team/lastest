@@ -53,8 +53,11 @@ Element.prototype.animate = function() {
 // 3b. Gate requestAnimationFrame — queue callbacks instead of firing them.
 // Gating is DISABLED during page load to allow initial rendering.
 // Enable via window.__enableRAFGating() after the page is interactive.
-var _origRAF = window.requestAnimationFrame;
-var _origCancelRAF = window.cancelAnimationFrame;
+// Playwright's setFixedTime installs fake-timers which override RAF as own properties.
+// Access real natives via Window.prototype to bypass fakes — ensures callbacks get
+// real DOMHighResTimeStamp during interactions (not frozen clock values).
+var _origRAF = (Window.prototype.requestAnimationFrame || window.requestAnimationFrame).bind(window);
+var _origCancelRAF = (Window.prototype.cancelAnimationFrame || window.cancelAnimationFrame).bind(window);
 var _rafQueue = new Map();
 var _rafNextId = 1;
 var _rafGatingEnabled = false;
@@ -80,7 +83,7 @@ window.__disableRAFGating = function() {
   var leftover = Array.from(_rafQueue.values());
   _rafQueue.clear();
   leftover.forEach(function(cb) { try { _origRAF(cb); } catch(e) {} });
-  // Drain orphaned timeouts via real setTimeout
+  // Drain gated timeouts so deferred callbacks (e.g. laser fade-out) still execute
   var timeouts = Array.from(_timeoutQueue.values());
   _timeoutQueue.clear();
   timeouts.forEach(function(cb) { try { _origSetTimeout(cb, 0); } catch(e) {} });
@@ -119,9 +122,14 @@ window.clearTimeout = function(id) {
 window.__flushAnimationFrames = function(maxIterations) {
   maxIterations = maxIterations || 10;
   for (var i = 0; i < maxIterations && _rafQueue.size > 0; i++) {
+    var t = 1000;
+    if (window.__perfNowFrozen !== false && typeof window.__perfNowFrozen === 'number') {
+      window.__perfNowFrozen += 16;
+      t = window.__perfNowFrozen;
+    }
     var rafCbs = Array.from(_rafQueue.values());
     _rafQueue.clear();
-    rafCbs.forEach(function(cb) { try { cb(1000); } catch(e) {} });
+    rafCbs.forEach(function(cb) { try { cb(t); } catch(e) {} });
   }
 };
 
@@ -297,6 +305,11 @@ export const CROSS_OS_CHROMIUM_ARGS = [
   '--disable-partial-raster',
   '--disable-checker-imaging',
   '--force-device-scale-factor=1',
+  '--disable-gpu-rasterization',
+  '--disable-oop-rasterization',
+  '--disable-background-timer-throttling',
+  '--disable-renderer-backgrounding',
+  '--disable-backgrounding-occluded-windows',
 ];
 
 /**

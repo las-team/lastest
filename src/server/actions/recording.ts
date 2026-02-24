@@ -366,7 +366,7 @@ export async function updateRerecordedTest(data: {
   viewportHeight?: number;
 }) {
   await requireTeamAccess();
-  const { updateTestWithVersion, getTest, getPlaywrightSettings } = await import('@/lib/db/queries');
+  const { updateTestWithVersion, getTest } = await import('@/lib/db/queries');
   const { getCurrentBranchForRepo } = await import('@/lib/git-utils');
 
   const { updateTest } = await import('@/lib/db/queries');
@@ -374,7 +374,7 @@ export async function updateRerecordedTest(data: {
   const test = await getTest(data.testId);
   const branch = await getCurrentBranchForRepo(test?.repositoryId);
 
-  // Use passed viewport or look up from playwright settings
+  // Use passed viewport or null
   const viewport = data.viewportWidth
     ? { width: data.viewportWidth, height: data.viewportHeight }
     : null;

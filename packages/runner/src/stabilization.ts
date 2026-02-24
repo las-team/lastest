@@ -28,6 +28,11 @@ export const CROSS_OS_CHROMIUM_ARGS = [
   '--disable-partial-raster',
   '--disable-checker-imaging',
   '--force-device-scale-factor=1',
+  '--disable-gpu-rasterization',
+  '--disable-oop-rasterization',
+  '--disable-background-timer-throttling',
+  '--disable-renderer-backgrounding',
+  '--disable-backgrounding-occluded-windows',
 ];
 
 /**
@@ -82,8 +87,11 @@ Element.prototype.animate = function() {
 // 3b. Gate requestAnimationFrame — queue callbacks instead of firing them.
 // Gating is DISABLED during page load to allow initial rendering.
 // Enable via window.__enableRAFGating() after the page is interactive.
-var _origRAF = window.requestAnimationFrame;
-var _origCancelRAF = window.cancelAnimationFrame;
+// Playwright's setFixedTime installs fake-timers which override RAF as own properties.
+// Access real natives via Window.prototype to bypass fakes — ensures callbacks get
+// real DOMHighResTimeStamp during interactions (not frozen clock values).
+var _origRAF = (Window.prototype.requestAnimationFrame || window.requestAnimationFrame).bind(window);
+var _origCancelRAF = (Window.prototype.cancelAnimationFrame || window.cancelAnimationFrame).bind(window);
 var _rafQueue = new Map();
 var _rafNextId = 1;
 var _rafGatingEnabled = false;
@@ -109,7 +117,7 @@ window.__disableRAFGating = function() {
   var leftover = Array.from(_rafQueue.values());
   _rafQueue.clear();
   leftover.forEach(function(cb) { try { _origRAF(cb); } catch(e) {} });
-  // Drain orphaned timeouts via real setTimeout
+  // Drain gated timeouts so deferred callbacks (e.g. laser fade-out) still execute
   var timeouts = Array.from(_timeoutQueue.values());
   _timeoutQueue.clear();
   timeouts.forEach(function(cb) { try { _origSetTimeout(cb, 0); } catch(e) {} });
@@ -148,9 +156,14 @@ window.clearTimeout = function(id) {
 window.__flushAnimationFrames = function(maxIterations) {
   maxIterations = maxIterations || 10;
   for (var i = 0; i < maxIterations && _rafQueue.size > 0; i++) {
+    var t = 1000;
+    if (window.__perfNowFrozen !== false && typeof window.__perfNowFrozen === 'number') {
+      window.__perfNowFrozen += 16;
+      t = window.__perfNowFrozen;
+    }
     var rafCbs = Array.from(_rafQueue.values());
     _rafQueue.clear();
-    rafCbs.forEach(function(cb) { try { cb(1000); } catch(e) {} });
+    rafCbs.forEach(function(cb) { try { cb(t); } catch(e) {} });
   }
 };
 
@@ -342,14 +355,15 @@ export async function setupFreezeScripts(
 
   if (settings.freezeTimestamps) {
     await page.clock.setFixedTime(new Date(settings.frozenTimestamp));
-    // Playwright's setFixedTime does NOT freeze performance.now() — override it
-    // so timing-dependent rendering (e.g. Excalidraw animations) is deterministic.
+    // Playwright's setFixedTime uses @sinonjs/fake-timers which overrides
+    // performance.now() as an own property on the performance object.
+    // Use Performance.prototype.now to bypass the fake and get real elapsed time.
     await page.addInitScript(`
       (function() {
-        var _origPerfNow = performance.now.bind(performance);
+        var _origPerfNow = Performance.prototype.now.bind(performance);
         window.__perfNowFrozen = false;
         performance.now = function() {
-          return window.__perfNowFrozen ? 1000 : _origPerfNow();
+          return window.__perfNowFrozen !== false ? window.__perfNowFrozen : _origPerfNow();
         };
       })();
     `);
@@ -437,6 +451,21 @@ export async function setupFreezeScripts(
           }
           return ctx;
         };
+
+        // OffscreenCanvas determinism
+        if (typeof OffscreenCanvas !== 'undefined') {
+          var _origOCGetContext = OffscreenCanvas.prototype.getContext;
+          OffscreenCanvas.prototype.getContext = function(type, attrs) {
+            if (type === '2d' && ${forceWillReadFrequently}) {
+              attrs = Object.assign({}, attrs || {}, { willReadFrequently: true });
+            }
+            var ctx = _origOCGetContext.call(this, type, attrs);
+            if (ctx && type === '2d' && ${disableSmoothing}) {
+              ctx.imageSmoothingEnabled = false;
+            }
+            return ctx;
+          };
+        }
       })();
     `);
   }
@@ -482,6 +511,42 @@ export async function setupFreezeScripts(
 
         var _fillRect = proto.fillRect;
         proto.fillRect = function(x, y, w, h) { return _fillRect.call(this, snap(x), snap(y), w, h); };
+
+        // lineWidth normalization: round to nearest 0.5 (Skia uses different AA for fractional values)
+        var _lineWidthDesc = Object.getOwnPropertyDescriptor(proto, 'lineWidth');
+        if (_lineWidthDesc && _lineWidthDesc.set) {
+          var _origLWSetter = _lineWidthDesc.set;
+          Object.defineProperty(proto, 'lineWidth', {
+            get: _lineWidthDesc.get,
+            set: function(v) { _origLWSetter.call(this, Math.round(v * 2) / 2); },
+            configurable: true,
+          });
+        }
+
+        // shadowBlur normalization: round to integer (avoids Gaussian kernel variance)
+        var _shadowBlurDesc = Object.getOwnPropertyDescriptor(proto, 'shadowBlur');
+        if (_shadowBlurDesc && _shadowBlurDesc.set) {
+          var _origSBSetter = _shadowBlurDesc.set;
+          Object.defineProperty(proto, 'shadowBlur', {
+            get: _shadowBlurDesc.get,
+            set: function(v) { _origSBSetter.call(this, Math.round(v)); },
+            configurable: true,
+          });
+        }
+
+        // drawImage coordinate snapping: sub-pixel destinations cause AA variance
+        var _drawImage = proto.drawImage;
+        proto.drawImage = function() {
+          var args = Array.prototype.slice.call(arguments);
+          if (args.length === 3) {
+            args[1] = snap(args[1]); args[2] = snap(args[2]);
+          } else if (args.length === 5) {
+            args[1] = snap(args[1]); args[2] = snap(args[2]);
+          } else if (args.length === 9) {
+            args[5] = snap(args[5]); args[6] = snap(args[6]);
+          }
+          return _drawImage.apply(this, args);
+        };
       })();
     `);
   }
@@ -582,7 +647,7 @@ export async function applyPreScreenshotStabilization(
 
   // 6. Freeze performance.now, reset Excalidraw RNG, enable RAF gating + flush deterministically
   await page.evaluate(() => {
-    (window as any).__perfNowFrozen = true;
+    (window as any).__perfNowFrozen = performance.now();
     if (typeof (window as any).__resetExcalidrawRNG === 'function') {
       (window as any).__resetExcalidrawRNG();
     }

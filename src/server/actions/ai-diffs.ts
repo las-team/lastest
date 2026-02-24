@@ -4,6 +4,7 @@ import * as queries from '@/lib/db/queries';
 
 import { analyzeDiff, type DiffingProviderConfig } from '@/lib/ai/diff-analyzer';
 import type { AIDiffingProvider } from '@/lib/db/schema';
+import { createChildJob, completeJob, failJob } from './jobs';
 
 const MAX_CONCURRENT_AI = 10;
 let activeAI = 0;
@@ -23,8 +24,9 @@ async function withAILimit<T>(fn: () => Promise<T>): Promise<T> {
  * Fire-and-forget — does not block test execution.
  * Capped at 10 concurrent analyses via semaphore.
  */
-export async function triggerAIDiffAnalysis(diffId: string, repositoryId?: string | null) {
+export async function triggerAIDiffAnalysis(diffId: string, repositoryId?: string | null, parentJobId?: string | null) {
   return withAILimit(async () => {
+  let childJobId: string | undefined;
   try {
     // Check if AI diffing is enabled
     const settings = await queries.getAISettings(repositoryId);
@@ -100,6 +102,11 @@ export async function triggerAIDiffAnalysis(diffId: string, repositoryId?: strin
     const test = await queries.getTest(diff.testId);
     const testName = test?.name || 'Unknown Test';
 
+    // Create child job if parent exists
+    if (parentJobId) {
+      childJobId = await createChildJob('ai_diff', `AI Diff: ${testName}`, parentJobId, repositoryId, { diffId });
+    }
+
     const providerConfig: DiffingProviderConfig = {
       provider: effectiveProvider as DiffingProviderConfig['provider'],
       apiKey: effectiveApiKey,
@@ -125,9 +132,11 @@ export async function triggerAIDiffAnalysis(diffId: string, repositoryId?: strin
       aiRecommendation: analysis.recommendation,
       aiAnalysisStatus: 'completed',
     });
+    if (childJobId) await completeJob(childJobId);
   } catch (error) {
     console.error(`AI diff analysis failed for diff ${diffId}:`, error);
     await queries.updateVisualDiff(diffId, { aiAnalysisStatus: 'failed' });
+    if (childJobId) await failJob(childJobId, error instanceof Error ? error.message : 'AI diff analysis failed');
   }
   });
 }

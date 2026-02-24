@@ -31,7 +31,9 @@ import { useNotifyJobStarted } from '@/components/queue/job-polling-context';
 import { ExecutionTargetSelector } from '@/components/execution/execution-target-selector';
 import { StepScreenshotMatcher } from '@/components/planned/step-screenshot-matcher';
 import { TestSetupOverrides } from '@/components/setup/test-setup-overrides';
-import type { Test, TestVersion, PlannedScreenshot, SetupScript, GoogleSheetsDataSource, A11yViolation } from '@/lib/db/schema';
+import type { Test, TestVersion, PlannedScreenshot, SetupScript, GoogleSheetsDataSource, A11yViolation, StabilizationSettings } from '@/lib/db/schema';
+import { DEFAULT_STABILIZATION_SETTINGS } from '@/lib/db/schema';
+import { TestStabilizationOverrides } from '@/components/settings/test-stabilization-overrides';
 import { A11yViolationsPanel } from '@/components/builds/a11y-violations-panel';
 import type { ScreenshotGroup } from '@/server/actions/tests';
 import { SheetDataPreview } from '@/components/test-data/sheet-data-preview';
@@ -82,9 +84,10 @@ interface TestDetailClientProps {
   availableTests?: Test[];
   availableScripts?: SetupScript[];
   sheetDataSources?: GoogleSheetsDataSource[];
+  stabilizationDefaults?: StabilizationSettings | null;
 }
 
-export function TestDetailClient({ test, results, repositoryId, screenshotGroups = [], plannedScreenshots = [], defaultSetupSteps = [], availableTests = [], availableScripts = [], sheetDataSources = [] }: TestDetailClientProps) {
+export function TestDetailClient({ test, results, repositoryId, screenshotGroups = [], plannedScreenshots = [], defaultSetupSteps = [], availableTests = [], availableScripts = [], sheetDataSources = [], stabilizationDefaults }: TestDetailClientProps) {
   const router = useRouter();
   const notifyJobStarted = useNotifyJobStarted();
   const [isDeleting, setIsDeleting] = useState(false);
@@ -568,6 +571,7 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
           <TabsList>
             <TabsTrigger value="code">Code</TabsTrigger>
             <TabsTrigger value="setup">Setup</TabsTrigger>
+            <TabsTrigger value="stabilization">Stabilization</TabsTrigger>
             <TabsTrigger value="screenshots">Screenshots</TabsTrigger>
             <TabsTrigger value="plans">Plans</TabsTrigger>
             <TabsTrigger value="history">Run History</TabsTrigger>
@@ -657,6 +661,14 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
               }))}
               availableTests={availableTests}
               availableScripts={availableScripts}
+            />
+          </TabsContent>
+
+          <TabsContent value="stabilization" className="mt-4">
+            <TestStabilizationOverrides
+              testId={test.id}
+              overrides={test.stabilizationOverrides ?? null}
+              defaults={stabilizationDefaults ?? DEFAULT_STABILIZATION_SETTINGS}
             />
           </TabsContent>
 

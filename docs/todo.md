@@ -16,9 +16,12 @@ Network Interception
 Support https://github.com/excalidraw/excalidraw/tree/master/packages/excalidraw/tests ~/.claude/plans/declarative-kindling-coral.md 70%
     ● Summary saved to memory/excalidraw-stabilization.md. 
 
-branch specific url storage
+Runner action
+
+Apache - embeddable vnc server - guacamole
+https://guacamole.apache.org/
+
 ## ideas
-Changed region detection via flood-fill algorithm
 Test coverage assessment and recreation based on existing test set
 Tweet about us
 Content comparison - compare text in 2 setups
@@ -34,8 +37,8 @@ Sitemap -flow
 Formal verification of code?
 ### UX
 ## bugs
+Keyboard shortcuts: A Approve · R Reject · ← → Navigate · + - Zoom on the diff screen dont work
 ## marketing 
-
 ## Excalidraw 
 
   Tier 3 — Needs product improvements first:
@@ -66,3 +69,7 @@ Formal verification of code?
   intact).   
 
   ~/.claude/plans/delegated-toasting-mccarthy.md
+
+
+
+

@@ -123,6 +123,7 @@ import type {
   SetupScriptType,
   TestSetupOverrides,
   TestTeardownOverrides,
+  StabilizationSettings,
 } from './schema';
 
 export { DEFAULT_SELECTOR_PRIORITY, DEFAULT_DIFF_THRESHOLDS, DEFAULT_AI_SETTINGS, DEFAULT_RECORDING_ENGINES, DEFAULT_NOTIFICATION_SETTINGS };
@@ -1620,6 +1621,7 @@ export async function getDiffSensitivitySettings(repositoryId?: string | null) {
     textRegionThreshold: DEFAULT_DIFF_THRESHOLDS.textRegionThreshold,
     textRegionPadding: DEFAULT_DIFF_THRESHOLDS.textRegionPadding,
     textDetectionGranularity: DEFAULT_DIFF_THRESHOLDS.textDetectionGranularity,
+    regionDetectionMode: DEFAULT_DIFF_THRESHOLDS.regionDetectionMode,
     createdAt: null,
     updatedAt: null,
   };
@@ -1994,6 +1996,7 @@ export async function createBackgroundJob(data: {
   totalSteps?: number;
   repositoryId?: string | null;
   metadata?: Record<string, unknown>;
+  parentJobId?: string | null;
 }) {
   const id = uuid();
   const now = new Date();
@@ -2007,6 +2010,7 @@ export async function createBackgroundJob(data: {
     progress: 0,
     repositoryId: data.repositoryId ?? null,
     metadata: data.metadata ?? null,
+    parentJobId: data.parentJobId ?? null,
     createdAt: now,
   });
   return { id };
@@ -2031,11 +2035,14 @@ export async function getRecentBackgroundJobs(sinceMs = 10000) {
     .select()
     .from(backgroundJobs)
     .where(
-      or(
-        or(eq(backgroundJobs.status, 'pending'), eq(backgroundJobs.status, 'running')),
-        and(
-          or(eq(backgroundJobs.status, 'completed'), eq(backgroundJobs.status, 'failed')),
-          gte(backgroundJobs.completedAt, since)
+      and(
+        isNull(backgroundJobs.parentJobId),
+        or(
+          or(eq(backgroundJobs.status, 'pending'), eq(backgroundJobs.status, 'running')),
+          and(
+            or(eq(backgroundJobs.status, 'completed'), eq(backgroundJobs.status, 'failed')),
+            gte(backgroundJobs.completedAt, since)
+          )
         )
       )
     )
@@ -2043,8 +2050,22 @@ export async function getRecentBackgroundJobs(sinceMs = 10000) {
     .all();
 }
 
+export async function getChildJobs(parentJobId: string) {
+  return db
+    .select()
+    .from(backgroundJobs)
+    .where(eq(backgroundJobs.parentJobId, parentJobId))
+    .orderBy(desc(backgroundJobs.createdAt))
+    .all();
+}
+
 export async function getBackgroundJob(id: string) {
   return db.select().from(backgroundJobs).where(eq(backgroundJobs.id, id)).get();
+}
+
+export async function deleteBackgroundJob(id: string) {
+  await db.delete(backgroundJobs).where(eq(backgroundJobs.parentJobId, id));
+  await db.delete(backgroundJobs).where(eq(backgroundJobs.id, id));
 }
 
 export async function getPendingBuildJobs(repositoryId?: string | null) {
@@ -3721,6 +3742,14 @@ export async function getResolvedTeardownStepsForTest(test: { id: string; reposi
   }
 
   return [...activeDefaults, ...extras];
+}
+
+// ============================================
+// Per-Test Stabilization Overrides
+// ============================================
+
+export async function updateTestStabilizationOverrides(testId: string, overrides: Partial<StabilizationSettings> | null) {
+  await db.update(tests).set({ stabilizationOverrides: overrides, updatedAt: new Date() }).where(eq(tests.id, testId));
 }
 
 // Spec Imports
