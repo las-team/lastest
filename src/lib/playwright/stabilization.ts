@@ -516,7 +516,7 @@ export async function setupFreezeScripts(
   }
 
   // Canvas coordinate rounding: snap path coords to pixel centers for deterministic strokes
-  if (settings.roundCanvasCoordinates) {
+  if (s.roundCanvasCoordinates) {
     await page.addInitScript(`
       (function() {
         function snap(v) { return Math.round(v - 0.5) + 0.5; }
