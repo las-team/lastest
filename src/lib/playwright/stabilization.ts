@@ -450,8 +450,12 @@ export async function setupFreezeScripts(
         document.addEventListener('DOMContentLoaded', inject);
       })();
     `);
+  }
 
-    // Inject cross-OS font CSS early via init script (prevents FOUC from late injection)
+  // Inject cross-OS font CSS early via init script (prevents FOUC from late injection).
+  // Only when crossOsConsistency is enabled — freezeAnimations alone should NOT force
+  // system fonts, matching the remote runner which only sends crossOsFontCSS for crossOs.
+  if (s.crossOsConsistency) {
     const fontCSS = getCrossOsFontCSS();
     await page.addInitScript(`
       (function() {

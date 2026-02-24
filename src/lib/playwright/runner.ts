@@ -1272,11 +1272,9 @@ export class PlaywrightRunner extends EventEmitter {
               // Apply stabilization before screenshot
               await applyStabilization(target, targetUrl, stabilization);
 
-              // Inject deterministic rendering CSS when freezeAnimations is enabled
-              // (crossOsConsistency case is already handled in applyStabilization)
-              if (this.settings?.freezeAnimations && !stabilization.crossOsConsistency) {
-                await target.addStyleTag({ content: DETERMINISTIC_RENDERING_CSS }).catch(() => {});
-              }
+              // Deterministic rendering CSS is now injected once via setupFreezeScripts
+              // init script (when freezeAnimations or crossOsConsistency is enabled),
+              // so no per-screenshot addStyleTag is needed.
 
               // Apply dynamic content masking before screenshot
               if (stabilization.autoMaskDynamicContent) {
