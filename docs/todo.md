@@ -16,7 +16,6 @@ Network Interception
 Support https://github.com/excalidraw/excalidraw/tree/master/packages/excalidraw/tests ~/.claude/plans/declarative-kindling-coral.md 70%
     ● Summary saved to memory/excalidraw-stabilization.md. 
 
-ai on zima
 branch specific url storage
 ## ideas
 Changed region detection via flood-fill algorithm
@@ -54,3 +53,16 @@ Formal verification of code?
   ├─────┼─────────────────────┼─────────────────────────┼────────────────┤
   │ 20  │ Paste CSV as Chart  │ Clipboard support       │ charts.test    │
   └─────┴─────────────────────┴─────────────────────────┴────────────────┘
+
+
+  please check what kind of measures have been implemented to try to get consistent   
+  results out of excalidraw tests. With the OS consistency, Font fixing, random       
+  number fixing, timestamp fixing. Place make sure all that is in place, and works    
+  well. Check anti-aliasing, sub-pixel rendering and ways to fix that. Try to make    
+  the testing deterministic.                                                          
+  You can verify your work by building a new runner, stopping and starting it, then   
+  running lastest2-runner trigger --repo ewyct/excalidraw_test. The goal is to get    
+  the same results in two consecutive runs (while keeping testing functionality       
+  intact).   
+
+  ~/.claude/plans/delegated-toasting-mccarthy.md

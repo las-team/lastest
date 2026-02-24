@@ -50,6 +50,9 @@ export function getFreezeRandomScript(seed: number): string {
                  ((nextCrypto() & 0x3 | 0x8).toString(16))+hex.slice(17,20)+'-'+hex.slice(20,32);
         };
       }
+      window.__resetMathRandom = function() {
+        mathState = ${seed};
+      };
     })();
   `;
 }
@@ -290,7 +293,7 @@ export async function waitForCanvasStable(
     // Run up to 30 flush-then-check iterations in a single JS execution context.
     // No delays between iterations — prevents non-deterministic async callbacks.
     for (let i = 0; i < 30; i++) {
-      flush(10);
+      flush(15);
       const canvases = Array.from(document.querySelectorAll('canvas'));
       const dataUrls = canvases.map((c: HTMLCanvasElement) => {
         try { return c.toDataURL(); } catch { return ''; }
@@ -368,7 +371,7 @@ export async function applyStabilization(
       (window as any).__enableRAFGating();
     }
     if (typeof (window as any).__flushAnimationFrames === 'function') {
-      (window as any).__flushAnimationFrames(10);
+      (window as any).__flushAnimationFrames(20);
     }
   }).catch(() => {});
 
@@ -410,7 +413,7 @@ export async function setupFreezeScripts(
   // Inject deterministic rendering CSS early via init script (before page scripts run).
   // Previously injected via injectCSS/addStyleTag in applyStabilization, which added
   // a new <style> tag on every screenshot and could trigger re-renders that advance RNG.
-  if (s.crossOsConsistency) {
+  if (s.crossOsConsistency || s.freezeAnimations) {
     await page.addInitScript(`
       (function() {
         function inject() {
@@ -445,11 +448,25 @@ export async function setupFreezeScripts(
     `);
   }
 
+  // Excalidraw RNG reset: provide __resetExcalidrawRNG that resets Math.random seed.
+  // applyPreScreenshotStabilization calls this before each screenshot.
+  if (s.freezeAnimations) {
+    await page.addInitScript(`
+      (function() {
+        window.__resetExcalidrawRNG = function() {
+          if (typeof window.__resetMathRandom === 'function') {
+            window.__resetMathRandom();
+          }
+        };
+      })();
+    `);
+  }
+
   // Canvas determinism: force willReadFrequently for CPU-backed canvas (avoids GPU readback
   // non-determinism) and optionally disable imageSmoothingEnabled.
-  const needsDeterministicCanvas = s.crossOsConsistency || s.disableImageSmoothing;
+  const needsDeterministicCanvas = s.crossOsConsistency || s.freezeAnimations || s.disableImageSmoothing;
   if (needsDeterministicCanvas) {
-    const forceWillReadFrequently = s.crossOsConsistency;
+    const forceWillReadFrequently = s.crossOsConsistency || s.freezeAnimations;
     const disableSmoothing = s.disableImageSmoothing;
     await page.addInitScript(`
       (function() {

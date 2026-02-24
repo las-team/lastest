@@ -478,7 +478,7 @@ export const DEFAULT_STABILIZATION_SETTINGS: StabilizationSettings = {
   maskColor: '#808080',
   waitForCanvasStable: false,
   canvasStableTimeout: 3000,
-  canvasStableThreshold: 2,
+  canvasStableThreshold: 3,
   disableImageSmoothing: false,
 };
 

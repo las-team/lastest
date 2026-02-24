@@ -327,6 +327,9 @@ export const DETERMINISTIC_RENDERING_CSS = `*, *::before, *::after {
   caret-color: transparent !important;
   -webkit-font-smoothing: antialiased !important;
   -moz-osx-font-smoothing: grayscale !important;
+  text-rendering: geometricPrecision !important;
+  -webkit-text-size-adjust: 100% !important;
+  will-change: auto !important;
 }
 ::selection {
   background: transparent !important;

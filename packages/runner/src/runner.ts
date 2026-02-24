@@ -206,7 +206,7 @@ export class TestRunner {
       context = await this.browser!.newContext({
         viewport,
         ...(parsedStorageState ? { storageState: parsedStorageState } : {}),
-        ...(command.stabilization?.crossOsConsistency ? { deviceScaleFactor: 1 } : {}),
+        ...(command.stabilization?.crossOsConsistency || command.stabilization?.freezeAnimations ? { deviceScaleFactor: 1 } : {}),
         ...(command.stabilization?.freezeAnimations ? { reducedMotion: 'reduce' as const } : {}),
       });
       page = await context.newPage();
@@ -432,7 +432,7 @@ export class TestRunner {
       // No storageState injection — this IS the setup that creates the session
       context = await this.browser!.newContext({
         viewport,
-        ...(command.stabilization?.crossOsConsistency ? { deviceScaleFactor: 1 } : {}),
+        ...(command.stabilization?.crossOsConsistency || command.stabilization?.freezeAnimations ? { deviceScaleFactor: 1 } : {}),
         ...(command.stabilization?.freezeAnimations ? { reducedMotion: 'reduce' as const } : {}),
       });
       page = await context.newPage();
@@ -726,6 +726,12 @@ export class TestRunner {
       log('info', `Navigating to ${url}...`);
       const response = await originalGoto(url, options);
       log('info', `Navigation complete: ${response?.status() ?? 'no response'}`);
+      // Reset Math.random seed after page load so test actions get deterministic seeds
+      if (stabilization?.freezeRandomValues) {
+        await page.evaluate(() => {
+          (window as unknown as { __resetMathRandom?: () => void }).__resetMathRandom?.();
+        }).catch(() => {});
+      }
       return response;
     };
 
@@ -740,18 +746,32 @@ export class TestRunner {
       }
     };
 
-    // Wrap key Playwright action methods with RAF flushing to ensure consistent
-    // state going into each action (prevents animation frame timing differences).
+    // Wrap key Playwright action methods with pre+post RAF flushing.
+    // Pre-action: flush pending callbacks from unwrapped actions (mouse.move).
+    // Post-action: wait one browser frame for the page to process the action's
+    // effects (React state → RAF-driven canvas re-render), then flush again.
     if (stabilization?.freezeAnimations) {
       const wrapAction = (obj: any, method: string) => {
         const orig = obj[method].bind(obj);
         obj[method] = async (...args: any[]) => {
+          // Pre-action: flush pending callbacks from unwrapped actions (mouse.move)
           await page.evaluate(() => {
             (window as any).__enableRAFGating?.();
-            (window as any).__flushAnimationFrames?.(5);
+            (window as any).__flushAnimationFrames?.(10);
             (window as any).__disableRAFGating?.();
           }).catch(() => {});
-          return orig(...args);
+          // Execute action (gating disabled — page reacts normally)
+          const result = await orig(...args);
+          // Post-action: wait one browser frame for page to process, then flush
+          await page.evaluate(() => new Promise<void>(resolve => {
+            requestAnimationFrame(() => {
+              (window as any).__enableRAFGating?.();
+              (window as any).__flushAnimationFrames?.(10);
+              (window as any).__disableRAFGating?.();
+              resolve();
+            });
+          })).catch(() => {});
+          return result;
         };
       };
       wrapAction(page.mouse, 'click');

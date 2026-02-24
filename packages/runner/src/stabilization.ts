@@ -39,6 +39,9 @@ const DETERMINISTIC_RENDERING_CSS = `*, *::before, *::after {
   caret-color: transparent !important;
   -webkit-font-smoothing: antialiased !important;
   -moz-osx-font-smoothing: grayscale !important;
+  text-rendering: geometricPrecision !important;
+  -webkit-text-size-adjust: 100% !important;
+  will-change: auto !important;
 }
 ::selection {
   background: transparent !important;
@@ -288,6 +291,9 @@ export function getFreezeRandomScript(seed: number): string {
                  ((nextCrypto() & 0x3 | 0x8).toString(16))+hex.slice(17,20)+'-'+hex.slice(20,32);
         };
       }
+      window.__resetMathRandom = function() {
+        mathState = ${seed};
+      };
     })();
   `;
 }
@@ -329,7 +335,11 @@ export async function setupFreezeScripts(
   if (settings.freezeAnimations) {
     await page.addInitScript(`
       (function() {
-        window.__resetExcalidrawRNG = function() {};
+        window.__resetExcalidrawRNG = function() {
+          if (typeof window.__resetMathRandom === 'function') {
+            window.__resetMathRandom();
+          }
+        };
       })();
     `);
   }
@@ -499,7 +509,7 @@ export async function applyPreScreenshotStabilization(
       (window as any).__enableRAFGating();
     }
     if (typeof (window as any).__flushAnimationFrames === 'function') {
-      (window as any).__flushAnimationFrames(10);
+      (window as any).__flushAnimationFrames(20);
     }
   }).catch(() => {});
 
@@ -526,7 +536,7 @@ async function waitForCanvasStable(
     let stableCount = 0;
 
     for (let i = 0; i < 30; i++) {
-      flush(10);
+      flush(15);
       const canvases = Array.from(document.querySelectorAll('canvas'));
       const dataUrls = canvases.map((c: HTMLCanvasElement) => {
         try { return c.toDataURL(); } catch { return ''; }

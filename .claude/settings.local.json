@@ -97,7 +97,8 @@
       "Bash(git -C /home/ewyct/dev/lastest2 log --all --pretty=format:\"%h %s\" --grep=\"Agent\\\\|agent\\\\|SDK\\\\|sdk\")",
       "Bash(git fetch:*)",
       "Bash(tail:*)",
-      "Bash(pnpm lastest2-runner:*)"
+      "Bash(pnpm lastest2-runner:*)",
+      "WebFetch(domain:deepwiki.com)"
     ]
   },
   "disabledMcpjsonServers": [
