@@ -1,5 +1,5 @@
 import { chromium, firefox, webkit, Browser, Page, BrowserContext, Locator } from 'playwright';
-import { FREEZE_ANIMATIONS_CSS, FREEZE_ANIMATIONS_SCRIPT, CROSS_OS_CHROMIUM_ARGS } from './constants';
+import { FREEZE_ANIMATIONS_CSS, FREEZE_ANIMATIONS_SCRIPT, CROSS_OS_CHROMIUM_ARGS, DETERMINISTIC_RENDERING_CSS } from './constants';
 import { EventEmitter } from 'events';
 import path from 'path';
 import fs from 'fs';
@@ -805,9 +805,10 @@ export class PlaywrightRunner extends EventEmitter {
       // Cross-OS consistency: inject Chromium flags for identical rendering across OS
       const stabilization = this.getStabilizationSettings();
       const browserType = this.settings?.browser || 'chromium';
-      const launchArgs = (stabilization.crossOsConsistency && browserType === 'chromium')
-        ? CROSS_OS_CHROMIUM_ARGS
-        : [];
+      // Use deterministic rendering args when crossOsConsistency or freezeAnimations
+      // is enabled — GPU compositing causes non-deterministic canvas anti-aliasing.
+      const needsDeterministicRendering = (stabilization.crossOsConsistency || this.settings?.freezeAnimations) && browserType === 'chromium';
+      const launchArgs = needsDeterministicRendering ? CROSS_OS_CHROMIUM_ARGS : [];
 
       // Cast needed as Playwright types may not include 'shell' yet
       this.browser = await launcher.launch({
@@ -1034,6 +1035,7 @@ export class PlaywrightRunner extends EventEmitter {
         ...(this.settings?.freezeAnimations ? { reducedMotion: 'reduce' } : {}),
         ...(this.settings?.grantClipboardAccess ? { permissions: ['clipboard-read', 'clipboard-write'] } : {}),
         ...(this.settings?.acceptDownloads ? { acceptDownloads: true } : {}),
+        ...(this.getStabilizationSettings().crossOsConsistency ? { deviceScaleFactor: 1 } : {}),
       });
       page = await context.newPage();
 
@@ -1041,7 +1043,10 @@ export class PlaywrightRunner extends EventEmitter {
       const stabilization = this.getStabilizationSettings();
 
       // Setup freeze scripts BEFORE navigation (must be added as init scripts)
-      await setupFreezeScripts(page, stabilization);
+      // Pass freezeAnimations from PlaywrightSettings so setupFreezeScripts can apply
+      // deterministic CSS, __resetExcalidrawRNG, and canvas determinism (these conditions
+      // check freezeAnimations which lives on PlaywrightSettings, not StabilizationSettings).
+      await setupFreezeScripts(page, { ...stabilization, freezeAnimations: this.settings?.freezeAnimations ?? false } as any);
 
       // Setup third-party blocking if enabled
       // Get the base URL from environment config (always a full URL like http://localhost:3000)
@@ -1061,6 +1066,35 @@ export class PlaywrightRunner extends EventEmitter {
       // Freeze CSS + JS animations if enabled (uses addInitScript to persist across navigations)
       if (this.settings?.freezeAnimations) {
         await page.addInitScript(FREEZE_ANIMATIONS_SCRIPT);
+        // Excalidraw RNG: roughjs uses each element's stored seed via Math.imul(48271, seed).
+        // Provide __resetExcalidrawRNG that resets the LCG seed for deterministic rendering.
+        // Note: setupFreezeScripts also injects this when freezeAnimations is passed through,
+        // but this serves as a fallback if freezeRandomValues is off.
+        await page.addInitScript(`
+          (function() {
+            window.__resetExcalidrawRNG = function() {
+              if (typeof window.__resetMathRandom === 'function') {
+                window.__resetMathRandom();
+              }
+            };
+          })();
+        `);
+        // Force willReadFrequently on canvas 2D contexts when freezeAnimations is
+        // enabled (but crossOsConsistency is not — that case is in setupFreezeScripts).
+        // This ensures CPU-backed canvas for deterministic toDataURL() results.
+        if (!stabilization.crossOsConsistency) {
+          await page.addInitScript(`
+            (function() {
+              var _origGetContext = HTMLCanvasElement.prototype.getContext;
+              HTMLCanvasElement.prototype.getContext = function(type, attrs) {
+                if (type === '2d') {
+                  attrs = Object.assign({}, attrs || {}, { willReadFrequently: true });
+                }
+                return _origGetContext.call(this, type, attrs);
+              };
+            })();
+          `);
+        }
       }
 
       // Patterns for console errors that should be ignored (React dev warnings, hydration, etc.)
@@ -1071,6 +1105,7 @@ export class PlaywrightRunner extends EventEmitter {
         /react\.dev\/link\/hydration-mismatch/i,
         /Warning: .* did not match/i,
         /Text content does not match/i,
+        /Failed to load resource/i,
       ];
 
       // Capture console errors before navigation (filtered)
@@ -1237,6 +1272,10 @@ export class PlaywrightRunner extends EventEmitter {
               // Apply stabilization before screenshot
               await applyStabilization(target, targetUrl, stabilization);
 
+              // Deterministic rendering CSS is now injected once via setupFreezeScripts
+              // init script (when freezeAnimations or crossOsConsistency is enabled),
+              // so no per-screenshot addStyleTag is needed.
+
               // Apply dynamic content masking before screenshot
               if (stabilization.autoMaskDynamicContent) {
                 await applyDynamicMasking(target, stabilization);
@@ -1291,6 +1330,14 @@ export class PlaywrightRunner extends EventEmitter {
                 currentStepLabel = `Step ${stepCounter}`;
 
               }
+              // Disable RAF gating + unfreeze performance.now after screenshot
+              await target.evaluate(() => {
+                if (typeof (window as any).__disableRAFGating === 'function') {
+                  (window as any).__disableRAFGating();
+                }
+                (window as any).__perfNowFrozen = false;
+              }).catch(() => {});
+
               return result;
             };
           }

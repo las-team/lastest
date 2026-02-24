@@ -366,7 +366,7 @@ export function DebugClient({ test, repositoryId }: DebugClientProps) {
           <ResizableHandle withHandle />
 
           {/* Right Panel — Tabbed: Steps / Network / Console */}
-          <ResizablePanel defaultSize={40} minSize={20}>
+          <ResizablePanel defaultSize={40} minSize={20} className="overflow-hidden">
             <Tabs defaultValue="steps" className="flex flex-col h-full gap-0">
               <div className="px-2 py-1.5 border-b bg-muted/50">
                 <TabsList className="h-7">

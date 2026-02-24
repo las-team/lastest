@@ -70,3 +70,4 @@ explore-*.mjs
 
 # clerk configuration (can include secrets)
 /.clerk/
+screenshot-*.png

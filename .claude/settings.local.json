@@ -95,7 +95,11 @@
       "Bash(timeout 15 tail:*)",
       "Bash(docker push:*)",
       "Bash(git -C /home/ewyct/dev/lastest2 log --all --pretty=format:\"%h %s\" --grep=\"Agent\\\\|agent\\\\|SDK\\\\|sdk\")",
-      "Bash(git fetch:*)"
+      "Bash(git fetch:*)",
+      "Bash(tail:*)",
+      "Bash(pnpm lastest2-runner:*)",
+      "WebFetch(domain:deepwiki.com)",
+      "WebFetch(domain:docs.excalidraw.com)"
     ]
   },
   "disabledMcpjsonServers": [

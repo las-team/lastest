@@ -771,6 +771,21 @@ export function PlaywrightSettingsCard({
                   />
                 </div>
               )}
+              {stabilization.freezeRandomValues && (
+                <div className="flex items-center justify-between pl-4">
+                  <div className="space-y-0.5">
+                    <Label className="text-sm">Reseed on Input Events</Label>
+                    <p className="text-xs text-muted-foreground">Reset RNG from event hash on user input for deterministic element creation</p>
+                  </div>
+                  <Switch
+                    checked={stabilization.reseedRandomOnInput ?? false}
+                    onCheckedChange={(checked) => setStabilization({
+                      ...stabilization,
+                      reseedRandomOnInput: checked
+                    })}
+                  />
+                </div>
+              )}
             </div>
 
             {/* Third-Party Handling */}
@@ -872,6 +887,21 @@ export function PlaywrightSettingsCard({
                   onCheckedChange={(checked) => setStabilization({
                     ...stabilization,
                     crossOsConsistency: checked
+                  })}
+                />
+              </div>
+
+              {/* Round Canvas Coordinates */}
+              <div className="flex items-center justify-between">
+                <div className="space-y-0.5">
+                  <Label className="text-sm">Round Canvas Coordinates</Label>
+                  <p className="text-xs text-muted-foreground">Snap stroke coordinates to pixel centers for deterministic line rendering</p>
+                </div>
+                <Switch
+                  checked={stabilization.roundCanvasCoordinates ?? false}
+                  onCheckedChange={(checked) => setStabilization({
+                    ...stabilization,
+                    roundCanvasCoordinates: checked
                   })}
                 />
               </div>

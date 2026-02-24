@@ -5,7 +5,8 @@
 
 import { chromium, Browser, Page, BrowserContext } from 'playwright';
 import { createHash } from 'crypto';
-import type { RunTestCommandPayload, RunSetupCommandPayload, LogEntry } from './protocol.js';
+import type { RunTestCommandPayload, RunSetupCommandPayload, LogEntry, StabilizationPayload } from './protocol.js';
+import { CROSS_OS_CHROMIUM_ARGS, setupFreezeScripts, applyPreScreenshotStabilization } from './stabilization.js';
 
 /**
  * Verify code integrity by comparing SHA256 hash.
@@ -31,6 +32,7 @@ export interface TestRunResult {
 export class TestRunner {
   private browser: Browser | null = null;
   private browserLaunchPromise: Promise<Browser> | null = null;
+  private currentLaunchArgs: string[] = [];
   private activeTests = new Map<string, { abort: AbortController; testRunId: string }>();
   private logs: LogEntry[] = [];
   // Legacy single-test tracking (for backward compat with abort/isRunning)
@@ -40,15 +42,29 @@ export class TestRunner {
   /**
    * Ensure a shared browser instance is running.
    * Concurrent calls share the same launch promise.
+   * If args differ from the current browser, close and relaunch.
    */
-  private async ensureBrowser(): Promise<Browser> {
+  private async ensureBrowser(args?: string[]): Promise<Browser> {
+    const requestedArgs = args ?? [];
+    const argsKey = requestedArgs.join(',');
+    const currentKey = this.currentLaunchArgs.join(',');
+
+    // If browser exists but args differ, close and relaunch
+    if (this.browser && this.browser.isConnected() && argsKey !== currentKey) {
+      const b = this.browser;
+      this.browser = null;
+      this.browserLaunchPromise = null;
+      await b.close().catch(() => {});
+    }
+
     if (this.browser && this.browser.isConnected()) {
       return this.browser;
     }
     if (this.browserLaunchPromise) {
       return this.browserLaunchPromise;
     }
-    this.browserLaunchPromise = chromium.launch({ headless: true }).then(b => {
+    this.currentLaunchArgs = requestedArgs;
+    this.browserLaunchPromise = chromium.launch({ headless: true, args: requestedArgs.length > 0 ? requestedArgs : undefined }).then(b => {
       this.browser = b;
       this.browserLaunchPromise = null;
       return b;
@@ -165,8 +181,15 @@ export class TestRunner {
       logFn('info', 'Launching browser...');
       onProgress?.('Launching browser', 10);
 
-      // Use shared browser instance
-      await this.ensureBrowser();
+      // Determine launch args based on stabilization settings.
+      // Use deterministic rendering args when EITHER crossOsConsistency or freezeAnimations
+      // is enabled — GPU compositing and Skia optimizations cause non-deterministic
+      // anti-aliasing on canvas elements (roughjs lines differ between runs).
+      const needsDeterministicRendering = command.stabilization?.crossOsConsistency || command.stabilization?.freezeAnimations;
+      const launchArgs = needsDeterministicRendering ? CROSS_OS_CHROMIUM_ARGS : [];
+
+      // Use shared browser instance (will relaunch if args changed)
+      await this.ensureBrowser(launchArgs);
 
       const viewport = command.viewport || { width: 1280, height: 720 };
       // Inject storageState from setup scripts (e.g. login session cookies/localStorage)
@@ -180,12 +203,23 @@ export class TestRunner {
           logFn('warn', `Failed to parse storageState: ${e}`);
         }
       }
-      context = await this.browser!.newContext({ viewport, ...(parsedStorageState ? { storageState: parsedStorageState } : {}) });
+      context = await this.browser!.newContext({
+        viewport,
+        ...(parsedStorageState ? { storageState: parsedStorageState } : {}),
+        ...(command.stabilization?.crossOsConsistency || command.stabilization?.freezeAnimations ? { deviceScaleFactor: 1 } : {}),
+        ...(command.stabilization?.freezeAnimations ? { reducedMotion: 'reduce' as const } : {}),
+      });
       page = await context.newPage();
 
       // Set explicit timeouts to prevent indefinite hangs
       page.setDefaultNavigationTimeout(30000);
       page.setDefaultTimeout(15000);
+
+      // Setup freeze scripts (timestamps, random, animations) BEFORE any navigation
+      if (command.stabilization) {
+        await setupFreezeScripts(page, command.stabilization);
+        logFn('info', `Stabilization: freeze timestamps=${command.stabilization.freezeTimestamps}, random=${command.stabilization.freezeRandomValues}, animations=${command.stabilization.freezeAnimations}, crossOS=${command.stabilization.crossOsConsistency}`);
+      }
 
       // Log page-level events for visibility during test execution
       page.on('console', msg => {
@@ -213,12 +247,21 @@ export class TestRunner {
       const captureScreenshot = async (label: string) => {
         if (!page) return;
         try {
+          // Apply pre-screenshot stabilization (network idle, images, fonts, DOM)
+          await applyPreScreenshotStabilization(page, command.stabilization);
           const buffer = await rawScreenshot!({ fullPage: true });
           const filename = `${command.testRunId}-${command.testId}-${label.replace(/ /g, '_')}.png`;
           const base64 = buffer.toString('base64');
           const { width, height } = viewport;
           screenshots.push({ filename, data: base64, width, height });
           logFn('info', `Captured screenshot: ${filename}`);
+          // Disable RAF gating + unfreeze performance.now after screenshot
+          await page.evaluate(() => {
+            if (typeof (window as any).__disableRAFGating === 'function') {
+              (window as any).__disableRAFGating();
+            }
+            (window as any).__perfNowFrozen = false;
+          }).catch(() => {});
         } catch (err) {
           logFn('warn', `Failed to capture screenshot: ${err}`);
         }
@@ -243,7 +286,7 @@ export class TestRunner {
 
       try {
         await Promise.race([
-          this.executeTestCode(page, command.code, command.targetUrl, captureScreenshot, logFn, softErrors).catch(e => { throw e; }),
+          this.executeTestCode(page, command.code, command.targetUrl, captureScreenshot, logFn, softErrors, command.cursorPlaybackSpeed, command.stabilization).catch(e => { throw e; }),
           new Promise<never>((_, reject) => {
             const timer = setTimeout(() => {
               logFn('warn', `Timeout fired (${testTimeout}ms) — closing context to kill in-flight operations`);
@@ -382,14 +425,25 @@ export class TestRunner {
       }
 
       logFn('info', 'Launching browser for setup...');
-      await this.ensureBrowser();
+      const needsDeterministicRendering = command.stabilization?.crossOsConsistency || command.stabilization?.freezeAnimations;
+      const setupLaunchArgs = needsDeterministicRendering ? CROSS_OS_CHROMIUM_ARGS : [];
+      await this.ensureBrowser(setupLaunchArgs);
 
       const viewport = command.viewport || { width: 1280, height: 720 };
       // No storageState injection — this IS the setup that creates the session
-      context = await this.browser!.newContext({ viewport });
+      context = await this.browser!.newContext({
+        viewport,
+        ...(command.stabilization?.crossOsConsistency || command.stabilization?.freezeAnimations ? { deviceScaleFactor: 1 } : {}),
+        ...(command.stabilization?.freezeAnimations ? { reducedMotion: 'reduce' as const } : {}),
+      });
       page = await context.newPage();
       page.setDefaultNavigationTimeout(30000);
       page.setDefaultTimeout(15000);
+
+      // Setup freeze scripts (timestamps, random, animations) BEFORE navigation
+      if (command.stabilization) {
+        await setupFreezeScripts(page, command.stabilization);
+      }
 
       logFn('info', `Browser launched, viewport: ${viewport.width}x${viewport.height}`);
 
@@ -397,7 +451,7 @@ export class TestRunner {
       logFn('info', 'Executing setup code...');
       const noopScreenshot = async () => {};
       await Promise.race([
-        this.executeTestCode(page, command.code, command.targetUrl, noopScreenshot, logFn),
+        this.executeTestCode(page, command.code, command.targetUrl, noopScreenshot, logFn, undefined, undefined, command.stabilization),
         new Promise<never>((_, reject) => {
           setTimeout(() => {
             logFn('warn', `Setup timeout fired (${setupTimeout}ms)`);
@@ -487,7 +541,9 @@ export class TestRunner {
     targetUrl: string,
     captureScreenshot: (label: string) => Promise<void>,
     logFn?: (level: 'info' | 'warn' | 'error', message: string) => void,
-    softErrors?: string[]
+    softErrors?: string[],
+    cursorPlaybackSpeed?: number,
+    stabilization?: StabilizationPayload
   ): Promise<void> {
     const log = logFn ?? this.log.bind(this);
     // Extract function body from: export async function test(page, baseUrl, screenshotPath, stepLogger) { ... }
@@ -520,6 +576,24 @@ export class TestRunner {
         }
         body = body.slice(0, startIdx) + '/* locateWithFallback provided by runner */' + body.slice(endIdx);
         log('info', 'Removed test-local locateWithFallback (using runner-provided version)');
+      }
+    }
+
+    // Remove the test's local replayCursorPath function if present (runner provides speed-aware version)
+    if (body.includes('async function replayCursorPath(')) {
+      const rcpMatch = body.match(/async function replayCursorPath\s*\([^)]*\)\s*\{/);
+      if (rcpMatch && rcpMatch.index !== undefined) {
+        const rcpStart = rcpMatch.index;
+        const rcpBraceStart = body.indexOf('{', rcpStart);
+        let rcpDepth = 1;
+        let rcpEnd = rcpBraceStart + 1;
+        while (rcpDepth > 0 && rcpEnd < body.length) {
+          if (body[rcpEnd] === '{') rcpDepth++;
+          else if (body[rcpEnd] === '}') rcpDepth--;
+          rcpEnd++;
+        }
+        body = body.slice(0, rcpStart) + '/* replayCursorPath provided by runner */' + body.slice(rcpEnd);
+        log('info', 'Removed test-local replayCursorPath (using runner-provided version)');
       }
     }
 
@@ -641,9 +715,9 @@ export class TestRunner {
     const originalScreenshot = page.screenshot.bind(page);
     const pageWithScreenshot = page as Page & { screenshot: typeof originalScreenshot };
     pageWithScreenshot.screenshot = async (options?: Parameters<typeof originalScreenshot>[0]) => {
-      const result = await originalScreenshot(options);
       const label = `Step ${screenshotStep++}`;
       await captureScreenshot(label);
+      const result = await originalScreenshot(options);
       return result;
     };
 
@@ -653,8 +727,60 @@ export class TestRunner {
       log('info', `Navigating to ${url}...`);
       const response = await originalGoto(url, options);
       log('info', `Navigation complete: ${response?.status() ?? 'no response'}`);
+      // Reset Math.random seed after page load so test actions get deterministic seeds
+      if (stabilization?.freezeRandomValues) {
+        await page.evaluate(() => {
+          (window as unknown as { __resetMathRandom?: () => void }).__resetMathRandom?.();
+        }).catch(() => {});
+      }
       return response;
     };
+
+    // Speed-aware replayCursorPath — respects cursorPlaybackSpeed setting
+    const speed = cursorPlaybackSpeed ?? 1;
+    const replayCursorPathFn = async (pg: Page, moves: [number, number, number][]) => {
+      for (const [x, y, delay] of moves) {
+        await pg.mouse.move(x, y);
+        if (delay > 0 && speed > 0) {
+          await pg.waitForTimeout(Math.round(delay / speed));
+        }
+      }
+    };
+
+    // Wrap key Playwright action methods with pre+post RAF flushing.
+    // Pre-action: flush pending callbacks from unwrapped actions (mouse.move).
+    // Post-action: wait one browser frame for the page to process the action's
+    // effects (React state → RAF-driven canvas re-render), then flush again.
+    if (stabilization?.freezeAnimations) {
+      const wrapAction = (obj: any, method: string) => {
+        const orig = obj[method].bind(obj);
+        obj[method] = async (...args: any[]) => {
+          // Pre-action: flush pending callbacks from unwrapped actions (mouse.move)
+          await page.evaluate(() => {
+            (window as any).__enableRAFGating?.();
+            (window as any).__flushAnimationFrames?.(10);
+            (window as any).__disableRAFGating?.();
+          }).catch(() => {});
+          // Execute action (gating disabled — page reacts normally)
+          const result = await orig(...args);
+          // Post-action: wait one browser frame for page to process, then flush
+          await page.evaluate(() => new Promise<void>(resolve => {
+            requestAnimationFrame(() => {
+              (window as any).__enableRAFGating?.();
+              (window as any).__flushAnimationFrames?.(10);
+              (window as any).__disableRAFGating?.();
+              resolve();
+            });
+          })).catch(() => {});
+          return result;
+        };
+      };
+      wrapAction(page.mouse, 'click');
+      wrapAction(page.mouse, 'down');
+      wrapAction(page.mouse, 'up');
+      wrapAction(page.keyboard, 'press');
+      wrapAction(page, 'click');
+    }
 
     // Execute the test
     log('info', 'Compiling test function...');
@@ -666,11 +792,12 @@ export class TestRunner {
       'stepLogger',
       'expect',
       'locateWithFallback',
+      'replayCursorPath',
       body
     );
 
     log('info', `Running test against ${targetUrl}...`);
-    await testFn(page, targetUrl.replace(/\/+$/, ''), 'screenshot.png', stepLogger, expect, locateWithFallback);
+    await testFn(page, targetUrl.replace(/\/+$/, ''), 'screenshot.png', stepLogger, expect, locateWithFallback, replayCursorPathFn);
     log('info', 'Test function returned successfully');
   }
 

@@ -186,7 +186,7 @@ export async function getTest(id: string) {
   return db.select().from(tests).where(eq(tests.id, id)).get();
 }
 
-export async function createTest(data: Omit<NewTest, 'id' | 'createdAt' | 'updatedAt'>, branch?: string | null) {
+export async function createTest(data: Omit<NewTest, 'id' | 'createdAt' | 'updatedAt'>, branch?: string | null, viewport?: { width?: number; height?: number } | null) {
   const id = uuid();
   const now = new Date();
   await db.insert(tests).values({ ...data, id, createdAt: now, updatedAt: now });
@@ -201,6 +201,8 @@ export async function createTest(data: Omit<NewTest, 'id' | 'createdAt' | 'updat
     targetUrl: data.targetUrl ?? null,
     changeReason: 'initial',
     branch: branch ?? null,
+    viewportWidth: viewport?.width ?? null,
+    viewportHeight: viewport?.height ?? null,
     createdAt: now,
   });
 
@@ -2233,7 +2235,8 @@ export async function updateTestWithVersion(
   id: string,
   data: Partial<NewTest>,
   changeReason?: TestChangeReason | string,
-  branch?: string
+  branch?: string,
+  viewport?: { width?: number; height?: number } | null
 ) {
   const test = await getTest(id);
   if (!test) throw new Error('Test not found');
@@ -2250,6 +2253,8 @@ export async function updateTestWithVersion(
     targetUrl: test.targetUrl,
     changeReason: changeReason ?? 'manual_edit',
     branch: branch ?? null,
+    viewportWidth: viewport?.width ?? null,
+    viewportHeight: viewport?.height ?? null,
   });
 
   // Update the test

@@ -37,6 +37,29 @@ export interface ServerConfig {
   healthCheckTimeout: number;
 }
 
+export interface StabilizationPayload {
+  freezeTimestamps: boolean;
+  frozenTimestamp: string;
+  freezeRandomValues: boolean;
+  randomSeed: number;
+  freezeAnimations: boolean;
+  crossOsConsistency: boolean;
+  waitForNetworkIdle: boolean;
+  networkIdleTimeout: number;
+  waitForDomStable: boolean;
+  domStableTimeout: number;
+  waitForFonts: boolean;
+  waitForImages: boolean;
+  waitForImagesTimeout: number;
+  crossOsFontCSS?: string;
+  waitForCanvasStable: boolean;
+  canvasStableTimeout: number;
+  canvasStableThreshold: number;
+  disableImageSmoothing: boolean;
+  roundCanvasCoordinates: boolean;
+  reseedRandomOnInput: boolean;
+}
+
 export interface RunTestCommandPayload {
   testId: string;
   testRunId: string;
@@ -50,6 +73,8 @@ export interface RunTestCommandPayload {
   serverConfig?: ServerConfig;
   storageState?: string; // Serialized JSON from page.context().storageState() — carries auth session
   setupVariables?: Record<string, unknown>; // Variables from setup scripts
+  cursorPlaybackSpeed?: number; // 0 = instant (skip delays), 1 = realtime
+  stabilization?: StabilizationPayload;
 }
 
 export interface RunTestCommand extends BaseMessage {
@@ -64,6 +89,7 @@ export interface RunSetupCommandPayload {
   targetUrl: string;
   timeout: number;
   viewport?: { width: number; height: number };
+  stabilization?: StabilizationPayload;
 }
 
 export interface RunSetupCommand extends BaseMessage {
