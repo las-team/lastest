@@ -1096,6 +1096,7 @@ export class PlaywrightRunner extends EventEmitter {
         /react\.dev\/link\/hydration-mismatch/i,
         /Warning: .* did not match/i,
         /Text content does not match/i,
+        /Failed to load resource/i,
       ];
 
       // Capture console errors before navigation (filtered)
