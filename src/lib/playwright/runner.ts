@@ -1043,7 +1043,10 @@ export class PlaywrightRunner extends EventEmitter {
       const stabilization = this.getStabilizationSettings();
 
       // Setup freeze scripts BEFORE navigation (must be added as init scripts)
-      await setupFreezeScripts(page, stabilization);
+      // Pass freezeAnimations from PlaywrightSettings so setupFreezeScripts can apply
+      // deterministic CSS, __resetExcalidrawRNG, and canvas determinism (these conditions
+      // check freezeAnimations which lives on PlaywrightSettings, not StabilizationSettings).
+      await setupFreezeScripts(page, { ...stabilization, freezeAnimations: this.settings?.freezeAnimations ?? false } as any);
 
       // Setup third-party blocking if enabled
       // Get the base URL from environment config (always a full URL like http://localhost:3000)
@@ -1064,10 +1067,16 @@ export class PlaywrightRunner extends EventEmitter {
       if (this.settings?.freezeAnimations) {
         await page.addInitScript(FREEZE_ANIMATIONS_SCRIPT);
         // Excalidraw RNG: roughjs uses each element's stored seed via Math.imul(48271, seed).
-        // Provide no-op __resetExcalidrawRNG for backward compatibility with call sites.
+        // Provide __resetExcalidrawRNG that resets the LCG seed for deterministic rendering.
+        // Note: setupFreezeScripts also injects this when freezeAnimations is passed through,
+        // but this serves as a fallback if freezeRandomValues is off.
         await page.addInitScript(`
           (function() {
-            window.__resetExcalidrawRNG = function() {};
+            window.__resetExcalidrawRNG = function() {
+              if (typeof window.__resetMathRandom === 'function') {
+                window.__resetMathRandom();
+              }
+            };
           })();
         `);
         // Force willReadFrequently on canvas 2D contexts when freezeAnimations is
