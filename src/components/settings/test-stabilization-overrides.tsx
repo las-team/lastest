@@ -81,6 +81,11 @@ export function TestStabilizationOverrides({ testId, overrides: initialOverrides
   }, [overrides, doSave]);
 
   const handleReset = async () => {
+    // Cancel pending auto-save to prevent race condition
+    if (saveTimer.current) {
+      clearTimeout(saveTimer.current);
+      saveTimer.current = null;
+    }
     setOverrides({});
     lastSaved.current = JSON.stringify({});
     try {
