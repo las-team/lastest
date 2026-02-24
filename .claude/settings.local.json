@@ -98,7 +98,8 @@
       "Bash(git fetch:*)",
       "Bash(tail:*)",
       "Bash(pnpm lastest2-runner:*)",
-      "WebFetch(domain:deepwiki.com)"
+      "WebFetch(domain:deepwiki.com)",
+      "WebFetch(domain:docs.excalidraw.com)"
     ]
   },
   "disabledMcpjsonServers": [

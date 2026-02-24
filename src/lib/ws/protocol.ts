@@ -68,6 +68,8 @@ export interface StabilizationPayload {
   canvasStableTimeout: number;
   canvasStableThreshold: number;
   disableImageSmoothing: boolean;
+  roundCanvasCoordinates: boolean;
+  reseedRandomOnInput: boolean;
 }
 
 export interface RunTestCommandPayload {

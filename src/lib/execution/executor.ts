@@ -67,6 +67,8 @@ function buildStabilizationPayload(settings?: PlaywrightSettings | null): Stabil
     canvasStableTimeout: stab.canvasStableTimeout,
     canvasStableThreshold: stab.canvasStableThreshold,
     disableImageSmoothing: stab.disableImageSmoothing,
+    roundCanvasCoordinates: stab.roundCanvasCoordinates,
+    reseedRandomOnInput: stab.reseedRandomOnInput,
   };
 }
 

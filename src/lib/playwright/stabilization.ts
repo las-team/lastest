@@ -11,9 +11,10 @@ import { DETERMINISTIC_RENDERING_CSS, HIDE_SPINNERS_CSS, PLACEHOLDER_IMAGE_BUFFE
  * Excalidraw for element IDs) use it instead of Math.random(). Non-deterministic
  * IDs can affect rendering order, React reconciliation, and canvas compositing.
  */
-export function getFreezeRandomScript(seed: number): string {
+export function getFreezeRandomScript(seed: number, reseedOnInput?: boolean): string {
   return `
     (function() {
+      var baseSeed = ${seed};
       // Separate LCG states so crypto calls (nanoid) don't shift Math.random sequence (rough.js seeds)
       var mathState = ${seed};
       var cryptoState = (${seed} * 2654435761 >>> 0) || 1;
@@ -53,6 +54,27 @@ export function getFreezeRandomScript(seed: number): string {
       window.__resetMathRandom = function() {
         mathState = ${seed};
       };
+${reseedOnInput ? `
+      // Reseed LCG on user input events so element creation gets a seed
+      // determined by the triggering event, not async RNG drift.
+      function __hashInputEvent(e) {
+        var h = baseSeed;
+        var t = e.type;
+        for (var i = 0; i < t.length; i++) h = ((h << 5) - h + t.charCodeAt(i)) | 0;
+        h = ((h << 5) - h + ((e.clientX || 0) | 0)) | 0;
+        h = ((h << 5) - h + ((e.clientY || 0) | 0)) | 0;
+        if (e.key) for (var j = 0; j < e.key.length; j++) h = ((h << 5) - h + e.key.charCodeAt(j)) | 0;
+        return (h & 0x7fffffff) || 1;
+      }
+      ['pointerdown','pointerup','keydown','keyup'].forEach(function(evtType) {
+        window.addEventListener(evtType, function(e) {
+          if (!e.isTrusted) return;
+          var h = __hashInputEvent(e);
+          mathState = h;
+          cryptoState = (h * 2654435761 >>> 0) || 1;
+        }, true);
+      });
+` : ''}
     })();
   `;
 }
@@ -407,7 +429,7 @@ export async function setupFreezeScripts(
 
   // Freeze random values
   if (s.freezeRandomValues) {
-    await page.addInitScript(getFreezeRandomScript(s.randomSeed));
+    await page.addInitScript(getFreezeRandomScript(s.randomSeed, s.reseedRandomOnInput));
   }
 
   // Inject deterministic rendering CSS early via init script (before page scripts run).
@@ -481,6 +503,51 @@ export async function setupFreezeScripts(
           }
           return ctx;
         };
+      })();
+    `);
+  }
+
+  // Canvas coordinate rounding: snap path coords to pixel centers for deterministic strokes
+  if (settings.roundCanvasCoordinates) {
+    await page.addInitScript(`
+      (function() {
+        function snap(v) { return Math.round(v - 0.5) + 0.5; }
+        var proto = CanvasRenderingContext2D.prototype;
+
+        var _moveTo = proto.moveTo;
+        proto.moveTo = function(x, y) { return _moveTo.call(this, snap(x), snap(y)); };
+
+        var _lineTo = proto.lineTo;
+        proto.lineTo = function(x, y) { return _lineTo.call(this, snap(x), snap(y)); };
+
+        var _bezierCurveTo = proto.bezierCurveTo;
+        proto.bezierCurveTo = function(cp1x, cp1y, cp2x, cp2y, x, y) {
+          return _bezierCurveTo.call(this, snap(cp1x), snap(cp1y), snap(cp2x), snap(cp2y), snap(x), snap(y));
+        };
+
+        var _quadraticCurveTo = proto.quadraticCurveTo;
+        proto.quadraticCurveTo = function(cpx, cpy, x, y) {
+          return _quadraticCurveTo.call(this, snap(cpx), snap(cpy), snap(x), snap(y));
+        };
+
+        var _arc = proto.arc;
+        proto.arc = function(x, y, r, sa, ea, ccw) {
+          return _arc.call(this, snap(x), snap(y), r, sa, ea, ccw);
+        };
+
+        var _arcTo = proto.arcTo;
+        proto.arcTo = function(x1, y1, x2, y2, r) {
+          return _arcTo.call(this, snap(x1), snap(y1), snap(x2), snap(y2), r);
+        };
+
+        var _rect = proto.rect;
+        proto.rect = function(x, y, w, h) { return _rect.call(this, snap(x), snap(y), w, h); };
+
+        var _strokeRect = proto.strokeRect;
+        proto.strokeRect = function(x, y, w, h) { return _strokeRect.call(this, snap(x), snap(y), w, h); };
+
+        var _fillRect = proto.fillRect;
+        proto.fillRect = function(x, y, w, h) { return _fillRect.call(this, snap(x), snap(y), w, h); };
       })();
     `);
   }
