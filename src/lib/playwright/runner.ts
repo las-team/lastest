@@ -1330,11 +1330,12 @@ export class PlaywrightRunner extends EventEmitter {
                 currentStepLabel = `Step ${stepCounter}`;
 
               }
-              // Disable RAF gating after screenshot so page can render during subsequent test actions
+              // Disable RAF gating + unfreeze performance.now after screenshot
               await target.evaluate(() => {
                 if (typeof (window as any).__disableRAFGating === 'function') {
                   (window as any).__disableRAFGating();
                 }
+                (window as any).__perfNowFrozen = false;
               }).catch(() => {});
 
               return result;

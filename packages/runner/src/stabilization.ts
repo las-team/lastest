@@ -103,7 +103,17 @@ window.cancelAnimationFrame = function(id) {
   }
 };
 window.__enableRAFGating = function() { _rafGatingEnabled = true; };
-window.__disableRAFGating = function() { _rafGatingEnabled = false; };
+window.__disableRAFGating = function() {
+  _rafGatingEnabled = false;
+  // Drain orphaned RAF callbacks via real browser RAF
+  var leftover = Array.from(_rafQueue.values());
+  _rafQueue.clear();
+  leftover.forEach(function(cb) { try { _origRAF(cb); } catch(e) {} });
+  // Drain orphaned timeouts via real setTimeout
+  var timeouts = Array.from(_timeoutQueue.values());
+  _timeoutQueue.clear();
+  timeouts.forEach(function(cb) { try { _origSetTimeout(cb, 0); } catch(e) {} });
+};
 
 // 3c. Gate setTimeout with delay > 100ms — catches debounced operations.
 // Also deferred until __enableRAFGating() is called.
@@ -336,8 +346,11 @@ export async function setupFreezeScripts(
     // so timing-dependent rendering (e.g. Excalidraw animations) is deterministic.
     await page.addInitScript(`
       (function() {
-        var frozen = 1000;
-        performance.now = function() { return frozen; };
+        var _origPerfNow = performance.now.bind(performance);
+        window.__perfNowFrozen = false;
+        performance.now = function() {
+          return window.__perfNowFrozen ? 1000 : _origPerfNow();
+        };
       })();
     `);
   }
@@ -567,8 +580,9 @@ export async function applyPreScreenshotStabilization(
     ).catch(() => {});
   }
 
-  // 6. Reset Excalidraw RNG + enable RAF gating + flush queued callbacks deterministically
+  // 6. Freeze performance.now, reset Excalidraw RNG, enable RAF gating + flush deterministically
   await page.evaluate(() => {
+    (window as any).__perfNowFrozen = true;
     if (typeof (window as any).__resetExcalidrawRNG === 'function') {
       (window as any).__resetExcalidrawRNG();
     }

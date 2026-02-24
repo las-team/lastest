@@ -74,7 +74,17 @@ window.cancelAnimationFrame = function(id) {
   }
 };
 window.__enableRAFGating = function() { _rafGatingEnabled = true; };
-window.__disableRAFGating = function() { _rafGatingEnabled = false; };
+window.__disableRAFGating = function() {
+  _rafGatingEnabled = false;
+  // Drain orphaned RAF callbacks via real browser RAF
+  var leftover = Array.from(_rafQueue.values());
+  _rafQueue.clear();
+  leftover.forEach(function(cb) { try { _origRAF(cb); } catch(e) {} });
+  // Drain orphaned timeouts via real setTimeout
+  var timeouts = Array.from(_timeoutQueue.values());
+  _timeoutQueue.clear();
+  timeouts.forEach(function(cb) { try { _origSetTimeout(cb, 0); } catch(e) {} });
+};
 
 // 3c. Gate setTimeout with delay > 100ms — catches debounced operations.
 // Also deferred until __enableRAFGating() is called.

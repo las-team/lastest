@@ -383,9 +383,10 @@ export async function applyStabilization(
     await waitForDomStable(page, s.domStableTimeout);
   }
 
-  // 8. Reset Excalidraw RNG + enable RAF gating + flush all queued callbacks
-  //    deterministically before screenshot.
+  // 8. Freeze performance.now, reset Excalidraw RNG, enable RAF gating + flush
+  //    all queued callbacks deterministically before screenshot.
   await page.evaluate(() => {
+    (window as any).__perfNowFrozen = true;
     if (typeof (window as any).__resetExcalidrawRNG === 'function') {
       (window as any).__resetExcalidrawRNG();
     }
@@ -421,8 +422,11 @@ export async function setupFreezeScripts(
     // (e.g. Excalidraw animations, roughjs stroke timing) is deterministic.
     await page.addInitScript(`
       (function() {
-        var frozen = 1000;
-        performance.now = function() { return frozen; };
+        var _origPerfNow = performance.now.bind(performance);
+        window.__perfNowFrozen = false;
+        performance.now = function() {
+          return window.__perfNowFrozen ? 1000 : _origPerfNow();
+        };
       })();
     `);
   }

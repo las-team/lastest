@@ -255,11 +255,12 @@ export class TestRunner {
           const { width, height } = viewport;
           screenshots.push({ filename, data: base64, width, height });
           logFn('info', `Captured screenshot: ${filename}`);
-          // Disable RAF gating after screenshot so page can render during subsequent test actions
+          // Disable RAF gating + unfreeze performance.now after screenshot
           await page.evaluate(() => {
             if (typeof (window as any).__disableRAFGating === 'function') {
               (window as any).__disableRAFGating();
             }
+            (window as any).__perfNowFrozen = false;
           }).catch(() => {});
         } catch (err) {
           logFn('warn', `Failed to capture screenshot: ${err}`);
