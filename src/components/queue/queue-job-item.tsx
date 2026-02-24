@@ -2,7 +2,7 @@
 
 import { Loader2, CheckCircle2, XCircle, Clock, X, Layers, ChevronDown } from 'lucide-react';
 import type { JobWithChildren } from '@/components/queue/job-polling-context';
-import { cancelJob } from '@/server/actions/jobs';
+import { cancelJob, dismissJob } from '@/server/actions/jobs';
 import { useState, useTransition } from 'react';
 import { Badge } from '@/components/ui/badge';
 
@@ -44,6 +44,12 @@ export function QueueJobItem({ job }: { job: JobWithChildren }) {
   const handleCancel = () => {
     startTransition(async () => {
       await cancelJob(job.id, job.repositoryId);
+    });
+  };
+
+  const handleDismiss = () => {
+    startTransition(async () => {
+      await dismissJob(job.id);
     });
   };
 
@@ -90,6 +96,16 @@ export function QueueJobItem({ job }: { job: JobWithChildren }) {
           disabled={isPending}
           className="opacity-0 group-hover:opacity-100 p-1 hover:bg-muted rounded transition-opacity"
           title="Cancel job"
+        >
+          <X className="h-3.5 w-3.5 text-muted-foreground hover:text-destructive" />
+        </button>
+      )}
+      {!isActive && (
+        <button
+          onClick={handleDismiss}
+          disabled={isPending}
+          className="opacity-0 group-hover:opacity-100 p-1 hover:bg-muted rounded transition-opacity"
+          title="Dismiss"
         >
           <X className="h-3.5 w-3.5 text-muted-foreground hover:text-destructive" />
         </button>

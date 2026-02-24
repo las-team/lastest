@@ -53,8 +53,11 @@ Element.prototype.animate = function() {
 // 3b. Gate requestAnimationFrame — queue callbacks instead of firing them.
 // Gating is DISABLED during page load to allow initial rendering.
 // Enable via window.__enableRAFGating() after the page is interactive.
-var _origRAF = window.requestAnimationFrame;
-var _origCancelRAF = window.cancelAnimationFrame;
+// Playwright's setFixedTime installs fake-timers which override RAF as own properties.
+// Access real natives via Window.prototype to bypass fakes — ensures callbacks get
+// real DOMHighResTimeStamp during interactions (not frozen clock values).
+var _origRAF = (Window.prototype.requestAnimationFrame || window.requestAnimationFrame).bind(window);
+var _origCancelRAF = (Window.prototype.cancelAnimationFrame || window.cancelAnimationFrame).bind(window);
 var _rafQueue = new Map();
 var _rafNextId = 1;
 var _rafGatingEnabled = false;

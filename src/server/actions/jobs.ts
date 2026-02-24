@@ -195,6 +195,16 @@ export async function cancelJob(jobId: string, repositoryId?: string | null, run
   return { success: true };
 }
 
+export async function dismissJob(jobId: string) {
+  const job = await queries.getBackgroundJob(jobId);
+  if (!job) return { success: false, error: 'Job not found' };
+  if (job.status === 'running' || job.status === 'pending') {
+    return { success: false, error: 'Cannot dismiss an active job' };
+  }
+  await queries.deleteBackgroundJob(jobId);
+  return { success: true };
+}
+
 export async function getActiveJobs() {
   return queries.getRecentBackgroundJobs(10000);
 }

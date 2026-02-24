@@ -2062,6 +2062,11 @@ export async function getBackgroundJob(id: string) {
   return db.select().from(backgroundJobs).where(eq(backgroundJobs.id, id)).get();
 }
 
+export async function deleteBackgroundJob(id: string) {
+  await db.delete(backgroundJobs).where(eq(backgroundJobs.parentJobId, id));
+  await db.delete(backgroundJobs).where(eq(backgroundJobs.id, id));
+}
+
 export async function getPendingBuildJobs(repositoryId?: string | null) {
   const conditions = [
     eq(backgroundJobs.status, 'pending'),

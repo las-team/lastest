@@ -16,7 +16,19 @@ Network Interception
 Support https://github.com/excalidraw/excalidraw/tree/master/packages/excalidraw/tests ~/.claude/plans/declarative-kindling-coral.md 70%
     ● Summary saved to memory/excalidraw-stabilization.md. 
 
-branch specific url storage
+Tests -test cases
+Order by diff amount
+Tree view
+ Area, test, case
+
+when switching diff tab, keep it
+Diff page, 
+
+Runner action
+
+Apache - embeddable vnc server - guacamole
+https://guacamole.apache.org/
+
 ## ideas
 Test coverage assessment and recreation based on existing test set
 Tweet about us
@@ -65,3 +77,7 @@ Keyboard shortcuts: A Approve · R Reject · ← → Navigate · + - Zoom on the
   intact).   
 
   ~/.claude/plans/delegated-toasting-mccarthy.md
+
+
+
+

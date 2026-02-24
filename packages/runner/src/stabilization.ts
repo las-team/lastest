@@ -87,8 +87,11 @@ Element.prototype.animate = function() {
 // 3b. Gate requestAnimationFrame — queue callbacks instead of firing them.
 // Gating is DISABLED during page load to allow initial rendering.
 // Enable via window.__enableRAFGating() after the page is interactive.
-var _origRAF = window.requestAnimationFrame;
-var _origCancelRAF = window.cancelAnimationFrame;
+// Playwright's setFixedTime installs fake-timers which override RAF as own properties.
+// Access real natives via Window.prototype to bypass fakes — ensures callbacks get
+// real DOMHighResTimeStamp during interactions (not frozen clock values).
+var _origRAF = (Window.prototype.requestAnimationFrame || window.requestAnimationFrame).bind(window);
+var _origCancelRAF = (Window.prototype.cancelAnimationFrame || window.cancelAnimationFrame).bind(window);
 var _rafQueue = new Map();
 var _rafNextId = 1;
 var _rafGatingEnabled = false;
@@ -352,11 +355,12 @@ export async function setupFreezeScripts(
 
   if (settings.freezeTimestamps) {
     await page.clock.setFixedTime(new Date(settings.frozenTimestamp));
-    // Playwright's setFixedTime does NOT freeze performance.now() — override it
-    // so timing-dependent rendering (e.g. Excalidraw animations) is deterministic.
+    // Playwright's setFixedTime uses @sinonjs/fake-timers which overrides
+    // performance.now() as an own property on the performance object.
+    // Use Performance.prototype.now to bypass the fake and get real elapsed time.
     await page.addInitScript(`
       (function() {
-        var _origPerfNow = performance.now.bind(performance);
+        var _origPerfNow = Performance.prototype.now.bind(performance);
         window.__perfNowFrozen = false;
         performance.now = function() {
           return window.__perfNowFrozen !== false ? window.__perfNowFrozen : _origPerfNow();

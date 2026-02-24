@@ -417,12 +417,13 @@ export async function setupFreezeScripts(
   // Freeze timestamps using Playwright's built-in clock API
   if (s.freezeTimestamps) {
     await page.clock.setFixedTime(new Date(s.frozenTimestamp));
-    // Playwright's setFixedTime does NOT freeze performance.now() — it continues
-    // returning real elapsed time. Override it so timing-dependent rendering
-    // (e.g. Excalidraw animations, roughjs stroke timing) is deterministic.
+    // Playwright's setFixedTime uses @sinonjs/fake-timers which overrides
+    // performance.now() as an own property on the performance object.
+    // Use Performance.prototype.now to bypass the fake and get real elapsed time.
+    // We control freeze/unfreeze ourselves via __perfNowFrozen.
     await page.addInitScript(`
       (function() {
-        var _origPerfNow = performance.now.bind(performance);
+        var _origPerfNow = Performance.prototype.now.bind(performance);
         window.__perfNowFrozen = false;
         performance.now = function() {
           return window.__perfNowFrozen !== false ? window.__perfNowFrozen : _origPerfNow();
