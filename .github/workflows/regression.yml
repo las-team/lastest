@@ -8,37 +8,17 @@ jobs:
   visual-regression:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-
       - name: Run visual regression tests
-        id: visual
-        uses: ./action
-        with:
-          server-url: ${{ secrets.LASTEST_SERVER_URL }}
-          runner-token: ${{ secrets.LASTEST_RUNNER_TOKEN }}
-          timeout: '300'
-          fail-on-changes: 'false'
-
-      - name: Summary
-        if: always() && steps.visual.outputs.status != ''
+        # --server      Lastest2 server URL (required)
+        # --token       Runner auth token (required)
+        # --repo        Repository to test, e.g. "owner/repo" (required)
+        # --target-url  Override base URL for tests (optional)
+        # --branch      Auto-detected from GITHUB_HEAD_REF
+        # --commit      Auto-detected from GITHUB_SHA
+        # --timeout     Build timeout in ms (default: 300000)
+        # --fail-on-changes  Exit 1 on visual changes (optional)
         run: |
-          STATUS="${{ steps.visual.outputs.status }}"
-          if [ "$STATUS" = "passed" ] || [ "$STATUS" = "safe_to_merge" ]; then
-            EMOJI="✅"
-          elif [ "$STATUS" = "review_required" ]; then
-            EMOJI="⚠️"
-          else
-            EMOJI="❌"
-          fi
-
-          echo "## ${EMOJI} Visual Regression Results" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "| Metric | Value |" >> $GITHUB_STEP_SUMMARY
-          echo "|--------|-------|" >> $GITHUB_STEP_SUMMARY
-          echo "| Status | **${STATUS}** |" >> $GITHUB_STEP_SUMMARY
-          echo "| Passed | ${{ steps.visual.outputs.passed-count }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Failed | ${{ steps.visual.outputs.failed-count }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Changes | ${{ steps.visual.outputs.changed-count }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Total | ${{ steps.visual.outputs.total-tests }} |" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "[View Results](${{ steps.visual.outputs.build-url }})" >> $GITHUB_STEP_SUMMARY
+          npx @lastest/runner@latest trigger \
+            --repo "${{ github.repository }}" \
+            --server "${{ secrets.LASTEST_SERVER_URL }}" \
+            --token "${{ secrets.LASTEST_RUNNER_TOKEN }}"

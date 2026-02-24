@@ -250,8 +250,9 @@ export async function createAndRunBuildFromCI(opts: {
   runnerId: string;
   gitBranch?: string;
   gitCommit?: string;
+  targetUrl?: string;
 }) {
-  const { triggerType, repositoryId, runnerId, gitBranch, gitCommit } = opts;
+  const { triggerType, repositoryId, runnerId, gitBranch, gitCommit, targetUrl } = opts;
   const runner = getRunner(repositoryId);
 
   // If tests are running, queue this build
@@ -303,7 +304,7 @@ export async function createAndRunBuildFromCI(opts: {
     flakyCount: 0,
     failedCount: 0,
     passedCount: 0,
-    baseUrl: envConfig?.baseUrl || 'http://localhost:3000',
+    baseUrl: targetUrl || envConfig?.baseUrl || 'http://localhost:3000',
     comparisonMode: 'vs_both',
   });
 

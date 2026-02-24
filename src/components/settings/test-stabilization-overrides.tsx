@@ -6,17 +6,21 @@ import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
-import { Checkbox } from '@/components/ui/checkbox';
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from '@/components/ui/tooltip';
 import {
   Collapsible,
   CollapsibleContent,
   CollapsibleTrigger,
 } from '@/components/ui/collapsible';
-import { Shield, ChevronDown, RotateCcw, Hourglass, Pause, Ban, Eye, EyeOff, Camera, Monitor } from 'lucide-react';
+import { Shield, ChevronDown, RotateCcw, Hourglass, Pause, Ban, Eye, EyeOff, Camera, Monitor, AlertTriangle } from 'lucide-react';
 import { toast } from 'sonner';
 import { saveTestStabilizationOverrides, resetTestStabilizationOverrides } from '@/server/actions/stabilization-overrides';
 import type { StabilizationSettings } from '@/lib/db/schema';
-import { DEFAULT_STABILIZATION_SETTINGS } from '@/lib/db/schema';
 
 interface TestStabilizationOverridesProps {
   testId: string;
@@ -28,10 +32,32 @@ type BooleanKeys = { [K in keyof StabilizationSettings]: StabilizationSettings[K
 type NumberKeys = { [K in keyof StabilizationSettings]: StabilizationSettings[K] extends number ? K : never }[keyof StabilizationSettings];
 
 export function TestStabilizationOverrides({ testId, overrides: initialOverrides, defaults }: TestStabilizationOverridesProps) {
+  // Merged state: defaults + overrides. We track which keys are overridden separately.
   const [overrides, setOverrides] = useState<Partial<StabilizationSettings>>(initialOverrides ?? {});
   const [isSaving, setIsSaving] = useState(false);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastSaved = useRef<string>(JSON.stringify(initialOverrides ?? {}));
+
+  // Effective value for any key: override if present, else default
+  const getVal = <K extends keyof StabilizationSettings>(key: K): StabilizationSettings[K] => {
+    return key in overrides ? (overrides[key] as StabilizationSettings[K]) : defaults[key];
+  };
+
+  const isOverridden = (key: keyof StabilizationSettings) => key in overrides;
+
+  // Set a value — automatically marks it as overridden
+  const setVal = <K extends keyof StabilizationSettings>(key: K, value: StabilizationSettings[K]) => {
+    setOverrides(prev => ({ ...prev, [key]: value }));
+  };
+
+  // Restore a single key back to the repo default (remove from overrides)
+  const restoreKey = (...keys: (keyof StabilizationSettings)[]) => {
+    setOverrides(prev => {
+      const next = { ...prev };
+      for (const key of keys) delete next[key];
+      return next;
+    });
+  };
 
   const doSave = useCallback(async (current: Partial<StabilizationSettings>) => {
     const serialized = JSON.stringify(current);
@@ -54,26 +80,6 @@ export function TestStabilizationOverrides({ testId, overrides: initialOverrides
     return () => { if (saveTimer.current) clearTimeout(saveTimer.current); };
   }, [overrides, doSave]);
 
-  const isOverridden = (key: keyof StabilizationSettings) => key in overrides;
-
-  const toggleOverride = (key: keyof StabilizationSettings) => {
-    if (isOverridden(key)) {
-      const next = { ...overrides };
-      delete next[key];
-      setOverrides(next);
-    } else {
-      setOverrides({ ...overrides, [key]: defaults[key] });
-    }
-  };
-
-  const getValue = <K extends keyof StabilizationSettings>(key: K): StabilizationSettings[K] => {
-    return isOverridden(key) ? (overrides[key] as StabilizationSettings[K]) : defaults[key];
-  };
-
-  const setValue = <K extends keyof StabilizationSettings>(key: K, value: StabilizationSettings[K]) => {
-    setOverrides({ ...overrides, [key]: value });
-  };
-
   const handleReset = async () => {
     setOverrides({});
     lastSaved.current = JSON.stringify({});
@@ -87,29 +93,45 @@ export function TestStabilizationOverrides({ testId, overrides: initialOverrides
 
   const overrideCount = Object.keys(overrides).length;
 
-  // Render a boolean toggle with override checkbox
-  const renderBooleanField = (key: BooleanKeys, label: string, description: string) => (
+  // Warning triangle + restore button for overridden fields
+  const OverrideIndicator = ({ keys }: { keys: (keyof StabilizationSettings)[] }) => {
+    const anyOverridden = keys.some(k => isOverridden(k));
+    if (!anyOverridden) return null;
+    return (
+      <TooltipProvider delayDuration={200}>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button variant="ghost" size="icon" className="h-6 w-6 shrink-0" onClick={(e) => { e.stopPropagation(); restoreKey(...keys); }}>
+              <AlertTriangle className="h-3.5 w-3.5 text-amber-500" />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent side="left">
+            <p className="text-xs">Overridden — click to restore default</p>
+          </TooltipContent>
+        </Tooltip>
+      </TooltipProvider>
+    );
+  };
+
+  // Boolean toggle row
+  const renderBool = (key: BooleanKeys, label: string, description: string) => (
     <div className="flex items-center justify-between">
-      <div className="flex items-center gap-2">
-        <Checkbox
-          checked={isOverridden(key)}
-          onCheckedChange={() => toggleOverride(key)}
-        />
-        <div className={`space-y-0.5 ${!isOverridden(key) ? 'opacity-50' : ''}`}>
+      <div className="flex items-center gap-1.5">
+        <OverrideIndicator keys={[key]} />
+        <div className="space-y-0.5">
           <Label className="text-sm">{label}</Label>
           <p className="text-xs text-muted-foreground">{description}</p>
         </div>
       </div>
       <Switch
-        checked={getValue(key) as boolean}
-        disabled={!isOverridden(key)}
-        onCheckedChange={(checked) => setValue(key, checked as StabilizationSettings[typeof key])}
+        checked={getVal(key) as boolean}
+        onCheckedChange={(checked) => setVal(key, checked as StabilizationSettings[typeof key])}
       />
     </div>
   );
 
-  // Render a boolean toggle with a number input alongside it
-  const renderBooleanWithNumber = (
+  // Boolean toggle + number input row
+  const renderBoolNum = (
     boolKey: BooleanKeys,
     numKey: NumberKeys,
     label: string,
@@ -117,21 +139,9 @@ export function TestStabilizationOverrides({ testId, overrides: initialOverrides
     numConfig: { min: number; max: number; step: number; fallback: number }
   ) => (
     <div className="flex items-center justify-between">
-      <div className="flex items-center gap-2">
-        <Checkbox
-          checked={isOverridden(boolKey) || isOverridden(numKey)}
-          onCheckedChange={() => {
-            if (isOverridden(boolKey) || isOverridden(numKey)) {
-              const next = { ...overrides };
-              delete next[boolKey];
-              delete next[numKey];
-              setOverrides(next);
-            } else {
-              setOverrides({ ...overrides, [boolKey]: defaults[boolKey], [numKey]: defaults[numKey] });
-            }
-          }}
-        />
-        <div className={`space-y-0.5 ${!(isOverridden(boolKey) || isOverridden(numKey)) ? 'opacity-50' : ''}`}>
+      <div className="flex items-center gap-1.5">
+        <OverrideIndicator keys={[boolKey, numKey]} />
+        <div className="space-y-0.5">
           <Label className="text-sm">{label}</Label>
           <p className="text-xs text-muted-foreground">{description}</p>
         </div>
@@ -142,17 +152,45 @@ export function TestStabilizationOverrides({ testId, overrides: initialOverrides
           min={numConfig.min}
           max={numConfig.max}
           step={numConfig.step}
-          value={getValue(numKey) as number}
-          onChange={(e) => setValue(numKey, Math.max(numConfig.min, parseInt(e.target.value) || numConfig.fallback) as StabilizationSettings[typeof numKey])}
+          value={getVal(numKey) as number}
+          onChange={(e) => setVal(numKey, Math.max(numConfig.min, parseInt(e.target.value) || numConfig.fallback) as StabilizationSettings[typeof numKey])}
           className="w-20"
-          disabled={!(isOverridden(boolKey) || isOverridden(numKey)) || !(getValue(boolKey) as boolean)}
+          disabled={!(getVal(boolKey) as boolean)}
         />
         <span className="text-xs text-muted-foreground">ms</span>
         <Switch
-          checked={getValue(boolKey) as boolean}
-          disabled={!(isOverridden(boolKey) || isOverridden(numKey))}
-          onCheckedChange={(checked) => setValue(boolKey, checked as StabilizationSettings[typeof boolKey])}
+          checked={getVal(boolKey) as boolean}
+          onCheckedChange={(checked) => setVal(boolKey, checked as StabilizationSettings[typeof boolKey])}
         />
+      </div>
+    </div>
+  );
+
+  // Number input row (standalone)
+  const renderNum = (
+    key: NumberKeys,
+    label: string,
+    config: { min: number; max: number; step: number; fallback: number },
+    suffix?: string,
+    disabled?: boolean,
+  ) => (
+    <div className="flex items-center justify-between pl-4">
+      <div className="flex items-center gap-1.5">
+        <OverrideIndicator keys={[key]} />
+        <Label className="text-sm">{label}</Label>
+      </div>
+      <div className="flex items-center gap-2">
+        <Input
+          type="number"
+          min={config.min}
+          max={config.max}
+          step={config.step}
+          value={getVal(key) as number}
+          onChange={(e) => setVal(key, Math.max(config.min, Math.min(config.max, (config.step < 1 ? parseFloat(e.target.value) : parseInt(e.target.value)) || config.fallback)) as StabilizationSettings[typeof key])}
+          className="w-20"
+          disabled={disabled}
+        />
+        {suffix && <span className="text-xs text-muted-foreground">{suffix}</span>}
       </div>
     </div>
   );
@@ -165,18 +203,21 @@ export function TestStabilizationOverrides({ testId, overrides: initialOverrides
             <Shield className="h-4 w-4" />
             Stabilization Overrides
             {overrideCount > 0 && (
-              <span className="text-xs bg-primary/10 text-primary px-1.5 py-0.5 rounded-full">{overrideCount} override{overrideCount !== 1 ? 's' : ''}</span>
+              <span className="text-xs bg-amber-500/10 text-amber-600 px-1.5 py-0.5 rounded-full flex items-center gap-1">
+                <AlertTriangle className="h-3 w-3" />
+                {overrideCount} override{overrideCount !== 1 ? 's' : ''}
+              </span>
             )}
             {isSaving && <span className="text-xs text-muted-foreground">Saving...</span>}
           </CardTitle>
           {overrideCount > 0 && (
             <Button variant="ghost" size="sm" onClick={handleReset}>
               <RotateCcw className="h-3 w-3 mr-1" />
-              Reset All
+              Restore All Defaults
             </Button>
           )}
         </div>
-        <p className="text-xs text-muted-foreground">Override repo-level stabilization settings for this test. Check a setting to override it.</p>
+        <p className="text-xs text-muted-foreground">Per-test stabilization settings. Changed values override repo defaults and show a warning indicator.</p>
       </CardHeader>
       <CardContent className="space-y-4">
         {/* Wait Strategies */}
@@ -191,15 +232,15 @@ export function TestStabilizationOverrides({ testId, overrides: initialOverrides
             </Button>
           </CollapsibleTrigger>
           <CollapsibleContent className="space-y-3 pt-2 pl-4">
-            {renderBooleanWithNumber('waitForNetworkIdle', 'networkIdleTimeout', 'Wait for Network Idle', 'Wait until no network requests', { min: 0, max: 30000, step: 1000, fallback: 5000 })}
-            {renderBooleanWithNumber('waitForDomStable', 'domStableTimeout', 'Wait for DOM Stable', 'Wait until DOM mutations stop', { min: 0, max: 10000, step: 500, fallback: 2000 })}
-            {renderBooleanField('waitForFonts', 'Wait for Fonts', 'Wait for web fonts to load')}
-            {renderBooleanWithNumber('waitForImages', 'waitForImagesTimeout', 'Wait for Images', 'Wait for all images to finish loading', { min: 0, max: 30000, step: 1000, fallback: 5000 })}
+            {renderBoolNum('waitForNetworkIdle', 'networkIdleTimeout', 'Wait for Network Idle', 'Wait until no network requests', { min: 0, max: 30000, step: 1000, fallback: 5000 })}
+            {renderBoolNum('waitForDomStable', 'domStableTimeout', 'Wait for DOM Stable', 'Wait until DOM mutations stop', { min: 0, max: 10000, step: 500, fallback: 2000 })}
+            {renderBool('waitForFonts', 'Wait for Fonts', 'Wait for web fonts to load')}
+            {renderBoolNum('waitForImages', 'waitForImagesTimeout', 'Wait for Images', 'Wait for all images to finish loading', { min: 0, max: 30000, step: 1000, fallback: 5000 })}
           </CollapsibleContent>
         </Collapsible>
 
         {/* Content Freezing */}
-        <Collapsible defaultOpen={Object.keys(overrides).some(k => ['freezeTimestamps', 'frozenTimestamp', 'freezeRandomValues', 'randomSeed', 'reseedRandomOnInput'].includes(k))}>
+        <Collapsible defaultOpen={Object.keys(overrides).some(k => ['freezeTimestamps', 'frozenTimestamp', 'freezeRandomValues', 'randomSeed', 'reseedRandomOnInput', 'freezeAnimations'].includes(k))}>
           <CollapsibleTrigger asChild>
             <Button variant="ghost" className="w-full justify-between p-2 h-auto">
               <div className="flex items-center gap-2">
@@ -210,35 +251,37 @@ export function TestStabilizationOverrides({ testId, overrides: initialOverrides
             </Button>
           </CollapsibleTrigger>
           <CollapsibleContent className="space-y-3 pt-2 pl-4">
-            {renderBooleanField('freezeTimestamps', 'Freeze Timestamps', 'Use a fixed Date.now() value')}
-            {isOverridden('freezeTimestamps') && (getValue('freezeTimestamps') as boolean) && (
-              <div className="flex items-center gap-2 pl-8">
+            {renderBool('freezeTimestamps', 'Freeze Timestamps', 'Use a fixed Date.now() value')}
+            {(getVal('freezeTimestamps') as boolean) && (
+              <div className="flex items-center gap-2 pl-4">
+                <OverrideIndicator keys={['frozenTimestamp']} />
                 <Label className="text-xs">Fixed timestamp:</Label>
                 <Input
                   type="text"
-                  value={getValue('frozenTimestamp') as string}
-                  onChange={(e) => setValue('frozenTimestamp', e.target.value as StabilizationSettings['frozenTimestamp'])}
+                  value={getVal('frozenTimestamp') as string}
+                  onChange={(e) => setVal('frozenTimestamp', e.target.value as StabilizationSettings['frozenTimestamp'])}
                   className="flex-1"
                   placeholder="2024-01-01T12:00:00Z"
                 />
               </div>
             )}
-            {renderBooleanField('freezeRandomValues', 'Freeze Math.random()', 'Use seeded pseudo-random values')}
-            {isOverridden('freezeRandomValues') && (getValue('freezeRandomValues') as boolean) && (
+            {renderBool('freezeRandomValues', 'Freeze Math.random()', 'Use seeded pseudo-random values')}
+            {(getVal('freezeRandomValues') as boolean) && (
               <>
-                <div className="flex items-center gap-2 pl-8">
+                <div className="flex items-center gap-2 pl-4">
+                  <OverrideIndicator keys={['randomSeed']} />
                   <Label className="text-xs">Seed:</Label>
                   <Input
                     type="number"
-                    value={getValue('randomSeed') as number}
-                    onChange={(e) => setValue('randomSeed', (parseInt(e.target.value) || 12345) as StabilizationSettings['randomSeed'])}
+                    value={getVal('randomSeed') as number}
+                    onChange={(e) => setVal('randomSeed', (parseInt(e.target.value) || 12345) as StabilizationSettings['randomSeed'])}
                     className="w-24"
                   />
                 </div>
-                {renderBooleanField('reseedRandomOnInput', 'Reseed on Input Events', 'Reset RNG from event hash on user input')}
+                {renderBool('reseedRandomOnInput', 'Reseed on Input Events', 'Reset RNG from event hash on user input')}
               </>
             )}
-            {renderBooleanField('freezeAnimations', 'Freeze Animations', 'Freeze CSS animations/transitions')}
+            {renderBool('freezeAnimations', 'Freeze Animations', 'Freeze CSS animations/transitions')}
           </CollapsibleContent>
         </Collapsible>
 
@@ -254,8 +297,8 @@ export function TestStabilizationOverrides({ testId, overrides: initialOverrides
             </Button>
           </CollapsibleTrigger>
           <CollapsibleContent className="space-y-3 pt-2 pl-4">
-            {renderBooleanField('blockThirdParty', 'Block Third-Party Scripts', 'Block external domain requests')}
-            {renderBooleanField('mockThirdPartyImages', 'Mock Third-Party Images', 'Replace with placeholders')}
+            {renderBool('blockThirdParty', 'Block Third-Party Scripts', 'Block external domain requests')}
+            {renderBool('mockThirdPartyImages', 'Mock Third-Party Images', 'Replace with placeholders')}
           </CollapsibleContent>
         </Collapsible>
 
@@ -271,10 +314,10 @@ export function TestStabilizationOverrides({ testId, overrides: initialOverrides
             </Button>
           </CollapsibleTrigger>
           <CollapsibleContent className="space-y-3 pt-2 pl-4">
-            {renderBooleanField('hideLoadingIndicators', 'Hide Loading Spinners', 'CSS hide common loading indicators')}
-            {renderBooleanField('crossOsConsistency', 'Cross-OS Consistency', 'Bundled font + Chromium flags for identical screenshots')}
-            {renderBooleanField('disableWebfonts', 'Force System Fonts', 'Use system fonts only')}
-            {renderBooleanField('roundCanvasCoordinates', 'Round Canvas Coordinates', 'Snap stroke coordinates to pixel centers')}
+            {renderBool('hideLoadingIndicators', 'Hide Loading Spinners', 'CSS hide common loading indicators')}
+            {renderBool('crossOsConsistency', 'Cross-OS Consistency', 'Bundled font + Chromium flags for identical screenshots')}
+            {renderBool('disableWebfonts', 'Force System Fonts', 'Use system fonts only')}
+            {renderBool('roundCanvasCoordinates', 'Round Canvas Coordinates', 'Snap stroke coordinates to pixel centers')}
           </CollapsibleContent>
         </Collapsible>
 
@@ -290,49 +333,11 @@ export function TestStabilizationOverrides({ testId, overrides: initialOverrides
             </Button>
           </CollapsibleTrigger>
           <CollapsibleContent className="space-y-3 pt-2 pl-4">
-            {renderBooleanField('burstCapture', 'Enable Burst Capture', 'Take multiple screenshots to detect instability')}
-            {isOverridden('burstCapture') && (getValue('burstCapture') as boolean) && (
+            {renderBool('burstCapture', 'Enable Burst Capture', 'Take multiple screenshots to detect instability')}
+            {(getVal('burstCapture') as boolean) && (
               <>
-                <div className="flex items-center justify-between pl-8">
-                  <div className="flex items-center gap-2">
-                    <Checkbox
-                      checked={isOverridden('burstFrameCount')}
-                      onCheckedChange={() => toggleOverride('burstFrameCount')}
-                    />
-                    <Label className={`text-sm ${!isOverridden('burstFrameCount') ? 'opacity-50' : ''}`}>Frame Count</Label>
-                  </div>
-                  <Input
-                    type="number"
-                    min={2}
-                    max={10}
-                    value={getValue('burstFrameCount') as number}
-                    onChange={(e) => setValue('burstFrameCount', Math.max(2, Math.min(10, parseInt(e.target.value) || 3)) as StabilizationSettings['burstFrameCount'])}
-                    className="w-20"
-                    disabled={!isOverridden('burstFrameCount')}
-                  />
-                </div>
-                <div className="flex items-center justify-between pl-8">
-                  <div className="flex items-center gap-2">
-                    <Checkbox
-                      checked={isOverridden('burstStabilityThreshold')}
-                      onCheckedChange={() => toggleOverride('burstStabilityThreshold')}
-                    />
-                    <Label className={`text-sm ${!isOverridden('burstStabilityThreshold') ? 'opacity-50' : ''}`}>Stability Threshold</Label>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <Input
-                      type="number"
-                      min={0}
-                      max={10}
-                      step={0.1}
-                      value={getValue('burstStabilityThreshold') as number}
-                      onChange={(e) => setValue('burstStabilityThreshold', Math.max(0, Math.min(10, parseFloat(e.target.value) || 0.5)) as StabilizationSettings['burstStabilityThreshold'])}
-                      className="w-20"
-                      disabled={!isOverridden('burstStabilityThreshold')}
-                    />
-                    <span className="text-xs text-muted-foreground">%</span>
-                  </div>
-                </div>
+                {renderNum('burstFrameCount', 'Frame Count', { min: 2, max: 10, step: 1, fallback: 3 })}
+                {renderNum('burstStabilityThreshold', 'Stability Threshold', { min: 0, max: 10, step: 0.1, fallback: 0.5 }, '%')}
               </>
             )}
           </CollapsibleContent>
@@ -350,7 +355,7 @@ export function TestStabilizationOverrides({ testId, overrides: initialOverrides
             </Button>
           </CollapsibleTrigger>
           <CollapsibleContent className="space-y-3 pt-2 pl-4">
-            {renderBooleanField('autoMaskDynamicContent', 'Auto-Mask Dynamic Content', 'Detect and mask timestamps, UUIDs, etc.')}
+            {renderBool('autoMaskDynamicContent', 'Auto-Mask Dynamic Content', 'Detect and mask timestamps, UUIDs, etc.')}
           </CollapsibleContent>
         </Collapsible>
 
@@ -366,52 +371,14 @@ export function TestStabilizationOverrides({ testId, overrides: initialOverrides
             </Button>
           </CollapsibleTrigger>
           <CollapsibleContent className="space-y-3 pt-2 pl-4">
-            {renderBooleanField('waitForCanvasStable', 'Wait for Canvas Stable', 'Loop canvas comparisons until stable')}
-            {isOverridden('waitForCanvasStable') && (getValue('waitForCanvasStable') as boolean) && (
+            {renderBool('waitForCanvasStable', 'Wait for Canvas Stable', 'Loop canvas comparisons until stable')}
+            {(getVal('waitForCanvasStable') as boolean) && (
               <>
-                <div className="flex items-center justify-between pl-8">
-                  <div className="flex items-center gap-2">
-                    <Checkbox
-                      checked={isOverridden('canvasStableTimeout')}
-                      onCheckedChange={() => toggleOverride('canvasStableTimeout')}
-                    />
-                    <Label className={`text-sm ${!isOverridden('canvasStableTimeout') ? 'opacity-50' : ''}`}>Timeout</Label>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <Input
-                      type="number"
-                      min={0}
-                      max={30000}
-                      step={1000}
-                      value={getValue('canvasStableTimeout') as number}
-                      onChange={(e) => setValue('canvasStableTimeout', Math.max(0, parseInt(e.target.value) || 3000) as StabilizationSettings['canvasStableTimeout'])}
-                      className="w-20"
-                      disabled={!isOverridden('canvasStableTimeout')}
-                    />
-                    <span className="text-xs text-muted-foreground">ms</span>
-                  </div>
-                </div>
-                <div className="flex items-center justify-between pl-8">
-                  <div className="flex items-center gap-2">
-                    <Checkbox
-                      checked={isOverridden('canvasStableThreshold')}
-                      onCheckedChange={() => toggleOverride('canvasStableThreshold')}
-                    />
-                    <Label className={`text-sm ${!isOverridden('canvasStableThreshold') ? 'opacity-50' : ''}`}>Stable Checks</Label>
-                  </div>
-                  <Input
-                    type="number"
-                    min={1}
-                    max={10}
-                    value={getValue('canvasStableThreshold') as number}
-                    onChange={(e) => setValue('canvasStableThreshold', Math.max(1, Math.min(10, parseInt(e.target.value) || 3)) as StabilizationSettings['canvasStableThreshold'])}
-                    className="w-20"
-                    disabled={!isOverridden('canvasStableThreshold')}
-                  />
-                </div>
+                {renderNum('canvasStableTimeout', 'Timeout', { min: 0, max: 30000, step: 1000, fallback: 3000 }, 'ms')}
+                {renderNum('canvasStableThreshold', 'Stable Checks', { min: 1, max: 10, step: 1, fallback: 3 })}
               </>
             )}
-            {renderBooleanField('disableImageSmoothing', 'Disable Image Smoothing', 'Set imageSmoothingEnabled = false on 2D contexts')}
+            {renderBool('disableImageSmoothing', 'Disable Image Smoothing', 'Set imageSmoothingEnabled = false on 2D contexts')}
           </CollapsibleContent>
         </Collapsible>
       </CardContent>

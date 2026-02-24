@@ -536,7 +536,7 @@ export function BuildDetailClient({
   );
 }
 
-/** Renders diffs grouped by test — single-step tests flat, multi-step in collapsibles */
+/** Renders diffs grouped by test — every test gets a collapsible header */
 function TestGroupedList({
   diffs,
   buildId,
@@ -567,24 +567,10 @@ function TestGroupedList({
   return (
     <div className="space-y-2">
       {testGroups.map(([testId, testDiffs]) => {
-        if (testDiffs.length === 1) {
-          const diff = testDiffs[0];
-          return (
-            <DiffRow
-              key={diff.id}
-              diff={diff}
-              buildId={buildId}
-              viewMode={viewMode}
-              isSelected={selectedIds.has(diff.id)}
-              onToggleSelect={onToggleSelect}
-              hasCodeChange={codeChangeTestIdSet.has(diff.testId)}
-            />
-          );
-        }
-
         const testName = testDiffs[0].testName || 'Unnamed Test';
         const pendingCount = testDiffs.filter(d => d.status === 'pending').length;
         const failedCount = testDiffs.filter(d => d.testResultStatus === 'failed' || d.status === 'rejected').length;
+        const stepLabel = testDiffs.length === 1 ? '1 case' : `${testDiffs.length} cases`;
 
         return (
           <Collapsible key={`test-${testId}-${expandKey}`} defaultOpen={allExpanded}>
@@ -593,7 +579,7 @@ function TestGroupedList({
                 <div className="flex items-center gap-2">
                   <ChevronRight className="w-3.5 h-3.5 text-muted-foreground transition-transform group-data-[state=open]:rotate-90" />
                   <span className="text-sm font-medium">{testName}</span>
-                  <Badge variant="secondary" className="text-xs">{testDiffs.length} steps</Badge>
+                  <Badge variant="secondary" className="text-xs">{stepLabel}</Badge>
                 </div>
                 <div className="flex items-center gap-2 text-xs text-muted-foreground">
                   {pendingCount > 0 && <span className="text-yellow-600">{pendingCount} pending</span>}
