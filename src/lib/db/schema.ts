@@ -457,9 +457,9 @@ export interface StabilizationSettings {
 // Default stabilization settings
 export const DEFAULT_STABILIZATION_SETTINGS: StabilizationSettings = {
   waitForNetworkIdle: true,
-  networkIdleTimeout: 5000,
+  networkIdleTimeout: 2000,
   waitForDomStable: true,
-  domStableTimeout: 2000,
+  domStableTimeout: 500,
   freezeTimestamps: true,
   frozenTimestamp: '2024-01-01T12:00:00Z',
   freezeRandomValues: true,
@@ -470,7 +470,7 @@ export const DEFAULT_STABILIZATION_SETTINGS: StabilizationSettings = {
   hideLoadingIndicators: true,
   loadingSelectors: [],
   waitForImages: true,
-  waitForImagesTimeout: 5000,
+  waitForImagesTimeout: 2000,
   waitForFonts: true,
   disableWebfonts: false,
   crossOsConsistency: false,
@@ -521,7 +521,7 @@ export const playwrightSettings = sqliteTable('playwright_settings', {
   freezeAnimations: integer('freeze_animations', { mode: 'boolean' }).default(false), // freeze CSS animations/transitions
   enableVideoRecording: integer('enable_video_recording', { mode: 'boolean' }).default(false), // record test runs as WebM video
   screenshotDelay: integer('screenshot_delay').default(0), // ms delay before screenshot
-  maxParallelTests: integer('max_parallel_tests').default(1), // max tests to run in parallel locally
+  maxParallelTests: integer('max_parallel_tests').default(2), // max tests to run in parallel locally
   stabilization: text('stabilization', { mode: 'json' }).$type<StabilizationSettings>(), // snapshot stabilization settings
   acceptAnyCertificate: integer('accept_any_certificate', { mode: 'boolean' }).default(false), // ignore HTTPS/SSL cert errors
   networkErrorMode: text('network_error_mode').default('fail'), // 'fail' | 'warn' | 'ignore'

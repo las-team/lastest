@@ -217,13 +217,15 @@ async function executeSetupViaRunner(
   console.log(`[Executor] Queuing setup command ${command.id.slice(0, 8)} for runner ${runnerId}`);
   await queueCommandToDB(runnerId, command);
 
-  // Poll DB for setup completion
-  const pollInterval = 1000;
+  // Poll DB for setup completion with adaptive interval (starts fast, backs off)
+  let pollInterval = 250;
+  const maxPollInterval = 1500;
   const maxWait = setupTimeout + 30000; // Allow extra time for network overhead
   const startTime = Date.now();
 
   while (Date.now() - startTime < maxWait) {
     await new Promise((resolve) => setTimeout(resolve, pollInterval));
+    pollInterval = Math.min(pollInterval + 100, maxPollInterval);
 
     const dbCmd = await getRunnerCommandById(command.id);
     if (!dbCmd) continue;
@@ -312,7 +314,8 @@ async function executeViaRunner(
   const baseTimeout = options.playwrightSettings?.navigationTimeout || 120000;
   // Scale timeout for concurrency — parallel tests compete for resources
   const testTimeout = Math.max(baseTimeout * maxParallel, 300000);
-  const pollInterval = 1000;
+  let pollInterval = 250;
+  const maxPollInterval = 1500;
 
   // Check if the background job has been cancelled
   const checkCancelled = async (): Promise<boolean> => {
@@ -389,6 +392,7 @@ async function executeViaRunner(
   // Poll DB for command completion and results
   while (inFlight.size > 0) {
     await new Promise((resolve) => setTimeout(resolve, pollInterval));
+    pollInterval = Math.min(pollInterval + 100, maxPollInterval);
 
     // Check if the job was cancelled — stop launching new tests and drain in-flight
     if (!cancelled && await checkCancelled()) {
@@ -461,7 +465,7 @@ async function executeViaRunner(
           info.completedSeenAt = Date.now();
           continue; // Wait for screenshots on next poll
         }
-        if (Date.now() - info.completedSeenAt < 10_000) {
+        if (Date.now() - info.completedSeenAt < 3_000) {
           continue; // Still waiting for screenshots
         }
         // Exceeded 10s — process anyway with whatever we have

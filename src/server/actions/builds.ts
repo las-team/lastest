@@ -448,18 +448,22 @@ async function runBuildAsync(
         ? [{ path: result.screenshotPath, label: 'final' }]
         : [];
 
-    // Generate visual diff for each screenshot
-    for (const screenshot of screenshots) {
-      const diffResult = await processVisualDiff(
-        buildId,
-        testResult.id,
-        result.testId,
-        screenshot.path,
-        branch,
-        repositoryId,
-        screenshot.label,
-        result.stabilityMetadata?.isStable === false
-      );
+    // Generate visual diffs for all screenshots concurrently
+    const diffResults = await Promise.all(
+      screenshots.map(screenshot =>
+        processVisualDiff(
+          buildId,
+          testResult.id,
+          result.testId,
+          screenshot.path,
+          branch,
+          repositoryId,
+          screenshot.label,
+          result.stabilityMetadata?.isStable === false
+        )
+      )
+    );
+    for (const diffResult of diffResults) {
       if (diffResult.classification === 'changed') changesDetected++;
       if (diffResult.classification === 'flaky') flakyCount++;
 
@@ -1110,8 +1114,10 @@ async function processVisualDiff(
       metadata.pageShift.alignedDiffImagePath = toRelativePath(metadata.pageShift.alignedDiffImagePath);
     }
 
-    const plannedDiff = await generatePlannedDiff(currentScreenshotPath);
-    const mainDiff = await generateMainBaselineDiff(currentScreenshotPath);
+    const [plannedDiff, mainDiff] = await Promise.all([
+      generatePlannedDiff(currentScreenshotPath),
+      generateMainBaselineDiff(currentScreenshotPath),
+    ]);
 
     const diff = await queries.createVisualDiff({
       buildId,
@@ -1146,8 +1152,10 @@ async function processVisualDiff(
     return { hasChanges, diffId: diff.id, classification };
   } catch {
     // Diff generation failed, mark as pending for review
-    const plannedDiff = await generatePlannedDiff(currentScreenshotPath);
-    const mainDiff = await generateMainBaselineDiff(currentScreenshotPath);
+    const [plannedDiff, mainDiff] = await Promise.all([
+      generatePlannedDiff(currentScreenshotPath),
+      generateMainBaselineDiff(currentScreenshotPath),
+    ]);
 
     const diff = await queries.createVisualDiff({
       buildId,

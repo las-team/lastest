@@ -367,47 +367,55 @@ export async function applyStabilization(
 ): Promise<void> {
   const s = { ...DEFAULT_STABILIZATION_SETTINGS, ...settings };
 
-  // 1. Wait for network idle
+  // Phase 1: Run independent wait strategies concurrently
+  // Network idle, image loading, and font/style loading are independent page-level waits
+  // that can all resolve in parallel rather than blocking sequentially.
+  const concurrentWaits: Promise<void>[] = [];
+
   if (s.waitForNetworkIdle) {
-    await page.waitForLoadState('networkidle', { timeout: s.networkIdleTimeout }).catch(() => {
-      // Timeout is acceptable, continue with stabilization
-    });
+    concurrentWaits.push(
+      page.waitForLoadState('networkidle', { timeout: s.networkIdleTimeout }).catch(() => {})
+    );
   }
 
-  // 2. Wait for images to finish loading
   if (s.waitForImages) {
-    await waitForImagesLoaded(page, s.waitForImagesTimeout).catch(() => {});
+    concurrentWaits.push(
+      waitForImagesLoaded(page, s.waitForImagesTimeout).catch(() => {})
+    );
   }
 
-  // 3. Wait for styles/fonts to load (FOUC prevention)
   if (s.waitForFonts) {
-    await waitForStylesLoaded(page, 3000);
+    concurrentWaits.push(
+      waitForStylesLoaded(page, 3000)
+    );
   }
 
-  // 4. Font + deterministic CSS injection moved to setupFreezeScripts (init scripts)
-  //    to avoid re-injecting <style> tags on every screenshot which triggers re-renders.
-  //    System font CSS (disableWebfonts without crossOsConsistency) still injected here
-  //    since it doesn't affect canvas rendering determinism.
+  if (concurrentWaits.length > 0) {
+    await Promise.all(concurrentWaits);
+  }
+
+  // Phase 2: CSS injection (fast, non-blocking DOM writes)
+  // System font CSS (disableWebfonts without crossOsConsistency) still injected here
+  // since it doesn't affect canvas rendering determinism.
   if (!s.crossOsConsistency && s.disableWebfonts) {
     await injectCSS(page, SYSTEM_FONTS_CSS);
   }
 
-  // 5. Hide loading spinners via CSS
   if (s.hideLoadingIndicators) {
     await injectCSS(page, HIDE_SPINNERS_CSS);
   }
 
-  // 6. Wait for spinners to actually disappear
+  // Phase 3: Wait for spinners to disappear and DOM to stabilize
+  // These depend on phase 1 & 2 completing first
   if (s.hideLoadingIndicators && s.loadingSelectors.length > 0) {
     await waitForSpinnersToDisappear(page, s.loadingSelectors, s.domStableTimeout);
   }
 
-  // 7. Wait for DOM stability
   if (s.waitForDomStable) {
     await waitForDomStable(page, s.domStableTimeout);
   }
 
-  // 8. Freeze performance.now, reset Excalidraw RNG, enable RAF gating + flush
+  // Phase 4: Freeze performance.now, reset Excalidraw RNG, enable RAF gating + flush
   //    all queued callbacks deterministically before screenshot.
   await page.evaluate(() => {
     (window as any).__perfNowFrozen = performance.now();
@@ -422,7 +430,7 @@ export async function applyStabilization(
     }
   }).catch(() => {});
 
-  // 9. Wait for canvas stability (single-evaluate loop of flush + toDataURL comparison)
+  // Phase 5: Wait for canvas stability (single-evaluate loop of flush + toDataURL comparison)
   if (s.waitForCanvasStable) {
     await waitForCanvasStable(page, s.canvasStableTimeout, s.canvasStableThreshold);
   }
