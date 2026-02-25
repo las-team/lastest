@@ -4,11 +4,13 @@ import { useEffect } from 'react';
 import {
   Select,
   SelectContent,
+  SelectGroup,
   SelectItem,
+  SelectLabel,
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { Monitor, Cloud } from 'lucide-react';
+import { Monitor, Cloud, Tv2 } from 'lucide-react';
 import type { RunnerCapability } from '@/lib/db/schema';
 import { useRunnerStatus } from './use-runner-status';
 import { persistRunnerPreference } from '@/hooks/use-preferred-runner';
@@ -32,6 +34,9 @@ export function ExecutionTargetSelector({
 }: ExecutionTargetSelectorProps) {
   const { runners, isLoading } = useRunnerStatus(capabilityFilter);
 
+  const remoteRunners = runners.filter((r) => r.type !== 'embedded');
+  const embeddedRunners = runners.filter((r) => r.type === 'embedded');
+
   // If selected runner goes offline, reset to local
   useEffect(() => {
     if (value !== 'local' && !isLoading) {
@@ -54,7 +59,60 @@ export function ExecutionTargetSelector({
             <span>Local</span>
           </div>
         </SelectItem>
-        {runners.map((runner) => {
+
+        {remoteRunners.length > 0 && (
+          <SelectGroup>
+            <SelectLabel className="text-xs text-muted-foreground">Remote Runners</SelectLabel>
+            {remoteRunners.map((runner) => {
+              const isOnline = runner.status === 'online';
+              return (
+                <SelectItem key={runner.id} value={runner.id} disabled={!isOnline}>
+                  <div className="flex items-center gap-2">
+                    <div className="relative">
+                      <Cloud className={`h-4 w-4 ${!isOnline ? 'text-muted-foreground' : ''}`} />
+                      <div
+                        className={`absolute -top-0.5 -right-0.5 h-2 w-2 rounded-full ${
+                          isOnline ? 'bg-green-500' : 'bg-gray-400'
+                        }`}
+                      />
+                    </div>
+                    <span className={!isOnline ? 'text-muted-foreground' : ''}>{runner.name}</span>
+                  </div>
+                </SelectItem>
+              );
+            })}
+          </SelectGroup>
+        )}
+
+        {embeddedRunners.length > 0 && (
+          <SelectGroup>
+            <SelectLabel className="text-xs text-muted-foreground">Embedded Browsers</SelectLabel>
+            {embeddedRunners.map((runner) => {
+              const isOnline = runner.status === 'online';
+              const isBusy = runner.status === 'busy';
+              return (
+                <SelectItem key={runner.id} value={runner.id} disabled={!isOnline && !isBusy}>
+                  <div className="flex items-center gap-2">
+                    <div className="relative">
+                      <Tv2 className={`h-4 w-4 ${!isOnline && !isBusy ? 'text-muted-foreground' : 'text-purple-500'}`} />
+                      <div
+                        className={`absolute -top-0.5 -right-0.5 h-2 w-2 rounded-full ${
+                          isOnline ? 'bg-green-500' : isBusy ? 'bg-yellow-500' : 'bg-gray-400'
+                        }`}
+                      />
+                    </div>
+                    <span className={!isOnline && !isBusy ? 'text-muted-foreground' : ''}>
+                      {runner.name}
+                    </span>
+                  </div>
+                </SelectItem>
+              );
+            })}
+          </SelectGroup>
+        )}
+
+        {/* Show ungrouped runners if no embedded exist (backward compat visual) */}
+        {embeddedRunners.length === 0 && remoteRunners.length === 0 && runners.map((runner) => {
           const isOnline = runner.status === 'online';
           return (
             <SelectItem key={runner.id} value={runner.id} disabled={!isOnline}>

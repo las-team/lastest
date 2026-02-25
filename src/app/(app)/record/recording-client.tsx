@@ -74,6 +74,7 @@ import type { FunctionalArea, PlaywrightSettings, RecordingEngine, Test } from '
 import { DEFAULT_RECORDING_ENGINES } from '@/lib/db/schema';
 import { PlaywrightSettingsCard } from '@/components/settings/playwright-settings-card';
 import { ExecutionTargetSelector } from '@/components/execution/execution-target-selector';
+import { BrowserViewer } from '@/components/embedded-browser/browser-viewer-client';
 
 interface SetupStepInfo {
   stepType: 'test' | 'script';
@@ -284,6 +285,7 @@ export function RecordingClient({
   const lastSequenceRef = useRef(0);
   const timelineRef = useRef<HTMLDivElement>(null);
   const [settingsSaveStatus, setSettingsSaveStatus] = useState({ isPending: false, showSaved: false });
+  const [embeddedStreamUrl, setEmbeddedStreamUrl] = useState<string | null>(null);
 
   // Poll for recording status and events when in recording step
   useEffect(() => {
@@ -452,6 +454,24 @@ export function RecordingClient({
           setStep('recording');
           setEvents([]);
           lastSequenceRef.current = 0;
+
+          // Fetch embedded stream URL if recording via an embedded runner
+          if (executionTarget !== 'local') {
+            fetch(`/api/embedded/stream`)
+              .then(res => res.ok ? res.json() : null)
+              .then(data => {
+                if (data?.sessions) {
+                  const session = data.sessions.find((s: { runnerId: string }) => s.runnerId === executionTarget);
+                  if (session?.streamUrl) {
+                    const token = data.streamAuthToken;
+                    setEmbeddedStreamUrl(
+                      token ? `${session.streamUrl}?token=${encodeURIComponent(token)}` : session.streamUrl
+                    );
+                  }
+                }
+              })
+              .catch(() => {});
+          }
         }
       }
     } catch (err) {
@@ -485,6 +505,7 @@ export function RecordingClient({
 
   const handleStopRecording = async () => {
     setIsLoading(true);
+    setEmbeddedStreamUrl(null);
     try {
       const session = await stopRecording(repositoryId);
       if (session) {
@@ -952,6 +973,15 @@ export function RecordingClient({
               </div>
             </CardContent>
           </Card>
+
+          {/* Embedded Browser Live View */}
+          {embeddedStreamUrl && (
+            <Card>
+              <CardContent className="p-0">
+                <BrowserViewer streamUrl={embeddedStreamUrl} className="max-h-[400px]" />
+              </CardContent>
+            </Card>
+          )}
 
           <div className="grid grid-cols-3 gap-6">
             {/* Interaction Timeline */}

@@ -29,6 +29,9 @@ import { InviteUserDialog } from '@/components/users/invite-user-dialog';
 import { RunnerList } from '@/components/runners/runner-list';
 import { CreateRunnerDialog } from '@/components/runners/create-runner-dialog';
 import { getRunners } from '@/server/actions/runners';
+import { listEmbeddedSessions } from '@/server/actions/embedded-sessions';
+import { EmbeddedSessionList } from '@/components/embedded-browser/embedded-session-list-client';
+import { Tv2 } from 'lucide-react';
 import { GoogleSheetsSettingsCard } from '@/components/settings/google-sheets-settings-card';
 import { TestingTemplateSelector } from '@/components/settings/testing-template-selector';
 import { AutoApproveToggle } from '@/components/settings/auto-approve-toggle';
@@ -62,13 +65,14 @@ export default async function SettingsPage({
 
   // Fetch admin-only data
   const isAdmin = currentUser?.role === 'admin' || currentUser?.role === 'owner';
-  const [teamMembers, pendingInvitations, runners] = isAdmin && currentUser?.teamId
+  const [teamMembers, pendingInvitations, runners, embeddedSessions] = isAdmin && currentUser?.teamId
     ? await Promise.all([
         queries.getTeamMembers(currentUser.teamId),
         queries.getPendingInvitationsByTeam(currentUser.teamId),
         getRunners(),
+        listEmbeddedSessions(),
       ])
-    : [[], [], []];
+    : [[], [], [], []];
 
   const serverUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
 
@@ -450,6 +454,32 @@ export default async function SettingsPage({
                       </p>
                     </div>
                   </details>
+                </CardContent>
+              </Card>
+
+              {/* Embedded Browsers */}
+              <Card id="embedded-browsers">
+                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                  <div className="space-y-1">
+                    <CardTitle className="flex items-center gap-2">
+                      <Tv2 className="w-5 h-5" />
+                      Embedded Browsers ({embeddedSessions.length})
+                    </CardTitle>
+                    <CardDescription>
+                      Docker-based browsers with live streaming
+                    </CardDescription>
+                  </div>
+                </CardHeader>
+                <CardContent>
+                  {embeddedSessions.length === 0 ? (
+                    <div className="text-center py-4 text-muted-foreground">
+                      <Tv2 className="w-12 h-12 mx-auto mb-4 opacity-50" />
+                      <p className="mb-1">No embedded browsers active</p>
+                      <p className="text-sm">Start an embedded browser container via Docker Compose to enable live browser streaming.</p>
+                    </div>
+                  ) : (
+                    <EmbeddedSessionList sessions={embeddedSessions} isAdmin={isAdmin} />
+                  )}
                 </CardContent>
               </Card>
 

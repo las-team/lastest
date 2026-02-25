@@ -11,6 +11,7 @@ import { ScreencastManager } from './screencast.js';
 import { InputHandler } from './input-handler.js';
 import { StreamServer } from './stream-server.js';
 import { EmbeddedRunnerClient } from './runner-client.js';
+import { EmbeddedTestExecutor } from './test-executor.js';
 
 // Configuration from environment
 const config = {
@@ -35,6 +36,7 @@ let screencast: ScreencastManager | null = null;
 let inputHandler: InputHandler | null = null;
 let streamServer: StreamServer | null = null;
 let runnerClient: EmbeddedRunnerClient | null = null;
+let testExecutor: EmbeddedTestExecutor | null = null;
 
 async function startup(): Promise<void> {
   console.log('=== Embedded Browser Service ===');
@@ -96,12 +98,77 @@ async function startup(): Promise<void> {
     pollInterval: config.pollInterval,
   });
 
+  // Initialize test executor
+  testExecutor = new EmbeddedTestExecutor();
+
   // Handle commands from main app
   runnerClient.onCommand = async (command) => {
     console.log(`[Command] Received: ${command.type}`);
-    // Commands are handled by the standard runner protocol
-    // The embedded browser's page is already running - commands
-    // manipulate it via the runner's test execution path
+
+    switch (command.type) {
+      case 'command:run_test': {
+        if (!page || !testExecutor || !runnerClient) break;
+        const payload = command.payload as {
+          testId: string; testRunId: string; code: string;
+          codeHash: string; targetUrl: string; timeout?: number;
+          viewport?: { width: number; height: number };
+        };
+
+        runnerClient.setStatus('busy', payload.testId);
+        streamServer?.broadcastStatus('busy', payload.targetUrl);
+
+        const result = await testExecutor.runTest(page, payload);
+
+        // Send result back via runner protocol
+        await runnerClient.sendMessage({
+          id: crypto.randomUUID(),
+          type: 'response:test_result',
+          timestamp: Date.now(),
+          payload: {
+            testId: payload.testId,
+            testRunId: payload.testRunId,
+            ...result,
+          },
+        });
+
+        runnerClient.setStatus('idle');
+        streamServer?.broadcastStatus('ready');
+        break;
+      }
+
+      case 'command:capture_screenshot': {
+        if (!page || !testExecutor || !runnerClient) break;
+        const screenshot = await testExecutor.captureScreenshot(page);
+        await runnerClient.sendMessage({
+          id: crypto.randomUUID(),
+          type: 'response:screenshot',
+          timestamp: Date.now(),
+          payload: screenshot ? { data: screenshot.data, width: screenshot.width, height: screenshot.height } : { error: 'Failed to capture screenshot' },
+        });
+        break;
+      }
+
+      case 'command:cancel_test': {
+        if (testExecutor) {
+          testExecutor.abort();
+          console.log('[Command] Test execution cancelled');
+        }
+        break;
+      }
+
+      case 'command:ping': {
+        await runnerClient?.sendMessage({
+          id: crypto.randomUUID(),
+          type: 'response:pong',
+          timestamp: Date.now(),
+          payload: {},
+        });
+        break;
+      }
+
+      default:
+        console.warn(`[Command] Unknown command type: ${command.type}`);
+    }
   };
 
   await runnerClient.start();

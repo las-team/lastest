@@ -5,6 +5,8 @@ import { getCurrentSession } from '@/lib/auth';
 import { RecentHistory } from '@/components/dashboard/recent-history';
 import { BuildActionsClient } from './build-actions-client';
 import { BuildPollingWrapper } from './build-polling-wrapper';
+import { getStreamUrlForRunner } from '@/server/actions/embedded-sessions';
+import * as queries from '@/lib/db/queries';
 
 interface PageProps {
   params: Promise<{ buildId: string }>;
@@ -26,6 +28,22 @@ export default async function BuildPage({ params }: PageProps) {
     notFound();
   }
 
+  // Look up embedded stream URL if this build uses an embedded runner
+  let embeddedStreamUrl: string | null = null;
+  const buildRecord = await queries.getBuild(buildId);
+  if (buildRecord?.testRunId) {
+    const testRun = await queries.getTestRun(buildRecord.testRunId);
+    if (testRun?.runnerId) {
+      const streamInfo = await getStreamUrlForRunner(testRun.runnerId);
+      if (streamInfo?.streamUrl) {
+        const token = streamInfo.streamAuthToken;
+        embeddedStreamUrl = token
+          ? `${streamInfo.streamUrl}?token=${encodeURIComponent(token)}`
+          : streamInfo.streamUrl;
+      }
+    }
+  }
+
   const pendingDiffs = build.diffs.filter((d) => d.status === 'pending');
   const aiApproveCount = build.diffs.filter(
     (d) => d.aiRecommendation === 'approve' && d.status === 'pending'
@@ -37,6 +55,7 @@ export default async function BuildPage({ params }: PageProps) {
       <BuildPollingWrapper
         buildId={buildId}
         isMainBranch={build.isMainBranch}
+        embeddedStreamUrl={embeddedStreamUrl}
         initialBuild={{
           id: build.id,
           overallStatus: build.overallStatus,

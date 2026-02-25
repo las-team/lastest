@@ -206,6 +206,26 @@ export async function getEmbeddedSessionForRunner(runnerId: string): Promise<Emb
 }
 
 /**
+ * Get the stream URL for a runner's linked embedded session.
+ * Used by UI to discover if a runner has live streaming available.
+ */
+export async function getStreamUrlForRunner(runnerId: string): Promise<{
+  streamUrl: string | null;
+  sessionId: string | null;
+  streamAuthToken: string | null;
+} | null> {
+  const session = await getEmbeddedSessionForRunner(runnerId);
+  if (!session || !session.streamUrl) return null;
+
+  const streamAuthToken = process.env.STREAM_AUTH_TOKEN || null;
+  return {
+    streamUrl: session.streamUrl,
+    sessionId: session.id,
+    streamAuthToken,
+  };
+}
+
+/**
  * Clean up expired embedded sessions
  */
 export async function cleanupExpiredSessions(): Promise<number> {

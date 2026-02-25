@@ -1,0 +1,40 @@
+import { NextResponse } from 'next/server';
+import { getEmbeddedSession } from '@/server/actions/embedded-sessions';
+
+/**
+ * GET /api/embedded/stream/[sessionId]
+ *
+ * Returns stream connection info for a specific embedded session.
+ * The client uses the returned streamUrl to connect directly to the
+ * container's WebSocket stream server (Option A — no WS proxy needed).
+ */
+export async function GET(
+  _request: Request,
+  { params }: { params: Promise<{ sessionId: string }> }
+) {
+  const { sessionId } = await params;
+
+  try {
+    const session = await getEmbeddedSession(sessionId);
+    if (!session) {
+      return NextResponse.json({ error: 'Session not found' }, { status: 404 });
+    }
+
+    const streamAuthToken = process.env.STREAM_AUTH_TOKEN || null;
+
+    return NextResponse.json({
+      sessionId: session.id,
+      runnerId: session.runnerId,
+      status: session.status,
+      streamUrl: session.streamUrl,
+      viewport: session.viewport,
+      currentUrl: session.currentUrl,
+      streamAuthToken,
+    });
+  } catch {
+    return NextResponse.json(
+      { error: 'Failed to get session' },
+      { status: 500 }
+    );
+  }
+}

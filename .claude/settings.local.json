@@ -104,7 +104,8 @@
       "WebFetch(domain:jacklj.github.io)",
       "WebFetch(domain:www.adammil.net)",
       "WebFetch(domain:lodev.org)",
-      "WebFetch(domain:docs.browserless.io)"
+      "WebFetch(domain:docs.browserless.io)",
+      "Bash(git diff:*)"
     ]
   },
   "disabledMcpjsonServers": [
