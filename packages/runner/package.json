@@ -1,6 +1,6 @@
 {
   "name": "@lastest/runner",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Remote test execution runner for Lastest2 visual regression testing platform",
   "type": "module",
   "bin": {

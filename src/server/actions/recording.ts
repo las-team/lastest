@@ -111,13 +111,13 @@ export async function startRecording(
         if (!id) continue;
         const record = step.stepType === 'test' ? await getTest(id) : await getSetupScript(id);
         if (record?.code) {
-          resolvedSetupSteps.push({ code: record.code, codeHash: record.codeHash ?? '' });
+          resolvedSetupSteps.push({ code: record.code, codeHash: 'codeHash' in record ? (record.codeHash ?? '') : '' });
         }
       }
     } else if (setupOptions?.testId || setupOptions?.scriptId) {
       const id = setupOptions.testId || setupOptions.scriptId;
       const record = setupOptions.testId ? await getTest(id!) : await getSetupScript(id!);
-      if (record?.code) resolvedSetupSteps = [{ code: record.code, codeHash: record.codeHash ?? '' }];
+      if (record?.code) resolvedSetupSteps = [{ code: record.code, codeHash: 'codeHash' in record ? (record.codeHash ?? '') : '' }];
     }
 
     // Queue start_recording command to the runner
