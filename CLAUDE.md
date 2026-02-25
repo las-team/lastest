@@ -26,9 +26,23 @@ Visual regression testing platform: Next.js 16 App Router, SQLite (Drizzle ORM),
 **Core flow:** Record browser interactions → Run tests → Diff screenshots (pixelmatch) → Review/approve baselines
 
 **Key paths:**
-- `src/lib/db/schema.ts` — all tables (~3800 lines, use offset/limit)
-- `src/lib/db/queries.ts` — all queries (~1900 lines, use offset/limit)
-- `src/lib/execution/executor.ts` — test executor (~14k lines, use offset/limit)
+- `src/lib/db/schema.ts` — all tables (~1375 lines)
+- `src/lib/db/queries.ts` — barrel re-export of all query modules
+- `src/lib/db/queries/` — domain-focused query modules:
+  - `tests.ts` — tests, functional areas, test runs, results, versions
+  - `builds.ts` — builds, build summaries, build status
+  - `visual-diffs.ts` — visual diffs, baselines, ignore regions, planned screenshots
+  - `repositories.ts` — repos, PRs, github/gitlab accounts
+  - `settings.ts` — playwright, environment, diff, AI, notification settings
+  - `routes.ts` — routes, scan status, route suggestions
+  - `suites.ts` — suites, functional area tree, hierarchy
+  - `background-jobs.ts` — background jobs
+  - `auth.ts` — teams, users, sessions, oauth, tokens, invitations
+  - `setup.ts` — setup/teardown scripts, configs, steps, resolution
+  - `runners.ts` — runners, runner commands
+  - `integrations.ts` — spec imports, google sheets, compose, agent sessions
+  - `misc.ts` — selector stats, bug reports, review todos
+- `src/lib/execution/executor.ts` — test executor (~650 lines)
 - `src/lib/playwright/` — recorder, runner, server manager, OCR
 - `src/lib/diff/` — pixelmatch diffing + SHA256 baseline hashing
 - `src/lib/ai/` — 4 providers: claude-cli, openrouter, claude-agent-sdk, anthropic-direct
@@ -42,7 +56,7 @@ Visual regression testing platform: Next.js 16 App Router, SQLite (Drizzle ORM),
 1. Edit `src/lib/db/schema.ts`
 2. Update `DEFAULT_*` constants at top of schema for new settings fields
 3. Run `pnpm db:push`
-4. Update queries in `src/lib/db/queries.ts`
+4. Update queries in the relevant `src/lib/db/queries/*.ts` module (barrel re-exported from `queries.ts`)
 
 ## Conventions
 
