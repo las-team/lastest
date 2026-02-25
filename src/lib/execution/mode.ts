@@ -1,14 +1,15 @@
 /**
  * Execution Mode Detection
  *
- * Determines whether tests should run locally or via remote runner.
+ * Determines whether tests should run locally, via remote runner, or via embedded browser.
  *
  * Modes:
  * - 'local': Direct Playwright execution on same machine (development, self-hosted)
- * - 'runner': Route through remote runner via WebSocket (cloud deployment)
+ * - 'runner': Route through remote runner via HTTP polling (cloud deployment)
+ * - 'embedded': Route through embedded browser container with live streaming
  */
 
-export type ExecutionMode = 'local' | 'runner';
+export type ExecutionMode = 'local' | 'runner' | 'embedded';
 
 /**
  * Get the current execution mode from environment.
@@ -17,7 +18,7 @@ export type ExecutionMode = 'local' | 'runner';
 export function getExecutionMode(): ExecutionMode {
   const envMode = process.env.EXECUTION_MODE as ExecutionMode | undefined;
 
-  if (envMode === 'local' || envMode === 'runner') {
+  if (envMode === 'local' || envMode === 'runner' || envMode === 'embedded') {
     return envMode;
   }
 
@@ -41,6 +42,13 @@ export function isLocalMode(): boolean {
  */
 export function isRunnerMode(): boolean {
   return getExecutionMode() === 'runner';
+}
+
+/**
+ * Check if running in embedded browser mode.
+ */
+export function isEmbeddedMode(): boolean {
+  return getExecutionMode() === 'embedded';
 }
 
 /**

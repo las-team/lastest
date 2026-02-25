@@ -35,7 +35,7 @@ Sitemap -flow
 Formal verification of code?
 ### UX
 ## bugs
-Keyboard shortcuts: A Approve · R Reject · ← → Navigate · + - Zoom on the diff screen dont work
+some elements are disappearing from test 13b
 ## marketing 
 ## Excalidraw 
 
@@ -65,9 +65,6 @@ Keyboard shortcuts: A Approve · R Reject · ← → Navigate · + - Zoom on the
   running lastest2-runner trigger --repo ewyct/excalidraw_test. The goal is to get    
   the same results in two consecutive runs (while keeping testing functionality       
   intact).   
-
-  ~/.claude/plans/delegated-toasting-mccarthy.md
-
 
 
 

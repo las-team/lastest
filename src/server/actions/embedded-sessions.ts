@@ -1,0 +1,231 @@
+'use server';
+
+import { db } from '@/lib/db';
+import { embeddedSessions, type EmbeddedSession, type EmbeddedSessionStatus } from '@/lib/db/schema';
+import { eq, and, desc } from 'drizzle-orm';
+import { requireTeamAccess, requireTeamAdmin } from '@/lib/auth';
+import { revalidatePath } from 'next/cache';
+
+/**
+ * List all embedded sessions for the current team
+ */
+export async function listEmbeddedSessions(): Promise<EmbeddedSession[]> {
+  const session = await requireTeamAccess();
+  return db
+    .select()
+    .from(embeddedSessions)
+    .where(eq(embeddedSessions.teamId, session.team.id))
+    .orderBy(desc(embeddedSessions.createdAt))
+    .all();
+}
+
+/**
+ * Get a specific embedded session
+ */
+export async function getEmbeddedSession(sessionId: string): Promise<EmbeddedSession | null> {
+  const session = await requireTeamAccess();
+  const result = await db
+    .select()
+    .from(embeddedSessions)
+    .where(and(eq(embeddedSessions.id, sessionId), eq(embeddedSessions.teamId, session.team.id)))
+    .get();
+  return result ?? null;
+}
+
+/**
+ * Find an available (ready) embedded session for the team
+ */
+export async function getAvailableEmbeddedSession(): Promise<EmbeddedSession | null> {
+  const session = await requireTeamAccess();
+  const result = await db
+    .select()
+    .from(embeddedSessions)
+    .where(and(
+      eq(embeddedSessions.teamId, session.team.id),
+      eq(embeddedSessions.status, 'ready'),
+    ))
+    .limit(1)
+    .get();
+  return result ?? null;
+}
+
+/**
+ * Claim an embedded session (set to busy, assign userId)
+ */
+export async function claimEmbeddedSession(
+  sessionId: string
+): Promise<{ success: boolean } | { error: string }> {
+  const session = await requireTeamAccess();
+
+  const existing = await db
+    .select()
+    .from(embeddedSessions)
+    .where(and(eq(embeddedSessions.id, sessionId), eq(embeddedSessions.teamId, session.team.id)))
+    .get();
+
+  if (!existing) {
+    return { error: 'Session not found' };
+  }
+
+  if (existing.status !== 'ready') {
+    return { error: `Session is not available (status: ${existing.status})` };
+  }
+
+  await db
+    .update(embeddedSessions)
+    .set({
+      status: 'busy',
+      userId: session.user.id,
+      lastActivityAt: new Date(),
+    })
+    .where(eq(embeddedSessions.id, sessionId));
+
+  revalidatePath('/settings');
+  return { success: true };
+}
+
+/**
+ * Release an embedded session (back to ready, clear userId)
+ */
+export async function releaseEmbeddedSession(
+  sessionId: string
+): Promise<{ success: boolean } | { error: string }> {
+  const session = await requireTeamAccess();
+
+  const existing = await db
+    .select()
+    .from(embeddedSessions)
+    .where(and(eq(embeddedSessions.id, sessionId), eq(embeddedSessions.teamId, session.team.id)))
+    .get();
+
+  if (!existing) {
+    return { error: 'Session not found' };
+  }
+
+  await db
+    .update(embeddedSessions)
+    .set({
+      status: 'ready',
+      userId: null,
+      lastActivityAt: new Date(),
+    })
+    .where(eq(embeddedSessions.id, sessionId));
+
+  revalidatePath('/settings');
+  return { success: true };
+}
+
+/**
+ * Create an embedded session (internal — called by registration endpoint)
+ */
+export async function createEmbeddedSession(params: {
+  teamId: string;
+  runnerId: string;
+  streamUrl: string;
+  containerUrl: string;
+  viewport?: { width: number; height: number };
+}): Promise<EmbeddedSession> {
+  const id = crypto.randomUUID();
+  const now = new Date();
+  const expiresAt = new Date(now.getTime() + 30 * 60 * 1000); // 30min expiry
+
+  await db.insert(embeddedSessions).values({
+    id,
+    teamId: params.teamId,
+    runnerId: params.runnerId,
+    status: 'ready',
+    streamUrl: params.streamUrl,
+    containerUrl: params.containerUrl,
+    viewport: params.viewport ?? { width: 1280, height: 720 },
+    createdAt: now,
+    lastActivityAt: now,
+    expiresAt,
+  });
+
+  const created = await db
+    .select()
+    .from(embeddedSessions)
+    .where(eq(embeddedSessions.id, id))
+    .get();
+
+  return created!;
+}
+
+/**
+ * Destroy an embedded session (admin only)
+ */
+export async function destroyEmbeddedSession(
+  sessionId: string
+): Promise<{ success: boolean } | { error: string }> {
+  const session = await requireTeamAdmin();
+
+  const existing = await db
+    .select()
+    .from(embeddedSessions)
+    .where(and(eq(embeddedSessions.id, sessionId), eq(embeddedSessions.teamId, session.team.id)))
+    .get();
+
+  if (!existing) {
+    return { error: 'Session not found' };
+  }
+
+  await db.delete(embeddedSessions).where(eq(embeddedSessions.id, sessionId));
+
+  revalidatePath('/settings');
+  return { success: true };
+}
+
+/**
+ * Update embedded session status (internal use)
+ */
+export async function updateEmbeddedSessionStatus(
+  sessionId: string,
+  status: EmbeddedSessionStatus,
+  updates?: { currentUrl?: string; lastActivityAt?: Date }
+): Promise<void> {
+  await db
+    .update(embeddedSessions)
+    .set({
+      status,
+      ...updates,
+      lastActivityAt: updates?.lastActivityAt ?? new Date(),
+    })
+    .where(eq(embeddedSessions.id, sessionId));
+}
+
+/**
+ * Get embedded session by runner ID
+ */
+export async function getEmbeddedSessionForRunner(runnerId: string): Promise<EmbeddedSession | null> {
+  const result = await db
+    .select()
+    .from(embeddedSessions)
+    .where(eq(embeddedSessions.runnerId, runnerId))
+    .get();
+  return result ?? null;
+}
+
+/**
+ * Clean up expired embedded sessions
+ */
+export async function cleanupExpiredSessions(): Promise<number> {
+  const now = new Date();
+  const expired = await db
+    .select()
+    .from(embeddedSessions)
+    .where(eq(embeddedSessions.status, 'ready'))
+    .all();
+
+  let cleaned = 0;
+  for (const session of expired) {
+    if (session.expiresAt && session.expiresAt < now) {
+      await db
+        .update(embeddedSessions)
+        .set({ status: 'stopped' })
+        .where(eq(embeddedSessions.id, session.id));
+      cleaned++;
+    }
+  }
+
+  return cleaned;
+}

@@ -993,12 +993,38 @@ export const runners = sqliteTable('runners', {
   status: text('status').notNull().default('offline'), // 'online' | 'offline' | 'busy'
   lastSeen: integer('last_seen', { mode: 'timestamp' }),
   capabilities: text('capabilities', { mode: 'json' }).$type<RunnerCapability[]>().default(['run', 'record']),
+  type: text('type').notNull().default('remote'), // 'remote' | 'embedded'
   maxParallelTests: integer('max_parallel_tests').default(1), // max tests to run in parallel on this runner
   createdAt: integer('created_at', { mode: 'timestamp' }).$defaultFn(() => new Date()),
 });
 
+export type RunnerType = 'remote' | 'embedded';
 export type Runner = typeof runners.$inferSelect;
 export type NewRunner = typeof runners.$inferInsert;
+
+// ============================================
+// Embedded Browser Sessions
+// ============================================
+
+export type EmbeddedSessionStatus = 'starting' | 'ready' | 'busy' | 'stopping' | 'stopped';
+
+export const embeddedSessions = sqliteTable('embedded_sessions', {
+  id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+  teamId: text('team_id').notNull().references(() => teams.id),
+  runnerId: text('runner_id').references(() => runners.id),
+  status: text('status').notNull().default('starting'), // EmbeddedSessionStatus
+  streamUrl: text('stream_url'), // ws://host:9223
+  containerUrl: text('container_url'), // http://host:port (for health checks)
+  viewport: text('viewport', { mode: 'json' }).$type<{ width: number; height: number }>(),
+  currentUrl: text('current_url'),
+  userId: text('user_id'), // Clerk user who claimed the session
+  createdAt: integer('created_at', { mode: 'timestamp' }).notNull().$defaultFn(() => new Date()),
+  lastActivityAt: integer('last_activity_at', { mode: 'timestamp' }),
+  expiresAt: integer('expires_at', { mode: 'timestamp' }),
+});
+
+export type EmbeddedSession = typeof embeddedSessions.$inferSelect;
+export type NewEmbeddedSession = typeof embeddedSessions.$inferInsert;
 
 // ============================================
 // Spec Import - Document-based US/AC extraction

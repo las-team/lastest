@@ -30,7 +30,12 @@ export type MessageType =
   | 'response:pong'
   // Status
   | 'status:heartbeat'
-  | 'connection:established';
+  | 'connection:established'
+  // Embedded Browser Streaming
+  | 'stream:frame'
+  | 'stream:input'
+  | 'stream:session'
+  | 'stream:status';
 
 export interface BaseMessage {
   id: string;
@@ -415,4 +420,74 @@ export function isServerCommand(msg: Message): msg is ServerCommand {
 
 export function isAgentResponse(msg: Message): msg is AgentResponse {
   return msg.type.startsWith('response:') || msg.type.startsWith('status:');
+}
+
+// ============================================
+// Embedded Browser Streaming Types
+// ============================================
+
+/** Server → Client: CDP screencast frame */
+export interface ScreencastFrameMessage extends BaseMessage {
+  type: 'stream:frame';
+  payload: {
+    data: string;          // base64 JPEG
+    width: number;
+    height: number;
+    timestamp: number;
+  };
+}
+
+/** Client → Server: Mouse/keyboard input forwarding */
+export interface StreamInputMessage extends BaseMessage {
+  type: 'stream:input';
+  payload: StreamMouseEvent | StreamKeyboardEvent;
+}
+
+export interface StreamMouseEvent {
+  type: 'mouse';
+  action: 'move' | 'down' | 'up' | 'click' | 'dblclick' | 'wheel';
+  x: number;
+  y: number;
+  button?: 'left' | 'right' | 'middle';
+  deltaX?: number;
+  deltaY?: number;
+}
+
+export interface StreamKeyboardEvent {
+  type: 'keyboard';
+  action: 'keydown' | 'keyup' | 'type';
+  key: string;
+  code?: string;
+  text?: string;
+  modifiers?: { ctrl?: boolean; shift?: boolean; alt?: boolean; meta?: boolean };
+}
+
+/** Client → Server / Server → Client: Session lifecycle control */
+export interface StreamSessionMessage extends BaseMessage {
+  type: 'stream:session';
+  payload: {
+    action: 'start' | 'stop' | 'resize';
+    viewport?: { width: number; height: number };
+  };
+}
+
+/** Server → Client: Stream connection status */
+export interface StreamStatusMessage extends BaseMessage {
+  type: 'stream:status';
+  payload: {
+    status: 'connected' | 'disconnected' | 'error';
+    currentUrl?: string;
+    viewport?: { width: number; height: number };
+    error?: string;
+  };
+}
+
+export type StreamMessage =
+  | ScreencastFrameMessage
+  | StreamInputMessage
+  | StreamSessionMessage
+  | StreamStatusMessage;
+
+export function isStreamMessage(msg: { type: string }): boolean {
+  return msg.type.startsWith('stream:');
 }

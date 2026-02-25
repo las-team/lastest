@@ -41,6 +41,33 @@ services:
       timeout: 10s
       retries: 3
       start_period: 60s
+    networks:
+      - lastest2-net
+
+  embedded-browser:
+    build:
+      context: .
+      dockerfile: packages/embedded-browser/Dockerfile
+    environment:
+      - LASTEST2_URL=http://lastest2:3000
+      - LASTEST2_TOKEN=${EMBEDDED_RUNNER_TOKEN:-}
+      - STREAM_PORT=9223
+      - STREAM_AUTH_TOKEN=${STREAM_AUTH_TOKEN:-}
+    deploy:
+      replicas: ${EMBEDDED_REPLICAS:-1}
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:9224/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    networks:
+      - lastest2-net
+
+networks:
+  lastest2-net:
+    driver: bridge
 
 volumes:
   lastest2-data:

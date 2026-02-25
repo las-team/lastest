@@ -634,15 +634,17 @@ export async function hasAvailableRunner(teamId: string): Promise<boolean> {
  * Get execution mode information for display.
  */
 export function getExecutionModeInfo(): {
-  mode: 'local' | 'runner';
+  mode: 'local' | 'runner' | 'embedded';
   description: string;
 } {
   const mode = getExecutionMode();
+  const descriptions: Record<string, string> = {
+    local: 'Tests run directly on this machine using Playwright',
+    runner: 'Tests run on a remote runner connected to this server',
+    embedded: 'Tests run in an embedded browser container with live streaming',
+  };
   return {
     mode,
-    description:
-      mode === 'local'
-        ? 'Tests run directly on this machine using Playwright'
-        : 'Tests run on a remote runner connected to this server',
+    description: descriptions[mode] ?? descriptions.runner,
   };
 }
