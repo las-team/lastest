@@ -82,6 +82,18 @@ async function startup(): Promise<void> {
 
   streamServer.setScreencast(screencast);
 
+  // Handle navigate requests from stream clients (toolbar URL bar)
+  streamServer.onNavigate = async (url: string) => {
+    if (!page) return;
+    console.log(`[Navigate] ${url}`);
+    try {
+      await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
+      streamServer!.broadcastStatus('ready', page.url());
+    } catch (err) {
+      console.error(`[Navigate] Failed:`, err);
+    }
+  };
+
   await screencast.start(page, (frame) => {
     streamServer!.broadcastFrame(frame.data, frame.width, frame.height, frame.timestamp);
   });
@@ -135,6 +147,51 @@ async function startup(): Promise<void> {
 
         runnerClient.setStatus('idle');
         streamServer?.broadcastStatus('ready');
+        break;
+      }
+
+      case 'command:start_recording': {
+        if (!page || !runnerClient) break;
+        const payload = command.payload as {
+          sessionId: string; targetUrl: string;
+          viewport?: { width: number; height: number };
+        };
+
+        runnerClient.setStatus('busy', payload.sessionId);
+        streamServer?.broadcastStatus('busy', payload.targetUrl);
+
+        // Navigate to the target URL
+        try {
+          if (payload.viewport && context) {
+            await page.setViewportSize(payload.viewport);
+          }
+          await page.goto(payload.targetUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
+          streamServer?.broadcastStatus('recording', page.url());
+          console.log(`[Command] Recording started, navigated to ${payload.targetUrl}`);
+        } catch (err) {
+          console.error(`[Command] Failed to navigate for recording:`, err);
+        }
+        break;
+      }
+
+      case 'command:stop_recording': {
+        if (!runnerClient) break;
+        const payload = command.payload as { sessionId: string };
+
+        // Send recording stopped response
+        await runnerClient.sendMessage({
+          id: crypto.randomUUID(),
+          type: 'response:recording_stopped',
+          timestamp: Date.now(),
+          payload: {
+            sessionId: payload.sessionId,
+            generatedCode: '',
+          },
+        });
+
+        runnerClient.setStatus('idle');
+        streamServer?.broadcastStatus('ready');
+        console.log(`[Command] Recording stopped`);
         break;
       }
 

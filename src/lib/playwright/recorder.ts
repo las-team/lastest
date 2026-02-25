@@ -453,6 +453,7 @@ export class PlaywrightRecorder extends EventEmitter {
     const initArgs = { pointerGestures, cursorFPS, selectorPriority };
 
     // Inject interaction tracking script - MUST await
+    // IMPORTANT: Keep this script in sync with packages/runner/src/browser-script.ts
     // This function is used both for addInitScript (future navigations) and evaluate (current page)
     const initFn = ({ pointerGestures: pg, cursorFPS: fps, selectorPriority: priority }: { pointerGestures: boolean; cursorFPS: number; selectorPriority: typeof selectorPriority }) => {
       // Type definition for selectors captured in browser context

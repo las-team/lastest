@@ -28,6 +28,9 @@ export class StreamServer {
   private inputHandler: InputHandler | null = null;
   private authToken?: string;
 
+  /** Callback for navigate requests from stream clients */
+  onNavigate?: (url: string) => Promise<void>;
+
   constructor(private options: StreamServerOptions) {
     this.authToken = options.authToken;
   }
@@ -148,7 +151,12 @@ export class StreamServer {
       }
 
       case 'stream:session': {
-        const payload = message.payload as { action: string; viewport?: { width: number; height: number } };
+        const payload = message.payload as { action: string; url?: string; viewport?: { width: number; height: number } };
+        if (payload?.action === 'navigate' && payload.url && this.onNavigate) {
+          this.onNavigate(payload.url).catch(err => {
+            console.error(`[StreamServer] Navigate error:`, err);
+          });
+        }
         if (payload?.action === 'resize' && payload.viewport && this.screencast) {
           this.screencast.updateViewport(payload.viewport.width, payload.viewport.height);
         }
