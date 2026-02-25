@@ -268,6 +268,30 @@ window.addEventListener('load', function() {
 `;
 
 /**
+ * JavaScript to inject for freezing Date/Date.now() only.
+ * Unlike page.clock.setFixedTime(), this does NOT install fake-timers,
+ * so setTimeout/setInterval/requestAnimationFrame continue working normally.
+ */
+export function getFreezeTimestampsScript(frozenTimestamp: string): string {
+  return `
+    (function() {
+      var frozenDate = new Date('${frozenTimestamp}');
+      var frozenTime = frozenDate.getTime();
+      var OriginalDate = Date;
+      function FrozenDate() {
+        if (arguments.length === 0) return new OriginalDate(frozenTime);
+        return new (Function.prototype.bind.apply(OriginalDate, [null].concat(Array.prototype.slice.call(arguments))))();
+      }
+      FrozenDate.now = function() { return frozenTime; };
+      FrozenDate.parse = OriginalDate.parse;
+      FrozenDate.UTC = OriginalDate.UTC;
+      FrozenDate.prototype = OriginalDate.prototype;
+      window.Date = FrozenDate;
+    })();
+  `;
+}
+
+/**
  * JavaScript to inject for seeding Math.random() AND crypto.getRandomValues().
  * Uses a simple Linear Congruential Generator (LCG) for reproducible random values.
  *
@@ -354,10 +378,9 @@ export async function setupFreezeScripts(
   if (!settings) return;
 
   if (settings.freezeTimestamps) {
-    await page.clock.setFixedTime(new Date(settings.frozenTimestamp));
-    // Playwright's setFixedTime uses @sinonjs/fake-timers which overrides
-    // performance.now() as an own property on the performance object.
-    // Use Performance.prototype.now to bypass the fake and get real elapsed time.
+    await page.addInitScript(getFreezeTimestampsScript(settings.frozenTimestamp));
+    // Override performance.now() so we can freeze/unfreeze it ourselves
+    // via the __perfNowFrozen mechanism used during RAF flushing.
     await page.addInitScript(`
       (function() {
         var _origPerfNow = Performance.prototype.now.bind(performance);

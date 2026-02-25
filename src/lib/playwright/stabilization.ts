@@ -80,6 +80,30 @@ ${reseedOnInput ? `
 }
 
 /**
+ * JavaScript to inject for freezing Date/Date.now() only.
+ * Unlike page.clock.setFixedTime(), this does NOT install fake-timers,
+ * so setTimeout/setInterval/requestAnimationFrame continue working normally.
+ */
+export function getFreezeTimestampsScript(frozenTimestamp: string): string {
+  return `
+    (function() {
+      var frozenDate = new Date('${frozenTimestamp}');
+      var frozenTime = frozenDate.getTime();
+      var OriginalDate = Date;
+      function FrozenDate() {
+        if (arguments.length === 0) return new OriginalDate(frozenTime);
+        return new (Function.prototype.bind.apply(OriginalDate, [null].concat(Array.prototype.slice.call(arguments))))();
+      }
+      FrozenDate.now = function() { return frozenTime; };
+      FrozenDate.parse = OriginalDate.parse;
+      FrozenDate.UTC = OriginalDate.UTC;
+      FrozenDate.prototype = OriginalDate.prototype;
+      window.Date = FrozenDate;
+    })();
+  `;
+}
+
+/**
  * Wait for all spinners/loading indicators to disappear.
  */
 export async function waitForSpinnersToDisappear(
@@ -414,13 +438,11 @@ export async function setupFreezeScripts(
 ): Promise<void> {
   const s = { ...DEFAULT_STABILIZATION_SETTINGS, ...settings };
 
-  // Freeze timestamps using Playwright's built-in clock API
+  // Freeze Date/Date.now() via init script (does NOT affect timers/RAF)
   if (s.freezeTimestamps) {
-    await page.clock.setFixedTime(new Date(s.frozenTimestamp));
-    // Playwright's setFixedTime uses @sinonjs/fake-timers which overrides
-    // performance.now() as an own property on the performance object.
-    // Use Performance.prototype.now to bypass the fake and get real elapsed time.
-    // We control freeze/unfreeze ourselves via __perfNowFrozen.
+    await page.addInitScript(getFreezeTimestampsScript(s.frozenTimestamp));
+    // Override performance.now() so we can freeze/unfreeze it ourselves
+    // via the __perfNowFrozen mechanism used during RAF flushing.
     await page.addInitScript(`
       (function() {
         var _origPerfNow = Performance.prototype.now.bind(performance);
