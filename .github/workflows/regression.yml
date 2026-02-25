@@ -19,6 +19,6 @@ jobs:
         # --fail-on-changes  Exit 1 on visual changes (optional)
         run: |
           npx @lastest/runner@latest trigger \
-            --repo "ewyct/excalidraw_test" \
+            --repo "dexilion-team/excalidraw" \
             --server "${{ secrets.LASTEST_SERVER_URL }}" \
             --token "${{ secrets.LASTEST_RUNNER_TOKEN }}"

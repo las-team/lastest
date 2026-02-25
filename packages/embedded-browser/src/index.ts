@@ -40,6 +40,7 @@ let streamServer: StreamServer | null = null;
 let runnerClient: EmbeddedRunnerClient | null = null;
 let testExecutor: EmbeddedTestExecutor | null = null;
 let recorder: EmbeddedRecorder | null = null;
+let isRecording = false;
 
 async function startup(): Promise<void> {
   console.log('=== Embedded Browser Service ===');
@@ -186,10 +187,12 @@ async function startup(): Promise<void> {
             streamServer!.broadcastFrame(frame.data, frame.width, frame.height, frame.timestamp);
           });
           await inputHandler?.attach(recordingPage);
+          isRecording = true;
           streamServer?.broadcastStatus('recording', recordingPage.url());
           console.log(`[Command] Recording started on fresh page, navigated to ${payload.targetUrl}`);
         } catch (err) {
           console.error(`[Command] Failed to start recording:`, err);
+          isRecording = false;
           // Restore screencast/input on idle page
           if (page) {
             await screencast?.start(page, (frame) => {
@@ -204,21 +207,24 @@ async function startup(): Promise<void> {
       }
 
       case 'command:stop_recording': {
-        if (!recorder || !runnerClient || !page) break;
+        if (!runnerClient || !page) break;
         const payload = command.payload as { sessionId: string };
 
-        // Stop screencast/input on recording page
-        await screencast?.stop();
-        await inputHandler?.detach();
+        if (isRecording && recorder) {
+          // Stop screencast/input on recording page
+          await screencast?.stop();
+          await inputHandler?.detach();
 
-        // Stop recording (closes recording context+page)
-        await recorder.stop();
+          // Stop recording (closes recording context+page)
+          await recorder.stop();
+          isRecording = false;
 
-        // Re-attach screencast + input to idle page
-        await screencast?.start(page, (frame) => {
-          streamServer!.broadcastFrame(frame.data, frame.width, frame.height, frame.timestamp);
-        });
-        await inputHandler?.attach(page);
+          // Re-attach screencast + input to idle page
+          await screencast?.start(page, (frame) => {
+            streamServer!.broadcastFrame(frame.data, frame.width, frame.height, frame.timestamp);
+          });
+          await inputHandler?.attach(page);
+        }
 
         // Send recording stopped response
         await runnerClient.sendMessage({
@@ -233,7 +239,7 @@ async function startup(): Promise<void> {
 
         runnerClient.setStatus('idle');
         streamServer?.broadcastStatus('ready');
-        console.log(`[Command] Recording stopped`);
+        console.log(`[Command] Recording stop handled`);
         break;
       }
 

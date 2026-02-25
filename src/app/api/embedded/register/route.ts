@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { validateRunnerToken } from '@/server/actions/runners';
-import { createEmbeddedSession } from '@/server/actions/embedded-sessions';
+import { upsertEmbeddedSession } from '@/server/actions/embedded-sessions';
 
 /**
  * POST /api/embedded/register
@@ -38,8 +38,8 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'streamUrl and containerUrl are required' }, { status: 400 });
   }
 
-  // Create embedded session
-  const session = await createEmbeddedSession({
+  // Upsert embedded session (1 per runner)
+  const session = await upsertEmbeddedSession({
     teamId: runner.teamId,
     runnerId: runner.id,
     streamUrl: body.streamUrl,

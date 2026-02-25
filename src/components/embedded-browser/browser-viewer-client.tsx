@@ -182,12 +182,16 @@ export function BrowserViewer({ streamUrl, initialViewport, className, expiresAt
       wsRef.current = null;
       if (ws) {
         // Suppress error/close handlers for intentional cleanup
-        ws.onopen = null;
         ws.onmessage = null;
         ws.onclose = null;
         ws.onerror = null;
-        if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) {
+        if (ws.readyState === WebSocket.OPEN) {
+          ws.onopen = null;
           ws.close();
+        } else if (ws.readyState === WebSocket.CONNECTING) {
+          // Close after handshake completes to avoid browser warning
+          // (React Strict Mode double-invokes effects in dev)
+          ws.onopen = () => ws.close();
         }
       }
     };

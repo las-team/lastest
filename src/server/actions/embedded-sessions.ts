@@ -2,7 +2,7 @@
 
 import { db } from '@/lib/db';
 import { embeddedSessions, type EmbeddedSession, type EmbeddedSessionStatus } from '@/lib/db/schema';
-import { eq, and, desc } from 'drizzle-orm';
+import { eq, and, ne, desc } from 'drizzle-orm';
 import { requireTeamAccess, requireTeamAdmin } from '@/lib/auth';
 import { revalidatePath } from 'next/cache';
 
@@ -113,6 +113,54 @@ export async function releaseEmbeddedSession(
 
   revalidatePath('/settings');
   return { success: true };
+}
+
+/**
+ * Upsert an embedded session for a runner — ensures exactly 1 session per runner.
+ * On restart, updates the existing session instead of creating a duplicate.
+ */
+export async function upsertEmbeddedSession(params: {
+  teamId: string;
+  runnerId: string;
+  streamUrl: string;
+  containerUrl: string;
+  viewport?: { width: number; height: number };
+}): Promise<EmbeddedSession> {
+  const existing = await getEmbeddedSessionForRunner(params.runnerId);
+
+  if (existing) {
+    const now = new Date();
+    const expiresAt = new Date(now.getTime() + 30 * 60 * 1000);
+
+    // Update the existing session
+    await db
+      .update(embeddedSessions)
+      .set({
+        streamUrl: params.streamUrl,
+        containerUrl: params.containerUrl,
+        viewport: params.viewport ?? { width: 1280, height: 720 },
+        status: 'ready',
+        userId: null,
+        lastActivityAt: now,
+        expiresAt,
+      })
+      .where(eq(embeddedSessions.id, existing.id));
+
+    // Delete any accumulated duplicates
+    await db
+      .delete(embeddedSessions)
+      .where(and(eq(embeddedSessions.runnerId, params.runnerId), ne(embeddedSessions.id, existing.id)));
+
+    const updated = await db
+      .select()
+      .from(embeddedSessions)
+      .where(eq(embeddedSessions.id, existing.id))
+      .get();
+
+    return updated!;
+  }
+
+  return createEmbeddedSession(params);
 }
 
 /**
