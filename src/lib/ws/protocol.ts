@@ -144,6 +144,7 @@ export interface StartRecordingCommandPayload {
   ocrEnabled?: boolean;
   pointerGestures?: boolean;
   cursorFPS?: number;
+  setupSteps?: Array<{ code: string; codeHash: string }>;
 }
 
 export interface StartRecordingCommand extends BaseMessage {

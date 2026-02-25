@@ -108,7 +108,8 @@
       "Bash(git diff:*)",
       "Bash(docker restart:*)",
       "WebFetch(domain:api.github.com)",
-      "Bash(LASTEST2_TOKEN=lastest_runner_9516ca3947ba5bb153bb7fc1e652e6e116cc3f79f35390df52e478f286f3a58c LASTEST2_URL=http://host.docker.internal:3000 STREAM_HOST=localhost docker compose:*)"
+      "Bash(LASTEST2_TOKEN=lastest_runner_9516ca3947ba5bb153bb7fc1e652e6e116cc3f79f35390df52e478f286f3a58c LASTEST2_URL=http://host.docker.internal:3000 STREAM_HOST=localhost docker compose:*)",
+      "Bash(docker compose:*)"
     ]
   },
   "disabledMcpjsonServers": [

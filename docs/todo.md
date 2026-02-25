@@ -14,10 +14,7 @@ Accept Downloads
 Network Interception
 ## features
 Support https://github.com/excalidraw/excalidraw/tree/master/packages/excalidraw/tests ~/.claude/plans/declarative-kindling-coral.md 70%
-    ● Summary saved to memory/excalidraw-stabilization.md. 
 
-Apache - embeddable vnc server - guacamole
-https://guacamole.apache.org/
 
 ## ideas
 Test coverage assessment and recreation based on existing test set

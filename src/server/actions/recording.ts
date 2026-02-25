@@ -11,7 +11,7 @@ import {
 } from '@/lib/playwright/inspector-manager';
 import { transformPlaywrightCode } from '@/lib/playwright/code-transformer';
 import { eventsToCodeLines } from '@/lib/playwright/event-to-code';
-import { createTest, createFunctionalArea, getFunctionalAreas, getPlaywrightSettings } from '@/lib/db/queries';
+import { createTest, createFunctionalArea, getFunctionalAreas, getPlaywrightSettings, getTest, getSetupScript } from '@/lib/db/queries';
 import { requireTeamAccess, requireRepoAccess } from '@/lib/auth';
 import { DEFAULT_SELECTOR_PRIORITY } from '@/lib/db/schema';
 import { v4 as uuid } from 'uuid';
@@ -102,6 +102,24 @@ export async function startRecording(
     // Create the remote recording session on the server
     createRemoteRecordingSession(sessionId, runnerId, repositoryId ?? null, url, selectorPriority);
 
+    // Resolve setup steps to code (runners have no DB access)
+    let resolvedSetupSteps: Array<{ code: string; codeHash: string }> | undefined;
+    if (setupOptions?.steps?.length) {
+      resolvedSetupSteps = [];
+      for (const step of setupOptions.steps) {
+        const id = step.stepType === 'test' ? step.testId : step.scriptId;
+        if (!id) continue;
+        const record = step.stepType === 'test' ? await getTest(id) : await getSetupScript(id);
+        if (record?.code) {
+          resolvedSetupSteps.push({ code: record.code, codeHash: record.codeHash ?? '' });
+        }
+      }
+    } else if (setupOptions?.testId || setupOptions?.scriptId) {
+      const id = setupOptions.testId || setupOptions.scriptId;
+      const record = setupOptions.testId ? await getTest(id!) : await getSetupScript(id!);
+      if (record?.code) resolvedSetupSteps = [{ code: record.code, codeHash: record.codeHash ?? '' }];
+    }
+
     // Queue start_recording command to the runner
     const command = createMessage<StartRecordingCommand>('command:start_recording', {
       sessionId,
@@ -115,6 +133,7 @@ export async function startRecording(
       ocrEnabled: selectorPriority.find(s => s.type === 'ocr-text')?.enabled ?? false,
       pointerGestures: settings.pointerGestures ?? false,
       cursorFPS: settings.cursorFPS ?? 30,
+      setupSteps: resolvedSetupSteps,
     });
     await queueCommandToDB(runnerId, command);
 

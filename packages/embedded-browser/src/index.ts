@@ -12,6 +12,7 @@ import { InputHandler } from './input-handler.js';
 import { StreamServer } from './stream-server.js';
 import { EmbeddedRunnerClient } from './runner-client.js';
 import { EmbeddedTestExecutor } from './test-executor.js';
+import { EmbeddedRecorder } from './embedded-recorder.js';
 
 // Configuration from environment
 const config = {
@@ -38,6 +39,7 @@ let inputHandler: InputHandler | null = null;
 let streamServer: StreamServer | null = null;
 let runnerClient: EmbeddedRunnerClient | null = null;
 let testExecutor: EmbeddedTestExecutor | null = null;
+let recorder: EmbeddedRecorder | null = null;
 
 async function startup(): Promise<void> {
   console.log('=== Embedded Browser Service ===');
@@ -112,8 +114,9 @@ async function startup(): Promise<void> {
     pollInterval: config.pollInterval,
   });
 
-  // Initialize test executor
+  // Initialize test executor and recorder
   testExecutor = new EmbeddedTestExecutor();
+  recorder = new EmbeddedRecorder();
 
   // Handle commands from main app
   runnerClient.onCommand = async (command) => {
@@ -151,32 +154,71 @@ async function startup(): Promise<void> {
       }
 
       case 'command:start_recording': {
-        if (!page || !runnerClient) break;
+        if (!browser || !runnerClient || !recorder) break;
         const payload = command.payload as {
           sessionId: string; targetUrl: string;
           viewport?: { width: number; height: number };
+          selectorPriority?: Array<{ type: string; enabled: boolean; priority: number }>;
+          pointerGestures?: boolean;
+          cursorFPS?: number;
+          setupSteps?: Array<{ code: string; codeHash: string }>;
         };
 
         runnerClient.setStatus('busy', payload.sessionId);
-        streamServer?.broadcastStatus('busy', payload.targetUrl);
 
-        // Navigate to the target URL
+        // Stop screencast/input on idle page
+        await screencast?.stop();
+        await inputHandler?.detach();
+
         try {
-          if (payload.viewport && context) {
-            await page.setViewportSize(payload.viewport);
-          }
-          await page.goto(payload.targetUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
-          streamServer?.broadcastStatus('recording', page.url());
-          console.log(`[Command] Recording started, navigated to ${payload.targetUrl}`);
+          // Start recording on a fresh context+page
+          const recordingPage = await recorder.start(browser, payload, (events) => {
+            runnerClient!.sendMessage({
+              id: crypto.randomUUID(),
+              type: 'response:recording_event',
+              timestamp: Date.now(),
+              payload: { sessionId: payload.sessionId, events },
+            });
+          });
+
+          // Attach screencast + input to the recording page
+          await screencast?.start(recordingPage, (frame) => {
+            streamServer!.broadcastFrame(frame.data, frame.width, frame.height, frame.timestamp);
+          });
+          await inputHandler?.attach(recordingPage);
+          streamServer?.broadcastStatus('recording', recordingPage.url());
+          console.log(`[Command] Recording started on fresh page, navigated to ${payload.targetUrl}`);
         } catch (err) {
-          console.error(`[Command] Failed to navigate for recording:`, err);
+          console.error(`[Command] Failed to start recording:`, err);
+          // Restore screencast/input on idle page
+          if (page) {
+            await screencast?.start(page, (frame) => {
+              streamServer!.broadcastFrame(frame.data, frame.width, frame.height, frame.timestamp);
+            });
+            await inputHandler?.attach(page);
+          }
+          runnerClient.setStatus('idle');
+          streamServer?.broadcastStatus('ready');
         }
         break;
       }
 
       case 'command:stop_recording': {
-        if (!runnerClient) break;
+        if (!recorder || !runnerClient || !page) break;
         const payload = command.payload as { sessionId: string };
+
+        // Stop screencast/input on recording page
+        await screencast?.stop();
+        await inputHandler?.detach();
+
+        // Stop recording (closes recording context+page)
+        await recorder.stop();
+
+        // Re-attach screencast + input to idle page
+        await screencast?.start(page, (frame) => {
+          streamServer!.broadcastFrame(frame.data, frame.width, frame.height, frame.timestamp);
+        });
+        await inputHandler?.attach(page);
 
         // Send recording stopped response
         await runnerClient.sendMessage({
