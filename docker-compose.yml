@@ -56,6 +56,7 @@ services:
       - LASTEST2_URL=${LASTEST2_URL:-http://lastest2:3000}
       - LASTEST2_TOKEN=${LASTEST2_TOKEN:?LASTEST2_TOKEN is required - generate one from Settings > Create Runner > Embedded Browser}
       - STREAM_PORT=9223
+      - STREAM_HOST=${STREAM_HOST:-}
       - STREAM_AUTH_TOKEN=${STREAM_AUTH_TOKEN:-}
     deploy:
       replicas: ${EMBEDDED_REPLICAS:-1}

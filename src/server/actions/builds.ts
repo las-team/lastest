@@ -24,7 +24,7 @@ import { postPRComment } from '@/lib/integrations/github-pr';
 import { postMRComment } from '@/lib/integrations/gitlab-mr';
 import type { Test, TriggerType, BuildStatus, VisualDiffWithTestStatus, DiffClassification, DiffStatus } from '@/lib/db/schema';
 import path from 'path';
-import { createJob, createPendingJob, startJob, updateJobProgress, completeJob, failJob } from './jobs';
+import { createJob, createPendingJob, startJob, updateJobProgress, completeJob, failJob, isRunnerBusy } from './jobs';
 import { triggerAIDiffAnalysis } from './ai-diffs';
 import { forkBaselinesForBranch } from './baselines';
 import { STORAGE_DIRS, STORAGE_ROOT, toRelativePath } from '@/lib/storage/paths';
@@ -161,12 +161,14 @@ export async function createAndRunBuild(
 ) {
   if (repositoryId) await requireRepoAccess(repositoryId);
   else await requireTeamAccess();
-  const runner = getRunner(repositoryId);
+  const targetRunner = runnerId || 'local';
 
-  // If tests are running, queue this build
-  if (runner.isActive()) {
-    return queueBuild(triggerType, testIds, repositoryId);
+  // If this runner is busy, queue this build
+  if (await isRunnerBusy(targetRunner)) {
+    return queueBuild(triggerType, testIds, repositoryId, runnerId);
   }
+
+  const runner = getRunner(repositoryId);
 
   // Load and set environment config
   const envConfig = await queries.getEnvironmentConfig(repositoryId);
@@ -253,12 +255,14 @@ export async function createAndRunBuildFromCI(opts: {
   targetUrl?: string;
 }) {
   const { triggerType, repositoryId, runnerId, gitBranch, gitCommit, targetUrl } = opts;
-  const runner = getRunner(repositoryId);
+  const targetRunner = runnerId || 'local';
 
-  // If tests are running, queue this build
-  if (runner.isActive()) {
-    return queueBuild(triggerType, undefined, repositoryId);
+  // If this runner is busy, queue this build
+  if (await isRunnerBusy(targetRunner)) {
+    return queueBuild(triggerType, undefined, repositoryId, runnerId);
   }
+
+  const runner = getRunner(repositoryId);
 
   // Load and set environment config
   const envConfig = await queries.getEnvironmentConfig(repositoryId);
@@ -338,7 +342,8 @@ async function runBuildAsync(
 ) {
   const runner = getRunner(repositoryId);
   const startTime = Date.now();
-  const jobId = await createJob('build_run', `Build (${tests.length} tests)`, tests.length, repositoryId, { buildId, testRunId });
+  const targetRunner = runnerId || 'local';
+  const jobId = await createJob('build_run', `Build (${tests.length} tests)`, tests.length, repositoryId, { buildId, testRunId }, targetRunner);
 
   // Auto-fork baselines for branch builds
   if (repositoryId) {
@@ -668,7 +673,7 @@ async function runBuildAsync(
     if (currentJob?.error === 'Cancelled by user') {
       revalidatePath('/builds');
       revalidatePath('/');
-      processNextQueuedBuild(repositoryId);
+      processNextQueuedBuild(repositoryId, targetRunner);
       return;
     }
 
@@ -728,8 +733,8 @@ async function runBuildAsync(
   revalidatePath('/builds');
   revalidatePath('/');
 
-  // Process next queued build if any
-  processNextQueuedBuild(repositoryId);
+  // Process next queued build for this runner
+  processNextQueuedBuild(repositoryId, targetRunner);
 }
 
 /**
@@ -738,7 +743,8 @@ async function runBuildAsync(
 async function queueBuild(
   triggerType: TriggerType = 'manual',
   testIds?: string[],
-  repositoryId?: string | null
+  repositoryId?: string | null,
+  runnerId?: string,
 ) {
   // Get tests to determine label (filter out soft-deleted tests)
   let tests: Test[];
@@ -756,13 +762,16 @@ async function queueBuild(
     throw new Error('No tests to run');
   }
 
+  const targetRunner = runnerId || 'local';
+
   // Create a pending job
   const jobId = await createPendingJob(
     'build_run',
     `Queued Build (${tests.length} tests)`,
     tests.length,
     repositoryId,
-    { triggerType, testIds: testIds || null }
+    { triggerType, testIds: testIds || null, runnerId },
+    targetRunner,
   );
 
   return {
@@ -777,18 +786,18 @@ async function queueBuild(
 /**
  * Process the next queued build if any
  */
-export async function processNextQueuedBuild(repositoryId?: string | null) {
-  const runner = getRunner(repositoryId);
+export async function processNextQueuedBuild(repositoryId?: string | null, targetRunnerId?: string) {
+  const effectiveRunner = targetRunnerId || 'local';
 
-  // Don't process if runner is still active
-  if (runner.isActive()) return;
+  // Don't process if this runner is still busy
+  if (await isRunnerBusy(effectiveRunner)) return;
 
-  // Get pending builds
-  const pendingJobs = await queries.getPendingBuildJobs(repositoryId);
+  // Get pending builds for this runner
+  const pendingJobs = await queries.getPendingBuildJobs(repositoryId, effectiveRunner);
   if (pendingJobs.length === 0) return;
 
   const nextJob = pendingJobs[0];
-  const metadata = nextJob.metadata as { triggerType?: TriggerType; testIds?: string[] | null } | null;
+  const metadata = nextJob.metadata as { triggerType?: TriggerType; testIds?: string[] | null; runnerId?: string } | null;
 
   // Start the job
   await startJob(nextJob.id);
@@ -798,7 +807,8 @@ export async function processNextQueuedBuild(repositoryId?: string | null) {
     await createAndRunBuild(
       metadata?.triggerType || 'manual',
       metadata?.testIds || undefined,
-      nextJob.repositoryId
+      nextJob.repositoryId,
+      metadata?.runnerId,
     );
   } catch (error) {
     // Job failed to start, mark as failed

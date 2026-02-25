@@ -1,14 +1,19 @@
 'use client';
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 
 const STORAGE_KEY = 'lastest2-preferred-runner';
 
 export function usePreferredRunner(): [string, (value: string) => void] {
-  const [value, setValue] = useState<string>(() => {
-    if (typeof window === 'undefined') return 'local';
-    return localStorage.getItem(STORAGE_KEY) || 'local';
-  });
+  const [value, setValue] = useState<string>('local');
+
+  // Hydrate from localStorage after mount to avoid SSR mismatch
+  useEffect(() => {
+    const stored = localStorage.getItem(STORAGE_KEY);
+    if (stored) {
+      setValue(stored);
+    }
+  }, []);
 
   const setAndPersist = useCallback((newValue: string) => {
     setValue(newValue);

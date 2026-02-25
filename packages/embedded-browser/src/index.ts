@@ -18,6 +18,7 @@ const config = {
   serverUrl: process.env.LASTEST2_URL ?? 'http://localhost:3000',
   token: process.env.LASTEST2_TOKEN ?? '',
   streamPort: parseInt(process.env.STREAM_PORT ?? '9223', 10),
+  streamHost: process.env.STREAM_HOST ?? '', // Public hostname for stream URL (empty = use os.hostname())
   pollInterval: parseInt(process.env.POLL_INTERVAL ?? '3000', 10),
   viewportWidth: parseInt(process.env.VIEWPORT_WIDTH ?? '1280', 10),
   viewportHeight: parseInt(process.env.VIEWPORT_HEIGHT ?? '720', 10),
@@ -95,6 +96,7 @@ async function startup(): Promise<void> {
     serverUrl: config.serverUrl,
     token: config.token,
     streamPort: config.streamPort,
+    streamHost: config.streamHost,
     pollInterval: config.pollInterval,
   });
 

@@ -48,6 +48,7 @@ export interface EmbeddedRunnerOptions {
   serverUrl: string;
   token: string;
   streamPort: number;
+  streamHost?: string;
   pollInterval?: number;
 }
 
@@ -55,6 +56,7 @@ export class EmbeddedRunnerClient {
   private serverUrl: string;
   private token: string;
   private streamPort: number;
+  private streamHost: string;
   private pollInterval: number;
   private running = false;
   private sessionId?: string;
@@ -71,6 +73,7 @@ export class EmbeddedRunnerClient {
     this.serverUrl = options.serverUrl.replace(/\/$/, '');
     this.token = options.token;
     this.streamPort = options.streamPort;
+    this.streamHost = options.streamHost || '';
     this.pollInterval = options.pollInterval ?? 3000;
   }
 
@@ -80,7 +83,7 @@ export class EmbeddedRunnerClient {
    */
   async register(): Promise<boolean> {
     try {
-      const hostname = os.hostname();
+      const hostname = this.streamHost || os.hostname();
       const streamUrl = `ws://${hostname}:${this.streamPort}`;
       const containerUrl = `http://${hostname}:${this.streamPort}`;
 

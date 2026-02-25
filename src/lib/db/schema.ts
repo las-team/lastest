@@ -746,6 +746,7 @@ export const backgroundJobs = sqliteTable('background_jobs', {
   metadata: text('metadata', { mode: 'json' }).$type<Record<string, unknown>>(),
   parentJobId: text('parent_job_id'),
   repositoryId: text('repository_id').references(() => repositories.id),
+  targetRunnerId: text('target_runner_id'), // 'local' or runner UUID — tracks which runner this job targets
   createdAt: integer('created_at', { mode: 'timestamp' }),
   startedAt: integer('started_at', { mode: 'timestamp' }),
   lastActivityAt: integer('last_activity_at', { mode: 'timestamp' }),

@@ -2,6 +2,7 @@ import { getRunner } from '@/lib/playwright/runner';
 import { getBranchInfo } from '@/lib/github/content';
 import * as queries from '@/lib/db/queries';
 import type { Test } from '@/lib/db/schema';
+import { isRunnerBusy } from '@/server/actions/jobs';
 
 export type QueuedRunStatus = 'queued' | 'running' | 'completed' | 'failed';
 
@@ -54,8 +55,9 @@ class RunQueue {
   private async processQueue() {
     if (this.isProcessing) return;
 
+    if (await isRunnerBusy('local')) return;
+
     const runner = getRunner();
-    if (runner.isActive()) return;
 
     const nextItem = Array.from(this.queue.values()).find(
       (item) => item.status === 'queued'

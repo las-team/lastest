@@ -1997,6 +1997,7 @@ export async function createBackgroundJob(data: {
   repositoryId?: string | null;
   metadata?: Record<string, unknown>;
   parentJobId?: string | null;
+  targetRunnerId?: string | null;
 }) {
   const id = uuid();
   const now = new Date();
@@ -2011,6 +2012,7 @@ export async function createBackgroundJob(data: {
     repositoryId: data.repositoryId ?? null,
     metadata: data.metadata ?? null,
     parentJobId: data.parentJobId ?? null,
+    targetRunnerId: data.targetRunnerId ?? null,
     createdAt: now,
   });
   return { id };
@@ -2068,13 +2070,16 @@ export async function deleteBackgroundJob(id: string) {
   await db.delete(backgroundJobs).where(eq(backgroundJobs.id, id));
 }
 
-export async function getPendingBuildJobs(repositoryId?: string | null) {
+export async function getPendingBuildJobs(repositoryId?: string | null, targetRunnerId?: string) {
   const conditions = [
     eq(backgroundJobs.status, 'pending'),
     eq(backgroundJobs.type, 'build_run'),
   ];
   if (repositoryId) {
     conditions.push(eq(backgroundJobs.repositoryId, repositoryId));
+  }
+  if (targetRunnerId) {
+    conditions.push(eq(backgroundJobs.targetRunnerId, targetRunnerId));
   }
   return db
     .select()
@@ -2084,7 +2089,7 @@ export async function getPendingBuildJobs(repositoryId?: string | null) {
     .all();
 }
 
-export async function getPendingTestRunJobs(repositoryId?: string | null) {
+export async function getPendingTestRunJobs(repositoryId?: string | null, targetRunnerId?: string) {
   const conditions = [
     eq(backgroundJobs.status, 'pending'),
     eq(backgroundJobs.type, 'test_run'),
@@ -2092,11 +2097,28 @@ export async function getPendingTestRunJobs(repositoryId?: string | null) {
   if (repositoryId) {
     conditions.push(eq(backgroundJobs.repositoryId, repositoryId));
   }
+  if (targetRunnerId) {
+    conditions.push(eq(backgroundJobs.targetRunnerId, targetRunnerId));
+  }
   return db
     .select()
     .from(backgroundJobs)
     .where(and(...conditions))
     .orderBy(backgroundJobs.createdAt)
+    .all();
+}
+
+export async function getRunningJobsForRunner(targetRunnerId: string) {
+  return db
+    .select()
+    .from(backgroundJobs)
+    .where(
+      and(
+        eq(backgroundJobs.status, 'running'),
+        eq(backgroundJobs.targetRunnerId, targetRunnerId),
+        or(eq(backgroundJobs.type, 'build_run'), eq(backgroundJobs.type, 'test_run'))
+      )
+    )
     .all();
 }
 
@@ -2152,7 +2174,7 @@ export async function markStaleJobsAsCrashed(staleThresholdMs = 300000) {
     }
   }
 
-  return staleJobs.length;
+  return staleJobs;
 }
 
 // Test Versions

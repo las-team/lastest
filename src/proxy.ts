@@ -11,6 +11,7 @@ const PUBLIC_PATHS = [
   '/api/builds/',
   '/api/runners/',
   '/api/ws/runner',
+  '/api/embedded/register',
   '/api/v1/',
   '/api/media/',
   '/screenshots/',

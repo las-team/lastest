@@ -95,7 +95,13 @@ export async function startRecording(
     // Check if there's already an active remote session
     const existingSession = getRemoteRecordingSession(repositoryId);
     if (existingSession?.isRecording) {
-      return { error: 'Recording already in progress on remote runner' };
+      // Auto-clear stale sessions older than 5 minutes
+      const staleMs = 5 * 60 * 1000;
+      if (Date.now() - existingSession.startedAt.getTime() > staleMs) {
+        clearRemoteRecordingSession(repositoryId);
+      } else {
+        return { error: 'Recording already in progress on remote runner' };
+      }
     }
 
     // Create the remote recording session on the server

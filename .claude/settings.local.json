@@ -105,7 +105,8 @@
       "WebFetch(domain:www.adammil.net)",
       "WebFetch(domain:lodev.org)",
       "WebFetch(domain:docs.browserless.io)",
-      "Bash(git diff:*)"
+      "Bash(git diff:*)",
+      "Bash(docker restart:*)"
     ]
   },
   "disabledMcpjsonServers": [
