@@ -129,6 +129,7 @@ async function startup(): Promise<void> {
         const payload = command.payload as {
           testId: string; testRunId: string; code: string;
           codeHash: string; targetUrl: string; timeout?: number;
+          repositoryId?: string;
           viewport?: { width: number; height: number };
         };
 
@@ -137,17 +138,45 @@ async function startup(): Promise<void> {
 
         const result = await testExecutor.runTest(page, payload);
 
-        // Send result back via runner protocol
+        // Send result FIRST so server sees pass/fail before timeout
         await runnerClient.sendMessage({
           id: crypto.randomUUID(),
           type: 'response:test_result',
           timestamp: Date.now(),
           payload: {
+            correlationId: command.id,
             testId: payload.testId,
             testRunId: payload.testRunId,
-            ...result,
+            status: result.status,
+            durationMs: result.durationMs,
+            screenshotCount: result.screenshots.length,
+            error: result.error,
+            logs: result.logs,
           },
         });
+
+        // Upload screenshots separately (matching standard runner pattern)
+        if (result.screenshots.length > 0) {
+          console.log(`[Command] Uploading ${result.screenshots.length} screenshots...`);
+          for (const screenshot of result.screenshots) {
+            await runnerClient.sendMessage({
+              id: crypto.randomUUID(),
+              type: 'response:screenshot',
+              timestamp: Date.now(),
+              payload: {
+                correlationId: command.id,
+                testRunId: payload.testRunId,
+                repositoryId: payload.repositoryId,
+                filename: screenshot.filename,
+                data: screenshot.data,
+                width: screenshot.width,
+                height: screenshot.height,
+                capturedAt: Date.now(),
+              },
+            });
+          }
+          console.log(`[Command] All screenshots uploaded`);
+        }
 
         runnerClient.setStatus('idle');
         streamServer?.broadcastStatus('ready');
@@ -250,7 +279,9 @@ async function startup(): Promise<void> {
           id: crypto.randomUUID(),
           type: 'response:screenshot',
           timestamp: Date.now(),
-          payload: screenshot ? { data: screenshot.data, width: screenshot.width, height: screenshot.height } : { error: 'Failed to capture screenshot' },
+          payload: screenshot
+            ? { correlationId: command.id, data: screenshot.data, width: screenshot.width, height: screenshot.height }
+            : { correlationId: command.id, error: 'Failed to capture screenshot' },
         });
         break;
       }
@@ -268,7 +299,7 @@ async function startup(): Promise<void> {
           id: crypto.randomUUID(),
           type: 'response:pong',
           timestamp: Date.now(),
-          payload: {},
+          payload: { correlationId: command.id },
         });
         break;
       }

@@ -75,6 +75,7 @@ export default async function SettingsPage({
     : [[], [], [], []];
 
   const serverUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
+  const earlyAdopterMode = session?.team?.earlyAdopterMode ?? false;
 
   return (
     <div className="flex flex-col h-full">
@@ -88,7 +89,7 @@ export default async function SettingsPage({
               GitHub account connected successfully!
             </div>
           )}
-          {params.success === 'gitlab_connected' && (
+          {earlyAdopterMode && params.success === 'gitlab_connected' && (
             <div className="p-4 bg-green-50 border border-green-200 rounded-lg flex items-center gap-2 text-green-700 dark:bg-green-950/30 dark:border-green-800 dark:text-green-400">
               <Check className="w-5 h-5" />
               GitLab account connected successfully!
@@ -151,7 +152,8 @@ export default async function SettingsPage({
             </CardContent>
           </Card>
 
-          {/* GitLab Integration */}
+          {/* GitLab Integration (early adopter only) */}
+          {earlyAdopterMode && (
           <Card id="gitlab">
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
@@ -209,6 +211,7 @@ export default async function SettingsPage({
               )}
             </CardContent>
           </Card>
+          )}
 
           {/* Repository Info */}
           <Card id="repository">
