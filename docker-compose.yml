@@ -48,9 +48,13 @@ services:
     build:
       context: .
       dockerfile: packages/embedded-browser/Dockerfile
+    ports:
+      - "${EMBEDDED_STREAM_PORT:-9223}:9223"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     environment:
-      - LASTEST2_URL=http://lastest2:3000
-      - LASTEST2_TOKEN=${EMBEDDED_RUNNER_TOKEN:-}
+      - LASTEST2_URL=${LASTEST2_URL:-http://lastest2:3000}
+      - LASTEST2_TOKEN=${LASTEST2_TOKEN:?LASTEST2_TOKEN is required - generate one from Settings > Create Runner > Embedded Browser}
       - STREAM_PORT=9223
       - STREAM_AUTH_TOKEN=${STREAM_AUTH_TOKEN:-}
     deploy:

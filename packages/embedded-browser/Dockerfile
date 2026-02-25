@@ -1,4 +1,4 @@
-FROM mcr.microsoft.com/playwright:v1.50.0-noble
+FROM mcr.microsoft.com/playwright:v1.52.0-noble
 
 WORKDIR /app
 
@@ -6,12 +6,15 @@ WORKDIR /app
 COPY packages/embedded-browser/package.json ./
 COPY packages/embedded-browser/tsconfig.json ./
 
-# Install dependencies
-RUN npm install --production
+# Install all dependencies (including devDeps for build)
+RUN npm install
 
 # Copy source and build
 COPY packages/embedded-browser/src/ ./src/
 RUN npx tsup src/index.ts --format esm --dts
+
+# Remove devDependencies after build
+RUN npm prune --omit=dev
 
 # Expose streaming port and health check port
 EXPOSE 9223 9224

@@ -11,7 +11,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "playwright": "^1.50.0",
+    "playwright": "1.52.0",
     "ws": "^8.16.0"
   },
   "devDependencies": {

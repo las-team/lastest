@@ -1,7 +1,7 @@
 'use server';
 
 import { db } from '@/lib/db';
-import { runners, type Runner, type RunnerCapability } from '@/lib/db/schema';
+import { runners, type Runner, type RunnerCapability, type RunnerType } from '@/lib/db/schema';
 import { eq, and, desc } from 'drizzle-orm';
 import { v4 as uuid } from 'uuid';
 import crypto from 'crypto';
@@ -54,7 +54,7 @@ export async function getRunner(runnerId: string): Promise<Runner | null> {
  * Create a new runner (admin only)
  * Returns the runner AND the plain token (only shown once)
  */
-export async function createRunner(name: string, capabilities: RunnerCapability[] = ['run', 'record']): Promise<{
+export async function createRunner(name: string, capabilities: RunnerCapability[] = ['run', 'record'], type: RunnerType = 'remote'): Promise<{
   runner: Runner;
   token: string;
 } | { error: string }> {
@@ -73,6 +73,7 @@ export async function createRunner(name: string, capabilities: RunnerCapability[
     tokenHash,
     status: 'offline',
     capabilities,
+    type,
     createdAt: now,
   });
 

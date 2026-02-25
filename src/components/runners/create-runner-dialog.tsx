@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { Plus, Copy, Check, Bot } from 'lucide-react';
+import { Plus, Copy, Check, Bot, Tv2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -14,13 +14,22 @@ import {
   DialogTitle,
   DialogTrigger,
 } from '@/components/ui/dialog';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { createRunner } from '@/server/actions/runners';
 import { useRouter } from 'next/navigation';
+import type { RunnerType } from '@/lib/db/schema';
 
 export function CreateRunnerDialog() {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [name, setName] = useState('');
+  const [runnerType, setRunnerType] = useState<RunnerType>('remote');
   const [loading, setLoading] = useState(false);
   const [token, setToken] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
@@ -36,7 +45,7 @@ export function CreateRunnerDialog() {
     setLoading(true);
     setError(null);
 
-    const result = await createRunner(name.trim());
+    const result = await createRunner(name.trim(), ['run', 'record'], runnerType);
 
     setLoading(false);
 
@@ -57,7 +66,9 @@ export function CreateRunnerDialog() {
   const copyCommand = async () => {
     if (!token) return;
     const serverUrl = typeof window !== 'undefined' ? window.location.origin : 'http://localhost:3000';
-    const command = `npx @lastest/runner start -t ${token} -s ${serverUrl}`;
+    const command = runnerType === 'embedded'
+      ? `LASTEST2_TOKEN=${token} LASTEST2_URL=${serverUrl} docker compose up embedded-browser -d --build`
+      : `npx @lastest/runner start -t ${token} -s ${serverUrl}`;
     await navigator.clipboard.writeText(command);
     setCopiedCommand(true);
     setTimeout(() => setCopiedCommand(false), 2000);
@@ -66,12 +77,16 @@ export function CreateRunnerDialog() {
   const handleClose = () => {
     setOpen(false);
     setName('');
+    setRunnerType('remote');
     setToken(null);
     setError(null);
     if (token) {
       router.refresh();
     }
   };
+
+  const isEmbedded = runnerType === 'embedded';
+  const Icon = isEmbedded ? Tv2 : Bot;
 
   return (
     <Dialog open={open} onOpenChange={(isOpen) => {
@@ -90,14 +105,14 @@ export function CreateRunnerDialog() {
       <DialogContent>
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
-            <Bot className="w-5 h-5" />
-            {token ? 'Runner Created' : 'Create Runner'}
+            <Icon className="w-5 h-5" />
+            {token ? (isEmbedded ? 'Embedded Browser Created' : 'Runner Created') : 'Create Runner'}
           </DialogTitle>
           <DialogDescription>
             {token ? (
               'Copy this token now. It will not be shown again.'
             ) : (
-              'Create a new runner to run tests remotely on your machine.'
+              'Create a new runner to execute tests remotely.'
             )}
           </DialogDescription>
         </DialogHeader>
@@ -134,35 +149,90 @@ export function CreateRunnerDialog() {
 
             <div className="space-y-2">
               <p className="text-sm font-medium">Quick Start</p>
-              <p className="text-xs text-muted-foreground">
-                Install Playwright first: <code className="bg-muted px-1 py-0.5 rounded text-xs">npx playwright install chromium</code>
-              </p>
-              <div className="relative">
-                <pre className="bg-muted p-3 rounded-md text-xs font-mono whitespace-pre-wrap break-all pr-10">
+              {isEmbedded ? (
+                <>
+                  <p className="text-xs text-muted-foreground">
+                    Set the token as <code className="bg-muted px-1 py-0.5 rounded text-xs">LASTEST2_TOKEN</code> in your environment or <code className="bg-muted px-1 py-0.5 rounded text-xs">.env</code> file, then start the container:
+                  </p>
+                  <div className="relative">
+                    <pre className="bg-muted p-3 rounded-md text-xs font-mono whitespace-pre-wrap break-all pr-10">
+{`LASTEST2_TOKEN=${token} \\\nLASTEST2_URL=${typeof window !== 'undefined' ? window.location.origin : 'http://localhost:3000'} \\\ndocker compose up embedded-browser -d`}
+                    </pre>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="absolute top-2 right-2"
+                      onClick={copyCommand}
+                    >
+                      {copiedCommand ? (
+                        <Check className="w-4 h-4 text-green-500" />
+                      ) : (
+                        <Copy className="w-4 h-4" />
+                      )}
+                    </Button>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <p className="text-xs text-muted-foreground">
+                    Install Playwright first: <code className="bg-muted px-1 py-0.5 rounded text-xs">npx playwright install chromium</code>
+                  </p>
+                  <div className="relative">
+                    <pre className="bg-muted p-3 rounded-md text-xs font-mono whitespace-pre-wrap break-all pr-10">
 {`npx @lastest/runner start \\\n  -t ${token} \\\n  -s ${typeof window !== 'undefined' ? window.location.origin : 'http://localhost:3000'}`}
-                </pre>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="absolute top-2 right-2"
-                  onClick={copyCommand}
-                >
-                  {copiedCommand ? (
-                    <Check className="w-4 h-4 text-green-500" />
-                  ) : (
-                    <Copy className="w-4 h-4" />
-                  )}
-                </Button>
-              </div>
+                    </pre>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="absolute top-2 right-2"
+                      onClick={copyCommand}
+                    >
+                      {copiedCommand ? (
+                        <Check className="w-4 h-4 text-green-500" />
+                      ) : (
+                        <Copy className="w-4 h-4" />
+                      )}
+                    </Button>
+                  </div>
+                </>
+              )}
             </div>
           </div>
         ) : (
           <div className="space-y-4">
             <div className="space-y-2">
-              <Label htmlFor="name">Runner Name</Label>
+              <Label htmlFor="runner-type">Type</Label>
+              <Select value={runnerType} onValueChange={(v) => setRunnerType(v as RunnerType)}>
+                <SelectTrigger id="runner-type">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="remote">
+                    <div className="flex items-center gap-2">
+                      <Bot className="h-4 w-4" />
+                      <span>Remote Runner</span>
+                    </div>
+                  </SelectItem>
+                  <SelectItem value="embedded">
+                    <div className="flex items-center gap-2">
+                      <Tv2 className="h-4 w-4" />
+                      <span>Embedded Browser</span>
+                    </div>
+                  </SelectItem>
+                </SelectContent>
+              </Select>
+              <p className="text-sm text-muted-foreground">
+                {isEmbedded
+                  ? 'Docker container with live browser streaming'
+                  : 'CLI agent that runs on your machine'}
+              </p>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="name">Name</Label>
               <Input
                 id="name"
-                placeholder="e.g., My Laptop, CI Server, Local Dev"
+                placeholder={isEmbedded ? 'e.g., Embedded Chrome, Docker Browser' : 'e.g., My Laptop, CI Server, Local Dev'}
                 value={name}
                 onChange={(e) => setName(e.target.value)}
                 onKeyDown={(e) => {
