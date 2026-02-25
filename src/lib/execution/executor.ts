@@ -458,14 +458,18 @@ async function executeViaRunner(
       const errorPayload = payload.error as Record<string, unknown> | undefined;
 
       // Screenshots are uploaded AFTER the test result, so they may not be here yet.
-      // Defer processing until screenshots arrive (up to 10s), then proceed anyway.
+      // If the runner reported screenshotCount, proceed as soon as all arrive.
+      // Otherwise fall back to a 10s timeout for backward compatibility with older runners.
       const screenshotResults = unacked.filter(r => r.type === 'response:screenshot');
-      if (screenshotResults.length === 0 && payload.status === 'passed') {
+      const expectedCount = typeof payload.screenshotCount === 'number' ? payload.screenshotCount : undefined;
+      const allScreenshotsReceived = expectedCount !== undefined && screenshotResults.length >= expectedCount;
+
+      if (payload.status === 'passed' && !allScreenshotsReceived && expectedCount !== 0) {
         if (!info.completedSeenAt) {
           info.completedSeenAt = Date.now();
           continue; // Wait for screenshots on next poll
         }
-        if (Date.now() - info.completedSeenAt < 3_000) {
+        if (Date.now() - info.completedSeenAt < 10_000) {
           continue; // Still waiting for screenshots
         }
         // Exceeded 10s — process anyway with whatever we have

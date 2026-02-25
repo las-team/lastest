@@ -435,6 +435,7 @@ export class RunnerClient {
         testRunId: command.payload.testRunId,
         status: result.status,
         durationMs: result.durationMs,
+        screenshotCount: result.screenshots.length,
         error: result.error,
         logs: result.logs,
         softErrors: result.softErrors,

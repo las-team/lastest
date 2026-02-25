@@ -210,6 +210,7 @@ export interface TestResultPayload {
   testRunId: string;
   status: 'passed' | 'failed' | 'error' | 'timeout' | 'cancelled';
   durationMs: number;
+  screenshotCount?: number; // Number of screenshots to expect (for early completion detection)
   error?: {
     message: string;
     stack?: string;
