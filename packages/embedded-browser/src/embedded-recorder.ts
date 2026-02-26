@@ -72,6 +72,21 @@ export class EmbeddedRecorder {
     });
     this.page = await this.context.newPage();
 
+    // Detect page crash/close to prevent using a dead page
+    this.page.on('crash', () => {
+      console.error('  [EmbeddedRecorder] Recording page crashed!');
+      this.isRecording = false;
+      if (this.eventBatchInterval) { clearInterval(this.eventBatchInterval); this.eventBatchInterval = null; }
+    });
+
+    this.page.on('close', () => {
+      if (this.isRecording) {
+        console.warn('  [EmbeddedRecorder] Recording page closed unexpectedly');
+        this.isRecording = false;
+        if (this.eventBatchInterval) { clearInterval(this.eventBatchInterval); this.eventBatchInterval = null; }
+      }
+    });
+
     // Navigate to target URL
     await this.page.goto(payload.targetUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
 
@@ -293,6 +308,24 @@ export class EmbeddedRecorder {
   createAssertion(assertionType: string): void {
     if (!this.isRecording) return;
     this.addEvent('assertion', { assertionType });
+  }
+
+  /**
+   * Force cleanup recorder state when stop() throws or recording needs to be force-killed.
+   */
+  async forceCleanup(): Promise<void> {
+    console.log('  [EmbeddedRecorder] Force cleanup...');
+    this.isRecording = false;
+    if (this.eventBatchInterval) {
+      clearInterval(this.eventBatchInterval);
+      this.eventBatchInterval = null;
+    }
+    this.pendingEvents = [];
+    this.onEvent = null;
+    if (this.page) await this.page.close().catch(() => {});
+    if (this.context) await this.context.close().catch(() => {});
+    this.page = null;
+    this.context = null;
   }
 
   isActive(): boolean {

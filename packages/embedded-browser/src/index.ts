@@ -41,6 +41,9 @@ let runnerClient: EmbeddedRunnerClient | null = null;
 let testExecutor: EmbeddedTestExecutor | null = null;
 let recorder: EmbeddedRecorder | null = null;
 let isRecording = false;
+let recordingWatchdog: ReturnType<typeof setInterval> | null = null;
+let lastRecordingEventTime = 0;
+const RECORDING_INACTIVITY_TIMEOUT = 60_000; // 1 minute
 
 // Command queue to serialize test execution (prevents parallel page collisions)
 const testCommandQueue: Array<() => Promise<void>> = [];
@@ -118,10 +121,14 @@ async function startup(): Promise<void> {
 
   // Handle viewport resize requests from stream clients
   streamServer.onResize = async (newViewport: { width: number; height: number }) => {
-    if (!page) return;
     console.log(`[Resize] ${newViewport.width}x${newViewport.height}`);
     try {
-      await page.setViewportSize(newViewport);
+      if (isRecording && recorder?.isActive()) {
+        const recordingPage = recorder.getPage();
+        if (recordingPage) await recordingPage.setViewportSize(newViewport);
+      } else if (page) {
+        await page.setViewportSize(newViewport);
+      }
     } catch (err) {
       console.error(`[Resize] Failed:`, err);
     }
@@ -255,6 +262,7 @@ async function startup(): Promise<void> {
         try {
           // Start recording on a fresh context+page
           const recordingPage = await recorder.start(browser, payload, (events) => {
+            lastRecordingEventTime = Date.now();
             runnerClient!.sendMessage({
               id: crypto.randomUUID(),
               type: 'response:recording_event',
@@ -269,17 +277,39 @@ async function startup(): Promise<void> {
           });
           await inputHandler?.attach(recordingPage);
           isRecording = true;
+
+          // Start inactivity watchdog
+          lastRecordingEventTime = Date.now();
+          recordingWatchdog = setInterval(() => {
+            if (isRecording && Date.now() - lastRecordingEventTime > RECORDING_INACTIVITY_TIMEOUT) {
+              console.warn('[Watchdog] Recording inactive for 60s — auto-stopping');
+              runnerClient?.onCommand?.({
+                id: crypto.randomUUID(),
+                type: 'command:stop_recording',
+                timestamp: Date.now(),
+                payload: { sessionId: payload.sessionId },
+              });
+            }
+          }, 15_000);
+
           streamServer?.broadcastStatus('recording', recordingPage.url());
           console.log(`[Command] Recording started on fresh page, navigated to ${payload.targetUrl}`);
         } catch (err) {
           console.error(`[Command] Failed to start recording:`, err);
           isRecording = false;
+          if (recordingWatchdog) { clearInterval(recordingWatchdog); recordingWatchdog = null; }
+          // Force cleanup recorder if it partially started
+          await recorder.forceCleanup();
           // Restore screencast/input on idle page
           if (page) {
-            await screencast?.start(page, (frame) => {
-              streamServer!.broadcastFrame(frame.data, frame.width, frame.height, frame.timestamp);
-            });
-            await inputHandler?.attach(page);
+            try {
+              await screencast?.start(page, (frame) => {
+                streamServer!.broadcastFrame(frame.data, frame.width, frame.height, frame.timestamp);
+              });
+              await inputHandler?.attach(page);
+            } catch (restoreErr) {
+              console.error('[Command] Error restoring idle page after failed recording start:', restoreErr);
+            }
           }
           runnerClient.setStatus('idle');
           streamServer?.broadcastStatus('ready');
@@ -291,23 +321,32 @@ async function startup(): Promise<void> {
         if (!runnerClient || !page) break;
         const payload = command.payload as { sessionId: string };
 
-        if (isRecording && recorder) {
-          // Stop screencast/input on recording page
-          await screencast?.stop();
-          await inputHandler?.detach();
+        // Clear watchdog first
+        if (recordingWatchdog) { clearInterval(recordingWatchdog); recordingWatchdog = null; }
 
-          // Stop recording (closes recording context+page)
-          await recorder.stop();
+        if (isRecording && recorder) {
+          try {
+            await screencast?.stop();
+            await inputHandler?.detach();
+            await recorder.stop();
+          } catch (err) {
+            console.error('[Command] Error stopping recording:', err);
+            await recorder.forceCleanup();
+          }
           isRecording = false;
 
           // Re-attach screencast + input to idle page
-          await screencast?.start(page, (frame) => {
-            streamServer!.broadcastFrame(frame.data, frame.width, frame.height, frame.timestamp);
-          });
-          await inputHandler?.attach(page);
+          try {
+            await screencast?.start(page, (frame) => {
+              streamServer!.broadcastFrame(frame.data, frame.width, frame.height, frame.timestamp);
+            });
+            await inputHandler?.attach(page);
+          } catch (err) {
+            console.error('[Command] Error restoring idle page:', err);
+          }
         }
 
-        // Send recording stopped response
+        // These ALWAYS execute regardless of errors above
         await runnerClient.sendMessage({
           id: crypto.randomUUID(),
           type: 'response:recording_stopped',
@@ -338,7 +377,7 @@ async function startup(): Promise<void> {
           type: 'response:screenshot',
           timestamp: Date.now(),
           payload: screenshot
-            ? { correlationId: command.id, data: screenshot.data, width: screenshot.width, height: screenshot.height }
+            ? { correlationId: command.id, filename: `capture-${Date.now()}.png`, data: screenshot.data, width: screenshot.width, height: screenshot.height, capturedAt: Date.now() }
             : { correlationId: command.id, error: 'Failed to capture screenshot' },
         });
         break;

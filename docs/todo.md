@@ -60,6 +60,15 @@ link action to baseurl
 
   ehhez most arrow és arrow binding related teszteket kell felvenni, 1) hogy a hasznosságát fel tudjam mérni 2) hogy személyre szabott sztoriban tudjam megmutatni Davidnek hogy mennyit segített. 3) Alátámasztani mindezt azzal hogy a PR-jaim release utáni bug countja csökken látványosan
 
+a CI workflow cuccod akár nyomhatna egy npx playwright install-t is és bejelentkezhetne runnernek arra az egy futásra
+van rá lehetőség hogy cacheld CI futások között a playwright install-t
+https://dev.to/ayomiku222/how-to-cache-playwright-browser-on-github-actions-51o6
+DEV Community
+How To Cache Playwright Browser On Github Actions
+Many of us who find ourselves tasked with automating processes, have likely been recommended or...
+How To Cache Playwright Browser On Github Actions
+és akkor máris nem a mi költségünk lesz a CI run, csak a user által triggereltek
+
 ## commands
 
   please check what kind of measures have been implemented to try to get consistent
