@@ -1025,9 +1025,10 @@ export class DebugRunner {
         ? CROSS_OS_CHROMIUM_ARGS
         : [];
 
+      const args = [...launchArgs, '--start-maximized'];
       this.browser = await launcher.launch({
         headless: false,
-        args: launchArgs.length > 0 ? launchArgs : undefined,
+        args,
       });
 
       if (this.isStale(gen)) {
