@@ -46,6 +46,18 @@ some elements are disappearing from test 13b
   │ 20  │ Paste CSV as Chart  │ Clipboard support       │ charts.test    │
   └─────┴─────────────────────┴─────────────────────────┴────────────────┘
 
+link action to baseurl
+    így tudod lekérdezni Verceltől az urlt:
+  curl "https://api.vercel.com/v6/deployments?projectId=PROJECT_ID&meta-githubCommitRef=branch-name" \
+    -H "Authorization: Bearer $VERCEL_TOKEN"
+  vagy commit hash alapján:
+  curl "https://api.vercel.com/v6/deployments?projectId=PROJECT_ID&meta-githubCommitSha=commit-hash" \
+    -H "Authorization: Bearer $VERCEL_TOKEN"
+  viszont arra ügyelj, hogy nem biztos hogy minden commithoz lesz vercel build!
+  az sem garantált hogy a legutolsó commithoz van
+  a végeredmény a válasz JSON deployments.meta.branchAlias-ban lesz
+  ha nincs egy commithoz szerintem akkor skippelni kellene silent a visual regression tesztet
+
   ehhez most arrow és arrow binding related teszteket kell felvenni, 1) hogy a hasznosságát fel tudjam mérni 2) hogy személyre szabott sztoriban tudjam megmutatni Davidnek hogy mennyit segített. 3) Alátámasztani mindezt azzal hogy a PR-jaim release utáni bug countja csökken látványosan
 
 ## commands

@@ -6,6 +6,7 @@ import { requireTeamAccess } from '@/lib/auth';
 import { hashImageWithDimensions } from '@/lib/diff/hasher';
 import { generateDiff, type Rectangle } from '@/lib/diff/generator';
 import type { DiffEngineType, RegionDetectionMode } from '@/lib/db/schema';
+import fs from 'fs';
 import path from 'path';
 import { STORAGE_ROOT, STORAGE_DIRS, toRelativePath } from '@/lib/storage/paths';
 
@@ -462,11 +463,14 @@ export async function updateStepLabelAndRediff(diffId: string, newStepLabel: str
     await queries.getBranchBaseline(diff.testId, newStepLabel, branch) ??
     await queries.getActiveBaseline(diff.testId, newStepLabel, branch, defaultBranch);
 
-  if (baseline && diff.currentImagePath) {
+  const baselineExists = baseline && fs.existsSync(path.join(STORAGE_ROOT, baseline.imagePath));
+  const currentExists = diff.currentImagePath && fs.existsSync(path.join(STORAGE_ROOT, diff.currentImagePath));
+
+  if (baselineExists && currentExists) {
     // Re-diff against found baseline
     const diffResult = await generateDiff(
-      path.join(STORAGE_ROOT, baseline.imagePath),
-      path.join(STORAGE_ROOT, diff.currentImagePath),
+      path.join(STORAGE_ROOT, baseline!.imagePath),
+      path.join(STORAGE_ROOT, diff.currentImagePath!),
       STORAGE_DIRS.diffs,
       0.1,
       includeAntiAliasing,

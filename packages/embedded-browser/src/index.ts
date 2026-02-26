@@ -161,6 +161,10 @@ async function startup(): Promise<void> {
           codeHash: string; targetUrl: string; timeout?: number;
           repositoryId?: string;
           viewport?: { width: number; height: number };
+          storageState?: string;
+          setupVariables?: Record<string, unknown>;
+          cursorPlaybackSpeed?: number;
+          stabilization?: import('./protocol.js').StabilizationPayload;
         };
 
         // Dedup: skip if already running/queued (mirrors standard runner activeTestIds)

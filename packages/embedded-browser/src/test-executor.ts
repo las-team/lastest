@@ -4,9 +4,23 @@
  * Executes test code against the live shared page (no new browser launch).
  * Uses the same `new Function()` pattern as `packages/runner/src/runner.ts`
  * but adapted for the embedded context.
+ *
+ * Features mirrored from the standard runner:
+ * - Stabilization (freeze timestamps/random/animations, wait for network idle/DOM/canvas)
+ * - StorageState injection
+ * - Timeout handling with context.close to kill in-flight ops
+ * - Heartbeat logging
+ * - RAF flush wrapping for actions
+ * - locateWithFallback with { type, value } selectors, ocr-text, role-name, coordinate fallback
+ * - Speed-aware replayCursorPath
+ * - stepLogger with softExpect/softAction
+ * - Robust stripTypeAnnotations
+ * - Removal of test-local function definitions
  */
 
 import type { Browser, Page } from 'playwright';
+import type { StabilizationPayload } from './protocol.js';
+import { setupFreezeScripts, applyPreScreenshotStabilization } from './stabilization.js';
 
 export interface EmbeddedTestResult {
   status: 'passed' | 'failed' | 'error' | 'timeout' | 'cancelled';
@@ -16,7 +30,7 @@ export interface EmbeddedTestResult {
   screenshots: Array<{ filename: string; data: string; width: number; height: number }>;
 }
 
-interface RunTestPayload {
+export interface RunTestPayload {
   testId: string;
   testRunId: string;
   code: string;
@@ -24,22 +38,56 @@ interface RunTestPayload {
   targetUrl: string;
   timeout?: number;
   viewport?: { width: number; height: number };
+  repositoryId?: string;
+  storageState?: string;
+  setupVariables?: Record<string, unknown>;
+  cursorPlaybackSpeed?: number;
+  stabilization?: StabilizationPayload;
 }
 
 /**
  * Strip TypeScript type annotations from test code so it can run as plain JS.
+ * Matches the runner's more robust version that handles destructured types,
+ * `as` casts, and generic type params.
  */
 function stripTypeAnnotations(code: string): string {
-  // Remove `: Type` annotations after parameters and variables
   let result = code;
-  // Parameter type annotations: (param: Type)
-  result = result.replace(/:\s*(string|number|boolean|void|any|object|Page|BrowserContext|Record<[^>]+>|Array<[^>]+>|\{[^}]*\})\s*([,)=])/g, '$2');
-  // Return type annotations: ): Type {
-  result = result.replace(/\)\s*:\s*Promise<[^>]+>\s*\{/g, ') {');
-  result = result.replace(/\)\s*:\s*\w+\s*\{/g, ') {');
-  // Variable type annotations: const x: Type =
-  result = result.replace(/(const|let|var)\s+(\w+)\s*:\s*[^=;]+\s*=/g, '$1 $2 =');
+  // Variable type annotations: const x: Type = / let x: Type =
+  result = result.replace(/\b(const|let|var)\s+(\w+)\s*:\s*[^=\n;]+(\s*=)/g, '$1 $2$3');
+  // Destructured type annotations: const { a, b }: Type = / const [a, b]: Type =
+  result = result.replace(/\b(const|let|var)\s+(\{[^}]+\}|\[[^\]]+\])\s*:\s*[^=\n;]+(\s*=)/g, '$1 $2$3');
+  // `as` casts: ) as Type / value as Type
+  result = result.replace(/\)\s+as\s+\w[\w<>\[\],\s|]*/g, ')');
+  result = result.replace(/(\w)\s+as\s+\w[\w<>\[\],\s|]*/g, '$1');
+  // Generic type params: <Type>( / <Type>identifier
+  result = result.replace(/<\w[\w<>\[\],\s|]*>\s*(?=\(|[\w])/g, '');
   return result;
+}
+
+/**
+ * Remove a named async function definition from a code body by brace-matching.
+ */
+function removeFunctionDefinition(body: string, funcName: string): { body: string; removed: boolean } {
+  const pattern = `async function ${funcName}`;
+  if (!body.includes(pattern)) return { body, removed: false };
+
+  const regex = new RegExp(`async function ${funcName}\\s*\\([^)]*\\)\\s*\\{`);
+  const startMatch = body.match(regex);
+  if (!startMatch || startMatch.index === undefined) return { body, removed: false };
+
+  const startIdx = startMatch.index;
+  const braceStart = body.indexOf('{', startIdx);
+  let depth = 1;
+  let endIdx = braceStart + 1;
+  while (depth > 0 && endIdx < body.length) {
+    if (body[endIdx] === '{') depth++;
+    else if (body[endIdx] === '}') depth--;
+    endIdx++;
+  }
+  return {
+    body: body.slice(0, startIdx) + `/* ${funcName} provided by runner */` + body.slice(endIdx),
+    removed: true,
+  };
 }
 
 export class EmbeddedTestExecutor {
@@ -64,6 +112,7 @@ export class EmbeddedTestExecutor {
     const startTime = Date.now();
     const logs: Array<{ timestamp: number; level: string; message: string }> = [];
     const screenshots: Array<{ filename: string; data: string; width: number; height: number }> = [];
+    const softErrors: string[] = [];
     const testTimeout = Math.max(command.timeout || 120000, 30000);
 
     const logFn = (level: string, message: string) => {
@@ -73,8 +122,29 @@ export class EmbeddedTestExecutor {
 
     const viewport = command.viewport || { width: 1280, height: 720 };
 
+    // Determine context options based on stabilization settings
+    const needsStabilizedContext = command.stabilization?.crossOsConsistency || command.stabilization?.freezeAnimations;
+
+    // Parse storageState if provided
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let parsedStorageState: any;
+    if (command.storageState) {
+      try {
+        parsedStorageState = JSON.parse(command.storageState);
+        logFn('info', `Injecting storageState: ${parsedStorageState.cookies?.length ?? 0} cookies, ${parsedStorageState.origins?.length ?? 0} origins`);
+      } catch (e) {
+        logFn('warn', `Failed to parse storageState: ${e}`);
+      }
+    }
+
     // Create a fresh context + page per test (mirrors standard runner)
-    const testContext = await browser.newContext({ viewport });
+    const testContext = await browser.newContext({
+      viewport,
+      ...(parsedStorageState ? { storageState: parsedStorageState } : {}),
+      ...(needsStabilizedContext ? { deviceScaleFactor: 1 } : {}),
+      ...(needsStabilizedContext ? { locale: 'en-US', timezoneId: 'UTC', colorScheme: 'light' as const } : {}),
+      ...(command.stabilization?.freezeAnimations ? { reducedMotion: 'reduce' as const } : {}),
+    });
     const page = await testContext.newPage();
 
     try {
@@ -82,45 +152,67 @@ export class EmbeddedTestExecutor {
         throw new Error('Test cancelled before starting');
       }
 
-      // Set default timeouts (mirrors standard runner lines 217-218)
+      // Set default timeouts (mirrors standard runner)
       page.setDefaultNavigationTimeout(30000);
       page.setDefaultTimeout(15000);
 
-      // Intercept page.goto with logging (mirrors standard runner lines 729-741)
-      const originalGoto = page.goto.bind(page);
-      (page as any).goto = async (url: string, options?: any) => {
-        logFn('info', `Navigating to ${url}...`);
-        const response = await originalGoto(url, options);
-        logFn('info', `Navigation complete: ${response?.status() ?? 'no response'}`);
-        return response;
-      };
+      // Setup freeze scripts (timestamps, random, animations) BEFORE any navigation
+      if (command.stabilization) {
+        await setupFreezeScripts(page, command.stabilization);
+        logFn('info', `Stabilization: freeze timestamps=${command.stabilization.freezeTimestamps}, random=${command.stabilization.freezeRandomValues}, animations=${command.stabilization.freezeAnimations}, crossOS=${command.stabilization.crossOsConsistency}`);
+      }
 
-      // Page event listeners for debugging (mirrors standard runner lines 227-240)
+      // Page event listeners for debugging
       page.on('console', (msg) => { if (msg.type() === 'error') logFn('warn', `Console error: ${msg.text()}`); });
       page.on('pageerror', (err) => logFn('warn', `Page error: ${err.message}`));
       page.on('requestfailed', (req) => logFn('warn', `Request failed: ${req.url()} ${req.failure()?.errorText ?? ''}`));
 
-      // Override page.screenshot to intercept screenshot calls (mirrors runner.ts)
+      // Save raw screenshot method BEFORE overriding page.screenshot (prevents infinite recursion)
+      const rawScreenshot = page.screenshot.bind(page);
       let screenshotStep = 1;
-      const originalScreenshot = page.screenshot.bind(page);
 
-      // Screenshot helper
+      // Screenshot helper with stabilization
       const captureScreenshot = async (label: string) => {
         try {
-          const buffer = await originalScreenshot({ fullPage: true });
+          // Apply pre-screenshot stabilization (network idle, images, fonts, DOM)
+          await applyPreScreenshotStabilization(page, command.stabilization);
+          const buffer = await rawScreenshot({ fullPage: true });
           const filename = `${command.testRunId}-${command.testId}-${label.replace(/ /g, '_')}.png`;
           const base64 = buffer.toString('base64');
           screenshots.push({ filename, data: base64, width: viewport.width, height: viewport.height });
           logFn('info', `Captured screenshot: ${filename}`);
+          // Disable RAF gating + unfreeze performance.now after screenshot
+          await page.evaluate(() => {
+            if (typeof (window as any).__disableRAFGating === 'function') {
+              (window as any).__disableRAFGating();
+            }
+            (window as any).__perfNowFrozen = false;
+          }).catch(() => {});
         } catch (err) {
           logFn('warn', `Failed to capture screenshot: ${err}`);
         }
       };
 
+      // Override page.screenshot to intercept screenshot calls
       (page as any).screenshot = async (options?: any) => {
         const label = `Step ${screenshotStep++}`;
         await captureScreenshot(label);
-        return originalScreenshot(options);
+        return rawScreenshot(options);
+      };
+
+      // Intercept page.goto with logging + random seed reset
+      const originalGoto = page.goto.bind(page);
+      (page as any).goto = async (url: string, options?: any) => {
+        logFn('info', `Navigating to ${url}...`);
+        const response = await originalGoto(url, options);
+        logFn('info', `Navigation complete: ${response?.status() ?? 'no response'}`);
+        // Reset Math.random seed after page load so test actions get deterministic seeds
+        if (command.stabilization?.freezeRandomValues) {
+          await page.evaluate(() => {
+            (window as unknown as { __resetMathRandom?: () => void }).__resetMathRandom?.();
+          }).catch(() => {});
+        }
+        return response;
       };
 
       // Extract function body
@@ -132,7 +224,23 @@ export class EmbeddedTestExecutor {
       if (funcMatch) {
         body = stripTypeAnnotations(funcMatch[1]);
       } else {
+        logFn('info', 'No export async function test(...) wrapper found — using code as body');
         body = stripTypeAnnotations(command.code);
+      }
+      logFn('info', `Extracted test body: ${body.length} chars`);
+
+      // Remove test-local locateWithFallback (using runner-provided version)
+      const lwfResult = removeFunctionDefinition(body, 'locateWithFallback');
+      if (lwfResult.removed) {
+        body = lwfResult.body;
+        logFn('info', 'Removed test-local locateWithFallback (using runner-provided version)');
+      }
+
+      // Remove test-local replayCursorPath (using runner-provided speed-aware version)
+      const rcpResult = removeFunctionDefinition(body, 'replayCursorPath');
+      if (rcpResult.removed) {
+        body = rcpResult.body;
+        logFn('info', 'Removed test-local replayCursorPath (using runner-provided version)');
       }
 
       // Patch selectAll (mirrors runner.ts)
@@ -144,11 +252,32 @@ export class EmbeddedTestExecutor {
         return `${indent}try { ${stmt} } catch(__softErr) { stepLogger.warn(typeof __softErr === 'object' && __softErr !== null && 'message' in __softErr ? __softErr.message : String(__softErr)); }`;
       });
 
-      // Step logger
+      // Step logger with softExpect/softAction (matches runner)
       const stepLogger = {
         log: (msg: string) => logFn('info', `Step: ${msg}`),
-        warn: (msg: string) => logFn('warn', `Step warning: ${msg}`),
+        warn: (msg: string) => {
+          softErrors.push(msg);
+          logFn('warn', `[WARN] ${msg}`);
+        },
         error: (msg: string) => logFn('error', `Step error: ${msg}`),
+        softExpect: async (fn: () => Promise<void>, label?: string) => {
+          try {
+            await fn();
+          } catch (e: unknown) {
+            const msg = label || (e instanceof Error ? e.message : String(e));
+            softErrors.push(msg);
+            logFn('warn', `[SOFT FAIL] ${msg}`);
+          }
+        },
+        softAction: async (fn: () => Promise<void>, label?: string) => {
+          try {
+            await fn();
+          } catch (e: unknown) {
+            const msg = label || (e instanceof Error ? e.message : String(e));
+            softErrors.push(msg);
+            logFn('warn', `[SOFT FAIL] ${msg}`);
+          }
+        },
       };
 
       // Basic expect implementation (mirrors runner.ts createExpect)
@@ -219,51 +348,161 @@ export class EmbeddedTestExecutor {
         };
       };
 
-      // Basic locateWithFallback — tries selectors in order
-      const locateWithFallback = async (pg: Page, selectors: any[], action: string, value?: string) => {
-        for (const sel of selectors) {
+      // locateWithFallback — supports { type, value } format, ocr-text, role-name, coordinate fallback
+      const locateWithFallback = async (
+        pg: Page,
+        selectors: Array<{ type: string; value: string } | string | { selector?: string; css?: string; text?: string }>,
+        action: string,
+        value?: string | null,
+        coords?: { x: number; y: number } | null,
+        options?: Record<string, unknown> | null
+      ) => {
+        // Normalize selectors to { type, value } format
+        const validSelectors = selectors
+          .map((sel) => {
+            if (typeof sel === 'string') return { type: 'css', value: sel };
+            if ('type' in sel && 'value' in sel) return sel as { type: string; value: string };
+            // Legacy format: { selector, css, text }
+            const legacy = sel as { selector?: string; css?: string; text?: string };
+            return { type: 'css', value: legacy.selector || legacy.css || legacy.text || '' };
+          })
+          .filter((s) => s.value && s.value.trim() && !s.value.includes('undefined'));
+
+        logFn('info', `[action] ${action}${value ? ` "${value}"` : ''} (${validSelectors.length} selectors)`);
+
+        for (const sel of validSelectors) {
           try {
-            const locator = typeof sel === 'string' ? pg.locator(sel) : pg.locator(sel.selector || sel.css || sel.text || '');
-            if (await locator.count() > 0) {
-              if (action === 'click') { await locator.first().click(); return; }
-              if (action === 'fill') { await locator.first().fill(value || ''); return; }
-              if (action === 'check') { await locator.first().check(); return; }
-              if (action === 'uncheck') { await locator.first().uncheck(); return; }
+            let locator;
+            if (sel.type === 'ocr-text') {
+              const text = sel.value.replace(/^ocr-text="/, '').replace(/"$/, '');
+              locator = pg.getByText(text, { exact: false });
+            } else if (sel.type === 'role-name') {
+              const match = sel.value.match(/^role=(\w+)\[name="(.+)"\]$/);
+              if (match) {
+                locator = pg.getByRole(match[1] as 'button' | 'link' | 'heading', { name: match[2] });
+              } else {
+                locator = pg.locator(sel.value);
+              }
+            } else {
+              locator = pg.locator(sel.value);
             }
-          } catch { /* try next selector */ }
+
+            const target = locator.first();
+            await target.waitFor({ timeout: 3000 });
+
+            logFn('info', `[action] ${action} matched via ${sel.type}`);
+            if (action === 'locate') return target;
+            if (action === 'click') await target.click(options || {});
+            else if (action === 'fill') await target.fill(value || '');
+            else if (action === 'selectOption') await target.selectOption(value || '');
+            else if (action === 'check') await target.check();
+            else if (action === 'uncheck') await target.uncheck();
+
+            return target;
+          } catch {
+            continue;
+          }
         }
-        throw new Error(`No selector matched for action "${action}": ${JSON.stringify(selectors)}`);
+
+        // Coordinate fallback for clicks
+        if (action === 'click' && coords) {
+          logFn('info', `Falling back to coordinate click at (${coords.x}, ${coords.y})`);
+          await pg.mouse.click(coords.x, coords.y, options || {});
+          return;
+        }
+
+        // Coordinate fallback for fill - click to focus then type
+        if (action === 'fill' && coords) {
+          logFn('info', `Falling back to coordinate fill at (${coords.x}, ${coords.y})`);
+          await pg.mouse.click(coords.x, coords.y);
+          await pg.keyboard.press('Control+a');
+          await pg.keyboard.type(value || '');
+          return;
+        }
+
+        throw new Error('No selector matched: ' + JSON.stringify(validSelectors));
       };
 
-      // Basic replayCursorPath
+      // Speed-aware replayCursorPath — respects cursorPlaybackSpeed setting
+      const speed = command.cursorPlaybackSpeed ?? 1;
       const replayCursorPathFn = async (pg: Page, moves: [number, number, number][]) => {
         for (const [x, y, delay] of moves) {
           await pg.mouse.move(x, y);
-          if (delay > 0) await pg.waitForTimeout(delay);
+          if (delay > 0 && speed > 0) {
+            await pg.waitForTimeout(Math.round(delay / speed));
+          }
         }
       };
 
+      // Wrap key Playwright action methods with pre+post RAF flushing when freezeAnimations is enabled
+      if (command.stabilization?.freezeAnimations) {
+        const wrapAction = (obj: any, method: string) => {
+          const orig = obj[method].bind(obj);
+          obj[method] = async (...args: any[]) => {
+            // Pre-action: flush pending callbacks from unwrapped actions (mouse.move)
+            await page.evaluate(() => {
+              (window as any).__enableRAFGating?.();
+              (window as any).__flushAnimationFrames?.(10);
+              (window as any).__disableRAFGating?.();
+            }).catch(() => {});
+            // Execute action (gating disabled — page reacts normally)
+            const result = await orig(...args);
+            // Post-action: wait one browser frame for page to process, then flush
+            await page.evaluate(() => new Promise<void>(resolve => {
+              requestAnimationFrame(() => {
+                (window as any).__enableRAFGating?.();
+                (window as any).__flushAnimationFrames?.(10);
+                (window as any).__disableRAFGating?.();
+                resolve();
+              });
+            })).catch(() => {});
+            return result;
+          };
+        };
+        wrapAction(page.mouse, 'click');
+        wrapAction(page.mouse, 'down');
+        wrapAction(page.mouse, 'up');
+        wrapAction(page.keyboard, 'press');
+        wrapAction(page, 'click');
+      }
+
       logFn('info', 'Executing test code...');
 
-      // Execute with timeout
-      await Promise.race([
-        (async () => {
-          const testFn = new Function(
-            'page', 'baseUrl', 'screenshotPath', 'stepLogger', 'expect', 'locateWithFallback', 'replayCursorPath',
-            `return (async () => { ${body} })();`
-          );
-          await testFn(page, command.targetUrl, 'screenshot.png', stepLogger, expect, locateWithFallback, replayCursorPathFn);
-        })(),
-        new Promise<never>((_, reject) => {
-          const timer = setTimeout(() => {
-            reject(new Error(`Test execution timed out after ${testTimeout}ms`));
-          }, testTimeout);
-          abortCtrl.signal.addEventListener('abort', () => {
-            clearTimeout(timer);
-            reject(new Error('Test cancelled'));
-          });
-        }),
-      ]);
+      // Heartbeat timer — logs every 15s so the user knows the test is still running
+      const heartbeatStart = Date.now();
+      const heartbeat = setInterval(() => {
+        const elapsed = Math.round((Date.now() - heartbeatStart) / 1000);
+        logFn('info', `Test still running... (${elapsed}s elapsed)`);
+      }, 15000);
+
+      // Execute with timeout — close context to kill in-flight Playwright ops on timeout
+      try {
+        await Promise.race([
+          (async () => {
+            const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
+            const testFn = new AsyncFunction(
+              'page', 'baseUrl', 'screenshotPath', 'stepLogger', 'expect', 'locateWithFallback', 'replayCursorPath',
+              body
+            );
+            await testFn(page, command.targetUrl.replace(/\/+$/, ''), 'screenshot.png', stepLogger, expect, locateWithFallback, replayCursorPathFn);
+          })(),
+          new Promise<never>((_, reject) => {
+            const timer = setTimeout(() => {
+              logFn('warn', `Timeout fired (${testTimeout}ms) — closing context to kill in-flight operations`);
+              testContext.close().catch(() => {});
+              reject(new Error(`Test execution timed out after ${testTimeout}ms`));
+            }, testTimeout);
+            abortCtrl.signal.addEventListener('abort', () => {
+              clearTimeout(timer);
+              logFn('info', 'Abort signal received — closing context');
+              testContext.close().catch(() => {});
+              reject(new Error('Test cancelled'));
+            });
+          }),
+        ]);
+      } finally {
+        clearInterval(heartbeat);
+      }
 
       logFn('info', 'Test code execution completed');
 
@@ -290,7 +529,7 @@ export class EmbeddedTestExecutor {
       const isTimeout = errorMessage.includes('timed out');
       logFn('error', `Test ${isTimeout ? 'timed out' : 'failed'}: ${errorMessage}`);
 
-      // Try to capture error screenshot (skip on timeout — in-flight ops would hang)
+      // Try to capture error screenshot (skip on timeout — context is closed)
       let errorScreenshot: string | undefined;
       if (!isTimeout) {
         try {
@@ -309,6 +548,7 @@ export class EmbeddedTestExecutor {
     } finally {
       this.abortController = null;
       // Close the per-test page + context (no state leaks between tests)
+      // context.close() may have already been called by timeout/cancel handler — that's fine
       await page.close().catch(() => {});
       await testContext.close().catch(() => {});
     }
