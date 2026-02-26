@@ -496,7 +496,7 @@ export function RecordingClient({
 
   const handleCreateAssertion = async (type: AssertionType) => {
     try {
-      await createAssertion(type);
+      await createAssertion(type, repositoryId);
       // Event will come through polling
     } catch (error) {
       console.error('Failed to create assertion:', error);
@@ -978,7 +978,13 @@ export function RecordingClient({
           {embeddedStreamUrl && (
             <Card>
               <CardContent className="p-0">
-                <BrowserViewer streamUrl={embeddedStreamUrl} className="max-h-[400px]" />
+                <BrowserViewer
+                  streamUrl={embeddedStreamUrl}
+                  initialViewport={{
+                    width: settings.viewportWidth ?? 1280,
+                    height: settings.viewportHeight ?? 720,
+                  }}
+                />
               </CardContent>
             </Card>
           )}

@@ -333,14 +333,27 @@ export function BrowserViewer({ streamUrl, initialViewport, className, expiresAt
 
   const toggleFullscreen = useCallback(() => {
     if (!containerRef.current) return;
-    if (!isFullscreen) {
-      containerRef.current.requestFullscreen?.();
-      setIsFullscreen(true);
-    } else {
-      document.exitFullscreen?.();
+    try {
+      if (!isFullscreen) {
+        containerRef.current.requestFullscreen?.();
+        setIsFullscreen(true);
+      } else if (document.fullscreenElement) {
+        document.exitFullscreen();
+        setIsFullscreen(false);
+      }
+    } catch {
       setIsFullscreen(false);
     }
   }, [isFullscreen]);
+
+  // Sync fullscreen state with browser API
+  useEffect(() => {
+    const handler = () => {
+      setIsFullscreen(!!document.fullscreenElement);
+    };
+    document.addEventListener('fullscreenchange', handler);
+    return () => document.removeEventListener('fullscreenchange', handler);
+  }, []);
 
   return (
     <div ref={containerRef} className={`flex flex-col ${className ?? ''}`}>
@@ -353,8 +366,8 @@ export function BrowserViewer({ streamUrl, initialViewport, className, expiresAt
         onFullscreenToggle={toggleFullscreen}
       />
 
-      {/* Canvas container */}
-      <div className="relative overflow-hidden rounded-b-lg border bg-black">
+      {/* Canvas container — centers browser at viewport dimensions, scales down if larger than available space */}
+      <div className="relative flex items-center justify-center overflow-hidden rounded-b-lg border bg-black">
         {connectionStatus !== 'connected' && (
           <div className="absolute inset-0 z-10 flex items-center justify-center bg-black/80">
             {(connectionStatus === 'connecting' || connectionStatus === 'reconnecting') ? (
@@ -387,8 +400,15 @@ export function BrowserViewer({ streamUrl, initialViewport, className, expiresAt
         <canvas
           ref={canvasRef}
           tabIndex={0}
-          className="w-full cursor-default outline-none"
-          style={{ aspectRatio: `${viewport.width} / ${viewport.height}` }}
+          className="cursor-default outline-none"
+          style={{
+            width: viewport.width,
+            height: viewport.height,
+            maxWidth: '100%',
+            maxHeight: isFullscreen ? '100vh' : `${viewport.height}px`,
+            objectFit: 'contain',
+            aspectRatio: `${viewport.width} / ${viewport.height}`,
+          }}
           onMouseMove={(e) => handleMouseEvent(e, 'move')}
           onMouseDown={(e) => handleMouseEvent(e, 'down')}
           onMouseUp={(e) => handleMouseEvent(e, 'up')}

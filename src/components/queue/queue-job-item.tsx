@@ -1,7 +1,7 @@
 'use client';
 
 import { Loader2, CheckCircle2, XCircle, Clock, X, Layers, ChevronDown } from 'lucide-react';
-import type { JobWithChildren } from '@/components/queue/job-polling-context';
+import { useJobPollingContext, type JobWithChildren } from '@/components/queue/job-polling-context';
 import { cancelJob, dismissJob } from '@/server/actions/jobs';
 import { useState, useTransition } from 'react';
 import { Badge } from '@/components/ui/badge';
@@ -31,6 +31,7 @@ function StatusIcon({ status }: { status: string }) {
 export function QueueJobItem({ job }: { job: JobWithChildren }) {
   const [isPending, startTransition] = useTransition();
   const [expanded, setExpanded] = useState(false);
+  const { refreshJobs } = useJobPollingContext();
   const typeLabel = TYPE_LABELS[job.type] || job.type;
   const isActive = job.status === 'running' || job.status === 'pending';
   const hasChildren = job._childSummary && job._childSummary.total > 0;
@@ -44,12 +45,14 @@ export function QueueJobItem({ job }: { job: JobWithChildren }) {
   const handleCancel = () => {
     startTransition(async () => {
       await cancelJob(job.id, job.repositoryId);
+      refreshJobs();
     });
   };
 
   const handleDismiss = () => {
     startTransition(async () => {
       await dismissJob(job.id);
+      refreshJobs();
     });
   };
 

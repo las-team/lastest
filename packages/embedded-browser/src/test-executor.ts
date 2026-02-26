@@ -6,7 +6,7 @@
  * but adapted for the embedded context.
  */
 
-import type { Page } from 'playwright';
+import type { Browser, Page } from 'playwright';
 
 export interface EmbeddedTestResult {
   status: 'passed' | 'failed' | 'error' | 'timeout' | 'cancelled';
@@ -57,7 +57,7 @@ export class EmbeddedTestExecutor {
     return false;
   }
 
-  async runTest(page: Page, command: RunTestPayload): Promise<EmbeddedTestResult> {
+  async runTest(browser: Browser, command: RunTestPayload): Promise<EmbeddedTestResult> {
     const abortCtrl = new AbortController();
     this.abortController = abortCtrl;
 
@@ -71,28 +71,29 @@ export class EmbeddedTestExecutor {
       console.log(`  [${level.toUpperCase()}] [embedded:${command.testId}] ${message}`);
     };
 
-    // Hoisted so we can restore in finally
-    let originalScreenshot: ((options?: any) => Promise<Buffer>) | null = null;
+    const viewport = command.viewport || { width: 1280, height: 720 };
+
+    // Create a fresh context + page per test (mirrors standard runner)
+    const testContext = await browser.newContext({ viewport });
+    const page = await testContext.newPage();
 
     try {
       if (abortCtrl.signal.aborted) {
         throw new Error('Test cancelled before starting');
       }
 
-      // Navigate to target URL on the shared page
+      // Navigate to target URL on the fresh page
       logFn('info', `Navigating to ${command.targetUrl}`);
       await page.goto(command.targetUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
 
-      const viewport = command.viewport || { width: 1280, height: 720 };
-
       // Override page.screenshot to intercept screenshot calls (mirrors runner.ts)
       let screenshotStep = 1;
-      originalScreenshot = page.screenshot.bind(page);
+      const originalScreenshot = page.screenshot.bind(page);
 
       // Screenshot helper
       const captureScreenshot = async (label: string) => {
         try {
-          const buffer = await originalScreenshot!({ fullPage: true });
+          const buffer = await originalScreenshot({ fullPage: true });
           const filename = `${command.testRunId}-${command.testId}-${label.replace(/ /g, '_')}.png`;
           const base64 = buffer.toString('base64');
           screenshots.push({ filename, data: base64, width: viewport.width, height: viewport.height });
@@ -105,7 +106,7 @@ export class EmbeddedTestExecutor {
       (page as any).screenshot = async (options?: any) => {
         const label = `Step ${screenshotStep++}`;
         await captureScreenshot(label);
-        return originalScreenshot!(options);
+        return originalScreenshot(options);
       };
 
       // Extract function body
@@ -119,6 +120,15 @@ export class EmbeddedTestExecutor {
       } else {
         body = stripTypeAnnotations(command.code);
       }
+
+      // Patch selectAll (mirrors runner.ts)
+      body = body.replace(/page\.keyboard\.selectAll\(\)/g, "page.keyboard.press('Control+a')");
+
+      // Soft error wrapping — skip screenshot lines (mirrors runner.ts)
+      body = body.replace(/^(\s*)(await\s+.+;)\s*$/gm, (_match, indent, stmt) => {
+        if (stmt.includes('.screenshot(')) return `${indent}${stmt}`;
+        return `${indent}try { ${stmt} } catch(__softErr) { stepLogger.warn(typeof __softErr === 'object' && __softErr !== null && 'message' in __softErr ? __softErr.message : String(__softErr)); }`;
+      });
 
       // Step logger
       const stepLogger = {
@@ -282,12 +292,9 @@ export class EmbeddedTestExecutor {
       };
     } finally {
       this.abortController = null;
-      // Restore original page.screenshot to avoid leaking the patched version
-      if (originalScreenshot) {
-        (page as any).screenshot = originalScreenshot;
-      }
-      // Navigate back to blank to reset state for next test
-      await page.goto('about:blank').catch(() => {});
+      // Close the per-test page + context (no state leaks between tests)
+      await page.close().catch(() => {});
+      await testContext.close().catch(() => {});
     }
   }
 

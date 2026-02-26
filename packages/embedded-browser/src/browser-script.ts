@@ -40,6 +40,14 @@ export const browserRecordingScript = ({ pointerGestures: pg, cursorFPS: fps, se
   const activeModifiers: Set<BrowserKeyboardModifier> = new Set();
 
   document.addEventListener('keydown', (e) => {
+    // Ctrl+Shift+S: take screenshot
+    if (e.ctrlKey && e.shiftKey && e.key.toLowerCase() === 's') {
+      e.preventDefault();
+      e.stopPropagation();
+      // @ts-expect-error - exposed function
+      window.__recordScreenshot?.();
+      return;
+    }
     if (e.key === 'Alt' || e.key === 'Control' || e.key === 'Shift' || e.key === 'Meta') {
       activeModifiers.add(e.key as BrowserKeyboardModifier);
     } else {

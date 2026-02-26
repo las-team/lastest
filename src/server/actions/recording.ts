@@ -18,7 +18,7 @@ import { v4 as uuid } from 'uuid';
 import { revalidatePath } from 'next/cache';
 import { chromium, firefox, webkit } from 'playwright';
 import { createMessage } from '@/lib/ws/protocol';
-import type { StartRecordingCommand, StopRecordingCommand, CaptureScreenshotCommand } from '@/lib/ws/protocol';
+import type { StartRecordingCommand, StopRecordingCommand, CaptureScreenshotCommand, CreateAssertionCommand } from '@/lib/ws/protocol';
 import {
   queueCommandToDB,
   createRemoteRecordingSession,
@@ -248,9 +248,22 @@ export async function captureScreenshot(repositoryId?: string | null) {
   return { screenshotPath };
 }
 
-export async function createAssertion(type: AssertionType): Promise<{ success: boolean }> {
+export async function createAssertion(type: AssertionType, repositoryId?: string | null): Promise<{ success: boolean }> {
   await requireTeamAccess();
-  const recorder = getRecorder();
+
+  // Check for remote recording session
+  const remoteSession = getRemoteRecordingSession(repositoryId);
+  if (remoteSession?.isRecording) {
+    const command = createMessage<CreateAssertionCommand>('command:create_assertion', {
+      sessionId: remoteSession.sessionId,
+      assertionType: type,
+    });
+    await queueCommandToDB(remoteSession.runnerId, command);
+    return { success: true };
+  }
+
+  // Local recording
+  const recorder = getRecorder(repositoryId);
   const success = await recorder.createAssertion(type);
 
   return { success };

@@ -42,6 +42,20 @@ let testExecutor: EmbeddedTestExecutor | null = null;
 let recorder: EmbeddedRecorder | null = null;
 let isRecording = false;
 
+// Command queue to serialize test execution (prevents parallel page collisions)
+const testCommandQueue: Array<() => Promise<void>> = [];
+let isProcessingQueue = false;
+
+async function processTestQueue(): Promise<void> {
+  if (isProcessingQueue) return;
+  isProcessingQueue = true;
+  while (testCommandQueue.length > 0) {
+    const next = testCommandQueue.shift()!;
+    await next();
+  }
+  isProcessingQueue = false;
+}
+
 async function startup(): Promise<void> {
   console.log('=== Embedded Browser Service ===');
   console.log(`Server: ${config.serverUrl}`);
@@ -125,7 +139,7 @@ async function startup(): Promise<void> {
 
     switch (command.type) {
       case 'command:run_test': {
-        if (!page || !testExecutor || !runnerClient) break;
+        if (!browser || !testExecutor || !runnerClient) break;
         const payload = command.payload as {
           testId: string; testRunId: string; code: string;
           codeHash: string; targetUrl: string; timeout?: number;
@@ -133,53 +147,60 @@ async function startup(): Promise<void> {
           viewport?: { width: number; height: number };
         };
 
-        runnerClient.setStatus('busy', payload.testId);
-        streamServer?.broadcastStatus('busy', payload.targetUrl);
+        // Queue test execution to prevent parallel page collisions
+        const capturedClient = runnerClient;
+        const capturedExecutor = testExecutor;
+        const capturedBrowser = browser;
+        testCommandQueue.push(async () => {
+          capturedClient.setStatus('busy', payload.testId);
+          streamServer?.broadcastStatus('busy', payload.targetUrl);
 
-        const result = await testExecutor.runTest(page, payload);
+          const result = await capturedExecutor.runTest(capturedBrowser, payload);
 
-        // Send result FIRST so server sees pass/fail before timeout
-        await runnerClient.sendMessage({
-          id: crypto.randomUUID(),
-          type: 'response:test_result',
-          timestamp: Date.now(),
-          payload: {
-            correlationId: command.id,
-            testId: payload.testId,
-            testRunId: payload.testRunId,
-            status: result.status,
-            durationMs: result.durationMs,
-            screenshotCount: result.screenshots.length,
-            error: result.error,
-            logs: result.logs,
-          },
-        });
+          // Send result FIRST so server sees pass/fail before timeout
+          await capturedClient.sendMessage({
+            id: crypto.randomUUID(),
+            type: 'response:test_result',
+            timestamp: Date.now(),
+            payload: {
+              correlationId: command.id,
+              testId: payload.testId,
+              testRunId: payload.testRunId,
+              status: result.status,
+              durationMs: result.durationMs,
+              screenshotCount: result.screenshots.length,
+              error: result.error,
+              logs: result.logs,
+            },
+          });
 
-        // Upload screenshots separately (matching standard runner pattern)
-        if (result.screenshots.length > 0) {
-          console.log(`[Command] Uploading ${result.screenshots.length} screenshots...`);
-          for (const screenshot of result.screenshots) {
-            await runnerClient.sendMessage({
-              id: crypto.randomUUID(),
-              type: 'response:screenshot',
-              timestamp: Date.now(),
-              payload: {
-                correlationId: command.id,
-                testRunId: payload.testRunId,
-                repositoryId: payload.repositoryId,
-                filename: screenshot.filename,
-                data: screenshot.data,
-                width: screenshot.width,
-                height: screenshot.height,
-                capturedAt: Date.now(),
-              },
-            });
+          // Upload screenshots separately (matching standard runner pattern)
+          if (result.screenshots.length > 0) {
+            console.log(`[Command] Uploading ${result.screenshots.length} screenshots...`);
+            for (const screenshot of result.screenshots) {
+              await capturedClient.sendMessage({
+                id: crypto.randomUUID(),
+                type: 'response:screenshot',
+                timestamp: Date.now(),
+                payload: {
+                  correlationId: command.id,
+                  testRunId: payload.testRunId,
+                  repositoryId: payload.repositoryId,
+                  filename: screenshot.filename,
+                  data: screenshot.data,
+                  width: screenshot.width,
+                  height: screenshot.height,
+                  capturedAt: Date.now(),
+                },
+              });
+            }
+            console.log(`[Command] All screenshots uploaded`);
           }
-          console.log(`[Command] All screenshots uploaded`);
-        }
 
-        runnerClient.setStatus('idle');
-        streamServer?.broadcastStatus('ready');
+          capturedClient.setStatus('idle');
+          streamServer?.broadcastStatus('ready');
+        });
+        processTestQueue();
         break;
       }
 
@@ -273,8 +294,14 @@ async function startup(): Promise<void> {
       }
 
       case 'command:capture_screenshot': {
-        if (!page || !testExecutor || !runnerClient) break;
-        const screenshot = await testExecutor.captureScreenshot(page);
+        if (!runnerClient) break;
+        // During recording, capture from the recording page
+        let screenshot: { data: string; width: number; height: number } | null = null;
+        if (isRecording && recorder?.isActive()) {
+          screenshot = await recorder.takeScreenshot();
+        } else if (page && testExecutor) {
+          screenshot = await testExecutor.captureScreenshot(page);
+        }
         await runnerClient.sendMessage({
           id: crypto.randomUUID(),
           type: 'response:screenshot',
@@ -283,6 +310,14 @@ async function startup(): Promise<void> {
             ? { correlationId: command.id, data: screenshot.data, width: screenshot.width, height: screenshot.height }
             : { correlationId: command.id, error: 'Failed to capture screenshot' },
         });
+        break;
+      }
+
+      case 'command:create_assertion': {
+        if (!recorder?.isActive() || !runnerClient) break;
+        const assertPayload = command.payload as { sessionId: string; assertionType: string };
+        recorder.createAssertion(assertPayload.assertionType);
+        console.log(`[Command] Created assertion: ${assertPayload.assertionType}`);
         break;
       }
 

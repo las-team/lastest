@@ -15,6 +15,7 @@ export type MessageType =
   | 'command:cancel_test'
   | 'command:start_recording'
   | 'command:stop_recording'
+  | 'command:create_assertion'
   | 'command:ping'
   | 'command:shutdown'
   // Agent → Server (Responses)
@@ -270,6 +271,16 @@ export interface RecordingStoppedResponse extends BaseMessage {
   payload: RecordingStoppedPayload;
 }
 
+export interface CreateAssertionCommandPayload {
+  sessionId: string;
+  assertionType: string;
+}
+
+export interface CreateAssertionCommand extends BaseMessage {
+  type: 'command:create_assertion';
+  payload: CreateAssertionCommandPayload;
+}
+
 export interface CaptureScreenshotCommand extends BaseMessage {
   type: 'command:capture_screenshot';
   payload: { sessionId: string };
@@ -379,6 +390,7 @@ export type ServerCommand =
   | ShutdownCommand
   | StartRecordingCommand
   | StopRecordingCommand
+  | CreateAssertionCommand
   | CaptureScreenshotCommand
   | PingCommand;
 

@@ -46,9 +46,13 @@ function getModifierFlags(modifiers?: { ctrl?: boolean; shift?: boolean; alt?: b
 
 export class InputHandler {
   private cdpSession: CDPSession | null = null;
+  private page: Page | null = null;
+  private modifiers = { ctrl: false, shift: false, alt: false, meta: false };
 
   async attach(page: Page): Promise<void> {
+    this.page = page;
     this.cdpSession = await page.context().newCDPSession(page);
+    this.modifiers = { ctrl: false, shift: false, alt: false, meta: false };
     console.log('[InputHandler] Attached to page');
   }
 
@@ -61,6 +65,8 @@ export class InputHandler {
       }
       this.cdpSession = null;
     }
+    this.page = null;
+    this.modifiers = { ctrl: false, shift: false, alt: false, meta: false };
   }
 
   async handleInput(event: InputEvent): Promise<void> {
@@ -126,6 +132,17 @@ export class InputHandler {
           button,
           clickCount: 1,
         });
+        // Dispatch synthetic contextmenu for right-click so browser-script sees it
+        if (button === 'right' && this.page) {
+          await this.page.evaluate(({ x, y, shiftKey }) => {
+            const el = document.elementFromPoint(x, y) || document.body;
+            el.dispatchEvent(new MouseEvent('contextmenu', {
+              bubbles: true, cancelable: true,
+              clientX: x, clientY: y,
+              shiftKey,
+            }));
+          }, { x: event.x, y: event.y, shiftKey: this.modifiers.shift });
+        }
         break;
 
       case 'dblclick':
@@ -159,6 +176,14 @@ export class InputHandler {
 
   private async handleKeyboard(event: KeyboardEvent): Promise<void> {
     if (!this.cdpSession) return;
+
+    // Track modifier state for contextmenu dispatching
+    if (event.modifiers) {
+      this.modifiers.ctrl = event.modifiers.ctrl ?? false;
+      this.modifiers.shift = event.modifiers.shift ?? false;
+      this.modifiers.alt = event.modifiers.alt ?? false;
+      this.modifiers.meta = event.modifiers.meta ?? false;
+    }
 
     const modifiers = getModifierFlags(event.modifiers);
 

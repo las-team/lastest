@@ -185,6 +185,10 @@ export class EmbeddedRecorder {
       this.addEvent('assertion', { elementAssertion: assertion });
     });
 
+    await this.page.exposeFunction('__recordScreenshot', () => {
+      this.takeScreenshot();
+    });
+
     await this.page.exposeFunction('__updateVerification', (actionId: string, verified: boolean) => {
       const event = this.events.find(e => e.data.actionId === actionId);
       if (event && event.verification) {
@@ -264,6 +268,31 @@ export class EmbeddedRecorder {
 
     console.log(`  [EmbeddedRecorder] Recording stopped, ${this.events.length} events captured`);
     return this.events;
+  }
+
+  /**
+   * Capture a screenshot from the recording page and add it as a recording event.
+   */
+  async takeScreenshot(): Promise<{ data: string; width: number; height: number } | null> {
+    if (!this.page || !this.isRecording) return null;
+    try {
+      const buffer = await this.page.screenshot({ fullPage: true });
+      const viewport = this.page.viewportSize() || { width: 1280, height: 720 };
+      const data = buffer.toString('base64');
+      this.addEvent('screenshot', { screenshotData: data, width: viewport.width, height: viewport.height });
+      return { data, width: viewport.width, height: viewport.height };
+    } catch (err) {
+      console.error('[EmbeddedRecorder] Failed to take screenshot:', err);
+      return null;
+    }
+  }
+
+  /**
+   * Create a page-level assertion event.
+   */
+  createAssertion(assertionType: string): void {
+    if (!this.isRecording) return;
+    this.addEvent('assertion', { assertionType });
   }
 
   isActive(): boolean {

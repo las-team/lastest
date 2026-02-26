@@ -141,6 +141,12 @@ export async function cancelJob(jobId: string, repositoryId?: string | null, run
   const job = await queries.getBackgroundJob(jobId);
   if (!job) return { success: false, error: 'Job not found' };
 
+  // For pending (queued) jobs that haven't started, just delete them entirely
+  if (job.status === 'pending') {
+    await queries.deleteBackgroundJob(jobId);
+    return { success: true };
+  }
+
   // Determine the effective runner — prefer job's stored targetRunnerId, fall back to passed runnerId
   const effectiveRunnerId = job.targetRunnerId || runnerId;
 
