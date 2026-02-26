@@ -71,6 +71,9 @@ export class EmbeddedTestExecutor {
       console.log(`  [${level.toUpperCase()}] [embedded:${command.testId}] ${message}`);
     };
 
+    // Hoisted so we can restore in finally
+    let originalScreenshot: ((options?: any) => Promise<Buffer>) | null = null;
+
     try {
       if (abortCtrl.signal.aborted) {
         throw new Error('Test cancelled before starting');
@@ -82,10 +85,14 @@ export class EmbeddedTestExecutor {
 
       const viewport = command.viewport || { width: 1280, height: 720 };
 
+      // Override page.screenshot to intercept screenshot calls (mirrors runner.ts)
+      let screenshotStep = 1;
+      originalScreenshot = page.screenshot.bind(page);
+
       // Screenshot helper
       const captureScreenshot = async (label: string) => {
         try {
-          const buffer = await page.screenshot({ fullPage: true });
+          const buffer = await originalScreenshot!({ fullPage: true });
           const filename = `${command.testRunId}-${command.testId}-${label.replace(/ /g, '_')}.png`;
           const base64 = buffer.toString('base64');
           screenshots.push({ filename, data: base64, width: viewport.width, height: viewport.height });
@@ -93,6 +100,12 @@ export class EmbeddedTestExecutor {
         } catch (err) {
           logFn('warn', `Failed to capture screenshot: ${err}`);
         }
+      };
+
+      (page as any).screenshot = async (options?: any) => {
+        const label = `Step ${screenshotStep++}`;
+        await captureScreenshot(label);
+        return originalScreenshot!(options);
       };
 
       // Extract function body
@@ -114,16 +127,108 @@ export class EmbeddedTestExecutor {
         error: (msg: string) => logFn('error', `Step error: ${msg}`),
       };
 
+      // Basic expect implementation (mirrors runner.ts createExpect)
+      const expect = (target: any, message?: string) => {
+        const msgPrefix = message ? `${message}: ` : '';
+        const isPage = typeof target?.goto === 'function';
+        const isLocator = typeof target?.click === 'function' && typeof target?.fill === 'function';
+        if (isPage) {
+          return {
+            async toHaveTitle(expected: string | RegExp) {
+              const title = await target.title();
+              const regex = typeof expected === 'string' ? new RegExp(expected) : expected;
+              if (!regex.test(title)) throw new Error(`${msgPrefix}Expected title "${title}" to match ${regex}`);
+            },
+            async toHaveURL(expected: string | RegExp) {
+              const url = target.url();
+              const regex = typeof expected === 'string' ? new RegExp(expected) : expected;
+              if (!regex.test(url)) throw new Error(`${msgPrefix}Expected URL "${url}" to match ${regex}`);
+            },
+          };
+        }
+        if (isLocator) {
+          return {
+            async toBeVisible() {
+              if (!await target.isVisible()) throw new Error(`${msgPrefix}Expected element to be visible`);
+            },
+            async toBeHidden() {
+              if (await target.isVisible()) throw new Error(`${msgPrefix}Expected element to be hidden`);
+            },
+            async toHaveText(expected: string | RegExp) {
+              const text = await target.textContent() || '';
+              const regex = typeof expected === 'string' ? new RegExp(expected) : expected;
+              if (!regex.test(text)) throw new Error(`${msgPrefix}Expected text "${text}" to match ${regex}`);
+            },
+            async toContainText(expected: string) {
+              const text = await target.textContent() || '';
+              if (!text.includes(expected)) throw new Error(`${msgPrefix}Expected text to contain "${expected}"`);
+            },
+            not: {
+              async toBeVisible() {
+                if (await target.isVisible()) throw new Error(`${msgPrefix}Expected element not to be visible`);
+              },
+            },
+          };
+        }
+        return {
+          toBe(expected: unknown) { if (target !== expected) throw new Error(`${msgPrefix}Expected ${JSON.stringify(expected)} but got ${JSON.stringify(target)}`); },
+          toEqual(expected: unknown) { if (JSON.stringify(target) !== JSON.stringify(expected)) throw new Error(`${msgPrefix}Expected ${JSON.stringify(expected)} but got ${JSON.stringify(target)}`); },
+          toBeTruthy() { if (!target) throw new Error(`${msgPrefix}Expected value to be truthy but got ${target}`); },
+          toBeFalsy() { if (target) throw new Error(`${msgPrefix}Expected value to be falsy but got ${target}`); },
+          toContain(expected: unknown) {
+            if (Array.isArray(target)) { if (!target.includes(expected)) throw new Error(`${msgPrefix}Expected array to contain ${JSON.stringify(expected)}`); }
+            else if (typeof target === 'string') { if (!target.includes(expected as string)) throw new Error(`${msgPrefix}Expected string to contain "${expected}"`); }
+          },
+          toHaveLength(expected: number) { if (target?.length !== expected) throw new Error(`${msgPrefix}Expected length ${expected} but got ${target?.length}`); },
+          toMatch(expected: string | RegExp) {
+            const regex = typeof expected === 'string' ? new RegExp(expected) : expected;
+            if (!regex.test(String(target))) throw new Error(`${msgPrefix}Expected "${target}" to match ${regex}`);
+          },
+          not: {
+            toBe(expected: unknown) { if (target === expected) throw new Error(`${msgPrefix}Expected not to be ${JSON.stringify(expected)}`); },
+            toBeTruthy() { if (target) throw new Error(`${msgPrefix}Expected value not to be truthy`); },
+            toContain(expected: unknown) {
+              if (Array.isArray(target) && target.includes(expected)) throw new Error(`${msgPrefix}Expected array not to contain ${JSON.stringify(expected)}`);
+              if (typeof target === 'string' && target.includes(expected as string)) throw new Error(`${msgPrefix}Expected string not to contain "${expected}"`);
+            },
+          },
+        };
+      };
+
+      // Basic locateWithFallback — tries selectors in order
+      const locateWithFallback = async (pg: Page, selectors: any[], action: string, value?: string) => {
+        for (const sel of selectors) {
+          try {
+            const locator = typeof sel === 'string' ? pg.locator(sel) : pg.locator(sel.selector || sel.css || sel.text || '');
+            if (await locator.count() > 0) {
+              if (action === 'click') { await locator.first().click(); return; }
+              if (action === 'fill') { await locator.first().fill(value || ''); return; }
+              if (action === 'check') { await locator.first().check(); return; }
+              if (action === 'uncheck') { await locator.first().uncheck(); return; }
+            }
+          } catch { /* try next selector */ }
+        }
+        throw new Error(`No selector matched for action "${action}": ${JSON.stringify(selectors)}`);
+      };
+
+      // Basic replayCursorPath
+      const replayCursorPathFn = async (pg: Page, moves: [number, number, number][]) => {
+        for (const [x, y, delay] of moves) {
+          await pg.mouse.move(x, y);
+          if (delay > 0) await pg.waitForTimeout(delay);
+        }
+      };
+
       logFn('info', 'Executing test code...');
 
       // Execute with timeout
       await Promise.race([
         (async () => {
           const testFn = new Function(
-            'page', 'baseUrl', 'screenshotPath', 'stepLogger',
+            'page', 'baseUrl', 'screenshotPath', 'stepLogger', 'expect', 'locateWithFallback', 'replayCursorPath',
             `return (async () => { ${body} })();`
           );
-          await testFn(page, command.targetUrl, captureScreenshot, stepLogger);
+          await testFn(page, command.targetUrl, 'screenshot.png', stepLogger, expect, locateWithFallback, replayCursorPathFn);
         })(),
         new Promise<never>((_, reject) => {
           const timer = setTimeout(() => {
@@ -177,6 +282,10 @@ export class EmbeddedTestExecutor {
       };
     } finally {
       this.abortController = null;
+      // Restore original page.screenshot to avoid leaking the patched version
+      if (originalScreenshot) {
+        (page as any).screenshot = originalScreenshot;
+      }
       // Navigate back to blank to reset state for next test
       await page.goto('about:blank').catch(() => {});
     }
