@@ -7,6 +7,8 @@ Accept Downloads
 Network Interception
 ## features
 Support https://github.com/excalidraw/excalidraw/tree/master/packages/excalidraw/tests ~/.claude/plans/declarative-kindling-coral.md 70%
+
+/home/ewyct/.claude/plans/dynamic-discovering-dove.md <- but without public image pushing
 ## ideas
 Test coverage assessment and recreation based on existing test set
 Tweet about us
