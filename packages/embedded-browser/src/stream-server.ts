@@ -30,6 +30,8 @@ export class StreamServer {
 
   /** Callback for navigate requests from stream clients */
   onNavigate?: (url: string) => Promise<void>;
+  /** Callback for viewport resize requests from stream clients */
+  onResize?: (viewport: { width: number; height: number }) => Promise<void>;
 
   constructor(private options: StreamServerOptions) {
     this.authToken = options.authToken;
@@ -157,8 +159,15 @@ export class StreamServer {
             console.error(`[StreamServer] Navigate error:`, err);
           });
         }
-        if (payload?.action === 'resize' && payload.viewport && this.screencast) {
-          this.screencast.updateViewport(payload.viewport.width, payload.viewport.height);
+        if (payload?.action === 'resize' && payload.viewport) {
+          if (this.onResize) {
+            this.onResize(payload.viewport).catch(err => {
+              console.error(`[StreamServer] Resize error:`, err);
+            });
+          }
+          if (this.screencast) {
+            this.screencast.updateViewport(payload.viewport.width, payload.viewport.height);
+          }
         }
         break;
       }

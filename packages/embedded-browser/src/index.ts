@@ -45,13 +45,18 @@ let isRecording = false;
 // Command queue to serialize test execution (prevents parallel page collisions)
 const testCommandQueue: Array<() => Promise<void>> = [];
 let isProcessingQueue = false;
+const activeTestIds = new Set<string>();
 
 async function processTestQueue(): Promise<void> {
   if (isProcessingQueue) return;
   isProcessingQueue = true;
   while (testCommandQueue.length > 0) {
     const next = testCommandQueue.shift()!;
-    await next();
+    try {
+      await next();
+    } catch (err) {
+      console.error('[Queue] Task failed:', err);
+    }
   }
   isProcessingQueue = false;
 }
@@ -111,6 +116,17 @@ async function startup(): Promise<void> {
     }
   };
 
+  // Handle viewport resize requests from stream clients
+  streamServer.onResize = async (newViewport: { width: number; height: number }) => {
+    if (!page) return;
+    console.log(`[Resize] ${newViewport.width}x${newViewport.height}`);
+    try {
+      await page.setViewportSize(newViewport);
+    } catch (err) {
+      console.error(`[Resize] Failed:`, err);
+    }
+  };
+
   await screencast.start(page, (frame) => {
     streamServer!.broadcastFrame(frame.data, frame.width, frame.height, frame.timestamp);
   });
@@ -147,58 +163,69 @@ async function startup(): Promise<void> {
           viewport?: { width: number; height: number };
         };
 
+        // Dedup: skip if already running/queued (mirrors standard runner activeTestIds)
+        if (activeTestIds.has(payload.testId)) {
+          console.log(`[Command] Skipping duplicate test ${payload.testId}`);
+          break;
+        }
+        activeTestIds.add(payload.testId);
+
         // Queue test execution to prevent parallel page collisions
         const capturedClient = runnerClient;
         const capturedExecutor = testExecutor;
         const capturedBrowser = browser;
         testCommandQueue.push(async () => {
-          capturedClient.setStatus('busy', payload.testId);
-          streamServer?.broadcastStatus('busy', payload.targetUrl);
+          try {
+            capturedClient.setStatus('busy', payload.testId);
+            streamServer?.broadcastStatus('busy', payload.targetUrl);
 
-          const result = await capturedExecutor.runTest(capturedBrowser, payload);
+            const result = await capturedExecutor.runTest(capturedBrowser, payload);
 
-          // Send result FIRST so server sees pass/fail before timeout
-          await capturedClient.sendMessage({
-            id: crypto.randomUUID(),
-            type: 'response:test_result',
-            timestamp: Date.now(),
-            payload: {
-              correlationId: command.id,
-              testId: payload.testId,
-              testRunId: payload.testRunId,
-              status: result.status,
-              durationMs: result.durationMs,
-              screenshotCount: result.screenshots.length,
-              error: result.error,
-              logs: result.logs,
-            },
-          });
+            // Send result FIRST so server sees pass/fail before timeout
+            await capturedClient.sendMessage({
+              id: crypto.randomUUID(),
+              type: 'response:test_result',
+              timestamp: Date.now(),
+              payload: {
+                correlationId: command.id,
+                testId: payload.testId,
+                testRunId: payload.testRunId,
+                status: result.status,
+                durationMs: result.durationMs,
+                screenshotCount: result.screenshots.length,
+                error: result.error,
+                logs: result.logs,
+              },
+            });
 
-          // Upload screenshots separately (matching standard runner pattern)
-          if (result.screenshots.length > 0) {
-            console.log(`[Command] Uploading ${result.screenshots.length} screenshots...`);
-            for (const screenshot of result.screenshots) {
-              await capturedClient.sendMessage({
-                id: crypto.randomUUID(),
-                type: 'response:screenshot',
-                timestamp: Date.now(),
-                payload: {
-                  correlationId: command.id,
-                  testRunId: payload.testRunId,
-                  repositoryId: payload.repositoryId,
-                  filename: screenshot.filename,
-                  data: screenshot.data,
-                  width: screenshot.width,
-                  height: screenshot.height,
-                  capturedAt: Date.now(),
-                },
-              });
+            // Upload screenshots separately (matching standard runner pattern)
+            if (result.screenshots.length > 0) {
+              console.log(`[Command] Uploading ${result.screenshots.length} screenshots...`);
+              for (const screenshot of result.screenshots) {
+                await capturedClient.sendMessage({
+                  id: crypto.randomUUID(),
+                  type: 'response:screenshot',
+                  timestamp: Date.now(),
+                  payload: {
+                    correlationId: command.id,
+                    testRunId: payload.testRunId,
+                    repositoryId: payload.repositoryId,
+                    filename: screenshot.filename,
+                    data: screenshot.data,
+                    width: screenshot.width,
+                    height: screenshot.height,
+                    capturedAt: Date.now(),
+                  },
+                });
+              }
+              console.log(`[Command] All screenshots uploaded`);
             }
-            console.log(`[Command] All screenshots uploaded`);
-          }
 
-          capturedClient.setStatus('idle');
-          streamServer?.broadcastStatus('ready');
+            capturedClient.setStatus('idle');
+            streamServer?.broadcastStatus('ready');
+          } finally {
+            activeTestIds.delete(payload.testId);
+          }
         });
         processTestQueue();
         break;

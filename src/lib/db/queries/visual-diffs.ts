@@ -308,6 +308,25 @@ export async function getPreviousRunScreenshot(testId: string, buildId: string, 
   return result?.currentImagePath ?? null;
 }
 
+/**
+ * Get distinct active baseline step labels for a given test.
+ * Used to populate suggestions when renaming a step label on the diff page.
+ */
+export async function getStepLabelsForTest(testId: string): Promise<string[]> {
+  const rows = await db
+    .selectDistinct({ stepLabel: baselines.stepLabel })
+    .from(baselines)
+    .where(and(
+      eq(baselines.testId, testId),
+      eq(baselines.isActive, true),
+    ))
+    .all();
+  return rows
+    .map(r => r.stepLabel)
+    .filter((label): label is string => label !== null)
+    .sort();
+}
+
 // Ignore Regions
 export async function getIgnoreRegions(testId: string) {
   return db.select().from(ignoreRegions).where(eq(ignoreRegions.testId, testId)).all();

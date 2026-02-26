@@ -4,8 +4,10 @@ import { revalidatePath } from 'next/cache';
 import * as queries from '@/lib/db/queries';
 import { requireTeamAccess } from '@/lib/auth';
 import { hashImageWithDimensions } from '@/lib/diff/hasher';
+import { generateDiff, type Rectangle } from '@/lib/diff/generator';
+import type { DiffEngineType, RegionDetectionMode } from '@/lib/db/schema';
 import path from 'path';
-import { STORAGE_ROOT } from '@/lib/storage/paths';
+import { STORAGE_ROOT, STORAGE_DIRS, toRelativePath } from '@/lib/storage/paths';
 
 /**
  * Approve a single visual diff
@@ -405,4 +407,132 @@ export async function rejectAllDiffs(buildId: string) {
 export async function getAIDiffSummary(buildId: string) {
   await requireTeamAccess();
   return queries.getAIDiffSummaryForBuild(buildId);
+}
+
+/**
+ * Get step label suggestions for a test (distinct active baseline step labels)
+ */
+export async function getStepLabelSuggestions(testId: string): Promise<string[]> {
+  await requireTeamAccess();
+  return queries.getStepLabelsForTest(testId);
+}
+
+/**
+ * Update a diff's step label and re-diff against the matching baseline
+ */
+export async function updateStepLabelAndRediff(diffId: string, newStepLabel: string | null) {
+  await requireTeamAccess();
+  const diff = await queries.getVisualDiff(diffId);
+  if (!diff) throw new Error('Diff not found');
+
+  // Short-circuit if label unchanged
+  if ((diff.stepLabel ?? null) === (newStepLabel ?? null)) {
+    return { success: true, changed: false };
+  }
+
+  // Resolve branch/repo context (same pattern as approveDiff)
+  const testResult = diff.testResultId
+    ? await queries.getTestResultById(diff.testResultId)
+    : null;
+  const testRun = testResult?.testRunId
+    ? await queries.getTestRun(testResult.testRunId)
+    : null;
+  const branch = testRun?.gitBranch || 'main';
+  const repositoryId = testRun?.repositoryId || null;
+  const repo = repositoryId ? await queries.getRepository(repositoryId) : null;
+  const defaultBranch = repo?.defaultBranch || 'main';
+
+  // Get diff sensitivity settings
+  const settings = await queries.getDiffSensitivitySettings(repositoryId);
+  const unchangedThreshold = settings.unchangedThreshold ?? 1;
+  const flakyThreshold = settings.flakyThreshold ?? 10;
+  const includeAntiAliasing = settings.includeAntiAliasing ?? false;
+  const ignorePageShift = settings.ignorePageShift ?? false;
+  const diffEngine = (settings.diffEngine as DiffEngineType) ?? 'pixelmatch';
+  const regionDetectionMode = (settings.regionDetectionMode as RegionDetectionMode) ?? 'grid';
+
+  // Fetch ignore regions
+  const testIgnoreRegions = await queries.getIgnoreRegions(diff.testId);
+  const ignoreRects: Rectangle[] | undefined = testIgnoreRegions.length > 0
+    ? testIgnoreRegions.map(r => ({ x: r.x, y: r.y, width: r.width, height: r.height }))
+    : undefined;
+
+  // Look up baseline: branch-specific first, then fallback to default branch
+  const baseline =
+    await queries.getBranchBaseline(diff.testId, newStepLabel, branch) ??
+    await queries.getActiveBaseline(diff.testId, newStepLabel, branch, defaultBranch);
+
+  if (baseline && diff.currentImagePath) {
+    // Re-diff against found baseline
+    const diffResult = await generateDiff(
+      path.join(STORAGE_ROOT, baseline.imagePath),
+      path.join(STORAGE_ROOT, diff.currentImagePath),
+      STORAGE_DIRS.diffs,
+      0.1,
+      includeAntiAliasing,
+      ignoreRects,
+      ignorePageShift,
+      diffEngine,
+      regionDetectionMode,
+    );
+
+    const pct = diffResult.percentageDifference;
+    let classification: 'unchanged' | 'flaky' | 'changed';
+    if (pct < unchangedThreshold) {
+      classification = 'unchanged';
+    } else if (pct < flakyThreshold) {
+      classification = 'flaky';
+    } else {
+      classification = 'changed';
+    }
+
+    // Strip absolute paths from aligned shift images
+    const metadata = diffResult.metadata;
+    if (metadata.pageShift?.alignedBaselineImagePath) {
+      metadata.pageShift.alignedBaselineImagePath = toRelativePath(metadata.pageShift.alignedBaselineImagePath);
+    }
+    if (metadata.pageShift?.alignedCurrentImagePath) {
+      metadata.pageShift.alignedCurrentImagePath = toRelativePath(metadata.pageShift.alignedCurrentImagePath);
+    }
+    if (metadata.pageShift?.alignedDiffImagePath) {
+      metadata.pageShift.alignedDiffImagePath = toRelativePath(metadata.pageShift.alignedDiffImagePath);
+    }
+
+    await queries.updateVisualDiff(diffId, {
+      stepLabel: newStepLabel,
+      baselineImagePath: baseline.imagePath,
+      diffImagePath: toRelativePath(diffResult.diffImagePath),
+      pixelDifference: diffResult.pixelDifference,
+      percentageDifference: diffResult.percentageDifference.toString(),
+      classification,
+      status: classification === 'unchanged' ? 'auto_approved' : 'pending',
+      metadata,
+    });
+  } else {
+    // No baseline found — mark as new screenshot
+    await queries.updateVisualDiff(diffId, {
+      stepLabel: newStepLabel,
+      baselineImagePath: null,
+      diffImagePath: null,
+      pixelDifference: 0,
+      percentageDifference: '0',
+      classification: 'changed',
+      status: 'pending',
+      metadata: { changedRegions: [], isNewTest: true },
+    });
+  }
+
+  // Recompute build status
+  if (diff.buildId) {
+    const newStatus = await queries.computeBuildStatus(diff.buildId);
+    await queries.updateBuild(diff.buildId, { overallStatus: newStatus });
+  }
+
+  revalidatePath('/builds');
+  if (diff.buildId) {
+    revalidatePath(`/builds/${diff.buildId}`);
+    revalidatePath(`/builds/${diff.buildId}/diff/${diffId}`);
+  }
+
+  return { success: true, changed: true };
 }

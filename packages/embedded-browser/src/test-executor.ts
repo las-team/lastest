@@ -82,9 +82,23 @@ export class EmbeddedTestExecutor {
         throw new Error('Test cancelled before starting');
       }
 
-      // Navigate to target URL on the fresh page
-      logFn('info', `Navigating to ${command.targetUrl}`);
-      await page.goto(command.targetUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
+      // Set default timeouts (mirrors standard runner lines 217-218)
+      page.setDefaultNavigationTimeout(30000);
+      page.setDefaultTimeout(15000);
+
+      // Intercept page.goto with logging (mirrors standard runner lines 729-741)
+      const originalGoto = page.goto.bind(page);
+      (page as any).goto = async (url: string, options?: any) => {
+        logFn('info', `Navigating to ${url}...`);
+        const response = await originalGoto(url, options);
+        logFn('info', `Navigation complete: ${response?.status() ?? 'no response'}`);
+        return response;
+      };
+
+      // Page event listeners for debugging (mirrors standard runner lines 227-240)
+      page.on('console', (msg) => { if (msg.type() === 'error') logFn('warn', `Console error: ${msg.text()}`); });
+      page.on('pageerror', (err) => logFn('warn', `Page error: ${err.message}`));
+      page.on('requestfailed', (req) => logFn('warn', `Request failed: ${req.url()} ${req.failure()?.errorText ?? ''}`));
 
       // Override page.screenshot to intercept screenshot calls (mirrors runner.ts)
       let screenshotStep = 1;
@@ -276,12 +290,14 @@ export class EmbeddedTestExecutor {
       const isTimeout = errorMessage.includes('timed out');
       logFn('error', `Test ${isTimeout ? 'timed out' : 'failed'}: ${errorMessage}`);
 
-      // Try to capture error screenshot
+      // Try to capture error screenshot (skip on timeout — in-flight ops would hang)
       let errorScreenshot: string | undefined;
-      try {
-        const buffer = await page.screenshot();
-        errorScreenshot = buffer.toString('base64');
-      } catch { /* ignore */ }
+      if (!isTimeout) {
+        try {
+          const buffer = await page.screenshot();
+          errorScreenshot = buffer.toString('base64');
+        } catch { /* ignore */ }
+      }
 
       return {
         status: isTimeout ? 'timeout' : 'failed',

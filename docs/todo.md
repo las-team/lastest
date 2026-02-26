@@ -45,6 +45,9 @@ some elements are disappearing from test 13b
   ├─────┼─────────────────────┼─────────────────────────┼────────────────┤
   │ 20  │ Paste CSV as Chart  │ Clipboard support       │ charts.test    │
   └─────┴─────────────────────┴─────────────────────────┴────────────────┘
+
+  ehhez most arrow és arrow binding related teszteket kell felvenni, 1) hogy a hasznosságát fel tudjam mérni 2) hogy személyre szabott sztoriban tudjam megmutatni Davidnek hogy mennyit segített. 3) Alátámasztani mindezt azzal hogy a PR-jaim release utáni bug countja csökken látványosan
+
 ## commands
 
   please check what kind of measures have been implemented to try to get consistent

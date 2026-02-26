@@ -1,8 +1,9 @@
 import { notFound } from 'next/navigation';
 import Link from 'next/link';
-import { getDiff, getDiffsByBuild } from '@/server/actions/diffs';
+import { getDiff, getDiffsByBuild, getStepLabelSuggestions } from '@/server/actions/diffs';
 import { getBuild } from '@/server/actions/builds';
 import { DiffViewerClient } from './diff-viewer-client';
+import { StepLabelEditor } from './step-label-editor';
 import { ChevronLeft, ChevronRight, ExternalLink } from 'lucide-react';
 
 interface PageProps {
@@ -37,6 +38,9 @@ export default async function DiffPage({ params }: PageProps) {
     }
   }
 
+  // Get step label suggestions for inline editing
+  const suggestions = await getStepLabelSuggestions(diff.testId);
+
   // Get all diffs for navigation
   const allDiffs = await getDiffsByBuild(buildId);
   const currentIndex = allDiffs.findIndex((d) => d.id === diffId);
@@ -55,11 +59,14 @@ export default async function DiffPage({ params }: PageProps) {
             ← Back to Build
           </Link>
           <div>
-            <h1 className="text-xl font-bold">
+            <h1 className="text-xl font-bold flex items-center gap-2">
               {diff.test?.name || `Test ${diff.testId.slice(0, 8)}`}
-              {diff.stepLabel && (
-                <span className="text-muted-foreground font-normal text-base ml-2">&rsaquo; {diff.stepLabel}</span>
-              )}
+              <StepLabelEditor
+                diffId={diffId}
+                testId={diff.testId}
+                currentStepLabel={diff.stepLabel}
+                suggestions={suggestions}
+              />
             </h1>
             <div className="flex items-center gap-3 text-sm text-muted-foreground">
               {openPageUrl && (

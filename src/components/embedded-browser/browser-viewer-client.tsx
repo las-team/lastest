@@ -71,15 +71,7 @@ export function BrowserViewer({ streamUrl, initialViewport, className, expiresAt
     img.src = `data:image/jpeg;base64,${base64Data}`;
   }, []);
 
-  // Scale factor for input coordinate translation
-  const getScale = useCallback(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return { scaleX: 1, scaleY: 1 };
-    return {
-      scaleX: viewport.width / canvas.clientWidth,
-      scaleY: viewport.height / canvas.clientHeight,
-    };
-  }, [viewport]);
+  // At 1:1 rendering, canvas pixels map directly to viewport pixels
 
   // Send message to WebSocket
   const sendWs = useCallback((message: object) => {
@@ -218,9 +210,8 @@ export function BrowserViewer({ streamUrl, initialViewport, className, expiresAt
       if (!canvas) return;
 
       const rect = canvas.getBoundingClientRect();
-      const scale = getScale();
-      const x = Math.round((e.clientX - rect.left) * scale.scaleX);
-      const y = Math.round((e.clientY - rect.top) * scale.scaleY);
+      const x = Math.round(e.clientX - rect.left);
+      const y = Math.round(e.clientY - rect.top);
 
       const message: { type: string; payload: StreamMouseEvent } = {
         type: 'stream:input',
@@ -235,7 +226,7 @@ export function BrowserViewer({ streamUrl, initialViewport, className, expiresAt
 
       sendWs(message);
     },
-    [getScale, sendWs]
+    [sendWs]
   );
 
   const handleWheel = useCallback(
@@ -244,9 +235,8 @@ export function BrowserViewer({ streamUrl, initialViewport, className, expiresAt
       if (!canvas) return;
 
       const rect = canvas.getBoundingClientRect();
-      const scale = getScale();
-      const x = Math.round((e.clientX - rect.left) * scale.scaleX);
-      const y = Math.round((e.clientY - rect.top) * scale.scaleY);
+      const x = Math.round(e.clientX - rect.left);
+      const y = Math.round(e.clientY - rect.top);
 
       sendWs({
         type: 'stream:input',
@@ -260,7 +250,7 @@ export function BrowserViewer({ streamUrl, initialViewport, className, expiresAt
         } satisfies StreamMouseEvent,
       });
     },
-    [getScale, sendWs]
+    [sendWs]
   );
 
   // Keyboard event handlers
@@ -366,8 +356,8 @@ export function BrowserViewer({ streamUrl, initialViewport, className, expiresAt
         onFullscreenToggle={toggleFullscreen}
       />
 
-      {/* Canvas container — centers browser at viewport dimensions, scales down if larger than available space */}
-      <div className="relative flex items-center justify-center overflow-hidden rounded-b-lg border bg-black">
+      {/* Canvas container — 1:1 pixel rendering, scrollable if larger than available space */}
+      <div className="relative overflow-auto rounded-b-lg border bg-black">
         {connectionStatus !== 'connected' && (
           <div className="absolute inset-0 z-10 flex items-center justify-center bg-black/80">
             {(connectionStatus === 'connecting' || connectionStatus === 'reconnecting') ? (
@@ -404,10 +394,6 @@ export function BrowserViewer({ streamUrl, initialViewport, className, expiresAt
           style={{
             width: viewport.width,
             height: viewport.height,
-            maxWidth: '100%',
-            maxHeight: isFullscreen ? '100vh' : `${viewport.height}px`,
-            objectFit: 'contain',
-            aspectRatio: `${viewport.width} / ${viewport.height}`,
           }}
           onMouseMove={(e) => handleMouseEvent(e, 'move')}
           onMouseDown={(e) => handleMouseEvent(e, 'down')}
