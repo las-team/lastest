@@ -19,6 +19,7 @@ import {
   stopRecording,
   captureScreenshot,
   createAssertion,
+  flagDownload,
   saveRecordedTest,
   updateRerecordedTest,
   getOrCreateFunctionalArea,
@@ -61,6 +62,7 @@ import {
   Keyboard,
   ShieldCheck,
   Play,
+  Download,
 } from 'lucide-react';
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
@@ -129,7 +131,8 @@ function getEventDescription(event: RecordingEvent): string {
       return `Navigate to ${event.data.relativePath || event.data.url || 'page'}`;
     case 'action':
       if (event.data.action === 'click') {
-        return `${modPrefix}Click ${event.data.selector?.slice(0, 40) || 'element'}`;
+        const dlSuffix = event.data.downloadWrap ? ' (download)' : '';
+        return `${modPrefix}Click ${event.data.selector?.slice(0, 40) || 'element'}${dlSuffix}`;
       }
       if (event.data.action === 'fill') {
         return `Fill ${event.data.selector?.slice(0, 30) || 'input'} with "${event.data.value?.slice(0, 20) || ''}"`;
@@ -156,6 +159,8 @@ function getEventDescription(event: RecordingEvent): string {
         domContentLoaded: 'DOM Ready',
       };
       return `Assert: ${labels[event.data.assertionType || ''] || event.data.assertionType}`;
+    case 'download':
+      return 'Download expected';
     case 'mouse-down':
       return `${modPrefix}Mouse down at (${event.data.coordinates?.x}, ${event.data.coordinates?.y})`;
     case 'mouse-up':
@@ -226,6 +231,8 @@ interface RecordingEvent {
     key?: string;
     deltaX?: number;
     deltaY?: number;
+    downloadWrap?: boolean;
+    autoDetected?: boolean;
     elementInfo?: {
       tagName: string;
       id?: string;
@@ -500,6 +507,15 @@ export function RecordingClient({
       // Event will come through polling
     } catch (error) {
       console.error('Failed to create assertion:', error);
+    }
+  };
+
+  const handleFlagDownload = async () => {
+    try {
+      await flagDownload(repositoryId);
+      // Event will come through polling
+    } catch (error) {
+      console.error('Failed to flag download:', error);
     }
   };
 
@@ -958,6 +974,10 @@ export function RecordingClient({
                     </DropdownMenuItem>
                   </DropdownMenuContent>
                 </DropdownMenu>
+                <Button onClick={handleFlagDownload} variant="outline">
+                  <Download className="h-4 w-4 mr-2" />
+                  Wait for Download
+                </Button>
                 <Button
                   onClick={handleStopRecording}
                   variant="destructive"
@@ -1026,6 +1046,7 @@ export function RecordingClient({
                             {event.type === 'keypress' && <Keyboard className="h-3 w-3 text-indigo-500" />}
                             {event.type === 'keydown' && <Keyboard className="h-3 w-3 text-green-500" />}
                             {event.type === 'keyup' && <Keyboard className="h-3 w-3 text-orange-400" />}
+                            {event.type === 'download' && <Download className="h-3 w-3 text-emerald-500" />}
                           </div>
                           <div className="flex-1 min-w-0">
                             <span className="text-muted-foreground text-xs">

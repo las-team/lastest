@@ -47,6 +47,7 @@ export class EmbeddedRecorder {
   private eventBatchInterval: ReturnType<typeof setInterval> | null = null;
   private pendingEvents: RecordingEventData[] = [];
   private onEvent: ((events: RecordingEventData[]) => void) | null = null;
+  private nextClickIsDownload = false;
 
   /**
    * Start recording on a fresh context/page.
@@ -69,6 +70,7 @@ export class EmbeddedRecorder {
     this.context = await browser.newContext({
       viewport,
       ignoreHTTPSErrors: true,
+      acceptDownloads: true,
     });
     this.page = await this.context.newPage();
 
@@ -121,6 +123,23 @@ export class EmbeddedRecorder {
       }
     });
 
+    // Auto-detect downloads: retroactively mark the last click/mouse-down as download-triggering
+    this.page.on('download', () => {
+      if (!this.isRecording) return;
+      for (let i = this.events.length - 1; i >= 0; i--) {
+        const ev = this.events[i];
+        const isClick = ev.type === 'action' && (ev.data.action === 'click' || ev.data.action === 'rightclick');
+        const isMouseDown = ev.type === 'mouse-down';
+        if (isClick || isMouseDown) {
+          if (!ev.data.downloadWrap) {
+            ev.data.downloadWrap = true;
+            ev.data.autoDetected = true;
+          }
+          break;
+        }
+      }
+    });
+
     // Batch events and send to server periodically
     this.eventBatchInterval = setInterval(() => {
       this.flushPendingEvents();
@@ -155,9 +174,14 @@ export class EmbeddedRecorder {
       const hasCoordsFallback = action === 'click' && coordinates !== undefined;
       const syntaxValid = hasValidSelectors || hasCoordsFallback;
 
+      // Check if this click was pre-flagged as a download trigger
+      const downloadWrap = (action === 'click' || action === 'rightclick') && this.nextClickIsDownload ? true : undefined;
+      if (downloadWrap) this.nextClickIsDownload = false;
+
       this.addEvent('action', {
         action, selector: primarySelector, selectors, value, coordinates, actionId,
         modifiers: modifiers && modifiers.length > 0 ? modifiers : undefined,
+        downloadWrap,
       }, 'committed', {
         syntaxValid,
         domVerified: undefined,
@@ -171,9 +195,14 @@ export class EmbeddedRecorder {
       });
 
       await this.page.exposeFunction('__recordMouseEvent', (type: string, x: number, y: number, button: number, modifiers?: string[]) => {
+        // Check if this mouse-down was pre-flagged as a download trigger
+        const downloadWrap = type === 'down' && this.nextClickIsDownload ? true : undefined;
+        if (downloadWrap) this.nextClickIsDownload = false;
+
         this.addEvent(type === 'down' ? 'mouse-down' : 'mouse-up', {
           coordinates: { x, y }, button,
           modifiers: modifiers && modifiers.length > 0 ? modifiers : undefined,
+          downloadWrap,
         });
       });
     }
@@ -308,6 +337,15 @@ export class EmbeddedRecorder {
   createAssertion(assertionType: string): void {
     if (!this.isRecording) return;
     this.addEvent('assertion', { assertionType });
+  }
+
+  /**
+   * Flag that the next click should be wrapped in downloads.waitForDownload().
+   */
+  flagDownload(): void {
+    if (!this.isRecording) return;
+    this.nextClickIsDownload = true;
+    this.addEvent('download', {});
   }
 
   /**

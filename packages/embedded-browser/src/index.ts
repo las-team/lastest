@@ -391,6 +391,13 @@ async function startup(): Promise<void> {
         break;
       }
 
+      case 'command:flag_download': {
+        if (!recorder?.isActive()) break;
+        recorder.flagDownload();
+        console.log(`[Command] Flagged next click as download trigger`);
+        break;
+      }
+
       case 'command:cancel_test': {
         if (testExecutor) {
           testExecutor.abort();

@@ -18,7 +18,7 @@ import { v4 as uuid } from 'uuid';
 import { revalidatePath } from 'next/cache';
 import { chromium, firefox, webkit } from 'playwright';
 import { createMessage } from '@/lib/ws/protocol';
-import type { StartRecordingCommand, StopRecordingCommand, CaptureScreenshotCommand, CreateAssertionCommand } from '@/lib/ws/protocol';
+import type { StartRecordingCommand, StopRecordingCommand, CaptureScreenshotCommand, CreateAssertionCommand, FlagDownloadCommand } from '@/lib/ws/protocol';
 import {
   queueCommandToDB,
   createRemoteRecordingSession,
@@ -265,6 +265,28 @@ export async function createAssertion(type: AssertionType, repositoryId?: string
   // Local recording
   const recorder = getRecorder(repositoryId);
   const success = await recorder.createAssertion(type);
+
+  return { success };
+}
+
+export async function flagDownload(repositoryId?: string | null): Promise<{ success: boolean }> {
+  await requireTeamAccess();
+
+  // Check for remote recording session
+  const remoteSession = getRemoteRecordingSession(repositoryId);
+  if (remoteSession?.isRecording) {
+    console.log(`[flagDownload] Dispatching to remote runner ${remoteSession.runnerId}`);
+    const command = createMessage<FlagDownloadCommand>('command:flag_download', {
+      sessionId: remoteSession.sessionId,
+    });
+    await queueCommandToDB(remoteSession.runnerId, command);
+    return { success: true };
+  }
+
+  // Local recording
+  console.log(`[flagDownload] Using local recorder, repositoryId=${repositoryId}`);
+  const recorder = getRecorder(repositoryId);
+  const success = recorder.flagDownload();
 
   return { success };
 }

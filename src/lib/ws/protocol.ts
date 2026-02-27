@@ -16,6 +16,7 @@ export type MessageType =
   | 'command:start_recording'
   | 'command:stop_recording'
   | 'command:create_assertion'
+  | 'command:flag_download'
   | 'command:ping'
   | 'command:shutdown'
   // Agent → Server (Responses)
@@ -281,6 +282,15 @@ export interface CreateAssertionCommand extends BaseMessage {
   payload: CreateAssertionCommandPayload;
 }
 
+export interface FlagDownloadCommandPayload {
+  sessionId: string;
+}
+
+export interface FlagDownloadCommand extends BaseMessage {
+  type: 'command:flag_download';
+  payload: FlagDownloadCommandPayload;
+}
+
 export interface CaptureScreenshotCommand extends BaseMessage {
   type: 'command:capture_screenshot';
   payload: { sessionId: string };
@@ -391,6 +401,7 @@ export type ServerCommand =
   | StartRecordingCommand
   | StopRecordingCommand
   | CreateAssertionCommand
+  | FlagDownloadCommand
   | CaptureScreenshotCommand
   | PingCommand;
 

@@ -9,6 +9,8 @@ Network Interception
 Support https://github.com/excalidraw/excalidraw/tree/master/packages/excalidraw/tests ~/.claude/plans/declarative-kindling-coral.md 70%
 
 /home/ewyct/.claude/plans/dynamic-discovering-dove.md <- but without public image pushing
+
+e2e agent https://github.com/coleam00/link-in-bio-page-builder/blob/main/.claude/skills/e2e-test/SKILL.md
 ## ideas
 Test coverage assessment and recreation based on existing test set
 Tweet about us
