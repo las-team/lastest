@@ -20,6 +20,7 @@ RUN corepack enable && corepack prepare pnpm@10.28.1 --activate
 # Copy package files
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY packages/runner/package.json ./packages/runner/
+COPY packages/embedded-browser/package.json ./packages/embedded-browser/
 
 # Install dependencies
 RUN pnpm install --frozen-lockfile
@@ -58,6 +59,9 @@ ENV NEXT_PUBLIC_GIT_COMMIT_COUNT=$GIT_COMMIT_COUNT
 
 # Build the application
 RUN pnpm build
+
+# Build embedded-browser
+RUN cd packages/embedded-browser && npx tsup src/index.ts --format esm --dts
 
 # -----------------------------------------------------------------------------
 # Stage 3: Production Runner (with Playwright)
@@ -113,6 +117,14 @@ RUN ln -sf .pnpm/@anthropic-ai+claude-agent-sdk@0.2.19_zod@4.3.5/node_modules/@a
 # Make claude CLI available for `docker exec ... claude login`
 RUN ln -s /app/node_modules/@anthropic-ai/claude-agent-sdk/cli.js /usr/local/bin/claude
 
+# Copy embedded-browser dist + runtime deps
+COPY --from=builder --chown=nextjs:nodejs /app/packages/embedded-browser/dist /app/embedded-browser/dist
+COPY --from=builder --chown=nextjs:nodejs /app/packages/embedded-browser/package.json /app/embedded-browser/
+COPY --from=deps --chown=nextjs:nodejs /app/node_modules/.pnpm/ws@8.19.0/node_modules/ws /app/embedded-browser/node_modules/ws
+RUN mkdir -p /app/embedded-browser/node_modules && \
+    ln -s /app/node_modules/playwright /app/embedded-browser/node_modules/playwright && \
+    ln -s /app/node_modules/playwright-core /app/embedded-browser/node_modules/playwright-core
+
 # Copy entrypoint script
 COPY --chown=nextjs:nodejs scripts/docker-entrypoint.sh /docker-entrypoint.sh
 RUN chmod +x /docker-entrypoint.sh
@@ -139,7 +151,7 @@ LABEL org.opencontainers.image.source="https://github.com/lastest2/lastest2"
 HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
     CMD wget -q --spider http://localhost:3000/api/health || exit 1
 
-EXPOSE 3000
+EXPOSE 3000 9223 9224
 
 USER nextjs
 

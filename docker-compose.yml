@@ -22,6 +22,7 @@ services:
     container_name: lastest2
     ports:
       - "3000:3000"
+      - "9223:9223"
     volumes:
       - lastest2-data:/app/data
       - lastest2-storage:/app/storage
@@ -34,6 +35,10 @@ services:
       - GITHUB_CLIENT_SECRET=${GITHUB_CLIENT_SECRET:-}
       - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID:-}
       - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET:-}
+      - ENABLE_EMBEDDED_BROWSER=${ENABLE_EMBEDDED_BROWSER:-false}
+      - LASTEST2_TOKEN=${LASTEST2_TOKEN:-}
+      - STREAM_PORT=9223
+      - STREAM_HOST=${STREAM_HOST:-localhost}
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "wget", "-q", "--spider", "http://localhost:3000/api/health"]
@@ -43,29 +48,6 @@ services:
       start_period: 60s
     networks:
       - lastest2-net
-
-  embedded-browser:
-    build:
-      context: .
-      dockerfile: packages/embedded-browser/Dockerfile
-    network_mode: host
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
-    environment:
-      - LASTEST2_URL=${LASTEST2_URL:-http://localhost:3000}
-      - LASTEST2_TOKEN=${LASTEST2_TOKEN:?LASTEST2_TOKEN is required - generate one from Settings > Create Runner > Embedded Browser}
-      - STREAM_PORT=9223
-      - STREAM_HOST=${STREAM_HOST:-localhost}
-      - STREAM_AUTH_TOKEN=${STREAM_AUTH_TOKEN:-}
-    deploy:
-      replicas: ${EMBEDDED_REPLICAS:-1}
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "wget", "-q", "--spider", "http://localhost:9224/health"]
-      interval: 10s
-      timeout: 5s
-      retries: 3
-      start_period: 30s
 
 networks:
   lastest2-net:

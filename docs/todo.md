@@ -6,11 +6,7 @@ Teardown
 Accept Downloads
 Network Interception
 ## features
-Support https://github.com/excalidraw/excalidraw/tree/master/packages/excalidraw/tests ~/.claude/plans/declarative-kindling-coral.md 70%
-
 /home/ewyct/.claude/plans/dynamic-discovering-dove.md <- but without public image pushing
-
-e2e agent https://github.com/coleam00/link-in-bio-page-builder/blob/main/.claude/skills/e2e-test/SKILL.md
 ## ideas
 Test coverage assessment and recreation based on existing test set
 Tweet about us
@@ -47,18 +43,6 @@ some elements are disappearing from test 13b
   ├─────┼─────────────────────┼─────────────────────────┼────────────────┤
   │ 20  │ Paste CSV as Chart  │ Clipboard support       │ charts.test    │
   └─────┴─────────────────────┴─────────────────────────┴────────────────┘
-
-link action to baseurl
-    így tudod lekérdezni Verceltől az urlt:
-  curl "https://api.vercel.com/v6/deployments?projectId=PROJECT_ID&meta-githubCommitRef=branch-name" \
-    -H "Authorization: Bearer $VERCEL_TOKEN"
-  vagy commit hash alapján:
-  curl "https://api.vercel.com/v6/deployments?projectId=PROJECT_ID&meta-githubCommitSha=commit-hash" \
-    -H "Authorization: Bearer $VERCEL_TOKEN"
-  viszont arra ügyelj, hogy nem biztos hogy minden commithoz lesz vercel build!
-  az sem garantált hogy a legutolsó commithoz van
-  a végeredmény a válasz JSON deployments.meta.branchAlias-ban lesz
-  ha nincs egy commithoz szerintem akkor skippelni kellene silent a visual regression tesztet
 
   ehhez most arrow és arrow binding related teszteket kell felvenni, 1) hogy a hasznosságát fel tudjam mérni 2) hogy személyre szabott sztoriban tudjam megmutatni Davidnek hogy mennyit segített. 3) Alátámasztani mindezt azzal hogy a PR-jaim release utáni bug countja csökken látványosan
 
