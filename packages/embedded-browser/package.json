@@ -11,6 +11,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@lastest/shared": "workspace:*",
     "playwright": "1.57.0",
     "ws": "^8.16.0"
   },

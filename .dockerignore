@@ -5,6 +5,7 @@ node_modules
 # Build outputs
 .next
 dist
+!packages/embedded-browser/dist
 *.tsbuildinfo
 
 # Database (handled via volumes)

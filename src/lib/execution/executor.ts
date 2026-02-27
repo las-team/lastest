@@ -27,7 +27,7 @@ import { createHash } from 'crypto';
 import fs from 'fs/promises';
 import path from 'path';
 import { STORAGE_DIRS } from '@/lib/storage/paths';
-import { getCrossOsFontCSS } from '@/lib/playwright/constants';
+import { getCrossOsFontCSS } from '@lastest/shared';
 import {
   getCommandsByTestRun,
   getUnacknowledgedResults,
