@@ -304,6 +304,11 @@ export const CROSS_OS_CHROMIUM_ARGS = [
   '--disable-background-timer-throttling',
   '--disable-renderer-backgrounding',
   '--disable-backgrounding-occluded-windows',
+  // Sandbox args — harmless on non-Docker hosts, ensures identical compositing
+  // behavior between containerized (embedded) and bare-metal (runner) environments
+  '--no-sandbox',
+  '--disable-setuid-sandbox',
+  '--disable-dev-shm-usage',
 ];
 
 /**

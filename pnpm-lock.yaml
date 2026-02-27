@@ -227,7 +227,7 @@ importers:
         specifier: ^12.0.0
         version: 12.1.0
       playwright:
-        specifier: ^1.48.0
+        specifier: 1.57.0
         version: 1.57.0
     devDependencies:
       '@types/node':

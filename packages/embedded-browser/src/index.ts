@@ -75,12 +75,7 @@ async function startup(): Promise<void> {
   console.log('[Startup] Launching Chromium...');
   browser = await chromium.launch({
     headless: true,
-    args: [
-      '--no-sandbox',
-      '--disable-setuid-sandbox',
-      '--disable-dev-shm-usage',
-      ...CROSS_OS_CHROMIUM_ARGS,
-    ],
+    args: CROSS_OS_CHROMIUM_ARGS,
   });
 
   context = await browser.newContext({
