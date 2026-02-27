@@ -8,17 +8,53 @@ jobs:
   visual-regression:
     runs-on: ubuntu-latest
     steps:
+      # ── Vercel preview URL resolution (uncomment to enable) ──────────
+      # Queries GitHub Deployments API for the Vercel preview URL.
+      # No extra secrets needed — uses github.token.
+      # Waits up to 10min for deployment, skips silently if none found.
+      #
+      # - name: Wait for Vercel preview deployment
+      #   id: vercel
+      #   env:
+      #     GH_TOKEN: ${{ github.token }}
+      #   run: |
+      #     COMMIT_SHA="${{ github.event.pull_request.head.sha }}"
+      #     MAX_ATTEMPTS=20
+      #     SLEEP_SECONDS=30
+      #
+      #     for i in $(seq 1 $MAX_ATTEMPTS); do
+      #       echo "Attempt $i/$MAX_ATTEMPTS: checking for Vercel preview deployment..."
+      #
+      #       DEPLOY_ID=$(gh api "repos/${{ github.repository }}/deployments?sha=${COMMIT_SHA}&environment=Preview" \
+      #         --jq '.[0].id // empty' 2>/dev/null)
+      #
+      #       if [ -n "$DEPLOY_ID" ]; then
+      #         URL=$(gh api "repos/${{ github.repository }}/deployments/${DEPLOY_ID}/statuses" \
+      #           --jq '[.[] | select(.state == "success")][0].environment_url // empty' 2>/dev/null)
+      #
+      #         if [ -n "$URL" ]; then
+      #           echo "url=${URL}" >> $GITHUB_OUTPUT
+      #           echo "skip=false" >> $GITHUB_OUTPUT
+      #           echo "✅ Found Vercel preview: ${URL}"
+      #           exit 0
+      #         fi
+      #       fi
+      #
+      #       if [ $i -lt $MAX_ATTEMPTS ]; then
+      #         echo "No ready preview deployment yet, waiting ${SLEEP_SECONDS}s..."
+      #         sleep $SLEEP_SECONDS
+      #       fi
+      #     done
+      #
+      #     echo "skip=true" >> $GITHUB_OUTPUT
+      #     echo "⚠️ No Vercel preview deployment found after ${MAX_ATTEMPTS} attempts, skipping visual regression"
+
       - name: Run visual regression tests
-        # --server      Lastest2 server URL (required)
-        # --token       Runner auth token (required)
-        # --repo        Repository to test, e.g. "owner/repo" (required)
-        # --target-url  Override base URL for tests (optional)
-        # --branch      Auto-detected from GITHUB_HEAD_REF
-        # --commit      Auto-detected from GITHUB_SHA
-        # --timeout     Build timeout in ms (default: 300000)
-        # --fail-on-changes  Exit 1 on visual changes (optional)
+        # To use Vercel preview URL, uncomment the step above and add:
+        #   if: steps.vercel.outputs.skip != 'true'
+        #   --target-url "${{ steps.vercel.outputs.url }}"
         run: |
           npx @lastest/runner@latest trigger \
-            --repo "ewyct/excalidraw_test" \
+            --repo "${{ github.repository }}" \
             --server "${{ secrets.LASTEST_SERVER_URL }}" \
             --token "${{ secrets.LASTEST_RUNNER_TOKEN }}"
