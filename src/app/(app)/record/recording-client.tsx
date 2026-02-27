@@ -471,11 +471,9 @@ export function RecordingClient({
                   const session = data.sessions.find((s: { runnerId: string }) => s.runnerId === executionTarget);
                   if (session?.streamUrl) {
                     const token = data.streamAuthToken;
-                    // Use the app's own origin to proxy the WebSocket (avoids mixed content on HTTPS)
-                    const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-                    const proxyUrl = `${wsProtocol}//${window.location.host}/api/embedded/stream/ws`;
+                    // Pass direct stream URL — BrowserViewer will replace hostname for remote access
                     setEmbeddedStreamUrl(
-                      token ? `${proxyUrl}?token=${encodeURIComponent(token)}` : proxyUrl
+                      token ? `${session.streamUrl}?token=${encodeURIComponent(token)}` : session.streamUrl
                     );
                   }
                 }

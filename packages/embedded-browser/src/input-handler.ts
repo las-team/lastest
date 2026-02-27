@@ -9,10 +9,11 @@ import type { CDPSession, Page } from 'playwright';
 
 export interface MouseEvent {
   type: 'mouse';
-  action: 'move' | 'down' | 'up' | 'click' | 'dblclick' | 'wheel';
+  action: 'move' | 'down' | 'up' | 'wheel';
   x: number;
   y: number;
   button?: 'left' | 'right' | 'middle';
+  clickCount?: number;
   deltaX?: number;
   deltaY?: number;
 }
@@ -103,7 +104,7 @@ export class InputHandler {
           x: event.x,
           y: event.y,
           button,
-          clickCount: 1,
+          clickCount: event.clickCount ?? 1,
         });
         break;
 
@@ -113,24 +114,7 @@ export class InputHandler {
           x: event.x,
           y: event.y,
           button,
-          clickCount: 1,
-        });
-        break;
-
-      case 'click':
-        await this.cdpSession.send('Input.dispatchMouseEvent', {
-          type: 'mousePressed',
-          x: event.x,
-          y: event.y,
-          button,
-          clickCount: 1,
-        });
-        await this.cdpSession.send('Input.dispatchMouseEvent', {
-          type: 'mouseReleased',
-          x: event.x,
-          y: event.y,
-          button,
-          clickCount: 1,
+          clickCount: event.clickCount ?? 1,
         });
         // Dispatch synthetic contextmenu for right-click so browser-script sees it
         if (button === 'right' && this.page) {
@@ -143,23 +127,6 @@ export class InputHandler {
             }));
           }, { x: event.x, y: event.y, shiftKey: this.modifiers.shift });
         }
-        break;
-
-      case 'dblclick':
-        await this.cdpSession.send('Input.dispatchMouseEvent', {
-          type: 'mousePressed',
-          x: event.x,
-          y: event.y,
-          button,
-          clickCount: 2,
-        });
-        await this.cdpSession.send('Input.dispatchMouseEvent', {
-          type: 'mouseReleased',
-          x: event.x,
-          y: event.y,
-          button,
-          clickCount: 2,
-        });
         break;
 
       case 'wheel':

@@ -110,11 +110,13 @@ async function startup(): Promise<void> {
 
   // Handle navigate requests from stream clients (toolbar URL bar)
   streamServer.onNavigate = async (url: string) => {
-    if (!page) return;
-    console.log(`[Navigate] ${url}`);
+    // During recording, navigate the recording page instead of idle page
+    const targetPage = (isRecording && recorder?.isActive()) ? recorder.getPage() : page;
+    if (!targetPage) return;
+    console.log(`[Navigate] ${url} (${isRecording ? 'recording' : 'idle'} page)`);
     try {
-      await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
-      streamServer!.broadcastStatus('ready', page.url());
+      await targetPage.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
+      streamServer!.broadcastStatus('ready', targetPage.url());
     } catch (err) {
       console.error(`[Navigate] Failed:`, err);
     }

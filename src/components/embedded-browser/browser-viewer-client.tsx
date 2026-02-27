@@ -94,9 +94,14 @@ export function BrowserViewer({ streamUrl, initialViewport, className, expiresAt
     }
 
     const connect = (attempt: number) => {
-      // Support relative paths — construct full WebSocket URL from page origin
       let wsUrl = streamUrl;
-      if (streamUrl.startsWith('/')) {
+      if (streamUrl.startsWith('ws://') || streamUrl.startsWith('wss://')) {
+        // Direct stream URL — replace hostname with current page hostname for remote access
+        const parsed = new URL(wsUrl);
+        parsed.hostname = window.location.hostname;
+        wsUrl = parsed.toString();
+      } else if (streamUrl.startsWith('/')) {
+        // Relative path — construct full WebSocket URL from page origin
         const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
         wsUrl = `${proto}//${window.location.host}${streamUrl}`;
       }
@@ -219,18 +224,19 @@ export function BrowserViewer({ streamUrl, initialViewport, className, expiresAt
       const x = Math.round(e.clientX - rect.left);
       const y = Math.round(e.clientY - rect.top);
 
-      const message: { type: string; payload: StreamMouseEvent } = {
-        type: 'stream:input',
-        payload: {
-          type: 'mouse',
-          action,
-          x,
-          y,
-          button: e.button === 2 ? 'right' : e.button === 1 ? 'middle' : 'left',
-        },
+      const payload: StreamMouseEvent = {
+        type: 'mouse',
+        action,
+        x,
+        y,
+        button: e.button === 2 ? 'right' : e.button === 1 ? 'middle' : 'left',
       };
 
-      sendWs(message);
+      if (action === 'down' || action === 'up') {
+        payload.clickCount = e.detail || 1;
+      }
+
+      sendWs({ type: 'stream:input', payload });
     },
     [sendWs]
   );
@@ -404,8 +410,6 @@ export function BrowserViewer({ streamUrl, initialViewport, className, expiresAt
           onMouseMove={(e) => handleMouseEvent(e, 'move')}
           onMouseDown={(e) => handleMouseEvent(e, 'down')}
           onMouseUp={(e) => handleMouseEvent(e, 'up')}
-          onClick={(e) => handleMouseEvent(e, 'click')}
-          onDoubleClick={(e) => handleMouseEvent(e, 'dblclick')}
           onWheel={handleWheel}
           onKeyDown={handleKeyDown}
           onKeyUp={handleKeyUp}

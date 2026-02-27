@@ -470,10 +470,11 @@ export interface StreamInputMessage extends BaseMessage {
 
 export interface StreamMouseEvent {
   type: 'mouse';
-  action: 'move' | 'down' | 'up' | 'click' | 'dblclick' | 'wheel';
+  action: 'move' | 'down' | 'up' | 'wheel';
   x: number;
   y: number;
   button?: 'left' | 'right' | 'middle';
+  clickCount?: number;
   deltaX?: number;
   deltaY?: number;
 }
