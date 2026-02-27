@@ -96,10 +96,17 @@ export function BrowserViewer({ streamUrl, initialViewport, className, expiresAt
     const connect = (attempt: number) => {
       let wsUrl = streamUrl;
       if (streamUrl.startsWith('ws://') || streamUrl.startsWith('wss://')) {
-        // Direct stream URL — replace hostname with current page hostname for remote access
-        const parsed = new URL(wsUrl);
-        parsed.hostname = window.location.hostname;
-        wsUrl = parsed.toString();
+        if (window.location.protocol === 'https:') {
+          // HTTPS page can't connect to ws:// (mixed content) — use proxy path through the app
+          const parsed = new URL(wsUrl);
+          const qs = parsed.search; // preserve ?token=... etc.
+          wsUrl = `wss://${window.location.host}/api/embedded/stream/ws${qs}`;
+        } else {
+          // HTTP — connect directly, replacing hostname for remote access
+          const parsed = new URL(wsUrl);
+          parsed.hostname = window.location.hostname;
+          wsUrl = parsed.toString();
+        }
       } else if (streamUrl.startsWith('/')) {
         // Relative path — construct full WebSocket URL from page origin
         const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
