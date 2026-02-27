@@ -203,7 +203,7 @@ export function MetricsRow({
   return (
     <div className="space-y-4">
       {/* Pass Rate Bar */}
-      <div className="p-4 bg-card border rounded-lg">
+      <div className="p-4">
         <div className="flex items-center justify-between mb-2">
           <span className="text-sm font-medium text-foreground">
             {isRunning ? 'Progress' : 'Pass Rate'}

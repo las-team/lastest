@@ -163,6 +163,7 @@ export async function startRecording(
   recorder.setViewport(settings.viewportWidth ?? 1280, settings.viewportHeight ?? 720);
   recorder.setBrowserType((settings.browser as 'chromium' | 'firefox' | 'webkit') ?? 'chromium');
   recorder.setClipboardAccess(settings.grantClipboardAccess ?? false);
+  recorder.setStabilizationSettings(settings.stabilization);
 
   try {
     await recorder.startRecording(url, sessionId, setupOptions);

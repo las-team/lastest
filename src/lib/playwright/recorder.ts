@@ -2,8 +2,10 @@ import { chromium, firefox, webkit, Browser, Page, BrowserContext } from 'playwr
 import { EventEmitter } from 'events';
 import path from 'path';
 import fs from 'fs';
-import type { ActionSelector, SelectorType, SelectorConfig } from '@/lib/db/schema';
-import { DEFAULT_SELECTOR_PRIORITY } from '@/lib/db/schema';
+import type { ActionSelector, SelectorType, SelectorConfig, StabilizationSettings } from '@/lib/db/schema';
+import { DEFAULT_SELECTOR_PRIORITY, DEFAULT_STABILIZATION_SETTINGS } from '@/lib/db/schema';
+import { CROSS_OS_CHROMIUM_ARGS } from './constants';
+import { setupFreezeScripts } from './stabilization';
 import { extractText, terminateWorker, warmupWorker } from './ocr';
 import { getSetupOrchestrator } from '@/lib/setup/setup-orchestrator';
 import { STORAGE_DIRS } from '@/lib/storage/paths';
@@ -135,6 +137,7 @@ export class PlaywrightRecorder extends EventEmitter {
   private browserType: 'chromium' | 'firefox' | 'webkit' = 'chromium';
   private headless: boolean = false;
   private clipboardAccess: boolean = false;
+  private stabilizationSettings: StabilizationSettings = DEFAULT_STABILIZATION_SETTINGS;
   private verificationUpdates: Map<string, { verified: boolean; timestamp: number }> = new Map();
   private nextClickIsDownload = false;
 
@@ -177,6 +180,10 @@ export class PlaywrightRecorder extends EventEmitter {
     this.clipboardAccess = enabled;
   }
 
+  setStabilizationSettings(settings: StabilizationSettings) {
+    this.stabilizationSettings = settings;
+  }
+
   async startRecording(url: string, sessionId: string, setupOptions?: SetupOptions): Promise<void> {
     if (this.isRecording) {
       throw new Error('Already recording');
@@ -202,9 +209,13 @@ export class PlaywrightRecorder extends EventEmitter {
       const browserLauncher = this.browserType === 'firefox' ? firefox
         : this.browserType === 'webkit' ? webkit
         : chromium;
+      const needsCrossOs = this.stabilizationSettings.crossOsConsistency && this.browserType === 'chromium';
+      const launchArgs = needsCrossOs
+        ? [...CROSS_OS_CHROMIUM_ARGS, '--start-maximized']
+        : ['--start-maximized'];
       this.browser = await browserLauncher.launch({
         headless: this.headless,
-        args: ['--start-maximized'],
+        args: launchArgs,
       });
 
       this.context = await this.browser.newContext({
@@ -212,9 +223,34 @@ export class PlaywrightRecorder extends EventEmitter {
         ignoreHTTPSErrors: true, // Ignore SSL errors for local dev
         acceptDownloads: true, // Always enable during recording so downloads are detected
         ...(this.clipboardAccess ? { permissions: ['clipboard-read', 'clipboard-write'] } : {}),
+        ...(this.stabilizationSettings.crossOsConsistency ? { deviceScaleFactor: 1 } : {}),
       });
 
       this.page = await this.context.newPage();
+
+      // Setup freeze scripts BEFORE navigation (cross-OS fonts, canvas determinism, freeze scripts).
+      // The shared setupFreezeScripts injects DETERMINISTIC_RENDERING_CSS which includes
+      // `cursor: none` — unusable during interactive recording. We let it inject normally,
+      // then override the cursor rule so the user can see their cursor while recording.
+      await setupFreezeScripts(this.page, this.stabilizationSettings);
+
+      // Override cursor: none from deterministic CSS so the cursor is visible during recording
+      if (this.stabilizationSettings.crossOsConsistency || this.stabilizationSettings.freezeAnimations) {
+        await this.page.addInitScript(`
+          (function() {
+            function inject() {
+              if (!document.querySelector('[data-recorder-cursor-fix]') && (document.head || document.documentElement)) {
+                var style = document.createElement('style');
+                style.setAttribute('data-recorder-cursor-fix', 'true');
+                style.textContent = '*, *::before, *::after { cursor: auto !important; }';
+                (document.head || document.documentElement).appendChild(style);
+              }
+            }
+            inject();
+            document.addEventListener('DOMContentLoaded', inject);
+          })();
+        `);
+      }
 
       // Navigate to initial URL first
       await this.page.goto(url, { waitUntil: 'domcontentloaded' });

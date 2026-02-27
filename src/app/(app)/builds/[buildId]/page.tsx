@@ -51,47 +51,49 @@ export default async function BuildPage({ params }: PageProps) {
   ).length;
 
   return (
-    <div className="p-6 max-w-6xl mx-auto space-y-6">
-      {/* Hero and Metrics with Polling Support */}
-      <BuildPollingWrapper
-        buildId={buildId}
-        isMainBranch={build.isMainBranch}
-        embeddedStreamUrl={embeddedStreamUrl}
-        initialBuild={{
-          id: build.id,
-          overallStatus: build.overallStatus,
-          totalTests: build.totalTests,
-          passedCount: build.passedCount,
-          failedCount: build.failedCount,
-          changesDetected: build.changesDetected,
-          flakyCount: build.flakyCount,
-          completedAt: build.completedAt,
-          elapsedMs: build.elapsedMs,
-          codeChangeTestIds: build.codeChangeTestIds,
-          diffs: build.diffs,
-        }}
-      >
-        {/* Inline: Recent History + Git Info + Actions */}
-        <RecentHistory builds={recentBuilds} />
-        <div className="flex items-center gap-2 text-xs text-muted-foreground">
-          <span className="font-mono">{build.gitBranch}</span>
-          <span>·</span>
-          <span className="font-mono">{build.gitCommit.slice(0, 7)}</span>
-          {build.pullRequestId && (
-            <>
-              <span>·</span>
-              <span className="text-primary font-medium">PR #{build.pullRequestId}</span>
-            </>
-          )}
-        </div>
-        <div className="ml-auto">
-          <BuildActionsClient
-            buildId={buildId}
-            hasPendingDiffs={pendingDiffs.length > 0}
-            aiApproveCount={aiApproveCount}
-          />
-        </div>
-      </BuildPollingWrapper>
+    <div className="flex-1 p-6 overflow-auto">
+      <div className="max-w-6xl mx-auto space-y-6">
+        {/* Hero and Metrics with Polling Support */}
+        <BuildPollingWrapper
+          buildId={buildId}
+          isMainBranch={build.isMainBranch}
+          embeddedStreamUrl={embeddedStreamUrl}
+          initialBuild={{
+            id: build.id,
+            overallStatus: build.overallStatus,
+            totalTests: build.totalTests,
+            passedCount: build.passedCount,
+            failedCount: build.failedCount,
+            changesDetected: build.changesDetected,
+            flakyCount: build.flakyCount,
+            completedAt: build.completedAt,
+            elapsedMs: build.elapsedMs,
+            codeChangeTestIds: build.codeChangeTestIds,
+            diffs: build.diffs,
+          }}
+        >
+          {/* Inline: Recent History + Git Info + Actions */}
+          <RecentHistory builds={recentBuilds} />
+          <div className="flex items-center gap-2 text-xs text-muted-foreground">
+            <span className="font-mono">{build.gitBranch}</span>
+            <span>·</span>
+            <span className="font-mono">{build.gitCommit.slice(0, 7)}</span>
+            {build.pullRequestId && (
+              <>
+                <span>·</span>
+                <span className="text-primary font-medium">PR #{build.pullRequestId}</span>
+              </>
+            )}
+          </div>
+          <div className="ml-auto">
+            <BuildActionsClient
+              buildId={buildId}
+              hasPendingDiffs={pendingDiffs.length > 0}
+              aiApproveCount={aiApproveCount}
+            />
+          </div>
+        </BuildPollingWrapper>
+      </div>
     </div>
   );
 }

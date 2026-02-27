@@ -6,6 +6,7 @@ import { BuildDetailClient } from './build-detail-client';
 import { BuildSummaryHero } from '@/components/dashboard/build-summary-hero';
 import { BrowserViewer } from '@/components/embedded-browser/browser-viewer-client';
 import { ChevronDown, ChevronUp, Tv2 } from 'lucide-react';
+import { Card, CardContent } from '@/components/ui/card';
 import type { VisualDiffWithTestStatus, BuildStatus } from '@/lib/db/schema';
 
 interface BuildData {
@@ -72,18 +73,20 @@ export function BuildPollingWrapper({ initialBuild, buildId, isMainBranch = fals
   return (
     <>
       {/* Top row: Hero + Quick Actions + Git Info */}
-      <div className="flex items-center gap-3">
-        <BuildSummaryHero
-          status={build.overallStatus}
-          changesDetected={build.changesDetected}
-          isRunning={isRunning}
-        />
-        {children}
-      </div>
+      <Card>
+        <CardContent className="flex items-center gap-3">
+          <BuildSummaryHero
+            status={build.overallStatus}
+            changesDetected={build.changesDetected}
+            isRunning={isRunning}
+          />
+          {children}
+        </CardContent>
+      </Card>
 
       {/* Live Browser Viewer (embedded runner only, while running) */}
       {showBrowserViewer && (
-        <div className="border rounded-lg overflow-hidden">
+        <Card className="overflow-hidden py-0">
           <button
             type="button"
             className="flex items-center gap-2 w-full px-3 py-2 text-sm font-medium bg-muted/50 hover:bg-muted transition-colors"
@@ -99,7 +102,7 @@ export function BuildPollingWrapper({ initialBuild, buildId, isMainBranch = fals
               className="max-h-[500px]"
             />
           )}
-        </div>
+        </Card>
       )}
 
       {/* Metrics Row and Diff List with Filter Support */}
