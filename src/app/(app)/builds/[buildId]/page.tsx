@@ -37,9 +37,11 @@ export default async function BuildPage({ params }: PageProps) {
       const streamInfo = await getStreamUrlForRunner(testRun.runnerId);
       if (streamInfo?.streamUrl) {
         const token = streamInfo.streamAuthToken;
+        // Use relative proxy path — client will construct wss:// URL from its origin
+        const proxyPath = '/api/embedded/stream/ws';
         embeddedStreamUrl = token
-          ? `${streamInfo.streamUrl}?token=${encodeURIComponent(token)}`
-          : streamInfo.streamUrl;
+          ? `${proxyPath}?token=${encodeURIComponent(token)}`
+          : proxyPath;
       }
     }
   }

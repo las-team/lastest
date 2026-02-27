@@ -11,9 +11,6 @@ import type { StabilizationPayload } from './protocol.js';
 
 /**
  * Chromium launch args for cross-OS rendering consistency.
- * NOTE: In the embedded browser, the shared browser instance is launched once
- * at startup, so these args cannot be applied per-test. They are exported
- * for reference but not used at runtime.
  */
 export const CROSS_OS_CHROMIUM_ARGS = [
   '--font-render-hinting=none',

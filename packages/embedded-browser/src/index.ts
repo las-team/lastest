@@ -13,6 +13,7 @@ import { StreamServer } from './stream-server.js';
 import { EmbeddedRunnerClient } from './runner-client.js';
 import { EmbeddedTestExecutor } from './test-executor.js';
 import { EmbeddedRecorder } from './embedded-recorder.js';
+import { CROSS_OS_CHROMIUM_ARGS } from './stabilization.js';
 
 // Configuration from environment
 const config = {
@@ -78,7 +79,7 @@ async function startup(): Promise<void> {
       '--no-sandbox',
       '--disable-setuid-sandbox',
       '--disable-dev-shm-usage',
-      '--disable-gpu',
+      ...CROSS_OS_CHROMIUM_ARGS,
     ],
   });
 

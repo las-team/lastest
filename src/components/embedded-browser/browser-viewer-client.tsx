@@ -94,7 +94,13 @@ export function BrowserViewer({ streamUrl, initialViewport, className, expiresAt
     }
 
     const connect = (attempt: number) => {
-      const ws = new WebSocket(streamUrl);
+      // Support relative paths — construct full WebSocket URL from page origin
+      let wsUrl = streamUrl;
+      if (streamUrl.startsWith('/')) {
+        const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        wsUrl = `${proto}//${window.location.host}${streamUrl}`;
+      }
+      const ws = new WebSocket(wsUrl);
       wsRef.current = ws;
 
       ws.onopen = () => {
