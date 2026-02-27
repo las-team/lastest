@@ -46,24 +46,9 @@ let recordingWatchdog: ReturnType<typeof setInterval> | null = null;
 let lastRecordingEventTime = 0;
 const RECORDING_INACTIVITY_TIMEOUT = 60_000; // 1 minute
 
-// Command queue to serialize test execution (prevents parallel page collisions)
-const testCommandQueue: Array<() => Promise<void>> = [];
-let isProcessingQueue = false;
+// Concurrent test execution tracking (each test gets its own BrowserContext)
+let activeTasks = 0;
 const activeTestIds = new Set<string>();
-
-async function processTestQueue(): Promise<void> {
-  if (isProcessingQueue) return;
-  isProcessingQueue = true;
-  while (testCommandQueue.length > 0) {
-    const next = testCommandQueue.shift()!;
-    try {
-      await next();
-    } catch (err) {
-      console.error('[Queue] Task failed:', err);
-    }
-  }
-  isProcessingQueue = false;
-}
 
 async function startup(): Promise<void> {
   console.log('=== Embedded Browser Service ===');
@@ -172,22 +157,27 @@ async function startup(): Promise<void> {
           stabilization?: import('./protocol.js').StabilizationPayload;
         };
 
-        // Dedup: skip if already running/queued (mirrors standard runner activeTestIds)
+        // Dedup: skip if already running (mirrors standard runner activeTestIds)
         if (activeTestIds.has(payload.testId)) {
           console.log(`[Command] Skipping duplicate test ${payload.testId}`);
           break;
         }
         activeTestIds.add(payload.testId);
 
-        // Queue test execution to prevent parallel page collisions
+        // Fire-and-forget concurrent execution (each test creates its own BrowserContext)
         const capturedClient = runnerClient;
         const capturedExecutor = testExecutor;
         const capturedBrowser = browser;
-        testCommandQueue.push(async () => {
-          try {
-            capturedClient.setStatus('busy', payload.testId);
-            streamServer?.broadcastStatus('busy', payload.targetUrl);
+        const capturedCommand = command;
 
+        activeTasks++;
+        if (activeTasks === 1) {
+          capturedClient.setStatus('busy', payload.testId);
+          streamServer?.broadcastStatus('busy', payload.targetUrl);
+        }
+
+        (async () => {
+          try {
             const result = await capturedExecutor.runTest(capturedBrowser, payload);
 
             // Send result FIRST so server sees pass/fail before timeout
@@ -196,7 +186,7 @@ async function startup(): Promise<void> {
               type: 'response:test_result',
               timestamp: Date.now(),
               payload: {
-                correlationId: command.id,
+                correlationId: capturedCommand.id,
                 testId: payload.testId,
                 testRunId: payload.testRunId,
                 status: result.status,
@@ -209,14 +199,14 @@ async function startup(): Promise<void> {
 
             // Upload screenshots separately (matching standard runner pattern)
             if (result.screenshots.length > 0) {
-              console.log(`[Command] Uploading ${result.screenshots.length} screenshots...`);
+              console.log(`[Command] Uploading ${result.screenshots.length} screenshots for test ${payload.testId}...`);
               for (const screenshot of result.screenshots) {
                 await capturedClient.sendMessage({
                   id: crypto.randomUUID(),
                   type: 'response:screenshot',
                   timestamp: Date.now(),
                   payload: {
-                    correlationId: command.id,
+                    correlationId: capturedCommand.id,
                     testRunId: payload.testRunId,
                     repositoryId: payload.repositoryId,
                     filename: screenshot.filename,
@@ -227,16 +217,19 @@ async function startup(): Promise<void> {
                   },
                 });
               }
-              console.log(`[Command] All screenshots uploaded`);
+              console.log(`[Command] All screenshots uploaded for test ${payload.testId}`);
             }
-
-            capturedClient.setStatus('idle');
-            streamServer?.broadcastStatus('ready');
+          } catch (err) {
+            console.error(`[Command] Test ${payload.testId} failed:`, err);
           } finally {
             activeTestIds.delete(payload.testId);
+            activeTasks--;
+            if (activeTasks === 0) {
+              capturedClient.setStatus('idle');
+              streamServer?.broadcastStatus('ready');
+            }
           }
-        });
-        processTestQueue();
+        })();
         break;
       }
 

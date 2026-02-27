@@ -128,6 +128,7 @@ RUN mkdir -p /app/embedded-browser/node_modules && \
 # Copy entrypoint script
 COPY --chown=nextjs:nodejs scripts/docker-entrypoint.sh /docker-entrypoint.sh
 RUN chmod +x /docker-entrypoint.sh
+COPY --chown=nextjs:nodejs scripts/ws-proxy-preload.js /app/ws-proxy-preload.js
 
 # Create data directories
 RUN mkdir -p /app/data /app/storage/screenshots /app/storage/baselines /app/storage/diffs /app/storage/traces /app/storage/videos /app/storage/planned /app/storage/bug-reports /home/nextjs/.claude && \
@@ -159,4 +160,4 @@ USER nextjs
 VOLUME ["/app/data", "/app/storage"]
 
 ENTRYPOINT ["/docker-entrypoint.sh"]
-CMD ["node", "server.js"]
+CMD ["node", "--require", "./ws-proxy-preload.js", "server.js"]
