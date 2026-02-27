@@ -4,7 +4,7 @@
  * Tests for the EmbeddedTestExecutor class and the embedded browser
  * service's command handling, test queue, and lifecycle.
  */
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 
 // Note: We can't import from packages/embedded-browser directly due to module resolution,
 // so we test the logic patterns and verify structural contracts.
@@ -89,7 +89,7 @@ describe('Embedded Browser Integration', () => {
     });
 
     it('abort() cancels running test and returns true', () => {
-      let abortController: AbortController | null = new AbortController();
+      const abortController: AbortController | null = new AbortController();
       const abort = () => {
         if (abortController) {
           abortController.abort();
