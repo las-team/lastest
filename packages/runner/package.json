@@ -14,7 +14,7 @@
     "LICENSE"
   ],
   "scripts": {
-    "build": "tsup src/index.ts --format esm --dts",
+    "build": "tsup",
     "dev": "tsx src/index.ts",
     "typecheck": "tsc --noEmit",
     "prepublishOnly": "pnpm build"
