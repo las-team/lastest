@@ -11,6 +11,7 @@ export type JobWithChildren = BackgroundJob & {
 interface JobPollingContextValue {
   jobs: JobWithChildren[];
   startPolling: () => void;
+  refreshJobs: () => void;
 }
 
 const JobPollingContext = createContext<JobPollingContextValue | null>(null);
@@ -55,7 +56,7 @@ export function JobPollingProvider({ children }: { children: ReactNode }) {
   }, [fetchJobs]);
 
   return (
-    <JobPollingContext.Provider value={{ jobs, startPolling }}>
+    <JobPollingContext.Provider value={{ jobs, startPolling, refreshJobs: fetchJobs }}>
       {children}
     </JobPollingContext.Provider>
   );

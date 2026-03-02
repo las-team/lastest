@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { AlertTriangle, CheckCircle, XCircle, ListTodo, ExternalLink, XIcon, Sparkles, Flag, Loader2, ChevronRight, ChevronsUpDown } from 'lucide-react';
 import type { AIDiffAnalysis, VisualDiffWithTestStatus } from '@/lib/db/schema';
 import { MetricsRow } from '@/components/dashboard/metrics-row';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Badge } from '@/components/ui/badge';
 import { Collapsible, CollapsibleTrigger, CollapsibleContent } from '@/components/ui/collapsible';
@@ -270,43 +271,47 @@ export function BuildDetailClient({
   return (
     <div className="space-y-6">
       {/* Metrics Row with Filter Support */}
-      <MetricsRow
-        totalTests={metrics.totalTests}
-        changesDetected={metrics.changesDetected}
-        flakyCount={metrics.flakyCount}
-        failedCount={metrics.failedCount}
-        passedCount={metrics.passedCount}
-        errorsCount={metrics.errorsCount}
-        elapsedMs={metrics.elapsedMs}
-        activeFilter={activeFilter}
-        onFilterChange={handleFilterChange}
-        isRunning={isRunning}
-        completedTests={completedTests}
-        aiSafeCount={aiSafeCount}
-        aiReviewCount={aiReviewCount}
-        aiFlagCount={aiFlagCount}
-        viewMode={isMainBranch ? undefined : viewMode}
-        onViewModeChange={isMainBranch ? undefined : setViewMode}
-        groupByArea={groupByArea}
-        onGroupByAreaChange={setGroupByArea}
-        groupByTest={groupByTest}
-        onGroupByTestChange={setGroupByTest}
-      />
+      <Card>
+        <CardContent>
+          <MetricsRow
+            totalTests={metrics.totalTests}
+            changesDetected={metrics.changesDetected}
+            flakyCount={metrics.flakyCount}
+            failedCount={metrics.failedCount}
+            passedCount={metrics.passedCount}
+            errorsCount={metrics.errorsCount}
+            elapsedMs={metrics.elapsedMs}
+            activeFilter={activeFilter}
+            onFilterChange={handleFilterChange}
+            isRunning={isRunning}
+            completedTests={completedTests}
+            aiSafeCount={aiSafeCount}
+            aiReviewCount={aiReviewCount}
+            aiFlagCount={aiFlagCount}
+            viewMode={isMainBranch ? undefined : viewMode}
+            onViewModeChange={isMainBranch ? undefined : setViewMode}
+            groupByArea={groupByArea}
+            onGroupByAreaChange={setGroupByArea}
+            groupByTest={groupByTest}
+            onGroupByTestChange={setGroupByTest}
+          />
+        </CardContent>
+      </Card>
 
       {/* Tests for Review Section */}
-      <div>
-        {/* Section Header */}
-        <div className="flex items-center justify-between mb-4">
-          <div className="flex items-center gap-3">
-            <Checkbox
-              checked={allFilteredSelected}
-              onCheckedChange={toggleSelectAll}
-              aria-label="Select all"
-            />
-            <div>
-              <h2 className="text-lg font-semibold">
-                {activeFilter === 'failed' ? 'Failed Test Cases' : 'Test Cases for Review'} ({filteredDiffs.length})
-              </h2>
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <Checkbox
+                checked={allFilteredSelected}
+                onCheckedChange={toggleSelectAll}
+                aria-label="Select all"
+              />
+              <div>
+                <h2 className="text-lg font-semibold">
+                  {activeFilter === 'failed' ? 'Failed Test Cases' : 'Test Cases for Review'} ({filteredDiffs.length})
+                </h2>
               {hasAIActivity && (
                 <div className="flex items-center gap-2 text-xs text-purple-600">
                   <Sparkles className="w-3 h-3" />
@@ -347,7 +352,9 @@ export function BuildDetailClient({
               </Badge>
             )}
           </div>
-        </div>
+        </CardTitle>
+        </CardHeader>
+        <CardContent>
 
         {/* Bulk Action Bar */}
         {selectedIds.size > 0 && (
@@ -531,7 +538,8 @@ export function BuildDetailClient({
             )}
           </div>
         )}
-      </div>
+      </CardContent>
+      </Card>
     </div>
   );
 }

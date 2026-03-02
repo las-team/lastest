@@ -43,5 +43,12 @@ if [ -f "/app/drizzle.config.ts" ]; then
   ./node_modules/.bin/drizzle-kit push --force 2>/dev/null || echo "Migration skipped (may already be current)"
 fi
 
+# Optionally start embedded browser in background
+if [ "${ENABLE_EMBEDDED_BROWSER}" = "true" ]; then
+  echo "Starting embedded browser..."
+  LASTEST2_URL="http://localhost:3000" \
+  node /app/embedded-browser/dist/index.js &
+fi
+
 # Execute the main command
 exec "$@"

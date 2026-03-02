@@ -27,6 +27,7 @@
     "test:ui": "vitest --ui"
   },
   "dependencies": {
+    "@lastest/shared": "workspace:*",
     "@anthropic-ai/claude-agent-sdk": "^0.2.19",
     "@axe-core/playwright": "^4.11.0",
     "@dnd-kit/core": "^6.3.1",

@@ -27,7 +27,7 @@ import { createHash } from 'crypto';
 import fs from 'fs/promises';
 import path from 'path';
 import { STORAGE_DIRS } from '@/lib/storage/paths';
-import { getCrossOsFontCSS } from '@/lib/playwright/constants';
+import { getCrossOsFontCSS } from '@lastest/shared';
 import {
   getCommandsByTestRun,
   getUnacknowledgedResults,
@@ -217,13 +217,15 @@ async function executeSetupViaRunner(
   console.log(`[Executor] Queuing setup command ${command.id.slice(0, 8)} for runner ${runnerId}`);
   await queueCommandToDB(runnerId, command);
 
-  // Poll DB for setup completion
-  const pollInterval = 1000;
+  // Poll DB for setup completion with adaptive interval (starts fast, backs off)
+  let pollInterval = 250;
+  const maxPollInterval = 750;
   const maxWait = setupTimeout + 30000; // Allow extra time for network overhead
   const startTime = Date.now();
 
   while (Date.now() - startTime < maxWait) {
     await new Promise((resolve) => setTimeout(resolve, pollInterval));
+    pollInterval = Math.min(pollInterval + 100, maxPollInterval);
 
     const dbCmd = await getRunnerCommandById(command.id);
     if (!dbCmd) continue;
@@ -312,7 +314,8 @@ async function executeViaRunner(
   const baseTimeout = options.playwrightSettings?.navigationTimeout || 120000;
   // Scale timeout for concurrency — parallel tests compete for resources
   const testTimeout = Math.max(baseTimeout * maxParallel, 300000);
-  const pollInterval = 1000;
+  let pollInterval = 250;
+  const maxPollInterval = 750;
 
   // Check if the background job has been cancelled
   const checkCancelled = async (): Promise<boolean> => {
@@ -387,8 +390,10 @@ async function executeViaRunner(
   updateProgress();
 
   // Poll DB for command completion and results
+  let prevCompletedCount = completedCount;
   while (inFlight.size > 0) {
     await new Promise((resolve) => setTimeout(resolve, pollInterval));
+    pollInterval = Math.min(pollInterval + 100, maxPollInterval);
 
     // Check if the job was cancelled — stop launching new tests and drain in-flight
     if (!cancelled && await checkCancelled()) {
@@ -454,9 +459,13 @@ async function executeViaRunner(
       const errorPayload = payload.error as Record<string, unknown> | undefined;
 
       // Screenshots are uploaded AFTER the test result, so they may not be here yet.
-      // Defer processing until screenshots arrive (up to 10s), then proceed anyway.
+      // If the runner reported screenshotCount, proceed as soon as all arrive.
+      // Otherwise fall back to a 10s timeout for backward compatibility with older runners.
       const screenshotResults = unacked.filter(r => r.type === 'response:screenshot');
-      if (screenshotResults.length === 0 && payload.status === 'passed') {
+      const expectedCount = typeof payload.screenshotCount === 'number' ? payload.screenshotCount : undefined;
+      const allScreenshotsReceived = expectedCount !== undefined && screenshotResults.length >= expectedCount;
+
+      if (payload.status === 'passed' && !allScreenshotsReceived && expectedCount !== 0) {
         if (!info.completedSeenAt) {
           info.completedSeenAt = Date.now();
           continue; // Wait for screenshots on next poll
@@ -522,6 +531,12 @@ async function executeViaRunner(
     // Fill more slots if any completed
     await fillSlots();
     updateProgress();
+
+    // Reset poll interval for fast pickup when a test just completed
+    if (completedCount > prevCompletedCount) {
+      pollInterval = 250;
+      prevCompletedCount = completedCount;
+    }
   }
 
   return results;
@@ -634,15 +649,17 @@ export async function hasAvailableRunner(teamId: string): Promise<boolean> {
  * Get execution mode information for display.
  */
 export function getExecutionModeInfo(): {
-  mode: 'local' | 'runner';
+  mode: 'local' | 'runner' | 'embedded';
   description: string;
 } {
   const mode = getExecutionMode();
+  const descriptions: Record<string, string> = {
+    local: 'Tests run directly on this machine using Playwright',
+    runner: 'Tests run on a remote runner connected to this server',
+    embedded: 'Tests run in an embedded browser container with live streaming',
+  };
   return {
     mode,
-    description:
-      mode === 'local'
-        ? 'Tests run directly on this machine using Playwright'
-        : 'Tests run on a remote runner connected to this server',
+    description: descriptions[mode] ?? descriptions.runner,
   };
 }

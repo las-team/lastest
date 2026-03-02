@@ -37,28 +37,9 @@ export interface ServerConfig {
   healthCheckTimeout: number;
 }
 
-export interface StabilizationPayload {
-  freezeTimestamps: boolean;
-  frozenTimestamp: string;
-  freezeRandomValues: boolean;
-  randomSeed: number;
-  freezeAnimations: boolean;
-  crossOsConsistency: boolean;
-  waitForNetworkIdle: boolean;
-  networkIdleTimeout: number;
-  waitForDomStable: boolean;
-  domStableTimeout: number;
-  waitForFonts: boolean;
-  waitForImages: boolean;
-  waitForImagesTimeout: number;
-  crossOsFontCSS?: string;
-  waitForCanvasStable: boolean;
-  canvasStableTimeout: number;
-  canvasStableThreshold: number;
-  disableImageSmoothing: boolean;
-  roundCanvasCoordinates: boolean;
-  reseedRandomOnInput: boolean;
-}
+import type { CoreStabilizationSettings } from '@lastest/shared';
+
+export type StabilizationPayload = CoreStabilizationSettings;
 
 export interface RunTestCommandPayload {
   testId: string;
@@ -145,6 +126,7 @@ export interface StartRecordingCommandPayload {
   ocrEnabled?: boolean;
   pointerGestures?: boolean;
   cursorFPS?: number;
+  setupSteps?: Array<{ code: string; codeHash: string }>;
 }
 
 export interface StartRecordingCommand extends BaseMessage {
@@ -241,6 +223,7 @@ export interface TestResultPayload {
   testRunId: string;
   status: 'passed' | 'failed' | 'error' | 'timeout' | 'cancelled';
   durationMs: number;
+  screenshotCount?: number; // Number of screenshots to expect (for early completion detection)
   error?: {
     message: string;
     stack?: string;

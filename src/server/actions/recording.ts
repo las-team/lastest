@@ -11,14 +11,14 @@ import {
 } from '@/lib/playwright/inspector-manager';
 import { transformPlaywrightCode } from '@/lib/playwright/code-transformer';
 import { eventsToCodeLines } from '@/lib/playwright/event-to-code';
-import { createTest, createFunctionalArea, getFunctionalAreas, getPlaywrightSettings } from '@/lib/db/queries';
+import { createTest, createFunctionalArea, getFunctionalAreas, getPlaywrightSettings, getTest, getSetupScript } from '@/lib/db/queries';
 import { requireTeamAccess, requireRepoAccess } from '@/lib/auth';
 import { DEFAULT_SELECTOR_PRIORITY } from '@/lib/db/schema';
 import { v4 as uuid } from 'uuid';
 import { revalidatePath } from 'next/cache';
 import { chromium, firefox, webkit } from 'playwright';
 import { createMessage } from '@/lib/ws/protocol';
-import type { StartRecordingCommand, StopRecordingCommand, CaptureScreenshotCommand } from '@/lib/ws/protocol';
+import type { StartRecordingCommand, StopRecordingCommand, CaptureScreenshotCommand, CreateAssertionCommand, FlagDownloadCommand } from '@/lib/ws/protocol';
 import {
   queueCommandToDB,
   createRemoteRecordingSession,
@@ -92,14 +92,37 @@ export async function startRecording(
 
   // Dispatch to remote runner if specified
   if (runnerId && runnerId !== 'local') {
-    // Check if there's already an active remote session
+    // Clear any existing remote session for this repository —
+    // reconnecting to the same runner should always be allowed
     const existingSession = getRemoteRecordingSession(repositoryId);
-    if (existingSession?.isRecording) {
-      return { error: 'Recording already in progress on remote runner' };
+    if (existingSession) {
+      clearRemoteRecordingSession(repositoryId);
     }
 
     // Create the remote recording session on the server
     createRemoteRecordingSession(sessionId, runnerId, repositoryId ?? null, url, selectorPriority);
+
+    // Resolve setup steps to code (runners have no DB access)
+    let resolvedSetupSteps: Array<{ code: string; codeHash: string }> | undefined;
+    if (setupOptions?.steps?.length) {
+      resolvedSetupSteps = [];
+      for (const step of setupOptions.steps) {
+        const id = step.stepType === 'test' ? step.testId : step.scriptId;
+        if (!id) continue;
+        const record = step.stepType === 'test' ? await getTest(id) : await getSetupScript(id);
+        if (record?.code) {
+          const hash = (record as Record<string, unknown>).codeHash;
+          resolvedSetupSteps.push({ code: record.code, codeHash: typeof hash === 'string' ? hash : '' });
+        }
+      }
+    } else if (setupOptions?.testId || setupOptions?.scriptId) {
+      const id = setupOptions.testId || setupOptions.scriptId;
+      const record = setupOptions.testId ? await getTest(id!) : await getSetupScript(id!);
+      if (record?.code) {
+        const hash = (record as Record<string, unknown>).codeHash;
+        resolvedSetupSteps = [{ code: record.code, codeHash: typeof hash === 'string' ? hash : '' }];
+      }
+    }
 
     // Queue start_recording command to the runner
     const command = createMessage<StartRecordingCommand>('command:start_recording', {
@@ -114,6 +137,7 @@ export async function startRecording(
       ocrEnabled: selectorPriority.find(s => s.type === 'ocr-text')?.enabled ?? false,
       pointerGestures: settings.pointerGestures ?? false,
       cursorFPS: settings.cursorFPS ?? 30,
+      setupSteps: resolvedSetupSteps,
     });
     await queueCommandToDB(runnerId, command);
 
@@ -139,6 +163,7 @@ export async function startRecording(
   recorder.setViewport(settings.viewportWidth ?? 1280, settings.viewportHeight ?? 720);
   recorder.setBrowserType((settings.browser as 'chromium' | 'firefox' | 'webkit') ?? 'chromium');
   recorder.setClipboardAccess(settings.grantClipboardAccess ?? false);
+  recorder.setStabilizationSettings(settings.stabilization);
 
   try {
     await recorder.startRecording(url, sessionId, setupOptions);
@@ -224,10 +249,45 @@ export async function captureScreenshot(repositoryId?: string | null) {
   return { screenshotPath };
 }
 
-export async function createAssertion(type: AssertionType): Promise<{ success: boolean }> {
+export async function createAssertion(type: AssertionType, repositoryId?: string | null): Promise<{ success: boolean }> {
   await requireTeamAccess();
-  const recorder = getRecorder();
+
+  // Check for remote recording session
+  const remoteSession = getRemoteRecordingSession(repositoryId);
+  if (remoteSession?.isRecording) {
+    const command = createMessage<CreateAssertionCommand>('command:create_assertion', {
+      sessionId: remoteSession.sessionId,
+      assertionType: type,
+    });
+    await queueCommandToDB(remoteSession.runnerId, command);
+    return { success: true };
+  }
+
+  // Local recording
+  const recorder = getRecorder(repositoryId);
   const success = await recorder.createAssertion(type);
+
+  return { success };
+}
+
+export async function flagDownload(repositoryId?: string | null): Promise<{ success: boolean }> {
+  await requireTeamAccess();
+
+  // Check for remote recording session
+  const remoteSession = getRemoteRecordingSession(repositoryId);
+  if (remoteSession?.isRecording) {
+    console.log(`[flagDownload] Dispatching to remote runner ${remoteSession.runnerId}`);
+    const command = createMessage<FlagDownloadCommand>('command:flag_download', {
+      sessionId: remoteSession.sessionId,
+    });
+    await queueCommandToDB(remoteSession.runnerId, command);
+    return { success: true };
+  }
+
+  // Local recording
+  console.log(`[flagDownload] Using local recorder, repositoryId=${repositoryId}`);
+  const recorder = getRecorder(repositoryId);
+  const success = recorder.flagDownload();
 
   return { success };
 }

@@ -2,7 +2,7 @@
  * Vitest setup file
  * Runs before all tests to configure mocks and globals
  */
-import { vi } from 'vitest';
+import { vi, beforeEach } from 'vitest';
 import fs from 'fs';
 import path from 'path';
 

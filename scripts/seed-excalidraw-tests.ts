@@ -12,7 +12,7 @@ import { tests, testVersions, repositories } from '../src/lib/db/schema';
 import { eq } from 'drizzle-orm';
 import { randomUUID as uuid } from 'crypto';
 
-const EXCALIDRAW_REPO_NAME = 'ewyct/excalidraw_test';
+const EXCALIDRAW_REPO_NAME = 'dexilion-team/excalidraw';
 const EXCALIDRAW_URL = 'https://excalidraw.com';
 
 // Will be set dynamically

@@ -811,9 +811,11 @@ export class PlaywrightRunner extends EventEmitter {
       const launchArgs = needsDeterministicRendering ? CROSS_OS_CHROMIUM_ARGS : [];
 
       // Cast needed as Playwright types may not include 'shell' yet
+      const args = [...launchArgs];
+      if (!headless) args.push('--start-maximized');
       this.browser = await launcher.launch({
         headless: headless as boolean | undefined,
-        args: launchArgs.length > 0 ? launchArgs : undefined,
+        args: args.length > 0 ? args : undefined,
       });
 
       this.emit('event', {

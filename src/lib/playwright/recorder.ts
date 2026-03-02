@@ -2,8 +2,10 @@ import { chromium, firefox, webkit, Browser, Page, BrowserContext } from 'playwr
 import { EventEmitter } from 'events';
 import path from 'path';
 import fs from 'fs';
-import type { ActionSelector, SelectorType, SelectorConfig } from '@/lib/db/schema';
-import { DEFAULT_SELECTOR_PRIORITY } from '@/lib/db/schema';
+import type { ActionSelector, SelectorType, SelectorConfig, StabilizationSettings } from '@/lib/db/schema';
+import { DEFAULT_SELECTOR_PRIORITY, DEFAULT_STABILIZATION_SETTINGS } from '@/lib/db/schema';
+import { CROSS_OS_CHROMIUM_ARGS } from './constants';
+import { setupFreezeScripts } from './stabilization';
 import { extractText, terminateWorker, warmupWorker } from './ocr';
 import { getSetupOrchestrator } from '@/lib/setup/setup-orchestrator';
 import { STORAGE_DIRS } from '@/lib/storage/paths';
@@ -62,7 +64,7 @@ export interface VerificationStatus {
 export type KeyboardModifier = 'Alt' | 'Control' | 'Shift' | 'Meta';
 
 export interface RecordingEvent {
-  type: 'action' | 'navigation' | 'screenshot' | 'error' | 'complete' | 'assertion' | 'cursor-move' | 'mouse-down' | 'mouse-up' | 'hover-preview' | 'keypress' | 'keydown' | 'keyup' | 'scroll';
+  type: 'action' | 'navigation' | 'screenshot' | 'error' | 'complete' | 'assertion' | 'cursor-move' | 'mouse-down' | 'mouse-up' | 'hover-preview' | 'keypress' | 'keydown' | 'keyup' | 'scroll' | 'download';
   timestamp: number;
   sequence: number;
   status: 'preview' | 'committed';
@@ -88,6 +90,8 @@ export interface RecordingEvent {
     elementAssertion?: ElementAssertion; // for element assertions via Shift+right-click
     deltaX?: number; // scroll delta X
     deltaY?: number; // scroll delta Y
+    downloadWrap?: boolean; // click triggers a download
+    autoDetected?: boolean; // download was auto-detected (not pre-flagged)
   };
 }
 
@@ -133,7 +137,9 @@ export class PlaywrightRecorder extends EventEmitter {
   private browserType: 'chromium' | 'firefox' | 'webkit' = 'chromium';
   private headless: boolean = false;
   private clipboardAccess: boolean = false;
+  private stabilizationSettings: StabilizationSettings = DEFAULT_STABILIZATION_SETTINGS;
   private verificationUpdates: Map<string, { verified: boolean; timestamp: number }> = new Map();
+  private nextClickIsDownload = false;
 
   constructor(repositoryId?: string | null, screenshotDir?: string) {
     super();
@@ -174,6 +180,10 @@ export class PlaywrightRecorder extends EventEmitter {
     this.clipboardAccess = enabled;
   }
 
+  setStabilizationSettings(settings: StabilizationSettings) {
+    this.stabilizationSettings = settings;
+  }
+
   async startRecording(url: string, sessionId: string, setupOptions?: SetupOptions): Promise<void> {
     if (this.isRecording) {
       throw new Error('Already recording');
@@ -199,18 +209,48 @@ export class PlaywrightRecorder extends EventEmitter {
       const browserLauncher = this.browserType === 'firefox' ? firefox
         : this.browserType === 'webkit' ? webkit
         : chromium;
+      const needsCrossOs = this.stabilizationSettings.crossOsConsistency && this.browserType === 'chromium';
+      const launchArgs = needsCrossOs
+        ? [...CROSS_OS_CHROMIUM_ARGS, '--start-maximized']
+        : ['--start-maximized'];
       this.browser = await browserLauncher.launch({
         headless: this.headless,
-        args: ['--start-maximized'],
+        args: launchArgs,
       });
 
       this.context = await this.browser.newContext({
         viewport: { width: this.viewportWidth, height: this.viewportHeight },
         ignoreHTTPSErrors: true, // Ignore SSL errors for local dev
+        acceptDownloads: true, // Always enable during recording so downloads are detected
         ...(this.clipboardAccess ? { permissions: ['clipboard-read', 'clipboard-write'] } : {}),
+        ...(this.stabilizationSettings.crossOsConsistency ? { deviceScaleFactor: 1 } : {}),
       });
 
       this.page = await this.context.newPage();
+
+      // Setup freeze scripts BEFORE navigation (cross-OS fonts, canvas determinism, freeze scripts).
+      // The shared setupFreezeScripts injects DETERMINISTIC_RENDERING_CSS which includes
+      // `cursor: none` — unusable during interactive recording. We let it inject normally,
+      // then override the cursor rule so the user can see their cursor while recording.
+      await setupFreezeScripts(this.page, this.stabilizationSettings);
+
+      // Override cursor: none from deterministic CSS so the cursor is visible during recording
+      if (this.stabilizationSettings.crossOsConsistency || this.stabilizationSettings.freezeAnimations) {
+        await this.page.addInitScript(`
+          (function() {
+            function inject() {
+              if (!document.querySelector('[data-recorder-cursor-fix]') && (document.head || document.documentElement)) {
+                var style = document.createElement('style');
+                style.setAttribute('data-recorder-cursor-fix', 'true');
+                style.textContent = '*, *::before, *::after { cursor: auto !important; }';
+                (document.head || document.documentElement).appendChild(style);
+              }
+            }
+            inject();
+            document.addEventListener('DOMContentLoaded', inject);
+          })();
+        `);
+      }
 
       // Navigate to initial URL first
       await this.page.goto(url, { waitUntil: 'domcontentloaded' });
@@ -300,6 +340,24 @@ export class PlaywrightRecorder extends EventEmitter {
       });
     });
 
+    // Auto-detect downloads: retroactively mark the last click/mouse-down as download-triggering
+    this.page.on('download', () => {
+      if (!this.session) return;
+      // Find the most recent click or mouse-down event and mark it
+      for (let i = this.session.events.length - 1; i >= 0; i--) {
+        const ev = this.session.events[i];
+        const isClick = ev.type === 'action' && (ev.data.action === 'click' || ev.data.action === 'rightclick');
+        const isMouseDown = ev.type === 'mouse-down';
+        if (isClick || isMouseDown) {
+          if (!ev.data.downloadWrap) {
+            ev.data.downloadWrap = true;
+            ev.data.autoDetected = true;
+          }
+          break;
+        }
+      }
+    });
+
     // Expose function to track interactions from the page - MUST await
     // actionId is a unique ID generated by the browser for verification tracking
     // modifiers is an array of active keyboard modifiers (Alt, Control, Shift, Meta)
@@ -335,7 +393,11 @@ export class PlaywrightRecorder extends EventEmitter {
         }
       }
 
-      this.addEvent('action', { action, selector: primarySelector, selectors, value, coordinates, actionId, button, modifiers: modifiers && modifiers.length > 0 ? modifiers : undefined }, 'committed', {
+      // Check if this click was pre-flagged as a download trigger
+      const downloadWrap = (action === 'click' || action === 'rightclick') && this.nextClickIsDownload ? true : undefined;
+      if (downloadWrap) this.nextClickIsDownload = false;
+
+      this.addEvent('action', { action, selector: primarySelector, selectors, value, coordinates, actionId, button, modifiers: modifiers && modifiers.length > 0 ? modifiers : undefined, downloadWrap }, 'committed', {
         syntaxValid,
         domVerified: undefined, // Will be set by async verification
         lastChecked: undefined,
@@ -373,7 +435,11 @@ export class PlaywrightRecorder extends EventEmitter {
 
       // Mouse down/up tracking for pointer gestures with modifier support
       await this.page.exposeFunction('__recordMouseEvent', (type: 'down' | 'up', x: number, y: number, button: number, modifiers?: KeyboardModifier[]) => {
-        this.addEvent(type === 'down' ? 'mouse-down' : 'mouse-up', { coordinates: { x, y }, button, modifiers: modifiers && modifiers.length > 0 ? modifiers : undefined });
+        // Check if this mouse-down was pre-flagged as a download trigger
+        const downloadWrap = type === 'down' && this.nextClickIsDownload ? true : undefined;
+        if (downloadWrap) this.nextClickIsDownload = false;
+
+        this.addEvent(type === 'down' ? 'mouse-down' : 'mouse-up', { coordinates: { x, y }, button, modifiers: modifiers && modifiers.length > 0 ? modifiers : undefined, downloadWrap });
       });
     }
 
@@ -453,6 +519,7 @@ export class PlaywrightRecorder extends EventEmitter {
     const initArgs = { pointerGestures, cursorFPS, selectorPriority };
 
     // Inject interaction tracking script - MUST await
+    // IMPORTANT: Keep this script in sync with packages/runner/src/browser-script.ts
     // This function is used both for addInitScript (future navigations) and evaluate (current page)
     const initFn = ({ pointerGestures: pg, cursorFPS: fps, selectorPriority: priority }: { pointerGestures: boolean; cursorFPS: number; selectorPriority: typeof selectorPriority }) => {
       // Type definition for selectors captured in browser context
@@ -1157,6 +1224,21 @@ export class PlaywrightRecorder extends EventEmitter {
     return true;
   }
 
+  /**
+   * Flag that the next click should be wrapped in downloads.waitForDownload().
+   * Also emits a 'download' marker event for the timeline UI.
+   */
+  flagDownload(): boolean {
+    if (!this.session) {
+      console.warn('[Recorder] flagDownload called but no active session');
+      return false;
+    }
+    this.nextClickIsDownload = true;
+    this.addEvent('download', {});
+    console.log(`[Recorder] Download flagged, next click will be wrapped. Events: ${this.session.events.length}`);
+    return true;
+  }
+
   async stopRecording(): Promise<RecordingSession | null> {
     if (!this.isRecording || !this.session) {
       // Return last completed session if available (for when browser was closed)
@@ -1222,6 +1304,9 @@ export class PlaywrightRecorder extends EventEmitter {
     for (const event of this.session?.events ?? []) {
       if (event.type === 'action' && event.data.action === 'setInputFiles') {
         caps.fileUpload = true;
+      }
+      if (event.type === 'download' || event.data.downloadWrap) {
+        caps.downloads = true;
       }
     }
 
@@ -1334,6 +1419,8 @@ export class PlaywrightRecorder extends EventEmitter {
     let lastCursorTimestamp = 0;
     let lastCursorX = 640;
     let lastCursorY = 360;
+    let nextClickIsDownloadCodegen = false; // Set by 'download' marker event
+    let insideDownloadMouseWrap = false; // True while inside a downloads.waitForDownload() wrapper for mouse-down/up
 
     const flushCursorBatch = () => {
       if (cursorBatch.length > 0) {
@@ -1357,6 +1444,12 @@ export class PlaywrightRecorder extends EventEmitter {
       // Flush any pending cursor moves before other events
       flushCursorBatch();
 
+      // Download marker: flag that the next click should be wrapped
+      if (event.type === 'download') {
+        nextClickIsDownloadCodegen = true;
+        continue;
+      }
+
       if (event.type === 'navigation' && event.data.relativePath) {
         // Only add goto for the first navigation or if URL changed significantly
         if (!lastAction.includes('goto')) {
@@ -1365,9 +1458,11 @@ export class PlaywrightRecorder extends EventEmitter {
         }
         lastAction = 'goto';
       } else if (event.type === 'action') {
-        const { action, selector, selectors, value, coordinates, button, modifiers } = event.data;
+        const { action, selector, selectors, value, coordinates, button, modifiers, downloadWrap } = event.data;
         const isRightClick = action === 'rightclick' || button === 2;
         const hasModifiers = modifiers && modifiers.length > 0;
+        const isDownloadClick = (action === 'click' || action === 'rightclick') && (nextClickIsDownloadCodegen || downloadWrap);
+        if (nextClickIsDownloadCodegen && (action === 'click' || action === 'rightclick')) nextClickIsDownloadCodegen = false;
 
         // Build click options object with button and modifiers
         const clickOptParts: string[] = [];
@@ -1391,69 +1486,94 @@ export class PlaywrightRecorder extends EventEmitter {
           }
         };
 
+        // Collect click lines into a temporary buffer so we can wrap in downloads.waitForDownload()
+        const clickLines: string[] = [];
+        const target = isDownloadClick ? clickLines : lines;
+
+        if (isDownloadClick) {
+          lines.push(`  // Wait for download triggered by click`);
+          lines.push(`  await downloads.waitForDownload(async () => {`);
+        }
+        const dIndent = isDownloadClick ? '    ' : '  ';
+
         // Use multi-selector format if available
         if (selectors && selectors.length > 0) {
           const selectorsJson = JSON.stringify(selectors);
           const coordsArg = coordinates ? JSON.stringify(coordinates) : 'null';
           switch (action) {
             case 'click':
-              lines.push(`  await locateWithFallback(page, ${selectorsJson}, 'click', null, ${coordsArg}${clickOptions !== 'null' ? `, ${clickOptions}` : ''});`);
+              target.push(`${dIndent}await locateWithFallback(page, ${selectorsJson}, 'click', null, ${coordsArg}${clickOptions !== 'null' ? `, ${clickOptions}` : ''});`);
               break;
             case 'rightclick':
-              lines.push(`  await locateWithFallback(page, ${selectorsJson}, 'click', null, ${coordsArg}, ${clickOptions});`);
+              target.push(`${dIndent}await locateWithFallback(page, ${selectorsJson}, 'click', null, ${coordsArg}, ${clickOptions});`);
               break;
             case 'fill':
-              lines.push(`  await locateWithFallback(page, ${selectorsJson}, 'fill', '${escStr(value || '')}', ${coordsArg});`);
+              target.push(`${dIndent}await locateWithFallback(page, ${selectorsJson}, 'fill', '${escStr(value || '')}', ${coordsArg});`);
               break;
             case 'selectOption':
-              lines.push(`  await locateWithFallback(page, ${selectorsJson}, 'selectOption', '${escStr(value || '')}', null);`);
+              target.push(`${dIndent}await locateWithFallback(page, ${selectorsJson}, 'selectOption', '${escStr(value || '')}', null);`);
               break;
             case 'setInputFiles':
-              lines.push(`  // File upload — replace the path with your actual test file`);
-              lines.push(`  await fileUpload('${escStr(selectors[0]?.value || selector || 'input[type="file"]')}', '${escStr(value || '')}');`);
+              target.push(`${dIndent}// File upload — replace the path with your actual test file`);
+              target.push(`${dIndent}await fileUpload('${escStr(selectors[0]?.value || selector || 'input[type="file"]')}', '${escStr(value || '')}');`);
               break;
           }
         } else if (selector && selector.trim()) {
           // Fallback to legacy single selector (only if non-empty)
           switch (action) {
             case 'click':
-              lines.push(`  await page.locator('${selector}').click(${clickOptions !== 'null' ? clickOptions : ''});`);
+              target.push(`${dIndent}await page.locator('${selector}').click(${clickOptions !== 'null' ? clickOptions : ''});`);
               break;
             case 'rightclick':
-              lines.push(`  await page.locator('${selector}').click(${clickOptions});`);
+              target.push(`${dIndent}await page.locator('${selector}').click(${clickOptions});`);
               break;
             case 'fill':
-              lines.push(`  await page.locator('${selector}').fill('${escStr(value || '')}');`);
+              target.push(`${dIndent}await page.locator('${selector}').fill('${escStr(value || '')}');`);
               break;
             case 'selectOption':
-              lines.push(`  await page.locator('${selector}').selectOption('${escStr(value || '')}');`);
+              target.push(`${dIndent}await page.locator('${selector}').selectOption('${escStr(value || '')}');`);
               break;
             case 'setInputFiles':
-              lines.push(`  // File upload — replace the path with your actual test file`);
-              lines.push(`  await fileUpload('${escStr(selector)}', '${escStr(value || '')}');`);
+              target.push(`${dIndent}// File upload — replace the path with your actual test file`);
+              target.push(`${dIndent}await fileUpload('${escStr(selector)}', '${escStr(value || '')}');`);
               break;
           }
         } else {
           // No selectors available - use coordinate fallback
           if ((action === 'click' || action === 'rightclick') && coordinates) {
-            lines.push(`  // Coordinate-only ${isRightClick ? 'right-' : ''}click (no selectors found)`);
-            emitModDown();
-            lines.push(`  await page.mouse.click(${coordinates.x}, ${coordinates.y}${isRightClick ? `, { button: 'right' }` : ''});`);
-            emitModUp();
+            target.push(`${dIndent}// Coordinate-only ${isRightClick ? 'right-' : ''}click (no selectors found)`);
+            if (hasModifiers) {
+              for (const mod of modifiers!) {
+                target.push(`${dIndent}await page.keyboard.down('${mod}');`);
+              }
+            }
+            target.push(`${dIndent}await page.mouse.click(${coordinates.x}, ${coordinates.y}${isRightClick ? `, { button: 'right' }` : ''});`);
+            if (hasModifiers) {
+              for (const mod of [...modifiers!].reverse()) {
+                target.push(`${dIndent}await page.keyboard.up('${mod}');`);
+              }
+            }
           } else if (action === 'fill' && coordinates) {
             if (lastEmittedEventType === 'mouse-up') {
               // Text input already focused by previous click (e.g. canvas text editor) - just type
-              lines.push(`  await page.keyboard.type('${escStr(value || '')}');`);
+              target.push(`${dIndent}await page.keyboard.type('${escStr(value || '')}');`);
             } else {
-              lines.push(`  // Coordinate-only fill (no selectors found) - click to focus then type`);
-              lines.push(`  await page.mouse.click(${coordinates.x}, ${coordinates.y});`);
-              lines.push(`  await page.keyboard.press('Control+a');`);
-              lines.push(`  await page.keyboard.type('${escStr(value || '')}');`);
+              target.push(`${dIndent}// Coordinate-only fill (no selectors found) - click to focus then type`);
+              target.push(`${dIndent}await page.mouse.click(${coordinates.x}, ${coordinates.y});`);
+              target.push(`${dIndent}await page.keyboard.press('Control+a');`);
+              target.push(`${dIndent}await page.keyboard.type('${escStr(value || '')}');`);
             }
           } else {
-            lines.push(`  // Skipped ${action}: no valid selector or coordinates found`);
+            target.push(`${dIndent}// Skipped ${action}: no valid selector or coordinates found`);
           }
         }
+
+        // Close download wrapper and flush buffered lines
+        if (isDownloadClick) {
+          lines.push(...clickLines);
+          lines.push(`  });`);
+        }
+
         lastAction = action || '';
         lastEmittedEventType = 'action';
       } else if (event.type === 'screenshot') {
@@ -1530,27 +1650,43 @@ export class PlaywrightRecorder extends EventEmitter {
         const modifiers = event.data.modifiers;
         const mouseButton = event.data.button;
         const buttonOpt = mouseButton === 2 ? `{ button: 'right' }` : '';
+        const isDownloadMouse = nextClickIsDownloadCodegen || event.data.downloadWrap;
+        if (nextClickIsDownloadCodegen) nextClickIsDownloadCodegen = false;
+
+        if (isDownloadMouse) {
+          insideDownloadMouseWrap = true;
+          lines.push(`  // Wait for download triggered by click`);
+          lines.push(`  await downloads.waitForDownload(async () => {`);
+        }
+        const mIndent = insideDownloadMouseWrap ? '    ' : '  ';
+
         // Press modifier keys before mouse down
         if (modifiers && modifiers.length > 0) {
           for (const mod of modifiers) {
-            lines.push(`  await page.keyboard.down('${mod}');`);
+            lines.push(`${mIndent}await page.keyboard.down('${mod}');`);
           }
         }
-        lines.push(`  await page.mouse.move(${x}, ${y});`);
-        lines.push(`  await page.mouse.down(${buttonOpt});`);
+        lines.push(`${mIndent}await page.mouse.move(${x}, ${y});`);
+        lines.push(`${mIndent}await page.mouse.down(${buttonOpt});`);
         lastEmittedEventType = 'mouse-down';
       } else if (event.type === 'mouse-up' && event.data.coordinates) {
         const { x, y } = event.data.coordinates;
         const modifiers = event.data.modifiers;
         const mouseButton = event.data.button;
         const buttonOpt = mouseButton === 2 ? `{ button: 'right' }` : '';
-        lines.push(`  await page.mouse.move(${x}, ${y});`);
-        lines.push(`  await page.mouse.up(${buttonOpt});`);
+        const mIndent = insideDownloadMouseWrap ? '    ' : '  ';
+        lines.push(`${mIndent}await page.mouse.move(${x}, ${y});`);
+        lines.push(`${mIndent}await page.mouse.up(${buttonOpt});`);
         // Release modifier keys after mouse up
         if (modifiers && modifiers.length > 0) {
           for (const mod of modifiers) {
-            lines.push(`  await page.keyboard.up('${mod}');`);
+            lines.push(`${mIndent}await page.keyboard.up('${mod}');`);
           }
+        }
+        // Close download wrapper after mouse-up
+        if (insideDownloadMouseWrap) {
+          lines.push(`  });`);
+          insideDownloadMouseWrap = false;
         }
         lastEmittedEventType = 'mouse-up';
       } else if (event.type === 'keypress' && event.data.key) {

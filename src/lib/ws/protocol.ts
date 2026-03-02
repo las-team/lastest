@@ -15,6 +15,8 @@ export type MessageType =
   | 'command:cancel_test'
   | 'command:start_recording'
   | 'command:stop_recording'
+  | 'command:create_assertion'
+  | 'command:flag_download'
   | 'command:ping'
   | 'command:shutdown'
   // Agent → Server (Responses)
@@ -30,7 +32,12 @@ export type MessageType =
   | 'response:pong'
   // Status
   | 'status:heartbeat'
-  | 'connection:established';
+  | 'connection:established'
+  // Embedded Browser Streaming
+  | 'stream:frame'
+  | 'stream:input'
+  | 'stream:session'
+  | 'stream:status';
 
 export interface BaseMessage {
   id: string;
@@ -49,28 +56,9 @@ export interface ServerConfig {
   healthCheckTimeout: number;
 }
 
-export interface StabilizationPayload {
-  freezeTimestamps: boolean;
-  frozenTimestamp: string;
-  freezeRandomValues: boolean;
-  randomSeed: number;
-  freezeAnimations: boolean;
-  crossOsConsistency: boolean;
-  waitForNetworkIdle: boolean;
-  networkIdleTimeout: number;
-  waitForDomStable: boolean;
-  domStableTimeout: number;
-  waitForFonts: boolean;
-  waitForImages: boolean;
-  waitForImagesTimeout: number;
-  crossOsFontCSS?: string;
-  waitForCanvasStable: boolean;
-  canvasStableTimeout: number;
-  canvasStableThreshold: number;
-  disableImageSmoothing: boolean;
-  roundCanvasCoordinates: boolean;
-  reseedRandomOnInput: boolean;
-}
+import type { CoreStabilizationSettings } from '@lastest/shared';
+
+export type StabilizationPayload = CoreStabilizationSettings;
 
 export interface RunTestCommandPayload {
   testId: string;
@@ -139,6 +127,7 @@ export interface StartRecordingCommandPayload {
   ocrEnabled?: boolean;
   pointerGestures?: boolean;
   cursorFPS?: number;
+  setupSteps?: Array<{ code: string; codeHash: string }>;
 }
 
 export interface StartRecordingCommand extends BaseMessage {
@@ -204,6 +193,7 @@ export interface TestResultPayload {
   testRunId: string;
   status: 'passed' | 'failed' | 'error' | 'timeout' | 'cancelled';
   durationMs: number;
+  screenshotCount?: number; // Number of screenshots to expect (for early completion detection)
   error?: {
     message: string;
     stack?: string;
@@ -261,6 +251,25 @@ export interface RecordingStoppedPayload {
 export interface RecordingStoppedResponse extends BaseMessage {
   type: 'response:recording_stopped';
   payload: RecordingStoppedPayload;
+}
+
+export interface CreateAssertionCommandPayload {
+  sessionId: string;
+  assertionType: string;
+}
+
+export interface CreateAssertionCommand extends BaseMessage {
+  type: 'command:create_assertion';
+  payload: CreateAssertionCommandPayload;
+}
+
+export interface FlagDownloadCommandPayload {
+  sessionId: string;
+}
+
+export interface FlagDownloadCommand extends BaseMessage {
+  type: 'command:flag_download';
+  payload: FlagDownloadCommandPayload;
 }
 
 export interface CaptureScreenshotCommand extends BaseMessage {
@@ -372,6 +381,8 @@ export type ServerCommand =
   | ShutdownCommand
   | StartRecordingCommand
   | StopRecordingCommand
+  | CreateAssertionCommand
+  | FlagDownloadCommand
   | CaptureScreenshotCommand
   | PingCommand;
 
@@ -415,4 +426,75 @@ export function isServerCommand(msg: Message): msg is ServerCommand {
 
 export function isAgentResponse(msg: Message): msg is AgentResponse {
   return msg.type.startsWith('response:') || msg.type.startsWith('status:');
+}
+
+// ============================================
+// Embedded Browser Streaming Types
+// ============================================
+
+/** Server → Client: CDP screencast frame */
+export interface ScreencastFrameMessage extends BaseMessage {
+  type: 'stream:frame';
+  payload: {
+    data: string;          // base64 JPEG
+    width: number;
+    height: number;
+    timestamp: number;
+  };
+}
+
+/** Client → Server: Mouse/keyboard input forwarding */
+export interface StreamInputMessage extends BaseMessage {
+  type: 'stream:input';
+  payload: StreamMouseEvent | StreamKeyboardEvent;
+}
+
+export interface StreamMouseEvent {
+  type: 'mouse';
+  action: 'move' | 'down' | 'up' | 'wheel';
+  x: number;
+  y: number;
+  button?: 'left' | 'right' | 'middle';
+  clickCount?: number;
+  deltaX?: number;
+  deltaY?: number;
+}
+
+export interface StreamKeyboardEvent {
+  type: 'keyboard';
+  action: 'keydown' | 'keyup' | 'type';
+  key: string;
+  code?: string;
+  text?: string;
+  modifiers?: { ctrl?: boolean; shift?: boolean; alt?: boolean; meta?: boolean };
+}
+
+/** Client → Server / Server → Client: Session lifecycle control */
+export interface StreamSessionMessage extends BaseMessage {
+  type: 'stream:session';
+  payload:
+    | { action: 'start' | 'stop' }
+    | { action: 'resize'; viewport: { width: number; height: number } }
+    | { action: 'navigate'; url: string };
+}
+
+/** Server → Client: Stream connection status */
+export interface StreamStatusMessage extends BaseMessage {
+  type: 'stream:status';
+  payload: {
+    status: 'connected' | 'disconnected' | 'error';
+    currentUrl?: string;
+    viewport?: { width: number; height: number };
+    error?: string;
+  };
+}
+
+export type StreamMessage =
+  | ScreencastFrameMessage
+  | StreamInputMessage
+  | StreamSessionMessage
+  | StreamStatusMessage;
+
+export function isStreamMessage(msg: { type: string }): boolean {
+  return msg.type.startsWith('stream:');
 }

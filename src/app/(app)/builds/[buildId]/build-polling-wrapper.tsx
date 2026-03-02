@@ -4,6 +4,9 @@ import { useState, useEffect, ReactNode } from 'react';
 import { useRouter } from 'next/navigation';
 import { BuildDetailClient } from './build-detail-client';
 import { BuildSummaryHero } from '@/components/dashboard/build-summary-hero';
+import { BrowserViewer } from '@/components/embedded-browser/browser-viewer-client';
+import { ChevronDown, ChevronUp, Tv2 } from 'lucide-react';
+import { Card, CardContent } from '@/components/ui/card';
 import type { VisualDiffWithTestStatus, BuildStatus } from '@/lib/db/schema';
 
 interface BuildData {
@@ -24,12 +27,14 @@ interface BuildPollingWrapperProps {
   initialBuild: BuildData;
   buildId: string;
   isMainBranch?: boolean;
+  embeddedStreamUrl?: string | null;
   children?: ReactNode;
 }
 
-export function BuildPollingWrapper({ initialBuild, buildId, isMainBranch = false, children }: BuildPollingWrapperProps) {
+export function BuildPollingWrapper({ initialBuild, buildId, isMainBranch = false, embeddedStreamUrl, children }: BuildPollingWrapperProps) {
   const [build, setBuild] = useState<BuildData>(initialBuild);
   const [isPolling, setIsPolling] = useState(!initialBuild.completedAt);
+  const [showViewer, setShowViewer] = useState(true);
 
   // Mark "Check Results" setup guide step as complete on page visit
   useEffect(() => {
@@ -63,18 +68,42 @@ export function BuildPollingWrapper({ initialBuild, buildId, isMainBranch = fals
   const isRunning = !build.completedAt;
   const completedTests = build.passedCount + build.failedCount;
   const pendingDiffs = build.diffs.filter((d) => d.status === 'pending');
+  const showBrowserViewer = embeddedStreamUrl && isRunning;
 
   return (
     <>
       {/* Top row: Hero + Quick Actions + Git Info */}
-      <div className="flex items-center gap-3">
-        <BuildSummaryHero
-          status={build.overallStatus}
-          changesDetected={build.changesDetected}
-          isRunning={isRunning}
-        />
-        {children}
-      </div>
+      <Card>
+        <CardContent className="flex items-center gap-3">
+          <BuildSummaryHero
+            status={build.overallStatus}
+            changesDetected={build.changesDetected}
+            isRunning={isRunning}
+          />
+          {children}
+        </CardContent>
+      </Card>
+
+      {/* Live Browser Viewer (embedded runner only, while running) */}
+      {showBrowserViewer && (
+        <Card className="overflow-hidden py-0">
+          <button
+            type="button"
+            className="flex items-center gap-2 w-full px-3 py-2 text-sm font-medium bg-muted/50 hover:bg-muted transition-colors"
+            onClick={() => setShowViewer(!showViewer)}
+          >
+            <Tv2 className="h-4 w-4 text-purple-500" />
+            <span>Live Browser View</span>
+            {showViewer ? <ChevronUp className="h-4 w-4 ml-auto" /> : <ChevronDown className="h-4 w-4 ml-auto" />}
+          </button>
+          {showViewer && (
+            <BrowserViewer
+              streamUrl={embeddedStreamUrl}
+              className="max-h-[500px]"
+            />
+          )}
+        </Card>
+      )}
 
       {/* Metrics Row and Diff List with Filter Support */}
       <BuildDetailClient

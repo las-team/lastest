@@ -11,6 +11,7 @@ function git(cmd: string): string {
 
 const nextConfig: NextConfig = {
   output: "standalone",
+  transpilePackages: ["@lastest/shared"],
   env: {
     NEXT_PUBLIC_GIT_HASH: process.env.NEXT_PUBLIC_GIT_HASH || git("rev-parse --short HEAD"),
     NEXT_PUBLIC_GIT_COMMIT_COUNT: process.env.NEXT_PUBLIC_GIT_COMMIT_COUNT || git("rev-list --count HEAD"),

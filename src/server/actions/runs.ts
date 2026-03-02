@@ -10,7 +10,7 @@ import { getBranchInfo } from '@/lib/github/content';
 import * as queries from '@/lib/db/queries';
 import { v4 as uuid } from 'uuid';
 import type { Test } from '@/lib/db/schema';
-import { createJob, createPendingJob, startJob, updateJobProgress, completeJob, failJob } from './jobs';
+import { createJob, createPendingJob, startJob, updateJobProgress, completeJob, failJob, isRunnerBusy } from './jobs';
 
 interface GitInfo {
   branch: string;
@@ -66,12 +66,14 @@ export async function createTestRun(testIds?: string[], repositoryId?: string | 
 export async function runTests(testIds?: string[], repositoryId?: string | null, headless?: boolean, runnerId?: string, forceVideoRecording?: boolean) {
   if (repositoryId) await requireRepoAccess(repositoryId);
   else await requireTeamAccess();
-  const runner = getRunner(repositoryId);
+  const targetRunner = runnerId || 'local';
 
-  // If tests are running, queue this run
-  if (runner.isActive()) {
+  // If this runner is busy, queue this run
+  if (await isRunnerBusy(targetRunner)) {
     return queueTestRun(testIds, repositoryId, headless, runnerId, forceVideoRecording);
   }
+
+  const runner = getRunner(repositoryId);
 
   // Load and set environment config
   const envConfig = await queries.getEnvironmentConfig(repositoryId);
@@ -117,7 +119,7 @@ export async function runTests(testIds?: string[], repositoryId?: string | null,
   });
 
   // Create job first so we can return the jobId
-  const jobId = await createJob('test_run', `Test Run (${tests.length} tests)`, tests.length, repositoryId);
+  const jobId = await createJob('test_run', `Test Run (${tests.length} tests)`, tests.length, repositoryId, undefined, targetRunner);
 
   // Run tests (this happens async)
   runTestsAsync(run.id, tests, repositoryId, headless, jobId, runnerId, forceVideoRecording);
@@ -129,7 +131,8 @@ async function runTestsAsync(runId: string, tests: Test[], repositoryId?: string
   const runner = getRunner(repositoryId);
 
   // Use provided jobId or create new one (for backwards compatibility)
-  const activeJobId = jobId ?? await createJob('test_run', `Test Run (${tests.length} tests)`, tests.length, repositoryId);
+  const targetRunner = runnerId || 'local';
+  const activeJobId = jobId ?? await createJob('test_run', `Test Run (${tests.length} tests)`, tests.length, repositoryId, undefined, targetRunner);
 
   // Get teamId from runner record (not session — session is unavailable in fire-and-forget context)
   let teamId: string | undefined;
@@ -214,8 +217,8 @@ async function runTestsAsync(runId: string, tests: Test[], repositoryId?: string
   revalidatePath('/tests', 'layout');
   revalidatePath('/');
 
-  // Process next queued test run if any
-  processNextQueuedTestRun(repositoryId);
+  // Process next queued test run for this runner
+  processNextQueuedTestRun(repositoryId, targetRunner);
 }
 
 export async function getTestRun(runId: string) {
@@ -268,24 +271,26 @@ async function queueTestRun(
     throw new Error('No tests to run');
   }
 
+  const targetRunner = runnerId || 'local';
   const jobId = await createPendingJob(
     'test_run',
     `Queued Test Run (${tests.length} tests)`,
     tests.length,
     repositoryId,
-    { testIds: testIds || null, headless, runnerId, forceVideoRecording }
+    { testIds: testIds || null, headless, runnerId, forceVideoRecording },
+    targetRunner,
   );
 
   return { runId: null, testCount: tests.length, queued: true, jobId };
 }
 
-export async function processNextQueuedTestRun(repositoryId?: string | null) {
-  const runner = getRunner(repositoryId);
+export async function processNextQueuedTestRun(repositoryId?: string | null, targetRunnerId?: string) {
+  const effectiveRunner = targetRunnerId || 'local';
 
-  // Don't process if runner is still active
-  if (runner.isActive()) return;
+  // Don't process if this runner is still busy
+  if (await isRunnerBusy(effectiveRunner)) return;
 
-  const pendingJobs = await queries.getPendingTestRunJobs(repositoryId);
+  const pendingJobs = await queries.getPendingTestRunJobs(repositoryId, effectiveRunner);
   if (pendingJobs.length === 0) return;
 
   const nextJob = pendingJobs[0];

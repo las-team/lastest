@@ -28,6 +28,8 @@ export interface CodeGenEvent {
     };
     deltaX?: number;
     deltaY?: number;
+    downloadWrap?: boolean;
+    autoDetected?: boolean;
   };
 }
 
@@ -58,6 +60,8 @@ export function eventsToCodeLines(
   let lastCursorTimestamp = 0;
   let lastCursorX = 640;
   let lastCursorY = 360;
+  let nextClickIsDownload = false;
+  let insideDownloadMouseWrap = false;
 
   const flushCursorBatch = () => {
     if (cursorBatch.length > 0 && includeCursorReplay) {
@@ -82,6 +86,12 @@ export function eventsToCodeLines(
 
     flushCursorBatch();
 
+    // Download marker: flag that the next click should be wrapped
+    if (event.type === 'download') {
+      nextClickIsDownload = true;
+      continue;
+    }
+
     if (event.type === 'navigation' && event.data.relativePath) {
       if (!lastAction.includes('goto')) {
         const relativePath = event.data.relativePath;
@@ -89,76 +99,88 @@ export function eventsToCodeLines(
       }
       lastAction = 'goto';
     } else if (event.type === 'action') {
-      const { action, selector, selectors, value, coordinates, button, modifiers } = event.data;
+      const { action, selector, selectors, value, coordinates, button, modifiers, downloadWrap } = event.data;
       const isRightClick = action === 'rightclick' || button === 2;
       const hasModifiers = modifiers && modifiers.length > 0;
+      const isDownloadClick = (action === 'click' || action === 'rightclick') && (nextClickIsDownload || downloadWrap);
+      if (nextClickIsDownload && (action === 'click' || action === 'rightclick')) nextClickIsDownload = false;
 
       const clickOptParts: string[] = [];
       if (isRightClick) clickOptParts.push(`button: 'right'`);
       if (hasModifiers) clickOptParts.push(`modifiers: [${modifiers!.map(m => `'${m}'`).join(', ')}]`);
       const clickOptions = clickOptParts.length > 0 ? `{ ${clickOptParts.join(', ')} }` : 'null';
 
-      const emitModDown = () => {
-        if (hasModifiers) {
-          for (const mod of modifiers!) {
-            lines.push(`${indent}await page.keyboard.down('${mod}');`);
-          }
-        }
-      };
-      const emitModUp = () => {
-        if (hasModifiers) {
-          for (const mod of [...modifiers!].reverse()) {
-            lines.push(`${indent}await page.keyboard.up('${mod}');`);
-          }
-        }
-      };
+      // For download-wrapped clicks, collect lines in a buffer then wrap
+      const clickLines: string[] = [];
+      const target = isDownloadClick ? clickLines : lines;
+
+      if (isDownloadClick) {
+        lines.push(`${indent}// Wait for download triggered by click`);
+        lines.push(`${indent}await downloads.waitForDownload(async () => {`);
+      }
+      const dIndent = isDownloadClick ? indent + '  ' : indent;
 
       if (selectors && selectors.length > 0) {
         const selectorsJson = JSON.stringify(selectors);
         const coordsArg = coordinates ? JSON.stringify(coordinates) : 'null';
         switch (action) {
           case 'click':
-            lines.push(`${indent}await locateWithFallback(page, ${selectorsJson}, 'click', null, ${coordsArg}${clickOptions !== 'null' ? `, ${clickOptions}` : ''});`);
+            target.push(`${dIndent}await locateWithFallback(page, ${selectorsJson}, 'click', null, ${coordsArg}${clickOptions !== 'null' ? `, ${clickOptions}` : ''});`);
             break;
           case 'rightclick':
-            lines.push(`${indent}await locateWithFallback(page, ${selectorsJson}, 'click', null, ${coordsArg}, ${clickOptions});`);
+            target.push(`${dIndent}await locateWithFallback(page, ${selectorsJson}, 'click', null, ${coordsArg}, ${clickOptions});`);
             break;
           case 'fill':
-            lines.push(`${indent}await locateWithFallback(page, ${selectorsJson}, 'fill', '${value || ''}', ${coordsArg});`);
+            target.push(`${dIndent}await locateWithFallback(page, ${selectorsJson}, 'fill', '${value || ''}', ${coordsArg});`);
             break;
           case 'selectOption':
-            lines.push(`${indent}await locateWithFallback(page, ${selectorsJson}, 'selectOption', '${value || ''}', null);`);
+            target.push(`${dIndent}await locateWithFallback(page, ${selectorsJson}, 'selectOption', '${value || ''}', null);`);
             break;
         }
       } else if (selector && selector.trim()) {
         switch (action) {
           case 'click':
-            lines.push(`${indent}await page.locator('${selector}').click(${clickOptions !== 'null' ? clickOptions : ''});`);
+            target.push(`${dIndent}await page.locator('${selector}').click(${clickOptions !== 'null' ? clickOptions : ''});`);
             break;
           case 'rightclick':
-            lines.push(`${indent}await page.locator('${selector}').click(${clickOptions});`);
+            target.push(`${dIndent}await page.locator('${selector}').click(${clickOptions});`);
             break;
           case 'fill':
-            lines.push(`${indent}await page.locator('${selector}').fill('${value || ''}');`);
+            target.push(`${dIndent}await page.locator('${selector}').fill('${value || ''}');`);
             break;
           case 'selectOption':
-            lines.push(`${indent}await page.locator('${selector}').selectOption('${value || ''}');`);
+            target.push(`${dIndent}await page.locator('${selector}').selectOption('${value || ''}');`);
             break;
         }
       } else if ((action === 'click' || action === 'rightclick') && coordinates) {
-        lines.push(`${indent}// Coordinate-only ${isRightClick ? 'right-' : ''}click (no selectors found)`);
-        emitModDown();
-        lines.push(`${indent}await page.mouse.click(${coordinates.x}, ${coordinates.y}${isRightClick ? `, { button: 'right' }` : ''});`);
-        emitModUp();
+        target.push(`${dIndent}// Coordinate-only ${isRightClick ? 'right-' : ''}click (no selectors found)`);
+        if (hasModifiers) {
+          for (const mod of modifiers!) {
+            target.push(`${dIndent}await page.keyboard.down('${mod}');`);
+          }
+        }
+        target.push(`${dIndent}await page.mouse.click(${coordinates.x}, ${coordinates.y}${isRightClick ? `, { button: 'right' }` : ''});`);
+        if (hasModifiers) {
+          for (const mod of [...modifiers!].reverse()) {
+            target.push(`${dIndent}await page.keyboard.up('${mod}');`);
+          }
+        }
       } else if (action === 'fill' && coordinates) {
         const escapedValue = (value || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'");
-        lines.push(`${indent}// Coordinate-only fill (no selectors found) - click to focus then type`);
-        lines.push(`${indent}await page.mouse.click(${coordinates.x}, ${coordinates.y});`);
-        lines.push(`${indent}await page.keyboard.press('Control+a');`);
-        lines.push(`${indent}await page.keyboard.type('${escapedValue}');`);
+        target.push(`${dIndent}// Coordinate-only fill (no selectors found) - click to focus then type`);
+        target.push(`${dIndent}await page.mouse.click(${coordinates.x}, ${coordinates.y});`);
+        target.push(`${dIndent}await page.keyboard.press('Control+a');`);
+        target.push(`${dIndent}await page.keyboard.type('${escapedValue}');`);
       } else {
-        lines.push(`${indent}// Skipped ${action}: no valid selector or coordinates found`);
+        target.push(`${dIndent}// Skipped ${action}: no valid selector or coordinates found`);
       }
+
+      // Close download wrapper
+      if (isDownloadClick) {
+        lines.push(...clickLines);
+        lines.push(`${indent}});`);
+      }
+
       lastAction = action || '';
     } else if (event.type === 'screenshot') {
       lines.push(`${indent}await page.screenshot({ path: getScreenshotPath(), fullPage: true });`);
@@ -218,22 +240,37 @@ export function eventsToCodeLines(
     } else if (event.type === 'mouse-down' && event.data.coordinates) {
       const { x, y } = event.data.coordinates;
       const modifiers = event.data.modifiers;
+      const isDownloadMouse = nextClickIsDownload || event.data.downloadWrap;
+      if (nextClickIsDownload) nextClickIsDownload = false;
+
+      if (isDownloadMouse) {
+        insideDownloadMouseWrap = true;
+        lines.push(`${indent}// Wait for download triggered by click`);
+        lines.push(`${indent}await downloads.waitForDownload(async () => {`);
+      }
+      const mIndent = insideDownloadMouseWrap ? indent + '  ' : indent;
+
       if (modifiers && modifiers.length > 0) {
         for (const mod of modifiers) {
-          lines.push(`${indent}await page.keyboard.down('${mod}');`);
+          lines.push(`${mIndent}await page.keyboard.down('${mod}');`);
         }
       }
-      lines.push(`${indent}await page.mouse.move(${x}, ${y});`);
-      lines.push(`${indent}await page.mouse.down();`);
+      lines.push(`${mIndent}await page.mouse.move(${x}, ${y});`);
+      lines.push(`${mIndent}await page.mouse.down();`);
     } else if (event.type === 'mouse-up' && event.data.coordinates) {
       const { x, y } = event.data.coordinates;
       const modifiers = event.data.modifiers;
-      lines.push(`${indent}await page.mouse.move(${x}, ${y});`);
-      lines.push(`${indent}await page.mouse.up();`);
+      const mIndent = insideDownloadMouseWrap ? indent + '  ' : indent;
+      lines.push(`${mIndent}await page.mouse.move(${x}, ${y});`);
+      lines.push(`${mIndent}await page.mouse.up();`);
       if (modifiers && modifiers.length > 0) {
         for (const mod of modifiers) {
-          lines.push(`${indent}await page.keyboard.up('${mod}');`);
+          lines.push(`${mIndent}await page.keyboard.up('${mod}');`);
         }
+      }
+      if (insideDownloadMouseWrap) {
+        lines.push(`${indent}});`);
+        insideDownloadMouseWrap = false;
       }
     } else if (event.type === 'keypress' && event.data.key) {
       const { key, modifiers } = event.data;

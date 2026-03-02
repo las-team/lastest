@@ -1,4 +1,4 @@
-import { sqliteTable, text, integer } from 'drizzle-orm/sqlite-core';
+import { sqliteTable, text, integer, index } from 'drizzle-orm/sqlite-core';
 
 // Type definitions for JSON columns
 export interface NetworkRequest {
@@ -457,9 +457,9 @@ export interface StabilizationSettings {
 // Default stabilization settings
 export const DEFAULT_STABILIZATION_SETTINGS: StabilizationSettings = {
   waitForNetworkIdle: true,
-  networkIdleTimeout: 5000,
+  networkIdleTimeout: 2000,
   waitForDomStable: true,
-  domStableTimeout: 2000,
+  domStableTimeout: 500,
   freezeTimestamps: true,
   frozenTimestamp: '2024-01-01T12:00:00Z',
   freezeRandomValues: true,
@@ -470,7 +470,7 @@ export const DEFAULT_STABILIZATION_SETTINGS: StabilizationSettings = {
   hideLoadingIndicators: true,
   loadingSelectors: [],
   waitForImages: true,
-  waitForImagesTimeout: 5000,
+  waitForImagesTimeout: 2000,
   waitForFonts: true,
   disableWebfonts: false,
   crossOsConsistency: false,
@@ -521,7 +521,7 @@ export const playwrightSettings = sqliteTable('playwright_settings', {
   freezeAnimations: integer('freeze_animations', { mode: 'boolean' }).default(false), // freeze CSS animations/transitions
   enableVideoRecording: integer('enable_video_recording', { mode: 'boolean' }).default(false), // record test runs as WebM video
   screenshotDelay: integer('screenshot_delay').default(0), // ms delay before screenshot
-  maxParallelTests: integer('max_parallel_tests').default(1), // max tests to run in parallel locally
+  maxParallelTests: integer('max_parallel_tests').default(2), // max tests to run in parallel locally
   stabilization: text('stabilization', { mode: 'json' }).$type<StabilizationSettings>(), // snapshot stabilization settings
   acceptAnyCertificate: integer('accept_any_certificate', { mode: 'boolean' }).default(false), // ignore HTTPS/SSL cert errors
   networkErrorMode: text('network_error_mode').default('fail'), // 'fail' | 'warn' | 'ignore'
@@ -746,6 +746,7 @@ export const backgroundJobs = sqliteTable('background_jobs', {
   metadata: text('metadata', { mode: 'json' }).$type<Record<string, unknown>>(),
   parentJobId: text('parent_job_id'),
   repositoryId: text('repository_id').references(() => repositories.id),
+  targetRunnerId: text('target_runner_id'), // 'local' or runner UUID — tracks which runner this job targets
   createdAt: integer('created_at', { mode: 'timestamp' }),
   startedAt: integer('started_at', { mode: 'timestamp' }),
   lastActivityAt: integer('last_activity_at', { mode: 'timestamp' }),
@@ -993,12 +994,38 @@ export const runners = sqliteTable('runners', {
   status: text('status').notNull().default('offline'), // 'online' | 'offline' | 'busy'
   lastSeen: integer('last_seen', { mode: 'timestamp' }),
   capabilities: text('capabilities', { mode: 'json' }).$type<RunnerCapability[]>().default(['run', 'record']),
+  type: text('type').notNull().default('remote'), // 'remote' | 'embedded'
   maxParallelTests: integer('max_parallel_tests').default(1), // max tests to run in parallel on this runner
   createdAt: integer('created_at', { mode: 'timestamp' }).$defaultFn(() => new Date()),
 });
 
+export type RunnerType = 'remote' | 'embedded';
 export type Runner = typeof runners.$inferSelect;
 export type NewRunner = typeof runners.$inferInsert;
+
+// ============================================
+// Embedded Browser Sessions
+// ============================================
+
+export type EmbeddedSessionStatus = 'starting' | 'ready' | 'busy' | 'stopping' | 'stopped';
+
+export const embeddedSessions = sqliteTable('embedded_sessions', {
+  id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+  teamId: text('team_id').notNull().references(() => teams.id),
+  runnerId: text('runner_id').references(() => runners.id),
+  status: text('status').notNull().default('starting'), // EmbeddedSessionStatus
+  streamUrl: text('stream_url'), // ws://host:9223
+  containerUrl: text('container_url'), // http://host:port (for health checks)
+  viewport: text('viewport', { mode: 'json' }).$type<{ width: number; height: number }>(),
+  currentUrl: text('current_url'),
+  userId: text('user_id'), // Clerk user who claimed the session
+  createdAt: integer('created_at', { mode: 'timestamp' }).notNull().$defaultFn(() => new Date()),
+  lastActivityAt: integer('last_activity_at', { mode: 'timestamp' }),
+  expiresAt: integer('expires_at', { mode: 'timestamp' }),
+});
+
+export type EmbeddedSession = typeof embeddedSessions.$inferSelect;
+export type NewEmbeddedSession = typeof embeddedSessions.$inferInsert;
 
 // ============================================
 // Spec Import - Document-based US/AC extraction
@@ -1330,7 +1357,10 @@ export const runnerCommands = sqliteTable('runner_commands', {
   createdAt: integer('created_at', { mode: 'timestamp' }).$defaultFn(() => new Date()),
   claimedAt: integer('claimed_at', { mode: 'timestamp' }),
   completedAt: integer('completed_at', { mode: 'timestamp' }),
-});
+}, (table) => ([
+  index('idx_runner_commands_runner_status').on(table.runnerId, table.status),
+  index('idx_runner_commands_test_run').on(table.testRunId),
+]));
 
 export type RunnerCommand = typeof runnerCommands.$inferSelect;
 export type NewRunnerCommand = typeof runnerCommands.$inferInsert;
@@ -1343,7 +1373,9 @@ export const runnerCommandResults = sqliteTable('runner_command_results', {
   payload: text('payload', { mode: 'json' }).$type<Record<string, unknown>>(),
   acknowledged: integer('acknowledged', { mode: 'boolean' }).default(false),
   createdAt: integer('created_at', { mode: 'timestamp' }).$defaultFn(() => new Date()),
-});
+}, (table) => ([
+  index('idx_runner_cmd_results_cmd_ack').on(table.commandId, table.acknowledged),
+]));
 
 export type RunnerCommandResult = typeof runnerCommandResults.$inferSelect;
 export type NewRunnerCommandResult = typeof runnerCommandResults.$inferInsert;

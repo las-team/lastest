@@ -103,7 +103,19 @@
       "WebFetch(domain:en.wikipedia.org)",
       "WebFetch(domain:jacklj.github.io)",
       "WebFetch(domain:www.adammil.net)",
-      "WebFetch(domain:lodev.org)"
+      "WebFetch(domain:lodev.org)",
+      "WebFetch(domain:docs.browserless.io)",
+      "Bash(git diff:*)",
+      "Bash(docker restart:*)",
+      "WebFetch(domain:api.github.com)",
+      "Bash(LASTEST2_TOKEN=lastest_runner_9516ca3947ba5bb153bb7fc1e652e6e116cc3f79f35390df52e478f286f3a58c LASTEST2_URL=http://host.docker.internal:3000 STREAM_HOST=localhost docker compose:*)",
+      "Bash(docker compose:*)",
+      "Bash(git cherry-pick:*)",
+      "Bash(LASTEST2_TOKEN=lastest_runner_2e67820cd0c6a328a7c43ec8cdce54351bc64bc0e762e66aa8cbf9027ec96958 docker compose:*)",
+      "Bash(git: - C*)",
+      "Bash(git:*)",
+      "Bash(docker ps:*)",
+      "Bash(gh pr:*)"
     ]
   },
   "disabledMcpjsonServers": [

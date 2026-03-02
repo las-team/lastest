@@ -19,6 +19,7 @@ import {
   stopRecording,
   captureScreenshot,
   createAssertion,
+  flagDownload,
   saveRecordedTest,
   updateRerecordedTest,
   getOrCreateFunctionalArea,
@@ -61,6 +62,7 @@ import {
   Keyboard,
   ShieldCheck,
   Play,
+  Download,
 } from 'lucide-react';
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
@@ -74,6 +76,7 @@ import type { FunctionalArea, PlaywrightSettings, RecordingEngine, Test } from '
 import { DEFAULT_RECORDING_ENGINES } from '@/lib/db/schema';
 import { PlaywrightSettingsCard } from '@/components/settings/playwright-settings-card';
 import { ExecutionTargetSelector } from '@/components/execution/execution-target-selector';
+import { BrowserViewer } from '@/components/embedded-browser/browser-viewer-client';
 
 interface SetupStepInfo {
   stepType: 'test' | 'script';
@@ -128,7 +131,8 @@ function getEventDescription(event: RecordingEvent): string {
       return `Navigate to ${event.data.relativePath || event.data.url || 'page'}`;
     case 'action':
       if (event.data.action === 'click') {
-        return `${modPrefix}Click ${event.data.selector?.slice(0, 40) || 'element'}`;
+        const dlSuffix = event.data.downloadWrap ? ' (download)' : '';
+        return `${modPrefix}Click ${event.data.selector?.slice(0, 40) || 'element'}${dlSuffix}`;
       }
       if (event.data.action === 'fill') {
         return `Fill ${event.data.selector?.slice(0, 30) || 'input'} with "${event.data.value?.slice(0, 20) || ''}"`;
@@ -155,6 +159,8 @@ function getEventDescription(event: RecordingEvent): string {
         domContentLoaded: 'DOM Ready',
       };
       return `Assert: ${labels[event.data.assertionType || ''] || event.data.assertionType}`;
+    case 'download':
+      return 'Download expected';
     case 'mouse-down':
       return `${modPrefix}Mouse down at (${event.data.coordinates?.x}, ${event.data.coordinates?.y})`;
     case 'mouse-up':
@@ -225,6 +231,8 @@ interface RecordingEvent {
     key?: string;
     deltaX?: number;
     deltaY?: number;
+    downloadWrap?: boolean;
+    autoDetected?: boolean;
     elementInfo?: {
       tagName: string;
       id?: string;
@@ -284,6 +292,7 @@ export function RecordingClient({
   const lastSequenceRef = useRef(0);
   const timelineRef = useRef<HTMLDivElement>(null);
   const [settingsSaveStatus, setSettingsSaveStatus] = useState({ isPending: false, showSaved: false });
+  const [embeddedStreamUrl, setEmbeddedStreamUrl] = useState<string | null>(null);
 
   // Poll for recording status and events when in recording step
   useEffect(() => {
@@ -452,6 +461,25 @@ export function RecordingClient({
           setStep('recording');
           setEvents([]);
           lastSequenceRef.current = 0;
+
+          // Fetch embedded stream URL if recording via an embedded runner
+          if (executionTarget !== 'local') {
+            fetch(`/api/embedded/stream`)
+              .then(res => res.ok ? res.json() : null)
+              .then(data => {
+                if (data?.sessions) {
+                  const session = data.sessions.find((s: { runnerId: string }) => s.runnerId === executionTarget);
+                  if (session?.streamUrl) {
+                    const token = data.streamAuthToken;
+                    // Pass direct stream URL — BrowserViewer will replace hostname for remote access
+                    setEmbeddedStreamUrl(
+                      token ? `${session.streamUrl}?token=${encodeURIComponent(token)}` : session.streamUrl
+                    );
+                  }
+                }
+              })
+              .catch(() => {});
+          }
         }
       }
     } catch (err) {
@@ -476,15 +504,25 @@ export function RecordingClient({
 
   const handleCreateAssertion = async (type: AssertionType) => {
     try {
-      await createAssertion(type);
+      await createAssertion(type, repositoryId);
       // Event will come through polling
     } catch (error) {
       console.error('Failed to create assertion:', error);
     }
   };
 
+  const handleFlagDownload = async () => {
+    try {
+      await flagDownload(repositoryId);
+      // Event will come through polling
+    } catch (error) {
+      console.error('Failed to flag download:', error);
+    }
+  };
+
   const handleStopRecording = async () => {
     setIsLoading(true);
+    setEmbeddedStreamUrl(null);
     try {
       const session = await stopRecording(repositoryId);
       if (session) {
@@ -937,6 +975,10 @@ export function RecordingClient({
                     </DropdownMenuItem>
                   </DropdownMenuContent>
                 </DropdownMenu>
+                <Button onClick={handleFlagDownload} variant="outline">
+                  <Download className="h-4 w-4 mr-2" />
+                  Wait for Download
+                </Button>
                 <Button
                   onClick={handleStopRecording}
                   variant="destructive"
@@ -952,6 +994,22 @@ export function RecordingClient({
               </div>
             </CardContent>
           </Card>
+
+          {/* Embedded Browser Live View */}
+          {embeddedStreamUrl && (
+            <Card>
+              <CardContent className="p-0">
+                <BrowserViewer
+                  streamUrl={embeddedStreamUrl}
+                  initialViewport={{
+                    width: settings.viewportWidth ?? 1280,
+                    height: settings.viewportHeight ?? 720,
+                  }}
+                  hideControls={step === 'recording'}
+                />
+              </CardContent>
+            </Card>
+          )}
 
           <div className="grid grid-cols-3 gap-6">
             {/* Interaction Timeline */}
@@ -990,6 +1048,7 @@ export function RecordingClient({
                             {event.type === 'keypress' && <Keyboard className="h-3 w-3 text-indigo-500" />}
                             {event.type === 'keydown' && <Keyboard className="h-3 w-3 text-green-500" />}
                             {event.type === 'keyup' && <Keyboard className="h-3 w-3 text-orange-400" />}
+                            {event.type === 'download' && <Download className="h-3 w-3 text-emerald-500" />}
                           </div>
                           <div className="flex-1 min-w-0">
                             <span className="text-muted-foreground text-xs">

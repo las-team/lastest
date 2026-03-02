@@ -400,7 +400,7 @@ export function DebugClient({ test, repositoryId }: DebugClientProps) {
                   </div>
                 )}
 
-                <ScrollArea className="flex-1">
+                <ScrollArea className="flex-1 overflow-hidden">
                   <div ref={stepListRef} className="p-2 space-y-1">
                     {(state?.steps || []).map((step, idx) => {
                       const result = state?.stepResults?.[idx];
