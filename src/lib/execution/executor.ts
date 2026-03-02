@@ -219,7 +219,7 @@ async function executeSetupViaRunner(
 
   // Poll DB for setup completion with adaptive interval (starts fast, backs off)
   let pollInterval = 250;
-  const maxPollInterval = 1500;
+  const maxPollInterval = 750;
   const maxWait = setupTimeout + 30000; // Allow extra time for network overhead
   const startTime = Date.now();
 
@@ -315,7 +315,7 @@ async function executeViaRunner(
   // Scale timeout for concurrency — parallel tests compete for resources
   const testTimeout = Math.max(baseTimeout * maxParallel, 300000);
   let pollInterval = 250;
-  const maxPollInterval = 1500;
+  const maxPollInterval = 750;
 
   // Check if the background job has been cancelled
   const checkCancelled = async (): Promise<boolean> => {
@@ -390,6 +390,7 @@ async function executeViaRunner(
   updateProgress();
 
   // Poll DB for command completion and results
+  let prevCompletedCount = completedCount;
   while (inFlight.size > 0) {
     await new Promise((resolve) => setTimeout(resolve, pollInterval));
     pollInterval = Math.min(pollInterval + 100, maxPollInterval);
@@ -530,6 +531,12 @@ async function executeViaRunner(
     // Fill more slots if any completed
     await fillSlots();
     updateProgress();
+
+    // Reset poll interval for fast pickup when a test just completed
+    if (completedCount > prevCompletedCount) {
+      pollInterval = 250;
+      prevCompletedCount = completedCount;
+    }
   }
 
   return results;

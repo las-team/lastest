@@ -26,16 +26,19 @@ export async function createRunnerCommand(cmd: NewRunnerCommand) {
 }
 
 /**
- * Atomically claim all pending commands for a runner.
+ * Atomically claim pending commands for a runner.
  * Sets status='claimed' and claimedAt=now, returns the updated rows.
+ * @param limit Max commands to claim (prevents bulk execution after crash-loop). Defaults to all.
  */
-export async function claimPendingCommands(runnerId: string) {
+export async function claimPendingCommands(runnerId: string, limit?: number) {
   const now = new Date();
-  const pending = await db
+  let query = db
     .select()
     .from(runnerCommands)
     .where(and(eq(runnerCommands.runnerId, runnerId), eq(runnerCommands.status, 'pending')))
-    .all();
+    .orderBy(runnerCommands.createdAt);
+
+  const pending = limit ? await query.limit(limit).all() : await query.all();
 
   if (pending.length === 0) return [];
 

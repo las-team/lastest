@@ -286,11 +286,14 @@ export class TestRunner {
         logFn('info', `Test still running... (${elapsed}s elapsed)`);
       }, 15000);
 
+      let timeoutTimer: ReturnType<typeof setTimeout> | undefined;
       try {
         await Promise.race([
-          this.executeTestCode(page, command.code, command.targetUrl, captureScreenshot, logFn, softErrors, command.cursorPlaybackSpeed, command.stabilization).catch(e => { throw e; }),
+          this.executeTestCode(page, command.code, command.targetUrl, captureScreenshot, logFn, softErrors, command.cursorPlaybackSpeed, command.stabilization)
+            .then(r => { clearTimeout(timeoutTimer); return r; })
+            .catch(e => { clearTimeout(timeoutTimer); throw e; }),
           new Promise<never>((_, reject) => {
-            const timer = setTimeout(() => {
+            timeoutTimer = setTimeout(() => {
               logFn('warn', `Timeout fired (${testTimeout}ms) — closing context to kill in-flight operations`);
               context?.close().catch(() => {});
               context = null;
@@ -298,7 +301,7 @@ export class TestRunner {
               reject(new Error(`Test execution timed out after ${testTimeout}ms`));
             }, testTimeout);
             testAbort.signal.addEventListener('abort', () => {
-              clearTimeout(timer);
+              clearTimeout(timeoutTimer);
               logFn('info', 'Abort signal received — closing context');
               context?.close().catch(() => {});
               context = null;
@@ -308,6 +311,7 @@ export class TestRunner {
           }),
         ]);
       } finally {
+        clearTimeout(timeoutTimer);
         clearInterval(heartbeat);
       }
       logFn('info', 'Test code execution completed');

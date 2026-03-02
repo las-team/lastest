@@ -74,7 +74,7 @@ export class EmbeddedRunnerClient {
     this.token = options.token;
     this.streamPort = options.streamPort;
     this.streamHost = options.streamHost || '';
-    this.pollInterval = options.pollInterval ?? 3000;
+    this.pollInterval = options.pollInterval ?? 1000;
   }
 
   /**

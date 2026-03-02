@@ -1,4 +1,4 @@
-import { sqliteTable, text, integer } from 'drizzle-orm/sqlite-core';
+import { sqliteTable, text, integer, index } from 'drizzle-orm/sqlite-core';
 
 // Type definitions for JSON columns
 export interface NetworkRequest {
@@ -1357,7 +1357,10 @@ export const runnerCommands = sqliteTable('runner_commands', {
   createdAt: integer('created_at', { mode: 'timestamp' }).$defaultFn(() => new Date()),
   claimedAt: integer('claimed_at', { mode: 'timestamp' }),
   completedAt: integer('completed_at', { mode: 'timestamp' }),
-});
+}, (table) => ([
+  index('idx_runner_commands_runner_status').on(table.runnerId, table.status),
+  index('idx_runner_commands_test_run').on(table.testRunId),
+]));
 
 export type RunnerCommand = typeof runnerCommands.$inferSelect;
 export type NewRunnerCommand = typeof runnerCommands.$inferInsert;
@@ -1370,7 +1373,9 @@ export const runnerCommandResults = sqliteTable('runner_command_results', {
   payload: text('payload', { mode: 'json' }).$type<Record<string, unknown>>(),
   acknowledged: integer('acknowledged', { mode: 'boolean' }).default(false),
   createdAt: integer('created_at', { mode: 'timestamp' }).$defaultFn(() => new Date()),
-});
+}, (table) => ([
+  index('idx_runner_cmd_results_cmd_ack').on(table.commandId, table.acknowledged),
+]));
 
 export type RunnerCommandResult = typeof runnerCommandResults.$inferSelect;
 export type NewRunnerCommandResult = typeof runnerCommandResults.$inferInsert;

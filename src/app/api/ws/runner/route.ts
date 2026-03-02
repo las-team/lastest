@@ -211,8 +211,8 @@ export async function POST(request: NextRequest) {
         }
         await updateRunnerStatus(runner.id, status);
 
-        // Claim pending commands from DB
-        const claimed = await claimPendingCommands(runner.id);
+        // Claim pending commands from DB (limit to maxParallelTests to prevent bulk execution)
+        const claimed = await claimPendingCommands(runner.id, runner.maxParallelTests ?? undefined);
         // Reconstruct Message objects from stored commands
         const commands: Message[] = claimed.map(cmd => ({
           id: cmd.id,
@@ -404,8 +404,8 @@ export async function GET(request: NextRequest) {
     // from a previous crashed session doesn't block task assignment
     await updateRunnerStatus(runner.id, 'online');
 
-    // Claim any pending commands from DB
-    const claimed = await claimPendingCommands(runner.id);
+    // Claim any pending commands from DB (limit to maxParallelTests)
+    const claimed = await claimPendingCommands(runner.id, runner.maxParallelTests ?? undefined);
     const commands: Message[] = claimed.map(cmd => ({
       id: cmd.id,
       type: cmd.type,

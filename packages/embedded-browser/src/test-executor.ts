@@ -444,6 +444,7 @@ export class EmbeddedTestExecutor {
       }, 15000);
 
       // Execute with timeout — close context to kill in-flight Playwright ops on timeout
+      let timeoutTimer: ReturnType<typeof setTimeout> | undefined;
       try {
         await Promise.race([
           (async () => {
@@ -453,15 +454,15 @@ export class EmbeddedTestExecutor {
               body
             );
             await testFn(page, command.targetUrl.replace(/\/+$/, ''), 'screenshot.png', stepLogger, expect, locateWithFallback, replayCursorPathFn);
-          })(),
+          })().then(r => { clearTimeout(timeoutTimer); return r; }),
           new Promise<never>((_, reject) => {
-            const timer = setTimeout(() => {
+            timeoutTimer = setTimeout(() => {
               logFn('warn', `Timeout fired (${testTimeout}ms) — closing context to kill in-flight operations`);
               testContext.close().catch(() => {});
               reject(new Error(`Test execution timed out after ${testTimeout}ms`));
             }, testTimeout);
             abortCtrl.signal.addEventListener('abort', () => {
-              clearTimeout(timer);
+              clearTimeout(timeoutTimer);
               logFn('info', 'Abort signal received — closing context');
               testContext.close().catch(() => {});
               reject(new Error('Test cancelled'));
@@ -469,6 +470,7 @@ export class EmbeddedTestExecutor {
           }),
         ]);
       } finally {
+        clearTimeout(timeoutTimer);
         clearInterval(heartbeat);
       }
 
