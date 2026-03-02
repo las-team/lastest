@@ -59,6 +59,67 @@ Your data stays on your server. Your screenshots never leave your infra. It cost
 
 ---
 
+## Three Ways to Work
+
+Lastest2 adapts to how you want to build tests — from fully manual to fully autonomous.
+
+### 1. AI-Free (Manual Recording)
+
+Open the recorder, click through your app, hit stop. Lastest2 captures every interaction and generates deterministic Playwright code — no AI involved, no API keys needed. You own the test code and can edit it by hand.
+
+**Best for:** Teams that don't want AI, air-gapped environments, simple flows.
+
+### 2. AI-Assisted (Human-in-the-Loop)
+
+AI generates, fixes, or enhances tests — but you review and approve before anything is saved. Feed it a URL and get a test back. Import OpenAPI specs or user stories and AI extracts test cases. When a test breaks, AI proposes a fix and you decide whether to accept it.
+
+**Best for:** Day-to-day development, iterating on tests, fixing breakages fast.
+
+### 3. Full Autonomous (Play Agent)
+
+One click kicks off a 9-step pipeline: scan your repo for routes, classify your app type, generate tests, run them, fix failures (up to 3 attempts per test), re-run, and report results. The agent pauses and asks for help only when it hits something it can't resolve on its own (missing settings, server offline). You resume and it picks up where it left off.
+
+**Best for:** Onboarding a new project, generating full coverage from scratch, CI bootstrapping.
+
+---
+
+## Three Ways to Run
+
+Once your tests exist, you have three execution modes:
+
+| Mode | How | When |
+|------|-----|------|
+| **Local** | Playwright runs on the same machine as Lastest2 | Development, debugging |
+| **Remote Runner** | Tests dispatched to remote machines via WebSocket | Distributed execution, different OS/browsers |
+| **Embedded Browser** | Browser runs in a container with live streaming back to the UI | Cloud deployments, recording/running without local Playwright |
+
+All three modes support both **running** and **recording** tests. Builds can be triggered **manually** (click Run), by **webhook** (PR opened/updated), or on **push** to monitored branches via CI/CD (GitHub Action or CLI runner). Smart Run analyzes git diffs to run only affected tests.
+
+---
+
+## Build Once, Run Forever — $0
+
+Tests are recorded or generated once, then stored as code. Every subsequent run re-executes the same code, captures new screenshots, and diffs them against approved baselines.
+
+- **First run**: screenshot becomes the baseline
+- **Every run after**: new screenshot is SHA256-hashed — if it matches the baseline, instant pass (no pixel comparison needed). If it differs, the diff engine runs and you review the change.
+- **AI costs are one-time**: AI is only used during test creation and fixing. Running tests uses zero AI — it's pure Playwright execution.
+- **No per-screenshot pricing**: unlike Percy ($5K/mo for 100K shots) or Chromatic ($179+/mo), every run is free regardless of volume.
+
+```
+Create tests (one-time)          Run tests (forever, $0)
+┌──────────────────────┐         ┌──────────────────────┐
+│ Manual recording     │         │ Execute Playwright    │
+│   — or —             │  ────▶  │ Capture screenshots   │
+│ AI generation        │  save   │ Diff against baseline │
+│   — or —             │         │ Review changes        │
+│ Play Agent autonomy  │         │ Approve/reject        │
+└──────────────────────┘         └──────────────────────┘
+  AI may be used here              No AI needed here
+```
+
+---
+
 ## Features
 
 ### Core
@@ -186,29 +247,28 @@ Open [http://localhost:3000](http://localhost:3000)
 ## How It Works
 
 ```
-┌─────────────┐     ┌─────────────┐     ┌─────────────┐
-│   Record    │ ──▶ │   Test      │ ──▶ │   Review    │
-│             │     │             │     │             │
-│ Click around│     │ Run tests   │     │ Approve/    │
-│ your app    │     │ Get diffs   │     │ Reject      │
-└─────────────┘     └─────────────┘     └─────────────┘
-        │                  │                   │
-        ▼                  ▼                   ▼
-   AI generates       Screenshots         New baseline
-   test code          compared            saved
+┌──────────────────┐     ┌─────────────┐     ┌─────────────┐
+│   Create Tests   │ ──▶ │   Run       │ ──▶ │   Review    │
+│                  │     │             │     │             │
+│ Record manually  │     │ Local or    │     │ Approve/    │
+│ AI-assisted      │     │ remote or   │     │ Reject      │
+│ Play Agent auto  │     │ CI/CD       │     │ changes     │
+└──────────────────┘     └─────────────┘     └─────────────┘
+   One-time cost           $0 per run         New baseline
+   (AI optional)           (no AI needed)     saved
 ```
 
 ### Core Flow
 
-1. **Record**: Interact with your app in the browser. Lastest2 captures every click, type, and navigation.
+1. **Create**: Build tests your way — record manually in the browser, let AI generate from a URL or spec, or let the Play Agent autonomously scan your entire app.
 
-2. **Generate**: AI writes Playwright test code with resilient selectors that survive DOM changes.
+2. **Run**: Execute tests locally, on remote runners, or in CI/CD. Screenshots are captured at key steps. No AI needed — pure Playwright execution at zero cost.
 
-3. **Run**: Execute tests locally or on remote runners. Screenshots are captured at key steps.
+3. **Compare**: New screenshots are diffed against baselines using your chosen engine (pixelmatch, SSIM, or Butteraugli). Text-region-aware comparison available. Accessibility audits run automatically.
 
-4. **Compare**: New screenshots are diffed against baselines using your chosen engine (pixelmatch, SSIM, or Butteraugli). Text-region-aware comparison available. Accessibility audits run automatically.
+4. **Review**: Visual diffs are classified (unchanged/flaky/changed). AI can optionally auto-classify with confidence scores. Approve intentional changes — they become the new baseline.
 
-5. **Review**: Visual diffs are classified (unchanged/flaky/changed). AI can auto-classify with confidence scores. Approve intentional changes.
+5. **Fix**: When tests break, AI can propose fixes (human-in-the-loop) or the Play Agent can fix and re-run autonomously. Or edit the code by hand — your choice.
 
 ---
 
