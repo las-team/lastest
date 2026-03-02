@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { requireAuth } from '@/lib/auth';
 import { listEmbeddedSessions } from '@/server/actions/embedded-sessions';
 
 /**
@@ -9,6 +10,12 @@ import { listEmbeddedSessions } from '@/server/actions/embedded-sessions';
  * The client connects directly to the container's stream server (Option A).
  */
 export async function GET() {
+  try {
+    await requireAuth();
+  } catch {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
+
   try {
     const sessions = await listEmbeddedSessions();
     const streamAuthToken = process.env.STREAM_AUTH_TOKEN || null;

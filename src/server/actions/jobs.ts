@@ -254,14 +254,21 @@ export async function cleanupStaleJobs(staleThresholdMs = 300000) {
     }
   }
 
-  // Trigger processNext* for each distinct targetRunnerId that had stale jobs
+  // Trigger processNext* for each distinct (repositoryId, targetRunnerId) pair
   if (staleJobs.length > 0) {
-    const runnerIds = [...new Set(staleJobs.map(j => j.targetRunnerId || 'local'))];
+    const jobsByRunner = new Map<string, Set<string | null>>();
+    for (const j of staleJobs) {
+      const rId = j.targetRunnerId || 'local';
+      if (!jobsByRunner.has(rId)) jobsByRunner.set(rId, new Set());
+      jobsByRunner.get(rId)!.add(j.repositoryId);
+    }
     const { processNextQueuedBuild } = await import('./builds');
     const { processNextQueuedTestRun } = await import('./runs');
-    for (const rId of runnerIds) {
-      processNextQueuedBuild(null, rId);
-      processNextQueuedTestRun(null, rId);
+    for (const [rId, repoIds] of jobsByRunner) {
+      for (const repoId of repoIds) {
+        processNextQueuedBuild(repoId, rId);
+        processNextQueuedTestRun(repoId, rId);
+      }
     }
   }
 

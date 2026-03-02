@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { requireAuth } from '@/lib/auth';
 import { getEmbeddedSession } from '@/server/actions/embedded-sessions';
 
 /**
@@ -12,6 +13,12 @@ export async function GET(
   _request: Request,
   { params }: { params: Promise<{ sessionId: string }> }
 ) {
+  try {
+    await requireAuth();
+  } catch {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
+
   const { sessionId } = await params;
 
   try {

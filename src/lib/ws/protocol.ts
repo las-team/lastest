@@ -472,10 +472,10 @@ export interface StreamKeyboardEvent {
 /** Client → Server / Server → Client: Session lifecycle control */
 export interface StreamSessionMessage extends BaseMessage {
   type: 'stream:session';
-  payload: {
-    action: 'start' | 'stop' | 'resize';
-    viewport?: { width: number; height: number };
-  };
+  payload:
+    | { action: 'start' | 'stop' }
+    | { action: 'resize'; viewport: { width: number; height: number } }
+    | { action: 'navigate'; url: string };
 }
 
 /** Server → Client: Stream connection status */

@@ -114,7 +114,8 @@
       "Bash(LASTEST2_TOKEN=lastest_runner_2e67820cd0c6a328a7c43ec8cdce54351bc64bc0e762e66aa8cbf9027ec96958 docker compose:*)",
       "Bash(git: - C*)",
       "Bash(git:*)",
-      "Bash(docker ps:*)"
+      "Bash(docker ps:*)",
+      "Bash(gh pr:*)"
     ]
   },
   "disabledMcpjsonServers": [
