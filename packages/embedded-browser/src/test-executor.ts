@@ -434,38 +434,6 @@ export class EmbeddedTestExecutor {
         }
       };
 
-      // Wrap key Playwright action methods with pre+post RAF flushing when freezeAnimations is enabled
-      if (command.stabilization?.freezeAnimations) {
-        const wrapAction = (obj: any, method: string) => {
-          const orig = obj[method].bind(obj);
-          obj[method] = async (...args: any[]) => {
-            // Pre-action: flush pending callbacks from unwrapped actions (mouse.move)
-            await page.evaluate(() => {
-              (window as any).__enableRAFGating?.();
-              (window as any).__flushAnimationFrames?.(10);
-              (window as any).__disableRAFGating?.();
-            }).catch(() => {});
-            // Execute action (gating disabled — page reacts normally)
-            const result = await orig(...args);
-            // Post-action: wait one browser frame for page to process, then flush
-            await page.evaluate(() => new Promise<void>(resolve => {
-              requestAnimationFrame(() => {
-                (window as any).__enableRAFGating?.();
-                (window as any).__flushAnimationFrames?.(10);
-                (window as any).__disableRAFGating?.();
-                resolve();
-              });
-            })).catch(() => {});
-            return result;
-          };
-        };
-        wrapAction(page.mouse, 'click');
-        wrapAction(page.mouse, 'down');
-        wrapAction(page.mouse, 'up');
-        wrapAction(page.keyboard, 'press');
-        wrapAction(page, 'click');
-      }
-
       logFn('info', 'Executing test code...');
 
       // Heartbeat timer — logs every 15s so the user knows the test is still running

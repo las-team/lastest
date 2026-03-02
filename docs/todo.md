@@ -6,7 +6,6 @@ Teardown
 Accept Downloads
 Network Interception
 ## features
-/home/ewyct/.claude/plans/dynamic-discovering-dove.md <- but without public image pushing
 ## ideas
 Test coverage assessment and recreation based on existing test set
 Tweet about us
@@ -28,22 +27,13 @@ Determine test coverage based on tests in repo
 some elements are disappearing from test 13b
 ## marketing
 ## Excalidraw
+### Tests missing:
+Export as PNG/SVG
+Insert Image  
+Library Add/Use 
+Paste CSV as Chart 
 
-  Tier 3 — Needs product improvements first:
-
-  ┌─────┬─────────────────────┬─────────────────────────┬────────────────┐
-  │  #  │      Test Name      │       Blocked by        │    Maps to     │
-  ├─────┼─────────────────────┼─────────────────────────┼────────────────┤
-  ├─────┼─────────────────────┼─────────────────────────┼────────────────┤
-  │ 17  │ Export as PNG/SVG   │ Download interception   │ export.test    │
-  ├─────┼─────────────────────┼─────────────────────────┼────────────────┤
-  │ 18  │ Insert Image        │ File upload support     │ image.test     │
-  ├─────┼─────────────────────┼─────────────────────────┼────────────────┤
-  │ 19  │ Library Add/Use     │ File upload + clipboard │ library.test   │
-  ├─────┼─────────────────────┼─────────────────────────┼────────────────┤
-  │ 20  │ Paste CSV as Chart  │ Clipboard support       │ charts.test    │
-  └─────┴─────────────────────┴─────────────────────────┴────────────────┘
-
+### Mark's tips:
   ehhez most arrow és arrow binding related teszteket kell felvenni, 1) hogy a hasznosságát fel tudjam mérni 2) hogy személyre szabott sztoriban tudjam megmutatni Davidnek hogy mennyit segített. 3) Alátámasztani mindezt azzal hogy a PR-jaim release utáni bug countja csökken látványosan
 
 a CI workflow cuccod akár nyomhatna egy npx playwright install-t is és bejelentkezhetne runnernek arra az egy futásra

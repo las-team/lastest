@@ -58,9 +58,10 @@ async function startup(): Promise<void> {
 
   // 1. Launch browser
   console.log('[Startup] Launching Chromium...');
+  const useCrossOsArgs = process.env.CROSS_OS_CONSISTENCY !== 'false';
   browser = await chromium.launch({
     headless: true,
-    args: CROSS_OS_CHROMIUM_ARGS,
+    args: useCrossOsArgs ? CROSS_OS_CHROMIUM_ARGS : [],
   });
 
   context = await browser.newContext({

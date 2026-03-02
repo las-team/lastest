@@ -14,14 +14,14 @@
 
 | Time | Screen | Action | What viewer sees |
 |------|--------|--------|-----------------|
-| 0:00-0:03 | `/record` page | Click "Start Recording", browser opens target app | Recording UI launching |
+| 0:00-0:03 | `/record` page | Click "Start Recording", browser opens target app | Recording UI launching with engine selector visible |
 | 0:03-0:08 | Target app in recorder | Click through 3-4 elements — navigate, click a button, fill a field | Real browser interaction being captured |
 | 0:08-0:10 | `/record` page | Click "Stop Recording" → AI generation starts | Spinner: "Generating test code..." |
-| 0:10-0:13 | `/tests/[id]` page | Test code appears with AI-generated Playwright code | Code editor showing clean test code |
+| 0:10-0:13 | `/tests/[id]` page | Test code appears with AI-generated Playwright code | Code editor with multi-selector fallback visible |
 | 0:13-0:16 | `/run` page | Click "Run" → test executes, progress bar fills | Test running with live progress |
-| 0:16-0:20 | `/builds/[buildId]` | Build results appear — green checks, screenshot thumbnails | Build dashboard with pass/fail status |
-| 0:20-0:25 | `/builds/[buildId]/diff/[diffId]` | Visual diff view — side-by-side baseline vs new, diff overlay highlighted | The money shot: visual comparison with changes highlighted |
-| 0:25-0:28 | Same diff page | Click "Approve" button → baseline updated | Approval workflow in action |
+| 0:16-0:20 | `/builds/[buildId]` | Build results appear — green checks, screenshot thumbnails, metrics row (total/changed/flaky/passed) | Build dashboard with safe_to_merge status |
+| 0:20-0:25 | `/builds/[buildId]/diff/[diffId]` | Visual diff view — toggle slider mode, show diff overlay | The money shot: slider comparison with change regions highlighted |
+| 0:25-0:28 | Same diff page | Click "Approve" (or press E keyboard shortcut) → baseline updated | Approval workflow in action |
 | 0:28-0:30 | Fade to text overlay | "Lastest2 — Record. Test. Ship. $0 forever." | End card |
 
 ### Recording tips
@@ -56,27 +56,27 @@ ffmpeg -i demo-recording.mp4 -vf "fps=20,scale=720:-1" -c:v libvpx-vp9 -b:v 500k
 
 ### INTRO (0:00 - 0:20)
 
-**[Screen: Lastest2 dashboard — empty state or landing page]**
+**[Screen: Lastest2 dashboard — stats cards showing total tests, pass/fail counts, functional area coverage, recent builds with pass-rate bars]**
 
 > "Visual regression testing sucks. It's either expensive — Percy charges five grand a month at scale — or it's flaky pixel diffs that flag every font rendering difference. Or you're maintaining hundreds of Playwright screenshots in your git repo like it's 2019.
 >
-> Lastest2 is different. It's free, self-hosted, open source, and it uses AI to write your tests for you. Let me show you how it works."
+> Lastest2 is different. It's free, self-hosted, open source, and it uses AI to write your tests, fix them when they break, and tell you whether a visual change is a regression or noise. Let me show you."
 
 ---
 
 ### RECORDING A TEST (0:20 - 0:55)
 
-**[Screen: Navigate to `/record` page]**
+**[Screen: Navigate to `/record` page — show recording engine selector (custom recorder vs Playwright Inspector)]**
 
-> "You start by recording. Pick a test area — say, your checkout flow — and hit Record."
+> "You start by recording. Pick a test area — say, your checkout flow — and hit Record. You can use our custom recorder or Playwright Inspector — both capture everything."
 
 **[Action: Click "Start Recording". Browser opens target app]**
 
 > "Lastest2 opens your app in a real browser. I'm going to click around like a user would — navigate to a product page, add something to cart, go to checkout."
 
-**[Action: Interact with target app — 3-4 clicks, maybe fill a form field. Show the recorder capturing actions in the sidebar]**
+**[Action: Interact with target app — 3-4 clicks, maybe fill a form field. Show the recorder capturing actions. Capture a manual screenshot mid-flow]**
 
-> "Every click, every keystroke, every navigation is captured. You don't write any code. Just use your app."
+> "Every click, every keystroke, every navigation is captured. I can also capture manual screenshots at key steps for multi-step comparison. It even auto-detects what browser capabilities your app needs — file uploads, clipboard, downloads."
 
 **[Action: Click "Stop Recording"]**
 
@@ -88,25 +88,25 @@ ffmpeg -i demo-recording.mp4 -vf "fps=20,scale=720:-1" -c:v libvpx-vp9 -b:v 500k
 
 **[Screen: AI generation in progress — spinner, then test code appears]**
 
-> "Claude analyzes the recording and generates Playwright test code. Notice it's using resilient selectors — data-testid first, then role, then aria-label. If one selector breaks, it falls back to the next. That's what makes these tests survive DOM changes."
+> "Claude analyzes the recording and generates Playwright test code. Notice it's using resilient selectors — data-testid first, then role, then aria-label, with OCR fallback. If one selector breaks, it falls back to the next. That's what makes these tests survive DOM changes."
 
-**[Screen: Scroll through the generated test code in the test editor]**
+**[Screen: Scroll through the generated test code in the test editor. Show version history tab briefly]**
 
-> "This is real Playwright code. You can edit it, enhance it, or just run it as-is. If you want, you can also skip recording entirely and generate tests from an OpenAPI spec or a user story — just feed it a markdown file."
+> "This is real Playwright code. You can edit it, enhance it, or just run it as-is. Every edit is versioned so you can always roll back. And if you want to skip recording entirely, you can generate tests from an OpenAPI spec, user stories, or let AI discover your routes automatically."
 
 ---
 
 ### RUNNING THE TEST (1:20 - 1:50)
 
-**[Screen: Navigate to `/run` page or click "Run" on the test]**
+**[Screen: Navigate to `/run` page — show Smart Run option and base URL with connection test]**
 
-> "Let's run it."
+> "Let's run it. I can run all tests, or use Smart Run — which analyzes my git diff and only runs tests affected by my changes."
 
 **[Action: Click Run. Show test executing — progress bar, step indicators]**
 
-> "The test replays your recorded flow. At each step, it captures a screenshot. These get compared against your baselines using perceptual diffing — not just raw pixels, but SSIM and Butteraugli algorithms that see like a human eye. So anti-aliasing differences and font rendering won't trigger false positives."
+> "The test replays the recorded flow. At each step, it captures screenshots. These get compared against baselines using three diff engines — pixelmatch for pixel-perfect, SSIM for structural similarity, and Butteraugli that sees like a human eye. There's even text-region-aware diffing that handles font rendering differences. Accessibility audits run automatically on every capture."
 
-**[Screen: Test completes. Show the build results with pass/fail]**
+**[Screen: Test completes. Show the build results with metrics row — total/changed/flaky/passed/failed/errors]**
 
 > "Done. Let's look at the results."
 
@@ -114,37 +114,39 @@ ffmpeg -i demo-recording.mp4 -vf "fps=20,scale=720:-1" -c:v libvpx-vp9 -b:v 500k
 
 ### VISUAL DIFF REVIEW (1:50 - 2:25)
 
-**[Screen: Navigate to build detail → click into a diff]**
+**[Screen: Navigate to build detail — show filter buttons (all/changed/flaky/failed/passed/AI categories), metrics row]**
 
-> "Here's the build. Three screenshots were captured. Two are unchanged — the hash matches the baseline, so they're instant green. One has a visual change."
+> "Here's the build. It tells me the overall status — safe to merge, needs review, or blocked. I can filter by changed, flaky, failed, or what the AI recommends."
 
-**[Action: Click into the changed diff. Show side-by-side view]**
+**[Action: Click into a changed diff. Show the slider comparison mode]**
 
-> "This is the diff view. Left is the baseline, right is the new screenshot. The overlay shows exactly what changed — in this case, someone updated the button styling."
+> "This is the diff view with six comparison modes — slider, side-by-side, overlay, three-way, planned-versus-actual for comparing against Figma designs, and shift-compare for detecting content that moved."
 
-**[Action: Toggle between diff overlay modes if available]**
+**[Action: Toggle to overlay mode, show changed region bounding boxes]**
 
-> "The AI also classifies this change automatically — it tells you whether this looks intentional or like a regression, with a confidence score."
+> "The AI classifies every change — insignificant noise, or a real regression — with a confidence score and a recommendation to approve, review, or flag."
 
-**[Action: Click "Approve"]**
+**[Action: Press E to approve, then use arrow keys to navigate to next diff]**
 
-> "I'll approve it. This becomes the new baseline. Next time this test runs, it compares against this approved screenshot."
+> "Keyboard shortcuts make review fast — E to approve, T to mark as todo, S to skip, arrows to navigate. Or hit 'Accept All Safe' to bulk-approve everything the AI says is fine."
 
 ---
 
 ### WHAT MAKES IT DIFFERENT (2:25 - 2:50)
 
-**[Screen: Quick montage — settings page showing AI providers, accessibility tab, Google Sheets integration, remote runners list]**
+**[Screen: Quick montage — settings page showing AI providers with Ollama, testing templates grid, setup/teardown step builder, remote runners list, functional areas tree with drag-drop, compose page with version sliders, debug mode with step-through controls, review page with developer todos]**
 
-> "A few things that set Lastest2 apart from everything else out there:
+> "A few things that set Lastest2 apart:
 >
-> It's completely self-hosted — your screenshots never leave your server. There's no per-screenshot pricing, no cloud dependency.
+> It's completely self-hosted — your screenshots never leave your server. No per-screenshot pricing, no cloud dependency.
 >
-> If a test breaks because your UI changed, the AI can auto-fix it. No other tool does this.
+> If a test breaks because your UI changed, the AI auto-fixes it. No other free tool does this.
 >
-> It runs accessibility audits on every screenshot automatically with axe-core.
+> You get 12 stabilization features — timestamp freezing, random seeding, burst capture, auto-masking dynamic content, network idle waiting — so your tests don't flake.
 >
-> You can use five different AI providers, including Ollama for fully local AI with zero API costs.
+> There's a full debug mode for stepping through tests, setup and teardown orchestration, test composition with version pinning, and 8 testing templates for instant configuration.
+>
+> Five AI providers including Ollama for fully local AI with zero API costs. GitHub and GitLab integration with PR comments and webhook-triggered builds. Remote runners for distributed execution.
 >
 > And it's MIT licensed. Free forever."
 
@@ -154,7 +156,7 @@ ffmpeg -i demo-recording.mp4 -vf "fps=20,scale=720:-1" -c:v libvpx-vp9 -b:v 500k
 
 **[Screen: GitHub repo page or Lastest2 dashboard]**
 
-> "Lastest2 is on GitHub. Clone it, docker-compose up, and you're running visual regression tests in under two minutes. Link in the description.
+> "Lastest2 is on GitHub. Clone it, docker-compose up, and you're running visual regression tests in under two minutes. Or use the GitHub Action for zero-config CI/CD. Link in the description.
 >
 > Star the repo if this is useful. PRs welcome."
 
@@ -172,3 +174,4 @@ ffmpeg -i demo-recording.mp4 -vf "fps=20,scale=720:-1" -c:v libvpx-vp9 -b:v 500k
 - **Editing:** Cut dead time (loading spinners, typing). Speed up repetitive actions (2x). Keep transitions simple (cuts, no fancy effects)
 - **Captions:** Add burned-in captions — many devs watch on mute
 - **Thumbnail:** Split screen showing "Before" and "After" with a visual diff overlay. Text: "Free Visual Regression Testing with AI"
+- **Feature callouts:** Consider brief text overlays when showing features (e.g., "6 diff modes", "12 stabilization features", "Smart Run") to reinforce key differentiators for muted viewers
