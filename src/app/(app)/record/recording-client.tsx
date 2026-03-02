@@ -1005,6 +1005,7 @@ export function RecordingClient({
                     width: settings.viewportWidth ?? 1280,
                     height: settings.viewportHeight ?? 720,
                   }}
+                  hideControls={step === 'recording'}
                 />
               </CardContent>
             </Card>

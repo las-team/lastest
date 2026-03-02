@@ -28,6 +28,7 @@ interface BrowserToolbarProps {
   onViewportChange?: (viewport: { width: number; height: number }) => void;
   onScreenshot?: () => void;
   onFullscreenToggle?: () => void;
+  hideControls?: boolean;
 }
 
 export function BrowserToolbar({
@@ -38,6 +39,7 @@ export function BrowserToolbar({
   onViewportChange,
   onScreenshot,
   onFullscreenToggle,
+  hideControls,
 }: BrowserToolbarProps) {
   const [urlInput, setUrlInput] = useState(currentUrl ?? '');
 
@@ -67,33 +69,37 @@ export function BrowserToolbar({
         />
       </form>
 
-      {/* Viewport selector */}
-      <Select
-        value={viewportLabel}
-        onValueChange={(val) => {
-          const preset = VIEWPORT_PRESETS.find((p) => `${p.width}×${p.height}` === val);
-          if (preset) {
-            onViewportChange?.({ width: preset.width, height: preset.height });
-          }
-        }}
-      >
-        <SelectTrigger className="h-7 w-[160px] text-xs">
-          <Monitor className="mr-1 h-3 w-3" />
-          <SelectValue />
-        </SelectTrigger>
-        <SelectContent>
-          {VIEWPORT_PRESETS.map((preset) => (
-            <SelectItem key={preset.label} value={`${preset.width}×${preset.height}`}>
-              {preset.label}
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
+      {!hideControls && (
+        <>
+          {/* Viewport selector */}
+          <Select
+            value={viewportLabel}
+            onValueChange={(val) => {
+              const preset = VIEWPORT_PRESETS.find((p) => `${p.width}×${p.height}` === val);
+              if (preset) {
+                onViewportChange?.({ width: preset.width, height: preset.height });
+              }
+            }}
+          >
+            <SelectTrigger className="h-7 w-[160px] text-xs">
+              <Monitor className="mr-1 h-3 w-3" />
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {VIEWPORT_PRESETS.map((preset) => (
+                <SelectItem key={preset.label} value={`${preset.width}×${preset.height}`}>
+                  {preset.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
 
-      {/* Screenshot */}
-      <Button variant="ghost" size="icon" className="h-7 w-7" onClick={onScreenshot} title="Take screenshot">
-        <Camera className="h-4 w-4" />
-      </Button>
+          {/* Screenshot */}
+          <Button variant="ghost" size="icon" className="h-7 w-7" onClick={onScreenshot} title="Take screenshot">
+            <Camera className="h-4 w-4" />
+          </Button>
+        </>
+      )}
 
       {/* Fullscreen */}
       <Button variant="ghost" size="icon" className="h-7 w-7" onClick={onFullscreenToggle} title="Toggle fullscreen">

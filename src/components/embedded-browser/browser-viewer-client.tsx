@@ -18,9 +18,10 @@ interface BrowserViewerProps {
   initialViewport?: { width: number; height: number };
   className?: string;
   expiresAt?: Date | string | null;
+  hideControls?: boolean;
 }
 
-export function BrowserViewer({ streamUrl, initialViewport, className, expiresAt }: BrowserViewerProps) {
+export function BrowserViewer({ streamUrl, initialViewport, className, expiresAt, hideControls }: BrowserViewerProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const wsRef = useRef<WebSocket | null>(null);
@@ -118,6 +119,11 @@ export function BrowserViewer({ streamUrl, initialViewport, className, expiresAt
       ws.onopen = () => {
         setConnectionStatus('connected');
         setReconnectAttempt(0);
+        // Apply the initial viewport size to the remote browser
+        ws.send(JSON.stringify({
+          type: 'stream:session',
+          payload: { action: 'resize', viewport: initialViewport ?? { width: 1280, height: 720 } },
+        }));
       };
 
       ws.onmessage = (event) => {
@@ -373,6 +379,7 @@ export function BrowserViewer({ streamUrl, initialViewport, className, expiresAt
         onNavigate={handleNavigate}
         onViewportChange={handleViewportChange}
         onFullscreenToggle={toggleFullscreen}
+        hideControls={hideControls}
       />
 
       {/* Canvas container — 1:1 pixel rendering, scrollable if larger than available space */}
