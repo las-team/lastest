@@ -11,8 +11,7 @@ Test coverage assessment and recreation based on existing test set
 Tweet about us
 Content comparison - compare text in 2 setups
 Explore/Cover instead of Areas
-Ban AI mode
-    Remove all GenAI features from UI if enabled
+
 Component specific testing
 Figma plugin
 Generate test data with AI
