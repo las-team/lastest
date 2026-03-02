@@ -30,6 +30,18 @@ import { toast } from 'sonner';
 import { calculateRecommendations, type SelectorRecommendation } from '@/lib/selector-recommendations';
 import type { SelectorTypeStats } from '@/lib/db/queries';
 
+const VIEWPORT_PRESETS = [
+  { label: 'Mobile S', width: 320, height: 568 },
+  { label: 'Mobile M', width: 375, height: 667 },
+  { label: 'Mobile L', width: 390, height: 844 },
+  { label: 'Tablet', width: 768, height: 1024 },
+  { label: 'Laptop', width: 1024, height: 768 },
+  { label: 'Desktop', width: 1280, height: 720 },
+  { label: 'Large Desktop', width: 1440, height: 900 },
+  { label: 'Full HD', width: 1920, height: 1080 },
+  { label: '2K', width: 2560, height: 1440 },
+] as const;
+
 interface PlaywrightSettingsCardProps {
   settings: PlaywrightSettings;
   repositoryId?: string | null;
@@ -1078,6 +1090,50 @@ export function PlaywrightSettingsCard({
       )}
 
       {/* Browser Settings */}
+      {/* Viewport */}
+      <div className="space-y-2">
+        <Label>Viewport</Label>
+        <Select
+          value={VIEWPORT_PRESETS.find(p => p.width === viewportWidth && p.height === viewportHeight)?.label ?? 'custom'}
+          onValueChange={(v) => {
+            if (v === 'custom') return;
+            const preset = VIEWPORT_PRESETS.find(p => p.label === v);
+            if (preset) {
+              setViewportWidth(preset.width);
+              setViewportHeight(preset.height);
+            }
+          }}
+        >
+          <SelectTrigger>
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {VIEWPORT_PRESETS.map((p) => (
+              <SelectItem key={p.label} value={p.label}>
+                {p.label} ({p.width}×{p.height})
+              </SelectItem>
+            ))}
+            <SelectItem value="custom">Custom</SelectItem>
+          </SelectContent>
+        </Select>
+        <div className="flex items-center gap-2">
+          <Input
+            type="number"
+            value={viewportWidth}
+            onChange={(e) => setViewportWidth(parseInt(e.target.value) || 1280)}
+            className="w-24"
+          />
+          <span className="text-muted-foreground">×</span>
+          <Input
+            type="number"
+            value={viewportHeight}
+            onChange={(e) => setViewportHeight(parseInt(e.target.value) || 720)}
+            className="w-24"
+          />
+          <span className="text-xs text-muted-foreground">px</span>
+        </div>
+      </div>
+
       {!compact && (
         <>
           <div className="grid grid-cols-2 gap-4">
@@ -1107,27 +1163,6 @@ export function PlaywrightSettingsCard({
                   <SelectItem value="shell">Headless Shell (better bot avoidance)</SelectItem>
                 </SelectContent>
               </Select>
-            </div>
-          </div>
-
-          {/* Viewport */}
-          <div className="space-y-2">
-            <Label>Viewport</Label>
-            <div className="flex items-center gap-2">
-              <Input
-                type="number"
-                value={viewportWidth}
-                onChange={(e) => setViewportWidth(parseInt(e.target.value) || 1280)}
-                className="w-24"
-              />
-              <span className="text-muted-foreground">x</span>
-              <Input
-                type="number"
-                value={viewportHeight}
-                onChange={(e) => setViewportHeight(parseInt(e.target.value) || 720)}
-                className="w-24"
-              />
-              <span className="text-xs text-muted-foreground">pixels</span>
             </div>
           </div>
 
