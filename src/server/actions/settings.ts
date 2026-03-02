@@ -44,7 +44,6 @@ export async function savePlaywrightSettings(data: {
   await queries.upsertPlaywrightSettings(repositoryId || null, settingsData);
 
   revalidatePath('/settings');
-  revalidatePath('/record');
 
   return { success: true };
 }
@@ -59,7 +58,6 @@ export async function resetPlaywrightSettings(repositoryId?: string | null) {
   }
 
   revalidatePath('/settings');
-  revalidatePath('/record');
 
   return { success: true };
 }

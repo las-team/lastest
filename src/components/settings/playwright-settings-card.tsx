@@ -1116,22 +1116,24 @@ export function PlaywrightSettingsCard({
             <SelectItem value="custom">Custom</SelectItem>
           </SelectContent>
         </Select>
-        <div className="flex items-center gap-2">
-          <Input
-            type="number"
-            value={viewportWidth}
-            onChange={(e) => setViewportWidth(parseInt(e.target.value) || 1280)}
-            className="w-24"
-          />
-          <span className="text-muted-foreground">×</span>
-          <Input
-            type="number"
-            value={viewportHeight}
-            onChange={(e) => setViewportHeight(parseInt(e.target.value) || 720)}
-            className="w-24"
-          />
-          <span className="text-xs text-muted-foreground">px</span>
-        </div>
+        {!compact && (
+          <div className="flex items-center gap-2">
+            <Input
+              type="number"
+              value={viewportWidth}
+              onChange={(e) => setViewportWidth(parseInt(e.target.value) || 1280)}
+              className="w-24"
+            />
+            <span className="text-muted-foreground">×</span>
+            <Input
+              type="number"
+              value={viewportHeight}
+              onChange={(e) => setViewportHeight(parseInt(e.target.value) || 720)}
+              className="w-24"
+            />
+            <span className="text-xs text-muted-foreground">px</span>
+          </div>
+        )}
       </div>
 
       {!compact && (
