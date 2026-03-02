@@ -198,6 +198,14 @@ export async function updateEarlyAdopterMode(enabled: boolean) {
   revalidatePath('/');
 }
 
+// Ban AI Mode
+export async function updateBanAiMode(enabled: boolean) {
+  const session = await requireTeamAccess();
+  await queries.updateTeam(session.team.id, { banAiMode: enabled });
+  revalidatePath('/settings');
+  revalidatePath('/');
+}
+
 // Selector Stats
 export async function getSelectorStatsAction(repositoryId: string) {
   await requireRepoAccess(repositoryId);

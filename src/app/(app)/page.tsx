@@ -83,7 +83,9 @@ export default async function DashboardPage() {
         </div>
 
         {/* Auto Setup Agent */}
-        <PlayAgentTimeline repositoryId={selectedRepo?.id} />
+        {!(session?.team?.banAiMode) && (
+          <PlayAgentTimeline repositoryId={selectedRepo?.id} />
+        )}
 
         {/* Recent Builds */}
         <Card>

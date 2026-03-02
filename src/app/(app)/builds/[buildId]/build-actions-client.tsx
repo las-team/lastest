@@ -10,9 +10,10 @@ interface BuildActionsClientProps {
   buildId: string;
   hasPendingDiffs: boolean;
   aiApproveCount?: number;
+  banAiMode?: boolean;
 }
 
-export function BuildActionsClient({ buildId, hasPendingDiffs, aiApproveCount = 0 }: BuildActionsClientProps) {
+export function BuildActionsClient({ buildId, hasPendingDiffs, aiApproveCount = 0, banAiMode = false }: BuildActionsClientProps) {
   const router = useRouter();
   const [isApproving, setIsApproving] = useState(false);
   const [isAIApproving, setIsAIApproving] = useState(false);
@@ -45,7 +46,7 @@ export function BuildActionsClient({ buildId, hasPendingDiffs, aiApproveCount = 
 
   return (
     <div className="flex items-center gap-2">
-      {aiApproveCount > 0 && (
+      {!banAiMode && aiApproveCount > 0 && (
         <button
           onClick={handleAIApprove}
           disabled={isAIApproving}

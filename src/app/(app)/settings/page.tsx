@@ -36,6 +36,7 @@ import { GoogleSheetsSettingsCard } from '@/components/settings/google-sheets-se
 import { TestingTemplateSelector } from '@/components/settings/testing-template-selector';
 import { AutoApproveToggle } from '@/components/settings/auto-approve-toggle';
 import { EarlyAdopterToggle } from '@/components/settings/early-adopter-toggle';
+import { BanAiModeToggle } from '@/components/settings/ban-ai-mode-toggle';
 import { ConnectGithubButton, ReconnectGithubLink } from '@/components/settings/connect-github-button';
 
 export default async function SettingsPage({
@@ -76,6 +77,7 @@ export default async function SettingsPage({
 
   const serverUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
   const earlyAdopterMode = session?.team?.earlyAdopterMode ?? false;
+  const banAiMode = session?.team?.banAiMode ?? false;
 
   return (
     <div className="flex flex-col h-full">
@@ -269,8 +271,9 @@ export default async function SettingsPage({
                 Toggle experimental features
               </CardDescription>
             </CardHeader>
-            <CardContent>
+            <CardContent className="space-y-4">
               <EarlyAdopterToggle enabled={session?.team?.earlyAdopterMode ?? false} />
+              <BanAiModeToggle enabled={session?.team?.banAiMode ?? false} />
             </CardContent>
           </Card>
 
@@ -334,20 +337,24 @@ export default async function SettingsPage({
           </div>
 
           {/* AI Settings */}
+          {!banAiMode && (
           <div id="ai-settings">
             <AISettingsCard
               settings={aiSettings}
               repositoryId={selectedRepo?.id}
             />
           </div>
+          )}
 
           {/* AI Prompt Logs */}
+          {!banAiMode && (
           <div id="ai-logs">
             <AILogsCard
               logs={aiLogs}
               repositoryId={selectedRepo?.id}
             />
           </div>
+          )}
 
           {/* Notifications */}
           <div id="notifications">

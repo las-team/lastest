@@ -867,6 +867,7 @@ export const teams = sqliteTable('teams', {
   name: text('name').notNull(),
   slug: text('slug').notNull().unique(),
   earlyAdopterMode: integer('early_adopter_mode', { mode: 'boolean' }).default(false),
+  banAiMode: integer('ban_ai_mode', { mode: 'boolean' }).default(false),
   createdAt: integer('created_at', { mode: 'timestamp' }),
   updatedAt: integer('updated_at', { mode: 'timestamp' }),
 });

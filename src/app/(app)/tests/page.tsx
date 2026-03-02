@@ -22,6 +22,8 @@ export default async function TestsPage() {
     selectedRepo ? getDeletedTests(selectedRepo.id) : Promise.resolve([]),
   ]);
 
+  const banAiMode = session?.team?.banAiMode ?? false;
+
   return (
     <div className="flex flex-col h-full">
       <TestsPageClient
@@ -31,6 +33,7 @@ export default async function TestsPage() {
         repositoryId={selectedRepo?.id}
         baseUrl={envConfig.baseUrl}
         deletedTests={deletedTests}
+        banAiMode={banAiMode}
       />
     </div>
   );

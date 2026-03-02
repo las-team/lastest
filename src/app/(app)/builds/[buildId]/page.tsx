@@ -45,8 +45,9 @@ export default async function BuildPage({ params }: PageProps) {
     }
   }
 
+  const banAiMode = session?.team?.banAiMode ?? false;
   const pendingDiffs = build.diffs.filter((d) => d.status === 'pending');
-  const aiApproveCount = build.diffs.filter(
+  const aiApproveCount = banAiMode ? 0 : build.diffs.filter(
     (d) => d.aiRecommendation === 'approve' && d.status === 'pending'
   ).length;
 
@@ -58,6 +59,7 @@ export default async function BuildPage({ params }: PageProps) {
           buildId={buildId}
           isMainBranch={build.isMainBranch}
           embeddedStreamUrl={embeddedStreamUrl}
+          banAiMode={banAiMode}
           initialBuild={{
             id: build.id,
             overallStatus: build.overallStatus,
@@ -90,6 +92,7 @@ export default async function BuildPage({ params }: PageProps) {
               buildId={buildId}
               hasPendingDiffs={pendingDiffs.length > 0}
               aiApproveCount={aiApproveCount}
+              banAiMode={banAiMode}
             />
           </div>
         </BuildPollingWrapper>

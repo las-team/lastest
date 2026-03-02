@@ -32,6 +32,8 @@ export default async function RunPage() {
     branchHeads[b.name] = b.commit.sha;
   }
 
+  const banAiMode = session?.team?.banAiMode ?? false;
+
   return (
     <div className="flex flex-col h-full">
       <RunDashboardClient
@@ -51,6 +53,7 @@ export default async function RunPage() {
             : composeConfig.selectedTestIds ?? null,
           versionOverrides: composeConfig.versionOverrides ?? null,
         } : null}
+        banAiMode={banAiMode}
       />
     </div>
   );

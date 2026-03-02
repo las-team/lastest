@@ -44,9 +44,10 @@ interface AreasPageClientProps {
   unsortedSuites: SuiteItem[];
   repositoryId: string;
   selectedBranch: string;
+  banAiMode?: boolean;
 }
 
-export function AreasPageClient({ tree, uncategorizedTests, unsortedSuites, repositoryId, selectedBranch }: AreasPageClientProps) {
+export function AreasPageClient({ tree, uncategorizedTests, unsortedSuites, repositoryId, selectedBranch, banAiMode = false }: AreasPageClientProps) {
   const router = useRouter();
   const [selection, setSelection] = useState<TreeSelection | null>(null);
   const [isNewAreaOpen, setIsNewAreaOpen] = useState(false);
@@ -257,46 +258,50 @@ export function AreasPageClient({ tree, uncategorizedTests, unsortedSuites, repo
                   <span className="font-medium text-sm">Scan Routes</span>
                   <span className="text-xs text-muted-foreground">Discover from repo</span>
                 </button>
-                <button
-                  onClick={() => setShowSpecAnalysisDialog(true)}
-                  className="flex flex-col items-center gap-2 p-4 border rounded-lg hover:bg-muted/50 hover:border-primary/50 transition-colors text-center"
-                >
-                  <FileText className="h-6 w-6 text-primary" />
-                  <span className="font-medium text-sm">Analyze Specs</span>
-                  <span className="text-xs text-muted-foreground">Parse API/route specs</span>
-                </button>
-                <button
-                  onClick={() => setShowImportFromSpecDialog(true)}
-                  className="flex flex-col items-center gap-2 p-4 border rounded-lg hover:bg-muted/50 hover:border-primary/50 transition-colors text-center"
-                >
-                  <BookOpen className="h-6 w-6 text-primary" />
-                  <span className="font-medium text-sm">Import Spec</span>
-                  <span className="text-xs text-muted-foreground">US/AC to tests</span>
-                </button>
-                <button
-                  onClick={() => setShowAIScanDialog(true)}
-                  className="flex flex-col items-center gap-2 p-4 border rounded-lg hover:bg-muted/50 hover:border-primary/50 transition-colors text-center"
-                >
-                  <Sparkles className="h-6 w-6 text-primary" />
-                  <span className="font-medium text-sm">AI Scan</span>
-                  <span className="text-xs text-muted-foreground">AI-powered discovery</span>
-                </button>
-                <button
-                  onClick={() => setShowMCPExploreDialog(true)}
-                  className="flex flex-col items-center gap-2 p-4 border rounded-lg hover:bg-muted/50 hover:border-primary/50 transition-colors text-center"
-                >
-                  <Globe className="h-6 w-6 text-primary" />
-                  <span className="font-medium text-sm">MCP Explore</span>
-                  <span className="text-xs text-muted-foreground">MCP-based exploration</span>
-                </button>
-                <button
-                  onClick={() => setShowCodeDiffDialog(true)}
-                  className="flex flex-col items-center gap-2 p-4 border rounded-lg hover:bg-muted/50 hover:border-primary/50 transition-colors text-center"
-                >
-                  <GitCompare className="h-6 w-6 text-primary" />
-                  <span className="font-medium text-sm">Code Diff</span>
-                  <span className="text-xs text-muted-foreground">Branch changes</span>
-                </button>
+                {!banAiMode && (
+                  <>
+                    <button
+                      onClick={() => setShowSpecAnalysisDialog(true)}
+                      className="flex flex-col items-center gap-2 p-4 border rounded-lg hover:bg-muted/50 hover:border-primary/50 transition-colors text-center"
+                    >
+                      <FileText className="h-6 w-6 text-primary" />
+                      <span className="font-medium text-sm">Analyze Specs</span>
+                      <span className="text-xs text-muted-foreground">Parse API/route specs</span>
+                    </button>
+                    <button
+                      onClick={() => setShowImportFromSpecDialog(true)}
+                      className="flex flex-col items-center gap-2 p-4 border rounded-lg hover:bg-muted/50 hover:border-primary/50 transition-colors text-center"
+                    >
+                      <BookOpen className="h-6 w-6 text-primary" />
+                      <span className="font-medium text-sm">Import Spec</span>
+                      <span className="text-xs text-muted-foreground">US/AC to tests</span>
+                    </button>
+                    <button
+                      onClick={() => setShowAIScanDialog(true)}
+                      className="flex flex-col items-center gap-2 p-4 border rounded-lg hover:bg-muted/50 hover:border-primary/50 transition-colors text-center"
+                    >
+                      <Sparkles className="h-6 w-6 text-primary" />
+                      <span className="font-medium text-sm">AI Scan</span>
+                      <span className="text-xs text-muted-foreground">AI-powered discovery</span>
+                    </button>
+                    <button
+                      onClick={() => setShowMCPExploreDialog(true)}
+                      className="flex flex-col items-center gap-2 p-4 border rounded-lg hover:bg-muted/50 hover:border-primary/50 transition-colors text-center"
+                    >
+                      <Globe className="h-6 w-6 text-primary" />
+                      <span className="font-medium text-sm">MCP Explore</span>
+                      <span className="text-xs text-muted-foreground">MCP-based exploration</span>
+                    </button>
+                    <button
+                      onClick={() => setShowCodeDiffDialog(true)}
+                      className="flex flex-col items-center gap-2 p-4 border rounded-lg hover:bg-muted/50 hover:border-primary/50 transition-colors text-center"
+                    >
+                      <GitCompare className="h-6 w-6 text-primary" />
+                      <span className="font-medium text-sm">Code Diff</span>
+                      <span className="text-xs text-muted-foreground">Branch changes</span>
+                    </button>
+                  </>
+                )}
               </div>
             </CardContent>
           </Card>

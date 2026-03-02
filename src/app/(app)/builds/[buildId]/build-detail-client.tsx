@@ -120,6 +120,7 @@ export interface BuildDetailClientProps {
   completedTests?: number;
   codeChangeTestIds?: string[] | null;
   isMainBranch?: boolean;
+  banAiMode?: boolean;
 }
 
 export function BuildDetailClient({
@@ -130,6 +131,7 @@ export function BuildDetailClient({
   completedTests = 0,
   codeChangeTestIds,
   isMainBranch = false,
+  banAiMode = false,
 }: BuildDetailClientProps) {
   const codeChangeTestIdSet = new Set(codeChangeTestIds ?? []);
   const [activeFilter, setActiveFilter] = useState<FilterType>('all');
@@ -189,15 +191,15 @@ export function BuildDetailClient({
   // Check if filter is active (not 'all')
   const isFilterActive = activeFilter !== 'all';
 
-  // AI counts
-  const aiSafeCount = diffs.filter(d => d.aiRecommendation === 'approve').length;
-  const aiReviewCount = diffs.filter(d => d.aiRecommendation === 'review').length;
-  const aiFlagCount = diffs.filter(d => d.aiRecommendation === 'flag').length;
-  const analyzedCount = diffs.filter(d => d.aiRecommendation).length;
-  const analyzingCount = diffs.filter(d => d.aiAnalysisStatus === 'running' || d.aiAnalysisStatus === 'pending').length;
-  const failedAnalysisCount = diffs.filter(d => d.aiAnalysisStatus === 'failed').length;
-  const pendingSafeCount = diffs.filter(d => d.aiRecommendation === 'approve' && d.status === 'pending').length;
-  const hasAIActivity = analyzedCount > 0 || analyzingCount > 0 || failedAnalysisCount > 0;
+  // AI counts (zeroed when banAiMode)
+  const aiSafeCount = banAiMode ? 0 : diffs.filter(d => d.aiRecommendation === 'approve').length;
+  const aiReviewCount = banAiMode ? 0 : diffs.filter(d => d.aiRecommendation === 'review').length;
+  const aiFlagCount = banAiMode ? 0 : diffs.filter(d => d.aiRecommendation === 'flag').length;
+  const analyzedCount = banAiMode ? 0 : diffs.filter(d => d.aiRecommendation).length;
+  const analyzingCount = banAiMode ? 0 : diffs.filter(d => d.aiAnalysisStatus === 'running' || d.aiAnalysisStatus === 'pending').length;
+  const failedAnalysisCount = banAiMode ? 0 : diffs.filter(d => d.aiAnalysisStatus === 'failed').length;
+  const pendingSafeCount = banAiMode ? 0 : diffs.filter(d => d.aiRecommendation === 'approve' && d.status === 'pending').length;
+  const hasAIActivity = !banAiMode && (analyzedCount > 0 || analyzingCount > 0 || failedAnalysisCount > 0);
   const totalAnalyzable = diffs.filter(d => d.classification !== 'unchanged').length;
 
   // Multi-select helpers
@@ -460,6 +462,7 @@ export function BuildDetailClient({
                     isSelected={selectedIds.has(diff.id)}
                     onToggleSelect={toggleSelect}
                     hasCodeChange={codeChangeTestIdSet.has(diff.testId)}
+                    banAiMode={banAiMode}
                   />
                 ))}
               </div>
@@ -474,6 +477,7 @@ export function BuildDetailClient({
                 codeChangeTestIdSet={codeChangeTestIdSet}
                 expandKey={expandKey}
                 allExpanded={allExpanded}
+                banAiMode={banAiMode}
               />
             ) : (
               /* Group by area (optionally with test subgroups) */
@@ -512,6 +516,7 @@ export function BuildDetailClient({
                                 codeChangeTestIdSet={codeChangeTestIdSet}
                                 expandKey={expandKey}
                                 allExpanded={allExpanded}
+                                banAiMode={banAiMode}
                               />
                             </div>
                           ) : (
@@ -525,6 +530,7 @@ export function BuildDetailClient({
                                   isSelected={selectedIds.has(diff.id)}
                                   onToggleSelect={toggleSelect}
                                   hasCodeChange={codeChangeTestIdSet.has(diff.testId)}
+                                  banAiMode={banAiMode}
                                 />
                               ))}
                             </div>
@@ -554,6 +560,7 @@ function TestGroupedList({
   codeChangeTestIdSet,
   expandKey,
   allExpanded,
+  banAiMode = false,
 }: {
   diffs: VisualDiffWithTestStatus[];
   buildId: string;
@@ -563,6 +570,7 @@ function TestGroupedList({
   codeChangeTestIdSet: Set<string>;
   expandKey: number;
   allExpanded: boolean;
+  banAiMode?: boolean;
 }) {
   const testGroups = useMemo(() => {
     const groups: Record<string, VisualDiffWithTestStatus[]> = {};
@@ -605,6 +613,7 @@ function TestGroupedList({
                       isSelected={selectedIds.has(diff.id)}
                       onToggleSelect={onToggleSelect}
                       hasCodeChange={codeChangeTestIdSet.has(diff.testId)}
+                      banAiMode={banAiMode}
                     />
                   ))}
                 </div>
@@ -625,6 +634,7 @@ function DiffRow({
   isSelected,
   onToggleSelect,
   hasCodeChange,
+  banAiMode = false,
 }: {
   diff: VisualDiffWithTestStatus;
   buildId: string;
@@ -632,16 +642,17 @@ function DiffRow({
   isSelected: boolean;
   onToggleSelect: (id: string) => void;
   hasCodeChange: boolean;
+  banAiMode?: boolean;
 }) {
   const router = useRouter();
   const isExecutionFailed = diff.testResultStatus === 'failed';
   const StatusIcon = isExecutionFailed ? XCircle : diffStatusIcons[diff.status];
   const statusColor = isExecutionFailed ? 'text-red-600 bg-red-50' : diffStatusColors[diff.status];
   const isFailed = isExecutionFailed || diff.status === 'rejected';
-  const aiBadge = diff.aiRecommendation ? aiRecommendationBadge[diff.aiRecommendation] : null;
-  const analysis = diff.aiAnalysis as AIDiffAnalysis | null;
-  const isAnalyzing = diff.aiAnalysisStatus === 'running' || diff.aiAnalysisStatus === 'pending';
-  const isAIFailed = diff.aiAnalysisStatus === 'failed';
+  const aiBadge = !banAiMode && diff.aiRecommendation ? aiRecommendationBadge[diff.aiRecommendation] : null;
+  const analysis = !banAiMode ? diff.aiAnalysis as AIDiffAnalysis | null : null;
+  const isAnalyzing = !banAiMode && (diff.aiAnalysisStatus === 'running' || diff.aiAnalysisStatus === 'pending');
+  const isAIFailed = !banAiMode && diff.aiAnalysisStatus === 'failed';
   const branchStatus = deriveBranchStatus(diff);
   const bsConfig = branchStatusConfig[branchStatus];
   const hasMainDrift = diff.mainPercentageDifference && parseFloat(diff.mainPercentageDifference) > 0;

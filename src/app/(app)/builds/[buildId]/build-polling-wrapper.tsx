@@ -28,10 +28,11 @@ interface BuildPollingWrapperProps {
   buildId: string;
   isMainBranch?: boolean;
   embeddedStreamUrl?: string | null;
+  banAiMode?: boolean;
   children?: ReactNode;
 }
 
-export function BuildPollingWrapper({ initialBuild, buildId, isMainBranch = false, embeddedStreamUrl, children }: BuildPollingWrapperProps) {
+export function BuildPollingWrapper({ initialBuild, buildId, isMainBranch = false, embeddedStreamUrl, banAiMode = false, children }: BuildPollingWrapperProps) {
   const [build, setBuild] = useState<BuildData>(initialBuild);
   const [isPolling, setIsPolling] = useState(!initialBuild.completedAt);
   const [showViewer, setShowViewer] = useState(true);
@@ -123,6 +124,7 @@ export function BuildPollingWrapper({ initialBuild, buildId, isMainBranch = fals
         completedTests={completedTests}
         codeChangeTestIds={build.codeChangeTestIds}
         isMainBranch={isMainBranch}
+        banAiMode={banAiMode}
       />
     </>
   );

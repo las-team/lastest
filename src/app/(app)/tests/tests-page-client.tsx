@@ -63,9 +63,10 @@ interface TestsPageClientProps {
   repositoryId?: string;
   baseUrl?: string;
   deletedTests?: Test[];
+  banAiMode?: boolean;
 }
 
-export function TestsPageClient({ areas, tests, routes, repositoryId, baseUrl = 'http://localhost:3000', deletedTests = [] }: TestsPageClientProps) {
+export function TestsPageClient({ areas, tests, routes, repositoryId, baseUrl = 'http://localhost:3000', deletedTests = [], banAiMode = false }: TestsPageClientProps) {
   const notifyJobStarted = useNotifyJobStarted();
 
   // A route is uncovered if it has no test (hasTest is maintained by soft-delete/restore lifecycle)
@@ -310,7 +311,7 @@ export function TestsPageClient({ areas, tests, routes, repositoryId, baseUrl = 
             </p>
           </div>
           <div className="flex gap-2">
-            {repositoryId && failedTests.length > 0 && (
+            {!banAiMode && repositoryId && failedTests.length > 0 && (
               <Button
                 variant="outline"
                 size="sm"
@@ -332,14 +333,18 @@ export function TestsPageClient({ areas, tests, routes, repositoryId, baseUrl = 
                   <FlaskConical className="h-4 w-4 mr-2" />
                   Add Basic Tests
                 </Button>
-                <Button variant="outline" size="sm" onClick={() => setIsAICreateOpen(true)}>
-                  <Sparkles className="h-4 w-4 mr-2" />
-                  AI Create
-                </Button>
-                <Button variant="outline" size="sm" onClick={() => setIsMCPCreateOpen(true)}>
-                  <Wand2 className="h-4 w-4 mr-2" />
-                  MCP Create
-                </Button>
+                {!banAiMode && (
+                  <>
+                    <Button variant="outline" size="sm" onClick={() => setIsAICreateOpen(true)}>
+                      <Sparkles className="h-4 w-4 mr-2" />
+                      AI Create
+                    </Button>
+                    <Button variant="outline" size="sm" onClick={() => setIsMCPCreateOpen(true)}>
+                      <Wand2 className="h-4 w-4 mr-2" />
+                      MCP Create
+                    </Button>
+                  </>
+                )}
               </>
             )}
             <Button asChild size="sm">
@@ -431,7 +436,7 @@ export function TestsPageClient({ areas, tests, routes, repositoryId, baseUrl = 
                   <Trash2 className="h-3.5 w-3.5 mr-1.5" />
                   Move to Trash
                 </Button>
-                {repositoryId && selectedFailedTests.length > 0 && (
+                {!banAiMode && repositoryId && selectedFailedTests.length > 0 && (
                   <>
                     <Button
                       variant="outline"
@@ -666,7 +671,7 @@ export function TestsPageClient({ areas, tests, routes, repositoryId, baseUrl = 
       />
 
       {/* AI Create Test Dialog */}
-      {repositoryId && (
+      {!banAiMode && repositoryId && (
         <AICreateTestDialog
           open={isAICreateOpen}
           onOpenChange={setIsAICreateOpen}
@@ -676,7 +681,7 @@ export function TestsPageClient({ areas, tests, routes, repositoryId, baseUrl = 
       )}
 
       {/* MCP Create Test Dialog */}
-      {repositoryId && (
+      {!banAiMode && repositoryId && (
         <MCPCreateTestDialog
           open={isMCPCreateOpen}
           onOpenChange={setIsMCPCreateOpen}

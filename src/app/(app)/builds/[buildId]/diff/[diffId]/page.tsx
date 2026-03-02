@@ -12,6 +12,9 @@ interface PageProps {
 
 export default async function DiffPage({ params }: PageProps) {
   const { buildId, diffId } = await params;
+  const { getCurrentSession } = await import('@/lib/auth');
+  const session = await getCurrentSession();
+  const banAiMode = session?.team?.banAiMode ?? false;
   const diff = await getDiff(diffId);
 
   if (!diff) {
@@ -137,6 +140,7 @@ export default async function DiffPage({ params }: PageProps) {
           buildId={buildId}
           prevDiffId={prevDiff?.id}
           nextDiffId={nextDiff?.id}
+          banAiMode={banAiMode}
         />
 
         {/* Keyboard shortcuts hint */}

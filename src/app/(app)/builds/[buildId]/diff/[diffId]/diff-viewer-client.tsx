@@ -17,9 +17,10 @@ interface DiffViewerClientProps {
   buildId: string;
   prevDiffId?: string;
   nextDiffId?: string;
+  banAiMode?: boolean;
 }
 
-export function DiffViewerClient({ diff, buildId, prevDiffId, nextDiffId }: DiffViewerClientProps) {
+export function DiffViewerClient({ diff, buildId, prevDiffId, nextDiffId, banAiMode = false }: DiffViewerClientProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const viewParam = searchParams.get('view') as 'slider' | 'side-by-side' | 'overlay' | 'three-way' | 'planned-vs-actual' | 'shift-compare' | null;
@@ -252,7 +253,7 @@ export function DiffViewerClient({ diff, buildId, prevDiffId, nextDiffId }: Diff
           )}
 
           {/* AI Analysis */}
-          {(aiAnalysis || aiStatus === 'running' || aiStatus === 'pending') && (
+          {!banAiMode && (aiAnalysis || aiStatus === 'running' || aiStatus === 'pending') && (
             <div className="border border-purple-200 bg-purple-50/50 rounded-lg p-4">
               <div className="flex items-start gap-3">
                 <Sparkles className="w-5 h-5 text-purple-600 mt-0.5 flex-shrink-0" />

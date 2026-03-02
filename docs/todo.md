@@ -11,7 +11,6 @@ Test coverage assessment and recreation based on existing test set
 Tweet about us
 Content comparison - compare text in 2 setups
 Explore/Cover instead of Areas
-
 Component specific testing
 Figma plugin
 Generate test data with AI
@@ -21,7 +20,7 @@ Firecrawl?
 Approve reject changes or create ticket -> gh issue
 Import from prior tools? 
 Determine test coverage based on tests in repo 
-### UX
+Expand into not just visual testing: https://github.com/coleam00/link-in-bio-page-builder/blob/main/.claude/skills/e2e-test/SKILL.md
 ## bugs
 some elements are disappearing from test 13b
 ## marketing
