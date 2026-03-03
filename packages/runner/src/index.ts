@@ -631,6 +631,21 @@ export async function main() {
       }
     });
 
+  // Print installed Playwright version (for CI cache keys)
+  program
+    .command('playwright-version')
+    .description('Print installed Playwright version (for CI cache keys)')
+    .action(() => {
+      try {
+        const pkgPath = require.resolve('playwright/package.json');
+        const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf-8'));
+        console.log(pkg.version);
+      } catch {
+        console.error('Error: playwright is not installed');
+        process.exit(1);
+      }
+    });
+
   await program.parseAsync(process.argv);
 }
 

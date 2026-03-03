@@ -1380,3 +1380,36 @@ export const runnerCommandResults = sqliteTable('runner_command_results', {
 
 export type RunnerCommandResult = typeof runnerCommandResults.$inferSelect;
 export type NewRunnerCommandResult = typeof runnerCommandResults.$inferInsert;
+
+// ============================================
+// GitHub Actions Configs
+// ============================================
+
+export type GithubActionMode = 'persistent' | 'ephemeral';
+export type GithubActionTriggerEvent = 'push' | 'pull_request' | 'workflow_dispatch' | 'schedule';
+
+export const githubActionConfigs = sqliteTable('github_action_configs', {
+  id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+  teamId: text('team_id').notNull().references(() => teams.id),
+  runnerId: text('runner_id').references(() => runners.id, { onDelete: 'set null' }),
+  repositoryOwner: text('repository_owner').notNull(),
+  repositoryName: text('repository_name').notNull(),
+  githubRepoId: integer('github_repo_id'),
+  mode: text('mode').notNull().default('persistent'),
+  triggerEvents: text('trigger_events', { mode: 'json' }).$type<GithubActionTriggerEvent[]>()
+    .default(['push', 'pull_request', 'workflow_dispatch']),
+  branchFilter: text('branch_filter', { mode: 'json' }).$type<string[]>().default(['main']),
+  cronSchedule: text('cron_schedule'),
+  targetUrl: text('target_url'),
+  timeout: integer('timeout').default(300000),
+  failOnChanges: integer('fail_on_changes', { mode: 'boolean' }).default(true),
+  maxParallelTests: integer('max_parallel_tests'),
+  pollInterval: integer('poll_interval'),
+  workflowDeployed: integer('workflow_deployed', { mode: 'boolean' }).default(false),
+  lastDeployedAt: integer('last_deployed_at', { mode: 'timestamp' }),
+  createdAt: integer('created_at', { mode: 'timestamp' }).$defaultFn(() => new Date()),
+  updatedAt: integer('updated_at', { mode: 'timestamp' }).$defaultFn(() => new Date()),
+});
+
+export type GithubActionConfig = typeof githubActionConfigs.$inferSelect;
+export type NewGithubActionConfig = typeof githubActionConfigs.$inferInsert;
