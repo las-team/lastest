@@ -1,15 +1,17 @@
 # Lastest2 Competitive Brief
 
-**Research Date:** February 5, 2026
+**Research Date:** March 3, 2026 (updated from February 5, 2026)
 
 ---
 
 ## 1. Executive Summary
 
-The visual regression testing market is dominated by three paid SaaS incumbents (Percy, Chromatic, Applitools) and a few open-source alternatives (BackstopJS, Playwright native, Lost Pixel). All incumbents are cloud-only, metered-pricing tools targeting mid-to-enterprise teams. None offer AI-powered test *generation* -- they only diff screenshots you provide.
+The visual regression testing market is dominated by three paid SaaS incumbents (Percy, Chromatic, Applitools) and a few open-source alternatives (BackstopJS, Playwright native, Lost Pixel, Argos). All incumbents are cloud-only, metered-pricing tools targeting mid-to-enterprise teams. None offer AI-powered test *generation* combined with recording and self-hosting.
 
-- **Biggest opportunity:** No competitor combines AI test generation + recording + visual diffing in a free, self-hosted package. The "vibe coder" / solo founder segment is entirely unserved.
-- **Biggest threat:** Applitools' "Autonomous" platform is adding natural-language test creation, and Percy launched an AI Review Agent -- incumbents are starting to add AI, though for *reviewing* not *generating*.
+Lastest2 is now the only tool that combines **AI test generation + no-code recording + autonomous agent + 3 diff engines + embedded browser execution + remote runners (published npm package) + full approval workflow** — all self-hosted at $0.
+
+- **Biggest opportunity:** No competitor combines AI test generation + recording + visual diffing + autonomous execution in a free, self-hosted package. The "vibe coder" / solo founder segment is entirely unserved.
+- **Biggest threat:** Applitools' "Autonomous" platform is adding natural-language test creation, and Percy launched an AI Review Agent -- incumbents are starting to add AI, though for *reviewing* not *generating*. Meticulous.ai's zero-authoring model is compelling but cloud-only and custom-priced.
 
 ---
 
@@ -312,17 +314,18 @@ The visual regression testing market is dominated by three paid SaaS incumbents 
 
 ## 3. Messaging Comparison Matrix
 
-| Dimension | Lastest2 | Percy | Chromatic | Applitools | BackstopJS |
-|-----------|----------|-------|-----------|------------|------------|
-| **Tagline** | "Record it. Test it. Ship it. -- $0 forever" | "All-in-one visual testing and review platform" | "Ship flawless UIs with less work" | "AI-Automated Compliance Testing" | "Catch CSS curve balls" |
-| **Target buyer** | Solo founders, vibe coders | Engineering/QA teams | Frontend/design system teams | Enterprise QA | Config-savvy devs |
-| **Key differentiator** | AI test generation + free + self-hosted | Cross-browser + CI/CD + AI review | Storybook ecosystem + accessibility | Visual AI + Autonomous NLP | Free + open source |
-| **Tone** | Casual, builder-friendly | Professional, enterprise | Modern, collaborative | Enterprise, technical | Developer/CLI |
-| **Price** | $0 forever | $149-199+/mo | $179+/mo | $699+/mo | Free |
-| **AI capability** | Test generation + auto-fix | Review agent + setup agent | None | Test creation (Autonomous) | None |
-| **Self-hosted** | Yes | No | No | On-prem (enterprise) | Yes |
-| **Recording** | Yes | No | No | No-code recording (new) | No |
-| **Core value prop** | AI writes your tests, $0 | Catch visual bugs in CI | Component testing for teams | Enterprise-grade AI testing | Simple screenshot diffs |
+| Dimension | Lastest2 | Percy | Chromatic | Applitools | Argos | Meticulous |
+|-----------|----------|-------|-----------|------------|-------|------------|
+| **Tagline** | "Record it. Test it. Ship it. — $0 forever" | "All-in-one visual testing and review platform" | "Ship flawless UIs with less work" | "AI-Automated Compliance Testing" | "Visual testing for developers" | "AI-powered frontend testing" |
+| **Target buyer** | Solo founders, vibe coders, small teams | Engineering/QA teams | Frontend/design system teams | Enterprise QA | Frontend devs/OSS teams | Frontend teams (Next.js/Vercel) |
+| **Key differentiator** | AI test gen + recording + autonomous agent + free + self-hosted | Cross-browser + CI/CD + AI review | Storybook ecosystem + accessibility | Visual AI + Autonomous NLP | Affordable OSS + stabilization | Zero-authoring from sessions |
+| **Tone** | Casual, builder-friendly | Professional, enterprise | Modern, collaborative | Enterprise, technical | Developer-focused, OSS | Modern, zero-effort |
+| **Price** | $0 forever | $149-199+/mo | $179+/mo | $699+/mo | $100+/mo | Custom |
+| **AI capability** | Test gen + auto-fix + autonomous agent + AI diff | Review agent + setup agent | MCP component sharing | Test creation (Autonomous) + Visual AI | None | Session-based auto-gen |
+| **Self-hosted** | Yes | No | No | On-prem (enterprise) | OSS core | No |
+| **Recording** | Yes (no-code) | No | No | Low-code (Preflight) | No | Session recording |
+| **Execution modes** | Local + remote runners + embedded browser | Cloud | Cloud | Cloud + on-prem | Cloud | Cloud |
+| **Core value prop** | AI writes, runs, and fixes your tests — $0 | Catch visual bugs in CI | Component testing for teams | Enterprise-grade AI testing | Affordable visual testing | Zero-maintenance testing |
 
 ---
 
@@ -342,6 +345,9 @@ The visual regression testing market is dominated by three paid SaaS incumbents 
 - **"Build with AI, run traditionally"** -- generate once, run free forever (token savings)
 - **Self-hosted privacy-first testing** -- data never leaves your machine
 - **"Record → Test → Ship in 2 minutes"** -- no competitor can show this flow
+- **"Run anywhere"** -- 3 execution modes (local, remote runner npm package, embedded browser with live streaming)
+- **"Autonomous Play Agent"** -- one-click pipeline that scans, generates, runs, fixes, and reports
+- **"12 stabilization features"** -- most comprehensive flaky test prevention in the market
 
 ### Content format opportunities
 - Short-form video demos (30-sec test recording to diff)
@@ -359,8 +365,11 @@ The visual regression testing market is dominated by three paid SaaS incumbents 
 3. **Self-hosted demand:** r/selfhosted has 2M+ members. Strong demand for privacy-first, no-cloud tools.
 4. **Price sensitivity:** Percy/Chromatic free tiers cap at 5,000 screenshots/month. Teams burning through this in CI need $150-400+/mo plans.
 5. **"Build with AI, run traditional":** Unique positioning -- AI generates code once, tests run as standard Playwright with zero AI tokens per execution.
-6. **Baseline management:** Percy has known issues with complex git workflows (branch merging breaks baselines). Lastest2's SHA256 hash carry-forward may be superior.
+6. **Baseline management:** Percy has known issues with complex git workflows (branch merging breaks baselines). Lastest2's SHA256 hash carry-forward is superior.
 7. **Meticulous.ai gap:** Requires real user traffic -- unusable for pre-launch MVPs. Lastest2 works from day one.
+8. **Embedded browser execution:** No competitor offers a self-hosted container with live browser streaming. Teams can run tests without installing Playwright locally -- unique for CI/CD and cloud deployments.
+9. **Runner npm package:** `@lastest/runner` is published and ready for distributed execution. No cloud dependency, no per-runner pricing, no vendor lock-in.
+10. **Autonomous agent gap:** Play Agent is the only fully autonomous pipeline that scans, generates, runs, fixes, and reports in one click. Applitools Autonomous is the closest but requires $969+/mo.
 
 ---
 
@@ -402,17 +411,32 @@ The visual regression testing market is dominated by three paid SaaS incumbents 
 
 ## Full Competitor Comparison
 
-| Capability | Lastest2 | Percy | Chromatic | Applitools | BackstopJS | Lost Pixel | Meticulous |
-|------------|----------|-------|-----------|------------|------------|------------|------------|
-| Record & playback | Yes | No | No | No | No | No | Auto-record |
-| AI test generation | Yes | No | No | Yes (NLP) | No | No | Yes (sessions) |
-| AI auto-fix tests | Yes | No | No | No | No | No | Auto-maintain |
-| Visual diff UI | Yes | Yes | Yes | Yes | Basic HTML | Yes (Platform) | Yes |
-| GitHub/GitLab integration | Yes | Yes | Yes | Yes | No | GitHub Actions | Yes |
-| Free unlimited screenshots | Yes | No (5k) | No (5k) | No | Yes | No (7k) | No |
-| Self-hosted | Yes | No | No | On-prem ($$$) | Yes | Yes (OSS) | No |
-| Route auto-discovery | Yes | No | No | No | No | No | No |
-| Cross-browser | Playwright | Yes | Yes ($179+) | Yes | Limited | Yes | Yes |
-| Accessibility testing | No | No | Yes (Enterprise) | No | No | No | No |
-| Price | $0 | $149+/mo | $179+/mo | $699+/mo | $0 | $100+/mo | Custom |
-| Smart run (diff-based) | Yes | No | TurboSnap | No | No | No | Yes |
+| Capability | Lastest2 | Percy | Chromatic | Applitools | BackstopJS | Lost Pixel | Meticulous | Argos |
+|------------|----------|-------|-----------|------------|------------|------------|------------|-------|
+| No-code recording | Yes | No | No | Low-code | No | No | Session record | No |
+| AI test generation | Yes | No | No | Yes (NLP) | No | No | Yes (sessions) | No |
+| AI auto-fix tests | Yes | No | No | No | No | No | Auto-maintain | No |
+| Autonomous agent | Yes (Play Agent) | No | No | Autonomous | No | No | No | No |
+| AI diff analysis | Yes | AI Review Agent | No | Visual AI | No | No | Deterministic | No |
+| Multi-engine diffing | 3 engines (pixelmatch, SSIM, Butteraugli) | No | No | Visual AI | No | No | No | No |
+| Text-region-aware diffing | Yes (OCR) | Yes (Intelli-ignore) | No | No | No | No | No | No |
+| Visual diff UI | Yes | Yes | Yes | Yes | Basic HTML | Yes (Platform) | Yes | Yes |
+| Approval workflow | Yes | Yes | Yes | Yes | No | Yes (SaaS) | PR-based | Yes |
+| GitHub/GitLab integration | Yes (both + self-hosted GitLab) | Yes | Yes | Yes | No | GitHub Actions | Yes | Yes |
+| Free unlimited screenshots | Yes | No (5k) | No (5k) | No | Yes | No (7k) | No | No (5k) |
+| Self-hosted | Yes | No | No | On-prem ($$$) | Yes | Yes (OSS) | No | OSS core |
+| Remote runners | Yes (npm package) | Cloud | Cloud | Cloud | No | Cloud | Cloud | Cloud |
+| Embedded browser | Yes (container + live stream) | No | No | No | No | No | No | No |
+| Route auto-discovery | Yes | No | No | No | No | No | No | No |
+| Spec-driven test gen | Yes | No | No | No | No | No | No | No |
+| Accessibility testing | Yes (axe-core) | No | Enterprise | No | No | No | No | ARIA snaps |
+| Cross-browser | Playwright | Real browsers | 4 browsers | Ultrafast Grid | Limited | Yes | Chromium | Via SDKs |
+| Local AI (Ollama) | Yes | No | No | No | No | No | No | No |
+| Figma integration | Yes | No | No | Yes | No | No | No | No |
+| Google Sheets data | Yes | No | No | No | No | No | No | No |
+| Setup/teardown orchestration | Yes | No | No | No | No | No | No | No |
+| Branch baseline management | Yes | Yes | Yes | Yes | No | No | No | No |
+| Testing templates | 8 presets | No | No | No | No | No | No | No |
+| Debug mode | Yes | No | No | No | No | No | No | Playwright trace |
+| Smart run (diff-based) | Yes | No | TurboSnap | No | No | No | Yes | No |
+| Price | $0 | $149+/mo | $179+/mo | $699+/mo | $0 | $100+/mo | Custom | $100+/mo |

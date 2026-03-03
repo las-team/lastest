@@ -115,7 +115,8 @@
       "Bash(git: - C*)",
       "Bash(git:*)",
       "Bash(docker ps:*)",
-      "Bash(gh pr:*)"
+      "Bash(gh pr:*)",
+      "WebFetch(domain:fsl.software)"
     ]
   },
   "disabledMcpjsonServers": [
