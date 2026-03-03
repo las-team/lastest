@@ -1,4 +1,3 @@
-import { Suspense } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import * as queries from '@/lib/db/queries';
@@ -113,9 +112,7 @@ export default async function SettingsPage({
           )}
 
           {/* Highlight settings cards when navigated from onboarding */}
-          <Suspense fallback={null}>
-            <SettingsHighlighter />
-          </Suspense>
+          <SettingsHighlighter />
 
           {/* GitHub Integration */}
           <Card id="github">

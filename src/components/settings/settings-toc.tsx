@@ -17,7 +17,6 @@ const SECTIONS = [
   { id: 'diff-sensitivity', label: 'Diff Sensitivity' },
   { id: 'playwright', label: 'Playwright' },
   { id: 'team', label: 'Team' },
-  { id: 'embedded-browsers', label: 'Embedded Browsers' },
   { id: 'about', label: 'About' },
 ];
 
