@@ -62,6 +62,7 @@ export async function getPlaywrightSettings(repositoryId?: string | null) {
         enabledRecordingEngines: settings.enabledRecordingEngines ?? DEFAULT_RECORDING_ENGINES,
         defaultRecordingEngine: settings.defaultRecordingEngine ?? 'lastest',
         stabilization: settings.stabilization ?? DEFAULT_STABILIZATION_SETTINGS,
+        browsers: settings.browsers ?? ['chromium'],
       };
     }
   }
@@ -80,6 +81,7 @@ export async function getPlaywrightSettings(repositoryId?: string | null) {
       enabledRecordingEngines: globalSettings.enabledRecordingEngines ?? DEFAULT_RECORDING_ENGINES,
       defaultRecordingEngine: globalSettings.defaultRecordingEngine ?? 'lastest',
       stabilization: globalSettings.stabilization ?? DEFAULT_STABILIZATION_SETTINGS,
+      browsers: globalSettings.browsers ?? ['chromium'],
     };
   }
 
@@ -111,6 +113,7 @@ export async function getPlaywrightSettings(repositoryId?: string | null) {
     grantClipboardAccess: false,
     acceptDownloads: false,
     enableNetworkInterception: false,
+    browsers: ['chromium'] as string[],
     createdAt: null,
     updatedAt: null,
   };

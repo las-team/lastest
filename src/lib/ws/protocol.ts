@@ -78,6 +78,7 @@ export interface RunTestCommandPayload {
   setupVariables?: Record<string, unknown>; // Variables from setup scripts
   cursorPlaybackSpeed?: number; // 0 = instant (skip delays), 1 = realtime
   stabilization?: StabilizationPayload;
+  browser?: 'chromium' | 'firefox' | 'webkit';
 }
 
 export interface RunTestCommand extends BaseMessage {
@@ -96,6 +97,7 @@ export interface RunSetupCommandPayload {
     height: number;
   };
   stabilization?: StabilizationPayload;
+  browser?: 'chromium' | 'firefox' | 'webkit';
 }
 
 export interface RunSetupCommand extends BaseMessage {

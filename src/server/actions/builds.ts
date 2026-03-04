@@ -411,6 +411,18 @@ async function runBuildAsync(
   const envConfig = await queries.getEnvironmentConfig(repositoryId);
   const playwrightSettings = await queries.getPlaywrightSettings(repositoryId);
 
+  // Determine browsers for this build
+  const browsers: string[] = playwrightSettings?.browsers && (playwrightSettings.browsers as string[]).length > 0
+    ? playwrightSettings.browsers as string[]
+    : ['chromium'];
+  const totalTestsAcrossBrowsers = tests.length * browsers.length;
+
+  // Store browsers on the build record
+  await queries.updateBuild(buildId, { browsers, totalTests: totalTestsAcrossBrowsers });
+
+  // Current browser being executed (updated in browser loop)
+  let currentBrowserType = 'chromium';
+
   // Result callback for processing diffs
   const onResult = async (result: { testId: string; status: string; screenshotPath?: string; screenshots: { path: string; label?: string }[]; errorMessage?: string; durationMs?: number; a11yViolations?: { id: string; impact: 'critical' | 'serious' | 'moderate' | 'minor'; description: string; help: string; helpUrl: string; nodes: number }[]; stabilityMetadata?: { frameCount: number; stableFrames: number; maxFrameDiff: number; isStable: boolean }; videoPath?: string; softErrors?: string[] }) => {
     processedCount++;
@@ -426,7 +438,7 @@ async function runBuildAsync(
       errorMessage: result.errorMessage,
       durationMs: result.durationMs,
       viewport: '1280x720',
-      browser: 'chromium',
+      browser: currentBrowserType,
       a11yViolations: result.a11yViolations,
       videoPath: result.videoPath,
       softErrors: result.softErrors,
@@ -459,7 +471,8 @@ async function runBuildAsync(
           branch,
           repositoryId,
           screenshot.label,
-          result.stabilityMetadata?.isStable === false
+          result.stabilityMetadata?.isStable === false,
+          currentBrowserType,
         )
       )
     );
@@ -490,7 +503,7 @@ async function runBuildAsync(
     }
 
     // Update build progress incrementally
-    await updateJobProgress(jobId, processedCount, tests.length);
+    await updateJobProgress(jobId, processedCount, totalTestsAcrossBrowsers);
     await queries.updateBuild(buildId, {
       passedCount,
       failedCount,
@@ -564,8 +577,8 @@ async function runBuildAsync(
         await queries.updateBuild(buildId, { setupStatus: 'running' });
 
         const orchestrator = getSetupOrchestrator();
-        const { chromium } = await import('playwright');
-        const browser = await chromium.launch({ headless: true });
+        const pw = await import('playwright');
+        const browser = await pw.chromium.launch({ headless: true });
         const page = await browser.newPage();
 
         try {
@@ -617,56 +630,70 @@ async function runBuildAsync(
     // Set the setup context on the runner so tests can access it
     runner.setSetupContext(setupContext);
 
-    // Use executor for agent routing, or direct runner for local
-    if (isRemoteRunner) {
-      // Load runner's maxParallelTests setting
-      const remoteRunner = await queries.getRunnerById(runnerId!);
-      const maxParallelTests = remoteRunner?.maxParallelTests ?? 1;
+    // Run tests for each browser in the browsers list
+    for (const browserType of browsers) {
+      currentBrowserType = browserType;
+      console.log(`[build] Running tests with browser: ${browserType}`);
 
-      // If no build-level setup, resolve per-test setup code to run on the runner
-      // (don't run locally — cookies from a different server instance would be invalid)
-      if (!remoteSetupInfo) {
-        const resolved = await resolveSetupCodeForRunner(tests);
-        if (resolved) {
-          remoteSetupInfo = resolved;
-          await queries.updateBuild(buildId, { setupStatus: 'running' });
-          console.log(`[build] Resolved per-test setup for remote runner: setupId=${resolved.setupId}`);
+      // Clone playwright settings with current browser for this iteration
+      const browserSettings = playwrightSettings
+        ? { ...playwrightSettings, browser: browserType }
+        : null;
+
+      // Use executor for agent routing, or direct runner for local
+      if (isRemoteRunner) {
+        // Load runner's maxParallelTests setting
+        const remoteRunner = await queries.getRunnerById(runnerId!);
+        const maxParallelTests = remoteRunner?.maxParallelTests ?? 1;
+
+        // If no build-level setup, resolve per-test setup code to run on the runner
+        // (don't run locally — cookies from a different server instance would be invalid)
+        if (!remoteSetupInfo) {
+          const resolved = await resolveSetupCodeForRunner(tests);
+          if (resolved) {
+            remoteSetupInfo = resolved;
+            await queries.updateBuild(buildId, { setupStatus: 'running' });
+            console.log(`[build] Resolved per-test setup for remote runner: setupId=${resolved.setupId}`);
+          }
         }
+
+        try {
+          await executeTests(tests, testRunId, {
+            repositoryId,
+            teamId,
+            runnerId,
+            environmentConfig: envConfig,
+            playwrightSettings: browserSettings,
+            maxParallelTests,
+            jobId,
+            setupInfo: remoteSetupInfo,
+            setupContext: {
+              storageState: setupContext.storageState,
+              variables: setupContext.variables,
+            },
+          }, onProgress, onResult);
+
+          // If remote setup was used, mark it completed now
+          if (remoteSetupInfo) {
+            await queries.updateBuild(buildId, { setupStatus: 'completed' });
+          }
+        } catch (error) {
+          // If setup failed on the runner, mark it
+          if (remoteSetupInfo && error instanceof Error && error.message.includes('setup')) {
+            await queries.updateBuild(buildId, {
+              setupStatus: 'failed',
+              setupError: error.message,
+            });
+          }
+          throw error;
+        }
+      } else {
+        // Local: update runner settings with current browser
+        if (browserSettings) {
+          runner.setSettings(browserSettings);
+        }
+        await runner.runTests(tests, testRunId, onProgress, onResult);
       }
-
-      try {
-        await executeTests(tests, testRunId, {
-          repositoryId,
-          teamId,
-          runnerId,
-          environmentConfig: envConfig,
-          playwrightSettings,
-          maxParallelTests,
-          jobId,
-          setupInfo: remoteSetupInfo,
-          setupContext: {
-            storageState: setupContext.storageState,
-            variables: setupContext.variables,
-          },
-        }, onProgress, onResult);
-
-        // If remote setup was used, mark it completed now
-        if (remoteSetupInfo) {
-          await queries.updateBuild(buildId, { setupStatus: 'completed' });
-        }
-      } catch (error) {
-        // If setup failed on the runner, mark it
-        if (remoteSetupInfo && error instanceof Error && error.message.includes('setup')) {
-          await queries.updateBuild(buildId, {
-            setupStatus: 'failed',
-            setupError: error.message,
-          });
-        }
-        throw error;
-      }
-    } else {
-      // Local uses maxParallelTests from playwrightSettings (set via runner.setSettings)
-      await runner.runTests(tests, testRunId, onProgress, onResult);
     }
 
     // Clear setup context after tests complete
@@ -840,6 +867,7 @@ async function processVisualDiff(
   repositoryId?: string | null,
   stepLabel?: string,
   isUnstable?: boolean,
+  browser: string = 'chromium',
 ): Promise<{ hasChanges: boolean; diffId: string; classification: DiffClassification }> {
 
   // Get diff sensitivity settings
@@ -880,7 +908,7 @@ async function processVisualDiff(
   };
 
   // Resolve primary baseline — branch-specific only, no fallback to main
-  const baseline = await queries.getBranchBaseline(testId, stepLabel, branch);
+  const baseline = await queries.getBranchBaseline(testId, stepLabel, branch, browser);
 
   // Check for carry-forward (previously approved identical image)
   // Try dimension-aware hash first, fall back to legacy hash for old baselines
@@ -888,8 +916,8 @@ async function processVisualDiff(
   const currentHashWithDims = hashImageWithDimensions(currentImageFullPath);
   const currentHash = hashImage(currentImageFullPath);
   const matchingBaseline =
-    await queries.getBaselineByHash(testId, currentHashWithDims, stepLabel) ||
-    await queries.getBaselineByHash(testId, currentHash, stepLabel);
+    await queries.getBaselineByHash(testId, currentHashWithDims, stepLabel, browser) ||
+    await queries.getBaselineByHash(testId, currentHash, stepLabel, browser);
 
   // Get planned screenshot if exists (for design comparison)
   const plannedScreenshot = await queries.getPlannedScreenshotByTest(testId, stepLabel || null);
@@ -952,7 +980,7 @@ async function processVisualDiff(
       return { mainBaselineImagePath: null, mainDiffImagePath: null, mainPixelDifference: null, mainPercentageDifference: null, mainClassification: null };
     }
 
-    const mainBaseline = await queries.getBranchBaseline(testId, stepLabel, defaultBranch);
+    const mainBaseline = await queries.getBranchBaseline(testId, stepLabel, defaultBranch, browser);
     if (!mainBaseline) {
       return { mainBaselineImagePath: null, mainDiffImagePath: null, mainPixelDifference: null, mainPercentageDifference: null, mainClassification: null };
     }
@@ -1022,6 +1050,7 @@ async function processVisualDiff(
         pixelDifference: 0,
         percentageDifference: '0',
         metadata: { changedRegions: [] },
+        browser,
         ...plannedDiff,
         ...mainDiff,
       });
@@ -1046,19 +1075,21 @@ async function processVisualDiff(
       pixelDifference: 0,
       percentageDifference: '0',
       metadata: { changedRegions: [], isNewTest: true },
+      browser,
       ...plannedDiff,
       ...mainDiff,
     });
 
     if (shouldAutoApprove) {
       const autoHash = hashImageWithDimensions(path.join(STORAGE_ROOT, currentScreenshotPath));
-      await queries.deactivateBaselines(testId, stepLabel || null, branch);
+      await queries.deactivateBaselines(testId, stepLabel || null, branch, browser);
       await queries.createBaseline({
         testId,
         stepLabel: stepLabel || null,
         imagePath: currentScreenshotPath,
         imageHash: autoHash,
         branch,
+        browser,
         approvedFromDiffId: diff.id,
       });
     }
@@ -1132,19 +1163,21 @@ async function processVisualDiff(
       pixelDifference: diffResult.pixelDifference,
       percentageDifference: diffResult.percentageDifference.toString(),
       metadata,
+      browser,
       ...plannedDiff,
       ...mainDiff,
     });
 
     if (shouldAutoApprove && classification !== 'unchanged') {
       const autoHash = hashImageWithDimensions(path.join(STORAGE_ROOT, currentScreenshotPath));
-      await queries.deactivateBaselines(testId, stepLabel || null, branch);
+      await queries.deactivateBaselines(testId, stepLabel || null, branch, browser);
       await queries.createBaseline({
         testId,
         stepLabel: stepLabel || null,
         imagePath: currentScreenshotPath,
         imageHash: autoHash,
         branch,
+        browser,
         approvedFromDiffId: diff.id,
       });
     }
@@ -1169,6 +1202,7 @@ async function processVisualDiff(
       pixelDifference: -1,
       percentageDifference: '-1',
       metadata: { changedRegions: [] },
+      browser,
       ...plannedDiff,
       ...mainDiff,
     });

@@ -273,6 +273,7 @@ export const builds = sqliteTable('builds', {
   teardownError: text('teardown_error'),
   teardownDurationMs: integer('teardown_duration_ms'),
   codeChangeTestIds: text('code_change_test_ids', { mode: 'json' }).$type<string[]>(),
+  browsers: text('browsers', { mode: 'json' }).$type<string[]>(), // browsers used in this build
   createdAt: integer('created_at', { mode: 'timestamp' }),
   completedAt: integer('completed_at', { mode: 'timestamp' }),
 });
@@ -310,6 +311,7 @@ export const visualDiffs = sqliteTable('visual_diffs', {
   aiAnalysis: text('ai_analysis', { mode: 'json' }).$type<AIDiffAnalysis>(),
   aiRecommendation: text('ai_recommendation'), // 'approve' | 'review' | 'flag' | null
   aiAnalysisStatus: text('ai_analysis_status'), // 'pending' | 'running' | 'completed' | 'failed' | 'skipped' | null
+  browser: text('browser').default('chromium'), // browser used for this diff
 });
 
 // Baselines for carry-forward logic
@@ -323,6 +325,7 @@ export const baselines = sqliteTable('baselines', {
   approvedFromDiffId: text('approved_from_diff_id').references(() => visualDiffs.id),
   branch: text('branch').notNull(),
   isActive: integer('is_active', { mode: 'boolean' }).default(true),
+  browser: text('browser').default('chromium'), // browser this baseline applies to
   createdAt: integer('created_at', { mode: 'timestamp' }),
 });
 
@@ -389,6 +392,7 @@ export type VisualDiffWithTestStatus = VisualDiff & {
   stepLabel?: string | null;
   errorMessage?: string | null;
   a11yViolations?: A11yViolation[] | null;
+  browser?: string | null;
 };
 export type NewVisualDiff = typeof visualDiffs.$inferInsert;
 export type Baseline = typeof baselines.$inferSelect;
@@ -530,6 +534,7 @@ export const playwrightSettings = sqliteTable('playwright_settings', {
   grantClipboardAccess: integer('grant_clipboard_access', { mode: 'boolean' }).default(false), // grant clipboard-read/write permissions
   acceptDownloads: integer('accept_downloads', { mode: 'boolean' }).default(false), // accept file downloads in tests
   enableNetworkInterception: integer('enable_network_interception', { mode: 'boolean' }).default(false), // enable page.route() network mocking
+  browsers: text('browsers', { mode: 'json' }).$type<string[]>().default(['chromium']), // browsers to use for build execution
   createdAt: integer('created_at', { mode: 'timestamp' }),
   updatedAt: integer('updated_at', { mode: 'timestamp' }),
 });

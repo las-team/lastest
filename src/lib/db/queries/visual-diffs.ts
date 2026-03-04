@@ -63,6 +63,7 @@ export async function getVisualDiffsWithTestStatus(buildId: string) {
       testName: tests.name,
       functionalAreaName: functionalAreas.name,
       a11yViolations: testResults.a11yViolations,
+      browser: visualDiffs.browser,
     })
     .from(visualDiffs)
     .leftJoin(testResults, eq(visualDiffs.testResultId, testResults.id))
@@ -149,7 +150,7 @@ export async function getPendingAIApprovableDiffs(buildId: string) {
  * 2. Default branch baseline (if defaultBranch provided)
  * 3. Any active baseline (legacy fallback)
  */
-export async function getActiveBaseline(testId: string, stepLabel?: string | null, branch?: string, defaultBranch?: string) {
+export async function getActiveBaseline(testId: string, stepLabel?: string | null, branch?: string, defaultBranch?: string, browser: string = 'chromium') {
   const stepConditions = stepLabel
     ? [eq(baselines.stepLabel, stepLabel)]
     : [isNull(baselines.stepLabel)];
@@ -163,6 +164,7 @@ export async function getActiveBaseline(testId: string, stepLabel?: string | nul
         eq(baselines.testId, testId),
         eq(baselines.isActive, true),
         eq(baselines.branch, branch),
+        eq(baselines.browser, browser),
         ...stepConditions,
       ))
       .orderBy(desc(baselines.createdAt))
@@ -179,6 +181,7 @@ export async function getActiveBaseline(testId: string, stepLabel?: string | nul
         eq(baselines.testId, testId),
         eq(baselines.isActive, true),
         eq(baselines.branch, defaultBranch),
+        eq(baselines.browser, browser),
         ...stepConditions,
       ))
       .orderBy(desc(baselines.createdAt))
@@ -186,13 +189,14 @@ export async function getActiveBaseline(testId: string, stepLabel?: string | nul
     if (mainBaseline) return mainBaseline;
   }
 
-  // 3. Legacy fallback — any active baseline
+  // 3. Legacy fallback — any active baseline for this browser
   return db
     .select()
     .from(baselines)
     .where(and(
       eq(baselines.testId, testId),
       eq(baselines.isActive, true),
+      eq(baselines.browser, browser),
       ...stepConditions,
     ))
     .orderBy(desc(baselines.createdAt))
@@ -202,7 +206,7 @@ export async function getActiveBaseline(testId: string, stepLabel?: string | nul
 /**
  * Get baseline for a specific branch only (no fallback)
  */
-export async function getBranchBaseline(testId: string, stepLabel: string | null | undefined, branch: string) {
+export async function getBranchBaseline(testId: string, stepLabel: string | null | undefined, branch: string, browser: string = 'chromium') {
   const stepConditions = stepLabel
     ? [eq(baselines.stepLabel, stepLabel)]
     : [isNull(baselines.stepLabel)];
@@ -214,6 +218,7 @@ export async function getBranchBaseline(testId: string, stepLabel: string | null
       eq(baselines.testId, testId),
       eq(baselines.isActive, true),
       eq(baselines.branch, branch),
+      eq(baselines.browser, browser),
       ...stepConditions,
     ))
     .orderBy(desc(baselines.createdAt))
@@ -235,11 +240,12 @@ export async function getBaselinesByBranch(repositoryId: string, branch: string)
     .all();
 }
 
-export async function getBaselineByHash(testId: string, imageHash: string, stepLabel?: string | null) {
+export async function getBaselineByHash(testId: string, imageHash: string, stepLabel?: string | null, browser: string = 'chromium') {
   const conditions = [
     eq(baselines.testId, testId),
     eq(baselines.imageHash, imageHash),
     eq(baselines.isActive, true),
+    eq(baselines.browser, browser),
   ];
   if (stepLabel) {
     conditions.push(eq(baselines.stepLabel, stepLabel));
@@ -262,7 +268,7 @@ export async function createBaseline(data: Omit<NewBaseline, 'id'>) {
 /**
  * Deactivate baselines. If branch is provided, only deactivates for that branch.
  */
-export async function deactivateBaselines(testId: string, stepLabel?: string | null, branch?: string) {
+export async function deactivateBaselines(testId: string, stepLabel?: string | null, branch?: string, browser?: string) {
   const conditions = [eq(baselines.testId, testId)];
   if (stepLabel) {
     conditions.push(eq(baselines.stepLabel, stepLabel));
@@ -271,6 +277,9 @@ export async function deactivateBaselines(testId: string, stepLabel?: string | n
   }
   if (branch) {
     conditions.push(eq(baselines.branch, branch));
+  }
+  if (browser) {
+    conditions.push(eq(baselines.browser, browser));
   }
   await db
     .update(baselines)

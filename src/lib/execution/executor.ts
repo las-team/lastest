@@ -231,6 +231,7 @@ async function executeSetupViaRunner(
   viewport?: { width: number; height: number },
   timeout?: number,
   playwrightSettings?: PlaywrightSettings | null,
+  browser?: 'chromium' | 'firefox' | 'webkit',
 ): Promise<{ storageState?: string; variables?: Record<string, unknown> }> {
   const setupTimeout = timeout || 120000;
 
@@ -242,6 +243,7 @@ async function executeSetupViaRunner(
     timeout: setupTimeout,
     viewport,
     stabilization: buildStabilizationPayload(playwrightSettings),
+    browser,
   });
 
   console.log(`[Executor] Queuing setup command ${command.id.slice(0, 8)} for runner ${runnerId}`);
@@ -408,6 +410,7 @@ async function executeViaRunner(
         setupVariables: options.setupContext?.variables,
         cursorPlaybackSpeed: options.playwrightSettings?.cursorPlaybackSpeed ?? 1,
         stabilization: buildStabilizationPayload(options.playwrightSettings, test.stabilizationOverrides),
+        browser: (options.playwrightSettings?.browser as 'chromium' | 'firefox' | 'webkit') || undefined,
       });
 
       // Queue command to DB

@@ -140,6 +140,7 @@ export function BuildDetailClient({
   const [viewMode, setViewMode] = useState<'branch' | 'main'>(isMainBranch ? 'branch' : 'main');
   const [groupByArea, setGroupByArea] = useState(false);
   const [groupByTest, setGroupByTest] = useState(true);
+  const [browserFilter, setBrowserFilter] = useState<string | null>(null);
   const [expandKey, setExpandKey] = useState(0);
   const [allExpanded, setAllExpanded] = useState(true);
   const router = useRouter();
@@ -173,8 +174,24 @@ export function BuildDetailClient({
     });
   }, [diffs]);
 
-  // Apply filter to sorted diffs
-  const filteredDiffs = filterDiffs(sortedDiffs, activeFilter);
+  // Detect available browsers from diffs
+  const availableBrowsers = useMemo(() => {
+    const set = new Set<string>();
+    for (const d of diffs) {
+      set.add(d.browser || 'chromium');
+    }
+    return Array.from(set).sort();
+  }, [diffs]);
+  const hasMultipleBrowsers = availableBrowsers.length > 1;
+
+  // Apply filter to sorted diffs (status filter + browser filter)
+  const filteredDiffs = useMemo(() => {
+    let result = filterDiffs(sortedDiffs, activeFilter);
+    if (browserFilter) {
+      result = result.filter(d => (d.browser || 'chromium') === browserFilter);
+    }
+    return result;
+  }, [sortedDiffs, activeFilter, browserFilter]);
 
   // Group diffs by functional area
   const groupedDiffs = useMemo(() => {
@@ -350,6 +367,39 @@ export function BuildDetailClient({
                 onClick={() => setActiveFilter('all')}
               >
                 <span>Showing: {filterLabels[activeFilter]}</span>
+                <XIcon className="w-3 h-3" />
+              </Badge>
+            )}
+
+            {hasMultipleBrowsers && (
+              <div className="flex items-center gap-1">
+                <button
+                  onClick={() => setBrowserFilter(null)}
+                  className={`px-2 py-1 text-xs rounded-md transition-colors ${
+                    browserFilter === null ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground hover:bg-muted/80'
+                  }`}
+                >
+                  All browsers
+                </button>
+                {availableBrowsers.map(b => (
+                  <button
+                    key={b}
+                    onClick={() => setBrowserFilter(b)}
+                    className={`px-2 py-1 text-xs rounded-md transition-colors ${
+                      browserFilter === b ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground hover:bg-muted/80'
+                    }`}
+                  >
+                    {b === 'webkit' ? 'Safari' : b === 'firefox' ? 'Firefox' : 'Chromium'}
+                  </button>
+                ))}
+              </div>
+            )}
+            {browserFilter && (
+              <Badge
+                className="cursor-pointer gap-1 bg-primary/10 text-primary border-primary/20 hover:bg-primary/20"
+                onClick={() => setBrowserFilter(null)}
+              >
+                <span>Browser: {browserFilter === 'webkit' ? 'Safari' : browserFilter === 'firefox' ? 'Firefox' : 'Chromium'}</span>
                 <XIcon className="w-3 h-3" />
               </Badge>
             )}
@@ -703,6 +753,11 @@ function DiffRow({
                     ? `${displayPixels.toLocaleString()}px diff`
                     : 'No changes'}
             </span>
+            {diff.browser && diff.browser !== 'chromium' && (
+              <Badge variant="outline" className="text-xs px-1.5 py-0">
+                {diff.browser === 'webkit' ? 'Safari' : diff.browser}
+              </Badge>
+            )}
             <span className="text-muted-foreground/40 text-xs font-mono">
               {diff.testId.slice(0, 8)}
             </span>

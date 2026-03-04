@@ -36,6 +36,7 @@ export async function savePlaywrightSettings(data: {
   grantClipboardAccess?: boolean;
   acceptDownloads?: boolean;
   enableNetworkInterception?: boolean;
+  browsers?: string[];
 }) {
   if (data.repositoryId) await requireRepoAccess(data.repositoryId);
   else await requireTeamAccess();
