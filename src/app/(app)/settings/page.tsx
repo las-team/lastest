@@ -28,7 +28,7 @@ import { PendingInvitations } from '@/components/users/pending-invitations';
 import { InviteUserDialog } from '@/components/users/invite-user-dialog';
 import { RunnerList } from '@/components/runners/runner-list';
 import { CreateRunnerDialog } from '@/components/runners/create-runner-dialog';
-import { getRunners } from '@/server/actions/runners';
+import { getRunners, getSystemRunners } from '@/server/actions/runners';
 import { GoogleSheetsSettingsCard } from '@/components/settings/google-sheets-settings-card';
 import { TestingTemplateSelector } from '@/components/settings/testing-template-selector';
 import { AutoApproveToggle } from '@/components/settings/auto-approve-toggle';
@@ -51,10 +51,11 @@ export default async function SettingsPage({
     teamId ? queries.getGitlabAccountByTeam(teamId) : null,
     teamId ? queries.getSelectedRepository(teamId) : null,
   ]);
-  const [githubActionConfigs, teamRepos, runners] = await Promise.all([
+  const [githubActionConfigs, teamRepos, runners, sysRunners] = await Promise.all([
     teamId ? queries.getGithubActionConfigs(teamId) : [],
     teamId ? queries.getRepositoriesByTeam(teamId) : [],
     getRunners(),
+    getSystemRunners(),
   ]);
   const playwrightSettings = await queries.getPlaywrightSettings(selectedRepo?.id);
   const environmentConfig = await queries.getEnvironmentConfig(selectedRepo?.id);
@@ -447,14 +448,14 @@ export default async function SettingsPage({
                   <CreateRunnerDialog />
                 </CardHeader>
                 <CardContent className="space-y-4">
-                  {runners.length === 0 ? (
+                  {runners.length === 0 && sysRunners.length === 0 ? (
                     <div className="text-center py-4 text-muted-foreground">
                       <Bot className="w-12 h-12 mx-auto mb-4 opacity-50" />
                       <p className="mb-1">No runners configured</p>
                       <p className="text-sm">Create a runner above to get a token, then start it with the CLI.</p>
                     </div>
                   ) : (
-                    <RunnerList runners={runners} />
+                    <RunnerList runners={runners} systemRunners={sysRunners} />
                   )}
 
                   <details open={runners.length === 0 ? true : undefined}>

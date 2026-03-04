@@ -997,6 +997,7 @@ export const runners = sqliteTable('runners', {
   capabilities: text('capabilities', { mode: 'json' }).$type<RunnerCapability[]>().default(['run', 'record']),
   type: text('type').notNull().default('remote'), // 'remote' | 'embedded'
   maxParallelTests: integer('max_parallel_tests').default(1), // max tests to run in parallel on this runner
+  isSystem: integer('is_system', { mode: 'boolean' }).notNull().default(false), // System EB runners (host-provided, cross-team)
   createdAt: integer('created_at', { mode: 'timestamp' }).$defaultFn(() => new Date()),
 });
 

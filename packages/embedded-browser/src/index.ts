@@ -15,20 +15,24 @@ import { EmbeddedTestExecutor } from './test-executor.js';
 import { EmbeddedRecorder } from './embedded-recorder.js';
 import { CROSS_OS_CHROMIUM_ARGS } from './stabilization.js';
 
+import os from 'os';
+
 // Configuration from environment
 const config = {
   serverUrl: process.env.LASTEST2_URL ?? 'http://localhost:3000',
   token: process.env.LASTEST2_TOKEN ?? '',
+  systemToken: process.env.SYSTEM_EB_TOKEN ?? '',
   streamPort: parseInt(process.env.STREAM_PORT ?? '9223', 10),
   streamHost: process.env.STREAM_HOST ?? '', // Public hostname for stream URL (empty = use os.hostname())
   pollInterval: parseInt(process.env.POLL_INTERVAL ?? '1000', 10),
   viewportWidth: parseInt(process.env.VIEWPORT_WIDTH ?? '1280', 10),
   viewportHeight: parseInt(process.env.VIEWPORT_HEIGHT ?? '720', 10),
   streamAuthToken: process.env.STREAM_AUTH_TOKEN,
+  instanceId: os.hostname(),
 };
 
-if (!config.token) {
-  console.error('LASTEST2_TOKEN is required');
+if (!config.token && !config.systemToken) {
+  console.error('Either LASTEST2_TOKEN or SYSTEM_EB_TOKEN is required');
   process.exit(1);
 }
 
@@ -130,10 +134,12 @@ async function startup(): Promise<void> {
   // 5. Connect as runner
   runnerClient = new EmbeddedRunnerClient({
     serverUrl: config.serverUrl,
-    token: config.token,
+    token: config.token || 'pending', // Will be replaced by system registration if systemToken is set
     streamPort: config.streamPort,
     streamHost: config.streamHost,
     pollInterval: config.pollInterval,
+    systemToken: config.systemToken || undefined,
+    instanceId: config.instanceId,
   });
 
   // Initialize test executor and recorder

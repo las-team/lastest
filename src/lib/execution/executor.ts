@@ -8,7 +8,7 @@
  * Mode is determined by EXECUTION_MODE env variable or auto-detected.
  */
 
-import { getExecutionMode, shouldUseLocalRunner } from './mode';
+import { getExecutionMode, shouldUseLocalRunner, isLocalDisabled } from './mode';
 import { getRunner, type TestRunResult, type ProgressCallback } from '@/lib/playwright/runner';
 import type { Test, EnvironmentConfig, PlaywrightSettings, StabilizationSettings } from '@/lib/db/schema';
 import { DEFAULT_STABILIZATION_SETTINGS } from '@/lib/db/schema';
@@ -106,11 +106,22 @@ export async function executeTests(
   onProgress?: (progress: ExecutionProgress) => void,
   onResult?: (result: TestRunResult) => Promise<void>
 ): Promise<TestRunResult[]> {
+  const localDisabled = isLocalDisabled();
+
   // If explicit runnerId is provided, use that routing
   if (options.runnerId) {
     if (options.runnerId === 'local') {
+      if (localDisabled) {
+        console.warn('Local runner disabled, redirecting to fallback chain');
+        return executeFallbackChain(tests, runId, options, onProgress, onResult);
+      }
       console.log('Execution target: local (explicit)');
       return executeLocally(tests, runId, options, onProgress, onResult);
+    }
+
+    if (options.runnerId === 'auto') {
+      console.log('Execution target: auto (fallback chain)');
+      return executeFallbackChain(tests, runId, options, onProgress, onResult);
     }
 
     // Explicit runner ID provided - verify runner is available
@@ -120,9 +131,19 @@ export async function executeTests(
         console.log(`Execution target: runner ${runner.id} (explicit)`);
         return executeViaRunner(tests, runId, runner.id, options, onProgress, onResult);
       }
-      console.warn(`Runner ${options.runnerId} not available, falling back to local`);
+      // Also check system runners (cross-team)
+      const sysRunner = await getAvailableSystemRunnerById(options.runnerId);
+      if (sysRunner) {
+        console.log(`Execution target: system runner ${sysRunner.id} (explicit)`);
+        return executeViaRunner(tests, runId, sysRunner.id, options, onProgress, onResult);
+      }
+      console.warn(`Runner ${options.runnerId} not available, using fallback chain`);
     } else {
-      console.warn('No teamId provided for runner execution, falling back to local');
+      console.warn('No teamId provided for runner execution, using fallback chain');
+    }
+
+    if (localDisabled) {
+      return executeFallbackChain(tests, runId, options, onProgress, onResult);
     }
     return executeLocally(tests, runId, options, onProgress, onResult);
   }
@@ -139,18 +160,27 @@ export async function executeTests(
 
   // Runner mode requires teamId
   if (!options.teamId) {
+    if (localDisabled) {
+      console.warn('No teamId provided and local disabled, using fallback chain');
+      return executeFallbackChain(tests, runId, options, onProgress, onResult);
+    }
     console.warn('No teamId provided for runner mode, falling back to local');
     return executeLocally(tests, runId, options, onProgress, onResult);
   }
 
-  // Check if runner is available
+  // Check if team runner is available
   const runner = await getAvailableRunner(options.teamId);
-  if (!runner) {
-    console.warn('No runner available, falling back to local');
-    return executeLocally(tests, runId, options, onProgress, onResult);
+  if (runner) {
+    return executeViaRunner(tests, runId, runner.id, options, onProgress, onResult);
   }
 
-  return executeViaRunner(tests, runId, runner.id, options, onProgress, onResult);
+  // No team runner — use fallback chain if local disabled
+  if (localDisabled) {
+    return executeFallbackChain(tests, runId, options, onProgress, onResult);
+  }
+
+  console.warn('No runner available, falling back to local');
+  return executeLocally(tests, runId, options, onProgress, onResult);
 }
 
 /**
@@ -643,6 +673,74 @@ async function getAvailableRunnerById(teamId: string, runnerId: string) {
 export async function hasAvailableRunner(teamId: string): Promise<boolean> {
   const runner = await getAvailableRunner(teamId);
   return !!runner;
+}
+
+/**
+ * Get an available system runner (isSystem=true, any team).
+ * System EBs are host-provided and available to all teams.
+ */
+async function getAvailableSystemRunner() {
+  const dbRunner = await db
+    .select()
+    .from(runners)
+    .where(and(eq(runners.isSystem, true), eq(runners.status, 'online')))
+    .limit(1)
+    .get();
+
+  return dbRunner;
+}
+
+/**
+ * Get a specific system runner by ID if it's online.
+ */
+async function getAvailableSystemRunnerById(runnerId: string) {
+  const dbRunner = await db
+    .select()
+    .from(runners)
+    .where(and(eq(runners.id, runnerId), eq(runners.isSystem, true), eq(runners.status, 'online')))
+    .get();
+
+  return dbRunner;
+}
+
+/**
+ * Fallback chain: team runner → system EB → queue.
+ * Used when local execution is disabled (cloud deployment).
+ */
+async function executeFallbackChain(
+  tests: Test[],
+  runId: string,
+  options: ExecutionOptions,
+  onProgress?: (progress: ExecutionProgress) => void,
+  onResult?: (result: TestRunResult) => Promise<void>
+): Promise<TestRunResult[]> {
+  // 1. Try team runner first
+  if (options.teamId) {
+    const teamRunner = await getAvailableRunner(options.teamId);
+    if (teamRunner) {
+      console.log(`Fallback chain: using team runner ${teamRunner.id}`);
+      return executeViaRunner(tests, runId, teamRunner.id, options, onProgress, onResult);
+    }
+  }
+
+  // 2. Try system EB
+  const systemRunner = await getAvailableSystemRunner();
+  if (systemRunner) {
+    console.log(`Fallback chain: using system EB ${systemRunner.id}`);
+    return executeViaRunner(tests, runId, systemRunner.id, options, onProgress, onResult);
+  }
+
+  // 3. Queue — return empty results with "skipped" status
+  // The background job stays pending with targetRunnerId=null.
+  // When a runner comes online, the job processor picks it up.
+  console.log('Fallback chain: no runner available, tests queued for later execution');
+  return tests.map((test) => ({
+    testId: test.id,
+    status: 'skipped' as const,
+    durationMs: 0,
+    screenshots: [],
+    errorMessage: 'Queued: waiting for an available runner',
+  }));
 }
 
 /**

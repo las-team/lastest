@@ -1,8 +1,8 @@
 'use server';
 
 import { db } from '@/lib/db';
-import { runners, type Runner, type RunnerCapability, type RunnerType } from '@/lib/db/schema';
-import { eq, and, desc } from 'drizzle-orm';
+import { runners, backgroundJobs, type Runner, type RunnerCapability, type RunnerType } from '@/lib/db/schema';
+import { eq, and, desc, isNull } from 'drizzle-orm';
 import { v4 as uuid } from 'uuid';
 import crypto from 'crypto';
 import { requireTeamAdmin, requireTeamAccess } from '@/lib/auth';
@@ -25,14 +25,27 @@ function generateRunnerToken(): string {
 }
 
 /**
- * Get all runners for the current team
+ * Get all runners for the current team (excludes system runners)
  */
 export async function getRunners(): Promise<Runner[]> {
   const session = await requireTeamAccess();
   return db
     .select()
     .from(runners)
-    .where(eq(runners.teamId, session.team.id))
+    .where(and(eq(runners.teamId, session.team.id), eq(runners.isSystem, false)))
+    .orderBy(desc(runners.createdAt))
+    .all();
+}
+
+/**
+ * Get online system runners (host-provided EBs, available to all teams).
+ * No auth required — these are visible to any authenticated user.
+ */
+export async function getSystemRunners(): Promise<Runner[]> {
+  return db
+    .select()
+    .from(runners)
+    .where(eq(runners.isSystem, true))
     .orderBy(desc(runners.createdAt))
     .all();
 }
@@ -238,7 +251,43 @@ export async function updateRunnerStatus(
       previousStatus: previousStatus as 'online' | 'offline' | 'busy' | undefined,
       timestamp: Date.now(),
     });
+
+    // When a runner comes online, check for pending queued jobs
+    if (status === 'online') {
+      pickUpQueuedJobs(runnerId).catch((err) => {
+        console.error(`[Runner ${runnerId}] Error picking up queued jobs:`, err);
+      });
+    }
   }
+}
+
+/**
+ * Pick up pending background jobs that have no assigned runner.
+ * Called when a runner transitions to 'online'.
+ */
+async function pickUpQueuedJobs(runnerId: string): Promise<void> {
+  // Find first pending job with no target runner (queued because no runner was available)
+  const pendingJob = await db
+    .select()
+    .from(backgroundJobs)
+    .where(
+      and(
+        eq(backgroundJobs.status, 'pending'),
+        isNull(backgroundJobs.targetRunnerId),
+      )
+    )
+    .limit(1)
+    .get();
+
+  if (!pendingJob) return;
+
+  // Assign this runner to the job
+  await db
+    .update(backgroundJobs)
+    .set({ targetRunnerId: runnerId })
+    .where(eq(backgroundJobs.id, pendingJob.id));
+
+  console.log(`[Runner ${runnerId}] Picked up queued job ${pendingJob.id} (${pendingJob.type}: ${pendingJob.label})`);
 }
 
 /**
@@ -304,16 +353,29 @@ export async function getOnlineRunnersWithCapability(capability?: RunnerCapabili
 }
 
 /**
- * Get all runners filtered by capability (for UI selection with offline shown as disabled)
+ * Get all runners filtered by capability (for UI selection with offline shown as disabled).
+ * Includes both team runners and system runners.
  */
 export async function getRunnersWithCapability(capability?: RunnerCapability): Promise<Runner[]> {
   const session = await requireTeamAccess();
-  const allRunners = await db
+
+  // Get team's own runners (non-system)
+  const teamRunners = await db
     .select()
     .from(runners)
-    .where(eq(runners.teamId, session.team.id))
+    .where(and(eq(runners.teamId, session.team.id), eq(runners.isSystem, false)))
     .orderBy(desc(runners.createdAt))
     .all();
+
+  // Get system runners (cross-team)
+  const systemRunners = await db
+    .select()
+    .from(runners)
+    .where(eq(runners.isSystem, true))
+    .orderBy(desc(runners.createdAt))
+    .all();
+
+  const allRunners = [...teamRunners, ...systemRunners];
 
   // Filter by capability if specified
   if (capability) {

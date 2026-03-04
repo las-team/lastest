@@ -8,6 +8,12 @@ Network Interception
 ## features
 Safari/FF Other browser runs
 MCP server
+Embedded browser across multiple teams
+Registration notification
+TOC
+Auto-runner select
+EB fullscreen overlay
+
 ## ideas
 Test coverage assessment and recreation based on existing test set
 Tweet about us

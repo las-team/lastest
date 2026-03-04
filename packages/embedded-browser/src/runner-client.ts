@@ -50,6 +50,10 @@ export interface EmbeddedRunnerOptions {
   streamPort: number;
   streamHost?: string;
   pollInterval?: number;
+  /** System EB shared token — if set, uses /api/embedded/auto-register instead */
+  systemToken?: string;
+  /** Container instance ID (os.hostname()) for system registration */
+  instanceId?: string;
 }
 
 export class EmbeddedRunnerClient {
@@ -65,6 +69,8 @@ export class EmbeddedRunnerClient {
   private status: 'idle' | 'busy' = 'idle';
   private currentTask?: string;
   private wakeHeartbeat: (() => void) | null = null;
+  private systemToken?: string;
+  private instanceId?: string;
 
   /** Called when the main app sends a command (test/recording) */
   onCommand?: (command: BaseMessage) => Promise<void>;
@@ -75,6 +81,8 @@ export class EmbeddedRunnerClient {
     this.streamPort = options.streamPort;
     this.streamHost = options.streamHost || '';
     this.pollInterval = options.pollInterval ?? 1000;
+    this.systemToken = options.systemToken;
+    this.instanceId = options.instanceId;
   }
 
   /**
@@ -156,13 +164,65 @@ export class EmbeddedRunnerClient {
     }
   }
 
+  /**
+   * Register as a system EB via shared SYSTEM_EB_TOKEN.
+   * The server creates/updates a system runner and returns a per-runner token.
+   */
+  async registerAsSystem(): Promise<boolean> {
+    try {
+      const hostname = this.streamHost || os.hostname();
+      const streamUrl = `ws://${hostname}:${this.streamPort}`;
+      const containerUrl = `http://${hostname}:${this.streamPort}`;
+
+      const response = await fetch(`${this.serverUrl}/api/embedded/auto-register`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${this.systemToken}`,
+        },
+        body: JSON.stringify({
+          streamUrl,
+          containerUrl,
+          viewport: { width: 1280, height: 720 },
+          instanceId: this.instanceId || os.hostname(),
+        }),
+      });
+
+      if (!response.ok) {
+        const text = await response.text();
+        console.error(`[EmbeddedRunner] System registration failed: ${response.status} ${text}`);
+        return false;
+      }
+
+      const data = (await response.json()) as { runnerId: string; token: string; sessionId: string };
+      this.runnerId = data.runnerId;
+      this.embeddedSessionId = data.sessionId;
+      // Replace token with the per-runner token for heartbeats
+      this.token = data.token;
+
+      console.log(`[EmbeddedRunner] System registered: runner=${data.runnerId}, session=${data.sessionId}`);
+      return true;
+    } catch (error) {
+      console.error('[EmbeddedRunner] System registration error:', error);
+      return false;
+    }
+  }
+
   async start(): Promise<void> {
     this.running = true;
 
-    // Register first
-    const registered = await this.register();
-    if (!registered) {
-      throw new Error('Failed to register embedded browser');
+    if (this.systemToken) {
+      // System EB mode: auto-register via shared token
+      const registered = await this.registerAsSystem();
+      if (!registered) {
+        throw new Error('Failed to register as system embedded browser');
+      }
+    } else {
+      // Standard mode: register via per-runner LASTEST2_TOKEN
+      const registered = await this.register();
+      if (!registered) {
+        throw new Error('Failed to register embedded browser');
+      }
     }
 
     // Then connect as a runner

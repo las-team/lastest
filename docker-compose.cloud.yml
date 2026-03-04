@@ -1,40 +1,38 @@
 # =============================================================================
-# Lastest2 - Docker Compose for Home Server Deployment
+# Lastest2 - Cloud Deployment with Embedded Browser Replicas
 # =============================================================================
 #
-# Quick start:
-#   docker-compose up -d
+# Usage:
+#   SYSTEM_EB_TOKEN=<secret> BETTER_AUTH_SECRET=<secret> docker compose -f docker-compose.cloud.yml up -d
 #
-# View logs:
-#   docker-compose logs -f
+# The main app runs with DISABLE_LOCAL_RUNNER=true.
+# Embedded browsers auto-register as system runners via SYSTEM_EB_TOKEN.
+# Users connect their own remote runners; system EBs serve as fallback.
 #
-# Stop:
-#   docker-compose down
+# Fallback chain: team runner → system EB → queue and wait
 #
 # =============================================================================
 
 services:
   lastest2:
     image: ewyc/lastest:latest
-    build:
-      context: .
-      dockerfile: Dockerfile
     container_name: lastest2
     ports:
       - "3000:3000"
     volumes:
       - lastest2-data:/app/data
       - lastest2-storage:/app/storage
-      - lastest2-claude-auth:/home/nextjs/.claude
     environment:
       - NODE_ENV=production
       - DATABASE_PATH=/app/data/lastest2.db
+      - EXECUTION_MODE=runner
+      - DISABLE_LOCAL_RUNNER=true
+      - SYSTEM_EB_TOKEN=${SYSTEM_EB_TOKEN:?SYSTEM_EB_TOKEN is required}
       - BETTER_AUTH_SECRET=${BETTER_AUTH_SECRET:?BETTER_AUTH_SECRET is required}
       - GITHUB_CLIENT_ID=${GITHUB_CLIENT_ID:-}
       - GITHUB_CLIENT_SECRET=${GITHUB_CLIENT_SECRET:-}
       - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID:-}
       - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET:-}
-      - LASTEST2_TOKEN=${LASTEST2_TOKEN:-}
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "wget", "-q", "--spider", "http://localhost:3000/api/health"]
@@ -42,6 +40,24 @@ services:
       timeout: 10s
       retries: 3
       start_period: 60s
+    networks:
+      - lastest2-net
+
+  embedded-browser:
+    image: ewyc/lastest-eb:latest
+    build:
+      context: .
+      dockerfile: packages/embedded-browser/Dockerfile
+    deploy:
+      replicas: 5
+    environment:
+      - LASTEST2_URL=http://lastest2:3000
+      - SYSTEM_EB_TOKEN=${SYSTEM_EB_TOKEN:?SYSTEM_EB_TOKEN is required}
+      - STREAM_PORT=9223
+    depends_on:
+      lastest2:
+        condition: service_healthy
+    restart: unless-stopped
     networks:
       - lastest2-net
 
@@ -53,6 +69,4 @@ volumes:
   lastest2-data:
     driver: local
   lastest2-storage:
-    driver: local
-  lastest2-claude-auth:
     driver: local
