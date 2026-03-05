@@ -12,7 +12,7 @@ import {
   createEnhancePrompt,
   extractCodeFromResponse,
 } from '@/lib/ai';
-import type { AIProviderConfig, TestGenerationContext, ScanContext, DiscoverySource } from '@/lib/ai/types';
+import type { AIProviderConfig, TestGenerationContext, ScanContext, DiscoverySource, CodebaseIntelligenceContext } from '@/lib/ai/types';
 import { revalidatePath } from 'next/cache';
 import { getCurrentBranchForRepo } from '@/lib/git-utils';
 
@@ -99,7 +99,8 @@ export async function aiCreateTest(
 export async function aiFixTest(
   repositoryId: string,
   testId: string,
-  errorMessage: string
+  errorMessage: string,
+  codebaseIntelligence?: CodebaseIntelligenceContext,
 ): Promise<{ success: boolean; code?: string; error?: string }> {
   await requireRepoAccess(repositoryId);
   try {
@@ -112,6 +113,7 @@ export async function aiFixTest(
     const prompt = createFixPrompt({
       existingCode: test.code,
       errorMessage,
+      codebaseIntelligence,
     });
     const response = await generateWithAI(config, prompt, SYSTEM_PROMPT, {
       actionType: 'fix_test',

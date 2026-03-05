@@ -47,6 +47,17 @@ export interface ScanContext {
   functionalAreaDescription?: string;
 }
 
+export interface CodebaseIntelligenceContext {
+  framework?: string;
+  cssFramework?: string;
+  selectorStrategy?: string;
+  authMechanism?: string;
+  projectDescription?: string;
+  testingRecommendations?: string[];
+  stateManagement?: string;
+  apiLayer?: string;
+}
+
 export interface TestGenerationContext {
   targetUrl?: string;
   routePath?: string;
@@ -57,6 +68,7 @@ export interface TestGenerationContext {
   isDynamicRoute?: boolean;
   siblingRoutes?: string[];
   scanContext?: ScanContext;
+  codebaseIntelligence?: CodebaseIntelligenceContext;
 }
 
 export interface GeneratedTest {

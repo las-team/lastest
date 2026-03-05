@@ -2,7 +2,7 @@
 
 import * as queries from '@/lib/db/queries';
 import { generateWithAI, createRouteScanPrompt, createMCPExploreRoutesPrompt, createCodeDiffScanPrompt, SYSTEM_PROMPT, MCP_SYSTEM_PROMPT } from '@/lib/ai';
-import type { AIProviderConfig } from '@/lib/ai/types';
+import type { AIProviderConfig, CodebaseIntelligenceContext } from '@/lib/ai/types';
 import { revalidatePath } from 'next/cache';
 import { getRepoTree, getFileContent, compareBranches, type TreeEntry } from '@/lib/github/content';
 import { createJob, completeJob, failJob } from './jobs';
@@ -206,7 +206,8 @@ async function getCodebaseContext(
 
 export async function aiScanRoutes(
   repositoryId: string,
-  branch: string
+  branch: string,
+  intelligence?: CodebaseIntelligenceContext,
 ): Promise<{ success: boolean; functionalAreas?: DiscoveredArea[]; error?: string }> {
   const { repo } = await requireRepoAccess(repositoryId);
   const jobId = await createJob('ai_scan', 'AI Route Scan', undefined, repositoryId);
@@ -230,7 +231,7 @@ export async function aiScanRoutes(
       return { success: false, error: 'Could not read codebase structure' };
     }
 
-    const prompt = createRouteScanPrompt(codebaseContext, repo.fullName);
+    const prompt = createRouteScanPrompt(codebaseContext, repo.fullName, intelligence);
     const response = await generateWithAI(config, prompt, SYSTEM_PROMPT, {
       actionType: 'scan_routes',
       repositoryId,
@@ -269,7 +270,8 @@ export async function aiScanRoutes(
 
 export async function mcpExploreRoutes(
   repositoryId: string,
-  baseURL: string
+  baseURL: string,
+  intelligence?: CodebaseIntelligenceContext,
 ): Promise<{ success: boolean; functionalAreas?: DiscoveredArea[]; error?: string }> {
   await requireRepoAccess(repositoryId);
   try {
@@ -279,7 +281,7 @@ export async function mcpExploreRoutes(
     const existingRoutes = await queries.getRoutesByRepo(repositoryId);
     const existingPaths = existingRoutes.map((r) => r.path);
 
-    const prompt = createMCPExploreRoutesPrompt(baseURL, existingPaths);
+    const prompt = createMCPExploreRoutesPrompt(baseURL, existingPaths, intelligence);
     const response = await generateWithAI(config, prompt, MCP_SYSTEM_PROMPT, {
       actionType: 'mcp_explore',
       repositoryId,

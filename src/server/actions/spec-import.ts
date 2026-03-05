@@ -9,7 +9,7 @@ import {
   SYSTEM_PROMPT,
   MCP_SYSTEM_PROMPT,
 } from '@/lib/ai';
-import type { AIProviderConfig } from '@/lib/ai/types';
+import type { AIProviderConfig, CodebaseIntelligenceContext } from '@/lib/ai/types';
 import type { ExtractedUserStory, ExtractedAcceptanceCriterion } from '@/lib/db/schema';
 import { revalidatePath } from 'next/cache';
 import { getRepoTree, getFileContent, compareBranches } from '@/lib/github/content';
@@ -385,6 +385,7 @@ export async function generateTestsFromStories(
   options?: {
     useBranchContext?: boolean;
     targetUrl?: string;
+    codebaseIntelligence?: CodebaseIntelligenceContext;
   }
 ): Promise<GenerateTestsResponse> {
   await requireRepoAccess(repositoryId);
@@ -450,6 +451,7 @@ export async function generateTestsFromStories(
           userStoryDescription: story.description,
           targetUrl: options?.targetUrl,
           branchChanges: branchChanges || undefined,
+          codebaseIntelligence: options?.codebaseIntelligence,
         });
 
         try {

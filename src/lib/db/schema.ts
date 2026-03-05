@@ -121,6 +121,7 @@ export const tests = sqliteTable('tests', {
   teardownOverrides: text('teardown_overrides', { mode: 'json' }).$type<TestTeardownOverrides>(),
   stabilizationOverrides: text('stabilization_overrides', { mode: 'json' }).$type<Partial<StabilizationSettings>>(),
   requiredCapabilities: text('required_capabilities', { mode: 'json' }).$type<TestRequiredCapabilities>(),
+  viewportOverride: text('viewport_override', { mode: 'json' }).$type<{ width: number; height: number }>(),
   deletedAt: integer('deleted_at', { mode: 'timestamp' }),
   createdAt: integer('created_at', { mode: 'timestamp' }),
   updatedAt: integer('updated_at', { mode: 'timestamp' }),

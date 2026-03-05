@@ -405,7 +405,7 @@ async function executeViaRunner(
         screenshotPath: `${runId}-${test.id}.png`,
         timeout: testTimeout,
         repositoryId: options.repositoryId || undefined,
-        viewport,
+        viewport: test.viewportOverride || viewport,
         storageState: options.setupContext?.storageState,
         setupVariables: options.setupContext?.variables,
         cursorPlaybackSpeed: options.playwrightSettings?.cursorPlaybackSpeed ?? 1,
