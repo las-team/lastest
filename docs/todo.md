@@ -6,11 +6,8 @@ Teardown
 Accept Downloads
 Network Interception
 ## features
-MCP server
-Registration notification
-TOC
-EB fullscreen overlay
-
+GH runner setup - test
+Project/repo wo github
 ## ideas
 Test coverage assessment and recreation based on existing test set
 Tweet about us

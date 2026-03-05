@@ -490,41 +490,28 @@ Extract User Stories and Acceptance Criteria with the following rules:
 1. Each distinct feature or capability should be its own User Story
 2. Each User Story should have clear, testable Acceptance Criteria
 3. Group related ACs under the same User Story
-4. If an AC is complex enough to warrant multiple tests, split it
-5. If multiple ACs are closely related and could be tested together, suggest grouping them
-6. Provide a suggested test name for each AC
+4. Provide a descriptive name for each AC that works as a test name
 
-Return a JSON array with this exact structure:
-[
-  {
-    "id": "US-1",
-    "title": "User Story title (as a functional area name)",
-    "description": "As a [role], I want [feature] so that [benefit]",
-    "acceptanceCriteria": [
-      {
-        "id": "AC-1.1",
-        "description": "Given [context], when [action], then [expected result]",
-        "testName": "Suggested test name for this AC"
-      },
-      {
-        "id": "AC-1.2",
-        "description": "Given [context], when [action], then [expected result]",
-        "testName": "Suggested test name for this AC",
-        "groupedWith": "AC-1.1"
-      }
-    ]
-  }
-]
+Format your response as markdown using this exact structure:
+
+### User Story 1: [Functional area name]
+**As a** [role]
+**I want to** [feature/capability]
+**So that** [benefit/value]
+
+**Acceptance Criteria:**
+- AC1: [Clear, testable criterion that describes expected behavior]
+- AC2: [Another criterion]
+
+### User Story 2: [Next functional area]
+...
 
 Guidelines:
-- User Story titles should be concise and work well as functional area names (e.g., "User Authentication", "Dashboard Analytics")
-- AC descriptions should be specific and testable
-- Use "groupedWith" only when two ACs are so closely related they should be a single test
-- Test names should be descriptive (e.g., "Login with valid credentials", "Dashboard shows correct metrics")
+- User Story titles should be concise functional area names (e.g., "User Authentication", "Dashboard Analytics")
+- AC descriptions should be specific and testable — describe what the user can do or what the system does
 - Extract as many meaningful stories and criteria as the document supports
 - If the document doesn't follow formal US/AC format, infer them from the requirements
-
-Return ONLY the JSON array, no explanations or markdown formatting.`;
+- Each AC should be independently testable`;
 }
 
 export function createBranchAwareTestPrompt(context: {

@@ -94,12 +94,136 @@ function extractJsonArray(text: string): string | null {
     else if (char === ']') {
       depth--;
       if (depth === 0) {
-        return text.slice(start, i + 1);
+        const candidate = text.slice(start, i + 1);
+        try {
+          JSON.parse(candidate);
+          return candidate;
+        } catch {
+          return null; // Balanced brackets but not valid JSON (markdown syntax)
+        }
       }
     }
   }
 
   return null;
+}
+
+/**
+ * Parse user stories from markdown-formatted AI response.
+ * Handles the primary exchange format used across agents.
+ */
+function parseStoriesFromMarkdown(text: string): ExtractedUserStory[] | null {
+  const stories: ExtractedUserStory[] = [];
+
+  // Split on user story headers: ### **User Story N: Title**, ## User Story: Title, ### Title, etc.
+  const storyBlocks = text.split(/(?=^#{1,4}\s+\*{0,2}(?:User Story[^*\n]*?[:]\s*)?)/mi);
+
+  let storyIndex = 0;
+  for (const block of storyBlocks) {
+    if (!block.trim()) continue;
+
+    // Extract title from header
+    const headerMatch = block.match(/^#{1,4}\s+\*{0,2}(?:User Story\s*\d*\s*[:.]?\s*)?(.+?)\*{0,2}\s*$/m);
+    if (!headerMatch) continue;
+
+    const title = headerMatch[1].replace(/\*+/g, '').trim();
+    if (!title) continue;
+
+    storyIndex++;
+    const storyId = `US-${storyIndex}`;
+
+    // Extract "As a / I want to / So that" description
+    const asAMatch = block.match(/\*{0,2}As a\*{0,2}\s+(.+?)(?:\n|$)/i);
+    const iWantMatch = block.match(/\*{0,2}I want(?:\s+to)?\*{0,2}\s+(.+?)(?:\n|$)/i);
+    const soThatMatch = block.match(/\*{0,2}So that\*{0,2}\s+(.+?)(?:\n|$)/i);
+
+    let description = '';
+    if (asAMatch) {
+      description = `As a ${asAMatch[1].replace(/\*+/g, '').trim()}`;
+      if (iWantMatch) description += `, I want to ${iWantMatch[1].replace(/\*+/g, '').trim()}`;
+      if (soThatMatch) description += `, so that ${soThatMatch[1].replace(/\*+/g, '').trim()}`;
+    } else {
+      // Fallback: use first non-header, non-AC paragraph as description
+      const descMatch = block.match(/^#{1,4}[^\n]+\n+((?:(?![-*]\s*AC|Acceptance|#{1,4}\s)[\s\S])+)/);
+      description = descMatch ? descMatch[1].replace(/\*+/g, '').trim() : title;
+    }
+
+    // Extract acceptance criteria from bullet points
+    const criteria: ExtractedAcceptanceCriterion[] = [];
+    // Match: - AC1: desc, - **AC1:** desc, - AC-1.1: desc, - desc (after "Acceptance Criteria" header)
+    const acSection = block.match(/(?:\*{0,2}Acceptance Criteria\*{0,2}:?\s*\n)([\s\S]*?)(?=\n#{1,4}\s|\n\*{0,2}(?:User Story|Priority|Notes)|$)/i);
+    const acText = acSection ? acSection[1] : block;
+
+    const acPattern = /(?:[-*]|\d+[.)]\s)\s*\*{0,2}(?:AC[-. ]?\d+(?:\.\d+)?)\*{0,2}[:.]\s*(.+?)(?:\n|$)/gi;
+    let acMatch;
+    let acIndex = 0;
+    while ((acMatch = acPattern.exec(acText)) !== null) {
+      acIndex++;
+      const acDesc = acMatch[1].replace(/\*+/g, '').trim();
+      if (!acDesc) continue;
+      criteria.push({
+        id: `AC-${storyIndex}.${acIndex}`,
+        description: `Given the user is on the application, when ${acDesc.toLowerCase()}, then the expected behavior occurs`,
+        testName: acDesc,
+      });
+    }
+
+    // Fallback: plain bullet points after "Acceptance Criteria:" without AC prefix
+    if (criteria.length === 0 && acSection) {
+      const plainBullets = /(?:[-*]|\d+[.)]\s)\s+(.+?)(?:\n|$)/g;
+      let bulletMatch;
+      while ((bulletMatch = plainBullets.exec(acSection[1])) !== null) {
+        acIndex++;
+        const desc = bulletMatch[1].replace(/\*+/g, '').trim();
+        if (!desc || desc.length < 5) continue;
+        criteria.push({
+          id: `AC-${storyIndex}.${acIndex}`,
+          description: desc,
+          testName: desc.length > 60 ? desc.slice(0, 57) + '...' : desc,
+        });
+      }
+    }
+
+    // Last-resort fallback: any bullets in the block after skipping header + description
+    if (criteria.length === 0) {
+      const lines = block.split('\n');
+      let pastHeader = false;
+      let pastDescription = false;
+      for (const line of lines) {
+        if (!pastHeader) {
+          if (/^#{1,4}\s/.test(line)) { pastHeader = true; continue; }
+          continue;
+        }
+        if (!pastDescription) {
+          // Skip blank lines and description text until we hit a bullet
+          if (/^\s*(?:[-*]|\d+[.)])\s+/.test(line)) pastDescription = true;
+          else continue;
+        }
+        const bulletMatch = line.match(/^\s*(?:[-*]|\d+[.)])\s+(.+)/);
+        if (bulletMatch) {
+          acIndex++;
+          const desc = bulletMatch[1].replace(/\*+/g, '').trim();
+          if (!desc || desc.length < 5) continue;
+          criteria.push({
+            id: `AC-${storyIndex}.${acIndex}`,
+            description: desc,
+            testName: desc.length > 60 ? desc.slice(0, 57) + '...' : desc,
+          });
+        }
+      }
+    }
+
+    if (criteria.length > 0) {
+      stories.push({
+        id: storyId,
+        title,
+        description,
+        acceptanceCriteria: criteria,
+      });
+    }
+  }
+
+  return stories.length > 0 ? stories : null;
 }
 
 // ============================================
@@ -259,13 +383,28 @@ async function extractStoriesFromContent(
     repositoryId,
   });
 
-  // Parse JSON response
+  // Parse response — try JSON first, then markdown
+  let stories: ExtractedUserStory[];
   const jsonStr = extractJsonArray(response);
-  if (!jsonStr) {
-    return { success: false, error: 'AI did not return valid JSON' };
+  if (jsonStr) {
+    try {
+      stories = JSON.parse(jsonStr);
+    } catch {
+      // extractJsonArray returned non-JSON — fall through to markdown
+      const parsed = parseStoriesFromMarkdown(response);
+      if (!parsed) {
+        return { success: false, error: 'Could not extract stories from AI response' };
+      }
+      stories = parsed;
+    }
+  } else {
+    // AI returned markdown/prose — parse directly
+    const parsed = parseStoriesFromMarkdown(response);
+    if (!parsed) {
+      return { success: false, error: 'Could not extract stories from AI response' };
+    }
+    stories = parsed;
   }
-
-  const stories: ExtractedUserStory[] = JSON.parse(jsonStr);
 
   // Create import record (non-fatal — stories are still usable if DB tracking fails)
   let importId: string | null = null;
