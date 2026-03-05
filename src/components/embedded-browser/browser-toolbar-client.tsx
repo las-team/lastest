@@ -101,10 +101,12 @@ export function BrowserToolbar({
         </>
       )}
 
-      {/* Fullscreen */}
-      <Button variant="ghost" size="icon" className="h-7 w-7" onClick={onFullscreenToggle} title="Toggle fullscreen">
-        {isFullscreen ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
-      </Button>
+      {/* Fullscreen — hidden when controls are hidden (parent handles fullscreen) */}
+      {!hideControls && (
+        <Button variant="ghost" size="icon" className="h-7 w-7" onClick={onFullscreenToggle} title="Toggle fullscreen">
+          {isFullscreen ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
+        </Button>
+      )}
     </div>
   );
 }

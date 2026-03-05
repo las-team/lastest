@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { usePreferredRunner } from '@/hooks/use-preferred-runner';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -63,6 +63,8 @@ import {
   ShieldCheck,
   Play,
   Download,
+  Maximize2,
+  Minimize2,
 } from 'lucide-react';
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
@@ -294,6 +296,8 @@ export function RecordingClient({
   const [settingsSaveStatus, setSettingsSaveStatus] = useState({ isPending: false, showSaved: false });
   const [embeddedStreamUrl, setEmbeddedStreamUrl] = useState<string | null>(null);
   const [timelineOpen, setTimelineOpen] = useState(true);
+  const [isRecordingFullscreen, setIsRecordingFullscreen] = useState(false);
+  const recordingLayoutRef = useRef<HTMLDivElement>(null);
 
   // Poll for recording status and events when in recording step
   useEffect(() => {
@@ -538,6 +542,26 @@ export function RecordingClient({
     }
   };
 
+  const toggleRecordingFullscreen = useCallback(() => {
+    if (!recordingLayoutRef.current) return;
+    try {
+      if (!isRecordingFullscreen) {
+        recordingLayoutRef.current.requestFullscreen?.();
+      } else if (document.fullscreenElement) {
+        document.exitFullscreen();
+      }
+    } catch {
+      setIsRecordingFullscreen(false);
+    }
+  }, [isRecordingFullscreen]);
+
+  // Sync fullscreen state with browser API
+  useEffect(() => {
+    const handler = () => setIsRecordingFullscreen(!!document.fullscreenElement);
+    document.addEventListener('fullscreenchange', handler);
+    return () => document.removeEventListener('fullscreenchange', handler);
+  }, []);
+
   const handleCancelInspector = async () => {
     if (!inspectorSessionId) return;
 
@@ -609,7 +633,7 @@ export function RecordingClient({
             <CardContent className="py-3">
               <div className="flex items-center gap-2 text-sm text-green-600">
                 <CheckCircle2 className="h-4 w-4" />
-                <span>{playwrightStatus.browser.charAt(0).toUpperCase() + playwrightStatus.browser.slice(1)} browser ready</span>
+                <span>Local Playwright recording available</span>
               </div>
             </CardContent>
           </Card>
@@ -621,7 +645,7 @@ export function RecordingClient({
           <CardContent className="py-3 space-y-3">
             <div className="flex items-center gap-2 text-sm text-destructive">
               <AlertTriangle className="h-4 w-4" />
-              <span>{playwrightStatus.error}</span>
+              <span>Local Playwright recording not available</span>
             </div>
             {playwrightStatus.installCommand && (
               <div className="flex items-center gap-2 p-2 bg-muted rounded font-mono text-xs">
@@ -935,7 +959,7 @@ export function RecordingClient({
     // --- Embedded browser: immersive dark layout ---
     if (embeddedStreamUrl) {
       return (
-        <div className="flex-1 flex flex-col h-full overflow-hidden bg-muted/50">
+        <div ref={recordingLayoutRef} className="flex-1 flex flex-col h-full overflow-hidden bg-muted/50">
           <div className="flex-1 flex min-h-0">
             {/* Browser area — centers in remaining space */}
             <div className="flex-1 relative flex items-center justify-center overflow-auto min-h-0">
@@ -1072,6 +1096,15 @@ export function RecordingClient({
               title="Toggle timeline"
             >
               <ListFilter className="h-4 w-4" />
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-8 w-8"
+              onClick={toggleRecordingFullscreen}
+              title={isRecordingFullscreen ? 'Exit fullscreen' : 'Fullscreen'}
+            >
+              {isRecordingFullscreen ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
             </Button>
             <div className="w-px h-5 bg-border" />
             <Button
