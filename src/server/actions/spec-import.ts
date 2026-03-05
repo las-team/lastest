@@ -62,6 +62,20 @@ async function getAIConfig(repositoryId?: string | null): Promise<AIProviderConf
 
 /** Extract first valid JSON array from text */
 function extractJsonArray(text: string): string | null {
+  // 1. Try extracting from markdown code blocks first (```json ... ``` or ``` ... ```)
+  const codeBlockRegex = /```(?:json)?\s*\n?([\s\S]*?)```/g;
+  let match;
+  while ((match = codeBlockRegex.exec(text)) !== null) {
+    const block = match[1].trim();
+    if (block.startsWith('[')) {
+      try {
+        JSON.parse(block);
+        return block;
+      } catch { /* not valid JSON, try next block */ }
+    }
+  }
+
+  // 2. Fallback: find first top-level [ and match its closing ]
   const start = text.indexOf('[');
   if (start === -1) return null;
 
@@ -71,7 +85,6 @@ function extractJsonArray(text: string): string | null {
 
   for (let i = start; i < text.length; i++) {
     const char = text[i];
-
     if (escape) { escape = false; continue; }
     if (char === '\\' && inString) { escape = true; continue; }
     if (char === '"') { inString = !inString; continue; }

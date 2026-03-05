@@ -326,7 +326,9 @@ async function tryFallbackDiscovery(
   sessionId: string,
   repositoryId: string,
   branch: string,
+  specDetail?: string,
 ): Promise<boolean> {
+  const specLabel = specDetail || 'No spec files found';
   const envConfig = await getEnvironmentConfig(repositoryId);
   const baseUrl = envConfig?.baseUrl || 'http://localhost:3000';
 
@@ -336,7 +338,7 @@ async function tryFallbackDiscovery(
 
   // Fallback 1: AI route scan
   await updateSubsteps(sessionId, 'discover', [
-    { label: 'Finding spec files', status: 'done', detail: 'No spec files found' },
+    { label: 'Finding spec files', status: 'done', detail: specLabel },
     { label: 'AI route scan', status: 'running' },
     { label: 'Generating tests', status: 'pending' },
   ]);
@@ -352,7 +354,7 @@ async function tryFallbackDiscovery(
         const areaCount = new Set(saveResult.savedRoutes.map((r) => r.areaName)).size;
 
         await updateSubsteps(sessionId, 'discover', [
-          { label: 'Finding spec files', status: 'done', detail: 'No spec files found' },
+          { label: 'Finding spec files', status: 'done', detail: specLabel },
           { label: 'AI route scan', status: 'done', detail: `${areaCount} areas, ${totalRoutes} routes` },
           { label: 'Generating tests', status: 'running' },
         ]);
@@ -372,7 +374,7 @@ async function tryFallbackDiscovery(
         }
 
         await updateSubsteps(sessionId, 'discover', [
-          { label: 'Finding spec files', status: 'done', detail: 'No spec files found' },
+          { label: 'Finding spec files', status: 'done', detail: specLabel },
           { label: 'AI route scan', status: 'done', detail: `${areaCount} areas, ${totalRoutes} routes` },
           { label: 'Generating tests', status: 'done', detail: `${testsCreated} tests` },
         ]);
@@ -394,7 +396,7 @@ async function tryFallbackDiscovery(
 
   // Fallback 2: Smoke tests from already-scanned routes
   await updateSubsteps(sessionId, 'discover', [
-    { label: 'Finding spec files', status: 'done', detail: 'No spec files found' },
+    { label: 'Finding spec files', status: 'done', detail: specLabel },
     { label: 'AI route scan', status: 'done', detail: 'No routes discovered' },
     { label: 'Generating smoke tests', status: 'running' },
   ]);
@@ -415,7 +417,7 @@ async function tryFallbackDiscovery(
       }
 
       await updateSubsteps(sessionId, 'discover', [
-        { label: 'Finding spec files', status: 'done', detail: 'No spec files found' },
+        { label: 'Finding spec files', status: 'done', detail: specLabel },
         { label: 'AI route scan', status: 'done', detail: 'No routes discovered' },
         { label: 'Generating smoke tests', status: 'done', detail: `${testsCreated} tests` },
       ]);
@@ -431,7 +433,7 @@ async function tryFallbackDiscovery(
 
   // All fallbacks exhausted
   await updateSubsteps(sessionId, 'discover', [
-    { label: 'Finding spec files', status: 'done', detail: 'No spec files found' },
+    { label: 'Finding spec files', status: 'done', detail: specLabel },
     { label: 'AI route scan', status: 'done', detail: 'No routes discovered' },
     { label: 'Generating smoke tests', status: 'done', detail: 'No routes available' },
   ]);
@@ -482,13 +484,11 @@ async function runDiscover(sessionId: string, repositoryId: string) {
   const storiesResult = await extractUserStoriesFromFiles(repositoryId, branch, filePaths);
 
   if (!storiesResult.success || !storiesResult.stories || storiesResult.stories.length === 0) {
-    await updateSubsteps(sessionId, 'discover', [
-      { label: 'Finding spec files', status: 'done', detail: `${specResult.files.length} files` },
-      { label: 'Extracting user stories', status: 'done', detail: 'No stories extracted' },
-      { label: 'Generating tests', status: 'done', detail: 'Skipped' },
-    ]);
-    await setStepCompleted(sessionId, 'discover', { skipped: true, reason: 'No user stories extracted' });
-    return true;
+    // No stories from specs — fall through to AI scan / smoke test fallbacks
+    return tryFallbackDiscovery(
+      sessionId, repositoryId, branch,
+      `${specResult.files.length} files (no stories extracted)`,
+    );
   }
 
   if (await isCancelled(sessionId)) return false;
@@ -859,6 +859,27 @@ async function runEnvSetup(sessionId: string, repositoryId: string) {
   ]);
 
   const loginDetection = await detectLoginRequired(baseUrl);
+
+  // Check if setup steps already exist — skip login generation to avoid duplicates
+  if (loginDetection.needsLogin) {
+    const existingSteps = await queries.getDefaultSetupSteps(repositoryId);
+    const hasScriptStep = existingSteps.some(s => s.stepType === 'script');
+    if (hasScriptStep) {
+      await updateSubsteps(sessionId, 'env_setup', [
+        { label: 'Checking base URL', status: 'done', detail: `${connResult.responseTime}ms` },
+        { label: 'Detecting login', status: 'done', detail: 'Login required' },
+        { label: 'Login setup', status: 'done', detail: 'Already configured' },
+      ]);
+      await setStepCompleted(sessionId, 'env_setup', {
+        url: baseUrl,
+        responseTime: connResult.responseTime,
+        loginRequired: true,
+        loginSetup: true,
+        existingSetup: true,
+      });
+      return true;
+    }
+  }
 
   if (!loginDetection.needsLogin) {
     // No login needed — done
