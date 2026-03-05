@@ -749,9 +749,11 @@ function DiffRow({
                 ? 'Execution failed'
                 : !hasViewData
                   ? viewMode === 'main' ? 'No main baseline' : 'No branch baseline'
-                  : displayPixels
+                  : displayPixels && displayPixels > 0
                     ? `${displayPixels.toLocaleString()}px diff`
-                    : 'No changes'}
+                    : displayPixels === -1
+                      ? 'Diff error'
+                      : 'No changes'}
             </span>
             {diff.browser && diff.browser !== 'chromium' && (
               <Badge variant="outline" className="text-xs px-1.5 py-0">

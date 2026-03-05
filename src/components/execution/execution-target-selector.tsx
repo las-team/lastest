@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import {
   Select,
   SelectContent,
@@ -14,6 +14,30 @@ import { Monitor, Cloud, Tv2, Zap, Server } from 'lucide-react';
 import type { RunnerCapability } from '@/lib/db/schema';
 import { useRunnerStatus } from './use-runner-status';
 import { persistRunnerPreference } from '@/hooks/use-preferred-runner';
+
+/** Cached config — fetched once per page load */
+let cachedDisableLocal: boolean | null = null;
+
+function useDisableLocalRunner(propOverride?: boolean): boolean {
+  const [disableLocal, setDisableLocal] = useState(propOverride ?? cachedDisableLocal ?? false);
+
+  useEffect(() => {
+    if (propOverride !== undefined) return; // prop takes precedence
+    if (cachedDisableLocal !== null) {
+      setDisableLocal(cachedDisableLocal);
+      return;
+    }
+    fetch('/api/config')
+      .then((r) => r.json())
+      .then((data: { disableLocalRunner?: boolean }) => {
+        cachedDisableLocal = data.disableLocalRunner ?? false;
+        setDisableLocal(cachedDisableLocal);
+      })
+      .catch(() => {}); // fail open — show local option
+  }, [propOverride]);
+
+  return disableLocal;
+}
 
 interface ExecutionTargetSelectorProps {
   value: string;
@@ -32,8 +56,9 @@ export function ExecutionTargetSelector({
   capabilityFilter,
   size = 'default',
   className,
-  disableLocal = false,
+  disableLocal: disableLocalProp,
 }: ExecutionTargetSelectorProps) {
+  const disableLocal = useDisableLocalRunner(disableLocalProp);
   const { runners, isLoading } = useRunnerStatus(capabilityFilter);
 
   const teamRunners = runners.filter((r) => r.type !== 'embedded' && !r.isSystem);

@@ -404,6 +404,72 @@ async function startup(): Promise<void> {
         break;
       }
 
+      case 'command:run_setup': {
+        if (!browser || !testExecutor || !runnerClient) break;
+        const payload = command.payload as {
+          setupId: string; code: string; codeHash: string;
+          targetUrl: string; timeout?: number;
+          viewport?: { width: number; height: number };
+          stabilization?: import('./protocol.js').StabilizationPayload;
+          browser?: string;
+        };
+
+        // Fire-and-forget async (same activeTasks bookkeeping as run_test)
+        const capturedClient = runnerClient;
+        const capturedExecutor = testExecutor;
+        const capturedBrowser = browser;
+        const capturedCommand = command;
+
+        activeTasks++;
+        if (activeTasks === 1) {
+          capturedClient.setStatus('busy', `setup:${payload.setupId}`);
+          streamServer?.broadcastStatus('busy', payload.targetUrl);
+        }
+
+        (async () => {
+          try {
+            const result = await capturedExecutor.runSetup(capturedBrowser, payload);
+
+            await capturedClient.sendMessage({
+              id: crypto.randomUUID(),
+              type: 'response:setup_result',
+              timestamp: Date.now(),
+              payload: {
+                correlationId: capturedCommand.id,
+                status: result.status,
+                storageState: result.storageState,
+                variables: result.variables,
+                durationMs: result.durationMs,
+                error: result.error,
+                logs: result.logs,
+              },
+            });
+          } catch (err) {
+            console.error(`[Command] Setup ${payload.setupId} failed:`, err);
+            // Send failed result so executor doesn't hang
+            await capturedClient.sendMessage({
+              id: crypto.randomUUID(),
+              type: 'response:setup_result',
+              timestamp: Date.now(),
+              payload: {
+                correlationId: capturedCommand.id,
+                status: 'failed',
+                durationMs: 0,
+                error: err instanceof Error ? err.message : String(err),
+                logs: [],
+              },
+            });
+          } finally {
+            activeTasks--;
+            if (activeTasks === 0) {
+              capturedClient.setStatus('idle');
+              streamServer?.broadcastStatus('ready');
+            }
+          }
+        })();
+        break;
+      }
+
       case 'command:ping': {
         await runnerClient?.sendMessage({
           id: crypto.randomUUID(),

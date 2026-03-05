@@ -30,6 +30,26 @@ export interface EmbeddedTestResult {
   screenshots: Array<{ filename: string; data: string; width: number; height: number }>;
 }
 
+export interface EmbeddedSetupResult {
+  status: 'passed' | 'failed' | 'error' | 'timeout';
+  storageState?: string;
+  variables?: Record<string, unknown>;
+  durationMs: number;
+  error?: string;
+  logs: Array<{ timestamp: number; level: string; message: string }>;
+}
+
+export interface RunSetupPayload {
+  setupId: string;
+  code: string;
+  codeHash: string;
+  targetUrl: string;
+  timeout?: number;
+  viewport?: { width: number; height: number };
+  stabilization?: StabilizationPayload;
+  browser?: string;
+}
+
 export interface RunTestPayload {
   testId: string;
   testRunId: string;
@@ -521,6 +541,157 @@ export class EmbeddedTestExecutor {
       // context.close() may have already been called by timeout/cancel handler — that's fine
       await page.close().catch(() => {});
       await testContext.close().catch(() => {});
+    }
+  }
+
+  async runSetup(browser: Browser, command: RunSetupPayload): Promise<EmbeddedSetupResult> {
+    const startTime = Date.now();
+    const logs: Array<{ timestamp: number; level: string; message: string }> = [];
+    const setupTimeout = Math.max(command.timeout || 120000, 30000);
+
+    const logFn = (level: string, message: string) => {
+      logs.push({ timestamp: Date.now(), level, message });
+      console.log(`  [${level.toUpperCase()}] [setup:${command.setupId}] ${message}`);
+    };
+
+    const viewport = command.viewport || { width: 1280, height: 720 };
+    const needsStabilizedContext = command.stabilization?.crossOsConsistency || command.stabilization?.freezeAnimations;
+
+    // No storageState injection — this IS the setup that creates the session
+    const setupContext = await browser.newContext({
+      viewport,
+      ...(needsStabilizedContext ? { deviceScaleFactor: 1 } : {}),
+      ...(needsStabilizedContext ? { locale: 'en-US', timezoneId: 'UTC', colorScheme: 'light' as const } : {}),
+      ...(command.stabilization?.freezeAnimations ? { reducedMotion: 'reduce' as const } : {}),
+    });
+    const page = await setupContext.newPage();
+
+    try {
+      page.setDefaultNavigationTimeout(30000);
+      page.setDefaultTimeout(15000);
+
+      // Setup freeze scripts BEFORE navigation
+      if (command.stabilization) {
+        await setupFreezeScripts(page, command.stabilization);
+        logFn('info', `Stabilization applied`);
+      }
+
+      // Extract function body (same pattern as runTest)
+      const funcMatch = command.code.match(
+        /export\s+async\s+function\s+test\s*\(\s*page[^)]*\)\s*\{([\s\S]*)\}\s*$/
+      );
+
+      let body: string;
+      if (funcMatch) {
+        body = stripTypeAnnotations(funcMatch[1]);
+      } else {
+        body = stripTypeAnnotations(command.code);
+      }
+
+      // Remove test-local function definitions
+      const lwfResult = removeFunctionDefinition(body, 'locateWithFallback');
+      if (lwfResult.removed) body = lwfResult.body;
+      const rcpResult = removeFunctionDefinition(body, 'replayCursorPath');
+      if (rcpResult.removed) body = rcpResult.body;
+
+      // Patch selectAll
+      body = body.replace(/page\.keyboard\.selectAll\(\)/g, "page.keyboard.press('Control+a')");
+
+      // Noop screenshot/stepLogger for setup
+      const noopScreenshot = async () => {};
+      const stepLogger = {
+        log: (msg: string) => logFn('info', `Step: ${msg}`),
+        warn: (msg: string) => logFn('warn', `[WARN] ${msg}`),
+        error: (msg: string) => logFn('error', `Step error: ${msg}`),
+        softExpect: async (fn: () => Promise<void>) => { try { await fn(); } catch { /* soft */ } },
+        softAction: async (fn: () => Promise<void>) => { try { await fn(); } catch { /* soft */ } },
+      };
+
+      logFn('info', 'Executing setup code...');
+
+      // Execute with timeout
+      let timeoutTimer: ReturnType<typeof setTimeout> | undefined;
+      await Promise.race([
+        (async () => {
+          const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
+          const setupFn = new AsyncFunction(
+            'page', 'baseUrl', 'screenshotPath', 'stepLogger',
+            body
+          );
+          await setupFn(page, command.targetUrl.replace(/\/+$/, ''), 'screenshot.png', stepLogger);
+        })().then(r => { clearTimeout(timeoutTimer); return r; }),
+        new Promise<never>((_, reject) => {
+          timeoutTimer = setTimeout(() => {
+            logFn('warn', `Setup timeout fired (${setupTimeout}ms)`);
+            setupContext.close().catch(() => {});
+            reject(new Error(`Setup timed out after ${setupTimeout}ms`));
+          }, setupTimeout);
+        }),
+      ]);
+
+      logFn('info', 'Setup code executed successfully');
+
+      // Wait for post-setup navigation (e.g., login redirect)
+      const setupPageUrl = page.url();
+      try {
+        await page.waitForURL(
+          (url: URL) => url.toString() !== setupPageUrl,
+          { timeout: 10000, waitUntil: 'networkidle' }
+        );
+        logFn('info', `Post-setup navigation: ${setupPageUrl} → ${page.url()}`);
+      } catch {
+        logFn('info', 'No post-setup navigation detected (URL unchanged)');
+      }
+
+      // Poll for session cookies
+      try {
+        const ctx = page.context();
+        const deadline = Date.now() + 5000;
+        while (Date.now() < deadline) {
+          const cookies = await ctx.cookies();
+          const hasSession = cookies.some(c =>
+            c.name.includes('session') || c.name.includes('auth') || c.name.includes('token')
+          );
+          if (hasSession) {
+            logFn('info', `Session cookie found after setup (${cookies.length} total cookies)`);
+            break;
+          }
+          await new Promise(r => setTimeout(r, 200));
+        }
+      } catch {
+        // Cookie polling failed — continue anyway
+      }
+
+      // Capture storageState
+      let storageState: string | undefined;
+      try {
+        const state = await setupContext.storageState();
+        storageState = JSON.stringify(state);
+        logFn('info', `Captured storageState: ${state.cookies.length} cookies, ${state.origins.length} origins`);
+      } catch (e) {
+        logFn('warn', `Failed to capture storageState: ${e}`);
+      }
+
+      return {
+        status: 'passed',
+        storageState,
+        durationMs: Date.now() - startTime,
+        logs,
+      };
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      const isTimeout = errorMessage.includes('timed out');
+      logFn('error', `Setup ${isTimeout ? 'timed out' : 'failed'}: ${errorMessage}`);
+
+      return {
+        status: isTimeout ? 'timeout' : 'failed',
+        durationMs: Date.now() - startTime,
+        error: errorMessage,
+        logs,
+      };
+    } finally {
+      await page.close().catch(() => {});
+      await setupContext.close().catch(() => {});
     }
   }
 

@@ -6,12 +6,9 @@ Teardown
 Accept Downloads
 Network Interception
 ## features
-Safari/FF Other browser runs
 MCP server
-Embedded browser across multiple teams
 Registration notification
 TOC
-Auto-runner select
 EB fullscreen overlay
 
 ## ideas
