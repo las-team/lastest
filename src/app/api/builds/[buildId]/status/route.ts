@@ -59,5 +59,6 @@ export async function GET(
     codeChangeTestIds: build.codeChangeTestIds,
     isMainBranch: build.isMainBranch,
     diffs: build.diffs,
+    errorMessage: build.errorMessage,
   });
 }

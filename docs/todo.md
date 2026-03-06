@@ -6,7 +6,7 @@ Teardown
 Accept Downloads
 Network Interception
 ## features
-GH runner test
+Migrate to gh app /home/ewyct/.claude/plans/cheeky-sparking-torvalds.md
 Stripe
 ## ideas
 Test coverage assessment and recreation based on existing test set

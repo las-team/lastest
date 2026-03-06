@@ -21,6 +21,7 @@ interface BuildData {
   elapsedMs: number | null;
   codeChangeTestIds?: string[] | null;
   diffs: VisualDiffWithTestStatus[];
+  errorMessage?: string | null;
 }
 
 interface BuildPollingWrapperProps {
@@ -80,6 +81,7 @@ export function BuildPollingWrapper({ initialBuild, buildId, isMainBranch = fals
             status={build.overallStatus}
             changesDetected={build.changesDetected}
             isRunning={isRunning}
+            errorMessage={build.errorMessage}
           />
           {children}
         </CardContent>

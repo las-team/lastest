@@ -144,6 +144,24 @@ export async function getRunningJobsForRunner(targetRunnerId: string) {
     .all();
 }
 
+export async function getBackgroundJobByBuildId(buildId: string) {
+  const jobs = await db
+    .select()
+    .from(backgroundJobs)
+    .where(
+      and(
+        eq(backgroundJobs.type, 'build_run'),
+      )
+    )
+    .orderBy(desc(backgroundJobs.createdAt))
+    .all();
+
+  return jobs.find(job => {
+    const meta = job.metadata as { buildId?: string } | null;
+    return meta?.buildId === buildId;
+  }) ?? null;
+}
+
 export async function markStaleJobsAsCrashed(staleThresholdMs = 300000) {
   const threshold = new Date(Date.now() - staleThresholdMs);
   // Check lastActivityAt first (if set), otherwise fall back to startedAt

@@ -138,6 +138,7 @@ export interface BuildSummary {
   codeChangeTestIds: string[] | null;
   isMainBranch: boolean;
   diffs: VisualDiffWithTestStatus[];
+  errorMessage?: string | null;
 }
 
 /**
@@ -1225,6 +1226,15 @@ export async function getBuildSummary(buildId: string): Promise<BuildSummary | n
   const defaultBranch = repo?.defaultBranch || 'main';
   const gitBranch = testRun?.gitBranch || 'unknown';
 
+  // Fetch error message from background job if build is blocked
+  let errorMessage: string | null = null;
+  if (build.overallStatus === 'blocked') {
+    const job = await queries.getBackgroundJobByBuildId(buildId);
+    if (job?.error) {
+      errorMessage = job.error;
+    }
+  }
+
   return {
     id: build.id,
     overallStatus: build.overallStatus as BuildStatus,
@@ -1243,6 +1253,7 @@ export async function getBuildSummary(buildId: string): Promise<BuildSummary | n
     gitBranch,
     gitCommit: testRun?.gitCommit || 'unknown',
     diffs,
+    errorMessage,
   };
 }
 

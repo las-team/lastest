@@ -72,6 +72,7 @@ export default async function BuildPage({ params }: PageProps) {
             elapsedMs: build.elapsedMs,
             codeChangeTestIds: build.codeChangeTestIds,
             diffs: build.diffs,
+            errorMessage: build.errorMessage,
           }}
         >
           {/* Inline: Recent History + Git Info + Actions */}
