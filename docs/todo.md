@@ -6,6 +6,8 @@ Teardown
 Accept Downloads
 Network Interception
 ## features
+GH runner test
+Stripe
 ## ideas
 Test coverage assessment and recreation based on existing test set
 cookie sharing from host machine?
