@@ -1,6 +1,5 @@
 name: Lastest2 Visual Tests
 on:
-  push:
   pull_request:
   workflow_dispatch:
 jobs:

@@ -15,6 +15,9 @@ export interface WorkflowConfig {
 function buildOnBlock(config: WorkflowConfig): string {
   const lines: string[] = ['on:'];
 
+  const hasBoth = config.triggerEvents.includes('push') && config.triggerEvents.includes('pull_request');
+  const noBranchFilter = config.branchFilter.length === 0;
+
   for (const event of config.triggerEvents) {
     if (event === 'schedule') {
       if (config.cronSchedule) {
@@ -25,6 +28,11 @@ function buildOnBlock(config: WorkflowConfig): string {
     }
     if (event === 'workflow_dispatch') {
       lines.push(`  workflow_dispatch:`);
+      continue;
+    }
+    // Skip push when both push and pull_request are selected without branch
+    // filters — otherwise GitHub runs the workflow twice for every PR push.
+    if (event === 'push' && hasBoth && noBranchFilter) {
       continue;
     }
     // push / pull_request
