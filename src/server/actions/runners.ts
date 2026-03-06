@@ -64,15 +64,15 @@ export async function getRunner(runnerId: string): Promise<Runner | null> {
 }
 
 /**
- * Create a new runner (admin only)
- * Returns the runner AND the plain token (only shown once)
+ * Internal runner creation (no auth check — caller must verify permissions).
  */
-export async function createRunner(name: string, capabilities: RunnerCapability[] = ['run', 'record'], type: RunnerType = 'remote'): Promise<{
-  runner: Runner;
-  token: string;
-} | { error: string }> {
-  const session = await requireTeamAdmin();
-
+export async function createRunnerInternal(
+  name: string,
+  teamId: string,
+  createdById: string,
+  capabilities: RunnerCapability[] = ['run', 'record'],
+  type: RunnerType = 'remote',
+): Promise<{ runner: Runner; token: string } | { error: string }> {
   const id = uuid();
   const token = generateRunnerToken();
   const tokenHash = hashToken(token);
@@ -80,8 +80,8 @@ export async function createRunner(name: string, capabilities: RunnerCapability[
 
   await db.insert(runners).values({
     id,
-    teamId: session.team.id,
-    createdById: session.user.id,
+    teamId,
+    createdById,
     name,
     tokenHash,
     status: 'offline',
@@ -96,6 +96,18 @@ export async function createRunner(name: string, capabilities: RunnerCapability[
   }
 
   return { runner, token };
+}
+
+/**
+ * Create a new runner (admin only)
+ * Returns the runner AND the plain token (only shown once)
+ */
+export async function createRunner(name: string, capabilities: RunnerCapability[] = ['run', 'record'], type: RunnerType = 'remote'): Promise<{
+  runner: Runner;
+  token: string;
+} | { error: string }> {
+  const session = await requireTeamAdmin();
+  return createRunnerInternal(name, session.team.id, session.user.id, capabilities, type);
 }
 
 /**

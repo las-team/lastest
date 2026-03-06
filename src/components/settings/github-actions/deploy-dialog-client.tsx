@@ -27,6 +27,7 @@ interface DeployDialogProps {
 type StepStatus = 'pending' | 'loading' | 'success' | 'error';
 
 export function DeployDialog({ open, onOpenChange, config }: DeployDialogProps) {
+  const isEphemeral = config.mode === 'ephemeral';
   const [setSecrets, setSetSecrets] = useState(false);
   const [runnerToken, setRunnerToken] = useState('');
   const [lastest2Url, setLastest2Url] = useState('');
@@ -39,19 +40,27 @@ export function DeployDialog({ open, onOpenChange, config }: DeployDialogProps) 
 
   const handleDeploy = async () => {
     setDeploying(true);
-    setSteps({ workflow: 'loading', tokenSecret: 'pending', urlSecret: 'pending' });
+    setSteps({
+      workflow: 'loading',
+      tokenSecret: isEphemeral ? 'loading' : 'pending',
+      urlSecret: isEphemeral ? 'loading' : 'pending',
+    });
 
     try {
       const results = await deployWorkflowToGithub(config.id, {
-        setSecrets,
-        runnerToken: setSecrets ? runnerToken : undefined,
-        lastest2Url: setSecrets ? lastest2Url : undefined,
+        setSecrets: isEphemeral ? false : setSecrets,
+        runnerToken: !isEphemeral && setSecrets ? runnerToken : undefined,
+        lastest2Url: !isEphemeral && setSecrets ? lastest2Url : undefined,
       });
 
       setSteps({
         workflow: results.workflow ? 'success' : 'error',
-        tokenSecret: !setSecrets ? 'pending' : results.tokenSecret ? 'success' : 'error',
-        urlSecret: !setSecrets ? 'pending' : results.urlSecret ? 'success' : 'error',
+        tokenSecret: isEphemeral
+          ? (results.tokenSecret ? 'success' : 'error')
+          : (!setSecrets ? 'pending' : results.tokenSecret ? 'success' : 'error'),
+        urlSecret: isEphemeral
+          ? (results.urlSecret ? 'success' : 'error')
+          : (!setSecrets ? 'pending' : results.urlSecret ? 'success' : 'error'),
       });
 
       toast.success('Workflow deployed successfully');
@@ -59,6 +68,8 @@ export function DeployDialog({ open, onOpenChange, config }: DeployDialogProps) 
       setSteps((prev) => ({
         ...prev,
         workflow: prev.workflow === 'loading' ? 'error' : prev.workflow,
+        tokenSecret: prev.tokenSecret === 'loading' ? 'error' : prev.tokenSecret,
+        urlSecret: prev.urlSecret === 'loading' ? 'error' : prev.urlSecret,
       }));
       toast.error(err instanceof Error ? err.message : 'Deployment failed');
     } finally {
@@ -74,6 +85,7 @@ export function DeployDialog({ open, onOpenChange, config }: DeployDialogProps) 
   };
 
   const allDone = steps.workflow !== 'pending' && steps.workflow !== 'loading';
+  const showSecretSteps = isEphemeral || setSecrets;
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -93,56 +105,64 @@ export function DeployDialog({ open, onOpenChange, config }: DeployDialogProps) 
             <AlertTriangle className="h-4 w-4 text-amber-500 shrink-0 mt-0.5" />
             <div>
               This will create <code className="font-mono">.github/workflows/lastest2.yml</code> in
-              your repo. GitHub Actions minutes may incur costs on paid plans.
+              your repo.
+              {isEphemeral
+                ? ' A runner token and server URL will be set as repository secrets automatically.'
+                : ' GitHub Actions minutes may incur costs on paid plans.'}
             </div>
           </div>
 
-          <div className="flex items-start gap-2">
-            <Checkbox
-              id="set-secrets"
-              checked={setSecrets}
-              onCheckedChange={(v) => setSetSecrets(v === true)}
-              disabled={deploying}
-            />
-            <Label htmlFor="set-secrets" className="text-sm leading-tight">
-              Also set <code className="text-xs">LASTEST2_TOKEN</code> and{' '}
-              <code className="text-xs">LASTEST2_URL</code> as repository secrets
-            </Label>
-          </div>
+          {/* Persistent mode: let user optionally provide secrets */}
+          {!isEphemeral && (
+            <>
+              <div className="flex items-start gap-2">
+                <Checkbox
+                  id="set-secrets"
+                  checked={setSecrets}
+                  onCheckedChange={(v) => setSetSecrets(v === true)}
+                  disabled={deploying}
+                />
+                <Label htmlFor="set-secrets" className="text-sm leading-tight">
+                  Also set <code className="text-xs">LASTEST2_TOKEN</code> and{' '}
+                  <code className="text-xs">LASTEST2_URL</code> as repository secrets
+                </Label>
+              </div>
 
-          {setSecrets && (
-            <div className="space-y-3 pl-6">
-              <div className="space-y-1.5">
-                <Label htmlFor="runner-token" className="text-xs">
-                  Runner Token
-                </Label>
-                <Input
-                  id="runner-token"
-                  type="password"
-                  placeholder="lastest_runner_..."
-                  value={runnerToken}
-                  onChange={(e) => setRunnerToken(e.target.value)}
-                  disabled={deploying}
-                  className="font-mono text-xs"
-                />
-                <p className="text-xs text-muted-foreground">
-                  Plain tokens are only shown once when created. Create a new runner if needed.
-                </p>
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="lastest2-url" className="text-xs">
-                  Lastest2 URL
-                </Label>
-                <Input
-                  id="lastest2-url"
-                  placeholder="https://your-lastest2-instance.com"
-                  value={lastest2Url}
-                  onChange={(e) => setLastest2Url(e.target.value)}
-                  disabled={deploying}
-                  className="text-xs"
-                />
-              </div>
-            </div>
+              {setSecrets && (
+                <div className="space-y-3 pl-6">
+                  <div className="space-y-1.5">
+                    <Label htmlFor="runner-token" className="text-xs">
+                      Runner Token
+                    </Label>
+                    <Input
+                      id="runner-token"
+                      type="password"
+                      placeholder="lastest_runner_..."
+                      value={runnerToken}
+                      onChange={(e) => setRunnerToken(e.target.value)}
+                      disabled={deploying}
+                      className="font-mono text-xs"
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      Plain tokens are only shown once when created. Create a new runner if needed.
+                    </p>
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label htmlFor="lastest2-url" className="text-xs">
+                      Lastest2 URL
+                    </Label>
+                    <Input
+                      id="lastest2-url"
+                      placeholder="https://your-lastest2-instance.com"
+                      value={lastest2Url}
+                      onChange={(e) => setLastest2Url(e.target.value)}
+                      disabled={deploying}
+                      className="text-xs"
+                    />
+                  </div>
+                </div>
+              )}
+            </>
           )}
 
           {allDone && (
@@ -151,7 +171,7 @@ export function DeployDialog({ open, onOpenChange, config }: DeployDialogProps) 
                 <StepIcon status={steps.workflow} />
                 <span>Workflow file</span>
               </div>
-              {setSecrets && (
+              {showSecretSteps && (
                 <>
                   <div className="flex items-center gap-2 text-sm">
                     <StepIcon status={steps.tokenSecret} />

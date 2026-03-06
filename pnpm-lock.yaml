@@ -226,9 +226,6 @@ importers:
 
   packages/runner:
     dependencies:
-      '@lastest/shared':
-        specifier: workspace:*
-        version: link:../shared
       commander:
         specifier: ^12.0.0
         version: 12.1.0
@@ -236,6 +233,9 @@ importers:
         specifier: 1.57.0
         version: 1.57.0
     devDependencies:
+      '@lastest/shared':
+        specifier: workspace:*
+        version: link:../shared
       '@types/node':
         specifier: ^20.10.0
         version: 20.19.30

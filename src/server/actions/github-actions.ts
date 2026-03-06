@@ -5,6 +5,7 @@ import * as queries from '@/lib/db/queries';
 import type { GithubActionMode, GithubActionTriggerEvent } from '@/lib/db/schema';
 import { generateWorkflowYaml } from '@/lib/github/workflow-yaml';
 import { getWorkflowFileSha, upsertWorkflowFile, setRepoSecret } from '@/lib/github/actions';
+import { createRunnerInternal } from '@/server/actions/runners';
 import { revalidatePath } from 'next/cache';
 
 export async function getGithubActionConfigsAction() {
@@ -72,6 +73,8 @@ export async function deployWorkflowToGithub(
   const config = await queries.getGithubActionConfig(configId, session.team.id);
   if (!config) throw new Error('Config not found');
 
+  const isEphemeral = config.mode === 'ephemeral';
+
   // Get GitHub account for token
   const ghAccount = await queries.getGithubAccountByTeam(session.team.id);
   if (!ghAccount) throw new Error('No GitHub account connected');
@@ -109,8 +112,39 @@ export async function deployWorkflowToGithub(
   );
   results.workflow = true;
 
-  // 2. Optionally set secrets
-  if (opts.setSecrets) {
+  // 2. Set secrets
+  if (isEphemeral) {
+    // Ephemeral mode: auto-create runner and set secrets automatically
+    const repoName = `${config.repositoryOwner}/${config.repositoryName}`;
+    const result = await createRunnerInternal(
+      `gha-${repoName}`,
+      session.team.id,
+      session.user.id,
+      ['run'],
+      'remote',
+    );
+    if ('error' in result) throw new Error(`Failed to create runner: ${result.error}`);
+
+    await setRepoSecret(
+      ghAccount.accessToken,
+      config.repositoryOwner,
+      config.repositoryName,
+      'LASTEST2_TOKEN',
+      result.token,
+    );
+    results.tokenSecret = true;
+
+    const lastest2Url = process.env.NEXT_PUBLIC_APP_URL || process.env.BETTER_AUTH_BASE_URL || 'http://localhost:3000';
+    await setRepoSecret(
+      ghAccount.accessToken,
+      config.repositoryOwner,
+      config.repositoryName,
+      'LASTEST2_URL',
+      lastest2Url,
+    );
+    results.urlSecret = true;
+  } else if (opts.setSecrets) {
+    // Persistent mode: use user-provided values
     if (opts.runnerToken) {
       await setRepoSecret(
         ghAccount.accessToken,
