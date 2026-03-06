@@ -51,7 +51,7 @@ export interface RunTestCommandPayload {
   timeout: number;
   repositoryId?: string; // For screenshot storage location
   viewport?: { width: number; height: number };
-  browser?: string;
+  browser?: 'chromium' | 'firefox' | 'webkit';
   serverConfig?: ServerConfig;
   storageState?: string; // Serialized JSON from page.context().storageState() — carries auth session
   setupVariables?: Record<string, unknown>; // Variables from setup scripts
@@ -71,7 +71,7 @@ export interface RunSetupCommandPayload {
   targetUrl: string;
   timeout: number;
   viewport?: { width: number; height: number };
-  browser?: string;
+  browser?: 'chromium' | 'firefox' | 'webkit';
   stabilization?: StabilizationPayload;
 }
 

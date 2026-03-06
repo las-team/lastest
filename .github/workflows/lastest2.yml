@@ -15,7 +15,7 @@ jobs:
 
       - name: Get Playwright version
         id: playwright-version
-        run: echo "version=$(npx @lastest/runner playwright-version)" >> $GITHUB_OUTPUT
+        run: echo "version=$(npx @lastest/runner@0.4.1 playwright-version)" >> $GITHUB_OUTPUT
 
       - name: Cache Playwright browsers
         uses: actions/cache@v4
@@ -37,13 +37,13 @@ jobs:
           LASTEST2_TOKEN: ${{ secrets.LASTEST2_TOKEN }}
           LASTEST2_URL: ${{ secrets.LASTEST2_URL }}
         run: |
-          npx @lastest/runner run \
+          npx @lastest/runner@0.4.1 run \
             -t "$LASTEST2_TOKEN" \
             -s "$LASTEST2_URL" &
           RUNNER_PID=$!
           sleep 3
 
-          npx @lastest/runner trigger \
+          npx @lastest/runner@0.4.1 trigger \
             --repo "dexilion-team/lastest2" \
             --branch "${{ github.head_ref || github.ref_name }}" \
             --commit "${{ github.sha }}" \
