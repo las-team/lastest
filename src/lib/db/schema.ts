@@ -174,13 +174,13 @@ export const testResults = sqliteTable('test_results', {
 });
 
 // Repository provider type
-export type RepositoryProvider = 'github' | 'gitlab';
+export type RepositoryProvider = 'github' | 'gitlab' | 'local';
 
-// Repositories synced from GitHub or GitLab
+// Repositories synced from GitHub or GitLab, or created locally
 export const repositories = sqliteTable('repositories', {
   id: text('id').primaryKey(),
   teamId: text('team_id'), // Team ownership - FK added after teams table definition
-  provider: text('provider').notNull().default('github'), // 'github' | 'gitlab'
+  provider: text('provider').notNull().default('github'), // 'github' | 'gitlab' | 'local'
   githubRepoId: integer('github_repo_id'), // nullable for GitLab repos
   gitlabProjectId: integer('gitlab_project_id'), // nullable for GitHub repos
   owner: text('owner').notNull(),
@@ -872,6 +872,7 @@ export const teams = sqliteTable('teams', {
   id: text('id').primaryKey(),
   name: text('name').notNull(),
   slug: text('slug').notNull().unique(),
+  selectedRepositoryId: text('selected_repository_id'),
   earlyAdopterMode: integer('early_adopter_mode', { mode: 'boolean' }).default(false),
   banAiMode: integer('ban_ai_mode', { mode: 'boolean' }).default(false),
   createdAt: integer('created_at', { mode: 'timestamp' }),

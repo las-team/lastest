@@ -6,11 +6,9 @@ Teardown
 Accept Downloads
 Network Interception
 ## features
-GH runner setup - test
-Project/repo wo github
-Cache and save mid-steps in db for play mode
 ## ideas
 Test coverage assessment and recreation based on existing test set
+cookie stealing?
 Tweet about us
 Content comparison - compare text in 2 setups
 Explore/Cover instead of Areas

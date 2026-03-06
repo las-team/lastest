@@ -63,7 +63,7 @@ export function AddConfigDialog({ open, onOpenChange, runners, repos, githubUser
   const [failOnChanges, setFailOnChanges] = useState(true);
   const [saving, setSaving] = useState(false);
 
-  const githubRepos = repos.filter((r) => r.provider !== 'gitlab');
+  const githubRepos = repos.filter((r) => r.provider === 'github');
 
   useEffect(() => {
     if (open) {

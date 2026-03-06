@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
-import { Layers, RefreshCw, Github } from 'lucide-react';
+import { Layers, RefreshCw, Github, HardDrive, Plus } from 'lucide-react';
 import {
   Select,
   SelectContent,
@@ -11,7 +11,13 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Button } from '@/components/ui/button';
-import { fetchAndSyncRepos, fetchAndSyncGitlabRepos, selectRepo } from '@/server/actions/repos';
+import { Input } from '@/components/ui/input';
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from '@/components/ui/popover';
+import { fetchAndSyncRepos, fetchAndSyncGitlabRepos, selectRepo, createLocalRepo } from '@/server/actions/repos';
 import type { Repository } from '@/lib/db/schema';
 
 // GitLab icon SVG component
@@ -21,6 +27,12 @@ function GitLabIcon({ className }: { className?: string }) {
       <path d="M4.845.904c-.435 0-.82.28-.955.692C2.639 5.449 1.246 9.728.07 13.335a1.437 1.437 0 00.522 1.607l11.071 8.045c.2.145.472.144.67-.004l11.073-8.04a1.436 1.436 0 00.522-1.61c-1.285-3.942-2.683-8.256-3.817-11.746a1.004 1.004 0 00-.957-.684.987.987 0 00-.949.69l-2.405 7.408H8.203l-2.41-7.408a.987.987 0 00-.942-.69h-.006z" />
     </svg>
   );
+}
+
+function RepoIcon({ provider, className }: { provider: string; className?: string }) {
+  if (provider === 'gitlab') return <GitLabIcon className={className} />;
+  if (provider === 'local') return <HardDrive className={className} />;
+  return <Github className={className} />;
 }
 
 // Separate sync button component that can be positioned independently
@@ -55,6 +67,53 @@ export function SyncReposButton() {
     >
       <RefreshCw className={`h-4 w-4 ${isSyncing ? 'animate-spin' : ''}`} />
     </Button>
+  );
+}
+
+export function CreateLocalRepoButton() {
+  const router = useRouter();
+  const [open, setOpen] = useState(false);
+  const [name, setName] = useState('');
+  const [isPending, startTransition] = useTransition();
+
+  const handleCreate = () => {
+    if (!name.trim()) return;
+    startTransition(async () => {
+      await createLocalRepo(name.trim());
+      setName('');
+      setOpen(false);
+      router.refresh();
+    });
+  };
+
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <Button variant="ghost" size="icon" title="Create local repository">
+          <Plus className="h-4 w-4" />
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent className="w-64 p-3" align="start">
+        <div className="space-y-2">
+          <p className="text-sm font-medium">New local repository</p>
+          <Input
+            placeholder="Repository name"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            onKeyDown={(e) => e.key === 'Enter' && handleCreate()}
+            autoFocus
+          />
+          <Button
+            size="sm"
+            className="w-full"
+            onClick={handleCreate}
+            disabled={!name.trim() || isPending}
+          >
+            {isPending ? 'Creating...' : 'Create'}
+          </Button>
+        </div>
+      </PopoverContent>
+    </Popover>
   );
 }
 
@@ -102,18 +161,14 @@ export function RepoSelector({ initialRepos = [], initialSelected = null }: Repo
         {repos.map((repo) => (
           <SelectItem key={repo.id} value={repo.id}>
             <div className="flex items-center gap-2">
-              {repo.provider === 'gitlab' ? (
-                <GitLabIcon className="h-3.5 w-3.5 shrink-0" />
-              ) : (
-                <Github className="h-3.5 w-3.5 shrink-0" />
-              )}
+              <RepoIcon provider={repo.provider} className="h-3.5 w-3.5 shrink-0" />
               {repo.fullName}
             </div>
           </SelectItem>
         ))}
         {repos.length === 0 && (
           <div className="px-2 py-1.5 text-sm text-muted-foreground">
-            No repos synced. Click sync to fetch.
+            No repos yet. Create a local repo or sync from GitHub/GitLab.
           </div>
         )}
       </SelectContent>

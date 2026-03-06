@@ -458,11 +458,10 @@ async function runDiscover(sessionId: string, repositoryId: string) {
 
   const branch = repo.selectedBranch || repo.defaultBranch || 'main';
 
-  // Cache: if repo already has tests in non-deleted areas, skip discovery
-  const existingAreas = await queries.getFunctionalAreasByRepo(repositoryId);
-  const areaIds = new Set(existingAreas.map(a => a.id));
-  const existingTests = (await queries.getTestsByRepo(repositoryId)).filter(t => t.functionalAreaId && areaIds.has(t.functionalAreaId));
+  // Cache: if repo already has any non-deleted tests (including orphaned ones), skip discovery
+  const existingTests = await queries.getTestsByRepo(repositoryId);
   if (existingTests.length > 0) {
+    const existingAreas = await queries.getFunctionalAreasByRepo(repositoryId);
     await updateSubsteps(sessionId, 'discover', [
       { label: 'Using existing tests', status: 'done', detail: `${existingTests.length} tests in ${existingAreas.length} areas` },
     ]);
@@ -885,11 +884,12 @@ async function runEnvSetup(sessionId: string, repositoryId: string) {
 
   const loginDetection = await detectLoginRequired(baseUrl);
 
-  // Check if setup steps already exist — skip login generation to avoid duplicates
+  // Check if setup steps or scripts already exist — skip login generation to avoid duplicates
   if (loginDetection.needsLogin) {
     const existingSteps = await queries.getDefaultSetupSteps(repositoryId);
     const hasScriptStep = existingSteps.some(s => s.stepType === 'script');
-    if (hasScriptStep) {
+    const existingScripts = await queries.getSetupScripts(repositoryId);
+    if (hasScriptStep || existingScripts.length > 0) {
       await updateSubsteps(sessionId, 'env_setup', [
         { label: 'Checking base URL', status: 'done', detail: `${connResult.responseTime}ms` },
         { label: 'Detecting login', status: 'done', detail: 'Login required' },

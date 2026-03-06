@@ -5,6 +5,7 @@ import {
   githubAccounts,
   gitlabAccounts,
   baselines,
+  teams,
 } from '../schema';
 import type {
   NewRepository,
@@ -128,8 +129,26 @@ export async function updateSelectedRepository(accountId: string, repositoryId: 
 }
 
 export async function getSelectedRepository(teamId?: string) {
-  const account = teamId ? await getGithubAccountByTeam(teamId) : await getGithubAccount();
-  if (!account?.selectedRepositoryId) return null;
-  const repo = await getRepository(account.selectedRepositoryId);
-  return repo || null;
+  if (!teamId) {
+    // Legacy fallback: read from GitHub account
+    const account = await getGithubAccount();
+    if (!account?.selectedRepositoryId) return null;
+    return (await getRepository(account.selectedRepositoryId)) || null;
+  }
+
+  // Read from teams.selectedRepositoryId
+  const team = await db.select().from(teams).where(eq(teams.id, teamId)).get();
+  if (team?.selectedRepositoryId) {
+    const repo = await getRepository(team.selectedRepositoryId);
+    if (repo) return repo;
+  }
+
+  // Lazy migration: check GitHub/GitLab account selection and copy to team
+  const account = await getGithubAccountByTeam(teamId);
+  if (account?.selectedRepositoryId) {
+    await db.update(teams).set({ selectedRepositoryId: account.selectedRepositoryId }).where(eq(teams.id, teamId));
+    return (await getRepository(account.selectedRepositoryId)) || null;
+  }
+
+  return null;
 }
