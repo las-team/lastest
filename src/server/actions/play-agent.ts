@@ -442,6 +442,99 @@ async function tryFallbackDiscovery(
   return true;
 }
 
+async function fillMissingUserStories(
+  sessionId: string,
+  repositoryId: string,
+  branch: string,
+  existingTests: Awaited<ReturnType<typeof queries.getTestsByRepo>>,
+  intelligence?: CodebaseIntelligenceContext,
+): Promise<boolean> {
+  // Step 1: Discover spec files (GitHub API, no AI)
+  const specResult = await discoverSpecFiles(repositoryId, branch);
+  if (!specResult.success || !specResult.files || specResult.files.length === 0) {
+    return false; // No spec files → nothing to fill
+  }
+
+  // Step 2: Extract user stories (AI call)
+  await updateSubsteps(sessionId, 'discover', [
+    { label: 'Checking spec coverage', status: 'running' },
+  ]);
+
+  const filePaths = specResult.files.map(f => f.path);
+  const storiesResult = await extractUserStoriesFromFiles(repositoryId, branch, filePaths);
+  if (!storiesResult.success || !storiesResult.stories || storiesResult.stories.length === 0) {
+    return false; // No stories extracted → nothing to fill
+  }
+
+  // Step 3: Find missing stories (area doesn't exist or has 0 tests)
+  const existingAreas = await queries.getFunctionalAreasByRepo(repositoryId);
+  const areaTestCounts = new Map<string, number>();
+  for (const area of existingAreas) {
+    const count = existingTests.filter(t => t.functionalAreaId === area.id).length;
+    areaTestCounts.set(area.name.toLowerCase(), count);
+  }
+
+  const missingStories = storiesResult.stories.filter(story => {
+    const key = story.title.toLowerCase();
+    return !areaTestCounts.has(key) || areaTestCounts.get(key)! === 0;
+  });
+
+  if (missingStories.length === 0) {
+    return false; // All stories covered → use cache
+  }
+
+  // Step 4: Generate tests for missing stories
+  let totalTests = 0;
+  for (const story of missingStories) {
+    if (!story.acceptanceCriteria) continue;
+    const grouped = new Set<string>();
+    for (const ac of story.acceptanceCriteria) {
+      if (ac.groupedWith && grouped.has(ac.groupedWith)) continue;
+      grouped.add(ac.id);
+      totalTests++;
+    }
+  }
+
+  const initialTestCount = existingTests.length;
+
+  await updateSubsteps(sessionId, 'discover', [
+    { label: 'Checking spec coverage', status: 'done', detail: `${missingStories.length} areas missing` },
+    { label: `Generating tests (0/${totalTests})`, status: 'running' },
+  ]);
+
+  const envConfig = await getEnvironmentConfig(repositoryId);
+  const genResult = await generateTestsFromStories(
+    repositoryId,
+    storiesResult.importId ?? null,
+    missingStories,
+    branch,
+    { targetUrl: envConfig?.baseUrl || undefined, codebaseIntelligence: intelligence },
+  );
+
+  const totalExistingAreas = existingAreas.length + genResult.areasCreated;
+
+  await updateSubsteps(sessionId, 'discover', [
+    { label: 'Checking spec coverage', status: 'done', detail: `${missingStories.length} areas missing` },
+    { label: 'Generating tests', status: 'done', detail: `${genResult.testsCreated} new tests` },
+  ]);
+
+  const session = await queries.getAgentSession(sessionId);
+  if (session) {
+    await queries.updateAgentSession(sessionId, {
+      metadata: { ...session.metadata, testsCreated: initialTestCount + genResult.testsCreated },
+    });
+  }
+
+  await setStepCompleted(sessionId, 'discover', {
+    testsCreated: initialTestCount + genResult.testsCreated,
+    areasCreated: totalExistingAreas,
+    newAreasAdded: genResult.areasCreated,
+    newTestsAdded: genResult.testsCreated,
+    fromSpecGapFill: true,
+  });
+  return true;
+}
+
 async function runDiscover(sessionId: string, repositoryId: string) {
   await setStepActive(sessionId, 'discover');
   if (await isCancelled(sessionId)) return false;
@@ -458,9 +551,16 @@ async function runDiscover(sessionId: string, repositoryId: string) {
 
   const branch = repo.selectedBranch || repo.defaultBranch || 'main';
 
-  // Cache: if repo already has any non-deleted tests (including orphaned ones), skip discovery
+  // Cache: if tests exist, check for missing user story areas before skipping
   const existingTests = await queries.getTestsByRepo(repositoryId);
   if (existingTests.length > 0) {
+    // Try to fill missing user story areas from spec files
+    const filled = await fillMissingUserStories(
+      sessionId, repositoryId, branch, existingTests, discoverIntelligence
+    );
+    if (filled) return true;
+
+    // No gaps found — use cache
     const existingAreas = await queries.getFunctionalAreasByRepo(repositoryId);
     await updateSubsteps(sessionId, 'discover', [
       { label: 'Using existing tests', status: 'done', detail: `${existingTests.length} tests in ${existingAreas.length} areas` },
