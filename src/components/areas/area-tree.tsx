@@ -48,10 +48,13 @@ interface AreaTreeProps {
   uncategorizedTests: { id: string; name: string; latestStatus: string | null; isPlaceholder?: boolean }[];
   unsortedSuites: SuiteItem[];
   selection: TreeSelection | null;
+  selectedAreaIds: Set<string>;
   onSelect: (selection: TreeSelection | null) => void;
+  onMultiSelect: (ids: Set<string>) => void;
   onNewArea: (parentId?: string) => void;
   onEditArea: (id: string) => void;
   onDeleteArea: (id: string) => void;
+  onDeleteMultipleAreas: (ids: string[]) => void;
   onMoveTest: (testId: string, areaId: string | null) => void;
   onMoveSuite: (suiteId: string, areaId: string | null) => void;
   onMoveArea: (areaId: string, newParentId: string | null) => void;
@@ -74,9 +77,11 @@ interface AreaNodeProps {
   area: FunctionalAreaWithChildren;
   depth: number;
   selection: TreeSelection | null;
+  selectedAreaIds: Set<string>;
   expandedIds: Set<string>;
   onToggle: (id: string) => void;
   onSelect: (selection: TreeSelection | null) => void;
+  onAreaClick: (id: string, shiftKey: boolean) => void;
   onNewArea: (parentId?: string) => void;
   onEditArea: (id: string) => void;
   onDeleteArea: (id: string) => void;
@@ -122,9 +127,11 @@ function AreaNode({
   area,
   depth,
   selection,
+  selectedAreaIds,
   expandedIds,
   onToggle,
   onSelect,
+  onAreaClick,
   onNewArea,
   onEditArea,
   onDeleteArea,
@@ -134,6 +141,7 @@ function AreaNode({
 }: AreaNodeProps) {
   const isExpanded = expandedIds.has(area.id);
   const isSelected = selection?.type === 'area' && selection.id === area.id;
+  const isMultiSelected = selectedAreaIds.has(area.id);
   const hasChildren = area.children.length > 0 || area.tests.length > 0 || area.suites.length > 0;
   const FolderIcon = area.isRouteFolder ? Route : isExpanded ? FolderOpen : Folder;
 
@@ -174,10 +182,18 @@ function AreaNode({
       <div
         className={cn(
           'group flex items-center gap-1 py-1 px-2 rounded cursor-pointer hover:bg-muted',
-          isSelected && 'bg-primary/10 hover:bg-primary/15'
+          isSelected && 'bg-primary/10 hover:bg-primary/15',
+          isMultiSelected && !isSelected && 'bg-primary/10 hover:bg-primary/15'
         )}
         style={{ paddingLeft: `${depth * 16 + 8}px` }}
-        onClick={() => onSelect({ type: 'area', id: area.id })}
+        onClick={(e) => {
+          if (e.shiftKey) {
+            onAreaClick(area.id, true);
+          } else {
+            onAreaClick(area.id, false);
+            onSelect({ type: 'area', id: area.id });
+          }
+        }}
         draggable
         onDragStart={handleDragStart}
         onDragOver={handleDragOver}
@@ -243,9 +259,11 @@ function AreaNode({
               area={child}
               depth={depth + 1}
               selection={selection}
+              selectedAreaIds={selectedAreaIds}
               expandedIds={expandedIds}
               onToggle={onToggle}
               onSelect={onSelect}
+              onAreaClick={onAreaClick}
               onNewArea={onNewArea}
               onEditArea={onEditArea}
               onDeleteArea={onDeleteArea}
@@ -349,20 +367,36 @@ function SuiteNode({ suite, depth, selection, onSelect }: SuiteNodeProps) {
   );
 }
 
+// Flatten tree into ordered list of area IDs (depth-first)
+function flattenAreaIds(areas: FunctionalAreaWithChildren[]): string[] {
+  const result: string[] = [];
+  for (const area of areas) {
+    result.push(area.id);
+    result.push(...flattenAreaIds(area.children));
+  }
+  return result;
+}
+
 export function AreaTree({
   tree,
   uncategorizedTests,
   unsortedSuites,
   selection,
+  selectedAreaIds,
   onSelect,
+  onMultiSelect,
   onNewArea,
   onEditArea,
   onDeleteArea,
+  onDeleteMultipleAreas,
   onMoveTest,
   onMoveSuite,
   onMoveArea,
 }: AreaTreeProps) {
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
+  const [lastClickedAreaId, setLastClickedAreaId] = useState<string | null>(null);
+
+  const flatIds = useMemo(() => flattenAreaIds(tree), [tree]);
 
   const handleToggle = useCallback((id: string) => {
     setExpandedIds((prev) => {
@@ -375,6 +409,26 @@ export function AreaTree({
       return next;
     });
   }, []);
+
+  const handleAreaClick = useCallback((id: string, shiftKey: boolean) => {
+    if (shiftKey && lastClickedAreaId) {
+      // Range select between lastClickedAreaId and id
+      const startIdx = flatIds.indexOf(lastClickedAreaId);
+      const endIdx = flatIds.indexOf(id);
+      if (startIdx !== -1 && endIdx !== -1) {
+        const from = Math.min(startIdx, endIdx);
+        const to = Math.max(startIdx, endIdx);
+        const rangeIds = flatIds.slice(from, to + 1);
+        const next = new Set(selectedAreaIds);
+        for (const rid of rangeIds) next.add(rid);
+        onMultiSelect(next);
+      }
+    } else {
+      // Normal click — clear multi-select
+      setLastClickedAreaId(id);
+      onMultiSelect(new Set());
+    }
+  }, [lastClickedAreaId, flatIds, selectedAreaIds, onMultiSelect]);
 
   const handleUnsortedDrop = (e: React.DragEvent) => {
     e.preventDefault();
@@ -394,10 +448,36 @@ export function AreaTree({
   return (
     <div className="h-full flex flex-col">
       <div className="p-3 border-b font-medium text-sm flex items-center justify-between">
-        <span>Areas</span>
-        <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => onNewArea()}>
-          <Plus className="h-4 w-4" />
-        </Button>
+        {selectedAreaIds.size > 0 ? (
+          <>
+            <span className="text-primary">{selectedAreaIds.size} selected</span>
+            <div className="flex items-center gap-1">
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-6 w-6"
+                onClick={() => onMultiSelect(new Set())}
+              >
+                <X className="h-4 w-4" />
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-6 w-6 text-destructive hover:text-destructive"
+                onClick={() => onDeleteMultipleAreas(Array.from(selectedAreaIds))}
+              >
+                <Trash2 className="h-4 w-4" />
+              </Button>
+            </div>
+          </>
+        ) : (
+          <>
+            <span>Areas</span>
+            <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => onNewArea()}>
+              <Plus className="h-4 w-4" />
+            </Button>
+          </>
+        )}
       </div>
 
       <ScrollArea className="flex-1 overflow-hidden" type="auto">
@@ -409,9 +489,11 @@ export function AreaTree({
               area={area}
               depth={0}
               selection={selection}
+              selectedAreaIds={selectedAreaIds}
               expandedIds={expandedIds}
               onToggle={handleToggle}
               onSelect={onSelect}
+              onAreaClick={handleAreaClick}
               onNewArea={onNewArea}
               onEditArea={onEditArea}
               onDeleteArea={onDeleteArea}

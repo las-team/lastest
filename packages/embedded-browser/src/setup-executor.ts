@@ -40,14 +40,31 @@ function createSetupPageProxy(page: Page, baseUrl: string): Page {
         return async () => Buffer.alloc(0);
       }
       if (prop === 'goto') {
-        return async (url: string, options?: Parameters<Page['goto']>[1]) => {
-          let resolvedUrl = url;
-          if (url.startsWith('/')) {
-            resolvedUrl = `${baseUrl.replace(/\/$/, '')}${url}`;
-          } else if (!url.startsWith('http://') && !url.startsWith('https://')) {
-            resolvedUrl = `${baseUrl.replace(/\/$/, '')}/${url}`;
+        return async (url: string | URL, options?: Parameters<Page['goto']>[1]) => {
+          const urlStr = typeof url === 'string' ? url : url.toString();
+          let resolvedUrl = urlStr;
+          if (urlStr.startsWith('/')) {
+            resolvedUrl = `${baseUrl.replace(/\/$/, '')}${urlStr}`;
+          } else if (!urlStr.startsWith('http://') && !urlStr.startsWith('https://')) {
+            resolvedUrl = `${baseUrl.replace(/\/$/, '')}/${urlStr}`;
           }
           return target.goto(resolvedUrl, options);
+        };
+      }
+      if (prop === 'waitForURL') {
+        return (predicate: string | RegExp | ((url: URL) => boolean), options?: { timeout?: number }) => {
+          if (typeof predicate === 'function') {
+            const origFn = predicate;
+            const wrappedFn = (url: URL) => {
+              const patched = url as URL & { includes?: (s: string) => boolean };
+              if (!patched.includes) {
+                patched.includes = (s: string) => url.href.includes(s);
+              }
+              return origFn(url);
+            };
+            return target.waitForURL(wrappedFn, options);
+          }
+          return target.waitForURL(predicate, options);
         };
       }
       const value = target[prop as keyof Page];

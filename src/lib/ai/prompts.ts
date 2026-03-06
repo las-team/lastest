@@ -508,10 +508,14 @@ Format your response as markdown using this exact structure:
 
 Guidelines:
 - User Story titles should be concise functional area names (e.g., "User Authentication", "Dashboard Analytics")
-- AC descriptions should be specific and testable — describe what the user can do or what the system does
-- Extract as many meaningful stories and criteria as the document supports
-- If the document doesn't follow formal US/AC format, infer them from the requirements
-- Each AC should be independently testable`;
+- Each AC MUST describe a specific, observable user action and expected system response that can be verified in a browser
+- DO NOT include: questions, suggestions, meta-commentary, implementation tasks, or vague criteria
+- DO NOT include ACs like "Create additional tests...", "Consider...", "Should we...", "Implement...", "Ensure proper..."
+- Bad AC: "Ensure proper error handling" (vague, not testable)
+- Good AC: "When user submits login form with wrong password, an error message 'Invalid credentials' appears"
+- Each AC should be independently testable in a browser-based visual regression test
+- If a requirement is not testable via browser interaction, skip it
+- If the document doesn't follow formal US/AC format, infer them from the requirements`;
 }
 
 export function createBranchAwareTestPrompt(context: {

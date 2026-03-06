@@ -1315,6 +1315,12 @@ export class PlaywrightRunner extends EventEmitter {
 
               if (options?.path) {
                 const filename = path.basename(options.path as string);
+                // Ensure the screenshot is saved to the correct location on disk
+                // (test code may pass an invalid path, e.g. treating screenshotPath as a directory)
+                const correctDiskPath = path.join(this.screenshotDir, filename);
+                if (!fs.existsSync(correctDiskPath)) {
+                  fs.writeFileSync(correctDiskPath, result);
+                }
                 const publicPath = this.repositoryId
                   ? `/screenshots/${this.repositoryId}/${filename}`
                   : `/screenshots/${filename}`;

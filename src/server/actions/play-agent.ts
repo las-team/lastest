@@ -458,6 +458,30 @@ async function runDiscover(sessionId: string, repositoryId: string) {
 
   const branch = repo.selectedBranch || repo.defaultBranch || 'main';
 
+  // Cache: if repo already has tests in non-deleted areas, skip discovery
+  const existingAreas = await queries.getFunctionalAreasByRepo(repositoryId);
+  const areaIds = new Set(existingAreas.map(a => a.id));
+  const existingTests = (await queries.getTestsByRepo(repositoryId)).filter(t => t.functionalAreaId && areaIds.has(t.functionalAreaId));
+  if (existingTests.length > 0) {
+    await updateSubsteps(sessionId, 'discover', [
+      { label: 'Using existing tests', status: 'done', detail: `${existingTests.length} tests in ${existingAreas.length} areas` },
+    ]);
+
+    const session = await queries.getAgentSession(sessionId);
+    if (session) {
+      await queries.updateAgentSession(sessionId, {
+        metadata: { ...session.metadata, testsCreated: existingTests.length },
+      });
+    }
+
+    await setStepCompleted(sessionId, 'discover', {
+      testsCreated: existingTests.length,
+      areasCreated: existingAreas.length,
+      cached: true,
+    });
+    return true;
+  }
+
   // Substep 1: Discover spec files
   await updateSubsteps(sessionId, 'discover', [
     { label: 'Finding spec files', status: 'running' },
@@ -643,7 +667,8 @@ CONSTRAINTS:
 - Export async function "setup" with exact signature above
 - Return an object with variables for tests (e.g., { loggedIn: true })
 - Handle loading states with waitForLoadState or waitForSelector
-- Use realistic test data (test@example.com, Password123!, etc.)`;
+- Use realistic test data (test@example.com, Password123!, etc.)
+- page.waitForURL() predicates receive a URL object, not a string. Use url.href or url.toString() for string operations`;
 
 function normalizeUrl(rawUrl: string): string {
   try {

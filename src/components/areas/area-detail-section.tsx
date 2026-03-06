@@ -312,7 +312,15 @@ export function AreaDetailSection({ selection, areas, suites, repositoryId, onUp
                 <div className="text-lg font-medium">{testData.name}</div>
               )}
               {testData.description && !isEditing && (
-                <p className="text-sm text-muted-foreground mt-1">{testData.description}</p>
+                testData.description.includes('\n') ? (
+                  <ul className="text-sm text-muted-foreground mt-1 list-disc list-inside space-y-0.5">
+                    {testData.description.split('\n').filter(Boolean).map((line, i) => (
+                      <li key={i}>{line}</li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p className="text-sm text-muted-foreground mt-1">{testData.description}</p>
+                )
               )}
             </div>
 

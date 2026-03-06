@@ -14,6 +14,7 @@ import type { ExtractedUserStory, ExtractedAcceptanceCriterion } from '@/lib/db/
 import { revalidatePath } from 'next/cache';
 import { getRepoTree, getFileContent, compareBranches } from '@/lib/github/content';
 import { extractTextFromFile } from '@/lib/file-parser';
+import { runParallel } from '@/lib/ai/parallel';
 import { createJob, updateJobProgress, completeJob, failJob } from './jobs';
 import { getCurrentBranchForRepo } from '@/lib/git-utils';
 import { requireRepoAccess } from '@/lib/auth';
@@ -227,6 +228,53 @@ function parseStoriesFromMarkdown(text: string): ExtractedUserStory[] | null {
 }
 
 // ============================================
+// Quality Gate: filter non-testable ACs
+// ============================================
+
+const NON_TESTABLE_PREFIX = /^(create|implement|consider|add|build|design|ensure|set up|configure|should|could|might)\b/i;
+
+function validateAndFilterStories(stories: ExtractedUserStory[]): ExtractedUserStory[] {
+  const seenDescriptions = new Set<string>();
+
+  const filtered = stories.map(story => {
+    const validACs = story.acceptanceCriteria.filter(ac => {
+      const desc = ac.description?.trim();
+      if (!desc) return false;
+
+      // Too short or too long
+      if (desc.length < 10 || desc.length > 300) return false;
+
+      // Questions
+      if (desc.endsWith('?')) return false;
+
+      // Non-testable action verbs
+      if (NON_TESTABLE_PREFIX.test(desc)) return false;
+
+      // Deduplicate by normalized description
+      const normalized = desc.toLowerCase().replace(/\s+/g, ' ');
+      if (seenDescriptions.has(normalized)) return false;
+      seenDescriptions.add(normalized);
+
+      return true;
+    });
+
+    return { ...story, acceptanceCriteria: validACs };
+  }).filter(story => story.acceptanceCriteria.length > 0);
+
+  // Deduplicate stories by title (keep the one with more ACs)
+  const storyMap = new Map<string, ExtractedUserStory>();
+  for (const story of filtered) {
+    const key = story.title.toLowerCase().trim();
+    const existing = storyMap.get(key);
+    if (!existing || story.acceptanceCriteria.length > existing.acceptanceCriteria.length) {
+      storyMap.set(key, story);
+    }
+  }
+
+  return Array.from(storyMap.values());
+}
+
+// ============================================
 // Document Discovery (reuse spec-analysis patterns)
 // ============================================
 
@@ -406,6 +454,12 @@ async function extractStoriesFromContent(
     stories = parsed;
   }
 
+  // Quality gate: filter non-testable ACs and deduplicate
+  stories = validateAndFilterStories(stories);
+  if (stories.length === 0) {
+    return { success: false, error: 'No testable stories found after quality filtering' };
+  }
+
   // Create import record (non-fatal — stories are still usable if DB tracking fails)
   let importId: string | null = null;
   try {
@@ -564,7 +618,6 @@ export async function generateTestsFromStories(
     let areasCreated = 0;
     let testsCreated = 0;
     const errors: string[] = [];
-    let testIndex = 0;
 
     // Fetch branch context if requested
     let branchChanges: { changedFiles: string[]; fileDiffs?: string } | null = null;
@@ -572,41 +625,50 @@ export async function generateTestsFromStories(
       branchChanges = await fetchBranchDiffs(repositoryId, branch);
     }
 
+    // Pre-create areas and collect all task groups
+    interface TaskInfo {
+      story: ExtractedUserStory;
+      group: ExtractedAcceptanceCriterion[];
+      areaId: string;
+    }
+    const allTasks: TaskInfo[] = [];
+
     for (const story of stories) {
-      // Create functional area for this User Story
       const area = await queries.getOrCreateFunctionalAreaByRepo(
         repositoryId,
         story.title,
         story.description
       );
 
-      // Track if this was a new area
       const existingAreas = await queries.getFunctionalAreasByRepo(repositoryId);
       const wasNew = existingAreas.filter(a => a.name.toLowerCase() === story.title.toLowerCase()).length <= 1;
       if (wasNew) areasCreated++;
 
-      // Group ACs that should be combined into single tests
       const acGroups = groupAcceptanceCriteria(story.acceptanceCriteria);
-
       for (const group of acGroups) {
-        testIndex++;
-        await updateJobProgress(jobId, testIndex, totalTests);
+        allTasks.push({ story, group, areaId: area.id });
+      }
+    }
 
-        const primaryAC = group[0];
-        const testName = primaryAC.testName || `${story.title}: ${primaryAC.description.slice(0, 60)}`;
-        const acDescription = group.map(ac => ac.description).join('\n');
+    // Run test generation in parallel (concurrency: 3)
+    const parallelTasks = allTasks.map((task) => {
+      const primaryAC = task.group[0];
+      const testName = primaryAC.testName || `${task.story.title}: ${primaryAC.description.slice(0, 60)}`;
+      const acDescription = task.group.map(ac => ac.description).join('\n');
 
-        const prompt = createBranchAwareTestPrompt({
-          testName,
-          acceptanceCriteria: acDescription,
-          userStoryTitle: story.title,
-          userStoryDescription: story.description,
-          targetUrl: options?.targetUrl,
-          branchChanges: branchChanges || undefined,
-          codebaseIntelligence: options?.codebaseIntelligence,
-        });
+      return {
+        id: primaryAC.id,
+        execute: async () => {
+          const prompt = createBranchAwareTestPrompt({
+            testName,
+            acceptanceCriteria: acDescription,
+            userStoryTitle: task.story.title,
+            userStoryDescription: task.story.description,
+            targetUrl: options?.targetUrl,
+            branchChanges: branchChanges || undefined,
+            codebaseIntelligence: options?.codebaseIntelligence,
+          });
 
-        try {
           const response = await generateWithAI(config, prompt, SYSTEM_PROMPT, {
             actionType: 'generate_spec_tests',
             repositoryId,
@@ -616,18 +678,28 @@ export async function generateTestsFromStories(
           if (code) {
             await queries.createTest({
               repositoryId,
-              functionalAreaId: area.id,
+              functionalAreaId: task.areaId,
               name: testName,
               code,
               description: acDescription,
               targetUrl: options?.targetUrl || null,
             });
-            testsCreated++;
+            return { created: true, testName };
           }
-        } catch (err) {
-          const msg = err instanceof Error ? err.message : 'Unknown error';
-          errors.push(`${testName}: ${msg}`);
-        }
+          return { created: false, testName };
+        },
+      };
+    });
+
+    const results = await runParallel(parallelTasks, 3, async (completed, total) => {
+      await updateJobProgress(jobId, completed, total);
+    });
+
+    for (const result of results) {
+      if (result.success && result.result?.created) {
+        testsCreated++;
+      } else if (!result.success) {
+        errors.push(`${result.error || 'Unknown error'}`);
       }
     }
 

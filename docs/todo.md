@@ -8,6 +8,7 @@ Network Interception
 ## features
 GH runner setup - test
 Project/repo wo github
+Cache and save mid-steps in db for play mode
 ## ideas
 Test coverage assessment and recreation based on existing test set
 Tweet about us
@@ -41,5 +42,6 @@ Paste CSV as Chart
 
 
 ## ourmotto
+Real constraints: if you dont use GH, this tool is not optimized for you - ping is with your stack and we will accommodate it.
 We hate manual testing
 Exp testing is kinda ok, at least you learn how your software works

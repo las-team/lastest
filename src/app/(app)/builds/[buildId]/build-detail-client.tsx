@@ -642,12 +642,12 @@ function TestGroupedList({
           <Collapsible key={`test-${testId}-${expandKey}`} defaultOpen={allExpanded}>
             <div>
               <CollapsibleTrigger className="flex items-center justify-between w-full p-2 bg-muted/20 hover:bg-muted/40 rounded-lg transition-colors group">
-                <div className="flex items-center gap-2">
-                  <ChevronRight className="w-3.5 h-3.5 text-muted-foreground transition-transform group-data-[state=open]:rotate-90" />
-                  <span className="text-sm font-medium">{testName}</span>
-                  <Badge variant="secondary" className="text-xs">{stepLabel}</Badge>
+                <div className="flex items-center gap-2 min-w-0">
+                  <ChevronRight className="w-3.5 h-3.5 shrink-0 text-muted-foreground transition-transform group-data-[state=open]:rotate-90" />
+                  <span className="text-sm font-medium truncate">{testName}</span>
+                  <Badge variant="secondary" className="text-xs shrink-0">{stepLabel}</Badge>
                 </div>
-                <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                <div className="flex items-center gap-2 text-xs text-muted-foreground shrink-0">
                   {pendingCount > 0 && <span className="text-yellow-600">{pendingCount} pending</span>}
                   {failedCount > 0 && <span className="text-red-600">{failedCount} failed</span>}
                 </div>
@@ -720,14 +720,14 @@ function DiffRow({
             : 'hover:border-primary/30 hover:bg-primary/5'
       }`}
     >
-      <div className="flex items-center gap-3">
+      <div className="flex items-center gap-3 min-w-0">
         <div onClick={(e) => e.stopPropagation()}>
           <Checkbox
             checked={isSelected}
             onCheckedChange={() => onToggleSelect(diff.id)}
           />
         </div>
-        <div className={`p-2 rounded ${statusColor}`}>
+        <div className={`p-2 rounded shrink-0 ${statusColor}`}>
           <StatusIcon className="w-4 h-4" />
         </div>
         <div className="min-w-0">
@@ -772,7 +772,7 @@ function DiffRow({
         </div>
       </div>
 
-      <div className="flex items-center gap-4">
+      <div className="flex items-center gap-4 shrink-0">
         {hasCodeChange && (
           <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium bg-orange-100 text-orange-700">
             Code Change

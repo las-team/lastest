@@ -41,7 +41,7 @@ export async function setup(page, baseUrl, screenshotPath, stepLogger) {
     // 2. Disappearance of login form
     // 3. Appearance of authenticated content
     await Promise.race([
-      page.waitForURL(url => !url.includes('/login'), { timeout: 15000 }),
+      page.waitForURL(url => !url.href.includes('/login'), { timeout: 15000 }),
       page.waitForSelector('nav, [data-testid="dashboard"], .dashboard, main', { timeout: 15000 }),
       page.waitForLoadState('networkidle', { timeout: 15000 })
     ]);
