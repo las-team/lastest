@@ -236,6 +236,22 @@ const NON_TESTABLE_PREFIX = /^(create|implement|consider|add|build|design|ensure
 function validateAndFilterStories(stories: ExtractedUserStory[]): ExtractedUserStory[] {
   const seenDescriptions = new Set<string>();
 
+  // Filter catch-all / markdown-artifact story titles
+  const CATCHALL_TITLES = new Set(['summary', 'overview', 'general', 'miscellaneous', 'misc', 'other', 'notes']);
+  const META_TEST_AC = /^(follows the constraint|handles loading|includes meaningful|uses steplogger|captures screenshots|employs appropriate)/i;
+
+  // Pre-filter: clean titles and remove catch-all stories
+  stories = stories.filter(story => {
+    // Strip emoji
+    story.title = story.title.replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{FE00}-\u{FE0F}\u{1F900}-\u{1F9FF}]/gu, '').trim();
+    // Strip status markers like "Planned", "Implemented", "Priority Order" etc.
+    story.title = story.title.replace(/\(.*?\)\s*$/, '').trim();
+    // Strip leading status words (e.g. "Planned", "Implemented")
+    story.title = story.title.replace(/^(planned|implemented|completed|pending|done|in progress)\b\s*/i, '').trim();
+    // Filter catch-all titles
+    return story.title.length > 0 && !CATCHALL_TITLES.has(story.title.toLowerCase());
+  });
+
   const filtered = stories.map(story => {
     const validACs = story.acceptanceCriteria.filter(ac => {
       const desc = ac.description?.trim();
@@ -249,6 +265,9 @@ function validateAndFilterStories(stories: ExtractedUserStory[]): ExtractedUserS
 
       // Non-testable action verbs
       if (NON_TESTABLE_PREFIX.test(desc)) return false;
+
+      // Filter meta-test-quality ACs (about how to write tests, not what to test)
+      if (META_TEST_AC.test(desc)) return false;
 
       // Deduplicate by normalized description
       const normalized = desc.toLowerCase().replace(/\s+/g, ' ');
@@ -437,6 +456,20 @@ async function extractStoriesFromContent(
   if (jsonStr) {
     try {
       stories = JSON.parse(jsonStr);
+      // Normalize JSON ACs to match markdown-path quality
+      for (const story of stories) {
+        if (!story.acceptanceCriteria) continue;
+        for (const ac of story.acceptanceCriteria) {
+          if (!ac.description) continue;
+          // Ensure testName is set
+          if (!ac.testName) ac.testName = ac.description;
+          // If description looks like a raw title (no sentence structure), wrap it
+          if (!ac.description.match(/\b(given|when|then|verify|check|should|must)\b/i)) {
+            const rawDesc = ac.description;
+            ac.description = `When ${rawDesc.charAt(0).toLowerCase() + rawDesc.slice(1)}, verify the expected behavior`;
+          }
+        }
+      }
     } catch {
       // extractJsonArray returned non-JSON — fall through to markdown
       const parsed = parseStoriesFromMarkdown(response);
@@ -654,7 +687,14 @@ export async function generateTestsFromStories(
     const parallelTasks = allTasks.map((task) => {
       const primaryAC = task.group[0];
       const testName = primaryAC.testName || `${task.story.title}: ${primaryAC.description.slice(0, 60)}`;
-      const acDescription = task.group.map(ac => ac.description).join('\n');
+      let acDescription = task.group.map(ac => ac.description).join('\n');
+      // If description just duplicates the name or is too short, use story context
+      if (acDescription === testName || acDescription.trim().length < 20) {
+        acDescription = task.story.description;
+        if (task.group.length > 0 && task.group[0].description !== testName) {
+          acDescription += `\n${task.group.map(ac => ac.description).join('\n')}`;
+        }
+      }
 
       return {
         id: primaryAC.id,
@@ -791,7 +831,14 @@ export async function createPlaceholdersFromStories(
 
         const primaryAC = group[0];
         const testName = primaryAC.testName || `${story.title}: ${primaryAC.description.slice(0, 60)}`;
-        const acDescription = group.map(ac => ac.description).join('\n');
+        let acDescription = group.map(ac => ac.description).join('\n');
+        // If description just duplicates the name or is too short, use story context
+        if (acDescription === testName || acDescription.trim().length < 20) {
+          acDescription = story.description;
+          if (group.length > 0 && group[0].description !== testName) {
+            acDescription += `\n${group.map(ac => ac.description).join('\n')}`;
+          }
+        }
 
         try {
           await queries.createTest({

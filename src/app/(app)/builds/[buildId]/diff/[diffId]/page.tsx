@@ -5,6 +5,7 @@ import { getBuild } from '@/server/actions/builds';
 import { DiffViewerClient } from './diff-viewer-client';
 import { StepLabelEditor } from './step-label-editor';
 import { ChevronLeft, ChevronRight, ExternalLink } from 'lucide-react';
+import { BrowserIcon } from '@/components/ui/browser-icon';
 
 interface PageProps {
   params: Promise<{ buildId: string; diffId: string }>;
@@ -73,6 +74,12 @@ export default async function DiffPage({ params }: PageProps) {
                 />
               </h1>
               <div className="flex items-center gap-3 text-sm text-muted-foreground">
+                {diff.browser && (
+                  <>
+                    <BrowserIcon browser={diff.browser} className="w-4 h-4" />
+                    <span>·</span>
+                  </>
+                )}
                 {openPageUrl && (
                   <a
                     href={openPageUrl}

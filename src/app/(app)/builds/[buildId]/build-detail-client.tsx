@@ -11,6 +11,7 @@ import { Badge } from '@/components/ui/badge';
 import { Collapsible, CollapsibleTrigger, CollapsibleContent } from '@/components/ui/collapsible';
 import { batchApproveDiffs, batchAddDiffTodos, acceptAIApprovals } from '@/server/actions/diffs';
 import { Input } from '@/components/ui/input';
+import { BrowserIcon } from '@/components/ui/browser-icon';
 
 // Filter type for the build detail page metrics
 export type FilterType = 'all' | 'tests' | 'changed' | 'flaky' | 'failed' | 'passed' | 'errors' | 'todo' | 'ai-approve' | 'ai-review' | 'ai-flag';
@@ -389,7 +390,7 @@ export function BuildDetailClient({
                       browserFilter === b ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground hover:bg-muted/80'
                     }`}
                   >
-                    {b === 'webkit' ? 'Safari' : b === 'firefox' ? 'Firefox' : 'Chromium'}
+                    <BrowserIcon browser={b} />
                   </button>
                 ))}
               </div>
@@ -399,7 +400,7 @@ export function BuildDetailClient({
                 className="cursor-pointer gap-1 bg-primary/10 text-primary border-primary/20 hover:bg-primary/20"
                 onClick={() => setBrowserFilter(null)}
               >
-                <span>Browser: {browserFilter === 'webkit' ? 'Safari' : browserFilter === 'firefox' ? 'Firefox' : 'Chromium'}</span>
+                <BrowserIcon browser={browserFilter} className="w-3 h-3" />
                 <XIcon className="w-3 h-3" />
               </Badge>
             )}
@@ -512,6 +513,7 @@ export function BuildDetailClient({
                     isSelected={selectedIds.has(diff.id)}
                     onToggleSelect={toggleSelect}
                     hasCodeChange={codeChangeTestIdSet.has(diff.testId)}
+                    hasMultipleBrowsers={hasMultipleBrowsers}
                     banAiMode={banAiMode}
                   />
                 ))}
@@ -525,6 +527,7 @@ export function BuildDetailClient({
                 selectedIds={selectedIds}
                 onToggleSelect={toggleSelect}
                 codeChangeTestIdSet={codeChangeTestIdSet}
+                hasMultipleBrowsers={hasMultipleBrowsers}
                 expandKey={expandKey}
                 allExpanded={allExpanded}
                 banAiMode={banAiMode}
@@ -564,6 +567,7 @@ export function BuildDetailClient({
                                 selectedIds={selectedIds}
                                 onToggleSelect={toggleSelect}
                                 codeChangeTestIdSet={codeChangeTestIdSet}
+                                hasMultipleBrowsers={hasMultipleBrowsers}
                                 expandKey={expandKey}
                                 allExpanded={allExpanded}
                                 banAiMode={banAiMode}
@@ -580,6 +584,7 @@ export function BuildDetailClient({
                                   isSelected={selectedIds.has(diff.id)}
                                   onToggleSelect={toggleSelect}
                                   hasCodeChange={codeChangeTestIdSet.has(diff.testId)}
+                                  hasMultipleBrowsers={hasMultipleBrowsers}
                                   banAiMode={banAiMode}
                                 />
                               ))}
@@ -608,6 +613,7 @@ function TestGroupedList({
   selectedIds,
   onToggleSelect,
   codeChangeTestIdSet,
+  hasMultipleBrowsers,
   expandKey,
   allExpanded,
   banAiMode = false,
@@ -618,6 +624,7 @@ function TestGroupedList({
   selectedIds: Set<string>;
   onToggleSelect: (id: string) => void;
   codeChangeTestIdSet: Set<string>;
+  hasMultipleBrowsers: boolean;
   expandKey: number;
   allExpanded: boolean;
   banAiMode?: boolean;
@@ -663,6 +670,7 @@ function TestGroupedList({
                       isSelected={selectedIds.has(diff.id)}
                       onToggleSelect={onToggleSelect}
                       hasCodeChange={codeChangeTestIdSet.has(diff.testId)}
+                      hasMultipleBrowsers={hasMultipleBrowsers}
                       banAiMode={banAiMode}
                     />
                   ))}
@@ -684,6 +692,7 @@ function DiffRow({
   isSelected,
   onToggleSelect,
   hasCodeChange,
+  hasMultipleBrowsers,
   banAiMode = false,
 }: {
   diff: VisualDiffWithTestStatus;
@@ -692,6 +701,7 @@ function DiffRow({
   isSelected: boolean;
   onToggleSelect: (id: string) => void;
   hasCodeChange: boolean;
+  hasMultipleBrowsers: boolean;
   banAiMode?: boolean;
 }) {
   const router = useRouter();
@@ -755,9 +765,9 @@ function DiffRow({
                       ? 'Diff error'
                       : 'No changes'}
             </span>
-            {diff.browser && diff.browser !== 'chromium' && (
+            {diff.browser && hasMultipleBrowsers && (
               <Badge variant="outline" className="text-xs px-1.5 py-0">
-                {diff.browser === 'webkit' ? 'Safari' : diff.browser}
+                <BrowserIcon browser={diff.browser} className="w-3.5 h-3.5" />
               </Badge>
             )}
             <span className="text-muted-foreground/40 text-xs font-mono">
