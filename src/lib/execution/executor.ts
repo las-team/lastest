@@ -251,7 +251,7 @@ async function executeSetupViaRunner(
 
   // Poll DB for setup completion with adaptive interval (starts fast, backs off)
   let pollInterval = 250;
-  const maxPollInterval = 750;
+  const maxPollInterval = 500;
   const maxWait = setupTimeout + 30000; // Allow extra time for network overhead
   const startTime = Date.now();
 
@@ -347,7 +347,7 @@ async function executeViaRunner(
   // Scale timeout for concurrency — parallel tests compete for resources
   const testTimeout = Math.max(baseTimeout * maxParallel, 300000);
   let pollInterval = 250;
-  const maxPollInterval = 750;
+  const maxPollInterval = 500;
 
   // Check if the background job has been cancelled
   const checkCancelled = async (): Promise<boolean> => {

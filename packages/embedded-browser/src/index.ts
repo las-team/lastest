@@ -181,13 +181,38 @@ async function startup(): Promise<void> {
         if (activeTasks === 1) {
           capturedClient.setStatus('busy', payload.testId);
           streamServer?.broadcastStatus('busy', payload.targetUrl);
+          // Pause screencast to free Chromium CPU for test execution
+          await screencast?.stop();
         }
 
         (async () => {
           try {
             const result = await capturedExecutor.runTest(capturedBrowser, payload);
 
-            // Send result FIRST so server sees pass/fail before timeout
+            // Upload screenshots BEFORE result so they're in DB when executor sees "completed"
+            if (result.screenshots.length > 0) {
+              console.log(`[Command] Uploading ${result.screenshots.length} screenshots for test ${payload.testId}...`);
+              await Promise.all(result.screenshots.map((screenshot) =>
+                capturedClient.sendMessage({
+                  id: crypto.randomUUID(),
+                  type: 'response:screenshot',
+                  timestamp: Date.now(),
+                  payload: {
+                    correlationId: capturedCommand.id,
+                    testRunId: payload.testRunId,
+                    repositoryId: payload.repositoryId,
+                    filename: screenshot.filename,
+                    data: screenshot.data,
+                    width: screenshot.width,
+                    height: screenshot.height,
+                    capturedAt: Date.now(),
+                  },
+                })
+              ));
+              console.log(`[Command] All screenshots uploaded for test ${payload.testId}`);
+            }
+
+            // Send result AFTER screenshots so server has them when it sees pass/fail
             await capturedClient.sendMessage({
               id: crypto.randomUUID(),
               type: 'response:test_result',
@@ -203,29 +228,6 @@ async function startup(): Promise<void> {
                 logs: result.logs,
               },
             });
-
-            // Upload screenshots separately (matching standard runner pattern)
-            if (result.screenshots.length > 0) {
-              console.log(`[Command] Uploading ${result.screenshots.length} screenshots for test ${payload.testId}...`);
-              for (const screenshot of result.screenshots) {
-                await capturedClient.sendMessage({
-                  id: crypto.randomUUID(),
-                  type: 'response:screenshot',
-                  timestamp: Date.now(),
-                  payload: {
-                    correlationId: capturedCommand.id,
-                    testRunId: payload.testRunId,
-                    repositoryId: payload.repositoryId,
-                    filename: screenshot.filename,
-                    data: screenshot.data,
-                    width: screenshot.width,
-                    height: screenshot.height,
-                    capturedAt: Date.now(),
-                  },
-                });
-              }
-              console.log(`[Command] All screenshots uploaded for test ${payload.testId}`);
-            }
           } catch (err) {
             console.error(`[Command] Test ${payload.testId} failed:`, err);
           } finally {
@@ -234,6 +236,16 @@ async function startup(): Promise<void> {
             if (activeTasks === 0) {
               capturedClient.setStatus('idle');
               streamServer?.broadcastStatus('ready');
+              // Restart screencast on idle page
+              if (page && screencast) {
+                try {
+                  await screencast.start(page, (frame) => {
+                    streamServer!.broadcastFrame(frame.data, frame.width, frame.height, frame.timestamp);
+                  });
+                } catch (err) {
+                  console.error('[Command] Failed to restart screencast:', err);
+                }
+              }
             }
           }
         })();
@@ -424,6 +436,8 @@ async function startup(): Promise<void> {
         if (activeTasks === 1) {
           capturedClient.setStatus('busy', `setup:${payload.setupId}`);
           streamServer?.broadcastStatus('busy', payload.targetUrl);
+          // Pause screencast to free Chromium CPU for setup execution
+          await screencast?.stop();
         }
 
         (async () => {
@@ -464,6 +478,16 @@ async function startup(): Promise<void> {
             if (activeTasks === 0) {
               capturedClient.setStatus('idle');
               streamServer?.broadcastStatus('ready');
+              // Restart screencast on idle page
+              if (page && screencast) {
+                try {
+                  await screencast.start(page, (frame) => {
+                    streamServer!.broadcastFrame(frame.data, frame.width, frame.height, frame.timestamp);
+                  });
+                } catch (err) {
+                  console.error('[Command] Failed to restart screencast:', err);
+                }
+              }
             }
           }
         })();
