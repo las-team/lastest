@@ -6,6 +6,7 @@
 
 import { Command } from 'commander';
 import { spawn, execSync } from 'child_process';
+import { createRequire } from 'node:module';
 import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
@@ -650,6 +651,7 @@ export async function main() {
     .description('Print installed Playwright version (for CI cache keys)')
     .action(() => {
       try {
+        const require = createRequire(import.meta.url);
         const pkgPath = require.resolve('playwright/package.json');
         const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf-8'));
         console.log(pkg.version);

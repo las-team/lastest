@@ -1,16 +1,3 @@
-/**
- * WebSocket Proxy Preload Script
- *
- * Loaded via `node --require ./ws-proxy-preload.js server.js` in Docker.
- * Synchronously patches http.Server.prototype.listen to proxy WebSocket
- * upgrade requests at /api/embedded/stream/ws to the embedded browser's
- * stream server.
- *
- * Supports two modes:
- * - Local: connects to 127.0.0.1:STREAM_PORT (single-container setup)
- * - Remote: connects to target host:port from ?target= query param (multi-container setup)
- */
-
 const http = require('http');
 const net = require('net');
 
@@ -25,18 +12,14 @@ http.Server.prototype.listen = function (...args) {
     const searchParams = new URLSearchParams(url.includes('?') ? url.slice(url.indexOf('?') + 1) : '');
     const target = searchParams.get('target');
 
-    // Determine connection target
     let connectHost = '127.0.0.1';
     let connectPort = defaultStreamPort;
-
     if (target) {
-      // Multi-container: parse target=host:port from query string
       const parts = target.split(':');
       connectHost = parts[0];
       if (parts[1]) connectPort = parseInt(parts[1], 10);
     }
 
-    // Build upstream query string (forward token but strip target)
     searchParams.delete('target');
     const upstreamQs = searchParams.toString() ? '?' + searchParams.toString() : '';
 

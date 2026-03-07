@@ -43,6 +43,8 @@ jobs:
           sleep 3
 
           npx @lastest/runner@0.4.1 trigger \
+            -t "$LASTEST2_TOKEN" \
+            -s "$LASTEST2_URL" \
             --repo "dexilion-team/lastest2" \
             --branch "${{ github.head_ref || github.ref_name }}" \
             --commit "${{ github.sha }}" \
