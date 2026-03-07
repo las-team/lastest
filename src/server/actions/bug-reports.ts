@@ -54,6 +54,7 @@ export async function submitBugReport(data: {
 
   // Insert report
   await queries.createBugReport({
+    id: reportId,
     teamId: session.team.id,
     reportedById: session.user.id,
     description: data.description,

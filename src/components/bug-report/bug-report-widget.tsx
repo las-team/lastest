@@ -45,38 +45,42 @@ export function BugReportWidget() {
     }
 
     startTransition(async () => {
-      let screenshotBase64: string | null = null;
+      try {
+        let screenshotBase64: string | null = null;
 
-      if (includeScreenshot) {
-        try {
-          const html2canvas = (await import('html2canvas')).default;
-          const canvas = await html2canvas(document.body, {
-            logging: false,
-            useCORS: true,
-            scale: 1,
-          });
-          screenshotBase64 = canvas.toDataURL('image/png').split(',')[1];
-        } catch {
-          // Screenshot capture failed, continue without it
+        if (includeScreenshot) {
+          try {
+            const html2canvas = (await import('html2canvas')).default;
+            const canvas = await html2canvas(document.body, {
+              logging: false,
+              useCORS: true,
+              scale: 1,
+            });
+            screenshotBase64 = canvas.toDataURL('image/png').split(',')[1];
+          } catch {
+            // Screenshot capture failed, continue without it
+          }
         }
-      }
 
-      const context = getSnapshot();
-      const result = await submitBugReport({
-        description: description.trim(),
-        severity,
-        context,
-        screenshotBase64,
-      });
+        const context = getSnapshot();
+        const result = await submitBugReport({
+          description: description.trim(),
+          severity,
+          context,
+          screenshotBase64,
+        });
 
-      if (result.success) {
-        toast.success('Bug report submitted. Thank you!');
-        setDescription('');
-        setSeverity('medium');
-        setIncludeScreenshot(false);
-        setOpen(false);
-      } else {
-        toast.error(result.error ?? 'Failed to submit bug report.');
+        if (result.success) {
+          toast.success('Bug report submitted. Thank you!');
+          setDescription('');
+          setSeverity('medium');
+          setIncludeScreenshot(false);
+          setOpen(false);
+        } else {
+          toast.error(result.error ?? 'Failed to submit bug report.');
+        }
+      } catch {
+        toast.error('Failed to submit bug report. Please try again.');
       }
     });
   };

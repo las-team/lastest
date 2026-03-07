@@ -199,6 +199,7 @@ export async function getAggregatedSelectorStats(repositoryId: string): Promise<
 
 // Bug Reports
 export async function createBugReport(data: {
+  id?: string;
   teamId: string;
   reportedById: string;
   description: string;
@@ -207,7 +208,7 @@ export async function createBugReport(data: {
   screenshotPath?: string | null;
   contentHash?: string | null;
 }) {
-  const id = uuid();
+  const id = data.id ?? uuid();
   await db.insert(bugReports).values({
     id,
     teamId: data.teamId,
