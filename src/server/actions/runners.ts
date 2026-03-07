@@ -1,8 +1,8 @@
 'use server';
 
 import { db } from '@/lib/db';
-import { runners, backgroundJobs, type Runner, type RunnerCapability, type RunnerType } from '@/lib/db/schema';
-import { eq, and, desc, isNull } from 'drizzle-orm';
+import { runners, backgroundJobs, embeddedSessions, type Runner, type RunnerCapability, type RunnerType } from '@/lib/db/schema';
+import { eq, and, desc, isNull, lt, or } from 'drizzle-orm';
 import { v4 as uuid } from 'uuid';
 import crypto from 'crypto';
 import { requireTeamAdmin, requireTeamAccess } from '@/lib/auth';
@@ -463,4 +463,38 @@ export async function markStaleRunnersOffline(staleThresholdMs: number = 60_000)
   }
 
   return markedOffline;
+}
+
+/**
+ * Delete system runners that have been offline for longer than the threshold.
+ * Also deletes their associated embedded sessions.
+ */
+export async function deleteStaleSystemRunners(thresholdMs: number): Promise<number> {
+  const staleThreshold = new Date(Date.now() - thresholdMs);
+
+  const staleRunners = await db
+    .select({ id: runners.id, name: runners.name })
+    .from(runners)
+    .where(
+      and(
+        eq(runners.isSystem, true),
+        eq(runners.status, 'offline'),
+        or(
+          isNull(runners.lastSeen),
+          lt(runners.lastSeen, staleThreshold)
+        )
+      )
+    )
+    .all();
+
+  if (staleRunners.length === 0) return 0;
+
+  for (const runner of staleRunners) {
+    // Delete associated embedded sessions first (no cascade FK)
+    await db.delete(embeddedSessions).where(eq(embeddedSessions.runnerId, runner.id));
+    await db.delete(runners).where(eq(runners.id, runner.id));
+    console.log(`[Stale Cleanup] Deleted stale system runner ${runner.id} (${runner.name})`);
+  }
+
+  return staleRunners.length;
 }

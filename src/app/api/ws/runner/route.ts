@@ -10,7 +10,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { validateRunnerToken, updateRunnerStatus, markStaleRunnersOffline } from '@/server/actions/runners';
+import { validateRunnerToken, updateRunnerStatus, markStaleRunnersOffline, deleteStaleSystemRunners } from '@/server/actions/runners';
 import type { Message, HeartbeatMessage, TestResultResponse, SetupResultResponse, ScreenshotUploadResponse, RecordingEventResponse, RecordingStoppedResponse } from '@/lib/ws/protocol';
 import fs from 'fs/promises';
 import path from 'path';
@@ -125,6 +125,15 @@ function ensureInitialized() {
       await markStaleRunnersOffline(SESSION_TIMEOUT_MS);
     } catch (error) {
       console.error('[Cleanup] Failed to mark stale runners offline:', error);
+    }
+
+    try {
+      const deleted = await deleteStaleSystemRunners(5 * 60 * 1000);
+      if (deleted > 0) {
+        console.log(`[GC] Deleted ${deleted} stale system runners`);
+      }
+    } catch (error) {
+      console.error('[GC] Failed to delete stale system runners:', error);
     }
 
     // Garbage collection: delete old completed commands (24h)
