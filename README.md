@@ -19,7 +19,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License" />
+  <img src="https://img.shields.io/badge/license-FSL--1.1--ALv2-blue.svg" alt="License" />
   <img src="https://img.shields.io/badge/PRs-welcome-brightgreen.svg" alt="PRs Welcome" />
   <img src="https://img.shields.io/badge/self--hosted-yes-green" alt="Self Hosted" />
   <img src="https://img.shields.io/badge/cost-%240%20forever-brightgreen" alt="$0 Forever" />
@@ -286,7 +286,7 @@ Open [http://localhost:3000](http://localhost:3000)
 | **Price** | **$0** | $199+/mo | $699+/mo | $179+/mo | $100+/mo | Custom | $0 |
 | **Free screenshots** | **Unlimited** | 5K/mo | OSS only | 5K/mo | 5K/mo | None | Unlimited |
 | **Self-hosted** | **Yes** | No | Enterprise | No | OSS core | No | Yes |
-| **Open source** | **MIT** | SDKs only | SDKs only | Storybook | MIT core | No | Apache-2.0 |
+| **Open source** | **FSL-1.1-ALv2** | SDKs only | SDKs only | Storybook | MIT core | No | Apache-2.0 |
 | **No-code recording** | **Yes** | No | Low-code | No | No | Session | Codegen |
 | **AI test generation** | **Yes** | No | NLP | No | No | Session-based | No |
 | **AI auto-fix tests** | **Yes** | No | No | No | No | Auto-maintain | No |
@@ -698,7 +698,7 @@ PRs welcome! See [CONTRIBUTING.md](./CONTRIBUTING.md) for guidelines.
 
 ## License
 
-MIT
+FSL-1.1-ALv2 — see [LICENSE](./LICENSE)
 
 ---
 
