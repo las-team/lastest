@@ -51,6 +51,18 @@ export async function getSystemRunners(): Promise<Runner[]> {
 }
 
 /**
+ * Get an available (online) system runner for auto-assignment.
+ */
+export async function getAvailableSystemRunner(): Promise<Runner | null> {
+  return db
+    .select()
+    .from(runners)
+    .where(and(eq(runners.isSystem, true), eq(runners.status, 'online')))
+    .limit(1)
+    .get() ?? null;
+}
+
+/**
  * Get a specific runner by ID (team-scoped)
  */
 export async function getRunner(runnerId: string): Promise<Runner | null> {

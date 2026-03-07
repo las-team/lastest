@@ -468,15 +468,15 @@ export function RecordingClient({
           lastSequenceRef.current = 0;
 
           // Fetch embedded stream URL if recording via an embedded runner
-          if (executionTarget !== 'local') {
+          const resolvedTarget = result.resolvedRunnerId || executionTarget;
+          if (resolvedTarget !== 'local') {
             fetch(`/api/embedded/stream`)
               .then(res => res.ok ? res.json() : null)
               .then(data => {
                 if (data?.sessions) {
-                  const session = data.sessions.find((s: { runnerId: string }) => s.runnerId === executionTarget);
+                  const session = data.sessions.find((s: { runnerId: string }) => s.runnerId === resolvedTarget);
                   if (session?.streamUrl) {
                     const token = data.streamAuthToken;
-                    // Pass direct stream URL — BrowserViewer will replace hostname for remote access
                     setEmbeddedStreamUrl(
                       token ? `${session.streamUrl}?token=${encodeURIComponent(token)}` : session.streamUrl
                     );
