@@ -1,14 +1,13 @@
 'use client';
 
 import { useEffect } from 'react';
-import { useSearchParams, useRouter } from 'next/navigation';
+import { useRouter } from 'next/navigation';
 
 export function SettingsHighlighter() {
-  const searchParams = useSearchParams();
   const router = useRouter();
-  const highlight = searchParams.get('highlight');
 
   useEffect(() => {
+    const highlight = new URLSearchParams(window.location.search).get('highlight');
     if (!highlight) return;
 
     const ids = highlight.split(',');
@@ -36,14 +35,13 @@ export function SettingsHighlighter() {
       for (const el of els) {
         el.classList.remove('settings-highlight');
       }
-      // Remove highlight param from URL without navigation
       const url = new URL(window.location.href);
       url.searchParams.delete('highlight');
       router.replace(url.pathname + url.search, { scroll: false });
     }, 3000);
 
     return () => clearTimeout(timer);
-  }, [highlight, router]);
+  }, [router]);
 
   return null;
 }

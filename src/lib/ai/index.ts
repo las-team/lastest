@@ -8,6 +8,8 @@ import type { AIActionType, AILogStatus } from '@/lib/db/schema';
 
 export * from './types';
 export * from './prompts';
+export { gatherCodebaseIntelligence } from './codebase-intelligence';
+export type { CodebaseIntelligence, DependencyInsight } from './codebase-intelligence';
 
 export function getAIProvider(config: AIProviderConfig): AIProvider {
   if (config.provider === 'openrouter') {

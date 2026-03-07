@@ -9,11 +9,12 @@ import {
   SYSTEM_PROMPT,
   MCP_SYSTEM_PROMPT,
 } from '@/lib/ai';
-import type { AIProviderConfig } from '@/lib/ai/types';
+import type { AIProviderConfig, CodebaseIntelligenceContext } from '@/lib/ai/types';
 import type { ExtractedUserStory, ExtractedAcceptanceCriterion } from '@/lib/db/schema';
 import { revalidatePath } from 'next/cache';
 import { getRepoTree, getFileContent, compareBranches } from '@/lib/github/content';
 import { extractTextFromFile } from '@/lib/file-parser';
+import { runParallel } from '@/lib/ai/parallel';
 import { createJob, updateJobProgress, completeJob, failJob } from './jobs';
 import { getCurrentBranchForRepo } from '@/lib/git-utils';
 import { requireRepoAccess } from '@/lib/auth';
@@ -62,6 +63,20 @@ async function getAIConfig(repositoryId?: string | null): Promise<AIProviderConf
 
 /** Extract first valid JSON array from text */
 function extractJsonArray(text: string): string | null {
+  // 1. Try extracting from markdown code blocks first (```json ... ``` or ``` ... ```)
+  const codeBlockRegex = /```(?:json)?\s*\n?([\s\S]*?)```/g;
+  let match;
+  while ((match = codeBlockRegex.exec(text)) !== null) {
+    const block = match[1].trim();
+    if (block.startsWith('[')) {
+      try {
+        JSON.parse(block);
+        return block;
+      } catch { /* not valid JSON, try next block */ }
+    }
+  }
+
+  // 2. Fallback: find first top-level [ and match its closing ]
   const start = text.indexOf('[');
   if (start === -1) return null;
 
@@ -71,7 +86,6 @@ function extractJsonArray(text: string): string | null {
 
   for (let i = start; i < text.length; i++) {
     const char = text[i];
-
     if (escape) { escape = false; continue; }
     if (char === '\\' && inString) { escape = true; continue; }
     if (char === '"') { inString = !inString; continue; }
@@ -81,12 +95,202 @@ function extractJsonArray(text: string): string | null {
     else if (char === ']') {
       depth--;
       if (depth === 0) {
-        return text.slice(start, i + 1);
+        const candidate = text.slice(start, i + 1);
+        try {
+          JSON.parse(candidate);
+          return candidate;
+        } catch {
+          return null; // Balanced brackets but not valid JSON (markdown syntax)
+        }
       }
     }
   }
 
   return null;
+}
+
+/**
+ * Parse user stories from markdown-formatted AI response.
+ * Handles the primary exchange format used across agents.
+ */
+function parseStoriesFromMarkdown(text: string): ExtractedUserStory[] | null {
+  const stories: ExtractedUserStory[] = [];
+
+  // Split on user story headers: ### **User Story N: Title**, ## User Story: Title, ### Title, etc.
+  const storyBlocks = text.split(/(?=^#{1,4}\s+\*{0,2}(?:User Story[^*\n]*?[:]\s*)?)/mi);
+
+  let storyIndex = 0;
+  for (const block of storyBlocks) {
+    if (!block.trim()) continue;
+
+    // Extract title from header
+    const headerMatch = block.match(/^#{1,4}\s+\*{0,2}(?:User Story\s*\d*\s*[:.]?\s*)?(.+?)\*{0,2}\s*$/m);
+    if (!headerMatch) continue;
+
+    const title = headerMatch[1].replace(/\*+/g, '').trim();
+    if (!title) continue;
+
+    storyIndex++;
+    const storyId = `US-${storyIndex}`;
+
+    // Extract "As a / I want to / So that" description
+    const asAMatch = block.match(/\*{0,2}As a\*{0,2}\s+(.+?)(?:\n|$)/i);
+    const iWantMatch = block.match(/\*{0,2}I want(?:\s+to)?\*{0,2}\s+(.+?)(?:\n|$)/i);
+    const soThatMatch = block.match(/\*{0,2}So that\*{0,2}\s+(.+?)(?:\n|$)/i);
+
+    let description = '';
+    if (asAMatch) {
+      description = `As a ${asAMatch[1].replace(/\*+/g, '').trim()}`;
+      if (iWantMatch) description += `, I want to ${iWantMatch[1].replace(/\*+/g, '').trim()}`;
+      if (soThatMatch) description += `, so that ${soThatMatch[1].replace(/\*+/g, '').trim()}`;
+    } else {
+      // Fallback: use first non-header, non-AC paragraph as description
+      const descMatch = block.match(/^#{1,4}[^\n]+\n+((?:(?![-*]\s*AC|Acceptance|#{1,4}\s)[\s\S])+)/);
+      description = descMatch ? descMatch[1].replace(/\*+/g, '').trim() : title;
+    }
+
+    // Extract acceptance criteria from bullet points
+    const criteria: ExtractedAcceptanceCriterion[] = [];
+    // Match: - AC1: desc, - **AC1:** desc, - AC-1.1: desc, - desc (after "Acceptance Criteria" header)
+    const acSection = block.match(/(?:\*{0,2}Acceptance Criteria\*{0,2}:?\s*\n)([\s\S]*?)(?=\n#{1,4}\s|\n\*{0,2}(?:User Story|Priority|Notes)|$)/i);
+    const acText = acSection ? acSection[1] : block;
+
+    const acPattern = /(?:[-*]|\d+[.)]\s)\s*\*{0,2}(?:AC[-. ]?\d+(?:\.\d+)?)\*{0,2}[:.]\s*(.+?)(?:\n|$)/gi;
+    let acMatch;
+    let acIndex = 0;
+    while ((acMatch = acPattern.exec(acText)) !== null) {
+      acIndex++;
+      const acDesc = acMatch[1].replace(/\*+/g, '').trim();
+      if (!acDesc) continue;
+      criteria.push({
+        id: `AC-${storyIndex}.${acIndex}`,
+        description: `Given the user is on the application, when ${acDesc.toLowerCase()}, then the expected behavior occurs`,
+        testName: acDesc,
+      });
+    }
+
+    // Fallback: plain bullet points after "Acceptance Criteria:" without AC prefix
+    if (criteria.length === 0 && acSection) {
+      const plainBullets = /(?:[-*]|\d+[.)]\s)\s+(.+?)(?:\n|$)/g;
+      let bulletMatch;
+      while ((bulletMatch = plainBullets.exec(acSection[1])) !== null) {
+        acIndex++;
+        const desc = bulletMatch[1].replace(/\*+/g, '').trim();
+        if (!desc || desc.length < 5) continue;
+        criteria.push({
+          id: `AC-${storyIndex}.${acIndex}`,
+          description: desc,
+          testName: desc.length > 60 ? desc.slice(0, 57) + '...' : desc,
+        });
+      }
+    }
+
+    // Last-resort fallback: any bullets in the block after skipping header + description
+    if (criteria.length === 0) {
+      const lines = block.split('\n');
+      let pastHeader = false;
+      let pastDescription = false;
+      for (const line of lines) {
+        if (!pastHeader) {
+          if (/^#{1,4}\s/.test(line)) { pastHeader = true; continue; }
+          continue;
+        }
+        if (!pastDescription) {
+          // Skip blank lines and description text until we hit a bullet
+          if (/^\s*(?:[-*]|\d+[.)])\s+/.test(line)) pastDescription = true;
+          else continue;
+        }
+        const bulletMatch = line.match(/^\s*(?:[-*]|\d+[.)])\s+(.+)/);
+        if (bulletMatch) {
+          acIndex++;
+          const desc = bulletMatch[1].replace(/\*+/g, '').trim();
+          if (!desc || desc.length < 5) continue;
+          criteria.push({
+            id: `AC-${storyIndex}.${acIndex}`,
+            description: desc,
+            testName: desc.length > 60 ? desc.slice(0, 57) + '...' : desc,
+          });
+        }
+      }
+    }
+
+    if (criteria.length > 0) {
+      stories.push({
+        id: storyId,
+        title,
+        description,
+        acceptanceCriteria: criteria,
+      });
+    }
+  }
+
+  return stories.length > 0 ? stories : null;
+}
+
+// ============================================
+// Quality Gate: filter non-testable ACs
+// ============================================
+
+const NON_TESTABLE_PREFIX = /^(create|implement|consider|add|build|design|ensure|set up|configure|should|could|might)\b/i;
+
+function validateAndFilterStories(stories: ExtractedUserStory[]): ExtractedUserStory[] {
+  const seenDescriptions = new Set<string>();
+
+  // Filter catch-all / markdown-artifact story titles
+  const CATCHALL_TITLES = new Set(['summary', 'overview', 'general', 'miscellaneous', 'misc', 'other', 'notes']);
+  const META_TEST_AC = /^(follows the constraint|handles loading|includes meaningful|uses steplogger|captures screenshots|employs appropriate)/i;
+
+  // Pre-filter: clean titles and remove catch-all stories
+  stories = stories.filter(story => {
+    // Strip emoji
+    story.title = story.title.replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{FE00}-\u{FE0F}\u{1F900}-\u{1F9FF}]/gu, '').trim();
+    // Strip status markers like "Planned", "Implemented", "Priority Order" etc.
+    story.title = story.title.replace(/\(.*?\)\s*$/, '').trim();
+    // Strip leading status words (e.g. "Planned", "Implemented")
+    story.title = story.title.replace(/^(planned|implemented|completed|pending|done|in progress)\b\s*/i, '').trim();
+    // Filter catch-all titles
+    return story.title.length > 0 && !CATCHALL_TITLES.has(story.title.toLowerCase());
+  });
+
+  const filtered = stories.map(story => {
+    const validACs = story.acceptanceCriteria.filter(ac => {
+      const desc = ac.description?.trim();
+      if (!desc) return false;
+
+      // Too short or too long
+      if (desc.length < 10 || desc.length > 300) return false;
+
+      // Questions
+      if (desc.endsWith('?')) return false;
+
+      // Non-testable action verbs
+      if (NON_TESTABLE_PREFIX.test(desc)) return false;
+
+      // Filter meta-test-quality ACs (about how to write tests, not what to test)
+      if (META_TEST_AC.test(desc)) return false;
+
+      // Deduplicate by normalized description
+      const normalized = desc.toLowerCase().replace(/\s+/g, ' ');
+      if (seenDescriptions.has(normalized)) return false;
+      seenDescriptions.add(normalized);
+
+      return true;
+    });
+
+    return { ...story, acceptanceCriteria: validACs };
+  }).filter(story => story.acceptanceCriteria.length > 0);
+
+  // Deduplicate stories by title (keep the one with more ACs)
+  const storyMap = new Map<string, ExtractedUserStory>();
+  for (const story of filtered) {
+    const key = story.title.toLowerCase().trim();
+    const existing = storyMap.get(key);
+    if (!existing || story.acceptanceCriteria.length > existing.acceptanceCriteria.length) {
+      storyMap.set(key, story);
+    }
+  }
+
+  return Array.from(storyMap.values());
 }
 
 // ============================================
@@ -246,13 +450,48 @@ async function extractStoriesFromContent(
     repositoryId,
   });
 
-  // Parse JSON response
+  // Parse response — try JSON first, then markdown
+  let stories: ExtractedUserStory[];
   const jsonStr = extractJsonArray(response);
-  if (!jsonStr) {
-    return { success: false, error: 'AI did not return valid JSON' };
+  if (jsonStr) {
+    try {
+      stories = JSON.parse(jsonStr);
+      // Normalize JSON ACs to match markdown-path quality
+      for (const story of stories) {
+        if (!story.acceptanceCriteria) continue;
+        for (const ac of story.acceptanceCriteria) {
+          if (!ac.description) continue;
+          // Ensure testName is set
+          if (!ac.testName) ac.testName = ac.description;
+          // If description looks like a raw title (no sentence structure), wrap it
+          if (!ac.description.match(/\b(given|when|then|verify|check|should|must)\b/i)) {
+            const rawDesc = ac.description;
+            ac.description = `When ${rawDesc.charAt(0).toLowerCase() + rawDesc.slice(1)}, verify the expected behavior`;
+          }
+        }
+      }
+    } catch {
+      // extractJsonArray returned non-JSON — fall through to markdown
+      const parsed = parseStoriesFromMarkdown(response);
+      if (!parsed) {
+        return { success: false, error: 'Could not extract stories from AI response' };
+      }
+      stories = parsed;
+    }
+  } else {
+    // AI returned markdown/prose — parse directly
+    const parsed = parseStoriesFromMarkdown(response);
+    if (!parsed) {
+      return { success: false, error: 'Could not extract stories from AI response' };
+    }
+    stories = parsed;
   }
 
-  const stories: ExtractedUserStory[] = JSON.parse(jsonStr);
+  // Quality gate: filter non-testable ACs and deduplicate
+  stories = validateAndFilterStories(stories);
+  if (stories.length === 0) {
+    return { success: false, error: 'No testable stories found after quality filtering' };
+  }
 
   // Create import record (non-fatal — stories are still usable if DB tracking fails)
   let importId: string | null = null;
@@ -385,6 +624,7 @@ export async function generateTestsFromStories(
   options?: {
     useBranchContext?: boolean;
     targetUrl?: string;
+    codebaseIntelligence?: CodebaseIntelligenceContext;
   }
 ): Promise<GenerateTestsResponse> {
   await requireRepoAccess(repositoryId);
@@ -411,7 +651,6 @@ export async function generateTestsFromStories(
     let areasCreated = 0;
     let testsCreated = 0;
     const errors: string[] = [];
-    let testIndex = 0;
 
     // Fetch branch context if requested
     let branchChanges: { changedFiles: string[]; fileDiffs?: string } | null = null;
@@ -419,40 +658,57 @@ export async function generateTestsFromStories(
       branchChanges = await fetchBranchDiffs(repositoryId, branch);
     }
 
+    // Pre-create areas and collect all task groups
+    interface TaskInfo {
+      story: ExtractedUserStory;
+      group: ExtractedAcceptanceCriterion[];
+      areaId: string;
+    }
+    const allTasks: TaskInfo[] = [];
+
     for (const story of stories) {
-      // Create functional area for this User Story
       const area = await queries.getOrCreateFunctionalAreaByRepo(
         repositoryId,
         story.title,
         story.description
       );
 
-      // Track if this was a new area
       const existingAreas = await queries.getFunctionalAreasByRepo(repositoryId);
       const wasNew = existingAreas.filter(a => a.name.toLowerCase() === story.title.toLowerCase()).length <= 1;
       if (wasNew) areasCreated++;
 
-      // Group ACs that should be combined into single tests
       const acGroups = groupAcceptanceCriteria(story.acceptanceCriteria);
-
       for (const group of acGroups) {
-        testIndex++;
-        await updateJobProgress(jobId, testIndex, totalTests);
+        allTasks.push({ story, group, areaId: area.id });
+      }
+    }
 
-        const primaryAC = group[0];
-        const testName = primaryAC.testName || `${story.title}: ${primaryAC.description.slice(0, 60)}`;
-        const acDescription = group.map(ac => ac.description).join('\n');
+    // Run test generation in parallel (concurrency: 3)
+    const parallelTasks = allTasks.map((task) => {
+      const primaryAC = task.group[0];
+      const testName = primaryAC.testName || `${task.story.title}: ${primaryAC.description.slice(0, 60)}`;
+      let acDescription = task.group.map(ac => ac.description).join('\n');
+      // If description just duplicates the name or is too short, use story context
+      if (acDescription === testName || acDescription.trim().length < 20) {
+        acDescription = task.story.description;
+        if (task.group.length > 0 && task.group[0].description !== testName) {
+          acDescription += `\n${task.group.map(ac => ac.description).join('\n')}`;
+        }
+      }
 
-        const prompt = createBranchAwareTestPrompt({
-          testName,
-          acceptanceCriteria: acDescription,
-          userStoryTitle: story.title,
-          userStoryDescription: story.description,
-          targetUrl: options?.targetUrl,
-          branchChanges: branchChanges || undefined,
-        });
+      return {
+        id: primaryAC.id,
+        execute: async () => {
+          const prompt = createBranchAwareTestPrompt({
+            testName,
+            acceptanceCriteria: acDescription,
+            userStoryTitle: task.story.title,
+            userStoryDescription: task.story.description,
+            targetUrl: options?.targetUrl,
+            branchChanges: branchChanges || undefined,
+            codebaseIntelligence: options?.codebaseIntelligence,
+          });
 
-        try {
           const response = await generateWithAI(config, prompt, SYSTEM_PROMPT, {
             actionType: 'generate_spec_tests',
             repositoryId,
@@ -462,18 +718,28 @@ export async function generateTestsFromStories(
           if (code) {
             await queries.createTest({
               repositoryId,
-              functionalAreaId: area.id,
+              functionalAreaId: task.areaId,
               name: testName,
               code,
               description: acDescription,
               targetUrl: options?.targetUrl || null,
             });
-            testsCreated++;
+            return { created: true, testName };
           }
-        } catch (err) {
-          const msg = err instanceof Error ? err.message : 'Unknown error';
-          errors.push(`${testName}: ${msg}`);
-        }
+          return { created: false, testName };
+        },
+      };
+    });
+
+    const results = await runParallel(parallelTasks, 3, async (completed, total) => {
+      await updateJobProgress(jobId, completed, total);
+    });
+
+    for (const result of results) {
+      if (result.success && result.result?.created) {
+        testsCreated++;
+      } else if (!result.success) {
+        errors.push(`${result.error || 'Unknown error'}`);
       }
     }
 
@@ -565,7 +831,14 @@ export async function createPlaceholdersFromStories(
 
         const primaryAC = group[0];
         const testName = primaryAC.testName || `${story.title}: ${primaryAC.description.slice(0, 60)}`;
-        const acDescription = group.map(ac => ac.description).join('\n');
+        let acDescription = group.map(ac => ac.description).join('\n');
+        // If description just duplicates the name or is too short, use story context
+        if (acDescription === testName || acDescription.trim().length < 20) {
+          acDescription = story.description;
+          if (group.length > 0 && group[0].description !== testName) {
+            acDescription += `\n${group.map(ac => ac.description).join('\n')}`;
+          }
+        }
 
         try {
           await queries.createTest({

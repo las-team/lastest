@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
+import { Checkbox } from '@/components/ui/checkbox';
 import {
   Select,
   SelectContent,
@@ -86,6 +87,9 @@ export function PlaywrightSettingsCard({
   const [stabilization, setStabilization] = useState<StabilizationSettings>(
     { ...DEFAULT_STABILIZATION_SETTINGS, ...settings.stabilization }
   );
+  const [browsers, setBrowsers] = useState<string[]>(
+    (settings as PlaywrightSettings & { browsers?: string[] }).browsers || ['chromium']
+  );
   const [stabilizationOpen, setStabilizationOpen] = useState(false);
   const [selectorStats, setSelectorStats] = useState<SelectorTypeStats[]>([]);
 
@@ -116,6 +120,7 @@ export function PlaywrightSettingsCard({
     screenshotDelay: settings.screenshotDelay ?? 0,
     maxParallelTests: settings.maxParallelTests ?? 1,
     stabilization: { ...DEFAULT_STABILIZATION_SETTINGS, ...settings.stabilization },
+    browsers: (settings as PlaywrightSettings & { browsers?: string[] }).browsers || ['chromium'],
   });
 
   // Sync local state when settings prop changes (e.g. after template apply)
@@ -144,6 +149,7 @@ export function PlaywrightSettingsCard({
     setScreenshotDelay(settings.screenshotDelay ?? 0);
     setMaxParallelTests(settings.maxParallelTests ?? 1);
     setStabilization({ ...DEFAULT_STABILIZATION_SETTINGS, ...settings.stabilization });
+    setBrowsers((settings as PlaywrightSettings & { browsers?: string[] }).browsers || ['chromium']);
 
     originalValues.current = {
       selectorPriority: settings.selectorPriority || DEFAULT_SELECTOR_PRIORITY,
@@ -169,6 +175,7 @@ export function PlaywrightSettingsCard({
       screenshotDelay: settings.screenshotDelay ?? 0,
       maxParallelTests: settings.maxParallelTests ?? 1,
       stabilization: { ...DEFAULT_STABILIZATION_SETTINGS, ...settings.stabilization },
+      browsers: (settings as PlaywrightSettings & { browsers?: string[] }).browsers || ['chromium'],
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [settingsKey]);
@@ -220,6 +227,7 @@ export function PlaywrightSettingsCard({
         screenshotDelay,
         maxParallelTests,
         stabilization,
+        browsers,
       });
       if (compact) {
         setShowSaved(true);
@@ -228,7 +236,7 @@ export function PlaywrightSettingsCard({
         toast.success('Playwright settings saved');
       }
     });
-  }, [repositoryId, selectorPriority, browser, viewportWidth, viewportHeight, headlessMode, navigationTimeout, actionTimeout, pointerGestures, cursorFPS, cursorPlaybackSpeed, defaultRecordingEngine, freezeAnimations, enableVideoRecording, acceptAnyCertificate, networkErrorMode, ignoreExternalNetworkErrors, consoleErrorMode, grantClipboardAccess, acceptDownloads, enableNetworkInterception, screenshotDelay, maxParallelTests, stabilization, compact]);
+  }, [repositoryId, selectorPriority, browser, viewportWidth, viewportHeight, headlessMode, navigationTimeout, actionTimeout, pointerGestures, cursorFPS, cursorPlaybackSpeed, defaultRecordingEngine, freezeAnimations, enableVideoRecording, acceptAnyCertificate, networkErrorMode, ignoreExternalNetworkErrors, consoleErrorMode, grantClipboardAccess, acceptDownloads, enableNetworkInterception, screenshotDelay, maxParallelTests, stabilization, browsers, compact]);
 
   // Auto-save with debounce - only when values differ from original props
   useEffect(() => {
@@ -256,7 +264,8 @@ export function PlaywrightSettingsCard({
       enableNetworkInterception !== orig.enableNetworkInterception ||
       screenshotDelay !== orig.screenshotDelay ||
       maxParallelTests !== orig.maxParallelTests ||
-      JSON.stringify(stabilization) !== JSON.stringify(orig.stabilization);
+      JSON.stringify(stabilization) !== JSON.stringify(orig.stabilization) ||
+      JSON.stringify(browsers) !== JSON.stringify(orig.browsers);
 
     if (!hasChanges) return;
 
@@ -273,7 +282,7 @@ export function PlaywrightSettingsCard({
         clearTimeout(debounceRef.current);
       }
     };
-  }, [selectorPriority, browser, viewportWidth, viewportHeight, headlessMode, navigationTimeout, actionTimeout, pointerGestures, cursorFPS, cursorPlaybackSpeed, defaultRecordingEngine, freezeAnimations, enableVideoRecording, acceptAnyCertificate, networkErrorMode, ignoreExternalNetworkErrors, consoleErrorMode, grantClipboardAccess, acceptDownloads, enableNetworkInterception, screenshotDelay, maxParallelTests, stabilization, doSave]);
+  }, [selectorPriority, browser, viewportWidth, viewportHeight, headlessMode, navigationTimeout, actionTimeout, pointerGestures, cursorFPS, cursorPlaybackSpeed, defaultRecordingEngine, freezeAnimations, enableVideoRecording, acceptAnyCertificate, networkErrorMode, ignoreExternalNetworkErrors, consoleErrorMode, grantClipboardAccess, acceptDownloads, enableNetworkInterception, screenshotDelay, maxParallelTests, stabilization, browsers, doSave]);
 
   // Notify parent of save status changes
   useEffect(() => {
@@ -301,6 +310,7 @@ export function PlaywrightSettingsCard({
       setScreenshotDelay(0);
       setMaxParallelTests(1);
       setStabilization(DEFAULT_STABILIZATION_SETTINGS);
+      setBrowsers(['chromium']);
       if (!compact) {
         toast.success('Playwright settings reset to defaults');
       }
@@ -1138,9 +1148,35 @@ export function PlaywrightSettingsCard({
 
       {!compact && (
         <>
+          {/* Build Browsers (multi-select) */}
+          <div className="space-y-2">
+            <Label>Build Browsers</Label>
+            <p className="text-xs text-muted-foreground">
+              Tests run once per selected browser. Each browser gets its own baselines.
+            </p>
+            <div className="flex gap-4">
+              {(['chromium', 'firefox', 'webkit'] as const).map((b) => (
+                <label key={b} className="flex items-center gap-1.5 text-sm">
+                  <Checkbox
+                    checked={browsers.includes(b)}
+                    onCheckedChange={(checked) => {
+                      if (checked) {
+                        setBrowsers(prev => [...prev, b]);
+                      } else {
+                        // Don't allow deselecting all browsers
+                        setBrowsers(prev => prev.length > 1 ? prev.filter(x => x !== b) : prev);
+                      }
+                    }}
+                  />
+                  <span>{b === 'webkit' ? 'WebKit (Safari)' : b === 'firefox' ? 'Firefox' : 'Chromium'}</span>
+                </label>
+              ))}
+            </div>
+          </div>
+
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-2">
-              <Label htmlFor="browser">Browser</Label>
+              <Label htmlFor="browser">Recording Browser</Label>
               <Select value={browser} onValueChange={setBrowser}>
                 <SelectTrigger id="browser">
                   <SelectValue />

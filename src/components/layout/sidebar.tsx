@@ -17,7 +17,7 @@ import {
   ClipboardCheck,
 } from 'lucide-react';
 import Image from 'next/image';
-import { RepoSelector, SyncReposButton } from './repo-selector';
+import { RepoSelector, SyncReposButton, CreateLocalRepoButton } from './repo-selector';
 import { QueueIndicator } from '@/components/queue/queue-indicator';
 import { UserMenu } from '@/components/auth/user-menu';
 import type { Repository, User, Team } from '@/lib/db/schema';
@@ -89,6 +89,7 @@ export function Sidebar({ repos, selectedRepo, currentUser, team }: SidebarProps
           <div className="flex-1 min-w-0">
             <RepoSelector initialRepos={repos} initialSelected={selectedRepo} />
           </div>
+          <CreateLocalRepoButton />
           <SyncReposButton />
         </div>
       </div>

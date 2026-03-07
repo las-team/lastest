@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 import { usePreferredRunner } from '@/hooks/use-preferred-runner';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -63,9 +63,10 @@ interface TestsPageClientProps {
   repositoryId?: string;
   baseUrl?: string;
   deletedTests?: Test[];
+  banAiMode?: boolean;
 }
 
-export function TestsPageClient({ areas, tests, routes, repositoryId, baseUrl = 'http://localhost:3000', deletedTests = [] }: TestsPageClientProps) {
+export function TestsPageClient({ areas, tests, routes, repositoryId, baseUrl = 'http://localhost:3000', deletedTests = [], banAiMode = false }: TestsPageClientProps) {
   const notifyJobStarted = useNotifyJobStarted();
 
   // A route is uncovered if it has no test (hasTest is maintained by soft-delete/restore lifecycle)
@@ -109,6 +110,8 @@ export function TestsPageClient({ areas, tests, routes, repositoryId, baseUrl = 
   const [isPermanentlyDeleting, setIsPermanentlyDeleting] = useState(false);
   const [showPermanentDeleteConfirm, setShowPermanentDeleteConfirm] = useState(false);
   const [selectedDeletedIds, setSelectedDeletedIds] = useState<Set<string>>(new Set());
+  const lastSelectedIdRef = useRef<string | null>(null);
+  const lastSelectedDeletedIdRef = useRef<string | null>(null);
   const [statusFilter, setStatusFilter] = useState<'all' | 'passed' | 'failed' | 'pending'>('all');
 
   const failedTests = tests.filter(t => t.latestStatus === 'failed');
@@ -138,13 +141,25 @@ export function TestsPageClient({ areas, tests, routes, repositoryId, baseUrl = 
     }
   };
 
-  const toggleSelect = (id: string) => {
+  const toggleSelect = (id: string, shiftKey = false) => {
     const newSet = new Set(selectedIds);
-    if (newSet.has(id)) {
-      newSet.delete(id);
+    if (shiftKey && lastSelectedIdRef.current) {
+      const lastIdx = filteredTests.findIndex(t => t.id === lastSelectedIdRef.current);
+      const currIdx = filteredTests.findIndex(t => t.id === id);
+      if (lastIdx !== -1 && currIdx !== -1) {
+        const [start, end] = lastIdx < currIdx ? [lastIdx, currIdx] : [currIdx, lastIdx];
+        for (let i = start; i <= end; i++) {
+          newSet.add(filteredTests[i].id);
+        }
+      }
     } else {
-      newSet.add(id);
+      if (newSet.has(id)) {
+        newSet.delete(id);
+      } else {
+        newSet.add(id);
+      }
     }
+    lastSelectedIdRef.current = id;
     setSelectedIds(newSet);
   };
 
@@ -221,13 +236,25 @@ export function TestsPageClient({ areas, tests, routes, repositoryId, baseUrl = 
     }
   };
 
-  const toggleDeletedSelect = (id: string) => {
+  const toggleDeletedSelect = (id: string, shiftKey = false) => {
     const newSet = new Set(selectedDeletedIds);
-    if (newSet.has(id)) {
-      newSet.delete(id);
+    if (shiftKey && lastSelectedDeletedIdRef.current) {
+      const lastIdx = deletedTests.findIndex(t => t.id === lastSelectedDeletedIdRef.current);
+      const currIdx = deletedTests.findIndex(t => t.id === id);
+      if (lastIdx !== -1 && currIdx !== -1) {
+        const [start, end] = lastIdx < currIdx ? [lastIdx, currIdx] : [currIdx, lastIdx];
+        for (let i = start; i <= end; i++) {
+          newSet.add(deletedTests[i].id);
+        }
+      }
     } else {
-      newSet.add(id);
+      if (newSet.has(id)) {
+        newSet.delete(id);
+      } else {
+        newSet.add(id);
+      }
     }
+    lastSelectedDeletedIdRef.current = id;
     setSelectedDeletedIds(newSet);
   };
 
@@ -310,7 +337,7 @@ export function TestsPageClient({ areas, tests, routes, repositoryId, baseUrl = 
             </p>
           </div>
           <div className="flex gap-2">
-            {repositoryId && failedTests.length > 0 && (
+            {!banAiMode && repositoryId && failedTests.length > 0 && (
               <Button
                 variant="outline"
                 size="sm"
@@ -332,14 +359,18 @@ export function TestsPageClient({ areas, tests, routes, repositoryId, baseUrl = 
                   <FlaskConical className="h-4 w-4 mr-2" />
                   Add Basic Tests
                 </Button>
-                <Button variant="outline" size="sm" onClick={() => setIsAICreateOpen(true)}>
-                  <Sparkles className="h-4 w-4 mr-2" />
-                  AI Create
-                </Button>
-                <Button variant="outline" size="sm" onClick={() => setIsMCPCreateOpen(true)}>
-                  <Wand2 className="h-4 w-4 mr-2" />
-                  MCP Create
-                </Button>
+                {!banAiMode && (
+                  <>
+                    <Button variant="outline" size="sm" onClick={() => setIsAICreateOpen(true)}>
+                      <Sparkles className="h-4 w-4 mr-2" />
+                      AI Create
+                    </Button>
+                    <Button variant="outline" size="sm" onClick={() => setIsMCPCreateOpen(true)}>
+                      <Wand2 className="h-4 w-4 mr-2" />
+                      MCP Create
+                    </Button>
+                  </>
+                )}
               </>
             )}
             <Button asChild size="sm">
@@ -431,7 +462,7 @@ export function TestsPageClient({ areas, tests, routes, repositoryId, baseUrl = 
                   <Trash2 className="h-3.5 w-3.5 mr-1.5" />
                   Move to Trash
                 </Button>
-                {repositoryId && selectedFailedTests.length > 0 && (
+                {!banAiMode && repositoryId && selectedFailedTests.length > 0 && (
                   <>
                     <Button
                       variant="outline"
@@ -492,8 +523,8 @@ export function TestsPageClient({ areas, tests, routes, repositoryId, baseUrl = 
                     <div className="flex items-center gap-4 min-w-0">
                       <Checkbox
                         checked={selectedIds.has(test.id)}
-                        onCheckedChange={() => toggleSelect(test.id)}
-                        onClick={(e) => e.stopPropagation()}
+                        onCheckedChange={() => {}}
+                        onClick={(e) => { e.stopPropagation(); toggleSelect(test.id, e.shiftKey); }}
                       />
                       <Link href={`/tests/${test.id}`} className="min-w-0 flex-1">
                         <div className="font-medium text-sm truncate group-hover:text-primary transition-colors">
@@ -581,7 +612,8 @@ export function TestsPageClient({ areas, tests, routes, repositoryId, baseUrl = 
                       <div className="flex items-center gap-4 min-w-0">
                         <Checkbox
                           checked={selectedDeletedIds.has(test.id)}
-                          onCheckedChange={() => toggleDeletedSelect(test.id)}
+                          onCheckedChange={() => {}}
+                          onClick={(e) => { e.stopPropagation(); toggleDeletedSelect(test.id, e.shiftKey); }}
                         />
                         <div className="min-w-0 flex-1">
                           <div className="font-medium text-sm truncate text-muted-foreground">
@@ -666,7 +698,7 @@ export function TestsPageClient({ areas, tests, routes, repositoryId, baseUrl = 
       />
 
       {/* AI Create Test Dialog */}
-      {repositoryId && (
+      {!banAiMode && repositoryId && (
         <AICreateTestDialog
           open={isAICreateOpen}
           onOpenChange={setIsAICreateOpen}
@@ -676,7 +708,7 @@ export function TestsPageClient({ areas, tests, routes, repositoryId, baseUrl = 
       )}
 
       {/* MCP Create Test Dialog */}
-      {repositoryId && (
+      {!banAiMode && repositoryId && (
         <MCPCreateTestDialog
           open={isMCPCreateOpen}
           onOpenChange={setIsMCPCreateOpen}

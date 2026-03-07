@@ -8,6 +8,7 @@ interface BuildSummaryHeroProps {
   prNumber?: number;
   changesDetected: number;
   isRunning?: boolean;
+  errorMessage?: string | null;
 }
 
 const statusConfig = {
@@ -58,17 +59,24 @@ const statusConfig = {
   },
 };
 
-export function BuildSummaryHero({ status, changesDetected, isRunning = false }: BuildSummaryHeroProps) {
+export function BuildSummaryHero({ status, changesDetected, isRunning = false, errorMessage }: BuildSummaryHeroProps) {
   const effectiveStatus = isRunning ? 'running' : status;
   const config = statusConfig[effectiveStatus];
   const Icon = config.icon;
 
   return (
-    <div className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-md border text-sm font-semibold ${config.bgColor} ${config.borderColor} ${config.textColor}`}>
-      <Icon className={`w-4 h-4 ${config.iconColor} ${isRunning ? 'animate-spin' : ''}`} />
-      <span>{config.label}</span>
-      {effectiveStatus === 'review_required' && changesDetected > 0 && (
-        <span className="text-xs font-normal opacity-70">({changesDetected})</span>
+    <div className="inline-flex flex-col gap-1">
+      <div className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-md border text-sm font-semibold ${config.bgColor} ${config.borderColor} ${config.textColor}`}>
+        <Icon className={`w-4 h-4 ${config.iconColor} ${isRunning ? 'animate-spin' : ''}`} />
+        <span>{config.label}</span>
+        {effectiveStatus === 'review_required' && changesDetected > 0 && (
+          <span className="text-xs font-normal opacity-70">({changesDetected})</span>
+        )}
+      </div>
+      {effectiveStatus === 'blocked' && errorMessage && (
+        <span className="text-xs text-red-600 truncate max-w-md" title={errorMessage}>
+          {errorMessage}
+        </span>
       )}
     </div>
   );

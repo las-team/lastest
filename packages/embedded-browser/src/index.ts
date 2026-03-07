@@ -15,20 +15,24 @@ import { EmbeddedTestExecutor } from './test-executor.js';
 import { EmbeddedRecorder } from './embedded-recorder.js';
 import { CROSS_OS_CHROMIUM_ARGS } from './stabilization.js';
 
+import os from 'os';
+
 // Configuration from environment
 const config = {
   serverUrl: process.env.LASTEST2_URL ?? 'http://localhost:3000',
   token: process.env.LASTEST2_TOKEN ?? '',
+  systemToken: process.env.SYSTEM_EB_TOKEN ?? '',
   streamPort: parseInt(process.env.STREAM_PORT ?? '9223', 10),
   streamHost: process.env.STREAM_HOST ?? '', // Public hostname for stream URL (empty = use os.hostname())
   pollInterval: parseInt(process.env.POLL_INTERVAL ?? '1000', 10),
   viewportWidth: parseInt(process.env.VIEWPORT_WIDTH ?? '1280', 10),
   viewportHeight: parseInt(process.env.VIEWPORT_HEIGHT ?? '720', 10),
   streamAuthToken: process.env.STREAM_AUTH_TOKEN,
+  instanceId: os.hostname(),
 };
 
-if (!config.token) {
-  console.error('LASTEST2_TOKEN is required');
+if (!config.token && !config.systemToken) {
+  console.error('Either LASTEST2_TOKEN or SYSTEM_EB_TOKEN is required');
   process.exit(1);
 }
 
@@ -130,10 +134,12 @@ async function startup(): Promise<void> {
   // 5. Connect as runner
   runnerClient = new EmbeddedRunnerClient({
     serverUrl: config.serverUrl,
-    token: config.token,
+    token: config.token || 'pending', // Will be replaced by system registration if systemToken is set
     streamPort: config.streamPort,
     streamHost: config.streamHost,
     pollInterval: config.pollInterval,
+    systemToken: config.systemToken || undefined,
+    instanceId: config.instanceId,
   });
 
   // Initialize test executor and recorder
@@ -175,13 +181,38 @@ async function startup(): Promise<void> {
         if (activeTasks === 1) {
           capturedClient.setStatus('busy', payload.testId);
           streamServer?.broadcastStatus('busy', payload.targetUrl);
+          // Pause screencast to free Chromium CPU for test execution
+          await screencast?.stop();
         }
 
         (async () => {
           try {
             const result = await capturedExecutor.runTest(capturedBrowser, payload);
 
-            // Send result FIRST so server sees pass/fail before timeout
+            // Upload screenshots BEFORE result so they're in DB when executor sees "completed"
+            if (result.screenshots.length > 0) {
+              console.log(`[Command] Uploading ${result.screenshots.length} screenshots for test ${payload.testId}...`);
+              await Promise.all(result.screenshots.map((screenshot) =>
+                capturedClient.sendMessage({
+                  id: crypto.randomUUID(),
+                  type: 'response:screenshot',
+                  timestamp: Date.now(),
+                  payload: {
+                    correlationId: capturedCommand.id,
+                    testRunId: payload.testRunId,
+                    repositoryId: payload.repositoryId,
+                    filename: screenshot.filename,
+                    data: screenshot.data,
+                    width: screenshot.width,
+                    height: screenshot.height,
+                    capturedAt: Date.now(),
+                  },
+                })
+              ));
+              console.log(`[Command] All screenshots uploaded for test ${payload.testId}`);
+            }
+
+            // Send result AFTER screenshots so server has them when it sees pass/fail
             await capturedClient.sendMessage({
               id: crypto.randomUUID(),
               type: 'response:test_result',
@@ -197,29 +228,6 @@ async function startup(): Promise<void> {
                 logs: result.logs,
               },
             });
-
-            // Upload screenshots separately (matching standard runner pattern)
-            if (result.screenshots.length > 0) {
-              console.log(`[Command] Uploading ${result.screenshots.length} screenshots for test ${payload.testId}...`);
-              for (const screenshot of result.screenshots) {
-                await capturedClient.sendMessage({
-                  id: crypto.randomUUID(),
-                  type: 'response:screenshot',
-                  timestamp: Date.now(),
-                  payload: {
-                    correlationId: capturedCommand.id,
-                    testRunId: payload.testRunId,
-                    repositoryId: payload.repositoryId,
-                    filename: screenshot.filename,
-                    data: screenshot.data,
-                    width: screenshot.width,
-                    height: screenshot.height,
-                    capturedAt: Date.now(),
-                  },
-                });
-              }
-              console.log(`[Command] All screenshots uploaded for test ${payload.testId}`);
-            }
           } catch (err) {
             console.error(`[Command] Test ${payload.testId} failed:`, err);
           } finally {
@@ -228,6 +236,16 @@ async function startup(): Promise<void> {
             if (activeTasks === 0) {
               capturedClient.setStatus('idle');
               streamServer?.broadcastStatus('ready');
+              // Restart screencast on idle page
+              if (page && screencast) {
+                try {
+                  await screencast.start(page, (frame) => {
+                    streamServer!.broadcastFrame(frame.data, frame.width, frame.height, frame.timestamp);
+                  });
+                } catch (err) {
+                  console.error('[Command] Failed to restart screencast:', err);
+                }
+              }
             }
           }
         })();
@@ -395,6 +413,84 @@ async function startup(): Promise<void> {
           testExecutor.abort();
           console.log('[Command] Test execution cancelled');
         }
+        break;
+      }
+
+      case 'command:run_setup': {
+        if (!browser || !testExecutor || !runnerClient) break;
+        const payload = command.payload as {
+          setupId: string; code: string; codeHash: string;
+          targetUrl: string; timeout?: number;
+          viewport?: { width: number; height: number };
+          stabilization?: import('./protocol.js').StabilizationPayload;
+          browser?: string;
+        };
+
+        // Fire-and-forget async (same activeTasks bookkeeping as run_test)
+        const capturedClient = runnerClient;
+        const capturedExecutor = testExecutor;
+        const capturedBrowser = browser;
+        const capturedCommand = command;
+
+        activeTasks++;
+        if (activeTasks === 1) {
+          capturedClient.setStatus('busy', `setup:${payload.setupId}`);
+          streamServer?.broadcastStatus('busy', payload.targetUrl);
+          // Pause screencast to free Chromium CPU for setup execution
+          await screencast?.stop();
+        }
+
+        (async () => {
+          try {
+            const result = await capturedExecutor.runSetup(capturedBrowser, payload);
+
+            await capturedClient.sendMessage({
+              id: crypto.randomUUID(),
+              type: 'response:setup_result',
+              timestamp: Date.now(),
+              payload: {
+                correlationId: capturedCommand.id,
+                status: result.status,
+                storageState: result.storageState,
+                variables: result.variables,
+                durationMs: result.durationMs,
+                error: result.error,
+                logs: result.logs,
+              },
+            });
+          } catch (err) {
+            console.error(`[Command] Setup ${payload.setupId} failed:`, err);
+            // Send failed result so executor doesn't hang
+            await capturedClient.sendMessage({
+              id: crypto.randomUUID(),
+              type: 'response:setup_result',
+              timestamp: Date.now(),
+              payload: {
+                correlationId: capturedCommand.id,
+                status: 'failed',
+                durationMs: 0,
+                error: err instanceof Error ? err.message : String(err),
+                logs: [],
+              },
+            });
+          } finally {
+            activeTasks--;
+            if (activeTasks === 0) {
+              capturedClient.setStatus('idle');
+              streamServer?.broadcastStatus('ready');
+              // Restart screencast on idle page
+              if (page && screencast) {
+                try {
+                  await screencast.start(page, (frame) => {
+                    streamServer!.broadcastFrame(frame.data, frame.width, frame.height, frame.timestamp);
+                  });
+                } catch (err) {
+                  console.error('[Command] Failed to restart screencast:', err);
+                }
+              }
+            }
+          }
+        })();
         break;
       }
 

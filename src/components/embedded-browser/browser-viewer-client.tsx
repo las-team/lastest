@@ -100,8 +100,9 @@ export function BrowserViewer({ streamUrl, initialViewport, className, expiresAt
         if (window.location.protocol === 'https:') {
           // HTTPS page can't connect to ws:// (mixed content) — use proxy path through the app
           const parsed = new URL(wsUrl);
-          const qs = parsed.search; // preserve ?token=... etc.
-          wsUrl = `wss://${window.location.host}/api/embedded/stream/ws${qs}`;
+          const targetParam = encodeURIComponent(parsed.host); // e.g. "container-id:9223"
+          const existingParams = parsed.search ? '&' + parsed.search.slice(1) : '';
+          wsUrl = `wss://${window.location.host}/api/embedded/stream/ws?target=${targetParam}${existingParams}`;
         } else {
           // HTTP — connect directly, replacing hostname for remote access
           const parsed = new URL(wsUrl);

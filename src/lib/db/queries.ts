@@ -19,3 +19,4 @@ export * from './queries/setup';
 export * from './queries/runners';
 export * from './queries/integrations';
 export * from './queries/misc';
+export * from './queries/github-actions';

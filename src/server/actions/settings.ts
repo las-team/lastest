@@ -36,6 +36,7 @@ export async function savePlaywrightSettings(data: {
   grantClipboardAccess?: boolean;
   acceptDownloads?: boolean;
   enableNetworkInterception?: boolean;
+  browsers?: string[];
 }) {
   if (data.repositoryId) await requireRepoAccess(data.repositoryId);
   else await requireTeamAccess();
@@ -194,6 +195,14 @@ export async function testCustomWebhookAction(data: {
 export async function updateEarlyAdopterMode(enabled: boolean) {
   const session = await requireTeamAccess();
   await queries.updateTeam(session.team.id, { earlyAdopterMode: enabled });
+  revalidatePath('/settings');
+  revalidatePath('/');
+}
+
+// Ban AI Mode
+export async function updateBanAiMode(enabled: boolean) {
+  const session = await requireTeamAccess();
+  await queries.updateTeam(session.team.id, { banAiMode: enabled });
   revalidatePath('/settings');
   revalidatePath('/');
 }

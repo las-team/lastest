@@ -52,10 +52,19 @@ export function isEmbeddedMode(): boolean {
 }
 
 /**
+ * Check if local runner is disabled (cloud deployment mode).
+ * When disabled, execution falls back to: team runner → system EB → queue.
+ */
+export function isLocalDisabled(): boolean {
+  return process.env.DISABLE_LOCAL_RUNNER === 'true';
+}
+
+/**
  * Force local mode override for specific operations.
  * Used when explicitly running tests locally regardless of env.
  */
 export function shouldUseLocalRunner(forceLocal?: boolean): boolean {
+  if (isLocalDisabled()) return false;
   if (forceLocal) return true;
   return isLocalMode();
 }

@@ -11,6 +11,7 @@ import { Badge } from '@/components/ui/badge';
 import { Collapsible, CollapsibleTrigger, CollapsibleContent } from '@/components/ui/collapsible';
 import { batchApproveDiffs, batchAddDiffTodos, acceptAIApprovals } from '@/server/actions/diffs';
 import { Input } from '@/components/ui/input';
+import { BrowserIcon } from '@/components/ui/browser-icon';
 
 // Filter type for the build detail page metrics
 export type FilterType = 'all' | 'tests' | 'changed' | 'flaky' | 'failed' | 'passed' | 'errors' | 'todo' | 'ai-approve' | 'ai-review' | 'ai-flag';
@@ -120,6 +121,7 @@ export interface BuildDetailClientProps {
   completedTests?: number;
   codeChangeTestIds?: string[] | null;
   isMainBranch?: boolean;
+  banAiMode?: boolean;
 }
 
 export function BuildDetailClient({
@@ -130,6 +132,7 @@ export function BuildDetailClient({
   completedTests = 0,
   codeChangeTestIds,
   isMainBranch = false,
+  banAiMode = false,
 }: BuildDetailClientProps) {
   const codeChangeTestIdSet = new Set(codeChangeTestIds ?? []);
   const [activeFilter, setActiveFilter] = useState<FilterType>('all');
@@ -138,6 +141,7 @@ export function BuildDetailClient({
   const [viewMode, setViewMode] = useState<'branch' | 'main'>(isMainBranch ? 'branch' : 'main');
   const [groupByArea, setGroupByArea] = useState(false);
   const [groupByTest, setGroupByTest] = useState(true);
+  const [browserFilter, setBrowserFilter] = useState<string | null>(null);
   const [expandKey, setExpandKey] = useState(0);
   const [allExpanded, setAllExpanded] = useState(true);
   const router = useRouter();
@@ -171,8 +175,24 @@ export function BuildDetailClient({
     });
   }, [diffs]);
 
-  // Apply filter to sorted diffs
-  const filteredDiffs = filterDiffs(sortedDiffs, activeFilter);
+  // Detect available browsers from diffs
+  const availableBrowsers = useMemo(() => {
+    const set = new Set<string>();
+    for (const d of diffs) {
+      set.add(d.browser || 'chromium');
+    }
+    return Array.from(set).sort();
+  }, [diffs]);
+  const hasMultipleBrowsers = availableBrowsers.length > 1;
+
+  // Apply filter to sorted diffs (status filter + browser filter)
+  const filteredDiffs = useMemo(() => {
+    let result = filterDiffs(sortedDiffs, activeFilter);
+    if (browserFilter) {
+      result = result.filter(d => (d.browser || 'chromium') === browserFilter);
+    }
+    return result;
+  }, [sortedDiffs, activeFilter, browserFilter]);
 
   // Group diffs by functional area
   const groupedDiffs = useMemo(() => {
@@ -189,15 +209,15 @@ export function BuildDetailClient({
   // Check if filter is active (not 'all')
   const isFilterActive = activeFilter !== 'all';
 
-  // AI counts
-  const aiSafeCount = diffs.filter(d => d.aiRecommendation === 'approve').length;
-  const aiReviewCount = diffs.filter(d => d.aiRecommendation === 'review').length;
-  const aiFlagCount = diffs.filter(d => d.aiRecommendation === 'flag').length;
-  const analyzedCount = diffs.filter(d => d.aiRecommendation).length;
-  const analyzingCount = diffs.filter(d => d.aiAnalysisStatus === 'running' || d.aiAnalysisStatus === 'pending').length;
-  const failedAnalysisCount = diffs.filter(d => d.aiAnalysisStatus === 'failed').length;
-  const pendingSafeCount = diffs.filter(d => d.aiRecommendation === 'approve' && d.status === 'pending').length;
-  const hasAIActivity = analyzedCount > 0 || analyzingCount > 0 || failedAnalysisCount > 0;
+  // AI counts (zeroed when banAiMode)
+  const aiSafeCount = banAiMode ? 0 : diffs.filter(d => d.aiRecommendation === 'approve').length;
+  const aiReviewCount = banAiMode ? 0 : diffs.filter(d => d.aiRecommendation === 'review').length;
+  const aiFlagCount = banAiMode ? 0 : diffs.filter(d => d.aiRecommendation === 'flag').length;
+  const analyzedCount = banAiMode ? 0 : diffs.filter(d => d.aiRecommendation).length;
+  const analyzingCount = banAiMode ? 0 : diffs.filter(d => d.aiAnalysisStatus === 'running' || d.aiAnalysisStatus === 'pending').length;
+  const failedAnalysisCount = banAiMode ? 0 : diffs.filter(d => d.aiAnalysisStatus === 'failed').length;
+  const pendingSafeCount = banAiMode ? 0 : diffs.filter(d => d.aiRecommendation === 'approve' && d.status === 'pending').length;
+  const hasAIActivity = !banAiMode && (analyzedCount > 0 || analyzingCount > 0 || failedAnalysisCount > 0);
   const totalAnalyzable = diffs.filter(d => d.classification !== 'unchanged').length;
 
   // Multi-select helpers
@@ -351,6 +371,39 @@ export function BuildDetailClient({
                 <XIcon className="w-3 h-3" />
               </Badge>
             )}
+
+            {hasMultipleBrowsers && (
+              <div className="flex items-center gap-1">
+                <button
+                  onClick={() => setBrowserFilter(null)}
+                  className={`px-2 py-1 text-xs rounded-md transition-colors ${
+                    browserFilter === null ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground hover:bg-muted/80'
+                  }`}
+                >
+                  All browsers
+                </button>
+                {availableBrowsers.map(b => (
+                  <button
+                    key={b}
+                    onClick={() => setBrowserFilter(b)}
+                    className={`px-2 py-1 text-xs rounded-md transition-colors ${
+                      browserFilter === b ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground hover:bg-muted/80'
+                    }`}
+                  >
+                    <BrowserIcon browser={b} />
+                  </button>
+                ))}
+              </div>
+            )}
+            {browserFilter && (
+              <Badge
+                className="cursor-pointer gap-1 bg-primary/10 text-primary border-primary/20 hover:bg-primary/20"
+                onClick={() => setBrowserFilter(null)}
+              >
+                <BrowserIcon browser={browserFilter} className="w-3 h-3" />
+                <XIcon className="w-3 h-3" />
+              </Badge>
+            )}
           </div>
         </CardTitle>
         </CardHeader>
@@ -460,6 +513,8 @@ export function BuildDetailClient({
                     isSelected={selectedIds.has(diff.id)}
                     onToggleSelect={toggleSelect}
                     hasCodeChange={codeChangeTestIdSet.has(diff.testId)}
+                    hasMultipleBrowsers={hasMultipleBrowsers}
+                    banAiMode={banAiMode}
                   />
                 ))}
               </div>
@@ -472,8 +527,10 @@ export function BuildDetailClient({
                 selectedIds={selectedIds}
                 onToggleSelect={toggleSelect}
                 codeChangeTestIdSet={codeChangeTestIdSet}
+                hasMultipleBrowsers={hasMultipleBrowsers}
                 expandKey={expandKey}
                 allExpanded={allExpanded}
+                banAiMode={banAiMode}
               />
             ) : (
               /* Group by area (optionally with test subgroups) */
@@ -510,8 +567,10 @@ export function BuildDetailClient({
                                 selectedIds={selectedIds}
                                 onToggleSelect={toggleSelect}
                                 codeChangeTestIdSet={codeChangeTestIdSet}
+                                hasMultipleBrowsers={hasMultipleBrowsers}
                                 expandKey={expandKey}
                                 allExpanded={allExpanded}
+                                banAiMode={banAiMode}
                               />
                             </div>
                           ) : (
@@ -525,6 +584,8 @@ export function BuildDetailClient({
                                   isSelected={selectedIds.has(diff.id)}
                                   onToggleSelect={toggleSelect}
                                   hasCodeChange={codeChangeTestIdSet.has(diff.testId)}
+                                  hasMultipleBrowsers={hasMultipleBrowsers}
+                                  banAiMode={banAiMode}
                                 />
                               ))}
                             </div>
@@ -552,8 +613,10 @@ function TestGroupedList({
   selectedIds,
   onToggleSelect,
   codeChangeTestIdSet,
+  hasMultipleBrowsers,
   expandKey,
   allExpanded,
+  banAiMode = false,
 }: {
   diffs: VisualDiffWithTestStatus[];
   buildId: string;
@@ -561,8 +624,10 @@ function TestGroupedList({
   selectedIds: Set<string>;
   onToggleSelect: (id: string) => void;
   codeChangeTestIdSet: Set<string>;
+  hasMultipleBrowsers: boolean;
   expandKey: number;
   allExpanded: boolean;
+  banAiMode?: boolean;
 }) {
   const testGroups = useMemo(() => {
     const groups: Record<string, VisualDiffWithTestStatus[]> = {};
@@ -584,12 +649,12 @@ function TestGroupedList({
           <Collapsible key={`test-${testId}-${expandKey}`} defaultOpen={allExpanded}>
             <div>
               <CollapsibleTrigger className="flex items-center justify-between w-full p-2 bg-muted/20 hover:bg-muted/40 rounded-lg transition-colors group">
-                <div className="flex items-center gap-2">
-                  <ChevronRight className="w-3.5 h-3.5 text-muted-foreground transition-transform group-data-[state=open]:rotate-90" />
-                  <span className="text-sm font-medium">{testName}</span>
-                  <Badge variant="secondary" className="text-xs">{stepLabel}</Badge>
+                <div className="flex items-center gap-2 min-w-0">
+                  <ChevronRight className="w-3.5 h-3.5 shrink-0 text-muted-foreground transition-transform group-data-[state=open]:rotate-90" />
+                  <span className="text-sm font-medium truncate">{testName}</span>
+                  <Badge variant="secondary" className="text-xs shrink-0">{stepLabel}</Badge>
                 </div>
-                <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                <div className="flex items-center gap-2 text-xs text-muted-foreground shrink-0">
                   {pendingCount > 0 && <span className="text-yellow-600">{pendingCount} pending</span>}
                   {failedCount > 0 && <span className="text-red-600">{failedCount} failed</span>}
                 </div>
@@ -605,6 +670,8 @@ function TestGroupedList({
                       isSelected={selectedIds.has(diff.id)}
                       onToggleSelect={onToggleSelect}
                       hasCodeChange={codeChangeTestIdSet.has(diff.testId)}
+                      hasMultipleBrowsers={hasMultipleBrowsers}
+                      banAiMode={banAiMode}
                     />
                   ))}
                 </div>
@@ -625,6 +692,8 @@ function DiffRow({
   isSelected,
   onToggleSelect,
   hasCodeChange,
+  hasMultipleBrowsers,
+  banAiMode = false,
 }: {
   diff: VisualDiffWithTestStatus;
   buildId: string;
@@ -632,16 +701,18 @@ function DiffRow({
   isSelected: boolean;
   onToggleSelect: (id: string) => void;
   hasCodeChange: boolean;
+  hasMultipleBrowsers: boolean;
+  banAiMode?: boolean;
 }) {
   const router = useRouter();
   const isExecutionFailed = diff.testResultStatus === 'failed';
   const StatusIcon = isExecutionFailed ? XCircle : diffStatusIcons[diff.status];
   const statusColor = isExecutionFailed ? 'text-red-600 bg-red-50' : diffStatusColors[diff.status];
   const isFailed = isExecutionFailed || diff.status === 'rejected';
-  const aiBadge = diff.aiRecommendation ? aiRecommendationBadge[diff.aiRecommendation] : null;
-  const analysis = diff.aiAnalysis as AIDiffAnalysis | null;
-  const isAnalyzing = diff.aiAnalysisStatus === 'running' || diff.aiAnalysisStatus === 'pending';
-  const isAIFailed = diff.aiAnalysisStatus === 'failed';
+  const aiBadge = !banAiMode && diff.aiRecommendation ? aiRecommendationBadge[diff.aiRecommendation] : null;
+  const analysis = !banAiMode ? diff.aiAnalysis as AIDiffAnalysis | null : null;
+  const isAnalyzing = !banAiMode && (diff.aiAnalysisStatus === 'running' || diff.aiAnalysisStatus === 'pending');
+  const isAIFailed = !banAiMode && diff.aiAnalysisStatus === 'failed';
   const branchStatus = deriveBranchStatus(diff);
   const bsConfig = branchStatusConfig[branchStatus];
   const hasMainDrift = diff.mainPercentageDifference && parseFloat(diff.mainPercentageDifference) > 0;
@@ -659,14 +730,14 @@ function DiffRow({
             : 'hover:border-primary/30 hover:bg-primary/5'
       }`}
     >
-      <div className="flex items-center gap-3">
+      <div className="flex items-center gap-3 min-w-0">
         <div onClick={(e) => e.stopPropagation()}>
           <Checkbox
             checked={isSelected}
             onCheckedChange={() => onToggleSelect(diff.id)}
           />
         </div>
-        <div className={`p-2 rounded ${statusColor}`}>
+        <div className={`p-2 rounded shrink-0 ${statusColor}`}>
           <StatusIcon className="w-4 h-4" />
         </div>
         <div className="min-w-0">
@@ -688,10 +759,17 @@ function DiffRow({
                 ? 'Execution failed'
                 : !hasViewData
                   ? viewMode === 'main' ? 'No main baseline' : 'No branch baseline'
-                  : displayPixels
+                  : displayPixels && displayPixels > 0
                     ? `${displayPixels.toLocaleString()}px diff`
-                    : 'No changes'}
+                    : displayPixels === -1
+                      ? 'Diff error'
+                      : 'No changes'}
             </span>
+            {diff.browser && hasMultipleBrowsers && (
+              <Badge variant="outline" className="text-xs px-1.5 py-0">
+                <BrowserIcon browser={diff.browser} className="w-3.5 h-3.5" />
+              </Badge>
+            )}
             <span className="text-muted-foreground/40 text-xs font-mono">
               {diff.testId.slice(0, 8)}
             </span>
@@ -704,7 +782,7 @@ function DiffRow({
         </div>
       </div>
 
-      <div className="flex items-center gap-4">
+      <div className="flex items-center gap-4 shrink-0">
         {hasCodeChange && (
           <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium bg-orange-100 text-orange-700">
             Code Change

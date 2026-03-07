@@ -1,6 +1,6 @@
 # Visual Regression Testing: Competitive Landscape Deep Dive
 
-**Research Date:** February 9, 2026 (updated from February 6, 2026)
+**Research Date:** March 3, 2026 (updated from February 9, 2026)
 
 ---
 
@@ -305,27 +305,34 @@ Sources: [TestSprite Seed](https://techfundingnews.com/testsprite-raises-6-7m-se
 | **AI Diffing** | Yes | Yes | No | Yes (best) | No | No | No | Deterministic | No | No |
 | **AI Test Gen** | Yes | No | No | Yes (NLP) | No | No | No | Yes (sessions) | No | No |
 | **AI Auto-Fix** | Yes | No | No | No | No | No | No | Auto-maintain | No | No |
+| **Autonomous Agent** | Yes (Play Agent) | No | No | Autonomous ($969+) | No | No | No | No | No | No |
 | **Spec-Driven Test Gen** | Yes | No | No | No | No | No | No | No | No | No |
-| **Recording** | Yes | No | No | Low-code | No | No | Codegen | Session record | No | No |
+| **No-Code Recording** | Yes | No | No | Low-code | No | No | Codegen | Session record | No | No |
 | **Visual Diff UI** | Yes | Yes | Yes | Yes | Basic HTML | Yes (SaaS) | No | PR-based | Yes | Yes |
 | **Approval Flow** | Yes | Yes | Yes | Yes | No | Yes (SaaS) | No | PR-based | Yes | Yes |
 | **Self-hosted** | Yes | No | No | Enterprise | Yes | OSS core | Yes | No | OSS core | No |
 | **Free Screenshots** | Unlimited | 5k/mo | 5k/mo | OSS only | Unlimited | OSS only | Unlimited | No | 5k/mo | OSS only |
+| **Remote Runners** | Yes (npm package) | Cloud | Cloud | Cloud | No | Cloud | No | Cloud | Cloud | Cloud |
+| **Embedded Browser** | Yes (container + live stream) | No | No | No | No | No | No | No | No | No |
 | **Cross-browser** | Playwright | Yes | 4 browsers | Ultrafast Grid | Limited | Yes | 3 engines | Chromium | Via SDKs | Real 5 |
 | **Accessibility** | Yes (axe-core) | No | Enterprise | No | No | No | No | No | ARIA snaps | No |
 | **Route Discovery** | Yes | No | No | No | No | No | No | No | No | No |
 | **Multi-tenancy** | Yes | Projects | Projects | Enterprise | No | SaaS | No | Projects | Teams | Teams |
-| **MCP Integration** | Yes | Yes | Q1 2026 | Yes (2x) | No | No | No | No | No | No |
+| **MCP Integration** | Yes | Yes | Yes | Yes (2x) | No | No | No | No | No | No |
 | **Perceptual Diffing** | Yes (SSIM+Butteraugli) | No | No | Yes (Visual AI) | No | No | No | No | No | No |
 | **Page Shift Detection** | Yes | No | Yes | No | No | No | No | No | No | No |
 | **Text-Region Diffing** | Yes (OCR) | Yes (OCR) | No | No | No | No | No | No | No | No |
 | **Figma Integration** | Yes (plugin) | No | No | Yes | No | No | No | No | No | No |
-| **Remote Runners** | Yes | Cloud | Cloud | Cloud | No | Cloud | No | Cloud | Cloud | Cloud |
 | **Debug Mode** | Yes | No | No | No | No | No | Trace | No | Playwright trace | No |
 | **Google Sheets Data** | Yes | No | No | No | No | No | No | No | No | No |
 | **VS Code Extension** | Yes (API) | No | No | Yes | No | No | Yes | No | No | No |
-| **GitLab Support** | Yes (OAuth+MR) | Yes | Yes | Yes | No | No | No | Yes | Yes | No |
-| **Open Source** | Yes | SDKs | Storybook | SDKs | Full | Core | Full | No | Core | Client |
+| **GitLab Support** | Yes (OAuth+MR+self-hosted) | Yes | Yes | Yes | No | No | No | Yes | Yes | No |
+| **Branch Baseline Mgmt** | Yes (SHA256 carry-forward) | Yes | Yes | Yes | No | No | No | No | No | No |
+| **Setup/Teardown Orchestration** | Yes | No | No | No | No | No | No | No | No | No |
+| **Test Composition** | Yes | No | No | No | No | No | No | No | No | No |
+| **Testing Templates** | 8 presets | No | No | No | No | No | No | No | No | No |
+| **Local AI (Ollama)** | Yes | No | No | No | No | No | No | No | No | No |
+| **Open Source** | Yes (MIT) | SDKs | Storybook | SDKs | Full | Core | Full | No | Core | Client |
 | **Price** | $0 | $199+/mo | $179+/mo | $699+/mo | $0 | $100+/mo | $0 | Custom | $100+/mo | $64+/mo |
 
 ---
@@ -379,7 +386,7 @@ Sources: [Tony Ward](https://www.tonyward.dev/articles/visual-regression-testing
 | 4 | **Cross-OS consistency without Docker** | **SOLVED** -- bundled fonts, Chromium flags, timestamp freezing, random seeding, burst capture, DOM stability detection |
 | 5 | **Full-page + component testing in one tool** | **SOLVED** -- records full flows, tests any URL |
 | 6 | **Accessibility + visual regression in one pass** | **SOLVED** -- automated axe-core audits on every screenshot capture |
-| 7 | **Zero-maintenance test generation** | **SOLVED** -- AI generates + auto-fixes tests + spec-driven generation |
+| 7 | **Zero-maintenance test generation** | **SOLVED** -- AI generates + auto-fixes tests + spec-driven generation + autonomous Play Agent |
 | 8 | **Git-native baseline management** with branching/merging | **SOLVED** -- SHA256 hash carry-forward, branch-aware |
 | 9 | **Transparent pricing** | **SOLVED** -- $0 forever, open source |
 | 10 | **Native mobile visual testing** | GAP -- not addressed yet |
@@ -434,36 +441,42 @@ Sources: [Tony Ward](https://www.tonyward.dev/articles/visual-regression-testing
 ### Unique advantages no competitor matches:
 1. **AI test generation from recordings** -- only Meticulous auto-generates (cloud-only, no recorder)
 2. **AI auto-fix for broken tests** -- nobody else does this
-3. **True self-hosted + full-featured UI** -- no competitor combines both
-4. **Recording + diffing + approval in one tool** -- all competitors are partial
-5. **Multi-tenancy in self-hosted package** -- unique
-6. **Route auto-discovery** -- unique
-7. **$0 forever with unlimited screenshots** -- only BackstopJS/Playwright match on price, but lack UI/collaboration
-8. **Open source + accessibility testing + AI generation** -- no other OSS tool has all three
-9. **Spec-driven test generation** -- import OpenAPI/markdown/user stories → AI generates tests (unique)
-10. **SSIM + Butteraugli perceptual diffing** -- beyond pixel-match, approaching Applitools Visual AI quality at $0
-11. **Text-region-aware OCR diffing** -- only Percy has comparable OCR-based diffing
-12. **Page shift detection** -- only Chromatic has comparable feature
-13. **Figma plugin for planned screenshots** -- compare against design files (rare, only Applitools has similar)
-14. **Google Sheets test data integration** -- unique
-15. **Debug mode with step-by-step execution** -- unique for visual testing tools
-16. **5 AI providers including Ollama** -- local AI option nobody else offers
-17. **Remote runners with capability tracking** -- self-hosted distributed execution (unique)
-18. **Setup orchestration** -- multi-step setup sequences with browser + API script types (unique)
-19. **Comprehensive stabilization engine** -- timestamp freezing, random seeding, burst capture, DOM stability, network idle, font loading, third-party blocking, loading indicator hiding (most comprehensive in market)
+3. **Autonomous Play Agent** -- one-click 9-step pipeline: scan routes → classify app → generate tests → run → fix failures (3 retries) → re-run → report. No competitor has a comparable autonomous pipeline at $0
+4. **True self-hosted + full-featured UI** -- no competitor combines both
+5. **Recording + AI generation + diffing + approval in one tool** -- all competitors are partial
+6. **Three execution modes** -- local, remote runners (`@lastest/runner` on npm), or embedded browser container with live CDP streaming. No competitor offers all three, especially not self-hosted
+7. **Published runner npm package** -- `@lastest/runner@0.4.0` on npm for distributed execution with zero cloud dependency
+8. **Embedded browser container** -- run and record tests in a Docker container with live video streaming back to the UI. No local Playwright install needed. Unique in the market
+9. **Multi-tenancy in self-hosted package** -- unique
+10. **Route auto-discovery** -- unique
+11. **$0 forever with unlimited screenshots** -- only BackstopJS/Playwright match on price, but lack UI/collaboration
+12. **Open source + accessibility testing + AI generation** -- no other OSS tool has all three
+13. **Spec-driven test generation** -- import OpenAPI/markdown/user stories → AI generates tests (unique)
+14. **SSIM + Butteraugli perceptual diffing** -- beyond pixel-match, approaching Applitools Visual AI quality at $0
+15. **Text-region-aware OCR diffing** -- only Percy has comparable OCR-based diffing
+16. **Page shift detection** -- only Chromatic has comparable feature
+17. **Figma plugin for planned screenshots** -- compare against design files (rare, only Applitools has similar)
+18. **Google Sheets test data integration** -- unique
+19. **Debug mode with step-by-step execution** -- unique for visual testing tools
+20. **5 AI providers including Ollama** -- local AI option nobody else offers
+21. **Setup/teardown orchestration** -- multi-step sequences with browser + API + test-as-setup script types, default + per-test overrides (unique)
+22. **Comprehensive stabilization engine** -- 12 features: timestamp freezing, random seeding, burst capture, DOM stability, network idle, font loading, third-party blocking, loading indicator hiding, auto-mask dynamic content, cross-OS consistency, page shift detection, text-region-aware diffing (most comprehensive in market)
+23. **Branch baseline management** -- fork baselines per branch, merge back on PR merge, promote test versions, SHA256 carry-forward matching
+24. **Test composition** -- cherry-pick tests and pin specific versions per build (unique)
+25. **Testing templates** -- 8 one-click presets for common app types (unique)
 
 ### Gaps to watch:
-- Cross-browser rendering (Happo/Applitools advantage)
+- Cross-browser rendering (Happo/Applitools advantage — Lastest2 runs Chromium only via Playwright)
 - ARIA snapshot testing specifically (Argos's unique approach to accessibility-aware diffing)
-- Scale/infrastructure (cloud tools handle this)
+- Scale/infrastructure at enterprise level (cloud tools handle thousands of concurrent tests)
 - SOC 2 / enterprise compliance (Argos and Meticulous have it)
 - Native mobile visual testing (Applitools and Panto AI expanding here)
-- MCP server for external AI agents to consume Lastest2 (competitors adding this)
+- MCP server for external AI agents to consume Lastest2 (competitors adding this — Applitools 2x, Percy, Chromatic)
 
 ### Closest competitors by positioning:
-1. **Argos CI** -- affordable OSS + SaaS, similar target audience, but no AI/recording
+1. **Argos CI** -- affordable OSS + SaaS, similar target audience, but no AI/recording/autonomous agent
 2. **Lost Pixel** -- affordable OSS alternative, but no AI/recording
-3. **Meticulous.ai** -- AI test generation + SOC 2, but cloud-only, no recording, custom pricing
+3. **Meticulous.ai** -- AI test generation + SOC 2, but cloud-only, no recording, custom pricing, requires real traffic
 4. **Visual Regression Tracker** -- self-hosted, but minimal features
 5. **TestSprite** -- AI testing with MCP, but focused on AI-generated code testing, not visual regression specifically
 
@@ -472,11 +485,18 @@ The $100-$200/mo range (Lost Pixel, Percy Pro, Chromatic Starter) is the sweet s
 
 ---
 
-## New Lastest2 Features Since Last Update (Feb 6-9, 2026)
+## New Lastest2 Features Since Last Update (Feb 9 → Mar 3, 2026)
 
-Features added to Lastest2 since the original competitive analysis:
+### Execution & Infrastructure (NEW)
+- **Embedded browser container** -- Docker container with live CDP screencast streaming to UI. Run and record tests without local Playwright installation. Works for both test execution and recording
+- **Runner npm package published** -- `@lastest/runner@0.4.0` on npm (7 versions total). CLI with `start`, `stop`, `status`, `log`, `run` commands. Ready for production distributed execution
+- **Runner management UI** -- register, monitor, and configure runners from the dashboard
+- **Browser viewer component** -- real-time embedded browser video feed during test execution, integrated into build detail and recording pages
+- **Embedded browser APIs** -- `/api/embedded/stream`, `/api/embedded/stream/[sessionId]`, `/api/embedded/register` endpoints
 
-### Diffing & Stabilization
+### Previously Added (Feb 6-9, 2026)
+
+#### Diffing & Stabilization
 - **SSIM and Butteraugli perceptual diffing engines** -- beyond pixel-match comparison
 - **Page Shift Detection** -- LCS row-alignment to exclude vertical content shifts from diffs
 - **Text-region-aware diffing** -- OCR-based detection of text changes
@@ -488,42 +508,36 @@ Features added to Lastest2 since the original competitive analysis:
 - **Font loading wait** -- wait for webfonts to load
 - **Loading indicator hiding** -- auto-hide spinners with custom selectors
 
-### AI & Test Generation
+#### AI & Test Generation
 - **Spec-driven testing** -- import OpenAPI specs, user stories, or markdown → AI generates tests
 - **5 AI providers** -- Claude CLI, OpenRouter, Agent SDK, Anthropic Direct, Ollama (local)
 - **Separate AI diff provider** -- use different AI for diff analysis vs test generation
 - **AI diff classification** -- insignificant/meaningful/noise with confidence scores
 - **MCP selector validation** -- real-time selector validation via Claude MCP
 
-### Integrations
+#### Integrations
 - **Figma plugin** -- import design files as planned test step screenshots (marketplace-ready)
 - **Google Sheets test data** -- per-team OAuth, multi-tab, custom headers, fixed ranges, caching
 - **GitLab support** -- OAuth login (self-hosted), MR comments, webhook triggers
 - **Google OAuth** -- sign in with Google
 - **Email invitations** -- via Resend with verification tokens
 
-### Infrastructure
-- **Remote runners** -- distributed test execution with capability tracking, max parallel tests
+#### Infrastructure
+- **Remote runners v2** -- concurrent multi-task execution, SHA256 code integrity, remote recording, heartbeat polling, command queuing
 - **Smart Run** -- analyzes git diffs to run only affected tests
 - **Debug mode** -- step-by-step test execution with live feedback
 - **Background jobs** -- async queue for long-running operations with parallel AI
 - **VS Code Extension API** -- REST + SSE for IDE integration
 - **Docker deployment** -- multi-stage Docker setup with persistent volumes
-- **Setup orchestration** -- repository-default and build-level multi-step setup sequences
+- **Setup/teardown orchestration** -- repository-default and build-level multi-step sequences with per-test overrides
 
-### Comparison Matrix (rows that changed)
-| Capability | Previous | Current |
+### Comparison Matrix (rows that changed since Feb 9)
+| Capability | Feb 9 | Mar 3 |
 |---|---|---|
-| Perceptual Diffing | No | SSIM + Butteraugli |
-| Spec-Driven Test Gen | No | Yes |
-| Figma Integration | No | Yes (plugin) |
-| Google Sheets Data | No | Yes |
-| GitLab Support | No | Yes (OAuth + MR) |
-| Remote Runners | No | Yes |
-| Debug Mode | No | Yes |
-| MCP Integration | No | Yes |
-| Cross-OS Consistency | Partial | Comprehensive (9 stabilization features) |
-| AI Providers | 4 | 5 (added Ollama) |
+| Embedded Browser | No | Yes (container + live stream) |
+| Runner NPM Package | Not published | @lastest/runner@0.4.0 on npm |
+| Runner Management UI | Basic | Full dashboard management |
+| Execution Modes | Local + Remote | Local + Remote + Embedded Browser |
 
 ---
 

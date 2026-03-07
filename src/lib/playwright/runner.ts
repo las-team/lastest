@@ -1032,10 +1032,13 @@ export class PlaywrightRunner extends EventEmitter {
       // Get stabilization settings (merge per-test overrides if present)
       const stabilization = { ...this.getStabilizationSettings(), ...test.stabilizationOverrides };
 
+      // Per-test viewport override takes precedence over global settings
+      const testViewport = test.viewportOverride || this.getViewport();
+
       context = await this.browser.newContext({
-        viewport: this.getViewport(),
+        viewport: testViewport,
         ...(parsedStorageState ? { storageState: parsedStorageState } : {}),
-        ...(videoDir ? { recordVideo: { dir: videoDir, size: this.getViewport() } } : {}),
+        ...(videoDir ? { recordVideo: { dir: videoDir, size: testViewport } } : {}),
         ...(this.settings?.acceptAnyCertificate ? { ignoreHTTPSErrors: true } : {}),
         ...(this.settings?.freezeAnimations ? { reducedMotion: 'reduce' } : {}),
         ...(this.settings?.grantClipboardAccess ? { permissions: ['clipboard-read', 'clipboard-write'] } : {}),
@@ -1312,6 +1315,12 @@ export class PlaywrightRunner extends EventEmitter {
 
               if (options?.path) {
                 const filename = path.basename(options.path as string);
+                // Ensure the screenshot is saved to the correct location on disk
+                // (test code may pass an invalid path, e.g. treating screenshotPath as a directory)
+                const correctDiskPath = path.join(this.screenshotDir, filename);
+                if (!fs.existsSync(correctDiskPath)) {
+                  fs.writeFileSync(correctDiskPath, result);
+                }
                 const publicPath = this.repositoryId
                   ? `/screenshots/${this.repositoryId}/${filename}`
                   : `/screenshots/${filename}`;

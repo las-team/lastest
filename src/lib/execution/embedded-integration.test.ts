@@ -248,6 +248,7 @@ describe('Embedded Browser Integration', () => {
     it('handles all expected command types', () => {
       const supportedCommands = [
         'command:run_test',
+        'command:run_setup',
         'command:start_recording',
         'command:stop_recording',
         'command:capture_screenshot',
@@ -261,12 +262,13 @@ describe('Embedded Browser Integration', () => {
       for (const cmd of supportedCommands) {
         expect(cmd).toMatch(/^command:/);
       }
-      expect(supportedCommands).toHaveLength(8);
+      expect(supportedCommands).toHaveLength(9);
     });
 
     it('maps command types to response types', () => {
       const commandToResponse: Record<string, string> = {
         'command:run_test': 'response:test_result',
+        'command:run_setup': 'response:setup_result',
         'command:capture_screenshot': 'response:screenshot',
         'command:start_recording': 'response:recording_event',
         'command:stop_recording': 'response:recording_stopped',

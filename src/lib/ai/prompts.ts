@@ -1,4 +1,4 @@
-import type { TestGenerationContext } from './types';
+import type { TestGenerationContext, CodebaseIntelligenceContext } from './types';
 
 export const TEST_SIGNATURE = `export async function test(page: Page, baseUrl: string, screenshotPath: string, stepLogger: any)`;
 
@@ -89,6 +89,11 @@ export function createTestPrompt(context: TestGenerationContext): string {
       parts.push(buildScanContextSection(context.scanContext));
     }
 
+    // Add codebase intelligence if available
+    if (context.codebaseIntelligence) {
+      parts.push(buildCodebaseIntelligenceSection(context.codebaseIntelligence));
+    }
+
     parts.push(`\nWorkflow: navigate → snapshot → explore → OUTPUT Playwright test code with discovered selectors`);
     return parts.join('\n');
   }
@@ -119,6 +124,11 @@ export function createTestPrompt(context: TestGenerationContext): string {
   // Add scan context if available
   if (context.scanContext) {
     parts.push(buildScanContextSection(context.scanContext));
+  }
+
+  // Add codebase intelligence if available
+  if (context.codebaseIntelligence) {
+    parts.push(buildCodebaseIntelligenceSection(context.codebaseIntelligence));
   }
 
   // Add guidelines and requirements sections
@@ -191,8 +201,31 @@ function buildScanContextSection(scanContext: import('./types').ScanContext): st
   return lines.join('\n');
 }
 
+function buildCodebaseIntelligenceSection(intel: CodebaseIntelligenceContext): string {
+  const lines: string[] = ['\n--- Project Intelligence ---'];
+
+  if (intel.framework) lines.push(`Framework: ${intel.framework}`);
+  if (intel.cssFramework) lines.push(`CSS: ${intel.cssFramework}`);
+  if (intel.selectorStrategy) lines.push(`Selector strategy: ${intel.selectorStrategy}`);
+  if (intel.authMechanism && intel.authMechanism !== 'none detected') {
+    lines.push(`Auth: ${intel.authMechanism} — protected routes may redirect to login`);
+  }
+  if (intel.stateManagement) lines.push(`State management: ${intel.stateManagement}`);
+  if (intel.apiLayer) lines.push(`API layer: ${intel.apiLayer}`);
+  if (intel.projectDescription) lines.push(`App: ${intel.projectDescription}`);
+
+  if (intel.testingRecommendations && intel.testingRecommendations.length > 0) {
+    lines.push('\nTesting recommendations:');
+    for (const rec of intel.testingRecommendations.slice(0, 8)) {
+      lines.push(`- ${rec}`);
+    }
+  }
+
+  return lines.join('\n');
+}
+
 export function createFixPrompt(context: TestGenerationContext): string {
-  return `Fix this failing Playwright test.
+  const parts: string[] = [`Fix this failing Playwright test.
 
 Original test code:
 \`\`\`typescript
@@ -200,8 +233,13 @@ ${context.existingCode}
 \`\`\`
 
 Error message:
-${context.errorMessage}
+${context.errorMessage}`];
 
+  if (context.codebaseIntelligence) {
+    parts.push(buildCodebaseIntelligenceSection(context.codebaseIntelligence));
+  }
+
+  parts.push(`
 Instructions:
 - Analyze the error, fix the root cause while keeping the same function signature and intent
 - Do NOT use \`import\` — expect is provided by the runner
@@ -210,7 +248,9 @@ Instructions:
 
 Common fixes: "X is not a function" → invalid matcher; "text=/regex/i" → use page.getByText(/regex/i); waitForLoadState timeout → use 'domcontentloaded' instead of 'networkidle'
 
-Return ONLY the fixed code, no explanations.`;
+Return ONLY the fixed code, no explanations.`);
+
+  return parts.join('\n');
 }
 
 export function createMcpFixPrompt(context: TestGenerationContext): string {
@@ -263,10 +303,11 @@ ${context.existingCode}
   return parts.join('\n');
 }
 
-export function createRouteScanPrompt(codebaseContext: string, repoFullName?: string): string {
+export function createRouteScanPrompt(codebaseContext: string, repoFullName?: string, intelligence?: CodebaseIntelligenceContext): string {
   const repoLine = repoFullName ? `\nRepository: ${repoFullName}\n` : '';
+  const intelSection = intelligence ? buildCodebaseIntelligenceSection(intelligence) : '';
   return `Analyze this codebase structure and identify all testable routes/pages.
-${repoLine}
+${repoLine}${intelSection}
 Codebase context:
 ${codebaseContext}
 
@@ -401,15 +442,16 @@ Guidelines:
 Return ONLY the JSON object, no explanations or markdown formatting.`;
 }
 
-export function createMCPExploreRoutesPrompt(baseURL: string, existingRoutes: string[]): string {
+export function createMCPExploreRoutesPrompt(baseURL: string, existingRoutes: string[], intelligence?: CodebaseIntelligenceContext): string {
   const seedSection = existingRoutes.length > 0
     ? `\nAlready known routes (use as seed starting points to explore deeper):\n${existingRoutes.map(r => `- ${r}`).join('\n')}`
     : '';
+  const intelSection = intelligence ? buildCodebaseIntelligenceSection(intelligence) : '';
 
   return `You are exploring a live web application to discover all available routes/pages.
 
 Base URL: ${baseURL}
-${seedSection}
+${seedSection}${intelSection}
 
 EXPLORATION INSTRUCTIONS:
 1. Navigate to ${baseURL} and snapshot to find navigation links, sidebars, menus
@@ -448,41 +490,32 @@ Extract User Stories and Acceptance Criteria with the following rules:
 1. Each distinct feature or capability should be its own User Story
 2. Each User Story should have clear, testable Acceptance Criteria
 3. Group related ACs under the same User Story
-4. If an AC is complex enough to warrant multiple tests, split it
-5. If multiple ACs are closely related and could be tested together, suggest grouping them
-6. Provide a suggested test name for each AC
+4. Provide a descriptive name for each AC that works as a test name
 
-Return a JSON array with this exact structure:
-[
-  {
-    "id": "US-1",
-    "title": "User Story title (as a functional area name)",
-    "description": "As a [role], I want [feature] so that [benefit]",
-    "acceptanceCriteria": [
-      {
-        "id": "AC-1.1",
-        "description": "Given [context], when [action], then [expected result]",
-        "testName": "Suggested test name for this AC"
-      },
-      {
-        "id": "AC-1.2",
-        "description": "Given [context], when [action], then [expected result]",
-        "testName": "Suggested test name for this AC",
-        "groupedWith": "AC-1.1"
-      }
-    ]
-  }
-]
+Format your response as markdown using this exact structure:
+
+### User Story 1: [Functional area name]
+**As a** [role]
+**I want to** [feature/capability]
+**So that** [benefit/value]
+
+**Acceptance Criteria:**
+- AC1: [Clear, testable criterion that describes expected behavior]
+- AC2: [Another criterion]
+
+### User Story 2: [Next functional area]
+...
 
 Guidelines:
-- User Story titles should be concise and work well as functional area names (e.g., "User Authentication", "Dashboard Analytics")
-- AC descriptions should be specific and testable
-- Use "groupedWith" only when two ACs are so closely related they should be a single test
-- Test names should be descriptive (e.g., "Login with valid credentials", "Dashboard shows correct metrics")
-- Extract as many meaningful stories and criteria as the document supports
-- If the document doesn't follow formal US/AC format, infer them from the requirements
-
-Return ONLY the JSON array, no explanations or markdown formatting.`;
+- User Story titles should be concise functional area names (e.g., "User Authentication", "Dashboard Analytics")
+- Each AC MUST describe a specific, observable user action and expected system response that can be verified in a browser
+- DO NOT include: questions, suggestions, meta-commentary, implementation tasks, or vague criteria
+- DO NOT include ACs like "Create additional tests...", "Consider...", "Should we...", "Implement...", "Ensure proper..."
+- Bad AC: "Ensure proper error handling" (vague, not testable)
+- Good AC: "When user submits login form with wrong password, an error message 'Invalid credentials' appears"
+- Each AC should be independently testable in a browser-based visual regression test
+- If a requirement is not testable via browser interaction, skip it
+- If the document doesn't follow formal US/AC format, infer them from the requirements`;
 }
 
 export function createBranchAwareTestPrompt(context: {
@@ -495,6 +528,7 @@ export function createBranchAwareTestPrompt(context: {
     changedFiles: string[];
     fileDiffs?: string;
   };
+  codebaseIntelligence?: CodebaseIntelligenceContext;
 }): string {
   const parts: string[] = [];
 
@@ -520,6 +554,10 @@ Test Name: ${context.testName}`);
       parts.push(`\nRelevant code changes:\n${context.branchChanges.fileDiffs}`);
     }
     parts.push(`\nUse this context to write more accurate selectors and assertions based on the actual code changes.`);
+  }
+
+  if (context.codebaseIntelligence) {
+    parts.push(buildCodebaseIntelligenceSection(context.codebaseIntelligence));
   }
 
   parts.push(`

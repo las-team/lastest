@@ -1,7 +1,7 @@
 'use server';
 
 import { db } from '@/lib/db';
-import { embeddedSessions, type EmbeddedSession, type EmbeddedSessionStatus } from '@/lib/db/schema';
+import { embeddedSessions, runners, type EmbeddedSession, type EmbeddedSessionStatus } from '@/lib/db/schema';
 import { eq, and, ne, desc } from 'drizzle-orm';
 import { requireTeamAccess, requireTeamAdmin } from '@/lib/auth';
 import { revalidatePath } from 'next/cache';
@@ -17,6 +17,30 @@ export async function listEmbeddedSessions(): Promise<EmbeddedSession[]> {
     .where(eq(embeddedSessions.teamId, session.team.id))
     .orderBy(desc(embeddedSessions.createdAt))
     .all();
+}
+
+/**
+ * List embedded sessions for system runners (cross-team, available to all authenticated users)
+ */
+export async function listSystemEmbeddedSessions(): Promise<EmbeddedSession[]> {
+  const systemRunnerIds = await db
+    .select({ id: runners.id })
+    .from(runners)
+    .where(eq(runners.isSystem, true))
+    .all();
+
+  if (systemRunnerIds.length === 0) return [];
+
+  const results: EmbeddedSession[] = [];
+  for (const r of systemRunnerIds) {
+    const session = await db
+      .select()
+      .from(embeddedSessions)
+      .where(eq(embeddedSessions.runnerId, r.id))
+      .get();
+    if (session) results.push(session);
+  }
+  return results;
 }
 
 /**

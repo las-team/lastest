@@ -1,13 +1,12 @@
 import { NextResponse } from 'next/server';
 import { requireAuth } from '@/lib/auth';
-import { listEmbeddedSessions } from '@/server/actions/embedded-sessions';
+import { listEmbeddedSessions, listSystemEmbeddedSessions } from '@/server/actions/embedded-sessions';
 
 /**
  * GET /api/embedded/stream
  *
- * Returns all embedded sessions for the authenticated team.
+ * Returns all embedded sessions for the authenticated team plus system sessions.
  * Each session includes the streamUrl for direct WebSocket connection.
- * The client connects directly to the container's stream server (Option A).
  */
 export async function GET() {
   try {
@@ -17,11 +16,23 @@ export async function GET() {
   }
 
   try {
-    const sessions = await listEmbeddedSessions();
+    const [teamSessions, systemSessions] = await Promise.all([
+      listEmbeddedSessions(),
+      listSystemEmbeddedSessions(),
+    ]);
+
+    // Merge, deduplicating by id (in case system runners are in the user's team)
+    const seen = new Set<string>();
+    const allSessions = [...teamSessions, ...systemSessions].filter((s) => {
+      if (seen.has(s.id)) return false;
+      seen.add(s.id);
+      return true;
+    });
+
     const streamAuthToken = process.env.STREAM_AUTH_TOKEN || null;
 
     return NextResponse.json({
-      sessions: sessions.map((s) => ({
+      sessions: allSessions.map((s) => ({
         id: s.id,
         runnerId: s.runnerId,
         status: s.status,

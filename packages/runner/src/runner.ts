@@ -3,7 +3,7 @@
  * Executes Playwright tests and returns results.
  */
 
-import { chromium, Browser, Page, BrowserContext } from 'playwright';
+import { chromium, firefox, webkit, Browser, Page, BrowserContext } from 'playwright';
 import { createHash } from 'crypto';
 import type { RunTestCommandPayload, RunSetupCommandPayload, LogEntry, StabilizationPayload } from './protocol.js';
 import { CROSS_OS_CHROMIUM_ARGS, setupFreezeScripts, applyPreScreenshotStabilization } from './stabilization.js';
@@ -33,6 +33,7 @@ export class TestRunner {
   private browser: Browser | null = null;
   private browserLaunchPromise: Promise<Browser> | null = null;
   private currentLaunchArgs: string[] = [];
+  private currentBrowserType: 'chromium' | 'firefox' | 'webkit' = 'chromium';
   private activeTests = new Map<string, { abort: AbortController; testRunId: string }>();
   private logs: LogEntry[] = [];
   // Legacy single-test tracking (for backward compat with abort/isRunning)
@@ -42,15 +43,15 @@ export class TestRunner {
   /**
    * Ensure a shared browser instance is running.
    * Concurrent calls share the same launch promise.
-   * If args differ from the current browser, close and relaunch.
+   * If args or browser type differ from the current browser, close and relaunch.
    */
-  private async ensureBrowser(args?: string[]): Promise<Browser> {
+  private async ensureBrowser(browserType: 'chromium' | 'firefox' | 'webkit' = 'chromium', args?: string[]): Promise<Browser> {
     const requestedArgs = args ?? [];
     const argsKey = requestedArgs.join(',');
     const currentKey = this.currentLaunchArgs.join(',');
 
-    // If browser exists but args differ, close and relaunch
-    if (this.browser && this.browser.isConnected() && argsKey !== currentKey) {
+    // If browser exists but args or type differ, close and relaunch
+    if (this.browser && this.browser.isConnected() && (argsKey !== currentKey || browserType !== this.currentBrowserType)) {
       const b = this.browser;
       this.browser = null;
       this.browserLaunchPromise = null;
@@ -64,7 +65,9 @@ export class TestRunner {
       return this.browserLaunchPromise;
     }
     this.currentLaunchArgs = requestedArgs;
-    this.browserLaunchPromise = chromium.launch({ headless: true, args: requestedArgs.length > 0 ? requestedArgs : undefined }).then(b => {
+    this.currentBrowserType = browserType;
+    const launcher = browserType === 'firefox' ? firefox : browserType === 'webkit' ? webkit : chromium;
+    this.browserLaunchPromise = launcher.launch({ headless: true, args: requestedArgs.length > 0 ? requestedArgs : undefined }).then(b => {
       this.browser = b;
       this.browserLaunchPromise = null;
       return b;
@@ -185,11 +188,12 @@ export class TestRunner {
       // Use deterministic rendering args when EITHER crossOsConsistency or freezeAnimations
       // is enabled — GPU compositing and Skia optimizations cause non-deterministic
       // anti-aliasing on canvas elements (roughjs lines differ between runs).
+      const browserType = command.browser || 'chromium';
       const needsDeterministicRendering = command.stabilization?.crossOsConsistency || command.stabilization?.freezeAnimations;
-      const launchArgs = needsDeterministicRendering ? CROSS_OS_CHROMIUM_ARGS : [];
+      const launchArgs = needsDeterministicRendering && browserType === 'chromium' ? CROSS_OS_CHROMIUM_ARGS : [];
 
-      // Use shared browser instance (will relaunch if args changed)
-      await this.ensureBrowser(launchArgs);
+      // Use shared browser instance (will relaunch if args or browser type changed)
+      await this.ensureBrowser(browserType, launchArgs);
 
       const viewport = command.viewport || { width: 1280, height: 720 };
       // Inject storageState from setup scripts (e.g. login session cookies/localStorage)
@@ -431,9 +435,10 @@ export class TestRunner {
       }
 
       logFn('info', 'Launching browser for setup...');
+      const setupBrowserType = command.browser || 'chromium';
       const needsDeterministicRendering = command.stabilization?.crossOsConsistency || command.stabilization?.freezeAnimations;
-      const setupLaunchArgs = needsDeterministicRendering ? CROSS_OS_CHROMIUM_ARGS : [];
-      await this.ensureBrowser(setupLaunchArgs);
+      const setupLaunchArgs = needsDeterministicRendering && setupBrowserType === 'chromium' ? CROSS_OS_CHROMIUM_ARGS : [];
+      await this.ensureBrowser(setupBrowserType, setupLaunchArgs);
 
       const viewport = command.viewport || { width: 1280, height: 720 };
       // No storageState injection — this IS the setup that creates the session

@@ -26,6 +26,9 @@ import { chromium } from 'playwright';
 import type { SetupContext, SetupScript } from '@/lib/setup/types';
 import { runPlaywrightSetup } from '@/lib/setup/script-runner';
 import { classifyTemplate } from '@/lib/templates/classifier';
+import { gatherCodebaseIntelligence } from '@/lib/ai/codebase-intelligence';
+import type { CodebaseIntelligence } from '@/lib/ai/codebase-intelligence';
+import type { CodebaseIntelligenceContext } from '@/lib/ai/types';
 
 // ============================================
 // Constants
@@ -187,6 +190,37 @@ async function runSelectRepo(sessionId: string, repositoryId: string) {
   return true;
 }
 
+/** Convert full CodebaseIntelligence to the lighter context type for prompts */
+function toIntelligenceContext(intel: CodebaseIntelligence): CodebaseIntelligenceContext {
+  return {
+    framework: intel.framework,
+    cssFramework: intel.cssFramework,
+    selectorStrategy: intel.selectorStrategy,
+    authMechanism: intel.authMechanism,
+    projectDescription: intel.projectDescription,
+    testingRecommendations: intel.testingRecommendations,
+    stateManagement: intel.stateManagement,
+    apiLayer: intel.apiLayer,
+  };
+}
+
+/** Build a human-readable intelligence brief for metadata */
+function buildIntelligenceBrief(intel: CodebaseIntelligence, routeCount: number): Record<string, unknown> {
+  const staticRoutes = routeCount; // We'll get exact counts from route data later
+  return {
+    framework: intel.framework,
+    auth: intel.authMechanism,
+    css: intel.cssFramework,
+    stateManagement: intel.stateManagement,
+    apiLayer: intel.apiLayer,
+    keyDeps: intel.keyDeps.map(d => d.name),
+    selectorStrategy: intel.selectorStrategy,
+    projectDescription: intel.projectDescription || undefined,
+    testingRecommendations: intel.testingRecommendations,
+    routeCount: staticRoutes,
+  };
+}
+
 async function runScanAndTemplate(sessionId: string, repositoryId: string) {
   await setStepActive(sessionId, 'scan_and_template');
   if (await isCancelled(sessionId)) return false;
@@ -198,17 +232,26 @@ async function runScanAndTemplate(sessionId: string, repositoryId: string) {
   }
 
   const branch = repo.selectedBranch || repo.defaultBranch || 'main';
+  const account = repo.teamId ? await queries.getGithubAccountByTeam(repo.teamId) : null;
 
-  // Substep 1: Scan routes
+  // Run route scanning AND codebase intelligence gathering in parallel
   await updateSubsteps(sessionId, 'scan_and_template', [
     { label: 'Scanning routes', status: 'running' },
+    { label: 'Analyzing codebase', status: 'running' },
     { label: 'Applying template', status: 'pending' },
   ]);
 
-  const scanResult = await startRemoteRouteScan(repositoryId, branch);
+  const [scanResult, intelligence] = await Promise.all([
+    startRemoteRouteScan(repositoryId, branch),
+    account
+      ? gatherCodebaseIntelligence(account.accessToken, repo.owner || '', repo.name, branch).catch(() => null)
+      : Promise.resolve(null),
+  ]);
+
   if (!scanResult.success) {
     await updateSubsteps(sessionId, 'scan_and_template', [
       { label: 'Scanning routes', status: 'error', detail: scanResult.error },
+      { label: 'Analyzing codebase', status: intelligence ? 'done' : 'error' },
       { label: 'Applying template', status: 'pending' },
     ]);
     await setStepFailed(sessionId, 'scan_and_template', scanResult.error || 'Scan failed');
@@ -217,20 +260,37 @@ async function runScanAndTemplate(sessionId: string, repositoryId: string) {
 
   if (await isCancelled(sessionId)) return false;
 
-  // Substep 2: Auto-detect template from framework
+  // Store intelligence in session metadata for later steps
+  if (intelligence) {
+    const session = await queries.getAgentSession(sessionId);
+    if (session) {
+      await queries.updateAgentSession(sessionId, {
+        metadata: {
+          ...session.metadata,
+          codebaseIntelligence: toIntelligenceContext(intelligence),
+          intelligenceBrief: buildIntelligenceBrief(intelligence, scanResult.routesFound || 0),
+        },
+      });
+    }
+  }
+
+  const intelDetail = intelligence
+    ? `${intelligence.framework}, ${intelligence.keyDeps.length} key deps`
+    : 'Skipped (no GitHub access)';
+
+  // Template classification (uses scan results)
   await updateSubsteps(sessionId, 'scan_and_template', [
     { label: 'Scanning routes', status: 'done', detail: `${scanResult.routesFound} routes found` },
+    { label: 'Analyzing codebase', status: 'done', detail: intelDetail },
     { label: 'Applying template', status: 'running' },
   ]);
 
-  // AI-powered template classification with heuristic fallback
-  const account = repo.teamId ? await queries.getGithubAccountByTeam(repo.teamId) : null;
   const repoRoutes = await queries.getRoutesByRepo(repositoryId);
   const routePaths = repoRoutes.map(r => r.path);
 
   const classification = await classifyTemplate(
     repositoryId,
-    scanResult.framework || 'unknown',
+    intelligence?.framework || scanResult.framework || 'unknown',
     routePaths,
     account?.accessToken || '',
     repo.owner || '',
@@ -246,13 +306,16 @@ async function runScanAndTemplate(sessionId: string, repositoryId: string) {
 
   await updateSubsteps(sessionId, 'scan_and_template', [
     { label: 'Scanning routes', status: 'done', detail: `${scanResult.routesFound} routes found` },
+    { label: 'Analyzing codebase', status: 'done', detail: intelDetail },
     { label: 'Applying template', status: 'done', detail: `${templateId} (${classification.confidence}%)` },
   ]);
 
   await setStepCompleted(sessionId, 'scan_and_template', {
     routesFound: scanResult.routesFound,
-    framework: scanResult.framework,
+    framework: intelligence?.framework || scanResult.framework,
     templateApplied: templateId,
+    hasIntelligence: !!intelligence,
+    ...(intelligence ? { intelligenceBrief: buildIntelligenceBrief(intelligence, scanResult.routesFound || 0) } : {}),
   });
   return true;
 }
@@ -263,19 +326,25 @@ async function tryFallbackDiscovery(
   sessionId: string,
   repositoryId: string,
   branch: string,
+  specDetail?: string,
 ): Promise<boolean> {
+  const specLabel = specDetail || 'No spec files found';
   const envConfig = await getEnvironmentConfig(repositoryId);
   const baseUrl = envConfig?.baseUrl || 'http://localhost:3000';
 
+  // Retrieve codebase intelligence from session metadata (gathered in scan_and_template)
+  const session = await queries.getAgentSession(sessionId);
+  const intelligence = session?.metadata?.codebaseIntelligence as CodebaseIntelligenceContext | undefined;
+
   // Fallback 1: AI route scan
   await updateSubsteps(sessionId, 'discover', [
-    { label: 'Finding spec files', status: 'done', detail: 'No spec files found' },
+    { label: 'Finding spec files', status: 'done', detail: specLabel },
     { label: 'AI route scan', status: 'running' },
     { label: 'Generating tests', status: 'pending' },
   ]);
 
   try {
-    const scanResult = await aiScanRoutes(repositoryId, branch);
+    const scanResult = await aiScanRoutes(repositoryId, branch, intelligence);
 
     if (scanResult.success && scanResult.functionalAreas && scanResult.functionalAreas.length > 0) {
       const saveResult = await saveDiscoveredRoutes(repositoryId, scanResult.functionalAreas);
@@ -285,7 +354,7 @@ async function tryFallbackDiscovery(
         const areaCount = new Set(saveResult.savedRoutes.map((r) => r.areaName)).size;
 
         await updateSubsteps(sessionId, 'discover', [
-          { label: 'Finding spec files', status: 'done', detail: 'No spec files found' },
+          { label: 'Finding spec files', status: 'done', detail: specLabel },
           { label: 'AI route scan', status: 'done', detail: `${areaCount} areas, ${totalRoutes} routes` },
           { label: 'Generating tests', status: 'running' },
         ]);
@@ -305,7 +374,7 @@ async function tryFallbackDiscovery(
         }
 
         await updateSubsteps(sessionId, 'discover', [
-          { label: 'Finding spec files', status: 'done', detail: 'No spec files found' },
+          { label: 'Finding spec files', status: 'done', detail: specLabel },
           { label: 'AI route scan', status: 'done', detail: `${areaCount} areas, ${totalRoutes} routes` },
           { label: 'Generating tests', status: 'done', detail: `${testsCreated} tests` },
         ]);
@@ -327,7 +396,7 @@ async function tryFallbackDiscovery(
 
   // Fallback 2: Smoke tests from already-scanned routes
   await updateSubsteps(sessionId, 'discover', [
-    { label: 'Finding spec files', status: 'done', detail: 'No spec files found' },
+    { label: 'Finding spec files', status: 'done', detail: specLabel },
     { label: 'AI route scan', status: 'done', detail: 'No routes discovered' },
     { label: 'Generating smoke tests', status: 'running' },
   ]);
@@ -348,7 +417,7 @@ async function tryFallbackDiscovery(
       }
 
       await updateSubsteps(sessionId, 'discover', [
-        { label: 'Finding spec files', status: 'done', detail: 'No spec files found' },
+        { label: 'Finding spec files', status: 'done', detail: specLabel },
         { label: 'AI route scan', status: 'done', detail: 'No routes discovered' },
         { label: 'Generating smoke tests', status: 'done', detail: `${testsCreated} tests` },
       ]);
@@ -364,7 +433,7 @@ async function tryFallbackDiscovery(
 
   // All fallbacks exhausted
   await updateSubsteps(sessionId, 'discover', [
-    { label: 'Finding spec files', status: 'done', detail: 'No spec files found' },
+    { label: 'Finding spec files', status: 'done', detail: specLabel },
     { label: 'AI route scan', status: 'done', detail: 'No routes discovered' },
     { label: 'Generating smoke tests', status: 'done', detail: 'No routes available' },
   ]);
@@ -373,9 +442,106 @@ async function tryFallbackDiscovery(
   return true;
 }
 
+async function fillMissingUserStories(
+  sessionId: string,
+  repositoryId: string,
+  branch: string,
+  existingTests: Awaited<ReturnType<typeof queries.getTestsByRepo>>,
+  intelligence?: CodebaseIntelligenceContext,
+): Promise<boolean> {
+  // Step 1: Discover spec files (GitHub API, no AI)
+  const specResult = await discoverSpecFiles(repositoryId, branch);
+  if (!specResult.success || !specResult.files || specResult.files.length === 0) {
+    return false; // No spec files → nothing to fill
+  }
+
+  // Step 2: Extract user stories (AI call)
+  await updateSubsteps(sessionId, 'discover', [
+    { label: 'Checking spec coverage', status: 'running' },
+  ]);
+
+  const filePaths = specResult.files.map(f => f.path);
+  const storiesResult = await extractUserStoriesFromFiles(repositoryId, branch, filePaths);
+  if (!storiesResult.success || !storiesResult.stories || storiesResult.stories.length === 0) {
+    return false; // No stories extracted → nothing to fill
+  }
+
+  // Step 3: Find missing stories (area doesn't exist or has 0 tests)
+  const existingAreas = await queries.getFunctionalAreasByRepo(repositoryId);
+  const areaTestCounts = new Map<string, number>();
+  for (const area of existingAreas) {
+    const count = existingTests.filter(t => t.functionalAreaId === area.id).length;
+    areaTestCounts.set(area.name.toLowerCase(), count);
+  }
+
+  const missingStories = storiesResult.stories.filter(story => {
+    const key = story.title.toLowerCase();
+    return !areaTestCounts.has(key) || areaTestCounts.get(key)! === 0;
+  });
+
+  if (missingStories.length === 0) {
+    return false; // All stories covered → use cache
+  }
+
+  // Step 4: Generate tests for missing stories
+  let totalTests = 0;
+  for (const story of missingStories) {
+    if (!story.acceptanceCriteria) continue;
+    const grouped = new Set<string>();
+    for (const ac of story.acceptanceCriteria) {
+      if (ac.groupedWith && grouped.has(ac.groupedWith)) continue;
+      grouped.add(ac.id);
+      totalTests++;
+    }
+  }
+
+  const initialTestCount = existingTests.length;
+
+  await updateSubsteps(sessionId, 'discover', [
+    { label: 'Checking spec coverage', status: 'done', detail: `${missingStories.length} areas missing` },
+    { label: `Generating tests (0/${totalTests})`, status: 'running' },
+  ]);
+
+  const envConfig = await getEnvironmentConfig(repositoryId);
+  const genResult = await generateTestsFromStories(
+    repositoryId,
+    storiesResult.importId ?? null,
+    missingStories,
+    branch,
+    { targetUrl: envConfig?.baseUrl || undefined, codebaseIntelligence: intelligence },
+  );
+
+  const totalExistingAreas = existingAreas.length + genResult.areasCreated;
+
+  await updateSubsteps(sessionId, 'discover', [
+    { label: 'Checking spec coverage', status: 'done', detail: `${missingStories.length} areas missing` },
+    { label: 'Generating tests', status: 'done', detail: `${genResult.testsCreated} new tests` },
+  ]);
+
+  const session = await queries.getAgentSession(sessionId);
+  if (session) {
+    await queries.updateAgentSession(sessionId, {
+      metadata: { ...session.metadata, testsCreated: initialTestCount + genResult.testsCreated },
+    });
+  }
+
+  await setStepCompleted(sessionId, 'discover', {
+    testsCreated: initialTestCount + genResult.testsCreated,
+    areasCreated: totalExistingAreas,
+    newAreasAdded: genResult.areasCreated,
+    newTestsAdded: genResult.testsCreated,
+    fromSpecGapFill: true,
+  });
+  return true;
+}
+
 async function runDiscover(sessionId: string, repositoryId: string) {
   await setStepActive(sessionId, 'discover');
   if (await isCancelled(sessionId)) return false;
+
+  // Retrieve codebase intelligence from session metadata
+  const discoverSession = await queries.getAgentSession(sessionId);
+  const discoverIntelligence = discoverSession?.metadata?.codebaseIntelligence as CodebaseIntelligenceContext | undefined;
 
   const repo = await queries.getRepository(repositoryId);
   if (!repo) {
@@ -384,6 +550,36 @@ async function runDiscover(sessionId: string, repositoryId: string) {
   }
 
   const branch = repo.selectedBranch || repo.defaultBranch || 'main';
+
+  // Cache: if tests exist, check for missing user story areas before skipping
+  const existingTests = await queries.getTestsByRepo(repositoryId);
+  if (existingTests.length > 0) {
+    // Try to fill missing user story areas from spec files
+    const filled = await fillMissingUserStories(
+      sessionId, repositoryId, branch, existingTests, discoverIntelligence
+    );
+    if (filled) return true;
+
+    // No gaps found — use cache
+    const existingAreas = await queries.getFunctionalAreasByRepo(repositoryId);
+    await updateSubsteps(sessionId, 'discover', [
+      { label: 'Using existing tests', status: 'done', detail: `${existingTests.length} tests in ${existingAreas.length} areas` },
+    ]);
+
+    const session = await queries.getAgentSession(sessionId);
+    if (session) {
+      await queries.updateAgentSession(sessionId, {
+        metadata: { ...session.metadata, testsCreated: existingTests.length },
+      });
+    }
+
+    await setStepCompleted(sessionId, 'discover', {
+      testsCreated: existingTests.length,
+      areasCreated: existingAreas.length,
+      cached: true,
+    });
+    return true;
+  }
 
   // Substep 1: Discover spec files
   await updateSubsteps(sessionId, 'discover', [
@@ -411,13 +607,11 @@ async function runDiscover(sessionId: string, repositoryId: string) {
   const storiesResult = await extractUserStoriesFromFiles(repositoryId, branch, filePaths);
 
   if (!storiesResult.success || !storiesResult.stories || storiesResult.stories.length === 0) {
-    await updateSubsteps(sessionId, 'discover', [
-      { label: 'Finding spec files', status: 'done', detail: `${specResult.files.length} files` },
-      { label: 'Extracting user stories', status: 'done', detail: 'No stories extracted' },
-      { label: 'Generating tests', status: 'done', detail: 'Skipped' },
-    ]);
-    await setStepCompleted(sessionId, 'discover', { skipped: true, reason: 'No user stories extracted' });
-    return true;
+    // No stories from specs — fall through to AI scan / smoke test fallbacks
+    return tryFallbackDiscovery(
+      sessionId, repositoryId, branch,
+      `${specResult.files.length} files (no stories extracted)`,
+    );
   }
 
   if (await isCancelled(sessionId)) return false;
@@ -454,7 +648,7 @@ async function runDiscover(sessionId: string, repositoryId: string) {
     storiesResult.importId ?? null,
     storiesResult.stories,
     branch,
-    { targetUrl: envConfig?.baseUrl || undefined },
+    { targetUrl: envConfig?.baseUrl || undefined, codebaseIntelligence: discoverIntelligence },
   );
 
   genPromise
@@ -572,7 +766,8 @@ CONSTRAINTS:
 - Export async function "setup" with exact signature above
 - Return an object with variables for tests (e.g., { loggedIn: true })
 - Handle loading states with waitForLoadState or waitForSelector
-- Use realistic test data (test@example.com, Password123!, etc.)`;
+- Use realistic test data (test@example.com, Password123!, etc.)
+- page.waitForURL() predicates receive a URL object, not a string. Use url.href or url.toString() for string operations`;
 
 function normalizeUrl(rawUrl: string): string {
   try {
@@ -789,6 +984,28 @@ async function runEnvSetup(sessionId: string, repositoryId: string) {
 
   const loginDetection = await detectLoginRequired(baseUrl);
 
+  // Check if setup steps or scripts already exist — skip login generation to avoid duplicates
+  if (loginDetection.needsLogin) {
+    const existingSteps = await queries.getDefaultSetupSteps(repositoryId);
+    const hasScriptStep = existingSteps.some(s => s.stepType === 'script');
+    const existingScripts = await queries.getSetupScripts(repositoryId);
+    if (hasScriptStep || existingScripts.length > 0) {
+      await updateSubsteps(sessionId, 'env_setup', [
+        { label: 'Checking base URL', status: 'done', detail: `${connResult.responseTime}ms` },
+        { label: 'Detecting login', status: 'done', detail: 'Login required' },
+        { label: 'Login setup', status: 'done', detail: 'Already configured' },
+      ]);
+      await setStepCompleted(sessionId, 'env_setup', {
+        url: baseUrl,
+        responseTime: connResult.responseTime,
+        loginRequired: true,
+        loginSetup: true,
+        existingSetup: true,
+      });
+      return true;
+    }
+  }
+
   if (!loginDetection.needsLogin) {
     // No login needed — done
     await updateSubsteps(sessionId, 'env_setup', [
@@ -975,9 +1192,10 @@ async function runFixTests(sessionId: string, repositoryId: string) {
   await setStepActive(sessionId, 'fix_tests');
   if (await isCancelled(sessionId)) return false;
 
-  // Get the latest build summary
+  // Get the latest build summary + intelligence context
   const session = await queries.getAgentSession(sessionId);
   if (!session) return false;
+  const intelligence = session.metadata?.codebaseIntelligence as CodebaseIntelligenceContext | undefined;
 
   const buildIds = session.metadata.buildIds || [];
   const lastBuildId = buildIds[buildIds.length - 1];
@@ -1038,7 +1256,7 @@ async function runFixTests(sessionId: string, repositoryId: string) {
       },
     ]);
 
-    const fixResult = await aiFixTest(repositoryId, testId, errorMessage);
+    const fixResult = await aiFixTest(repositoryId, testId, errorMessage, intelligence);
     fixAttempts[testId] = attempts + 1;
 
     if (fixResult.success && fixResult.code) {

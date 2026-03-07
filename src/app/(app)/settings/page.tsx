@@ -28,15 +28,14 @@ import { PendingInvitations } from '@/components/users/pending-invitations';
 import { InviteUserDialog } from '@/components/users/invite-user-dialog';
 import { RunnerList } from '@/components/runners/runner-list';
 import { CreateRunnerDialog } from '@/components/runners/create-runner-dialog';
-import { getRunners } from '@/server/actions/runners';
-import { listEmbeddedSessions } from '@/server/actions/embedded-sessions';
-import { EmbeddedSessionList } from '@/components/embedded-browser/embedded-session-list-client';
-import { Tv2 } from 'lucide-react';
+import { getRunners, getSystemRunners } from '@/server/actions/runners';
 import { GoogleSheetsSettingsCard } from '@/components/settings/google-sheets-settings-card';
 import { TestingTemplateSelector } from '@/components/settings/testing-template-selector';
 import { AutoApproveToggle } from '@/components/settings/auto-approve-toggle';
 import { EarlyAdopterToggle } from '@/components/settings/early-adopter-toggle';
+import { BanAiModeToggle } from '@/components/settings/ban-ai-mode-toggle';
 import { ConnectGithubButton, ReconnectGithubLink } from '@/components/settings/connect-github-button';
+import { GithubActionsCard } from '@/components/settings/github-actions-card-client';
 
 export default async function SettingsPage({
   searchParams,
@@ -52,6 +51,12 @@ export default async function SettingsPage({
     teamId ? queries.getGitlabAccountByTeam(teamId) : null,
     teamId ? queries.getSelectedRepository(teamId) : null,
   ]);
+  const [githubActionConfigs, teamRepos, runners, sysRunners] = await Promise.all([
+    teamId ? queries.getGithubActionConfigs(teamId) : [],
+    teamId ? queries.getRepositoriesByTeam(teamId) : [],
+    getRunners(),
+    getSystemRunners(),
+  ]);
   const playwrightSettings = await queries.getPlaywrightSettings(selectedRepo?.id);
   const environmentConfig = await queries.getEnvironmentConfig(selectedRepo?.id);
   const diffSensitivitySettings = await queries.getDiffSensitivitySettings(selectedRepo?.id);
@@ -65,17 +70,16 @@ export default async function SettingsPage({
 
   // Fetch admin-only data
   const isAdmin = currentUser?.role === 'admin' || currentUser?.role === 'owner';
-  const [teamMembers, pendingInvitations, runners, embeddedSessions] = isAdmin && currentUser?.teamId
+  const [teamMembers, pendingInvitations] = isAdmin && currentUser?.teamId
     ? await Promise.all([
         queries.getTeamMembers(currentUser.teamId),
         queries.getPendingInvitationsByTeam(currentUser.teamId),
-        getRunners(),
-        listEmbeddedSessions(),
       ])
-    : [[], [], [], []];
+    : [[], []];
 
   const serverUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
   const earlyAdopterMode = session?.team?.earlyAdopterMode ?? false;
+  const banAiMode = session?.team?.banAiMode ?? false;
 
   return (
     <div className="flex flex-col h-full">
@@ -151,6 +155,15 @@ export default async function SettingsPage({
               )}
             </CardContent>
           </Card>
+
+          {/* GitHub Actions */}
+          <GithubActionsCard
+            configs={githubActionConfigs}
+            runners={runners}
+            repos={teamRepos}
+            hasGithubAccount={!!githubAccount}
+            githubUsername={githubAccount?.githubUsername ?? null}
+          />
 
           {/* GitLab Integration (early adopter only) */}
           {earlyAdopterMode && (
@@ -269,8 +282,9 @@ export default async function SettingsPage({
                 Toggle experimental features
               </CardDescription>
             </CardHeader>
-            <CardContent>
+            <CardContent className="space-y-4">
               <EarlyAdopterToggle enabled={session?.team?.earlyAdopterMode ?? false} />
+              <BanAiModeToggle enabled={session?.team?.banAiMode ?? false} />
             </CardContent>
           </Card>
 
@@ -334,20 +348,24 @@ export default async function SettingsPage({
           </div>
 
           {/* AI Settings */}
+          {!banAiMode && (
           <div id="ai-settings">
             <AISettingsCard
               settings={aiSettings}
               repositoryId={selectedRepo?.id}
             />
           </div>
+          )}
 
           {/* AI Prompt Logs */}
+          {!banAiMode && (
           <div id="ai-logs">
             <AILogsCard
               logs={aiLogs}
               repositoryId={selectedRepo?.id}
             />
           </div>
+          )}
 
           {/* Notifications */}
           <div id="notifications">
@@ -430,14 +448,14 @@ export default async function SettingsPage({
                   <CreateRunnerDialog />
                 </CardHeader>
                 <CardContent className="space-y-4">
-                  {runners.length === 0 ? (
+                  {runners.length === 0 && sysRunners.length === 0 ? (
                     <div className="text-center py-4 text-muted-foreground">
                       <Bot className="w-12 h-12 mx-auto mb-4 opacity-50" />
                       <p className="mb-1">No runners configured</p>
                       <p className="text-sm">Create a runner above to get a token, then start it with the CLI.</p>
                     </div>
                   ) : (
-                    <RunnerList runners={runners} />
+                    <RunnerList runners={runners} systemRunners={sysRunners} />
                   )}
 
                   <details open={runners.length === 0 ? true : undefined}>
@@ -460,31 +478,6 @@ export default async function SettingsPage({
                 </CardContent>
               </Card>
 
-              {/* Embedded Browsers */}
-              <Card id="embedded-browsers">
-                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                  <div className="space-y-1">
-                    <CardTitle className="flex items-center gap-2">
-                      <Tv2 className="w-5 h-5" />
-                      Embedded Browsers ({embeddedSessions.length})
-                    </CardTitle>
-                    <CardDescription>
-                      Docker-based browsers with live streaming
-                    </CardDescription>
-                  </div>
-                </CardHeader>
-                <CardContent>
-                  {embeddedSessions.length === 0 ? (
-                    <div className="text-center py-4 text-muted-foreground">
-                      <Tv2 className="w-12 h-12 mx-auto mb-4 opacity-50" />
-                      <p className="mb-1">No embedded browsers active</p>
-                      <p className="text-sm">Start an embedded browser container via Docker Compose to enable live browser streaming.</p>
-                    </div>
-                  ) : (
-                    <EmbeddedSessionList sessions={embeddedSessions} isAdmin={isAdmin} />
-                  )}
-                </CardContent>
-              </Card>
 
             </div>
           )}

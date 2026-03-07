@@ -27,7 +27,7 @@ export async function forkBaselinesForBranch(
     return { forked: 0, skipped: false };
   }
 
-  // Copy each baseline to the new branch (share image files)
+  // Copy each baseline to the new branch (share image files, preserve browser)
   let forked = 0;
   for (const baseline of sourceBaselines) {
     await queries.createBaseline({
@@ -37,6 +37,7 @@ export async function forkBaselinesForBranch(
       imagePath: baseline.imagePath, // Shared — no file duplication
       imageHash: baseline.imageHash,
       branch: toBranch,
+      browser: baseline.browser,
       approvedFromDiffId: baseline.approvedFromDiffId,
     });
     forked++;
@@ -60,10 +61,10 @@ export async function mergeBaselinesFromBranch(
   const sourceBaselines = await queries.getBaselinesByBranch(repositoryId, fromBranch);
   const targetBaselines = await queries.getBaselinesByBranch(repositoryId, toBranch);
 
-  // Build a lookup map for target baselines: key = testId:stepLabel
+  // Build a lookup map for target baselines: key = testId:stepLabel:browser
   const targetMap = new Map<string, typeof targetBaselines[0]>();
   for (const b of targetBaselines) {
-    const key = `${b.testId}:${b.stepLabel || ''}`;
+    const key = `${b.testId}:${b.stepLabel || ''}:${b.browser || 'chromium'}`;
     targetMap.set(key, b);
   }
 
@@ -71,7 +72,7 @@ export async function mergeBaselinesFromBranch(
   let unchanged = 0;
 
   for (const source of sourceBaselines) {
-    const key = `${source.testId}:${source.stepLabel || ''}`;
+    const key = `${source.testId}:${source.stepLabel || ''}:${source.browser || 'chromium'}`;
     const existing = targetMap.get(key);
 
     if (existing && existing.imageHash === source.imageHash) {
@@ -80,8 +81,8 @@ export async function mergeBaselinesFromBranch(
       continue;
     }
 
-    // Deactivate old target baseline and create new one
-    await queries.deactivateBaselines(source.testId, source.stepLabel, toBranch);
+    // Deactivate old target baseline and create new one (browser-scoped)
+    await queries.deactivateBaselines(source.testId, source.stepLabel, toBranch, source.browser || undefined);
     await queries.createBaseline({
       repositoryId: source.repositoryId,
       testId: source.testId,
@@ -89,6 +90,7 @@ export async function mergeBaselinesFromBranch(
       imagePath: source.imagePath,
       imageHash: source.imageHash,
       branch: toBranch,
+      browser: source.browser,
       approvedFromDiffId: source.approvedFromDiffId,
     });
     promoted++;

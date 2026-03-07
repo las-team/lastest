@@ -1,16 +1,7 @@
-/**
- * WebSocket Proxy Preload Script
- *
- * Loaded via `node --require ./ws-proxy-preload.js server.js` in Docker.
- * Synchronously patches http.Server.prototype.listen to proxy WebSocket
- * upgrade requests at /api/embedded/stream/ws to the embedded browser's
- * stream server on 127.0.0.1:STREAM_PORT.
- */
-
 const http = require('http');
 const net = require('net');
 
-const streamPort = parseInt(process.env.STREAM_PORT || '9223', 10);
+const defaultStreamPort = parseInt(process.env.STREAM_PORT || '9223', 10);
 const originalListen = http.Server.prototype.listen;
 
 http.Server.prototype.listen = function (...args) {
@@ -18,11 +9,29 @@ http.Server.prototype.listen = function (...args) {
     const url = req.url || '';
     if (!url.startsWith('/api/embedded/stream/ws')) return;
 
-    const qs = url.includes('?') ? url.slice(url.indexOf('?')) : '';
-    const proxy = net.connect(streamPort, '127.0.0.1', () => {
+    // Prevent Next.js from ending the socket after upgrade
+    const originalEnd = socket.end.bind(socket);
+    let owned = true;
+    socket.end = (...a) => owned ? socket : originalEnd(...a);
+
+    const searchParams = new URLSearchParams(url.includes('?') ? url.slice(url.indexOf('?') + 1) : '');
+    const target = searchParams.get('target');
+
+    let connectHost = '127.0.0.1';
+    let connectPort = defaultStreamPort;
+    if (target) {
+      const parts = target.split(':');
+      connectHost = parts[0];
+      if (parts[1]) connectPort = parseInt(parts[1], 10);
+    }
+
+    searchParams.delete('target');
+    const upstreamQs = searchParams.toString() ? '?' + searchParams.toString() : '';
+
+    const proxy = net.connect(connectPort, connectHost, () => {
       const lines = [
-        `GET /${qs} HTTP/1.1`,
-        `Host: 127.0.0.1:${streamPort}`,
+        `GET /${upstreamQs} HTTP/1.1`,
+        `Host: ${connectHost}:${connectPort}`,
         'Upgrade: websocket',
         'Connection: Upgrade',
         `Sec-WebSocket-Key: ${req.headers['sec-websocket-key']}`,
@@ -35,11 +44,13 @@ http.Server.prototype.listen = function (...args) {
 
       proxy.write(lines.join('\r\n') + '\r\n\r\n');
       if (head.length > 0) proxy.write(head);
+      owned = false;
       proxy.pipe(socket);
       socket.pipe(proxy);
     });
-    proxy.on('error', () => socket.destroy());
+    proxy.on('error', () => { owned = false; socket.destroy(); });
     socket.on('error', () => proxy.destroy());
+    socket.on('close', () => proxy.destroy());
   });
   return originalListen.apply(this, args);
 };

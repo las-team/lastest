@@ -19,6 +19,7 @@ import { revalidatePath } from 'next/cache';
 import { chromium, firefox, webkit } from 'playwright';
 import { createMessage } from '@/lib/ws/protocol';
 import type { StartRecordingCommand, StopRecordingCommand, CaptureScreenshotCommand, CreateAssertionCommand, FlagDownloadCommand } from '@/lib/ws/protocol';
+import { getAvailableSystemRunner } from '@/server/actions/runners';
 import {
   queueCommandToDB,
   createRemoteRecordingSession,
@@ -77,7 +78,7 @@ export async function startRecording(
   repositoryId?: string | null,
   runnerId?: string,
   setupOptions?: { testId?: string | null; scriptId?: string | null; steps?: Array<{ stepType: 'test' | 'script'; testId?: string | null; scriptId?: string | null }> }
-): Promise<{ sessionId?: string; error?: string }> {
+): Promise<{ sessionId?: string; resolvedRunnerId?: string; error?: string }> {
   await requireTeamAccess();
   // Validate URL format
   try {
@@ -89,6 +90,15 @@ export async function startRecording(
   const sessionId = uuid();
   const settings = await getPlaywrightSettings(repositoryId);
   const selectorPriority = settings.selectorPriority ?? DEFAULT_SELECTOR_PRIORITY;
+
+  // Resolve 'auto' to an available system runner
+  if (runnerId === 'auto') {
+    const systemRunner = await getAvailableSystemRunner();
+    if (!systemRunner) {
+      return { error: 'No system browsers available. Please try again later.' };
+    }
+    runnerId = systemRunner.id;
+  }
 
   // Dispatch to remote runner if specified
   if (runnerId && runnerId !== 'local') {
@@ -142,7 +152,7 @@ export async function startRecording(
     await queueCommandToDB(runnerId, command);
 
     console.log(`[Recording] Dispatched recording to runner ${runnerId}, session ${sessionId}`);
-    return { sessionId };
+    return { sessionId, resolvedRunnerId: runnerId };
   }
 
   // Local recording

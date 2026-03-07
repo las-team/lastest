@@ -17,7 +17,7 @@ import type {
   AgentStepId,
   AgentSessionMetadata,
 } from '../schema';
-import { eq, desc, and, or } from 'drizzle-orm';
+import { eq, desc, and, or, isNotNull } from 'drizzle-orm';
 import { v4 as uuid } from 'uuid';
 
 // Spec Imports
@@ -46,6 +46,22 @@ export async function getSpecImportsByRepo(repositoryId: string) {
     .where(eq(specImports.repositoryId, repositoryId))
     .orderBy(desc(specImports.createdAt))
     .all();
+}
+
+export async function getLatestSpecImportForRepo(repositoryId: string) {
+  return db
+    .select()
+    .from(specImports)
+    .where(
+      and(
+        eq(specImports.repositoryId, repositoryId),
+        eq(specImports.status, 'completed'),
+        isNotNull(specImports.extractedStories),
+      )
+    )
+    .orderBy(desc(specImports.createdAt))
+    .limit(1)
+    .then(rows => rows[0] ?? null);
 }
 
 // ============================================

@@ -35,6 +35,8 @@ export default async function TestDetailPage({ params }: TestDetailPageProps) {
   // Load playwright settings for stabilization defaults
   const playwrightSettings = repoId ? await getPlaywrightSettings(repoId) : null;
 
+  const banAiMode = session?.team?.banAiMode ?? false;
+
   return (
     <div className="flex flex-col h-full">
       <TestDetailClient
@@ -48,6 +50,7 @@ export default async function TestDetailPage({ params }: TestDetailPageProps) {
         availableScripts={setupScripts}
         sheetDataSources={sheetDataSources}
         stabilizationDefaults={playwrightSettings?.stabilization ?? null}
+        banAiMode={banAiMode}
       />
     </div>
   );

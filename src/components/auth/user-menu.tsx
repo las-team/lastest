@@ -34,7 +34,7 @@ export function UserMenu({ user }: UserMenuProps) {
       <DropdownMenuTrigger asChild>
         <button className="flex items-center gap-3 w-full p-2 rounded-md hover:bg-accent cursor-pointer">
           <Avatar className="h-8 w-8">
-            {user.avatarUrl && <AvatarImage src={user.avatarUrl} alt={user.name ?? ''} />}
+            {user.avatarUrl && <AvatarImage src={user.avatarUrl} alt={user.name ?? ''} referrerPolicy="no-referrer" />}
             <AvatarFallback className="text-xs">{initials}</AvatarFallback>
           </Avatar>
           <div className="flex-1 min-w-0 text-left">

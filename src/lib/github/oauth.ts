@@ -6,7 +6,7 @@ export function getGitHubAuthUrl(state?: string): string {
   const params = new URLSearchParams({
     client_id: GITHUB_CLIENT_ID,
     redirect_uri: GITHUB_REDIRECT_URI,
-    scope: 'repo read:user',
+    scope: 'repo read:user workflow',
     state: state || crypto.randomUUID(),
   });
 

@@ -232,3 +232,58 @@ export async function generateBasicTests(repositoryId: string, routeIds: string[
 
   return { testsCreated, testsUpdated };
 }
+
+// ============================================
+// Responsive Testing
+// ============================================
+
+const RESPONSIVE_VIEWPORTS: Record<string, { width: number; height: number; label: string }> = {
+  mobile: { width: 375, height: 812, label: 'Mobile' },
+  tablet: { width: 768, height: 1024, label: 'Tablet' },
+  desktop: { width: 1440, height: 900, label: 'Desktop' },
+};
+
+/**
+ * Create responsive variants of existing tests at different viewports.
+ * Clones each source test for each selected viewport with a viewport override.
+ * @param viewports - Array of viewport names: 'mobile', 'tablet', 'desktop'
+ */
+export async function createResponsiveVariants(
+  repositoryId: string,
+  testIds: string[],
+  viewports: string[] = ['mobile', 'tablet'],
+): Promise<{ testsCreated: number }> {
+  await requireRepoAccess(repositoryId);
+  let testsCreated = 0;
+
+  for (const testId of testIds) {
+    const test = await queries.getTest(testId);
+    if (!test) continue;
+
+    for (const vp of viewports) {
+      const vpConfig = RESPONSIVE_VIEWPORTS[vp];
+      if (!vpConfig) continue;
+      const variantName = `${test.name} [${vpConfig.label}]`;
+
+      // Skip if variant already exists
+      const existing = await queries.getTestsByRepo(repositoryId);
+      if (existing.some(t => t.name === variantName)) continue;
+
+      await queries.createTest({
+        repositoryId,
+        functionalAreaId: test.functionalAreaId,
+        name: variantName,
+        code: test.code,
+        description: `${vpConfig.label} (${vpConfig.width}x${vpConfig.height}) variant of: ${test.name}`,
+        targetUrl: test.targetUrl,
+        setupTestId: test.setupTestId,
+        setupScriptId: test.setupScriptId,
+        viewportOverride: { width: vpConfig.width, height: vpConfig.height },
+      });
+      testsCreated++;
+    }
+  }
+
+  revalidatePath('/tests');
+  return { testsCreated };
+}

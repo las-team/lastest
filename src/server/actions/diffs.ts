@@ -40,15 +40,19 @@ export async function approveDiff(diffId: string, approvedBy?: string) {
     : null;
   const branch = testRun?.gitBranch || 'main';
 
-  // Branch-scoped approval: only deactivate/create baselines for THIS branch
+  // Determine the browser from the diff record (defaults to chromium for legacy diffs)
+  const browser = diff.browser || 'chromium';
+
+  // Branch-scoped approval: only deactivate/create baselines for THIS branch + browser
   // Main baselines are only updated via PR merge promotion or direct main builds
-  await queries.deactivateBaselines(diff.testId, diff.stepLabel, branch);
+  await queries.deactivateBaselines(diff.testId, diff.stepLabel, branch, browser);
   await queries.createBaseline({
     testId: diff.testId,
     stepLabel: diff.stepLabel,
     imagePath: diff.currentImagePath,
     imageHash: currentHash,
     branch,
+    browser,
     approvedFromDiffId: diffId,
   });
 

@@ -22,7 +22,6 @@ services:
     container_name: lastest2
     ports:
       - "3000:3000"
-      - "9223:9223"
     volumes:
       - lastest2-data:/app/data
       - lastest2-storage:/app/storage
@@ -35,10 +34,7 @@ services:
       - GITHUB_CLIENT_SECRET=${GITHUB_CLIENT_SECRET:-}
       - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID:-}
       - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET:-}
-      - ENABLE_EMBEDDED_BROWSER=${ENABLE_EMBEDDED_BROWSER:-false}
       - LASTEST2_TOKEN=${LASTEST2_TOKEN:-}
-      - STREAM_PORT=9223
-      - STREAM_HOST=${STREAM_HOST:-localhost}
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "wget", "-q", "--spider", "http://localhost:3000/api/health"]

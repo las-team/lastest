@@ -5,13 +5,14 @@
  * Key differences:
  * - Receives an existing Browser instance (does NOT launch one)
  * - Creates a fresh BrowserContext + Page per recording session (full isolation)
- * - Runs setup code via new Function() pattern before injecting recording script
+ * - Runs setup code via executeSetupCode() before injecting recording script
  * - Closes the recording context/page on stop (browser stays alive)
  * - Sends events via callback
  */
 
 import type { Browser, Page, BrowserContext } from 'playwright';
 import { browserRecordingScript } from './browser-script.js';
+import { executeSetupCode } from './setup-executor.js';
 
 // Re-define minimal payload type to avoid cross-package imports
 interface StartRecordingPayload {
@@ -97,10 +98,10 @@ export class EmbeddedRecorder {
       for (const step of payload.setupSteps) {
         try {
           console.log(`  [EmbeddedRecorder] Running setup step...`);
-          const fn = new Function('page', 'baseUrl', 'screenshotPath', 'stepLogger', step.code);
-          await fn(this.page, payload.targetUrl, '', { log: console.log, error: console.error });
+          await executeSetupCode(this.page, step.code, this.baseOrigin);
         } catch (err) {
           console.error(`  [EmbeddedRecorder] Setup step failed:`, err);
+          throw err;
         }
       }
     }

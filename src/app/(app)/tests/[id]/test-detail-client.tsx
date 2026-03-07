@@ -85,9 +85,10 @@ interface TestDetailClientProps {
   availableScripts?: SetupScript[];
   sheetDataSources?: GoogleSheetsDataSource[];
   stabilizationDefaults?: StabilizationSettings | null;
+  banAiMode?: boolean;
 }
 
-export function TestDetailClient({ test, results, repositoryId, screenshotGroups = [], plannedScreenshots = [], defaultSetupSteps = [], availableTests = [], availableScripts = [], sheetDataSources = [], stabilizationDefaults }: TestDetailClientProps) {
+export function TestDetailClient({ test, results, repositoryId, screenshotGroups = [], plannedScreenshots = [], defaultSetupSteps = [], availableTests = [], availableScripts = [], sheetDataSources = [], stabilizationDefaults, banAiMode = false }: TestDetailClientProps) {
   const router = useRouter();
   const notifyJobStarted = useNotifyJobStarted();
   const [isDeleting, setIsDeleting] = useState(false);
@@ -455,7 +456,7 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
                         </DropdownMenuContent>
                       </DropdownMenu>
                     </div>
-                    {repositoryId && (
+                    {!banAiMode && repositoryId && (
                       <Button
                         variant="outline"
                         onClick={handleFix}
@@ -618,7 +619,7 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
             )}
 
             {/* Inline AI Enhance */}
-            {repositoryId && !isEditing && (
+            {!banAiMode && repositoryId && !isEditing && (
               <Card>
                 <CardHeader>
                   <CardTitle className="text-sm flex items-center gap-2">

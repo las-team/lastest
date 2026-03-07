@@ -44,17 +44,20 @@ interface AreasPageClientProps {
   unsortedSuites: SuiteItem[];
   repositoryId: string;
   selectedBranch: string;
+  banAiMode?: boolean;
 }
 
-export function AreasPageClient({ tree, uncategorizedTests, unsortedSuites, repositoryId, selectedBranch }: AreasPageClientProps) {
+export function AreasPageClient({ tree, uncategorizedTests, unsortedSuites, repositoryId, selectedBranch, banAiMode = false }: AreasPageClientProps) {
   const router = useRouter();
   const [selection, setSelection] = useState<TreeSelection | null>(null);
+  const [selectedAreaIds, setSelectedAreaIds] = useState<Set<string>>(new Set());
   const [isNewAreaOpen, setIsNewAreaOpen] = useState(false);
   const [newAreaParentId, setNewAreaParentId] = useState<string | undefined>();
   const [newAreaName, setNewAreaName] = useState('');
   const [newAreaDescription, setNewAreaDescription] = useState('');
   const [isCreating, setIsCreating] = useState(false);
   const [deleteAreaId, setDeleteAreaId] = useState<string | null>(null);
+  const [deleteAreaIds, setDeleteAreaIds] = useState<string[]>([]);
   const [isDeleting, setIsDeleting] = useState(false);
   const [isScanning, setIsScanning] = useState(false);
   const [showAIScanDialog, setShowAIScanDialog] = useState(false);
@@ -66,16 +69,19 @@ export function AreasPageClient({ tree, uncategorizedTests, unsortedSuites, repo
   // Delete key handler
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Delete' && selection?.type === 'area' && !deleteAreaId) {
-        // Don't trigger if user is typing in an input/textarea
+      if (e.key === 'Delete' && !deleteAreaId && !deleteAreaIds.length) {
         const tag = (e.target as HTMLElement)?.tagName;
         if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
-        setDeleteAreaId(selection.id);
+        if (selectedAreaIds.size > 0) {
+          setDeleteAreaIds(Array.from(selectedAreaIds));
+        } else if (selection?.type === 'area') {
+          setDeleteAreaId(selection.id);
+        }
       }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [selection, deleteAreaId]);
+  }, [selection, deleteAreaId, deleteAreaIds, selectedAreaIds]);
 
   function computeCoverage(
     items: FunctionalAreaWithChildren[],
@@ -165,6 +171,28 @@ export function AreasPageClient({ tree, uncategorizedTests, unsortedSuites, repo
     }
   };
 
+  const handleDeleteMultipleAreas = async (withContents: boolean) => {
+    if (!deleteAreaIds.length) return;
+    setIsDeleting(true);
+    try {
+      for (const id of deleteAreaIds) {
+        if (withContents) {
+          await deleteAreaWithContents(id);
+        } else {
+          await deleteArea(id);
+        }
+      }
+      if (selection?.type === 'area' && deleteAreaIds.includes(selection.id)) {
+        setSelection(null);
+      }
+      setDeleteAreaIds([]);
+      setSelectedAreaIds(new Set());
+      router.refresh();
+    } finally {
+      setIsDeleting(false);
+    }
+  };
+
   const handleMoveTest = async (testId: string, areaId: string | null) => {
     await moveTestToArea(testId, areaId);
     router.refresh();
@@ -219,10 +247,13 @@ export function AreasPageClient({ tree, uncategorizedTests, unsortedSuites, repo
           uncategorizedTests={uncategorizedTests}
           unsortedSuites={unsortedSuites}
           selection={selection}
+          selectedAreaIds={selectedAreaIds}
           onSelect={setSelection}
+          onMultiSelect={setSelectedAreaIds}
           onNewArea={handleNewArea}
           onEditArea={(id) => setSelection({ type: 'area', id })}
           onDeleteArea={setDeleteAreaId}
+          onDeleteMultipleAreas={setDeleteAreaIds}
           onMoveTest={handleMoveTest}
           onMoveSuite={handleMoveSuite}
           onMoveArea={handleMoveArea}
@@ -257,46 +288,50 @@ export function AreasPageClient({ tree, uncategorizedTests, unsortedSuites, repo
                   <span className="font-medium text-sm">Scan Routes</span>
                   <span className="text-xs text-muted-foreground">Discover from repo</span>
                 </button>
-                <button
-                  onClick={() => setShowSpecAnalysisDialog(true)}
-                  className="flex flex-col items-center gap-2 p-4 border rounded-lg hover:bg-muted/50 hover:border-primary/50 transition-colors text-center"
-                >
-                  <FileText className="h-6 w-6 text-primary" />
-                  <span className="font-medium text-sm">Analyze Specs</span>
-                  <span className="text-xs text-muted-foreground">Parse API/route specs</span>
-                </button>
-                <button
-                  onClick={() => setShowImportFromSpecDialog(true)}
-                  className="flex flex-col items-center gap-2 p-4 border rounded-lg hover:bg-muted/50 hover:border-primary/50 transition-colors text-center"
-                >
-                  <BookOpen className="h-6 w-6 text-primary" />
-                  <span className="font-medium text-sm">Import Spec</span>
-                  <span className="text-xs text-muted-foreground">US/AC to tests</span>
-                </button>
-                <button
-                  onClick={() => setShowAIScanDialog(true)}
-                  className="flex flex-col items-center gap-2 p-4 border rounded-lg hover:bg-muted/50 hover:border-primary/50 transition-colors text-center"
-                >
-                  <Sparkles className="h-6 w-6 text-primary" />
-                  <span className="font-medium text-sm">AI Scan</span>
-                  <span className="text-xs text-muted-foreground">AI-powered discovery</span>
-                </button>
-                <button
-                  onClick={() => setShowMCPExploreDialog(true)}
-                  className="flex flex-col items-center gap-2 p-4 border rounded-lg hover:bg-muted/50 hover:border-primary/50 transition-colors text-center"
-                >
-                  <Globe className="h-6 w-6 text-primary" />
-                  <span className="font-medium text-sm">MCP Explore</span>
-                  <span className="text-xs text-muted-foreground">MCP-based exploration</span>
-                </button>
-                <button
-                  onClick={() => setShowCodeDiffDialog(true)}
-                  className="flex flex-col items-center gap-2 p-4 border rounded-lg hover:bg-muted/50 hover:border-primary/50 transition-colors text-center"
-                >
-                  <GitCompare className="h-6 w-6 text-primary" />
-                  <span className="font-medium text-sm">Code Diff</span>
-                  <span className="text-xs text-muted-foreground">Branch changes</span>
-                </button>
+                {!banAiMode && (
+                  <>
+                    <button
+                      onClick={() => setShowSpecAnalysisDialog(true)}
+                      className="flex flex-col items-center gap-2 p-4 border rounded-lg hover:bg-muted/50 hover:border-primary/50 transition-colors text-center"
+                    >
+                      <FileText className="h-6 w-6 text-primary" />
+                      <span className="font-medium text-sm">Analyze Specs</span>
+                      <span className="text-xs text-muted-foreground">Parse API/route specs</span>
+                    </button>
+                    <button
+                      onClick={() => setShowImportFromSpecDialog(true)}
+                      className="flex flex-col items-center gap-2 p-4 border rounded-lg hover:bg-muted/50 hover:border-primary/50 transition-colors text-center"
+                    >
+                      <BookOpen className="h-6 w-6 text-primary" />
+                      <span className="font-medium text-sm">Import Spec</span>
+                      <span className="text-xs text-muted-foreground">US/AC to tests</span>
+                    </button>
+                    <button
+                      onClick={() => setShowAIScanDialog(true)}
+                      className="flex flex-col items-center gap-2 p-4 border rounded-lg hover:bg-muted/50 hover:border-primary/50 transition-colors text-center"
+                    >
+                      <Sparkles className="h-6 w-6 text-primary" />
+                      <span className="font-medium text-sm">AI Scan</span>
+                      <span className="text-xs text-muted-foreground">AI-powered discovery</span>
+                    </button>
+                    <button
+                      onClick={() => setShowMCPExploreDialog(true)}
+                      className="flex flex-col items-center gap-2 p-4 border rounded-lg hover:bg-muted/50 hover:border-primary/50 transition-colors text-center"
+                    >
+                      <Globe className="h-6 w-6 text-primary" />
+                      <span className="font-medium text-sm">MCP Explore</span>
+                      <span className="text-xs text-muted-foreground">MCP-based exploration</span>
+                    </button>
+                    <button
+                      onClick={() => setShowCodeDiffDialog(true)}
+                      className="flex flex-col items-center gap-2 p-4 border rounded-lg hover:bg-muted/50 hover:border-primary/50 transition-colors text-center"
+                    >
+                      <GitCompare className="h-6 w-6 text-primary" />
+                      <span className="font-medium text-sm">Code Diff</span>
+                      <span className="text-xs text-muted-foreground">Branch changes</span>
+                    </button>
+                  </>
+                )}
               </div>
             </CardContent>
           </Card>
@@ -443,6 +478,42 @@ export function AreasPageClient({ tree, uncategorizedTests, unsortedSuites, repo
               <div className="text-left">
                 <div className="font-medium">{isDeleting ? 'Deleting...' : 'Delete everything'}</div>
                 <div className="text-xs font-normal opacity-90">Remove the area and all its tests, suites, and sub-folders</div>
+              </div>
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Bulk Delete Confirmation Dialog */}
+      <Dialog open={deleteAreaIds.length > 0} onOpenChange={(open) => !open && setDeleteAreaIds([])}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Delete {deleteAreaIds.length} Areas</DialogTitle>
+            <DialogDescription>
+              What would you like to do with the tests, suites, and sub-folders inside these areas?
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex flex-col gap-2 py-2">
+            <Button
+              variant="outline"
+              onClick={() => handleDeleteMultipleAreas(false)}
+              disabled={isDeleting}
+              className="justify-start h-auto py-3 px-4"
+            >
+              <div className="text-left">
+                <div className="font-medium">{isDeleting ? 'Deleting...' : 'Delete areas only'}</div>
+                <div className="text-xs text-muted-foreground font-normal">Move contents to Unsorted and sub-folders to root</div>
+              </div>
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={() => handleDeleteMultipleAreas(true)}
+              disabled={isDeleting}
+              className="justify-start h-auto py-3 px-4"
+            >
+              <div className="text-left">
+                <div className="font-medium">{isDeleting ? 'Deleting...' : 'Delete everything'}</div>
+                <div className="text-xs font-normal opacity-90">Remove all {deleteAreaIds.length} areas and their tests, suites, and sub-folders</div>
               </div>
             </Button>
           </div>

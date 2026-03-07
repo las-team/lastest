@@ -46,6 +46,8 @@ export default async function AreasPage() {
     .filter((t) => !t.functionalAreaId)
     .map((t) => ({ id: t.id, name: t.name, latestStatus: t.latestStatus, isPlaceholder: t.isPlaceholder ?? false }));
 
+  const banAiMode = session?.team?.banAiMode ?? false;
+
   return (
     <div className="absolute inset-0 flex flex-col overflow-hidden">
       <AreasPageClient
@@ -54,6 +56,7 @@ export default async function AreasPage() {
         unsortedSuites={unsortedSuites}
         repositoryId={selectedRepo.id}
         selectedBranch={selectedRepo.selectedBranch || selectedRepo.defaultBranch || 'main'}
+        banAiMode={banAiMode}
       />
     </div>
   );

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { usePreferredRunner } from '@/hooks/use-preferred-runner';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -63,6 +63,8 @@ import {
   ShieldCheck,
   Play,
   Download,
+  Maximize2,
+  Minimize2,
 } from 'lucide-react';
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
@@ -293,6 +295,9 @@ export function RecordingClient({
   const timelineRef = useRef<HTMLDivElement>(null);
   const [settingsSaveStatus, setSettingsSaveStatus] = useState({ isPending: false, showSaved: false });
   const [embeddedStreamUrl, setEmbeddedStreamUrl] = useState<string | null>(null);
+  const [timelineOpen, setTimelineOpen] = useState(true);
+  const [isRecordingFullscreen, setIsRecordingFullscreen] = useState(false);
+  const recordingLayoutRef = useRef<HTMLDivElement>(null);
 
   // Poll for recording status and events when in recording step
   useEffect(() => {
@@ -463,15 +468,15 @@ export function RecordingClient({
           lastSequenceRef.current = 0;
 
           // Fetch embedded stream URL if recording via an embedded runner
-          if (executionTarget !== 'local') {
+          const resolvedTarget = result.resolvedRunnerId || executionTarget;
+          if (resolvedTarget !== 'local') {
             fetch(`/api/embedded/stream`)
               .then(res => res.ok ? res.json() : null)
               .then(data => {
                 if (data?.sessions) {
-                  const session = data.sessions.find((s: { runnerId: string }) => s.runnerId === executionTarget);
+                  const session = data.sessions.find((s: { runnerId: string }) => s.runnerId === resolvedTarget);
                   if (session?.streamUrl) {
                     const token = data.streamAuthToken;
-                    // Pass direct stream URL — BrowserViewer will replace hostname for remote access
                     setEmbeddedStreamUrl(
                       token ? `${session.streamUrl}?token=${encodeURIComponent(token)}` : session.streamUrl
                     );
@@ -536,6 +541,26 @@ export function RecordingClient({
       setIsLoading(false);
     }
   };
+
+  const toggleRecordingFullscreen = useCallback(() => {
+    if (!recordingLayoutRef.current) return;
+    try {
+      if (!isRecordingFullscreen) {
+        recordingLayoutRef.current.requestFullscreen?.();
+      } else if (document.fullscreenElement) {
+        document.exitFullscreen();
+      }
+    } catch {
+      setIsRecordingFullscreen(false);
+    }
+  }, [isRecordingFullscreen]);
+
+  // Sync fullscreen state with browser API
+  useEffect(() => {
+    const handler = () => setIsRecordingFullscreen(!!document.fullscreenElement);
+    document.addEventListener('fullscreenchange', handler);
+    return () => document.removeEventListener('fullscreenchange', handler);
+  }, []);
 
   const handleCancelInspector = async () => {
     if (!inspectorSessionId) return;
@@ -608,7 +633,7 @@ export function RecordingClient({
             <CardContent className="py-3">
               <div className="flex items-center gap-2 text-sm text-green-600">
                 <CheckCircle2 className="h-4 w-4" />
-                <span>{playwrightStatus.browser.charAt(0).toUpperCase() + playwrightStatus.browser.slice(1)} browser ready</span>
+                <span>Local Playwright recording available</span>
               </div>
             </CardContent>
           </Card>
@@ -620,7 +645,7 @@ export function RecordingClient({
           <CardContent className="py-3 space-y-3">
             <div className="flex items-center gap-2 text-sm text-destructive">
               <AlertTriangle className="h-4 w-4" />
-              <span>{playwrightStatus.error}</span>
+              <span>Local Playwright recording not available</span>
             </div>
             {playwrightStatus.installCommand && (
               <div className="flex items-center gap-2 p-2 bg-muted rounded font-mono text-xs">
@@ -931,6 +956,175 @@ export function RecordingClient({
   }
 
   if (step === 'recording') {
+    // --- Embedded browser: immersive dark layout ---
+    if (embeddedStreamUrl) {
+      return (
+        <div ref={recordingLayoutRef} className="flex-1 flex flex-col h-full overflow-hidden bg-muted/50">
+          <div className="flex-1 flex min-h-0">
+            {/* Browser area — centers in remaining space */}
+            <div className="flex-1 relative flex items-center justify-center overflow-auto min-h-0">
+              <BrowserViewer
+                streamUrl={embeddedStreamUrl}
+                initialViewport={{
+                  width: settings.viewportWidth ?? 1280,
+                  height: settings.viewportHeight ?? 720,
+                }}
+                hideControls
+              />
+            </div>
+
+            {/* Timeline panel (flex sibling, pushes browser left) */}
+            <div className={`h-full shrink-0 bg-card border-l border-border transition-all duration-200 overflow-hidden ${timelineOpen ? 'w-72' : 'w-0 border-l-0'}`}>
+              <div className="flex items-center justify-between px-3 py-2.5 border-b border-border w-72">
+                <span className="text-sm font-medium text-foreground">Timeline</span>
+                <span className="text-xs text-muted-foreground">{events.length} events</span>
+              </div>
+              <div ref={timelineRef} className="overflow-y-auto overflow-x-hidden p-2.5 space-y-1.5 w-72" style={{ maxHeight: 'calc(100% - 41px)' }}>
+                {events.length === 0 ? (
+                  <div className="text-center py-4 text-muted-foreground text-sm">
+                    Waiting for interactions...
+                  </div>
+                ) : (
+                  events.map((event, i) => {
+                    const replayStatus = isActionReplayable(event);
+                    const verification = event.verification;
+                    return (
+                      <div
+                        key={`${event.sequence}-${i}`}
+                        className={`flex items-start gap-2 text-sm ${
+                          event.status === 'preview' ? 'opacity-50 border-l-2 border-dashed border-muted-foreground pl-2' : ''
+                        }`}
+                      >
+                        <div className="mt-0.5">
+                          {event.type === 'navigation' && <Navigation className="h-3 w-3 text-blue-500" />}
+                          {event.type === 'action' && event.data.action === 'click' && <MousePointer className="h-3 w-3 text-green-500" />}
+                          {event.type === 'action' && event.data.action === 'fill' && <FormInput className="h-3 w-3 text-orange-500" />}
+                          {event.type === 'action' && event.data.action === 'selectOption' && <ListFilter className="h-3 w-3 text-cyan-500" />}
+                          {event.type === 'screenshot' && <Camera className="h-3 w-3 text-yellow-500" />}
+                          {event.type === 'assertion' && !event.data.elementAssertion && <CheckCircle2 className="h-3 w-3 text-purple-500" />}
+                          {event.type === 'assertion' && event.data.elementAssertion && <ShieldCheck className="h-3 w-3 text-teal-500" />}
+                          {event.type === 'mouse-down' && <MousePointerClick className="h-3 w-3 text-red-500" />}
+                          {event.type === 'mouse-up' && <MousePointerClick className="h-3 w-3 text-red-300" />}
+                          {event.type === 'hover-preview' && <Eye className="h-3 w-3 text-gray-400" />}
+                          {event.type === 'keypress' && <Keyboard className="h-3 w-3 text-indigo-500" />}
+                          {event.type === 'keydown' && <Keyboard className="h-3 w-3 text-green-500" />}
+                          {event.type === 'keyup' && <Keyboard className="h-3 w-3 text-orange-400" />}
+                          {event.type === 'download' && <Download className="h-3 w-3 text-emerald-500" />}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <span className="text-muted-foreground text-xs">
+                            {new Date(event.timestamp).toLocaleTimeString()}
+                          </span>
+                          <span className="ml-2 truncate text-foreground">
+                            {getEventDescription(event)}
+                          </span>
+                        </div>
+                        <div className="mt-0.5 flex items-center justify-end w-5 shrink-0">
+                          {event.type === 'action' && event.status === 'committed' && (
+                            <div title={
+                              !replayStatus.replayable ? 'No selectors - may not replay' :
+                              replayStatus.reason === 'coords-only' ? 'Coords fallback only' :
+                              verification?.domVerified ? 'Verified' :
+                              verification?.syntaxValid ? 'Verifying...' : 'Checking...'
+                            }>
+                              {!replayStatus.replayable ? (
+                                <AlertTriangle className="h-3 w-3 text-red-500" />
+                              ) : replayStatus.reason === 'coords-only' ? (
+                                <Check className="h-3 w-3 text-yellow-500" />
+                              ) : verification?.domVerified ? (
+                                <CheckCircle2 className="h-3 w-3 text-green-500" />
+                              ) : verification?.syntaxValid ? (
+                                <div className="flex items-center">
+                                  <Check className="h-3 w-3 text-green-500" />
+                                  <Loader2 className="h-2.5 w-2.5 text-muted-foreground animate-spin ml-0.5" />
+                                </div>
+                              ) : (
+                                <Loader2 className="h-3 w-3 text-muted-foreground animate-spin" />
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+            </div>
+          </div>
+
+          {/* Floating mini-menu — fixed at bottom center */}
+          <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 flex items-center gap-1.5 px-3 py-1.5 bg-card/95 backdrop-blur-sm border border-border rounded-full shadow-2xl">
+            <div className="flex items-center gap-2 px-1">
+              <div className="h-2.5 w-2.5 rounded-full bg-red-500 animate-pulse" />
+              <span className="text-sm font-medium text-foreground">Recording</span>
+            </div>
+            <div className="w-px h-5 bg-border" />
+            <Button variant="ghost" size="icon" className="h-8 w-8" onClick={handleCaptureScreenshot} title="Screenshot">
+              <Camera className="h-4 w-4" />
+            </Button>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="ghost" size="sm" className="h-8 gap-1 px-2">
+                  <CheckCircle2 className="h-4 w-4" />
+                  <ChevronDown className="h-3 w-3" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent>
+                <DropdownMenuItem onClick={() => handleCreateAssertion('pageLoad')}>
+                  Page Load
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => handleCreateAssertion('networkIdle')}>
+                  Network Idle
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => handleCreateAssertion('urlMatch')}>
+                  URL Match
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => handleCreateAssertion('domContentLoaded')}>
+                  DOM Content Loaded
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+            <Button variant="ghost" size="icon" className="h-8 w-8" onClick={handleFlagDownload} title="Wait for Download">
+              <Download className="h-4 w-4" />
+            </Button>
+            <div className="w-px h-5 bg-border" />
+            <Button
+              variant="ghost"
+              size="icon"
+              className={`h-8 w-8 ${timelineOpen ? 'bg-muted' : ''}`}
+              onClick={() => setTimelineOpen(!timelineOpen)}
+              title="Toggle timeline"
+            >
+              <ListFilter className="h-4 w-4" />
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-8 w-8"
+              onClick={toggleRecordingFullscreen}
+              title={isRecordingFullscreen ? 'Exit fullscreen' : 'Fullscreen'}
+            >
+              {isRecordingFullscreen ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
+            </Button>
+            <div className="w-px h-5 bg-border" />
+            <Button
+              onClick={handleStopRecording}
+              disabled={isLoading}
+              className="h-8 bg-red-600 hover:bg-red-700 text-white rounded-full px-3 gap-1.5"
+            >
+              {isLoading ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <Square className="h-3.5 w-3.5" />
+              )}
+              Stop
+            </Button>
+          </div>
+        </div>
+      );
+    }
+
+    // --- Local Playwright: original card layout ---
     return (
       <div className="flex-1 p-6 overflow-auto">
         <div className="max-w-4xl mx-auto space-y-6">
@@ -994,22 +1188,6 @@ export function RecordingClient({
               </div>
             </CardContent>
           </Card>
-
-          {/* Embedded Browser Live View */}
-          {embeddedStreamUrl && (
-            <Card>
-              <CardContent className="p-0">
-                <BrowserViewer
-                  streamUrl={embeddedStreamUrl}
-                  initialViewport={{
-                    width: settings.viewportWidth ?? 1280,
-                    height: settings.viewportHeight ?? 720,
-                  }}
-                  hideControls={step === 'recording'}
-                />
-              </CardContent>
-            </Card>
-          )}
 
           <div className="grid grid-cols-3 gap-6">
             {/* Interaction Timeline */}

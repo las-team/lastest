@@ -1,8 +1,8 @@
 'use server';
 
 import { db } from '@/lib/db';
-import { runners, type Runner, type RunnerCapability, type RunnerType } from '@/lib/db/schema';
-import { eq, and, desc } from 'drizzle-orm';
+import { runners, backgroundJobs, embeddedSessions, type Runner, type RunnerCapability, type RunnerType } from '@/lib/db/schema';
+import { eq, and, desc, isNull, lt, or } from 'drizzle-orm';
 import { v4 as uuid } from 'uuid';
 import crypto from 'crypto';
 import { requireTeamAdmin, requireTeamAccess } from '@/lib/auth';
@@ -25,16 +25,41 @@ function generateRunnerToken(): string {
 }
 
 /**
- * Get all runners for the current team
+ * Get all runners for the current team (excludes system runners)
  */
 export async function getRunners(): Promise<Runner[]> {
   const session = await requireTeamAccess();
   return db
     .select()
     .from(runners)
-    .where(eq(runners.teamId, session.team.id))
+    .where(and(eq(runners.teamId, session.team.id), eq(runners.isSystem, false)))
     .orderBy(desc(runners.createdAt))
     .all();
+}
+
+/**
+ * Get online system runners (host-provided EBs, available to all teams).
+ * No auth required — these are visible to any authenticated user.
+ */
+export async function getSystemRunners(): Promise<Runner[]> {
+  return db
+    .select()
+    .from(runners)
+    .where(eq(runners.isSystem, true))
+    .orderBy(desc(runners.createdAt))
+    .all();
+}
+
+/**
+ * Get an available (online) system runner for auto-assignment.
+ */
+export async function getAvailableSystemRunner(): Promise<Runner | null> {
+  return db
+    .select()
+    .from(runners)
+    .where(and(eq(runners.isSystem, true), eq(runners.status, 'online')))
+    .limit(1)
+    .get() ?? null;
 }
 
 /**
@@ -51,15 +76,15 @@ export async function getRunner(runnerId: string): Promise<Runner | null> {
 }
 
 /**
- * Create a new runner (admin only)
- * Returns the runner AND the plain token (only shown once)
+ * Internal runner creation (no auth check — caller must verify permissions).
  */
-export async function createRunner(name: string, capabilities: RunnerCapability[] = ['run', 'record'], type: RunnerType = 'remote'): Promise<{
-  runner: Runner;
-  token: string;
-} | { error: string }> {
-  const session = await requireTeamAdmin();
-
+export async function createRunnerInternal(
+  name: string,
+  teamId: string,
+  createdById: string,
+  capabilities: RunnerCapability[] = ['run', 'record'],
+  type: RunnerType = 'remote',
+): Promise<{ runner: Runner; token: string } | { error: string }> {
   const id = uuid();
   const token = generateRunnerToken();
   const tokenHash = hashToken(token);
@@ -67,8 +92,8 @@ export async function createRunner(name: string, capabilities: RunnerCapability[
 
   await db.insert(runners).values({
     id,
-    teamId: session.team.id,
-    createdById: session.user.id,
+    teamId,
+    createdById,
     name,
     tokenHash,
     status: 'offline',
@@ -83,6 +108,18 @@ export async function createRunner(name: string, capabilities: RunnerCapability[
   }
 
   return { runner, token };
+}
+
+/**
+ * Create a new runner (admin only)
+ * Returns the runner AND the plain token (only shown once)
+ */
+export async function createRunner(name: string, capabilities: RunnerCapability[] = ['run', 'record'], type: RunnerType = 'remote'): Promise<{
+  runner: Runner;
+  token: string;
+} | { error: string }> {
+  const session = await requireTeamAdmin();
+  return createRunnerInternal(name, session.team.id, session.user.id, capabilities, type);
 }
 
 /**
@@ -238,7 +275,43 @@ export async function updateRunnerStatus(
       previousStatus: previousStatus as 'online' | 'offline' | 'busy' | undefined,
       timestamp: Date.now(),
     });
+
+    // When a runner comes online, check for pending queued jobs
+    if (status === 'online') {
+      pickUpQueuedJobs(runnerId).catch((err) => {
+        console.error(`[Runner ${runnerId}] Error picking up queued jobs:`, err);
+      });
+    }
   }
+}
+
+/**
+ * Pick up pending background jobs that have no assigned runner.
+ * Called when a runner transitions to 'online'.
+ */
+async function pickUpQueuedJobs(runnerId: string): Promise<void> {
+  // Find first pending job with no target runner (queued because no runner was available)
+  const pendingJob = await db
+    .select()
+    .from(backgroundJobs)
+    .where(
+      and(
+        eq(backgroundJobs.status, 'pending'),
+        isNull(backgroundJobs.targetRunnerId),
+      )
+    )
+    .limit(1)
+    .get();
+
+  if (!pendingJob) return;
+
+  // Assign this runner to the job
+  await db
+    .update(backgroundJobs)
+    .set({ targetRunnerId: runnerId })
+    .where(eq(backgroundJobs.id, pendingJob.id));
+
+  console.log(`[Runner ${runnerId}] Picked up queued job ${pendingJob.id} (${pendingJob.type}: ${pendingJob.label})`);
 }
 
 /**
@@ -304,16 +377,29 @@ export async function getOnlineRunnersWithCapability(capability?: RunnerCapabili
 }
 
 /**
- * Get all runners filtered by capability (for UI selection with offline shown as disabled)
+ * Get all runners filtered by capability (for UI selection with offline shown as disabled).
+ * Includes both team runners and system runners.
  */
 export async function getRunnersWithCapability(capability?: RunnerCapability): Promise<Runner[]> {
   const session = await requireTeamAccess();
-  const allRunners = await db
+
+  // Get team's own runners (non-system)
+  const teamRunners = await db
     .select()
     .from(runners)
-    .where(eq(runners.teamId, session.team.id))
+    .where(and(eq(runners.teamId, session.team.id), eq(runners.isSystem, false)))
     .orderBy(desc(runners.createdAt))
     .all();
+
+  // Get system runners (cross-team)
+  const systemRunners = await db
+    .select()
+    .from(runners)
+    .where(eq(runners.isSystem, true))
+    .orderBy(desc(runners.createdAt))
+    .all();
+
+  const allRunners = [...teamRunners, ...systemRunners];
 
   // Filter by capability if specified
   if (capability) {
@@ -377,4 +463,38 @@ export async function markStaleRunnersOffline(staleThresholdMs: number = 60_000)
   }
 
   return markedOffline;
+}
+
+/**
+ * Delete system runners that have been offline for longer than the threshold.
+ * Also deletes their associated embedded sessions.
+ */
+export async function deleteStaleSystemRunners(thresholdMs: number): Promise<number> {
+  const staleThreshold = new Date(Date.now() - thresholdMs);
+
+  const staleRunners = await db
+    .select({ id: runners.id, name: runners.name })
+    .from(runners)
+    .where(
+      and(
+        eq(runners.isSystem, true),
+        eq(runners.status, 'offline'),
+        or(
+          isNull(runners.lastSeen),
+          lt(runners.lastSeen, staleThreshold)
+        )
+      )
+    )
+    .all();
+
+  if (staleRunners.length === 0) return 0;
+
+  for (const runner of staleRunners) {
+    // Delete associated embedded sessions first (no cascade FK)
+    await db.delete(embeddedSessions).where(eq(embeddedSessions.runnerId, runner.id));
+    await db.delete(runners).where(eq(runners.id, runner.id));
+    console.log(`[Stale Cleanup] Deleted stale system runner ${runner.id} (${runner.name})`);
+  }
+
+  return staleRunners.length;
 }

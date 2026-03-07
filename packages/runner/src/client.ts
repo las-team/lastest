@@ -428,7 +428,32 @@ export class RunnerClient {
 
       console.log(`[Test ${testId}] runTest returned: status=${result.status}, screenshots=${result.screenshots.length}, duration=${result.durationMs}ms`);
 
-      // Send result FIRST so server sees pass/fail before timeout
+      // Upload screenshots BEFORE result so they're in DB when executor sees "completed"
+      if (result.screenshots.length > 0) {
+        console.log(`[Test ${testId}] Uploading ${result.screenshots.length} screenshots in parallel...`);
+        const screenshotResults = await Promise.all(result.screenshots.map((screenshot) => {
+          const screenshotMsg = createMessage<ScreenshotUploadResponse>('response:screenshot', {
+            correlationId: command.id,
+            testRunId: command.payload.testRunId,
+            repositoryId: command.payload.repositoryId,
+            filename: screenshot.filename,
+            data: screenshot.data,
+            width: screenshot.width,
+            height: screenshot.height,
+            capturedAt: Date.now(),
+          });
+          return this.sendMessage(screenshotMsg).then(sent => {
+            if (!sent) {
+              console.warn(`[Test ${testId}]   Screenshot send failed, queuing for retry`);
+              this.pendingResults.push(screenshotMsg);
+            }
+            return sent;
+          });
+        }));
+        console.log(`[Test ${testId}] All screenshots uploaded (${screenshotResults.filter(Boolean).length}/${result.screenshots.length} succeeded)`);
+      }
+
+      // Send result AFTER screenshots so server has them when it sees pass/fail
       const resultMsg = createMessage<TestResultResponse>('response:test_result', {
         correlationId: command.id,
         testId: command.payload.testId,
@@ -447,30 +472,6 @@ export class RunnerClient {
         this.pendingResults.push(resultMsg);
       } else {
         console.log(`[Test ${testId}] Result sent: ${result.status}`);
-      }
-
-      // Upload screenshots after result (non-blocking for server timeout)
-      if (result.screenshots.length > 0) {
-        console.log(`[Test ${testId}] Uploading ${result.screenshots.length} screenshots...`);
-        for (const screenshot of result.screenshots) {
-          const screenshotMsg = createMessage<ScreenshotUploadResponse>('response:screenshot', {
-            correlationId: command.id,
-            testRunId: command.payload.testRunId,
-            repositoryId: command.payload.repositoryId,
-            filename: screenshot.filename,
-            data: screenshot.data,
-            width: screenshot.width,
-            height: screenshot.height,
-            capturedAt: Date.now(),
-          });
-          console.log(`[Test ${testId}]   Sending screenshot: ${screenshot.filename}`);
-          const screenshotSent = await this.sendMessage(screenshotMsg);
-          if (!screenshotSent) {
-            console.warn(`[Test ${testId}]   Screenshot send failed, queuing for retry`);
-            this.pendingResults.push(screenshotMsg);
-          }
-        }
-        console.log(`[Test ${testId}] All screenshots uploaded`);
       }
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);

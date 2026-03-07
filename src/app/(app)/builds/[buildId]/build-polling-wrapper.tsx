@@ -21,6 +21,7 @@ interface BuildData {
   elapsedMs: number | null;
   codeChangeTestIds?: string[] | null;
   diffs: VisualDiffWithTestStatus[];
+  errorMessage?: string | null;
 }
 
 interface BuildPollingWrapperProps {
@@ -28,10 +29,11 @@ interface BuildPollingWrapperProps {
   buildId: string;
   isMainBranch?: boolean;
   embeddedStreamUrl?: string | null;
+  banAiMode?: boolean;
   children?: ReactNode;
 }
 
-export function BuildPollingWrapper({ initialBuild, buildId, isMainBranch = false, embeddedStreamUrl, children }: BuildPollingWrapperProps) {
+export function BuildPollingWrapper({ initialBuild, buildId, isMainBranch = false, embeddedStreamUrl, banAiMode = false, children }: BuildPollingWrapperProps) {
   const [build, setBuild] = useState<BuildData>(initialBuild);
   const [isPolling, setIsPolling] = useState(!initialBuild.completedAt);
   const [showViewer, setShowViewer] = useState(true);
@@ -79,6 +81,7 @@ export function BuildPollingWrapper({ initialBuild, buildId, isMainBranch = fals
             status={build.overallStatus}
             changesDetected={build.changesDetected}
             isRunning={isRunning}
+            errorMessage={build.errorMessage}
           />
           {children}
         </CardContent>
@@ -123,6 +126,7 @@ export function BuildPollingWrapper({ initialBuild, buildId, isMainBranch = fals
         completedTests={completedTests}
         codeChangeTestIds={build.codeChangeTestIds}
         isMainBranch={isMainBranch}
+        banAiMode={banAiMode}
       />
     </>
   );

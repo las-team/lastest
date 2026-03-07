@@ -7,6 +7,33 @@ import { hash, verify } from "@node-rs/argon2";
 import * as queries from "@/lib/db/queries";
 import { getGitHubUser } from "@/lib/github/oauth";
 
+async function syncGithubAccount(account: { userId: string; accessToken?: string | null }) {
+  if (!account.accessToken) return;
+  try {
+    const ghUser = await getGitHubUser(account.accessToken);
+    if (!ghUser) return;
+    const user = await queries.getUserById(account.userId);
+    const teamId = user?.teamId ?? null;
+    const existing = teamId ? await queries.getGithubAccountByTeam(teamId) : null;
+    if (existing) {
+      await queries.updateGithubAccount(existing.id, {
+        accessToken: account.accessToken,
+        githubUserId: ghUser.id.toString(),
+        githubUsername: ghUser.login,
+      });
+    } else {
+      await queries.createGithubAccount({
+        githubUserId: ghUser.id.toString(),
+        githubUsername: ghUser.login,
+        accessToken: account.accessToken,
+        teamId,
+      });
+    }
+  } catch {
+    // Don't block sign-in if github_accounts sync fails
+  }
+}
+
 export const auth = betterAuth({
   baseURL: process.env.BETTER_AUTH_BASE_URL || process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000",
   trustedOrigins: process.env.BETTER_AUTH_TRUSTED_ORIGINS
@@ -60,7 +87,7 @@ export const auth = betterAuth({
     github: {
       clientId: process.env.GITHUB_CLIENT_ID!,
       clientSecret: process.env.GITHUB_CLIENT_SECRET!,
-      scope: ["read:user", "user:email", "repo"],
+      scope: ["read:user", "user:email", "repo", "workflow"],
     },
     google: {
       clientId: process.env.GOOGLE_CLIENT_ID!,
@@ -78,29 +105,14 @@ export const auth = betterAuth({
       create: {
         after: async (account) => {
           if (account.providerId === "github" && account.accessToken) {
-            try {
-              const ghUser = await getGitHubUser(account.accessToken);
-              if (!ghUser) return;
-              const user = await queries.getUserById(account.userId);
-              const teamId = user?.teamId ?? null;
-              const existing = teamId ? await queries.getGithubAccountByTeam(teamId) : null;
-              if (existing) {
-                await queries.updateGithubAccount(existing.id, {
-                  accessToken: account.accessToken,
-                  githubUserId: ghUser.id.toString(),
-                  githubUsername: ghUser.login,
-                });
-              } else {
-                await queries.createGithubAccount({
-                  githubUserId: ghUser.id.toString(),
-                  githubUsername: ghUser.login,
-                  accessToken: account.accessToken,
-                  teamId,
-                });
-              }
-            } catch {
-              // Don't block sign-in if github_accounts sync fails
-            }
+            await syncGithubAccount(account);
+          }
+        },
+      },
+      update: {
+        after: async (account) => {
+          if (account.providerId === "github" && account.accessToken) {
+            await syncGithubAccount(account);
           }
         },
       },

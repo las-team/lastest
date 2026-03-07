@@ -6,11 +6,12 @@
 
 import { Command } from 'commander';
 import { spawn, execSync } from 'child_process';
+import { createRequire } from 'node:module';
 import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
-import { chromium } from 'playwright';
+import { chromium, firefox, webkit } from 'playwright';
 import { RunnerClient } from './client.js';
 
 export { RunnerClient } from './client.js';
@@ -94,10 +95,10 @@ function loadConfig(): { token?: string; server?: string; interval?: string; bas
 }
 
 async function ensurePlaywrightBrowsers(): Promise<boolean> {
+  // Test chromium (required), and check firefox/webkit availability (optional)
   try {
     const browser = await chromium.launch({ headless: true });
     await browser.close();
-    return true;
   } catch {
     console.error('\n  Playwright Chromium browser is not installed.\n');
     console.error('  Run the following command to install it:\n');
@@ -106,6 +107,19 @@ async function ensurePlaywrightBrowsers(): Promise<boolean> {
     console.error('    npx playwright install\n');
     return false;
   }
+
+  // Check optional browsers (non-blocking)
+  for (const [name, launcher] of [['firefox', firefox], ['webkit', webkit]] as const) {
+    try {
+      const b = await launcher.launch({ headless: true });
+      await b.close();
+      console.log(`  ${name}: available`);
+    } catch {
+      console.log(`  ${name}: not installed (run "npx playwright install ${name}" to enable)`);
+    }
+  }
+
+  return true;
 }
 
 export async function main() {
@@ -627,6 +641,22 @@ export async function main() {
         await client.start();
       } catch (error) {
         console.error(`[${timestamp()}] Failed to start runner:`, error);
+        process.exit(1);
+      }
+    });
+
+  // Print installed Playwright version (for CI cache keys)
+  program
+    .command('playwright-version')
+    .description('Print installed Playwright version (for CI cache keys)')
+    .action(() => {
+      try {
+        const require = createRequire(import.meta.url);
+        const pkgPath = require.resolve('playwright/package.json');
+        const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf-8'));
+        console.log(pkg.version);
+      } catch {
+        console.error('Error: playwright is not installed');
         process.exit(1);
       }
     });

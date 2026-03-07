@@ -19,7 +19,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License" />
+  <img src="https://img.shields.io/badge/license-FSL--1.1--ALv2-blue.svg" alt="License" />
   <img src="https://img.shields.io/badge/PRs-welcome-brightgreen.svg" alt="PRs Welcome" />
   <img src="https://img.shields.io/badge/self--hosted-yes-green" alt="Self Hosted" />
   <img src="https://img.shields.io/badge/cost-%240%20forever-brightgreen" alt="$0 Forever" />
@@ -38,6 +38,8 @@ Visual regression testing is either **expensive**, **flaky**, or **painful to ma
 - Percy: **$199-5,000+/mo** depending on screenshots. Cloud-only
 - Applitools: **$699+/mo**. Enterprise pricing, steep learning curve
 - Chromatic: **$179+/mo**. Locked to Storybook
+- Meticulous: **Custom pricing**. Session-based, no self-hosting
+- Argos: **$100+/mo**. OSS core but cloud execution
 - Playwright native: Free, but no dashboard, no collaboration, no AI
 - BackstopJS: Free, but maintenance mode and no UI
 
@@ -45,14 +47,15 @@ Meanwhile, you just need to know: **"Did my last commit break the UI?"**
 
 ## The Solution
 
-Lastest2 is free, self-hosted visual regression testing that **writes tests for you and fixes them when they break**.
+Lastest2 is a free, self-hosted visual regression testing platform that **records your tests, writes them with AI, runs them anywhere, and fixes them when they break** — all in one tool.
 
 ```
 1. Point it at your app
 2. Record your user flows (point-and-click, no code)
-3. AI generates resilient test code
-4. Screenshots compared with 3 diff engines (pixelmatch, SSIM, Butteraugli)
-5. Approve or reject visual changes in a full review UI
+3. AI generates resilient test code with multi-selector fallback
+4. Run locally, on remote runners, or in an embedded browser container
+5. Screenshots compared with 3 diff engines (pixelmatch, SSIM, Butteraugli)
+6. Review and approve visual changes — or let AI auto-classify them
 ```
 
 Your data stays on your server. Your screenshots never leave your infra. It costs $0 forever.
@@ -283,10 +286,11 @@ Open [http://localhost:3000](http://localhost:3000)
 | **Price** | **$0** | $199+/mo | $699+/mo | $179+/mo | $100+/mo | Custom | $0 |
 | **Free screenshots** | **Unlimited** | 5K/mo | OSS only | 5K/mo | 5K/mo | None | Unlimited |
 | **Self-hosted** | **Yes** | No | Enterprise | No | OSS core | No | Yes |
-| **Open source** | **MIT** | SDKs only | SDKs only | Storybook | MIT core | No | Apache-2.0 |
-| **Recording** | **Yes** | No | Low-code | No | No | Session | Codegen |
+| **Open source** | **FSL-1.1-ALv2** | SDKs only | SDKs only | Storybook | MIT core | No | Apache-2.0 |
+| **No-code recording** | **Yes** | No | Low-code | No | No | Session | Codegen |
 | **AI test generation** | **Yes** | No | NLP | No | No | Session-based | No |
 | **AI auto-fix tests** | **Yes** | No | No | No | No | Auto-maintain | No |
+| **Autonomous agent** | **Yes (Play Agent)** | No | No | No | No | No | No |
 | **AI diff analysis** | **Yes** | AI Review Agent | Visual AI | No | No | Deterministic | No |
 | **Multi-engine diffing** | **3 engines** | No | Visual AI | No | No | No | No |
 | **Text-region-aware diffing** | **Yes** | No | No | No | No | No | No |
@@ -298,23 +302,29 @@ Open [http://localhost:3000](http://localhost:3000)
 | **Figma integration** | **Yes** | No | Yes | No | No | No | No |
 | **Google Sheets data** | **Yes** | No | No | No | No | No | No |
 | **Debug mode** | **Yes** | No | No | No | Traces | No | Trace |
-| **Remote runners** | **Yes** | Cloud | Cloud | Cloud | Cloud | Cloud | No |
+| **Remote runners** | **Yes (npm package)** | Cloud | Cloud | Cloud | Cloud | Cloud | No |
+| **Embedded browser** | **Yes (container + live stream)** | No | No | No | No | No | No |
 | **Local AI (Ollama)** | **Yes** | No | No | No | No | No | No |
 | **Cross-OS consistency** | **12 stabilization features** | No | No | No | Stabilization engine | No | No |
 | **GitHub Action** | **Yes** | Cloud-only | Cloud-only | Cloud-only | Cloud-only | Cloud-only | No |
+| **GitLab integration** | **Yes (self-hosted)** | Yes | Yes | No | No | No | No |
 | **Test composition** | **Yes** | No | No | No | No | No | No |
 | **Testing templates** | **8 presets** | No | No | No | No | No | No |
 | **Setup/teardown orchestration** | **Yes** | No | No | No | No | No | No |
+| **Branch baseline management** | **Yes** | Yes | Yes | Yes | No | No | No |
 
 ### What makes Lastest2 different
 
-- **Record + AI generate + diff + approve** in one self-hosted tool — no competitor does all four
+- **Record + AI generate + run + diff + approve** in one self-hosted tool — no competitor does all five
+- **Three execution modes**: local, remote runners (`@lastest/runner` on npm), or embedded browser container with live streaming — no local Playwright install needed
+- **Autonomous Play Agent**: one-click 9-step pipeline scans routes, generates tests, runs them, fixes failures, and reports results
 - **AI auto-fix**: tests break as your UI evolves, Lastest2 fixes them automatically
 - **$0 with unlimited screenshots** — Percy charges ~$5K/mo for 100K shots
 - **Your data never leaves your server** — screenshots stay local, no cloud dependency
-- **5 AI providers including Ollama** — run AI locally with zero API costs
-- **Spec-driven testing** — feed it OpenAPI specs or user stories, get tests back
-- **3 diff engines** — pixelmatch, SSIM, and Butteraugli with text-region-aware comparison
+- **5 AI providers including Ollama** — run AI completely locally with zero API costs
+- **Spec-driven testing** — feed it OpenAPI specs, user stories, or markdown files and get tests back
+- **3 diff engines** — pixelmatch, SSIM, and Butteraugli with OCR-based text-region-aware comparison
+- **12 stabilization features** — timestamp freezing, random seeding, burst capture, auto-masking, DOM/network stability, and more
 - **Auto-capability detection** — recordings auto-detect clipboard, upload, download, and network needs
 
 ---
@@ -673,8 +683,10 @@ NEXT_PUBLIC_BASE_URL=             # Base URL for API calls
 - [x] Early adopter mode (experimental feature gating)
 - [x] Runner v2 (concurrent execution, code integrity, remote recording)
 - [x] better-auth migration (replaced Clerk)
-- [ ] Remote runner NPM package publication
-- [ ] Production-ready runner infrastructure (Redis queue)
+- [x] Remote runner NPM package (`@lastest/runner` on npm)
+- [x] Embedded browser container (live streaming, no local Playwright needed)
+- [x] Runner management UI (register, monitor, configure from dashboard)
+
 
 ---
 
@@ -686,7 +698,7 @@ PRs welcome! See [CONTRIBUTING.md](./CONTRIBUTING.md) for guidelines.
 
 ## License
 
-MIT
+FSL-1.1-ALv2 — see [LICENSE](./LICENSE)
 
 ---
 

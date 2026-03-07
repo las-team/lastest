@@ -92,7 +92,10 @@ export async function fetchAndSyncGitlabRepos(): Promise<{ success: boolean; cou
 export async function selectRepo(repositoryId: string | null) {
   const session = await requireTeamAccess();
 
-  // Update both GitHub and GitLab account selections
+  // Write to team-level selection
+  await queries.updateTeam(session.team.id, { selectedRepositoryId: repositoryId });
+
+  // Backward compat: also write to provider account selections
   const [githubAccount, gitlabAccount] = await Promise.all([
     queries.getGithubAccountByTeam(session.team.id),
     queries.getGitlabAccountByTeam(session.team.id),
@@ -108,6 +111,22 @@ export async function selectRepo(repositoryId: string | null) {
   revalidatePath('/');
   revalidatePath('/tests');
   revalidatePath('/run');
+}
+
+export async function createLocalRepo(name: string) {
+  const session = await requireTeamAccess();
+  const repo = await queries.createRepository({
+    teamId: session.team.id,
+    provider: 'local',
+    owner: 'local',
+    name,
+    fullName: name,
+  });
+  // Auto-select the new repo
+  await queries.updateTeam(session.team.id, { selectedRepositoryId: repo.id });
+  revalidatePath('/');
+  revalidatePath('/settings');
+  return repo;
 }
 
 export async function getSelectedRepo() {
@@ -164,6 +183,8 @@ export async function fetchRepoBranches(repositoryId: string): Promise<RepoBranc
   const session = await requireTeamAccess();
   const repo = await queries.getRepository(repositoryId);
   if (!repo || repo.teamId !== session.team.id) return [];
+
+  if (repo.provider === 'local') return [];
 
   if (repo.provider === 'gitlab') {
     // Fetch from GitLab
