@@ -9,6 +9,11 @@ http.Server.prototype.listen = function (...args) {
     const url = req.url || '';
     if (!url.startsWith('/api/embedded/stream/ws')) return;
 
+    // Prevent Next.js from ending the socket after upgrade
+    const originalEnd = socket.end.bind(socket);
+    let owned = true;
+    socket.end = (...a) => owned ? socket : originalEnd(...a);
+
     const searchParams = new URLSearchParams(url.includes('?') ? url.slice(url.indexOf('?') + 1) : '');
     const target = searchParams.get('target');
 
@@ -39,11 +44,13 @@ http.Server.prototype.listen = function (...args) {
 
       proxy.write(lines.join('\r\n') + '\r\n\r\n');
       if (head.length > 0) proxy.write(head);
+      owned = false;
       proxy.pipe(socket);
       socket.pipe(proxy);
     });
-    proxy.on('error', () => socket.destroy());
+    proxy.on('error', () => { owned = false; socket.destroy(); });
     socket.on('error', () => proxy.destroy());
+    socket.on('close', () => proxy.destroy());
   });
   return originalListen.apply(this, args);
 };
