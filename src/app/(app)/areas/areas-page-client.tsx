@@ -18,6 +18,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { createArea, deleteArea, deleteAreaWithContents, moveTestToArea, moveSuiteToArea, moveArea } from '@/server/actions/areas';
+import { deleteTest } from '@/server/actions/tests';
 import { FolderSearch, Sparkles, Globe, FileText, Loader2, BookOpen, Check, X, Circle, FileWarning, GitCompare } from 'lucide-react';
 import { Progress } from '@/components/ui/progress';
 import { cn } from '@/lib/utils';
@@ -58,6 +59,7 @@ export function AreasPageClient({ tree, uncategorizedTests, unsortedSuites, repo
   const [isCreating, setIsCreating] = useState(false);
   const [deleteAreaId, setDeleteAreaId] = useState<string | null>(null);
   const [deleteAreaIds, setDeleteAreaIds] = useState<string[]>([]);
+  const [deleteTestId, setDeleteTestId] = useState<string | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
   const [isScanning, setIsScanning] = useState(false);
   const [showAIScanDialog, setShowAIScanDialog] = useState(false);
@@ -69,19 +71,21 @@ export function AreasPageClient({ tree, uncategorizedTests, unsortedSuites, repo
   // Delete key handler
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Delete' && !deleteAreaId && !deleteAreaIds.length) {
+      if (e.key === 'Delete' && !deleteAreaId && !deleteAreaIds.length && !deleteTestId) {
         const tag = (e.target as HTMLElement)?.tagName;
         if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
         if (selectedAreaIds.size > 0) {
           setDeleteAreaIds(Array.from(selectedAreaIds));
         } else if (selection?.type === 'area') {
           setDeleteAreaId(selection.id);
+        } else if (selection?.type === 'test') {
+          setDeleteTestId(selection.id);
         }
       }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [selection, deleteAreaId, deleteAreaIds, selectedAreaIds]);
+  }, [selection, deleteAreaId, deleteAreaIds, deleteTestId, selectedAreaIds]);
 
   function computeCoverage(
     items: FunctionalAreaWithChildren[],
@@ -193,6 +197,21 @@ export function AreasPageClient({ tree, uncategorizedTests, unsortedSuites, repo
     }
   };
 
+  const handleDeleteTest = async () => {
+    if (!deleteTestId) return;
+    setIsDeleting(true);
+    try {
+      await deleteTest(deleteTestId);
+      if (selection?.type === 'test' && selection.id === deleteTestId) {
+        setSelection(null);
+      }
+      setDeleteTestId(null);
+      router.refresh();
+    } finally {
+      setIsDeleting(false);
+    }
+  };
+
   const handleMoveTest = async (testId: string, areaId: string | null) => {
     await moveTestToArea(testId, areaId);
     router.refresh();
@@ -257,6 +276,7 @@ export function AreasPageClient({ tree, uncategorizedTests, unsortedSuites, repo
           onMoveTest={handleMoveTest}
           onMoveSuite={handleMoveSuite}
           onMoveArea={handleMoveArea}
+          onDeleteTest={setDeleteTestId}
         />
       </ResizablePanel>
       <ResizableHandle withHandle />
@@ -517,6 +537,30 @@ export function AreasPageClient({ tree, uncategorizedTests, unsortedSuites, repo
               </div>
             </Button>
           </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Delete Test Confirmation Dialog */}
+      <Dialog open={!!deleteTestId} onOpenChange={(open) => !open && setDeleteTestId(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Delete Test</DialogTitle>
+            <DialogDescription>
+              Are you sure you want to delete this test? It will be soft-deleted and can be restored later.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDeleteTestId(null)}>
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={handleDeleteTest}
+              disabled={isDeleting}
+            >
+              {isDeleting ? 'Deleting...' : 'Delete'}
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
 
