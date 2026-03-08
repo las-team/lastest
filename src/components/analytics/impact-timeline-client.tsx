@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useTransition, useRef, useCallback } from 'react';
+import { useState, useTransition, useRef, useCallback, memo, useMemo } from 'react';
 import {
   AreaChart,
   Area,
@@ -85,6 +85,19 @@ function formatWeekLabel(d: Date): string {
   return `${months[d.getUTCMonth()]} ${d.getUTCDate()}`;
 }
 
+function getWeekNumber(d: Date): number {
+  const date = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
+  date.setUTCDate(date.getUTCDate() + 4 - (date.getUTCDay() || 7));
+  const yearStart = new Date(Date.UTC(date.getUTCFullYear(), 0, 1));
+  return Math.ceil(((date.getTime() - yearStart.getTime()) / 86400000 + 1) / 7);
+}
+
+function formatDate(d: Date | string | null | undefined): string {
+  if (!d) return '';
+  const date = typeof d === 'string' ? new Date(d) : d;
+  return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+}
+
 function buildContinuousTimeline(
   timeline: TimelineEntry[],
   mergedPRs: MergedPR[],
@@ -134,7 +147,6 @@ function buildContinuousTimeline(
   return points;
 }
 
-/** Compute before/after metrics based on a split index in the chart data */
 function computeMetrics(chartData: ChartPoint[], splitIndex: number) {
   const before = chartData.slice(0, splitIndex);
   const after = chartData.slice(splitIndex);
@@ -199,28 +211,134 @@ function CustomTooltip(props: Record<string, unknown>) {
   );
 }
 
-function formatDate(d: Date | string | null | undefined): string {
-  if (!d) return '';
-  const date = typeof d === 'string' ? new Date(d) : d;
-  return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
-}
+/**
+ * Chart component isolated with memo — never re-renders when splitIndex changes.
+ * Communicates brush position to parent via a ref callback.
+ */
+const ImpactChart = memo(function ImpactChart({
+  chartData,
+  onBrushChange,
+}: {
+  chartData: ChartPoint[];
+  onBrushChange: (startIndex: number) => void;
+}) {
+  return (
+    <ResponsiveContainer width="100%" height={500}>
+      <AreaChart data={chartData} margin={{ top: 30, right: 30, left: 0, bottom: 10 }}>
+        <defs>
+          <linearGradient id="issueGradient" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="5%" stopColor="oklch(0.55 0.17 195)" stopOpacity={0.3} />
+            <stop offset="95%" stopColor="oklch(0.55 0.17 195)" stopOpacity={0.05} />
+          </linearGradient>
+          <linearGradient id="closedGradient" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="5%" stopColor="oklch(0.68 0.14 195)" stopOpacity={0.2} />
+            <stop offset="95%" stopColor="oklch(0.68 0.14 195)" stopOpacity={0.02} />
+          </linearGradient>
+        </defs>
+        <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
+        <XAxis
+          dataKey="weekLabel"
+          tick={{ fontSize: 11 }}
+          className="fill-muted-foreground"
+          angle={-35}
+          textAnchor="end"
+          height={60}
+          interval="preserveStartEnd"
+        />
+        <YAxis
+          tick={{ fontSize: 12 }}
+          className="fill-muted-foreground"
+          allowDecimals={false}
+        />
+        <Tooltip content={<CustomTooltip />} />
+        <Area
+          type="monotone"
+          dataKey="issues"
+          stroke="oklch(0.55 0.17 195)"
+          fill="url(#issueGradient)"
+          strokeWidth={2}
+          name="Opened"
+          dot={false}
+          activeDot={{ r: 4, strokeWidth: 2 }}
+        />
+        <Area
+          type="monotone"
+          dataKey="closed"
+          stroke="oklch(0.68 0.14 195)"
+          fill="url(#closedGradient)"
+          strokeWidth={1.5}
+          strokeDasharray="4 4"
+          name="Closed"
+          dot={false}
+        />
+        {chartData.map((point) =>
+          point.prs.length > 0 ? (
+            <ReferenceLine
+              key={point.weekKey}
+              x={point.weekLabel}
+              stroke="oklch(0.65 0.15 280)"
+              strokeDasharray="3 3"
+              strokeWidth={1.5}
+              label={{
+                value: `${point.prs.length} PR${point.prs.length > 1 ? 's' : ''}`,
+                position: 'top',
+                fill: 'oklch(0.65 0.15 280)',
+                fontSize: 10,
+              }}
+            />
+          ) : null,
+        )}
+        <Brush
+          dataKey="weekLabel"
+          height={35}
+          stroke="hsl(var(--border))"
+          fill="transparent"
+          travellerWidth={10}
+          tickFormatter={() => ''}
+          onChange={(range) => {
+            if (range && typeof range.startIndex === 'number') {
+              onBrushChange(range.startIndex);
+            }
+          }}
+        >
+          <AreaChart data={chartData}>
+            <Area
+              type="monotone"
+              dataKey="issues"
+              stroke="oklch(0.55 0.17 195)"
+              fill="oklch(0.55 0.17 195 / 0.1)"
+              strokeWidth={1}
+              dot={false}
+            />
+          </AreaChart>
+        </Brush>
+      </AreaChart>
+    </ResponsiveContainer>
+  );
+});
 
 export function ImpactTimelineClient({ repositoryId, initialData }: Props) {
   const [data, setData] = useState<ImpactData | null>(initialData);
   const [selectedAuthor, setSelectedAuthor] = useState<string>('all');
   const [isPending, startTransition] = useTransition();
   const [splitIndex, setSplitIndex] = useState<number | null>(null);
-  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const handleBrushChange = useCallback((range: { startIndex?: number; endIndex?: number }) => {
-    if (range && typeof range.startIndex === 'number') {
-      // Debounce: update cards only after user stops dragging for 150ms
-      if (debounceRef.current) clearTimeout(debounceRef.current);
-      debounceRef.current = setTimeout(() => {
-        setSplitIndex(range.startIndex!);
-      }, 150);
-    }
+  // Stable callback ref — never changes, so ImpactChart never re-renders from it
+  const splitRef = useRef<number | null>(null);
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const handleBrushChange = useCallback((startIndex: number) => {
+    splitRef.current = startIndex;
+    if (timerRef.current) clearTimeout(timerRef.current);
+    timerRef.current = setTimeout(() => {
+      setSplitIndex(splitRef.current);
+    }, 200);
   }, []);
+
+  const chartData = useMemo(
+    () => data ? buildContinuousTimeline(data.timeline, data.mergedPRs) : [],
+    [data],
+  );
 
   if (!repositoryId) {
     return (
@@ -250,16 +368,10 @@ export function ImpactTimelineClient({ repositoryId, initialData }: Props) {
     );
   }
 
-  const { timeline, mergedPRs, authors, summary } = data;
+  const { mergedPRs, authors, summary } = data;
 
-  const chartData = buildContinuousTimeline(timeline, mergedPRs);
-
-  // Use slider split or fall back to midpoint
   const effectiveSplit = splitIndex ?? Math.floor(chartData.length / 2);
-  const metrics = chartData.length > 0
-    ? computeMetrics(chartData, effectiveSplit)
-    : null;
-
+  const metrics = chartData.length > 0 ? computeMetrics(chartData, effectiveSplit) : null;
   const isImproving = metrics ? metrics.percentChange < 0 : false;
   const splitWeekLabel = chartData[effectiveSplit]?.weekLabel ?? '';
 
@@ -377,7 +489,7 @@ export function ImpactTimelineClient({ repositoryId, initialData }: Props) {
         </Card>
       )}
 
-      {/* Chart */}
+      {/* Chart — isolated in memo'd component so brush drag never causes chart re-render */}
       <Card>
         <CardHeader>
           <CardTitle>Issues by Week</CardTitle>
@@ -388,109 +500,7 @@ export function ImpactTimelineClient({ repositoryId, initialData }: Props) {
               No issue data to display.
             </div>
           ) : (
-            <ResponsiveContainer width="100%" height={500}>
-              <AreaChart data={chartData} margin={{ top: 30, right: 30, left: 0, bottom: 10 }}>
-                <defs>
-                  <linearGradient id="issueGradient" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="oklch(0.55 0.17 195)" stopOpacity={0.3} />
-                    <stop offset="95%" stopColor="oklch(0.55 0.17 195)" stopOpacity={0.05} />
-                  </linearGradient>
-                  <linearGradient id="closedGradient" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="oklch(0.68 0.14 195)" stopOpacity={0.2} />
-                    <stop offset="95%" stopColor="oklch(0.68 0.14 195)" stopOpacity={0.02} />
-                  </linearGradient>
-                </defs>
-                <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
-                <XAxis
-                  dataKey="weekLabel"
-                  tick={{ fontSize: 11 }}
-                  className="fill-muted-foreground"
-                  angle={-35}
-                  textAnchor="end"
-                  height={60}
-                  interval="preserveStartEnd"
-                />
-                <YAxis
-                  tick={{ fontSize: 12 }}
-                  className="fill-muted-foreground"
-                  allowDecimals={false}
-                />
-                <Tooltip content={<CustomTooltip />} />
-                {/* Split point reference line */}
-                {chartData[effectiveSplit] && (
-                  <ReferenceLine
-                    x={chartData[effectiveSplit].weekLabel}
-                    stroke="hsl(var(--foreground))"
-                    strokeWidth={2}
-                    strokeDasharray="6 3"
-                    label={{
-                      value: 'Split',
-                      position: 'top',
-                      fill: 'hsl(var(--foreground))',
-                      fontSize: 11,
-                      fontWeight: 600,
-                    }}
-                  />
-                )}
-                <Area
-                  type="monotone"
-                  dataKey="issues"
-                  stroke="oklch(0.55 0.17 195)"
-                  fill="url(#issueGradient)"
-                  strokeWidth={2}
-                  name="Opened"
-                  dot={false}
-                  activeDot={{ r: 4, strokeWidth: 2 }}
-                />
-                <Area
-                  type="monotone"
-                  dataKey="closed"
-                  stroke="oklch(0.68 0.14 195)"
-                  fill="url(#closedGradient)"
-                  strokeWidth={1.5}
-                  strokeDasharray="4 4"
-                  name="Closed"
-                  dot={false}
-                />
-                {chartData.map((point) =>
-                  point.prs.length > 0 ? (
-                    <ReferenceLine
-                      key={point.weekKey}
-                      x={point.weekLabel}
-                      stroke="oklch(0.65 0.15 280)"
-                      strokeDasharray="3 3"
-                      strokeWidth={1.5}
-                      label={{
-                        value: `${point.prs.length} PR${point.prs.length > 1 ? 's' : ''}`,
-                        position: 'top',
-                        fill: 'oklch(0.65 0.15 280)',
-                        fontSize: 10,
-                      }}
-                    />
-                  ) : null,
-                )}
-                <Brush
-                  dataKey="weekLabel"
-                  height={35}
-                  stroke="hsl(var(--border))"
-                  fill="transparent"
-                  travellerWidth={10}
-                  tickFormatter={() => ''}
-                  onChange={handleBrushChange}
-                >
-                  <AreaChart data={chartData}>
-                    <Area
-                      type="monotone"
-                      dataKey="issues"
-                      stroke="oklch(0.55 0.17 195)"
-                      fill="oklch(0.55 0.17 195 / 0.1)"
-                      strokeWidth={1}
-                      dot={false}
-                    />
-                  </AreaChart>
-                </Brush>
-              </AreaChart>
-            </ResponsiveContainer>
+            <ImpactChart chartData={chartData} onBrushChange={handleBrushChange} />
           )}
         </CardContent>
       </Card>
@@ -524,11 +534,4 @@ export function ImpactTimelineClient({ repositoryId, initialData }: Props) {
       )}
     </div>
   );
-}
-
-function getWeekNumber(d: Date): number {
-  const date = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
-  date.setUTCDate(date.getUTCDate() + 4 - (date.getUTCDay() || 7));
-  const yearStart = new Date(Date.UTC(date.getUTCFullYear(), 0, 1));
-  return Math.ceil(((date.getTime() - yearStart.getTime()) / 86400000 + 1) / 7);
 }
