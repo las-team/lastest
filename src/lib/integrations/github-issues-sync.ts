@@ -1,6 +1,7 @@
 import { db } from '@/lib/db';
-import { githubIssues, repositories } from '@/lib/db/schema';
-import { eq, and } from 'drizzle-orm';
+import { githubIssues, pullRequests, repositories } from '@/lib/db/schema';
+import { eq, and, isNull } from 'drizzle-orm';
+import { v4 as uuid } from 'uuid';
 
 const SYNC_TTL_MS = 60 * 60 * 1000; // 1 hour
 
@@ -12,15 +13,59 @@ interface GitHubIssueResponse {
   user: { login: string } | null;
   created_at: string;
   closed_at: string | null;
-  pull_request?: unknown; // Issues API also returns PRs — filter these out
+  pull_request?: unknown;
+}
+
+interface GitHubPRResponse {
+  number: number;
+  title: string;
+  state: string;
+  merged_at: string | null;
+  created_at: string;
+  user: { login: string } | null;
+  head: { ref: string; sha: string };
+  base: { ref: string };
+}
+
+async function fetchGitHubPaginated<T>(
+  url: string,
+  accessToken: string,
+  perPage = 100,
+): Promise<T[]> {
+  const all: T[] = [];
+  let page = 1;
+
+  while (true) {
+    const sep = url.includes('?') ? '&' : '?';
+    const response = await fetch(`${url}${sep}per_page=${perPage}&page=${page}`, {
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        Accept: 'application/vnd.github+json',
+        'X-GitHub-Api-Version': '2022-11-28',
+      },
+    });
+
+    if (!response.ok) {
+      const body = await response.text().catch(() => '');
+      console.error(`[github-sync] API error: ${response.status} ${response.statusText} - ${body.slice(0, 200)}`);
+      break;
+    }
+
+    const items: T[] = await response.json();
+    all.push(...items);
+    if (items.length < perPage) break;
+    page++;
+  }
+
+  return all;
 }
 
 export async function syncGithubIssues(
   repositoryId: string,
   accessToken: string,
   force = false,
-): Promise<{ synced: number }> {
-  // Check TTL — skip if recently synced
+): Promise<{ syncedIssues: number; syncedPRs: number }> {
+  // Check TTL
   if (!force) {
     const latest = db
       .select({ syncedAt: githubIssues.syncedAt })
@@ -31,11 +76,10 @@ export async function syncGithubIssues(
       .get();
 
     if (latest?.syncedAt && Date.now() - latest.syncedAt.getTime() < SYNC_TTL_MS) {
-      return { synced: 0 };
+      return { syncedIssues: 0, syncedPRs: 0 };
     }
   }
 
-  // Get repo owner/name
   const repo = db
     .select({ owner: repositories.owner, name: repositories.name })
     .from(repositories)
@@ -44,43 +88,22 @@ export async function syncGithubIssues(
 
   if (!repo) throw new Error('Repository not found');
 
-  // Fetch all issues from GitHub (paginated) — not just bugs
-  const allIssues: GitHubIssueResponse[] = [];
-  let page = 1;
-  const perPage = 100;
+  const baseUrl = `https://api.github.com/repos/${repo.owner}/${repo.name}`;
+  console.log(`[github-sync] Syncing issues + PRs for ${repo.owner}/${repo.name}...`);
 
-  console.log(`[github-issues-sync] Syncing issues for ${repo.owner}/${repo.name}...`);
+  // Fetch issues and PRs in parallel
+  const [allIssues, allPRs] = await Promise.all([
+    fetchGitHubPaginated<GitHubIssueResponse>(`${baseUrl}/issues?state=all`, accessToken),
+    fetchGitHubPaginated<GitHubPRResponse>(`${baseUrl}/pulls?state=all`, accessToken),
+  ]);
 
-  while (true) {
-    const url = `https://api.github.com/repos/${repo.owner}/${repo.name}/issues?state=all&per_page=${perPage}&page=${page}`;
-    const response = await fetch(url, {
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-        Accept: 'application/vnd.github+json',
-        'X-GitHub-Api-Version': '2022-11-28',
-      },
-    });
+  // Filter out PRs from issues endpoint
+  const realIssues = allIssues.filter((i) => !i.pull_request);
+  console.log(`[github-sync] Fetched ${realIssues.length} issues, ${allPRs.length} PRs`);
 
-    if (!response.ok) {
-      const body = await response.text().catch(() => '');
-      console.error(`[github-issues-sync] API error: ${response.status} ${response.statusText} - ${body.slice(0, 200)}`);
-      break;
-    }
-
-    const issues: GitHubIssueResponse[] = await response.json();
-    // Filter out pull requests (GitHub Issues API includes them)
-    const realIssues = issues.filter((i) => !i.pull_request);
-    allIssues.push(...realIssues);
-
-    if (issues.length < perPage) break;
-    page++;
-  }
-
-  console.log(`[github-issues-sync] Fetched ${allIssues.length} issues, upserting...`);
-
-  // Upsert into DB
+  // Upsert issues
   const now = new Date();
-  for (const issue of allIssues) {
+  for (const issue of realIssues) {
     const existing = db
       .select({ id: githubIssues.id })
       .from(githubIssues)
@@ -111,6 +134,57 @@ export async function syncGithubIssues(
     }
   }
 
-  console.log(`[github-issues-sync] Done. Synced ${allIssues.length} issues for ${repo.owner}/${repo.name}`);
-  return { synced: allIssues.length };
+  // Upsert PRs — match by PR number + repo owner/name
+  let syncedPRs = 0;
+  for (const pr of allPRs) {
+    const existing = db
+      .select({ id: pullRequests.id })
+      .from(pullRequests)
+      .where(
+        and(
+          eq(pullRequests.repoOwner, repo.owner),
+          eq(pullRequests.repoName, repo.name),
+          eq(pullRequests.githubPrNumber, pr.number),
+        ),
+      )
+      .get();
+
+    const status = pr.merged_at ? 'merged' : pr.state;
+
+    if (existing) {
+      // Update with author + mergedAt if missing
+      await db.update(pullRequests).set({
+        title: pr.title,
+        status,
+        author: pr.user?.login ?? null,
+        mergedAt: pr.merged_at ? new Date(pr.merged_at) : null,
+        headBranch: pr.head.ref,
+        baseBranch: pr.base.ref,
+        headCommit: pr.head.sha,
+        updatedAt: now,
+      }).where(eq(pullRequests.id, existing.id));
+    } else {
+      // Create new PR record from API data
+      await db.insert(pullRequests).values({
+        id: uuid(),
+        provider: 'github',
+        githubPrNumber: pr.number,
+        repoOwner: repo.owner,
+        repoName: repo.name,
+        headBranch: pr.head.ref,
+        baseBranch: pr.base.ref,
+        headCommit: pr.head.sha,
+        title: pr.title,
+        status,
+        author: pr.user?.login ?? null,
+        mergedAt: pr.merged_at ? new Date(pr.merged_at) : null,
+        createdAt: new Date(pr.created_at),
+        updatedAt: now,
+      });
+    }
+    syncedPRs++;
+  }
+
+  console.log(`[github-sync] Done. Synced ${realIssues.length} issues, ${syncedPRs} PRs for ${repo.owner}/${repo.name}`);
+  return { syncedIssues: realIssues.length, syncedPRs };
 }
