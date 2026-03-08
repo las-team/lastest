@@ -241,6 +241,8 @@ export const pullRequests = sqliteTable('pull_requests', {
   headCommit: text('head_commit').notNull(),
   title: text('title'),
   status: text('status'), // 'open', 'closed', 'merged'
+  author: text('author'), // GitHub username of PR author
+  mergedAt: integer('merged_at', { mode: 'timestamp' }),
   createdAt: integer('created_at', { mode: 'timestamp' }),
   updatedAt: integer('updated_at', { mode: 'timestamp' }),
 });
@@ -1421,3 +1423,26 @@ export const githubActionConfigs = sqliteTable('github_action_configs', {
 
 export type GithubActionConfig = typeof githubActionConfigs.$inferSelect;
 export type NewGithubActionConfig = typeof githubActionConfigs.$inferInsert;
+
+// ============================================
+// GitHub Issues (cached for analytics)
+// ============================================
+
+export const githubIssues = sqliteTable('github_issues', {
+  id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+  repositoryId: text('repository_id').references(() => repositories.id, { onDelete: 'cascade' }).notNull(),
+  githubIssueNumber: integer('github_issue_number').notNull(),
+  title: text('title').notNull(),
+  state: text('state').notNull(), // 'open' | 'closed'
+  labels: text('labels', { mode: 'json' }).$type<string[]>().default([]),
+  author: text('author'),
+  createdAt: integer('created_at', { mode: 'timestamp' }),
+  closedAt: integer('closed_at', { mode: 'timestamp' }),
+  syncedAt: integer('synced_at', { mode: 'timestamp' }).$defaultFn(() => new Date()),
+}, (table) => ([
+  index('idx_github_issues_repo').on(table.repositoryId),
+  index('idx_github_issues_repo_number').on(table.repositoryId, table.githubIssueNumber),
+]));
+
+export type GithubIssue = typeof githubIssues.$inferSelect;
+export type NewGithubIssue = typeof githubIssues.$inferInsert;
