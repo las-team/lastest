@@ -5,6 +5,9 @@
 
 import { chromium, firefox, webkit, Browser, Page, BrowserContext } from 'playwright';
 import { createHash } from 'crypto';
+import fs from 'fs';
+import path from 'path';
+import os from 'os';
 import type { RunTestCommandPayload, RunSetupCommandPayload, LogEntry, StabilizationPayload } from './protocol.js';
 import { CROSS_OS_CHROMIUM_ARGS, setupFreezeScripts, applyPreScreenshotStabilization } from './stabilization.js';
 
@@ -293,7 +296,7 @@ export class TestRunner {
       let timeoutTimer: ReturnType<typeof setTimeout> | undefined;
       try {
         await Promise.race([
-          this.executeTestCode(page, command.code, command.targetUrl, captureScreenshot, logFn, softErrors, command.cursorPlaybackSpeed, command.stabilization)
+          this.executeTestCode(page, command.code, command.targetUrl, captureScreenshot, logFn, softErrors, command.cursorPlaybackSpeed, command.stabilization, command)
             .then(r => { clearTimeout(timeoutTimer); return r; })
             .catch(e => { clearTimeout(timeoutTimer); throw e; }),
           new Promise<never>((_, reject) => {
@@ -556,7 +559,8 @@ export class TestRunner {
     logFn?: (level: 'info' | 'warn' | 'error', message: string) => void,
     softErrors?: string[],
     cursorPlaybackSpeed?: number,
-    stabilization?: StabilizationPayload
+    stabilization?: StabilizationPayload,
+    payload?: RunTestCommandPayload
   ): Promise<void> {
     const log = logFn ?? this.log.bind(this);
     // Extract function body from: export async function test(page, baseUrl, screenshotPath, stepLogger) { ... }
@@ -797,6 +801,84 @@ export class TestRunner {
 
     // Execute the test
     log('info', 'Compiling test function...');
+
+    // Build helper objects matching local runner's 12-arg signature
+    const fileUploadHelper = async (selector: string, filePaths: string | string[]) => {
+      const locator = page.locator(selector);
+      await locator.setInputFiles(Array.isArray(filePaths) ? filePaths : [filePaths]);
+    };
+
+    const clipboardHelper = payload?.grantClipboardAccess ? {
+      copy: async (text: string) => {
+        await page.evaluate((t) => navigator.clipboard.writeText(t), text);
+      },
+      paste: async () => {
+        return await page.evaluate(() => navigator.clipboard.readText());
+      },
+      pasteInto: async (selector: string) => {
+        await page.locator(selector).focus();
+        await page.keyboard.press('Control+V');
+      },
+    } : null;
+
+    const dlDir = payload?.acceptDownloads ? path.join(os.tmpdir(), `lastest-dl-${payload.testRunId}`) : '';
+    if (dlDir) fs.mkdirSync(dlDir, { recursive: true });
+    const dlList: Array<{ suggestedFilename: string; path: string }> = [];
+    const downloadsHelper = payload?.acceptDownloads ? {
+      waitForDownload: async (triggerAction: () => Promise<void>) => {
+        const [download] = await Promise.all([
+          page.waitForEvent('download'),
+          triggerAction(),
+        ]);
+        const safeName = path.basename(download.suggestedFilename()).replace(/\.\./g, '_');
+        const savePath = path.join(dlDir, safeName);
+        await download.saveAs(savePath);
+        dlList.push({ suggestedFilename: safeName, path: savePath });
+        return { filename: safeName, path: savePath };
+      },
+      list: () => dlList,
+    } : null;
+
+    const networkHelper = {
+      mock: async (urlPattern: string, response: { status?: number; body?: string; contentType?: string; json?: unknown }) => {
+        await page.route(urlPattern, async (route) => {
+          await route.fulfill({
+            status: response.status ?? 200,
+            contentType: response.contentType ?? (response.json ? 'application/json' : 'text/plain'),
+            body: response.json ? JSON.stringify(response.json) : (response.body ?? ''),
+          });
+        });
+      },
+      block: async (urlPattern: string) => {
+        await page.route(urlPattern, (route) => route.abort());
+      },
+      passthrough: async (urlPattern: string) => {
+        await page.unroute(urlPattern);
+      },
+      capture: (urlPattern: string) => {
+        const captured: Array<{ url: string; method: string; postData?: string }> = [];
+        page.on('request', (req) => {
+          if (new RegExp(urlPattern).test(req.url())) {
+            captured.push({ url: req.url(), method: req.method(), postData: req.postData() ?? undefined });
+          }
+        });
+        return { requests: captured };
+      },
+    };
+
+    // Decode base64 fixtures from payload to temp dir
+    const fixturesMap: Record<string, string> = {};
+    if (payload?.fixtures && payload.fixtures.length > 0) {
+      const fixtureDir = path.join(os.tmpdir(), `lastest-fixtures-${payload.testRunId}`);
+      fs.mkdirSync(fixtureDir, { recursive: true });
+      for (const fixture of payload.fixtures) {
+        const safeName = path.basename(fixture.filename).replace(/\.\./g, '_');
+        const fixturePath = path.join(fixtureDir, safeName);
+        fs.writeFileSync(fixturePath, Buffer.from(fixture.data, 'base64'));
+        fixturesMap[fixture.filename] = fixturePath;
+      }
+    }
+
     const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
     const testFn = new AsyncFunction(
       'page',
@@ -804,14 +886,36 @@ export class TestRunner {
       'screenshotPath',
       'stepLogger',
       'expect',
+      'appState',
       'locateWithFallback',
+      'fileUpload',
+      'clipboard',
+      'downloads',
+      'network',
       'replayCursorPath',
+      'fixtures',
       body
     );
 
     log('info', `Running test against ${targetUrl}...`);
-    await testFn(page, targetUrl.replace(/\/+$/, ''), 'screenshot.png', stepLogger, expect, locateWithFallback, replayCursorPathFn);
-    log('info', 'Test function returned successfully');
+    try {
+      await testFn(
+        page, targetUrl.replace(/\/+$/, ''), 'screenshot.png', stepLogger, expect,
+        null, locateWithFallback,
+        fileUploadHelper, clipboardHelper, downloadsHelper, networkHelper, replayCursorPathFn,
+        fixturesMap
+      );
+      log('info', 'Test function returned successfully');
+    } finally {
+      // Clean up fixture temp files
+      if (payload?.fixtures && payload.fixtures.length > 0) {
+        const fixtureDir = path.join(os.tmpdir(), `lastest-fixtures-${payload.testRunId}`);
+        try { fs.rmSync(fixtureDir, { recursive: true, force: true }); } catch {}
+      }
+      if (dlDir) {
+        try { fs.rmSync(dlDir, { recursive: true, force: true }); } catch {}
+      }
+    }
   }
 
   private stripTypeAnnotations(code: string): string {

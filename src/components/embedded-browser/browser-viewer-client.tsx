@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState, useCallback } from 'react';
-import { Wifi, WifiOff, Loader2, RefreshCw } from 'lucide-react';
+import { Wifi, WifiOff, Loader2, RefreshCw, Upload } from 'lucide-react';
 import { BrowserToolbar } from '@/components/embedded-browser/browser-toolbar-client';
 import { Button } from '@/components/ui/button';
 import type { StreamMouseEvent, StreamKeyboardEvent } from '@/lib/ws/protocol';
@@ -34,6 +34,7 @@ export function BrowserViewer({ streamUrl, initialViewport, className, expiresAt
   const [fps, setFps] = useState(0);
   const [reconnectAttempt, setReconnectAttempt] = useState(0);
   const [timeRemaining, setTimeRemaining] = useState<number | null>(null);
+  const [fileChooserPending, setFileChooserPending] = useState(false);
 
   // FPS counter refs — initialized in useEffect to avoid impure render calls
   const frameCountRef = useRef(0);
@@ -148,6 +149,7 @@ export function BrowserViewer({ streamUrl, initialViewport, className, expiresAt
               if (message.payload.viewport) {
                 setViewport(message.payload.viewport);
               }
+              setFileChooserPending(message.payload.fileChooserPending ?? false);
               break;
             }
           }
@@ -273,10 +275,47 @@ export function BrowserViewer({ streamUrl, initialViewport, className, expiresAt
     [sendWs]
   );
 
+  // File upload handler for embedded browser
+  const handleFileUpload = useCallback(() => {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.multiple = true;
+    input.onchange = async () => {
+      if (!input.files?.length) return;
+      const files: Array<{ name: string; data: string; mimeType: string }> = [];
+      for (const file of Array.from(input.files)) {
+        const buffer = await file.arrayBuffer();
+        const bytes = new Uint8Array(buffer);
+        let binary = '';
+        for (let i = 0; i < bytes.length; i++) {
+          binary += String.fromCharCode(bytes[i]);
+        }
+        files.push({ name: file.name, data: btoa(binary), mimeType: file.type || 'application/octet-stream' });
+      }
+      sendWs({ type: 'stream:input', payload: { type: 'file_upload' as const, files } });
+      setFileChooserPending(false);
+    };
+    input.click();
+  }, [sendWs]);
+
   // Keyboard event handlers
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLCanvasElement>) => {
       e.preventDefault();
+
+      // Intercept paste: read local clipboard and send as clipboard_paste event
+      if ((e.ctrlKey || e.metaKey) && e.key === 'v') {
+        navigator.clipboard.readText().then(text => {
+          if (text) {
+            sendWs({
+              type: 'stream:input',
+              payload: { type: 'clipboard_paste' as const, text },
+            });
+          }
+        }).catch(() => {});
+        return;
+      }
+
       sendWs({
         type: 'stream:input',
         payload: {
@@ -405,6 +444,14 @@ export function BrowserViewer({ streamUrl, initialViewport, className, expiresAt
                 </Button>
               </div>
             )}
+          </div>
+        )}
+
+        {fileChooserPending && (
+          <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-10 bg-background/90 border rounded-lg p-6 shadow-lg flex flex-col items-center gap-3">
+            <Upload className="h-8 w-8 text-muted-foreground" />
+            <p className="text-sm font-medium">File upload requested</p>
+            <Button onClick={handleFileUpload} size="sm">Choose Files</Button>
           </div>
         )}
 

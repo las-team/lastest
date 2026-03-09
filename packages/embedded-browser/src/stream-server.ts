@@ -125,12 +125,12 @@ export class StreamServer {
   }
 
   /** Broadcast a status update to all connected clients */
-  broadcastStatus(status: string, currentUrl?: string, viewport?: { width: number; height: number }): void {
+  broadcastStatus(status: string, currentUrl?: string, viewport?: { width: number; height: number }, fileChooserPending?: boolean): void {
     const message = JSON.stringify({
       type: 'stream:status',
       id: crypto.randomUUID(),
       timestamp: Date.now(),
-      payload: { status, currentUrl, viewport },
+      payload: { status, currentUrl, viewport, fileChooserPending },
     });
 
     for (const [clientId, client] of this.clients) {

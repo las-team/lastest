@@ -64,7 +64,7 @@ export interface VerificationStatus {
 export type KeyboardModifier = 'Alt' | 'Control' | 'Shift' | 'Meta';
 
 export interface RecordingEvent {
-  type: 'action' | 'navigation' | 'screenshot' | 'error' | 'complete' | 'assertion' | 'cursor-move' | 'mouse-down' | 'mouse-up' | 'hover-preview' | 'keypress' | 'keydown' | 'keyup' | 'scroll' | 'download';
+  type: 'action' | 'navigation' | 'screenshot' | 'error' | 'complete' | 'assertion' | 'cursor-move' | 'mouse-down' | 'mouse-up' | 'hover-preview' | 'keypress' | 'keydown' | 'keyup' | 'scroll' | 'download' | 'clipboard-set';
   timestamp: number;
   sequence: number;
   status: 'preview' | 'committed';
@@ -92,6 +92,7 @@ export interface RecordingEvent {
     deltaY?: number; // scroll delta Y
     downloadWrap?: boolean; // click triggers a download
     autoDetected?: boolean; // download was auto-detected (not pre-flagged)
+    text?: string; // clipboard text for clipboard-set events
   };
 }
 
@@ -448,6 +449,11 @@ export class PlaywrightRecorder extends EventEmitter {
       this.takeScreenshot();
     });
 
+    // Clipboard capture — emits clipboard-set event before paste keypress
+    await this.page.exposeFunction('__recordClipboardSet', (text: string) => {
+      this.addEvent('clipboard-set', { text });
+    });
+
     // Keypress tracking for keyboard interactions
     await this.page.exposeFunction('__recordKeypress', (key: string, modifiers?: KeyboardModifier[], keyCode?: string) => {
       this.addEvent('keypress', { key, modifiers: modifiers && modifiers.length > 0 ? modifiers : undefined, keyCode: keyCode || undefined });
@@ -565,6 +571,16 @@ export class PlaywrightRecorder extends EventEmitter {
           }
           // Repeat keydowns for space are intentionally ignored
         } else {
+          // Detect paste (Ctrl+V / Meta+V) and capture clipboard content before recording keypress
+          if ((e.key === 'v' || e.key === 'V') && (e.ctrlKey || e.metaKey)) {
+            navigator.clipboard.readText().then((text: string) => {
+              if (text) {
+                // @ts-expect-error
+                window.__recordClipboardSet?.(text);
+              }
+            }).catch(() => {});
+          }
+
           // Record non-modifier keypresses (skip if inside input/textarea to avoid duplicate recording with fill)
           const target = e.target as HTMLElement;
           const isEditable = target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable;
@@ -1308,6 +1324,9 @@ export class PlaywrightRecorder extends EventEmitter {
       if (event.type === 'download' || event.data.downloadWrap) {
         caps.downloads = true;
       }
+      if (event.type === 'clipboard-set') {
+        caps.clipboard = true;
+      }
     }
 
     // Clipboard: detected if clipboard access was enabled during recording
@@ -1689,6 +1708,10 @@ export class PlaywrightRecorder extends EventEmitter {
           insideDownloadMouseWrap = false;
         }
         lastEmittedEventType = 'mouse-up';
+      } else if (event.type === 'clipboard-set' && event.data.text) {
+        const escapedText = JSON.stringify(event.data.text);
+        lines.push(`  await clipboard.copy(${escapedText});`);
+        lastEmittedEventType = 'clipboard-set';
       } else if (event.type === 'keypress' && event.data.key) {
         const { key, modifiers, keyCode } = event.data;
         // When Shift is a modifier and e.key is a single char, e.key is the shifted result

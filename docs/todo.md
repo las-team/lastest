@@ -8,6 +8,7 @@ Network Interception
 ## features
 Migrate to gh app /home/ewyct/.claude/plans/cheeky-sparking-torvalds.md
 Stripe
+Stability, excalidraw tests
 ## ideas
 Test coverage assessment and recreation based on existing test set
 cookie sharing from host machine?
@@ -30,11 +31,6 @@ other users can see build page w url
 ## marketing
 ## Excalidraw
 ### Tests missing:
-Export as PNG/SVG
-Insert Image  
-Library Add/Use 
-Paste CSV as Chart 
-
 B.5) Valamit ki kell majd találni, hogy a user feltölthessen asseteket, amiket böngészni tud file opennel. Very low prio MVP-re, csak megemlítem.
 B.6) A remote browseres implementációban a kétujjas canvas panning somewhat hiányzik.
 most veszek fel teszteket az elkövetkező napokban, kérlek ezeket őrizd meg, hogy ne kelljen újragyártani őket.

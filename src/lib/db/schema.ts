@@ -1446,3 +1446,24 @@ export const githubIssues = sqliteTable('github_issues', {
 
 export type GithubIssue = typeof githubIssues.$inferSelect;
 export type NewGithubIssue = typeof githubIssues.$inferInsert;
+
+// ============================================
+// Test Fixtures (files used during test execution)
+// ============================================
+
+export const testFixtures = sqliteTable('test_fixtures', {
+  id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+  repositoryId: text('repository_id').references(() => repositories.id, { onDelete: 'cascade' }).notNull(),
+  testId: text('test_id').references(() => tests.id, { onDelete: 'cascade' }).notNull(),
+  filename: text('filename').notNull(),
+  storagePath: text('storage_path').notNull(), // relative path under storage/fixtures/
+  mimeType: text('mime_type'),
+  sizeBytes: integer('size_bytes'),
+  createdAt: integer('created_at', { mode: 'timestamp' }).$defaultFn(() => new Date()),
+}, (table) => ([
+  index('idx_test_fixtures_test').on(table.testId),
+  index('idx_test_fixtures_repo').on(table.repositoryId),
+]));
+
+export type TestFixture = typeof testFixtures.$inferSelect;
+export type NewTestFixture = typeof testFixtures.$inferInsert;

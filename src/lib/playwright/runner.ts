@@ -7,7 +7,7 @@ import crypto from 'crypto';
 import AxeBuilder from '@axe-core/playwright';
 import { DEFAULT_SELECTOR_PRIORITY, DEFAULT_STABILIZATION_SETTINGS } from '@/lib/db/schema';
 import type { A11yViolation, StabilizationSettings, StabilityMetadata } from '@/lib/db/schema';
-import { getSelectorStats, recordSelectorSuccess, recordSelectorFailure, getDefaultSetupSteps } from '@/lib/db/queries';
+import { getSelectorStats, recordSelectorSuccess, recordSelectorFailure, getDefaultSetupSteps, getTestFixtures } from '@/lib/db/queries';
 import { setupFreezeScripts, setupThirdPartyBlocking, applyStabilization } from './stabilization';
 import { captureWithBurst } from './burst-capture';
 import { applyDynamicMasking } from './dynamic-masking';
@@ -1893,9 +1893,21 @@ export class PlaywrightRunner extends EventEmitter {
         }
       };
 
+      // Load test fixtures from DB — map filename → absolute storage path
+      const fixturesMap: Record<string, string> = {};
+      if (test.id) {
+        const fixtureRecords = await getTestFixtures(test.id);
+        for (const fixture of fixtureRecords) {
+          const absPath = path.join(STORAGE_DIRS.fixtures, fixture.storagePath.replace(/^\/fixtures\//, ''));
+          if (fs.existsSync(absPath)) {
+            fixturesMap[fixture.filename] = absPath;
+          }
+        }
+      }
+
       const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
-      const testFn = new AsyncFunction('page', 'baseUrl', 'screenshotPath', 'stepLogger', 'expect', 'appState', 'locateWithFallback', 'fileUpload', 'clipboard', 'downloads', 'network', 'replayCursorPath', body);
-      await testFn(page, baseUrl, screenshotPath, stepLogger, expectFn, appStateFn, statsLocateWithFallback, fileUploadHelper, clipboardHelper, downloadsHelper, networkHelper, replayCursorPathFn);
+      const testFn = new AsyncFunction('page', 'baseUrl', 'screenshotPath', 'stepLogger', 'expect', 'appState', 'locateWithFallback', 'fileUpload', 'clipboard', 'downloads', 'network', 'replayCursorPath', 'fixtures', body);
+      await testFn(page, baseUrl, screenshotPath, stepLogger, expectFn, appStateFn, statsLocateWithFallback, fileUploadHelper, clipboardHelper, downloadsHelper, networkHelper, replayCursorPathFn, fixturesMap);
       return softErrors;
     }
 

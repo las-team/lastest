@@ -131,6 +131,11 @@ async function startup(): Promise<void> {
   await inputHandler.attach(page);
   streamServer.setInputHandler(inputHandler);
 
+  // 4b. Notify clients when a file chooser dialog opens
+  page.on('filechooser', () => {
+    streamServer?.broadcastStatus('connected', page?.url(), undefined, true);
+  });
+
   // 5. Connect as runner
   runnerClient = new EmbeddedRunnerClient({
     serverUrl: config.serverUrl,

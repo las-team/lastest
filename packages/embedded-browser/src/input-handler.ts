@@ -6,6 +6,9 @@
  */
 
 import type { CDPSession, Page } from 'playwright';
+import * as fs from 'fs';
+import * as path from 'path';
+import * as os from 'os';
 
 export interface MouseEvent {
   type: 'mouse';
@@ -27,7 +30,17 @@ export interface KeyboardEvent {
   modifiers?: { ctrl?: boolean; shift?: boolean; alt?: boolean; meta?: boolean };
 }
 
-export type InputEvent = MouseEvent | KeyboardEvent;
+export interface FileUploadEvent {
+  type: 'file_upload';
+  files: Array<{ name: string; data: string; mimeType: string }>; // base64 data
+}
+
+export interface ClipboardPasteEvent {
+  type: 'clipboard_paste';
+  text: string;
+}
+
+export type InputEvent = MouseEvent | KeyboardEvent | FileUploadEvent | ClipboardPasteEvent;
 
 const BUTTON_MAP: Record<string, 'left' | 'right' | 'middle'> = {
   left: 'left',
@@ -78,6 +91,10 @@ export class InputHandler {
         await this.handleMouse(event);
       } else if (event.type === 'keyboard') {
         await this.handleKeyboard(event);
+      } else if (event.type === 'file_upload') {
+        await this.handleFileUpload(event);
+      } else if (event.type === 'clipboard_paste') {
+        await this.handleClipboardPaste(event);
       }
     } catch (error) {
       console.error('[InputHandler] Error dispatching event:', error);
@@ -193,5 +210,40 @@ export class InputHandler {
         }
         break;
     }
+  }
+
+  private async handleFileUpload(event: FileUploadEvent): Promise<void> {
+    if (!this.page) return;
+
+    const tmpDir = path.join(os.tmpdir(), `lastest-stream-upload-${Date.now()}`);
+    fs.mkdirSync(tmpDir, { recursive: true });
+    const filePaths: string[] = [];
+
+    for (const file of event.files) {
+      const safeName = path.basename(file.name).replace(/\.\./g, '_');
+      const filePath = path.join(tmpDir, safeName);
+      fs.writeFileSync(filePath, Buffer.from(file.data, 'base64'));
+      filePaths.push(filePath);
+    }
+
+    try {
+      await this.page.locator('input[type="file"]').setInputFiles(filePaths);
+    } catch {
+      // If no file input visible, the filechooser event handler should pick it up
+      console.warn('[InputHandler] No file input found for upload, files written to:', tmpDir);
+    }
+
+    // Clean up temp files after a delay
+    setTimeout(() => {
+      try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch { /* ignore */ }
+    }, 30000);
+  }
+
+  private async handleClipboardPaste(event: ClipboardPasteEvent): Promise<void> {
+    if (!this.page) return;
+
+    // Write text to the page's clipboard, then simulate Ctrl+V
+    await this.page.evaluate((text) => navigator.clipboard.writeText(text), event.text);
+    await this.page.keyboard.press('Control+V');
   }
 }

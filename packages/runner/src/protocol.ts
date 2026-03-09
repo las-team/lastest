@@ -57,6 +57,9 @@ export interface RunTestCommandPayload {
   setupVariables?: Record<string, unknown>; // Variables from setup scripts
   cursorPlaybackSpeed?: number; // 0 = instant (skip delays), 1 = realtime
   stabilization?: StabilizationPayload;
+  fixtures?: Array<{ filename: string; data: string }>; // base64-encoded fixture files
+  grantClipboardAccess?: boolean;
+  acceptDownloads?: boolean;
 }
 
 export interface RunTestCommand extends BaseMessage {

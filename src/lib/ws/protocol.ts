@@ -79,6 +79,9 @@ export interface RunTestCommandPayload {
   cursorPlaybackSpeed?: number; // 0 = instant (skip delays), 1 = realtime
   stabilization?: StabilizationPayload;
   browser?: 'chromium' | 'firefox' | 'webkit';
+  fixtures?: Array<{ filename: string; data: string }>; // base64-encoded fixture files
+  grantClipboardAccess?: boolean;
+  acceptDownloads?: boolean;
 }
 
 export interface RunTestCommand extends BaseMessage {
@@ -448,7 +451,7 @@ export interface ScreencastFrameMessage extends BaseMessage {
 /** Client → Server: Mouse/keyboard input forwarding */
 export interface StreamInputMessage extends BaseMessage {
   type: 'stream:input';
-  payload: StreamMouseEvent | StreamKeyboardEvent;
+  payload: StreamMouseEvent | StreamKeyboardEvent | StreamFileUploadEvent | StreamClipboardEvent;
 }
 
 export interface StreamMouseEvent {
@@ -471,6 +474,16 @@ export interface StreamKeyboardEvent {
   modifiers?: { ctrl?: boolean; shift?: boolean; alt?: boolean; meta?: boolean };
 }
 
+export interface StreamFileUploadEvent {
+  type: 'file_upload';
+  files: Array<{ name: string; data: string; mimeType: string }>; // base64 data
+}
+
+export interface StreamClipboardEvent {
+  type: 'clipboard_paste';
+  text: string;
+}
+
 /** Client → Server / Server → Client: Session lifecycle control */
 export interface StreamSessionMessage extends BaseMessage {
   type: 'stream:session';
@@ -488,6 +501,7 @@ export interface StreamStatusMessage extends BaseMessage {
     currentUrl?: string;
     viewport?: { width: number; height: number };
     error?: string;
+    fileChooserPending?: boolean;
   };
 }
 

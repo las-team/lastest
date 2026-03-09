@@ -33,6 +33,7 @@ import {
   getUnacknowledgedResults,
   acknowledgeResults,
   getRunnerCommandById,
+  getTestFixtures,
 } from '@/lib/db/queries';
 
 /**
@@ -402,6 +403,19 @@ async function executeViaRunner(
         continue;
       }
 
+      // Load test fixtures from DB and base64 encode for remote transfer
+      const testFixtureRecords = await getTestFixtures(test.id);
+      const fixturePayloads: Array<{ filename: string; data: string }> = [];
+      for (const fixture of testFixtureRecords) {
+        try {
+          const absPath = path.join(STORAGE_DIRS.fixtures, fixture.storagePath.replace(/^\/fixtures\//, ''));
+          const fileData = await fs.readFile(absPath);
+          fixturePayloads.push({ filename: fixture.filename, data: fileData.toString('base64') });
+        } catch (err) {
+          console.warn(`[Executor] Failed to read fixture ${fixture.filename}: ${err}`);
+        }
+      }
+
       // Create run_test command with code hash for integrity verification
       const command = createMessage<RunTestCommand>('command:run_test', {
         testId: test.id,
@@ -418,6 +432,9 @@ async function executeViaRunner(
         cursorPlaybackSpeed: options.playwrightSettings?.cursorPlaybackSpeed ?? 1,
         stabilization: buildStabilizationPayload(options.playwrightSettings, test.stabilizationOverrides),
         browser: (options.playwrightSettings?.browser as 'chromium' | 'firefox' | 'webkit') || undefined,
+        fixtures: fixturePayloads,
+        grantClipboardAccess: options.playwrightSettings?.grantClipboardAccess ?? false,
+        acceptDownloads: options.playwrightSettings?.acceptDownloads ?? false,
       });
 
       // Queue command to DB
