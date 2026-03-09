@@ -337,7 +337,14 @@ async function executeViaRunner(
     console.log(`[Executor] Remote setup complete, storageState: ${setupResult.storageState ? 'yes' : 'no'}`);
   }
 
-  const maxParallel = options.maxParallelTests ?? 1;
+  // Load runner's maxParallelTests from DB if not provided in options
+  let maxParallel = options.maxParallelTests ?? 1;
+  if (!options.maxParallelTests) {
+    const runnerRecord = await db.select({ maxParallelTests: runners.maxParallelTests }).from(runners).where(eq(runners.id, runnerId)).get();
+    if (runnerRecord?.maxParallelTests) {
+      maxParallel = runnerRecord.maxParallelTests;
+    }
+  }
   const pending = [...tests];
   // Track in-flight tests: commandId → { testId, testName, startTime }
   const inFlight = new Map<string, { testId: string; testName: string; startTime: number; completedSeenAt?: number }>();

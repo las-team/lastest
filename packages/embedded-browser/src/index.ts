@@ -28,7 +28,7 @@ const config = {
   viewportWidth: parseInt(process.env.VIEWPORT_WIDTH ?? '1280', 10),
   viewportHeight: parseInt(process.env.VIEWPORT_HEIGHT ?? '720', 10),
   streamAuthToken: process.env.STREAM_AUTH_TOKEN,
-  instanceId: os.hostname(),
+  instanceId: process.env.INSTANCE_ID || os.hostname(),
 };
 
 if (!config.token && !config.systemToken) {
