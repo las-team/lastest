@@ -56,6 +56,7 @@ export async function POST(request: NextRequest) {
             headCommit: sanitizeStr(data.pull_request.head.sha, 40),
             title: sanitizeStr(data.pull_request.title, 300),
             status: sanitizeStr(data.pull_request.state, 20),
+            author: sanitizeStr(data.pull_request.user?.login, 100),
           });
         } else {
           await queries.createPullRequest({
@@ -67,6 +68,7 @@ export async function POST(request: NextRequest) {
             headCommit: sanitizeStr(data.pull_request.head.sha, 40),
             title: sanitizeStr(data.pull_request.title, 300),
             status: sanitizeStr(data.pull_request.state, 20),
+            author: sanitizeStr(data.pull_request.user?.login, 100),
           });
         }
 
@@ -82,6 +84,7 @@ export async function POST(request: NextRequest) {
         if (existingPR) {
           await queries.updatePullRequest(existingPR.id, {
             status: data.pull_request.merged ? 'merged' : 'closed',
+            ...(data.pull_request.merged ? { mergedAt: new Date() } : {}),
           });
         }
 

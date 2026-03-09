@@ -97,18 +97,12 @@ export function BrowserViewer({ streamUrl, initialViewport, className, expiresAt
     const connect = (attempt: number) => {
       let wsUrl = streamUrl;
       if (streamUrl.startsWith('ws://') || streamUrl.startsWith('wss://')) {
-        if (window.location.protocol === 'https:') {
-          // HTTPS page can't connect to ws:// (mixed content) — use proxy path through the app
-          const parsed = new URL(wsUrl);
-          const targetParam = encodeURIComponent(parsed.host); // e.g. "container-id:9223"
-          const existingParams = parsed.search ? '&' + parsed.search.slice(1) : '';
-          wsUrl = `wss://${window.location.host}/api/embedded/stream/ws?target=${targetParam}${existingParams}`;
-        } else {
-          // HTTP — connect directly, replacing hostname for remote access
-          const parsed = new URL(wsUrl);
-          parsed.hostname = window.location.hostname;
-          wsUrl = parsed.toString();
-        }
+        // Always proxy through the app — handles K8s, Docker, and most deployments
+        const parsed = new URL(wsUrl);
+        const targetParam = encodeURIComponent(parsed.host);
+        const existingParams = parsed.search ? '&' + parsed.search.slice(1) : '';
+        const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        wsUrl = `${proto}//${window.location.host}/api/embedded/stream/ws?target=${targetParam}${existingParams}`;
       } else if (streamUrl.startsWith('/')) {
         // Relative path — construct full WebSocket URL from page origin
         const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';

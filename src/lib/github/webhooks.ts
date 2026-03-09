@@ -23,6 +23,7 @@ export interface PullRequestEvent {
     title: string;
     state: string;
     merged?: boolean;
+    user?: { login: string };
     head: {
       ref: string;
       sha: string;

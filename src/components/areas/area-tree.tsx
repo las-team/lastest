@@ -58,6 +58,7 @@ interface AreaTreeProps {
   onMoveTest: (testId: string, areaId: string | null) => void;
   onMoveSuite: (suiteId: string, areaId: string | null) => void;
   onMoveArea: (areaId: string, newParentId: string | null) => void;
+  onDeleteTest?: (id: string) => void;
 }
 
 function StatusIcon({ status }: { status: string | null }) {
@@ -88,6 +89,7 @@ interface AreaNodeProps {
   onMoveTest: (testId: string, areaId: string | null) => void;
   onMoveSuite: (suiteId: string, areaId: string | null) => void;
   onMoveArea: (areaId: string, newParentId: string | null) => void;
+  onDeleteTest?: (id: string) => void;
 }
 
 function computeAreaCoverage(area: FunctionalAreaWithChildren): { total: number; executed: number; rate: number } {
@@ -138,6 +140,7 @@ function AreaNode({
   onMoveTest,
   onMoveSuite,
   onMoveArea,
+  onDeleteTest,
 }: AreaNodeProps) {
   const isExpanded = expandedIds.has(area.id);
   const isSelected = selection?.type === 'area' && selection.id === area.id;
@@ -270,6 +273,7 @@ function AreaNode({
               onMoveTest={onMoveTest}
               onMoveSuite={onMoveSuite}
               onMoveArea={onMoveArea}
+              onDeleteTest={onDeleteTest}
             />
           ))}
           {area.suites.map((suite) => (
@@ -288,6 +292,7 @@ function AreaNode({
               depth={depth + 1}
               selection={selection}
               onSelect={onSelect}
+              onDeleteTest={onDeleteTest}
             />
           ))}
         </div>
@@ -301,9 +306,10 @@ interface TestNodeProps {
   depth: number;
   selection: TreeSelection | null;
   onSelect: (selection: TreeSelection | null) => void;
+  onDeleteTest?: (id: string) => void;
 }
 
-function TestNode({ test, depth, selection, onSelect }: TestNodeProps) {
+function TestNode({ test, depth, selection, onSelect, onDeleteTest }: TestNodeProps) {
   const isSelected = selection?.type === 'test' && selection.id === test.id;
 
   const handleDragStart = (e: React.DragEvent) => {
@@ -314,7 +320,7 @@ function TestNode({ test, depth, selection, onSelect }: TestNodeProps) {
   return (
     <div
       className={cn(
-        'flex items-center gap-2 py-1 px-2 rounded cursor-pointer hover:bg-muted',
+        'group/test flex items-center gap-2 py-1 px-2 rounded cursor-pointer hover:bg-muted',
         isSelected && 'bg-primary/10 hover:bg-primary/15'
       )}
       style={{ paddingLeft: `${depth * 16 + 8}px` }}
@@ -322,13 +328,35 @@ function TestNode({ test, depth, selection, onSelect }: TestNodeProps) {
       draggable
       onDragStart={handleDragStart}
     >
-      <GripVertical className="h-3 w-3 text-muted-foreground opacity-0 group-hover:opacity-100 cursor-grab" />
+      <GripVertical className="h-3 w-3 text-muted-foreground opacity-0 group-hover/test:opacity-100 cursor-grab" />
       <StatusIcon status={test.latestStatus} />
       <FileCode className={cn("h-4 w-4", test.isPlaceholder ? "text-amber-500" : "text-muted-foreground")} />
       <span className="flex-1 truncate text-sm">
         {test.name}
         {test.isPlaceholder && <span className="text-xs text-muted-foreground ml-1">(placeholder)</span>}
       </span>
+      {onDeleteTest && (
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild onClick={(e) => e.stopPropagation()}>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-6 w-6 opacity-0 group-hover/test:opacity-100"
+            >
+              <MoreHorizontal className="h-4 w-4" />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            <DropdownMenuItem
+              onClick={() => onDeleteTest(test.id)}
+              className="text-destructive focus:text-destructive"
+            >
+              <Trash2 className="h-4 w-4 mr-2" />
+              Delete
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      )}
     </div>
   );
 }
@@ -392,6 +420,7 @@ export function AreaTree({
   onMoveTest,
   onMoveSuite,
   onMoveArea,
+  onDeleteTest,
 }: AreaTreeProps) {
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
   const [lastClickedAreaId, setLastClickedAreaId] = useState<string | null>(null);
@@ -500,6 +529,7 @@ export function AreaTree({
               onMoveTest={onMoveTest}
               onMoveSuite={onMoveSuite}
               onMoveArea={onMoveArea}
+              onDeleteTest={onDeleteTest}
             />
           ))}
 
@@ -535,6 +565,7 @@ export function AreaTree({
                 depth={0}
                 selection={selection}
                 onSelect={onSelect}
+                onDeleteTest={onDeleteTest}
               />
             ))}
             {uncategorizedTests.length === 0 && unsortedSuites.length === 0 && (

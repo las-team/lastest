@@ -15,6 +15,7 @@ import {
   Building2,
   Zap,
   ClipboardCheck,
+  TrendingDown,
 } from 'lucide-react';
 import Image from 'next/image';
 import { RepoSelector, SyncReposButton, CreateLocalRepoButton } from './repo-selector';
@@ -47,6 +48,7 @@ const executionNav = [
   { name: 'Compare', href: '/compare', icon: GitCompare },
   { name: 'Suites', href: '/suites', icon: ListOrdered },
   { name: 'Review', href: '/review', icon: ClipboardCheck },
+  { name: 'Impact', href: '/analytics/impact', icon: TrendingDown },
 ];
 
 const settingsNav = [

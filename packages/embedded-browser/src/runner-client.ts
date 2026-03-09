@@ -8,6 +8,18 @@
 
 import os from 'os';
 
+function getContainerIP(): string | null {
+  const interfaces = os.networkInterfaces();
+  for (const name of Object.keys(interfaces)) {
+    for (const iface of interfaces[name] ?? []) {
+      if (iface.family === 'IPv4' && !iface.internal) {
+        return iface.address;
+      }
+    }
+  }
+  return null;
+}
+
 // Re-define minimal protocol types to avoid cross-package imports
 interface BaseMessage {
   id: string;
@@ -91,7 +103,7 @@ export class EmbeddedRunnerClient {
    */
   async register(): Promise<boolean> {
     try {
-      const hostname = this.streamHost || os.hostname();
+      const hostname = this.streamHost || getContainerIP() || os.hostname();
       const streamUrl = `ws://${hostname}:${this.streamPort}`;
       const containerUrl = `http://${hostname}:${this.streamPort}`;
 
@@ -170,7 +182,7 @@ export class EmbeddedRunnerClient {
    */
   async registerAsSystem(): Promise<boolean> {
     try {
-      const hostname = this.streamHost || os.hostname();
+      const hostname = this.streamHost || getContainerIP() || os.hostname();
       const streamUrl = `ws://${hostname}:${this.streamPort}`;
       const containerUrl = `http://${hostname}:${this.streamPort}`;
 

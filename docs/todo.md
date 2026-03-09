@@ -35,6 +35,11 @@ Insert Image
 Library Add/Use 
 Paste CSV as Chart 
 
+B.5) Valamit ki kell majd találni, hogy a user feltölthessen asseteket, amiket böngészni tud file opennel. Very low prio MVP-re, csak megemlítem.
+B.6) A remote browseres implementációban a kétujjas canvas panning somewhat hiányzik.
+most veszek fel teszteket az elkövetkező napokban, kérlek ezeket őrizd meg, hogy ne kelljen újragyártani őket.
+B.7) Nem világos hogy hogyan csinálsz multi-step teszteket
+
 ## commands
 ## ourmotto
 Real constraints: if you dont use GH, this tool is not optimized for you - ping is with your stack and we will accommodate it.

@@ -112,6 +112,7 @@ export async function POST(request: Request) {
       capabilities: ['run', 'record'],
       type: 'embedded',
       isSystem: true,
+      maxParallelTests: 6,
       lastSeen: new Date(),
       createdAt: new Date(),
     });
@@ -120,7 +121,7 @@ export async function POST(request: Request) {
     // Update existing runner: refresh token & mark online
     await db
       .update(runners)
-      .set({ tokenHash, status: 'online', lastSeen: new Date() })
+      .set({ tokenHash, status: 'online', lastSeen: new Date(), maxParallelTests: 6 })
       .where(eq(runners.id, runner.id));
     runner = await db.select().from(runners).where(eq(runners.id, runner.id)).get();
   }
