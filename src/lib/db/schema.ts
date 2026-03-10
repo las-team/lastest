@@ -893,6 +893,7 @@ export const users = sqliteTable('users', {
   avatarUrl: text('avatar_url'),
   teamId: text('team_id').references(() => teams.id), // Single team membership
   role: text('role').notNull().default('member'), // 'owner' | 'admin' | 'member' | 'viewer'
+  selectedRepositoryId: text('selected_repository_id'),
   emailVerified: integer('email_verified', { mode: 'boolean' }).default(false),
   createdAt: integer('created_at', { mode: 'timestamp' }),
   updatedAt: integer('updated_at', { mode: 'timestamp' }),

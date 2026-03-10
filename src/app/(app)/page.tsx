@@ -14,7 +14,8 @@ import Link from 'next/link';
 export default async function DashboardPage() {
   const session = await getCurrentSession();
   const teamId = session?.team?.id;
-  const selectedRepo = teamId ? await getSelectedRepository(teamId) : null;
+  const userId = session?.user?.id;
+  const selectedRepo = teamId ? await getSelectedRepository(userId, teamId) : null;
   // Fetch data filtered by selected repo — no global fallbacks
   const [tests, areas, recentBuilds] = await Promise.all([
     selectedRepo ? getTestsByRepo(selectedRepo.id) : Promise.resolve([]),

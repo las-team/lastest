@@ -18,8 +18,9 @@ export default async function TestDetailPage({ params }: TestDetailPageProps) {
 
   const session = await getCurrentSession();
   const teamId = session?.team?.id;
+  const userId = session?.user?.id;
   const results = await getTestResultsByTest(id);
-  const selectedRepo = teamId ? await getSelectedRepository(teamId) : null;
+  const selectedRepo = teamId ? await getSelectedRepository(userId, teamId) : null;
   const repoId = test.repositoryId || selectedRepo?.id;
   const screenshotGroups = await getTestScreenshotsGrouped(id, repoId);
   const plannedScreenshots = await getPlannedScreenshotsByTest(id);

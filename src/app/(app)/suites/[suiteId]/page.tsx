@@ -33,7 +33,8 @@ export default async function SuiteDetailPage({ params }: Props) {
 
   const session = await getCurrentSession();
   const teamId = session?.team?.id;
-  const selectedRepo = teamId ? await getSelectedRepository(teamId) : null;
+  const userId = session?.user?.id;
+  const selectedRepo = teamId ? await getSelectedRepository(userId, teamId) : null;
   const repositoryId = suite.repositoryId || selectedRepo?.id;
 
   const [testsRaw, areas] = await Promise.all([

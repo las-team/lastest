@@ -9,7 +9,8 @@ import { getDefaultTeardownSteps } from '@/server/actions/teardown-steps';
 export default async function EnvPage() {
   const session = await getCurrentSession();
   const teamId = session?.team?.id;
-  const selectedRepo = teamId ? await queries.getSelectedRepository(teamId) : null;
+  const userId = session?.user?.id;
+  const selectedRepo = teamId ? await queries.getSelectedRepository(userId, teamId) : null;
 
   if (!selectedRepo) {
     return (

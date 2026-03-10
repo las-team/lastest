@@ -6,7 +6,8 @@ import { fetchRepoBranches } from '@/server/actions/repos';
 export default async function ComparePage() {
   const session = await getCurrentSession();
   const teamId = session?.team?.id;
-  const selectedRepo = teamId ? await getSelectedRepository(teamId) : null;
+  const userId = session?.user?.id;
+  const selectedRepo = teamId ? await getSelectedRepository(userId, teamId) : null;
 
   let branches: string[] = [];
   let runs: Awaited<ReturnType<typeof getTestRunsByRepo>> = [];

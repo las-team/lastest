@@ -12,7 +12,8 @@ import { getCurrentSession } from '@/lib/auth';
 export default async function TestsPage() {
   const session = await getCurrentSession();
   const teamId = session?.team?.id;
-  const selectedRepo = teamId ? await getSelectedRepository(teamId) : null;
+  const userId = session?.user?.id;
+  const selectedRepo = teamId ? await getSelectedRepository(userId, teamId) : null;
 
   const [areas, tests, envConfig, routes, deletedTests] = await Promise.all([
     selectedRepo ? getFunctionalAreasByRepo(selectedRepo.id) : Promise.resolve([]),

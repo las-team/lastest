@@ -46,10 +46,11 @@ export default async function SettingsPage({
   const session = await getCurrentSession();
   const currentUser = session?.user ?? null;
   const teamId = session?.team?.id;
+  const userId = session?.user?.id;
   const [githubAccount, gitlabAccount, selectedRepo] = await Promise.all([
     teamId ? queries.getGithubAccountByTeam(teamId) : null,
     teamId ? queries.getGitlabAccountByTeam(teamId) : null,
-    teamId ? queries.getSelectedRepository(teamId) : null,
+    teamId ? queries.getSelectedRepository(userId, teamId) : null,
   ]);
   const [githubActionConfigs, teamRepos, runners, sysRunners] = await Promise.all([
     teamId ? queries.getGithubActionConfigs(teamId) : [],

@@ -12,7 +12,7 @@
     ]
   },
   "scripts": {
-    "dev": "next dev -p 3000",
+    "dev": "NODE_OPTIONS='--require ./scripts/ws-proxy-preload.js' next dev -p 3000",
     "build": "next build",
     "start": "next start",
     "lint": "eslint",

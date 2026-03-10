@@ -10,9 +10,10 @@ export async function SidebarServer() {
   }
 
   const teamId = session.team?.id;
+  const userId = session.user?.id;
 
   const [selectedRepo, repos] = await Promise.all([
-    teamId ? getSelectedRepository(teamId) : Promise.resolve(null),
+    teamId ? getSelectedRepository(userId, teamId) : Promise.resolve(null),
     teamId ? getRepositoriesByTeam(teamId) : Promise.resolve([]),
   ]);
 
