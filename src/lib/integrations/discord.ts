@@ -145,7 +145,8 @@ export async function sendDiscordBugReport(
         new Blob([new Uint8Array(notification.screenshotBuffer)], { type: 'image/png' }),
         'screenshot.png',
       );
-      response = await fetch(webhookUrl, {
+      const url = webhookUrl.includes('?') ? `${webhookUrl}&wait=true` : `${webhookUrl}?wait=true`;
+      response = await fetch(url, {
         method: 'POST',
         body: formData,
       });
@@ -162,10 +163,12 @@ export async function sendDiscordBugReport(
 
     if (!response.ok) {
       const text = await response.text();
+      console.error('[BugReport] Discord webhook error:', response.status, text);
       return { success: false, error: `Discord webhook failed: ${response.status} ${text}` };
     }
     return { success: true };
   } catch (error) {
+    console.error('[BugReport] Discord send error:', error);
     return {
       success: false,
       error: error instanceof Error ? error.message : 'Unknown error sending Discord bug report',

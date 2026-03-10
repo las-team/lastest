@@ -350,6 +350,10 @@ export async function getAISettings(repositoryId?: string | null) {
     aiDiffingOllamaModel: DEFAULT_AI_SETTINGS.aiDiffingOllamaModel,
     ollamaBaseUrl: DEFAULT_AI_SETTINGS.ollamaBaseUrl,
     ollamaModel: DEFAULT_AI_SETTINGS.ollamaModel,
+    anthropicApiKey: null,
+    anthropicModel: DEFAULT_AI_SETTINGS.anthropicModel,
+    openaiApiKey: null,
+    openaiModel: DEFAULT_AI_SETTINGS.openaiModel,
     createdAt: null,
     updatedAt: null,
   };

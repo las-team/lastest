@@ -34,7 +34,7 @@ const dashboardNav = [
   { name: 'Dashboard', href: '/', icon: LayoutDashboard },
 ];
 
-const EARLY_ADOPTER_ITEMS = new Set(['Compose', 'Suites', 'Compare']);
+const EARLY_ADOPTER_ITEMS = new Set(['Compose', 'Suites', 'Compare', 'Impact']);
 
 const definitionNav = [
   { name: 'Areas', href: '/areas', icon: FolderTree },

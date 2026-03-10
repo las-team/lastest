@@ -642,7 +642,7 @@ export const diffSensitivitySettings = sqliteTable('diff_sensitivity_settings', 
   textRegionThreshold: integer('text_region_threshold').default(30), // percentage, stored as 30 = 0.3
   textRegionPadding: integer('text_region_padding').default(4), // pixels to expand text bounding boxes
   textDetectionGranularity: text('text_detection_granularity').default('word'), // 'word' | 'line' | 'block'
-  regionDetectionMode: text('region_detection_mode').default('grid'), // 'grid' | 'flood-fill'
+  regionDetectionMode: text('region_detection_mode').default('flood-fill'), // 'grid' | 'flood-fill'
   createdAt: integer('created_at', { mode: 'timestamp' }),
   updatedAt: integer('updated_at', { mode: 'timestamp' }),
 });
@@ -661,7 +661,7 @@ export const DEFAULT_DIFF_THRESHOLDS = {
   textRegionThreshold: 30,
   textRegionPadding: 4,
   textDetectionGranularity: 'word' as TextDetectionGranularity,
-  regionDetectionMode: 'grid' as RegionDetectionMode,
+  regionDetectionMode: 'flood-fill' as RegionDetectionMode,
 };
 
 // Diff classification type
@@ -673,7 +673,7 @@ export type DiffStatus = 'pending' | 'approved' | 'rejected' | 'auto_approved' |
 export type TriggerType = 'webhook' | 'manual' | 'push';
 
 // AI Provider settings for test generation
-export type AIProvider = 'claude-cli' | 'openrouter' | 'claude-agent-sdk' | 'ollama';
+export type AIProvider = 'claude-cli' | 'openrouter' | 'claude-agent-sdk' | 'ollama' | 'openai' | 'anthropic';
 export type AgentSdkPermissionMode = 'plan' | 'default' | 'acceptEdits';
 
 export const aiSettings = sqliteTable('ai_settings', {
@@ -687,6 +687,10 @@ export const aiSettings = sqliteTable('ai_settings', {
   agentSdkWorkingDir: text('agent_sdk_working_dir'),
   ollamaBaseUrl: text('ollama_base_url'),
   ollamaModel: text('ollama_model'),
+  anthropicApiKey: text('anthropic_api_key'),
+  anthropicModel: text('anthropic_model').default('claude-sonnet-4-5-20250929'),
+  openaiApiKey: text('openai_api_key'),
+  openaiModel: text('openai_model').default('gpt-4o'),
   customInstructions: text('custom_instructions'),
   // AI Diffing settings (separate from test generation)
   aiDiffingEnabled: integer('ai_diffing_enabled', { mode: 'boolean' }).default(false),
@@ -709,6 +713,8 @@ export const DEFAULT_AI_SETTINGS = {
   agentSdkModel: '',
   ollamaBaseUrl: 'http://localhost:11434',
   ollamaModel: '',
+  anthropicModel: 'claude-sonnet-4-5-20250929',
+  openaiModel: 'gpt-4o',
   aiDiffingEnabled: false,
   aiDiffingProvider: 'same-as-test-gen' as AIDiffingProvider,
   aiDiffingModel: 'anthropic/claude-sonnet-4-5-20250929',
