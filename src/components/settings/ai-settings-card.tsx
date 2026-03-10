@@ -282,18 +282,27 @@ export function AISettingsCard({ settings, repositoryId }: AISettingsCardProps) 
 
             <div className="space-y-2">
               <Label>Model</Label>
-              <Select value={openrouterModel} onValueChange={setOpenrouterModel}>
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {OPENROUTER_MODELS.map((model) => (
-                    <SelectItem key={model.value} value={model.value}>
-                      {model.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <Input
+                value={openrouterModel}
+                onChange={(e) => setOpenrouterModel(e.target.value)}
+                placeholder="e.g. anthropic/claude-sonnet-4"
+              />
+              <div className="flex flex-wrap gap-1.5">
+                {OPENROUTER_MODELS.map((model) => (
+                  <button
+                    key={model.value}
+                    type="button"
+                    onClick={() => setOpenrouterModel(model.value)}
+                    className={`rounded-md border px-2 py-0.5 text-xs transition-colors ${
+                      openrouterModel === model.value
+                        ? 'border-primary bg-primary/10 text-primary'
+                        : 'border-border text-muted-foreground hover:border-primary/50 hover:text-foreground'
+                    }`}
+                  >
+                    {model.label}
+                  </button>
+                ))}
+              </div>
             </div>
           </>
         )}
