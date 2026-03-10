@@ -40,7 +40,6 @@ export async function submitBugReport(data: {
   }
 
   // Save screenshot if provided
-  console.log('[BugReport] screenshotBase64 present:', !!data.screenshotBase64, 'length:', data.screenshotBase64?.length ?? 0);
   let screenshotPath: string | null = null;
   const reportId = crypto.randomUUID();
   if (data.screenshotBase64) {

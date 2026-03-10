@@ -36,6 +36,7 @@ import { EarlyAdopterToggle } from '@/components/settings/early-adopter-toggle';
 import { BanAiModeToggle } from '@/components/settings/ban-ai-mode-toggle';
 import { ConnectGithubButton, ReconnectGithubLink } from '@/components/settings/connect-github-button';
 import { GithubActionsCard } from '@/components/settings/github-actions-card-client';
+import { DiagramThumbnail } from '@/components/ui/diagram-thumbnail';
 
 export default async function SettingsPage({
   searchParams,
@@ -428,6 +429,12 @@ export default async function SettingsPage({
                       Setup Guide
                     </summary>
                     <div className="bg-muted/50 border rounded-md p-4 mt-2 space-y-3 text-xs text-muted-foreground">
+                      <DiagramThumbnail
+                        src="/docs/runner-logic.png"
+                        alt="Remote Runners Architecture Diagram"
+                        width={140}
+                        height={90}
+                      />
                       <div>
                         <p className="font-medium mb-1">1. Install Playwright browser:</p>
                         <pre className="bg-muted p-2 rounded text-xs font-mono">npx playwright install chromium</pre>

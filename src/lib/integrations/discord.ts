@@ -141,7 +141,6 @@ export async function sendDiscordBugReport(
       const buf = Buffer.isBuffer(notification.screenshotBuffer)
         ? notification.screenshotBuffer
         : Buffer.from(notification.screenshotBuffer);
-      console.log('[BugReport] Screenshot buffer size:', buf.length, 'bytes');
       const file = new File([buf], 'screenshot.png', { type: 'image/png' });
       const formData = new FormData();
       formData.append('payload_json', payload);
@@ -162,9 +161,8 @@ export async function sendDiscordBugReport(
       });
     }
 
-    const text = await response.text();
-    console.log('[BugReport] Discord response:', response.status, text.slice(0, 500));
     if (!response.ok) {
+      const text = await response.text();
       console.error('[BugReport] Discord webhook error:', response.status, text);
       return { success: false, error: `Discord webhook failed: ${response.status} ${text}` };
     }

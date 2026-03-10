@@ -116,7 +116,10 @@
       "Bash(git:*)",
       "Bash(docker ps:*)",
       "Bash(gh pr:*)",
-      "WebFetch(domain:fsl.software)"
+      "WebFetch(domain:fsl.software)",
+      "Bash(cd /home/ewyct/.claude/skills/excalidraw-diagram/references && uv run python render_excalidraw.py /home/ewyct/dev/lastest2/docs/development-flow.excalidraw)",
+      "Bash(pnpm list:*)",
+      "Bash(pnpm remove:*)"
     ]
   },
   "disabledMcpjsonServers": [
