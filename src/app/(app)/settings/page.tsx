@@ -427,15 +427,37 @@ export default async function SettingsPage({
                       <Terminal className="w-4 h-4" />
                       Setup Guide
                     </summary>
-                    <div className="bg-muted/50 border rounded-md p-4 mt-2 space-y-2 text-xs text-muted-foreground">
-                      <p>1. Install Playwright browser:</p>
-                      <pre className="bg-muted p-2 rounded text-xs font-mono">npx playwright install chromium</pre>
-                      <p>2. Start the runner:</p>
-                      <pre className="bg-muted p-2 rounded text-xs font-mono">npx @lastest/runner start -t YOUR_TOKEN -s {serverUrl}</pre>
-                      <p>3. For Docker / foreground mode:</p>
-                      <pre className="bg-muted p-2 rounded text-xs font-mono">npx @lastest/runner run -t YOUR_TOKEN -s {serverUrl}</pre>
+                    <div className="bg-muted/50 border rounded-md p-4 mt-2 space-y-3 text-xs text-muted-foreground">
+                      <div>
+                        <p className="font-medium mb-1">1. Install Playwright browser:</p>
+                        <pre className="bg-muted p-2 rounded text-xs font-mono">npx playwright install chromium</pre>
+                      </div>
+                      <div>
+                        <p className="font-medium mb-1">2. Start as background daemon:</p>
+                        <pre className="bg-muted p-2 rounded text-xs font-mono">npx @lastest/runner start -t YOUR_TOKEN -s {serverUrl}</pre>
+                        <p className="text-[11px] mt-1 opacity-75">Logs: ~/.lastest2/runner.log · Config saved for subsequent runs</p>
+                      </div>
+                      <div>
+                        <p className="font-medium mb-1">3. Or run in foreground (Docker / CI):</p>
+                        <pre className="bg-muted p-2 rounded text-xs font-mono">npx @lastest/runner run -t YOUR_TOKEN -s {serverUrl}</pre>
+                      </div>
+                      <div>
+                        <p className="font-medium mb-1">Manage daemon:</p>
+                        <pre className="bg-muted p-2 rounded text-xs font-mono space-y-0.5">{`npx @lastest/runner stop      # Stop background runner
+npx @lastest/runner status    # Check if running
+npx @lastest/runner log -f    # Follow logs in real-time`}</pre>
+                      </div>
+                      <div>
+                        <p className="font-medium mb-1">Trigger builds from CI:</p>
+                        <pre className="bg-muted p-2 rounded text-xs font-mono">{`npx @lastest/runner trigger -t YOUR_TOKEN -s ${serverUrl} --branch main`}</pre>
+                        <p className="text-[11px] mt-1 opacity-75">Options: <code className="bg-muted px-1 py-0.5 rounded">--timeout</code> ms, <code className="bg-muted px-1 py-0.5 rounded">--commit</code> SHA, <code className="bg-muted px-1 py-0.5 rounded">--target-url</code> override, <code className="bg-muted px-1 py-0.5 rounded">--fail-on-changes</code></p>
+                      </div>
+                      <div>
+                        <p className="font-medium mb-1">List available repositories:</p>
+                        <pre className="bg-muted p-2 rounded text-xs font-mono">npx @lastest/runner repos</pre>
+                      </div>
                       <p className="pt-1">
-                        Options: <code className="bg-muted px-1 py-0.5 rounded">--base-url</code> override target URL, <code className="bg-muted px-1 py-0.5 rounded">--interval</code> poll frequency (ms)
+                        Options: <code className="bg-muted px-1 py-0.5 rounded">-b, --base-url</code> override target URL, <code className="bg-muted px-1 py-0.5 rounded">-i, --interval</code> poll frequency (ms, default 5000)
                       </p>
                     </div>
                   </details>

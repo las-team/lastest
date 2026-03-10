@@ -181,6 +181,9 @@ export function CreateRunnerDialog() {
                     <pre className="bg-muted p-3 rounded-md text-xs font-mono whitespace-pre-wrap break-all pr-10">
 {`npx @lastest/runner start \\\n  -t ${token} \\\n  -s ${typeof window !== 'undefined' ? window.location.origin : 'http://localhost:3000'}`}
                     </pre>
+                    <p className="text-[11px] text-muted-foreground mt-1.5 opacity-75">
+                      Config saved after first run. Manage: <code className="bg-muted px-1 py-0.5 rounded">stop</code> · <code className="bg-muted px-1 py-0.5 rounded">status</code> · <code className="bg-muted px-1 py-0.5 rounded">log -f</code> · <code className="bg-muted px-1 py-0.5 rounded">run</code> (foreground)
+                    </p>
                     <Button
                       variant="ghost"
                       size="sm"
