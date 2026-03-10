@@ -8,7 +8,6 @@ const SECTIONS = [
   { id: 'gitlab', label: 'GitLab' },
   { id: 'repository', label: 'Repository' },
   { id: 'features', label: 'Features' },
-  { id: 'database', label: 'Database' },
   { id: 'environment', label: 'Environment' },
   { id: 'google-sheets', label: 'Google Sheets' },
   { id: 'ai-settings', label: 'AI Settings' },

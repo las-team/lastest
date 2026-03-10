@@ -1,7 +1,7 @@
 'use server';
 
 import crypto from 'crypto';
-import { writeFile, mkdir } from 'fs/promises';
+import { writeFile, readFile, mkdir } from 'fs/promises';
 import path from 'path';
 import { STORAGE_DIRS } from '@/lib/storage/paths';
 import * as queries from '@/lib/db/queries';
@@ -73,6 +73,15 @@ export async function submitBugReport(data: {
     } catch {}
   }
 
+  // Read screenshot buffer for Discord attachment
+  let screenshotBuffer: Buffer | null = null;
+  if (screenshotPath) {
+    try {
+      const filePath = path.join(STORAGE_DIRS['bug-reports'], `${reportId}.png`);
+      screenshotBuffer = await readFile(filePath);
+    } catch {}
+  }
+
   // Fire-and-forget forwarding
   forwardBugReport({
     reportId,
@@ -82,6 +91,7 @@ export async function submitBugReport(data: {
     context: data.context,
     contentHash,
     screenshotUrl,
+    screenshotBuffer,
   }).catch(() => {});
 
   return { success: true, reportId };
@@ -95,6 +105,7 @@ async function forwardBugReport(data: {
   context: BugReportContext;
   contentHash: string;
   screenshotUrl: string | null;
+  screenshotBuffer: Buffer | null;
 }) {
   const promises: Promise<void>[] = [];
 
@@ -137,7 +148,7 @@ async function forwardBugReport(data: {
         appVersion: data.context.appVersion,
         gitHash: data.context.gitHash,
         reportId: data.reportId,
-        screenshotUrl: data.screenshotUrl,
+        screenshotBuffer: data.screenshotBuffer,
       }).then(() => {}),
     );
   }

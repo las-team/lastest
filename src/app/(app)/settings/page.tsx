@@ -2,7 +2,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Badge } from '@/components/ui/badge';
 import * as queries from '@/lib/db/queries';
 import { getCurrentSession } from '@/lib/auth';
-import { Github, Check, X, Database, ExternalLink, Users, Bot, Mail, Terminal } from 'lucide-react';
+import { Github, Check, X, Users, Bot, Mail, Terminal } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 
 // GitLab icon SVG component
@@ -289,43 +289,6 @@ export default async function SettingsPage({
             </CardContent>
           </Card>
 
-          {/* Database Info */}
-          <Card id="database">
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <Database className="w-5 h-5" />
-                Database
-              </CardTitle>
-              <CardDescription>
-                SQLite database configuration
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">Location</span>
-                <code className="text-sm">./lastest2.db</code>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">Type</span>
-                <span>SQLite with WAL mode</span>
-              </div>
-              <div className="pt-2 border-t">
-                <Button asChild variant="outline" size="sm">
-                  <a
-                    href="https://local.drizzle.studio"
-                    target="_blank"
-                    rel="noopener noreferrer"
-                  >
-                    <ExternalLink className="w-4 h-4" />
-                    Open Drizzle Studio
-                  </a>
-                </Button>
-                <p className="text-xs text-muted-foreground mt-2">
-                  Run <code className="bg-muted px-1 rounded">pnpm db:studio</code> first
-                </p>
-              </div>
-            </CardContent>
-          </Card>
 
           {/* Environment Config */}
           <div id="environment">

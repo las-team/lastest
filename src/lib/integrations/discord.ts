@@ -97,7 +97,7 @@ export interface DiscordBugReportNotification {
   appVersion: string | null;
   gitHash: string | null;
   reportId: string;
-  screenshotUrl: string | null;
+  screenshotBuffer: Buffer | null;
 }
 
 function getBugSeverityColor(severity: BugReportSeverity): number {
@@ -126,19 +126,39 @@ export async function sendDiscordBugReport(
     timestamp: new Date().toISOString(),
   };
 
-  if (notification.screenshotUrl) {
-    embed.image = { url: notification.screenshotUrl };
+  if (notification.screenshotBuffer) {
+    embed.image = { url: 'attachment://screenshot.png' };
   }
 
   try {
-    const response = await fetch(webhookUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
+    let response: Response;
+
+    if (notification.screenshotBuffer) {
+      const payload = JSON.stringify({
         embeds: [embed],
         allowed_mentions: { parse: [] },
-      }),
-    });
+      });
+      const formData = new FormData();
+      formData.append('payload_json', payload);
+      formData.append(
+        'files[0]',
+        new Blob([new Uint8Array(notification.screenshotBuffer)], { type: 'image/png' }),
+        'screenshot.png',
+      );
+      response = await fetch(webhookUrl, {
+        method: 'POST',
+        body: formData,
+      });
+    } else {
+      response = await fetch(webhookUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          embeds: [embed],
+          allowed_mentions: { parse: [] },
+        }),
+      });
+    }
 
     if (!response.ok) {
       const text = await response.text();
