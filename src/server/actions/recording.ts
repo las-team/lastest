@@ -296,6 +296,20 @@ export async function createAssertion(type: AssertionType, repositoryId?: string
 export async function insertTimestamp(repositoryId?: string | null): Promise<{ success: boolean }> {
   await requireTeamAccess();
 
+  // Check for remote recording session
+  const remoteSession = getRemoteRecordingSession(repositoryId);
+  if (remoteSession?.isRecording) {
+    remoteSession.events.push({
+      type: 'insert-timestamp',
+      timestamp: Date.now(),
+      sequence: remoteSession.events.length + 1,
+      status: 'committed',
+      data: { timestampFormat: 'iso' },
+    });
+    return { success: true };
+  }
+
+  // Local recording
   const recorder = getRecorder(repositoryId);
   const success = recorder.insertTimestamp();
 

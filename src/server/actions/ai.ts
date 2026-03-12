@@ -164,6 +164,7 @@ export async function saveGeneratedTest(data: {
   name: string;
   code: string;
   targetUrl?: string;
+  description?: string;
 }): Promise<{ success: boolean; testId?: string; error?: string }> {
   await requireRepoAccess(data.repositoryId);
   try {
@@ -173,6 +174,7 @@ export async function saveGeneratedTest(data: {
       name: data.name,
       code: data.code,
       targetUrl: data.targetUrl || null,
+      description: data.description || null,
     });
 
     revalidatePath('/tests');
