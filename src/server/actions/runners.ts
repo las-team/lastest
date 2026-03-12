@@ -1,7 +1,7 @@
 'use server';
 
 import { db } from '@/lib/db';
-import { runners, backgroundJobs, embeddedSessions, type Runner, type RunnerCapability, type RunnerType } from '@/lib/db/schema';
+import { runners, backgroundJobs, embeddedSessions, runnerCommands, runnerCommandResults, type Runner, type RunnerCapability, type RunnerType } from '@/lib/db/schema';
 import { eq, and, desc, isNull, lt, or } from 'drizzle-orm';
 import { v4 as uuid } from 'uuid';
 import crypto from 'crypto';
@@ -490,8 +490,16 @@ export async function deleteStaleSystemRunners(thresholdMs: number): Promise<num
   if (staleRunners.length === 0) return 0;
 
   for (const runner of staleRunners) {
-    // Delete associated embedded sessions first (no cascade FK)
+    // Delete all FK references before deleting the runner
     await db.delete(embeddedSessions).where(eq(embeddedSessions.runnerId, runner.id));
+    const cmds = await db.select({ id: runnerCommands.id }).from(runnerCommands).where(eq(runnerCommands.runnerId, runner.id)).all();
+    if (cmds.length > 0) {
+      for (const cmd of cmds) {
+        await db.delete(runnerCommandResults).where(eq(runnerCommandResults.commandId, cmd.id));
+      }
+      await db.delete(runnerCommands).where(eq(runnerCommands.runnerId, runner.id));
+    }
+    await db.delete(runnerCommandResults).where(eq(runnerCommandResults.runnerId, runner.id));
     await db.delete(runners).where(eq(runners.id, runner.id));
     console.log(`[Stale Cleanup] Deleted stale system runner ${runner.id} (${runner.name})`);
   }

@@ -74,6 +74,9 @@ export class EmbeddedRecorder {
       acceptDownloads: true,
     });
     this.page = await this.context.newPage();
+    await this.page.addInitScript(() => {
+      Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+    });
 
     // Detect page crash/close to prevent using a dead page
     this.page.on('crash', () => {
