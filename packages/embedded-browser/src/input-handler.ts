@@ -172,15 +172,29 @@ export class InputHandler {
     const modifiers = getModifierFlags(event.modifiers);
 
     switch (event.action) {
-      case 'keydown':
+      case 'keydown': {
+        const isChar = event.text && event.text.length === 1;
+        // Non-printable keys (Backspace, Enter, Tab, arrows, etc.) need rawKeyDown;
+        // keyDown generates a char event which swallows the key for non-printable keys
         await this.cdpSession.send('Input.dispatchKeyEvent', {
-          type: 'keyDown',
+          type: isChar ? 'keyDown' : 'rawKeyDown',
           key: event.key,
           code: event.code ?? '',
           text: event.text ?? '',
           modifiers,
         });
+        // For printable chars, also send the char event explicitly
+        if (isChar) {
+          await this.cdpSession.send('Input.dispatchKeyEvent', {
+            type: 'char',
+            key: event.key,
+            code: event.code ?? '',
+            text: event.text ?? '',
+            modifiers,
+          });
+        }
         break;
+      }
 
       case 'keyup':
         await this.cdpSession.send('Input.dispatchKeyEvent', {

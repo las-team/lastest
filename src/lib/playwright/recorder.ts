@@ -229,6 +229,7 @@ export class PlaywrightRecorder extends EventEmitter {
       this.browser = await browserLauncher.launch({
         headless: this.headless,
         args: launchArgs,
+        ignoreDefaultArgs: ['--enable-automation'],
       });
 
       this.context = await this.browser.newContext({
@@ -241,6 +242,11 @@ export class PlaywrightRecorder extends EventEmitter {
       });
 
       this.page = await this.context.newPage();
+
+      // Remove navigator.webdriver flag to avoid automation detection (e.g. Google login)
+      await this.page.addInitScript(() => {
+        Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+      });
 
       // Setup freeze scripts BEFORE navigation (cross-OS fonts, canvas determinism, freeze scripts).
       // The shared setupFreezeScripts injects DETERMINISTIC_RENDERING_CSS which includes

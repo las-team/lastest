@@ -65,7 +65,10 @@ async function startup(): Promise<void> {
   const useCrossOsArgs = process.env.CROSS_OS_CONSISTENCY !== 'false';
   browser = await chromium.launch({
     headless: true,
-    args: useCrossOsArgs ? CROSS_OS_CHROMIUM_ARGS : [],
+    args: [
+      ...(useCrossOsArgs ? CROSS_OS_CHROMIUM_ARGS : []),
+      '--disable-blink-features=AutomationControlled',
+    ],
   });
 
   context = await browser.newContext({
