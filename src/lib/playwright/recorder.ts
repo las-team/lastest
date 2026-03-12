@@ -64,7 +64,7 @@ export interface VerificationStatus {
 export type KeyboardModifier = 'Alt' | 'Control' | 'Shift' | 'Meta';
 
 export interface RecordingEvent {
-  type: 'action' | 'navigation' | 'screenshot' | 'error' | 'complete' | 'assertion' | 'cursor-move' | 'mouse-down' | 'mouse-up' | 'hover-preview' | 'keypress' | 'keydown' | 'keyup' | 'scroll' | 'download' | 'clipboard-set';
+  type: 'action' | 'navigation' | 'screenshot' | 'error' | 'complete' | 'assertion' | 'cursor-move' | 'mouse-down' | 'mouse-up' | 'hover-preview' | 'keypress' | 'keydown' | 'keyup' | 'scroll' | 'download' | 'clipboard-set' | 'insert-timestamp';
   timestamp: number;
   sequence: number;
   status: 'preview' | 'committed';
@@ -93,6 +93,7 @@ export interface RecordingEvent {
     downloadWrap?: boolean; // click triggers a download
     autoDetected?: boolean; // download was auto-detected (not pre-flagged)
     text?: string; // clipboard text for clipboard-set events
+    timestampFormat?: string; // format for insert-timestamp events ('iso' default)
   };
 }
 
@@ -1262,6 +1263,16 @@ export class PlaywrightRecorder extends EventEmitter {
     const url = this.page.url();
     this.addEvent('assertion', { assertionType, url });
 
+    return true;
+  }
+
+  /**
+   * Insert a timestamp at the current cursor position.
+   * At replay time, this types the current ISO timestamp into the focused element.
+   */
+  insertTimestamp(format: string = 'iso'): boolean {
+    if (!this.page || !this.session) return false;
+    this.addEvent('insert-timestamp', { timestampFormat: format });
     return true;
   }
 

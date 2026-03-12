@@ -293,6 +293,15 @@ export async function createAssertion(type: AssertionType, repositoryId?: string
   return { success };
 }
 
+export async function insertTimestamp(repositoryId?: string | null): Promise<{ success: boolean }> {
+  await requireTeamAccess();
+
+  const recorder = getRecorder(repositoryId);
+  const success = recorder.insertTimestamp();
+
+  return { success };
+}
+
 export async function flagDownload(repositoryId?: string | null): Promise<{ success: boolean }> {
   await requireTeamAccess();
 

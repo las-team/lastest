@@ -20,6 +20,7 @@ import {
   captureScreenshot,
   createAssertion,
   flagDownload,
+  insertTimestamp,
   togglePauseRecording,
   saveRecordedTest,
   updateRerecordedTest,
@@ -167,6 +168,8 @@ function getEventDescription(event: RecordingEvent): string {
       return `Assert: ${labels[event.data.assertionType || ''] || event.data.assertionType}`;
     case 'download':
       return 'Download expected';
+    case 'insert-timestamp':
+      return 'Insert timestamp';
     case 'mouse-down':
       return `${modPrefix}Mouse down at (${event.data.coordinates?.x}, ${event.data.coordinates?.y})`;
     case 'mouse-up':
@@ -546,6 +549,14 @@ export function RecordingClient({
       // Event will come through polling
     } catch (error) {
       console.error('Failed to flag download:', error);
+    }
+  };
+
+  const handleInsertTimestamp = async () => {
+    try {
+      await insertTimestamp(repositoryId);
+    } catch (error) {
+      console.error('Failed to insert timestamp:', error);
     }
   };
 
@@ -1155,6 +1166,9 @@ export function RecordingClient({
             <Button variant="ghost" size="icon" className="h-8 w-8" onClick={handleFlagDownload} title="Wait for Download">
               <Download className="h-4 w-4" />
             </Button>
+            <Button variant="ghost" size="icon" className="h-8 w-8" onClick={handleInsertTimestamp} title="Insert Timestamp">
+              <Clock className="h-4 w-4" />
+            </Button>
             <div className="w-px h-5 bg-border" />
             <Button
               variant="ghost"
@@ -1244,6 +1258,10 @@ export function RecordingClient({
                 <Button onClick={handleFlagDownload} variant="outline">
                   <Download className="h-4 w-4 mr-2" />
                   Wait for Download
+                </Button>
+                <Button onClick={handleInsertTimestamp} variant="outline">
+                  <Clock className="h-4 w-4 mr-2" />
+                  Insert Timestamp
                 </Button>
                 <Button
                   onClick={handleStopRecording}

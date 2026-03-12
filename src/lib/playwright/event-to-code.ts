@@ -291,6 +291,8 @@ export function eventsToCodeLines(
     } else if (event.type === 'keyup' && event.data.key) {
       const escapedKey = event.data.key.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
       lines.push(`${indent}await page.keyboard.up('${escapedKey}');`);
+    } else if (event.type === 'insert-timestamp') {
+      lines.push(`${indent}await page.keyboard.type(new Date().toISOString());`);
     } else if (event.type === 'scroll') {
       const deltaX = (event.data.deltaX as number) || 0;
       const deltaY = (event.data.deltaY as number) || 0;
