@@ -7,12 +7,14 @@ import type { TestTeardownOverrides } from '@/lib/db/schema';
 
 export interface TeardownStep {
   id: string;
-  stepType: 'test' | 'script';
+  stepType: 'test' | 'script' | 'storage_state';
   testId: string | null;
   scriptId: string | null;
+  storageStateId: string | null;
   orderIndex: number;
   testName: string | null;
   scriptName: string | null;
+  storageStateName: string | null;
 }
 
 export interface TeardownStepInput {
@@ -28,12 +30,14 @@ export async function getDefaultTeardownSteps(repositoryId: string): Promise<Tea
   const steps = await queries.getDefaultTeardownSteps(repositoryId);
   return steps.map((step) => ({
     id: step.id,
-    stepType: step.stepType as 'test' | 'script',
+    stepType: step.stepType as 'test' | 'script' | 'storage_state',
     testId: step.testId,
     scriptId: step.scriptId,
+    storageStateId: null,
     orderIndex: step.orderIndex,
     testName: step.testName,
     scriptName: step.scriptName,
+    storageStateName: null,
   }));
 }
 

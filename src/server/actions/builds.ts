@@ -542,6 +542,20 @@ async function runBuildAsync(
       repositoryId: repositoryId || null,
     };
 
+    // Pre-load storage states from default setup steps for remote runners
+    if (repositoryId) {
+      const defaultSteps = await queries.getDefaultSetupSteps(repositoryId);
+      for (const step of defaultSteps) {
+        if (step.stepType === 'storage_state' && step.storageStateId) {
+          const ss = await queries.getStorageState(step.storageStateId);
+          if (ss) {
+            setupContext.storageState = ss.storageStateJson;
+            console.log(`[build] Pre-loaded storage state "${ss.name}" for setup context`);
+          }
+        }
+      }
+    }
+
     // Resolve setup info for remote runner (run setup on the runner, not locally)
     let remoteSetupInfo: { code: string; setupId: string } | undefined;
     const isRemoteRunner = runnerId && runnerId !== 'local' && teamId;

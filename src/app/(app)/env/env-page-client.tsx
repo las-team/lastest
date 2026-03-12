@@ -8,7 +8,7 @@ import {
   removeDefaultTeardownStep,
   reorderDefaultTeardownSteps,
 } from '@/server/actions/teardown-steps';
-import type { Repository, Test, SetupScript, SetupConfig } from '@/lib/db/schema';
+import type { Repository, Test, SetupScript, SetupConfig, StorageState } from '@/lib/db/schema';
 import type { SetupStep } from '@/server/actions/setup-steps';
 import type { TeardownStep } from '@/server/actions/teardown-steps';
 
@@ -19,6 +19,7 @@ interface EnvPageClientProps {
   availableTests: Test[];
   defaultSetupSteps: SetupStep[];
   defaultTeardownSteps: TeardownStep[];
+  storageStates: StorageState[];
 }
 
 export function EnvPageClient({
@@ -28,6 +29,7 @@ export function EnvPageClient({
   availableTests,
   defaultSetupSteps,
   defaultTeardownSteps,
+  storageStates,
 }: EnvPageClientProps) {
   return (
     <div className="flex-1 p-6 overflow-auto">
@@ -57,6 +59,7 @@ export function EnvPageClient({
                 setupSteps={defaultSetupSteps}
                 availableTests={availableTests}
                 availableScripts={setupScripts}
+                availableStorageStates={storageStates}
               />
             </section>
 

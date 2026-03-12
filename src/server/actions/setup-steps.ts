@@ -7,18 +7,21 @@ import type { TestSetupOverrides } from '@/lib/db/schema';
 
 export interface SetupStep {
   id: string;
-  stepType: 'test' | 'script';
+  stepType: 'test' | 'script' | 'storage_state';
   testId: string | null;
   scriptId: string | null;
+  storageStateId: string | null;
   orderIndex: number;
   testName: string | null;
   scriptName: string | null;
+  storageStateName: string | null;
 }
 
 export interface SetupStepInput {
-  stepType: 'test' | 'script';
+  stepType: 'test' | 'script' | 'storage_state';
   testId?: string | null;
   scriptId?: string | null;
+  storageStateId?: string | null;
 }
 
 /**
@@ -28,12 +31,14 @@ export async function getDefaultSetupSteps(repositoryId: string): Promise<SetupS
   const steps = await queries.getDefaultSetupSteps(repositoryId);
   return steps.map((step) => ({
     id: step.id,
-    stepType: step.stepType as 'test' | 'script',
+    stepType: step.stepType as 'test' | 'script' | 'storage_state',
     testId: step.testId,
     scriptId: step.scriptId,
+    storageStateId: step.storageStateId,
     orderIndex: step.orderIndex,
     testName: step.testName,
     scriptName: step.scriptName,
+    storageStateName: step.storageStateName,
   }));
 }
 
@@ -55,7 +60,7 @@ export async function updateDefaultSetupSteps(
  */
 export async function addDefaultSetupStep(
   repositoryId: string,
-  stepType: 'test' | 'script',
+  stepType: 'test' | 'script' | 'storage_state',
   itemId: string
 ) {
   await requireRepoAccess(repositoryId);
@@ -70,6 +75,7 @@ export async function addDefaultSetupStep(
     stepType,
     testId: stepType === 'test' ? itemId : null,
     scriptId: stepType === 'script' ? itemId : null,
+    storageStateId: stepType === 'storage_state' ? itemId : null,
     orderIndex: maxOrder + 1,
   });
 
@@ -153,7 +159,7 @@ export async function unskipDefaultStepForTest(testId: string, defaultStepId: st
   return { success: true };
 }
 
-export async function addExtraSetupStep(testId: string, stepType: 'test' | 'script', itemId: string) {
+export async function addExtraSetupStep(testId: string, stepType: 'test' | 'script' | 'storage_state', itemId: string) {
   await requireTeamAccess();
   const test = await queries.getTest(testId);
   if (!test) return { success: false, error: 'Test not found' };
@@ -163,6 +169,7 @@ export async function addExtraSetupStep(testId: string, stepType: 'test' | 'scri
     stepType,
     testId: stepType === 'test' ? itemId : null,
     scriptId: stepType === 'script' ? itemId : null,
+    storageStateId: stepType === 'storage_state' ? itemId : null,
   });
   await queries.updateTestSetupOverrides(testId, overrides);
   revalidatePath(`/tests/${testId}`);

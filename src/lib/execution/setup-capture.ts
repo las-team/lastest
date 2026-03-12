@@ -122,6 +122,8 @@ export async function resolveSetupCodeForRunner(
         const skippedIds = new Set(test.setupOverrides?.skippedDefaultStepIds ?? []);
         for (const step of defaultSteps) {
           if (skippedIds.has(step.id)) continue;
+          // Skip storage_state steps — they don't produce code; handled by pre-loading into setupContext
+          if (step.stepType === 'storage_state') continue;
           if (step.stepType === 'test' && step.testId) {
             const setupTest = await queries.getTest(step.testId);
             if (setupTest) return { code: setupTest.code, setupId: setupTest.id };

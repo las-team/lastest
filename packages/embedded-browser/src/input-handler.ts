@@ -178,7 +178,7 @@ export class InputHandler {
   }
 
   private async handleKeyboard(event: KeyboardEvent): Promise<void> {
-    if (!this.cdpSession) return;
+    if (!this.page) return;
 
     // Track modifier state for contextmenu dispatching
     if (event.modifiers) {
@@ -188,75 +188,42 @@ export class InputHandler {
       this.modifiers.meta = event.modifiers.meta ?? false;
     }
 
-    const modifiers = getModifierFlags(event.modifiers);
-
     switch (event.action) {
       case 'keydown': {
         const isChar = event.text && event.text.length === 1;
-        const vk = getVirtualKeyCode(event.key);
-        // Non-printable keys (Backspace, Enter, Tab, arrows, etc.) need rawKeyDown;
-        // keyDown generates a char event which swallows the key for non-printable keys
-        await this.cdpSession.send('Input.dispatchKeyEvent', {
-          type: isChar ? 'keyDown' : 'rawKeyDown',
-          key: event.key,
-          code: event.code ?? '',
-          text: event.text ?? '',
-          modifiers,
-          windowsVirtualKeyCode: vk,
-          nativeVirtualKeyCode: vk,
-        });
-        // For printable chars, also send the char event explicitly
         if (isChar) {
-          await this.cdpSession.send('Input.dispatchKeyEvent', {
-            type: 'char',
-            key: event.key,
-            code: event.code ?? '',
-            text: event.text ?? '',
-            modifiers,
-            windowsVirtualKeyCode: vk,
-            nativeVirtualKeyCode: vk,
-          });
+          // Printable character: use press() which handles keyDown + char + keyUp
+          // Build modifier prefix for Playwright's key descriptor format
+          const modPrefix = this.buildModifierPrefix(event.modifiers);
+          await this.page.keyboard.press(`${modPrefix}${event.key}`);
+        } else {
+          // Non-printable key (Backspace, Delete, Enter, arrows, etc.)
+          await this.page.keyboard.down(event.key);
         }
         break;
       }
 
       case 'keyup': {
-        const vkUp = getVirtualKeyCode(event.key);
-        await this.cdpSession.send('Input.dispatchKeyEvent', {
-          type: 'keyUp',
-          key: event.key,
-          code: event.code ?? '',
-          modifiers,
-          windowsVirtualKeyCode: vkUp,
-          nativeVirtualKeyCode: vkUp,
-        });
+        await this.page.keyboard.up(event.key);
         break;
       }
 
       case 'type':
-        // Type each character individually
         if (event.text) {
-          for (const char of event.text) {
-            const vkChar = getVirtualKeyCode(char);
-            await this.cdpSession.send('Input.dispatchKeyEvent', {
-              type: 'keyDown',
-              key: char,
-              text: char,
-              modifiers,
-              windowsVirtualKeyCode: vkChar,
-              nativeVirtualKeyCode: vkChar,
-            });
-            await this.cdpSession.send('Input.dispatchKeyEvent', {
-              type: 'keyUp',
-              key: char,
-              modifiers,
-              windowsVirtualKeyCode: vkChar,
-              nativeVirtualKeyCode: vkChar,
-            });
-          }
+          await this.page.keyboard.type(event.text);
         }
         break;
     }
+  }
+
+  private buildModifierPrefix(modifiers?: { ctrl?: boolean; shift?: boolean; alt?: boolean; meta?: boolean }): string {
+    if (!modifiers) return '';
+    const parts: string[] = [];
+    if (modifiers.ctrl) parts.push('Control+');
+    if (modifiers.shift) parts.push('Shift+');
+    if (modifiers.alt) parts.push('Alt+');
+    if (modifiers.meta) parts.push('Meta+');
+    return parts.join('');
   }
 
   private async handleFileUpload(event: FileUploadEvent): Promise<void> {

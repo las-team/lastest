@@ -5,6 +5,7 @@ import { getSetupScripts, getAvailableSetupTests } from '@/server/actions/setup-
 import { getSetupConfigs } from '@/server/actions/setup-configs';
 import { getDefaultSetupSteps } from '@/server/actions/setup-steps';
 import { getDefaultTeardownSteps } from '@/server/actions/teardown-steps';
+import { listStorageStates } from '@/server/actions/storage-states';
 
 export default async function EnvPage() {
   const session = await getCurrentSession();
@@ -25,12 +26,13 @@ export default async function EnvPage() {
     );
   }
 
-  const [setupScripts, setupConfigs, availableTests, defaultSetupSteps, defaultTeardownSteps] = await Promise.all([
+  const [setupScripts, setupConfigs, availableTests, defaultSetupSteps, defaultTeardownSteps, storageStates] = await Promise.all([
     getSetupScripts(selectedRepo.id),
     getSetupConfigs(selectedRepo.id),
     getAvailableSetupTests(selectedRepo.id),
     getDefaultSetupSteps(selectedRepo.id),
     getDefaultTeardownSteps(selectedRepo.id),
+    listStorageStates(selectedRepo.id),
   ]);
 
   return (
@@ -41,6 +43,7 @@ export default async function EnvPage() {
       availableTests={availableTests}
       defaultSetupSteps={defaultSetupSteps}
       defaultTeardownSteps={defaultTeardownSteps}
+      storageStates={storageStates}
     />
   );
 }

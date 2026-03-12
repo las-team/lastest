@@ -79,18 +79,20 @@ export interface TestRequiredCapabilities {
 export interface TestSetupOverrides {
   skippedDefaultStepIds: string[];  // IDs from default_setup_steps to skip
   extraSteps: Array<{
-    stepType: 'test' | 'script';
+    stepType: 'test' | 'script' | 'storage_state';
     testId?: string | null;
     scriptId?: string | null;
+    storageStateId?: string | null;
   }>;
 }
 
 export interface TestTeardownOverrides {
   skippedDefaultStepIds: string[];  // IDs from default_teardown_steps to skip
   extraSteps: Array<{
-    stepType: 'test' | 'script';
+    stepType: 'test' | 'script' | 'storage_state';
     testId?: string | null;
     scriptId?: string | null;
+    storageStateId?: string | null;
   }>;
 }
 
@@ -1134,14 +1136,15 @@ export type NewSetupConfig = typeof setupConfigs.$inferInsert;
 export type SetupStatus = 'pending' | 'running' | 'completed' | 'failed' | 'skipped';
 
 // Default Setup Steps - Ordered multi-step setup for repositories
-export type SetupStepType = 'test' | 'script';
+export type SetupStepType = 'test' | 'script' | 'storage_state';
 
 export const defaultSetupSteps = sqliteTable('default_setup_steps', {
   id: text('id').primaryKey(),
   repositoryId: text('repository_id').references(() => repositories.id, { onDelete: 'cascade' }).notNull(),
-  stepType: text('step_type').notNull(), // 'test' | 'script'
+  stepType: text('step_type').notNull(), // 'test' | 'script' | 'storage_state'
   testId: text('test_id').references(() => tests.id, { onDelete: 'cascade' }),
   scriptId: text('script_id').references(() => setupScripts.id, { onDelete: 'cascade' }),
+  storageStateId: text('storage_state_id').references(() => storageStates.id, { onDelete: 'cascade' }),
   orderIndex: integer('order_index').notNull().default(0),
   createdAt: integer('created_at', { mode: 'timestamp' }),
 });
