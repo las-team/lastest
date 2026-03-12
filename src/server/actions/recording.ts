@@ -244,6 +244,7 @@ export async function stopRecording(repositoryId?: string | null) {
   // Local recording
   const recorder = getRecorder(repositoryId);
   const session = await recorder.stopRecording();
+  if (!session) return null;
   const capturedStorageState = recorder.getCapturedStorageState();
   return { ...session, capturedStorageState };
 }
