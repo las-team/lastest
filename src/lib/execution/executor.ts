@@ -435,6 +435,7 @@ async function executeViaRunner(
         fixtures: fixturePayloads,
         grantClipboardAccess: options.playwrightSettings?.grantClipboardAccess ?? false,
         acceptDownloads: options.playwrightSettings?.acceptDownloads ?? false,
+        headed: options.headless === false,
       });
 
       // Queue command to DB

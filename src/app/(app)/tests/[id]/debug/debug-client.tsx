@@ -47,7 +47,7 @@ export function DebugClient({ test, repositoryId }: DebugClientProps) {
   const stepListRef = useRef<HTMLDivElement>(null);
 
   // Runner selector + live view state
-  const [executionTarget, setExecutionTarget] = usePreferredRunner();
+  const [executionTarget, setExecutionTarget, isRunnerHydrated] = usePreferredRunner();
   const [streamUrl, setStreamUrl] = useState<string | null>(null);
 
   // Editable code state
@@ -56,15 +56,25 @@ export function DebugClient({ test, repositoryId }: DebugClientProps) {
   const codeVersionRef = useRef<number>(0);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // Track sessionId in a ref so cleanup/effect can access latest value
+  const sessionIdRef = useRef<string | null>(null);
+  useEffect(() => {
+    sessionIdRef.current = sessionId;
+  }, [sessionId]);
+
   const isRemote = executionTarget !== 'local';
 
-  // Start session on mount or when execution target changes
+  // Start session on mount or when execution target changes (wait for hydration)
   useEffect(() => {
+    if (!isRunnerHydrated) return;
+
     let cancelled = false;
     async function init() {
       // Stop any existing session
-      if (sessionId) {
-        await stopDebugSession(sessionId).catch(() => {});
+      const prevSessionId = sessionIdRef.current;
+      if (prevSessionId) {
+        await stopDebugSession(prevSessionId).catch(() => {});
+        if (cancelled) return;
         setSessionId(null);
         setState(null);
       }
@@ -80,8 +90,7 @@ export function DebugClient({ test, repositoryId }: DebugClientProps) {
     return () => {
       cancelled = true;
     };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [test.id, repositoryId, executionTarget]);
+  }, [test.id, repositoryId, executionTarget, isRunnerHydrated]);
 
   // Poll for state
   useEffect(() => {
@@ -115,11 +124,11 @@ export function DebugClient({ test, repositoryId }: DebugClientProps) {
   // Cleanup on unmount
   useEffect(() => {
     return () => {
-      if (sessionId) {
-        stopDebugSession(sessionId).catch(() => {});
+      if (sessionIdRef.current) {
+        stopDebugSession(sessionIdRef.current).catch(() => {});
       }
     };
-  }, [sessionId]);
+  }, []);
 
   // Auto-scroll step list to current step
   useEffect(() => {

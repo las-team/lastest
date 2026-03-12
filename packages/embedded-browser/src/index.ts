@@ -182,6 +182,7 @@ async function startup(): Promise<void> {
           setupVariables?: Record<string, unknown>;
           cursorPlaybackSpeed?: number;
           stabilization?: import('./protocol.js').StabilizationPayload;
+          headed?: boolean;
         };
 
         // Dedup: skip if already running (mirrors standard runner activeTestIds)
@@ -198,16 +199,50 @@ async function startup(): Promise<void> {
         const capturedCommand = command;
 
         activeTasks++;
+        const isHeaded = !!payload.headed;
         if (activeTasks === 1) {
           capturedClient.setStatus('busy', payload.testId);
           streamServer?.broadcastStatus('busy', payload.targetUrl);
-          // Pause screencast to free Chromium CPU for test execution
-          await screencast?.stop();
+          if (!isHeaded) {
+            // Pause screencast to free Chromium CPU for test execution
+            await screencast?.stop();
+          }
         }
 
         (async () => {
           try {
-            const result = await capturedExecutor.runTest(capturedBrowser, payload);
+            const capturedScreencast = screencast;
+            const capturedStreamServer = streamServer;
+            const capturedPage = page; // idle page for screencast restore
+            const shouldStreamTest = isHeaded && activeTasks === 1 && capturedScreencast && capturedStreamServer;
+
+            const callbacks = shouldStreamTest ? {
+              onPageCreated: async (testPage: Page) => {
+                try {
+                  await capturedScreencast.stop();
+                  await capturedScreencast.start(testPage, (frame) => {
+                    capturedStreamServer.broadcastFrame(frame.data, frame.width, frame.height, frame.timestamp);
+                  });
+                } catch (err) {
+                  console.error('[Command] Failed to attach screencast to test page:', err);
+                }
+              },
+              onBeforePageClose: async () => {
+                try {
+                  await capturedScreencast.stop();
+                  // Restart on idle page immediately so there's no frame gap
+                  if (capturedPage) {
+                    await capturedScreencast.start(capturedPage, (frame) => {
+                      capturedStreamServer.broadcastFrame(frame.data, frame.width, frame.height, frame.timestamp);
+                    });
+                  }
+                } catch (err) {
+                  console.error('[Command] Failed to restore screencast to idle page:', err);
+                }
+              },
+            } : undefined;
+
+            const result = await capturedExecutor.runTest(capturedBrowser, payload, callbacks);
 
             // Upload screenshots BEFORE result so they're in DB when executor sees "completed"
             if (result.screenshots.length > 0) {
@@ -256,8 +291,9 @@ async function startup(): Promise<void> {
             if (activeTasks === 0) {
               capturedClient.setStatus('idle');
               streamServer?.broadcastStatus('ready');
-              // Restart screencast on idle page
-              if (page && screencast) {
+              // Restart screencast on idle page (headed: already restored by onBeforePageClose,
+              // but start() handles "already running" safely; headless: was stopped at test start)
+              if (page && screencast && !isHeaded) {
                 try {
                   await screencast.start(page, (frame) => {
                     streamServer!.broadcastFrame(frame.data, frame.width, frame.height, frame.timestamp);

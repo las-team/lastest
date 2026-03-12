@@ -125,7 +125,14 @@ export class EmbeddedTestExecutor {
     return false;
   }
 
-  async runTest(browser: Browser, command: RunTestPayload): Promise<EmbeddedTestResult> {
+  async runTest(
+    browser: Browser,
+    command: RunTestPayload,
+    callbacks?: {
+      onPageCreated?: (page: Page) => Promise<void> | void;
+      onBeforePageClose?: () => Promise<void> | void;
+    },
+  ): Promise<EmbeddedTestResult> {
     const abortCtrl = new AbortController();
     this.abortController = abortCtrl;
 
@@ -166,6 +173,9 @@ export class EmbeddedTestExecutor {
       ...(command.stabilization?.freezeAnimations ? { reducedMotion: 'reduce' as const } : {}),
     });
     const page = await testContext.newPage();
+    if (callbacks?.onPageCreated) {
+      await callbacks.onPageCreated(page);
+    }
 
     try {
       if (abortCtrl.signal.aborted) {
@@ -537,6 +547,10 @@ export class EmbeddedTestExecutor {
       };
     } finally {
       this.abortController = null;
+      // Stop screencast before closing page so CDP session doesn't die unexpectedly
+      if (callbacks?.onBeforePageClose) {
+        try { await callbacks.onBeforePageClose(); } catch { /* ignore */ }
+      }
       // Close the per-test page + context (no state leaks between tests)
       // context.close() may have already been called by timeout/cancel handler — that's fine
       await page.close().catch(() => {});

@@ -77,7 +77,24 @@ export async function getDebugState(
 ): Promise<DebugState | null> {
   // Check remote session first
   const remoteSession = getRemoteDebugSession(sessionId);
-  if (remoteSession && remoteSession.state) {
+  if (remoteSession) {
+    if (!remoteSession.state) {
+      // Session exists but no state yet — return initializing placeholder
+      return {
+        sessionId,
+        testId: remoteSession.testId,
+        status: 'initializing',
+        currentStepIndex: -1,
+        steps: [],
+        stepResults: [],
+        code: '',
+        networkEntries: [],
+        consoleEntries: [],
+        codeVersion: 0,
+        isRecording: false,
+        recordedEventCount: 0,
+      } as DebugState;
+    }
     // Convert to DebugState format (add empty network/console/trace fields)
     return {
       ...remoteSession.state,

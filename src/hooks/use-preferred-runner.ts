@@ -1,25 +1,59 @@
 'use client';
 
-import { useState, useCallback, useEffect } from 'react';
+import { useCallback, useSyncExternalStore } from 'react';
 
 const STORAGE_KEY = 'lastest2-preferred-runner';
 
-export function usePreferredRunner(): [string, (value: string) => void] {
-  const [value, setValue] = useState<string>('local');
+// In-memory store that syncs with localStorage
+let currentValue = 'local';
+let hydrated = false;
+const listeners = new Set<() => void>();
 
-  // Hydrate from localStorage after mount to avoid SSR mismatch
-  useEffect(() => {
+function notify() {
+  for (const l of listeners) l();
+}
+
+function subscribe(cb: () => void): () => void {
+  listeners.add(cb);
+  // One-time hydration from localStorage on first subscribe
+  if (!hydrated && typeof window !== 'undefined') {
+    hydrated = true;
     const stored = localStorage.getItem(STORAGE_KEY);
-    if (stored) {
-      setValue(stored);
+    if (stored && stored !== currentValue) {
+      currentValue = stored;
+      // Notify on next microtask to avoid triggering during subscribe
+      queueMicrotask(notify);
     }
-  }, []);
+  }
+  return () => { listeners.delete(cb); };
+}
+
+function getSnapshot(): string {
+  return currentValue;
+}
+
+function getServerSnapshot(): string {
+  return 'local';
+}
+
+function getHydrated(): boolean {
+  return hydrated;
+}
+
+function getServerHydrated(): boolean {
+  return false;
+}
+
+export function usePreferredRunner(): [string, (value: string) => void, boolean] {
+  const value = useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
+  const isHydrated = useSyncExternalStore(subscribe, getHydrated, getServerHydrated);
 
   const setAndPersist = useCallback((newValue: string) => {
-    setValue(newValue);
+    currentValue = newValue;
+    notify();
   }, []);
 
-  return [value, setAndPersist];
+  return [value, setAndPersist, isHydrated];
 }
 
 export function persistRunnerPreference(value: string) {

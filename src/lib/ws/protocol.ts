@@ -87,6 +87,7 @@ export interface RunTestCommandPayload {
   fixtures?: Array<{ filename: string; data: string }>; // base64-encoded fixture files
   grantClipboardAccess?: boolean;
   acceptDownloads?: boolean;
+  headed?: boolean;
 }
 
 export interface RunTestCommand extends BaseMessage {
