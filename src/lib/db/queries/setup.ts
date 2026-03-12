@@ -459,7 +459,7 @@ export async function getResolvedTeardownStepsForTest(test: { id: string; reposi
     .map((s) => ({
       source: 'default' as const,
       id: s.id,
-      stepType: s.stepType as 'test' | 'script',
+      stepType: s.stepType as 'test' | 'script' | 'storage_state',
       testId: s.testId,
       scriptId: s.scriptId,
       name: s.testName || s.scriptName || 'Unknown',
@@ -468,7 +468,7 @@ export async function getResolvedTeardownStepsForTest(test: { id: string; reposi
   const extras: Array<{
     source: 'extra';
     id: string;
-    stepType: 'test' | 'script';
+    stepType: 'test' | 'script' | 'storage_state';
     testId: string | null | undefined;
     scriptId: string | null | undefined;
     name: string;
