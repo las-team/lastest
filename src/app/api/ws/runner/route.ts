@@ -210,10 +210,9 @@ export async function POST(request: NextRequest) {
         let status: 'online' | 'offline' | 'busy';
         switch (heartbeat.payload.status) {
           case 'busy':
-            status = 'busy';
-            break;
           case 'recording':
-            status = 'busy'; // Recording is a form of busy
+          case 'debugging':
+            status = 'busy';
             break;
           default:
             status = 'online';
@@ -353,6 +352,16 @@ export async function POST(request: NextRequest) {
           console.log(`[Recording] Session ${stoppedSessionId} stopped, ${session.events.length} events`);
         }
 
+        return NextResponse.json({ ok: true });
+      }
+
+      case 'response:debug_state': {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const debugPayload = (message as any).payload as DebugStateResponsePayload;
+        const debugSession = findRemoteDebugBySessionId(debugPayload.sessionId);
+        if (debugSession) {
+          debugSession.state = debugPayload;
+        }
         return NextResponse.json({ ok: true });
       }
 
@@ -607,4 +616,59 @@ export function completeRemoteRecordingSession(repositoryId?: string | null, gen
 export function clearRemoteRecordingSession(repositoryId?: string | null): void {
   const key = repositoryId ?? '__no_repo__';
   remoteRecordingSessionsMap.delete(key);
+}
+
+// ============================================
+// Remote Debug Session Management (in-memory — real-time, acceptable)
+// ============================================
+
+import type { DebugStateResponsePayload } from '@/lib/ws/protocol';
+
+export interface RemoteDebugSession {
+  sessionId: string;
+  runnerId: string;
+  repositoryId: string | null;
+  testId: string;
+  state: DebugStateResponsePayload | null;
+  startedAt: Date;
+}
+
+const globalDebugState = globalThis as typeof globalThis & {
+  __remoteDebugSessions?: Map<string, RemoteDebugSession>;
+};
+if (!globalDebugState.__remoteDebugSessions) {
+  globalDebugState.__remoteDebugSessions = new Map<string, RemoteDebugSession>();
+}
+const remoteDebugSessionsMap = globalDebugState.__remoteDebugSessions;
+
+function findRemoteDebugBySessionId(sessionId: string): RemoteDebugSession | undefined {
+  for (const session of remoteDebugSessionsMap.values()) {
+    if (session.sessionId === sessionId) return session;
+  }
+  return undefined;
+}
+
+export function createRemoteDebugSession(
+  sessionId: string,
+  runnerId: string,
+  repositoryId: string | null,
+  testId: string
+): void {
+  remoteDebugSessionsMap.set(sessionId, {
+    sessionId,
+    runnerId,
+    repositoryId,
+    testId,
+    state: null,
+    startedAt: new Date(),
+  });
+  console.log(`[Debug] Created remote session ${sessionId} for runner ${runnerId}`);
+}
+
+export function getRemoteDebugSession(sessionId: string): RemoteDebugSession | null {
+  return remoteDebugSessionsMap.get(sessionId) ?? findRemoteDebugBySessionId(sessionId) ?? null;
+}
+
+export function clearRemoteDebugSession(sessionId: string): void {
+  remoteDebugSessionsMap.delete(sessionId);
 }

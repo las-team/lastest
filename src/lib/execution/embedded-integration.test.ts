@@ -256,13 +256,14 @@ describe('Embedded Browser Integration', () => {
         'command:ping',
         'command:create_assertion',
         'command:flag_download',
+        'command:insert_timestamp',
       ];
 
       // Verify each command type is in the protocol
       for (const cmd of supportedCommands) {
         expect(cmd).toMatch(/^command:/);
       }
-      expect(supportedCommands).toHaveLength(9);
+      expect(supportedCommands).toHaveLength(10);
     });
 
     it('maps command types to response types', () => {

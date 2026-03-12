@@ -64,7 +64,8 @@ export async function POST(request: Request) {
   }
 
   const token = authHeader.slice(7);
-  if (token !== expectedToken) {
+  const validTokens = expectedToken.split(',').map(t => t.trim());
+  if (!validTokens.includes(token)) {
     return NextResponse.json({ error: 'Invalid system token' }, { status: 401 });
   }
 

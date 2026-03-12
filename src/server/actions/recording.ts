@@ -18,7 +18,7 @@ import { v4 as uuid } from 'uuid';
 import { revalidatePath } from 'next/cache';
 import { chromium, firefox, webkit } from 'playwright';
 import { createMessage } from '@/lib/ws/protocol';
-import type { StartRecordingCommand, StopRecordingCommand, CaptureScreenshotCommand, CreateAssertionCommand, FlagDownloadCommand } from '@/lib/ws/protocol';
+import type { StartRecordingCommand, StopRecordingCommand, CaptureScreenshotCommand, CreateAssertionCommand, FlagDownloadCommand, InsertTimestampCommand } from '@/lib/ws/protocol';
 import { getAvailableSystemRunner } from '@/server/actions/runners';
 import {
   queueCommandToDB,
@@ -299,19 +299,16 @@ export async function insertTimestamp(repositoryId?: string | null): Promise<{ s
   // Check for remote recording session
   const remoteSession = getRemoteRecordingSession(repositoryId);
   if (remoteSession?.isRecording) {
-    remoteSession.events.push({
-      type: 'insert-timestamp',
-      timestamp: Date.now(),
-      sequence: remoteSession.events.length + 1,
-      status: 'committed',
-      data: { timestampFormat: 'iso' },
+    const command = createMessage<InsertTimestampCommand>('command:insert_timestamp', {
+      sessionId: remoteSession.sessionId,
     });
+    await queueCommandToDB(remoteSession.runnerId, command);
     return { success: true };
   }
 
   // Local recording
   const recorder = getRecorder(repositoryId);
-  const success = recorder.insertTimestamp();
+  const success = await recorder.insertTimestamp();
 
   return { success };
 }

@@ -344,6 +344,16 @@ export class EmbeddedRecorder {
   }
 
   /**
+   * Insert a timestamp at the current cursor position in the browser.
+   */
+  async insertTimestamp(): Promise<void> {
+    if (!this.isRecording || !this.page) return;
+    const timestamp = new Date().toISOString();
+    await this.page.keyboard.type(timestamp);
+    this.addEvent('insert-timestamp', { timestampFormat: 'iso' });
+  }
+
+  /**
    * Flag that the next click should be wrapped in downloads.waitForDownload().
    */
   flagDownload(): void {

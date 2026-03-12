@@ -1270,8 +1270,10 @@ export class PlaywrightRecorder extends EventEmitter {
    * Insert a timestamp at the current cursor position.
    * At replay time, this types the current ISO timestamp into the focused element.
    */
-  insertTimestamp(format: string = 'iso'): boolean {
+  async insertTimestamp(format: string = 'iso'): Promise<boolean> {
     if (!this.page || !this.session) return false;
+    const timestamp = new Date().toISOString();
+    await this.page.keyboard.type(timestamp);
     this.addEvent('insert-timestamp', { timestampFormat: format });
     return true;
   }

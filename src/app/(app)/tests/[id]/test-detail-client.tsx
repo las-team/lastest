@@ -16,7 +16,7 @@ import {
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
-import { Play, Trash2, Copy, Edit2, Clock, CheckCircle, XCircle, X, Save, Wrench, Wand2, Loader2, History, RotateCcw, ChevronDown, ChevronRight, Monitor, Video, AlertTriangle, Image, Bug, GitBranch, GitCommit } from 'lucide-react';
+import { Play, Trash2, Copy, Edit2, Clock, CheckCircle, XCircle, X, Save, Wrench, Wand2, Loader2, History, RotateCcw, ChevronDown, ChevronRight, ChevronUp, Monitor, Video, AlertTriangle, Image, Bug, GitBranch, GitCommit, Tv2 } from 'lucide-react';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -38,6 +38,8 @@ import { A11yViolationsPanel } from '@/components/builds/a11y-violations-panel';
 import type { ScreenshotGroup } from '@/server/actions/tests';
 import { SheetDataPreview } from '@/components/test-data/sheet-data-preview';
 import { SheetReferenceInserter } from '@/components/test-data/sheet-reference-inserter';
+import { BrowserViewer } from '@/components/embedded-browser/browser-viewer-client';
+import { getStreamUrlForRunner } from '@/server/actions/embedded-sessions';
 
 interface StepDiff {
   stepLabel: string | null;
@@ -106,6 +108,10 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
   const [isRunning, setIsRunning] = useState(false);
   const pollIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const [executionTarget, setExecutionTarget] = usePreferredRunner();
+
+  // Live browser viewer state
+  const [streamUrl, setStreamUrl] = useState<string | null>(null);
+  const [showViewer, setShowViewer] = useState(true);
 
   // Cleanup poll interval on unmount
   useEffect(() => {
@@ -250,6 +256,24 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
       } else {
         toast.success(forceVideoRecording ? 'Test started with recording' : headless ? 'Test started' : 'Test started (headed mode)');
       }
+
+      // Fetch stream URL for headed runs on embedded/system runners
+      if (!headless && executionTarget !== 'local') {
+        try {
+          const streamInfo = await getStreamUrlForRunner(executionTarget);
+          if (streamInfo?.streamUrl) {
+            const token = streamInfo.streamAuthToken;
+            setStreamUrl(
+              token
+                ? `${streamInfo.streamUrl}?token=${encodeURIComponent(token)}`
+                : streamInfo.streamUrl
+            );
+          }
+        } catch {
+          // Stream not available — not critical
+        }
+      }
+
       // Poll job status for completion (ensures results are saved before refresh)
       pollIntervalRef.current = setInterval(async () => {
         const { isComplete } = await getJobStatus(jobId);
@@ -259,6 +283,7 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
             pollIntervalRef.current = null;
           }
           setIsRunning(false);
+          setStreamUrl(null);
           router.refresh();
           toast.success('Test completed');
         }
@@ -575,6 +600,27 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
                 Record Now
               </Button>
             </CardContent>
+          </Card>
+        )}
+
+        {/* Live Browser Viewer (headed runs on embedded/system runners) */}
+        {streamUrl && isRunning && (
+          <Card className="overflow-hidden py-0">
+            <button
+              type="button"
+              className="flex items-center gap-2 w-full px-3 py-2 text-sm font-medium bg-muted/50 hover:bg-muted transition-colors"
+              onClick={() => setShowViewer(!showViewer)}
+            >
+              <Tv2 className="h-4 w-4 text-purple-500" />
+              <span>Live Browser View</span>
+              {showViewer ? <ChevronUp className="h-4 w-4 ml-auto" /> : <ChevronDown className="h-4 w-4 ml-auto" />}
+            </button>
+            {showViewer && (
+              <BrowserViewer
+                streamUrl={streamUrl}
+                className="max-h-[500px]"
+              />
+            )}
           </Card>
         )}
 

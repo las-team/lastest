@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
+import { usePreferredRunner } from '@/hooks/use-preferred-runner';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -23,11 +24,15 @@ import {
   Globe,
   Terminal,
   Circle,
+  Tv2,
 } from 'lucide-react';
 import { startDebugSession, getDebugState, sendDebugCommand, stopDebugSession, flushDebugTrace } from '@/server/actions/debug';
 import { toast } from 'sonner';
 import type { Test } from '@/lib/db/schema';
 import type { DebugState, DebugNetworkEntry, DebugConsoleEntry } from '@/lib/playwright/debug-runner';
+import { BrowserViewer } from '@/components/embedded-browser/browser-viewer-client';
+import { ExecutionTargetSelector } from '@/components/execution/execution-target-selector';
+import { getStreamUrlForRunner } from '@/server/actions/embedded-sessions';
 
 interface DebugClientProps {
   test: Test;
@@ -41,17 +46,29 @@ export function DebugClient({ test, repositoryId }: DebugClientProps) {
   const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const stepListRef = useRef<HTMLDivElement>(null);
 
+  // Runner selector + live view state
+  const [executionTarget, setExecutionTarget] = usePreferredRunner();
+  const [streamUrl, setStreamUrl] = useState<string | null>(null);
+
   // Editable code state
   const [localCode, setLocalCode] = useState<string>(test.code || '');
   const lastSentCodeRef = useRef<string>(test.code || '');
   const codeVersionRef = useRef<number>(0);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Start session on mount
+  const isRemote = executionTarget !== 'local';
+
+  // Start session on mount or when execution target changes
   useEffect(() => {
     let cancelled = false;
     async function init() {
-      const result = await startDebugSession(test.id, repositoryId);
+      // Stop any existing session
+      if (sessionId) {
+        await stopDebugSession(sessionId).catch(() => {});
+        setSessionId(null);
+        setState(null);
+      }
+      const result = await startDebugSession(test.id, repositoryId, executionTarget === 'local' ? null : executionTarget);
       if (cancelled) return;
       if (result.error) {
         toast.error(result.error);
@@ -63,7 +80,8 @@ export function DebugClient({ test, repositoryId }: DebugClientProps) {
     return () => {
       cancelled = true;
     };
-  }, [test.id, repositoryId]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [test.id, repositoryId, executionTarget]);
 
   // Poll for state
   useEffect(() => {
@@ -181,6 +199,35 @@ export function DebugClient({ test, repositoryId }: DebugClientProps) {
     };
   }, [sendCmd, handleStop]);
 
+  // Resolve stream URL when execution target changes
+  useEffect(() => {
+    let cancelled = false;
+    if (executionTarget === 'local') {
+      // Use async to avoid synchronous setState in effect
+      Promise.resolve().then(() => { if (!cancelled) setStreamUrl(null); });
+    } else {
+      (async () => {
+        try {
+          const streamInfo = await getStreamUrlForRunner(executionTarget);
+          if (cancelled) return;
+          if (streamInfo?.streamUrl) {
+            const token = streamInfo.streamAuthToken;
+            setStreamUrl(
+              token
+                ? `${streamInfo.streamUrl}?token=${encodeURIComponent(token)}`
+                : streamInfo.streamUrl
+            );
+          } else {
+            setStreamUrl(null);
+          }
+        } catch {
+          if (!cancelled) setStreamUrl(null);
+        }
+      })();
+    }
+    return () => { cancelled = true; };
+  }, [executionTarget]);
+
   const isPaused = state?.status === 'paused';
   const isError = state?.status === 'error';
   const isCompleted = state?.status === 'completed';
@@ -209,6 +256,12 @@ export function DebugClient({ test, repositoryId }: DebugClientProps) {
             <ArrowLeft className="h-4 w-4" />
           </Button>
           <h1 className="text-sm font-medium">Debug: {test.name}</h1>
+          <ExecutionTargetSelector
+            value={executionTarget}
+            onChange={setExecutionTarget}
+            capabilityFilter="run"
+            size="sm"
+          />
           <Badge
             variant="secondary"
             className={`text-white ${statusColor[state?.status || 'initializing']}`}
@@ -268,8 +321,8 @@ export function DebugClient({ test, repositoryId }: DebugClientProps) {
             <Square className="h-4 w-4" />
           </Button>
           <div className="w-px h-5 bg-border mx-1" />
-          {/* Record toggle */}
-          {isRecording ? (
+          {/* Record toggle (local only) */}
+          {!isRemote && (isRecording ? (
             <Button
               variant="destructive"
               size="sm"
@@ -290,29 +343,31 @@ export function DebugClient({ test, repositoryId }: DebugClientProps) {
               <Circle className="h-3 w-3 mr-1 text-red-500 fill-red-500" />
               Record
             </Button>
+          ))}
+          {!isRemote && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={async () => {
+                if (!sessionId) return;
+                const result = await flushDebugTrace(sessionId);
+                const traceUrl = result.url || state?.traceUrl;
+                if (traceUrl) {
+                  window.open(
+                    `https://trace.playwright.dev/?trace=${window.location.origin}${traceUrl}`,
+                    '_blank'
+                  );
+                } else {
+                  toast.error('No trace available');
+                }
+              }}
+              disabled={!sessionId}
+              title="Export Playwright Trace"
+            >
+              <FileSearch className="h-4 w-4 mr-1" />
+              Trace
+            </Button>
           )}
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={async () => {
-              if (!sessionId) return;
-              const result = await flushDebugTrace(sessionId);
-              const traceUrl = result.url || state?.traceUrl;
-              if (traceUrl) {
-                window.open(
-                  `https://trace.playwright.dev/?trace=${window.location.origin}${traceUrl}`,
-                  '_blank'
-                );
-              } else {
-                toast.error('No trace available');
-              }
-            }}
-            disabled={!sessionId}
-            title="Export Playwright Trace"
-          >
-            <FileSearch className="h-4 w-4 mr-1" />
-            Trace
-          </Button>
         </div>
       </div>
 
@@ -367,7 +422,7 @@ export function DebugClient({ test, repositoryId }: DebugClientProps) {
 
           {/* Right Panel — Tabbed: Steps / Network / Console */}
           <ResizablePanel defaultSize={40} minSize={20} className="overflow-hidden">
-            <Tabs defaultValue="steps" className="flex flex-col h-full gap-0">
+            <Tabs defaultValue={streamUrl ? 'liveview' : 'steps'} className="flex flex-col h-full gap-0">
               <div className="px-2 py-1.5 border-b bg-muted/50">
                 <TabsList className="h-7">
                   <TabsTrigger value="steps" className="text-xs px-2 py-0.5 h-6">
@@ -381,6 +436,12 @@ export function DebugClient({ test, repositoryId }: DebugClientProps) {
                     <Terminal className="h-3 w-3 mr-1" />
                     Console{(state?.consoleEntries?.length ?? 0) > 0 && ` (${state!.consoleEntries.length})`}
                   </TabsTrigger>
+                  {streamUrl && (
+                    <TabsTrigger value="liveview" className="text-xs px-2 py-0.5 h-6">
+                      <Tv2 className="h-3 w-3 mr-1" />
+                      Live View
+                    </TabsTrigger>
+                  )}
                 </TabsList>
               </div>
 
@@ -487,6 +548,13 @@ export function DebugClient({ test, repositoryId }: DebugClientProps) {
               <TabsContent value="console" className="flex flex-col flex-1 min-h-0 mt-0 overflow-hidden">
                 <ConsolePanel entries={state?.consoleEntries || []} />
               </TabsContent>
+
+              {/* Live View Tab */}
+              {streamUrl && (
+                <TabsContent value="liveview" className="flex flex-col flex-1 min-h-0 mt-0">
+                  <BrowserViewer streamUrl={streamUrl} className="h-full" />
+                </TabsContent>
+              )}
             </Tabs>
           </ResizablePanel>
         </ResizablePanelGroup>

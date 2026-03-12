@@ -13,6 +13,7 @@ import { StreamServer } from './stream-server.js';
 import { EmbeddedRunnerClient } from './runner-client.js';
 import { EmbeddedTestExecutor } from './test-executor.js';
 import { EmbeddedRecorder } from './embedded-recorder.js';
+import { EmbeddedDebugExecutor } from './debug-executor.js';
 import { CROSS_OS_CHROMIUM_ARGS } from './stabilization.js';
 
 import os from 'os';
@@ -45,7 +46,10 @@ let streamServer: StreamServer | null = null;
 let runnerClient: EmbeddedRunnerClient | null = null;
 let testExecutor: EmbeddedTestExecutor | null = null;
 let recorder: EmbeddedRecorder | null = null;
+let debugExecutor: EmbeddedDebugExecutor | null = null;
+let debugStateReporter: ReturnType<typeof setInterval> | null = null;
 let isRecording = false;
+let isDebugging = false;
 let recordingWatchdog: ReturnType<typeof setInterval> | null = null;
 let lastRecordingEventTime = 0;
 const RECORDING_INACTIVITY_TIMEOUT = 60_000; // 1 minute
@@ -102,10 +106,12 @@ async function startup(): Promise<void> {
 
   // Handle navigate requests from stream clients (toolbar URL bar)
   streamServer.onNavigate = async (url: string) => {
-    // During recording, navigate the recording page instead of idle page
-    const targetPage = (isRecording && recorder?.isActive()) ? recorder.getPage() : page;
+    // During recording/debugging, navigate the active page instead of idle page
+    const targetPage = (isDebugging && debugExecutor?.getPage())
+      ? debugExecutor.getPage()
+      : (isRecording && recorder?.isActive()) ? recorder.getPage() : page;
     if (!targetPage) return;
-    console.log(`[Navigate] ${url} (${isRecording ? 'recording' : 'idle'} page)`);
+    console.log(`[Navigate] ${url} (${isDebugging ? 'debugging' : isRecording ? 'recording' : 'idle'} page)`);
     try {
       await targetPage.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
       streamServer!.broadcastStatus('ready', targetPage.url());
@@ -118,7 +124,9 @@ async function startup(): Promise<void> {
   streamServer.onResize = async (newViewport: { width: number; height: number }) => {
     console.log(`[Resize] ${newViewport.width}x${newViewport.height}`);
     try {
-      if (isRecording && recorder?.isActive()) {
+      if (isDebugging && debugExecutor?.getPage()) {
+        await debugExecutor.getPage()!.setViewportSize(newViewport);
+      } else if (isRecording && recorder?.isActive()) {
         const recordingPage = recorder.getPage();
         if (recordingPage) await recordingPage.setViewportSize(newViewport);
       } else if (page) {
@@ -417,6 +425,145 @@ async function startup(): Promise<void> {
         if (!recorder?.isActive()) break;
         recorder.flagDownload();
         console.log(`[Command] Flagged next click as download trigger`);
+        break;
+      }
+
+      case 'command:insert_timestamp': {
+        if (!recorder?.isActive()) break;
+        await recorder.insertTimestamp();
+        console.log(`[Command] Inserted timestamp`);
+        break;
+      }
+
+      case 'command:start_debug': {
+        if (!browser || !runnerClient) break;
+        const payload = command.payload as {
+          sessionId: string; testId: string; code: string;
+          cleanBody: string; steps: import('./debug-executor.js').DebugStep[];
+          targetUrl: string;
+          viewport?: { width: number; height: number };
+          storageState?: string;
+          setupVariables?: Record<string, unknown>;
+          stabilization?: import('./protocol.js').StabilizationPayload;
+        };
+
+        runnerClient.setStatus('busy', payload.sessionId);
+
+        // Stop screencast/input on idle page
+        await screencast?.stop();
+        await inputHandler?.detach();
+
+        try {
+          debugExecutor = new EmbeddedDebugExecutor(browser);
+          await debugExecutor.start(payload);
+
+          // Attach screencast + input to the debug page
+          const dbgPage = debugExecutor.getPage();
+          if (dbgPage && screencast) {
+            await screencast.start(dbgPage, (frame) => {
+              streamServer!.broadcastFrame(frame.data, frame.width, frame.height, frame.timestamp);
+            });
+            await inputHandler?.attach(dbgPage);
+          }
+
+          isDebugging = true;
+
+          // Start state reporter (250ms interval)
+          debugStateReporter = setInterval(() => {
+            if (debugExecutor && runnerClient) {
+              runnerClient.sendMessage({
+                id: crypto.randomUUID(),
+                type: 'response:debug_state',
+                timestamp: Date.now(),
+                payload: debugExecutor.getState(),
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              } as any).catch(() => {});
+            }
+          }, 250);
+
+          streamServer?.broadcastStatus('debugging', payload.targetUrl);
+          console.log(`[Command] Debug session started for test ${payload.testId}`);
+        } catch (err) {
+          console.error(`[Command] Failed to start debug session:`, err);
+          isDebugging = false;
+          if (debugStateReporter) { clearInterval(debugStateReporter); debugStateReporter = null; }
+          if (debugExecutor) { await debugExecutor.stop(); debugExecutor = null; }
+          // Restore idle page
+          if (page) {
+            try {
+              await screencast?.start(page, (frame) => {
+                streamServer!.broadcastFrame(frame.data, frame.width, frame.height, frame.timestamp);
+              });
+              await inputHandler?.attach(page);
+            } catch (restoreErr) {
+              console.error('[Command] Error restoring idle page after failed debug start:', restoreErr);
+            }
+          }
+          runnerClient.setStatus('idle');
+          streamServer?.broadcastStatus('ready');
+        }
+        break;
+      }
+
+      case 'command:debug_action': {
+        if (!debugExecutor || !runnerClient) break;
+        const payload = command.payload as {
+          sessionId: string;
+          action: 'step_forward' | 'step_back' | 'run_to_end' | 'run_to_step' | 'update_code';
+          stepIndex?: number;
+          code?: string;
+          cleanBody?: string;
+          steps?: import('./debug-executor.js').DebugStep[];
+        };
+
+        await debugExecutor.handleAction(payload.action, payload);
+
+        // After step_back, screencast needs restart on new page (old context closed)
+        if (payload.action === 'step_back') {
+          await screencast?.stop();
+          await inputHandler?.detach();
+          const newPage = debugExecutor.getPage();
+          if (newPage && screencast) {
+            await screencast.start(newPage, (frame) => {
+              streamServer!.broadcastFrame(frame.data, frame.width, frame.height, frame.timestamp);
+            });
+            await inputHandler?.attach(newPage);
+          }
+        }
+        break;
+      }
+
+      case 'command:stop_debug': {
+        if (!runnerClient || !page) break;
+
+        // Clear state reporter
+        if (debugStateReporter) { clearInterval(debugStateReporter); debugStateReporter = null; }
+
+        if (isDebugging && debugExecutor) {
+          try {
+            await screencast?.stop();
+            await inputHandler?.detach();
+            await debugExecutor.stop();
+          } catch (err) {
+            console.error('[Command] Error stopping debug session:', err);
+          }
+          debugExecutor = null;
+          isDebugging = false;
+
+          // Re-attach screencast + input to idle page
+          try {
+            await screencast?.start(page, (frame) => {
+              streamServer!.broadcastFrame(frame.data, frame.width, frame.height, frame.timestamp);
+            });
+            await inputHandler?.attach(page);
+          } catch (err) {
+            console.error('[Command] Error restoring idle page after debug stop:', err);
+          }
+        }
+
+        runnerClient.setStatus('idle');
+        streamServer?.broadcastStatus('ready');
+        console.log(`[Command] Debug session stopped`);
         break;
       }
 
