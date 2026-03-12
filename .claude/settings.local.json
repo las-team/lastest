@@ -121,7 +121,8 @@
       "Bash(pnpm list:*)",
       "Bash(pnpm remove:*)",
       "Bash(wc -l /home/ewyct/dev/lastest2/src/app/\\\\\\(app\\\\\\)/record/recording-client.tsx)",
-      "Bash(grep -A 30 \"getStreamUrlForRunner\" /home/ewyct/dev/lastest2/src/app/\\\\\\(app\\\\\\)/builds/\\\\[buildId\\\\]/page.tsx | head -50)"
+      "Bash(grep -A 30 \"getStreamUrlForRunner\" /home/ewyct/dev/lastest2/src/app/\\\\\\(app\\\\\\)/builds/\\\\[buildId\\\\]/page.tsx | head -50)",
+      "Bash(docker inspect:*)"
     ]
   },
   "disabledMcpjsonServers": [

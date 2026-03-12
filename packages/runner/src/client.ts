@@ -72,7 +72,7 @@ export class RunnerClient {
   constructor(options: RunnerClientOptions) {
     this.token = options.token;
     this.serverUrl = options.serverUrl.replace(/\/$/, '');
-    this.pollInterval = options.pollInterval ?? 3000; // 3 seconds default
+    this.pollInterval = options.pollInterval ?? 1000; // 1s buffer between long-poll cycles
     this.baseUrl = options.baseUrl;
     this.runner = new TestRunner();
     this.recorder = new RemoteRecorder();

@@ -62,3 +62,61 @@ export function emitRunnerStatusChange(event: RunnerStatusEvent): void {
 export function getSubscriberCount(): number {
   return listeners.size;
 }
+
+// ============================================
+// Command-queued long-poll primitives
+// ============================================
+
+type CommandWaiter = () => void;
+
+const globalCommandWaiters = globalThis as typeof globalThis & {
+  __runnerCommandWaiters?: Map<string, CommandWaiter>;
+};
+if (!globalCommandWaiters.__runnerCommandWaiters) {
+  globalCommandWaiters.__runnerCommandWaiters = new Map<string, CommandWaiter>();
+}
+const commandWaiters = globalCommandWaiters.__runnerCommandWaiters;
+
+/**
+ * Wait until a command is queued for this runner, or until timeout.
+ * Returns `true` if notified, `false` on timeout.
+ * Supports an optional AbortSignal for request cancellation.
+ */
+export function waitForCommandQueued(
+  runnerId: string,
+  timeoutMs: number,
+  signal?: AbortSignal,
+): Promise<boolean> {
+  return new Promise<boolean>((resolve) => {
+    if (signal?.aborted) {
+      resolve(false);
+      return;
+    }
+
+    let settled = false;
+    const settle = (value: boolean) => {
+      if (settled) return;
+      settled = true;
+      commandWaiters.delete(runnerId);
+      clearTimeout(timer);
+      resolve(value);
+    };
+
+    const timer = setTimeout(() => settle(false), timeoutMs);
+
+    // AbortSignal listener (request disconnected)
+    signal?.addEventListener('abort', () => settle(false), { once: true });
+
+    commandWaiters.set(runnerId, () => settle(true));
+  });
+}
+
+/**
+ * Wake any pending long-poll waiter for this runner.
+ */
+export function notifyCommandQueued(runnerId: string): void {
+  const waiter = commandWaiters.get(runnerId);
+  if (waiter) {
+    waiter();
+  }
+}

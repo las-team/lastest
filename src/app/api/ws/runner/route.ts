@@ -12,6 +12,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { validateRunnerToken, updateRunnerStatus, markStaleRunnersOffline, deleteStaleSystemRunners } from '@/server/actions/runners';
 import type { Message, HeartbeatMessage, TestResultResponse, SetupResultResponse, ScreenshotUploadResponse, RecordingEventResponse, RecordingStoppedResponse } from '@/lib/ws/protocol';
+import { waitForCommandQueued, notifyCommandQueued } from '@/lib/ws/runner-events';
 import fs from 'fs/promises';
 import path from 'path';
 import { STORAGE_DIRS } from '@/lib/storage/paths';
@@ -83,8 +84,8 @@ if (!globalSessionState.__runnerActiveSessions) {
 }
 const activeRunnerSessions = globalSessionState.__runnerActiveSessions;
 
-// Session timeout in milliseconds (15 seconds = 5x heartbeat interval at 3s)
-const SESSION_TIMEOUT_MS = 15_000;
+// Session timeout in milliseconds (60s — held long-poll connections prove liveness)
+const SESSION_TIMEOUT_MS = 60_000;
 
 // Cleanup interval (60 seconds)
 const CLEANUP_INTERVAL_MS = 60_000;
@@ -220,7 +221,16 @@ export async function POST(request: NextRequest) {
         await updateRunnerStatus(runner.id, status);
 
         // Claim pending commands from DB (limit to maxParallelTests to prevent bulk execution)
-        const claimed = await claimPendingCommands(runner.id, runner.maxParallelTests ?? undefined);
+        let claimed = await claimPendingCommands(runner.id, runner.maxParallelTests ?? undefined);
+
+        // Long-poll: if no commands, wait up to 25s for a command to be queued
+        if (claimed.length === 0) {
+          const notified = await waitForCommandQueued(runner.id, 25_000, request.signal);
+          if (notified) {
+            claimed = await claimPendingCommands(runner.id, runner.maxParallelTests ?? undefined);
+          }
+        }
+
         // Reconstruct Message objects from stored commands
         const commands: Message[] = claimed.map(cmd => ({
           id: cmd.id,
@@ -482,6 +492,7 @@ export async function queueCommandToDB(runnerId: string, command: Message): Prom
     testId: (payload as Record<string, unknown>).testId as string | undefined,
     testRunId: (payload as Record<string, unknown>).testRunId as string | undefined,
   });
+  notifyCommandQueued(runnerId);
 }
 
 /**
