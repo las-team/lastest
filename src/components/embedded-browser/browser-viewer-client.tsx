@@ -10,6 +10,7 @@ type ConnectionStatus = 'connecting' | 'connected' | 'disconnected' | 'error' | 
 
 const MAX_RECONNECT_ATTEMPTS = 5;
 const RECONNECT_BASE_DELAY_MS = 1000;
+const FRAME_STALL_TIMEOUT_MS = 8000; // Reconnect if no frames for 8s while "connected"
 
 const SESSION_EXPIRY_WARN_MS = 5 * 60 * 1000; // Warn when <5 min remain
 
@@ -41,6 +42,8 @@ export function BrowserViewer({ streamUrl, initialViewport, className, expiresAt
   const lastFpsUpdateRef = useRef(0);
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const intentionalCloseRef = useRef(false);
+  const lastFrameTimeRef = useRef(0);
+  const stallCheckRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // Session expiry countdown
   useEffect(() => {
@@ -114,6 +117,22 @@ export function BrowserViewer({ streamUrl, initialViewport, className, expiresAt
       ws.onopen = () => {
         setConnectionStatus('connected');
         setReconnectAttempt(0);
+        lastFrameTimeRef.current = Date.now();
+
+        // Start frame stall detection — if no frames arrive for FRAME_STALL_TIMEOUT_MS,
+        // the CDP screencast likely died silently. Force reconnect to recover.
+        if (stallCheckRef.current) clearInterval(stallCheckRef.current);
+        stallCheckRef.current = setInterval(() => {
+          if (
+            lastFrameTimeRef.current > 0 &&
+            Date.now() - lastFrameTimeRef.current > FRAME_STALL_TIMEOUT_MS &&
+            wsRef.current?.readyState === WebSocket.OPEN
+          ) {
+            console.warn('[BrowserViewer] Frame stall detected — reconnecting');
+            wsRef.current?.close();
+          }
+        }, 3000);
+
         // Apply the initial viewport size to the remote browser
         ws.send(JSON.stringify({
           type: 'stream:session',
@@ -129,6 +148,9 @@ export function BrowserViewer({ streamUrl, initialViewport, className, expiresAt
             case 'stream:frame': {
               const { data, width, height } = message.payload;
               renderFrame(data, width, height);
+
+              // Reset stall timer on every frame
+              lastFrameTimeRef.current = Date.now();
 
               // Update FPS
               frameCountRef.current++;
@@ -159,6 +181,8 @@ export function BrowserViewer({ streamUrl, initialViewport, className, expiresAt
 
       ws.onclose = () => {
         wsRef.current = null;
+        if (stallCheckRef.current) { clearInterval(stallCheckRef.current); stallCheckRef.current = null; }
+        lastFrameTimeRef.current = 0;
         if (intentionalCloseRef.current) {
           setConnectionStatus('disconnected');
           return;
@@ -186,6 +210,7 @@ export function BrowserViewer({ streamUrl, initialViewport, className, expiresAt
 
     return () => {
       intentionalCloseRef.current = true;
+      if (stallCheckRef.current) { clearInterval(stallCheckRef.current); stallCheckRef.current = null; }
       if (reconnectTimerRef.current) {
         clearTimeout(reconnectTimerRef.current);
         reconnectTimerRef.current = null;

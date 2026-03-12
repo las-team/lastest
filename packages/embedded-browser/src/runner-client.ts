@@ -309,19 +309,26 @@ export class EmbeddedRunnerClient {
       headers['X-Session-ID'] = this.sessionId;
     }
 
-    const response = await fetch(`${this.serverUrl}/api/ws/runner`, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify(heartbeat),
-    });
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 15_000);
+    try {
+      const response = await fetch(`${this.serverUrl}/api/ws/runner`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(heartbeat),
+        signal: controller.signal,
+      });
 
-    if (response.ok) {
-      const data = (await response.json()) as HeartbeatResponse;
-      if (data.commands && data.commands.length > 0) {
-        for (const cmd of data.commands) {
-          this.onCommand?.(cmd);
+      if (response.ok) {
+        const data = (await response.json()) as HeartbeatResponse;
+        if (data.commands && data.commands.length > 0) {
+          for (const cmd of data.commands) {
+            this.onCommand?.(cmd);
+          }
         }
       }
+    } finally {
+      clearTimeout(timeout);
     }
   }
 
