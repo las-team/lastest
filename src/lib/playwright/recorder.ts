@@ -297,10 +297,13 @@ export class PlaywrightRecorder extends EventEmitter {
       // Setup event listeners AFTER setup completes (to avoid capturing setup actions)
       await this.setupEventListeners();
 
-      // Record initial navigation event (after setup, page may be on a different URL)
-      const currentUrl = this.page.url();
-      const relativePath = this.getRelativePath(currentUrl);
-      this.addEvent('navigation', { url: currentUrl, relativePath });
+      // Record initial navigation event only if no setup scripts ran
+      // (setup scripts already handle navigation — recording it would duplicate their activity)
+      if (!setupOptions) {
+        const currentUrl = this.page.url();
+        const relativePath = this.getRelativePath(currentUrl);
+        this.addEvent('navigation', { url: currentUrl, relativePath });
+      }
 
       this.isRecording = true;
       this.emit('started', { sessionId, url });
