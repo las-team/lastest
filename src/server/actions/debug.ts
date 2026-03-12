@@ -7,6 +7,8 @@ import { extractTestBody, removeInlineLocateWithFallback, removeInlineReplayCurs
 import { stripTypeAnnotations } from '@/lib/playwright/runner';
 import { queueCommandToDB } from '@/app/api/ws/runner/route';
 import { createRemoteDebugSession, getRemoteDebugSession, clearRemoteDebugSession } from '@/app/api/ws/runner/route';
+import { resolveSetupCodeForRunner } from '@/lib/execution/setup-capture';
+import { executeSetupViaRunner } from '@/lib/execution/executor';
 import type { Message } from '@/lib/ws/protocol';
 
 export async function startDebugSession(
@@ -43,6 +45,32 @@ export async function startDebugSession(
     createRemoteDebugSession(sessionId, runnerId, repoId || null, testId);
 
     const targetUrl = envConfig?.baseUrl || 'about:blank';
+    const viewport = settings?.viewportWidth && settings?.viewportHeight
+      ? { width: settings.viewportWidth, height: settings.viewportHeight }
+      : undefined;
+
+    // Run setup on the remote runner if needed (get storageState for auth)
+    let storageState: string | undefined;
+    let setupVariables: Record<string, unknown> | undefined;
+    const setupInfo = await resolveSetupCodeForRunner([test]);
+    if (setupInfo) {
+      try {
+        const setupResult = await executeSetupViaRunner(
+          setupInfo.code,
+          setupInfo.setupId,
+          runnerId,
+          targetUrl,
+          viewport,
+          settings?.navigationTimeout ?? undefined,
+          settings,
+        );
+        storageState = setupResult.storageState;
+        setupVariables = setupResult.variables;
+      } catch (err) {
+        clearRemoteDebugSession(sessionId);
+        return { sessionId: '', error: `Setup failed: ${err instanceof Error ? err.message : String(err)}` };
+      }
+    }
 
     await queueCommandToDB(runnerId, {
       id: crypto.randomUUID(),
@@ -55,9 +83,9 @@ export async function startDebugSession(
         cleanBody,
         steps,
         targetUrl,
-        viewport: settings?.viewportWidth && settings?.viewportHeight
-          ? { width: settings.viewportWidth, height: settings.viewportHeight }
-          : undefined,
+        viewport,
+        storageState,
+        setupVariables,
         stabilization: settings?.stabilization ?? undefined,
       },
     } as unknown as Message);

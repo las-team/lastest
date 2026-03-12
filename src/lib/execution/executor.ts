@@ -224,7 +224,7 @@ async function executeLocally(
  * Execute setup on a remote runner before tests.
  * Queues a command:run_setup to the DB, polls for completion, and returns storageState.
  */
-async function executeSetupViaRunner(
+export async function executeSetupViaRunner(
   setupCode: string,
   setupId: string,
   runnerId: string,

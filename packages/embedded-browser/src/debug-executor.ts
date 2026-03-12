@@ -531,7 +531,6 @@ export class EmbeddedDebugExecutor {
       const wrappedBody = `
   let __currentStep = -1;
   let __stepStart = 0;
-  const __stepResults = arguments[7];
   ${instrumentedBody}
 `;
 
