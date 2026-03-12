@@ -46,7 +46,7 @@ export async function getDefaultTeardownSteps(repositoryId: string): Promise<Tea
  */
 export async function addDefaultTeardownStep(
   repositoryId: string,
-  stepType: 'test' | 'script',
+  stepType: 'test' | 'script' | 'storage_state',
   itemId: string
 ) {
   await requireRepoAccess(repositoryId);
