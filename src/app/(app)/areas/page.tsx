@@ -45,7 +45,7 @@ export default async function AreasPage() {
 
   const uncategorizedTests = tests
     .filter((t) => !t.functionalAreaId)
-    .map((t) => ({ id: t.id, name: t.name, latestStatus: t.latestStatus, isPlaceholder: t.isPlaceholder ?? false }));
+    .map((t) => ({ id: t.id, name: t.name, description: t.description, latestStatus: t.latestStatus, isPlaceholder: t.isPlaceholder ?? false }));
 
   const banAiMode = session?.team?.banAiMode ?? false;
 

@@ -388,6 +388,17 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
                     <CardTitle className="flex items-center gap-2">
                       {test.name}
                     </CardTitle>
+                    {test.description && (
+                      test.description.includes('\n') ? (
+                        <ul className="text-sm text-muted-foreground mt-1 list-disc list-inside space-y-0.5">
+                          {test.description.split('\n').filter(Boolean).map((line, i) => (
+                            <li key={i}>{line}</li>
+                          ))}
+                        </ul>
+                      ) : (
+                        <p className="text-sm text-muted-foreground mt-1">{test.description}</p>
+                      )
+                    )}
                     <CardDescription>
                       {test.targetUrl || 'No target URL'}
                     </CardDescription>
