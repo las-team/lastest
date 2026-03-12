@@ -141,7 +141,7 @@ export async function sendDiscordBugReport(
       const buf = Buffer.isBuffer(notification.screenshotBuffer)
         ? notification.screenshotBuffer
         : Buffer.from(notification.screenshotBuffer);
-      const file = new File([buf], 'screenshot.png', { type: 'image/png' });
+      const file = new File([buf as unknown as BlobPart], 'screenshot.png', { type: 'image/png' });
       const formData = new FormData();
       formData.append('payload_json', payload);
       formData.append('files[0]', file);
