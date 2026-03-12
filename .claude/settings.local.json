@@ -119,7 +119,8 @@
       "WebFetch(domain:fsl.software)",
       "Bash(cd /home/ewyct/.claude/skills/excalidraw-diagram/references && uv run python render_excalidraw.py /home/ewyct/dev/lastest2/docs/development-flow.excalidraw)",
       "Bash(pnpm list:*)",
-      "Bash(pnpm remove:*)"
+      "Bash(pnpm remove:*)",
+      "Bash(wc -l /home/ewyct/dev/lastest2/src/app/\\\\\\(app\\\\\\)/record/recording-client.tsx)"
     ]
   },
   "disabledMcpjsonServers": [

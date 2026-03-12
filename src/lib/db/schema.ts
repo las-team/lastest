@@ -1474,3 +1474,23 @@ export const testFixtures = sqliteTable('test_fixtures', {
 
 export type TestFixture = typeof testFixtures.$inferSelect;
 export type NewTestFixture = typeof testFixtures.$inferInsert;
+
+// ============================================
+// Storage States (saved browser auth for recordings)
+// ============================================
+
+export const storageStates = sqliteTable('storage_states', {
+  id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+  repositoryId: text('repository_id').references(() => repositories.id, { onDelete: 'cascade' }),
+  name: text('name').notNull(),
+  storageStateJson: text('storage_state_json').notNull(),
+  cookieCount: integer('cookie_count').default(0),
+  originCount: integer('origin_count').default(0),
+  createdAt: integer('created_at', { mode: 'timestamp' }).$defaultFn(() => new Date()),
+  updatedAt: integer('updated_at', { mode: 'timestamp' }).$defaultFn(() => new Date()),
+}, (table) => ([
+  index('idx_storage_states_repo').on(table.repositoryId),
+]));
+
+export type StorageState = typeof storageStates.$inferSelect;
+export type NewStorageState = typeof storageStates.$inferInsert;

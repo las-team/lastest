@@ -141,6 +141,8 @@ export class PlaywrightRecorder extends EventEmitter {
   private stabilizationSettings: StabilizationSettings = DEFAULT_STABILIZATION_SETTINGS;
   private verificationUpdates: Map<string, { verified: boolean; timestamp: number }> = new Map();
   private nextClickIsDownload = false;
+  private storageState: string | null = null;
+  private capturedStorageState: string | null = null;
 
   constructor(repositoryId?: string | null, screenshotDir?: string) {
     super();
@@ -181,6 +183,14 @@ export class PlaywrightRecorder extends EventEmitter {
     this.clipboardAccess = enabled;
   }
 
+  setStorageState(state: string | null) {
+    this.storageState = state;
+  }
+
+  getCapturedStorageState(): string | null {
+    return this.capturedStorageState;
+  }
+
   setStabilizationSettings(settings: StabilizationSettings) {
     this.stabilizationSettings = settings;
   }
@@ -211,9 +221,11 @@ export class PlaywrightRecorder extends EventEmitter {
         : this.browserType === 'webkit' ? webkit
         : chromium;
       const needsCrossOs = this.stabilizationSettings.crossOsConsistency && this.browserType === 'chromium';
-      const launchArgs = needsCrossOs
-        ? [...CROSS_OS_CHROMIUM_ARGS, '--start-maximized']
-        : ['--start-maximized'];
+      const launchArgs = [
+        ...(needsCrossOs ? CROSS_OS_CHROMIUM_ARGS : []),
+        '--start-maximized',
+        '--disable-blink-features=AutomationControlled',
+      ];
       this.browser = await browserLauncher.launch({
         headless: this.headless,
         args: launchArgs,
@@ -225,6 +237,7 @@ export class PlaywrightRecorder extends EventEmitter {
         acceptDownloads: true, // Always enable during recording so downloads are detected
         ...(this.clipboardAccess ? { permissions: ['clipboard-read', 'clipboard-write'] } : {}),
         ...(this.stabilizationSettings.crossOsConsistency ? { deviceScaleFactor: 1 } : {}),
+        ...(this.storageState ? { storageState: JSON.parse(this.storageState) } : {}),
       });
 
       this.page = await this.context.newPage();
@@ -1278,11 +1291,23 @@ export class PlaywrightRecorder extends EventEmitter {
     this.session.requiredCapabilities = this.detectRequiredCapabilities();
     this.addEvent('complete', { code: this.session.generatedCode });
 
+    // Capture storage state (cookies/localStorage) before cleanup
+    this.capturedStorageState = null;
+    if (this.context) {
+      try {
+        const state = await this.context.storageState();
+        this.capturedStorageState = JSON.stringify(state);
+      } catch {}
+    }
+
     const session = { ...this.session };
     this.lastCompletedSession = session; // Store for retrieval
 
     await this.cleanup();
     this.emit('stopped', session);
+    if (this.capturedStorageState) {
+      this.emit('storageStateCaptured', this.capturedStorageState);
+    }
 
     return session;
   }

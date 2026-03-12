@@ -21,9 +21,10 @@ import {
 } from '@/components/ui/collapsible';
 import { SelectorPriorityList } from './selector-priority-list';
 import { savePlaywrightSettings, resetPlaywrightSettings, getSelectorStatsAction } from '@/server/actions/settings';
+import { listStorageStates, removeStorageState } from '@/server/actions/storage-states';
 import { DEFAULT_SELECTOR_PRIORITY, DEFAULT_STABILIZATION_SETTINGS } from '@/lib/db/schema';
 import type { SelectorConfig, PlaywrightSettings, HeadlessMode, RecordingEngine, StabilizationSettings, SelectorType } from '@/lib/db/schema';
-import { Loader2, RotateCcw, List, Video, MousePointer, Pause, Clock, Layers, ChevronDown, Shield, ShieldCheck, Hourglass, Type, Ban, Eye, Camera, EyeOff, Info, ClipboardCopy, Download, Globe } from 'lucide-react';
+import { Loader2, RotateCcw, List, Video, MousePointer, Pause, Clock, Layers, ChevronDown, Shield, ShieldCheck, Hourglass, Type, Ban, Eye, Camera, EyeOff, Info, ClipboardCopy, Download, Globe, Cookie, Trash2 } from 'lucide-react';
 import { Slider } from '@/components/ui/slider';
 import { Badge } from '@/components/ui/badge';
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip';
@@ -92,6 +93,7 @@ export function PlaywrightSettingsCard({
   );
   const [stabilizationOpen, setStabilizationOpen] = useState(false);
   const [selectorStats, setSelectorStats] = useState<SelectorTypeStats[]>([]);
+  const [savedStorageStates, setSavedStorageStates] = useState<Array<{ id: string; name: string; cookieCount: number | null; originCount: number | null; createdAt: Date | null }>>([]);
 
   const debounceRef = useRef<NodeJS.Timeout | null>(null);
 
@@ -185,6 +187,7 @@ export function PlaywrightSettingsCard({
     if (!repositoryId) return;
 
     getSelectorStatsAction(repositoryId).then(setSelectorStats).catch(console.error);
+    listStorageStates(repositoryId).then(setSavedStorageStates).catch(console.error);
   }, [repositoryId]);
 
   // Calculate recommendations based on current priority and stats
@@ -1235,6 +1238,42 @@ export function PlaywrightSettingsCard({
             </div>
           </div>
         </>
+      )}
+
+      {/* Saved Auth States - hidden in compact mode */}
+      {!compact && savedStorageStates.length > 0 && (
+        <Collapsible>
+          <CollapsibleTrigger className="flex items-center gap-2 w-full py-2 text-sm font-medium hover:text-primary transition-colors">
+            <Cookie className="w-4 h-4" />
+            Saved Auth States ({savedStorageStates.length})
+            <ChevronDown className="w-4 h-4 ml-auto transition-transform data-[state=open]:rotate-180" />
+          </CollapsibleTrigger>
+          <CollapsibleContent className="space-y-2 pt-2">
+            {savedStorageStates.map(state => (
+              <div key={state.id} className="flex items-center justify-between p-2 bg-muted/50 rounded-lg border text-sm">
+                <div className="flex items-center gap-2 min-w-0">
+                  <Cookie className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                  <span className="font-medium truncate">{state.name}</span>
+                  <Badge variant="secondary" className="text-xs shrink-0">
+                    {state.cookieCount ?? 0} cookies
+                  </Badge>
+                </div>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-7 w-7 shrink-0"
+                  onClick={async () => {
+                    await removeStorageState(state.id);
+                    setSavedStorageStates(prev => prev.filter(s => s.id !== state.id));
+                    toast.success('Auth state deleted');
+                  }}
+                >
+                  <Trash2 className="h-3.5 w-3.5 text-muted-foreground" />
+                </Button>
+              </div>
+            ))}
+          </CollapsibleContent>
+        </Collapsible>
       )}
 
       {/* Reset button - hidden in compact mode */}

@@ -22,3 +22,4 @@ export * from './queries/misc';
 export * from './queries/github-actions';
 export * from './queries/analytics';
 export * from './queries/fixtures';
+export * from './queries/storage-states';

@@ -77,7 +77,8 @@ export async function startRecording(
   url: string,
   repositoryId?: string | null,
   runnerId?: string,
-  setupOptions?: { testId?: string | null; scriptId?: string | null; steps?: Array<{ stepType: 'test' | 'script'; testId?: string | null; scriptId?: string | null }> }
+  setupOptions?: { testId?: string | null; scriptId?: string | null; steps?: Array<{ stepType: 'test' | 'script'; testId?: string | null; scriptId?: string | null }> },
+  storageStateId?: string,
 ): Promise<{ sessionId?: string; resolvedRunnerId?: string; error?: string }> {
   await requireTeamAccess();
   // Validate URL format
@@ -175,6 +176,15 @@ export async function startRecording(
   recorder.setClipboardAccess(settings.grantClipboardAccess ?? false);
   recorder.setStabilizationSettings(settings.stabilization);
 
+  // Load storage state if specified
+  if (storageStateId) {
+    const { getStorageState } = await import('@/lib/db/queries');
+    const state = await getStorageState(storageStateId);
+    recorder.setStorageState(state?.storageStateJson ?? null);
+  } else {
+    recorder.setStorageState(null);
+  }
+
   try {
     await recorder.startRecording(url, sessionId, setupOptions);
     return { sessionId };
@@ -234,7 +244,8 @@ export async function stopRecording(repositoryId?: string | null) {
   // Local recording
   const recorder = getRecorder(repositoryId);
   const session = await recorder.stopRecording();
-  return session;
+  const capturedStorageState = recorder.getCapturedStorageState();
+  return { ...session, capturedStorageState };
 }
 
 export async function captureScreenshot(repositoryId?: string | null) {
@@ -363,6 +374,7 @@ export async function getRecordingStatus(repositoryId?: string | null, sinceSequ
       generatedCode: lastCompleted.generatedCode,
       requiredCapabilities: lastCompleted.requiredCapabilities,
     } : null,
+    capturedStorageState: recorder.getCapturedStorageState(),
   };
 }
 

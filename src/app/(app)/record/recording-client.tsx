@@ -32,6 +32,7 @@ import {
   finalizeInspectorSession,
   type PlaywrightAvailability,
 } from '@/server/actions/recording';
+import { listStorageStates, saveStorageState } from '@/server/actions/storage-states';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -65,6 +66,7 @@ import {
   Download,
   Maximize2,
   Minimize2,
+  Cookie,
 } from 'lucide-react';
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
@@ -263,6 +265,10 @@ export function RecordingClient({
   const [inspectorSessionId, setInspectorSessionId] = useState<string | null>(null);
   const [executionTarget, setExecutionTarget] = usePreferredRunner();
   const [runSetupBeforeRecording, setRunSetupBeforeRecording] = useState(true);
+  const [selectedStorageStateId, setSelectedStorageStateId] = useState<string | null>(null);
+  const [storageStateOptions, setStorageStateOptions] = useState<Array<{ id: string; name: string; cookieCount: number; originCount: number }>>([]);
+  const [capturedStorageState, setCapturedStorageState] = useState<string | null>(null);
+  const [saveCookieName, setSaveCookieName] = useState('');
 
   // Re-record mode
   const isRerecording = !!rerecordTest;
@@ -274,6 +280,15 @@ export function RecordingClient({
       setPlaywrightStatus(status);
     }
     verifyPlaywright();
+  }, [repositoryId]);
+
+  // Load saved storage states
+  useEffect(() => {
+    async function loadStorageStates() {
+      const states = await listStorageStates(repositoryId ?? null);
+      setStorageStateOptions(states.map(s => ({ id: s.id, name: s.name, cookieCount: s.cookieCount ?? 0, originCount: s.originCount ?? 0 })));
+    }
+    loadStorageStates();
   }, [repositoryId]);
 
   // Setup form state - pre-fill from rerecordTest if available
@@ -312,6 +327,7 @@ export function RecordingClient({
           if (status.lastCompletedSession) {
             setGeneratedCode(status.lastCompletedSession.generatedCode);
             setRequiredCapabilities(status.lastCompletedSession.requiredCapabilities ?? null);
+            setCapturedStorageState(status.capturedStorageState ?? null);
             await clearLastCompletedSession(repositoryId);
             setStep('saving');
           } else {
@@ -454,7 +470,7 @@ export function RecordingClient({
             }
           : undefined;
 
-        const result = await startRecording(url, repositoryId, executionTarget, setupOptions);
+        const result = await startRecording(url, repositoryId, executionTarget, setupOptions, selectedStorageStateId ?? undefined);
 
         if (result.error) {
           setError(result.error);
@@ -533,6 +549,7 @@ export function RecordingClient({
       if (session) {
         setGeneratedCode(session.generatedCode);
         setRequiredCapabilities(session.requiredCapabilities ?? null);
+        setCapturedStorageState(session.capturedStorageState ?? null);
         setStep('saving');
       }
     } catch (error) {
@@ -836,6 +853,37 @@ export function RecordingClient({
                     </TooltipProvider>
                   );
                 })()}
+
+                {/* Storage State (Saved Auth) Picker */}
+                {storageStateOptions.length > 0 && (
+                  <div className="flex items-center justify-between p-3 bg-muted/50 rounded-lg border">
+                    <div className="flex items-center gap-3">
+                      <Cookie className="h-4 w-4 text-muted-foreground" />
+                      <div className="space-y-0.5">
+                        <Label className="text-sm font-medium">Load Saved Auth</Label>
+                        <p className="text-xs text-muted-foreground">
+                          Restore cookies & localStorage from a previous session
+                        </p>
+                      </div>
+                    </div>
+                    <Select
+                      value={selectedStorageStateId ?? 'none'}
+                      onValueChange={(v) => setSelectedStorageStateId(v === 'none' ? null : v)}
+                    >
+                      <SelectTrigger className="w-48">
+                        <SelectValue placeholder="None" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="none">None</SelectItem>
+                        {storageStateOptions.map(s => (
+                          <SelectItem key={s.id} value={s.id}>
+                            {s.name} ({s.cookieCount} cookies)
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                )}
 
                 {/* Error Display */}
                 {error && (
@@ -1343,6 +1391,42 @@ export function RecordingClient({
               </pre>
             </div>
 
+            {/* Save cookies from this session */}
+            {capturedStorageState && (
+              <div className="p-3 bg-muted/50 rounded-lg border space-y-2">
+                <div className="flex items-center gap-2">
+                  <Cookie className="h-4 w-4 text-muted-foreground" />
+                  <span className="text-sm font-medium">Save Auth State</span>
+                  <span className="text-xs text-muted-foreground">
+                    (cookies & localStorage from this session)
+                  </span>
+                </div>
+                <div className="flex gap-2">
+                  <Input
+                    placeholder="Name (e.g., Google Login)"
+                    value={saveCookieName}
+                    onChange={(e) => setSaveCookieName(e.target.value)}
+                    className="flex-1"
+                  />
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    disabled={!saveCookieName.trim()}
+                    onClick={async () => {
+                      if (!capturedStorageState || !saveCookieName.trim()) return;
+                      await saveStorageState(repositoryId ?? null, saveCookieName.trim(), capturedStorageState);
+                      const states = await listStorageStates(repositoryId ?? null);
+                      setStorageStateOptions(states.map(s => ({ id: s.id, name: s.name, cookieCount: s.cookieCount ?? 0, originCount: s.originCount ?? 0 })));
+                      setCapturedStorageState(null);
+                      setSaveCookieName('');
+                    }}
+                  >
+                    Save
+                  </Button>
+                </div>
+              </div>
+            )}
+
             <div className="flex gap-2 justify-end">
               <Button
                 variant="outline"
@@ -1350,6 +1434,7 @@ export function RecordingClient({
                   setStep('setup');
                   setGeneratedCode('');
                   setRequiredCapabilities(null);
+                  setCapturedStorageState(null);
                   setEvents([]);
                   setScreenshots([]);
                   lastSequenceRef.current = 0;
