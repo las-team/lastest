@@ -126,6 +126,7 @@ export class PlaywrightRecorder extends EventEmitter {
   private lastCompletedSession: RecordingSession | null = null;
   private screenshotDir: string;
   private isRecording = false;
+  private _isPaused = false;
   private repositoryId: string | null;
   private settings: CursorSettings = { pointerGestures: false, cursorFPS: 30 };
   private ocrEnabled = false;
@@ -325,6 +326,7 @@ export class PlaywrightRecorder extends EventEmitter {
       }
 
       this.isRecording = true;
+      this._isPaused = false;
       this.emit('started', { sessionId, url });
     } catch (error) {
       await this.cleanup();
@@ -1217,6 +1219,7 @@ export class PlaywrightRecorder extends EventEmitter {
 
   private addEvent(type: RecordingEvent['type'], data: RecordingEvent['data'], status: 'preview' | 'committed' = 'committed', verification?: VerificationStatus) {
     if (!this.session) return;
+    if (this._isPaused && type !== 'complete') return;
 
     const event: RecordingEvent = {
       type,
@@ -1284,6 +1287,7 @@ export class PlaywrightRecorder extends EventEmitter {
     }
 
     this.isRecording = false;
+    this._isPaused = false;
 
     // Await all pending OCR extractions before generating code
     if (this.pendingOcrPromises.length > 0) {
@@ -1830,6 +1834,22 @@ export class PlaywrightRecorder extends EventEmitter {
 
   isActive(): boolean {
     return this.isRecording;
+  }
+
+  isPaused(): boolean {
+    return this._isPaused;
+  }
+
+  pauseRecording(): void {
+    if (!this.isRecording) return;
+    this._isPaused = true;
+    this.emit('paused');
+  }
+
+  resumeRecording(): void {
+    if (!this.isRecording) return;
+    this._isPaused = false;
+    this.emit('resumed');
   }
 
   // Get and clear pending verification updates

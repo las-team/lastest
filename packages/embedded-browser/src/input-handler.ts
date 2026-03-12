@@ -58,6 +58,25 @@ function getModifierFlags(modifiers?: { ctrl?: boolean; shift?: boolean; alt?: b
   return flags;
 }
 
+const KEY_TO_VK: Record<string, number> = {
+  Backspace: 8, Tab: 9, Enter: 13, Shift: 16, Control: 17, Alt: 18,
+  Escape: 27, Space: 32, ' ': 32,
+  PageUp: 33, PageDown: 34, End: 35, Home: 36,
+  ArrowLeft: 37, ArrowUp: 38, ArrowRight: 39, ArrowDown: 40,
+  Insert: 45, Delete: 46,
+  Meta: 91,
+  F1: 112, F2: 113, F3: 114, F4: 115, F5: 116, F6: 117,
+  F7: 118, F8: 119, F9: 120, F10: 121, F11: 122, F12: 123,
+  NumLock: 144, ScrollLock: 145,
+  CapsLock: 20, ContextMenu: 93, PrintScreen: 44, Pause: 19,
+};
+
+function getVirtualKeyCode(key: string): number {
+  if (KEY_TO_VK[key] !== undefined) return KEY_TO_VK[key];
+  if (key.length === 1) return key.toUpperCase().charCodeAt(0);
+  return 0;
+}
+
 export class InputHandler {
   private cdpSession: CDPSession | null = null;
   private page: Page | null = null;
@@ -174,6 +193,7 @@ export class InputHandler {
     switch (event.action) {
       case 'keydown': {
         const isChar = event.text && event.text.length === 1;
+        const vk = getVirtualKeyCode(event.key);
         // Non-printable keys (Backspace, Enter, Tab, arrows, etc.) need rawKeyDown;
         // keyDown generates a char event which swallows the key for non-printable keys
         await this.cdpSession.send('Input.dispatchKeyEvent', {
@@ -182,6 +202,8 @@ export class InputHandler {
           code: event.code ?? '',
           text: event.text ?? '',
           modifiers,
+          windowsVirtualKeyCode: vk,
+          nativeVirtualKeyCode: vk,
         });
         // For printable chars, also send the char event explicitly
         if (isChar) {
@@ -191,34 +213,45 @@ export class InputHandler {
             code: event.code ?? '',
             text: event.text ?? '',
             modifiers,
+            windowsVirtualKeyCode: vk,
+            nativeVirtualKeyCode: vk,
           });
         }
         break;
       }
 
-      case 'keyup':
+      case 'keyup': {
+        const vkUp = getVirtualKeyCode(event.key);
         await this.cdpSession.send('Input.dispatchKeyEvent', {
           type: 'keyUp',
           key: event.key,
           code: event.code ?? '',
           modifiers,
+          windowsVirtualKeyCode: vkUp,
+          nativeVirtualKeyCode: vkUp,
         });
         break;
+      }
 
       case 'type':
         // Type each character individually
         if (event.text) {
           for (const char of event.text) {
+            const vkChar = getVirtualKeyCode(char);
             await this.cdpSession.send('Input.dispatchKeyEvent', {
               type: 'keyDown',
               key: char,
               text: char,
               modifiers,
+              windowsVirtualKeyCode: vkChar,
+              nativeVirtualKeyCode: vkChar,
             });
             await this.cdpSession.send('Input.dispatchKeyEvent', {
               type: 'keyUp',
               key: char,
               modifiers,
+              windowsVirtualKeyCode: vkChar,
+              nativeVirtualKeyCode: vkChar,
             });
           }
         }

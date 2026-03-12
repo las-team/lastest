@@ -20,6 +20,7 @@ import {
   captureScreenshot,
   createAssertion,
   flagDownload,
+  togglePauseRecording,
   saveRecordedTest,
   updateRerecordedTest,
   getOrCreateFunctionalArea,
@@ -63,6 +64,7 @@ import {
   Keyboard,
   ShieldCheck,
   Play,
+  Pause,
   Download,
   Maximize2,
   Minimize2,
@@ -312,6 +314,7 @@ export function RecordingClient({
   const [embeddedStreamUrl, setEmbeddedStreamUrl] = useState<string | null>(null);
   const [timelineOpen, setTimelineOpen] = useState(true);
   const [isRecordingFullscreen, setIsRecordingFullscreen] = useState(false);
+  const [isPaused, setIsPaused] = useState(false);
   const recordingLayoutRef = useRef<HTMLDivElement>(null);
 
   // Poll for recording status and events when in recording step
@@ -337,6 +340,11 @@ export function RecordingClient({
           }
           clearInterval(pollInterval);
           return;
+        }
+
+        // Sync pause state
+        if (status.isPaused !== undefined) {
+          setIsPaused(status.isPaused);
         }
 
         // Apply verification updates to existing events
@@ -538,6 +546,15 @@ export function RecordingClient({
       // Event will come through polling
     } catch (error) {
       console.error('Failed to flag download:', error);
+    }
+  };
+
+  const handleTogglePause = async () => {
+    try {
+      const result = await togglePauseRecording(repositoryId);
+      setIsPaused(result.paused);
+    } catch (error) {
+      console.error('Failed to toggle pause:', error);
     }
   };
 
@@ -1103,10 +1120,13 @@ export function RecordingClient({
           {/* Floating mini-menu — fixed at bottom center */}
           <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 flex items-center gap-1.5 px-3 py-1.5 bg-card/95 backdrop-blur-sm border border-border rounded-full shadow-2xl">
             <div className="flex items-center gap-2 px-1">
-              <div className="h-2.5 w-2.5 rounded-full bg-red-500 animate-pulse" />
-              <span className="text-sm font-medium text-foreground">Recording</span>
+              <div className={`h-2.5 w-2.5 rounded-full ${isPaused ? 'bg-yellow-500' : 'bg-red-500 animate-pulse'}`} />
+              <span className="text-sm font-medium text-foreground">{isPaused ? 'Paused' : 'Recording'}</span>
             </div>
             <div className="w-px h-5 bg-border" />
+            <Button variant="ghost" size="icon" className="h-8 w-8" onClick={handleTogglePause} title={isPaused ? 'Resume recording' : 'Pause recording'}>
+              {isPaused ? <Play className="h-4 w-4" /> : <Pause className="h-4 w-4" />}
+            </Button>
             <Button variant="ghost" size="icon" className="h-8 w-8" onClick={handleCaptureScreenshot} title="Screenshot">
               <Camera className="h-4 w-4" />
             </Button>
@@ -1181,8 +1201,8 @@ export function RecordingClient({
             <CardHeader className="pb-3">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-3">
-                  <div className="h-3 w-3 rounded-full bg-red-500 animate-pulse" />
-                  <CardTitle>Recording in Progress</CardTitle>
+                  <div className={`h-3 w-3 rounded-full ${isPaused ? 'bg-yellow-500' : 'bg-red-500 animate-pulse'}`} />
+                  <CardTitle>{isPaused ? 'Recording Paused' : 'Recording in Progress'}</CardTitle>
                 </div>
                 <Badge variant="outline">{testName}</Badge>
               </div>
@@ -1190,6 +1210,10 @@ export function RecordingClient({
             </CardHeader>
             <CardContent>
               <div className="flex gap-2">
+                <Button onClick={handleTogglePause} variant={isPaused ? 'default' : 'outline'}>
+                  {isPaused ? <Play className="h-4 w-4 mr-2" /> : <Pause className="h-4 w-4 mr-2" />}
+                  {isPaused ? 'Resume' : 'Pause'}
+                </Button>
                 <Button onClick={handleCaptureScreenshot} variant="outline">
                   <Camera className="h-4 w-4 mr-2" />
                   Screenshot

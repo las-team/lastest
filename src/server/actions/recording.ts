@@ -315,6 +315,18 @@ export async function flagDownload(repositoryId?: string | null): Promise<{ succ
   return { success };
 }
 
+export async function togglePauseRecording(repositoryId?: string | null): Promise<{ paused: boolean }> {
+  await requireTeamAccess();
+  const recorder = getRecorder(repositoryId);
+  if (recorder.isPaused()) {
+    recorder.resumeRecording();
+    return { paused: false };
+  } else {
+    recorder.pauseRecording();
+    return { paused: true };
+  }
+}
+
 export async function getRecordingStatus(repositoryId?: string | null, sinceSequence?: number) {
   await requireTeamAccess();
   // Check for remote recording session first
@@ -362,6 +374,7 @@ export async function getRecordingStatus(repositoryId?: string | null, sinceSequ
 
   return {
     isRecording: recorder.isActive(),
+    isPaused: recorder.isPaused(),
     events,
     lastSequence,
     verificationUpdates,

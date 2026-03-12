@@ -9,7 +9,7 @@ Network Interception
 Migrate to gh app /home/ewyct/.claude/plans/cheeky-sparking-torvalds.md
 Stripe
 Stability, excalidraw tests
-multiple envs to run tests in
+multiple envs to run tests in w url providing in parallel
 self-test suite finish
 visualize selector stats
 ## ideas
