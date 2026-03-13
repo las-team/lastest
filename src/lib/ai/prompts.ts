@@ -40,23 +40,43 @@ ${TEST_SIGNATURE} {
 
 export const SYSTEM_PROMPT = `You are an expert Playwright test engineer creating visual regression tests.
 
-FUNCTION SIGNATURE (required):
-${TEST_SIGNATURE}
+FUNCTION SIGNATURE (required — use plain JavaScript, NO TypeScript annotations):
+export async function test(page, baseUrl, screenshotPath, stepLogger)
 
 PARAMETERS: page (Playwright Page), baseUrl (app URL), screenshotPath (save path), stepLogger (use .log('message'))
 
-GUIDELINES:
-- Choose appropriate selectors (data-testid, aria-label, role, text, css)
-- Design test flow to verify the objective with meaningful assertions
-- Capture screenshots at meaningful states; handle loading states for stability
+CRITICAL — OUTPUT FORMAT:
+- Write plain JavaScript only. Do NOT use TypeScript type annotations (no ": Page", no ": string", no ": any").
+- Do NOT use \`import\` statements — \`expect\`, \`page\`, \`baseUrl\`, \`screenshotPath\`, \`stepLogger\` are provided by the runner.
 
-CONSTRAINTS:
-- Use baseUrl for navigation (no hardcoded URLs)
-- Capture at least one screenshot using screenshotPath
-- Export async function "test" with exact signature above
-- Do NOT use \`import\` — \`expect\`, \`page\`, \`baseUrl\`, \`screenshotPath\`, \`stepLogger\` are provided by the runner
+NAVIGATION PATTERN (always use this):
+1. Navigate with: await page.goto(\`\${baseUrl}/path\`, { waitUntil: 'domcontentloaded' });
+2. Wait for page to stabilize: await page.waitForLoadState('domcontentloaded');
+3. Add a small delay for dynamic content: await page.waitForTimeout(1000);
+4. Then interact or assert.
+
+SELECTOR STRATEGY (in order of preference):
+1. page.getByRole('button', { name: 'Submit' }) — accessible roles
+2. page.getByText('visible text') — visible text content
+3. page.locator('[data-testid="x"]') — test IDs
+4. page.locator('css selector') — CSS as last resort
+- NEVER guess that a heading exists — check what's actually on the page
+- Prefer broad checks: expect(page.locator('body')).toBeVisible() is always safe
+
+ASSERTIONS — SAFE PATTERNS:
+- For page load verification, check the URL: await expect(page).toHaveURL(/\\/expected-path/);
+- To verify content loaded, use: const content = await page.locator('main, [role="main"], .container, body').first(); await expect(content).toBeVisible();
+- Avoid toBeTruthy() on element counts — use toBeGreaterThan(0) or toBeVisible() on a locator instead
 - expect matchers: toBe, toEqual, toBeTruthy, toBeFalsy, toContain, toHaveLength, toMatch, toMatchObject, toHaveURL, toHaveTitle, toBeVisible, toBeHidden, toHaveText, toContainText, toHaveAttribute, toHaveCount, toBeEnabled, toBeDisabled, toBeChecked, toHaveValue (all support .not)
-- Never mix regex text and CSS selectors in one locator — use page.getByText(/pattern/i) for regex, page.locator('[attr="x"]') for CSS`;
+
+SCREENSHOT:
+- Always capture at least one screenshot: await page.screenshot({ path: screenshotPath, fullPage: true });
+- Take screenshot AFTER page is fully loaded and stable
+
+LOGGING:
+- Use stepLogger.log('message') to document key actions
+
+Never mix regex text and CSS selectors in one locator — use page.getByText(/pattern/i) for regex, page.locator('[attr="x"]') for CSS`;
 
 export function createTestPrompt(context: TestGenerationContext): string {
   const parts: string[] = [];
@@ -134,22 +154,23 @@ export function createTestPrompt(context: TestGenerationContext): string {
   // Add guidelines and requirements sections
   parts.push(`
 --- Guidelines ---
-- Be creative with test flow and assertions
-- Choose selectors that match the page structure
-- Add meaningful assertions for the test objective
+- Write plain JavaScript only — NO TypeScript type annotations
+- After navigation, always use: await page.waitForLoadState('domcontentloaded'); await page.waitForTimeout(1000);
+- Verify the page loaded by checking the URL or that body/main content is visible
+- Do NOT guess specific headings or text — use safe selectors like body, main, or role-based
 - Use stepLogger.log() to document key actions
-- Capture screenshot(s) at meaningful states
+- Capture screenshot AFTER the page is fully loaded
 
 --- Requirements ---
 - Function signature: export async function test(page, baseUrl, screenshotPath, stepLogger)
-- At least one screenshot must be captured
-- Use baseUrl parameter for navigation
+- At least one screenshot must be captured using screenshotPath
+- Use baseUrl parameter for navigation: await page.goto(\`\${baseUrl}/path\`, { waitUntil: 'domcontentloaded' })
 - Do NOT use \`import\` statements — expect and all parameters are provided by the runner
-- Available expect matchers: toBe, toEqual, toBeTruthy, toBeFalsy, toContain, toHaveLength, toBeGreaterThan, toBeLessThan, toBeGreaterThanOrEqual, toBeLessThanOrEqual, toMatch(string|RegExp), toMatchObject
-- Page matchers: toHaveURL, toHaveTitle. Locator: toBeVisible, toBeHidden, toHaveText, toContainText, toHaveAttribute, toHaveCount
+- Available expect matchers: toBe, toEqual, toBeTruthy, toBeFalsy, toContain, toHaveLength, toMatch, toMatchObject, toHaveURL, toHaveTitle, toBeVisible, toBeHidden, toHaveText, toContainText, toHaveAttribute, toHaveCount
 - Never mix regex text and CSS selectors in one locator (use page.getByText(/regex/i) for regex matching)
+- Prefer toBeVisible() on locators over toBeTruthy() on counts
 
-Return ONLY the code, no explanations.`);
+Return ONLY the code block, no explanations.`);
 
   return parts.join('\n');
 }
