@@ -663,6 +663,8 @@ export class PlaywrightRecorder extends EventEmitter {
       let pointerDownSelectors: BrowserActionSelector[] | null = null;
       let pointerDownBoundingBox: { x: number; y: number; width: number; height: number; clickX: number; clickY: number } | null = null;
       let pointerCleanupTimer: ReturnType<typeof setTimeout> | null = null;
+      let pointerDownDeferTimer: ReturnType<typeof setTimeout> | null = null;
+      let pointerDownClickRecorded = false;
 
       // Walk up DOM to find nearest interactive ancestor for better selectors.
       function findBestTarget(el: HTMLElement): HTMLElement {
@@ -685,12 +687,28 @@ export class PlaywrightRecorder extends EventEmitter {
 
       document.addEventListener('pointerdown', (e: PointerEvent) => {
         if (pointerCleanupTimer) { clearTimeout(pointerCleanupTimer); pointerCleanupTimer = null; }
+        if (pointerDownDeferTimer) { clearTimeout(pointerDownDeferTimer); pointerDownDeferTimer = null; }
         const rawTarget = e.target as HTMLElement;
         const target = findBestTarget(rawTarget);
         pointerDownTarget = target;
         pointerDownSelectors = generateAllSelectors(target);
         const rect = target.getBoundingClientRect();
         pointerDownBoundingBox = { x: rect.x, y: rect.y, width: rect.width, height: rect.height, clickX: e.clientX, clickY: e.clientY };
+        pointerDownClickRecorded = false;
+
+        // Deferred recording: if click never fires (Radix removes element), record from pointerdown
+        const savedSelectors = pointerDownSelectors;
+        const savedBoundingBox = pointerDownBoundingBox;
+        if (savedSelectors && savedSelectors.length > 0) {
+          pointerDownDeferTimer = setTimeout(() => {
+            if (!pointerDownClickRecorded && !document.contains(target) && savedSelectors.length > 0) {
+              const modifiers = getActiveModifiers();
+              // @ts-expect-error
+              window.__recordAction?.('click', savedSelectors, undefined, savedBoundingBox, generateActionId(), modifiers);
+            }
+            pointerDownDeferTimer = null;
+          }, 300);
+        }
       }, true);
 
       document.addEventListener('pointerup', () => {
@@ -720,6 +738,7 @@ export class PlaywrightRecorder extends EventEmitter {
       }
 
       document.addEventListener('click', (e) => {
+        pointerDownClickRecorded = true; // Prevent deferred pointerdown from double-recording
         // Skip if this was a drag/draw operation (mouse moved significantly while held)
         if (mouseDownState) {
           const dx = Math.abs(e.clientX - mouseDownState.x);

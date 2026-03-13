@@ -257,6 +257,25 @@ export async function injectRecordingListeners(
       return parts.join(' > ');
     }
 
+    // Walk up DOM to find nearest interactive ancestor for better selectors.
+    function findBestTarget(el: HTMLElement): HTMLElement {
+      const INTERACTIVE_ROLES = new Set([
+        'button', 'option', 'menuitem', 'menuitemcheckbox', 'menuitemradio',
+        'tab', 'treeitem', 'link', 'switch', 'radio', 'checkbox',
+        'combobox', 'listitem'
+      ]);
+      const INTERACTIVE_TAGS = new Set(['A', 'BUTTON', 'INPUT', 'SELECT', 'TEXTAREA', 'LI']);
+      let current: HTMLElement | null = el;
+      while (current && current !== document.body && current !== document.documentElement) {
+        const role = current.getAttribute('role');
+        if (role && INTERACTIVE_ROLES.has(role)) return current;
+        if (INTERACTIVE_TAGS.has(current.tagName)) return current;
+        if (current.dataset.testid) return current;
+        current = current.parentElement;
+      }
+      return el;
+    }
+
     // Capture pointerdown target selectors for fallback (dropdown options removed from DOM before click fires).
     // Uses pointerdown instead of mousedown because Radix UI (and similar) call preventDefault()
     // on pointerdown which suppresses mousedown entirely. Capture-phase pointerdown fires first.
@@ -264,12 +283,30 @@ export async function injectRecordingListeners(
     let pointerDownSelectors: Array<{ type: string; value: string }> | null = null;
     let pointerDownCoords: { x: number; y: number } | null = null;
     let pointerCleanupTimer: ReturnType<typeof setTimeout> | null = null;
+    let pointerDownDeferTimer: ReturnType<typeof setTimeout> | null = null;
+    let pointerDownClickRecorded = false;
     document.addEventListener('pointerdown', (e: PointerEvent) => {
       if (pointerCleanupTimer) { clearTimeout(pointerCleanupTimer); pointerCleanupTimer = null; }
-      const target = e.target as HTMLElement;
+      if (pointerDownDeferTimer) { clearTimeout(pointerDownDeferTimer); pointerDownDeferTimer = null; }
+      const rawTarget = e.target as HTMLElement;
+      const target = findBestTarget(rawTarget);
       pointerDownTarget = target;
       pointerDownSelectors = generateSelectors(target);
       pointerDownCoords = { x: e.clientX, y: e.clientY };
+      pointerDownClickRecorded = false;
+
+      // Deferred recording: if click never fires (Radix removes element), record from pointerdown
+      const savedSelectors = pointerDownSelectors;
+      const savedCoords = pointerDownCoords;
+      if (savedSelectors && savedSelectors.length > 0) {
+        pointerDownDeferTimer = setTimeout(() => {
+          if (!pointerDownClickRecorded && !document.contains(target) && savedSelectors.length > 0) {
+            // @ts-expect-error - exposed function
+            window.__debugRecordAction?.('click', savedSelectors, undefined, savedCoords);
+          }
+          pointerDownDeferTimer = null;
+        }, 300);
+      }
     }, true);
     document.addEventListener('pointerup', () => {
       pointerCleanupTimer = setTimeout(() => { pointerDownTarget = null; pointerDownSelectors = null; pointerDownCoords = null; pointerCleanupTimer = null; }, 500);
@@ -291,6 +328,7 @@ export async function injectRecordingListeners(
     // Click listener
     document.addEventListener('click', (e) => {
       if ((window as unknown as Record<string, unknown>).__debugRecordingDisabled) return;
+      pointerDownClickRecorded = true; // Prevent deferred pointerdown from double-recording
       const target = e.target as HTMLElement;
       let selectors = generateSelectors(target);
       let coords = { x: e.clientX, y: e.clientY };
