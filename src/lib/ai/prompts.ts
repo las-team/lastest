@@ -158,22 +158,14 @@ export function createTestPrompt(context: TestGenerationContext): string {
 
   // Add guidelines and requirements sections
   parts.push(`
---- Guidelines ---
-- Write plain JavaScript only — NO TypeScript type annotations
-- After navigation, always use: await page.waitForLoadState('domcontentloaded'); await page.waitForTimeout(1000);
-- Verify the page loaded by checking the URL or that body/main content is visible
-- Do NOT guess specific headings or text — use safe selectors like body, main, or role-based
-- Use stepLogger.log() to document key actions
-- Capture screenshot AFTER the page is fully loaded
-
 --- Requirements ---
-- Function signature: export async function test(page, baseUrl, screenshotPath, stepLogger)
-- At least one screenshot must be captured using screenshotPath
-- Use baseUrl parameter for navigation: await page.goto(\`\${baseUrl}/path\`, { waitUntil: 'domcontentloaded' })
-- Do NOT use \`import\` statements — expect and all parameters are provided by the runner
-- Available expect matchers: toBe, toEqual, toBeTruthy, toBeFalsy, toContain, toHaveLength, toMatch, toMatchObject, toHaveURL, toHaveTitle, toBeVisible, toBeHidden, toHaveText, toContainText, toHaveAttribute, toHaveCount
-- Never mix regex text and CSS selectors in one locator (use page.getByText(/regex/i) for regex matching)
-- Prefer toBeVisible() on locators over toBeTruthy() on counts
+- Plain JavaScript only — NO TypeScript annotations, NO imports
+- Signature: export async function test(page, baseUrl, screenshotPath, stepLogger)
+- Navigate: await page.goto(\`\${baseUrl}/path\`, { waitUntil: 'domcontentloaded' })
+- URL checks: ALWAYS regex — await expect(page).toHaveURL(/\\/path/)
+- Content checks: await expect(page.locator('body')).toBeVisible()
+- Screenshot: await page.screenshot({ path: screenshotPath, fullPage: true })
+- Log actions: stepLogger.log('message')
 
 Return ONLY the code block, no explanations.`);
 
