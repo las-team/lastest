@@ -77,7 +77,24 @@ SCREENSHOT:
 LOGGING:
 - Use stepLogger.log('message') to document key actions
 
-Never mix regex text and CSS selectors in one locator — use page.getByText(/pattern/i) for regex, page.locator('[attr="x"]') for CSS`;
+Never mix regex text and CSS selectors in one locator — use page.getByText(/pattern/i) for regex, page.locator('[attr="x"]') for CSS
+
+EXAMPLE TEST (follow this pattern):
+\`\`\`javascript
+export async function test(page, baseUrl, screenshotPath, stepLogger) {
+  stepLogger.log('Navigating to settings page');
+  await page.goto(\`\${baseUrl}/settings\`, { waitUntil: 'domcontentloaded' });
+  await page.waitForLoadState('domcontentloaded');
+  await page.waitForTimeout(500);
+
+  stepLogger.log('Verifying page loaded');
+  await expect(page).toHaveURL(/\\/settings/);
+  await expect(page.locator('body')).toBeVisible();
+
+  stepLogger.log('Taking screenshot');
+  await page.screenshot({ path: screenshotPath, fullPage: true });
+}
+\`\`\``;
 
 export function createTestPrompt(context: TestGenerationContext): string {
   const parts: string[] = [];
