@@ -52,8 +52,7 @@ CRITICAL — OUTPUT FORMAT:
 NAVIGATION PATTERN (always use this):
 1. Navigate with: await page.goto(\`\${baseUrl}/path\`, { waitUntil: 'domcontentloaded' });
 2. Wait for page to stabilize: await page.waitForLoadState('domcontentloaded');
-3. Add a small delay for dynamic content: await page.waitForTimeout(500);
-4. Then interact or assert.
+3. Then interact or assert.
 
 SELECTOR STRATEGY (in order of preference):
 1. page.getByRole('button', { name: 'Submit' }) — accessible roles
@@ -85,7 +84,6 @@ export async function test(page, baseUrl, screenshotPath, stepLogger) {
   stepLogger.log('Navigating to settings page');
   await page.goto(\`\${baseUrl}/settings\`, { waitUntil: 'domcontentloaded' });
   await page.waitForLoadState('domcontentloaded');
-  await page.waitForTimeout(500);
 
   stepLogger.log('Verifying page loaded');
   await expect(page).toHaveURL(/\\/settings/);
