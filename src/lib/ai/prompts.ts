@@ -296,7 +296,8 @@ Instructions:
 - browser_navigate to the target URL, then browser_snapshot to see current page structure
 - Compare actual page selectors/content with the failing test to identify what changed
 - Fix the test using discovered selectors; maintain the same function signature and intent
-- Do NOT use \`import\` — expect is provided by the runner
+- Write plain JavaScript only — NO TypeScript type annotations, NO imports
+- ALWAYS use regex for URL checks: await expect(page).toHaveURL(/\\/path/);
 - Use only valid matchers (toBe, toEqual, toBeTruthy, toBeFalsy, toContain, toMatch, toHaveURL, toHaveTitle, toBeVisible, toHaveText, toContainText, toHaveAttribute, toHaveCount, etc.)
 - Never mix regex text and CSS selectors in one locator — use page.getByText(/pattern/i) for regex
 
