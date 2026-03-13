@@ -52,7 +52,7 @@ CRITICAL — OUTPUT FORMAT:
 NAVIGATION PATTERN (always use this):
 1. Navigate with: await page.goto(\`\${baseUrl}/path\`, { waitUntil: 'domcontentloaded' });
 2. Wait for page to stabilize: await page.waitForLoadState('domcontentloaded');
-3. Add a small delay for dynamic content: await page.waitForTimeout(1000);
+3. Add a small delay for dynamic content: await page.waitForTimeout(500);
 4. Then interact or assert.
 
 SELECTOR STRATEGY (in order of preference):
