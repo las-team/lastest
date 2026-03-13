@@ -280,12 +280,20 @@ ${context.errorMessage}`];
 
   parts.push(`
 Instructions:
+- Write plain JavaScript only — NO TypeScript type annotations (no ": Page", no ": string", no ": any")
 - Analyze the error, fix the root cause while keeping the same function signature and intent
 - Do NOT use \`import\` — expect is provided by the runner
 - Use only valid matchers (toBe, toEqual, toBeTruthy, toBeFalsy, toContain, toMatch, toHaveURL, toHaveTitle, toBeVisible, toHaveText, toContainText, toHaveAttribute, toHaveCount, etc.)
+- ALWAYS use regex for URL checks: await expect(page).toHaveURL(/\\/path/); — never exact string URLs
 - Never mix regex text and CSS selectors in one locator — use page.getByText(/pattern/i) for regex
+- Use waitUntil: 'domcontentloaded' for navigation, add waitForTimeout(500) after
 
-Common fixes: "X is not a function" → invalid matcher; "text=/regex/i" → use page.getByText(/regex/i); waitForLoadState timeout → use 'domcontentloaded' instead of 'networkidle'
+Common fixes:
+- "X is not a function" → invalid matcher name
+- "text=/regex/i" → use page.getByText(/regex/i) instead
+- waitForLoadState timeout → use 'domcontentloaded' instead of 'networkidle'
+- Timeout waiting for element → element doesn't exist, use broader selector or remove assertion
+- "Expected URL" mismatch → use regex pattern instead of exact string
 
 Return ONLY the fixed code, no explanations.`);
 
