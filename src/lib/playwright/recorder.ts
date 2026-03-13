@@ -662,9 +662,31 @@ export class PlaywrightRecorder extends EventEmitter {
       let pointerDownTarget: HTMLElement | null = null;
       let pointerDownSelectors: BrowserActionSelector[] | null = null;
       let pointerDownBoundingBox: { x: number; y: number; width: number; height: number; clickX: number; clickY: number } | null = null;
+      let pointerCleanupTimer: ReturnType<typeof setTimeout> | null = null;
+
+      // Walk up DOM to find nearest interactive ancestor for better selectors.
+      function findBestTarget(el: HTMLElement): HTMLElement {
+        const INTERACTIVE_ROLES = new Set([
+          'button', 'option', 'menuitem', 'menuitemcheckbox', 'menuitemradio',
+          'tab', 'treeitem', 'link', 'switch', 'radio', 'checkbox',
+          'combobox', 'listitem'
+        ]);
+        const INTERACTIVE_TAGS = new Set(['A', 'BUTTON', 'INPUT', 'SELECT', 'TEXTAREA', 'LI']);
+        let current: HTMLElement | null = el;
+        while (current && current !== document.body && current !== document.documentElement) {
+          const role = current.getAttribute('role');
+          if (role && INTERACTIVE_ROLES.has(role)) return current;
+          if (INTERACTIVE_TAGS.has(current.tagName)) return current;
+          if (current.dataset.testid) return current;
+          current = current.parentElement;
+        }
+        return el;
+      }
 
       document.addEventListener('pointerdown', (e: PointerEvent) => {
-        const target = e.target as HTMLElement;
+        if (pointerCleanupTimer) { clearTimeout(pointerCleanupTimer); pointerCleanupTimer = null; }
+        const rawTarget = e.target as HTMLElement;
+        const target = findBestTarget(rawTarget);
         pointerDownTarget = target;
         pointerDownSelectors = generateAllSelectors(target);
         const rect = target.getBoundingClientRect();
@@ -672,7 +694,7 @@ export class PlaywrightRecorder extends EventEmitter {
       }, true);
 
       document.addEventListener('pointerup', () => {
-        setTimeout(() => { pointerDownTarget = null; pointerDownSelectors = null; pointerDownBoundingBox = null; }, 500);
+        pointerCleanupTimer = setTimeout(() => { pointerDownTarget = null; pointerDownSelectors = null; pointerDownBoundingBox = null; pointerCleanupTimer = null; }, 500);
       }, true);
 
       // Also capture selectors from mouseover for a second fallback.

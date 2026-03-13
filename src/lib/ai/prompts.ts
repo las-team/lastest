@@ -136,6 +136,13 @@ export function createTestPrompt(context: TestGenerationContext): string {
     parts.push(buildCodebaseIntelligenceSection(context.codebaseIntelligence));
   }
 
+  if (context.availableRoutes?.length) {
+    parts.push(`\n--- Available Routes (ONLY navigate to these) ---`);
+    parts.push(context.availableRoutes.map(r => `- ${r}`).join('\n'));
+    parts.push(`\nCRITICAL: Do NOT invent or guess URLs. ONLY use routes from the list above.`);
+    parts.push(`If the test objective refers to a page not in this list, navigate to the closest matching route.`);
+  }
+
   // Add guidelines and requirements sections
   parts.push(`
 --- Requirements ---
@@ -536,6 +543,7 @@ export function createBranchAwareTestPrompt(context: {
     fileDiffs?: string;
   };
   codebaseIntelligence?: CodebaseIntelligenceContext;
+  availableRoutes?: string[];
 }): string {
   const parts: string[] = [];
 
@@ -567,6 +575,13 @@ Test Name: ${context.testName}`);
     parts.push(buildCodebaseIntelligenceSection(context.codebaseIntelligence));
   }
 
+  if (context.availableRoutes?.length) {
+    parts.push(`\n--- Available Routes (ONLY navigate to these) ---`);
+    parts.push(context.availableRoutes.map(r => `- ${r}`).join('\n'));
+    parts.push(`\nCRITICAL: Do NOT invent or guess URLs. ONLY use routes from the list above.`);
+    parts.push(`If the acceptance criterion refers to a page not in this list, navigate to the closest matching route and test what is available there.`);
+  }
+
   parts.push(`
 --- Guidelines ---
 - Write the test to verify the acceptance criterion
@@ -576,11 +591,14 @@ Test Name: ${context.testName}`);
 - Handle loading states for stable screenshots
 
 --- Requirements ---
+- Plain JavaScript only — NO TypeScript annotations, NO imports
 - Function signature: export async function test(page, baseUrl, screenshotPath, stepLogger)
+- Navigate: await page.goto(\`\${baseUrl}/path\`, { waitUntil: 'domcontentloaded' })
+- URL checks: ALWAYS regex — await expect(page).toHaveURL(/\\/path/)
 - At least one screenshot must be captured
 - Use baseUrl parameter for navigation
 
-Return ONLY the code, no explanations.`);
+Return ONLY the code block, no explanations.`);
 
   return parts.join('\n');
 }

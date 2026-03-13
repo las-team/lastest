@@ -73,6 +73,7 @@ export interface TestGenerationContext {
   siblingRoutes?: string[];
   scanContext?: ScanContext;
   codebaseIntelligence?: CodebaseIntelligenceContext;
+  availableRoutes?: string[];
 }
 
 export interface GeneratedTest {

@@ -658,6 +658,10 @@ export async function generateTestsFromStories(
       branchChanges = await fetchBranchDiffs(repositoryId, branch);
     }
 
+    // Fetch available routes to constrain test navigation
+    const repoRoutes = await queries.getRoutesByRepo(repositoryId);
+    const availableRoutes = repoRoutes.map(r => r.path);
+
     // Pre-create areas and collect all task groups
     interface TaskInfo {
       story: ExtractedUserStory;
@@ -707,6 +711,7 @@ export async function generateTestsFromStories(
             targetUrl: options?.targetUrl,
             branchChanges: branchChanges || undefined,
             codebaseIntelligence: options?.codebaseIntelligence,
+            availableRoutes: availableRoutes.length > 0 ? availableRoutes : undefined,
           });
 
           const response = await generateWithAI(config, prompt, SYSTEM_PROMPT, {

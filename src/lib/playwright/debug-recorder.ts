@@ -263,14 +263,16 @@ export async function injectRecordingListeners(
     let pointerDownTarget: HTMLElement | null = null;
     let pointerDownSelectors: Array<{ type: string; value: string }> | null = null;
     let pointerDownCoords: { x: number; y: number } | null = null;
+    let pointerCleanupTimer: ReturnType<typeof setTimeout> | null = null;
     document.addEventListener('pointerdown', (e: PointerEvent) => {
+      if (pointerCleanupTimer) { clearTimeout(pointerCleanupTimer); pointerCleanupTimer = null; }
       const target = e.target as HTMLElement;
       pointerDownTarget = target;
       pointerDownSelectors = generateSelectors(target);
       pointerDownCoords = { x: e.clientX, y: e.clientY };
     }, true);
     document.addEventListener('pointerup', () => {
-      setTimeout(() => { pointerDownTarget = null; pointerDownSelectors = null; pointerDownCoords = null; }, 500);
+      pointerCleanupTimer = setTimeout(() => { pointerDownTarget = null; pointerDownSelectors = null; pointerDownCoords = null; pointerCleanupTimer = null; }, 500);
     }, true);
 
     // Capture mouseover selectors as second fallback (fires before click, unaffected by DOM removal)
