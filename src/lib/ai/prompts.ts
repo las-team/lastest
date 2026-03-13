@@ -54,29 +54,18 @@ NAVIGATION PATTERN (always use this):
 2. Wait for page to stabilize: await page.waitForLoadState('domcontentloaded');
 3. Then interact or assert.
 
-SELECTOR STRATEGY (in order of preference):
-1. page.getByRole('button', { name: 'Submit' }) — accessible roles
-2. page.getByText('visible text') — visible text content
-3. page.locator('[data-testid="x"]') — test IDs
-4. page.locator('css selector') — CSS as last resort
-- NEVER guess that a heading exists — check what's actually on the page
-- Prefer broad checks: expect(page.locator('body')).toBeVisible() is always safe
+SELECTORS: Use getByRole, getByText, locator('[data-testid]'), or CSS. Never guess headings exist — use broad checks like body.toBeVisible().
 
-ASSERTIONS — SAFE PATTERNS:
-- For URL verification, ALWAYS use regex: await expect(page).toHaveURL(/\\/expected-path/); — NEVER use exact string URLs (trailing slashes cause failures)
-- For the root page (/), verify with: await expect(page).toHaveURL(new RegExp(baseUrl));
-- To verify content loaded, use: const content = await page.locator('main, [role="main"], .container, body').first(); await expect(content).toBeVisible();
-- Avoid toBeTruthy() on element counts — use toBeGreaterThan(0) or toBeVisible() on a locator instead
-- expect matchers: toBe, toEqual, toBeTruthy, toBeFalsy, toContain, toHaveLength, toMatch, toMatchObject, toHaveURL, toHaveTitle, toBeVisible, toBeHidden, toHaveText, toContainText, toHaveAttribute, toHaveCount, toBeEnabled, toBeDisabled, toBeChecked, toHaveValue (all support .not)
+ASSERTIONS:
+- URL: ALWAYS use regex — await expect(page).toHaveURL(/\\/path/); NEVER exact strings (trailing slash issues)
+- Root page: await expect(page).toHaveURL(new RegExp(baseUrl));
+- Content: await expect(page.locator('body')).toBeVisible();
+- Avoid toBeTruthy() on counts — use toBeVisible() on locators
+- Available: toBe, toEqual, toBeTruthy, toBeFalsy, toContain, toHaveLength, toMatch, toMatchObject, toHaveURL, toHaveTitle, toBeVisible, toBeHidden, toHaveText, toContainText, toHaveAttribute, toHaveCount (all support .not)
+- Never mix regex and CSS in one locator — use page.getByText(/regex/i) for regex, page.locator('css') for CSS
 
-SCREENSHOT:
-- Always capture at least one screenshot: await page.screenshot({ path: screenshotPath, fullPage: true });
-- Take screenshot AFTER page is fully loaded and stable
-
-LOGGING:
-- Use stepLogger.log('message') to document key actions
-
-Never mix regex text and CSS selectors in one locator — use page.getByText(/pattern/i) for regex, page.locator('[attr="x"]') for CSS
+Always capture screenshot: await page.screenshot({ path: screenshotPath, fullPage: true });
+Use stepLogger.log('message') to document actions.
 
 EXAMPLE TEST (follow this pattern):
 \`\`\`javascript
