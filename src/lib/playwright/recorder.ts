@@ -642,7 +642,7 @@ export class PlaywrightRecorder extends EventEmitter {
         return Array.from(activeModifiers);
       }
 
-      // Track mousedown for drag/draw detection
+      // Track mousedown for drag/draw detection only
       let mouseDownState: { x: number; y: number; time: number } | null = null;
       const DRAG_THRESHOLD_PX = 10; // Movement threshold to consider it a drag
       const DRAG_THRESHOLD_MS = 300; // Time threshold for long press + movement
@@ -652,8 +652,43 @@ export class PlaywrightRecorder extends EventEmitter {
       }, true);
 
       document.addEventListener('mouseup', () => {
-        // Clear after a short delay to allow click event to check it
         setTimeout(() => { mouseDownState = null; }, 50);
+      }, true);
+
+      // Capture selectors at pointerdown time for fallback.
+      // Radix UI (and similar) call preventDefault() on pointerdown which suppresses
+      // mousedown entirely. pointerdown in capture phase fires before any framework
+      // handler, so the target element is still in DOM and selectors can be read.
+      let pointerDownTarget: HTMLElement | null = null;
+      let pointerDownSelectors: BrowserActionSelector[] | null = null;
+      let pointerDownBoundingBox: { x: number; y: number; width: number; height: number; clickX: number; clickY: number } | null = null;
+
+      document.addEventListener('pointerdown', (e: PointerEvent) => {
+        const target = e.target as HTMLElement;
+        pointerDownTarget = target;
+        pointerDownSelectors = generateAllSelectors(target);
+        const rect = target.getBoundingClientRect();
+        pointerDownBoundingBox = { x: rect.x, y: rect.y, width: rect.width, height: rect.height, clickX: e.clientX, clickY: e.clientY };
+      }, true);
+
+      document.addEventListener('pointerup', () => {
+        setTimeout(() => { pointerDownTarget = null; pointerDownSelectors = null; pointerDownBoundingBox = null; }, 500);
+      }, true);
+
+      // Also capture selectors from mouseover for a second fallback.
+      // mouseover fires well before click and is unaffected by DOM removal timing.
+      // This catches cases where pointerdown fallback fails (e.g., Radix exit animations).
+      let hoverSelectors: BrowserActionSelector[] | null = null;
+      let hoverBoundingBox: { x: number; y: number; width: number; height: number; clickX: number; clickY: number } | null = null;
+      document.addEventListener('mouseover', (e: MouseEvent) => {
+        const target = e.target as HTMLElement;
+        if (!target || target === document.body || target === document.documentElement) return;
+        const sels = generateAllSelectors(target);
+        if (sels.length > 0) {
+          hoverSelectors = sels;
+          const rect = target.getBoundingClientRect();
+          hoverBoundingBox = { x: rect.x, y: rect.y, width: rect.width, height: rect.height, clickX: e.clientX, clickY: e.clientY };
+        }
       }, true);
 
       // Generate unique action IDs for verification tracking
@@ -681,10 +716,37 @@ export class PlaywrightRecorder extends EventEmitter {
         if (pg) return;
 
         const target = e.target as HTMLElement;
-        const selectors = generateAllSelectors(target);
+        let selectors = generateAllSelectors(target);
         // Pass actual click position for coordinate fallback (element center is wrong for canvas)
         const rect = target.getBoundingClientRect();
-        const boundingBox = { x: rect.x, y: rect.y, width: rect.width, height: rect.height, clickX: e.clientX, clickY: e.clientY };
+        let boundingBox: { x: number; y: number; width: number; height: number; clickX?: number; clickY?: number } = { x: rect.x, y: rect.y, width: rect.width, height: rect.height, clickX: e.clientX, clickY: e.clientY };
+
+        // Check if click-generated selectors are useful
+        const hasUsefulSelectors = selectors.length > 0 &&
+          !(selectors.length === 1 && selectors[0].type === 'css-path' &&
+            (selectors[0].value === 'body' || selectors[0].value === 'html'));
+
+        // Fallback 1: use pointerdown selectors (captured before DOM removal)
+        if (!hasUsefulSelectors && pointerDownTarget && target !== pointerDownTarget &&
+            pointerDownSelectors && pointerDownSelectors.length > 0) {
+          selectors = pointerDownSelectors;
+          if (pointerDownBoundingBox) {
+            boundingBox = pointerDownBoundingBox;
+          }
+        }
+
+        // Fallback 2: use mouseover/hover selectors (last element hovered before click)
+        // mouseover fires well before click and is unaffected by DOM removal timing
+        const stillNoSelectors = selectors.length === 0 ||
+          (selectors.length === 1 && selectors[0].type === 'css-path' &&
+            (selectors[0].value === 'body' || selectors[0].value === 'html'));
+        if (stillNoSelectors && hoverSelectors && hoverSelectors.length > 0) {
+          selectors = hoverSelectors;
+          if (hoverBoundingBox) {
+            boundingBox = hoverBoundingBox;
+          }
+        }
+
         const modifiers = getActiveModifiers();
         // @ts-expect-error
         window.__recordAction?.('click', selectors, undefined, boundingBox, generateActionId(), modifiers);
@@ -743,9 +805,16 @@ export class PlaywrightRecorder extends EventEmitter {
           allSelectors.set('aria-label', `[aria-label="${ariaLabel}"]`);
         }
 
-        // Text content (for buttons/links)
+        // Text content (for buttons/links/interactive elements)
+        const INTERACTIVE_ROLES = new Set([
+          'button', 'option', 'menuitem', 'menuitemcheckbox', 'menuitemradio',
+          'tab', 'treeitem', 'link', 'switch', 'radio', 'checkbox',
+          'combobox', 'listitem'
+        ]);
+        const elRole = element.getAttribute('role');
         if (element.tagName === 'BUTTON' || element.tagName === 'A' ||
-            element.getAttribute('role') === 'button') {
+            element.tagName === 'LI' || element.tagName === 'LABEL' ||
+            (elRole && INTERACTIVE_ROLES.has(elRole))) {
           const text = element.textContent?.trim().slice(0, 30);
           if (text) {
             allSelectors.set('text', `text="${text}"`);
@@ -762,6 +831,14 @@ export class PlaywrightRecorder extends EventEmitter {
         const name = element.getAttribute('name');
         if (name) {
           allSelectors.set('name', `[name="${name}"]`);
+        }
+
+        // Leaf element fallback: generate text selector for elements with no children and short text
+        if (!allSelectors.has('text') && element.children.length === 0) {
+          const leafText = element.textContent?.trim().slice(0, 30);
+          if (leafText && leafText.length > 0) {
+            allSelectors.set('text', `text="${leafText}"`);
+          }
         }
 
         // CSS path fallback
@@ -788,6 +865,15 @@ export class PlaywrightRecorder extends EventEmitter {
 
       // Get implicit ARIA role for common elements
       function getImplicitRole(element: HTMLElement): string | null {
+        if (element.tagName === 'LI') {
+          const parent = element.closest('[role="listbox"], [role="menu"], [role="tablist"], [role="tree"]');
+          if (parent) {
+            const parentRole = parent.getAttribute('role');
+            if (parentRole === 'listbox') return 'option';
+            if (parentRole === 'menu') return 'menuitem';
+          }
+          return 'listitem';
+        }
         const tagRoles: Record<string, string> = {
           'BUTTON': 'button',
           'A': 'link',

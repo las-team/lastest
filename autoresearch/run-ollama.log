@@ -1,0 +1,63 @@
+Loading AI config...
+Provider: ollama
+Launching browser...
+Performing login...
+Login successful, storageState saved.
+
+[/] Generating test...
+[/] Generated 507 chars
+[/] Running test...
+[/] PASSED
+
+[/tests] Generating test...
+[/tests] Generated 494 chars
+[/tests] Running test...
+[/tests] PASSED
+
+[/repositories] Generating test...
+[/repositories] Generated 517 chars
+[/repositories] Running test...
+[/repositories] PASSED
+
+[/settings] Generating test...
+[/settings] Generated 499 chars
+[/settings] Running test...
+[/settings] PASSED
+
+[/builds] Generating test...
+[/builds] Generated 500 chars
+[/builds] Running test...
+[/builds] PASSED
+
+[/suites] Generating test...
+[/suites] Generated 498 chars
+[/suites] Running test...
+[/suites] PASSED
+
+[/routes] Generating test...
+[/routes] Generated 493 chars
+[/routes] Running test...
+[/routes] PASSED
+
+[/run] Generating test...
+[/run] Generated 492 chars
+[/run] Running test...
+[/run] PASSED
+---
+pass_rate:     1.000000
+passed:        8
+failed:        0
+total:         8
+routes_tested: 8
+syntax_errors: 0
+common_errors: none
+duration_s:    727.5
+---
+PASS / (102.5s)
+PASS /tests (105.2s)
+PASS /repositories (87.5s)
+PASS /settings (87.9s)
+PASS /builds (84.2s)
+PASS /suites (91.2s)
+PASS /routes (77.3s)
+PASS /run (90.7s)

@@ -176,7 +176,15 @@ export async function injectRecordingListeners(
       if (ariaLabel) {
         selectors.push({ type: 'aria-label', value: `[aria-label="${ariaLabel}"]` });
       }
-      if ((element.tagName === 'BUTTON' || element.tagName === 'A') && element.textContent?.trim()) {
+      const INTERACTIVE_ROLES = new Set([
+        'button', 'option', 'menuitem', 'menuitemcheckbox', 'menuitemradio',
+        'tab', 'treeitem', 'link', 'switch', 'radio', 'checkbox',
+        'combobox', 'listitem'
+      ]);
+      const elRole = element.getAttribute('role');
+      if ((element.tagName === 'BUTTON' || element.tagName === 'A' ||
+           element.tagName === 'LI' || element.tagName === 'LABEL' ||
+           (elRole && INTERACTIVE_ROLES.has(elRole))) && element.textContent?.trim()) {
         selectors.push({ type: 'text', value: `text="${element.textContent.trim().slice(0, 30)}"` });
       }
       const placeholder = element.getAttribute('placeholder');
@@ -187,6 +195,13 @@ export async function injectRecordingListeners(
       if (name) {
         selectors.push({ type: 'name', value: `[name="${name}"]` });
       }
+      // Leaf element fallback: generate text selector for elements with no children and short text
+      if (!selectors.some(s => s.type === 'text') && element.children.length === 0) {
+        const leafText = element.textContent?.trim().slice(0, 30);
+        if (leafText && leafText.length > 0) {
+          selectors.push({ type: 'text', value: `text="${leafText}"` });
+        }
+      }
       // CSS path fallback
       selectors.push({ type: 'css-path', value: getCssPath(element) });
 
@@ -195,6 +210,15 @@ export async function injectRecordingListeners(
 
     function getImplicitRole(el: HTMLElement): string | null {
       const tag = el.tagName.toLowerCase();
+      if (tag === 'li') {
+        const parent = el.closest('[role="listbox"], [role="menu"], [role="tablist"], [role="tree"]');
+        if (parent) {
+          const parentRole = parent.getAttribute('role');
+          if (parentRole === 'listbox') return 'option';
+          if (parentRole === 'menu') return 'menuitem';
+        }
+        return 'listitem';
+      }
       if (tag === 'button') return 'button';
       if (tag === 'a' && el.hasAttribute('href')) return 'link';
       if (tag === 'input') {
@@ -233,13 +257,64 @@ export async function injectRecordingListeners(
       return parts.join(' > ');
     }
 
+    // Capture pointerdown target selectors for fallback (dropdown options removed from DOM before click fires).
+    // Uses pointerdown instead of mousedown because Radix UI (and similar) call preventDefault()
+    // on pointerdown which suppresses mousedown entirely. Capture-phase pointerdown fires first.
+    let pointerDownTarget: HTMLElement | null = null;
+    let pointerDownSelectors: Array<{ type: string; value: string }> | null = null;
+    let pointerDownCoords: { x: number; y: number } | null = null;
+    document.addEventListener('pointerdown', (e: PointerEvent) => {
+      const target = e.target as HTMLElement;
+      pointerDownTarget = target;
+      pointerDownSelectors = generateSelectors(target);
+      pointerDownCoords = { x: e.clientX, y: e.clientY };
+    }, true);
+    document.addEventListener('pointerup', () => {
+      setTimeout(() => { pointerDownTarget = null; pointerDownSelectors = null; pointerDownCoords = null; }, 500);
+    }, true);
+
+    // Capture mouseover selectors as second fallback (fires before click, unaffected by DOM removal)
+    let hoverSelectors: Array<{ type: string; value: string }> | null = null;
+    let hoverCoords: { x: number; y: number } | null = null;
+    document.addEventListener('mouseover', (e: MouseEvent) => {
+      const target = e.target as HTMLElement;
+      if (!target || target === document.body || target === document.documentElement) return;
+      const sels = generateSelectors(target);
+      if (sels.length > 0) {
+        hoverSelectors = sels;
+        hoverCoords = { x: e.clientX, y: e.clientY };
+      }
+    }, true);
+
     // Click listener
     document.addEventListener('click', (e) => {
       if ((window as unknown as Record<string, unknown>).__debugRecordingDisabled) return;
       const target = e.target as HTMLElement;
-      const selectors = generateSelectors(target);
+      let selectors = generateSelectors(target);
+      let coords = { x: e.clientX, y: e.clientY };
+
+      const hasUsefulSelectors = selectors.length > 0 &&
+        !(selectors.length === 1 && selectors[0].type === 'css-path' &&
+          (selectors[0].value === 'body' || selectors[0].value === 'html'));
+
+      // Fallback 1: pointerdown selectors
+      if (!hasUsefulSelectors && pointerDownTarget && target !== pointerDownTarget &&
+          pointerDownSelectors && pointerDownSelectors.length > 0) {
+        selectors = pointerDownSelectors;
+        if (pointerDownCoords) coords = pointerDownCoords;
+      }
+
+      // Fallback 2: mouseover/hover selectors
+      const stillNoSelectors = selectors.length === 0 ||
+        (selectors.length === 1 && selectors[0].type === 'css-path' &&
+          (selectors[0].value === 'body' || selectors[0].value === 'html'));
+      if (stillNoSelectors && hoverSelectors && hoverSelectors.length > 0) {
+        selectors = hoverSelectors;
+        if (hoverCoords) coords = hoverCoords;
+      }
+
       // @ts-expect-error - exposed function
-      window.__debugRecordAction?.('click', selectors, undefined, { x: e.clientX, y: e.clientY });
+      window.__debugRecordAction?.('click', selectors, undefined, coords);
     }, true);
 
     // Input listener (fill coalescing happens on the Node side)

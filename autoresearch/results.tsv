@@ -1,0 +1,10 @@
+commit	pass_rate	syntax_errors	status	description
+29d8435	0.250000	1	baseline	Initial baseline - 2/8 routes pass
+b656336	1.000000	0	keep	Add robust wait strategies, no-TS emphasis, safe selector guidance
+b7b9a98	1.000000	0	keep	Use regex for URL assertions to avoid trailing slash failures
+c2f87d1	1.000000	0	keep	Reduce waitForTimeout from 1000ms to 500ms for speed
+a9a1bda	1.000000	0	keep	Add concrete example test to SYSTEM_PROMPT — fastest run 61.6s
+5d7cb92	1.000000	0	keep	Improve fix prompt with no-TS, regex URLs, better error catalog
+8513a80	1.000000	0	keep	Remove waitForTimeout, rely on waitForLoadState only
+0cbce72	1.000000	0	keep	Condense selector/assertion/screenshot sections for brevity
+a5f2f22	1.000000	0	keep	Simplify createTestPrompt guidelines, fix stale waitForTimeout

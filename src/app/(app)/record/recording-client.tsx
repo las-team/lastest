@@ -1223,7 +1223,7 @@ export function RecordingClient({
               <CardDescription>{url}</CardDescription>
             </CardHeader>
             <CardContent>
-              <div className="flex gap-2">
+              <div className="flex flex-wrap gap-2">
                 <Button onClick={handleTogglePause} variant={isPaused ? 'default' : 'outline'}>
                   {isPaused ? <Play className="h-4 w-4 mr-2" /> : <Pause className="h-4 w-4 mr-2" />}
                   {isPaused ? 'Resume' : 'Pause'}

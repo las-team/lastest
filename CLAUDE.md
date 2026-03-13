@@ -17,6 +17,12 @@ pnpm test                       # Unit tests (vitest)
 pnpm test -- src/lib/diff       # Tests in specific directory
 pnpm db:push                    # Push schema changes to DB
 pnpm db:studio                  # Drizzle Studio
+
+# Embedded Browser (local dev)
+docker compose -f docker-compose.eb.yml up -d          # Start EB containers
+docker compose -f docker-compose.eb.yml up -d --build  # Rebuild + start
+docker compose -f docker-compose.eb.yml down            # Stop EB containers
+docker compose -f docker-compose.eb.yml logs -f         # Tail EB logs
 ```
 
 ## Architecture

@@ -94,6 +94,37 @@ export const browserRecordingScript = ({ pointerGestures: pg, cursorFPS: fps, se
     return `action-${Date.now()}-${++actionIdCounter}`;
   }
 
+  // Capture selectors at pointerdown time for fallback.
+  // Radix UI (and similar) remove elements from DOM on selection, causing click
+  // to retarget to body/wrapper with useless selectors. pointerdown fires first.
+  let pointerDownSelectors: BrowserActionSelector[] | null = null;
+  let pointerDownBoundingBox: { x: number; y: number; width: number; height: number; clickX: number; clickY: number } | null = null;
+
+  document.addEventListener('pointerdown', (e: PointerEvent) => {
+    const target = e.target as HTMLElement;
+    pointerDownSelectors = generateAllSelectors(target);
+    const rect = target.getBoundingClientRect();
+    pointerDownBoundingBox = { x: rect.x, y: rect.y, width: rect.width, height: rect.height, clickX: e.clientX, clickY: e.clientY };
+  }, true);
+
+  document.addEventListener('pointerup', () => {
+    setTimeout(() => { pointerDownSelectors = null; pointerDownBoundingBox = null; }, 500);
+  }, true);
+
+  // Capture mouseover selectors as second fallback (fires well before click)
+  let hoverSelectors: BrowserActionSelector[] | null = null;
+  let hoverBoundingBox: { x: number; y: number; width: number; height: number; clickX: number; clickY: number } | null = null;
+  document.addEventListener('mouseover', (e: MouseEvent) => {
+    const target = e.target as HTMLElement;
+    if (!target || target === document.body || target === document.documentElement) return;
+    const sels = generateAllSelectors(target);
+    if (sels.length > 0) {
+      hoverSelectors = sels;
+      const rect = target.getBoundingClientRect();
+      hoverBoundingBox = { x: rect.x, y: rect.y, width: rect.width, height: rect.height, clickX: e.clientX, clickY: e.clientY };
+    }
+  }, true);
+
   document.addEventListener('click', (e) => {
     if (mouseDownState) {
       const dx = Math.abs(e.clientX - mouseDownState.x);
@@ -105,9 +136,34 @@ export const browserRecordingScript = ({ pointerGestures: pg, cursorFPS: fps, se
       }
     }
     const target = e.target as HTMLElement;
-    const selectors = generateAllSelectors(target);
+    let selectors = generateAllSelectors(target);
     const rect = target.getBoundingClientRect();
-    const boundingBox = { x: rect.x, y: rect.y, width: rect.width, height: rect.height };
+    let boundingBox: { x: number; y: number; width: number; height: number; clickX?: number; clickY?: number } = { x: rect.x, y: rect.y, width: rect.width, height: rect.height, clickX: e.clientX, clickY: e.clientY };
+
+    // Check if click-generated selectors are useful (not just body/html css-path)
+    const hasUsefulSelectors = selectors.length > 0 &&
+      !(selectors.length === 1 && selectors[0].type === 'css-path' &&
+        (selectors[0].value === 'body' || selectors[0].value === 'html'));
+
+    // Fallback 1: use pointerdown selectors (captured before DOM removal)
+    if (!hasUsefulSelectors && pointerDownSelectors && pointerDownSelectors.length > 0) {
+      selectors = pointerDownSelectors;
+      if (pointerDownBoundingBox) {
+        boundingBox = pointerDownBoundingBox;
+      }
+    }
+
+    // Fallback 2: use mouseover/hover selectors (last element hovered before click)
+    const stillNoSelectors = selectors.length === 0 ||
+      (selectors.length === 1 && selectors[0].type === 'css-path' &&
+        (selectors[0].value === 'body' || selectors[0].value === 'html'));
+    if (stillNoSelectors && hoverSelectors && hoverSelectors.length > 0) {
+      selectors = hoverSelectors;
+      if (hoverBoundingBox) {
+        boundingBox = hoverBoundingBox;
+      }
+    }
+
     const modifiers = getActiveModifiers();
     // @ts-expect-error - exposed function
     window.__recordAction?.('click', selectors, undefined, boundingBox, generateActionId(), modifiers);
