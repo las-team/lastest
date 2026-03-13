@@ -225,7 +225,7 @@ export async function POST(request: NextRequest) {
 
         // Long-poll: if no commands, wait up to 25s for a command to be queued
         if (claimed.length === 0) {
-          const notified = await waitForCommandQueued(runner.id, 25_000, request.signal);
+          const notified = await waitForCommandQueued(runner.id, 25_000);
           if (notified) {
             claimed = await claimPendingCommands(runner.id, runner.maxParallelTests ?? undefined);
           }

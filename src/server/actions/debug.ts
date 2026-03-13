@@ -9,6 +9,7 @@ import { queueCommandToDB } from '@/app/api/ws/runner/route';
 import { createRemoteDebugSession, getRemoteDebugSession, clearRemoteDebugSession } from '@/app/api/ws/runner/route';
 import { resolveSetupCodeForRunner } from '@/lib/execution/setup-capture';
 import { executeSetupViaRunner } from '@/lib/execution/executor';
+import { getAvailableSystemRunner } from '@/server/actions/runners';
 import type { Message } from '@/lib/ws/protocol';
 
 export async function startDebugSession(
@@ -27,6 +28,15 @@ export async function startDebugSession(
   const repoId = repositoryId || test.repositoryId;
   const settings = await getPlaywrightSettings(repoId);
   const envConfig = await getEnvironmentConfig(repoId);
+
+  // Resolve 'auto' to an available system runner
+  if (runnerId === 'auto') {
+    const systemRunner = await getAvailableSystemRunner();
+    if (!systemRunner) {
+      return { sessionId: '', error: 'No system browsers available. Please try again later.' };
+    }
+    runnerId = systemRunner.id;
+  }
 
   // Remote debug: route to embedded browser runner
   if (runnerId && runnerId !== 'local') {

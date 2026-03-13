@@ -270,6 +270,7 @@ export function DebugClient({ test, repositoryId }: DebugClientProps) {
             onChange={setExecutionTarget}
             capabilityFilter="run"
             size="sm"
+            disabled={!!sessionId}
           />
           <Badge
             variant="secondary"

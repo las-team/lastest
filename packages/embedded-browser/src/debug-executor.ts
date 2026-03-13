@@ -493,9 +493,9 @@ export class EmbeddedDebugExecutor {
   __stepStart = Date.now();
   try {
     ${steps[i].code}
-    __stepResults[${i}] = { stepId: ${steps[i].id}, status: 'passed', durationMs: Date.now() - __stepStart };
+    __reportStep(${i}, { stepId: ${steps[i].id}, status: 'passed', durationMs: Date.now() - __stepStart });
   } catch (__err) {
-    __stepResults[${i}] = { stepId: ${steps[i].id}, status: 'failed', durationMs: Date.now() - __stepStart, error: __err?.message || String(__err) };
+    __reportStep(${i}, { stepId: ${steps[i].id}, status: 'failed', durationMs: Date.now() - __stepStart, error: __err?.message || String(__err) });
     throw __err;
   }
 `;
@@ -526,7 +526,9 @@ export class EmbeddedDebugExecutor {
     // Execute instrumented function
     try {
       const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
-      const stepResultsArray = this.stepResults;
+      const reportStep = (idx: number, result: DebugStepResult) => {
+        this.stepResults[idx] = result;
+      };
 
       const wrappedBody = `
   let __currentStep = -1;
@@ -536,7 +538,7 @@ export class EmbeddedDebugExecutor {
 
       const debugFn = new AsyncFunction(
         'page', 'baseUrl', 'screenshotPath', 'stepLogger', 'expect',
-        'locateWithFallback', 'replayCursorPath', '__stepResults', '__checkpoint',
+        'locateWithFallback', 'replayCursorPath', '__checkpoint', '__reportStep',
         wrappedBody
       );
 
@@ -548,8 +550,8 @@ export class EmbeddedDebugExecutor {
         expect,
         locateWithFallback,
         replayCursorPath,
-        stepResultsArray,
         checkpoint,
+        reportStep,
       );
 
       if (this.generation === gen) {

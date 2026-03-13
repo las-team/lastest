@@ -85,14 +85,8 @@ const commandWaiters = globalCommandWaiters.__runnerCommandWaiters;
 export function waitForCommandQueued(
   runnerId: string,
   timeoutMs: number,
-  signal?: AbortSignal,
 ): Promise<boolean> {
   return new Promise<boolean>((resolve) => {
-    if (signal?.aborted) {
-      resolve(false);
-      return;
-    }
-
     let settled = false;
     const settle = (value: boolean) => {
       if (settled) return;
@@ -103,9 +97,6 @@ export function waitForCommandQueued(
     };
 
     const timer = setTimeout(() => settle(false), timeoutMs);
-
-    // AbortSignal listener (request disconnected)
-    signal?.addEventListener('abort', () => settle(false), { once: true });
 
     commandWaiters.set(runnerId, () => settle(true));
   });
