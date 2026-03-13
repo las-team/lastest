@@ -64,7 +64,8 @@ SELECTOR STRATEGY (in order of preference):
 - Prefer broad checks: expect(page.locator('body')).toBeVisible() is always safe
 
 ASSERTIONS — SAFE PATTERNS:
-- For page load verification, check the URL: await expect(page).toHaveURL(/\\/expected-path/);
+- For URL verification, ALWAYS use regex: await expect(page).toHaveURL(/\\/expected-path/); — NEVER use exact string URLs (trailing slashes cause failures)
+- For the root page (/), verify with: await expect(page).toHaveURL(new RegExp(baseUrl));
 - To verify content loaded, use: const content = await page.locator('main, [role="main"], .container, body').first(); await expect(content).toBeVisible();
 - Avoid toBeTruthy() on element counts — use toBeGreaterThan(0) or toBeVisible() on a locator instead
 - expect matchers: toBe, toEqual, toBeTruthy, toBeFalsy, toContain, toHaveLength, toMatch, toMatchObject, toHaveURL, toHaveTitle, toBeVisible, toBeHidden, toHaveText, toContainText, toHaveAttribute, toHaveCount, toBeEnabled, toBeDisabled, toBeChecked, toHaveValue (all support .not)
