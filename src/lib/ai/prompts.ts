@@ -716,6 +716,8 @@ ASSERTIONS — CRITICAL:
 - WRONG: const href = await link.getAttribute('href'); expect(href).toBeTruthy()
 - RIGHT: await expect(link).toHaveAttribute('href', /.*/)
 
+BEFORE writing page.goto(), verify the URL is in the available routes list above. If no route matches, use the closest parent route.
+
 Return ONLY the code block, no explanations.`);
 
   return parts.join('\n');
