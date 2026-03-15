@@ -782,8 +782,8 @@ SELECTORS (this app uses shadcn/ui + Tailwind CSS):
 
 LOADING STATES:
 - After navigation: await page.waitForLoadState('domcontentloaded')
-- Before assertions: allow time for dynamic content to render
 - For async data: await page.locator('[data-loading]').waitFor({ state: 'hidden', timeout: 5000 }).catch(() => {})
+- Do NOT use page.waitForTimeout() — use waitForLoadState or waitFor instead
 
 --- Requirements ---
 - Plain JavaScript only — NO TypeScript annotations, NO imports
