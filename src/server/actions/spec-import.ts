@@ -893,13 +893,37 @@ function groupAcceptanceCriteria(
   const groups: Map<string, ExtractedAcceptanceCriterion[]> = new Map();
 
   for (const ac of criteria) {
-    const groupKey = ac.groupedWith || ac.id;
-    const existing = groups.get(groupKey) || [];
+    // Use explicit grouping if set
+    if (ac.groupedWith) {
+      const existing = groups.get(ac.groupedWith) || [];
+      existing.push(ac);
+      groups.set(ac.groupedWith, existing);
+      continue;
+    }
+
+    // Auto-detect route mentions in AC description to group by route
+    const routeMatch = ac.description.match(/\/[\w-]+(?:\/[\w-[\]]+)*/);
+    const routeKey = routeMatch ? routeMatch[0] : ac.id;
+
+    const existing = groups.get(routeKey) || [];
     existing.push(ac);
-    groups.set(groupKey, existing);
+    groups.set(routeKey, existing);
   }
 
-  return Array.from(groups.values());
+  // Cap groups at 3 ACs to keep tests focused
+  const result: ExtractedAcceptanceCriterion[][] = [];
+  for (const group of groups.values()) {
+    if (group.length <= 3) {
+      result.push(group);
+    } else {
+      // Split large groups into chunks of 3
+      for (let i = 0; i < group.length; i += 3) {
+        result.push(group.slice(i, i + 3));
+      }
+    }
+  }
+
+  return result;
 }
 
 // ============================================
