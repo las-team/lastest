@@ -50,6 +50,11 @@ RULES:
 - Screenshot: await page.screenshot({ path: screenshotPath, fullPage: true })
 - Log: stepLogger.log('message')
 
+AUTH: Tests run with pre-authenticated browser state (Playwright storageState).
+- Do NOT add login steps — auth cookies are already set
+- If redirected to /login or /sign-in, the auth state expired — take screenshot and return gracefully
+- After page.goto(), optionally check: if (page.url().includes('/login')) { await page.screenshot({ path: screenshotPath }); return; }
+
 SYNTAX — CRITICAL:
 - WRONG: const el: Locator = page.locator(...) → RIGHT: const el = page.locator(...)
 - WRONG: import { expect } from '@playwright/test' → RIGHT: (no imports — expect is a parameter)
