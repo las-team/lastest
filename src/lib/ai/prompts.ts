@@ -317,8 +317,10 @@ ${context.errorMessage}`];
   }
 
   parts.push(`
+IMPORTANT: If the "original test code" above is NOT valid JavaScript (e.g., it's an explanation, error message, or empty), IGNORE it completely and write a NEW test from scratch for the target URL using the function signature: export async function test(page, baseUrl, screenshotPath, stepLogger)
+
 ERROR DIAGNOSIS — identify the category FIRST, then apply the matching fix strategy:
-- "Unexpected identifier" or "Unexpected token" → SYNTAX ERROR: Look for missing commas, semicolons, or unmatched brackets. Remove any TypeScript annotations (: Type, as Type). Remove any import statements.
+- "Unexpected identifier" or "Unexpected token" → SYNTAX ERROR: The code may not be valid JS at all. If the code is plaintext/explanation, rewrite from scratch. Otherwise, look for missing commas, semicolons, or unmatched brackets. Remove any TypeScript annotations (: Type, as Type). Remove any import statements.
 - "404" or "not found" → WRONG URL: The page.goto() URL doesn't exist. Change it to a route from the available routes list.
 - "timeout" or "waiting for selector" → SELECTOR MISMATCH: The element doesn't exist with that selector. Use broader selectors (getByRole, getByText) or remove the assertion.
 - "X is not a function" → INVALID API: Using a non-existent method. Check expect() matcher names and Playwright API.
