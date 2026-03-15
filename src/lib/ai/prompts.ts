@@ -183,8 +183,9 @@ export function createTestPrompt(context: TestGenerationContext): string {
       parts.push(`\nIMPORTANT: This is a dynamic route. Before testing it directly:`);
       parts.push(`1. Navigate to the parent list page first (e.g., for /users/[id], go to /users)`);
       parts.push(`2. Wait for the list to load and find a valid link`);
-      parts.push(`3. Click the link or extract the href to get a real ID`);
-      parts.push(`4. Then test the actual page with real data`);
+      parts.push(`3. If the list is empty, take a screenshot of the empty state and return gracefully`);
+      parts.push(`4. Click the link or extract the href to get a real ID`);
+      parts.push(`5. Then test the actual page with real data`);
 
       if (context.siblingRoutes?.length) {
         parts.push(`\nRelated routes: ${context.siblingRoutes.join(', ')}`);
