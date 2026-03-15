@@ -23,7 +23,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { deleteTest, updateTest, getTestVersionHistory, restoreTestVersion, getVisualDiffsForTestResult, restoreTest, permanentlyDeleteTest } from '@/server/actions/tests';
+import { deleteTest, updateTest, getTestVersionHistory, restoreTestVersion, getVisualDiffsForTestResult, restoreTest, permanentlyDeleteTest, cloneTest } from '@/server/actions/tests';
 import { runTests, getJobStatus } from '@/server/actions/runs';
 import { aiFixTest, aiEnhanceTest, updateTestCode } from '@/server/actions/ai';
 import { toast } from 'sonner';
@@ -408,47 +408,23 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
 
         {/* Test Info Card */}
         <Card>
-          <CardHeader>
-            <div className="flex items-start justify-between">
-              <div className="flex-1 mr-4">
+          <CardHeader className="space-y-3">
+            <div className="flex items-start justify-between gap-4">
+              <div className="flex-1 min-w-0">
                 {isEditing ? (
-                  <div className="space-y-2">
-                    <Input
-                      value={editName}
-                      onChange={(e) => setEditName(e.target.value)}
-                      className="text-xl font-semibold"
-                    />
-                    <Input
-                      value={editUrl}
-                      onChange={(e) => setEditUrl(e.target.value)}
-                      placeholder="https://example.com"
-                      className="text-sm text-muted-foreground"
-                    />
-                  </div>
+                  <Input
+                    value={editName}
+                    onChange={(e) => setEditName(e.target.value)}
+                    className="text-xl font-semibold"
+                  />
                 ) : (
-                  <>
-                    <CardTitle className="flex items-center gap-2">
-                      {test.name}
-                    </CardTitle>
-                    {test.description && (
-                      test.description.includes('\n') ? (
-                        <ul className="text-sm text-muted-foreground mt-1 list-disc list-inside space-y-0.5">
-                          {test.description.split('\n').filter(Boolean).map((line, i) => (
-                            <li key={i}>{line}</li>
-                          ))}
-                        </ul>
-                      ) : (
-                        <p className="text-sm text-muted-foreground mt-1">{test.description}</p>
-                      )
-                    )}
-                    <CardDescription>
-                      {test.targetUrl || 'No target URL'}
-                    </CardDescription>
-                  </>
+                  <CardTitle className="flex items-center gap-2">
+                    {test.name}
+                  </CardTitle>
                 )}
               </div>
 
-              <div className="flex gap-2">
+              <div className="flex gap-2 flex-shrink-0">
                 {isEditing ? (
                   <>
                     <Button onClick={handleSave} disabled={isSaving}>
@@ -535,7 +511,20 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
                     >
                       <Video className="h-4 w-4" />
                     </Button>
-                    <Button variant="outline" size="icon" title="Copy">
+                    <Button
+                      variant="outline"
+                      size="icon"
+                      title="Clone"
+                      onClick={async () => {
+                        try {
+                          const cloned = await cloneTest(test.id);
+                          toast.success('Test cloned');
+                          router.push(`/tests/${cloned.id}`);
+                        } catch {
+                          toast.error('Failed to clone test');
+                        }
+                      }}
+                    >
                       <Copy className="h-4 w-4" />
                     </Button>
                     <Button
@@ -549,6 +538,31 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
                 )}
               </div>
             </div>
+            {isEditing ? (
+              <Input
+                value={editUrl}
+                onChange={(e) => setEditUrl(e.target.value)}
+                placeholder="https://example.com"
+                className="text-sm text-muted-foreground"
+              />
+            ) : (
+              <>
+                {test.description && (
+                  test.description.includes('\n') ? (
+                    <ul className="text-sm text-muted-foreground list-disc list-inside space-y-0.5">
+                      {test.description.split('\n').filter(Boolean).map((line, i) => (
+                        <li key={i}>{line}</li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <p className="text-sm text-muted-foreground">{test.description}</p>
+                  )
+                )}
+                <CardDescription>
+                  {test.targetUrl || 'No target URL'}
+                </CardDescription>
+              </>
+            )}
           </CardHeader>
 
           <CardContent>

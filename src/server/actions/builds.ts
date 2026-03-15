@@ -88,6 +88,39 @@ async function getGitInfoFromGitHub(repositoryId: string | null): Promise<GitInf
   return getGitInfoFromProvider(repositoryId);
 }
 
+async function getGitInfoForBranch(repositoryId: string | null, branch: string): Promise<GitInfo> {
+  if (!repositoryId) {
+    return { branch, commit: 'unknown' };
+  }
+
+  const repo = await queries.getRepository(repositoryId);
+  if (!repo) {
+    return { branch, commit: 'unknown' };
+  }
+
+  if (repo.provider === 'gitlab') {
+    const account = repo.teamId ? await queries.getGitlabAccountByTeam(repo.teamId) : null;
+    if (!account || !repo.gitlabProjectId) {
+      return { branch, commit: 'unknown' };
+    }
+    const branchInfo = await getGitLabBranchInfo(account.accessToken, repo.gitlabProjectId, branch, account.instanceUrl || undefined);
+    return {
+      branch,
+      commit: branchInfo ? branchInfo.commit.id.slice(0, 7) : 'unknown',
+    };
+  } else {
+    const account = repo.teamId ? await queries.getGithubAccountByTeam(repo.teamId) : null;
+    if (!account) {
+      return { branch, commit: 'unknown' };
+    }
+    const branchInfo = await getBranchInfo(account.accessToken, repo.owner, repo.name, branch);
+    return {
+      branch,
+      commit: branchInfo ? branchInfo.commit.sha.slice(0, 7) : 'unknown',
+    };
+  }
+}
+
 /**
  * Compute which tests are affected by code changes on this branch vs default branch.
  * Stores the test IDs on the build record. Non-blocking — callers should catch errors.
@@ -159,6 +192,7 @@ export async function createAndRunBuild(
   repositoryId?: string | null,
   runnerId?: string,
   versionOverrides?: Record<string, string>,
+  gitBranchOverride?: string,
 ) {
   if (repositoryId) await requireRepoAccess(repositoryId);
   else await requireTeamAccess();
@@ -203,7 +237,9 @@ export async function createAndRunBuild(
 
   // Get repo for git info via GitHub API
   const repo = repositoryId ? await queries.getRepository(repositoryId) : null;
-  const gitInfo = await getGitInfoFromGitHub(repositoryId ?? repo?.id ?? null);
+  const gitInfo = gitBranchOverride
+    ? await getGitInfoForBranch(repositoryId ?? repo?.id ?? null, gitBranchOverride)
+    : await getGitInfoFromGitHub(repositoryId ?? repo?.id ?? null);
 
   // Create test run
   const testRun = await queries.createTestRun({

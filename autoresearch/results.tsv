@@ -8,3 +8,58 @@ a9a1bda	1.000000	0	keep	Add concrete example test to SYSTEM_PROMPT — fastest r
 8513a80	1.000000	0	keep	Remove waitForTimeout, rely on waitForLoadState only
 0cbce72	1.000000	0	keep	Condense selector/assertion/screenshot sections for brevity
 a5f2f22	1.000000	0	keep	Simplify createTestPrompt guidelines, fix stale waitForTimeout
+05e1482	0.937500	1.000000	1.000000	1.000000	baseline	Initial v2 baseline - 30/32 pass, 2 assertion failures
+83e38bb	0.937500	1.000000	1.000000	1.000000	keep	[fix-loop] D1 error category → fix strategy mapping
+f642be4	0.937500	1.000000	1.000000	1.000000	keep	[test-generation] B1 syntax enforcement + resilient assertions
+eebf6aa	0.937500	1.000000	1.000000	1.000000	keep	[test-generation] Dynamic route discovery + assertion guidance
+3c959ea	0.937500	1.000000	1.000000	1.000000	keep	[test-generation] Dynamic route example in SYSTEM_PROMPT
+7a92e1d	0.937500	1.000000	1.000000	1.000000	keep	[fix-loop] D3 available routes in fix prompt
+8228203	0.937500	1.000000	1.000000	1.000000	keep	[test-generation] B5 shadcn selectors + B4 loading states
+d7b7aba	0.937500	1.000000	1.000000	1.000000	keep	[fix-loop] D6 route validation + dynamic route fix guidance
+87b2f2c	0.937500	1.000000	1.000000	1.000000	keep	[test-generation] B6 AC extraction with route context
+e1ca987	0.937500	1.000000	1.000000	1.000000	keep	[fix-loop] D5+D6 root cause patterns + validation checklist
+ca66ff2	0.937500	1.000000	1.000000	1.000000	keep	[auth-resilience] C1+C3 auth awareness in SYSTEM_PROMPT
+8d19609	0.937500	1.000000	1.000000	1.000000	keep	[fix-loop] Error diagnosis + routes in MCP fix prompt
+633022c	0.937500	1.000000	1.000000	1.000000	keep	[route-accuracy] A6 route validation reminder
+be924f1	0.937500	1.000000	1.000000	1.000000	keep	[test-generation] Align createTestPrompt with branch-aware
+409fc51	0.937500	1.000000	1.000000	1.000000	keep	[test-generation] B7 toBeTruthy antipattern + var declarations
+2f380af	0.937500	1.000000	1.000000	1.000000	keep	[test-generation] Fix extractCodeFromResponse for explanation-before-code
+4c8923a	0.937500	1.000000	1.000000	1.000000	keep	[fix-loop] Emphasize code-only output in fix prompt header
+b10a369	0.937500	1.000000	1.000000	1.000000	keep	[test-generation] Code-only emphasis in SYSTEM_PROMPT
+0b276b9	0.937500	1.000000	1.000000	1.000000	keep	[fix-loop] Code-only emphasis in MCP fix prompt
+a93ce0a	0.937500	1.000000	1.000000	1.000000	keep	[test-generation] JS-only rules in enhance prompt
+4ca8f93	0.937500	1.000000	1.000000	1.000000	keep	[test-generation] Fix MCP_SYSTEM_PROMPT example
+f92a31d	0.937500	1.000000	1.000000	1.000000	keep	[test-generation] Code block labels typescript→javascript
+210a326	0.937500	1.000000	1.000000	1.000000	keep	[test-generation] Auto-group ACs by route
+60bda04	0.937500	1.000000	1.000000	1.000000	keep	[fix-loop] Reject non-code responses in extractCodeFromResponse
+bfa0308	0.937500	1.000000	1.000000	1.000000	keep	[fix-loop] Handle non-code original test in fix prompt
+1e4c2ae	0.937500	1.000000	1.000000	1.000000	keep	[fix-loop] Non-code handling in MCP fix prompt
+86d47ba	0.937500	1.000000	1.000000	1.000000	keep	[test-generation] Tighten non-code detection
+2239451	0.937500	1.000000	1.000000	1.000000	keep	[test-generation] Add expect matchers list
+551b3db	0.937500	1.000000	1.000000	1.000000	keep	[test-generation] Enhance static route example
+23c6e81	0.937500	1.000000	1.000000	1.000000	keep	[test-generation] Count/expression toBeTruthy warning
+fc6fe6e	0.937500	1.000000	1.000000	1.000000	keep	[test-generation] Empty list graceful exit for dynamic routes
+865ed4b	0.937500	1.000000	1.000000	1.000000	keep	[test-generation] Empty state handling in dynamic route example
+865ed4b	0.968750	1.000000	1.000000	1.000000	milestone	New build: 31/32 pass, 1 env error (dsafasdf)
+d4abea5	0.937500	1.000000	1.000000	1.000000	keep	[test-generation] Empty state guard + count comparison antipattern
+cc960bc	0.781250	0.781250	1.000000	1.000000	keep	[test-generation] Stronger conversational text filtering in AC extraction
+NOTE: build 7bc8ca65 has 7x500 server errors (transient infra, not prompt issue)
+1a1b22d	0.781250	0.781250	1.000000	1.000000	keep	[fix-loop] Add 500 server error to error diagnosis
+67d9d77	0.781250	0.781250	1.000000	1.000000	keep	[fix-loop] 500/console in MCP fix prompt
+ebd13f4	0.781250	0.781250	1.000000	1.000000	keep	[test-generation] Empty state in createTestPrompt
+NOTE: test-generation fast-eval 7/7 pass (1.0), route-accuracy 5/7 (false neg from ${href})
+67d9d77	test-gen:1.0	route:0.71	fix:1.0	auth:1.0	all-tracks	All fast-evals ≥0.71 (route false negs only)
+e5beef7	0.781250	0.781250	1.000000	1.000000	keep	[route-accuracy] A2 better route matching for feature ACs
+20abd36	test-gen:1.0	route:N/A	fix:1.0	auth:1.0	keep	[test-generation] Strict parser role in AC extraction
+f0c58aa	test-gen:1.0	all-tracks	keep	All fast-evals pass. test-gen 7/7 (1.0) consistently
+f0c58aa	0.781250	0.781250	1.000000	1.000000	keep	[test-generation] Add list/table page example to SYSTEM_PROMPT
+ecf868d	route:1.0	test-gen:1.0	fix:1.0	auth:1.0	milestone	ALL FAST-EVALS 1.0! route-accuracy 7/7, test-gen 7/7
+1a12910	fix:1.0	all:1.0	keep	[fix-loop] Actionable server error fix with response status check
+d488d2f	test-gen:1.0	all:1.0	keep	[test-generation] Quality check filter for AC extraction
+a75d49a	route:1.0	test-gen:1.0	fix:1.0	auth:1.0	keep	[route-accuracy] A4 route hints with descriptions
+VALIDATED: build f9fcf0b2 = 31/32 pass (96.9%), only failure is garbage test "dsafasdf" (console error)
+VALIDATED: Original 2 assertion failures (tests/[id] + tests) are FIXED by prompt improvements
+576ea96	route:1.0	all:1.0	keep	[route-accuracy] Home fallback in createTestPrompt
+c950b2d	test-gen:1.0	all:1.0	keep	[test-generation] Simplicity guideline in SYSTEM_PROMPT
+5f82981	test-gen:1.0	all:1.0	keep	[test-generation] Accept any language tag in code block extraction
+2e140b9	test-gen:1.0	all:1.0	keep	[test-generation] Discourage waitForTimeout

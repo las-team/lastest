@@ -30,10 +30,8 @@ import type { TestRun } from '@/lib/db/schema';
 import {
   getLatestRunForBranch,
   queueRunForBranch,
-  getQueueStatus,
   type BranchRunInfo,
 } from '@/server/actions/compare';
-import type { QueuedRun } from '@/lib/run-queue';
 
 interface CompareClientProps {
   branches: string[];
@@ -41,6 +39,14 @@ interface CompareClientProps {
   defaultBaseline?: string | null;
   repositoryId?: string;
   activeBranch?: string;
+}
+
+interface BranchBuildState {
+  buildId: string;
+  status: 'running' | 'completed' | 'failed';
+  passedCount: number;
+  failedCount: number;
+  totalTests: number;
 }
 
 function formatTimestamp(date: Date | null): string {
@@ -65,7 +71,7 @@ function TestStatusIcon({ status }: { status: string | null }) {
 interface BranchColumnProps {
   branch: string;
   branchInfo: BranchRunInfo | null;
-  queuedRun: QueuedRun | null;
+  buildState: BranchBuildState | null;
   isLoading: boolean;
   onRun: () => void;
   onRerun: () => void;
@@ -79,7 +85,7 @@ interface BranchColumnProps {
 function BranchColumn({
   branch,
   branchInfo,
-  queuedRun,
+  buildState,
   isLoading,
   onRun,
   onRerun,
@@ -90,23 +96,10 @@ function BranchColumn({
   onScroll,
 }: BranchColumnProps) {
   const hasRun = branchInfo?.run !== null;
-  const isRunning = queuedRun?.status === 'running';
-  const isQueued = queuedRun?.status === 'queued';
-  const progress = queuedRun?.progress;
+  const isRunning = buildState?.status === 'running';
   const isActiveBranch = branch === activeBranch;
 
-  // Merge allTests with real-time completedResults from running queue
-  const testsWithLiveStatus = branchInfo?.allTests?.map((test) => {
-    const liveResult = queuedRun?.completedResults?.find((r) => r.testId === test.id);
-    if (liveResult) {
-      return {
-        ...test,
-        status: liveResult.status,
-        screenshotPath: liveResult.screenshotPath || test.screenshotPath,
-      };
-    }
-    return test;
-  }) || [];
+  const testsWithLiveStatus = branchInfo?.allTests || [];
 
   return (
     <Card className="flex-1">
@@ -136,20 +129,18 @@ function BranchColumn({
       </CardHeader>
       <CardContent className="space-y-4">
         {/* Progress bar when running */}
-        {(isRunning || isQueued) && (
+        {isRunning && buildState && (
           <div className="space-y-2">
             <div className="flex items-center justify-between text-sm">
-              <span className="text-muted-foreground">
-                {isQueued ? 'Queued...' : progress?.currentTestName || 'Running...'}
-              </span>
-              {progress && progress.total > 0 && (
+              <span className="text-muted-foreground">Running...</span>
+              {buildState.totalTests > 0 && (
                 <span className="text-muted-foreground">
-                  {progress.completed}/{progress.total}
+                  {buildState.passedCount + buildState.failedCount}/{buildState.totalTests}
                 </span>
               )}
             </div>
             <Progress
-              value={progress && progress.total > 0 ? (progress.completed / progress.total) * 100 : 0}
+              value={buildState.totalTests > 0 ? ((buildState.passedCount + buildState.failedCount) / buildState.totalTests) * 100 : 0}
             />
           </div>
         )}
@@ -158,13 +149,13 @@ function BranchColumn({
         <div className="flex gap-2 h-9">
           {isActiveBranch && (
             <>
-              {!hasRun && !isRunning && !isQueued && (
+              {!hasRun && !isRunning && (
                 <Button onClick={onRun} disabled={isLoading} size="sm" className="flex-1">
                   {isLoading ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Play className="h-4 w-4 mr-2" />}
                   Run Tests
                 </Button>
               )}
-              {hasRun && !isRunning && !isQueued && (
+              {hasRun && !isRunning && (
                 <Button onClick={onRerun} disabled={isLoading} variant="outline" size="sm" className="flex-1">
                   {isLoading ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <RefreshCw className="h-4 w-4 mr-2" />}
                   Re-run
@@ -246,7 +237,7 @@ function BranchColumn({
         )}
 
         {/* No tests message */}
-        {testsWithLiveStatus.length === 0 && !isRunning && !isQueued && (
+        {testsWithLiveStatus.length === 0 && !isRunning && (
           <div className="text-center py-4 text-muted-foreground text-sm">
             No tests available
           </div>
@@ -263,10 +254,7 @@ export function CompareClient({ branches, runs, defaultBaseline, repositoryId, a
   const [targetInfo, setTargetInfo] = useState<BranchRunInfo | null>(null);
   const [isLoadingBase, setIsLoadingBase] = useState(false);
   const [isLoadingTarget, setIsLoadingTarget] = useState(false);
-  const [queueStatus, setQueueStatus] = useState<{ queue: QueuedRun[]; activeRun: QueuedRun | null }>({
-    queue: [],
-    activeRun: null,
-  });
+  const [branchBuilds, setBranchBuilds] = useState<Record<string, BranchBuildState>>({});
   const [expandedTests, setExpandedTests] = useState<Set<string>>(new Set());
 
   // Synchronized scrolling refs
@@ -340,53 +328,76 @@ export function CompareClient({ branches, runs, defaultBaseline, repositoryId, a
     }
   }, [targetBranch, fetchBranchInfo]);
 
-  // Poll queue status when runs are active
+  // Poll build status for active builds
   useEffect(() => {
-    const pollQueue = async () => {
-      try {
-        const status = await getQueueStatus();
-        setQueueStatus(status);
+    const activeBuilds = Object.entries(branchBuilds).filter(
+      ([, state]) => state.status === 'running'
+    );
 
-        // Refresh branch info when runs complete
-        const wasRunning = queueStatus.activeRun !== null;
-        const isNowIdle = status.activeRun === null && status.queue.length === 0;
+    if (activeBuilds.length === 0) return;
 
-        if (wasRunning && isNowIdle) {
-          if (baseBranch) fetchBranchInfo(baseBranch, true);
-          if (targetBranch) fetchBranchInfo(targetBranch, false);
-          toast.success('Test run completed');
+    const pollBuilds = async () => {
+      for (const [branch, buildState] of activeBuilds) {
+        try {
+          const res = await fetch(`/api/builds/${buildState.buildId}/status`);
+          if (!res.ok) continue;
+          const data = await res.json();
+
+          const completed = data.passedCount + data.failedCount;
+          const isComplete = data.overallStatus !== 'review_required' || data.completedAt;
+
+          if (isComplete) {
+            setBranchBuilds((prev) => ({
+              ...prev,
+              [branch]: { ...prev[branch], status: 'completed', passedCount: data.passedCount, failedCount: data.failedCount, totalTests: data.totalTests },
+            }));
+            // Refresh branch info after completion
+            const isBase = branch === baseBranch;
+            fetchBranchInfo(branch, isBase);
+            toast.success(`Build completed for ${branch}`);
+          } else {
+            setBranchBuilds((prev) => ({
+              ...prev,
+              [branch]: { ...prev[branch], passedCount: data.passedCount, failedCount: data.failedCount, totalTests: data.totalTests },
+            }));
+          }
+        } catch {
+          // Ignore poll errors
         }
-      } catch (error) {
-        console.error('Failed to poll queue status:', error);
       }
     };
 
-    const interval = setInterval(pollQueue, 2000);
-    pollQueue();
+    const interval = setInterval(pollBuilds, 2000);
+    pollBuilds();
 
     return () => clearInterval(interval);
-  }, [baseBranch, targetBranch, fetchBranchInfo, queueStatus.activeRun]);
+  }, [branchBuilds, baseBranch, targetBranch, fetchBranchInfo]);
 
   const handleRunBranch = async (branch: string) => {
     try {
-      await queueRunForBranch(branch, repositoryId);
-      toast.info(`Tests queued for ${branch}`);
+      const result = await queueRunForBranch(branch, repositoryId);
 
-      // Immediate status refresh
-      const status = await getQueueStatus();
-      setQueueStatus(status);
+      if (result.queued || !result.buildId) {
+        toast.info(`Build queued for ${branch}`);
+        return;
+      }
+
+      toast.info(`Build started for ${branch}`);
+      const buildId = result.buildId!;
+      setBranchBuilds((prev) => ({
+        ...prev,
+        [branch]: {
+          buildId,
+          status: 'running',
+          passedCount: 0,
+          failedCount: 0,
+          totalTests: 0,
+        },
+      }));
     } catch (error) {
-      console.error('Failed to queue run:', error);
-      toast.error('Failed to queue tests');
+      console.error('Failed to start build:', error);
+      toast.error('Failed to start build');
     }
-  };
-
-  const getQueuedRunForBranch = (branch: string): QueuedRun | null => {
-    // Check active run first, then queued
-    if (queueStatus.activeRun?.branch === branch) {
-      return queueStatus.activeRun;
-    }
-    return queueStatus.queue.find((q) => q.branch === branch) || null;
   };
 
   return (
@@ -462,7 +473,7 @@ export function CompareClient({ branches, runs, defaultBaseline, repositoryId, a
               <BranchColumn
                 branch={baseBranch}
                 branchInfo={baseInfo}
-                queuedRun={getQueuedRunForBranch(baseBranch)}
+                buildState={branchBuilds[baseBranch] || null}
                 isLoading={isLoadingBase}
                 onRun={() => handleRunBranch(baseBranch)}
                 onRerun={() => handleRunBranch(baseBranch)}
@@ -482,7 +493,7 @@ export function CompareClient({ branches, runs, defaultBaseline, repositoryId, a
               <BranchColumn
                 branch={targetBranch}
                 branchInfo={targetInfo}
-                queuedRun={getQueuedRunForBranch(targetBranch)}
+                buildState={branchBuilds[targetBranch] || null}
                 isLoading={isLoadingTarget}
                 onRun={() => handleRunBranch(targetBranch)}
                 onRerun={() => handleRunBranch(targetBranch)}
