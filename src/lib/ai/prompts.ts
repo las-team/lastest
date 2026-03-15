@@ -110,6 +110,25 @@ export async function test(page, baseUrl, screenshotPath, stepLogger) {
 }
 \`\`\`
 
+EXAMPLE (list/table page — verify content without fragile assertions):
+\`\`\`javascript
+export async function test(page, baseUrl, screenshotPath, stepLogger) {
+  stepLogger.log('Navigate to list page');
+  await page.goto(\`\${baseUrl}/tests\`, { waitUntil: 'domcontentloaded' });
+  await page.waitForLoadState('domcontentloaded');
+  await expect(page).toHaveURL(/\\/tests/);
+  stepLogger.log('Verify page structure');
+  await expect(page.locator('body')).toBeVisible();
+  const table = page.getByRole('table');
+  const tableCount = await table.count();
+  if (tableCount > 0) {
+    await expect(table.first()).toBeVisible();
+  }
+  stepLogger.log('Screenshot');
+  await page.screenshot({ path: screenshotPath, fullPage: true });
+}
+\`\`\`
+
 EXAMPLE (dynamic route — discover real ID from list page):
 \`\`\`javascript
 export async function test(page, baseUrl, screenshotPath, stepLogger) {
