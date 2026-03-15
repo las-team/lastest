@@ -335,6 +335,10 @@ Return ONLY the fixed code, no explanations.`);
 }
 
 export function createMcpFixPrompt(context: TestGenerationContext): string {
+  const routeSection = context.availableRoutes?.length
+    ? `\nAvailable Routes (ONLY use these in page.goto()):\n${context.availableRoutes.map(r => `- ${r}`).join('\n')}\n`
+    : '';
+
   return `Fix this failing Playwright test by exploring the live page with MCP tools.
 
 Original test code:
@@ -346,6 +350,12 @@ Error message:
 ${context.errorMessage}
 
 Target URL: ${context.targetUrl || 'unknown'}
+${routeSection}
+ERROR DIAGNOSIS — identify the category FIRST:
+- "Unexpected identifier/token" → SYNTAX ERROR: fix missing commas, remove TS annotations
+- "404/not found" → WRONG URL: change to a route from available routes
+- "timeout/selector" → SELECTOR MISMATCH: use browser_snapshot to find correct selectors
+- "Expected value to be truthy" → replace toBeTruthy() with toBeVisible() on locator
 
 Instructions:
 - browser_navigate to the target URL, then browser_snapshot to see current page structure
