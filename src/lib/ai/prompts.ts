@@ -781,6 +781,13 @@ export function extractCodeFromResponse(response: string): string {
     return importMatch[1].trim();
   }
 
-  // Return as-is if we can't extract
-  return response.trim();
+  // If no code patterns found, the response is likely explanatory text, not code.
+  // Return empty string to signal extraction failure rather than storing non-code text.
+  const trimmed = response.trim();
+  if (!trimmed.includes('function') && !trimmed.includes('await') && !trimmed.includes('page.')) {
+    return '';
+  }
+
+  // Return as-is if we can't extract but it looks code-like
+  return trimmed;
 }
