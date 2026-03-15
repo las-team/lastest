@@ -406,7 +406,14 @@ ${context.existingCode}
 - Add waits for dynamic content`);
   }
 
-  parts.push(`\nReturn ONLY the enhanced code, no explanations.`);
+  parts.push(`
+Rules:
+- Plain JavaScript only — NO TypeScript annotations, NO imports
+- ALWAYS use regex for URL checks: await expect(page).toHaveURL(/\\/path/)
+- Prefer toBeVisible() over toBeTruthy() for element presence
+- Every variable must use const or let
+
+Return ONLY the enhanced code in a code block, no explanations.`);
 
   return parts.join('\n');
 }
