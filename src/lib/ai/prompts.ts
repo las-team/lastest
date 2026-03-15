@@ -657,8 +657,9 @@ Guidelines:
 - Each AC MUST describe a specific, observable user action and expected system response that can be verified in a browser
 - Each AC should mention the specific page/route where the behavior occurs (e.g., "On the /settings page, ...")
 - DO NOT include: questions, suggestions, meta-commentary, implementation tasks, vague criteria, or conversational text
-- DO NOT include ACs like "Create additional tests...", "Consider...", "Should we...", "Implement...", "Ensure proper...", "Clarification on...", "Permission to..."
-- DO NOT include conversational responses, clarifying questions, or approval requests — output ONLY the structured user stories
+- DO NOT include ACs that start with: "Create...", "Consider...", "Should we...", "Implement...", "Ensure proper...", "Clarification...", "Permission...", "Let me...", "I'll...", "Would you...", "Can you..."
+- DO NOT include conversational responses, clarifying questions, approval requests, or meta-discussion about the testing process — output ONLY testable user stories
+- EVERY AC must describe a specific USER ACTION and EXPECTED VISIBLE RESULT, not a task or process step
 - Bad AC: "Ensure proper error handling" (vague, not testable)
 - Good AC: "When user submits login form with wrong password, an error message 'Invalid credentials' appears"
 - Bad AC: "The system should display data correctly" (vague, no specific elements)
