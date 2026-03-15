@@ -759,9 +759,11 @@ LOADING STATES:
 
 ASSERTIONS — CRITICAL:
 - Prefer toBeVisible() for element checks, toContainText() for text, regex toHaveURL() for URLs
-- NEVER use toBeTruthy() on textContent()/getAttribute()/innerText() — they return null when element is missing
+- NEVER use toBeTruthy() on textContent()/getAttribute()/count/comparison results
 - WRONG: const text = await el.textContent(); expect(text).toBeTruthy()
+- WRONG: expect(count > 0).toBeTruthy() → RIGHT: await expect(el.first()).toBeVisible()
 - RIGHT: await expect(el).toBeVisible() or await expect(el).toContainText(/expected/)
+- For lists that might be empty, guard: const count = await rows.count(); if (count > 0) { await expect(rows.first()).toBeVisible(); }
 - Available expect matchers: toBe, toEqual, toBeTruthy, toBeFalsy, toContain, toMatch, toHaveURL, toHaveTitle, toBeVisible, toBeHidden, toHaveText, toContainText, toHaveAttribute, toHaveCount, toBeEnabled, toBeDisabled, toBeChecked, toHaveValue (all support .not)
 
 BEFORE writing page.goto(), verify the URL is in the available routes list above. If no route matches, use the closest parent route.
