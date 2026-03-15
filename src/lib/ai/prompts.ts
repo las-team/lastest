@@ -375,6 +375,7 @@ COMMON FIX PATTERNS:
 - "Unexpected identifier" often means a variable is used without declaration (missing const/let) or a line is missing a semicolon before the next statement
 - "Expected value to be truthy but got false" means toBeTruthy() was called on a falsy value — replace with toBeVisible() on a locator, or remove the assertion entirely if it's not critical
 - If you see \`const x = await el.textContent(); expect(x).toBeTruthy()\` → replace with \`await expect(el).toBeVisible()\` or \`await expect(el).toContainText(/something/)\`
+- "Network failures detected" or "(500)" → Add response status check after page.goto(): \`const response = await page.goto(...); if (!response || response.status() >= 400) { stepLogger.log('Server error'); await page.screenshot({ path: screenshotPath }); return; }\`
 
 Rules:
 - Write plain JavaScript only — NO TypeScript type annotations (no ": Page", no ": string", no ": any")
