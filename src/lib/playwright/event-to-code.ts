@@ -48,6 +48,28 @@ export function eventsToCodeLines(
   const includeCursorReplay = options?.includeCursorReplay ?? true;
   const lines: string[] = [];
 
+  // Pre-process: deduplicate consecutive fill actions on the same element
+  const deduped: CodeGenEvent[] = [];
+  for (let i = 0; i < events.length; i++) {
+    const event = events[i];
+    if (event.type === 'action' && event.data.action === 'fill') {
+      let j = i + 1;
+      let skip = false;
+      while (j < events.length) {
+        const next = events[j];
+        if (next.type === 'insert-timestamp') { skip = true; break; }
+        if (next.type === 'action') {
+          if (next.data.action === 'fill' && next.data.selector === event.data.selector) { skip = true; }
+          break;
+        }
+        j++;
+      }
+      if (skip) continue;
+    }
+    deduped.push(event);
+  }
+  events = deduped;
+
   function getRelativePath(url: string): string {
     if (url.startsWith(baseOrigin)) {
       return url.slice(baseOrigin.length) || '/';
@@ -56,6 +78,8 @@ export function eventsToCodeLines(
   }
 
   let lastAction = '';
+  let lastEmittedEventType = '';
+  let lastNavigatedPath = '';
   let cursorBatch: [number, number, number][] = [];
   let lastCursorTimestamp = 0;
   let lastCursorX = 640;
@@ -93,9 +117,18 @@ export function eventsToCodeLines(
     }
 
     if (event.type === 'navigation' && event.data.relativePath) {
-      if (!lastAction.includes('goto')) {
-        const relativePath = event.data.relativePath;
+      const relativePath = event.data.relativePath;
+      if (relativePath === lastNavigatedPath && lastEmittedEventType === 'action') {
+        // Skip duplicate navigation (revalidatePath refresh), just wait for mutation
+        if (lastAction === 'click') {
+          lines.push(`${indent}await page.waitForLoadState('networkidle').catch(() => {});`);
+        }
+      } else if (!lastAction.includes('goto')) {
+        if (lastEmittedEventType === 'action' && lastAction === 'click') {
+          lines.push(`${indent}await page.waitForLoadState('networkidle').catch(() => {});`);
+        }
         lines.push(`${indent}await page.goto(buildUrl(baseUrl, '${relativePath}'));`);
+        lastNavigatedPath = relativePath;
       }
       lastAction = 'goto';
     } else if (event.type === 'action') {
@@ -182,6 +215,7 @@ export function eventsToCodeLines(
       }
 
       lastAction = action || '';
+      lastEmittedEventType = 'action';
     } else if (event.type === 'screenshot') {
       lines.push(`${indent}await page.screenshot({ path: getScreenshotPath(), fullPage: true });`);
     } else if (event.type === 'assertion') {

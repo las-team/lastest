@@ -94,6 +94,8 @@ export interface RecordingEvent {
     autoDetected?: boolean; // download was auto-detected (not pre-flagged)
     text?: string; // clipboard text for clipboard-set events
     timestampFormat?: string; // format for insert-timestamp events ('iso' default)
+    targetSelectors?: ActionSelector[]; // target element selectors for insert-timestamp
+    targetCoordinates?: { x: number; y: number }; // target element coordinates for insert-timestamp
   };
 }
 
@@ -1410,9 +1412,30 @@ export class PlaywrightRecorder extends EventEmitter {
    */
   async insertTimestamp(format: string = 'iso'): Promise<boolean> {
     if (!this.page || !this.session) return false;
+    // Capture the currently focused element's selectors before typing
+    // so code gen knows which element to focus before typing the timestamp
+    const focusInfo = await this.page.evaluate(() => {
+      const el = document.activeElement as HTMLElement | null;
+      if (!el || el === document.body) return null;
+      const rect = el.getBoundingClientRect();
+      const selectors: { type: string; value: string }[] = [];
+      if (el.id) selectors.push({ type: 'id', value: `#${el.id}` });
+      const placeholder = el.getAttribute('placeholder');
+      if (placeholder) selectors.push({ type: 'placeholder', value: `[placeholder="${placeholder}"]` });
+      const ariaLabel = el.getAttribute('aria-label');
+      if (ariaLabel) selectors.push({ type: 'aria-label', value: `[aria-label="${ariaLabel}"]` });
+      return {
+        selectors,
+        coordinates: { x: Math.round(rect.x + rect.width / 2), y: Math.round(rect.y + rect.height / 2) },
+      };
+    }).catch(() => null);
     const timestamp = new Date().toISOString();
     await this.page.keyboard.type(timestamp);
-    this.addEvent('insert-timestamp', { timestampFormat: format });
+    this.addEvent('insert-timestamp', {
+      timestampFormat: format,
+      targetSelectors: focusInfo?.selectors,
+      targetCoordinates: focusInfo?.coordinates,
+    });
     return true;
   }
 
@@ -1529,7 +1552,36 @@ export class PlaywrightRecorder extends EventEmitter {
   private generateCode(): string {
     if (!this.session) return '';
 
-    const hasCursorEvents = this.session.events.some(e => e.type === 'cursor-move');
+    // Pre-process: deduplicate consecutive fill actions on the same element
+    // (keeps only the last fill value when multiple fills target the same selector)
+    // Also removes fills that precede an insert-timestamp (timestamp replaces the fill content)
+    const deduped: RecordingEvent[] = [];
+    for (let i = 0; i < this.session.events.length; i++) {
+      const event = this.session.events[i];
+      if (event.type === 'action' && event.data.action === 'fill') {
+        // Look ahead: skip this fill if a later fill or insert-timestamp follows
+        let j = i + 1;
+        let skipReason: 'later-fill' | 'timestamp' | null = null;
+        while (j < this.session.events.length) {
+          const next = this.session.events[j];
+          if (next.type === 'insert-timestamp') {
+            skipReason = 'timestamp'; // Insert-timestamp replaces all preceding fills
+            break;
+          }
+          if (next.type === 'action') {
+            if (next.data.action === 'fill' && next.data.selector === event.data.selector) {
+              skipReason = 'later-fill';
+            }
+            break; // Stop at any action event
+          }
+          j++;
+        }
+        if (skipReason) continue; // Skip — a later fill or timestamp supersedes this one
+      }
+      deduped.push(event);
+    }
+
+    const hasCursorEvents = deduped.some(e => e.type === 'cursor-move');
     const coordsEnabled = this.selectorPriority.find(s => s.type === 'coords')?.enabled ?? true;
 
     const lines: string[] = [
@@ -1577,6 +1629,8 @@ export class PlaywrightRecorder extends EventEmitter {
       `        // Use .first() to handle multiple matches (e.g., header + footer nav links)`,
       `        const target = locator.first();`,
       `        await target.waitFor({ timeout: 3000 });`,
+      `        // Scroll element into view before interacting (handles elements in scroll containers)`,
+      `        await target.scrollIntoViewIfNeeded().catch(() => {});`,
       `        if (action === 'locate') return target; // Return locator for assertions`,
       `        if (action === 'click') await target.click(options || {});`,
       `        else if (action === 'fill') await target.fill(value || '');`,
@@ -1623,6 +1677,7 @@ export class PlaywrightRecorder extends EventEmitter {
 
     let lastAction = '';
     let lastEmittedEventType = ''; // Track last non-cursor event for context-aware code gen
+    let lastNavigatedPath = ''; // Track current URL to skip duplicate navigations (e.g. revalidatePath)
     let cursorBatch: [number, number, number][] = [];
     let lastCursorTimestamp = 0;
     let lastCursorX = 640;
@@ -1638,7 +1693,7 @@ export class PlaywrightRecorder extends EventEmitter {
       }
     };
 
-    for (const event of this.session.events) {
+    for (const event of deduped) {
       if (event.type === 'cursor-move' && event.data.coordinates) {
         const { x, y } = event.data.coordinates;
         const delay = lastCursorTimestamp > 0 ? event.timestamp - lastCursorTimestamp : 0;
@@ -1659,10 +1714,21 @@ export class PlaywrightRecorder extends EventEmitter {
       }
 
       if (event.type === 'navigation' && event.data.relativePath) {
-        // Only add goto for the first navigation or if URL changed significantly
-        if (!lastAction.includes('goto')) {
-          const relativePath = event.data.relativePath;
+        const relativePath = event.data.relativePath;
+        // Skip duplicate navigations to the same path (triggered by revalidatePath/server actions)
+        if (relativePath === lastNavigatedPath && lastEmittedEventType === 'action') {
+          // This is likely a revalidatePath refresh, not a user navigation — skip it
+          // but still wait for the mutation to complete
+          if (lastAction === 'click') {
+            lines.push(`  await page.waitForLoadState('networkidle').catch(() => {});`);
+          }
+        } else if (!lastAction.includes('goto')) {
+          // If last action was a click (e.g. Save/Create/Delete), wait for pending requests
+          if (lastEmittedEventType === 'action' && lastAction === 'click') {
+            lines.push(`  await page.waitForLoadState('networkidle').catch(() => {});`);
+          }
           lines.push(`  await page.goto(buildUrl(baseUrl, '${relativePath}'));`);
+          lastNavigatedPath = relativePath;
         }
         lastAction = 'goto';
       } else if (event.type === 'action') {
@@ -1935,25 +2001,43 @@ export class PlaywrightRecorder extends EventEmitter {
         const escapedKey = event.data.key.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
         lines.push(`  await page.keyboard.up('${escapedKey}');`);
         lastEmittedEventType = 'keyup';
+      } else if (event.type === 'insert-timestamp') {
+        // If we have target selectors, click the element first to ensure focus
+        const targetSels = event.data.targetSelectors;
+        const targetCoords = event.data.targetCoordinates;
+        if (targetSels && targetSels.length > 0) {
+          const selectorsJson = JSON.stringify(targetSels);
+          const coordsArg = targetCoords ? JSON.stringify(targetCoords) : 'null';
+          lines.push(`  await locateWithFallback(page, ${selectorsJson}, 'click', null, ${coordsArg});`);
+        }
+        lines.push(`  await page.keyboard.type(new Date().toISOString());`);
+        lastEmittedEventType = 'insert-timestamp';
       } else if (event.type === 'scroll') {
         const deltaX = event.data.deltaX || 0;
         const deltaY = event.data.deltaY || 0;
         const scrollMods = event.data.modifiers;
+        // Always use evaluate with elementFromPoint to scroll the correct container
+        // (page.mouse.wheel doesn't work reliably for nested scroll containers like ScrollArea)
+        const modFlags: string[] = [];
         if (scrollMods && scrollMods.length > 0) {
-          // Dispatch WheelEvent via evaluate with modifier flags set directly on the event
-          // (keyboard.down + mouse.wheel doesn't propagate modifier state to the wheel event)
-          const modFlags: string[] = [];
           if (scrollMods.includes('Control')) modFlags.push('ctrlKey: true');
           if (scrollMods.includes('Shift')) modFlags.push('shiftKey: true');
           if (scrollMods.includes('Alt')) modFlags.push('altKey: true');
           if (scrollMods.includes('Meta')) modFlags.push('metaKey: true');
-          lines.push(`  await page.evaluate(({ x, y, dx, dy }) => {`);
-          lines.push(`    const el = document.elementFromPoint(x, y) || document.documentElement;`);
-          lines.push(`    el.dispatchEvent(new WheelEvent('wheel', { deltaX: dx, deltaY: dy, ${modFlags.join(', ')}, bubbles: true, cancelable: true, clientX: x, clientY: y }));`);
-          lines.push(`  }, { x: ${lastCursorX}, y: ${lastCursorY}, dx: ${deltaX}, dy: ${deltaY} });`);
-        } else {
-          lines.push(`  await page.mouse.wheel(${deltaX}, ${deltaY});`);
         }
+        const modFlagsStr = modFlags.length > 0 ? `, ${modFlags.join(', ')}` : '';
+        lines.push(`  await page.evaluate(({ x, y, dx, dy }) => {`);
+        lines.push(`    let el = document.elementFromPoint(x, y) || document.documentElement;`);
+        lines.push(`    // Find the nearest scrollable ancestor`);
+        lines.push(`    while (el && el !== document.documentElement) {`);
+        lines.push(`      const style = getComputedStyle(el);`);
+        lines.push(`      const overflowY = style.overflowY;`);
+        lines.push(`      if ((overflowY === 'auto' || overflowY === 'scroll') && el.scrollHeight > el.clientHeight) { el.scrollTop += dy; return; }`);
+        lines.push(`      el = el.parentElement;`);
+        lines.push(`    }`);
+        lines.push(`    // Fallback: dispatch wheel event`);
+        lines.push(`    document.documentElement.dispatchEvent(new WheelEvent('wheel', { deltaX: dx, deltaY: dy${modFlagsStr}, bubbles: true, cancelable: true, clientX: x, clientY: y }));`);
+        lines.push(`  }, { x: ${lastCursorX}, y: ${lastCursorY}, dx: ${deltaX}, dy: ${deltaY} });`);
         lastEmittedEventType = 'scroll';
       }
     }

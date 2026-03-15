@@ -67,10 +67,10 @@ export function ExecutionTargetSelector({
 
   // If selected runner goes offline, fallback appropriately
   useEffect(() => {
-    if (value === 'local' || value === 'auto' || isLoading) return;
+    if (value === 'local' || value === 'auto' || isLoading || disabled) return;
 
     const selectedRunner = runners.find((r) => r.id === value);
-    if (selectedRunner && selectedRunner.status !== 'online') {
+    if (selectedRunner && selectedRunner.status !== 'online' && selectedRunner.status !== 'busy') {
       if (disableLocal) {
         // Try to find first available system EB or switch to auto
         const availableSystem = systemRunners.find((r) => r.status === 'online');
@@ -79,7 +79,7 @@ export function ExecutionTargetSelector({
         onChange('local');
       }
     }
-  }, [runners, value, isLoading, onChange, disableLocal, systemRunners]);
+  }, [runners, value, isLoading, onChange, disableLocal, systemRunners, disabled]);
 
   // If local is disabled and current value is 'local', switch to 'auto'
   useEffect(() => {

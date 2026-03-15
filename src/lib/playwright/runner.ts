@@ -1751,6 +1751,7 @@ export class PlaywrightRunner extends EventEmitter {
             }
             const target = locator.first();
             await target.waitFor({ timeout: 3000 });
+            await target.scrollIntoViewIfNeeded().catch(() => {});
             if (action === 'click') await target.click();
             else if (action === 'fill') await target.fill(value || '');
             else if (action === 'selectOption') await target.selectOption(value || '');
