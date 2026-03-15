@@ -69,6 +69,16 @@ SYNTAX — CRITICAL:
 - Every variable declaration must use const or let
 - Verify all brackets/parens are balanced before outputting
 
+SELECTORS — this app uses shadcn/ui + Tailwind CSS:
+- Buttons: page.getByRole('button', { name: '...' })
+- Links: page.getByRole('link', { name: '...' })
+- Inputs: page.getByRole('textbox') or page.getByLabel('...')
+- Tabs: page.getByRole('tab', { name: '...' })
+- Dialogs: page.getByRole('dialog')
+- Tables: page.getByRole('table'), page.getByRole('row')
+- Headings: page.getByRole('heading', { name: '...' })
+- Prefer getByRole() > getByText() > page.locator('[data-testid]') > CSS selectors
+
 ASSERTIONS — prefer resilient checks:
 - Use toContainText() over exact toHaveText() when possible
 - NEVER use toBeTruthy() on textContent() or getAttribute() results — they return null when missing
