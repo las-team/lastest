@@ -38,7 +38,7 @@ ${TEST_SIGNATURE} {
 }
 \`\`\``;
 
-export const SYSTEM_PROMPT = `You generate Playwright visual regression tests. Output ONLY a JavaScript code block.
+export const SYSTEM_PROMPT = `You generate Playwright visual regression tests. Output ONLY a JavaScript code block — NO explanations, NO analysis, NO text before or after the code.
 
 RULES:
 - Plain JavaScript, NO TypeScript, NO imports
