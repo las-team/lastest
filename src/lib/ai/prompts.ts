@@ -721,7 +721,8 @@ Test Name: ${context.testName}`);
     parts.push(`\n--- Available Routes (ONLY navigate to these) ---`);
     parts.push(context.availableRoutes.map(r => `- ${r}`).join('\n'));
     parts.push(`\nCRITICAL: Do NOT invent or guess URLs. ONLY use routes from the list above.`);
-    parts.push(`If the acceptance criterion refers to a page not in this list, navigate to the closest matching route and test what is available there.`);
+    parts.push(`If the acceptance criterion mentions a feature (e.g., "settings", "test management"), find the route that best matches that feature from the list.`);
+    parts.push(`If no route exactly matches, use the closest parent or related route. For features without a dedicated route, use "/" (home page).`);
   }
 
   parts.push(`
