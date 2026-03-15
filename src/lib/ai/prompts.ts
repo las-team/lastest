@@ -60,9 +60,11 @@ SYNTAX — CRITICAL:
 
 ASSERTIONS — prefer resilient checks:
 - Use toContainText() over exact toHaveText() when possible
-- Use toBeTruthy() only on values you are certain exist
+- NEVER use toBeTruthy() on textContent() or getAttribute() results — they return null when missing
+- WRONG: const t = await el.textContent(); expect(t).toBeTruthy()
+- RIGHT: await expect(el).toBeVisible() or await expect(el).toContainText(/expected/)
 - Prefer toBeVisible() for element presence checks
-- If checking a count, use toHaveCount() with the expected number, not toBeTruthy()
+- If checking a count, use toHaveCount() with the expected number
 
 EXAMPLE (static route):
 \`\`\`javascript
