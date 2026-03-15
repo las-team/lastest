@@ -92,8 +92,9 @@ export async function test(page, baseUrl, screenshotPath, stepLogger) {
   await page.waitForLoadState('domcontentloaded');
   const firstLink = page.locator('a[href*="/tests/"]').first();
   await expect(firstLink).toBeVisible();
+  await expect(firstLink).toHaveAttribute('href', /\\/tests\\//);
   const href = await firstLink.getAttribute('href');
-  stepLogger.log('Navigate to detail page');
+  stepLogger.log('Navigate to detail page: ' + href);
   await page.goto(\`\${baseUrl}\${href}\`, { waitUntil: 'domcontentloaded' });
   await page.waitForLoadState('domcontentloaded');
   await expect(page.locator('body')).toBeVisible();
@@ -349,7 +350,7 @@ export function createMcpFixPrompt(context: TestGenerationContext): string {
     ? `\nAvailable Routes (ONLY use these in page.goto()):\n${context.availableRoutes.map(r => `- ${r}`).join('\n')}\n`
     : '';
 
-  return `Fix this failing Playwright test by exploring the live page with MCP tools.
+  return `Fix this failing Playwright test by exploring the live page with MCP tools. Return ONLY the complete fixed code in a code block — NO explanations.
 
 Original test code:
 \`\`\`typescript
