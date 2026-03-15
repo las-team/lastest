@@ -698,7 +698,8 @@ Guidelines:
 - Each AC should be independently testable in a browser-based visual regression test
 - Group ACs that test the SAME page/route under the same User Story
 - If a requirement is not testable via browser interaction, skip it
-- If the document doesn't follow formal US/AC format, infer them from the requirements`;
+- If the document doesn't follow formal US/AC format, infer them from the requirements
+- QUALITY CHECK: Before outputting, verify each AC has a clear GIVEN/WHEN/THEN structure or equivalent. Delete any AC that is a question, a request for permission, or meta-discussion about what to test`;
 }
 
 export function createBranchAwareTestPrompt(context: {
