@@ -636,7 +636,7 @@ Return ONLY the JSON object inside a code block, no other text.`;
 }
 
 export function createUserStoryExtractionPrompt(specContent: string): string {
-  return `Analyze the following specification/requirements document and extract all User Stories (US) and their Acceptance Criteria (AC).
+  return `You are a strict parser. Extract User Stories and Acceptance Criteria from the document below. Output ONLY the structured markdown format shown — NO questions, NO clarifications, NO conversation, NO meta-commentary.
 
 Document content:
 ${specContent}
