@@ -461,6 +461,10 @@ async function runBuildAsync(
         ? [{ path: result.screenshotPath, label: 'final' }]
         : [];
 
+    // Look up per-test diff overrides
+    const testRecord = tests.find(t => t.id === result.testId);
+    const testDiffOverrides = testRecord?.diffOverrides ?? null;
+
     // Generate visual diffs for all screenshots concurrently
     const diffResults = await Promise.all(
       screenshots.map(screenshot =>
@@ -474,6 +478,7 @@ async function runBuildAsync(
           screenshot.label,
           result.stabilityMetadata?.isStable === false,
           currentBrowserType,
+          testDiffOverrides,
         )
       )
     );
@@ -883,17 +888,19 @@ async function processVisualDiff(
   stepLabel?: string,
   isUnstable?: boolean,
   browser: string = 'chromium',
+  testDiffOverrides?: import('@/lib/db/schema').TestDiffOverrides | null,
 ): Promise<{ hasChanges: boolean; diffId: string; classification: DiffClassification }> {
 
-  // Get diff sensitivity settings
+  // Get diff sensitivity settings, then merge per-test overrides
   const settings = await queries.getDiffSensitivitySettings(repositoryId);
-  const unchangedThreshold = settings.unchangedThreshold ?? 1;
-  const flakyThreshold = settings.flakyThreshold ?? 10;
-  const includeAntiAliasing = settings.includeAntiAliasing ?? false;
-  const ignorePageShift = settings.ignorePageShift ?? false;
-  const diffEngine = (settings.diffEngine as import('@/lib/db/schema').DiffEngineType) ?? 'pixelmatch';
-  const textRegionAwareDiffing = settings.textRegionAwareDiffing ?? false;
-  const regionDetectionMode = (settings.regionDetectionMode as import('@/lib/db/schema').RegionDetectionMode) ?? 'grid';
+  const merged = testDiffOverrides ? { ...settings, ...testDiffOverrides } : settings;
+  const unchangedThreshold = merged.unchangedThreshold ?? 1;
+  const flakyThreshold = merged.flakyThreshold ?? 10;
+  const includeAntiAliasing = merged.includeAntiAliasing ?? false;
+  const ignorePageShift = merged.ignorePageShift ?? false;
+  const diffEngine = (merged.diffEngine as import('@/lib/db/schema').DiffEngineType) ?? 'pixelmatch';
+  const textRegionAwareDiffing = merged.textRegionAwareDiffing ?? false;
+  const regionDetectionMode = (merged.regionDetectionMode as import('@/lib/db/schema').RegionDetectionMode) ?? 'grid';
 
   // Get the repo's default branch
   const repo = repositoryId ? await queries.getRepository(repositoryId) : null;

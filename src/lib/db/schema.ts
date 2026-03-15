@@ -96,6 +96,31 @@ export interface TestTeardownOverrides {
   }>;
 }
 
+export interface TestDiffOverrides {
+  unchangedThreshold?: number;
+  flakyThreshold?: number;
+  includeAntiAliasing?: boolean;
+  ignorePageShift?: boolean;
+  diffEngine?: 'pixelmatch' | 'ssim' | 'butteraugli';
+  textRegionAwareDiffing?: boolean;
+  textRegionThreshold?: number;
+  textRegionPadding?: number;
+  textDetectionGranularity?: 'word' | 'line' | 'block';
+  regionDetectionMode?: 'grid' | 'flood-fill';
+}
+
+export interface TestPlaywrightOverrides {
+  browser?: 'chromium' | 'firefox' | 'webkit';
+  navigationTimeout?: number;
+  actionTimeout?: number;
+  screenshotDelay?: number;
+  networkErrorMode?: 'fail' | 'warn' | 'ignore';
+  consoleErrorMode?: 'fail' | 'warn' | 'ignore';
+  acceptAnyCertificate?: boolean;
+  maxParallelTests?: number;
+  baseUrl?: string;
+}
+
 export const functionalAreas = sqliteTable('functional_areas', {
   id: text('id').primaryKey(),
   repositoryId: text('repository_id'),
@@ -124,6 +149,8 @@ export const tests = sqliteTable('tests', {
   stabilizationOverrides: text('stabilization_overrides', { mode: 'json' }).$type<Partial<StabilizationSettings>>(),
   requiredCapabilities: text('required_capabilities', { mode: 'json' }).$type<TestRequiredCapabilities>(),
   viewportOverride: text('viewport_override', { mode: 'json' }).$type<{ width: number; height: number }>(),
+  diffOverrides: text('diff_overrides', { mode: 'json' }).$type<TestDiffOverrides>(),
+  playwrightOverrides: text('playwright_overrides', { mode: 'json' }).$type<TestPlaywrightOverrides>(),
   deletedAt: integer('deleted_at', { mode: 'timestamp' }),
   createdAt: integer('created_at', { mode: 'timestamp' }),
   updatedAt: integer('updated_at', { mode: 'timestamp' }),

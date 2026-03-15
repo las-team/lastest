@@ -18,6 +18,8 @@ import type {
   TestSetupOverrides,
   TestTeardownOverrides,
   StabilizationSettings,
+  TestDiffOverrides,
+  TestPlaywrightOverrides,
 } from '../schema';
 import { getTest } from './tests';
 import { getRepository } from './repositories';
@@ -505,4 +507,20 @@ export async function getResolvedTeardownStepsForTest(test: { id: string; reposi
 
 export async function updateTestStabilizationOverrides(testId: string, overrides: Partial<StabilizationSettings> | null) {
   await db.update(tests).set({ stabilizationOverrides: overrides, updatedAt: new Date() }).where(eq(tests.id, testId));
+}
+
+// ============================================
+// Per-Test Diff Overrides
+// ============================================
+
+export async function updateTestDiffOverrides(testId: string, overrides: TestDiffOverrides | null) {
+  await db.update(tests).set({ diffOverrides: overrides, updatedAt: new Date() }).where(eq(tests.id, testId));
+}
+
+// ============================================
+// Per-Test Playwright Overrides
+// ============================================
+
+export async function updateTestPlaywrightOverrides(testId: string, overrides: TestPlaywrightOverrides | null) {
+  await db.update(tests).set({ playwrightOverrides: overrides, updatedAt: new Date() }).where(eq(tests.id, testId));
 }

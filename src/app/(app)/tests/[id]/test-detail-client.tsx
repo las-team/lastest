@@ -31,9 +31,11 @@ import { useNotifyJobStarted } from '@/components/queue/job-polling-context';
 import { ExecutionTargetSelector } from '@/components/execution/execution-target-selector';
 import { StepScreenshotMatcher } from '@/components/planned/step-screenshot-matcher';
 import { TestSetupOverrides } from '@/components/setup/test-setup-overrides';
-import type { Test, TestVersion, PlannedScreenshot, SetupScript, GoogleSheetsDataSource, A11yViolation, StabilizationSettings } from '@/lib/db/schema';
-import { DEFAULT_STABILIZATION_SETTINGS } from '@/lib/db/schema';
+import type { Test, TestVersion, PlannedScreenshot, SetupScript, GoogleSheetsDataSource, A11yViolation, StabilizationSettings, DiffSensitivitySettings } from '@/lib/db/schema';
+import { DEFAULT_STABILIZATION_SETTINGS, DEFAULT_DIFF_THRESHOLDS } from '@/lib/db/schema';
 import { TestStabilizationOverrides } from '@/components/settings/test-stabilization-overrides';
+import { TestDiffOverrides as TestDiffOverridesComponent } from '@/components/settings/test-diff-overrides';
+import { TestPlaywrightOverrides as TestPlaywrightOverridesComponent } from '@/components/settings/test-playwright-overrides';
 import { A11yViolationsPanel } from '@/components/builds/a11y-violations-panel';
 import type { ScreenshotGroup } from '@/server/actions/tests';
 import { SheetDataPreview } from '@/components/test-data/sheet-data-preview';
@@ -76,6 +78,17 @@ interface DefaultStepForUI {
   scriptName: string | null;
 }
 
+interface PlaywrightSettingsForDefaults {
+  browser?: string | null;
+  navigationTimeout?: number | null;
+  actionTimeout?: number | null;
+  screenshotDelay?: number | null;
+  networkErrorMode?: string | null;
+  consoleErrorMode?: string | null;
+  acceptAnyCertificate?: boolean | null;
+  maxParallelTests?: number | null;
+}
+
 interface TestDetailClientProps {
   test: Test;
   results: TestResult[];
@@ -88,9 +101,13 @@ interface TestDetailClientProps {
   sheetDataSources?: GoogleSheetsDataSource[];
   stabilizationDefaults?: StabilizationSettings | null;
   banAiMode?: boolean;
+  earlyAdopterMode?: boolean;
+  diffDefaults?: DiffSensitivitySettings | null;
+  playwrightDefaults?: PlaywrightSettingsForDefaults | null;
+  envBaseUrl?: string | null;
 }
 
-export function TestDetailClient({ test, results, repositoryId, screenshotGroups = [], plannedScreenshots = [], defaultSetupSteps = [], availableTests = [], availableScripts = [], sheetDataSources = [], stabilizationDefaults, banAiMode = false }: TestDetailClientProps) {
+export function TestDetailClient({ test, results, repositoryId, screenshotGroups = [], plannedScreenshots = [], defaultSetupSteps = [], availableTests = [], availableScripts = [], sheetDataSources = [], stabilizationDefaults, banAiMode = false, earlyAdopterMode = false, diffDefaults, playwrightDefaults, envBaseUrl }: TestDetailClientProps) {
   const router = useRouter();
   const notifyJobStarted = useNotifyJobStarted();
   const [isDeleting, setIsDeleting] = useState(false);
@@ -630,6 +647,8 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
             <TabsTrigger value="code">Code</TabsTrigger>
             <TabsTrigger value="setup">Setup</TabsTrigger>
             <TabsTrigger value="stabilization">Stabilization</TabsTrigger>
+            {earlyAdopterMode && <TabsTrigger value="diff-overrides">Diff</TabsTrigger>}
+            {earlyAdopterMode && <TabsTrigger value="playwright-overrides">Playwright</TabsTrigger>}
             <TabsTrigger value="screenshots">Screenshots</TabsTrigger>
             <TabsTrigger value="plans">Plans</TabsTrigger>
             <TabsTrigger value="history">Run History</TabsTrigger>
@@ -729,6 +748,49 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
               defaults={stabilizationDefaults ?? DEFAULT_STABILIZATION_SETTINGS}
             />
           </TabsContent>
+
+          {earlyAdopterMode && (
+            <TabsContent value="diff-overrides" className="mt-4">
+              <TestDiffOverridesComponent
+                testId={test.id}
+                repositoryId={repositoryId ?? null}
+                overrides={test.diffOverrides ?? null}
+                defaults={{
+                  unchangedThreshold: diffDefaults?.unchangedThreshold ?? DEFAULT_DIFF_THRESHOLDS.unchangedThreshold,
+                  flakyThreshold: diffDefaults?.flakyThreshold ?? DEFAULT_DIFF_THRESHOLDS.flakyThreshold,
+                  includeAntiAliasing: diffDefaults?.includeAntiAliasing ?? DEFAULT_DIFF_THRESHOLDS.includeAntiAliasing,
+                  ignorePageShift: diffDefaults?.ignorePageShift ?? DEFAULT_DIFF_THRESHOLDS.ignorePageShift,
+                  diffEngine: (diffDefaults?.diffEngine as 'pixelmatch' | 'ssim' | 'butteraugli') ?? DEFAULT_DIFF_THRESHOLDS.diffEngine,
+                  textRegionAwareDiffing: diffDefaults?.textRegionAwareDiffing ?? DEFAULT_DIFF_THRESHOLDS.textRegionAwareDiffing,
+                  textRegionThreshold: diffDefaults?.textRegionThreshold ?? DEFAULT_DIFF_THRESHOLDS.textRegionThreshold,
+                  textRegionPadding: diffDefaults?.textRegionPadding ?? DEFAULT_DIFF_THRESHOLDS.textRegionPadding,
+                  textDetectionGranularity: (diffDefaults?.textDetectionGranularity as 'word' | 'line' | 'block') ?? DEFAULT_DIFF_THRESHOLDS.textDetectionGranularity,
+                  regionDetectionMode: (diffDefaults?.regionDetectionMode as 'grid' | 'flood-fill') ?? DEFAULT_DIFF_THRESHOLDS.regionDetectionMode,
+                }}
+              />
+            </TabsContent>
+          )}
+
+          {earlyAdopterMode && (
+            <TabsContent value="playwright-overrides" className="mt-4">
+              <TestPlaywrightOverridesComponent
+                testId={test.id}
+                repositoryId={repositoryId ?? null}
+                overrides={test.playwrightOverrides ?? null}
+                defaults={{
+                  browser: (playwrightDefaults?.browser as 'chromium' | 'firefox' | 'webkit') ?? 'chromium',
+                  navigationTimeout: playwrightDefaults?.navigationTimeout ?? 30000,
+                  actionTimeout: playwrightDefaults?.actionTimeout ?? 30000,
+                  screenshotDelay: playwrightDefaults?.screenshotDelay ?? 0,
+                  networkErrorMode: (playwrightDefaults?.networkErrorMode as 'fail' | 'warn' | 'ignore') ?? 'fail',
+                  consoleErrorMode: (playwrightDefaults?.consoleErrorMode as 'fail' | 'warn' | 'ignore') ?? 'fail',
+                  acceptAnyCertificate: playwrightDefaults?.acceptAnyCertificate ?? false,
+                  maxParallelTests: playwrightDefaults?.maxParallelTests ?? 2,
+                  baseUrl: envBaseUrl ?? 'http://localhost:3000',
+                }}
+              />
+            </TabsContent>
+          )}
 
           <TabsContent value="screenshots" className="mt-4 space-y-6">
             <Card>

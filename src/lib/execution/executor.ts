@@ -417,21 +417,27 @@ async function executeViaRunner(
       }
 
       // Create run_test command with code hash for integrity verification
+      // Per-test playwright overrides
+      const pwOverrides = test.playwrightOverrides;
+      const effectiveBrowser = pwOverrides?.browser ?? ((options.playwrightSettings?.browser as 'chromium' | 'firefox' | 'webkit') || undefined);
+      const effectiveBaseUrl = pwOverrides?.baseUrl ?? baseUrl;
+      const effectiveTimeout = pwOverrides?.navigationTimeout ?? testTimeout;
+
       const command = createMessage<RunTestCommand>('command:run_test', {
         testId: test.id,
         testRunId: runId,
         code: test.code,
         codeHash: hashCode(test.code),
-        targetUrl: baseUrl,
+        targetUrl: effectiveBaseUrl,
         screenshotPath: `${runId}-${test.id}.png`,
-        timeout: testTimeout,
+        timeout: effectiveTimeout,
         repositoryId: options.repositoryId || undefined,
         viewport: test.viewportOverride || viewport,
         storageState: options.setupContext?.storageState,
         setupVariables: options.setupContext?.variables,
         cursorPlaybackSpeed: options.playwrightSettings?.cursorPlaybackSpeed ?? 1,
         stabilization: buildStabilizationPayload(options.playwrightSettings, test.stabilizationOverrides),
-        browser: (options.playwrightSettings?.browser as 'chromium' | 'firefox' | 'webkit') || undefined,
+        browser: effectiveBrowser,
         fixtures: fixturePayloads,
         grantClipboardAccess: options.playwrightSettings?.grantClipboardAccess ?? false,
         acceptDownloads: options.playwrightSettings?.acceptDownloads ?? false,
