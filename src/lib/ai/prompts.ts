@@ -231,7 +231,7 @@ export function createTestPrompt(context: TestGenerationContext): string {
     parts.push(`\n--- Available Routes (ONLY navigate to these) ---`);
     parts.push(context.availableRoutes.map(r => `- ${r}`).join('\n'));
     parts.push(`\nCRITICAL: Do NOT invent or guess URLs. ONLY use routes from the list above.`);
-    parts.push(`If the test objective refers to a page not in this list, navigate to the closest matching route.`);
+    parts.push(`If the test objective refers to a page not in this list, navigate to the closest matching route. For features without a dedicated route, use "/" (home).`);
   }
 
   // Add guidelines and requirements sections
