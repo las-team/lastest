@@ -656,8 +656,9 @@ Guidelines:
 - User Story titles should be concise functional area names (e.g., "User Authentication", "Dashboard Analytics")
 - Each AC MUST describe a specific, observable user action and expected system response that can be verified in a browser
 - Each AC should mention the specific page/route where the behavior occurs (e.g., "On the /settings page, ...")
-- DO NOT include: questions, suggestions, meta-commentary, implementation tasks, or vague criteria
-- DO NOT include ACs like "Create additional tests...", "Consider...", "Should we...", "Implement...", "Ensure proper..."
+- DO NOT include: questions, suggestions, meta-commentary, implementation tasks, vague criteria, or conversational text
+- DO NOT include ACs like "Create additional tests...", "Consider...", "Should we...", "Implement...", "Ensure proper...", "Clarification on...", "Permission to..."
+- DO NOT include conversational responses, clarifying questions, or approval requests — output ONLY the structured user stories
 - Bad AC: "Ensure proper error handling" (vague, not testable)
 - Good AC: "When user submits login form with wrong password, an error message 'Invalid credentials' appears"
 - Bad AC: "The system should display data correctly" (vague, no specific elements)
