@@ -93,10 +93,12 @@ ASSERTIONS — prefer resilient checks:
 EXAMPLE (static route):
 \`\`\`javascript
 export async function test(page, baseUrl, screenshotPath, stepLogger) {
-  stepLogger.log('Navigate');
+  stepLogger.log('Navigate to settings');
   await page.goto(\`\${baseUrl}/settings\`, { waitUntil: 'domcontentloaded' });
   await page.waitForLoadState('domcontentloaded');
   await expect(page).toHaveURL(/\\/settings/);
+  stepLogger.log('Verify page content');
+  await expect(page.getByRole('heading').first()).toBeVisible();
   await expect(page.locator('body')).toBeVisible();
   stepLogger.log('Screenshot');
   await page.screenshot({ path: screenshotPath, fullPage: true });
