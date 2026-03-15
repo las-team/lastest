@@ -94,6 +94,7 @@ ASSERTIONS — prefer resilient checks:
 - RIGHT: await expect(el.first()).toBeVisible() — to check at least one exists
 - Prefer toBeVisible() for element presence checks
 - If checking a count, use toHaveCount() with the expected number or check first() visibility
+- When in doubt, keep the test simple: navigate, verify page loaded, take screenshot
 
 EXAMPLE (static route):
 \`\`\`javascript
