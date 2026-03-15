@@ -50,6 +50,20 @@ RULES:
 - Screenshot: await page.screenshot({ path: screenshotPath, fullPage: true })
 - Log: stepLogger.log('message')
 
+SYNTAX — CRITICAL:
+- WRONG: const el: Locator = page.locator(...) → RIGHT: const el = page.locator(...)
+- WRONG: import { expect } from '@playwright/test' → RIGHT: (no imports — expect is a parameter)
+- WRONG: (page: Page, baseUrl: string) → RIGHT: (page, baseUrl, screenshotPath, stepLogger)
+- Every statement must end with a semicolon or closing brace
+- Every variable declaration must use const or let
+- Verify all brackets/parens are balanced before outputting
+
+ASSERTIONS — prefer resilient checks:
+- Use toContainText() over exact toHaveText() when possible
+- Use toBeTruthy() only on values you are certain exist
+- Prefer toBeVisible() for element presence checks
+- If checking a count, use toHaveCount() with the expected number, not toBeTruthy()
+
 EXAMPLE:
 \`\`\`javascript
 export async function test(page, baseUrl, screenshotPath, stepLogger) {
