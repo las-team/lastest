@@ -391,48 +391,67 @@ export function DebugClient({ test, repositoryId }: DebugClientProps) {
         </div>
       ) : (
         <ResizablePanelGroup orientation="horizontal" className="flex-1 min-h-0">
-          {/* Left Panel — Code */}
+          {/* Left Panel — Code / Live View */}
           <ResizablePanel defaultSize={60} minSize={30}>
-            <div className="flex flex-col h-full">
-              <div className="flex items-center justify-between px-3 py-1.5 border-b bg-muted/50">
-                <span className="text-xs font-medium text-muted-foreground">Test Code</span>
+            <Tabs defaultValue="code" className="flex flex-col h-full gap-0">
+              <div className="px-2 py-1.5 border-b bg-muted/50">
+                <TabsList className="h-7">
+                  <TabsTrigger value="code" className="text-xs px-2 py-0.5 h-6">
+                    Code
+                  </TabsTrigger>
+                  {streamUrl && (
+                    <TabsTrigger value="liveview" className="text-xs px-2 py-0.5 h-6">
+                      <Tv2 className="h-3 w-3 mr-1" />
+                      Live View
+                    </TabsTrigger>
+                  )}
+                </TabsList>
               </div>
-              {/* Past-step edit warning */}
-              {hasPastStepWarning && (
-                <div className="flex items-center gap-2 px-3 py-1.5 bg-yellow-500/10 border-b border-yellow-500/20">
-                  <p className="text-xs text-yellow-600 flex-1">Code changed at an already-executed step. Step back to apply changes.</p>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="h-6 text-xs border-yellow-500/30 text-yellow-600"
-                    onClick={() => sendCmd({ type: 'step_back' })}
-                  >
-                    <SkipBack className="h-3 w-3 mr-1" />
-                    Step Back
-                  </Button>
-                </div>
+
+              <TabsContent value="code" className="flex flex-col flex-1 min-h-0 mt-0">
+                {/* Past-step edit warning */}
+                {hasPastStepWarning && (
+                  <div className="flex items-center gap-2 px-3 py-1.5 bg-yellow-500/10 border-b border-yellow-500/20">
+                    <p className="text-xs text-yellow-600 flex-1">Code changed at an already-executed step. Step back to apply changes.</p>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="h-6 text-xs border-yellow-500/30 text-yellow-600"
+                      onClick={() => sendCmd({ type: 'step_back' })}
+                    >
+                      <SkipBack className="h-3 w-3 mr-1" />
+                      Step Back
+                    </Button>
+                  </div>
+                )}
+                <EditableCodeDisplay
+                  code={localCode}
+                  steps={state?.steps || []}
+                  currentStepIndex={state?.currentStepIndex ?? -1}
+                  stepResults={state?.stepResults || []}
+                  onCodeChange={handleCodeChange}
+                  onClickStep={(idx) => {
+                    if (isPaused && idx > (state?.currentStepIndex ?? -1)) {
+                      sendCmd({ type: 'run_to_step', stepIndex: idx });
+                    }
+                  }}
+                  disabled={isBusy}
+                />
+              </TabsContent>
+
+              {streamUrl && (
+                <TabsContent value="liveview" className="flex flex-col flex-1 min-h-0 mt-0">
+                  <BrowserViewer streamUrl={streamUrl} className="h-full" />
+                </TabsContent>
               )}
-              <EditableCodeDisplay
-                code={localCode}
-                steps={state?.steps || []}
-                currentStepIndex={state?.currentStepIndex ?? -1}
-                stepResults={state?.stepResults || []}
-                onCodeChange={handleCodeChange}
-                onClickStep={(idx) => {
-                  if (isPaused && idx > (state?.currentStepIndex ?? -1)) {
-                    sendCmd({ type: 'run_to_step', stepIndex: idx });
-                  }
-                }}
-                disabled={isBusy}
-              />
-            </div>
+            </Tabs>
           </ResizablePanel>
 
           <ResizableHandle withHandle />
 
           {/* Right Panel — Tabbed: Steps / Network / Console */}
           <ResizablePanel defaultSize={40} minSize={20} className="overflow-hidden">
-            <Tabs defaultValue={streamUrl ? 'liveview' : 'steps'} className="flex flex-col h-full gap-0">
+            <Tabs defaultValue="steps" className="flex flex-col h-full gap-0">
               <div className="px-2 py-1.5 border-b bg-muted/50">
                 <TabsList className="h-7">
                   <TabsTrigger value="steps" className="text-xs px-2 py-0.5 h-6">
@@ -446,12 +465,6 @@ export function DebugClient({ test, repositoryId }: DebugClientProps) {
                     <Terminal className="h-3 w-3 mr-1" />
                     Console{(state?.consoleEntries?.length ?? 0) > 0 && ` (${state!.consoleEntries.length})`}
                   </TabsTrigger>
-                  {streamUrl && (
-                    <TabsTrigger value="liveview" className="text-xs px-2 py-0.5 h-6">
-                      <Tv2 className="h-3 w-3 mr-1" />
-                      Live View
-                    </TabsTrigger>
-                  )}
                 </TabsList>
               </div>
 
@@ -559,12 +572,6 @@ export function DebugClient({ test, repositoryId }: DebugClientProps) {
                 <ConsolePanel entries={state?.consoleEntries || []} />
               </TabsContent>
 
-              {/* Live View Tab */}
-              {streamUrl && (
-                <TabsContent value="liveview" className="flex flex-col flex-1 min-h-0 mt-0">
-                  <BrowserViewer streamUrl={streamUrl} className="h-full" />
-                </TabsContent>
-              )}
             </Tabs>
           </ResizablePanel>
         </ResizablePanelGroup>
