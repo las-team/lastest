@@ -17,22 +17,28 @@ DYNAMIC ROUTES (e.g. /users/[id]):
 Navigate to the parent list page first, snapshot to find links with real IDs, then navigate to the actual URL.
 
 CONSTRAINTS:
+- Plain JavaScript ONLY — NO TypeScript annotations, NO imports
 - Use baseUrl for navigation (no hardcoded URLs)
 - Capture at least one screenshot using screenshotPath
-- Export async function "test" with exact signature: ${TEST_SIGNATURE}
+- Function signature: export async function test(page, baseUrl, screenshotPath, stepLogger)
 - Do NOT use \`import\` — \`expect\`, \`page\`, \`baseUrl\`, \`screenshotPath\`, \`stepLogger\` are provided by the runner
-- expect matchers: toBe, toEqual, toBeTruthy, toBeFalsy, toContain, toHaveLength, toMatch, toMatchObject, toHaveURL, toHaveTitle, toBeVisible, toBeHidden, toHaveText, toContainText, toHaveAttribute, toHaveCount, toBeEnabled, toBeDisabled, toBeChecked, toHaveValue (all support .not)
+- ALWAYS use regex for URL checks: await expect(page).toHaveURL(/\\/path/)
+- Prefer toBeVisible() for element presence, toContainText() for text content
+- NEVER use toBeTruthy() on textContent() or getAttribute() results
+- Every variable must use const or let
 - Never mix regex text and CSS selectors in one locator — use page.getByText(/pattern/i) for regex, page.locator('[attr="x"]') for CSS
 
-FINAL OUTPUT: After exploration, generate standard Playwright test code using discovered selectors.
+FINAL OUTPUT: After exploration, generate standard Playwright test code using discovered selectors. Output ONLY the code block.
 
-\`\`\`typescript
-import { Page } from 'playwright';
-
-${TEST_SIGNATURE} {
+\`\`\`javascript
+export async function test(page, baseUrl, screenshotPath, stepLogger) {
   stepLogger.log('Navigating to page');
-  await page.goto(\`\${baseUrl}/path\`);
-  await page.locator('[data-testid="discovered-element"]').click();
+  await page.goto(\`\${baseUrl}/path\`, { waitUntil: 'domcontentloaded' });
+  await page.waitForLoadState('domcontentloaded');
+  await expect(page).toHaveURL(/\\/path/);
+  const element = page.locator('[data-testid="discovered-element"]');
+  await expect(element).toBeVisible();
+  await element.click();
   stepLogger.log('Taking screenshot');
   await page.screenshot({ path: screenshotPath, fullPage: true });
 }
