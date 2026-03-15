@@ -745,6 +745,18 @@ export function extractCodeFromResponse(response: string): string {
     return response.trim();
   }
 
+  // Look for export async function anywhere in the response (AI may have added explanation before code)
+  const funcMatch = response.match(/(export\s+async\s+function\s+test\s*\([\s\S]*)/);
+  if (funcMatch) {
+    return funcMatch[1].trim();
+  }
+
+  // Look for import statement followed by code anywhere in the response
+  const importMatch = response.match(/(import\s+[\s\S]*export\s+async\s+function[\s\S]*)/);
+  if (importMatch) {
+    return importMatch[1].trim();
+  }
+
   // Return as-is if we can't extract
   return response.trim();
 }
