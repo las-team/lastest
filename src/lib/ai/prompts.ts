@@ -294,14 +294,33 @@ ERROR DIAGNOSIS — identify the category FIRST, then apply the matching fix str
 
 Instructions:
 1. Identify which error category above matches the error message
-2. Apply ONLY the minimal fix for that category — do not rewrite the entire test
-3. Verify your fix actually changes something (not identical to input)
+2. Mentally trace the exact line that caused the error
+3. Apply ONLY the minimal fix for that category — do not rewrite the entire test
+4. Verify your fix actually changes something (not identical to input)
+
+COMMON FIX PATTERNS:
+- "Unexpected identifier" often means a variable is used without declaration (missing const/let) or a line is missing a semicolon before the next statement
+- "Expected value to be truthy but got false" means toBeTruthy() was called on a falsy value — replace with toBeVisible() on a locator, or remove the assertion entirely if it's not critical
+- If you see \`const x = await el.textContent(); expect(x).toBeTruthy()\` → replace with \`await expect(el).toBeVisible()\` or \`await expect(el).toContainText(/something/)\`
 
 Rules:
 - Write plain JavaScript only — NO TypeScript type annotations (no ": Page", no ": string", no ": any")
 - Do NOT use \`import\` — expect is provided by the runner
 - ALWAYS use regex for URL checks: await expect(page).toHaveURL(/\\/path/); — never exact string URLs
 - Never mix regex text and CSS selectors in one locator — use page.getByText(/pattern/i) for regex
+- Every statement must end with a semicolon or closing brace
+- Every variable declaration must use const or let
+
+DYNAMIC ROUTES: If testing a detail page (e.g., /tests/[id]), navigate to the list page first, find a real link, then follow it. Never hardcode fake IDs.
+
+BEFORE RETURNING — verify your output:
+□ All page.goto() URLs match available routes listed above
+□ No TypeScript annotations (: Type, as Type, <Type>)
+□ No import statements
+□ Every variable has const/let declaration
+□ All brackets and parentheses are balanced
+□ The fix addresses the specific error message above
+□ Function signature is: export async function test(page, baseUrl, screenshotPath, stepLogger)
 
 Return ONLY the fixed code, no explanations.`);
 
@@ -329,6 +348,11 @@ Instructions:
 - ALWAYS use regex for URL checks: await expect(page).toHaveURL(/\\/path/);
 - Use only valid matchers (toBe, toEqual, toBeTruthy, toBeFalsy, toContain, toMatch, toHaveURL, toHaveTitle, toBeVisible, toHaveText, toContainText, toHaveAttribute, toHaveCount, etc.)
 - Never mix regex text and CSS selectors in one locator — use page.getByText(/pattern/i) for regex
+- If the error is "Expected value to be truthy but got false", replace toBeTruthy() with toBeVisible() on a locator or remove the assertion
+- Every variable declaration must use const or let
+- Every statement must end with a semicolon or closing brace
+
+BEFORE RETURNING — verify your output has no TypeScript, no imports, balanced brackets, and addresses the specific error.
 
 Return ONLY the fixed code, no explanations.`;
 }
