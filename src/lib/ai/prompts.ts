@@ -400,6 +400,8 @@ ERROR DIAGNOSIS — identify the category FIRST:
 - "404/not found" → WRONG URL: change to a route from available routes
 - "timeout/selector" → SELECTOR MISMATCH: use browser_snapshot to find correct selectors
 - "Expected value to be truthy" → replace toBeTruthy() with toBeVisible() on locator
+- "(500)" or "Network failures" → SERVER ERROR: transient issue, add waitForLoadState after navigation
+- "Console errors" or "Failed to fetch" → ENVIRONMENT ISSUE: ignore console errors
 
 Instructions:
 - browser_navigate to the target URL, then browser_snapshot to see current page structure
