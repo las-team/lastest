@@ -299,7 +299,7 @@ export function createFixPrompt(context: TestGenerationContext): string {
   const parts: string[] = [`Fix this failing Playwright test. Return ONLY the complete fixed code in a code block — NO explanations, NO analysis, NO commentary.
 
 Original test code:
-\`\`\`typescript
+\`\`\`javascript
 ${context.existingCode}
 \`\`\`
 
@@ -369,7 +369,7 @@ export function createMcpFixPrompt(context: TestGenerationContext): string {
   return `Fix this failing Playwright test by exploring the live page with MCP tools. Return ONLY the complete fixed code in a code block — NO explanations.
 
 Original test code:
-\`\`\`typescript
+\`\`\`javascript
 ${context.existingCode}
 \`\`\`
 
@@ -407,7 +407,7 @@ export function createEnhancePrompt(context: TestGenerationContext): string {
   parts.push(`Enhance this Playwright visual regression test:
 
 Current test code:
-\`\`\`typescript
+\`\`\`javascript
 ${context.existingCode}
 \`\`\``);
 
