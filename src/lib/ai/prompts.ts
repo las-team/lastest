@@ -786,9 +786,10 @@ export function extractCodeFromResponse(response: string): string {
   }
 
   // If no code patterns found, the response is likely explanatory text, not code.
-  // Return empty string to signal extraction failure rather than storing non-code text.
+  // Check for actual code patterns (not just mentions of words in prose)
   const trimmed = response.trim();
-  if (!trimmed.includes('function') && !trimmed.includes('await') && !trimmed.includes('page.')) {
+  const hasCodePattern = /(?:^|\n)\s*(?:export\s+|async\s+function|const\s+\w+\s*=|let\s+\w+\s*=|await\s+page\.|page\.goto|page\.locator|stepLogger\.log)/.test(trimmed);
+  if (!hasCodePattern) {
     return '';
   }
 
