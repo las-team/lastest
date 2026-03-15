@@ -337,6 +337,7 @@ ERROR DIAGNOSIS — identify the category FIRST, then apply the matching fix str
 - "Expected" + "Received" → ASSERTION FAILURE: The page content doesn't match expectations. Loosen the assertion or use a more flexible match (toContain instead of toBe, regex instead of exact string).
 - "login" or "redirect" or "sign-in" → AUTH ISSUE: Add auth state check — if (page.url().includes('/login')) return;
 - "net::ERR" or "ERR_CONNECTION" → NETWORK ERROR: The server may not be ready. Add waitForLoadState('domcontentloaded').
+- "Console errors detected" or "Failed to fetch" → ENVIRONMENT ISSUE: These are background API errors, not test code issues. If the test logic is correct, the fix is to ignore console errors or remove any console error checking assertions.
 
 Instructions:
 1. Identify which error category above matches the error message
