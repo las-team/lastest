@@ -816,8 +816,8 @@ Return ONLY the code block, no explanations.`);
 }
 
 export function extractCodeFromResponse(response: string): string {
-  // Try to extract code from markdown code blocks
-  const codeBlockMatch = response.match(/```(?:typescript|ts|javascript|js)?\n([\s\S]*?)```/);
+  // Try to extract code from markdown code blocks (any language tag or none)
+  const codeBlockMatch = response.match(/```(?:\w*)?\n([\s\S]*?)```/);
   if (codeBlockMatch) {
     return codeBlockMatch[1].trim();
   }
