@@ -639,6 +639,20 @@ DYNAMIC ROUTES (paths with [id], [slug], etc.):
 - Then test the detail page with real data
 - NEVER hardcode fake IDs like "123" or "test-id"
 
+SELECTORS (this app uses shadcn/ui + Tailwind CSS):
+- Buttons: page.getByRole('button', { name: '...' })
+- Inputs: page.getByRole('textbox') or page.getByLabel('...')
+- Tabs: page.getByRole('tab', { name: '...' })
+- Dialog: page.getByRole('dialog')
+- Links: page.getByRole('link', { name: '...' })
+- Headings: page.getByRole('heading', { name: '...' })
+- Prefer getByRole/getByText/getByLabel over CSS selectors
+
+LOADING STATES:
+- After navigation: await page.waitForLoadState('domcontentloaded')
+- Before assertions: allow time for dynamic content to render
+- For async data: await page.locator('[data-loading]').waitFor({ state: 'hidden', timeout: 5000 }).catch(() => {})
+
 --- Requirements ---
 - Plain JavaScript only — NO TypeScript annotations, NO imports
 - Function signature: export async function test(page, baseUrl, screenshotPath, stepLogger)
