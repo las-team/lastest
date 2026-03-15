@@ -756,6 +756,7 @@ Test Name: ${context.testName}`);
 - Add assertions that verify the expected behavior
 - Capture screenshots at meaningful states
 - Handle loading states for stable screenshots
+- When in doubt, keep the test simple: navigate, verify page loaded, take screenshot
 
 DYNAMIC ROUTES (paths with [id], [slug], etc.):
 - First navigate to the parent list page (e.g., for /tests/[id], go to /tests)
