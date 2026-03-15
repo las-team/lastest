@@ -362,7 +362,7 @@ ERROR DIAGNOSIS — identify the category FIRST, then apply the matching fix str
 - "Expected" + "Received" → ASSERTION FAILURE: The page content doesn't match expectations. Loosen the assertion or use a more flexible match (toContain instead of toBe, regex instead of exact string).
 - "login" or "redirect" or "sign-in" → AUTH ISSUE: Add auth state check — if (page.url().includes('/login')) return;
 - "net::ERR" or "ERR_CONNECTION" → NETWORK ERROR: The server may not be ready. Add waitForLoadState('domcontentloaded').
-- "(500)" or "Network failures detected" → SERVER ERROR: The server returned a 500 error. This is usually transient. Try adding waitForLoadState('domcontentloaded') after navigation, or retry the navigation.
+- "(500)" or "Network failures detected" → SERVER ERROR: The page.goto() response was 500. Capture the response: const response = await page.goto(...); if (!response || response.status() >= 400) { stepLogger.log('Server error'); await page.screenshot({ path: screenshotPath }); return; }
 - "Console errors detected" or "Failed to fetch" → ENVIRONMENT ISSUE: These are background API errors, not test code issues. If the test logic is correct, the fix is to ignore console errors or remove any console error checking assertions.
 
 Instructions:
