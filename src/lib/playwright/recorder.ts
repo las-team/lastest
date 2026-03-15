@@ -408,14 +408,23 @@ export class PlaywrightRecorder extends EventEmitter {
       const button = action === 'rightclick' ? 2 : undefined;
 
       // Coalesce consecutive fill actions on the same element (input fires per-keystroke)
+      // Look backwards past non-action events (cursor-move, scroll, etc.) to find the last fill
       if (action === 'fill' && this.session?.events.length) {
-        const lastEvent = this.session.events[this.session.events.length - 1];
-        if (lastEvent.type === 'action' && lastEvent.data.action === 'fill' && lastEvent.data.selector === primarySelector) {
-          lastEvent.data.value = value;
-          lastEvent.data.coordinates = coordinates;
-          lastEvent.data.actionId = actionId;
-          this.emit('event', lastEvent);
-          return;
+        for (let i = this.session.events.length - 1; i >= 0; i--) {
+          const prevEvent = this.session.events[i];
+          if (prevEvent.type === 'action') {
+            if (prevEvent.data.action === 'fill' && prevEvent.data.selector === primarySelector) {
+              prevEvent.data.value = value;
+              prevEvent.data.coordinates = coordinates;
+              prevEvent.data.actionId = actionId;
+              // Also update selectors in case they changed (e.g., accessible name reflects input value)
+              prevEvent.data.selectors = selectors;
+              this.emit('event', prevEvent);
+              return;
+            }
+            break; // Hit a non-fill action, stop looking
+          }
+          // Skip non-action events (cursor-move, scroll, keypress, etc.) and keep looking
         }
       }
 
@@ -680,6 +689,8 @@ export class PlaywrightRecorder extends EventEmitter {
           if (role && INTERACTIVE_ROLES.has(role)) return current;
           if (INTERACTIVE_TAGS.has(current.tagName)) return current;
           if (current.dataset.testid) return current;
+          // Detect clickable divs: elements with tabindex or aria-label on non-leaf containers
+          if (current.hasAttribute('tabindex') || (current.getAttribute('aria-label') && current !== el)) return current;
           current = current.parentElement;
         }
         return el;

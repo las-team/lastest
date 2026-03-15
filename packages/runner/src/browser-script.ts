@@ -109,6 +109,7 @@ export const browserRecordingScript = ({ pointerGestures: pg, cursorFPS: fps, se
       if (role && INTERACTIVE.has(role)) return current;
       if (INTERACTIVE_TAGS.has(current.tagName)) return current;
       if (current.dataset.testid) return current;
+      if (current.hasAttribute('tabindex') || (current.getAttribute('aria-label') && current !== el)) return current;
       current = current.parentElement;
     }
     return el;

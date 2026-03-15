@@ -183,6 +183,10 @@ function AreaNode({
   return (
     <div>
       <div
+        role="treeitem"
+        aria-label={area.name}
+        aria-selected={isSelected}
+        aria-expanded={hasChildren ? isExpanded : undefined}
         className={cn(
           'group flex items-center gap-1 py-1 px-2 rounded cursor-pointer hover:bg-muted',
           isSelected && 'bg-primary/10 hover:bg-primary/15',
@@ -321,6 +325,9 @@ function TestNode({ test, depth, selection, onSelect, onDeleteTest }: TestNodePr
 
   return (
     <div
+      role="treeitem"
+      aria-label={test.name}
+      aria-selected={isSelected}
       className={cn(
         'group/test py-1 px-2 rounded cursor-pointer hover:bg-muted',
         isSelected && 'bg-primary/10 hover:bg-primary/15'
@@ -389,6 +396,9 @@ function SuiteNode({ suite, depth, selection, onSelect }: SuiteNodeProps) {
 
   return (
     <div
+      role="treeitem"
+      aria-label={suite.name}
+      aria-selected={isSelected}
       className={cn(
         'group flex items-center gap-2 py-1 px-2 rounded cursor-pointer hover:bg-muted',
         isSelected && 'bg-primary/10 hover:bg-primary/15'
@@ -521,7 +531,7 @@ export function AreaTree({
       </div>
 
       <ScrollArea className="flex-1 overflow-hidden" type="auto">
-        <div className="p-2 overflow-x-auto">
+        <div className="p-2 overflow-x-auto" role="tree">
           {/* Areas */}
           {tree.map((area) => (
             <AreaNode
