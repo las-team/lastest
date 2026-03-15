@@ -276,6 +276,12 @@ ${context.errorMessage}`];
     parts.push(buildCodebaseIntelligenceSection(context.codebaseIntelligence));
   }
 
+  if (context.availableRoutes?.length) {
+    parts.push(`\nAvailable Routes (ONLY use these in page.goto()):`);
+    parts.push(context.availableRoutes.map(r => `- ${r}`).join('\n'));
+    parts.push(`If the current page.goto() URL is not in this list, change it to the closest matching route.`);
+  }
+
   parts.push(`
 ERROR DIAGNOSIS — identify the category FIRST, then apply the matching fix strategy:
 - "Unexpected identifier" or "Unexpected token" → SYNTAX ERROR: Look for missing commas, semicolons, or unmatched brackets. Remove any TypeScript annotations (: Type, as Type). Remove any import statements.
