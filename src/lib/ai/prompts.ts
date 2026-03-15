@@ -81,11 +81,14 @@ SELECTORS — this app uses shadcn/ui + Tailwind CSS:
 
 ASSERTIONS — prefer resilient checks:
 - Use toContainText() over exact toHaveText() when possible
-- NEVER use toBeTruthy() on textContent() or getAttribute() results — they return null when missing
+- NEVER use toBeTruthy() on textContent()/getAttribute()/count results — they can be null/0
 - WRONG: const t = await el.textContent(); expect(t).toBeTruthy()
-- RIGHT: await expect(el).toBeVisible() or await expect(el).toContainText(/expected/)
+- WRONG: const count = await el.count(); expect(count > 0).toBeTruthy()
+- RIGHT: await expect(el).toBeVisible()
+- RIGHT: await expect(el).toContainText(/expected/)
+- RIGHT: await expect(el.first()).toBeVisible() — to check at least one exists
 - Prefer toBeVisible() for element presence checks
-- If checking a count, use toHaveCount() with the expected number
+- If checking a count, use toHaveCount() with the expected number or check first() visibility
 
 EXAMPLE (static route):
 \`\`\`javascript
