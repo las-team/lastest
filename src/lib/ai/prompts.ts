@@ -192,6 +192,16 @@ export function createTestPrompt(context: TestGenerationContext): string {
 - Content checks: await expect(page.locator('body')).toBeVisible()
 - Screenshot: await page.screenshot({ path: screenshotPath, fullPage: true })
 - Log actions: stepLogger.log('message')
+- Every variable MUST be declared with const or let
+- Every statement must end with a semicolon or closing brace
+
+ASSERTIONS — CRITICAL:
+- Prefer toBeVisible() for element checks, toContainText() for text
+- NEVER use toBeTruthy() on textContent()/getAttribute() — they return null when missing
+- WRONG: const text = await el.textContent(); expect(text).toBeTruthy()
+- RIGHT: await expect(el).toBeVisible()
+
+BEFORE writing page.goto(), verify the URL is in the available routes list above.
 
 Return ONLY the code block, no explanations.`);
 
