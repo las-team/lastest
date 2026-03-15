@@ -751,8 +751,7 @@ ASSERTIONS — CRITICAL:
 - NEVER use toBeTruthy() on textContent()/getAttribute()/innerText() — they return null when element is missing
 - WRONG: const text = await el.textContent(); expect(text).toBeTruthy()
 - RIGHT: await expect(el).toBeVisible() or await expect(el).toContainText(/expected/)
-- WRONG: const href = await link.getAttribute('href'); expect(href).toBeTruthy()
-- RIGHT: await expect(link).toHaveAttribute('href', /.*/)
+- Available expect matchers: toBe, toEqual, toBeTruthy, toBeFalsy, toContain, toMatch, toHaveURL, toHaveTitle, toBeVisible, toBeHidden, toHaveText, toContainText, toHaveAttribute, toHaveCount, toBeEnabled, toBeDisabled, toBeChecked, toHaveValue (all support .not)
 
 BEFORE writing page.goto(), verify the URL is in the available routes list above. If no route matches, use the closest parent route.
 
