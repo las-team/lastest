@@ -64,13 +64,31 @@ ASSERTIONS — prefer resilient checks:
 - Prefer toBeVisible() for element presence checks
 - If checking a count, use toHaveCount() with the expected number, not toBeTruthy()
 
-EXAMPLE:
+EXAMPLE (static route):
 \`\`\`javascript
 export async function test(page, baseUrl, screenshotPath, stepLogger) {
   stepLogger.log('Navigate');
   await page.goto(\`\${baseUrl}/settings\`, { waitUntil: 'domcontentloaded' });
   await page.waitForLoadState('domcontentloaded');
   await expect(page).toHaveURL(/\\/settings/);
+  await expect(page.locator('body')).toBeVisible();
+  stepLogger.log('Screenshot');
+  await page.screenshot({ path: screenshotPath, fullPage: true });
+}
+\`\`\`
+
+EXAMPLE (dynamic route — discover real ID from list page):
+\`\`\`javascript
+export async function test(page, baseUrl, screenshotPath, stepLogger) {
+  stepLogger.log('Navigate to list page to find a real item');
+  await page.goto(\`\${baseUrl}/tests\`, { waitUntil: 'domcontentloaded' });
+  await page.waitForLoadState('domcontentloaded');
+  const firstLink = page.locator('a[href*="/tests/"]').first();
+  await expect(firstLink).toBeVisible();
+  const href = await firstLink.getAttribute('href');
+  stepLogger.log('Navigate to detail page');
+  await page.goto(\`\${baseUrl}\${href}\`, { waitUntil: 'domcontentloaded' });
+  await page.waitForLoadState('domcontentloaded');
   await expect(page.locator('body')).toBeVisible();
   stepLogger.log('Screenshot');
   await page.screenshot({ path: screenshotPath, fullPage: true });
