@@ -726,6 +726,7 @@ DYNAMIC ROUTES (paths with [id], [slug], etc.):
 - Click the first item or extract its href to get a real URL with an actual ID
 - Then test the detail page with real data
 - NEVER hardcode fake IDs like "123" or "test-id"
+- If no items exist in the list, take a screenshot of the empty state and return gracefully
 
 SELECTORS (this app uses shadcn/ui + Tailwind CSS):
 - Buttons: page.getByRole('button', { name: '...' })
