@@ -279,7 +279,7 @@ function buildCodebaseIntelligenceSection(intel: CodebaseIntelligenceContext): s
 }
 
 export function createFixPrompt(context: TestGenerationContext): string {
-  const parts: string[] = [`Fix this failing Playwright test.
+  const parts: string[] = [`Fix this failing Playwright test. Return ONLY the complete fixed code in a code block — NO explanations, NO analysis, NO commentary.
 
 Original test code:
 \`\`\`typescript
