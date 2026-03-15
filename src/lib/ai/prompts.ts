@@ -749,8 +749,8 @@ Test Name: ${context.testName}`);
     parts.push(`\n--- Available Routes (ONLY navigate to these) ---`);
     parts.push(context.availableRoutes.map(r => `- ${r}`).join('\n'));
     parts.push(`\nCRITICAL: Do NOT invent or guess URLs. ONLY use routes from the list above.`);
-    parts.push(`If the acceptance criterion mentions a feature (e.g., "settings", "test management"), find the route that best matches that feature from the list.`);
-    parts.push(`If no route exactly matches, use the closest parent or related route. For features without a dedicated route, use "/" (home page).`);
+    parts.push(`Route hints: /settings = configuration, /tests = test list, /tests/[id] = test detail, /builds/* = build results, /suites = test suites, /areas = functional areas, /run = run tests, /record = record tests, /review = review diffs, /compare = compare builds`);
+    parts.push(`Match the acceptance criterion's feature to the most relevant route above. If no route matches, use "/" (home page).`);
   }
 
   parts.push(`
