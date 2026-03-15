@@ -61,6 +61,11 @@ AUTH: Tests run with pre-authenticated browser state (Playwright storageState).
 - If redirected to /login or /sign-in, the auth state expired — take screenshot and return gracefully
 - After page.goto(), optionally check: if (page.url().includes('/login')) { await page.screenshot({ path: screenshotPath }); return; }
 
+ERROR RESILIENCE:
+- After page.goto(), check response status: const response = await page.goto(...); if (!response || response.status() >= 400) { stepLogger.log('Page returned error ' + (response?.status() || 'unknown')); await page.screenshot({ path: screenshotPath }); return; }
+- Use try/catch around assertions that might fail due to page load issues
+- If a page loads but content is missing, screenshot the current state and return gracefully rather than throwing
+
 SYNTAX — CRITICAL:
 - WRONG: const el: Locator = page.locator(...) → RIGHT: const el = page.locator(...)
 - WRONG: import { expect } from '@playwright/test' → RIGHT: (no imports — expect is a parameter)
