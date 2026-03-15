@@ -253,6 +253,8 @@ ASSERTIONS — CRITICAL:
 - WRONG: const text = await el.textContent(); expect(text).toBeTruthy()
 - RIGHT: await expect(el).toBeVisible()
 
+ERROR RESILIENCE: After page.goto(), check response: const response = await page.goto(...); if (!response || response.status() >= 400) { stepLogger.log('Server error'); await page.screenshot({ path: screenshotPath }); return; }
+
 BEFORE writing page.goto(), verify the URL is in the available routes list above.
 
 Return ONLY the code block, no explanations.`);
