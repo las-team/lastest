@@ -591,11 +591,15 @@ Format your response as markdown using this exact structure:
 Guidelines:
 - User Story titles should be concise functional area names (e.g., "User Authentication", "Dashboard Analytics")
 - Each AC MUST describe a specific, observable user action and expected system response that can be verified in a browser
+- Each AC should mention the specific page/route where the behavior occurs (e.g., "On the /settings page, ...")
 - DO NOT include: questions, suggestions, meta-commentary, implementation tasks, or vague criteria
 - DO NOT include ACs like "Create additional tests...", "Consider...", "Should we...", "Implement...", "Ensure proper..."
 - Bad AC: "Ensure proper error handling" (vague, not testable)
 - Good AC: "When user submits login form with wrong password, an error message 'Invalid credentials' appears"
+- Bad AC: "The system should display data correctly" (vague, no specific elements)
+- Good AC: "On the /tests page, a table of tests is visible with columns for name, status, and last run date"
 - Each AC should be independently testable in a browser-based visual regression test
+- Group ACs that test the SAME page/route under the same User Story
 - If a requirement is not testable via browser interaction, skip it
 - If the document doesn't follow formal US/AC format, infer them from the requirements`;
 }
