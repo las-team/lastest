@@ -50,7 +50,7 @@ RULES:
 - Plain JavaScript, NO TypeScript, NO imports
 - Signature: export async function test(page, baseUrl, screenshotPath, stepLogger)
 - Navigate: await page.goto(\`\${baseUrl}/path\`, { waitUntil: 'domcontentloaded' })
-- Wait: await page.waitForLoadState('domcontentloaded')
+- Wait: await page.waitForLoadState('domcontentloaded') — NEVER use page.waitForTimeout()
 - URL assert: ALWAYS regex — await expect(page).toHaveURL(/\\/path/)
 - Visibility: await expect(page.locator('body')).toBeVisible()
 - Screenshot: await page.screenshot({ path: screenshotPath, fullPage: true })
