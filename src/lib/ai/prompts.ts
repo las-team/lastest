@@ -705,8 +705,16 @@ LOADING STATES:
 - URL checks: ALWAYS regex — await expect(page).toHaveURL(/\\/path/)
 - At least one screenshot must be captured
 - Use baseUrl parameter for navigation
-- ASSERTIONS: prefer toBeVisible() for element checks, toContainText() for text, regex toHaveURL() for URLs
-- NEVER use toBeTruthy() on a value that might not exist — use toBeVisible() on the locator instead
+- Every variable MUST be declared with const or let
+- Every statement must end with a semicolon or closing brace
+
+ASSERTIONS — CRITICAL:
+- Prefer toBeVisible() for element checks, toContainText() for text, regex toHaveURL() for URLs
+- NEVER use toBeTruthy() on textContent()/getAttribute()/innerText() — they return null when element is missing
+- WRONG: const text = await el.textContent(); expect(text).toBeTruthy()
+- RIGHT: await expect(el).toBeVisible() or await expect(el).toContainText(/expected/)
+- WRONG: const href = await link.getAttribute('href'); expect(href).toBeTruthy()
+- RIGHT: await expect(link).toHaveAttribute('href', /.*/)
 
 Return ONLY the code block, no explanations.`);
 
