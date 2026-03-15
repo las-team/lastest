@@ -799,6 +799,10 @@ ASSERTIONS — CRITICAL:
 - For lists that might be empty, guard: const count = await rows.count(); if (count > 0) { await expect(rows.first()).toBeVisible(); }
 - Available expect matchers: toBe, toEqual, toBeTruthy, toBeFalsy, toContain, toMatch, toHaveURL, toHaveTitle, toBeVisible, toBeHidden, toHaveText, toContainText, toHaveAttribute, toHaveCount, toBeEnabled, toBeDisabled, toBeChecked, toHaveValue (all support .not)
 
+ERROR RESILIENCE:
+- Check navigation response: const response = await page.goto(...); if (!response || response.status() >= 400) { stepLogger.log('Server error'); await page.screenshot({ path: screenshotPath }); return; }
+- If the page loads but expected content is missing, screenshot and return gracefully
+
 BEFORE writing page.goto(), verify the URL is in the available routes list above. If no route matches, use the closest parent route.
 
 Return ONLY the code block, no explanations.`);
