@@ -608,6 +608,13 @@ Test Name: ${context.testName}`);
 - Capture screenshots at meaningful states
 - Handle loading states for stable screenshots
 
+DYNAMIC ROUTES (paths with [id], [slug], etc.):
+- First navigate to the parent list page (e.g., for /tests/[id], go to /tests)
+- Wait for the page to load, then find a link or row in the list
+- Click the first item or extract its href to get a real URL with an actual ID
+- Then test the detail page with real data
+- NEVER hardcode fake IDs like "123" or "test-id"
+
 --- Requirements ---
 - Plain JavaScript only — NO TypeScript annotations, NO imports
 - Function signature: export async function test(page, baseUrl, screenshotPath, stepLogger)
@@ -615,6 +622,8 @@ Test Name: ${context.testName}`);
 - URL checks: ALWAYS regex — await expect(page).toHaveURL(/\\/path/)
 - At least one screenshot must be captured
 - Use baseUrl parameter for navigation
+- ASSERTIONS: prefer toBeVisible() for element checks, toContainText() for text, regex toHaveURL() for URLs
+- NEVER use toBeTruthy() on a value that might not exist — use toBeVisible() on the locator instead
 
 Return ONLY the code block, no explanations.`);
 
