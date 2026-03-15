@@ -380,8 +380,10 @@ ${context.errorMessage}
 
 Target URL: ${context.targetUrl || 'unknown'}
 ${routeSection}
+IMPORTANT: If the "original test code" is NOT valid JavaScript (e.g., it's explanation text), IGNORE it and write a NEW test from scratch.
+
 ERROR DIAGNOSIS — identify the category FIRST:
-- "Unexpected identifier/token" → SYNTAX ERROR: fix missing commas, remove TS annotations
+- "Unexpected identifier/token" → SYNTAX ERROR: code may not be valid JS — rewrite from scratch if needed, or fix missing commas, remove TS annotations
 - "404/not found" → WRONG URL: change to a route from available routes
 - "timeout/selector" → SELECTOR MISMATCH: use browser_snapshot to find correct selectors
 - "Expected value to be truthy" → replace toBeTruthy() with toBeVisible() on locator
