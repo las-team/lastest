@@ -28,7 +28,6 @@ Approve reject changes or create ticket -> gh issue
 Import from prior tools? 
 Determine test coverage based on tests in repo 
 Expand into not just visual testing: https://github.com/coleam00/link-in-bio-page-builder/blob/main/.claude/skills/e2e-test/SKILL.md
-tset
 ## bugs
 some elements are disappearing from test 13b
 other users can see build page w url
