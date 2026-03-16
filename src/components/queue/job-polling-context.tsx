@@ -14,7 +14,7 @@ interface JobPollingContextValue {
   refreshJobs: () => void;
 }
 
-const JobPollingContext = createContext<JobPollingContextValue | null>(null);
+export const JobPollingContext = createContext<JobPollingContextValue | null>(null);
 
 export function JobPollingProvider({ children }: { children: ReactNode }) {
   const [jobs, setJobs] = useState<JobWithChildren[]>([]);

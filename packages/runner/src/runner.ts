@@ -28,7 +28,7 @@ export interface TestRunResult {
     screenshot?: string;
   };
   logs: LogEntry[];
-  screenshots: Array<{ filename: string; data: string; width: number; height: number }>;
+  screenshots: Array<{ filename: string; data: string; width: number; height: number; capturedAt?: number }>;
   softErrors?: string[];
 }
 
