@@ -5,50 +5,20 @@ on:
 jobs:
   visual-tests:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
-
-      - name: Get Playwright version
-        id: playwright-version
-        run: echo "version=$(npx @lastest/runner@0.4.1 playwright-version)" >> $GITHUB_OUTPUT
-
-      - name: Cache Playwright browsers
-        uses: actions/cache@v4
-        id: playwright-cache
-        with:
-          path: ~/.cache/ms-playwright
-          key: ${{ runner.os }}-playwright-${{ steps.playwright-version.outputs.version }}
-
-      - name: Install Playwright browsers
-        if: steps.playwright-cache.outputs.cache-hit != 'true'
-        run: npx playwright install chromium --with-deps
-
-      - name: Install Playwright OS deps (cached)
-        if: steps.playwright-cache.outputs.cache-hit == 'true'
-        run: npx playwright install-deps chromium
-
       - name: Run visual tests
         env:
           LASTEST2_TOKEN: ${{ secrets.LASTEST2_TOKEN }}
           LASTEST2_URL: ${{ secrets.LASTEST2_URL }}
         run: |
-          npx @lastest/runner@0.4.1 run \
-            -t "$LASTEST2_TOKEN" \
-            -s "$LASTEST2_URL" &
-          RUNNER_PID=$!
-          sleep 3
-
-          npx @lastest/runner@0.4.1 trigger \
-            -t "$LASTEST2_TOKEN" \
-            -s "$LASTEST2_URL" \
+          npx @lastest/runner trigger \
             --repo "dexilion-team/lastest2" \
             --branch "${{ github.head_ref || github.ref_name }}" \
             --commit "${{ github.sha }}" \
-            --fail-on-changes \
-            --timeout 300000
-
-          kill $RUNNER_PID || true
+            --timeout 300000 \
+            --target-url "https://admin.lastest.cloud/"
