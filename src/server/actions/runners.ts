@@ -234,6 +234,13 @@ export async function deleteRunner(runnerId: string): Promise<{ success: boolean
 }
 
 /**
+ * Internal runner deletion (no auth check — caller must verify permissions).
+ */
+export async function deleteRunnerInternal(runnerId: string, teamId: string): Promise<void> {
+  await db.delete(runners).where(and(eq(runners.id, runnerId), eq(runners.teamId, teamId)));
+}
+
+/**
  * Stop a running runner remotely (admin only)
  * Queues a shutdown command that the runner will receive on next heartbeat
  */

@@ -25,7 +25,8 @@ type StepStatus = 'pending' | 'loading' | 'success' | 'error';
 
 export function DeployDialog({ open, onOpenChange, config }: DeployDialogProps) {
   const isEphemeral = config.mode === 'ephemeral';
-  const hasPersistentRunner = !isEphemeral && !!config.runnerId;
+  const isAuto = config.mode === 'auto';
+  const hasPersistentRunner = !isEphemeral && !isAuto && !!config.runnerId;
   const [deploying, setDeploying] = useState(false);
   const [steps, setSteps] = useState<{
     workflow: StepStatus;
@@ -33,7 +34,7 @@ export function DeployDialog({ open, onOpenChange, config }: DeployDialogProps) 
     urlSecret: StepStatus;
   }>({ workflow: 'pending', tokenSecret: 'pending', urlSecret: 'pending' });
 
-  const willSetSecrets = isEphemeral || hasPersistentRunner;
+  const willSetSecrets = isEphemeral || isAuto || hasPersistentRunner;
 
   const handleDeploy = async () => {
     setDeploying(true);
@@ -101,7 +102,9 @@ export function DeployDialog({ open, onOpenChange, config }: DeployDialogProps) 
               {willSetSecrets
                 ? hasPersistentRunner
                   ? ' The runner token will be regenerated and secrets will be set automatically. Any other usage of the old token will stop working.'
-                  : ' A runner token and server URL will be set as repository secrets automatically.'
+                  : isAuto
+                    ? ' An auth-only runner will be created and secrets set automatically. The server will pick the best available runner at build time.'
+                    : ' A runner token and server URL will be set as repository secrets automatically.'
                 : ' You will need to manually set LASTEST2_TOKEN and LASTEST2_URL as repository secrets.'}
             </div>
           </div>
