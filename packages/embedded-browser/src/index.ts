@@ -321,6 +321,9 @@ async function startup(): Promise<void> {
 
         runnerClient.setStatus('busy', payload.sessionId);
 
+        // Notify stream viewers before stopping screencast so they suppress stall detection
+        streamServer?.broadcastStatus('busy');
+
         // Stop screencast/input on idle page
         await screencast?.stop();
         await inputHandler?.detach();
@@ -484,6 +487,9 @@ async function startup(): Promise<void> {
         };
 
         runnerClient.setStatus('busy', payload.sessionId);
+
+        // Notify stream viewers before stopping screencast so they suppress stall detection
+        streamServer?.broadcastStatus('busy');
 
         // Stop screencast/input on idle page
         await screencast?.stop();

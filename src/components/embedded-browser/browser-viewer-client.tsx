@@ -44,6 +44,7 @@ export function BrowserViewer({ streamUrl, initialViewport, className, expiresAt
   const intentionalCloseRef = useRef(false);
   const lastFrameTimeRef = useRef(0);
   const stallCheckRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const screencastPausedRef = useRef(false);
 
   // Session expiry countdown
   useEffect(() => {
@@ -122,6 +123,7 @@ export function BrowserViewer({ streamUrl, initialViewport, className, expiresAt
         setConnectionStatus('connected');
         setReconnectAttempt(0);
         lastFrameTimeRef.current = Date.now();
+        screencastPausedRef.current = false;
 
         // Start frame stall detection — if no frames arrive for FRAME_STALL_TIMEOUT_MS,
         // the CDP screencast likely died silently. Force reconnect to recover.
@@ -130,7 +132,8 @@ export function BrowserViewer({ streamUrl, initialViewport, className, expiresAt
           if (
             lastFrameTimeRef.current > 0 &&
             Date.now() - lastFrameTimeRef.current > FRAME_STALL_TIMEOUT_MS &&
-            wsRef.current?.readyState === WebSocket.OPEN
+            wsRef.current?.readyState === WebSocket.OPEN &&
+            !screencastPausedRef.current
           ) {
             console.warn('[BrowserViewer] Frame stall detected — reconnecting');
             wsRef.current?.close();
@@ -175,6 +178,15 @@ export function BrowserViewer({ streamUrl, initialViewport, className, expiresAt
                 setViewport(message.payload.viewport);
               }
               setFileChooserPending(message.payload.fileChooserPending ?? false);
+
+              // Track intentional screencast pauses to suppress stall detection
+              const status = message.payload.status;
+              if (status === 'busy' || status === 'recording' || status === 'debugging') {
+                screencastPausedRef.current = true;
+                lastFrameTimeRef.current = Date.now(); // keep timer fresh
+              } else {
+                screencastPausedRef.current = false;
+              }
               break;
             }
           }
