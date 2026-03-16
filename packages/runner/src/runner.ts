@@ -262,7 +262,7 @@ export class TestRunner {
           const filename = `${command.testRunId}-${command.testId}-${label.replace(/ /g, '_')}.png`;
           const base64 = buffer.toString('base64');
           const { width, height } = viewport;
-          screenshots.push({ filename, data: base64, width, height });
+          screenshots.push({ filename, data: base64, width, height, capturedAt: Date.now() });
           logFn('info', `Captured screenshot: ${filename}`);
           // Disable RAF gating + unfreeze performance.now after screenshot
           await page.evaluate(() => {

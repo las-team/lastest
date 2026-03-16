@@ -543,9 +543,20 @@ async function executeViaRunner(
       inFlight.delete(dbCmd.id);
       completedCount++;
 
-      let allScreenshots: { path: string; label: string }[] = screenshotResults.map((r, idx) => {
+      // Sort by capturedAt to restore capture order (parallel uploads arrive out of order)
+      const sortedScreenshots = [...screenshotResults].sort((a, b) => {
+        const aPayload = a.payload as Record<string, unknown>;
+        const bPayload = b.payload as Record<string, unknown>;
+        return ((aPayload.capturedAt as number) || 0) - ((bPayload.capturedAt as number) || 0);
+      });
+
+      let allScreenshots: { path: string; label: string }[] = sortedScreenshots.map((r, idx) => {
         const sp = r.payload as Record<string, unknown>;
-        return { path: sp.path as string, label: `Step ${idx + 1}` };
+        // Extract step label from filename (e.g. "runId-testId-Step_3.png" → "Step 3")
+        const filename = (sp.filename as string) || '';
+        const stepMatch = filename.match(/Step_(\d+)/);
+        const label = stepMatch ? `Step ${stepMatch[1]}` : `Step ${idx + 1}`;
+        return { path: sp.path as string, label };
       });
 
       // Fallback to disk scan if no DB screenshot entries found

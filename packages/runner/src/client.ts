@@ -440,7 +440,7 @@ export class RunnerClient {
             data: screenshot.data,
             width: screenshot.width,
             height: screenshot.height,
-            capturedAt: Date.now(),
+            capturedAt: screenshot.capturedAt || Date.now(),
           });
           return this.sendMessage(screenshotMsg).then(sent => {
             if (!sent) {

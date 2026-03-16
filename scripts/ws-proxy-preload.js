@@ -9,10 +9,11 @@ http.Server.prototype.listen = function (...args) {
     const url = req.url || '';
     if (!url.startsWith('/api/embedded/stream/ws')) return;
 
-    // Prevent Next.js from ending the socket after upgrade
-    const originalEnd = socket.end.bind(socket);
-    let owned = true;
-    socket.end = (...a) => owned ? socket : originalEnd(...a);
+    // Block Next.js from ending the socket — it defers .end() after upgrade,
+    // which races with the proxy pipe setup and kills the connection.
+    const originalDestroy = socket.destroy.bind(socket);
+    socket.end = () => { console.log('[WS-PROXY] socket.end() blocked'); return socket; };
+    socket.destroy = (...a) => { console.log('[WS-PROXY] socket.destroy() called', new Error().stack?.split('\n').slice(1,4).join(' | ')); return originalDestroy(...a); };
 
     const searchParams = new URLSearchParams(url.includes('?') ? url.slice(url.indexOf('?') + 1) : '');
     const target = searchParams.get('target');
@@ -28,7 +29,10 @@ http.Server.prototype.listen = function (...args) {
     searchParams.delete('target');
     const upstreamQs = searchParams.toString() ? '?' + searchParams.toString() : '';
 
+    socket.on('close', (hadError) => console.log('[WS-PROXY] socket close event, hadError:', hadError));
+
     const proxy = net.connect(connectPort, connectHost, () => {
+      console.log('[WS-PROXY] upstream connected to', connectHost, connectPort);
       const lines = [
         `GET /${upstreamQs} HTTP/1.1`,
         `Host: ${connectHost}:${connectPort}`,
@@ -44,11 +48,11 @@ http.Server.prototype.listen = function (...args) {
 
       proxy.write(lines.join('\r\n') + '\r\n\r\n');
       if (head.length > 0) proxy.write(head);
-      owned = false;
-      proxy.pipe(socket);
+      proxy.pipe(socket, { end: false });
       socket.pipe(proxy);
     });
-    proxy.on('error', () => { owned = false; socket.destroy(); });
+    proxy.on('error', (e) => { console.log('[WS-PROXY] proxy error:', e.message); socket.destroy(); });
+    proxy.on('close', (hadError) => { console.log('[WS-PROXY] proxy close, hadError:', hadError); socket.destroy(); });
     socket.on('error', () => proxy.destroy());
     socket.on('close', () => proxy.destroy());
   });
