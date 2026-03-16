@@ -1418,7 +1418,7 @@ export class PlaywrightRecorder extends EventEmitter {
       const el = document.activeElement as HTMLElement | null;
       if (!el || el === document.body) return null;
       const rect = el.getBoundingClientRect();
-      const selectors: { type: string; value: string }[] = [];
+      const selectors: { type: 'id' | 'placeholder' | 'aria-label'; value: string }[] = [];
       if (el.id) selectors.push({ type: 'id', value: `#${el.id}` });
       const placeholder = el.getAttribute('placeholder');
       if (placeholder) selectors.push({ type: 'placeholder', value: `[placeholder="${placeholder}"]` });

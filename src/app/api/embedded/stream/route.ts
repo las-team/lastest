@@ -3,10 +3,29 @@ import { requireAuth } from '@/lib/auth';
 import { listEmbeddedSessions, listSystemEmbeddedSessions } from '@/server/actions/embedded-sessions';
 
 /**
+ * Convert a direct ws:// streamUrl to a proxy path so the browser connects
+ * through the main app's WS proxy (ws-proxy-preload.js) instead of directly
+ * to the container IP, which fails behind HTTPS/nginx.
+ */
+function toProxyStreamUrl(streamUrl: string | null): string | null {
+  if (!streamUrl) return null;
+  try {
+    const url = new URL(streamUrl);
+    if (url.protocol === 'ws:' || url.protocol === 'wss:') {
+      const target = `${url.hostname}:${url.port || '9223'}`;
+      return `/api/embedded/stream/ws?target=${encodeURIComponent(target)}`;
+    }
+  } catch {
+    // not a valid URL — return as-is
+  }
+  return streamUrl;
+}
+
+/**
  * GET /api/embedded/stream
  *
  * Returns all embedded sessions for the authenticated team plus system sessions.
- * Each session includes the streamUrl for direct WebSocket connection.
+ * Each session includes the streamUrl routed through the WS proxy.
  */
 export async function GET() {
   try {
@@ -36,7 +55,7 @@ export async function GET() {
         id: s.id,
         runnerId: s.runnerId,
         status: s.status,
-        streamUrl: s.streamUrl,
+        streamUrl: toProxyStreamUrl(s.streamUrl),
         viewport: s.viewport,
         currentUrl: s.currentUrl,
         userId: s.userId,
