@@ -87,6 +87,36 @@ function createExpect(timeout = 5000) {
         const value = await locator.inputValue();
         throw new Error(`Expected value "${expected}", but got "${value}"`);
       },
+      async toBeEnabled(options?: { timeout?: number }) {
+        const t = options?.timeout ?? timeout;
+        const start = Date.now();
+        while (Date.now() - start < t) {
+          if (await locator.isEnabled()) return;
+          await new Promise(r => setTimeout(r, 100));
+        }
+        throw new Error(`Expected element to be enabled`);
+      },
+      async toBeDisabled(options?: { timeout?: number }) {
+        const t = options?.timeout ?? timeout;
+        const start = Date.now();
+        while (Date.now() - start < t) {
+          if (await locator.isDisabled()) return;
+          await new Promise(r => setTimeout(r, 100));
+        }
+        throw new Error(`Expected element to be disabled`);
+      },
+      async toBeChecked(options?: { timeout?: number }) {
+        const t = options?.timeout ?? timeout;
+        const start = Date.now();
+        while (Date.now() - start < t) {
+          if (await locator.isChecked()) return;
+          await new Promise(r => setTimeout(r, 100));
+        }
+        throw new Error(`Expected element to be checked`);
+      },
+      async toBeAttached(options?: { timeout?: number }) {
+        await locator.waitFor({ state: 'attached', timeout: options?.timeout ?? timeout });
+      },
     };
   };
 }
