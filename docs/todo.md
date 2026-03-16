@@ -69,3 +69,4 @@ Exp testing is kinda ok, at least you learn how your software works
 1) hogy a hasznosságát fel tudjam mérni 
 2) hogy személyre szabott sztoriban tudjam megmutatni Davidnek hogy mennyit segített. 
 3) Alátámasztani mindezt azzal hogy a PR-jaim release utáni bug countja csökken látványosan
+test
