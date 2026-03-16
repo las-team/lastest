@@ -25,7 +25,13 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
-    "test:ui": "vitest --ui"
+    "test:ui": "vitest --ui",
+    "deploy:local": "bash scripts/deploy.sh local",
+    "deploy:eb": "bash scripts/deploy.sh eb",
+    "deploy:zima": "bash scripts/deploy.sh zima",
+    "deploy:olares": "bash scripts/deploy.sh olares",
+    "deploy:npm": "bash scripts/deploy.sh npm",
+    "deploy:all": "bash scripts/deploy.sh all"
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.2.19",

@@ -9,6 +9,8 @@ export async function GET() {
 
     return NextResponse.json({
       status: 'healthy',
+      version: process.env.NEXT_PUBLIC_GIT_HASH || 'dev',
+      commitCount: process.env.NEXT_PUBLIC_GIT_COMMIT_COUNT || '0',
       timestamp: new Date().toISOString(),
       database: 'connected',
     });

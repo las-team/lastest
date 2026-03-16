@@ -1,0 +1,299 @@
+#!/usr/bin/env bash
+# Master deploy script for Lastest2
+# Usage: deploy.sh <target> [options]
+#
+# Targets: local, eb, zima, olares, npm, all
+# Options:
+#   --skip-checks    Skip lint/test before deploy
+#   --app-only       Only build/deploy main app image (skip EB)
+#   --eb-only        Only build/deploy EB image (skip main app)
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+ROOT_DIR="$(dirname "$SCRIPT_DIR")"
+cd "$ROOT_DIR"
+
+# --- Config ---
+ZIMA_HOST="192.168.1.138"
+ZIMA_USER="ewyct"
+ZIMA_COMPOSE="/var/lib/casaos/apps/lastest2/docker-compose.yml"
+
+OLARES_HOST="ewyctorlab.olares.local"
+OLARES_USER="root"
+OLARES_NS="lastest-dev-ewyctorlab"
+OLARES_DEPLOY="lastest-dev"
+
+IMAGE_APP="ewyc/lastest"
+IMAGE_EB="ewyc/lastest-eb"
+
+# --- Parse args ---
+TARGET="${1:-}"
+shift || true
+
+SKIP_CHECKS=false
+APP_ONLY=false
+EB_ONLY=false
+
+for arg in "$@"; do
+  case "$arg" in
+    --skip-checks) SKIP_CHECKS=true ;;
+    --app-only)    APP_ONLY=true ;;
+    --eb-only)     EB_ONLY=true ;;
+    *) echo "Unknown option: $arg"; exit 1 ;;
+  esac
+done
+
+# --- Helpers ---
+VERSION=$(node -p "require('./package.json').version")
+GIT_HASH=$(git rev-parse --short HEAD)
+GIT_COMMIT_COUNT=$(git rev-list --count HEAD)
+
+log()  { echo -e "\n\033[1;34m▸ $*\033[0m"; }
+ok()   { echo -e "\033[1;32m✓ $*\033[0m"; }
+warn() { echo -e "\033[1;33m⚠ $*\033[0m"; }
+err()  { echo -e "\033[1;31m✗ $*\033[0m"; exit 1; }
+
+timer_start() { DEPLOY_START=$(date +%s); }
+timer_end() {
+  local elapsed=$(( $(date +%s) - DEPLOY_START ))
+  local min=$((elapsed / 60))
+  local sec=$((elapsed % 60))
+  echo ""
+  ok "Done in ${min}m${sec}s"
+}
+
+# --- Pre-checks ---
+run_checks() {
+  if [ "$SKIP_CHECKS" = true ]; then
+    warn "Skipping pre-deploy checks"
+    return
+  fi
+
+  log "Pre-deploy checks"
+
+  # Dirty tree warning (not error)
+  if ! git diff --quiet 2>/dev/null || ! git diff --cached --quiet 2>/dev/null; then
+    warn "Working tree has uncommitted changes"
+  fi
+
+  log "Running lint..."
+  pnpm lint || err "Lint failed"
+
+  log "Running tests..."
+  pnpm test || err "Tests failed"
+
+  ok "All checks passed"
+}
+
+# --- Build ---
+build_app() {
+  log "Building $IMAGE_APP:latest (hash: $GIT_HASH, build #$GIT_COMMIT_COUNT)"
+  docker build \
+    -t "$IMAGE_APP:latest" \
+    -t "$IMAGE_APP:$VERSION" \
+    --build-arg GIT_HASH="$GIT_HASH" \
+    --build-arg GIT_COMMIT_COUNT="$GIT_COMMIT_COUNT" \
+    -f Dockerfile .
+  ok "Built $IMAGE_APP:latest"
+}
+
+build_eb() {
+  log "Building $IMAGE_EB:latest"
+  docker build \
+    -t "$IMAGE_EB:latest" \
+    -t "$IMAGE_EB:$VERSION" \
+    -f packages/embedded-browser/Dockerfile .
+  ok "Built $IMAGE_EB:latest"
+}
+
+build_images() {
+  if [ "$EB_ONLY" = true ]; then
+    build_eb
+  elif [ "$APP_ONLY" = true ]; then
+    build_app
+  else
+    # Build both — EB in background, app in foreground
+    build_eb &
+    local eb_pid=$!
+    build_app
+    wait "$eb_pid" || err "EB image build failed"
+    ok "Both images built"
+  fi
+}
+
+build_olares() {
+  log "Building $IMAGE_APP:olares (hash: $GIT_HASH, build #$GIT_COMMIT_COUNT)"
+  docker build \
+    -t "$IMAGE_APP:olares" \
+    --build-arg GIT_HASH="$GIT_HASH" \
+    --build-arg GIT_COMMIT_COUNT="$GIT_COMMIT_COUNT" \
+    -f Dockerfile .
+  ok "Built $IMAGE_APP:olares"
+}
+
+# --- Targets ---
+deploy_local() {
+  log "Deploying locally"
+  run_checks
+  docker compose build
+  docker compose up -d
+  bash "$SCRIPT_DIR/health-check.sh" "http://localhost:3000"
+}
+
+deploy_eb() {
+  log "Deploying embedded browsers (local dev)"
+  docker compose -f docker-compose.eb.yml up -d --build
+  sleep 3
+  ok "EB containers started"
+  echo "  eb-1: http://localhost:9224/health"
+  echo "  eb-2: http://localhost:9226/health"
+}
+
+deploy_zima() {
+  log "Deploying to ZimaOS ($ZIMA_HOST)"
+  run_checks
+
+  # Determine which images to build and transfer
+  local images=()
+  if [ "$EB_ONLY" = true ]; then
+    build_eb
+    images+=("$IMAGE_EB:latest")
+  elif [ "$APP_ONLY" = true ]; then
+    build_app
+    images+=("$IMAGE_APP:latest")
+  else
+    build_images
+    images+=("$IMAGE_APP:latest" "$IMAGE_EB:latest")
+  fi
+
+  log "Transferring images to $ZIMA_HOST (this may take a while)..."
+  docker save "${images[@]}" | ssh "$ZIMA_USER@$ZIMA_HOST" 'docker load'
+  ok "Images loaded on $ZIMA_HOST"
+
+  log "Restarting containers..."
+  ssh "$ZIMA_USER@$ZIMA_HOST" "cd /var/lib/casaos/apps/lastest2 && docker compose up -d"
+
+  log "Verifying deployment..."
+  bash "$SCRIPT_DIR/health-check.sh" "http://$ZIMA_HOST:3000"
+}
+
+deploy_olares() {
+  log "Deploying to Olares ($OLARES_HOST)"
+  run_checks
+  build_olares
+
+  log "Removing old image on Olares..."
+  ssh "$OLARES_USER@$OLARES_HOST" \
+    "ctr -n k8s.io images rm docker.io/$IMAGE_APP:olares 2>/dev/null || true"
+
+  log "Transferring image to Olares (this takes ~10 minutes)..."
+  docker save "$IMAGE_APP:olares" | \
+    ssh "$OLARES_USER@$OLARES_HOST" 'ctr -n k8s.io images import -'
+  ok "Image imported on Olares"
+
+  log "Restarting deployment..."
+  ssh "$OLARES_USER@$OLARES_HOST" \
+    "kubectl rollout restart deployment/$OLARES_DEPLOY -n $OLARES_NS"
+
+  log "Waiting for rollout..."
+  ssh "$OLARES_USER@$OLARES_HOST" \
+    "kubectl rollout status deployment/$OLARES_DEPLOY -n $OLARES_NS --timeout=180s"
+
+  log "Verifying deployment..."
+  bash "$SCRIPT_DIR/health-check.sh" "https://app.lastest.cloud" 180
+}
+
+deploy_npm() {
+  log "Publishing @lastest/runner to npm"
+
+  # Sync version from root
+  local runner_dir="$ROOT_DIR/packages/runner"
+  local current=$(node -p "require('$runner_dir/package.json').version")
+
+  if [ "$current" != "$VERSION" ]; then
+    log "Syncing version $current → $VERSION"
+    node -e "
+      const fs = require('fs');
+      const pkg = JSON.parse(fs.readFileSync('$runner_dir/package.json', 'utf8'));
+      pkg.version = '$VERSION';
+      fs.writeFileSync('$runner_dir/package.json', JSON.stringify(pkg, null, 2) + '\n');
+    "
+  fi
+
+  cd "$runner_dir"
+  pnpm build
+  pnpm publish --no-git-checks --access public
+  cd "$ROOT_DIR"
+  ok "Published @lastest/runner@$VERSION"
+}
+
+deploy_all() {
+  log "Full deployment — version $VERSION (hash: $GIT_HASH)"
+  run_checks
+
+  # Build all images once
+  build_images
+  build_olares
+
+  # Deploy to targets
+  deploy_zima_transfer
+  deploy_olares_transfer
+  deploy_npm
+
+  ok "All deployments complete"
+}
+
+# Transfer-only helpers (skip checks + build, used by deploy_all)
+deploy_zima_transfer() {
+  log "Transferring to ZimaOS..."
+  local images=("$IMAGE_APP:latest")
+  [ "$APP_ONLY" != true ] && images+=("$IMAGE_EB:latest")
+  docker save "${images[@]}" | ssh "$ZIMA_USER@$ZIMA_HOST" 'docker load'
+  ssh "$ZIMA_USER@$ZIMA_HOST" "cd /var/lib/casaos/apps/lastest2 && docker compose up -d"
+  bash "$SCRIPT_DIR/health-check.sh" "http://$ZIMA_HOST:3000"
+}
+
+deploy_olares_transfer() {
+  log "Transferring to Olares..."
+  ssh "$OLARES_USER@$OLARES_HOST" \
+    "ctr -n k8s.io images rm docker.io/$IMAGE_APP:olares 2>/dev/null || true"
+  docker save "$IMAGE_APP:olares" | \
+    ssh "$OLARES_USER@$OLARES_HOST" 'ctr -n k8s.io images import -'
+  ssh "$OLARES_USER@$OLARES_HOST" \
+    "kubectl rollout restart deployment/$OLARES_DEPLOY -n $OLARES_NS"
+  ssh "$OLARES_USER@$OLARES_HOST" \
+    "kubectl rollout status deployment/$OLARES_DEPLOY -n $OLARES_NS --timeout=180s"
+  bash "$SCRIPT_DIR/health-check.sh" "https://app.lastest.cloud" 180
+}
+
+# --- Main ---
+usage() {
+  echo "Usage: deploy.sh <target> [options]"
+  echo ""
+  echo "Targets:"
+  echo "  local     Build + run via docker compose locally"
+  echo "  eb        Build + run embedded browsers for local dev"
+  echo "  zima      Build + deploy to ZimaOS ($ZIMA_HOST)"
+  echo "  olares    Build + deploy to Olares (app.lastest.cloud)"
+  echo "  npm       Publish @lastest/runner to npm"
+  echo "  all       Deploy everything (zima + olares + npm)"
+  echo ""
+  echo "Options:"
+  echo "  --skip-checks    Skip lint/test before deploy"
+  echo "  --app-only       Only build/deploy main app image"
+  echo "  --eb-only        Only build/deploy EB image"
+  echo ""
+  echo "Version: $VERSION | Hash: $GIT_HASH | Build: #$GIT_COMMIT_COUNT"
+}
+
+case "${TARGET}" in
+  local)   timer_start; deploy_local;  timer_end ;;
+  eb)      timer_start; deploy_eb;     timer_end ;;
+  zima)    timer_start; deploy_zima;   timer_end ;;
+  olares)  timer_start; deploy_olares; timer_end ;;
+  npm)     timer_start; deploy_npm;    timer_end ;;
+  all)     timer_start; deploy_all;    timer_end ;;
+  -h|--help|help) usage ;;
+  "") usage; exit 1 ;;
+  *) err "Unknown target: $TARGET" ;;
+esac
