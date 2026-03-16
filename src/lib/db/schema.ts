@@ -119,6 +119,7 @@ export interface TestPlaywrightOverrides {
   acceptAnyCertificate?: boolean;
   maxParallelTests?: number;
   baseUrl?: string;
+  cursorPlaybackSpeed?: number;
 }
 
 export const functionalAreas = sqliteTable('functional_areas', {

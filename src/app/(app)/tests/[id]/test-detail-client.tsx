@@ -87,6 +87,7 @@ interface PlaywrightSettingsForDefaults {
   consoleErrorMode?: string | null;
   acceptAnyCertificate?: boolean | null;
   maxParallelTests?: number | null;
+  cursorPlaybackSpeed?: number | null;
 }
 
 interface TestDetailClientProps {
@@ -800,6 +801,7 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
                   consoleErrorMode: (playwrightDefaults?.consoleErrorMode as 'fail' | 'warn' | 'ignore') ?? 'fail',
                   acceptAnyCertificate: playwrightDefaults?.acceptAnyCertificate ?? false,
                   maxParallelTests: playwrightDefaults?.maxParallelTests ?? 2,
+                  cursorPlaybackSpeed: playwrightDefaults?.cursorPlaybackSpeed ?? 1,
                   baseUrl: envBaseUrl ?? 'http://localhost:3000',
                 }}
               />

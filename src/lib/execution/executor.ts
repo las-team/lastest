@@ -435,7 +435,7 @@ async function executeViaRunner(
         viewport: test.viewportOverride || viewport,
         storageState: options.setupContext?.storageState,
         setupVariables: options.setupContext?.variables,
-        cursorPlaybackSpeed: options.playwrightSettings?.cursorPlaybackSpeed ?? 1,
+        cursorPlaybackSpeed: pwOverrides?.cursorPlaybackSpeed ?? options.playwrightSettings?.cursorPlaybackSpeed ?? 1,
         stabilization: buildStabilizationPayload(options.playwrightSettings, test.stabilizationOverrides),
         browser: effectiveBrowser,
         fixtures: fixturePayloads,
