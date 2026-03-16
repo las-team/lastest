@@ -951,11 +951,11 @@ async function processVisualDiff(
     : undefined;
 
   // Helper to classify based on percentage
-  const classifyDiff = (pct: number): { classification: DiffClassification; status: DiffStatus } => {
+  const classifyDiff = (pct: number, pixelDiff?: number): { classification: DiffClassification; status: DiffStatus } => {
     const effectiveFlakyThreshold = isUnstable ? Math.max(flakyThreshold, pct + 1) : flakyThreshold;
 
     if (pct < unchangedThreshold) {
-      if (isUnstable) {
+      if (isUnstable && (pixelDiff === undefined || pixelDiff > 0)) {
         return { classification: 'flaky', status: 'pending' };
       }
       return { classification: 'unchanged', status: 'auto_approved' };
@@ -1187,13 +1187,18 @@ async function processVisualDiff(
         );
 
     const pct = diffResult.percentageDifference;
-    const { classification, status } = classifyDiff(pct);
+    const { classification, status } = classifyDiff(pct, diffResult.pixelDifference);
     const effectiveStatus = shouldAutoApprove ? 'auto_approved' : status;
     const hasChanges = shouldAutoApprove ? false : classification !== 'unchanged';
     const diffImagePath = toRelativePath(diffResult.diffImagePath);
 
     // Strip absolute paths from aligned shift images before DB storage
     const metadata = diffResult.metadata;
+    if (diffResult.pixelDifference === 0) {
+      metadata.changedRegions = [];
+      metadata.affectedComponents = [];
+      metadata.changeCategories = [];
+    }
     if (metadata.pageShift?.alignedBaselineImagePath) {
       metadata.pageShift.alignedBaselineImagePath = toRelativePath(metadata.pageShift.alignedBaselineImagePath);
     }
