@@ -84,6 +84,7 @@ export async function createRunnerInternal(
   createdById: string,
   capabilities: RunnerCapability[] = ['run', 'record'],
   type: RunnerType = 'remote',
+  authOnly: boolean = false,
 ): Promise<{ runner: Runner; token: string } | { error: string }> {
   const id = uuid();
   const token = generateRunnerToken();
@@ -99,6 +100,7 @@ export async function createRunnerInternal(
     status: 'offline',
     capabilities,
     type,
+    authOnly,
     createdAt: now,
   });
 

@@ -70,6 +70,7 @@ export async function deployWorkflowToGithub(
   if (!config) throw new Error('Config not found');
 
   const isEphemeral = config.mode === 'ephemeral';
+  const isAuto = config.mode === 'auto';
 
   // Get GitHub account for token
   const ghAccount = await queries.getGithubAccountByTeam(session.team.id);
@@ -109,15 +110,16 @@ export async function deployWorkflowToGithub(
   results.workflow = true;
 
   // 2. Set secrets
-  if (isEphemeral) {
-    // Ephemeral mode: auto-create runner and set secrets automatically
+  if (isEphemeral || isAuto) {
+    // Ephemeral/Auto mode: auto-create runner and set secrets automatically
     const repoName = `${config.repositoryOwner}/${config.repositoryName}`;
     const result = await createRunnerInternal(
-      `gha-${repoName}`,
+      isAuto ? `gha-auto-${repoName}` : `gha-${repoName}`,
       session.team.id,
       session.user.id,
       ['run'],
       'remote',
+      isAuto, // authOnly for auto mode
     );
     if ('error' in result) throw new Error(`Failed to create runner: ${result.error}`);
 

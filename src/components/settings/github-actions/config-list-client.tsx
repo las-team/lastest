@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { ChevronDown, ChevronRight, Copy, Check, Trash2, Rocket, Cloud, Server } from 'lucide-react';
+import { ChevronDown, ChevronRight, Copy, Check, Trash2, Rocket, Cloud, Server, Zap } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
@@ -96,9 +96,11 @@ function ConfigCard({
                 <span className="font-mono text-sm font-medium truncate">
                   {config.repositoryOwner}/{config.repositoryName}
                 </span>
-                <Badge variant={mode === 'ephemeral' ? 'default' : 'secondary'} className="text-xs">
+                <Badge variant={mode === 'ephemeral' ? 'default' : mode === 'auto' ? 'default' : 'secondary'} className="text-xs">
                   {mode === 'ephemeral' ? (
                     <><Cloud className="h-3 w-3 mr-1" /> Ephemeral</>
+                  ) : mode === 'auto' ? (
+                    <><Zap className="h-3 w-3 mr-1" /> Auto</>
                   ) : (
                     <><Server className="h-3 w-3 mr-1" /> Persistent</>
                   )}

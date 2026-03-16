@@ -130,9 +130,9 @@ function buildEphemeralSteps(config: WorkflowConfig): string {
 export function generateWorkflowYaml(config: WorkflowConfig): string {
   const timeoutMinutes = Math.ceil(config.timeout / 60000) + (config.mode === 'ephemeral' ? 5 : 0);
   const onBlock = buildOnBlock(config);
-  const steps = config.mode === 'persistent'
-    ? buildPersistentSteps(config)
-    : buildEphemeralSteps(config);
+  const steps = config.mode === 'ephemeral'
+    ? buildEphemeralSteps(config)
+    : buildPersistentSteps(config); // 'persistent' and 'auto' both use trigger-only steps
 
   return `name: Lastest2 Visual Tests
 ${onBlock}

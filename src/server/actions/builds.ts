@@ -294,8 +294,8 @@ export async function createAndRunBuildFromCI(opts: {
   const { triggerType, repositoryId, runnerId, gitBranch, gitCommit, targetUrl } = opts;
   const targetRunner = runnerId || 'local';
 
-  // If this runner is busy, queue this build
-  if (await isRunnerBusy(targetRunner)) {
+  // Auto mode: skip busy check — fallback chain handles concurrency internally
+  if (targetRunner !== 'auto' && await isRunnerBusy(targetRunner)) {
     return queueBuild(triggerType, undefined, repositoryId, runnerId);
   }
 

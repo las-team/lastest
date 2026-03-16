@@ -68,7 +68,7 @@ export async function POST(request: Request) {
     const result = await createAndRunBuildFromCI({
       triggerType: triggerType || 'ci',
       repositoryId: resolvedRepoId,
-      runnerId: runner.id,
+      runnerId: runner.authOnly ? 'auto' : runner.id,
       gitBranch,
       gitCommit,
       targetUrl,

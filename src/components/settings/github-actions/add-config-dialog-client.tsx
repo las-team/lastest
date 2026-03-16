@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { Loader2, Cloud, Server } from 'lucide-react';
+import { Loader2, Cloud, Server, Zap } from 'lucide-react';
 import {
   Dialog,
   DialogContent,
@@ -224,7 +224,24 @@ export function AddConfigDialog({ open, onOpenChange, runners, repos, githubUser
             {/* Mode */}
             <div className="space-y-2">
               <h4 className="text-sm font-medium">Mode</h4>
-              <div className="grid grid-cols-2 gap-2">
+              <div className="grid grid-cols-3 gap-2">
+                <button
+                  type="button"
+                  className={`p-2.5 rounded-md border text-left transition-colors ${
+                    mode === 'auto'
+                      ? 'border-primary bg-primary/5'
+                      : 'border-border hover:border-muted-foreground/50'
+                  }`}
+                  onClick={() => setMode('auto')}
+                >
+                  <div className="flex items-center gap-1.5 mb-0.5">
+                    <Zap className="h-3.5 w-3.5" />
+                    <span className="text-sm font-medium">Auto</span>
+                  </div>
+                  <p className="text-xs text-muted-foreground leading-tight">
+                    Server picks the best available runner.
+                  </p>
+                </button>
                 <button
                   type="button"
                   className={`p-2.5 rounded-md border text-left transition-colors ${
