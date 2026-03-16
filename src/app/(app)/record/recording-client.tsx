@@ -84,6 +84,7 @@ import { DEFAULT_RECORDING_ENGINES } from '@/lib/db/schema';
 import { PlaywrightSettingsCard } from '@/components/settings/playwright-settings-card';
 import { ExecutionTargetSelector } from '@/components/execution/execution-target-selector';
 import { BrowserViewer } from '@/components/embedded-browser/browser-viewer-client';
+import { toast } from 'sonner';
 
 interface SetupStepInfo {
   stepType: 'test' | 'script';
@@ -563,6 +564,10 @@ export function RecordingClient({
   const handleTogglePause = async () => {
     try {
       const result = await togglePauseRecording(repositoryId);
+      if (result.error) {
+        toast.error(result.error);
+        return;
+      }
       setIsPaused(result.paused);
     } catch (error) {
       console.error('Failed to toggle pause:', error);
