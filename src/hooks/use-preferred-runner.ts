@@ -50,6 +50,9 @@ export function usePreferredRunner(): [string, (value: string) => void, boolean]
 
   const setAndPersist = useCallback((newValue: string) => {
     currentValue = newValue;
+    if (typeof window !== 'undefined') {
+      localStorage.setItem(STORAGE_KEY, newValue);
+    }
     notify();
   }, []);
 

@@ -928,7 +928,7 @@ export const users = sqliteTable('users', {
   avatarUrl: text('avatar_url'),
   teamId: text('team_id').references(() => teams.id), // Single team membership
   role: text('role').notNull().default('member'), // 'owner' | 'admin' | 'member' | 'viewer'
-  selectedRepositoryId: text('selected_repository_id'),
+  selectedRepositoryId: text('selected_repository_id').references(() => repositories.id, { onDelete: 'set null' }),
   emailVerified: integer('email_verified', { mode: 'boolean' }).default(false),
   createdAt: integer('created_at', { mode: 'timestamp' }),
   updatedAt: integer('updated_at', { mode: 'timestamp' }),
@@ -1183,9 +1183,10 @@ export type NewDefaultSetupStep = typeof defaultSetupSteps.$inferInsert;
 export const defaultTeardownSteps = sqliteTable('default_teardown_steps', {
   id: text('id').primaryKey(),
   repositoryId: text('repository_id').references(() => repositories.id, { onDelete: 'cascade' }).notNull(),
-  stepType: text('step_type').notNull(), // 'test' | 'script'
+  stepType: text('step_type').notNull(), // 'test' | 'script' | 'storage_state'
   testId: text('test_id').references(() => tests.id, { onDelete: 'cascade' }),
   scriptId: text('script_id').references(() => setupScripts.id, { onDelete: 'cascade' }),
+  storageStateId: text('storage_state_id').references(() => storageStates.id, { onDelete: 'cascade' }),
   orderIndex: integer('order_index').notNull().default(0),
   createdAt: integer('created_at', { mode: 'timestamp' }),
 });

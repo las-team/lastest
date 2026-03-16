@@ -386,14 +386,17 @@ export async function getDefaultTeardownSteps(repositoryId: string) {
       stepType: defaultTeardownSteps.stepType,
       testId: defaultTeardownSteps.testId,
       scriptId: defaultTeardownSteps.scriptId,
+      storageStateId: defaultTeardownSteps.storageStateId,
       orderIndex: defaultTeardownSteps.orderIndex,
       createdAt: defaultTeardownSteps.createdAt,
       testName: tests.name,
       scriptName: setupScripts.name,
+      storageStateName: storageStates.name,
     })
     .from(defaultTeardownSteps)
     .leftJoin(tests, eq(defaultTeardownSteps.testId, tests.id))
     .leftJoin(setupScripts, eq(defaultTeardownSteps.scriptId, setupScripts.id))
+    .leftJoin(storageStates, eq(defaultTeardownSteps.storageStateId, storageStates.id))
     .where(eq(defaultTeardownSteps.repositoryId, repositoryId))
     .orderBy(defaultTeardownSteps.orderIndex)
     .all();
@@ -423,7 +426,7 @@ export async function updateDefaultTeardownStepOrder(id: string, orderIndex: num
 
 export async function replaceDefaultTeardownSteps(
   repositoryId: string,
-  steps: Array<{ stepType: 'test' | 'script'; testId?: string | null; scriptId?: string | null }>
+  steps: Array<{ stepType: 'test' | 'script' | 'storage_state'; testId?: string | null; scriptId?: string | null; storageStateId?: string | null }>
 ) {
   await deleteAllDefaultTeardownSteps(repositoryId);
   const results = [];
@@ -434,6 +437,7 @@ export async function replaceDefaultTeardownSteps(
       stepType: step.stepType,
       testId: step.testId ?? null,
       scriptId: step.scriptId ?? null,
+      storageStateId: step.storageStateId ?? null,
       orderIndex: i,
     });
     results.push(result);
@@ -464,7 +468,8 @@ export async function getResolvedTeardownStepsForTest(test: { id: string; reposi
       stepType: s.stepType as 'test' | 'script' | 'storage_state',
       testId: s.testId,
       scriptId: s.scriptId,
-      name: s.testName || s.scriptName || 'Unknown',
+      storageStateId: s.storageStateId,
+      name: s.testName || s.scriptName || s.storageStateName || 'Unknown',
     }));
 
   const extras: Array<{
@@ -473,6 +478,7 @@ export async function getResolvedTeardownStepsForTest(test: { id: string; reposi
     stepType: 'test' | 'script' | 'storage_state';
     testId: string | null | undefined;
     scriptId: string | null | undefined;
+    storageStateId?: string | null | undefined;
     name: string;
   }> = [];
 
@@ -486,6 +492,10 @@ export async function getResolvedTeardownStepsForTest(test: { id: string; reposi
       } else if (step.stepType === 'script' && step.scriptId) {
         const s = await getSetupScript(step.scriptId);
         name = s?.name || 'Deleted script';
+      } else if (step.stepType === 'storage_state' && (step as Record<string, unknown>).storageStateId) {
+        const { getStorageState } = await import('./storage-states');
+        const ss = await getStorageState((step as Record<string, unknown>).storageStateId as string);
+        name = ss?.name || 'Deleted storage state';
       }
       extras.push({
         source: 'extra',
@@ -493,6 +503,7 @@ export async function getResolvedTeardownStepsForTest(test: { id: string; reposi
         stepType: step.stepType,
         testId: step.testId,
         scriptId: step.scriptId,
+        storageStateId: (step as Record<string, unknown>).storageStateId as string | null | undefined,
         name,
       });
     }

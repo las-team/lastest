@@ -145,9 +145,13 @@ export async function getSelectedRepository(userId?: string, teamId?: string) {
     if (team?.selectedRepositoryId) {
       const repo = await getRepository(team.selectedRepositoryId);
       if (repo) {
-        // Migrate to user record
+        // Migrate to user record (best-effort, don't fail the read)
         if (userId) {
-          await db.update(users).set({ selectedRepositoryId: team.selectedRepositoryId, updatedAt: new Date() }).where(eq(users.id, userId));
+          try {
+            await db.update(users).set({ selectedRepositoryId: team.selectedRepositoryId, updatedAt: new Date() }).where(eq(users.id, userId));
+          } catch (e) {
+            console.warn('[getSelectedRepository] Failed to migrate team selection to user:', e);
+          }
         }
         return repo;
       }
@@ -157,7 +161,11 @@ export async function getSelectedRepository(userId?: string, teamId?: string) {
     const account = await getGithubAccountByTeam(teamId);
     if (account?.selectedRepositoryId) {
       if (userId) {
-        await db.update(users).set({ selectedRepositoryId: account.selectedRepositoryId, updatedAt: new Date() }).where(eq(users.id, userId));
+        try {
+          await db.update(users).set({ selectedRepositoryId: account.selectedRepositoryId, updatedAt: new Date() }).where(eq(users.id, userId));
+        } catch (e) {
+          console.warn('[getSelectedRepository] Failed to migrate account selection to user:', e);
+        }
       }
       return (await getRepository(account.selectedRepositoryId)) || null;
     }

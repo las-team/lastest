@@ -26,7 +26,10 @@ export async function saveStorageState(repositoryId: string | null, name: string
 }
 
 export async function removeStorageState(id: string) {
-  await requireTeamAccess();
+  const state = await getStorageState(id);
+  if (!state) throw new Error('Storage state not found');
+  if (state.repositoryId) await requireRepoAccess(state.repositoryId);
+  else await requireTeamAccess();
   await deleteStorageState(id);
   revalidatePath('/settings');
 }

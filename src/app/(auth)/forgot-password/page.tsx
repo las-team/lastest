@@ -16,13 +16,18 @@ export default function ForgotPasswordPage() {
     e.preventDefault();
     setLoading(true);
 
-    await authClient.requestPasswordReset({
-      email,
-      redirectTo: '/reset-password',
-    });
-
-    setSubmitted(true);
-    setLoading(false);
+    try {
+      await authClient.requestPasswordReset({
+        email,
+        redirectTo: '/reset-password',
+      });
+      setSubmitted(true);
+    } catch {
+      // Show success regardless to prevent email enumeration
+      setSubmitted(true);
+    } finally {
+      setLoading(false);
+    }
   }
 
   return (

@@ -25,16 +25,14 @@ export async function createStorageState(data: {
     originCount = Array.isArray(parsed.origins) ? parsed.origins.length : 0;
   } catch {}
 
-  const id = crypto.randomUUID();
-  await db.insert(storageStates).values({
-    id,
+  const rows = await db.insert(storageStates).values({
     repositoryId: data.repositoryId,
     name: data.name,
     storageStateJson: data.storageStateJson,
     cookieCount,
     originCount,
-  });
-  return { id };
+  }).returning();
+  return rows[0];
 }
 
 export async function deleteStorageState(id: string) {

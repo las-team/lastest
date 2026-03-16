@@ -64,20 +64,24 @@ export function DebugClient({ test, repositoryId }: DebugClientProps) {
 
   const isRemote = executionTarget !== 'local';
 
+  // Track whether initial mount has completed to avoid double-start from hydration
+  const hasMountedRef = useRef(false);
+
   // Start session on mount or when execution target changes (wait for hydration)
   useEffect(() => {
     if (!isRunnerHydrated) return;
 
     let cancelled = false;
     async function init() {
-      // Stop any existing session
+      // Stop any existing session (only on target change after initial mount)
       const prevSessionId = sessionIdRef.current;
-      if (prevSessionId) {
+      if (prevSessionId && hasMountedRef.current) {
         await stopDebugSession(prevSessionId).catch(() => {});
         if (cancelled) return;
         setSessionId(null);
         setState(null);
       }
+      hasMountedRef.current = true;
       const result = await startDebugSession(test.id, repositoryId, executionTarget === 'local' ? null : executionTarget);
       if (cancelled) return;
       if (result.error) {

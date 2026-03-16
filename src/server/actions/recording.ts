@@ -335,8 +335,15 @@ export async function flagDownload(repositoryId?: string | null): Promise<{ succ
   return { success };
 }
 
-export async function togglePauseRecording(repositoryId?: string | null): Promise<{ paused: boolean }> {
+export async function togglePauseRecording(repositoryId?: string | null): Promise<{ paused: boolean; error?: string }> {
   await requireTeamAccess();
+
+  // Check for remote recording session — pause is not supported remotely
+  const remoteSession = getRemoteRecordingSession(repositoryId);
+  if (remoteSession?.isRecording) {
+    return { paused: false, error: 'Pause is not supported for remote recording sessions' };
+  }
+
   const recorder = getRecorder(repositoryId);
   if (recorder.isPaused()) {
     recorder.resumeRecording();

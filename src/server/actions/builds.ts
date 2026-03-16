@@ -592,6 +592,7 @@ async function runBuildAsync(
           if (ss) {
             setupContext.storageState = ss.storageStateJson;
             console.log(`[build] Pre-loaded storage state "${ss.name}" for setup context`);
+            break; // Use first matching storage state
           }
         }
       }

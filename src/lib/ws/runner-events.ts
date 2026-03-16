@@ -86,6 +86,12 @@ export function waitForCommandQueued(
   runnerId: string,
   timeoutMs: number,
 ): Promise<boolean> {
+  // Abort any existing waiter for this runner before registering a new one
+  const existingWaiter = commandWaiters.get(runnerId);
+  if (existingWaiter) {
+    existingWaiter(); // resolve previous waiter as notified
+  }
+
   return new Promise<boolean>((resolve) => {
     let settled = false;
     const settle = (value: boolean) => {
