@@ -143,6 +143,28 @@ export async function updateRunnerName(runnerId: string, name: string): Promise<
 }
 
 /**
+ * Regenerate runner token (internal use — no auth check, caller must verify permissions).
+ * Returns the new plain token.
+ */
+export async function regenerateRunnerTokenInternal(runnerId: string, teamId: string): Promise<{ token: string } | { error: string }> {
+  const runner = await db
+    .select()
+    .from(runners)
+    .where(and(eq(runners.id, runnerId), eq(runners.teamId, teamId)))
+    .get();
+
+  if (!runner) {
+    return { error: 'Runner not found' };
+  }
+
+  const token = generateRunnerToken();
+  const tokenHash = hashToken(token);
+
+  await db.update(runners).set({ tokenHash }).where(eq(runners.id, runnerId));
+  return { token };
+}
+
+/**
  * Regenerate runner token (admin only)
  * Returns the new plain token (only shown once)
  */

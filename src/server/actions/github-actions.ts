@@ -5,7 +5,7 @@ import * as queries from '@/lib/db/queries';
 import type { GithubActionMode, GithubActionTriggerEvent } from '@/lib/db/schema';
 import { generateWorkflowYaml } from '@/lib/github/workflow-yaml';
 import { getWorkflowFileSha, upsertWorkflowFile, setRepoSecret } from '@/lib/github/actions';
-import { createRunnerInternal } from '@/server/actions/runners';
+import { createRunnerInternal, regenerateRunnerTokenInternal } from '@/server/actions/runners';
 import { revalidatePath } from 'next/cache';
 
 export async function getGithubActionConfigsAction() {
@@ -63,11 +63,7 @@ export async function deleteGithubActionConfigAction(id: string) {
 
 export async function deployWorkflowToGithub(
   configId: string,
-  opts: {
-    setSecrets?: boolean;
-    runnerToken?: string;
-    lastest2Url?: string;
-  },
+  _opts?: Record<string, unknown>,
 ) {
   const session = await requireTeamAdmin();
   const config = await queries.getGithubActionConfig(configId, session.team.id);
@@ -143,28 +139,29 @@ export async function deployWorkflowToGithub(
       lastest2Url,
     );
     results.urlSecret = true;
-  } else if (opts.setSecrets) {
-    // Persistent mode: use user-provided values
-    if (opts.runnerToken) {
-      await setRepoSecret(
-        ghAccount.accessToken,
-        config.repositoryOwner,
-        config.repositoryName,
-        'LASTEST2_TOKEN',
-        opts.runnerToken,
-      );
-      results.tokenSecret = true;
-    }
-    if (opts.lastest2Url) {
-      await setRepoSecret(
-        ghAccount.accessToken,
-        config.repositoryOwner,
-        config.repositoryName,
-        'LASTEST2_URL',
-        opts.lastest2Url,
-      );
-      results.urlSecret = true;
-    }
+  } else if (config.runnerId) {
+    // Persistent mode with assigned runner: regenerate token and auto-set secrets
+    const regen = await regenerateRunnerTokenInternal(config.runnerId, session.team.id);
+    if ('error' in regen) throw new Error(`Failed to regenerate runner token: ${regen.error}`);
+
+    await setRepoSecret(
+      ghAccount.accessToken,
+      config.repositoryOwner,
+      config.repositoryName,
+      'LASTEST2_TOKEN',
+      regen.token,
+    );
+    results.tokenSecret = true;
+
+    const lastest2Url = process.env.NEXT_PUBLIC_APP_URL || process.env.BETTER_AUTH_BASE_URL || 'http://localhost:3000';
+    await setRepoSecret(
+      ghAccount.accessToken,
+      config.repositoryOwner,
+      config.repositoryName,
+      'LASTEST2_URL',
+      lastest2Url,
+    );
+    results.urlSecret = true;
   }
 
   // Mark as deployed
