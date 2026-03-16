@@ -101,11 +101,15 @@ export function BrowserViewer({ streamUrl, initialViewport, className, expiresAt
     const connect = (attempt: number) => {
       let wsUrl = streamUrl;
       if (streamUrl.startsWith('ws://') || streamUrl.startsWith('wss://')) {
-        // Connect directly to the EB WebSocket stream.
-        // Next.js App Router cannot proxy WebSocket upgrades, so the previous
-        // /api/embedded/stream/ws proxy path never worked. Direct connection
-        // works for same-network deployments (localhost dev, LAN homeserver).
-        wsUrl = streamUrl;
+        if (window.location.protocol === 'https:') {
+          // On HTTPS pages, direct ws:// is blocked by mixed-content policy.
+          // Route through the ws-proxy-preload.js proxy via the origin.
+          const url = new URL(streamUrl);
+          wsUrl = `wss://${window.location.host}/api/embedded/stream/ws?target=${url.hostname}:${url.port}`;
+        } else {
+          // HTTP (local dev) — connect directly
+          wsUrl = streamUrl;
+        }
       } else if (streamUrl.startsWith('/')) {
         // Relative path — construct full WebSocket URL from page origin
         const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
