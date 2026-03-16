@@ -17,6 +17,8 @@ jobs:
           LASTEST2_URL: ${{ secrets.LASTEST2_URL }}
         run: |
           npx @lastest/runner trigger \
+            -t "$LASTEST2_TOKEN" \
+            -s "$LASTEST2_URL" \
             --repo "dexilion-team/lastest2" \
             --branch "${{ github.head_ref || github.ref_name }}" \
             --commit "${{ github.sha }}" \
