@@ -1,0 +1,39 @@
+Mode: replay
+Loading AI config...
+Provider: claude-cli
+Launching browser...
+Performing login...
+Auth failed: page.waitForURL: Timeout 10000ms exceeded.
+=========================== logs ===========================
+waiting for navigation until "load"
+============================================================
+Loaded 3 failed scenarios from DB
+Loaded 20 available routes for repo
+
+[replay:Clarification on which features you want tested fr] Generating (prev error: 404)...
+[replay:Clarification on which features you want tested fr] 525 chars
+[replay:Clarification on which features you want tested fr] Running...
+[replay:Clarification on which features you want tested fr] PASSED
+
+[replay:Test Creation & Recording: /tests/import-spec] Generating (prev error: 404)...
+[replay:Test Creation & Recording: /tests/import-spec] 927 chars
+[replay:Test Creation & Recording: /tests/import-spec] Running...
+[replay:Test Creation & Recording: /tests/import-spec] FAILED: Expected URL "/\/tests/" but got "http://localhost:3000/login"
+
+[replay:Test Creation & Recording: /tests/generate] Generating (prev error: 404)...
+[replay:Test Creation & Recording: /tests/generate] 873 chars
+[replay:Test Creation & Recording: /tests/generate] Running...
+[replay:Test Creation & Recording: /tests/generate] FAILED: Expected URL "/\/tests/" but got "http://localhost:3000/login"
+---
+mode:          replay
+pass_rate:     0.333333
+passed:        1
+failed:        2
+total:         3
+syntax_errors: 0
+common_errors: assertion:2
+duration_s:    46.6
+---
+PASS Clarification on which features you want tested fr (9.2s)
+FAIL Test Creation & Recording: /tests/import-spec (13.1s) | Expected URL "/\/tests/" but got "http://localhost:3000/login"
+FAIL Test Creation & Recording: /tests/generate (13.8s) | Expected URL "/\/tests/" but got "http://localhost:3000/login"

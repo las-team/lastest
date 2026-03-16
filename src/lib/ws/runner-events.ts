@@ -62,3 +62,58 @@ export function emitRunnerStatusChange(event: RunnerStatusEvent): void {
 export function getSubscriberCount(): number {
   return listeners.size;
 }
+
+// ============================================
+// Command-queued long-poll primitives
+// ============================================
+
+type CommandWaiter = () => void;
+
+const globalCommandWaiters = globalThis as typeof globalThis & {
+  __runnerCommandWaiters?: Map<string, CommandWaiter>;
+};
+if (!globalCommandWaiters.__runnerCommandWaiters) {
+  globalCommandWaiters.__runnerCommandWaiters = new Map<string, CommandWaiter>();
+}
+const commandWaiters = globalCommandWaiters.__runnerCommandWaiters;
+
+/**
+ * Wait until a command is queued for this runner, or until timeout.
+ * Returns `true` if notified, `false` on timeout.
+ * Supports an optional AbortSignal for request cancellation.
+ */
+export function waitForCommandQueued(
+  runnerId: string,
+  timeoutMs: number,
+): Promise<boolean> {
+  // Abort any existing waiter for this runner before registering a new one
+  const existingWaiter = commandWaiters.get(runnerId);
+  if (existingWaiter) {
+    existingWaiter(); // resolve previous waiter as notified
+  }
+
+  return new Promise<boolean>((resolve) => {
+    let settled = false;
+    const settle = (value: boolean) => {
+      if (settled) return;
+      settled = true;
+      commandWaiters.delete(runnerId);
+      clearTimeout(timer);
+      resolve(value);
+    };
+
+    const timer = setTimeout(() => settle(false), timeoutMs);
+
+    commandWaiters.set(runnerId, () => settle(true));
+  });
+}
+
+/**
+ * Wake any pending long-poll waiter for this runner.
+ */
+export function notifyCommandQueued(runnerId: string): void {
+  const waiter = commandWaiters.get(runnerId);
+  if (waiter) {
+    waiter();
+  }
+}

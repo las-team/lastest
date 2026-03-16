@@ -82,7 +82,8 @@ export async function submitBugReport(data: {
     context: data.context,
     contentHash,
     screenshotUrl,
-  }).catch(() => {});
+    screenshotBuffer: data.screenshotBase64 ? Buffer.from(data.screenshotBase64, 'base64') : null,
+  }).catch((err) => console.error('[BugReport] forwarding failed:', err));
 
   return { success: true, reportId };
 }
@@ -95,6 +96,7 @@ async function forwardBugReport(data: {
   context: BugReportContext;
   contentHash: string;
   screenshotUrl: string | null;
+  screenshotBuffer: Buffer | null;
 }) {
   const promises: Promise<void>[] = [];
 
@@ -137,7 +139,7 @@ async function forwardBugReport(data: {
         appVersion: data.context.appVersion,
         gitHash: data.context.gitHash,
         reportId: data.reportId,
-        screenshotUrl: data.screenshotUrl,
+        screenshotBuffer: data.screenshotBuffer,
       }).then(() => {}),
     );
   }

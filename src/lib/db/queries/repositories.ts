@@ -6,6 +6,7 @@ import {
   gitlabAccounts,
   baselines,
   teams,
+  users,
 } from '../schema';
 import type {
   NewRepository,
@@ -128,25 +129,52 @@ export async function updateSelectedRepository(accountId: string, repositoryId: 
   await db.update(githubAccounts).set({ selectedRepositoryId: repositoryId }).where(eq(githubAccounts.id, accountId));
 }
 
-export async function getSelectedRepository(teamId?: string) {
-  if (!teamId) {
+export async function getSelectedRepository(userId?: string, teamId?: string) {
+  // 1. Per-user selection
+  if (userId) {
+    const user = await db.select().from(users).where(eq(users.id, userId)).get();
+    if (user?.selectedRepositoryId) {
+      const repo = await getRepository(user.selectedRepositoryId);
+      if (repo) return repo;
+    }
+  }
+
+  // 2. Fallback: team-level selection (lazy migration to user)
+  if (teamId) {
+    const team = await db.select().from(teams).where(eq(teams.id, teamId)).get();
+    if (team?.selectedRepositoryId) {
+      const repo = await getRepository(team.selectedRepositoryId);
+      if (repo) {
+        // Migrate to user record (best-effort, don't fail the read)
+        if (userId) {
+          try {
+            await db.update(users).set({ selectedRepositoryId: team.selectedRepositoryId, updatedAt: new Date() }).where(eq(users.id, userId));
+          } catch (e) {
+            console.warn('[getSelectedRepository] Failed to migrate team selection to user:', e);
+          }
+        }
+        return repo;
+      }
+    }
+
+    // 3. Fallback: GitHub/GitLab account selection
+    const account = await getGithubAccountByTeam(teamId);
+    if (account?.selectedRepositoryId) {
+      if (userId) {
+        try {
+          await db.update(users).set({ selectedRepositoryId: account.selectedRepositoryId, updatedAt: new Date() }).where(eq(users.id, userId));
+        } catch (e) {
+          console.warn('[getSelectedRepository] Failed to migrate account selection to user:', e);
+        }
+      }
+      return (await getRepository(account.selectedRepositoryId)) || null;
+    }
+  }
+
+  if (!userId && !teamId) {
     // Legacy fallback: read from GitHub account
     const account = await getGithubAccount();
     if (!account?.selectedRepositoryId) return null;
-    return (await getRepository(account.selectedRepositoryId)) || null;
-  }
-
-  // Read from teams.selectedRepositoryId
-  const team = await db.select().from(teams).where(eq(teams.id, teamId)).get();
-  if (team?.selectedRepositoryId) {
-    const repo = await getRepository(team.selectedRepositoryId);
-    if (repo) return repo;
-  }
-
-  // Lazy migration: check GitHub/GitLab account selection and copy to team
-  const account = await getGithubAccountByTeam(teamId);
-  if (account?.selectedRepositoryId) {
-    await db.update(teams).set({ selectedRepositoryId: account.selectedRepositoryId }).where(eq(teams.id, teamId));
     return (await getRepository(account.selectedRepositoryId)) || null;
   }
 

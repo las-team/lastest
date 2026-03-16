@@ -37,6 +37,7 @@ export class ScreencastManager {
   private frameCallback: FrameCallback | null = null;
   private width: number;
   private height: number;
+  private ackFailCount = 0;
 
   constructor(
     private options: ScreencastOptions = {}
@@ -46,11 +47,14 @@ export class ScreencastManager {
   }
 
   async start(page: Page, onFrame: FrameCallback): Promise<void> {
+    // If already running, stop first (prevents "already running" deadlock)
     if (this.running) {
-      throw new Error('Screencast already running');
+      console.warn('[Screencast] Already running — stopping before restart');
+      await this.stop();
     }
 
     this.frameCallback = onFrame;
+    this.ackFailCount = 0;
     this.cdpSession = await page.context().newCDPSession(page);
     this.running = true;
 
@@ -69,7 +73,13 @@ export class ScreencastManager {
       this.cdpSession?.send('Page.screencastFrameAck', {
         sessionId: frame.sessionId,
       }).catch(() => {
-        // Ignore ack errors (session may be closing)
+        // Track consecutive ack failures — if CDP session is broken,
+        // Chrome stops sending frames and the stream silently dies
+        this.ackFailCount++;
+        if (this.ackFailCount >= 3) {
+          console.error('[Screencast] Multiple frame ack failures — CDP session likely broken');
+          this.running = false;
+        }
       });
     });
 

@@ -19,6 +19,7 @@ interface StreamClient {
   ws: WebSocket;
   id: string;
   connectedAt: number;
+  alive: boolean;
 }
 
 export class StreamServer {
@@ -27,6 +28,7 @@ export class StreamServer {
   private screencast: ScreencastManager | null = null;
   private inputHandler: InputHandler | null = null;
   private authToken?: string;
+  private pingInterval: ReturnType<typeof setInterval> | null = null;
 
   /** Callback for navigate requests from stream clients */
   onNavigate?: (url: string) => Promise<void>;
@@ -60,7 +62,7 @@ export class StreamServer {
 
     this.wss.on('connection', (ws: WebSocket, req: IncomingMessage) => {
       const clientId = crypto.randomUUID();
-      const client: StreamClient = { ws, id: clientId, connectedAt: Date.now() };
+      const client: StreamClient = { ws, id: clientId, connectedAt: Date.now(), alive: true };
       this.clients.set(clientId, client);
 
       console.log(`[StreamServer] Client connected: ${clientId} (total: ${this.clients.size})`);
@@ -73,6 +75,11 @@ export class StreamServer {
         payload: {
           status: 'connected',
         },
+      });
+
+      // Mark alive on pong response
+      ws.on('pong', () => {
+        client.alive = true;
       });
 
       ws.on('message', (data: Buffer) => {
@@ -94,6 +101,20 @@ export class StreamServer {
         this.clients.delete(clientId);
       });
     });
+
+    // Ping all clients every 30s to detect dead connections
+    this.pingInterval = setInterval(() => {
+      for (const [clientId, client] of this.clients) {
+        if (!client.alive) {
+          console.log(`[StreamServer] Terminating unresponsive client: ${clientId}`);
+          client.ws.terminate();
+          this.clients.delete(clientId);
+          continue;
+        }
+        client.alive = false;
+        client.ws.ping();
+      }
+    }, 30_000);
 
     console.log(`[StreamServer] Listening on port ${this.options.port}`);
   }
@@ -125,12 +146,12 @@ export class StreamServer {
   }
 
   /** Broadcast a status update to all connected clients */
-  broadcastStatus(status: string, currentUrl?: string, viewport?: { width: number; height: number }): void {
+  broadcastStatus(status: string, currentUrl?: string, viewport?: { width: number; height: number }, fileChooserPending?: boolean): void {
     const message = JSON.stringify({
       type: 'stream:status',
       id: crypto.randomUUID(),
       timestamp: Date.now(),
-      payload: { status, currentUrl, viewport },
+      payload: { status, currentUrl, viewport, fileChooserPending },
     });
 
     for (const [clientId, client] of this.clients) {
@@ -188,6 +209,12 @@ export class StreamServer {
   }
 
   async stop(): Promise<void> {
+    // Stop ping interval
+    if (this.pingInterval) {
+      clearInterval(this.pingInterval);
+      this.pingInterval = null;
+    }
+
     // Close all clients
     for (const [, client] of this.clients) {
       client.ws.close(1001, 'Server shutting down');

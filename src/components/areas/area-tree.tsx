@@ -45,7 +45,7 @@ export interface SuiteItem {
 
 interface AreaTreeProps {
   tree: FunctionalAreaWithChildren[];
-  uncategorizedTests: { id: string; name: string; latestStatus: string | null; isPlaceholder?: boolean }[];
+  uncategorizedTests: { id: string; name: string; description: string | null; latestStatus: string | null; isPlaceholder?: boolean }[];
   unsortedSuites: SuiteItem[];
   selection: TreeSelection | null;
   selectedAreaIds: Set<string>;
@@ -183,6 +183,10 @@ function AreaNode({
   return (
     <div>
       <div
+        role="treeitem"
+        aria-label={area.name}
+        aria-selected={isSelected}
+        aria-expanded={hasChildren ? isExpanded : undefined}
         className={cn(
           'group flex items-center gap-1 py-1 px-2 rounded cursor-pointer hover:bg-muted',
           isSelected && 'bg-primary/10 hover:bg-primary/15',
@@ -302,7 +306,7 @@ function AreaNode({
 }
 
 interface TestNodeProps {
-  test: { id: string; name: string; latestStatus: string | null; isPlaceholder?: boolean };
+  test: { id: string; name: string; description: string | null; latestStatus: string | null; isPlaceholder?: boolean };
   depth: number;
   selection: TreeSelection | null;
   onSelect: (selection: TreeSelection | null) => void;
@@ -317,10 +321,15 @@ function TestNode({ test, depth, selection, onSelect, onDeleteTest }: TestNodePr
     e.dataTransfer.effectAllowed = 'move';
   };
 
+  const descriptionLines = test.description?.split('\n').filter(Boolean) || [];
+
   return (
     <div
+      role="treeitem"
+      aria-label={test.name}
+      aria-selected={isSelected}
       className={cn(
-        'group/test flex items-center gap-2 py-1 px-2 rounded cursor-pointer hover:bg-muted',
+        'group/test py-1 px-2 rounded cursor-pointer hover:bg-muted',
         isSelected && 'bg-primary/10 hover:bg-primary/15'
       )}
       style={{ paddingLeft: `${depth * 16 + 8}px` }}
@@ -328,34 +337,43 @@ function TestNode({ test, depth, selection, onSelect, onDeleteTest }: TestNodePr
       draggable
       onDragStart={handleDragStart}
     >
-      <GripVertical className="h-3 w-3 text-muted-foreground opacity-0 group-hover/test:opacity-100 cursor-grab" />
-      <StatusIcon status={test.latestStatus} />
-      <FileCode className={cn("h-4 w-4", test.isPlaceholder ? "text-amber-500" : "text-muted-foreground")} />
-      <span className="flex-1 truncate text-sm">
-        {test.name}
-        {test.isPlaceholder && <span className="text-xs text-muted-foreground ml-1">(placeholder)</span>}
-      </span>
-      {onDeleteTest && (
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild onClick={(e) => e.stopPropagation()}>
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-6 w-6 opacity-0 group-hover/test:opacity-100"
-            >
-              <MoreHorizontal className="h-4 w-4" />
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end">
-            <DropdownMenuItem
-              onClick={() => onDeleteTest(test.id)}
-              className="text-destructive focus:text-destructive"
-            >
-              <Trash2 className="h-4 w-4 mr-2" />
-              Delete
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
+      <div className="flex items-center gap-2">
+        <GripVertical className="h-3 w-3 text-muted-foreground opacity-0 group-hover/test:opacity-100 cursor-grab" />
+        <StatusIcon status={test.latestStatus} />
+        <FileCode className={cn("h-4 w-4 shrink-0", test.isPlaceholder ? "text-amber-500" : "text-muted-foreground")} />
+        <span className="flex-1 truncate text-sm">
+          {test.name}
+          {test.isPlaceholder && <span className="text-xs text-muted-foreground ml-1">(placeholder)</span>}
+        </span>
+        {onDeleteTest && (
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild onClick={(e) => e.stopPropagation()}>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-6 w-6 opacity-0 group-hover/test:opacity-100"
+              >
+                <MoreHorizontal className="h-4 w-4" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem
+                onClick={() => onDeleteTest(test.id)}
+                className="text-destructive focus:text-destructive"
+              >
+                <Trash2 className="h-4 w-4 mr-2" />
+                Delete
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        )}
+      </div>
+      {descriptionLines.length > 0 && (
+        <ul className="ml-[52px] mt-0.5 space-y-0 text-xs text-muted-foreground list-disc list-inside">
+          {descriptionLines.map((line, i) => (
+            <li key={i} className="truncate">{line}</li>
+          ))}
+        </ul>
       )}
     </div>
   );
@@ -378,6 +396,9 @@ function SuiteNode({ suite, depth, selection, onSelect }: SuiteNodeProps) {
 
   return (
     <div
+      role="treeitem"
+      aria-label={suite.name}
+      aria-selected={isSelected}
       className={cn(
         'group flex items-center gap-2 py-1 px-2 rounded cursor-pointer hover:bg-muted',
         isSelected && 'bg-primary/10 hover:bg-primary/15'
@@ -510,7 +531,7 @@ export function AreaTree({
       </div>
 
       <ScrollArea className="flex-1 overflow-hidden" type="auto">
-        <div className="p-2 overflow-x-auto">
+        <div className="p-2 overflow-x-auto" role="tree">
           {/* Areas */}
           {tree.map((area) => (
             <AreaNode

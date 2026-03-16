@@ -11,7 +11,8 @@ export default async function RecordPage({ searchParams }: RecordPageProps) {
   const params = await searchParams;
   const session = await getCurrentSession();
   const teamId = session?.team?.id;
-  const selectedRepo = teamId ? await getSelectedRepository(teamId) : null;
+  const userId = session?.user?.id;
+  const selectedRepo = teamId ? await getSelectedRepository(userId, teamId) : null;
   const areas = selectedRepo ? await getFunctionalAreasByRepo(selectedRepo.id) : [];
   const settings = await getPlaywrightSettings(selectedRepo?.id);
   const envConfig = await getEnvironmentConfig(selectedRepo?.id);

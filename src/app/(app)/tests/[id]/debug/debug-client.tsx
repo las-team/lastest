@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
+import { usePreferredRunner } from '@/hooks/use-preferred-runner';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -23,11 +24,15 @@ import {
   Globe,
   Terminal,
   Circle,
+  Tv2,
 } from 'lucide-react';
 import { startDebugSession, getDebugState, sendDebugCommand, stopDebugSession, flushDebugTrace } from '@/server/actions/debug';
 import { toast } from 'sonner';
 import type { Test } from '@/lib/db/schema';
 import type { DebugState, DebugNetworkEntry, DebugConsoleEntry } from '@/lib/playwright/debug-runner';
+import { BrowserViewer } from '@/components/embedded-browser/browser-viewer-client';
+import { ExecutionTargetSelector } from '@/components/execution/execution-target-selector';
+import { getStreamUrlForRunner } from '@/server/actions/embedded-sessions';
 
 interface DebugClientProps {
   test: Test;
@@ -41,17 +46,43 @@ export function DebugClient({ test, repositoryId }: DebugClientProps) {
   const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const stepListRef = useRef<HTMLDivElement>(null);
 
+  // Runner selector + live view state
+  const [executionTarget, setExecutionTarget, isRunnerHydrated] = usePreferredRunner();
+  const [streamUrl, setStreamUrl] = useState<string | null>(null);
+
   // Editable code state
   const [localCode, setLocalCode] = useState<string>(test.code || '');
   const lastSentCodeRef = useRef<string>(test.code || '');
   const codeVersionRef = useRef<number>(0);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Start session on mount
+  // Track sessionId in a ref so cleanup/effect can access latest value
+  const sessionIdRef = useRef<string | null>(null);
   useEffect(() => {
+    sessionIdRef.current = sessionId;
+  }, [sessionId]);
+
+  const isRemote = executionTarget !== 'local';
+
+  // Track whether initial mount has completed to avoid double-start from hydration
+  const hasMountedRef = useRef(false);
+
+  // Start session on mount or when execution target changes (wait for hydration)
+  useEffect(() => {
+    if (!isRunnerHydrated) return;
+
     let cancelled = false;
     async function init() {
-      const result = await startDebugSession(test.id, repositoryId);
+      // Stop any existing session (only on target change after initial mount)
+      const prevSessionId = sessionIdRef.current;
+      if (prevSessionId && hasMountedRef.current) {
+        await stopDebugSession(prevSessionId).catch(() => {});
+        if (cancelled) return;
+        setSessionId(null);
+        setState(null);
+      }
+      hasMountedRef.current = true;
+      const result = await startDebugSession(test.id, repositoryId, executionTarget === 'local' ? null : executionTarget);
       if (cancelled) return;
       if (result.error) {
         toast.error(result.error);
@@ -63,7 +94,7 @@ export function DebugClient({ test, repositoryId }: DebugClientProps) {
     return () => {
       cancelled = true;
     };
-  }, [test.id, repositoryId]);
+  }, [test.id, repositoryId, executionTarget, isRunnerHydrated]);
 
   // Poll for state
   useEffect(() => {
@@ -97,11 +128,11 @@ export function DebugClient({ test, repositoryId }: DebugClientProps) {
   // Cleanup on unmount
   useEffect(() => {
     return () => {
-      if (sessionId) {
-        stopDebugSession(sessionId).catch(() => {});
+      if (sessionIdRef.current) {
+        stopDebugSession(sessionIdRef.current).catch(() => {});
       }
     };
-  }, [sessionId]);
+  }, []);
 
   // Auto-scroll step list to current step
   useEffect(() => {
@@ -181,6 +212,35 @@ export function DebugClient({ test, repositoryId }: DebugClientProps) {
     };
   }, [sendCmd, handleStop]);
 
+  // Resolve stream URL when execution target changes
+  useEffect(() => {
+    let cancelled = false;
+    if (executionTarget === 'local') {
+      // Use async to avoid synchronous setState in effect
+      Promise.resolve().then(() => { if (!cancelled) setStreamUrl(null); });
+    } else {
+      (async () => {
+        try {
+          const streamInfo = await getStreamUrlForRunner(executionTarget);
+          if (cancelled) return;
+          if (streamInfo?.streamUrl) {
+            const token = streamInfo.streamAuthToken;
+            setStreamUrl(
+              token
+                ? `${streamInfo.streamUrl}?token=${encodeURIComponent(token)}`
+                : streamInfo.streamUrl
+            );
+          } else {
+            setStreamUrl(null);
+          }
+        } catch {
+          if (!cancelled) setStreamUrl(null);
+        }
+      })();
+    }
+    return () => { cancelled = true; };
+  }, [executionTarget]);
+
   const isPaused = state?.status === 'paused';
   const isError = state?.status === 'error';
   const isCompleted = state?.status === 'completed';
@@ -209,6 +269,13 @@ export function DebugClient({ test, repositoryId }: DebugClientProps) {
             <ArrowLeft className="h-4 w-4" />
           </Button>
           <h1 className="text-sm font-medium">Debug: {test.name}</h1>
+          <ExecutionTargetSelector
+            value={executionTarget}
+            onChange={setExecutionTarget}
+            capabilityFilter="run"
+            size="sm"
+            disabled={!!sessionId}
+          />
           <Badge
             variant="secondary"
             className={`text-white ${statusColor[state?.status || 'initializing']}`}
@@ -268,8 +335,8 @@ export function DebugClient({ test, repositoryId }: DebugClientProps) {
             <Square className="h-4 w-4" />
           </Button>
           <div className="w-px h-5 bg-border mx-1" />
-          {/* Record toggle */}
-          {isRecording ? (
+          {/* Record toggle (local only) */}
+          {!isRemote && (isRecording ? (
             <Button
               variant="destructive"
               size="sm"
@@ -290,29 +357,31 @@ export function DebugClient({ test, repositoryId }: DebugClientProps) {
               <Circle className="h-3 w-3 mr-1 text-red-500 fill-red-500" />
               Record
             </Button>
+          ))}
+          {!isRemote && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={async () => {
+                if (!sessionId) return;
+                const result = await flushDebugTrace(sessionId);
+                const traceUrl = result.url || state?.traceUrl;
+                if (traceUrl) {
+                  window.open(
+                    `https://trace.playwright.dev/?trace=${window.location.origin}${traceUrl}`,
+                    '_blank'
+                  );
+                } else {
+                  toast.error('No trace available');
+                }
+              }}
+              disabled={!sessionId}
+              title="Export Playwright Trace"
+            >
+              <FileSearch className="h-4 w-4 mr-1" />
+              Trace
+            </Button>
           )}
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={async () => {
-              if (!sessionId) return;
-              const result = await flushDebugTrace(sessionId);
-              const traceUrl = result.url || state?.traceUrl;
-              if (traceUrl) {
-                window.open(
-                  `https://trace.playwright.dev/?trace=${window.location.origin}${traceUrl}`,
-                  '_blank'
-                );
-              } else {
-                toast.error('No trace available');
-              }
-            }}
-            disabled={!sessionId}
-            title="Export Playwright Trace"
-          >
-            <FileSearch className="h-4 w-4 mr-1" />
-            Trace
-          </Button>
         </div>
       </div>
 
@@ -326,41 +395,60 @@ export function DebugClient({ test, repositoryId }: DebugClientProps) {
         </div>
       ) : (
         <ResizablePanelGroup orientation="horizontal" className="flex-1 min-h-0">
-          {/* Left Panel — Code */}
+          {/* Left Panel — Code / Live View */}
           <ResizablePanel defaultSize={60} minSize={30}>
-            <div className="flex flex-col h-full">
-              <div className="flex items-center justify-between px-3 py-1.5 border-b bg-muted/50">
-                <span className="text-xs font-medium text-muted-foreground">Test Code</span>
+            <Tabs defaultValue="code" className="flex flex-col h-full gap-0">
+              <div className="px-2 py-1.5 border-b bg-muted/50">
+                <TabsList className="h-7">
+                  <TabsTrigger value="code" className="text-xs px-2 py-0.5 h-6">
+                    Code
+                  </TabsTrigger>
+                  {streamUrl && (
+                    <TabsTrigger value="liveview" className="text-xs px-2 py-0.5 h-6">
+                      <Tv2 className="h-3 w-3 mr-1" />
+                      Live View
+                    </TabsTrigger>
+                  )}
+                </TabsList>
               </div>
-              {/* Past-step edit warning */}
-              {hasPastStepWarning && (
-                <div className="flex items-center gap-2 px-3 py-1.5 bg-yellow-500/10 border-b border-yellow-500/20">
-                  <p className="text-xs text-yellow-600 flex-1">Code changed at an already-executed step. Step back to apply changes.</p>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="h-6 text-xs border-yellow-500/30 text-yellow-600"
-                    onClick={() => sendCmd({ type: 'step_back' })}
-                  >
-                    <SkipBack className="h-3 w-3 mr-1" />
-                    Step Back
-                  </Button>
-                </div>
+
+              <TabsContent value="code" className="flex flex-col flex-1 min-h-0 mt-0">
+                {/* Past-step edit warning */}
+                {hasPastStepWarning && (
+                  <div className="flex items-center gap-2 px-3 py-1.5 bg-yellow-500/10 border-b border-yellow-500/20">
+                    <p className="text-xs text-yellow-600 flex-1">Code changed at an already-executed step. Step back to apply changes.</p>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="h-6 text-xs border-yellow-500/30 text-yellow-600"
+                      onClick={() => sendCmd({ type: 'step_back' })}
+                    >
+                      <SkipBack className="h-3 w-3 mr-1" />
+                      Step Back
+                    </Button>
+                  </div>
+                )}
+                <EditableCodeDisplay
+                  code={localCode}
+                  steps={state?.steps || []}
+                  currentStepIndex={state?.currentStepIndex ?? -1}
+                  stepResults={state?.stepResults || []}
+                  onCodeChange={handleCodeChange}
+                  onClickStep={(idx) => {
+                    if (isPaused && idx > (state?.currentStepIndex ?? -1)) {
+                      sendCmd({ type: 'run_to_step', stepIndex: idx });
+                    }
+                  }}
+                  disabled={isBusy}
+                />
+              </TabsContent>
+
+              {streamUrl && (
+                <TabsContent value="liveview" className="flex flex-col flex-1 min-h-0 mt-0">
+                  <BrowserViewer streamUrl={streamUrl} className="h-full" />
+                </TabsContent>
               )}
-              <EditableCodeDisplay
-                code={localCode}
-                steps={state?.steps || []}
-                currentStepIndex={state?.currentStepIndex ?? -1}
-                stepResults={state?.stepResults || []}
-                onCodeChange={handleCodeChange}
-                onClickStep={(idx) => {
-                  if (isPaused && idx > (state?.currentStepIndex ?? -1)) {
-                    sendCmd({ type: 'run_to_step', stepIndex: idx });
-                  }
-                }}
-                disabled={isBusy}
-              />
-            </div>
+            </Tabs>
           </ResizablePanel>
 
           <ResizableHandle withHandle />
@@ -487,6 +575,7 @@ export function DebugClient({ test, repositoryId }: DebugClientProps) {
               <TabsContent value="console" className="flex flex-col flex-1 min-h-0 mt-0 overflow-hidden">
                 <ConsolePanel entries={state?.consoleEntries || []} />
               </TabsContent>
+
             </Tabs>
           </ResizablePanel>
         </ResizablePanelGroup>

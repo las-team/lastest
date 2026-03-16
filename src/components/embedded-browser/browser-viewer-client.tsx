@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState, useCallback } from 'react';
-import { Wifi, WifiOff, Loader2, RefreshCw } from 'lucide-react';
+import { Wifi, WifiOff, Loader2, RefreshCw, Upload } from 'lucide-react';
 import { BrowserToolbar } from '@/components/embedded-browser/browser-toolbar-client';
 import { Button } from '@/components/ui/button';
 import type { StreamMouseEvent, StreamKeyboardEvent } from '@/lib/ws/protocol';
@@ -10,6 +10,7 @@ type ConnectionStatus = 'connecting' | 'connected' | 'disconnected' | 'error' | 
 
 const MAX_RECONNECT_ATTEMPTS = 5;
 const RECONNECT_BASE_DELAY_MS = 1000;
+const FRAME_STALL_TIMEOUT_MS = 8000; // Reconnect if no frames for 8s while "connected"
 
 const SESSION_EXPIRY_WARN_MS = 5 * 60 * 1000; // Warn when <5 min remain
 
@@ -34,12 +35,15 @@ export function BrowserViewer({ streamUrl, initialViewport, className, expiresAt
   const [fps, setFps] = useState(0);
   const [reconnectAttempt, setReconnectAttempt] = useState(0);
   const [timeRemaining, setTimeRemaining] = useState<number | null>(null);
+  const [fileChooserPending, setFileChooserPending] = useState(false);
 
   // FPS counter refs — initialized in useEffect to avoid impure render calls
   const frameCountRef = useRef(0);
   const lastFpsUpdateRef = useRef(0);
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const intentionalCloseRef = useRef(false);
+  const lastFrameTimeRef = useRef(0);
+  const stallCheckRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // Session expiry countdown
   useEffect(() => {
@@ -97,12 +101,11 @@ export function BrowserViewer({ streamUrl, initialViewport, className, expiresAt
     const connect = (attempt: number) => {
       let wsUrl = streamUrl;
       if (streamUrl.startsWith('ws://') || streamUrl.startsWith('wss://')) {
-        // Always proxy through the app — handles K8s, Docker, and most deployments
-        const parsed = new URL(wsUrl);
-        const targetParam = encodeURIComponent(parsed.host);
-        const existingParams = parsed.search ? '&' + parsed.search.slice(1) : '';
-        const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-        wsUrl = `${proto}//${window.location.host}/api/embedded/stream/ws?target=${targetParam}${existingParams}`;
+        // Connect directly to the EB WebSocket stream.
+        // Next.js App Router cannot proxy WebSocket upgrades, so the previous
+        // /api/embedded/stream/ws proxy path never worked. Direct connection
+        // works for same-network deployments (localhost dev, LAN homeserver).
+        wsUrl = streamUrl;
       } else if (streamUrl.startsWith('/')) {
         // Relative path — construct full WebSocket URL from page origin
         const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -114,6 +117,22 @@ export function BrowserViewer({ streamUrl, initialViewport, className, expiresAt
       ws.onopen = () => {
         setConnectionStatus('connected');
         setReconnectAttempt(0);
+        lastFrameTimeRef.current = Date.now();
+
+        // Start frame stall detection — if no frames arrive for FRAME_STALL_TIMEOUT_MS,
+        // the CDP screencast likely died silently. Force reconnect to recover.
+        if (stallCheckRef.current) clearInterval(stallCheckRef.current);
+        stallCheckRef.current = setInterval(() => {
+          if (
+            lastFrameTimeRef.current > 0 &&
+            Date.now() - lastFrameTimeRef.current > FRAME_STALL_TIMEOUT_MS &&
+            wsRef.current?.readyState === WebSocket.OPEN
+          ) {
+            console.warn('[BrowserViewer] Frame stall detected — reconnecting');
+            wsRef.current?.close();
+          }
+        }, 3000);
+
         // Apply the initial viewport size to the remote browser
         ws.send(JSON.stringify({
           type: 'stream:session',
@@ -129,6 +148,9 @@ export function BrowserViewer({ streamUrl, initialViewport, className, expiresAt
             case 'stream:frame': {
               const { data, width, height } = message.payload;
               renderFrame(data, width, height);
+
+              // Reset stall timer on every frame
+              lastFrameTimeRef.current = Date.now();
 
               // Update FPS
               frameCountRef.current++;
@@ -148,6 +170,7 @@ export function BrowserViewer({ streamUrl, initialViewport, className, expiresAt
               if (message.payload.viewport) {
                 setViewport(message.payload.viewport);
               }
+              setFileChooserPending(message.payload.fileChooserPending ?? false);
               break;
             }
           }
@@ -158,6 +181,8 @@ export function BrowserViewer({ streamUrl, initialViewport, className, expiresAt
 
       ws.onclose = () => {
         wsRef.current = null;
+        if (stallCheckRef.current) { clearInterval(stallCheckRef.current); stallCheckRef.current = null; }
+        lastFrameTimeRef.current = 0;
         if (intentionalCloseRef.current) {
           setConnectionStatus('disconnected');
           return;
@@ -185,6 +210,7 @@ export function BrowserViewer({ streamUrl, initialViewport, className, expiresAt
 
     return () => {
       intentionalCloseRef.current = true;
+      if (stallCheckRef.current) { clearInterval(stallCheckRef.current); stallCheckRef.current = null; }
       if (reconnectTimerRef.current) {
         clearTimeout(reconnectTimerRef.current);
         reconnectTimerRef.current = null;
@@ -273,10 +299,47 @@ export function BrowserViewer({ streamUrl, initialViewport, className, expiresAt
     [sendWs]
   );
 
+  // File upload handler for embedded browser
+  const handleFileUpload = useCallback(() => {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.multiple = true;
+    input.onchange = async () => {
+      if (!input.files?.length) return;
+      const files: Array<{ name: string; data: string; mimeType: string }> = [];
+      for (const file of Array.from(input.files)) {
+        const buffer = await file.arrayBuffer();
+        const bytes = new Uint8Array(buffer);
+        let binary = '';
+        for (let i = 0; i < bytes.length; i++) {
+          binary += String.fromCharCode(bytes[i]);
+        }
+        files.push({ name: file.name, data: btoa(binary), mimeType: file.type || 'application/octet-stream' });
+      }
+      sendWs({ type: 'stream:input', payload: { type: 'file_upload' as const, files } });
+      setFileChooserPending(false);
+    };
+    input.click();
+  }, [sendWs]);
+
   // Keyboard event handlers
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLCanvasElement>) => {
       e.preventDefault();
+
+      // Intercept paste: read local clipboard and send as clipboard_paste event
+      if ((e.ctrlKey || e.metaKey) && e.key === 'v') {
+        navigator.clipboard.readText().then(text => {
+          if (text) {
+            sendWs({
+              type: 'stream:input',
+              payload: { type: 'clipboard_paste' as const, text },
+            });
+          }
+        }).catch(() => {});
+        return;
+      }
+
       sendWs({
         type: 'stream:input',
         payload: {
@@ -405,6 +468,14 @@ export function BrowserViewer({ streamUrl, initialViewport, className, expiresAt
                 </Button>
               </div>
             )}
+          </div>
+        )}
+
+        {fileChooserPending && (
+          <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-10 bg-background/90 border rounded-lg p-6 shadow-lg flex flex-col items-center gap-3">
+            <Upload className="h-8 w-8 text-muted-foreground" />
+            <p className="text-sm font-medium">File upload requested</p>
+            <Button onClick={handleFileUpload} size="sm">Choose Files</Button>
           </div>
         )}
 

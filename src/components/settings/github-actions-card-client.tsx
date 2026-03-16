@@ -1,9 +1,11 @@
 'use client';
 
 import { useState } from 'react';
-import { Github, Plus, AlertTriangle } from 'lucide-react';
+import { Github, Plus, AlertTriangle, Info } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { DiagramThumbnail } from '@/components/ui/diagram-thumbnail';
 import type { GithubActionConfig, Runner, Repository } from '@/lib/db/schema';
 import { ConfigList } from '@/components/settings/github-actions/config-list-client';
 import { AddConfigDialog } from '@/components/settings/github-actions/add-config-dialog-client';
@@ -33,6 +35,22 @@ export function GithubActionsCard({
           <CardTitle className="flex items-center gap-2">
             <Github className="w-5 h-5" />
             GitHub Actions
+            <Popover>
+              <PopoverTrigger asChild>
+                <button className="text-muted-foreground hover:text-foreground transition-colors">
+                  <Info className="w-4 h-4" />
+                </button>
+              </PopoverTrigger>
+              <PopoverContent side="bottom" align="start" className="w-auto p-3">
+                <p className="text-xs text-muted-foreground mb-2">Development & Review Flow</p>
+                <DiagramThumbnail
+                  src="/docs/development-flow.png"
+                  alt="Development & Review Flow — from code push to production with visual validation"
+                  width={480}
+                  height={120}
+                />
+              </PopoverContent>
+            </Popover>
           </CardTitle>
           <CardDescription>
             Automate visual testing in your CI/CD pipeline

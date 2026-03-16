@@ -17,7 +17,7 @@ import {
 import { saveAISettings, resetAISettings, testAIConnection } from '@/server/actions/ai-settings';
 import { DEFAULT_AI_SETTINGS } from '@/lib/db/schema';
 import type { AISettings, AIProvider, AgentSdkPermissionMode, AIDiffingProvider } from '@/lib/db/schema';
-import { Loader2, RotateCcw, Sparkles, CheckCircle2, XCircle, Zap, Bot, Eye, Server } from 'lucide-react';
+import { Loader2, RotateCcw, Sparkles, CheckCircle2, XCircle, Zap, Bot, Eye, Server, Brain, Cloud } from 'lucide-react';
 import { toast } from 'sonner';
 
 interface AISettingsCardProps {
@@ -31,6 +31,17 @@ const OPENROUTER_MODELS = [
   { value: 'anthropic/claude-3.5-sonnet', label: 'Claude 3.5 Sonnet' },
   { value: 'openai/gpt-4o', label: 'GPT-4o' },
   { value: 'google/gemini-2.0-flash-001', label: 'Gemini 2.0 Flash' },
+];
+
+const ANTHROPIC_MODELS = [
+  { value: 'claude-sonnet-4-5-20250929', label: 'Claude Sonnet 4.5' },
+  { value: 'claude-opus-4-20250514', label: 'Claude Opus 4' },
+];
+
+const OPENAI_MODELS = [
+  { value: 'gpt-4o', label: 'GPT-4o' },
+  { value: 'gpt-4o-mini', label: 'GPT-4o Mini' },
+  { value: 'o3', label: 'o3' },
 ];
 
 export function AISettingsCard({ settings, repositoryId }: AISettingsCardProps) {
@@ -55,6 +66,14 @@ export function AISettingsCard({ settings, repositoryId }: AISettingsCardProps) 
     settings.ollamaBaseUrl || DEFAULT_AI_SETTINGS.ollamaBaseUrl
   );
   const [ollamaModel, setOllamaModel] = useState(settings.ollamaModel || '');
+  const [anthropicApiKey, setAnthropicApiKey] = useState(settings.anthropicApiKey || '');
+  const [anthropicModel, setAnthropicModel] = useState(
+    settings.anthropicModel || DEFAULT_AI_SETTINGS.anthropicModel
+  );
+  const [openaiApiKey, setOpenaiApiKey] = useState(settings.openaiApiKey || '');
+  const [openaiModel, setOpenaiModel] = useState(
+    settings.openaiModel || DEFAULT_AI_SETTINGS.openaiModel
+  );
 
   // AI Diffing settings
   const [aiDiffingEnabled, setAiDiffingEnabled] = useState(settings.aiDiffingEnabled ?? false);
@@ -83,6 +102,10 @@ export function AISettingsCard({ settings, repositoryId }: AISettingsCardProps) 
     agentSdkWorkingDir: settings.agentSdkWorkingDir || '',
     ollamaBaseUrl: settings.ollamaBaseUrl || DEFAULT_AI_SETTINGS.ollamaBaseUrl,
     ollamaModel: settings.ollamaModel || '',
+    anthropicApiKey: settings.anthropicApiKey || '',
+    anthropicModel: settings.anthropicModel || DEFAULT_AI_SETTINGS.anthropicModel,
+    openaiApiKey: settings.openaiApiKey || '',
+    openaiModel: settings.openaiModel || DEFAULT_AI_SETTINGS.openaiModel,
     aiDiffingEnabled: settings.aiDiffingEnabled ?? false,
     aiDiffingProvider: (settings.aiDiffingProvider as AIDiffingProvider) || 'same-as-test-gen',
     aiDiffingApiKey: settings.aiDiffingApiKey || '',
@@ -103,6 +126,10 @@ export function AISettingsCard({ settings, repositoryId }: AISettingsCardProps) 
         agentSdkWorkingDir: agentSdkWorkingDir || null,
         ollamaBaseUrl: ollamaBaseUrl || null,
         ollamaModel: ollamaModel || null,
+        anthropicApiKey: anthropicApiKey || null,
+        anthropicModel: anthropicModel || null,
+        openaiApiKey: openaiApiKey || null,
+        openaiModel: openaiModel || null,
         customInstructions: customInstructions || null,
         aiDiffingEnabled,
         aiDiffingProvider: aiDiffingProvider || null,
@@ -113,7 +140,7 @@ export function AISettingsCard({ settings, repositoryId }: AISettingsCardProps) 
       });
       toast.success('AI settings saved');
     });
-  }, [repositoryId, provider, openrouterApiKey, openrouterModel, agentSdkPermissionMode, agentSdkModel, agentSdkWorkingDir, ollamaBaseUrl, ollamaModel, customInstructions, aiDiffingEnabled, aiDiffingProvider, aiDiffingApiKey, aiDiffingModel, aiDiffingOllamaBaseUrl, aiDiffingOllamaModel]);
+  }, [repositoryId, provider, openrouterApiKey, openrouterModel, agentSdkPermissionMode, agentSdkModel, agentSdkWorkingDir, ollamaBaseUrl, ollamaModel, anthropicApiKey, anthropicModel, openaiApiKey, openaiModel, customInstructions, aiDiffingEnabled, aiDiffingProvider, aiDiffingApiKey, aiDiffingModel, aiDiffingOllamaBaseUrl, aiDiffingOllamaModel]);
 
   // Auto-save with debounce - only when values differ from original props
   useEffect(() => {
@@ -128,6 +155,10 @@ export function AISettingsCard({ settings, repositoryId }: AISettingsCardProps) 
       agentSdkWorkingDir !== orig.agentSdkWorkingDir ||
       ollamaBaseUrl !== orig.ollamaBaseUrl ||
       ollamaModel !== orig.ollamaModel ||
+      anthropicApiKey !== orig.anthropicApiKey ||
+      anthropicModel !== orig.anthropicModel ||
+      openaiApiKey !== orig.openaiApiKey ||
+      openaiModel !== orig.openaiModel ||
       aiDiffingEnabled !== orig.aiDiffingEnabled ||
       aiDiffingProvider !== orig.aiDiffingProvider ||
       aiDiffingApiKey !== orig.aiDiffingApiKey ||
@@ -150,7 +181,7 @@ export function AISettingsCard({ settings, repositoryId }: AISettingsCardProps) 
         clearTimeout(debounceRef.current);
       }
     };
-  }, [provider, openrouterApiKey, openrouterModel, agentSdkPermissionMode, agentSdkModel, agentSdkWorkingDir, ollamaBaseUrl, ollamaModel, customInstructions, aiDiffingEnabled, aiDiffingProvider, aiDiffingApiKey, aiDiffingModel, aiDiffingOllamaBaseUrl, aiDiffingOllamaModel, doSave]);
+  }, [provider, openrouterApiKey, openrouterModel, agentSdkPermissionMode, agentSdkModel, agentSdkWorkingDir, ollamaBaseUrl, ollamaModel, anthropicApiKey, anthropicModel, openaiApiKey, openaiModel, customInstructions, aiDiffingEnabled, aiDiffingProvider, aiDiffingApiKey, aiDiffingModel, aiDiffingOllamaBaseUrl, aiDiffingOllamaModel, doSave]);
 
   const handleReset = () => {
     startTransition(async () => {
@@ -164,6 +195,10 @@ export function AISettingsCard({ settings, repositoryId }: AISettingsCardProps) 
       setAgentSdkWorkingDir('');
       setOllamaBaseUrl(DEFAULT_AI_SETTINGS.ollamaBaseUrl);
       setOllamaModel('');
+      setAnthropicApiKey('');
+      setAnthropicModel(DEFAULT_AI_SETTINGS.anthropicModel);
+      setOpenaiApiKey('');
+      setOpenaiModel(DEFAULT_AI_SETTINGS.openaiModel);
       setAiDiffingEnabled(false);
       setAiDiffingProvider(DEFAULT_AI_SETTINGS.aiDiffingProvider);
       setAiDiffingApiKey('');
@@ -184,7 +219,9 @@ export function AISettingsCard({ settings, repositoryId }: AISettingsCardProps) 
         openrouterApiKey || undefined,
         agentSdkPermissionMode,
         ollamaBaseUrl,
-        ollamaModel
+        ollamaModel,
+        anthropicApiKey || undefined,
+        openaiApiKey || undefined
       );
       setTestResult(result);
       if (result.success) {
@@ -236,6 +273,18 @@ export function AISettingsCard({ settings, repositoryId }: AISettingsCardProps) 
                   Claude Agent SDK
                 </div>
               </SelectItem>
+              <SelectItem value="anthropic">
+                <div className="flex items-center gap-2">
+                  <Brain className="h-4 w-4" />
+                  Anthropic API
+                </div>
+              </SelectItem>
+              <SelectItem value="openai">
+                <div className="flex items-center gap-2">
+                  <Cloud className="h-4 w-4" />
+                  OpenAI API
+                </div>
+              </SelectItem>
               <SelectItem value="ollama">
                 <div className="flex items-center gap-2">
                   <Server className="h-4 w-4" />
@@ -249,6 +298,10 @@ export function AISettingsCard({ settings, repositoryId }: AISettingsCardProps) 
               ? 'Uses the Claude CLI tool. Run `claude login` to authenticate.'
               : provider === 'openrouter'
               ? 'Uses OpenRouter API with your API key.'
+              : provider === 'anthropic'
+              ? 'Uses the Anthropic Messages API directly with your API key.'
+              : provider === 'openai'
+              ? 'Uses the OpenAI Chat Completions API with your API key.'
               : provider === 'ollama'
               ? 'Uses Ollama for local open-source LLMs (Llama, Qwen, DeepSeek, etc.)'
               : 'Uses Claude Agent SDK for agentic interactions.'}
@@ -282,18 +335,131 @@ export function AISettingsCard({ settings, repositoryId }: AISettingsCardProps) 
 
             <div className="space-y-2">
               <Label>Model</Label>
-              <Select value={openrouterModel} onValueChange={setOpenrouterModel}>
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {OPENROUTER_MODELS.map((model) => (
-                    <SelectItem key={model.value} value={model.value}>
-                      {model.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <Input
+                value={openrouterModel}
+                onChange={(e) => setOpenrouterModel(e.target.value)}
+                placeholder="e.g. anthropic/claude-sonnet-4"
+              />
+              <div className="flex flex-wrap gap-1.5">
+                {OPENROUTER_MODELS.map((model) => (
+                  <button
+                    key={model.value}
+                    type="button"
+                    onClick={() => setOpenrouterModel(model.value)}
+                    className={`rounded-md border px-2 py-0.5 text-xs transition-colors ${
+                      openrouterModel === model.value
+                        ? 'border-primary bg-primary/10 text-primary'
+                        : 'border-border text-muted-foreground hover:border-primary/50 hover:text-foreground'
+                    }`}
+                  >
+                    {model.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </>
+        )}
+
+        {/* Anthropic API Settings */}
+        {provider === 'anthropic' && (
+          <>
+            <div className="space-y-2">
+              <Label htmlFor="anthropicApiKey">Anthropic API Key</Label>
+              <Input
+                id="anthropicApiKey"
+                type="password"
+                value={anthropicApiKey}
+                onChange={(e) => setAnthropicApiKey(e.target.value)}
+                placeholder="sk-ant-..."
+              />
+              <p className="text-xs text-muted-foreground">
+                Get your API key from{' '}
+                <a
+                  href="https://console.anthropic.com/settings/keys"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-primary hover:underline"
+                >
+                  console.anthropic.com
+                </a>
+              </p>
+            </div>
+
+            <div className="space-y-2">
+              <Label>Model</Label>
+              <Input
+                value={anthropicModel}
+                onChange={(e) => setAnthropicModel(e.target.value)}
+                placeholder="e.g. claude-sonnet-4-5-20250929"
+              />
+              <div className="flex flex-wrap gap-1.5">
+                {ANTHROPIC_MODELS.map((model) => (
+                  <button
+                    key={model.value}
+                    type="button"
+                    onClick={() => setAnthropicModel(model.value)}
+                    className={`rounded-md border px-2 py-0.5 text-xs transition-colors ${
+                      anthropicModel === model.value
+                        ? 'border-primary bg-primary/10 text-primary'
+                        : 'border-border text-muted-foreground hover:border-primary/50 hover:text-foreground'
+                    }`}
+                  >
+                    {model.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </>
+        )}
+
+        {/* OpenAI API Settings */}
+        {provider === 'openai' && (
+          <>
+            <div className="space-y-2">
+              <Label htmlFor="openaiApiKey">OpenAI API Key</Label>
+              <Input
+                id="openaiApiKey"
+                type="password"
+                value={openaiApiKey}
+                onChange={(e) => setOpenaiApiKey(e.target.value)}
+                placeholder="sk-..."
+              />
+              <p className="text-xs text-muted-foreground">
+                Get your API key from{' '}
+                <a
+                  href="https://platform.openai.com/api-keys"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-primary hover:underline"
+                >
+                  platform.openai.com
+                </a>
+              </p>
+            </div>
+
+            <div className="space-y-2">
+              <Label>Model</Label>
+              <Input
+                value={openaiModel}
+                onChange={(e) => setOpenaiModel(e.target.value)}
+                placeholder="e.g. gpt-4o"
+              />
+              <div className="flex flex-wrap gap-1.5">
+                {OPENAI_MODELS.map((model) => (
+                  <button
+                    key={model.value}
+                    type="button"
+                    onClick={() => setOpenaiModel(model.value)}
+                    className={`rounded-md border px-2 py-0.5 text-xs transition-colors ${
+                      openaiModel === model.value
+                        ? 'border-primary bg-primary/10 text-primary'
+                        : 'border-border text-muted-foreground hover:border-primary/50 hover:text-foreground'
+                    }`}
+                  >
+                    {model.label}
+                  </button>
+                ))}
+              </div>
             </div>
           </>
         )}
@@ -520,7 +686,7 @@ export function AISettingsCard({ settings, repositoryId }: AISettingsCardProps) 
             variant="outline"
             size="sm"
             onClick={handleTestConnection}
-            disabled={isTesting || (provider === 'openrouter' && !openrouterApiKey) || (provider === 'ollama' && !ollamaModel)}
+            disabled={isTesting || (provider === 'openrouter' && !openrouterApiKey) || (provider === 'ollama' && !ollamaModel) || (provider === 'anthropic' && !anthropicApiKey) || (provider === 'openai' && !openaiApiKey)}
           >
             {isTesting ? (
               <Loader2 className="w-4 h-4 mr-2 animate-spin" />

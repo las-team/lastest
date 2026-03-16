@@ -55,7 +55,7 @@ interface DefaultStep {
 interface ExtraStepDisplay {
   id: string;
   index: number;
-  stepType: 'test' | 'script';
+  stepType: 'test' | 'script' | 'storage_state';
   name: string;
 }
 

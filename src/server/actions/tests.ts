@@ -32,6 +32,23 @@ export async function deleteFunctionalArea(id: string) {
   revalidatePath('/');
 }
 
+export async function cloneTest(id: string) {
+  const session = await requireTeamAccess();
+  const test = await queries.getTest(id);
+  if (!test) throw new Error('Test not found');
+  if (test.repositoryId) {
+    await requireRepoAccess(test.repositoryId);
+  }
+  const { id: _id, createdAt, updatedAt, deletedAt, ...data } = test;
+  const result = await queries.createTest({
+    ...data,
+    name: `${test.name} (copy)`,
+  });
+  revalidatePath('/tests');
+  revalidatePath('/');
+  return result;
+}
+
 export async function createTest(data: Omit<NewTest, 'id' | 'createdAt' | 'updatedAt'>) {
   if (data.repositoryId) await requireRepoAccess(data.repositoryId);
   else await requireTeamAccess();

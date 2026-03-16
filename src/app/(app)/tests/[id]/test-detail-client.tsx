@@ -16,14 +16,14 @@ import {
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
-import { Play, Trash2, Copy, Edit2, Clock, CheckCircle, XCircle, X, Save, Wrench, Wand2, Loader2, History, RotateCcw, ChevronDown, ChevronRight, Monitor, Video, AlertTriangle, Image, Bug, GitBranch, GitCommit } from 'lucide-react';
+import { Play, Trash2, Copy, Edit2, Clock, CheckCircle, XCircle, X, Save, Wrench, Wand2, Loader2, History, RotateCcw, ChevronDown, ChevronRight, ChevronUp, Monitor, Video, AlertTriangle, Image, Bug, GitBranch, GitCommit, Tv2 } from 'lucide-react';
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { deleteTest, updateTest, getTestVersionHistory, restoreTestVersion, getVisualDiffsForTestResult, restoreTest, permanentlyDeleteTest } from '@/server/actions/tests';
+import { deleteTest, updateTest, getTestVersionHistory, restoreTestVersion, getVisualDiffsForTestResult, restoreTest, permanentlyDeleteTest, cloneTest } from '@/server/actions/tests';
 import { runTests, getJobStatus } from '@/server/actions/runs';
 import { aiFixTest, aiEnhanceTest, updateTestCode } from '@/server/actions/ai';
 import { toast } from 'sonner';
@@ -31,13 +31,17 @@ import { useNotifyJobStarted } from '@/components/queue/job-polling-context';
 import { ExecutionTargetSelector } from '@/components/execution/execution-target-selector';
 import { StepScreenshotMatcher } from '@/components/planned/step-screenshot-matcher';
 import { TestSetupOverrides } from '@/components/setup/test-setup-overrides';
-import type { Test, TestVersion, PlannedScreenshot, SetupScript, GoogleSheetsDataSource, A11yViolation, StabilizationSettings } from '@/lib/db/schema';
-import { DEFAULT_STABILIZATION_SETTINGS } from '@/lib/db/schema';
+import type { Test, TestVersion, PlannedScreenshot, SetupScript, GoogleSheetsDataSource, A11yViolation, StabilizationSettings, DiffSensitivitySettings } from '@/lib/db/schema';
+import { DEFAULT_STABILIZATION_SETTINGS, DEFAULT_DIFF_THRESHOLDS } from '@/lib/db/schema';
 import { TestStabilizationOverrides } from '@/components/settings/test-stabilization-overrides';
+import { TestDiffOverrides as TestDiffOverridesComponent } from '@/components/settings/test-diff-overrides';
+import { TestPlaywrightOverrides as TestPlaywrightOverridesComponent } from '@/components/settings/test-playwright-overrides';
 import { A11yViolationsPanel } from '@/components/builds/a11y-violations-panel';
 import type { ScreenshotGroup } from '@/server/actions/tests';
 import { SheetDataPreview } from '@/components/test-data/sheet-data-preview';
 import { SheetReferenceInserter } from '@/components/test-data/sheet-reference-inserter';
+import { BrowserViewer } from '@/components/embedded-browser/browser-viewer-client';
+import { getStreamUrlForRunner } from '@/server/actions/embedded-sessions';
 
 interface StepDiff {
   stepLabel: string | null;
@@ -74,6 +78,17 @@ interface DefaultStepForUI {
   scriptName: string | null;
 }
 
+interface PlaywrightSettingsForDefaults {
+  browser?: string | null;
+  navigationTimeout?: number | null;
+  actionTimeout?: number | null;
+  screenshotDelay?: number | null;
+  networkErrorMode?: string | null;
+  consoleErrorMode?: string | null;
+  acceptAnyCertificate?: boolean | null;
+  maxParallelTests?: number | null;
+}
+
 interface TestDetailClientProps {
   test: Test;
   results: TestResult[];
@@ -86,9 +101,13 @@ interface TestDetailClientProps {
   sheetDataSources?: GoogleSheetsDataSource[];
   stabilizationDefaults?: StabilizationSettings | null;
   banAiMode?: boolean;
+  earlyAdopterMode?: boolean;
+  diffDefaults?: DiffSensitivitySettings | null;
+  playwrightDefaults?: PlaywrightSettingsForDefaults | null;
+  envBaseUrl?: string | null;
 }
 
-export function TestDetailClient({ test, results, repositoryId, screenshotGroups = [], plannedScreenshots = [], defaultSetupSteps = [], availableTests = [], availableScripts = [], sheetDataSources = [], stabilizationDefaults, banAiMode = false }: TestDetailClientProps) {
+export function TestDetailClient({ test, results, repositoryId, screenshotGroups = [], plannedScreenshots = [], defaultSetupSteps = [], availableTests = [], availableScripts = [], sheetDataSources = [], stabilizationDefaults, banAiMode = false, earlyAdopterMode = false, diffDefaults, playwrightDefaults, envBaseUrl }: TestDetailClientProps) {
   const router = useRouter();
   const notifyJobStarted = useNotifyJobStarted();
   const [isDeleting, setIsDeleting] = useState(false);
@@ -106,6 +125,10 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
   const [isRunning, setIsRunning] = useState(false);
   const pollIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const [executionTarget, setExecutionTarget] = usePreferredRunner();
+
+  // Live browser viewer state
+  const [streamUrl, setStreamUrl] = useState<string | null>(null);
+  const [showViewer, setShowViewer] = useState(true);
 
   // Cleanup poll interval on unmount
   useEffect(() => {
@@ -250,6 +273,24 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
       } else {
         toast.success(forceVideoRecording ? 'Test started with recording' : headless ? 'Test started' : 'Test started (headed mode)');
       }
+
+      // Fetch stream URL for headed runs on embedded/system runners
+      if (!headless && executionTarget !== 'local') {
+        try {
+          const streamInfo = await getStreamUrlForRunner(executionTarget);
+          if (streamInfo?.streamUrl) {
+            const token = streamInfo.streamAuthToken;
+            setStreamUrl(
+              token
+                ? `${streamInfo.streamUrl}?token=${encodeURIComponent(token)}`
+                : streamInfo.streamUrl
+            );
+          }
+        } catch {
+          // Stream not available — not critical
+        }
+      }
+
       // Poll job status for completion (ensures results are saved before refresh)
       pollIntervalRef.current = setInterval(async () => {
         const { isComplete } = await getJobStatus(jobId);
@@ -259,6 +300,7 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
             pollIntervalRef.current = null;
           }
           setIsRunning(false);
+          setStreamUrl(null);
           router.refresh();
           toast.success('Test completed');
         }
@@ -366,36 +408,23 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
 
         {/* Test Info Card */}
         <Card>
-          <CardHeader>
-            <div className="flex items-start justify-between">
-              <div className="flex-1 mr-4">
+          <CardHeader className="space-y-3">
+            <div className="flex items-start justify-between gap-4">
+              <div className="flex-1 min-w-0">
                 {isEditing ? (
-                  <div className="space-y-2">
-                    <Input
-                      value={editName}
-                      onChange={(e) => setEditName(e.target.value)}
-                      className="text-xl font-semibold"
-                    />
-                    <Input
-                      value={editUrl}
-                      onChange={(e) => setEditUrl(e.target.value)}
-                      placeholder="https://example.com"
-                      className="text-sm text-muted-foreground"
-                    />
-                  </div>
+                  <Input
+                    value={editName}
+                    onChange={(e) => setEditName(e.target.value)}
+                    className="text-xl font-semibold"
+                  />
                 ) : (
-                  <>
-                    <CardTitle className="flex items-center gap-2">
-                      {test.name}
-                    </CardTitle>
-                    <CardDescription>
-                      {test.targetUrl || 'No target URL'}
-                    </CardDescription>
-                  </>
+                  <CardTitle className="flex items-center gap-2">
+                    {test.name}
+                  </CardTitle>
                 )}
               </div>
 
-              <div className="flex gap-2">
+              <div className="flex gap-2 flex-shrink-0">
                 {isEditing ? (
                   <>
                     <Button onClick={handleSave} disabled={isSaving}>
@@ -482,7 +511,20 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
                     >
                       <Video className="h-4 w-4" />
                     </Button>
-                    <Button variant="outline" size="icon" title="Copy">
+                    <Button
+                      variant="outline"
+                      size="icon"
+                      title="Clone"
+                      onClick={async () => {
+                        try {
+                          const cloned = await cloneTest(test.id);
+                          toast.success('Test cloned');
+                          router.push(`/tests/${cloned.id}`);
+                        } catch {
+                          toast.error('Failed to clone test');
+                        }
+                      }}
+                    >
                       <Copy className="h-4 w-4" />
                     </Button>
                     <Button
@@ -496,6 +538,31 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
                 )}
               </div>
             </div>
+            {isEditing ? (
+              <Input
+                value={editUrl}
+                onChange={(e) => setEditUrl(e.target.value)}
+                placeholder="https://example.com"
+                className="text-sm text-muted-foreground"
+              />
+            ) : (
+              <>
+                {test.description && (
+                  test.description.includes('\n') ? (
+                    <ul className="text-sm text-muted-foreground list-disc list-inside space-y-0.5">
+                      {test.description.split('\n').filter(Boolean).map((line, i) => (
+                        <li key={i}>{line}</li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <p className="text-sm text-muted-foreground">{test.description}</p>
+                  )
+                )}
+                <CardDescription>
+                  {test.targetUrl || 'No target URL'}
+                </CardDescription>
+              </>
+            )}
           </CardHeader>
 
           <CardContent>
@@ -567,12 +634,35 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
           </Card>
         )}
 
+        {/* Live Browser Viewer (headed runs on embedded/system runners) */}
+        {streamUrl && isRunning && (
+          <Card className="overflow-hidden py-0">
+            <button
+              type="button"
+              className="flex items-center gap-2 w-full px-3 py-2 text-sm font-medium bg-muted/50 hover:bg-muted transition-colors"
+              onClick={() => setShowViewer(!showViewer)}
+            >
+              <Tv2 className="h-4 w-4 text-purple-500" />
+              <span>Live Browser View</span>
+              {showViewer ? <ChevronUp className="h-4 w-4 ml-auto" /> : <ChevronDown className="h-4 w-4 ml-auto" />}
+            </button>
+            {showViewer && (
+              <BrowserViewer
+                streamUrl={streamUrl}
+                className="max-h-[500px]"
+              />
+            )}
+          </Card>
+        )}
+
         {/* Tabs for Code, Screenshots, History */}
         <Tabs defaultValue="code">
           <TabsList>
             <TabsTrigger value="code">Code</TabsTrigger>
             <TabsTrigger value="setup">Setup</TabsTrigger>
             <TabsTrigger value="stabilization">Stabilization</TabsTrigger>
+            {earlyAdopterMode && <TabsTrigger value="diff-overrides">Diff</TabsTrigger>}
+            {earlyAdopterMode && <TabsTrigger value="playwright-overrides">Playwright</TabsTrigger>}
             <TabsTrigger value="screenshots">Screenshots</TabsTrigger>
             <TabsTrigger value="plans">Plans</TabsTrigger>
             <TabsTrigger value="history">Run History</TabsTrigger>
@@ -672,6 +762,49 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
               defaults={stabilizationDefaults ?? DEFAULT_STABILIZATION_SETTINGS}
             />
           </TabsContent>
+
+          {earlyAdopterMode && (
+            <TabsContent value="diff-overrides" className="mt-4">
+              <TestDiffOverridesComponent
+                testId={test.id}
+                repositoryId={repositoryId ?? null}
+                overrides={test.diffOverrides ?? null}
+                defaults={{
+                  unchangedThreshold: diffDefaults?.unchangedThreshold ?? DEFAULT_DIFF_THRESHOLDS.unchangedThreshold,
+                  flakyThreshold: diffDefaults?.flakyThreshold ?? DEFAULT_DIFF_THRESHOLDS.flakyThreshold,
+                  includeAntiAliasing: diffDefaults?.includeAntiAliasing ?? DEFAULT_DIFF_THRESHOLDS.includeAntiAliasing,
+                  ignorePageShift: diffDefaults?.ignorePageShift ?? DEFAULT_DIFF_THRESHOLDS.ignorePageShift,
+                  diffEngine: (diffDefaults?.diffEngine as 'pixelmatch' | 'ssim' | 'butteraugli') ?? DEFAULT_DIFF_THRESHOLDS.diffEngine,
+                  textRegionAwareDiffing: diffDefaults?.textRegionAwareDiffing ?? DEFAULT_DIFF_THRESHOLDS.textRegionAwareDiffing,
+                  textRegionThreshold: diffDefaults?.textRegionThreshold ?? DEFAULT_DIFF_THRESHOLDS.textRegionThreshold,
+                  textRegionPadding: diffDefaults?.textRegionPadding ?? DEFAULT_DIFF_THRESHOLDS.textRegionPadding,
+                  textDetectionGranularity: (diffDefaults?.textDetectionGranularity as 'word' | 'line' | 'block') ?? DEFAULT_DIFF_THRESHOLDS.textDetectionGranularity,
+                  regionDetectionMode: (diffDefaults?.regionDetectionMode as 'grid' | 'flood-fill') ?? DEFAULT_DIFF_THRESHOLDS.regionDetectionMode,
+                }}
+              />
+            </TabsContent>
+          )}
+
+          {earlyAdopterMode && (
+            <TabsContent value="playwright-overrides" className="mt-4">
+              <TestPlaywrightOverridesComponent
+                testId={test.id}
+                repositoryId={repositoryId ?? null}
+                overrides={test.playwrightOverrides ?? null}
+                defaults={{
+                  browser: (playwrightDefaults?.browser as 'chromium' | 'firefox' | 'webkit') ?? 'chromium',
+                  navigationTimeout: playwrightDefaults?.navigationTimeout ?? 30000,
+                  actionTimeout: playwrightDefaults?.actionTimeout ?? 30000,
+                  screenshotDelay: playwrightDefaults?.screenshotDelay ?? 0,
+                  networkErrorMode: (playwrightDefaults?.networkErrorMode as 'fail' | 'warn' | 'ignore') ?? 'fail',
+                  consoleErrorMode: (playwrightDefaults?.consoleErrorMode as 'fail' | 'warn' | 'ignore') ?? 'fail',
+                  acceptAnyCertificate: playwrightDefaults?.acceptAnyCertificate ?? false,
+                  maxParallelTests: playwrightDefaults?.maxParallelTests ?? 2,
+                  baseUrl: envBaseUrl ?? 'http://localhost:3000',
+                }}
+              />
+            </TabsContent>
+          )}
 
           <TabsContent value="screenshots" className="mt-4 space-y-6">
             <Card>

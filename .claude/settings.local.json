@@ -116,7 +116,16 @@
       "Bash(git:*)",
       "Bash(docker ps:*)",
       "Bash(gh pr:*)",
-      "WebFetch(domain:fsl.software)"
+      "WebFetch(domain:fsl.software)",
+      "Bash(cd /home/ewyct/.claude/skills/excalidraw-diagram/references && uv run python render_excalidraw.py /home/ewyct/dev/lastest2/docs/development-flow.excalidraw)",
+      "Bash(pnpm list:*)",
+      "Bash(pnpm remove:*)",
+      "Bash(wc -l /home/ewyct/dev/lastest2/src/app/\\\\\\(app\\\\\\)/record/recording-client.tsx)",
+      "Bash(grep -A 30 \"getStreamUrlForRunner\" /home/ewyct/dev/lastest2/src/app/\\\\\\(app\\\\\\)/builds/\\\\[buildId\\\\]/page.tsx | head -50)",
+      "Bash(docker inspect:*)",
+      "Bash(grep -n \"usePreferredRunner\\\\|ExecutionTargetSelector\" /home/ewyct/dev/lastest2/src/app/\\\\\\(app\\\\\\)/tests/\\\\[id\\\\]/test-detail-client.tsx)",
+      "Bash(wc -l /home/ewyct/dev/lastest2/src/app/\\\\\\(app\\\\\\)/tests/\\\\[id\\\\]/test-detail-client.tsx)",
+      "Bash(pnpm tsx:*)"
     ]
   },
   "disabledMcpjsonServers": [

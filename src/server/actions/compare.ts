@@ -2,7 +2,7 @@
 
 import * as queries from '@/lib/db/queries';
 import { requireTeamAccess, requireRepoAccess } from '@/lib/auth';
-import { getRunQueue } from '@/lib/run-queue';
+import { createAndRunBuild } from '@/server/actions/builds';
 import { revalidatePath } from 'next/cache';
 
 export interface BranchRunInfo {
@@ -53,23 +53,21 @@ export async function getLatestRunForBranch(
 export async function queueRunForBranch(branch: string, repositoryId?: string, testIds?: string[]) {
   if (repositoryId) await requireRepoAccess(repositoryId);
   else await requireTeamAccess();
-  const queue = getRunQueue();
-  const queuedRun = queue.addToQueue(branch, repositoryId, testIds);
+
+  const result = await createAndRunBuild(
+    'manual',
+    testIds,
+    repositoryId,
+    undefined,
+    undefined,
+    branch,
+  );
 
   revalidatePath('/compare');
 
   return {
-    queueId: queuedRun.id,
-    status: queuedRun.status,
+    buildId: result.buildId as string | null,
+    testRunId: result.testRunId as string | null,
+    queued: 'queued' in result ? true : false,
   };
-}
-
-export async function getQueueStatus() {
-  const queue = getRunQueue();
-  return queue.getStatus();
-}
-
-export async function getQueuedRunStatus(queueId: string) {
-  const queue = getRunQueue();
-  return queue.getQueuedRun(queueId);
 }

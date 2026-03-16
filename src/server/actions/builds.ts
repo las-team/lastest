@@ -88,6 +88,39 @@ async function getGitInfoFromGitHub(repositoryId: string | null): Promise<GitInf
   return getGitInfoFromProvider(repositoryId);
 }
 
+async function getGitInfoForBranch(repositoryId: string | null, branch: string): Promise<GitInfo> {
+  if (!repositoryId) {
+    return { branch, commit: 'unknown' };
+  }
+
+  const repo = await queries.getRepository(repositoryId);
+  if (!repo) {
+    return { branch, commit: 'unknown' };
+  }
+
+  if (repo.provider === 'gitlab') {
+    const account = repo.teamId ? await queries.getGitlabAccountByTeam(repo.teamId) : null;
+    if (!account || !repo.gitlabProjectId) {
+      return { branch, commit: 'unknown' };
+    }
+    const branchInfo = await getGitLabBranchInfo(account.accessToken, repo.gitlabProjectId, branch, account.instanceUrl || undefined);
+    return {
+      branch,
+      commit: branchInfo ? branchInfo.commit.id.slice(0, 7) : 'unknown',
+    };
+  } else {
+    const account = repo.teamId ? await queries.getGithubAccountByTeam(repo.teamId) : null;
+    if (!account) {
+      return { branch, commit: 'unknown' };
+    }
+    const branchInfo = await getBranchInfo(account.accessToken, repo.owner, repo.name, branch);
+    return {
+      branch,
+      commit: branchInfo ? branchInfo.commit.sha.slice(0, 7) : 'unknown',
+    };
+  }
+}
+
 /**
  * Compute which tests are affected by code changes on this branch vs default branch.
  * Stores the test IDs on the build record. Non-blocking — callers should catch errors.
@@ -159,6 +192,7 @@ export async function createAndRunBuild(
   repositoryId?: string | null,
   runnerId?: string,
   versionOverrides?: Record<string, string>,
+  gitBranchOverride?: string,
 ) {
   if (repositoryId) await requireRepoAccess(repositoryId);
   else await requireTeamAccess();
@@ -203,7 +237,9 @@ export async function createAndRunBuild(
 
   // Get repo for git info via GitHub API
   const repo = repositoryId ? await queries.getRepository(repositoryId) : null;
-  const gitInfo = await getGitInfoFromGitHub(repositoryId ?? repo?.id ?? null);
+  const gitInfo = gitBranchOverride
+    ? await getGitInfoForBranch(repositoryId ?? repo?.id ?? null, gitBranchOverride)
+    : await getGitInfoFromGitHub(repositoryId ?? repo?.id ?? null);
 
   // Create test run
   const testRun = await queries.createTestRun({
@@ -461,6 +497,10 @@ async function runBuildAsync(
         ? [{ path: result.screenshotPath, label: 'final' }]
         : [];
 
+    // Look up per-test diff overrides
+    const testRecord = tests.find(t => t.id === result.testId);
+    const testDiffOverrides = testRecord?.diffOverrides ?? null;
+
     // Generate visual diffs for all screenshots concurrently
     const diffResults = await Promise.all(
       screenshots.map(screenshot =>
@@ -474,6 +514,7 @@ async function runBuildAsync(
           screenshot.label,
           result.stabilityMetadata?.isStable === false,
           currentBrowserType,
+          testDiffOverrides,
         )
       )
     );
@@ -541,6 +582,21 @@ async function runBuildAsync(
       variables: {},
       repositoryId: repositoryId || null,
     };
+
+    // Pre-load storage states from default setup steps for remote runners
+    if (repositoryId) {
+      const defaultSteps = await queries.getDefaultSetupSteps(repositoryId);
+      for (const step of defaultSteps) {
+        if (step.stepType === 'storage_state' && step.storageStateId) {
+          const ss = await queries.getStorageState(step.storageStateId);
+          if (ss) {
+            setupContext.storageState = ss.storageStateJson;
+            console.log(`[build] Pre-loaded storage state "${ss.name}" for setup context`);
+            break; // Use first matching storage state
+          }
+        }
+      }
+    }
 
     // Resolve setup info for remote runner (run setup on the runner, not locally)
     let remoteSetupInfo: { code: string; setupId: string } | undefined;
@@ -869,17 +925,19 @@ async function processVisualDiff(
   stepLabel?: string,
   isUnstable?: boolean,
   browser: string = 'chromium',
+  testDiffOverrides?: import('@/lib/db/schema').TestDiffOverrides | null,
 ): Promise<{ hasChanges: boolean; diffId: string; classification: DiffClassification }> {
 
-  // Get diff sensitivity settings
+  // Get diff sensitivity settings, then merge per-test overrides
   const settings = await queries.getDiffSensitivitySettings(repositoryId);
-  const unchangedThreshold = settings.unchangedThreshold ?? 1;
-  const flakyThreshold = settings.flakyThreshold ?? 10;
-  const includeAntiAliasing = settings.includeAntiAliasing ?? false;
-  const ignorePageShift = settings.ignorePageShift ?? false;
-  const diffEngine = (settings.diffEngine as import('@/lib/db/schema').DiffEngineType) ?? 'pixelmatch';
-  const textRegionAwareDiffing = settings.textRegionAwareDiffing ?? false;
-  const regionDetectionMode = (settings.regionDetectionMode as import('@/lib/db/schema').RegionDetectionMode) ?? 'grid';
+  const merged = testDiffOverrides ? { ...settings, ...testDiffOverrides } : settings;
+  const unchangedThreshold = merged.unchangedThreshold ?? 1;
+  const flakyThreshold = merged.flakyThreshold ?? 10;
+  const includeAntiAliasing = merged.includeAntiAliasing ?? false;
+  const ignorePageShift = merged.ignorePageShift ?? false;
+  const diffEngine = (merged.diffEngine as import('@/lib/db/schema').DiffEngineType) ?? 'pixelmatch';
+  const textRegionAwareDiffing = merged.textRegionAwareDiffing ?? false;
+  const regionDetectionMode = (merged.regionDetectionMode as import('@/lib/db/schema').RegionDetectionMode) ?? 'grid';
 
   // Get the repo's default branch
   const repo = repositoryId ? await queries.getRepository(repositoryId) : null;

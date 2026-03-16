@@ -18,7 +18,7 @@ import { v4 as uuid } from 'uuid';
 import { revalidatePath } from 'next/cache';
 import { chromium, firefox, webkit } from 'playwright';
 import { createMessage } from '@/lib/ws/protocol';
-import type { StartRecordingCommand, StopRecordingCommand, CaptureScreenshotCommand, CreateAssertionCommand, FlagDownloadCommand } from '@/lib/ws/protocol';
+import type { StartRecordingCommand, StopRecordingCommand, CaptureScreenshotCommand, CreateAssertionCommand, FlagDownloadCommand, InsertTimestampCommand } from '@/lib/ws/protocol';
 import { getAvailableSystemRunner } from '@/server/actions/runners';
 import {
   queueCommandToDB,
@@ -77,7 +77,8 @@ export async function startRecording(
   url: string,
   repositoryId?: string | null,
   runnerId?: string,
-  setupOptions?: { testId?: string | null; scriptId?: string | null; steps?: Array<{ stepType: 'test' | 'script'; testId?: string | null; scriptId?: string | null }> }
+  setupOptions?: { testId?: string | null; scriptId?: string | null; steps?: Array<{ stepType: 'test' | 'script'; testId?: string | null; scriptId?: string | null }> },
+  storageStateId?: string,
 ): Promise<{ sessionId?: string; resolvedRunnerId?: string; error?: string }> {
   await requireTeamAccess();
   // Validate URL format
@@ -175,6 +176,15 @@ export async function startRecording(
   recorder.setClipboardAccess(settings.grantClipboardAccess ?? false);
   recorder.setStabilizationSettings(settings.stabilization);
 
+  // Load storage state if specified
+  if (storageStateId) {
+    const { getStorageState } = await import('@/lib/db/queries');
+    const state = await getStorageState(storageStateId);
+    recorder.setStorageState(state?.storageStateJson ?? null);
+  } else {
+    recorder.setStorageState(null);
+  }
+
   try {
     await recorder.startRecording(url, sessionId, setupOptions);
     return { sessionId };
@@ -228,13 +238,16 @@ export async function stopRecording(repositoryId?: string | null) {
       events: remoteSession.events,
       generatedCode,
       requiredCapabilities: undefined,
+      capturedStorageState: null as string | null,
     };
   }
 
   // Local recording
   const recorder = getRecorder(repositoryId);
   const session = await recorder.stopRecording();
-  return session;
+  if (!session) return null;
+  const capturedStorageState = recorder.getCapturedStorageState();
+  return { ...session, capturedStorageState };
 }
 
 export async function captureScreenshot(repositoryId?: string | null) {
@@ -280,6 +293,26 @@ export async function createAssertion(type: AssertionType, repositoryId?: string
   return { success };
 }
 
+export async function insertTimestamp(repositoryId?: string | null): Promise<{ success: boolean }> {
+  await requireTeamAccess();
+
+  // Check for remote recording session
+  const remoteSession = getRemoteRecordingSession(repositoryId);
+  if (remoteSession?.isRecording) {
+    const command = createMessage<InsertTimestampCommand>('command:insert_timestamp', {
+      sessionId: remoteSession.sessionId,
+    });
+    await queueCommandToDB(remoteSession.runnerId, command);
+    return { success: true };
+  }
+
+  // Local recording
+  const recorder = getRecorder(repositoryId);
+  const success = await recorder.insertTimestamp();
+
+  return { success };
+}
+
 export async function flagDownload(repositoryId?: string | null): Promise<{ success: boolean }> {
   await requireTeamAccess();
 
@@ -300,6 +333,25 @@ export async function flagDownload(repositoryId?: string | null): Promise<{ succ
   const success = recorder.flagDownload();
 
   return { success };
+}
+
+export async function togglePauseRecording(repositoryId?: string | null): Promise<{ paused: boolean; error?: string }> {
+  await requireTeamAccess();
+
+  // Check for remote recording session — pause is not supported remotely
+  const remoteSession = getRemoteRecordingSession(repositoryId);
+  if (remoteSession?.isRecording) {
+    return { paused: false, error: 'Pause is not supported for remote recording sessions' };
+  }
+
+  const recorder = getRecorder(repositoryId);
+  if (recorder.isPaused()) {
+    recorder.resumeRecording();
+    return { paused: false };
+  } else {
+    recorder.pauseRecording();
+    return { paused: true };
+  }
 }
 
 export async function getRecordingStatus(repositoryId?: string | null, sinceSequence?: number) {
@@ -349,6 +401,7 @@ export async function getRecordingStatus(repositoryId?: string | null, sinceSequ
 
   return {
     isRecording: recorder.isActive(),
+    isPaused: recorder.isPaused(),
     events,
     lastSequence,
     verificationUpdates,
@@ -363,6 +416,7 @@ export async function getRecordingStatus(repositoryId?: string | null, sinceSequ
       generatedCode: lastCompleted.generatedCode,
       requiredCapabilities: lastCompleted.requiredCapabilities,
     } : null,
+    capturedStorageState: recorder.getCapturedStorageState(),
   };
 }
 

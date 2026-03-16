@@ -6,6 +6,9 @@
  */
 
 import type { CDPSession, Page } from 'playwright';
+import * as fs from 'fs';
+import * as path from 'path';
+import * as os from 'os';
 
 export interface MouseEvent {
   type: 'mouse';
@@ -27,7 +30,17 @@ export interface KeyboardEvent {
   modifiers?: { ctrl?: boolean; shift?: boolean; alt?: boolean; meta?: boolean };
 }
 
-export type InputEvent = MouseEvent | KeyboardEvent;
+export interface FileUploadEvent {
+  type: 'file_upload';
+  files: Array<{ name: string; data: string; mimeType: string }>; // base64 data
+}
+
+export interface ClipboardPasteEvent {
+  type: 'clipboard_paste';
+  text: string;
+}
+
+export type InputEvent = MouseEvent | KeyboardEvent | FileUploadEvent | ClipboardPasteEvent;
 
 const BUTTON_MAP: Record<string, 'left' | 'right' | 'middle'> = {
   left: 'left',
@@ -43,6 +56,25 @@ function getModifierFlags(modifiers?: { ctrl?: boolean; shift?: boolean; alt?: b
   if (modifiers.meta) flags |= 4;
   if (modifiers.shift) flags |= 8;
   return flags;
+}
+
+const KEY_TO_VK: Record<string, number> = {
+  Backspace: 8, Tab: 9, Enter: 13, Shift: 16, Control: 17, Alt: 18,
+  Escape: 27, Space: 32, ' ': 32,
+  PageUp: 33, PageDown: 34, End: 35, Home: 36,
+  ArrowLeft: 37, ArrowUp: 38, ArrowRight: 39, ArrowDown: 40,
+  Insert: 45, Delete: 46,
+  Meta: 91,
+  F1: 112, F2: 113, F3: 114, F4: 115, F5: 116, F6: 117,
+  F7: 118, F8: 119, F9: 120, F10: 121, F11: 122, F12: 123,
+  NumLock: 144, ScrollLock: 145,
+  CapsLock: 20, ContextMenu: 93, PrintScreen: 44, Pause: 19,
+};
+
+function getVirtualKeyCode(key: string): number {
+  if (KEY_TO_VK[key] !== undefined) return KEY_TO_VK[key];
+  if (key.length === 1) return key.toUpperCase().charCodeAt(0);
+  return 0;
 }
 
 export class InputHandler {
@@ -78,6 +110,10 @@ export class InputHandler {
         await this.handleMouse(event);
       } else if (event.type === 'keyboard') {
         await this.handleKeyboard(event);
+      } else if (event.type === 'file_upload') {
+        await this.handleFileUpload(event);
+      } else if (event.type === 'clipboard_paste') {
+        await this.handleClipboardPaste(event);
       }
     } catch (error) {
       console.error('[InputHandler] Error dispatching event:', error);
@@ -142,7 +178,7 @@ export class InputHandler {
   }
 
   private async handleKeyboard(event: KeyboardEvent): Promise<void> {
-    if (!this.cdpSession) return;
+    if (!this.page) return;
 
     // Track modifier state for contextmenu dispatching
     if (event.modifiers) {
@@ -152,46 +188,76 @@ export class InputHandler {
       this.modifiers.meta = event.modifiers.meta ?? false;
     }
 
-    const modifiers = getModifierFlags(event.modifiers);
-
     switch (event.action) {
-      case 'keydown':
-        await this.cdpSession.send('Input.dispatchKeyEvent', {
-          type: 'keyDown',
-          key: event.key,
-          code: event.code ?? '',
-          text: event.text ?? '',
-          modifiers,
-        });
+      case 'keydown': {
+        const isChar = event.text && event.text.length === 1;
+        if (isChar) {
+          // Printable character: use press() which handles keyDown + char + keyUp
+          // Build modifier prefix for Playwright's key descriptor format
+          const modPrefix = this.buildModifierPrefix(event.modifiers);
+          await this.page.keyboard.press(`${modPrefix}${event.key}`);
+        } else {
+          // Non-printable key (Backspace, Delete, Enter, arrows, etc.)
+          await this.page.keyboard.down(event.key);
+        }
         break;
+      }
 
-      case 'keyup':
-        await this.cdpSession.send('Input.dispatchKeyEvent', {
-          type: 'keyUp',
-          key: event.key,
-          code: event.code ?? '',
-          modifiers,
-        });
+      case 'keyup': {
+        await this.page.keyboard.up(event.key);
         break;
+      }
 
       case 'type':
-        // Type each character individually
         if (event.text) {
-          for (const char of event.text) {
-            await this.cdpSession.send('Input.dispatchKeyEvent', {
-              type: 'keyDown',
-              key: char,
-              text: char,
-              modifiers,
-            });
-            await this.cdpSession.send('Input.dispatchKeyEvent', {
-              type: 'keyUp',
-              key: char,
-              modifiers,
-            });
-          }
+          await this.page.keyboard.type(event.text);
         }
         break;
     }
+  }
+
+  private buildModifierPrefix(modifiers?: { ctrl?: boolean; shift?: boolean; alt?: boolean; meta?: boolean }): string {
+    if (!modifiers) return '';
+    const parts: string[] = [];
+    if (modifiers.ctrl) parts.push('Control+');
+    if (modifiers.shift) parts.push('Shift+');
+    if (modifiers.alt) parts.push('Alt+');
+    if (modifiers.meta) parts.push('Meta+');
+    return parts.join('');
+  }
+
+  private async handleFileUpload(event: FileUploadEvent): Promise<void> {
+    if (!this.page) return;
+
+    const tmpDir = path.join(os.tmpdir(), `lastest-stream-upload-${Date.now()}`);
+    fs.mkdirSync(tmpDir, { recursive: true });
+    const filePaths: string[] = [];
+
+    for (const file of event.files) {
+      const safeName = path.basename(file.name).replace(/\.\./g, '_');
+      const filePath = path.join(tmpDir, safeName);
+      fs.writeFileSync(filePath, Buffer.from(file.data, 'base64'));
+      filePaths.push(filePath);
+    }
+
+    try {
+      await this.page.locator('input[type="file"]').setInputFiles(filePaths);
+    } catch {
+      // If no file input visible, the filechooser event handler should pick it up
+      console.warn('[InputHandler] No file input found for upload, files written to:', tmpDir);
+    }
+
+    // Clean up temp files after a delay
+    setTimeout(() => {
+      try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch { /* ignore */ }
+    }, 30000);
+  }
+
+  private async handleClipboardPaste(event: ClipboardPasteEvent): Promise<void> {
+    if (!this.page) return;
+
+    // Write text to the page's clipboard, then simulate Ctrl+V
+    await this.page.evaluate((text) => navigator.clipboard.writeText(text), event.text);
+    await this.page.keyboard.press('Control+V');
   }
 }

@@ -12,6 +12,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { validateRunnerToken, updateRunnerStatus, markStaleRunnersOffline, deleteStaleSystemRunners } from '@/server/actions/runners';
 import type { Message, HeartbeatMessage, TestResultResponse, SetupResultResponse, ScreenshotUploadResponse, RecordingEventResponse, RecordingStoppedResponse } from '@/lib/ws/protocol';
+import { waitForCommandQueued, notifyCommandQueued } from '@/lib/ws/runner-events';
 import fs from 'fs/promises';
 import path from 'path';
 import { STORAGE_DIRS } from '@/lib/storage/paths';
@@ -83,8 +84,8 @@ if (!globalSessionState.__runnerActiveSessions) {
 }
 const activeRunnerSessions = globalSessionState.__runnerActiveSessions;
 
-// Session timeout in milliseconds (15 seconds = 5x heartbeat interval at 3s)
-const SESSION_TIMEOUT_MS = 15_000;
+// Session timeout in milliseconds (60s — held long-poll connections prove liveness)
+const SESSION_TIMEOUT_MS = 60_000;
 
 // Cleanup interval (60 seconds)
 const CLEANUP_INTERVAL_MS = 60_000;
@@ -210,10 +211,9 @@ export async function POST(request: NextRequest) {
         let status: 'online' | 'offline' | 'busy';
         switch (heartbeat.payload.status) {
           case 'busy':
-            status = 'busy';
-            break;
           case 'recording':
-            status = 'busy'; // Recording is a form of busy
+          case 'debugging':
+            status = 'busy';
             break;
           default:
             status = 'online';
@@ -221,7 +221,16 @@ export async function POST(request: NextRequest) {
         await updateRunnerStatus(runner.id, status);
 
         // Claim pending commands from DB (limit to maxParallelTests to prevent bulk execution)
-        const claimed = await claimPendingCommands(runner.id, runner.maxParallelTests ?? undefined);
+        let claimed = await claimPendingCommands(runner.id, runner.maxParallelTests ?? undefined);
+
+        // Long-poll: if no commands, wait up to 25s for a command to be queued
+        if (claimed.length === 0) {
+          const notified = await waitForCommandQueued(runner.id, 25_000);
+          if (notified) {
+            claimed = await claimPendingCommands(runner.id, runner.maxParallelTests ?? undefined);
+          }
+        }
+
         // Reconstruct Message objects from stored commands
         const commands: Message[] = claimed.map(cmd => ({
           id: cmd.id,
@@ -356,6 +365,16 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ ok: true });
       }
 
+      case 'response:debug_state': {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const debugPayload = (message as any).payload as DebugStateResponsePayload;
+        const debugSession = findRemoteDebugBySessionId(debugPayload.sessionId);
+        if (debugSession) {
+          debugSession.state = debugPayload;
+        }
+        return NextResponse.json({ ok: true });
+      }
+
       default:
         console.warn('Unknown message type:', message.type);
         return NextResponse.json({ error: 'Unknown message type', type: message.type }, { status: 400 });
@@ -473,6 +492,7 @@ export async function queueCommandToDB(runnerId: string, command: Message): Prom
     testId: (payload as Record<string, unknown>).testId as string | undefined,
     testRunId: (payload as Record<string, unknown>).testRunId as string | undefined,
   });
+  notifyCommandQueued(runnerId);
 }
 
 /**
@@ -607,4 +627,59 @@ export function completeRemoteRecordingSession(repositoryId?: string | null, gen
 export function clearRemoteRecordingSession(repositoryId?: string | null): void {
   const key = repositoryId ?? '__no_repo__';
   remoteRecordingSessionsMap.delete(key);
+}
+
+// ============================================
+// Remote Debug Session Management (in-memory — real-time, acceptable)
+// ============================================
+
+import type { DebugStateResponsePayload } from '@/lib/ws/protocol';
+
+export interface RemoteDebugSession {
+  sessionId: string;
+  runnerId: string;
+  repositoryId: string | null;
+  testId: string;
+  state: DebugStateResponsePayload | null;
+  startedAt: Date;
+}
+
+const globalDebugState = globalThis as typeof globalThis & {
+  __remoteDebugSessions?: Map<string, RemoteDebugSession>;
+};
+if (!globalDebugState.__remoteDebugSessions) {
+  globalDebugState.__remoteDebugSessions = new Map<string, RemoteDebugSession>();
+}
+const remoteDebugSessionsMap = globalDebugState.__remoteDebugSessions;
+
+function findRemoteDebugBySessionId(sessionId: string): RemoteDebugSession | undefined {
+  for (const session of remoteDebugSessionsMap.values()) {
+    if (session.sessionId === sessionId) return session;
+  }
+  return undefined;
+}
+
+export function createRemoteDebugSession(
+  sessionId: string,
+  runnerId: string,
+  repositoryId: string | null,
+  testId: string
+): void {
+  remoteDebugSessionsMap.set(sessionId, {
+    sessionId,
+    runnerId,
+    repositoryId,
+    testId,
+    state: null,
+    startedAt: new Date(),
+  });
+  console.log(`[Debug] Created remote session ${sessionId} for runner ${runnerId}`);
+}
+
+export function getRemoteDebugSession(sessionId: string): RemoteDebugSession | null {
+  return remoteDebugSessionsMap.get(sessionId) ?? findRemoteDebugBySessionId(sessionId) ?? null;
+}
+
+export function clearRemoteDebugSession(sessionId: string): void {
+  remoteDebugSessionsMap.delete(sessionId);
 }

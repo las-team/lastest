@@ -7,7 +7,7 @@ import crypto from 'crypto';
 import AxeBuilder from '@axe-core/playwright';
 import { DEFAULT_SELECTOR_PRIORITY, DEFAULT_STABILIZATION_SETTINGS } from '@/lib/db/schema';
 import type { A11yViolation, StabilizationSettings, StabilityMetadata } from '@/lib/db/schema';
-import { getSelectorStats, recordSelectorSuccess, recordSelectorFailure, getDefaultSetupSteps } from '@/lib/db/queries';
+import { getSelectorStats, recordSelectorSuccess, recordSelectorFailure, getDefaultSetupSteps, getTestFixtures } from '@/lib/db/queries';
 import { setupFreezeScripts, setupThirdPartyBlocking, applyStabilization } from './stabilization';
 import { captureWithBurst } from './burst-capture';
 import { applyDynamicMasking } from './dynamic-masking';
@@ -1032,14 +1032,19 @@ export class PlaywrightRunner extends EventEmitter {
       // Get stabilization settings (merge per-test overrides if present)
       const stabilization = { ...this.getStabilizationSettings(), ...test.stabilizationOverrides };
 
+      // Per-test playwright overrides
+      const effectiveBaseUrl = test.playwrightOverrides?.baseUrl ?? (this.environmentConfig?.baseUrl || 'http://localhost:3000');
+
       // Per-test viewport override takes precedence over global settings
       const testViewport = test.viewportOverride || this.getViewport();
+
+      const effectiveAcceptAnyCert = test.playwrightOverrides?.acceptAnyCertificate ?? this.settings?.acceptAnyCertificate ?? false;
 
       context = await this.browser.newContext({
         viewport: testViewport,
         ...(parsedStorageState ? { storageState: parsedStorageState } : {}),
         ...(videoDir ? { recordVideo: { dir: videoDir, size: testViewport } } : {}),
-        ...(this.settings?.acceptAnyCertificate ? { ignoreHTTPSErrors: true } : {}),
+        ...(effectiveAcceptAnyCert ? { ignoreHTTPSErrors: true } : {}),
         ...(this.settings?.freezeAnimations ? { reducedMotion: 'reduce' } : {}),
         ...(this.settings?.grantClipboardAccess ? { permissions: ['clipboard-read', 'clipboard-write'] } : {}),
         ...(this.settings?.acceptDownloads ? { acceptDownloads: true } : {}),
@@ -1054,8 +1059,8 @@ export class PlaywrightRunner extends EventEmitter {
       await setupFreezeScripts(page, { ...stabilization, freezeAnimations: this.settings?.freezeAnimations ?? false } as any);
 
       // Setup third-party blocking if enabled
-      // Get the base URL from environment config (always a full URL like http://localhost:3000)
-      const envBaseUrl = (this.environmentConfig?.baseUrl || 'http://localhost:3000').replace(/\/$/, '');
+      // Get the base URL from environment config or per-test override
+      const envBaseUrl = effectiveBaseUrl.replace(/\/$/, '');
       // Resolve target URL - if test.targetUrl is relative, combine with envBaseUrl
       let targetUrl = envBaseUrl;
       if (test.targetUrl) {
@@ -1746,6 +1751,7 @@ export class PlaywrightRunner extends EventEmitter {
             }
             const target = locator.first();
             await target.waitFor({ timeout: 3000 });
+            await target.scrollIntoViewIfNeeded().catch(() => {});
             if (action === 'click') await target.click();
             else if (action === 'fill') await target.fill(value || '');
             else if (action === 'selectOption') await target.selectOption(value || '');
@@ -1893,9 +1899,21 @@ export class PlaywrightRunner extends EventEmitter {
         }
       };
 
+      // Load test fixtures from DB — map filename → absolute storage path
+      const fixturesMap: Record<string, string> = {};
+      if (test.id) {
+        const fixtureRecords = await getTestFixtures(test.id);
+        for (const fixture of fixtureRecords) {
+          const absPath = path.join(STORAGE_DIRS.fixtures, fixture.storagePath.replace(/^\/fixtures\//, ''));
+          if (fs.existsSync(absPath)) {
+            fixturesMap[fixture.filename] = absPath;
+          }
+        }
+      }
+
       const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
-      const testFn = new AsyncFunction('page', 'baseUrl', 'screenshotPath', 'stepLogger', 'expect', 'appState', 'locateWithFallback', 'fileUpload', 'clipboard', 'downloads', 'network', 'replayCursorPath', body);
-      await testFn(page, baseUrl, screenshotPath, stepLogger, expectFn, appStateFn, statsLocateWithFallback, fileUploadHelper, clipboardHelper, downloadsHelper, networkHelper, replayCursorPathFn);
+      const testFn = new AsyncFunction('page', 'baseUrl', 'screenshotPath', 'stepLogger', 'expect', 'appState', 'locateWithFallback', 'fileUpload', 'clipboard', 'downloads', 'network', 'replayCursorPath', 'fixtures', body);
+      await testFn(page, baseUrl, screenshotPath, stepLogger, expectFn, appStateFn, statsLocateWithFallback, fileUploadHelper, clipboardHelper, downloadsHelper, networkHelper, replayCursorPathFn, fixturesMap);
       return softErrors;
     }
 

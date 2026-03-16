@@ -69,12 +69,93 @@ export class AnthropicDirectProvider implements AIProvider {
   }
 
   async generateStream(options: GenerateOptions, callbacks: StreamCallbacks): Promise<void> {
-    // For diff analysis, streaming is not needed. Fall back to non-streaming.
+    const { prompt, systemPrompt, maxTokens = 4096, temperature = 0.7, images } = options;
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const content: any[] = [];
+
+    if (images && images.length > 0) {
+      for (const img of images) {
+        content.push({
+          type: 'image',
+          source: {
+            type: 'base64',
+            media_type: img.mediaType,
+            data: img.base64,
+          },
+        });
+      }
+    }
+
+    content.push({ type: 'text', text: prompt });
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const body: any = {
+      model: this.model,
+      max_tokens: maxTokens,
+      temperature,
+      messages: [{ role: 'user', content }],
+      stream: true,
+    };
+
+    if (systemPrompt) {
+      body.system = systemPrompt;
+    }
+
     try {
-      const result = await this.generate(options);
-      callbacks.onComplete?.(result);
+      const response = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: {
+          'x-api-key': this.apiKey,
+          'anthropic-version': '2023-06-01',
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(body),
+      });
+
+      if (!response.ok) {
+        const error = await response.json().catch(() => ({ error: { message: response.statusText } }));
+        throw new Error(`Anthropic API error: ${error.error?.message || 'Unknown error'}`);
+      }
+
+      const reader = response.body?.getReader();
+      if (!reader) {
+        throw new Error('No response body');
+      }
+
+      const decoder = new TextDecoder();
+      let fullText = '';
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        const chunk = decoder.decode(value, { stream: true });
+        const lines = chunk.split('\n').filter((line) => line.trim() !== '');
+
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            const data = line.slice(6);
+
+            try {
+              const parsed = JSON.parse(data);
+              if (parsed.type === 'content_block_delta' && parsed.delta?.type === 'text_delta') {
+                const text = parsed.delta.text;
+                if (text) {
+                  fullText += text;
+                  callbacks.onToken?.(text);
+                }
+              }
+            } catch {
+              // Skip invalid JSON chunks
+            }
+          }
+        }
+      }
+
+      callbacks.onComplete?.(fullText);
     } catch (error) {
-      const err = error instanceof Error ? error : new Error('Generation failed');
+      const err = error instanceof Error ? error : new Error('Stream failed');
       callbacks.onError?.(err);
       throw err;
     }

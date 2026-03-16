@@ -92,10 +92,12 @@ export async function fetchAndSyncGitlabRepos(): Promise<{ success: boolean; cou
 export async function selectRepo(repositoryId: string | null) {
   const session = await requireTeamAccess();
 
-  // Write to team-level selection
+  // Write to user-level selection
+  await queries.updateUser(session.user.id, { selectedRepositoryId: repositoryId });
+
+  // Backward compat: also write to team + provider account selections
   await queries.updateTeam(session.team.id, { selectedRepositoryId: repositoryId });
 
-  // Backward compat: also write to provider account selections
   const [githubAccount, gitlabAccount] = await Promise.all([
     queries.getGithubAccountByTeam(session.team.id),
     queries.getGitlabAccountByTeam(session.team.id),
@@ -122,8 +124,8 @@ export async function createLocalRepo(name: string) {
     name,
     fullName: name,
   });
-  // Auto-select the new repo
-  await queries.updateTeam(session.team.id, { selectedRepositoryId: repo.id });
+  // Auto-select the new repo on user
+  await queries.updateUser(session.user.id, { selectedRepositoryId: repo.id });
   revalidatePath('/');
   revalidatePath('/settings');
   return repo;
@@ -131,7 +133,7 @@ export async function createLocalRepo(name: string) {
 
 export async function getSelectedRepo() {
   const session = await requireTeamAccess();
-  return queries.getSelectedRepository(session.team.id);
+  return queries.getSelectedRepository(session.user.id, session.team.id);
 }
 
 export async function getRepos() {

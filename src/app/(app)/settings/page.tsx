@@ -2,7 +2,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Badge } from '@/components/ui/badge';
 import * as queries from '@/lib/db/queries';
 import { getCurrentSession } from '@/lib/auth';
-import { Github, Check, X, Database, ExternalLink, Users, Bot, Mail, Terminal } from 'lucide-react';
+import { Github, Check, X, Users, Bot, Mail, Terminal } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 
 // GitLab icon SVG component
@@ -36,6 +36,7 @@ import { EarlyAdopterToggle } from '@/components/settings/early-adopter-toggle';
 import { BanAiModeToggle } from '@/components/settings/ban-ai-mode-toggle';
 import { ConnectGithubButton, ReconnectGithubLink } from '@/components/settings/connect-github-button';
 import { GithubActionsCard } from '@/components/settings/github-actions-card-client';
+import { DiagramThumbnail } from '@/components/ui/diagram-thumbnail';
 
 export default async function SettingsPage({
   searchParams,
@@ -46,10 +47,11 @@ export default async function SettingsPage({
   const session = await getCurrentSession();
   const currentUser = session?.user ?? null;
   const teamId = session?.team?.id;
+  const userId = session?.user?.id;
   const [githubAccount, gitlabAccount, selectedRepo] = await Promise.all([
     teamId ? queries.getGithubAccountByTeam(teamId) : null,
     teamId ? queries.getGitlabAccountByTeam(teamId) : null,
-    teamId ? queries.getSelectedRepository(teamId) : null,
+    teamId ? queries.getSelectedRepository(userId, teamId) : null,
   ]);
   const [githubActionConfigs, teamRepos, runners, sysRunners] = await Promise.all([
     teamId ? queries.getGithubActionConfigs(teamId) : [],
@@ -288,43 +290,6 @@ export default async function SettingsPage({
             </CardContent>
           </Card>
 
-          {/* Database Info */}
-          <Card id="database">
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <Database className="w-5 h-5" />
-                Database
-              </CardTitle>
-              <CardDescription>
-                SQLite database configuration
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">Location</span>
-                <code className="text-sm">./lastest2.db</code>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">Type</span>
-                <span>SQLite with WAL mode</span>
-              </div>
-              <div className="pt-2 border-t">
-                <Button asChild variant="outline" size="sm">
-                  <a
-                    href="https://local.drizzle.studio"
-                    target="_blank"
-                    rel="noopener noreferrer"
-                  >
-                    <ExternalLink className="w-4 h-4" />
-                    Open Drizzle Studio
-                  </a>
-                </Button>
-                <p className="text-xs text-muted-foreground mt-2">
-                  Run <code className="bg-muted px-1 rounded">pnpm db:studio</code> first
-                </p>
-              </div>
-            </CardContent>
-          </Card>
 
           {/* Environment Config */}
           <div id="environment">
@@ -463,15 +428,43 @@ export default async function SettingsPage({
                       <Terminal className="w-4 h-4" />
                       Setup Guide
                     </summary>
-                    <div className="bg-muted/50 border rounded-md p-4 mt-2 space-y-2 text-xs text-muted-foreground">
-                      <p>1. Install Playwright browser:</p>
-                      <pre className="bg-muted p-2 rounded text-xs font-mono">npx playwright install chromium</pre>
-                      <p>2. Start the runner:</p>
-                      <pre className="bg-muted p-2 rounded text-xs font-mono">npx @lastest/runner start -t YOUR_TOKEN -s {serverUrl}</pre>
-                      <p>3. For Docker / foreground mode:</p>
-                      <pre className="bg-muted p-2 rounded text-xs font-mono">npx @lastest/runner run -t YOUR_TOKEN -s {serverUrl}</pre>
+                    <div className="bg-muted/50 border rounded-md p-4 mt-2 space-y-3 text-xs text-muted-foreground">
+                      <DiagramThumbnail
+                        src="/docs/runner-logic.png"
+                        alt="Remote Runners Architecture Diagram"
+                        width={140}
+                        height={90}
+                      />
+                      <div>
+                        <p className="font-medium mb-1">1. Install Playwright browser:</p>
+                        <pre className="bg-muted p-2 rounded text-xs font-mono">npx playwright install chromium</pre>
+                      </div>
+                      <div>
+                        <p className="font-medium mb-1">2. Start as background daemon:</p>
+                        <pre className="bg-muted p-2 rounded text-xs font-mono">npx @lastest/runner start -t YOUR_TOKEN -s {serverUrl}</pre>
+                        <p className="text-[11px] mt-1 opacity-75">Logs: ~/.lastest2/runner.log · Config saved for subsequent runs</p>
+                      </div>
+                      <div>
+                        <p className="font-medium mb-1">3. Or run in foreground (Docker / CI):</p>
+                        <pre className="bg-muted p-2 rounded text-xs font-mono">npx @lastest/runner run -t YOUR_TOKEN -s {serverUrl}</pre>
+                      </div>
+                      <div>
+                        <p className="font-medium mb-1">Manage daemon:</p>
+                        <pre className="bg-muted p-2 rounded text-xs font-mono space-y-0.5">{`npx @lastest/runner stop      # Stop background runner
+npx @lastest/runner status    # Check if running
+npx @lastest/runner log -f    # Follow logs in real-time`}</pre>
+                      </div>
+                      <div>
+                        <p className="font-medium mb-1">Trigger builds from CI:</p>
+                        <pre className="bg-muted p-2 rounded text-xs font-mono">{`npx @lastest/runner trigger -t YOUR_TOKEN -s ${serverUrl} --branch main`}</pre>
+                        <p className="text-[11px] mt-1 opacity-75">Options: <code className="bg-muted px-1 py-0.5 rounded">--timeout</code> ms, <code className="bg-muted px-1 py-0.5 rounded">--commit</code> SHA, <code className="bg-muted px-1 py-0.5 rounded">--target-url</code> override, <code className="bg-muted px-1 py-0.5 rounded">--fail-on-changes</code></p>
+                      </div>
+                      <div>
+                        <p className="font-medium mb-1">List available repositories:</p>
+                        <pre className="bg-muted p-2 rounded text-xs font-mono">npx @lastest/runner repos</pre>
+                      </div>
                       <p className="pt-1">
-                        Options: <code className="bg-muted px-1 py-0.5 rounded">--base-url</code> override target URL, <code className="bg-muted px-1 py-0.5 rounded">--interval</code> poll frequency (ms)
+                        Options: <code className="bg-muted px-1 py-0.5 rounded">-b, --base-url</code> override target URL, <code className="bg-muted px-1 py-0.5 rounded">-i, --interval</code> poll frequency (ms, default 5000)
                       </p>
                     </div>
                   </details>

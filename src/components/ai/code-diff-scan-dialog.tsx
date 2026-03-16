@@ -211,6 +211,7 @@ export function CodeDiffScanDialog({
             name: `${testName} - Diff Test`,
             code: result.code,
             targetUrl: route.path,
+            description: route.testSuggestions.length > 0 ? route.testSuggestions.join('\n') : undefined,
           });
           successCount++;
           setGenerateResults(prev => [...prev, { path: route.path, success: true }]);

@@ -7,6 +7,7 @@ import {
   tests,
   suites,
   repositories,
+  storageStates,
 } from '../schema';
 import type {
   NewSetupScript,
@@ -17,10 +18,13 @@ import type {
   TestSetupOverrides,
   TestTeardownOverrides,
   StabilizationSettings,
+  TestDiffOverrides,
+  TestPlaywrightOverrides,
 } from '../schema';
 import { getTest } from './tests';
 import { getRepository } from './repositories';
 import { getSuite } from './suites';
+import { getStorageState } from './storage-states';
 import { eq, desc, and, isNull } from 'drizzle-orm';
 import { v4 as uuid } from 'uuid';
 
@@ -236,16 +240,20 @@ export async function getDefaultSetupSteps(repositoryId: string) {
       stepType: defaultSetupSteps.stepType,
       testId: defaultSetupSteps.testId,
       scriptId: defaultSetupSteps.scriptId,
+      storageStateId: defaultSetupSteps.storageStateId,
       orderIndex: defaultSetupSteps.orderIndex,
       createdAt: defaultSetupSteps.createdAt,
       // Join test name
       testName: tests.name,
       // Join script name
       scriptName: setupScripts.name,
+      // Join storage state name
+      storageStateName: storageStates.name,
     })
     .from(defaultSetupSteps)
     .leftJoin(tests, eq(defaultSetupSteps.testId, tests.id))
     .leftJoin(setupScripts, eq(defaultSetupSteps.scriptId, setupScripts.id))
+    .leftJoin(storageStates, eq(defaultSetupSteps.storageStateId, storageStates.id))
     .where(eq(defaultSetupSteps.repositoryId, repositoryId))
     .orderBy(defaultSetupSteps.orderIndex)
     .all();
@@ -275,7 +283,7 @@ export async function updateDefaultSetupStepOrder(id: string, orderIndex: number
 
 export async function replaceDefaultSetupSteps(
   repositoryId: string,
-  steps: Array<{ stepType: 'test' | 'script'; testId?: string | null; scriptId?: string | null }>
+  steps: Array<{ stepType: 'test' | 'script' | 'storage_state'; testId?: string | null; scriptId?: string | null; storageStateId?: string | null }>
 ) {
   // Delete all existing steps
   await deleteAllDefaultSetupSteps(repositoryId);
@@ -289,6 +297,7 @@ export async function replaceDefaultSetupSteps(
       stepType: step.stepType,
       testId: step.testId ?? null,
       scriptId: step.scriptId ?? null,
+      storageStateId: step.storageStateId ?? null,
       orderIndex: i,
     });
     results.push(result);
@@ -318,19 +327,21 @@ export async function getResolvedSetupStepsForTest(test: { id: string; repositor
     .map((s) => ({
       source: 'default' as const,
       id: s.id,
-      stepType: s.stepType as 'test' | 'script',
+      stepType: s.stepType as 'test' | 'script' | 'storage_state',
       testId: s.testId,
       scriptId: s.scriptId,
-      name: s.testName || s.scriptName || 'Unknown',
+      storageStateId: s.storageStateId,
+      name: s.testName || s.scriptName || s.storageStateName || 'Unknown',
     }));
 
   // Resolve extra steps names
   const extras: Array<{
     source: 'extra';
     id: string;
-    stepType: 'test' | 'script';
+    stepType: 'test' | 'script' | 'storage_state';
     testId: string | null | undefined;
     scriptId: string | null | undefined;
+    storageStateId: string | null | undefined;
     name: string;
   }> = [];
 
@@ -344,6 +355,9 @@ export async function getResolvedSetupStepsForTest(test: { id: string; repositor
       } else if (step.stepType === 'script' && step.scriptId) {
         const s = await getSetupScript(step.scriptId);
         name = s?.name || 'Deleted script';
+      } else if (step.stepType === 'storage_state' && step.storageStateId) {
+        const ss = await getStorageState(step.storageStateId);
+        name = ss?.name || 'Deleted auth state';
       }
       extras.push({
         source: 'extra',
@@ -351,6 +365,7 @@ export async function getResolvedSetupStepsForTest(test: { id: string; repositor
         stepType: step.stepType,
         testId: step.testId,
         scriptId: step.scriptId,
+        storageStateId: step.storageStateId,
         name,
       });
     }
@@ -371,14 +386,17 @@ export async function getDefaultTeardownSteps(repositoryId: string) {
       stepType: defaultTeardownSteps.stepType,
       testId: defaultTeardownSteps.testId,
       scriptId: defaultTeardownSteps.scriptId,
+      storageStateId: defaultTeardownSteps.storageStateId,
       orderIndex: defaultTeardownSteps.orderIndex,
       createdAt: defaultTeardownSteps.createdAt,
       testName: tests.name,
       scriptName: setupScripts.name,
+      storageStateName: storageStates.name,
     })
     .from(defaultTeardownSteps)
     .leftJoin(tests, eq(defaultTeardownSteps.testId, tests.id))
     .leftJoin(setupScripts, eq(defaultTeardownSteps.scriptId, setupScripts.id))
+    .leftJoin(storageStates, eq(defaultTeardownSteps.storageStateId, storageStates.id))
     .where(eq(defaultTeardownSteps.repositoryId, repositoryId))
     .orderBy(defaultTeardownSteps.orderIndex)
     .all();
@@ -408,7 +426,7 @@ export async function updateDefaultTeardownStepOrder(id: string, orderIndex: num
 
 export async function replaceDefaultTeardownSteps(
   repositoryId: string,
-  steps: Array<{ stepType: 'test' | 'script'; testId?: string | null; scriptId?: string | null }>
+  steps: Array<{ stepType: 'test' | 'script' | 'storage_state'; testId?: string | null; scriptId?: string | null; storageStateId?: string | null }>
 ) {
   await deleteAllDefaultTeardownSteps(repositoryId);
   const results = [];
@@ -419,6 +437,7 @@ export async function replaceDefaultTeardownSteps(
       stepType: step.stepType,
       testId: step.testId ?? null,
       scriptId: step.scriptId ?? null,
+      storageStateId: step.storageStateId ?? null,
       orderIndex: i,
     });
     results.push(result);
@@ -446,18 +465,20 @@ export async function getResolvedTeardownStepsForTest(test: { id: string; reposi
     .map((s) => ({
       source: 'default' as const,
       id: s.id,
-      stepType: s.stepType as 'test' | 'script',
+      stepType: s.stepType as 'test' | 'script' | 'storage_state',
       testId: s.testId,
       scriptId: s.scriptId,
-      name: s.testName || s.scriptName || 'Unknown',
+      storageStateId: s.storageStateId,
+      name: s.testName || s.scriptName || s.storageStateName || 'Unknown',
     }));
 
   const extras: Array<{
     source: 'extra';
     id: string;
-    stepType: 'test' | 'script';
+    stepType: 'test' | 'script' | 'storage_state';
     testId: string | null | undefined;
     scriptId: string | null | undefined;
+    storageStateId?: string | null | undefined;
     name: string;
   }> = [];
 
@@ -471,6 +492,10 @@ export async function getResolvedTeardownStepsForTest(test: { id: string; reposi
       } else if (step.stepType === 'script' && step.scriptId) {
         const s = await getSetupScript(step.scriptId);
         name = s?.name || 'Deleted script';
+      } else if (step.stepType === 'storage_state' && (step as Record<string, unknown>).storageStateId) {
+        const { getStorageState } = await import('./storage-states');
+        const ss = await getStorageState((step as Record<string, unknown>).storageStateId as string);
+        name = ss?.name || 'Deleted storage state';
       }
       extras.push({
         source: 'extra',
@@ -478,6 +503,7 @@ export async function getResolvedTeardownStepsForTest(test: { id: string; reposi
         stepType: step.stepType,
         testId: step.testId,
         scriptId: step.scriptId,
+        storageStateId: (step as Record<string, unknown>).storageStateId as string | null | undefined,
         name,
       });
     }
@@ -492,4 +518,20 @@ export async function getResolvedTeardownStepsForTest(test: { id: string; reposi
 
 export async function updateTestStabilizationOverrides(testId: string, overrides: Partial<StabilizationSettings> | null) {
   await db.update(tests).set({ stabilizationOverrides: overrides, updatedAt: new Date() }).where(eq(tests.id, testId));
+}
+
+// ============================================
+// Per-Test Diff Overrides
+// ============================================
+
+export async function updateTestDiffOverrides(testId: string, overrides: TestDiffOverrides | null) {
+  await db.update(tests).set({ diffOverrides: overrides, updatedAt: new Date() }).where(eq(tests.id, testId));
+}
+
+// ============================================
+// Per-Test Playwright Overrides
+// ============================================
+
+export async function updateTestPlaywrightOverrides(testId: string, overrides: TestPlaywrightOverrides | null) {
+  await db.update(tests).set({ playwrightOverrides: overrides, updatedAt: new Date() }).where(eq(tests.id, testId));
 }

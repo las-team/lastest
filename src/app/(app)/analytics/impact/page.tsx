@@ -15,7 +15,8 @@ export const dynamic = 'force-dynamic';
 export default async function ImpactPage() {
   const session = await getCurrentSession();
   const teamId = session?.team?.id;
-  const selectedRepo = teamId ? await getSelectedRepository(teamId) : null;
+  const userId = session?.user?.id;
+  const selectedRepo = teamId ? await getSelectedRepository(userId, teamId) : null;
 
   let initialData = null;
   if (selectedRepo && teamId) {

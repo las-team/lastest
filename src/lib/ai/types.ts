@@ -1,4 +1,4 @@
-export type AIProviderType = 'claude-cli' | 'openrouter' | 'claude-agent-sdk' | 'ollama';
+export type AIProviderType = 'claude-cli' | 'openrouter' | 'claude-agent-sdk' | 'ollama' | 'openai' | 'anthropic';
 
 export interface GenerateOptions {
   prompt: string;
@@ -30,6 +30,10 @@ export interface AIProviderConfig {
   agentSdkMcpServers?: Record<string, { command: string; args?: string[]; env?: Record<string, string> }>;
   ollamaBaseUrl?: string;
   ollamaModel?: string;
+  anthropicApiKey?: string | null;
+  anthropicModel?: string;
+  openaiApiKey?: string | null;
+  openaiModel?: string;
 }
 
 export type DiscoverySource = 'file-scan' | 'nav-link' | 'spec-analysis' | 'mcp-explore' | 'manual';
@@ -69,6 +73,7 @@ export interface TestGenerationContext {
   siblingRoutes?: string[];
   scanContext?: ScanContext;
   codebaseIntelligence?: CodebaseIntelligenceContext;
+  availableRoutes?: string[];
 }
 
 export interface GeneratedTest {

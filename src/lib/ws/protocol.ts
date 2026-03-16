@@ -17,6 +17,10 @@ export type MessageType =
   | 'command:stop_recording'
   | 'command:create_assertion'
   | 'command:flag_download'
+  | 'command:insert_timestamp'
+  | 'command:start_debug'
+  | 'command:debug_action'
+  | 'command:stop_debug'
   | 'command:ping'
   | 'command:shutdown'
   // Agent → Server (Responses)
@@ -25,6 +29,7 @@ export type MessageType =
   | 'response:setup_result'
   | 'response:recording_event'
   | 'response:recording_stopped'
+  | 'response:debug_state'
   | 'command:capture_screenshot'
   | 'response:screenshot'
   | 'response:screenshot_ack'
@@ -79,6 +84,10 @@ export interface RunTestCommandPayload {
   cursorPlaybackSpeed?: number; // 0 = instant (skip delays), 1 = realtime
   stabilization?: StabilizationPayload;
   browser?: 'chromium' | 'firefox' | 'webkit';
+  fixtures?: Array<{ filename: string; data: string }>; // base64-encoded fixture files
+  grantClipboardAccess?: boolean;
+  acceptDownloads?: boolean;
+  headed?: boolean;
 }
 
 export interface RunTestCommand extends BaseMessage {
@@ -274,6 +283,89 @@ export interface FlagDownloadCommand extends BaseMessage {
   payload: FlagDownloadCommandPayload;
 }
 
+export interface InsertTimestampCommand extends BaseMessage {
+  type: 'command:insert_timestamp';
+  payload: { sessionId: string };
+}
+
+// ============================================
+// Debug Commands & Responses
+// ============================================
+
+export interface DebugStep {
+  id: number;
+  code: string;
+  label: string;
+  lineStart: number;
+  lineEnd: number;
+  type: 'action' | 'navigation' | 'assertion' | 'screenshot' | 'wait' | 'variable' | 'log' | 'other';
+}
+
+export interface DebugStepResult {
+  stepId: number;
+  status: 'passed' | 'failed' | 'pending';
+  durationMs: number;
+  error?: string;
+}
+
+export interface StartDebugCommandPayload {
+  sessionId: string;
+  testId: string;
+  code: string;
+  cleanBody: string;
+  steps: DebugStep[];
+  targetUrl: string;
+  viewport?: { width: number; height: number };
+  storageState?: string;
+  setupVariables?: Record<string, unknown>;
+  stabilization?: StabilizationPayload;
+}
+
+export interface StartDebugCommand extends BaseMessage {
+  type: 'command:start_debug';
+  payload: StartDebugCommandPayload;
+}
+
+export interface DebugActionCommandPayload {
+  sessionId: string;
+  action: 'step_forward' | 'step_back' | 'run_to_end' | 'run_to_step' | 'update_code';
+  stepIndex?: number;
+  code?: string;
+  cleanBody?: string;
+  steps?: DebugStep[];
+}
+
+export interface DebugActionCommand extends BaseMessage {
+  type: 'command:debug_action';
+  payload: DebugActionCommandPayload;
+}
+
+export interface StopDebugCommandPayload {
+  sessionId: string;
+}
+
+export interface StopDebugCommand extends BaseMessage {
+  type: 'command:stop_debug';
+  payload: StopDebugCommandPayload;
+}
+
+export interface DebugStateResponsePayload {
+  sessionId: string;
+  testId: string;
+  status: 'initializing' | 'paused' | 'stepping' | 'running' | 'completed' | 'error';
+  currentStepIndex: number;
+  steps: DebugStep[];
+  stepResults: DebugStepResult[];
+  code: string;
+  error?: string;
+  codeVersion: number;
+}
+
+export interface DebugStateResponse extends BaseMessage {
+  type: 'response:debug_state';
+  payload: DebugStateResponsePayload;
+}
+
 export interface CaptureScreenshotCommand extends BaseMessage {
   type: 'command:capture_screenshot';
   payload: { sessionId: string };
@@ -348,7 +440,7 @@ export interface SystemInfo {
 }
 
 export interface HeartbeatPayload {
-  status: 'idle' | 'busy' | 'recording';
+  status: 'idle' | 'busy' | 'recording' | 'debugging';
   currentTask?: string;
   systemInfo: SystemInfo;
   disconnect?: boolean; // Signal graceful shutdown
@@ -385,7 +477,11 @@ export type ServerCommand =
   | StopRecordingCommand
   | CreateAssertionCommand
   | FlagDownloadCommand
+  | InsertTimestampCommand
   | CaptureScreenshotCommand
+  | StartDebugCommand
+  | DebugActionCommand
+  | StopDebugCommand
   | PingCommand;
 
 export type AgentResponse =
@@ -395,6 +491,7 @@ export type AgentResponse =
   | RecordingEventResponse
   | RecordingStoppedResponse
   | ScreenshotUploadResponse
+  | DebugStateResponse
   | ErrorResponse
   | PongResponse
   | HeartbeatMessage;
@@ -404,6 +501,7 @@ export type Message =
   | AgentResponse
   | SetupResultResponse
   | ScreenshotAckResponse
+  | DebugStateResponse
   | ConnectionEstablishedMessage;
 
 // ============================================
@@ -448,7 +546,7 @@ export interface ScreencastFrameMessage extends BaseMessage {
 /** Client → Server: Mouse/keyboard input forwarding */
 export interface StreamInputMessage extends BaseMessage {
   type: 'stream:input';
-  payload: StreamMouseEvent | StreamKeyboardEvent;
+  payload: StreamMouseEvent | StreamKeyboardEvent | StreamFileUploadEvent | StreamClipboardEvent;
 }
 
 export interface StreamMouseEvent {
@@ -471,6 +569,16 @@ export interface StreamKeyboardEvent {
   modifiers?: { ctrl?: boolean; shift?: boolean; alt?: boolean; meta?: boolean };
 }
 
+export interface StreamFileUploadEvent {
+  type: 'file_upload';
+  files: Array<{ name: string; data: string; mimeType: string }>; // base64 data
+}
+
+export interface StreamClipboardEvent {
+  type: 'clipboard_paste';
+  text: string;
+}
+
 /** Client → Server / Server → Client: Session lifecycle control */
 export interface StreamSessionMessage extends BaseMessage {
   type: 'stream:session';
@@ -488,6 +596,7 @@ export interface StreamStatusMessage extends BaseMessage {
     currentUrl?: string;
     viewport?: { width: number; height: number };
     error?: string;
+    fileChooserPending?: boolean;
   };
 }
 

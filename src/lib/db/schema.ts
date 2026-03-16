@@ -79,19 +79,46 @@ export interface TestRequiredCapabilities {
 export interface TestSetupOverrides {
   skippedDefaultStepIds: string[];  // IDs from default_setup_steps to skip
   extraSteps: Array<{
-    stepType: 'test' | 'script';
+    stepType: 'test' | 'script' | 'storage_state';
     testId?: string | null;
     scriptId?: string | null;
+    storageStateId?: string | null;
   }>;
 }
 
 export interface TestTeardownOverrides {
   skippedDefaultStepIds: string[];  // IDs from default_teardown_steps to skip
   extraSteps: Array<{
-    stepType: 'test' | 'script';
+    stepType: 'test' | 'script' | 'storage_state';
     testId?: string | null;
     scriptId?: string | null;
+    storageStateId?: string | null;
   }>;
+}
+
+export interface TestDiffOverrides {
+  unchangedThreshold?: number;
+  flakyThreshold?: number;
+  includeAntiAliasing?: boolean;
+  ignorePageShift?: boolean;
+  diffEngine?: 'pixelmatch' | 'ssim' | 'butteraugli';
+  textRegionAwareDiffing?: boolean;
+  textRegionThreshold?: number;
+  textRegionPadding?: number;
+  textDetectionGranularity?: 'word' | 'line' | 'block';
+  regionDetectionMode?: 'grid' | 'flood-fill';
+}
+
+export interface TestPlaywrightOverrides {
+  browser?: 'chromium' | 'firefox' | 'webkit';
+  navigationTimeout?: number;
+  actionTimeout?: number;
+  screenshotDelay?: number;
+  networkErrorMode?: 'fail' | 'warn' | 'ignore';
+  consoleErrorMode?: 'fail' | 'warn' | 'ignore';
+  acceptAnyCertificate?: boolean;
+  maxParallelTests?: number;
+  baseUrl?: string;
 }
 
 export const functionalAreas = sqliteTable('functional_areas', {
@@ -122,6 +149,8 @@ export const tests = sqliteTable('tests', {
   stabilizationOverrides: text('stabilization_overrides', { mode: 'json' }).$type<Partial<StabilizationSettings>>(),
   requiredCapabilities: text('required_capabilities', { mode: 'json' }).$type<TestRequiredCapabilities>(),
   viewportOverride: text('viewport_override', { mode: 'json' }).$type<{ width: number; height: number }>(),
+  diffOverrides: text('diff_overrides', { mode: 'json' }).$type<TestDiffOverrides>(),
+  playwrightOverrides: text('playwright_overrides', { mode: 'json' }).$type<TestPlaywrightOverrides>(),
   deletedAt: integer('deleted_at', { mode: 'timestamp' }),
   createdAt: integer('created_at', { mode: 'timestamp' }),
   updatedAt: integer('updated_at', { mode: 'timestamp' }),
@@ -642,7 +671,7 @@ export const diffSensitivitySettings = sqliteTable('diff_sensitivity_settings', 
   textRegionThreshold: integer('text_region_threshold').default(30), // percentage, stored as 30 = 0.3
   textRegionPadding: integer('text_region_padding').default(4), // pixels to expand text bounding boxes
   textDetectionGranularity: text('text_detection_granularity').default('word'), // 'word' | 'line' | 'block'
-  regionDetectionMode: text('region_detection_mode').default('grid'), // 'grid' | 'flood-fill'
+  regionDetectionMode: text('region_detection_mode').default('flood-fill'), // 'grid' | 'flood-fill'
   createdAt: integer('created_at', { mode: 'timestamp' }),
   updatedAt: integer('updated_at', { mode: 'timestamp' }),
 });
@@ -661,7 +690,7 @@ export const DEFAULT_DIFF_THRESHOLDS = {
   textRegionThreshold: 30,
   textRegionPadding: 4,
   textDetectionGranularity: 'word' as TextDetectionGranularity,
-  regionDetectionMode: 'grid' as RegionDetectionMode,
+  regionDetectionMode: 'flood-fill' as RegionDetectionMode,
 };
 
 // Diff classification type
@@ -673,7 +702,7 @@ export type DiffStatus = 'pending' | 'approved' | 'rejected' | 'auto_approved' |
 export type TriggerType = 'webhook' | 'manual' | 'push';
 
 // AI Provider settings for test generation
-export type AIProvider = 'claude-cli' | 'openrouter' | 'claude-agent-sdk' | 'ollama';
+export type AIProvider = 'claude-cli' | 'openrouter' | 'claude-agent-sdk' | 'ollama' | 'openai' | 'anthropic';
 export type AgentSdkPermissionMode = 'plan' | 'default' | 'acceptEdits';
 
 export const aiSettings = sqliteTable('ai_settings', {
@@ -687,6 +716,10 @@ export const aiSettings = sqliteTable('ai_settings', {
   agentSdkWorkingDir: text('agent_sdk_working_dir'),
   ollamaBaseUrl: text('ollama_base_url'),
   ollamaModel: text('ollama_model'),
+  anthropicApiKey: text('anthropic_api_key'),
+  anthropicModel: text('anthropic_model').default('claude-sonnet-4-5-20250929'),
+  openaiApiKey: text('openai_api_key'),
+  openaiModel: text('openai_model').default('gpt-4o'),
   customInstructions: text('custom_instructions'),
   // AI Diffing settings (separate from test generation)
   aiDiffingEnabled: integer('ai_diffing_enabled', { mode: 'boolean' }).default(false),
@@ -709,6 +742,8 @@ export const DEFAULT_AI_SETTINGS = {
   agentSdkModel: '',
   ollamaBaseUrl: 'http://localhost:11434',
   ollamaModel: '',
+  anthropicModel: 'claude-sonnet-4-5-20250929',
+  openaiModel: 'gpt-4o',
   aiDiffingEnabled: false,
   aiDiffingProvider: 'same-as-test-gen' as AIDiffingProvider,
   aiDiffingModel: 'anthropic/claude-sonnet-4-5-20250929',
@@ -893,6 +928,7 @@ export const users = sqliteTable('users', {
   avatarUrl: text('avatar_url'),
   teamId: text('team_id').references(() => teams.id), // Single team membership
   role: text('role').notNull().default('member'), // 'owner' | 'admin' | 'member' | 'viewer'
+  selectedRepositoryId: text('selected_repository_id').references(() => repositories.id, { onDelete: 'set null' }),
   emailVerified: integer('email_verified', { mode: 'boolean' }).default(false),
   createdAt: integer('created_at', { mode: 'timestamp' }),
   updatedAt: integer('updated_at', { mode: 'timestamp' }),
@@ -1127,14 +1163,15 @@ export type NewSetupConfig = typeof setupConfigs.$inferInsert;
 export type SetupStatus = 'pending' | 'running' | 'completed' | 'failed' | 'skipped';
 
 // Default Setup Steps - Ordered multi-step setup for repositories
-export type SetupStepType = 'test' | 'script';
+export type SetupStepType = 'test' | 'script' | 'storage_state';
 
 export const defaultSetupSteps = sqliteTable('default_setup_steps', {
   id: text('id').primaryKey(),
   repositoryId: text('repository_id').references(() => repositories.id, { onDelete: 'cascade' }).notNull(),
-  stepType: text('step_type').notNull(), // 'test' | 'script'
+  stepType: text('step_type').notNull(), // 'test' | 'script' | 'storage_state'
   testId: text('test_id').references(() => tests.id, { onDelete: 'cascade' }),
   scriptId: text('script_id').references(() => setupScripts.id, { onDelete: 'cascade' }),
+  storageStateId: text('storage_state_id').references(() => storageStates.id, { onDelete: 'cascade' }),
   orderIndex: integer('order_index').notNull().default(0),
   createdAt: integer('created_at', { mode: 'timestamp' }),
 });
@@ -1146,9 +1183,10 @@ export type NewDefaultSetupStep = typeof defaultSetupSteps.$inferInsert;
 export const defaultTeardownSteps = sqliteTable('default_teardown_steps', {
   id: text('id').primaryKey(),
   repositoryId: text('repository_id').references(() => repositories.id, { onDelete: 'cascade' }).notNull(),
-  stepType: text('step_type').notNull(), // 'test' | 'script'
+  stepType: text('step_type').notNull(), // 'test' | 'script' | 'storage_state'
   testId: text('test_id').references(() => tests.id, { onDelete: 'cascade' }),
   scriptId: text('script_id').references(() => setupScripts.id, { onDelete: 'cascade' }),
+  storageStateId: text('storage_state_id').references(() => storageStates.id, { onDelete: 'cascade' }),
   orderIndex: integer('order_index').notNull().default(0),
   createdAt: integer('created_at', { mode: 'timestamp' }),
 });
@@ -1446,3 +1484,44 @@ export const githubIssues = sqliteTable('github_issues', {
 
 export type GithubIssue = typeof githubIssues.$inferSelect;
 export type NewGithubIssue = typeof githubIssues.$inferInsert;
+
+// ============================================
+// Test Fixtures (files used during test execution)
+// ============================================
+
+export const testFixtures = sqliteTable('test_fixtures', {
+  id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+  repositoryId: text('repository_id').references(() => repositories.id, { onDelete: 'cascade' }).notNull(),
+  testId: text('test_id').references(() => tests.id, { onDelete: 'cascade' }).notNull(),
+  filename: text('filename').notNull(),
+  storagePath: text('storage_path').notNull(), // relative path under storage/fixtures/
+  mimeType: text('mime_type'),
+  sizeBytes: integer('size_bytes'),
+  createdAt: integer('created_at', { mode: 'timestamp' }).$defaultFn(() => new Date()),
+}, (table) => ([
+  index('idx_test_fixtures_test').on(table.testId),
+  index('idx_test_fixtures_repo').on(table.repositoryId),
+]));
+
+export type TestFixture = typeof testFixtures.$inferSelect;
+export type NewTestFixture = typeof testFixtures.$inferInsert;
+
+// ============================================
+// Storage States (saved browser auth for recordings)
+// ============================================
+
+export const storageStates = sqliteTable('storage_states', {
+  id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+  repositoryId: text('repository_id').references(() => repositories.id, { onDelete: 'cascade' }),
+  name: text('name').notNull(),
+  storageStateJson: text('storage_state_json').notNull(),
+  cookieCount: integer('cookie_count').default(0),
+  originCount: integer('origin_count').default(0),
+  createdAt: integer('created_at', { mode: 'timestamp' }).$defaultFn(() => new Date()),
+  updatedAt: integer('updated_at', { mode: 'timestamp' }).$defaultFn(() => new Date()),
+}, (table) => ([
+  index('idx_storage_states_repo').on(table.repositoryId),
+]));
+
+export type StorageState = typeof storageStates.$inferSelect;
+export type NewStorageState = typeof storageStates.$inferInsert;

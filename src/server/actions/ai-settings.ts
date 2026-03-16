@@ -22,8 +22,12 @@ export async function getAISettings(repositoryId?: string | null) {
     ...settings,
     openrouterApiKey: maskSecret(settings.openrouterApiKey),
     aiDiffingApiKey: maskSecret(settings.aiDiffingApiKey),
+    anthropicApiKey: maskSecret(settings.anthropicApiKey),
+    openaiApiKey: maskSecret(settings.openaiApiKey),
     _hasOpenrouterKey: !!settings.openrouterApiKey,
     _hasAiDiffingKey: !!settings.aiDiffingApiKey,
+    _hasAnthropicKey: !!settings.anthropicApiKey,
+    _hasOpenaiKey: !!settings.openaiApiKey,
   };
 }
 
@@ -53,6 +57,10 @@ export async function saveAISettings(data: {
   aiDiffingModel?: string | null;
   aiDiffingOllamaBaseUrl?: string | null;
   aiDiffingOllamaModel?: string | null;
+  anthropicApiKey?: string | null;
+  anthropicModel?: string | null;
+  openaiApiKey?: string | null;
+  openaiModel?: string | null;
 }) {
   if (data.repositoryId) await requireRepoAccess(data.repositoryId);
   else await requireTeamAccess();
@@ -61,6 +69,8 @@ export async function saveAISettings(data: {
   // Don't overwrite real keys with masked placeholders
   if (isMaskedValue(settingsData.openrouterApiKey)) delete settingsData.openrouterApiKey;
   if (isMaskedValue(settingsData.aiDiffingApiKey)) delete settingsData.aiDiffingApiKey;
+  if (isMaskedValue(settingsData.anthropicApiKey)) delete settingsData.anthropicApiKey;
+  if (isMaskedValue(settingsData.openaiApiKey)) delete settingsData.openaiApiKey;
 
   await queries.upsertAISettings(repositoryId || null, settingsData);
 
@@ -88,7 +98,9 @@ export async function testAIConnection(
   apiKey?: string,
   permissionMode?: AgentSdkPermissionMode,
   ollamaBaseUrl?: string,
-  ollamaModel?: string
+  ollamaModel?: string,
+  anthropicApiKey?: string,
+  openaiApiKey?: string
 ): Promise<{
   success: boolean;
   message: string;
@@ -208,6 +220,57 @@ export async function testAIConnection(
             : 'Cannot reach Ollama server. Is it running on the configured URL?'
         };
       }
+    } else if (provider === 'anthropic') {
+      const key = anthropicApiKey || apiKey;
+      if (!key) {
+        return { success: false, message: 'API key is required for Anthropic' };
+      }
+
+      const response = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: {
+          'x-api-key': key,
+          'anthropic-version': '2023-06-01',
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          model: 'claude-sonnet-4-5-20250929',
+          max_tokens: 10,
+          messages: [{ role: 'user', content: 'Say hello in one word' }],
+        }),
+      });
+
+      if (response.ok) {
+        return { success: true, message: 'Anthropic API connected successfully' };
+      }
+
+      const error = await response.json().catch(() => ({ error: { message: response.statusText } }));
+      return { success: false, message: error.error?.message || 'Anthropic connection failed' };
+    } else if (provider === 'openai') {
+      const key = openaiApiKey || apiKey;
+      if (!key) {
+        return { success: false, message: 'API key is required for OpenAI' };
+      }
+
+      const response = await fetch('https://api.openai.com/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${key}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          model: 'gpt-4o',
+          messages: [{ role: 'user', content: 'Say hello in one word' }],
+          max_tokens: 10,
+        }),
+      });
+
+      if (response.ok) {
+        return { success: true, message: 'OpenAI API connected successfully' };
+      }
+
+      const error = await response.json().catch(() => ({ error: { message: response.statusText } }));
+      return { success: false, message: error.error?.message || 'OpenAI connection failed' };
     }
 
     return { success: false, message: 'Unknown provider' };

@@ -50,15 +50,16 @@ export function BugReportWidget() {
 
         if (includeScreenshot) {
           try {
-            const html2canvas = (await import('html2canvas')).default;
+            const html2canvas = (await import('html2canvas-pro')).default;
             const canvas = await html2canvas(document.body, {
               logging: false,
               useCORS: true,
               scale: 1,
+              ignoreElements: (el) => el.tagName === 'IMG' && el.getAttribute('src')?.startsWith('http') === true,
             });
             screenshotBase64 = canvas.toDataURL('image/png').split(',')[1];
           } catch {
-            // Screenshot capture failed, continue without it
+            // Screenshot capture is best-effort; proceed without it
           }
         }
 

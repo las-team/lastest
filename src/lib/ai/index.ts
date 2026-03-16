@@ -3,6 +3,8 @@ import { ClaudeCLIProvider } from './claude-cli';
 import { createOpenRouterProvider } from './openrouter';
 import { createOllamaProvider } from './ollama';
 import { ClaudeAgentSDKProvider } from './claude-agent-sdk';
+import { createOpenAIProvider } from './openai';
+import { createAnthropicDirectProvider } from './anthropic-direct';
 import { createAIPromptLog, updateAIPromptLog } from '@/lib/db/queries';
 import type { AIActionType, AILogStatus } from '@/lib/db/schema';
 
@@ -38,6 +40,26 @@ export function getAIProvider(config: AIProviderConfig): AIProvider {
     return createOllamaProvider({
       baseUrl: config.ollamaBaseUrl || 'http://localhost:11434',
       model: config.ollamaModel,
+    });
+  }
+
+  if (config.provider === 'openai') {
+    if (!config.openaiApiKey) {
+      throw new Error('OpenAI API key is required');
+    }
+    return createOpenAIProvider({
+      apiKey: config.openaiApiKey,
+      model: config.openaiModel || 'gpt-4o',
+    });
+  }
+
+  if (config.provider === 'anthropic') {
+    if (!config.anthropicApiKey) {
+      throw new Error('Anthropic API key is required');
+    }
+    return createAnthropicDirectProvider({
+      apiKey: config.anthropicApiKey,
+      model: config.anthropicModel || 'claude-sonnet-4-5-20250929',
     });
   }
 
@@ -91,7 +113,11 @@ export async function generateWithAI(
         ? config.openrouterModel
         : config.provider === 'ollama'
           ? config.ollamaModel
-          : undefined,
+          : config.provider === 'openai'
+            ? config.openaiModel
+            : config.provider === 'anthropic'
+              ? config.anthropicModel
+              : undefined,
       systemPrompt: finalSystemPrompt || undefined,
       userPrompt: prompt,
       status: 'pending' as AILogStatus,

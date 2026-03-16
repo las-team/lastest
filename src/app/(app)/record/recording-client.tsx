@@ -20,6 +20,8 @@ import {
   captureScreenshot,
   createAssertion,
   flagDownload,
+  insertTimestamp,
+  togglePauseRecording,
   saveRecordedTest,
   updateRerecordedTest,
   getOrCreateFunctionalArea,
@@ -32,6 +34,7 @@ import {
   finalizeInspectorSession,
   type PlaywrightAvailability,
 } from '@/server/actions/recording';
+import { listStorageStates, saveStorageState } from '@/server/actions/storage-states';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -62,9 +65,11 @@ import {
   Keyboard,
   ShieldCheck,
   Play,
+  Pause,
   Download,
   Maximize2,
   Minimize2,
+  Cookie,
 } from 'lucide-react';
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
@@ -79,6 +84,7 @@ import { DEFAULT_RECORDING_ENGINES } from '@/lib/db/schema';
 import { PlaywrightSettingsCard } from '@/components/settings/playwright-settings-card';
 import { ExecutionTargetSelector } from '@/components/execution/execution-target-selector';
 import { BrowserViewer } from '@/components/embedded-browser/browser-viewer-client';
+import { toast } from 'sonner';
 
 interface SetupStepInfo {
   stepType: 'test' | 'script';
@@ -163,6 +169,8 @@ function getEventDescription(event: RecordingEvent): string {
       return `Assert: ${labels[event.data.assertionType || ''] || event.data.assertionType}`;
     case 'download':
       return 'Download expected';
+    case 'insert-timestamp':
+      return 'Insert timestamp';
     case 'mouse-down':
       return `${modPrefix}Mouse down at (${event.data.coordinates?.x}, ${event.data.coordinates?.y})`;
     case 'mouse-up':
@@ -263,6 +271,10 @@ export function RecordingClient({
   const [inspectorSessionId, setInspectorSessionId] = useState<string | null>(null);
   const [executionTarget, setExecutionTarget] = usePreferredRunner();
   const [runSetupBeforeRecording, setRunSetupBeforeRecording] = useState(true);
+  const [selectedStorageStateId, setSelectedStorageStateId] = useState<string | null>(null);
+  const [storageStateOptions, setStorageStateOptions] = useState<Array<{ id: string; name: string; cookieCount: number; originCount: number }>>([]);
+  const [capturedStorageState, setCapturedStorageState] = useState<string | null>(null);
+  const [saveCookieName, setSaveCookieName] = useState('');
 
   // Re-record mode
   const isRerecording = !!rerecordTest;
@@ -274,6 +286,15 @@ export function RecordingClient({
       setPlaywrightStatus(status);
     }
     verifyPlaywright();
+  }, [repositoryId]);
+
+  // Load saved storage states
+  useEffect(() => {
+    async function loadStorageStates() {
+      const states = await listStorageStates(repositoryId ?? null);
+      setStorageStateOptions(states.map(s => ({ id: s.id, name: s.name, cookieCount: s.cookieCount ?? 0, originCount: s.originCount ?? 0 })));
+    }
+    loadStorageStates();
   }, [repositoryId]);
 
   // Setup form state - pre-fill from rerecordTest if available
@@ -297,6 +318,7 @@ export function RecordingClient({
   const [embeddedStreamUrl, setEmbeddedStreamUrl] = useState<string | null>(null);
   const [timelineOpen, setTimelineOpen] = useState(true);
   const [isRecordingFullscreen, setIsRecordingFullscreen] = useState(false);
+  const [isPaused, setIsPaused] = useState(false);
   const recordingLayoutRef = useRef<HTMLDivElement>(null);
 
   // Poll for recording status and events when in recording step
@@ -312,6 +334,7 @@ export function RecordingClient({
           if (status.lastCompletedSession) {
             setGeneratedCode(status.lastCompletedSession.generatedCode);
             setRequiredCapabilities(status.lastCompletedSession.requiredCapabilities ?? null);
+            setCapturedStorageState(status.capturedStorageState ?? null);
             await clearLastCompletedSession(repositoryId);
             setStep('saving');
           } else {
@@ -321,6 +344,11 @@ export function RecordingClient({
           }
           clearInterval(pollInterval);
           return;
+        }
+
+        // Sync pause state
+        if (status.isPaused !== undefined) {
+          setIsPaused(status.isPaused);
         }
 
         // Apply verification updates to existing events
@@ -454,7 +482,7 @@ export function RecordingClient({
             }
           : undefined;
 
-        const result = await startRecording(url, repositoryId, executionTarget, setupOptions);
+        const result = await startRecording(url, repositoryId, executionTarget, setupOptions, selectedStorageStateId ?? undefined);
 
         if (result.error) {
           setError(result.error);
@@ -525,6 +553,27 @@ export function RecordingClient({
     }
   };
 
+  const handleInsertTimestamp = async () => {
+    try {
+      await insertTimestamp(repositoryId);
+    } catch (error) {
+      console.error('Failed to insert timestamp:', error);
+    }
+  };
+
+  const handleTogglePause = async () => {
+    try {
+      const result = await togglePauseRecording(repositoryId);
+      if (result.error) {
+        toast.error(result.error);
+        return;
+      }
+      setIsPaused(result.paused);
+    } catch (error) {
+      console.error('Failed to toggle pause:', error);
+    }
+  };
+
   const handleStopRecording = async () => {
     setIsLoading(true);
     setEmbeddedStreamUrl(null);
@@ -533,6 +582,7 @@ export function RecordingClient({
       if (session) {
         setGeneratedCode(session.generatedCode);
         setRequiredCapabilities(session.requiredCapabilities ?? null);
+        setCapturedStorageState(session.capturedStorageState ?? null);
         setStep('saving');
       }
     } catch (error) {
@@ -837,6 +887,37 @@ export function RecordingClient({
                   );
                 })()}
 
+                {/* Storage State (Saved Auth) Picker */}
+                {storageStateOptions.length > 0 && (
+                  <div className="flex items-center justify-between p-3 bg-muted/50 rounded-lg border">
+                    <div className="flex items-center gap-3">
+                      <Cookie className="h-4 w-4 text-muted-foreground" />
+                      <div className="space-y-0.5">
+                        <Label className="text-sm font-medium">Load Saved Auth</Label>
+                        <p className="text-xs text-muted-foreground">
+                          Restore cookies & localStorage from a previous session
+                        </p>
+                      </div>
+                    </div>
+                    <Select
+                      value={selectedStorageStateId ?? 'none'}
+                      onValueChange={(v) => setSelectedStorageStateId(v === 'none' ? null : v)}
+                    >
+                      <SelectTrigger className="w-48">
+                        <SelectValue placeholder="None" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="none">None</SelectItem>
+                        {storageStateOptions.map(s => (
+                          <SelectItem key={s.id} value={s.id}>
+                            {s.name} ({s.cookieCount} cookies)
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                )}
+
                 {/* Error Display */}
                 {error && (
                   <div className="p-3 bg-destructive/10 border border-destructive/20 rounded-lg text-sm text-destructive">
@@ -1055,10 +1136,13 @@ export function RecordingClient({
           {/* Floating mini-menu — fixed at bottom center */}
           <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 flex items-center gap-1.5 px-3 py-1.5 bg-card/95 backdrop-blur-sm border border-border rounded-full shadow-2xl">
             <div className="flex items-center gap-2 px-1">
-              <div className="h-2.5 w-2.5 rounded-full bg-red-500 animate-pulse" />
-              <span className="text-sm font-medium text-foreground">Recording</span>
+              <div className={`h-2.5 w-2.5 rounded-full ${isPaused ? 'bg-yellow-500' : 'bg-red-500 animate-pulse'}`} />
+              <span className="text-sm font-medium text-foreground">{isPaused ? 'Paused' : 'Recording'}</span>
             </div>
             <div className="w-px h-5 bg-border" />
+            <Button variant="ghost" size="icon" className="h-8 w-8" onClick={handleTogglePause} title={isPaused ? 'Resume recording' : 'Pause recording'}>
+              {isPaused ? <Play className="h-4 w-4" /> : <Pause className="h-4 w-4" />}
+            </Button>
             <Button variant="ghost" size="icon" className="h-8 w-8" onClick={handleCaptureScreenshot} title="Screenshot">
               <Camera className="h-4 w-4" />
             </Button>
@@ -1086,6 +1170,9 @@ export function RecordingClient({
             </DropdownMenu>
             <Button variant="ghost" size="icon" className="h-8 w-8" onClick={handleFlagDownload} title="Wait for Download">
               <Download className="h-4 w-4" />
+            </Button>
+            <Button variant="ghost" size="icon" className="h-8 w-8" onClick={handleInsertTimestamp} title="Insert Timestamp">
+              <Clock className="h-4 w-4" />
             </Button>
             <div className="w-px h-5 bg-border" />
             <Button
@@ -1133,15 +1220,19 @@ export function RecordingClient({
             <CardHeader className="pb-3">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-3">
-                  <div className="h-3 w-3 rounded-full bg-red-500 animate-pulse" />
-                  <CardTitle>Recording in Progress</CardTitle>
+                  <div className={`h-3 w-3 rounded-full ${isPaused ? 'bg-yellow-500' : 'bg-red-500 animate-pulse'}`} />
+                  <CardTitle>{isPaused ? 'Recording Paused' : 'Recording in Progress'}</CardTitle>
                 </div>
                 <Badge variant="outline">{testName}</Badge>
               </div>
               <CardDescription>{url}</CardDescription>
             </CardHeader>
             <CardContent>
-              <div className="flex gap-2">
+              <div className="flex flex-wrap gap-2">
+                <Button onClick={handleTogglePause} variant={isPaused ? 'default' : 'outline'}>
+                  {isPaused ? <Play className="h-4 w-4 mr-2" /> : <Pause className="h-4 w-4 mr-2" />}
+                  {isPaused ? 'Resume' : 'Pause'}
+                </Button>
                 <Button onClick={handleCaptureScreenshot} variant="outline">
                   <Camera className="h-4 w-4 mr-2" />
                   Screenshot
@@ -1172,6 +1263,10 @@ export function RecordingClient({
                 <Button onClick={handleFlagDownload} variant="outline">
                   <Download className="h-4 w-4 mr-2" />
                   Wait for Download
+                </Button>
+                <Button onClick={handleInsertTimestamp} variant="outline">
+                  <Clock className="h-4 w-4 mr-2" />
+                  Insert Timestamp
                 </Button>
                 <Button
                   onClick={handleStopRecording}
@@ -1343,6 +1438,42 @@ export function RecordingClient({
               </pre>
             </div>
 
+            {/* Save cookies from this session */}
+            {capturedStorageState && (
+              <div className="p-3 bg-muted/50 rounded-lg border space-y-2">
+                <div className="flex items-center gap-2">
+                  <Cookie className="h-4 w-4 text-muted-foreground" />
+                  <span className="text-sm font-medium">Save Auth State</span>
+                  <span className="text-xs text-muted-foreground">
+                    (cookies & localStorage from this session)
+                  </span>
+                </div>
+                <div className="flex gap-2">
+                  <Input
+                    placeholder="Name (e.g., Google Login)"
+                    value={saveCookieName}
+                    onChange={(e) => setSaveCookieName(e.target.value)}
+                    className="flex-1"
+                  />
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    disabled={!saveCookieName.trim()}
+                    onClick={async () => {
+                      if (!capturedStorageState || !saveCookieName.trim()) return;
+                      await saveStorageState(repositoryId ?? null, saveCookieName.trim(), capturedStorageState);
+                      const states = await listStorageStates(repositoryId ?? null);
+                      setStorageStateOptions(states.map(s => ({ id: s.id, name: s.name, cookieCount: s.cookieCount ?? 0, originCount: s.originCount ?? 0 })));
+                      setCapturedStorageState(null);
+                      setSaveCookieName('');
+                    }}
+                  >
+                    Save
+                  </Button>
+                </div>
+              </div>
+            )}
+
             <div className="flex gap-2 justify-end">
               <Button
                 variant="outline"
@@ -1350,6 +1481,7 @@ export function RecordingClient({
                   setStep('setup');
                   setGeneratedCode('');
                   setRequiredCapabilities(null);
+                  setCapturedStorageState(null);
                   setEvents([]);
                   setScreenshots([]);
                   lastSequenceRef.current = 0;

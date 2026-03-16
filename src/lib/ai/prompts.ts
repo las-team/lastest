@@ -17,46 +17,142 @@ DYNAMIC ROUTES (e.g. /users/[id]):
 Navigate to the parent list page first, snapshot to find links with real IDs, then navigate to the actual URL.
 
 CONSTRAINTS:
+- Plain JavaScript ONLY — NO TypeScript annotations, NO imports
 - Use baseUrl for navigation (no hardcoded URLs)
 - Capture at least one screenshot using screenshotPath
-- Export async function "test" with exact signature: ${TEST_SIGNATURE}
+- Function signature: export async function test(page, baseUrl, screenshotPath, stepLogger)
 - Do NOT use \`import\` — \`expect\`, \`page\`, \`baseUrl\`, \`screenshotPath\`, \`stepLogger\` are provided by the runner
-- expect matchers: toBe, toEqual, toBeTruthy, toBeFalsy, toContain, toHaveLength, toMatch, toMatchObject, toHaveURL, toHaveTitle, toBeVisible, toBeHidden, toHaveText, toContainText, toHaveAttribute, toHaveCount, toBeEnabled, toBeDisabled, toBeChecked, toHaveValue (all support .not)
+- ALWAYS use regex for URL checks: await expect(page).toHaveURL(/\\/path/)
+- Prefer toBeVisible() for element presence, toContainText() for text content
+- NEVER use toBeTruthy() on textContent() or getAttribute() results
+- Every variable must use const or let
 - Never mix regex text and CSS selectors in one locator — use page.getByText(/pattern/i) for regex, page.locator('[attr="x"]') for CSS
 
-FINAL OUTPUT: After exploration, generate standard Playwright test code using discovered selectors.
+FINAL OUTPUT: After exploration, generate standard Playwright test code using discovered selectors. Output ONLY the code block.
 
-\`\`\`typescript
-import { Page } from 'playwright';
-
-${TEST_SIGNATURE} {
+\`\`\`javascript
+export async function test(page, baseUrl, screenshotPath, stepLogger) {
   stepLogger.log('Navigating to page');
-  await page.goto(\`\${baseUrl}/path\`);
-  await page.locator('[data-testid="discovered-element"]').click();
+  await page.goto(\`\${baseUrl}/path\`, { waitUntil: 'domcontentloaded' });
+  await page.waitForLoadState('domcontentloaded');
+  await expect(page).toHaveURL(/\\/path/);
+  const element = page.locator('[data-testid="discovered-element"]');
+  await expect(element).toBeVisible();
+  await element.click();
   stepLogger.log('Taking screenshot');
   await page.screenshot({ path: screenshotPath, fullPage: true });
 }
 \`\`\``;
 
-export const SYSTEM_PROMPT = `You are an expert Playwright test engineer creating visual regression tests.
+export const SYSTEM_PROMPT = `You generate Playwright visual regression tests. Output ONLY a JavaScript code block — NO explanations, NO analysis, NO text before or after the code.
 
-FUNCTION SIGNATURE (required):
-${TEST_SIGNATURE}
+RULES:
+- Plain JavaScript, NO TypeScript, NO imports
+- Signature: export async function test(page, baseUrl, screenshotPath, stepLogger)
+- Navigate: await page.goto(\`\${baseUrl}/path\`, { waitUntil: 'domcontentloaded' })
+- Wait: await page.waitForLoadState('domcontentloaded') — NEVER use page.waitForTimeout()
+- URL assert: ALWAYS regex — await expect(page).toHaveURL(/\\/path/)
+- Visibility: await expect(page.locator('body')).toBeVisible()
+- Screenshot: await page.screenshot({ path: screenshotPath, fullPage: true })
+- Log: stepLogger.log('message')
 
-PARAMETERS: page (Playwright Page), baseUrl (app URL), screenshotPath (save path), stepLogger (use .log('message'))
+AUTH: Tests run with pre-authenticated browser state (Playwright storageState).
+- Do NOT add login steps — auth cookies are already set
+- If redirected to /login or /sign-in, the auth state expired — take screenshot and return gracefully
+- After page.goto(), optionally check: if (page.url().includes('/login')) { await page.screenshot({ path: screenshotPath }); return; }
 
-GUIDELINES:
-- Choose appropriate selectors (data-testid, aria-label, role, text, css)
-- Design test flow to verify the objective with meaningful assertions
-- Capture screenshots at meaningful states; handle loading states for stability
+ERROR RESILIENCE:
+- After page.goto(), check response status: const response = await page.goto(...); if (!response || response.status() >= 400) { stepLogger.log('Page returned error ' + (response?.status() || 'unknown')); await page.screenshot({ path: screenshotPath }); return; }
+- Use try/catch around assertions that might fail due to page load issues
+- If a page loads but content is missing, screenshot the current state and return gracefully rather than throwing
 
-CONSTRAINTS:
-- Use baseUrl for navigation (no hardcoded URLs)
-- Capture at least one screenshot using screenshotPath
-- Export async function "test" with exact signature above
-- Do NOT use \`import\` — \`expect\`, \`page\`, \`baseUrl\`, \`screenshotPath\`, \`stepLogger\` are provided by the runner
-- expect matchers: toBe, toEqual, toBeTruthy, toBeFalsy, toContain, toHaveLength, toMatch, toMatchObject, toHaveURL, toHaveTitle, toBeVisible, toBeHidden, toHaveText, toContainText, toHaveAttribute, toHaveCount, toBeEnabled, toBeDisabled, toBeChecked, toHaveValue (all support .not)
-- Never mix regex text and CSS selectors in one locator — use page.getByText(/pattern/i) for regex, page.locator('[attr="x"]') for CSS`;
+SYNTAX — CRITICAL:
+- WRONG: const el: Locator = page.locator(...) → RIGHT: const el = page.locator(...)
+- WRONG: import { expect } from '@playwright/test' → RIGHT: (no imports — expect is a parameter)
+- WRONG: (page: Page, baseUrl: string) → RIGHT: (page, baseUrl, screenshotPath, stepLogger)
+- Every statement must end with a semicolon or closing brace
+- Every variable declaration must use const or let
+- Verify all brackets/parens are balanced before outputting
+
+SELECTORS — this app uses shadcn/ui + Tailwind CSS:
+- Buttons: page.getByRole('button', { name: '...' })
+- Links: page.getByRole('link', { name: '...' })
+- Inputs: page.getByRole('textbox') or page.getByLabel('...')
+- Tabs: page.getByRole('tab', { name: '...' })
+- Dialogs: page.getByRole('dialog')
+- Tables: page.getByRole('table'), page.getByRole('row')
+- Headings: page.getByRole('heading', { name: '...' })
+- Prefer getByRole() > getByText() > page.locator('[data-testid]') > CSS selectors
+
+ASSERTIONS — prefer resilient checks:
+- Use toContainText() over exact toHaveText() when possible
+- NEVER use toBeTruthy() on textContent()/getAttribute()/count results — they can be null/0
+- WRONG: const t = await el.textContent(); expect(t).toBeTruthy()
+- WRONG: const count = await el.count(); expect(count > 0).toBeTruthy()
+- RIGHT: await expect(el).toBeVisible()
+- RIGHT: await expect(el).toContainText(/expected/)
+- RIGHT: await expect(el.first()).toBeVisible() — to check at least one exists
+- Prefer toBeVisible() for element presence checks
+- If checking a count, use toHaveCount() with the expected number or check first() visibility
+- When in doubt, keep the test simple: navigate, verify page loaded, take screenshot
+
+EXAMPLE (static route):
+\`\`\`javascript
+export async function test(page, baseUrl, screenshotPath, stepLogger) {
+  stepLogger.log('Navigate to settings');
+  await page.goto(\`\${baseUrl}/settings\`, { waitUntil: 'domcontentloaded' });
+  await page.waitForLoadState('domcontentloaded');
+  await expect(page).toHaveURL(/\\/settings/);
+  stepLogger.log('Verify page content');
+  await expect(page.getByRole('heading').first()).toBeVisible();
+  await expect(page.locator('body')).toBeVisible();
+  stepLogger.log('Screenshot');
+  await page.screenshot({ path: screenshotPath, fullPage: true });
+}
+\`\`\`
+
+EXAMPLE (list/table page — verify content without fragile assertions):
+\`\`\`javascript
+export async function test(page, baseUrl, screenshotPath, stepLogger) {
+  stepLogger.log('Navigate to list page');
+  await page.goto(\`\${baseUrl}/tests\`, { waitUntil: 'domcontentloaded' });
+  await page.waitForLoadState('domcontentloaded');
+  await expect(page).toHaveURL(/\\/tests/);
+  stepLogger.log('Verify page structure');
+  await expect(page.locator('body')).toBeVisible();
+  const table = page.getByRole('table');
+  const tableCount = await table.count();
+  if (tableCount > 0) {
+    await expect(table.first()).toBeVisible();
+  }
+  stepLogger.log('Screenshot');
+  await page.screenshot({ path: screenshotPath, fullPage: true });
+}
+\`\`\`
+
+EXAMPLE (dynamic route — discover real ID from list page):
+\`\`\`javascript
+export async function test(page, baseUrl, screenshotPath, stepLogger) {
+  stepLogger.log('Navigate to list page to find a real item');
+  await page.goto(\`\${baseUrl}/tests\`, { waitUntil: 'domcontentloaded' });
+  await page.waitForLoadState('domcontentloaded');
+  const firstLink = page.locator('a[href*="/tests/"]').first();
+  const linkCount = await page.locator('a[href*="/tests/"]').count();
+  if (linkCount === 0) {
+    stepLogger.log('No items found — screenshot empty state');
+    await page.screenshot({ path: screenshotPath, fullPage: true });
+    return;
+  }
+  await expect(firstLink).toBeVisible();
+  const href = await firstLink.getAttribute('href');
+  stepLogger.log('Navigate to detail page: ' + href);
+  await page.goto(\`\${baseUrl}\${href}\`, { waitUntil: 'domcontentloaded' });
+  await page.waitForLoadState('domcontentloaded');
+  await expect(page.locator('body')).toBeVisible();
+  stepLogger.log('Screenshot');
+  await page.screenshot({ path: screenshotPath, fullPage: true });
+}
+\`\`\``;
 
 export function createTestPrompt(context: TestGenerationContext): string {
   const parts: string[] = [];
@@ -112,8 +208,9 @@ export function createTestPrompt(context: TestGenerationContext): string {
       parts.push(`\nIMPORTANT: This is a dynamic route. Before testing it directly:`);
       parts.push(`1. Navigate to the parent list page first (e.g., for /users/[id], go to /users)`);
       parts.push(`2. Wait for the list to load and find a valid link`);
-      parts.push(`3. Click the link or extract the href to get a real ID`);
-      parts.push(`4. Then test the actual page with real data`);
+      parts.push(`3. If the list is empty, take a screenshot of the empty state and return gracefully`);
+      parts.push(`4. Click the link or extract the href to get a real ID`);
+      parts.push(`5. Then test the actual page with real data`);
 
       if (context.siblingRoutes?.length) {
         parts.push(`\nRelated routes: ${context.siblingRoutes.join(', ')}`);
@@ -131,25 +228,37 @@ export function createTestPrompt(context: TestGenerationContext): string {
     parts.push(buildCodebaseIntelligenceSection(context.codebaseIntelligence));
   }
 
+  if (context.availableRoutes?.length) {
+    parts.push(`\n--- Available Routes (ONLY navigate to these) ---`);
+    parts.push(context.availableRoutes.map(r => `- ${r}`).join('\n'));
+    parts.push(`\nCRITICAL: Do NOT invent or guess URLs. ONLY use routes from the list above.`);
+    parts.push(`If the test objective refers to a page not in this list, navigate to the closest matching route. For features without a dedicated route, use "/" (home).`);
+  }
+
   // Add guidelines and requirements sections
   parts.push(`
---- Guidelines ---
-- Be creative with test flow and assertions
-- Choose selectors that match the page structure
-- Add meaningful assertions for the test objective
-- Use stepLogger.log() to document key actions
-- Capture screenshot(s) at meaningful states
-
 --- Requirements ---
-- Function signature: export async function test(page, baseUrl, screenshotPath, stepLogger)
-- At least one screenshot must be captured
-- Use baseUrl parameter for navigation
-- Do NOT use \`import\` statements — expect and all parameters are provided by the runner
-- Available expect matchers: toBe, toEqual, toBeTruthy, toBeFalsy, toContain, toHaveLength, toBeGreaterThan, toBeLessThan, toBeGreaterThanOrEqual, toBeLessThanOrEqual, toMatch(string|RegExp), toMatchObject
-- Page matchers: toHaveURL, toHaveTitle. Locator: toBeVisible, toBeHidden, toHaveText, toContainText, toHaveAttribute, toHaveCount
-- Never mix regex text and CSS selectors in one locator (use page.getByText(/regex/i) for regex matching)
+- Plain JavaScript only — NO TypeScript annotations, NO imports
+- Signature: export async function test(page, baseUrl, screenshotPath, stepLogger)
+- Navigate: await page.goto(\`\${baseUrl}/path\`, { waitUntil: 'domcontentloaded' })
+- URL checks: ALWAYS regex — await expect(page).toHaveURL(/\\/path/)
+- Content checks: await expect(page.locator('body')).toBeVisible()
+- Screenshot: await page.screenshot({ path: screenshotPath, fullPage: true })
+- Log actions: stepLogger.log('message')
+- Every variable MUST be declared with const or let
+- Every statement must end with a semicolon or closing brace
 
-Return ONLY the code, no explanations.`);
+ASSERTIONS — CRITICAL:
+- Prefer toBeVisible() for element checks, toContainText() for text
+- NEVER use toBeTruthy() on textContent()/getAttribute() — they return null when missing
+- WRONG: const text = await el.textContent(); expect(text).toBeTruthy()
+- RIGHT: await expect(el).toBeVisible()
+
+ERROR RESILIENCE: After page.goto(), check response: const response = await page.goto(...); if (!response || response.status() >= 400) { stepLogger.log('Server error'); await page.screenshot({ path: screenshotPath }); return; }
+
+BEFORE writing page.goto(), verify the URL is in the available routes list above.
+
+Return ONLY the code block, no explanations.`);
 
   return parts.join('\n');
 }
@@ -225,10 +334,10 @@ function buildCodebaseIntelligenceSection(intel: CodebaseIntelligenceContext): s
 }
 
 export function createFixPrompt(context: TestGenerationContext): string {
-  const parts: string[] = [`Fix this failing Playwright test.
+  const parts: string[] = [`Fix this failing Playwright test. Return ONLY the complete fixed code in a code block — NO explanations, NO analysis, NO commentary.
 
 Original test code:
-\`\`\`typescript
+\`\`\`javascript
 ${context.existingCode}
 \`\`\`
 
@@ -239,14 +348,56 @@ ${context.errorMessage}`];
     parts.push(buildCodebaseIntelligenceSection(context.codebaseIntelligence));
   }
 
-  parts.push(`
-Instructions:
-- Analyze the error, fix the root cause while keeping the same function signature and intent
-- Do NOT use \`import\` — expect is provided by the runner
-- Use only valid matchers (toBe, toEqual, toBeTruthy, toBeFalsy, toContain, toMatch, toHaveURL, toHaveTitle, toBeVisible, toHaveText, toContainText, toHaveAttribute, toHaveCount, etc.)
-- Never mix regex text and CSS selectors in one locator — use page.getByText(/pattern/i) for regex
+  if (context.availableRoutes?.length) {
+    parts.push(`\nAvailable Routes (ONLY use these in page.goto()):`);
+    parts.push(context.availableRoutes.map(r => `- ${r}`).join('\n'));
+    parts.push(`If the current page.goto() URL is not in this list, change it to the closest matching route.`);
+  }
 
-Common fixes: "X is not a function" → invalid matcher; "text=/regex/i" → use page.getByText(/regex/i); waitForLoadState timeout → use 'domcontentloaded' instead of 'networkidle'
+  parts.push(`
+IMPORTANT: If the "original test code" above is NOT valid JavaScript (e.g., it's an explanation, error message, or empty), IGNORE it completely and write a NEW test from scratch for the target URL using the function signature: export async function test(page, baseUrl, screenshotPath, stepLogger)
+
+ERROR DIAGNOSIS — identify the category FIRST, then apply the matching fix strategy:
+- "Unexpected identifier" or "Unexpected token" → SYNTAX ERROR: The code may not be valid JS at all. If the code is plaintext/explanation, rewrite from scratch. Otherwise, look for missing commas, semicolons, or unmatched brackets. Remove any TypeScript annotations (: Type, as Type). Remove any import statements.
+- "404" or "not found" → WRONG URL: The page.goto() URL doesn't exist. Change it to a route from the available routes list.
+- "timeout" or "waiting for selector" → SELECTOR MISMATCH: The element doesn't exist with that selector. Use broader selectors (getByRole, getByText) or remove the assertion.
+- "X is not a function" → INVALID API: Using a non-existent method. Check expect() matcher names and Playwright API.
+- "Expected" + "Received" → ASSERTION FAILURE: The page content doesn't match expectations. Loosen the assertion or use a more flexible match (toContain instead of toBe, regex instead of exact string).
+- "login" or "redirect" or "sign-in" → AUTH ISSUE: Add auth state check — if (page.url().includes('/login')) return;
+- "net::ERR" or "ERR_CONNECTION" → NETWORK ERROR: The server may not be ready. Add waitForLoadState('domcontentloaded').
+- "(500)" or "Network failures detected" → SERVER ERROR: The page.goto() response was 500. Capture the response: const response = await page.goto(...); if (!response || response.status() >= 400) { stepLogger.log('Server error'); await page.screenshot({ path: screenshotPath }); return; }
+- "Console errors detected" or "Failed to fetch" → ENVIRONMENT ISSUE: These are background API errors, not test code issues. If the test logic is correct, the fix is to ignore console errors or remove any console error checking assertions.
+
+Instructions:
+1. Identify which error category above matches the error message
+2. Mentally trace the exact line that caused the error
+3. Apply ONLY the minimal fix for that category — do not rewrite the entire test
+4. Verify your fix actually changes something (not identical to input)
+
+COMMON FIX PATTERNS:
+- "Unexpected identifier" often means a variable is used without declaration (missing const/let) or a line is missing a semicolon before the next statement
+- "Expected value to be truthy but got false" means toBeTruthy() was called on a falsy value — replace with toBeVisible() on a locator, or remove the assertion entirely if it's not critical
+- If you see \`const x = await el.textContent(); expect(x).toBeTruthy()\` → replace with \`await expect(el).toBeVisible()\` or \`await expect(el).toContainText(/something/)\`
+- "Network failures detected" or "(500)" → Add response status check after page.goto(): \`const response = await page.goto(...); if (!response || response.status() >= 400) { stepLogger.log('Server error'); await page.screenshot({ path: screenshotPath }); return; }\`
+
+Rules:
+- Write plain JavaScript only — NO TypeScript type annotations (no ": Page", no ": string", no ": any")
+- Do NOT use \`import\` — expect is provided by the runner
+- ALWAYS use regex for URL checks: await expect(page).toHaveURL(/\\/path/); — never exact string URLs
+- Never mix regex text and CSS selectors in one locator — use page.getByText(/pattern/i) for regex
+- Every statement must end with a semicolon or closing brace
+- Every variable declaration must use const or let
+
+DYNAMIC ROUTES: If testing a detail page (e.g., /tests/[id]), navigate to the list page first, find a real link, then follow it. Never hardcode fake IDs.
+
+BEFORE RETURNING — verify your output:
+□ All page.goto() URLs match available routes listed above
+□ No TypeScript annotations (: Type, as Type, <Type>)
+□ No import statements
+□ Every variable has const/let declaration
+□ All brackets and parentheses are balanced
+□ The fix addresses the specific error message above
+□ Function signature is: export async function test(page, baseUrl, screenshotPath, stepLogger)
 
 Return ONLY the fixed code, no explanations.`);
 
@@ -254,10 +405,14 @@ Return ONLY the fixed code, no explanations.`);
 }
 
 export function createMcpFixPrompt(context: TestGenerationContext): string {
-  return `Fix this failing Playwright test by exploring the live page with MCP tools.
+  const routeSection = context.availableRoutes?.length
+    ? `\nAvailable Routes (ONLY use these in page.goto()):\n${context.availableRoutes.map(r => `- ${r}`).join('\n')}\n`
+    : '';
+
+  return `Fix this failing Playwright test by exploring the live page with MCP tools. Return ONLY the complete fixed code in a code block — NO explanations.
 
 Original test code:
-\`\`\`typescript
+\`\`\`javascript
 ${context.existingCode}
 \`\`\`
 
@@ -265,14 +420,30 @@ Error message:
 ${context.errorMessage}
 
 Target URL: ${context.targetUrl || 'unknown'}
+${routeSection}
+IMPORTANT: If the "original test code" is NOT valid JavaScript (e.g., it's explanation text), IGNORE it and write a NEW test from scratch.
+
+ERROR DIAGNOSIS — identify the category FIRST:
+- "Unexpected identifier/token" → SYNTAX ERROR: code may not be valid JS — rewrite from scratch if needed, or fix missing commas, remove TS annotations
+- "404/not found" → WRONG URL: change to a route from available routes
+- "timeout/selector" → SELECTOR MISMATCH: use browser_snapshot to find correct selectors
+- "Expected value to be truthy" → replace toBeTruthy() with toBeVisible() on locator
+- "(500)" or "Network failures" → SERVER ERROR: Add response status check: const response = await page.goto(...); if (!response || response.status() >= 400) { stepLogger.log('Server error'); await page.screenshot({ path: screenshotPath }); return; }
+- "Console errors" or "Failed to fetch" → ENVIRONMENT ISSUE: ignore console errors
 
 Instructions:
 - browser_navigate to the target URL, then browser_snapshot to see current page structure
 - Compare actual page selectors/content with the failing test to identify what changed
 - Fix the test using discovered selectors; maintain the same function signature and intent
-- Do NOT use \`import\` — expect is provided by the runner
+- Write plain JavaScript only — NO TypeScript type annotations, NO imports
+- ALWAYS use regex for URL checks: await expect(page).toHaveURL(/\\/path/);
 - Use only valid matchers (toBe, toEqual, toBeTruthy, toBeFalsy, toContain, toMatch, toHaveURL, toHaveTitle, toBeVisible, toHaveText, toContainText, toHaveAttribute, toHaveCount, etc.)
 - Never mix regex text and CSS selectors in one locator — use page.getByText(/pattern/i) for regex
+- If the error is "Expected value to be truthy but got false", replace toBeTruthy() with toBeVisible() on a locator or remove the assertion
+- Every variable declaration must use const or let
+- Every statement must end with a semicolon or closing brace
+
+BEFORE RETURNING — verify your output has no TypeScript, no imports, balanced brackets, and addresses the specific error.
 
 Return ONLY the fixed code, no explanations.`;
 }
@@ -283,7 +454,7 @@ export function createEnhancePrompt(context: TestGenerationContext): string {
   parts.push(`Enhance this Playwright visual regression test:
 
 Current test code:
-\`\`\`typescript
+\`\`\`javascript
 ${context.existingCode}
 \`\`\``);
 
@@ -298,7 +469,14 @@ ${context.existingCode}
 - Add waits for dynamic content`);
   }
 
-  parts.push(`\nReturn ONLY the enhanced code, no explanations.`);
+  parts.push(`
+Rules:
+- Plain JavaScript only — NO TypeScript annotations, NO imports
+- ALWAYS use regex for URL checks: await expect(page).toHaveURL(/\\/path/)
+- Prefer toBeVisible() over toBeTruthy() for element presence
+- Every variable must use const or let
+
+Return ONLY the enhanced code in a code block, no explanations.`);
 
   return parts.join('\n');
 }
@@ -481,7 +659,7 @@ Return ONLY the JSON object inside a code block, no other text.`;
 }
 
 export function createUserStoryExtractionPrompt(specContent: string): string {
-  return `Analyze the following specification/requirements document and extract all User Stories (US) and their Acceptance Criteria (AC).
+  return `You are a strict parser. Extract User Stories and Acceptance Criteria from the document below. Output ONLY the structured markdown format shown — NO questions, NO clarifications, NO conversation, NO meta-commentary.
 
 Document content:
 ${specContent}
@@ -509,13 +687,20 @@ Format your response as markdown using this exact structure:
 Guidelines:
 - User Story titles should be concise functional area names (e.g., "User Authentication", "Dashboard Analytics")
 - Each AC MUST describe a specific, observable user action and expected system response that can be verified in a browser
-- DO NOT include: questions, suggestions, meta-commentary, implementation tasks, or vague criteria
-- DO NOT include ACs like "Create additional tests...", "Consider...", "Should we...", "Implement...", "Ensure proper..."
+- Each AC should mention the specific page/route where the behavior occurs (e.g., "On the /settings page, ...")
+- DO NOT include: questions, suggestions, meta-commentary, implementation tasks, vague criteria, or conversational text
+- DO NOT include ACs that start with: "Create...", "Consider...", "Should we...", "Implement...", "Ensure proper...", "Clarification...", "Permission...", "Let me...", "I'll...", "Would you...", "Can you..."
+- DO NOT include conversational responses, clarifying questions, approval requests, or meta-discussion about the testing process — output ONLY testable user stories
+- EVERY AC must describe a specific USER ACTION and EXPECTED VISIBLE RESULT, not a task or process step
 - Bad AC: "Ensure proper error handling" (vague, not testable)
 - Good AC: "When user submits login form with wrong password, an error message 'Invalid credentials' appears"
+- Bad AC: "The system should display data correctly" (vague, no specific elements)
+- Good AC: "On the /tests page, a table of tests is visible with columns for name, status, and last run date"
 - Each AC should be independently testable in a browser-based visual regression test
+- Group ACs that test the SAME page/route under the same User Story
 - If a requirement is not testable via browser interaction, skip it
-- If the document doesn't follow formal US/AC format, infer them from the requirements`;
+- If the document doesn't follow formal US/AC format, infer them from the requirements
+- QUALITY CHECK: Before outputting, verify each AC has a clear GIVEN/WHEN/THEN structure or equivalent. Delete any AC that is a question, a request for permission, or meta-discussion about what to test`;
 }
 
 export function createBranchAwareTestPrompt(context: {
@@ -529,6 +714,7 @@ export function createBranchAwareTestPrompt(context: {
     fileDiffs?: string;
   };
   codebaseIntelligence?: CodebaseIntelligenceContext;
+  availableRoutes?: string[];
 }): string {
   const parts: string[] = [];
 
@@ -560,6 +746,14 @@ Test Name: ${context.testName}`);
     parts.push(buildCodebaseIntelligenceSection(context.codebaseIntelligence));
   }
 
+  if (context.availableRoutes?.length) {
+    parts.push(`\n--- Available Routes (ONLY navigate to these) ---`);
+    parts.push(context.availableRoutes.map(r => `- ${r}`).join('\n'));
+    parts.push(`\nCRITICAL: Do NOT invent or guess URLs. ONLY use routes from the list above.`);
+    parts.push(`Route hints: /settings = configuration, /tests = test list, /tests/[id] = test detail, /builds/* = build results, /suites = test suites, /areas = functional areas, /run = run tests, /record = record tests, /review = review diffs, /compare = compare builds`);
+    parts.push(`Match the acceptance criterion's feature to the most relevant route above. If no route matches, use "/" (home page).`);
+  }
+
   parts.push(`
 --- Guidelines ---
 - Write the test to verify the acceptance criterion
@@ -567,20 +761,63 @@ Test Name: ${context.testName}`);
 - Add assertions that verify the expected behavior
 - Capture screenshots at meaningful states
 - Handle loading states for stable screenshots
+- When in doubt, keep the test simple: navigate, verify page loaded, take screenshot
+
+DYNAMIC ROUTES (paths with [id], [slug], etc.):
+- First navigate to the parent list page (e.g., for /tests/[id], go to /tests)
+- Wait for the page to load, then find a link or row in the list
+- Click the first item or extract its href to get a real URL with an actual ID
+- Then test the detail page with real data
+- NEVER hardcode fake IDs like "123" or "test-id"
+- If no items exist in the list, take a screenshot of the empty state and return gracefully
+
+SELECTORS (this app uses shadcn/ui + Tailwind CSS):
+- Buttons: page.getByRole('button', { name: '...' })
+- Inputs: page.getByRole('textbox') or page.getByLabel('...')
+- Tabs: page.getByRole('tab', { name: '...' })
+- Dialog: page.getByRole('dialog')
+- Links: page.getByRole('link', { name: '...' })
+- Headings: page.getByRole('heading', { name: '...' })
+- Prefer getByRole/getByText/getByLabel over CSS selectors
+
+LOADING STATES:
+- After navigation: await page.waitForLoadState('domcontentloaded')
+- For async data: await page.locator('[data-loading]').waitFor({ state: 'hidden', timeout: 5000 }).catch(() => {})
+- Do NOT use page.waitForTimeout() — use waitForLoadState or waitFor instead
 
 --- Requirements ---
+- Plain JavaScript only — NO TypeScript annotations, NO imports
 - Function signature: export async function test(page, baseUrl, screenshotPath, stepLogger)
+- Navigate: await page.goto(\`\${baseUrl}/path\`, { waitUntil: 'domcontentloaded' })
+- URL checks: ALWAYS regex — await expect(page).toHaveURL(/\\/path/)
 - At least one screenshot must be captured
 - Use baseUrl parameter for navigation
+- Every variable MUST be declared with const or let
+- Every statement must end with a semicolon or closing brace
 
-Return ONLY the code, no explanations.`);
+ASSERTIONS — CRITICAL:
+- Prefer toBeVisible() for element checks, toContainText() for text, regex toHaveURL() for URLs
+- NEVER use toBeTruthy() on textContent()/getAttribute()/count/comparison results
+- WRONG: const text = await el.textContent(); expect(text).toBeTruthy()
+- WRONG: expect(count > 0).toBeTruthy() → RIGHT: await expect(el.first()).toBeVisible()
+- RIGHT: await expect(el).toBeVisible() or await expect(el).toContainText(/expected/)
+- For lists that might be empty, guard: const count = await rows.count(); if (count > 0) { await expect(rows.first()).toBeVisible(); }
+- Available expect matchers: toBe, toEqual, toBeTruthy, toBeFalsy, toContain, toMatch, toHaveURL, toHaveTitle, toBeVisible, toBeHidden, toHaveText, toContainText, toHaveAttribute, toHaveCount, toBeEnabled, toBeDisabled, toBeChecked, toHaveValue (all support .not)
+
+ERROR RESILIENCE:
+- Check navigation response: const response = await page.goto(...); if (!response || response.status() >= 400) { stepLogger.log('Server error'); await page.screenshot({ path: screenshotPath }); return; }
+- If the page loads but expected content is missing, screenshot and return gracefully
+
+BEFORE writing page.goto(), verify the URL is in the available routes list above. If no route matches, use the closest parent route.
+
+Return ONLY the code block, no explanations.`);
 
   return parts.join('\n');
 }
 
 export function extractCodeFromResponse(response: string): string {
-  // Try to extract code from markdown code blocks
-  const codeBlockMatch = response.match(/```(?:typescript|ts|javascript|js)?\n([\s\S]*?)```/);
+  // Try to extract code from markdown code blocks (any language tag or none)
+  const codeBlockMatch = response.match(/```(?:\w*)?\n([\s\S]*?)```/);
   if (codeBlockMatch) {
     return codeBlockMatch[1].trim();
   }
@@ -590,6 +827,26 @@ export function extractCodeFromResponse(response: string): string {
     return response.trim();
   }
 
-  // Return as-is if we can't extract
-  return response.trim();
+  // Look for export async function anywhere in the response (AI may have added explanation before code)
+  const funcMatch = response.match(/(export\s+async\s+function\s+test\s*\([\s\S]*)/);
+  if (funcMatch) {
+    return funcMatch[1].trim();
+  }
+
+  // Look for import statement followed by code anywhere in the response
+  const importMatch = response.match(/(import\s+[\s\S]*export\s+async\s+function[\s\S]*)/);
+  if (importMatch) {
+    return importMatch[1].trim();
+  }
+
+  // If no code patterns found, the response is likely explanatory text, not code.
+  // Check for actual code patterns (not just mentions of words in prose)
+  const trimmed = response.trim();
+  const hasCodePattern = /(?:^|\n)\s*(?:export\s+|async\s+function|const\s+\w+\s*=|let\s+\w+\s*=|await\s+page\.|page\.goto|page\.locator|stepLogger\.log)/.test(trimmed);
+  if (!hasCodePattern) {
+    return '';
+  }
+
+  // Return as-is if we can't extract but it looks code-like
+  return trimmed;
 }

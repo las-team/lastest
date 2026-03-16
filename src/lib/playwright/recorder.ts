@@ -64,7 +64,7 @@ export interface VerificationStatus {
 export type KeyboardModifier = 'Alt' | 'Control' | 'Shift' | 'Meta';
 
 export interface RecordingEvent {
-  type: 'action' | 'navigation' | 'screenshot' | 'error' | 'complete' | 'assertion' | 'cursor-move' | 'mouse-down' | 'mouse-up' | 'hover-preview' | 'keypress' | 'keydown' | 'keyup' | 'scroll' | 'download';
+  type: 'action' | 'navigation' | 'screenshot' | 'error' | 'complete' | 'assertion' | 'cursor-move' | 'mouse-down' | 'mouse-up' | 'hover-preview' | 'keypress' | 'keydown' | 'keyup' | 'scroll' | 'download' | 'clipboard-set' | 'insert-timestamp';
   timestamp: number;
   sequence: number;
   status: 'preview' | 'committed';
@@ -92,6 +92,10 @@ export interface RecordingEvent {
     deltaY?: number; // scroll delta Y
     downloadWrap?: boolean; // click triggers a download
     autoDetected?: boolean; // download was auto-detected (not pre-flagged)
+    text?: string; // clipboard text for clipboard-set events
+    timestampFormat?: string; // format for insert-timestamp events ('iso' default)
+    targetSelectors?: ActionSelector[]; // target element selectors for insert-timestamp
+    targetCoordinates?: { x: number; y: number }; // target element coordinates for insert-timestamp
   };
 }
 
@@ -125,6 +129,7 @@ export class PlaywrightRecorder extends EventEmitter {
   private lastCompletedSession: RecordingSession | null = null;
   private screenshotDir: string;
   private isRecording = false;
+  private _isPaused = false;
   private repositoryId: string | null;
   private settings: CursorSettings = { pointerGestures: false, cursorFPS: 30 };
   private ocrEnabled = false;
@@ -140,6 +145,8 @@ export class PlaywrightRecorder extends EventEmitter {
   private stabilizationSettings: StabilizationSettings = DEFAULT_STABILIZATION_SETTINGS;
   private verificationUpdates: Map<string, { verified: boolean; timestamp: number }> = new Map();
   private nextClickIsDownload = false;
+  private storageState: string | null = null;
+  private capturedStorageState: string | null = null;
 
   constructor(repositoryId?: string | null, screenshotDir?: string) {
     super();
@@ -180,6 +187,14 @@ export class PlaywrightRecorder extends EventEmitter {
     this.clipboardAccess = enabled;
   }
 
+  setStorageState(state: string | null) {
+    this.storageState = state;
+  }
+
+  getCapturedStorageState(): string | null {
+    return this.capturedStorageState;
+  }
+
   setStabilizationSettings(settings: StabilizationSettings) {
     this.stabilizationSettings = settings;
   }
@@ -210,12 +225,15 @@ export class PlaywrightRecorder extends EventEmitter {
         : this.browserType === 'webkit' ? webkit
         : chromium;
       const needsCrossOs = this.stabilizationSettings.crossOsConsistency && this.browserType === 'chromium';
-      const launchArgs = needsCrossOs
-        ? [...CROSS_OS_CHROMIUM_ARGS, '--start-maximized']
-        : ['--start-maximized'];
+      const launchArgs = [
+        ...(needsCrossOs ? CROSS_OS_CHROMIUM_ARGS : []),
+        '--start-maximized',
+        '--disable-blink-features=AutomationControlled',
+      ];
       this.browser = await browserLauncher.launch({
         headless: this.headless,
         args: launchArgs,
+        ignoreDefaultArgs: ['--enable-automation'],
       });
 
       this.context = await this.browser.newContext({
@@ -224,9 +242,15 @@ export class PlaywrightRecorder extends EventEmitter {
         acceptDownloads: true, // Always enable during recording so downloads are detected
         ...(this.clipboardAccess ? { permissions: ['clipboard-read', 'clipboard-write'] } : {}),
         ...(this.stabilizationSettings.crossOsConsistency ? { deviceScaleFactor: 1 } : {}),
+        ...(this.storageState ? { storageState: JSON.parse(this.storageState) } : {}),
       });
 
       this.page = await this.context.newPage();
+
+      // Remove navigator.webdriver flag to avoid automation detection (e.g. Google login)
+      await this.page.addInitScript(() => {
+        Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+      });
 
       // Setup freeze scripts BEFORE navigation (cross-OS fonts, canvas determinism, freeze scripts).
       // The shared setupFreezeScripts injects DETERMINISTIC_RENDERING_CSS which includes
@@ -296,12 +320,16 @@ export class PlaywrightRecorder extends EventEmitter {
       // Setup event listeners AFTER setup completes (to avoid capturing setup actions)
       await this.setupEventListeners();
 
-      // Record initial navigation event (after setup, page may be on a different URL)
-      const currentUrl = this.page.url();
-      const relativePath = this.getRelativePath(currentUrl);
-      this.addEvent('navigation', { url: currentUrl, relativePath });
+      // Record initial navigation event only if no setup scripts ran
+      // (setup scripts already handle navigation — recording it would duplicate their activity)
+      if (!setupOptions) {
+        const currentUrl = this.page.url();
+        const relativePath = this.getRelativePath(currentUrl);
+        this.addEvent('navigation', { url: currentUrl, relativePath });
+      }
 
       this.isRecording = true;
+      this._isPaused = false;
       this.emit('started', { sessionId, url });
     } catch (error) {
       await this.cleanup();
@@ -382,14 +410,23 @@ export class PlaywrightRecorder extends EventEmitter {
       const button = action === 'rightclick' ? 2 : undefined;
 
       // Coalesce consecutive fill actions on the same element (input fires per-keystroke)
+      // Look backwards past non-action events (cursor-move, scroll, etc.) to find the last fill
       if (action === 'fill' && this.session?.events.length) {
-        const lastEvent = this.session.events[this.session.events.length - 1];
-        if (lastEvent.type === 'action' && lastEvent.data.action === 'fill' && lastEvent.data.selector === primarySelector) {
-          lastEvent.data.value = value;
-          lastEvent.data.coordinates = coordinates;
-          lastEvent.data.actionId = actionId;
-          this.emit('event', lastEvent);
-          return;
+        for (let i = this.session.events.length - 1; i >= 0; i--) {
+          const prevEvent = this.session.events[i];
+          if (prevEvent.type === 'action') {
+            if (prevEvent.data.action === 'fill' && prevEvent.data.selector === primarySelector) {
+              prevEvent.data.value = value;
+              prevEvent.data.coordinates = coordinates;
+              prevEvent.data.actionId = actionId;
+              // Also update selectors in case they changed (e.g., accessible name reflects input value)
+              prevEvent.data.selectors = selectors;
+              this.emit('event', prevEvent);
+              return;
+            }
+            break; // Hit a non-fill action, stop looking
+          }
+          // Skip non-action events (cursor-move, scroll, keypress, etc.) and keep looking
         }
       }
 
@@ -446,6 +483,11 @@ export class PlaywrightRecorder extends EventEmitter {
     // Screenshot capture via Ctrl+Shift+S hotkey
     await this.page.exposeFunction('__recordScreenshot', () => {
       this.takeScreenshot();
+    });
+
+    // Clipboard capture — emits clipboard-set event before paste keypress
+    await this.page.exposeFunction('__recordClipboardSet', (text: string) => {
+      this.addEvent('clipboard-set', { text });
     });
 
     // Keypress tracking for keyboard interactions
@@ -565,6 +607,16 @@ export class PlaywrightRecorder extends EventEmitter {
           }
           // Repeat keydowns for space are intentionally ignored
         } else {
+          // Detect paste (Ctrl+V / Meta+V) and capture clipboard content before recording keypress
+          if ((e.key === 'v' || e.key === 'V') && (e.ctrlKey || e.metaKey)) {
+            navigator.clipboard.readText().then((text: string) => {
+              if (text) {
+                // @ts-expect-error
+                window.__recordClipboardSet?.(text);
+              }
+            }).catch(() => {});
+          }
+
           // Record non-modifier keypresses (skip if inside input/textarea to avoid duplicate recording with fill)
           const target = e.target as HTMLElement;
           const isEditable = target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable;
@@ -601,7 +653,7 @@ export class PlaywrightRecorder extends EventEmitter {
         return Array.from(activeModifiers);
       }
 
-      // Track mousedown for drag/draw detection
+      // Track mousedown for drag/draw detection only
       let mouseDownState: { x: number; y: number; time: number } | null = null;
       const DRAG_THRESHOLD_PX = 10; // Movement threshold to consider it a drag
       const DRAG_THRESHOLD_MS = 300; // Time threshold for long press + movement
@@ -611,8 +663,85 @@ export class PlaywrightRecorder extends EventEmitter {
       }, true);
 
       document.addEventListener('mouseup', () => {
-        // Clear after a short delay to allow click event to check it
         setTimeout(() => { mouseDownState = null; }, 50);
+      }, true);
+
+      // Capture selectors at pointerdown time for fallback.
+      // Radix UI (and similar) call preventDefault() on pointerdown which suppresses
+      // mousedown entirely. pointerdown in capture phase fires before any framework
+      // handler, so the target element is still in DOM and selectors can be read.
+      let pointerDownTarget: HTMLElement | null = null;
+      let pointerDownSelectors: BrowserActionSelector[] | null = null;
+      let pointerDownBoundingBox: { x: number; y: number; width: number; height: number; clickX: number; clickY: number } | null = null;
+      let pointerCleanupTimer: ReturnType<typeof setTimeout> | null = null;
+      let pointerDownDeferTimer: ReturnType<typeof setTimeout> | null = null;
+      let pointerDownClickRecorded = false;
+
+      // Walk up DOM to find nearest interactive ancestor for better selectors.
+      function findBestTarget(el: HTMLElement): HTMLElement {
+        const INTERACTIVE_ROLES = new Set([
+          'button', 'option', 'menuitem', 'menuitemcheckbox', 'menuitemradio',
+          'tab', 'treeitem', 'link', 'switch', 'radio', 'checkbox',
+          'combobox', 'listitem'
+        ]);
+        const INTERACTIVE_TAGS = new Set(['A', 'BUTTON', 'INPUT', 'SELECT', 'TEXTAREA', 'LI']);
+        let current: HTMLElement | null = el;
+        while (current && current !== document.body && current !== document.documentElement) {
+          const role = current.getAttribute('role');
+          if (role && INTERACTIVE_ROLES.has(role)) return current;
+          if (INTERACTIVE_TAGS.has(current.tagName)) return current;
+          if (current.dataset.testid) return current;
+          // Detect clickable divs: elements with tabindex or aria-label on non-leaf containers
+          if (current.hasAttribute('tabindex') || (current.getAttribute('aria-label') && current !== el)) return current;
+          current = current.parentElement;
+        }
+        return el;
+      }
+
+      document.addEventListener('pointerdown', (e: PointerEvent) => {
+        if (pointerCleanupTimer) { clearTimeout(pointerCleanupTimer); pointerCleanupTimer = null; }
+        if (pointerDownDeferTimer) { clearTimeout(pointerDownDeferTimer); pointerDownDeferTimer = null; }
+        const rawTarget = e.target as HTMLElement;
+        const target = findBestTarget(rawTarget);
+        pointerDownTarget = target;
+        pointerDownSelectors = generateAllSelectors(target);
+        const rect = target.getBoundingClientRect();
+        pointerDownBoundingBox = { x: rect.x, y: rect.y, width: rect.width, height: rect.height, clickX: e.clientX, clickY: e.clientY };
+        pointerDownClickRecorded = false;
+
+        // Deferred recording: if click never fires (Radix removes element), record from pointerdown
+        const savedSelectors = pointerDownSelectors;
+        const savedBoundingBox = pointerDownBoundingBox;
+        if (savedSelectors && savedSelectors.length > 0) {
+          pointerDownDeferTimer = setTimeout(() => {
+            if (!pointerDownClickRecorded && !document.contains(target) && savedSelectors.length > 0) {
+              const modifiers = getActiveModifiers();
+              // @ts-expect-error
+              window.__recordAction?.('click', savedSelectors, undefined, savedBoundingBox, generateActionId(), modifiers);
+            }
+            pointerDownDeferTimer = null;
+          }, 300);
+        }
+      }, true);
+
+      document.addEventListener('pointerup', () => {
+        pointerCleanupTimer = setTimeout(() => { pointerDownTarget = null; pointerDownSelectors = null; pointerDownBoundingBox = null; pointerCleanupTimer = null; }, 500);
+      }, true);
+
+      // Also capture selectors from mouseover for a second fallback.
+      // mouseover fires well before click and is unaffected by DOM removal timing.
+      // This catches cases where pointerdown fallback fails (e.g., Radix exit animations).
+      let hoverSelectors: BrowserActionSelector[] | null = null;
+      let hoverBoundingBox: { x: number; y: number; width: number; height: number; clickX: number; clickY: number } | null = null;
+      document.addEventListener('mouseover', (e: MouseEvent) => {
+        const target = e.target as HTMLElement;
+        if (!target || target === document.body || target === document.documentElement) return;
+        const sels = generateAllSelectors(target);
+        if (sels.length > 0) {
+          hoverSelectors = sels;
+          const rect = target.getBoundingClientRect();
+          hoverBoundingBox = { x: rect.x, y: rect.y, width: rect.width, height: rect.height, clickX: e.clientX, clickY: e.clientY };
+        }
       }, true);
 
       // Generate unique action IDs for verification tracking
@@ -622,6 +751,7 @@ export class PlaywrightRecorder extends EventEmitter {
       }
 
       document.addEventListener('click', (e) => {
+        pointerDownClickRecorded = true; // Prevent deferred pointerdown from double-recording
         // Skip if this was a drag/draw operation (mouse moved significantly while held)
         if (mouseDownState) {
           const dx = Math.abs(e.clientX - mouseDownState.x);
@@ -640,10 +770,37 @@ export class PlaywrightRecorder extends EventEmitter {
         if (pg) return;
 
         const target = e.target as HTMLElement;
-        const selectors = generateAllSelectors(target);
+        let selectors = generateAllSelectors(target);
         // Pass actual click position for coordinate fallback (element center is wrong for canvas)
         const rect = target.getBoundingClientRect();
-        const boundingBox = { x: rect.x, y: rect.y, width: rect.width, height: rect.height, clickX: e.clientX, clickY: e.clientY };
+        let boundingBox: { x: number; y: number; width: number; height: number; clickX?: number; clickY?: number } = { x: rect.x, y: rect.y, width: rect.width, height: rect.height, clickX: e.clientX, clickY: e.clientY };
+
+        // Check if click-generated selectors are useful
+        const hasUsefulSelectors = selectors.length > 0 &&
+          !(selectors.length === 1 && selectors[0].type === 'css-path' &&
+            (selectors[0].value === 'body' || selectors[0].value === 'html'));
+
+        // Fallback 1: use pointerdown selectors (captured before DOM removal)
+        if (!hasUsefulSelectors && pointerDownTarget && target !== pointerDownTarget &&
+            pointerDownSelectors && pointerDownSelectors.length > 0) {
+          selectors = pointerDownSelectors;
+          if (pointerDownBoundingBox) {
+            boundingBox = pointerDownBoundingBox;
+          }
+        }
+
+        // Fallback 2: use mouseover/hover selectors (last element hovered before click)
+        // mouseover fires well before click and is unaffected by DOM removal timing
+        const stillNoSelectors = selectors.length === 0 ||
+          (selectors.length === 1 && selectors[0].type === 'css-path' &&
+            (selectors[0].value === 'body' || selectors[0].value === 'html'));
+        if (stillNoSelectors && hoverSelectors && hoverSelectors.length > 0) {
+          selectors = hoverSelectors;
+          if (hoverBoundingBox) {
+            boundingBox = hoverBoundingBox;
+          }
+        }
+
         const modifiers = getActiveModifiers();
         // @ts-expect-error
         window.__recordAction?.('click', selectors, undefined, boundingBox, generateActionId(), modifiers);
@@ -702,9 +859,16 @@ export class PlaywrightRecorder extends EventEmitter {
           allSelectors.set('aria-label', `[aria-label="${ariaLabel}"]`);
         }
 
-        // Text content (for buttons/links)
+        // Text content (for buttons/links/interactive elements)
+        const INTERACTIVE_ROLES = new Set([
+          'button', 'option', 'menuitem', 'menuitemcheckbox', 'menuitemradio',
+          'tab', 'treeitem', 'link', 'switch', 'radio', 'checkbox',
+          'combobox', 'listitem'
+        ]);
+        const elRole = element.getAttribute('role');
         if (element.tagName === 'BUTTON' || element.tagName === 'A' ||
-            element.getAttribute('role') === 'button') {
+            element.tagName === 'LI' || element.tagName === 'LABEL' ||
+            (elRole && INTERACTIVE_ROLES.has(elRole))) {
           const text = element.textContent?.trim().slice(0, 30);
           if (text) {
             allSelectors.set('text', `text="${text}"`);
@@ -721,6 +885,14 @@ export class PlaywrightRecorder extends EventEmitter {
         const name = element.getAttribute('name');
         if (name) {
           allSelectors.set('name', `[name="${name}"]`);
+        }
+
+        // Leaf element fallback: generate text selector for elements with no children and short text
+        if (!allSelectors.has('text') && element.children.length === 0) {
+          const leafText = element.textContent?.trim().slice(0, 30);
+          if (leafText && leafText.length > 0) {
+            allSelectors.set('text', `text="${leafText}"`);
+          }
         }
 
         // CSS path fallback
@@ -747,6 +919,15 @@ export class PlaywrightRecorder extends EventEmitter {
 
       // Get implicit ARIA role for common elements
       function getImplicitRole(element: HTMLElement): string | null {
+        if (element.tagName === 'LI') {
+          const parent = element.closest('[role="listbox"], [role="menu"], [role="tablist"], [role="tree"]');
+          if (parent) {
+            const parentRole = parent.getAttribute('role');
+            if (parentRole === 'listbox') return 'option';
+            if (parentRole === 'menu') return 'menuitem';
+          }
+          return 'listitem';
+        }
         const tagRoles: Record<string, string> = {
           'BUTTON': 'button',
           'A': 'link',
@@ -1179,6 +1360,7 @@ export class PlaywrightRecorder extends EventEmitter {
 
   private addEvent(type: RecordingEvent['type'], data: RecordingEvent['data'], status: 'preview' | 'committed' = 'committed', verification?: VerificationStatus) {
     if (!this.session) return;
+    if (this._isPaused && type !== 'complete') return;
 
     const event: RecordingEvent = {
       type,
@@ -1225,6 +1407,39 @@ export class PlaywrightRecorder extends EventEmitter {
   }
 
   /**
+   * Insert a timestamp at the current cursor position.
+   * At replay time, this types the current ISO timestamp into the focused element.
+   */
+  async insertTimestamp(format: string = 'iso'): Promise<boolean> {
+    if (!this.page || !this.session) return false;
+    // Capture the currently focused element's selectors before typing
+    // so code gen knows which element to focus before typing the timestamp
+    const focusInfo = await this.page.evaluate(() => {
+      const el = document.activeElement as HTMLElement | null;
+      if (!el || el === document.body) return null;
+      const rect = el.getBoundingClientRect();
+      const selectors: { type: string; value: string }[] = [];
+      if (el.id) selectors.push({ type: 'id', value: `#${el.id}` });
+      const placeholder = el.getAttribute('placeholder');
+      if (placeholder) selectors.push({ type: 'placeholder', value: `[placeholder="${placeholder}"]` });
+      const ariaLabel = el.getAttribute('aria-label');
+      if (ariaLabel) selectors.push({ type: 'aria-label', value: `[aria-label="${ariaLabel}"]` });
+      return {
+        selectors,
+        coordinates: { x: Math.round(rect.x + rect.width / 2), y: Math.round(rect.y + rect.height / 2) },
+      };
+    }).catch(() => null);
+    const timestamp = new Date().toISOString();
+    await this.page.keyboard.type(timestamp);
+    this.addEvent('insert-timestamp', {
+      timestampFormat: format,
+      targetSelectors: focusInfo?.selectors,
+      targetCoordinates: focusInfo?.coordinates,
+    });
+    return true;
+  }
+
+  /**
    * Flag that the next click should be wrapped in downloads.waitForDownload().
    * Also emits a 'download' marker event for the timeline UI.
    */
@@ -1246,6 +1461,7 @@ export class PlaywrightRecorder extends EventEmitter {
     }
 
     this.isRecording = false;
+    this._isPaused = false;
 
     // Await all pending OCR extractions before generating code
     if (this.pendingOcrPromises.length > 0) {
@@ -1259,11 +1475,23 @@ export class PlaywrightRecorder extends EventEmitter {
     this.session.requiredCapabilities = this.detectRequiredCapabilities();
     this.addEvent('complete', { code: this.session.generatedCode });
 
+    // Capture storage state (cookies/localStorage) before cleanup
+    this.capturedStorageState = null;
+    if (this.context) {
+      try {
+        const state = await this.context.storageState();
+        this.capturedStorageState = JSON.stringify(state);
+      } catch {}
+    }
+
     const session = { ...this.session };
     this.lastCompletedSession = session; // Store for retrieval
 
     await this.cleanup();
     this.emit('stopped', session);
+    if (this.capturedStorageState) {
+      this.emit('storageStateCaptured', this.capturedStorageState);
+    }
 
     return session;
   }
@@ -1308,6 +1536,9 @@ export class PlaywrightRecorder extends EventEmitter {
       if (event.type === 'download' || event.data.downloadWrap) {
         caps.downloads = true;
       }
+      if (event.type === 'clipboard-set') {
+        caps.clipboard = true;
+      }
     }
 
     // Clipboard: detected if clipboard access was enabled during recording
@@ -1321,7 +1552,36 @@ export class PlaywrightRecorder extends EventEmitter {
   private generateCode(): string {
     if (!this.session) return '';
 
-    const hasCursorEvents = this.session.events.some(e => e.type === 'cursor-move');
+    // Pre-process: deduplicate consecutive fill actions on the same element
+    // (keeps only the last fill value when multiple fills target the same selector)
+    // Also removes fills that precede an insert-timestamp (timestamp replaces the fill content)
+    const deduped: RecordingEvent[] = [];
+    for (let i = 0; i < this.session.events.length; i++) {
+      const event = this.session.events[i];
+      if (event.type === 'action' && event.data.action === 'fill') {
+        // Look ahead: skip this fill if a later fill or insert-timestamp follows
+        let j = i + 1;
+        let skipReason: 'later-fill' | 'timestamp' | null = null;
+        while (j < this.session.events.length) {
+          const next = this.session.events[j];
+          if (next.type === 'insert-timestamp') {
+            skipReason = 'timestamp'; // Insert-timestamp replaces all preceding fills
+            break;
+          }
+          if (next.type === 'action') {
+            if (next.data.action === 'fill' && next.data.selector === event.data.selector) {
+              skipReason = 'later-fill';
+            }
+            break; // Stop at any action event
+          }
+          j++;
+        }
+        if (skipReason) continue; // Skip — a later fill or timestamp supersedes this one
+      }
+      deduped.push(event);
+    }
+
+    const hasCursorEvents = deduped.some(e => e.type === 'cursor-move');
     const coordsEnabled = this.selectorPriority.find(s => s.type === 'coords')?.enabled ?? true;
 
     const lines: string[] = [
@@ -1369,6 +1629,8 @@ export class PlaywrightRecorder extends EventEmitter {
       `        // Use .first() to handle multiple matches (e.g., header + footer nav links)`,
       `        const target = locator.first();`,
       `        await target.waitFor({ timeout: 3000 });`,
+      `        // Scroll element into view before interacting (handles elements in scroll containers)`,
+      `        await target.scrollIntoViewIfNeeded().catch(() => {});`,
       `        if (action === 'locate') return target; // Return locator for assertions`,
       `        if (action === 'click') await target.click(options || {});`,
       `        else if (action === 'fill') await target.fill(value || '');`,
@@ -1415,6 +1677,7 @@ export class PlaywrightRecorder extends EventEmitter {
 
     let lastAction = '';
     let lastEmittedEventType = ''; // Track last non-cursor event for context-aware code gen
+    let lastNavigatedPath = ''; // Track current URL to skip duplicate navigations (e.g. revalidatePath)
     let cursorBatch: [number, number, number][] = [];
     let lastCursorTimestamp = 0;
     let lastCursorX = 640;
@@ -1430,7 +1693,7 @@ export class PlaywrightRecorder extends EventEmitter {
       }
     };
 
-    for (const event of this.session.events) {
+    for (const event of deduped) {
       if (event.type === 'cursor-move' && event.data.coordinates) {
         const { x, y } = event.data.coordinates;
         const delay = lastCursorTimestamp > 0 ? event.timestamp - lastCursorTimestamp : 0;
@@ -1451,10 +1714,21 @@ export class PlaywrightRecorder extends EventEmitter {
       }
 
       if (event.type === 'navigation' && event.data.relativePath) {
-        // Only add goto for the first navigation or if URL changed significantly
-        if (!lastAction.includes('goto')) {
-          const relativePath = event.data.relativePath;
+        const relativePath = event.data.relativePath;
+        // Skip duplicate navigations to the same path (triggered by revalidatePath/server actions)
+        if (relativePath === lastNavigatedPath && lastEmittedEventType === 'action') {
+          // This is likely a revalidatePath refresh, not a user navigation — skip it
+          // but still wait for the mutation to complete
+          if (lastAction === 'click') {
+            lines.push(`  await page.waitForLoadState('networkidle').catch(() => {});`);
+          }
+        } else if (!lastAction.includes('goto')) {
+          // If last action was a click (e.g. Save/Create/Delete), wait for pending requests
+          if (lastEmittedEventType === 'action' && lastAction === 'click') {
+            lines.push(`  await page.waitForLoadState('networkidle').catch(() => {});`);
+          }
           lines.push(`  await page.goto(buildUrl(baseUrl, '${relativePath}'));`);
+          lastNavigatedPath = relativePath;
         }
         lastAction = 'goto';
       } else if (event.type === 'action') {
@@ -1689,6 +1963,10 @@ export class PlaywrightRecorder extends EventEmitter {
           insideDownloadMouseWrap = false;
         }
         lastEmittedEventType = 'mouse-up';
+      } else if (event.type === 'clipboard-set' && event.data.text) {
+        const escapedText = JSON.stringify(event.data.text);
+        lines.push(`  await clipboard.copy(${escapedText});`);
+        lastEmittedEventType = 'clipboard-set';
       } else if (event.type === 'keypress' && event.data.key) {
         const { key, modifiers, keyCode } = event.data;
         // When Shift is a modifier and e.key is a single char, e.key is the shifted result
@@ -1723,25 +2001,43 @@ export class PlaywrightRecorder extends EventEmitter {
         const escapedKey = event.data.key.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
         lines.push(`  await page.keyboard.up('${escapedKey}');`);
         lastEmittedEventType = 'keyup';
+      } else if (event.type === 'insert-timestamp') {
+        // If we have target selectors, click the element first to ensure focus
+        const targetSels = event.data.targetSelectors;
+        const targetCoords = event.data.targetCoordinates;
+        if (targetSels && targetSels.length > 0) {
+          const selectorsJson = JSON.stringify(targetSels);
+          const coordsArg = targetCoords ? JSON.stringify(targetCoords) : 'null';
+          lines.push(`  await locateWithFallback(page, ${selectorsJson}, 'click', null, ${coordsArg});`);
+        }
+        lines.push(`  await page.keyboard.type(new Date().toISOString());`);
+        lastEmittedEventType = 'insert-timestamp';
       } else if (event.type === 'scroll') {
         const deltaX = event.data.deltaX || 0;
         const deltaY = event.data.deltaY || 0;
         const scrollMods = event.data.modifiers;
+        // Always use evaluate with elementFromPoint to scroll the correct container
+        // (page.mouse.wheel doesn't work reliably for nested scroll containers like ScrollArea)
+        const modFlags: string[] = [];
         if (scrollMods && scrollMods.length > 0) {
-          // Dispatch WheelEvent via evaluate with modifier flags set directly on the event
-          // (keyboard.down + mouse.wheel doesn't propagate modifier state to the wheel event)
-          const modFlags: string[] = [];
           if (scrollMods.includes('Control')) modFlags.push('ctrlKey: true');
           if (scrollMods.includes('Shift')) modFlags.push('shiftKey: true');
           if (scrollMods.includes('Alt')) modFlags.push('altKey: true');
           if (scrollMods.includes('Meta')) modFlags.push('metaKey: true');
-          lines.push(`  await page.evaluate(({ x, y, dx, dy }) => {`);
-          lines.push(`    const el = document.elementFromPoint(x, y) || document.documentElement;`);
-          lines.push(`    el.dispatchEvent(new WheelEvent('wheel', { deltaX: dx, deltaY: dy, ${modFlags.join(', ')}, bubbles: true, cancelable: true, clientX: x, clientY: y }));`);
-          lines.push(`  }, { x: ${lastCursorX}, y: ${lastCursorY}, dx: ${deltaX}, dy: ${deltaY} });`);
-        } else {
-          lines.push(`  await page.mouse.wheel(${deltaX}, ${deltaY});`);
         }
+        const modFlagsStr = modFlags.length > 0 ? `, ${modFlags.join(', ')}` : '';
+        lines.push(`  await page.evaluate(({ x, y, dx, dy }) => {`);
+        lines.push(`    let el = document.elementFromPoint(x, y) || document.documentElement;`);
+        lines.push(`    // Find the nearest scrollable ancestor`);
+        lines.push(`    while (el && el !== document.documentElement) {`);
+        lines.push(`      const style = getComputedStyle(el);`);
+        lines.push(`      const overflowY = style.overflowY;`);
+        lines.push(`      if ((overflowY === 'auto' || overflowY === 'scroll') && el.scrollHeight > el.clientHeight) { el.scrollTop += dy; return; }`);
+        lines.push(`      el = el.parentElement;`);
+        lines.push(`    }`);
+        lines.push(`    // Fallback: dispatch wheel event`);
+        lines.push(`    document.documentElement.dispatchEvent(new WheelEvent('wheel', { deltaX: dx, deltaY: dy${modFlagsStr}, bubbles: true, cancelable: true, clientX: x, clientY: y }));`);
+        lines.push(`  }, { x: ${lastCursorX}, y: ${lastCursorY}, dx: ${deltaX}, dy: ${deltaY} });`);
         lastEmittedEventType = 'scroll';
       }
     }
@@ -1773,6 +2069,22 @@ export class PlaywrightRecorder extends EventEmitter {
 
   isActive(): boolean {
     return this.isRecording;
+  }
+
+  isPaused(): boolean {
+    return this._isPaused;
+  }
+
+  pauseRecording(): void {
+    if (!this.isRecording) return;
+    this._isPaused = true;
+    this.emit('paused');
+  }
+
+  resumeRecording(): void {
+    if (!this.isRecording) return;
+    this._isPaused = false;
+    this.emit('resumed');
   }
 
   // Get and clear pending verification updates

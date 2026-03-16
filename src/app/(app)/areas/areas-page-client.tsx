@@ -41,7 +41,7 @@ export interface SuiteItem {
 
 interface AreasPageClientProps {
   tree: FunctionalAreaWithChildren[];
-  uncategorizedTests: { id: string; name: string; latestStatus: string | null }[];
+  uncategorizedTests: { id: string; name: string; description: string | null; latestStatus: string | null }[];
   unsortedSuites: SuiteItem[];
   repositoryId: string;
   selectedBranch: string;

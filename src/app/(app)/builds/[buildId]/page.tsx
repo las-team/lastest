@@ -16,9 +16,10 @@ export default async function BuildPage({ params }: PageProps) {
   const { buildId } = await params;
   const session = await getCurrentSession();
   const teamId = session?.team?.id;
+  const userId = session?.user?.id;
   const [build, selectedRepo] = await Promise.all([
     getBuildSummary(buildId),
-    teamId ? getSelectedRepository(teamId) : null,
+    teamId ? getSelectedRepository(userId, teamId) : null,
   ]);
   const recentBuilds = selectedRepo
     ? await getRecentBuildsByRepo(selectedRepo.id, 5)

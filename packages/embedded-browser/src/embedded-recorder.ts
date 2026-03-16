@@ -74,6 +74,9 @@ export class EmbeddedRecorder {
       acceptDownloads: true,
     });
     this.page = await this.context.newPage();
+    await this.page.addInitScript(() => {
+      Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+    });
 
     // Detect page crash/close to prevent using a dead page
     this.page.on('crash', () => {
@@ -338,6 +341,16 @@ export class EmbeddedRecorder {
   createAssertion(assertionType: string): void {
     if (!this.isRecording) return;
     this.addEvent('assertion', { assertionType });
+  }
+
+  /**
+   * Insert a timestamp at the current cursor position in the browser.
+   */
+  async insertTimestamp(): Promise<void> {
+    if (!this.isRecording || !this.page) return;
+    const timestamp = new Date().toISOString();
+    await this.page.keyboard.type(timestamp);
+    this.addEvent('insert-timestamp', { timestampFormat: 'iso' });
   }
 
   /**

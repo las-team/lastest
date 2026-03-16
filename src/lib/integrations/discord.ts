@@ -97,7 +97,7 @@ export interface DiscordBugReportNotification {
   appVersion: string | null;
   gitHash: string | null;
   reportId: string;
-  screenshotUrl: string | null;
+  screenshotBuffer: Buffer | null;
 }
 
 function getBugSeverityColor(severity: BugReportSeverity): number {
@@ -126,26 +126,49 @@ export async function sendDiscordBugReport(
     timestamp: new Date().toISOString(),
   };
 
-  if (notification.screenshotUrl) {
-    embed.image = { url: notification.screenshotUrl };
+  if (notification.screenshotBuffer) {
+    embed.image = { url: 'attachment://screenshot.png' };
   }
 
   try {
-    const response = await fetch(webhookUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
+    let response: Response;
+
+    if (notification.screenshotBuffer) {
+      const payload = JSON.stringify({
         embeds: [embed],
         allowed_mentions: { parse: [] },
-      }),
-    });
+      });
+      const buf = Buffer.isBuffer(notification.screenshotBuffer)
+        ? notification.screenshotBuffer
+        : Buffer.from(notification.screenshotBuffer);
+      const file = new File([buf as unknown as BlobPart], 'screenshot.png', { type: 'image/png' });
+      const formData = new FormData();
+      formData.append('payload_json', payload);
+      formData.append('files[0]', file);
+      const url = webhookUrl.includes('?') ? `${webhookUrl}&wait=true` : `${webhookUrl}?wait=true`;
+      response = await fetch(url, {
+        method: 'POST',
+        body: formData,
+      });
+    } else {
+      response = await fetch(webhookUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          embeds: [embed],
+          allowed_mentions: { parse: [] },
+        }),
+      });
+    }
 
     if (!response.ok) {
       const text = await response.text();
+      console.error('[BugReport] Discord webhook error:', response.status, text);
       return { success: false, error: `Discord webhook failed: ${response.status} ${text}` };
     }
     return { success: true };
   } catch (error) {
+    console.error('[BugReport] Discord send error:', error);
     return {
       success: false,
       error: error instanceof Error ? error.message : 'Unknown error sending Discord bug report',

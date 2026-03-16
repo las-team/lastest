@@ -86,7 +86,81 @@ export const browserRecordingScript = ({ pointerGestures: pg, cursorFPS: fps, se
     return `action-${Date.now()}-${++actionIdCounter}`;
   }
 
+  // Capture selectors at pointerdown time for fallback.
+  // Radix UI (and similar) remove elements from DOM on selection, causing click
+  // to retarget to body/wrapper with useless selectors. pointerdown fires first.
+  let pointerDownSelectors: BrowserActionSelector[] | null = null;
+  let pointerDownBoundingBox: { x: number; y: number; width: number; height: number; clickX: number; clickY: number } | null = null;
+  let pointerCleanupTimer: ReturnType<typeof setTimeout> | null = null;
+  let pointerDownClickRecorded = false;
+  let pointerDownDeferTimer: ReturnType<typeof setTimeout> | null = null;
+
+  // Walk up DOM to find nearest interactive ancestor for better selectors.
+  function findBestTarget(el: HTMLElement): HTMLElement {
+    const INTERACTIVE = new Set([
+      'button', 'option', 'menuitem', 'menuitemcheckbox', 'menuitemradio',
+      'tab', 'treeitem', 'link', 'switch', 'radio', 'checkbox',
+      'combobox', 'listitem'
+    ]);
+    const INTERACTIVE_TAGS = new Set(['A', 'BUTTON', 'INPUT', 'SELECT', 'TEXTAREA', 'LI']);
+    let current: HTMLElement | null = el;
+    while (current && current !== document.body && current !== document.documentElement) {
+      const role = current.getAttribute('role');
+      if (role && INTERACTIVE.has(role)) return current;
+      if (INTERACTIVE_TAGS.has(current.tagName)) return current;
+      if (current.dataset.testid) return current;
+      if (current.hasAttribute('tabindex') || (current.getAttribute('aria-label') && current !== el)) return current;
+      current = current.parentElement;
+    }
+    return el;
+  }
+
+  document.addEventListener('pointerdown', (e: PointerEvent) => {
+    if (pointerCleanupTimer) { clearTimeout(pointerCleanupTimer); pointerCleanupTimer = null; }
+    if (pointerDownDeferTimer) { clearTimeout(pointerDownDeferTimer); pointerDownDeferTimer = null; }
+    const rawTarget = e.target as HTMLElement;
+    const target = findBestTarget(rawTarget);
+    pointerDownSelectors = generateAllSelectors(target);
+    const rect = target.getBoundingClientRect();
+    pointerDownBoundingBox = { x: rect.x, y: rect.y, width: rect.width, height: rect.height, clickX: e.clientX, clickY: e.clientY };
+    pointerDownClickRecorded = false;
+
+    // Safety net: if element is removed from DOM and no click fires,
+    // record the action directly from pointerdown data.
+    const savedSelectors = pointerDownSelectors;
+    const savedBoundingBox = pointerDownBoundingBox;
+    if (savedSelectors && savedSelectors.length > 0) {
+      pointerDownDeferTimer = setTimeout(() => {
+        if (!pointerDownClickRecorded && !document.contains(target) && savedSelectors.length > 0) {
+          const modifiers = getActiveModifiers();
+          // @ts-expect-error - exposed function
+          window.__recordAction?.('click', savedSelectors, undefined, savedBoundingBox, generateActionId(), modifiers);
+        }
+        pointerDownDeferTimer = null;
+      }, 300);
+    }
+  }, true);
+
+  document.addEventListener('pointerup', () => {
+    pointerCleanupTimer = setTimeout(() => { pointerDownSelectors = null; pointerDownBoundingBox = null; pointerCleanupTimer = null; }, 500);
+  }, true);
+
+  // Capture mouseover selectors as second fallback (fires well before click)
+  let hoverSelectors: BrowserActionSelector[] | null = null;
+  let hoverBoundingBox: { x: number; y: number; width: number; height: number; clickX: number; clickY: number } | null = null;
+  document.addEventListener('mouseover', (e: MouseEvent) => {
+    const target = e.target as HTMLElement;
+    if (!target || target === document.body || target === document.documentElement) return;
+    const sels = generateAllSelectors(target);
+    if (sels.length > 0) {
+      hoverSelectors = sels;
+      const rect = target.getBoundingClientRect();
+      hoverBoundingBox = { x: rect.x, y: rect.y, width: rect.width, height: rect.height, clickX: e.clientX, clickY: e.clientY };
+    }
+  }, true);
+
   document.addEventListener('click', (e) => {
+    pointerDownClickRecorded = true; // Prevent deferred pointerdown from double-recording
     if (mouseDownState) {
       const dx = Math.abs(e.clientX - mouseDownState.x);
       const dy = Math.abs(e.clientY - mouseDownState.y);
@@ -97,9 +171,34 @@ export const browserRecordingScript = ({ pointerGestures: pg, cursorFPS: fps, se
       }
     }
     const target = e.target as HTMLElement;
-    const selectors = generateAllSelectors(target);
+    let selectors = generateAllSelectors(target);
     const rect = target.getBoundingClientRect();
-    const boundingBox = { x: rect.x, y: rect.y, width: rect.width, height: rect.height };
+    let boundingBox: { x: number; y: number; width: number; height: number; clickX?: number; clickY?: number } = { x: rect.x, y: rect.y, width: rect.width, height: rect.height, clickX: e.clientX, clickY: e.clientY };
+
+    // Check if click-generated selectors are useful (not just body/html css-path)
+    const hasUsefulSelectors = selectors.length > 0 &&
+      !(selectors.length === 1 && selectors[0].type === 'css-path' &&
+        (selectors[0].value === 'body' || selectors[0].value === 'html'));
+
+    // Fallback 1: use pointerdown selectors (captured before DOM removal)
+    if (!hasUsefulSelectors && pointerDownSelectors && pointerDownSelectors.length > 0) {
+      selectors = pointerDownSelectors;
+      if (pointerDownBoundingBox) {
+        boundingBox = pointerDownBoundingBox;
+      }
+    }
+
+    // Fallback 2: use mouseover/hover selectors (last element hovered before click)
+    const stillNoSelectors = selectors.length === 0 ||
+      (selectors.length === 1 && selectors[0].type === 'css-path' &&
+        (selectors[0].value === 'body' || selectors[0].value === 'html'));
+    if (stillNoSelectors && hoverSelectors && hoverSelectors.length > 0) {
+      selectors = hoverSelectors;
+      if (hoverBoundingBox) {
+        boundingBox = hoverBoundingBox;
+      }
+    }
+
     const modifiers = getActiveModifiers();
     // @ts-expect-error - exposed function
     window.__recordAction?.('click', selectors, undefined, boundingBox, generateActionId(), modifiers);

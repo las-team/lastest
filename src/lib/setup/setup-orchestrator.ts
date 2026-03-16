@@ -190,8 +190,8 @@ export class SetupOrchestrator {
         const activeDefaults = defaultSteps.filter((s) => !skippedIds.has(s.id));
 
         // Build step list: active defaults + extras
-        const stepsToRun: Array<{ stepType: string; testId: string | null; scriptId: string | null }> = [
-          ...activeDefaults.map((s) => ({ stepType: s.stepType, testId: s.testId, scriptId: s.scriptId })),
+        const stepsToRun: Array<{ stepType: string; testId: string | null; scriptId: string | null; storageStateId: string | null }> = [
+          ...activeDefaults.map((s) => ({ stepType: s.stepType, testId: s.testId, scriptId: s.scriptId, storageStateId: s.storageStateId })),
         ];
 
         if (overrides?.extraSteps) {
@@ -200,6 +200,7 @@ export class SetupOrchestrator {
               stepType: extra.stepType,
               testId: extra.testId ?? null,
               scriptId: extra.scriptId ?? null,
+              storageStateId: extra.storageStateId ?? null,
             });
           }
         }
@@ -207,6 +208,31 @@ export class SetupOrchestrator {
         // Execute sequentially, accumulate variables, stop on first failure
         let currentContext = suiteContext;
         for (const step of stepsToRun) {
+          // Handle storage_state steps: load saved auth state directly
+          if (step.stepType === 'storage_state' && step.storageStateId) {
+            try {
+              const storageState = await queries.getStorageState(step.storageStateId);
+              if (storageState) {
+                currentContext = { ...currentContext, storageState: storageState.storageStateJson };
+                // Inject cookies into current browser context
+                const parsed = JSON.parse(storageState.storageStateJson);
+                if (parsed.cookies?.length > 0) {
+                  await page.context().addCookies(parsed.cookies);
+                }
+                console.log(`[setup] Loaded storage state "${storageState.name}": ${parsed.cookies?.length ?? 0} cookies`);
+              } else {
+                console.warn(`[setup] Storage state not found: ${step.storageStateId} - skipping`);
+              }
+            } catch (error) {
+              return {
+                success: false,
+                error: `Failed to load storage state: ${error instanceof Error ? error.message : String(error)}`,
+                duration: Date.now() - startTime,
+              };
+            }
+            continue;
+          }
+
           const stepTestId = step.stepType === 'test' ? step.testId : null;
           const stepScriptId = step.stepType === 'script' ? step.scriptId : null;
 

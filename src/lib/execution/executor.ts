@@ -33,6 +33,7 @@ import {
   getUnacknowledgedResults,
   acknowledgeResults,
   getRunnerCommandById,
+  getTestFixtures,
 } from '@/lib/db/queries';
 
 /**
@@ -223,7 +224,7 @@ async function executeLocally(
  * Execute setup on a remote runner before tests.
  * Queues a command:run_setup to the DB, polls for completion, and returns storageState.
  */
-async function executeSetupViaRunner(
+export async function executeSetupViaRunner(
   setupCode: string,
   setupId: string,
   runnerId: string,
@@ -402,22 +403,45 @@ async function executeViaRunner(
         continue;
       }
 
+      // Load test fixtures from DB and base64 encode for remote transfer
+      const testFixtureRecords = await getTestFixtures(test.id);
+      const fixturePayloads: Array<{ filename: string; data: string }> = [];
+      for (const fixture of testFixtureRecords) {
+        try {
+          const absPath = path.join(STORAGE_DIRS.fixtures, fixture.storagePath.replace(/^\/fixtures\//, ''));
+          const fileData = await fs.readFile(absPath);
+          fixturePayloads.push({ filename: fixture.filename, data: fileData.toString('base64') });
+        } catch (err) {
+          console.warn(`[Executor] Failed to read fixture ${fixture.filename}: ${err}`);
+        }
+      }
+
       // Create run_test command with code hash for integrity verification
+      // Per-test playwright overrides
+      const pwOverrides = test.playwrightOverrides;
+      const effectiveBrowser = pwOverrides?.browser ?? ((options.playwrightSettings?.browser as 'chromium' | 'firefox' | 'webkit') || undefined);
+      const effectiveBaseUrl = pwOverrides?.baseUrl ?? baseUrl;
+      const effectiveTimeout = pwOverrides?.navigationTimeout ?? testTimeout;
+
       const command = createMessage<RunTestCommand>('command:run_test', {
         testId: test.id,
         testRunId: runId,
         code: test.code,
         codeHash: hashCode(test.code),
-        targetUrl: baseUrl,
+        targetUrl: effectiveBaseUrl,
         screenshotPath: `${runId}-${test.id}.png`,
-        timeout: testTimeout,
+        timeout: effectiveTimeout,
         repositoryId: options.repositoryId || undefined,
         viewport: test.viewportOverride || viewport,
         storageState: options.setupContext?.storageState,
         setupVariables: options.setupContext?.variables,
         cursorPlaybackSpeed: options.playwrightSettings?.cursorPlaybackSpeed ?? 1,
         stabilization: buildStabilizationPayload(options.playwrightSettings, test.stabilizationOverrides),
-        browser: (options.playwrightSettings?.browser as 'chromium' | 'firefox' | 'webkit') || undefined,
+        browser: effectiveBrowser,
+        fixtures: fixturePayloads,
+        grantClipboardAccess: options.playwrightSettings?.grantClipboardAccess ?? false,
+        acceptDownloads: options.playwrightSettings?.acceptDownloads ?? false,
+        headed: options.headless === false,
       });
 
       // Queue command to DB

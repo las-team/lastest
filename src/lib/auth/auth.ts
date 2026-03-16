@@ -6,6 +6,7 @@ import * as schema from "@/lib/db/schema";
 import { hash, verify } from "@node-rs/argon2";
 import * as queries from "@/lib/db/queries";
 import { getGitHubUser } from "@/lib/github/oauth";
+import { sendPasswordResetEmail } from "@/lib/email";
 
 async function syncGithubAccount(account: { userId: string; accessToken?: string | null }) {
   if (!account.accessToken) return;
@@ -80,6 +81,9 @@ export const auth = betterAuth({
           outputLen: 32,
         }),
       verify: ({ hash: h, password }) => verify(h, password),
+    },
+    sendResetPassword: async ({ user, token }) => {
+      await sendPasswordResetEmail(user.email, token);
     },
   },
 
