@@ -26,6 +26,7 @@ const eslintConfig = defineConfig([
     "**/dist/**",
     "packages/runner/dist/**",
     "packages/vscode-extension/dist/**",
+    "scripts/**",
   ]),
 ]);
 

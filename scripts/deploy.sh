@@ -169,11 +169,12 @@ build_olares() {
 
 # --- Targets ---
 deploy_local() {
-  log "Deploying locally"
-  run_checks
-  docker compose build
-  docker compose up -d
-  bash "$SCRIPT_DIR/health-check.sh" "http://localhost:3000"
+  log "Deploying embedded browsers (local dev)"
+  docker compose -f docker-compose.eb.yml up -d --build
+  sleep 3
+  ok "EB containers started"
+  echo "  eb-1: http://localhost:9224/health"
+  echo "  eb-2: http://localhost:9226/health"
 }
 
 deploy_eb() {

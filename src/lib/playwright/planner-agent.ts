@@ -132,7 +132,7 @@ export function parseAreasFromResponse(response: string): PlannerArea[] {
 export async function agentDiscoverAreas(
   repositoryId: string,
   baseUrl: string,
-): Promise<{ success: boolean; functionalAreas?: Array<{ name: string; routes: Array<{ path: string; type: 'dynamic' | 'static'; description?: string }> }>; rawResponse?: string; error?: string }> {
+): Promise<{ success: boolean; functionalAreas?: Array<{ name: string; description?: string; routes: Array<{ path: string; type: 'dynamic' | 'static'; description?: string }> }>; rawResponse?: string; error?: string }> {
   await requireRepoAccess(repositoryId);
 
   try {

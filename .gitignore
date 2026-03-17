@@ -73,3 +73,5 @@ explore-*.mjs
 /.clerk/
 screenshot-*.png
 playwright-visual-tests/
+tests/*
+test-results/*

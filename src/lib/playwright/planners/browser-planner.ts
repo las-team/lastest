@@ -23,7 +23,7 @@ export async function runBrowserPlanner(
     }
 
     // agentDiscoverAreas already saves agentPlan to DB — we just need the PlannerArea format
-    const { default: queries } = await import('@/lib/db/queries');
+    const queries = await import('@/lib/db/queries');
     const dbAreas = await queries.getFunctionalAreasByRepo(repositoryId);
 
     const areas = result.functionalAreas.map(fa => {

@@ -31,6 +31,7 @@ export function getAIProvider(config: AIProviderConfig): AIProvider {
       workingDirectory: config.agentSdkWorkingDir,
       mcpServers: config.agentSdkMcpServers,
       allowedTools: config.agentSdkAllowedTools,
+      disallowedTools: config.agentSdkDisallowedTools,
     });
   }
 
@@ -94,6 +95,11 @@ export async function generateWithAI(
     effectiveConfig.agentSdkAllowedTools = [
       ...(effectiveConfig.agentSdkAllowedTools || []),
       'mcp__playwright-test__*',
+    ];
+    // Disable non-MCP tools so the agent focuses on browser exploration, not shell commands
+    effectiveConfig.agentSdkDisallowedTools = [
+      ...(effectiveConfig.agentSdkDisallowedTools || []),
+      'Bash', 'Write', 'Edit', 'NotebookEdit',
     ];
   }
 

@@ -2,10 +2,13 @@
  * Spec Planner — discovers spec/PRD files in the repo via GitHub API,
  * fetches their contents ("Select All"), extracts user stories,
  * and maps acceptance criteria into test plans.
+ *
+ * If structured extraction fails, returns the raw spec content so the
+ * orchestrator/merger can still salvage useful information.
  */
 
 import * as queries from '@/lib/db/queries';
-import { getRepoTree } from '@/lib/github/content';
+import { getRepoTree, getFileContent } from '@/lib/github/content';
 import type { PlannerResult } from '@/lib/playwright/planner-types';
 
 const SPEC_PATTERNS = ['docs/', 'specs/', 'specifications/', 'requirements/', 'stories/', 'features/'];
@@ -53,29 +56,36 @@ export async function runSpecPlanner(
       return { source: 'spec', areas: [] };
     }
 
-    // "Select All" — fetch all spec file contents
+    // Fetch raw spec file contents for fallback
     const filePaths = specEntries.map(e => e.path);
+    const rawContents: string[] = [];
+    for (const path of filePaths) {
+      const content = await getFileContent(account.accessToken, repo.owner, repo.name, path, branch);
+      if (content) rawContents.push(`--- ${path} ---\n${content}`);
+    }
+    const rawSpecContent = rawContents.join('\n\n');
 
-    // Use extractUserStoriesFromFiles which handles fetching + AI extraction
+    // Try structured extraction via AI
     const { extractUserStoriesFromFiles } = await import('@/server/actions/spec-import');
     const storiesResult = await extractUserStoriesFromFiles(repositoryId, branch, filePaths);
 
-    if (!storiesResult.success || !storiesResult.stories?.length) {
-      return {
-        source: 'spec',
-        areas: [],
-        error: storiesResult.error || `${specEntries.length} spec files found, no stories extracted`,
-      };
+    if (storiesResult.success && storiesResult.stories?.length) {
+      const areas = storiesResult.stories.map(story => ({
+        name: story.title,
+        description: story.description,
+        routes: [] as string[],
+        testPlan: buildSpecTestPlan(story),
+      }));
+      return { source: 'spec', areas };
     }
 
-    const areas = storiesResult.stories.map(story => ({
-      name: story.title,
-      description: story.description,
-      routes: [] as string[],
-      testPlan: buildSpecTestPlan(story),
-    }));
-
-    return { source: 'spec', areas };
+    // Extraction failed — return raw spec content for merger to salvage
+    return {
+      source: 'spec',
+      areas: [],
+      rawOutput: rawSpecContent,
+      error: storiesResult.error || `${specEntries.length} spec files found, extraction failed`,
+    };
   } catch (error) {
     return {
       source: 'spec',
