@@ -6,6 +6,7 @@ export interface ClaudeAgentSDKOptions {
   workingDirectory?: string;
   model?: string;
   mcpServers?: Record<string, McpStdioServerConfig>;
+  allowedTools?: string[];
 }
 
 /** Max prompt size (in chars) the Agent SDK handles reliably. */
@@ -22,12 +23,14 @@ export class ClaudeAgentSDKProvider implements AIProvider {
   private workingDirectory?: string;
   private model?: string;
   private mcpServers?: Record<string, McpStdioServerConfig>;
+  private allowedTools?: string[];
 
   constructor(options: ClaudeAgentSDKOptions = {}) {
     this.permissionMode = options.permissionMode || 'plan';
     this.workingDirectory = options.workingDirectory;
     this.model = options.model;
     this.mcpServers = options.mcpServers;
+    this.allowedTools = options.allowedTools;
   }
 
   async generate(options: GenerateOptions): Promise<string> {
@@ -49,6 +52,7 @@ export class ClaudeAgentSDKProvider implements AIProvider {
           cwd: this.workingDirectory,
           model: this.model,
           ...(this.mcpServers && { mcpServers: this.mcpServers }),
+          ...(this.allowedTools && { allowedTools: this.allowedTools }),
           stderr: (data: string) => { stderrChunks.push(data); },
         },
       })) {
@@ -105,6 +109,7 @@ export class ClaudeAgentSDKProvider implements AIProvider {
           cwd: this.workingDirectory,
           model: this.model,
           ...(this.mcpServers && { mcpServers: this.mcpServers }),
+          ...(this.allowedTools && { allowedTools: this.allowedTools }),
           stderr: (data: string) => { stderrChunks.push(data); },
         },
       })) {

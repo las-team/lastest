@@ -14,5 +14,7 @@ export type PlannerSource = 'browser' | 'code' | 'spec' | 'routes';
 export interface PlannerResult {
   source: PlannerSource;
   areas: PlannerArea[];
+  /** Raw text output from the planner (used by merger as fallback when areas is empty) */
+  rawOutput?: string;
   error?: string;
 }

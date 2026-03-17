@@ -14,11 +14,15 @@ export async function runBrowserPlanner(
     const result = await agentDiscoverAreas(repositoryId, baseUrl);
 
     if (!result.success || !result.functionalAreas?.length) {
-      return { source: 'browser', areas: [], error: result.error || 'No areas discovered' };
+      return {
+        source: 'browser',
+        areas: [],
+        rawOutput: result.rawResponse,
+        error: result.error || 'No areas discovered',
+      };
     }
 
     // agentDiscoverAreas already saves agentPlan to DB — we just need the PlannerArea format
-    // Re-read the plans from DB since agentDiscoverAreas stores them there
     const { default: queries } = await import('@/lib/db/queries');
     const dbAreas = await queries.getFunctionalAreasByRepo(repositoryId);
 

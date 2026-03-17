@@ -135,9 +135,10 @@ RUN mkdir -p /app/embedded-browser/node_modules && \
     ln -s /app/node_modules/playwright /app/embedded-browser/node_modules/playwright && \
     ln -s /app/node_modules/playwright-core /app/embedded-browser/node_modules/playwright-core
 
-# Copy entrypoint script
+# Copy entrypoint and helper scripts
 COPY --chown=nextjs:nodejs scripts/docker-entrypoint.sh /docker-entrypoint.sh
 RUN chmod +x /docker-entrypoint.sh
+COPY --chown=nextjs:nodejs scripts/migrate.js /app/migrate.js
 COPY --chown=nextjs:nodejs scripts/ws-proxy-preload.js /app/ws-proxy-preload.js
 
 # Create data directories

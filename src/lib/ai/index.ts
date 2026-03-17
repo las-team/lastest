@@ -30,6 +30,7 @@ export function getAIProvider(config: AIProviderConfig): AIProvider {
       model: config.agentSdkModel || undefined,
       workingDirectory: config.agentSdkWorkingDir,
       mcpServers: config.agentSdkMcpServers,
+      allowedTools: config.agentSdkAllowedTools,
     });
   }
 
@@ -89,8 +90,11 @@ export async function generateWithAI(
         args: ['playwright', 'run-test-mcp-server'],
       },
     };
-    // MCP agents need unrestricted tool execution (browser_navigate, etc. are not "edits")
-    effectiveConfig.agentSdkPermissionMode = 'bypassPermissions';
+    // Auto-allow all Playwright MCP tools without prompting (respects user's permission mode)
+    effectiveConfig.agentSdkAllowedTools = [
+      ...(effectiveConfig.agentSdkAllowedTools || []),
+      'mcp__playwright-test__*',
+    ];
   }
 
   const provider = getAIProvider(effectiveConfig);

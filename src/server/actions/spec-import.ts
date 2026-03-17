@@ -445,7 +445,7 @@ async function extractStoriesFromContent(
   const config = await getAIConfig(repositoryId);
   const prompt = createUserStoryExtractionPrompt(specContent);
 
-  const response = await generateWithAI(config, prompt, SYSTEM_PROMPT, {
+  const response = await generateWithAI(config, prompt, 'You are a document parser that extracts structured user stories and acceptance criteria. Output ONLY the requested format — no code, no tests, no conversation.', {
     actionType: 'extract_user_stories',
     repositoryId,
   });

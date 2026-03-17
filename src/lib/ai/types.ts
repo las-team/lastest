@@ -28,6 +28,7 @@ export interface AIProviderConfig {
   agentSdkModel?: string;
   agentSdkWorkingDir?: string;
   agentSdkMcpServers?: Record<string, { command: string; args?: string[]; env?: Record<string, string> }>;
+  agentSdkAllowedTools?: string[];
   ollamaBaseUrl?: string;
   ollamaModel?: string;
   anthropicApiKey?: string | null;
