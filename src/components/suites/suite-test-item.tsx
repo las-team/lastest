@@ -45,13 +45,15 @@ export function SuiteTestItem({ test, index, onRemove, isRunning, isCurrent, sta
   };
 
   // Determine status icon
-  const StatusIcon = () => {
-    if (isCurrent) return <Loader2 className="w-4 h-4 animate-spin text-blue-500" />;
-    if (status === 'passed') return <CheckCircle className="w-4 h-4 text-green-500" />;
-    if (status === 'failed') return <XCircle className="w-4 h-4 text-red-500" />;
-    if (isRunning) return <Clock className="w-4 h-4 text-muted-foreground" />;
-    return null;
-  };
+  const statusIcon = isCurrent
+    ? <Loader2 className="w-4 h-4 animate-spin text-blue-500" />
+    : status === 'passed'
+    ? <CheckCircle className="w-4 h-4 text-green-500" />
+    : status === 'failed'
+    ? <XCircle className="w-4 h-4 text-red-500" />
+    : isRunning
+    ? <Clock className="w-4 h-4 text-muted-foreground" />
+    : null;
 
   return (
     <div
@@ -82,9 +84,7 @@ export function SuiteTestItem({ test, index, onRemove, isRunning, isCurrent, sta
         {index + 1}
       </span>
 
-      {(isRunning || status) && (
-        <StatusIcon />
-      )}
+      {(isRunning || status) && statusIcon}
 
       <div className="flex-1 min-w-0">
         <p className="text-sm font-medium truncate">{test.testName}</p>

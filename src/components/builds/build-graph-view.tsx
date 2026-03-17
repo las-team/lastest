@@ -320,7 +320,6 @@ export function BuildGraphView({ builds, defaultBranch, mainBaselineBuildId, bra
         {nodes.map((node) => {
           const status = node.build.overallStatus as BuildStatus;
           const fill = STATUS_COLORS[status] || '#6b7280';
-          const branchColor = BRANCH_COLORS[node.col % BRANCH_COLORS.length];
           const isMainBaseline = node.build.id === mainBaselineBuildId;
           const isBranchBaseline = node.build.id === branchBaselineBuildId;
           const isBaseline = isMainBaseline || isBranchBaseline;

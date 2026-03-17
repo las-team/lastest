@@ -36,7 +36,7 @@ export function JobPollingProvider({ children }: { children: ReactNode }) {
   }, []);
 
   useEffect(() => {
-    fetchJobs();
+    queueMicrotask(() => fetchJobs());
   }, [fetchJobs]);
 
   useEffect(() => {

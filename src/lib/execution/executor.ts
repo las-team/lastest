@@ -194,30 +194,76 @@ async function executeLocally(
   onProgress?: (progress: ExecutionProgress) => void,
   onResult?: (result: TestRunResult) => Promise<void>
 ): Promise<TestRunResult[]> {
-  const runner = getRunner(options.repositoryId);
+  // Split tests into procedural and agent-mode
+  const proceduralTests = tests.filter(t => t.executionMode !== 'agent');
+  const agentTests = tests.filter(t => t.executionMode === 'agent');
 
-  // Configure runner
-  if (options.environmentConfig) {
-    runner.setEnvironmentConfig(options.environmentConfig);
+  const allResults: TestRunResult[] = [];
+
+  // Execute agent-mode tests via the agent executor
+  if (agentTests.length > 0) {
+    const { executeAgentTest } = await import('@/lib/playwright/agent-executor');
+    const baseUrl = options.environmentConfig?.baseUrl || 'http://localhost:3000';
+
+    for (const test of agentTests) {
+      onProgress?.({
+        completed: allResults.length,
+        total: tests.length,
+        currentTestName: test.name,
+        activeCount: 1,
+        activeTests: [test.name],
+      });
+
+      const screenshotPath = test.id; // Runner normalizes this
+      const agentResult = await executeAgentTest(test, {
+        baseUrl,
+        screenshotPath,
+        setupCode: options.setupContext?.storageState ? undefined : undefined,
+        timeout: options.playwrightSettings?.timeout ?? 300_000,
+        headless: options.headless,
+      });
+
+      const result: TestRunResult = {
+        testId: agentResult.testId,
+        status: agentResult.status === 'error' ? 'failed' : agentResult.status,
+        durationMs: agentResult.duration,
+        screenshots: agentResult.screenshots,
+        errorMessage: agentResult.errorMessage,
+      };
+
+      allResults.push(result);
+      if (onResult) await onResult(result);
+    }
   }
-  if (options.playwrightSettings) {
-    runner.setSettings(options.playwrightSettings);
+
+  // Execute procedural tests via the standard runner
+  if (proceduralTests.length > 0) {
+    const runner = getRunner(options.repositoryId);
+
+    if (options.environmentConfig) {
+      runner.setEnvironmentConfig(options.environmentConfig);
+    }
+    if (options.playwrightSettings) {
+      runner.setSettings(options.playwrightSettings);
+    }
+
+    const progressCallback = onProgress
+      ? (p: ProgressCallback) => {
+          onProgress({
+            completed: allResults.length + p.completed,
+            total: tests.length,
+            currentTestName: p.currentTestName,
+            activeCount: p.activeCount,
+            activeTests: p.activeTests,
+          });
+        }
+      : undefined;
+
+    const proceduralResults = await runner.runTests(proceduralTests, runId, progressCallback, onResult, options.headless, options.maxParallelTests, options.forceVideoRecording);
+    allResults.push(...proceduralResults);
   }
 
-  const progressCallback = onProgress
-    ? (p: ProgressCallback) => {
-        onProgress({
-          completed: p.completed,
-          total: p.total,
-          currentTestName: p.currentTestName,
-          activeCount: p.activeCount,
-          activeTests: p.activeTests,
-        });
-      }
-    : undefined;
-
-  // maxParallelTests from settings is used by runner internally, but can be overridden
-  return runner.runTests(tests, runId, progressCallback, onResult, options.headless, options.maxParallelTests, options.forceVideoRecording);
+  return allResults;
 }
 
 /**

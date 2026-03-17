@@ -161,6 +161,7 @@ function calculateContentArea(
  * We use MD5 because we only need collision resistance within a single image pair,
  * and it's significantly faster than SHA256 for this use case.
  */
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 function _hashRow(data: Buffer | Uint8Array, width: number, row: number): string {
   const start = row * width * 4;
   const end = start + width * 4;
@@ -367,13 +368,13 @@ function fuzzyMatchUnalignedRows(
   let i = 0;
   while (i < ops.length) {
     // Find a block of deletes
-    let delStart = i;
+    const delStart = i;
     while (i < ops.length && ops[i] === 'delete') i++;
     const delEnd = i;
     const delCount = delEnd - delStart;
 
     // Find a following block of inserts
-    let insStart = i;
+    const insStart = i;
     while (i < ops.length && ops[i] === 'insert') i++;
     const insEnd = i;
     const insCount = insEnd - insStart;

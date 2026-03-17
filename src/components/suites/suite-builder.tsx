@@ -91,11 +91,10 @@ export function SuiteBuilder({ suiteId, suiteTests, availableTests, areas, isRun
     })
   );
 
-  // Tests already in suite
-  const suiteTestIds = new Set(orderedTests.map((t) => t.testId));
-
   // Group available tests by functional area
   const groupedTests = useMemo(() => {
+    // Tests already in suite
+    const suiteTestIds = new Set(orderedTests.map((t) => t.testId));
     const filtered = availableTests.filter(
       (t) =>
         !suiteTestIds.has(t.id) &&
@@ -120,7 +119,7 @@ export function SuiteBuilder({ suiteId, suiteTests, availableTests, areas, isRun
     }
 
     return groups;
-  }, [availableTests, suiteTestIds, searchQuery, areas]);
+  }, [availableTests, orderedTests, searchQuery, areas]);
 
   const handleDragEnd = async (event: DragEndEvent) => {
     const { active, over } = event;

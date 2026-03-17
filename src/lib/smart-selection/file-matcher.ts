@@ -1,5 +1,5 @@
 import * as queries from '@/lib/db/queries';
-import type { Test, Route, FunctionalArea } from '@/lib/db/schema';
+import type { Route, FunctionalArea } from '@/lib/db/schema';
 
 export type MatchReason = 'route_match' | 'url_match' | 'area_match';
 

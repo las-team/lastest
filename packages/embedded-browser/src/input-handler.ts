@@ -48,7 +48,7 @@ const BUTTON_MAP: Record<string, 'left' | 'right' | 'middle'> = {
   middle: 'middle',
 };
 
-function getModifierFlags(modifiers?: { ctrl?: boolean; shift?: boolean; alt?: boolean; meta?: boolean }): number {
+function _getModifierFlags(modifiers?: { ctrl?: boolean; shift?: boolean; alt?: boolean; meta?: boolean }): number {
   if (!modifiers) return 0;
   let flags = 0;
   if (modifiers.alt) flags |= 1;
@@ -71,7 +71,7 @@ const KEY_TO_VK: Record<string, number> = {
   CapsLock: 20, ContextMenu: 93, PrintScreen: 44, Pause: 19,
 };
 
-function getVirtualKeyCode(key: string): number {
+function _getVirtualKeyCode(key: string): number {
   if (KEY_TO_VK[key] !== undefined) return KEY_TO_VK[key];
   if (key.length === 1) return key.toUpperCase().charCodeAt(0);
   return 0;

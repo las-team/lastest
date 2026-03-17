@@ -9,7 +9,7 @@
 
 import { db } from '@/lib/db';
 import { testResults, tests, testRuns, builds, routes, functionalAreas } from '@/lib/db/schema';
-import { eq, and, desc, sql } from 'drizzle-orm';
+import { eq, desc } from 'drizzle-orm';
 
 // ─── Failure Classification ─────────────────────────────────────
 

@@ -33,7 +33,7 @@ interface AreaDetailSectionProps {
   onDeleteArea?: (id: string) => void;
 }
 
-export function AreaDetailSection({ selection, areas, suites, repositoryId, onUpdate, onDeleteArea }: AreaDetailSectionProps) {
+export function AreaDetailSection({ selection, areas, suites, repositoryId: _repositoryId, onUpdate, onDeleteArea }: AreaDetailSectionProps) {
   const [isEditing, setIsEditing] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [areaData, setAreaData] = useState<FunctionalArea | null>(null);

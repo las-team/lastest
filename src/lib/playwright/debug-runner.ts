@@ -529,6 +529,7 @@ export class DebugRunner {
     const page = await context.newPage();
 
     // Freeze timestamps/random values if configured
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     await setupFreezeScripts(page, { ...stabilization, freezeAnimations: this.settings?.freezeAnimations ?? false } as any);
 
     // Freeze CSS + JS animations if enabled
@@ -948,15 +949,18 @@ export class DebugRunner {
             await applyStabilization(target, baseUrl, stabilization);
             const result = await target.screenshot(options);
             // Disable RAF gating + unfreeze performance.now after screenshot
+            /* eslint-disable @typescript-eslint/no-explicit-any */
             await target.evaluate(() => {
               if (typeof (window as any).__disableRAFGating === 'function') {
                 (window as any).__disableRAFGating();
               }
               (window as any).__perfNowFrozen = false;
             }).catch(() => {});
+            /* eslint-enable @typescript-eslint/no-explicit-any */
             return result;
           };
         }
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         return (target as any)[prop];
       },
     });

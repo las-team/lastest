@@ -31,7 +31,7 @@ export function SpecAnalysisDialog({
   branch,
 }: SpecAnalysisDialogProps) {
   const [step, setStep] = useState<'input' | 'file-selection' | 'analyzing' | 'preview'>('input');
-  const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [_isAnalyzing, setIsAnalyzing] = useState(false);
   const [isDiscovering, setIsDiscovering] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [isBuilding, setIsBuilding] = useState(false);

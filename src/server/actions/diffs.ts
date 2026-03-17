@@ -179,9 +179,9 @@ export async function getDiff(diffId: string) {
 
   // Look up planned screenshot if not already on the diff
   let plannedImagePath = diff.plannedImagePath;
-  let plannedDiffImagePath = diff.plannedDiffImagePath;
-  let plannedPixelDifference = diff.plannedPixelDifference;
-  let plannedPercentageDifference = diff.plannedPercentageDifference;
+  const plannedDiffImagePath = diff.plannedDiffImagePath;
+  const plannedPixelDifference = diff.plannedPixelDifference;
+  const plannedPercentageDifference = diff.plannedPercentageDifference;
 
   if (!plannedImagePath && diff.currentImagePath) {
     const stepLabel = extractStepLabelFromPath(diff.currentImagePath);

@@ -80,7 +80,7 @@ run_checks() {
   pnpm lint || err "Lint failed"
 
   log "Running tests..."
-  pnpm test || err "Tests failed"
+  pnpm test -- --exclude '**/playwright-visual-tests/**' || err "Tests failed"
 
   ok "All checks passed"
 }

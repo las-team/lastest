@@ -589,7 +589,7 @@ export class PlaywrightRecorder extends EventEmitter {
         if (e.ctrlKey && e.shiftKey && e.key.toLowerCase() === 's') {
           e.preventDefault();
           e.stopPropagation();
-          // @ts-expect-error
+          // @ts-expect-error - exposed function
           window.__recordScreenshot?.();
           return;
         }
@@ -602,7 +602,7 @@ export class PlaywrightRecorder extends EventEmitter {
           if (!isEditable && !e.repeat && !spaceDown) {
             spaceDown = true;
             // Record as explicit keydown event so playback sends Space to the app
-            // @ts-expect-error
+            // @ts-expect-error - exposed function
             window.__recordKeydown?.(' ', 'Space');
           }
           // Repeat keydowns for space are intentionally ignored
@@ -611,7 +611,7 @@ export class PlaywrightRecorder extends EventEmitter {
           if ((e.key === 'v' || e.key === 'V') && (e.ctrlKey || e.metaKey)) {
             navigator.clipboard.readText().then((text: string) => {
               if (text) {
-                // @ts-expect-error
+                // @ts-expect-error - exposed function
                 window.__recordClipboardSet?.(text);
               }
             }).catch(() => {});
@@ -624,7 +624,7 @@ export class PlaywrightRecorder extends EventEmitter {
           const isSpecialKey = e.key.length > 1 || activeModifiers.size > 0;
           if (!isEditable || isSpecialKey) {
             const modifiers = getActiveModifiers();
-            // @ts-expect-error
+            // @ts-expect-error - exposed function
             window.__recordKeypress?.(e.key, modifiers, e.code);
           }
         }
@@ -637,7 +637,7 @@ export class PlaywrightRecorder extends EventEmitter {
           if (spaceDown) {
             spaceDown = false;
             // Record explicit keyup event
-            // @ts-expect-error
+            // @ts-expect-error - exposed function
             window.__recordKeyup?.(' ', 'Space');
           }
         }
@@ -716,7 +716,7 @@ export class PlaywrightRecorder extends EventEmitter {
           pointerDownDeferTimer = setTimeout(() => {
             if (!pointerDownClickRecorded && !document.contains(target) && savedSelectors.length > 0) {
               const modifiers = getActiveModifiers();
-              // @ts-expect-error
+              // @ts-expect-error - exposed function
               window.__recordAction?.('click', savedSelectors, undefined, savedBoundingBox, generateActionId(), modifiers);
             }
             pointerDownDeferTimer = null;
@@ -802,7 +802,7 @@ export class PlaywrightRecorder extends EventEmitter {
         }
 
         const modifiers = getActiveModifiers();
-        // @ts-expect-error
+        // @ts-expect-error - exposed function
         window.__recordAction?.('click', selectors, undefined, boundingBox, generateActionId(), modifiers);
       }, true);
 
@@ -816,7 +816,7 @@ export class PlaywrightRecorder extends EventEmitter {
         const selectors = generateAllSelectors(target);
         const rect = target.getBoundingClientRect();
         const boundingBox = { x: rect.x, y: rect.y, width: rect.width, height: rect.height };
-        // @ts-expect-error
+        // @ts-expect-error - exposed function
         window.__recordAction?.('fill', selectors, target.value, boundingBox, generateActionId());
       }, true);
 
@@ -824,7 +824,7 @@ export class PlaywrightRecorder extends EventEmitter {
         const target = e.target as HTMLSelectElement;
         if (target.tagName === 'SELECT') {
           const selectors = generateAllSelectors(target);
-          // @ts-expect-error
+          // @ts-expect-error - exposed function
           window.__recordAction?.('selectOption', selectors, target.value, undefined, generateActionId());
         }
       }, true);
@@ -977,7 +977,7 @@ export class PlaywrightRecorder extends EventEmitter {
           const now = Date.now();
           if (now - lastTime >= interval) {
             lastTime = now;
-            // @ts-expect-error
+            // @ts-expect-error - exposed function
             window.__recordCursorMove?.(e.clientX, e.clientY);
           }
         }, true);
@@ -988,14 +988,14 @@ export class PlaywrightRecorder extends EventEmitter {
         document.addEventListener('pointerdown', (e: PointerEvent) => {
           if (e.pointerType !== 'mouse') return;
           const modifiers = getActiveModifiers();
-          // @ts-expect-error
+          // @ts-expect-error - exposed function
           window.__recordMouseEvent?.('down', e.clientX, e.clientY, e.button, modifiers);
         }, true);
 
         document.addEventListener('pointerup', (e: PointerEvent) => {
           if (e.pointerType !== 'mouse') return;
           const modifiers = getActiveModifiers();
-          // @ts-expect-error
+          // @ts-expect-error - exposed function
           window.__recordMouseEvent?.('up', e.clientX, e.clientY, e.button, modifiers);
         }, true);
       }
@@ -1021,7 +1021,7 @@ export class PlaywrightRecorder extends EventEmitter {
         if (scrollFlushTimer) clearTimeout(scrollFlushTimer);
         scrollFlushTimer = setTimeout(() => {
           if (scrollAccumX !== 0 || scrollAccumY !== 0) {
-            // @ts-expect-error
+            // @ts-expect-error - exposed function
             window.__recordScroll?.(Math.round(scrollAccumX), Math.round(scrollAccumY), scrollModifiers.length > 0 ? scrollModifiers : undefined);
             scrollAccumX = 0;
             scrollAccumY = 0;
@@ -1057,7 +1057,7 @@ export class PlaywrightRecorder extends EventEmitter {
         const selectors = generateAllSelectors(target);
         const primarySelector = selectors[0]?.value || '';
 
-        // @ts-expect-error
+        // @ts-expect-error - exposed function
         window.__recordHoverPreview?.({
           tagName: target.tagName.toLowerCase(),
           id: target.id || undefined,
@@ -1238,7 +1238,7 @@ export class PlaywrightRecorder extends EventEmitter {
           }
         }
 
-        // @ts-expect-error
+        // @ts-expect-error - exposed function
         window.__recordElementAssertion?.({
           type: opt.type,
           selectors,
@@ -1268,7 +1268,7 @@ export class PlaywrightRecorder extends EventEmitter {
           const rect = target.getBoundingClientRect();
           const boundingBox = { x: rect.x, y: rect.y, width: rect.width, height: rect.height, clickX: e.clientX, clickY: e.clientY };
           const modifiers = getActiveModifiers();
-          // @ts-expect-error
+          // @ts-expect-error - exposed function
           window.__recordAction?.('rightclick', selectors, undefined, boundingBox, generateActionId(), modifiers);
         }
       }, true);
@@ -1337,7 +1337,7 @@ export class PlaywrightRecorder extends EventEmitter {
 
           if (found) {
             pending.verified = true;
-            // @ts-expect-error
+            // @ts-expect-error - exposed function
             window.__updateVerification?.(pending.actionId, true);
           }
         }

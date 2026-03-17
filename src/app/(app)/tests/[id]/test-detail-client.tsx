@@ -198,6 +198,7 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
     if (diff.classification === 'changed') {
       return <XCircle className="h-3 w-3 text-red-500" />;
     }
+    // eslint-disable-next-line jsx-a11y/alt-text
     return <Image className="h-3 w-3 text-muted-foreground" />;
   };
 
@@ -840,6 +841,7 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
                                   rel="noopener noreferrer"
                                   className="block"
                                 >
+                                  {/* eslint-disable-next-line @next/next/no-img-element */}
                                   <img
                                     src={src}
                                     alt={label || 'Screenshot'}
@@ -957,6 +959,7 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
                                           rel="noopener noreferrer"
                                           className="block"
                                         >
+                                          {/* eslint-disable-next-line @next/next/no-img-element */}
                                           <img
                                             src={diff.currentImagePath}
                                             alt={diff.stepLabel || `Step ${i + 1}`}

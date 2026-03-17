@@ -320,7 +320,7 @@ const ImpactChart = memo(function ImpactChart({
 export function ImpactTimelineClient({ repositoryId, initialData }: Props) {
   const [data, setData] = useState<ImpactData | null>(initialData);
   const [selectedAuthor, setSelectedAuthor] = useState<string>('all');
-  const [isPending, startTransition] = useTransition();
+  const [_isPending, startTransition] = useTransition();
   const [splitIndex, setSplitIndex] = useState<number | null>(null);
 
   // Stable callback ref — never changes, so ImpactChart never re-renders from it

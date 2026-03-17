@@ -34,7 +34,7 @@ export function MCPExploreRoutesDialog({
 }: MCPExploreRoutesDialogProps) {
   const [step, setStep] = useState<'input' | 'exploring' | 'preview' | 'generate'>('input');
   const [baseURL, setBaseURL] = useState('http://localhost:3000');
-  const [isExploring, setIsExploring] = useState(false);
+  const [_isExploring, setIsExploring] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [discoveredAreas, setDiscoveredAreas] = useState<DiscoveredArea[]>([]);
   const [selectedRoutes, setSelectedRoutes] = useState<Set<string>>(new Set());

@@ -3,7 +3,6 @@
 import { getRecorder, type AssertionType } from '@/lib/playwright/recorder';
 import {
   launchInspector,
-  isInspectorRunning,
   getInspectorOutput,
   cancelInspector,
   cleanupSession,

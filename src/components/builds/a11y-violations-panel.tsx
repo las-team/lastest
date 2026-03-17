@@ -1,6 +1,6 @@
 'use client';
 
-import { AlertTriangle, Info, ExternalLink } from 'lucide-react';
+import { AlertTriangle, ExternalLink } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import type { A11yViolation } from '@/lib/db/schema';
 

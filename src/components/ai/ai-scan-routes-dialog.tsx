@@ -59,6 +59,7 @@ export function AIScanRoutesDialog({
       setHasStartedScan(true);
       handleScan();
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, hasStartedScan, hasScanned]);
 
   const handleScan = async () => {

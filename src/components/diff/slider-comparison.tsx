@@ -132,7 +132,7 @@ export function SliderComparison({
     setSliderPosition(percentage);
   }, []);
 
-  const ViewModeButtons = () => (
+  const viewModeButtons = (
     <div className="flex gap-2 mb-4 flex-wrap">
       {baselineImage && (
         <>
@@ -204,7 +204,7 @@ export function SliderComparison({
 
     return (
       <div className={className}>
-        <ViewModeButtons />
+        {viewModeButtons}
         {/* Headers above the grid so gutters + images align vertically */}
         <div className="grid grid-cols-[16px_1fr_1fr_16px] gap-0 border-x border-t rounded-t-lg overflow-hidden">
           <div />
@@ -274,7 +274,7 @@ export function SliderComparison({
   if (viewMode === 'side-by-side' && baselineImage) {
     return (
       <div className={className}>
-        <ViewModeButtons />
+        {viewModeButtons}
         <div className="grid grid-cols-2 gap-4">
           <div className="relative">
             <div className="text-sm text-muted-foreground mb-2">{leftLabel}</div>
@@ -298,7 +298,7 @@ export function SliderComparison({
   if (viewMode === 'three-way' && plannedImage && baselineImage) {
     return (
       <div className={className}>
-        <ViewModeButtons />
+        {viewModeButtons}
         <div className="grid grid-cols-3 gap-4">
           <div>
             <div className="text-sm text-muted-foreground mb-2">{leftLabel}</div>
@@ -326,7 +326,7 @@ export function SliderComparison({
   if (viewMode === 'planned-vs-actual' && plannedImage) {
     return (
       <div className={className}>
-        <ViewModeButtons />
+        {viewModeButtons}
 
         <div
           ref={containerRef}
@@ -379,7 +379,7 @@ export function SliderComparison({
   if (viewMode === 'overlay' && diffImage) {
     return (
       <div className={className}>
-        <ViewModeButtons />
+        {viewModeButtons}
         <div className="relative">
           <img src={currentImage} alt="Current" className="w-full border rounded" onLoad={handleImageLoad} />
           <img
@@ -398,7 +398,7 @@ export function SliderComparison({
     // Fallback: just show current image if no baseline and no planned mode matched
     return (
       <div className={className}>
-        <ViewModeButtons />
+        {viewModeButtons}
         <div className="text-sm text-muted-foreground mb-2">{rightLabel}</div>
         <img src={currentImage} alt={rightLabel} className="w-full border rounded" />
       </div>
@@ -407,7 +407,7 @@ export function SliderComparison({
 
   return (
     <div className={className}>
-      <ViewModeButtons />
+      {viewModeButtons}
 
       <div
         ref={containerRef}

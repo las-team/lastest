@@ -127,6 +127,7 @@ export function GoogleSheetsSettingsCard({
                 This allows you to reference cells, columns, and rows from Google Sheets
                 directly in your test code.
               </p>
+              {/* eslint-disable-next-line @next/next/no-html-link-for-pages */}
               <a
                 href="/api/auth/google-sheets"
                 className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm"

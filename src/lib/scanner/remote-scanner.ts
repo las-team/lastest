@@ -5,7 +5,6 @@
 import {
   getRepoTree,
   getFileContent,
-  filterTree,
   pathExists,
   type TreeEntry,
 } from '@/lib/github/content';
@@ -240,7 +239,7 @@ export class RemoteRouteScanner {
     const navLinks: Array<{ path: string; label: string; navSource: string }> = [];
 
     // Find potential navigation files
-    const navPatterns = [
+    const _navPatterns = [
       '**/sidebar*.tsx',
       '**/sidebar*.jsx',
       '**/nav*.tsx',

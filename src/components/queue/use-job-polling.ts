@@ -28,7 +28,7 @@ export function useJobPolling(intervalMs = 2000) {
   }, []);
 
   useEffect(() => {
-    fetchJobs();
+    queueMicrotask(() => fetchJobs());
   }, [fetchJobs]);
 
   useEffect(() => {

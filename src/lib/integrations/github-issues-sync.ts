@@ -1,6 +1,6 @@
 import { db } from '@/lib/db';
 import { githubIssues, pullRequests, repositories } from '@/lib/db/schema';
-import { eq, and, isNull } from 'drizzle-orm';
+import { eq, and } from 'drizzle-orm';
 import { v4 as uuid } from 'uuid';
 
 const SYNC_TTL_MS = 60 * 60 * 1000; // 1 hour

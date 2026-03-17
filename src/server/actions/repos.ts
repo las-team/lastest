@@ -3,8 +3,8 @@
 import { revalidatePath } from 'next/cache';
 import * as queries from '@/lib/db/queries';
 import { requireTeamAccess, requireRepoAccess } from '@/lib/auth';
-import { getUserRepos, getRepoBranches, type GitHubRepo, type GitHubBranch } from '@/lib/github/oauth';
-import { getUserProjects, getProjectBranches, type GitLabProject, type GitLabBranch } from '@/lib/gitlab/oauth';
+import { getUserRepos, getRepoBranches } from '@/lib/github/oauth';
+import { getUserProjects, getProjectBranches } from '@/lib/gitlab/oauth';
 import { TESTING_TEMPLATES, isValidTemplateId } from '@/lib/templates/testing-templates';
 
 export async function fetchAndSyncRepos(): Promise<{ success: boolean; count: number }> {

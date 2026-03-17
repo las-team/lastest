@@ -177,6 +177,7 @@ export async function applyStabilization(
   }
 
   // Phase 2: Freeze performance.now, reset Excalidraw RNG, enable RAF gating + flush
+  /* eslint-disable @typescript-eslint/no-explicit-any */
   await page.evaluate(() => {
     (window as any).__perfNowFrozen = performance.now();
     if (typeof (window as any).__resetExcalidrawRNG === 'function') {
@@ -189,6 +190,7 @@ export async function applyStabilization(
       (window as any).__flushAnimationFrames(20);
     }
   }).catch(() => {});
+  /* eslint-enable @typescript-eslint/no-explicit-any */
 
   // Phase 3: Wait for canvas stability
   if (core.waitForCanvasStable) {

@@ -212,18 +212,21 @@ export class EmbeddedTestExecutor {
           screenshots.push({ filename, data: base64, width: viewport.width, height: viewport.height });
           logFn('info', `Captured screenshot: ${filename}`);
           // Disable RAF gating + unfreeze performance.now after screenshot
+          /* eslint-disable @typescript-eslint/no-explicit-any */
           await page.evaluate(() => {
             if (typeof (window as any).__disableRAFGating === 'function') {
               (window as any).__disableRAFGating();
             }
             (window as any).__perfNowFrozen = false;
           }).catch(() => {});
+          /* eslint-enable @typescript-eslint/no-explicit-any */
         } catch (err) {
           logFn('warn', `Failed to capture screenshot: ${err}`);
         }
       };
 
       // Override page.screenshot to intercept screenshot calls
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (page as any).screenshot = async (options?: any) => {
         const label = `Step ${screenshotStep++}`;
         await captureScreenshot(label);
@@ -232,6 +235,7 @@ export class EmbeddedTestExecutor {
 
       // Intercept page.goto with logging + random seed reset
       const originalGoto = page.goto.bind(page);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (page as any).goto = async (url: string, options?: any) => {
         logFn('info', `Navigating to ${url}...`);
         const response = await originalGoto(url, options);
@@ -311,6 +315,7 @@ export class EmbeddedTestExecutor {
       };
 
       // Basic expect implementation (mirrors runner.ts createExpect)
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const expect = (target: any, message?: string) => {
         const msgPrefix = message ? `${message}: ` : '';
         const isPage = typeof target?.goto === 'function';
@@ -612,7 +617,7 @@ export class EmbeddedTestExecutor {
       body = body.replace(/page\.keyboard\.selectAll\(\)/g, "page.keyboard.press('Control+a')");
 
       // Noop screenshot/stepLogger for setup
-      const noopScreenshot = async () => {};
+      const _noopScreenshot = async () => {};
       const stepLogger = {
         log: (msg: string) => logFn('info', `Step: ${msg}`),
         warn: (msg: string) => logFn('warn', `[WARN] ${msg}`),

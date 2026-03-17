@@ -11,14 +11,16 @@ export function ResetSetupGuide() {
   const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
-    setMounted(true);
-    try {
-      const raw = localStorage.getItem(STORAGE_KEY);
-      if (raw) {
-        const state = JSON.parse(raw);
-        setIsDismissed(state.dismissed === true);
-      }
-    } catch {}
+    queueMicrotask(() => {
+      setMounted(true);
+      try {
+        const raw = localStorage.getItem(STORAGE_KEY);
+        if (raw) {
+          const state = JSON.parse(raw);
+          setIsDismissed(state.dismissed === true);
+        }
+      } catch {}
+    });
   }, []);
 
   if (!mounted || !isDismissed) return null;

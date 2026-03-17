@@ -32,7 +32,7 @@ export async function createRunnerCommand(cmd: NewRunnerCommand) {
  */
 export async function claimPendingCommands(runnerId: string, limit?: number) {
   const now = new Date();
-  let query = db
+  const query = db
     .select()
     .from(runnerCommands)
     .where(and(eq(runnerCommands.runnerId, runnerId), eq(runnerCommands.status, 'pending')))

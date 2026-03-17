@@ -248,6 +248,7 @@ export function BrowserViewer({ streamUrl, initialViewport, className, expiresAt
         }
       }
     };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [streamUrl, renderFrame]);
 
   // Manual reconnect handler

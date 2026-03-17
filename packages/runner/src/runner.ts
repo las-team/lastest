@@ -265,12 +265,14 @@ export class TestRunner {
           screenshots.push({ filename, data: base64, width, height, capturedAt: Date.now() });
           logFn('info', `Captured screenshot: ${filename}`);
           // Disable RAF gating + unfreeze performance.now after screenshot
+          /* eslint-disable @typescript-eslint/no-explicit-any */
           await page.evaluate(() => {
             if (typeof (window as any).__disableRAFGating === 'function') {
               (window as any).__disableRAFGating();
             }
             (window as any).__perfNowFrozen = false;
           }).catch(() => {});
+          /* eslint-enable @typescript-eslint/no-explicit-any */
         } catch (err) {
           logFn('warn', `Failed to capture screenshot: ${err}`);
         }
@@ -769,6 +771,7 @@ export class TestRunner {
     // Post-action: wait one browser frame for the page to process the action's
     // effects (React state → RAF-driven canvas re-render), then flush again.
     if (stabilization?.freezeAnimations) {
+      /* eslint-disable @typescript-eslint/no-explicit-any */
       const wrapAction = (obj: any, method: string) => {
         const orig = obj[method].bind(obj);
         obj[method] = async (...args: any[]) => {
@@ -792,6 +795,7 @@ export class TestRunner {
           return result;
         };
       };
+      /* eslint-enable @typescript-eslint/no-explicit-any */
       wrapAction(page.mouse, 'click');
       wrapAction(page.mouse, 'down');
       wrapAction(page.mouse, 'up');

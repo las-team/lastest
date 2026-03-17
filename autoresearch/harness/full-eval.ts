@@ -12,8 +12,8 @@
 delete process.env.CLAUDECODE;
 
 import { db } from '@/lib/db';
-import { agentSessions, builds, testRuns } from '@/lib/db/schema';
-import { eq, desc, and } from 'drizzle-orm';
+import { agentSessions } from '@/lib/db/schema';
+import { eq, desc } from 'drizzle-orm';
 import { getLatestBuildMetrics } from './metrics';
 
 // ─── Types ──────────────────────────────────────────────────────

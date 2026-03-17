@@ -1,4 +1,4 @@
-import type { Build, BuildStatus } from '@/lib/db/schema';
+import type { BuildStatus } from '@/lib/db/schema';
 
 export interface SlackBuildNotification {
   buildId: string;

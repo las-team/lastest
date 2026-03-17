@@ -1378,6 +1378,7 @@ export function RecordingClient({
                         key={i}
                         className="aspect-video bg-muted rounded border cursor-pointer hover:border-primary"
                       >
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
                         <img
                           src={path}
                           alt={`Screenshot ${i + 1}`}

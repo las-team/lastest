@@ -72,9 +72,11 @@ export function useSetupGuide(initialStatus: SetupStatus) {
 
     const merged = Array.from(new Set([...loaded.completedSteps, ...autoDetected]));
     const newState = { ...loaded, completedSteps: merged };
-    setState(newState);
+    queueMicrotask(() => {
+      setState(newState);
+      setMounted(true);
+    });
     saveState(newState);
-    setMounted(true);
   }, [initialStatus]);
 
   const completeStep = useCallback((step: number) => {

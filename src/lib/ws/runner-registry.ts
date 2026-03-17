@@ -12,7 +12,7 @@ interface WebSocket {
   close(): void;
   on(event: string, handler: (...args: unknown[]) => void): void;
 }
-import type { Runner, RunnerStatus } from '@/lib/db/schema';
+import type { RunnerStatus } from '@/lib/db/schema';
 import type {
   Message,
   ServerCommand,

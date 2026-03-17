@@ -102,9 +102,9 @@ class ServerManager {
       });
 
       // Collect stderr for debugging
-      let stderr = '';
+      let _stderr = '';
       proc.stderr?.on('data', (data) => {
-        stderr += data.toString();
+        _stderr += data.toString();
       });
 
       // Log stdout for debugging
