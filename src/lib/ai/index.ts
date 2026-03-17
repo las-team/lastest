@@ -89,6 +89,8 @@ export async function generateWithAI(
         args: ['playwright', 'run-test-mcp-server'],
       },
     };
+    // MCP agents need tool execution — override permission mode
+    effectiveConfig.agentSdkPermissionMode = 'acceptEdits';
   }
 
   const provider = getAIProvider(effectiveConfig);

@@ -10,7 +10,7 @@ import * as queries from '@/lib/db/queries';
 import { requireRepoAccess } from '@/lib/auth';
 import { revalidatePath } from 'next/cache';
 import { generateWithAI } from '@/lib/ai';
-import type { AIProviderConfig } from '@/lib/ai/types';
+import { getAIConfig, buildSeedFixture } from './agent-context';
 
 // ---------------------------------------------------------------------------
 // Planner system prompt (derived from Playwright's planner agent definition)
@@ -20,30 +20,35 @@ const PLANNER_SYSTEM_PROMPT = `You are an expert web test planner with extensive
 
 You will:
 
-1. **Navigate and Explore**
+1. **Run the Seed Test First**
+   If a seed test is provided below, execute it step-by-step using MCP browser tools BEFORE exploring.
+   This sets up authentication, login, or other prerequisites.
+
+2. **Navigate and Explore**
    - Use browser_navigate to go to the base URL
    - Use browser_snapshot to explore the accessibility tree
    - Use browser_click, browser_type, browser_hover to interact with the UI
    - Thoroughly explore the interface, identifying all interactive elements, forms, navigation paths, and functionality
+   - Use the known routes list (if provided) as starting points — visit each one
 
-2. **Analyze User Flows**
+3. **Analyze User Flows**
    - Map out the primary user journeys and identify critical paths
    - Consider different user types and their typical behaviors
 
-3. **Design Comprehensive Scenarios**
+4. **Design Comprehensive Scenarios**
    Create detailed test scenarios covering:
    - Happy path scenarios (normal user behavior)
    - Edge cases and boundary conditions
    - Error handling and validation
 
-4. **Structure Test Plans**
+5. **Structure Test Plans**
    Each scenario must include:
    - Clear, descriptive title
    - Detailed step-by-step instructions
    - Expected outcomes where appropriate
    - Success criteria and failure conditions
 
-5. **Output Format**
+6. **Output Format**
    Output your test plan as structured JSON (no markdown, no extra text):
 
 \`\`\`json
@@ -79,22 +84,6 @@ interface PlannerArea {
 // ---------------------------------------------------------------------------
 // Core
 // ---------------------------------------------------------------------------
-
-function getAIConfig(settings: Awaited<ReturnType<typeof queries.getAISettings>>): AIProviderConfig {
-  return {
-    provider: settings.provider as AIProviderConfig['provider'],
-    openrouterApiKey: settings.openrouterApiKey,
-    openrouterModel: settings.openrouterModel || 'anthropic/claude-sonnet-4',
-    customInstructions: settings.customInstructions,
-    agentSdkPermissionMode: settings.agentSdkPermissionMode as 'plan' | 'default' | 'acceptEdits' | undefined,
-    agentSdkModel: settings.agentSdkModel || undefined,
-    agentSdkWorkingDir: settings.agentSdkWorkingDir || undefined,
-    anthropicApiKey: settings.anthropicApiKey,
-    anthropicModel: settings.anthropicModel || undefined,
-    openaiApiKey: settings.openaiApiKey,
-    openaiModel: settings.openaiModel || undefined,
-  };
-}
 
 function parseAreasFromResponse(response: string): PlannerArea[] {
   // Extract JSON from response (may be wrapped in markdown code fences)
@@ -153,20 +142,13 @@ export async function agentDiscoverAreas(
   try {
     const settings = await queries.getAISettings(repositoryId);
     const config = getAIConfig(settings);
+    const seed = await buildSeedFixture(repositoryId);
 
-    // Build the exploration prompt
-    let prompt = `Explore the web application at ${baseUrl} and create a comprehensive test plan.\n\n`;
-    prompt += `Start by navigating to ${baseUrl} and thoroughly exploring all pages, forms, and interactive elements.\n`;
+    // Build the exploration prompt with seed fixture
+    let prompt = `Explore the web application at ${seed.baseUrl} and create a comprehensive test plan.\n\n`;
+    prompt += `Start by navigating to ${seed.baseUrl} and thoroughly exploring all pages, forms, and interactive elements.\n`;
     prompt += `Discover all functional areas and routes, then produce a structured test plan.\n`;
-
-    // Include seed/setup context if available
-    const setupSteps = await queries.getDefaultSetupSteps(repositoryId);
-    if (setupSteps.length > 0) {
-      const setupCode = setupSteps.map(s => s.code || s.scriptCode || '').filter(Boolean).join('\n');
-      if (setupCode) {
-        prompt += `\nSetup/seed test code (use this for authentication or initialization before exploring):\n\`\`\`javascript\n${setupCode}\n\`\`\`\n`;
-      }
-    }
+    prompt += `\n---\n\n${seed.seedPrompt}`;
 
     const response = await generateWithAI(config, prompt, PLANNER_SYSTEM_PROMPT, {
       useMCP: true,

@@ -13,7 +13,7 @@ import { revalidatePath } from 'next/cache';
 import { getCurrentBranchForRepo } from '@/lib/git-utils';
 import { generateWithAI } from '@/lib/ai';
 import { extractCodeFromResponse } from '@/lib/ai/prompts';
-import type { AIProviderConfig } from '@/lib/ai/types';
+import { getAIConfig, buildSeedFixture } from './agent-context';
 
 // ---------------------------------------------------------------------------
 // Healer system prompt (derived from Playwright's healer agent definition)
@@ -22,19 +22,20 @@ import type { AIProviderConfig } from '@/lib/ai/types';
 const HEALER_SYSTEM_PROMPT = `You are the Playwright Test Healer, an expert test automation engineer specializing in debugging and resolving test failures.
 
 Your workflow:
-1. **Understand the Failure**: Read the failing test code and error message carefully
-2. **Inspect the Live UI**: Use browser_navigate to go to the page, then browser_snapshot to see the current state
-3. **Diagnose the Issue**: Compare what the test expects vs what the page actually shows
+1. **Run the Seed Test First** — if a seed fixture is provided, execute it step-by-step using MCP browser tools to set up auth/login BEFORE debugging
+2. **Understand the Failure**: Read the failing test code and error message carefully
+3. **Inspect the Live UI**: Use browser_navigate to go to the page, then browser_snapshot to see the current state
+4. **Diagnose the Issue**: Compare what the test expects vs what the page actually shows
    - Element selectors that may have changed
    - Timing and synchronization issues
    - Data dependencies or test environment problems
    - Application changes that broke test assumptions
-4. **Fix the Code**: Update the test code to match the current UI state
+5. **Fix the Code**: Update the test code to match the current UI state
    - Update selectors to match current elements
    - Fix assertions and expected values
    - Improve test reliability
    - For dynamic data, use flexible matchers
-5. **Verify**: Use MCP tools to confirm your fix would work on the live page
+6. **Verify**: Use MCP tools to confirm your fix would work on the live page
 
 OUTPUT FORMAT:
 Output the complete fixed test function — NO imports, NO TypeScript, plain JavaScript only:
@@ -54,26 +55,6 @@ CRITICAL RULES:
 - Keep stepLogger.log() calls for step descriptions
 - Output ONLY the fixed code block, no explanations
 - Do not add test.fixme() — always attempt a real fix`;
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-function getAIConfig(settings: Awaited<ReturnType<typeof queries.getAISettings>>): AIProviderConfig {
-  return {
-    provider: settings.provider as AIProviderConfig['provider'],
-    openrouterApiKey: settings.openrouterApiKey,
-    openrouterModel: settings.openrouterModel || 'anthropic/claude-sonnet-4',
-    customInstructions: settings.customInstructions,
-    agentSdkPermissionMode: settings.agentSdkPermissionMode as 'plan' | 'default' | 'acceptEdits' | undefined,
-    agentSdkModel: settings.agentSdkModel || undefined,
-    agentSdkWorkingDir: settings.agentSdkWorkingDir || undefined,
-    anthropicApiKey: settings.anthropicApiKey,
-    anthropicModel: settings.anthropicModel || undefined,
-    openaiApiKey: settings.openaiApiKey,
-    openaiModel: settings.openaiModel || undefined,
-  };
-}
 
 // ---------------------------------------------------------------------------
 // Server-action-compatible wrappers
@@ -100,12 +81,9 @@ export async function agentHealTest(
     const latestResult = results[results.length - 1];
     const errorMessage = latestResult?.errorMessage || 'Test failed with unknown error';
 
-    // Get base URL
-    const envConfig = await queries.getEnvironmentConfig(repositoryId);
-    const baseUrl = test.targetUrl || envConfig?.baseUrl || 'http://localhost:3000';
-
     const settings = await queries.getAISettings(repositoryId);
     const config = getAIConfig(settings);
+    const seed = await buildSeedFixture(repositoryId);
 
     const prompt = `Fix this failing Playwright test.
 
@@ -119,14 +97,18 @@ ${test.code}
 ${errorMessage}
 \`\`\`
 
-**Base URL:** ${baseUrl}
+**Base URL:** ${seed.baseUrl}
 
-Navigate to the relevant page using MCP tools, inspect the current UI state via browser_snapshot, diagnose why the test fails, and output the fixed test code.`;
+Navigate to the relevant page using MCP tools, inspect the current UI state via browser_snapshot, diagnose why the test fails, and output the fixed test code.
+
+---
+
+${seed.seedPrompt}`;
 
     const response = await generateWithAI(config, prompt, HEALER_SYSTEM_PROMPT, {
       useMCP: true,
       repositoryId,
-      actionType: 'test_fix',
+      actionType: 'agent_heal',
     });
 
     const code = extractCodeFromResponse(response);

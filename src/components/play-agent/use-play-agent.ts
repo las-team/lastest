@@ -26,8 +26,8 @@ export function usePlayAgent(repositoryId?: string | null) {
       const data: AgentSession = await res.json();
       setSession(data);
 
-      // Stop polling if terminal
-      if (data.status === 'completed' || data.status === 'cancelled' || data.status === 'failed') {
+      // Stop polling if not active/paused (terminal or unknown state)
+      if (data.status !== 'active' && data.status !== 'paused') {
         if (pollRef.current) {
           clearInterval(pollRef.current);
           pollRef.current = null;

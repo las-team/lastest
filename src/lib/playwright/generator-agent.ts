@@ -10,8 +10,8 @@ import * as queries from '@/lib/db/queries';
 import { requireRepoAccess } from '@/lib/auth';
 import { generateWithAI } from '@/lib/ai';
 import { extractCodeFromResponse } from '@/lib/ai/prompts';
-import type { AIProviderConfig } from '@/lib/ai/types';
 import type { TestGenerationContext } from '@/lib/ai/types';
+import { getAIConfig, buildSeedFixture } from './agent-context';
 
 // ---------------------------------------------------------------------------
 // Generator system prompt (derived from Playwright's generator agent definition)
@@ -21,7 +21,7 @@ const GENERATOR_SYSTEM_PROMPT = `You are a Playwright Test Generator, an expert 
 Your specialty is creating robust, reliable tests that accurately simulate user interactions and validate application behavior.
 
 WORKFLOW:
-1. Read the test plan/spec provided
+1. **Run the Seed Test First** — if a seed fixture is provided, execute it step-by-step using MCP browser tools to set up auth/login BEFORE generating the test
 2. Use browser_navigate to go to the target URL
 3. Use browser_snapshot to discover the accessibility tree and element refs
 4. For each test step, use browser_click, browser_type, browser_hover etc. to manually execute the step in real-time
@@ -54,26 +54,6 @@ CRITICAL RULES:
 - Output ONLY the code block, no explanations`;
 
 // ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-function getAIConfig(settings: Awaited<ReturnType<typeof queries.getAISettings>>): AIProviderConfig {
-  return {
-    provider: settings.provider as AIProviderConfig['provider'],
-    openrouterApiKey: settings.openrouterApiKey,
-    openrouterModel: settings.openrouterModel || 'anthropic/claude-sonnet-4',
-    customInstructions: settings.customInstructions,
-    agentSdkPermissionMode: settings.agentSdkPermissionMode as 'plan' | 'default' | 'acceptEdits' | undefined,
-    agentSdkModel: settings.agentSdkModel || undefined,
-    agentSdkWorkingDir: settings.agentSdkWorkingDir || undefined,
-    anthropicApiKey: settings.anthropicApiKey,
-    anthropicModel: settings.anthropicModel || undefined,
-    openaiApiKey: settings.openaiApiKey,
-    openaiModel: settings.openaiModel || undefined,
-  };
-}
-
-// ---------------------------------------------------------------------------
 // Server-action-compatible wrapper
 // ---------------------------------------------------------------------------
 
@@ -90,6 +70,7 @@ export async function agentCreateTest(
   try {
     const settings = await queries.getAISettings(repositoryId);
     const config = getAIConfig(settings);
+    const seed = await buildSeedFixture(repositoryId);
 
     // Build spec/prompt from context
     let prompt = '';
@@ -117,17 +98,14 @@ export async function agentCreateTest(
       prompt = parts.join('\n') || 'Generate a comprehensive test for this page.';
     }
 
-    // Get base URL
-    const envConfig = await queries.getEnvironmentConfig(repositoryId);
-    const baseUrl = context.targetUrl || context.baseUrl || envConfig?.baseUrl || 'http://localhost:3000';
-
-    prompt += `\n\nTarget base URL: ${baseUrl}`;
+    prompt += `\n\nTarget base URL: ${seed.baseUrl}`;
     prompt += `\nNavigate to the page, explore it using MCP tools, then generate the test code.`;
+    prompt += `\n\n---\n\n${seed.seedPrompt}`;
 
     const response = await generateWithAI(config, prompt, GENERATOR_SYSTEM_PROMPT, {
       useMCP: true,
       repositoryId,
-      actionType: 'test_create',
+      actionType: 'agent_generate',
     });
 
     const code = extractCodeFromResponse(response);
