@@ -71,21 +71,17 @@ Quality Standards:
 - Group related functionality into functional areas`;
 
 // ---------------------------------------------------------------------------
-// Types
+// Types (re-exported from shared module)
 // ---------------------------------------------------------------------------
 
-interface PlannerArea {
-  name: string;
-  description?: string;
-  routes: string[];
-  testPlan: string;
-}
+import type { PlannerArea } from './planner-types';
+export type { PlannerArea } from './planner-types';
 
 // ---------------------------------------------------------------------------
 // Core
 // ---------------------------------------------------------------------------
 
-function parseAreasFromResponse(response: string): PlannerArea[] {
+export function parseAreasFromResponse(response: string): PlannerArea[] {
   // Extract JSON from response (may be wrapped in markdown code fences)
   const jsonMatch = response.match(/```(?:json)?\s*\n?([\s\S]*?)\n?```/) || [null, response];
   const jsonStr = jsonMatch[1]?.trim() || response.trim();

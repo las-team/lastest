@@ -551,8 +551,9 @@ async function fillMissingUserStories(
 }
 
 /**
- * Discover tests using PW Planner + Generator agents.
- * Shows orchestrator/planner/generator substeps in the UI.
+ * Discover tests using parallel multi-planner pipeline + Generator agents.
+ * Runs 4 specialized planners in parallel (browser, code, spec, routes),
+ * merges their findings, then feeds into N generator agents.
  */
 async function runDiscoverWithAgents(
   sessionId: string,
@@ -562,142 +563,190 @@ async function runDiscoverWithAgents(
   const envConfig = await getEnvironmentConfig(repositoryId);
   const baseUrl = envConfig?.baseUrl || 'http://localhost:3000';
 
-  // Phase 1: Orchestrator coordinates
-  await updateSubsteps(sessionId, 'discover', [
-    { label: 'Coordinating agent pipeline', status: 'running', agent: 'orchestrator' },
-    { label: 'Exploring application routes', status: 'pending', agent: 'planner' },
+  // Retrieve codebase intelligence from session metadata
+  const sessionData = await queries.getAgentSession(sessionId);
+  const intelligence = sessionData?.metadata?.codebaseIntelligence as CodebaseIntelligenceContext | undefined;
+
+  // Mutable substep states for parallel updates
+  type SubstepStatus = 'pending' | 'running' | 'done' | 'error';
+  const plannerStates: Array<{ label: string; status: SubstepStatus; detail?: string; agent?: 'orchestrator' | 'planner' | 'generator' }> = [
+    { label: 'Coordinating multi-planner pipeline', status: 'running', agent: 'orchestrator' },
+    { label: 'Exploring app via browser', status: 'pending', agent: 'planner' },
+    { label: 'Scanning codebase routes', status: 'pending', agent: 'planner' },
+    { label: 'Analyzing spec files', status: 'pending', agent: 'planner' },
+    { label: 'Checking route coverage', status: 'pending', agent: 'planner' },
     { label: 'Generating test code', status: 'pending', agent: 'generator' },
+  ];
+
+  const flushSubsteps = () => updateSubsteps(sessionId, 'discover', [...plannerStates]);
+  await flushSubsteps();
+
+  if (await isCancelled(sessionId)) return false;
+
+  // Phase 1: Launch all 4 planners in parallel
+  plannerStates[0].status = 'done';
+  await flushSubsteps();
+
+  const { runBrowserPlanner } = await import('@/lib/playwright/planners/browser-planner');
+  const { runCodePlanner } = await import('@/lib/playwright/planners/code-planner');
+  const { runSpecPlanner } = await import('@/lib/playwright/planners/spec-planner');
+  const { runRoutePlanner } = await import('@/lib/playwright/planners/route-planner');
+
+  // Wrap each planner to update its substep slot
+  const wrapPlanner = <T extends unknown[]>(
+    idx: number,
+    fn: (...args: T) => Promise<import('@/lib/playwright/planner-types').PlannerResult>,
+    ...args: T
+  ) => {
+    plannerStates[idx].status = 'running';
+    flushSubsteps();
+    return fn(...args).then(result => {
+      plannerStates[idx].status = result.error ? 'error' : 'done';
+      plannerStates[idx].detail = result.error
+        ? result.error.slice(0, 60)
+        : `${result.areas.length} areas`;
+      flushSubsteps();
+      return result;
+    }).catch(err => {
+      plannerStates[idx].status = 'error';
+      plannerStates[idx].detail = err instanceof Error ? err.message.slice(0, 60) : 'Failed';
+      flushSubsteps();
+      return { source: 'browser' as const, areas: [], error: String(err) };
+    });
+  };
+
+  const plannerResults = await Promise.allSettled([
+    wrapPlanner(1, runBrowserPlanner, repositoryId, baseUrl),
+    wrapPlanner(2, runCodePlanner, repositoryId, branch, intelligence),
+    wrapPlanner(3, runSpecPlanner, repositoryId, branch),
+    wrapPlanner(4, runRoutePlanner, repositoryId),
   ]);
 
   if (await isCancelled(sessionId)) return false;
 
-  // Phase 2: Planner agent explores the app
-  await updateSubsteps(sessionId, 'discover', [
-    { label: 'Coordinating agent pipeline', status: 'done', agent: 'orchestrator' },
-    { label: 'Exploring application routes', status: 'running', agent: 'planner' },
-    { label: 'Generating test code', status: 'pending', agent: 'generator' },
-  ]);
+  // Phase 2: Merge results
+  const { mergePlannerResults } = await import('@/lib/playwright/planner-merger');
+  const fulfilledResults = plannerResults
+    .filter((r): r is PromiseFulfilledResult<import('@/lib/playwright/planner-types').PlannerResult> => r.status === 'fulfilled')
+    .map(r => r.value)
+    .filter(r => r.areas.length > 0);
 
-  try {
-    const { agentDiscoverAreas } = await import('@/lib/playwright/planner-agent');
-    const plannerResult = await agentDiscoverAreas(repositoryId, baseUrl);
+  const mergedAreas = mergePlannerResults(fulfilledResults);
+  const sourcesUsed = new Set(fulfilledResults.map(r => r.source)).size;
 
-    if (!plannerResult.success || !plannerResult.functionalAreas?.length) {
-      // Planner failed — fall back to traditional discovery
-      return tryFallbackDiscovery(sessionId, repositoryId, branch, undefined, true);
-    }
-
-    if (await isCancelled(sessionId)) return false;
-
-    const areas = plannerResult.functionalAreas;
-    const areaCount = areas.length;
-    const routeCount = areas.reduce((sum, a) => sum + a.routes.length, 0);
-
-    // Save discovered routes
-    const { saveDiscoveredRoutes: saveRoutes } = await import('./ai-routes');
-    const saveResult = await saveRoutes(repositoryId, areas.map(a => ({
-      name: a.name,
-      routes: a.routes.map(r => ({
-        path: r.path,
-        type: r.type as 'static' | 'dynamic',
-        description: r.description,
-      })),
-    })));
-
-    // Phase 3: Generator agent creates tests
-    await updateSubsteps(sessionId, 'discover', [
-      { label: 'Coordinating agent pipeline', status: 'done', agent: 'orchestrator' },
-      { label: `Discovered ${areaCount} areas, ${routeCount} routes`, status: 'done', agent: 'planner' },
-      { label: 'Generating verified test code', status: 'running', agent: 'generator' },
-    ]);
-
-    if (await isCancelled(sessionId)) return false;
-
-    // Generate tests for discovered routes
-    let testsCreated = 0;
-    if (saveResult.savedRoutes && saveResult.savedRoutes.length > 0) {
-      const routeIds = saveResult.savedRoutes.map(r => r.routeId);
-      const genResult = await generateBasicTests(repositoryId, routeIds, baseUrl);
-      testsCreated = genResult.testsCreated + genResult.testsUpdated;
-    }
-
-    // Try Generator agent for richer tests if we have area plans
-    const dbAreas = await queries.getFunctionalAreasByRepo(repositoryId);
-    const areasWithPlans = dbAreas.filter(a => a.agentPlan);
-
-    if (areasWithPlans.length > 0) {
-      const { agentCreateTest } = await import('@/lib/playwright/generator-agent');
-      const targetAreas = areasWithPlans.slice(0, 8);
-      const GENERATOR_CONCURRENCY = 3;
-
-      // Process in parallel batches
-      for (let batch = 0; batch < targetAreas.length; batch += GENERATOR_CONCURRENCY) {
-        if (await isCancelled(sessionId)) return false;
-
-        const chunk = targetAreas.slice(batch, batch + GENERATOR_CONCURRENCY);
-        const completed = Math.min(batch, targetAreas.length);
-
-        await updateSubsteps(sessionId, 'discover', [
-          { label: 'Coordinating agent pipeline', status: 'done', agent: 'orchestrator' },
-          { label: `Discovered ${areaCount} areas, ${routeCount} routes`, status: 'done', agent: 'planner' },
-          {
-            label: `Generating tests (${completed}/${targetAreas.length})`,
-            status: 'running',
-            detail: `${chunk.length} generators in parallel`,
-            agent: 'generator',
-          },
-        ]);
-
-        const results = await Promise.allSettled(
-          chunk.map(async (area) => {
-            const genResult = await agentCreateTest(repositoryId, {
-              functionalAreaId: area.id,
-              baseUrl,
-            });
-            if (genResult.success && genResult.code) {
-              await queries.createTest({
-                repositoryId,
-                functionalAreaId: area.id,
-                name: `${area.name} - Agent Test`,
-                code: genResult.code,
-                targetUrl: baseUrl,
-              });
-              return true;
-            }
-            return false;
-          }),
-        );
-
-        testsCreated += results.filter(r => r.status === 'fulfilled' && r.value).length;
-      }
-    }
-
-    const session = await queries.getAgentSession(sessionId);
-    if (session) {
-      await queries.updateAgentSession(sessionId, {
-        metadata: { ...session.metadata, testsCreated },
-      });
-    }
-
-    await updateSubsteps(sessionId, 'discover', [
-      { label: 'Agent pipeline complete', status: 'done', agent: 'orchestrator' },
-      { label: `Discovered ${areaCount} areas, ${routeCount} routes`, status: 'done', agent: 'planner' },
-      { label: `Generated ${testsCreated} tests`, status: 'done', agent: 'generator' },
-    ]);
-
-    await setStepCompleted(sessionId, 'discover', {
-      method: 'pw_agents',
-      areasFound: areaCount,
-      routesFound: routeCount,
-      testsCreated,
-    });
-    return true;
-  } catch (error) {
-    const message = error instanceof Error ? error.message : 'Agent discovery failed';
-
-    // Fall back to traditional discovery
+  if (mergedAreas.length === 0) {
+    // All planners failed or found nothing — fall back
     return tryFallbackDiscovery(sessionId, repositoryId, branch, undefined, true);
   }
+
+  const areaCount = mergedAreas.length;
+  const routeCount = mergedAreas.reduce((sum, a) => sum + a.routes.length, 0);
+
+  // Save merged areas and routes to DB
+  const { saveDiscoveredRoutes: saveRoutes } = await import('./ai-routes');
+  const saveResult = await saveRoutes(repositoryId, mergedAreas.map(a => ({
+    name: a.name,
+    routes: a.routes.map(r => ({
+      path: r,
+      type: (r.includes('[') || r.includes(':') ? 'dynamic' : 'static') as 'static' | 'dynamic',
+    })),
+  })));
+
+  // Save agent plans to functional areas
+  for (const area of mergedAreas) {
+    if (area.testPlan) {
+      const dbArea = await queries.getOrCreateFunctionalAreaByRepo(
+        repositoryId,
+        area.name,
+        area.description,
+      );
+      await queries.updateFunctionalArea(dbArea.id, {
+        agentPlan: area.testPlan,
+        planGeneratedAt: new Date(),
+      });
+    }
+  }
+
+  // Phase 3: Generator agents create tests
+  plannerStates[5].status = 'running';
+  plannerStates[5].detail = `${areaCount} areas from ${sourcesUsed} sources`;
+  await flushSubsteps();
+
+  if (await isCancelled(sessionId)) return false;
+
+  let testsCreated = 0;
+
+  // Generate basic tests from saved routes
+  if (saveResult.savedRoutes && saveResult.savedRoutes.length > 0) {
+    const routeIds = saveResult.savedRoutes.map(r => r.routeId);
+    const genResult = await generateBasicTests(repositoryId, routeIds, baseUrl);
+    testsCreated = genResult.testsCreated + genResult.testsUpdated;
+  }
+
+  // Use Generator agent for richer tests from area plans
+  const dbAreas = await queries.getFunctionalAreasByRepo(repositoryId);
+  const areasWithPlans = dbAreas.filter(a => a.agentPlan);
+
+  if (areasWithPlans.length > 0) {
+    const { agentCreateTest } = await import('@/lib/playwright/generator-agent');
+    const targetAreas = areasWithPlans.slice(0, 8);
+    const GENERATOR_CONCURRENCY = 3;
+
+    for (let batch = 0; batch < targetAreas.length; batch += GENERATOR_CONCURRENCY) {
+      if (await isCancelled(sessionId)) return false;
+
+      const chunk = targetAreas.slice(batch, batch + GENERATOR_CONCURRENCY);
+      const completed = Math.min(batch, targetAreas.length);
+
+      plannerStates[5].label = `Generating tests (${completed}/${targetAreas.length})`;
+      plannerStates[5].detail = `${chunk.length} generators in parallel`;
+      await flushSubsteps();
+
+      const results = await Promise.allSettled(
+        chunk.map(async (area) => {
+          const genResult = await agentCreateTest(repositoryId, {
+            functionalAreaId: area.id,
+            baseUrl,
+          });
+          if (genResult.success && genResult.code) {
+            await queries.createTest({
+              repositoryId,
+              functionalAreaId: area.id,
+              name: `${area.name} - Agent Test`,
+              code: genResult.code,
+              targetUrl: baseUrl,
+            });
+            return true;
+          }
+          return false;
+        }),
+      );
+
+      testsCreated += results.filter(r => r.status === 'fulfilled' && r.value).length;
+    }
+  }
+
+  const session = await queries.getAgentSession(sessionId);
+  if (session) {
+    await queries.updateAgentSession(sessionId, {
+      metadata: { ...session.metadata, testsCreated },
+    });
+  }
+
+  plannerStates[0].label = 'Multi-planner pipeline complete';
+  plannerStates[5].status = 'done';
+  plannerStates[5].label = `Generated ${testsCreated} tests`;
+  plannerStates[5].detail = `${areaCount} areas, ${routeCount} routes`;
+  await flushSubsteps();
+
+  await setStepCompleted(sessionId, 'discover', {
+    method: 'pw_agents_parallel',
+    areasFound: areaCount,
+    routesFound: routeCount,
+    testsCreated,
+    sourcesUsed,
+  });
+  return true;
 }
 
 async function runDiscover(sessionId: string, repositoryId: string) {

@@ -157,6 +157,14 @@ build_olares() {
     --build-arg GIT_COMMIT_COUNT="$GIT_COMMIT_COUNT" \
     -f Dockerfile .
   ok "Built $IMAGE_APP:olares"
+
+  log "Building EB package..."
+  pnpm --filter @lastest/embedded-browser build
+  log "Building $IMAGE_EB:olares"
+  docker build \
+    -t "$IMAGE_EB:olares" \
+    -f packages/embedded-browser/Dockerfile .
+  ok "Built $IMAGE_EB:olares"
 }
 
 # --- Targets ---
@@ -210,14 +218,15 @@ deploy_olares() {
   run_checks
   build_olares
 
-  log "Removing old image on Olares..."
+  log "Removing old images on Olares..."
   ssh "$OLARES_USER@$OLARES_HOST" \
-    "ctr -n k8s.io images rm docker.io/$IMAGE_APP:olares 2>/dev/null || true"
+    "ctr -n k8s.io images rm docker.io/$IMAGE_APP:olares 2>/dev/null || true; \
+     ctr -n k8s.io images rm docker.io/$IMAGE_EB:olares 2>/dev/null || true"
 
-  log "Transferring image to Olares (this takes ~10 minutes)..."
-  docker save "$IMAGE_APP:olares" | \
+  log "Transferring images to Olares (this takes ~10 minutes)..."
+  docker save "$IMAGE_APP:olares" "$IMAGE_EB:olares" | \
     ssh "$OLARES_USER@$OLARES_HOST" 'ctr -n k8s.io images import -'
-  ok "Image imported on Olares"
+  ok "Images imported on Olares"
 
   log "Restarting deployment..."
   ssh "$OLARES_USER@$OLARES_HOST" \
