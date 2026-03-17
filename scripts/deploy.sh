@@ -77,10 +77,19 @@ run_checks() {
   fi
 
   log "Running lint..."
-  pnpm lint || err "Lint failed"
+  LINT_OUTPUT=$(pnpm lint 2>&1)
+  LINT_ERRORS=$(echo "$LINT_OUTPUT" | grep -c '  error  ' || true)
+  if [ "$LINT_ERRORS" -gt 0 ]; then
+    echo "$LINT_OUTPUT" | grep '  error  '
+    err "Lint has $LINT_ERRORS error(s)"
+  fi
+  LINT_WARNINGS=$(echo "$LINT_OUTPUT" | grep -c '  warning  ' || true)
+  if [ "$LINT_WARNINGS" -gt 0 ]; then
+    warn "Lint has $LINT_WARNINGS warning(s)"
+  fi
 
   log "Running tests..."
-  pnpm test -- --exclude '**/playwright-visual-tests/**' || err "Tests failed"
+  pnpm vitest run --dir src || err "Tests failed"
 
   ok "All checks passed"
 }

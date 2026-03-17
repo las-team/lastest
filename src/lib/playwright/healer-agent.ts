@@ -13,7 +13,6 @@ import {
   createTempTestDir,
   parseHealerOutput,
   cleanupTempDir,
-  convertPwTestToLastest2,
 } from './agent-bridge';
 import { promises as fs } from 'fs';
 import path from 'path';

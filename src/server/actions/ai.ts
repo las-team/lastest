@@ -8,7 +8,6 @@ import {
   MCP_SYSTEM_PROMPT,
   createTestPrompt,
   createFixPrompt,
-  createMcpFixPrompt,
   createEnhancePrompt,
   extractCodeFromResponse,
 } from '@/lib/ai';

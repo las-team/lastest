@@ -216,6 +216,7 @@ function BranchColumn({
                               rel="noopener noreferrer"
                               className="block"
                             >
+                              {/* eslint-disable-next-line @next/next/no-img-element */}
                               <img
                                 src={test.screenshotPath!}
                                 alt={`Screenshot for ${test.name}`}
