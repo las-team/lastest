@@ -62,16 +62,11 @@ function getAnnotations(step: AgentStepState): Annotation[] | null {
   if (!r) return null;
 
   switch (step.id) {
-    case 'settings_check': {
-      const agents = (r.activeAgents as string[]) ?? [];
+    case 'settings_check':
       return [
         { label: `GH: ${r.ghAccount}`, ok: true },
         { label: AI_PROVIDER_LABELS[r.aiProvider as string] ?? (r.aiProvider as string), ok: true },
-        ...(agents.length > 0
-          ? agents.map(a => ({ label: AGENT_LABELS[a] ?? a, ok: true }))
-          : [{ label: 'Prompt mode', ok: true }]),
       ];
-    }
     case 'select_repo':
       return [
         { label: r.repoFullName as string, ok: true },
@@ -187,6 +182,30 @@ export function PlayAgentTimeline({ repositoryId }: PlayAgentTimelineProps) {
     (s) => s.status === 'active' || s.status === 'waiting_user' || s.status === 'failed',
   );
 
+  // Determine which agent is currently running and parallel counts
+  const runningAgents = new Set<string>();
+  const doneAgents = new Set<string>();
+  const agentParallelCount: Record<string, number> = {};
+  if (activeStep?.substeps) {
+    for (const sub of activeStep.substeps) {
+      if (sub.agent && sub.status === 'running') {
+        runningAgents.add(sub.agent);
+        // Parse parallel count from detail like "3 generators in parallel"
+        const countMatch = sub.detail?.match(/^(\d+)\s+\w+\s+in parallel$/);
+        if (countMatch) agentParallelCount[sub.agent] = parseInt(countMatch[1], 10);
+      }
+      if (sub.agent && sub.status === 'done') doneAgents.add(sub.agent);
+    }
+  }
+  // Also check all completed steps for done agents
+  for (const s of steps) {
+    if (s.status === 'completed' && s.substeps) {
+      for (const sub of s.substeps) {
+        if (sub.agent) doneAgents.add(sub.agent);
+      }
+    }
+  }
+
   const handlePlayPause = () => {
     if (isRunning) {
       cancel();
@@ -227,17 +246,25 @@ export function PlayAgentTimeline({ repositoryId }: PlayAgentTimelineProps) {
             </span>
             {pwAgentEnabled ? (
               (['orchestrator', ...activeAgents] as PwAgentType[]).map(agent => {
+                const isRunning = runningAgents.has(agent);
+                const isDone = doneAgents.has(agent);
+                const isActiveAgent = isRunning || isDone;
                 const style = ROSTER_BADGE_STYLES[agent];
+                const count = agentParallelCount[agent];
                 return (
                   <span
                     key={agent}
                     className={cn(
-                      'inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium',
-                      style.bg,
-                      style.text,
+                      'inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium transition-colors',
+                      isActiveAgent ? [style.bg, style.text] : 'bg-muted/60 text-muted-foreground/50',
                     )}
                   >
+                    {isRunning && <Loader2 className="h-2.5 w-2.5 animate-spin" />}
+                    {isDone && !isRunning && <Check className="h-2.5 w-2.5" />}
                     {AGENT_LABELS[agent] ?? agent.charAt(0).toUpperCase() + agent.slice(1)}
+                    {isRunning && count && count > 1 && (
+                      <span className="text-[9px] opacity-75">x{count}</span>
+                    )}
                   </span>
                 );
               })

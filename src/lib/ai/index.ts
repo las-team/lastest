@@ -83,9 +83,10 @@ export async function generateWithAI(
   const effectiveConfig = { ...config };
   if (options?.useMCP && config.provider === 'claude-agent-sdk') {
     effectiveConfig.agentSdkMcpServers = {
-      playwright: {
+      ...effectiveConfig.agentSdkMcpServers,
+      'playwright-test': {
         command: 'npx',
-        args: ['@anthropic-ai/mcp-server-playwright'],
+        args: ['playwright', 'run-test-mcp-server'],
       },
     };
   }

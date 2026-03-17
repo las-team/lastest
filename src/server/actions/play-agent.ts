@@ -330,6 +330,7 @@ async function tryFallbackDiscovery(
   repositoryId: string,
   branch: string,
   specDetail?: string,
+  agentFallback?: boolean,
 ): Promise<boolean> {
   const specLabel = specDetail || 'No spec files found';
   const envConfig = await getEnvironmentConfig(repositoryId);
@@ -339,8 +340,14 @@ async function tryFallbackDiscovery(
   const session = await queries.getAgentSession(sessionId);
   const intelligence = session?.metadata?.codebaseIntelligence as CodebaseIntelligenceContext | undefined;
 
+  // When falling back from agent path, preserve agent context in substeps
+  const agentPrefix = agentFallback ? [
+    { label: 'Agent discovery failed — falling back', status: 'error' as const, agent: 'orchestrator' as const },
+  ] : [];
+
   // Fallback 1: AI route scan
   await updateSubsteps(sessionId, 'discover', [
+    ...agentPrefix,
     { label: 'Finding spec files', status: 'done', detail: specLabel },
     { label: 'AI route scan', status: 'running' },
     { label: 'Generating tests', status: 'pending' },
@@ -357,6 +364,7 @@ async function tryFallbackDiscovery(
         const areaCount = new Set(saveResult.savedRoutes.map((r) => r.areaName)).size;
 
         await updateSubsteps(sessionId, 'discover', [
+          ...agentPrefix,
           { label: 'Finding spec files', status: 'done', detail: specLabel },
           { label: 'AI route scan', status: 'done', detail: `${areaCount} areas, ${totalRoutes} routes` },
           { label: 'Generating tests', status: 'running' },
@@ -377,6 +385,7 @@ async function tryFallbackDiscovery(
         }
 
         await updateSubsteps(sessionId, 'discover', [
+          ...agentPrefix,
           { label: 'Finding spec files', status: 'done', detail: specLabel },
           { label: 'AI route scan', status: 'done', detail: `${areaCount} areas, ${totalRoutes} routes` },
           { label: 'Generating tests', status: 'done', detail: `${testsCreated} tests` },
@@ -399,6 +408,7 @@ async function tryFallbackDiscovery(
 
   // Fallback 2: Smoke tests from already-scanned routes
   await updateSubsteps(sessionId, 'discover', [
+    ...agentPrefix,
     { label: 'Finding spec files', status: 'done', detail: specLabel },
     { label: 'AI route scan', status: 'done', detail: 'No routes discovered' },
     { label: 'Generating smoke tests', status: 'running' },
@@ -420,6 +430,7 @@ async function tryFallbackDiscovery(
       }
 
       await updateSubsteps(sessionId, 'discover', [
+        ...agentPrefix,
         { label: 'Finding spec files', status: 'done', detail: specLabel },
         { label: 'AI route scan', status: 'done', detail: 'No routes discovered' },
         { label: 'Generating smoke tests', status: 'done', detail: `${testsCreated} tests` },
@@ -436,6 +447,7 @@ async function tryFallbackDiscovery(
 
   // All fallbacks exhausted
   await updateSubsteps(sessionId, 'discover', [
+    ...agentPrefix,
     { label: 'Finding spec files', status: 'done', detail: specLabel },
     { label: 'AI route scan', status: 'done', detail: 'No routes discovered' },
     { label: 'Generating smoke tests', status: 'done', detail: 'No routes available' },
@@ -572,12 +584,7 @@ async function runDiscoverWithAgents(
 
     if (!plannerResult.success || !plannerResult.functionalAreas?.length) {
       // Planner failed — fall back to traditional discovery
-      await updateSubsteps(sessionId, 'discover', [
-        { label: 'Coordinating agent pipeline', status: 'done', agent: 'orchestrator' },
-        { label: 'Planner agent failed, falling back to AI scan', status: 'error', agent: 'planner' },
-      ]);
-
-      return tryFallbackDiscovery(sessionId, repositoryId, branch);
+      return tryFallbackDiscovery(sessionId, repositoryId, branch, undefined, true);
     }
 
     if (await isCancelled(sessionId)) return false;
@@ -620,35 +627,48 @@ async function runDiscoverWithAgents(
 
     if (areasWithPlans.length > 0) {
       const { agentCreateTest } = await import('@/lib/playwright/generator-agent');
+      const targetAreas = areasWithPlans.slice(0, 8);
+      const GENERATOR_CONCURRENCY = 3;
 
-      for (const area of areasWithPlans.slice(0, 5)) { // Limit to 5 areas to avoid timeout
+      // Process in parallel batches
+      for (let batch = 0; batch < targetAreas.length; batch += GENERATOR_CONCURRENCY) {
         if (await isCancelled(sessionId)) return false;
+
+        const chunk = targetAreas.slice(batch, batch + GENERATOR_CONCURRENCY);
+        const completed = Math.min(batch, targetAreas.length);
 
         await updateSubsteps(sessionId, 'discover', [
           { label: 'Coordinating agent pipeline', status: 'done', agent: 'orchestrator' },
           { label: `Discovered ${areaCount} areas, ${routeCount} routes`, status: 'done', agent: 'planner' },
-          { label: `Generating test: ${area.name}`, status: 'running', agent: 'generator' },
+          {
+            label: `Generating tests (${completed}/${targetAreas.length})`,
+            status: 'running',
+            detail: `${chunk.length} generators in parallel`,
+            agent: 'generator',
+          },
         ]);
 
-        try {
-          const genResult = await agentCreateTest(repositoryId, {
-            functionalAreaId: area.id,
-            baseUrl,
-          });
-
-          if (genResult.success && genResult.code) {
-            await queries.createTest({
-              repositoryId,
+        const results = await Promise.allSettled(
+          chunk.map(async (area) => {
+            const genResult = await agentCreateTest(repositoryId, {
               functionalAreaId: area.id,
-              name: `${area.name} - Agent Test`,
-              code: genResult.code,
-              targetUrl: baseUrl,
+              baseUrl,
             });
-            testsCreated++;
-          }
-        } catch {
-          // Individual test generation failure is non-fatal
-        }
+            if (genResult.success && genResult.code) {
+              await queries.createTest({
+                repositoryId,
+                functionalAreaId: area.id,
+                name: `${area.name} - Agent Test`,
+                code: genResult.code,
+                targetUrl: baseUrl,
+              });
+              return true;
+            }
+            return false;
+          }),
+        );
+
+        testsCreated += results.filter(r => r.status === 'fulfilled' && r.value).length;
       }
     }
 
@@ -675,14 +695,8 @@ async function runDiscoverWithAgents(
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Agent discovery failed';
 
-    await updateSubsteps(sessionId, 'discover', [
-      { label: 'Coordinating agent pipeline', status: 'done', agent: 'orchestrator' },
-      { label: `Agent error: ${message}`, status: 'error', agent: 'planner' },
-      { label: 'Falling back to AI scan', status: 'running' },
-    ]);
-
     // Fall back to traditional discovery
-    return tryFallbackDiscovery(sessionId, repositoryId, branch);
+    return tryFallbackDiscovery(sessionId, repositoryId, branch, undefined, true);
   }
 }
 
@@ -701,6 +715,12 @@ async function runDiscover(sessionId: string, repositoryId: string) {
   }
 
   const branch = repo.selectedBranch || repo.defaultBranch || 'main';
+
+  // Check if PW agents are enabled — if so, always use Planner + Generator
+  const aiSettings = await getAISettings(repositoryId);
+  if (aiSettings?.pwAgentEnabled) {
+    return runDiscoverWithAgents(sessionId, repositoryId, branch);
+  }
 
   // Cache: if tests exist, check for missing user story areas before skipping
   const existingTests = await queries.getTestsByRepo(repositoryId);
@@ -730,12 +750,6 @@ async function runDiscover(sessionId: string, repositoryId: string) {
       cached: true,
     });
     return true;
-  }
-
-  // Check if PW agents are enabled — if so, use Planner + Generator instead
-  const aiSettings = await getAISettings(repositoryId);
-  if (aiSettings?.pwAgentEnabled) {
-    return runDiscoverWithAgents(sessionId, repositoryId, branch);
   }
 
   // Substep 1: Discover spec files
@@ -1406,87 +1420,149 @@ async function runFixTests(sessionId: string, repositoryId: string) {
   const fixAiSettings = await getAISettings(repositoryId);
   const useHealer = fixAiSettings?.pwAgentEnabled ?? false;
 
-  for (let i = 0; i < failedResults.length; i++) {
-    if (await isCancelled(sessionId)) return false;
-
-    const result = failedResults[i];
-    const testId = result.testId!;
-    const errorMessage = result.errorMessage!;
-
-    const attempts = fixAttempts[testId] || 0;
+  // Separate fixable from unfixable
+  const fixableResults: typeof failedResults = [];
+  for (const result of failedResults) {
+    const attempts = fixAttempts[result.testId!] || 0;
     if (attempts >= MAX_FIX_ATTEMPTS) {
       unfixableCount++;
-      continue;
+    } else {
+      fixableResults.push(result);
     }
+  }
 
-    const test = await queries.getTest(testId);
+  if (useHealer) {
+    // Parallel healer — process in concurrent batches
+    const HEALER_CONCURRENCY = 3;
+    const { agentHealTest } = await import('@/lib/playwright/healer-agent');
 
-    if (useHealer) {
+    for (let batch = 0; batch < fixableResults.length; batch += HEALER_CONCURRENCY) {
+      if (await isCancelled(sessionId)) return false;
+
+      const chunk = fixableResults.slice(batch, batch + HEALER_CONCURRENCY);
+      const completed = Math.min(batch, fixableResults.length);
+
       await updateSubsteps(sessionId, 'fix_tests', [
         { label: 'Coordinating fix pipeline', status: 'done', agent: 'orchestrator' },
         {
-          label: `Healing test ${i + 1}/${failedResults.length}: ${test?.name || testId}`,
+          label: `Healing tests (${completed}/${fixableResults.length})`,
           status: 'running',
-          detail: `Attempt ${attempts + 1}/${MAX_FIX_ATTEMPTS}`,
+          detail: `${chunk.length} healers in parallel`,
           agent: 'healer',
         },
       ]);
-    } else {
+
+      const results = await Promise.allSettled(
+        chunk.map(async (result) => {
+          const testId = result.testId!;
+          const attempts = fixAttempts[testId] || 0;
+
+          const healResult = await agentHealTest(repositoryId, testId);
+          fixAttempts[testId] = attempts + 1;
+
+          if (healResult.success && healResult.code) {
+            const hashes = codeHashes[testId] || [];
+            const newHash = hashCode(healResult.code);
+
+            if (hashes.includes(newHash)) {
+              return 'unfixable' as const;
+            }
+
+            hashes.push(newHash);
+            codeHashes[testId] = hashes;
+
+            await queries.updateTest(testId, { code: healResult.code });
+            const test = await queries.getTest(testId);
+            if (test) {
+              const branch = await getCurrentBranchForRepo(repositoryId);
+              const versions = await queries.getTestVersions(testId);
+              await queries.createTestVersion({
+                testId,
+                name: test.name,
+                code: healResult.code,
+                version: (versions.length || 0) + 1,
+                changeReason: 'ai_fix',
+                branch: branch ?? null,
+              });
+            }
+            return 'fixed' as const;
+          }
+          return 'failed' as const;
+        }),
+      );
+
+      for (const r of results) {
+        if (r.status === 'fulfilled') {
+          if (r.value === 'fixed') fixedCount++;
+          else if (r.value === 'unfixable') unfixableCount++;
+        }
+      }
+
+      // Update metadata after each batch
+      const currentSession = await queries.getAgentSession(sessionId);
+      if (currentSession) {
+        await queries.updateAgentSession(sessionId, {
+          metadata: { ...currentSession.metadata, fixAttempts, codeHashes },
+        });
+      }
+    }
+  } else {
+    // Sequential AI fix (non-agent mode)
+    for (let i = 0; i < fixableResults.length; i++) {
+      if (await isCancelled(sessionId)) return false;
+
+      const result = fixableResults[i];
+      const testId = result.testId!;
+      const errorMessage = result.errorMessage!;
+      const attempts = fixAttempts[testId] || 0;
+
+      const test = await queries.getTest(testId);
       await updateSubsteps(sessionId, 'fix_tests', [
         {
-          label: `Fixing test ${i + 1}/${failedResults.length}: ${test?.name || testId}`,
+          label: `Fixing test ${i + 1}/${fixableResults.length}: ${test?.name || testId}`,
           status: 'running',
           detail: `Attempt ${attempts + 1}/${MAX_FIX_ATTEMPTS}`,
         },
       ]);
-    }
 
-    let fixResult: { success: boolean; code?: string; error?: string };
-    if (useHealer) {
-      const { agentHealTest } = await import('@/lib/playwright/healer-agent');
-      fixResult = await agentHealTest(repositoryId, testId);
-    } else {
-      fixResult = await aiFixTest(repositoryId, testId, errorMessage, intelligence);
-    }
-    fixAttempts[testId] = attempts + 1;
+      const fixResult = await aiFixTest(repositoryId, testId, errorMessage, intelligence);
+      fixAttempts[testId] = attempts + 1;
 
-    if (fixResult.success && fixResult.code) {
-      // Check for oscillation
-      const hashes = codeHashes[testId] || [];
-      const newHash = hashCode(fixResult.code);
+      if (fixResult.success && fixResult.code) {
+        const hashes = codeHashes[testId] || [];
+        const newHash = hashCode(fixResult.code);
 
-      if (hashes.includes(newHash)) {
-        // Oscillation detected — mark as unfixable
-        unfixableCount++;
-        continue;
+        if (hashes.includes(newHash)) {
+          unfixableCount++;
+          continue;
+        }
+
+        hashes.push(newHash);
+        codeHashes[testId] = hashes;
+
+        await queries.updateTest(testId, { code: fixResult.code });
+        if (test) {
+          const branch = await getCurrentBranchForRepo(repositoryId);
+          const versions = await queries.getTestVersions(testId);
+          await queries.createTestVersion({
+            testId,
+            name: test.name,
+            code: fixResult.code,
+            version: (versions.length || 0) + 1,
+            changeReason: 'ai_fix',
+            branch: branch ?? null,
+          });
+        }
+        fixedCount++;
       }
 
-      hashes.push(newHash);
-      codeHashes[testId] = hashes;
-
-      // Apply the fix
-      await queries.updateTest(testId, { code: fixResult.code });
-      if (test) {
-        const branch = await getCurrentBranchForRepo(repositoryId);
-        const versions = await queries.getTestVersions(testId);
-        await queries.createTestVersion({
-          testId,
-          name: test.name,
-          code: fixResult.code,
-          version: (versions.length || 0) + 1,
-          changeReason: 'ai_fix',
-          branch: branch ?? null,
+      // Update metadata periodically
+      const currentSession = await queries.getAgentSession(sessionId);
+      if (currentSession) {
+        await queries.updateAgentSession(sessionId, {
+          metadata: { ...currentSession.metadata, fixAttempts, codeHashes },
         });
       }
-      fixedCount++;
-    }
-
-    // Update metadata periodically
-    const currentSession = await queries.getAgentSession(sessionId);
-    if (currentSession) {
-      await queries.updateAgentSession(sessionId, {
-        metadata: { ...currentSession.metadata, fixAttempts, codeHashes },
-      });
     }
   }
 

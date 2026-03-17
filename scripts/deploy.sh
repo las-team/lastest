@@ -124,6 +124,8 @@ build_app() {
 }
 
 build_eb() {
+  log "Building EB package..."
+  pnpm --filter @lastest/embedded-browser build
   log "Building $IMAGE_EB:latest"
   docker build \
     -t "$IMAGE_EB:latest" \

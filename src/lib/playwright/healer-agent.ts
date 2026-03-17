@@ -1,133 +1,77 @@
 /**
- * Healer Agent — auto-fixes failing tests using Playwright's built-in
- * Healer agent which replays the test, inspects the live UI, and patches
- * broken selectors/assertions.
+ * Healer Agent — auto-fixes failing tests by using the AI provider
+ * with Playwright MCP tools to inspect the live UI and patch broken
+ * selectors/assertions.
+ *
+ * Uses the official Playwright Test Healer agent prompt with the
+ * `playwright-test` MCP server (npx playwright run-test-mcp-server).
  */
 
 import * as queries from '@/lib/db/queries';
 import { requireRepoAccess } from '@/lib/auth';
 import { revalidatePath } from 'next/cache';
 import { getCurrentBranchForRepo } from '@/lib/git-utils';
-import {
-  spawnAgentProcess,
-  createTempTestDir,
-  parseHealerOutput,
-  cleanupTempDir,
-} from './agent-bridge';
-import { promises as fs } from 'fs';
-import path from 'path';
+import { generateWithAI } from '@/lib/ai';
+import { extractCodeFromResponse } from '@/lib/ai/prompts';
+import type { AIProviderConfig } from '@/lib/ai/types';
 
 // ---------------------------------------------------------------------------
-// Types
+// Healer system prompt (derived from Playwright's healer agent definition)
 // ---------------------------------------------------------------------------
 
-export interface HealerResult {
-  success: boolean;
-  patchedCode?: string;
-  attempts: number;
-  log: string[];
+const HEALER_SYSTEM_PROMPT = `You are the Playwright Test Healer, an expert test automation engineer specializing in debugging and resolving test failures.
+
+Your workflow:
+1. **Understand the Failure**: Read the failing test code and error message carefully
+2. **Inspect the Live UI**: Use browser_navigate to go to the page, then browser_snapshot to see the current state
+3. **Diagnose the Issue**: Compare what the test expects vs what the page actually shows
+   - Element selectors that may have changed
+   - Timing and synchronization issues
+   - Data dependencies or test environment problems
+   - Application changes that broke test assumptions
+4. **Fix the Code**: Update the test code to match the current UI state
+   - Update selectors to match current elements
+   - Fix assertions and expected values
+   - Improve test reliability
+   - For dynamic data, use flexible matchers
+5. **Verify**: Use MCP tools to confirm your fix would work on the live page
+
+OUTPUT FORMAT:
+Output the complete fixed test function — NO imports, NO TypeScript, plain JavaScript only:
+
+\`\`\`javascript
+export async function test(page, baseUrl, screenshotPath, stepLogger) {
+  // ... fixed test code
 }
+\`\`\`
+
+CRITICAL RULES:
+- ALWAYS inspect the live page via browser_snapshot before fixing
+- NEVER guess selectors — verify them against the current accessibility tree
+- Use role-based locators: page.getByRole(), page.getByText(), page.getByLabel()
+- Plain JavaScript ONLY — NO TypeScript, NO imports
+- Use baseUrl for navigation (no hardcoded URLs)
+- Keep stepLogger.log() calls for step descriptions
+- Output ONLY the fixed code block, no explanations
+- Do not add test.fixme() — always attempt a real fix`;
 
 // ---------------------------------------------------------------------------
-// Core
+// Helpers
 // ---------------------------------------------------------------------------
 
-const MAX_HEAL_ATTEMPTS = 3;
-
-/**
- * Run the Playwright Healer agent on a failing test.
- *
- * Writes the test to a temp dir, runs the Healer, reads the patched output.
- * Retries up to MAX_HEAL_ATTEMPTS times.
- */
-export async function runHealerAgent(
-  testCode: string,
-  errorMessage: string,
-  baseUrl: string,
-  options?: {
-    timeout?: number;
-    stepLogger?: (line: string) => void;
-    signal?: AbortSignal;
-  },
-): Promise<HealerResult> {
-  const log: string[] = [];
-  let currentCode = testCode;
-
-  for (let attempt = 1; attempt <= MAX_HEAL_ATTEMPTS; attempt++) {
-    const testsDir = await createTempTestDir('healer');
-
-    try {
-      // Write the current (possibly already-patched) test code
-      // Convert from Lastest2 format to PW format for the healer
-      const pwCode = convertToPwFormat(currentCode);
-      await fs.writeFile(path.join(testsDir, 'failing.spec.ts'), pwCode, 'utf-8');
-
-      // Write error context file for the healer
-      await fs.writeFile(
-        path.join(testsDir, 'error-context.txt'),
-        `Error from last run:\n${errorMessage}`,
-        'utf-8',
-      );
-
-      const extraArgs: string[] = [
-        `--tests=${testsDir}`,
-        `--base-url=${baseUrl}`,
-        `--output=${testsDir}`,
-      ];
-
-      log.push(`Attempt ${attempt}/${MAX_HEAL_ATTEMPTS}: running healer...`);
-
-      const result = await spawnAgentProcess('healer', extraArgs, {
-        timeout: options?.timeout ?? 300_000,
-        stepLogger: (line) => {
-          log.push(line);
-          options?.stepLogger?.(line);
-        },
-        signal: options?.signal,
-      });
-
-      // Parse patched output
-      const patched = await parseHealerOutput(testsDir);
-      if (patched.length > 0) {
-        const patchedCode = patched[0].patchedCode;
-        log.push(`Attempt ${attempt}: healer produced patched code`);
-
-        // If exit code 0, the healer verified the fix works
-        if (result.exitCode === 0) {
-          return {
-            success: true,
-            patchedCode,
-            attempts: attempt,
-            log,
-          };
-        }
-
-        // Non-zero exit: the patch might still be an improvement, try again
-        currentCode = patchedCode;
-        log.push(`Attempt ${attempt}: healer exited with code ${result.exitCode}, retrying...`);
-      } else {
-        log.push(`Attempt ${attempt}: healer produced no output`);
-        break;
-      }
-    } finally {
-      await cleanupTempDir(testsDir);
-    }
-  }
-
-  // Return best effort — the last patched code even if not verified
-  if (currentCode !== testCode) {
-    return {
-      success: false,
-      patchedCode: currentCode,
-      attempts: MAX_HEAL_ATTEMPTS,
-      log,
-    };
-  }
-
+function getAIConfig(settings: Awaited<ReturnType<typeof queries.getAISettings>>): AIProviderConfig {
   return {
-    success: false,
-    attempts: MAX_HEAL_ATTEMPTS,
-    log,
+    provider: settings.provider as AIProviderConfig['provider'],
+    openrouterApiKey: settings.openrouterApiKey,
+    openrouterModel: settings.openrouterModel || 'anthropic/claude-sonnet-4',
+    customInstructions: settings.customInstructions,
+    agentSdkPermissionMode: settings.agentSdkPermissionMode as 'plan' | 'default' | 'acceptEdits' | undefined,
+    agentSdkModel: settings.agentSdkModel || undefined,
+    agentSdkWorkingDir: settings.agentSdkWorkingDir || undefined,
+    anthropicApiKey: settings.anthropicApiKey,
+    anthropicModel: settings.anthropicModel || undefined,
+    openaiApiKey: settings.openaiApiKey,
+    openaiModel: settings.openaiModel || undefined,
   };
 }
 
@@ -137,6 +81,7 @@ export async function runHealerAgent(
 
 /**
  * Heal a single failing test using the PW Healer agent.
+ * Uses the AI provider + Playwright MCP tools to inspect and fix.
  */
 export async function agentHealTest(
   repositoryId: string,
@@ -160,16 +105,36 @@ export async function agentHealTest(
     const baseUrl = test.targetUrl || envConfig?.baseUrl || 'http://localhost:3000';
 
     const settings = await queries.getAISettings(repositoryId);
+    const config = getAIConfig(settings);
 
-    const result = await runHealerAgent(test.code, errorMessage, baseUrl, {
-      timeout: settings.pwAgentTimeout ?? 300_000,
+    const prompt = `Fix this failing Playwright test.
+
+**Test code:**
+\`\`\`javascript
+${test.code}
+\`\`\`
+
+**Error message:**
+\`\`\`
+${errorMessage}
+\`\`\`
+
+**Base URL:** ${baseUrl}
+
+Navigate to the relevant page using MCP tools, inspect the current UI state via browser_snapshot, diagnose why the test fails, and output the fixed test code.`;
+
+    const response = await generateWithAI(config, prompt, HEALER_SYSTEM_PROMPT, {
+      useMCP: true,
+      repositoryId,
+      actionType: 'test_fix',
     });
 
-    if (result.patchedCode) {
-      return { success: true, code: result.patchedCode };
+    const code = extractCodeFromResponse(response);
+    if (!code) {
+      return { success: false, error: 'Healer agent produced no fixed code' };
     }
 
-    return { success: false, error: `Healer failed after ${result.attempts} attempts` };
+    return { success: true, code };
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Healer agent failed';
     return { success: false, error: message };
@@ -217,32 +182,4 @@ export async function agentHealTests(
 
   revalidatePath('/tests');
   return { success: true, fixed, failed, errors };
-}
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-/**
- * Convert Lastest2's function signature to standard Playwright test format
- * so the Healer agent can understand it.
- */
-function convertToPwFormat(code: string): string {
-  // If already in PW format, return as-is
-  if (code.includes("from '@playwright/test'") || code.includes('from "@playwright/test"')) {
-    return code;
-  }
-
-  // Extract the function body
-  const bodyMatch = code.match(
-    /export\s+async\s+function\s+test\s*\([^)]*\)\s*\{([\s\S]*)\}\s*$/,
-  );
-
-  if (bodyMatch) {
-    const body = bodyMatch[1].trim();
-    return `import { test, expect } from '@playwright/test';\n\ntest('test', async ({ page }) => {\n  ${body}\n});\n`;
-  }
-
-  // Fallback: wrap entire code
-  return `import { test, expect } from '@playwright/test';\n\ntest('test', async ({ page }) => {\n  ${code}\n});\n`;
 }

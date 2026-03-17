@@ -24,7 +24,7 @@ const config = {
   token: process.env.LASTEST2_TOKEN ?? '',
   systemToken: process.env.SYSTEM_EB_TOKEN ?? '',
   streamPort: parseInt(process.env.STREAM_PORT ?? '9223', 10),
-  streamHost: process.env.STREAM_HOST ?? 'localhost', // Hostname for stream URL (EBs are always colocated with the app)
+  streamHost: process.env.STREAM_HOST ?? '', // Empty = auto-detect container IP
   pollInterval: parseInt(process.env.POLL_INTERVAL ?? '1000', 10),
   viewportWidth: parseInt(process.env.VIEWPORT_WIDTH ?? '1280', 10),
   viewportHeight: parseInt(process.env.VIEWPORT_HEIGHT ?? '720', 10),
