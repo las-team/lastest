@@ -171,7 +171,7 @@ export async function agentDiscoverAreas(
     const response = await generateWithAI(config, prompt, PLANNER_SYSTEM_PROMPT, {
       useMCP: true,
       repositoryId,
-      actionType: 'test_create',
+      actionType: 'agent_discover',
     });
 
     const areas = parseAreasFromResponse(response);

@@ -40,7 +40,15 @@ rm -f /app/data/.write-test
 # Run database migrations if drizzle-kit is available
 if [ -f "/app/drizzle.config.ts" ]; then
   echo "Running database migrations..."
-  ./node_modules/.bin/drizzle-kit push --force 2>/dev/null || echo "Migration skipped (may already be current)"
+  # Disable FK checks during migration to avoid constraint errors on schema changes
+  DB_FILE="${DATABASE_PATH:-/app/data/lastest2.db}"
+  if [ -f "$DB_FILE" ]; then
+    node -e "require('better-sqlite3')('$DB_FILE').pragma('foreign_keys = OFF')" 2>/dev/null || true
+  fi
+  ./node_modules/.bin/drizzle-kit push --force 2>&1 || echo "⚠ Migration had issues (app may still work)"
+  if [ -f "$DB_FILE" ]; then
+    node -e "require('better-sqlite3')('$DB_FILE').pragma('foreign_keys = ON')" 2>/dev/null || true
+  fi
 fi
 
 # Execute the main command
