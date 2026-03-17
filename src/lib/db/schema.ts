@@ -1300,10 +1300,14 @@ export type AgentStepId =
 
 export type AgentStepStatus = 'pending' | 'active' | 'waiting_user' | 'completed' | 'failed' | 'skipped';
 
+export type PwAgentType = 'orchestrator' | 'planner' | 'generator' | 'healer';
+
 export interface AgentSubstep {
   label: string;
   status: 'pending' | 'running' | 'done' | 'error';
   detail?: string;
+  /** Which PW sub-agent is handling this substep (shown as a badge in the UI) */
+  agent?: PwAgentType;
 }
 
 export interface AgentStepState {

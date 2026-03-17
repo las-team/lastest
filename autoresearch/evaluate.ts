@@ -183,7 +183,6 @@ async function runTestCode(
     page = await context.newPage();
 
     const screenshotPath = path.join(SCREENSHOT_DIR, `${label.replace(/[^a-zA-Z0-9]/g, '_')}.png`);
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
     const stepLogger = { log: (_msg: string) => {} };
     const expectFn = createExpect(5000);
 

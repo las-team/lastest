@@ -219,7 +219,7 @@ async function executeLocally(
         baseUrl,
         screenshotPath,
         setupCode: options.setupContext?.storageState ? undefined : undefined,
-        timeout: options.playwrightSettings?.timeout ?? 300_000,
+        timeout: options.playwrightSettings?.navigationTimeout ?? 300_000,
         headless: options.headless,
       });
 

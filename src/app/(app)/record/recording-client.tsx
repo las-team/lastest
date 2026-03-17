@@ -453,6 +453,9 @@ export function RecordingClient({
           parentId: area.parentId ?? null,
           isRouteFolder: area.isRouteFolder ?? null,
           orderIndex: area.orderIndex ?? null,
+          agentPlan: area.agentPlan ?? null,
+          planGeneratedAt: area.planGeneratedAt ?? null,
+          deletedAt: area.deletedAt ?? null,
         }]);
         setAreaId(area.id);
       }

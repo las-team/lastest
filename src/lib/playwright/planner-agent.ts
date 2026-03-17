@@ -95,7 +95,7 @@ export async function runPlannerAgent(
 export async function agentDiscoverAreas(
   repositoryId: string,
   baseUrl: string,
-): Promise<{ success: boolean; functionalAreas?: Array<{ name: string; routes: Array<{ path: string; type: string; description?: string }> }>; error?: string }> {
+): Promise<{ success: boolean; functionalAreas?: Array<{ name: string; routes: Array<{ path: string; type: 'dynamic' | 'static'; description?: string }> }>; error?: string }> {
   await requireRepoAccess(repositoryId);
 
   try {
@@ -105,7 +105,7 @@ export async function agentDiscoverAreas(
     let seedTestCode: string | undefined;
     const setupSteps = await queries.getDefaultSetupSteps(repositoryId);
     if (setupSteps.length > 0) {
-      seedTestCode = setupSteps.map(s => s.code).join('\n');
+      seedTestCode = setupSteps.map(s => s.code || s.scriptCode || '').filter(Boolean).join('\n');
     }
 
     const result = await runPlannerAgent(baseUrl, {

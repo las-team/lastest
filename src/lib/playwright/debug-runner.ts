@@ -716,12 +716,10 @@ export class DebugRunner {
     const appStateFn = createAppState(page);
     const locateWithFallback = this.createLocateWithFallback(page, testId);
 
-    /* eslint-disable @typescript-eslint/no-unused-vars */
     const stepLogger = {
       log: (_msg: string) => { /* no-op in debug mode */ },
       warn: (_msg: string) => { /* captured by soft error wrapping */ },
     };
-    /* eslint-enable @typescript-eslint/no-unused-vars */
 
     // File upload helper
     const fileUpload = async (selector: string, filePaths: string | string[]) => {

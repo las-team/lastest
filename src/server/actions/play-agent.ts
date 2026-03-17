@@ -535,6 +535,154 @@ async function fillMissingUserStories(
   return true;
 }
 
+/**
+ * Discover tests using PW Planner + Generator agents.
+ * Shows orchestrator/planner/generator substeps in the UI.
+ */
+async function runDiscoverWithAgents(
+  sessionId: string,
+  repositoryId: string,
+  branch: string,
+): Promise<boolean> {
+  const envConfig = await getEnvironmentConfig(repositoryId);
+  const baseUrl = envConfig?.baseUrl || 'http://localhost:3000';
+
+  // Phase 1: Orchestrator coordinates
+  await updateSubsteps(sessionId, 'discover', [
+    { label: 'Coordinating agent pipeline', status: 'running', agent: 'orchestrator' },
+    { label: 'Exploring application routes', status: 'pending', agent: 'planner' },
+    { label: 'Generating test code', status: 'pending', agent: 'generator' },
+  ]);
+
+  if (await isCancelled(sessionId)) return false;
+
+  // Phase 2: Planner agent explores the app
+  await updateSubsteps(sessionId, 'discover', [
+    { label: 'Coordinating agent pipeline', status: 'done', agent: 'orchestrator' },
+    { label: 'Exploring application routes', status: 'running', agent: 'planner' },
+    { label: 'Generating test code', status: 'pending', agent: 'generator' },
+  ]);
+
+  try {
+    const { agentDiscoverAreas } = await import('@/lib/playwright/planner-agent');
+    const plannerResult = await agentDiscoverAreas(repositoryId, baseUrl);
+
+    if (!plannerResult.success || !plannerResult.functionalAreas?.length) {
+      // Planner failed — fall back to traditional discovery
+      await updateSubsteps(sessionId, 'discover', [
+        { label: 'Coordinating agent pipeline', status: 'done', agent: 'orchestrator' },
+        { label: 'Planner agent failed, falling back to AI scan', status: 'error', agent: 'planner' },
+      ]);
+
+      return tryFallbackDiscovery(sessionId, repositoryId, branch);
+    }
+
+    if (await isCancelled(sessionId)) return false;
+
+    const areas = plannerResult.functionalAreas;
+    const areaCount = areas.length;
+    const routeCount = areas.reduce((sum, a) => sum + a.routes.length, 0);
+
+    // Save discovered routes
+    const { saveDiscoveredRoutes: saveRoutes } = await import('./ai-routes');
+    const saveResult = await saveRoutes(repositoryId, areas.map(a => ({
+      name: a.name,
+      routes: a.routes.map(r => ({
+        path: r.path,
+        type: r.type as 'static' | 'dynamic',
+        description: r.description,
+      })),
+    })));
+
+    // Phase 3: Generator agent creates tests
+    await updateSubsteps(sessionId, 'discover', [
+      { label: 'Coordinating agent pipeline', status: 'done', agent: 'orchestrator' },
+      { label: `Discovered ${areaCount} areas, ${routeCount} routes`, status: 'done', agent: 'planner' },
+      { label: 'Generating verified test code', status: 'running', agent: 'generator' },
+    ]);
+
+    if (await isCancelled(sessionId)) return false;
+
+    // Generate tests for discovered routes
+    let testsCreated = 0;
+    if (saveResult.savedRoutes && saveResult.savedRoutes.length > 0) {
+      const routeIds = saveResult.savedRoutes.map(r => r.routeId);
+      const genResult = await generateBasicTests(repositoryId, routeIds, baseUrl);
+      testsCreated = genResult.testsCreated + genResult.testsUpdated;
+    }
+
+    // Try Generator agent for richer tests if we have area plans
+    const dbAreas = await queries.getFunctionalAreasByRepo(repositoryId);
+    const areasWithPlans = dbAreas.filter(a => a.agentPlan);
+
+    if (areasWithPlans.length > 0) {
+      const { agentCreateTest } = await import('@/lib/playwright/generator-agent');
+
+      for (const area of areasWithPlans.slice(0, 5)) { // Limit to 5 areas to avoid timeout
+        if (await isCancelled(sessionId)) return false;
+
+        await updateSubsteps(sessionId, 'discover', [
+          { label: 'Coordinating agent pipeline', status: 'done', agent: 'orchestrator' },
+          { label: `Discovered ${areaCount} areas, ${routeCount} routes`, status: 'done', agent: 'planner' },
+          { label: `Generating test: ${area.name}`, status: 'running', agent: 'generator' },
+        ]);
+
+        try {
+          const genResult = await agentCreateTest(repositoryId, {
+            functionalAreaId: area.id,
+            baseUrl,
+          });
+
+          if (genResult.success && genResult.code) {
+            await queries.createTest({
+              repositoryId,
+              functionalAreaId: area.id,
+              name: `${area.name} - Agent Test`,
+              code: genResult.code,
+              targetUrl: baseUrl,
+            });
+            testsCreated++;
+          }
+        } catch {
+          // Individual test generation failure is non-fatal
+        }
+      }
+    }
+
+    const session = await queries.getAgentSession(sessionId);
+    if (session) {
+      await queries.updateAgentSession(sessionId, {
+        metadata: { ...session.metadata, testsCreated },
+      });
+    }
+
+    await updateSubsteps(sessionId, 'discover', [
+      { label: 'Agent pipeline complete', status: 'done', agent: 'orchestrator' },
+      { label: `Discovered ${areaCount} areas, ${routeCount} routes`, status: 'done', agent: 'planner' },
+      { label: `Generated ${testsCreated} tests`, status: 'done', agent: 'generator' },
+    ]);
+
+    await setStepCompleted(sessionId, 'discover', {
+      method: 'pw_agents',
+      areasFound: areaCount,
+      routesFound: routeCount,
+      testsCreated,
+    });
+    return true;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Agent discovery failed';
+
+    await updateSubsteps(sessionId, 'discover', [
+      { label: 'Coordinating agent pipeline', status: 'done', agent: 'orchestrator' },
+      { label: `Agent error: ${message}`, status: 'error', agent: 'planner' },
+      { label: 'Falling back to AI scan', status: 'running' },
+    ]);
+
+    // Fall back to traditional discovery
+    return tryFallbackDiscovery(sessionId, repositoryId, branch);
+  }
+}
+
 async function runDiscover(sessionId: string, repositoryId: string) {
   await setStepActive(sessionId, 'discover');
   if (await isCancelled(sessionId)) return false;
@@ -579,6 +727,12 @@ async function runDiscover(sessionId: string, repositoryId: string) {
       cached: true,
     });
     return true;
+  }
+
+  // Check if PW agents are enabled — if so, use Planner + Generator instead
+  const aiSettings = await getAISettings(repositoryId);
+  if (aiSettings?.pwAgentEnabled) {
+    return runDiscoverWithAgents(sessionId, repositoryId, branch);
   }
 
   // Substep 1: Discover spec files
@@ -1142,9 +1296,21 @@ async function runTests(sessionId: string, repositoryId: string) {
       });
     }
 
-    await updateSubsteps(sessionId, 'run_tests', [
-      { label: `Running ${buildResult.testCount} tests`, status: 'running' },
-    ]);
+    // Check for agent-mode tests
+    const allTests = await queries.getTestsByRepo(repositoryId);
+    const agentModeTests = allTests.filter(t => t.executionMode === 'agent');
+    const proceduralTests = allTests.filter(t => t.executionMode !== 'agent');
+
+    if (agentModeTests.length > 0) {
+      await updateSubsteps(sessionId, 'run_tests', [
+        { label: `Running ${proceduralTests.length} procedural tests`, status: 'running' },
+        { label: `Running ${agentModeTests.length} agent-mode tests`, status: 'pending', agent: 'orchestrator' },
+      ]);
+    } else {
+      await updateSubsteps(sessionId, 'run_tests', [
+        { label: `Running ${buildResult.testCount} tests`, status: 'running' },
+      ]);
+    }
 
     // Wait for build to complete
     const summary = await waitForBuild(buildId);
@@ -1233,6 +1399,10 @@ async function runFixTests(sessionId: string, repositoryId: string) {
   let fixedCount = 0;
   let unfixableCount = 0;
 
+  // Check if PW agents are enabled for healer
+  const fixAiSettings = await getAISettings(repositoryId);
+  const useHealer = fixAiSettings?.pwAgentEnabled ?? false;
+
   for (let i = 0; i < failedResults.length; i++) {
     if (await isCancelled(sessionId)) return false;
 
@@ -1248,15 +1418,33 @@ async function runFixTests(sessionId: string, repositoryId: string) {
 
     const test = await queries.getTest(testId);
 
-    await updateSubsteps(sessionId, 'fix_tests', [
-      {
-        label: `Fixing test ${i + 1}/${failedResults.length}: ${test?.name || testId}`,
-        status: 'running',
-        detail: `Attempt ${attempts + 1}/${MAX_FIX_ATTEMPTS}`,
-      },
-    ]);
+    if (useHealer) {
+      await updateSubsteps(sessionId, 'fix_tests', [
+        { label: 'Coordinating fix pipeline', status: 'done', agent: 'orchestrator' },
+        {
+          label: `Healing test ${i + 1}/${failedResults.length}: ${test?.name || testId}`,
+          status: 'running',
+          detail: `Attempt ${attempts + 1}/${MAX_FIX_ATTEMPTS}`,
+          agent: 'healer',
+        },
+      ]);
+    } else {
+      await updateSubsteps(sessionId, 'fix_tests', [
+        {
+          label: `Fixing test ${i + 1}/${failedResults.length}: ${test?.name || testId}`,
+          status: 'running',
+          detail: `Attempt ${attempts + 1}/${MAX_FIX_ATTEMPTS}`,
+        },
+      ]);
+    }
 
-    const fixResult = await aiFixTest(repositoryId, testId, errorMessage, intelligence);
+    let fixResult: { success: boolean; code?: string; error?: string };
+    if (useHealer) {
+      const { agentHealTest } = await import('@/lib/playwright/healer-agent');
+      fixResult = await agentHealTest(repositoryId, testId);
+    } else {
+      fixResult = await aiFixTest(repositoryId, testId, errorMessage, intelligence);
+    }
     fixAttempts[testId] = attempts + 1;
 
     if (fixResult.success && fixResult.code) {
@@ -1299,12 +1487,23 @@ async function runFixTests(sessionId: string, repositoryId: string) {
     }
   }
 
-  await updateSubsteps(sessionId, 'fix_tests', [
-    {
-      label: `${fixedCount} fixed, ${unfixableCount} unfixable`,
-      status: fixedCount > 0 ? 'done' : unfixableCount > 0 ? 'error' : 'done',
-    },
-  ]);
+  if (useHealer) {
+    await updateSubsteps(sessionId, 'fix_tests', [
+      { label: 'Fix pipeline complete', status: 'done', agent: 'orchestrator' },
+      {
+        label: `${fixedCount} healed, ${unfixableCount} unfixable`,
+        status: fixedCount > 0 ? 'done' : unfixableCount > 0 ? 'error' : 'done',
+        agent: 'healer',
+      },
+    ]);
+  } else {
+    await updateSubsteps(sessionId, 'fix_tests', [
+      {
+        label: `${fixedCount} fixed, ${unfixableCount} unfixable`,
+        status: fixedCount > 0 ? 'done' : unfixableCount > 0 ? 'error' : 'done',
+      },
+    ]);
+  }
 
   await setStepCompleted(sessionId, 'fix_tests', { fixedCount, unfixableCount });
   return true;

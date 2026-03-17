@@ -74,6 +74,9 @@ export interface TestGenerationContext {
   scanContext?: ScanContext;
   codebaseIntelligence?: CodebaseIntelligenceContext;
   availableRoutes?: string[];
+  functionalAreaId?: string;
+  testName?: string;
+  baseUrl?: string;
 }
 
 export interface GeneratedTest {

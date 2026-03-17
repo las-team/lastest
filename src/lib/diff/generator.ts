@@ -161,7 +161,6 @@ function calculateContentArea(
  * We use MD5 because we only need collision resistance within a single image pair,
  * and it's significantly faster than SHA256 for this use case.
  */
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
 function _hashRow(data: Buffer | Uint8Array, width: number, row: number): string {
   const start = row * width * 4;
   const end = start + width * 4;

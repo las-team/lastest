@@ -24,7 +24,8 @@ function useDisableLocalRunner(propOverride?: boolean): boolean {
   useEffect(() => {
     if (propOverride !== undefined) return; // prop takes precedence
     if (cachedDisableLocal !== null) {
-      queueMicrotask(() => setDisableLocal(cachedDisableLocal));
+      const val = cachedDisableLocal;
+      queueMicrotask(() => setDisableLocal(val));
       return;
     }
     fetch('/api/config')

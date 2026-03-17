@@ -56,6 +56,8 @@ ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
 ENV NEXT_PUBLIC_GIT_HASH=$GIT_HASH
 ENV NEXT_PUBLIC_GIT_COMMIT_COUNT=$GIT_COMMIT_COUNT
+# Dummy secret for build-time page data collection (overridden at runtime)
+ENV BETTER_AUTH_SECRET=build-time-placeholder
 
 # Build the application
 RUN pnpm build

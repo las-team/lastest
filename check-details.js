@@ -39,7 +39,7 @@ results.forEach(r => {
           console.log("  Screenshot:", s.path, "(NOT FOUND)");
         }
       });
-    } catch(_e) {} // eslint-disable-line @typescript-eslint/no-unused-vars
+    } catch(_e) {}
   }
   if (r.screenshot_path) {
     const fullPath = path.join("public", r.screenshot_path);

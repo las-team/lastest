@@ -418,13 +418,13 @@ describe('createAppState Helper', () => {
     });
 
     it('looks for state in multiple common locations', async () => {
-      mockPage.evaluate = vi.fn().mockImplementation((fn) => {
+      mockPage.evaluate = vi.fn().mockImplementation((_fn) => {
         // Simulate looking for state in __APP_STATE__, store, __EXCALIDRAW_STATE__
         return Promise.resolve(undefined);
       });
 
       const appState = {
-        get: async (path: string) => {
+        get: async (_path: string) => {
           return mockPage.evaluate(() => {
             // Check common locations
             const state = (window as Record<string, unknown>).__APP_STATE__ ||
@@ -471,7 +471,7 @@ describe('createAppState Helper', () => {
       mockPage.evaluate = vi.fn().mockResolvedValue(undefined);
 
       const appState = {
-        get: async (path: string) => {
+        get: async (_path: string) => {
           return mockPage.evaluate(() => undefined);
         },
       };
@@ -585,7 +585,7 @@ describe('createAppState Helper', () => {
         },
       };
 
-      const value = await appState.evaluate<string>('window.customValue');
+      const _value = await appState.evaluate<string>('window.customValue');
 
       expect(mockPage.evaluate).toHaveBeenCalled();
     });

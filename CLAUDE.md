@@ -1,7 +1,5 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
-
 ## Critical Rules
 
 - **ALWAYS use `pnpm`** — never `npm` or `npx`
@@ -19,17 +17,14 @@ pnpm db:push                    # Push schema changes to DB
 pnpm db:studio                  # Drizzle Studio
 
 # Embedded Browser (local dev)
-docker compose -f docker-compose.eb.yml up -d          # Start EB containers
 docker compose -f docker-compose.eb.yml up -d --build  # Rebuild + start
-docker compose -f docker-compose.eb.yml down            # Stop EB containers
-docker compose -f docker-compose.eb.yml logs -f         # Tail EB logs
 ```
 
 ## Architecture
 
 Visual regression testing platform: Next.js 16 App Router, SQLite (Drizzle ORM), Playwright.
 
-**Core flow:** Record browser interactions → Run tests → Diff screenshots (pixelmatch) → Review/approve baselines
+**Core flow:** Record browser interactions → Run tests → Diff screenshots → Review/approve baselines
 
 **Key paths:**
 - `src/lib/db/schema.ts` — all tables (~1375 lines)
@@ -82,7 +77,5 @@ Visual regression testing platform: Next.js 16 App Router, SQLite (Drizzle ORM),
 ## Gotchas
 
 - `VisualDiffWithTestStatus` type must stay in sync with `getVisualDiffsWithTestStatus` query select
-- Pre-existing lint warnings (~119) — new code should pass clean
-- `pnpm build` may have a pre-existing type error in `ai-settings-card.tsx` (Ollama fields) — verify errors are from your changes
 - Test code signature: `export async function test(page, baseUrl, screenshotPath, stepLogger)` — runner strips TS annotations
 - Docker entrypoint runs `drizzle-kit push --force` on startup

@@ -632,7 +632,7 @@ export interface RunEvent {
 
 export interface CapturedScreenshot {
   path: string;
-  label: string;
+  label?: string;
 }
 
 export interface TestRunResult {
