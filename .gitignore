@@ -2,6 +2,7 @@
 
 # dependencies
 node_modules
+build-info.json
 /.pnp
 .pnp.*
 .yarn/*

@@ -59,6 +59,13 @@ ENV NEXT_PUBLIC_GIT_COMMIT_COUNT=$GIT_COMMIT_COUNT
 # Dummy secret for build-time page data collection (overridden at runtime)
 ENV BETTER_AUTH_SECRET=build-time-placeholder
 
+# Generate build info file
+RUN node -e "\
+  const pkg = require('./package.json');\
+  const runner = require('./packages/runner/package.json');\
+  const info = { gitHash: '$GIT_HASH', commitCount: '$GIT_COMMIT_COUNT', version: pkg.version, runnerVersion: runner.version };\
+  require('fs').writeFileSync('build-info.json', JSON.stringify(info));"
+
 # Build the application
 RUN pnpm build
 
@@ -88,6 +95,7 @@ RUN groupadd --gid 1002 nodejs && \
 COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
 COPY --from=builder --chown=nextjs:nodejs /app/public ./public
+COPY --from=builder --chown=nextjs:nodejs /app/build-info.json ./build-info.json
 
 # Copy full playwright packages for runtime (standalone prunes them since they're dynamically loaded)
 COPY --from=deps --chown=nextjs:nodejs /app/node_modules/.pnpm/playwright@1.57.0/node_modules/playwright ./node_modules/.pnpm/playwright@1.57.0/node_modules/playwright

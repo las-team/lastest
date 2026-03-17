@@ -167,9 +167,12 @@ async function runSettingsCheck(sessionId: string, repositoryId: string, teamId:
     return false;
   }
 
+  const pwEnabled = aiSettings.pwAgentEnabled ?? false;
   await setStepCompleted(sessionId, 'settings_check', {
     ghAccount: ghAccount?.githubUsername || 'Connected',
     aiProvider: aiSettings.provider,
+    pwAgentEnabled: pwEnabled,
+    activeAgents: pwEnabled ? ['planner', 'generator', 'healer'] : [],
   });
   return true;
 }

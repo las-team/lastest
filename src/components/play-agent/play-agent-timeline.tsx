@@ -6,7 +6,7 @@ import { Play, X, Check, Loader2, Pause, SkipForward, AlertCircle, RotateCcw } f
 import { PlayAgentStep } from './play-agent-step';
 import { usePlayAgent } from './use-play-agent';
 import { cn } from '@/lib/utils';
-import type { AgentStepState, AgentStepId } from '@/lib/db/schema';
+import type { AgentStepState, AgentStepId, PwAgentType } from '@/lib/db/schema';
 
 interface PlayAgentTimelineProps {
   repositoryId?: string | null;
@@ -33,6 +33,20 @@ const AI_PROVIDER_LABELS: Record<string, string> = {
   'anthropic-direct': 'Anthropic Direct',
 };
 
+const AGENT_LABELS: Record<string, string> = {
+  orchestrator: 'Orchestrator',
+  planner: 'Planner',
+  generator: 'Generator',
+  healer: 'Healer',
+};
+
+const ROSTER_BADGE_STYLES: Record<PwAgentType, { bg: string; text: string }> = {
+  orchestrator: { bg: 'bg-violet-500/15', text: 'text-violet-600 dark:text-violet-400' },
+  planner: { bg: 'bg-blue-500/15', text: 'text-blue-600 dark:text-blue-400' },
+  generator: { bg: 'bg-emerald-500/15', text: 'text-emerald-600 dark:text-emerald-400' },
+  healer: { bg: 'bg-amber-500/15', text: 'text-amber-600 dark:text-amber-400' },
+};
+
 // ============================================
 // Annotations
 // ============================================
@@ -48,11 +62,16 @@ function getAnnotations(step: AgentStepState): Annotation[] | null {
   if (!r) return null;
 
   switch (step.id) {
-    case 'settings_check':
+    case 'settings_check': {
+      const agents = (r.activeAgents as string[]) ?? [];
       return [
         { label: `GH: ${r.ghAccount}`, ok: true },
         { label: AI_PROVIDER_LABELS[r.aiProvider as string] ?? (r.aiProvider as string), ok: true },
+        ...(agents.length > 0
+          ? agents.map(a => ({ label: AGENT_LABELS[a] ?? a, ok: true }))
+          : [{ label: 'Prompt mode', ok: true }]),
       ];
+    }
     case 'select_repo':
       return [
         { label: r.repoFullName as string, ok: true },
@@ -158,6 +177,12 @@ export function PlayAgentTimeline({ repositoryId }: PlayAgentTimelineProps) {
   const isRunning = isActive && session?.status === 'active';
   const isPaused = session?.status === 'paused';
 
+  // Extract agent roster from completed settings_check step
+  const settingsStep = steps.find(s => s.id === 'settings_check');
+  const settingsResult = settingsStep?.status === 'completed' ? settingsStep.result : null;
+  const activeAgents = (settingsResult?.activeAgents as string[] | undefined) ?? [];
+  const pwAgentEnabled = activeAgents.length > 0;
+
   const activeStep = session?.steps.find(
     (s) => s.status === 'active' || s.status === 'waiting_user' || s.status === 'failed',
   );
@@ -193,6 +218,36 @@ export function PlayAgentTimeline({ repositoryId }: PlayAgentTimelineProps) {
             )}
           </div>
         </div>
+
+        {/* Agent roster bar — visible once settings_check completes */}
+        {settingsResult && (
+          <div className="flex items-center gap-1.5 mb-2.5">
+            <span className="text-[10px] text-muted-foreground/70 uppercase tracking-wider font-medium mr-1">
+              {pwAgentEnabled ? 'Agents' : 'Mode'}
+            </span>
+            {pwAgentEnabled ? (
+              (['orchestrator', ...activeAgents] as PwAgentType[]).map(agent => {
+                const style = ROSTER_BADGE_STYLES[agent];
+                return (
+                  <span
+                    key={agent}
+                    className={cn(
+                      'inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium',
+                      style.bg,
+                      style.text,
+                    )}
+                  >
+                    {AGENT_LABELS[agent] ?? agent.charAt(0).toUpperCase() + agent.slice(1)}
+                  </span>
+                );
+              })
+            ) : (
+              <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-muted text-muted-foreground">
+                Prompt
+              </span>
+            )}
+          </div>
+        )}
 
         {/* Play/Pause button + grid timeline */}
         <div className="flex items-start gap-3">
