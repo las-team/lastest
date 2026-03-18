@@ -1052,7 +1052,7 @@ export const runners = sqliteTable('runners', {
   lastSeen: integer('last_seen', { mode: 'timestamp' }),
   capabilities: text('capabilities', { mode: 'json' }).$type<RunnerCapability[]>().default(['run', 'record']),
   type: text('type').notNull().default('remote'), // 'remote' | 'embedded'
-  maxParallelTests: integer('max_parallel_tests').default(1), // max tests to run in parallel on this runner
+  maxParallelTests: integer('max_parallel_tests').default(4), // max tests to run in parallel on this runner
   isSystem: integer('is_system', { mode: 'boolean' }).notNull().default(false), // System EB runners (host-provided, cross-team)
   authOnly: integer('auth_only', { mode: 'boolean' }).notNull().default(false), // Auth-only runners (for GHA auto mode — not used for execution)
   createdAt: integer('created_at', { mode: 'timestamp' }).$defaultFn(() => new Date()),

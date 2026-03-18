@@ -65,7 +65,6 @@ ${reseedOnInput ? `
         window.addEventListener(evtType, function(e) {
           if (!e.isTrusted) return;
           var h = __hashInputEvent(e);
-          mathState = h;
           cryptoState = (h * 2654435761 >>> 0) || 1;
         }, true);
       });
