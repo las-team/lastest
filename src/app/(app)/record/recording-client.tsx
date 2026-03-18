@@ -73,18 +73,13 @@ import {
 } from 'lucide-react';
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from '@/components/ui/tooltip';
 import type { FunctionalArea, PlaywrightSettings, RecordingEngine, Test } from '@/lib/db/schema';
 import { DEFAULT_RECORDING_ENGINES } from '@/lib/db/schema';
 import { PlaywrightSettingsCard } from '@/components/settings/playwright-settings-card';
 import { ExecutionTargetSelector } from '@/components/execution/execution-target-selector';
 import { BrowserViewer } from '@/components/embedded-browser/browser-viewer-client';
 import { toast } from 'sonner';
+import { RecordingSetupPicker, type ExtraStep } from '@/components/setup/recording-setup-picker';
 
 interface SetupStepInfo {
   stepType: 'test' | 'script';
@@ -102,6 +97,8 @@ interface RecordingClientProps {
   defaultEngine?: RecordingEngine;
   rerecordTest?: Test | null;
   repositorySetupSteps?: SetupStepInfo[];
+  availableTests?: { id: string; name: string }[];
+  availableScripts?: { id: string; name: string }[];
 }
 
 type RecordingStep = 'setup' | 'recording' | 'inspector-running' | 'saving';
@@ -263,6 +260,8 @@ export function RecordingClient({
   defaultEngine = 'lastest',
   rerecordTest,
   repositorySetupSteps = [],
+  availableTests = [],
+  availableScripts = [],
 }: RecordingClientProps) {
   const router = useRouter();
   const [step, setStep] = useState<RecordingStep>('setup');
@@ -271,6 +270,7 @@ export function RecordingClient({
   const [inspectorSessionId, setInspectorSessionId] = useState<string | null>(null);
   const [executionTarget, setExecutionTarget] = usePreferredRunner();
   const [runSetupBeforeRecording, setRunSetupBeforeRecording] = useState(true);
+  const [extraSetupSteps, setExtraSetupSteps] = useState<ExtraStep[]>([]);
   const [selectedStorageStateId, setSelectedStorageStateId] = useState<string | null>(null);
   const [storageStateOptions, setStorageStateOptions] = useState<Array<{ id: string; name: string; cookieCount: number; originCount: number }>>([]);
   const [capturedStorageState, setCapturedStorageState] = useState<string | null>(null);
@@ -475,13 +475,20 @@ export function RecordingClient({
         }
       } else {
         // Start Lastest recorder with optional setup
-        const setupOptions = runSetupBeforeRecording && repositorySetupSteps.length > 0
+        const setupOptions = runSetupBeforeRecording && (repositorySetupSteps.length > 0 || extraSetupSteps.length > 0)
           ? {
-              steps: repositorySetupSteps.map(s => ({
-                stepType: s.stepType,
-                testId: s.testId,
-                scriptId: s.scriptId,
-              })),
+              steps: [
+                ...repositorySetupSteps.map(s => ({
+                  stepType: s.stepType,
+                  testId: s.testId,
+                  scriptId: s.scriptId,
+                })),
+                ...extraSetupSteps.map(s => ({
+                  stepType: s.stepType,
+                  testId: s.testId ?? null,
+                  scriptId: s.scriptId ?? null,
+                })),
+              ],
             }
           : undefined;
 
@@ -848,45 +855,45 @@ export function RecordingClient({
 
                 {/* Environment Setup Toggle */}
                 {(() => {
-                  const hasSetup = repositorySetupSteps.length > 0;
-                  const isDisabled = isLoading || !hasSetup;
-                  const stepSummary = hasSetup
-                    ? repositorySetupSteps.length === 1
-                      ? `${repositorySetupSteps[0].stepType === 'test' ? 'Test' : 'Script'}: ${repositorySetupSteps[0].name}`
-                      : `${repositorySetupSteps.length} setup steps`
-                    : 'No setup configured';
+                  const hasDefaults = repositorySetupSteps.length > 0;
+                  const totalSteps = repositorySetupSteps.length + extraSetupSteps.length;
+                  const stepSummary = totalSteps > 0
+                    ? totalSteps === 1
+                      ? `${repositorySetupSteps[0]?.stepType === 'test' ? 'Test' : 'Script'}: ${repositorySetupSteps[0]?.name ?? extraSetupSteps[0]?.name}`
+                      : `${totalSteps} setup steps`
+                    : 'Add steps below';
 
                   return (
-                    <TooltipProvider>
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          <div className={`flex items-center justify-between p-3 bg-muted/50 rounded-lg border ${!hasSetup ? 'opacity-60' : ''}`}>
-                            <div className="flex items-center gap-3">
-                              <Play className="h-4 w-4 text-muted-foreground" />
-                              <div className="space-y-0.5">
-                                <Label htmlFor="run-setup" className={`text-sm font-medium ${hasSetup ? 'cursor-pointer' : 'cursor-not-allowed'}`}>
-                                  Run Environment Setup
-                                </Label>
-                                <p className="text-xs text-muted-foreground">
-                                  {stepSummary}
-                                </p>
-                              </div>
-                            </div>
-                            <Switch
-                              id="run-setup"
-                              checked={hasSetup && runSetupBeforeRecording}
-                              onCheckedChange={setRunSetupBeforeRecording}
-                              disabled={isDisabled}
-                            />
+                    <div className="space-y-0">
+                      <div className="flex items-center justify-between p-3 bg-muted/50 rounded-lg border">
+                        <div className="flex items-center gap-3">
+                          <Play className="h-4 w-4 text-muted-foreground" />
+                          <div className="space-y-0.5">
+                            <Label htmlFor="run-setup" className="text-sm font-medium cursor-pointer">
+                              Run Environment Setup
+                            </Label>
+                            <p className="text-xs text-muted-foreground">
+                              {runSetupBeforeRecording ? stepSummary : hasDefaults ? `${repositorySetupSteps.length} default step${repositorySetupSteps.length !== 1 ? 's' : ''} configured` : 'No setup configured'}
+                            </p>
                           </div>
-                        </TooltipTrigger>
-                        {!hasSetup && (
-                          <TooltipContent side="top">
-                            <p>Configure default setup steps in Environment Settings</p>
-                          </TooltipContent>
-                        )}
-                      </Tooltip>
-                    </TooltipProvider>
+                        </div>
+                        <Switch
+                          id="run-setup"
+                          checked={runSetupBeforeRecording}
+                          onCheckedChange={setRunSetupBeforeRecording}
+                          disabled={isLoading}
+                        />
+                      </div>
+                      {runSetupBeforeRecording && (
+                        <RecordingSetupPicker
+                          defaultSteps={repositorySetupSteps}
+                          extraSteps={extraSetupSteps}
+                          availableTests={availableTests}
+                          availableScripts={availableScripts}
+                          onChange={setExtraSetupSteps}
+                        />
+                      )}
+                    </div>
                   );
                 })()}
 
