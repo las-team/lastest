@@ -167,9 +167,12 @@ async function runSettingsCheck(sessionId: string, repositoryId: string, teamId:
     return false;
   }
 
+  const pwEnabled = aiSettings.pwAgentEnabled ?? false;
   await setStepCompleted(sessionId, 'settings_check', {
     ghAccount: ghAccount?.githubUsername || 'Connected',
     aiProvider: aiSettings.provider,
+    pwAgentEnabled: pwEnabled,
+    activeAgents: pwEnabled ? ['planner', 'generator', 'healer'] : [],
   });
   return true;
 }
@@ -327,6 +330,7 @@ async function tryFallbackDiscovery(
   repositoryId: string,
   branch: string,
   specDetail?: string,
+  agentFallback?: boolean,
 ): Promise<boolean> {
   const specLabel = specDetail || 'No spec files found';
   const envConfig = await getEnvironmentConfig(repositoryId);
@@ -336,8 +340,14 @@ async function tryFallbackDiscovery(
   const session = await queries.getAgentSession(sessionId);
   const intelligence = session?.metadata?.codebaseIntelligence as CodebaseIntelligenceContext | undefined;
 
+  // When falling back from agent path, preserve agent context in substeps
+  const agentPrefix = agentFallback ? [
+    { label: 'Agent discovery failed — falling back', status: 'error' as const, agent: 'orchestrator' as const },
+  ] : [];
+
   // Fallback 1: AI route scan
   await updateSubsteps(sessionId, 'discover', [
+    ...agentPrefix,
     { label: 'Finding spec files', status: 'done', detail: specLabel },
     { label: 'AI route scan', status: 'running' },
     { label: 'Generating tests', status: 'pending' },
@@ -354,6 +364,7 @@ async function tryFallbackDiscovery(
         const areaCount = new Set(saveResult.savedRoutes.map((r) => r.areaName)).size;
 
         await updateSubsteps(sessionId, 'discover', [
+          ...agentPrefix,
           { label: 'Finding spec files', status: 'done', detail: specLabel },
           { label: 'AI route scan', status: 'done', detail: `${areaCount} areas, ${totalRoutes} routes` },
           { label: 'Generating tests', status: 'running' },
@@ -374,6 +385,7 @@ async function tryFallbackDiscovery(
         }
 
         await updateSubsteps(sessionId, 'discover', [
+          ...agentPrefix,
           { label: 'Finding spec files', status: 'done', detail: specLabel },
           { label: 'AI route scan', status: 'done', detail: `${areaCount} areas, ${totalRoutes} routes` },
           { label: 'Generating tests', status: 'done', detail: `${testsCreated} tests` },
@@ -396,6 +408,7 @@ async function tryFallbackDiscovery(
 
   // Fallback 2: Smoke tests from already-scanned routes
   await updateSubsteps(sessionId, 'discover', [
+    ...agentPrefix,
     { label: 'Finding spec files', status: 'done', detail: specLabel },
     { label: 'AI route scan', status: 'done', detail: 'No routes discovered' },
     { label: 'Generating smoke tests', status: 'running' },
@@ -417,6 +430,7 @@ async function tryFallbackDiscovery(
       }
 
       await updateSubsteps(sessionId, 'discover', [
+        ...agentPrefix,
         { label: 'Finding spec files', status: 'done', detail: specLabel },
         { label: 'AI route scan', status: 'done', detail: 'No routes discovered' },
         { label: 'Generating smoke tests', status: 'done', detail: `${testsCreated} tests` },
@@ -433,6 +447,7 @@ async function tryFallbackDiscovery(
 
   // All fallbacks exhausted
   await updateSubsteps(sessionId, 'discover', [
+    ...agentPrefix,
     { label: 'Finding spec files', status: 'done', detail: specLabel },
     { label: 'AI route scan', status: 'done', detail: 'No routes discovered' },
     { label: 'Generating smoke tests', status: 'done', detail: 'No routes available' },
@@ -535,6 +550,205 @@ async function fillMissingUserStories(
   return true;
 }
 
+/**
+ * Discover tests using parallel multi-planner pipeline + Generator agents.
+ * Runs 4 specialized planners in parallel (browser, code, spec, routes),
+ * merges their findings, then feeds into N generator agents.
+ */
+async function runDiscoverWithAgents(
+  sessionId: string,
+  repositoryId: string,
+  branch: string,
+): Promise<boolean> {
+  const envConfig = await getEnvironmentConfig(repositoryId);
+  const baseUrl = envConfig?.baseUrl || 'http://localhost:3000';
+
+  // Retrieve codebase intelligence from session metadata
+  const sessionData = await queries.getAgentSession(sessionId);
+  const intelligence = sessionData?.metadata?.codebaseIntelligence as CodebaseIntelligenceContext | undefined;
+
+  // Mutable substep states for parallel updates
+  type SubstepStatus = 'pending' | 'running' | 'done' | 'error';
+  const plannerStates: Array<{ label: string; status: SubstepStatus; detail?: string; agent?: 'orchestrator' | 'planner' | 'generator' }> = [
+    { label: 'Coordinating multi-planner pipeline', status: 'running', agent: 'orchestrator' },
+    { label: 'Exploring app via browser', status: 'pending', agent: 'planner' },
+    { label: 'Scanning codebase routes', status: 'pending', agent: 'planner' },
+    { label: 'Analyzing spec files', status: 'pending', agent: 'planner' },
+    { label: 'Checking route coverage', status: 'pending', agent: 'planner' },
+    { label: 'Generating test code', status: 'pending', agent: 'generator' },
+  ];
+
+  const flushSubsteps = () => updateSubsteps(sessionId, 'discover', [...plannerStates]);
+  await flushSubsteps();
+
+  if (await isCancelled(sessionId)) return false;
+
+  // Phase 1: Launch all 4 planners in parallel
+  plannerStates[0].status = 'done';
+  await flushSubsteps();
+
+  const { runBrowserPlanner } = await import('@/lib/playwright/planners/browser-planner');
+  const { runCodePlanner } = await import('@/lib/playwright/planners/code-planner');
+  const { runSpecPlanner } = await import('@/lib/playwright/planners/spec-planner');
+  const { runRoutePlanner } = await import('@/lib/playwright/planners/route-planner');
+
+  // Wrap each planner to update its substep slot
+  const wrapPlanner = <T extends unknown[]>(
+    idx: number,
+    fn: (...args: T) => Promise<import('@/lib/playwright/planner-types').PlannerResult>,
+    ...args: T
+  ) => {
+    plannerStates[idx].status = 'running';
+    flushSubsteps();
+    return fn(...args).then(result => {
+      plannerStates[idx].status = result.error ? 'error' : 'done';
+      plannerStates[idx].detail = result.error
+        ? result.error.slice(0, 60)
+        : `${result.areas.length} areas`;
+      flushSubsteps();
+      return result;
+    }).catch(err => {
+      plannerStates[idx].status = 'error';
+      plannerStates[idx].detail = err instanceof Error ? err.message.slice(0, 60) : 'Failed';
+      flushSubsteps();
+      return { source: 'browser' as const, areas: [], error: String(err) };
+    });
+  };
+
+  const plannerResults = await Promise.allSettled([
+    wrapPlanner(1, runBrowserPlanner, repositoryId, baseUrl),
+    wrapPlanner(2, runCodePlanner, repositoryId, branch, intelligence),
+    wrapPlanner(3, runSpecPlanner, repositoryId, branch),
+    wrapPlanner(4, runRoutePlanner, repositoryId),
+  ]);
+
+  if (await isCancelled(sessionId)) return false;
+
+  // Phase 2: Merge results
+  const { mergePlannerResults } = await import('@/lib/playwright/planner-merger');
+  const fulfilledResults = plannerResults
+    .filter((r): r is PromiseFulfilledResult<import('@/lib/playwright/planner-types').PlannerResult> => r.status === 'fulfilled')
+    .map(r => r.value)
+    .filter(r => r.areas.length > 0);
+
+  const mergedAreas = mergePlannerResults(fulfilledResults);
+  const sourcesUsed = new Set(fulfilledResults.map(r => r.source)).size;
+
+  if (mergedAreas.length === 0) {
+    // All planners failed or found nothing — fall back
+    return tryFallbackDiscovery(sessionId, repositoryId, branch, undefined, true);
+  }
+
+  const areaCount = mergedAreas.length;
+  const routeCount = mergedAreas.reduce((sum, a) => sum + a.routes.length, 0);
+
+  // Save merged areas and routes to DB
+  const { saveDiscoveredRoutes: saveRoutes } = await import('./ai-routes');
+  const saveResult = await saveRoutes(repositoryId, mergedAreas.map(a => ({
+    name: a.name,
+    routes: a.routes.map(r => ({
+      path: r,
+      type: (r.includes('[') || r.includes(':') ? 'dynamic' : 'static') as 'static' | 'dynamic',
+    })),
+  })));
+
+  // Save agent plans to functional areas
+  for (const area of mergedAreas) {
+    if (area.testPlan) {
+      const dbArea = await queries.getOrCreateFunctionalAreaByRepo(
+        repositoryId,
+        area.name,
+        area.description,
+      );
+      await queries.updateFunctionalArea(dbArea.id, {
+        agentPlan: area.testPlan,
+        planGeneratedAt: new Date(),
+      });
+    }
+  }
+
+  // Phase 3: Generator agents create tests
+  plannerStates[5].status = 'running';
+  plannerStates[5].detail = `${areaCount} areas from ${sourcesUsed} sources`;
+  await flushSubsteps();
+
+  if (await isCancelled(sessionId)) return false;
+
+  let testsCreated = 0;
+
+  // Generate basic tests from saved routes
+  if (saveResult.savedRoutes && saveResult.savedRoutes.length > 0) {
+    const routeIds = saveResult.savedRoutes.map(r => r.routeId);
+    const genResult = await generateBasicTests(repositoryId, routeIds, baseUrl);
+    testsCreated = genResult.testsCreated + genResult.testsUpdated;
+  }
+
+  // Use Generator agent for richer tests from area plans
+  const dbAreas = await queries.getFunctionalAreasByRepo(repositoryId);
+  const areasWithPlans = dbAreas.filter(a => a.agentPlan);
+
+  if (areasWithPlans.length > 0) {
+    const { agentCreateTest } = await import('@/lib/playwright/generator-agent');
+    const targetAreas = areasWithPlans.slice(0, 8);
+    const GENERATOR_CONCURRENCY = 3;
+
+    for (let batch = 0; batch < targetAreas.length; batch += GENERATOR_CONCURRENCY) {
+      if (await isCancelled(sessionId)) return false;
+
+      const chunk = targetAreas.slice(batch, batch + GENERATOR_CONCURRENCY);
+      const completed = Math.min(batch, targetAreas.length);
+
+      plannerStates[5].label = `Generating tests (${completed}/${targetAreas.length})`;
+      plannerStates[5].detail = `${chunk.length} generators in parallel`;
+      await flushSubsteps();
+
+      const results = await Promise.allSettled(
+        chunk.map(async (area) => {
+          const genResult = await agentCreateTest(repositoryId, {
+            functionalAreaId: area.id,
+            baseUrl,
+          });
+          if (genResult.success && genResult.code) {
+            await queries.createTest({
+              repositoryId,
+              functionalAreaId: area.id,
+              name: `${area.name} - Agent Test`,
+              code: genResult.code,
+              targetUrl: baseUrl,
+            });
+            return true;
+          }
+          return false;
+        }),
+      );
+
+      testsCreated += results.filter(r => r.status === 'fulfilled' && r.value).length;
+    }
+  }
+
+  const session = await queries.getAgentSession(sessionId);
+  if (session) {
+    await queries.updateAgentSession(sessionId, {
+      metadata: { ...session.metadata, testsCreated },
+    });
+  }
+
+  plannerStates[0].label = 'Multi-planner pipeline complete';
+  plannerStates[5].status = 'done';
+  plannerStates[5].label = `Generated ${testsCreated} tests`;
+  plannerStates[5].detail = `${areaCount} areas, ${routeCount} routes`;
+  await flushSubsteps();
+
+  await setStepCompleted(sessionId, 'discover', {
+    method: 'pw_agents_parallel',
+    areasFound: areaCount,
+    routesFound: routeCount,
+    testsCreated,
+    sourcesUsed,
+  });
+  return true;
+}
+
 async function runDiscover(sessionId: string, repositoryId: string) {
   await setStepActive(sessionId, 'discover');
   if (await isCancelled(sessionId)) return false;
@@ -550,6 +764,12 @@ async function runDiscover(sessionId: string, repositoryId: string) {
   }
 
   const branch = repo.selectedBranch || repo.defaultBranch || 'main';
+
+  // Check if PW agents are enabled — if so, always use Planner + Generator
+  const aiSettings = await getAISettings(repositoryId);
+  if (aiSettings?.pwAgentEnabled) {
+    return runDiscoverWithAgents(sessionId, repositoryId, branch);
+  }
 
   // Cache: if tests exist, check for missing user story areas before skipping
   const existingTests = await queries.getTestsByRepo(repositoryId);
@@ -1142,9 +1362,21 @@ async function runTests(sessionId: string, repositoryId: string) {
       });
     }
 
-    await updateSubsteps(sessionId, 'run_tests', [
-      { label: `Running ${buildResult.testCount} tests`, status: 'running' },
-    ]);
+    // Check for agent-mode tests
+    const allTests = await queries.getTestsByRepo(repositoryId);
+    const agentModeTests = allTests.filter(t => t.executionMode === 'agent');
+    const proceduralTests = allTests.filter(t => t.executionMode !== 'agent');
+
+    if (agentModeTests.length > 0) {
+      await updateSubsteps(sessionId, 'run_tests', [
+        { label: `Running ${proceduralTests.length} procedural tests`, status: 'running' },
+        { label: `Running ${agentModeTests.length} agent-mode tests`, status: 'pending', agent: 'orchestrator' },
+      ]);
+    } else {
+      await updateSubsteps(sessionId, 'run_tests', [
+        { label: `Running ${buildResult.testCount} tests`, status: 'running' },
+      ]);
+    }
 
     // Wait for build to complete
     const summary = await waitForBuild(buildId);
@@ -1233,78 +1465,173 @@ async function runFixTests(sessionId: string, repositoryId: string) {
   let fixedCount = 0;
   let unfixableCount = 0;
 
-  for (let i = 0; i < failedResults.length; i++) {
-    if (await isCancelled(sessionId)) return false;
+  // Check if PW agents are enabled for healer
+  const fixAiSettings = await getAISettings(repositoryId);
+  const useHealer = fixAiSettings?.pwAgentEnabled ?? false;
 
-    const result = failedResults[i];
-    const testId = result.testId!;
-    const errorMessage = result.errorMessage!;
-
-    const attempts = fixAttempts[testId] || 0;
+  // Separate fixable from unfixable
+  const fixableResults: typeof failedResults = [];
+  for (const result of failedResults) {
+    const attempts = fixAttempts[result.testId!] || 0;
     if (attempts >= MAX_FIX_ATTEMPTS) {
       unfixableCount++;
-      continue;
-    }
-
-    const test = await queries.getTest(testId);
-
-    await updateSubsteps(sessionId, 'fix_tests', [
-      {
-        label: `Fixing test ${i + 1}/${failedResults.length}: ${test?.name || testId}`,
-        status: 'running',
-        detail: `Attempt ${attempts + 1}/${MAX_FIX_ATTEMPTS}`,
-      },
-    ]);
-
-    const fixResult = await aiFixTest(repositoryId, testId, errorMessage, intelligence);
-    fixAttempts[testId] = attempts + 1;
-
-    if (fixResult.success && fixResult.code) {
-      // Check for oscillation
-      const hashes = codeHashes[testId] || [];
-      const newHash = hashCode(fixResult.code);
-
-      if (hashes.includes(newHash)) {
-        // Oscillation detected — mark as unfixable
-        unfixableCount++;
-        continue;
-      }
-
-      hashes.push(newHash);
-      codeHashes[testId] = hashes;
-
-      // Apply the fix
-      await queries.updateTest(testId, { code: fixResult.code });
-      if (test) {
-        const branch = await getCurrentBranchForRepo(repositoryId);
-        const versions = await queries.getTestVersions(testId);
-        await queries.createTestVersion({
-          testId,
-          name: test.name,
-          code: fixResult.code,
-          version: (versions.length || 0) + 1,
-          changeReason: 'ai_fix',
-          branch: branch ?? null,
-        });
-      }
-      fixedCount++;
-    }
-
-    // Update metadata periodically
-    const currentSession = await queries.getAgentSession(sessionId);
-    if (currentSession) {
-      await queries.updateAgentSession(sessionId, {
-        metadata: { ...currentSession.metadata, fixAttempts, codeHashes },
-      });
+    } else {
+      fixableResults.push(result);
     }
   }
 
-  await updateSubsteps(sessionId, 'fix_tests', [
-    {
-      label: `${fixedCount} fixed, ${unfixableCount} unfixable`,
-      status: fixedCount > 0 ? 'done' : unfixableCount > 0 ? 'error' : 'done',
-    },
-  ]);
+  if (useHealer) {
+    // Parallel healer — process in concurrent batches
+    const HEALER_CONCURRENCY = 3;
+    const { agentHealTest } = await import('@/lib/playwright/healer-agent');
+
+    for (let batch = 0; batch < fixableResults.length; batch += HEALER_CONCURRENCY) {
+      if (await isCancelled(sessionId)) return false;
+
+      const chunk = fixableResults.slice(batch, batch + HEALER_CONCURRENCY);
+      const completed = Math.min(batch, fixableResults.length);
+
+      await updateSubsteps(sessionId, 'fix_tests', [
+        { label: 'Coordinating fix pipeline', status: 'done', agent: 'orchestrator' },
+        {
+          label: `Healing tests (${completed}/${fixableResults.length})`,
+          status: 'running',
+          detail: `${chunk.length} healers in parallel`,
+          agent: 'healer',
+        },
+      ]);
+
+      const results = await Promise.allSettled(
+        chunk.map(async (result) => {
+          const testId = result.testId!;
+          const attempts = fixAttempts[testId] || 0;
+
+          const healResult = await agentHealTest(repositoryId, testId);
+          fixAttempts[testId] = attempts + 1;
+
+          if (healResult.success && healResult.code) {
+            const hashes = codeHashes[testId] || [];
+            const newHash = hashCode(healResult.code);
+
+            if (hashes.includes(newHash)) {
+              return 'unfixable' as const;
+            }
+
+            hashes.push(newHash);
+            codeHashes[testId] = hashes;
+
+            await queries.updateTest(testId, { code: healResult.code });
+            const test = await queries.getTest(testId);
+            if (test) {
+              const branch = await getCurrentBranchForRepo(repositoryId);
+              const versions = await queries.getTestVersions(testId);
+              await queries.createTestVersion({
+                testId,
+                name: test.name,
+                code: healResult.code,
+                version: (versions.length || 0) + 1,
+                changeReason: 'ai_fix',
+                branch: branch ?? null,
+              });
+            }
+            return 'fixed' as const;
+          }
+          return 'failed' as const;
+        }),
+      );
+
+      for (const r of results) {
+        if (r.status === 'fulfilled') {
+          if (r.value === 'fixed') fixedCount++;
+          else if (r.value === 'unfixable') unfixableCount++;
+        }
+      }
+
+      // Update metadata after each batch
+      const currentSession = await queries.getAgentSession(sessionId);
+      if (currentSession) {
+        await queries.updateAgentSession(sessionId, {
+          metadata: { ...currentSession.metadata, fixAttempts, codeHashes },
+        });
+      }
+    }
+  } else {
+    // Sequential AI fix (non-agent mode)
+    for (let i = 0; i < fixableResults.length; i++) {
+      if (await isCancelled(sessionId)) return false;
+
+      const result = fixableResults[i];
+      const testId = result.testId!;
+      const errorMessage = result.errorMessage!;
+      const attempts = fixAttempts[testId] || 0;
+
+      const test = await queries.getTest(testId);
+      await updateSubsteps(sessionId, 'fix_tests', [
+        {
+          label: `Fixing test ${i + 1}/${fixableResults.length}: ${test?.name || testId}`,
+          status: 'running',
+          detail: `Attempt ${attempts + 1}/${MAX_FIX_ATTEMPTS}`,
+        },
+      ]);
+
+      const fixResult = await aiFixTest(repositoryId, testId, errorMessage, intelligence);
+      fixAttempts[testId] = attempts + 1;
+
+      if (fixResult.success && fixResult.code) {
+        const hashes = codeHashes[testId] || [];
+        const newHash = hashCode(fixResult.code);
+
+        if (hashes.includes(newHash)) {
+          unfixableCount++;
+          continue;
+        }
+
+        hashes.push(newHash);
+        codeHashes[testId] = hashes;
+
+        await queries.updateTest(testId, { code: fixResult.code });
+        if (test) {
+          const branch = await getCurrentBranchForRepo(repositoryId);
+          const versions = await queries.getTestVersions(testId);
+          await queries.createTestVersion({
+            testId,
+            name: test.name,
+            code: fixResult.code,
+            version: (versions.length || 0) + 1,
+            changeReason: 'ai_fix',
+            branch: branch ?? null,
+          });
+        }
+        fixedCount++;
+      }
+
+      // Update metadata periodically
+      const currentSession = await queries.getAgentSession(sessionId);
+      if (currentSession) {
+        await queries.updateAgentSession(sessionId, {
+          metadata: { ...currentSession.metadata, fixAttempts, codeHashes },
+        });
+      }
+    }
+  }
+
+  if (useHealer) {
+    await updateSubsteps(sessionId, 'fix_tests', [
+      { label: 'Fix pipeline complete', status: 'done', agent: 'orchestrator' },
+      {
+        label: `${fixedCount} healed, ${unfixableCount} unfixable`,
+        status: fixedCount > 0 ? 'done' : unfixableCount > 0 ? 'error' : 'done',
+        agent: 'healer',
+      },
+    ]);
+  } else {
+    await updateSubsteps(sessionId, 'fix_tests', [
+      {
+        label: `${fixedCount} fixed, ${unfixableCount} unfixable`,
+        status: fixedCount > 0 ? 'done' : unfixableCount > 0 ? 'error' : 'done',
+      },
+    ]);
+  }
 
   await setStepCompleted(sessionId, 'fix_tests', { fixedCount, unfixableCount });
   return true;

@@ -160,7 +160,7 @@ export async function addRoutesAsFunctionalAreas(repositoryId: string, routeIds:
 
 export async function generateBasicTests(repositoryId: string, routeIds: string[], baseUrl: string) {
   await requireRepoAccess(repositoryId);
-  let routesToTest = await queries.getRoutesByIds(routeIds);
+  const routesToTest = await queries.getRoutesByIds(routeIds);
 
   // If no routes found, IDs might be functional area IDs — create route records from areas
   if (routesToTest.length === 0) {

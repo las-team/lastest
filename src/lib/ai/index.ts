@@ -30,6 +30,8 @@ export function getAIProvider(config: AIProviderConfig): AIProvider {
       model: config.agentSdkModel || undefined,
       workingDirectory: config.agentSdkWorkingDir,
       mcpServers: config.agentSdkMcpServers,
+      allowedTools: config.agentSdkAllowedTools,
+      disallowedTools: config.agentSdkDisallowedTools,
     });
   }
 
@@ -83,11 +85,22 @@ export async function generateWithAI(
   const effectiveConfig = { ...config };
   if (options?.useMCP && config.provider === 'claude-agent-sdk') {
     effectiveConfig.agentSdkMcpServers = {
-      playwright: {
+      ...effectiveConfig.agentSdkMcpServers,
+      'playwright-test': {
         command: 'npx',
-        args: ['@anthropic-ai/mcp-server-playwright'],
+        args: ['playwright', 'run-test-mcp-server'],
       },
     };
+    // Auto-allow all Playwright MCP tools without prompting (respects user's permission mode)
+    effectiveConfig.agentSdkAllowedTools = [
+      ...(effectiveConfig.agentSdkAllowedTools || []),
+      'mcp__playwright-test__*',
+    ];
+    // Disable non-MCP tools so the agent focuses on browser exploration, not shell commands
+    effectiveConfig.agentSdkDisallowedTools = [
+      ...(effectiveConfig.agentSdkDisallowedTools || []),
+      'Bash', 'Write', 'Edit', 'NotebookEdit',
+    ];
   }
 
   const provider = getAIProvider(effectiveConfig);

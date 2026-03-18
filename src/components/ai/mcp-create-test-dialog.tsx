@@ -20,7 +20,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { Badge } from '@/components/ui/badge';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { AICodePreview } from './ai-code-preview';
 import { aiCreateTest, saveGeneratedTest } from '@/server/actions/ai';
@@ -97,7 +96,7 @@ export function MCPCreateTestDialog({
         toast.error(result.error || 'Failed to generate test');
         setStep('prompt');
       }
-    } catch (error) {
+    } catch (_error) {
       toast.error('Failed to generate test');
       setStep('prompt');
     } finally {
@@ -139,7 +138,7 @@ export function MCPCreateTestDialog({
         toast.error(result.error || 'Validation failed');
         setStep('preview');
       }
-    } catch (error) {
+    } catch (_error) {
       toast.error('Validation failed');
       setStep('preview');
     } finally {
@@ -173,7 +172,7 @@ export function MCPCreateTestDialog({
         toast.error('Failed to auto-fix test');
         setStep('preview');
       }
-    } catch (error) {
+    } catch (_error) {
       toast.error('Failed to auto-fix test');
       setStep('preview');
     } finally {
@@ -210,7 +209,7 @@ export function MCPCreateTestDialog({
         toast.error(result.error || 'Failed to save test');
         setStep('preview');
       }
-    } catch (error) {
+    } catch (_error) {
       toast.error('Failed to save test');
       setStep('preview');
     } finally {
@@ -240,7 +239,7 @@ export function MCPCreateTestDialog({
       } else {
         toast.error(result.error || 'Failed to save test');
       }
-    } catch (error) {
+    } catch (_error) {
       toast.error('Failed to save test');
     } finally {
       setIsSaving(false);

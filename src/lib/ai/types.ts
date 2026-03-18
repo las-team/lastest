@@ -28,6 +28,8 @@ export interface AIProviderConfig {
   agentSdkModel?: string;
   agentSdkWorkingDir?: string;
   agentSdkMcpServers?: Record<string, { command: string; args?: string[]; env?: Record<string, string> }>;
+  agentSdkAllowedTools?: string[];
+  agentSdkDisallowedTools?: string[];
   ollamaBaseUrl?: string;
   ollamaModel?: string;
   anthropicApiKey?: string | null;
@@ -74,6 +76,9 @@ export interface TestGenerationContext {
   scanContext?: ScanContext;
   codebaseIntelligence?: CodebaseIntelligenceContext;
   availableRoutes?: string[];
+  functionalAreaId?: string;
+  testName?: string;
+  baseUrl?: string;
 }
 
 export interface GeneratedTest {

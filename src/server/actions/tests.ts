@@ -33,13 +33,13 @@ export async function deleteFunctionalArea(id: string) {
 }
 
 export async function cloneTest(id: string) {
-  const session = await requireTeamAccess();
+  await requireTeamAccess();
   const test = await queries.getTest(id);
   if (!test) throw new Error('Test not found');
   if (test.repositoryId) {
     await requireRepoAccess(test.repositoryId);
   }
-  const { id: _id, createdAt, updatedAt, deletedAt, ...data } = test;
+  const { id: _id, createdAt: _createdAt, updatedAt: _updatedAt, deletedAt: _deletedAt, ...data } = test;
   const result = await queries.createTest({
     ...data,
     name: `${test.name} (copy)`,
@@ -188,7 +188,7 @@ export async function getTestScreenshots(
 
 export async function getTestScreenshotsGrouped(
   testId: string,
-  repositoryId?: string | null
+  _repositoryId?: string | null
 ): Promise<ScreenshotGroup[]> {
   // Primary: Get screenshots from database (stored in test results)
   const testResults = await queries.getTestResultsByTest(testId);

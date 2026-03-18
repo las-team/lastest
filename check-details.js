@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-require-imports */
 const Database = require("better-sqlite3");
 const fs = require("fs");
 const path = require("path");
@@ -38,7 +39,7 @@ results.forEach(r => {
           console.log("  Screenshot:", s.path, "(NOT FOUND)");
         }
       });
-    } catch(e) {}
+    } catch(_e) {}
   }
   if (r.screenshot_path) {
     const fullPath = path.join("public", r.screenshot_path);

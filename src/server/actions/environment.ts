@@ -56,7 +56,7 @@ export async function testServerConnection(url: string): Promise<{
   // No SSRF check here — environment config is specifically for testing
   // the user's own dev/staging server, which is typically localhost or LAN.
 
-  const serverManager = getServerManager();
+  const _serverManager = getServerManager();
   const startTime = Date.now();
 
   try {

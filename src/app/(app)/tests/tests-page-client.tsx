@@ -24,18 +24,16 @@ import {
 import { toast } from 'sonner';
 import { createFunctionalArea, deleteTests, restoreTests, permanentlyDeleteTests } from '@/server/actions/tests';
 import { generateBasicTests } from '@/server/actions/scanner';
-import { aiFixAllFailedTests, aiFixTests, aiMcpFixTests } from '@/server/actions/ai';
+import { aiFixAllFailedTests, aiFixTests } from '@/server/actions/ai';
 import { runTests } from '@/server/actions/runs';
 import { useNotifyJobStarted } from '@/components/queue/job-polling-context';
 import { ExecutionTargetSelector } from '@/components/execution/execution-target-selector';
 import { RouteSelectorDialog } from '@/components/routes/route-selector-dialog';
 import { AICreateTestDialog } from '@/components/ai/ai-create-test-dialog';
-import { MCPCreateTestDialog } from '@/components/ai/mcp-create-test-dialog';
 import {
   FlaskConical,
   Plus,
   Sparkles,
-  Wand2,
   Wrench,
   CheckCircle2,
   XCircle,
@@ -94,7 +92,6 @@ export function TestsPageClient({ areas, tests, routes, repositoryId, baseUrl = 
   const [isCreating, setIsCreating] = useState(false);
   const [isAddTestsOpen, setIsAddTestsOpen] = useState(false);
   const [isAICreateOpen, setIsAICreateOpen] = useState(false);
-  const [isMCPCreateOpen, setIsMCPCreateOpen] = useState(false);
   const [isFixingAll, setIsFixingAll] = useState(false);
   const [fixResult, setFixResult] = useState<{ fixed: number; failed: number } | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
@@ -102,7 +99,6 @@ export function TestsPageClient({ areas, tests, routes, repositoryId, baseUrl = 
   const [isBulkRunning, setIsBulkRunning] = useState(false);
   const [isBulkDeleting, setIsBulkDeleting] = useState(false);
   const [isBulkFixing, setIsBulkFixing] = useState(false);
-  const [isBulkMcpFixing, setIsBulkMcpFixing] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [executionTarget, setExecutionTarget] = usePreferredRunner();
   const [showDeleted, setShowDeleted] = useState(false);
@@ -198,18 +194,6 @@ export function TestsPageClient({ areas, tests, routes, repositoryId, baseUrl = 
       setFixResult({ fixed: result.fixed, failed: result.failed });
     } finally {
       setIsBulkFixing(false);
-    }
-  };
-
-  const handleBulkMcpFix = async () => {
-    if (!repositoryId || selectedFailedTests.length === 0) return;
-    setIsBulkMcpFixing(true);
-    setFixResult(null);
-    try {
-      const result = await aiMcpFixTests(selectedFailedTests, repositoryId);
-      setFixResult({ fixed: result.fixed, failed: result.failed });
-    } finally {
-      setIsBulkMcpFixing(false);
     }
   };
 
@@ -360,16 +344,10 @@ export function TestsPageClient({ areas, tests, routes, repositoryId, baseUrl = 
                   Add Basic Tests
                 </Button>
                 {!banAiMode && (
-                  <>
-                    <Button variant="outline" size="sm" onClick={() => setIsAICreateOpen(true)}>
-                      <Sparkles className="h-4 w-4 mr-2" />
-                      AI Create
-                    </Button>
-                    <Button variant="outline" size="sm" onClick={() => setIsMCPCreateOpen(true)}>
-                      <Wand2 className="h-4 w-4 mr-2" />
-                      MCP Create
-                    </Button>
-                  </>
+                  <Button variant="outline" size="sm" onClick={() => setIsAICreateOpen(true)}>
+                    <Sparkles className="h-4 w-4 mr-2" />
+                    Generate Test
+                  </Button>
                 )}
               </>
             )}
@@ -463,26 +441,15 @@ export function TestsPageClient({ areas, tests, routes, repositoryId, baseUrl = 
                   Move to Trash
                 </Button>
                 {!banAiMode && repositoryId && selectedFailedTests.length > 0 && (
-                  <>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={handleBulkFix}
-                      disabled={isBulkFixing}
-                    >
-                      <Wrench className="h-3.5 w-3.5 mr-1.5" />
-                      {isBulkFixing ? 'Fixing...' : `AI Fix (${selectedFailedTests.length})`}
-                    </Button>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={handleBulkMcpFix}
-                      disabled={isBulkMcpFixing}
-                    >
-                      <Wand2 className="h-3.5 w-3.5 mr-1.5" />
-                      {isBulkMcpFixing ? 'MCP Fixing...' : `AI MCP Fix (${selectedFailedTests.length})`}
-                    </Button>
-                  </>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={handleBulkFix}
+                    disabled={isBulkFixing}
+                  >
+                    <Wrench className="h-3.5 w-3.5 mr-1.5" />
+                    {isBulkFixing ? 'Fixing...' : `Fix (${selectedFailedTests.length})`}
+                  </Button>
                 )}
                 <Button
                   variant="ghost"
@@ -704,17 +671,6 @@ export function TestsPageClient({ areas, tests, routes, repositoryId, baseUrl = 
           onOpenChange={setIsAICreateOpen}
           repositoryId={repositoryId}
           areas={areas}
-        />
-      )}
-
-      {/* MCP Create Test Dialog */}
-      {!banAiMode && repositoryId && (
-        <MCPCreateTestDialog
-          open={isMCPCreateOpen}
-          onOpenChange={setIsMCPCreateOpen}
-          repositoryId={repositoryId}
-          areas={areas}
-          baseUrl={baseUrl}
         />
       )}
 

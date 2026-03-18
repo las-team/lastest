@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { detectPageShift, generateDiff, imagesMatch } from './generator';
 import { PNG } from 'pngjs';
 import fs from 'fs';
@@ -37,7 +37,7 @@ describe('detectPageShift', () => {
         makeRegion(0, 100),   // centroid Y = 100 + 25 = 125
         makeRegion(0, 200),   // centroid Y = 200 + 25 = 225
       ];
-      const result = detectPageShift(regions);
+      const _result = detectPageShift(regions);
       // With only 2 regions, needs 2+ per group, so this may not trigger
       // The algorithm requires significant groups with count >= 2
       // Let's test with more regions instead
@@ -107,7 +107,7 @@ describe('detectPageShift', () => {
         makeRegion(0, 300),
       ];
       // Each region is in its own group (only 1 per group)
-      const result = detectPageShift(regions);
+      const _result = detectPageShift(regions);
       // This might trigger uniform shift detection if clustered
       // The tolerance is 50px, so these are too far apart to group
     });
@@ -122,7 +122,7 @@ describe('detectPageShift', () => {
         makeRegion(200, 400),
         makeRegion(50, 320),
       ];
-      const result = detectPageShift(regions);
+      const _result = detectPageShift(regions);
       // This tests the secondary detection path for uniform shifts
       // Requires maxY - minY > 100
     });

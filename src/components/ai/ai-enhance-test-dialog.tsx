@@ -54,7 +54,7 @@ export function AIEnhanceTestDialog({
       } else {
         toast.error(result.error || 'Failed to enhance test');
       }
-    } catch (error) {
+    } catch (_error) {
       toast.error('Failed to enhance test');
     } finally {
       setIsGenerating(false);
@@ -72,7 +72,7 @@ export function AIEnhanceTestDialog({
       } else {
         toast.error(result.error || 'Failed to regenerate');
       }
-    } catch (error) {
+    } catch (_error) {
       toast.error('Failed to regenerate');
     } finally {
       setIsGenerating(false);
@@ -91,7 +91,7 @@ export function AIEnhanceTestDialog({
       } else {
         toast.error(result.error || 'Failed to save');
       }
-    } catch (error) {
+    } catch (_error) {
       toast.error('Failed to save');
     } finally {
       setIsSaving(false);

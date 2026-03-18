@@ -8,7 +8,6 @@ import { resolveSetupCodeForRunner } from '@/lib/execution/setup-capture';
 import { requireTeamAccess, requireRepoAccess } from '@/lib/auth';
 import { getBranchInfo } from '@/lib/github/content';
 import * as queries from '@/lib/db/queries';
-import { v4 as uuid } from 'uuid';
 import type { Test } from '@/lib/db/schema';
 import { createJob, createPendingJob, startJob, updateJobProgress, completeJob, failJob, isRunnerBusy } from './jobs';
 

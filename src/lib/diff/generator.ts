@@ -367,13 +367,13 @@ function fuzzyMatchUnalignedRows(
   let i = 0;
   while (i < ops.length) {
     // Find a block of deletes
-    let delStart = i;
+    const delStart = i;
     while (i < ops.length && ops[i] === 'delete') i++;
     const delEnd = i;
     const delCount = delEnd - delStart;
 
     // Find a following block of inserts
-    let insStart = i;
+    const insStart = i;
     while (i < ops.length && ops[i] === 'insert') i++;
     const insEnd = i;
     const insCount = insEnd - insStart;

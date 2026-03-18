@@ -159,6 +159,7 @@ export function ZoomableImage({ src, alt, className, onZoomChange }: ZoomableIma
         onWheel={handleWheel}
         style={{ cursor: isDragging ? 'grabbing' : 'grab' }}
       >
+        {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
           ref={imageRef}
           src={src}

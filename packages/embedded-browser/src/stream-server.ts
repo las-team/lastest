@@ -60,7 +60,7 @@ export class StreamServer {
       },
     });
 
-    this.wss.on('connection', (ws: WebSocket, req: IncomingMessage) => {
+    this.wss.on('connection', (ws: WebSocket, _req: IncomingMessage) => {
       const clientId = crypto.randomUUID();
       const client: StreamClient = { ws, id: clientId, connectedAt: Date.now(), alive: true };
       this.clients.set(clientId, client);

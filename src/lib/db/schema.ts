@@ -119,6 +119,7 @@ export interface TestPlaywrightOverrides {
   acceptAnyCertificate?: boolean;
   maxParallelTests?: number;
   baseUrl?: string;
+  cursorPlaybackSpeed?: number;
 }
 
 export const functionalAreas = sqliteTable('functional_areas', {
@@ -129,6 +130,8 @@ export const functionalAreas = sqliteTable('functional_areas', {
   parentId: text('parent_id'),
   isRouteFolder: integer('is_route_folder', { mode: 'boolean' }).default(false),
   orderIndex: integer('order_index').default(0),
+  agentPlan: text('agent_plan'), // markdown test plan from Planner agent
+  planGeneratedAt: integer('plan_generated_at', { mode: 'timestamp' }),
   deletedAt: integer('deleted_at', { mode: 'timestamp' }),
 });
 
@@ -151,6 +154,8 @@ export const tests = sqliteTable('tests', {
   viewportOverride: text('viewport_override', { mode: 'json' }).$type<{ width: number; height: number }>(),
   diffOverrides: text('diff_overrides', { mode: 'json' }).$type<TestDiffOverrides>(),
   playwrightOverrides: text('playwright_overrides', { mode: 'json' }).$type<TestPlaywrightOverrides>(),
+  executionMode: text('execution_mode').default('procedural'), // 'procedural' | 'agent'
+  agentPrompt: text('agent_prompt'), // NL description for agent mode
   deletedAt: integer('deleted_at', { mode: 'timestamp' }),
   createdAt: integer('created_at', { mode: 'timestamp' }),
   updatedAt: integer('updated_at', { mode: 'timestamp' }),
@@ -728,6 +733,9 @@ export const aiSettings = sqliteTable('ai_settings', {
   aiDiffingModel: text('ai_diffing_model').default('anthropic/claude-sonnet-4-5-20250929'),
   aiDiffingOllamaBaseUrl: text('ai_diffing_ollama_base_url'),
   aiDiffingOllamaModel: text('ai_diffing_ollama_model'),
+  pwAgentEnabled: integer('pw_agent_enabled', { mode: 'boolean' }).default(false),
+  pwAgentModel: text('pw_agent_model'),
+  pwAgentTimeout: integer('pw_agent_timeout').default(300000),
   createdAt: integer('created_at', { mode: 'timestamp' }),
   updatedAt: integer('updated_at', { mode: 'timestamp' }),
 });
@@ -749,10 +757,13 @@ export const DEFAULT_AI_SETTINGS = {
   aiDiffingModel: 'anthropic/claude-sonnet-4-5-20250929',
   aiDiffingOllamaBaseUrl: 'http://localhost:11434',
   aiDiffingOllamaModel: '',
+  pwAgentEnabled: false,
+  pwAgentModel: '',
+  pwAgentTimeout: 300000,
 };
 
 // AI Prompt Logging for debugging and auditing
-export type AIActionType = 'create_test' | 'fix_test' | 'enhance_test' | 'scan_routes' | 'test_connection' | 'analyze_specs' | 'mcp_explore' | 'analyze_diff' | 'extract_user_stories' | 'generate_spec_tests' | 'classify_template';
+export type AIActionType = 'create_test' | 'fix_test' | 'enhance_test' | 'scan_routes' | 'test_connection' | 'analyze_specs' | 'mcp_explore' | 'analyze_diff' | 'extract_user_stories' | 'generate_spec_tests' | 'classify_template' | 'agent_discover' | 'agent_generate' | 'agent_heal' | 'agent_play';
 export type AILogStatus = 'pending' | 'success' | 'error';
 
 export const aiPromptLogs = sqliteTable('ai_prompt_logs', {
@@ -1041,8 +1052,9 @@ export const runners = sqliteTable('runners', {
   lastSeen: integer('last_seen', { mode: 'timestamp' }),
   capabilities: text('capabilities', { mode: 'json' }).$type<RunnerCapability[]>().default(['run', 'record']),
   type: text('type').notNull().default('remote'), // 'remote' | 'embedded'
-  maxParallelTests: integer('max_parallel_tests').default(1), // max tests to run in parallel on this runner
+  maxParallelTests: integer('max_parallel_tests').default(4), // max tests to run in parallel on this runner
   isSystem: integer('is_system', { mode: 'boolean' }).notNull().default(false), // System EB runners (host-provided, cross-team)
+  authOnly: integer('auth_only', { mode: 'boolean' }).notNull().default(false), // Auth-only runners (for GHA auto mode — not used for execution)
   createdAt: integer('created_at', { mode: 'timestamp' }).$defaultFn(() => new Date()),
 });
 
@@ -1288,10 +1300,14 @@ export type AgentStepId =
 
 export type AgentStepStatus = 'pending' | 'active' | 'waiting_user' | 'completed' | 'failed' | 'skipped';
 
+export type PwAgentType = 'orchestrator' | 'planner' | 'generator' | 'healer';
+
 export interface AgentSubstep {
   label: string;
   status: 'pending' | 'running' | 'done' | 'error';
   detail?: string;
+  /** Which PW sub-agent is handling this substep (shown as a badge in the UI) */
+  agent?: PwAgentType;
 }
 
 export interface AgentStepState {
@@ -1433,7 +1449,7 @@ export type NewRunnerCommandResult = typeof runnerCommandResults.$inferInsert;
 // GitHub Actions Configs
 // ============================================
 
-export type GithubActionMode = 'persistent' | 'ephemeral';
+export type GithubActionMode = 'persistent' | 'ephemeral' | 'auto';
 export type GithubActionTriggerEvent = 'push' | 'pull_request' | 'workflow_dispatch' | 'schedule';
 
 export const githubActionConfigs = sqliteTable('github_action_configs', {

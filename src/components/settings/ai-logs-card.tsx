@@ -54,7 +54,7 @@ export function AILogsCard({ logs, repositoryId }: AILogsCardProps) {
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [currentPage, setCurrentPage] = useState(0);
 
-  useEffect(() => { setCurrentPage(0); }, [logs.length]);
+  useEffect(() => { queueMicrotask(() => setCurrentPage(0)); }, [logs.length]);
 
   const totalPages = Math.max(1, Math.ceil(logs.length / PAGE_SIZE));
   const paginatedLogs = logs.slice(currentPage * PAGE_SIZE, (currentPage + 1) * PAGE_SIZE);

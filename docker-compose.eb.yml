@@ -25,6 +25,7 @@ services:
     environment:
       - LASTEST2_URL=http://localhost:3000
       - SYSTEM_EB_TOKEN=2c0eb9c62caaa0dac8ece295c1c985d6c0dbfb81cd1d9e7516ee5ba8a8083f98
+      - STREAM_HOST=localhost
       - STREAM_PORT=9223
       - INSTANCE_ID=eb-1
     restart: unless-stopped
@@ -44,6 +45,7 @@ services:
     environment:
       - LASTEST2_URL=http://localhost:3000
       - SYSTEM_EB_TOKEN=898e8bd52bcb6280aadc754b94f7425ab0a02863fe4c76a9e6a4d038c4535eaf
+      - STREAM_HOST=localhost
       - STREAM_PORT=9225
       - INSTANCE_ID=eb-2
     restart: unless-stopped

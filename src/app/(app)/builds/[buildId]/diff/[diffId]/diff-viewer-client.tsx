@@ -71,6 +71,7 @@ export function DiffViewerClient({ diff, buildId, prevDiffId, nextDiffId, banAiM
     } finally {
       setIsProcessing(false);
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [diff.id, diff.status, isProcessing, nextDiffId, buildId, router, buildDiffUrl]);
 
   const handleAddTodo = useCallback(async () => {
@@ -369,6 +370,7 @@ export function DiffViewerClient({ diff, buildId, prevDiffId, nextDiffId, banAiM
                 ) : (
                   <div className="p-4">
                     <div className="text-sm text-muted-foreground mb-2">New Screenshot (No Baseline)</div>
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img
                       src={diff.currentImagePath!}
                       alt="Current screenshot"
@@ -420,6 +422,7 @@ export function DiffViewerClient({ diff, buildId, prevDiffId, nextDiffId, banAiM
                               : 'Run and approve a build on the default branch to create a main baseline.'}
                           </p>
                           <div className="pt-2">
+                            {/* eslint-disable-next-line @next/next/no-img-element */}
                             <img
                               src={diff.currentImagePath!}
                               alt="Current screenshot"

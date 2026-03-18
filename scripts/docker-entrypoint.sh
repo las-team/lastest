@@ -37,10 +37,12 @@ if ! touch /app/data/.write-test 2>/dev/null; then
 fi
 rm -f /app/data/.write-test
 
-# Run database migrations if drizzle-kit is available
-if [ -f "/app/drizzle.config.ts" ]; then
+# Run database migrations
+if [ -f "/app/migrate.js" ]; then
+  node /app/migrate.js
+elif [ -f "/app/drizzle.config.ts" ]; then
   echo "Running database migrations..."
-  ./node_modules/.bin/drizzle-kit push --force 2>/dev/null || echo "Migration skipped (may already be current)"
+  ./node_modules/.bin/drizzle-kit push --force 2>&1 || echo "⚠ Migration had issues (app may still work)"
 fi
 
 # Execute the main command

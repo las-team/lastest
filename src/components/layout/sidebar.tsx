@@ -51,6 +51,7 @@ const executionNav = [
   { name: 'Impact', href: '/analytics/impact', icon: TrendingDown },
 ];
 
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 const settingsNav = [
   { name: 'Settings', href: '/settings', icon: Settings },
 ];

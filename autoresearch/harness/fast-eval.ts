@@ -11,7 +11,7 @@
  */
 
 import { db } from '@/lib/db';
-import { testResults, tests, testRuns, builds, routes, functionalAreas } from '@/lib/db/schema';
+import { testResults, tests, testRuns, functionalAreas } from '@/lib/db/schema';
 import { eq, and, desc } from 'drizzle-orm';
 import { getAISettings } from '@/lib/db/queries/settings';
 import { getRoutesByRepo } from '@/lib/db/queries/routes';

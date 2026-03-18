@@ -70,6 +70,56 @@ export async function upsertWorkflowFile(
  * Encrypt a secret value using the repo's public key and set it via the Secrets API.
  * Uses libsodium sealed-box encryption as required by GitHub.
  */
+/**
+ * Delete the workflow file from the repo.
+ */
+export async function deleteWorkflowFile(
+  token: string,
+  owner: string,
+  repo: string,
+): Promise<void> {
+  const sha = await getWorkflowFileSha(token, owner, repo);
+  if (!sha) return; // No workflow file to delete
+
+  const res = await fetch(
+    `${GITHUB_API}/repos/${owner}/${repo}/contents/${WORKFLOW_PATH}`,
+    {
+      method: 'DELETE',
+      headers: headers(token),
+      body: JSON.stringify({
+        message: 'Remove Lastest2 visual testing workflow',
+        sha,
+      }),
+    },
+  );
+
+  if (!res.ok && res.status !== 404) {
+    throw new Error(`Failed to delete workflow: ${res.status} ${await res.text()}`);
+  }
+}
+
+/**
+ * Delete a repository secret.
+ */
+export async function deleteRepoSecret(
+  token: string,
+  owner: string,
+  repo: string,
+  secretName: string,
+): Promise<void> {
+  const res = await fetch(
+    `${GITHUB_API}/repos/${owner}/${repo}/actions/secrets/${secretName}`,
+    {
+      method: 'DELETE',
+      headers: headers(token),
+    },
+  );
+
+  if (!res.ok && res.status !== 404) {
+    throw new Error(`Failed to delete secret ${secretName}: ${res.status} ${await res.text()}`);
+  }
+}
+
 export async function setRepoSecret(
   token: string,
   owner: string,

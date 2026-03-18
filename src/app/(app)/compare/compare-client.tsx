@@ -216,6 +216,7 @@ function BranchColumn({
                               rel="noopener noreferrer"
                               className="block"
                             >
+                              {/* eslint-disable-next-line @next/next/no-img-element */}
                               <img
                                 src={test.screenshotPath!}
                                 alt={`Screenshot for ${test.name}`}
@@ -343,7 +344,7 @@ export function CompareClient({ branches, runs, defaultBaseline, repositoryId, a
           if (!res.ok) continue;
           const data = await res.json();
 
-          const completed = data.passedCount + data.failedCount;
+          const _completed = data.passedCount + data.failedCount;
           const isComplete = data.overallStatus !== 'review_required' || data.completedAt;
 
           if (isComplete) {

@@ -4,8 +4,8 @@ import { requireTeamAccess, requireTeamAdmin } from '@/lib/auth';
 import * as queries from '@/lib/db/queries';
 import type { GithubActionMode, GithubActionTriggerEvent } from '@/lib/db/schema';
 import { generateWorkflowYaml } from '@/lib/github/workflow-yaml';
-import { getWorkflowFileSha, upsertWorkflowFile, setRepoSecret } from '@/lib/github/actions';
-import { createRunnerInternal } from '@/server/actions/runners';
+import { getWorkflowFileSha, upsertWorkflowFile, setRepoSecret, deleteWorkflowFile, deleteRepoSecret } from '@/lib/github/actions';
+import { createRunnerInternal, regenerateRunnerTokenInternal, deleteRunnerInternal } from '@/server/actions/runners';
 import { revalidatePath } from 'next/cache';
 
 export async function getGithubActionConfigsAction() {
@@ -56,6 +56,28 @@ export async function updateGithubActionConfigAction(
 
 export async function deleteGithubActionConfigAction(id: string) {
   const session = await requireTeamAdmin();
+  const config = await queries.getGithubActionConfig(id, session.team.id);
+  if (!config) throw new Error('Config not found');
+
+  // Clean up GitHub resources if the workflow was deployed
+  if (config.workflowDeployed) {
+    const ghAccount = await queries.getGithubAccountByTeam(session.team.id);
+    if (ghAccount) {
+      // Delete workflow file and secrets (best-effort — don't fail the delete if GitHub is unreachable)
+      await Promise.allSettled([
+        deleteWorkflowFile(ghAccount.accessToken, config.repositoryOwner, config.repositoryName),
+        deleteRepoSecret(ghAccount.accessToken, config.repositoryOwner, config.repositoryName, 'LASTEST2_TOKEN'),
+        deleteRepoSecret(ghAccount.accessToken, config.repositoryOwner, config.repositoryName, 'LASTEST2_URL'),
+      ]);
+    }
+  }
+
+  // Delete auto-created runner (ephemeral/auto modes link the runner to the config)
+  const mode = config.mode as GithubActionMode;
+  if ((mode === 'ephemeral' || mode === 'auto') && config.runnerId) {
+    await deleteRunnerInternal(config.runnerId, session.team.id);
+  }
+
   await queries.deleteGithubActionConfig(id, session.team.id);
   revalidatePath('/settings');
   return { success: true };
@@ -63,17 +85,14 @@ export async function deleteGithubActionConfigAction(id: string) {
 
 export async function deployWorkflowToGithub(
   configId: string,
-  opts: {
-    setSecrets?: boolean;
-    runnerToken?: string;
-    lastest2Url?: string;
-  },
+  _opts?: Record<string, unknown>,
 ) {
   const session = await requireTeamAdmin();
   const config = await queries.getGithubActionConfig(configId, session.team.id);
   if (!config) throw new Error('Config not found');
 
   const isEphemeral = config.mode === 'ephemeral';
+  const isAuto = config.mode === 'auto';
 
   // Get GitHub account for token
   const ghAccount = await queries.getGithubAccountByTeam(session.team.id);
@@ -113,15 +132,16 @@ export async function deployWorkflowToGithub(
   results.workflow = true;
 
   // 2. Set secrets
-  if (isEphemeral) {
-    // Ephemeral mode: auto-create runner and set secrets automatically
+  if (isEphemeral || isAuto) {
+    // Ephemeral/Auto mode: auto-create runner and set secrets automatically
     const repoName = `${config.repositoryOwner}/${config.repositoryName}`;
     const result = await createRunnerInternal(
-      `gha-${repoName}`,
+      isAuto ? `gha-auto-${repoName}` : `gha-${repoName}`,
       session.team.id,
       session.user.id,
       ['run'],
       'remote',
+      isAuto, // authOnly for auto mode
     );
     if ('error' in result) throw new Error(`Failed to create runner: ${result.error}`);
 
@@ -143,28 +163,34 @@ export async function deployWorkflowToGithub(
       lastest2Url,
     );
     results.urlSecret = true;
-  } else if (opts.setSecrets) {
-    // Persistent mode: use user-provided values
-    if (opts.runnerToken) {
-      await setRepoSecret(
-        ghAccount.accessToken,
-        config.repositoryOwner,
-        config.repositoryName,
-        'LASTEST2_TOKEN',
-        opts.runnerToken,
-      );
-      results.tokenSecret = true;
-    }
-    if (opts.lastest2Url) {
-      await setRepoSecret(
-        ghAccount.accessToken,
-        config.repositoryOwner,
-        config.repositoryName,
-        'LASTEST2_URL',
-        opts.lastest2Url,
-      );
-      results.urlSecret = true;
-    }
+
+    // Link the auto-created runner to this config
+    await queries.updateGithubActionConfig(configId, session.team.id, {
+      runnerId: result.runner.id,
+    });
+  } else if (config.runnerId) {
+    // Persistent mode with assigned runner: regenerate token and auto-set secrets
+    const regen = await regenerateRunnerTokenInternal(config.runnerId, session.team.id);
+    if ('error' in regen) throw new Error(`Failed to regenerate runner token: ${regen.error}`);
+
+    await setRepoSecret(
+      ghAccount.accessToken,
+      config.repositoryOwner,
+      config.repositoryName,
+      'LASTEST2_TOKEN',
+      regen.token,
+    );
+    results.tokenSecret = true;
+
+    const lastest2Url = process.env.NEXT_PUBLIC_APP_URL || process.env.BETTER_AUTH_BASE_URL || 'http://localhost:3000';
+    await setRepoSecret(
+      ghAccount.accessToken,
+      config.repositoryOwner,
+      config.repositoryName,
+      'LASTEST2_URL',
+      lastest2Url,
+    );
+    results.urlSecret = true;
   }
 
   // Mark as deployed

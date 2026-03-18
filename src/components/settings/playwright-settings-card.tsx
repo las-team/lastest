@@ -23,13 +23,13 @@ import { SelectorPriorityList } from './selector-priority-list';
 import { savePlaywrightSettings, resetPlaywrightSettings, getSelectorStatsAction } from '@/server/actions/settings';
 import { listStorageStates, removeStorageState } from '@/server/actions/storage-states';
 import { DEFAULT_SELECTOR_PRIORITY, DEFAULT_STABILIZATION_SETTINGS } from '@/lib/db/schema';
-import type { SelectorConfig, PlaywrightSettings, HeadlessMode, RecordingEngine, StabilizationSettings, SelectorType } from '@/lib/db/schema';
-import { Loader2, RotateCcw, List, Video, MousePointer, Pause, Clock, Layers, ChevronDown, Shield, ShieldCheck, Hourglass, Type, Ban, Eye, Camera, EyeOff, Info, ClipboardCopy, Download, Globe, Cookie, Trash2 } from 'lucide-react';
+import type { SelectorConfig, PlaywrightSettings, HeadlessMode, RecordingEngine, StabilizationSettings } from '@/lib/db/schema';
+import { Loader2, RotateCcw, List, Video, MousePointer, Pause, Clock, Layers, ChevronDown, Shield, ShieldCheck, Hourglass, Ban, Eye, Camera, EyeOff, Info, ClipboardCopy, Download, Globe, Cookie, Trash2 } from 'lucide-react';
 import { Slider } from '@/components/ui/slider';
 import { Badge } from '@/components/ui/badge';
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip';
 import { toast } from 'sonner';
-import { calculateRecommendations, type SelectorRecommendation } from '@/lib/selector-recommendations';
+import { calculateRecommendations } from '@/lib/selector-recommendations';
 import type { SelectorTypeStats } from '@/lib/db/queries';
 
 const VIEWPORT_PRESETS = [

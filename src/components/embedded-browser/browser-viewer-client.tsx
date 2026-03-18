@@ -44,6 +44,7 @@ export function BrowserViewer({ streamUrl, initialViewport, className, expiresAt
   const intentionalCloseRef = useRef(false);
   const lastFrameTimeRef = useRef(0);
   const stallCheckRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const screencastPausedRef = useRef(false);
 
   // Session expiry countdown
   useEffect(() => {
@@ -101,11 +102,15 @@ export function BrowserViewer({ streamUrl, initialViewport, className, expiresAt
     const connect = (attempt: number) => {
       let wsUrl = streamUrl;
       if (streamUrl.startsWith('ws://') || streamUrl.startsWith('wss://')) {
-        // Connect directly to the EB WebSocket stream.
-        // Next.js App Router cannot proxy WebSocket upgrades, so the previous
-        // /api/embedded/stream/ws proxy path never worked. Direct connection
-        // works for same-network deployments (localhost dev, LAN homeserver).
-        wsUrl = streamUrl;
+        if (window.location.protocol === 'https:') {
+          // On HTTPS pages, direct ws:// is blocked by mixed-content policy.
+          // Route through the ws-proxy-preload.js proxy via the origin.
+          const url = new URL(streamUrl);
+          wsUrl = `wss://${window.location.host}/api/embedded/stream/ws?target=${url.hostname}:${url.port}`;
+        } else {
+          // HTTP (local dev) — connect directly
+          wsUrl = streamUrl;
+        }
       } else if (streamUrl.startsWith('/')) {
         // Relative path — construct full WebSocket URL from page origin
         const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -118,6 +123,7 @@ export function BrowserViewer({ streamUrl, initialViewport, className, expiresAt
         setConnectionStatus('connected');
         setReconnectAttempt(0);
         lastFrameTimeRef.current = Date.now();
+        screencastPausedRef.current = false;
 
         // Start frame stall detection — if no frames arrive for FRAME_STALL_TIMEOUT_MS,
         // the CDP screencast likely died silently. Force reconnect to recover.
@@ -126,7 +132,8 @@ export function BrowserViewer({ streamUrl, initialViewport, className, expiresAt
           if (
             lastFrameTimeRef.current > 0 &&
             Date.now() - lastFrameTimeRef.current > FRAME_STALL_TIMEOUT_MS &&
-            wsRef.current?.readyState === WebSocket.OPEN
+            wsRef.current?.readyState === WebSocket.OPEN &&
+            !screencastPausedRef.current
           ) {
             console.warn('[BrowserViewer] Frame stall detected — reconnecting');
             wsRef.current?.close();
@@ -171,6 +178,15 @@ export function BrowserViewer({ streamUrl, initialViewport, className, expiresAt
                 setViewport(message.payload.viewport);
               }
               setFileChooserPending(message.payload.fileChooserPending ?? false);
+
+              // Track intentional screencast pauses to suppress stall detection
+              const status = message.payload.status;
+              if (status === 'busy' || status === 'recording' || status === 'debugging') {
+                screencastPausedRef.current = true;
+                lastFrameTimeRef.current = Date.now(); // keep timer fresh
+              } else {
+                screencastPausedRef.current = false;
+              }
               break;
             }
           }
@@ -232,6 +248,7 @@ export function BrowserViewer({ streamUrl, initialViewport, className, expiresAt
         }
       }
     };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [streamUrl, renderFrame]);
 
   // Manual reconnect handler

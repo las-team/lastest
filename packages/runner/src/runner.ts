@@ -28,7 +28,7 @@ export interface TestRunResult {
     screenshot?: string;
   };
   logs: LogEntry[];
-  screenshots: Array<{ filename: string; data: string; width: number; height: number }>;
+  screenshots: Array<{ filename: string; data: string; width: number; height: number; capturedAt?: number }>;
   softErrors?: string[];
 }
 
@@ -262,15 +262,17 @@ export class TestRunner {
           const filename = `${command.testRunId}-${command.testId}-${label.replace(/ /g, '_')}.png`;
           const base64 = buffer.toString('base64');
           const { width, height } = viewport;
-          screenshots.push({ filename, data: base64, width, height });
+          screenshots.push({ filename, data: base64, width, height, capturedAt: Date.now() });
           logFn('info', `Captured screenshot: ${filename}`);
           // Disable RAF gating + unfreeze performance.now after screenshot
+          /* eslint-disable @typescript-eslint/no-explicit-any */
           await page.evaluate(() => {
             if (typeof (window as any).__disableRAFGating === 'function') {
               (window as any).__disableRAFGating();
             }
             (window as any).__perfNowFrozen = false;
           }).catch(() => {});
+          /* eslint-enable @typescript-eslint/no-explicit-any */
         } catch (err) {
           logFn('warn', `Failed to capture screenshot: ${err}`);
         }
@@ -744,12 +746,7 @@ export class TestRunner {
       log('info', `Navigating to ${url}...`);
       const response = await originalGoto(url, options);
       log('info', `Navigation complete: ${response?.status() ?? 'no response'}`);
-      // Reset Math.random seed after page load so test actions get deterministic seeds
-      if (stabilization?.freezeRandomValues) {
-        await page.evaluate(() => {
-          (window as unknown as { __resetMathRandom?: () => void }).__resetMathRandom?.();
-        }).catch(() => {});
-      }
+      // addInitScript already resets mathState on each navigation — no explicit reset needed
       return response;
     };
 
@@ -769,6 +766,7 @@ export class TestRunner {
     // Post-action: wait one browser frame for the page to process the action's
     // effects (React state → RAF-driven canvas re-render), then flush again.
     if (stabilization?.freezeAnimations) {
+      /* eslint-disable @typescript-eslint/no-explicit-any */
       const wrapAction = (obj: any, method: string) => {
         const orig = obj[method].bind(obj);
         obj[method] = async (...args: any[]) => {
@@ -792,6 +790,7 @@ export class TestRunner {
           return result;
         };
       };
+      /* eslint-enable @typescript-eslint/no-explicit-any */
       wrapAction(page.mouse, 'click');
       wrapAction(page.mouse, 'down');
       wrapAction(page.mouse, 'up');

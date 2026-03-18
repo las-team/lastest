@@ -1,18 +1,15 @@
 'use client';
 
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useContext } from 'react';
 import { Activity } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { useJobPollingContext } from './job-polling-context';
+import { JobPollingContext } from './job-polling-context';
 import { QueueDropdown } from './queue-dropdown';
 
 export function QueueIndicator() {
-  const { jobs } = useJobPollingContext();
+  const ctx = useContext(JobPollingContext);
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
-
-  const activeJobs = jobs.filter(j => j.status === 'running' || j.status === 'pending');
-  const hasActive = activeJobs.length > 0;
 
   // Close on click outside
   useEffect(() => {
@@ -24,6 +21,12 @@ export function QueueIndicator() {
     if (open) document.addEventListener('mousedown', handleClick);
     return () => document.removeEventListener('mousedown', handleClick);
   }, [open]);
+
+  if (!ctx) return null;
+  const { jobs } = ctx;
+
+  const activeJobs = jobs.filter(j => j.status === 'running' || j.status === 'pending');
+  const hasActive = activeJobs.length > 0;
 
   // Aggregate progress for the indicator bar
   const avgProgress = hasActive

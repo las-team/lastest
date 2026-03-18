@@ -31,7 +31,7 @@ export function SettingsToC() {
 
     // Detect which section IDs actually exist in the DOM
     const existing = SECTIONS.filter(s => document.getElementById(s.id)).map(s => s.id);
-    setPresentSections(existing);
+    queueMicrotask(() => setPresentSections(existing));
 
     // Fade in after scrolling 100px
     const handleScroll = () => {

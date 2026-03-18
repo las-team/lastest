@@ -8,7 +8,6 @@ import {
   MCP_SYSTEM_PROMPT,
   createTestPrompt,
   createFixPrompt,
-  createMcpFixPrompt,
   createEnhancePrompt,
   extractCodeFromResponse,
 } from '@/lib/ai';
@@ -278,75 +277,50 @@ export async function aiFixTests(
   return { success: true, fixed, failed, errors };
 }
 
-export async function aiMcpFixTest(
+/**
+ * Unified fix: routes to PW Healer agent when enabled, falls back to prompt-based fix.
+ */
+export async function fixTest(
   repositoryId: string,
   testId: string,
   errorMessage: string
 ): Promise<{ success: boolean; code?: string; error?: string }> {
-  await requireRepoAccess(repositoryId);
-  try {
-    const test = await queries.getTest(testId);
-    if (!test) {
-      return { success: false, error: 'Test not found' };
-    }
-
-    const config = await getAIConfig(repositoryId);
-    const prompt = createMcpFixPrompt({
-      existingCode: test.code,
-      errorMessage,
-      targetUrl: test.targetUrl || undefined,
-    });
-    const response = await generateWithAI(config, prompt, MCP_SYSTEM_PROMPT, {
-      actionType: 'fix_test',
-      repositoryId,
-      useMCP: true,
-    });
-    const code = extractCodeFromResponse(response);
-
-    return { success: true, code };
-  } catch (error) {
-    const message = error instanceof Error ? error.message : 'Failed to fix test with MCP';
-    return { success: false, error: message };
+  const settings = await queries.getAISettings(repositoryId);
+  if (settings.pwAgentEnabled) {
+    // Dynamic import to avoid circular deps / loading cost when not needed
+    const { agentHealTest } = await import('@/lib/playwright/healer-agent');
+    return agentHealTest(repositoryId, testId);
   }
+  return aiFixTest(repositoryId, testId, errorMessage);
 }
 
-export async function aiMcpFixTests(
+/**
+ * Unified bulk fix: routes to PW Healer agent when enabled.
+ */
+export async function fixTests(
   testIds: string[],
   repositoryId: string
 ): Promise<{ success: boolean; fixed: number; failed: number; errors: string[] }> {
-  await requireRepoAccess(repositoryId);
-  const branch = await getCurrentBranchForRepo(repositoryId);
-  const errors: string[] = [];
-  let fixed = 0;
-  let failed = 0;
-
-  for (const testId of testIds) {
-    const test = await queries.getTest(testId);
-    if (!test) {
-      failed++;
-      errors.push(`Test ${testId}: Not found`);
-      continue;
-    }
-
-    const results = await queries.getTestResultsByTest(testId);
-    const latestResult = results[results.length - 1];
-
-    if (latestResult?.status !== 'failed') {
-      continue;
-    }
-
-    const errorMessage = latestResult.errorMessage || 'Test failed with unknown error';
-    const result = await aiMcpFixTest(repositoryId, testId, errorMessage);
-
-    if (result.success && result.code) {
-      await queries.updateTestWithVersion(testId, { code: result.code }, 'ai_fix', branch ?? undefined);
-      fixed++;
-    } else {
-      failed++;
-      errors.push(`${test.name}: ${result.error || 'Unknown error'}`);
-    }
+  const settings = await queries.getAISettings(repositoryId);
+  if (settings.pwAgentEnabled) {
+    const { agentHealTests } = await import('@/lib/playwright/healer-agent');
+    return agentHealTests(testIds, repositoryId);
   }
+  return aiFixTests(testIds, repositoryId);
+}
 
-  revalidatePath('/tests');
-  return { success: true, fixed, failed, errors };
+/**
+ * Unified create test: routes to PW Generator agent when enabled.
+ */
+export async function createTest(
+  repositoryId: string,
+  context: TestGenerationContext,
+  routeId?: string
+): Promise<{ success: boolean; code?: string; error?: string }> {
+  const settings = await queries.getAISettings(repositoryId);
+  if (settings.pwAgentEnabled) {
+    const { agentCreateTest } = await import('@/lib/playwright/generator-agent');
+    return agentCreateTest(repositoryId, context);
+  }
+  return aiCreateTest(repositoryId, context, routeId);
 }

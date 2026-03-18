@@ -5,13 +5,29 @@ import { useRouter } from 'next/navigation';
 import { Check, Circle, Loader2, Pause, X, SkipForward } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
-import type { AgentStepState } from '@/lib/db/schema';
+import type { AgentStepState, PwAgentType } from '@/lib/db/schema';
 
 interface PlayAgentStepProps {
   step: AgentStepState;
   stepNumber: number;
   onResume?: () => void;
   onSkipDiscover?: () => void;
+}
+
+const AGENT_BADGE_STYLES: Record<PwAgentType, { bg: string; text: string; label: string }> = {
+  orchestrator: { bg: 'bg-violet-500/15', text: 'text-violet-600 dark:text-violet-400', label: 'Orchestrator' },
+  planner: { bg: 'bg-blue-500/15', text: 'text-blue-600 dark:text-blue-400', label: 'Planner' },
+  generator: { bg: 'bg-emerald-500/15', text: 'text-emerald-600 dark:text-emerald-400', label: 'Generator' },
+  healer: { bg: 'bg-amber-500/15', text: 'text-amber-600 dark:text-amber-400', label: 'Healer' },
+};
+
+function AgentBadge({ agent }: { agent: PwAgentType }) {
+  const style = AGENT_BADGE_STYLES[agent];
+  return (
+    <span className={cn('inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium', style.bg, style.text)}>
+      {style.label}
+    </span>
+  );
 }
 
 export function PlayAgentStep({ step, stepNumber, onResume, onSkipDiscover }: PlayAgentStepProps) {
@@ -84,14 +100,15 @@ export function PlayAgentStep({ step, stepNumber, onResume, onSkipDiscover }: Pl
           {step.substeps.map((sub, i) => (
             <div key={i} className="flex items-center gap-2 text-xs text-muted-foreground">
               {sub.status === 'running' ? (
-                <Loader2 className="h-3 w-3 animate-spin text-primary" />
+                <Loader2 className="h-3 w-3 animate-spin text-primary flex-shrink-0" />
               ) : sub.status === 'done' ? (
-                <Check className="h-3 w-3 text-green-500" />
+                <Check className="h-3 w-3 text-green-500 flex-shrink-0" />
               ) : sub.status === 'error' ? (
-                <X className="h-3 w-3 text-red-500" />
+                <X className="h-3 w-3 text-red-500 flex-shrink-0" />
               ) : (
-                <Circle className="h-3 w-3" />
+                <Circle className="h-3 w-3 flex-shrink-0" />
               )}
+              {sub.agent && <AgentBadge agent={sub.agent} />}
               <span>{sub.label}</span>
               {sub.detail && <span className="text-muted-foreground/60">{sub.detail}</span>}
             </div>

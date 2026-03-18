@@ -12,7 +12,7 @@ interface InviteFormProps {
   token: string;
 }
 
-export function InviteForm({ email, token }: InviteFormProps) {
+export function InviteForm({ email, token: _token }: InviteFormProps) {
   const router = useRouter();
   const [name, setName] = useState('');
   const [password, setPassword] = useState('');

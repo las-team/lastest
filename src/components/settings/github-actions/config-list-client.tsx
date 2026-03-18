@@ -1,10 +1,18 @@
 'use client';
 
 import { useState } from 'react';
-import { ChevronDown, ChevronRight, Copy, Check, Trash2, Rocket, Cloud, Server } from 'lucide-react';
+import { ChevronDown, ChevronRight, Copy, Check, Trash2, Rocket, Cloud, Server, Zap, AlertTriangle, Loader2 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import type { GithubActionConfig, GithubActionMode, GithubActionTriggerEvent, Runner } from '@/lib/db/schema';
 import { WorkflowPreview } from '@/components/settings/github-actions/workflow-preview-client';
 import { DeployDialog } from '@/components/settings/github-actions/deploy-dialog-client';
@@ -48,16 +56,17 @@ function ConfigCard({
 }) {
   const [expanded, setExpanded] = useState(false);
   const [deployOpen, setDeployOpen] = useState(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
 
   const runner = runners.find((r) => r.id === config.runnerId);
   const mode = config.mode as GithubActionMode;
 
   const handleDelete = async () => {
-    if (!confirm(`Delete config for ${config.repositoryOwner}/${config.repositoryName}?`)) return;
     setDeleting(true);
     try {
       await deleteGithubActionConfigAction(config.id);
+      setDeleteOpen(false);
       toast.success('Config deleted');
     } catch {
       toast.error('Failed to delete config');
@@ -96,9 +105,11 @@ function ConfigCard({
                 <span className="font-mono text-sm font-medium truncate">
                   {config.repositoryOwner}/{config.repositoryName}
                 </span>
-                <Badge variant={mode === 'ephemeral' ? 'default' : 'secondary'} className="text-xs">
+                <Badge variant={mode === 'ephemeral' ? 'default' : mode === 'auto' ? 'default' : 'secondary'} className="text-xs">
                   {mode === 'ephemeral' ? (
                     <><Cloud className="h-3 w-3 mr-1" /> Ephemeral</>
+                  ) : mode === 'auto' ? (
+                    <><Zap className="h-3 w-3 mr-1" /> Auto</>
                   ) : (
                     <><Server className="h-3 w-3 mr-1" /> Persistent</>
                   )}
@@ -123,7 +134,7 @@ function ConfigCard({
               <Button
                 variant="ghost"
                 size="sm"
-                onClick={handleDelete}
+                onClick={() => setDeleteOpen(true)}
                 disabled={deleting}
                 className="h-8 text-destructive hover:text-destructive"
               >
@@ -201,6 +212,49 @@ function ConfigCard({
       </Card>
 
       <DeployDialog open={deployOpen} onOpenChange={setDeployOpen} config={config} />
+
+      <Dialog open={deleteOpen} onOpenChange={setDeleteOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Delete GitHub Actions Config</DialogTitle>
+            <DialogDescription>
+              Remove the config for{' '}
+              <span className="font-mono text-foreground">
+                {config.repositoryOwner}/{config.repositoryName}
+              </span>
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="rounded-md border border-amber-500/50 bg-amber-500/5 p-3 text-xs flex gap-2">
+            <AlertTriangle className="h-4 w-4 text-amber-500 shrink-0 mt-0.5" />
+            <div>
+              This will:
+              <ul className="list-disc ml-4 mt-1 space-y-0.5">
+                {config.workflowDeployed && (
+                  <>
+                    <li>Delete <code className="font-mono">.github/workflows/lastest2.yml</code> from the repo</li>
+                    <li>Remove LASTEST2_TOKEN and LASTEST2_URL secrets</li>
+                  </>
+                )}
+                {(mode === 'ephemeral' || mode === 'auto') && config.runnerId && (
+                  <li>Delete the auto-created runner</li>
+                )}
+                <li>Delete this configuration</li>
+              </ul>
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDeleteOpen(false)} disabled={deleting}>
+              Cancel
+            </Button>
+            <Button variant="destructive" onClick={handleDelete} disabled={deleting}>
+              {deleting && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+              Delete
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </>
   );
 }

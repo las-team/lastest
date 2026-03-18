@@ -24,7 +24,7 @@ const config = {
   token: process.env.LASTEST2_TOKEN ?? '',
   systemToken: process.env.SYSTEM_EB_TOKEN ?? '',
   streamPort: parseInt(process.env.STREAM_PORT ?? '9223', 10),
-  streamHost: process.env.STREAM_HOST ?? 'localhost', // Hostname for stream URL (EBs are always colocated with the app)
+  streamHost: process.env.STREAM_HOST ?? '', // Empty = auto-detect container IP
   pollInterval: parseInt(process.env.POLL_INTERVAL ?? '1000', 10),
   viewportWidth: parseInt(process.env.VIEWPORT_WIDTH ?? '1280', 10),
   viewportHeight: parseInt(process.env.VIEWPORT_HEIGHT ?? '720', 10),
@@ -321,6 +321,9 @@ async function startup(): Promise<void> {
 
         runnerClient.setStatus('busy', payload.sessionId);
 
+        // Notify stream viewers before stopping screencast so they suppress stall detection
+        streamServer?.broadcastStatus('busy');
+
         // Stop screencast/input on idle page
         await screencast?.stop();
         await inputHandler?.detach();
@@ -484,6 +487,9 @@ async function startup(): Promise<void> {
         };
 
         runnerClient.setStatus('busy', payload.sessionId);
+
+        // Notify stream viewers before stopping screencast so they suppress stall detection
+        streamServer?.broadcastStatus('busy');
 
         // Stop screencast/input on idle page
         await screencast?.stop();

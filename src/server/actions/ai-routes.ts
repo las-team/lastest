@@ -4,7 +4,7 @@ import * as queries from '@/lib/db/queries';
 import { generateWithAI, createRouteScanPrompt, createMCPExploreRoutesPrompt, createCodeDiffScanPrompt, SYSTEM_PROMPT, MCP_SYSTEM_PROMPT } from '@/lib/ai';
 import type { AIProviderConfig, CodebaseIntelligenceContext } from '@/lib/ai/types';
 import { revalidatePath } from 'next/cache';
-import { getRepoTree, getFileContent, compareBranches, type TreeEntry } from '@/lib/github/content';
+import { getRepoTree, getFileContent, compareBranches } from '@/lib/github/content';
 import { createJob, completeJob, failJob } from './jobs';
 import { requireRepoAccess } from '@/lib/auth';
 
@@ -267,6 +267,24 @@ export async function aiScanRoutes(
     await failJob(jobId, message);
     return { success: false, error: message };
   }
+}
+
+/**
+ * Unified area discovery: routes to PW Planner agent when enabled,
+ * falls back to AI scan or MCP explore.
+ */
+export async function discoverAreas(
+  repositoryId: string,
+  branch: string,
+  baseURL?: string,
+  intelligence?: CodebaseIntelligenceContext,
+): Promise<{ success: boolean; functionalAreas?: DiscoveredArea[]; error?: string }> {
+  const settings = await queries.getAISettings(repositoryId);
+  if (settings.pwAgentEnabled && baseURL) {
+    const { agentDiscoverAreas } = await import('@/lib/playwright/planner-agent');
+    return agentDiscoverAreas(repositoryId, baseURL);
+  }
+  return aiScanRoutes(repositoryId, branch, intelligence);
 }
 
 export async function mcpExploreRoutes(

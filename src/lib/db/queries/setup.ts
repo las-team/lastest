@@ -243,10 +243,12 @@ export async function getDefaultSetupSteps(repositoryId: string) {
       storageStateId: defaultSetupSteps.storageStateId,
       orderIndex: defaultSetupSteps.orderIndex,
       createdAt: defaultSetupSteps.createdAt,
-      // Join test name
+      // Join test name and code
       testName: tests.name,
+      code: tests.code,
       // Join script name
       scriptName: setupScripts.name,
+      scriptCode: setupScripts.code,
       // Join storage state name
       storageStateName: storageStates.name,
     })

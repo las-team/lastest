@@ -24,7 +24,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { Globe, ChevronDown, RotateCcw, Timer, AlertTriangle, Settings } from 'lucide-react';
+import { Globe, ChevronDown, RotateCcw, Timer, AlertTriangle, Settings, MousePointer } from 'lucide-react';
 import { toast } from 'sonner';
 import { saveTestPlaywrightOverrides, resetTestPlaywrightOverrides } from '@/server/actions/test-overrides';
 import type { TestPlaywrightOverrides as TestPlaywrightOverridesType } from '@/lib/db/schema';
@@ -43,6 +43,7 @@ interface TestPlaywrightOverridesProps {
     acceptAnyCertificate: boolean;
     maxParallelTests: number;
     baseUrl: string;
+    cursorPlaybackSpeed: number;
   };
 }
 
@@ -365,6 +366,41 @@ export function TestPlaywrightOverrides({ testId, repositoryId, overrides: initi
                 className="w-48"
                 placeholder="https://example.com"
               />
+            </div>
+          </CollapsibleContent>
+        </Collapsible>
+        {/* Cursor Tracking */}
+        <Collapsible defaultOpen={Object.keys(overrides).some(k => ['cursorPlaybackSpeed'].includes(k))}>
+          <CollapsibleTrigger asChild>
+            <Button variant="ghost" className="w-full justify-between p-2 h-auto">
+              <div className="flex items-center gap-2">
+                <MousePointer className="w-4 h-4 text-muted-foreground" />
+                <span className="text-sm font-medium">Cursor Tracking</span>
+              </div>
+              <ChevronDown className="w-4 h-4 transition-transform data-[state=open]:rotate-180" />
+            </Button>
+          </CollapsibleTrigger>
+          <CollapsibleContent className="space-y-3 pt-2 pl-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-1.5">
+                <OverrideIndicator keys={['cursorPlaybackSpeed']} />
+                <div className="space-y-0.5">
+                  <Label className="text-sm">Playback Speed</Label>
+                  <p className="text-xs text-muted-foreground">Speed multiplier for cursor replay</p>
+                </div>
+              </div>
+              <Select value={String(getVal('cursorPlaybackSpeed'))} onValueChange={(value) => setVal('cursorPlaybackSpeed', Number(value))}>
+                <SelectTrigger className="w-32">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="0">Instant</SelectItem>
+                  <SelectItem value="1">1x</SelectItem>
+                  <SelectItem value="2">2x</SelectItem>
+                  <SelectItem value="5">5x</SelectItem>
+                  <SelectItem value="10">10x</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
           </CollapsibleContent>
         </Collapsible>

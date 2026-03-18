@@ -74,7 +74,7 @@ export function AICreateTestDialog({
       } else {
         toast.error(result.error || 'Failed to generate test');
       }
-    } catch (error) {
+    } catch (_error) {
       toast.error('Failed to generate test');
     } finally {
       setIsGenerating(false);
@@ -95,7 +95,7 @@ export function AICreateTestDialog({
       } else {
         toast.error(result.error || 'Failed to regenerate test');
       }
-    } catch (error) {
+    } catch (_error) {
       toast.error('Failed to regenerate test');
     } finally {
       setIsGenerating(false);
@@ -124,7 +124,7 @@ export function AICreateTestDialog({
       } else {
         toast.error(result.error || 'Failed to save test');
       }
-    } catch (error) {
+    } catch (_error) {
       toast.error('Failed to save test');
     } finally {
       setIsSaving(false);

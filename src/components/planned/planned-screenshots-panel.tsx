@@ -102,6 +102,7 @@ export function PlannedScreenshotsPanel({
                 className="aspect-video cursor-pointer"
                 onClick={() => setSelectedImage(screenshot)}
               >
+                {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img
                   src={screenshot.imagePath}
                   alt={screenshot.name || 'Planned screenshot'}
@@ -201,6 +202,7 @@ export function PlannedScreenshotsPanel({
 
             {/* Modal body */}
             <div className="p-4 overflow-auto max-h-[calc(90vh-120px)]">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
               <img
                 src={selectedImage.imagePath}
                 alt={selectedImage.name || 'Planned screenshot'}

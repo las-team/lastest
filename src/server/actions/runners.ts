@@ -84,6 +84,7 @@ export async function createRunnerInternal(
   createdById: string,
   capabilities: RunnerCapability[] = ['run', 'record'],
   type: RunnerType = 'remote',
+  authOnly: boolean = false,
 ): Promise<{ runner: Runner; token: string } | { error: string }> {
   const id = uuid();
   const token = generateRunnerToken();
@@ -99,6 +100,7 @@ export async function createRunnerInternal(
     status: 'offline',
     capabilities,
     type,
+    authOnly,
     createdAt: now,
   });
 
@@ -140,6 +142,28 @@ export async function updateRunnerName(runnerId: string, name: string): Promise<
 
   await db.update(runners).set({ name }).where(eq(runners.id, runnerId));
   return { success: true };
+}
+
+/**
+ * Regenerate runner token (internal use — no auth check, caller must verify permissions).
+ * Returns the new plain token.
+ */
+export async function regenerateRunnerTokenInternal(runnerId: string, teamId: string): Promise<{ token: string } | { error: string }> {
+  const runner = await db
+    .select()
+    .from(runners)
+    .where(and(eq(runners.id, runnerId), eq(runners.teamId, teamId)))
+    .get();
+
+  if (!runner) {
+    return { error: 'Runner not found' };
+  }
+
+  const token = generateRunnerToken();
+  const tokenHash = hashToken(token);
+
+  await db.update(runners).set({ tokenHash }).where(eq(runners.id, runnerId));
+  return { token };
 }
 
 /**
@@ -207,6 +231,13 @@ export async function deleteRunner(runnerId: string): Promise<{ success: boolean
 
   await db.delete(runners).where(eq(runners.id, runnerId));
   return { success: true };
+}
+
+/**
+ * Internal runner deletion (no auth check — caller must verify permissions).
+ */
+export async function deleteRunnerInternal(runnerId: string, teamId: string): Promise<void> {
+  await db.delete(runners).where(and(eq(runners.id, runnerId), eq(runners.teamId, teamId)));
 }
 
 /**

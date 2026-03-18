@@ -1,5 +1,7 @@
 import type { GithubActionMode, GithubActionTriggerEvent } from '@/lib/db/schema';
 
+const RUNNER_VERSION = '0.4.2';
+
 export interface WorkflowConfig {
   mode: GithubActionMode;
   repositoryOwner: string;
@@ -57,7 +59,7 @@ function buildPersistentSteps(config: WorkflowConfig): string {
   flags.push(`--timeout ${config.timeout}`);
   if (config.targetUrl) flags.push(`--target-url "${config.targetUrl}"`);
 
-  const runCmd = flags.map((f, i) => i === 0 ? `npx @lastest/runner trigger \\\n            ${f}` : `            ${f}`).join(' \\\n');
+  const runCmd = flags.map((f, i) => i === 0 ? `npx @lastest/runner@${RUNNER_VERSION} trigger \\\n            ${f}` : `            ${f}`).join(' \\\n');
 
   return `      - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -83,7 +85,7 @@ function buildEphemeralSteps(config: WorkflowConfig): string {
   flags.push(`--timeout ${config.timeout}`);
   if (config.targetUrl) flags.push(`--target-url "${config.targetUrl}"`);
 
-  const triggerFlags = flags.map((f, i) => i === 0 ? `npx @lastest/runner trigger \\\n            ${f}` : `            ${f}`).join(' \\\n');
+  const triggerFlags = flags.map((f, i) => i === 0 ? `npx @lastest/runner@${RUNNER_VERSION} trigger \\\n            ${f}` : `            ${f}`).join(' \\\n');
 
   return `      - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -92,7 +94,7 @@ function buildEphemeralSteps(config: WorkflowConfig): string {
 
       - name: Get Playwright version
         id: playwright-version
-        run: echo "version=$(npx @lastest/runner playwright-version)" >> $GITHUB_OUTPUT
+        run: echo "version=$(npx @lastest/runner@${RUNNER_VERSION} playwright-version)" >> $GITHUB_OUTPUT
 
       - name: Cache Playwright browsers
         uses: actions/cache@v4
@@ -114,7 +116,7 @@ function buildEphemeralSteps(config: WorkflowConfig): string {
           LASTEST2_TOKEN: \${{ secrets.LASTEST2_TOKEN }}
           LASTEST2_URL: \${{ secrets.LASTEST2_URL }}
         run: |
-          npx @lastest/runner run \\
+          npx @lastest/runner@${RUNNER_VERSION} run \\
             -t "$LASTEST2_TOKEN" \\
             -s "$LASTEST2_URL" &
           RUNNER_PID=$!
@@ -128,9 +130,9 @@ function buildEphemeralSteps(config: WorkflowConfig): string {
 export function generateWorkflowYaml(config: WorkflowConfig): string {
   const timeoutMinutes = Math.ceil(config.timeout / 60000) + (config.mode === 'ephemeral' ? 5 : 0);
   const onBlock = buildOnBlock(config);
-  const steps = config.mode === 'persistent'
-    ? buildPersistentSteps(config)
-    : buildEphemeralSteps(config);
+  const steps = config.mode === 'ephemeral'
+    ? buildEphemeralSteps(config)
+    : buildPersistentSteps(config); // 'persistent' and 'auto' both use trigger-only steps
 
   return `name: Lastest2 Visual Tests
 ${onBlock}

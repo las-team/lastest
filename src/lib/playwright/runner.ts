@@ -632,7 +632,7 @@ export interface RunEvent {
 
 export interface CapturedScreenshot {
   path: string;
-  label: string;
+  label?: string;
 }
 
 export interface TestRunResult {
@@ -1056,6 +1056,7 @@ export class PlaywrightRunner extends EventEmitter {
       // Pass freezeAnimations from PlaywrightSettings so setupFreezeScripts can apply
       // deterministic CSS, __resetExcalidrawRNG, and canvas determinism (these conditions
       // check freezeAnimations which lives on PlaywrightSettings, not StabilizationSettings).
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       await setupFreezeScripts(page, { ...stabilization, freezeAnimations: this.settings?.freezeAnimations ?? false } as any);
 
       // Setup third-party blocking if enabled
@@ -1083,9 +1084,9 @@ export class PlaywrightRunner extends EventEmitter {
         await page.addInitScript(`
           (function() {
             window.__resetExcalidrawRNG = function() {
-              if (typeof window.__resetMathRandom === 'function') {
-                window.__resetMathRandom();
-              }
+              // No-op: resetting mathState here caused roughjs to re-render elements
+              // with a different Math.random sequence, making them invisible.
+              // Per-element seeds in roughjs handle rendering determinism.
             };
           })();
         `);
@@ -1347,12 +1348,14 @@ export class PlaywrightRunner extends EventEmitter {
 
               }
               // Disable RAF gating + unfreeze performance.now after screenshot
+              /* eslint-disable @typescript-eslint/no-explicit-any */
               await target.evaluate(() => {
                 if (typeof (window as any).__disableRAFGating === 'function') {
                   (window as any).__disableRAFGating();
                 }
                 (window as any).__perfNowFrozen = false;
               }).catch(() => {});
+              /* eslint-enable @typescript-eslint/no-explicit-any */
 
               return result;
             };

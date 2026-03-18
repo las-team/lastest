@@ -6,7 +6,7 @@ import { Play, X, Check, Loader2, Pause, SkipForward, AlertCircle, RotateCcw } f
 import { PlayAgentStep } from './play-agent-step';
 import { usePlayAgent } from './use-play-agent';
 import { cn } from '@/lib/utils';
-import type { AgentStepState, AgentStepId } from '@/lib/db/schema';
+import type { AgentStepState, AgentStepId, PwAgentType } from '@/lib/db/schema';
 
 interface PlayAgentTimelineProps {
   repositoryId?: string | null;
@@ -31,6 +31,20 @@ const AI_PROVIDER_LABELS: Record<string, string> = {
   'openrouter': 'OpenRouter',
   'claude-agent-sdk': 'Claude SDK',
   'anthropic-direct': 'Anthropic Direct',
+};
+
+const AGENT_LABELS: Record<string, string> = {
+  orchestrator: 'Orchestrator',
+  planner: 'Planner',
+  generator: 'Generator',
+  healer: 'Healer',
+};
+
+const ROSTER_BADGE_STYLES: Record<PwAgentType, { bg: string; text: string }> = {
+  orchestrator: { bg: 'bg-violet-500/15', text: 'text-violet-600 dark:text-violet-400' },
+  planner: { bg: 'bg-blue-500/15', text: 'text-blue-600 dark:text-blue-400' },
+  generator: { bg: 'bg-emerald-500/15', text: 'text-emerald-600 dark:text-emerald-400' },
+  healer: { bg: 'bg-amber-500/15', text: 'text-amber-600 dark:text-amber-400' },
 };
 
 // ============================================
@@ -158,9 +172,39 @@ export function PlayAgentTimeline({ repositoryId }: PlayAgentTimelineProps) {
   const isRunning = isActive && session?.status === 'active';
   const isPaused = session?.status === 'paused';
 
+  // Extract agent roster from completed settings_check step
+  const settingsStep = steps.find(s => s.id === 'settings_check');
+  const settingsResult = settingsStep?.status === 'completed' ? settingsStep.result : null;
+  const activeAgents = (settingsResult?.activeAgents as string[] | undefined) ?? [];
+  const pwAgentEnabled = activeAgents.length > 0;
+
   const activeStep = session?.steps.find(
     (s) => s.status === 'active' || s.status === 'waiting_user' || s.status === 'failed',
   );
+
+  // Determine which agent is currently running and parallel counts
+  const runningAgents = new Set<string>();
+  const doneAgents = new Set<string>();
+  const agentParallelCount: Record<string, number> = {};
+  if (activeStep?.substeps) {
+    for (const sub of activeStep.substeps) {
+      if (sub.agent && sub.status === 'running') {
+        runningAgents.add(sub.agent);
+        // Parse parallel count from detail like "3 generators in parallel"
+        const countMatch = sub.detail?.match(/^(\d+)\s+\w+\s+in parallel$/);
+        if (countMatch) agentParallelCount[sub.agent] = parseInt(countMatch[1], 10);
+      }
+      if (sub.agent && sub.status === 'done') doneAgents.add(sub.agent);
+    }
+  }
+  // Also check all completed steps for done agents
+  for (const s of steps) {
+    if (s.status === 'completed' && s.substeps) {
+      for (const sub of s.substeps) {
+        if (sub.agent) doneAgents.add(sub.agent);
+      }
+    }
+  }
 
   const handlePlayPause = () => {
     if (isRunning) {
@@ -193,6 +237,44 @@ export function PlayAgentTimeline({ repositoryId }: PlayAgentTimelineProps) {
             )}
           </div>
         </div>
+
+        {/* Agent roster bar — visible once settings_check completes */}
+        {settingsResult && (
+          <div className="flex items-center gap-1.5 mb-2.5">
+            <span className="text-[10px] text-muted-foreground/70 uppercase tracking-wider font-medium mr-1">
+              {pwAgentEnabled ? 'Agents' : 'Mode'}
+            </span>
+            {pwAgentEnabled ? (
+              (['orchestrator', ...activeAgents] as PwAgentType[]).map(agent => {
+                const isRunning = runningAgents.has(agent);
+                const isDone = doneAgents.has(agent);
+                const isActiveAgent = isRunning || isDone;
+                const style = ROSTER_BADGE_STYLES[agent];
+                const count = agentParallelCount[agent];
+                return (
+                  <span
+                    key={agent}
+                    className={cn(
+                      'inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium transition-colors',
+                      isActiveAgent ? [style.bg, style.text] : 'bg-muted/60 text-muted-foreground/50',
+                    )}
+                  >
+                    {isRunning && <Loader2 className="h-2.5 w-2.5 animate-spin" />}
+                    {isDone && !isRunning && <Check className="h-2.5 w-2.5" />}
+                    {AGENT_LABELS[agent] ?? agent.charAt(0).toUpperCase() + agent.slice(1)}
+                    {isRunning && count && count > 1 && (
+                      <span className="text-[9px] opacity-75">x{count}</span>
+                    )}
+                  </span>
+                );
+              })
+            ) : (
+              <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-muted text-muted-foreground">
+                Prompt
+              </span>
+            )}
+          </div>
+        )}
 
         {/* Play/Pause button + grid timeline */}
         <div className="flex items-start gap-3">

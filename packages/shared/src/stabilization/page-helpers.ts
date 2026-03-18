@@ -145,6 +145,7 @@ export async function waitForCanvasStable(
   threshold: number
 ): Promise<void> {
   await page.evaluate(({ stableNeeded }) => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const flush = (window as any).__flushAnimationFrames;
     if (typeof flush !== 'function') return;
 

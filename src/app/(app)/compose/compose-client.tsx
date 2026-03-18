@@ -139,6 +139,7 @@ export function ComposeClient({ tests, repositoryId, currentBranch, defaultBranc
     return () => {
       if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
     };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [repositoryId, currentBranch, selectedTestIds, versionOverrides, tests]);
 
   const [groupByArea, setGroupByArea] = useState(false);

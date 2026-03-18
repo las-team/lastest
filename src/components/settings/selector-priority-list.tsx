@@ -150,7 +150,7 @@ export function SelectorPriorityList({ value, onChange, compact = false, recomme
   const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
-    setMounted(true);
+    queueMicrotask(() => setMounted(true));
   }, []);
 
   const sensors = useSensors(

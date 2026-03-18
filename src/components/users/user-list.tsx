@@ -95,6 +95,7 @@ export function UserList({ users, currentUserId }: UserListProps) {
                 <td className="px-4 py-3">
                   <div className="flex items-center gap-3">
                     {user.avatarUrl ? (
+                      /* eslint-disable-next-line @next/next/no-img-element */
                       <img
                         src={user.avatarUrl}
                         alt={user.name || user.email}

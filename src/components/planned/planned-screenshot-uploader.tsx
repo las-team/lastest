@@ -175,6 +175,7 @@ export function PlannedScreenshotUploader({
           >
             <X className="w-4 h-4" />
           </button>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
             src={preview}
             alt="Preview"

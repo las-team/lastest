@@ -1,4 +1,4 @@
-import { getSelectedRepository, getRepositoriesByTeam, getTeam } from '@/lib/db/queries';
+import { getSelectedRepository, getRepositoriesByTeam } from '@/lib/db/queries';
 import { getCurrentSession } from '@/lib/auth';
 import { Sidebar } from './sidebar';
 

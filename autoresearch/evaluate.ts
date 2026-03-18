@@ -212,6 +212,7 @@ async function runTestCode(
   } catch (e) {
     return { passed: false, errorMessage: e instanceof Error ? e.message : String(e) };
   } finally {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     if (page) await (page as any).close().catch(() => {});
     if (context) await context.close().catch(() => {});
   }

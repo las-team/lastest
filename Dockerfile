@@ -56,6 +56,15 @@ ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
 ENV NEXT_PUBLIC_GIT_HASH=$GIT_HASH
 ENV NEXT_PUBLIC_GIT_COMMIT_COUNT=$GIT_COMMIT_COUNT
+# Dummy secret for build-time page data collection (overridden at runtime)
+ENV BETTER_AUTH_SECRET=build-time-placeholder
+
+# Generate build info file
+RUN node -e "\
+  const pkg = require('./package.json');\
+  const runner = require('./packages/runner/package.json');\
+  const info = { gitHash: '$GIT_HASH', commitCount: '$GIT_COMMIT_COUNT', version: pkg.version, runnerVersion: runner.version };\
+  require('fs').writeFileSync('build-info.json', JSON.stringify(info));"
 
 # Build the application
 RUN pnpm build
@@ -86,6 +95,7 @@ RUN groupadd --gid 1002 nodejs && \
 COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
 COPY --from=builder --chown=nextjs:nodejs /app/public ./public
+COPY --from=builder --chown=nextjs:nodejs /app/build-info.json ./build-info.json
 
 # Copy full playwright packages for runtime (standalone prunes them since they're dynamically loaded)
 COPY --from=deps --chown=nextjs:nodejs /app/node_modules/.pnpm/playwright@1.57.0/node_modules/playwright ./node_modules/.pnpm/playwright@1.57.0/node_modules/playwright
@@ -125,9 +135,10 @@ RUN mkdir -p /app/embedded-browser/node_modules && \
     ln -s /app/node_modules/playwright /app/embedded-browser/node_modules/playwright && \
     ln -s /app/node_modules/playwright-core /app/embedded-browser/node_modules/playwright-core
 
-# Copy entrypoint script
+# Copy entrypoint and helper scripts
 COPY --chown=nextjs:nodejs scripts/docker-entrypoint.sh /docker-entrypoint.sh
 RUN chmod +x /docker-entrypoint.sh
+COPY --chown=nextjs:nodejs scripts/migrate.js /app/migrate.js
 COPY --chown=nextjs:nodejs scripts/ws-proxy-preload.js /app/ws-proxy-preload.js
 
 # Create data directories

@@ -87,6 +87,7 @@ interface PlaywrightSettingsForDefaults {
   consoleErrorMode?: string | null;
   acceptAnyCertificate?: boolean | null;
   maxParallelTests?: number | null;
+  cursorPlaybackSpeed?: number | null;
 }
 
 interface TestDetailClientProps {
@@ -197,6 +198,7 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
     if (diff.classification === 'changed') {
       return <XCircle className="h-3 w-3 text-red-500" />;
     }
+    // eslint-disable-next-line jsx-a11y/alt-text
     return <Image className="h-3 w-3 text-muted-foreground" />;
   };
 
@@ -800,6 +802,7 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
                   consoleErrorMode: (playwrightDefaults?.consoleErrorMode as 'fail' | 'warn' | 'ignore') ?? 'fail',
                   acceptAnyCertificate: playwrightDefaults?.acceptAnyCertificate ?? false,
                   maxParallelTests: playwrightDefaults?.maxParallelTests ?? 2,
+                  cursorPlaybackSpeed: playwrightDefaults?.cursorPlaybackSpeed ?? 1,
                   baseUrl: envBaseUrl ?? 'http://localhost:3000',
                 }}
               />
@@ -838,6 +841,7 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
                                   rel="noopener noreferrer"
                                   className="block"
                                 >
+                                  {/* eslint-disable-next-line @next/next/no-img-element */}
                                   <img
                                     src={src}
                                     alt={label || 'Screenshot'}
@@ -955,6 +959,7 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
                                           rel="noopener noreferrer"
                                           className="block"
                                         >
+                                          {/* eslint-disable-next-line @next/next/no-img-element */}
                                           <img
                                             src={diff.currentImagePath}
                                             alt={diff.stepLabel || `Step ${i + 1}`}

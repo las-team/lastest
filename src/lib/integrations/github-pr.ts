@@ -25,7 +25,7 @@ export async function postPRComment(
   data: PRCommentData
 ): Promise<{ success: boolean; commentId?: number; error?: string }> {
   const statusEmoji = getStatusEmoji(data.status);
-  const statusText = getStatusText(data.status);
+  const _statusText = getStatusText(data.status);
 
   const baselineCount = data.totalTests - (data.changesDetected + data.flakyCount + data.failedCount);
   const modeLabel = data.comparisonMode ? getComparisonModeLabel(data.comparisonMode) : '';

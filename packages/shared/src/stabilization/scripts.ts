@@ -12,19 +12,21 @@ export function getFreezeRandomScript(seed: number, reseedOnInput?: boolean): st
       var baseSeed = ${seed};
       // Separate LCG states so crypto calls (nanoid) don't shift Math.random sequence (rough.js seeds)
       var mathState = ${seed};
-      var cryptoState = (${seed} * 2654435761 >>> 0) || 1;
+      var cryptoState = (Math.imul(${seed}, 2654435761) >>> 0) || 1;
 
       function nextMath() {
-        mathState = (mathState * 1103515245 + 12345) & 0x7fffffff;
+        // Math.imul: true 32-bit multiply (plain * overflows JS 53-bit floats for large states)
+        mathState = (Math.imul(mathState, 1103515245) + 12345) & 0x7fffffff;
         return mathState;
       }
       function nextCrypto() {
-        cryptoState = (cryptoState * 1103515245 + 12345) & 0x7fffffff;
+        cryptoState = (Math.imul(cryptoState, 1103515245) + 12345) & 0x7fffffff;
         return cryptoState;
       }
 
       Math.random = function() {
-        return nextMath() / 0x7fffffff;
+        // Divide by 0x80000000 (not 0x7fffffff) so result is in [0, 1), never 1.0
+        return nextMath() / 0x80000000;
       };
       // Override crypto.getRandomValues to produce deterministic bytes
       crypto.getRandomValues = function(array) {
@@ -46,9 +48,9 @@ export function getFreezeRandomScript(seed: number, reseedOnInput?: boolean): st
                  ((nextCrypto() & 0x3 | 0x8).toString(16))+hex.slice(17,20)+'-'+hex.slice(20,32);
         };
       }
-      window.__resetMathRandom = function() {
-        mathState = ${seed};
-      };
+      // __resetMathRandom removed: resetting mathState mid-session caused roughjs
+      // to re-render existing elements with different strokes, making them invisible.
+      // addInitScript already resets mathState on each navigation.
 ${reseedOnInput ? `
       // Reseed LCG on user input events so element creation gets a seed
       // determined by the triggering event, not async RNG drift.
@@ -65,8 +67,7 @@ ${reseedOnInput ? `
         window.addEventListener(evtType, function(e) {
           if (!e.isTrusted) return;
           var h = __hashInputEvent(e);
-          mathState = h;
-          cryptoState = (h * 2654435761 >>> 0) || 1;
+          cryptoState = (Math.imul(h, 2654435761) >>> 0) || 1;
         }, true);
       });
 ` : ''}

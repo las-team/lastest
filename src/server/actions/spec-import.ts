@@ -152,7 +152,7 @@ function parseStoriesFromMarkdown(text: string): ExtractedUserStory[] | null {
     // Extract acceptance criteria from bullet points
     const criteria: ExtractedAcceptanceCriterion[] = [];
     // Match: - AC1: desc, - **AC1:** desc, - AC-1.1: desc, - desc (after "Acceptance Criteria" header)
-    const acSection = block.match(/(?:\*{0,2}Acceptance Criteria\*{0,2}:?\s*\n)([\s\S]*?)(?=\n#{1,4}\s|\n\*{0,2}(?:User Story|Priority|Notes)|$)/i);
+    const acSection = block.match(/(?:(?:#{1,4}\s+)?\*{0,2}Acceptance Criteria\*{0,2}:?\s*\n)([\s\S]*?)(?=\n#{1,4}\s+(?!AC)|(?:\n---)|(?:\n\*{0,2}(?:User Story|Priority|Notes))|$)/i);
     const acText = acSection ? acSection[1] : block;
 
     const acPattern = /(?:[-*]|\d+[.)]\s)\s*\*{0,2}(?:AC[-. ]?\d+(?:\.\d+)?)\*{0,2}[:.]\s*(.+?)(?:\n|$)/gi;
@@ -175,7 +175,7 @@ function parseStoriesFromMarkdown(text: string): ExtractedUserStory[] | null {
       let bulletMatch;
       while ((bulletMatch = plainBullets.exec(acSection[1])) !== null) {
         acIndex++;
-        const desc = bulletMatch[1].replace(/\*+/g, '').trim();
+        const desc = bulletMatch[1].replace(/\*+/g, '').replace(/^\[[ x]]\s*/i, '').trim();
         if (!desc || desc.length < 5) continue;
         criteria.push({
           id: `AC-${storyIndex}.${acIndex}`,
@@ -203,7 +203,7 @@ function parseStoriesFromMarkdown(text: string): ExtractedUserStory[] | null {
         const bulletMatch = line.match(/^\s*(?:[-*]|\d+[.)])\s+(.+)/);
         if (bulletMatch) {
           acIndex++;
-          const desc = bulletMatch[1].replace(/\*+/g, '').trim();
+          const desc = bulletMatch[1].replace(/\*+/g, '').replace(/^\[[ x]]\s*/i, '').trim();
           if (!desc || desc.length < 5) continue;
           criteria.push({
             id: `AC-${storyIndex}.${acIndex}`,
@@ -445,7 +445,7 @@ async function extractStoriesFromContent(
   const config = await getAIConfig(repositoryId);
   const prompt = createUserStoryExtractionPrompt(specContent);
 
-  const response = await generateWithAI(config, prompt, SYSTEM_PROMPT, {
+  const response = await generateWithAI(config, prompt, 'You are a document parser that extracts structured user stories and acceptance criteria. Output ONLY the requested format — no code, no tests, no conversation.', {
     actionType: 'extract_user_stories',
     repositoryId,
   });

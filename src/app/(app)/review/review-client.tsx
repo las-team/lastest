@@ -298,6 +298,7 @@ export function ReviewClient({
                                 )}
                               </span>
                               {diff.currentImagePath && (
+                                /* eslint-disable-next-line @next/next/no-img-element */
                                 <img
                                   src={diff.currentImagePath}
                                   alt=""

@@ -19,13 +19,12 @@ import {
 } from '@/components/ui/dialog';
 import { createArea, deleteArea, deleteAreaWithContents, moveTestToArea, moveSuiteToArea, moveArea } from '@/server/actions/areas';
 import { deleteTest } from '@/server/actions/tests';
-import { FolderSearch, Sparkles, Globe, FileText, Loader2, BookOpen, Check, X, Circle, FileWarning, GitCompare } from 'lucide-react';
+import { FolderSearch, Sparkles, FileText, Loader2, BookOpen, Check, X, Circle, FileWarning, GitCompare } from 'lucide-react';
 import { Progress } from '@/components/ui/progress';
 import { cn } from '@/lib/utils';
 import { startRemoteRouteScan } from '@/server/actions/scanner';
 import { AIScanRoutesDialog } from '@/components/ai/ai-scan-routes-dialog';
 import { SpecAnalysisDialog } from '@/components/ai/spec-analysis-dialog';
-import { MCPExploreRoutesDialog } from '@/components/ai/mcp-explore-routes-dialog';
 import { ImportFromSpecDialog } from '@/components/ai/import-from-spec-dialog';
 import { CodeDiffScanDialog } from '@/components/ai/code-diff-scan-dialog';
 import { toast } from 'sonner';
@@ -64,7 +63,6 @@ export function AreasPageClient({ tree, uncategorizedTests, unsortedSuites, repo
   const [isScanning, setIsScanning] = useState(false);
   const [showAIScanDialog, setShowAIScanDialog] = useState(false);
   const [showSpecAnalysisDialog, setShowSpecAnalysisDialog] = useState(false);
-  const [showMCPExploreDialog, setShowMCPExploreDialog] = useState(false);
   const [showImportFromSpecDialog, setShowImportFromSpecDialog] = useState(false);
   const [showCodeDiffDialog, setShowCodeDiffDialog] = useState(false);
 
@@ -331,16 +329,8 @@ export function AreasPageClient({ tree, uncategorizedTests, unsortedSuites, repo
                       className="flex flex-col items-center gap-2 p-4 border rounded-lg hover:bg-muted/50 hover:border-primary/50 transition-colors text-center"
                     >
                       <Sparkles className="h-6 w-6 text-primary" />
-                      <span className="font-medium text-sm">AI Scan</span>
+                      <span className="font-medium text-sm">Discover Areas</span>
                       <span className="text-xs text-muted-foreground">AI-powered discovery</span>
-                    </button>
-                    <button
-                      onClick={() => setShowMCPExploreDialog(true)}
-                      className="flex flex-col items-center gap-2 p-4 border rounded-lg hover:bg-muted/50 hover:border-primary/50 transition-colors text-center"
-                    >
-                      <Globe className="h-6 w-6 text-primary" />
-                      <span className="font-medium text-sm">MCP Explore</span>
-                      <span className="text-xs text-muted-foreground">MCP-based exploration</span>
                     </button>
                     <button
                       onClick={() => setShowCodeDiffDialog(true)}
@@ -577,12 +567,6 @@ export function AreasPageClient({ tree, uncategorizedTests, unsortedSuites, repo
         onOpenChange={setShowSpecAnalysisDialog}
         repositoryId={repositoryId}
         branch={selectedBranch}
-      />
-      <MCPExploreRoutesDialog
-        open={showMCPExploreDialog}
-        onOpenChange={setShowMCPExploreDialog}
-        repositoryId={repositoryId}
-        onSaved={() => router.refresh()}
       />
       <ImportFromSpecDialog
         open={showImportFromSpecDialog}

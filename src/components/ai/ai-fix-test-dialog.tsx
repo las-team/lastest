@@ -55,7 +55,7 @@ export function AIFixTestDialog({
       } else {
         toast.error(result.error || 'Failed to generate fix');
       }
-    } catch (error) {
+    } catch (_error) {
       toast.error('Failed to generate fix');
     } finally {
       setIsGenerating(false);
@@ -74,7 +74,7 @@ export function AIFixTestDialog({
       } else {
         toast.error(result.error || 'Failed to save fix');
       }
-    } catch (error) {
+    } catch (_error) {
       toast.error('Failed to save fix');
     } finally {
       setIsSaving(false);
@@ -97,7 +97,7 @@ export function AIFixTestDialog({
             Fix Test with AI
           </DialogTitle>
           <DialogDescription>
-            AI will analyze the error and generate a fixed version of "{testName}"
+            AI will analyze the error and generate a fixed version of &quot;{testName}&quot;
           </DialogDescription>
         </DialogHeader>
 

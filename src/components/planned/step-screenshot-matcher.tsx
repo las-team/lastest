@@ -113,6 +113,7 @@ function DraggablePlannedItem({
       >
         <GripVertical className="h-4 w-4 text-muted-foreground mt-1 flex-shrink-0" />
         <div className="flex-1 min-w-0">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
             src={screenshot.imagePath}
             alt={screenshot.name || 'Planned'}
@@ -155,6 +156,7 @@ function DroppableStepSlot({
       <div className="flex gap-3">
         {/* Captured screenshot thumbnail */}
         <div className="flex-shrink-0 w-24">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
             src={step.imagePath}
             alt={step.label}
@@ -175,6 +177,7 @@ function DroppableStepSlot({
                   <Link2 className="h-3 w-3 text-green-600" />
                   <span className="text-xs font-medium text-green-700">Matched</span>
                 </div>
+                {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img
                   src={matchedPlanned.imagePath}
                   alt={matchedPlanned.name || 'Planned'}
@@ -529,6 +532,7 @@ export function StepScreenshotMatcher({
           <DragOverlay>
             {activePlanned && (
               <div className="border rounded-lg p-2 bg-white shadow-lg cursor-grabbing">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img
                   src={activePlanned.imagePath}
                   alt={activePlanned.name || 'Planned'}

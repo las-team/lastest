@@ -1,10 +1,10 @@
+/* eslint-disable @typescript-eslint/no-require-imports */
 /**
  * Vitest setup file
  * Runs before all tests to configure mocks and globals
  */
 import { vi, beforeEach } from 'vitest';
 import fs from 'fs';
-import path from 'path';
 
 // Mock fs operations for tests that don't need real file I/O
 export const mockFs = () => {
