@@ -93,6 +93,8 @@ function deriveBranchStatus(diff: VisualDiffWithTestStatus): BranchStatus {
   if (diff.status === 'todo') return 'has_todo';
   if (diff.status === 'approved') return 'branch_accepted';
   if (diff.classification === 'unchanged' || diff.status === 'auto_approved') return 'baseline';
+  // 0px diffs are visually identical — treat as baseline regardless of stale classification
+  if (diff.pixelDifference === 0 || diff.pixelDifference === null) return 'baseline';
   return 'new_change';
 }
 
