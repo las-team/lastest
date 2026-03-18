@@ -442,6 +442,7 @@ export async function saveRecordedTest(data: {
   requiredCapabilities?: { fileUpload?: boolean; clipboard?: boolean; networkInterception?: boolean; downloads?: boolean } | null;
   viewportWidth?: number;
   viewportHeight?: number;
+  extraSetupSteps?: Array<{ stepType: 'test' | 'script'; testId?: string | null; scriptId?: string | null }>;
 }) {
   if (data.repositoryId) await requireRepoAccess(data.repositoryId);
   else await requireTeamAccess();
@@ -473,6 +474,19 @@ export async function saveRecordedTest(data: {
     if (Object.keys(updates).length > 0) {
       await upsertPlaywrightSettings(data.repositoryId, updates);
     }
+  }
+
+  // Persist extra setup steps as test setup overrides
+  if (data.extraSetupSteps && data.extraSetupSteps.length > 0) {
+    const { updateTestSetupOverrides } = await import('@/lib/db/queries');
+    await updateTestSetupOverrides(test.id, {
+      skippedDefaultStepIds: [],
+      extraSteps: data.extraSetupSteps.map(s => ({
+        stepType: s.stepType,
+        testId: s.testId ?? null,
+        scriptId: s.scriptId ?? null,
+      })),
+    });
   }
 
   revalidatePath('/tests');

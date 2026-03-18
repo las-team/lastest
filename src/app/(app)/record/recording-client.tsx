@@ -661,6 +661,7 @@ export function RecordingClient({
           requiredCapabilities,
           viewportWidth: settings.viewportWidth ?? 1280,
           viewportHeight: settings.viewportHeight ?? 720,
+          extraSetupSteps: runSetupBeforeRecording && extraSetupSteps.length > 0 ? extraSetupSteps : undefined,
         });
         router.push(`/tests/${test.id}`);
       }
