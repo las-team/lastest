@@ -1084,9 +1084,9 @@ export class PlaywrightRunner extends EventEmitter {
         await page.addInitScript(`
           (function() {
             window.__resetExcalidrawRNG = function() {
-              if (typeof window.__resetMathRandom === 'function') {
-                window.__resetMathRandom();
-              }
+              // No-op: resetting mathState here caused roughjs to re-render elements
+              // with a different Math.random sequence, making them invisible.
+              // Per-element seeds in roughjs handle rendering determinism.
             };
           })();
         `);

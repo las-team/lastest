@@ -746,12 +746,7 @@ export class TestRunner {
       log('info', `Navigating to ${url}...`);
       const response = await originalGoto(url, options);
       log('info', `Navigation complete: ${response?.status() ?? 'no response'}`);
-      // Reset Math.random seed after page load so test actions get deterministic seeds
-      if (stabilization?.freezeRandomValues) {
-        await page.evaluate(() => {
-          (window as unknown as { __resetMathRandom?: () => void }).__resetMathRandom?.();
-        }).catch(() => {});
-      }
+      // addInitScript already resets mathState on each navigation — no explicit reset needed
       return response;
     };
 

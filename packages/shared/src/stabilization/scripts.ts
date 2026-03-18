@@ -46,9 +46,9 @@ export function getFreezeRandomScript(seed: number, reseedOnInput?: boolean): st
                  ((nextCrypto() & 0x3 | 0x8).toString(16))+hex.slice(17,20)+'-'+hex.slice(20,32);
         };
       }
-      window.__resetMathRandom = function() {
-        mathState = ${seed};
-      };
+      // __resetMathRandom removed: resetting mathState mid-session caused roughjs
+      // to re-render existing elements with different strokes, making them invisible.
+      // addInitScript already resets mathState on each navigation.
 ${reseedOnInput ? `
       // Reseed LCG on user input events so element creation gets a seed
       // determined by the triggering event, not async RNG drift.
