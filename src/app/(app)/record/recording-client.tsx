@@ -82,6 +82,7 @@ import { toast } from 'sonner';
 import { RecordingSetupPicker, type ExtraStep } from '@/components/setup/recording-setup-picker';
 
 interface SetupStepInfo {
+  id: string;
   stepType: 'test' | 'script';
   testId: string | null;
   scriptId: string | null;
@@ -271,6 +272,7 @@ export function RecordingClient({
   const [executionTarget, setExecutionTarget] = usePreferredRunner();
   const [runSetupBeforeRecording, setRunSetupBeforeRecording] = useState(true);
   const [extraSetupSteps, setExtraSetupSteps] = useState<ExtraStep[]>([]);
+  const [skippedDefaultStepIds, setSkippedDefaultStepIds] = useState<Set<string>>(new Set());
   const [selectedStorageStateId, setSelectedStorageStateId] = useState<string | null>(null);
   const [storageStateOptions, setStorageStateOptions] = useState<Array<{ id: string; name: string; cookieCount: number; originCount: number }>>([]);
   const [capturedStorageState, setCapturedStorageState] = useState<string | null>(null);
@@ -475,21 +477,13 @@ export function RecordingClient({
         }
       } else {
         // Start Lastest recorder with optional setup
-        const setupOptions = runSetupBeforeRecording && (repositorySetupSteps.length > 0 || extraSetupSteps.length > 0)
-          ? {
-              steps: [
-                ...repositorySetupSteps.map(s => ({
-                  stepType: s.stepType,
-                  testId: s.testId,
-                  scriptId: s.scriptId,
-                })),
-                ...extraSetupSteps.map(s => ({
-                  stepType: s.stepType,
-                  testId: s.testId ?? null,
-                  scriptId: s.scriptId ?? null,
-                })),
-              ],
-            }
+        const activeDefaults = repositorySetupSteps.filter(s => !skippedDefaultStepIds.has(s.id));
+        const allSteps = [
+          ...activeDefaults.map(s => ({ stepType: s.stepType, testId: s.testId, scriptId: s.scriptId })),
+          ...extraSetupSteps.map(s => ({ stepType: s.stepType, testId: s.testId ?? null, scriptId: s.scriptId ?? null })),
+        ];
+        const setupOptions = runSetupBeforeRecording && allSteps.length > 0
+          ? { steps: allSteps }
           : undefined;
 
         const result = await startRecording(url, repositoryId, executionTarget, setupOptions, selectedStorageStateId ?? undefined);
@@ -662,6 +656,7 @@ export function RecordingClient({
           viewportWidth: settings.viewportWidth ?? 1280,
           viewportHeight: settings.viewportHeight ?? 720,
           extraSetupSteps: runSetupBeforeRecording && extraSetupSteps.length > 0 ? extraSetupSteps : undefined,
+          skippedDefaultStepIds: runSetupBeforeRecording && skippedDefaultStepIds.size > 0 ? Array.from(skippedDefaultStepIds) : undefined,
         });
         router.push(`/tests/${test.id}`);
       }
@@ -733,7 +728,6 @@ export function RecordingClient({
     return (
       <div className="flex-1 p-6 overflow-auto">
         <div className="max-w-5xl mx-auto space-y-4">
-          <PlaywrightStatusSection />
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
             {/* Left Column - Form */}
             <Card>
@@ -857,16 +851,15 @@ export function RecordingClient({
                 {/* Environment Setup Toggle */}
                 {(() => {
                   const hasDefaults = repositorySetupSteps.length > 0;
-                  const totalSteps = repositorySetupSteps.length + extraSetupSteps.length;
+                  const activeDefaultCount = repositorySetupSteps.filter(s => !skippedDefaultStepIds.has(s.id)).length;
+                  const totalSteps = activeDefaultCount + extraSetupSteps.length;
                   const stepSummary = totalSteps > 0
-                    ? totalSteps === 1
-                      ? `${repositorySetupSteps[0]?.stepType === 'test' ? 'Test' : 'Script'}: ${repositorySetupSteps[0]?.name ?? extraSetupSteps[0]?.name}`
-                      : `${totalSteps} setup steps`
-                    : 'Add steps below';
+                    ? `${totalSteps} setup step${totalSteps !== 1 ? 's' : ''}${skippedDefaultStepIds.size > 0 ? ` (${skippedDefaultStepIds.size} skipped)` : ''}`
+                    : 'All steps disabled';
 
                   return (
-                    <div className="space-y-0">
-                      <div className="flex items-center justify-between p-3 bg-muted/50 rounded-lg border">
+                    <div className="bg-muted/30 rounded-lg border">
+                      <div className="flex items-center justify-between p-3">
                         <div className="flex items-center gap-3">
                           <Play className="h-4 w-4 text-muted-foreground" />
                           <div className="space-y-0.5">
@@ -886,48 +879,50 @@ export function RecordingClient({
                         />
                       </div>
                       {runSetupBeforeRecording && (
-                        <RecordingSetupPicker
-                          defaultSteps={repositorySetupSteps}
-                          extraSteps={extraSetupSteps}
-                          availableTests={availableTests}
-                          availableScripts={availableScripts}
-                          onChange={setExtraSetupSteps}
-                        />
+                        <div className="border-t px-3 pb-3">
+                          <RecordingSetupPicker
+                            defaultSteps={repositorySetupSteps}
+                            extraSteps={extraSetupSteps}
+                            skippedDefaultStepIds={skippedDefaultStepIds}
+                            availableTests={availableTests}
+                            availableScripts={availableScripts}
+                            onChange={setExtraSetupSteps}
+                            onSkipChange={setSkippedDefaultStepIds}
+                          />
+                        </div>
+                      )}
+                      {storageStateOptions.length > 0 && (
+                        <div className="flex items-center justify-between p-3 border-t">
+                          <div className="flex items-center gap-3">
+                            <Cookie className="h-4 w-4 text-muted-foreground" />
+                            <div className="space-y-0.5">
+                              <Label className="text-sm font-medium">Load Saved Auth</Label>
+                              <p className="text-xs text-muted-foreground">
+                                Restore cookies & localStorage from a previous session
+                              </p>
+                            </div>
+                          </div>
+                          <Select
+                            value={selectedStorageStateId ?? 'none'}
+                            onValueChange={(v) => setSelectedStorageStateId(v === 'none' ? null : v)}
+                          >
+                            <SelectTrigger className="w-48 bg-background">
+                              <SelectValue placeholder="None" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="none">None</SelectItem>
+                              {storageStateOptions.map(s => (
+                                <SelectItem key={s.id} value={s.id}>
+                                  {s.name} ({s.cookieCount} cookies)
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
                       )}
                     </div>
                   );
                 })()}
-
-                {/* Storage State (Saved Auth) Picker */}
-                {storageStateOptions.length > 0 && (
-                  <div className="flex items-center justify-between p-3 bg-muted/50 rounded-lg border">
-                    <div className="flex items-center gap-3">
-                      <Cookie className="h-4 w-4 text-muted-foreground" />
-                      <div className="space-y-0.5">
-                        <Label className="text-sm font-medium">Load Saved Auth</Label>
-                        <p className="text-xs text-muted-foreground">
-                          Restore cookies & localStorage from a previous session
-                        </p>
-                      </div>
-                    </div>
-                    <Select
-                      value={selectedStorageStateId ?? 'none'}
-                      onValueChange={(v) => setSelectedStorageStateId(v === 'none' ? null : v)}
-                    >
-                      <SelectTrigger className="w-48">
-                        <SelectValue placeholder="None" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="none">None</SelectItem>
-                        {storageStateOptions.map(s => (
-                          <SelectItem key={s.id} value={s.id}>
-                            {s.name} ({s.cookieCount} cookies)
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                )}
 
                 {/* Error Display */}
                 {error && (

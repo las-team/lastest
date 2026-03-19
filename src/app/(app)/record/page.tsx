@@ -27,6 +27,7 @@ export default async function RecordPage({ searchParams }: RecordPageProps) {
     selectedRepo ? getSetupScripts(selectedRepo.id) : Promise.resolve([]),
   ]);
   const repositorySetupSteps = defaultSteps.map(s => ({
+    id: s.id,
     stepType: s.stepType as 'test' | 'script',
     testId: s.testId,
     scriptId: s.scriptId,

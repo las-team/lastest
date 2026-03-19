@@ -443,6 +443,7 @@ export async function saveRecordedTest(data: {
   viewportWidth?: number;
   viewportHeight?: number;
   extraSetupSteps?: Array<{ stepType: 'test' | 'script'; testId?: string | null; scriptId?: string | null }>;
+  skippedDefaultStepIds?: string[];
 }) {
   if (data.repositoryId) await requireRepoAccess(data.repositoryId);
   else await requireTeamAccess();
@@ -476,12 +477,14 @@ export async function saveRecordedTest(data: {
     }
   }
 
-  // Persist extra setup steps as test setup overrides
-  if (data.extraSetupSteps && data.extraSetupSteps.length > 0) {
+  // Persist setup overrides (skipped defaults and/or extra steps)
+  const hasSkipped = data.skippedDefaultStepIds && data.skippedDefaultStepIds.length > 0;
+  const hasExtra = data.extraSetupSteps && data.extraSetupSteps.length > 0;
+  if (hasSkipped || hasExtra) {
     const { updateTestSetupOverrides } = await import('@/lib/db/queries');
     await updateTestSetupOverrides(test.id, {
-      skippedDefaultStepIds: [],
-      extraSteps: data.extraSetupSteps.map(s => ({
+      skippedDefaultStepIds: data.skippedDefaultStepIds ?? [],
+      extraSteps: (data.extraSetupSteps ?? []).map(s => ({
         stepType: s.stepType,
         testId: s.testId ?? null,
         scriptId: s.scriptId ?? null,

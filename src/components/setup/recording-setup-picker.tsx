@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { FlaskConical, FileCode, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { Switch } from '@/components/ui/switch';
 import {
   Select,
   SelectContent,
@@ -20,19 +21,23 @@ export interface ExtraStep {
 }
 
 interface RecordingSetupPickerProps {
-  defaultSteps: { stepType: 'test' | 'script'; name: string }[];
+  defaultSteps: { id: string; stepType: 'test' | 'script'; testId?: string | null; scriptId?: string | null; name: string }[];
   extraSteps: ExtraStep[];
+  skippedDefaultStepIds: Set<string>;
   availableTests: { id: string; name: string }[];
   availableScripts: { id: string; name: string }[];
   onChange: (steps: ExtraStep[]) => void;
+  onSkipChange: (skipped: Set<string>) => void;
 }
 
 export function RecordingSetupPicker({
   defaultSteps,
   extraSteps,
+  skippedDefaultStepIds,
   availableTests,
   availableScripts,
   onChange,
+  onSkipChange,
 }: RecordingSetupPickerProps) {
   const [addStepType, setAddStepType] = useState<'test' | 'script'>('test');
 
@@ -52,27 +57,47 @@ export function RecordingSetupPicker({
     onChange(extraSteps.filter((_, i) => i !== index));
   };
 
-  const addedTestIds = new Set(extraSteps.filter((s) => s.stepType === 'test').map((s) => s.testId!));
-  const addedScriptIds = new Set(extraSteps.filter((s) => s.stepType === 'script').map((s) => s.scriptId!));
-  const pickableTests = availableTests.filter((t) => !addedTestIds.has(t.id));
-  const pickableScripts = availableScripts.filter((s) => !addedScriptIds.has(s.id));
+  const activeDefaults = defaultSteps.filter((s) => !skippedDefaultStepIds.has(s.id));
+  const usedTestIds = new Set([
+    ...activeDefaults.filter((s) => s.stepType === 'test' && s.testId).map((s) => s.testId!),
+    ...extraSteps.filter((s) => s.stepType === 'test').map((s) => s.testId!),
+  ]);
+  const usedScriptIds = new Set([
+    ...activeDefaults.filter((s) => s.stepType === 'script' && s.scriptId).map((s) => s.scriptId!),
+    ...extraSteps.filter((s) => s.stepType === 'script').map((s) => s.scriptId!),
+  ]);
+  const pickableTests = availableTests.filter((t) => !usedTestIds.has(t.id));
+  const pickableScripts = availableScripts.filter((s) => !usedScriptIds.has(s.id));
 
   return (
-    <div className="space-y-2 mt-3 px-1">
-      {/* Default steps (read-only) */}
-      {defaultSteps.map((step, i) => {
+    <div className="space-y-2 pt-2">
+      {/* Default steps (toggleable) */}
+      {defaultSteps.map((step) => {
+        const isSkipped = skippedDefaultStepIds.has(step.id);
         const Icon = step.stepType === 'test' ? FlaskConical : FileCode;
         const iconColor = step.stepType === 'test' ? 'text-blue-500' : 'text-green-500';
         const bgColor = step.stepType === 'test' ? 'bg-blue-500/10' : 'bg-green-500/10';
         return (
-          <div key={i} className="flex items-center gap-3 p-2.5 border rounded-lg opacity-60">
+          <div key={step.id} className={cn('flex items-center gap-3 p-2.5 bg-background/50 border rounded-lg transition-opacity', isSkipped && 'opacity-50')}>
             <div className={cn('flex items-center justify-center w-6 h-6 rounded', bgColor)}>
               <Icon className={cn('w-3.5 h-3.5', iconColor)} />
             </div>
             <div className="flex-1 min-w-0">
-              <p className="text-xs font-medium truncate">{step.name}</p>
+              <p className={cn('text-xs font-medium truncate', isSkipped && 'line-through')}>{step.name}</p>
               <p className="text-xs text-muted-foreground">Default</p>
             </div>
+            <Switch
+              checked={!isSkipped}
+              onCheckedChange={(checked) => {
+                const next = new Set(skippedDefaultStepIds);
+                if (checked) {
+                  next.delete(step.id);
+                } else {
+                  next.add(step.id);
+                }
+                onSkipChange(next);
+              }}
+            />
           </div>
         );
       })}
@@ -83,7 +108,7 @@ export function RecordingSetupPicker({
         const iconColor = step.stepType === 'test' ? 'text-blue-500' : 'text-green-500';
         const bgColor = step.stepType === 'test' ? 'bg-blue-500/10' : 'bg-green-500/10';
         return (
-          <div key={i} className="flex items-center gap-3 p-2.5 bg-background border rounded-lg">
+          <div key={i} className="flex items-center gap-3 p-2.5 bg-background/80 border rounded-lg">
             <div className={cn('flex items-center justify-center w-6 h-6 rounded', bgColor)}>
               <Icon className={cn('w-3.5 h-3.5', iconColor)} />
             </div>
@@ -106,7 +131,7 @@ export function RecordingSetupPicker({
       {/* Add step row */}
       <div className="flex gap-2 items-center pt-1">
         <Select value={addStepType} onValueChange={(v) => setAddStepType(v as 'test' | 'script')}>
-          <SelectTrigger className="w-[100px] h-8 text-xs">
+          <SelectTrigger className="w-[100px] h-8 text-xs bg-background">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
@@ -116,7 +141,7 @@ export function RecordingSetupPicker({
         </Select>
 
         <Select onValueChange={handleAdd} value="">
-          <SelectTrigger className="flex-1 h-8 text-xs">
+          <SelectTrigger className="flex-1 h-8 text-xs bg-background">
             <SelectValue placeholder="Add extra step..." />
           </SelectTrigger>
           <SelectContent>
