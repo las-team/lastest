@@ -952,6 +952,11 @@ async function processVisualDiff(
 
   // Helper to classify based on percentage
   const classifyDiff = (pct: number, pixelDiff?: number): { classification: DiffClassification; status: DiffStatus } => {
+    // Truly identical images are always unchanged, regardless of thresholds
+    if (pixelDiff === 0) {
+      return { classification: 'unchanged', status: 'auto_approved' };
+    }
+
     const effectiveFlakyThreshold = isUnstable ? Math.max(flakyThreshold, pct + 1) : flakyThreshold;
 
     if (pct < unchangedThreshold) {

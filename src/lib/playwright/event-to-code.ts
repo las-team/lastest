@@ -128,6 +128,7 @@ export function eventsToCodeLines(
           lines.push(`${indent}await page.waitForLoadState('networkidle').catch(() => {});`);
         }
         lines.push(`${indent}await page.goto(buildUrl(baseUrl, '${relativePath}'));`);
+        lines.push(`${indent}await page.waitForLoadState('networkidle').catch(() => {});`);
         lastNavigatedPath = relativePath;
       }
       lastAction = 'goto';
@@ -202,6 +203,7 @@ export function eventsToCodeLines(
         const escapedValue = (value || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'");
         target.push(`${dIndent}// Coordinate-only fill (no selectors found) - click to focus then type`);
         target.push(`${dIndent}await page.mouse.click(${coordinates.x}, ${coordinates.y});`);
+        target.push(`${dIndent}await page.waitForTimeout(100);`);
         target.push(`${dIndent}await page.keyboard.press('Control+a');`);
         target.push(`${dIndent}await page.keyboard.type('${escapedValue}');`);
       } else {

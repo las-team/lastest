@@ -1770,6 +1770,13 @@ export class PlaywrightRunner extends EventEmitter {
           await pg.mouse.click(coords.x, coords.y);
           return;
         }
+        if (action === 'fill' && coords) {
+          await pg.mouse.click(coords.x, coords.y);
+          await pg.waitForTimeout(100);
+          await pg.keyboard.press('Control+a');
+          await pg.keyboard.type(value || '');
+          return;
+        }
         throw new Error('No selector matched: ' + JSON.stringify(validSelectors));
       };
 
