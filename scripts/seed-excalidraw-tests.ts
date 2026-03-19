@@ -1,10 +1,10 @@
 /**
  * Seed script for Excalidraw visual regression tests
  *
- * Populates the lastest2 repository with 28 Excalidraw tests.
- * Generated from production database dump (2026-03-08).
+ * Populates the dexilion-team/excalidraw repository with 29 tests.
+ * Generated from Zima production database dump (2026-03-19).
  *
- * Run: pnpm db:seed
+ * Run: pnpm tsx scripts/seed-excalidraw-tests.ts
  */
 
 import { db } from '../src/lib/db';
@@ -17,16 +17,31 @@ const EXCALIDRAW_REPO_NAME = 'dexilion-team/excalidraw';
 // Will be set dynamically
 let REPO_ID: string;
 
-// Functional area definitions
-const FUNCTIONAL_AREA_DEFINITIONS = [
-  { name: "Arrows binding to bindables" },
+// Functional area definitions (with hierarchy)
+const FUNCTIONAL_AREA_DEFINITIONS: Array<{ name: string; description?: string; parent?: string }> = [
+  { name: "Arrows & Binding", description: "Binding behavior, simple and elbow arrows." },
+  { name: "Arrows binding to bindables", description: "Arrows' ability to bind and follow bindable shapes.", parent: "Arrows & Binding" },
+  { name: "Binding focus point", description: "The modifiable focus point handling tests.", parent: "Arrows & Binding" },
 ];
 
 // Test definitions with complete code
-const TEST_DEFINITIONS: Array<{ name: string; code: string; targetUrl: string; functionalArea?: string }> = [
+const TEST_DEFINITIONS: Array<{
+  name: string;
+  code: string;
+  targetUrl: string;
+  description?: string;
+  functionalArea?: string;
+  executionMode?: string;
+  agentPrompt?: string;
+  setupOverrides?: string;
+  teardownOverrides?: string;
+  viewportOverride?: string;
+  diffOverrides?: string;
+  playwrightOverrides?: string;
+}> = [
   {
-    name: "Multipoint simple arrows bind and track",
-    targetUrl: "https://excalidraw-lastest.vercel.app", functionalArea: "Arrows binding to bindables",
+    name: "Test 1: Move Element Basic",
+    targetUrl: "https://excalidraw.com",
     code: `import { Page } from 'playwright';
 
 export async function test(page: Page, baseUrl: string, screenshotPath: string, stepLogger: any) {
@@ -58,6 +73,7 @@ export async function test(page: Page, baseUrl: string, screenshotPath: string, 
           const text = sel.value.replace(/^ocr-text="/, '').replace(/"$/, '');
           locator = page.getByText(text, { exact: false });
         } else if (sel.type === 'role-name') {
+          // Parse role=button[name="Label"] format and use getByRole
           const match = sel.value.match(/^role=(\\w+)\\[name="(.+)"\\]$/);
           if (match) {
             locator = page.getByRole(match[1], { name: match[2] });
@@ -67,30 +83,25 @@ export async function test(page: Page, baseUrl: string, screenshotPath: string, 
         } else {
           locator = page.locator(sel.value);
         }
+        // Use .first() to handle multiple matches (e.g., header + footer nav links)
         const target = locator.first();
         await target.waitFor({ timeout: 3000 });
-        if (action === 'locate') return target;
         if (action === 'click') await target.click();
         else if (action === 'fill') await target.fill(value || '');
         else if (action === 'selectOption') await target.selectOption(value || '');
-        return target;
+        return;
       } catch { continue; }
     }
+    // Coordinate fallback for clicks when all selectors fail
     if (action === 'click' && coords) {
       console.log('Falling back to coordinate click at', coords.x, coords.y);
       await page.mouse.click(coords.x, coords.y);
       return;
     }
-    if (action === 'fill' && coords) {
-      console.log('Falling back to coordinate fill at', coords.x, coords.y);
-      await page.mouse.click(coords.x, coords.y);
-      await page.keyboard.press('Control+a');
-      await page.keyboard.type(value || '');
-      return;
-    }
     throw new Error('No selector matched: ' + JSON.stringify(validSelectors));
   }
 
+  // Replay cursor path helper
   async function replayCursorPath(page, moves) {
     for (const [x, y, delay] of moves) {
       await page.mouse.move(x, y);
@@ -99,244 +110,142 @@ export async function test(page: Page, baseUrl: string, screenshotPath: string, 
   }
 
   await page.goto(buildUrl(baseUrl, '/'));
-  await replayCursorPath(page, [[485,683,0],[478,644,36],[471,573,57],[472,509,40],[473,504,67],[474,503,33]]);
-  await replayCursorPath(page, [[498,457,71],[554,364,39],[582,332,39],[580,333,351],[552,348,33]]);
-  await replayCursorPath(page, [[524,357,103],[511,359,47],[503,362,2672]]);
-  await replayCursorPath(page, [[357,438,32],[356,439,47],[355,441,39],[352,450,43],[350,454,33],[348,456,34],[346,458,44],[346,458,56],[346,458,217],[346,458,67]]);
-  await page.mouse.move(346, 458);
+  await replayCursorPath(page, [[1248,477,0],[1042,440,39],[912,409,33],[831,386,33],[791,366,34],[781,350,33],[778,343,33],[777,337,34]]);
+  await replayCursorPath(page, [[774,332,33],[763,324,33],[729,310,34],[680,293,33],[634,271,33],[599,242,34],[563,207,33],[535,176,34],[519,150,32],[511,129,34],[508,112,33],[507,97,42],[508,92,33],[509,89,33],[511,84,34],[512,78,33],[514,71,34],[516,64,33]]);
+  await replayCursorPath(page, [[519,54,34],[521,46,33],[522,41,33],[522,39,33],[522,36,34],[523,36,99],[523,36,50],[522,36,109],[522,36,133],[522,36,83]]);
+  await page.mouse.move(522, 36);
   await page.mouse.down();
-  await replayCursorPath(page, [[346,458,83],[346,457,217],[350,454,39],[363,444,45],[376,434,51],[383,428,101],[393,421,39],[397,417,57],[400,413,44],[405,406,44],[408,400,45],[410,397,46],[412,392,44],[416,386,66],[419,382,51],[430,370,31],[438,360,62],[453,342,39],[457,337,229],[463,328,37],[468,319,179],[468,319,37],[470,317,121],[474,309,48],[474,308,43],[475,308,34]]);
-  await page.mouse.move(475, 308);
+  await page.mouse.move(522, 36);
   await page.mouse.up();
-  await replayCursorPath(page, [[475,307,318],[476,290,70],[479,277,139],[479,276,489],[479,276,368],[479,266,50],[484,223,49],[499,160,32],[504,136,34],[506,128,33],[507,116,242],[515,89,44],[523,64,33]]);
-  await replayCursorPath(page, [[526,53,43],[527,51,46],[527,48,47],[527,45,65],[527,42,66]]);
-  await page.mouse.move(527, 42);
+  await locateWithFallback(page, [{"type":"css-path","value":"svg > g > rect"}], 'click', null, {"x":520,"y":38});
+  await locateWithFallback(page, [{"type":"role-name","value":"role=radio[name=\\"Rectangle\\"]"},{"type":"name","value":"[name=\\"editor-current-shape\\"]"},{"type":"css-path","value":"div.Stack.Stack_horizontal > label.ToolIcon.Shape > input.ToolIcon_type_radio.ToolIcon_size_medium"}], 'click', null, {"x":514,"y":40});
+  await replayCursorPath(page, [[522,36,475],[522,36,142],[522,36,91],[517,42,34]]);
+  await replayCursorPath(page, [[507,53,33],[500,63,33],[492,77,34],[485,95,33],[479,115,34],[475,126,33],[474,134,33],[472,138,33],[471,140,34],[469,144,34],[465,152,41],[460,159,33],[458,163,34],[455,167,33],[455,167,133],[453,169,33],[440,174,34],[416,178,33],[393,181,34],[383,181,33],[383,181,66],[383,181,34],[383,181,41],[383,181,34],[383,181,42],[383,181,33],[383,181,41],[383,181,34],[383,180,33],[383,179,33],[383,179,33],[383,179,34],[383,179,42],[383,179,33],[383,179,33],[383,179,43]]);
+  await page.mouse.move(383, 179);
   await page.mouse.down();
-  await replayCursorPath(page, [[527,42,33]]);
-  await page.mouse.move(527, 42);
+  await replayCursorPath(page, [[383,179,175],[383,179,107],[383,182,34],[388,190,33],[391,194,33],[391,194,42],[391,194,59],[391,195,41],[396,205,33],[403,216,34],[408,227,33],[414,236,34],[420,248,33],[430,264,33],[441,282,34],[452,296,33],[463,307,33],[473,316,34],[479,321,33],[487,325,33],[497,330,33],[504,332,33],[510,333,34],[516,334,33],[524,337,34],[533,340,33],[544,343,33],[551,346,34],[555,347,34],[562,350,32],[566,352,33],[568,352,35],[568,353,90],[571,354,34],[571,355,33],[571,355,37],[571,355,30],[573,357,33],[575,361,34],[576,362,33],[577,365,34],[577,366,33]]);
+  await page.mouse.move(577, 366);
   await page.mouse.up();
-  // Coordinate-only click (no selectors found)
-  await page.mouse.click(520, 38);
-  // Coordinate-only click (no selectors found)
-  await page.mouse.click(514, 40);
-  await replayCursorPath(page, [[526,44,289]]);
-  await replayCursorPath(page, [[515,61,59],[484,123,35],[462,171,34],[439,230,49],[430,251,34],[424,261,94],[423,264,206],[409,291,32],[387,338,35],[359,398,51],[337,458,31],[334,467,44],[334,467,40],[334,467,32],[334,467,83],[334,469,33],[333,470,38]]);
-  await page.mouse.move(333, 470);
+  await replayCursorPath(page, [[577,365,2692],[577,365,49],[576,362,34],[572,356,33],[564,347,34],[558,339,33],[547,329,42],[537,319,32],[526,309,34],[517,301,34],[511,295,32],[506,290,34],[499,283,42],[489,273,34],[481,266,33],[477,262,32],[473,257,34],[472,257,59],[472,257,492],[472,257,166],[472,257,58],[472,258,34],[472,259,316],[472,260,34],[472,260,41],[472,261,34],[472,262,516],[472,263,108],[472,263,42]]);
+  await page.mouse.move(472, 263);
   await page.mouse.down();
-  await replayCursorPath(page, [[333,470,148],[335,448,44],[350,404,49],[373,341,46],[398,277,43],[406,259,50]]);
-  await page.mouse.move(406, 259);
+  await replayCursorPath(page, [[472,263,591],[472,264,33],[473,265,34],[474,267,34],[476,270,33],[480,273,33],[482,277,34],[488,283,32],[498,293,35],[513,305,32],[532,316,34],[550,326,33],[569,335,34],[585,342,33],[602,350,33],[622,358,34],[644,366,33],[669,375,33],[690,381,34],[704,386,33],[718,392,34],[735,399,32],[749,405,34],[754,408,33],[755,409,34],[760,413,33],[766,417,33],[774,424,33],[781,430,34],[785,432,33],[785,432,34],[785,433,32],[787,434,42],[788,435,42],[788,435,208]]);
+  await page.mouse.move(788, 435);
   await page.mouse.up();
-  await replayCursorPath(page, [[406,261,1310],[408,295,64],[413,397,39],[410,414,92],[413,408,162],[447,354,215],[599,88,136],[593,78,50],[580,61,72]]);
-  await replayCursorPath(page, [[561,40,43],[559,37,52],[558,35,55]]);
-  await page.mouse.move(558, 35);
-  await page.mouse.down();
-  await page.mouse.move(558, 35);
-  await page.mouse.up();
-  // Coordinate-only click (no selectors found)
-  await page.mouse.click(560, 38);
-  // Coordinate-only click (no selectors found)
-  await page.mouse.click(554, 40);
-  await replayCursorPath(page, [[558,35,255],[560,35,60]]);
-  await replayCursorPath(page, [[561,50,45],[561,66,33],[548,171,33],[541,216,33],[519,331,123],[508,357,579],[502,372,35],[463,472,47],[454,491,58],[447,509,43],[447,509,66],[458,501,60],[463,494,41],[470,486,35],[484,466,59],[489,460,40],[493,456,38],[498,453,42],[503,450,56],[508,447,39],[509,446,41],[511,445,135]]);
-  await page.mouse.move(511, 445);
-  await page.mouse.down();
-  await replayCursorPath(page, [[511,444,98],[516,422,34],[529,385,50],[557,313,48],[561,302,33],[562,300,37],[562,298,194],[566,290,39],[572,276,50],[587,247,94],[587,247,49],[587,247,54],[588,247,40],[588,246,44],[588,246,49]]);
-  await page.mouse.move(588, 246);
-  await page.mouse.up();
-  await page.keyboard.press('4');
-  await replayCursorPath(page, [[588,254,1829],[604,311,139],[663,427,94],[664,433,60],[665,443,45],[666,451,42],[666,454,37],[666,455,56],[666,455,166],[669,450,33]]);
-  await page.mouse.move(669, 450);
-  await page.mouse.down();
-  await replayCursorPath(page, [[669,450,334],[669,448,32],[670,445,35],[673,427,51],[677,405,47],[684,356,85],[688,335,38],[689,330,28],[690,326,34],[696,309,62],[700,298,38],[703,286,53],[704,281,44],[704,280,52],[705,279,51],[705,274,57],[705,274,208],[705,273,158],[708,272,37],[718,269,51],[724,267,54],[727,267,34],[736,264,50],[739,262,54],[741,261,62],[744,261,50],[744,261,60],[746,261,42],[747,261,99],[749,261,33],[750,261,84],[752,261,50],[754,262,40],[754,262,110]]);
-  await page.mouse.move(754, 262);
-  await page.mouse.up();
-  await replayCursorPath(page, [[754,261,1910],[777,216,41],[821,133,33],[840,102,33]]);
-  await replayCursorPath(page, [[882,38,33],[895,25,109],[895,26,307]]);
-  await replayCursorPath(page, [[895,33,33],[895,35,33]]);
-  // Coordinate-only click (no selectors found)
-  await page.mouse.click(893, 34);
-  await replayCursorPath(page, [[895,36,1284]]);
-  await replayCursorPath(page, [[895,41,34],[895,46,33],[893,65,40],[887,90,45],[881,100,55],[875,104,81],[872,104,45]]);
-  await replayCursorPath(page, [[869,98,184],[868,97,170]]);
-  await page.mouse.move(868, 97);
-  await page.mouse.down();
-  await page.mouse.move(868, 97);
-  await page.mouse.up();
-  // Coordinate-only click (no selectors found)
-  await page.mouse.click(819, 94);
-  await replayCursorPath(page, [[868,98,758],[869,105,71],[874,144,43],[879,198,57],[879,226,75],[880,253,43],[881,261,34]]);
-  await page.mouse.move(881, 262);
-  await page.mouse.down();
-  await replayCursorPath(page, [[881,262,600],[890,287,42],[931,402,39],[941,413,79],[955,421,45],[966,425,47],[977,430,45],[986,434,51],[990,436,51]]);
-  await page.mouse.move(991, 437);
-  await page.mouse.up();
-  await replayCursorPath(page, [[991,437,1148],[978,424,53],[856,343,50],[797,329,32],[748,327,58],[747,326,260],[688,269,33],[595,177,33],[552,89,74],[552,73,208],[557,70,52]]);
-  await replayCursorPath(page, [[595,59,49],[610,58,60],[620,55,41],[624,50,33],[625,47,34],[627,40,65],[631,36,46]]);
-  await replayCursorPath(page, [[634,35,36]]);
-  await page.mouse.move(634, 35);
-  await page.mouse.down();
-  await page.mouse.move(634, 35);
-  await page.mouse.up();
-  // Coordinate-only click (no selectors found)
-  await page.mouse.click(640, 38);
-  // Coordinate-only click (no selectors found)
-  await page.mouse.click(634, 40);
-  await replayCursorPath(page, [[633,35,1068]]);
-  await replayCursorPath(page, [[630,38,37],[560,105,35],[430,254,45],[389,312,36],[324,413,33],[310,435,37],[309,444,277],[309,467,40],[314,511,44],[317,530,33],[317,544,69],[316,548,46],[311,551,51],[300,557,46],[294,561,37],[291,565,34],[289,568,52],[289,569,32],[288,571,41],[286,573,42],[285,577,33],[283,581,33],[283,584,34],[282,587,60]]);
-  await page.mouse.move(282, 587);
-  await page.mouse.down();
-  await page.mouse.move(282, 587);
-  await page.mouse.up();
-  // Coordinate-only click (no selectors found)
-  await page.mouse.click(640, 360);
-  await replayCursorPath(page, [[286,587,425],[298,587,42],[327,589,56],[336,591,38],[345,592,55],[348,592,79],[353,592,41],[357,589,52],[363,584,44],[365,583,40],[367,581,34],[368,581,38]]);
-  await page.mouse.move(368, 581);
-  await page.mouse.down();
-  await page.mouse.move(368, 581);
-  await page.mouse.up();
-  // Coordinate-only click (no selectors found)
-  await page.mouse.click(640, 360);
-  await replayCursorPath(page, [[368,580,712],[368,576,33],[368,566,63],[368,552,37],[368,548,38],[369,543,136],[370,535,380],[372,505,34],[372,504,47],[372,502,67],[372,497,50],[372,495,56],[372,493,35],[372,491,59],[372,487,41],[372,484,46],[372,481,115],[372,479,38],[372,476,63],[372,476,863],[372,476,67]]);
-  await page.mouse.move(372, 476);
-  await page.mouse.down();
-  await page.mouse.move(372, 476);
-  await page.mouse.up();
-  // Coordinate-only click (no selectors found)
-  await page.mouse.click(640, 360);
-  await replayCursorPath(page, [[375,469,1120],[380,457,36],[385,432,64],[388,423,56],[390,419,38],[392,416,36],[394,413,300],[400,407,61],[402,403,39],[404,401,34],[407,396,65],[408,394,34],[409,394,49]]);
-  await page.mouse.move(409, 393);
-  await page.mouse.down();
-  await replayCursorPath(page, [[409,393,732],[408,393,50],[408,393,50],[407,393,36],[406,393,41],[404,393,59],[404,393,48],[403,393,56],[402,393,64],[401,393,52],[401,393,48],[400,393,41],[399,393,56],[399,393,49],[399,393,34],[398,393,38],[398,394,69],[397,394,44],[397,394,41],[396,394,52],[395,394,45],[386,396,52],[383,397,43],[381,397,65],[379,397,40],[377,397,57],[372,398,63],[368,398,41],[365,398,50],[364,398,66],[363,398,52],[361,397,34],[360,396,42],[358,396,39],[356,396,41],[345,401,59],[343,403,55],[342,403,45],[342,403,93],[341,403,47],[341,403,44]]);
-  await page.mouse.move(341, 403);
-  await page.mouse.up();
-  await replayCursorPath(page, [[341,408,733],[340,437,46],[339,479,39],[339,502,35],[345,555,65],[346,556,49],[346,556,217],[346,556,33],[346,555,168],[350,553,32],[376,532,34],[413,507,34],[443,484,33],[465,468,53],[479,458,51],[480,458,46],[480,457,92],[486,454,41],[500,446,34],[522,427,35],[554,387,33],[594,317,34],[612,272,248],[616,198,35],[619,144,60],[624,108,35],[626,101,33],[630,96,34],[635,88,33],[637,84,35],[642,71,51],[644,64,32]]);
-  await replayCursorPath(page, [[644,50,45],[644,42,55],[644,40,60]]);
-  await page.mouse.move(644, 40);
-  await page.mouse.down();
-  await page.mouse.move(644, 40);
-  await page.mouse.up();
-  // Coordinate-only click (no selectors found)
-  await page.mouse.click(640, 38);
-  // Coordinate-only click (no selectors found)
-  await page.mouse.click(634, 40);
-  await replayCursorPath(page, [[644,40,231],[643,42,42],[643,43,43]]);
-  await replayCursorPath(page, [[643,46,41],[634,71,50],[621,107,33],[603,157,34],[589,201,34],[557,345,46],[551,415,62],[547,456,41],[546,469,284],[543,545,91],[539,577,34],[531,579,81],[513,587,44],[502,592,33],[493,596,34],[487,597,33],[483,596,50],[481,595,39],[481,595,65]]);
-  await page.mouse.move(481, 595);
-  await page.mouse.down();
-  await page.mouse.move(481, 595);
-  await page.mouse.up();
-  // Coordinate-only click (no selectors found)
-  await page.mouse.click(640, 360);
-  await replayCursorPath(page, [[495,591,256],[525,578,57],[535,571,32],[544,566,40],[550,563,217],[563,553,39],[568,551,43],[569,551,45],[570,550,41],[570,549,57],[570,549,46],[571,548,37],[572,548,39],[573,546,49],[574,545,35],[574,544,40],[575,544,95]]);
-  await page.mouse.move(575, 544);
-  await page.mouse.down();
-  await page.mouse.move(575, 544);
-  await page.mouse.up();
-  // Coordinate-only click (no selectors found)
-  await page.mouse.click(640, 360);
-  await replayCursorPath(page, [[575,542,242],[575,537,40],[574,507,61],[570,471,51],[567,464,52],[567,464,41],[564,461,46],[563,461,46],[563,461,48],[563,461,33],[563,460,33],[562,460,56],[562,459,56],[561,458,60],[560,456,48],[560,456,69],[560,455,37],[560,454,53],[559,454,39],[559,454,34],[559,454,41],[558,453,42],[558,452,35],[558,451,57],[558,451,33],[557,450,41],[557,450,44],[557,449,36],[556,449,39],[556,448,49],[556,448,34],[556,448,682],[555,447,41]]);
-  await page.mouse.move(555, 447);
-  await page.mouse.down();
-  await page.mouse.move(555, 447);
-  await page.mouse.up();
-  // Coordinate-only click (no selectors found)
-  await page.mouse.click(640, 360);
-  await replayCursorPath(page, [[555,446,566],[558,442,42],[562,437,41],[567,430,47],[569,426,63],[570,423,337],[570,414,33],[571,404,35],[571,392,60],[571,389,50],[571,389,33],[572,389,104],[572,388,66],[572,388,65]]);
-  await page.mouse.move(572, 388);
-  await page.mouse.down();
-  await replayCursorPath(page, [[571,388,342],[570,388,103],[566,388,44],[565,388,60],[564,388,35],[564,388,58],[563,388,143],[563,388,32],[563,388,232],[562,388,42],[561,388,52],[561,388,51],[560,388,54],[560,388,41],[559,389,38],[559,389,44],[558,389,63],[558,389,40],[557,389,60],[555,389,39],[553,390,118],[551,391,38],[550,391,42],[549,391,42],[548,391,52],[547,392,92],[545,392,87],[545,392,73],[545,392,126],[544,392,33],[543,393,65],[540,393,59],[540,394,50],[539,394,44],[538,394,108],[533,395,55]]);
-  await page.mouse.move(533, 395);
-  await page.mouse.up();
-  await replayCursorPath(page, [[534,394,389],[588,307,135],[654,201,206],[647,143,62],[641,97,34],[640,90,71],[640,83,39],[639,79,52],[639,72,39],[640,62,49]]);
-  await replayCursorPath(page, [[640,48,43],[640,47,32],[640,44,59]]);
-  await page.mouse.move(640, 44);
-  await page.mouse.down();
-  await page.mouse.move(640, 44);
-  await page.mouse.up();
-  // Coordinate-only click (no selectors found)
-  await page.mouse.click(640, 38);
-  // Coordinate-only click (no selectors found)
-  await page.mouse.click(634, 40);
-  await replayCursorPath(page, [[641,56,646],[679,448,32],[703,536,64],[703,539,340],[696,543,113],[682,562,38],[681,568,33],[681,570,110]]);
-  await page.mouse.move(681, 570);
-  await page.mouse.down();
-  await page.mouse.move(681, 570);
-  await page.mouse.up();
-  // Coordinate-only click (no selectors found)
-  await page.mouse.click(640, 360);
-  await replayCursorPath(page, [[682,568,170],[691,556,40],[701,537,45],[706,526,50],[711,516,67],[713,512,37],[731,497,73],[746,491,48],[751,489,39],[755,488,36],[759,487,39],[761,487,64],[765,487,41]]);
-  await page.mouse.move(767, 487);
-  await page.mouse.down();
-  await page.mouse.move(767, 487);
-  await page.mouse.up();
-  // Coordinate-only click (no selectors found)
-  await page.mouse.click(640, 360);
-  await replayCursorPath(page, [[766,485,490],[763,481,37],[761,478,37],[756,472,40],[752,468,36],[750,467,34],[745,461,56],[743,460,35],[740,458,37],[738,456,50],[735,454,51],[734,453,36],[733,452,36],[732,451,87],[731,450,45],[730,450,58],[730,450,94],[729,450,46],[728,450,52],[728,450,50],[727,450,61],[727,450,332],[724,449,41],[723,449,49]]);
-  await page.mouse.move(723, 449);
-  await page.mouse.down();
-  await page.mouse.move(723, 449);
-  await page.mouse.up();
-  // Coordinate-only click (no selectors found)
-  await page.mouse.click(640, 360);
-  await replayCursorPath(page, [[724,449,1403],[733,453,50],[745,458,65],[760,460,58],[763,453,40],[766,439,149],[766,433,52],[764,429,105],[750,407,51],[744,397,45],[743,395,35],[743,393,32],[743,393,50],[743,393,83],[745,393,123],[750,395,44],[750,395,66],[750,395,51]]);
-  await page.mouse.move(750, 395);
-  await page.mouse.down();
-  await replayCursorPath(page, [[750,395,343],[742,396,39],[733,397,34],[730,398,44],[724,398,41],[723,398,54],[721,398,88],[720,398,40],[720,398,76],[719,398,42],[718,398,46],[717,398,69],[716,398,42],[714,398,49],[713,398,92],[707,399,51],[706,399,38],[705,399,44]]);
-  await page.mouse.move(705, 399);
-  await page.mouse.up();
-  await replayCursorPath(page, [[706,399,510],[774,384,53],[795,360,61],[806,303,147],[824,201,112],[826,204,49],[820,180,130],[744,69,36],[728,62,65],[706,60,37]]);
-  await replayCursorPath(page, [[690,58,87],[662,52,40],[659,51,39],[654,49,116]]);
-  await replayCursorPath(page, [[652,48,43]]);
-  await page.mouse.move(649, 47);
-  await page.mouse.down();
-  await page.mouse.move(649, 47);
-  await page.mouse.up();
-  // Coordinate-only click (no selectors found)
-  await page.mouse.click(652, 46);
-  // Coordinate-only click (no selectors found)
-  await page.mouse.click(634, 40);
-  await replayCursorPath(page, [[653,47,94],[660,50,36],[679,57,64]]);
-  await replayCursorPath(page, [[735,86,46],[802,147,154],[936,489,59],[941,510,56],[943,522,32],[943,523,217],[942,531,34],[929,553,71],[910,568,50],[903,572,118]]);
-  await page.mouse.move(893, 576);
-  await page.mouse.down();
-  await replayCursorPath(page, [[893,576,111]]);
-  await page.mouse.move(893, 576);
-  await page.mouse.up();
-  // Coordinate-only click (no selectors found)
-  await page.mouse.click(640, 360);
-  await replayCursorPath(page, [[964,523,386],[967,519,65],[975,505,42],[976,504,42],[976,503,53],[976,503,61]]);
-  await page.mouse.move(976, 503);
-  await page.mouse.down();
-  await page.mouse.move(976, 503);
-  await page.mouse.up();
-  // Coordinate-only click (no selectors found)
-  await page.mouse.click(640, 360);
-  await replayCursorPath(page, [[975,498,710],[970,488,66],[962,478,56],[955,473,63],[952,471,81],[948,469,44],[945,467,46],[944,467,40],[943,466,44],[942,465,71],[940,463,37],[939,461,41],[937,458,50],[937,457,50],[936,453,429],[932,446,113],[926,439,44],[924,438,42],[924,438,141],[923,438,49],[923,438,551],[923,438,48]]);
-  await page.mouse.move(923, 438);
-  await page.mouse.down();
-  await page.mouse.move(923, 438);
-  await page.mouse.up();
-  // Coordinate-only click (no selectors found)
-  await page.mouse.click(640, 360);
-  await replayCursorPath(page, [[923,449,1235],[911,528,383],[911,517,40],[908,486,81],[908,449,39],[910,428,40],[910,418,33],[910,411,34],[910,409,50],[910,409,150],[910,409,42],[907,413,41],[906,417,52],[904,424,38],[903,425,42],[903,425,100],[903,427,317],[902,477,107],[911,558,48],[912,561,63],[912,559,185],[912,544,52],[912,533,46],[912,530,90],[913,524,43],[913,524,84]]);
-  await page.mouse.move(913, 524);
-  await page.mouse.down();
-  await replayCursorPath(page, [[913,523,334],[913,516,63],[914,502,51],[920,484,44],[926,469,60],[927,466,48],[928,464,34],[929,462,64],[929,461,51],[931,458,234],[936,451,32],[936,451,57],[936,450,49],[938,446,42],[938,446,68],[938,444,41],[939,443,43],[940,441,50],[940,440,469],[940,440,48],[940,440,38]]);
-  await page.mouse.move(940, 440);
-  await page.mouse.up();
-  await replayCursorPath(page, [[940,440,746],[936,441,35],[909,444,93],[880,443,57],[878,441,48],[877,433,74],[877,427,42],[877,425,34],[879,421,50],[880,419,31],[881,418,70],[881,418,60],[881,417,56],[882,417,50]]);
-  await page.mouse.move(882, 417);
-  await page.mouse.down();
-  await replayCursorPath(page, [[881,417,409],[879,417,40],[874,417,59],[872,418,41],[868,418,52],[866,418,48],[865,418,41],[864,419,42],[863,419,33],[861,419,54],[860,419,52],[859,419,46],[858,419,53],[858,420,46],[857,420,136],[856,420,41],[855,420,38],[855,420,50],[854,421,40],[853,421,36],[852,421,44],[851,421,48],[851,421,36],[850,422,63],[850,422,44],[849,422,57]]);
-  await page.mouse.move(849, 422);
-  await page.mouse.up();
-  await replayCursorPath(page, [[849,422,735],[841,521,49],[839,655,50]]);
-}
-`,
+  await replayCursorPath(page, [[788,435,1092],[788,435,42],[788,435,41],[788,437,34],[787,440,34],[788,440,75],[791,441,33],[810,434,33],[890,440,33],[1022,451,34],[1222,466,33]]);
+  await page.screenshot({ path: getScreenshotPath(), fullPage: true });
+}`,
   },
   {
-    name: "New elbow arrow binds and tracks bindables",
-    targetUrl: "https://excalidraw-lastest.vercel.app", functionalArea: "Arrows binding to bindables",
+    name: "Test 1b: Move Element Advanced",
+    targetUrl: "https://excalidraw.com",
+    code: `import { Page } from 'playwright';
+
+export async function test(page: Page, baseUrl: string, screenshotPath: string, stepLogger: any) {
+  // Helper to build URLs safely (handles trailing/leading slashes)
+  function buildUrl(base, path) {
+    const cleanBase = base.endsWith('/') ? base.slice(0, -1) : base;
+    const cleanPath = path.startsWith('/') ? path : '/' + path;
+    return cleanBase + cleanPath;
+  }
+
+  // Helper to generate unique screenshot paths
+  let screenshotStep = 0;
+  function getScreenshotPath() {
+    screenshotStep++;
+    const ext = screenshotPath.lastIndexOf('.');
+    if (ext > 0) {
+      return screenshotPath.slice(0, ext) + '-step' + screenshotStep + screenshotPath.slice(ext);
+    }
+    return screenshotPath + '-step' + screenshotStep;
+  }
+
+  // Multi-selector fallback helper with coordinate fallback for clicks
+  async function locateWithFallback(page, selectors, action, value, coords) {
+    const validSelectors = selectors.filter(sel => sel.value && sel.value.trim() && !sel.value.includes('undefined'));
+    for (const sel of validSelectors) {
+      try {
+        let locator;
+        if (sel.type === 'ocr-text') {
+          const text = sel.value.replace(/^ocr-text="/, '').replace(/"$/, '');
+          locator = page.getByText(text, { exact: false });
+        } else if (sel.type === 'role-name') {
+          // Parse role=button[name="Label"] format and use getByRole
+          const match = sel.value.match(/^role=(\\w+)\\[name="(.+)"\\]$/);
+          if (match) {
+            locator = page.getByRole(match[1], { name: match[2] });
+          } else {
+            locator = page.locator(sel.value);
+          }
+        } else {
+          locator = page.locator(sel.value);
+        }
+        // Use .first() to handle multiple matches (e.g., header + footer nav links)
+        const target = locator.first();
+        await target.waitFor({ timeout: 3000 });
+        if (action === 'click') await target.click();
+        else if (action === 'fill') await target.fill(value || '');
+        else if (action === 'selectOption') await target.selectOption(value || '');
+        return;
+      } catch { continue; }
+    }
+    // Coordinate fallback for clicks when all selectors fail
+    if (action === 'click' && coords) {
+      console.log('Falling back to coordinate click at', coords.x, coords.y);
+      await page.mouse.click(coords.x, coords.y);
+      return;
+    }
+    throw new Error('No selector matched: ' + JSON.stringify(validSelectors));
+  }
+
+  // Replay cursor path helper
+  async function replayCursorPath(page, moves) {
+    for (const [x, y, delay] of moves) {
+      await page.mouse.move(x, y);
+      if (delay > 0) await page.waitForTimeout(delay);
+    }
+  }
+
+  await page.goto(buildUrl(baseUrl, '/'));
+  await replayCursorPath(page, [[1262,469,0],[1147,454,40],[1060,446,33],[978,441,32],[902,438,42],[850,439,26],[813,440,33]]);
+  await replayCursorPath(page, [[787,438,35],[771,436,31],[765,435,34],[765,435,42],[765,435,57],[765,435,34],[764,435,42],[764,435,33],[765,435,33],[765,435,42],[765,435,42],[765,435,50],[765,435,33],[765,435,41],[765,435,76],[765,435,600]]);
+  await page.mouse.move(765, 435);
+  await page.mouse.down();
+  await page.mouse.move(765, 435);
+  await page.mouse.up();
+  await locateWithFallback(page, [{"type":"role-name","value":"role=button[name=\\"Live collaboration...\\"]"},{"type":"css-path","value":"div.welcome-screen-center > div.welcome-screen-menu > button.welcome-screen-menu-item"}], 'click', null, {"x":640,"y":445});
+  await replayCursorPath(page, [[765,435,2250],[765,435,41],[756,436,34],[753,437,32],[752,437,34],[752,437,42],[752,437,158],[752,437,201],[761,436,33],[797,434,33],[849,435,34]]);
+  await page.keyboard.press('Escape');
+  await replayCursorPath(page, [[877,435,34],[881,435,32],[882,435,300],[891,433,34],[910,424,33],[930,408,33],[941,396,34],[945,386,33],[947,383,33]]);
+  await page.mouse.move(947, 383);
+  await page.mouse.down();
+  await page.mouse.move(947, 383);
+  await page.mouse.up();
+  await locateWithFallback(page, [{"type":"css-path","value":"div.excalidraw-app > div.excalidraw.excalidraw-container > canvas.excalidraw__canvas.interactive"}], 'click', null, {"x":640,"y":360});
+  await replayCursorPath(page, [[947,383,142],[947,384,117],[947,384,133],[947,384,42],[946,385,33],[945,385,75],[946,385,50],[946,385,49],[946,385,67],[947,386,418]]);
+  await page.keyboard.press('2');
+  await replayCursorPath(page, [[946,386,1916],[927,389,33],[905,392,33],[897,389,33],[887,379,34],[871,367,33],[851,359,33],[821,350,34],[787,341,33],[751,334,33],[717,331,34],[697,330,33],[689,329,34],[674,328,33],[653,324,33],[621,314,34],[579,299,33],[538,282,34],[509,268,33],[496,259,33],[494,259,42],[494,258,37],[494,258,113],[494,258,42],[493,258,65],[492,258,34],[491,257,34],[485,256,33],[480,254,33],[477,254,33],[468,252,34],[455,249,33],[448,247,33],[440,244,34],[438,243,41],[438,243,34],[438,243,50]]);
+  await page.mouse.move(438, 242);
+  await page.mouse.down();
+  await replayCursorPath(page, [[438,243,75],[438,243,41],[441,251,34],[457,272,33],[489,301,42],[522,328,34],[569,361,41],[612,385,33],[648,406,34],[680,424,33],[709,439,33],[728,449,34],[751,463,33],[785,481,33],[820,496,34],[842,505,33],[845,507,41],[845,507,158],[845,507,100],[845,507,43]]);
+  await page.mouse.move(845, 507);
+  await page.mouse.up();
+  await replayCursorPath(page, [[845,506,50],[845,506,166],[845,506,58],[845,506,2734],[936,485,34]]);
+  await page.screenshot({ path: getScreenshotPath(), fullPage: true });
+  await replayCursorPath(page, [[1265,333,2317],[1167,332,32],[1061,327,33],[945,323,33],[838,318,34],[753,310,33],[676,300,34],[633,295,33],[614,293,33],[605,294,34],[605,294,33],[605,294,34],[604,294,50],[601,296,33],[599,300,33],[596,307,34],[593,317,38],[594,332,28],[598,346,34],[601,353,33],[603,354,49],[603,355,51],[604,356,33],[604,359,33],[604,363,33],[606,364,59],[609,366,33],[614,368,33],[618,368,34],[619,368,33],[619,368,34],[621,368,33],[622,368,42],[622,368,33],[622,368,284]]);
+  await page.mouse.move(622, 368);
+  await page.mouse.down();
+  await replayCursorPath(page, [[622,368,335],[623,369,889],[626,369,34],[628,370,33],[630,372,33],[631,372,34],[633,373,33],[635,373,41],[635,373,34],[636,374,42],[637,374,33],[637,374,50],[639,375,34],[645,379,33],[654,385,33],[662,390,33],[670,394,33],[682,404,34],[699,420,34],[712,432,41],[712,432,33],[713,432,34],[718,432,33],[725,432,34],[728,433,33],[735,434,33],[744,438,33],[764,448,33],[784,459,34],[798,469,33],[814,478,33],[827,484,34],[835,487,34],[839,489,33],[842,489,33],[848,492,33],[854,494,34],[865,498,33],[867,498,41],[867,498,217],[867,498,83],[868,498,33],[875,496,34],[880,494,33],[882,494,33],[883,494,34],[885,493,34],[887,493,41],[890,493,39]]);
+  await page.mouse.move(890, 493);
+  await page.mouse.up();
+  await replayCursorPath(page, [[890,493,561],[890,494,601],[927,502,41],[1043,506,34]]);
+  await page.screenshot({ path: getScreenshotPath(), fullPage: true });
+  await replayCursorPath(page, [[1266,150,2125],[1195,159,32],[1168,165,34],[1163,168,33],[1152,176,38],[1135,187,28],[1111,200,34],[1076,217,33],[1026,230,34],[976,237,33],[938,240,34],[925,241,33],[925,241,183],[925,241,841],[925,241,2292],[959,240,34],[1123,226,33]]);
+}`,
+  },
+  {
+    name: "Test 2: Move Binding Arrow",
+    targetUrl: "https://excalidraw.com",
     code: `import { Page } from 'playwright';
 
 export async function test(page: Page, baseUrl: string, screenshotPath: string, stepLogger: any) {
@@ -409,183 +318,88 @@ export async function test(page: Page, baseUrl: string, screenshotPath: string, 
   }
 
   await page.goto(buildUrl(baseUrl, '/'));
-  await replayCursorPath(page, [[469,597,0],[472,600,50],[474,565,33]]);
-  await replayCursorPath(page, [[550,314,58],[623,149,42],[629,133,33],[632,119,134],[629,115,116],[622,108,68]]);
-  await replayCursorPath(page, [[545,41,65],[542,39,33],[535,36,39],[533,36,91],[533,36,37],[531,36,35],[528,36,153]]);
-  await replayCursorPath(page, [[525,36,106]]);
-  await page.mouse.move(525, 36);
+  await replayCursorPath(page, [[427,479,0],[427,480,39],[427,480,42],[427,480,125],[426,482,109],[380,519,434],[380,515,41],[380,512,52],[381,458,47],[400,403,40],[484,194,46],[493,161,41],[498,115,35],[498,115,54],[497,114,34],[490,107,134],[498,67,48]]);
+  await replayCursorPath(page, [[505,59,35],[511,51,33],[520,43,56],[523,41,39],[526,34,46]]);
+  await page.mouse.move(526, 33);
   await page.mouse.down();
-  await page.mouse.move(525, 36);
+  await replayCursorPath(page, [[526,33,45],[526,33,47],[526,33,176]]);
+  await page.mouse.move(526, 34);
   await page.mouse.up();
   // Coordinate-only click (no selectors found)
   await page.mouse.click(520, 38);
   // Coordinate-only click (no selectors found)
   await page.mouse.click(514, 40);
-  await replayCursorPath(page, [[516,40,556]]);
-  await replayCursorPath(page, [[449,74,33],[381,112,145],[311,158,289],[300,165,105],[266,176,60],[262,176,44],[261,176,40],[258,176,51],[257,176,54],[256,176,50],[253,175,144]]);
-  await page.mouse.move(253, 175);
+  await replayCursorPath(page, [[526,34,37]]);
+  await replayCursorPath(page, [[525,35,37],[515,54,61],[510,62,40],[496,86,233],[458,134,49],[458,134,69],[434,166,76],[402,199,89],[402,200,134],[388,211,96],[362,233,43],[363,232,44],[362,232,47],[363,231,41],[363,231,50],[363,231,45],[363,232,46],[363,232,43],[363,232,144],[358,240,36],[357,241,63],[354,244,87]]);
+  await page.mouse.move(354, 243);
   await page.mouse.down();
-  await replayCursorPath(page, [[253,175,125],[257,177,43],[269,194,313],[328,268,38],[336,275,75],[339,278,50],[341,279,55],[342,280,51],[342,280,34],[343,281,229],[343,281,89],[347,284,74],[356,290,66],[358,291,47],[358,291,50],[359,292,97],[360,293,36],[382,301,60],[389,304,58],[398,307,40],[402,309,36],[402,310,51]]);
-  await page.mouse.move(402, 310);
+  await replayCursorPath(page, [[354,242,92],[354,243,48],[358,248,39],[371,277,51],[388,299,70],[449,365,39],[476,393,50],[480,395,50],[481,395,42],[484,396,51],[550,400,47],[567,400,47],[582,399,126],[585,399,51],[585,399,254],[585,399,89],[584,399,50],[584,400,85],[584,400,34],[584,400,74],[575,409,189],[573,410,85]]);
+  await page.mouse.move(573, 410);
   await page.mouse.up();
-  await replayCursorPath(page, [[402,309,413],[442,86,37],[452,70,34],[456,66,73],[457,65,129]]);
-  await replayCursorPath(page, [[474,58,52],[525,50,32],[547,50,55],[554,50,59],[556,50,34]]);
-  await page.mouse.move(556, 49);
+  await replayCursorPath(page, [[573,409,50],[573,411,87],[576,414,39],[581,417,58],[642,440,45],[679,452,45],[717,461,48],[719,461,43],[719,461,53],[719,462,34],[720,463,34],[726,466,54],[730,468,61],[730,468,234],[730,468,267],[730,468,49]]);
+  await page.keyboard.press('2');
+  await replayCursorPath(page, [[730,468,233],[730,468,417],[730,460,33],[729,453,33],[728,445,43],[728,445,75]]);
+  await page.mouse.move(728, 445);
   await page.mouse.down();
-  await page.mouse.move(556, 49);
+  await replayCursorPath(page, [[728,445,53],[728,447,38],[729,457,37],[732,464,37],[750,484,58],[760,491,25],[820,531,42],[852,547,36],[892,567,62],[936,593,37],[939,593,34],[939,593,51],[939,593,171],[939,593,50],[938,593,69],[939,593,39],[938,593,42],[938,593,36]]);
+  await page.mouse.move(938, 593);
   await page.mouse.up();
-  // Coordinate-only click (no selectors found)
-  await page.mouse.click(560, 38);
-  // Coordinate-only click (no selectors found)
-  await page.mouse.click(554, 40);
-  await replayCursorPath(page, [[555,51,680]]);
-  await replayCursorPath(page, [[545,64,37],[501,136,49],[481,189,32],[472,225,33],[469,244,33],[468,251,34],[468,248,202],[467,235,32],[461,209,37],[457,192,31],[451,179,50],[450,176,35],[450,175,63]]);
-  await page.mouse.move(450, 175);
+  await replayCursorPath(page, [[938,593,216],[938,593,100],[938,593,67],[928,588,45],[873,572,35],[745,540,46],[674,519,35],[640,502,38],[603,478,44],[583,470,36],[562,464,38],[545,464,41],[530,465,40],[512,465,33],[495,466,35],[469,468,49],[446,468,33],[419,470,47],[388,474,37],[322,487,32],[303,493,35],[273,504,49],[266,508,50],[266,509,100],[266,508,68],[267,508,34],[267,508,33],[267,508,35],[267,507,94],[268,502,54],[269,496,34],[272,483,35],[274,474,49],[275,466,50],[276,462,50],[276,460,57],[275,457,42],[275,456,35],[275,456,47],[275,454,107],[275,442,53],[273,437,36],[273,436,72],[272,436,51],[272,436,155],[272,426,70],[272,425,142],[273,422,44],[279,413,39],[285,405,32],[287,403,42],[288,402,90],[288,403,251],[287,402,549],[287,399,35],[292,393,32],[303,384,46],[321,373,41],[335,365,48],[354,355,49],[367,350,35],[408,337,32],[447,326,53],[473,311,33],[494,293,47],[495,289,37],[495,290,41]]);
+  await page.keyboard.press('5');
+  await replayCursorPath(page, [[495,290,55],[495,290,49],[495,291,253],[495,291,52],[495,292,145],[500,302,152],[506,303,278],[554,302,88],[555,302,50],[555,302,202],[555,303,86],[556,306,45],[556,307,49],[556,307,92],[557,311,152],[557,315,65],[563,318,37],[563,318,81],[579,320,40],[581,320,54],[583,321,46],[583,321,146],[581,326,42],[578,329,237],[578,330,97],[574,329,38],[572,327,40],[572,326,50],[572,326,53]]);
+  await page.mouse.move(572, 326);
   await page.mouse.down();
-  await replayCursorPath(page, [[450,175,369],[455,186,38],[466,210,48],[491,257,49],[510,295,39],[521,314,52],[527,322,56],[528,323,39],[530,324,43],[531,325,34],[532,325,35],[533,325,43],[533,326,40],[534,326,33],[534,326,33],[535,326,49],[536,326,33],[536,326,53],[538,326,42],[542,324,43],[544,322,48],[548,320,48],[551,318,50],[555,317,50],[556,316,34],[561,314,49],[563,313,50],[564,312,62],[569,311,41],[574,310,49],[579,309,44],[582,309,107],[588,308,48],[590,306,34],[593,303,200],[599,296,201]]);
-  await page.mouse.move(599, 296);
+  await replayCursorPath(page, [[572,326,47],[572,326,61],[573,326,57],[577,325,49],[589,321,56],[604,317,33],[622,313,37],[636,313,44],[657,313,33],[693,319,52],[718,325,46],[765,337,48],[780,342,38],[796,351,50],[819,362,46],[832,372,42],[841,381,44],[842,385,32],[842,385,48],[839,399,52],[836,410,39],[835,412,62],[835,412,31],[836,413,60],[836,421,36],[836,425,32],[836,427,46],[835,429,53],[835,431,51],[834,434,57],[834,435,40],[834,435,29],[834,436,81],[833,436,39],[833,436,46],[833,439,38],[833,439,41],[833,439,287],[834,439,32],[834,439,50],[835,440,33],[835,440,40],[835,440,32],[836,442,62],[836,442,81],[836,443,353],[836,443,40],[836,444,35],[836,445,58],[836,445,33],[836,446,49],[836,446,83],[836,446,84],[836,447,42],[836,447,142],[836,446,384],[836,446,331],[836,446,42],[836,446,126],[836,446,81],[836,445,44],[836,445,40],[836,444,55],[836,442,88],[836,440,45],[836,438,48],[836,438,53],[836,438,38],[836,437,324]]);
+  await page.mouse.move(836, 437);
   await page.mouse.up();
-  await page.keyboard.press('4');
-  await replayCursorPath(page, [[599,295,1784],[607,286,34],[619,270,33],[632,251,31],[646,224,50],[657,201,34],[664,186,52],[665,184,265],[666,179,65],[666,173,68]]);
-  await page.mouse.move(666, 173);
+  await replayCursorPath(page, [[836,437,248],[836,437,69],[836,437,135],[836,437,100],[839,436,111],[881,427,61],[1019,417,88],[1044,409,84],[1064,400,90],[1065,398,65],[1065,398,317],[1064,398,123],[1056,393,47],[1055,393,163],[1055,393,368],[1044,386,78],[982,368,96],[860,347,84],[782,323,97],[688,303,92],[572,288,97],[443,272,140],[290,271,57],[281,273,107],[248,293,66],[228,319,122],[225,321,46],[225,320,32],[224,320,132],[224,320,86],[224,320,50],[224,320,48],[224,320,35],[224,320,101],[224,320,36],[224,320,46],[221,323,32],[217,325,67]]);
+  await replayCursorPath(page, [[214,329,33],[214,329,57],[209,338,43],[202,350,35],[198,362,36]]);
+  await replayCursorPath(page, [[196,369,53],[194,372,35],[194,373,61],[193,374,48],[193,374,92],[193,374,41],[192,375,108],[183,384,38]]);
+  await replayCursorPath(page, [[182,385,60],[182,385,40],[181,387,75],[168,393,123],[162,396,39],[154,400,38],[147,403,48],[147,403,48],[146,403,126],[146,403,41],[146,404,33],[146,404,33],[145,404,34],[145,404,33],[145,404,219],[144,404,30],[141,405,34]]);
+  await replayCursorPath(page, [[137,407,33],[133,407,33],[130,408,37],[127,408,48]]);
+  await page.mouse.move(127, 408);
   await page.mouse.down();
-  await replayCursorPath(page, [[666,173,439],[668,180,52],[680,197,57],[691,210,49],[696,217,46],[702,222,41],[712,232,67],[719,238,36],[719,239,38],[720,241,41],[721,242,117],[725,247,37],[727,249,33],[731,252,66],[737,258,74],[740,261,36],[741,263,35],[743,265,37],[745,268,55],[746,269,59],[748,271,37],[753,276,61],[756,278,41],[757,279,224],[761,281,41],[769,289,199],[769,294,38],[769,303,58],[769,306,50],[769,308,52],[769,309,53],[769,309,45],[769,310,50],[770,310,47],[772,311,58],[772,312,61],[773,312,34],[774,312,51],[775,313,33],[776,314,48],[776,315,40],[776,315,33]]);
-  await page.mouse.move(776, 315);
-  await page.mouse.up();
-  await replayCursorPath(page, [[809,179,826],[833,116,171],[844,104,33],[861,88,33],[871,77,51],[872,75,85],[873,69,33],[875,62,49]]);
-  await replayCursorPath(page, [[877,57,32],[879,54,52],[880,52,49],[882,50,38],[884,46,51]]);
-  await replayCursorPath(page, [[885,45,80],[886,45,46],[886,45,34],[887,44,32],[887,44,51],[888,43,33],[888,43,83]]);
-  await page.mouse.move(888, 43);
-  await page.mouse.up();
-  // Coordinate-only click (no selectors found)
-  await page.mouse.click(890, 41);
-  await replayCursorPath(page, [[888,44,986],[883,50,49],[877,57,36],[866,71,48],[860,78,56]]);
-  await replayCursorPath(page, [[852,87,41],[850,91,49],[849,91,37],[849,91,34],[847,91,48],[847,91,33],[847,91,68]]);
-  await page.mouse.move(847, 91);
-  await page.mouse.down();
-  await page.mouse.move(847, 91);
-  await page.mouse.up();
-  // Coordinate-only click (no selectors found)
-  await page.mouse.click(819, 94);
-  await replayCursorPath(page, [[847,93,1129],[847,107,46],[849,130,57],[850,144,55],[850,154,46],[850,155,52],[851,155,31],[852,156,71],[862,165,48],[869,172,48],[870,173,49]]);
-  await page.mouse.move(870, 173);
-  await page.mouse.down();
-  await replayCursorPath(page, [[870,173,385],[875,178,45],[884,188,33],[902,206,38],[912,218,33],[923,230,34],[935,247,41],[943,259,51],[947,266,51],[953,274,174],[956,280,35],[957,284,56],[957,284,44],[957,285,97],[957,285,201],[957,286,40],[958,290,37],[960,294,35],[961,295,36],[963,300,44],[964,303,57],[965,305,35],[969,308,48],[970,308,35],[973,311,48],[974,312,36],[976,314,70]]);
-  await page.mouse.move(976, 314);
-  await page.mouse.up();
-  await replayCursorPath(page, [[976,314,613],[964,307,56],[797,158,43]]);
-  await replayCursorPath(page, [[661,31,58],[647,19,359]]);
-  await replayCursorPath(page, [[647,29,48],[647,35,59],[647,36,52],[646,36,72]]);
-  await page.mouse.move(646, 36);
-  await page.mouse.down();
-  await page.mouse.move(646, 36);
-  await page.mouse.up();
-  // Coordinate-only click (no selectors found)
-  await page.mouse.click(640, 38);
-  // Coordinate-only click (no selectors found)
-  await page.mouse.click(634, 40);
-  await replayCursorPath(page, [[645,36,835]]);
-  await replayCursorPath(page, [[610,38,41],[475,51,34],[345,86,65],[301,105,41],[290,111,45],[286,117,192],[260,149,52]]);
-  await replayCursorPath(page, [[172,269,43],[151,301,37],[140,324,34],[137,335,35],[136,341,64]]);
-  await replayCursorPath(page, [[133,355,46],[130,373,188]]);
-  await replayCursorPath(page, [[129,405,40],[128,409,269]]);
-  await page.mouse.move(128, 409);
-  await page.mouse.down();
-  await page.mouse.move(128, 409);
+  await replayCursorPath(page, [[127,408,199]]);
+  await page.mouse.move(127, 408);
   await page.mouse.up();
   // Coordinate-only click (no selectors found)
   await page.mouse.click(124, 405);
   // Coordinate-only click (no selectors found)
   await page.mouse.click(125, 407);
-  await replayCursorPath(page, [[129,409,775]]);
-  await replayCursorPath(page, [[150,411,59],[178,417,49],[226,433,46],[264,453,47],[282,463,48],[286,466,34],[287,467,33],[288,468,34],[291,470,33],[305,476,48],[314,479,34],[326,482,33],[327,482,33],[328,482,33]]);
-  await page.mouse.move(328, 482);
+  await replayCursorPath(page, [[127,408,132],[127,407,186],[128,408,540],[129,408,43]]);
+  await replayCursorPath(page, [[219,416,41],[291,422,36],[363,432,38],[414,437,33],[429,438,34],[429,438,35],[432,437,46],[440,438,35],[446,438,34],[450,438,33],[463,438,41],[478,438,38],[493,439,53],[503,441,33],[523,445,34],[548,450,33],[582,457,34],[606,463,36],[619,472,50],[619,478,50],[617,496,50],[615,513,33],[612,529,34],[601,579,47],[595,620,33],[586,650,33],[575,681,33],[563,703,34],[556,718,33]]);
+  await page.screenshot({ path: getScreenshotPath(), fullPage: true });
+  await replayCursorPath(page, [[732,707,1567],[838,644,35],[901,586,34],[929,552,34],[939,537,32],[939,537,50],[939,537,51],[938,537,33],[937,537,34],[935,538,100],[883,549,64],[883,549,69],[883,549,128],[883,548,36]]);
+  await page.mouse.move(883, 548);
   await page.mouse.down();
-  await replayCursorPath(page, [[328,482,302],[328,479,40],[321,464,44],[314,449,48],[308,433,36],[306,424,40],[305,409,98],[306,400,42],[306,396,41],[306,394,229],[309,385,131],[321,358,103],[326,349,52],[327,347,35],[328,346,42],[328,344,50],[329,341,44],[329,339,59],[329,337,45],[329,336,69],[329,333,64],[329,331,53],[329,330,36],[330,327,41],[330,327,39],[330,327,77],[330,324,53],[330,323,57],[330,322,36],[329,321,40],[329,320,47],[329,320,56],[329,319,35],[328,319,33],[328,319,35],[328,318,40],[327,318,42],[326,318,36],[326,317,41],[325,317,49],[325,317,57],[325,317,35],[324,317,72],[324,317,278]]);
-  await page.mouse.move(324, 317);
-  await page.mouse.up();
-  await replayCursorPath(page, [[326,317,610],[369,317,97],[384,317,180],[378,306,86],[375,304,150],[373,304,293],[373,305,34],[373,305,50],[373,306,34],[373,306,49],[373,307,51],[372,307,40]]);
-  await page.mouse.move(372, 307);
-  await page.mouse.down();
-  await replayCursorPath(page, [[372,307,58],[372,307,235],[370,307,69],[364,307,59],[358,307,43],[356,307,40],[355,307,54],[354,307,51],[353,307,35],[352,307,54],[352,307,125],[351,307,40],[350,308,78],[350,308,39],[349,308,113],[348,308,53],[348,308,93],[347,308,37]]);
-  await page.mouse.move(347, 308);
-  await page.mouse.up();
-  await replayCursorPath(page, [[351,308,444],[385,311,61],[421,313,45],[448,309,48],[463,295,39],[489,242,62],[522,170,50],[522,171,153],[527,172,51],[560,138,64],[585,106,33],[593,97,35],[600,89,32],[612,72,69],[618,62,48]]);
-  await replayCursorPath(page, [[626,52,66],[628,50,300],[631,45,35]]);
-  await page.mouse.move(640, 32);
-  await page.mouse.down();
-  await page.mouse.move(640, 32);
+  await page.mouse.move(883, 548);
   await page.mouse.up();
   // Coordinate-only click (no selectors found)
-  await page.mouse.click(640, 38);
-  // Coordinate-only click (no selectors found)
-  await page.mouse.click(634, 40);
-  await replayCursorPath(page, [[639,34,154],[623,74,39],[583,204,63],[563,296,68],[558,356,53],[558,378,42],[555,398,109],[548,409,53],[541,418,45],[530,434,84],[527,441,81],[525,446,44],[525,448,47],[521,459,66],[518,470,49],[518,473,38]]);
-  await page.mouse.move(518, 474);
+  await page.mouse.click(640, 360);
+  await replayCursorPath(page, [[883,548,300],[883,548,100],[884,548,98],[894,542,37],[904,537,56],[917,529,108],[927,521,77]]);
+  await page.mouse.move(940, 511);
   await page.mouse.down();
-  await replayCursorPath(page, [[518,474,1227],[518,473,151],[515,463,35],[508,451,67],[505,446,43],[499,433,51],[495,423,48],[492,414,59],[490,409,34],[488,401,47],[487,395,48],[485,387,61],[484,380,43],[483,372,48],[483,368,37],[483,350,93],[483,346,40],[483,329,34],[484,319,46],[484,316,34],[484,307,47],[485,304,36],[485,302,51],[485,301,58],[486,300,40],[488,297,154],[495,291,40],[497,288,75],[497,288,35],[497,287,134],[497,287,39],[497,287,360],[497,286,421],[497,286,35],[497,284,366],[496,276,41],[496,276,70],[496,275,54],[496,275,33],[496,275,46],[496,274,168]]);
-  await page.mouse.move(495, 274);
-  await page.mouse.up();
-  await replayCursorPath(page, [[497,274,851],[505,276,58],[528,285,38],[536,287,199],[540,286,38],[541,285,45],[541,285,35],[542,285,36],[542,285,114]]);
-  await page.mouse.move(542, 285);
-  await page.mouse.down();
-  await replayCursorPath(page, [[542,285,815],[542,285,41],[543,285,105],[546,286,38],[546,286,138],[548,287,37],[549,288,54],[550,289,72],[550,289,57],[551,290,42],[551,290,50],[551,291,47],[551,291,45],[552,291,42],[552,292,55],[552,292,48],[553,293,43],[553,293,155],[554,294,33]]);
-  await page.mouse.move(554, 294);
-  await page.mouse.up();
-  await replayCursorPath(page, [[555,294,400],[581,268,54],[612,229,47],[673,147,66],[679,136,33],[672,111,323]]);
-  await replayCursorPath(page, [[656,57,43],[655,57,36],[655,57,47],[651,55,80],[645,47,57]]);
-  await replayCursorPath(page, [[644,43,44]]);
-  await page.mouse.move(644, 43);
-  await page.mouse.down();
-  await page.mouse.move(644, 43);
+  await replayCursorPath(page, [[940,511,178]]);
+  await page.mouse.move(940, 511);
   await page.mouse.up();
   // Coordinate-only click (no selectors found)
-  await page.mouse.click(640, 38);
-  // Coordinate-only click (no selectors found)
-  await page.mouse.click(634, 40);
-  await replayCursorPath(page, [[644,44,369]]);
-  await replayCursorPath(page, [[645,48,116],[661,154,35],[662,174,73],[674,298,68],[676,320,40],[676,323,238],[694,406,47],[727,522,42],[732,536,41],[735,543,51],[735,544,108],[735,548,53],[735,550,39],[735,551,32],[735,552,42],[735,552,41]]);
-  await page.mouse.move(735, 552);
+  await page.mouse.click(640, 360);
+  await replayCursorPath(page, [[940,511,277],[940,512,54],[940,512,34],[940,512,86],[940,512,165],[939,514,75],[928,522,89],[919,527,85],[919,527,167],[919,527,117],[919,527,93],[919,527,53],[919,527,37],[920,525,41],[920,523,42],[920,523,50],[920,523,150],[920,523,34],[922,523,39],[924,523,36],[926,523,33],[927,523,41],[930,524,32],[932,524,50],[932,524,150],[934,525,34],[935,525,32],[935,526,33]]);
+  await page.mouse.move(936, 526);
   await page.mouse.down();
-  await replayCursorPath(page, [[735,551,316],[734,550,39],[730,533,34],[724,515,60],[718,502,52],[715,492,66],[712,484,35],[711,460,40],[717,445,42],[720,437,32],[729,419,135],[733,409,43],[734,402,261],[730,395,39],[723,381,39],[721,378,34],[717,367,152],[715,360,39],[715,352,58],[715,351,67],[714,349,62],[714,348,35],[713,347,91],[713,344,40],[712,342,46],[712,342,42],[712,341,52],[711,340,46],[711,339,40],[711,339,46],[711,338,39],[711,337,50],[710,335,43],[710,335,44],[710,334,54],[710,333,49],[710,333,91],[709,332,52],[709,331,62],[709,331,40],[709,331,43],[709,331,34],[709,330,34],[709,330,48],[709,329,100],[709,329,43],[709,328,57],[709,327,40],[709,327,179],[708,325,39],[708,324,75],[708,324,34],[708,324,46],[708,323,39],[708,322,44],[708,321,38],[708,320,33],[708,319,50],[707,319,36],[707,319,281],[707,318,40]]);
-  await page.mouse.move(707, 318);
+  await replayCursorPath(page, [[935,526,160],[935,526,76],[935,526,65],[936,526,51],[936,526,45],[936,525,37],[938,525,37],[942,524,33],[963,517,38],[993,513,34],[1017,510,44],[1035,507,50],[1047,506,43],[1054,506,38],[1068,504,40],[1078,504,34],[1090,505,47],[1096,505,42],[1098,505,36],[1108,506,46],[1115,506,57],[1123,506,41],[1146,509,53],[1157,510,49],[1162,510,57],[1164,510,40],[1164,510,45],[1164,511,64],[1165,511,42],[1165,510,226],[1170,486,32],[1170,449,48],[1167,425,34],[1158,380,42],[1154,358,60],[1153,337,36],[1153,316,37],[1152,294,34],[1152,264,43],[1151,244,53],[1148,230,34],[1145,208,35],[1142,194,46],[1141,183,36],[1137,162,44],[1137,159,36],[1136,152,40],[1135,151,49],[1135,151,76],[1135,151,36],[1135,153,43],[1134,154,38],[1130,160,72],[1122,172,36],[1119,179,37],[1114,190,41],[1108,205,45],[1108,206,98],[1106,211,39],[1105,211,106],[1105,211,62],[1101,216,57],[1099,220,35],[1099,220,54],[1099,220,84],[1099,220,201],[1099,220,131]]);
+  await page.mouse.move(1099, 220);
   await page.mouse.up();
-  await replayCursorPath(page, [[711,318,470],[734,320,90],[737,319,110],[737,318,59],[738,312,113],[739,309,36],[740,309,45],[740,308,135],[745,308,56],[748,308,83]]);
-  await page.mouse.move(749, 308);
-  await page.mouse.down();
-  await replayCursorPath(page, [[749,308,449],[748,308,61],[745,308,37],[744,308,49],[744,308,33],[743,308,37],[742,308,47],[742,308,199],[740,308,88],[740,308,223],[734,308,49],[733,308,54],[733,308,43],[733,308,194],[733,308,52],[739,309,55],[742,309,37],[743,310,54]]);
-  await page.mouse.move(743, 310);
-  await page.mouse.up();
-  await replayCursorPath(page, [[743,306,654],[744,242,49],[752,199,33],[759,170,33],[762,162,34],[765,177,133],[767,184,48],[764,171,34],[720,99,70],[681,60,48]]);
-  await replayCursorPath(page, [[677,57,180],[657,54,55],[646,44,37],[641,39,62],[640,39,49]]);
-  await page.mouse.move(640, 39);
-  await page.mouse.down();
-  await page.mouse.move(640, 39);
-  await page.mouse.up();
-  // Coordinate-only click (no selectors found)
-  await page.mouse.click(640, 38);
-  // Coordinate-only click (no selectors found)
-  await page.mouse.click(634, 40);
-  await replayCursorPath(page, [[641,39,284]]);
-  await replayCursorPath(page, [[647,39,33],[665,45,34],[736,83,47],[815,141,55],[930,270,41],[971,338,43],[975,353,304],[970,386,42],[959,440,51],[956,454,33],[955,457,50],[954,458,32],[954,460,189],[953,464,45],[953,469,35],[953,476,49],[951,482,48],[949,486,35],[949,487,35]]);
-  await page.mouse.move(949, 487);
-  await page.mouse.down();
-  await replayCursorPath(page, [[949,487,182],[945,466,78],[942,454,35],[938,442,31],[933,428,49],[931,418,45],[930,414,46],[930,412,49],[929,409,44],[929,409,38],[929,408,252],[927,406,42],[919,393,39],[915,385,35],[912,381,49],[911,380,39],[911,378,41],[911,377,45],[911,376,48],[910,373,50],[909,369,46],[908,368,35],[907,366,40],[906,365,54],[906,364,36],[906,363,43],[905,360,190],[900,343,39],[897,335,46],[896,331,59],[895,328,47],[895,327,42],[895,326,34],[895,325,35],[895,324,65],[895,323,47],[895,321,320],[895,317,277],[895,314,334]]);
-  await page.mouse.move(895, 314);
-  await page.mouse.up();
-  await replayCursorPath(page, [[895,313,1004],[888,303,33],[884,298,34],[882,296,49],[879,295,71],[878,294,81],[878,294,34],[877,293,33],[877,293,34],[877,293,34],[875,292,49],[875,291,34],[874,291,33],[874,291,50],[873,291,34],[873,290,82],[873,290,33],[872,290,72],[872,290,45],[871,289,50],[871,289,34],[871,289,50],[870,288,33],[870,288,66]]);
-  await page.mouse.move(870, 288);
-  await page.mouse.down();
-  await replayCursorPath(page, [[870,288,437],[867,288,38],[863,288,41],[861,288,51],[860,288,79],[860,288,39],[859,288,48],[859,288,51],[859,288,32],[858,288,58],[858,288,55],[857,288,70],[857,288,40],[857,288,45],[856,289,33],[856,289,48],[855,289,53],[855,289,65],[854,289,51],[854,290,67]]);
-  await page.mouse.move(854, 290);
-  await page.mouse.up();
-  await replayCursorPath(page, [[854,290,414],[847,349,50],[832,436,33],[820,521,34],[812,625,41],[812,640,43],[812,643,34],[812,648,200],[818,675,34]]);
+  await replayCursorPath(page, [[1099,220,145],[1095,236,39],[1088,248,38],[1017,336,46],[979,376,53],[822,562,36],[798,595,59],[775,641,36],[764,663,55],[744,701,41],[741,705,36]]);
+  await page.screenshot({ path: getScreenshotPath(), fullPage: true });
+  await replayCursorPath(page, [[901,718,1743],[906,714,43],[905,709,33],[906,708,47],[906,708,179],[906,708,107],[906,708,99],[906,708,100],[906,708,33],[906,708,51],[906,709,65],[906,709,33],[906,709,35],[906,709,34],[905,710,49],[905,711,42],[905,712,41],[903,717,33],[876,719,1501],[875,717,33],[875,717,100],[875,717,32],[875,717,67],[875,717,51],[874,716,40],[874,715,43],[874,714,35],[873,714,32],[873,714,119],[873,713,48],[873,713,34],[873,712,32],[873,712,35],[872,711,49],[872,711,99],[872,711,101],[872,711,100],[872,711,49],[871,711,40],[871,710,60],[870,710,32],[870,710,34],[870,710,44],[870,709,41],[869,709,40],[869,709,60],[869,709,50],[869,709,33],[869,709,100],[869,709,106],[868,709,125],[868,709,102],[868,709,134],[868,709,216],[868,709,68],[868,710,32],[849,714,44],[827,714,40],[820,715,50],[820,717,43],[820,717,75],[819,715,31],[819,714,34],[819,714,32],[819,714,34],[819,714,34],[818,714,135],[818,714,682],[818,714,82],[818,714,84],[818,713,60],[818,712,40],[818,712,34],[818,711,35],[818,711,32],[818,711,49],[818,711,150],[818,711,117],[808,708,43],[803,707,52],[796,706,51],[787,704,55],[784,704,42],[777,705,41],[719,713,43],[641,711,39],[169,641,45]]);
+  await replayCursorPath(page, [[85,411,1602],[287,417,41],[436,428,47],[638,455,123],[1152,558,76],[1114,697,64]]);
 }
 `,
   },
   {
-    name: "New simple arrow binds and tracks",
-    targetUrl: "https://excalidraw.com", functionalArea: "Arrows binding to bindables",
+    name: "Test 3: ALT+Drag Duplicate",
+    targetUrl: "https://excalidraw.com",
     code: `import { Page } from 'playwright';
 
 export async function test(page: Page, baseUrl: string, screenshotPath: string, stepLogger: any) {
@@ -617,6 +431,7 @@ export async function test(page: Page, baseUrl: string, screenshotPath: string, 
           const text = sel.value.replace(/^ocr-text="/, '').replace(/"$/, '');
           locator = page.getByText(text, { exact: false });
         } else if (sel.type === 'role-name') {
+          // Parse role=button[name="Label"] format and use getByRole
           const match = sel.value.match(/^role=(\\w+)\\[name="(.+)"\\]$/);
           if (match) {
             locator = page.getByRole(match[1], { name: match[2] });
@@ -626,30 +441,25 @@ export async function test(page: Page, baseUrl: string, screenshotPath: string, 
         } else {
           locator = page.locator(sel.value);
         }
+        // Use .first() to handle multiple matches (e.g., header + footer nav links)
         const target = locator.first();
         await target.waitFor({ timeout: 3000 });
-        if (action === 'locate') return target;
         if (action === 'click') await target.click();
         else if (action === 'fill') await target.fill(value || '');
         else if (action === 'selectOption') await target.selectOption(value || '');
-        return target;
+        return;
       } catch { continue; }
     }
+    // Coordinate fallback for clicks when all selectors fail
     if (action === 'click' && coords) {
       console.log('Falling back to coordinate click at', coords.x, coords.y);
       await page.mouse.click(coords.x, coords.y);
       return;
     }
-    if (action === 'fill' && coords) {
-      console.log('Falling back to coordinate fill at', coords.x, coords.y);
-      await page.mouse.click(coords.x, coords.y);
-      await page.keyboard.press('Control+a');
-      await page.keyboard.type(value || '');
-      return;
-    }
     throw new Error('No selector matched: ' + JSON.stringify(validSelectors));
   }
 
+  // Replay cursor path helper
   async function replayCursorPath(page, moves) {
     for (const [x, y, delay] of moves) {
       await page.mouse.move(x, y);
@@ -658,185 +468,36 @@ export async function test(page: Page, baseUrl: string, screenshotPath: string, 
   }
 
   await page.goto(buildUrl(baseUrl, '/'));
-  await replayCursorPath(page, [[543,434,0],[524,428,41],[443,390,38],[427,382,70],[420,365,33],[420,360,67],[420,355,186],[445,196,38],[483,106,45]]);
-  await replayCursorPath(page, [[507,53,58]]);
-  await replayCursorPath(page, [[514,42,229],[524,33,65],[526,33,31]]);
-  await page.mouse.move(527, 33);
+  await replayCursorPath(page, [[1275,234,0],[1080,213,38],[953,199,34],[832,185,33],[767,178,33],[764,178,42],[764,178,41],[758,169,34],[735,149,42],[693,125,25],[648,99,33],[632,87,33],[629,84,34],[626,81,33],[626,81,33],[626,81,34],[626,81,41],[626,81,33],[626,81,43],[626,81,33],[626,82,33],[625,83,33],[626,104,34],[625,126,34],[619,149,33],[609,168,32],[587,190,34],[551,218,33],[510,238,33],[490,246,34],[489,246,34],[489,246,33]]);
+  await page.mouse.move(489, 246);
   await page.mouse.down();
-  await page.mouse.move(527, 33);
+  await replayCursorPath(page, [[489,246,60],[489,246,89]]);
+  await page.mouse.move(489, 246);
   await page.mouse.up();
   // Coordinate-only click (no selectors found)
-  await page.mouse.click(520, 38);
-  // Coordinate-only click (no selectors found)
-  await page.mouse.click(514, 40);
-  await replayCursorPath(page, [[526,33,516]]);
-  await replayCursorPath(page, [[511,43,34],[456,80,50],[434,97,39],[378,147,63],[368,158,124],[363,160,40],[354,165,34],[347,168,34],[337,174,145],[323,188,63]]);
-  await page.mouse.move(323, 188);
+  await page.mouse.click(640, 360);
+  await page.keyboard.press('3');
+  await replayCursorPath(page, [[489,246,334],[489,246,200],[487,249,42],[483,251,24],[476,259,34],[469,267,33],[465,270,34],[463,272,33],[462,273,33],[462,273,126],[462,273,41],[461,267,34],[457,258,33],[451,247,33],[443,235,41],[436,227,26]]);
+  await page.mouse.move(435, 227);
   await page.mouse.down();
-  await replayCursorPath(page, [[325,188,540],[333,191,39],[374,222,50],[406,250,48],[431,272,62],[438,278,51],[446,284,53],[450,287,41],[456,290,48],[462,294,37],[465,296,72],[467,298,41]]);
-  await page.mouse.move(468, 298);
+  await replayCursorPath(page, [[435,227,75],[435,237,33],[441,256,34],[463,289,33],[495,324,33],[528,350,33],[553,373,34],[565,384,33],[567,385,50],[567,385,176],[567,385,66],[568,385,33],[579,385,33],[602,383,34],[612,382,33],[612,382,109]]);
+  await page.mouse.move(612, 382);
   await page.mouse.up();
-  await replayCursorPath(page, [[468,297,1585],[473,257,35],[491,199,57],[530,124,34],[551,95,32],[559,87,54],[602,62,101]]);
-  await replayCursorPath(page, [[625,55,43],[632,55,50],[642,58,63],[643,57,40]]);
-  await replayCursorPath(page, [[645,46,59],[648,39,64]]);
-  await page.mouse.move(648, 38);
+  await replayCursorPath(page, [[612,382,50],[611,381,49],[607,381,34],[600,378,33],[591,372,34],[574,358,33],[557,345,33],[546,336,33],[543,333,34],[543,332,33],[543,332,158],[543,333,34],[543,333,33],[543,332,108]]);
+  await page.keyboard.down('Alt');
+  await page.mouse.move(543, 332);
   await page.mouse.down();
-  await page.mouse.move(648, 38);
+  await replayCursorPath(page, [[543,332,184],[545,333,33],[577,338,34],[634,340,33],[703,340,33],[757,339,33],[777,338,34],[777,338,58],[777,338,242]]);
+  await page.mouse.move(777, 338);
   await page.mouse.up();
-  // Coordinate-only click (no selectors found)
-  await page.mouse.click(640, 38);
-  // Coordinate-only click (no selectors found)
-  await page.mouse.click(634, 40);
-  await replayCursorPath(page, [[647,39,326],[641,44,72],[633,49,61],[615,61,35],[585,82,38],[480,142,61],[428,181,36],[395,223,52],[367,263,45],[359,276,32],[331,322,66],[326,328,68],[325,338,274],[322,378,42],[322,381,41],[323,381,97],[328,383,58],[331,385,55],[341,393,50],[343,395,52],[345,397,48],[345,397,116],[345,399,85],[345,401,31],[345,402,43],[345,403,53],[345,405,38],[345,407,47],[345,408,53],[345,408,44]]);
-  await page.mouse.move(345, 408);
-  await page.mouse.down();
-  await replayCursorPath(page, [[345,408,373],[345,408,42],[345,400,56],[348,392,36],[351,381,46],[357,363,38],[360,358,88],[369,338,40],[376,324,42],[378,320,58],[379,319,52],[380,318,62],[380,317,46],[381,317,741],[382,314,38],[383,312,231],[384,311,40],[384,310,245],[384,309,76],[385,307,41],[386,307,132],[386,307,49],[386,307,113],[386,306,44]]);
-  await page.mouse.move(386, 306);
-  await page.mouse.up();
-  await replayCursorPath(page, [[386,306,680],[415,318,147],[515,369,35],[558,389,68],[567,391,262],[568,371,56],[554,325,35],[530,298,63],[518,288,49],[516,285,33],[516,283,37],[518,269,45],[521,261,33],[522,257,34],[522,257,34],[522,254,67],[527,242,34],[563,192,32],[579,172,61],[600,149,120],[600,149,100],[590,121,52],[579,95,34],[573,84,32],[560,80,56],[525,100,44],[486,130,33],[451,167,51],[436,195,42],[436,204,60],[437,221,49],[442,225,44],[448,228,39],[453,230,34],[456,231,32],[458,232,34],[461,234,33],[462,234,49],[463,234,34],[464,234,49],[466,234,35],[467,235,67]]);
-  await page.mouse.move(468, 235);
-  await page.mouse.down();
-  await replayCursorPath(page, [[467,235,400],[466,235,33],[465,235,35],[464,235,47],[462,235,57],[460,235,36],[458,235,40],[457,235,50],[455,235,35],[454,235,45],[454,235,53],[453,235,118],[452,235,40],[452,235,42],[451,235,100],[451,235,131],[451,235,70],[450,235,34],[450,235,39],[447,235,66],[444,236,43],[444,236,34],[442,236,51],[442,236,67],[442,236,116]]);
-  await page.mouse.move(442, 236);
-  await page.mouse.up();
-  await replayCursorPath(page, [[444,234,117],[461,216,51],[537,105,49]]);
-  await replayCursorPath(page, [[576,17,92],[580,6,42],[580,5,64],[580,6,117],[575,12,34]]);
-  await replayCursorPath(page, [[566,23,48],[560,30,86],[559,31,35]]);
-  await page.mouse.move(559, 32);
-  await page.mouse.down();
-  await page.mouse.move(559, 32);
-  await page.mouse.up();
-  // Coordinate-only click (no selectors found)
-  await page.mouse.click(560, 38);
-  // Coordinate-only click (no selectors found)
-  await page.mouse.click(554, 40);
-  await replayCursorPath(page, [[562,35,760]]);
-  await replayCursorPath(page, [[569,62,34],[572,98,37],[574,134,35],[570,164,33],[563,182,66],[559,190,34],[555,195,47],[551,196,35],[543,195,50],[537,193,34],[535,192,33],[534,192,127]]);
-  await page.mouse.move(534, 192);
-  await page.mouse.down();
-  await replayCursorPath(page, [[534,193,587],[542,210,44],[559,240,48],[570,256,45],[581,267,35],[593,277,38],[598,282,43],[602,285,41],[604,287,39],[605,288,36],[607,290,45],[608,292,50],[609,294,54],[610,296,70],[610,298,58],[611,298,73],[611,298,734],[612,298,45],[613,298,141],[613,298,248],[614,298,69],[621,300,57],[623,301,41],[626,303,67],[627,303,44],[628,303,118]]);
-  await page.mouse.move(628, 304);
-  await page.mouse.up();
-  await replayCursorPath(page, [[628,296,381],[626,271,59],[617,170,198],[624,106,104],[642,73,158]]);
-  await replayCursorPath(page, [[644,50,41],[644,45,79],[644,42,50],[644,42,67],[644,42,32]]);
-  await page.mouse.move(644, 42);
-  await page.mouse.down();
-  await page.mouse.move(644, 42);
-  await page.mouse.up();
-  // Coordinate-only click (no selectors found)
-  await page.mouse.click(640, 38);
-  // Coordinate-only click (no selectors found)
-  await page.mouse.click(634, 40);
-  await replayCursorPath(page, [[644,42,700],[643,43,33]]);
-  await replayCursorPath(page, [[642,47,35],[635,67,50],[627,88,74],[602,152,41],[576,199,37],[555,238,50],[546,257,33],[540,274,43],[534,297,33],[532,306,42],[529,327,39],[526,344,33],[522,365,41],[520,372,51],[520,373,34],[520,374,49],[520,374,35]]);
-  await page.mouse.move(520, 374);
-  await page.mouse.down();
-  await replayCursorPath(page, [[520,373,392],[520,371,40],[524,357,36],[528,343,97],[535,325,41],[538,319,35],[540,312,41],[542,309,38],[542,308,43],[545,302,37],[545,300,55],[546,297,36],[547,295,56],[547,295,34],[548,294,44],[548,293,40],[548,292,46],[550,290,36],[550,290,35],[551,288,135],[552,287,36],[552,287,84],[552,286,44],[553,285,53],[554,285,33],[555,284,40],[555,284,40],[555,284,54],[556,283,700],[560,282,39],[561,282,714]]);
-  await page.mouse.move(561, 282);
-  await page.mouse.up();
-  await replayCursorPath(page, [[563,282,264],[573,284,36],[601,294,46],[616,303,87],[616,301,61],[614,296,36],[612,292,41],[610,285,51],[609,281,75],[609,280,47],[609,279,270],[609,279,48],[609,278,59],[608,276,62],[607,273,94],[607,273,54]]);
-  await page.mouse.move(607, 273);
-  await page.mouse.down();
-  await replayCursorPath(page, [[607,273,246],[605,273,44],[600,273,38],[597,273,34],[593,273,34],[590,273,36],[586,274,46],[584,274,50],[582,274,33],[580,274,50],[578,274,46]]);
-  await page.mouse.move(578, 273);
-  await page.mouse.up();
-  await replayCursorPath(page, [[578,273,795],[581,273,42],[584,273,45],[592,270,41],[601,263,32],[607,257,37],[641,206,56],[649,189,42],[650,183,248],[661,156,35],[666,138,35],[676,100,32],[677,89,33],[677,85,32],[674,81,35],[670,76,33],[667,73,33],[653,64,33]]);
-  await replayCursorPath(page, [[638,58,37],[621,51,34],[609,47,37],[594,42,59],[588,39,49],[586,37,37],[585,36,46],[584,36,101],[585,36,133],[589,36,61],[590,37,54],[590,37,35]]);
-  await page.mouse.move(590, 37);
-  await page.mouse.down();
-  await page.mouse.move(590, 37);
-  await page.mouse.up();
-  // Coordinate-only click (no selectors found)
-  await page.mouse.click(600, 38);
-  // Coordinate-only click (no selectors found)
-  await page.mouse.click(594, 40);
-  await replayCursorPath(page, [[591,38,277]]);
-  await replayCursorPath(page, [[595,41,40],[602,49,33],[610,61,35],[616,73,44],[637,118,54],[642,141,41],[645,156,42],[646,169,33],[649,182,34],[652,194,34],[655,204,50],[655,206,51],[653,206,298],[652,205,33],[651,204,33],[651,201,35],[651,199,34],[651,198,39],[651,198,79]]);
-  await page.mouse.move(651, 198);
-  await page.mouse.down();
-  await replayCursorPath(page, [[651,198,199],[653,207,39],[656,212,41],[668,234,53],[683,257,50],[696,272,47],[703,280,43],[706,282,57],[707,283,52],[707,283,40],[707,283,797],[712,285,41],[731,299,50],[741,303,42],[744,304,47],[746,304,40],[748,305,43],[750,305,62],[752,306,42],[753,306,42],[754,306,42],[754,306,59],[755,306,72],[755,306,97]]);
-  await page.mouse.move(755, 306);
-  await page.mouse.up();
-  await replayCursorPath(page, [[747,286,390],[690,172,53],[658,95,42],[657,87,123],[655,70,228]]);
-  await replayCursorPath(page, [[644,37,123]]);
-  await page.mouse.move(643, 37);
-  await page.mouse.down();
-  await page.mouse.move(643, 37);
-  await page.mouse.up();
-  // Coordinate-only click (no selectors found)
-  await page.mouse.click(643, 37);
-  // Coordinate-only click (no selectors found)
-  await page.mouse.click(634, 40);
-  await replayCursorPath(page, [[643,37,524]]);
-  await replayCursorPath(page, [[643,43,33],[643,47,49],[641,73,34],[635,102,33],[625,141,34],[603,245,33],[589,311,36],[580,371,69],[580,376,47],[580,380,284],[581,403,49],[584,418,42],[584,419,137],[590,419,91],[597,416,39],[604,414,71]]);
-  await page.mouse.move(604, 414);
-  await page.mouse.down();
-  await replayCursorPath(page, [[605,414,120],[605,413,38],[605,412,130],[610,400,40],[621,375,51],[639,351,55],[641,349,34],[645,343,51],[646,341,34],[651,334,46],[652,333,40],[653,330,298],[659,320,46],[660,319,46],[661,318,48],[661,317,109],[661,317,40],[662,316,77],[663,315,38],[663,315,73],[665,314,43],[668,311,174],[673,307,32],[673,306,131],[675,303,41],[675,302,38],[676,302,43],[676,301,88],[676,301,39],[676,300,59]]);
-  await page.mouse.move(676, 300);
-  await page.mouse.up();
-  await replayCursorPath(page, [[682,292,1113],[695,269,156],[728,195,38],[733,172,245],[733,162,50],[733,155,36],[731,144,47],[731,141,33],[728,133,44],[727,130,40],[724,126,45],[721,123,61],[719,120,32],[720,118,155],[728,110,56],[742,97,34],[769,77,50],[780,71,37],[784,68,297]]);
-  await replayCursorPath(page, [[793,59,49],[796,57,32],[801,53,35],[803,52,63],[803,48,61]]);
-  await replayCursorPath(page, [[803,45,42],[803,44,33],[803,44,33],[803,43,118]]);
-  await page.mouse.move(802, 43);
-  await page.mouse.down();
-  await page.mouse.move(802, 43);
-  await page.mouse.up();
-  // Coordinate-only click (no selectors found)
-  await page.mouse.click(800, 38);
-  // Coordinate-only click (no selectors found)
-  await page.mouse.click(794, 40);
-  await replayCursorPath(page, [[802,44,2250]]);
-  await replayCursorPath(page, [[801,53,41],[788,110,40],[778,175,51],[773,207,35],[772,271,506],[774,268,114],[779,264,46],[779,264,33],[779,263,1001],[779,262,66],[782,255,33],[803,220,45],[825,180,55],[831,170,39],[839,152,36],[841,147,42],[845,138,32],[856,121,39],[864,111,46],[871,103,33],[873,101,33],[873,97,205],[875,90,45],[877,83,33],[880,74,51],[881,71,33],[883,67,33],[884,63,78]]);
-  await replayCursorPath(page, [[885,57,36],[886,54,65],[888,49,38],[888,47,33]]);
-  // Coordinate-only click (no selectors found)
-  await page.mouse.click(893, 38);
-  await replayCursorPath(page, [[888,47,1283],[888,47,49],[888,48,51],[888,48,34],[887,49,32],[885,53,33],[883,55,33]]);
-  await replayCursorPath(page, [[875,64,44],[871,68,39],[869,69,33],[864,71,53],[859,73,48],[856,74,83],[844,77,34]]);
-  await replayCursorPath(page, [[834,82,33],[832,83,60],[824,87,42],[821,90,33],[819,92,50],[818,93,34]]);
-  await page.mouse.move(818, 93);
-  await page.mouse.down();
-  await page.mouse.move(818, 93);
-  await page.mouse.up();
-  // Coordinate-only click (no selectors found)
-  await page.mouse.click(790, 94);
-  await replayCursorPath(page, [[818,93,1624],[833,132,36],[837,154,63],[839,176,60],[839,179,33],[839,184,33],[839,186,94]]);
-  await page.mouse.move(840, 189);
-  await page.mouse.down();
-  await replayCursorPath(page, [[840,189,42],[840,189,80],[842,190,41],[850,197,42],[864,210,50],[868,215,33],[882,230,46],[897,244,62],[914,260,58],[918,264,37],[926,273,64],[927,274,387],[936,286,40],[941,292,161],[977,338,44],[997,358,45],[999,360,41],[1000,360,64]]);
-  await page.mouse.move(1000, 360);
-  await page.mouse.up();
-  await replayCursorPath(page, [[998,360,513],[989,356,39],[963,342,34],[944,328,34],[871,269,32],[814,197,35],[779,129,48],[771,107,34],[768,98,34],[767,97,275],[750,68,41]]);
-  await replayCursorPath(page, [[740,52,33],[734,44,38],[724,37,66],[712,35,46]]);
-  await replayCursorPath(page, [[698,34,51],[689,34,48],[676,32,33],[669,30,39],[662,28,51],[654,27,43],[653,27,35],[651,27,33],[650,27,51],[649,28,47]]);
-  await replayCursorPath(page, [[646,31,53],[644,32,32]]);
-  await page.mouse.move(644, 33);
-  await page.mouse.down();
-  await page.mouse.move(644, 33);
-  await page.mouse.up();
-  // Coordinate-only click (no selectors found)
-  await page.mouse.click(640, 38);
-  // Coordinate-only click (no selectors found)
-  await page.mouse.click(634, 40);
-  await replayCursorPath(page, [[644,33,517],[646,35,73]]);
-  await replayCursorPath(page, [[659,65,45],[665,94,33],[673,155,49],[686,222,64],[692,231,40],[692,231,178],[692,231,57],[713,325,61],[730,407,39],[739,453,94],[752,530,200],[752,537,35],[752,583,50],[752,586,33],[752,588,32],[753,588,67],[754,585,48],[756,582,35]]);
-  await page.mouse.move(757, 580);
-  await page.mouse.down();
-  await replayCursorPath(page, [[757,580,79],[758,576,43],[761,569,37],[766,559,34],[777,536,40],[788,518,38],[803,495,38],[823,465,40],[853,425,50],[863,411,38],[868,405,42],[869,404,290],[869,402,211],[870,391,33],[870,390,53],[870,389,70],[870,388,85],[870,386,346],[870,386,63],[870,377,53],[870,375,50],[870,374,435],[870,373,54],[870,372,33],[870,370,54],[870,368,67],[870,368,55],[870,367,47],[870,367,56],[870,366,38]]);
-  await page.mouse.move(870, 366);
-  await page.mouse.up();
-  await replayCursorPath(page, [[872,366,849],[894,362,45],[900,362,43],[905,362,82],[906,362,43],[906,362,268],[906,362,49],[906,361,51],[906,361,65],[906,361,35],[906,361,49],[906,360,48]]);
-  await page.mouse.move(906, 360);
-  await page.mouse.down();
-  await replayCursorPath(page, [[906,360,335],[905,360,39],[902,360,62],[899,360,51],[897,360,41],[896,360,56],[896,360,40],[895,360,57],[895,360,53],[894,360,33],[893,360,39],[892,360,62],[892,360,49],[892,360,68],[891,360,174],[888,360,34],[887,360,61],[885,360,185],[880,360,179],[881,360,72]]);
-  await page.mouse.move(881, 360);
-  await page.mouse.up();
-  await replayCursorPath(page, [[881,361,212],[883,381,35],[876,482,43],[864,551,39],[856,582,54],[810,691,55],[802,704,40],[799,710,35],[798,711,43],[798,714,222]]);
-}
-`,
+  await page.keyboard.up('Alt');
+  await replayCursorPath(page, [[777,338,175],[777,338,117],[797,330,33],[883,321,33],[1087,307,33]]);
+  await page.screenshot({ path: getScreenshotPath(), fullPage: true });
+}`,
   },
   {
-    name: "Old arrows can bind to bindables and track",
-    targetUrl: "https://excalidraw-lastest.vercel.app", functionalArea: "Arrows binding to bindables",
+    name: "Test 4: Rotate Arrow Binding",
+    targetUrl: "https://excalidraw.com",
     code: `import { Page } from 'playwright';
 
 export async function test(page: Page, baseUrl: string, screenshotPath: string, stepLogger: any) {
@@ -868,6 +529,7 @@ export async function test(page: Page, baseUrl: string, screenshotPath: string, 
           const text = sel.value.replace(/^ocr-text="/, '').replace(/"$/, '');
           locator = page.getByText(text, { exact: false });
         } else if (sel.type === 'role-name') {
+          // Parse role=button[name="Label"] format and use getByRole
           const match = sel.value.match(/^role=(\\w+)\\[name="(.+)"\\]$/);
           if (match) {
             locator = page.getByRole(match[1], { name: match[2] });
@@ -877,30 +539,25 @@ export async function test(page: Page, baseUrl: string, screenshotPath: string, 
         } else {
           locator = page.locator(sel.value);
         }
+        // Use .first() to handle multiple matches (e.g., header + footer nav links)
         const target = locator.first();
         await target.waitFor({ timeout: 3000 });
-        if (action === 'locate') return target;
         if (action === 'click') await target.click();
         else if (action === 'fill') await target.fill(value || '');
         else if (action === 'selectOption') await target.selectOption(value || '');
-        return target;
+        return;
       } catch { continue; }
     }
+    // Coordinate fallback for clicks when all selectors fail
     if (action === 'click' && coords) {
       console.log('Falling back to coordinate click at', coords.x, coords.y);
       await page.mouse.click(coords.x, coords.y);
       return;
     }
-    if (action === 'fill' && coords) {
-      console.log('Falling back to coordinate fill at', coords.x, coords.y);
-      await page.mouse.click(coords.x, coords.y);
-      await page.keyboard.press('Control+a');
-      await page.keyboard.type(value || '');
-      return;
-    }
     throw new Error('No selector matched: ' + JSON.stringify(validSelectors));
   }
 
+  // Replay cursor path helper
   async function replayCursorPath(page, moves) {
     for (const [x, y, delay] of moves) {
       await page.mouse.move(x, y);
@@ -909,231 +566,586 @@ export async function test(page: Page, baseUrl: string, screenshotPath: string, 
   }
 
   await page.goto(buildUrl(baseUrl, '/'));
-  await replayCursorPath(page, [[561,489,0],[1002,187,54],[1036,172,660],[1028,176,34],[981,194,49],[922,211,93],[893,215,60],[889,215,366],[749,243,49],[675,260,101],[658,263,2180],[666,263,169],[677,299,49],[677,308,38],[677,313,57],[677,313,38],[677,312,65],[677,298,65],[677,291,52],[679,287,33],[681,284,34],[687,286,59],[690,295,41],[690,304,48],[689,311,46],[682,317,40],[680,317,60],[680,317,90],[681,316,34],[681,316,57],[681,314,40],[679,302,35],[668,263,67],[656,225,33],[647,188,34],[643,163,32],[642,145,34],[642,134,33],[642,129,233],[635,111,34],[601,62,59]]);
-  await replayCursorPath(page, [[587,46,43],[584,44,71],[575,40,38],[575,40,55]]);
-  await replayCursorPath(page, [[571,40,416],[526,38,28],[526,37,39],[526,37,35],[525,37,50],[525,37,32],[524,37,34],[523,37,33],[523,37,35]]);
-  await page.mouse.move(523, 37);
+  await replayCursorPath(page, [[1263,317,0],[1148,294,38],[1064,285,34],[1002,283,33],[954,281,33],[899,279,34],[828,276,33],[750,267,33],[698,252,34],[669,231,33],[662,213,33],[652,187,33],[636,158,35],[626,145,33],[625,145,33],[625,145,92],[625,145,42],[625,145,41],[625,145,108],[614,154,34],[598,165,33],[585,175,33],[572,188,34],[566,193,33],[566,193,59],[566,194,74],[562,201,33],[555,213,33],[542,231,35],[529,252,33],[518,274,33],[509,293,33],[504,307,33],[500,315,33]]);
+  await page.mouse.move(500, 316);
   await page.mouse.down();
-  await page.mouse.move(523, 37);
+  await replayCursorPath(page, [[500,315,126]]);
+  await page.mouse.move(500, 315);
   await page.mouse.up();
-  // Coordinate-only click (no selectors found)
-  await page.mouse.click(520, 38);
-  // Coordinate-only click (no selectors found)
-  await page.mouse.click(514, 40);
-  await replayCursorPath(page, [[523,38,534]]);
-  await replayCursorPath(page, [[522,51,33],[506,106,52],[482,171,33],[468,195,48],[445,206,34],[388,221,49],[356,228,54],[332,230,62],[327,228,280],[277,197,35],[249,164,67],[246,158,69],[246,159,166],[246,159,33],[247,161,34],[247,163,33],[248,164,35],[248,165,32]]);
-  await page.mouse.move(248, 165);
+  await locateWithFallback(page, [{"type":"css-path","value":"div.excalidraw-app > div.excalidraw.excalidraw-container > canvas.excalidraw__canvas.interactive"}], 'click', null, {"x":640,"y":360});
+  await page.keyboard.press('2');
+  await replayCursorPath(page, [[500,316,375],[490,318,33],[481,320,33],[471,321,34],[464,321,33],[464,321,51],[458,314,33],[451,302,33],[446,294,34],[441,282,33],[428,267,33],[418,258,41],[417,258,50],[417,258,33]]);
+  await page.mouse.move(417, 258);
   await page.mouse.down();
-  await replayCursorPath(page, [[248,165,57],[248,165,112],[257,172,42],[278,188,43],[317,218,41],[354,245,50],[370,258,36],[386,270,46],[400,281,52],[411,292,54],[421,302,43],[424,307,38],[425,309,51],[426,309,52],[426,309,47],[426,309,36]]);
-  await page.mouse.move(426, 309);
+  await replayCursorPath(page, [[417,258,109],[418,261,34],[428,282,34],[444,306,33],[464,330,33],[479,344,33],[485,348,34],[492,355,33],[502,362,34],[503,362,33],[505,362,33],[505,362,33]]);
+  await page.mouse.move(505, 362);
   await page.mouse.up();
-  await replayCursorPath(page, [[426,308,803],[454,265,53],[504,173,51],[513,147,44],[517,125,42],[522,106,40],[524,101,34],[531,88,47],[532,86,186],[538,78,33]]);
-  await replayCursorPath(page, [[554,58,59],[562,47,39],[563,46,42],[563,46,39],[563,43,106]]);
-  await replayCursorPath(page, [[563,41,64]]);
-  await page.mouse.move(563, 41);
+  await replayCursorPath(page, [[506,362,192],[532,360,33],[598,358,33],[706,351,34],[801,345,33],[825,344,34],[825,344,58],[824,344,34],[823,343,33],[819,339,41],[814,333,33],[810,327,34],[808,326,41]]);
+  await page.mouse.move(808, 326);
   await page.mouse.down();
-  await page.mouse.move(563, 41);
+  await replayCursorPath(page, [[808,326,75]]);
+  await page.mouse.move(808, 326);
   await page.mouse.up();
-  // Coordinate-only click (no selectors found)
-  await page.mouse.click(560, 38);
-  // Coordinate-only click (no selectors found)
-  await page.mouse.click(554, 40);
-  await replayCursorPath(page, [[563,42,333]]);
-  await replayCursorPath(page, [[563,71,51],[562,100,283],[524,188,34],[519,178,50],[519,177,35],[519,177,32],[519,176,34],[519,175,65],[518,175,49],[518,175,36],[514,175,49],[514,175,32]]);
-  await page.mouse.move(514, 175);
+  await locateWithFallback(page, [{"type":"css-path","value":"div.excalidraw-app > div.excalidraw.excalidraw-container > canvas.excalidraw__canvas.interactive"}], 'click', null, {"x":640,"y":360});
+  await page.keyboard.press('2');
+  await replayCursorPath(page, [[808,326,351],[808,326,41],[799,318,33],[779,303,34],[756,287,33],[748,282,42],[740,275,33],[734,272,34],[733,270,41],[733,269,85],[729,266,32],[728,265,34],[728,265,41],[728,265,32],[722,261,35],[707,253,38],[694,248,28],[694,248,33],[693,248,34],[694,248,33]]);
+  await page.mouse.move(693, 249);
   await page.mouse.down();
-  await replayCursorPath(page, [[514,175,37],[514,175,213],[523,185,38],[537,205,47],[558,239,65],[578,273,52],[580,278,34],[583,285,40],[583,285,190],[585,287,59],[586,290,84],[587,290,57],[587,290,34],[587,290,43],[588,291,56],[590,293,44],[592,295,51],[598,301,52],[602,304,50],[603,305,62],[603,305,49],[603,305,60],[604,305,36],[608,305,34],[613,307,70],[615,309,42],[625,314,61],[635,318,42],[641,321,35],[643,321,63],[646,323,83]]);
-  await page.mouse.move(646, 323);
+  await replayCursorPath(page, [[694,250,33],[693,253,33],[692,259,34],[696,275,33],[712,304,33],[736,330,34],[757,347,33],[779,362,33],[789,369,34],[794,372,33],[794,372,42],[795,373,50],[800,378,33],[802,379,34],[802,379,42],[802,379,33],[802,379,58]]);
+  await page.mouse.move(802, 379);
   await page.mouse.up();
-  await replayCursorPath(page, [[646,321,481],[644,306,36],[639,271,34],[634,224,32],[629,157,33],[626,140,33],[625,131,34],[620,115,86],[610,95,50],[607,87,45],[604,75,37],[602,66,34]]);
-  await replayCursorPath(page, [[601,56,49],[601,53,35],[601,49,33],[601,47,44],[601,45,38],[601,43,34],[601,41,72]]);
-  await page.mouse.move(601, 41);
+  await replayCursorPath(page, [[802,379,64],[801,379,53],[796,375,33],[782,360,41],[766,347,34],[760,342,34],[759,341,66],[758,341,52],[758,341,33],[758,341,32],[758,341,141],[758,341,175],[743,328,34],[713,308,32],[677,285,34],[638,261,33],[608,242,34],[593,230,33],[591,228,42],[591,228,42],[590,227,33],[590,228,58],[590,228,33],[590,228,34],[590,228,34],[591,227,49],[590,228,33],[590,227,34],[590,228,41],[590,228,34]]);
+  await page.keyboard.press('5');
+  await replayCursorPath(page, [[590,228,33],[590,228,34],[590,228,33],[590,228,33],[589,229,33],[584,233,33],[579,236,34],[557,244,33],[528,254,34],[502,256,33],[462,250,33],[441,243,34],[437,242,42],[437,242,34],[437,242,32],[437,242,33],[437,242,34],[437,243,34],[441,252,32],[446,261,34],[448,264,33],[452,268,34],[455,270,33],[455,270,33],[455,270,33],[457,267,34],[457,263,34],[457,260,32],[455,257,35],[452,253,41],[452,253,52],[452,253,224],[452,253,40],[453,254,34],[454,254,59],[455,254,42],[455,255,40]]);
+  await page.mouse.move(455, 255);
   await page.mouse.down();
-  await page.mouse.move(601, 41);
+  await replayCursorPath(page, [[455,254,184],[455,254,33],[459,245,33],[464,233,34],[467,225,33],[471,217,33],[476,209,33],[478,206,34],[482,201,33],[491,196,34],[509,191,32],[546,190,34],[590,191,34],[629,194,33],[657,197,33],[672,198,33],[674,198,34],[676,199,32],[678,199,34],[687,200,34],[691,200,33],[691,200,49],[692,200,100],[705,208,34],[716,216,34],[721,224,33],[723,226,50],[722,227,33],[719,235,33],[715,243,34],[707,252,33],[701,262,38],[699,268,29],[698,270,33],[696,278,34],[696,289,33],[698,294,33],[699,295,50],[701,298,33],[703,299,34],[704,300,33],[707,303,33],[711,306,34],[710,305,42],[710,305,50],[710,305,33],[711,305,42],[712,305,41],[712,305,34],[713,305,33],[712,305,92],[712,305,42],[712,305,41],[709,305,34],[706,306,41],[706,306,34],[706,306,41],[706,306,42],[704,306,33],[703,307,75],[701,307,33],[695,308,33],[692,308,34],[692,308,41],[692,308,51],[692,309,33],[692,308,91],[692,308,50]]);
+  await page.mouse.move(692, 308);
   await page.mouse.up();
-  // Coordinate-only click (no selectors found)
-  await page.mouse.click(600, 38);
-  // Coordinate-only click (no selectors found)
-  await page.mouse.click(594, 40);
-  await replayCursorPath(page, [[603,41,378]]);
-  await replayCursorPath(page, [[628,68,65],[675,144,35],[724,246,54],[724,242,229],[723,225,34],[719,185,49],[719,172,34],[719,170,32],[719,169,44],[720,165,40],[721,164,35],[722,162,33],[723,162,49],[723,162,50],[723,161,33],[724,161,67]]);
-  await page.mouse.move(724, 161);
+  await replayCursorPath(page, [[693,308,443],[729,316,41],[786,330,34],[814,341,33],[815,347,32],[811,361,34],[795,381,34],[771,396,33],[754,402,34],[745,404,33],[738,404,33],[738,405,58],[738,405,44],[738,405,81],[737,404,76],[737,404,33],[737,404,41],[733,403,33],[730,402,34],[728,402,34],[725,402,41],[723,402,33],[722,402,33],[721,403,34],[719,403,42],[718,403,84],[718,403,116],[715,404,33],[708,404,33],[701,405,34],[694,405,33],[688,405,33],[686,405,50],[686,405,118],[686,405,393],[687,404,40],[688,404,35],[689,402,30],[689,402,34],[689,402,42],[689,402,58],[689,402,51],[689,402,301],[689,402,248],[689,402,284],[689,402,74],[689,401,33],[689,401,100],[690,397,34],[696,388,33],[706,379,33],[711,375,34],[712,375,34],[713,375,101],[713,374,32]]);
+  await page.mouse.move(713, 374);
   await page.mouse.down();
-  await replayCursorPath(page, [[724,161,135],[730,168,44],[746,194,36],[758,215,41],[769,234,49],[774,241,63],[782,250,51],[786,254,52],[796,264,79],[804,269,27],[808,273,41],[811,275,37],[814,278,60],[818,284,51],[821,290,116],[824,295,36],[837,308,63],[848,318,160],[864,326,42],[871,329,38],[873,330,40],[877,333,39],[879,335,48],[879,336,34],[881,337,44],[884,347,49],[885,352,52],[885,354,55],[886,356,52]]);
-  await page.mouse.move(886, 356);
+  await replayCursorPath(page, [[713,374,150]]);
+  await page.mouse.move(713, 374);
   await page.mouse.up();
-  await replayCursorPath(page, [[885,353,636],[883,349,32],[852,266,49],[831,189,34],[822,136,31],[819,109,34],[817,95,36],[816,92,198],[818,84,34]]);
-  await replayCursorPath(page, [[829,57,41],[841,44,100],[841,44,43]]);
-  await replayCursorPath(page, [[849,42,67],[861,41,49],[864,41,42],[865,41,41],[866,41,54],[874,40,44]]);
-  await replayCursorPath(page, [[877,41,38],[881,43,52],[882,43,94],[885,43,45]]);
-  await replayCursorPath(page, [[890,43,73],[891,43,83]]);
-  // Coordinate-only click (no selectors found)
-  await page.mouse.click(890, 41);
-  await replayCursorPath(page, [[891,43,978]]);
-  await replayCursorPath(page, [[890,45,33],[877,57,70],[859,81,36],[850,90,47],[843,99,37]]);
-  await replayCursorPath(page, [[838,104,36],[826,121,31],[823,127,170]]);
-  await replayCursorPath(page, [[808,165,43],[805,178,33],[805,178,34]]);
-  await replayCursorPath(page, [[805,170,160],[808,127,43],[808,127,48],[808,126,35],[807,122,59],[807,120,39],[806,120,69],[806,119,215]]);
-  await replayCursorPath(page, [[806,116,35],[806,109,57],[806,107,41],[806,107,34],[806,106,33],[806,105,51],[806,105,32],[806,104,50]]);
-  await replayCursorPath(page, [[805,102,114],[805,102,53],[805,102,67],[805,101,50],[805,101,67]]);
-  await page.mouse.move(805, 101);
+  await locateWithFallback(page, [{"type":"css-path","value":"div.excalidraw-app > div.excalidraw.excalidraw-container > canvas.excalidraw__canvas.interactive"}], 'click', null, {"x":640,"y":360});
+  await replayCursorPath(page, [[713,374,416],[713,374,143],[713,375,559],[712,375,41],[712,375,166],[712,375,1080],[714,370,20],[726,350,33],[740,328,33],[754,304,34],[762,290,33],[766,285,34],[767,282,33],[770,277,33],[774,270,34],[777,266,32],[779,262,34],[779,258,33],[777,251,34],[773,241,33],[767,232,33],[765,230,34],[764,230,41],[761,229,34],[759,229,33],[757,229,33],[753,228,33],[749,227,34],[748,226,34],[746,226,33],[746,226,151],[746,226,48],[746,226,202],[746,225,48],[746,225,42],[746,224,34],[746,224,226],[746,224,207],[746,225,92],[746,225,34],[747,226,32],[747,227,34],[748,228,38],[748,229,37],[748,229,50],[749,229,101],[749,229,51],[749,229,165]]);
+  await page.mouse.move(749, 229);
   await page.mouse.down();
-  await page.mouse.move(805, 101);
+  await replayCursorPath(page, [[749,229,325],[749,229,50],[749,229,34],[749,229,40],[750,228,84],[752,228,33],[752,228,177],[753,229,40],[753,229,34],[755,229,32],[757,230,33],[758,231,33],[759,231,34],[760,232,33],[761,232,69],[765,234,32],[768,237,33],[769,237,34],[772,239,33],[775,242,32],[778,245,34],[780,246,34],[782,247,32],[785,250,34],[787,252,33],[789,254,33],[789,254,51],[790,255,34],[791,257,33],[794,260,33],[797,264,34],[799,267,33],[801,270,33],[803,274,33],[806,278,34],[808,281,33],[809,284,33],[809,285,34],[809,285,34],[811,289,32],[812,291,42],[813,295,33],[813,299,34],[814,303,32],[815,311,34],[816,316,42],[817,322,33],[817,326,34],[817,330,33],[817,331,41],[817,331,184],[817,331,41],[818,330,33],[818,327,34],[815,318,33],[810,309,34],[803,299,33],[795,289,34],[793,285,32],[791,284,34],[789,282,34],[787,279,33],[785,276,33],[784,275,159],[785,275,42],[785,276,49],[788,278,33],[791,279,33],[794,282,34],[795,283,34],[796,284,33],[797,286,33],[798,288,50],[798,288,50],[798,288,133],[798,288,50],[798,287,34],[797,286,33],[797,285,75],[796,285,33],[795,285,34],[793,284,33],[792,281,33],[791,280,34],[790,280,166],[793,282,40],[798,289,27],[802,297,33],[808,308,33],[816,323,34],[820,334,33],[822,341,34],[823,349,33],[823,368,41],[821,387,34],[817,406,33],[813,416,34],[812,422,34],[808,430,33],[804,438,33],[803,440,101],[803,440,208],[781,447,41],[744,452,33],[716,454,33],[708,454,34],[707,454,33],[707,454,34],[707,453,33],[701,447,33],[682,430,41],[663,413,34],[641,395,33],[622,381,33],[611,371,34],[606,365,33],[605,364,34],[605,364,33],[605,364,34],[606,364,33],[606,364,33],[606,364,100],[607,366,33],[620,377,34],[643,393,33],[671,406,34],[702,415,33],[740,422,33],[777,423,33],[808,420,42],[817,417,33],[824,412,34],[833,401,33],[844,386,33],[854,362,33],[856,343,34],[856,326,34],[855,311,32],[854,296,34],[852,287,33],[851,287,300],[851,287,51],[851,288,33],[851,293,33],[854,301,33],[854,305,34],[856,310,33],[857,314,33],[857,315,42],[858,318,33],[858,319,92],[858,319,266],[858,319,51]]);
+  await page.mouse.move(858, 319);
   await page.mouse.up();
-  // Coordinate-only click (no selectors found)
-  await page.mouse.click(790, 94);
-  await replayCursorPath(page, [[838,109,571],[876,131,45],[909,157,34],[928,177,33],[936,186,35],[939,188,349],[948,188,41],[949,189,43],[950,188,76],[950,183,32],[950,176,32],[951,173,42],[952,171,31],[954,168,34],[955,166,50],[956,165,51],[961,161,86],[962,158,67],[963,157,31]]);
-  await page.mouse.move(963, 157);
+  await replayCursorPath(page, [[858,319,1534],[860,321,41],[872,322,33],[892,321,34],[915,321,33],[923,321,33],[924,324,34],[936,335,33],[974,350,33],[988,354,316],[988,350,33],[988,348,34],[986,345,33],[984,341,33],[983,338,34],[982,336,40],[978,334,26],[978,333,34],[976,330,33],[976,329,34],[973,327,34],[968,326,33],[964,326,33],[963,325,66],[959,325,34],[955,325,34],[950,325,32],[939,322,34],[932,321,33],[931,320,39],[931,320,28],[931,320,43],[931,319,32],[930,319,84],[930,319,76],[930,319,50],[930,319,115],[930,318,68],[929,315,32],[928,312,41],[928,312,51],[929,314,32],[934,317,35],[983,323,33],[1135,327,33]]);
+  await page.screenshot({ path: getScreenshotPath(), fullPage: true });
+  await replayCursorPath(page, [[1271,156,2051],[1048,209,33],[931,244,41],[924,253,33],[930,272,33],[944,286,33],[945,288,34],[945,288,33],[944,288,34],[927,290,33],[876,284,34],[831,266,32],[813,248,34],[805,237,33],[805,236,33],[805,236,34],[805,236,33],[805,235,34],[805,235,33],[805,235,44],[805,234,47],[805,231,34],[805,227,33],[805,226,42],[805,226,42],[804,225,33],[804,225,41],[804,224,109],[803,218,33],[802,215,33],[802,215,44],[802,215,50],[802,215,50],[802,215,82],[802,215,35],[801,215,49],[802,216,42],[809,218,32],[819,220,33],[831,224,34],[849,230,33],[859,236,33],[863,243,34],[860,249,33],[840,263,41],[813,271,34],[785,272,34],[765,269,33],[763,269,41]]);
+  await page.mouse.move(763, 269);
   await page.mouse.down();
-  await replayCursorPath(page, [[963,157,72],[963,157,95],[969,160,48],[984,175,35],[995,188,48],[1003,199,33],[1012,209,34],[1021,219,33],[1031,231,42],[1050,253,107],[1077,280,39],[1087,291,61],[1091,297,41],[1091,298,229],[1096,306,45],[1106,326,99],[1112,340,39],[1113,345,47],[1113,346,370],[1114,350,49],[1115,352,34],[1118,361,49],[1119,362,66]]);
-  await page.mouse.move(1119, 362);
+  await replayCursorPath(page, [[763,268,71]]);
+  await page.mouse.move(763, 268);
   await page.mouse.up();
-  await replayCursorPath(page, [[1118,362,902],[1112,359,39],[1102,350,44],[1095,341,33],[1093,338,34],[1090,326,38],[1090,324,44],[1090,322,49],[1089,322,33],[1089,322,48],[1087,319,36],[1070,301,32],[1008,244,34],[881,154,52],[848,134,33],[835,124,34],[833,124,232],[801,104,35]]);
-  await replayCursorPath(page, [[702,57,44],[649,43,45],[630,42,44],[629,42,49],[628,43,32],[628,43,35],[629,43,67],[629,43,32],[629,43,101]]);
-  await page.mouse.move(629, 43);
+  await locateWithFallback(page, [{"type":"css-path","value":"div.excalidraw-app > div.excalidraw.excalidraw-container > canvas.excalidraw__canvas.interactive"}], 'click', null, {"x":640,"y":360});
+  await page.keyboard.press('r');
+  await replayCursorPath(page, [[763,268,722],[763,265,34],[763,257,40],[762,255,92],[762,255,33],[762,256,33],[757,257,34],[755,257,41],[754,257,209],[753,254,33],[750,253,33],[750,253,42],[750,253,284],[754,255,33],[776,258,33],[827,266,34],[920,276,32],[998,286,34],[1011,290,42],[1010,290,49],[1008,289,33]]);
+  await page.keyboard.press('Escape');
+  await replayCursorPath(page, [[1006,290,34],[1002,290,33],[1001,290,43],[996,290,33],[985,291,33],[972,292,33],[949,294,34],[928,295,33],[916,296,33],[914,296,34],[914,296,32],[914,297,51],[914,297,58],[914,297,34],[914,297,33],[913,298,33],[911,302,34],[906,305,33],[901,306,33],[895,305,34],[877,301,32],[843,297,34],[816,291,33],[804,289,34],[802,288,34],[800,288,33]]);
+  await page.mouse.move(800, 289);
   await page.mouse.down();
-  await page.mouse.move(629, 43);
+  await replayCursorPath(page, [[800,289,32],[800,290,51]]);
+  await page.mouse.move(800, 289);
   await page.mouse.up();
-  // Coordinate-only click (no selectors found)
-  await page.mouse.click(640, 38);
-  // Coordinate-only click (no selectors found)
-  await page.mouse.click(634, 40);
-  await replayCursorPath(page, [[620,56,504],[516,171,62],[401,315,35],[389,334,36],[367,376,45],[359,389,41],[351,399,44],[334,414,49],[318,428,34],[309,437,34],[307,440,33],[306,443,301],[302,453,33],[295,472,33],[292,491,37],[292,500,47],[292,515,62],[291,521,37],[290,523,34],[289,528,33],[288,536,50],[288,538,33],[288,539,32]]);
-  await page.mouse.move(288, 539);
+  await locateWithFallback(page, [{"type":"css-path","value":"div.excalidraw-app > div.excalidraw.excalidraw-container > canvas.excalidraw__canvas.interactive"}], 'click', null, {"x":640,"y":360});
+  await replayCursorPath(page, [[801,289,150],[800,289,151],[800,289,41],[800,289,41],[800,289,42],[801,289,116],[810,286,33],[873,280,34],[1048,276,33]]);
+}`,
+  },
+  {
+    name: "Test 5: Undo Element Creation",
+    targetUrl: "https://excalidraw.com",
+    code: `import { Page } from 'playwright';
+
+export async function test(page: Page, baseUrl: string, screenshotPath: string, stepLogger: any) {
+  // Helper to build URLs safely (handles trailing/leading slashes)
+  function buildUrl(base, path) {
+    const cleanBase = base.endsWith('/') ? base.slice(0, -1) : base;
+    const cleanPath = path.startsWith('/') ? path : '/' + path;
+    return cleanBase + cleanPath;
+  }
+
+  // Helper to generate unique screenshot paths
+  let screenshotStep = 0;
+  function getScreenshotPath() {
+    screenshotStep++;
+    const ext = screenshotPath.lastIndexOf('.');
+    if (ext > 0) {
+      return screenshotPath.slice(0, ext) + '-step' + screenshotStep + screenshotPath.slice(ext);
+    }
+    return screenshotPath + '-step' + screenshotStep;
+  }
+
+  // Multi-selector fallback helper with coordinate fallback for clicks
+  async function locateWithFallback(page, selectors, action, value, coords) {
+    const validSelectors = selectors.filter(sel => sel.value && sel.value.trim() && !sel.value.includes('undefined'));
+    for (const sel of validSelectors) {
+      try {
+        let locator;
+        if (sel.type === 'ocr-text') {
+          const text = sel.value.replace(/^ocr-text="/, '').replace(/"$/, '');
+          locator = page.getByText(text, { exact: false });
+        } else if (sel.type === 'role-name') {
+          // Parse role=button[name="Label"] format and use getByRole
+          const match = sel.value.match(/^role=(\\w+)\\[name="(.+)"\\]$/);
+          if (match) {
+            locator = page.getByRole(match[1], { name: match[2] });
+          } else {
+            locator = page.locator(sel.value);
+          }
+        } else {
+          locator = page.locator(sel.value);
+        }
+        // Use .first() to handle multiple matches (e.g., header + footer nav links)
+        const target = locator.first();
+        await target.waitFor({ timeout: 3000 });
+        if (action === 'click') await target.click();
+        else if (action === 'fill') await target.fill(value || '');
+        else if (action === 'selectOption') await target.selectOption(value || '');
+        return;
+      } catch { continue; }
+    }
+    // Coordinate fallback for clicks when all selectors fail
+    if (action === 'click' && coords) {
+      console.log('Falling back to coordinate click at', coords.x, coords.y);
+      await page.mouse.click(coords.x, coords.y);
+      return;
+    }
+    throw new Error('No selector matched: ' + JSON.stringify(validSelectors));
+  }
+
+  // Replay cursor path helper
+  async function replayCursorPath(page, moves) {
+    for (const [x, y, delay] of moves) {
+      await page.mouse.move(x, y);
+      if (delay > 0) await page.waitForTimeout(delay);
+    }
+  }
+
+  await page.goto(buildUrl(baseUrl, '/'));
+  await replayCursorPath(page, [[1262,592,0],[1150,551,40],[1038,510,34],[947,475,33],[888,448,34],[873,441,32],[873,441,34],[873,441,33],[873,441,51],[873,441,33],[871,440,33],[858,427,33],[830,400,33],[797,365,34],[754,322,33],[711,293,33],[676,277,33],[647,263,35],[613,250,33],[573,241,34],[526,241,32],[451,259,34],[391,285,33],[363,299,33],[360,305,34],[357,310,33],[357,310,68],[357,310,82]]);
+  await page.mouse.move(357, 310);
   await page.mouse.down();
-  await replayCursorPath(page, [[288,539,167],[288,529,38],[288,512,45],[288,494,73],[290,466,60],[295,437,68],[305,405,31],[309,395,34],[311,391,43],[318,380,57],[330,366,48],[333,361,203]]);
-  await page.mouse.move(333, 361);
+  await page.mouse.move(357, 309);
   await page.mouse.up();
-  await replayCursorPath(page, [[333,362,904],[346,372,56],[366,375,45],[403,370,46],[513,294,56],[569,243,32],[615,195,50],[617,196,292],[580,267,36],[530,401,55],[516,475,33],[515,487,45],[515,486,135],[529,453,50],[581,280,37],[680,7,46],[665,0,349]]);
-  await replayCursorPath(page, [[655,17,45],[651,23,34],[649,26,50],[649,27,49],[643,39,51]]);
-  await replayCursorPath(page, [[641,42,41],[641,43,99]]);
-  await page.mouse.move(641, 43);
+  await locateWithFallback(page, [{"type":"css-path","value":"div.excalidraw-app > div.excalidraw.excalidraw-container > canvas.excalidraw__canvas.interactive"}], 'click', null, {"x":640,"y":360});
+  await replayCursorPath(page, [[357,309,133],[357,309,708],[369,300,33],[466,274,34],[729,272,33],[1154,283,34]]);
+  await replayCursorPath(page, [[1260,118,1318],[814,102,32],[559,96,33],[494,94,33],[494,94,34],[496,96,33],[499,98,33],[509,92,33],[524,72,34]]);
+  await replayCursorPath(page, [[541,54,33],[560,39,34],[562,37,84],[560,38,32],[552,40,34]]);
+  await replayCursorPath(page, [[542,42,33],[529,44,33],[522,44,33],[522,44,35],[522,44,33],[521,43,33]]);
+  await page.mouse.move(520, 43);
   await page.mouse.down();
-  await page.mouse.move(641, 43);
+  await replayCursorPath(page, [[520,43,66],[520,43,75]]);
+  await page.mouse.move(520, 43);
   await page.mouse.up();
-  // Coordinate-only click (no selectors found)
-  await page.mouse.click(640, 38);
-  // Coordinate-only click (no selectors found)
-  await page.mouse.click(634, 40);
-  await replayCursorPath(page, [[641,45,365]]);
-  await replayCursorPath(page, [[608,116,48],[562,227,56],[517,412,44],[516,437,33],[516,450,51],[515,458,36],[515,464,32],[515,489,33],[515,512,34],[515,530,34],[515,540,32],[515,542,35],[515,543,31],[516,545,51],[518,555,50],[524,567,78],[527,569,39],[528,569,33],[528,569,33],[529,569,46]]);
-  await page.mouse.move(529, 569);
+  await locateWithFallback(page, [{"type":"css-path","value":"svg > g > rect"}], 'click', null, {"x":520,"y":38});
+  await locateWithFallback(page, [{"type":"role-name","value":"role=radio[name=\\"Rectangle\\"]"},{"type":"name","value":"[name=\\"editor-current-shape\\"]"},{"type":"css-path","value":"div.Stack.Stack_horizontal > label.ToolIcon.Shape > input.ToolIcon_type_radio.ToolIcon_size_medium"}], 'click', null, {"x":514,"y":40});
+  await replayCursorPath(page, [[520,43,58]]);
+  await replayCursorPath(page, [[519,47,34],[512,77,34],[503,145,34],[494,220,41],[494,230,33],[494,230,42],[494,229,99],[494,229,52]]);
+  await page.mouse.move(494, 229);
   await page.mouse.down();
-  await replayCursorPath(page, [[529,569,105],[529,567,32],[529,557,37],[532,525,46],[536,498,38],[544,463,30],[550,446,33],[552,438,49],[554,432,35],[560,411,38],[563,397,42],[564,389,34],[565,381,36],[566,374,40],[566,372,42],[566,371,68],[566,368,43],[567,367,41],[567,367,39],[567,366,93],[567,366,83],[567,366,50],[567,366,32],[567,366,41],[568,365,56],[568,364,42],[568,363,41],[568,362,88]]);
-  await page.mouse.move(568, 362);
+  await replayCursorPath(page, [[495,229,57],[516,254,33],[586,299,33],[688,347,34],[782,382,33],[844,406,41],[852,410,35],[852,410,107]]);
+  await page.mouse.move(852, 409);
   await page.mouse.up();
-  await replayCursorPath(page, [[569,361,533],[579,349,37],[602,317,34],[612,304,33],[628,280,35],[648,225,48],[659,158,52],[660,121,69],[656,100,77],[654,93,49],[653,93,90],[653,93,35],[651,86,40],[649,78,33],[648,70,33],[646,65,33],[645,60,35]]);
-  await replayCursorPath(page, [[643,54,49],[643,53,34],[643,52,186],[640,47,40]]);
-  await page.mouse.move(640, 46);
+  await replayCursorPath(page, [[852,409,67],[852,409,34],[852,409,41],[851,410,59],[851,410,33],[851,411,41],[860,416,34],[922,417,33],[1121,411,34]]);
+  await page.screenshot({ path: getScreenshotPath(), fullPage: true });
+  await replayCursorPath(page, [[1272,180,1942],[1192,213,40],[1148,233,25],[1115,244,34],[1084,249,33],[1058,252,34],[1024,254,32],[979,256,34],[948,258,33],[933,259,34],[912,265,33],[891,277,33],[883,285,34],[880,292,33],[882,301,34],[890,311,33],[894,314,42],[894,314,25],[894,314,33],[894,314,41],[894,314,34],[896,315,34]]);
+  await page.mouse.move(896, 315);
   await page.mouse.down();
-  await page.mouse.move(640, 46);
+  await replayCursorPath(page, [[896,314,33],[895,314,33]]);
+  await page.mouse.move(896, 314);
   await page.mouse.up();
-  // Coordinate-only click (no selectors found)
-  await page.mouse.click(640, 38);
-  // Coordinate-only click (no selectors found)
-  await page.mouse.click(634, 40);
-  await replayCursorPath(page, [[640,47,357]]);
-  await replayCursorPath(page, [[646,74,51],[654,110,80],[684,268,37],[696,361,50],[707,409,164],[763,502,53],[765,506,59],[772,524,41],[772,530,32],[772,537,36],[772,544,53],[772,547,46],[772,565,79],[772,568,53],[772,571,57]]);
-  await page.mouse.move(772, 571);
+  await locateWithFallback(page, [{"type":"css-path","value":"div.excalidraw-app > div.excalidraw.excalidraw-container > canvas.excalidraw__canvas.interactive"}], 'click', null, {"x":640,"y":360});
+  await replayCursorPath(page, [[895,315,66],[895,314,59],[895,314,50],[895,315,75],[895,315,452],[892,317,31],[876,327,35],[871,331,32],[869,332,33],[867,335,33],[865,337,33],[865,337,35],[865,337,40],[862,339,34],[859,340,34],[858,341,41],[857,341,33],[856,343,33],[856,343,201],[856,343,33],[856,342,42],[856,342,77],[856,342,32],[857,342,33]]);
+  await page.keyboard.down('Control');
+  await page.keyboard.press('z');
+  await page.keyboard.up('Control');
+  await page.keyboard.down('Control');
+  await page.keyboard.press('z');
+  await page.keyboard.up('Control');
+  await replayCursorPath(page, [[857,342,4084],[906,340,40],[1126,339,34]]);
+  await page.screenshot({ path: getScreenshotPath(), fullPage: true });
+}`,
+  },
+  {
+    name: "Test 6: Redo Element Creation",
+    targetUrl: "https://excalidraw.com",
+    code: `import { Page } from 'playwright';
+
+export async function test(page: Page, baseUrl: string, screenshotPath: string, stepLogger: any) {
+  // Helper to build URLs safely (handles trailing/leading slashes)
+  function buildUrl(base, path) {
+    const cleanBase = base.endsWith('/') ? base.slice(0, -1) : base;
+    const cleanPath = path.startsWith('/') ? path : '/' + path;
+    return cleanBase + cleanPath;
+  }
+
+  // Helper to generate unique screenshot paths
+  let screenshotStep = 0;
+  function getScreenshotPath() {
+    screenshotStep++;
+    const ext = screenshotPath.lastIndexOf('.');
+    if (ext > 0) {
+      return screenshotPath.slice(0, ext) + '-step' + screenshotStep + screenshotPath.slice(ext);
+    }
+    return screenshotPath + '-step' + screenshotStep;
+  }
+
+  // Multi-selector fallback helper with coordinate fallback for clicks
+  async function locateWithFallback(page, selectors, action, value, coords) {
+    const validSelectors = selectors.filter(sel => sel.value && sel.value.trim() && !sel.value.includes('undefined'));
+    for (const sel of validSelectors) {
+      try {
+        let locator;
+        if (sel.type === 'ocr-text') {
+          const text = sel.value.replace(/^ocr-text="/, '').replace(/"$/, '');
+          locator = page.getByText(text, { exact: false });
+        } else if (sel.type === 'role-name') {
+          // Parse role=button[name="Label"] format and use getByRole
+          const match = sel.value.match(/^role=(\\w+)\\[name="(.+)"\\]$/);
+          if (match) {
+            locator = page.getByRole(match[1], { name: match[2] });
+          } else {
+            locator = page.locator(sel.value);
+          }
+        } else {
+          locator = page.locator(sel.value);
+        }
+        // Use .first() to handle multiple matches (e.g., header + footer nav links)
+        const target = locator.first();
+        await target.waitFor({ timeout: 3000 });
+        if (action === 'click') await target.click();
+        else if (action === 'fill') await target.fill(value || '');
+        else if (action === 'selectOption') await target.selectOption(value || '');
+        return;
+      } catch { continue; }
+    }
+    // Coordinate fallback for clicks when all selectors fail
+    if (action === 'click' && coords) {
+      console.log('Falling back to coordinate click at', coords.x, coords.y);
+      await page.mouse.click(coords.x, coords.y);
+      return;
+    }
+    throw new Error('No selector matched: ' + JSON.stringify(validSelectors));
+  }
+
+  // Replay cursor path helper
+  async function replayCursorPath(page, moves) {
+    for (const [x, y, delay] of moves) {
+      await page.mouse.move(x, y);
+      if (delay > 0) await page.waitForTimeout(delay);
+    }
+  }
+
+  await page.goto(buildUrl(baseUrl, '/'));
+  await replayCursorPath(page, [[1223,289,0],[931,299,38],[781,319,34],[682,338,34],[651,349,33],[647,354,33],[646,355,33],[646,355,34],[646,355,33],[647,355,60],[648,346,32],[650,326,33],[648,321,33],[648,321,34],[632,319,34],[604,319,33],[578,322,33],[571,322,33]]);
+  await page.mouse.move(571, 322);
   await page.mouse.down();
-  await replayCursorPath(page, [[772,571,143],[772,568,36],[772,563,47],[772,556,36],[773,538,47],[776,514,49],[779,497,51],[781,480,430],[781,391,47],[780,380,191],[780,380,49],[780,382,36],[781,385,89]]);
-  await page.mouse.move(782, 387);
+  await replayCursorPath(page, [[571,322,33]]);
+  await page.mouse.move(571, 322);
   await page.mouse.up();
-  await replayCursorPath(page, [[782,386,959],[778,367,38],[773,348,32],[727,221,64],[697,151,48],[688,132,51],[684,125,36],[683,120,31],[680,113,123],[675,94,263],[667,79,37],[659,64,92],[657,61,35],[657,61,50],[656,61,33]]);
-  await replayCursorPath(page, [[655,59,38],[648,49,67],[644,40,44],[643,40,35]]);
-  await page.mouse.move(643, 40);
+  await locateWithFallback(page, [{"type":"css-path","value":"div.excalidraw-app > div.excalidraw.excalidraw-container > canvas.excalidraw__canvas.interactive"}], 'click', null, {"x":640,"y":360});
+  await replayCursorPath(page, [[571,322,259],[571,322,99],[571,321,134],[571,317,42],[570,312,33],[576,313,567],[565,309,33],[560,307,33],[557,306,34],[548,304,33],[537,306,34],[524,307,33],[508,307,32],[499,306,34],[493,304,33],[489,302,34],[489,300,33],[489,300,33],[488,300,34],[488,300,41],[488,300,34],[487,300,49],[483,300,34],[476,299,34],[469,301,33],[451,306,33],[431,308,34],[425,303,33],[416,292,33],[403,282,34],[396,280,33],[396,280,75],[396,280,33],[396,279,34],[397,269,33],[401,245,34],[415,212,41],[434,185,36],[457,162,30],[474,144,34],[482,133,34],[486,127,33],[488,120,33],[489,112,34],[491,105,33],[492,97,33],[493,92,33],[493,83,34],[494,69,33],[495,68,59],[495,64,33]]);
+  await replayCursorPath(page, [[497,53,33],[498,47,33],[501,37,33],[502,35,42],[503,34,33],[505,31,34],[505,30,42],[507,28,33],[509,27,33]]);
+  await page.mouse.move(509, 27);
   await page.mouse.down();
-  await page.mouse.move(643, 40);
+  await page.mouse.move(509, 27);
   await page.mouse.up();
-  // Coordinate-only click (no selectors found)
-  await page.mouse.click(643, 39);
-  // Coordinate-only click (no selectors found)
-  await page.mouse.click(634, 40);
-  await replayCursorPath(page, [[656,54,345],[706,135,38],[742,235,51],[770,304,38],[835,431,45],[871,487,66],[875,488,232],[897,504,33],[956,552,50],[975,567,33],[981,572,33],[982,572,34],[983,572,33],[984,572,34],[986,572,34],[988,572,74],[992,573,42],[993,574,34],[996,578,34],[997,579,34]]);
-  await page.mouse.move(997, 579);
+  await locateWithFallback(page, [{"type":"css-path","value":"div.Stack.Stack_horizontal > label.ToolIcon.Shape > div.ToolIcon__icon"}], 'click', null, {"x":520,"y":38});
+  await locateWithFallback(page, [{"type":"role-name","value":"role=radio[name=\\"Rectangle\\"]"},{"type":"name","value":"[name=\\"editor-current-shape\\"]"},{"type":"css-path","value":"div.Stack.Stack_horizontal > label.ToolIcon.Shape > input.ToolIcon_type_radio.ToolIcon_size_medium"}], 'click', null, {"x":514,"y":40});
+  await replayCursorPath(page, [[509,27,459],[509,28,41],[508,31,33]]);
+  await replayCursorPath(page, [[504,68,35],[492,164,41],[476,228,33],[466,262,33],[464,271,33],[464,271,34],[464,271,41],[464,271,34],[464,270,42],[464,271,33],[464,270,58]]);
+  await page.mouse.move(464, 270);
   await page.mouse.down();
-  await replayCursorPath(page, [[997,579,133],[997,577,127],[997,535,33],[997,528,39],[998,514,89],[999,495,52],[1001,477,41],[1001,471,36],[1001,467,34],[1001,466,352],[1002,463,54],[1003,462,91],[1008,452,37],[1011,446,46],[1011,443,50],[1011,442,34],[1012,442,76],[1012,441,57],[1012,441,33],[1012,440,34],[1013,440,34],[1013,439,45],[1013,438,60],[1013,438,302],[1017,422,56],[1019,415,72],[1020,408,40],[1021,405,126],[1025,397,49],[1026,396,75],[1027,394,70],[1027,393,45],[1027,392,144],[1027,392,533],[1027,392,50]]);
-  await page.mouse.move(1027, 392);
+  await replayCursorPath(page, [[464,270,42],[464,270,34],[465,271,33],[499,303,33],[560,344,33],[626,382,38],[677,408,29],[694,416,33],[695,417,75],[695,417,100],[695,417,125],[695,420,33],[696,420,33],[696,420,34],[696,420,84],[696,420,116],[696,420,41],[696,420,226],[696,420,224],[696,420,242]]);
+  await page.mouse.move(696, 420);
   await page.mouse.up();
-  await replayCursorPath(page, [[1027,392,1318],[897,387,32],[793,385,37],[547,386,34],[416,397,44],[390,398,35],[387,397,234],[372,390,33],[336,380,51],[326,380,50],[325,380,36],[325,381,63],[325,381,51]]);
-  await page.mouse.move(325, 381);
+  await replayCursorPath(page, [[696,420,62],[696,420,305],[696,420,42],[718,418,33],[938,435,42]]);
+  await page.screenshot({ path: getScreenshotPath(), fullPage: true });
+  await replayCursorPath(page, [[1257,135,2277],[1095,130,39],[1001,134,34],[934,139,33],[885,146,34],[853,158,32],[843,171,34],[840,185,34],[836,198,32],[831,219,34],[826,241,36],[819,256,31],[809,270,33],[801,282,33],[797,288,34],[794,291,33],[789,295,34],[784,300,32],[783,301,42],[783,300,33],[782,300,317],[782,300,83],[783,301,67],[783,301,84],[783,300,199],[783,300,1917],[783,298,34],[791,276,33],[818,172,34]]);
+  await replayCursorPath(page, [[810,29,36]]);
+  await page.keyboard.down('Control');
+  await page.keyboard.press('z');
+  await page.keyboard.up('Control');
+  await page.screenshot({ path: getScreenshotPath(), fullPage: true });
+  await replayCursorPath(page, [[1266,547,4814],[1154,564,40],[1148,565,38],[1147,565,29],[1136,562,34],[1094,559,33],[966,554,42],[822,542,33],[699,528,34],[623,515,33],[608,510,33],[608,510,116],[607,511,51]]);
+  await page.mouse.move(608, 511);
   await page.mouse.down();
-  await page.mouse.move(325, 381);
+  await replayCursorPath(page, [[607,511,3299],[607,511,84]]);
+  await page.mouse.move(607, 511);
   await page.mouse.up();
-  // Coordinate-only click (no selectors found)
-  await page.mouse.click(640, 360);
-  await replayCursorPath(page, [[325,380,1171],[329,371,45],[331,366,36],[332,364,67],[333,364,48],[333,363,49],[333,363,48],[333,363,50],[333,362,33]]);
-  await page.mouse.move(333, 362);
+  await locateWithFallback(page, [{"type":"css-path","value":"div.excalidraw-app > div.excalidraw.excalidraw-container > canvas.excalidraw__canvas.interactive"}], 'click', null, {"x":640,"y":360});
+  await replayCursorPath(page, [[607,511,41]]);
+  await page.keyboard.down('Control');
+  await page.keyboard.down('Shift');
+  await page.keyboard.press('Z');
+  await page.keyboard.up('Shift');
+  await page.keyboard.up('Control');
+  await replayCursorPath(page, [[608,511,1876],[629,505,33],[677,493,33],[892,440,33],[1273,403,34]]);
+  await page.screenshot({ path: getScreenshotPath(), fullPage: true });
+}`,
+  },
+  {
+    name: "Test 7: Undo Multiple Operations",
+    targetUrl: "https://excalidraw.com",
+    code: `import { Page } from 'playwright';
+
+export async function test(page: Page, baseUrl: string, screenshotPath: string, stepLogger: any) {
+  // Helper to build URLs safely (handles trailing/leading slashes)
+  function buildUrl(base, path) {
+    const cleanBase = base.endsWith('/') ? base.slice(0, -1) : base;
+    const cleanPath = path.startsWith('/') ? path : '/' + path;
+    return cleanBase + cleanPath;
+  }
+
+  // Helper to generate unique screenshot paths
+  let screenshotStep = 0;
+  function getScreenshotPath() {
+    screenshotStep++;
+    const ext = screenshotPath.lastIndexOf('.');
+    if (ext > 0) {
+      return screenshotPath.slice(0, ext) + '-step' + screenshotStep + screenshotPath.slice(ext);
+    }
+    return screenshotPath + '-step' + screenshotStep;
+  }
+
+  // Multi-selector fallback helper with coordinate fallback for clicks
+  async function locateWithFallback(page, selectors, action, value, coords) {
+    const validSelectors = selectors.filter(sel => sel.value && sel.value.trim() && !sel.value.includes('undefined'));
+    for (const sel of validSelectors) {
+      try {
+        let locator;
+        if (sel.type === 'ocr-text') {
+          const text = sel.value.replace(/^ocr-text="/, '').replace(/"$/, '');
+          locator = page.getByText(text, { exact: false });
+        } else if (sel.type === 'role-name') {
+          // Parse role=button[name="Label"] format and use getByRole
+          const match = sel.value.match(/^role=(\\w+)\\[name="(.+)"\\]$/);
+          if (match) {
+            locator = page.getByRole(match[1], { name: match[2] });
+          } else {
+            locator = page.locator(sel.value);
+          }
+        } else {
+          locator = page.locator(sel.value);
+        }
+        // Use .first() to handle multiple matches (e.g., header + footer nav links)
+        const target = locator.first();
+        await target.waitFor({ timeout: 3000 });
+        if (action === 'click') await target.click();
+        else if (action === 'fill') await target.fill(value || '');
+        else if (action === 'selectOption') await target.selectOption(value || '');
+        return;
+      } catch { continue; }
+    }
+    // Coordinate fallback for clicks when all selectors fail
+    if (action === 'click' && coords) {
+      console.log('Falling back to coordinate click at', coords.x, coords.y);
+      await page.mouse.click(coords.x, coords.y);
+      return;
+    }
+    throw new Error('No selector matched: ' + JSON.stringify(validSelectors));
+  }
+
+  // Replay cursor path helper
+  async function replayCursorPath(page, moves) {
+    for (const [x, y, delay] of moves) {
+      await page.mouse.move(x, y);
+      if (delay > 0) await page.waitForTimeout(delay);
+    }
+  }
+
+  await page.goto(buildUrl(baseUrl, '/'));
+  await replayCursorPath(page, [[1270,378,0],[1160,394,39],[1088,410,34],[1022,422,33],[947,427,34],[878,430,32],[849,430,33],[836,425,34],[810,411,33]]);
+  await replayCursorPath(page, [[767,381,34],[738,350,33],[726,322,34],[717,301,33],[714,291,34]]);
+  await page.mouse.move(713, 291);
   await page.mouse.down();
-  await replayCursorPath(page, [[333,361,355],[333,360,38],[331,351,47],[330,347,30],[329,340,78],[328,337,41],[328,335,63],[327,333,38],[326,331,57],[325,330,36],[324,329,125],[324,328,42],[322,323,35],[321,322,52],[321,321,34],[321,320,36],[320,319,43],[320,319,70],[320,319,41],[320,319,36],[320,318,38],[320,318,35],[319,318,47],[319,317,58],[319,317,43],[318,317,37],[318,317,122],[318,317,57],[318,317,267]]);
-  await page.mouse.move(318, 317);
+  await replayCursorPath(page, [[713,291,107]]);
+  await page.mouse.move(713, 291);
   await page.mouse.up();
-  await replayCursorPath(page, [[318,317,83],[323,316,305],[331,314,47],[344,312,50],[354,311,51],[363,311,49],[370,311,72],[374,312,51],[374,311,210],[374,311,33],[375,310,49],[375,310,50],[375,310,52]]);
-  await page.mouse.move(375, 310);
+  await locateWithFallback(page, [{"type":"css-path","value":"div.excalidraw-app > div.excalidraw.excalidraw-container > canvas.excalidraw__canvas.interactive"}], 'click', null, {"x":640,"y":360});
+  await replayCursorPath(page, [[713,291,50],[693,273,34],[639,230,33],[571,180,33],[516,139,34],[495,121,33],[495,120,42],[495,118,33],[498,114,34],[502,104,33],[507,97,33],[515,88,34],[522,77,33],[527,68,42],[527,65,33],[528,62,33]]);
+  await replayCursorPath(page, [[528,57,33],[528,52,34],[526,44,34],[524,37,33]]);
+  await page.mouse.move(524, 37);
   await page.mouse.down();
-  await replayCursorPath(page, [[375,310,361],[377,310,42],[380,310,62],[382,309,50],[383,309,39],[384,309,63],[385,309,47],[385,309,40],[386,309,45],[386,309,62],[387,309,35],[388,309,51],[388,309,35],[389,309,49],[389,309,69],[390,309,64],[390,309,50],[390,309,68],[391,309,117]]);
-  await page.mouse.move(391, 309);
+  await replayCursorPath(page, [[524,37,100]]);
+  await page.mouse.move(524, 37);
   await page.mouse.up();
-  await replayCursorPath(page, [[394,309,366],[408,312,34],[432,320,32],[464,336,33],[494,358,35],[513,376,107],[534,398,43],[535,399,35],[535,400,32],[539,402,33],[542,404,34],[548,406,49],[551,408,50],[552,408,35],[552,408,181],[554,409,50],[556,410,34],[558,411,51],[560,412,50],[560,412,33]]);
-  await page.mouse.move(560, 412);
+  await locateWithFallback(page, [{"type":"css-path","value":"svg > g > rect"}], 'click', null, {"x":520,"y":38});
+  await locateWithFallback(page, [{"type":"role-name","value":"role=radio[name=\\"Rectangle\\"]"},{"type":"name","value":"[name=\\"editor-current-shape\\"]"},{"type":"css-path","value":"div.Stack.Stack_horizontal > label.ToolIcon.Shape > input.ToolIcon_type_radio.ToolIcon_size_medium"}], 'click', null, {"x":514,"y":40});
+  await replayCursorPath(page, [[524,37,83],[523,39,33]]);
+  await replayCursorPath(page, [[513,51,33],[471,94,34],[424,157,33],[390,217,33],[378,246,34],[378,246,50],[379,246,42],[381,242,33],[395,228,43],[401,220,32],[400,220,41]]);
+  await page.mouse.move(400, 220);
   await page.mouse.down();
-  await page.mouse.move(560, 412);
+  await replayCursorPath(page, [[400,220,103],[400,222,40],[420,253,33],[476,304,33],[537,348,33],[566,367,34],[567,368,49],[567,367,50]]);
+  await page.mouse.move(567, 367);
   await page.mouse.up();
-  // Coordinate-only click (no selectors found)
-  await page.mouse.click(640, 360);
-  await replayCursorPath(page, [[561,407,602],[563,400,47],[565,392,65],[565,390,33],[566,388,33],[567,383,51],[567,381,126],[569,377,44],[570,374,33],[571,368,106],[571,365,126]]);
-  await page.mouse.move(571, 365);
+  await replayCursorPath(page, [[567,367,54],[567,367,122],[567,367,283],[567,367,50],[568,366,39],[571,355,28],[576,331,33],[572,289,33],[545,206,42],[518,147,33],[505,114,33],[503,100,34],[503,90,33],[503,88,34],[506,86,33],[509,83,33],[510,83,50],[517,77,33],[530,68,34],[533,66,41],[535,62,34]]);
+  await replayCursorPath(page, [[540,51,33],[540,48,134],[540,48,58],[540,48,49],[540,48,34]]);
+  await replayCursorPath(page, [[537,47,35],[521,39,31],[510,34,34],[509,33,34],[507,33,33],[506,33,50],[506,33,125],[507,33,100],[507,33,33],[508,33,33],[509,33,34],[509,33,75]]);
+  await page.mouse.move(509, 33);
   await page.mouse.down();
-  await replayCursorPath(page, [[571,364,319],[570,362,36],[566,354,47],[565,349,53],[563,342,32],[563,336,56],[562,333,41],[562,330,40],[562,328,33],[562,327,39],[562,326,44],[562,325,146],[562,325,47],[562,325,85],[562,322,33],[562,321,34],[562,320,50],[562,317,46],[563,316,53],[563,315,66],[563,315,68],[563,315,204],[564,314,44],[565,312,40],[565,311,54],[565,311,64]]);
-  await page.mouse.move(565, 310);
+  await replayCursorPath(page, [[509,33,58]]);
+  await page.mouse.move(509, 33);
   await page.mouse.up();
-  await replayCursorPath(page, [[567,310,430],[587,304,38],[596,302,43],[599,301,65],[603,300,35],[604,300,35],[604,300,34],[605,300,65],[606,299,35]]);
-  await page.mouse.move(606, 299);
+  await locateWithFallback(page, [{"type":"css-path","value":"div.Stack.Stack_horizontal > label.ToolIcon.Shape > div.ToolIcon__icon"}], 'click', null, {"x":520,"y":38});
+  await locateWithFallback(page, [{"type":"role-name","value":"role=radio[name=\\"Rectangle\\"]"},{"type":"name","value":"[name=\\"editor-current-shape\\"]"},{"type":"css-path","value":"div.Stack.Stack_horizontal > label.ToolIcon.Shape > input.ToolIcon_type_radio.ToolIcon_size_medium"}], 'click', null, {"x":514,"y":40});
+  await replayCursorPath(page, [[509,33,75],[509,34,50]]);
+  await replayCursorPath(page, [[515,42,34],[557,90,32],[646,164,34],[751,233,33],[810,270,34],[817,273,33],[816,273,34],[810,270,41],[798,269,34],[784,268,33],[772,268,33],[759,267,34],[742,262,33],[726,256,33],[705,244,33],[688,234,34],[687,233,50],[687,231,33],[687,230,33]]);
+  await page.mouse.move(687, 230);
   await page.mouse.down();
-  await replayCursorPath(page, [[606,299,756],[618,303,34],[618,304,55],[619,304,52],[620,304,64],[620,304,50],[621,304,32],[621,305,36],[622,305,38],[622,305,44],[623,305,39],[624,306,95],[627,307,40],[628,307,51],[630,307,77],[631,308,64]]);
-  await page.mouse.move(631, 308);
+  await replayCursorPath(page, [[687,230,34],[691,238,33],[735,275,33],[793,317,34],[847,353,45],[860,361,30],[860,361,42],[860,361,33],[860,361,33],[860,361,33]]);
+  await page.mouse.move(860, 361);
   await page.mouse.up();
-  await replayCursorPath(page, [[634,308,518],[638,308,34],[653,315,34],[675,327,33],[704,349,33],[724,370,55],[753,416,46],[757,424,34],[758,424,49],[761,425,50],[766,427,52],[771,428,47],[773,428,35],[775,428,83],[778,427,47],[780,427,46],[783,427,38],[783,427,35]]);
-  await page.mouse.move(784, 427);
+  await replayCursorPath(page, [[860,361,34],[860,361,33],[860,361,33],[860,361,33],[870,366,35],[943,377,32],[1077,390,34],[1206,398,33]]);
+  await page.screenshot({ path: getScreenshotPath(), fullPage: true });
+  await replayCursorPath(page, [[1270,376,3427],[1186,379,40],[1158,380,33],[1151,379,33],[1151,379,34],[1151,378,33],[1151,378,33],[1151,378,117],[1151,378,183],[1151,378,1042],[1152,327,33],[1144,205,33],[1131,76,34]]);
+  await replayCursorPath(page, [[1129,24,410],[1123,104,32],[1108,216,39],[1098,270,27],[1098,276,34]]);
+  await page.mouse.move(1098, 276);
   await page.mouse.down();
-  await page.mouse.move(784, 427);
+  await replayCursorPath(page, [[1098,276,67],[1098,275,57],[1098,275,34]]);
+  await page.mouse.move(1098, 275);
   await page.mouse.up();
-  // Coordinate-only click (no selectors found)
-  await page.mouse.click(640, 360);
-  await replayCursorPath(page, [[784,425,469],[781,412,47],[781,399,49],[781,395,35],[781,395,32],[781,393,43],[781,392,39],[781,392,69],[781,392,369],[781,391,64],[782,390,36]]);
-  await page.mouse.move(782, 390);
+  await locateWithFallback(page, [{"type":"css-path","value":"div.excalidraw-app > div.excalidraw.excalidraw-container > canvas.excalidraw__canvas.interactive"}], 'click', null, {"x":640,"y":360});
+  await replayCursorPath(page, [[1098,275,32],[1098,274,34],[1098,274,92],[1098,274,75],[1098,274,325],[1097,274,42]]);
+  await page.keyboard.down('Control');
+  await page.keyboard.press('z');
+  await page.keyboard.up('Control');
+  await replayCursorPath(page, [[1097,275,75],[1097,276,33],[1096,276,51],[1096,276,57]]);
+  await page.keyboard.down('Control');
+  await page.keyboard.press('z');
+  await page.keyboard.up('Control');
+  await replayCursorPath(page, [[1096,277,1801],[1092,282,33],[1092,284,83],[1092,284,33],[1092,283,58],[1092,283,34],[1113,275,33]]);
+  await page.screenshot({ path: getScreenshotPath(), fullPage: true });
+  await replayCursorPath(page, [[1249,265,1409],[992,286,34],[832,309,41],[819,312,50],[819,312,33]]);
+  await page.mouse.move(820, 312);
   await page.mouse.down();
-  await replayCursorPath(page, [[782,390,264],[782,386,49],[782,383,36],[782,382,49],[782,379,43],[782,376,41],[782,374,44],[782,373,45],[782,371,58],[782,371,34],[782,370,91],[782,369,39],[782,368,37],[782,367,36],[782,366,54],[782,366,47],[783,366,46],[783,365,45],[783,364,38],[783,363,50],[784,362,110],[785,360,39],[785,359,84],[785,359,42],[785,359,189],[786,358,44],[786,358,178]]);
-  await page.mouse.move(786, 358);
+  await replayCursorPath(page, [[820,312,67],[820,312,49]]);
+  await page.mouse.move(820, 312);
   await page.mouse.up();
-  await replayCursorPath(page, [[786,357,418],[781,351,58],[769,338,50],[768,337,190],[761,332,32],[759,332,37],[757,332,45],[755,332,33],[754,332,50],[753,333,53],[752,333,50]]);
-  await page.mouse.move(752, 333);
+  await locateWithFallback(page, [{"type":"css-path","value":"div.excalidraw-app > div.excalidraw.excalidraw-container > canvas.excalidraw__canvas.interactive"}], 'click', null, {"x":640,"y":360});
+  await replayCursorPath(page, [[820,312,59],[820,311,148]]);
+  await page.keyboard.down('Control');
+  await page.keyboard.press('z');
+  await page.keyboard.up('Control');
+  await page.keyboard.down('Control');
+  await page.keyboard.press('z');
+  await page.keyboard.up('Control');
+  await replayCursorPath(page, [[820,311,1003],[826,309,24],[872,298,34],[1056,281,33]]);
+  await page.screenshot({ path: getScreenshotPath(), fullPage: true });
+}`,
+  },
+  {
+    name: "Test 8: Undo/Redo Button State",
+    targetUrl: "https://excalidraw.com",
+    code: `import { Page } from 'playwright';
+
+export async function test(page: Page, baseUrl: string, screenshotPath: string, stepLogger: any) {
+  // Helper to build URLs safely (handles trailing/leading slashes)
+  function buildUrl(base, path) {
+    const cleanBase = base.endsWith('/') ? base.slice(0, -1) : base;
+    const cleanPath = path.startsWith('/') ? path : '/' + path;
+    return cleanBase + cleanPath;
+  }
+
+  // Helper to generate unique screenshot paths
+  let screenshotStep = 0;
+  function getScreenshotPath() {
+    screenshotStep++;
+    const ext = screenshotPath.lastIndexOf('.');
+    if (ext > 0) {
+      return screenshotPath.slice(0, ext) + '-step' + screenshotStep + screenshotPath.slice(ext);
+    }
+    return screenshotPath + '-step' + screenshotStep;
+  }
+
+  // Multi-selector fallback helper with coordinate fallback for clicks
+  async function locateWithFallback(page, selectors, action, value, coords) {
+    const validSelectors = selectors.filter(sel => sel.value && sel.value.trim() && !sel.value.includes('undefined'));
+    for (const sel of validSelectors) {
+      try {
+        let locator;
+        if (sel.type === 'ocr-text') {
+          const text = sel.value.replace(/^ocr-text="/, '').replace(/"$/, '');
+          locator = page.getByText(text, { exact: false });
+        } else if (sel.type === 'role-name') {
+          // Parse role=button[name="Label"] format and use getByRole
+          const match = sel.value.match(/^role=(\\w+)\\[name="(.+)"\\]$/);
+          if (match) {
+            locator = page.getByRole(match[1], { name: match[2] });
+          } else {
+            locator = page.locator(sel.value);
+          }
+        } else {
+          locator = page.locator(sel.value);
+        }
+        // Use .first() to handle multiple matches (e.g., header + footer nav links)
+        const target = locator.first();
+        await target.waitFor({ timeout: 3000 });
+        if (action === 'click') await target.click();
+        else if (action === 'fill') await target.fill(value || '');
+        else if (action === 'selectOption') await target.selectOption(value || '');
+        return;
+      } catch { continue; }
+    }
+    // Coordinate fallback for clicks when all selectors fail
+    if (action === 'click' && coords) {
+      console.log('Falling back to coordinate click at', coords.x, coords.y);
+      await page.mouse.click(coords.x, coords.y);
+      return;
+    }
+    throw new Error('No selector matched: ' + JSON.stringify(validSelectors));
+  }
+
+  // Replay cursor path helper
+  async function replayCursorPath(page, moves) {
+    for (const [x, y, delay] of moves) {
+      await page.mouse.move(x, y);
+      if (delay > 0) await page.waitForTimeout(delay);
+    }
+  }
+
+  await page.goto(buildUrl(baseUrl, '/'));
+  await replayCursorPath(page, [[1276,418,0],[1263,419,32],[1243,417,42],[1213,414,32],[1169,410,34],[1119,407,33],[1037,409,34],[950,411,33],[896,407,34],[848,403,33],[820,399,33],[800,396,33]]);
+  await replayCursorPath(page, [[778,397,34],[745,395,33],[698,387,33],[628,375,34],[552,366,33],[477,357,34],[439,352,32],[434,351,42],[434,351,34],[434,351,41],[434,351,33],[425,346,33],[403,337,35],[378,324,32],[361,304,42],[356,295,25],[356,295,92],[356,295,51],[356,295,42],[356,296,43],[356,301,39],[359,309,34],[359,311,183],[361,323,33],[365,335,33],[368,341,33],[369,343,35],[370,347,41],[371,352,33],[372,364,33],[374,402,33],[373,447,34],[368,483,33],[363,508,34],[356,541,32],[346,567,35],[342,573,33],[341,576,33],[321,593,33],[287,611,34],[261,625,33],[243,638,33],[233,647,34],[224,657,33],[222,658,33],[222,658,33],[222,658,43],[223,658,33],[245,644,33],[366,587,33]]);
+  await replayCursorPath(page, [[659,470,34],[1234,295,42]]);
+  await page.screenshot({ path: getScreenshotPath(), fullPage: true });
+  await replayCursorPath(page, [[1278,464,2143],[1037,484,31],[823,488,34],[623,503,33],[473,525,34],[383,541,33],[331,551,33],[292,560,33],[263,572,33],[254,581,34],[254,581,34],[256,582,33],[258,583,33],[258,583,41],[261,580,35],[263,577,33],[263,577,33]]);
+  await page.mouse.move(263, 577);
   await page.mouse.down();
-  await replayCursorPath(page, [[752,333,370],[754,333,39],[758,335,39],[760,335,33],[766,339,54],[768,340,39],[771,342,62],[773,342,60],[773,342,37],[773,343,65],[774,343,68],[775,344,55],[776,344,62],[777,344,103],[777,344,43],[778,344,129],[779,344,39],[780,345,40],[780,345,297],[780,345,33],[785,349,59],[786,350,39],[787,350,33],[788,351,36],[788,352,64]]);
-  await page.mouse.move(788, 352);
+  await page.mouse.move(263, 577);
   await page.mouse.up();
-  await replayCursorPath(page, [[789,352,468],[804,352,34],[842,353,33],[917,380,88],[958,409,182],[1009,442,30],[1016,446,42],[1032,452,58],[1031,452,148],[1029,452,33],[1025,452,34],[1021,449,74],[1020,449,59]]);
-  await page.mouse.move(1020, 449);
+  await locateWithFallback(page, [{"type":"css-path","value":"div.excalidraw-app > div.excalidraw.excalidraw-container > canvas.excalidraw__canvas.interactive"}], 'click', null, {"x":640,"y":360});
+  await replayCursorPath(page, [[263,577,158],[259,590,33],[253,604,34],[250,614,33],[246,631,33],[244,645,34],[243,652,33],[241,659,33],[239,666,34],[236,672,33],[234,678,33],[233,679,33],[232,680,33],[231,682,35]]);
+  await replayCursorPath(page, [[229,684,32],[228,684,51],[228,684,99],[228,684,42],[228,679,34],[228,671,33],[228,671,150],[228,670,58]]);
+  await replayCursorPath(page, [[228,666,33],[228,666,92],[228,666,217],[241,646,33],[297,571,34],[359,488,33],[418,418,33],[472,359,33],[503,324,34],[521,299,33],[526,285,34],[529,278,33],[531,272,33],[537,255,34],[537,237,33],[530,208,33],[515,172,33],[493,144,34],[476,125,34],[461,104,33],[449,89,33],[448,87,33],[448,87,41],[448,87,35],[448,87,91],[448,82,33],[447,75,33],[447,73,34],[448,68,33]]);
+  await replayCursorPath(page, [[456,49,33],[456,48,51],[466,43,33],[478,42,33],[493,43,33],[501,43,34],[501,43,49]]);
+  await replayCursorPath(page, [[505,43,34],[506,42,33],[509,42,34],[513,41,33],[515,40,50],[515,40,34]]);
+  await page.mouse.move(515, 40);
   await page.mouse.down();
-  await page.mouse.move(1020, 449);
+  await replayCursorPath(page, [[515,40,101]]);
+  await page.mouse.move(515, 40);
   await page.mouse.up();
-  // Coordinate-only click (no selectors found)
-  await page.mouse.click(640, 360);
-  await replayCursorPath(page, [[1020,448,669],[1020,445,33],[1021,421,38],[1022,416,46],[1023,406,64],[1023,404,59],[1025,401,79],[1025,401,46],[1026,400,49],[1026,400,79],[1026,398,263],[1026,398,32],[1026,397,44]]);
-  await page.mouse.move(1026, 397);
+  await locateWithFallback(page, [{"type":"css-path","value":"svg > g > rect"}], 'click', null, {"x":520,"y":38});
+  await locateWithFallback(page, [{"type":"role-name","value":"role=radio[name=\\"Rectangle\\"]"},{"type":"name","value":"[name=\\"editor-current-shape\\"]"},{"type":"css-path","value":"div.Stack.Stack_horizontal > label.ToolIcon.Shape > input.ToolIcon_type_radio.ToolIcon_size_medium"}], 'click', null, {"x":514,"y":40});
+  await replayCursorPath(page, [[515,40,50],[515,40,98]]);
+  await replayCursorPath(page, [[514,41,84],[514,42,33],[511,46,33],[505,55,33],[491,74,34],[464,110,34],[432,153,32],[410,187,34],[404,200,34],[401,204,33],[396,214,42],[393,219,33],[392,219,42],[392,219,32],[392,219,110],[391,220,32],[387,227,40],[386,228,43],[386,228,34],[386,228,42],[385,222,33],[382,215,34],[381,215,33],[381,219,41],[381,220,119],[381,220,32],[381,220,94],[382,220,64],[382,220,42],[382,220,983]]);
+  await page.mouse.move(382, 220);
   await page.mouse.down();
-  await replayCursorPath(page, [[1026,397,66],[1026,397,201],[1026,396,40],[1025,392,49],[1023,387,48],[1022,385,79],[1021,384,40],[1020,382,64],[1020,382,347],[1019,379,33],[1019,378,46],[1018,378,69],[1018,377,34],[1017,377,45],[1017,377,39],[1015,376,43],[1013,374,53],[1012,373,48],[1012,373,81],[1011,372,76]]);
-  await page.mouse.move(1011, 372);
+  await replayCursorPath(page, [[382,220,83],[382,221,76],[417,257,32],[498,306,42],[575,336,33],[649,358,33],[710,372,34],[728,376,34],[728,376,41],[727,376,42],[727,376,108],[726,378,41],[721,390,34],[715,401,33],[710,408,34],[707,410,33],[707,410,158],[707,411,34],[698,416,33],[690,419,33],[686,421,33],[686,421,42],[686,421,92],[686,420,35],[687,420,57]]);
+  await page.mouse.move(687, 420);
   await page.mouse.up();
-  await replayCursorPath(page, [[1009,365,637],[1003,354,246],[979,320,51],[975,320,42],[969,320,41],[966,319,90],[966,319,60],[966,319,116],[965,318,34],[965,318,67],[965,318,34]]);
-  await page.mouse.move(965, 318);
+  await replayCursorPath(page, [[687,420,86],[686,420,414],[686,420,124],[687,420,34],[709,412,33],[788,403,34],[939,382,33],[1216,315,33]]);
+  await page.screenshot({ path: getScreenshotPath(), fullPage: true });
+  await replayCursorPath(page, [[1255,299,2760],[1022,366,32],[879,425,33],[813,462,41],[763,496,26],[714,529,33],[667,564,34],[621,593,33],[537,622,34],[337,653,41]]);
+  await replayCursorPath(page, [[173,677,34],[81,694,32],[41,697,33],[41,697,51],[42,697,34],[48,694,32]]);
+  await replayCursorPath(page, [[65,694,34],[80,694,33],[90,694,34],[99,694,33],[112,694,34],[125,693,33],[133,692,33]]);
+  await replayCursorPath(page, [[142,692,33],[153,691,33],[159,692,34],[169,690,33],[170,689,267]]);
+  await page.mouse.move(170, 689);
   await page.mouse.down();
-  await replayCursorPath(page, [[966,318,384],[967,318,40],[968,318,36],[970,319,47],[973,320,45],[975,321,67],[978,321,62],[979,322,49],[981,322,106],[985,323,51],[985,323,60],[986,323,41],[989,325,68],[990,325,70],[990,325,40],[992,326,40],[994,327,45],[998,328,32],[999,329,63],[1005,332,42],[1006,332,57],[1008,334,41],[1009,334,35],[1010,335,79],[1010,335,157]]);
-  await page.mouse.move(1010, 335);
+  await replayCursorPath(page, [[170,689,258]]);
+  await page.mouse.move(170, 689);
   await page.mouse.up();
-  await replayCursorPath(page, [[1008,336,907],[997,346,39],[975,371,45],[949,409,50],[930,451,34],[902,548,37],[874,675,48],[866,716,197],[862,712,34],[862,704,35],[859,708,32]]);
-}
-`,
+  await locateWithFallback(page, [{"type":"css-path","value":"button.ToolIcon_type_button.ToolIcon_size_medium > div.ToolIcon__icon > svg"}], 'click', null, {"x":176,"y":686});
+  await replayCursorPath(page, [[170,689,325],[170,689,50],[169,689,34],[168,690,33]]);
+  await replayCursorPath(page, [[175,687,34],[264,673,33],[619,632,41],[1089,579,33]]);
+  await page.screenshot({ path: getScreenshotPath(), fullPage: true });
+  await replayCursorPath(page, [[1213,434,1576],[995,473,33],[880,502,33],[837,515,34],[805,530,33],[746,550,33],[658,567,34],[552,585,33],[438,599,33],[331,602,34],[258,601,33],[223,604,33],[208,610,34],[204,616,33],[200,625,33],[200,638,34],[201,651,33],[204,664,33]]);
+  await replayCursorPath(page, [[207,673,33],[209,681,34],[210,684,35],[210,685,32],[209,686,32]]);
+  await page.mouse.move(209, 687);
+  await page.mouse.down();
+  await page.mouse.move(209, 687);
+  await page.mouse.up();
+  await locateWithFallback(page, [{"type":"css-path","value":"div.ToolIcon__icon > svg > path"}], 'click', null, {"x":211,"y":685});
+  await replayCursorPath(page, [[209,686,268],[209,686,317]]);
+  await replayCursorPath(page, [[238,683,32],[381,667,34],[661,629,33],[1055,572,34]]);
+  await page.screenshot({ path: getScreenshotPath(), fullPage: true });
+}`,
   },
   {
     name: "Test 11: Context Menu Actions",
@@ -1439,7 +1451,7 @@ export async function test(page: Page, baseUrl: string, screenshotPath: string, 
   }
 
   // Multi-selector fallback helper with coordinate fallback for clicks
-  async function locateWithFallback(page, selectors, action, value, coords, options) {
+  async function locateWithFallback(page, selectors, action, value, coords) {
     const validSelectors = selectors.filter(sel => sel.value && sel.value.trim() && !sel.value.includes('undefined'));
     for (const sel of validSelectors) {
       try {
@@ -1448,7 +1460,6 @@ export async function test(page: Page, baseUrl: string, screenshotPath: string, 
           const text = sel.value.replace(/^ocr-text="/, '').replace(/"$/, '');
           locator = page.getByText(text, { exact: false });
         } else if (sel.type === 'role-name') {
-          // Parse role=button[name="Label"] format and use getByRole
           const match = sel.value.match(/^role=(\\w+)\\[name="(.+)"\\]$/);
           if (match) {
             locator = page.getByRole(match[1], { name: match[2] });
@@ -1458,26 +1469,30 @@ export async function test(page: Page, baseUrl: string, screenshotPath: string, 
         } else {
           locator = page.locator(sel.value);
         }
-        // Use .first() to handle multiple matches (e.g., header + footer nav links)
         const target = locator.first();
         await target.waitFor({ timeout: 3000 });
-        if (action === 'locate') return target; // Return locator for assertions
-        if (action === 'click') await target.click(options || {});
+        if (action === 'locate') return target;
+        if (action === 'click') await target.click();
         else if (action === 'fill') await target.fill(value || '');
         else if (action === 'selectOption') await target.selectOption(value || '');
         return target;
       } catch { continue; }
     }
-    // Coordinate fallback for clicks when all selectors fail
     if (action === 'click' && coords) {
       console.log('Falling back to coordinate click at', coords.x, coords.y);
-      await page.mouse.click(coords.x, coords.y, options || {});
+      await page.mouse.click(coords.x, coords.y);
+      return;
+    }
+    if (action === 'fill' && coords) {
+      console.log('Falling back to coordinate fill at', coords.x, coords.y);
+      await page.mouse.click(coords.x, coords.y);
+      await page.keyboard.press('Control+a');
+      await page.keyboard.type(value || '');
       return;
     }
     throw new Error('No selector matched: ' + JSON.stringify(validSelectors));
   }
 
-  // Replay cursor path helper
   async function replayCursorPath(page, moves) {
     for (const [x, y, delay] of moves) {
       await page.mouse.move(x, y);
@@ -1486,174 +1501,159 @@ export async function test(page: Page, baseUrl: string, screenshotPath: string, 
   }
 
   await page.goto(buildUrl(baseUrl, '/'));
-  await replayCursorPath(page, [[1276,420,0],[1263,413,42],[1251,401,32],[1227,383,40],[1209,369,35],[1168,354,32],[1094,345,33],[988,341,34],[870,335,34],[774,325,33],[702,310,33],[642,291,33],[595,273,33],[570,261,34],[564,255,33],[563,254,35],[563,254,33],[563,254,234],[558,248,32],[552,239,33],[539,220,33],[534,210,33],[533,208,35],[533,208,50],[532,207,174],[525,193,34],[520,171,33],[518,147,33],[517,131,33],[517,124,33],[518,116,34],[518,109,33],[520,94,34],[520,84,33],[520,77,33],[519,67,33],[519,62,34]]);
-  await replayCursorPath(page, [[519,57,34],[519,49,33],[519,48,33],[520,42,35],[520,33,32],[520,32,53]]);
-  await page.mouse.move(520, 32);
+  await replayCursorPath(page, [[532,640,0],[526,628,79],[513,579,24]]);
+  await replayCursorPath(page, [[495,483,59],[468,392,31],[429,283,20],[419,251,39],[409,219,41],[408,213,67],[408,212,25],[408,212,51],[408,212,34],[408,212,56],[408,212,38],[408,212,32],[408,212,44],[408,212,40],[408,212,33],[408,212,34],[407,212,33],[401,208,35],[393,206,44],[383,203,147],[381,203,92],[380,203,370],[378,203,109],[362,199,86],[361,198,122],[436,121,7],[468,106,24],[478,101,133],[533,77,80],[545,69,34],[545,69,188],[534,65,82],[529,62,176]]);
+  await replayCursorPath(page, [[525,59,108],[520,51,185],[521,49,397]]);
+  await replayCursorPath(page, [[524,41,75],[525,36,84]]);
+  await replayCursorPath(page, [[525,32,96]]);
+  await page.mouse.move(526, 31);
   await page.mouse.down();
-  await page.mouse.move(520, 32);
+  await page.mouse.move(526, 31);
   await page.mouse.up();
   // Coordinate-only click (no selectors found)
   await page.mouse.click(520, 38);
   // Coordinate-only click (no selectors found)
   await page.mouse.click(514, 40);
-  await replayCursorPath(page, [[520,33,524],[520,34,40],[518,52,35],[508,108,39],[497,144,34],[489,161,33],[489,161,51],[488,161,51],[488,161,44],[481,159,29],[452,157,34],[429,155,33],[422,155,33],[420,156,42]]);
-  await page.mouse.move(420, 156);
+  await replayCursorPath(page, [[526,31,39],[526,31,238],[526,31,33],[526,31,49],[526,32,34],[526,32,61],[527,33,237],[526,33,34],[526,34,56]]);
+  await replayCursorPath(page, [[522,37,47],[497,53,88],[426,96,85],[374,125,90],[368,130,122],[368,131,190],[363,137,350],[359,142,75],[353,149,34],[352,152,33],[340,165,35],[332,172,39],[326,176,39],[327,175,34],[327,175,33],[326,171,39],[326,170,79]]);
+  await page.mouse.move(326, 170);
   await page.mouse.down();
-  await replayCursorPath(page, [[420,155,66],[420,156,43],[423,161,32],[434,181,34],[450,205,33],[467,226,33],[480,242,33],[492,260,34],[497,268,34],[500,271,33],[503,275,33],[505,277,50],[505,277,34],[507,276,32],[513,275,34],[523,272,33],[530,270,43],[534,269,33],[541,268,33],[546,267,33],[546,267,51]]);
-  await page.mouse.move(546, 267);
+  await replayCursorPath(page, [[326,171,250],[333,178,36],[370,212,55],[391,227,36],[405,236,36],[412,241,34],[416,244,40],[420,247,30],[421,248,36],[425,252,47],[425,252,48],[426,252,53],[427,252,32],[426,252,52],[427,253,36],[432,263,51],[437,270,41],[439,274,39],[439,274,249]]);
+  await page.mouse.move(439, 274);
   await page.mouse.up();
-  await replayCursorPath(page, [[546,267,549],[546,267,1685],[546,266,33],[546,239,40],[547,218,33],[551,201,34],[554,186,33],[557,174,33],[559,164,34],[561,154,33],[563,143,38],[563,137,29],[563,136,34],[563,135,141],[561,124,33],[559,105,34],[555,83,33],[554,75,41],[554,74,42],[554,72,33]]);
-  await replayCursorPath(page, [[557,58,34],[559,51,37],[563,43,29],[564,39,33]]);
-  await page.mouse.move(564, 39);
+  await replayCursorPath(page, [[439,274,72],[439,274,178],[439,274,36],[438,271,54],[436,269,103],[435,260,129],[546,131,100],[556,120,62],[587,66,19],[584,61,87]]);
+  await replayCursorPath(page, [[578,55,88],[572,46,76],[571,46,49],[570,45,163],[569,39,33],[569,39,100]]);
+  await page.mouse.move(569, 39);
   await page.mouse.down();
-  await page.mouse.move(564, 39);
+  await page.mouse.move(569, 39);
   await page.mouse.up();
   // Coordinate-only click (no selectors found)
-  await page.mouse.click(560, 38);
+  await page.mouse.click(572, 46);
   // Coordinate-only click (no selectors found)
   await page.mouse.click(554, 40);
-  await replayCursorPath(page, [[564,39,467],[564,40,276],[564,40,41],[564,40,35]]);
-  await replayCursorPath(page, [[566,50,32],[577,76,33],[590,108,34],[601,135,33],[605,156,33],[610,175,33],[611,179,209],[611,179,51],[611,178,34],[612,175,31],[613,174,76],[615,172,33],[615,171,34],[616,170,35],[618,168,31],[619,165,33],[620,166,75]]);
-  await page.mouse.move(620, 166);
+  await replayCursorPath(page, [[569,39,1033],[569,39,1466]]);
+  await replayCursorPath(page, [[567,44,34],[558,74,40],[544,120,31],[536,169,32],[534,193,40],[534,200,41],[534,200,49],[535,200,34],[537,199,32],[536,194,40],[534,188,34],[534,187,36],[526,184,37],[507,179,39],[485,174,32],[485,174,36],[485,174,98],[485,174,41]]);
+  await page.mouse.move(485, 174);
   await page.mouse.down();
-  await replayCursorPath(page, [[620,166,135],[621,168,33],[630,178,40],[637,188,33],[649,202,38],[663,216,30],[673,226,32],[685,237,34],[696,246,33],[701,251,33],[709,260,34],[716,265,33],[716,266,34],[716,266,33],[724,269,33],[737,275,33],[743,276,34],[756,279,34],[760,280,175],[760,280,184],[760,280,175]]);
-  await page.mouse.move(760, 280);
+  await replayCursorPath(page, [[485,174,36],[487,175,35],[495,178,39],[500,181,39],[521,199,39],[545,217,38],[562,231,33],[569,239,34],[576,245,53],[584,254,31],[593,263,36],[602,273,33],[603,274,50],[603,274,33],[604,276,38],[604,279,38],[604,280,41],[604,281,41],[604,285,35],[605,288,41],[605,288,43],[605,288,51],[605,288,50],[605,288,184]]);
+  await page.mouse.move(605, 288);
   await page.mouse.up();
-  await replayCursorPath(page, [[758,277,35],[757,277,31],[756,279,33],[756,287,33],[768,302,34],[895,332,32],[1182,374,34]]);
-  await page.screenshot({ path: getScreenshotPath(), fullPage: true });
-  await replayCursorPath(page, [[1259,102,2726],[1193,110,33],[1165,123,32],[1138,136,34],[1119,141,33],[1093,142,35],[1042,140,32],[955,134,33],[852,123,34],[767,111,33],[707,101,34],[678,95,41],[679,95,33],[677,93,35],[671,84,40],[662,76,34],[643,64,33]]);
-  await replayCursorPath(page, [[622,56,36],[599,52,30],[579,48,34],[578,47,50],[578,47,83],[578,47,67],[578,47,34],[578,47,133]]);
-  await replayCursorPath(page, [[569,43,33],[568,42,33],[569,42,101],[569,42,41],[569,41,34]]);
-  await replayCursorPath(page, [[575,36,33],[580,34,32],[582,33,34],[582,33,117],[585,34,33],[590,34,33]]);
-  await replayCursorPath(page, [[595,33,38],[596,33,88]]);
-  await page.mouse.move(596, 33);
+  await replayCursorPath(page, [[605,287,91],[605,287,60],[605,287,34],[605,287,516],[605,287,461],[603,275,34],[602,274,59],[602,271,40],[601,269,195],[597,258,20],[596,252,71],[594,234,29],[590,211,66],[589,193,29],[588,181,38],[588,172,165],[586,138,138],[585,125,92],[586,117,102],[586,111,170],[586,99,63],[586,97,60],[586,90,75],[587,81,57],[587,79,49],[587,74,61],[587,71,504],[586,70,113],[586,60,76]]);
+  await replayCursorPath(page, [[586,55,93],[586,51,99],[589,44,93]]);
+  await replayCursorPath(page, [[594,40,104]]);
+  await page.mouse.move(596, 36);
   await page.mouse.down();
-  await page.mouse.move(596, 33);
+  await page.mouse.move(596, 36);
   await page.mouse.up();
   // Coordinate-only click (no selectors found)
   await page.mouse.click(600, 38);
   // Coordinate-only click (no selectors found)
   await page.mouse.click(594, 40);
-  await replayCursorPath(page, [[596,33,250],[596,34,126],[596,34,73],[602,38,34]]);
-  await replayCursorPath(page, [[650,65,33],[721,97,42],[769,116,33],[803,126,34],[835,133,33],[857,135,41],[872,132,35],[874,131,32],[874,131,43],[874,132,42],[874,132,32],[874,133,33],[873,134,34],[874,135,33],[873,136,34],[870,139,35]]);
-  await page.mouse.move(866, 141);
+  await replayCursorPath(page, [[596,36,79],[598,36,162],[598,36,584],[599,36,282]]);
+  await replayCursorPath(page, [[612,42,65],[653,61,45],[671,70,48],[709,88,37],[771,125,36],[800,152,48],[792,162,40],[775,161,38],[747,159,57],[736,161,56],[736,160,33],[736,160,51],[736,159,125],[736,159,74],[736,159,34],[736,158,41],[737,157,37],[737,156,37],[737,155,35],[737,151,39],[737,150,37],[737,148,40],[737,147,33],[737,147,50],[737,146,34],[737,145,43],[736,145,38],[736,145,50]]);
+  await page.mouse.move(734, 146);
   await page.mouse.down();
-  await replayCursorPath(page, [[866,142,145],[866,143,36],[867,147,33],[871,160,34],[882,184,33],[896,207,33],[907,223,34],[916,234,33],[926,246,33],[937,256,34],[945,262,33],[953,266,33],[959,268,34],[960,268,52],[967,265,31],[983,260,33],[986,260,34],[986,260,61],[993,259,39],[994,259,91],[994,260,76],[994,260,100]]);
-  await page.mouse.move(994, 260);
+  await replayCursorPath(page, [[732,149,46],[728,153,32],[720,160,41],[715,163,32],[715,163,83],[715,166,40],[718,174,44],[744,197,36],[782,228,24],[809,254,40],[832,278,29],[852,298,46],[857,301,36],[860,303,32],[862,303,39],[871,308,41],[882,311,36],[892,314,42],[902,316,35],[902,316,65],[902,316,33],[903,316,35],[903,316,81],[904,316,50],[903,316,49],[903,316,68]]);
+  await page.mouse.move(903, 316);
   await page.mouse.up();
-  await replayCursorPath(page, [[994,260,74],[995,259,100],[1011,259,34],[1095,261,34]]);
+  await replayCursorPath(page, [[903,316,117],[903,316,52],[903,315,325],[903,315,36],[902,315,87],[902,315,168],[902,315,55],[895,314,40],[888,313,36],[888,313,67],[888,313,201],[888,313,201],[887,313,57],[887,313,48],[882,313,40],[880,313,55],[880,313,420],[864,319,28],[817,347,37],[756,393,35],[658,491,31],[593,581,33],[552,656,32],[540,696,32]]);
   await page.screenshot({ path: getScreenshotPath(), fullPage: true });
-  await replayCursorPath(page, [[1269,193,2475],[1170,201,32],[1104,211,33],[1043,214,34],[1017,206,33],[1003,193,41],[959,178,34],[899,160,33],[825,135,34],[748,114,33],[703,106,33],[688,103,33],[675,100,34],[673,99,43],[670,96,41],[659,86,32],[646,74,34],[639,65,34]]);
-  await replayCursorPath(page, [[634,59,33],[630,51,33],[626,45,33],[626,42,36],[626,42,48],[629,38,33]]);
-  await replayCursorPath(page, [[633,32,34],[635,30,39],[638,29,27],[640,28,33],[640,28,34],[640,28,92]]);
-  await page.mouse.move(640, 28);
+  await replayCursorPath(page, [[541,719,3079],[483,621,47],[421,537,29],[405,509,37],[400,500,53],[396,486,29],[394,473,32],[389,451,36],[385,433,69],[375,402,44],[370,395,95],[370,395,451],[370,395,1085],[371,371,63],[399,262,19],[468,155,62],[532,68,40]]);
+  await replayCursorPath(page, [[536,53,30],[537,48,42],[536,48,40],[537,48,38],[536,48,34],[534,47,55],[534,45,34],[534,44,40],[534,44,36],[534,44,30],[534,44,49],[534,43,35],[534,43,41],[537,41,33]]);
+  await replayCursorPath(page, [[545,36,41],[558,30,40],[563,29,46],[568,28,41],[572,28,41],[577,29,53]]);
+  await replayCursorPath(page, [[598,36,61],[619,42,32],[625,44,49],[627,44,50]]);
+  await replayCursorPath(page, [[633,44,32],[634,44,41],[634,44,32],[634,44,102]]);
+  await page.mouse.move(634, 44);
   await page.mouse.down();
-  await page.mouse.move(640, 28);
+  await page.mouse.move(634, 44);
   await page.mouse.up();
   // Coordinate-only click (no selectors found)
   await page.mouse.click(640, 38);
   // Coordinate-only click (no selectors found)
   await page.mouse.click(634, 40);
-  await replayCursorPath(page, [[640,28,432],[640,28,59],[640,29,33]]);
-  await replayCursorPath(page, [[639,39,33],[632,70,34],[611,131,34],[575,208,41],[543,267,34],[505,325,32],[459,381,34],[412,432,34],[372,469,33],[347,487,33],[345,489,58],[345,488,34],[346,486,35],[354,479,32],[375,465,41],[392,454,33],[407,445,34],[423,435,33],[432,427,33],[438,422,33],[439,420,36],[440,419,32],[440,417,34],[440,416,32],[440,414,33],[440,412,35],[440,412,33],[440,409,32],[440,408,34],[440,408,75]]);
-  await page.mouse.move(440, 408);
+  await replayCursorPath(page, [[634,44,182],[634,44,136],[636,40,34]]);
+  await replayCursorPath(page, [[638,38,47],[638,38,500]]);
+  await page.mouse.move(638, 38);
   await page.mouse.down();
-  await replayCursorPath(page, [[440,408,41],[440,408,35],[440,407,34],[441,407,39],[459,404,34],[498,399,33],[538,394,33],[572,391,34],[597,388,33],[616,386,34],[620,385,43]]);
-  await page.mouse.move(620, 385);
+  await page.mouse.move(638, 38);
   await page.mouse.up();
-  await replayCursorPath(page, [[620,385,291],[620,386,58],[620,386,58],[620,386,92],[620,387,49],[620,387,93],[641,391,41],[737,403,33],[944,418,33]]);
-  await page.screenshot({ path: getScreenshotPath(), fullPage: true });
-  await replayCursorPath(page, [[1277,330,2309],[1198,333,33],[1124,339,33],[1059,346,34],[1009,352,33],[965,354,33],[925,354,33],[877,351,33],[823,345,34],[783,337,34],[750,325,33],[729,304,33],[718,282,37],[706,240,40],[699,208,33],[694,175,32],[684,134,42],[680,119,33],[678,114,33],[677,108,33],[676,97,33],[676,92,36],[676,91,41],[678,84,32],[679,78,34],[680,71,33],[680,65,33],[680,63,34]]);
-  await replayCursorPath(page, [[679,58,34],[678,52,32],[678,47,33],[678,45,33],[677,42,35],[677,42,33],[677,42,50]]);
-  await page.mouse.move(677, 42);
+  // Coordinate-only click (no selectors found)
+  await page.mouse.click(640, 38);
+  // Coordinate-only click (no selectors found)
+  await page.mouse.click(634, 40);
+  await replayCursorPath(page, [[638,38,252]]);
+  await replayCursorPath(page, [[638,39,750],[637,39,48],[637,39,33],[637,39,50],[637,39,32],[636,40,94]]);
+  await replayCursorPath(page, [[629,43,57],[628,43,51],[628,43,100],[628,43,99],[628,43,251],[628,43,1028]]);
+  await replayCursorPath(page, [[614,47,32],[503,101,36],[424,167,42],[340,269,41],[327,320,38],[329,327,71],[329,327,30],[329,327,36],[335,333,45],[342,338,29],[346,340,36],[348,340,38],[353,339,34],[357,339,33],[361,339,39],[365,338,53],[376,335,21],[377,335,35]]);
+  await page.mouse.move(377, 335);
   await page.mouse.down();
-  await page.mouse.move(677, 42);
+  await replayCursorPath(page, [[378,335,33],[378,336,40],[378,337,45],[376,362,43],[371,395,47],[368,432,36],[368,450,43],[368,455,33],[368,460,38],[369,468,40],[370,468,38],[370,468,45],[370,468,51],[370,468,68]]);
+  await page.mouse.move(370, 468);
+  await page.mouse.up();
+  await replayCursorPath(page, [[370,468,142],[370,468,1059],[379,454,32],[388,442,77],[455,356,11],[523,266,28],[566,205,39],[587,178,39],[615,138,46],[631,116,32],[640,102,64],[649,86,32],[659,70,35]]);
+  await replayCursorPath(page, [[668,55,32],[681,35,48],[685,30,55],[688,27,30],[687,27,48],[687,27,32],[687,28,45],[686,29,40],[686,29,35]]);
+  await replayCursorPath(page, [[686,30,36],[684,33,33],[683,34,42]]);
+  await page.mouse.move(682, 34);
+  await page.mouse.down();
+  await replayCursorPath(page, [[682,34,155],[683,34,78]]);
+  await page.mouse.move(683, 34);
   await page.mouse.up();
   // Coordinate-only click (no selectors found)
   await page.mouse.click(680, 38);
   // Coordinate-only click (no selectors found)
   await page.mouse.click(674, 40);
-  await replayCursorPath(page, [[677,42,299],[677,42,117],[677,42,292]]);
-  await replayCursorPath(page, [[677,49,34],[681,83,38],[691,140,28],[714,210,34],[742,282,40],[752,310,35],[753,316,33],[753,316,174],[753,320,34],[752,328,33],[748,336,33],[745,342,33],[744,345,34]]);
-  await page.mouse.move(744, 345);
+  await replayCursorPath(page, [[683,34,422]]);
+  await replayCursorPath(page, [[683,41,34],[680,51,37],[664,89,52],[627,161,35],[603,211,25],[585,248,43],[565,293,33],[553,321,33],[542,344,33],[535,357,34],[529,366,35],[526,370,36],[526,370,33],[524,367,38],[520,359,34],[515,348,35],[513,342,35],[510,335,32],[506,329,33],[505,328,44],[505,327,51]]);
+  await page.mouse.move(504, 327);
   await page.mouse.down();
-  await replayCursorPath(page, [[744,345,150],[750,359,33],[763,385,34],[777,412,33],[794,437,33],[801,446,42],[803,448,33],[804,448,33],[804,449,34],[804,449,33],[804,449,41],[804,449,43],[804,449,41],[805,449,33],[805,449,42],[804,448,34],[804,448,41]]);
-  await page.mouse.move(804, 448);
+  await replayCursorPath(page, [[504,327,173],[501,337,41],[496,359,40],[491,401,42],[490,416,36],[488,427,34],[487,434,43],[488,439,36],[488,443,37],[488,445,33],[488,447,34],[489,451,35],[489,453,43],[489,456,36],[489,459,42],[489,459,78],[489,458,68]]);
+  await page.mouse.move(489, 458);
   await page.mouse.up();
-  await replayCursorPath(page, [[804,448,34],[804,448,50],[804,448,33],[804,448,51],[805,448,149],[806,448,34],[842,449,33],[942,453,33],[1098,463,42],[1269,474,33]]);
-  await page.screenshot({ path: getScreenshotPath(), fullPage: true });
-  await replayCursorPath(page, [[1274,166,2634],[1226,160,33],[1159,152,33],[1078,145,34],[993,137,33],[914,128,33],[852,116,33],[807,105,34],[792,99,33],[790,98,33],[772,88,33],[745,77,34],[737,74,41],[727,71,33],[708,64,34],[705,62,68],[705,62,33],[705,61,42]]);
-  await replayCursorPath(page, [[705,57,32],[707,51,33],[708,46,34],[708,45,34],[708,44,32],[712,41,42],[713,39,35],[713,39,66]]);
-  await page.mouse.move(713, 39);
+  await replayCursorPath(page, [[489,458,82],[489,458,36],[489,458,50],[491,457,32],[498,448,56],[510,440,25],[570,384,71],[654,269,33],[675,227,36],[686,192,37],[690,175,39],[695,140,46],[698,108,42],[698,83,46],[699,67,47]]);
+  await replayCursorPath(page, [[702,50,33],[704,42,56],[706,37,42],[707,35,40],[707,34,33],[707,34,41],[711,34,39],[711,34,59]]);
+  await replayCursorPath(page, [[714,36,40],[715,36,188]]);
+  await page.mouse.move(715, 36);
   await page.mouse.down();
-  await page.mouse.move(713, 39);
+  await page.mouse.move(715, 36);
   await page.mouse.up();
   // Coordinate-only click (no selectors found)
   await page.mouse.click(720, 38);
   // Coordinate-only click (no selectors found)
   await page.mouse.click(714, 40);
-  await replayCursorPath(page, [[713,39,424],[713,40,75],[712,44,34]]);
-  await replayCursorPath(page, [[710,67,32],[719,110,34],[744,167,33],[780,230,34],[816,290,33],[840,326,33],[851,342,34],[857,350,33],[858,351,34],[870,353,33],[895,355,34],[907,355,40],[933,355,34],[956,353,34],[968,351,33],[969,351,33],[969,351,77],[969,351,73],[969,351,42],[969,351,42],[969,350,67],[971,349,33],[973,348,33],[977,345,33],[988,341,33],[991,340,33],[996,338,34],[1002,336,34],[1005,335,33],[1009,332,33],[1009,331,42],[1009,331,84]]);
-  await page.mouse.move(1009, 331);
+  await replayCursorPath(page, [[715,36,749],[715,37,99]]);
+  await replayCursorPath(page, [[711,45,38],[709,50,46],[701,76,27],[702,100,37],[704,112,85],[706,142,9],[708,159,35],[707,171,32],[706,177,35],[706,186,36],[703,197,38],[694,217,29],[688,234,43],[673,278,28],[665,312,36],[656,347,32],[647,374,33],[641,398,36],[637,412,33],[633,423,34],[632,429,32],[631,431,46],[624,440,30],[617,442,32],[611,442,34],[611,442,41],[611,442,31],[610,441,36],[610,436,33],[610,434,33],[610,434,82],[612,427,38],[615,414,30],[616,407,45],[615,389,27],[614,385,55],[612,379,57],[612,376,35],[612,372,34],[611,368,32],[611,362,45],[611,357,19],[610,356,51],[609,356,32],[609,355,34],[609,355,33],[609,355,33],[609,355,49]]);
+  await page.mouse.move(609, 354);
   await page.mouse.down();
-  await replayCursorPath(page, [[1009,331,108],[1009,332,67],[1009,332,33],[1008,332,33],[996,333,33],[986,335,33],[983,336,43],[976,340,41],[971,344,33],[964,351,33],[957,362,34],[953,375,33],[952,389,33],[955,403,34],[962,416,33],[969,424,33],[974,428,34],[976,429,33],[978,429,33],[985,429,33],[991,429,34],[999,428,34],[1009,425,33],[1016,423,33],[1022,420,34],[1026,417,33],[1030,411,33],[1033,402,33],[1033,392,33],[1032,385,34],[1031,384,52],[1028,383,32],[1027,383,32],[1024,383,34],[1020,384,33],[1017,384,34],[1013,386,33],[1011,387,33],[1008,389,34],[1006,391,33],[1004,392,33],[1003,393,35],[1003,393,48],[1001,395,34],[998,397,33],[998,397,43],[998,396,92],[998,396,49]]);
-  await page.mouse.move(998, 396);
+  await replayCursorPath(page, [[609,354,54],[609,354,47],[609,354,51],[615,352,59],[622,352,39],[633,352,32],[646,352,45],[665,356,35],[671,358,31],[672,359,40],[673,362,55],[676,370,15],[676,380,44],[670,396,34],[663,404,50],[641,419,34],[627,423,65],[587,435,35],[583,438,42],[583,439,59],[583,440,42],[587,470,54],[597,492,39],[608,508,39],[622,522,37],[641,531,33],[687,544,50],[703,550,36],[710,552,39],[710,553,36],[712,556,41],[714,575,48],[708,595,35],[693,611,37],[682,616,45],[667,622,35],[658,624,35],[652,626,50],[652,626,38],[652,626,83],[652,625,35],[652,625,36],[651,624,66]]);
+  await page.mouse.move(651, 623);
   await page.mouse.up();
-  await replayCursorPath(page, [[998,396,166],[999,395,34],[1022,389,35],[1089,378,31],[1190,366,34]]);
+  await replayCursorPath(page, [[651,624,44],[651,625,56],[652,627,46],[653,631,32],[655,636,38],[656,639,37],[656,641,35],[659,647,44],[661,652,29],[661,654,35],[661,654,33],[661,654,83],[661,655,68],[661,655,83],[661,655,300],[661,655,60],[658,657,26],[652,659,33],[648,661,33],[647,662,39],[643,662,108],[643,662,33],[642,663,37],[635,666,30],[632,668,37],[623,674,31],[618,677,39],[617,681,33],[612,691,33],[606,699,33],[601,709,36]]);
   await page.screenshot({ path: getScreenshotPath(), fullPage: true });
-  await replayCursorPath(page, [[1257,148,2833],[1175,150,34],[1159,145,33],[1150,136,33],[1124,122,33],[1066,104,33],[995,89,34],[904,77,33],[825,68,33],[803,64,34],[803,63,51],[803,63,41],[803,62,33],[803,61,142],[803,61,43]]);
-  await replayCursorPath(page, [[801,59,32],[797,56,33],[793,51,33],[793,50,42],[789,50,33],[787,49,42],[785,48,33],[785,48,108],[782,48,34]]);
-  await replayCursorPath(page, [[781,48,33],[780,48,33],[778,48,34],[777,48,75],[776,48,33],[775,48,59]]);
-  await replayCursorPath(page, [[772,48,34],[771,48,34]]);
-  await page.mouse.move(771, 48);
+  await replayCursorPath(page, [[599,713,3216],[643,594,39],[708,422,29],[737,323,32],[757,244,34],[767,203,33],[770,188,59],[780,151,32],[783,142,37],[791,119,32],[797,105,33],[800,98,44],[809,68,29],[809,67,37],[809,67,138],[809,67,49],[809,68,34],[809,68,133],[809,67,37],[809,65,32],[807,61,33]]);
+  await replayCursorPath(page, [[806,57,34],[803,53,35],[802,52,55],[797,49,31],[793,48,39],[787,44,37]]);
+  await replayCursorPath(page, [[777,40,34],[767,38,33],[766,38,48],[765,38,36],[765,38,67],[765,38,184],[765,38,150],[765,38,267],[765,38,250],[765,38,266],[765,38,39]]);
+  await page.mouse.move(765, 38);
   await page.mouse.down();
-  await page.mouse.move(771, 48);
+  await page.mouse.move(765, 38);
   await page.mouse.up();
   // Coordinate-only click (no selectors found)
-  await page.mouse.click(772, 46);
+  await page.mouse.click(760, 38);
   // Coordinate-only click (no selectors found)
   await page.mouse.click(754, 40);
-  await replayCursorPath(page, [[771,48,256],[771,48,185]]);
-  await replayCursorPath(page, [[766,52,32],[728,96,33],[668,187,35],[595,341,41],[555,469,33],[539,550,33],[528,589,34],[524,602,183],[524,602,42],[523,595,33],[508,569,33],[501,557,33],[494,546,34],[482,524,33]]);
-  await page.mouse.move(479, 521);
+  await replayCursorPath(page, [[765,38,166],[765,38,62],[765,38,1748],[765,38,83],[764,39,35]]);
+  await replayCursorPath(page, [[762,43,37],[760,46,33],[760,47,46],[760,47,336],[760,46,49],[760,46,183],[760,46,115]]);
+  await replayCursorPath(page, [[771,72,42],[794,134,36],[846,285,34],[891,401,67],[927,502,28],[929,506,40],[929,506,71],[903,489,50],[875,475,35],[860,466,31],[853,459,35]]);
+  await page.mouse.move(851, 457);
   await page.mouse.down();
-  await page.mouse.move(479, 521);
+  await replayCursorPath(page, [[851,456,67],[851,456,48],[851,457,34],[851,457,33]]);
+  await page.mouse.move(851, 457);
   await page.mouse.up();
   // Coordinate-only click (no selectors found)
   await page.mouse.click(640, 360);
+  await replayCursorPath(page, [[851,457,167],[851,457,150],[851,457,134],[852,457,148]]);
+  await replayCursorPath(page, [[863,456,94],[900,454,81],[923,454,67],[923,454,257],[920,460,42]]);
   // Skipped fill: no valid selector or coordinates found
-  // Skipped fill: no valid selector or coordinates found
-  // Skipped fill: no valid selector or coordinates found
-  // Skipped fill: no valid selector or coordinates found
-  // Skipped fill: no valid selector or coordinates found
-  await replayCursorPath(page, [[479,521,3385]]);
-  await replayCursorPath(page, [[487,512,32],[518,499,32],[635,481,34],[901,488,39]]);
-  await page.screenshot({ path: getScreenshotPath(), fullPage: true });
-  await replayCursorPath(page, [[1231,118,2295],[1017,97,33],[878,81,33],[778,65,34],[726,52,33],[678,40,33]]);
-  await replayCursorPath(page, [[623,31,39],[615,29,28],[615,29,33],[616,29,51],[616,29,34],[631,34,32]]);
-  await replayCursorPath(page, [[659,40,34],[709,45,33],[734,44,32],[737,44,43],[743,44,33],[751,44,33]]);
-  await replayCursorPath(page, [[761,41,41],[767,41,34],[775,40,34],[788,39,33],[792,37,33],[793,37,35],[796,37,32]]);
-  await replayCursorPath(page, [[797,37,257],[797,38,27],[798,39,34],[798,39,1974]]);
-  await replayCursorPath(page, [[803,38,32],[808,37,34],[813,37,33],[815,36,34],[816,36,42],[816,36,67]]);
-  await replayCursorPath(page, [[821,35,33],[821,35,75],[821,35,158]]);
-  await replayCursorPath(page, [[825,35,33],[826,36,34],[830,36,32],[834,36,34],[835,36,50],[836,36,33]]);
-  await replayCursorPath(page, [[838,36,352]]);
-  await page.mouse.move(838, 36);
-  await page.mouse.down();
-  await page.mouse.move(838, 36);
-  await page.mouse.up();
-  // Coordinate-only click (no selectors found)
-  await page.mouse.click(840, 38);
-  // Coordinate-only click (no selectors found)
-  await page.mouse.click(834, 40);
-  await replayCursorPath(page, [[838,36,707],[837,37,76],[837,40,31]]);
-  await replayCursorPath(page, [[847,74,34],[889,138,34],[968,222,33],[1044,295,33],[1102,358,34],[1120,389,33],[1121,400,33],[1119,407,34],[1117,411,33],[1111,417,42],[1102,419,33],[1098,420,33],[1086,418,33],[1072,417,34],[1059,417,34],[1052,417,33],[1051,417,33],[1051,417,34],[1051,417,33],[1051,417,33],[1051,417,42],[1051,416,42]]);
-  await page.mouse.move(1051, 416);
-  await page.mouse.down();
-  await replayCursorPath(page, [[1051,416,41],[1052,414,33],[1048,406,34],[1037,400,33],[1021,391,33],[994,382,33],[971,375,34],[962,375,33],[962,374,34],[961,375,158],[942,378,33],[925,381,33],[924,381,34],[924,381,47]]);
-  await page.mouse.move(924, 381);
-  await page.mouse.up();
-  await replayCursorPath(page, [[924,382,36],[922,386,34],[920,390,33],[913,402,33],[909,417,34],[907,428,33],[907,439,41],[907,445,34],[907,445,67],[907,445,92],[907,445,150],[907,445,92],[907,445,50],[911,446,32],[992,463,42],[1140,490,33]]);
+  await replayCursorPath(page, [[917,465,35],[917,465,209],[916,466,237],[906,493,126],[898,523,207],[893,549,175],[890,570,75],[888,577,42],[886,589,40],[882,609,111],[875,661,58],[873,673,95],[871,689,91],[870,696,73],[866,710,94]]);
   await page.screenshot({ path: getScreenshotPath(), fullPage: true });
 }
 `,
@@ -2696,210 +2696,6 @@ export async function test(page: Page, baseUrl: string, screenshotPath: string, 
 `,
   },
   {
-    name: "Test 1: Move Element Basic",
-    targetUrl: "https://excalidraw.com",
-    code: `import { Page } from 'playwright';
-
-export async function test(page: Page, baseUrl: string, screenshotPath: string, stepLogger: any) {
-  // Helper to build URLs safely (handles trailing/leading slashes)
-  function buildUrl(base, path) {
-    const cleanBase = base.endsWith('/') ? base.slice(0, -1) : base;
-    const cleanPath = path.startsWith('/') ? path : '/' + path;
-    return cleanBase + cleanPath;
-  }
-
-  // Helper to generate unique screenshot paths
-  let screenshotStep = 0;
-  function getScreenshotPath() {
-    screenshotStep++;
-    const ext = screenshotPath.lastIndexOf('.');
-    if (ext > 0) {
-      return screenshotPath.slice(0, ext) + '-step' + screenshotStep + screenshotPath.slice(ext);
-    }
-    return screenshotPath + '-step' + screenshotStep;
-  }
-
-  // Multi-selector fallback helper with coordinate fallback for clicks
-  async function locateWithFallback(page, selectors, action, value, coords) {
-    const validSelectors = selectors.filter(sel => sel.value && sel.value.trim() && !sel.value.includes('undefined'));
-    for (const sel of validSelectors) {
-      try {
-        let locator;
-        if (sel.type === 'ocr-text') {
-          const text = sel.value.replace(/^ocr-text="/, '').replace(/"$/, '');
-          locator = page.getByText(text, { exact: false });
-        } else if (sel.type === 'role-name') {
-          // Parse role=button[name="Label"] format and use getByRole
-          const match = sel.value.match(/^role=(\\w+)\\[name="(.+)"\\]$/);
-          if (match) {
-            locator = page.getByRole(match[1], { name: match[2] });
-          } else {
-            locator = page.locator(sel.value);
-          }
-        } else {
-          locator = page.locator(sel.value);
-        }
-        // Use .first() to handle multiple matches (e.g., header + footer nav links)
-        const target = locator.first();
-        await target.waitFor({ timeout: 3000 });
-        if (action === 'click') await target.click();
-        else if (action === 'fill') await target.fill(value || '');
-        else if (action === 'selectOption') await target.selectOption(value || '');
-        return;
-      } catch { continue; }
-    }
-    // Coordinate fallback for clicks when all selectors fail
-    if (action === 'click' && coords) {
-      console.log('Falling back to coordinate click at', coords.x, coords.y);
-      await page.mouse.click(coords.x, coords.y);
-      return;
-    }
-    throw new Error('No selector matched: ' + JSON.stringify(validSelectors));
-  }
-
-  // Replay cursor path helper
-  async function replayCursorPath(page, moves) {
-    for (const [x, y, delay] of moves) {
-      await page.mouse.move(x, y);
-      if (delay > 0) await page.waitForTimeout(delay);
-    }
-  }
-
-  await page.goto(buildUrl(baseUrl, '/'));
-  await replayCursorPath(page, [[1248,477,0],[1042,440,39],[912,409,33],[831,386,33],[791,366,34],[781,350,33],[778,343,33],[777,337,34]]);
-  await replayCursorPath(page, [[774,332,33],[763,324,33],[729,310,34],[680,293,33],[634,271,33],[599,242,34],[563,207,33],[535,176,34],[519,150,32],[511,129,34],[508,112,33],[507,97,42],[508,92,33],[509,89,33],[511,84,34],[512,78,33],[514,71,34],[516,64,33]]);
-  await replayCursorPath(page, [[519,54,34],[521,46,33],[522,41,33],[522,39,33],[522,36,34],[523,36,99],[523,36,50],[522,36,109],[522,36,133],[522,36,83]]);
-  await page.mouse.move(522, 36);
-  await page.mouse.down();
-  await page.mouse.move(522, 36);
-  await page.mouse.up();
-  await locateWithFallback(page, [{"type":"css-path","value":"svg > g > rect"}], 'click', null, {"x":520,"y":38});
-  await locateWithFallback(page, [{"type":"role-name","value":"role=radio[name=\\"Rectangle\\"]"},{"type":"name","value":"[name=\\"editor-current-shape\\"]"},{"type":"css-path","value":"div.Stack.Stack_horizontal > label.ToolIcon.Shape > input.ToolIcon_type_radio.ToolIcon_size_medium"}], 'click', null, {"x":514,"y":40});
-  await replayCursorPath(page, [[522,36,475],[522,36,142],[522,36,91],[517,42,34]]);
-  await replayCursorPath(page, [[507,53,33],[500,63,33],[492,77,34],[485,95,33],[479,115,34],[475,126,33],[474,134,33],[472,138,33],[471,140,34],[469,144,34],[465,152,41],[460,159,33],[458,163,34],[455,167,33],[455,167,133],[453,169,33],[440,174,34],[416,178,33],[393,181,34],[383,181,33],[383,181,66],[383,181,34],[383,181,41],[383,181,34],[383,181,42],[383,181,33],[383,181,41],[383,181,34],[383,180,33],[383,179,33],[383,179,33],[383,179,34],[383,179,42],[383,179,33],[383,179,33],[383,179,43]]);
-  await page.mouse.move(383, 179);
-  await page.mouse.down();
-  await replayCursorPath(page, [[383,179,175],[383,179,107],[383,182,34],[388,190,33],[391,194,33],[391,194,42],[391,194,59],[391,195,41],[396,205,33],[403,216,34],[408,227,33],[414,236,34],[420,248,33],[430,264,33],[441,282,34],[452,296,33],[463,307,33],[473,316,34],[479,321,33],[487,325,33],[497,330,33],[504,332,33],[510,333,34],[516,334,33],[524,337,34],[533,340,33],[544,343,33],[551,346,34],[555,347,34],[562,350,32],[566,352,33],[568,352,35],[568,353,90],[571,354,34],[571,355,33],[571,355,37],[571,355,30],[573,357,33],[575,361,34],[576,362,33],[577,365,34],[577,366,33]]);
-  await page.mouse.move(577, 366);
-  await page.mouse.up();
-  await replayCursorPath(page, [[577,365,2692],[577,365,49],[576,362,34],[572,356,33],[564,347,34],[558,339,33],[547,329,42],[537,319,32],[526,309,34],[517,301,34],[511,295,32],[506,290,34],[499,283,42],[489,273,34],[481,266,33],[477,262,32],[473,257,34],[472,257,59],[472,257,492],[472,257,166],[472,257,58],[472,258,34],[472,259,316],[472,260,34],[472,260,41],[472,261,34],[472,262,516],[472,263,108],[472,263,42]]);
-  await page.mouse.move(472, 263);
-  await page.mouse.down();
-  await replayCursorPath(page, [[472,263,591],[472,264,33],[473,265,34],[474,267,34],[476,270,33],[480,273,33],[482,277,34],[488,283,32],[498,293,35],[513,305,32],[532,316,34],[550,326,33],[569,335,34],[585,342,33],[602,350,33],[622,358,34],[644,366,33],[669,375,33],[690,381,34],[704,386,33],[718,392,34],[735,399,32],[749,405,34],[754,408,33],[755,409,34],[760,413,33],[766,417,33],[774,424,33],[781,430,34],[785,432,33],[785,432,34],[785,433,32],[787,434,42],[788,435,42],[788,435,208]]);
-  await page.mouse.move(788, 435);
-  await page.mouse.up();
-  await replayCursorPath(page, [[788,435,1092],[788,435,42],[788,435,41],[788,437,34],[787,440,34],[788,440,75],[791,441,33],[810,434,33],[890,440,33],[1022,451,34],[1222,466,33]]);
-  await page.screenshot({ path: getScreenshotPath(), fullPage: true });
-}`,
-  },
-  {
-    name: "Test 1b: Move Element Advanced",
-    targetUrl: "https://excalidraw.com",
-    code: `import { Page } from 'playwright';
-
-export async function test(page: Page, baseUrl: string, screenshotPath: string, stepLogger: any) {
-  // Helper to build URLs safely (handles trailing/leading slashes)
-  function buildUrl(base, path) {
-    const cleanBase = base.endsWith('/') ? base.slice(0, -1) : base;
-    const cleanPath = path.startsWith('/') ? path : '/' + path;
-    return cleanBase + cleanPath;
-  }
-
-  // Helper to generate unique screenshot paths
-  let screenshotStep = 0;
-  function getScreenshotPath() {
-    screenshotStep++;
-    const ext = screenshotPath.lastIndexOf('.');
-    if (ext > 0) {
-      return screenshotPath.slice(0, ext) + '-step' + screenshotStep + screenshotPath.slice(ext);
-    }
-    return screenshotPath + '-step' + screenshotStep;
-  }
-
-  // Multi-selector fallback helper with coordinate fallback for clicks
-  async function locateWithFallback(page, selectors, action, value, coords) {
-    const validSelectors = selectors.filter(sel => sel.value && sel.value.trim() && !sel.value.includes('undefined'));
-    for (const sel of validSelectors) {
-      try {
-        let locator;
-        if (sel.type === 'ocr-text') {
-          const text = sel.value.replace(/^ocr-text="/, '').replace(/"$/, '');
-          locator = page.getByText(text, { exact: false });
-        } else if (sel.type === 'role-name') {
-          // Parse role=button[name="Label"] format and use getByRole
-          const match = sel.value.match(/^role=(\\w+)\\[name="(.+)"\\]$/);
-          if (match) {
-            locator = page.getByRole(match[1], { name: match[2] });
-          } else {
-            locator = page.locator(sel.value);
-          }
-        } else {
-          locator = page.locator(sel.value);
-        }
-        // Use .first() to handle multiple matches (e.g., header + footer nav links)
-        const target = locator.first();
-        await target.waitFor({ timeout: 3000 });
-        if (action === 'click') await target.click();
-        else if (action === 'fill') await target.fill(value || '');
-        else if (action === 'selectOption') await target.selectOption(value || '');
-        return;
-      } catch { continue; }
-    }
-    // Coordinate fallback for clicks when all selectors fail
-    if (action === 'click' && coords) {
-      console.log('Falling back to coordinate click at', coords.x, coords.y);
-      await page.mouse.click(coords.x, coords.y);
-      return;
-    }
-    throw new Error('No selector matched: ' + JSON.stringify(validSelectors));
-  }
-
-  // Replay cursor path helper
-  async function replayCursorPath(page, moves) {
-    for (const [x, y, delay] of moves) {
-      await page.mouse.move(x, y);
-      if (delay > 0) await page.waitForTimeout(delay);
-    }
-  }
-
-  await page.goto(buildUrl(baseUrl, '/'));
-  await replayCursorPath(page, [[1262,469,0],[1147,454,40],[1060,446,33],[978,441,32],[902,438,42],[850,439,26],[813,440,33]]);
-  await replayCursorPath(page, [[787,438,35],[771,436,31],[765,435,34],[765,435,42],[765,435,57],[765,435,34],[764,435,42],[764,435,33],[765,435,33],[765,435,42],[765,435,42],[765,435,50],[765,435,33],[765,435,41],[765,435,76],[765,435,600]]);
-  await page.mouse.move(765, 435);
-  await page.mouse.down();
-  await page.mouse.move(765, 435);
-  await page.mouse.up();
-  await locateWithFallback(page, [{"type":"role-name","value":"role=button[name=\\"Live collaboration...\\"]"},{"type":"css-path","value":"div.welcome-screen-center > div.welcome-screen-menu > button.welcome-screen-menu-item"}], 'click', null, {"x":640,"y":445});
-  await replayCursorPath(page, [[765,435,2250],[765,435,41],[756,436,34],[753,437,32],[752,437,34],[752,437,42],[752,437,158],[752,437,201],[761,436,33],[797,434,33],[849,435,34]]);
-  await page.keyboard.press('Escape');
-  await replayCursorPath(page, [[877,435,34],[881,435,32],[882,435,300],[891,433,34],[910,424,33],[930,408,33],[941,396,34],[945,386,33],[947,383,33]]);
-  await page.mouse.move(947, 383);
-  await page.mouse.down();
-  await page.mouse.move(947, 383);
-  await page.mouse.up();
-  await locateWithFallback(page, [{"type":"css-path","value":"div.excalidraw-app > div.excalidraw.excalidraw-container > canvas.excalidraw__canvas.interactive"}], 'click', null, {"x":640,"y":360});
-  await replayCursorPath(page, [[947,383,142],[947,384,117],[947,384,133],[947,384,42],[946,385,33],[945,385,75],[946,385,50],[946,385,49],[946,385,67],[947,386,418]]);
-  await page.keyboard.press('2');
-  await replayCursorPath(page, [[946,386,1916],[927,389,33],[905,392,33],[897,389,33],[887,379,34],[871,367,33],[851,359,33],[821,350,34],[787,341,33],[751,334,33],[717,331,34],[697,330,33],[689,329,34],[674,328,33],[653,324,33],[621,314,34],[579,299,33],[538,282,34],[509,268,33],[496,259,33],[494,259,42],[494,258,37],[494,258,113],[494,258,42],[493,258,65],[492,258,34],[491,257,34],[485,256,33],[480,254,33],[477,254,33],[468,252,34],[455,249,33],[448,247,33],[440,244,34],[438,243,41],[438,243,34],[438,243,50]]);
-  await page.mouse.move(438, 242);
-  await page.mouse.down();
-  await replayCursorPath(page, [[438,243,75],[438,243,41],[441,251,34],[457,272,33],[489,301,42],[522,328,34],[569,361,41],[612,385,33],[648,406,34],[680,424,33],[709,439,33],[728,449,34],[751,463,33],[785,481,33],[820,496,34],[842,505,33],[845,507,41],[845,507,158],[845,507,100],[845,507,43]]);
-  await page.mouse.move(845, 507);
-  await page.mouse.up();
-  await replayCursorPath(page, [[845,506,50],[845,506,166],[845,506,58],[845,506,2734],[936,485,34]]);
-  await page.screenshot({ path: getScreenshotPath(), fullPage: true });
-  await replayCursorPath(page, [[1265,333,2317],[1167,332,32],[1061,327,33],[945,323,33],[838,318,34],[753,310,33],[676,300,34],[633,295,33],[614,293,33],[605,294,34],[605,294,33],[605,294,34],[604,294,50],[601,296,33],[599,300,33],[596,307,34],[593,317,38],[594,332,28],[598,346,34],[601,353,33],[603,354,49],[603,355,51],[604,356,33],[604,359,33],[604,363,33],[606,364,59],[609,366,33],[614,368,33],[618,368,34],[619,368,33],[619,368,34],[621,368,33],[622,368,42],[622,368,33],[622,368,284]]);
-  await page.mouse.move(622, 368);
-  await page.mouse.down();
-  await replayCursorPath(page, [[622,368,335],[623,369,889],[626,369,34],[628,370,33],[630,372,33],[631,372,34],[633,373,33],[635,373,41],[635,373,34],[636,374,42],[637,374,33],[637,374,50],[639,375,34],[645,379,33],[654,385,33],[662,390,33],[670,394,33],[682,404,34],[699,420,34],[712,432,41],[712,432,33],[713,432,34],[718,432,33],[725,432,34],[728,433,33],[735,434,33],[744,438,33],[764,448,33],[784,459,34],[798,469,33],[814,478,33],[827,484,34],[835,487,34],[839,489,33],[842,489,33],[848,492,33],[854,494,34],[865,498,33],[867,498,41],[867,498,217],[867,498,83],[868,498,33],[875,496,34],[880,494,33],[882,494,33],[883,494,34],[885,493,34],[887,493,41],[890,493,39]]);
-  await page.mouse.move(890, 493);
-  await page.mouse.up();
-  await replayCursorPath(page, [[890,493,561],[890,494,601],[927,502,41],[1043,506,34]]);
-  await page.screenshot({ path: getScreenshotPath(), fullPage: true });
-  await replayCursorPath(page, [[1266,150,2125],[1195,159,32],[1168,165,34],[1163,168,33],[1152,176,38],[1135,187,28],[1111,200,34],[1076,217,33],[1026,230,34],[976,237,33],[938,240,34],[925,241,33],[925,241,183],[925,241,841],[925,241,2292],[959,240,34],[1123,226,33]]);
-}`,
-  },
-  {
     name: "Test 20: Fit to Content",
     targetUrl: "https://excalidraw.com",
     code: `import { Page } from 'playwright';
@@ -3572,6 +3368,7 @@ export async function test(page: Page, baseUrl: string, screenshotPath: string, 
   {
     name: "Test 25: Laser",
     targetUrl: "https://excalidraw.com",
+    playwrightOverrides: "{\"cursorPlaybackSpeed\": 1, \"screenshotDelay\": 0}",
     code: `import { Page } from 'playwright';
 
 export async function test(page: Page, baseUrl: string, screenshotPath: string, stepLogger: any) {
@@ -3755,93 +3552,13 @@ export async function test(page: Page, baseUrl: string, screenshotPath: string, 
     [720,445,192],[720,445,107],[720,445,158],
     [720,445,235],[720,445,124]
   ]);
-
-  // Screenshot after Ctrl+Shift+D
-  await page.screenshot({ path: getScreenshotPath(), fullPage: true });
-
-  await replayCursorPath(page, [
-    [720,445,635],[720,445,191],[721,445,34],[721,445,124]
-  ]);
-
-  // === STROKE 3: draw down-left, screenshot MID-STROKE ===
-  await page.mouse.move(721, 445);
-  await page.mouse.down();
-  await replayCursorPathFast(page, [
-    [721,445],[720,445],[713,438],[690,414],
-    [675,402],[664,395],[653,388],[642,380],
-    [636,375],[632,373],[624,366],[616,360],
-    [614,358],[611,356],[606,353],[602,350]
-  ]);
-  await page.screenshot({ path: getScreenshotPath(), fullPage: true });
-  await replayCursorPathFast(page, [
-    [601,349],[600,348],[597,346],[591,341],
-    [586,338],[584,336],[581,333],[581,332],
-    [580,332],[571,323],[555,310],[554,308],[553,308]
-  ]);
-  await page.mouse.move(553, 308);
-  await page.mouse.up();
-
-  await replayCursorPath(page, [[553,308,324],[553,309,51],[553,309,124]]);
-  await replayCursorPath(page, [
-    [553,309,291],[554,309,417],[554,308,33],[554,304,34],
-    [553,295,33],[552,292,33],[551,291,43],[545,285,33],
-    [541,282,59]
-  ]);
-
-  // === STROKE 4: draw up-right, screenshot MID-STROKE ===
-  await page.mouse.move(541, 282);
-  await page.mouse.down();
-  await replayCursorPathFast(page, [
-    [541,282],[542,282],[549,286],[582,315],
-    [637,357],[678,385],[703,402]
-  ]);
-  await page.screenshot({ path: getScreenshotPath(), fullPage: true });
-  await replayCursorPathFast(page, [
-    [716,413],[717,414],[720,415],[723,417],[725,418]
-  ]);
-  await page.mouse.move(725, 418);
-  await page.mouse.up();
-  await page.keyboard.up('Control');
-  await page.keyboard.up('Shift');
-
-  await page.screenshot({ path: getScreenshotPath(), fullPage: true });
-
-  await replayCursorPath(page, [
-    [725,418,175],[724,417,68],[722,417,33],[720,417,33],
-    [719,416,33],[717,417,41],[718,424,33],[719,430,34],
-    [724,439,33],[734,463,33],[760,487,34],[766,490,376],
-    [750,479,32],[740,470,34],[720,457,33],[714,452,34],
-    [714,451,33],[712,448,34],[707,443,33],[701,437,33],
-    [692,432,33],[684,428,34],[682,427,42],[682,427,100],
-    [683,427,134],[688,430,33],[697,434,40],[708,440,34],
-    [714,443,34],[720,447,33],[724,450,41]
-  ]);
-
-  // === STROKE 5: draw down-left, screenshot MID-STROKE ===
-  await page.mouse.move(724, 450);
-  await page.mouse.down();
-  await replayCursorPathFast(page, [
-    [724,449],[724,448],[710,429],[678,398],
-    [641,366],[605,336],[576,311],[556,291],[540,277]
-  ]);
-  await page.screenshot({ path: getScreenshotPath(), fullPage: true });
-  await replayCursorPathFast(page, [[532,269]]);
-  await page.mouse.move(531, 269);
-  await page.mouse.up();
-  await page.keyboard.up('Control');
-
-  await replayCursorPath(page, [
-    [530,268,49],[532,271,33],[534,275,33],[535,278,34],
-    [540,284,33],[545,289,33],[548,293,34],[551,297,34],
-    [551,297,74],[551,297,376]
-  ]);
-  await page.screenshot({ path: getScreenshotPath(), fullPage: true });
 }
 `,
   },
   {
-    name: "Test 2: Move Binding Arrow",
+    name: "New simple arrow binds and tracks",
     targetUrl: "https://excalidraw.com",
+    functionalArea: "Arrows binding to bindables",
     code: `import { Page } from 'playwright';
 
 export async function test(page: Page, baseUrl: string, screenshotPath: string, stepLogger: any) {
@@ -3873,7 +3590,6 @@ export async function test(page: Page, baseUrl: string, screenshotPath: string, 
           const text = sel.value.replace(/^ocr-text="/, '').replace(/"$/, '');
           locator = page.getByText(text, { exact: false });
         } else if (sel.type === 'role-name') {
-          // Parse role=button[name="Label"] format and use getByRole
           const match = sel.value.match(/^role=(\\w+)\\[name="(.+)"\\]$/);
           if (match) {
             locator = page.getByRole(match[1], { name: match[2] });
@@ -3883,25 +3599,30 @@ export async function test(page: Page, baseUrl: string, screenshotPath: string, 
         } else {
           locator = page.locator(sel.value);
         }
-        // Use .first() to handle multiple matches (e.g., header + footer nav links)
         const target = locator.first();
         await target.waitFor({ timeout: 3000 });
+        if (action === 'locate') return target;
         if (action === 'click') await target.click();
         else if (action === 'fill') await target.fill(value || '');
         else if (action === 'selectOption') await target.selectOption(value || '');
-        return;
+        return target;
       } catch { continue; }
     }
-    // Coordinate fallback for clicks when all selectors fail
     if (action === 'click' && coords) {
       console.log('Falling back to coordinate click at', coords.x, coords.y);
       await page.mouse.click(coords.x, coords.y);
       return;
     }
+    if (action === 'fill' && coords) {
+      console.log('Falling back to coordinate fill at', coords.x, coords.y);
+      await page.mouse.click(coords.x, coords.y);
+      await page.keyboard.press('Control+a');
+      await page.keyboard.type(value || '');
+      return;
+    }
     throw new Error('No selector matched: ' + JSON.stringify(validSelectors));
   }
 
-  // Replay cursor path helper
   async function replayCursorPath(page, moves) {
     for (const [x, y, delay] of moves) {
       await page.mouse.move(x, y);
@@ -3910,136 +3631,185 @@ export async function test(page: Page, baseUrl: string, screenshotPath: string, 
   }
 
   await page.goto(buildUrl(baseUrl, '/'));
-  await page.screenshot({ path: getScreenshotPath(), fullPage: true });
-  await replayCursorPath(page, [[1260,155,0],[1084,155,39],[970,156,34],[863,149,33],[774,138,33],[710,129,33],[667,121,33],[654,112,34],[642,102,33],[634,94,34],[620,85,33],[597,76,33],[586,71,33],[576,65,34],[572,63,49],[568,60,34]]);
-  await replayCursorPath(page, [[558,51,34],[557,50,41],[549,44,34],[545,41,199],[545,42,83],[544,53,34]]);
-  await replayCursorPath(page, [[549,87,34],[554,142,33],[555,198,33],[556,240,34],[554,259,33],[549,275,33],[547,282,34],[547,282,33],[547,282,50],[547,282,42],[546,278,33],[542,268,33],[532,256,33],[522,244,33],[516,237,34],[505,225,33],[501,222,33],[500,221,34],[486,212,34],[478,208,33],[472,205,33],[464,203,34],[460,202,33],[458,201,33],[458,201,34],[458,201,58],[458,201,124],[458,201,34],[457,201,58],[457,201,42],[454,202,33],[454,202,434],[450,203,33],[449,203,50]]);
-  await page.mouse.move(449, 203);
+  await replayCursorPath(page, [[550,461,0],[546,396,29],[580,251,38],[587,215,56],[595,117,34],[596,96,37],[595,88,83],[582,83,34],[557,69,46],[542,60,34]]);
+  await replayCursorPath(page, [[538,55,37],[533,51,51],[533,50,131]]);
+  await replayCursorPath(page, [[528,48,38]]);
+  await page.mouse.move(517, 42);
   await page.mouse.down();
-  await page.mouse.move(449, 203);
+  await page.mouse.move(517, 42);
   await page.mouse.up();
-  await locateWithFallback(page, [{"type":"css-path","value":"div.excalidraw-app > div.excalidraw.excalidraw-container > canvas.excalidraw__canvas.interactive"}], 'click', null, {"x":640,"y":360});
-  await page.keyboard.press('2');
-  await replayCursorPath(page, [[448,203,1001],[437,206,33],[423,208,32],[413,209,34],[413,208,184],[413,208,32],[413,208,34],[413,208,142],[412,206,33],[408,202,37],[407,201,30],[398,190,33],[392,185,33],[391,183,51],[386,178,33],[386,178,49],[386,178,50],[384,176,34],[375,170,33],[367,165,33],[367,165,42],[366,163,33],[364,161,34],[364,161,83],[364,161,41]]);
-  await page.mouse.move(364, 161);
+  // Coordinate-only click (no selectors found)
+  await page.mouse.click(520, 38);
+  // Coordinate-only click (no selectors found)
+  await page.mouse.click(514, 40);
+  await replayCursorPath(page, [[520,47,439],[523,78,69],[483,218,40],[451,384,45],[449,472,39],[443,520,33],[439,530,85],[423,513,47],[407,423,42],[371,332,41],[336,270,33],[327,248,33],[310,223,33],[300,207,34],[298,204,35],[296,202,48],[296,201,52],[301,198,31],[308,190,61],[311,188,32],[314,185,36],[318,183,40]]);
+  await page.mouse.move(318, 183);
   await page.mouse.down();
-  await replayCursorPath(page, [[364,161,35],[364,161,66],[364,162,33],[369,172,34],[376,186,33],[388,201,34],[393,209,32],[399,215,33],[402,219,34],[405,223,33],[408,225,35],[415,230,40],[426,236,34],[436,241,41],[442,243,33],[447,245,35],[457,249,32],[463,251,34],[474,255,42],[486,260,33],[494,263,42],[495,263,33],[499,264,42],[499,264,58],[499,265,159],[499,265,32],[499,265,417]]);
-  await page.mouse.move(499, 265);
+  await replayCursorPath(page, [[319,183,115],[327,188,40],[339,195,35],[365,220,34],[389,256,49],[398,276,35],[405,286,40],[414,297,42],[422,301,43],[427,305,36],[434,310,42],[444,314,43],[447,316,45],[451,318,39],[453,319,59],[458,321,35],[466,325,31],[483,334,49],[486,336,38],[489,337,134]]);
+  await page.mouse.move(488, 337);
   await page.mouse.up();
-  await replayCursorPath(page, [[499,265,825],[513,268,34],[547,273,34],[587,280,32],[640,289,42],[660,292,33],[675,297,33],[702,303,34],[723,306,33],[729,307,33],[729,307,126],[729,307,32],[729,307,43],[729,307,50],[729,307,50],[729,307,33],[729,307,41],[729,307,34],[729,307,150],[729,307,200],[726,304,34],[722,300,33],[717,298,33],[708,298,33],[689,301,34],[673,304,33],[667,307,33],[666,307,50],[666,307,376]]);
-  await page.keyboard.press('2');
-  await page.mouse.move(666, 307);
+  await replayCursorPath(page, [[492,280,63],[512,215,73],[528,111,40],[533,74,33]]);
+  await replayCursorPath(page, [[536,51,39],[540,30,41],[542,22,42],[542,21,34],[542,21,34],[555,22,36]]);
+  await replayCursorPath(page, [[582,24,35],[594,24,38],[602,25,46],[619,30,39],[623,32,39],[624,32,131],[628,34,33]]);
+  await replayCursorPath(page, [[638,37,47],[640,37,45]]);
+  await page.mouse.move(640, 37);
   await page.mouse.down();
-  await replayCursorPath(page, [[666,307,1515],[676,316,34],[684,326,34],[697,342,33],[719,362,33],[735,375,34],[746,385,33],[759,395,33],[773,406,34],[786,415,33],[799,421,33],[805,424,34]]);
-  await page.mouse.move(806, 424);
+  await page.mouse.move(640, 37);
   await page.mouse.up();
-  await replayCursorPath(page, [[806,424,708],[806,424,183],[803,421,34],[798,416,33],[790,408,33],[782,400,34],[773,389,33],[757,364,34],[730,326,33],[705,286,32],[688,258,34],[675,235,33],[668,223,34],[666,218,33],[666,216,34],[666,216,33],[665,216,58],[665,215,41],[665,215,34],[665,215,34],[665,215,33],[665,215,33],[665,215,50],[665,215,34],[665,215,33],[665,215,33],[665,215,41],[665,215,43],[665,215,108],[660,197,34],[651,173,32],[644,147,34],[641,128,33],[640,118,34],[638,110,33],[637,102,42],[636,96,33],[636,90,33],[635,85,34],[635,81,32],[635,77,34],[635,75,33],[635,75,100],[635,75,42],[635,74,59],[635,71,33],[636,67,33],[637,63,33]]);
-  await replayCursorPath(page, [[637,59,34],[638,57,32],[638,55,60],[638,55,83],[638,55,63],[638,55,28]]);
-  await replayCursorPath(page, [[637,59,33],[636,72,34],[634,93,33],[631,113,34],[628,128,33],[624,139,33],[624,140,59],[624,140,108],[624,140,117],[624,140,134],[624,140,182],[624,140,108]]);
-  await page.keyboard.press('5');
-  await replayCursorPath(page, [[624,140,383],[624,140,59],[605,144,34],[581,151,33],[558,159,33],[540,166,34],[536,169,33],[531,171,34],[529,171,33],[525,175,33],[517,181,34],[512,188,33],[508,194,33],[505,199,34],[500,204,33],[496,209,33],[496,210,33],[495,210,33],[495,211,118],[495,210,116],[495,210,33],[496,210,42],[498,210,33],[499,209,34],[500,209,41]]);
-  await page.mouse.move(500, 209);
+  // Coordinate-only click (no selectors found)
+  await page.mouse.click(640, 38);
+  // Coordinate-only click (no selectors found)
+  await page.mouse.click(634, 40);
+  await replayCursorPath(page, [[639,37,119],[638,39,45]]);
+  await replayCursorPath(page, [[541,215,35],[443,361,43],[402,452,38],[379,503,61],[362,537,35],[353,553,33],[350,555,33],[350,555,68],[345,535,43],[357,501,37],[361,493,47]]);
+  await page.mouse.move(364, 487);
   await page.mouse.down();
-  await replayCursorPath(page, [[500,208,375],[505,208,33],[512,204,34],[522,201,33],[535,198,41],[545,195,34],[561,193,33],[574,191,34],[585,191,33],[604,193,34],[627,197,33],[646,200,34],[652,202,33],[664,206,33],[692,217,34],[715,223,33],[725,226,33],[731,229,34],[737,235,33],[745,242,33],[748,246,34],[750,250,33],[751,258,33],[751,264,34],[750,270,33],[749,276,33],[746,281,34],[743,285,33],[742,288,32],[740,291,35],[739,293,33],[738,295,33],[737,296,58],[736,297,33],[736,298,33],[735,299,34],[735,299,117],[735,299,116],[735,299,317]]);
-  await page.mouse.move(735, 299);
+  await replayCursorPath(page, [[365,484,40],[369,479,43],[369,478,74],[371,469,32],[379,440,40],[387,407,53],[391,389,57],[391,384,36],[391,379,57],[391,379,92],[391,378,49],[395,369,44],[398,359,41],[400,354,48],[400,353,33],[400,353,42],[400,351,41],[401,346,46],[402,345,238]]);
+  await page.mouse.move(402, 345);
   await page.mouse.up();
-  await replayCursorPath(page, [[735,298,284],[736,297,33],[752,288,33],[803,274,34],[869,258,33],[936,244,34],[993,231,41],[1013,221,33],[1024,214,34],[1029,210,33],[1030,208,34],[1030,208,149],[1029,208,75],[1029,208,42],[1018,198,33],[1008,192,33],[1000,187,34],[987,178,33],[975,171,34],[967,167,33],[957,166,42],[943,163,33],[929,162,33],[918,160,33],[909,160,33],[903,159,34],[899,159,33],[899,159,34],[898,158,33],[895,158,34],[890,157,33],[885,156,34],[882,155,33],[878,155,33],[870,155,33],[856,155,34],[837,153,33],[832,153,58],[832,153,117],[832,153,142],[832,153,225],[820,172,33],[805,196,33],[804,199,50],[804,199,76],[804,199,40],[804,199,42],[803,201,34],[801,203,34],[801,203,41],[802,203,33],[803,203,51],[803,203,149],[803,203,34],[803,203,67],[845,209,32],[967,214,34],[1172,210,34]]);
-  await page.screenshot({ path: getScreenshotPath(), fullPage: true });
-  await replayCursorPath(page, [[1278,79,3860],[1124,98,39],[1011,108,33],[919,115,33],[832,117,34],[736,125,34],[612,129,32],[447,124,34],[307,119,33],[217,114,33]]);
-  await replayCursorPath(page, [[181,112,34],[173,115,33],[165,121,33],[160,128,33],[153,143,35],[145,164,33]]);
-  await replayCursorPath(page, [[138,185,33],[130,204,33],[122,221,41],[118,230,34],[115,235,34],[115,239,33],[115,242,33]]);
-  await replayCursorPath(page, [[115,246,34],[115,252,33],[115,259,33],[115,267,33],[115,271,34],[115,275,33]]);
-  await replayCursorPath(page, [[115,279,33],[115,283,33],[116,286,34],[116,287,33],[116,287,34],[119,292,33],[121,301,33],[123,310,33]]);
-  await replayCursorPath(page, [[125,316,34],[125,320,34],[125,327,33],[125,333,33],[125,335,34],[125,337,33],[125,340,33]]);
-  await replayCursorPath(page, [[124,348,42],[125,358,33],[126,372,42],[127,382,33],[129,389,34],[129,391,33],[130,393,32],[130,393,34],[130,393,92],[129,394,34]]);
-  await replayCursorPath(page, [[129,398,33],[127,401,42],[127,402,41],[127,402,233],[127,402,59],[127,402,158],[127,402,42]]);
-  await page.mouse.move(127, 402);
+  await replayCursorPath(page, [[402,345,353],[400,346,99],[399,346,32],[397,345,34],[386,337,34],[378,334,32],[374,331,37],[365,325,32],[361,324,57],[360,324,207],[360,325,35],[360,326,33],[361,326,100],[361,328,62],[361,334,32],[361,335,39],[360,340,33],[359,344,38],[358,347,126],[357,346,34],[357,346,33],[357,341,56],[359,335,47],[358,335,34]]);
+  await page.mouse.move(358, 335);
   await page.mouse.down();
-  await page.mouse.move(127, 402);
+  await replayCursorPath(page, [[358,335,232],[357,335,40],[351,333,44],[342,332,33],[335,330,42],[331,329,50],[327,329,37],[326,329,86],[325,329,36],[325,329,66],[324,329,49]]);
+  await page.mouse.move(324, 329);
   await page.mouse.up();
-  await locateWithFallback(page, [{"type":"css-path","value":"svg > g > path"}], 'click', null, {"x":124,"y":406});
-  await locateWithFallback(page, [{"type":"name","value":"[name=\\"arrowtypes\\"]"},{"type":"css-path","value":"div.buttonList > label > input"}], 'click', null, {"x":125,"y":407});
-  await replayCursorPath(page, [[127,402,567]]);
-  await replayCursorPath(page, [[134,396,33],[197,380,34],[349,365,32],[633,351,34],[1002,342,33]]);
-  await page.screenshot({ path: getScreenshotPath(), fullPage: true });
-  await replayCursorPath(page, [[1273,132,2318],[1134,137,32],[1022,151,33],[920,172,33],[829,197,34],[742,222,34],[683,237,33],[638,245,34],[587,251,33],[526,255,33],[459,257,33],[374,258,41],[313,261,34],[270,266,33],[247,270,34],[230,273,33],[216,276,33]]);
-  await replayCursorPath(page, [[209,277,33],[208,277,376],[208,278,75]]);
-  await replayCursorPath(page, [[230,293,33],[300,324,33],[392,361,33],[465,386,34],[533,410,42],[584,427,33],[631,439,34],[671,444,33],[711,446,33],[730,446,33],[733,444,34],[737,441,33],[745,434,41],[750,428,34],[753,425,33],[756,423,33],[757,422,34],[758,419,37],[759,419,29],[760,419,42],[759,419,401],[760,418,83],[765,408,33],[769,400,33],[772,395,34],[773,390,33],[773,385,41],[772,383,34],[771,381,33],[768,378,34],[764,374,33],[759,372,33],[748,368,34],[740,365,33],[739,364,75]]);
-  await page.mouse.move(739, 364);
+  await replayCursorPath(page, [[324,329,301],[396,323,42],[503,299,39],[535,281,33],[554,265,36],[595,226,33],[617,202,35],[623,191,39],[623,176,40],[620,152,35],[615,106,32],[607,74,46]]);
+  await replayCursorPath(page, [[594,53,35],[590,39,35],[589,32,52],[585,28,37],[575,23,41],[572,23,61],[563,22,61],[563,23,49],[562,24,34]]);
+  await page.mouse.move(562, 24);
   await page.mouse.down();
-  await replayCursorPath(page, [[739,364,183]]);
-  await page.mouse.move(739, 364);
+  await page.mouse.move(562, 24);
   await page.mouse.up();
-  await locateWithFallback(page, [{"type":"css-path","value":"div.excalidraw-app > div.excalidraw.excalidraw-container > canvas.excalidraw__canvas.interactive"}], 'click', null, {"x":640,"y":360});
-  await replayCursorPath(page, [[739,364,143],[739,364,365],[739,364,34],[732,365,33],[727,367,34],[723,368,33]]);
-  await page.mouse.move(721, 369);
+  // Coordinate-only click (no selectors found)
+  await page.mouse.click(560, 38);
+  // Coordinate-only click (no selectors found)
+  await page.mouse.click(554, 40);
+  await replayCursorPath(page, [[562,25,190]]);
+  await replayCursorPath(page, [[560,45,55],[553,77,42],[538,148,48],[522,204,44],[520,209,38],[519,209,99],[516,197,43],[519,188,40],[521,183,35]]);
+  await page.mouse.move(521, 183);
   await page.mouse.down();
-  await page.mouse.move(721, 369);
+  await replayCursorPath(page, [[521,183,72],[529,187,54],[546,198,37],[599,260,46],[608,269,39],[628,286,33],[638,296,34],[648,305,36],[656,309,40],[657,310,45],[659,312,41],[667,315,50],[671,318,48],[676,320,56],[685,323,42],[695,331,54],[707,343,58],[716,351,39],[720,354,43],[719,354,111]]);
+  await page.mouse.move(719, 354);
   await page.mouse.up();
-  await locateWithFallback(page, [{"type":"css-path","value":"div.excalidraw-app > div.excalidraw.excalidraw-container > canvas.excalidraw__canvas.interactive"}], 'click', null, {"x":640,"y":360});
-  await replayCursorPath(page, [[721,368,567],[728,363,33],[740,355,37],[756,344,38],[765,335,33],[768,332,50]]);
-  await page.mouse.move(768, 332);
+  await replayCursorPath(page, [[717,352,39],[696,284,62],[672,111,45],[667,98,36],[656,80,40],[645,67,41],[644,66,43],[637,62,32]]);
+  await replayCursorPath(page, [[627,53,37],[627,49,47]]);
+  await page.mouse.move(627, 47);
   await page.mouse.down();
-  await replayCursorPath(page, [[769,332,76]]);
-  await page.mouse.move(769, 332);
+  await page.mouse.move(627, 47);
   await page.mouse.up();
-  await locateWithFallback(page, [{"type":"css-path","value":"div.excalidraw-app > div.excalidraw.excalidraw-container > canvas.excalidraw__canvas.interactive"}], 'click', null, {"x":640,"y":360});
-  await replayCursorPath(page, [[769,332,41],[769,332,100],[774,327,33],[782,320,33],[788,315,34],[791,312,33],[792,311,42]]);
-  await page.mouse.move(792, 311);
+  // Coordinate-only click (no selectors found)
+  await page.mouse.click(640, 38);
+  // Coordinate-only click (no selectors found)
+  await page.mouse.click(634, 40);
+  await replayCursorPath(page, [[627,47,282],[627,48,34]]);
+  await replayCursorPath(page, [[620,78,51],[600,185,61],[578,303,31],[554,368,33],[540,399,39],[495,495,49],[488,512,36],[486,522,33],[484,537,41],[483,540,43],[485,540,33],[485,539,50],[491,524,33],[505,492,34],[510,484,50],[512,481,44],[516,477,33]]);
+  await page.mouse.move(517, 474);
   await page.mouse.down();
-  await replayCursorPath(page, [[792,311,199]]);
-  await page.mouse.move(792, 311);
+  await replayCursorPath(page, [[520,471,38],[522,468,42],[525,460,33],[532,434,53],[549,394,43],[556,377,39],[558,371,52],[558,368,39],[559,366,38],[560,364,40],[567,354,50],[571,345,35],[572,342,38],[572,341,70],[572,341,46],[572,341,136],[573,341,86],[578,339,32],[581,336,50],[584,332,37],[586,329,60]]);
+  await page.mouse.move(586, 329);
   await page.mouse.up();
-  await locateWithFallback(page, [{"type":"css-path","value":"div.excalidraw-app > div.excalidraw.excalidraw-container > canvas.excalidraw__canvas.interactive"}], 'click', null, {"x":640,"y":360});
-  await replayCursorPath(page, [[792,312,788],[791,312,905],[791,312,4883],[787,315,33]]);
-  await page.mouse.move(787, 315);
+  await replayCursorPath(page, [[586,328,399],[590,319,35],[595,305,43],[595,304,46],[602,284,42],[605,276,39],[606,275,47],[606,275,84],[603,274,50],[599,273,35],[591,272,40],[573,276,42],[557,280,35],[551,282,44],[549,284,38],[549,285,41],[546,290,47],[546,293,145]]);
+  await page.mouse.move(546, 293);
   await page.mouse.down();
-  await replayCursorPath(page, [[787,315,875],[767,317,42],[755,317,32],[744,316,35],[737,316,32],[728,316,34],[719,316,34],[713,316,41],[704,317,33],[691,319,34],[681,320,32],[673,321,34],[667,321,34],[664,321,33],[660,322,33],[656,322,34],[656,322,33],[656,322,58],[656,322,183],[656,322,125]]);
-  await page.mouse.move(656, 322);
+  await replayCursorPath(page, [[546,294,606],[543,294,47],[541,294,33],[533,291,39],[531,290,38],[529,290,32],[529,289,120],[528,289,34]]);
+  await page.mouse.move(527, 289);
   await page.mouse.up();
-  await replayCursorPath(page, [[656,322,401],[735,312,33],[985,312,33]]);
-  await page.screenshot({ path: getScreenshotPath(), fullPage: true });
-  await replayCursorPath(page, [[1262,316,2101],[1128,339,33],[1019,355,32],[906,368,34],[814,385,34],[738,405,33],[642,429,42],[604,440,33],[597,441,33],[598,440,45],[599,440,30],[603,431,42],[609,421,33],[617,408,34],[621,400,33],[622,400,133],[622,401,33],[621,403,34],[622,407,42],[622,408,33],[622,407,83]]);
-  await page.mouse.move(622, 407);
+  await replayCursorPath(page, [[528,289,406],[591,241,67],[670,150,41],[675,141,36],[681,130,41],[682,124,53],[681,116,38],[678,108,40],[678,97,35],[671,78,39]]);
+  await replayCursorPath(page, [[667,51,35],[667,32,50],[667,28,33],[666,27,33],[658,22,47]]);
+  await replayCursorPath(page, [[656,22,38],[655,22,31],[650,23,39],[633,29,46],[624,33,39],[614,38,35]]);
+  await replayCursorPath(page, [[609,39,35],[606,39,44],[600,40,39],[597,40,34],[592,39,39]]);
+  await page.mouse.move(592, 39);
   await page.mouse.down();
-  await replayCursorPath(page, [[623,408,175],[640,420,33],[665,435,33],[694,451,35],[723,465,32],[743,473,34],[756,478,33],[767,484,33],[784,493,34],[802,503,33],[823,515,34],[849,529,33],[871,540,34],[886,548,33],[903,556,33],[909,560,33],[911,560,33],[914,561,34],[913,561,74],[913,561,68],[913,561,133]]);
-  await page.mouse.move(912, 561);
+  await replayCursorPath(page, [[593,39,347]]);
+  await page.mouse.move(593, 39);
   await page.mouse.up();
-  await replayCursorPath(page, [[913,561,100],[914,562,33],[914,562,116],[927,552,34],[1041,545,42]]);
-  await page.screenshot({ path: getScreenshotPath(), fullPage: true });
-  await replayCursorPath(page, [[1269,364,2017],[1228,396,33],[1213,421,33],[1199,449,33],[1160,480,34],[1102,499,33],[1045,512,33],[1000,518,34],[973,520,33],[959,523,33],[945,526,34],[939,528,33],[927,532,33],[922,534,33],[922,534,33],[922,534,43]]);
-  await page.mouse.move(922, 534);
+  // Coordinate-only click (no selectors found)
+  await page.mouse.click(600, 38);
+  // Coordinate-only click (no selectors found)
+  await page.mouse.click(594, 40);
+  await replayCursorPath(page, [[602,44,40],[662,98,57],[765,179,40],[799,201,38],[806,205,144],[805,204,50]]);
+  await page.mouse.move(805, 204);
   await page.mouse.down();
-  await replayCursorPath(page, [[922,533,45],[927,522,38],[946,488,34],[969,446,33],[990,399,33],[1010,354,33],[1027,314,34],[1037,278,33],[1042,242,33],[1042,215,34],[1042,198,33],[1040,184,33],[1038,174,33],[1037,172,34],[1037,172,122],[1036,172,45],[1036,172,41],[1034,173,33],[1029,175,34],[1008,182,33],[982,190,33],[974,194,33],[972,194,34],[972,194,42],[972,194,58],[972,194,50],[972,194,125],[972,194,84],[972,194,91],[972,194,83]]);
-  await page.mouse.move(971, 194);
+  await replayCursorPath(page, [[805,205,236],[829,238,42],[846,256,39],[869,279,54],[887,298,31],[901,312,40],[912,320,38],[919,323,47],[930,332,51],[933,333,50],[938,337,58],[944,339,44],[946,340,54],[946,340,68]]);
+  await page.mouse.move(946, 340);
   await page.mouse.up();
-  await replayCursorPath(page, [[971,194,375],[971,194,59],[970,195,33],[968,197,33],[968,197,84],[969,197,42],[1000,202,33],[1119,216,34]]);
-  await page.screenshot({ path: getScreenshotPath(), fullPage: true });
-  await replayCursorPath(page, [[1201,316,2859],[983,297,32],[851,274,33],[747,263,34],[653,262,33],[587,262,34],[534,256,41],[507,249,33],[467,240,34],[425,235,33],[413,234,33],[409,233,33],[408,232,58],[408,232,117]]);
-  await page.mouse.move(408, 232);
+  await replayCursorPath(page, [[944,338,103],[881,263,43],[812,172,34],[755,107,49]]);
+  await replayCursorPath(page, [[696,57,48],[677,45,38],[668,40,51],[656,34,32],[652,33,35]]);
+  await page.mouse.move(652, 33);
   await page.mouse.down();
-  await replayCursorPath(page, [[408,232,109],[408,237,33],[408,248,34],[409,256,32],[409,266,34],[411,282,33],[413,294,33],[414,301,34],[416,311,33],[419,324,34],[420,327,100]]);
-  await page.mouse.move(420, 327);
+  await page.mouse.move(652, 33);
   await page.mouse.up();
-  await replayCursorPath(page, [[420,327,33],[423,319,38],[430,307,28],[438,296,34],[446,284,33],[450,278,34],[454,275,33],[454,274,67],[455,273,33],[455,273,33],[455,273,59],[458,267,33],[460,264,34],[460,264,32]]);
-  await page.mouse.move(460, 263);
+  // Coordinate-only click (no selectors found)
+  await page.mouse.click(640, 38);
+  // Coordinate-only click (no selectors found)
+  await page.mouse.click(634, 40);
+  await replayCursorPath(page, [[653,33,284]]);
+  await replayCursorPath(page, [[676,83,33],[707,175,38],[731,279,33],[739,384,33],[740,442,41],[740,461,39],[739,470,50],[738,474,49]]);
+  await page.mouse.move(739, 474);
   await page.mouse.down();
-  await page.mouse.move(460, 263);
+  await replayCursorPath(page, [[740,474,83],[749,457,47],[775,412,36],[791,382,38],[797,370,44],[797,369,52],[808,354,150],[810,351,83],[811,350,49],[814,347,42],[816,344,36],[816,343,33],[817,343,192],[817,334,42],[817,324,36],[816,320,103],[815,320,47]]);
+  await page.mouse.move(815, 320);
   await page.mouse.up();
-  await locateWithFallback(page, [{"type":"css-path","value":"div.excalidraw-app > div.excalidraw.excalidraw-container > canvas.excalidraw__canvas.interactive"}], 'click', null, {"x":640,"y":360});
-  await replayCursorPath(page, [[460,264,184],[460,264,284],[460,264,258]]);
-  await page.mouse.move(460, 264);
+  await replayCursorPath(page, [[814,319,521],[812,316,38],[811,313,61],[806,303,49],[803,289,54],[802,283,34],[803,283,283],[805,283,34],[807,282,47],[809,282,49],[810,282,35]]);
+  await page.mouse.move(810, 282);
   await page.mouse.down();
-  await replayCursorPath(page, [[460,264,382],[458,268,34],[452,278,34],[445,290,33],[436,307,33],[427,326,33],[418,347,34],[410,366,33],[402,387,34],[396,408,33],[393,425,33],[393,434,34],[394,437,32],[398,443,41],[405,451,27],[413,459,33],[427,473,33],[442,485,34],[452,493,32],[459,499,34],[462,501,33],[464,503,34],[468,507,33],[473,510,33],[478,514,34],[485,516,34],[494,519,41],[501,521,33],[506,523,34],[512,525,33],[519,530,34],[521,532,33],[526,536,33],[531,540,34],[533,541,41],[538,543,42],[539,544,33],[542,544,33],[543,544,34],[543,544,41],[544,544,42],[548,544,33],[549,544,42]]);
-  await page.mouse.move(549, 544);
+  await replayCursorPath(page, [[809,282,299],[809,282,37],[807,283,35],[806,283,35],[803,283,43],[799,283,49],[794,283,40],[790,283,38],[778,283,48],[771,283,53],[763,282,48],[753,278,50],[751,277,57],[750,276,50],[747,274,44],[746,274,157]]);
+  await page.mouse.move(746, 274);
   await page.mouse.up();
-  await replayCursorPath(page, [[549,544,217],[550,544,141],[639,550,42],[830,570,33],[1120,579,34]]);
-  await page.screenshot({ path: getScreenshotPath(), fullPage: true });
-}`,
+  await replayCursorPath(page, [[746,274,251],[759,224,31],[764,205,34],[768,144,34],[766,122,34],[759,90,49],[765,77,32],[785,69,33],[799,66,34],[809,63,42]]);
+  await replayCursorPath(page, [[825,59,42],[853,46,31],[869,36,35],[879,32,43],[887,29,43],[896,27,149]]);
+  await page.mouse.move(896, 27);
+  await page.mouse.up();
+  // Coordinate-only click (no selectors found)
+  await page.mouse.click(893, 38);
+  await replayCursorPath(page, [[896,27,100]]);
+  await replayCursorPath(page, [[896,30,37],[896,32,62],[896,32,50],[896,32,233],[896,36,33],[893,45,33]]);
+  await replayCursorPath(page, [[889,56,36],[881,78,44],[875,91,54],[870,97,32],[868,103,35],[863,108,49]]);
+  await replayCursorPath(page, [[861,110,49],[860,111,51],[859,111,35],[859,111,53],[858,111,30],[858,111,83]]);
+  await replayCursorPath(page, [[856,108,36],[851,98,47],[850,97,38]]);
+  await page.mouse.move(848, 96);
+  await page.mouse.down();
+  await page.mouse.move(848, 96);
+  await page.mouse.up();
+  // Coordinate-only click (no selectors found)
+  await page.mouse.click(819, 94);
+  await replayCursorPath(page, [[849,98,271],[869,141,35],[896,185,34],[924,225,39],[942,256,51],[953,277,41],[955,279,101],[962,262,53],[967,248,36],[972,237,35],[978,230,33],[989,216,32],[995,206,62],[992,193,40],[990,187,50]]);
+  await page.mouse.move(990, 186);
+  await page.mouse.down();
+  await replayCursorPath(page, [[990,186,285],[991,188,38],[993,193,42],[998,207,37],[1008,224,40],[1020,240,61],[1030,249,36],[1037,255,63],[1057,271,54],[1080,286,52],[1096,308,60],[1107,323,56],[1112,335,48],[1125,350,53],[1131,356,51],[1141,363,46],[1146,364,54]]);
+  await page.mouse.move(1146, 364);
+  await page.mouse.up();
+  await replayCursorPath(page, [[1145,364,273],[1136,359,42],[1039,282,33],[1008,262,42],[975,241,34],[898,171,48],[859,127,48],[842,107,36],[794,61,42]]);
+  await replayCursorPath(page, [[767,39,36],[754,33,60],[716,24,40],[712,24,56]]);
+  await replayCursorPath(page, [[701,27,46],[690,31,36],[684,32,54],[659,32,42],[653,32,42],[650,33,56]]);
+  await replayCursorPath(page, [[642,33,58]]);
+  await page.mouse.move(642, 33);
+  await page.mouse.down();
+  await page.mouse.move(642, 33);
+  await page.mouse.up();
+  // Coordinate-only click (no selectors found)
+  await page.mouse.click(640, 38);
+  // Coordinate-only click (no selectors found)
+  await page.mouse.click(634, 40);
+  await replayCursorPath(page, [[642,36,244],[708,162,48],[796,278,34],[837,335,38],[915,424,40],[958,476,57],[976,507,46],[979,518,34],[982,527,41],[982,525,198],[982,522,41]]);
+  await page.mouse.move(982, 522);
+  await page.mouse.down();
+  await replayCursorPath(page, [[983,518,36],[985,510,38],[994,494,36],[998,486,41],[1009,465,49],[1014,453,33],[1018,442,41],[1024,427,34],[1027,417,38],[1033,407,35],[1034,404,37],[1034,401,34],[1035,396,55],[1036,388,37],[1036,385,40],[1036,384,145],[1036,383,33],[1036,379,35],[1036,377,213],[1035,376,41]]);
+  await page.mouse.move(1035, 376);
+  await page.mouse.up();
+  await replayCursorPath(page, [[1035,376,379],[1027,364,45],[1001,332,31],[997,324,45],[982,312,45],[978,307,181],[979,307,51],[980,307,34],[982,307,34],[985,307,33],[985,307,183],[986,307,85],[986,307,131],[987,307,117],[988,307,33],[990,307,34],[991,307,51]]);
+  await page.mouse.move(991, 307);
+  await page.mouse.down();
+  await replayCursorPath(page, [[991,307,499],[988,307,35],[985,308,36],[983,308,39],[979,308,46],[976,308,43],[973,308,151],[973,308,39],[969,308,66],[962,308,45],[957,308,37],[955,308,37],[948,308,51],[946,308,57],[945,308,33],[944,308,34]]);
+  await page.mouse.move(944, 308);
+  await page.mouse.up();
+  await replayCursorPath(page, [[943,320,217],[939,337,49],[921,443,35],[913,508,41],[906,614,41],[892,707,41]]);
+}
+`,
   },
   {
-    name: "Test 3: ALT+Drag Duplicate",
-    targetUrl: "https://excalidraw.com",
+    name: "Old arrows can bind to bindables and track",
+    targetUrl: "https://excalidraw-lastest.vercel.app",
+    functionalArea: "Arrows binding to bindables",
     code: `import { Page } from 'playwright';
 
 export async function test(page: Page, baseUrl: string, screenshotPath: string, stepLogger: any) {
@@ -4071,7 +3841,6 @@ export async function test(page: Page, baseUrl: string, screenshotPath: string, 
           const text = sel.value.replace(/^ocr-text="/, '').replace(/"$/, '');
           locator = page.getByText(text, { exact: false });
         } else if (sel.type === 'role-name') {
-          // Parse role=button[name="Label"] format and use getByRole
           const match = sel.value.match(/^role=(\\w+)\\[name="(.+)"\\]$/);
           if (match) {
             locator = page.getByRole(match[1], { name: match[2] });
@@ -4081,25 +3850,30 @@ export async function test(page: Page, baseUrl: string, screenshotPath: string, 
         } else {
           locator = page.locator(sel.value);
         }
-        // Use .first() to handle multiple matches (e.g., header + footer nav links)
         const target = locator.first();
         await target.waitFor({ timeout: 3000 });
+        if (action === 'locate') return target;
         if (action === 'click') await target.click();
         else if (action === 'fill') await target.fill(value || '');
         else if (action === 'selectOption') await target.selectOption(value || '');
-        return;
+        return target;
       } catch { continue; }
     }
-    // Coordinate fallback for clicks when all selectors fail
     if (action === 'click' && coords) {
       console.log('Falling back to coordinate click at', coords.x, coords.y);
       await page.mouse.click(coords.x, coords.y);
       return;
     }
+    if (action === 'fill' && coords) {
+      console.log('Falling back to coordinate fill at', coords.x, coords.y);
+      await page.mouse.click(coords.x, coords.y);
+      await page.keyboard.press('Control+a');
+      await page.keyboard.type(value || '');
+      return;
+    }
     throw new Error('No selector matched: ' + JSON.stringify(validSelectors));
   }
 
-  // Replay cursor path helper
   async function replayCursorPath(page, moves) {
     for (const [x, y, delay] of moves) {
       await page.mouse.move(x, y);
@@ -4108,36 +3882,236 @@ export async function test(page: Page, baseUrl: string, screenshotPath: string, 
   }
 
   await page.goto(buildUrl(baseUrl, '/'));
-  await replayCursorPath(page, [[1275,234,0],[1080,213,38],[953,199,34],[832,185,33],[767,178,33],[764,178,42],[764,178,41],[758,169,34],[735,149,42],[693,125,25],[648,99,33],[632,87,33],[629,84,34],[626,81,33],[626,81,33],[626,81,34],[626,81,41],[626,81,33],[626,81,43],[626,81,33],[626,82,33],[625,83,33],[626,104,34],[625,126,34],[619,149,33],[609,168,32],[587,190,34],[551,218,33],[510,238,33],[490,246,34],[489,246,34],[489,246,33]]);
-  await page.mouse.move(489, 246);
+  await replayCursorPath(page, [[673,131,0],[673,130,39],[645,102,40],[642,93,51],[639,90,80],[635,73,37]]);
+  await replayCursorPath(page, [[630,58,37],[618,47,39],[594,46,58],[544,51,39],[528,51,38],[526,51,37]]);
+  await page.mouse.move(526, 51);
   await page.mouse.down();
-  await replayCursorPath(page, [[489,246,60],[489,246,89]]);
-  await page.mouse.move(489, 246);
+  await page.mouse.move(526, 51);
+  await page.mouse.up();
+  // Coordinate-only click (no selectors found)
+  await page.mouse.click(520, 38);
+  // Coordinate-only click (no selectors found)
+  await page.mouse.click(514, 40);
+  await replayCursorPath(page, [[526,53,301]]);
+  await replayCursorPath(page, [[517,141,44],[481,270,37],[450,344,35],[435,374,33],[435,375,34],[401,349,46],[382,285,37],[390,233,33],[396,217,34],[401,199,51],[401,197,148],[400,168,46],[401,166,37],[400,166,101],[400,166,34],[399,164,34]]);
+  await page.mouse.move(398, 163);
+  await page.mouse.down();
+  await replayCursorPath(page, [[399,163,131],[427,194,59],[441,227,53],[452,239,58],[463,244,32],[472,251,35],[484,258,43],[489,260,40],[492,263,47],[497,266,34],[500,266,34],[509,271,46],[511,272,34],[513,274,36],[517,276,83],[518,276,39],[519,277,44]]);
+  await page.mouse.move(519, 277);
+  await page.mouse.up();
+  await replayCursorPath(page, [[519,275,164],[524,187,58],[544,107,42],[550,97,39],[569,69,56]]);
+  await replayCursorPath(page, [[592,50,59],[612,37,50],[618,36,33],[622,37,51],[627,39,48]]);
+  await replayCursorPath(page, [[635,44,52],[643,49,66],[646,49,32],[647,49,37]]);
+  await page.mouse.move(647, 49);
+  await page.mouse.down();
+  await page.mouse.move(647, 49);
+  await page.mouse.up();
+  // Coordinate-only click (no selectors found)
+  await page.mouse.click(640, 38);
+  // Coordinate-only click (no selectors found)
+  await page.mouse.click(634, 40);
+  await replayCursorPath(page, [[647,49,147],[640,55,33]]);
+  await replayCursorPath(page, [[610,93,51],[584,143,34],[552,218,31],[525,285,34],[489,367,35],[465,423,32],[437,470,34],[429,481,32],[423,489,51],[421,490,34],[421,490,101],[421,489,51]]);
+  await page.mouse.move(421, 489);
+  await page.mouse.down();
+  await replayCursorPath(page, [[421,488,50],[423,476,34],[428,444,36],[432,427,35],[437,415,45],[440,390,48],[442,379,55],[447,364,49],[447,349,39],[447,346,39],[446,343,61],[446,342,45],[446,342,78],[446,341,44],[447,340,73],[447,339,268]]);
+  await page.mouse.move(447, 339);
+  await page.mouse.up();
+  await replayCursorPath(page, [[447,339,281],[448,383,33],[450,401,33],[456,448,45],[463,464,41],[474,494,31],[476,501,34],[477,505,35],[480,506,68],[480,511,47],[486,526,35],[495,550,33],[502,562,50],[505,573,33],[507,584,51],[507,590,33],[507,589,81],[507,578,35],[508,528,32],[511,521,33],[511,518,36],[511,517,32],[507,497,32],[505,466,43],[498,457,36],[481,431,44],[478,399,44],[478,394,38],[472,383,36],[472,380,43],[472,380,50],[472,379,35],[455,359,48],[453,355,51],[452,355,34],[451,355,33],[451,353,111],[450,342,43],[451,339,46],[451,339,233],[450,338,34]]);
+  await page.mouse.move(450, 338);
+  await page.mouse.down();
+  await replayCursorPath(page, [[450,338,133],[450,336,34],[451,328,45],[451,318,57],[451,315,52],[449,307,42],[450,301,48],[449,294,68],[449,293,53],[449,293,37],[448,292,64],[445,282,33],[445,281,49]]);
+  await page.mouse.move(445, 281);
+  await page.mouse.up();
+  await replayCursorPath(page, [[445,281,491],[449,280,61],[459,281,71],[477,282,43],[479,283,33],[480,283,120],[480,283,84],[482,272,45],[482,269,37],[482,269,301],[483,273,33],[483,276,43],[483,276,38]]);
+  await page.mouse.move(483, 276);
+  await page.mouse.down();
+  await replayCursorPath(page, [[483,276,268],[480,276,37],[469,272,49],[462,269,34],[460,269,62],[454,267,45],[450,265,58],[448,264,46],[446,264,52],[444,264,65],[431,267,52],[410,270,39],[404,271,37],[399,273,56],[393,274,43],[387,275,57],[380,277,56],[375,279,212],[372,279,41]]);
+  await page.mouse.move(368, 279);
+  await page.mouse.up();
+  await replayCursorPath(page, [[368,280,210],[370,283,40],[397,336,34],[419,371,36],[472,442,39],[517,490,33],[543,525,50],[560,544,75],[568,552,35],[583,574,42],[602,606,47],[616,650,52],[625,678,52],[629,700,45]]);
+  await page.screenshot({ path: getScreenshotPath(), fullPage: true });
+  await replayCursorPath(page, [[633,717,1769],[649,605,50],[647,442,56],[635,375,43],[627,306,34],[626,241,50],[622,206,50],[619,198,32],[619,184,52],[622,169,36],[623,165,32],[624,154,32],[624,140,33],[622,111,44],[615,79,55],[614,74,35],[606,70,44],[597,66,40],[587,62,32]]);
+  await replayCursorPath(page, [[574,56,40],[568,51,61],[566,49,44],[563,39,55]]);
+  await page.mouse.move(563, 39);
+  await page.mouse.down();
+  await page.mouse.move(563, 39);
+  await page.mouse.up();
+  // Coordinate-only click (no selectors found)
+  await page.mouse.click(560, 38);
+  // Coordinate-only click (no selectors found)
+  await page.mouse.click(554, 40);
+  await replayCursorPath(page, [[563,40,350]]);
+  await replayCursorPath(page, [[563,50,42],[560,62,32],[557,66,58],[555,68,35],[548,74,33],[529,95,34],[496,148,48],[483,165,51],[477,169,33],[471,171,33],[467,173,34],[466,173,162],[481,177,35],[493,180,36],[497,180,33],[511,180,34],[518,180,50],[525,181,34],[538,186,52],[544,188,48],[546,189,32],[547,187,66],[549,184,33],[552,181,35],[552,180,34],[555,179,49],[559,180,50],[560,181,41],[565,182,42],[567,183,34],[572,183,32],[573,182,36],[590,178,32],[593,176,49],[593,176,50]]);
+  await page.mouse.move(593, 176);
+  await page.mouse.down();
+  await replayCursorPath(page, [[593,177,152],[604,197,47],[612,207,33],[627,219,45],[634,225,50],[641,231,33],[649,238,51],[652,240,50],[662,250,48],[666,256,55],[670,261,44],[679,269,50],[687,278,53],[693,287,47],[694,287,44],[697,289,44],[700,291,56],[703,295,48],[705,296,33],[706,296,68],[706,296,37]]);
+  await page.mouse.move(706, 296);
+  await page.mouse.up();
+  await replayCursorPath(page, [[706,296,145],[690,260,55],[665,96,37],[665,81,42],[664,78,34],[662,65,32]]);
+  await replayCursorPath(page, [[662,58,50],[662,57,67],[661,56,50],[659,55,37],[657,52,46]]);
+  await replayCursorPath(page, [[654,50,32],[653,49,54]]);
+  await page.mouse.move(645, 42);
+  await page.mouse.down();
+  await replayCursorPath(page, [[644,42,68]]);
+  await page.mouse.move(644, 42);
+  await page.mouse.up();
+  // Coordinate-only click (no selectors found)
+  await page.mouse.click(640, 38);
+  // Coordinate-only click (no selectors found)
+  await page.mouse.click(634, 40);
+  await replayCursorPath(page, [[644,42,129]]);
+  await replayCursorPath(page, [[644,98,48],[640,194,37],[617,310,61],[602,378,32],[600,392,40],[595,412,48],[589,437,33],[584,453,33],[580,467,34],[579,471,44],[579,477,51]]);
+  await page.mouse.move(579, 478);
+  await page.mouse.down();
+  await replayCursorPath(page, [[580,475,156],[592,422,43],[596,403,50],[597,387,39],[600,376,46],[603,369,54],[605,354,47],[606,352,40],[606,350,37],[606,349,128],[609,345,38],[610,338,43]]);
+  await page.mouse.move(610, 338);
+  await page.mouse.up();
+  await replayCursorPath(page, [[610,339,370],[610,340,34]]);
+  await page.mouse.move(610, 340);
+  await page.mouse.down();
+  await replayCursorPath(page, [[610,339,480],[611,337,37],[615,321,49],[618,308,40],[619,307,42],[620,305,33],[620,301,133],[620,299,134],[620,298,36],[621,298,31],[621,298,66],[621,297,118],[624,294,32],[625,293,35],[626,293,38],[626,292,44]]);
+  await page.mouse.move(626, 292);
+  await page.mouse.up();
+  await replayCursorPath(page, [[626,291,401],[626,291,45],[626,291,39],[624,289,32],[624,288,35],[616,275,43],[610,254,39],[610,245,49],[611,245,153],[611,245,35],[611,245,247],[609,253,34]]);
+  await page.mouse.move(609, 253);
+  await page.mouse.down();
+  await page.mouse.move(609, 253);
   await page.mouse.up();
   // Coordinate-only click (no selectors found)
   await page.mouse.click(640, 360);
-  await page.keyboard.press('3');
-  await replayCursorPath(page, [[489,246,334],[489,246,200],[487,249,42],[483,251,24],[476,259,34],[469,267,33],[465,270,34],[463,272,33],[462,273,33],[462,273,126],[462,273,41],[461,267,34],[457,258,33],[451,247,33],[443,235,41],[436,227,26]]);
-  await page.mouse.move(435, 227);
+  await replayCursorPath(page, [[609,253,398],[610,253,85],[610,253,49],[610,252,266],[611,251,53],[611,250,115]]);
+  await page.mouse.move(611, 250);
   await page.mouse.down();
-  await replayCursorPath(page, [[435,227,75],[435,237,33],[441,256,34],[463,289,33],[495,324,33],[528,350,33],[553,373,34],[565,384,33],[567,385,50],[567,385,176],[567,385,66],[568,385,33],[579,385,33],[602,383,34],[612,382,33],[612,382,109]]);
-  await page.mouse.move(612, 382);
+  await replayCursorPath(page, [[610,250,197],[603,248,35],[588,247,40],[582,246,36],[568,245,60],[561,244,36],[556,243,38],[543,241,54],[534,241,61],[529,241,57],[524,242,45],[520,242,69],[517,242,63],[508,242,39],[506,242,35],[506,242,67],[504,242,33],[492,241,49],[489,240,44]]);
+  await page.mouse.move(489, 240);
   await page.mouse.up();
-  await replayCursorPath(page, [[612,382,50],[611,381,49],[607,381,34],[600,378,33],[591,372,34],[574,358,33],[557,345,33],[546,336,33],[543,333,34],[543,332,33],[543,332,158],[543,333,34],[543,333,33],[543,332,108]]);
-  await page.keyboard.down('Alt');
-  await page.mouse.move(543, 332);
-  await page.mouse.down();
-  await replayCursorPath(page, [[543,332,184],[545,333,33],[577,338,34],[634,340,33],[703,340,33],[757,339,33],[777,338,34],[777,338,58],[777,338,242]]);
-  await page.mouse.move(777, 338);
-  await page.mouse.up();
-  await page.keyboard.up('Alt');
-  await replayCursorPath(page, [[777,338,175],[777,338,117],[797,330,33],[883,321,33],[1087,307,33]]);
+  await replayCursorPath(page, [[490,240,220],[501,279,53],[542,428,35],[574,529,50],[622,645,51],[644,705,49],[648,719,33]]);
   await page.screenshot({ path: getScreenshotPath(), fullPage: true });
-}`,
+  await replayCursorPath(page, [[626,700,933],[638,621,34],[650,520,33],[662,428,35],[677,280,35],[693,184,47],[698,129,35],[703,99,32]]);
+  await replayCursorPath(page, [[705,57,45],[703,51,37],[701,50,33],[696,46,34],[691,44,32],[686,42,41],[684,42,44],[679,43,43],[672,44,40]]);
+  await replayCursorPath(page, [[659,43,42],[646,42,41],[639,38,52],[628,34,39]]);
+  await replayCursorPath(page, [[620,31,47],[616,29,37],[613,28,61],[598,22,65],[595,22,34],[592,22,32],[591,22,241],[590,22,43]]);
+  await replayCursorPath(page, [[580,27,47],[577,30,48],[578,32,45],[589,36,49],[592,39,55]]);
+  await page.mouse.move(594, 39);
+  await page.mouse.down();
+  await page.mouse.move(594, 39);
+  await page.mouse.up();
+  // Coordinate-only click (no selectors found)
+  await page.mouse.click(600, 38);
+  // Coordinate-only click (no selectors found)
+  await page.mouse.click(594, 40);
+  await replayCursorPath(page, [[595,41,301]]);
+  await replayCursorPath(page, [[599,65,37],[620,129,33],[655,190,33],[680,205,33],[691,210,34],[699,211,85],[695,189,50],[694,161,33],[694,155,34],[695,155,49],[710,163,50],[728,172,33],[734,176,33],[739,178,43],[745,180,40],[747,181,32],[747,181,119],[749,181,43]]);
+  await page.mouse.move(749, 181);
+  await page.mouse.down();
+  await replayCursorPath(page, [[752,180,35],[761,186,43],[771,200,34],[784,224,34],[795,243,42],[799,251,34],[803,255,51],[806,259,35],[808,261,48],[811,263,59],[817,264,59],[818,264,48],[820,264,36],[825,266,41],[825,266,57],[825,267,36],[827,267,65]]);
+  await page.mouse.move(827, 267);
+  await page.mouse.up();
+  await replayCursorPath(page, [[827,267,98],[791,223,51],[730,109,36],[720,89,32],[715,87,33],[701,79,50],[697,77,42],[686,72,42],[678,69,34]]);
+  await replayCursorPath(page, [[650,54,62],[637,37,36]]);
+  await page.mouse.move(635, 36);
+  await page.mouse.down();
+  await replayCursorPath(page, [[636,36,128]]);
+  await page.mouse.move(636, 36);
+  await page.mouse.up();
+  // Coordinate-only click (no selectors found)
+  await page.mouse.click(640, 38);
+  // Coordinate-only click (no selectors found)
+  await page.mouse.click(634, 40);
+  await replayCursorPath(page, [[636,36,105]]);
+  await replayCursorPath(page, [[636,61,36],[632,252,45],[638,323,33],[659,415,37],[669,455,33],[674,471,34],[680,481,49],[682,487,33],[683,494,33],[686,495,33],[688,495,33],[692,495,33]]);
+  await page.mouse.move(692, 494);
+  await page.mouse.down();
+  await replayCursorPath(page, [[696,487,41],[707,442,55],[723,407,50],[737,371,47],[739,364,36],[742,352,51],[750,337,54],[751,329,42]]);
+  await page.mouse.move(751, 328);
+  await page.mouse.up();
+  await replayCursorPath(page, [[752,329,156],[752,330,54],[752,331,67],[752,330,701]]);
+  await page.mouse.move(752, 330);
+  await page.mouse.down();
+  await replayCursorPath(page, [[752,330,131],[752,328,38],[753,323,45],[753,319,35],[753,309,40],[754,303,57],[752,293,44],[750,286,49],[750,282,55],[750,278,53],[750,276,50],[750,276,34],[752,266,54],[753,263,97],[753,263,184]]);
+  await page.mouse.move(753, 263);
+  await page.mouse.up();
+  await replayCursorPath(page, [[754,263,216],[754,262,84],[754,261,33],[760,254,32],[763,252,41],[765,248,93],[767,245,45],[768,243,39],[768,241,50],[761,235,50],[758,231,36],[758,229,99],[758,228,36],[760,228,78],[767,233,34],[777,243,33],[784,252,34],[795,276,50],[797,280,34],[796,281,166],[795,281,35],[794,279,129],[794,279,63],[793,272,46],[793,268,41],[793,266,34],[794,264,68]]);
+  await page.mouse.move(794, 264);
+  await page.mouse.down();
+  await replayCursorPath(page, [[794,264,215],[793,264,52],[778,267,44],[770,267,37],[733,268,43],[714,268,50],[704,269,49],[694,269,59],[693,269,33]]);
+  await page.mouse.move(693, 269);
+  await page.mouse.up();
+  await replayCursorPath(page, [[694,269,432],[698,407,47],[684,530,39],[684,617,34],[690,679,32],[692,717,34]]);
+  await page.screenshot({ path: getScreenshotPath(), fullPage: true });
+  await replayCursorPath(page, [[625,716,1601],[638,557,49],[654,435,46],[668,376,36],[689,315,35],[711,246,33],[739,197,34],[773,165,32],[794,129,33],[807,105,35],[820,77,32],[823,67,34],[828,62,32]]);
+  await replayCursorPath(page, [[831,57,33],[833,56,35],[836,56,50],[849,54,33],[870,45,48],[871,45,42]]);
+  await replayCursorPath(page, [[882,40,43],[883,39,49],[884,38,33]]);
+  // Coordinate-only click (no selectors found)
+  await page.mouse.click(893, 38);
+  await replayCursorPath(page, [[884,38,250],[884,39,103],[883,50,48]]);
+  await replayCursorPath(page, [[881,69,51],[877,88,37],[877,97,35],[874,101,45],[873,106,67],[873,106,99],[873,107,63]]);
+  await replayCursorPath(page, [[868,111,46],[866,112,40],[866,112,84],[866,112,84],[865,112,68]]);
+  await replayCursorPath(page, [[864,107,34],[864,102,34],[863,101,59],[860,99,138]]);
+  await page.mouse.move(860, 99);
+  await page.mouse.down();
+  await replayCursorPath(page, [[860,98,67]]);
+  await page.mouse.move(860, 98);
+  await page.mouse.up();
+  // Coordinate-only click (no selectors found)
+  await page.mouse.click(819, 94);
+  await replayCursorPath(page, [[860,99,167],[862,108,33],[862,127,35],[869,174,47],[874,192,46],[874,194,38],[872,193,100],[869,188,35],[868,186,48],[870,184,36],[873,183,31],[876,181,33],[888,177,46],[900,176,39],[920,175,49],[938,175,49],[947,175,51],[950,176,41],[952,177,55],[958,179,37],[960,180,119]]);
+  await page.mouse.move(960, 180);
+  await page.mouse.down();
+  await replayCursorPath(page, [[961,181,51],[984,234,68],[1007,274,47],[1024,296,50],[1029,305,32],[1031,308,44],[1036,311,52],[1040,318,43],[1067,350,54],[1076,358,47],[1081,360,66],[1085,362,43],[1091,364,49],[1093,364,34]]);
+  await page.mouse.move(1094, 364);
+  await page.mouse.up();
+  await replayCursorPath(page, [[1094,364,134],[1094,364,35],[935,191,44],[903,153,36],[868,131,36],[830,110,35],[799,87,40],[792,85,42],[784,83,34],[769,77,32],[752,71,35]]);
+  await replayCursorPath(page, [[691,53,47],[675,49,33],[672,48,43],[664,47,42],[659,47,45],[658,47,72]]);
+  await replayCursorPath(page, [[656,46,64],[655,46,69]]);
+  await page.mouse.move(655, 46);
+  await page.mouse.down();
+  await replayCursorPath(page, [[654,46,99]]);
+  await page.mouse.move(652, 46);
+  await page.mouse.up();
+  // Coordinate-only click (no selectors found)
+  await page.mouse.click(640, 38);
+  // Coordinate-only click (no selectors found)
+  await page.mouse.click(634, 40);
+  await replayCursorPath(page, [[650,46,64],[648,48,102],[658,84,33],[680,161,33],[693,257,33],[717,324,45],[744,402,60],[766,454,43],[776,472,36],[796,498,48],[802,503,37],[805,509,51],[806,510,48]]);
+  await page.mouse.move(806, 510);
+  await page.mouse.down();
+  await replayCursorPath(page, [[807,510,35],[808,503,35],[833,440,60],[852,400,34],[857,392,35],[858,391,36]]);
+  await page.mouse.move(859, 390);
+  await page.mouse.up();
+  await page.mouse.move(859, 390);
+  await page.mouse.down();
+  await replayCursorPath(page, [[860,390,745],[861,390,36],[864,390,51],[881,382,54],[896,364,38],[906,354,36],[918,340,76],[931,326,51],[944,319,45],[952,313,44],[953,312,40],[955,312,51],[956,312,48]]);
+  await page.mouse.move(956, 312);
+  await page.mouse.up();
+  await replayCursorPath(page, [[957,313,569],[959,319,38],[960,323,54],[963,328,58],[964,328,32],[964,328,51],[967,334,52],[968,349,48],[968,353,52],[967,354,33],[966,354,82],[966,355,33],[967,355,33]]);
+  await page.mouse.move(967, 355);
+  await page.mouse.down();
+  await replayCursorPath(page, [[967,355,267],[966,355,37],[965,355,62],[960,353,45],[958,353,37],[956,352,34],[956,351,33],[954,350,34],[952,349,36]]);
+  await page.mouse.move(951, 349);
+  await page.mouse.up();
+  await replayCursorPath(page, [[952,349,231],[955,349,51],[955,349,33],[956,349,117]]);
+  await page.mouse.move(956, 349);
+  await page.mouse.down();
+  await page.mouse.move(956, 349);
+  await page.mouse.up();
+  // Coordinate-only click (no selectors found)
+  await page.mouse.click(640, 360);
+  await replayCursorPath(page, [[956,349,300],[957,349,216],[958,349,166],[958,349,35],[960,348,53],[967,351,46],[966,351,51],[963,350,33],[962,350,33]]);
+  await page.mouse.move(962, 350);
+  await page.mouse.down();
+  await replayCursorPath(page, [[961,350,33],[960,349,39],[948,345,42],[933,338,34],[914,328,51],[893,317,42],[879,310,65],[868,308,32],[864,306,34],[858,304,58],[854,303,45],[853,303,45],[847,303,40],[838,303,46],[837,303,42],[836,303,68],[832,304,65],[829,305,55],[827,305,45],[823,307,41],[820,308,34],[816,310,144],[809,312,40]]);
+  await page.mouse.move(809, 313);
+  await page.mouse.up();
+  await replayCursorPath(page, [[808,313,59],[794,354,55],[756,501,39],[735,591,40],[708,689,32]]);
+}
+`,
   },
   {
-    name: "Test 4: Rotate Arrow Binding",
-    targetUrl: "https://excalidraw.com",
+    name: "New elbow arrow binds and tracks bindables",
+    targetUrl: "https://excalidraw-lastest.vercel.app",
+    functionalArea: "Arrows binding to bindables",
     code: `import { Page } from 'playwright';
 
 export async function test(page: Page, baseUrl: string, screenshotPath: string, stepLogger: any) {
@@ -4169,7 +4143,6 @@ export async function test(page: Page, baseUrl: string, screenshotPath: string, 
           const text = sel.value.replace(/^ocr-text="/, '').replace(/"$/, '');
           locator = page.getByText(text, { exact: false });
         } else if (sel.type === 'role-name') {
-          // Parse role=button[name="Label"] format and use getByRole
           const match = sel.value.match(/^role=(\\w+)\\[name="(.+)"\\]$/);
           if (match) {
             locator = page.getByRole(match[1], { name: match[2] });
@@ -4179,25 +4152,30 @@ export async function test(page: Page, baseUrl: string, screenshotPath: string, 
         } else {
           locator = page.locator(sel.value);
         }
-        // Use .first() to handle multiple matches (e.g., header + footer nav links)
         const target = locator.first();
         await target.waitFor({ timeout: 3000 });
+        if (action === 'locate') return target;
         if (action === 'click') await target.click();
         else if (action === 'fill') await target.fill(value || '');
         else if (action === 'selectOption') await target.selectOption(value || '');
-        return;
+        return target;
       } catch { continue; }
     }
-    // Coordinate fallback for clicks when all selectors fail
     if (action === 'click' && coords) {
       console.log('Falling back to coordinate click at', coords.x, coords.y);
       await page.mouse.click(coords.x, coords.y);
       return;
     }
+    if (action === 'fill' && coords) {
+      console.log('Falling back to coordinate fill at', coords.x, coords.y);
+      await page.mouse.click(coords.x, coords.y);
+      await page.keyboard.press('Control+a');
+      await page.keyboard.type(value || '');
+      return;
+    }
     throw new Error('No selector matched: ' + JSON.stringify(validSelectors));
   }
 
-  // Replay cursor path helper
   async function replayCursorPath(page, moves) {
     for (const [x, y, delay] of moves) {
       await page.mouse.move(x, y);
@@ -4206,80 +4184,184 @@ export async function test(page: Page, baseUrl: string, screenshotPath: string, 
   }
 
   await page.goto(buildUrl(baseUrl, '/'));
-  await replayCursorPath(page, [[1263,317,0],[1148,294,38],[1064,285,34],[1002,283,33],[954,281,33],[899,279,34],[828,276,33],[750,267,33],[698,252,34],[669,231,33],[662,213,33],[652,187,33],[636,158,35],[626,145,33],[625,145,33],[625,145,92],[625,145,42],[625,145,41],[625,145,108],[614,154,34],[598,165,33],[585,175,33],[572,188,34],[566,193,33],[566,193,59],[566,194,74],[562,201,33],[555,213,33],[542,231,35],[529,252,33],[518,274,33],[509,293,33],[504,307,33],[500,315,33]]);
-  await page.mouse.move(500, 316);
+  await replayCursorPath(page, [[469,597,0],[472,600,50],[474,565,33]]);
+  await replayCursorPath(page, [[550,314,58],[623,149,42],[629,133,33],[632,119,134],[629,115,116],[622,108,68]]);
+  await replayCursorPath(page, [[545,41,65],[542,39,33],[535,36,39],[533,36,91],[533,36,37],[531,36,35],[528,36,153]]);
+  await replayCursorPath(page, [[525,36,106]]);
+  await page.mouse.move(525, 36);
   await page.mouse.down();
-  await replayCursorPath(page, [[500,315,126]]);
-  await page.mouse.move(500, 315);
+  await page.mouse.move(525, 36);
   await page.mouse.up();
-  await locateWithFallback(page, [{"type":"css-path","value":"div.excalidraw-app > div.excalidraw.excalidraw-container > canvas.excalidraw__canvas.interactive"}], 'click', null, {"x":640,"y":360});
-  await page.keyboard.press('2');
-  await replayCursorPath(page, [[500,316,375],[490,318,33],[481,320,33],[471,321,34],[464,321,33],[464,321,51],[458,314,33],[451,302,33],[446,294,34],[441,282,33],[428,267,33],[418,258,41],[417,258,50],[417,258,33]]);
-  await page.mouse.move(417, 258);
+  // Coordinate-only click (no selectors found)
+  await page.mouse.click(520, 38);
+  // Coordinate-only click (no selectors found)
+  await page.mouse.click(514, 40);
+  await replayCursorPath(page, [[516,40,556]]);
+  await replayCursorPath(page, [[449,74,33],[381,112,145],[311,158,289],[300,165,105],[266,176,60],[262,176,44],[261,176,40],[258,176,51],[257,176,54],[256,176,50],[253,175,144]]);
+  await page.mouse.move(253, 175);
   await page.mouse.down();
-  await replayCursorPath(page, [[417,258,109],[418,261,34],[428,282,34],[444,306,33],[464,330,33],[479,344,33],[485,348,34],[492,355,33],[502,362,34],[503,362,33],[505,362,33],[505,362,33]]);
-  await page.mouse.move(505, 362);
+  await replayCursorPath(page, [[253,175,125],[257,177,43],[269,194,313],[328,268,38],[336,275,75],[339,278,50],[341,279,55],[342,280,51],[342,280,34],[343,281,229],[343,281,89],[347,284,74],[356,290,66],[358,291,47],[358,291,50],[359,292,97],[360,293,36],[382,301,60],[389,304,58],[398,307,40],[402,309,36],[402,310,51]]);
+  await page.mouse.move(402, 310);
   await page.mouse.up();
-  await replayCursorPath(page, [[506,362,192],[532,360,33],[598,358,33],[706,351,34],[801,345,33],[825,344,34],[825,344,58],[824,344,34],[823,343,33],[819,339,41],[814,333,33],[810,327,34],[808,326,41]]);
-  await page.mouse.move(808, 326);
+  await replayCursorPath(page, [[402,309,413],[442,86,37],[452,70,34],[456,66,73],[457,65,129]]);
+  await replayCursorPath(page, [[474,58,52],[525,50,32],[547,50,55],[554,50,59],[556,50,34]]);
+  await page.mouse.move(556, 49);
   await page.mouse.down();
-  await replayCursorPath(page, [[808,326,75]]);
-  await page.mouse.move(808, 326);
+  await page.mouse.move(556, 49);
   await page.mouse.up();
-  await locateWithFallback(page, [{"type":"css-path","value":"div.excalidraw-app > div.excalidraw.excalidraw-container > canvas.excalidraw__canvas.interactive"}], 'click', null, {"x":640,"y":360});
-  await page.keyboard.press('2');
-  await replayCursorPath(page, [[808,326,351],[808,326,41],[799,318,33],[779,303,34],[756,287,33],[748,282,42],[740,275,33],[734,272,34],[733,270,41],[733,269,85],[729,266,32],[728,265,34],[728,265,41],[728,265,32],[722,261,35],[707,253,38],[694,248,28],[694,248,33],[693,248,34],[694,248,33]]);
-  await page.mouse.move(693, 249);
+  // Coordinate-only click (no selectors found)
+  await page.mouse.click(560, 38);
+  // Coordinate-only click (no selectors found)
+  await page.mouse.click(554, 40);
+  await replayCursorPath(page, [[555,51,680]]);
+  await replayCursorPath(page, [[545,64,37],[501,136,49],[481,189,32],[472,225,33],[469,244,33],[468,251,34],[468,248,202],[467,235,32],[461,209,37],[457,192,31],[451,179,50],[450,176,35],[450,175,63]]);
+  await page.mouse.move(450, 175);
   await page.mouse.down();
-  await replayCursorPath(page, [[694,250,33],[693,253,33],[692,259,34],[696,275,33],[712,304,33],[736,330,34],[757,347,33],[779,362,33],[789,369,34],[794,372,33],[794,372,42],[795,373,50],[800,378,33],[802,379,34],[802,379,42],[802,379,33],[802,379,58]]);
-  await page.mouse.move(802, 379);
+  await replayCursorPath(page, [[450,175,369],[455,186,38],[466,210,48],[491,257,49],[510,295,39],[521,314,52],[527,322,56],[528,323,39],[530,324,43],[531,325,34],[532,325,35],[533,325,43],[533,326,40],[534,326,33],[534,326,33],[535,326,49],[536,326,33],[536,326,53],[538,326,42],[542,324,43],[544,322,48],[548,320,48],[551,318,50],[555,317,50],[556,316,34],[561,314,49],[563,313,50],[564,312,62],[569,311,41],[574,310,49],[579,309,44],[582,309,107],[588,308,48],[590,306,34],[593,303,200],[599,296,201]]);
+  await page.mouse.move(599, 296);
   await page.mouse.up();
-  await replayCursorPath(page, [[802,379,64],[801,379,53],[796,375,33],[782,360,41],[766,347,34],[760,342,34],[759,341,66],[758,341,52],[758,341,33],[758,341,32],[758,341,141],[758,341,175],[743,328,34],[713,308,32],[677,285,34],[638,261,33],[608,242,34],[593,230,33],[591,228,42],[591,228,42],[590,227,33],[590,228,58],[590,228,33],[590,228,34],[590,228,34],[591,227,49],[590,228,33],[590,227,34],[590,228,41],[590,228,34]]);
-  await page.keyboard.press('5');
-  await replayCursorPath(page, [[590,228,33],[590,228,34],[590,228,33],[590,228,33],[589,229,33],[584,233,33],[579,236,34],[557,244,33],[528,254,34],[502,256,33],[462,250,33],[441,243,34],[437,242,42],[437,242,34],[437,242,32],[437,242,33],[437,242,34],[437,243,34],[441,252,32],[446,261,34],[448,264,33],[452,268,34],[455,270,33],[455,270,33],[455,270,33],[457,267,34],[457,263,34],[457,260,32],[455,257,35],[452,253,41],[452,253,52],[452,253,224],[452,253,40],[453,254,34],[454,254,59],[455,254,42],[455,255,40]]);
-  await page.mouse.move(455, 255);
+  await page.keyboard.press('4');
+  await replayCursorPath(page, [[599,295,1784],[607,286,34],[619,270,33],[632,251,31],[646,224,50],[657,201,34],[664,186,52],[665,184,265],[666,179,65],[666,173,68]]);
+  await page.mouse.move(666, 173);
   await page.mouse.down();
-  await replayCursorPath(page, [[455,254,184],[455,254,33],[459,245,33],[464,233,34],[467,225,33],[471,217,33],[476,209,33],[478,206,34],[482,201,33],[491,196,34],[509,191,32],[546,190,34],[590,191,34],[629,194,33],[657,197,33],[672,198,33],[674,198,34],[676,199,32],[678,199,34],[687,200,34],[691,200,33],[691,200,49],[692,200,100],[705,208,34],[716,216,34],[721,224,33],[723,226,50],[722,227,33],[719,235,33],[715,243,34],[707,252,33],[701,262,38],[699,268,29],[698,270,33],[696,278,34],[696,289,33],[698,294,33],[699,295,50],[701,298,33],[703,299,34],[704,300,33],[707,303,33],[711,306,34],[710,305,42],[710,305,50],[710,305,33],[711,305,42],[712,305,41],[712,305,34],[713,305,33],[712,305,92],[712,305,42],[712,305,41],[709,305,34],[706,306,41],[706,306,34],[706,306,41],[706,306,42],[704,306,33],[703,307,75],[701,307,33],[695,308,33],[692,308,34],[692,308,41],[692,308,51],[692,309,33],[692,308,91],[692,308,50]]);
-  await page.mouse.move(692, 308);
+  await replayCursorPath(page, [[666,173,439],[668,180,52],[680,197,57],[691,210,49],[696,217,46],[702,222,41],[712,232,67],[719,238,36],[719,239,38],[720,241,41],[721,242,117],[725,247,37],[727,249,33],[731,252,66],[737,258,74],[740,261,36],[741,263,35],[743,265,37],[745,268,55],[746,269,59],[748,271,37],[753,276,61],[756,278,41],[757,279,224],[761,281,41],[769,289,199],[769,294,38],[769,303,58],[769,306,50],[769,308,52],[769,309,53],[769,309,45],[769,310,50],[770,310,47],[772,311,58],[772,312,61],[773,312,34],[774,312,51],[775,313,33],[776,314,48],[776,315,40],[776,315,33]]);
+  await page.mouse.move(776, 315);
   await page.mouse.up();
-  await replayCursorPath(page, [[693,308,443],[729,316,41],[786,330,34],[814,341,33],[815,347,32],[811,361,34],[795,381,34],[771,396,33],[754,402,34],[745,404,33],[738,404,33],[738,405,58],[738,405,44],[738,405,81],[737,404,76],[737,404,33],[737,404,41],[733,403,33],[730,402,34],[728,402,34],[725,402,41],[723,402,33],[722,402,33],[721,403,34],[719,403,42],[718,403,84],[718,403,116],[715,404,33],[708,404,33],[701,405,34],[694,405,33],[688,405,33],[686,405,50],[686,405,118],[686,405,393],[687,404,40],[688,404,35],[689,402,30],[689,402,34],[689,402,42],[689,402,58],[689,402,51],[689,402,301],[689,402,248],[689,402,284],[689,402,74],[689,401,33],[689,401,100],[690,397,34],[696,388,33],[706,379,33],[711,375,34],[712,375,34],[713,375,101],[713,374,32]]);
-  await page.mouse.move(713, 374);
+  await replayCursorPath(page, [[809,179,826],[833,116,171],[844,104,33],[861,88,33],[871,77,51],[872,75,85],[873,69,33],[875,62,49]]);
+  await replayCursorPath(page, [[877,57,32],[879,54,52],[880,52,49],[882,50,38],[884,46,51]]);
+  await replayCursorPath(page, [[885,45,80],[886,45,46],[886,45,34],[887,44,32],[887,44,51],[888,43,33],[888,43,83]]);
+  await page.mouse.move(888, 43);
+  await page.mouse.up();
+  // Coordinate-only click (no selectors found)
+  await page.mouse.click(890, 41);
+  await replayCursorPath(page, [[888,44,986],[883,50,49],[877,57,36],[866,71,48],[860,78,56]]);
+  await replayCursorPath(page, [[852,87,41],[850,91,49],[849,91,37],[849,91,34],[847,91,48],[847,91,33],[847,91,68]]);
+  await page.mouse.move(847, 91);
   await page.mouse.down();
-  await replayCursorPath(page, [[713,374,150]]);
-  await page.mouse.move(713, 374);
+  await page.mouse.move(847, 91);
   await page.mouse.up();
-  await locateWithFallback(page, [{"type":"css-path","value":"div.excalidraw-app > div.excalidraw.excalidraw-container > canvas.excalidraw__canvas.interactive"}], 'click', null, {"x":640,"y":360});
-  await replayCursorPath(page, [[713,374,416],[713,374,143],[713,375,559],[712,375,41],[712,375,166],[712,375,1080],[714,370,20],[726,350,33],[740,328,33],[754,304,34],[762,290,33],[766,285,34],[767,282,33],[770,277,33],[774,270,34],[777,266,32],[779,262,34],[779,258,33],[777,251,34],[773,241,33],[767,232,33],[765,230,34],[764,230,41],[761,229,34],[759,229,33],[757,229,33],[753,228,33],[749,227,34],[748,226,34],[746,226,33],[746,226,151],[746,226,48],[746,226,202],[746,225,48],[746,225,42],[746,224,34],[746,224,226],[746,224,207],[746,225,92],[746,225,34],[747,226,32],[747,227,34],[748,228,38],[748,229,37],[748,229,50],[749,229,101],[749,229,51],[749,229,165]]);
-  await page.mouse.move(749, 229);
+  // Coordinate-only click (no selectors found)
+  await page.mouse.click(819, 94);
+  await replayCursorPath(page, [[847,93,1129],[847,107,46],[849,130,57],[850,144,55],[850,154,46],[850,155,52],[851,155,31],[852,156,71],[862,165,48],[869,172,48],[870,173,49]]);
+  await page.mouse.move(870, 173);
   await page.mouse.down();
-  await replayCursorPath(page, [[749,229,325],[749,229,50],[749,229,34],[749,229,40],[750,228,84],[752,228,33],[752,228,177],[753,229,40],[753,229,34],[755,229,32],[757,230,33],[758,231,33],[759,231,34],[760,232,33],[761,232,69],[765,234,32],[768,237,33],[769,237,34],[772,239,33],[775,242,32],[778,245,34],[780,246,34],[782,247,32],[785,250,34],[787,252,33],[789,254,33],[789,254,51],[790,255,34],[791,257,33],[794,260,33],[797,264,34],[799,267,33],[801,270,33],[803,274,33],[806,278,34],[808,281,33],[809,284,33],[809,285,34],[809,285,34],[811,289,32],[812,291,42],[813,295,33],[813,299,34],[814,303,32],[815,311,34],[816,316,42],[817,322,33],[817,326,34],[817,330,33],[817,331,41],[817,331,184],[817,331,41],[818,330,33],[818,327,34],[815,318,33],[810,309,34],[803,299,33],[795,289,34],[793,285,32],[791,284,34],[789,282,34],[787,279,33],[785,276,33],[784,275,159],[785,275,42],[785,276,49],[788,278,33],[791,279,33],[794,282,34],[795,283,34],[796,284,33],[797,286,33],[798,288,50],[798,288,50],[798,288,133],[798,288,50],[798,287,34],[797,286,33],[797,285,75],[796,285,33],[795,285,34],[793,284,33],[792,281,33],[791,280,34],[790,280,166],[793,282,40],[798,289,27],[802,297,33],[808,308,33],[816,323,34],[820,334,33],[822,341,34],[823,349,33],[823,368,41],[821,387,34],[817,406,33],[813,416,34],[812,422,34],[808,430,33],[804,438,33],[803,440,101],[803,440,208],[781,447,41],[744,452,33],[716,454,33],[708,454,34],[707,454,33],[707,454,34],[707,453,33],[701,447,33],[682,430,41],[663,413,34],[641,395,33],[622,381,33],[611,371,34],[606,365,33],[605,364,34],[605,364,33],[605,364,34],[606,364,33],[606,364,33],[606,364,100],[607,366,33],[620,377,34],[643,393,33],[671,406,34],[702,415,33],[740,422,33],[777,423,33],[808,420,42],[817,417,33],[824,412,34],[833,401,33],[844,386,33],[854,362,33],[856,343,34],[856,326,34],[855,311,32],[854,296,34],[852,287,33],[851,287,300],[851,287,51],[851,288,33],[851,293,33],[854,301,33],[854,305,34],[856,310,33],[857,314,33],[857,315,42],[858,318,33],[858,319,92],[858,319,266],[858,319,51]]);
-  await page.mouse.move(858, 319);
+  await replayCursorPath(page, [[870,173,385],[875,178,45],[884,188,33],[902,206,38],[912,218,33],[923,230,34],[935,247,41],[943,259,51],[947,266,51],[953,274,174],[956,280,35],[957,284,56],[957,284,44],[957,285,97],[957,285,201],[957,286,40],[958,290,37],[960,294,35],[961,295,36],[963,300,44],[964,303,57],[965,305,35],[969,308,48],[970,308,35],[973,311,48],[974,312,36],[976,314,70]]);
+  await page.mouse.move(976, 314);
   await page.mouse.up();
-  await replayCursorPath(page, [[858,319,1534],[860,321,41],[872,322,33],[892,321,34],[915,321,33],[923,321,33],[924,324,34],[936,335,33],[974,350,33],[988,354,316],[988,350,33],[988,348,34],[986,345,33],[984,341,33],[983,338,34],[982,336,40],[978,334,26],[978,333,34],[976,330,33],[976,329,34],[973,327,34],[968,326,33],[964,326,33],[963,325,66],[959,325,34],[955,325,34],[950,325,32],[939,322,34],[932,321,33],[931,320,39],[931,320,28],[931,320,43],[931,319,32],[930,319,84],[930,319,76],[930,319,50],[930,319,115],[930,318,68],[929,315,32],[928,312,41],[928,312,51],[929,314,32],[934,317,35],[983,323,33],[1135,327,33]]);
-  await page.screenshot({ path: getScreenshotPath(), fullPage: true });
-  await replayCursorPath(page, [[1271,156,2051],[1048,209,33],[931,244,41],[924,253,33],[930,272,33],[944,286,33],[945,288,34],[945,288,33],[944,288,34],[927,290,33],[876,284,34],[831,266,32],[813,248,34],[805,237,33],[805,236,33],[805,236,34],[805,236,33],[805,235,34],[805,235,33],[805,235,44],[805,234,47],[805,231,34],[805,227,33],[805,226,42],[805,226,42],[804,225,33],[804,225,41],[804,224,109],[803,218,33],[802,215,33],[802,215,44],[802,215,50],[802,215,50],[802,215,82],[802,215,35],[801,215,49],[802,216,42],[809,218,32],[819,220,33],[831,224,34],[849,230,33],[859,236,33],[863,243,34],[860,249,33],[840,263,41],[813,271,34],[785,272,34],[765,269,33],[763,269,41]]);
-  await page.mouse.move(763, 269);
+  await replayCursorPath(page, [[976,314,613],[964,307,56],[797,158,43]]);
+  await replayCursorPath(page, [[661,31,58],[647,19,359]]);
+  await replayCursorPath(page, [[647,29,48],[647,35,59],[647,36,52],[646,36,72]]);
+  await page.mouse.move(646, 36);
   await page.mouse.down();
-  await replayCursorPath(page, [[763,268,71]]);
-  await page.mouse.move(763, 268);
+  await page.mouse.move(646, 36);
   await page.mouse.up();
-  await locateWithFallback(page, [{"type":"css-path","value":"div.excalidraw-app > div.excalidraw.excalidraw-container > canvas.excalidraw__canvas.interactive"}], 'click', null, {"x":640,"y":360});
-  await page.keyboard.press('r');
-  await replayCursorPath(page, [[763,268,722],[763,265,34],[763,257,40],[762,255,92],[762,255,33],[762,256,33],[757,257,34],[755,257,41],[754,257,209],[753,254,33],[750,253,33],[750,253,42],[750,253,284],[754,255,33],[776,258,33],[827,266,34],[920,276,32],[998,286,34],[1011,290,42],[1010,290,49],[1008,289,33]]);
-  await page.keyboard.press('Escape');
-  await replayCursorPath(page, [[1006,290,34],[1002,290,33],[1001,290,43],[996,290,33],[985,291,33],[972,292,33],[949,294,34],[928,295,33],[916,296,33],[914,296,34],[914,296,32],[914,297,51],[914,297,58],[914,297,34],[914,297,33],[913,298,33],[911,302,34],[906,305,33],[901,306,33],[895,305,34],[877,301,32],[843,297,34],[816,291,33],[804,289,34],[802,288,34],[800,288,33]]);
-  await page.mouse.move(800, 289);
+  // Coordinate-only click (no selectors found)
+  await page.mouse.click(640, 38);
+  // Coordinate-only click (no selectors found)
+  await page.mouse.click(634, 40);
+  await replayCursorPath(page, [[645,36,835]]);
+  await replayCursorPath(page, [[610,38,41],[475,51,34],[345,86,65],[301,105,41],[290,111,45],[286,117,192],[260,149,52]]);
+  await replayCursorPath(page, [[172,269,43],[151,301,37],[140,324,34],[137,335,35],[136,341,64]]);
+  await replayCursorPath(page, [[133,355,46],[130,373,188]]);
+  await replayCursorPath(page, [[129,405,40],[128,409,269]]);
+  await page.mouse.move(128, 409);
   await page.mouse.down();
-  await replayCursorPath(page, [[800,289,32],[800,290,51]]);
-  await page.mouse.move(800, 289);
+  await page.mouse.move(128, 409);
   await page.mouse.up();
-  await locateWithFallback(page, [{"type":"css-path","value":"div.excalidraw-app > div.excalidraw.excalidraw-container > canvas.excalidraw__canvas.interactive"}], 'click', null, {"x":640,"y":360});
-  await replayCursorPath(page, [[801,289,150],[800,289,151],[800,289,41],[800,289,41],[800,289,42],[801,289,116],[810,286,33],[873,280,34],[1048,276,33]]);
-}`,
+  // Coordinate-only click (no selectors found)
+  await page.mouse.click(124, 405);
+  // Coordinate-only click (no selectors found)
+  await page.mouse.click(125, 407);
+  await replayCursorPath(page, [[129,409,775]]);
+  await replayCursorPath(page, [[150,411,59],[178,417,49],[226,433,46],[264,453,47],[282,463,48],[286,466,34],[287,467,33],[288,468,34],[291,470,33],[305,476,48],[314,479,34],[326,482,33],[327,482,33],[328,482,33]]);
+  await page.mouse.move(328, 482);
+  await page.mouse.down();
+  await replayCursorPath(page, [[328,482,302],[328,479,40],[321,464,44],[314,449,48],[308,433,36],[306,424,40],[305,409,98],[306,400,42],[306,396,41],[306,394,229],[309,385,131],[321,358,103],[326,349,52],[327,347,35],[328,346,42],[328,344,50],[329,341,44],[329,339,59],[329,337,45],[329,336,69],[329,333,64],[329,331,53],[329,330,36],[330,327,41],[330,327,39],[330,327,77],[330,324,53],[330,323,57],[330,322,36],[329,321,40],[329,320,47],[329,320,56],[329,319,35],[328,319,33],[328,319,35],[328,318,40],[327,318,42],[326,318,36],[326,317,41],[325,317,49],[325,317,57],[325,317,35],[324,317,72],[324,317,278]]);
+  await page.mouse.move(324, 317);
+  await page.mouse.up();
+  await replayCursorPath(page, [[326,317,610],[369,317,97],[384,317,180],[378,306,86],[375,304,150],[373,304,293],[373,305,34],[373,305,50],[373,306,34],[373,306,49],[373,307,51],[372,307,40]]);
+  await page.mouse.move(372, 307);
+  await page.mouse.down();
+  await replayCursorPath(page, [[372,307,58],[372,307,235],[370,307,69],[364,307,59],[358,307,43],[356,307,40],[355,307,54],[354,307,51],[353,307,35],[352,307,54],[352,307,125],[351,307,40],[350,308,78],[350,308,39],[349,308,113],[348,308,53],[348,308,93],[347,308,37]]);
+  await page.mouse.move(347, 308);
+  await page.mouse.up();
+  await replayCursorPath(page, [[351,308,444],[385,311,61],[421,313,45],[448,309,48],[463,295,39],[489,242,62],[522,170,50],[522,171,153],[527,172,51],[560,138,64],[585,106,33],[593,97,35],[600,89,32],[612,72,69],[618,62,48]]);
+  await replayCursorPath(page, [[626,52,66],[628,50,300],[631,45,35]]);
+  await page.mouse.move(640, 32);
+  await page.mouse.down();
+  await page.mouse.move(640, 32);
+  await page.mouse.up();
+  // Coordinate-only click (no selectors found)
+  await page.mouse.click(640, 38);
+  // Coordinate-only click (no selectors found)
+  await page.mouse.click(634, 40);
+  await replayCursorPath(page, [[639,34,154],[623,74,39],[583,204,63],[563,296,68],[558,356,53],[558,378,42],[555,398,109],[548,409,53],[541,418,45],[530,434,84],[527,441,81],[525,446,44],[525,448,47],[521,459,66],[518,470,49],[518,473,38]]);
+  await page.mouse.move(518, 474);
+  await page.mouse.down();
+  await replayCursorPath(page, [[518,474,1227],[518,473,151],[515,463,35],[508,451,67],[505,446,43],[499,433,51],[495,423,48],[492,414,59],[490,409,34],[488,401,47],[487,395,48],[485,387,61],[484,380,43],[483,372,48],[483,368,37],[483,350,93],[483,346,40],[483,329,34],[484,319,46],[484,316,34],[484,307,47],[485,304,36],[485,302,51],[485,301,58],[486,300,40],[488,297,154],[495,291,40],[497,288,75],[497,288,35],[497,287,134],[497,287,39],[497,287,360],[497,286,421],[497,286,35],[497,284,366],[496,276,41],[496,276,70],[496,275,54],[496,275,33],[496,275,46],[496,274,168]]);
+  await page.mouse.move(495, 274);
+  await page.mouse.up();
+  await replayCursorPath(page, [[497,274,851],[505,276,58],[528,285,38],[536,287,199],[540,286,38],[541,285,45],[541,285,35],[542,285,36],[542,285,114]]);
+  await page.mouse.move(542, 285);
+  await page.mouse.down();
+  await replayCursorPath(page, [[542,285,815],[542,285,41],[543,285,105],[546,286,38],[546,286,138],[548,287,37],[549,288,54],[550,289,72],[550,289,57],[551,290,42],[551,290,50],[551,291,47],[551,291,45],[552,291,42],[552,292,55],[552,292,48],[553,293,43],[553,293,155],[554,294,33]]);
+  await page.mouse.move(554, 294);
+  await page.mouse.up();
+  await replayCursorPath(page, [[555,294,400],[581,268,54],[612,229,47],[673,147,66],[679,136,33],[672,111,323]]);
+  await replayCursorPath(page, [[656,57,43],[655,57,36],[655,57,47],[651,55,80],[645,47,57]]);
+  await replayCursorPath(page, [[644,43,44]]);
+  await page.mouse.move(644, 43);
+  await page.mouse.down();
+  await page.mouse.move(644, 43);
+  await page.mouse.up();
+  // Coordinate-only click (no selectors found)
+  await page.mouse.click(640, 38);
+  // Coordinate-only click (no selectors found)
+  await page.mouse.click(634, 40);
+  await replayCursorPath(page, [[644,44,369]]);
+  await replayCursorPath(page, [[645,48,116],[661,154,35],[662,174,73],[674,298,68],[676,320,40],[676,323,238],[694,406,47],[727,522,42],[732,536,41],[735,543,51],[735,544,108],[735,548,53],[735,550,39],[735,551,32],[735,552,42],[735,552,41]]);
+  await page.mouse.move(735, 552);
+  await page.mouse.down();
+  await replayCursorPath(page, [[735,551,316],[734,550,39],[730,533,34],[724,515,60],[718,502,52],[715,492,66],[712,484,35],[711,460,40],[717,445,42],[720,437,32],[729,419,135],[733,409,43],[734,402,261],[730,395,39],[723,381,39],[721,378,34],[717,367,152],[715,360,39],[715,352,58],[715,351,67],[714,349,62],[714,348,35],[713,347,91],[713,344,40],[712,342,46],[712,342,42],[712,341,52],[711,340,46],[711,339,40],[711,339,46],[711,338,39],[711,337,50],[710,335,43],[710,335,44],[710,334,54],[710,333,49],[710,333,91],[709,332,52],[709,331,62],[709,331,40],[709,331,43],[709,331,34],[709,330,34],[709,330,48],[709,329,100],[709,329,43],[709,328,57],[709,327,40],[709,327,179],[708,325,39],[708,324,75],[708,324,34],[708,324,46],[708,323,39],[708,322,44],[708,321,38],[708,320,33],[708,319,50],[707,319,36],[707,319,281],[707,318,40]]);
+  await page.mouse.move(707, 318);
+  await page.mouse.up();
+  await replayCursorPath(page, [[711,318,470],[734,320,90],[737,319,110],[737,318,59],[738,312,113],[739,309,36],[740,309,45],[740,308,135],[745,308,56],[748,308,83]]);
+  await page.mouse.move(749, 308);
+  await page.mouse.down();
+  await replayCursorPath(page, [[749,308,449],[748,308,61],[745,308,37],[744,308,49],[744,308,33],[743,308,37],[742,308,47],[742,308,199],[740,308,88],[740,308,223],[734,308,49],[733,308,54],[733,308,43],[733,308,194],[733,308,52],[739,309,55],[742,309,37],[743,310,54]]);
+  await page.mouse.move(743, 310);
+  await page.mouse.up();
+  await replayCursorPath(page, [[743,306,654],[744,242,49],[752,199,33],[759,170,33],[762,162,34],[765,177,133],[767,184,48],[764,171,34],[720,99,70],[681,60,48]]);
+  await replayCursorPath(page, [[677,57,180],[657,54,55],[646,44,37],[641,39,62],[640,39,49]]);
+  await page.mouse.move(640, 39);
+  await page.mouse.down();
+  await page.mouse.move(640, 39);
+  await page.mouse.up();
+  // Coordinate-only click (no selectors found)
+  await page.mouse.click(640, 38);
+  // Coordinate-only click (no selectors found)
+  await page.mouse.click(634, 40);
+  await replayCursorPath(page, [[641,39,284]]);
+  await replayCursorPath(page, [[647,39,33],[665,45,34],[736,83,47],[815,141,55],[930,270,41],[971,338,43],[975,353,304],[970,386,42],[959,440,51],[956,454,33],[955,457,50],[954,458,32],[954,460,189],[953,464,45],[953,469,35],[953,476,49],[951,482,48],[949,486,35],[949,487,35]]);
+  await page.mouse.move(949, 487);
+  await page.mouse.down();
+  await replayCursorPath(page, [[949,487,182],[945,466,78],[942,454,35],[938,442,31],[933,428,49],[931,418,45],[930,414,46],[930,412,49],[929,409,44],[929,409,38],[929,408,252],[927,406,42],[919,393,39],[915,385,35],[912,381,49],[911,380,39],[911,378,41],[911,377,45],[911,376,48],[910,373,50],[909,369,46],[908,368,35],[907,366,40],[906,365,54],[906,364,36],[906,363,43],[905,360,190],[900,343,39],[897,335,46],[896,331,59],[895,328,47],[895,327,42],[895,326,34],[895,325,35],[895,324,65],[895,323,47],[895,321,320],[895,317,277],[895,314,334]]);
+  await page.mouse.move(895, 314);
+  await page.mouse.up();
+  await replayCursorPath(page, [[895,313,1004],[888,303,33],[884,298,34],[882,296,49],[879,295,71],[878,294,81],[878,294,34],[877,293,33],[877,293,34],[877,293,34],[875,292,49],[875,291,34],[874,291,33],[874,291,50],[873,291,34],[873,290,82],[873,290,33],[872,290,72],[872,290,45],[871,289,50],[871,289,34],[871,289,50],[870,288,33],[870,288,66]]);
+  await page.mouse.move(870, 288);
+  await page.mouse.down();
+  await replayCursorPath(page, [[870,288,437],[867,288,38],[863,288,41],[861,288,51],[860,288,79],[860,288,39],[859,288,48],[859,288,51],[859,288,32],[858,288,58],[858,288,55],[857,288,70],[857,288,40],[857,288,45],[856,289,33],[856,289,48],[855,289,53],[855,289,65],[854,289,51],[854,290,67]]);
+  await page.mouse.move(854, 290);
+  await page.mouse.up();
+  await replayCursorPath(page, [[854,290,414],[847,349,50],[832,436,33],[820,521,34],[812,625,41],[812,640,43],[812,643,34],[812,648,200],[818,675,34]]);
+}
+`,
   },
   {
-    name: "Test 5: Undo Element Creation",
-    targetUrl: "https://excalidraw.com",
+    name: "Multipoint simple arrows bind and track",
+    targetUrl: "https://excalidraw-lastest.vercel.app",
+    functionalArea: "Arrows binding to bindables",
     code: `import { Page } from 'playwright';
 
 export async function test(page: Page, baseUrl: string, screenshotPath: string, stepLogger: any) {
@@ -4311,7 +4393,6 @@ export async function test(page: Page, baseUrl: string, screenshotPath: string, 
           const text = sel.value.replace(/^ocr-text="/, '').replace(/"$/, '');
           locator = page.getByText(text, { exact: false });
         } else if (sel.type === 'role-name') {
-          // Parse role=button[name="Label"] format and use getByRole
           const match = sel.value.match(/^role=(\\w+)\\[name="(.+)"\\]$/);
           if (match) {
             locator = page.getByRole(match[1], { name: match[2] });
@@ -4321,25 +4402,30 @@ export async function test(page: Page, baseUrl: string, screenshotPath: string, 
         } else {
           locator = page.locator(sel.value);
         }
-        // Use .first() to handle multiple matches (e.g., header + footer nav links)
         const target = locator.first();
         await target.waitFor({ timeout: 3000 });
+        if (action === 'locate') return target;
         if (action === 'click') await target.click();
         else if (action === 'fill') await target.fill(value || '');
         else if (action === 'selectOption') await target.selectOption(value || '');
-        return;
+        return target;
       } catch { continue; }
     }
-    // Coordinate fallback for clicks when all selectors fail
     if (action === 'click' && coords) {
       console.log('Falling back to coordinate click at', coords.x, coords.y);
       await page.mouse.click(coords.x, coords.y);
       return;
     }
+    if (action === 'fill' && coords) {
+      console.log('Falling back to coordinate fill at', coords.x, coords.y);
+      await page.mouse.click(coords.x, coords.y);
+      await page.keyboard.press('Control+a');
+      await page.keyboard.type(value || '');
+      return;
+    }
     throw new Error('No selector matched: ' + JSON.stringify(validSelectors));
   }
 
-  // Replay cursor path helper
   async function replayCursorPath(page, moves) {
     for (const [x, y, delay] of moves) {
       await page.mouse.move(x, y);
@@ -4348,53 +4434,300 @@ export async function test(page: Page, baseUrl: string, screenshotPath: string, 
   }
 
   await page.goto(buildUrl(baseUrl, '/'));
-  await replayCursorPath(page, [[1262,592,0],[1150,551,40],[1038,510,34],[947,475,33],[888,448,34],[873,441,32],[873,441,34],[873,441,33],[873,441,51],[873,441,33],[871,440,33],[858,427,33],[830,400,33],[797,365,34],[754,322,33],[711,293,33],[676,277,33],[647,263,35],[613,250,33],[573,241,34],[526,241,32],[451,259,34],[391,285,33],[363,299,33],[360,305,34],[357,310,33],[357,310,68],[357,310,82]]);
-  await page.mouse.move(357, 310);
+  await replayCursorPath(page, [[539,233,0],[514,206,42],[510,195,35],[506,177,32],[508,163,33],[516,153,34],[539,127,34],[549,115,33],[558,103,36],[562,98,34],[562,90,36],[552,83,39],[547,79,39],[536,67,45],[534,60,39]]);
+  await replayCursorPath(page, [[533,53,31],[531,48,41],[527,43,52],[525,41,48]]);
+  await page.mouse.move(521, 38);
   await page.mouse.down();
-  await page.mouse.move(357, 309);
+  await replayCursorPath(page, [[520,38,76]]);
+  await page.mouse.move(520, 38);
   await page.mouse.up();
-  await locateWithFallback(page, [{"type":"css-path","value":"div.excalidraw-app > div.excalidraw.excalidraw-container > canvas.excalidraw__canvas.interactive"}], 'click', null, {"x":640,"y":360});
-  await replayCursorPath(page, [[357,309,133],[357,309,708],[369,300,33],[466,274,34],[729,272,33],[1154,283,34]]);
-  await replayCursorPath(page, [[1260,118,1318],[814,102,32],[559,96,33],[494,94,33],[494,94,34],[496,96,33],[499,98,33],[509,92,33],[524,72,34]]);
-  await replayCursorPath(page, [[541,54,33],[560,39,34],[562,37,84],[560,38,32],[552,40,34]]);
-  await replayCursorPath(page, [[542,42,33],[529,44,33],[522,44,33],[522,44,35],[522,44,33],[521,43,33]]);
-  await page.mouse.move(520, 43);
+  // Coordinate-only click (no selectors found)
+  await page.mouse.click(520, 38);
+  // Coordinate-only click (no selectors found)
+  await page.mouse.click(514, 40);
+  await replayCursorPath(page, [[519,40,110]]);
+  await replayCursorPath(page, [[521,50,36],[520,67,47],[486,117,41],[439,168,51],[416,181,33],[405,185,32],[386,185,49],[380,181,50],[371,176,34],[366,174,33],[364,172,34],[362,171,33],[363,170,58]]);
+  await page.mouse.move(363, 170);
   await page.mouse.down();
-  await replayCursorPath(page, [[520,43,66],[520,43,75]]);
-  await page.mouse.move(520, 43);
+  await replayCursorPath(page, [[365,171,44],[395,184,52],[405,190,29],[421,198,34],[429,205,40],[436,208,44],[441,211,61],[451,217,38],[453,218,34],[457,222,42],[460,226,41],[464,231,37],[465,232,34],[466,235,32],[467,242,42],[468,254,41],[468,260,40],[468,263,37],[468,265,38],[469,266,47],[469,268,46],[470,273,54]]);
+  await page.mouse.move(471, 274);
   await page.mouse.up();
-  await locateWithFallback(page, [{"type":"css-path","value":"svg > g > rect"}], 'click', null, {"x":520,"y":38});
-  await locateWithFallback(page, [{"type":"role-name","value":"role=radio[name=\\"Rectangle\\"]"},{"type":"name","value":"[name=\\"editor-current-shape\\"]"},{"type":"css-path","value":"div.Stack.Stack_horizontal > label.ToolIcon.Shape > input.ToolIcon_type_radio.ToolIcon_size_medium"}], 'click', null, {"x":514,"y":40});
-  await replayCursorPath(page, [[520,43,58]]);
-  await replayCursorPath(page, [[519,47,34],[512,77,34],[503,145,34],[494,220,41],[494,230,33],[494,230,42],[494,229,99],[494,229,52]]);
-  await page.mouse.move(494, 229);
+  await replayCursorPath(page, [[472,274,184],[546,214,56],[572,150,46],[573,139,35],[571,130,33],[573,103,49],[577,90,50],[585,82,35],[605,68,50]]);
+  await replayCursorPath(page, [[614,59,51],[625,43,50],[629,41,34],[637,36,66],[639,36,65]]);
+  await page.mouse.move(639, 36);
   await page.mouse.down();
-  await replayCursorPath(page, [[495,229,57],[516,254,33],[586,299,33],[688,347,34],[782,382,33],[844,406,41],[852,410,35],[852,410,107]]);
-  await page.mouse.move(852, 409);
+  await page.mouse.move(639, 36);
   await page.mouse.up();
-  await replayCursorPath(page, [[852,409,67],[852,409,34],[852,409,41],[851,410,59],[851,410,33],[851,411,41],[860,416,34],[922,417,33],[1121,411,34]]);
+  // Coordinate-only click (no selectors found)
+  await page.mouse.click(640, 38);
+  // Coordinate-only click (no selectors found)
+  await page.mouse.click(634, 40);
+  await replayCursorPath(page, [[639,36,151]]);
+  await replayCursorPath(page, [[617,75,30],[551,159,37],[479,246,46],[424,324,36],[393,369,33],[333,448,60],[316,476,35],[312,485,33],[311,492,38],[311,492,68],[374,457,72],[383,448,35],[389,444,50],[398,436,37],[401,435,37]]);
+  await page.mouse.move(401, 435);
+  await page.mouse.down();
+  await replayCursorPath(page, [[402,435,78]]);
+  await page.mouse.move(402, 435);
+  await page.mouse.up();
+  // Coordinate-only click (no selectors found)
+  await page.mouse.click(640, 360);
+  await replayCursorPath(page, [[419,427,43],[461,403,44],[495,387,45],[551,368,45],[557,366,38],[563,362,47],[568,358,38],[568,354,45],[567,353,34],[563,349,36],[558,346,37],[550,333,41],[548,326,40],[548,325,55]]);
+  await page.mouse.move(548, 325);
+  await page.mouse.down();
+  await page.mouse.move(548, 325);
+  await page.mouse.up();
+  // Coordinate-only click (no selectors found)
+  await page.mouse.click(640, 360);
+  await replayCursorPath(page, [[548,325,183],[547,324,55],[543,322,45],[540,318,37],[533,303,48],[526,289,39],[519,275,34],[511,268,47],[508,265,40],[500,261,39],[499,260,34],[493,256,43],[490,254,41],[486,251,44],[481,249,45],[480,248,143],[480,247,66]]);
+  await page.mouse.move(480, 247);
+  await page.mouse.down();
+  await page.mouse.move(480, 247);
+  await page.mouse.up();
+  // Coordinate-only click (no selectors found)
+  await page.mouse.click(640, 360);
+  await replayCursorPath(page, [[480,247,590],[482,249,40],[487,257,38],[497,282,35],[500,288,33],[501,289,35],[501,292,149],[500,292,49],[500,292,183],[497,286,42],[495,281,40],[493,273,36],[490,255,48],[490,254,34],[489,249,47],[489,247,53],[488,246,51],[483,244,38],[481,243,78]]);
+  await page.mouse.move(481, 243);
+  await page.mouse.down();
+  await replayCursorPath(page, [[482,243,451],[483,244,52],[484,245,33],[486,245,49],[487,245,63],[487,245,104]]);
+  await page.mouse.move(487, 245);
+  await page.mouse.up();
+  await replayCursorPath(page, [[487,245,515],[484,247,34],[481,249,64],[472,254,65],[462,258,50],[457,263,32],[455,266,36],[454,266,151],[451,268,35],[448,268,33],[443,271,33],[421,280,49],[400,281,41],[382,281,34],[379,280,227],[379,279,48],[379,279,66],[379,278,184],[379,276,35]]);
+  await page.mouse.move(382, 270);
+  await page.mouse.down();
+  await replayCursorPath(page, [[381,269,390],[380,269,43],[365,269,54],[362,269,48],[361,269,46],[360,269,251]]);
+  await page.mouse.move(360, 269);
+  await page.mouse.up();
+  await replayCursorPath(page, [[361,269,215],[380,282,54],[461,361,43],[486,386,43],[584,490,43],[626,537,34],[725,661,44],[737,684,42]]);
   await page.screenshot({ path: getScreenshotPath(), fullPage: true });
-  await replayCursorPath(page, [[1272,180,1942],[1192,213,40],[1148,233,25],[1115,244,34],[1084,249,33],[1058,252,34],[1024,254,32],[979,256,34],[948,258,33],[933,259,34],[912,265,33],[891,277,33],[883,285,34],[880,292,33],[882,301,34],[890,311,33],[894,314,42],[894,314,25],[894,314,33],[894,314,41],[894,314,34],[896,315,34]]);
-  await page.mouse.move(896, 315);
+  await replayCursorPath(page, [[600,707,1381],[616,553,33],[633,469,36],[649,368,31],[651,288,44],[645,228,40],[638,177,33],[612,105,51],[605,92,34],[594,77,49],[585,66,41],[584,64,48],[582,62,43],[581,62,35],[579,60,83]]);
+  await replayCursorPath(page, [[578,59,38],[573,57,37],[572,55,41],[571,55,44],[570,54,56],[570,53,50],[568,50,45],[567,46,34]]);
+  await replayCursorPath(page, [[567,43,38]]);
+  await page.mouse.move(567, 43);
   await page.mouse.down();
-  await replayCursorPath(page, [[896,314,33],[895,314,33]]);
-  await page.mouse.move(896, 314);
+  await page.mouse.move(567, 43);
   await page.mouse.up();
-  await locateWithFallback(page, [{"type":"css-path","value":"div.excalidraw-app > div.excalidraw.excalidraw-container > canvas.excalidraw__canvas.interactive"}], 'click', null, {"x":640,"y":360});
-  await replayCursorPath(page, [[895,315,66],[895,314,59],[895,314,50],[895,315,75],[895,315,452],[892,317,31],[876,327,35],[871,331,32],[869,332,33],[867,335,33],[865,337,33],[865,337,35],[865,337,40],[862,339,34],[859,340,34],[858,341,41],[857,341,33],[856,343,33],[856,343,201],[856,343,33],[856,342,42],[856,342,77],[856,342,32],[857,342,33]]);
-  await page.keyboard.down('Control');
-  await page.keyboard.press('z');
-  await page.keyboard.up('Control');
-  await page.keyboard.down('Control');
-  await page.keyboard.press('z');
-  await page.keyboard.up('Control');
-  await replayCursorPath(page, [[857,342,4084],[906,340,40],[1126,339,34]]);
+  // Coordinate-only click (no selectors found)
+  await page.mouse.click(560, 38);
+  // Coordinate-only click (no selectors found)
+  await page.mouse.click(554, 40);
+  await replayCursorPath(page, [[568,43,235],[582,52,47],[591,63,36],[609,94,48],[613,108,36],[616,116,48],[619,125,46],[621,132,38],[622,138,33],[624,142,33],[624,147,34],[624,160,49],[624,162,50]]);
+  await page.mouse.move(624, 162);
+  await page.mouse.down();
+  await replayCursorPath(page, [[624,163,204],[624,169,37],[638,201,33],[646,213,38],[650,218,40],[669,236,47],[670,237,33],[674,240,52],[675,242,41],[677,244,59],[678,247,49],[686,258,42],[694,268,34],[700,274,60],[705,279,320],[706,281,31],[713,288,41],[716,291,32],[723,294,42],[729,298,35],[730,298,32],[733,299,47]]);
+  await page.mouse.move(734, 300);
+  await page.mouse.up();
+  await replayCursorPath(page, [[732,300,256],[705,257,62],[676,132,34],[673,78,40],[674,61,35]]);
+  await replayCursorPath(page, [[669,47,46],[640,2,59],[632,2,185],[634,11,42]]);
+  await replayCursorPath(page, [[644,30,36],[646,31,44],[650,38,45]]);
+  await page.mouse.move(650, 38);
+  await page.mouse.down();
+  await page.mouse.move(650, 38);
+  await page.mouse.up();
+  // Coordinate-only click (no selectors found)
+  await page.mouse.click(640, 38);
+  // Coordinate-only click (no selectors found)
+  await page.mouse.click(634, 40);
+  await replayCursorPath(page, [[649,38,160]]);
+  await replayCursorPath(page, [[644,44,56],[635,120,31],[598,249,36],[570,351,33],[565,400,33],[564,435,40],[566,449,35],[570,473,41],[574,486,34],[577,489,52]]);
+  await page.mouse.move(577, 489);
+  await page.mouse.down();
+  await replayCursorPath(page, [[578,489,151]]);
+  await page.mouse.move(578, 489);
+  await page.mouse.up();
+  // Coordinate-only click (no selectors found)
+  await page.mouse.click(640, 360);
+  await replayCursorPath(page, [[578,489,49],[651,450,31],[696,403,52],[723,381,31],[742,373,35],[749,367,53],[750,364,48]]);
+  await page.mouse.move(750, 364);
+  await page.mouse.down();
+  await page.mouse.move(750, 364);
+  await page.mouse.up();
+  // Coordinate-only click (no selectors found)
+  await page.mouse.click(640, 360);
+  await replayCursorPath(page, [[750,364,275],[783,303,61],[816,229,52],[817,226,45],[811,219,39],[805,217,46],[793,216,46],[786,219,46],[769,234,39],[759,242,37],[753,247,33],[750,251,38],[749,252,62],[749,252,101],[746,252,47],[744,252,55],[739,252,84],[738,252,94],[737,252,42],[727,252,43],[724,252,47],[722,252,70],[720,252,51],[718,252,51]]);
+  await page.mouse.move(717, 252);
+  await page.mouse.down();
+  await page.mouse.move(717, 252);
+  await page.mouse.up();
+  // Coordinate-only click (no selectors found)
+  await page.mouse.click(640, 360);
+  await replayCursorPath(page, [[725,273,709],[769,359,38],[908,620,51],[919,639,32],[918,639,99],[908,628,33],[808,479,33],[740,354,35],[726,327,34],[714,308,49],[708,295,35],[696,271,33],[693,267,80],[697,260,53],[703,257,33],[710,255,33],[713,255,36],[714,255,98],[715,255,52]]);
+  await page.mouse.move(715, 255);
+  await page.mouse.down();
+  await replayCursorPath(page, [[716,255,162],[718,255,40],[727,263,57],[730,265,41],[729,265,315],[728,265,65],[728,265,81],[727,264,36],[726,264,49],[726,264,121],[725,264,99]]);
+  await page.mouse.move(725, 264);
+  await page.mouse.up();
+  await replayCursorPath(page, [[725,264,263],[725,264,50],[723,265,33],[709,270,33],[703,271,50],[701,271,35],[700,272,269],[699,272,50],[698,272,68],[696,242,47],[694,216,39],[689,201,62],[690,199,35],[693,197,49],[694,197,38],[694,197,58],[697,196,46]]);
+  await page.mouse.move(698, 196);
+  await page.mouse.down();
+  await replayCursorPath(page, [[699,196,71]]);
+  await page.mouse.move(699, 196);
+  await page.mouse.up();
+  // Coordinate-only click (no selectors found)
+  await page.mouse.click(640, 360);
+  await replayCursorPath(page, [[699,196,118],[701,195,48]]);
+  await page.mouse.move(701, 195);
+  await page.mouse.down();
+  await replayCursorPath(page, [[700,195,351],[694,194,49],[687,194,52],[685,194,38],[682,194,37],[678,193,39],[674,192,45],[669,192,33],[662,192,48],[660,192,143],[660,192,35],[658,192,43],[654,192,36],[653,191,50],[651,191,51],[651,191,50],[650,191,51],[646,191,39]]);
+  await page.mouse.move(646, 191);
+  await page.mouse.up();
+  await replayCursorPath(page, [[646,191,243],[656,191,52],[670,191,32],[680,187,40],[688,144,44]]);
+  await replayCursorPath(page, [[683,52,50],[682,50,47],[628,155,35],[608,279,41],[630,564,38],[641,607,34],[659,661,51],[658,669,54],[650,676,51],[639,693,37],[631,709,44]]);
   await page.screenshot({ path: getScreenshotPath(), fullPage: true });
-}`,
+  await replayCursorPath(page, [[611,696,1134],[623,574,33],[638,469,34],[658,382,51],[676,284,47],[677,260,36],[677,249,32],[666,219,34],[654,187,33],[637,155,34],[633,150,35],[617,128,48],[606,112,34],[597,90,48],[596,88,34],[595,79,36],[595,76,31],[597,72,49],[597,70,49],[598,62,49],[599,61,36],[599,60,51]]);
+  await replayCursorPath(page, [[599,57,34],[599,55,34]]);
+  await page.mouse.move(599, 54);
+  await page.mouse.down();
+  await page.mouse.move(599, 54);
+  await page.mouse.up();
+  // Coordinate-only click (no selectors found)
+  await page.mouse.click(600, 38);
+  // Coordinate-only click (no selectors found)
+  await page.mouse.click(594, 40);
+  await replayCursorPath(page, [[600,54,415]]);
+  await replayCursorPath(page, [[623,62,34],[675,87,47],[682,91,34],[693,97,50],[702,106,33],[713,115,52],[737,129,44],[760,138,54],[797,152,40],[798,153,44],[802,156,36],[809,160,231],[806,160,34],[805,160,33],[805,160,65],[812,165,35],[821,169,32],[828,174,33],[863,180,35],[886,184,48],[888,183,53],[888,183,84],[888,182,48],[887,182,33],[886,182,33],[886,181,34],[886,181,49],[886,181,34]]);
+  await page.mouse.move(886, 181);
+  await page.mouse.down();
+  await replayCursorPath(page, [[886,181,101],[893,186,58],[907,199,41],[927,225,37],[945,247,38],[951,258,37],[953,262,38],[956,264,50],[956,266,84],[960,269,50],[961,269,241]]);
+  await page.mouse.move(961, 269);
+  await page.mouse.up();
+  await replayCursorPath(page, [[960,269,41],[895,251,60],[708,102,37],[688,65,39]]);
+  await replayCursorPath(page, [[661,33,36],[651,24,38],[641,19,62],[641,19,81]]);
+  await replayCursorPath(page, [[642,22,35],[646,42,69],[648,47,45]]);
+  await page.mouse.move(648, 47);
+  await page.mouse.down();
+  await page.mouse.move(648, 47);
+  await page.mouse.up();
+  // Coordinate-only click (no selectors found)
+  await page.mouse.click(640, 38);
+  // Coordinate-only click (no selectors found)
+  await page.mouse.click(634, 40);
+  await replayCursorPath(page, [[659,73,246],[688,132,38],[748,213,49],[782,264,33],[823,324,51],[839,356,35],[849,376,33],[858,395,47],[865,398,44],[865,399,40],[864,400,73],[847,411,67],[841,418,35],[831,432,42],[828,441,33],[823,448,35],[821,449,50],[800,460,45],[795,464,47],[786,471,39]]);
+  await page.mouse.move(786, 471);
+  await page.mouse.down();
+  await replayCursorPath(page, [[787,471,152]]);
+  await page.mouse.move(787, 471);
+  await page.mouse.up();
+  // Coordinate-only click (no selectors found)
+  await page.mouse.click(640, 360);
+  await replayCursorPath(page, [[790,472,62],[838,433,49],[850,416,32],[876,395,70],[895,383,36],[900,379,38],[909,374,40],[925,373,37],[929,373,45],[930,373,75],[936,372,32],[946,370,34]]);
+  await page.mouse.move(946, 370);
+  await page.mouse.down();
+  await replayCursorPath(page, [[946,370,98]]);
+  await page.mouse.move(946, 370);
+  await page.mouse.up();
+  // Coordinate-only click (no selectors found)
+  await page.mouse.click(640, 360);
+  await replayCursorPath(page, [[946,367,83],[964,317,56],[963,293,35],[962,289,38],[961,283,35],[952,273,46],[948,271,44],[944,268,39],[943,267,42],[942,267,34],[941,266,48],[940,266,86]]);
+  await page.mouse.move(940, 266);
+  await page.mouse.down();
+  await page.mouse.move(940, 266);
+  await page.mouse.up();
+  // Coordinate-only click (no selectors found)
+  await page.mouse.click(640, 360);
+  await replayCursorPath(page, [[940,266,566],[941,322,37],[966,368,67],[972,382,63],[972,383,65],[972,382,34],[964,345,32],[963,342,52],[958,331,48],[949,313,35],[945,305,50],[940,301,33],[934,287,36],[933,272,47],[933,270,34],[932,269,35],[932,268,81],[933,269,66],[935,269,85],[938,271,47],[939,271,152],[939,271,33],[939,271,46]]);
+  await page.mouse.move(939, 271);
+  await page.mouse.down();
+  await replayCursorPath(page, [[941,274,64],[949,283,39],[958,306,34],[974,341,39],[984,361,32],[986,363,47],[985,363,198],[983,361,50],[974,355,51],[972,352,33],[954,302,48],[952,294,37],[951,291,34],[945,285,38],[944,284,42],[941,283,69],[938,280,37],[937,280,44],[937,279,51],[936,279,65],[936,278,51],[936,278,50],[936,277,36]]);
+  await page.mouse.move(936, 277);
+  await page.mouse.up();
+  await replayCursorPath(page, [[933,276,376],[903,265,38],[895,264,40],[891,260,30],[886,257,31],[880,254,35],[878,253,41],[877,250,119],[882,242,38],[883,238,35],[882,236,117],[883,236,84],[890,238,31],[895,242,35],[897,242,33]]);
+  await page.mouse.move(897, 242);
+  await page.mouse.down();
+  await replayCursorPath(page, [[896,241,338]]);
+  await page.mouse.move(896, 241);
+  await page.mouse.up();
+  // Coordinate-only click (no selectors found)
+  await page.mouse.click(640, 360);
+  await replayCursorPath(page, [[894,240,178],[893,240,84],[893,240,65],[893,240,51],[892,240,34],[891,240,250],[891,240,48]]);
+  await page.mouse.move(890, 240);
+  await page.mouse.down();
+  await page.mouse.move(890, 240);
+  await page.mouse.up();
+  // Coordinate-only click (no selectors found)
+  await page.mouse.click(640, 360);
+  await replayCursorPath(page, [[891,240,585],[892,240,83],[893,240,119]]);
+  await page.mouse.move(893, 240);
+  await page.mouse.down();
+  await replayCursorPath(page, [[894,240,33],[893,240,81],[890,240,39],[881,240,73],[872,240,43],[864,240,42],[860,240,35],[851,240,33],[848,241,33],[843,240,35],[836,240,38],[834,240,31],[831,240,41],[829,240,47],[814,238,54],[805,237,34],[799,237,40],[795,237,81],[794,237,53],[782,236,48]]);
+  await page.mouse.move(782, 236);
+  await page.mouse.up();
+  await replayCursorPath(page, [[784,235,176],[787,222,39],[785,190,36],[771,94,45],[773,68,38]]);
+  await replayCursorPath(page, [[776,14,50],[780,4,36],[800,3,63],[849,15,34]]);
+  await replayCursorPath(page, [[879,24,33],[886,26,35],[890,27,32]]);
+  // Coordinate-only click (no selectors found)
+  await page.mouse.click(893, 38);
+  await replayCursorPath(page, [[891,30,268],[896,34,68],[896,36,242]]);
+  await replayCursorPath(page, [[917,80,39],[922,111,42],[905,138,40],[897,146,34],[868,157,50],[862,156,32],[853,153,36]]);
+  await replayCursorPath(page, [[837,141,46],[829,122,34],[829,118,43],[830,115,41],[830,111,47]]);
+  await replayCursorPath(page, [[832,105,39],[832,104,47],[830,103,41]]);
+  await page.mouse.move(830, 103);
+  await page.mouse.down();
+  await page.mouse.move(830, 103);
+  await page.mouse.up();
+  // Coordinate-only click (no selectors found)
+  await page.mouse.click(814, 94);
+  await replayCursorPath(page, [[835,103,259],[871,100,46],[920,107,38],[950,113,33],[964,118,34],[983,127,37],[1031,148,46],[1038,152,35],[1040,152,83],[1040,154,166],[1035,163,33],[1028,166,50],[1017,167,33],[1016,170,54],[1018,174,30],[1072,188,33],[1139,214,51],[1148,204,226],[1161,185,41],[1161,179,35],[1159,177,31],[1159,175,34]]);
+  await page.mouse.move(1159, 175);
+  await page.mouse.down();
+  await replayCursorPath(page, [[1159,176,132],[1161,182,42],[1175,224,32],[1189,246,39],[1198,257,55],[1203,261,32],[1213,271,49],[1216,279,37],[1221,290,31],[1225,300,40],[1227,307,42],[1233,314,34],[1271,358,45],[1277,367,38],[1278,367,35],[1277,367,48],[1276,366,53],[1274,366,39]]);
+  await page.mouse.move(1274, 366);
+  await page.mouse.up();
+  await replayCursorPath(page, [[1253,354,35],[1247,348,44],[1230,335,48],[1225,329,33],[1222,327,35],[1196,310,32],[1184,304,34],[1178,303,33],[1146,293,51],[1073,263,38],[995,194,35],[929,112,40]]);
+  await replayCursorPath(page, [[899,55,36],[895,50,32],[883,46,33],[852,36,34],[836,33,50],[834,32,41]]);
+  await replayCursorPath(page, [[813,29,57],[812,29,52],[810,29,34],[805,29,32]]);
+  await replayCursorPath(page, [[789,32,52],[780,33,32],[773,34,33],[766,33,54],[753,32,45],[744,31,34]]);
+  await replayCursorPath(page, [[722,29,32],[716,28,33],[711,27,33],[697,26,34],[692,26,34],[684,26,36],[678,26,114]]);
+  await replayCursorPath(page, [[655,32,37],[643,35,48],[635,38,43]]);
+  await page.mouse.move(635, 38);
+  await page.mouse.down();
+  await page.mouse.move(635, 38);
+  await page.mouse.up();
+  // Coordinate-only click (no selectors found)
+  await page.mouse.click(640, 38);
+  // Coordinate-only click (no selectors found)
+  await page.mouse.click(634, 40);
+  await replayCursorPath(page, [[635,39,277],[756,143,34],[856,273,40],[955,372,38],[993,403,34],[1043,445,53],[1056,470,47],[1057,478,49],[1051,483,33],[1040,488,39],[1029,492,30],[1015,498,50],[1011,500,33],[1010,502,32],[1008,504,33]]);
+  await page.mouse.move(1008, 506);
+  await page.mouse.down();
+  await replayCursorPath(page, [[1008,507,98],[1010,507,46]]);
+  await page.mouse.move(1010, 507);
+  await page.mouse.up();
+  // Coordinate-only click (no selectors found)
+  await page.mouse.click(640, 360);
+  await replayCursorPath(page, [[1011,507,34],[1109,465,34],[1142,452,62],[1150,449,42],[1152,448,42],[1153,448,59],[1156,447,36],[1158,446,149]]);
+  await page.mouse.move(1158, 446);
+  await page.mouse.down();
+  await page.mouse.move(1158, 446);
+  await page.mouse.up();
+  // Coordinate-only click (no selectors found)
+  await page.mouse.click(640, 360);
+  await replayCursorPath(page, [[1158,446,99],[1157,446,39],[1169,395,35],[1169,393,75],[1169,384,33],[1170,375,46],[1168,366,34],[1166,362,42],[1166,362,181],[1167,362,33],[1171,363,42],[1172,365,491],[1173,370,37]]);
+  await page.mouse.move(1174, 372);
+  await page.mouse.down();
+  await page.mouse.move(1174, 372);
+  await page.mouse.up();
+  // Coordinate-only click (no selectors found)
+  await page.mouse.click(640, 360);
+  await replayCursorPath(page, [[1175,372,648],[1176,373,37],[1176,373,444],[1175,373,34]]);
+  await page.mouse.move(1174, 373);
+  await page.mouse.down();
+  await replayCursorPath(page, [[1174,372,66],[1173,372,57],[1172,373,54],[1190,404,56],[1199,416,40],[1199,417,277],[1197,414,34],[1192,397,64],[1187,386,46],[1182,376,49],[1180,373,39],[1178,371,42],[1176,369,53],[1176,368,71]]);
+  await page.mouse.move(1176, 368);
+  await page.mouse.up();
+  await replayCursorPath(page, [[1175,368,229],[1175,368,90],[1175,367,66],[1167,345,42],[1159,326,48],[1154,311,60],[1156,302,50],[1157,300,34],[1158,299,50]]);
+  await page.mouse.move(1158, 298);
+  await page.mouse.down();
+  await replayCursorPath(page, [[1157,298,350],[1149,295,39],[1133,293,64],[1130,293,44],[1124,293,38],[1118,292,45],[1114,293,58],[1112,293,33],[1108,293,42],[1090,294,59],[1066,292,54],[1054,290,46],[1044,289,59],[1037,288,55],[1031,285,41],[1011,277,54],[996,271,49],[987,266,323]]);
+  await page.mouse.move(987, 266);
+  await page.mouse.up();
+  await replayCursorPath(page, [[987,266,30],[988,266,32],[994,268,50],[991,303,52],[950,421,38],[924,474,33],[884,584,66],[868,696,45],[865,719,34]]);
+}
+`,
   },
   {
-    name: "Test 6: Redo Element Creation",
-    targetUrl: "https://excalidraw.com",
+    name: "<<Setup>>",
+    targetUrl: "https://excalidraw-lastest.vercel.app",
+    functionalArea: "Arrows binding to bindables",
     code: `import { Page } from 'playwright';
 
 export async function test(page: Page, baseUrl: string, screenshotPath: string, stepLogger: any) {
@@ -4426,7 +4759,6 @@ export async function test(page: Page, baseUrl: string, screenshotPath: string, 
           const text = sel.value.replace(/^ocr-text="/, '').replace(/"$/, '');
           locator = page.getByText(text, { exact: false });
         } else if (sel.type === 'role-name') {
-          // Parse role=button[name="Label"] format and use getByRole
           const match = sel.value.match(/^role=(\\w+)\\[name="(.+)"\\]$/);
           if (match) {
             locator = page.getByRole(match[1], { name: match[2] });
@@ -4436,25 +4768,30 @@ export async function test(page: Page, baseUrl: string, screenshotPath: string, 
         } else {
           locator = page.locator(sel.value);
         }
-        // Use .first() to handle multiple matches (e.g., header + footer nav links)
         const target = locator.first();
         await target.waitFor({ timeout: 3000 });
+        if (action === 'locate') return target;
         if (action === 'click') await target.click();
         else if (action === 'fill') await target.fill(value || '');
         else if (action === 'selectOption') await target.selectOption(value || '');
-        return;
+        return target;
       } catch { continue; }
     }
-    // Coordinate fallback for clicks when all selectors fail
     if (action === 'click' && coords) {
       console.log('Falling back to coordinate click at', coords.x, coords.y);
       await page.mouse.click(coords.x, coords.y);
       return;
     }
+    if (action === 'fill' && coords) {
+      console.log('Falling back to coordinate fill at', coords.x, coords.y);
+      await page.mouse.click(coords.x, coords.y);
+      await page.keyboard.press('Control+a');
+      await page.keyboard.type(value || '');
+      return;
+    }
     throw new Error('No selector matched: ' + JSON.stringify(validSelectors));
   }
 
-  // Replay cursor path helper
   async function replayCursorPath(page, moves) {
     for (const [x, y, delay] of moves) {
       await page.mouse.move(x, y);
@@ -4463,395 +4800,162 @@ export async function test(page: Page, baseUrl: string, screenshotPath: string, 
   }
 
   await page.goto(buildUrl(baseUrl, '/'));
-  await replayCursorPath(page, [[1223,289,0],[931,299,38],[781,319,34],[682,338,34],[651,349,33],[647,354,33],[646,355,33],[646,355,34],[646,355,33],[647,355,60],[648,346,32],[650,326,33],[648,321,33],[648,321,34],[632,319,34],[604,319,33],[578,322,33],[571,322,33]]);
-  await page.mouse.move(571, 322);
+  await replayCursorPath(page, [[461,638,0]]);
+  await replayCursorPath(page, [[518,522,38],[562,489,39],[521,367,54],[330,193,36],[301,166,40],[277,101,47],[288,39,31],[393,8,136]]);
+  await replayCursorPath(page, [[494,43,53],[526,39,57],[552,33,53],[554,36,116]]);
+  await replayCursorPath(page, [[551,36,36],[538,39,31],[532,40,40],[528,41,61]]);
+  await page.mouse.move(528, 41);
   await page.mouse.down();
-  await replayCursorPath(page, [[571,322,33]]);
-  await page.mouse.move(571, 322);
+  await replayCursorPath(page, [[527,41,204]]);
+  await page.mouse.move(527, 41);
   await page.mouse.up();
-  await locateWithFallback(page, [{"type":"css-path","value":"div.excalidraw-app > div.excalidraw.excalidraw-container > canvas.excalidraw__canvas.interactive"}], 'click', null, {"x":640,"y":360});
-  await replayCursorPath(page, [[571,322,259],[571,322,99],[571,321,134],[571,317,42],[570,312,33],[576,313,567],[565,309,33],[560,307,33],[557,306,34],[548,304,33],[537,306,34],[524,307,33],[508,307,32],[499,306,34],[493,304,33],[489,302,34],[489,300,33],[489,300,33],[488,300,34],[488,300,41],[488,300,34],[487,300,49],[483,300,34],[476,299,34],[469,301,33],[451,306,33],[431,308,34],[425,303,33],[416,292,33],[403,282,34],[396,280,33],[396,280,75],[396,280,33],[396,279,34],[397,269,33],[401,245,34],[415,212,41],[434,185,36],[457,162,30],[474,144,34],[482,133,34],[486,127,33],[488,120,33],[489,112,34],[491,105,33],[492,97,33],[493,92,33],[493,83,34],[494,69,33],[495,68,59],[495,64,33]]);
-  await replayCursorPath(page, [[497,53,33],[498,47,33],[501,37,33],[502,35,42],[503,34,33],[505,31,34],[505,30,42],[507,28,33],[509,27,33]]);
-  await page.mouse.move(509, 27);
+  // Coordinate-only click (no selectors found)
+  await page.mouse.click(520, 38);
+  // Coordinate-only click (no selectors found)
+  await page.mouse.click(514, 40);
+  await replayCursorPath(page, [[527,42,61],[527,43,39],[411,125,42],[354,154,38],[325,172,34],[290,192,31],[269,201,33],[264,204,34],[262,205,35],[264,205,48],[301,185,36],[309,177,48],[309,176,34],[308,174,50],[305,173,32],[301,171,36],[297,169,48],[297,152,33],[297,146,33],[298,144,35]]);
+  await page.mouse.move(298, 143);
   await page.mouse.down();
-  await page.mouse.move(509, 27);
+  await replayCursorPath(page, [[299,143,132],[305,149,39],[359,215,67],[374,228,37],[383,234,40],[399,246,37],[410,254,58],[415,261,38],[419,266,51],[424,272,55],[443,299,37],[452,309,40]]);
+  await page.mouse.move(453, 309);
   await page.mouse.up();
-  await locateWithFallback(page, [{"type":"css-path","value":"div.Stack.Stack_horizontal > label.ToolIcon.Shape > div.ToolIcon__icon"}], 'click', null, {"x":520,"y":38});
-  await locateWithFallback(page, [{"type":"role-name","value":"role=radio[name=\\"Rectangle\\"]"},{"type":"name","value":"[name=\\"editor-current-shape\\"]"},{"type":"css-path","value":"div.Stack.Stack_horizontal > label.ToolIcon.Shape > input.ToolIcon_type_radio.ToolIcon_size_medium"}], 'click', null, {"x":514,"y":40});
-  await replayCursorPath(page, [[509,27,459],[509,28,41],[508,31,33]]);
-  await replayCursorPath(page, [[504,68,35],[492,164,41],[476,228,33],[466,262,33],[464,271,33],[464,271,34],[464,271,41],[464,271,34],[464,270,42],[464,271,33],[464,270,58]]);
-  await page.mouse.move(464, 270);
+  await replayCursorPath(page, [[453,308,300],[473,267,54],[536,126,44],[552,98,37],[563,78,50],[563,76,33],[567,72,35],[568,67,33],[569,65,33],[569,62,33]]);
+  await replayCursorPath(page, [[567,43,49],[566,37,59]]);
+  await page.mouse.move(564, 35);
   await page.mouse.down();
-  await replayCursorPath(page, [[464,270,42],[464,270,34],[465,271,33],[499,303,33],[560,344,33],[626,382,38],[677,408,29],[694,416,33],[695,417,75],[695,417,100],[695,417,125],[695,420,33],[696,420,33],[696,420,34],[696,420,84],[696,420,116],[696,420,41],[696,420,226],[696,420,224],[696,420,242]]);
-  await page.mouse.move(696, 420);
+  await page.mouse.move(564, 35);
   await page.mouse.up();
-  await replayCursorPath(page, [[696,420,62],[696,420,305],[696,420,42],[718,418,33],[938,435,42]]);
-  await page.screenshot({ path: getScreenshotPath(), fullPage: true });
-  await replayCursorPath(page, [[1257,135,2277],[1095,130,39],[1001,134,34],[934,139,33],[885,146,34],[853,158,32],[843,171,34],[840,185,34],[836,198,32],[831,219,34],[826,241,36],[819,256,31],[809,270,33],[801,282,33],[797,288,34],[794,291,33],[789,295,34],[784,300,32],[783,301,42],[783,300,33],[782,300,317],[782,300,83],[783,301,67],[783,301,84],[783,300,199],[783,300,1917],[783,298,34],[791,276,33],[818,172,34]]);
-  await replayCursorPath(page, [[810,29,36]]);
-  await page.keyboard.down('Control');
-  await page.keyboard.press('z');
-  await page.keyboard.up('Control');
-  await page.screenshot({ path: getScreenshotPath(), fullPage: true });
-  await replayCursorPath(page, [[1266,547,4814],[1154,564,40],[1148,565,38],[1147,565,29],[1136,562,34],[1094,559,33],[966,554,42],[822,542,33],[699,528,34],[623,515,33],[608,510,33],[608,510,116],[607,511,51]]);
-  await page.mouse.move(608, 511);
+  // Coordinate-only click (no selectors found)
+  await page.mouse.click(560, 38);
+  // Coordinate-only click (no selectors found)
+  await page.mouse.click(554, 40);
+  await replayCursorPath(page, [[564,36,333]]);
+  await replayCursorPath(page, [[532,98,63],[501,180,43],[492,208,43],[489,214,44],[484,210,44],[484,209,39],[485,204,49],[487,202,51],[490,198,33],[493,197,33],[515,179,43],[518,169,41],[521,163,34],[522,160,48],[522,160,100],[534,153,45],[539,148,56],[540,147,49]]);
+  await page.mouse.move(540, 147);
   await page.mouse.down();
-  await replayCursorPath(page, [[607,511,3299],[607,511,84]]);
-  await page.mouse.move(607, 511);
+  await replayCursorPath(page, [[542,147,38],[544,147,33],[550,154,39],[559,162,31],[572,176,33],[581,186,48],[600,201,42],[614,210,39],[632,232,42],[645,248,35],[660,268,37],[668,279,40],[673,289,33],[679,297,51],[681,297,58],[683,298,48],[691,305,49],[692,306,54],[693,306,255],[693,306,31],[694,307,99],[694,307,81]]);
+  await page.mouse.move(694, 307);
   await page.mouse.up();
-  await locateWithFallback(page, [{"type":"css-path","value":"div.excalidraw-app > div.excalidraw.excalidraw-container > canvas.excalidraw__canvas.interactive"}], 'click', null, {"x":640,"y":360});
-  await replayCursorPath(page, [[607,511,41]]);
-  await page.keyboard.down('Control');
-  await page.keyboard.down('Shift');
-  await page.keyboard.press('Z');
-  await page.keyboard.up('Shift');
-  await page.keyboard.up('Control');
-  await replayCursorPath(page, [[608,511,1876],[629,505,33],[677,493,33],[892,440,33],[1273,403,34]]);
-  await page.screenshot({ path: getScreenshotPath(), fullPage: true });
-}`,
+  await replayCursorPath(page, [[695,291,37],[695,182,60],[680,111,39],[668,84,31],[659,68,35]]);
+  await replayCursorPath(page, [[650,52,44],[646,51,38],[630,49,46],[622,45,35],[620,44,42],[620,44,63],[619,44,34],[618,44,61]]);
+  await replayCursorPath(page, [[615,42,40],[607,42,48],[603,41,47],[602,41,35]]);
+  await page.mouse.move(602, 39);
+  await page.mouse.down();
+  await page.mouse.move(602, 39);
+  await page.mouse.up();
+  // Coordinate-only click (no selectors found)
+  await page.mouse.click(600, 38);
+  // Coordinate-only click (no selectors found)
+  await page.mouse.click(594, 40);
+  await replayCursorPath(page, [[602,39,149]]);
+  await replayCursorPath(page, [[642,67,60],[732,126,41],[784,149,33],[810,156,34],[818,157,51],[823,157,32],[822,156,66],[819,155,66],[818,155,33],[815,153,35],[811,151,60],[809,151,57],[807,150,33],[805,150,49],[802,150,51],[791,153,58],[785,156,42],[782,158,32]]);
+  await page.mouse.move(782, 158);
+  await page.mouse.down();
+  await replayCursorPath(page, [[786,161,91],[801,169,60],[814,177,32],[836,195,51],[860,221,39],[884,246,52],[888,251,61],[901,267,39],[907,273,50],[910,276,57],[919,290,47],[921,299,49],[925,314,50],[929,320,47],[930,325,57],[931,330,42],[932,330,44],[932,329,231],[932,329,51],[932,326,33],[932,321,33],[932,315,34],[931,312,71]]);
+  await page.mouse.move(931, 312);
+  await page.mouse.up();
+  await replayCursorPath(page, [[927,305,264],[923,299,106],[818,66,45]]);
+  await replayCursorPath(page, [[797,56,47],[789,54,36],[778,54,46],[776,57,39],[770,62,64],[771,61,183],[772,61,48],[775,60,33]]);
+  await replayCursorPath(page, [[781,57,82],[795,49,42],[802,46,64],[813,46,43]]);
+  await replayCursorPath(page, [[817,46,36],[835,42,35],[842,42,52],[854,42,64],[856,43,150]]);
+  await replayCursorPath(page, [[864,46,33],[866,46,34],[870,46,37],[888,46,33],[891,45,48]]);
+  await replayCursorPath(page, [[891,46,35],[892,46,64]]);
+  // Coordinate-only click (no selectors found)
+  await page.mouse.click(893, 38);
+  await replayCursorPath(page, [[890,46,139],[890,46,77],[889,47,35],[889,50,45]]);
+  await replayCursorPath(page, [[903,76,54],[910,83,53],[912,85,31],[917,90,33],[918,92,33],[919,99,51]]);
+  await replayCursorPath(page, [[908,110,44],[885,116,37],[869,117,34],[862,117,34],[853,117,33],[848,117,40],[847,117,40],[842,114,45],[837,111,35]]);
+  await replayCursorPath(page, [[829,103,42],[823,98,56],[820,96,65],[819,95,45],[818,94,80]]);
+  await page.mouse.move(818, 94);
+  await page.mouse.down();
+  await replayCursorPath(page, [[818,94,152]]);
+  await page.mouse.move(818, 94);
+  await page.mouse.up();
+  // Coordinate-only click (no selectors found)
+  await page.mouse.click(790, 94);
+  await replayCursorPath(page, [[819,95,54],[827,99,69],[930,147,42],[1010,183,54],[1022,188,33],[1030,188,32],[1032,189,33],[1034,185,48],[1027,172,36],[1012,162,47],[1007,160,36],[998,158,166],[998,158,35]]);
+  await page.mouse.move(999, 158);
+  await page.mouse.down();
+  await replayCursorPath(page, [[1000,158,34],[1001,159,54],[1008,165,26],[1015,169,32],[1019,175,34],[1040,194,46],[1045,201,38],[1063,224,44],[1077,245,59],[1088,263,40],[1091,266,56],[1102,273,44],[1105,277,50],[1112,285,50],[1119,293,50],[1132,299,52],[1135,299,55],[1135,300,85],[1136,300,39],[1137,300,42],[1137,301,34],[1138,302,34]]);
+  await page.mouse.move(1138, 302);
+  await page.mouse.up();
+  await replayCursorPath(page, [[1137,302,283],[1137,302,35],[1136,302,65],[1131,304,36],[1103,312,48],[1091,312,34],[1053,309,57],[1031,307,35],[1018,307,49],[983,307,42],[974,307,33],[941,303,34],[927,313,49],[905,387,50],[905,467,34],[911,529,33],[909,634,34],[902,706,32]]);
+}
+`,
   },
-  {
-    name: "Test 7: Undo Multiple Operations",
-    targetUrl: "https://excalidraw.com",
-    code: `import { Page } from 'playwright';
-
-export async function test(page: Page, baseUrl: string, screenshotPath: string, stepLogger: any) {
-  // Helper to build URLs safely (handles trailing/leading slashes)
-  function buildUrl(base, path) {
-    const cleanBase = base.endsWith('/') ? base.slice(0, -1) : base;
-    const cleanPath = path.startsWith('/') ? path : '/' + path;
-    return cleanBase + cleanPath;
-  }
-
-  // Helper to generate unique screenshot paths
-  let screenshotStep = 0;
-  function getScreenshotPath() {
-    screenshotStep++;
-    const ext = screenshotPath.lastIndexOf('.');
-    if (ext > 0) {
-      return screenshotPath.slice(0, ext) + '-step' + screenshotStep + screenshotPath.slice(ext);
-    }
-    return screenshotPath + '-step' + screenshotStep;
-  }
-
-  // Multi-selector fallback helper with coordinate fallback for clicks
-  async function locateWithFallback(page, selectors, action, value, coords) {
-    const validSelectors = selectors.filter(sel => sel.value && sel.value.trim() && !sel.value.includes('undefined'));
-    for (const sel of validSelectors) {
-      try {
-        let locator;
-        if (sel.type === 'ocr-text') {
-          const text = sel.value.replace(/^ocr-text="/, '').replace(/"$/, '');
-          locator = page.getByText(text, { exact: false });
-        } else if (sel.type === 'role-name') {
-          // Parse role=button[name="Label"] format and use getByRole
-          const match = sel.value.match(/^role=(\\w+)\\[name="(.+)"\\]$/);
-          if (match) {
-            locator = page.getByRole(match[1], { name: match[2] });
-          } else {
-            locator = page.locator(sel.value);
-          }
-        } else {
-          locator = page.locator(sel.value);
-        }
-        // Use .first() to handle multiple matches (e.g., header + footer nav links)
-        const target = locator.first();
-        await target.waitFor({ timeout: 3000 });
-        if (action === 'click') await target.click();
-        else if (action === 'fill') await target.fill(value || '');
-        else if (action === 'selectOption') await target.selectOption(value || '');
-        return;
-      } catch { continue; }
-    }
-    // Coordinate fallback for clicks when all selectors fail
-    if (action === 'click' && coords) {
-      console.log('Falling back to coordinate click at', coords.x, coords.y);
-      await page.mouse.click(coords.x, coords.y);
-      return;
-    }
-    throw new Error('No selector matched: ' + JSON.stringify(validSelectors));
-  }
-
-  // Replay cursor path helper
-  async function replayCursorPath(page, moves) {
-    for (const [x, y, delay] of moves) {
-      await page.mouse.move(x, y);
-      if (delay > 0) await page.waitForTimeout(delay);
-    }
-  }
-
-  await page.goto(buildUrl(baseUrl, '/'));
-  await replayCursorPath(page, [[1270,378,0],[1160,394,39],[1088,410,34],[1022,422,33],[947,427,34],[878,430,32],[849,430,33],[836,425,34],[810,411,33]]);
-  await replayCursorPath(page, [[767,381,34],[738,350,33],[726,322,34],[717,301,33],[714,291,34]]);
-  await page.mouse.move(713, 291);
-  await page.mouse.down();
-  await replayCursorPath(page, [[713,291,107]]);
-  await page.mouse.move(713, 291);
-  await page.mouse.up();
-  await locateWithFallback(page, [{"type":"css-path","value":"div.excalidraw-app > div.excalidraw.excalidraw-container > canvas.excalidraw__canvas.interactive"}], 'click', null, {"x":640,"y":360});
-  await replayCursorPath(page, [[713,291,50],[693,273,34],[639,230,33],[571,180,33],[516,139,34],[495,121,33],[495,120,42],[495,118,33],[498,114,34],[502,104,33],[507,97,33],[515,88,34],[522,77,33],[527,68,42],[527,65,33],[528,62,33]]);
-  await replayCursorPath(page, [[528,57,33],[528,52,34],[526,44,34],[524,37,33]]);
-  await page.mouse.move(524, 37);
-  await page.mouse.down();
-  await replayCursorPath(page, [[524,37,100]]);
-  await page.mouse.move(524, 37);
-  await page.mouse.up();
-  await locateWithFallback(page, [{"type":"css-path","value":"svg > g > rect"}], 'click', null, {"x":520,"y":38});
-  await locateWithFallback(page, [{"type":"role-name","value":"role=radio[name=\\"Rectangle\\"]"},{"type":"name","value":"[name=\\"editor-current-shape\\"]"},{"type":"css-path","value":"div.Stack.Stack_horizontal > label.ToolIcon.Shape > input.ToolIcon_type_radio.ToolIcon_size_medium"}], 'click', null, {"x":514,"y":40});
-  await replayCursorPath(page, [[524,37,83],[523,39,33]]);
-  await replayCursorPath(page, [[513,51,33],[471,94,34],[424,157,33],[390,217,33],[378,246,34],[378,246,50],[379,246,42],[381,242,33],[395,228,43],[401,220,32],[400,220,41]]);
-  await page.mouse.move(400, 220);
-  await page.mouse.down();
-  await replayCursorPath(page, [[400,220,103],[400,222,40],[420,253,33],[476,304,33],[537,348,33],[566,367,34],[567,368,49],[567,367,50]]);
-  await page.mouse.move(567, 367);
-  await page.mouse.up();
-  await replayCursorPath(page, [[567,367,54],[567,367,122],[567,367,283],[567,367,50],[568,366,39],[571,355,28],[576,331,33],[572,289,33],[545,206,42],[518,147,33],[505,114,33],[503,100,34],[503,90,33],[503,88,34],[506,86,33],[509,83,33],[510,83,50],[517,77,33],[530,68,34],[533,66,41],[535,62,34]]);
-  await replayCursorPath(page, [[540,51,33],[540,48,134],[540,48,58],[540,48,49],[540,48,34]]);
-  await replayCursorPath(page, [[537,47,35],[521,39,31],[510,34,34],[509,33,34],[507,33,33],[506,33,50],[506,33,125],[507,33,100],[507,33,33],[508,33,33],[509,33,34],[509,33,75]]);
-  await page.mouse.move(509, 33);
-  await page.mouse.down();
-  await replayCursorPath(page, [[509,33,58]]);
-  await page.mouse.move(509, 33);
-  await page.mouse.up();
-  await locateWithFallback(page, [{"type":"css-path","value":"div.Stack.Stack_horizontal > label.ToolIcon.Shape > div.ToolIcon__icon"}], 'click', null, {"x":520,"y":38});
-  await locateWithFallback(page, [{"type":"role-name","value":"role=radio[name=\\"Rectangle\\"]"},{"type":"name","value":"[name=\\"editor-current-shape\\"]"},{"type":"css-path","value":"div.Stack.Stack_horizontal > label.ToolIcon.Shape > input.ToolIcon_type_radio.ToolIcon_size_medium"}], 'click', null, {"x":514,"y":40});
-  await replayCursorPath(page, [[509,33,75],[509,34,50]]);
-  await replayCursorPath(page, [[515,42,34],[557,90,32],[646,164,34],[751,233,33],[810,270,34],[817,273,33],[816,273,34],[810,270,41],[798,269,34],[784,268,33],[772,268,33],[759,267,34],[742,262,33],[726,256,33],[705,244,33],[688,234,34],[687,233,50],[687,231,33],[687,230,33]]);
-  await page.mouse.move(687, 230);
-  await page.mouse.down();
-  await replayCursorPath(page, [[687,230,34],[691,238,33],[735,275,33],[793,317,34],[847,353,45],[860,361,30],[860,361,42],[860,361,33],[860,361,33],[860,361,33]]);
-  await page.mouse.move(860, 361);
-  await page.mouse.up();
-  await replayCursorPath(page, [[860,361,34],[860,361,33],[860,361,33],[860,361,33],[870,366,35],[943,377,32],[1077,390,34],[1206,398,33]]);
-  await page.screenshot({ path: getScreenshotPath(), fullPage: true });
-  await replayCursorPath(page, [[1270,376,3427],[1186,379,40],[1158,380,33],[1151,379,33],[1151,379,34],[1151,378,33],[1151,378,33],[1151,378,117],[1151,378,183],[1151,378,1042],[1152,327,33],[1144,205,33],[1131,76,34]]);
-  await replayCursorPath(page, [[1129,24,410],[1123,104,32],[1108,216,39],[1098,270,27],[1098,276,34]]);
-  await page.mouse.move(1098, 276);
-  await page.mouse.down();
-  await replayCursorPath(page, [[1098,276,67],[1098,275,57],[1098,275,34]]);
-  await page.mouse.move(1098, 275);
-  await page.mouse.up();
-  await locateWithFallback(page, [{"type":"css-path","value":"div.excalidraw-app > div.excalidraw.excalidraw-container > canvas.excalidraw__canvas.interactive"}], 'click', null, {"x":640,"y":360});
-  await replayCursorPath(page, [[1098,275,32],[1098,274,34],[1098,274,92],[1098,274,75],[1098,274,325],[1097,274,42]]);
-  await page.keyboard.down('Control');
-  await page.keyboard.press('z');
-  await page.keyboard.up('Control');
-  await replayCursorPath(page, [[1097,275,75],[1097,276,33],[1096,276,51],[1096,276,57]]);
-  await page.keyboard.down('Control');
-  await page.keyboard.press('z');
-  await page.keyboard.up('Control');
-  await replayCursorPath(page, [[1096,277,1801],[1092,282,33],[1092,284,83],[1092,284,33],[1092,283,58],[1092,283,34],[1113,275,33]]);
-  await page.screenshot({ path: getScreenshotPath(), fullPage: true });
-  await replayCursorPath(page, [[1249,265,1409],[992,286,34],[832,309,41],[819,312,50],[819,312,33]]);
-  await page.mouse.move(820, 312);
-  await page.mouse.down();
-  await replayCursorPath(page, [[820,312,67],[820,312,49]]);
-  await page.mouse.move(820, 312);
-  await page.mouse.up();
-  await locateWithFallback(page, [{"type":"css-path","value":"div.excalidraw-app > div.excalidraw.excalidraw-container > canvas.excalidraw__canvas.interactive"}], 'click', null, {"x":640,"y":360});
-  await replayCursorPath(page, [[820,312,59],[820,311,148]]);
-  await page.keyboard.down('Control');
-  await page.keyboard.press('z');
-  await page.keyboard.up('Control');
-  await page.keyboard.down('Control');
-  await page.keyboard.press('z');
-  await page.keyboard.up('Control');
-  await replayCursorPath(page, [[820,311,1003],[826,309,24],[872,298,34],[1056,281,33]]);
-  await page.screenshot({ path: getScreenshotPath(), fullPage: true });
-}`,
-  },
-  {
-    name: "Test 8: Undo/Redo Button State",
-    targetUrl: "https://excalidraw.com",
-    code: `import { Page } from 'playwright';
-
-export async function test(page: Page, baseUrl: string, screenshotPath: string, stepLogger: any) {
-  // Helper to build URLs safely (handles trailing/leading slashes)
-  function buildUrl(base, path) {
-    const cleanBase = base.endsWith('/') ? base.slice(0, -1) : base;
-    const cleanPath = path.startsWith('/') ? path : '/' + path;
-    return cleanBase + cleanPath;
-  }
-
-  // Helper to generate unique screenshot paths
-  let screenshotStep = 0;
-  function getScreenshotPath() {
-    screenshotStep++;
-    const ext = screenshotPath.lastIndexOf('.');
-    if (ext > 0) {
-      return screenshotPath.slice(0, ext) + '-step' + screenshotStep + screenshotPath.slice(ext);
-    }
-    return screenshotPath + '-step' + screenshotStep;
-  }
-
-  // Multi-selector fallback helper with coordinate fallback for clicks
-  async function locateWithFallback(page, selectors, action, value, coords) {
-    const validSelectors = selectors.filter(sel => sel.value && sel.value.trim() && !sel.value.includes('undefined'));
-    for (const sel of validSelectors) {
-      try {
-        let locator;
-        if (sel.type === 'ocr-text') {
-          const text = sel.value.replace(/^ocr-text="/, '').replace(/"$/, '');
-          locator = page.getByText(text, { exact: false });
-        } else if (sel.type === 'role-name') {
-          // Parse role=button[name="Label"] format and use getByRole
-          const match = sel.value.match(/^role=(\\w+)\\[name="(.+)"\\]$/);
-          if (match) {
-            locator = page.getByRole(match[1], { name: match[2] });
-          } else {
-            locator = page.locator(sel.value);
-          }
-        } else {
-          locator = page.locator(sel.value);
-        }
-        // Use .first() to handle multiple matches (e.g., header + footer nav links)
-        const target = locator.first();
-        await target.waitFor({ timeout: 3000 });
-        if (action === 'click') await target.click();
-        else if (action === 'fill') await target.fill(value || '');
-        else if (action === 'selectOption') await target.selectOption(value || '');
-        return;
-      } catch { continue; }
-    }
-    // Coordinate fallback for clicks when all selectors fail
-    if (action === 'click' && coords) {
-      console.log('Falling back to coordinate click at', coords.x, coords.y);
-      await page.mouse.click(coords.x, coords.y);
-      return;
-    }
-    throw new Error('No selector matched: ' + JSON.stringify(validSelectors));
-  }
-
-  // Replay cursor path helper
-  async function replayCursorPath(page, moves) {
-    for (const [x, y, delay] of moves) {
-      await page.mouse.move(x, y);
-      if (delay > 0) await page.waitForTimeout(delay);
-    }
-  }
-
-  await page.goto(buildUrl(baseUrl, '/'));
-  await replayCursorPath(page, [[1276,418,0],[1263,419,32],[1243,417,42],[1213,414,32],[1169,410,34],[1119,407,33],[1037,409,34],[950,411,33],[896,407,34],[848,403,33],[820,399,33],[800,396,33]]);
-  await replayCursorPath(page, [[778,397,34],[745,395,33],[698,387,33],[628,375,34],[552,366,33],[477,357,34],[439,352,32],[434,351,42],[434,351,34],[434,351,41],[434,351,33],[425,346,33],[403,337,35],[378,324,32],[361,304,42],[356,295,25],[356,295,92],[356,295,51],[356,295,42],[356,296,43],[356,301,39],[359,309,34],[359,311,183],[361,323,33],[365,335,33],[368,341,33],[369,343,35],[370,347,41],[371,352,33],[372,364,33],[374,402,33],[373,447,34],[368,483,33],[363,508,34],[356,541,32],[346,567,35],[342,573,33],[341,576,33],[321,593,33],[287,611,34],[261,625,33],[243,638,33],[233,647,34],[224,657,33],[222,658,33],[222,658,33],[222,658,43],[223,658,33],[245,644,33],[366,587,33]]);
-  await replayCursorPath(page, [[659,470,34],[1234,295,42]]);
-  await page.screenshot({ path: getScreenshotPath(), fullPage: true });
-  await replayCursorPath(page, [[1278,464,2143],[1037,484,31],[823,488,34],[623,503,33],[473,525,34],[383,541,33],[331,551,33],[292,560,33],[263,572,33],[254,581,34],[254,581,34],[256,582,33],[258,583,33],[258,583,41],[261,580,35],[263,577,33],[263,577,33]]);
-  await page.mouse.move(263, 577);
-  await page.mouse.down();
-  await page.mouse.move(263, 577);
-  await page.mouse.up();
-  await locateWithFallback(page, [{"type":"css-path","value":"div.excalidraw-app > div.excalidraw.excalidraw-container > canvas.excalidraw__canvas.interactive"}], 'click', null, {"x":640,"y":360});
-  await replayCursorPath(page, [[263,577,158],[259,590,33],[253,604,34],[250,614,33],[246,631,33],[244,645,34],[243,652,33],[241,659,33],[239,666,34],[236,672,33],[234,678,33],[233,679,33],[232,680,33],[231,682,35]]);
-  await replayCursorPath(page, [[229,684,32],[228,684,51],[228,684,99],[228,684,42],[228,679,34],[228,671,33],[228,671,150],[228,670,58]]);
-  await replayCursorPath(page, [[228,666,33],[228,666,92],[228,666,217],[241,646,33],[297,571,34],[359,488,33],[418,418,33],[472,359,33],[503,324,34],[521,299,33],[526,285,34],[529,278,33],[531,272,33],[537,255,34],[537,237,33],[530,208,33],[515,172,33],[493,144,34],[476,125,34],[461,104,33],[449,89,33],[448,87,33],[448,87,41],[448,87,35],[448,87,91],[448,82,33],[447,75,33],[447,73,34],[448,68,33]]);
-  await replayCursorPath(page, [[456,49,33],[456,48,51],[466,43,33],[478,42,33],[493,43,33],[501,43,34],[501,43,49]]);
-  await replayCursorPath(page, [[505,43,34],[506,42,33],[509,42,34],[513,41,33],[515,40,50],[515,40,34]]);
-  await page.mouse.move(515, 40);
-  await page.mouse.down();
-  await replayCursorPath(page, [[515,40,101]]);
-  await page.mouse.move(515, 40);
-  await page.mouse.up();
-  await locateWithFallback(page, [{"type":"css-path","value":"svg > g > rect"}], 'click', null, {"x":520,"y":38});
-  await locateWithFallback(page, [{"type":"role-name","value":"role=radio[name=\\"Rectangle\\"]"},{"type":"name","value":"[name=\\"editor-current-shape\\"]"},{"type":"css-path","value":"div.Stack.Stack_horizontal > label.ToolIcon.Shape > input.ToolIcon_type_radio.ToolIcon_size_medium"}], 'click', null, {"x":514,"y":40});
-  await replayCursorPath(page, [[515,40,50],[515,40,98]]);
-  await replayCursorPath(page, [[514,41,84],[514,42,33],[511,46,33],[505,55,33],[491,74,34],[464,110,34],[432,153,32],[410,187,34],[404,200,34],[401,204,33],[396,214,42],[393,219,33],[392,219,42],[392,219,32],[392,219,110],[391,220,32],[387,227,40],[386,228,43],[386,228,34],[386,228,42],[385,222,33],[382,215,34],[381,215,33],[381,219,41],[381,220,119],[381,220,32],[381,220,94],[382,220,64],[382,220,42],[382,220,983]]);
-  await page.mouse.move(382, 220);
-  await page.mouse.down();
-  await replayCursorPath(page, [[382,220,83],[382,221,76],[417,257,32],[498,306,42],[575,336,33],[649,358,33],[710,372,34],[728,376,34],[728,376,41],[727,376,42],[727,376,108],[726,378,41],[721,390,34],[715,401,33],[710,408,34],[707,410,33],[707,410,158],[707,411,34],[698,416,33],[690,419,33],[686,421,33],[686,421,42],[686,421,92],[686,420,35],[687,420,57]]);
-  await page.mouse.move(687, 420);
-  await page.mouse.up();
-  await replayCursorPath(page, [[687,420,86],[686,420,414],[686,420,124],[687,420,34],[709,412,33],[788,403,34],[939,382,33],[1216,315,33]]);
-  await page.screenshot({ path: getScreenshotPath(), fullPage: true });
-  await replayCursorPath(page, [[1255,299,2760],[1022,366,32],[879,425,33],[813,462,41],[763,496,26],[714,529,33],[667,564,34],[621,593,33],[537,622,34],[337,653,41]]);
-  await replayCursorPath(page, [[173,677,34],[81,694,32],[41,697,33],[41,697,51],[42,697,34],[48,694,32]]);
-  await replayCursorPath(page, [[65,694,34],[80,694,33],[90,694,34],[99,694,33],[112,694,34],[125,693,33],[133,692,33]]);
-  await replayCursorPath(page, [[142,692,33],[153,691,33],[159,692,34],[169,690,33],[170,689,267]]);
-  await page.mouse.move(170, 689);
-  await page.mouse.down();
-  await replayCursorPath(page, [[170,689,258]]);
-  await page.mouse.move(170, 689);
-  await page.mouse.up();
-  await locateWithFallback(page, [{"type":"css-path","value":"button.ToolIcon_type_button.ToolIcon_size_medium > div.ToolIcon__icon > svg"}], 'click', null, {"x":176,"y":686});
-  await replayCursorPath(page, [[170,689,325],[170,689,50],[169,689,34],[168,690,33]]);
-  await replayCursorPath(page, [[175,687,34],[264,673,33],[619,632,41],[1089,579,33]]);
-  await page.screenshot({ path: getScreenshotPath(), fullPage: true });
-  await replayCursorPath(page, [[1213,434,1576],[995,473,33],[880,502,33],[837,515,34],[805,530,33],[746,550,33],[658,567,34],[552,585,33],[438,599,33],[331,602,34],[258,601,33],[223,604,33],[208,610,34],[204,616,33],[200,625,33],[200,638,34],[201,651,33],[204,664,33]]);
-  await replayCursorPath(page, [[207,673,33],[209,681,34],[210,684,35],[210,685,32],[209,686,32]]);
-  await page.mouse.move(209, 687);
-  await page.mouse.down();
-  await page.mouse.move(209, 687);
-  await page.mouse.up();
-  await locateWithFallback(page, [{"type":"css-path","value":"div.ToolIcon__icon > svg > path"}], 'click', null, {"x":211,"y":685});
-  await replayCursorPath(page, [[209,686,268],[209,686,317]]);
-  await replayCursorPath(page, [[238,683,32],[381,667,34],[661,629,33],[1055,572,34]]);
-  await page.screenshot({ path: getScreenshotPath(), fullPage: true });
-}`,
-  }
 ];
 
 async function seed() {
-  // Look up repository by name
-  const repo = await db.select().from(repositories).where(eq(repositories.fullName, EXCALIDRAW_REPO_NAME)).get();
+  console.log('🌱 Seeding Excalidraw tests...');
 
+  // Find or create the repository
+  const [repo] = await db.select().from(repositories).where(eq(repositories.fullName, EXCALIDRAW_REPO_NAME));
   if (!repo) {
-    console.error(`❌ Repository "${EXCALIDRAW_REPO_NAME}" not found in database.`);
-    console.error('   Please add the repository first via the UI, then run this script again.');
+    console.error(`Repository ${EXCALIDRAW_REPO_NAME} not found. Please create it first.`);
     process.exit(1);
   }
-
   REPO_ID = repo.id;
-  console.log(`Found repository: ${EXCALIDRAW_REPO_NAME} (${REPO_ID})`);
+  console.log(`Found repository: ${repo.fullName} (${repo.id})`);
+
+  // Delete existing tests and functional areas for this repo
+  await db.delete(tests).where(eq(tests.repositoryId, REPO_ID));
+  await db.delete(functionalAreas).where(eq(functionalAreas.repositoryId, REPO_ID));
+  console.log('Cleared existing data');
 
   // Create functional areas
   const faMap = new Map<string, string>();
   for (const faDef of FUNCTIONAL_AREA_DEFINITIONS) {
-    const faId = uuid();
+    const id = uuid();
+    const parentId = faDef.parent ? faMap.get(faDef.parent) ?? null : null;
     await db.insert(functionalAreas).values({
-      id: faId,
+      id,
       repositoryId: REPO_ID,
       name: faDef.name,
+      description: faDef.description ?? null,
+      parentId,
     });
-    faMap.set(faDef.name, faId);
-    console.log(`✓ Created functional area: ${faDef.name}`);
+    faMap.set(faDef.name, id);
+    console.log(`  Created FA: ${faDef.name}`);
   }
 
-  console.log('Seeding Excalidraw tests...\n');
-
+  // Create tests
   const now = new Date();
-
-  for (const def of TEST_DEFINITIONS) {
+  for (const testDef of TEST_DEFINITIONS) {
     const testId = uuid();
-
+    const faId = testDef.functionalArea ? faMap.get(testDef.functionalArea) ?? null : null;
     await db.insert(tests).values({
       id: testId,
       repositoryId: REPO_ID,
-      functionalAreaId: def.functionalArea ? faMap.get(def.functionalArea) ?? null : null,
-      name: def.name,
-      code: def.code,
-      targetUrl: def.targetUrl,
+      functionalAreaId: faId,
+      name: testDef.name,
+      code: testDef.code,
+      targetUrl: testDef.targetUrl,
+      description: testDef.description ?? null,
+      executionMode: testDef.executionMode ?? 'procedural',
+      agentPrompt: testDef.agentPrompt ?? null,
+      setupOverrides: testDef.setupOverrides ?? null,
+      teardownOverrides: testDef.teardownOverrides ?? null,
+      viewportOverride: testDef.viewportOverride ?? null,
+      diffOverrides: testDef.diffOverrides ?? null,
+      playwrightOverrides: testDef.playwrightOverrides ?? null,
       createdAt: now,
       updatedAt: now,
     });
 
-    // Create initial version
+    // Create initial test version
     await db.insert(testVersions).values({
       id: uuid(),
       testId,
       version: 1,
-      code: def.code,
-      name: def.name,
-      targetUrl: def.targetUrl,
-      changeReason: 'initial',
+      code: testDef.code,
+      changeDescription: 'Initial seed',
       createdAt: now,
     });
 
-    console.log(`✓ Created test: ${def.name}`);
+    console.log(`  Created test: ${testDef.name}`);
   }
 
-  console.log(`\n✓ Seed complete! Created ${TEST_DEFINITIONS.length} tests.`);
+  console.log(`\n✅ Seeded ${TEST_DEFINITIONS.length} tests and ${FUNCTIONAL_AREA_DEFINITIONS.length} functional areas`);
 }
 
-seed().catch((err) => {
-  console.error('Seed failed:', err);
-  process.exit(1);
-});
+seed().catch(console.error).finally(() => process.exit(0));
