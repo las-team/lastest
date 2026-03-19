@@ -193,7 +193,7 @@ async function runSettingsCheck(sessionId: string, repositoryId: string, teamId:
     ghAccount: ghAccount?.githubUsername || 'Connected',
     aiProvider: aiSettings.provider,
     pwAgentEnabled: pwEnabled,
-    activeAgents: pwEnabled ? ['planner', 'generator', 'healer'] : [],
+    activeAgents: pwEnabled ? ['scout', 'diver', 'planner', 'generator', 'healer'] : [],
   });
   return true;
 }
@@ -745,13 +745,14 @@ async function runPlanWithAgents(
   const sessionData = await queries.getAgentSession(sessionId);
   const intelligence = sessionData?.metadata?.codebaseIntelligence as CodebaseIntelligenceContext | undefined;
 
+  // Dynamic substep list — grows as scout/divers start
   type SubstepState = NonNullable<AgentStepState['substeps']>[number];
   const plannerStates: SubstepState[] = [
     { label: 'Coordinating multi-planner pipeline', status: 'running', agent: 'orchestrator' },
-    { label: 'Exploring app via browser', status: 'pending', agent: 'planner', source: 'browser' },
     { label: 'Scanning codebase routes', status: 'pending', agent: 'planner', source: 'code' },
-    { label: 'Analyzing spec files', status: 'pending', agent: 'planner', source: 'spec' },
     { label: 'Checking route coverage', status: 'pending', agent: 'planner', source: 'routes' },
+    { label: 'Analyzing spec files', status: 'pending', agent: 'planner', source: 'spec' },
+    { label: 'Classifying areas', status: 'pending', agent: 'scout', source: 'browser-scout' },
   ];
 
   const flushSubsteps = () => updateSubsteps(sessionId, 'plan', [...plannerStates]);
@@ -767,66 +768,114 @@ async function runPlanWithAgents(
   const { runSpecPlanner } = await import('@/lib/playwright/planners/spec-planner');
   const { runRoutePlanner } = await import('@/lib/playwright/planners/route-planner');
 
-  const wrapPlanner = <T extends unknown[]>(
-    idx: number,
-    fn: (...args: T) => Promise<import('@/lib/playwright/planner-types').PlannerResult>,
-    ...args: T
-  ) => {
-    plannerStates[idx].status = 'running';
-    flushSubsteps();
-    return fn(...args).then(result => {
-      plannerStates[idx].status = result.error ? 'error' : 'done';
-      plannerStates[idx].detail = result.error
-        ? result.error.slice(0, 60)
-        : `${result.areas.length} areas`;
-      // Enrich substep with observability data
-      plannerStates[idx].durationMs = result.durationMs;
-      plannerStates[idx].areasFound = result.areas.length;
-      plannerStates[idx].promptLogId = result.promptLogId;
-      plannerStates[idx].inputSummary = result.inputSummary;
-      plannerStates[idx].outputSummary = result.areas.length > 0
-        ? result.areas.map(a => a.name).join(', ')
-        : undefined;
-      plannerStates[idx].rawError = result.error;
-      flushSubsteps();
-      return result;
-    }).catch(err => {
-      plannerStates[idx].status = 'error';
-      plannerStates[idx].detail = err instanceof Error ? err.message.slice(0, 60) : 'Failed';
-      plannerStates[idx].rawError = err instanceof Error ? err.message : String(err);
-      plannerStates[idx].durationMs = 0;
-      flushSubsteps();
-      return { source: 'browser' as const, areas: [], error: String(err), rawOutput: undefined };
-    });
+  /** Helper to enrich a substep from a PlannerResult */
+  const enrichSubstep = (idx: number, result: import('@/lib/playwright/planner-types').PlannerResult) => {
+    plannerStates[idx].status = result.error ? 'error' : 'done';
+    plannerStates[idx].detail = result.error ? result.error.slice(0, 60) : `${result.areas.length} areas`;
+    plannerStates[idx].durationMs = result.durationMs;
+    plannerStates[idx].areasFound = result.areas.length;
+    plannerStates[idx].promptLogId = result.promptLogId;
+    plannerStates[idx].inputSummary = result.inputSummary;
+    plannerStates[idx].outputSummary = result.areas.length > 0 ? result.areas.map(a => a.name).join(', ') : undefined;
+    plannerStates[idx].rawError = result.error;
   };
 
-  const plannerResults = await Promise.allSettled([
-    wrapPlanner(1, runBrowserPlanner, repositoryId, baseUrl),
-    wrapPlanner(2, runCodePlanner, repositoryId, branch, intelligence),
-    wrapPlanner(3, runSpecPlanner, repositoryId, branch),
-    wrapPlanner(4, runRoutePlanner, repositoryId),
+  // ── Phase A: Run code + route planners first (fast), start spec in parallel ──
+  plannerStates[1].status = 'running';
+  plannerStates[2].status = 'running';
+  plannerStates[3].status = 'running';
+  await flushSubsteps();
+
+  const specPromise = runSpecPlanner(repositoryId, branch).then(r => {
+    enrichSubstep(3, r);
+    flushSubsteps();
+    return r;
+  }).catch(err => {
+    plannerStates[3].status = 'error';
+    plannerStates[3].rawError = err instanceof Error ? err.message : String(err);
+    flushSubsteps();
+    return { source: 'spec' as const, areas: [], error: String(err) } as import('@/lib/playwright/planner-types').PlannerResult;
+  });
+
+  const [codeResult, routeResult] = await Promise.all([
+    runCodePlanner(repositoryId, branch, intelligence).then(r => { enrichSubstep(1, r); flushSubsteps(); return r; })
+      .catch(err => { plannerStates[1].status = 'error'; plannerStates[1].rawError = String(err); flushSubsteps(); return { source: 'code' as const, areas: [], error: String(err) } as import('@/lib/playwright/planner-types').PlannerResult; }),
+    runRoutePlanner(repositoryId).then(r => { enrichSubstep(2, r); flushSubsteps(); return r; })
+      .catch(err => { plannerStates[2].status = 'error'; plannerStates[2].rawError = String(err); flushSubsteps(); return { source: 'routes' as const, areas: [], error: String(err) } as import('@/lib/playwright/planner-types').PlannerResult; }),
   ]);
 
   if (isAborted(signal)) return false;
 
-  // Store individual planner results in metadata for re-run capability
+  // ── Phase B+C: Browser planner (scout → deep-dive internally) ──
+  const otherAreas = [...codeResult.areas, ...routeResult.areas];
+  plannerStates[4].status = 'running';
+  plannerStates[4].detail = `${otherAreas.length} areas from code+route`;
+  await flushSubsteps();
+
+  const browserResult = await runBrowserPlanner(repositoryId, baseUrl, {
+    otherPlannerAreas: otherAreas,
+    signal,
+    onLogCreated: (id) => { plannerStates[4].promptLogId = id; },
+    onScoutComplete: (scout) => {
+      const exploreAreas = scout.areas.filter(a => a.classification === 'explore');
+      const skipCount = scout.areas.filter(a => a.classification === 'skip').length;
+
+      // Update scout substep
+      plannerStates[4].status = 'done';
+      plannerStates[4].detail = `${skipCount} skip, ${exploreAreas.length} explore`;
+      plannerStates[4].durationMs = scout.durationMs;
+      plannerStates[4].promptLogId = scout.promptLogId;
+
+      // Add diver substeps for each explore area
+      for (const area of exploreAreas) {
+        plannerStates.push({
+          label: `${area.name} (${area.routes.slice(0, 2).join(', ')}${area.routes.length > 2 ? '...' : ''})`,
+          status: 'pending',
+          agent: 'diver',
+          source: `browser-dive-${area.name}`,
+          inputSummary: area.focusPoints?.join('; '),
+        });
+      }
+      flushSubsteps();
+    },
+    onDeepDiveStart: (areaName) => {
+      const idx = plannerStates.findIndex(s => s.source === `browser-dive-${areaName}`);
+      if (idx >= 0) { plannerStates[idx].status = 'running'; flushSubsteps(); }
+    },
+    onDeepDiveComplete: (areaName, areasFound, durationMs, promptLogId) => {
+      const idx = plannerStates.findIndex(s => s.source === `browser-dive-${areaName}`);
+      if (idx >= 0) {
+        plannerStates[idx].status = areasFound > 0 ? 'done' : 'error';
+        plannerStates[idx].areasFound = areasFound;
+        plannerStates[idx].durationMs = durationMs;
+        plannerStates[idx].detail = areasFound > 0 ? `${areasFound} areas` : 'No areas found';
+        plannerStates[idx].promptLogId = promptLogId;
+        flushSubsteps();
+      }
+    },
+  }).catch(err => {
+    plannerStates[4].status = 'error';
+    plannerStates[4].rawError = err instanceof Error ? err.message : String(err);
+    flushSubsteps();
+    return { source: 'browser' as const, areas: [], error: String(err) } as import('@/lib/playwright/planner-types').PlannerResult;
+  });
+
+  // Wait for spec planner
+  const specResult = await specPromise;
+
+  if (isAborted(signal)) return false;
+
+  // ── Collect all results ──
+  const allResults = [browserResult, codeResult, specResult, routeResult];
+
   const allPlannerResults: Record<string, { source: string; areas: import('@/lib/playwright/planner-types').PlannerArea[]; error?: string; rawOutput?: string }> = {};
   const fulfilledResults: import('@/lib/playwright/planner-types').PlannerResult[] = [];
-  for (const pr of plannerResults) {
-    if (pr.status === 'fulfilled') {
-      allPlannerResults[pr.value.source] = {
-        source: pr.value.source,
-        areas: pr.value.areas,
-        error: pr.value.error,
-        rawOutput: pr.value.rawOutput,
-      };
-      if (pr.value.areas.length > 0) {
-        fulfilledResults.push(pr.value);
-      }
-    }
+  for (const r of allResults) {
+    allPlannerResults[r.source] = { source: r.source, areas: r.areas, error: r.error, rawOutput: r.rawOutput };
+    if (r.areas.length > 0) fulfilledResults.push(r);
   }
 
-  // Persist planner results to metadata
+  // Persist planner results + scout output to metadata
   const metaSession = await queries.getAgentSession(sessionId);
   if (metaSession) {
     await queries.updateAgentSession(sessionId, {
@@ -1840,29 +1889,46 @@ export async function rerunPlanner(
   // Re-run the specific planner
   let result: import('@/lib/playwright/planner-types').PlannerResult;
   try {
-    switch (plannerSource) {
-      case 'browser': {
-        const { runBrowserPlanner } = await import('@/lib/playwright/planners/browser-planner');
-        result = await runBrowserPlanner(session.repositoryId, baseUrl);
-        break;
+    if (plannerSource.startsWith('browser-dive-')) {
+      // Re-run a single deep-diver for a specific area
+      const areaName = plannerSource.replace('browser-dive-', '');
+      const scoutData = session.metadata?.scoutOutput as import('@/lib/playwright/planner-types').ScoutOutput | undefined;
+      const scoutArea = scoutData?.areas?.find(a => a.name === areaName);
+
+      const { runDeepDiveExploration } = await import('@/lib/playwright/planner-agent');
+      const areas = await runDeepDiveExploration(
+        areaName,
+        scoutArea?.routes || [],
+        scoutArea?.focusPoints,
+        session.repositoryId,
+        baseUrl,
+      );
+      result = { source: 'browser', areas, durationMs: 0, inputSummary: `Re-run: ${areaName}` };
+    } else {
+      switch (plannerSource) {
+        case 'browser': {
+          const { runBrowserPlanner } = await import('@/lib/playwright/planners/browser-planner');
+          result = await runBrowserPlanner(session.repositoryId, baseUrl);
+          break;
+        }
+        case 'code': {
+          const { runCodePlanner } = await import('@/lib/playwright/planners/code-planner');
+          result = await runCodePlanner(session.repositoryId, branch, intelligence);
+          break;
+        }
+        case 'spec': {
+          const { runSpecPlanner } = await import('@/lib/playwright/planners/spec-planner');
+          result = await runSpecPlanner(session.repositoryId, branch);
+          break;
+        }
+        case 'routes': {
+          const { runRoutePlanner } = await import('@/lib/playwright/planners/route-planner');
+          result = await runRoutePlanner(session.repositoryId);
+          break;
+        }
+        default:
+          return { success: false, error: `Unknown planner source: ${plannerSource}` };
       }
-      case 'code': {
-        const { runCodePlanner } = await import('@/lib/playwright/planners/code-planner');
-        result = await runCodePlanner(session.repositoryId, branch, intelligence);
-        break;
-      }
-      case 'spec': {
-        const { runSpecPlanner } = await import('@/lib/playwright/planners/spec-planner');
-        result = await runSpecPlanner(session.repositoryId, branch);
-        break;
-      }
-      case 'routes': {
-        const { runRoutePlanner } = await import('@/lib/playwright/planners/route-planner');
-        result = await runRoutePlanner(session.repositoryId);
-        break;
-      }
-      default:
-        return { success: false, error: `Unknown planner source: ${plannerSource}` };
     }
   } catch (error) {
     return { success: false, error: error instanceof Error ? error.message : 'Re-run failed' };

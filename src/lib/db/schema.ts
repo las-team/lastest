@@ -1302,7 +1302,7 @@ export type AgentStepId =
 
 export type AgentStepStatus = 'pending' | 'active' | 'waiting_user' | 'completed' | 'failed' | 'skipped';
 
-export type PwAgentType = 'orchestrator' | 'planner' | 'generator' | 'healer';
+export type PwAgentType = 'orchestrator' | 'planner' | 'scout' | 'diver' | 'generator' | 'healer';
 
 export interface AgentSubstep {
   label: string;

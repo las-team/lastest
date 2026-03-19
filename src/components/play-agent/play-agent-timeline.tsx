@@ -40,6 +40,8 @@ const AI_PROVIDER_LABELS: Record<string, string> = {
 const AGENT_LABELS: Record<string, string> = {
   orchestrator: 'Orchestrator',
   planner: 'Planner',
+  scout: 'Scout',
+  diver: 'Diver',
   generator: 'Generator',
   healer: 'Healer',
 };
@@ -47,6 +49,8 @@ const AGENT_LABELS: Record<string, string> = {
 const ROSTER_BADGE_STYLES: Record<PwAgentType, { bg: string; text: string }> = {
   orchestrator: { bg: 'bg-violet-500/15', text: 'text-violet-600 dark:text-violet-400' },
   planner: { bg: 'bg-blue-500/15', text: 'text-blue-600 dark:text-blue-400' },
+  scout: { bg: 'bg-cyan-500/15', text: 'text-cyan-600 dark:text-cyan-400' },
+  diver: { bg: 'bg-indigo-500/15', text: 'text-indigo-600 dark:text-indigo-400' },
   generator: { bg: 'bg-emerald-500/15', text: 'text-emerald-600 dark:text-emerald-400' },
   healer: { bg: 'bg-amber-500/15', text: 'text-amber-600 dark:text-amber-400' },
 };

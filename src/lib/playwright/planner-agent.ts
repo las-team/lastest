@@ -11,6 +11,7 @@ import { requireRepoAccess } from '@/lib/auth';
 import { revalidatePath } from 'next/cache';
 import { generateWithAI } from '@/lib/ai';
 import { getAIConfig, buildSeedFixture } from './agent-context';
+import type { PlannerArea, ScoutArea, ScoutOutput } from './planner-types';
 
 // ---------------------------------------------------------------------------
 // Planner system prompt (derived from Playwright's planner agent definition)
@@ -74,7 +75,6 @@ Quality Standards:
 // Types (re-exported from shared module)
 // ---------------------------------------------------------------------------
 
-import type { PlannerArea } from './planner-types';
 export type { PlannerArea } from './planner-types';
 
 // ---------------------------------------------------------------------------
@@ -192,4 +192,172 @@ export async function agentDiscoverAreas(
     const message = error instanceof Error ? error.message : 'Planner agent failed';
     return { success: false, error: message };
   }
+}
+
+// ---------------------------------------------------------------------------
+// Scout — fast classification of areas (no MCP)
+// ---------------------------------------------------------------------------
+
+const SCOUT_SYSTEM_PROMPT = `You are an expert test planning classifier. You receive a list of functional areas discovered from a web application's codebase and route structure.
+
+Classify each area as either:
+- "skip" — Simple/static enough that basic test suggestions are sufficient. Examples: about pages, static docs, simple list views with no complex interactions.
+- "explore" — Needs live browser exploration for a good test plan. Examples: forms with validation, multi-step workflows, dynamic JS content, auth flows, drag-and-drop, modals, real-time updates, interactive tables.
+
+For "skip" areas: write a basic test plan with page load verification, key content checks, and navigation checks.
+For "explore" areas: list 2-4 specific focus points for what a browser agent should test.
+
+CLASSIFICATION HEURISTICS:
+- Routes with dynamic segments ([id], :id) → likely "explore"
+- Routes containing "new", "create", "edit", "record" → "explore"
+- Auth-related areas (login, register, password) → "explore"
+- Dashboard/home pages → "explore" (complex widgets)
+- Settings pages with forms → "explore"
+- Simple list/detail pages where code planner has suggestions → "skip"
+
+OUTPUT FORMAT (JSON only, no markdown):
+{
+  "areas": [
+    {
+      "name": "Area Name",
+      "classification": "skip",
+      "routes": ["/path1"],
+      "testPlan": "## Area Name\\n\\n### Scenario 1: Page Load\\n1. Navigate to /path1\\n2. Verify heading\\n\\n**Expected**: Page loads correctly"
+    },
+    {
+      "name": "Area Name",
+      "classification": "explore",
+      "routes": ["/path1", "/path2"],
+      "focusPoints": ["Test form validation on /path1", "Check dynamic content loading", "Verify error states"]
+    }
+  ]
+}`;
+
+export async function runScoutClassification(
+  repositoryId: string,
+  otherPlannerAreas: PlannerArea[],
+  options?: { onLogCreated?: (logId: string) => void },
+): Promise<ScoutOutput> {
+  const start = Date.now();
+  let promptLogId: string | undefined;
+
+  const settings = await queries.getAISettings(repositoryId);
+  const config = getAIConfig(settings);
+
+  // Build input from other planners' results
+  const areasSummary = otherPlannerAreas.map(a => ({
+    name: a.name,
+    routes: a.routes,
+    hasTestSuggestions: !!a.testPlan && a.testPlan.length > 100,
+    testPlanPreview: a.testPlan?.slice(0, 200),
+  }));
+
+  // Get codebase intelligence from active session
+  const activeSession = await queries.getActiveAgentSession(repositoryId);
+  const intelligence = activeSession?.metadata?.codebaseIntelligence as Record<string, unknown> | undefined;
+
+  const prompt = `Classify these ${areasSummary.length} functional areas discovered from the codebase.
+
+## Areas to Classify
+${JSON.stringify(areasSummary, null, 2)}
+
+${intelligence ? `## Codebase Intelligence\n${JSON.stringify(intelligence, null, 2)}` : ''}
+
+Classify each area as "skip" or "explore" and output JSON.`;
+
+  try {
+    const response = await generateWithAI(config, prompt, SCOUT_SYSTEM_PROMPT, {
+      repositoryId,
+      actionType: 'agent_discover',
+      onLogCreated: (id) => { promptLogId = id; options?.onLogCreated?.(id); },
+    });
+
+    // Parse scout output
+    const jsonMatch = response.match(/```(?:json)?\s*\n?([\s\S]*?)\n?```/) || [null, response];
+    const jsonStr = jsonMatch[1]?.trim() || response.trim();
+    const parsed = JSON.parse(jsonStr);
+    const rawAreas = parsed.areas || parsed;
+
+    if (!Array.isArray(rawAreas)) {
+      return { areas: [], durationMs: Date.now() - start, promptLogId };
+    }
+
+    const areas: ScoutArea[] = rawAreas.map((a: Record<string, unknown>) => ({
+      name: String(a.name || ''),
+      classification: a.classification === 'explore' ? 'explore' as const : 'skip' as const,
+      routes: Array.isArray(a.routes) ? a.routes.map(String) : [],
+      testPlan: a.testPlan ? String(a.testPlan) : undefined,
+      focusPoints: Array.isArray(a.focusPoints) ? a.focusPoints.map(String) : undefined,
+    }));
+
+    return { areas, durationMs: Date.now() - start, promptLogId };
+  } catch {
+    return { areas: [], durationMs: Date.now() - start, promptLogId };
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Deep-Diver — focused browser exploration of one area (MCP)
+// ---------------------------------------------------------------------------
+
+const DEEP_DIVER_SYSTEM_PROMPT = `You are an expert web test planner exploring a specific functional area of a web application.
+
+WORKFLOW:
+1. **Run the Seed Test First** — if a seed fixture is provided, execute it using MCP browser tools to set up auth
+2. Navigate to the target routes assigned to you
+3. Use browser_snapshot to discover the page structure
+4. Interact with forms, buttons, dropdowns using MCP tools
+5. Create detailed test scenarios based on what you find
+
+CONSTRAINTS:
+- ONLY explore routes in your assigned area — do NOT wander to other sections
+- Spend no more than 30 seconds per route
+- If a route requires specific data/IDs, note this in the test plan
+- Do NOT include login/setup steps in test plans — assume authenticated
+
+OUTPUT FORMAT (JSON only):
+{
+  "areas": [{
+    "name": "Area Name",
+    "description": "What this area does based on exploration",
+    "routes": ["/actual/routes/found"],
+    "testPlan": "## Area Name\\n\\n### Scenario 1: Title\\n1. Navigate to...\\n2. ...\\n\\n**Expected**: ..."
+  }]
+}`;
+
+export async function runDeepDiveExploration(
+  areaName: string,
+  routes: string[],
+  focusPoints: string[] | undefined,
+  repositoryId: string,
+  baseUrl: string,
+  options?: { onLogCreated?: (logId: string) => void },
+): Promise<PlannerArea[]> {
+  const settings = await queries.getAISettings(repositoryId);
+  const config = getAIConfig(settings);
+  const seed = await buildSeedFixture(repositoryId);
+
+  let prompt = `Explore the "${areaName}" area of the web application at ${baseUrl}.\n\n`;
+  prompt += `Target routes:\n${routes.map(r => `- ${r}`).join('\n')}\n\n`;
+
+  if (focusPoints && focusPoints.length > 0) {
+    prompt += `Focus your exploration on:\n${focusPoints.map(fp => `- ${fp}`).join('\n')}\n\n`;
+  }
+
+  prompt += `Navigate to each route, interact with the UI using MCP tools, and create detailed test scenarios.\n`;
+
+  if (seed.hasLoginSetup) {
+    prompt += `\n**The user is already authenticated. Do NOT include login steps in test plans.**\n`;
+  }
+
+  prompt += `\n---\n\n${seed.seedPrompt}`;
+
+  const response = await generateWithAI(config, prompt, DEEP_DIVER_SYSTEM_PROMPT, {
+    useMCP: true,
+    repositoryId,
+    actionType: 'agent_discover',
+    onLogCreated: options?.onLogCreated,
+  });
+
+  return parseAreasFromResponse(response);
 }
