@@ -1135,7 +1135,7 @@ async function runGenerate(sessionId: string, repositoryId: string, _teamId: str
 
   if (useAgents && targetAreas.length > 0) {
     const { agentCreateTest, groupScenariosForGeneration } = await import('@/lib/playwright/generator-agent');
-    const GENERATOR_CONCURRENCY = 3;
+    const GENERATOR_CONCURRENCY = 8;
 
     // Build work items: group scenarios by route proximity per area
     const workItems: Array<{
