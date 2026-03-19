@@ -15,7 +15,7 @@ export class OpenRouterProvider implements AIProvider {
   }
 
   async generate(options: GenerateOptions): Promise<string> {
-    const { prompt, systemPrompt, maxTokens = 4096, temperature = 0.7, images } = options;
+    const { prompt, systemPrompt, maxTokens = 4096, temperature = 0.7, images, signal } = options;
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const messages: { role: string; content: any }[] = [];
@@ -54,6 +54,7 @@ export class OpenRouterProvider implements AIProvider {
         max_tokens: maxTokens,
         temperature,
       }),
+      signal,
     });
 
     if (!response.ok) {
@@ -66,7 +67,7 @@ export class OpenRouterProvider implements AIProvider {
   }
 
   async generateStream(options: GenerateOptions, callbacks: StreamCallbacks): Promise<void> {
-    const { prompt, systemPrompt, maxTokens = 4096, temperature = 0.7 } = options;
+    const { prompt, systemPrompt, maxTokens = 4096, temperature = 0.7, signal } = options;
 
     const messages: { role: string; content: string }[] = [];
 
@@ -91,6 +92,7 @@ export class OpenRouterProvider implements AIProvider {
           temperature,
           stream: true,
         }),
+        signal,
       });
 
       if (!response.ok) {

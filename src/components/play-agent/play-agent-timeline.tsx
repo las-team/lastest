@@ -1,9 +1,11 @@
 'use client';
 
+import { useState } from 'react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Play, X, Check, Loader2, Pause, SkipForward, AlertCircle, RotateCcw } from 'lucide-react';
+import { Play, X, Check, Loader2, Pause, SkipForward, AlertCircle, RotateCcw, ChevronDown } from 'lucide-react';
 import { PlayAgentStep } from './play-agent-step';
+import { PlayAgentStepDetail } from './play-agent-step-detail';
 import { usePlayAgent } from './use-play-agent';
 import { cn } from '@/lib/utils';
 import type { AgentStepState, AgentStepId, PwAgentType } from '@/lib/db/schema';
@@ -12,14 +14,16 @@ interface PlayAgentTimelineProps {
   repositoryId?: string | null;
 }
 
-const USER_STEPS: Set<AgentStepId> = new Set(['settings_check', 'select_repo', 'env_setup']);
+const USER_STEPS: Set<AgentStepId> = new Set(['settings_check', 'select_repo', 'env_setup', 'review']);
 
 const DEFAULT_STEPS: AgentStepState[] = [
   { id: 'settings_check', status: 'pending', label: 'Settings', description: 'Verify configuration' },
   { id: 'select_repo', status: 'pending', label: 'Repo', description: 'Ensure repo selected' },
-  { id: 'scan_and_template', status: 'pending', label: 'Scan', description: 'Scan routes & template' },
-  { id: 'discover', status: 'pending', label: 'Discover', description: 'Generate tests' },
   { id: 'env_setup', status: 'pending', label: 'Env Setup', description: 'URL & login setup' },
+  { id: 'scan_and_template', status: 'pending', label: 'Scan', description: 'Scan routes & template' },
+  { id: 'plan', status: 'pending', label: 'Plan', description: 'Discover test areas' },
+  { id: 'review', status: 'pending', label: 'Review', description: 'Approve test plan' },
+  { id: 'generate', status: 'pending', label: 'Generate', description: 'Create tests' },
   { id: 'run_tests', status: 'pending', label: 'Run', description: 'Run build' },
   { id: 'fix_tests', status: 'pending', label: 'Fix', description: 'AI-fix tests' },
   { id: 'rerun_tests', status: 'pending', label: 'Re-run', description: 'Re-run build' },
@@ -78,13 +82,19 @@ function getAnnotations(step: AgentStepState): Annotation[] | null {
         ...(r.framework ? [{ label: r.framework as string, ok: true }] : []),
         { label: `Template: ${r.templateApplied}`, ok: true },
       ];
-    case 'discover':
-      if (r.skipped) return [{ label: r.reason as string, ok: true }];
+    case 'plan':
+      if (r.cached) return [{ label: 'Using cached tests', ok: true }];
       return [
-        ...(r.specsFound ? [{ label: `${r.specsFound} specs`, ok: true }] : []),
-        ...(r.areasCreated ? [{ label: `${r.areasCreated} areas`, ok: true }] : []),
+        ...(r.areasFound ? [{ label: `${r.areasFound} areas`, ok: true }] : []),
+        ...(r.sourcesUsed ? [{ label: `${r.sourcesUsed} sources`, ok: true }] : []),
+      ];
+    case 'review':
+      if (r.skipped) return [{ label: r.reason as string, ok: true }];
+      if (r.autoApproved) return [{ label: 'Auto-approved', ok: true }];
+      return [{ label: 'Approved', ok: true }];
+    case 'generate':
+      return [
         { label: `${r.testsCreated} tests`, ok: true },
-        ...((r.skippedRemaining as number) > 0 ? [{ label: `+${r.skippedRemaining} in bg`, ok: true }] : []),
       ];
     case 'env_setup':
       return [
@@ -165,8 +175,10 @@ function getDotIcon(step: AgentStepState) {
 // ============================================
 
 export function PlayAgentTimeline({ repositoryId }: PlayAgentTimelineProps) {
-  const { session, loading, isActive, isTerminal, progress, start, resume, cancel, dismiss, skipDiscover } =
+  const { session, loading, isActive, isTerminal, progress, start, resume, cancel, dismiss, approvePlan, rerunPlanner } =
     usePlayAgent(repositoryId);
+
+  const [expandedStepId, setExpandedStepId] = useState<AgentStepId | null>(null);
 
   const steps = session?.steps ?? DEFAULT_STEPS;
   const isRunning = isActive && session?.status === 'active';
@@ -190,14 +202,12 @@ export function PlayAgentTimeline({ repositoryId }: PlayAgentTimelineProps) {
     for (const sub of activeStep.substeps) {
       if (sub.agent && sub.status === 'running') {
         runningAgents.add(sub.agent);
-        // Parse parallel count from detail like "3 generators in parallel"
         const countMatch = sub.detail?.match(/^(\d+)\s+\w+\s+in parallel$/);
         if (countMatch) agentParallelCount[sub.agent] = parseInt(countMatch[1], 10);
       }
       if (sub.agent && sub.status === 'done') doneAgents.add(sub.agent);
     }
   }
-  // Also check all completed steps for done agents
   for (const s of steps) {
     if (s.status === 'completed' && s.substeps) {
       for (const sub of s.substeps) {
@@ -213,6 +223,14 @@ export function PlayAgentTimeline({ repositoryId }: PlayAgentTimelineProps) {
       resume();
     } else {
       start();
+    }
+  };
+
+  const handleStepClick = (stepId: AgentStepId) => {
+    const step = steps.find(s => s.id === stepId);
+    if (!step || step.status === 'pending') return;
+    if (step.richResult || step.status === 'completed') {
+      setExpandedStepId(prev => prev === stepId ? null : stepId);
     }
   };
 
@@ -238,7 +256,7 @@ export function PlayAgentTimeline({ repositoryId }: PlayAgentTimelineProps) {
           </div>
         </div>
 
-        {/* Agent roster bar — visible once settings_check completes */}
+        {/* Agent roster bar */}
         {settingsResult && (
           <div className="flex items-center gap-1.5 mb-2.5">
             <span className="text-[10px] text-muted-foreground/70 uppercase tracking-wider font-medium mr-1">
@@ -304,12 +322,12 @@ export function PlayAgentTimeline({ repositoryId }: PlayAgentTimelineProps) {
             )}
           </button>
 
-          {/* Grid: 4 rows (top-labels, dots, bottom-labels, annotations) x N columns */}
+          {/* Grid: 4 rows x N columns */}
           <div
             className="flex-1 min-w-0 grid gap-y-0.5"
             style={{ gridTemplateColumns: `repeat(${steps.length}, 1fr)` }}
           >
-            {/* Row 1: Top labels (automated steps above, placeholder for user steps) */}
+            {/* Row 1: Top labels (automated steps above) */}
             {steps.map((step) => {
               const { isUser, labelClass } = getStepClasses(step);
               return (
@@ -329,9 +347,9 @@ export function PlayAgentTimeline({ repositoryId }: PlayAgentTimelineProps) {
               const icon = getDotIcon(step);
               const prevCompleted = i > 0 && steps[i - 1].status === 'completed';
               const currCompleted = step.status === 'completed';
+              const hasDetail = step.richResult || (step.status === 'completed' && step.result);
               return (
                 <div key={`dot-${step.id}`} className="relative flex items-center justify-center py-0.5">
-                  {/* Left connector (from previous step) */}
                   {i > 0 && (
                     <div
                       className={cn(
@@ -341,9 +359,13 @@ export function PlayAgentTimeline({ repositoryId }: PlayAgentTimelineProps) {
                       style={{ left: 0, right: 'calc(50% + 12px)' }}
                     />
                   )}
-                  {/* Dot */}
-                  <div className={cn(dotClass, 'relative z-10')}>{icon}</div>
-                  {/* Right connector (to next step) */}
+                  <button
+                    onClick={() => handleStepClick(step.id)}
+                    className={cn(dotClass, 'relative z-10', hasDetail && 'cursor-pointer hover:ring-2 hover:ring-primary/30')}
+                    disabled={!hasDetail}
+                  >
+                    {icon}
+                  </button>
                   {i < steps.length - 1 && (
                     <div
                       className={cn(
@@ -353,11 +375,15 @@ export function PlayAgentTimeline({ repositoryId }: PlayAgentTimelineProps) {
                       style={{ left: 'calc(50% + 12px)', right: 0 }}
                     />
                   )}
+                  {/* Expand indicator */}
+                  {hasDetail && expandedStepId === step.id && (
+                    <ChevronDown className="absolute -bottom-1.5 h-2 w-2 text-muted-foreground" />
+                  )}
                 </div>
               );
             })}
 
-            {/* Row 3: Bottom labels (user steps below, placeholder for automated) */}
+            {/* Row 3: Bottom labels (user steps below) */}
             {steps.map((step) => {
               const { isUser, labelClass } = getStepClasses(step);
               return (
@@ -371,7 +397,7 @@ export function PlayAgentTimeline({ repositoryId }: PlayAgentTimelineProps) {
               );
             })}
 
-            {/* Row 4: Annotations (variable height — isolated from dot alignment) */}
+            {/* Row 4: Annotations */}
             {steps.map((step) => {
               const annotations = getAnnotations(step);
               return (
@@ -396,14 +422,30 @@ export function PlayAgentTimeline({ repositoryId }: PlayAgentTimelineProps) {
           </div>
         </div>
 
+        {/* Expanded step detail panel */}
+        {expandedStepId && (() => {
+          const step = steps.find(s => s.id === expandedStepId);
+          if (!step) return null;
+          return (
+            <div className="mt-3 pt-3 border-t">
+              <PlayAgentStepDetail
+                step={step}
+                sessionId={session?.id}
+                onApprovePlan={step.id === 'review' ? approvePlan : undefined}
+                onRerunPlanner={step.id === 'plan' ? rerunPlanner : undefined}
+              />
+            </div>
+          );
+        })()}
+
         {/* Active / waiting / failed step detail */}
-        {activeStep && (
+        {activeStep && expandedStepId !== activeStep.id && (
           <div className="mt-3 pt-3 border-t">
             <PlayAgentStep
               step={activeStep}
               stepNumber={steps.findIndex((s) => s.id === activeStep.id) + 1}
               onResume={activeStep.status === 'waiting_user' || activeStep.status === 'failed' ? resume : undefined}
-              onSkipDiscover={activeStep.id === 'discover' && activeStep.status === 'active' ? skipDiscover : undefined}
+              onApprovePlan={activeStep.id === 'review' && activeStep.status === 'waiting_user' ? approvePlan : undefined}
             />
           </div>
         )}

@@ -10,8 +10,14 @@ export async function runBrowserPlanner(
   repositoryId: string,
   baseUrl: string,
 ): Promise<PlannerResult> {
+  const start = Date.now();
+  let promptLogId: string | undefined;
+
   try {
-    const result = await agentDiscoverAreas(repositoryId, baseUrl);
+    const result = await agentDiscoverAreas(repositoryId, baseUrl, {
+      onLogCreated: (id) => { promptLogId = id; },
+    });
+    const durationMs = Date.now() - start;
 
     if (!result.success || !result.functionalAreas?.length) {
       return {
@@ -19,6 +25,9 @@ export async function runBrowserPlanner(
         areas: [],
         rawOutput: result.rawResponse,
         error: result.error || 'No areas discovered',
+        promptLogId,
+        durationMs,
+        inputSummary: `baseUrl: ${baseUrl}`,
       };
     }
 
@@ -36,12 +45,21 @@ export async function runBrowserPlanner(
       };
     });
 
-    return { source: 'browser', areas };
+    return {
+      source: 'browser',
+      areas,
+      promptLogId,
+      durationMs,
+      inputSummary: `baseUrl: ${baseUrl}`,
+    };
   } catch (error) {
     return {
       source: 'browser',
       areas: [],
       error: error instanceof Error ? error.message : 'Browser planner failed',
+      promptLogId,
+      durationMs: Date.now() - start,
+      inputSummary: `baseUrl: ${baseUrl}`,
     };
   }
 }

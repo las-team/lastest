@@ -37,7 +37,9 @@ export class ClaudeAgentSDKProvider implements AIProvider {
   }
 
   async generate(options: GenerateOptions): Promise<string> {
-    const { prompt, systemPrompt } = options;
+    const { prompt, systemPrompt, signal } = options;
+
+    if (signal?.aborted) throw new Error('Aborted');
 
     let fullPrompt = truncatePrompt(prompt);
     if (systemPrompt) {
@@ -60,6 +62,9 @@ export class ClaudeAgentSDKProvider implements AIProvider {
           stderr: (data: string) => { stderrChunks.push(data); },
         },
       })) {
+        // Check abort between iterations
+        if (signal?.aborted) throw new Error('Aborted');
+
         // Collect text content from assistant messages
         if (message.type === 'assistant' && message.message?.content) {
           for (const block of message.message.content) {
@@ -87,6 +92,7 @@ export class ClaudeAgentSDKProvider implements AIProvider {
     } catch (error) {
       const stderr = stderrChunks.join('').trim();
       if (error instanceof Error) {
+        if (error.message === 'Aborted') throw error;
         const detail = stderr ? ` | stderr: ${stderr.slice(0, 500)}` : '';
         throw new Error(`Claude Agent SDK error: ${error.message}${detail}`);
       }
@@ -95,7 +101,9 @@ export class ClaudeAgentSDKProvider implements AIProvider {
   }
 
   async generateStream(options: GenerateOptions, callbacks: StreamCallbacks): Promise<void> {
-    const { prompt, systemPrompt } = options;
+    const { prompt, systemPrompt, signal } = options;
+
+    if (signal?.aborted) throw new Error('Aborted');
 
     let fullPrompt = truncatePrompt(prompt);
     if (systemPrompt) {
@@ -118,6 +126,8 @@ export class ClaudeAgentSDKProvider implements AIProvider {
           stderr: (data: string) => { stderrChunks.push(data); },
         },
       })) {
+        if (signal?.aborted) throw new Error('Aborted');
+
         // Stream text content from assistant messages
         if (message.type === 'assistant' && message.message?.content) {
           for (const block of message.message.content) {
@@ -145,7 +155,7 @@ export class ClaudeAgentSDKProvider implements AIProvider {
     } catch (error) {
       const stderr = stderrChunks.join('').trim();
       const base = error instanceof Error ? error : new Error(String(error));
-      if (stderr) {
+      if (base.message !== 'Aborted' && stderr) {
         base.message = `${base.message} | stderr: ${stderr.slice(0, 500)}`;
       }
       callbacks.onError?.(base);

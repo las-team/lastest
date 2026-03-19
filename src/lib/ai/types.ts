@@ -6,6 +6,7 @@ export interface GenerateOptions {
   maxTokens?: number;
   temperature?: number;
   images?: { base64: string; mediaType: string }[];
+  signal?: AbortSignal;
 }
 
 export interface StreamCallbacks {

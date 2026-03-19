@@ -27,25 +27,25 @@ export async function runSpecPlanner(
   repositoryId: string,
   branch: string,
 ): Promise<PlannerResult> {
+  const start = Date.now();
+
   try {
     const repo = await queries.getRepository(repositoryId);
     if (!repo) {
-      return { source: 'spec', areas: [], error: 'Repository not found' };
+      return { source: 'spec', areas: [], error: 'Repository not found', durationMs: Date.now() - start, inputSummary: `branch: ${branch}` };
     }
 
-    // Use team-scoped GitHub account (same as play-agent flow)
     const account = repo.teamId
       ? await queries.getGithubAccountByTeam(repo.teamId)
       : await queries.getGithubAccount();
 
     if (!account) {
-      return { source: 'spec', areas: [], error: 'No GitHub account' };
+      return { source: 'spec', areas: [], error: 'No GitHub account', durationMs: Date.now() - start, inputSummary: `branch: ${branch}` };
     }
 
-    // Discover spec files via GitHub tree API
     const repoTree = await getRepoTree(account.accessToken, repo.owner, repo.name, branch);
     if (!repoTree || repoTree.tree.length === 0) {
-      return { source: 'spec', areas: [] };
+      return { source: 'spec', areas: [], durationMs: Date.now() - start, inputSummary: `branch: ${branch}, 0 spec files` };
     }
 
     const specEntries = repoTree.tree.filter(
@@ -53,10 +53,9 @@ export async function runSpecPlanner(
     );
 
     if (specEntries.length === 0) {
-      return { source: 'spec', areas: [] };
+      return { source: 'spec', areas: [], durationMs: Date.now() - start, inputSummary: `branch: ${branch}, 0 spec files` };
     }
 
-    // Fetch raw spec file contents for fallback
     const filePaths = specEntries.map(e => e.path);
     const rawContents: string[] = [];
     for (const path of filePaths) {
@@ -68,6 +67,7 @@ export async function runSpecPlanner(
     // Try structured extraction via AI
     const { extractUserStoriesFromFiles } = await import('@/server/actions/spec-import');
     const storiesResult = await extractUserStoriesFromFiles(repositoryId, branch, filePaths);
+    const durationMs = Date.now() - start;
 
     if (storiesResult.success && storiesResult.stories?.length) {
       const areas = storiesResult.stories.map(story => ({
@@ -76,7 +76,12 @@ export async function runSpecPlanner(
         routes: [] as string[],
         testPlan: buildSpecTestPlan(story),
       }));
-      return { source: 'spec', areas };
+      return {
+        source: 'spec',
+        areas,
+        durationMs,
+        inputSummary: `branch: ${branch}, ${specEntries.length} spec files (${filePaths.join(', ')})`,
+      };
     }
 
     // Extraction failed — return raw spec content for merger to salvage
@@ -85,12 +90,16 @@ export async function runSpecPlanner(
       areas: [],
       rawOutput: rawSpecContent,
       error: storiesResult.error || `${specEntries.length} spec files found, extraction failed`,
+      durationMs,
+      inputSummary: `branch: ${branch}, ${specEntries.length} spec files (${filePaths.join(', ')})`,
     };
   } catch (error) {
     return {
       source: 'spec',
       areas: [],
       error: error instanceof Error ? error.message : 'Spec planner failed',
+      durationMs: Date.now() - start,
+      inputSummary: `branch: ${branch}`,
     };
   }
 }

@@ -6,12 +6,13 @@ import { Check, Circle, Loader2, Pause, X, SkipForward } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import type { AgentStepState, PwAgentType } from '@/lib/db/schema';
+import { PlayAgentStepDetail } from './play-agent-step-detail';
 
 interface PlayAgentStepProps {
   step: AgentStepState;
   stepNumber: number;
   onResume?: () => void;
-  onSkipDiscover?: () => void;
+  onApprovePlan?: (approvedAreaIds: string[], autoApprove: boolean) => void;
 }
 
 const AGENT_BADGE_STYLES: Record<PwAgentType, { bg: string; text: string; label: string }> = {
@@ -30,7 +31,7 @@ function AgentBadge({ agent }: { agent: PwAgentType }) {
   );
 }
 
-export function PlayAgentStep({ step, stepNumber, onResume, onSkipDiscover }: PlayAgentStepProps) {
+export function PlayAgentStep({ step, stepNumber, onResume, onApprovePlan }: PlayAgentStepProps) {
   const router = useRouter();
   const navigatedRef = useRef(false);
 
@@ -45,6 +46,9 @@ export function PlayAgentStep({ step, stepNumber, onResume, onSkipDiscover }: Pl
     navigatedRef.current = true;
     router.push(`/settings?highlight=${highlightIds.join(',')}`);
   }, [step.status, step.result, step.id, router]);
+
+  // For review step waiting for user, show the plan detail inline
+  const isReviewWaiting = step.id === 'review' && step.status === 'waiting_user';
 
   return (
     <div className="py-1.5">
@@ -98,37 +102,51 @@ export function PlayAgentStep({ step, stepNumber, onResume, onSkipDiscover }: Pl
       {step.substeps && step.substeps.length > 0 && (step.status === 'active' || step.status === 'completed') && (
         <div className="ml-7 mt-1 space-y-0.5">
           {step.substeps.map((sub, i) => (
-            <div key={i} className="flex items-center gap-2 text-xs text-muted-foreground">
-              {sub.status === 'running' ? (
-                <Loader2 className="h-3 w-3 animate-spin text-primary flex-shrink-0" />
-              ) : sub.status === 'done' ? (
-                <Check className="h-3 w-3 text-green-500 flex-shrink-0" />
-              ) : sub.status === 'error' ? (
-                <X className="h-3 w-3 text-red-500 flex-shrink-0" />
-              ) : (
-                <Circle className="h-3 w-3 flex-shrink-0" />
+            <div key={i} className="space-y-0.5">
+              <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                {sub.status === 'running' ? (
+                  <Loader2 className="h-3 w-3 animate-spin text-primary flex-shrink-0" />
+                ) : sub.status === 'done' ? (
+                  <Check className="h-3 w-3 text-green-500 flex-shrink-0" />
+                ) : sub.status === 'error' ? (
+                  <X className="h-3 w-3 text-red-500 flex-shrink-0" />
+                ) : (
+                  <Circle className="h-3 w-3 flex-shrink-0" />
+                )}
+                {sub.agent && <AgentBadge agent={sub.agent} />}
+                <span>{sub.label}</span>
+                {sub.detail && <span className="text-muted-foreground/60">{sub.detail}</span>}
+                {sub.durationMs != null && sub.status !== 'running' && sub.status !== 'pending' && (
+                  <span className="text-[10px] text-muted-foreground/40 tabular-nums">{(sub.durationMs / 1000).toFixed(1)}s</span>
+                )}
+              </div>
+              {/* Show area names for completed planners */}
+              {sub.outputSummary && sub.status === 'done' && (
+                <div className="ml-5 text-[10px] text-muted-foreground/50 truncate max-w-[400px]">
+                  {sub.outputSummary}
+                </div>
               )}
-              {sub.agent && <AgentBadge agent={sub.agent} />}
-              <span>{sub.label}</span>
-              {sub.detail && <span className="text-muted-foreground/60">{sub.detail}</span>}
+              {/* Show full error for failed planners */}
+              {sub.rawError && sub.status === 'error' && (
+                <div className="ml-5 text-[10px] text-red-500/80 max-w-[400px] break-words">
+                  {sub.rawError}
+                </div>
+              )}
             </div>
           ))}
         </div>
       )}
 
-      {/* Skip ahead button for discover step */}
-      {step.status === 'active' && onSkipDiscover && (
-        <div className="ml-7 mt-1.5 flex items-center gap-2">
-          <Button size="sm" variant="outline" onClick={onSkipDiscover} className="gap-1.5 h-6 text-xs">
-            <SkipForward className="h-3 w-3" />
-            Skip ahead
-          </Button>
-          <span className="text-[10px] text-muted-foreground">Continue with current tests, generate rest in background</span>
+      {/* Review step: show plan areas with checkboxes + approve button */}
+      {isReviewWaiting && onApprovePlan && (
+        <div className="ml-7 mt-2">
+          <p className="text-xs text-blue-600 dark:text-blue-400 mb-2">{step.userAction}</p>
+          <PlayAgentStepDetail step={step} onApprovePlan={onApprovePlan} />
         </div>
       )}
 
-      {/* Waiting user action */}
-      {step.status === 'waiting_user' && step.userAction && (
+      {/* Waiting user action (non-review) */}
+      {step.status === 'waiting_user' && step.userAction && !isReviewWaiting && (
         <div className="ml-7 mt-1.5 space-y-1.5">
           <p className="text-xs text-blue-600 dark:text-blue-400">{step.userAction}</p>
           <div className="flex gap-2">

@@ -6,6 +6,8 @@ import { revalidatePath } from 'next/cache';
 import type {
   AgentStepState,
   AgentStepId,
+  AgentStepRichResult,
+  AgentRichResultPlanArea,
 } from '@/lib/db/schema';
 import { createAndRunBuild } from './builds';
 import { getCurrentBranchForRepo } from '@/lib/git-utils';
@@ -13,7 +15,7 @@ import { getBuildSummary } from './builds';
 import { startRemoteRouteScan, generateBasicTests } from './scanner';
 import { applyTestingTemplate } from './repos';
 import { aiScanRoutes, saveDiscoveredRoutes } from './ai-routes';
-import { discoverSpecFiles, extractUserStoriesFromFiles, generateTestsFromStories } from './spec-import';
+import { discoverSpecFiles, extractUserStoriesFromFiles } from './spec-import';
 import { testServerConnection } from './environment';
 import { aiFixTest } from './ai';
 import { getAISettings } from './ai-settings';
@@ -37,9 +39,11 @@ import type { CodebaseIntelligenceContext } from '@/lib/ai/types';
 const STEP_DEFINITIONS: Array<{ id: AgentStepId; label: string; description: string }> = [
   { id: 'settings_check', label: 'Settings Check', description: 'Verify GitHub, AI, and environment configuration' },
   { id: 'select_repo', label: 'Select Repository', description: 'Ensure a repository is selected' },
-  { id: 'scan_and_template', label: 'Scan & Template', description: 'Scan routes and apply testing template' },
-  { id: 'discover', label: 'Discover Tests', description: 'Find specs, scan routes, or generate smoke tests' },
   { id: 'env_setup', label: 'Env Setup', description: 'Verify server, detect login, configure setup' },
+  { id: 'scan_and_template', label: 'Scan & Template', description: 'Scan routes and apply testing template' },
+  { id: 'plan', label: 'Plan Tests', description: 'Discover functional areas and create test plans' },
+  { id: 'review', label: 'Review Plan', description: 'Review and approve the test plan' },
+  { id: 'generate', label: 'Generate Tests', description: 'Generate test code from approved plan' },
   { id: 'run_tests', label: 'Run Tests', description: 'Create and run initial build' },
   { id: 'fix_tests', label: 'Fix Failing Tests', description: 'AI-fix failing tests (max 3 attempts each)' },
   { id: 'rerun_tests', label: 'Re-run Tests', description: 'Re-run build after fixes' },
@@ -56,6 +60,25 @@ function buildInitialSteps(): AgentStepState[] {
     label: def.label,
     description: def.description,
   }));
+}
+
+// ============================================
+// AbortController Registry
+// ============================================
+
+const activeControllers = new Map<string, AbortController>();
+
+function getOrCreateController(sessionId: string): AbortController {
+  let controller = activeControllers.get(sessionId);
+  if (!controller || controller.signal.aborted) {
+    controller = new AbortController();
+    activeControllers.set(sessionId, controller);
+  }
+  return controller;
+}
+
+function cleanupController(sessionId: string) {
+  activeControllers.delete(sessionId);
 }
 
 // ============================================
@@ -91,11 +114,12 @@ async function setStepActive(sessionId: string, stepId: AgentStepId) {
   await queries.updateAgentSession(sessionId, { currentStepId: stepId });
 }
 
-async function setStepCompleted(sessionId: string, stepId: AgentStepId, result?: Record<string, unknown>) {
+async function setStepCompleted(sessionId: string, stepId: AgentStepId, result?: Record<string, unknown>, richResult?: AgentStepRichResult) {
   await updateStep(sessionId, stepId, {
     status: 'completed',
     completedAt: new Date().toISOString(),
     result,
+    ...(richResult ? { richResult } : {}),
   });
 }
 
@@ -120,13 +144,13 @@ async function updateSubsteps(sessionId: string, stepId: AgentStepId, substeps: 
   await updateStep(sessionId, stepId, { substeps });
 }
 
-async function isCancelled(sessionId: string): Promise<boolean> {
-  const session = await queries.getAgentSession(sessionId);
-  return !session || session.status === 'cancelled';
+function isAborted(signal: AbortSignal): boolean {
+  return signal.aborted;
 }
 
-async function waitForBuild(buildId: string): Promise<Awaited<ReturnType<typeof getBuildSummary>>> {
+async function waitForBuild(buildId: string, signal: AbortSignal): Promise<Awaited<ReturnType<typeof getBuildSummary>>> {
   for (;;) {
+    if (signal.aborted) return null;
     const summary = await getBuildSummary(buildId);
     if (!summary) return null;
     if (summary.completedAt) return summary;
@@ -138,22 +162,19 @@ async function waitForBuild(buildId: string): Promise<Awaited<ReturnType<typeof 
 // Step Implementations
 // ============================================
 
-async function runSettingsCheck(sessionId: string, repositoryId: string, teamId: string) {
+async function runSettingsCheck(sessionId: string, repositoryId: string, teamId: string, _signal: AbortSignal) {
   await setStepActive(sessionId, 'settings_check');
 
   const missing: string[] = [];
 
-  // Check GitHub
   const ghAccount = await queries.getGithubAccountByTeam(teamId);
   if (!ghAccount) missing.push('GitHub account');
 
-  // Check AI settings
   const aiSettings = await getAISettings(repositoryId);
   const hasAI = aiSettings.provider && aiSettings.provider !== 'none';
   if (!hasAI) missing.push('AI provider');
 
   if (missing.length > 0) {
-    // Map missing items to settings page element IDs for highlight navigation
     const highlightIds: string[] = [];
     if (!ghAccount) highlightIds.push('github');
     if (!hasAI) highlightIds.push('ai-settings');
@@ -177,7 +198,7 @@ async function runSettingsCheck(sessionId: string, repositoryId: string, teamId:
   return true;
 }
 
-async function runSelectRepo(sessionId: string, repositoryId: string) {
+async function runSelectRepo(sessionId: string, repositoryId: string, _teamId: string, _signal: AbortSignal) {
   await setStepActive(sessionId, 'select_repo');
 
   const repo = await queries.getRepository(repositoryId);
@@ -193,768 +214,79 @@ async function runSelectRepo(sessionId: string, repositoryId: string) {
   return true;
 }
 
-/** Convert full CodebaseIntelligence to the lighter context type for prompts */
-function toIntelligenceContext(intel: CodebaseIntelligence): CodebaseIntelligenceContext {
-  return {
-    framework: intel.framework,
-    cssFramework: intel.cssFramework,
-    selectorStrategy: intel.selectorStrategy,
-    authMechanism: intel.authMechanism,
-    projectDescription: intel.projectDescription,
-    testingRecommendations: intel.testingRecommendations,
-    stateManagement: intel.stateManagement,
-    apiLayer: intel.apiLayer,
-  };
-}
+// ============================================
+// Env Setup (now step 3 — before scan/plan)
+// ============================================
 
-/** Build a human-readable intelligence brief for metadata */
-function buildIntelligenceBrief(intel: CodebaseIntelligence, routeCount: number): Record<string, unknown> {
-  const staticRoutes = routeCount; // We'll get exact counts from route data later
-  return {
-    framework: intel.framework,
-    auth: intel.authMechanism,
-    css: intel.cssFramework,
-    stateManagement: intel.stateManagement,
-    apiLayer: intel.apiLayer,
-    keyDeps: intel.keyDeps.map(d => d.name),
-    selectorStrategy: intel.selectorStrategy,
-    projectDescription: intel.projectDescription || undefined,
-    testingRecommendations: intel.testingRecommendations,
-    routeCount: staticRoutes,
-  };
-}
-
-async function runScanAndTemplate(sessionId: string, repositoryId: string) {
-  await setStepActive(sessionId, 'scan_and_template');
-  if (await isCancelled(sessionId)) return false;
-
-  const repo = await queries.getRepository(repositoryId);
-  if (!repo) {
-    await setStepFailed(sessionId, 'scan_and_template', 'Repository not found');
-    return false;
-  }
-
-  const branch = repo.selectedBranch || repo.defaultBranch || 'main';
-  const account = repo.teamId ? await queries.getGithubAccountByTeam(repo.teamId) : null;
-
-  // Run route scanning AND codebase intelligence gathering in parallel
-  await updateSubsteps(sessionId, 'scan_and_template', [
-    { label: 'Scanning routes', status: 'running' },
-    { label: 'Analyzing codebase', status: 'running' },
-    { label: 'Applying template', status: 'pending' },
-  ]);
-
-  const [scanResult, intelligence] = await Promise.all([
-    startRemoteRouteScan(repositoryId, branch),
-    account
-      ? gatherCodebaseIntelligence(account.accessToken, repo.owner || '', repo.name, branch).catch(() => null)
-      : Promise.resolve(null),
-  ]);
-
-  if (!scanResult.success) {
-    await updateSubsteps(sessionId, 'scan_and_template', [
-      { label: 'Scanning routes', status: 'error', detail: scanResult.error },
-      { label: 'Analyzing codebase', status: intelligence ? 'done' : 'error' },
-      { label: 'Applying template', status: 'pending' },
-    ]);
-    await setStepFailed(sessionId, 'scan_and_template', scanResult.error || 'Scan failed');
-    return false;
-  }
-
-  if (await isCancelled(sessionId)) return false;
-
-  // Store intelligence in session metadata for later steps
-  if (intelligence) {
-    const session = await queries.getAgentSession(sessionId);
-    if (session) {
-      await queries.updateAgentSession(sessionId, {
-        metadata: {
-          ...session.metadata,
-          codebaseIntelligence: toIntelligenceContext(intelligence),
-          intelligenceBrief: buildIntelligenceBrief(intelligence, scanResult.routesFound || 0),
-        },
-      });
-    }
-  }
-
-  const intelDetail = intelligence
-    ? `${intelligence.framework}, ${intelligence.keyDeps.length} key deps`
-    : 'Skipped (no GitHub access)';
-
-  // Template classification (uses scan results)
-  await updateSubsteps(sessionId, 'scan_and_template', [
-    { label: 'Scanning routes', status: 'done', detail: `${scanResult.routesFound} routes found` },
-    { label: 'Analyzing codebase', status: 'done', detail: intelDetail },
-    { label: 'Applying template', status: 'running' },
-  ]);
-
-  const repoRoutes = await queries.getRoutesByRepo(repositoryId);
-  const routePaths = repoRoutes.map(r => r.path);
-
-  const classification = await classifyTemplate(
-    repositoryId,
-    intelligence?.framework || scanResult.framework || 'unknown',
-    routePaths,
-    account?.accessToken || '',
-    repo.owner || '',
-    repo.name,
-    branch,
-  );
-  const templateId = classification.templateId;
-
-  // Only apply if no template currently set
-  if (!repo.testingTemplate) {
-    await applyTestingTemplate(repositoryId, templateId);
-  }
-
-  await updateSubsteps(sessionId, 'scan_and_template', [
-    { label: 'Scanning routes', status: 'done', detail: `${scanResult.routesFound} routes found` },
-    { label: 'Analyzing codebase', status: 'done', detail: intelDetail },
-    { label: 'Applying template', status: 'done', detail: `${templateId} (${classification.confidence}%)` },
-  ]);
-
-  await setStepCompleted(sessionId, 'scan_and_template', {
-    routesFound: scanResult.routesFound,
-    framework: intelligence?.framework || scanResult.framework,
-    templateApplied: templateId,
-    hasIntelligence: !!intelligence,
-    ...(intelligence ? { intelligenceBrief: buildIntelligenceBrief(intelligence, scanResult.routesFound || 0) } : {}),
-  });
-  return true;
-}
-
-const DISCOVER_POLL_INTERVAL_MS = 2000;
-
-async function tryFallbackDiscovery(
-  sessionId: string,
-  repositoryId: string,
-  branch: string,
-  specDetail?: string,
-  agentFallback?: boolean,
-): Promise<boolean> {
-  const specLabel = specDetail || 'No spec files found';
-  const envConfig = await getEnvironmentConfig(repositoryId);
-  const baseUrl = envConfig?.baseUrl || 'http://localhost:3000';
-
-  // Retrieve codebase intelligence from session metadata (gathered in scan_and_template)
-  const session = await queries.getAgentSession(sessionId);
-  const intelligence = session?.metadata?.codebaseIntelligence as CodebaseIntelligenceContext | undefined;
-
-  // When falling back from agent path, preserve agent context in substeps
-  const agentPrefix = agentFallback ? [
-    { label: 'Agent discovery failed — falling back', status: 'error' as const, agent: 'orchestrator' as const },
-  ] : [];
-
-  // Fallback 1: AI route scan
-  await updateSubsteps(sessionId, 'discover', [
-    ...agentPrefix,
-    { label: 'Finding spec files', status: 'done', detail: specLabel },
-    { label: 'AI route scan', status: 'running' },
-    { label: 'Generating tests', status: 'pending' },
-  ]);
-
+function normalizeUrl(rawUrl: string): string {
   try {
-    const scanResult = await aiScanRoutes(repositoryId, branch, intelligence);
-
-    if (scanResult.success && scanResult.functionalAreas && scanResult.functionalAreas.length > 0) {
-      const saveResult = await saveDiscoveredRoutes(repositoryId, scanResult.functionalAreas);
-
-      if (saveResult.success && saveResult.savedRoutes && saveResult.savedRoutes.length > 0) {
-        const totalRoutes = saveResult.savedRoutes.length;
-        const areaCount = new Set(saveResult.savedRoutes.map((r) => r.areaName)).size;
-
-        await updateSubsteps(sessionId, 'discover', [
-          ...agentPrefix,
-          { label: 'Finding spec files', status: 'done', detail: specLabel },
-          { label: 'AI route scan', status: 'done', detail: `${areaCount} areas, ${totalRoutes} routes` },
-          { label: 'Generating tests', status: 'running' },
-        ]);
-
-        if (await isCancelled(sessionId)) return false;
-
-        const routeIds = saveResult.savedRoutes.map((r) => r.routeId);
-        const genResult = await generateBasicTests(repositoryId, routeIds, baseUrl);
-
-        const testsCreated = genResult.testsCreated + genResult.testsUpdated;
-
-        const session = await queries.getAgentSession(sessionId);
-        if (session) {
-          await queries.updateAgentSession(sessionId, {
-            metadata: { ...session.metadata, testsCreated },
-          });
-        }
-
-        await updateSubsteps(sessionId, 'discover', [
-          ...agentPrefix,
-          { label: 'Finding spec files', status: 'done', detail: specLabel },
-          { label: 'AI route scan', status: 'done', detail: `${areaCount} areas, ${totalRoutes} routes` },
-          { label: 'Generating tests', status: 'done', detail: `${testsCreated} tests` },
-        ]);
-
-        await setStepCompleted(sessionId, 'discover', {
-          method: 'ai_scan',
-          areasFound: areaCount,
-          routesFound: totalRoutes,
-          testsCreated,
-        });
-        return true;
-      }
-    }
+    const parsed = new URL(rawUrl);
+    parsed.pathname = parsed.pathname.replace(/\/{2,}/g, '/');
+    return parsed.toString();
   } catch {
-    // AI scan failed, continue to next fallback
+    return rawUrl;
   }
-
-  if (await isCancelled(sessionId)) return false;
-
-  // Fallback 2: Smoke tests from already-scanned routes
-  await updateSubsteps(sessionId, 'discover', [
-    ...agentPrefix,
-    { label: 'Finding spec files', status: 'done', detail: specLabel },
-    { label: 'AI route scan', status: 'done', detail: 'No routes discovered' },
-    { label: 'Generating smoke tests', status: 'running' },
-  ]);
-
-  const existingRoutes = await queries.getRoutesByRepo(repositoryId);
-
-  if (existingRoutes.length > 0) {
-    const routeIds = existingRoutes.map((r) => r.id);
-    const genResult = await generateBasicTests(repositoryId, routeIds, baseUrl);
-    const testsCreated = genResult.testsCreated + genResult.testsUpdated;
-
-    if (testsCreated > 0) {
-      const session = await queries.getAgentSession(sessionId);
-      if (session) {
-        await queries.updateAgentSession(sessionId, {
-          metadata: { ...session.metadata, testsCreated },
-        });
-      }
-
-      await updateSubsteps(sessionId, 'discover', [
-        ...agentPrefix,
-        { label: 'Finding spec files', status: 'done', detail: specLabel },
-        { label: 'AI route scan', status: 'done', detail: 'No routes discovered' },
-        { label: 'Generating smoke tests', status: 'done', detail: `${testsCreated} tests` },
-      ]);
-
-      await setStepCompleted(sessionId, 'discover', {
-        method: 'smoke_tests',
-        routesUsed: existingRoutes.length,
-        testsCreated,
-      });
-      return true;
-    }
-  }
-
-  // All fallbacks exhausted
-  await updateSubsteps(sessionId, 'discover', [
-    ...agentPrefix,
-    { label: 'Finding spec files', status: 'done', detail: specLabel },
-    { label: 'AI route scan', status: 'done', detail: 'No routes discovered' },
-    { label: 'Generating smoke tests', status: 'done', detail: 'No routes available' },
-  ]);
-
-  await setStepCompleted(sessionId, 'discover', { skipped: true, reason: 'No tests could be generated' });
-  return true;
 }
 
-async function fillMissingUserStories(
-  sessionId: string,
-  repositoryId: string,
-  branch: string,
-  existingTests: Awaited<ReturnType<typeof queries.getTestsByRepo>>,
-  intelligence?: CodebaseIntelligenceContext,
-): Promise<boolean> {
-  // Step 1: Discover spec files (GitHub API, no AI)
-  const specResult = await discoverSpecFiles(repositoryId, branch);
-  if (!specResult.success || !specResult.files || specResult.files.length === 0) {
-    return false; // No spec files → nothing to fill
-  }
-
-  // Step 2: Extract user stories (AI call)
-  await updateSubsteps(sessionId, 'discover', [
-    { label: 'Checking spec coverage', status: 'running' },
-  ]);
-
-  const filePaths = specResult.files.map(f => f.path);
-  const storiesResult = await extractUserStoriesFromFiles(repositoryId, branch, filePaths);
-  if (!storiesResult.success || !storiesResult.stories || storiesResult.stories.length === 0) {
-    return false; // No stories extracted → nothing to fill
-  }
-
-  // Step 3: Find missing stories (area doesn't exist or has 0 tests)
-  const existingAreas = await queries.getFunctionalAreasByRepo(repositoryId);
-  const areaTestCounts = new Map<string, number>();
-  for (const area of existingAreas) {
-    const count = existingTests.filter(t => t.functionalAreaId === area.id).length;
-    areaTestCounts.set(area.name.toLowerCase(), count);
-  }
-
-  const missingStories = storiesResult.stories.filter(story => {
-    const key = story.title.toLowerCase();
-    return !areaTestCounts.has(key) || areaTestCounts.get(key)! === 0;
-  });
-
-  if (missingStories.length === 0) {
-    return false; // All stories covered → use cache
-  }
-
-  // Step 4: Generate tests for missing stories
-  let totalTests = 0;
-  for (const story of missingStories) {
-    if (!story.acceptanceCriteria) continue;
-    const grouped = new Set<string>();
-    for (const ac of story.acceptanceCriteria) {
-      if (ac.groupedWith && grouped.has(ac.groupedWith)) continue;
-      grouped.add(ac.id);
-      totalTests++;
-    }
-  }
-
-  const initialTestCount = existingTests.length;
-
-  await updateSubsteps(sessionId, 'discover', [
-    { label: 'Checking spec coverage', status: 'done', detail: `${missingStories.length} areas missing` },
-    { label: `Generating tests (0/${totalTests})`, status: 'running' },
-  ]);
-
-  const envConfig = await getEnvironmentConfig(repositoryId);
-  const genResult = await generateTestsFromStories(
-    repositoryId,
-    storiesResult.importId ?? null,
-    missingStories,
-    branch,
-    { targetUrl: envConfig?.baseUrl || undefined, codebaseIntelligence: intelligence },
-  );
-
-  const totalExistingAreas = existingAreas.length + genResult.areasCreated;
-
-  await updateSubsteps(sessionId, 'discover', [
-    { label: 'Checking spec coverage', status: 'done', detail: `${missingStories.length} areas missing` },
-    { label: 'Generating tests', status: 'done', detail: `${genResult.testsCreated} new tests` },
-  ]);
-
-  const session = await queries.getAgentSession(sessionId);
-  if (session) {
-    await queries.updateAgentSession(sessionId, {
-      metadata: { ...session.metadata, testsCreated: initialTestCount + genResult.testsCreated },
-    });
-  }
-
-  await setStepCompleted(sessionId, 'discover', {
-    testsCreated: initialTestCount + genResult.testsCreated,
-    areasCreated: totalExistingAreas,
-    newAreasAdded: genResult.areasCreated,
-    newTestsAdded: genResult.testsCreated,
-    fromSpecGapFill: true,
-  });
-  return true;
-}
-
-/**
- * Discover tests using parallel multi-planner pipeline + Generator agents.
- * Runs 4 specialized planners in parallel (browser, code, spec, routes),
- * merges their findings, then feeds into N generator agents.
- */
-async function runDiscoverWithAgents(
-  sessionId: string,
-  repositoryId: string,
-  branch: string,
-): Promise<boolean> {
-  const envConfig = await getEnvironmentConfig(repositoryId);
-  const baseUrl = envConfig?.baseUrl || 'http://localhost:3000';
-
-  // Retrieve codebase intelligence from session metadata
-  const sessionData = await queries.getAgentSession(sessionId);
-  const intelligence = sessionData?.metadata?.codebaseIntelligence as CodebaseIntelligenceContext | undefined;
-
-  // Mutable substep states for parallel updates
-  type SubstepStatus = 'pending' | 'running' | 'done' | 'error';
-  const plannerStates: Array<{ label: string; status: SubstepStatus; detail?: string; agent?: 'orchestrator' | 'planner' | 'generator' }> = [
-    { label: 'Coordinating multi-planner pipeline', status: 'running', agent: 'orchestrator' },
-    { label: 'Exploring app via browser', status: 'pending', agent: 'planner' },
-    { label: 'Scanning codebase routes', status: 'pending', agent: 'planner' },
-    { label: 'Analyzing spec files', status: 'pending', agent: 'planner' },
-    { label: 'Checking route coverage', status: 'pending', agent: 'planner' },
-    { label: 'Generating test code', status: 'pending', agent: 'generator' },
-  ];
-
-  const flushSubsteps = () => updateSubsteps(sessionId, 'discover', [...plannerStates]);
-  await flushSubsteps();
-
-  if (await isCancelled(sessionId)) return false;
-
-  // Phase 1: Launch all 4 planners in parallel
-  plannerStates[0].status = 'done';
-  await flushSubsteps();
-
-  const { runBrowserPlanner } = await import('@/lib/playwright/planners/browser-planner');
-  const { runCodePlanner } = await import('@/lib/playwright/planners/code-planner');
-  const { runSpecPlanner } = await import('@/lib/playwright/planners/spec-planner');
-  const { runRoutePlanner } = await import('@/lib/playwright/planners/route-planner');
-
-  // Wrap each planner to update its substep slot
-  const wrapPlanner = <T extends unknown[]>(
-    idx: number,
-    fn: (...args: T) => Promise<import('@/lib/playwright/planner-types').PlannerResult>,
-    ...args: T
-  ) => {
-    plannerStates[idx].status = 'running';
-    flushSubsteps();
-    return fn(...args).then(result => {
-      plannerStates[idx].status = result.error ? 'error' : 'done';
-      plannerStates[idx].detail = result.error
-        ? result.error.slice(0, 60)
-        : `${result.areas.length} areas`;
-      flushSubsteps();
-      return result;
-    }).catch(err => {
-      plannerStates[idx].status = 'error';
-      plannerStates[idx].detail = err instanceof Error ? err.message.slice(0, 60) : 'Failed';
-      flushSubsteps();
-      return { source: 'browser' as const, areas: [], error: String(err) };
-    });
-  };
-
-  const plannerResults = await Promise.allSettled([
-    wrapPlanner(1, runBrowserPlanner, repositoryId, baseUrl),
-    wrapPlanner(2, runCodePlanner, repositoryId, branch, intelligence),
-    wrapPlanner(3, runSpecPlanner, repositoryId, branch),
-    wrapPlanner(4, runRoutePlanner, repositoryId),
-  ]);
-
-  if (await isCancelled(sessionId)) return false;
-
-  // Phase 2: Merge results
-  const { mergePlannerResults } = await import('@/lib/playwright/planner-merger');
-  const fulfilledResults = plannerResults
-    .filter((r): r is PromiseFulfilledResult<import('@/lib/playwright/planner-types').PlannerResult> => r.status === 'fulfilled')
-    .map(r => r.value)
-    .filter(r => r.areas.length > 0);
-
-  const mergedAreas = mergePlannerResults(fulfilledResults);
-  const sourcesUsed = new Set(fulfilledResults.map(r => r.source)).size;
-
-  if (mergedAreas.length === 0) {
-    // All planners failed or found nothing — fall back
-    return tryFallbackDiscovery(sessionId, repositoryId, branch, undefined, true);
-  }
-
-  const areaCount = mergedAreas.length;
-  const routeCount = mergedAreas.reduce((sum, a) => sum + a.routes.length, 0);
-
-  // Save merged areas and routes to DB
-  const { saveDiscoveredRoutes: saveRoutes } = await import('./ai-routes');
-  const saveResult = await saveRoutes(repositoryId, mergedAreas.map(a => ({
-    name: a.name,
-    routes: a.routes.map(r => ({
-      path: r,
-      type: (r.includes('[') || r.includes(':') ? 'dynamic' : 'static') as 'static' | 'dynamic',
-    })),
-  })));
-
-  // Save agent plans to functional areas
-  for (const area of mergedAreas) {
-    if (area.testPlan) {
-      const dbArea = await queries.getOrCreateFunctionalAreaByRepo(
-        repositoryId,
-        area.name,
-        area.description,
-      );
-      await queries.updateFunctionalArea(dbArea.id, {
-        agentPlan: area.testPlan,
-        planGeneratedAt: new Date(),
-      });
-    }
-  }
-
-  // Phase 3: Generator agents create tests
-  plannerStates[5].status = 'running';
-  plannerStates[5].detail = `${areaCount} areas from ${sourcesUsed} sources`;
-  await flushSubsteps();
-
-  if (await isCancelled(sessionId)) return false;
-
-  let testsCreated = 0;
-
-  // Generate basic tests from saved routes
-  if (saveResult.savedRoutes && saveResult.savedRoutes.length > 0) {
-    const routeIds = saveResult.savedRoutes.map(r => r.routeId);
-    const genResult = await generateBasicTests(repositoryId, routeIds, baseUrl);
-    testsCreated = genResult.testsCreated + genResult.testsUpdated;
-  }
-
-  // Use Generator agent for richer tests from area plans
-  const dbAreas = await queries.getFunctionalAreasByRepo(repositoryId);
-  const areasWithPlans = dbAreas.filter(a => a.agentPlan);
-
-  if (areasWithPlans.length > 0) {
-    const { agentCreateTest } = await import('@/lib/playwright/generator-agent');
-    const targetAreas = areasWithPlans.slice(0, 8);
-    const GENERATOR_CONCURRENCY = 3;
-
-    for (let batch = 0; batch < targetAreas.length; batch += GENERATOR_CONCURRENCY) {
-      if (await isCancelled(sessionId)) return false;
-
-      const chunk = targetAreas.slice(batch, batch + GENERATOR_CONCURRENCY);
-      const completed = Math.min(batch, targetAreas.length);
-
-      plannerStates[5].label = `Generating tests (${completed}/${targetAreas.length})`;
-      plannerStates[5].detail = `${chunk.length} generators in parallel`;
-      await flushSubsteps();
-
-      const results = await Promise.allSettled(
-        chunk.map(async (area) => {
-          const genResult = await agentCreateTest(repositoryId, {
-            functionalAreaId: area.id,
-            baseUrl,
-          });
-          if (genResult.success && genResult.code) {
-            await queries.createTest({
-              repositoryId,
-              functionalAreaId: area.id,
-              name: `${area.name} - Agent Test`,
-              code: genResult.code,
-              targetUrl: baseUrl,
-            });
-            return true;
-          }
-          return false;
-        }),
-      );
-
-      testsCreated += results.filter(r => r.status === 'fulfilled' && r.value).length;
-    }
-  }
-
-  const session = await queries.getAgentSession(sessionId);
-  if (session) {
-    await queries.updateAgentSession(sessionId, {
-      metadata: { ...session.metadata, testsCreated },
-    });
-  }
-
-  plannerStates[0].label = 'Multi-planner pipeline complete';
-  plannerStates[5].status = 'done';
-  plannerStates[5].label = `Generated ${testsCreated} tests`;
-  plannerStates[5].detail = `${areaCount} areas, ${routeCount} routes`;
-  await flushSubsteps();
-
-  await setStepCompleted(sessionId, 'discover', {
-    method: 'pw_agents_parallel',
-    areasFound: areaCount,
-    routesFound: routeCount,
-    testsCreated,
-    sourcesUsed,
-  });
-  return true;
-}
-
-async function runDiscover(sessionId: string, repositoryId: string) {
-  await setStepActive(sessionId, 'discover');
-  if (await isCancelled(sessionId)) return false;
-
-  // Retrieve codebase intelligence from session metadata
-  const discoverSession = await queries.getAgentSession(sessionId);
-  const discoverIntelligence = discoverSession?.metadata?.codebaseIntelligence as CodebaseIntelligenceContext | undefined;
-
-  const repo = await queries.getRepository(repositoryId);
-  if (!repo) {
-    await setStepFailed(sessionId, 'discover', 'Repository not found');
-    return false;
-  }
-
-  const branch = repo.selectedBranch || repo.defaultBranch || 'main';
-
-  // Check if PW agents are enabled — if so, always use Planner + Generator
-  const aiSettings = await getAISettings(repositoryId);
-  if (aiSettings?.pwAgentEnabled) {
-    return runDiscoverWithAgents(sessionId, repositoryId, branch);
-  }
-
-  // Cache: if tests exist, check for missing user story areas before skipping
-  const existingTests = await queries.getTestsByRepo(repositoryId);
-  if (existingTests.length > 0) {
-    // Try to fill missing user story areas from spec files
-    const filled = await fillMissingUserStories(
-      sessionId, repositoryId, branch, existingTests, discoverIntelligence
-    );
-    if (filled) return true;
-
-    // No gaps found — use cache
-    const existingAreas = await queries.getFunctionalAreasByRepo(repositoryId);
-    await updateSubsteps(sessionId, 'discover', [
-      { label: 'Using existing tests', status: 'done', detail: `${existingTests.length} tests in ${existingAreas.length} areas` },
-    ]);
-
-    const session = await queries.getAgentSession(sessionId);
-    if (session) {
-      await queries.updateAgentSession(sessionId, {
-        metadata: { ...session.metadata, testsCreated: existingTests.length },
-      });
-    }
-
-    await setStepCompleted(sessionId, 'discover', {
-      testsCreated: existingTests.length,
-      areasCreated: existingAreas.length,
-      cached: true,
-    });
-    return true;
-  }
-
-  // Substep 1: Discover spec files
-  await updateSubsteps(sessionId, 'discover', [
-    { label: 'Finding spec files', status: 'running' },
-    { label: 'Extracting user stories', status: 'pending' },
-    { label: 'Generating tests', status: 'pending' },
-  ]);
-
-  const specResult = await discoverSpecFiles(repositoryId, branch);
-
-  if (!specResult.success || !specResult.files || specResult.files.length === 0) {
-    return tryFallbackDiscovery(sessionId, repositoryId, branch);
-  }
-
-  if (await isCancelled(sessionId)) return false;
-
-  // Substep 2: Extract user stories
-  await updateSubsteps(sessionId, 'discover', [
-    { label: 'Finding spec files', status: 'done', detail: `${specResult.files.length} files` },
-    { label: 'Extracting user stories', status: 'running' },
-    { label: 'Generating tests', status: 'pending' },
-  ]);
-
-  const filePaths = specResult.files.map((f) => f.path);
-  const storiesResult = await extractUserStoriesFromFiles(repositoryId, branch, filePaths);
-
-  if (!storiesResult.success || !storiesResult.stories || storiesResult.stories.length === 0) {
-    // No stories from specs — fall through to AI scan / smoke test fallbacks
-    return tryFallbackDiscovery(
-      sessionId, repositoryId, branch,
-      `${specResult.files.length} files (no stories extracted)`,
-    );
-  }
-
-  if (await isCancelled(sessionId)) return false;
-
-  // Count total tests to generate
-  let totalTests = 0;
-  for (const story of storiesResult.stories) {
-    if (!story.acceptanceCriteria) continue;
-    const grouped = new Set<string>();
-    for (const ac of story.acceptanceCriteria) {
-      if (ac.groupedWith && grouped.has(ac.groupedWith)) continue;
-      grouped.add(ac.id);
-      totalTests++;
-    }
-  }
-
-  // Snapshot initial test count before generation
-  const initialTestCount = (await queries.getTestsByRepo(repositoryId)).length;
-
-  // Substep 3: Generate tests — fire off in background
-  await updateSubsteps(sessionId, 'discover', [
-    { label: 'Finding spec files', status: 'done', detail: `${specResult.files.length} files` },
-    { label: 'Extracting user stories', status: 'done', detail: `${storiesResult.stories.length} stories` },
-    { label: `Generating tests (0/${totalTests})`, status: 'running' },
-  ]);
-
-  const envConfig = await getEnvironmentConfig(repositoryId);
-
-  let genDone = false;
-  let genError: string | null = null;
-
-  const genPromise = generateTestsFromStories(
-    repositoryId,
-    storiesResult.importId ?? null,
-    storiesResult.stories,
-    branch,
-    { targetUrl: envConfig?.baseUrl || undefined, codebaseIntelligence: discoverIntelligence },
-  );
-
-  genPromise
-    .then(() => { genDone = true; })
-    .catch((err) => {
-      genError = err instanceof Error ? err.message : 'Generation failed';
-      genDone = true;
-    });
-
-  // Poll progress until generation completes or user skips
-  while (!genDone) {
-    await new Promise((r) => setTimeout(r, DISCOVER_POLL_INTERVAL_MS));
-
-    if (await isCancelled(sessionId)) return false;
-
-    const currentTestCount = (await queries.getTestsByRepo(repositoryId)).length;
-    const generated = Math.max(0, currentTestCount - initialTestCount);
-
-    await updateSubsteps(sessionId, 'discover', [
-      { label: 'Finding spec files', status: 'done', detail: `${specResult.files.length} files` },
-      { label: 'Extracting user stories', status: 'done', detail: `${storiesResult.stories.length} stories` },
-      { label: `Generating tests (${generated}/${totalTests})`, status: 'running' },
-    ]);
-
-    // Check for skip flag
-    const sess = await queries.getAgentSession(sessionId);
-    if (sess?.metadata.skipDiscovery && generated >= 1) {
-      const remaining = totalTests - generated;
-      await updateSubsteps(sessionId, 'discover', [
-        { label: 'Finding spec files', status: 'done', detail: `${specResult.files.length} files` },
-        { label: 'Extracting user stories', status: 'done', detail: `${storiesResult.stories.length} stories` },
-        { label: `Generated ${generated} tests`, status: 'done', detail: remaining > 0 ? `+${remaining} in background` : undefined },
-      ]);
-
-      await queries.updateAgentSession(sessionId, {
-        metadata: { ...sess.metadata, testsCreated: generated },
-      });
-
-      await setStepCompleted(sessionId, 'discover', {
-        specsFound: specResult.files.length,
-        storiesExtracted: storiesResult.stories.length,
-        testsCreated: generated,
-        areasCreated: 0,
-        ...(remaining > 0 ? { skippedRemaining: remaining } : {}),
-      });
-      // Generation continues in background — we proceed with onboarding
-      return true;
-    }
-  }
-
-  // Generation completed normally
-  if (genError) {
-    await setStepFailed(sessionId, 'discover', genError);
-    return false;
-  }
-
-  // Re-await to get typed result (already resolved at this point)
-  let finalResult: { testsCreated: number; areasCreated: number };
+async function detectLoginRequired(
+  baseUrl: string,
+): Promise<{ needsLogin: boolean; loginUrl?: string; hasRegisterLink?: boolean; registerUrl?: string; pageContent: string }> {
+  let browser = null;
   try {
-    const r = await genPromise;
-    finalResult = { testsCreated: r.testsCreated, areasCreated: r.areasCreated };
-  } catch {
-    await setStepFailed(sessionId, 'discover', 'Generation failed');
-    return false;
-  }
+    browser = await chromium.launch({ headless: true });
+    const context = await browser.newContext({ viewport: { width: 1280, height: 720 } });
+    const page = await context.newPage();
+    await page.goto(baseUrl, { waitUntil: 'networkidle', timeout: 15000 }).catch(() => {});
+    await page.waitForLoadState('domcontentloaded').catch(() => {});
 
-  const session = await queries.getAgentSession(sessionId);
-  if (session) {
-    await queries.updateAgentSession(sessionId, {
-      metadata: { ...session.metadata, testsCreated: finalResult.testsCreated },
+    const url = normalizeUrl(page.url());
+    const title = await page.title();
+    const bodyText = await page.evaluate(() => document.body?.innerText?.slice(0, 3000) || '');
+    const forms = await page.evaluate(() => {
+      const formEls = document.querySelectorAll('form');
+      return Array.from(formEls).map(f => ({
+        action: f.action,
+        inputs: Array.from(f.querySelectorAll('input')).map(i => ({
+          type: i.type, name: i.name, placeholder: i.placeholder,
+        })),
+      }));
     });
+    const links = (await page.evaluate(() => {
+      return Array.from(document.querySelectorAll('a')).map(a => ({
+        href: a.href, text: a.textContent?.trim().slice(0, 50),
+      })).filter(l => l.text && l.text.length > 0).slice(0, 30);
+    })).map(l => ({ ...l, href: normalizeUrl(l.href) }));
+
+    const pageContent = JSON.stringify({ url, title, bodyText: bodyText.slice(0, 2000), forms, links }, null, 2);
+
+    const hasPasswordField = forms.some(f => f.inputs.some(i => i.type === 'password'));
+    const loginSegments = new Set(['login', 'signin', 'sign-in', 'auth', 'sign_in']);
+    const pathSegments = new URL(url).pathname.split('/').map(s => s.toLowerCase());
+    const isLoginPage = pathSegments.some(s => loginSegments.has(s));
+
+    if (hasPasswordField || isLoginPage) {
+      const registerLink = links.find(l => {
+        const t = (l.text || '').toLowerCase();
+        const h = (l.href || '').toLowerCase();
+        return t.includes('register') || t.includes('sign up') || t.includes('create account')
+          || h.includes('/register') || h.includes('/signup');
+      });
+
+      return {
+        needsLogin: true,
+        loginUrl: isLoginPage ? url : undefined,
+        hasRegisterLink: !!registerLink,
+        registerUrl: registerLink?.href ? normalizeUrl(registerLink.href) : undefined,
+        pageContent,
+      };
+    }
+
+    return { needsLogin: false, pageContent };
+  } catch {
+    return { needsLogin: false, pageContent: '' };
+  } finally {
+    if (browser) await browser.close().catch(() => {});
   }
-
-  await updateSubsteps(sessionId, 'discover', [
-    { label: 'Finding spec files', status: 'done', detail: `${specResult.files.length} files` },
-    { label: 'Extracting user stories', status: 'done', detail: `${storiesResult.stories.length} stories` },
-    { label: 'Generating tests', status: 'done', detail: `${finalResult.testsCreated} tests` },
-  ]);
-
-  await setStepCompleted(sessionId, 'discover', {
-    specsFound: specResult.files.length,
-    storiesExtracted: storiesResult.stories.length,
-    testsCreated: finalResult.testsCreated,
-    areasCreated: finalResult.areasCreated,
-  });
-  return true;
 }
 
 async function getAIConfig(repositoryId?: string | null): Promise<AIProviderConfig> {
@@ -989,86 +321,6 @@ CONSTRAINTS:
 - Use realistic test data (test@example.com, Password123!, etc.)
 - page.waitForURL() predicates receive a URL object, not a string. Use url.href or url.toString() for string operations`;
 
-function normalizeUrl(rawUrl: string): string {
-  try {
-    const parsed = new URL(rawUrl);
-    parsed.pathname = parsed.pathname.replace(/\/{2,}/g, '/');
-    return parsed.toString();
-  } catch {
-    return rawUrl;
-  }
-}
-
-/**
- * Detect if a page at the given URL requires login by checking page content.
- */
-async function detectLoginRequired(
-  baseUrl: string,
-): Promise<{ needsLogin: boolean; loginUrl?: string; hasRegisterLink?: boolean; registerUrl?: string; pageContent: string }> {
-  let browser = null;
-  try {
-    browser = await chromium.launch({ headless: true });
-    const context = await browser.newContext({ viewport: { width: 1280, height: 720 } });
-    const page = await context.newPage();
-    await page.goto(baseUrl, { waitUntil: 'networkidle', timeout: 15000 }).catch(() => {});
-    await page.waitForLoadState('domcontentloaded').catch(() => {});
-
-    // Get page content for AI analysis
-    const url = normalizeUrl(page.url());
-    const title = await page.title();
-    const bodyText = await page.evaluate(() => document.body?.innerText?.slice(0, 3000) || '');
-    const forms = await page.evaluate(() => {
-      const formEls = document.querySelectorAll('form');
-      return Array.from(formEls).map(f => ({
-        action: f.action,
-        inputs: Array.from(f.querySelectorAll('input')).map(i => ({
-          type: i.type, name: i.name, placeholder: i.placeholder,
-        })),
-      }));
-    });
-    const links = (await page.evaluate(() => {
-      return Array.from(document.querySelectorAll('a')).map(a => ({
-        href: a.href, text: a.textContent?.trim().slice(0, 50),
-      })).filter(l => l.text && l.text.length > 0).slice(0, 30);
-    })).map(l => ({ ...l, href: normalizeUrl(l.href) }));
-
-    const pageContent = JSON.stringify({ url, title, bodyText: bodyText.slice(0, 2000), forms, links }, null, 2);
-
-    // Quick heuristic before AI — check for obvious login indicators
-    const hasPasswordField = forms.some(f => f.inputs.some(i => i.type === 'password'));
-    const loginSegments = new Set(['login', 'signin', 'sign-in', 'auth', 'sign_in']);
-    const pathSegments = new URL(url).pathname.split('/').map(s => s.toLowerCase());
-    const isLoginPage = pathSegments.some(s => loginSegments.has(s));
-
-    if (hasPasswordField || isLoginPage) {
-      // Check for register link
-      const registerLink = links.find(l => {
-        const t = (l.text || '').toLowerCase();
-        const h = (l.href || '').toLowerCase();
-        return t.includes('register') || t.includes('sign up') || t.includes('create account')
-          || h.includes('/register') || h.includes('/signup');
-      });
-
-      return {
-        needsLogin: true,
-        loginUrl: isLoginPage ? url : undefined,
-        hasRegisterLink: !!registerLink,
-        registerUrl: registerLink?.href ? normalizeUrl(registerLink.href) : undefined,
-        pageContent,
-      };
-    }
-
-    return { needsLogin: false, pageContent };
-  } catch {
-    return { needsLogin: false, pageContent: '' };
-  } finally {
-    if (browser) await browser.close().catch(() => {});
-  }
-}
-
-/**
- * Generate a register+login setup script using AI, given page context.
- */
 async function aiGenerateLoginScript(
   repositoryId: string,
   baseUrl: string,
@@ -1076,6 +328,7 @@ async function aiGenerateLoginScript(
   hasRegister: boolean,
   registerUrl?: string,
   loginUrl?: string,
+  signal?: AbortSignal,
 ): Promise<{ success: boolean; code?: string; error?: string }> {
   try {
     const config = await getAIConfig(repositoryId);
@@ -1099,18 +352,17 @@ Use stepLogger.log() to report progress.`;
     const response = await generateWithAI(config, prompt, LOGIN_SCRIPT_SYSTEM_PROMPT, {
       actionType: 'create_test',
       repositoryId,
+      signal,
     });
     const code = extractCodeFromResponse(response);
     return { success: true, code };
   } catch (error) {
+    if (error instanceof Error && error.message === 'Aborted') throw error;
     const message = error instanceof Error ? error.message : 'Failed to generate login script';
     return { success: false, error: message };
   }
 }
 
-/**
- * Test a login script by running it in a temporary browser.
- */
 async function testLoginScript(
   code: string,
   baseUrl: string,
@@ -1149,14 +401,13 @@ async function testLoginScript(
   }
 }
 
-async function runEnvSetup(sessionId: string, repositoryId: string) {
+async function runEnvSetup(sessionId: string, repositoryId: string, _teamId: string, signal: AbortSignal) {
   await setStepActive(sessionId, 'env_setup');
-  if (await isCancelled(sessionId)) return false;
+  if (isAborted(signal)) return false;
 
   const envConfig = await getEnvironmentConfig(repositoryId);
   const baseUrl = envConfig?.baseUrl;
 
-  // Substep 1: Check base URL
   await updateSubsteps(sessionId, 'env_setup', [
     { label: 'Checking base URL', status: 'running' },
     { label: 'Detecting login', status: 'pending' },
@@ -1193,9 +444,8 @@ async function runEnvSetup(sessionId: string, repositoryId: string) {
     return false;
   }
 
-  if (await isCancelled(sessionId)) return false;
+  if (isAborted(signal)) return false;
 
-  // Substep 2: Detect login
   await updateSubsteps(sessionId, 'env_setup', [
     { label: 'Checking base URL', status: 'done', detail: `${connResult.responseTime}ms` },
     { label: 'Detecting login', status: 'running' },
@@ -1204,7 +454,7 @@ async function runEnvSetup(sessionId: string, repositoryId: string) {
 
   const loginDetection = await detectLoginRequired(baseUrl);
 
-  // Check if setup steps or scripts already exist — skip login generation to avoid duplicates
+  // Check if setup steps or scripts already exist
   if (loginDetection.needsLogin) {
     const existingSteps = await queries.getDefaultSetupSteps(repositoryId);
     const hasScriptStep = existingSteps.some(s => s.stepType === 'script');
@@ -1227,7 +477,6 @@ async function runEnvSetup(sessionId: string, repositoryId: string) {
   }
 
   if (!loginDetection.needsLogin) {
-    // No login needed — done
     await updateSubsteps(sessionId, 'env_setup', [
       { label: 'Checking base URL', status: 'done', detail: `${connResult.responseTime}ms` },
       { label: 'Detecting login', status: 'done', detail: 'Not required' },
@@ -1241,9 +490,9 @@ async function runEnvSetup(sessionId: string, repositoryId: string) {
     return true;
   }
 
-  if (await isCancelled(sessionId)) return false;
+  if (isAborted(signal)) return false;
 
-  // Substep 3: Generate and test login script
+  // Generate and test login script
   await updateSubsteps(sessionId, 'env_setup', [
     { label: 'Checking base URL', status: 'done', detail: `${connResult.responseTime}ms` },
     { label: 'Detecting login', status: 'done', detail: loginDetection.hasRegisterLink ? 'Register + Login' : 'Login required' },
@@ -1257,6 +506,7 @@ async function runEnvSetup(sessionId: string, repositoryId: string) {
     loginDetection.hasRegisterLink ?? false,
     loginDetection.registerUrl,
     loginDetection.loginUrl,
+    signal,
   );
 
   if (!scriptResult.success || !scriptResult.code) {
@@ -1269,9 +519,8 @@ async function runEnvSetup(sessionId: string, repositoryId: string) {
     return false;
   }
 
-  if (await isCancelled(sessionId)) return false;
+  if (isAborted(signal)) return false;
 
-  // Test the generated script
   await updateSubsteps(sessionId, 'env_setup', [
     { label: 'Checking base URL', status: 'done', detail: `${connResult.responseTime}ms` },
     { label: 'Detecting login', status: 'done', detail: loginDetection.hasRegisterLink ? 'Register + Login' : 'Login required' },
@@ -1281,7 +530,6 @@ async function runEnvSetup(sessionId: string, repositoryId: string) {
   const testResult = await testLoginScript(scriptResult.code, baseUrl, repositoryId);
 
   if (!testResult.success) {
-    // Script failed — save it as draft so user can fix, then pause
     const savedScript = await queries.createSetupScript({
       repositoryId,
       name: 'Auto-generated Login (needs fix)',
@@ -1296,7 +544,6 @@ async function runEnvSetup(sessionId: string, repositoryId: string) {
       { label: 'Testing login script', status: 'error', detail: testResult.error?.slice(0, 80) },
     ]);
 
-    // Store script ID in metadata for later reference
     const session = await queries.getAgentSession(sessionId);
     if (session) {
       await queries.updateAgentSession(sessionId, {
@@ -1312,7 +559,6 @@ async function runEnvSetup(sessionId: string, repositoryId: string) {
     return false;
   }
 
-  // Script works — save it and add as default setup step
   const savedScript = await queries.createSetupScript({
     repositoryId,
     name: 'Login Setup',
@@ -1329,19 +575,645 @@ async function runEnvSetup(sessionId: string, repositoryId: string) {
     { label: 'Login setup added', status: 'done', detail: `${testResult.duration}ms` },
   ]);
 
+  // Rich result: include login script code for visibility
+  const richResult: AgentStepRichResult = {
+    type: 'env_setup',
+    loginScript: scriptResult.code,
+    pageContext: loginDetection.pageContent,
+  };
+
   await setStepCompleted(sessionId, 'env_setup', {
     url: baseUrl,
     responseTime: connResult.responseTime,
     loginRequired: true,
     loginSetup: true,
     loginScriptId: savedScript.id,
+  }, richResult);
+  return true;
+}
+
+// ============================================
+// Scan & Template (now step 4)
+// ============================================
+
+/** Convert full CodebaseIntelligence to the lighter context type for prompts */
+function toIntelligenceContext(intel: CodebaseIntelligence): CodebaseIntelligenceContext {
+  return {
+    framework: intel.framework,
+    cssFramework: intel.cssFramework,
+    selectorStrategy: intel.selectorStrategy,
+    authMechanism: intel.authMechanism,
+    projectDescription: intel.projectDescription,
+    testingRecommendations: intel.testingRecommendations,
+    stateManagement: intel.stateManagement,
+    apiLayer: intel.apiLayer,
+  };
+}
+
+function buildIntelligenceBrief(intel: CodebaseIntelligence, routeCount: number): Record<string, unknown> {
+  return {
+    framework: intel.framework,
+    auth: intel.authMechanism,
+    css: intel.cssFramework,
+    stateManagement: intel.stateManagement,
+    apiLayer: intel.apiLayer,
+    keyDeps: intel.keyDeps.map(d => d.name),
+    selectorStrategy: intel.selectorStrategy,
+    projectDescription: intel.projectDescription || undefined,
+    testingRecommendations: intel.testingRecommendations,
+    routeCount,
+  };
+}
+
+async function runScanAndTemplate(sessionId: string, repositoryId: string, _teamId: string, signal: AbortSignal) {
+  await setStepActive(sessionId, 'scan_and_template');
+  if (isAborted(signal)) return false;
+
+  const repo = await queries.getRepository(repositoryId);
+  if (!repo) {
+    await setStepFailed(sessionId, 'scan_and_template', 'Repository not found');
+    return false;
+  }
+
+  const branch = repo.selectedBranch || repo.defaultBranch || 'main';
+  const account = repo.teamId ? await queries.getGithubAccountByTeam(repo.teamId) : null;
+
+  await updateSubsteps(sessionId, 'scan_and_template', [
+    { label: 'Scanning routes', status: 'running' },
+    { label: 'Analyzing codebase', status: 'running' },
+    { label: 'Applying template', status: 'pending' },
+  ]);
+
+  const [scanResult, intelligence] = await Promise.all([
+    startRemoteRouteScan(repositoryId, branch),
+    account
+      ? gatherCodebaseIntelligence(account.accessToken, repo.owner || '', repo.name, branch).catch(() => null)
+      : Promise.resolve(null),
+  ]);
+
+  if (!scanResult.success) {
+    await updateSubsteps(sessionId, 'scan_and_template', [
+      { label: 'Scanning routes', status: 'error', detail: scanResult.error },
+      { label: 'Analyzing codebase', status: intelligence ? 'done' : 'error' },
+      { label: 'Applying template', status: 'pending' },
+    ]);
+    await setStepFailed(sessionId, 'scan_and_template', scanResult.error || 'Scan failed');
+    return false;
+  }
+
+  if (isAborted(signal)) return false;
+
+  if (intelligence) {
+    const session = await queries.getAgentSession(sessionId);
+    if (session) {
+      await queries.updateAgentSession(sessionId, {
+        metadata: {
+          ...session.metadata,
+          codebaseIntelligence: toIntelligenceContext(intelligence),
+          intelligenceBrief: buildIntelligenceBrief(intelligence, scanResult.routesFound || 0),
+        },
+      });
+    }
+  }
+
+  const intelDetail = intelligence
+    ? `${intelligence.framework}, ${intelligence.keyDeps.length} key deps`
+    : 'Skipped (no GitHub access)';
+
+  await updateSubsteps(sessionId, 'scan_and_template', [
+    { label: 'Scanning routes', status: 'done', detail: `${scanResult.routesFound} routes found` },
+    { label: 'Analyzing codebase', status: 'done', detail: intelDetail },
+    { label: 'Applying template', status: 'running' },
+  ]);
+
+  const repoRoutes = await queries.getRoutesByRepo(repositoryId);
+  const routePaths = repoRoutes.map(r => r.path);
+
+  const classification = await classifyTemplate(
+    repositoryId,
+    intelligence?.framework || scanResult.framework || 'unknown',
+    routePaths,
+    account?.accessToken || '',
+    repo.owner || '',
+    repo.name,
+    branch,
+  );
+  const templateId = classification.templateId;
+
+  if (!repo.testingTemplate) {
+    await applyTestingTemplate(repositoryId, templateId);
+  }
+
+  await updateSubsteps(sessionId, 'scan_and_template', [
+    { label: 'Scanning routes', status: 'done', detail: `${scanResult.routesFound} routes found` },
+    { label: 'Analyzing codebase', status: 'done', detail: intelDetail },
+    { label: 'Applying template', status: 'done', detail: `${templateId} (${classification.confidence}%)` },
+  ]);
+
+  // Build rich result with actual routes
+  const richResult: AgentStepRichResult = {
+    type: 'scan_and_template',
+    routes: repoRoutes.map(r => ({ path: r.path, type: r.type || 'static' })),
+    framework: (intelligence?.framework || scanResult.framework) ?? undefined,
+    template: templateId,
+    intelligence: intelligence ? buildIntelligenceBrief(intelligence, scanResult.routesFound || 0) : undefined,
+  };
+
+  await setStepCompleted(sessionId, 'scan_and_template', {
+    routesFound: scanResult.routesFound,
+    framework: intelligence?.framework || scanResult.framework,
+    templateApplied: templateId,
+    hasIntelligence: !!intelligence,
+    ...(intelligence ? { intelligenceBrief: buildIntelligenceBrief(intelligence, scanResult.routesFound || 0) } : {}),
+  }, richResult);
+  return true;
+}
+
+// ============================================
+// Plan (step 5) — formerly first half of discover
+// ============================================
+
+async function runPlanWithAgents(
+  sessionId: string,
+  repositoryId: string,
+  branch: string,
+  signal: AbortSignal,
+): Promise<boolean> {
+  const envConfig = await getEnvironmentConfig(repositoryId);
+  const baseUrl = envConfig?.baseUrl || 'http://localhost:3000';
+
+  const sessionData = await queries.getAgentSession(sessionId);
+  const intelligence = sessionData?.metadata?.codebaseIntelligence as CodebaseIntelligenceContext | undefined;
+
+  type SubstepState = NonNullable<AgentStepState['substeps']>[number];
+  const plannerStates: SubstepState[] = [
+    { label: 'Coordinating multi-planner pipeline', status: 'running', agent: 'orchestrator' },
+    { label: 'Exploring app via browser', status: 'pending', agent: 'planner', source: 'browser' },
+    { label: 'Scanning codebase routes', status: 'pending', agent: 'planner', source: 'code' },
+    { label: 'Analyzing spec files', status: 'pending', agent: 'planner', source: 'spec' },
+    { label: 'Checking route coverage', status: 'pending', agent: 'planner', source: 'routes' },
+  ];
+
+  const flushSubsteps = () => updateSubsteps(sessionId, 'plan', [...plannerStates]);
+  await flushSubsteps();
+
+  if (isAborted(signal)) return false;
+
+  plannerStates[0].status = 'done';
+  await flushSubsteps();
+
+  const { runBrowserPlanner } = await import('@/lib/playwright/planners/browser-planner');
+  const { runCodePlanner } = await import('@/lib/playwright/planners/code-planner');
+  const { runSpecPlanner } = await import('@/lib/playwright/planners/spec-planner');
+  const { runRoutePlanner } = await import('@/lib/playwright/planners/route-planner');
+
+  const wrapPlanner = <T extends unknown[]>(
+    idx: number,
+    fn: (...args: T) => Promise<import('@/lib/playwright/planner-types').PlannerResult>,
+    ...args: T
+  ) => {
+    plannerStates[idx].status = 'running';
+    flushSubsteps();
+    return fn(...args).then(result => {
+      plannerStates[idx].status = result.error ? 'error' : 'done';
+      plannerStates[idx].detail = result.error
+        ? result.error.slice(0, 60)
+        : `${result.areas.length} areas`;
+      // Enrich substep with observability data
+      plannerStates[idx].durationMs = result.durationMs;
+      plannerStates[idx].areasFound = result.areas.length;
+      plannerStates[idx].promptLogId = result.promptLogId;
+      plannerStates[idx].inputSummary = result.inputSummary;
+      plannerStates[idx].outputSummary = result.areas.length > 0
+        ? result.areas.map(a => a.name).join(', ')
+        : undefined;
+      plannerStates[idx].rawError = result.error;
+      flushSubsteps();
+      return result;
+    }).catch(err => {
+      plannerStates[idx].status = 'error';
+      plannerStates[idx].detail = err instanceof Error ? err.message.slice(0, 60) : 'Failed';
+      plannerStates[idx].rawError = err instanceof Error ? err.message : String(err);
+      plannerStates[idx].durationMs = 0;
+      flushSubsteps();
+      return { source: 'browser' as const, areas: [], error: String(err), rawOutput: undefined };
+    });
+  };
+
+  const plannerResults = await Promise.allSettled([
+    wrapPlanner(1, runBrowserPlanner, repositoryId, baseUrl),
+    wrapPlanner(2, runCodePlanner, repositoryId, branch, intelligence),
+    wrapPlanner(3, runSpecPlanner, repositoryId, branch),
+    wrapPlanner(4, runRoutePlanner, repositoryId),
+  ]);
+
+  if (isAborted(signal)) return false;
+
+  // Store individual planner results in metadata for re-run capability
+  const allPlannerResults: Record<string, { source: string; areas: import('@/lib/playwright/planner-types').PlannerArea[]; error?: string; rawOutput?: string }> = {};
+  const fulfilledResults: import('@/lib/playwright/planner-types').PlannerResult[] = [];
+  for (const pr of plannerResults) {
+    if (pr.status === 'fulfilled') {
+      allPlannerResults[pr.value.source] = {
+        source: pr.value.source,
+        areas: pr.value.areas,
+        error: pr.value.error,
+        rawOutput: pr.value.rawOutput,
+      };
+      if (pr.value.areas.length > 0) {
+        fulfilledResults.push(pr.value);
+      }
+    }
+  }
+
+  // Persist planner results to metadata
+  const metaSession = await queries.getAgentSession(sessionId);
+  if (metaSession) {
+    await queries.updateAgentSession(sessionId, {
+      metadata: { ...metaSession.metadata, plannerResults: allPlannerResults },
+    });
+  }
+
+  // Merge results
+  const { mergePlannerResults } = await import('@/lib/playwright/planner-merger');
+
+  const mergedAreas = mergePlannerResults(fulfilledResults);
+  const sourcesUsed = new Set(fulfilledResults.map(r => r.source)).size;
+
+  if (mergedAreas.length === 0) {
+    // Fallback: try to discover from routes
+    await setStepCompleted(sessionId, 'plan', {
+      method: 'fallback',
+      areasFound: 0,
+      sourcesUsed: 0,
+    });
+    return true;
+  }
+
+  const areaCount = mergedAreas.length;
+  const routeCount = mergedAreas.reduce((sum, a) => sum + a.routes.length, 0);
+
+  // Save merged areas and routes to DB
+  const { saveDiscoveredRoutes: saveRoutes } = await import('./ai-routes');
+  await saveRoutes(repositoryId, mergedAreas.map(a => ({
+    name: a.name,
+    routes: a.routes.map(r => ({
+      path: r,
+      type: (r.includes('[') || r.includes(':') ? 'dynamic' : 'static') as 'static' | 'dynamic',
+    })),
+  })));
+
+  // Save agent plans to functional areas
+  const richAreas: AgentRichResultPlanArea[] = [];
+  for (const area of mergedAreas) {
+    const dbArea = await queries.getOrCreateFunctionalAreaByRepo(
+      repositoryId,
+      area.name,
+      area.description,
+    );
+    if (area.testPlan) {
+      await queries.updateFunctionalArea(dbArea.id, {
+        agentPlan: area.testPlan,
+        planGeneratedAt: new Date(),
+      });
+    }
+    richAreas.push({
+      id: dbArea.id,
+      name: area.name,
+      description: area.description || '',
+      routes: area.routes,
+      testPlan: area.testPlan || '',
+    });
+  }
+
+  // Build rich result for review step
+  const richResult: AgentStepRichResult = {
+    type: 'plan',
+    areas: richAreas,
+  };
+
+  await setStepCompleted(sessionId, 'plan', {
+    method: 'pw_agents_parallel',
+    areasFound: areaCount,
+    routesFound: routeCount,
+    sourcesUsed,
+  }, richResult);
+  return true;
+}
+
+async function runPlanPromptMode(
+  sessionId: string,
+  repositoryId: string,
+  branch: string,
+  signal: AbortSignal,
+): Promise<boolean> {
+  const discoverSession = await queries.getAgentSession(sessionId);
+  const discoverIntelligence = discoverSession?.metadata?.codebaseIntelligence as CodebaseIntelligenceContext | undefined;
+
+  // Check if tests already exist
+  const existingTests = await queries.getTestsByRepo(repositoryId);
+  if (existingTests.length > 0) {
+    const existingAreas = await queries.getFunctionalAreasByRepo(repositoryId);
+    await updateSubsteps(sessionId, 'plan', [
+      { label: 'Using existing tests', status: 'done', detail: `${existingTests.length} tests in ${existingAreas.length} areas` },
+    ]);
+
+    const session = await queries.getAgentSession(sessionId);
+    if (session) {
+      await queries.updateAgentSession(sessionId, {
+        metadata: { ...session.metadata, testsCreated: existingTests.length },
+      });
+    }
+
+    await setStepCompleted(sessionId, 'plan', {
+      testsCreated: existingTests.length,
+      areasCreated: existingAreas.length,
+      cached: true,
+    });
+    return true;
+  }
+
+  // Discover spec files
+  await updateSubsteps(sessionId, 'plan', [
+    { label: 'Finding spec files', status: 'running' },
+    { label: 'Extracting user stories', status: 'pending' },
+  ]);
+
+  const specResult = await discoverSpecFiles(repositoryId, branch);
+
+  if (!specResult.success || !specResult.files || specResult.files.length === 0) {
+    // Fallback: AI route scan
+    await updateSubsteps(sessionId, 'plan', [
+      { label: 'Finding spec files', status: 'done', detail: 'No spec files found' },
+      { label: 'AI route scan', status: 'running' },
+    ]);
+
+    const aiResult = await aiScanRoutes(repositoryId, branch, discoverIntelligence);
+    if (aiResult.success && aiResult.functionalAreas && aiResult.functionalAreas.length > 0) {
+      await saveDiscoveredRoutes(repositoryId, aiResult.functionalAreas);
+    }
+
+    await setStepCompleted(sessionId, 'plan', {
+      method: 'ai_scan_fallback',
+      areasFound: aiResult.functionalAreas?.length || 0,
+    });
+    return true;
+  }
+
+  if (isAborted(signal)) return false;
+
+  await updateSubsteps(sessionId, 'plan', [
+    { label: 'Finding spec files', status: 'done', detail: `${specResult.files.length} files` },
+    { label: 'Extracting user stories', status: 'running' },
+  ]);
+
+  const filePaths = specResult.files.map(f => f.path);
+  const storiesResult = await extractUserStoriesFromFiles(repositoryId, branch, filePaths);
+
+  await setStepCompleted(sessionId, 'plan', {
+    method: 'spec_discovery',
+    specsFound: specResult.files.length,
+    storiesExtracted: storiesResult.stories?.length || 0,
   });
   return true;
 }
 
-async function runTests(sessionId: string, repositoryId: string) {
+async function runPlan(sessionId: string, repositoryId: string, _teamId: string, signal: AbortSignal) {
+  await setStepActive(sessionId, 'plan');
+  if (isAborted(signal)) return false;
+
+  const repo = await queries.getRepository(repositoryId);
+  if (!repo) {
+    await setStepFailed(sessionId, 'plan', 'Repository not found');
+    return false;
+  }
+
+  const branch = repo.selectedBranch || repo.defaultBranch || 'main';
+
+  const aiSettings = await getAISettings(repositoryId);
+  if (aiSettings?.pwAgentEnabled) {
+    return runPlanWithAgents(sessionId, repositoryId, branch, signal);
+  }
+
+  return runPlanPromptMode(sessionId, repositoryId, branch, signal);
+}
+
+// ============================================
+// Review (step 6) — human gate
+// ============================================
+
+async function runReview(sessionId: string, _repositoryId: string, _teamId: string, _signal: AbortSignal) {
+  await setStepActive(sessionId, 'review');
+
+  const session = await queries.getAgentSession(sessionId);
+  if (!session) return false;
+
+  // If user already approved (approvedAreaIds set via approvePlayAgentPlan), proceed
+  if (session.metadata.approvedAreaIds && session.metadata.approvedAreaIds.length > 0) {
+    await setStepCompleted(sessionId, 'review', {
+      approvedCount: session.metadata.approvedAreaIds.length,
+    });
+    return true;
+  }
+
+  // Auto-approve if user has opted in
+  if (session.metadata.autoApproveReview) {
+    const planStep = session.steps.find(s => s.id === 'plan');
+    const planRich = planStep?.richResult as { type: 'plan'; areas: AgentRichResultPlanArea[] } | undefined;
+    if (planRich?.areas) {
+      await queries.updateAgentSession(sessionId, {
+        metadata: { ...session.metadata, approvedAreaIds: planRich.areas.map(a => a.id) },
+      });
+    }
+    await setStepCompleted(sessionId, 'review', { autoApproved: true });
+    return true;
+  }
+
+  // Check if plan produced no areas (fallback path) — auto-skip review
+  const planStep = session.steps.find(s => s.id === 'plan');
+  const planResult = planStep?.result;
+  if (planResult?.cached || planResult?.method === 'fallback' || planResult?.method === 'ai_scan_fallback' || planResult?.method === 'spec_discovery') {
+    await setStepCompleted(sessionId, 'review', { skipped: true, reason: 'No plan to review' });
+    return true;
+  }
+
+  // Pause for user review — show plan areas with richResult from plan step
+  const planRich = planStep?.richResult as { type: 'plan'; areas: AgentRichResultPlanArea[] } | undefined;
+  const areaCount = planRich?.areas?.length || 0;
+
+  // Copy the plan's richResult to the review step so the UI can render it
+  if (planRich) {
+    await updateStep(sessionId, 'review', { richResult: planRich });
+  }
+
+  await setStepWaitingUser(
+    sessionId,
+    'review',
+    `${areaCount} functional areas planned. Review and approve to generate tests.`,
+  );
+  return false;
+}
+
+// ============================================
+// Generate (step 7) — formerly second half of discover
+// ============================================
+
+async function runGenerate(sessionId: string, repositoryId: string, _teamId: string, signal: AbortSignal) {
+  await setStepActive(sessionId, 'generate');
+  if (isAborted(signal)) return false;
+
+  const session = await queries.getAgentSession(sessionId);
+  if (!session) return false;
+
+  const envConfig = await getEnvironmentConfig(repositoryId);
+  const baseUrl = envConfig?.baseUrl || 'http://localhost:3000';
+  const approvedAreaIds = session.metadata.approvedAreaIds;
+
+  const aiSettings = await getAISettings(repositoryId);
+  const useAgents = aiSettings?.pwAgentEnabled ?? false;
+
+  // Get areas to generate tests for
+  const dbAreas = await queries.getFunctionalAreasByRepo(repositoryId);
+  let targetAreas = dbAreas.filter(a => a.agentPlan);
+
+  // Filter by approved areas if review step provided them
+  if (approvedAreaIds && approvedAreaIds.length > 0) {
+    targetAreas = targetAreas.filter(a => approvedAreaIds.includes(a.id));
+  }
+
+  let testsCreated = 0;
+  const generatedTests: Array<{ testId: string; name: string; areaName: string; code: string }> = [];
+
+  if (useAgents && targetAreas.length > 0) {
+    const { agentCreateTest, groupScenariosForGeneration } = await import('@/lib/playwright/generator-agent');
+    const GENERATOR_CONCURRENCY = 3;
+
+    // Build work items: group scenarios by route proximity per area
+    const workItems: Array<{
+      area: typeof targetAreas[0];
+      group: import('@/lib/playwright/generator-agent').ScenarioGroup;
+    }> = [];
+
+    for (const area of targetAreas) {
+      // Save scenario summary to area description if not already set
+      if (area.agentPlan && !area.description) {
+        const scenarioLines = area.agentPlan.split('\n').filter(l => /^###\s+Scenario\s+\d+:/.test(l));
+        const desc = scenarioLines.length > 0
+          ? scenarioLines.map(l => l.replace(/^###\s+Scenario\s+\d+:\s*/, '- ')).join('\n')
+          : area.agentPlan.slice(0, 500);
+        await queries.updateFunctionalArea(area.id, { description: desc });
+      }
+
+      // Get known routes for this area to help grouping
+      const allRoutes = await queries.getRoutesByRepo(repositoryId);
+      const routePaths = allRoutes
+        .filter(r => r.functionalAreaId === area.id)
+        .map(r => r.path);
+
+      const groups = area.agentPlan
+        ? groupScenariosForGeneration(area.agentPlan, area.name, routePaths)
+        : [{ name: area.name, description: `Test ${area.name}`, combinedSteps: '', scenarioCount: 1 }];
+
+      for (const group of groups) {
+        workItems.push({ area, group });
+      }
+    }
+
+    const totalWork = workItems.length;
+
+    for (let batch = 0; batch < workItems.length; batch += GENERATOR_CONCURRENCY) {
+      if (isAborted(signal)) return false;
+
+      const chunk = workItems.slice(batch, batch + GENERATOR_CONCURRENCY);
+
+      await updateSubsteps(sessionId, 'generate', [
+        {
+          label: `Generating tests (${Math.min(batch, totalWork)}/${totalWork})`,
+          status: 'running',
+          detail: `${chunk.length} generators in parallel`,
+          agent: 'generator',
+        },
+      ]);
+
+      const results = await Promise.allSettled(
+        chunk.map(async ({ area, group }) => {
+          const genResult = await agentCreateTest(repositoryId, {
+            functionalAreaId: area.id,
+            baseUrl,
+            scenarioGroup: group,
+          });
+          if (genResult.success && genResult.code) {
+            const test = await queries.createTest({
+              repositoryId,
+              functionalAreaId: area.id,
+              name: group.name,
+              description: group.description,
+              code: genResult.code,
+              targetUrl: baseUrl,
+            });
+            generatedTests.push({
+              testId: test.id,
+              name: group.name,
+              areaName: area.name,
+              code: genResult.code,
+            });
+            return true;
+          }
+          return false;
+        }),
+      );
+
+      testsCreated += results.filter(r => r.status === 'fulfilled' && r.value).length;
+    }
+  } else {
+    // Prompt mode: generate basic tests from saved routes
+    const { saveDiscoveredRoutes: _sr } = await import('./ai-routes');
+    const repoRoutes = await queries.getRoutesByRepo(repositoryId);
+    if (repoRoutes.length > 0) {
+      await updateSubsteps(sessionId, 'generate', [
+        { label: `Generating smoke tests for ${repoRoutes.length} routes`, status: 'running' },
+      ]);
+      const routeIds = repoRoutes.map(r => r.id);
+      const genResult = await generateBasicTests(repositoryId, routeIds, baseUrl);
+      testsCreated = genResult.testsCreated + genResult.testsUpdated;
+    }
+  }
+
+  // Update metadata
+  const updatedSession = await queries.getAgentSession(sessionId);
+  if (updatedSession) {
+    await queries.updateAgentSession(sessionId, {
+      metadata: { ...updatedSession.metadata, testsCreated },
+    });
+  }
+
+  const richResult: AgentStepRichResult = {
+    type: 'generate',
+    tests: generatedTests,
+  };
+
+  await updateSubsteps(sessionId, 'generate', [
+    {
+      label: `Generated ${testsCreated} tests`,
+      status: 'done',
+      agent: useAgents ? 'generator' : undefined,
+    },
+  ]);
+
+  await setStepCompleted(sessionId, 'generate', {
+    testsCreated,
+    method: useAgents ? 'pw_agents' : 'prompt',
+  }, richResult);
+  return true;
+}
+
+// ============================================
+// Run Tests (step 8)
+// ============================================
+
+async function runTests(sessionId: string, repositoryId: string, _teamId: string, signal: AbortSignal) {
   await setStepActive(sessionId, 'run_tests');
-  if (await isCancelled(sessionId)) return false;
+  if (isAborted(signal)) return false;
 
   try {
     const buildResult = await createAndRunBuild('manual', undefined, repositoryId);
@@ -1353,7 +1225,6 @@ async function runTests(sessionId: string, repositoryId: string) {
 
     const buildId = buildResult.buildId;
 
-    // Store build ID in metadata
     const session = await queries.getAgentSession(sessionId);
     if (session) {
       const buildIds: string[] = [...(session.metadata.buildIds || []), buildId];
@@ -1362,7 +1233,6 @@ async function runTests(sessionId: string, repositoryId: string) {
       });
     }
 
-    // Check for agent-mode tests
     const allTests = await queries.getTestsByRepo(repositoryId);
     const agentModeTests = allTests.filter(t => t.executionMode === 'agent');
     const proceduralTests = allTests.filter(t => t.executionMode !== 'agent');
@@ -1378,16 +1248,15 @@ async function runTests(sessionId: string, repositoryId: string) {
       ]);
     }
 
-    // Wait for build to complete
-    const summary = await waitForBuild(buildId);
+    const summary = await waitForBuild(buildId, signal);
     if (!summary) {
+      if (isAborted(signal)) return false;
       await setStepFailed(sessionId, 'run_tests', 'Build not found after creation');
       return false;
     }
 
-    if (await isCancelled(sessionId)) return false;
+    if (isAborted(signal)) return false;
 
-    // Store initial results in metadata
     const sess = await queries.getAgentSession(sessionId);
     if (sess) {
       await queries.updateAgentSession(sessionId, {
@@ -1414,17 +1283,21 @@ async function runTests(sessionId: string, repositoryId: string) {
     });
     return true;
   } catch (error) {
+    if (error instanceof Error && error.message === 'Aborted') return false;
     const message = error instanceof Error ? error.message : 'Failed to run tests';
     await setStepFailed(sessionId, 'run_tests', message);
     return false;
   }
 }
 
-async function runFixTests(sessionId: string, repositoryId: string) {
-  await setStepActive(sessionId, 'fix_tests');
-  if (await isCancelled(sessionId)) return false;
+// ============================================
+// Fix Tests (step 9)
+// ============================================
 
-  // Get the latest build summary + intelligence context
+async function runFixTests(sessionId: string, repositoryId: string, _teamId: string, signal: AbortSignal) {
+  await setStepActive(sessionId, 'fix_tests');
+  if (isAborted(signal)) return false;
+
   const session = await queries.getAgentSession(sessionId);
   if (!session) return false;
   const intelligence = session.metadata?.codebaseIntelligence as CodebaseIntelligenceContext | undefined;
@@ -1438,12 +1311,10 @@ async function runFixTests(sessionId: string, repositoryId: string) {
 
   const summary = await getBuildSummary(lastBuildId);
   if (!summary || summary.failedCount === 0) {
-    // No failures — skip
     await setStepCompleted(sessionId, 'fix_tests', { skipped: true, reason: 'No failing tests' });
     return true;
   }
 
-  // Get failing test results from the build's test run
   const build = await queries.getBuild(lastBuildId);
   if (!build?.testRunId) {
     await setStepCompleted(sessionId, 'fix_tests', { skipped: true, reason: 'No test run found' });
@@ -1464,12 +1335,11 @@ async function runFixTests(sessionId: string, repositoryId: string) {
   const codeHashes: Record<string, string[]> = { ...session.metadata.codeHashes };
   let fixedCount = 0;
   let unfixableCount = 0;
+  const fixes: Array<{ testName: string; originalError: string; fixed: boolean; newCode?: string }> = [];
 
-  // Check if PW agents are enabled for healer
   const fixAiSettings = await getAISettings(repositoryId);
   const useHealer = fixAiSettings?.pwAgentEnabled ?? false;
 
-  // Separate fixable from unfixable
   const fixableResults: typeof failedResults = [];
   for (const result of failedResults) {
     const attempts = fixAttempts[result.testId!] || 0;
@@ -1481,12 +1351,11 @@ async function runFixTests(sessionId: string, repositoryId: string) {
   }
 
   if (useHealer) {
-    // Parallel healer — process in concurrent batches
     const HEALER_CONCURRENCY = 3;
     const { agentHealTest } = await import('@/lib/playwright/healer-agent');
 
     for (let batch = 0; batch < fixableResults.length; batch += HEALER_CONCURRENCY) {
-      if (await isCancelled(sessionId)) return false;
+      if (isAborted(signal)) return false;
 
       const chunk = fixableResults.slice(batch, batch + HEALER_CONCURRENCY);
       const completed = Math.min(batch, fixableResults.length);
@@ -1509,11 +1378,14 @@ async function runFixTests(sessionId: string, repositoryId: string) {
           const healResult = await agentHealTest(repositoryId, testId);
           fixAttempts[testId] = attempts + 1;
 
+          const test = await queries.getTest(testId);
+
           if (healResult.success && healResult.code) {
             const hashes = codeHashes[testId] || [];
             const newHash = hashCode(healResult.code);
 
             if (hashes.includes(newHash)) {
+              fixes.push({ testName: test?.name || testId, originalError: result.errorMessage!, fixed: false });
               return 'unfixable' as const;
             }
 
@@ -1521,7 +1393,6 @@ async function runFixTests(sessionId: string, repositoryId: string) {
             codeHashes[testId] = hashes;
 
             await queries.updateTest(testId, { code: healResult.code });
-            const test = await queries.getTest(testId);
             if (test) {
               const branch = await getCurrentBranchForRepo(repositoryId);
               const versions = await queries.getTestVersions(testId);
@@ -1534,8 +1405,10 @@ async function runFixTests(sessionId: string, repositoryId: string) {
                 branch: branch ?? null,
               });
             }
+            fixes.push({ testName: test?.name || testId, originalError: result.errorMessage!, fixed: true, newCode: healResult.code });
             return 'fixed' as const;
           }
+          fixes.push({ testName: test?.name || testId, originalError: result.errorMessage!, fixed: false });
           return 'failed' as const;
         }),
       );
@@ -1547,7 +1420,6 @@ async function runFixTests(sessionId: string, repositoryId: string) {
         }
       }
 
-      // Update metadata after each batch
       const currentSession = await queries.getAgentSession(sessionId);
       if (currentSession) {
         await queries.updateAgentSession(sessionId, {
@@ -1556,9 +1428,8 @@ async function runFixTests(sessionId: string, repositoryId: string) {
       }
     }
   } else {
-    // Sequential AI fix (non-agent mode)
     for (let i = 0; i < fixableResults.length; i++) {
-      if (await isCancelled(sessionId)) return false;
+      if (isAborted(signal)) return false;
 
       const result = fixableResults[i];
       const testId = result.testId!;
@@ -1583,6 +1454,7 @@ async function runFixTests(sessionId: string, repositoryId: string) {
 
         if (hashes.includes(newHash)) {
           unfixableCount++;
+          fixes.push({ testName: test?.name || testId, originalError: errorMessage, fixed: false });
           continue;
         }
 
@@ -1603,9 +1475,11 @@ async function runFixTests(sessionId: string, repositoryId: string) {
           });
         }
         fixedCount++;
+        fixes.push({ testName: test?.name || testId, originalError: errorMessage, fixed: true, newCode: fixResult.code });
+      } else {
+        fixes.push({ testName: test?.name || testId, originalError: errorMessage, fixed: false });
       }
 
-      // Update metadata periodically
       const currentSession = await queries.getAgentSession(sessionId);
       if (currentSession) {
         await queries.updateAgentSession(sessionId, {
@@ -1633,18 +1507,21 @@ async function runFixTests(sessionId: string, repositoryId: string) {
     ]);
   }
 
-  await setStepCompleted(sessionId, 'fix_tests', { fixedCount, unfixableCount });
+  const richResult: AgentStepRichResult = { type: 'fix_tests', fixes };
+  await setStepCompleted(sessionId, 'fix_tests', { fixedCount, unfixableCount }, richResult);
   return true;
 }
 
-async function runRerunTests(sessionId: string, repositoryId: string) {
-  // Check if fixes were made
+// ============================================
+// Re-run Tests (step 10)
+// ============================================
+
+async function runRerunTests(sessionId: string, repositoryId: string, _teamId: string, signal: AbortSignal) {
   const session = await queries.getAgentSession(sessionId);
   if (!session) return false;
 
   const fixStep = session.steps.find((s) => s.id === 'fix_tests');
   if (fixStep?.result?.skipped || (fixStep?.result?.fixedCount === 0)) {
-    // No fixes were made — skip rerun
     await updateStep(sessionId, 'rerun_tests', {
       status: 'skipped',
       completedAt: new Date().toISOString(),
@@ -1653,7 +1530,7 @@ async function runRerunTests(sessionId: string, repositoryId: string) {
   }
 
   await setStepActive(sessionId, 'rerun_tests');
-  if (await isCancelled(sessionId)) return false;
+  if (isAborted(signal)) return false;
 
   try {
     const buildResult = await createAndRunBuild('manual', undefined, repositoryId);
@@ -1677,15 +1554,15 @@ async function runRerunTests(sessionId: string, repositoryId: string) {
       { label: `Re-running ${buildResult.testCount} tests`, status: 'running' },
     ]);
 
-    const summary = await waitForBuild(buildId);
+    const summary = await waitForBuild(buildId, signal);
     if (!summary) {
+      if (isAborted(signal)) return false;
       await setStepFailed(sessionId, 'rerun_tests', 'Build not found');
       return false;
     }
 
-    if (await isCancelled(sessionId)) return false;
+    if (isAborted(signal)) return false;
 
-    // Store final results
     const finalSess = await queries.getAgentSession(sessionId);
     if (finalSess) {
       await queries.updateAgentSession(sessionId, {
@@ -1711,17 +1588,22 @@ async function runRerunTests(sessionId: string, repositoryId: string) {
     });
     return true;
   } catch (error) {
+    if (error instanceof Error && error.message === 'Aborted') return false;
     const message = error instanceof Error ? error.message : 'Failed to re-run tests';
     await setStepFailed(sessionId, 'rerun_tests', message);
     return false;
   }
 }
 
-async function runSummary(sessionId: string) {
+// ============================================
+// Summary (step 11)
+// ============================================
+
+async function runSummary(sessionId: string, _repositoryId: string, _teamId: string, _signal: AbortSignal) {
   await setStepActive(sessionId, 'summary');
 
   const session = await queries.getAgentSession(sessionId);
-  if (!session) return;
+  if (!session) return true;
 
   const meta = session.metadata;
   const result: Record<string, unknown> = {
@@ -1739,49 +1621,52 @@ async function runSummary(sessionId: string) {
     status: 'completed',
     completedAt: new Date(),
   });
+  return true;
 }
 
 // ============================================
 // Orchestrator
 // ============================================
 
-type StepRunner = (sessionId: string, repositoryId: string, teamId: string) => Promise<boolean>;
+type StepRunner = (sessionId: string, repositoryId: string, teamId: string, signal: AbortSignal) => Promise<boolean>;
 
 const STEP_ORDER: Array<{ id: AgentStepId; run: StepRunner }> = [
-  { id: 'settings_check', run: (sid, rid, tid) => runSettingsCheck(sid, rid, tid) },
-  { id: 'select_repo', run: (sid, rid) => runSelectRepo(sid, rid) },
-  { id: 'scan_and_template', run: (sid, rid) => runScanAndTemplate(sid, rid) },
-  { id: 'discover', run: (sid, rid) => runDiscover(sid, rid) },
-  { id: 'env_setup', run: (sid, rid) => runEnvSetup(sid, rid) },
-  { id: 'run_tests', run: (sid, rid) => runTests(sid, rid) },
-  { id: 'fix_tests', run: (sid, rid) => runFixTests(sid, rid) },
-  { id: 'rerun_tests', run: (sid, rid) => runRerunTests(sid, rid) },
-  {
-    id: 'summary',
-    run: async (sid) => {
-      await runSummary(sid);
-      return true;
-    },
-  },
+  { id: 'settings_check', run: runSettingsCheck },
+  { id: 'select_repo', run: runSelectRepo },
+  { id: 'env_setup', run: runEnvSetup },
+  { id: 'scan_and_template', run: runScanAndTemplate },
+  { id: 'plan', run: runPlan },
+  { id: 'review', run: runReview },
+  { id: 'generate', run: runGenerate },
+  { id: 'run_tests', run: runTests },
+  { id: 'fix_tests', run: runFixTests },
+  { id: 'rerun_tests', run: runRerunTests },
+  { id: 'summary', run: runSummary },
 ];
 
 async function executeFromStep(sessionId: string, repositoryId: string, teamId: string, startStepId: AgentStepId) {
-  const startIdx = STEP_ORDER.findIndex((s) => s.id === startStepId);
-  if (startIdx === -1) return;
+  const controller = getOrCreateController(sessionId);
+  const { signal } = controller;
 
-  for (let i = startIdx; i < STEP_ORDER.length; i++) {
-    if (await isCancelled(sessionId)) return;
+  try {
+    const startIdx = STEP_ORDER.findIndex((s) => s.id === startStepId);
+    if (startIdx === -1) return;
 
-    const step = STEP_ORDER[i];
-    const success = await step.run(sessionId, repositoryId, teamId);
+    for (let i = startIdx; i < STEP_ORDER.length; i++) {
+      if (signal.aborted) return;
 
-    if (!success) {
-      // Step paused or failed — stop execution
-      return;
+      const step = STEP_ORDER[i];
+      const success = await step.run(sessionId, repositoryId, teamId, signal);
+
+      if (!success) {
+        return;
+      }
     }
-  }
 
-  revalidatePath('/run');
+    revalidatePath('/run');
+  } finally {
+    cleanupController(sessionId);
+  }
 }
 
 // ============================================
@@ -1794,6 +1679,11 @@ export async function startPlayAgent(repositoryId: string): Promise<{ sessionId:
   // Cancel any existing active session for this repo
   const existing = await queries.getActiveAgentSession(repositoryId);
   if (existing) {
+    // Abort the running controller
+    const existingController = activeControllers.get(existing.id);
+    if (existingController) existingController.abort();
+    cleanupController(existing.id);
+
     await queries.updateAgentSession(existing.id, {
       status: 'cancelled',
       completedAt: new Date(),
@@ -1826,11 +1716,18 @@ export async function resumePlayAgent(sessionId: string): Promise<{ success: boo
     return { success: false };
   }
 
-  // Find the step that needs resuming
+  // Backward compat: old sessions with 'discover' step — force restart
+  if (session.steps.some(s => (s.id as string) === 'discover')) {
+    await queries.updateAgentSession(sessionId, {
+      status: 'cancelled',
+      completedAt: new Date(),
+    });
+    return { success: false };
+  }
+
   const waitingStep = session.steps.find((s) => s.status === 'waiting_user' || s.status === 'failed');
   if (!waitingStep) return { success: false };
 
-  // Reset step status
   await updateStep(sessionId, waitingStep.id, {
     status: 'pending',
     error: undefined,
@@ -1855,6 +1752,20 @@ export async function cancelPlayAgent(sessionId: string): Promise<{ success: boo
   const session = await queries.getAgentSession(sessionId);
   if (!session) return { success: false };
 
+  // Abort the running controller to kill in-flight AI calls
+  const controller = activeControllers.get(sessionId);
+  if (controller) controller.abort();
+  cleanupController(sessionId);
+
+  // Cancel any running builds
+  const buildIds = session.metadata?.buildIds || [];
+  for (const buildId of buildIds) {
+    const build = await queries.getBuild(buildId);
+    if (build && !build.completedAt) {
+      await queries.updateBuild(buildId, { overallStatus: 'cancelled', completedAt: new Date() }).catch(() => {});
+    }
+  }
+
   await queries.updateAgentSession(sessionId, {
     status: 'cancelled',
     completedAt: new Date(),
@@ -1872,6 +1783,27 @@ export async function getActivePlayAgentSession(repositoryId: string) {
   return queries.getActiveAgentSession(repositoryId);
 }
 
+export async function approvePlayAgentPlan(
+  sessionId: string,
+  approvedAreaIds: string[],
+  autoApprove?: boolean,
+): Promise<{ success: boolean }> {
+  await requireTeamAccess();
+  const session = await queries.getAgentSession(sessionId);
+  if (!session) return { success: false };
+
+  await queries.updateAgentSession(sessionId, {
+    metadata: {
+      ...session.metadata,
+      approvedAreaIds,
+      ...(autoApprove ? { autoApproveReview: true } : {}),
+    },
+  });
+
+  // Resume from review step
+  return resumePlayAgent(sessionId);
+}
+
 export async function skipDiscoverStep(sessionId: string): Promise<{ success: boolean }> {
   await requireTeamAccess();
   const session = await queries.getAgentSession(sessionId);
@@ -1879,5 +1811,126 @@ export async function skipDiscoverStep(sessionId: string): Promise<{ success: bo
   await queries.updateAgentSession(sessionId, {
     metadata: { ...session.metadata, skipDiscovery: true },
   });
+  return { success: true };
+}
+
+export async function rerunPlanner(
+  sessionId: string,
+  plannerSource: string,
+): Promise<{ success: boolean; error?: string }> {
+  await requireTeamAccess();
+
+  const session = await queries.getAgentSession(sessionId);
+  if (!session) return { success: false, error: 'Session not found' };
+
+  // Validate plan step exists and is completed/failed
+  const planStep = session.steps.find(s => s.id === 'plan');
+  if (!planStep || (planStep.status !== 'completed' && planStep.status !== 'failed')) {
+    return { success: false, error: 'Plan step not in re-runnable state' };
+  }
+
+  const repo = await queries.getRepository(session.repositoryId);
+  if (!repo) return { success: false, error: 'Repository not found' };
+
+  const branch = repo.selectedBranch || repo.defaultBranch || 'main';
+  const envConfig = await getEnvironmentConfig(session.repositoryId);
+  const baseUrl = envConfig?.baseUrl || 'http://localhost:3000';
+  const intelligence = session.metadata?.codebaseIntelligence as CodebaseIntelligenceContext | undefined;
+
+  // Re-run the specific planner
+  let result: import('@/lib/playwright/planner-types').PlannerResult;
+  try {
+    switch (plannerSource) {
+      case 'browser': {
+        const { runBrowserPlanner } = await import('@/lib/playwright/planners/browser-planner');
+        result = await runBrowserPlanner(session.repositoryId, baseUrl);
+        break;
+      }
+      case 'code': {
+        const { runCodePlanner } = await import('@/lib/playwright/planners/code-planner');
+        result = await runCodePlanner(session.repositoryId, branch, intelligence);
+        break;
+      }
+      case 'spec': {
+        const { runSpecPlanner } = await import('@/lib/playwright/planners/spec-planner');
+        result = await runSpecPlanner(session.repositoryId, branch);
+        break;
+      }
+      case 'routes': {
+        const { runRoutePlanner } = await import('@/lib/playwright/planners/route-planner');
+        result = await runRoutePlanner(session.repositoryId);
+        break;
+      }
+      default:
+        return { success: false, error: `Unknown planner source: ${plannerSource}` };
+    }
+  } catch (error) {
+    return { success: false, error: error instanceof Error ? error.message : 'Re-run failed' };
+  }
+
+  // Update planner results in metadata
+  const freshSession = await queries.getAgentSession(sessionId);
+  if (!freshSession) return { success: false, error: 'Session lost' };
+
+  const plannerResults = { ...(freshSession.metadata.plannerResults as Record<string, unknown> || {}) };
+  plannerResults[plannerSource] = {
+    source: result.source,
+    areas: result.areas,
+    error: result.error,
+    rawOutput: result.rawOutput,
+  };
+
+  // Update the substep for this planner
+  const substeps = [...(planStep.substeps || [])];
+  const substepIdx = substeps.findIndex(s => s.source === plannerSource);
+  if (substepIdx >= 0) {
+    substeps[substepIdx] = {
+      ...substeps[substepIdx],
+      status: result.error ? 'error' : 'done',
+      detail: result.error ? result.error.slice(0, 60) : `${result.areas.length} areas`,
+      durationMs: result.durationMs,
+      areasFound: result.areas.length,
+      promptLogId: result.promptLogId,
+      inputSummary: result.inputSummary,
+      outputSummary: result.areas.length > 0 ? result.areas.map(a => a.name).join(', ') : undefined,
+      rawError: result.error,
+    };
+  }
+
+  // Re-merge all planner results
+  const { mergePlannerResults } = await import('@/lib/playwright/planner-merger');
+  const allResults = Object.values(plannerResults) as Array<{ source: string; areas: import('@/lib/playwright/planner-types').PlannerArea[]; error?: string }>;
+  const mergeInput = allResults.filter(r => r.areas.length > 0) as import('@/lib/playwright/planner-types').PlannerResult[];
+  const mergedAreas = mergePlannerResults(mergeInput);
+
+  // Save merged areas to DB and build rich result
+  const richAreas: AgentRichResultPlanArea[] = [];
+  for (const area of mergedAreas) {
+    const dbArea = await queries.getOrCreateFunctionalAreaByRepo(session.repositoryId, area.name, area.description);
+    if (area.testPlan) {
+      await queries.updateFunctionalArea(dbArea.id, { agentPlan: area.testPlan, planGeneratedAt: new Date() });
+    }
+    richAreas.push({ id: dbArea.id, name: area.name, description: area.description || '', routes: area.routes, testPlan: area.testPlan || '' });
+  }
+
+  const richResult: AgentStepRichResult = { type: 'plan', areas: richAreas };
+
+  // Update step + metadata
+  await updateStep(sessionId, 'plan', {
+    status: 'completed',
+    result: { method: 'pw_agents_parallel', areasFound: mergedAreas.length, routesFound: mergedAreas.reduce((s, a) => s + a.routes.length, 0) },
+    richResult,
+    substeps,
+  });
+  await queries.updateAgentSession(sessionId, {
+    metadata: { ...freshSession.metadata, plannerResults },
+  });
+
+  // If review step has the old plan, update it too
+  const reviewStep = freshSession.steps.find(s => s.id === 'review');
+  if (reviewStep?.richResult) {
+    await updateStep(sessionId, 'review', { richResult });
+  }
+
   return { success: true };
 }

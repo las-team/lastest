@@ -19,7 +19,6 @@ Stripe for self-subscribe
 Stability, excalidraw tests
 multiple envs to run tests in w url providing in parallel
 self-test suite finish
-visualize selector stats
 ## ideas
 Test coverage assessment and recreation based on existing test set
 cookie sharing from host machine?

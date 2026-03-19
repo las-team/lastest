@@ -9,6 +9,7 @@ import type { PlannerResult } from '@/lib/playwright/planner-types';
 export async function runRoutePlanner(
   repositoryId: string,
 ): Promise<PlannerResult> {
+  const start = Date.now();
   try {
     const [routes, areas] = await Promise.all([
       queries.getRoutesByRepo(repositoryId),
@@ -16,7 +17,7 @@ export async function runRoutePlanner(
     ]);
 
     if (routes.length === 0) {
-      return { source: 'routes', areas: [] };
+      return { source: 'routes', areas: [], durationMs: Date.now() - start, inputSummary: '0 routes in DB' };
     }
 
     // Build a map of area ID → area for quick lookup
@@ -60,12 +61,14 @@ export async function runRoutePlanner(
         testPlan: buildRouteTestPlan(g.name, g.routes),
       }));
 
-    return { source: 'routes', areas: plannerAreas };
+    return { source: 'routes', areas: plannerAreas, durationMs: Date.now() - start, inputSummary: `${routes.length} routes, ${areas.length} existing areas` };
   } catch (error) {
     return {
       source: 'routes',
       areas: [],
       error: error instanceof Error ? error.message : 'Route planner failed',
+      durationMs: Date.now() - start,
+      inputSummary: 'DB query failed',
     };
   }
 }

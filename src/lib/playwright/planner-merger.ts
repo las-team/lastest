@@ -48,6 +48,35 @@ function jaccardSimilarity(a: string[], b: string[]): number {
   return union === 0 ? 0 : intersection / union;
 }
 
+/** Check if nameA is a sub-topic of nameB (e.g. "reset password" ⊂ "authentication") */
+function isSubTopic(nameA: string, nameB: string): boolean {
+  // Common parent-child relationships
+  const PARENT_CHILDREN: Record<string, string[]> = {
+    'auth': ['login', 'logout', 'register', 'signup', 'sign up', 'sign in', 'reset password', 'forgot password', 'password reset', 'session', 'oauth', 'sso', 'two factor', '2fa', 'mfa'],
+    'authentication': ['login', 'logout', 'register', 'signup', 'sign up', 'sign in', 'reset password', 'forgot password', 'password reset', 'session', 'oauth', 'sso', 'two factor', '2fa', 'mfa'],
+    'user management': ['profile', 'settings', 'account', 'preferences', 'avatar', 'password', 'reset password'],
+    'navigation': ['header', 'footer', 'sidebar', 'menu', 'navbar', 'breadcrumb'],
+    'settings': ['profile settings', 'account settings', 'notification settings', 'preferences'],
+  };
+
+  const normB = nameB.toLowerCase();
+  for (const [parent, children] of Object.entries(PARENT_CHILDREN)) {
+    if (normB.includes(parent)) {
+      const normA = nameA.toLowerCase();
+      if (children.some(child => normA.includes(child))) return true;
+    }
+  }
+  return false;
+}
+
+/** Check if one set of routes is a subset of another */
+function isRouteSubset(smaller: string[], larger: string[]): boolean {
+  if (smaller.length === 0) return false;
+  const largerSet = new Set(larger);
+  const matchCount = smaller.filter(r => largerSet.has(r)).length;
+  return matchCount >= Math.ceil(smaller.length * 0.6);
+}
+
 function findGroupIndex(
   groups: TaggedArea[][],
   area: TaggedArea,
@@ -56,13 +85,28 @@ function findGroupIndex(
   const areaName = normalizeName(area.name);
 
   for (let i = 0; i < groups.length; i++) {
-    // Check name match
-    if (normalizedNames.get(i) === areaName) return i;
+    const groupName = normalizedNames.get(i) || '';
 
-    // Check route overlap
+    // Check exact name match
+    if (groupName === areaName) return i;
+
+    // Check route overlap (Jaccard > 0.5)
     const groupRoutes = groups[i].flatMap(a => a.routes);
     if (area.routes.length > 0 && groupRoutes.length > 0) {
       if (jaccardSimilarity(area.routes, groupRoutes) > 0.5) return i;
+    }
+
+    // Check sub-topic relationship (e.g. "Reset Password" → "Authentication")
+    if (isSubTopic(areaName, groupName) || isSubTopic(groupName, areaName)) return i;
+
+    // Check route subset (smaller area's routes contained in larger area)
+    if (area.routes.length > 0 && groupRoutes.length > 0) {
+      if (isRouteSubset(area.routes, groupRoutes) || isRouteSubset(groupRoutes, area.routes)) return i;
+    }
+
+    // Check if one name contains the other as a substring
+    if (areaName.length >= 3 && groupName.length >= 3) {
+      if (groupName.includes(areaName) || areaName.includes(groupName)) return i;
     }
   }
 

@@ -11,12 +11,21 @@ export async function runCodePlanner(
   branch: string,
   intelligence?: CodebaseIntelligenceContext,
 ): Promise<PlannerResult> {
+  const start = Date.now();
+
   try {
     const { aiScanRoutes } = await import('@/server/actions/ai-routes');
     const result = await aiScanRoutes(repositoryId, branch, intelligence);
+    const durationMs = Date.now() - start;
 
     if (!result.success || !result.functionalAreas?.length) {
-      return { source: 'code', areas: [], error: result.error || 'No routes found in codebase' };
+      return {
+        source: 'code',
+        areas: [],
+        error: result.error || 'No routes found in codebase',
+        durationMs,
+        inputSummary: `branch: ${branch}${intelligence?.framework ? `, framework: ${intelligence.framework}` : ''}`,
+      };
     }
 
     const areas = result.functionalAreas.map(fa => ({
@@ -26,12 +35,19 @@ export async function runCodePlanner(
       testPlan: buildCodeTestPlan(fa.name, fa.routes),
     }));
 
-    return { source: 'code', areas };
+    return {
+      source: 'code',
+      areas,
+      durationMs,
+      inputSummary: `branch: ${branch}${intelligence?.framework ? `, framework: ${intelligence.framework}` : ''}`,
+    };
   } catch (error) {
     return {
       source: 'code',
       areas: [],
       error: error instanceof Error ? error.message : 'Code planner failed',
+      durationMs: Date.now() - start,
+      inputSummary: `branch: ${branch}`,
     };
   }
 }

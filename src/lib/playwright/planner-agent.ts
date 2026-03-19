@@ -132,6 +132,7 @@ export function parseAreasFromResponse(response: string): PlannerArea[] {
 export async function agentDiscoverAreas(
   repositoryId: string,
   baseUrl: string,
+  options?: { onLogCreated?: (logId: string) => void },
 ): Promise<{ success: boolean; functionalAreas?: Array<{ name: string; description?: string; routes: Array<{ path: string; type: 'dynamic' | 'static'; description?: string }> }>; rawResponse?: string; error?: string }> {
   await requireRepoAccess(repositoryId);
 
@@ -150,6 +151,7 @@ export async function agentDiscoverAreas(
       useMCP: true,
       repositoryId,
       actionType: 'agent_discover',
+      onLogCreated: options?.onLogCreated,
     });
 
     const areas = parseAreasFromResponse(response);

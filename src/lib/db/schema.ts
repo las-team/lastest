@@ -1290,9 +1290,11 @@ export type AgentSessionStatus = 'active' | 'paused' | 'completed' | 'failed' | 
 export type AgentStepId =
   | 'settings_check'
   | 'select_repo'
-  | 'scan_and_template'
-  | 'discover'
   | 'env_setup'
+  | 'scan_and_template'
+  | 'plan'
+  | 'review'
+  | 'generate'
   | 'run_tests'
   | 'fix_tests'
   | 'rerun_tests'
@@ -1308,7 +1310,39 @@ export interface AgentSubstep {
   detail?: string;
   /** Which PW sub-agent is handling this substep (shown as a badge in the UI) */
   agent?: PwAgentType;
+  /** Planner source identifier for observability */
+  source?: string;
+  /** Links to aiPromptLogs.id for full input/output drill-down */
+  promptLogId?: string;
+  /** Short description of planner inputs */
+  inputSummary?: string;
+  /** Comma-separated area names found */
+  outputSummary?: string;
+  /** Number of areas discovered */
+  areasFound?: number;
+  /** Wall-clock duration in ms */
+  durationMs?: number;
+  /** Full error message (not truncated) */
+  rawError?: string;
 }
+
+export interface AgentRichResultPlanArea {
+  id: string;
+  name: string;
+  description: string;
+  routes: string[];
+  testPlan: string;
+  approved?: boolean;
+}
+
+export type AgentStepRichResult =
+  | { type: 'scan_and_template'; routes: Array<{ path: string; type: string }>; framework?: string; template?: string; intelligence?: Record<string, unknown> }
+  | { type: 'plan'; areas: AgentRichResultPlanArea[] }
+  | { type: 'generate'; tests: Array<{ testId: string; name: string; areaName: string; code: string }> }
+  | { type: 'env_setup'; loginScript?: string; pageContext?: string }
+  | { type: 'run_tests'; buildId: string; results: Array<{ testName: string; status: string; error?: string }> }
+  | { type: 'fix_tests'; fixes: Array<{ testName: string; originalError: string; fixed: boolean; newCode?: string }> }
+  | { type: 'generic'; content: string };
 
 export interface AgentStepState {
   id: AgentStepId;
@@ -1319,6 +1353,7 @@ export interface AgentStepState {
   completedAt?: string;
   error?: string;
   result?: Record<string, unknown>;
+  richResult?: AgentStepRichResult;
   userAction?: string;
   substeps?: AgentSubstep[];
 }
@@ -1332,6 +1367,8 @@ export interface AgentSessionMetadata {
   initialFailedCount?: number;
   finalPassedCount?: number;
   finalFailedCount?: number;
+  approvedAreaIds?: string[];
+  autoApproveReview?: boolean;
   [key: string]: unknown;
 }
 

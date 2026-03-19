@@ -73,6 +73,9 @@ export interface GenerateWithAIOptions {
   actionType?: AIActionType;
   repositoryId?: string | null;
   useMCP?: boolean;
+  signal?: AbortSignal;
+  /** Called with the prompt log ID after the log entry is created (before AI call) */
+  onLogCreated?: (logId: string) => void;
 }
 
 export async function generateWithAI(
@@ -136,12 +139,14 @@ export async function generateWithAI(
       status: 'pending' as AILogStatus,
     });
     logId = log.id;
+    options?.onLogCreated?.(logId);
   }
 
   try {
     const response = await provider.generate({
       prompt,
       systemPrompt: finalSystemPrompt || undefined,
+      signal: options?.signal,
     });
 
     // Update log with success

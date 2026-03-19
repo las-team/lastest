@@ -26,8 +26,8 @@ interface Props {
   stats: SelectorTypeStats[];
 }
 
-const SUCCESS_COLOR = 'oklch(0.65 0.17 145)';
-const FAILURE_COLOR = 'oklch(0.55 0.2 25)';
+const SUCCESS_COLOR = 'oklch(0.75 0.10 155 / 0.7)';
+const FAILURE_COLOR = 'oklch(0.70 0.10 25 / 0.7)';
 
 function CustomTooltip(props: Record<string, unknown>) {
   const active = props.active as boolean | undefined;

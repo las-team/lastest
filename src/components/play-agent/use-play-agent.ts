@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import type { AgentSession } from '@/lib/db/schema';
-import { startPlayAgent, resumePlayAgent, cancelPlayAgent, skipDiscoverStep } from '@/server/actions/play-agent';
+import { startPlayAgent, resumePlayAgent, cancelPlayAgent, approvePlayAgentPlan, rerunPlanner as rerunPlannerAction } from '@/server/actions/play-agent';
 
 const SESSION_KEY = 'play-agent-session-id';
 const POLL_INTERVAL = 2000;
@@ -18,7 +18,6 @@ export function usePlayAgent(repositoryId?: string | null) {
     try {
       const res = await fetch(`/api/play-agent/${sid}`);
       if (!res.ok) {
-        // Session gone — clear
         localStorage.removeItem(SESSION_KEY);
         setSession(null);
         return;
@@ -26,7 +25,6 @@ export function usePlayAgent(repositoryId?: string | null) {
       const data: AgentSession = await res.json();
       setSession(data);
 
-      // Stop polling if not active/paused (terminal or unknown state)
       if (data.status !== 'active' && data.status !== 'paused') {
         if (pollRef.current) {
           clearInterval(pollRef.current);
@@ -38,12 +36,10 @@ export function usePlayAgent(repositoryId?: string | null) {
     }
   }, []);
 
-  // Start polling when we have a session ID
   useEffect(() => {
     const sid = sessionId;
     if (!sid) return;
 
-    // Initial fetch
     poll(sid);
 
     pollRef.current = setInterval(() => poll(sid), POLL_INTERVAL);
@@ -63,7 +59,6 @@ export function usePlayAgent(repositoryId?: string | null) {
       localStorage.setItem(SESSION_KEY, result.sessionId);
       await poll(result.sessionId);
 
-      // Start polling
       if (pollRef.current) clearInterval(pollRef.current);
       pollRef.current = setInterval(() => poll(result.sessionId), POLL_INTERVAL);
     } finally {
@@ -76,7 +71,6 @@ export function usePlayAgent(repositoryId?: string | null) {
     setLoading(true);
     try {
       await resumePlayAgent(session.id);
-      // Resume polling
       if (pollRef.current) clearInterval(pollRef.current);
       pollRef.current = setInterval(() => poll(session.id), POLL_INTERVAL);
     } finally {
@@ -89,8 +83,9 @@ export function usePlayAgent(repositoryId?: string | null) {
     setLoading(true);
     try {
       await cancelPlayAgent(session.id);
-      localStorage.removeItem(SESSION_KEY);
-      setSession(null);
+      // Keep session ID in localStorage so cancelled state persists across refresh.
+      // Only dismiss() (reset button) clears it.
+      await poll(session.id);
       if (pollRef.current) {
         clearInterval(pollRef.current);
         pollRef.current = null;
@@ -98,12 +93,40 @@ export function usePlayAgent(repositoryId?: string | null) {
     } finally {
       setLoading(false);
     }
-  }, [session?.id]);
+  }, [session?.id, poll]);
 
-  const skipDiscover = useCallback(async () => {
+  const approvePlan = useCallback(async (approvedAreaIds: string[], autoApprove: boolean) => {
     if (!session?.id) return;
-    await skipDiscoverStep(session.id);
-  }, [session?.id]);
+    setLoading(true);
+    try {
+      // If empty array, approve all areas from plan step
+      let ids = approvedAreaIds;
+      if (ids.length === 0) {
+        const planStep = session.steps.find(s => s.id === 'plan');
+        const planRich = planStep?.richResult as { type: 'plan'; areas: Array<{ id: string }> } | undefined;
+        ids = planRich?.areas?.map(a => a.id) || [];
+      }
+      await approvePlayAgentPlan(session.id, ids, autoApprove);
+      if (pollRef.current) clearInterval(pollRef.current);
+      pollRef.current = setInterval(() => poll(session.id), POLL_INTERVAL);
+    } finally {
+      setLoading(false);
+    }
+  }, [session?.id, session?.steps, poll]);
+
+  const rerunPlanner = useCallback(async (source: string) => {
+    if (!session?.id) return;
+    setLoading(true);
+    try {
+      await rerunPlannerAction(session.id, source);
+      // Resume polling to pick up the update
+      if (pollRef.current) clearInterval(pollRef.current);
+      pollRef.current = setInterval(() => poll(session.id), POLL_INTERVAL);
+      await poll(session.id);
+    } finally {
+      setLoading(false);
+    }
+  }, [session?.id, poll]);
 
   const dismiss = useCallback(() => {
     localStorage.removeItem(SESSION_KEY);
@@ -117,11 +140,10 @@ export function usePlayAgent(repositoryId?: string | null) {
   const isActive = session?.status === 'active' || session?.status === 'paused';
   const isTerminal = session?.status === 'completed' || session?.status === 'cancelled' || session?.status === 'failed';
 
-  // Compute progress
   const completedSteps = session?.steps.filter(
     (s) => s.status === 'completed' || s.status === 'skipped',
   ).length ?? 0;
-  const totalSteps = session?.steps.length ?? 9;
+  const totalSteps = session?.steps.length ?? 11;
   const progress = totalSteps > 0 ? Math.round((completedSteps / totalSteps) * 100) : 0;
 
   return {
@@ -134,6 +156,7 @@ export function usePlayAgent(repositoryId?: string | null) {
     resume,
     cancel,
     dismiss,
-    skipDiscover,
+    approvePlan,
+    rerunPlanner,
   };
 }
