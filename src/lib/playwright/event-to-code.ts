@@ -305,6 +305,7 @@ export function eventsToCodeLines(
       }
       lines.push(`${mIndent}await page.mouse.move(${x}, ${y});`);
       lines.push(`${mIndent}await page.mouse.down();`);
+      lastEmittedEventType = 'mouse-down';
     } else if (event.type === 'mouse-up' && event.data.coordinates) {
       const { x, y } = event.data.coordinates;
       const modifiers = event.data.modifiers;
@@ -320,6 +321,7 @@ export function eventsToCodeLines(
         lines.push(`${indent}});`);
         insideDownloadMouseWrap = false;
       }
+      lastEmittedEventType = 'mouse-up';
     } else if (event.type === 'keypress' && event.data.key) {
       const { key, modifiers } = event.data;
       if (modifiers && modifiers.length > 0) {
