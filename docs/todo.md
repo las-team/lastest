@@ -18,7 +18,6 @@ Migrate to gh app /home/ewyct/.claude/plans/cheeky-sparking-torvalds.md
 Stripe for self-subscribe
 Stability, excalidraw tests
 multiple envs to run tests in w url providing in parallel
-self-test suite finish
 ## ideas
 Test coverage assessment and recreation based on existing test set
 cookie sharing from host machine?

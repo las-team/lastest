@@ -170,6 +170,7 @@ export const browserRecordingScript = ({ pointerGestures: pg, cursorFPS: fps, se
         return;
       }
     }
+    if (pg) return;
     const target = e.target as HTMLElement;
     let selectors = generateAllSelectors(target);
     const rect = target.getBoundingClientRect();
@@ -211,8 +212,10 @@ export const browserRecordingScript = ({ pointerGestures: pg, cursorFPS: fps, se
       return;
     }
     const selectors = generateAllSelectors(target);
+    const rect = target.getBoundingClientRect();
+    const boundingBox = { x: rect.x, y: rect.y, width: rect.width, height: rect.height };
     // @ts-expect-error - exposed function
-    window.__recordAction?.('fill', selectors, target.value, undefined, generateActionId());
+    window.__recordAction?.('fill', selectors, target.value, boundingBox, generateActionId());
   }, true);
 
   document.addEventListener('change', (e) => {
@@ -330,13 +333,15 @@ export const browserRecordingScript = ({ pointerGestures: pg, cursorFPS: fps, se
       }
     }, true);
 
-    document.addEventListener('mousedown', (e: MouseEvent) => {
+    document.addEventListener('pointerdown', (e: PointerEvent) => {
+      if (e.pointerType !== 'mouse') return;
       const modifiers = getActiveModifiers();
       // @ts-expect-error - exposed function
       window.__recordMouseEvent?.('down', e.clientX, e.clientY, e.button, modifiers);
     }, true);
 
-    document.addEventListener('mouseup', (e: MouseEvent) => {
+    document.addEventListener('pointerup', (e: PointerEvent) => {
+      if (e.pointerType !== 'mouse') return;
       const modifiers = getActiveModifiers();
       // @ts-expect-error - exposed function
       window.__recordMouseEvent?.('up', e.clientX, e.clientY, e.button, modifiers);
