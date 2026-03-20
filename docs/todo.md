@@ -5,18 +5,10 @@ Gitlab
 Teardown
 Accept Downloads
 Network Interception
-Deploy
-      pnpm deploy:zima              # Build both images → pipe to 192.168.1.138 → restart
-  pnpm deploy:olares            # Build → pipe to Olares → kubectl restart → health check
-  pnpm deploy:local             # docker compose build + up
-  pnpm deploy:eb                # Rebuild + restart EB containers for local dev
-  pnpm deploy:npm               # Sync version + publish @lastest/runner
-  pnpm deploy:all               # Everything at once
 Auto gh action run
 ## features
 Migrate to gh app /home/ewyct/.claude/plans/cheeky-sparking-torvalds.md
 Stripe for self-subscribe
-Stability, excalidraw tests
 multiple envs to run tests in w url providing in parallel
 ## ideas
 Test coverage assessment and recreation based on existing test set
