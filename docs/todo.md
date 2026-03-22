@@ -10,6 +10,9 @@ Auto gh action run
 Migrate to gh app /home/ewyct/.claude/plans/cheeky-sparking-torvalds.md
 Stripe for self-subscribe
 multiple envs to run tests in w url providing in parallel
+debug - go back
+debug - googlesheet data
+google non test-app
 ## ideas
 Test coverage assessment and recreation based on existing test set
 cookie sharing from host machine?
