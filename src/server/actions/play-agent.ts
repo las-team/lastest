@@ -1761,34 +1761,25 @@ async function executeFromStep(sessionId: string, repositoryId: string, teamId: 
 // ============================================
 
 export async function startPlayAgent(repositoryId: string): Promise<{ sessionId: string }> {
-  // Allow starting without a repo — settings_check and select_repo steps will guide the user
-  let teamId: string;
-  if (repositoryId) {
-    const { team } = await requireRepoAccess(repositoryId);
-    teamId = team?.id ?? '';
-  } else {
-    const { team } = await requireTeamAccess();
-    teamId = team.id;
-  }
+  const { team } = await requireRepoAccess(repositoryId);
 
   // Cancel any existing active session for this repo
-  if (repositoryId) {
-    const existing = await queries.getActiveAgentSession(repositoryId);
-    if (existing) {
-      const existingController = activeControllers.get(existing.id);
-      if (existingController) existingController.abort();
-      cleanupController(existing.id);
+  const existing = await queries.getActiveAgentSession(repositoryId);
+  if (existing) {
+    // Abort the running controller
+    const existingController = activeControllers.get(existing.id);
+    if (existingController) existingController.abort();
+    cleanupController(existing.id);
 
-      await queries.updateAgentSession(existing.id, {
-        status: 'cancelled',
-        completedAt: new Date(),
-      });
-    }
+    await queries.updateAgentSession(existing.id, {
+      status: 'cancelled',
+      completedAt: new Date(),
+    });
   }
 
   const session = await queries.createAgentSession({
     repositoryId,
-    teamId: teamId || null,
+    teamId: team?.id ?? null,
     status: 'active',
     currentStepId: 'settings_check',
     steps: buildInitialSteps(),
@@ -1796,7 +1787,7 @@ export async function startPlayAgent(repositoryId: string): Promise<{ sessionId:
   });
 
   // Fire-and-forget: run steps
-  executeFromStep(session.id, repositoryId, teamId, 'settings_check').catch((err) => {
+  executeFromStep(session.id, repositoryId, team?.id ?? '', 'settings_check').catch((err) => {
     console.error('[PlayAgent] Unhandled error:', err);
     queries.updateAgentSession(session.id, { status: 'failed' }).catch(() => {});
   });

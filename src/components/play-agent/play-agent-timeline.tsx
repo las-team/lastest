@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useCallback } from 'react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Play, X, Check, Loader2, Pause, SkipForward, AlertCircle, RotateCcw, ChevronDown, ScrollText, Undo2 } from 'lucide-react';
@@ -186,6 +186,7 @@ export function PlayAgentTimeline({ repositoryId }: PlayAgentTimelineProps) {
     usePlayAgent(repositoryId);
 
   const [expandedStepId, setExpandedStepId] = useState<AgentStepId | null>(null);
+  const [showRepoPrompt, setShowRepoPrompt] = useState(false);
 
   const steps = session?.steps ?? DEFAULT_STEPS;
   const isRunning = isActive && session?.status === 'active';
@@ -220,7 +221,33 @@ export function PlayAgentTimeline({ repositoryId }: PlayAgentTimelineProps) {
     }
   }
 
+  const pingRepoSelector = useCallback(() => {
+    const trigger = document.querySelector('[data-slot="select-trigger"]') as HTMLElement | null;
+    if (!trigger) return;
+    trigger.classList.add('ring-2', 'ring-amber-400', 'ring-offset-2', 'ring-offset-background', 'animate-pulse');
+    setTimeout(() => {
+      trigger.classList.remove('ring-2', 'ring-amber-400', 'ring-offset-2', 'ring-offset-background', 'animate-pulse');
+    }, 3000);
+  }, []);
+
+  // Auto-start when repo becomes available after user was prompted
+  const [prevRepoId, setPrevRepoId] = useState(repositoryId);
+  if (repositoryId !== prevRepoId) {
+    setPrevRepoId(repositoryId);
+    if (!prevRepoId && repositoryId && showRepoPrompt && !session) {
+      setShowRepoPrompt(false);
+      // Defer start to avoid cascading render
+      queueMicrotask(() => start());
+    }
+  }
+
   const handlePlayPause = () => {
+    if (!repositoryId && !session) {
+      setShowRepoPrompt(true);
+      pingRepoSelector();
+      return;
+    }
+    setShowRepoPrompt(false);
     if (isRunning) {
       cancel();
     } else if (isPaused || session?.status === 'failed') {
@@ -240,7 +267,7 @@ export function PlayAgentTimeline({ repositoryId }: PlayAgentTimelineProps) {
 
   return (
     <Card className={cn(
-      activeStep?.status === 'waiting_user' && 'border-amber-400/50 dark:border-amber-500/30',
+      (activeStep?.status === 'waiting_user' || showRepoPrompt) && 'border-amber-400/50 dark:border-amber-500/30',
     )}>
       <CardContent className="py-4 px-4">
         {/* Title row */}
@@ -370,7 +397,11 @@ export function PlayAgentTimeline({ repositoryId }: PlayAgentTimelineProps) {
                   )}
                   <button
                     onClick={() => handleStepClick(step.id)}
-                    className={cn(dotClass, 'relative z-10', hasDetail && 'cursor-pointer hover:ring-2 hover:ring-primary/30')}
+                    className={cn(
+                      dotClass, 'relative z-10',
+                      hasDetail && 'cursor-pointer hover:ring-2 hover:ring-primary/30',
+                      showRepoPrompt && step.id === 'select_repo' && 'ring-2 ring-amber-400 ring-offset-1 ring-offset-background animate-pulse',
+                    )}
                     disabled={!hasDetail}
                   >
                     {icon}
@@ -446,6 +477,41 @@ export function PlayAgentTimeline({ repositoryId }: PlayAgentTimelineProps) {
             </div>
           );
         })()}
+
+        {/* No-repo prompt — guide new users through setup */}
+        {showRepoPrompt && !session && (
+          <div className="mt-3 pt-3 border-t space-y-2">
+            <div className="flex items-center gap-2.5">
+              <div className="h-5 w-5 rounded-full bg-amber-500 flex items-center justify-center shrink-0">
+                <AlertCircle className="h-3 w-3 text-white" />
+              </div>
+              <span className="text-sm font-medium text-amber-600 dark:text-amber-400">
+                Get started
+              </span>
+            </div>
+            <div className="ml-7 space-y-1.5">
+              <div className="flex items-center gap-2 text-xs">
+                <X className="h-3 w-3 text-red-500 shrink-0" />
+                <span className="text-muted-foreground">Select a repository from the sidebar</span>
+              </div>
+              <div className="flex items-center gap-2 text-xs">
+                <span className="h-3 w-3 flex items-center justify-center text-muted-foreground/50 shrink-0">—</span>
+                <Link href="/settings?highlight=github" className="text-muted-foreground hover:text-foreground transition-colors">
+                  Connect GitHub account
+                </Link>
+              </div>
+              <div className="flex items-center gap-2 text-xs">
+                <span className="h-3 w-3 flex items-center justify-center text-muted-foreground/50 shrink-0">—</span>
+                <Link href="/settings?highlight=ai-settings" className="text-muted-foreground hover:text-foreground transition-colors">
+                  Configure AI provider
+                </Link>
+              </div>
+              <p className="text-[10px] text-muted-foreground/60 mt-1">
+                Pick a repo to begin — settings will be checked automatically.
+              </p>
+            </div>
+          </div>
+        )}
 
         {/* Active / waiting / failed step detail */}
         {activeStep && expandedStepId !== activeStep.id && (

@@ -1033,7 +1033,7 @@ export class PlaywrightRunner extends EventEmitter {
       const stabilization = { ...this.getStabilizationSettings(), ...test.stabilizationOverrides };
 
       // Per-test playwright overrides
-      const effectiveBaseUrl = test.playwrightOverrides?.baseUrl ?? test.targetUrl ?? (this.environmentConfig?.baseUrl || 'http://localhost:3000');
+      const effectiveBaseUrl = test.playwrightOverrides?.baseUrl ?? (this.environmentConfig?.baseUrl || 'http://localhost:3000');
 
       // Per-test viewport override takes precedence over global settings
       const testViewport = test.viewportOverride || this.getViewport();
@@ -1647,7 +1647,7 @@ export class PlaywrightRunner extends EventEmitter {
 
     if (funcMatch) {
       const serverManager = getServerManager();
-      const baseUrl = (test.targetUrl || this.environmentConfig?.baseUrl || serverManager.resolveUrl('http://localhost:3000') || 'http://localhost:3000').replace(/\/$/, '');
+      const baseUrl = (this.environmentConfig?.baseUrl || serverManager.resolveUrl('http://localhost:3000') || 'http://localhost:3000').replace(/\/$/, '');
 
       const softErrors: string[] = [];
 

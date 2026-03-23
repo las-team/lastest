@@ -477,6 +477,17 @@ export async function saveRecordedTest(data: {
     }
   }
 
+  // Update environment config baseUrl from the recording target URL
+  if (data.targetUrl) {
+    try {
+      const origin = new URL(data.targetUrl).origin;
+      const { upsertEnvironmentConfig } = await import('@/lib/db/queries');
+      await upsertEnvironmentConfig(data.repositoryId ?? '', { baseUrl: origin });
+    } catch {
+      // Invalid URL — skip baseUrl update
+    }
+  }
+
   // Persist setup overrides (skipped defaults and/or extra steps)
   const hasSkipped = data.skippedDefaultStepIds && data.skippedDefaultStepIds.length > 0;
   const hasExtra = data.extraSetupSteps && data.extraSetupSteps.length > 0;
