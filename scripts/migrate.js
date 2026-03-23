@@ -43,13 +43,20 @@ try {
   if (fs.existsSync(schemaPath)) {
     const schema = fs.readFileSync(schemaPath, 'utf8');
 
-    // Extract table/column definitions using regex
-    // Match: sqliteTable('table_name', { ... })
-    const tableRegex = /sqliteTable\s*\(\s*['"](\w+)['"]\s*,\s*\{([\s\S]*?)\}\s*\)/g;
+    // Extract table/column definitions using brace-counting
+    // (regex non-greedy fails on nested braces like `{ mode: 'boolean' }`)
+    const tableHeaderRegex = /sqliteTable\s*\(\s*['"](\w+)['"]\s*,\s*\{/g;
     let match;
-    while ((match = tableRegex.exec(schema)) !== null) {
+    while ((match = tableHeaderRegex.exec(schema)) !== null) {
       const tableName = match[1];
-      const body = match[2];
+      let depth = 1;
+      let i = match.index + match[0].length;
+      while (i < schema.length && depth > 0) {
+        if (schema[i] === '{') depth++;
+        else if (schema[i] === '}') depth--;
+        i++;
+      }
+      const body = schema.substring(match.index + match[0].length, i - 1);
 
       // Get existing columns
       let existingCols;

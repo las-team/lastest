@@ -297,6 +297,80 @@ export function RunDashboardClient({ tests, runs: _runs, builds, repositoryId, a
                   <span>Tests get faster over time as selectors are optimized</span>
                 </div>
               </div>
+              {/* Comparison Run toggle */}
+              {repositoryId && (
+                <div className="mt-3 pt-3 border-t">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <GitCompare className="h-3.5 w-3.5 text-muted-foreground" />
+                      <Label htmlFor="comparison-toggle" className="text-sm font-medium cursor-pointer">
+                        Comparison Run
+                      </Label>
+                    </div>
+                    <Switch
+                      id="comparison-toggle"
+                      checked={comparisonEnabled}
+                      onCheckedChange={(checked) => {
+                        setComparisonEnabled(checked);
+                        updateComparisonRunSettings(repositoryId, checked, baselineBranch);
+                      }}
+                    />
+                  </div>
+                  {comparisonEnabled && (
+                    <div className="mt-3 space-y-3">
+                      <div className="flex items-center gap-2 p-2 rounded-md bg-amber-50 border border-amber-200 text-amber-800">
+                        <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+                        <span className="text-xs">
+                          Baseline branch will be auto-approved, overwriting existing baselines.
+                        </span>
+                      </div>
+                      <div className="space-y-2">
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs text-muted-foreground">Baseline Branch</span>
+                          <Select
+                            value={baselineBranch}
+                            onValueChange={(val) => {
+                              setBaselineBranch(val);
+                              setBaselineUrl(branchBaseUrls?.[val] || initialBaseUrl);
+                              updateComparisonRunSettings(repositoryId, true, val);
+                            }}
+                          >
+                            <SelectTrigger className="w-[180px] h-8 text-xs">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {branches.length > 0 ? branches.map((b) => (
+                                <SelectItem key={b} value={b} className="text-xs">{b}</SelectItem>
+                              )) : (
+                                <SelectItem value={defaultBranch || 'main'} className="text-xs">
+                                  {defaultBranch || 'main'}
+                                </SelectItem>
+                              )}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <div>
+                          <span className="text-xs text-muted-foreground">Baseline URL</span>
+                          <Input
+                            value={baselineUrl}
+                            onChange={(e) => setBaselineUrl(e.target.value)}
+                            onBlur={() => {
+                              if (repositoryId && baselineBranch) {
+                                saveBranchBaseUrl(repositoryId, baselineBranch, baselineUrl);
+                              }
+                            }}
+                            placeholder="http://localhost:3000"
+                            className="text-xs h-8 mt-1"
+                          />
+                        </div>
+                      </div>
+                      <div className="text-xs text-muted-foreground">
+                        <span className="font-medium">Flow:</span> Run on {baselineBranch} ({baselineUrl}) → auto-set baselines → Run on {activeBranch || 'current branch'} ({baseUrl})
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
             </CardContent>
           </Card>
 
@@ -491,83 +565,6 @@ export function RunDashboardClient({ tests, runs: _runs, builds, repositoryId, a
               )}
             </CardContent>
           </Card>
-
-          {/* Comparison Run Card */}
-          {repositoryId && (
-            <Card>
-              <CardContent className="pt-4 pb-3 px-4">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <GitCompare className="h-3.5 w-3.5 text-muted-foreground" />
-                    <Label htmlFor="comparison-toggle" className="text-sm font-medium cursor-pointer">
-                      Comparison Run
-                    </Label>
-                  </div>
-                  <Switch
-                    id="comparison-toggle"
-                    checked={comparisonEnabled}
-                    onCheckedChange={(checked) => {
-                      setComparisonEnabled(checked);
-                      updateComparisonRunSettings(repositoryId, checked, baselineBranch);
-                    }}
-                  />
-                </div>
-                {comparisonEnabled && (
-                  <div className="mt-3 space-y-3">
-                    <div className="flex items-center gap-2 p-2 rounded-md bg-amber-50 border border-amber-200 text-amber-800">
-                      <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
-                      <span className="text-xs">
-                        Baseline branch will be auto-approved, overwriting existing baselines.
-                      </span>
-                    </div>
-                    <div className="space-y-2">
-                      <div className="flex items-center justify-between">
-                        <span className="text-xs text-muted-foreground">Baseline Branch</span>
-                        <Select
-                          value={baselineBranch}
-                          onValueChange={(val) => {
-                            setBaselineBranch(val);
-                            setBaselineUrl(branchBaseUrls?.[val] || initialBaseUrl);
-                            updateComparisonRunSettings(repositoryId, true, val);
-                          }}
-                        >
-                          <SelectTrigger className="w-[180px] h-8 text-xs">
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {branches.length > 0 ? branches.map((b) => (
-                              <SelectItem key={b} value={b} className="text-xs">{b}</SelectItem>
-                            )) : (
-                              <SelectItem value={defaultBranch || 'main'} className="text-xs">
-                                {defaultBranch || 'main'}
-                              </SelectItem>
-                            )}
-                          </SelectContent>
-                        </Select>
-                      </div>
-                      <div>
-                        <span className="text-xs text-muted-foreground">Baseline URL</span>
-                        <Input
-                          value={baselineUrl}
-                          onChange={(e) => setBaselineUrl(e.target.value)}
-                          onBlur={() => {
-                            if (repositoryId && baselineBranch) {
-                              saveBranchBaseUrl(repositoryId, baselineBranch, baselineUrl);
-                            }
-                          }}
-                          placeholder="http://localhost:3000"
-                          className="text-xs h-8 mt-1"
-                        />
-                      </div>
-                    </div>
-                    <div className="text-xs text-muted-foreground">
-                      <span className="font-medium">Flow:</span> Run on {baselineBranch} ({baselineUrl}) → auto-set baselines → Run on {activeBranch || 'current branch'} ({baseUrl})
-                    </div>
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-          )}
 
           <Card>
             <CardHeader className="pb-3">
