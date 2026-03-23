@@ -1927,6 +1927,25 @@ export async function rerunPlanner(
   const baseUrl = envConfig?.baseUrl || 'http://localhost:3000';
   const intelligence = session.metadata?.codebaseIntelligence as CodebaseIntelligenceContext | undefined;
 
+  // Mark the substep as running before starting work
+  const currentPlanStep = session.steps.find(s => s.id === 'plan')!;
+  const preSubsteps = [...(currentPlanStep.substeps || [])];
+  const preIdx = preSubsteps.findIndex(s => s.source === plannerSource);
+  if (preIdx >= 0) {
+    preSubsteps[preIdx] = { ...preSubsteps[preIdx], status: 'running', rawError: undefined };
+    await updateStep(sessionId, 'plan', { substeps: preSubsteps });
+  } else {
+    // New diver — add a running substep
+    const isDiver = plannerSource.startsWith('browser-dive-');
+    preSubsteps.push({
+      label: isDiver ? `Deep-dive: ${plannerSource.replace('browser-dive-', '')}` : plannerSource,
+      status: 'running',
+      agent: isDiver ? 'diver' : 'planner',
+      source: plannerSource,
+    });
+    await updateStep(sessionId, 'plan', { substeps: preSubsteps });
+  }
+
   // Re-run the specific planner
   let result: import('@/lib/playwright/planner-types').PlannerResult;
   try {
