@@ -8,16 +8,13 @@ Network Interception
 Auto gh action run
 ## features
 Migrate to gh app /home/ewyct/.claude/plans/cheeky-sparking-torvalds.md
-Payment integration /home/ewyct/.claude/plans/drifting-yawning-hoare.md
-multiple envs to run tests in w url providing in parallel
-special prompting for ai diff analysis either by user or by branch code change 
-after discovery, extract testing manifesto into a separate page where user can edit
-    if a pr merge happens, update with new functions - show as new, prompt test generation
-    run this on excali
+Videos explaining use
 ## ideas
+Payment integration /home/ewyct/.claude/plans/drifting-yawning-hoare.md
+special prompting for ai diff analysis either by user or by branch code change 
+if a pr merge happens, update test manifest with new functions - show as new, prompt test generation
 Test coverage assessment and recreation based on existing test set
 debug - googlesheet data
-
 cookie sharing from host machine?
 Tweet about us
 Content comparison - compare text in 2 setups

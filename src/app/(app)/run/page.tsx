@@ -55,6 +55,10 @@ export default async function RunPage() {
           versionOverrides: composeConfig.versionOverrides ?? null,
         } : null}
         banAiMode={banAiMode}
+        comparisonRunEnabled={selectedRepo?.comparisonRunEnabled ?? false}
+        comparisonBaselineBranch={selectedRepo?.comparisonBaselineBranch ?? null}
+        branches={repoBranches.map(b => b.name)}
+        branchBaseUrls={selectedRepo?.branchBaseUrls ?? null}
       />
     </div>
   );

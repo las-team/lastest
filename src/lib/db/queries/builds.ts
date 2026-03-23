@@ -28,6 +28,10 @@ export async function getBuildByTestRun(testRunId: string) {
   return db.select().from(builds).where(eq(builds.testRunId, testRunId)).get();
 }
 
+export async function getBuildsByComparisonPairId(pairId: string) {
+  return db.select().from(builds).where(eq(builds.comparisonPairId, pairId)).orderBy(builds.createdAt).all();
+}
+
 export async function createBuild(data: Omit<NewBuild, 'id'>) {
   const id = uuid();
   await db.insert(builds).values({ ...data, id, createdAt: new Date() });
@@ -70,6 +74,9 @@ export async function getBuildsByRepo(repositoryId: string, limit = 10) {
       comparisonMode: builds.comparisonMode,
       codeChangeTestIds: builds.codeChangeTestIds,
       browsers: builds.browsers,
+      comparisonPairId: builds.comparisonPairId,
+      comparisonRole: builds.comparisonRole,
+      comparisonMeta: builds.comparisonMeta,
       gitBranch: testRuns.gitBranch,
       gitCommit: testRuns.gitCommit,
     })

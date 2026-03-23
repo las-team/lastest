@@ -17,16 +17,28 @@ import {
   Monitor,
   HelpCircle,
   GitBranch,
+  GitCompare,
   Zap,
   ChevronDown,
   ChevronRight,
   List,
+  AlertTriangle,
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
-import { createAndRunBuild } from '@/server/actions/builds';
+import { createAndRunBuild, createComparisonRun } from '@/server/actions/builds';
 import type { BuildChanges } from '@/server/actions/builds';
 import { analyzeSmartRun, runSmartBuild, type SmartRunAnalysis } from '@/server/actions/smart-run';
 import { testServerConnection, saveEnvironmentConfig, saveBranchBaseUrl } from '@/server/actions/environment';
+import { updateComparisonRunSettings } from '@/server/actions/repos';
+import { Switch } from '@/components/ui/switch';
+import { Label } from '@/components/ui/label';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { useNotifyJobStarted } from '@/components/queue/job-polling-context';
 import { ExecutionTargetSelector } from '@/components/execution/execution-target-selector';
 import type { Test, TestRun, Build } from '@/lib/db/schema';
@@ -58,6 +70,10 @@ interface RunDashboardClientProps {
   buildChanges?: BuildChanges | null;
   composeConfig?: ComposeConfigProp | null;
   banAiMode?: boolean;
+  comparisonRunEnabled?: boolean;
+  comparisonBaselineBranch?: string | null;
+  branches?: string[];
+  branchBaseUrls?: Record<string, string> | null;
 }
 
 const HISTORY_KEY = 'baseurl-history';
@@ -86,11 +102,16 @@ function isLocalUrl(url: string): boolean {
   }
 }
 
-export function RunDashboardClient({ tests, runs: _runs, builds, repositoryId, activeBranch, currentBranch, defaultBranch, baseUrl: initialBaseUrl, branchHeads, buildChanges, composeConfig, banAiMode = false }: RunDashboardClientProps) {
+export function RunDashboardClient({ tests, runs: _runs, builds, repositoryId, activeBranch, currentBranch, defaultBranch, baseUrl: initialBaseUrl, branchHeads, buildChanges, composeConfig, banAiMode = false, comparisonRunEnabled: initialComparisonEnabled = false, comparisonBaselineBranch: initialBaselineBranch, branches = [], branchBaseUrls }: RunDashboardClientProps) {
   const router = useRouter();
   const notifyJobStarted = useNotifyJobStarted();
   const [isRunning, setIsRunning] = useState(false);
   const [baseUrl, setBaseUrl] = useState(initialBaseUrl);
+
+  // Comparison run state
+  const [comparisonEnabled, setComparisonEnabled] = useState(initialComparisonEnabled);
+  const [baselineBranch, setBaselineBranch] = useState(initialBaselineBranch || defaultBranch || 'main');
+  const [baselineUrl, setBaselineUrl] = useState(branchBaseUrls?.[initialBaselineBranch || defaultBranch || 'main'] || initialBaseUrl);
   const [isTesting, setIsTesting] = useState(false);
   const [testResult, setTestResult] = useState<{ success: boolean; responseTime?: number; statusCode?: number; error?: string } | null>(null);
   const [showHistory, setShowHistory] = useState(false);
@@ -192,9 +213,26 @@ export function RunDashboardClient({ tests, runs: _runs, builds, repositoryId, a
       await saveAndTestBaseUrl();
       const testIds = composeConfig?.selectedTestIds ?? undefined;
       const versionOverrides = composeConfig?.versionOverrides ?? undefined;
-      const { buildId } = await createAndRunBuild('manual', testIds, repositoryId, executionTarget, versionOverrides);
-      notifyJobStarted();
-      router.push(`/builds/${buildId}`);
+
+      if (comparisonEnabled && repositoryId) {
+        const featureBranch = activeBranch || currentBranch || 'main';
+        const { baselineBuildId } = await createComparisonRun(
+          repositoryId,
+          baselineBranch,
+          baselineUrl,
+          featureBranch,
+          baseUrl,
+          executionTarget,
+          testIds,
+          versionOverrides,
+        );
+        notifyJobStarted();
+        router.push(`/builds/${baselineBuildId}`);
+      } else {
+        const { buildId } = await createAndRunBuild('manual', testIds, repositoryId, executionTarget, versionOverrides);
+        notifyJobStarted();
+        router.push(`/builds/${buildId}`);
+      }
     } catch (error) {
       console.error('Failed to start build:', error);
     } finally {
@@ -231,10 +269,14 @@ export function RunDashboardClient({ tests, runs: _runs, builds, repositoryId, a
                   >
                     {isRunning ? (
                       <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    ) : comparisonEnabled ? (
+                      <GitCompare className="h-4 w-4 mr-2" />
                     ) : (
                       <Play className="h-4 w-4 mr-2" />
                     )}
-                    {hasComposeConfig ? `Run ${composedTestCount} Tests` : 'Run All Tests'}
+                    {comparisonEnabled
+                      ? 'Run Comparison'
+                      : hasComposeConfig ? `Run ${composedTestCount} Tests` : 'Run All Tests'}
                   </Button>
                 </div>
               </div>
@@ -449,6 +491,83 @@ export function RunDashboardClient({ tests, runs: _runs, builds, repositoryId, a
               )}
             </CardContent>
           </Card>
+
+          {/* Comparison Run Card */}
+          {repositoryId && (
+            <Card>
+              <CardContent className="pt-4 pb-3 px-4">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <GitCompare className="h-3.5 w-3.5 text-muted-foreground" />
+                    <Label htmlFor="comparison-toggle" className="text-sm font-medium cursor-pointer">
+                      Comparison Run
+                    </Label>
+                  </div>
+                  <Switch
+                    id="comparison-toggle"
+                    checked={comparisonEnabled}
+                    onCheckedChange={(checked) => {
+                      setComparisonEnabled(checked);
+                      updateComparisonRunSettings(repositoryId, checked, baselineBranch);
+                    }}
+                  />
+                </div>
+                {comparisonEnabled && (
+                  <div className="mt-3 space-y-3">
+                    <div className="flex items-center gap-2 p-2 rounded-md bg-amber-50 border border-amber-200 text-amber-800">
+                      <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+                      <span className="text-xs">
+                        Baseline branch will be auto-approved, overwriting existing baselines.
+                      </span>
+                    </div>
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs text-muted-foreground">Baseline Branch</span>
+                        <Select
+                          value={baselineBranch}
+                          onValueChange={(val) => {
+                            setBaselineBranch(val);
+                            setBaselineUrl(branchBaseUrls?.[val] || initialBaseUrl);
+                            updateComparisonRunSettings(repositoryId, true, val);
+                          }}
+                        >
+                          <SelectTrigger className="w-[180px] h-8 text-xs">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {branches.length > 0 ? branches.map((b) => (
+                              <SelectItem key={b} value={b} className="text-xs">{b}</SelectItem>
+                            )) : (
+                              <SelectItem value={defaultBranch || 'main'} className="text-xs">
+                                {defaultBranch || 'main'}
+                              </SelectItem>
+                            )}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div>
+                        <span className="text-xs text-muted-foreground">Baseline URL</span>
+                        <Input
+                          value={baselineUrl}
+                          onChange={(e) => setBaselineUrl(e.target.value)}
+                          onBlur={() => {
+                            if (repositoryId && baselineBranch) {
+                              saveBranchBaseUrl(repositoryId, baselineBranch, baselineUrl);
+                            }
+                          }}
+                          placeholder="http://localhost:3000"
+                          className="text-xs h-8 mt-1"
+                        />
+                      </div>
+                    </div>
+                    <div className="text-xs text-muted-foreground">
+                      <span className="font-medium">Flow:</span> Run on {baselineBranch} ({baselineUrl}) → auto-set baselines → Run on {activeBranch || 'current branch'} ({baseUrl})
+                    </div>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          )}
 
           <Card>
             <CardHeader className="pb-3">

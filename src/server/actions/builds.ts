@@ -366,6 +366,167 @@ export async function createAndRunBuildFromCI(opts: {
 }
 
 /**
+ * Create a comparison run: baseline build (auto-approved) → feature build (diffed against baselines).
+ */
+export async function createComparisonRun(
+  repositoryId: string,
+  baselineBranch: string,
+  baselineUrl: string,
+  featureBranch: string,
+  featureUrl: string,
+  runnerId?: string,
+  testIds?: string[],
+  versionOverrides?: Record<string, string>,
+) {
+  await requireRepoAccess(repositoryId);
+  const targetRunner = runnerId || 'local';
+
+  // If runner is busy, we can't start — comparison runs are not queued
+  if (await isRunnerBusy(targetRunner)) {
+    throw new Error('Runner is busy. Please wait for the current build to finish before starting a comparison run.');
+  }
+
+  const comparisonPairId = crypto.randomUUID();
+
+  const runner = getRunner(repositoryId);
+
+  // Load env + playwright settings
+  const envConfig = await queries.getEnvironmentConfig(repositoryId);
+  if (envConfig && envConfig.id) {
+    runner.setEnvironmentConfig(envConfig);
+    const serverManager = getServerManager();
+    serverManager.setConfig(envConfig);
+  }
+  const playwrightSettings = await queries.getPlaywrightSettings(repositoryId);
+  if (playwrightSettings) {
+    runner.setSettings(playwrightSettings);
+  }
+
+  // Get tests
+  let tests: Test[];
+  if (testIds && testIds.length > 0) {
+    tests = await Promise.all(
+      testIds.map((id) => queries.getTest(id))
+    ).then((results) => results.filter((t): t is Test => t !== undefined && !t.deletedAt));
+  } else {
+    tests = await queries.getTestsByRepo(repositoryId);
+  }
+  if (tests.length === 0) {
+    throw new Error('No tests to run');
+  }
+
+  // Git info for baseline branch
+  const gitInfo = await getGitInfoForBranch(repositoryId, baselineBranch);
+
+  // Create test run for baseline
+  const testRun = await queries.createTestRun({
+    repositoryId,
+    gitBranch: gitInfo.branch,
+    gitCommit: gitInfo.commit,
+    startedAt: new Date(),
+    status: 'running',
+  });
+
+  // Create baseline build
+  const build = await queries.createBuild({
+    testRunId: testRun.id,
+    triggerType: 'manual',
+    overallStatus: 'review_required',
+    totalTests: tests.length,
+    changesDetected: 0,
+    flakyCount: 0,
+    failedCount: 0,
+    passedCount: 0,
+    baseUrl: baselineUrl,
+    comparisonMode: 'vs_both',
+  });
+
+  // Tag as comparison baseline with Phase 2 metadata
+  await queries.updateBuild(build.id, {
+    comparisonPairId,
+    comparisonRole: 'baseline',
+    comparisonMeta: {
+      featureBranch,
+      featureUrl,
+      runnerId,
+      testIds,
+      versionOverrides,
+    },
+  });
+
+  // Run baseline build async with forceAutoApprove
+  runBuildAsync(build.id, testRun.id, tests, gitInfo.branch, repositoryId, runnerId, versionOverrides, true);
+
+  return { pairId: comparisonPairId, baselineBuildId: build.id, testRunId: testRun.id };
+}
+
+/**
+ * Internal: Create the feature build for a comparison pair (called after baseline completes).
+ */
+async function createComparisonFeatureBuild(
+  comparisonPairId: string,
+  repositoryId: string | null,
+  meta: { featureBranch: string; featureUrl: string; runnerId?: string; testIds?: string[]; versionOverrides?: Record<string, string> },
+) {
+  if (!repositoryId) throw new Error('Comparison run requires a repository');
+
+  const runner = getRunner(repositoryId);
+  const envConfig = await queries.getEnvironmentConfig(repositoryId);
+  if (envConfig && envConfig.id) {
+    runner.setEnvironmentConfig(envConfig);
+    const serverManager = getServerManager();
+    serverManager.setConfig(envConfig);
+  }
+  const playwrightSettings = await queries.getPlaywrightSettings(repositoryId);
+  if (playwrightSettings) {
+    runner.setSettings(playwrightSettings);
+  }
+
+  let tests: Test[];
+  if (meta.testIds && meta.testIds.length > 0) {
+    tests = await Promise.all(
+      meta.testIds.map((id) => queries.getTest(id))
+    ).then((results) => results.filter((t): t is Test => t !== undefined && !t.deletedAt));
+  } else {
+    tests = await queries.getTestsByRepo(repositoryId);
+  }
+  if (tests.length === 0) throw new Error('No tests to run for feature build');
+
+  const gitInfo = await getGitInfoForBranch(repositoryId, meta.featureBranch);
+
+  const testRun = await queries.createTestRun({
+    repositoryId,
+    gitBranch: gitInfo.branch,
+    gitCommit: gitInfo.commit,
+    startedAt: new Date(),
+    status: 'running',
+  });
+
+  const build = await queries.createBuild({
+    testRunId: testRun.id,
+    triggerType: 'manual',
+    overallStatus: 'review_required',
+    totalTests: tests.length,
+    changesDetected: 0,
+    flakyCount: 0,
+    failedCount: 0,
+    passedCount: 0,
+    baseUrl: meta.featureUrl,
+    comparisonMode: 'vs_both',
+  });
+
+  await queries.updateBuild(build.id, {
+    comparisonPairId,
+    comparisonRole: 'feature',
+  });
+
+  // Run feature build normally (no forceAutoApprove — diffs against baselines from Phase 1)
+  runBuildAsync(build.id, testRun.id, tests, gitInfo.branch, repositoryId, meta.runnerId, meta.versionOverrides);
+
+  return { buildId: build.id, testRunId: testRun.id };
+}
+
+/**
  * Internal async build runner
  */
 async function runBuildAsync(
@@ -376,6 +537,7 @@ async function runBuildAsync(
   repositoryId?: string | null,
   runnerId?: string,
   versionOverrides?: Record<string, string>,
+  forceAutoApprove?: boolean,
 ) {
   const runner = getRunner(repositoryId);
   const startTime = Date.now();
@@ -515,6 +677,7 @@ async function runBuildAsync(
           result.stabilityMetadata?.isStable === false,
           currentBrowserType,
           testDiffOverrides,
+          forceAutoApprove,
         )
       )
     );
@@ -797,6 +960,29 @@ async function runBuildAsync(
       gitBranch: branch,
       repositoryId,
     });
+
+    // Phase 2: If this was a comparison baseline build, chain the feature build
+    const completedBuild = await queries.getBuild(buildId);
+    if (completedBuild?.comparisonRole === 'baseline' && completedBuild.comparisonMeta) {
+      const meta = completedBuild.comparisonMeta as {
+        featureBranch: string;
+        featureUrl: string;
+        runnerId?: string;
+        testIds?: string[];
+        versionOverrides?: Record<string, string>;
+      };
+      try {
+        console.log(`[comparison] Baseline build ${buildId} completed. Starting feature build on ${meta.featureBranch}...`);
+        const featureResult = await createComparisonFeatureBuild(
+          completedBuild.comparisonPairId!,
+          repositoryId ?? null,
+          meta,
+        );
+        console.log(`[comparison] Feature build ${featureResult.buildId} started for pair ${completedBuild.comparisonPairId}`);
+      } catch (err) {
+        console.error('[comparison] Failed to start feature build:', err);
+      }
+    }
   } catch (error) {
     // Check if this build was cancelled while running — don't overwrite cancelJob's statuses
     const currentJob = await queries.getBackgroundJob(jobId);
@@ -926,6 +1112,7 @@ async function processVisualDiff(
   isUnstable?: boolean,
   browser: string = 'chromium',
   testDiffOverrides?: import('@/lib/db/schema').TestDiffOverrides | null,
+  forceAutoApprove?: boolean,
 ): Promise<{ hasChanges: boolean; diffId: string; classification: DiffClassification }> {
 
   // Get diff sensitivity settings, then merge per-test overrides
@@ -942,7 +1129,7 @@ async function processVisualDiff(
   // Get the repo's default branch
   const repo = repositoryId ? await queries.getRepository(repositoryId) : null;
   const defaultBranch = repo?.defaultBranch || 'main';
-  const shouldAutoApprove = repo?.autoApproveDefaultBranch && branch === defaultBranch;
+  const shouldAutoApprove = forceAutoApprove || (repo?.autoApproveDefaultBranch && branch === defaultBranch);
 
   // Fetch ignore regions for this test
   const testIgnoreRegions = await queries.getIgnoreRegions(testId);

@@ -135,7 +135,8 @@
       "WebFetch(domain:creem.io)",
       "WebFetch(domain:www.reddit.com)",
       "Bash(gh run:*)",
-      "Bash(cat /home/ewyct/dev/lastest2/src/app/\\\\\\(app\\\\\\)/settings/page.tsx)"
+      "Bash(cat /home/ewyct/dev/lastest2/src/app/\\\\\\(app\\\\\\)/settings/page.tsx)",
+      "Bash(cat /home/ewyct/dev/lastest2/src/app/\\\\\\(app\\\\\\)/compare/compare-client.tsx)"
     ]
   },
   "disabledMcpjsonServers": [

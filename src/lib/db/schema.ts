@@ -232,6 +232,8 @@ export const repositories = sqliteTable('repositories', {
   testingTemplate: text('testing_template'), // Testing template ID (e.g. 'saas', 'marketing', 'canvas')
   autoApproveDefaultBranch: integer('auto_approve_default_branch', { mode: 'boolean' }).default(false),
   branchBaseUrls: text('branch_base_urls', { mode: 'json' }).$type<Record<string, string>>(),
+  comparisonRunEnabled: integer('comparison_run_enabled', { mode: 'boolean' }).default(false),
+  comparisonBaselineBranch: text('comparison_baseline_branch'), // branch used as baseline in comparison runs
   createdAt: integer('created_at', { mode: 'timestamp' }),
 });
 
@@ -312,6 +314,15 @@ export const builds = sqliteTable('builds', {
   teardownDurationMs: integer('teardown_duration_ms'),
   codeChangeTestIds: text('code_change_test_ids', { mode: 'json' }).$type<string[]>(),
   browsers: text('browsers', { mode: 'json' }).$type<string[]>(), // browsers used in this build
+  comparisonPairId: text('comparison_pair_id'), // shared ID linking baseline + feature builds
+  comparisonRole: text('comparison_role'), // 'baseline' | 'feature' | null
+  comparisonMeta: text('comparison_meta', { mode: 'json' }).$type<{
+    featureBranch: string;
+    featureUrl: string;
+    runnerId?: string;
+    testIds?: string[];
+    versionOverrides?: Record<string, string>;
+  }>(),
   createdAt: integer('created_at', { mode: 'timestamp' }),
   completedAt: integer('completed_at', { mode: 'timestamp' }),
 });

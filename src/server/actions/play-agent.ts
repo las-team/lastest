@@ -852,10 +852,13 @@ async function runPlanWithAgents(
 
   if (isAborted(signal)) return false;
 
+  // ── Wait for spec planner before scout so its areas feed into classification ──
+  const specResult = await specPromise;
+
   // ── Phase B+C: Browser planner (scout → deep-dive internally) ──
-  const otherAreas = [...codeResult.areas, ...routeResult.areas];
+  const otherAreas = [...codeResult.areas, ...routeResult.areas, ...specResult.areas];
   plannerStates[4].status = 'running';
-  plannerStates[4].detail = `${otherAreas.length} areas from code+route`;
+  plannerStates[4].detail = `${otherAreas.length} areas from code+route+spec`;
   await flushSubsteps();
 
   const browserResult = await runBrowserPlanner(repositoryId, baseUrl, {
@@ -905,9 +908,6 @@ async function runPlanWithAgents(
     flushSubsteps();
     return { source: 'browser' as const, areas: [], error: String(err) } as import('@/lib/playwright/planner-types').PlannerResult;
   });
-
-  // Wait for spec planner
-  const specResult = await specPromise;
 
   if (isAborted(signal)) return false;
 
