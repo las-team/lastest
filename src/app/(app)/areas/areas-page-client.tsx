@@ -1,7 +1,7 @@
 'use client';
 
-import { useState, useEffect } from 'react';
-import { useRouter } from 'next/navigation';
+import { useState, useEffect, useRef, useCallback } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { AreaTree, type TreeSelection } from '@/components/areas/area-tree';
 import { AreaDetailSection } from '@/components/areas/area-detail-section';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -9,6 +9,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
+import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import {
   Dialog,
   DialogContent,
@@ -17,11 +18,11 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { createArea, deleteArea, deleteAreaWithContents, moveTestToArea, moveSuiteToArea, moveArea, exportAllPlans } from '@/server/actions/areas';
+import { createArea, deleteArea, deleteAreaWithContents, moveTestToArea, moveSuiteToArea, moveArea, exportAllPlans, updateAreaPlan } from '@/server/actions/areas';
 import { deleteTest } from '@/server/actions/tests';
-import { FolderSearch, Sparkles, FileText, Loader2, BookOpen, Check, X, Circle, FileWarning, GitCompare, ScrollText, Download } from 'lucide-react';
-import Link from 'next/link';
-import { downloadMarkdown } from '@/lib/utils';
+import { FolderSearch, Sparkles, FileText, Loader2, BookOpen, Check, X, Circle, FileWarning, GitCompare, Download } from 'lucide-react';
+import { Badge } from '@/components/ui/badge';
+import { downloadMarkdown, timeAgo } from '@/lib/utils';
 import { Progress } from '@/components/ui/progress';
 import { cn } from '@/lib/utils';
 import { startRemoteRouteScan } from '@/server/actions/scanner';
@@ -51,6 +52,9 @@ interface AreasPageClientProps {
 
 export function AreasPageClient({ tree, uncategorizedTests, unsortedSuites, repositoryId, selectedBranch, banAiMode = false }: AreasPageClientProps) {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const initialTab = searchParams.get('tab') === 'plan' ? 'plan' : 'overview';
+  const [activeTab, setActiveTab] = useState(initialTab);
   const [selection, setSelection] = useState<TreeSelection | null>(null);
   const [selectedAreaIds, setSelectedAreaIds] = useState<Set<string>>(new Set());
   const [isNewAreaOpen, setIsNewAreaOpen] = useState(false);
@@ -67,6 +71,18 @@ export function AreasPageClient({ tree, uncategorizedTests, unsortedSuites, repo
   const [showSpecAnalysisDialog, setShowSpecAnalysisDialog] = useState(false);
   const [showImportFromSpecDialog, setShowImportFromSpecDialog] = useState(false);
   const [showCodeDiffDialog, setShowCodeDiffDialog] = useState(false);
+  const [isExporting, setIsExporting] = useState(false);
+
+  // When Plan tab is active and tree item is clicked, scroll to that area's plan editor
+  const handleTreeSelect = useCallback((sel: TreeSelection | null) => {
+    setSelection(sel);
+    if (activeTab === 'plan' && sel?.type === 'area') {
+      setTimeout(() => {
+        const el = document.getElementById(`plan-area-${sel.id}`);
+        if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }, 50);
+    }
+  }, [activeTab]);
 
   // Delete key handler
   useEffect(() => {
@@ -242,6 +258,19 @@ export function AreasPageClient({ tree, uncategorizedTests, unsortedSuites, repo
     }
   };
 
+  const handleExportAll = async () => {
+    setIsExporting(true);
+    try {
+      const md = await exportAllPlans(repositoryId);
+      downloadMarkdown(md, 'testing-manifesto.md');
+      toast.success('Manifesto exported');
+    } catch {
+      toast.error('Failed to export');
+    } finally {
+      setIsExporting(false);
+    }
+  };
+
   // Collect all suites (sorted and unsorted) for the detail section
   const allSuites: SuiteItem[] = [
     ...unsortedSuites,
@@ -257,6 +286,19 @@ export function AreasPageClient({ tree, uncategorizedTests, unsortedSuites, repo
     return result;
   }
 
+  // Flatten tree for plan tab
+  function flattenAreas(items: FunctionalAreaWithChildren[], depth = 0): Array<FunctionalAreaWithChildren & { depth: number }> {
+    const result: Array<FunctionalAreaWithChildren & { depth: number }> = [];
+    for (const item of items) {
+      result.push({ ...item, depth });
+      result.push(...flattenAreas(item.children, depth + 1));
+    }
+    return result;
+  }
+
+  const flatAreas = flattenAreas(tree);
+  const areasWithPlans = flatAreas.filter(a => a.agentPlan);
+
   return (
     <ResizablePanelGroup orientation="horizontal" className="flex-1 overflow-hidden">
       {/* Left Sidebar - Area Tree */}
@@ -267,7 +309,7 @@ export function AreasPageClient({ tree, uncategorizedTests, unsortedSuites, repo
           unsortedSuites={unsortedSuites}
           selection={selection}
           selectedAreaIds={selectedAreaIds}
-          onSelect={setSelection}
+          onSelect={handleTreeSelect}
           onMultiSelect={setSelectedAreaIds}
           onNewArea={handleNewArea}
           onEditArea={(id) => setSelection({ type: 'area', id })}
@@ -282,163 +324,204 @@ export function AreasPageClient({ tree, uncategorizedTests, unsortedSuites, repo
       <ResizableHandle withHandle />
 
       {/* Main Content */}
-      <ResizablePanel defaultSize="80%" className="overflow-auto">
-        <div className="p-6">
-        <div className="max-w-3xl space-y-6">
-          {/* Discovery Actions */}
-          <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-base">Discovery Actions</CardTitle>
-              <CardDescription>
-                Discover and import routes using these tools
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="grid grid-cols-3 md:grid-cols-6 gap-3">
-                <button
-                  onClick={handleScan}
-                  disabled={isScanning}
-                  className="flex flex-col items-center gap-2 p-4 border rounded-lg hover:bg-muted/50 hover:border-primary/50 transition-colors text-center disabled:opacity-50"
-                >
-                  {isScanning ? (
-                    <Loader2 className="h-6 w-6 text-primary animate-spin" />
-                  ) : (
-                    <FolderSearch className="h-6 w-6 text-primary" />
-                  )}
-                  <span className="font-medium text-sm">Scan Routes</span>
-                  <span className="text-xs text-muted-foreground">Discover from repo</span>
-                </button>
-                {!banAiMode && (
-                  <>
-                    <button
-                      onClick={() => setShowSpecAnalysisDialog(true)}
-                      className="flex flex-col items-center gap-2 p-4 border rounded-lg hover:bg-muted/50 hover:border-primary/50 transition-colors text-center"
-                    >
-                      <FileText className="h-6 w-6 text-primary" />
-                      <span className="font-medium text-sm">Analyze Specs</span>
-                      <span className="text-xs text-muted-foreground">Parse API/route specs</span>
-                    </button>
-                    <button
-                      onClick={() => setShowImportFromSpecDialog(true)}
-                      className="flex flex-col items-center gap-2 p-4 border rounded-lg hover:bg-muted/50 hover:border-primary/50 transition-colors text-center"
-                    >
-                      <BookOpen className="h-6 w-6 text-primary" />
-                      <span className="font-medium text-sm">Import Spec</span>
-                      <span className="text-xs text-muted-foreground">US/AC to tests</span>
-                    </button>
-                    <button
-                      onClick={() => setShowAIScanDialog(true)}
-                      className="flex flex-col items-center gap-2 p-4 border rounded-lg hover:bg-muted/50 hover:border-primary/50 transition-colors text-center"
-                    >
-                      <Sparkles className="h-6 w-6 text-primary" />
-                      <span className="font-medium text-sm">Discover Areas</span>
-                      <span className="text-xs text-muted-foreground">AI-powered discovery</span>
-                    </button>
-                    <button
-                      onClick={() => setShowCodeDiffDialog(true)}
-                      className="flex flex-col items-center gap-2 p-4 border rounded-lg hover:bg-muted/50 hover:border-primary/50 transition-colors text-center"
-                    >
-                      <GitCompare className="h-6 w-6 text-primary" />
-                      <span className="font-medium text-sm">Code Diff</span>
-                      <span className="text-xs text-muted-foreground">Branch changes</span>
-                    </button>
-                  </>
+      <ResizablePanel defaultSize="80%" className="overflow-hidden flex flex-col">
+        <Tabs value={activeTab} onValueChange={setActiveTab} className="flex flex-col flex-1 overflow-hidden">
+          <div className="px-6 pt-4 pb-0 shrink-0">
+            <TabsList className="h-11 w-full max-w-3xl p-1 bg-white dark:bg-zinc-950 border">
+              <TabsTrigger value="overview" className="flex-1 px-6 text-sm data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-sm">
+                Overview
+              </TabsTrigger>
+              <TabsTrigger value="plan" className="flex-1 px-6 text-sm data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-sm">
+                Plan
+                {areasWithPlans.length > 0 && (
+                  <Badge variant="secondary" className="ml-1.5 h-5 px-1.5 text-[10px] data-[state=active]:bg-primary-foreground/20 data-[state=active]:text-primary-foreground">
+                    {areasWithPlans.length}
+                  </Badge>
                 )}
-                <Link
-                  href="/areas/plan"
-                  className="flex flex-col items-center gap-2 p-4 border rounded-lg hover:bg-muted/50 hover:border-primary/50 transition-colors text-center"
-                >
-                  <ScrollText className="h-6 w-6 text-primary" />
-                  <span className="font-medium text-sm">Testing Plan</span>
-                  <span className="text-xs text-muted-foreground">View & edit plans</span>
-                </Link>
-                <button
-                  onClick={async () => {
-                    try {
-                      const md = await exportAllPlans(repositoryId);
-                      downloadMarkdown(md, 'testing-manifesto.md');
-                      toast.success('Manifesto exported');
-                    } catch {
-                      toast.error('Failed to export');
-                    }
-                  }}
-                  className="flex flex-col items-center gap-2 p-4 border rounded-lg hover:bg-muted/50 hover:border-primary/50 transition-colors text-center"
-                >
-                  <Download className="h-6 w-6 text-primary" />
-                  <span className="font-medium text-sm">Export</span>
-                  <span className="text-xs text-muted-foreground">Manifesto (.md)</span>
-                </button>
-              </div>
-            </CardContent>
-          </Card>
+              </TabsTrigger>
+            </TabsList>
+          </div>
 
-          <Card>
-            <CardHeader>
-              <CardTitle>Areas Overview</CardTitle>
-              <CardDescription>
-                Organize your tests and suites into functional areas
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              {/* Coverage progress bar */}
-              <div className="space-y-2">
-                <div className="flex items-center justify-between text-sm">
-                  <span className="text-muted-foreground">Test coverage</span>
-                  <span className={cn('font-semibold', getCoverageColor(coverage.rate))}>
-                    {coverage.executed}/{coverage.total} tested ({coverage.rate}%)
-                  </span>
-                </div>
-                <Progress
-                  value={coverage.rate}
-                  className={cn('h-2.5', getCoverageBarClass(coverage.rate))}
+          {/* Overview Tab */}
+          <TabsContent value="overview" className="overflow-auto flex-1">
+            <div className="p-6 pt-2">
+              <div className="max-w-3xl space-y-6">
+                {/* Discovery Actions */}
+                <Card>
+                  <CardHeader className="pb-2">
+                    <CardTitle className="text-base">Discovery Actions</CardTitle>
+                    <CardDescription>
+                      Discover and import routes using these tools
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="grid grid-cols-3 md:grid-cols-5 gap-3">
+                      <button
+                        onClick={handleScan}
+                        disabled={isScanning}
+                        className="flex flex-col items-center gap-2 p-4 border rounded-lg hover:bg-muted/50 hover:border-primary/50 transition-colors text-center disabled:opacity-50"
+                      >
+                        {isScanning ? (
+                          <Loader2 className="h-6 w-6 text-primary animate-spin" />
+                        ) : (
+                          <FolderSearch className="h-6 w-6 text-primary" />
+                        )}
+                        <span className="font-medium text-sm">Scan Routes</span>
+                        <span className="text-xs text-muted-foreground">Discover from repo</span>
+                      </button>
+                      {!banAiMode && (
+                        <>
+                          <button
+                            onClick={() => setShowSpecAnalysisDialog(true)}
+                            className="flex flex-col items-center gap-2 p-4 border rounded-lg hover:bg-muted/50 hover:border-primary/50 transition-colors text-center"
+                          >
+                            <FileText className="h-6 w-6 text-primary" />
+                            <span className="font-medium text-sm">Analyze Specs</span>
+                            <span className="text-xs text-muted-foreground">Parse API/route specs</span>
+                          </button>
+                          <button
+                            onClick={() => setShowImportFromSpecDialog(true)}
+                            className="flex flex-col items-center gap-2 p-4 border rounded-lg hover:bg-muted/50 hover:border-primary/50 transition-colors text-center"
+                          >
+                            <BookOpen className="h-6 w-6 text-primary" />
+                            <span className="font-medium text-sm">Import Spec</span>
+                            <span className="text-xs text-muted-foreground">US/AC to tests</span>
+                          </button>
+                          <button
+                            onClick={() => setShowAIScanDialog(true)}
+                            className="flex flex-col items-center gap-2 p-4 border rounded-lg hover:bg-muted/50 hover:border-primary/50 transition-colors text-center"
+                          >
+                            <Sparkles className="h-6 w-6 text-primary" />
+                            <span className="font-medium text-sm">Discover Areas</span>
+                            <span className="text-xs text-muted-foreground">AI-powered discovery</span>
+                          </button>
+                          <button
+                            onClick={() => setShowCodeDiffDialog(true)}
+                            className="flex flex-col items-center gap-2 p-4 border rounded-lg hover:bg-muted/50 hover:border-primary/50 transition-colors text-center"
+                          >
+                            <GitCompare className="h-6 w-6 text-primary" />
+                            <span className="font-medium text-sm">Code Diff</span>
+                            <span className="text-xs text-muted-foreground">Branch changes</span>
+                          </button>
+                        </>
+                      )}
+                    </div>
+                  </CardContent>
+                </Card>
+
+                <Card>
+                  <CardHeader>
+                    <CardTitle>Areas Overview</CardTitle>
+                    <CardDescription>
+                      Organize your tests and suites into functional areas
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent className="space-y-4">
+                    {/* Coverage progress bar */}
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between text-sm">
+                        <span className="text-muted-foreground">Test coverage</span>
+                        <span className={cn('font-semibold', getCoverageColor(coverage.rate))}>
+                          {coverage.executed}/{coverage.total} tested ({coverage.rate}%)
+                        </span>
+                      </div>
+                      <Progress
+                        value={coverage.rate}
+                        className={cn('h-2.5', getCoverageBarClass(coverage.rate))}
+                      />
+                    </div>
+
+                    {/* Status breakdown */}
+                    <div className="grid grid-cols-4 gap-3">
+                      <div className="flex items-center gap-2 p-3 bg-muted/50 rounded-lg">
+                        <Check className="h-4 w-4 text-green-500 shrink-0" />
+                        <div>
+                          <div className="text-lg font-bold leading-none">{coverage.passed}</div>
+                          <div className="text-xs text-muted-foreground">Passed</div>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2 p-3 bg-muted/50 rounded-lg">
+                        <X className="h-4 w-4 text-red-500 shrink-0" />
+                        <div>
+                          <div className="text-lg font-bold leading-none">{coverage.failed}</div>
+                          <div className="text-xs text-muted-foreground">Failed</div>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2 p-3 bg-muted/50 rounded-lg">
+                        <Circle className="h-4 w-4 text-muted-foreground shrink-0" />
+                        <div>
+                          <div className="text-lg font-bold leading-none">{coverage.notRun}</div>
+                          <div className="text-xs text-muted-foreground">Not Run</div>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2 p-3 bg-muted/50 rounded-lg">
+                        <FileWarning className="h-4 w-4 text-amber-500 shrink-0" />
+                        <div>
+                          <div className="text-lg font-bold leading-none">{coverage.placeholders}</div>
+                          <div className="text-xs text-muted-foreground">Placeholders</div>
+                        </div>
+                      </div>
+                    </div>
+
+                  </CardContent>
+                </Card>
+
+                <AreaDetailSection
+                  selection={selection}
+                  areas={tree}
+                  suites={allSuites}
+                  repositoryId={repositoryId}
+                  onUpdate={() => router.refresh()}
+                  onDeleteArea={setDeleteAreaId}
                 />
               </div>
+            </div>
+          </TabsContent>
 
-              {/* Status breakdown */}
-              <div className="grid grid-cols-4 gap-3">
-                <div className="flex items-center gap-2 p-3 bg-muted/50 rounded-lg">
-                  <Check className="h-4 w-4 text-green-500 shrink-0" />
-                  <div>
-                    <div className="text-lg font-bold leading-none">{coverage.passed}</div>
-                    <div className="text-xs text-muted-foreground">Passed</div>
+          {/* Plan Tab */}
+          <TabsContent value="plan" className="overflow-auto flex-1">
+            <div className="p-6 pt-2">
+              <div className="max-w-4xl">
+                {/* Plan tab header */}
+                <div className="flex items-center justify-between mb-3">
+                  <div className="text-sm text-muted-foreground">
+                    {areasWithPlans.length} area{areasWithPlans.length !== 1 ? 's' : ''} with plans
                   </div>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={handleExportAll}
+                    disabled={isExporting || areasWithPlans.length === 0}
+                  >
+                    {isExporting ? <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" /> : <Download className="h-3.5 w-3.5 mr-1.5" />}
+                    Export Manifesto
+                  </Button>
                 </div>
-                <div className="flex items-center gap-2 p-3 bg-muted/50 rounded-lg">
-                  <X className="h-4 w-4 text-red-500 shrink-0" />
-                  <div>
-                    <div className="text-lg font-bold leading-none">{coverage.failed}</div>
-                    <div className="text-xs text-muted-foreground">Failed</div>
+
+                {areasWithPlans.length === 0 ? (
+                  <div className="py-12 text-center text-muted-foreground">
+                    <FileText className="h-10 w-10 mx-auto mb-3 opacity-50" />
+                    <p>No test plans generated yet.</p>
+                    <p className="text-sm mt-1">Run the Play Agent to generate test plans for your functional areas.</p>
                   </div>
-                </div>
-                <div className="flex items-center gap-2 p-3 bg-muted/50 rounded-lg">
-                  <Circle className="h-4 w-4 text-muted-foreground shrink-0" />
-                  <div>
-                    <div className="text-lg font-bold leading-none">{coverage.notRun}</div>
-                    <div className="text-xs text-muted-foreground">Not Run</div>
+                ) : (
+                  <div className="divide-y">
+                    {areasWithPlans.map((area) => (
+                      <PlanAreaEditor
+                        key={area.id}
+                        areaId={area.id}
+                        areaName={area.name}
+                        agentPlan={area.agentPlan!}
+                        planGeneratedAt={area.planGeneratedAt}
+                        depth={area.depth}
+                      />
+                    ))}
                   </div>
-                </div>
-                <div className="flex items-center gap-2 p-3 bg-muted/50 rounded-lg">
-                  <FileWarning className="h-4 w-4 text-amber-500 shrink-0" />
-                  <div>
-                    <div className="text-lg font-bold leading-none">{coverage.placeholders}</div>
-                    <div className="text-xs text-muted-foreground">Placeholders</div>
-                  </div>
-                </div>
+                )}
               </div>
-
-            </CardContent>
-          </Card>
-
-          <AreaDetailSection
-            selection={selection}
-            areas={tree}
-            suites={allSuites}
-            repositoryId={repositoryId}
-            onUpdate={() => router.refresh()}
-            onDeleteArea={setDeleteAreaId}
-          />
-        </div>
-        </div>
+            </div>
+          </TabsContent>
+        </Tabs>
       </ResizablePanel>
 
       {/* New Area Dialog */}
@@ -609,5 +692,90 @@ export function AreasPageClient({ tree, uncategorizedTests, unsortedSuites, repo
         onSaved={() => router.refresh()}
       />
     </ResizablePanelGroup>
+  );
+}
+
+function PlanAreaEditor({
+  areaId,
+  areaName,
+  agentPlan,
+  planGeneratedAt,
+  depth,
+}: {
+  areaId: string;
+  areaName: string;
+  agentPlan: string;
+  planGeneratedAt: Date | null;
+  depth: number;
+}) {
+  const [content, setContent] = useState(agentPlan);
+  const [saving, setSaving] = useState(false);
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastSavedRef = useRef(agentPlan);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  const autoResize = useCallback((el: HTMLTextAreaElement | null) => {
+    if (!el) return;
+    el.style.height = 'auto';
+    el.style.height = `${el.scrollHeight}px`;
+  }, []);
+
+  // Auto-resize on mount
+  useEffect(() => {
+    autoResize(textareaRef.current);
+  }, [autoResize]);
+
+  const doSave = useCallback(async (text: string) => {
+    if (text === lastSavedRef.current) return;
+    setSaving(true);
+    try {
+      await updateAreaPlan(areaId, text);
+      lastSavedRef.current = text;
+    } catch {
+      toast.error(`Failed to save plan for ${areaName}`);
+    } finally {
+      setSaving(false);
+    }
+  }, [areaId, areaName]);
+
+  const handleChange = (value: string) => {
+    setContent(value);
+    autoResize(textareaRef.current);
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(() => doSave(value), 500);
+  };
+
+  // Save on unmount if pending
+  useEffect(() => {
+    return () => {
+      if (debounceRef.current) {
+        clearTimeout(debounceRef.current);
+      }
+    };
+  }, []);
+
+  return (
+    <div id={`plan-area-${areaId}`} className="py-3 space-y-1.5" style={{ paddingLeft: depth > 0 ? `${depth * 16}px` : undefined }}>
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <h3 className="text-xs font-semibold">{areaName}</h3>
+          {planGeneratedAt && (
+            <span className="text-[10px] text-muted-foreground">{timeAgo(planGeneratedAt)}</span>
+          )}
+        </div>
+        {saving && (
+          <span className="text-[10px] text-muted-foreground flex items-center gap-1">
+            <Loader2 className="h-3 w-3 animate-spin" />
+          </span>
+        )}
+      </div>
+      <Textarea
+        ref={textareaRef}
+        value={content}
+        onChange={(e) => handleChange(e.target.value)}
+        className="font-mono text-[11px] resize-none overflow-hidden min-h-[2lh] border-muted/60"
+        placeholder="No plan content yet..."
+      />
+    </div>
   );
 }

@@ -3,12 +3,14 @@
 import { useState } from 'react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Play, X, Check, Loader2, Pause, SkipForward, AlertCircle, RotateCcw, ChevronDown, ScrollText } from 'lucide-react';
+import { Play, X, Check, Loader2, Pause, SkipForward, AlertCircle, RotateCcw, ChevronDown, ScrollText, Undo2 } from 'lucide-react';
 import Link from 'next/link';
 import { PlayAgentStep } from './play-agent-step';
 import { PlayAgentStepDetail } from './play-agent-step-detail';
 import { usePlayAgent } from './use-play-agent';
 import { cn } from '@/lib/utils';
+import { rollbackAllAreaPlans } from '@/server/actions/areas';
+import { toast } from 'sonner';
 import type { AgentStepState, AgentStepId, PwAgentType } from '@/lib/db/schema';
 
 interface PlayAgentTimelineProps {
@@ -203,20 +205,17 @@ export function PlayAgentTimeline({ repositoryId }: PlayAgentTimelineProps) {
   const runningAgents = new Set<string>();
   const doneAgents = new Set<string>();
   const agentParallelCount: Record<string, number> = {};
-  if (activeStep?.substeps) {
-    for (const sub of activeStep.substeps) {
+  // Scan all steps for running/done agents (reruns update completed step substeps)
+  for (const s of steps) {
+    if (!s.substeps) continue;
+    for (const sub of s.substeps) {
       if (sub.agent && sub.status === 'running') {
         runningAgents.add(sub.agent);
         const countMatch = sub.detail?.match(/^(\d+)\s+\w+\s+in parallel$/);
         if (countMatch) agentParallelCount[sub.agent] = parseInt(countMatch[1], 10);
       }
-      if (sub.agent && sub.status === 'done') doneAgents.add(sub.agent);
-    }
-  }
-  for (const s of steps) {
-    if (s.status === 'completed' && s.substeps) {
-      for (const sub of s.substeps) {
-        if (sub.agent) doneAgents.add(sub.agent);
+      if (sub.agent && (sub.status === 'done' || s.status === 'completed')) {
+        doneAgents.add(sub.agent);
       }
     }
   }
@@ -437,7 +436,7 @@ export function PlayAgentTimeline({ repositoryId }: PlayAgentTimelineProps) {
                 step={step}
                 sessionId={session?.id}
                 onApprovePlan={step.id === 'review' ? approvePlan : undefined}
-                onRerunPlanner={step.id === 'plan' ? rerunPlanner : undefined}
+                onRerunPlanner={(step.id === 'plan' || step.id === 'review') ? rerunPlanner : undefined}
               />
             </div>
           );
@@ -455,19 +454,54 @@ export function PlayAgentTimeline({ repositoryId }: PlayAgentTimelineProps) {
           </div>
         )}
 
-        {/* Post-completion link to testing plan */}
+        {/* Post-completion actions */}
         {session?.status === 'completed' && (
-          <div className="mt-3 pt-3 border-t flex items-center justify-center">
+          <div className="mt-3 pt-3 border-t flex items-center justify-center gap-4">
             <Link
-              href="/areas/plan"
+              href="/areas?tab=plan"
               className="inline-flex items-center gap-1.5 text-xs text-primary hover:underline"
             >
               <ScrollText className="h-3.5 w-3.5" />
               View Testing Plan
             </Link>
+            {repositoryId && (
+              <RollbackAllButton repositoryId={repositoryId} />
+            )}
           </div>
         )}
       </CardContent>
     </Card>
+  );
+}
+
+function RollbackAllButton({ repositoryId }: { repositoryId: string }) {
+  const [rolling, setRolling] = useState(false);
+  const [done, setDone] = useState(false);
+
+  const handleRollback = async () => {
+    if (!confirm('This will rollback all area plans from the latest agent run and delete generated tests. Continue?')) return;
+    setRolling(true);
+    try {
+      const count = await rollbackAllAreaPlans(repositoryId);
+      toast.success(`Rolled back ${count} area${count !== 1 ? 's' : ''}`);
+      setDone(true);
+    } catch {
+      toast.error('Failed to rollback');
+    } finally {
+      setRolling(false);
+    }
+  };
+
+  if (done) return null;
+
+  return (
+    <button
+      onClick={handleRollback}
+      disabled={rolling}
+      className="inline-flex items-center gap-1.5 text-xs text-destructive hover:underline disabled:opacity-50"
+    >
+      {rolling ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Undo2 className="h-3.5 w-3.5" />}
+      Rollback All
+    </button>
   );
 }

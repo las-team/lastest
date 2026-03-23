@@ -20,10 +20,10 @@ export class ClaudeCLIProvider implements AIProvider {
     if (signal?.aborted) throw new Error('Aborted');
 
     return new Promise((resolve, reject) => {
-      const child = spawn('claude', ['-p', fullPrompt], {
+      const child = spawn('claude', ['-p', '-'], {
         shell: false,
         env: getExtendedEnv(),
-        stdio: ['ignore', 'pipe', 'pipe'],
+        stdio: ['pipe', 'pipe', 'pipe'],
       });
 
       let stdout = '';
@@ -62,6 +62,10 @@ export class ClaudeCLIProvider implements AIProvider {
         child.kill('SIGTERM');
         reject(new Error('Claude CLI error: timed out after 120s'));
       }, 120000);
+
+      // Write prompt via stdin to avoid E2BIG on large prompts
+      child.stdin.write(fullPrompt);
+      child.stdin.end();
     });
   }
 
@@ -76,10 +80,10 @@ export class ClaudeCLIProvider implements AIProvider {
     if (signal?.aborted) throw new Error('Aborted');
 
     return new Promise((resolve, reject) => {
-      const child = spawn('claude', ['-p', fullPrompt], {
+      const child = spawn('claude', ['-p', '-'], {
         shell: false,
         env: getExtendedEnv(),
-        stdio: ['ignore', 'pipe', 'pipe'],
+        stdio: ['pipe', 'pipe', 'pipe'],
       });
 
       let fullText = '';
@@ -119,6 +123,10 @@ export class ClaudeCLIProvider implements AIProvider {
         callbacks.onError?.(error);
         reject(error);
       });
+
+      // Write prompt via stdin to avoid E2BIG on large prompts
+      child.stdin.write(fullPrompt);
+      child.stdin.end();
     });
   }
 }

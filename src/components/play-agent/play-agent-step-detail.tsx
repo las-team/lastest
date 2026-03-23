@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useCallback } from 'react';
-import { Check, X, ChevronRight, ChevronDown, RotateCcw, Loader2, Eye, ScrollText } from 'lucide-react';
+import { Check, X, ChevronRight, ChevronDown, RotateCcw, Loader2, Eye, ScrollText, Telescope } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import Link from 'next/link';
@@ -14,13 +14,14 @@ interface PlayAgentStepDetailProps {
   onRerunPlanner?: (source: string) => void;
 }
 
-function PlanDetail({ areas, onApprovePlan }: {
+function PlanDetail({ areas, onApprovePlan, onRerunPlanner }: {
   areas: AgentRichResultPlanArea[];
   onApprovePlan?: (approvedAreaIds: string[], autoApprove: boolean) => void;
+  onRerunPlanner?: (source: string) => void;
 }) {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set(areas.map(a => a.id)));
   const [expandedId, setExpandedId] = useState<string | null>(null);
-  const [autoApprove, setAutoApprove] = useState(false);
+  const [divingArea, setDivingArea] = useState<string | null>(null);
 
   const toggleArea = (id: string) => {
     setSelectedIds(prev => {
@@ -29,6 +30,16 @@ function PlanDetail({ areas, onApprovePlan }: {
       else next.add(id);
       return next;
     });
+  };
+
+  const handleDiscoverMore = async (area: AgentRichResultPlanArea) => {
+    if (!onRerunPlanner) return;
+    setDivingArea(area.id);
+    try {
+      await onRerunPlanner(`browser-dive-${area.name}`);
+    } finally {
+      setDivingArea(null);
+    }
   };
 
   return (
@@ -62,6 +73,21 @@ function PlanDetail({ areas, onApprovePlan }: {
               {area.routes.length > 0 && (
                 <span className="text-[10px] text-muted-foreground">{area.routes.length} routes</span>
               )}
+              {onRerunPlanner && (
+                <button
+                  onClick={() => handleDiscoverMore(area)}
+                  disabled={divingArea === area.id}
+                  className="text-[10px] text-cyan-600 dark:text-cyan-400 hover:text-cyan-500 flex items-center gap-0.5 shrink-0 disabled:opacity-50"
+                  title="Launch diver agent to explore this area further"
+                >
+                  {divingArea === area.id ? (
+                    <Loader2 className="h-2.5 w-2.5 animate-spin" />
+                  ) : (
+                    <Telescope className="h-2.5 w-2.5" />
+                  )}
+                  Discover
+                </button>
+              )}
             </div>
             {expandedId === area.id && (
               <div className="mt-2 ml-5 space-y-1.5">
@@ -87,34 +113,24 @@ function PlanDetail({ areas, onApprovePlan }: {
           </div>
         ))}
       </div>
-      {onApprovePlan ? (
-        <div className="flex items-center gap-2 pt-1">
+      <div className="flex items-center gap-2 pt-1">
+        <Link
+          href="/areas?tab=plan"
+          className="inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground border rounded-md px-3 py-1.5 hover:bg-muted/50 transition-colors"
+        >
+          <ScrollText className="h-3 w-3" />
+          Review Testing Plan
+        </Link>
+        {onApprovePlan && (
           <Button
             size="sm"
-            onClick={() => onApprovePlan(Array.from(selectedIds), autoApprove)}
+            onClick={() => onApprovePlan(Array.from(selectedIds), false)}
             disabled={selectedIds.size === 0}
           >
             Approve & Generate ({selectedIds.size})
           </Button>
-          <label className="flex items-center gap-1.5 text-[10px] text-muted-foreground cursor-pointer">
-            <input
-              type="checkbox"
-              checked={autoApprove}
-              onChange={(e) => setAutoApprove(e.target.checked)}
-              className="h-3 w-3 rounded"
-            />
-            Auto-approve next time
-          </label>
-        </div>
-      ) : (
-        <Link
-          href="/areas/plan"
-          className="inline-flex items-center gap-1.5 text-xs text-primary hover:underline pt-1"
-        >
-          <ScrollText className="h-3 w-3" />
-          View Testing Plan
-        </Link>
-      )}
+        )}
+      </div>
     </div>
   );
 }
@@ -337,8 +353,19 @@ function PlannerObservabilityDetail({ substeps, sessionId, onRerunPlanner }: {
   onRerunPlanner?: (source: string) => void;
 }) {
   const plannerSubsteps = substeps.filter(s => s.source);
+  const [rerunningSource, setRerunningSource] = useState<string | null>(null);
 
   if (plannerSubsteps.length === 0) return null;
+
+  const handleRerun = async (source: string) => {
+    if (!onRerunPlanner) return;
+    setRerunningSource(source);
+    try {
+      await onRerunPlanner(source);
+    } finally {
+      setRerunningSource(null);
+    }
+  };
 
   return (
     <div className="space-y-1.5 mb-3">
@@ -378,12 +405,22 @@ function PlannerObservabilityDetail({ substeps, sessionId, onRerunPlanner }: {
             {sub.promptLogId && sessionId && (
               <PlannerLogViewer sessionId={sessionId} logId={sub.promptLogId} />
             )}
-            {sub.source && sub.status === 'error' && onRerunPlanner && (
+            {sub.source && onRerunPlanner && (sub.status === 'done' || sub.status === 'error') && (
               <button
-                onClick={() => onRerunPlanner(sub.source!)}
-                className="text-[10px] text-amber-500 hover:text-amber-400 flex items-center gap-1"
+                onClick={() => handleRerun(sub.source!)}
+                disabled={rerunningSource === sub.source}
+                className={cn(
+                  'text-[10px] flex items-center gap-1 disabled:opacity-50',
+                  sub.status === 'error'
+                    ? 'text-amber-500 hover:text-amber-400'
+                    : 'text-muted-foreground hover:text-foreground',
+                )}
               >
-                <RotateCcw className="h-2.5 w-2.5" />
+                {rerunningSource === sub.source ? (
+                  <Loader2 className="h-2.5 w-2.5 animate-spin" />
+                ) : (
+                  <RotateCcw className="h-2.5 w-2.5" />
+                )}
                 Re-run
               </button>
             )}
@@ -407,7 +444,7 @@ export function PlayAgentStepDetail({ step, sessionId, onApprovePlan, onRerunPla
           onRerunPlanner={onRerunPlanner}
         />
         {rich?.type === 'plan' && (
-          <PlanDetail areas={rich.areas} onApprovePlan={onApprovePlan} />
+          <PlanDetail areas={rich.areas} onApprovePlan={onApprovePlan} onRerunPlanner={onRerunPlanner} />
         )}
       </div>
     );
@@ -431,7 +468,7 @@ export function PlayAgentStepDetail({ step, sessionId, onApprovePlan, onRerunPla
     case 'scan_and_template':
       return <ScanAndTemplateDetail routes={rich.routes} framework={rich.framework} template={rich.template} intelligence={rich.intelligence} />;
     case 'plan':
-      return <PlanDetail areas={rich.areas} onApprovePlan={onApprovePlan} />;
+      return <PlanDetail areas={rich.areas} onApprovePlan={onApprovePlan} onRerunPlanner={onRerunPlanner} />;
     case 'generate':
       return <GenerateDetail tests={rich.tests} />;
     case 'env_setup':

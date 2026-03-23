@@ -126,23 +126,22 @@ function ConfigCard({
                 <p className="text-xs text-muted-foreground mt-0.5">Runner: {runner.name}</p>
               )}
             </div>
-            <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
-              <Button variant="ghost" size="sm" onClick={() => setValidateOpen(true)} className="h-8">
-                <ShieldCheck className="h-3.5 w-3.5 mr-1.5" />
-                Validate
+            <div className="flex items-center gap-0.5" onClick={(e) => e.stopPropagation()}>
+              <Button variant="ghost" size="icon" onClick={() => setValidateOpen(true)} className="h-8 w-8" title="Validate">
+                <ShieldCheck className="h-3.5 w-3.5" />
               </Button>
               {hasGithubAccount && (
-                <Button variant="ghost" size="sm" onClick={() => setDeployOpen(true)} className="h-8">
-                  <Rocket className="h-3.5 w-3.5 mr-1.5" />
-                  Deploy
+                <Button variant="ghost" size="icon" onClick={() => setDeployOpen(true)} className="h-8 w-8" title="Deploy">
+                  <Rocket className="h-3.5 w-3.5" />
                 </Button>
               )}
               <Button
                 variant="ghost"
-                size="sm"
+                size="icon"
                 onClick={() => setDeleteOpen(true)}
                 disabled={deleting}
-                className="h-8 text-destructive hover:text-destructive"
+                className="h-8 w-8 text-destructive hover:text-destructive"
+                title="Delete"
               >
                 <Trash2 className="h-3.5 w-3.5" />
               </Button>

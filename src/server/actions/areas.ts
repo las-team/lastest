@@ -185,7 +185,6 @@ export async function updateAreaPlan(id: string, agentPlan: string) {
   });
 
   revalidatePath('/areas');
-  revalidatePath('/areas/plan');
 }
 
 export async function rollbackAreaPlan(id: string) {
@@ -211,8 +210,23 @@ export async function rollbackAreaPlan(id: string) {
   }
 
   revalidatePath('/areas');
-  revalidatePath('/areas/plan');
   revalidatePath('/tests');
+}
+
+export async function rollbackAllAreaPlans(repositoryId: string) {
+  await requireRepoAccess(repositoryId);
+  const areas = await queries.getFunctionalAreasByRepo(repositoryId);
+  const areasWithSnapshot = areas.filter(a => a.planSnapshot);
+
+  if (areasWithSnapshot.length === 0) throw new Error('No snapshots to rollback');
+
+  for (const area of areasWithSnapshot) {
+    await rollbackAreaPlan(area.id);
+  }
+
+  revalidatePath('/areas');
+  revalidatePath('/tests');
+  return areasWithSnapshot.length;
 }
 
 export async function exportAllPlans(repositoryId: string) {

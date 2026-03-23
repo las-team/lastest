@@ -902,14 +902,20 @@ async function runPlanWithAgents(
   const areaCount = mergedAreas.length;
   const routeCount = mergedAreas.reduce((sum, a) => sum + a.routes.length, 0);
 
-  // Save merged areas and routes to DB
+  // Get existing routes so we don't re-add ones the user may have rearranged
+  const existingRoutes = await queries.getRoutesByRepo(repositoryId);
+  const existingRoutePaths = new Set(existingRoutes.map(r => r.path));
+
+  // Save only genuinely new routes to DB
   const { saveDiscoveredRoutes: saveRoutes } = await import('./ai-routes');
   await saveRoutes(repositoryId, mergedAreas.map(a => ({
     name: a.name,
-    routes: a.routes.map(r => ({
-      path: r,
-      type: (r.includes('[') || r.includes(':') ? 'dynamic' : 'static') as 'static' | 'dynamic',
-    })),
+    routes: a.routes
+      .filter(r => !existingRoutePaths.has(r))
+      .map(r => ({
+        path: r,
+        type: (r.includes('[') || r.includes(':') ? 'dynamic' : 'static') as 'static' | 'dynamic',
+      })),
   })));
 
   // Save agent plans to functional areas
@@ -933,11 +939,13 @@ async function runPlanWithAgents(
         planSnapshot: snapshot,
       });
     }
+    // Only include routes not already in DB (user may have rearranged them)
+    const newRoutes = area.routes.filter(r => !existingRoutePaths.has(r));
     richAreas.push({
       id: dbArea.id,
       name: area.name,
       description: area.description || '',
-      routes: area.routes,
+      routes: newRoutes,
       testPlan: area.testPlan || '',
     });
   }
@@ -2002,6 +2010,10 @@ export async function rerunPlanner(
   const mergeInput = allResults.filter(r => r.areas.length > 0) as import('@/lib/playwright/planner-types').PlannerResult[];
   const mergedAreas = mergePlannerResults(mergeInput);
 
+  // Filter out routes that already exist in DB (user may have rearranged them)
+  const existingRerunRoutes = await queries.getRoutesByRepo(session.repositoryId);
+  const existingRerunPaths = new Set(existingRerunRoutes.map(r => r.path));
+
   // Save merged areas to DB and build rich result
   const richAreas: AgentRichResultPlanArea[] = [];
   for (const area of mergedAreas) {
@@ -2014,7 +2026,8 @@ export async function rerunPlanner(
       });
       await queries.updateFunctionalArea(dbArea.id, { agentPlan: area.testPlan, planGeneratedAt: new Date(), planSnapshot: snapshot });
     }
-    richAreas.push({ id: dbArea.id, name: area.name, description: area.description || '', routes: area.routes, testPlan: area.testPlan || '' });
+    const newRoutes = area.routes.filter(r => !existingRerunPaths.has(r));
+    richAreas.push({ id: dbArea.id, name: area.name, description: area.description || '', routes: newRoutes, testPlan: area.testPlan || '' });
   }
 
   const richResult: AgentStepRichResult = { type: 'plan', areas: richAreas };

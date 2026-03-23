@@ -15,21 +15,9 @@ import {
 } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
-import { ExternalLink, Play, Pencil, Save, X, Folder, FileCode, ListChecks, Trash2, ScrollText, Undo2, Loader2 } from 'lucide-react';
+import { ExternalLink, Play, Pencil, Save, X, Folder, FileCode, ListChecks, Trash2 } from 'lucide-react';
 import Link from 'next/link';
-import ReactMarkdown from 'react-markdown';
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
-import { updateArea, getArea, rollbackAreaPlan, updateAreaPlan } from '@/server/actions/areas';
-import { toast } from 'sonner';
-import { timeAgo } from '@/lib/utils';
-import type { FunctionalAreaPlanSnapshot } from '@/lib/db/schema';
+import { updateArea, getArea } from '@/server/actions/areas';
 import { getTest, updateTest } from '@/server/actions/tests';
 import { getSuite, updateSuite } from '@/server/actions/suites';
 import type { TreeSelection, SuiteItem } from './area-tree';
@@ -274,19 +262,6 @@ export function AreaDetailSection({ selection, areas, suites, repositoryId: _rep
             <p className="text-2xl font-bold mt-1">{testCount}</p>
           </div>
 
-          {/* Agent Plan Preview */}
-          {areaData.agentPlan && (
-            <>
-              <Separator />
-              <AgentPlanPreview
-                areaId={areaData.id}
-                agentPlan={areaData.agentPlan}
-                planGeneratedAt={areaData.planGeneratedAt}
-                planSnapshot={areaData.planSnapshot}
-                onUpdate={onUpdate}
-              />
-            </>
-          )}
         </CardContent>
       </Card>
     );
@@ -507,159 +482,3 @@ function findAreaNode(areas: FunctionalAreaWithChildren[], id: string): Function
   return null;
 }
 
-function AgentPlanPreview({
-  areaId,
-  agentPlan,
-  planGeneratedAt,
-  planSnapshot,
-  onUpdate,
-}: {
-  areaId: string;
-  agentPlan: string;
-  planGeneratedAt: Date | null;
-  planSnapshot: string | null;
-  onUpdate: () => void;
-}) {
-  const [isEditing, setIsEditing] = useState(false);
-  const [editContent, setEditContent] = useState(agentPlan);
-  const [isSaving, setIsSaving] = useState(false);
-  const [isRollingBack, setIsRollingBack] = useState(false);
-  const [showRollbackDialog, setShowRollbackDialog] = useState(false);
-
-  const snapshot: FunctionalAreaPlanSnapshot | null = planSnapshot
-    ? JSON.parse(planSnapshot)
-    : null;
-  const testCount = snapshot?.generatedTestIds?.length ?? 0;
-
-  const handleSave = async () => {
-    setIsSaving(true);
-    try {
-      await updateAreaPlan(areaId, editContent);
-      setIsEditing(false);
-      toast.success('Plan updated');
-      onUpdate();
-    } catch {
-      toast.error('Failed to save plan');
-    } finally {
-      setIsSaving(false);
-    }
-  };
-
-  const handleRollback = async () => {
-    setIsRollingBack(true);
-    try {
-      await rollbackAreaPlan(areaId);
-      setShowRollbackDialog(false);
-      toast.success('Plan rolled back');
-      onUpdate();
-    } catch {
-      toast.error('Failed to rollback');
-    } finally {
-      setIsRollingBack(false);
-    }
-  };
-
-  return (
-    <div className="space-y-3">
-      {/* Header row */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <Label className="text-sm font-medium">Test Plan</Label>
-          {planGeneratedAt && (
-            <Badge variant="secondary" className="text-xs">
-              {timeAgo(planGeneratedAt)}
-            </Badge>
-          )}
-        </div>
-        <div className="flex items-center gap-1">
-          {!isEditing ? (
-            <>
-              <Button variant="ghost" size="sm" onClick={() => { setEditContent(agentPlan); setIsEditing(true); }}>
-                <Pencil className="h-3.5 w-3.5 mr-1" />
-                Edit
-              </Button>
-              <Button asChild variant="ghost" size="sm">
-                <Link href={`/areas/plan#area-${areaId}`}>
-                  <ScrollText className="h-3.5 w-3.5 mr-1" />
-                  Full View
-                </Link>
-              </Button>
-            </>
-          ) : (
-            <>
-              <Button variant="ghost" size="sm" onClick={() => setIsEditing(false)}>
-                <X className="h-3.5 w-3.5 mr-1" />
-                Cancel
-              </Button>
-              <Button size="sm" onClick={handleSave} disabled={isSaving}>
-                {isSaving ? <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" /> : <Save className="h-3.5 w-3.5 mr-1" />}
-                Save
-              </Button>
-            </>
-          )}
-        </div>
-      </div>
-
-      {/* Plan content */}
-      {isEditing ? (
-        <Textarea
-          value={editContent}
-          onChange={(e) => setEditContent(e.target.value)}
-          className="font-mono text-sm min-h-[250px] resize-y"
-        />
-      ) : (
-        <div className="border rounded-md p-3 prose prose-sm dark:prose-invert max-w-none max-h-[300px] overflow-auto">
-          <ReactMarkdown>{agentPlan}</ReactMarkdown>
-        </div>
-      )}
-
-      {/* Rollback bar */}
-      {snapshot && !isEditing && (
-        <div className="flex items-center justify-between px-3 py-2 bg-muted/50 rounded-md">
-          <span className="text-xs text-muted-foreground">
-            {testCount > 0
-              ? `${testCount} test${testCount !== 1 ? 's' : ''} generated from this plan`
-              : 'Previous plan snapshot available'}
-          </span>
-          <Button
-            variant="outline"
-            size="sm"
-            className="text-destructive hover:text-destructive h-7 text-xs"
-            onClick={() => setShowRollbackDialog(true)}
-          >
-            <Undo2 className="h-3 w-3 mr-1" />
-            Rollback
-          </Button>
-        </div>
-      )}
-
-      {/* Rollback confirmation dialog */}
-      <Dialog open={showRollbackDialog} onOpenChange={setShowRollbackDialog}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Rollback Plan</DialogTitle>
-            <DialogDescription>
-              This will restore the previous plan and description.
-              {testCount > 0 && (
-                <> <strong>{testCount} generated test{testCount !== 1 ? 's' : ''}</strong> will be deleted.</>
-              )}
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setShowRollbackDialog(false)}>
-              Cancel
-            </Button>
-            <Button
-              variant="destructive"
-              onClick={handleRollback}
-              disabled={isRollingBack}
-            >
-              {isRollingBack ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <Undo2 className="h-4 w-4 mr-1" />}
-              Rollback
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-    </div>
-  );
-}
