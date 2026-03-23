@@ -716,6 +716,7 @@ export class TestRunner {
       if (action === 'fill' && coords) {
         log('info', `Falling back to coordinate fill at (${coords.x}, ${coords.y})`);
         await pg.mouse.click(coords.x, coords.y);
+        await pg.waitForTimeout(100);
         await pg.keyboard.press('Control+a');
         await pg.keyboard.type(value || '');
         return;

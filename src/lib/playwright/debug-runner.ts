@@ -334,16 +334,20 @@ export class DebugRunner {
    */
   private triggerReplayToStep(targetIdx: number): void {
     // Fire and forget — the async work happens in background
+    const replayGeneration = ++this.generation;
     (async () => {
       if (!this.state || !this.test) return;
       this.state.status = 'stepping';
       this.state.error = undefined;
 
-      // Abort current execution
+      // Abort current execution and wait for it to settle
       if (this.pauseController) {
         this.pauseController.stop();
       }
-      await new Promise(r => setTimeout(r, 50));
+      // Yield to allow the stopped execution's catch handler to run
+      await new Promise(r => setTimeout(r, 0));
+      // If another replay was triggered while we yielded, bail out
+      if (this.generation !== replayGeneration) return;
 
       // Save trace chunk before closing context
       if (this.context && this.tracingActive) {

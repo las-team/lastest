@@ -1069,11 +1069,17 @@ async function runReview(sessionId: string, _repositoryId: string, _teamId: stri
   if (session.metadata.autoApproveReview) {
     const planStep = session.steps.find(s => s.id === 'plan');
     const planRich = planStep?.richResult as { type: 'plan'; areas: AgentRichResultPlanArea[] } | undefined;
+    let approvedIds: string[];
     if (planRich?.areas) {
-      await queries.updateAgentSession(sessionId, {
-        metadata: { ...session.metadata, approvedAreaIds: planRich.areas.map(a => a.id) },
-      });
+      approvedIds = planRich.areas.map(a => a.id);
+    } else {
+      // Fallback: approve all areas that have an agent plan
+      const dbAreas = await queries.getFunctionalAreasByRepo(_repositoryId);
+      approvedIds = dbAreas.filter(a => a.agentPlan).map(a => a.id);
     }
+    await queries.updateAgentSession(sessionId, {
+      metadata: { ...session.metadata, approvedAreaIds: approvedIds },
+    });
     await setStepCompleted(sessionId, 'review', { autoApproved: true });
     return true;
   }
@@ -1143,6 +1149,8 @@ async function runGenerate(sessionId: string, repositoryId: string, _teamId: str
       group: import('@/lib/playwright/generator-agent').ScenarioGroup;
     }> = [];
 
+    const allRoutes = await queries.getRoutesByRepo(repositoryId);
+
     for (const area of targetAreas) {
       // Save scenario summary to area description if not already set
       if (area.agentPlan && !area.description) {
@@ -1154,7 +1162,6 @@ async function runGenerate(sessionId: string, repositoryId: string, _teamId: str
       }
 
       // Get known routes for this area to help grouping
-      const allRoutes = await queries.getRoutesByRepo(repositoryId);
       const routePaths = allRoutes
         .filter(r => r.functionalAreaId === area.id)
         .map(r => r.path);
@@ -1758,12 +1765,13 @@ export async function startPlayAgent(repositoryId: string): Promise<{ sessionId:
 }
 
 export async function resumePlayAgent(sessionId: string): Promise<{ success: boolean }> {
-  await requireTeamAccess();
+  const { team } = await requireTeamAccess();
 
   const session = await queries.getAgentSession(sessionId);
   if (!session || session.status === 'cancelled' || session.status === 'completed') {
     return { success: false };
   }
+  if (session.teamId && session.teamId !== team.id) return { success: false };
 
   // Backward compat: old sessions with 'discover' step — force restart
   if (session.steps.some(s => (s.id as string) === 'discover')) {
@@ -1784,10 +1792,8 @@ export async function resumePlayAgent(sessionId: string): Promise<{ success: boo
   });
   await queries.updateAgentSession(sessionId, { status: 'active' });
 
-  const { team } = await requireRepoAccess(session.repositoryId);
-
   // Fire-and-forget: resume from the waiting step
-  executeFromStep(sessionId, session.repositoryId, team?.id ?? '', waitingStep.id).catch((err) => {
+  executeFromStep(sessionId, session.repositoryId, team.id ?? '', waitingStep.id).catch((err) => {
     console.error('[PlayAgent] Resume error:', err);
     queries.updateAgentSession(sessionId, { status: 'failed' }).catch(() => {});
   });
@@ -1796,10 +1802,11 @@ export async function resumePlayAgent(sessionId: string): Promise<{ success: boo
 }
 
 export async function cancelPlayAgent(sessionId: string): Promise<{ success: boolean }> {
-  await requireTeamAccess();
+  const { team } = await requireTeamAccess();
 
   const session = await queries.getAgentSession(sessionId);
   if (!session) return { success: false };
+  if (session.teamId && session.teamId !== team.id) return { success: false };
 
   // Abort the running controller to kill in-flight AI calls
   const controller = activeControllers.get(sessionId);
@@ -1837,9 +1844,10 @@ export async function approvePlayAgentPlan(
   approvedAreaIds: string[],
   autoApprove?: boolean,
 ): Promise<{ success: boolean }> {
-  await requireTeamAccess();
+  const { team } = await requireTeamAccess();
   const session = await queries.getAgentSession(sessionId);
   if (!session) return { success: false };
+  if (session.teamId && session.teamId !== team.id) return { success: false };
 
   await queries.updateAgentSession(sessionId, {
     metadata: {
@@ -1854,9 +1862,10 @@ export async function approvePlayAgentPlan(
 }
 
 export async function skipDiscoverStep(sessionId: string): Promise<{ success: boolean }> {
-  await requireTeamAccess();
+  const { team } = await requireTeamAccess();
   const session = await queries.getAgentSession(sessionId);
   if (!session) return { success: false };
+  if (session.teamId && session.teamId !== team.id) return { success: false };
   await queries.updateAgentSession(sessionId, {
     metadata: { ...session.metadata, skipDiscovery: true },
   });
@@ -1867,10 +1876,11 @@ export async function rerunPlanner(
   sessionId: string,
   plannerSource: string,
 ): Promise<{ success: boolean; error?: string }> {
-  await requireTeamAccess();
+  const { team } = await requireTeamAccess();
 
   const session = await queries.getAgentSession(sessionId);
   if (!session) return { success: false, error: 'Session not found' };
+  if (session.teamId && session.teamId !== team.id) return { success: false, error: 'Forbidden' };
 
   // Validate plan step exists and is completed/failed
   const planStep = session.steps.find(s => s.id === 'plan');

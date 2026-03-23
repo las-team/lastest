@@ -77,8 +77,9 @@
 
     async function fetchCount() {
       try {
-        const sep = API_URL.includes('?') ? '&' : '?';
-        const res = await fetch(`${API_URL}${sep}key=${API_KEY}`);
+        const res = await fetch(API_URL, {
+          headers: API_KEY ? { 'Authorization': `Bearer ${API_KEY}` } : {},
+        });
         if (!res.ok) throw new Error(`${res.status}`);
         const data = await res.json();
         countEl.textContent = data.users;
