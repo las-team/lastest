@@ -504,6 +504,34 @@ export async function getTestsByRepo(repositoryId: string) {
   return db.select().from(tests).where(and(eq(tests.repositoryId, repositoryId), isNull(tests.deletedAt))).orderBy(desc(tests.createdAt)).all();
 }
 
+export async function getUncategorizedTests() {
+  return db.select().from(tests).where(and(isNull(tests.repositoryId), isNull(tests.deletedAt))).orderBy(desc(tests.createdAt)).all();
+}
+
+export async function getUncategorizedTestsWithStatus() {
+  const allTests = await getUncategorizedTests();
+
+  return Promise.all(
+    allTests.map(async (test) => {
+      const results = await getTestResultsByTest(test.id);
+      const latestResult = results[0];
+
+      return {
+        ...test,
+        area: null,
+        latestStatus: latestResult?.status || null,
+      };
+    })
+  );
+}
+
+export async function getDeletedUncategorizedTests() {
+  return db.select().from(tests)
+    .where(and(isNull(tests.repositoryId), isNotNull(tests.deletedAt)))
+    .orderBy(desc(tests.deletedAt))
+    .all();
+}
+
 export async function getTestRunsByRepo(repositoryId: string) {
   return db.select().from(testRuns).where(eq(testRuns.repositoryId, repositoryId)).orderBy(desc(testRuns.startedAt)).all();
 }

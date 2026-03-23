@@ -52,10 +52,9 @@ export function usePlayAgent(repositoryId?: string | null) {
   }, [sessionId, poll]);
 
   const start = useCallback(async () => {
-    if (!repositoryId) return;
     setLoading(true);
     try {
-      const result = await startPlayAgent(repositoryId);
+      const result = await startPlayAgent(repositoryId ?? '');
       localStorage.setItem(SESSION_KEY, result.sessionId);
       await poll(result.sessionId);
 

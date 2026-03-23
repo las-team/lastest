@@ -252,8 +252,8 @@ export function PlayAgentTimeline({ repositoryId }: PlayAgentTimelineProps) {
             {isActive && (
               <span className="text-[11px] text-muted-foreground tabular-nums">{progress}%</span>
             )}
-            {isTerminal && session?.status !== 'cancelled' && (
-              <Button size="icon" variant="ghost" className="h-5 w-5 shrink-0" onClick={dismiss} title="Run again">
+            {session && (
+              <Button size="icon" variant="ghost" className="h-5 w-5 shrink-0" onClick={dismiss} title="Restart">
                 <RotateCcw className="h-3 w-3" />
               </Button>
             )}
@@ -300,31 +300,36 @@ export function PlayAgentTimeline({ repositoryId }: PlayAgentTimelineProps) {
 
         {/* Play/Pause button + grid timeline */}
         <div className="flex items-start gap-3">
-          <button
-            onClick={handlePlayPause}
-            disabled={loading || !repositoryId || session?.status === 'completed'}
-            className={cn(
-              'h-8 w-8 rounded-full flex items-center justify-center shrink-0 transition-all mt-3',
-              'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-              !session && 'bg-primary text-primary-foreground hover:bg-primary/90',
-              isRunning && 'bg-amber-500 text-white hover:bg-amber-600',
-              isPaused && 'bg-primary text-primary-foreground hover:bg-primary/90',
-              session?.status === 'failed' && 'bg-primary text-primary-foreground hover:bg-primary/90',
-              session?.status === 'completed' && 'bg-green-500 text-white',
-              session?.status === 'cancelled' && 'bg-muted text-muted-foreground',
-              (loading || !repositoryId) && 'opacity-50 cursor-not-allowed',
+          <div className="relative shrink-0 mt-3">
+            {!session && !loading && (
+              <span className="absolute inset-0 rounded-full bg-primary/30 animate-ping" />
             )}
-          >
-            {loading ? (
-              <Loader2 className="h-3.5 w-3.5 animate-spin" />
-            ) : isRunning ? (
-              <Pause className="h-3.5 w-3.5 fill-current" />
-            ) : session?.status === 'completed' ? (
-              <Check className="h-3.5 w-3.5" />
-            ) : (
-              <Play className="h-3.5 w-3.5 ml-0.5 fill-current" />
-            )}
-          </button>
+            <button
+              onClick={handlePlayPause}
+              disabled={loading || session?.status === 'completed'}
+              className={cn(
+                'relative h-8 w-8 rounded-full flex items-center justify-center transition-all',
+                'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+                !session && 'bg-primary text-primary-foreground hover:bg-primary/90',
+                isRunning && 'bg-amber-500 text-white hover:bg-amber-600',
+                isPaused && 'bg-primary text-primary-foreground hover:bg-primary/90',
+                session?.status === 'failed' && 'bg-primary text-primary-foreground hover:bg-primary/90',
+                session?.status === 'completed' && 'bg-green-500 text-white',
+                session?.status === 'cancelled' && 'bg-muted text-muted-foreground',
+                loading && 'opacity-50 cursor-not-allowed',
+              )}
+            >
+              {loading ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              ) : isRunning ? (
+                <Pause className="h-3.5 w-3.5 fill-current" />
+              ) : session?.status === 'completed' ? (
+                <Check className="h-3.5 w-3.5" />
+              ) : (
+                <Play className="h-3.5 w-3.5 ml-0.5 fill-current" />
+              )}
+            </button>
+          </div>
 
           {/* Grid: 4 rows x N columns */}
           <div

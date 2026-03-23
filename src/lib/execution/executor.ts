@@ -466,7 +466,7 @@ async function executeViaRunner(
       // Per-test playwright overrides
       const pwOverrides = test.playwrightOverrides;
       const effectiveBrowser = pwOverrides?.browser ?? ((options.playwrightSettings?.browser as 'chromium' | 'firefox' | 'webkit') || undefined);
-      const effectiveBaseUrl = pwOverrides?.baseUrl ?? baseUrl;
+      const effectiveBaseUrl = pwOverrides?.baseUrl ?? test.targetUrl ?? baseUrl;
       const effectiveTimeout = pwOverrides?.navigationTimeout ?? testTimeout;
 
       const command = createMessage<RunTestCommand>('command:run_test', {

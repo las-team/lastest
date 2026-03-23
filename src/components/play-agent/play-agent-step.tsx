@@ -1,8 +1,6 @@
 'use client';
 
-import { useEffect, useRef } from 'react';
-import { useRouter } from 'next/navigation';
-import { Check, Circle, Loader2, Pause, X, SkipForward } from 'lucide-react';
+import { Check, Circle, Loader2, Pause, X, SkipForward, ExternalLink } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import type { AgentStepState, PwAgentType } from '@/lib/db/schema';
@@ -34,21 +32,6 @@ function AgentBadge({ agent }: { agent: PwAgentType }) {
 }
 
 export function PlayAgentStep({ step, stepNumber, onResume, onApprovePlan }: PlayAgentStepProps) {
-  const router = useRouter();
-  const navigatedRef = useRef(false);
-
-  // Auto-navigate to settings with highlight when waiting for user to configure settings
-  useEffect(() => {
-    if (step.status !== 'waiting_user') return;
-    if (navigatedRef.current) return;
-    const highlightIds = step.result?.highlight as string[] | undefined;
-    if (!highlightIds?.length) return;
-    if (step.id !== 'settings_check' && step.id !== 'env_setup') return;
-
-    navigatedRef.current = true;
-    router.push(`/settings?highlight=${highlightIds.join(',')}`);
-  }, [step.status, step.result, step.id, router]);
-
   // For review step waiting for user, show the plan detail inline
   const isReviewWaiting = step.id === 'review' && step.status === 'waiting_user';
 
@@ -149,22 +132,63 @@ export function PlayAgentStep({ step, stepNumber, onResume, onApprovePlan }: Pla
 
       {/* Waiting user action (non-review) */}
       {step.status === 'waiting_user' && step.userAction && !isReviewWaiting && (
-        <div className="ml-7 mt-1.5 space-y-1.5">
-          <p className="text-xs text-blue-600 dark:text-blue-400">{step.userAction}</p>
-          <div className="flex gap-2">
-            {(step.id === 'settings_check' || step.id === 'env_setup') && (() => {
-              const ids = (step.result?.highlight as string[] | undefined) ?? [];
-              const href = ids.length > 0 ? `/settings?highlight=${ids.join(',')}` : '/settings';
-              return (
-                <Button size="sm" variant="outline" onClick={() => router.push(href)}>
-                  Go to Settings
-                </Button>
-              );
-            })()}
-            {onResume && (
-              <Button size="sm" onClick={onResume}>Retry</Button>
-            )}
-          </div>
+        <div className="ml-7 mt-1.5 space-y-2">
+          {step.id === 'settings_check' && (() => {
+            const highlights = (step.result?.highlight as string[] | undefined) ?? [];
+            const missingGH = highlights.includes('github');
+            const missingAI = highlights.includes('ai-settings');
+            return (
+              <div className="space-y-1.5">
+                <p className="text-xs font-medium text-amber-600 dark:text-amber-400">Configure these to continue:</p>
+                <div className="space-y-1">
+                  {missingGH && (
+                    <a
+                      href="/settings?highlight=github"
+                      className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors group"
+                    >
+                      <X className="h-3 w-3 text-red-500 shrink-0" />
+                      <span>GitHub account</span>
+                      <ExternalLink className="h-2.5 w-2.5 opacity-0 group-hover:opacity-100 transition-opacity" />
+                    </a>
+                  )}
+                  {missingAI && (
+                    <a
+                      href="/settings?highlight=ai-settings"
+                      className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors group"
+                    >
+                      <X className="h-3 w-3 text-red-500 shrink-0" />
+                      <span>AI provider</span>
+                      <ExternalLink className="h-2.5 w-2.5 opacity-0 group-hover:opacity-100 transition-opacity" />
+                    </a>
+                  )}
+                </div>
+              </div>
+            );
+          })()}
+          {step.id === 'select_repo' && (
+            <p className="text-xs text-amber-600 dark:text-amber-400">Select a repository from the sidebar to continue</p>
+          )}
+          {step.id === 'env_setup' && (() => {
+            const ids = (step.result?.highlight as string[] | undefined) ?? [];
+            const href = ids.length > 0 ? `/settings?highlight=${ids.join(',')}` : '/settings';
+            return (
+              <>
+                <p className="text-xs text-amber-600 dark:text-amber-400">{step.userAction}</p>
+                <a
+                  href={href}
+                  className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
+                >
+                  Go to Settings <ExternalLink className="h-2.5 w-2.5" />
+                </a>
+              </>
+            );
+          })()}
+          {step.id !== 'settings_check' && step.id !== 'select_repo' && step.id !== 'env_setup' && (
+            <p className="text-xs text-amber-600 dark:text-amber-400">{step.userAction}</p>
+          )}
+          {onResume && (
+            <Button size="sm" onClick={onResume}>Retry</Button>
+          )}
         </div>
       )}
 
