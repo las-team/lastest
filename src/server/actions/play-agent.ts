@@ -174,19 +174,23 @@ async function waitForBuild(buildId: string, signal: AbortSignal): Promise<Await
 async function runSettingsCheck(sessionId: string, repositoryId: string, teamId: string, _signal: AbortSignal) {
   await setStepActive(sessionId, 'settings_check');
 
+  const session = await queries.getAgentSession(sessionId);
+  const skipGithub = session?.metadata?.skipGithub === true;
+  const skipAI = session?.metadata?.skipAI === true;
+
   const missing: string[] = [];
 
   const ghAccount = await queries.getGithubAccountByTeam(teamId);
-  if (!ghAccount) missing.push('GitHub account');
+  if (!ghAccount && !skipGithub) missing.push('GitHub account');
 
   const aiSettings = await getAISettings(repositoryId);
   const hasAI = aiSettings.provider && aiSettings.provider !== 'none';
-  if (!hasAI) missing.push('AI provider');
+  if (!hasAI && !skipAI) missing.push('AI provider');
 
   if (missing.length > 0) {
     const highlightIds: string[] = [];
-    if (!ghAccount) highlightIds.push('github');
-    if (!hasAI) highlightIds.push('ai-settings');
+    if (!ghAccount && !skipGithub) highlightIds.push('github');
+    if (!hasAI && !skipAI) highlightIds.push('ai-settings');
 
     await updateStep(sessionId, 'settings_check', {
       status: 'waiting_user',
@@ -197,10 +201,18 @@ async function runSettingsCheck(sessionId: string, repositoryId: string, teamId:
     return false;
   }
 
-  const pwEnabled = aiSettings.pwAgentEnabled ?? false;
+  // If AI was skipped, enable manual mode
+  const isManual = skipAI && !hasAI;
+  if (isManual && session) {
+    await queries.updateAgentSession(sessionId, {
+      metadata: { ...session.metadata, manualMode: true },
+    });
+  }
+
+  const pwEnabled = !isManual && (aiSettings.pwAgentEnabled ?? false);
   await setStepCompleted(sessionId, 'settings_check', {
-    ghAccount: ghAccount?.githubUsername || 'Connected',
-    aiProvider: aiSettings.provider,
+    ghAccount: ghAccount?.githubUsername || (skipGithub ? 'Skipped' : 'Connected'),
+    aiProvider: isManual ? 'manual' : aiSettings.provider,
     pwAgentEnabled: pwEnabled,
     activeAgents: pwEnabled ? ['scout', 'diver', 'planner', 'generator', 'healer'] : [],
   });
@@ -1918,20 +1930,28 @@ export async function skipSettingsStep(sessionId: string): Promise<{ success: bo
   if (!session) return { success: false };
   if (session.teamId && session.teamId !== team.id) return { success: false };
 
-  // Mark settings_check as skipped
-  await updateStep(sessionId, 'settings_check', {
-    status: 'skipped',
-    completedAt: new Date().toISOString(),
-  });
+  // Determine which item to skip based on what's currently missing
+  const waitingStep = session.steps.find(s => s.id === 'settings_check');
+  const highlights = (waitingStep?.result?.highlight as string[] | undefined) ?? [];
 
-  // Enable manual mode — AI steps will auto-skip
+  const newMeta = { ...session.metadata };
+  // Skip whichever items are currently blocking
+  if (highlights.includes('github')) newMeta.skipGithub = true;
+  if (highlights.includes('ai-settings')) newMeta.skipAI = true;
+
   await queries.updateAgentSession(sessionId, {
     status: 'active',
-    metadata: { ...session.metadata, manualMode: true },
+    metadata: newMeta,
   });
 
-  // Resume from select_repo
-  executeFromStep(sessionId, session.repositoryId, team.id ?? '', 'select_repo').catch((err) => {
+  // Reset step to pending and re-run from settings_check
+  await updateStep(sessionId, 'settings_check', {
+    status: 'pending',
+    error: undefined,
+    userAction: undefined,
+  });
+
+  executeFromStep(sessionId, session.repositoryId, team.id ?? '', 'settings_check').catch((err) => {
     console.error('[PlayAgent] Skip settings resume error:', err);
     queries.updateAgentSession(sessionId, { status: 'failed' }).catch(() => {});
   });

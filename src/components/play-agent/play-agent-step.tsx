@@ -169,21 +169,17 @@ export function PlayAgentStep({ step, stepNumber, onResume, onSkip, onApprovePla
           {step.id === 'select_repo' && (
             <p className="text-xs text-amber-600 dark:text-amber-400">Select a repository from the sidebar to continue</p>
           )}
-          {step.id === 'env_setup' && (() => {
-            const ids = (step.result?.highlight as string[] | undefined) ?? [];
-            const href = ids.length > 0 ? `/settings?highlight=${ids.join(',')}` : '/settings';
-            return (
-              <>
-                <p className="text-xs text-amber-600 dark:text-amber-400">{step.userAction}</p>
-                <a
-                  href={href}
-                  className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
-                >
-                  Go to Settings <ExternalLink className="h-2.5 w-2.5" />
-                </a>
-              </>
-            );
-          })()}
+          {step.id === 'env_setup' && (
+            <>
+              <p className="text-xs text-amber-600 dark:text-amber-400">{step.userAction}</p>
+              <a
+                href="/settings?highlight=environment"
+                className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
+              >
+                Configure Environment <ExternalLink className="h-2.5 w-2.5" />
+              </a>
+            </>
+          )}
           {step.id !== 'settings_check' && step.id !== 'select_repo' && step.id !== 'env_setup' && (
             <p className="text-xs text-amber-600 dark:text-amber-400">{step.userAction}</p>
           )}

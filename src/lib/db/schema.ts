@@ -1377,6 +1377,8 @@ export interface AgentSessionMetadata {
   approvedAreaIds?: string[];
   autoApproveReview?: boolean;
   manualMode?: boolean;
+  skipGithub?: boolean;
+  skipAI?: boolean;
   [key: string]: unknown;
 }
 

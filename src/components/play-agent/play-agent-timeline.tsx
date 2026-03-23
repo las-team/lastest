@@ -370,9 +370,9 @@ export function PlayAgentTimeline({ repositoryId }: PlayAgentTimelineProps) {
               const { isUser, labelClass } = getStepClasses(step);
               const dimmed = manualMode && AI_STEPS.has(step.id);
               return (
-                <div key={`top-${step.id}`} className={cn('flex justify-center min-w-0', dimmed && 'opacity-25')}>
+                <div key={`top-${step.id}`} className={cn('flex justify-center min-w-0', dimmed && 'opacity-20')}>
                   {!isUser ? (
-                    <span className={cn(labelClass, 'truncate', dimmed && 'line-through')}>{step.label}</span>
+                    <span className={cn(labelClass, 'truncate')}>{step.label}</span>
                   ) : (
                     <span className="text-[10px] leading-tight invisible">.</span>
                   )}
@@ -389,7 +389,7 @@ export function PlayAgentTimeline({ repositoryId }: PlayAgentTimelineProps) {
               const hasDetail = step.richResult || (step.status === 'completed' && step.result);
               const dimmed = manualMode && AI_STEPS.has(step.id);
               return (
-                <div key={`dot-${step.id}`} className={cn('relative flex items-center justify-center py-0.5', dimmed && 'opacity-25')}>
+                <div key={`dot-${step.id}`} className={cn('relative flex items-center justify-center py-0.5', dimmed && 'opacity-20')}>
                   {i > 0 && (
                     <div
                       className={cn(
@@ -432,9 +432,9 @@ export function PlayAgentTimeline({ repositoryId }: PlayAgentTimelineProps) {
               const { isUser, labelClass } = getStepClasses(step);
               const dimmed = manualMode && AI_STEPS.has(step.id);
               return (
-                <div key={`bot-${step.id}`} className={cn('flex justify-center min-w-0', dimmed && 'opacity-25')}>
+                <div key={`bot-${step.id}`} className={cn('flex justify-center min-w-0', dimmed && 'opacity-20')}>
                   {isUser ? (
-                    <span className={cn(labelClass, 'truncate', dimmed && 'line-through')}>{step.label}</span>
+                    <span className={cn(labelClass, 'truncate')}>{step.label}</span>
                   ) : (
                     <span className="text-[10px] leading-tight invisible">.</span>
                   )}
@@ -540,35 +540,30 @@ export function PlayAgentTimeline({ repositoryId }: PlayAgentTimelineProps) {
           </div>
         )}
 
-        {/* Manual mode steps — appear after env_setup completes */}
-        {manualMode && (() => {
-          const envStep = steps.find(s => s.id === 'env_setup');
-          const envDone = envStep?.status === 'completed';
-          if (!envDone) return null;
-          return (
-            <div className="mt-3 pt-3 border-t space-y-2">
-              <span className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">
-                Manual Setup
-              </span>
-              <ManualStep
-                number={1}
-                label="Record a test"
-                description="Open the recorder and interact with your app"
-                href="/record"
-                buttonLabel="Go to Recorder"
-                delay={0}
-              />
-              <ManualStep
-                number={2}
-                label="Run your test"
-                description="Execute the recorded test and view results"
-                href="/run"
-                buttonLabel="Go to Builds"
-                delay={600}
-              />
-            </div>
-          );
-        })()}
+        {/* Manual mode steps */}
+        {manualMode && (
+          <div className="mt-3 pt-3 border-t space-y-2">
+            <span className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">
+              Manual Setup
+            </span>
+            <ManualStep
+              number={1}
+              label="Record a test"
+              description="Open the recorder and interact with your app"
+              href="/record"
+              buttonLabel="Go to Recorder"
+              delay={0}
+            />
+            <ManualStep
+              number={2}
+              label="Run your test"
+              description="Execute the recorded test and view results"
+              href="/run"
+              buttonLabel="Go to Builds"
+              delay={600}
+            />
+          </div>
+        )}
 
         {/* Post-completion actions */}
         {session?.status === 'completed' && (

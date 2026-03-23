@@ -483,7 +483,7 @@ export function AreasPageClient({ tree, uncategorizedTests, unsortedSuites, repo
             <div className="p-6 pt-2">
               <div className="max-w-4xl">
                 {/* Plan tab header */}
-                <div className="flex items-center justify-between mb-3">
+                <div className="flex items-center gap-4 mb-3">
                   <div className="text-sm text-muted-foreground">
                     {areasWithPlans.length} area{areasWithPlans.length !== 1 ? 's' : ''} with plans
                   </div>
