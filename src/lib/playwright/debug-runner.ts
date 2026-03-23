@@ -171,6 +171,10 @@ export class DebugRunner {
   private debugRecordingCleanup: (() => Promise<void>) | null = null;
   private debugFunctionsExposed = false;
 
+  // Stored during start() for replay
+  private baseUrl = '';
+  private screenshotPath = '';
+
   getState(): DebugState | null {
     return this.state;
   }
@@ -268,6 +272,27 @@ export class DebugRunner {
       return true;
     }
 
+    // Handle backward run_to_step directly (bypass command loop)
+    if (command.type === 'run_to_step') {
+      const targetIdx = command.stepIndex;
+      if (targetIdx < 0 || targetIdx >= this.state.steps.length) return false;
+      if (targetIdx === this.state.currentStepIndex) return false;
+
+      if (targetIdx < this.state.currentStepIndex || this.state.status === 'completed' || this.state.status === 'error') {
+        // Backward or forward from completed/error: full replay
+        this.triggerReplayToStep(targetIdx);
+        return true;
+      }
+      // Forward: fall through to command loop via commandResolve
+    }
+
+    // Handle step_back directly too (same as backward run_to_step)
+    if (command.type === 'step_back') {
+      if (this.state.currentStepIndex <= 0) return false;
+      this.triggerReplayToStep(this.state.currentStepIndex - 1);
+      return true;
+    }
+
     if (this.commandResolve) {
       this.commandResolve(command);
       this.commandResolve = null;
@@ -275,6 +300,112 @@ export class DebugRunner {
     }
 
     return false;
+  }
+
+  /**
+   * Fire-and-forget execution restart with proper then/catch handling.
+   */
+  private startNewExecution(pc: PauseController, helpers: ReturnType<typeof this.createHelpers>, page: Page): void {
+    this.launchExecution(this.state!.steps, pc, page, this.baseUrl, this.screenshotPath, helpers).then(() => {
+      if (this.state && this.state.status !== 'completed' && this.state.status !== 'error') {
+        this.state.status = 'completed';
+      }
+      if (this.commandResolve) {
+        this.commandResolve({ type: '_execution_complete' });
+        this.commandResolve = null;
+      }
+    }).catch((err) => {
+      if (err instanceof StopError) return;
+      const execError = err instanceof Error ? err : new Error(String(err));
+      if (this.state) {
+        this.state.status = 'error';
+        this.state.error = execError.message;
+      }
+      if (this.commandResolve) {
+        this.commandResolve({ type: '_execution_complete' });
+        this.commandResolve = null;
+      }
+    });
+  }
+
+  /**
+   * Replay from step 0 to targetIdx: teardown context, recreate, replay.
+   * Can be called from sendCommand (bypasses command loop).
+   */
+  private triggerReplayToStep(targetIdx: number): void {
+    // Fire and forget — the async work happens in background
+    (async () => {
+      if (!this.state || !this.test) return;
+      this.state.status = 'stepping';
+      this.state.error = undefined;
+
+      // Abort current execution
+      if (this.pauseController) {
+        this.pauseController.stop();
+      }
+      await new Promise(r => setTimeout(r, 50));
+
+      // Save trace chunk before closing context
+      if (this.context && this.tracingActive) {
+        const traceFile = `debug-${this.state.sessionId}-${this.traceChunkIndex}.zip`;
+        const tracePath = path.join(this.traceDir || STORAGE_DIRS.traces, traceFile);
+        fs.mkdirSync(path.dirname(tracePath), { recursive: true });
+        await this.context.tracing.stop({ path: tracePath }).catch(() => {});
+        this.state.traceUrl = `/traces/${traceFile}`;
+        this.traceChunkIndex++;
+        this.tracingActive = false;
+      }
+
+      // Close context (keep browser)
+      if (this.context) {
+        await this.context.close().catch(() => {});
+        this.context = null;
+        this.page = null;
+      }
+
+      // Reset recording state
+      this.debugFunctionsExposed = false;
+      if (this.debugRecordingCleanup) {
+        this.debugRecordingCleanup = null;
+        this.debugRecordingSession = null;
+        this.state.isRecording = false;
+        this.state.recordedEventCount = 0;
+      }
+
+      // Clear network/console
+      this.networkEntries = [];
+      this.networkSeq = 0;
+      this.consoleEntries = [];
+      this.state.networkEntries = this.networkEntries;
+      this.state.consoleEntries = this.consoleEntries;
+
+      // Recreate page and context
+      await this.createPageAndContext();
+      if (!this.page) throw new Error('Failed to recreate page');
+
+      // Re-run setup
+      await this.runSetupIfNeeded(this.test, this.page, this.baseUrl);
+
+      // Reset all step results
+      for (let i = 0; i < this.state.stepResults.length; i++) {
+        this.state.stepResults[i] = { stepId: this.state.steps[i].id, status: 'pending', durationMs: 0 };
+      }
+
+      // New PauseController: replay 0..targetIdx, then pause
+      const pauseCtrl = new PauseController('run_to_step', targetIdx + 1, () => {
+        if (this.state) this.state.status = 'paused';
+      });
+      this.pauseController = pauseCtrl;
+
+      // Recreate helpers and start execution
+      const helpers = this.createHelpers(this.page, this.test.id);
+      this.startNewExecution(pauseCtrl, helpers, this.page);
+    })().catch((err) => {
+      if (this.state) {
+        this.state.status = 'error';
+        this.state.error = err instanceof Error ? err.message : String(err);
+      }
+    });
   }
 
   /**
@@ -1044,6 +1175,7 @@ export class DebugRunner {
 
       // Resolve base URL
       const baseUrl = this.environmentConfig?.baseUrl || serverManager.resolveUrl('http://localhost:3000').replace(/\/$/, '') || 'http://localhost:3000';
+      this.baseUrl = baseUrl;
 
       // Prepare screenshot path
       const screenshotDir = this.repositoryId
@@ -1053,6 +1185,7 @@ export class DebugRunner {
         fs.mkdirSync(screenshotDir, { recursive: true });
       }
       const screenshotPath = path.join(screenshotDir, `debug-${this.state.sessionId}.png`);
+      this.screenshotPath = screenshotPath;
 
       // Run setup if needed
       const test = this.test;
@@ -1066,7 +1199,7 @@ export class DebugRunner {
       const firstActionIdx = this.getFirstActionIndex(steps);
 
       // Create helpers
-      let helpers = this.createHelpers(this.page, test.id);
+      const helpers = this.createHelpers(this.page, test.id);
 
       // Choose initial PauseController mode
       let initMode: 'paused' | 'running' | 'run_to_step';
@@ -1084,38 +1217,13 @@ export class DebugRunner {
         initTarget = 0;
       }
 
-      let pauseCtrl = new PauseController(initMode, initTarget, () => {
+      const pauseCtrl = new PauseController(initMode, initTarget, () => {
         if (this.state) this.state.status = 'paused';
       });
       this.pauseController = pauseCtrl;
 
-      // Launch instrumented execution in background
-      const startExecution = (pc: PauseController, h: ReturnType<typeof this.createHelpers>, pg: Page) => {
-        this.launchExecution(this.state!.steps, pc, pg, baseUrl, screenshotPath, h).then(() => {
-          if (this.state && this.state.status !== 'completed' && this.state.status !== 'error') {
-            this.state.status = 'completed';
-          }
-          // Unblock command loop (keep alive for editing/recording)
-          if (this.commandResolve) {
-            this.commandResolve({ type: '_execution_complete' });
-            this.commandResolve = null;
-          }
-        }).catch((err) => {
-          if (err instanceof StopError) return; // expected abort
-          const execError = err instanceof Error ? err : new Error(String(err));
-          if (this.state) {
-            this.state.status = 'error';
-            this.state.error = execError.message;
-          }
-          // Unblock command loop (keep alive for step_back/editing)
-          if (this.commandResolve) {
-            this.commandResolve({ type: '_execution_complete' });
-            this.commandResolve = null;
-          }
-        });
-      };
-
-      startExecution(pauseCtrl, helpers, this.page);
+      // Launch initial execution
+      this.startNewExecution(pauseCtrl, helpers, this.page);
 
       // Command loop (stays alive after execution completes for editing/recording)
       while (true) {
@@ -1134,78 +1242,28 @@ export class DebugRunner {
         // Execution finished signal — keep loop alive
         if (cmd.type === '_execution_complete') continue;
 
-        // step_back — always allowed (even after error/completed), requires currentStepIndex > 0
+        // step_back and backward run_to_step are handled in sendCommand via triggerReplayToStep.
+        // They should not normally reach here, but handle as safety fallback.
         if (cmd.type === 'step_back') {
-          if (this.state.currentStepIndex <= 0) continue;
-          const targetIdx = this.state.currentStepIndex - 1;
-
-          this.state.status = 'stepping';
-          this.state.error = undefined;
-
-          // Abort current execution
-          pauseCtrl.stop();
-          // Give execution promise time to settle
-          await new Promise(r => setTimeout(r, 50));
-
-          // Save trace chunk before closing context
-          if (this.context && this.tracingActive) {
-            const traceFile = `debug-${this.state.sessionId}-${this.traceChunkIndex}.zip`;
-            const tracePath = path.join(this.traceDir || STORAGE_DIRS.traces, traceFile);
-            fs.mkdirSync(path.dirname(tracePath), { recursive: true });
-            await this.context.tracing.stop({ path: tracePath }).catch(() => {});
-            this.state.traceUrl = `/traces/${traceFile}`;
-            this.traceChunkIndex++;
-            this.tracingActive = false;
+          if (this.state.currentStepIndex > 0) {
+            this.triggerReplayToStep(this.state.currentStepIndex - 1);
           }
+          continue;
+        }
 
-          // Close context (keep browser)
-          if (this.context) {
-            await this.context.close().catch(() => {});
-            this.context = null;
-            this.page = null;
+        if (cmd.type === 'run_to_step') {
+          const targetIdx = cmd.stepIndex;
+          if (targetIdx < 0 || targetIdx >= this.state.steps.length) continue;
+          if (targetIdx === this.state.currentStepIndex) continue;
+
+          if (targetIdx < this.state.currentStepIndex || this.state.status === 'completed' || this.state.status === 'error') {
+            // Backward or completed/error: replay via class method
+            this.triggerReplayToStep(targetIdx);
+          } else {
+            // FORWARD: resume existing execution
+            this.state.status = 'running';
+            pauseCtrl.resume('run_to_step', targetIdx + 1);
           }
-
-          // Reset recording state (exposed functions die with the context)
-          this.debugFunctionsExposed = false;
-          if (this.debugRecordingCleanup) {
-            this.debugRecordingCleanup = null;
-            this.debugRecordingSession = null;
-            if (this.state) {
-              this.state.isRecording = false;
-              this.state.recordedEventCount = 0;
-            }
-          }
-
-          // Clear network/console for replay
-          this.networkEntries = [];
-          this.networkSeq = 0;
-          this.consoleEntries = [];
-          this.state.networkEntries = this.networkEntries;
-          this.state.consoleEntries = this.consoleEntries;
-
-          // Recreate page and context
-          await this.createPageAndContext();
-          if (!this.page) throw new Error('Failed to recreate page');
-
-          // Re-run setup
-          await this.runSetupIfNeeded(test, this.page, baseUrl);
-
-          // Recreate helpers with new page
-          helpers = this.createHelpers(this.page, test.id);
-
-          // Reset all step results
-          for (let i = 0; i < this.state.stepResults.length; i++) {
-            this.state.stepResults[i] = { stepId: this.state.steps[i].id, status: 'pending', durationMs: 0 };
-          }
-
-          // New PauseController: run_to_step replaying 0..targetIdx, then pause
-          pauseCtrl = new PauseController('run_to_step', targetIdx + 1, () => {
-            if (this.state) this.state.status = 'paused';
-          });
-          this.pauseController = pauseCtrl;
-
-          // Restart execution
-          startExecution(pauseCtrl, helpers, this.page);
           continue;
         }
 
@@ -1220,43 +1278,7 @@ export class DebugRunner {
           }
           if (this.state.status === 'completed') {
             // Execution finished but new steps added (via edit/recording) — restart
-            this.state.status = 'stepping';
-            this.state.error = undefined;
-            pauseCtrl.stop();
-            await new Promise(r => setTimeout(r, 50));
-
-            if (this.context && this.tracingActive) {
-              const traceFile = `debug-${this.state.sessionId}-${this.traceChunkIndex}.zip`;
-              const tracePath = path.join(this.traceDir || STORAGE_DIRS.traces, traceFile);
-              fs.mkdirSync(path.dirname(tracePath), { recursive: true });
-              await this.context.tracing.stop({ path: tracePath }).catch(() => {});
-              this.state.traceUrl = `/traces/${traceFile}`;
-              this.traceChunkIndex++;
-              this.tracingActive = false;
-            }
-            if (this.context) {
-              await this.context.close().catch(() => {});
-              this.context = null;
-              this.page = null;
-            }
-            this.debugFunctionsExposed = false;
-            this.networkEntries = [];
-            this.networkSeq = 0;
-            this.consoleEntries = [];
-            this.state.networkEntries = this.networkEntries;
-            this.state.consoleEntries = this.consoleEntries;
-            await this.createPageAndContext();
-            if (!this.page) throw new Error('Failed to recreate page');
-            await this.runSetupIfNeeded(test, this.page, baseUrl);
-            helpers = this.createHelpers(this.page, test.id);
-            for (let i = 0; i < this.state.stepResults.length; i++) {
-              this.state.stepResults[i] = { stepId: this.state.steps[i].id, status: 'pending', durationMs: 0 };
-            }
-            pauseCtrl = new PauseController('run_to_step', nextIdx + 1, () => {
-              if (this.state) this.state.status = 'paused';
-            });
-            this.pauseController = pauseCtrl;
-            startExecution(pauseCtrl, helpers, this.page);
+            this.triggerReplayToStep(nextIdx);
             continue;
           }
           this.state.status = 'stepping';
@@ -1267,15 +1289,6 @@ export class DebugRunner {
           if (this.state.status === 'completed') continue; // already at end
           this.state.status = 'running';
           pauseCtrl.resume('running');
-        }
-
-        else if (cmd.type === 'run_to_step') {
-          const targetIdx = cmd.stepIndex;
-          if (targetIdx <= this.state.currentStepIndex || targetIdx >= this.state.steps.length) continue;
-          if (this.state.status === 'completed') continue; // can't resume completed execution
-          this.state.status = 'running';
-          // Target is targetIdx+1 because checkpoint(targetIdx+1) fires AFTER step targetIdx completes
-          pauseCtrl.resume('run_to_step', targetIdx + 1);
         }
 
         else if (cmd.type === 'start_recording') {
@@ -1289,64 +1302,7 @@ export class DebugRunner {
           const addedSteps = this.state.steps.length - oldStepCount;
 
           if (addedSteps > 0) {
-            // Restart execution to compile the new steps
-            this.state.status = 'stepping';
-            pauseCtrl.stop();
-            await new Promise(r => setTimeout(r, 50));
-
-            // Save trace chunk before closing context
-            if (this.context && this.tracingActive) {
-              const traceFile = `debug-${this.state.sessionId}-${this.traceChunkIndex}.zip`;
-              const tracePath = path.join(this.traceDir || STORAGE_DIRS.traces, traceFile);
-              fs.mkdirSync(path.dirname(tracePath), { recursive: true });
-              await this.context.tracing.stop({ path: tracePath }).catch(() => {});
-              this.state.traceUrl = `/traces/${traceFile}`;
-              this.traceChunkIndex++;
-              this.tracingActive = false;
-            }
-
-            // Close context (keep browser)
-            if (this.context) {
-              await this.context.close().catch(() => {});
-              this.context = null;
-              this.page = null;
-            }
-
-            // Reset recording state (exposed functions die with context)
-            this.debugFunctionsExposed = false;
-            this.debugRecordingCleanup = null;
-            this.debugRecordingSession = null;
-
-            // Clear network/console for replay
-            this.networkEntries = [];
-            this.networkSeq = 0;
-            this.consoleEntries = [];
-            this.state.networkEntries = this.networkEntries;
-            this.state.consoleEntries = this.consoleEntries;
-
-            // Recreate page and context
-            await this.createPageAndContext();
-            if (!this.page) throw new Error('Failed to recreate page');
-
-            // Re-run setup
-            await this.runSetupIfNeeded(test, this.page, baseUrl);
-
-            // Recreate helpers with new page
-            helpers = this.createHelpers(this.page, test.id);
-
-            // Reset all step results
-            for (let i = 0; i < this.state.stepResults.length; i++) {
-              this.state.stepResults[i] = { stepId: this.state.steps[i].id, status: 'pending', durationMs: 0 };
-            }
-
-            // Replay to after the last recorded step, then pause
-            const replayTarget = oldCurrentIdx + addedSteps;
-            pauseCtrl = new PauseController('run_to_step', replayTarget + 1, () => {
-              if (this.state) this.state.status = 'paused';
-            });
-            this.pauseController = pauseCtrl;
-
-            startExecution(pauseCtrl, helpers, this.page);
+            this.triggerReplayToStep(oldCurrentIdx + addedSteps);
           }
         }
       }

@@ -435,7 +435,7 @@ export function DebugClient({ test, repositoryId }: DebugClientProps) {
                   stepResults={state?.stepResults || []}
                   onCodeChange={handleCodeChange}
                   onClickStep={(idx) => {
-                    if (isPaused && idx > (state?.currentStepIndex ?? -1)) {
+                    if ((isPaused || isError || isCompleted) && idx !== (state?.currentStepIndex ?? -1)) {
                       sendCmd({ type: 'run_to_step', stepIndex: idx });
                     }
                   }}
@@ -505,7 +505,7 @@ export function DebugClient({ test, repositoryId }: DebugClientProps) {
                             isCurrent ? 'bg-blue-500/10 border border-blue-500/30' : ''
                           }`}
                           onClick={() => {
-                            if (isPaused && idx > (state?.currentStepIndex ?? -1)) {
+                            if ((isPaused || isError || isCompleted) && idx !== (state?.currentStepIndex ?? -1)) {
                               sendCmd({ type: 'run_to_step', stepIndex: idx });
                             }
                           }}

@@ -186,6 +186,32 @@ export class EmbeddedDebugExecutor {
     });
   }
 
+  private async replayToStep(targetStep: number): Promise<void> {
+    this.pauseController?.stop();
+    this.pauseController = null;
+    await this.cleanupContextAndPage();
+    await this.createContextAndPage();
+    if (this.debugPage && this.targetUrl) {
+      try {
+        await this.debugPage.goto(this.targetUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
+      } catch (err) {
+        console.error('[DebugExecutor] Navigation failed on replay:', err);
+      }
+    }
+    this.stepResults = this.steps.map(s => ({ stepId: s.id, status: 'pending' as const, durationMs: 0 }));
+    this.currentStepIndex = 0;
+    this.status = 'running';
+    this.error = undefined;
+    this.generation++;
+    const gen = this.generation;
+    this.runExecution(gen, targetStep).catch(err => {
+      if (this.generation === gen) {
+        this.status = 'error';
+        this.error = err?.message || String(err);
+      }
+    });
+  }
+
   async handleAction(action: string, payload?: DebugActionPayload): Promise<void> {
     switch (action) {
       case 'step_forward':
@@ -197,33 +223,7 @@ export class EmbeddedDebugExecutor {
 
       case 'step_back': {
         if (this.currentStepIndex <= 0) break;
-        const targetStep = this.currentStepIndex - 1;
-        // Stop current execution
-        this.pauseController?.stop();
-        this.pauseController = null;
-        await this.cleanupContextAndPage();
-        // Re-create and re-execute from start to targetStep-1
-        await this.createContextAndPage();
-        if (this.debugPage && this.targetUrl) {
-          try {
-            await this.debugPage.goto(this.targetUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
-          } catch (err) {
-            console.error('[DebugExecutor] Navigation failed on step back:', err);
-          }
-        }
-        // Reset step results
-        this.stepResults = this.steps.map(s => ({ stepId: s.id, status: 'pending' as const, durationMs: 0 }));
-        this.currentStepIndex = 0;
-        this.status = 'running';
-        this.error = undefined;
-        this.generation++;
-        const gen = this.generation;
-        this.runExecution(gen, targetStep).catch(err => {
-          if (this.generation === gen) {
-            this.status = 'error';
-            this.error = err?.message || String(err);
-          }
-        });
+        await this.replayToStep(this.currentStepIndex - 1);
         break;
       }
 
@@ -234,12 +234,22 @@ export class EmbeddedDebugExecutor {
         }
         break;
 
-      case 'run_to_step':
-        if (this.pauseController && payload?.stepIndex !== undefined) {
+      case 'run_to_step': {
+        if (payload?.stepIndex === undefined) break;
+        const targetIdx = payload.stepIndex;
+        if (targetIdx < 0 || targetIdx >= this.steps.length) break;
+        if (targetIdx === this.currentStepIndex) break;
+
+        if (targetIdx > this.currentStepIndex && this.pauseController && this.status !== 'completed' && this.status !== 'error') {
+          // FORWARD: resume existing execution
           this.status = 'running';
-          this.pauseController.resume('run_to_step', payload.stepIndex);
+          this.pauseController.resume('run_to_step', targetIdx);
+        } else {
+          // BACKWARD or forward from completed/error: full replay
+          await this.replayToStep(targetIdx);
         }
         break;
+      }
 
       case 'update_code':
         if (payload?.steps && payload?.cleanBody) {

@@ -8,13 +8,17 @@ Network Interception
 Auto gh action run
 ## features
 Migrate to gh app /home/ewyct/.claude/plans/cheeky-sparking-torvalds.md
-Stripe for self-subscribe
+Payment integration /home/ewyct/.claude/plans/drifting-yawning-hoare.md
 multiple envs to run tests in w url providing in parallel
-debug - go back
-debug - googlesheet data
-google non test-app
+special prompting for ai diff analysis either by user or by branch code change 
+validate if deployed action is working fine
+after discovery, extract testing manifesto into a separate page where user can edit
+    if a pr merge happens, update with new functions - show as new, prompt test generation
+    run this on excali
 ## ideas
 Test coverage assessment and recreation based on existing test set
+debug - googlesheet data
+
 cookie sharing from host machine?
 Tweet about us
 Content comparison - compare text in 2 setups
@@ -30,8 +34,6 @@ Import from prior tools?
 Determine test coverage based on tests in repo 
 Expand into not just visual testing: https://github.com/coleam00/link-in-bio-page-builder/blob/main/.claude/skills/e2e-test/SKILL.md
 ## bugs
-some elements are disappearing from test 13b
-other users can see build page w url
 ## marketing
 why is software not just a play button?
 what's between agents and saas? obeservability, human in the loop
