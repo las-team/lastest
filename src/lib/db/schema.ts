@@ -132,6 +132,7 @@ export const functionalAreas = sqliteTable('functional_areas', {
   orderIndex: integer('order_index').default(0),
   agentPlan: text('agent_plan'), // markdown test plan from Planner agent
   planGeneratedAt: integer('plan_generated_at', { mode: 'timestamp' }),
+  planSnapshot: text('plan_snapshot'), // JSON: FunctionalAreaPlanSnapshot for rollback
   deletedAt: integer('deleted_at', { mode: 'timestamp' }),
 });
 
@@ -403,6 +404,12 @@ export type Repository = typeof repositories.$inferSelect;
 export type NewRepository = typeof repositories.$inferInsert;
 export type FunctionalArea = typeof functionalAreas.$inferSelect;
 export type NewFunctionalArea = typeof functionalAreas.$inferInsert;
+
+export interface FunctionalAreaPlanSnapshot {
+  previousPlan: string | null;
+  previousDescription: string | null;
+  generatedTestIds: string[];
+}
 export type Test = typeof tests.$inferSelect;
 export type NewTest = typeof tests.$inferInsert;
 export type TestRun = typeof testRuns.$inferSelect;

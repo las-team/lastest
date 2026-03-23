@@ -921,9 +921,16 @@ async function runPlanWithAgents(
       area.description,
     );
     if (area.testPlan) {
+      // Save snapshot for rollback before overwriting
+      const snapshot = JSON.stringify({
+        previousPlan: dbArea.agentPlan,
+        previousDescription: dbArea.description,
+        generatedTestIds: [],
+      });
       await queries.updateFunctionalArea(dbArea.id, {
         agentPlan: area.testPlan,
         planGeneratedAt: new Date(),
+        planSnapshot: snapshot,
       });
     }
     richAreas.push({
@@ -1232,6 +1239,22 @@ async function runGenerate(sessionId: string, repositoryId: string, _teamId: str
       const routeIds = repoRoutes.map(r => r.id);
       const genResult = await generateBasicTests(repositoryId, routeIds, baseUrl);
       testsCreated = genResult.testsCreated + genResult.testsUpdated;
+    }
+  }
+
+  // Update planSnapshot with generated test IDs per area
+  const testsByArea = new Map<string, string[]>();
+  for (const gt of generatedTests) {
+    const existing = testsByArea.get(gt.areaName) || [];
+    existing.push(gt.testId);
+    testsByArea.set(gt.areaName, existing);
+  }
+  for (const area of targetAreas) {
+    const areaTestIds = generatedTests.filter(t => t.areaName === area.name).map(t => t.testId);
+    if (areaTestIds.length > 0 && area.planSnapshot) {
+      const snapshot = JSON.parse(area.planSnapshot);
+      snapshot.generatedTestIds = areaTestIds;
+      await queries.updateFunctionalArea(area.id, { planSnapshot: JSON.stringify(snapshot) });
     }
   }
 
@@ -1984,7 +2007,12 @@ export async function rerunPlanner(
   for (const area of mergedAreas) {
     const dbArea = await queries.getOrCreateFunctionalAreaByRepo(session.repositoryId, area.name, area.description);
     if (area.testPlan) {
-      await queries.updateFunctionalArea(dbArea.id, { agentPlan: area.testPlan, planGeneratedAt: new Date() });
+      const snapshot = JSON.stringify({
+        previousPlan: dbArea.agentPlan,
+        previousDescription: dbArea.description,
+        generatedTestIds: [],
+      });
+      await queries.updateFunctionalArea(dbArea.id, { agentPlan: area.testPlan, planGeneratedAt: new Date(), planSnapshot: snapshot });
     }
     richAreas.push({ id: dbArea.id, name: area.name, description: area.description || '', routes: area.routes, testPlan: area.testPlan || '' });
   }

@@ -15,9 +15,11 @@ import {
 } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
-import { ExternalLink, Play, Pencil, Save, X, Folder, FileCode, ListChecks, Trash2 } from 'lucide-react';
+import { ExternalLink, Play, Pencil, Save, X, Folder, FileCode, ListChecks, Trash2, ScrollText, Undo2, Loader2 } from 'lucide-react';
 import Link from 'next/link';
-import { updateArea, getArea } from '@/server/actions/areas';
+import ReactMarkdown from 'react-markdown';
+import { updateArea, getArea, rollbackAreaPlan } from '@/server/actions/areas';
+import { toast } from 'sonner';
 import { getTest, updateTest } from '@/server/actions/tests';
 import { getSuite, updateSuite } from '@/server/actions/suites';
 import type { TreeSelection, SuiteItem } from './area-tree';
@@ -261,6 +263,20 @@ export function AreaDetailSection({ selection, areas, suites, repositoryId: _rep
             <Label>Tests in this area</Label>
             <p className="text-2xl font-bold mt-1">{testCount}</p>
           </div>
+
+          {/* Agent Plan Preview */}
+          {areaData.agentPlan && (
+            <>
+              <Separator />
+              <AgentPlanPreview
+                areaId={areaData.id}
+                agentPlan={areaData.agentPlan}
+                planGeneratedAt={areaData.planGeneratedAt}
+                hasSnapshot={!!areaData.planSnapshot}
+                onUpdate={onUpdate}
+              />
+            </>
+          )}
         </CardContent>
       </Card>
     );
@@ -479,4 +495,79 @@ function findAreaNode(areas: FunctionalAreaWithChildren[], id: string): Function
     if (found) return found;
   }
   return null;
+}
+
+function AgentPlanPreview({
+  areaId,
+  agentPlan,
+  planGeneratedAt,
+  hasSnapshot,
+  onUpdate,
+}: {
+  areaId: string;
+  agentPlan: string;
+  planGeneratedAt: Date | null;
+  hasSnapshot: boolean;
+  onUpdate: () => void;
+}) {
+  const [isRollingBack, setIsRollingBack] = useState(false);
+  const [expanded, setExpanded] = useState(false);
+
+  const handleRollback = async () => {
+    setIsRollingBack(true);
+    try {
+      await rollbackAreaPlan(areaId);
+      toast.success('Plan rolled back');
+      onUpdate();
+    } catch {
+      toast.error('Failed to rollback');
+    } finally {
+      setIsRollingBack(false);
+    }
+  };
+
+  const previewText = expanded ? agentPlan : agentPlan;
+  const isLong = agentPlan.split('\n').length > 15;
+
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <Label>Agent Plan</Label>
+          {planGeneratedAt && (
+            <Badge variant="secondary" className="text-xs">
+              {new Date(planGeneratedAt).toLocaleDateString()}
+            </Badge>
+          )}
+        </div>
+        <div className="flex items-center gap-1">
+          <Button asChild variant="ghost" size="sm">
+            <Link href={`/areas/plan#area-${areaId}`}>
+              <ScrollText className="h-3.5 w-3.5 mr-1" />
+              Full View
+            </Link>
+          </Button>
+          {hasSnapshot && (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="text-destructive hover:text-destructive"
+              onClick={handleRollback}
+              disabled={isRollingBack}
+            >
+              {isRollingBack ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Undo2 className="h-3.5 w-3.5" />}
+            </Button>
+          )}
+        </div>
+      </div>
+      <div className={`border rounded-md p-3 prose prose-sm dark:prose-invert max-w-none overflow-auto ${!expanded && isLong ? 'max-h-[200px]' : ''}`}>
+        <ReactMarkdown>{previewText}</ReactMarkdown>
+      </div>
+      {isLong && (
+        <Button variant="ghost" size="sm" className="w-full text-xs" onClick={() => setExpanded(!expanded)}>
+          {expanded ? 'Show less' : 'Show more'}
+        </Button>
+      )}
+    </div>
+  );
 }

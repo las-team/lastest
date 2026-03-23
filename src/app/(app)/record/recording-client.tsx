@@ -457,6 +457,7 @@ export function RecordingClient({
           orderIndex: area.orderIndex ?? null,
           agentPlan: area.agentPlan ?? null,
           planGeneratedAt: area.planGeneratedAt ?? null,
+          planSnapshot: area.planSnapshot ?? null,
           deletedAt: area.deletedAt ?? null,
         }]);
         setAreaId(area.id);
