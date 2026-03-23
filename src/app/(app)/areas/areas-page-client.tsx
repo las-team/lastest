@@ -21,6 +21,7 @@ import { createArea, deleteArea, deleteAreaWithContents, moveTestToArea, moveSui
 import { deleteTest } from '@/server/actions/tests';
 import { FolderSearch, Sparkles, FileText, Loader2, BookOpen, Check, X, Circle, FileWarning, GitCompare, ScrollText, Download } from 'lucide-react';
 import Link from 'next/link';
+import { downloadMarkdown } from '@/lib/utils';
 import { Progress } from '@/components/ui/progress';
 import { cn } from '@/lib/utils';
 import { startRemoteRouteScan } from '@/server/actions/scanner';
@@ -343,6 +344,30 @@ export function AreasPageClient({ tree, uncategorizedTests, unsortedSuites, repo
                     </button>
                   </>
                 )}
+                <Link
+                  href="/areas/plan"
+                  className="flex flex-col items-center gap-2 p-4 border rounded-lg hover:bg-muted/50 hover:border-primary/50 transition-colors text-center"
+                >
+                  <ScrollText className="h-6 w-6 text-primary" />
+                  <span className="font-medium text-sm">Testing Plan</span>
+                  <span className="text-xs text-muted-foreground">View & edit plans</span>
+                </Link>
+                <button
+                  onClick={async () => {
+                    try {
+                      const md = await exportAllPlans(repositoryId);
+                      downloadMarkdown(md, 'testing-manifesto.md');
+                      toast.success('Manifesto exported');
+                    } catch {
+                      toast.error('Failed to export');
+                    }
+                  }}
+                  className="flex flex-col items-center gap-2 p-4 border rounded-lg hover:bg-muted/50 hover:border-primary/50 transition-colors text-center"
+                >
+                  <Download className="h-6 w-6 text-primary" />
+                  <span className="font-medium text-sm">Export</span>
+                  <span className="text-xs text-muted-foreground">Manifesto (.md)</span>
+                </button>
               </div>
             </CardContent>
           </Card>
@@ -401,37 +426,6 @@ export function AreasPageClient({ tree, uncategorizedTests, unsortedSuites, repo
                 </div>
               </div>
 
-              {/* Plan Actions */}
-              <div className="flex gap-2 pt-2">
-                <Button asChild variant="outline" size="sm">
-                  <Link href="/areas/plan">
-                    <ScrollText className="h-4 w-4 mr-2" />
-                    View Full Plan
-                  </Link>
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={async () => {
-                    try {
-                      const md = await exportAllPlans(repositoryId);
-                      const blob = new Blob([md], { type: 'text/markdown' });
-                      const url = URL.createObjectURL(blob);
-                      const a = document.createElement('a');
-                      a.href = url;
-                      a.download = 'testing-manifesto.md';
-                      a.click();
-                      URL.revokeObjectURL(url);
-                      toast.success('Manifesto exported');
-                    } catch {
-                      toast.error('Failed to export');
-                    }
-                  }}
-                >
-                  <Download className="h-4 w-4 mr-2" />
-                  Export Manifesto
-                </Button>
-              </div>
             </CardContent>
           </Card>
 

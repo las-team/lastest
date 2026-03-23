@@ -133,7 +133,9 @@
       "WebFetch(domain:www.lost-pixel.com)",
       "WebFetch(domain:polar.sh)",
       "WebFetch(domain:creem.io)",
-      "WebFetch(domain:www.reddit.com)"
+      "WebFetch(domain:www.reddit.com)",
+      "Bash(gh run:*)",
+      "Bash(cat /home/ewyct/dev/lastest2/src/app/\\\\\\(app\\\\\\)/settings/page.tsx)"
     ]
   },
   "disabledMcpjsonServers": [

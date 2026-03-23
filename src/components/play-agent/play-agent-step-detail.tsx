@@ -1,9 +1,10 @@
 'use client';
 
 import { useState, useCallback } from 'react';
-import { Check, X, ChevronRight, ChevronDown, RotateCcw, Loader2, Eye } from 'lucide-react';
+import { Check, X, ChevronRight, ChevronDown, RotateCcw, Loader2, Eye, ScrollText } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
+import Link from 'next/link';
 import type { AgentStepState, AgentSubstep, AgentRichResultPlanArea } from '@/lib/db/schema';
 
 interface PlayAgentStepDetailProps {
@@ -86,7 +87,7 @@ function PlanDetail({ areas, onApprovePlan }: {
           </div>
         ))}
       </div>
-      {onApprovePlan && (
+      {onApprovePlan ? (
         <div className="flex items-center gap-2 pt-1">
           <Button
             size="sm"
@@ -105,6 +106,14 @@ function PlanDetail({ areas, onApprovePlan }: {
             Auto-approve next time
           </label>
         </div>
+      ) : (
+        <Link
+          href="/areas/plan"
+          className="inline-flex items-center gap-1.5 text-xs text-primary hover:underline pt-1"
+        >
+          <ScrollText className="h-3 w-3" />
+          View Testing Plan
+        </Link>
       )}
     </div>
   );

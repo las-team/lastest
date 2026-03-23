@@ -11,7 +11,6 @@ Migrate to gh app /home/ewyct/.claude/plans/cheeky-sparking-torvalds.md
 Payment integration /home/ewyct/.claude/plans/drifting-yawning-hoare.md
 multiple envs to run tests in w url providing in parallel
 special prompting for ai diff analysis either by user or by branch code change 
-validate if deployed action is working fine
 after discovery, extract testing manifesto into a separate page where user can edit
     if a pr merge happens, update with new functions - show as new, prompt test generation
     run this on excali

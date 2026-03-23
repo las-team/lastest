@@ -3,7 +3,8 @@
 import { useState } from 'react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Play, X, Check, Loader2, Pause, SkipForward, AlertCircle, RotateCcw, ChevronDown } from 'lucide-react';
+import { Play, X, Check, Loader2, Pause, SkipForward, AlertCircle, RotateCcw, ChevronDown, ScrollText } from 'lucide-react';
+import Link from 'next/link';
 import { PlayAgentStep } from './play-agent-step';
 import { PlayAgentStepDetail } from './play-agent-step-detail';
 import { usePlayAgent } from './use-play-agent';
@@ -451,6 +452,19 @@ export function PlayAgentTimeline({ repositoryId }: PlayAgentTimelineProps) {
               onResume={activeStep.status === 'waiting_user' || activeStep.status === 'failed' ? resume : undefined}
               onApprovePlan={activeStep.id === 'review' && activeStep.status === 'waiting_user' ? approvePlan : undefined}
             />
+          </div>
+        )}
+
+        {/* Post-completion link to testing plan */}
+        {session?.status === 'completed' && (
+          <div className="mt-3 pt-3 border-t flex items-center justify-center">
+            <Link
+              href="/areas/plan"
+              className="inline-flex items-center gap-1.5 text-xs text-primary hover:underline"
+            >
+              <ScrollText className="h-3.5 w-3.5" />
+              View Testing Plan
+            </Link>
           </div>
         )}
       </CardContent>

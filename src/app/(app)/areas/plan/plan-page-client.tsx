@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import ReactMarkdown from 'react-markdown';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -9,14 +9,24 @@ import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
 import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import {
   Collapsible,
   CollapsibleContent,
   CollapsibleTrigger,
 } from '@/components/ui/collapsible';
-import { ArrowLeft, Download, Save, Undo2, ChevronDown, ChevronRight, FileText, Loader2 } from 'lucide-react';
+import { ArrowLeft, Download, Save, Undo2, ChevronDown, ChevronRight, FileText, Loader2, Pencil, X } from 'lucide-react';
 import Link from 'next/link';
 import { updateAreaPlan, rollbackAreaPlan, exportAllPlans, exportAreaPlan } from '@/server/actions/areas';
 import { toast } from 'sonner';
+import { timeAgo, downloadMarkdown } from '@/lib/utils';
+import type { FunctionalAreaPlanSnapshot } from '@/lib/db/schema';
 
 interface PlanArea {
   id: string;
@@ -34,36 +44,23 @@ interface PlanPageClientProps {
   repositoryId: string;
 }
 
-function downloadMarkdown(content: string, filename: string) {
-  const blob = new Blob([content], { type: 'text/markdown' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = filename;
-  a.click();
-  URL.revokeObjectURL(url);
-}
-
-function timeAgo(date: Date | null): string {
-  if (!date) return 'Unknown';
-  const now = new Date();
-  const diff = now.getTime() - new Date(date).getTime();
-  const minutes = Math.floor(diff / 60000);
-  if (minutes < 1) return 'Just now';
-  if (minutes < 60) return `${minutes}m ago`;
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours}h ago`;
-  const days = Math.floor(hours / 24);
-  return `${days}d ago`;
-}
-
 export function PlanPageClient({ areas, repoName, repositoryId }: PlanPageClientProps) {
   const router = useRouter();
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editContent, setEditContent] = useState('');
   const [saving, setSaving] = useState<string | null>(null);
   const [rollingBack, setRollingBack] = useState<string | null>(null);
+  const [rollbackTarget, setRollbackTarget] = useState<PlanArea | null>(null);
   const [exporting, setExporting] = useState(false);
+
+  // Auto-scroll to hash target on mount
+  useEffect(() => {
+    const hash = window.location.hash;
+    if (hash) {
+      const el = document.querySelector(hash);
+      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+  }, []);
 
   const handleEdit = (area: PlanArea) => {
     setEditingId(area.id);
@@ -84,11 +81,12 @@ export function PlanPageClient({ areas, repoName, repositoryId }: PlanPageClient
     }
   };
 
-  const handleRollback = async (areaId: string) => {
-    setRollingBack(areaId);
+  const handleRollback = async (area: PlanArea) => {
+    setRollingBack(area.id);
     try {
-      await rollbackAreaPlan(areaId);
-      toast.success('Plan rolled back — generated tests deleted');
+      await rollbackAreaPlan(area.id);
+      setRollbackTarget(null);
+      toast.success('Plan rolled back');
       router.refresh();
     } catch {
       toast.error('Failed to rollback');
@@ -114,10 +112,16 @@ export function PlanPageClient({ areas, repoName, repositoryId }: PlanPageClient
     try {
       const md = await exportAreaPlan(area.id);
       downloadMarkdown(md, `${area.name.toLowerCase().replace(/\s+/g, '-')}-plan.md`);
+      toast.success('Plan exported');
     } catch {
       toast.error('Failed to export area plan');
     }
   };
+
+  const rollbackSnapshot: FunctionalAreaPlanSnapshot | null = rollbackTarget?.planSnapshot
+    ? JSON.parse(rollbackTarget.planSnapshot)
+    : null;
+  const rollbackTestCount = rollbackSnapshot?.generatedTestIds?.length ?? 0;
 
   return (
     <div className="flex flex-col h-full overflow-hidden">
@@ -161,18 +165,45 @@ export function PlanPageClient({ areas, repoName, repositoryId }: PlanPageClient
                 isEditing={editingId === area.id}
                 editContent={editContent}
                 isSaving={saving === area.id}
-                isRollingBack={rollingBack === area.id}
                 onEdit={() => handleEdit(area)}
                 onCancelEdit={() => setEditingId(null)}
                 onEditChange={setEditContent}
                 onSave={() => handleSave(area.id)}
-                onRollback={() => handleRollback(area.id)}
+                onRequestRollback={() => setRollbackTarget(area)}
                 onExport={() => handleExportArea(area)}
               />
             ))
           )}
         </div>
       </div>
+
+      {/* Rollback confirmation dialog */}
+      <Dialog open={!!rollbackTarget} onOpenChange={(open) => !open && setRollbackTarget(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Rollback &ldquo;{rollbackTarget?.name}&rdquo;</DialogTitle>
+            <DialogDescription>
+              This will restore the previous plan and description.
+              {rollbackTestCount > 0 && (
+                <> <strong>{rollbackTestCount} generated test{rollbackTestCount !== 1 ? 's' : ''}</strong> will be deleted.</>
+              )}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setRollbackTarget(null)}>
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={() => rollbackTarget && handleRollback(rollbackTarget)}
+              disabled={rollingBack === rollbackTarget?.id}
+            >
+              {rollingBack === rollbackTarget?.id ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <Undo2 className="h-4 w-4 mr-1" />}
+              Rollback
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
@@ -182,12 +213,11 @@ interface AreaPlanCardProps {
   isEditing: boolean;
   editContent: string;
   isSaving: boolean;
-  isRollingBack: boolean;
   onEdit: () => void;
   onCancelEdit: () => void;
   onEditChange: (v: string) => void;
   onSave: () => void;
-  onRollback: () => void;
+  onRequestRollback: () => void;
   onExport: () => void;
 }
 
@@ -196,12 +226,11 @@ function AreaPlanCard({
   isEditing,
   editContent,
   isSaving,
-  isRollingBack,
   onEdit,
   onCancelEdit,
   onEditChange,
   onSave,
-  onRollback,
+  onRequestRollback,
   onExport,
 }: AreaPlanCardProps) {
   const [testsOpen, setTestsOpen] = useState(false);
@@ -220,7 +249,7 @@ function AreaPlanCard({
           <Badge variant="secondary" className="text-xs">
             {timeAgo(area.planGeneratedAt)}
           </Badge>
-          <Button variant="ghost" size="sm" onClick={onExport}>
+          <Button variant="ghost" size="sm" onClick={onExport} title="Export this area">
             <Download className="h-3.5 w-3.5" />
           </Button>
         </div>
@@ -262,11 +291,13 @@ function AreaPlanCard({
                   Save
                 </Button>
                 <Button size="sm" variant="ghost" onClick={onCancelEdit}>
+                  <X className="h-4 w-4 mr-1" />
                   Cancel
                 </Button>
               </>
             ) : (
               <Button size="sm" variant="outline" onClick={onEdit}>
+                <Pencil className="h-4 w-4 mr-1" />
                 Edit Plan
               </Button>
             )}
@@ -274,11 +305,11 @@ function AreaPlanCard({
           {hasSnapshot && !isEditing && (
             <Button
               size="sm"
-              variant="destructive"
-              onClick={onRollback}
-              disabled={isRollingBack}
+              variant="outline"
+              className="text-destructive hover:text-destructive"
+              onClick={onRequestRollback}
             >
-              {isRollingBack ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <Undo2 className="h-4 w-4 mr-1" />}
+              <Undo2 className="h-4 w-4 mr-1" />
               Rollback
             </Button>
           )}
