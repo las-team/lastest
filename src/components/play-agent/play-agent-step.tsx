@@ -10,6 +10,7 @@ interface PlayAgentStepProps {
   step: AgentStepState;
   stepNumber: number;
   onResume?: () => void;
+  onSkip?: () => void;
   onApprovePlan?: (approvedAreaIds: string[], autoApprove: boolean) => void;
 }
 
@@ -31,7 +32,7 @@ function AgentBadge({ agent }: { agent: PwAgentType }) {
   );
 }
 
-export function PlayAgentStep({ step, stepNumber, onResume, onApprovePlan }: PlayAgentStepProps) {
+export function PlayAgentStep({ step, stepNumber, onResume, onSkip, onApprovePlan }: PlayAgentStepProps) {
   // For review step waiting for user, show the plan detail inline
   const isReviewWaiting = step.id === 'review' && step.status === 'waiting_user';
 
@@ -186,9 +187,17 @@ export function PlayAgentStep({ step, stepNumber, onResume, onApprovePlan }: Pla
           {step.id !== 'settings_check' && step.id !== 'select_repo' && step.id !== 'env_setup' && (
             <p className="text-xs text-amber-600 dark:text-amber-400">{step.userAction}</p>
           )}
-          {onResume && (
-            <Button size="sm" onClick={onResume}>Retry</Button>
-          )}
+          <div className="flex gap-2">
+            {onResume && (
+              <Button size="sm" onClick={onResume}>Retry</Button>
+            )}
+            {onSkip && step.id === 'settings_check' && (
+              <Button size="sm" variant="outline" onClick={onSkip}>
+                <SkipForward className="h-3 w-3 mr-1" />
+                Skip for now
+              </Button>
+            )}
+          </div>
         </div>
       )}
 

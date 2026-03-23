@@ -148,6 +148,15 @@ function isAborted(signal: AbortSignal): boolean {
   return signal.aborted;
 }
 
+async function skipIfManualMode(sessionId: string, stepId: AgentStepId): Promise<boolean> {
+  const session = await queries.getAgentSession(sessionId);
+  if (session?.metadata?.manualMode) {
+    await updateStep(sessionId, stepId, { status: 'skipped', completedAt: new Date().toISOString() });
+    return true;
+  }
+  return false;
+}
+
 async function waitForBuild(buildId: string, signal: AbortSignal): Promise<Awaited<ReturnType<typeof getBuildSummary>>> {
   for (;;) {
     if (signal.aborted) return null;
@@ -626,6 +635,7 @@ function buildIntelligenceBrief(intel: CodebaseIntelligence, routeCount: number)
 }
 
 async function runScanAndTemplate(sessionId: string, repositoryId: string, _teamId: string, signal: AbortSignal) {
+  if (await skipIfManualMode(sessionId, 'scan_and_template')) return true;
   await setStepActive(sessionId, 'scan_and_template');
   if (isAborted(signal)) return false;
 
@@ -1043,6 +1053,7 @@ async function runPlanPromptMode(
 }
 
 async function runPlan(sessionId: string, repositoryId: string, _teamId: string, signal: AbortSignal) {
+  if (await skipIfManualMode(sessionId, 'plan')) return true;
   await setStepActive(sessionId, 'plan');
   if (isAborted(signal)) return false;
 
@@ -1067,6 +1078,7 @@ async function runPlan(sessionId: string, repositoryId: string, _teamId: string,
 // ============================================
 
 async function runReview(sessionId: string, _repositoryId: string, _teamId: string, _signal: AbortSignal) {
+  if (await skipIfManualMode(sessionId, 'review')) return true;
   await setStepActive(sessionId, 'review');
 
   const session = await queries.getAgentSession(sessionId);
@@ -1129,6 +1141,7 @@ async function runReview(sessionId: string, _repositoryId: string, _teamId: stri
 // ============================================
 
 async function runGenerate(sessionId: string, repositoryId: string, _teamId: string, signal: AbortSignal) {
+  if (await skipIfManualMode(sessionId, 'generate')) return true;
   await setStepActive(sessionId, 'generate');
   if (isAborted(signal)) return false;
 
@@ -1299,6 +1312,7 @@ async function runGenerate(sessionId: string, repositoryId: string, _teamId: str
 // ============================================
 
 async function runTests(sessionId: string, repositoryId: string, _teamId: string, signal: AbortSignal) {
+  if (await skipIfManualMode(sessionId, 'run_tests')) return true;
   await setStepActive(sessionId, 'run_tests');
   if (isAborted(signal)) return false;
 
@@ -1382,6 +1396,7 @@ async function runTests(sessionId: string, repositoryId: string, _teamId: string
 // ============================================
 
 async function runFixTests(sessionId: string, repositoryId: string, _teamId: string, signal: AbortSignal) {
+  if (await skipIfManualMode(sessionId, 'fix_tests')) return true;
   await setStepActive(sessionId, 'fix_tests');
   if (isAborted(signal)) return false;
 
@@ -1604,6 +1619,7 @@ async function runFixTests(sessionId: string, repositoryId: string, _teamId: str
 // ============================================
 
 async function runRerunTests(sessionId: string, repositoryId: string, _teamId: string, signal: AbortSignal) {
+  if (await skipIfManualMode(sessionId, 'rerun_tests')) return true;
   const session = await queries.getAgentSession(sessionId);
   if (!session) return false;
 
@@ -1687,6 +1703,10 @@ async function runRerunTests(sessionId: string, repositoryId: string, _teamId: s
 // ============================================
 
 async function runSummary(sessionId: string, _repositoryId: string, _teamId: string, _signal: AbortSignal) {
+  if (await skipIfManualMode(sessionId, 'summary')) {
+    await queries.updateAgentSession(sessionId, { status: 'completed', completedAt: new Date() });
+    return true;
+  }
   await setStepActive(sessionId, 'summary');
 
   const session = await queries.getAgentSession(sessionId);
@@ -1890,6 +1910,33 @@ export async function approvePlayAgentPlan(
 
   // Resume from review step
   return resumePlayAgent(sessionId);
+}
+
+export async function skipSettingsStep(sessionId: string): Promise<{ success: boolean }> {
+  const { team } = await requireTeamAccess();
+  const session = await queries.getAgentSession(sessionId);
+  if (!session) return { success: false };
+  if (session.teamId && session.teamId !== team.id) return { success: false };
+
+  // Mark settings_check as skipped
+  await updateStep(sessionId, 'settings_check', {
+    status: 'skipped',
+    completedAt: new Date().toISOString(),
+  });
+
+  // Enable manual mode — AI steps will auto-skip
+  await queries.updateAgentSession(sessionId, {
+    status: 'active',
+    metadata: { ...session.metadata, manualMode: true },
+  });
+
+  // Resume from select_repo
+  executeFromStep(sessionId, session.repositoryId, team.id ?? '', 'select_repo').catch((err) => {
+    console.error('[PlayAgent] Skip settings resume error:', err);
+    queries.updateAgentSession(sessionId, { status: 'failed' }).catch(() => {});
+  });
+
+  return { success: true };
 }
 
 export async function skipDiscoverStep(sessionId: string): Promise<{ success: boolean }> {

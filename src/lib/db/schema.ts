@@ -1376,6 +1376,7 @@ export interface AgentSessionMetadata {
   finalFailedCount?: number;
   approvedAreaIds?: string[];
   autoApproveReview?: boolean;
+  manualMode?: boolean;
   [key: string]: unknown;
 }
 

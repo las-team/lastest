@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import type { AgentSession } from '@/lib/db/schema';
-import { startPlayAgent, resumePlayAgent, cancelPlayAgent, approvePlayAgentPlan, rerunPlanner as rerunPlannerAction } from '@/server/actions/play-agent';
+import { startPlayAgent, resumePlayAgent, cancelPlayAgent, approvePlayAgentPlan, rerunPlanner as rerunPlannerAction, skipSettingsStep } from '@/server/actions/play-agent';
 
 const SESSION_KEY = 'play-agent-session-id';
 const POLL_INTERVAL = 2000;
@@ -128,6 +128,18 @@ export function usePlayAgent(repositoryId?: string | null) {
     }
   }, [session?.id, poll]);
 
+  const skipSettings = useCallback(async () => {
+    if (!session?.id) return;
+    setLoading(true);
+    try {
+      await skipSettingsStep(session.id);
+      if (pollRef.current) clearInterval(pollRef.current);
+      pollRef.current = setInterval(() => poll(session.id), POLL_INTERVAL);
+    } finally {
+      setLoading(false);
+    }
+  }, [session?.id, poll]);
+
   const dismiss = useCallback(() => {
     localStorage.removeItem(SESSION_KEY);
     setSession(null);
@@ -158,5 +170,6 @@ export function usePlayAgent(repositoryId?: string | null) {
     dismiss,
     approvePlan,
     rerunPlanner,
+    skipSettings,
   };
 }

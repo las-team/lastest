@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Play, X, Check, Loader2, Pause, SkipForward, AlertCircle, RotateCcw, ChevronDown, ScrollText, Undo2 } from 'lucide-react';
@@ -18,6 +18,7 @@ interface PlayAgentTimelineProps {
 }
 
 const USER_STEPS: Set<AgentStepId> = new Set(['settings_check', 'select_repo', 'env_setup', 'review']);
+const AI_STEPS: Set<AgentStepId> = new Set(['scan_and_template', 'plan', 'review', 'generate', 'run_tests', 'fix_tests', 'rerun_tests', 'summary']);
 
 const DEFAULT_STEPS: AgentStepState[] = [
   { id: 'settings_check', status: 'pending', label: 'Settings', description: 'Verify configuration' },
@@ -182,7 +183,7 @@ function getDotIcon(step: AgentStepState) {
 // ============================================
 
 export function PlayAgentTimeline({ repositoryId }: PlayAgentTimelineProps) {
-  const { session, loading, isActive, isTerminal, progress, start, resume, cancel, dismiss, approvePlan, rerunPlanner } =
+  const { session, loading, isActive, isTerminal, progress, start, resume, cancel, dismiss, approvePlan, rerunPlanner, skipSettings } =
     usePlayAgent(repositoryId);
 
   const [expandedStepId, setExpandedStepId] = useState<AgentStepId | null>(null);
@@ -191,6 +192,7 @@ export function PlayAgentTimeline({ repositoryId }: PlayAgentTimelineProps) {
   const steps = session?.steps ?? DEFAULT_STEPS;
   const isRunning = isActive && session?.status === 'active';
   const isPaused = session?.status === 'paused';
+  const manualMode = session?.metadata?.manualMode === true;
 
   // Extract agent roster from completed settings_check step
   const settingsStep = steps.find(s => s.id === 'settings_check');
@@ -366,10 +368,11 @@ export function PlayAgentTimeline({ repositoryId }: PlayAgentTimelineProps) {
             {/* Row 1: Top labels (automated steps above) */}
             {steps.map((step) => {
               const { isUser, labelClass } = getStepClasses(step);
+              const dimmed = manualMode && AI_STEPS.has(step.id);
               return (
-                <div key={`top-${step.id}`} className="flex justify-center min-w-0">
+                <div key={`top-${step.id}`} className={cn('flex justify-center min-w-0', dimmed && 'opacity-25')}>
                   {!isUser ? (
-                    <span className={cn(labelClass, 'truncate')}>{step.label}</span>
+                    <span className={cn(labelClass, 'truncate', dimmed && 'line-through')}>{step.label}</span>
                   ) : (
                     <span className="text-[10px] leading-tight invisible">.</span>
                   )}
@@ -384,8 +387,9 @@ export function PlayAgentTimeline({ repositoryId }: PlayAgentTimelineProps) {
               const prevCompleted = i > 0 && steps[i - 1].status === 'completed';
               const currCompleted = step.status === 'completed';
               const hasDetail = step.richResult || (step.status === 'completed' && step.result);
+              const dimmed = manualMode && AI_STEPS.has(step.id);
               return (
-                <div key={`dot-${step.id}`} className="relative flex items-center justify-center py-0.5">
+                <div key={`dot-${step.id}`} className={cn('relative flex items-center justify-center py-0.5', dimmed && 'opacity-25')}>
                   {i > 0 && (
                     <div
                       className={cn(
@@ -426,10 +430,11 @@ export function PlayAgentTimeline({ repositoryId }: PlayAgentTimelineProps) {
             {/* Row 3: Bottom labels (user steps below) */}
             {steps.map((step) => {
               const { isUser, labelClass } = getStepClasses(step);
+              const dimmed = manualMode && AI_STEPS.has(step.id);
               return (
-                <div key={`bot-${step.id}`} className="flex justify-center min-w-0">
+                <div key={`bot-${step.id}`} className={cn('flex justify-center min-w-0', dimmed && 'opacity-25')}>
                   {isUser ? (
-                    <span className={cn(labelClass, 'truncate')}>{step.label}</span>
+                    <span className={cn(labelClass, 'truncate', dimmed && 'line-through')}>{step.label}</span>
                   ) : (
                     <span className="text-[10px] leading-tight invisible">.</span>
                   )}
@@ -461,6 +466,15 @@ export function PlayAgentTimeline({ repositoryId }: PlayAgentTimelineProps) {
             })}
           </div>
         </div>
+
+        {/* Manual mode label */}
+        {manualMode && (
+          <div className="flex justify-center mt-1">
+            <span className="text-[9px] text-muted-foreground/50 italic">
+              AI steps require GitHub + AI provider
+            </span>
+          </div>
+        )}
 
         {/* Expanded step detail panel */}
         {expandedStepId && (() => {
@@ -520,10 +534,41 @@ export function PlayAgentTimeline({ repositoryId }: PlayAgentTimelineProps) {
               step={activeStep}
               stepNumber={steps.findIndex((s) => s.id === activeStep.id) + 1}
               onResume={activeStep.status === 'waiting_user' || activeStep.status === 'failed' ? resume : undefined}
+              onSkip={activeStep.id === 'settings_check' && activeStep.status === 'waiting_user' ? skipSettings : undefined}
               onApprovePlan={activeStep.id === 'review' && activeStep.status === 'waiting_user' ? approvePlan : undefined}
             />
           </div>
         )}
+
+        {/* Manual mode steps — appear after env_setup completes */}
+        {manualMode && (() => {
+          const envStep = steps.find(s => s.id === 'env_setup');
+          const envDone = envStep?.status === 'completed';
+          if (!envDone) return null;
+          return (
+            <div className="mt-3 pt-3 border-t space-y-2">
+              <span className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">
+                Manual Setup
+              </span>
+              <ManualStep
+                number={1}
+                label="Record a test"
+                description="Open the recorder and interact with your app"
+                href="/record"
+                buttonLabel="Go to Recorder"
+                delay={0}
+              />
+              <ManualStep
+                number={2}
+                label="Run your test"
+                description="Execute the recorded test and view results"
+                href="/run"
+                buttonLabel="Go to Builds"
+                delay={600}
+              />
+            </div>
+          );
+        })()}
 
         {/* Post-completion actions */}
         {session?.status === 'completed' && (
@@ -542,6 +587,46 @@ export function PlayAgentTimeline({ repositoryId }: PlayAgentTimelineProps) {
         )}
       </CardContent>
     </Card>
+  );
+}
+
+function ManualStep({ number, label, description, href, buttonLabel, delay }: {
+  number: number;
+  label: string;
+  description: string;
+  href: string;
+  buttonLabel: string;
+  delay: number;
+}) {
+  const [visible, setVisible] = useState(delay === 0);
+  useEffect(() => {
+    if (delay > 0) {
+      const timer = setTimeout(() => setVisible(true), delay);
+      return () => clearTimeout(timer);
+    }
+  }, [delay]);
+
+  return (
+    <div
+      className={cn(
+        'flex items-center gap-2.5 py-1.5 transition-all duration-500',
+        visible ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-2',
+      )}
+    >
+      <div className="h-5 w-5 rounded-full border-2 border-primary/50 flex items-center justify-center shrink-0">
+        <span className="text-[10px] font-semibold text-primary">{number}</span>
+      </div>
+      <div className="flex-1 min-w-0">
+        <span className="text-sm font-medium">{label}</span>
+        <p className="text-[10px] text-muted-foreground">{description}</p>
+      </div>
+      <Link
+        href={href}
+        className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-medium bg-primary text-primary-foreground hover:bg-primary/90 transition-colors shrink-0"
+      >
+        {buttonLabel}
+      </Link>
+    </div>
   );
 }
 
