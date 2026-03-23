@@ -9,6 +9,7 @@ import { PlayAgentStepDetail } from './play-agent-step-detail';
 interface PlayAgentStepProps {
   step: AgentStepState;
   stepNumber: number;
+  loading?: boolean;
   onResume?: () => void;
   onSkip?: () => void;
   onApprovePlan?: (approvedAreaIds: string[], autoApprove: boolean) => void;
@@ -32,7 +33,7 @@ function AgentBadge({ agent }: { agent: PwAgentType }) {
   );
 }
 
-export function PlayAgentStep({ step, stepNumber, onResume, onSkip, onApprovePlan }: PlayAgentStepProps) {
+export function PlayAgentStep({ step, stepNumber, loading, onResume, onSkip, onApprovePlan }: PlayAgentStepProps) {
   // For review step waiting for user, show the plan detail inline
   const isReviewWaiting = step.id === 'review' && step.status === 'waiting_user';
 
@@ -185,11 +186,14 @@ export function PlayAgentStep({ step, stepNumber, onResume, onSkip, onApprovePla
           )}
           <div className="flex gap-2">
             {onResume && (
-              <Button size="sm" onClick={onResume}>Retry</Button>
+              <Button size="sm" onClick={onResume} disabled={loading}>
+                {loading ? <Loader2 className="h-3 w-3 mr-1 animate-spin" /> : null}
+                Retry
+              </Button>
             )}
             {onSkip && step.id === 'settings_check' && (
-              <Button size="sm" variant="outline" onClick={onSkip}>
-                <SkipForward className="h-3 w-3 mr-1" />
+              <Button size="sm" variant="outline" onClick={onSkip} disabled={loading}>
+                {loading ? <Loader2 className="h-3 w-3 mr-1 animate-spin" /> : <SkipForward className="h-3 w-3 mr-1" />}
                 Skip for now
               </Button>
             )}
@@ -202,7 +206,10 @@ export function PlayAgentStep({ step, stepNumber, onResume, onSkip, onApprovePla
         <div className="ml-7 mt-1.5 space-y-1.5">
           <p className="text-xs text-red-600 dark:text-red-400">{step.error}</p>
           {onResume && (
-            <Button size="sm" variant="outline" onClick={onResume}>Retry</Button>
+            <Button size="sm" variant="outline" onClick={onResume} disabled={loading}>
+              {loading ? <Loader2 className="h-3 w-3 mr-1 animate-spin" /> : null}
+              Retry
+            </Button>
           )}
         </div>
       )}

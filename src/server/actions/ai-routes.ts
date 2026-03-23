@@ -1,7 +1,7 @@
 'use server';
 
 import * as queries from '@/lib/db/queries';
-import { generateWithAI, createRouteScanPrompt, createMCPExploreRoutesPrompt, createCodeDiffScanPrompt, SYSTEM_PROMPT, MCP_SYSTEM_PROMPT } from '@/lib/ai';
+import { generateWithAI, createRouteScanPrompt, createMCPExploreRoutesPrompt, createCodeDiffScanPrompt, SYSTEM_PROMPT, MCP_SYSTEM_PROMPT, ROUTE_SCAN_SYSTEM_PROMPT } from '@/lib/ai';
 import type { AIProviderConfig, CodebaseIntelligenceContext } from '@/lib/ai/types';
 import { revalidatePath } from 'next/cache';
 import { getRepoTree, getFileContent, compareBranches } from '@/lib/github/content';
@@ -135,19 +135,25 @@ export interface DiscoveredArea {
 }
 
 // Read directory structure for AI context via GitHub API
+interface CodebaseContextResult {
+  context: string;
+  hasRoutingDirs: boolean;
+}
+
 async function getCodebaseContext(
   accessToken: string,
   owner: string,
   repo: string,
   branch: string,
   maxDepth = 3
-): Promise<string> {
+): Promise<CodebaseContextResult> {
   const context: string[] = [];
+  let hasRoutingDirs = false;
 
   // Fetch repo tree
   const repoTree = await getRepoTree(accessToken, owner, repo, branch);
   if (!repoTree || repoTree.tree.length === 0) {
-    return '';
+    return { context: '', hasRoutingDirs: false };
   }
 
   const tree = repoTree.tree;
@@ -173,6 +179,7 @@ async function getCodebaseContext(
     });
 
     if (filesInDir.length > 0) {
+      hasRoutingDirs = true;
       context.push(`\n=== ${routeDir}/ ===`);
       for (const file of filesInDir) {
         const relativePath = file.path.replace(routeDir + '/', '');
@@ -202,7 +209,7 @@ async function getCodebaseContext(
     }
   }
 
-  return context.join('\n');
+  return { context: context.join('\n'), hasRoutingDirs };
 }
 
 export async function aiScanRoutes(
@@ -220,7 +227,7 @@ export async function aiScanRoutes(
     }
 
     const config = await getAIConfig(repositoryId);
-    const codebaseContext = await getCodebaseContext(
+    const { context: codebaseContext, hasRoutingDirs } = await getCodebaseContext(
       account.accessToken,
       repo.owner,
       repo.name,
@@ -232,8 +239,15 @@ export async function aiScanRoutes(
       return { success: false, error: 'Could not read codebase structure' };
     }
 
+    // Guard: if no routing directories found (e.g. SPA, non-standard framework),
+    // skip AI scan to prevent hallucinated routes from biasing downstream agents
+    if (!hasRoutingDirs) {
+      await completeJob(jobId);
+      return { success: true, functionalAreas: [], error: 'No routing directories found in codebase — skipping AI route scan' };
+    }
+
     const prompt = createRouteScanPrompt(codebaseContext, repo.fullName, intelligence);
-    const response = await generateWithAI(config, prompt, SYSTEM_PROMPT, {
+    const response = await generateWithAI(config, prompt, ROUTE_SCAN_SYSTEM_PROMPT, {
       actionType: 'scan_routes',
       repositoryId,
     });

@@ -1,9 +1,9 @@
 'use client';
 
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback } from 'react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Play, X, Check, Loader2, Pause, SkipForward, AlertCircle, RotateCcw, ChevronDown, ScrollText, Undo2 } from 'lucide-react';
+import { Play, X, Check, Loader2, Pause, SkipForward, AlertCircle, RotateCcw, ChevronDown, ScrollText, Undo2, Circle } from 'lucide-react';
 import Link from 'next/link';
 import { PlayAgentStep } from './play-agent-step';
 import { PlayAgentStepDetail } from './play-agent-step-detail';
@@ -18,7 +18,7 @@ interface PlayAgentTimelineProps {
 }
 
 const USER_STEPS: Set<AgentStepId> = new Set(['settings_check', 'select_repo', 'env_setup', 'review']);
-const AI_STEPS: Set<AgentStepId> = new Set(['scan_and_template', 'plan', 'review', 'generate', 'run_tests', 'fix_tests', 'rerun_tests', 'summary']);
+const AI_ONLY_STEPS: Set<AgentStepId> = new Set(['scan_and_template', 'plan', 'review', 'generate']);
 
 const DEFAULT_STEPS: AgentStepState[] = [
   { id: 'settings_check', status: 'pending', label: 'Settings', description: 'Verify configuration' },
@@ -223,12 +223,12 @@ export function PlayAgentTimeline({ repositoryId }: PlayAgentTimelineProps) {
     }
   }
 
-  const pingRepoSelector = useCallback(() => {
-    const trigger = document.querySelector('[data-slot="select-trigger"]') as HTMLElement | null;
-    if (!trigger) return;
-    trigger.classList.add('ring-2', 'ring-amber-400', 'ring-offset-2', 'ring-offset-background', 'animate-pulse');
+  const pingElement = useCallback((selector: string) => {
+    const el = document.querySelector(selector) as HTMLElement | null;
+    if (!el) return;
+    el.classList.add('ring-2', 'ring-amber-400', 'ring-offset-2', 'ring-offset-background', 'animate-pulse');
     setTimeout(() => {
-      trigger.classList.remove('ring-2', 'ring-amber-400', 'ring-offset-2', 'ring-offset-background', 'animate-pulse');
+      el.classList.remove('ring-2', 'ring-amber-400', 'ring-offset-2', 'ring-offset-background', 'animate-pulse');
     }, 3000);
   }, []);
 
@@ -246,7 +246,7 @@ export function PlayAgentTimeline({ repositoryId }: PlayAgentTimelineProps) {
   const handlePlayPause = () => {
     if (!repositoryId && !session) {
       setShowRepoPrompt(true);
-      pingRepoSelector();
+      pingElement('[data-slot="select-trigger"]');
       return;
     }
     setShowRepoPrompt(false);
@@ -274,9 +274,16 @@ export function PlayAgentTimeline({ repositoryId }: PlayAgentTimelineProps) {
       <CardContent className="py-4 px-4">
         {/* Title row */}
         <div className="flex items-center justify-between mb-3">
-          <span className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">
-            Onboarding
-          </span>
+          <div className="flex items-center gap-2">
+            <span className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">
+              Onboarding
+            </span>
+            {manualMode && (
+              <span className="text-[9px] text-muted-foreground/50 italic">
+                AI steps require GitHub + AI provider
+              </span>
+            )}
+          </div>
           <div className="flex items-center gap-1">
             {isActive && (
               <span className="text-[11px] text-muted-foreground tabular-nums">{progress}%</span>
@@ -368,7 +375,7 @@ export function PlayAgentTimeline({ repositoryId }: PlayAgentTimelineProps) {
             {/* Row 1: Top labels (automated steps above) */}
             {steps.map((step) => {
               const { isUser, labelClass } = getStepClasses(step);
-              const dimmed = manualMode && AI_STEPS.has(step.id);
+              const dimmed = manualMode && AI_ONLY_STEPS.has(step.id);
               return (
                 <div key={`top-${step.id}`} className={cn('flex justify-center min-w-0', dimmed && 'opacity-20')}>
                   {!isUser ? (
@@ -387,7 +394,7 @@ export function PlayAgentTimeline({ repositoryId }: PlayAgentTimelineProps) {
               const prevCompleted = i > 0 && steps[i - 1].status === 'completed';
               const currCompleted = step.status === 'completed';
               const hasDetail = step.richResult || (step.status === 'completed' && step.result);
-              const dimmed = manualMode && AI_STEPS.has(step.id);
+              const dimmed = manualMode && AI_ONLY_STEPS.has(step.id);
               return (
                 <div key={`dot-${step.id}`} className={cn('relative flex items-center justify-center py-0.5', dimmed && 'opacity-20')}>
                   {i > 0 && (
@@ -430,7 +437,7 @@ export function PlayAgentTimeline({ repositoryId }: PlayAgentTimelineProps) {
             {/* Row 3: Bottom labels (user steps below) */}
             {steps.map((step) => {
               const { isUser, labelClass } = getStepClasses(step);
-              const dimmed = manualMode && AI_STEPS.has(step.id);
+              const dimmed = manualMode && AI_ONLY_STEPS.has(step.id);
               return (
                 <div key={`bot-${step.id}`} className={cn('flex justify-center min-w-0', dimmed && 'opacity-20')}>
                   {isUser ? (
@@ -464,17 +471,56 @@ export function PlayAgentTimeline({ repositoryId }: PlayAgentTimelineProps) {
                 </div>
               );
             })}
+
+            {/* Row 5: Manual branch (alternate route with curved connectors) */}
+            {manualMode && (() => {
+              const envIdx = steps.findIndex(s => s.id === 'env_setup');
+              const runIdx = steps.findIndex(s => s.id === 'run_tests');
+              return (
+                <div
+                  className="relative h-12"
+                  style={{ gridColumn: `${envIdx + 1} / ${runIdx + 2}` }}
+                >
+                  {/* SVG curved path from env_setup down through dots and back up to run_tests */}
+                  <svg className="absolute inset-0 w-full h-full" preserveAspectRatio="none" viewBox="0 0 100 48">
+                    <path
+                      d="M 8.3 0 C 8.3 35, 25 30, 38 30 L 62 30 C 75 30, 91.7 35, 91.7 0"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="0.6"
+                      className="text-primary/40"
+                      vectorEffect="non-scaling-stroke"
+                    />
+                  </svg>
+                  {/* Record dot — icon center aligned to curve at 62% height */}
+                  <Link
+                    href="/record"
+                    onClick={() => pingElement('a[href="/record"]')}
+                    className="group absolute flex flex-col items-center -translate-x-1/2"
+                    style={{ left: '38%', top: 'calc(62% - 10px)' }}
+                  >
+                    <div className="h-5 w-5 rounded-full border-2 border-primary bg-background flex items-center justify-center group-hover:ring-2 group-hover:ring-primary/30 transition-all relative z-10">
+                      <Circle className="h-2 w-2 text-primary fill-primary" />
+                    </div>
+                    <span className="text-[9px] font-medium text-primary whitespace-nowrap bg-background px-1 mt-0.5">Record</span>
+                  </Link>
+                  {/* Run test dot — icon center aligned to curve at 62% height */}
+                  <Link
+                    href="/run"
+                    onClick={() => pingElement('a[href="/run"]')}
+                    className="group absolute flex flex-col items-center -translate-x-1/2"
+                    style={{ left: '62%', top: 'calc(62% - 10px)' }}
+                  >
+                    <div className="h-5 w-5 rounded-full border-2 border-primary bg-background flex items-center justify-center group-hover:ring-2 group-hover:ring-primary/30 transition-all relative z-10">
+                      <Play className="h-2 w-2 text-primary fill-primary" />
+                    </div>
+                    <span className="text-[9px] font-medium text-primary whitespace-nowrap bg-background px-1 mt-0.5">Run test</span>
+                  </Link>
+                </div>
+              );
+            })()}
           </div>
         </div>
-
-        {/* Manual mode label */}
-        {manualMode && (
-          <div className="flex justify-center mt-1">
-            <span className="text-[9px] text-muted-foreground/50 italic">
-              AI steps require GitHub + AI provider
-            </span>
-          </div>
-        )}
 
         {/* Expanded step detail panel */}
         {expandedStepId && (() => {
@@ -533,6 +579,7 @@ export function PlayAgentTimeline({ repositoryId }: PlayAgentTimelineProps) {
             <PlayAgentStep
               step={activeStep}
               stepNumber={steps.findIndex((s) => s.id === activeStep.id) + 1}
+              loading={loading}
               onResume={activeStep.status === 'waiting_user' || activeStep.status === 'failed' ? resume : undefined}
               onSkip={activeStep.id === 'settings_check' && activeStep.status === 'waiting_user' ? skipSettings : undefined}
               onApprovePlan={activeStep.id === 'review' && activeStep.status === 'waiting_user' ? approvePlan : undefined}
@@ -540,34 +587,69 @@ export function PlayAgentTimeline({ repositoryId }: PlayAgentTimelineProps) {
           </div>
         )}
 
-        {/* Manual mode steps */}
-        {manualMode && (
-          <div className="mt-3 pt-3 border-t space-y-2">
-            <span className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">
-              Manual Setup
-            </span>
-            <ManualStep
-              number={1}
-              label="Record a test"
-              description="Open the recorder and interact with your app"
-              href="/record"
-              buttonLabel="Go to Recorder"
-              delay={0}
-            />
-            <ManualStep
-              number={2}
-              label="Run your test"
-              description="Execute the recorded test and view results"
-              href="/run"
-              buttonLabel="Go to Builds"
-              delay={600}
-            />
+        {/* Manual mode: Record & Run tutorial — shown only while waiting for user to record */}
+        {manualMode && activeStep?.id === 'run_tests' && activeStep.status === 'active'
+          && activeStep.substeps?.[0]?.label?.includes('Waiting') && (
+          <div className="mt-3 pt-3 border-t space-y-3">
+            <div className="space-y-1">
+              <div className="flex items-center gap-2.5">
+                <div className="h-5 w-5 rounded-full border-2 border-primary flex items-center justify-center shrink-0">
+                  <Circle className="h-2 w-2 text-primary fill-primary" />
+                </div>
+                <span className="text-sm font-medium">Record a test</span>
+              </div>
+              <p className="ml-7 text-xs text-muted-foreground">
+                Use the <strong>Record Test</strong> button in the header to open the recorder and interact with your app.
+              </p>
+              <div className="ml-7 flex items-center gap-2">
+                <Link
+                  href="/record"
+                  onClick={() => pingElement('a[href="/record"]')}
+                  className="inline-flex items-center gap-1 text-xs text-primary hover:underline"
+                >
+                  Open Recorder →
+                </Link>
+                <button
+                  onClick={() => pingElement('a[href="/record"]')}
+                  className="text-[10px] text-muted-foreground hover:text-foreground transition-colors"
+                >
+                  Show me
+                </button>
+              </div>
+            </div>
+
+            <div className="space-y-1">
+              <div className="flex items-center gap-2.5">
+                <div className="h-5 w-5 rounded-full border-2 border-primary flex items-center justify-center shrink-0">
+                  <Play className="h-2 w-2 text-primary fill-primary" />
+                </div>
+                <span className="text-sm font-medium">Run your test</span>
+              </div>
+              <p className="ml-7 text-xs text-muted-foreground">
+                Go to <strong>Runs</strong> in the sidebar to execute your recorded test and view results.
+              </p>
+              <div className="ml-7 flex items-center gap-2">
+                <Link
+                  href="/run"
+                  onClick={() => pingElement('a[href="/run"]')}
+                  className="inline-flex items-center gap-1 text-xs text-primary hover:underline"
+                >
+                  Go to Runs →
+                </Link>
+                <button
+                  onClick={() => pingElement('a[href="/run"]')}
+                  className="text-[10px] text-muted-foreground hover:text-foreground transition-colors"
+                >
+                  Show me
+                </button>
+              </div>
+            </div>
           </div>
         )}
 
-        {/* Post-completion actions */}
-        {session?.status === 'completed' && (
-          <div className="mt-3 pt-3 border-t flex items-center justify-center gap-4">
+        {/* Review-stage actions: view plan + rollback */}
+        {activeStep?.id === 'review' && activeStep.status === 'waiting_user' && (
+          <div className="mt-2 flex items-center justify-center gap-4">
             <Link
               href="/areas?tab=plan"
               className="inline-flex items-center gap-1.5 text-xs text-primary hover:underline"
@@ -580,48 +662,47 @@ export function PlayAgentTimeline({ repositoryId }: PlayAgentTimelineProps) {
             )}
           </div>
         )}
+
+        {/* Completed summary — link to build diff + highlight nav */}
+        {session?.status === 'completed' && (() => {
+          const summaryStep = steps.find(s => s.id === 'summary');
+          const latestBuildId = summaryStep?.result?.latestBuildId as string | undefined;
+          return (
+            <div className="mt-3 pt-3 border-t space-y-2">
+              {latestBuildId && (
+                <div className="space-y-1.5">
+                  <Link
+                    href={`/builds/${latestBuildId}`}
+                    onClick={() => {
+                      pingElement('a[href="/run"]');
+                      pingElement('a[href="/review"]');
+                    }}
+                    className="inline-flex items-center gap-1.5 text-xs text-primary hover:underline"
+                  >
+                    <ScrollText className="h-3.5 w-3.5" />
+                    View latest build results →
+                  </Link>
+                  <div className="flex items-center gap-3">
+                    <button
+                      onClick={() => pingElement('a[href="/run"]')}
+                      className="text-[10px] text-muted-foreground hover:text-foreground transition-colors"
+                    >
+                      Show Runs
+                    </button>
+                    <button
+                      onClick={() => pingElement('a[href="/review"]')}
+                      className="text-[10px] text-muted-foreground hover:text-foreground transition-colors"
+                    >
+                      Show Review
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          );
+        })()}
       </CardContent>
     </Card>
-  );
-}
-
-function ManualStep({ number, label, description, href, buttonLabel, delay }: {
-  number: number;
-  label: string;
-  description: string;
-  href: string;
-  buttonLabel: string;
-  delay: number;
-}) {
-  const [visible, setVisible] = useState(delay === 0);
-  useEffect(() => {
-    if (delay > 0) {
-      const timer = setTimeout(() => setVisible(true), delay);
-      return () => clearTimeout(timer);
-    }
-  }, [delay]);
-
-  return (
-    <div
-      className={cn(
-        'flex items-center gap-2.5 py-1.5 transition-all duration-500',
-        visible ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-2',
-      )}
-    >
-      <div className="h-5 w-5 rounded-full border-2 border-primary/50 flex items-center justify-center shrink-0">
-        <span className="text-[10px] font-semibold text-primary">{number}</span>
-      </div>
-      <div className="flex-1 min-w-0">
-        <span className="text-sm font-medium">{label}</span>
-        <p className="text-[10px] text-muted-foreground">{description}</p>
-      </div>
-      <Link
-        href={href}
-        className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-medium bg-primary text-primary-foreground hover:bg-primary/90 transition-colors shrink-0"
-      >
-        {buttonLabel}
-      </Link>
-    </div>
   );
 }
 

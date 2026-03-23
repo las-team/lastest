@@ -10,6 +10,7 @@ import type {
   AgentRichResultPlanArea,
 } from '@/lib/db/schema';
 import { createAndRunBuild } from './builds';
+import { approveAllDiffs } from './diffs';
 import { getCurrentBranchForRepo } from '@/lib/git-utils';
 import { getBuildSummary } from './builds';
 import { startRemoteRouteScan, generateBasicTests } from './scanner';
@@ -201,8 +202,8 @@ async function runSettingsCheck(sessionId: string, repositoryId: string, teamId:
     return false;
   }
 
-  // If AI was skipped, enable manual mode
-  const isManual = skipAI && !hasAI;
+  // If either GH or AI was skipped, enable manual mode
+  const isManual = (skipGithub && !ghAccount) || (skipAI && !hasAI);
   if (isManual && session) {
     await queries.updateAgentSession(sessionId, {
       metadata: { ...session.metadata, manualMode: true },
@@ -426,24 +427,32 @@ async function runEnvSetup(sessionId: string, repositoryId: string, _teamId: str
   await setStepActive(sessionId, 'env_setup');
   if (isAborted(signal)) return false;
 
+  const session = await queries.getAgentSession(sessionId);
+  const isManual = session?.metadata?.manualMode === true;
+
   const envConfig = await getEnvironmentConfig(repositoryId);
   const baseUrl = envConfig?.baseUrl;
 
-  await updateSubsteps(sessionId, 'env_setup', [
-    { label: 'Checking base URL', status: 'running' },
-    { label: 'Detecting login', status: 'pending' },
-    { label: 'Login setup', status: 'pending' },
-  ]);
+  const substepLabels = isManual
+    ? [{ label: 'Checking base URL', status: 'running' as const }]
+    : [
+        { label: 'Checking base URL', status: 'running' as const },
+        { label: 'Detecting login', status: 'pending' as const },
+        { label: 'Login setup', status: 'pending' as const },
+      ];
+  await updateSubsteps(sessionId, 'env_setup', substepLabels);
 
   if (!baseUrl) {
     await updateSubsteps(sessionId, 'env_setup', [
       { label: 'Checking base URL', status: 'error', detail: 'Not configured' },
-      { label: 'Detecting login', status: 'pending' },
-      { label: 'Login setup', status: 'pending' },
+      ...(!isManual ? [
+        { label: 'Detecting login', status: 'pending' as const },
+        { label: 'Login setup', status: 'pending' as const },
+      ] : []),
     ]);
     await updateStep(sessionId, 'env_setup', {
       status: 'waiting_user',
-      userAction: 'No Base URL configured',
+      userAction: 'Set the URL where your app is running',
       result: { highlight: ['environment'] },
     });
     await queries.updateAgentSession(sessionId, { status: 'paused' });
@@ -454,8 +463,10 @@ async function runEnvSetup(sessionId: string, repositoryId: string, _teamId: str
   if (!connResult.success) {
     await updateSubsteps(sessionId, 'env_setup', [
       { label: 'Checking base URL', status: 'error', detail: `Unreachable (${connResult.statusCode || 'timeout'})` },
-      { label: 'Detecting login', status: 'pending' },
-      { label: 'Login setup', status: 'pending' },
+      ...(!isManual ? [
+        { label: 'Detecting login', status: 'pending' as const },
+        { label: 'Login setup', status: 'pending' as const },
+      ] : []),
     ]);
     await setStepWaitingUser(
       sessionId,
@@ -466,6 +477,19 @@ async function runEnvSetup(sessionId: string, repositoryId: string, _teamId: str
   }
 
   if (isAborted(signal)) return false;
+
+  // In manual mode, skip login detection — just confirm URL is reachable
+  if (isManual) {
+    await updateSubsteps(sessionId, 'env_setup', [
+      { label: 'Checking base URL', status: 'done', detail: `${connResult.responseTime}ms` },
+    ]);
+    await setStepCompleted(sessionId, 'env_setup', {
+      url: baseUrl,
+      responseTime: connResult.responseTime,
+      loginRequired: false,
+    });
+    return true;
+  }
 
   await updateSubsteps(sessionId, 'env_setup', [
     { label: 'Checking base URL', status: 'done', detail: `${connResult.responseTime}ms` },
@@ -1324,9 +1348,27 @@ async function runGenerate(sessionId: string, repositoryId: string, _teamId: str
 // ============================================
 
 async function runTests(sessionId: string, repositoryId: string, _teamId: string, signal: AbortSignal) {
-  if (await skipIfManualMode(sessionId, 'run_tests')) return true;
+  const session = await queries.getAgentSession(sessionId);
+  const isManual = session?.metadata?.manualMode === true;
+
   await setStepActive(sessionId, 'run_tests');
   if (isAborted(signal)) return false;
+
+  // In manual mode, wait for the user to record at least one test
+  if (isManual) {
+    await updateSubsteps(sessionId, 'run_tests', [
+      { label: 'Waiting for you to record a test…', status: 'running' },
+    ]);
+    for (;;) {
+      if (isAborted(signal)) return false;
+      const tests = await queries.getTestsByRepo(repositoryId);
+      if (tests.length > 0) break;
+      await new Promise((r) => setTimeout(r, BUILD_POLL_INTERVAL_MS));
+    }
+    await updateSubsteps(sessionId, 'run_tests', [
+      { label: 'Test recorded — starting build', status: 'done' },
+    ]);
+  }
 
   try {
     const buildResult = await createAndRunBuild('manual', undefined, repositoryId);
@@ -1631,21 +1673,42 @@ async function runFixTests(sessionId: string, repositoryId: string, _teamId: str
 // ============================================
 
 async function runRerunTests(sessionId: string, repositoryId: string, _teamId: string, signal: AbortSignal) {
-  if (await skipIfManualMode(sessionId, 'rerun_tests')) return true;
   const session = await queries.getAgentSession(sessionId);
   if (!session) return false;
+  const isManual = session.metadata?.manualMode === true;
 
-  const fixStep = session.steps.find((s) => s.id === 'fix_tests');
-  if (fixStep?.result?.skipped || (fixStep?.result?.fixedCount === 0)) {
-    await updateStep(sessionId, 'rerun_tests', {
-      status: 'skipped',
-      completedAt: new Date().toISOString(),
-    });
-    return true;
+  if (!isManual) {
+    const fixStep = session.steps.find((s) => s.id === 'fix_tests');
+    if (fixStep?.result?.skipped || (fixStep?.result?.fixedCount === 0)) {
+      await updateStep(sessionId, 'rerun_tests', {
+        status: 'skipped',
+        completedAt: new Date().toISOString(),
+      });
+      return true;
+    }
   }
 
   await setStepActive(sessionId, 'rerun_tests');
   if (isAborted(signal)) return false;
+
+  // In manual mode, approve all diffs from the first build as baselines before re-running
+  if (isManual) {
+    const firstBuildId = session.metadata.buildIds?.[0];
+    if (firstBuildId) {
+      await updateSubsteps(sessionId, 'rerun_tests', [
+        { label: 'Accepting screenshots as baselines', status: 'running' },
+      ]);
+      try {
+        await approveAllDiffs(firstBuildId, 'onboarding-agent');
+      } catch {
+        // Non-fatal — may have no pending diffs
+      }
+      await updateSubsteps(sessionId, 'rerun_tests', [
+        { label: 'Baselines accepted', status: 'done' },
+        { label: 'Re-running tests', status: 'running' },
+      ]);
+    }
+  }
 
   try {
     const buildResult = await createAndRunBuild('manual', undefined, repositoryId);
@@ -1715,24 +1778,25 @@ async function runRerunTests(sessionId: string, repositoryId: string, _teamId: s
 // ============================================
 
 async function runSummary(sessionId: string, _repositoryId: string, _teamId: string, _signal: AbortSignal) {
-  if (await skipIfManualMode(sessionId, 'summary')) {
-    await queries.updateAgentSession(sessionId, { status: 'completed', completedAt: new Date() });
-    return true;
-  }
   await setStepActive(sessionId, 'summary');
 
   const session = await queries.getAgentSession(sessionId);
   if (!session) return true;
 
   const meta = session.metadata;
+  const buildIds = meta.buildIds || [];
+  const latestBuildId = buildIds[buildIds.length - 1] || null;
+
   const result: Record<string, unknown> = {
     testsCreated: meta.testsCreated || 0,
     initialPassed: meta.initialPassedCount || 0,
     initialFailed: meta.initialFailedCount || 0,
     finalPassed: meta.finalPassedCount ?? meta.initialPassedCount ?? 0,
     finalFailed: meta.finalFailedCount ?? meta.initialFailedCount ?? 0,
-    buildIds: meta.buildIds || [],
+    buildIds,
+    latestBuildId,
     fixAttempts: meta.fixAttempts || {},
+    manualMode: meta.manualMode || false,
   };
 
   await setStepCompleted(sessionId, 'summary', result);
