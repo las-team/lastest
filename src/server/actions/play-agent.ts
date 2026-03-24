@@ -1912,6 +1912,11 @@ export async function resumePlayAgent(sessionId: string): Promise<{ success: boo
   const waitingStep = session.steps.find((s) => s.status === 'waiting_user' || s.status === 'failed');
   if (!waitingStep) return { success: false };
 
+  // Abort any in-flight execution before starting a new one
+  const existingCtrl = activeControllers.get(sessionId);
+  if (existingCtrl) existingCtrl.abort();
+  cleanupController(sessionId);
+
   await updateStep(sessionId, waitingStep.id, {
     status: 'pending',
     error: undefined,
@@ -1975,6 +1980,12 @@ export async function approvePlayAgentPlan(
   const session = await queries.getAgentSession(sessionId);
   if (!session) return { success: false };
   if (session.teamId && session.teamId !== team.id) return { success: false };
+
+  // Idempotency: if already approved and review step is no longer waiting, skip
+  const reviewStep = session.steps.find(s => s.id === 'review');
+  if (session.metadata?.approvedAreaIds && reviewStep?.status !== 'waiting_user') {
+    return { success: true };
+  }
 
   await queries.updateAgentSession(sessionId, {
     metadata: {

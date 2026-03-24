@@ -391,12 +391,15 @@ export async function createComparisonRun(
   const runner = getRunner(repositoryId);
 
   // Load env + playwright settings
+  // Override base URL with baseline URL for this comparison run
   const envConfig = await queries.getEnvironmentConfig(repositoryId);
-  if (envConfig && envConfig.id) {
-    runner.setEnvironmentConfig(envConfig);
-    const serverManager = getServerManager();
-    serverManager.setConfig(envConfig);
-  }
+  const overriddenEnvConfig = envConfig
+    ? { ...envConfig, baseUrl: baselineUrl }
+    : { id: 'comparison-override', repositoryId, mode: 'manual', baseUrl: baselineUrl, startCommand: null, healthCheckUrl: null, healthCheckTimeout: 60000, reuseExistingServer: true, createdAt: null, updatedAt: null } satisfies import('@/lib/db/schema').EnvironmentConfig;
+  runner.setEnvironmentConfig(overriddenEnvConfig);
+  const serverManager = getServerManager();
+  serverManager.setConfig(overriddenEnvConfig);
+
   const playwrightSettings = await queries.getPlaywrightSettings(repositoryId);
   if (playwrightSettings) {
     runner.setSettings(playwrightSettings);
@@ -470,13 +473,16 @@ async function createComparisonFeatureBuild(
 ) {
   if (!repositoryId) throw new Error('Comparison run requires a repository');
 
-  const runner = getRunner(repositoryId);
   const envConfig = await queries.getEnvironmentConfig(repositoryId);
-  if (envConfig && envConfig.id) {
-    runner.setEnvironmentConfig(envConfig);
-    const serverManager = getServerManager();
-    serverManager.setConfig(envConfig);
-  }
+  // Override base URL with feature URL for this comparison run
+  const overriddenEnvConfig = envConfig
+    ? { ...envConfig, baseUrl: meta.featureUrl }
+    : { id: 'comparison-override', repositoryId, mode: 'manual', baseUrl: meta.featureUrl, startCommand: null, healthCheckUrl: null, healthCheckTimeout: 60000, reuseExistingServer: true, createdAt: null, updatedAt: null } satisfies import('@/lib/db/schema').EnvironmentConfig;
+  const runner = getRunner(repositoryId);
+  runner.setEnvironmentConfig(overriddenEnvConfig);
+  const serverManager = getServerManager();
+  serverManager.setConfig(overriddenEnvConfig);
+
   const playwrightSettings = await queries.getPlaywrightSettings(repositoryId);
   if (playwrightSettings) {
     runner.setSettings(playwrightSettings);
@@ -972,6 +978,11 @@ async function runBuildAsync(
         versionOverrides?: Record<string, string>;
       };
       try {
+        // Force-reset runner to guarantee clean state for Phase 2
+        const phaseRunner = getRunner(repositoryId);
+        console.log(`[comparison] Resetting runner before Phase 2 (isActive=${phaseRunner.isActive()})`);
+        await phaseRunner.forceReset();
+
         console.log(`[comparison] Baseline build ${buildId} completed. Starting feature build on ${meta.featureBranch}...`);
         const featureResult = await createComparisonFeatureBuild(
           completedBuild.comparisonPairId!,

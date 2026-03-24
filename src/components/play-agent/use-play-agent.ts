@@ -96,7 +96,7 @@ export function usePlayAgent(repositoryId?: string | null) {
   }, [session?.id, poll]);
 
   const approvePlan = useCallback(async (approvedAreaIds: string[], autoApprove: boolean) => {
-    if (!session?.id) return;
+    if (!session?.id || loading) return;
     setLoading(true);
     try {
       // If empty array, approve all areas from plan step
@@ -112,7 +112,7 @@ export function usePlayAgent(repositoryId?: string | null) {
     } finally {
       setLoading(false);
     }
-  }, [session?.id, session?.steps, poll]);
+  }, [session?.id, session?.steps, poll, loading]);
 
   const rerunPlanner = useCallback(async (source: string) => {
     if (!session?.id) return;

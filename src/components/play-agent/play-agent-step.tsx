@@ -128,7 +128,7 @@ export function PlayAgentStep({ step, stepNumber, loading, onResume, onSkip, onA
       {isReviewWaiting && onApprovePlan && (
         <div className="ml-7 mt-2">
           <p className="text-xs text-blue-600 dark:text-blue-400 mb-2">{step.userAction}</p>
-          <PlayAgentStepDetail step={step} onApprovePlan={onApprovePlan} />
+          <PlayAgentStepDetail step={step} loading={loading} onApprovePlan={onApprovePlan} />
         </div>
       )}
 

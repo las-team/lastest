@@ -6,9 +6,11 @@ Teardown
 Accept Downloads
 Network Interception
 Auto gh action run
+Comparison run
 ## features
 Migrate to gh app /home/ewyct/.claude/plans/cheeky-sparking-torvalds.md
 Videos explaining use
+    Saját demo felvétele ahol van egy laza scripted előre megírva, ami egy törött vibe kódolt appon bemutatja hogy lépésről lépésre hogyan használod a Lastestet. A végén elmondani hogy a runnereket bárhol tudja futtatni, de itt a cloud instance, like and subscribe, kommentelj, kérdezz, nagyon lelkes a szerző.
 ## ideas
 Payment integration /home/ewyct/.claude/plans/drifting-yawning-hoare.md
 special prompting for ai diff analysis either by user or by branch code change 

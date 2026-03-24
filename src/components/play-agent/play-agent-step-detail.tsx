@@ -10,12 +10,14 @@ import type { AgentStepState, AgentSubstep, AgentRichResultPlanArea } from '@/li
 interface PlayAgentStepDetailProps {
   step: AgentStepState;
   sessionId?: string;
+  loading?: boolean;
   onApprovePlan?: (approvedAreaIds: string[], autoApprove: boolean) => void;
   onRerunPlanner?: (source: string) => void;
 }
 
-function PlanDetail({ areas, onApprovePlan, onRerunPlanner }: {
+function PlanDetail({ areas, loading, onApprovePlan, onRerunPlanner }: {
   areas: AgentRichResultPlanArea[];
+  loading?: boolean;
   onApprovePlan?: (approvedAreaIds: string[], autoApprove: boolean) => void;
   onRerunPlanner?: (source: string) => void;
 }) {
@@ -125,8 +127,9 @@ function PlanDetail({ areas, onApprovePlan, onRerunPlanner }: {
           <Button
             size="sm"
             onClick={() => onApprovePlan(Array.from(selectedIds), false)}
-            disabled={selectedIds.size === 0}
+            disabled={loading || selectedIds.size === 0}
           >
+            {loading ? <Loader2 className="h-3 w-3 mr-1 animate-spin" /> : null}
             Approve & Generate ({selectedIds.size})
           </Button>
         )}
@@ -313,7 +316,7 @@ function PlannerLogViewer({ sessionId, logId }: { sessionId: string; logId: stri
 
   return (
     <div>
-      <button onClick={fetchLog} className="text-[10px] text-blue-500 hover:text-blue-400 flex items-center gap-1">
+      <button onClick={fetchLog} disabled={loading} className="text-[10px] text-blue-500 hover:text-blue-400 disabled:opacity-50 flex items-center gap-1">
         {loading ? <Loader2 className="h-2.5 w-2.5 animate-spin" /> : <Eye className="h-2.5 w-2.5" />}
         {expanded ? 'Hide' : 'View'} AI Log
       </button>
@@ -431,7 +434,7 @@ function PlannerObservabilityDetail({ substeps, sessionId, onRerunPlanner }: {
   );
 }
 
-export function PlayAgentStepDetail({ step, sessionId, onApprovePlan, onRerunPlanner }: PlayAgentStepDetailProps) {
+export function PlayAgentStepDetail({ step, sessionId, loading, onApprovePlan, onRerunPlanner }: PlayAgentStepDetailProps) {
   const rich = step.richResult;
 
   // For plan step: show planner observability + plan areas
@@ -444,7 +447,7 @@ export function PlayAgentStepDetail({ step, sessionId, onApprovePlan, onRerunPla
           onRerunPlanner={onRerunPlanner}
         />
         {rich?.type === 'plan' && (
-          <PlanDetail areas={rich.areas} onApprovePlan={onApprovePlan} onRerunPlanner={onRerunPlanner} />
+          <PlanDetail areas={rich.areas} loading={loading} onApprovePlan={onApprovePlan} onRerunPlanner={onRerunPlanner} />
         )}
       </div>
     );
@@ -468,7 +471,7 @@ export function PlayAgentStepDetail({ step, sessionId, onApprovePlan, onRerunPla
     case 'scan_and_template':
       return <ScanAndTemplateDetail routes={rich.routes} framework={rich.framework} template={rich.template} intelligence={rich.intelligence} />;
     case 'plan':
-      return <PlanDetail areas={rich.areas} onApprovePlan={onApprovePlan} onRerunPlanner={onRerunPlanner} />;
+      return <PlanDetail areas={rich.areas} loading={loading} onApprovePlan={onApprovePlan} onRerunPlanner={onRerunPlanner} />;
     case 'generate':
       return <GenerateDetail tests={rich.tests} />;
     case 'env_setup':

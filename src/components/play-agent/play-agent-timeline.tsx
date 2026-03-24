@@ -289,7 +289,7 @@ export function PlayAgentTimeline({ repositoryId }: PlayAgentTimelineProps) {
               <span className="text-[11px] text-muted-foreground tabular-nums">{progress}%</span>
             )}
             {session && (
-              <Button size="icon" variant="ghost" className="h-5 w-5 shrink-0" onClick={dismiss} title="Restart">
+              <Button size="icon" variant="ghost" className="h-5 w-5 shrink-0" onClick={() => { if (window.confirm('Reset agent progress? This cannot be undone.')) dismiss(); }} title="Restart">
                 <RotateCcw className="h-3 w-3" />
               </Button>
             )}
@@ -531,6 +531,7 @@ export function PlayAgentTimeline({ repositoryId }: PlayAgentTimelineProps) {
               <PlayAgentStepDetail
                 step={step}
                 sessionId={session?.id}
+                loading={loading}
                 onApprovePlan={step.id === 'review' ? approvePlan : undefined}
                 onRerunPlanner={(step.id === 'plan' || step.id === 'review') ? rerunPlanner : undefined}
               />
