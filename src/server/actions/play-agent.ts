@@ -1933,6 +1933,33 @@ export async function resumePlayAgent(sessionId: string): Promise<{ success: boo
   return { success: true };
 }
 
+export async function pausePlayAgent(sessionId: string): Promise<{ success: boolean }> {
+  const { team } = await requireTeamAccess();
+
+  const session = await queries.getAgentSession(sessionId);
+  if (!session) return { success: false };
+  if (session.teamId && session.teamId !== team.id) return { success: false };
+  if (session.status !== 'active') return { success: false };
+
+  // Abort the running controller to kill in-flight AI calls
+  const controller = activeControllers.get(sessionId);
+  if (controller) controller.abort();
+  cleanupController(sessionId);
+
+  // Mark the currently active step as waiting_user so resume can find it
+  const activeStep = session.steps.find(s => s.status === 'active');
+  if (activeStep) {
+    await updateStep(sessionId, activeStep.id, { status: 'waiting_user', userAction: 'paused' });
+  }
+
+  await queries.updateAgentSession(sessionId, {
+    status: 'paused',
+  });
+
+  revalidatePath('/run');
+  return { success: true };
+}
+
 export async function cancelPlayAgent(sessionId: string): Promise<{ success: boolean }> {
   const { team } = await requireTeamAccess();
 

@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import type { AgentSession } from '@/lib/db/schema';
-import { startPlayAgent, resumePlayAgent, cancelPlayAgent, approvePlayAgentPlan, rerunPlanner as rerunPlannerAction, skipSettingsStep } from '@/server/actions/play-agent';
+import { startPlayAgent, resumePlayAgent, pausePlayAgent, cancelPlayAgent, approvePlayAgentPlan, rerunPlanner as rerunPlannerAction, skipSettingsStep } from '@/server/actions/play-agent';
 
 const SESSION_KEY = 'play-agent-session-id';
 const POLL_INTERVAL = 2000;
@@ -73,6 +73,7 @@ export function usePlayAgent(repositoryId?: string | null) {
       await resumePlayAgent(session.id);
       if (pollRef.current) clearInterval(pollRef.current);
       pollRef.current = setInterval(() => poll(session.id), POLL_INTERVAL);
+      await poll(session.id);
     } finally {
       setLoading(false);
     }
@@ -82,14 +83,9 @@ export function usePlayAgent(repositoryId?: string | null) {
     if (!session?.id) return;
     setLoading(true);
     try {
-      await cancelPlayAgent(session.id);
-      // Keep session ID in localStorage so cancelled state persists across refresh.
-      // Only dismiss() (reset button) clears it.
+      await pausePlayAgent(session.id);
       await poll(session.id);
-      if (pollRef.current) {
-        clearInterval(pollRef.current);
-        pollRef.current = null;
-      }
+      // Keep polling so UI stays in sync when paused
     } finally {
       setLoading(false);
     }
@@ -142,14 +138,17 @@ export function usePlayAgent(repositoryId?: string | null) {
     }
   }, [session?.id, poll]);
 
-  const dismiss = useCallback(() => {
+  const dismiss = useCallback(async () => {
+    if (session?.id) {
+      await cancelPlayAgent(session.id).catch(() => {});
+    }
     localStorage.removeItem(SESSION_KEY);
     setSession(null);
     if (pollRef.current) {
       clearInterval(pollRef.current);
       pollRef.current = null;
     }
-  }, []);
+  }, [session?.id]);
 
   const isActive = session?.status === 'active' || session?.status === 'paused';
   const isTerminal = session?.status === 'completed' || session?.status === 'cancelled' || session?.status === 'failed';
