@@ -109,6 +109,7 @@ export function usePlayAgent(repositoryId?: string | null) {
       await approvePlayAgentPlan(session.id, ids, autoApprove);
       if (pollRef.current) clearInterval(pollRef.current);
       pollRef.current = setInterval(() => poll(session.id), POLL_INTERVAL);
+      await poll(session.id);
     } finally {
       setLoading(false);
     }
@@ -135,6 +136,7 @@ export function usePlayAgent(repositoryId?: string | null) {
       await skipSettingsStep(session.id);
       if (pollRef.current) clearInterval(pollRef.current);
       pollRef.current = setInterval(() => poll(session.id), POLL_INTERVAL);
+      await poll(session.id);
     } finally {
       setLoading(false);
     }
