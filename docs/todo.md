@@ -11,6 +11,9 @@ Comparison run
 Migrate to gh app /home/ewyct/.claude/plans/cheeky-sparking-torvalds.md
 Videos explaining use
     Saját demo felvétele ahol van egy laza scripted előre megírva, ami egy törött vibe kódolt appon bemutatja hogy lépésről lépésre hogyan használod a Lastestet. A végén elmondani hogy a runnereket bárhol tudja futtatni, de itt a cloud instance, like and subscribe, kommentelj, kérdezz, nagyon lelkes a szerző.
+PostgreSQL
+Run tests on prod to test admin
+Selectors propagation for play agent /home/ewyct/.claude/plans/cozy-doodling-rain.md
 ## ideas
 Payment integration /home/ewyct/.claude/plans/drifting-yawning-hoare.md
 special prompting for ai diff analysis either by user or by branch code change 

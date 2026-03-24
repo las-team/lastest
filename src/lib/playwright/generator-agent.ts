@@ -91,6 +91,7 @@ export type { ParsedScenario, ScenarioGroup };
 export async function agentCreateTest(
   repositoryId: string,
   context: TestGenerationContext & { scenarioGroup?: ScenarioGroup },
+  options?: { signal?: AbortSignal },
 ): Promise<{ success: boolean; code?: string; error?: string }> {
   await requireRepoAccess(repositoryId);
 
@@ -141,6 +142,7 @@ export async function agentCreateTest(
       useMCP: true,
       repositoryId,
       actionType: 'agent_generate',
+      signal: options?.signal,
     });
 
     const code = extractCodeFromResponse(response);

@@ -1,3 +1,4 @@
+import path from 'path';
 import type { AIProvider, AIProviderConfig } from './types';
 import { ClaudeCLIProvider } from './claude-cli';
 import { createOpenRouterProvider } from './openrouter';
@@ -90,8 +91,11 @@ export async function generateWithAI(
     effectiveConfig.agentSdkMcpServers = {
       ...effectiveConfig.agentSdkMcpServers,
       'playwright-test': {
-        command: 'npx',
-        args: ['playwright', 'run-test-mcp-server'],
+        command: 'node',
+        args: [
+          path.join(path.dirname(require.resolve('playwright')), 'cli.js'),
+          'run-test-mcp-server',
+        ],
       },
     };
     // Auto-allow all Playwright MCP tools without prompting (respects user's permission mode)

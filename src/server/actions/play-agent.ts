@@ -1190,6 +1190,7 @@ async function runGenerate(sessionId: string, repositoryId: string, _teamId: str
 
   const aiSettings = await getAISettings(repositoryId);
   const useAgents = aiSettings?.pwAgentEnabled ?? false;
+  const agentTimeout = aiSettings?.pwAgentTimeout ?? 300_000;
 
   // Get areas to generate tests for
   const dbAreas = await queries.getFunctionalAreasByRepo(repositoryId);
@@ -1205,7 +1206,7 @@ async function runGenerate(sessionId: string, repositoryId: string, _teamId: str
 
   if (useAgents && targetAreas.length > 0) {
     const { agentCreateTest, groupScenariosForGeneration } = await import('@/lib/playwright/generator-agent');
-    const GENERATOR_CONCURRENCY = 8;
+    const GENERATOR_CONCURRENCY = 3;
 
     // Build work items: group scenarios by route proximity per area
     const workItems: Array<{
@@ -1257,11 +1258,16 @@ async function runGenerate(sessionId: string, repositoryId: string, _teamId: str
 
       const results = await Promise.allSettled(
         chunk.map(async ({ area, group }) => {
+          // Combine session abort signal with per-call timeout
+          const timeoutSignal = AbortSignal.timeout(agentTimeout);
+          const combinedSignal = signal
+            ? AbortSignal.any([signal, timeoutSignal])
+            : timeoutSignal;
           const genResult = await agentCreateTest(repositoryId, {
             functionalAreaId: area.id,
             baseUrl,
             scenarioGroup: group,
-          });
+          }, { signal: combinedSignal });
           if (genResult.success && genResult.code) {
             const test = await queries.createTest({
               repositoryId,

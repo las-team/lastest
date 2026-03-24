@@ -10,6 +10,17 @@ export interface ClaudeAgentSDKOptions {
   disallowedTools?: string[];
 }
 
+/** Bridge an AbortSignal into an AbortController the SDK can use. */
+function abortControllerFromSignal(signal: AbortSignal): AbortController {
+  const controller = new AbortController();
+  if (signal.aborted) {
+    controller.abort(signal.reason);
+  } else {
+    signal.addEventListener('abort', () => controller.abort(signal.reason), { once: true });
+  }
+  return controller;
+}
+
 /** Max prompt size (in chars) the Agent SDK handles reliably. */
 const MAX_PROMPT_CHARS = 100_000;
 
@@ -46,6 +57,9 @@ export class ClaudeAgentSDKProvider implements AIProvider {
       fullPrompt = `${systemPrompt}\n\n---\n\n${fullPrompt}`;
     }
 
+    // Convert AbortSignal to AbortController for the SDK
+    const abortController = signal ? abortControllerFromSignal(signal) : undefined;
+
     const messages: string[] = [];
     const stderrChunks: string[] = [];
 
@@ -59,6 +73,7 @@ export class ClaudeAgentSDKProvider implements AIProvider {
           ...(this.mcpServers && { mcpServers: this.mcpServers }),
           ...(this.allowedTools && { allowedTools: this.allowedTools }),
           ...(this.disallowedTools && { disallowedTools: this.disallowedTools }),
+          ...(abortController && { abortController }),
           stderr: (data: string) => { stderrChunks.push(data); },
         },
       })) {
@@ -110,6 +125,9 @@ export class ClaudeAgentSDKProvider implements AIProvider {
       fullPrompt = `${systemPrompt}\n\n---\n\n${fullPrompt}`;
     }
 
+    // Convert AbortSignal to AbortController for the SDK
+    const abortController = signal ? abortControllerFromSignal(signal) : undefined;
+
     let fullText = '';
     const stderrChunks: string[] = [];
 
@@ -123,6 +141,7 @@ export class ClaudeAgentSDKProvider implements AIProvider {
           ...(this.mcpServers && { mcpServers: this.mcpServers }),
           ...(this.allowedTools && { allowedTools: this.allowedTools }),
           ...(this.disallowedTools && { disallowedTools: this.disallowedTools }),
+          ...(abortController && { abortController }),
           stderr: (data: string) => { stderrChunks.push(data); },
         },
       })) {
