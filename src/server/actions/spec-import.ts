@@ -77,7 +77,16 @@ function extractJsonArray(text: string): string | null {
   }
 
   // 2. Fallback: find first top-level [ and match its closing ]
-  const start = text.indexOf('[');
+  //    Skip markdown checkbox patterns like "[ ]" or "[x]"
+  let start = -1;
+  for (let s = 0; s < text.length; s++) {
+    if (text[s] === '[') {
+      // Skip markdown checkboxes: [ ], [x], [X]
+      if (/^\[[ xX]\]/.test(text.slice(s))) { s += 2; continue; }
+      start = s;
+      break;
+    }
+  }
   if (start === -1) return null;
 
   let depth = 0;
@@ -97,7 +106,8 @@ function extractJsonArray(text: string): string | null {
       if (depth === 0) {
         const candidate = text.slice(start, i + 1);
         try {
-          JSON.parse(candidate);
+          const parsed = JSON.parse(candidate);
+          if (!Array.isArray(parsed) || parsed.length === 0) return null;
           return candidate;
         } catch {
           return null; // Balanced brackets but not valid JSON (markdown syntax)

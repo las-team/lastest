@@ -1,11 +1,12 @@
 'use client';
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useMemo } from 'react';
 import { Check, X, ChevronRight, ChevronDown, RotateCcw, Loader2, Eye, ScrollText, Telescope } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import Link from 'next/link';
 import type { AgentStepState, AgentSubstep, AgentRichResultPlanArea } from '@/lib/db/schema';
+import { groupScenariosForGeneration } from '@/lib/playwright/scenario-grouping';
 
 interface PlayAgentStepDetailProps {
   step: AgentStepState;
@@ -24,6 +25,26 @@ function PlanDetail({ areas, loading, onApprovePlan, onRerunPlanner }: {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set(areas.map(a => a.id)));
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [divingArea, setDivingArea] = useState<string | null>(null);
+
+  const testCountMap = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const area of areas) {
+      if (area.testPlan) {
+        map.set(area.id, groupScenariosForGeneration(area.testPlan, area.name, area.routes).length);
+      } else {
+        map.set(area.id, 1);
+      }
+    }
+    return map;
+  }, [areas]);
+
+  const selectedTestCount = useMemo(() => {
+    let total = 0;
+    for (const id of selectedIds) {
+      total += testCountMap.get(id) ?? 1;
+    }
+    return total;
+  }, [selectedIds, testCountMap]);
 
   const toggleArea = (id: string) => {
     setSelectedIds(prev => {
@@ -75,6 +96,7 @@ function PlanDetail({ areas, loading, onApprovePlan, onRerunPlanner }: {
               {area.routes.length > 0 && (
                 <span className="text-[10px] text-muted-foreground">{area.routes.length} routes</span>
               )}
+              <span className="text-[10px] text-muted-foreground">{testCountMap.get(area.id) ?? 1} tests</span>
               {onRerunPlanner && (
                 <button
                   onClick={() => handleDiscoverMore(area)}
@@ -130,7 +152,7 @@ function PlanDetail({ areas, loading, onApprovePlan, onRerunPlanner }: {
             disabled={loading || selectedIds.size === 0}
           >
             {loading ? <Loader2 className="h-3 w-3 mr-1 animate-spin" /> : null}
-            Approve & Generate ({selectedIds.size})
+            Approve & Generate ({selectedIds.size} areas · {selectedTestCount} tests)
           </Button>
         )}
       </div>
