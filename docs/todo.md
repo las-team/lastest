@@ -18,7 +18,7 @@ Selectors propagation for play agent /home/ewyct/.claude/plans/cozy-doodling-rai
 Payment integration /home/ewyct/.claude/plans/drifting-yawning-hoare.md
 special prompting for ai diff analysis either by user or by branch code change 
 if a pr merge happens, update test manifest with new functions - show as new, prompt test generation
-Test coverage assessment and recreation based on existing test set
+Test coverage assessment and recreation based on existing test set  ~/.claude/plans/shimmying-conjuring-sun.md
 debug - googlesheet data
 cookie sharing from host machine?
 Tweet about us

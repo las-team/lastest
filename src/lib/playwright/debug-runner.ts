@@ -443,23 +443,27 @@ export class DebugRunner {
     // Small delay to let the run loop process the stop
     await new Promise(r => setTimeout(r, 100));
 
+    // Helper: race a promise against a timeout to prevent indefinite hangs
+    const withTimeout = (p: Promise<void>, ms: number) =>
+      Promise.race([p, new Promise<void>(r => setTimeout(r, ms))]).catch(() => {});
+
     // Save final trace before closing context
     if (this.context && this.tracingActive && this.state) {
       const traceFile = `debug-${this.state.sessionId}-${this.traceChunkIndex}.zip`;
       const tracePath = path.join(this.traceDir || STORAGE_DIRS.traces, traceFile);
       fs.mkdirSync(path.dirname(tracePath), { recursive: true });
-      await this.context.tracing.stop({ path: tracePath }).catch(() => {});
+      await withTimeout(this.context.tracing.stop({ path: tracePath }), 5000);
       this.state.traceUrl = `/traces/${traceFile}`;
       this.tracingActive = false;
     }
 
     if (this.context) {
-      await this.context.close().catch(() => {});
+      await withTimeout(this.context.close(), 5000);
       this.context = null;
       this.page = null;
     }
     if (this.browser) {
-      await this.browser.close().catch(() => {});
+      await withTimeout(this.browser.close(), 5000);
       this.browser = null;
     }
   }

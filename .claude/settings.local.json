@@ -137,7 +137,11 @@
       "Bash(gh run:*)",
       "Bash(cat /home/ewyct/dev/lastest2/src/app/\\\\\\(app\\\\\\)/settings/page.tsx)",
       "Bash(cat /home/ewyct/dev/lastest2/src/app/\\\\\\(app\\\\\\)/compare/compare-client.tsx)",
-      "Bash(pnpm video:preview)"
+      "Bash(pnpm video:preview)",
+      "WebFetch(domain:news.ycombinator.com)",
+      "WebFetch(domain:www.tonyward.dev)",
+      "WebFetch(domain:dx.tips)",
+      "WebFetch(domain:qa-financial.com)"
     ]
   },
   "disabledMcpjsonServers": [

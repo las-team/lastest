@@ -152,11 +152,12 @@ export function DebugClient({ test, repositoryId }: DebugClientProps) {
     }
   }, [sessionId]);
 
-  const handleStop = useCallback(async () => {
-    if (sessionId) {
-      await stopDebugSession(sessionId);
-    }
+  const handleStop = useCallback(() => {
     router.push(`/tests/${test.id}`);
+    // Session cleanup handled by unmount effect + background stop
+    if (sessionId) {
+      stopDebugSession(sessionId).catch(() => {});
+    }
   }, [sessionId, router, test.id]);
 
   // Debounced code update handler
