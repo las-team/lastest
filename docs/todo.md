@@ -14,6 +14,7 @@ Videos explaining use
 PostgreSQL
 Run tests on prod to test admin
 Selectors propagation for play agent /home/ewyct/.claude/plans/cozy-doodling-rain.md
+The premium QA agent
 ## ideas
 Payment integration /home/ewyct/.claude/plans/drifting-yawning-hoare.md
 special prompting for ai diff analysis either by user or by branch code change 

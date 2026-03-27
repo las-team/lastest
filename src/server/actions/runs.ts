@@ -9,7 +9,7 @@ import { requireTeamAccess, requireRepoAccess } from '@/lib/auth';
 import { getBranchInfo } from '@/lib/github/content';
 import * as queries from '@/lib/db/queries';
 import type { Test } from '@/lib/db/schema';
-import { createJob, createPendingJob, startJob, updateJobProgress, completeJob, failJob, isRunnerBusy } from './jobs';
+import { createJob, createPendingJob, updateJobProgress, completeJob, failJob, isRunnerBusy } from './jobs';
 
 interface GitInfo {
   branch: string;
@@ -300,8 +300,13 @@ export async function processNextQueuedTestRun(repositoryId?: string | null, tar
     forceVideoRecording?: boolean;
   } | null;
 
-  // Start the job
-  await startJob(nextJob.id);
+  // Complete the queue placeholder — runTests creates its own running job.
+  // We must NOT call startJob() here because that marks it 'running', which causes
+  // runTests' isRunnerBusy() check to see a running job and re-queue.
+  await queries.updateBackgroundJob(nextJob.id, {
+    status: 'completed',
+    completedAt: new Date(),
+  });
 
   // Run the tests
   try {
@@ -313,10 +318,6 @@ export async function processNextQueuedTestRun(repositoryId?: string | null, tar
       metadata?.forceVideoRecording,
     );
   } catch (error) {
-    await queries.updateBackgroundJob(nextJob.id, {
-      status: 'failed',
-      error: error instanceof Error ? error.message : 'Failed to start test run',
-      completedAt: new Date(),
-    });
+    console.error('[queue] Failed to start queued test run:', error);
   }
 }

@@ -24,7 +24,7 @@ import { postPRComment } from '@/lib/integrations/github-pr';
 import { postMRComment } from '@/lib/integrations/gitlab-mr';
 import type { Test, TriggerType, BuildStatus, VisualDiffWithTestStatus, DiffClassification, DiffStatus } from '@/lib/db/schema';
 import path from 'path';
-import { createJob, createPendingJob, startJob, updateJobProgress, completeJob, failJob, isRunnerBusy } from './jobs';
+import { createJob, createPendingJob, updateJobProgress, completeJob, failJob, isRunnerBusy } from './jobs';
 import { triggerAIDiffAnalysis } from './ai-diffs';
 import { forkBaselinesForBranch } from './baselines';
 import { STORAGE_DIRS, STORAGE_ROOT, toRelativePath } from '@/lib/storage/paths';
@@ -1084,8 +1084,13 @@ export async function processNextQueuedBuild(repositoryId?: string | null, targe
   const nextJob = pendingJobs[0];
   const metadata = nextJob.metadata as { triggerType?: TriggerType; testIds?: string[] | null; runnerId?: string } | null;
 
-  // Start the job
-  await startJob(nextJob.id);
+  // Complete the queue placeholder — createAndRunBuild creates its own running job.
+  // We must NOT call startJob() here because that marks it 'running', which causes
+  // createAndRunBuild's isRunnerBusy() check to see a running job and re-queue.
+  await queries.updateBackgroundJob(nextJob.id, {
+    status: 'completed',
+    completedAt: new Date(),
+  });
 
   // Run the build
   try {
@@ -1096,12 +1101,7 @@ export async function processNextQueuedBuild(repositoryId?: string | null, targe
       metadata?.runnerId,
     );
   } catch (error) {
-    // Job failed to start, mark as failed
-    await queries.updateBackgroundJob(nextJob.id, {
-      status: 'failed',
-      error: error instanceof Error ? error.message : 'Failed to start build',
-      completedAt: new Date(),
-    });
+    console.error('[queue] Failed to start queued build:', error);
   }
 }
 

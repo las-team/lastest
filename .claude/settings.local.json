@@ -141,7 +141,8 @@
       "WebFetch(domain:news.ycombinator.com)",
       "WebFetch(domain:www.tonyward.dev)",
       "WebFetch(domain:dx.tips)",
-      "WebFetch(domain:qa-financial.com)"
+      "WebFetch(domain:qa-financial.com)",
+      "Bash(npm view:*)"
     ]
   },
   "disabledMcpjsonServers": [
