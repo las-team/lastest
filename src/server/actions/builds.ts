@@ -24,7 +24,7 @@ import { postPRComment } from '@/lib/integrations/github-pr';
 import { postMRComment } from '@/lib/integrations/gitlab-mr';
 import type { Test, TriggerType, BuildStatus, VisualDiffWithTestStatus, DiffClassification, DiffStatus } from '@/lib/db/schema';
 import path from 'path';
-import { createJob, createPendingJob, startJob, updateJobProgress, completeJob, failJob, isRunnerBusy } from './jobs';
+import { createJob, createPendingJob, updateJobProgress, completeJob, failJob, isRunnerBusy } from './jobs';
 import { triggerAIDiffAnalysis } from './ai-diffs';
 import { forkBaselinesForBranch } from './baselines';
 import { STORAGE_DIRS, STORAGE_ROOT, toRelativePath } from '@/lib/storage/paths';
@@ -366,6 +366,173 @@ export async function createAndRunBuildFromCI(opts: {
 }
 
 /**
+ * Create a comparison run: baseline build (auto-approved) → feature build (diffed against baselines).
+ */
+export async function createComparisonRun(
+  repositoryId: string,
+  baselineBranch: string,
+  baselineUrl: string,
+  featureBranch: string,
+  featureUrl: string,
+  runnerId?: string,
+  testIds?: string[],
+  versionOverrides?: Record<string, string>,
+) {
+  await requireRepoAccess(repositoryId);
+  const targetRunner = runnerId || 'local';
+
+  // If runner is busy, we can't start — comparison runs are not queued
+  if (await isRunnerBusy(targetRunner)) {
+    throw new Error('Runner is busy. Please wait for the current build to finish before starting a comparison run.');
+  }
+
+  const comparisonPairId = crypto.randomUUID();
+
+  const runner = getRunner(repositoryId);
+
+  // Load env + playwright settings
+  // Override base URL with baseline URL for this comparison run
+  const envConfig = await queries.getEnvironmentConfig(repositoryId);
+  const overriddenEnvConfig = envConfig
+    ? { ...envConfig, baseUrl: baselineUrl }
+    : { id: 'comparison-override', repositoryId, mode: 'manual', baseUrl: baselineUrl, startCommand: null, healthCheckUrl: null, healthCheckTimeout: 60000, reuseExistingServer: true, createdAt: null, updatedAt: null } satisfies import('@/lib/db/schema').EnvironmentConfig;
+  runner.setEnvironmentConfig(overriddenEnvConfig);
+  const serverManager = getServerManager();
+  serverManager.setConfig(overriddenEnvConfig);
+
+  const playwrightSettings = await queries.getPlaywrightSettings(repositoryId);
+  if (playwrightSettings) {
+    runner.setSettings(playwrightSettings);
+  }
+
+  // Get tests
+  let tests: Test[];
+  if (testIds && testIds.length > 0) {
+    tests = await Promise.all(
+      testIds.map((id) => queries.getTest(id))
+    ).then((results) => results.filter((t): t is Test => t !== undefined && !t.deletedAt));
+  } else {
+    tests = await queries.getTestsByRepo(repositoryId);
+  }
+  if (tests.length === 0) {
+    throw new Error('No tests to run');
+  }
+
+  // Git info for baseline branch
+  const gitInfo = await getGitInfoForBranch(repositoryId, baselineBranch);
+
+  // Create test run for baseline
+  const testRun = await queries.createTestRun({
+    repositoryId,
+    gitBranch: gitInfo.branch,
+    gitCommit: gitInfo.commit,
+    startedAt: new Date(),
+    status: 'running',
+  });
+
+  // Create baseline build
+  const build = await queries.createBuild({
+    testRunId: testRun.id,
+    triggerType: 'manual',
+    overallStatus: 'review_required',
+    totalTests: tests.length,
+    changesDetected: 0,
+    flakyCount: 0,
+    failedCount: 0,
+    passedCount: 0,
+    baseUrl: baselineUrl,
+    comparisonMode: 'vs_both',
+  });
+
+  // Tag as comparison baseline with Phase 2 metadata
+  await queries.updateBuild(build.id, {
+    comparisonPairId,
+    comparisonRole: 'baseline',
+    comparisonMeta: {
+      featureBranch,
+      featureUrl,
+      runnerId,
+      testIds,
+      versionOverrides,
+    },
+  });
+
+  // Run baseline build async with forceAutoApprove
+  runBuildAsync(build.id, testRun.id, tests, gitInfo.branch, repositoryId, runnerId, versionOverrides, true);
+
+  return { pairId: comparisonPairId, baselineBuildId: build.id, testRunId: testRun.id };
+}
+
+/**
+ * Internal: Create the feature build for a comparison pair (called after baseline completes).
+ */
+async function createComparisonFeatureBuild(
+  comparisonPairId: string,
+  repositoryId: string | null,
+  meta: { featureBranch: string; featureUrl: string; runnerId?: string; testIds?: string[]; versionOverrides?: Record<string, string> },
+) {
+  if (!repositoryId) throw new Error('Comparison run requires a repository');
+
+  const envConfig = await queries.getEnvironmentConfig(repositoryId);
+  // Override base URL with feature URL for this comparison run
+  const overriddenEnvConfig = envConfig
+    ? { ...envConfig, baseUrl: meta.featureUrl }
+    : { id: 'comparison-override', repositoryId, mode: 'manual', baseUrl: meta.featureUrl, startCommand: null, healthCheckUrl: null, healthCheckTimeout: 60000, reuseExistingServer: true, createdAt: null, updatedAt: null } satisfies import('@/lib/db/schema').EnvironmentConfig;
+  const runner = getRunner(repositoryId);
+  runner.setEnvironmentConfig(overriddenEnvConfig);
+  const serverManager = getServerManager();
+  serverManager.setConfig(overriddenEnvConfig);
+
+  const playwrightSettings = await queries.getPlaywrightSettings(repositoryId);
+  if (playwrightSettings) {
+    runner.setSettings(playwrightSettings);
+  }
+
+  let tests: Test[];
+  if (meta.testIds && meta.testIds.length > 0) {
+    tests = await Promise.all(
+      meta.testIds.map((id) => queries.getTest(id))
+    ).then((results) => results.filter((t): t is Test => t !== undefined && !t.deletedAt));
+  } else {
+    tests = await queries.getTestsByRepo(repositoryId);
+  }
+  if (tests.length === 0) throw new Error('No tests to run for feature build');
+
+  const gitInfo = await getGitInfoForBranch(repositoryId, meta.featureBranch);
+
+  const testRun = await queries.createTestRun({
+    repositoryId,
+    gitBranch: gitInfo.branch,
+    gitCommit: gitInfo.commit,
+    startedAt: new Date(),
+    status: 'running',
+  });
+
+  const build = await queries.createBuild({
+    testRunId: testRun.id,
+    triggerType: 'manual',
+    overallStatus: 'review_required',
+    totalTests: tests.length,
+    changesDetected: 0,
+    flakyCount: 0,
+    failedCount: 0,
+    passedCount: 0,
+    baseUrl: meta.featureUrl,
+    comparisonMode: 'vs_both',
+  });
+
+  await queries.updateBuild(build.id, {
+    comparisonPairId,
+    comparisonRole: 'feature',
+  });
+
+  // Run feature build normally (no forceAutoApprove — diffs against baselines from Phase 1)
+  runBuildAsync(build.id, testRun.id, tests, gitInfo.branch, repositoryId, meta.runnerId, meta.versionOverrides);
+
+  return { buildId: build.id, testRunId: testRun.id };
+}
+
+/**
  * Internal async build runner
  */
 async function runBuildAsync(
@@ -376,6 +543,7 @@ async function runBuildAsync(
   repositoryId?: string | null,
   runnerId?: string,
   versionOverrides?: Record<string, string>,
+  forceAutoApprove?: boolean,
 ) {
   const runner = getRunner(repositoryId);
   const startTime = Date.now();
@@ -515,6 +683,7 @@ async function runBuildAsync(
           result.stabilityMetadata?.isStable === false,
           currentBrowserType,
           testDiffOverrides,
+          forceAutoApprove,
         )
       )
     );
@@ -797,6 +966,34 @@ async function runBuildAsync(
       gitBranch: branch,
       repositoryId,
     });
+
+    // Phase 2: If this was a comparison baseline build, chain the feature build
+    const completedBuild = await queries.getBuild(buildId);
+    if (completedBuild?.comparisonRole === 'baseline' && completedBuild.comparisonMeta) {
+      const meta = completedBuild.comparisonMeta as {
+        featureBranch: string;
+        featureUrl: string;
+        runnerId?: string;
+        testIds?: string[];
+        versionOverrides?: Record<string, string>;
+      };
+      try {
+        // Force-reset runner to guarantee clean state for Phase 2
+        const phaseRunner = getRunner(repositoryId);
+        console.log(`[comparison] Resetting runner before Phase 2 (isActive=${phaseRunner.isActive()})`);
+        await phaseRunner.forceReset();
+
+        console.log(`[comparison] Baseline build ${buildId} completed. Starting feature build on ${meta.featureBranch}...`);
+        const featureResult = await createComparisonFeatureBuild(
+          completedBuild.comparisonPairId!,
+          repositoryId ?? null,
+          meta,
+        );
+        console.log(`[comparison] Feature build ${featureResult.buildId} started for pair ${completedBuild.comparisonPairId}`);
+      } catch (err) {
+        console.error('[comparison] Failed to start feature build:', err);
+      }
+    }
   } catch (error) {
     // Check if this build was cancelled while running — don't overwrite cancelJob's statuses
     const currentJob = await queries.getBackgroundJob(jobId);
@@ -887,8 +1084,13 @@ export async function processNextQueuedBuild(repositoryId?: string | null, targe
   const nextJob = pendingJobs[0];
   const metadata = nextJob.metadata as { triggerType?: TriggerType; testIds?: string[] | null; runnerId?: string } | null;
 
-  // Start the job
-  await startJob(nextJob.id);
+  // Complete the queue placeholder — createAndRunBuild creates its own running job.
+  // We must NOT call startJob() here because that marks it 'running', which causes
+  // createAndRunBuild's isRunnerBusy() check to see a running job and re-queue.
+  await queries.updateBackgroundJob(nextJob.id, {
+    status: 'completed',
+    completedAt: new Date(),
+  });
 
   // Run the build
   try {
@@ -899,12 +1101,7 @@ export async function processNextQueuedBuild(repositoryId?: string | null, targe
       metadata?.runnerId,
     );
   } catch (error) {
-    // Job failed to start, mark as failed
-    await queries.updateBackgroundJob(nextJob.id, {
-      status: 'failed',
-      error: error instanceof Error ? error.message : 'Failed to start build',
-      completedAt: new Date(),
-    });
+    console.error('[queue] Failed to start queued build:', error);
   }
 }
 
@@ -926,6 +1123,7 @@ async function processVisualDiff(
   isUnstable?: boolean,
   browser: string = 'chromium',
   testDiffOverrides?: import('@/lib/db/schema').TestDiffOverrides | null,
+  forceAutoApprove?: boolean,
 ): Promise<{ hasChanges: boolean; diffId: string; classification: DiffClassification }> {
 
   // Get diff sensitivity settings, then merge per-test overrides
@@ -942,7 +1140,7 @@ async function processVisualDiff(
   // Get the repo's default branch
   const repo = repositoryId ? await queries.getRepository(repositoryId) : null;
   const defaultBranch = repo?.defaultBranch || 'main';
-  const shouldAutoApprove = repo?.autoApproveDefaultBranch && branch === defaultBranch;
+  const shouldAutoApprove = forceAutoApprove || (repo?.autoApproveDefaultBranch && branch === defaultBranch);
 
   // Fetch ignore regions for this test
   const testIgnoreRegions = await queries.getIgnoreRegions(testId);
@@ -952,6 +1150,11 @@ async function processVisualDiff(
 
   // Helper to classify based on percentage
   const classifyDiff = (pct: number, pixelDiff?: number): { classification: DiffClassification; status: DiffStatus } => {
+    // Truly identical images are always unchanged, regardless of thresholds
+    if (pixelDiff === 0) {
+      return { classification: 'unchanged', status: 'auto_approved' };
+    }
+
     const effectiveFlakyThreshold = isUnstable ? Math.max(flakyThreshold, pct + 1) : flakyThreshold;
 
     if (pct < unchangedThreshold) {

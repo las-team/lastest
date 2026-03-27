@@ -143,6 +143,9 @@ export interface FunctionalAreaWithChildren {
   parentId: string | null;
   isRouteFolder: boolean | null;
   orderIndex: number | null;
+  agentPlan: string | null;
+  planGeneratedAt: Date | null;
+  planSnapshot: string | null;
   children: FunctionalAreaWithChildren[];
   tests: { id: string; name: string; description: string | null; latestStatus: string | null; isPlaceholder?: boolean }[];
   suites: { id: string; name: string; description: string | null; testCount: number }[];

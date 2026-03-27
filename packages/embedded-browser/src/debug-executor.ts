@@ -186,6 +186,32 @@ export class EmbeddedDebugExecutor {
     });
   }
 
+  private async replayToStep(targetStep: number): Promise<void> {
+    this.pauseController?.stop();
+    this.pauseController = null;
+    await this.cleanupContextAndPage();
+    await this.createContextAndPage();
+    if (this.debugPage && this.targetUrl) {
+      try {
+        await this.debugPage.goto(this.targetUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
+      } catch (err) {
+        console.error('[DebugExecutor] Navigation failed on replay:', err);
+      }
+    }
+    this.stepResults = this.steps.map(s => ({ stepId: s.id, status: 'pending' as const, durationMs: 0 }));
+    this.currentStepIndex = 0;
+    this.status = 'running';
+    this.error = undefined;
+    this.generation++;
+    const gen = this.generation;
+    this.runExecution(gen, targetStep).catch(err => {
+      if (this.generation === gen) {
+        this.status = 'error';
+        this.error = err?.message || String(err);
+      }
+    });
+  }
+
   async handleAction(action: string, payload?: DebugActionPayload): Promise<void> {
     switch (action) {
       case 'step_forward':
@@ -197,33 +223,7 @@ export class EmbeddedDebugExecutor {
 
       case 'step_back': {
         if (this.currentStepIndex <= 0) break;
-        const targetStep = this.currentStepIndex - 1;
-        // Stop current execution
-        this.pauseController?.stop();
-        this.pauseController = null;
-        await this.cleanupContextAndPage();
-        // Re-create and re-execute from start to targetStep-1
-        await this.createContextAndPage();
-        if (this.debugPage && this.targetUrl) {
-          try {
-            await this.debugPage.goto(this.targetUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
-          } catch (err) {
-            console.error('[DebugExecutor] Navigation failed on step back:', err);
-          }
-        }
-        // Reset step results
-        this.stepResults = this.steps.map(s => ({ stepId: s.id, status: 'pending' as const, durationMs: 0 }));
-        this.currentStepIndex = 0;
-        this.status = 'running';
-        this.error = undefined;
-        this.generation++;
-        const gen = this.generation;
-        this.runExecution(gen, targetStep).catch(err => {
-          if (this.generation === gen) {
-            this.status = 'error';
-            this.error = err?.message || String(err);
-          }
-        });
+        await this.replayToStep(this.currentStepIndex - 1);
         break;
       }
 
@@ -234,12 +234,22 @@ export class EmbeddedDebugExecutor {
         }
         break;
 
-      case 'run_to_step':
-        if (this.pauseController && payload?.stepIndex !== undefined) {
+      case 'run_to_step': {
+        if (payload?.stepIndex === undefined) break;
+        const targetIdx = payload.stepIndex;
+        if (targetIdx < 0 || targetIdx >= this.steps.length) break;
+        if (targetIdx === this.currentStepIndex) break;
+
+        if (targetIdx > this.currentStepIndex && this.pauseController && this.status !== 'completed' && this.status !== 'error') {
+          // FORWARD: resume existing execution
           this.status = 'running';
-          this.pauseController.resume('run_to_step', payload.stepIndex);
+          this.pauseController.resume('run_to_step', targetIdx);
+        } else {
+          // BACKWARD or forward from completed/error: full replay
+          await this.replayToStep(targetIdx);
         }
         break;
+      }
 
       case 'update_code':
         if (payload?.steps && payload?.cleanBody) {
@@ -484,22 +494,18 @@ export class EmbeddedDebugExecutor {
     };
 
     // Build instrumented code with checkpoints
+    // IMPORTANT: Steps are placed at the top-level of the function body (no try/catch
+    // wrapping per step) so that `let` variables and function declarations remain in
+    // the same scope. This matches the local debug runner's approach.
     const steps = this.steps;
-    let instrumentedBody = '';
+    const codeParts: string[] = [];
     for (let i = 0; i < steps.length; i++) {
-      instrumentedBody += `
-  __currentStep = ${i};
-  await __checkpoint(${i});
-  __stepStart = Date.now();
-  try {
-    ${steps[i].code}
-    __reportStep(${i}, { stepId: ${steps[i].id}, status: 'passed', durationMs: Date.now() - __stepStart });
-  } catch (__err) {
-    __reportStep(${i}, { stepId: ${steps[i].id}, status: 'failed', durationMs: Date.now() - __stepStart, error: __err?.message || String(__err) });
-    throw __err;
-  }
-`;
+      codeParts.push(`await __checkpoint(${i});`);
+      codeParts.push(steps[i].code);
     }
+    // Final checkpoint marks last step as done
+    codeParts.push(`await __checkpoint(${steps.length});`);
+    const instrumentedBody = codeParts.join('\n');
 
     // Create pause controller
     const initialMode = runToStep !== undefined ? 'run_to_step' : 'paused';
@@ -512,11 +518,34 @@ export class EmbeddedDebugExecutor {
     });
 
     const controller = this.pauseController;
+    const totalSteps = steps.length;
+    const stepStartTimes: number[] = new Array(totalSteps).fill(0);
+    let executingStepIdx = -1;
 
-    const checkpoint = async (stepIdx: number) => {
+    const checkpoint = async (n: number) => {
       if (this.generation !== gen) throw new StopError();
-      this.currentStepIndex = stepIdx;
-      await controller.waitIfNeeded(stepIdx);
+      const now = Date.now();
+
+      // Mark previous step as passed
+      if (n > 0 && n <= totalSteps) {
+        const prev = n - 1;
+        this.stepResults[prev] = {
+          stepId: steps[prev].id,
+          status: 'passed',
+          durationMs: now - stepStartTimes[prev],
+        };
+        this.currentStepIndex = prev;
+      }
+
+      // All steps done
+      if (n >= totalSteps) return;
+
+      // About to start step n
+      executingStepIdx = n;
+      stepStartTimes[n] = now;
+      this.currentStepIndex = n;
+
+      await controller.waitIfNeeded(n);
       if (this.generation !== gen) throw new StopError();
       if (this.status !== 'running') {
         this.status = 'stepping';
@@ -526,20 +555,11 @@ export class EmbeddedDebugExecutor {
     // Execute instrumented function
     try {
       const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
-      const reportStep = (idx: number, result: DebugStepResult) => {
-        this.stepResults[idx] = result;
-      };
-
-      const wrappedBody = `
-  let __currentStep = -1;
-  let __stepStart = 0;
-  ${instrumentedBody}
-`;
 
       const debugFn = new AsyncFunction(
         'page', 'baseUrl', 'screenshotPath', 'stepLogger', 'expect',
-        'locateWithFallback', 'replayCursorPath', '__checkpoint', '__reportStep',
-        wrappedBody
+        'locateWithFallback', 'replayCursorPath', '__checkpoint',
+        instrumentedBody
       );
 
       await debugFn(
@@ -551,7 +571,6 @@ export class EmbeddedDebugExecutor {
         locateWithFallback,
         replayCursorPath,
         checkpoint,
-        reportStep,
       );
 
       if (this.generation === gen) {
@@ -563,7 +582,17 @@ export class EmbeddedDebugExecutor {
         // Normal stop, don't set error
         return;
       }
+      // Mark current step as failed
       if (this.generation === gen) {
+        if (executingStepIdx >= 0 && executingStepIdx < totalSteps) {
+          this.stepResults[executingStepIdx] = {
+            stepId: steps[executingStepIdx].id,
+            status: 'failed',
+            durationMs: Date.now() - stepStartTimes[executingStepIdx],
+            error: err instanceof Error ? err.message : String(err),
+          };
+          this.currentStepIndex = executingStepIdx;
+        }
         this.status = 'error';
         this.error = err instanceof Error ? err.message : String(err);
       }

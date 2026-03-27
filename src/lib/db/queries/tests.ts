@@ -434,6 +434,7 @@ export async function getTestResultsByTest(testId: string) {
       networkRequests: testResults.networkRequests,
       videoPath: testResults.videoPath,
       a11yViolations: testResults.a11yViolations,
+      softErrors: testResults.softErrors,
       startedAt: testRuns.startedAt,
     })
     .from(testResults)
@@ -502,6 +503,34 @@ export async function getFunctionalAreasByRepo(repositoryId: string) {
 
 export async function getTestsByRepo(repositoryId: string) {
   return db.select().from(tests).where(and(eq(tests.repositoryId, repositoryId), isNull(tests.deletedAt))).orderBy(desc(tests.createdAt)).all();
+}
+
+export async function getUncategorizedTests() {
+  return db.select().from(tests).where(and(isNull(tests.repositoryId), isNull(tests.deletedAt))).orderBy(desc(tests.createdAt)).all();
+}
+
+export async function getUncategorizedTestsWithStatus() {
+  const allTests = await getUncategorizedTests();
+
+  return Promise.all(
+    allTests.map(async (test) => {
+      const results = await getTestResultsByTest(test.id);
+      const latestResult = results[0];
+
+      return {
+        ...test,
+        area: null,
+        latestStatus: latestResult?.status || null,
+      };
+    })
+  );
+}
+
+export async function getDeletedUncategorizedTests() {
+  return db.select().from(tests)
+    .where(and(isNull(tests.repositoryId), isNotNull(tests.deletedAt)))
+    .orderBy(desc(tests.deletedAt))
+    .all();
 }
 
 export async function getTestRunsByRepo(repositoryId: string) {
@@ -606,6 +635,16 @@ export async function getLatestVersionNumber(testId: string): Promise<number> {
     .limit(1)
     .get();
   return latest?.version ?? 0;
+}
+
+export async function getRecordingViewport(testId: string) {
+  return db
+    .select({ viewportWidth: testVersions.viewportWidth, viewportHeight: testVersions.viewportHeight })
+    .from(testVersions)
+    .where(eq(testVersions.testId, testId))
+    .orderBy(desc(testVersions.version))
+    .limit(1)
+    .get();
 }
 
 export async function createTestVersion(data: Omit<NewTestVersion, 'id'>) {

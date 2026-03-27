@@ -88,6 +88,9 @@ export interface RunTestCommandPayload {
   grantClipboardAccess?: boolean;
   acceptDownloads?: boolean;
   headed?: boolean;
+  forceVideoRecording?: boolean;
+  recordingViewport?: { width: number; height: number };
+  lockViewportToRecording?: boolean;
 }
 
 export interface RunTestCommand extends BaseMessage {
@@ -212,6 +215,8 @@ export interface TestResultPayload {
   };
   logs: LogEntry[];
   softErrors?: string[];
+  videoData?: string; // base64-encoded video file
+  videoFilename?: string;
 }
 
 export interface TestResultResponse extends BaseMessage {

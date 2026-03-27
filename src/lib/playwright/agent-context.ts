@@ -35,6 +35,8 @@ export interface SeedFixture {
   seedPrompt: string;
   /** Base URL from env config */
   baseUrl: string;
+  /** Whether the seed includes a login/auth setup step */
+  hasLoginSetup: boolean;
 }
 
 /**
@@ -44,6 +46,7 @@ export interface SeedFixture {
  */
 export async function buildSeedFixture(repositoryId: string): Promise<SeedFixture> {
   const parts: string[] = [];
+  let hasLoginSetup = false;
 
   // 1. Environment config
   const envConfig = await queries.getEnvironmentConfig(repositoryId);
@@ -68,10 +71,21 @@ export async function buildSeedFixture(repositoryId: string): Promise<SeedFixtur
     }
 
     if (seedParts.length > 0) {
+      // Detect if any setup step involves login/auth
+      hasLoginSetup = setupSteps.some(s => {
+        const code = (s.code || s.scriptCode || '').toLowerCase();
+        const name = (s.testName || s.scriptName || '').toLowerCase();
+        return code.includes('login') || code.includes('password') || code.includes('sign in')
+          || name.includes('login') || name.includes('auth') || name.includes('setup');
+      });
+
       parts.push('');
       parts.push(`## Seed Test (run this FIRST before exploring)`);
       parts.push(`This seed test sets up the environment (e.g. login, authentication).`);
-      parts.push(`Execute these steps using MCP browser tools before exploring the app:`);
+      parts.push(`Execute these steps using MCP browser tools before exploring the app.`);
+      if (hasLoginSetup) {
+        parts.push(`**IMPORTANT: Do NOT include these login/setup steps in your generated test code. A separate setup script runs them automatically before each test at runtime. Your test should assume the user is already logged in.**`);
+      }
       parts.push('```javascript');
       parts.push(seedParts.join('\n\n'));
       parts.push('```');
@@ -127,5 +141,6 @@ export async function buildSeedFixture(repositoryId: string): Promise<SeedFixtur
   return {
     seedPrompt: parts.join('\n'),
     baseUrl,
+    hasLoginSetup,
   };
 }

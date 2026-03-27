@@ -161,3 +161,43 @@ export async function setRepoSecret(
     throw new Error(`Failed to set secret ${secretName}: ${setRes.status} ${await setRes.text()}`);
   }
 }
+
+/**
+ * Check if a repository secret exists (cannot read the value, only existence).
+ */
+export async function checkRepoSecretExists(
+  token: string,
+  owner: string,
+  repo: string,
+  secretName: string,
+): Promise<boolean> {
+  const res = await fetch(
+    `${GITHUB_API}/repos/${owner}/${repo}/actions/secrets/${secretName}`,
+    { headers: headers(token) },
+  );
+  return res.status === 200;
+}
+
+/**
+ * Get the latest workflow run for the lastest2 workflow.
+ */
+export async function getLatestWorkflowRun(
+  token: string,
+  owner: string,
+  repo: string,
+): Promise<{ status: string; conclusion: string | null; htmlUrl: string; createdAt: string } | null> {
+  const res = await fetch(
+    `${GITHUB_API}/repos/${owner}/${repo}/actions/workflows/lastest2.yml/runs?per_page=1`,
+    { headers: headers(token) },
+  );
+  if (!res.ok) return null;
+  const data = await res.json();
+  const run = data.workflow_runs?.[0];
+  if (!run) return null;
+  return {
+    status: run.status,
+    conclusion: run.conclusion,
+    htmlUrl: run.html_url,
+    createdAt: run.created_at,
+  };
+}

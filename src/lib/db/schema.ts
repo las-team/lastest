@@ -132,6 +132,7 @@ export const functionalAreas = sqliteTable('functional_areas', {
   orderIndex: integer('order_index').default(0),
   agentPlan: text('agent_plan'), // markdown test plan from Planner agent
   planGeneratedAt: integer('plan_generated_at', { mode: 'timestamp' }),
+  planSnapshot: text('plan_snapshot'), // JSON: FunctionalAreaPlanSnapshot for rollback
   deletedAt: integer('deleted_at', { mode: 'timestamp' }),
 });
 
@@ -231,6 +232,8 @@ export const repositories = sqliteTable('repositories', {
   testingTemplate: text('testing_template'), // Testing template ID (e.g. 'saas', 'marketing', 'canvas')
   autoApproveDefaultBranch: integer('auto_approve_default_branch', { mode: 'boolean' }).default(false),
   branchBaseUrls: text('branch_base_urls', { mode: 'json' }).$type<Record<string, string>>(),
+  comparisonRunEnabled: integer('comparison_run_enabled', { mode: 'boolean' }).default(false),
+  comparisonBaselineBranch: text('comparison_baseline_branch'), // branch used as baseline in comparison runs
   createdAt: integer('created_at', { mode: 'timestamp' }),
 });
 
@@ -311,6 +314,15 @@ export const builds = sqliteTable('builds', {
   teardownDurationMs: integer('teardown_duration_ms'),
   codeChangeTestIds: text('code_change_test_ids', { mode: 'json' }).$type<string[]>(),
   browsers: text('browsers', { mode: 'json' }).$type<string[]>(), // browsers used in this build
+  comparisonPairId: text('comparison_pair_id'), // shared ID linking baseline + feature builds
+  comparisonRole: text('comparison_role'), // 'baseline' | 'feature' | null
+  comparisonMeta: text('comparison_meta', { mode: 'json' }).$type<{
+    featureBranch: string;
+    featureUrl: string;
+    runnerId?: string;
+    testIds?: string[];
+    versionOverrides?: Record<string, string>;
+  }>(),
   createdAt: integer('created_at', { mode: 'timestamp' }),
   completedAt: integer('completed_at', { mode: 'timestamp' }),
 });
@@ -403,6 +415,12 @@ export type Repository = typeof repositories.$inferSelect;
 export type NewRepository = typeof repositories.$inferInsert;
 export type FunctionalArea = typeof functionalAreas.$inferSelect;
 export type NewFunctionalArea = typeof functionalAreas.$inferInsert;
+
+export interface FunctionalAreaPlanSnapshot {
+  previousPlan: string | null;
+  previousDescription: string | null;
+  generatedTestIds: string[];
+}
 export type Test = typeof tests.$inferSelect;
 export type NewTest = typeof tests.$inferInsert;
 export type TestRun = typeof testRuns.$inferSelect;
@@ -551,6 +569,7 @@ export const playwrightSettings = sqliteTable('playwright_settings', {
   browser: text('browser').default('chromium'), // chromium | firefox | webkit
   viewportWidth: integer('viewport_width').default(1280),
   viewportHeight: integer('viewport_height').default(720),
+  lockViewportToRecording: integer('lock_viewport_to_recording', { mode: 'boolean' }).default(false),
   headlessMode: text('headless_mode').default('true'), // 'true' | 'false' | 'shell'
   navigationTimeout: integer('navigation_timeout').default(30000),
   actionTimeout: integer('action_timeout').default(5000),
@@ -733,7 +752,7 @@ export const aiSettings = sqliteTable('ai_settings', {
   aiDiffingModel: text('ai_diffing_model').default('anthropic/claude-sonnet-4-5-20250929'),
   aiDiffingOllamaBaseUrl: text('ai_diffing_ollama_base_url'),
   aiDiffingOllamaModel: text('ai_diffing_ollama_model'),
-  pwAgentEnabled: integer('pw_agent_enabled', { mode: 'boolean' }).default(false),
+  pwAgentEnabled: integer('pw_agent_enabled', { mode: 'boolean' }).default(true),
   pwAgentModel: text('pw_agent_model'),
   pwAgentTimeout: integer('pw_agent_timeout').default(300000),
   createdAt: integer('created_at', { mode: 'timestamp' }),
@@ -757,7 +776,7 @@ export const DEFAULT_AI_SETTINGS = {
   aiDiffingModel: 'anthropic/claude-sonnet-4-5-20250929',
   aiDiffingOllamaBaseUrl: 'http://localhost:11434',
   aiDiffingOllamaModel: '',
-  pwAgentEnabled: false,
+  pwAgentEnabled: true,
   pwAgentModel: '',
   pwAgentTimeout: 300000,
 };
@@ -1290,9 +1309,11 @@ export type AgentSessionStatus = 'active' | 'paused' | 'completed' | 'failed' | 
 export type AgentStepId =
   | 'settings_check'
   | 'select_repo'
-  | 'scan_and_template'
-  | 'discover'
   | 'env_setup'
+  | 'scan_and_template'
+  | 'plan'
+  | 'review'
+  | 'generate'
   | 'run_tests'
   | 'fix_tests'
   | 'rerun_tests'
@@ -1300,7 +1321,7 @@ export type AgentStepId =
 
 export type AgentStepStatus = 'pending' | 'active' | 'waiting_user' | 'completed' | 'failed' | 'skipped';
 
-export type PwAgentType = 'orchestrator' | 'planner' | 'generator' | 'healer';
+export type PwAgentType = 'orchestrator' | 'planner' | 'scout' | 'diver' | 'generator' | 'healer';
 
 export interface AgentSubstep {
   label: string;
@@ -1308,7 +1329,39 @@ export interface AgentSubstep {
   detail?: string;
   /** Which PW sub-agent is handling this substep (shown as a badge in the UI) */
   agent?: PwAgentType;
+  /** Planner source identifier for observability */
+  source?: string;
+  /** Links to aiPromptLogs.id for full input/output drill-down */
+  promptLogId?: string;
+  /** Short description of planner inputs */
+  inputSummary?: string;
+  /** Comma-separated area names found */
+  outputSummary?: string;
+  /** Number of areas discovered */
+  areasFound?: number;
+  /** Wall-clock duration in ms */
+  durationMs?: number;
+  /** Full error message (not truncated) */
+  rawError?: string;
 }
+
+export interface AgentRichResultPlanArea {
+  id: string;
+  name: string;
+  description: string;
+  routes: string[];
+  testPlan: string;
+  approved?: boolean;
+}
+
+export type AgentStepRichResult =
+  | { type: 'scan_and_template'; routes: Array<{ path: string; type: string }>; framework?: string; template?: string; intelligence?: Record<string, unknown> }
+  | { type: 'plan'; areas: AgentRichResultPlanArea[] }
+  | { type: 'generate'; tests: Array<{ testId: string; name: string; areaName: string; code: string }> }
+  | { type: 'env_setup'; loginScript?: string; pageContext?: string }
+  | { type: 'run_tests'; buildId: string; results: Array<{ testName: string; status: string; error?: string }> }
+  | { type: 'fix_tests'; fixes: Array<{ testName: string; originalError: string; fixed: boolean; newCode?: string }> }
+  | { type: 'generic'; content: string };
 
 export interface AgentStepState {
   id: AgentStepId;
@@ -1319,6 +1372,7 @@ export interface AgentStepState {
   completedAt?: string;
   error?: string;
   result?: Record<string, unknown>;
+  richResult?: AgentStepRichResult;
   userAction?: string;
   substeps?: AgentSubstep[];
 }
@@ -1332,6 +1386,11 @@ export interface AgentSessionMetadata {
   initialFailedCount?: number;
   finalPassedCount?: number;
   finalFailedCount?: number;
+  approvedAreaIds?: string[];
+  autoApproveReview?: boolean;
+  manualMode?: boolean;
+  skipGithub?: boolean;
+  skipAI?: boolean;
   [key: string]: unknown;
 }
 

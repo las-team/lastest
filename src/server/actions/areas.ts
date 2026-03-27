@@ -3,7 +3,7 @@
 import { revalidatePath } from 'next/cache';
 import * as queries from '@/lib/db/queries';
 import { requireRepoAccess, requireTeamAccess } from '@/lib/auth';
-import type { NewFunctionalArea } from '@/lib/db/schema';
+import type { NewFunctionalArea, FunctionalAreaPlanSnapshot } from '@/lib/db/schema';
 
 export async function createArea(data: {
   name: string;
@@ -160,4 +160,133 @@ export async function getAreasTree(repositoryId: string) {
 
 export async function getArea(id: string) {
   return queries.getFunctionalArea(id);
+}
+
+export async function updateAreaPlan(id: string, agentPlan: string) {
+  await requireTeamAccess();
+  const area = await queries.getFunctionalArea(id);
+  if (!area) throw new Error('Area not found');
+
+  // Save current plan to snapshot for rollback
+  const currentSnapshot: FunctionalAreaPlanSnapshot = area.planSnapshot
+    ? JSON.parse(area.planSnapshot)
+    : { previousPlan: null, previousDescription: null, generatedTestIds: [] };
+
+  const snapshot: FunctionalAreaPlanSnapshot = {
+    previousPlan: area.agentPlan,
+    previousDescription: area.description,
+    generatedTestIds: currentSnapshot.generatedTestIds,
+  };
+
+  await queries.updateFunctionalArea(id, {
+    agentPlan,
+    planGeneratedAt: new Date(),
+    planSnapshot: JSON.stringify(snapshot),
+  });
+
+  revalidatePath('/areas');
+}
+
+export async function rollbackAreaPlan(id: string) {
+  await requireTeamAccess();
+  const area = await queries.getFunctionalArea(id);
+  if (!area || !area.planSnapshot) throw new Error('No snapshot to rollback');
+
+  const snapshot: FunctionalAreaPlanSnapshot = JSON.parse(area.planSnapshot);
+
+  // Restore plan and description
+  await queries.updateFunctionalArea(id, {
+    agentPlan: snapshot.previousPlan,
+    description: snapshot.previousDescription,
+    planSnapshot: null,
+    planGeneratedAt: snapshot.previousPlan ? new Date() : null,
+  });
+
+  // Soft-delete generated tests
+  if (snapshot.generatedTestIds.length > 0) {
+    for (const testId of snapshot.generatedTestIds) {
+      await queries.softDeleteTest(testId);
+    }
+  }
+
+  revalidatePath('/areas');
+  revalidatePath('/tests');
+}
+
+export async function rollbackAllAreaPlans(repositoryId: string) {
+  await requireRepoAccess(repositoryId);
+  const areas = await queries.getFunctionalAreasByRepo(repositoryId);
+  const areasWithSnapshot = areas.filter(a => a.planSnapshot);
+
+  if (areasWithSnapshot.length === 0) throw new Error('No snapshots to rollback');
+
+  for (const area of areasWithSnapshot) {
+    await rollbackAreaPlan(area.id);
+  }
+
+  revalidatePath('/areas');
+  revalidatePath('/tests');
+  return areasWithSnapshot.length;
+}
+
+export async function exportAllPlans(repositoryId: string) {
+  await requireRepoAccess(repositoryId);
+  const areas = await queries.getFunctionalAreasByRepo(repositoryId);
+  const areasWithPlans = areas.filter(a => a.agentPlan);
+
+  if (areasWithPlans.length === 0) return '# Testing Manifesto\n\nNo test plans generated yet.\n';
+
+  const repo = await queries.getRepository(repositoryId);
+  const repoName = repo?.name || 'Project';
+
+  const sections: string[] = [
+    `# Testing Manifesto — ${repoName}`,
+    `> Generated: ${new Date().toISOString().split('T')[0]}`,
+    '',
+  ];
+
+  for (const area of areasWithPlans) {
+    sections.push(`## ${area.name}`);
+    if (area.description) {
+      sections.push('', area.description);
+    }
+    if (area.agentPlan) {
+      sections.push('', area.agentPlan);
+    }
+
+    // Include test cases
+    const areaTests = await queries.getTestsByFunctionalArea(area.id);
+    if (areaTests.length > 0) {
+      sections.push('', '### Test Cases', '');
+      for (const test of areaTests) {
+        const desc = test.description ? `: ${test.description.split('\n')[0]}` : '';
+        sections.push(`- **${test.name}**${desc}`);
+      }
+    }
+
+    sections.push('', '---', '');
+  }
+
+  return sections.join('\n');
+}
+
+export async function exportAreaPlan(areaId: string) {
+  await requireTeamAccess();
+  const area = await queries.getFunctionalArea(areaId);
+  if (!area) throw new Error('Area not found');
+
+  const sections: string[] = [`# ${area.name}`];
+  if (area.description) sections.push('', area.description);
+  if (area.agentPlan) sections.push('', area.agentPlan);
+
+  const areaTests = await queries.getTestsByFunctionalArea(areaId);
+  if (areaTests.length > 0) {
+    sections.push('', '## Test Cases', '');
+    for (const test of areaTests) {
+      const desc = test.description ? `: ${test.description.split('\n')[0]}` : '';
+      sections.push(`- **${test.name}**${desc}`);
+    }
+  }
+
+  return sections.join('\n');
 }

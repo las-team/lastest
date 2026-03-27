@@ -155,6 +155,7 @@ export async function sendDebugCommand(
   sessionId: string,
   command: DebugCommand
 ): Promise<{ ok: boolean; error?: string }> {
+
   // Check remote session first
   const remoteSession = getRemoteDebugSession(sessionId);
   if (remoteSession) {

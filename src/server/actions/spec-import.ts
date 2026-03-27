@@ -77,7 +77,16 @@ function extractJsonArray(text: string): string | null {
   }
 
   // 2. Fallback: find first top-level [ and match its closing ]
-  const start = text.indexOf('[');
+  //    Skip markdown checkbox patterns like "[ ]" or "[x]"
+  let start = -1;
+  for (let s = 0; s < text.length; s++) {
+    if (text[s] === '[') {
+      // Skip markdown checkboxes: [ ], [x], [X]
+      if (/^\[[ xX]\]/.test(text.slice(s))) { s += 2; continue; }
+      start = s;
+      break;
+    }
+  }
   if (start === -1) return null;
 
   let depth = 0;
@@ -97,7 +106,8 @@ function extractJsonArray(text: string): string | null {
       if (depth === 0) {
         const candidate = text.slice(start, i + 1);
         try {
-          JSON.parse(candidate);
+          const parsed = JSON.parse(candidate);
+          if (!Array.isArray(parsed) || parsed.length === 0) return null;
           return candidate;
         } catch {
           return null; // Balanced brackets but not valid JSON (markdown syntax)
@@ -320,14 +330,14 @@ export async function discoverSpecFiles(
 ): Promise<{ success: boolean; files?: DiscoveredSpecFile[]; error?: string }> {
   await requireRepoAccess(repositoryId);
   try {
-    const account = await queries.getGithubAccount();
-    if (!account) {
-      return { success: false, error: 'GitHub account not connected' };
-    }
-
     const repo = await queries.getRepository(repositoryId);
     if (!repo) {
       return { success: false, error: 'Repository not found' };
+    }
+
+    const account = repo.teamId ? await queries.getGithubAccountByTeam(repo.teamId) : null;
+    if (!account) {
+      return { success: false, error: 'GitHub account not connected' };
     }
 
     const repoTree = await getRepoTree(account.accessToken, repo.owner, repo.name, branch);
@@ -370,14 +380,14 @@ export async function extractUserStoriesFromFiles(
       return { success: false, error: 'No files selected' };
     }
 
-    const account = await queries.getGithubAccount();
-    if (!account) {
-      return { success: false, error: 'GitHub account not connected' };
-    }
-
     const repo = await queries.getRepository(repositoryId);
     if (!repo) {
       return { success: false, error: 'Repository not found' };
+    }
+
+    const account = repo.teamId ? await queries.getGithubAccountByTeam(repo.teamId) : null;
+    if (!account) {
+      return { success: false, error: 'GitHub account not connected' };
     }
 
     // Fetch file contents
@@ -523,14 +533,14 @@ export async function getBranchChanges(
 ): Promise<{ success: boolean; changedFiles?: string[]; error?: string }> {
   await requireRepoAccess(repositoryId);
   try {
-    const account = await queries.getGithubAccount();
-    if (!account) {
-      return { success: false, error: 'GitHub account not connected' };
-    }
-
     const repo = await queries.getRepository(repositoryId);
     if (!repo) {
       return { success: false, error: 'Repository not found' };
+    }
+
+    const account = repo.teamId ? await queries.getGithubAccountByTeam(repo.teamId) : null;
+    if (!account) {
+      return { success: false, error: 'GitHub account not connected' };
     }
 
     const baseBranch = repo.defaultBranch || 'main';
@@ -564,11 +574,11 @@ async function fetchBranchDiffs(
   branch: string
 ): Promise<{ changedFiles: string[]; fileDiffs?: string } | null> {
   try {
-    const account = await queries.getGithubAccount();
-    if (!account) return null;
-
     const repo = await queries.getRepository(repositoryId);
     if (!repo) return null;
+
+    const account = repo.teamId ? await queries.getGithubAccountByTeam(repo.teamId) : null;
+    if (!account) return null;
 
     const baseBranch = repo.defaultBranch || 'main';
     if (branch === baseBranch) return null;

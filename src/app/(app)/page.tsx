@@ -6,9 +6,11 @@ import {
   getTestsByRepo,
   getFunctionalAreasByRepo,
   getBuildsByRepo,
+  getAggregatedSelectorStats,
 } from '@/lib/db/queries';
 import { getCurrentSession } from '@/lib/auth';
 import { PlayAgentTimeline } from '@/components/play-agent/play-agent-timeline';
+import { SelectorStatsChartClient } from '@/components/dashboard/selector-stats-chart-client';
 import Link from 'next/link';
 
 export default async function DashboardPage() {
@@ -17,10 +19,11 @@ export default async function DashboardPage() {
   const userId = session?.user?.id;
   const selectedRepo = teamId ? await getSelectedRepository(userId, teamId) : null;
   // Fetch data filtered by selected repo — no global fallbacks
-  const [tests, areas, recentBuilds] = await Promise.all([
+  const [tests, areas, recentBuilds, selectorStats] = await Promise.all([
     selectedRepo ? getTestsByRepo(selectedRepo.id) : Promise.resolve([]),
     selectedRepo ? getFunctionalAreasByRepo(selectedRepo.id) : Promise.resolve([]),
     selectedRepo ? getBuildsByRepo(selectedRepo.id, 5) : Promise.resolve([]),
+    selectedRepo ? getAggregatedSelectorStats(selectedRepo.id) : Promise.resolve([]),
   ]);
 
   // Get stats from the latest build
@@ -86,6 +89,11 @@ export default async function DashboardPage() {
         {/* Auto Setup Agent */}
         {!(session?.team?.banAiMode) && (
           <PlayAgentTimeline repositoryId={selectedRepo?.id} />
+        )}
+
+        {/* Selector Stats */}
+        {selectorStats.length > 0 && (
+          <SelectorStatsChartClient stats={selectorStats} />
         )}
 
         {/* Recent Builds */}

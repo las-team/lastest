@@ -10,22 +10,30 @@ function getExtendedEnv(): NodeJS.ProcessEnv {
 
 export class ClaudeCLIProvider implements AIProvider {
   async generate(options: GenerateOptions): Promise<string> {
-    const { prompt, systemPrompt } = options;
+    const { prompt, systemPrompt, signal } = options;
 
     let fullPrompt = prompt;
     if (systemPrompt) {
       fullPrompt = `${systemPrompt}\n\n---\n\n${prompt}`;
     }
 
+    if (signal?.aborted) throw new Error('Aborted');
+
     return new Promise((resolve, reject) => {
-      const child = spawn('claude', ['-p', fullPrompt], {
+      const child = spawn('claude', ['-p', '-'], {
         shell: false,
         env: getExtendedEnv(),
-        stdio: ['ignore', 'pipe', 'pipe'],
+        stdio: ['pipe', 'pipe', 'pipe'],
       });
 
       let stdout = '';
       let stderr = '';
+
+      const onAbort = () => {
+        child.kill('SIGTERM');
+        reject(new Error('Aborted'));
+      };
+      signal?.addEventListener('abort', onAbort, { once: true });
 
       child.stdout.on('data', (data) => {
         stdout += data.toString();
@@ -36,14 +44,16 @@ export class ClaudeCLIProvider implements AIProvider {
       });
 
       child.on('close', (code) => {
+        signal?.removeEventListener('abort', onAbort);
         if (code === 0) {
           resolve(stdout.trim());
         } else {
-          reject(new Error(`Claude CLI error: exited with code ${code}${stderr ? ` — ${stderr.trim()}` : ''}`));
+          reject(new Error(`Claude CLI error: exited with code ${code}${stderr ? ` \u2014 ${stderr.trim()}` : ''}`));
         }
       });
 
       child.on('error', (error) => {
+        signal?.removeEventListener('abort', onAbort);
         reject(new Error(`Claude CLI error: ${error.message}`));
       });
 
@@ -52,26 +62,39 @@ export class ClaudeCLIProvider implements AIProvider {
         child.kill('SIGTERM');
         reject(new Error('Claude CLI error: timed out after 120s'));
       }, 120000);
+
+      // Write prompt via stdin to avoid E2BIG on large prompts
+      child.stdin.write(fullPrompt);
+      child.stdin.end();
     });
   }
 
   async generateStream(options: GenerateOptions, callbacks: StreamCallbacks): Promise<void> {
-    const { prompt, systemPrompt } = options;
+    const { prompt, systemPrompt, signal } = options;
 
     let fullPrompt = prompt;
     if (systemPrompt) {
       fullPrompt = `${systemPrompt}\n\n---\n\n${prompt}`;
     }
 
+    if (signal?.aborted) throw new Error('Aborted');
+
     return new Promise((resolve, reject) => {
-      // For spawn, we pass arguments directly without shell escaping
-      const child = spawn('claude', ['-p', fullPrompt], {
+      const child = spawn('claude', ['-p', '-'], {
         shell: false,
         env: getExtendedEnv(),
-        stdio: ['ignore', 'pipe', 'pipe'],
+        stdio: ['pipe', 'pipe', 'pipe'],
       });
 
       let fullText = '';
+
+      const onAbort = () => {
+        child.kill('SIGTERM');
+        const error = new Error('Aborted');
+        callbacks.onError?.(error);
+        reject(error);
+      };
+      signal?.addEventListener('abort', onAbort, { once: true });
 
       child.stdout.on('data', (data) => {
         const text = data.toString();
@@ -84,6 +107,7 @@ export class ClaudeCLIProvider implements AIProvider {
       });
 
       child.on('close', (code) => {
+        signal?.removeEventListener('abort', onAbort);
         if (code === 0) {
           callbacks.onComplete?.(fullText);
           resolve();
@@ -95,9 +119,14 @@ export class ClaudeCLIProvider implements AIProvider {
       });
 
       child.on('error', (error) => {
+        signal?.removeEventListener('abort', onAbort);
         callbacks.onError?.(error);
         reject(error);
       });
+
+      // Write prompt via stdin to avoid E2BIG on large prompts
+      child.stdin.write(fullPrompt);
+      child.stdin.end();
     });
   }
 }

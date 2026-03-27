@@ -15,7 +15,7 @@ export class AnthropicDirectProvider implements AIProvider {
   }
 
   async generate(options: GenerateOptions): Promise<string> {
-    const { prompt, systemPrompt, maxTokens = 4096, temperature = 0.7, images } = options;
+    const { prompt, systemPrompt, maxTokens = 4096, temperature = 0.7, images, signal } = options;
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const content: any[] = [];
@@ -56,6 +56,7 @@ export class AnthropicDirectProvider implements AIProvider {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify(body),
+      signal,
     });
 
     if (!response.ok) {
@@ -69,7 +70,7 @@ export class AnthropicDirectProvider implements AIProvider {
   }
 
   async generateStream(options: GenerateOptions, callbacks: StreamCallbacks): Promise<void> {
-    const { prompt, systemPrompt, maxTokens = 4096, temperature = 0.7, images } = options;
+    const { prompt, systemPrompt, maxTokens = 4096, temperature = 0.7, images, signal } = options;
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const content: any[] = [];
@@ -111,6 +112,7 @@ export class AnthropicDirectProvider implements AIProvider {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify(body),
+        signal,
       });
 
       if (!response.ok) {

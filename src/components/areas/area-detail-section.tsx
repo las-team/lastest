@@ -261,6 +261,7 @@ export function AreaDetailSection({ selection, areas, suites, repositoryId: _rep
             <Label>Tests in this area</Label>
             <p className="text-2xl font-bold mt-1">{testCount}</p>
           </div>
+
         </CardContent>
       </Card>
     );
@@ -480,3 +481,4 @@ function findAreaNode(areas: FunctionalAreaWithChildren[], id: string): Function
   }
   return null;
 }
+

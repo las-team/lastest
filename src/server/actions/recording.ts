@@ -442,6 +442,8 @@ export async function saveRecordedTest(data: {
   requiredCapabilities?: { fileUpload?: boolean; clipboard?: boolean; networkInterception?: boolean; downloads?: boolean } | null;
   viewportWidth?: number;
   viewportHeight?: number;
+  extraSetupSteps?: Array<{ stepType: 'test' | 'script'; testId?: string | null; scriptId?: string | null }>;
+  skippedDefaultStepIds?: string[];
 }) {
   if (data.repositoryId) await requireRepoAccess(data.repositoryId);
   else await requireTeamAccess();
@@ -473,6 +475,32 @@ export async function saveRecordedTest(data: {
     if (Object.keys(updates).length > 0) {
       await upsertPlaywrightSettings(data.repositoryId, updates);
     }
+  }
+
+  // Update environment config baseUrl from the recording target URL
+  if (data.targetUrl) {
+    try {
+      const origin = new URL(data.targetUrl).origin;
+      const { upsertEnvironmentConfig } = await import('@/lib/db/queries');
+      await upsertEnvironmentConfig(data.repositoryId ?? '', { baseUrl: origin });
+    } catch {
+      // Invalid URL — skip baseUrl update
+    }
+  }
+
+  // Persist setup overrides (skipped defaults and/or extra steps)
+  const hasSkipped = data.skippedDefaultStepIds && data.skippedDefaultStepIds.length > 0;
+  const hasExtra = data.extraSetupSteps && data.extraSetupSteps.length > 0;
+  if (hasSkipped || hasExtra) {
+    const { updateTestSetupOverrides } = await import('@/lib/db/queries');
+    await updateTestSetupOverrides(test.id, {
+      skippedDefaultStepIds: data.skippedDefaultStepIds ?? [],
+      extraSteps: (data.extraSetupSteps ?? []).map(s => ({
+        stepType: s.stepType,
+        testId: s.testId ?? null,
+        scriptId: s.scriptId ?? null,
+      })),
+    });
   }
 
   revalidatePath('/tests');

@@ -152,11 +152,12 @@ export function DebugClient({ test, repositoryId }: DebugClientProps) {
     }
   }, [sessionId]);
 
-  const handleStop = useCallback(async () => {
-    if (sessionId) {
-      await stopDebugSession(sessionId);
-    }
+  const handleStop = useCallback(() => {
     router.push(`/tests/${test.id}`);
+    // Session cleanup handled by unmount effect + background stop
+    if (sessionId) {
+      stopDebugSession(sessionId).catch(() => {});
+    }
   }, [sessionId, router, test.id]);
 
   // Debounced code update handler
@@ -435,7 +436,7 @@ export function DebugClient({ test, repositoryId }: DebugClientProps) {
                   stepResults={state?.stepResults || []}
                   onCodeChange={handleCodeChange}
                   onClickStep={(idx) => {
-                    if (isPaused && idx > (state?.currentStepIndex ?? -1)) {
+                    if ((isPaused || isError || isCompleted) && idx !== (state?.currentStepIndex ?? -1)) {
                       sendCmd({ type: 'run_to_step', stepIndex: idx });
                     }
                   }}
@@ -505,7 +506,7 @@ export function DebugClient({ test, repositoryId }: DebugClientProps) {
                             isCurrent ? 'bg-blue-500/10 border border-blue-500/30' : ''
                           }`}
                           onClick={() => {
-                            if (isPaused && idx > (state?.currentStepIndex ?? -1)) {
+                            if ((isPaused || isError || isCompleted) && idx !== (state?.currentStepIndex ?? -1)) {
                               sendCmd({ type: 'run_to_step', stepIndex: idx });
                             }
                           }}

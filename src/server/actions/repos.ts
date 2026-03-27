@@ -174,6 +174,21 @@ export async function updateAutoApproveDefaultBranch(repositoryId: string, enabl
   revalidatePath('/settings');
 }
 
+export async function updateComparisonRunSettings(
+  repositoryId: string,
+  enabled: boolean,
+  baselineBranch?: string,
+) {
+  const session = await requireTeamAccess();
+  const repo = await queries.getRepository(repositoryId);
+  if (!repo || repo.teamId !== session.team.id) return;
+  await queries.updateRepository(repositoryId, {
+    comparisonRunEnabled: enabled,
+    ...(baselineBranch !== undefined ? { comparisonBaselineBranch: baselineBranch } : {}),
+  });
+  revalidatePath('/run');
+}
+
 // Branch interface that works for both providers
 interface RepoBranch {
   name: string;
@@ -252,6 +267,7 @@ export async function applyTestingTemplate(
     ...playwrightFields,
     selectorPriority,
     stabilization,
+    lockViewportToRecording: templateId === 'canvas',
   });
   await queries.upsertDiffSensitivitySettings(repositoryId, diff);
 

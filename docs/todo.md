@@ -5,23 +5,22 @@ Gitlab
 Teardown
 Accept Downloads
 Network Interception
-Deploy
-      pnpm deploy:zima              # Build both images → pipe to 192.168.1.138 → restart
-  pnpm deploy:olares            # Build → pipe to Olares → kubectl restart → health check
-  pnpm deploy:local             # docker compose build + up
-  pnpm deploy:eb                # Rebuild + restart EB containers for local dev
-  pnpm deploy:npm               # Sync version + publish @lastest/runner
-  pnpm deploy:all               # Everything at once
 Auto gh action run
+Comparison run
 ## features
 Migrate to gh app /home/ewyct/.claude/plans/cheeky-sparking-torvalds.md
-Stripe for self-subscribe
-Stability, excalidraw tests
-multiple envs to run tests in w url providing in parallel
-self-test suite finish
-visualize selector stats
+Videos explaining use
+    Saját demo felvétele ahol van egy laza scripted előre megírva, ami egy törött vibe kódolt appon bemutatja hogy lépésről lépésre hogyan használod a Lastestet. A végén elmondani hogy a runnereket bárhol tudja futtatni, de itt a cloud instance, like and subscribe, kommentelj, kérdezz, nagyon lelkes a szerző.
+PostgreSQL
+Run tests on prod to test admin
+Selectors propagation for play agent /home/ewyct/.claude/plans/cozy-doodling-rain.md
+The premium QA agent
 ## ideas
-Test coverage assessment and recreation based on existing test set
+Payment integration /home/ewyct/.claude/plans/drifting-yawning-hoare.md
+special prompting for ai diff analysis either by user or by branch code change 
+if a pr merge happens, update test manifest with new functions - show as new, prompt test generation
+Test coverage assessment and recreation based on existing test set  ~/.claude/plans/shimmying-conjuring-sun.md
+debug - googlesheet data
 cookie sharing from host machine?
 Tweet about us
 Content comparison - compare text in 2 setups
@@ -37,8 +36,6 @@ Import from prior tools?
 Determine test coverage based on tests in repo 
 Expand into not just visual testing: https://github.com/coleam00/link-in-bio-page-builder/blob/main/.claude/skills/e2e-test/SKILL.md
 ## bugs
-some elements are disappearing from test 13b
-other users can see build page w url
 ## marketing
 why is software not just a play button?
 what's between agents and saas? obeservability, human in the loop

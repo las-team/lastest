@@ -420,6 +420,10 @@ export async function updateAIPromptLog(
   await db.update(aiPromptLogs).set(data).where(eq(aiPromptLogs.id, id));
 }
 
+export async function getAIPromptLog(id: string) {
+  return db.select().from(aiPromptLogs).where(eq(aiPromptLogs.id, id)).get();
+}
+
 export async function getAIPromptLogs(repositoryId?: string | null, limit = 50) {
   if (repositoryId) {
     return db

@@ -127,7 +127,24 @@
       "Bash(wc -l /home/ewyct/dev/lastest2/src/app/\\\\\\(app\\\\\\)/tests/\\\\[id\\\\]/test-detail-client.tsx)",
       "Bash(pnpm tsx:*)",
       "Bash(docker images:*)",
-      "Bash(pnpm deploy:zima -- --skip-checks)"
+      "Bash(pnpm deploy:zima -- --skip-checks)",
+      "WebFetch(domain:docs.polar.sh)",
+      "WebFetch(domain:docs.creem.io)",
+      "WebFetch(domain:www.lost-pixel.com)",
+      "WebFetch(domain:polar.sh)",
+      "WebFetch(domain:creem.io)",
+      "WebFetch(domain:www.reddit.com)",
+      "Bash(gh run:*)",
+      "Bash(cat /home/ewyct/dev/lastest2/src/app/\\\\\\(app\\\\\\)/settings/page.tsx)",
+      "Bash(cat /home/ewyct/dev/lastest2/src/app/\\\\\\(app\\\\\\)/compare/compare-client.tsx)",
+      "Bash(pnpm video:preview)",
+      "WebFetch(domain:news.ycombinator.com)",
+      "WebFetch(domain:www.tonyward.dev)",
+      "WebFetch(domain:dx.tips)",
+      "WebFetch(domain:qa-financial.com)",
+      "Bash(npm view:*)",
+      "Bash(grep -n \"error\\\\|warning\\\\|result\\\\|status\" /home/ewyct/dev/lastest2/src/app/\\\\\\(app\\\\\\)/tests/[id]/test-detail-client.tsx)",
+      "Bash(grep -n \"softErrors\\\\|results.*=.*use\\\\|TestResult\" src/app/\\\\\\(app\\\\\\)/tests/[id]/test-detail-client.tsx)"
     ]
   },
   "disabledMcpjsonServers": [

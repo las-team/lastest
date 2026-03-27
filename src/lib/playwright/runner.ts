@@ -7,7 +7,7 @@ import crypto from 'crypto';
 import AxeBuilder from '@axe-core/playwright';
 import { DEFAULT_SELECTOR_PRIORITY, DEFAULT_STABILIZATION_SETTINGS } from '@/lib/db/schema';
 import type { A11yViolation, StabilizationSettings, StabilityMetadata } from '@/lib/db/schema';
-import { getSelectorStats, recordSelectorSuccess, recordSelectorFailure, getDefaultSetupSteps, getTestFixtures } from '@/lib/db/queries';
+import { getSelectorStats, recordSelectorSuccess, recordSelectorFailure, getDefaultSetupSteps, getTestFixtures, getRecordingViewport } from '@/lib/db/queries';
 import { setupFreezeScripts, setupThirdPartyBlocking, applyStabilization } from './stabilization';
 import { captureWithBurst } from './burst-capture';
 import { applyDynamicMasking } from './dynamic-masking';
@@ -1036,7 +1036,32 @@ export class PlaywrightRunner extends EventEmitter {
       const effectiveBaseUrl = test.playwrightOverrides?.baseUrl ?? (this.environmentConfig?.baseUrl || 'http://localhost:3000');
 
       // Per-test viewport override takes precedence over global settings
-      const testViewport = test.viewportOverride || this.getViewport();
+      let testViewport = test.viewportOverride || this.getViewport();
+
+      // Viewport mismatch detection: lock to recording size or warn
+      try {
+        const recordingVp = await getRecordingViewport(test.id);
+        if (recordingVp?.viewportWidth && recordingVp?.viewportHeight) {
+          const recW = recordingVp.viewportWidth;
+          const recH = recordingVp.viewportHeight;
+          if (recW !== testViewport.width || recH !== testViewport.height) {
+            if (this.settings?.lockViewportToRecording) {
+              testViewport = { width: recW, height: recH };
+            } else {
+              // Only warn for tests that use coordinate-based actions
+              const code = test.code || '';
+              const usesCoords = /page\.mouse\.click\(|page\.mouse\.move\(|replayCursorPath\(/.test(code);
+              if (usesCoords) {
+                testSoftErrors.push(
+                  `Viewport mismatch: recorded at ${recW}x${recH}, playing back at ${testViewport.width}x${testViewport.height}. Coordinate-based actions may click wrong positions.`
+                );
+              }
+            }
+          }
+        }
+      } catch {
+        // Non-critical — skip viewport check
+      }
 
       const effectiveAcceptAnyCert = test.playwrightOverrides?.acceptAnyCertificate ?? this.settings?.acceptAnyCertificate ?? false;
 
@@ -1768,6 +1793,13 @@ export class PlaywrightRunner extends EventEmitter {
         // Coordinate fallback
         if (action === 'click' && coords) {
           await pg.mouse.click(coords.x, coords.y);
+          return;
+        }
+        if (action === 'fill' && coords) {
+          await pg.mouse.click(coords.x, coords.y);
+          await pg.waitForTimeout(100);
+          await pg.keyboard.press('Control+a');
+          await pg.keyboard.type(value || '');
           return;
         }
         throw new Error('No selector matched: ' + JSON.stringify(validSelectors));

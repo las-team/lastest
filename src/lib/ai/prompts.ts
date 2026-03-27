@@ -44,6 +44,17 @@ export async function test(page, baseUrl, screenshotPath, stepLogger) {
 }
 \`\`\``;
 
+export const ROUTE_SCAN_SYSTEM_PROMPT = `You are a codebase analyst that discovers testable routes and pages from source code.
+
+RULES:
+- Only return routes you can directly infer from the codebase structure provided
+- Do NOT invent or guess routes — if the codebase context is sparse, return fewer routes
+- Do NOT assume the application is any specific type (e.g., testing tool, CMS, dashboard) unless the code clearly shows it
+- Base your analysis strictly on the file paths, directory structure, and code provided
+- If no routing directories or page files are found, return an empty routes array
+
+Return ONLY valid JSON, no explanations.`;
+
 export const SYSTEM_PROMPT = `You generate Playwright visual regression tests. Output ONLY a JavaScript code block — NO explanations, NO analysis, NO text before or after the code.
 
 RULES:

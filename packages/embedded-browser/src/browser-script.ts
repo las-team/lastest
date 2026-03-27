@@ -180,6 +180,7 @@ export const browserRecordingScript = ({ pointerGestures: pg, cursorFPS: fps, se
         return;
       }
     }
+    if (pg) return;
     const target = e.target as HTMLElement;
     let selectors = generateAllSelectors(target);
     const rect = target.getBoundingClientRect();
@@ -221,8 +222,10 @@ export const browserRecordingScript = ({ pointerGestures: pg, cursorFPS: fps, se
       return;
     }
     const selectors = generateAllSelectors(target);
+    const rect = target.getBoundingClientRect();
+    const boundingBox = { x: rect.x, y: rect.y, width: rect.width, height: rect.height };
     // @ts-expect-error - exposed function
-    window.__recordAction?.('fill', selectors, target.value, undefined, generateActionId());
+    window.__recordAction?.('fill', selectors, target.value, boundingBox, generateActionId());
   }, true);
 
   document.addEventListener('change', (e) => {

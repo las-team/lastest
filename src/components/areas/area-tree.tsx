@@ -18,6 +18,7 @@ import {
   Route,
   ListChecks,
   GripVertical,
+  ScrollText,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -225,6 +226,7 @@ function AreaNode({
         </button>
         <FolderIcon className={cn('h-4 w-4', area.isRouteFolder ? 'text-blue-500' : 'text-primary')} />
         <span className="flex-1 truncate text-sm">{area.name}</span>
+        {area.agentPlan && <ScrollText className="h-3 w-3 text-muted-foreground shrink-0" />}
         <CoverageBadge area={area} />
         <span className="text-xs text-muted-foreground">{area.tests.length + area.suites.length}</span>
         <DropdownMenu>

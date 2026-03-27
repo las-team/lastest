@@ -124,8 +124,9 @@ COPY --from=deps --chown=nextjs:nodejs \
 RUN ln -sf .pnpm/@anthropic-ai+claude-agent-sdk@0.2.19_zod@4.3.5/node_modules/@anthropic-ai \
   ./node_modules/@anthropic-ai
 
-# Make claude CLI available for `docker exec ... claude login`
-RUN ln -s /app/node_modules/@anthropic-ai/claude-agent-sdk/cli.js /usr/local/bin/claude
+# Install Claude Code CLI globally (for `docker exec ... claude login`)
+RUN npm install -g @anthropic-ai/claude-code@latest 2>/dev/null || \
+    ln -s /app/node_modules/@anthropic-ai/claude-agent-sdk/cli.js /usr/local/bin/claude
 
 # Copy embedded-browser dist + runtime deps
 COPY --from=builder --chown=nextjs:nodejs /app/packages/embedded-browser/dist /app/embedded-browser/dist

@@ -1733,6 +1733,14 @@ export class PlaywrightRecorder extends EventEmitter {
         lastAction = 'goto';
       } else if (event.type === 'action') {
         const { action, selector, selectors, value, coordinates, button, modifiers, downloadWrap } = event.data;
+
+        // Skip click actions that follow mouse-up — pointer gestures already captured the click
+        // via mouse-down/up events, so the click action is a duplicate that can interfere
+        // (e.g. clicking canvas center instead of actual position, stealing focus from canvas apps)
+        if ((action === 'click' || action === 'rightclick') && lastEmittedEventType === 'mouse-up') {
+          continue;
+        }
+
         const isRightClick = action === 'rightclick' || button === 2;
         const hasModifiers = modifiers && modifiers.length > 0;
         const isDownloadClick = (action === 'click' || action === 'rightclick') && (nextClickIsDownloadCodegen || downloadWrap);
@@ -1827,16 +1835,14 @@ export class PlaywrightRecorder extends EventEmitter {
                 target.push(`${dIndent}await page.keyboard.up('${mod}');`);
               }
             }
+          } else if (action === 'fill' && lastEmittedEventType === 'mouse-up') {
+            // Text input already focused by previous click (e.g. canvas text editor) - just type
+            target.push(`${dIndent}await page.keyboard.type('${escStr(value || '')}');`);
           } else if (action === 'fill' && coordinates) {
-            if (lastEmittedEventType === 'mouse-up') {
-              // Text input already focused by previous click (e.g. canvas text editor) - just type
-              target.push(`${dIndent}await page.keyboard.type('${escStr(value || '')}');`);
-            } else {
-              target.push(`${dIndent}// Coordinate-only fill (no selectors found) - click to focus then type`);
-              target.push(`${dIndent}await page.mouse.click(${coordinates.x}, ${coordinates.y});`);
-              target.push(`${dIndent}await page.keyboard.press('Control+a');`);
-              target.push(`${dIndent}await page.keyboard.type('${escStr(value || '')}');`);
-            }
+            target.push(`${dIndent}// Coordinate-only fill (no selectors found) - click to focus then type`);
+            target.push(`${dIndent}await page.mouse.click(${coordinates.x}, ${coordinates.y});`);
+            target.push(`${dIndent}await page.keyboard.press('Control+a');`);
+            target.push(`${dIndent}await page.keyboard.type('${escStr(value || '')}');`);
           } else {
             target.push(`${dIndent}// Skipped ${action}: no valid selector or coordinates found`);
           }

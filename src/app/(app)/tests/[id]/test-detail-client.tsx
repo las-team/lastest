@@ -65,6 +65,7 @@ interface TestResult {
   networkRequests: unknown[] | null;
   videoPath: string | null;
   a11yViolations: A11yViolation[] | null;
+  softErrors: string[] | null;
   startedAt: Date | null;
 }
 
@@ -930,6 +931,19 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
                                 <pre className="whitespace-pre-wrap font-mono text-xs overflow-x-auto">
                                   {result.errorMessage}
                                 </pre>
+                              </div>
+                            )}
+
+                            {result.softErrors && (result.softErrors as string[]).length > 0 && (
+                              <div className="mt-2 p-2 bg-yellow-50 border border-yellow-200 rounded text-sm text-yellow-800 dark:bg-yellow-950/30 dark:border-yellow-800 dark:text-yellow-200">
+                                <div className="flex items-start gap-2">
+                                  <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0" />
+                                  <div className="space-y-1">
+                                    {(result.softErrors as string[]).map((err, i) => (
+                                      <p key={i} className="text-xs">{err}</p>
+                                    ))}
+                                  </div>
+                                </div>
                               </div>
                             )}
 

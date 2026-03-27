@@ -128,11 +128,20 @@ export function eventsToCodeLines(
           lines.push(`${indent}await page.waitForLoadState('networkidle').catch(() => {});`);
         }
         lines.push(`${indent}await page.goto(buildUrl(baseUrl, '${relativePath}'));`);
+        lines.push(`${indent}await page.waitForLoadState('networkidle').catch(() => {});`);
         lastNavigatedPath = relativePath;
       }
       lastAction = 'goto';
     } else if (event.type === 'action') {
       const { action, selector, selectors, value, coordinates, button, modifiers, downloadWrap } = event.data;
+
+      // Skip click actions that follow mouse-up — pointer gestures already captured the click
+      // via mouse-down/up events, so the click action is a duplicate that can interfere
+      // (e.g. clicking canvas center instead of actual position, stealing focus from canvas apps)
+      if ((action === 'click' || action === 'rightclick') && lastEmittedEventType === 'mouse-up') {
+        continue;
+      }
+
       const isRightClick = action === 'rightclick' || button === 2;
       const hasModifiers = modifiers && modifiers.length > 0;
       const isDownloadClick = (action === 'click' || action === 'rightclick') && (nextClickIsDownload || downloadWrap);
@@ -198,10 +207,15 @@ export function eventsToCodeLines(
             target.push(`${dIndent}await page.keyboard.up('${mod}');`);
           }
         }
+      } else if (action === 'fill' && lastEmittedEventType === 'mouse-up') {
+        // Text input already focused by previous click (e.g. canvas text editor) - just type
+        const escapedValue = (value || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+        target.push(`${dIndent}await page.keyboard.type('${escapedValue}');`);
       } else if (action === 'fill' && coordinates) {
         const escapedValue = (value || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'");
         target.push(`${dIndent}// Coordinate-only fill (no selectors found) - click to focus then type`);
         target.push(`${dIndent}await page.mouse.click(${coordinates.x}, ${coordinates.y});`);
+        target.push(`${dIndent}await page.waitForTimeout(100);`);
         target.push(`${dIndent}await page.keyboard.press('Control+a');`);
         target.push(`${dIndent}await page.keyboard.type('${escapedValue}');`);
       } else {
@@ -291,6 +305,7 @@ export function eventsToCodeLines(
       }
       lines.push(`${mIndent}await page.mouse.move(${x}, ${y});`);
       lines.push(`${mIndent}await page.mouse.down();`);
+      lastEmittedEventType = 'mouse-down';
     } else if (event.type === 'mouse-up' && event.data.coordinates) {
       const { x, y } = event.data.coordinates;
       const modifiers = event.data.modifiers;
@@ -306,6 +321,7 @@ export function eventsToCodeLines(
         lines.push(`${indent}});`);
         insideDownloadMouseWrap = false;
       }
+      lastEmittedEventType = 'mouse-up';
     } else if (event.type === 'keypress' && event.data.key) {
       const { key, modifiers } = event.data;
       if (modifiers && modifiers.length > 0) {

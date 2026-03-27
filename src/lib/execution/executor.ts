@@ -19,6 +19,7 @@ import type {
 } from '@/lib/ws/protocol';
 import { createMessage } from '@/lib/ws/protocol';
 import { queueCommandToDB, queueCancelCommandToDB } from '@/app/api/ws/runner/route';
+import { getRecordingViewport } from '@/lib/db/queries';
 import { runnerRegistry } from '@/lib/ws/runner-registry';
 import { db } from '@/lib/db';
 import { runners, tests as testsTable, backgroundJobs } from '@/lib/db/schema';
@@ -26,7 +27,7 @@ import { eq, and } from 'drizzle-orm';
 import { createHash } from 'crypto';
 import fs from 'fs/promises';
 import path from 'path';
-import { STORAGE_DIRS } from '@/lib/storage/paths';
+import { STORAGE_DIRS, toRelativePath } from '@/lib/storage/paths';
 import { getCrossOsFontCSS } from '@lastest/shared';
 import {
   getCommandsByTestRun,
@@ -469,6 +470,17 @@ async function executeViaRunner(
       const effectiveBaseUrl = pwOverrides?.baseUrl ?? baseUrl;
       const effectiveTimeout = pwOverrides?.navigationTimeout ?? testTimeout;
 
+      // Look up recording viewport for mismatch detection on remote runner
+      let recordingViewport: { width: number; height: number } | undefined;
+      try {
+        const recVp = await getRecordingViewport(test.id);
+        if (recVp?.viewportWidth && recVp?.viewportHeight) {
+          recordingViewport = { width: recVp.viewportWidth, height: recVp.viewportHeight };
+        }
+      } catch {
+        // Non-critical
+      }
+
       const command = createMessage<RunTestCommand>('command:run_test', {
         testId: test.id,
         testRunId: runId,
@@ -488,6 +500,9 @@ async function executeViaRunner(
         grantClipboardAccess: options.playwrightSettings?.grantClipboardAccess ?? false,
         acceptDownloads: options.playwrightSettings?.acceptDownloads ?? false,
         headed: options.headless === false,
+        forceVideoRecording: options.forceVideoRecording || undefined,
+        recordingViewport,
+        lockViewportToRecording: options.playwrightSettings?.lockViewportToRecording ?? false,
       });
 
       // Queue command to DB
@@ -610,6 +625,20 @@ async function executeViaRunner(
         allScreenshots = await findScreenshotsOnDisk(runId, info.testId, options.repositoryId);
       }
 
+      // Save video file if present in the result
+      let videoPath: string | undefined;
+      if (payload.videoData && payload.videoFilename) {
+        try {
+          const videoDir = path.join(STORAGE_DIRS.videos, options.repositoryId || 'default');
+          await fs.mkdir(videoDir, { recursive: true });
+          const videoDest = path.join(videoDir, payload.videoFilename as string);
+          await fs.writeFile(videoDest, Buffer.from(payload.videoData as string, 'base64'));
+          videoPath = toRelativePath(videoDest);
+        } catch {
+          // Video save is best-effort
+        }
+      }
+
       const testResult: TestRunResult = {
         testId: (payload.testId as string) || info.testId,
         status: payload.status === 'error' || payload.status === 'timeout' || payload.status === 'cancelled' ? 'failed' : (payload.status as 'passed' | 'failed'),
@@ -618,6 +647,7 @@ async function executeViaRunner(
         screenshots: allScreenshots,
         errorMessage: errorPayload?.message as string | undefined,
         softErrors: Array.isArray(payload.softErrors) && payload.softErrors.length > 0 ? payload.softErrors as string[] : undefined,
+        videoPath,
       };
       results.push(testResult);
       await onResult?.(testResult);
