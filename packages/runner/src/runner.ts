@@ -30,6 +30,8 @@ export interface TestRunResult {
   logs: LogEntry[];
   screenshots: Array<{ filename: string; data: string; width: number; height: number; capturedAt?: number }>;
   softErrors?: string[];
+  videoData?: string; // base64-encoded video file
+  videoFilename?: string;
 }
 
 export class TestRunner {
@@ -163,6 +165,7 @@ export class TestRunner {
 
     const startTime = Date.now();
     const screenshots: Array<{ filename: string; data: string; width: number; height: number }> = [];
+    let result: TestRunResult | null = null;
 
     let context: BrowserContext | null = null;
     let page: Page | null = null;
@@ -211,12 +214,24 @@ export class TestRunner {
         }
       }
       const needsStabilizedContext = command.stabilization?.crossOsConsistency || command.stabilization?.freezeAnimations;
+
+      // Set up video recording directory if requested
+      let videoDir: string | undefined;
+      if (command.forceVideoRecording) {
+        videoDir = path.join(os.tmpdir(), 'lastest-runner-videos', command.testRunId);
+        if (!fs.existsSync(videoDir)) {
+          fs.mkdirSync(videoDir, { recursive: true });
+        }
+        logFn('info', 'Video recording enabled');
+      }
+
       context = await this.browser!.newContext({
         viewport,
         ...(parsedStorageState ? { storageState: parsedStorageState } : {}),
         ...(needsStabilizedContext ? { deviceScaleFactor: 1 } : {}),
         ...(needsStabilizedContext ? { locale: 'en-US', timezoneId: 'UTC', colorScheme: 'light' as const } : {}),
         ...(command.stabilization?.freezeAnimations ? { reducedMotion: 'reduce' as const } : {}),
+        ...(videoDir ? { recordVideo: { dir: videoDir, size: viewport } } : {}),
       });
       page = await context.newPage();
 
@@ -340,7 +355,7 @@ export class TestRunner {
       const durationMs = Date.now() - startTime;
       logFn('info', `Test passed in ${durationMs}ms (${screenshots.length} screenshots)`);
 
-      return {
+      result = {
         status: 'passed',
         durationMs,
         logs,
@@ -356,7 +371,7 @@ export class TestRunner {
       const isCancelled = errorMessage.includes('cancelled') || testAbort.signal.aborted;
       if (isCancelled) {
         logFn('info', 'Test cancelled');
-        return {
+        result = {
           status: 'cancelled',
           durationMs,
           error: {
@@ -365,45 +380,45 @@ export class TestRunner {
           logs,
           screenshots,
         };
-      }
+      } else {
+        // Check if timeout
+        const isTimeout = errorMessage.includes('timed out');
+        logFn('error', `Test ${isTimeout ? 'timed out' : 'failed'}: ${errorMessage}`);
 
-      // Check if timeout
-      const isTimeout = errorMessage.includes('timed out');
-      logFn('error', `Test ${isTimeout ? 'timed out' : 'failed'}: ${errorMessage}`);
-
-      // Capture failure screenshot — but NOT on timeout because the test code
-      // is still running on the page and Playwright can't screenshot while
-      // operations are in-flight (it would hang).
-      let errorScreenshot: string | undefined;
-      if (page && rawScreenshot && !isTimeout) {
-        try {
-          const buffer = await rawScreenshot({ fullPage: true });
-          errorScreenshot = buffer.toString('base64');
-          const filename = `${command.testRunId}-${command.testId}-failure.png`;
-          const viewport = command.viewport || { width: 1280, height: 720 };
-          screenshots.push({
-            filename,
-            data: errorScreenshot,
-            width: viewport.width,
-            height: viewport.height,
-          });
-        } catch {
-          logFn('warn', 'Failed to capture error screenshot');
+        // Capture failure screenshot — but NOT on timeout because the test code
+        // is still running on the page and Playwright can't screenshot while
+        // operations are in-flight (it would hang).
+        let errorScreenshot: string | undefined;
+        if (page && rawScreenshot && !isTimeout) {
+          try {
+            const buffer = await rawScreenshot({ fullPage: true });
+            errorScreenshot = buffer.toString('base64');
+            const filename = `${command.testRunId}-${command.testId}-failure.png`;
+            const viewport = command.viewport || { width: 1280, height: 720 };
+            screenshots.push({
+              filename,
+              data: errorScreenshot,
+              width: viewport.width,
+              height: viewport.height,
+            });
+          } catch {
+            logFn('warn', 'Failed to capture error screenshot');
+          }
         }
-      }
 
-      return {
-        status: isTimeout ? 'timeout' : 'failed',
-        durationMs,
-        error: {
-          message: errorMessage,
-          stack: errorStack,
-          screenshot: errorScreenshot,
-        },
-        logs,
-        screenshots,
-        softErrors: softErrors.length > 0 ? softErrors : undefined,
-      };
+        result = {
+          status: isTimeout ? 'timeout' : 'failed',
+          durationMs,
+          error: {
+            message: errorMessage,
+            stack: errorStack,
+            screenshot: errorScreenshot,
+          },
+          logs,
+          screenshots,
+          softErrors: softErrors.length > 0 ? softErrors : undefined,
+        };
+      }
     } finally {
       this.activeTests.delete(command.testId);
       // Clear legacy tracking if this was the tracked test
@@ -411,11 +426,31 @@ export class TestRunner {
         this.abortController = null;
         this.currentTestRunId = null;
       }
+      // Capture video before closing context (video is finalized on close)
+      const video = page?.video();
       if (page) await page.close().catch(() => {});
       if (context) await context.close().catch(() => {});
+      // After context close, video file is finalized — read and base64-encode
+      if (video && command.forceVideoRecording && result) {
+        try {
+          const videoPath = await video.path();
+          if (videoPath && fs.existsSync(videoPath)) {
+            const videoBuffer = fs.readFileSync(videoPath);
+            result.videoData = videoBuffer.toString('base64');
+            result.videoFilename = `${command.testRunId}-${command.testId}.webm`;
+            logFn('info', `Video captured: ${result.videoFilename} (${Math.round(videoBuffer.length / 1024)}KB)`);
+            // Clean up temp file
+            fs.unlinkSync(videoPath);
+          }
+        } catch {
+          logFn('warn', 'Failed to capture video recording');
+        }
+      }
       // Close browser only when no tests are running
       await this.closeBrowserIfIdle();
     }
+
+    return result!;
   }
 
   async runSetup(

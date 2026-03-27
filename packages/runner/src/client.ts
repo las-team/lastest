@@ -464,6 +464,8 @@ export class RunnerClient {
         error: result.error,
         logs: result.logs,
         softErrors: result.softErrors,
+        videoData: result.videoData,
+        videoFilename: result.videoFilename,
       });
       console.log(`[Test ${testId}] Sending result to server...`);
       const resultSent = await this.sendMessage(resultMsg);
