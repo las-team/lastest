@@ -19,6 +19,7 @@ import type {
 } from '@/lib/ws/protocol';
 import { createMessage } from '@/lib/ws/protocol';
 import { queueCommandToDB, queueCancelCommandToDB } from '@/app/api/ws/runner/route';
+import { getRecordingViewport } from '@/lib/db/queries';
 import { runnerRegistry } from '@/lib/ws/runner-registry';
 import { db } from '@/lib/db';
 import { runners, tests as testsTable, backgroundJobs } from '@/lib/db/schema';
@@ -469,6 +470,17 @@ async function executeViaRunner(
       const effectiveBaseUrl = pwOverrides?.baseUrl ?? baseUrl;
       const effectiveTimeout = pwOverrides?.navigationTimeout ?? testTimeout;
 
+      // Look up recording viewport for mismatch detection on remote runner
+      let recordingViewport: { width: number; height: number } | undefined;
+      try {
+        const recVp = await getRecordingViewport(test.id);
+        if (recVp?.viewportWidth && recVp?.viewportHeight) {
+          recordingViewport = { width: recVp.viewportWidth, height: recVp.viewportHeight };
+        }
+      } catch {
+        // Non-critical
+      }
+
       const command = createMessage<RunTestCommand>('command:run_test', {
         testId: test.id,
         testRunId: runId,
@@ -489,6 +501,8 @@ async function executeViaRunner(
         acceptDownloads: options.playwrightSettings?.acceptDownloads ?? false,
         headed: options.headless === false,
         forceVideoRecording: options.forceVideoRecording || undefined,
+        recordingViewport,
+        lockViewportToRecording: options.playwrightSettings?.lockViewportToRecording ?? false,
       });
 
       // Queue command to DB

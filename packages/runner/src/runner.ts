@@ -201,7 +201,27 @@ export class TestRunner {
       // Use shared browser instance (will relaunch if args or browser type changed)
       await this.ensureBrowser(browserType, launchArgs);
 
-      const viewport = command.viewport || { width: 1280, height: 720 };
+      let viewport = command.viewport || { width: 1280, height: 720 };
+
+      // Viewport mismatch: lock to recording size or warn
+      if (command.recordingViewport) {
+        const recVp = command.recordingViewport;
+        if (recVp.width !== viewport.width || recVp.height !== viewport.height) {
+          if (command.lockViewportToRecording) {
+            viewport = { width: recVp.width, height: recVp.height };
+            logFn('info', `Viewport locked to recording size: ${recVp.width}x${recVp.height}`);
+          } else {
+            // Only warn for tests that use coordinate-based actions
+            const usesCoords = /page\.mouse\.click\(|page\.mouse\.move\(|replayCursorPath\(/.test(command.code);
+            if (usesCoords) {
+              softErrors.push(
+                `Viewport mismatch: recorded at ${recVp.width}x${recVp.height}, playing back at ${viewport.width}x${viewport.height}. Coordinate-based actions may click wrong positions.`
+              );
+            }
+          }
+        }
+      }
+
       // Inject storageState from setup scripts (e.g. login session cookies/localStorage)
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       let parsedStorageState: any;

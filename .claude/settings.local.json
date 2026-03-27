@@ -142,7 +142,9 @@
       "WebFetch(domain:www.tonyward.dev)",
       "WebFetch(domain:dx.tips)",
       "WebFetch(domain:qa-financial.com)",
-      "Bash(npm view:*)"
+      "Bash(npm view:*)",
+      "Bash(grep -n \"error\\\\|warning\\\\|result\\\\|status\" /home/ewyct/dev/lastest2/src/app/\\\\\\(app\\\\\\)/tests/[id]/test-detail-client.tsx)",
+      "Bash(grep -n \"softErrors\\\\|results.*=.*use\\\\|TestResult\" src/app/\\\\\\(app\\\\\\)/tests/[id]/test-detail-client.tsx)"
     ]
   },
   "disabledMcpjsonServers": [

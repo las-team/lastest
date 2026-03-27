@@ -83,6 +83,7 @@ export function PlaywrightSettingsCard({
   const [grantClipboardAccess, setGrantClipboardAccess] = useState(settings.grantClipboardAccess ?? false);
   const [acceptDownloads, setAcceptDownloads] = useState(settings.acceptDownloads ?? false);
   const [enableNetworkInterception, setEnableNetworkInterception] = useState(settings.enableNetworkInterception ?? false);
+  const [lockViewportToRecording, setLockViewportToRecording] = useState(settings.lockViewportToRecording ?? false);
   const [screenshotDelay, setScreenshotDelay] = useState(settings.screenshotDelay ?? 0);
   const [maxParallelTests, setMaxParallelTests] = useState(settings.maxParallelTests ?? 1);
   const [stabilization, setStabilization] = useState<StabilizationSettings>(
@@ -119,6 +120,7 @@ export function PlaywrightSettingsCard({
     grantClipboardAccess: settings.grantClipboardAccess ?? false,
     acceptDownloads: settings.acceptDownloads ?? false,
     enableNetworkInterception: settings.enableNetworkInterception ?? false,
+    lockViewportToRecording: settings.lockViewportToRecording ?? false,
     screenshotDelay: settings.screenshotDelay ?? 0,
     maxParallelTests: settings.maxParallelTests ?? 1,
     stabilization: { ...DEFAULT_STABILIZATION_SETTINGS, ...settings.stabilization },
@@ -148,6 +150,7 @@ export function PlaywrightSettingsCard({
     setGrantClipboardAccess(settings.grantClipboardAccess ?? false);
     setAcceptDownloads(settings.acceptDownloads ?? false);
     setEnableNetworkInterception(settings.enableNetworkInterception ?? false);
+    setLockViewportToRecording(settings.lockViewportToRecording ?? false);
     setScreenshotDelay(settings.screenshotDelay ?? 0);
     setMaxParallelTests(settings.maxParallelTests ?? 1);
     setStabilization({ ...DEFAULT_STABILIZATION_SETTINGS, ...settings.stabilization });
@@ -174,6 +177,7 @@ export function PlaywrightSettingsCard({
       grantClipboardAccess: settings.grantClipboardAccess ?? false,
       acceptDownloads: settings.acceptDownloads ?? false,
       enableNetworkInterception: settings.enableNetworkInterception ?? false,
+      lockViewportToRecording: settings.lockViewportToRecording ?? false,
       screenshotDelay: settings.screenshotDelay ?? 0,
       maxParallelTests: settings.maxParallelTests ?? 1,
       stabilization: { ...DEFAULT_STABILIZATION_SETTINGS, ...settings.stabilization },
@@ -227,6 +231,7 @@ export function PlaywrightSettingsCard({
         grantClipboardAccess,
         acceptDownloads,
         enableNetworkInterception,
+        lockViewportToRecording,
         screenshotDelay,
         maxParallelTests,
         stabilization,
@@ -239,7 +244,7 @@ export function PlaywrightSettingsCard({
         toast.success('Playwright settings saved');
       }
     });
-  }, [repositoryId, selectorPriority, browser, viewportWidth, viewportHeight, headlessMode, navigationTimeout, actionTimeout, pointerGestures, cursorFPS, cursorPlaybackSpeed, defaultRecordingEngine, freezeAnimations, enableVideoRecording, acceptAnyCertificate, networkErrorMode, ignoreExternalNetworkErrors, consoleErrorMode, grantClipboardAccess, acceptDownloads, enableNetworkInterception, screenshotDelay, maxParallelTests, stabilization, browsers, compact]);
+  }, [repositoryId, selectorPriority, browser, viewportWidth, viewportHeight, headlessMode, navigationTimeout, actionTimeout, pointerGestures, cursorFPS, cursorPlaybackSpeed, defaultRecordingEngine, freezeAnimations, enableVideoRecording, acceptAnyCertificate, networkErrorMode, ignoreExternalNetworkErrors, consoleErrorMode, grantClipboardAccess, acceptDownloads, enableNetworkInterception, lockViewportToRecording, screenshotDelay, maxParallelTests, stabilization, browsers, compact]);
 
   // Auto-save with debounce - only when values differ from original props
   useEffect(() => {
@@ -265,6 +270,7 @@ export function PlaywrightSettingsCard({
       grantClipboardAccess !== orig.grantClipboardAccess ||
       acceptDownloads !== orig.acceptDownloads ||
       enableNetworkInterception !== orig.enableNetworkInterception ||
+      lockViewportToRecording !== orig.lockViewportToRecording ||
       screenshotDelay !== orig.screenshotDelay ||
       maxParallelTests !== orig.maxParallelTests ||
       JSON.stringify(stabilization) !== JSON.stringify(orig.stabilization) ||
@@ -285,7 +291,7 @@ export function PlaywrightSettingsCard({
         clearTimeout(debounceRef.current);
       }
     };
-  }, [selectorPriority, browser, viewportWidth, viewportHeight, headlessMode, navigationTimeout, actionTimeout, pointerGestures, cursorFPS, cursorPlaybackSpeed, defaultRecordingEngine, freezeAnimations, enableVideoRecording, acceptAnyCertificate, networkErrorMode, ignoreExternalNetworkErrors, consoleErrorMode, grantClipboardAccess, acceptDownloads, enableNetworkInterception, screenshotDelay, maxParallelTests, stabilization, browsers, doSave]);
+  }, [selectorPriority, browser, viewportWidth, viewportHeight, headlessMode, navigationTimeout, actionTimeout, pointerGestures, cursorFPS, cursorPlaybackSpeed, defaultRecordingEngine, freezeAnimations, enableVideoRecording, acceptAnyCertificate, networkErrorMode, ignoreExternalNetworkErrors, consoleErrorMode, grantClipboardAccess, acceptDownloads, enableNetworkInterception, lockViewportToRecording, screenshotDelay, maxParallelTests, stabilization, browsers, doSave]);
 
   // Notify parent of save status changes
   useEffect(() => {
@@ -310,6 +316,7 @@ export function PlaywrightSettingsCard({
       setGrantClipboardAccess(false);
       setAcceptDownloads(false);
       setEnableNetworkInterception(false);
+      setLockViewportToRecording(false);
       setScreenshotDelay(0);
       setMaxParallelTests(1);
       setStabilization(DEFAULT_STABILIZATION_SETTINGS);
@@ -1145,6 +1152,15 @@ export function PlaywrightSettingsCard({
               className="w-24"
             />
             <span className="text-xs text-muted-foreground">px</span>
+          </div>
+        )}
+        {!compact && (
+          <div className="flex items-center justify-between mt-2">
+            <div>
+              <span className="text-sm">Lock viewport to recording size</span>
+              <p className="text-xs text-muted-foreground">Use the viewport from when the test was recorded. Recommended for canvas/coordinate-heavy tests.</p>
+            </div>
+            <Switch checked={lockViewportToRecording} onCheckedChange={setLockViewportToRecording} />
           </div>
         )}
       </div>

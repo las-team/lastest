@@ -61,6 +61,8 @@ export interface RunTestCommandPayload {
   grantClipboardAccess?: boolean;
   acceptDownloads?: boolean;
   forceVideoRecording?: boolean;
+  recordingViewport?: { width: number; height: number };
+  lockViewportToRecording?: boolean;
 }
 
 export interface RunTestCommand extends BaseMessage {

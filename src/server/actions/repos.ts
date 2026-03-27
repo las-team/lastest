@@ -267,6 +267,7 @@ export async function applyTestingTemplate(
     ...playwrightFields,
     selectorPriority,
     stabilization,
+    lockViewportToRecording: templateId === 'canvas',
   });
   await queries.upsertDiffSensitivitySettings(repositoryId, diff);
 

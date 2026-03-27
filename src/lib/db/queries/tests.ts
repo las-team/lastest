@@ -434,6 +434,7 @@ export async function getTestResultsByTest(testId: string) {
       networkRequests: testResults.networkRequests,
       videoPath: testResults.videoPath,
       a11yViolations: testResults.a11yViolations,
+      softErrors: testResults.softErrors,
       startedAt: testRuns.startedAt,
     })
     .from(testResults)
@@ -634,6 +635,16 @@ export async function getLatestVersionNumber(testId: string): Promise<number> {
     .limit(1)
     .get();
   return latest?.version ?? 0;
+}
+
+export async function getRecordingViewport(testId: string) {
+  return db
+    .select({ viewportWidth: testVersions.viewportWidth, viewportHeight: testVersions.viewportHeight })
+    .from(testVersions)
+    .where(eq(testVersions.testId, testId))
+    .orderBy(desc(testVersions.version))
+    .limit(1)
+    .get();
 }
 
 export async function createTestVersion(data: Omit<NewTestVersion, 'id'>) {

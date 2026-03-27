@@ -89,6 +89,8 @@ export interface RunTestCommandPayload {
   acceptDownloads?: boolean;
   headed?: boolean;
   forceVideoRecording?: boolean;
+  recordingViewport?: { width: number; height: number };
+  lockViewportToRecording?: boolean;
 }
 
 export interface RunTestCommand extends BaseMessage {
