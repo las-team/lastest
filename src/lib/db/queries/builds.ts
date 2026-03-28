@@ -217,7 +217,15 @@ export async function getBuildTestSummaries(buildId: string) {
 
 // Build Summary helpers
 export async function computeBuildStatus(buildId: string): Promise<BuildStatus> {
-  const diffs = await db.select().from(visualDiffs).where(eq(visualDiffs.buildId, buildId)).all();
+  const allDiffs = await db.select().from(visualDiffs).where(eq(visualDiffs.buildId, buildId)).all();
+
+  if (allDiffs.length === 0) return 'safe_to_merge';
+
+  // Filter out diffs from quarantined tests — they don't block builds
+  const quarantinedTestIds = new Set(
+    (await db.select({ id: tests.id }).from(tests).where(eq(tests.quarantined, true)).all()).map(t => t.id)
+  );
+  const diffs = allDiffs.filter(d => !d.testId || !quarantinedTestIds.has(d.testId));
 
   if (diffs.length === 0) return 'safe_to_merge';
 
@@ -264,4 +272,64 @@ export async function getBuildCount(repositoryId?: string | null) {
   }
   const rows = await db.select({ id: builds.id }).from(builds).all();
   return rows.length;
+}
+
+// Get build trends for dashboard sparklines (daily aggregates over last N days)
+export async function getBuildTrends(repositoryId: string, days = 30): Promise<{
+  date: string;
+  passRate: number;
+  flakyRate: number;
+  totalTests: number;
+  failedCount: number;
+  passedCount: number;
+  flakyCount: number;
+}[]> {
+  const cutoff = new Date();
+  cutoff.setDate(cutoff.getDate() - days);
+
+  const recentBuilds = await db
+    .select({
+      passedCount: builds.passedCount,
+      failedCount: builds.failedCount,
+      totalTests: builds.totalTests,
+      flakyCount: builds.flakyCount,
+      completedAt: builds.completedAt,
+    })
+    .from(builds)
+    .innerJoin(testRuns, eq(builds.testRunId, testRuns.id))
+    .where(and(
+      eq(testRuns.repositoryId, repositoryId),
+      sql`${builds.completedAt} IS NOT NULL`,
+    ))
+    .orderBy(desc(builds.completedAt))
+    .all();
+
+  // Group by date
+  const byDate = new Map<string, { passed: number; failed: number; total: number; flaky: number; count: number }>();
+
+  for (const b of recentBuilds) {
+    if (!b.completedAt) continue;
+    const d = new Date(b.completedAt);
+    if (d < cutoff) continue;
+    const dateKey = d.toISOString().slice(0, 10);
+    const entry = byDate.get(dateKey) ?? { passed: 0, failed: 0, total: 0, flaky: 0, count: 0 };
+    entry.passed += b.passedCount ?? 0;
+    entry.failed += b.failedCount ?? 0;
+    entry.total += b.totalTests ?? 0;
+    entry.flaky += b.flakyCount ?? 0;
+    entry.count++;
+    byDate.set(dateKey, entry);
+  }
+
+  return Array.from(byDate.entries())
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([date, d]) => ({
+      date,
+      passRate: d.total > 0 ? Math.round((d.passed / d.total) * 100) : 0,
+      flakyRate: d.total > 0 ? Math.round((d.flaky / d.total) * 100) : 0,
+      totalTests: d.total,
+      failedCount: d.failed,
+      passedCount: d.passed,
+      flakyCount: d.flaky,
+    }));
 }

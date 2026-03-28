@@ -1,6 +1,16 @@
 import { sqliteTable, text, integer, index } from 'drizzle-orm/sqlite-core';
 
 // Type definitions for JSON columns
+
+export type TriageClassification = 'real_regression' | 'flaky_test' | 'environment_issue' | 'test_maintenance' | 'unknown';
+
+export interface TriageResult {
+  classification: TriageClassification;
+  confidence: number; // 0-1
+  reasoning: string;
+  actionTaken?: string;
+}
+
 export interface NetworkRequest {
   url: string;
   method: string;
@@ -157,6 +167,7 @@ export const tests = sqliteTable('tests', {
   playwrightOverrides: text('playwright_overrides', { mode: 'json' }).$type<TestPlaywrightOverrides>(),
   executionMode: text('execution_mode').default('procedural'), // 'procedural' | 'agent'
   agentPrompt: text('agent_prompt'), // NL description for agent mode
+  quarantined: integer('quarantined', { mode: 'boolean' }).default(false), // quarantined tests run but don't block builds
   deletedAt: integer('deleted_at', { mode: 'timestamp' }),
   createdAt: integer('created_at', { mode: 'timestamp' }),
   updatedAt: integer('updated_at', { mode: 'timestamp' }),
@@ -206,6 +217,9 @@ export const testResults = sqliteTable('test_results', {
   a11yViolations: text('a11y_violations', { mode: 'json' }).$type<A11yViolation[]>(),
   videoPath: text('video_path'),
   softErrors: text('soft_errors', { mode: 'json' }).$type<string[]>(),
+  retryOf: text('retry_of'), // links to original test result ID if this is a retry
+  isFlaky: integer('is_flaky', { mode: 'boolean' }).default(false), // true if test failed then passed on retry
+  triage: text('triage', { mode: 'json' }).$type<TriageResult>(), // AI failure triage classification
 });
 
 // Repository provider type
@@ -591,6 +605,7 @@ export const playwrightSettings = sqliteTable('playwright_settings', {
   acceptDownloads: integer('accept_downloads', { mode: 'boolean' }).default(false), // accept file downloads in tests
   enableNetworkInterception: integer('enable_network_interception', { mode: 'boolean' }).default(false), // enable page.route() network mocking
   browsers: text('browsers', { mode: 'json' }).$type<string[]>().default(['chromium']), // browsers to use for build execution
+  autoRetryCount: integer('auto_retry_count').default(0), // 0-3: how many times to retry a failing test to detect flakiness
   createdAt: integer('created_at', { mode: 'timestamp' }),
   updatedAt: integer('updated_at', { mode: 'timestamp' }),
 });

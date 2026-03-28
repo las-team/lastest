@@ -144,7 +144,8 @@
       "WebFetch(domain:qa-financial.com)",
       "Bash(npm view:*)",
       "Bash(grep -n \"error\\\\|warning\\\\|result\\\\|status\" /home/ewyct/dev/lastest2/src/app/\\\\\\(app\\\\\\)/tests/[id]/test-detail-client.tsx)",
-      "Bash(grep -n \"softErrors\\\\|results.*=.*use\\\\|TestResult\" src/app/\\\\\\(app\\\\\\)/tests/[id]/test-detail-client.tsx)"
+      "Bash(grep -n \"softErrors\\\\|results.*=.*use\\\\|TestResult\" src/app/\\\\\\(app\\\\\\)/tests/[id]/test-detail-client.tsx)",
+      "Bash(ls -la /home/ewyct/dev/lastest2/src/app/\\\\\\(app\\\\\\)/)"
     ]
   },
   "disabledMcpjsonServers": [

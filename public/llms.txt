@@ -1,0 +1,25 @@
+# Lastest2
+
+> Visual regression testing platform with AI-powered test generation, self-healing selectors, and MCP server for agent integration.
+
+## Overview
+
+Lastest2 records browser interactions, runs Playwright tests, diffs screenshots against baselines, and uses AI to classify visual changes. It supports 3 diff engines, 6 AI providers, and 12 stabilization features for flake-free testing.
+
+## MCP Integration
+
+Install: `npx @lastest/mcp-server --url <URL> --api-key <KEY>`
+
+Tools: lastest2_run_tests, lastest2_get_build_status, lastest2_list_tests, lastest2_list_failing_tests, lastest2_get_visual_diff, lastest2_approve_baseline, lastest2_reject_baseline, lastest2_create_test, lastest2_get_coverage, lastest2_heal_test
+
+## API
+
+Base: /api/v1/
+Auth: Bearer token
+Endpoints: /repos, /repos/:id/tests, /repos/:id/builds, /repos/:id/coverage, /builds/:id, /diffs/approve, /diffs/reject, /tests/create, /tests/:id/heal
+
+## Documentation
+
+- AGENTS.md: Agent integration guide
+- SKILL.md: OpenClaw skill definition
+- CLAUDE.md: Development instructions

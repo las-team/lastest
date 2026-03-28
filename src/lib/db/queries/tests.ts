@@ -454,6 +454,37 @@ export async function updateTestResult(id: string, data: Partial<NewTestResult>)
   await db.update(testResults).set(data).where(eq(testResults.id, id));
 }
 
+// Get flaky rate for a test over the last N runs
+export async function getTestFlakyRate(testId: string, lastN = 10): Promise<{ total: number; flakyCount: number; rate: number }> {
+  const results = await db
+    .select({ isFlaky: testResults.isFlaky })
+    .from(testResults)
+    .where(eq(testResults.testId, testId))
+    .orderBy(desc(testResults.id))
+    .limit(lastN)
+    .all();
+  const flakyCount = results.filter(r => r.isFlaky).length;
+  return {
+    total: results.length,
+    flakyCount,
+    rate: results.length > 0 ? Math.round((flakyCount / results.length) * 100) : 0,
+  };
+}
+
+// Get quarantined tests for a repository
+export async function getQuarantinedTests(repositoryId: string) {
+  return db
+    .select()
+    .from(tests)
+    .where(and(eq(tests.repositoryId, repositoryId), eq(tests.quarantined, true)))
+    .all();
+}
+
+// Toggle quarantine status for a test
+export async function setTestQuarantined(testId: string, quarantined: boolean) {
+  await db.update(tests).set({ quarantined, updatedAt: new Date() }).where(eq(tests.id, testId));
+}
+
 // Get tests with their latest result status
 export async function getTestsWithStatus() {
   const allTests = await getTests();

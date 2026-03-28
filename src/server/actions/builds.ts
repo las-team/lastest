@@ -934,6 +934,102 @@ async function runBuildAsync(
       return;
     }
 
+    // --- Flaky test detection: auto-retry failed tests ---
+    const autoRetryCount = playwrightSettings?.autoRetryCount ?? 0;
+    if (autoRetryCount > 0 && failedCount > 0) {
+      const allResults = await queries.getTestResultsByRun(testRunId);
+      const failedResults = allResults.filter(r => r.status === 'failed');
+      const failedTestIds = [...new Set(failedResults.map(r => r.testId!))];
+      const failedTests = tests.filter(t => failedTestIds.includes(t.id));
+
+      if (failedTests.length > 0) {
+        console.log(`[build] Auto-retrying ${failedTests.length} failed test(s), max ${autoRetryCount} attempt(s)`);
+        await updateJobProgress(jobId, processedCount, totalTestsAcrossBrowsers, { activeTests: ['Retrying failed tests...'] });
+
+        for (let attempt = 1; attempt <= autoRetryCount; attempt++) {
+          // Re-check which tests are still failing (they may have passed on a previous retry)
+          const currentFailedResults = (await queries.getTestResultsByRun(testRunId))
+            .filter(r => r.status === 'failed' && !r.isFlaky);
+          const currentFailedTestIds = [...new Set(currentFailedResults.map(r => r.testId!))];
+          const testsToRetry = failedTests.filter(t => currentFailedTestIds.includes(t.id));
+
+          if (testsToRetry.length === 0) break;
+
+          console.log(`[build] Retry attempt ${attempt}/${autoRetryCount}: ${testsToRetry.length} test(s)`);
+
+          // Create a temporary retry result handler
+          const retryOnResult = async (result: { testId: string; status: string; screenshotPath?: string; screenshots: { path: string; label?: string }[]; errorMessage?: string; durationMs?: number; a11yViolations?: { id: string; impact: 'critical' | 'serious' | 'moderate' | 'minor'; description: string; help: string; helpUrl: string; nodes: number }[]; stabilityMetadata?: { frameCount: number; stableFrames: number; maxFrameDiff: number; isStable: boolean }; videoPath?: string; softErrors?: string[] }) => {
+            if (result.status === 'passed') {
+              // Test passed on retry — it's flaky!
+              // Find the original failed result and mark it as flaky
+              const originalResult = currentFailedResults.find(r => r.testId === result.testId);
+              if (originalResult) {
+                await queries.updateTestResult(originalResult.id, { isFlaky: true });
+              }
+
+              // Save the retry result
+              await queries.createTestResult({
+                testRunId,
+                testId: result.testId,
+                testVersionId: versionIdMap.get(result.testId) ?? null,
+                status: result.status,
+                screenshotPath: result.screenshotPath,
+                screenshots: result.screenshots,
+                errorMessage: result.errorMessage,
+                durationMs: result.durationMs,
+                viewport: '1280x720',
+                browser: currentBrowserType,
+                a11yViolations: result.a11yViolations,
+                videoPath: result.videoPath,
+                softErrors: result.softErrors,
+                retryOf: originalResult?.id ?? null,
+                isFlaky: false,
+              });
+
+              // Adjust counts
+              passedCount++;
+              failedCount--;
+              flakyCount++;
+
+              console.log(`[build] Test "${testsToRetry.find(t => t.id === result.testId)?.name}" passed on retry ${attempt} — marked as flaky`);
+            }
+            // If retry also fails, do nothing — keep the original failed result
+          };
+
+          // Re-run failed tests
+          if (isRemoteRunner) {
+            await executeTests(testsToRetry, testRunId, {
+              repositoryId,
+              teamId,
+              runnerId,
+              environmentConfig: envConfig,
+              playwrightSettings: playwrightSettings ? { ...playwrightSettings, browser: currentBrowserType } : null,
+              maxParallelTests: 1, // Retry sequentially for stability
+              jobId,
+              setupContext: {
+                storageState: setupContext.storageState,
+                variables: setupContext.variables,
+              },
+            }, undefined, retryOnResult);
+          } else {
+            if (playwrightSettings) {
+              runner.setSettings({ ...playwrightSettings, browser: currentBrowserType });
+            }
+            runner.setSetupContext(setupContext);
+            await runner.runTests(testsToRetry, testRunId, undefined, retryOnResult);
+            runner.clearSetupContext();
+          }
+
+          // Update build progress after retry
+          await queries.updateBuild(buildId, {
+            passedCount,
+            failedCount,
+            flakyCount,
+          });
+        }
+      }
+    }
+
     // Update test run status
     const hasFailures = failedCount > 0;
     await queries.updateTestRun(testRunId, {
@@ -966,6 +1062,13 @@ async function runBuildAsync(
       gitBranch: branch,
       repositoryId,
     });
+
+    // Fire-and-forget AI failure triage for failed tests
+    if (failedCount > 0) {
+      import('@/lib/ai/failure-triage').then(({ triageBuildFailures }) => {
+        triageBuildFailures(buildId, repositoryId).catch(console.error);
+      }).catch(console.error);
+    }
 
     // Phase 2: If this was a comparison baseline build, chain the feature build
     const completedBuild = await queries.getBuild(buildId);

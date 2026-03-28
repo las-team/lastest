@@ -1,5 +1,5 @@
 /**
- * REST API v1 for VSCode Extension
+ * REST API v1 for VSCode Extension + MCP Server
  *
  * Provides authenticated HTTP endpoints wrapping server actions.
  *
@@ -10,16 +10,22 @@
  *   GET  /api/v1/repos/:id/functional-areas - Get functional areas for repo
  *   GET  /api/v1/repos/:id/tests - Get tests for repo
  *   GET  /api/v1/repos/:id/builds - Get builds for repo
+ *   GET  /api/v1/repos/:id/coverage - Get test coverage stats for repo
  *   GET  /api/v1/functional-areas/:id/tests - Get tests by functional area
  *   GET  /api/v1/tests/:id - Get single test
  *   GET  /api/v1/runs/:id - Get test run
  *   GET  /api/v1/builds/:id - Get build
  *   POST /api/v1/runs - Create and run tests
+ *   POST /api/v1/diffs/approve - Batch approve visual diffs
+ *   POST /api/v1/diffs/reject - Batch reject visual diffs
+ *   POST /api/v1/tests/create - Create test via AI
+ *   POST /api/v1/tests/:id/heal - Heal a failing test via AI
  */
 
 import { NextRequest, NextResponse } from 'next/server';
 import * as queries from '@/lib/db/queries';
 import { createAndRunBuild } from '@/server/actions/builds';
+import { batchApproveDiffs, batchRejectDiffs } from '@/server/actions/diffs';
 import { getCurrentSession } from '@/lib/auth';
 import { verifyBearerToken } from '@/lib/auth/api-key';
 
@@ -101,6 +107,19 @@ export async function GET(
         const limit = Math.min(Math.max(Number.isNaN(rawLimit) ? 10 : rawLimit, 1), 100);
         const builds = await queries.getBuildsByRepo(id, limit);
         return NextResponse.json(builds);
+      }
+
+      if (subResource === 'coverage') {
+        const routeCoverage = await queries.getRouteCoverageStats(id);
+        const areas = await queries.getFunctionalAreasByRepo(id);
+        const tests = await queries.getTestsByRepo(id);
+        const testedAreaIds = new Set(tests.filter(t => t.functionalAreaId).map(t => t.functionalAreaId));
+        const areaCoverage = {
+          total: areas.length,
+          tested: areas.filter(a => testedAreaIds.has(a.id)).length,
+          percentage: areas.length > 0 ? Math.round((areas.filter(a => testedAreaIds.has(a.id)).length / areas.length) * 100) : 0,
+        };
+        return NextResponse.json({ routeCoverage, areaCoverage });
       }
 
       return NextResponse.json(repo);
@@ -232,6 +251,62 @@ export async function POST(
       // Use build system for visual diff tracking
       const result = await createAndRunBuild('manual', testIdsToRun, repositoryId);
 
+      return NextResponse.json(result);
+    }
+
+    // Batch approve diffs
+    if (resource === 'diffs' && slug[1] === 'approve') {
+      const body = await request.json();
+      const { diffIds } = body;
+      if (!diffIds || !Array.isArray(diffIds) || diffIds.length === 0) {
+        return NextResponse.json({ error: 'diffIds array required' }, { status: 400 });
+      }
+      const result = await batchApproveDiffs(diffIds);
+      return NextResponse.json(result);
+    }
+
+    // Batch reject diffs
+    if (resource === 'diffs' && slug[1] === 'reject') {
+      const body = await request.json();
+      const { diffIds } = body;
+      if (!diffIds || !Array.isArray(diffIds) || diffIds.length === 0) {
+        return NextResponse.json({ error: 'diffIds array required' }, { status: 400 });
+      }
+      const result = await batchRejectDiffs(diffIds);
+      return NextResponse.json(result);
+    }
+
+    // Create test via AI
+    if (resource === 'tests' && slug[1] === 'create' && !slug[2]) {
+      const body = await request.json();
+      const { repositoryId, url, prompt, functionalAreaId } = body;
+      if (!repositoryId) {
+        return NextResponse.json({ error: 'repositoryId required' }, { status: 400 });
+      }
+      // Dynamic import to avoid pulling in heavy AI deps at route level
+      const { aiCreateTest } = await import('@/server/actions/ai');
+      const result = await aiCreateTest(repositoryId, {
+        targetUrl: url,
+        userPrompt: prompt,
+        functionalAreaId,
+        useMCP: true,
+      });
+      return NextResponse.json(result);
+    }
+
+    // Heal a failing test via AI
+    if (resource === 'tests' && slug[2] === 'heal') {
+      const testId = slug[1];
+      if (!testId) {
+        return NextResponse.json({ error: 'testId required' }, { status: 400 });
+      }
+      const test = await queries.getTest(testId);
+      if (!test) {
+        return NextResponse.json({ error: 'Test not found' }, { status: 404 });
+      }
+      // Dynamic import to avoid pulling in heavy AI deps at route level
+      const { agentHealTest } = await import('@/lib/playwright/healer-agent');
+      const result = await agentHealTest(test.repositoryId!, testId);
       return NextResponse.json(result);
     }
 
