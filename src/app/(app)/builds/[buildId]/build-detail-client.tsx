@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { AlertTriangle, CheckCircle, XCircle, ListTodo, ExternalLink, XIcon, Sparkles, Flag, Loader2, ChevronRight, ChevronsUpDown } from 'lucide-react';
 import type { AIDiffAnalysis, VisualDiffWithTestStatus } from '@/lib/db/schema';
 import { MetricsRow } from '@/components/dashboard/metrics-row';
+import { A11yComplianceCard } from '@/components/builds/a11y-compliance-card';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Badge } from '@/components/ui/badge';
@@ -118,6 +119,13 @@ export interface BuildDetailClientProps {
     errorsCount: number;
     elapsedMs: number | null;
   };
+  a11y?: {
+    score: number | null;
+    violationCount: number | null;
+    criticalCount: number | null;
+    totalRulesChecked: number | null;
+    trend?: Array<{ id: string; a11yScore: number | null; createdAt: Date | null }>;
+  };
   hasPendingDiffs: boolean;
   isRunning?: boolean;
   completedTests?: number;
@@ -130,6 +138,7 @@ export function BuildDetailClient({
   buildId,
   diffs,
   metrics,
+  a11y,
   isRunning = false,
   completedTests = 0,
   codeChangeTestIds,
@@ -319,6 +328,17 @@ export function BuildDetailClient({
           />
         </CardContent>
       </Card>
+
+      {/* A11y Compliance */}
+      {a11y?.score != null && (
+        <A11yComplianceCard
+          score={a11y.score}
+          violationCount={a11y.violationCount}
+          criticalCount={a11y.criticalCount}
+          totalRulesChecked={a11y.totalRulesChecked}
+          trend={a11y.trend}
+        />
+      )}
 
       {/* Tests for Review Section */}
       <Card>

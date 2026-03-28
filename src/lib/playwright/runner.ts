@@ -645,6 +645,8 @@ export interface TestRunResult {
   consoleErrors?: string[];
   networkRequests?: NetworkRequest[];
   a11yViolations?: A11yViolation[];
+  a11yPassesCount?: number;
+  assertionResults?: import('@/lib/db/schema').AssertionResult[];
   setupDurationMs?: number;
   teardownDurationMs?: number;
   teardownError?: string;
@@ -1442,6 +1444,7 @@ export class PlaywrightRunner extends EventEmitter {
 
       // Run accessibility check with axe-core
       let a11yViolations: A11yViolation[] | undefined;
+      let a11yPassesCount: number | undefined;
       try {
         const a11yResults = await new AxeBuilder({ page }).analyze();
         if (a11yResults.violations.length > 0) {
@@ -1452,8 +1455,14 @@ export class PlaywrightRunner extends EventEmitter {
             help: v.help,
             helpUrl: v.helpUrl,
             nodes: v.nodes.length,
+            tags: v.tags,
+            wcagLevel: v.tags?.some(t => t.startsWith('wcag2aaa') || t === 'wcag22aaa') ? 'AAA' as const
+              : v.tags?.some(t => t.startsWith('wcag2aa') || t === 'wcag22aa' || t === 'wcag21aa') ? 'AA' as const
+              : v.tags?.some(t => t.startsWith('wcag2a') || t === 'wcag21a') ? 'A' as const
+              : undefined,
           }));
         }
+        a11yPassesCount = a11yResults.passes?.length ?? 0;
       } catch {
         // Ignore a11y check errors - don't fail the test
       }
@@ -1533,6 +1542,7 @@ export class PlaywrightRunner extends EventEmitter {
         consoleErrors: consoleErrors.length > 0 ? consoleErrors : undefined,
         networkRequests: networkFailures.length > 0 ? networkFailures : undefined,
         a11yViolations,
+        a11yPassesCount: typeof a11yPassesCount === 'number' ? a11yPassesCount : undefined,
         setupDurationMs: setupDurationMs > 0 ? setupDurationMs : undefined,
         teardownDurationMs,
         teardownError,

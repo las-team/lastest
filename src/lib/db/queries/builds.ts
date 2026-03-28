@@ -77,6 +77,11 @@ export async function getBuildsByRepo(repositoryId: string, limit = 10) {
       comparisonPairId: builds.comparisonPairId,
       comparisonRole: builds.comparisonRole,
       comparisonMeta: builds.comparisonMeta,
+      scheduleId: builds.scheduleId,
+      a11yScore: builds.a11yScore,
+      a11yViolationCount: builds.a11yViolationCount,
+      a11yCriticalCount: builds.a11yCriticalCount,
+      a11yTotalRulesChecked: builds.a11yTotalRulesChecked,
       gitBranch: testRuns.gitBranch,
       gitCommit: testRuns.gitCommit,
     })
@@ -332,4 +337,27 @@ export async function getBuildTrends(repositoryId: string, days = 30): Promise<{
       passedCount: d.passed,
       flakyCount: d.flaky,
     }));
+}
+
+export async function getA11yScoreTrend(repositoryId: string, limit = 10) {
+  const repoBuilds = await db
+    .select({
+      id: builds.id,
+      a11yScore: builds.a11yScore,
+      a11yViolationCount: builds.a11yViolationCount,
+      a11yCriticalCount: builds.a11yCriticalCount,
+      a11yTotalRulesChecked: builds.a11yTotalRulesChecked,
+      createdAt: builds.createdAt,
+    })
+    .from(builds)
+    .innerJoin(testRuns, eq(builds.testRunId, testRuns.id))
+    .where(and(
+      eq(testRuns.repositoryId, repositoryId),
+      sql`${builds.a11yScore} IS NOT NULL`,
+    ))
+    .orderBy(desc(builds.createdAt))
+    .limit(limit)
+    .all();
+
+  return repoBuilds.reverse(); // oldest first for charting
 }

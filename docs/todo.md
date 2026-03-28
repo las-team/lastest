@@ -6,7 +6,13 @@ Teardown
 Accept Downloads
 Network Interception
 Auto gh action run
-Comparison run
+MCP
+QA agent
+sparklines
+triage
+ally
+schedule
+success crit
 ## features
 Migrate to gh app /home/ewyct/.claude/plans/cheeky-sparking-torvalds.md
 Videos explaining use

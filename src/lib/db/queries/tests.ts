@@ -435,6 +435,7 @@ export async function getTestResultsByTest(testId: string) {
       videoPath: testResults.videoPath,
       a11yViolations: testResults.a11yViolations,
       softErrors: testResults.softErrors,
+      assertionResults: testResults.assertionResults,
       startedAt: testRuns.startedAt,
     })
     .from(testResults)

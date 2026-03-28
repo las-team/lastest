@@ -72,6 +72,19 @@ export async function updateTest(id: string, data: Partial<NewTest>) {
   revalidatePath(`/tests/${id}`);
 }
 
+// Updates only the parsed assertions metadata — no version history entry
+export async function syncTestAssertions(id: string, assertions: import('@/lib/db/schema').TestAssertion[]) {
+  const session = await requireTeamAccess();
+  const test = await queries.getTest(id);
+  if (!test) throw new Error('Test not found');
+  if (test.repositoryId) {
+    const repo = await queries.getRepository(test.repositoryId);
+    if (!repo || repo.teamId !== session.team.id) throw new Error('Forbidden');
+  }
+  await queries.updateTest(id, { assertions });
+  revalidatePath(`/tests/${id}`);
+}
+
 async function verifyTestOwnership(testId: string, teamId: string) {
   const test = await queries.getTest(testId);
   if (!test) throw new Error('Test not found');

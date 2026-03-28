@@ -80,7 +80,7 @@ AI generates, fixes, or enhances tests — but you review and approve before any
 
 ### 3. Full Autonomous (Play Agent)
 
-One click kicks off a 9-step pipeline: scan your repo for routes, classify your app type, generate tests, run them, fix failures (up to 3 attempts per test), re-run, and report results. The agent pauses and asks for help only when it hits something it can't resolve on its own (missing settings, server offline). You resume and it picks up where it left off.
+One click kicks off an 11-step pipeline: check settings, select repo, set up environment, scan routes & apply testing template, plan functional areas, review plan, generate tests, run them, fix failures (up to 3 attempts per test), re-run, and report results. Uses specialized sub-agents (Orchestrator, Planner, Scout, Diver, Generator, Healer). The agent pauses and asks for help only when it hits something it can't resolve on its own. You resume and it picks up where it left off.
 
 **Best for:** Onboarding a new project, generating full coverage from scratch, CI bootstrapping.
 
@@ -96,7 +96,7 @@ Once your tests exist, you have three execution modes:
 | **Remote Runner** | Tests dispatched to remote machines via WebSocket | Distributed execution, different OS/browsers |
 | **Embedded Browser** | Browser runs in a container with live streaming back to the UI | Cloud deployments, recording/running without local Playwright |
 
-All three modes support both **running** and **recording** tests. Builds can be triggered **manually** (click Run), by **webhook** (PR opened/updated), or on **push** to monitored branches via CI/CD (GitHub Action or CLI runner). Smart Run analyzes git diffs to run only affected tests.
+All three modes support both **running** and **recording** tests. Builds can be triggered **manually** (click Run), by **webhook** (PR opened/updated), on **push** to monitored branches via CI/CD (GitHub Action or CLI runner), or on a **schedule** (cron-based automation). Smart Run analyzes git diffs to run only affected tests.
 
 ---
 
@@ -142,6 +142,11 @@ Create tests (one-time)          Run tests (forever, $0)
 - **Testing Templates** — One-click preset configurations for common app types: SaaS/Dashboard, Marketing Website, Canvas/WebGL, E-commerce, Documentation, Mobile-First, SPA, and CMS.
 - **Auto-Detect Capabilities** — Recording automatically detects required browser capabilities (file upload, clipboard, downloads, network interception) and enables corresponding Playwright settings.
 - **Early Adopter Mode** — Team-level toggle to access experimental features before general release.
+- **Scheduled Test Runs** — Cron-based automated builds with preset schedules (daily, weekly, hourly) or custom cron expressions. Auto-disables after consecutive failures. Optional branch targeting.
+- **Success Criteria Tab** — Parsed assertion tracking per test: see which `expect()` calls passed/failed with expected vs actual values, error messages, and code line references.
+- **WCAG 2.2 AA Compliance Scoring** — Automated 0–100 accessibility score per build with severity-weighted deductions (critical/serious/moderate/minor), trend sparklines across builds, and per-test violation detail.
+- **Guided Onboarding** — 8-step setup guide for new users: connect GitHub, configure AI, scan routes, record first test, run, set baselines, re-run, check results. Auto-detects completion.
+- **AI Failure Triage** — Automatic classification of test failures into real regression, flaky test, environment issue, or test maintenance — with confidence scores and reasoning.
 
 ### AI-Powered
 
@@ -152,6 +157,7 @@ Create tests (one-time)          Run tests (forever, $0)
 - **Spec-Driven Testing** — Import OpenAPI specs, user stories, or markdown files. AI extracts stories and generates tests automatically.
 - **Route Discovery** — AI scans your source code to discover routes and suggest tests.
 - **MCP Selector Validation** — Real-time selector validation on live pages via Claude MCP.
+- **Play Agent (Autonomous)** — One-click 11-step pipeline: check settings → select repo → environment setup → scan & template → plan areas → review → generate tests → run → fix failures (up to 3 attempts) → re-run → summary. Uses specialized sub-agents (Orchestrator, Planner, Scout, Diver, Generator, Healer). Pause/resume, approve plans, skip steps.
 
 ### Stabilization & Flaky Test Prevention
 
@@ -182,9 +188,11 @@ Create tests (one-time)          Run tests (forever, $0)
 - **Smart Run** — Analyzes git diffs to run only tests affected by your changes.
 - **Remote Runners (v2)** — Distributed test execution with concurrent multi-task support, SHA256 code integrity verification, remote recording, heartbeat polling with command queuing, and per-test abort support.
 - **Parallel Test Execution** — Configurable max parallel tests for local and remote runners.
+- **Embedded Browser** — Containerized Chromium with CDP live streaming back to the UI. Record and run tests without local Playwright. JPEG streaming with configurable quality/framerate, WebSocket auth, concurrent contexts.
 - **Docker Deployment** — Production-ready multi-stage Docker setup based on official Playwright image with persistent volumes.
+- **MCP Server** — Model Context Protocol server (`@lastest/mcp-server`) exposing 29 tools for AI agent integration: run tests, review diffs, approve baselines, create/heal tests, check coverage. Install via `npx @lastest/mcp-server`.
 - **VSCode Extension API** — REST + SSE API (`/api/v1/`) for IDE integration.
-- **Accessibility Audits** — Automated axe-core checks on every screenshot capture.
+- **Accessibility Audits** — Automated axe-core checks on every screenshot capture with WCAG 2.2 AA compliance scoring.
 - **Network & Console Tracking** — Capture network requests and browser console errors during test runs.
 
 ### Advanced
@@ -312,6 +320,11 @@ Open [http://localhost:3000](http://localhost:3000)
 | **Testing templates** | **8 presets** | No | No | No | No | No | No |
 | **Setup/teardown orchestration** | **Yes** | No | No | No | No | No | No |
 | **Branch baseline management** | **Yes** | Yes | Yes | Yes | No | No | No |
+| **Scheduled test runs** | **Yes (cron)** | Cloud | Cloud | Cloud | Cloud | Cloud | No |
+| **MCP server (AI agent API)** | **Yes (29 tools)** | No | No | No | No | No | No |
+| **WCAG compliance scoring** | **Yes (0–100)** | No | No | No | No | No | No |
+| **AI failure triage** | **Yes** | No | No | No | No | No | No |
+| **Assertion tracking** | **Yes** | No | No | No | No | No | No |
 
 ### What makes Lastest2 different
 
@@ -321,6 +334,9 @@ Open [http://localhost:3000](http://localhost:3000)
 - **AI auto-fix**: tests break as your UI evolves, Lastest2 fixes them automatically
 - **$0 with unlimited screenshots** — Percy charges ~$5K/mo for 100K shots
 - **Your data never leaves your server** — screenshots stay local, no cloud dependency
+- **MCP server with 29 tools** — let AI agents (Claude, etc.) run tests, review diffs, and heal failures autonomously
+- **Scheduled test runs** — cron-based automation with smart failure handling
+- **WCAG 2.2 AA compliance scoring** — automated 0–100 accessibility score per build with trend tracking
 - **5 AI providers including Ollama** — run AI completely locally with zero API costs
 - **Spec-driven testing** — feed it OpenAPI specs, user stories, or markdown files and get tests back
 - **3 diff engines** — pixelmatch, SSIM, and Butteraugli with OCR-based text-region-aware comparison
@@ -510,6 +526,54 @@ Config stored in `~/.lastest2/` (runner.pid, runner.log, runner.config.json).
 
 ---
 
+## MCP Server (AI Agent Integration)
+
+Let AI agents interact with Lastest2 programmatically via the Model Context Protocol:
+
+```bash
+npx @lastest/mcp-server --url http://localhost:3000 --api-key YOUR_API_KEY
+```
+
+### Available Tools
+
+| Tool | Description |
+|------|-------------|
+| `lastest2_run_tests` | Trigger a test build. Returns build ID for polling. |
+| `lastest2_get_build_status` | Get build results: pass/fail counts, visual diffs, overall status. |
+| `lastest2_list_tests` | List all tests with latest pass/fail status. |
+| `lastest2_list_failing_tests` | List currently failing tests with error details. |
+| `lastest2_get_visual_diff` | Get visual diff details with AI classification and confidence. |
+| `lastest2_approve_baseline` | Approve visual changes (updates baselines). |
+| `lastest2_reject_baseline` | Reject visual changes (blocks build). |
+| `lastest2_create_test` | Generate a test via AI from a URL or natural language prompt. |
+| `lastest2_heal_test` | Auto-fix a failing test using AI healer agent. |
+| `lastest2_get_coverage` | Get test coverage stats by functional area and route. |
+
+### Typical Agent Workflow
+
+1. `lastest2_run_tests` — start a build
+2. `lastest2_get_build_status` — poll until complete
+3. If visual changes: `lastest2_get_visual_diff` — inspect diffs
+4. `lastest2_approve_baseline` or `lastest2_reject_baseline` — act on diffs
+5. If failures: `lastest2_heal_test` — auto-fix, then re-run
+
+Every tool returns structured JSON: `{ status, summary, actionRequired, details }`.
+
+---
+
+## Scheduled Test Runs
+
+Automate test execution with cron-based schedules:
+
+1. Go to **Settings → Schedules**
+2. Choose a preset (daily at 3am, weekly on Sunday, every 6 hours, hourly, every 15 minutes) or enter a custom cron expression
+3. Optionally target a specific git branch
+4. Enable/disable schedules at any time
+
+Schedules auto-disable after 5 consecutive failures. Manual trigger available for testing.
+
+---
+
 ## Google Sheets Integration
 
 Use spreadsheet data as test data sources:
@@ -580,6 +644,7 @@ All configuration lives under a unified Settings page:
 | **Testing Templates** | One-click preset configurations for SaaS, Marketing, Canvas, E-commerce, Documentation, Mobile-First, SPA, CMS |
 | **Setup** | Default repository-wide multi-step setup scripts (Playwright and API types) |
 | **Teardown** | Default repository-wide multi-step teardown scripts with per-test overrides |
+| **Schedules** | Cron-based automated test runs with presets and custom expressions |
 | **Users** | Team member management, invitations (admin only) |
 | **Runners** | Remote runner registration and management (admin only) |
 
@@ -595,6 +660,7 @@ All configuration lives under a unified Settings page:
 - **Database**: SQLite + Drizzle ORM (WAL mode)
 - **Auth**: better-auth (email/password with Argon2, GitHub, GitLab, Google OAuth)
 - **AI**: Claude (Agent SDK, CLI, OpenRouter, direct Anthropic API), Ollama
+- **MCP**: `@lastest/mcp-server` for AI agent integration
 - **OCR Fallback**: Tesseract.js
 - **Test Data**: Google Sheets integration
 - **Email**: Resend
@@ -686,6 +752,15 @@ NEXT_PUBLIC_BASE_URL=             # Base URL for API calls
 - [x] Remote runner NPM package (`@lastest/runner` on npm)
 - [x] Embedded browser container (live streaming, no local Playwright needed)
 - [x] Runner management UI (register, monitor, configure from dashboard)
+- [x] Play Agent (autonomous 11-step test generation pipeline with sub-agents)
+- [x] Guided onboarding (8-step setup guide with auto-detection)
+- [x] MCP server v2 (`@lastest/mcp-server` — 29 tools for AI agent integration)
+- [x] AI failure triage (auto-classify failures: regression, flaky, environment, maintenance)
+- [x] Scheduled test runs (cron-based automation with preset schedules)
+- [x] WCAG 2.2 AA compliance scoring (severity-weighted 0–100 score with trends)
+- [x] Success criteria tab (parsed assertion tracking with pass/fail per `expect()`)
+- [x] Selector stats & recommendations (auto-suggest enable/disable/reorder)
+- [x] Storage state management (browser state persistence for auth flows)
 
 
 ---

@@ -165,6 +165,7 @@ export const tests = sqliteTable('tests', {
   viewportOverride: text('viewport_override', { mode: 'json' }).$type<{ width: number; height: number }>(),
   diffOverrides: text('diff_overrides', { mode: 'json' }).$type<TestDiffOverrides>(),
   playwrightOverrides: text('playwright_overrides', { mode: 'json' }).$type<TestPlaywrightOverrides>(),
+  assertions: text('assertions', { mode: 'json' }).$type<TestAssertion[]>(),
   executionMode: text('execution_mode').default('procedural'), // 'procedural' | 'agent'
   agentPrompt: text('agent_prompt'), // NL description for agent mode
   quarantined: integer('quarantined', { mode: 'boolean' }).default(false), // quarantined tests run but don't block builds
@@ -197,6 +198,40 @@ export interface A11yViolation {
   help: string;
   helpUrl: string;
   nodes: number;
+  tags?: string[];
+  wcagLevel?: 'A' | 'AA' | 'AAA';
+}
+
+// Success criteria / assertion tracking
+export interface TestAssertion {
+  id: string;
+  orderIndex: number;
+  category: 'element' | 'page' | 'generic' | 'visual';
+  assertionType: string;
+  negated: boolean;
+  targetSelector?: string;
+  targetSelectors?: Array<{ type: string; value: string }>;
+  expectedValue?: string;
+  attributeName?: string;
+  label?: string;
+  codeLineStart?: number;
+  codeLineEnd?: number;
+}
+
+export interface AssertionResult {
+  assertionId: string;
+  status: 'passed' | 'failed' | 'skipped';
+  actualValue?: string;
+  errorMessage?: string;
+  durationMs?: number;
+}
+
+export interface WcagScoreSummary {
+  score: number;
+  totalRules: number;
+  passedRules: number;
+  violatedRules: number;
+  bySeverity: { critical: number; serious: number; moderate: number; minor: number };
 }
 
 export const testResults = sqliteTable('test_results', {
@@ -215,6 +250,8 @@ export const testResults = sqliteTable('test_results', {
   consoleErrors: text('console_errors', { mode: 'json' }).$type<string[]>(),
   networkRequests: text('network_requests', { mode: 'json' }).$type<NetworkRequest[]>(),
   a11yViolations: text('a11y_violations', { mode: 'json' }).$type<A11yViolation[]>(),
+  assertionResults: text('assertion_results', { mode: 'json' }).$type<AssertionResult[]>(),
+  a11yPassesCount: integer('a11y_passes_count'),
   videoPath: text('video_path'),
   softErrors: text('soft_errors', { mode: 'json' }).$type<string[]>(),
   retryOf: text('retry_of'), // links to original test result ID if this is a retry
@@ -328,6 +365,11 @@ export const builds = sqliteTable('builds', {
   teardownDurationMs: integer('teardown_duration_ms'),
   codeChangeTestIds: text('code_change_test_ids', { mode: 'json' }).$type<string[]>(),
   browsers: text('browsers', { mode: 'json' }).$type<string[]>(), // browsers used in this build
+  scheduleId: text('schedule_id'),
+  a11yScore: integer('a11y_score'),
+  a11yViolationCount: integer('a11y_violation_count'),
+  a11yCriticalCount: integer('a11y_critical_count'),
+  a11yTotalRulesChecked: integer('a11y_total_rules_checked'),
   comparisonPairId: text('comparison_pair_id'), // shared ID linking baseline + feature builds
   comparisonRole: text('comparison_role'), // 'baseline' | 'feature' | null
   comparisonMeta: text('comparison_meta', { mode: 'json' }).$type<{
@@ -738,7 +780,7 @@ export type DiffClassification = 'unchanged' | 'flaky' | 'changed';
 // Build status enum
 export type BuildStatus = 'safe_to_merge' | 'review_required' | 'blocked' | 'has_todos';
 export type DiffStatus = 'pending' | 'approved' | 'rejected' | 'auto_approved' | 'todo';
-export type TriggerType = 'webhook' | 'manual' | 'push';
+export type TriggerType = 'webhook' | 'manual' | 'push' | 'scheduled';
 
 // AI Provider settings for test generation
 export type AIProvider = 'claude-cli' | 'openrouter' | 'claude-agent-sdk' | 'ollama' | 'openai' | 'anthropic';
@@ -844,8 +886,32 @@ export const backgroundJobs = sqliteTable('background_jobs', {
 export type BackgroundJob = typeof backgroundJobs.$inferSelect;
 export type NewBackgroundJob = typeof backgroundJobs.$inferInsert;
 
+// Build schedules for recurring test runs
+export const buildSchedules = sqliteTable('build_schedules', {
+  id: text('id').primaryKey(),
+  repositoryId: text('repository_id').references(() => repositories.id, { onDelete: 'cascade' }).notNull(),
+  name: text('name').notNull(),
+  enabled: integer('enabled', { mode: 'boolean' }).default(true),
+  cronExpression: text('cron_expression').notNull(),
+  timezone: text('timezone').default('UTC'),
+  runnerId: text('runner_id'),
+  testIds: text('test_ids', { mode: 'json' }).$type<string[]>(),
+  suiteId: text('suite_id'),
+  gitBranch: text('git_branch'),
+  nextRunAt: integer('next_run_at', { mode: 'timestamp' }),
+  lastRunAt: integer('last_run_at', { mode: 'timestamp' }),
+  lastBuildId: text('last_build_id'),
+  consecutiveFailures: integer('consecutive_failures').default(0),
+  maxConsecutiveFailures: integer('max_consecutive_failures').default(5),
+  createdAt: integer('created_at', { mode: 'timestamp' }),
+  updatedAt: integer('updated_at', { mode: 'timestamp' }),
+});
+
+export type BuildSchedule = typeof buildSchedules.$inferSelect;
+export type NewBuildSchedule = typeof buildSchedules.$inferInsert;
+
 // Test versions for version history
-export type TestChangeReason = 'initial' | 'manual_edit' | 'ai_fix' | 'ai_enhance' | 'restored' | 'branch_merge';
+export type TestChangeReason = 'initial' | 'manual_edit' | 'ai_fix' | 'ai_enhance' | 'restored' | 'branch_merge' | 'assertion_sync';
 
 export const testVersions = sqliteTable('test_versions', {
   id: text('id').primaryKey(),

@@ -36,6 +36,7 @@ import { EarlyAdopterToggle } from '@/components/settings/early-adopter-toggle';
 import { BanAiModeToggle } from '@/components/settings/ban-ai-mode-toggle';
 import { ConnectGithubButton, ReconnectGithubLink } from '@/components/settings/connect-github-button';
 import { GithubActionsCard } from '@/components/settings/github-actions-card-client';
+import { ScheduleManagerCard } from '@/components/settings/schedule-manager-client';
 import { DiagramThumbnail } from '@/components/ui/diagram-thumbnail';
 
 export default async function SettingsPage({
@@ -157,6 +158,9 @@ export default async function SettingsPage({
               )}
             </CardContent>
           </Card>
+
+          {/* Scheduled Runs */}
+          {selectedRepo && <ScheduleManagerCard repositoryId={selectedRepo.id} />}
 
           {/* GitHub Actions */}
           <GithubActionsCard

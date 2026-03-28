@@ -8,6 +8,7 @@ vi.mock('./mode', () => ({
   isLocalMode: vi.fn(() => true),
   isRunnerMode: vi.fn(() => false),
   isEmbeddedMode: vi.fn(() => false),
+  isLocalDisabled: vi.fn(() => false),
 }));
 
 vi.mock('@/lib/playwright/runner', () => ({
@@ -89,6 +90,7 @@ vi.mock('@/lib/db/queries', () => ({
   getUnacknowledgedResults: vi.fn().mockResolvedValue([]),
   acknowledgeResults: vi.fn().mockResolvedValue(undefined),
   getRunnerCommandById: vi.fn().mockResolvedValue(null),
+  getTestFixtures: vi.fn().mockResolvedValue([]),
 }));
 
 vi.mock('@/lib/ws/protocol', () => ({

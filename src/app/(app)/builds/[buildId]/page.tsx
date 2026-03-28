@@ -57,6 +57,15 @@ export default async function BuildPage({ params }: PageProps) {
   }
 
   const banAiMode = session?.team?.banAiMode ?? false;
+
+  // Fetch a11y compliance data
+  const a11yData = buildRecord ? {
+    score: buildRecord.a11yScore ?? null,
+    violationCount: buildRecord.a11yViolationCount ?? null,
+    criticalCount: buildRecord.a11yCriticalCount ?? null,
+    totalRulesChecked: buildRecord.a11yTotalRulesChecked ?? null,
+    trend: selectedRepo ? await queries.getA11yScoreTrend(selectedRepo.id) : [],
+  } : undefined;
   const pendingDiffs = build.diffs.filter((d) => d.status === 'pending');
   const aiApproveCount = banAiMode ? 0 : build.diffs.filter(
     (d) => d.aiRecommendation === 'approve' && d.status === 'pending'
@@ -88,6 +97,7 @@ export default async function BuildPage({ params }: PageProps) {
           isMainBranch={build.isMainBranch}
           embeddedStreamUrl={embeddedStreamUrl}
           banAiMode={banAiMode}
+          a11y={a11yData}
           initialBuild={{
             id: build.id,
             overallStatus: build.overallStatus,

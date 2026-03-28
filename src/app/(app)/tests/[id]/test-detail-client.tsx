@@ -37,6 +37,7 @@ import { TestStabilizationOverrides } from '@/components/settings/test-stabiliza
 import { TestDiffOverrides as TestDiffOverridesComponent } from '@/components/settings/test-diff-overrides';
 import { TestPlaywrightOverrides as TestPlaywrightOverridesComponent } from '@/components/settings/test-playwright-overrides';
 import { A11yViolationsPanel } from '@/components/builds/a11y-violations-panel';
+import { SuccessCriteriaTab } from '@/components/tests/success-criteria-tab';
 import type { ScreenshotGroup } from '@/server/actions/tests';
 import { SheetDataPreview } from '@/components/test-data/sheet-data-preview';
 import { SheetReferenceInserter } from '@/components/test-data/sheet-reference-inserter';
@@ -66,6 +67,7 @@ interface TestResult {
   videoPath: string | null;
   a11yViolations: A11yViolation[] | null;
   softErrors: string[] | null;
+  assertionResults: import('@/lib/db/schema').AssertionResult[] | null;
   startedAt: Date | null;
 }
 
@@ -662,6 +664,7 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
         <Tabs defaultValue="code">
           <TabsList>
             <TabsTrigger value="code">Code</TabsTrigger>
+            <TabsTrigger value="criteria">Success Criteria</TabsTrigger>
             <TabsTrigger value="setup">Setup</TabsTrigger>
             <TabsTrigger value="stabilization">Stabilization</TabsTrigger>
             {earlyAdopterMode && <TabsTrigger value="diff-overrides">Diff</TabsTrigger>}
@@ -743,6 +746,27 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
                 </CardContent>
               </Card>
             )}
+          </TabsContent>
+
+          <TabsContent value="criteria" className="mt-4">
+            <SuccessCriteriaTab
+              assertions={test.assertions ?? null}
+              assertionResults={latestResult?.assertionResults ?? null}
+              softErrors={latestResult?.softErrors ?? null}
+              code={test.code || ''}
+              onParseNeeded={async () => {
+                try {
+                  const { parseAssertions } = await import('@/lib/playwright/assertion-parser');
+                  const parsed = parseAssertions(test.code || '');
+                  if (parsed.length > 0) {
+                    const { syncTestAssertions } = await import('@/server/actions/tests');
+                    await syncTestAssertions(test.id, parsed);
+                  }
+                } catch {
+                  // Best effort
+                }
+              }}
+            />
           </TabsContent>
 
           <TabsContent value="setup" className="mt-4">
