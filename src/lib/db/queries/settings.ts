@@ -93,6 +93,7 @@ export async function getPlaywrightSettings(repositoryId?: string | null) {
     browser: 'chromium' as const,
     viewportWidth: 1280,
     viewportHeight: 720,
+    lockViewportToRecording: false,
     headlessMode: 'true' as const,
     navigationTimeout: 30000,
     actionTimeout: 5000,
@@ -114,6 +115,7 @@ export async function getPlaywrightSettings(repositoryId?: string | null) {
     acceptDownloads: false,
     enableNetworkInterception: false,
     browsers: ['chromium'] as string[],
+    autoRetryCount: 0,
     createdAt: null,
     updatedAt: null,
   };

@@ -1064,9 +1064,10 @@ async function runBuildAsync(
     });
 
     // Fire-and-forget AI failure triage for failed tests
-    if (failedCount > 0) {
+    if (failedCount > 0 && repositoryId) {
+      const repoId = repositoryId;
       import('@/lib/ai/failure-triage').then(({ triageBuildFailures }) => {
-        triageBuildFailures(buildId, repositoryId).catch(console.error);
+        triageBuildFailures(buildId, repoId).catch(console.error);
       }).catch(console.error);
     }
 
