@@ -57,6 +57,14 @@ export class LastestClient {
     return this.request<T>('POST', path, body);
   }
 
+  private put<T = unknown>(path: string, body?: unknown): Promise<T> {
+    return this.request<T>('PUT', path, body);
+  }
+
+  private del<T = unknown>(path: string): Promise<T> {
+    return this.request<T>('DELETE', path);
+  }
+
   // --- Health ---
 
   async health(): Promise<{ ok: boolean }> {
@@ -113,7 +121,35 @@ export class LastestClient {
     return this.get(`/api/v1/repos/${repoId}/functional-areas`);
   }
 
+  async createArea(data: { name: string; repositoryId?: string; parentId?: string }): Promise<unknown> {
+    return this.post('/api/v1/functional-areas', data);
+  }
+
+  async listTestsByArea(areaId: string): Promise<unknown[]> {
+    return this.get(`/api/v1/functional-areas/${areaId}/tests`);
+  }
+
+  // --- Tests (mutations) ---
+
+  async updateTest(testId: string, data: { name?: string; code?: string; targetUrl?: string; functionalAreaId?: string }): Promise<unknown> {
+    return this.put(`/api/v1/tests/${testId}`, data);
+  }
+
+  async deleteTest(testId: string): Promise<{ success: boolean }> {
+    return this.del(`/api/v1/tests/${testId}`);
+  }
+
+  // --- Test Runs ---
+
+  async getTestRun(runId: string): Promise<unknown> {
+    return this.get(`/api/v1/runs/${runId}`);
+  }
+
   // --- Diffs ---
+
+  async getDiff(diffId: string): Promise<unknown> {
+    return this.get(`/api/v1/diffs/${diffId}`);
+  }
 
   async approveDiffs(diffIds: string[]): Promise<{ approvedCount: number }> {
     return this.post('/api/v1/diffs/approve', { diffIds });
@@ -121,6 +157,28 @@ export class LastestClient {
 
   async rejectDiffs(diffIds: string[]): Promise<{ rejectedCount: number }> {
     return this.post('/api/v1/diffs/reject', { diffIds });
+  }
+
+  async approveDiff(diffId: string): Promise<{ success: boolean }> {
+    return this.post(`/api/v1/diffs/${diffId}/approve`);
+  }
+
+  async rejectDiff(diffId: string): Promise<{ success: boolean }> {
+    return this.post(`/api/v1/diffs/${diffId}/reject`);
+  }
+
+  async approveAllDiffs(buildId: string): Promise<{ success: boolean }> {
+    return this.post(`/api/v1/builds/${buildId}/approve-all`);
+  }
+
+  // --- Background Jobs ---
+
+  async getActiveJobs(): Promise<unknown[]> {
+    return this.get('/api/v1/jobs/active');
+  }
+
+  async getJob(jobId: string): Promise<unknown> {
+    return this.get(`/api/v1/jobs/${jobId}`);
   }
 
   // --- Coverage ---

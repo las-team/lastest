@@ -11,21 +11,31 @@
  *   GET  /api/v1/repos/:id/tests - Get tests for repo
  *   GET  /api/v1/repos/:id/builds - Get builds for repo
  *   GET  /api/v1/repos/:id/coverage - Get test coverage stats for repo
+ *   GET  /api/v1/functional-areas/:id - Get functional area
  *   GET  /api/v1/functional-areas/:id/tests - Get tests by functional area
  *   GET  /api/v1/tests/:id - Get single test
  *   GET  /api/v1/runs/:id - Get test run
  *   GET  /api/v1/builds/:id - Get build
+ *   GET  /api/v1/diffs/:id - Get single visual diff
+ *   GET  /api/v1/jobs/active - List active background jobs
+ *   GET  /api/v1/jobs/:id - Get background job status
  *   POST /api/v1/runs - Create and run tests
  *   POST /api/v1/diffs/approve - Batch approve visual diffs
  *   POST /api/v1/diffs/reject - Batch reject visual diffs
+ *   POST /api/v1/diffs/:id/approve - Approve single visual diff
+ *   POST /api/v1/diffs/:id/reject - Reject single visual diff
+ *   POST /api/v1/builds/:id/approve-all - Approve all diffs in a build
+ *   POST /api/v1/functional-areas - Create functional area
  *   POST /api/v1/tests/create - Create test via AI
  *   POST /api/v1/tests/:id/heal - Heal a failing test via AI
+ *   PUT  /api/v1/tests/:id - Update a test
+ *   DELETE /api/v1/tests/:id - Soft-delete a test
  */
 
 import { NextRequest, NextResponse } from 'next/server';
 import * as queries from '@/lib/db/queries';
 import { createAndRunBuild } from '@/server/actions/builds';
-import { batchApproveDiffs, batchRejectDiffs } from '@/server/actions/diffs';
+import { batchApproveDiffs, batchRejectDiffs, approveDiff, rejectDiff, approveAllDiffs, getDiff } from '@/server/actions/diffs';
 import { getCurrentSession } from '@/lib/auth';
 import { verifyBearerToken } from '@/lib/auth/api-key';
 
@@ -47,10 +57,10 @@ async function verifyAuth(request: NextRequest) {
   return null;
 }
 
-// Helper to parse slug
-function parseSlug(slug: string[]): { resource: string; id?: string; subResource?: string } {
-  const [resource, id, subResource] = slug;
-  return { resource, id, subResource };
+// Helper to parse slug (supports up to 4 levels: resource/id/subResource/action)
+function parseSlug(slug: string[]): { resource: string; id?: string; subResource?: string; action?: string } {
+  const [resource, id, subResource, action] = slug;
+  return { resource, id, subResource, action };
 }
 
 // GET handler
@@ -180,6 +190,28 @@ export async function GET(
       return NextResponse.json({ run, results });
     }
 
+    // Visual diffs
+    if (resource === 'diffs' && id && !subResource) {
+      const diff = await getDiff(id);
+      if (!diff) {
+        return NextResponse.json({ error: 'Not found' }, { status: 404 });
+      }
+      return NextResponse.json(diff);
+    }
+
+    // Background jobs
+    if (resource === 'jobs') {
+      if (!id || id === 'active') {
+        const activeJobs = await queries.getActiveBackgroundJobs();
+        return NextResponse.json(activeJobs);
+      }
+      const job = await queries.getBackgroundJob(id);
+      if (!job) {
+        return NextResponse.json({ error: 'Not found' }, { status: 404 });
+      }
+      return NextResponse.json(job);
+    }
+
     // Builds
     if (resource === 'builds' && id) {
       const build = await queries.getBuild(id);
@@ -224,11 +256,11 @@ export async function POST(
   }
 
   const { slug } = await params;
-  const { resource } = parseSlug(slug);
+  const { resource, id, subResource } = parseSlug(slug);
 
   try {
     // Create test run
-    if (resource === 'runs') {
+    if (resource === 'runs' && !id) {
       const body = await request.json();
       const { testIds, functionalAreaId, repositoryId } = body;
 
@@ -310,9 +342,137 @@ export async function POST(
       return NextResponse.json(result);
     }
 
+    // Approve single diff: POST /api/v1/diffs/:id/approve
+    if (resource === 'diffs' && id && subResource === 'approve') {
+      await approveDiff(id, 'mcp-agent');
+      return NextResponse.json({ success: true });
+    }
+
+    // Reject single diff: POST /api/v1/diffs/:id/reject
+    if (resource === 'diffs' && id && subResource === 'reject') {
+      await rejectDiff(id);
+      return NextResponse.json({ success: true });
+    }
+
+    // Approve all diffs in a build: POST /api/v1/builds/:id/approve-all
+    if (resource === 'builds' && id && subResource === 'approve-all') {
+      await approveAllDiffs(id, 'mcp-agent');
+      return NextResponse.json({ success: true });
+    }
+
+    // Create functional area: POST /api/v1/functional-areas
+    if (resource === 'functional-areas' && !id) {
+      const body = await request.json();
+      const { name, repositoryId, parentId } = body;
+      if (!name) {
+        return NextResponse.json({ error: 'name required' }, { status: 400 });
+      }
+      const result = await queries.createFunctionalArea({
+        repositoryId: repositoryId ?? null,
+        name,
+        description: null,
+        parentId: parentId ?? null,
+      });
+      return NextResponse.json(result, { status: 201 });
+    }
+
     return NextResponse.json({ error: 'Not found' }, { status: 404 });
   } catch (error) {
     console.error('[API v1] POST error:', error);
+    return NextResponse.json(
+      { error: 'Internal server error' },
+      { status: 500 }
+    );
+  }
+}
+
+// PUT handler
+export async function PUT(
+  request: NextRequest,
+  { params }: { params: Promise<{ slug: string[] }> }
+) {
+  const session = await verifyAuth(request);
+  if (!session) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
+
+  const { slug } = await params;
+  const { resource, id } = parseSlug(slug);
+
+  try {
+    // Update test: PUT /api/v1/tests/:id
+    if (resource === 'tests' && id) {
+      const test = await queries.getTest(id);
+      if (!test) {
+        return NextResponse.json({ error: 'Not found' }, { status: 404 });
+      }
+      if (test.repositoryId) {
+        const testRepo = await queries.getRepository(test.repositoryId);
+        if (!testRepo || testRepo.teamId !== session.team?.id) {
+          return NextResponse.json({ error: 'Not found' }, { status: 404 });
+        }
+      }
+
+      const body = await request.json();
+      const updates: Record<string, unknown> = {};
+      if (body.name !== undefined) updates.name = body.name;
+      if (body.code !== undefined) updates.code = body.code;
+      if (body.targetUrl !== undefined) updates.targetUrl = body.targetUrl;
+      if (body.functionalAreaId !== undefined) updates.functionalAreaId = body.functionalAreaId;
+
+      if (Object.keys(updates).length === 0) {
+        return NextResponse.json({ error: 'No fields to update' }, { status: 400 });
+      }
+
+      await queries.updateTestWithVersion(id, updates, 'mcp_edit');
+      const updated = await queries.getTest(id);
+      return NextResponse.json(updated);
+    }
+
+    return NextResponse.json({ error: 'Not found' }, { status: 404 });
+  } catch (error) {
+    console.error('[API v1] PUT error:', error);
+    return NextResponse.json(
+      { error: 'Internal server error' },
+      { status: 500 }
+    );
+  }
+}
+
+// DELETE handler
+export async function DELETE(
+  request: NextRequest,
+  { params }: { params: Promise<{ slug: string[] }> }
+) {
+  const session = await verifyAuth(request);
+  if (!session) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
+
+  const { slug } = await params;
+  const { resource, id } = parseSlug(slug);
+
+  try {
+    // Soft-delete test: DELETE /api/v1/tests/:id
+    if (resource === 'tests' && id) {
+      const test = await queries.getTest(id);
+      if (!test) {
+        return NextResponse.json({ error: 'Not found' }, { status: 404 });
+      }
+      if (test.repositoryId) {
+        const testRepo = await queries.getRepository(test.repositoryId);
+        if (!testRepo || testRepo.teamId !== session.team?.id) {
+          return NextResponse.json({ error: 'Not found' }, { status: 404 });
+        }
+      }
+
+      await queries.softDeleteTest(id);
+      return NextResponse.json({ success: true });
+    }
+
+    return NextResponse.json({ error: 'Not found' }, { status: 404 });
+  } catch (error) {
+    console.error('[API v1] DELETE error:', error);
     return NextResponse.json(
       { error: 'Internal server error' },
       { status: 500 }
