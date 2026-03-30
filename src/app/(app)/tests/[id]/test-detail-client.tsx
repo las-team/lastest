@@ -662,18 +662,16 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
 
         {/* Tabs for Code, Screenshots, History */}
         <Tabs defaultValue="code">
-          <TabsList>
-            <TabsTrigger value="code">Code</TabsTrigger>
-            <TabsTrigger value="criteria">Success Criteria</TabsTrigger>
-            <TabsTrigger value="setup">Setup</TabsTrigger>
-            <TabsTrigger value="stabilization">Stabilization</TabsTrigger>
-            {earlyAdopterMode && <TabsTrigger value="diff-overrides">Diff</TabsTrigger>}
-            {earlyAdopterMode && <TabsTrigger value="playwright-overrides">Playwright</TabsTrigger>}
-            <TabsTrigger value="screenshots">Screenshots</TabsTrigger>
-            <TabsTrigger value="plans">Plans</TabsTrigger>
-            <TabsTrigger value="history">Run History</TabsTrigger>
-            <TabsTrigger value="recordings">Recordings</TabsTrigger>
-            <TabsTrigger value="versions" onClick={loadVersions}>Versions</TabsTrigger>
+          <TabsList className="h-11 w-full p-1 gap-1 bg-white dark:bg-zinc-950 border">
+            <TabsTrigger value="code" className="flex-1 px-2 text-sm data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-sm">Code</TabsTrigger>
+            <TabsTrigger value="criteria" className="flex-1 px-2 text-sm data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-sm">Criteria</TabsTrigger>
+            <TabsTrigger value="setup" className="flex-1 px-2 text-sm data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-sm">Setup</TabsTrigger>
+            <TabsTrigger value="playback" className="flex-1 px-2 text-sm data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-sm">Overrides</TabsTrigger>
+            <TabsTrigger value="screenshots" className="flex-1 px-2 text-sm data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-sm">Screenshots</TabsTrigger>
+            <TabsTrigger value="plans" className="flex-1 px-2 text-sm data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-sm">Plans</TabsTrigger>
+            <TabsTrigger value="history" className="flex-1 px-2 text-sm data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-sm">History</TabsTrigger>
+            <TabsTrigger value="recordings" className="flex-1 px-2 text-sm data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-sm">Recordings</TabsTrigger>
+            <TabsTrigger value="versions" onClick={loadVersions} className="flex-1 px-2 text-sm data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-sm">Versions</TabsTrigger>
           </TabsList>
 
           <TabsContent value="code" className="mt-4 space-y-4">
@@ -782,16 +780,14 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
             />
           </TabsContent>
 
-          <TabsContent value="stabilization" className="mt-4">
+          <TabsContent value="playback" className="mt-4 space-y-6">
             <TestStabilizationOverrides
               testId={test.id}
               overrides={test.stabilizationOverrides ?? null}
               defaults={stabilizationDefaults ?? DEFAULT_STABILIZATION_SETTINGS}
             />
-          </TabsContent>
 
-          {earlyAdopterMode && (
-            <TabsContent value="diff-overrides" className="mt-4">
+            {earlyAdopterMode && (
               <TestDiffOverridesComponent
                 testId={test.id}
                 repositoryId={repositoryId ?? null}
@@ -809,11 +805,9 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
                   regionDetectionMode: (diffDefaults?.regionDetectionMode as 'grid' | 'flood-fill') ?? DEFAULT_DIFF_THRESHOLDS.regionDetectionMode,
                 }}
               />
-            </TabsContent>
-          )}
+            )}
 
-          {earlyAdopterMode && (
-            <TabsContent value="playwright-overrides" className="mt-4">
+            {earlyAdopterMode && (
               <TestPlaywrightOverridesComponent
                 testId={test.id}
                 repositoryId={repositoryId ?? null}
@@ -831,8 +825,8 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
                   baseUrl: envBaseUrl ?? 'http://localhost:3000',
                 }}
               />
-            </TabsContent>
-          )}
+            )}
+          </TabsContent>
 
           <TabsContent value="screenshots" className="mt-4 space-y-6">
             <Card>
