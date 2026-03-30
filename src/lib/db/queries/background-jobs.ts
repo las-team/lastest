@@ -8,7 +8,7 @@ import type {
   NewBackgroundJob,
   BackgroundJobType,
 } from '../schema';
-import { eq, desc, and, or, gte, lt, isNull } from 'drizzle-orm';
+import { eq, desc, and, or, gte, lt, isNull, inArray } from 'drizzle-orm';
 import { v4 as uuid } from 'uuid';
 
 // Background Jobs
@@ -79,6 +79,16 @@ export async function getChildJobs(parentJobId: string) {
     .select()
     .from(backgroundJobs)
     .where(eq(backgroundJobs.parentJobId, parentJobId))
+    .orderBy(desc(backgroundJobs.createdAt))
+    .all();
+}
+
+export async function getChildJobsByParentIds(parentIds: string[]) {
+  if (parentIds.length === 0) return [];
+  return db
+    .select()
+    .from(backgroundJobs)
+    .where(inArray(backgroundJobs.parentJobId, parentIds))
     .orderBy(desc(backgroundJobs.createdAt))
     .all();
 }

@@ -20,7 +20,7 @@ Videos explaining use
     sdfsd
 PostgreSQL
 Run tests on prod to test admin
-Selectors propagation for play agent /home/ewyct/.claude/plans/cozy-doodling-rain.md
+Selectors 1 for play agent /home/ewyct/.claude/plans/cozy-doodling-rain.md
 The premium QA agent
 ## ideas
 Payment integration /home/ewyct/.claude/plans/drifting-yawning-hoare.md
