@@ -582,10 +582,24 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
                       <span className="text-green-600">Passed</span>
                     </>
                   ) : latestResult?.status === 'failed' ? (
-                    <>
-                      <XCircle className="h-4 w-4 text-destructive" />
-                      <span className="text-destructive">Failed</span>
-                    </>
+                    latestResult.errorMessage ? (
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <div className="flex items-center gap-2 cursor-default">
+                            <XCircle className="h-4 w-4 text-destructive" />
+                            <span className="text-destructive">Failed</span>
+                          </div>
+                        </TooltipTrigger>
+                        <TooltipContent side="right" className="max-w-md">
+                          <pre className="whitespace-pre-wrap font-mono text-xs max-h-48 overflow-y-auto">{latestResult.errorMessage}</pre>
+                        </TooltipContent>
+                      </Tooltip>
+                    ) : (
+                      <>
+                        <XCircle className="h-4 w-4 text-destructive" />
+                        <span className="text-destructive">Failed</span>
+                      </>
+                    )
                   ) : (
                     <span className="text-muted-foreground">Not run</span>
                   )}
