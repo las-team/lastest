@@ -648,6 +648,7 @@ export const playwrightSettings = sqliteTable('playwright_settings', {
   enableNetworkInterception: integer('enable_network_interception', { mode: 'boolean' }).default(false), // enable page.route() network mocking
   browsers: text('browsers', { mode: 'json' }).$type<string[]>().default(['chromium']), // browsers to use for build execution
   autoRetryCount: integer('auto_retry_count').default(0), // 0-3: how many times to retry a failing test to detect flakiness
+  enableA11y: integer('enable_a11y', { mode: 'boolean' }).default(false), // enable WCAG accessibility checks with axe-core
   createdAt: integer('created_at', { mode: 'timestamp' }),
   updatedAt: integer('updated_at', { mode: 'timestamp' }),
 });

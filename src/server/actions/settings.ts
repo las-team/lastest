@@ -26,6 +26,7 @@ export async function savePlaywrightSettings(data: {
   defaultRecordingEngine?: string;
   freezeAnimations?: boolean;
   enableVideoRecording?: boolean;
+  enableA11y?: boolean;
   screenshotDelay?: number;
   maxParallelTests?: number;
   stabilization?: StabilizationSettings;

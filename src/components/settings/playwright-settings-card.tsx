@@ -24,7 +24,7 @@ import { savePlaywrightSettings, resetPlaywrightSettings, getSelectorStatsAction
 import { listStorageStates, removeStorageState } from '@/server/actions/storage-states';
 import { DEFAULT_SELECTOR_PRIORITY, DEFAULT_STABILIZATION_SETTINGS } from '@/lib/db/schema';
 import type { SelectorConfig, PlaywrightSettings, HeadlessMode, RecordingEngine, StabilizationSettings } from '@/lib/db/schema';
-import { Loader2, RotateCcw, List, Video, MousePointer, Pause, Clock, Layers, ChevronDown, Shield, ShieldCheck, Hourglass, Ban, Eye, Camera, EyeOff, Info, ClipboardCopy, Download, Globe, Cookie, Trash2 } from 'lucide-react';
+import { Loader2, RotateCcw, List, Video, MousePointer, Pause, Clock, Layers, ChevronDown, Shield, ShieldCheck, Hourglass, Ban, Eye, Camera, EyeOff, Info, ClipboardCopy, Download, Globe, Cookie, Trash2, Accessibility } from 'lucide-react';
 import { Slider } from '@/components/ui/slider';
 import { Badge } from '@/components/ui/badge';
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip';
@@ -76,6 +76,7 @@ export function PlaywrightSettingsCard({
   );
   const [freezeAnimations, setFreezeAnimations] = useState(settings.freezeAnimations ?? false);
   const [enableVideoRecording, setEnableVideoRecording] = useState(settings.enableVideoRecording ?? false);
+  const [enableA11y, setEnableA11y] = useState(settings.enableA11y ?? false);
   const [acceptAnyCertificate, setAcceptAnyCertificate] = useState(settings.acceptAnyCertificate ?? false);
   const [networkErrorMode, setNetworkErrorMode] = useState(settings.networkErrorMode ?? 'fail');
   const [ignoreExternalNetworkErrors, setIgnoreExternalNetworkErrors] = useState(settings.ignoreExternalNetworkErrors ?? false);
@@ -113,6 +114,7 @@ export function PlaywrightSettingsCard({
     defaultRecordingEngine: (settings.defaultRecordingEngine as RecordingEngine) ?? 'lastest',
     freezeAnimations: settings.freezeAnimations ?? false,
     enableVideoRecording: settings.enableVideoRecording ?? false,
+    enableA11y: settings.enableA11y ?? false,
     acceptAnyCertificate: settings.acceptAnyCertificate ?? false,
     networkErrorMode: settings.networkErrorMode ?? 'fail',
     ignoreExternalNetworkErrors: settings.ignoreExternalNetworkErrors ?? false,
@@ -143,6 +145,7 @@ export function PlaywrightSettingsCard({
     setDefaultRecordingEngine((settings.defaultRecordingEngine as RecordingEngine) ?? 'lastest');
     setFreezeAnimations(settings.freezeAnimations ?? false);
     setEnableVideoRecording(settings.enableVideoRecording ?? false);
+    setEnableA11y(settings.enableA11y ?? false);
     setAcceptAnyCertificate(settings.acceptAnyCertificate ?? false);
     setNetworkErrorMode(settings.networkErrorMode ?? 'fail');
     setIgnoreExternalNetworkErrors(settings.ignoreExternalNetworkErrors ?? false);
@@ -170,6 +173,7 @@ export function PlaywrightSettingsCard({
       defaultRecordingEngine: (settings.defaultRecordingEngine as RecordingEngine) ?? 'lastest',
       freezeAnimations: settings.freezeAnimations ?? false,
       enableVideoRecording: settings.enableVideoRecording ?? false,
+      enableA11y: settings.enableA11y ?? false,
       acceptAnyCertificate: settings.acceptAnyCertificate ?? false,
       networkErrorMode: settings.networkErrorMode ?? 'fail',
       ignoreExternalNetworkErrors: settings.ignoreExternalNetworkErrors ?? false,
@@ -224,6 +228,7 @@ export function PlaywrightSettingsCard({
         defaultRecordingEngine,
         freezeAnimations,
         enableVideoRecording,
+        enableA11y,
         acceptAnyCertificate,
         networkErrorMode,
         ignoreExternalNetworkErrors,
@@ -244,7 +249,7 @@ export function PlaywrightSettingsCard({
         toast.success('Playwright settings saved');
       }
     });
-  }, [repositoryId, selectorPriority, browser, viewportWidth, viewportHeight, headlessMode, navigationTimeout, actionTimeout, pointerGestures, cursorFPS, cursorPlaybackSpeed, defaultRecordingEngine, freezeAnimations, enableVideoRecording, acceptAnyCertificate, networkErrorMode, ignoreExternalNetworkErrors, consoleErrorMode, grantClipboardAccess, acceptDownloads, enableNetworkInterception, lockViewportToRecording, screenshotDelay, maxParallelTests, stabilization, browsers, compact]);
+  }, [repositoryId, selectorPriority, browser, viewportWidth, viewportHeight, headlessMode, navigationTimeout, actionTimeout, pointerGestures, cursorFPS, cursorPlaybackSpeed, defaultRecordingEngine, freezeAnimations, enableVideoRecording, enableA11y, acceptAnyCertificate, networkErrorMode, ignoreExternalNetworkErrors, consoleErrorMode, grantClipboardAccess, acceptDownloads, enableNetworkInterception, lockViewportToRecording, screenshotDelay, maxParallelTests, stabilization, browsers, compact]);
 
   // Auto-save with debounce - only when values differ from original props
   useEffect(() => {
@@ -263,6 +268,7 @@ export function PlaywrightSettingsCard({
       defaultRecordingEngine !== orig.defaultRecordingEngine ||
       freezeAnimations !== orig.freezeAnimations ||
       enableVideoRecording !== orig.enableVideoRecording ||
+      enableA11y !== orig.enableA11y ||
       acceptAnyCertificate !== orig.acceptAnyCertificate ||
       networkErrorMode !== orig.networkErrorMode ||
       ignoreExternalNetworkErrors !== orig.ignoreExternalNetworkErrors ||
@@ -291,7 +297,7 @@ export function PlaywrightSettingsCard({
         clearTimeout(debounceRef.current);
       }
     };
-  }, [selectorPriority, browser, viewportWidth, viewportHeight, headlessMode, navigationTimeout, actionTimeout, pointerGestures, cursorFPS, cursorPlaybackSpeed, defaultRecordingEngine, freezeAnimations, enableVideoRecording, acceptAnyCertificate, networkErrorMode, ignoreExternalNetworkErrors, consoleErrorMode, grantClipboardAccess, acceptDownloads, enableNetworkInterception, lockViewportToRecording, screenshotDelay, maxParallelTests, stabilization, browsers, doSave]);
+  }, [selectorPriority, browser, viewportWidth, viewportHeight, headlessMode, navigationTimeout, actionTimeout, pointerGestures, cursorFPS, cursorPlaybackSpeed, defaultRecordingEngine, freezeAnimations, enableVideoRecording, enableA11y, acceptAnyCertificate, networkErrorMode, ignoreExternalNetworkErrors, consoleErrorMode, grantClipboardAccess, acceptDownloads, enableNetworkInterception, lockViewportToRecording, screenshotDelay, maxParallelTests, stabilization, browsers, doSave]);
 
   // Notify parent of save status changes
   useEffect(() => {
@@ -313,6 +319,7 @@ export function PlaywrightSettingsCard({
       setDefaultRecordingEngine('lastest');
       setFreezeAnimations(false);
       setEnableVideoRecording(false);
+      setEnableA11y(false);
       setGrantClipboardAccess(false);
       setAcceptDownloads(false);
       setEnableNetworkInterception(false);
@@ -441,6 +448,22 @@ export function PlaywrightSettingsCard({
             </div>
           </div>
           <Switch checked={enableVideoRecording} onCheckedChange={setEnableVideoRecording} />
+        </div>
+
+        {/* Accessibility Checks */}
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Accessibility className="w-4 h-4 text-muted-foreground" />
+            <div className="space-y-0.5">
+              <Label className="text-sm">Accessibility Checks</Label>
+              {!compact && (
+                <p className="text-xs text-muted-foreground">
+                  Run WCAG 2.2 AA compliance checks with axe-core
+                </p>
+              )}
+            </div>
+          </div>
+          <Switch checked={enableA11y} onCheckedChange={setEnableA11y} />
         </div>
 
         {/* Accept Any Certificate */}

@@ -33,7 +33,7 @@ const nextConfig: NextConfig = {
           { key: 'Referrer-Policy', value: 'strict-origin-when-cross-origin' },
           { key: 'Permissions-Policy', value: 'camera=(), microphone=(), geolocation=()' },
           { key: 'Strict-Transport-Security', value: 'max-age=31536000; includeSubDomains' },
-          { key: 'Content-Security-Policy', value: "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://avatars.githubusercontent.com https://*.googleusercontent.com https://img.clerk.com https://*.gravatar.com; connect-src 'self' ws: wss:; font-src 'self' data:; frame-src 'self' https://trace.playwright.dev;" },
+          { key: 'Content-Security-Policy', value: "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://avatars.githubusercontent.com https://*.googleusercontent.com https://img.clerk.com https://*.gravatar.com; connect-src 'self' ws: wss: https://github.com https://api.github.com; font-src 'self' data:; frame-src 'self' https://trace.playwright.dev; form-action 'self' https://github.com;" },
         ],
       },
     ];

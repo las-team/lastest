@@ -1044,18 +1044,21 @@ async function runBuildAsync(
     // Update build final metrics and status
     const overallStatus = await queries.computeBuildStatus(buildId);
 
-    // Aggregate a11y scores across all test results for this build
+    // Aggregate a11y scores across all test results for this build (only if a11y data exists)
     let a11yUpdate: { a11yScore?: number; a11yViolationCount?: number; a11yCriticalCount?: number; a11yTotalRulesChecked?: number } = {};
     try {
       const { aggregateA11yForBuild } = await import('@/lib/a11y/wcag-score');
       const testResultsForA11y = await queries.getTestResultsByRun(testRunId);
-      const a11ySummary = aggregateA11yForBuild(testResultsForA11y);
-      a11yUpdate = {
-        a11yScore: a11ySummary.score,
-        a11yViolationCount: a11ySummary.violationCount,
-        a11yCriticalCount: a11ySummary.criticalCount,
-        a11yTotalRulesChecked: a11ySummary.totalRulesChecked,
-      };
+      const hasA11yData = testResultsForA11y.some(r => r.a11yViolations != null || (r.a11yPassesCount != null && r.a11yPassesCount > 0));
+      if (hasA11yData) {
+        const a11ySummary = aggregateA11yForBuild(testResultsForA11y);
+        a11yUpdate = {
+          a11yScore: a11ySummary.score,
+          a11yViolationCount: a11ySummary.violationCount,
+          a11yCriticalCount: a11ySummary.criticalCount,
+          a11yTotalRulesChecked: a11ySummary.totalRulesChecked,
+        };
+      }
     } catch {
       // a11y scoring is best-effort
     }

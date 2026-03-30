@@ -116,6 +116,7 @@ export async function getPlaywrightSettings(repositoryId?: string | null) {
     enableNetworkInterception: false,
     browsers: ['chromium'] as string[],
     autoRetryCount: 0,
+    enableA11y: false,
     createdAt: null,
     updatedAt: null,
   };

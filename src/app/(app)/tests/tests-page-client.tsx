@@ -390,7 +390,7 @@ export function TestsPageClient({ areas, tests, routes, repositoryId, baseUrl = 
 
         {/* Tests Table */}
         <Card className="border-border/50 overflow-hidden">
-          <CardHeader className="border-b border-border/50 bg-muted/30">
+          <CardHeader className="border-b border-border/50">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-3">
                 <Checkbox

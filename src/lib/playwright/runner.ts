@@ -1442,29 +1442,31 @@ export class PlaywrightRunner extends EventEmitter {
         throw new Error(errorParts.join(' | '));
       }
 
-      // Run accessibility check with axe-core
+      // Run accessibility check with axe-core (only when enabled in settings)
       let a11yViolations: A11yViolation[] | undefined;
       let a11yPassesCount: number | undefined;
-      try {
-        const a11yResults = await new AxeBuilder({ page }).analyze();
-        if (a11yResults.violations.length > 0) {
-          a11yViolations = a11yResults.violations.map(v => ({
-            id: v.id,
-            impact: v.impact as A11yViolation['impact'],
-            description: v.description,
-            help: v.help,
-            helpUrl: v.helpUrl,
-            nodes: v.nodes.length,
-            tags: v.tags,
-            wcagLevel: v.tags?.some(t => t.startsWith('wcag2aaa') || t === 'wcag22aaa') ? 'AAA' as const
-              : v.tags?.some(t => t.startsWith('wcag2aa') || t === 'wcag22aa' || t === 'wcag21aa') ? 'AA' as const
-              : v.tags?.some(t => t.startsWith('wcag2a') || t === 'wcag21a') ? 'A' as const
-              : undefined,
-          }));
+      if (this.settings?.enableA11y) {
+        try {
+          const a11yResults = await new AxeBuilder({ page }).analyze();
+          if (a11yResults.violations.length > 0) {
+            a11yViolations = a11yResults.violations.map(v => ({
+              id: v.id,
+              impact: v.impact as A11yViolation['impact'],
+              description: v.description,
+              help: v.help,
+              helpUrl: v.helpUrl,
+              nodes: v.nodes.length,
+              tags: v.tags,
+              wcagLevel: v.tags?.some(t => t.startsWith('wcag2aaa') || t === 'wcag22aaa') ? 'AAA' as const
+                : v.tags?.some(t => t.startsWith('wcag2aa') || t === 'wcag22aa' || t === 'wcag21aa') ? 'AA' as const
+                : v.tags?.some(t => t.startsWith('wcag2a') || t === 'wcag21a') ? 'A' as const
+                : undefined,
+            }));
+          }
+          a11yPassesCount = a11yResults.passes?.length ?? 0;
+        } catch {
+          // Ignore a11y check errors - don't fail the test
         }
-        a11yPassesCount = a11yResults.passes?.length ?? 0;
-      } catch {
-        // Ignore a11y check errors - don't fail the test
       }
 
       let screenshotPublicPath: string | undefined;
