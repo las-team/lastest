@@ -42,11 +42,11 @@ export function EnvPageClient({
         </div>
 
         <Tabs defaultValue="setup">
-          <TabsList className="h-11 w-full p-1">
-            <TabsTrigger value="setup" className="flex-1 px-6 text-sm">
+          <TabsList className="h-11 w-full p-1 bg-white dark:bg-zinc-950 border">
+            <TabsTrigger value="setup" className="flex-1 px-6 text-sm data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-sm">
               Setup
             </TabsTrigger>
-            <TabsTrigger value="teardown" className="flex-1 px-6 text-sm">
+            <TabsTrigger value="teardown" className="flex-1 px-6 text-sm data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-sm">
               Teardown
             </TabsTrigger>
           </TabsList>
