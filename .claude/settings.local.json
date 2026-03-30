@@ -147,7 +147,8 @@
       "Bash(grep -n \"softErrors\\\\|results.*=.*use\\\\|TestResult\" src/app/\\\\\\(app\\\\\\)/tests/[id]/test-detail-client.tsx)",
       "Bash(ls -la /home/ewyct/dev/lastest2/src/app/\\\\\\(app\\\\\\)/)",
       "Read(//home/ewyct/.claude/todos/**)",
-      "Read(//home/ewyct/.claude/**)"
+      "Read(//home/ewyct/.claude/**)",
+      "WebFetch(domain:192.168.1.138)"
     ]
   },
   "disabledMcpjsonServers": [

@@ -1,8 +1,9 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { CheckCircle2, XCircle, Circle, AlertTriangle } from 'lucide-react';
+import { CheckCircle2, XCircle, Circle, AlertTriangle, ShieldCheck } from 'lucide-react';
 import type { TestAssertion, AssertionResult } from '@/lib/db/schema';
 import { cn } from '@/lib/utils';
 
@@ -49,27 +50,18 @@ export function SuccessCriteriaTab({
     }
   }, [assertions, code, onParseNeeded]);
 
-  if (!assertions || assertions.length === 0) {
-    return (
-      <div className="text-sm text-muted-foreground py-8 text-center">
-        {!assertions
-          ? 'Analyzing test code for assertions...'
-          : 'No assertions found in this test. Add assertions during recording using Shift+right-click on elements.'}
-      </div>
-    );
-  }
-
   // Build a map of results by assertion ID
   const resultMap = new Map<string, AssertionResult>();
-  if (assertionResults) {
+  if (assertions && assertionResults) {
     for (const r of assertionResults) {
       resultMap.set(r.assertionId, r);
     }
   }
 
-  const passedCount = assertions.filter(a => resultMap.get(a.id)?.status === 'passed').length;
-  const failedCount = assertions.filter(a => resultMap.get(a.id)?.status === 'failed').length;
-  const hasResults = assertionResults && assertionResults.length > 0;
+  const hasAssertions = assertions && assertions.length > 0;
+  const passedCount = hasAssertions ? assertions.filter(a => resultMap.get(a.id)?.status === 'passed').length : 0;
+  const failedCount = hasAssertions ? assertions.filter(a => resultMap.get(a.id)?.status === 'failed').length : 0;
+  const hasResults = hasAssertions && assertionResults && assertionResults.length > 0;
 
   // Find soft errors not matched to any assertion result
   const matchedErrors = new Set(
@@ -87,132 +79,144 @@ export function SuccessCriteriaTab({
   };
 
   return (
-    <div className="space-y-4">
-      {/* Summary bar */}
-      <div className="flex items-center justify-between rounded-md border p-3 bg-muted/30">
-        <div className="flex items-center gap-3">
-          <span className="font-medium text-sm">Success Criteria</span>
-          <span className="text-sm text-muted-foreground">
-            {assertions.length} assertion{assertions.length !== 1 ? 's' : ''}
-          </span>
-        </div>
-        {hasResults && (
-          <div className="flex items-center gap-3 text-sm">
-            {passedCount > 0 && (
-              <span className="flex items-center gap-1 text-green-600">
-                <CheckCircle2 className="h-4 w-4" />
-                {passedCount} passed
+    <Card>
+      <CardHeader>
+        <div className="flex items-center justify-between">
+          <CardTitle className="text-sm flex items-center gap-2">
+            <ShieldCheck className="h-4 w-4" />
+            Success Criteria
+            {hasAssertions && (
+              <span className="text-muted-foreground font-normal">
+                {assertions.length} assertion{assertions.length !== 1 ? 's' : ''}
               </span>
             )}
-            {failedCount > 0 && (
-              <span className="flex items-center gap-1 text-red-600">
-                <XCircle className="h-4 w-4" />
-                {failedCount} failed
-              </span>
-            )}
-            {assertions.length - passedCount - failedCount > 0 && (
-              <span className="flex items-center gap-1 text-muted-foreground">
-                <Circle className="h-4 w-4" />
-                {assertions.length - passedCount - failedCount} not run
-              </span>
-            )}
-          </div>
-        )}
-      </div>
-
-      {/* Assertions list */}
-      <div className="space-y-1">
-        {assertions.map(assertion => {
-          const result = resultMap.get(assertion.id);
-          const status = result?.status ?? 'not_run';
-          const isExpanded = expanded.has(assertion.id);
-
-          return (
-            <div
-              key={assertion.id}
-              className={cn(
-                'rounded-md border p-3 cursor-pointer transition-colors hover:bg-muted/30',
-                status === 'failed' && 'border-red-200 dark:border-red-900',
+          </CardTitle>
+          {hasResults && (
+            <div className="flex items-center gap-3 text-sm">
+              {passedCount > 0 && (
+                <span className="flex items-center gap-1 text-green-600">
+                  <CheckCircle2 className="h-4 w-4" />
+                  {passedCount} passed
+                </span>
               )}
-              onClick={() => toggleExpand(assertion.id)}
-            >
-              <div className="flex items-start gap-3">
-                <StatusIcon status={status} />
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <span className="text-sm font-medium">
-                      {assertion.label ?? `${assertion.assertionType}()`}
-                    </span>
-                    <Badge variant="outline" className={cn('text-xs', CATEGORY_COLORS[assertion.category])}>
-                      {assertion.category}
-                    </Badge>
-                    {assertion.negated && (
-                      <Badge variant="outline" className="text-xs">.not</Badge>
+              {failedCount > 0 && (
+                <span className="flex items-center gap-1 text-red-600">
+                  <XCircle className="h-4 w-4" />
+                  {failedCount} failed
+                </span>
+              )}
+              {assertions.length - passedCount - failedCount > 0 && (
+                <span className="flex items-center gap-1 text-muted-foreground">
+                  <Circle className="h-4 w-4" />
+                  {assertions.length - passedCount - failedCount} not run
+                </span>
+              )}
+            </div>
+          )}
+        </div>
+      </CardHeader>
+      <CardContent>
+        {!hasAssertions ? (
+          <div className="text-sm text-muted-foreground py-4 text-center">
+            {!assertions
+              ? 'Analyzing test code for assertions...'
+              : 'No assertions found in this test. Add assertions during recording using Shift+right-click on elements.'}
+          </div>
+        ) : (<>
+        <div className="space-y-1">
+          {assertions.map(assertion => {
+            const result = resultMap.get(assertion.id);
+            const status = result?.status ?? 'not_run';
+            const isExpanded = expanded.has(assertion.id);
+
+            return (
+              <div
+                key={assertion.id}
+                className={cn(
+                  'rounded-md border p-3 cursor-pointer transition-colors hover:bg-muted/30',
+                  status === 'failed' && 'border-red-200 dark:border-red-900',
+                )}
+                onClick={() => toggleExpand(assertion.id)}
+              >
+                <div className="flex items-start gap-3">
+                  <StatusIcon status={status} />
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="text-sm font-medium">
+                        {assertion.label ?? `${assertion.assertionType}()`}
+                      </span>
+                      <Badge variant="outline" className={cn('text-xs', CATEGORY_COLORS[assertion.category])}>
+                        {assertion.category}
+                      </Badge>
+                      {assertion.negated && (
+                        <Badge variant="outline" className="text-xs">.not</Badge>
+                      )}
+                    </div>
+
+                    {/* Expected / Actual values */}
+                    {(assertion.expectedValue || result?.actualValue) && (
+                      <div className="mt-1 text-xs space-y-0.5">
+                        {assertion.expectedValue && (
+                          <div className="text-muted-foreground">
+                            Expected: <span className="font-mono">{assertion.expectedValue}</span>
+                          </div>
+                        )}
+                        {result?.actualValue && (
+                          <div className={status === 'failed' ? 'text-red-600' : 'text-muted-foreground'}>
+                            Actual: <span className="font-mono">{result.actualValue}</span>
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {/* Error message on failure */}
+                    {result?.errorMessage && (
+                      <div className="mt-1 text-xs text-red-600 font-mono break-all">
+                        {result.errorMessage}
+                      </div>
+                    )}
+
+                    {/* Expanded details */}
+                    {isExpanded && (
+                      <div className="mt-2 text-xs text-muted-foreground space-y-1 border-t pt-2">
+                        {assertion.targetSelector && (
+                          <div>Selector: <span className="font-mono">{assertion.targetSelector}</span></div>
+                        )}
+                        {assertion.codeLineStart && (
+                          <div>Code line: {assertion.codeLineStart}{assertion.codeLineEnd && assertion.codeLineEnd !== assertion.codeLineStart ? `–${assertion.codeLineEnd}` : ''}</div>
+                        )}
+                        {result?.durationMs != null && (
+                          <div>Duration: {result.durationMs}ms</div>
+                        )}
+                      </div>
                     )}
                   </div>
-
-                  {/* Expected / Actual values */}
-                  {(assertion.expectedValue || result?.actualValue) && (
-                    <div className="mt-1 text-xs space-y-0.5">
-                      {assertion.expectedValue && (
-                        <div className="text-muted-foreground">
-                          Expected: <span className="font-mono">{assertion.expectedValue}</span>
-                        </div>
-                      )}
-                      {result?.actualValue && (
-                        <div className={status === 'failed' ? 'text-red-600' : 'text-muted-foreground'}>
-                          Actual: <span className="font-mono">{result.actualValue}</span>
-                        </div>
-                      )}
-                    </div>
-                  )}
-
-                  {/* Error message on failure */}
-                  {result?.errorMessage && (
-                    <div className="mt-1 text-xs text-red-600 font-mono break-all">
-                      {result.errorMessage}
-                    </div>
-                  )}
-
-                  {/* Expanded details */}
-                  {isExpanded && (
-                    <div className="mt-2 text-xs text-muted-foreground space-y-1 border-t pt-2">
-                      {assertion.targetSelector && (
-                        <div>Selector: <span className="font-mono">{assertion.targetSelector}</span></div>
-                      )}
-                      {assertion.codeLineStart && (
-                        <div>Code line: {assertion.codeLineStart}{assertion.codeLineEnd && assertion.codeLineEnd !== assertion.codeLineStart ? `–${assertion.codeLineEnd}` : ''}</div>
-                      )}
-                      {result?.durationMs != null && (
-                        <div>Duration: {result.durationMs}ms</div>
-                      )}
-                    </div>
-                  )}
                 </div>
               </div>
-            </div>
-          );
-        })}
-      </div>
-
-      {/* Unmatched soft errors */}
-      {unmatchedErrors.length > 0 && (
-        <div className="rounded-md border border-yellow-200 bg-yellow-50 dark:border-yellow-900 dark:bg-yellow-950 p-3">
-          <div className="flex items-center gap-2 mb-2">
-            <AlertTriangle className="h-4 w-4 text-yellow-600" />
-            <span className="text-sm font-medium text-yellow-800 dark:text-yellow-200">
-              Unmatched Soft Errors ({unmatchedErrors.length})
-            </span>
-          </div>
-          <div className="space-y-1">
-            {unmatchedErrors.map((error, i) => (
-              <div key={i} className="text-xs font-mono text-yellow-700 dark:text-yellow-300 break-all">
-                {error}
-              </div>
-            ))}
-          </div>
+            );
+          })}
         </div>
-      )}
-    </div>
+
+        {/* Unmatched soft errors */}
+        {unmatchedErrors.length > 0 && (
+          <div className="rounded-md border border-yellow-200 bg-yellow-50 dark:border-yellow-900 dark:bg-yellow-950 p-3 mt-4">
+            <div className="flex items-center gap-2 mb-2">
+              <AlertTriangle className="h-4 w-4 text-yellow-600" />
+              <span className="text-sm font-medium text-yellow-800 dark:text-yellow-200">
+                Unmatched Soft Errors ({unmatchedErrors.length})
+              </span>
+            </div>
+            <div className="space-y-1">
+              {unmatchedErrors.map((error, i) => (
+                <div key={i} className="text-xs font-mono text-yellow-700 dark:text-yellow-300 break-all">
+                  {error}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+        </>)}
+      </CardContent>
+    </Card>
   );
 }

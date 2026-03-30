@@ -314,6 +314,10 @@ export async function getPendingInvitations() {
     .all();
 }
 
+export async function getInvitationById(id: string) {
+  return db.select().from(userInvitations).where(eq(userInvitations.id, id)).get();
+}
+
 export async function getInvitationByToken(token: string) {
   return db.select().from(userInvitations).where(eq(userInvitations.token, token)).get();
 }
