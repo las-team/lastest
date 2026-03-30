@@ -81,3 +81,9 @@ Exp testing is kinda ok, at least you learn how your software works
 1) hogy a hasznosságát fel tudjam mérni 
 2) hogy személyre szabott sztoriban tudjam megmutatni Davidnek hogy mennyit segített. 
 3) Alátámasztani mindezt azzal hogy a PR-jaim release utáni bug countja csökken látványosan
+
+  await page.locator('#email').fill('testuser1771664821751@example.com');
+  
+  // Fill in the password field
+  stepLogger.log('Entering password');
+  await page.locator('#password').fill('SecurePass123');

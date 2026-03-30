@@ -15,6 +15,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { Textarea } from '@/components/ui/textarea';
 import { Play, Trash2, Copy, Edit2, Clock, CheckCircle, XCircle, X, Save, Wrench, Wand2, Loader2, History, RotateCcw, ChevronDown, ChevronRight, ChevronUp, Monitor, Video, AlertTriangle, Image, Bug, GitBranch, GitCommit, Tv2 } from 'lucide-react';
 import {
@@ -925,12 +926,26 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
                             ) : (
                               <ChevronRight className="h-4 w-4 text-muted-foreground" />
                             )}
-                            {result.status === 'passed' ? (
+                            {result.status === 'failed' && result.errorMessage ? (
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <div className="flex items-center gap-2 cursor-default">
+                                    <XCircle className="h-4 w-4 text-destructive" />
+                                    <span className="capitalize">{result.status}</span>
+                                  </div>
+                                </TooltipTrigger>
+                                <TooltipContent side="right" className="max-w-md">
+                                  <pre className="whitespace-pre-wrap font-mono text-xs max-h-48 overflow-y-auto">{result.errorMessage}</pre>
+                                </TooltipContent>
+                              </Tooltip>
+                            ) : result.status === 'passed' ? (
                               <CheckCircle className="h-4 w-4 text-green-500" />
                             ) : (
                               <XCircle className="h-4 w-4 text-destructive" />
                             )}
-                            <span className="capitalize">{result.status}</span>
+                            {!(result.status === 'failed' && result.errorMessage) && (
+                              <span className="capitalize">{result.status}</span>
+                            )}
                           </div>
                           <div className="flex items-center gap-4 text-sm text-muted-foreground">
                             <span>{result.durationMs}ms</span>
@@ -1048,12 +1063,28 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
                       <div key={result.id} className="border rounded-lg p-4 space-y-3">
                         <div className="flex items-center justify-between">
                           <div className="flex items-center gap-3">
-                            {result.status === 'passed' ? (
-                              <CheckCircle className="h-4 w-4 text-green-500" />
+                            {result.status === 'failed' && result.errorMessage ? (
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <div className="flex items-center gap-2 cursor-default">
+                                    <XCircle className="h-4 w-4 text-destructive" />
+                                    <span className="text-sm font-medium capitalize">{result.status}</span>
+                                  </div>
+                                </TooltipTrigger>
+                                <TooltipContent side="right" className="max-w-md">
+                                  <pre className="whitespace-pre-wrap font-mono text-xs max-h-48 overflow-y-auto">{result.errorMessage}</pre>
+                                </TooltipContent>
+                              </Tooltip>
                             ) : (
-                              <XCircle className="h-4 w-4 text-destructive" />
+                              <>
+                                {result.status === 'passed' ? (
+                                  <CheckCircle className="h-4 w-4 text-green-500" />
+                                ) : (
+                                  <XCircle className="h-4 w-4 text-destructive" />
+                                )}
+                                <span className="text-sm font-medium capitalize">{result.status}</span>
+                              </>
                             )}
-                            <span className="text-sm font-medium capitalize">{result.status}</span>
                             {result.durationMs && (
                               <span className="text-xs text-muted-foreground">{result.durationMs}ms</span>
                             )}

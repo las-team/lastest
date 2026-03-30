@@ -63,6 +63,33 @@ function parseSlug(slug: string[]): { resource: string; id?: string; subResource
   return { resource, id, subResource, action };
 }
 
+// Helper to verify a repository belongs to the session's team
+async function verifyRepoOwnership(repoId: string, session: { team?: { id: string } | null }) {
+  const repo = await queries.getRepository(repoId);
+  if (!repo || repo.teamId !== session.team?.id) return false;
+  return true;
+}
+
+// Helper to verify a build belongs to the session's team (via test run → repo)
+async function verifyBuildOwnership(buildId: string, session: { team?: { id: string } | null }) {
+  const build = await queries.getBuild(buildId);
+  if (!build) return false;
+  if (build.testRunId) {
+    const testRun = await queries.getTestRun(build.testRunId);
+    if (testRun?.repositoryId) {
+      return verifyRepoOwnership(testRun.repositoryId, session);
+    }
+  }
+  return false;
+}
+
+// Helper to verify a visual diff belongs to the session's team (via build)
+async function verifyDiffOwnership(diffId: string, session: { team?: { id: string } | null }) {
+  const diff = await queries.getVisualDiff(diffId);
+  if (!diff) return false;
+  return verifyBuildOwnership(diff.buildId, session);
+}
+
 // GET handler
 export async function GET(
   request: NextRequest,
@@ -192,6 +219,10 @@ export async function GET(
 
     // Visual diffs
     if (resource === 'diffs' && id && !subResource) {
+      // Verify team ownership via diff → build → test run → repo
+      if (!(await verifyDiffOwnership(id, session))) {
+        return NextResponse.json({ error: 'Not found' }, { status: 404 });
+      }
       const diff = await getDiff(id);
       if (!diff) {
         return NextResponse.json({ error: 'Not found' }, { status: 404 });
@@ -199,15 +230,24 @@ export async function GET(
       return NextResponse.json(diff);
     }
 
-    // Background jobs
+    // Background jobs — filter to jobs belonging to the session's team
     if (resource === 'jobs') {
       if (!id || id === 'active') {
-        const activeJobs = await queries.getActiveBackgroundJobs();
-        return NextResponse.json(activeJobs);
+        const activeJobs = await queries.getActiveBackgroundJobs() as Array<Record<string, unknown>>;
+        const teamRepos = session.team ? await queries.getRepositoriesByTeam(session.team.id) : [];
+        const teamRepoIds = new Set(teamRepos.map(r => r.id));
+        const filtered = activeJobs.filter(j => !j.repositoryId || teamRepoIds.has(j.repositoryId as string));
+        return NextResponse.json(filtered);
       }
-      const job = await queries.getBackgroundJob(id);
+      const job = await queries.getBackgroundJob(id) as Record<string, unknown> | null;
       if (!job) {
         return NextResponse.json({ error: 'Not found' }, { status: 404 });
+      }
+      // Verify team ownership if job has a repositoryId
+      if (job.repositoryId) {
+        if (!(await verifyRepoOwnership(job.repositoryId as string, session))) {
+          return NextResponse.json({ error: 'Not found' }, { status: 404 });
+        }
       }
       return NextResponse.json(job);
     }
@@ -293,6 +333,12 @@ export async function POST(
       if (!diffIds || !Array.isArray(diffIds) || diffIds.length === 0) {
         return NextResponse.json({ error: 'diffIds array required' }, { status: 400 });
       }
+      // Verify team ownership for all diffs
+      for (const did of diffIds) {
+        if (!(await verifyDiffOwnership(did, session))) {
+          return NextResponse.json({ error: 'Not found' }, { status: 404 });
+        }
+      }
       const result = await batchApproveDiffs(diffIds);
       return NextResponse.json(result);
     }
@@ -303,6 +349,12 @@ export async function POST(
       const { diffIds } = body;
       if (!diffIds || !Array.isArray(diffIds) || diffIds.length === 0) {
         return NextResponse.json({ error: 'diffIds array required' }, { status: 400 });
+      }
+      // Verify team ownership for all diffs
+      for (const did of diffIds) {
+        if (!(await verifyDiffOwnership(did, session))) {
+          return NextResponse.json({ error: 'Not found' }, { status: 404 });
+        }
       }
       const result = await batchRejectDiffs(diffIds);
       return NextResponse.json(result);
@@ -336,6 +388,12 @@ export async function POST(
       if (!test) {
         return NextResponse.json({ error: 'Test not found' }, { status: 404 });
       }
+      // Verify team ownership via repository
+      if (test.repositoryId) {
+        if (!(await verifyRepoOwnership(test.repositoryId, session))) {
+          return NextResponse.json({ error: 'Not found' }, { status: 404 });
+        }
+      }
       // Dynamic import to avoid pulling in heavy AI deps at route level
       const { agentHealTest } = await import('@/lib/playwright/healer-agent');
       const result = await agentHealTest(test.repositoryId!, testId);
@@ -344,18 +402,27 @@ export async function POST(
 
     // Approve single diff: POST /api/v1/diffs/:id/approve
     if (resource === 'diffs' && id && subResource === 'approve') {
+      if (!(await verifyDiffOwnership(id, session))) {
+        return NextResponse.json({ error: 'Not found' }, { status: 404 });
+      }
       await approveDiff(id, 'mcp-agent');
       return NextResponse.json({ success: true });
     }
 
     // Reject single diff: POST /api/v1/diffs/:id/reject
     if (resource === 'diffs' && id && subResource === 'reject') {
+      if (!(await verifyDiffOwnership(id, session))) {
+        return NextResponse.json({ error: 'Not found' }, { status: 404 });
+      }
       await rejectDiff(id);
       return NextResponse.json({ success: true });
     }
 
     // Approve all diffs in a build: POST /api/v1/builds/:id/approve-all
     if (resource === 'builds' && id && subResource === 'approve-all') {
+      if (!(await verifyBuildOwnership(id, session))) {
+        return NextResponse.json({ error: 'Not found' }, { status: 404 });
+      }
       await approveAllDiffs(id, 'mcp-agent');
       return NextResponse.json({ success: true });
     }
@@ -366,6 +433,12 @@ export async function POST(
       const { name, repositoryId, parentId } = body;
       if (!name) {
         return NextResponse.json({ error: 'name required' }, { status: 400 });
+      }
+      // Verify team ownership of the target repository
+      if (repositoryId) {
+        if (!(await verifyRepoOwnership(repositoryId, session))) {
+          return NextResponse.json({ error: 'Not found' }, { status: 404 });
+        }
       }
       const result = await queries.createFunctionalArea({
         repositoryId: repositoryId ?? null,
