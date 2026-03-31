@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getCurrentSession } from '@/lib/auth';
-import { exchangeCodeForToken, getGitLabUser, getDefaultInstanceUrl } from '@/lib/gitlab/oauth';
+import { exchangeCodeForToken, getGitLabUser, getDefaultInstanceUrl, getUserProjects } from '@/lib/gitlab/oauth';
 import * as queries from '@/lib/db/queries';
 import { getPublicUrl } from '@/lib/utils';
 
@@ -62,6 +62,37 @@ export async function GET(request: NextRequest) {
       tokenExpiresAt,
       instanceUrl,
     });
+  }
+
+  // Auto-sync repos so the sidebar is populated immediately
+  try {
+    const glProjects = await getUserProjects(tokenResponse.access_token, instanceUrl);
+    for (const project of glProjects) {
+      const existing = await queries.getRepositoryByGitlabProjectId(project.id);
+      const [namespace, ...nameParts] = project.path_with_namespace.split('/');
+      const projectName = nameParts.join('/');
+
+      if (existing && existing.teamId === teamId) {
+        await queries.updateRepository(existing.id, {
+          owner: namespace,
+          name: projectName,
+          fullName: project.path_with_namespace,
+          defaultBranch: project.default_branch,
+        });
+      } else if (!existing) {
+        await queries.createRepository({
+          teamId,
+          provider: 'gitlab',
+          gitlabProjectId: project.id,
+          owner: namespace,
+          name: projectName,
+          fullName: project.path_with_namespace,
+          defaultBranch: project.default_branch,
+        });
+      }
+    }
+  } catch {
+    // Non-fatal — user can still manually sync later
   }
 
   return NextResponse.redirect(new URL('/settings?success=gitlab_connected', getPublicUrl(request)));

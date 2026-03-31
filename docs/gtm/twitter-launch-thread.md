@@ -63,7 +63,7 @@ Built with:
 • Next.js 16 (App Router)
 • Playwright for browser automation
 • pixelmatch for visual diffing
-• SQLite + Drizzle ORM
+• PostgreSQL + Drizzle ORM
 • Claude for AI test generation
 • Tesseract.js for OCR fallback selectors
 

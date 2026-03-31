@@ -5,7 +5,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Critical Rules
 
 - **ALWAYS use `pnpm`** — never `npm` or `npx`
-- **NEVER delete `lastest2.db`** without asking the user first (includes `pnpm db:reset`)
+- **NEVER run `pnpm db:reset`** without asking the user first (drops all PostgreSQL tables)
 
 ## Commands
 
@@ -24,7 +24,7 @@ docker compose -f docker-compose.eb.yml up -d --build  # Rebuild + start
 
 ## Architecture
 
-Visual regression testing platform: Next.js 16 App Router, SQLite (Drizzle ORM), Playwright.
+Visual regression testing platform: Next.js 16 App Router, PostgreSQL (Drizzle ORM), Playwright.
 
 **Core flow:** Record browser interactions → Run tests → Diff screenshots → Review/approve baselines
 

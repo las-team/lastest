@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { usePathname } from 'next/navigation';
+import { usePathname, useSearchParams } from 'next/navigation';
 import { cn } from '@/lib/utils';
 import {
   LayoutDashboard,
@@ -58,6 +58,8 @@ const settingsNav = [
 
 export function Sidebar({ repos, selectedRepo, currentUser, team }: SidebarProps) {
   const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const justConnected = searchParams.get('success') === 'github_connected' || searchParams.get('success') === 'gitlab_connected';
   const earlyAdopter = team?.earlyAdopterMode ?? false;
 
   const filteredDefinitionNav = earlyAdopter
@@ -87,7 +89,10 @@ export function Sidebar({ repos, selectedRepo, currentUser, team }: SidebarProps
         )}
       </div>
 
-      <div className="p-4 border-b space-y-3">
+      <div className={cn(
+        'p-4 border-b space-y-3 transition-all duration-500',
+        justConnected && 'ring-2 ring-primary/60 bg-primary/5 rounded-md'
+      )}>
         <div className="flex items-center gap-2">
           <div className="flex-1 min-w-0">
             <RepoSelector initialRepos={repos} initialSelected={selectedRepo} />
@@ -95,6 +100,11 @@ export function Sidebar({ repos, selectedRepo, currentUser, team }: SidebarProps
           <CreateLocalRepoButton />
           <SyncReposButton />
         </div>
+        {justConnected && repos && repos.length > 0 && !selectedRepo && (
+          <p className="text-xs text-primary font-medium animate-pulse">
+            {repos.length} repo{repos.length !== 1 ? 's' : ''} synced — select one to get started
+          </p>
+        )}
       </div>
 
       <nav className="flex-1 p-4 space-y-4">

@@ -27,12 +27,14 @@ export function parseAssertions(code: string): TestAssertion[] {
     const trimmed = line.trim();
 
     // Pattern 1: Element assertion block (from event-to-code.ts)
-    // // Element assertion: toBeVisible
-    const elementCommentMatch = trimmed.match(/^\/\/ Element assertion: (\w+)/);
+    // // Element assertion: toBeVisible  OR  // Hard assertion: toBeVisible
+    const elementCommentMatch = trimmed.match(/^\/\/ (Element|Hard) assertion: (\w+)/);
     if (elementCommentMatch) {
-      const assertionType = elementCommentMatch[1];
+      const isHard = elementCommentMatch[1] === 'Hard';
+      const assertionType = elementCommentMatch[2];
       const assertion = parseElementAssertionBlock(lines, i, orderIndex, assertionType);
       if (assertion) {
+        assertion.isSoft = !isHard;
         assertions.push(assertion);
         orderIndex++;
       }
@@ -55,6 +57,7 @@ export function parseAssertions(code: string): TestAssertion[] {
         assertionType,
         negated,
         expectedValue,
+        isSoft: true,
         label: describeAssertion('page', assertionType, negated, undefined, expectedValue),
         codeLineStart: i + 1,
         codeLineEnd: i + 1,
@@ -78,6 +81,7 @@ export function parseAssertions(code: string): TestAssertion[] {
         assertionType,
         negated,
         expectedValue,
+        isSoft: true,
         label: describeAssertion('element', assertionType, negated, undefined, expectedValue),
         codeLineStart: i + 1,
         codeLineEnd: i + 1,
@@ -102,6 +106,7 @@ export function parseAssertions(code: string): TestAssertion[] {
         assertionType,
         negated,
         expectedValue,
+        isSoft: true,
         label: describeAssertion('generic', assertionType, negated, genericMatch[1], expectedValue),
         codeLineStart: i + 1,
         codeLineEnd: i + 1,
@@ -121,6 +126,7 @@ export function parseAssertions(code: string): TestAssertion[] {
         assertionType: 'waitForLoadState',
         negated: false,
         expectedValue: state,
+        isSoft: true,
         label: `Page load state: ${state}`,
         codeLineStart: i + 1,
         codeLineEnd: i + 1,
@@ -200,6 +206,7 @@ function parseElementAssertionBlock(
     targetSelectors,
     expectedValue,
     attributeName,
+    isSoft: true,
     label: describeAssertion('element', assertionType, negated, targetSelector, expectedValue, attributeName),
     codeLineStart: commentLine + 1,
     codeLineEnd: endLine + 1,

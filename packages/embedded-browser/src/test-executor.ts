@@ -278,7 +278,7 @@ export class EmbeddedTestExecutor {
       // Soft error wrapping — skip screenshot lines (mirrors runner.ts)
       body = body.replace(/^(\s*)(await\s+.+;)\s*$/gm, (_match, indent, stmt) => {
         if (stmt.includes('.screenshot(')) return `${indent}${stmt}`;
-        return `${indent}try { ${stmt} } catch(__softErr) { stepLogger.warn(typeof __softErr === 'object' && __softErr !== null && 'message' in __softErr ? __softErr.message : String(__softErr)); }`;
+        return `${indent}try { ${stmt} } catch(__softErr) { if (__softErr && __softErr.__hardAssertion) throw __softErr; stepLogger.warn(typeof __softErr === 'object' && __softErr !== null && 'message' in __softErr ? __softErr.message : String(__softErr)); }`;
       });
 
       // Step logger with softExpect/softAction (matches runner)

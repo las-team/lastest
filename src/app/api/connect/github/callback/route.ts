@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getCurrentSession } from '@/lib/auth';
-import { exchangeCodeForToken, getGitHubUser } from '@/lib/github/oauth';
+import { exchangeCodeForToken, getGitHubUser, getUserRepos } from '@/lib/github/oauth';
 import * as queries from '@/lib/db/queries';
 import { getPublicUrl } from '@/lib/utils';
 
@@ -86,6 +86,35 @@ export async function GET(request: NextRequest) {
         githubUsername: ghUser.login,
         accessToken: tokenResponse.access_token,
       });
+    }
+  }
+
+  // Auto-sync repos so the sidebar is populated immediately
+  if (teamId) {
+    try {
+      const ghRepos = await getUserRepos(tokenResponse.access_token);
+      for (const repo of ghRepos) {
+        const existing = await queries.getRepositoryByGithubId(repo.id);
+        if (existing && existing.teamId === teamId) {
+          await queries.updateRepository(existing.id, {
+            owner: repo.owner.login,
+            name: repo.name,
+            fullName: repo.full_name,
+            defaultBranch: repo.default_branch,
+          });
+        } else if (!existing) {
+          await queries.createRepository({
+            teamId,
+            githubRepoId: repo.id,
+            owner: repo.owner.login,
+            name: repo.name,
+            fullName: repo.full_name,
+            defaultBranch: repo.default_branch,
+          });
+        }
+      }
+    } catch {
+      // Non-fatal — user can still manually sync later
     }
   }
 

@@ -234,7 +234,9 @@ Open [http://localhost:3000](http://localhost:3000) — that's it.
 ```bash
 git clone https://github.com/dexilion-team/lastest2.git
 cd lastest2
+docker run -d --name lastest2-dev-db -e POSTGRES_USER=lastest -e POSTGRES_PASSWORD=lastest -e POSTGRES_DB=lastest -p 5432:5432 postgres:17-alpine
 pnpm install
+pnpm db:push
 pnpm dev
 ```
 
@@ -251,7 +253,7 @@ Open [http://localhost:3000](http://localhost:3000)
 
 ### Requirements
 - **Docker**: Docker 20+ and Docker Compose
-- **From source**: Node.js 18+, pnpm
+- **From source**: Node.js 18+, pnpm, PostgreSQL 15+
 
 ---
 
@@ -359,7 +361,7 @@ pnpm test:ui      # Run tests with Vitest UI
 pnpm db:studio    # Open Drizzle Studio for database inspection
 pnpm db:push      # Push schema changes to database
 pnpm db:generate  # Generate Drizzle migrations
-pnpm db:reset     # Reset database (removes SQLite DB + screenshots/baselines)
+pnpm db:reset     # Reset database (drops all tables + removes screenshots/baselines)
 pnpm db:seed      # Seed test data
 pnpm test:visual  # Run visual tests via CLI (see below)
 ```
@@ -469,13 +471,14 @@ Uses the official Playwright base image (`mcr.microsoft.com/playwright`) with No
 
 | Volume | Purpose |
 |--------|---------|
-| `lastest2-data` | SQLite database |
-| `lastest2-screenshots` | Test screenshots |
-| `lastest2-baselines` | Approved baselines |
+| `lastest2-pgdata` | PostgreSQL data |
+| `lastest2-storage` | Screenshots, baselines, diffs, traces |
 
 ### Environment Variables for Docker
 
 ```bash
+POSTGRES_PASSWORD=your-secure-password
+BETTER_AUTH_SECRET=your-auth-secret
 GITHUB_CLIENT_ID=your-github-app-id
 GITHUB_CLIENT_SECRET=your-github-app-secret
 ```
@@ -657,7 +660,7 @@ All configuration lives under a unified Settings page:
 - **Browser Automation**: Playwright
 - **Visual Diffing**: pixelmatch, SSIM, Butteraugli
 - **Accessibility**: axe-core
-- **Database**: SQLite + Drizzle ORM (WAL mode)
+- **Database**: PostgreSQL + Drizzle ORM
 - **Auth**: better-auth (email/password with Argon2, GitHub, GitLab, Google OAuth)
 - **AI**: Claude (Agent SDK, CLI, OpenRouter, direct Anthropic API), Ollama
 - **MCP**: `@lastest/mcp-server` for AI agent integration
@@ -697,8 +700,8 @@ GOOGLE_SHEETS_REDIRECT_URI=       # Separate redirect for Sheets OAuth
 RESEND_API_KEY=
 EMAIL_FROM=
 
-# Advanced
-DATABASE_PATH=                    # Default: ./lastest2.db
+# Database
+DATABASE_URL=                     # Default: postgresql://lastest:lastest@localhost:5432/lastest
 MONITORED_BRANCHES=               # Default: main,master,develop
 NEXT_PUBLIC_APP_URL=              # Your app's public URL
 NEXT_PUBLIC_BASE_URL=             # Base URL for API calls

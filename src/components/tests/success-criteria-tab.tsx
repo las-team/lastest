@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { CheckCircle2, XCircle, Circle, AlertTriangle, ShieldCheck } from 'lucide-react';
+import { CheckCircle2, XCircle, Circle, AlertTriangle, ShieldCheck, ShieldAlert } from 'lucide-react';
 import type { TestAssertion, AssertionResult } from '@/lib/db/schema';
 import { cn } from '@/lib/utils';
 
@@ -62,6 +62,7 @@ export function SuccessCriteriaTab({
   const passedCount = hasAssertions ? assertions.filter(a => resultMap.get(a.id)?.status === 'passed').length : 0;
   const failedCount = hasAssertions ? assertions.filter(a => resultMap.get(a.id)?.status === 'failed').length : 0;
   const hasResults = hasAssertions && assertionResults && assertionResults.length > 0;
+  const hardCount = hasAssertions ? assertions.filter(a => a.isSoft === false).length : 0;
 
   // Find soft errors not matched to any assertion result
   const matchedErrors = new Set(
@@ -88,6 +89,7 @@ export function SuccessCriteriaTab({
             {hasAssertions && (
               <span className="text-muted-foreground font-normal">
                 {assertions.length} assertion{assertions.length !== 1 ? 's' : ''}
+                {hardCount > 0 && <> ({hardCount} hard)</>}
               </span>
             )}
           </CardTitle>
@@ -96,13 +98,13 @@ export function SuccessCriteriaTab({
               {passedCount > 0 && (
                 <span className="flex items-center gap-1 text-green-600">
                   <CheckCircle2 className="h-4 w-4" />
-                  {passedCount} passed
+                  {passedCount} met
                 </span>
               )}
               {failedCount > 0 && (
                 <span className="flex items-center gap-1 text-red-600">
                   <XCircle className="h-4 w-4" />
-                  {failedCount} failed
+                  {failedCount} not met
                 </span>
               )}
               {assertions.length - passedCount - failedCount > 0 && (
@@ -128,13 +130,15 @@ export function SuccessCriteriaTab({
             const result = resultMap.get(assertion.id);
             const status = result?.status ?? 'not_run';
             const isExpanded = expanded.has(assertion.id);
+            const isHard = assertion.isSoft === false;
 
             return (
               <div
                 key={assertion.id}
                 className={cn(
                   'rounded-md border p-3 cursor-pointer transition-colors hover:bg-muted/30',
-                  status === 'failed' && 'border-red-200 dark:border-red-900',
+                  status === 'failed' && isHard && 'border-red-200 bg-red-50/50 dark:border-red-900 dark:bg-red-950/30',
+                  status === 'failed' && !isHard && 'border-yellow-200 dark:border-yellow-900',
                 )}
                 onClick={() => toggleExpand(assertion.id)}
               >
@@ -151,9 +155,19 @@ export function SuccessCriteriaTab({
                       {assertion.negated && (
                         <Badge variant="outline" className="text-xs">.not</Badge>
                       )}
+                      {isHard ? (
+                        <Badge variant="outline" className="text-xs bg-red-50 text-red-700 border-red-200 dark:bg-red-950 dark:text-red-300 dark:border-red-800">
+                          <ShieldAlert className="h-3 w-3 mr-1" />
+                          Hard
+                        </Badge>
+                      ) : (
+                        <Badge variant="outline" className="text-xs text-muted-foreground">
+                          Soft
+                        </Badge>
+                      )}
                     </div>
 
-                    {/* Expected / Actual values */}
+                    {/* Expected / Actual values — show whenever available from last run */}
                     {(assertion.expectedValue || result?.actualValue) && (
                       <div className="mt-1 text-xs space-y-0.5">
                         {assertion.expectedValue && (
@@ -162,7 +176,7 @@ export function SuccessCriteriaTab({
                           </div>
                         )}
                         {result?.actualValue && (
-                          <div className={status === 'failed' ? 'text-red-600' : 'text-muted-foreground'}>
+                          <div className={status === 'failed' ? 'text-red-600' : 'text-green-600'}>
                             Actual: <span className="font-mono">{result.actualValue}</span>
                           </div>
                         )}
@@ -183,11 +197,12 @@ export function SuccessCriteriaTab({
                           <div>Selector: <span className="font-mono">{assertion.targetSelector}</span></div>
                         )}
                         {assertion.codeLineStart && (
-                          <div>Code line: {assertion.codeLineStart}{assertion.codeLineEnd && assertion.codeLineEnd !== assertion.codeLineStart ? `–${assertion.codeLineEnd}` : ''}</div>
+                          <div>Code line: {assertion.codeLineStart}{assertion.codeLineEnd && assertion.codeLineEnd !== assertion.codeLineStart ? `\u2013${assertion.codeLineEnd}` : ''}</div>
                         )}
                         {result?.durationMs != null && (
                           <div>Duration: {result.durationMs}ms</div>
                         )}
+                        <div>Mode: {isHard ? 'Hard \u2014 test fails immediately if not met' : 'Soft \u2014 test continues if not met'}</div>
                       </div>
                     )}
                   </div>

@@ -32,7 +32,7 @@ I'm a solo founder. I spend $20/mo on hosting. Paying $150+ for visual testing f
 3. **Run** - Screenshots compared against baselines
 4. **Review** - Approve intentional changes, catch regressions
 
-It's 100% self-hosted (SQLite + local files), open source (MIT), and free forever.
+It's 100% self-hosted (PostgreSQL + local files), open source (MIT), and free forever.
 
 **Who it's for**: Solo founders and small teams who ship with AI tools and need visual testing without the enterprise price tag.
 

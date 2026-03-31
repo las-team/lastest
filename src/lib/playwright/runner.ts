@@ -124,6 +124,17 @@ export function validateTestCode(code: string): void {
 }
 
 /**
+ * Error class for hard assertions — re-thrown by the body wrapper's try/catch.
+ */
+export class HardAssertionError extends Error {
+  __hardAssertion = true;
+  constructor(message: string) {
+    super(message);
+    this.name = 'HardAssertionError';
+  }
+}
+
+/**
  * Wrap matcher objects so assertion failures push to softErrors instead of throwing.
  * Handles both sync and async matchers, and recursively wraps nested objects (e.g. `not`).
  */
@@ -154,6 +165,97 @@ function wrapMatchersForSoftErrors(matchers: Record<string, unknown>, softErrors
   });
 }
 
+/** Assertion tracker state passed to createExpect for result collection. */
+export interface AssertionTracker {
+  assertions: import('@/lib/db/schema').TestAssertion[];
+  results: import('@/lib/db/schema').AssertionResult[];
+  callIndex: number;
+}
+
+/**
+ * Extract actual value from assertion error messages.
+ * Matches patterns like: 'but got "X"', 'but got X', 'Received: X'
+ */
+function extractActualFromError(msg: string): string | undefined {
+  const m = msg.match(/but got "?([^"]*)"?$/) ?? msg.match(/Received:\s*(.+)$/);
+  return m?.[1];
+}
+
+/**
+ * Wrap matchers with assertion result tracking.
+ * Records pass/fail/duration for each assertion and handles hard vs soft behavior.
+ */
+function wrapMatchersForTracking(
+  matchers: Record<string, unknown>,
+  assertion: import('@/lib/db/schema').TestAssertion,
+  results: import('@/lib/db/schema').AssertionResult[],
+  isSoft: boolean,
+  softErrors?: string[],
+): unknown {
+  return new Proxy(matchers, {
+    get(target, prop) {
+      const value = target[prop as string];
+      if (typeof value === 'function') {
+        return (...args: unknown[]) => {
+          const start = Date.now();
+          try {
+            const result = (value as (...a: unknown[]) => unknown)(...args);
+            if (result && typeof (result as Promise<unknown>).then === 'function') {
+              return (result as Promise<unknown>).then(() => {
+                results.push({
+                  assertionId: assertion.id,
+                  status: 'passed',
+                  durationMs: Date.now() - start,
+                });
+              }).catch((e: unknown) => {
+                const errorMessage = e instanceof Error ? e.message : String(e);
+                results.push({
+                  assertionId: assertion.id,
+                  status: 'failed',
+                  errorMessage,
+                  actualValue: extractActualFromError(errorMessage),
+                  durationMs: Date.now() - start,
+                });
+                if (isSoft) {
+                  softErrors?.push(errorMessage);
+                } else {
+                  throw new HardAssertionError(errorMessage);
+                }
+              });
+            }
+            // Sync matcher passed
+            results.push({
+              assertionId: assertion.id,
+              status: 'passed',
+              durationMs: Date.now() - start,
+            });
+            return result;
+          } catch (e) {
+            if (e instanceof HardAssertionError) throw e;
+            const errorMessage = e instanceof Error ? e.message : String(e);
+            results.push({
+              assertionId: assertion.id,
+              status: 'failed',
+              errorMessage,
+              actualValue: extractActualFromError(errorMessage),
+              durationMs: Date.now() - start,
+            });
+            if (isSoft) {
+              softErrors?.push(errorMessage);
+            } else {
+              throw new HardAssertionError(errorMessage);
+            }
+          }
+        };
+      }
+      if (typeof value === 'object' && value !== null) {
+        return wrapMatchersForTracking(value as Record<string, unknown>, assertion, results, isSoft, softErrors);
+      }
+      return value;
+    }
+  });
+}
+
 /**
  * Simple expect implementation for Playwright Inspector-generated tests.
  * Provides common assertion matchers that wrap Playwright's built-in locator assertions.
@@ -163,8 +265,11 @@ function wrapMatchersForSoftErrors(matchers: Record<string, unknown>, softErrors
  * When softErrors is provided, assertion failures are logged instead of thrown,
  * allowing test execution to continue past failed assertions.
  */
-export function createExpect(timeout = 5000, softErrors?: string[]) {
+export function createExpect(timeout = 5000, softErrors?: string[], tracker?: AssertionTracker) {
   return function expect(target: unknown, message?: string) {
+    // If tracking, find the current assertion and advance the counter
+    const currentAssertion = tracker?.assertions[tracker.callIndex];
+    if (tracker) tracker.callIndex++;
     // Check if target is a Page (has 'goto' method) vs Locator
     const isPage = typeof (target as { goto?: unknown })?.goto === 'function';
     const isLocator = typeof (target as { click?: unknown })?.click === 'function' &&
@@ -313,6 +418,10 @@ export function createExpect(timeout = 5000, softErrors?: string[]) {
           },
         },
       };
+      if (tracker && currentAssertion) {
+        const isSoft = currentAssertion.isSoft !== false;
+        return wrapMatchersForTracking(matchers as Record<string, unknown>, currentAssertion, tracker.results, isSoft, softErrors);
+      }
       return softErrors ? wrapMatchersForSoftErrors(matchers as Record<string, unknown>, softErrors) : matchers;
     }
 
@@ -368,6 +477,10 @@ export function createExpect(timeout = 5000, softErrors?: string[]) {
           },
         },
       };
+      if (tracker && currentAssertion) {
+        const isSoft = currentAssertion.isSoft !== false;
+        return wrapMatchersForTracking(matchers as Record<string, unknown>, currentAssertion, tracker.results, isSoft, softErrors);
+      }
       return softErrors ? wrapMatchersForSoftErrors(matchers as Record<string, unknown>, softErrors) : matchers;
     }
 
@@ -587,7 +700,11 @@ export function createExpect(timeout = 5000, softErrors?: string[]) {
         },
       },
     };
-    return softErrors ? wrapMatchersForSoftErrors(matchers as Record<string, unknown>, softErrors) : matchers;
+    if (tracker && currentAssertion) {
+        const isSoft = currentAssertion.isSoft !== false;
+        return wrapMatchersForTracking(matchers as Record<string, unknown>, currentAssertion, tracker.results, isSoft, softErrors);
+      }
+      return softErrors ? wrapMatchersForSoftErrors(matchers as Record<string, unknown>, softErrors) : matchers;
   };
 }
 import type { Test, TestResult, ActionSelector, SelectorConfig, PlaywrightSettings, NetworkRequest, EnvironmentConfig } from '@/lib/db/schema';
@@ -987,6 +1104,7 @@ export class PlaywrightRunner extends EventEmitter {
 
     // Track soft errors (outside try so catch can access)
     let testSoftErrors: string[] = [];
+    let testAssertionResults: import('@/lib/db/schema').AssertionResult[] = [];
 
     // Result object — assigned in try/catch, video path added in finally
     let result: TestRunResult = {
@@ -1399,9 +1517,11 @@ export class PlaywrightRunner extends EventEmitter {
       // Errors are caught as soft errors so screenshot capture still happens
       let testThrewError = false;
       try {
-        testSoftErrors = await this.executeTestCode(screenshotProxy, test, runId, testScreenshotPath, (label: string) => {
+        const execResult = await this.executeTestCode(screenshotProxy, test, runId, testScreenshotPath, (label: string) => {
           currentStepLabel = label;
         });
+        testSoftErrors = execResult.softErrors;
+        testAssertionResults = execResult.assertionResults;
       } catch (e) {
         testThrewError = true;
         const msg = e instanceof Error ? e.message : String(e);
@@ -1550,6 +1670,7 @@ export class PlaywrightRunner extends EventEmitter {
         teardownError,
         stabilityMetadata: aggregatedStabilityMetadata,
         softErrors: testSoftErrors.length > 0 ? testSoftErrors : undefined,
+        assertionResults: testAssertionResults.length > 0 ? testAssertionResults : undefined,
       };
 
     } catch (error) {
@@ -1605,6 +1726,7 @@ export class PlaywrightRunner extends EventEmitter {
         teardownDurationMs,
         teardownError,
         softErrors: testSoftErrors.length > 0 ? testSoftErrors : undefined,
+        assertionResults: testAssertionResults.length > 0 ? testAssertionResults : undefined,
       };
 
     } finally {
@@ -1646,7 +1768,7 @@ export class PlaywrightRunner extends EventEmitter {
     validateTestCode(code);
   }
 
-  private async executeTestCode(page: Page, test: Test, runId: string, screenshotPath: string, onStepLabel?: (label: string) => void): Promise<string[]> {
+  private async executeTestCode(page: Page, test: Test, runId: string, screenshotPath: string, onStepLabel?: (label: string) => void): Promise<{ softErrors: string[]; assertionResults: import('@/lib/db/schema').AssertionResult[] }> {
     let code = test.code;
     if (!code) {
       throw new Error('No test code');
@@ -1687,6 +1809,11 @@ export class PlaywrightRunner extends EventEmitter {
       const baseUrl = (this.environmentConfig?.baseUrl || serverManager.resolveUrl('http://localhost:3000') || 'http://localhost:3000').replace(/\/$/, '');
 
       const softErrors: string[] = [];
+      const assertionTracker: AssertionTracker = {
+        assertions: (test as { assertions?: import('@/lib/db/schema').TestAssertion[] }).assertions ?? [],
+        results: [],
+        callIndex: 0,
+      };
 
       const stepLogger = {
         log: (msg: string) => {
@@ -1729,7 +1856,7 @@ export class PlaywrightRunner extends EventEmitter {
       // Build an async function from the body
       // Include 'expect' for Playwright Inspector-generated tests that use assertions
       // Include 'appState' for internal state inspection (Excalidraw undo/redo, etc.)
-      const expectFn = createExpect(this.getActionTimeout(), softErrors);
+      const expectFn = createExpect(this.getActionTimeout(), softErrors, assertionTracker.assertions.length > 0 ? assertionTracker : undefined);
       const appStateFn = createAppState(page);
 
       // Create stats-tracking locateWithFallback that tests can use
@@ -1861,7 +1988,7 @@ export class PlaywrightRunner extends EventEmitter {
       // execution continues past locator/action failures to reach screenshot calls
       body = body.replace(/^(\s*)(await\s+.+;)\s*$/gm, (_match, indent, stmt) => {
         if (stmt.includes('.screenshot(')) return `${indent}${stmt}`;
-        return `${indent}try { ${stmt} } catch(__softErr) { stepLogger.warn(typeof __softErr === 'object' && __softErr !== null && 'message' in __softErr ? __softErr.message : String(__softErr)); }`;
+        return `${indent}try { ${stmt} } catch(__softErr) { if (__softErr && __softErr.__hardAssertion) throw __softErr; stepLogger.warn(typeof __softErr === 'object' && __softErr !== null && 'message' in __softErr ? __softErr.message : String(__softErr)); }`;
       });
 
       // File upload helper — always available
@@ -1961,7 +2088,7 @@ export class PlaywrightRunner extends EventEmitter {
       const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
       const testFn = new AsyncFunction('page', 'baseUrl', 'screenshotPath', 'stepLogger', 'expect', 'appState', 'locateWithFallback', 'fileUpload', 'clipboard', 'downloads', 'network', 'replayCursorPath', 'fixtures', body);
       await testFn(page, baseUrl, screenshotPath, stepLogger, expectFn, appStateFn, statsLocateWithFallback, fileUploadHelper, clipboardHelper, downloadsHelper, networkHelper, replayCursorPathFn, fixturesMap);
-      return softErrors;
+      return { softErrors, assertionResults: assertionTracker.results };
     }
 
     // Legacy: try Playwright test format
@@ -1974,7 +2101,7 @@ export class PlaywrightRunner extends EventEmitter {
       for (const line of lines) {
         await this.executeLine(page, line.trim(), test.id);
       }
-      return [];
+      return { softErrors: [], assertionResults: [] };
     }
 
     const body = bodyMatch[1];
@@ -1983,7 +2110,7 @@ export class PlaywrightRunner extends EventEmitter {
     for (const line of lines) {
       await this.executeLine(page, line.trim(), test.id);
     }
-    return [];
+    return { softErrors: [], assertionResults: [] };
   }
 
   // Locate element using fallback selector strategy with stats-based optimization

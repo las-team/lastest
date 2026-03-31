@@ -17,7 +17,7 @@
 | **Smart Baseline Carry-Forward** | Same screenshot = auto-approved across runs |
 | **GitHub Integration** | OAuth login, PR linking, branch-aware baselines |
 | **Route Discovery** | Scans your Next.js/React app, suggests test coverage gaps |
-| **Local SQLite** | No cloud bills, no infra—runs on your machine |
+| **PostgreSQL** | No cloud bills, no infra—runs on your machine |
 | **Multi-Selector Fallback** | Tests survive minor UI changes (data-testid → id → text → OCR) |
 | **MCP-Enhanced AI** | AI explores your live app before writing tests |
 
@@ -149,7 +149,7 @@
 - **Setup time:** < 5 min (clone, pnpm install, pnpm dev)
 - **First test:** < 2 min with recorder
 - **Cost:** $0 (bring your own AI API key or use Claude CLI)
-- **Stack:** Next.js 16, Playwright, SQLite, TypeScript
+- **Stack:** Next.js 16, Playwright, PostgreSQL, TypeScript
 
 ---
 

@@ -216,6 +216,7 @@ export interface TestAssertion {
   label?: string;
   codeLineStart?: number;
   codeLineEnd?: number;
+  isSoft?: boolean; // true (default) = test continues on failure, false = test fails immediately
 }
 
 export interface AssertionResult {

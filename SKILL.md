@@ -51,4 +51,4 @@ npx @lastest/mcp-server --url http://localhost:3000 --api-key YOUR_KEY
 
 ### Self-Hosted
 
-Lastest2 runs on your infrastructure. SQLite database, no external dependencies required.
+Lastest2 runs on your infrastructure. PostgreSQL database, Docker Compose included.

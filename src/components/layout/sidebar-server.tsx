@@ -1,3 +1,4 @@
+import { Suspense } from 'react';
 import { getSelectedRepository, getRepositoriesByTeam } from '@/lib/db/queries';
 import { getCurrentSession } from '@/lib/auth';
 import { Sidebar } from './sidebar';
@@ -6,7 +7,11 @@ export async function SidebarServer() {
   const session = await getCurrentSession();
 
   if (!session) {
-    return <Sidebar repos={[]} selectedRepo={null} currentUser={null} team={null} />;
+    return (
+      <Suspense>
+        <Sidebar repos={[]} selectedRepo={null} currentUser={null} team={null} />
+      </Suspense>
+    );
   }
 
   const teamId = session.team?.id;
@@ -18,11 +23,13 @@ export async function SidebarServer() {
   ]);
 
   return (
-    <Sidebar
-      repos={repos}
-      selectedRepo={selectedRepo ?? null}
-      currentUser={session.user}
-      team={session.team}
-    />
+    <Suspense>
+      <Sidebar
+        repos={repos}
+        selectedRepo={selectedRepo ?? null}
+        currentUser={session.user}
+        team={session.team}
+      />
+    </Suspense>
   );
 }

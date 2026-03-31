@@ -16,7 +16,7 @@ So I built Lastest2:
 - Point-and-click test recording (Playwright under the hood)
 - AI generates robust test code with fallback selectors
 - Pixel-perfect visual diffing with approval workflow
-- 100% self-hosted, SQLite database, your data stays local
+- 100% self-hosted, PostgreSQL database, your data stays local
 - Free forever (MIT license)
 
 The workflow: Record a user flow → AI writes the test → Run it → See exactly what pixels changed → Approve or reject.
