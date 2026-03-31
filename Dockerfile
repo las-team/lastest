@@ -124,6 +124,13 @@ COPY --from=deps --chown=nextjs:nodejs \
 RUN ln -sf .pnpm/@anthropic-ai+claude-agent-sdk@0.2.19_zod@4.3.5/node_modules/@anthropic-ai \
   ./node_modules/@anthropic-ai
 
+# Copy tesseract.js + all its deps (standalone prunes serverExternalPackages)
+COPY --from=deps --chown=nextjs:nodejs \
+  /app/node_modules/.pnpm/tesseract.js@7.0.0 \
+  ./node_modules/.pnpm/tesseract.js@7.0.0
+RUN ln -sf .pnpm/tesseract.js@7.0.0/node_modules/tesseract.js ./node_modules/tesseract.js && \
+    ln -sf .pnpm/tesseract.js@7.0.0/node_modules/tesseract.js-core ./node_modules/tesseract.js-core
+
 # Install Claude Code CLI globally (for `docker exec ... claude login`)
 RUN npm install -g @anthropic-ai/claude-code@latest 2>/dev/null || \
     ln -s /app/node_modules/@anthropic-ai/claude-agent-sdk/cli.js /usr/local/bin/claude

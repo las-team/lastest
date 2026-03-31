@@ -223,18 +223,26 @@ export class EmbeddedRunnerClient {
   async start(): Promise<void> {
     this.running = true;
 
-    if (this.systemToken) {
-      // System EB mode: auto-register via shared token
-      const registered = await this.registerAsSystem();
-      if (!registered) {
-        throw new Error('Failed to register as system embedded browser');
+    // Retry registration with backoff — the app may not be ready yet
+    const maxAttempts = 10;
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      let registered = false;
+
+      if (this.systemToken) {
+        registered = await this.registerAsSystem();
+      } else {
+        registered = await this.register();
       }
-    } else {
-      // Standard mode: register via per-runner LASTEST2_TOKEN
-      const registered = await this.register();
-      if (!registered) {
-        throw new Error('Failed to register embedded browser');
+
+      if (registered) break;
+
+      if (attempt === maxAttempts) {
+        throw new Error('Failed to register embedded browser after ' + maxAttempts + ' attempts');
       }
+
+      const delay = Math.min(1000 * Math.pow(2, attempt - 1), 15000);
+      console.log(`[EmbeddedRunner] Registration attempt ${attempt}/${maxAttempts} failed, retrying in ${delay}ms...`);
+      await new Promise((r) => setTimeout(r, delay));
     }
 
     // Then connect as a runner
