@@ -124,12 +124,34 @@ COPY --from=deps --chown=nextjs:nodejs \
 RUN ln -sf .pnpm/@anthropic-ai+claude-agent-sdk@0.2.19_zod@4.3.5/node_modules/@anthropic-ai \
   ./node_modules/@anthropic-ai
 
-# Copy tesseract.js + all its deps (standalone prunes serverExternalPackages)
+# Copy tesseract.js + all its transitive deps (standalone prunes serverExternalPackages)
+# Each subdep is a separate pnpm dir that tesseract.js symlinks to
 COPY --from=deps --chown=nextjs:nodejs \
   /app/node_modules/.pnpm/tesseract.js@7.0.0 \
   ./node_modules/.pnpm/tesseract.js@7.0.0
+COPY --from=deps --chown=nextjs:nodejs \
+  /app/node_modules/.pnpm/tesseract.js-core@7.0.0 \
+  ./node_modules/.pnpm/tesseract.js-core@7.0.0
+COPY --from=deps --chown=nextjs:nodejs \
+  /app/node_modules/.pnpm/bmp-js@0.1.0 \
+  ./node_modules/.pnpm/bmp-js@0.1.0
+COPY --from=deps --chown=nextjs:nodejs \
+  /app/node_modules/.pnpm/zlibjs@0.3.1 \
+  ./node_modules/.pnpm/zlibjs@0.3.1
+COPY --from=deps --chown=nextjs:nodejs \
+  /app/node_modules/.pnpm/wasm-feature-detect@1.8.0 \
+  ./node_modules/.pnpm/wasm-feature-detect@1.8.0
+COPY --from=deps --chown=nextjs:nodejs \
+  /app/node_modules/.pnpm/regenerator-runtime@0.13.11 \
+  ./node_modules/.pnpm/regenerator-runtime@0.13.11
+COPY --from=deps --chown=nextjs:nodejs \
+  /app/node_modules/.pnpm/is-url@1.2.4 \
+  ./node_modules/.pnpm/is-url@1.2.4
+COPY --from=deps --chown=nextjs:nodejs \
+  /app/node_modules/.pnpm/node-fetch@2.7.0 \
+  ./node_modules/.pnpm/node-fetch@2.7.0
 RUN ln -sf .pnpm/tesseract.js@7.0.0/node_modules/tesseract.js ./node_modules/tesseract.js && \
-    ln -sf .pnpm/tesseract.js@7.0.0/node_modules/tesseract.js-core ./node_modules/tesseract.js-core
+    ln -sf .pnpm/tesseract.js-core@7.0.0/node_modules/tesseract.js-core ./node_modules/tesseract.js-core
 
 # Install Claude Code CLI globally (for `docker exec ... claude login`)
 RUN npm install -g @anthropic-ai/claude-code@latest 2>/dev/null || \

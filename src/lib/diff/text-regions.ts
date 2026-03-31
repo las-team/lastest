@@ -164,7 +164,9 @@ export async function detectTextRegions(
     // failure propagates as an uncaughtException that kills the executor's event loop.
     let workerCrashed = false;
     const suppressTesseractCrash = (err: Error) => {
-      if (err.message?.includes('Cannot find module') && err.stack?.includes('tesseract')) {
+      const stack = err.stack || '';
+      const isTesseract = stack.includes('tesseract') || stack.includes('worker-script') || stack.includes('createWorker');
+      if (isTesseract) {
         workerCrashed = true;
         return; // Swallow — handled below
       }

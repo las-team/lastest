@@ -85,14 +85,14 @@ export async function GET(request: NextRequest) {
         }
       });
 
-      // Send keepalive every 30 seconds
+      // Send keepalive every 8 seconds (must be under envoy's 10s idle_timeout)
       const keepalive = setInterval(() => {
         try {
           controller.enqueue(encoder.encode(': keepalive\n\n'));
         } catch {
           clearInterval(keepalive);
         }
-      }, 30000);
+      }, 8000);
 
       // Cleanup on close
       request.signal.addEventListener('abort', () => {

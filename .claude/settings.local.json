@@ -148,7 +148,8 @@
       "Bash(ls -la /home/ewyct/dev/lastest2/src/app/\\\\\\(app\\\\\\)/)",
       "Read(//home/ewyct/.claude/todos/**)",
       "Read(//home/ewyct/.claude/**)",
-      "WebFetch(domain:192.168.1.138)"
+      "WebFetch(domain:192.168.1.138)",
+      "Bash(pnpm deploy:olares -- --skip-checks)"
     ]
   },
   "disabledMcpjsonServers": [
