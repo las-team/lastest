@@ -50,7 +50,7 @@ export async function getActiveBackgroundJobs() {
     .from(backgroundJobs)
     .where(or(eq(backgroundJobs.status, 'pending'), eq(backgroundJobs.status, 'running')))
     .orderBy(desc(backgroundJobs.createdAt))
-    .all();
+    ;
 }
 
 export async function getRecentBackgroundJobs(sinceMs = 10000) {
@@ -71,7 +71,7 @@ export async function getRecentBackgroundJobs(sinceMs = 10000) {
       )
     )
     .orderBy(desc(backgroundJobs.createdAt))
-    .all();
+    ;
 }
 
 export async function getChildJobs(parentJobId: string) {
@@ -80,7 +80,7 @@ export async function getChildJobs(parentJobId: string) {
     .from(backgroundJobs)
     .where(eq(backgroundJobs.parentJobId, parentJobId))
     .orderBy(desc(backgroundJobs.createdAt))
-    .all();
+    ;
 }
 
 export async function getChildJobsByParentIds(parentIds: string[]) {
@@ -90,11 +90,12 @@ export async function getChildJobsByParentIds(parentIds: string[]) {
     .from(backgroundJobs)
     .where(inArray(backgroundJobs.parentJobId, parentIds))
     .orderBy(desc(backgroundJobs.createdAt))
-    .all();
+    ;
 }
 
 export async function getBackgroundJob(id: string) {
-  return db.select().from(backgroundJobs).where(eq(backgroundJobs.id, id)).get();
+  const [row] = await db.select().from(backgroundJobs).where(eq(backgroundJobs.id, id));
+  return row;
 }
 
 export async function deleteBackgroundJob(id: string) {
@@ -118,7 +119,7 @@ export async function getPendingBuildJobs(repositoryId?: string | null, targetRu
     .from(backgroundJobs)
     .where(and(...conditions))
     .orderBy(backgroundJobs.createdAt)
-    .all();
+    ;
 }
 
 export async function getPendingTestRunJobs(repositoryId?: string | null, targetRunnerId?: string) {
@@ -137,7 +138,7 @@ export async function getPendingTestRunJobs(repositoryId?: string | null, target
     .from(backgroundJobs)
     .where(and(...conditions))
     .orderBy(backgroundJobs.createdAt)
-    .all();
+    ;
 }
 
 export async function getRunningJobsForRunner(targetRunnerId: string) {
@@ -151,7 +152,7 @@ export async function getRunningJobsForRunner(targetRunnerId: string) {
         or(eq(backgroundJobs.type, 'build_run'), eq(backgroundJobs.type, 'test_run'))
       )
     )
-    .all();
+    ;
 }
 
 export async function getBackgroundJobByBuildId(buildId: string) {
@@ -164,7 +165,7 @@ export async function getBackgroundJobByBuildId(buildId: string) {
       )
     )
     .orderBy(desc(backgroundJobs.createdAt))
-    .all();
+    ;
 
   return jobs.find(job => {
     const meta = job.metadata as { buildId?: string } | null;
@@ -196,7 +197,7 @@ export async function markStaleJobsAsCrashed(staleThresholdMs = 300000) {
         )
       )
     )
-    .all();
+    ;
 
   const now = new Date();
   for (const job of staleJobs) {

@@ -388,7 +388,7 @@ async function executeViaRunner(
   // Load runner's maxParallelTests from DB if not provided in options
   let maxParallel = options.maxParallelTests ?? 1;
   if (!options.maxParallelTests) {
-    const runnerRecord = await db.select({ maxParallelTests: runners.maxParallelTests }).from(runners).where(eq(runners.id, runnerId)).get();
+    const [runnerRecord] = await db.select({ maxParallelTests: runners.maxParallelTests }).from(runners).where(eq(runners.id, runnerId));
     if (runnerRecord?.maxParallelTests) {
       maxParallel = runnerRecord.maxParallelTests;
     }
@@ -758,12 +758,11 @@ async function getAvailableRunner(teamId: string) {
   }
 
   // Fall back to database (polling runners)
-  const dbRunner = await db
+  const [dbRunner] = await db
     .select()
     .from(runners)
     .where(and(eq(runners.teamId, teamId), eq(runners.status, 'online')))
-    .limit(1)
-    .get();
+    .limit(1);
 
   return dbRunner;
 }
@@ -779,11 +778,10 @@ async function getAvailableRunnerById(teamId: string, runnerId: string) {
   }
 
   // Fall back to database (polling runners)
-  const dbRunner = await db
+  const [dbRunner] = await db
     .select()
     .from(runners)
-    .where(and(eq(runners.id, runnerId), eq(runners.teamId, teamId), eq(runners.status, 'online')))
-    .get();
+    .where(and(eq(runners.id, runnerId), eq(runners.teamId, teamId), eq(runners.status, 'online')));
 
   return dbRunner;
 }
@@ -801,12 +799,11 @@ export async function hasAvailableRunner(teamId: string): Promise<boolean> {
  * System EBs are host-provided and available to all teams.
  */
 async function getAvailableSystemRunner() {
-  const dbRunner = await db
+  const [dbRunner] = await db
     .select()
     .from(runners)
     .where(and(eq(runners.isSystem, true), eq(runners.status, 'online')))
-    .limit(1)
-    .get();
+    .limit(1);
 
   return dbRunner;
 }
@@ -815,11 +812,10 @@ async function getAvailableSystemRunner() {
  * Get a specific system runner by ID if it's online.
  */
 async function getAvailableSystemRunnerById(runnerId: string) {
-  const dbRunner = await db
+  const [dbRunner] = await db
     .select()
     .from(runners)
-    .where(and(eq(runners.id, runnerId), eq(runners.isSystem, true), eq(runners.status, 'online')))
-    .get();
+    .where(and(eq(runners.id, runnerId), eq(runners.isSystem, true), eq(runners.status, 'online')));
 
   return dbRunner;
 }

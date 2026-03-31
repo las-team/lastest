@@ -1049,7 +1049,7 @@ async function runBuildAsync(
     try {
       const { aggregateA11yForBuild } = await import('@/lib/a11y/wcag-score');
       const testResultsForA11y = await queries.getTestResultsByRun(testRunId);
-      const hasA11yData = testResultsForA11y.some(r => r.a11yViolations != null || (r.a11yPassesCount != null && r.a11yPassesCount > 0));
+      const hasA11yData = testResultsForA11y.some(r => r.a11yViolations != null || r.a11yPassesCount != null);
       if (hasA11yData) {
         const a11ySummary = aggregateA11yForBuild(testResultsForA11y);
         a11yUpdate = {

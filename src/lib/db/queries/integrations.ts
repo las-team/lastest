@@ -36,7 +36,8 @@ export async function updateSpecImport(
 }
 
 export async function getSpecImport(id: string) {
-  return db.select().from(specImports).where(eq(specImports.id, id)).get();
+  const [row] = await db.select().from(specImports).where(eq(specImports.id, id));
+  return row;
 }
 
 export async function getSpecImportsByRepo(repositoryId: string) {
@@ -44,8 +45,7 @@ export async function getSpecImportsByRepo(repositoryId: string) {
     .select()
     .from(specImports)
     .where(eq(specImports.repositoryId, repositoryId))
-    .orderBy(desc(specImports.createdAt))
-    .all();
+    .orderBy(desc(specImports.createdAt));
 }
 
 export async function getLatestSpecImportForRepo(repositoryId: string) {
@@ -70,11 +70,11 @@ export async function getLatestSpecImportForRepo(repositoryId: string) {
 
 export async function getGoogleSheetsAccount(teamId?: string | null) {
   if (!teamId) return null;
-  return db
+  const [row] = await db
     .select()
     .from(googleSheetsAccounts)
-    .where(eq(googleSheetsAccounts.teamId, teamId))
-    .get() || null;
+    .where(eq(googleSheetsAccounts.teamId, teamId));
+  return row || null;
 }
 
 export async function upsertGoogleSheetsAccount(data: {
@@ -86,11 +86,10 @@ export async function upsertGoogleSheetsAccount(data: {
   refreshToken?: string | null;
   tokenExpiresAt?: Date | null;
 }) {
-  const existing = await db
+  const [existing] = await db
     .select()
     .from(googleSheetsAccounts)
-    .where(eq(googleSheetsAccounts.teamId, data.teamId))
-    .get();
+    .where(eq(googleSheetsAccounts.teamId, data.teamId));
 
   if (existing) {
     await db
@@ -155,20 +154,19 @@ export async function getGoogleSheetsDataSources(repositoryId?: string | null) {
   return db
     .select()
     .from(googleSheetsDataSources)
-    .where(eq(googleSheetsDataSources.repositoryId, repositoryId))
-    .all();
+    .where(eq(googleSheetsDataSources.repositoryId, repositoryId));
 }
 
 export async function getGoogleSheetsDataSource(id: string) {
-  return db
+  const [row] = await db
     .select()
     .from(googleSheetsDataSources)
-    .where(eq(googleSheetsDataSources.id, id))
-    .get() || null;
+    .where(eq(googleSheetsDataSources.id, id));
+  return row || null;
 }
 
 export async function getGoogleSheetsDataSourceByAlias(repositoryId: string, alias: string) {
-  return db
+  const [row] = await db
     .select()
     .from(googleSheetsDataSources)
     .where(
@@ -176,8 +174,8 @@ export async function getGoogleSheetsDataSourceByAlias(repositoryId: string, ali
         eq(googleSheetsDataSources.repositoryId, repositoryId),
         eq(googleSheetsDataSources.alias, alias)
       )
-    )
-    .get() || null;
+    );
+  return row || null;
 }
 
 export async function createGoogleSheetsDataSource(data: {
@@ -247,14 +245,14 @@ export async function deleteGoogleSheetsDataSource(id: string) {
 // ============================================
 
 export async function getComposeConfig(repositoryId: string, branch: string) {
-  return db
+  const [row] = await db
     .select()
     .from(composeConfigs)
     .where(and(
       eq(composeConfigs.repositoryId, repositoryId),
       eq(composeConfigs.branch, branch),
-    ))
-    .get() ?? null;
+    ));
+  return row ?? null;
 }
 
 export async function upsertComposeConfig(
@@ -262,14 +260,13 @@ export async function upsertComposeConfig(
   branch: string,
   data: { selectedTestIds: string[]; excludedTestIds: string[]; versionOverrides: Record<string, string> },
 ) {
-  const existing = await db
+  const [existing] = await db
     .select()
     .from(composeConfigs)
     .where(and(
       eq(composeConfigs.repositoryId, repositoryId),
       eq(composeConfigs.branch, branch),
-    ))
-    .get();
+    ));
 
   if (existing) {
     await db
@@ -311,15 +308,17 @@ export async function createAgentSession(data: Omit<NewAgentSession, 'id'>) {
     createdAt: now,
     updatedAt: now,
   });
-  return db.select().from(agentSessions).where(eq(agentSessions.id, id)).get()!;
+  const [row] = await db.select().from(agentSessions).where(eq(agentSessions.id, id));
+  return row!;
 }
 
 export async function getAgentSession(id: string) {
-  return db.select().from(agentSessions).where(eq(agentSessions.id, id)).get();
+  const [row] = await db.select().from(agentSessions).where(eq(agentSessions.id, id));
+  return row;
 }
 
 export async function getActiveAgentSession(repositoryId: string) {
-  return db
+  const [row] = await db
     .select()
     .from(agentSessions)
     .where(
@@ -331,8 +330,8 @@ export async function getActiveAgentSession(repositoryId: string) {
         ),
       ),
     )
-    .orderBy(desc(agentSessions.createdAt))
-    .get();
+    .orderBy(desc(agentSessions.createdAt));
+  return row;
 }
 
 export async function updateAgentSession(

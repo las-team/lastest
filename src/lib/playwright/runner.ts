@@ -1464,8 +1464,8 @@ export class PlaywrightRunner extends EventEmitter {
             }));
           }
           a11yPassesCount = a11yResults.passes?.length ?? 0;
-        } catch {
-          // Ignore a11y check errors - don't fail the test
+        } catch (e) {
+          console.warn('[a11y] axe-core analysis failed:', e instanceof Error ? e.message : e);
         }
       }
 

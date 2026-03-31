@@ -13,7 +13,8 @@ import { eq, and, inArray, lt } from 'drizzle-orm';
 
 // Runner queries
 export async function getRunnerById(runnerId: string) {
-  return db.select().from(runners).where(eq(runners.id, runnerId)).get();
+  const [row] = await db.select().from(runners).where(eq(runners.id, runnerId));
+  return row;
 }
 
 // ============================================
@@ -38,7 +39,7 @@ export async function claimPendingCommands(runnerId: string, limit?: number) {
     .where(and(eq(runnerCommands.runnerId, runnerId), eq(runnerCommands.status, 'pending')))
     .orderBy(runnerCommands.createdAt);
 
-  const pending = limit ? await query.limit(limit).all() : await query.all();
+  const pending = limit ? await query.limit(limit) : await query;
 
   if (pending.length === 0) return [];
 
@@ -56,7 +57,7 @@ export async function getCommandsByTestRun(testRunId: string) {
     .select()
     .from(runnerCommands)
     .where(eq(runnerCommands.testRunId, testRunId))
-    .all();
+    ;
 }
 
 export async function getRunnerCommandById(commandId: string) {
@@ -91,7 +92,7 @@ export async function getUnacknowledgedResults(commandIds: string[]) {
     .select()
     .from(runnerCommandResults)
     .where(and(inArray(runnerCommandResults.commandId, commandIds), eq(runnerCommandResults.acknowledged, false)))
-    .all();
+    ;
 }
 
 export async function acknowledgeResults(resultIds: string[]) {
@@ -111,8 +112,7 @@ export async function cleanupOldCommands(olderThanMs: number) {
     .where(and(
       inArray(runnerCommands.status, ['completed', 'failed', 'cancelled', 'timeout']),
       lt(runnerCommands.createdAt, cutoff)
-    ))
-    .all()).map(c => c.id);
+    ))).map(c => c.id);
 
   if (oldCommandIds.length > 0) {
     await db.delete(runnerCommandResults).where(inArray(runnerCommandResults.commandId, oldCommandIds));

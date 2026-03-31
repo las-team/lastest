@@ -7,22 +7,22 @@ export async function getGithubActionConfigs(teamId: string) {
   return db
     .select()
     .from(githubActionConfigs)
-    .where(eq(githubActionConfigs.teamId, teamId))
-    .all();
+    .where(eq(githubActionConfigs.teamId, teamId));
 }
 
 export async function getGithubActionConfig(id: string, teamId: string) {
-  return db
+  const [row] = await db
     .select()
     .from(githubActionConfigs)
-    .where(and(eq(githubActionConfigs.id, id), eq(githubActionConfigs.teamId, teamId)))
-    .get();
+    .where(and(eq(githubActionConfigs.id, id), eq(githubActionConfigs.teamId, teamId)));
+  return row;
 }
 
 export async function createGithubActionConfig(data: NewGithubActionConfig) {
   const id = data.id || crypto.randomUUID();
   await db.insert(githubActionConfigs).values({ ...data, id });
-  return db.select().from(githubActionConfigs).where(eq(githubActionConfigs.id, id)).get()!;
+  const [row] = await db.select().from(githubActionConfigs).where(eq(githubActionConfigs.id, id));
+  return row!;
 }
 
 export async function updateGithubActionConfig(
@@ -34,11 +34,11 @@ export async function updateGithubActionConfig(
     .update(githubActionConfigs)
     .set({ ...data, updatedAt: new Date() })
     .where(and(eq(githubActionConfigs.id, id), eq(githubActionConfigs.teamId, teamId)));
-  return db
+  const [row] = await db
     .select()
     .from(githubActionConfigs)
-    .where(and(eq(githubActionConfigs.id, id), eq(githubActionConfigs.teamId, teamId)))
-    .get();
+    .where(and(eq(githubActionConfigs.id, id), eq(githubActionConfigs.teamId, teamId)));
+  return row;
 }
 
 export async function deleteGithubActionConfig(id: string, teamId: string) {

@@ -33,8 +33,7 @@ export async function getRunners(): Promise<Runner[]> {
     .select()
     .from(runners)
     .where(and(eq(runners.teamId, session.team.id), eq(runners.isSystem, false)))
-    .orderBy(desc(runners.createdAt))
-    .all();
+    .orderBy(desc(runners.createdAt));
 }
 
 /**
@@ -46,20 +45,19 @@ export async function getSystemRunners(): Promise<Runner[]> {
     .select()
     .from(runners)
     .where(eq(runners.isSystem, true))
-    .orderBy(desc(runners.createdAt))
-    .all();
+    .orderBy(desc(runners.createdAt));
 }
 
 /**
  * Get an available (online) system runner for auto-assignment.
  */
 export async function getAvailableSystemRunner(): Promise<Runner | null> {
-  return db
+  const [row] = await db
     .select()
     .from(runners)
     .where(and(eq(runners.isSystem, true), eq(runners.status, 'online')))
-    .limit(1)
-    .get() ?? null;
+    .limit(1);
+  return row ?? null;
 }
 
 /**
@@ -67,11 +65,10 @@ export async function getAvailableSystemRunner(): Promise<Runner | null> {
  */
 export async function getRunner(runnerId: string): Promise<Runner | null> {
   const session = await requireTeamAccess();
-  const runner = await db
+  const [runner] = await db
     .select()
     .from(runners)
-    .where(and(eq(runners.id, runnerId), eq(runners.teamId, session.team.id)))
-    .get();
+    .where(and(eq(runners.id, runnerId), eq(runners.teamId, session.team.id)));
   return runner ?? null;
 }
 
@@ -104,7 +101,7 @@ export async function createRunnerInternal(
     createdAt: now,
   });
 
-  const runner = await db.select().from(runners).where(eq(runners.id, id)).get();
+  const [runner] = await db.select().from(runners).where(eq(runners.id, id));
   if (!runner) {
     return { error: 'Failed to create runner' };
   }
@@ -130,11 +127,10 @@ export async function createRunner(name: string, capabilities: RunnerCapability[
 export async function updateRunnerName(runnerId: string, name: string): Promise<{ success: boolean } | { error: string }> {
   const session = await requireTeamAdmin();
 
-  const runner = await db
+  const [runner] = await db
     .select()
     .from(runners)
-    .where(and(eq(runners.id, runnerId), eq(runners.teamId, session.team.id)))
-    .get();
+    .where(and(eq(runners.id, runnerId), eq(runners.teamId, session.team.id)));
 
   if (!runner) {
     return { error: 'Runner not found' };
@@ -149,11 +145,10 @@ export async function updateRunnerName(runnerId: string, name: string): Promise<
  * Returns the new plain token.
  */
 export async function regenerateRunnerTokenInternal(runnerId: string, teamId: string): Promise<{ token: string } | { error: string }> {
-  const runner = await db
+  const [runner] = await db
     .select()
     .from(runners)
-    .where(and(eq(runners.id, runnerId), eq(runners.teamId, teamId)))
-    .get();
+    .where(and(eq(runners.id, runnerId), eq(runners.teamId, teamId)));
 
   if (!runner) {
     return { error: 'Runner not found' };
@@ -173,11 +168,10 @@ export async function regenerateRunnerTokenInternal(runnerId: string, teamId: st
 export async function regenerateRunnerToken(runnerId: string): Promise<{ token: string } | { error: string }> {
   const session = await requireTeamAdmin();
 
-  const runner = await db
+  const [runner] = await db
     .select()
     .from(runners)
-    .where(and(eq(runners.id, runnerId), eq(runners.teamId, session.team.id)))
-    .get();
+    .where(and(eq(runners.id, runnerId), eq(runners.teamId, session.team.id)));
 
   if (!runner) {
     return { error: 'Runner not found' };
@@ -199,11 +193,10 @@ export async function updateRunnerSettings(
 ): Promise<{ success: boolean } | { error: string }> {
   const session = await requireTeamAdmin();
 
-  const runner = await db
+  const [runner] = await db
     .select()
     .from(runners)
-    .where(and(eq(runners.id, runnerId), eq(runners.teamId, session.team.id)))
-    .get();
+    .where(and(eq(runners.id, runnerId), eq(runners.teamId, session.team.id)));
 
   if (!runner) {
     return { error: 'Runner not found' };
@@ -219,11 +212,10 @@ export async function updateRunnerSettings(
 export async function deleteRunner(runnerId: string): Promise<{ success: boolean } | { error: string }> {
   const session = await requireTeamAdmin();
 
-  const runner = await db
+  const [runner] = await db
     .select()
     .from(runners)
-    .where(and(eq(runners.id, runnerId), eq(runners.teamId, session.team.id)))
-    .get();
+    .where(and(eq(runners.id, runnerId), eq(runners.teamId, session.team.id)));
 
   if (!runner) {
     return { error: 'Runner not found' };
@@ -247,11 +239,10 @@ export async function deleteRunnerInternal(runnerId: string, teamId: string): Pr
 export async function stopRunner(runnerId: string): Promise<{ success: boolean } | { error: string }> {
   const session = await requireTeamAdmin();
 
-  const runner = await db
+  const [runner] = await db
     .select()
     .from(runners)
-    .where(and(eq(runners.id, runnerId), eq(runners.teamId, session.team.id)))
-    .get();
+    .where(and(eq(runners.id, runnerId), eq(runners.teamId, session.team.id)));
 
   if (!runner) {
     return { error: 'Runner not found' };
@@ -286,7 +277,7 @@ export async function updateRunnerStatus(
   lastSeen?: Date
 ): Promise<void> {
   // Get current status to detect changes
-  const current = await db.select().from(runners).where(eq(runners.id, runnerId)).get();
+  const [current] = await db.select().from(runners).where(eq(runners.id, runnerId));
   const previousStatus = current?.status;
 
   await db
@@ -322,7 +313,7 @@ export async function updateRunnerStatus(
  */
 async function pickUpQueuedJobs(runnerId: string): Promise<void> {
   // Find first pending job with no target runner (queued because no runner was available)
-  const pendingJob = await db
+  const [pendingJob] = await db
     .select()
     .from(backgroundJobs)
     .where(
@@ -331,8 +322,7 @@ async function pickUpQueuedJobs(runnerId: string): Promise<void> {
         isNull(backgroundJobs.targetRunnerId),
       )
     )
-    .limit(1)
-    .get();
+    .limit(1);
 
   if (!pendingJob) return;
 
@@ -351,11 +341,10 @@ async function pickUpQueuedJobs(runnerId: string): Promise<void> {
  */
 export async function validateRunnerToken(token: string): Promise<Runner | null> {
   const tokenHash = hashToken(token);
-  const runner = await db
+  const [runner] = await db
     .select()
     .from(runners)
-    .where(eq(runners.tokenHash, tokenHash))
-    .get();
+    .where(eq(runners.tokenHash, tokenHash));
   return runner ?? null;
 }
 
@@ -367,8 +356,7 @@ export async function getOnlineRunners(): Promise<Runner[]> {
   return db
     .select()
     .from(runners)
-    .where(and(eq(runners.teamId, session.team.id), eq(runners.status, 'online')))
-    .all();
+    .where(and(eq(runners.teamId, session.team.id), eq(runners.status, 'online')));
 }
 
 /**
@@ -376,12 +364,11 @@ export async function getOnlineRunners(): Promise<Runner[]> {
  */
 export async function hasConnectedRunners(): Promise<boolean> {
   const session = await requireTeamAccess();
-  const onlineRunner = await db
+  const [onlineRunner] = await db
     .select()
     .from(runners)
     .where(and(eq(runners.teamId, session.team.id), eq(runners.status, 'online')))
-    .limit(1)
-    .get();
+    .limit(1);
   return !!onlineRunner;
 }
 
@@ -393,8 +380,7 @@ export async function getOnlineRunnersWithCapability(capability?: RunnerCapabili
   const onlineRunners = await db
     .select()
     .from(runners)
-    .where(and(eq(runners.teamId, session.team.id), eq(runners.status, 'online')))
-    .all();
+    .where(and(eq(runners.teamId, session.team.id), eq(runners.status, 'online')));
 
   // Filter by capability if specified
   if (capability) {
@@ -419,16 +405,14 @@ export async function getRunnersWithCapability(capability?: RunnerCapability): P
     .select()
     .from(runners)
     .where(and(eq(runners.teamId, session.team.id), eq(runners.isSystem, false)))
-    .orderBy(desc(runners.createdAt))
-    .all();
+    .orderBy(desc(runners.createdAt));
 
   // Get system runners (cross-team)
   const systemRunners = await db
     .select()
     .from(runners)
     .where(eq(runners.isSystem, true))
-    .orderBy(desc(runners.createdAt))
-    .all();
+    .orderBy(desc(runners.createdAt));
 
   const allRunners = [...teamRunners, ...systemRunners];
 
@@ -459,8 +443,7 @@ export async function markStaleRunnersOffline(staleThresholdMs: number = 60_000)
       and(
         eq(runners.status, 'online'),
       )
-    )
-    .all();
+    );
 
   let markedOffline = 0;
   for (const runner of staleRunners) {
@@ -479,8 +462,7 @@ export async function markStaleRunnersOffline(staleThresholdMs: number = 60_000)
   const busyRunners = await db
     .select()
     .from(runners)
-    .where(eq(runners.status, 'busy'))
-    .all();
+    .where(eq(runners.status, 'busy'));
 
   for (const runner of busyRunners) {
     if (!runner.lastSeen || runner.lastSeen < staleThreshold) {
@@ -515,15 +497,14 @@ export async function deleteStaleSystemRunners(thresholdMs: number): Promise<num
           lt(runners.lastSeen, staleThreshold)
         )
       )
-    )
-    .all();
+    );
 
   if (staleRunners.length === 0) return 0;
 
   for (const runner of staleRunners) {
     // Delete all FK references before deleting the runner
     await db.delete(embeddedSessions).where(eq(embeddedSessions.runnerId, runner.id));
-    const cmds = await db.select({ id: runnerCommands.id }).from(runnerCommands).where(eq(runnerCommands.runnerId, runner.id)).all();
+    const cmds = await db.select({ id: runnerCommands.id }).from(runnerCommands).where(eq(runnerCommands.runnerId, runner.id));
     if (cmds.length > 0) {
       for (const cmd of cmds) {
         await db.delete(runnerCommandResults).where(eq(runnerCommandResults.commandId, cmd.id));

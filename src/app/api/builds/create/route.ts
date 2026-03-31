@@ -26,7 +26,7 @@ export async function POST(request: Request) {
     // Resolve repository: by ID (legacy) or by GitHub full name (e.g. "owner/repo")
     let resolvedRepoId = repositoryId;
     if (!resolvedRepoId && githubRepo) {
-      const repo = await db
+      const [repo] = await db
         .select()
         .from(repositories)
         .where(
@@ -34,8 +34,7 @@ export async function POST(request: Request) {
             eq(repositories.fullName, githubRepo),
             eq(repositories.teamId, runner.teamId)
           )
-        )
-        .get();
+        );
 
       if (!repo) {
         return NextResponse.json(
@@ -54,11 +53,10 @@ export async function POST(request: Request) {
     }
 
     // Verify repo belongs to runner's team
-    const repo = await db
+    const [repo] = await db
       .select()
       .from(repositories)
-      .where(eq(repositories.id, resolvedRepoId))
-      .get();
+      .where(eq(repositories.id, resolvedRepoId));
 
     if (!repo || repo.teamId !== runner.teamId) {
       return NextResponse.json({ error: 'Repository does not belong to runner\'s team' }, { status: 403 });

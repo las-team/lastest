@@ -268,11 +268,10 @@ async function runGenerateMode(
 
 async function loadReplayScenarios(): Promise<ReplayScenario[]> {
   // Get the most recent test run
-  const latestRun = db.select({ id: testRuns.id, repositoryId: testRuns.repositoryId })
+  const [latestRun] = await db.select({ id: testRuns.id, repositoryId: testRuns.repositoryId })
     .from(testRuns)
     .orderBy(desc(testRuns.startedAt))
-    .limit(1)
-    .get();
+    .limit(1);
 
   if (!latestRun) {
     console.error('No test runs found in DB');
@@ -280,7 +279,7 @@ async function loadReplayScenarios(): Promise<ReplayScenario[]> {
   }
 
   // Get failed tests with their info
-  const failed = db.select({
+  const failed = await db.select({
     testName: tests.name,
     testCode: tests.code,
     targetUrl: tests.targetUrl,
@@ -294,8 +293,7 @@ async function loadReplayScenarios(): Promise<ReplayScenario[]> {
   .where(and(
     eq(testResults.testRunId, latestRun.id),
     eq(testResults.status, 'failed')
-  ))
-  .all();
+  ));
 
   return failed.slice(0, MAX_REPLAY).map(f => ({
     testName: f.testName || 'Unknown',

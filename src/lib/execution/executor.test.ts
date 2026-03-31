@@ -34,10 +34,9 @@ vi.mock('@/lib/ws/runner-registry', () => ({
 }));
 
 vi.mock('@/lib/db', () => {
-  const mockGet = vi.fn(() => null);
-  const mockLimit = vi.fn(() => ({ get: mockGet }));
-  // .where() returns object with both .get() (for getAvailableRunnerById) and .limit() (for getAvailableRunner)
-  const mockWhere = vi.fn(() => ({ limit: mockLimit, get: mockGet }));
+  // PG Drizzle returns arrays — queries are thennable promises resolving to arrays
+  const mockLimit = vi.fn(() => Promise.resolve([]));
+  const mockWhere = vi.fn(() => ({ limit: mockLimit, then: (resolve: (v: unknown[]) => void) => resolve([]) }));
   const mockFrom = vi.fn(() => ({ where: mockWhere }));
   return {
     db: {

@@ -70,7 +70,7 @@ export interface BuildMetrics {
 
 export async function getLatestBuildMetrics(repositoryId: string): Promise<BuildMetrics | null> {
   // Get latest build for this repo via testRuns
-  const latestBuild = db
+  const [latestBuild] = await db
     .select({
       buildId: builds.id,
       testRunId: builds.testRunId,
@@ -82,13 +82,12 @@ export async function getLatestBuildMetrics(repositoryId: string): Promise<Build
     .innerJoin(testRuns, eq(builds.testRunId, testRuns.id))
     .where(eq(testRuns.repositoryId, repositoryId))
     .orderBy(desc(builds.createdAt))
-    .limit(1)
-    .get();
+    .limit(1);
 
   if (!latestBuild) return null;
 
   // Get all test results for this build's test run
-  const results = db
+  const results = await db
     .select({
       testResultId: testResults.id,
       testId: testResults.testId,
@@ -101,15 +100,13 @@ export async function getLatestBuildMetrics(repositoryId: string): Promise<Build
     .from(testResults)
     .innerJoin(tests, eq(testResults.testId, tests.id))
     .leftJoin(functionalAreas, eq(tests.functionalAreaId, functionalAreas.id))
-    .where(eq(testResults.testRunId, latestBuild.testRunId!))
-    .all();
+    .where(eq(testResults.testRunId, latestBuild.testRunId!));
 
   // Get all routes for the repo
-  const repoRoutes = db
+  const repoRoutes = await db
     .select({ path: routes.path, hasTest: routes.hasTest })
     .from(routes)
-    .where(eq(routes.repositoryId, repositoryId))
-    .all();
+    .where(eq(routes.repositoryId, repositoryId));
 
   // Classify failures
   const failures: FailureDetail[] = [];
@@ -182,30 +179,27 @@ export async function getRouteHallucinationRate(
   buildId: string
 ): Promise<{ hallucinated: string[]; valid: string[] }> {
   // Get all routes for this repo
-  const repoRoutes = db
+  const repoRoutes = await db
     .select({ path: routes.path })
     .from(routes)
-    .where(eq(routes.repositoryId, repositoryId))
-    .all();
+    .where(eq(routes.repositoryId, repositoryId));
 
   const routePaths = new Set(repoRoutes.map(r => r.path));
 
   // Get the build's test run
-  const build = db
+  const [build] = await db
     .select({ testRunId: builds.testRunId })
     .from(builds)
-    .where(eq(builds.id, buildId))
-    .get();
+    .where(eq(builds.id, buildId));
 
   if (!build?.testRunId) return { hallucinated: [], valid: [] };
 
   // Get all tests for this run with their targetUrls
-  const testUrls = db
+  const testUrls = await db
     .select({ targetUrl: tests.targetUrl })
     .from(testResults)
     .innerJoin(tests, eq(testResults.testId, tests.id))
-    .where(eq(testResults.testRunId, build.testRunId))
-    .all();
+    .where(eq(testResults.testRunId, build.testRunId));
 
   const hallucinated: string[] = [];
   const valid: string[] = [];

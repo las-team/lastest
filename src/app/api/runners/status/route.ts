@@ -45,8 +45,7 @@ export async function GET(request: NextRequest) {
           const teamRunners = await db
             .select()
             .from(runners)
-            .where(eq(runners.teamId, teamId))
-            .all();
+            .where(eq(runners.teamId, teamId));
 
           const initialData = {
             type: 'init',

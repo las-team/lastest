@@ -28,11 +28,12 @@ import { v4 as uuid } from 'uuid';
 
 // Functional Areas
 export async function getFunctionalAreas() {
-  return db.select().from(functionalAreas).where(isNull(functionalAreas.deletedAt)).all();
+  return db.select().from(functionalAreas).where(isNull(functionalAreas.deletedAt));
 }
 
 export async function getFunctionalArea(id: string) {
-  return db.select().from(functionalAreas).where(and(eq(functionalAreas.id, id), isNull(functionalAreas.deletedAt))).get();
+  const [row] = await db.select().from(functionalAreas).where(and(eq(functionalAreas.id, id), isNull(functionalAreas.deletedAt)));
+  return row;
 }
 
 export async function createFunctionalArea(data: Omit<NewFunctionalArea, 'id'>) {
@@ -72,15 +73,16 @@ export async function getOrCreateFunctionalAreaByRepo(
 
 // Tests
 export async function getTests() {
-  return db.select().from(tests).where(isNull(tests.deletedAt)).orderBy(desc(tests.createdAt)).all();
+  return db.select().from(tests).where(isNull(tests.deletedAt)).orderBy(desc(tests.createdAt));
 }
 
 export async function getTestsByFunctionalArea(functionalAreaId: string) {
-  return db.select().from(tests).where(and(eq(tests.functionalAreaId, functionalAreaId), isNull(tests.deletedAt))).all();
+  return db.select().from(tests).where(and(eq(tests.functionalAreaId, functionalAreaId), isNull(tests.deletedAt)));
 }
 
 export async function getTest(id: string) {
-  return db.select().from(tests).where(eq(tests.id, id)).get();
+  const [row] = await db.select().from(tests).where(eq(tests.id, id));
+  return row;
 }
 
 export async function createTest(data: Omit<NewTest, 'id' | 'createdAt' | 'updatedAt'>, branch?: string | null, viewport?: { width?: number; height?: number } | null) {
@@ -112,8 +114,8 @@ export async function updateTest(id: string, data: Partial<NewTest>) {
 
 export async function softDeleteTest(id: string) {
   // Fetch the test before deleting so we can update route coverage
-  const deletingTest = await db.select({ functionalAreaId: tests.functionalAreaId })
-    .from(tests).where(eq(tests.id, id)).get();
+  const [deletingTest] = await db.select({ functionalAreaId: tests.functionalAreaId })
+    .from(tests).where(eq(tests.id, id));
 
   // Clear setup test references so other tests don't reference a deleted test
   await db.update(tests)
@@ -158,7 +160,7 @@ export async function softDeleteTest(id: string) {
         isNull(tests.deletedAt),
       ))
       .limit(1)
-      .all();
+      ;
 
     if (activeTestsInArea.length === 0) {
       await db.update(routes)
@@ -172,8 +174,8 @@ export async function restoreTest(id: string) {
   await db.update(tests).set({ deletedAt: null }).where(eq(tests.id, id));
 
   // Re-mark routes as having a test when restoring
-  const restoredTest = await db.select({ functionalAreaId: tests.functionalAreaId })
-    .from(tests).where(eq(tests.id, id)).get();
+  const [restoredTest] = await db.select({ functionalAreaId: tests.functionalAreaId })
+    .from(tests).where(eq(tests.id, id));
   if (restoredTest?.functionalAreaId) {
     await db.update(routes)
       .set({ hasTest: true })
@@ -186,12 +188,12 @@ export async function getDeletedTests(repositoryId?: string) {
     return db.select().from(tests)
       .where(and(eq(tests.repositoryId, repositoryId), isNotNull(tests.deletedAt)))
       .orderBy(desc(tests.deletedAt))
-      .all();
+      ;
   }
   return db.select().from(tests)
     .where(isNotNull(tests.deletedAt))
     .orderBy(desc(tests.deletedAt))
-    .all();
+    ;
 }
 
 export async function permanentlyDeleteTest(id: string) {
@@ -361,7 +363,7 @@ export async function upsertTestByTargetUrl(
   }
 
   // Find existing test with same targetUrl in same functional area
-  const existing = await db
+  const [existing] = await db
     .select()
     .from(tests)
     .where(
@@ -370,8 +372,7 @@ export async function upsertTestByTargetUrl(
         eq(tests.targetUrl, data.targetUrl),
         isNull(tests.deletedAt)
       )
-    )
-    .get();
+    );
 
   if (existing) {
     // Update existing test
@@ -384,16 +385,17 @@ export async function upsertTestByTargetUrl(
 
 // Test Runs
 export async function getTestRuns() {
-  return db.select().from(testRuns).orderBy(desc(testRuns.startedAt)).all();
+  return db.select().from(testRuns).orderBy(desc(testRuns.startedAt));
 }
 
 export async function getTestRun(id: string) {
-  return db.select().from(testRuns).where(eq(testRuns.id, id)).get();
+  const [row] = await db.select().from(testRuns).where(eq(testRuns.id, id));
+  return row;
 }
 
 export async function getTestRunsByIds(ids: string[]) {
   if (ids.length === 0) return [];
-  return db.select().from(testRuns).where(inArray(testRuns.id, ids)).all();
+  return db.select().from(testRuns).where(inArray(testRuns.id, ids));
 }
 
 export async function createTestRun(data: Omit<NewTestRun, 'id'>) {
@@ -408,11 +410,12 @@ export async function updateTestRun(id: string, data: Partial<NewTestRun>) {
 
 // Test Results
 export async function getTestResultById(id: string) {
-  return db.select().from(testResults).where(eq(testResults.id, id)).get();
+  const [row] = await db.select().from(testResults).where(eq(testResults.id, id));
+  return row;
 }
 
 export async function getTestResultsByRun(testRunId: string) {
-  return db.select().from(testResults).where(eq(testResults.testRunId, testRunId)).all();
+  return db.select().from(testResults).where(eq(testResults.testRunId, testRunId));
 }
 
 export async function getTestResultsByTest(testId: string) {
@@ -442,7 +445,7 @@ export async function getTestResultsByTest(testId: string) {
     .innerJoin(testRuns, eq(testResults.testRunId, testRuns.id))
     .where(eq(testResults.testId, testId))
     .orderBy(desc(testRuns.startedAt))
-    .all();
+    ;
 }
 
 export async function createTestResult(data: Omit<NewTestResult, 'id'>) {
@@ -463,7 +466,7 @@ export async function getTestFlakyRate(testId: string, lastN = 10): Promise<{ to
     .where(eq(testResults.testId, testId))
     .orderBy(desc(testResults.id))
     .limit(lastN)
-    .all();
+    ;
   const flakyCount = results.filter(r => r.isFlaky).length;
   return {
     total: results.length,
@@ -478,7 +481,7 @@ export async function getQuarantinedTests(repositoryId: string) {
     .select()
     .from(tests)
     .where(and(eq(tests.repositoryId, repositoryId), eq(tests.quarantined, true)))
-    .all();
+    ;
 }
 
 // Toggle quarantine status for a test
@@ -530,15 +533,15 @@ export async function getTestsWithStatusByRepo(repositoryId: string) {
 
 // Repo-filtered queries
 export async function getFunctionalAreasByRepo(repositoryId: string) {
-  return db.select().from(functionalAreas).where(and(eq(functionalAreas.repositoryId, repositoryId), isNull(functionalAreas.deletedAt))).all();
+  return db.select().from(functionalAreas).where(and(eq(functionalAreas.repositoryId, repositoryId), isNull(functionalAreas.deletedAt)));
 }
 
 export async function getTestsByRepo(repositoryId: string) {
-  return db.select().from(tests).where(and(eq(tests.repositoryId, repositoryId), isNull(tests.deletedAt))).orderBy(desc(tests.createdAt)).all();
+  return db.select().from(tests).where(and(eq(tests.repositoryId, repositoryId), isNull(tests.deletedAt))).orderBy(desc(tests.createdAt));
 }
 
 export async function getUncategorizedTests() {
-  return db.select().from(tests).where(and(isNull(tests.repositoryId), isNull(tests.deletedAt))).orderBy(desc(tests.createdAt)).all();
+  return db.select().from(tests).where(and(isNull(tests.repositoryId), isNull(tests.deletedAt))).orderBy(desc(tests.createdAt));
 }
 
 export async function getUncategorizedTestsWithStatus() {
@@ -562,11 +565,11 @@ export async function getDeletedUncategorizedTests() {
   return db.select().from(tests)
     .where(and(isNull(tests.repositoryId), isNotNull(tests.deletedAt)))
     .orderBy(desc(tests.deletedAt))
-    .all();
+    ;
 }
 
 export async function getTestRunsByRepo(repositoryId: string) {
-  return db.select().from(testRuns).where(eq(testRuns.repositoryId, repositoryId)).orderBy(desc(testRuns.startedAt)).all();
+  return db.select().from(testRuns).where(eq(testRuns.repositoryId, repositoryId)).orderBy(desc(testRuns.startedAt));
 }
 
 // Get latest test run for a specific branch
@@ -576,13 +579,13 @@ export async function getLatestRunByBranch(branch: string, repositoryId?: string
     conditions.push(eq(testRuns.repositoryId, repositoryId));
   }
 
-  return db
+  const [row] = await db
     .select()
     .from(testRuns)
     .where(and(...conditions))
     .orderBy(desc(testRuns.startedAt))
-    .limit(1)
-    .get();
+    .limit(1);
+  return row;
 }
 
 // Get test results with test info for a run
@@ -600,7 +603,7 @@ export async function getTestResultsWithTestInfo(testRunId: string) {
     .from(testResults)
     .innerJoin(tests, eq(testResults.testId, tests.id))
     .where(eq(testResults.testRunId, testRunId))
-    .all();
+    ;
 
   return results;
 }
@@ -647,36 +650,35 @@ export async function getTestVersions(testId: string) {
     .from(testVersions)
     .where(eq(testVersions.testId, testId))
     .orderBy(desc(testVersions.version))
-    .all();
+    ;
 }
 
 export async function getTestVersion(testId: string, version: number) {
-  return db
+  const [row] = await db
     .select()
     .from(testVersions)
-    .where(and(eq(testVersions.testId, testId), eq(testVersions.version, version)))
-    .get();
+    .where(and(eq(testVersions.testId, testId), eq(testVersions.version, version)));
+  return row;
 }
 
 export async function getLatestVersionNumber(testId: string): Promise<number> {
-  const latest = await db
+  const [latest] = await db
     .select({ version: testVersions.version })
     .from(testVersions)
     .where(eq(testVersions.testId, testId))
     .orderBy(desc(testVersions.version))
-    .limit(1)
-    .get();
+    .limit(1);
   return latest?.version ?? 0;
 }
 
 export async function getRecordingViewport(testId: string) {
-  return db
+  const [row] = await db
     .select({ viewportWidth: testVersions.viewportWidth, viewportHeight: testVersions.viewportHeight })
     .from(testVersions)
     .where(eq(testVersions.testId, testId))
     .orderBy(desc(testVersions.version))
-    .limit(1)
-    .get();
+    .limit(1);
+  return row;
 }
 
 export async function createTestVersion(data: Omit<NewTestVersion, 'id'>) {
@@ -709,11 +711,11 @@ export async function stampFirstBuild(
 
 // Get a single test version by its ID
 export async function getTestVersionById(versionId: string) {
-  return db
+  const [row] = await db
     .select()
     .from(testVersions)
-    .where(eq(testVersions.id, versionId))
-    .get();
+    .where(eq(testVersions.id, versionId));
+  return row;
 }
 
 // Get test versions created on a specific branch
@@ -723,7 +725,7 @@ export async function getTestVersionsByBranch(testId: string, branch: string) {
     .from(testVersions)
     .where(and(eq(testVersions.testId, testId), eq(testVersions.branch, branch)))
     .orderBy(desc(testVersions.version))
-    .all();
+    ;
 }
 
 // For each test in a repo, get the latest version on a given branch
@@ -732,13 +734,12 @@ export async function getLatestBranchVersions(repositoryId: string, branch: stri
   const results: { testId: string; version: typeof testVersions.$inferSelect }[] = [];
 
   for (const test of repoTests) {
-    const latest = await db
+    const [latest] = await db
       .select()
       .from(testVersions)
       .where(and(eq(testVersions.testId, test.id), eq(testVersions.branch, branch)))
       .orderBy(desc(testVersions.version))
-      .limit(1)
-      .get();
+      .limit(1);
     if (latest) {
       results.push({ testId: test.id, version: latest });
     }

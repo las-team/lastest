@@ -118,6 +118,13 @@ ${historyDesc}`;
  */
 export async function triageBuildFailures(buildId: string, repositoryId: string): Promise<void> {
   try {
+    // Only run triage if AI Diff Analysis is enabled
+    const settings = await queries.getAISettings(repositoryId);
+    if (!settings.aiDiffingEnabled) {
+      console.log(`[triage] Skipping triage for build ${buildId} — AI Diff Analysis is disabled`);
+      return;
+    }
+
     const build = await queries.getBuild(buildId);
     if (!build?.testRunId) return;
 

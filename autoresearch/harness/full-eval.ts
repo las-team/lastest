@@ -47,14 +47,13 @@ async function waitForCompletion(sessionId: string): Promise<{
   const startTime = Date.now();
 
   while (Date.now() - startTime < MAX_WAIT_MS) {
-    const session = db
+    const [session] = await db
       .select({
         status: agentSessions.status,
         completedAt: agentSessions.completedAt,
       })
       .from(agentSessions)
-      .where(eq(agentSessions.id, sessionId))
-      .get();
+      .where(eq(agentSessions.id, sessionId));
 
     if (!session) {
       throw new Error(`Session ${sessionId} not found`);
@@ -92,13 +91,12 @@ async function main() {
 
   if (skipTrigger) {
     // Use the latest active/completed session
-    const latest = db
+    const [latest] = await db
       .select({ id: agentSessions.id })
       .from(agentSessions)
       .where(eq(agentSessions.repositoryId, repositoryId))
       .orderBy(desc(agentSessions.createdAt))
-      .limit(1)
-      .get();
+      .limit(1);
 
     if (!latest) {
       console.error('No agent sessions found');

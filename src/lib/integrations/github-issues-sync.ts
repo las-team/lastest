@@ -67,24 +67,22 @@ export async function syncGithubIssues(
 ): Promise<{ syncedIssues: number; syncedPRs: number }> {
   // Check TTL
   if (!force) {
-    const latest = db
+    const [latest] = await db
       .select({ syncedAt: githubIssues.syncedAt })
       .from(githubIssues)
       .where(eq(githubIssues.repositoryId, repositoryId))
       .orderBy(githubIssues.syncedAt)
-      .limit(1)
-      .get();
+      .limit(1);
 
     if (latest?.syncedAt && Date.now() - latest.syncedAt.getTime() < SYNC_TTL_MS) {
       return { syncedIssues: 0, syncedPRs: 0 };
     }
   }
 
-  const repo = db
+  const [repo] = await db
     .select({ owner: repositories.owner, name: repositories.name })
     .from(repositories)
-    .where(eq(repositories.id, repositoryId))
-    .get();
+    .where(eq(repositories.id, repositoryId));
 
   if (!repo) throw new Error('Repository not found');
 
@@ -104,7 +102,7 @@ export async function syncGithubIssues(
   // Upsert issues
   const now = new Date();
   for (const issue of realIssues) {
-    const existing = db
+    const [existing] = await db
       .select({ id: githubIssues.id })
       .from(githubIssues)
       .where(
@@ -112,8 +110,7 @@ export async function syncGithubIssues(
           eq(githubIssues.repositoryId, repositoryId),
           eq(githubIssues.githubIssueNumber, issue.number),
         ),
-      )
-      .get();
+      );
 
     const values = {
       repositoryId,
@@ -137,7 +134,7 @@ export async function syncGithubIssues(
   // Upsert PRs — match by PR number + repo owner/name
   let syncedPRs = 0;
   for (const pr of allPRs) {
-    const existing = db
+    const [existing] = await db
       .select({ id: pullRequests.id })
       .from(pullRequests)
       .where(
@@ -146,8 +143,7 @@ export async function syncGithubIssues(
           eq(pullRequests.repoName, repo.name),
           eq(pullRequests.githubPrNumber, pr.number),
         ),
-      )
-      .get();
+      );
 
     const status = pr.merged_at ? 'merged' : pr.state;
 

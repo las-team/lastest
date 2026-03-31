@@ -8,10 +8,6 @@
 # -----------------------------------------------------------------------------
 FROM node:24-slim AS deps
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    python3 make g++ && \
-    rm -rf /var/lib/apt/lists/*
-
 WORKDIR /app
 
 # Install pnpm
@@ -29,11 +25,6 @@ RUN pnpm install --frozen-lockfile
 # Stage 2: Builder
 # -----------------------------------------------------------------------------
 FROM node:24-slim AS builder
-
-# Install build dependencies for native modules
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    python3 make g++ && \
-    rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
@@ -65,6 +56,9 @@ RUN node -e "\
   const runner = require('./packages/runner/package.json');\
   const info = { gitHash: '$GIT_HASH', commitCount: '$GIT_COMMIT_COUNT', version: pkg.version, runnerVersion: runner.version };\
   require('fs').writeFileSync('build-info.json', JSON.stringify(info));"
+
+# Run tests (includes Tesseract OCR verification)
+RUN pnpm test
 
 # Build the application
 RUN pnpm build
@@ -171,15 +165,15 @@ RUN chmod +x /docker-entrypoint.sh
 COPY --chown=nextjs:nodejs scripts/migrate.js /app/migrate.js
 COPY --chown=nextjs:nodejs scripts/ws-proxy-preload.js /app/ws-proxy-preload.js
 
-# Create data directories
-RUN mkdir -p /app/data /app/storage/screenshots /app/storage/baselines /app/storage/diffs /app/storage/traces /app/storage/videos /app/storage/planned /app/storage/bug-reports /home/nextjs/.claude && \
+# Create storage directories
+RUN mkdir -p /app/storage/screenshots /app/storage/baselines /app/storage/diffs /app/storage/traces /app/storage/videos /app/storage/planned /app/storage/bug-reports /home/nextjs/.claude && \
     chown -R nextjs:nodejs /app && \
     chown nextjs:nodejs /home/nextjs/.claude
 
 # Environment configuration
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
-ENV DATABASE_PATH=/app/data/lastest2.db
+ENV DATABASE_URL=postgresql://lastest:lastest@localhost:5432/lastest
 ENV PORT=3000
 ENV HOSTNAME=0.0.0.0
 
@@ -198,7 +192,7 @@ EXPOSE 3000 9223 9224
 USER nextjs
 
 # Volumes for persistent data
-VOLUME ["/app/data", "/app/storage"]
+VOLUME ["/app/storage"]
 
 ENTRYPOINT ["/docker-entrypoint.sh"]
 CMD ["node", "--require", "./ws-proxy-preload.js", "server.js"]

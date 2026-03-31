@@ -1,4 +1,4 @@
-import { sqliteTable, text, integer, index } from 'drizzle-orm/sqlite-core';
+import { pgTable, text, integer, boolean, timestamp, jsonb, index } from 'drizzle-orm/pg-core';
 
 // Type definitions for JSON columns
 
@@ -132,56 +132,56 @@ export interface TestPlaywrightOverrides {
   cursorPlaybackSpeed?: number;
 }
 
-export const functionalAreas = sqliteTable('functional_areas', {
+export const functionalAreas = pgTable('functional_areas', {
   id: text('id').primaryKey(),
   repositoryId: text('repository_id'),
   name: text('name').notNull(),
   description: text('description'),
   parentId: text('parent_id'),
-  isRouteFolder: integer('is_route_folder', { mode: 'boolean' }).default(false),
+  isRouteFolder: boolean('is_route_folder').default(false),
   orderIndex: integer('order_index').default(0),
   agentPlan: text('agent_plan'), // markdown test plan from Planner agent
-  planGeneratedAt: integer('plan_generated_at', { mode: 'timestamp' }),
+  planGeneratedAt: timestamp('plan_generated_at'),
   planSnapshot: text('plan_snapshot'), // JSON: FunctionalAreaPlanSnapshot for rollback
-  deletedAt: integer('deleted_at', { mode: 'timestamp' }),
+  deletedAt: timestamp('deleted_at'),
 });
 
-export const tests = sqliteTable('tests', {
+export const tests = pgTable('tests', {
   id: text('id').primaryKey(),
   repositoryId: text('repository_id'),
   functionalAreaId: text('functional_area_id').references(() => functionalAreas.id),
   name: text('name').notNull(),
   code: text('code').notNull(), // Playwright test code
   description: text('description'),
-  isPlaceholder: integer('is_placeholder', { mode: 'boolean' }).default(false),
+  isPlaceholder: boolean('is_placeholder').default(false),
   targetUrl: text('target_url'),
   // Setup configuration - setupTestId takes precedence over setupScriptId
   setupTestId: text('setup_test_id'), // Use another test as setup (most common)
   setupScriptId: text('setup_script_id'), // OR use dedicated setup script
-  setupOverrides: text('setup_overrides', { mode: 'json' }).$type<TestSetupOverrides>(),
-  teardownOverrides: text('teardown_overrides', { mode: 'json' }).$type<TestTeardownOverrides>(),
-  stabilizationOverrides: text('stabilization_overrides', { mode: 'json' }).$type<Partial<StabilizationSettings>>(),
-  requiredCapabilities: text('required_capabilities', { mode: 'json' }).$type<TestRequiredCapabilities>(),
-  viewportOverride: text('viewport_override', { mode: 'json' }).$type<{ width: number; height: number }>(),
-  diffOverrides: text('diff_overrides', { mode: 'json' }).$type<TestDiffOverrides>(),
-  playwrightOverrides: text('playwright_overrides', { mode: 'json' }).$type<TestPlaywrightOverrides>(),
-  assertions: text('assertions', { mode: 'json' }).$type<TestAssertion[]>(),
+  setupOverrides: jsonb('setup_overrides').$type<TestSetupOverrides>(),
+  teardownOverrides: jsonb('teardown_overrides').$type<TestTeardownOverrides>(),
+  stabilizationOverrides: jsonb('stabilization_overrides').$type<Partial<StabilizationSettings>>(),
+  requiredCapabilities: jsonb('required_capabilities').$type<TestRequiredCapabilities>(),
+  viewportOverride: jsonb('viewport_override').$type<{ width: number; height: number }>(),
+  diffOverrides: jsonb('diff_overrides').$type<TestDiffOverrides>(),
+  playwrightOverrides: jsonb('playwright_overrides').$type<TestPlaywrightOverrides>(),
+  assertions: jsonb('assertions').$type<TestAssertion[]>(),
   executionMode: text('execution_mode').default('procedural'), // 'procedural' | 'agent'
   agentPrompt: text('agent_prompt'), // NL description for agent mode
-  quarantined: integer('quarantined', { mode: 'boolean' }).default(false), // quarantined tests run but don't block builds
-  deletedAt: integer('deleted_at', { mode: 'timestamp' }),
-  createdAt: integer('created_at', { mode: 'timestamp' }),
-  updatedAt: integer('updated_at', { mode: 'timestamp' }),
+  quarantined: boolean('quarantined').default(false), // quarantined tests run but don't block builds
+  deletedAt: timestamp('deleted_at'),
+  createdAt: timestamp('created_at'),
+  updatedAt: timestamp('updated_at'),
 });
 
-export const testRuns = sqliteTable('test_runs', {
+export const testRuns = pgTable('test_runs', {
   id: text('id').primaryKey(),
   repositoryId: text('repository_id'),
   runnerId: text('runner_id'), // nullable - set when run via remote runner, null for local runs
   gitBranch: text('git_branch').notNull(),
   gitCommit: text('git_commit').notNull(),
-  startedAt: integer('started_at', { mode: 'timestamp' }),
-  completedAt: integer('completed_at', { mode: 'timestamp' }),
+  startedAt: timestamp('started_at'),
+  completedAt: timestamp('completed_at'),
   status: text('status'), // 'passed', 'failed', 'running'
 });
 
@@ -234,36 +234,36 @@ export interface WcagScoreSummary {
   bySeverity: { critical: number; serious: number; moderate: number; minor: number };
 }
 
-export const testResults = sqliteTable('test_results', {
+export const testResults = pgTable('test_results', {
   id: text('id').primaryKey(),
   testRunId: text('test_run_id').references(() => testRuns.id),
   testId: text('test_id').references(() => tests.id),
   testVersionId: text('test_version_id'), // links to testVersions.id — which version was executed
   status: text('status'), // 'passed', 'failed', 'skipped'
   screenshotPath: text('screenshot_path'),
-  screenshots: text('screenshots', { mode: 'json' }).$type<CapturedScreenshot[]>(),
+  screenshots: jsonb('screenshots').$type<CapturedScreenshot[]>(),
   diffPath: text('diff_path'),
   errorMessage: text('error_message'),
   durationMs: integer('duration_ms'),
   viewport: text('viewport'), // e.g., '1920x1080'
   browser: text('browser').default('chromium'),
-  consoleErrors: text('console_errors', { mode: 'json' }).$type<string[]>(),
-  networkRequests: text('network_requests', { mode: 'json' }).$type<NetworkRequest[]>(),
-  a11yViolations: text('a11y_violations', { mode: 'json' }).$type<A11yViolation[]>(),
-  assertionResults: text('assertion_results', { mode: 'json' }).$type<AssertionResult[]>(),
+  consoleErrors: jsonb('console_errors').$type<string[]>(),
+  networkRequests: jsonb('network_requests').$type<NetworkRequest[]>(),
+  a11yViolations: jsonb('a11y_violations').$type<A11yViolation[]>(),
+  assertionResults: jsonb('assertion_results').$type<AssertionResult[]>(),
   a11yPassesCount: integer('a11y_passes_count'),
   videoPath: text('video_path'),
-  softErrors: text('soft_errors', { mode: 'json' }).$type<string[]>(),
+  softErrors: jsonb('soft_errors').$type<string[]>(),
   retryOf: text('retry_of'), // links to original test result ID if this is a retry
-  isFlaky: integer('is_flaky', { mode: 'boolean' }).default(false), // true if test failed then passed on retry
-  triage: text('triage', { mode: 'json' }).$type<TriageResult>(), // AI failure triage classification
+  isFlaky: boolean('is_flaky').default(false), // true if test failed then passed on retry
+  triage: jsonb('triage').$type<TriageResult>(), // AI failure triage classification
 });
 
 // Repository provider type
 export type RepositoryProvider = 'github' | 'gitlab' | 'local';
 
 // Repositories synced from GitHub or GitLab, or created locally
-export const repositories = sqliteTable('repositories', {
+export const repositories = pgTable('repositories', {
   id: text('id').primaryKey(),
   teamId: text('team_id'), // Team ownership - FK added after teams table definition
   provider: text('provider').notNull().default('github'), // 'github' | 'gitlab' | 'local'
@@ -281,42 +281,42 @@ export const repositories = sqliteTable('repositories', {
   defaultSetupTestId: text('default_setup_test_id'), // Default test-as-setup for all tests
   defaultSetupScriptId: text('default_setup_script_id'), // OR default script
   testingTemplate: text('testing_template'), // Testing template ID (e.g. 'saas', 'marketing', 'canvas')
-  autoApproveDefaultBranch: integer('auto_approve_default_branch', { mode: 'boolean' }).default(false),
-  branchBaseUrls: text('branch_base_urls', { mode: 'json' }).$type<Record<string, string>>(),
-  comparisonRunEnabled: integer('comparison_run_enabled', { mode: 'boolean' }).default(false),
+  autoApproveDefaultBranch: boolean('auto_approve_default_branch').default(false),
+  branchBaseUrls: jsonb('branch_base_urls').$type<Record<string, string>>(),
+  comparisonRunEnabled: boolean('comparison_run_enabled').default(false),
   comparisonBaselineBranch: text('comparison_baseline_branch'), // branch used as baseline in comparison runs
-  createdAt: integer('created_at', { mode: 'timestamp' }),
+  createdAt: timestamp('created_at'),
 });
 
 // GitHub OAuth accounts - per-team GitHub connection
-export const githubAccounts = sqliteTable('github_accounts', {
+export const githubAccounts = pgTable('github_accounts', {
   id: text('id').primaryKey(),
   teamId: text('team_id'), // Team ownership - FK added after teams table definition
   githubUserId: text('github_user_id').notNull(),
   githubUsername: text('github_username').notNull(),
   accessToken: text('access_token').notNull(),
   refreshToken: text('refresh_token'),
-  tokenExpiresAt: integer('token_expires_at', { mode: 'timestamp' }),
+  tokenExpiresAt: timestamp('token_expires_at'),
   selectedRepositoryId: text('selected_repository_id').references(() => repositories.id),
-  createdAt: integer('created_at', { mode: 'timestamp' }),
+  createdAt: timestamp('created_at'),
 });
 
 // GitLab OAuth accounts - per-team GitLab connection
-export const gitlabAccounts = sqliteTable('gitlab_accounts', {
+export const gitlabAccounts = pgTable('gitlab_accounts', {
   id: text('id').primaryKey(),
   teamId: text('team_id'), // Team ownership - FK added after teams table definition
   gitlabUserId: text('gitlab_user_id').notNull(),
   gitlabUsername: text('gitlab_username').notNull(),
   accessToken: text('access_token').notNull(),
   refreshToken: text('refresh_token'),
-  tokenExpiresAt: integer('token_expires_at', { mode: 'timestamp' }),
+  tokenExpiresAt: timestamp('token_expires_at'),
   instanceUrl: text('instance_url').default('https://gitlab.com'), // For self-hosted GitLab
   selectedRepositoryId: text('selected_repository_id').references(() => repositories.id),
-  createdAt: integer('created_at', { mode: 'timestamp' }),
+  createdAt: timestamp('created_at'),
 });
 
 // Pull requests / Merge requests linked to builds
-export const pullRequests = sqliteTable('pull_requests', {
+export const pullRequests = pgTable('pull_requests', {
   id: text('id').primaryKey(),
   provider: text('provider').notNull().default('github'), // 'github' | 'gitlab'
   githubPrNumber: integer('github_pr_number'), // nullable for GitLab MRs
@@ -330,16 +330,16 @@ export const pullRequests = sqliteTable('pull_requests', {
   title: text('title'),
   status: text('status'), // 'open', 'closed', 'merged'
   author: text('author'), // GitHub username of PR author
-  mergedAt: integer('merged_at', { mode: 'timestamp' }),
-  createdAt: integer('created_at', { mode: 'timestamp' }),
-  updatedAt: integer('updated_at', { mode: 'timestamp' }),
+  mergedAt: timestamp('merged_at'),
+  createdAt: timestamp('created_at'),
+  updatedAt: timestamp('updated_at'),
 });
 
 /** @deprecated Always vs_both now — kept for backward compat */
 export type ComparisonMode = 'vs_main' | 'vs_branch' | 'vs_both' | 'vs_previous' | 'vs_planned';
 
 // Builds - aggregated test run with status
-export const builds = sqliteTable('builds', {
+export const builds = pgTable('builds', {
   id: text('id').primaryKey(),
   testRunId: text('test_run_id').references(() => testRuns.id),
   pullRequestId: text('pull_request_id').references(() => pullRequests.id),
@@ -363,8 +363,8 @@ export const builds = sqliteTable('builds', {
   teardownStatus: text('teardown_status').default('pending'), // 'pending' | 'running' | 'completed' | 'failed' | 'skipped'
   teardownError: text('teardown_error'),
   teardownDurationMs: integer('teardown_duration_ms'),
-  codeChangeTestIds: text('code_change_test_ids', { mode: 'json' }).$type<string[]>(),
-  browsers: text('browsers', { mode: 'json' }).$type<string[]>(), // browsers used in this build
+  codeChangeTestIds: jsonb('code_change_test_ids').$type<string[]>(),
+  browsers: jsonb('browsers').$type<string[]>(), // browsers used in this build
   scheduleId: text('schedule_id'),
   a11yScore: integer('a11y_score'),
   a11yViolationCount: integer('a11y_violation_count'),
@@ -372,19 +372,19 @@ export const builds = sqliteTable('builds', {
   a11yTotalRulesChecked: integer('a11y_total_rules_checked'),
   comparisonPairId: text('comparison_pair_id'), // shared ID linking baseline + feature builds
   comparisonRole: text('comparison_role'), // 'baseline' | 'feature' | null
-  comparisonMeta: text('comparison_meta', { mode: 'json' }).$type<{
+  comparisonMeta: jsonb('comparison_meta').$type<{
     featureBranch: string;
     featureUrl: string;
     runnerId?: string;
     testIds?: string[];
     versionOverrides?: Record<string, string>;
   }>(),
-  createdAt: integer('created_at', { mode: 'timestamp' }),
-  completedAt: integer('completed_at', { mode: 'timestamp' }),
+  createdAt: timestamp('created_at'),
+  completedAt: timestamp('completed_at'),
 });
 
 // Visual diffs with approval workflow
-export const visualDiffs = sqliteTable('visual_diffs', {
+export const visualDiffs = pgTable('visual_diffs', {
   id: text('id').primaryKey(),
   buildId: text('build_id').references(() => builds.id).notNull(),
   testResultId: text('test_result_id').references(() => testResults.id).notNull(),
@@ -397,10 +397,10 @@ export const visualDiffs = sqliteTable('visual_diffs', {
   pixelDifference: integer('pixel_difference').default(0),
   percentageDifference: text('percentage_difference'), // stored as string for precision
   classification: text('classification'), // 'unchanged' | 'flaky' | 'changed'
-  metadata: text('metadata', { mode: 'json' }).$type<DiffMetadata>(),
+  metadata: jsonb('metadata').$type<DiffMetadata>(),
   approvedBy: text('approved_by'),
-  approvedAt: integer('approved_at', { mode: 'timestamp' }),
-  createdAt: integer('created_at', { mode: 'timestamp' }),
+  approvedAt: timestamp('approved_at'),
+  createdAt: timestamp('created_at'),
   // Planned screenshot comparison fields
   plannedImagePath: text('planned_image_path'),
   plannedDiffImagePath: text('planned_diff_image_path'),
@@ -413,14 +413,14 @@ export const visualDiffs = sqliteTable('visual_diffs', {
   mainPercentageDifference: text('main_percentage_difference'),
   mainClassification: text('main_classification'), // 'unchanged' | 'flaky' | 'changed'
   // AI diff analysis
-  aiAnalysis: text('ai_analysis', { mode: 'json' }).$type<AIDiffAnalysis>(),
+  aiAnalysis: jsonb('ai_analysis').$type<AIDiffAnalysis>(),
   aiRecommendation: text('ai_recommendation'), // 'approve' | 'review' | 'flag' | null
   aiAnalysisStatus: text('ai_analysis_status'), // 'pending' | 'running' | 'completed' | 'failed' | 'skipped' | null
   browser: text('browser').default('chromium'), // browser used for this diff
 });
 
 // Baselines for carry-forward logic
-export const baselines = sqliteTable('baselines', {
+export const baselines = pgTable('baselines', {
   id: text('id').primaryKey(),
   repositoryId: text('repository_id'),
   testId: text('test_id').references(() => tests.id).notNull(),
@@ -429,13 +429,13 @@ export const baselines = sqliteTable('baselines', {
   imageHash: text('image_hash').notNull(), // SHA256 for carry-forward matching
   approvedFromDiffId: text('approved_from_diff_id').references(() => visualDiffs.id),
   branch: text('branch').notNull(),
-  isActive: integer('is_active', { mode: 'boolean' }).default(true),
+  isActive: boolean('is_active').default(true),
   browser: text('browser').default('chromium'), // browser this baseline applies to
-  createdAt: integer('created_at', { mode: 'timestamp' }),
+  createdAt: timestamp('created_at'),
 });
 
 // Planned/expected screenshots for design comparison
-export const plannedScreenshots = sqliteTable('planned_screenshots', {
+export const plannedScreenshots = pgTable('planned_screenshots', {
   id: text('id').primaryKey(),
   repositoryId: text('repository_id').references(() => repositories.id),
   testId: text('test_id').references(() => tests.id, { onDelete: 'cascade' }),
@@ -447,16 +447,16 @@ export const plannedScreenshots = sqliteTable('planned_screenshots', {
   description: text('description'),
   uploadedBy: text('uploaded_by').references(() => users.id),
   sourceUrl: text('source_url'), // Original design file URL (Figma, etc.)
-  isActive: integer('is_active', { mode: 'boolean' }).default(true),
-  createdAt: integer('created_at', { mode: 'timestamp' }),
-  updatedAt: integer('updated_at', { mode: 'timestamp' }),
+  isActive: boolean('is_active').default(true),
+  createdAt: timestamp('created_at'),
+  updatedAt: timestamp('updated_at'),
 });
 
 export type PlannedScreenshot = typeof plannedScreenshots.$inferSelect;
 export type NewPlannedScreenshot = typeof plannedScreenshots.$inferInsert;
 
 // Ignore regions for masking areas during diff
-export const ignoreRegions = sqliteTable('ignore_regions', {
+export const ignoreRegions = pgTable('ignore_regions', {
   id: text('id').primaryKey(),
   testId: text('test_id').references(() => tests.id).notNull(),
   x: integer('x').notNull(),
@@ -464,7 +464,7 @@ export const ignoreRegions = sqliteTable('ignore_regions', {
   width: integer('width').notNull(),
   height: integer('height').notNull(),
   reason: text('reason'),
-  createdAt: integer('created_at', { mode: 'timestamp' }),
+  createdAt: timestamp('created_at'),
 });
 
 export type Repository = typeof repositories.$inferSelect;
@@ -618,39 +618,39 @@ export type RecordingEngine = 'lastest' | 'playwright-inspector';
 export const DEFAULT_RECORDING_ENGINES: RecordingEngine[] = ['lastest', 'playwright-inspector'];
 
 // Playwright settings for recording and running tests
-export const playwrightSettings = sqliteTable('playwright_settings', {
+export const playwrightSettings = pgTable('playwright_settings', {
   id: text('id').primaryKey(),
   repositoryId: text('repository_id').references(() => repositories.id),
-  selectorPriority: text('selector_priority', { mode: 'json' }).$type<SelectorConfig[]>(),
+  selectorPriority: jsonb('selector_priority').$type<SelectorConfig[]>(),
   browser: text('browser').default('chromium'), // chromium | firefox | webkit
   viewportWidth: integer('viewport_width').default(1280),
   viewportHeight: integer('viewport_height').default(720),
-  lockViewportToRecording: integer('lock_viewport_to_recording', { mode: 'boolean' }).default(false),
+  lockViewportToRecording: boolean('lock_viewport_to_recording').default(false),
   headlessMode: text('headless_mode').default('true'), // 'true' | 'false' | 'shell'
   navigationTimeout: integer('navigation_timeout').default(30000),
   actionTimeout: integer('action_timeout').default(5000),
-  pointerGestures: integer('pointer_gestures', { mode: 'boolean' }).default(false),
+  pointerGestures: boolean('pointer_gestures').default(false),
   cursorFPS: integer('cursor_fps').default(30),
   cursorPlaybackSpeed: integer('cursor_playback_speed').default(1), // 1 = realtime, 0 = instant (skip delays)
-  enabledRecordingEngines: text('enabled_recording_engines', { mode: 'json' }).$type<RecordingEngine[]>(),
+  enabledRecordingEngines: jsonb('enabled_recording_engines').$type<RecordingEngine[]>(),
   defaultRecordingEngine: text('default_recording_engine').default('lastest'),
-  freezeAnimations: integer('freeze_animations', { mode: 'boolean' }).default(false), // freeze CSS animations/transitions
-  enableVideoRecording: integer('enable_video_recording', { mode: 'boolean' }).default(false), // record test runs as WebM video
+  freezeAnimations: boolean('freeze_animations').default(false), // freeze CSS animations/transitions
+  enableVideoRecording: boolean('enable_video_recording').default(false), // record test runs as WebM video
   screenshotDelay: integer('screenshot_delay').default(0), // ms delay before screenshot
   maxParallelTests: integer('max_parallel_tests').default(2), // max tests to run in parallel locally
-  stabilization: text('stabilization', { mode: 'json' }).$type<StabilizationSettings>(), // snapshot stabilization settings
-  acceptAnyCertificate: integer('accept_any_certificate', { mode: 'boolean' }).default(false), // ignore HTTPS/SSL cert errors
+  stabilization: jsonb('stabilization').$type<StabilizationSettings>(), // snapshot stabilization settings
+  acceptAnyCertificate: boolean('accept_any_certificate').default(false), // ignore HTTPS/SSL cert errors
   networkErrorMode: text('network_error_mode').default('fail'), // 'fail' | 'warn' | 'ignore'
-  ignoreExternalNetworkErrors: integer('ignore_external_network_errors', { mode: 'boolean' }).default(false), // skip errors from different origins
+  ignoreExternalNetworkErrors: boolean('ignore_external_network_errors').default(false), // skip errors from different origins
   consoleErrorMode: text('console_error_mode').default('fail'), // 'fail' | 'warn' | 'ignore'
-  grantClipboardAccess: integer('grant_clipboard_access', { mode: 'boolean' }).default(false), // grant clipboard-read/write permissions
-  acceptDownloads: integer('accept_downloads', { mode: 'boolean' }).default(false), // accept file downloads in tests
-  enableNetworkInterception: integer('enable_network_interception', { mode: 'boolean' }).default(false), // enable page.route() network mocking
-  browsers: text('browsers', { mode: 'json' }).$type<string[]>().default(['chromium']), // browsers to use for build execution
+  grantClipboardAccess: boolean('grant_clipboard_access').default(false), // grant clipboard-read/write permissions
+  acceptDownloads: boolean('accept_downloads').default(false), // accept file downloads in tests
+  enableNetworkInterception: boolean('enable_network_interception').default(false), // enable page.route() network mocking
+  browsers: jsonb('browsers').$type<string[]>().default(['chromium']), // browsers to use for build execution
   autoRetryCount: integer('auto_retry_count').default(0), // 0-3: how many times to retry a failing test to detect flakiness
-  enableA11y: integer('enable_a11y', { mode: 'boolean' }).default(false), // enable WCAG accessibility checks with axe-core
-  createdAt: integer('created_at', { mode: 'timestamp' }),
-  updatedAt: integer('updated_at', { mode: 'timestamp' }),
+  enableA11y: boolean('enable_a11y').default(false), // enable WCAG accessibility checks with axe-core
+  createdAt: timestamp('created_at'),
+  updatedAt: timestamp('updated_at'),
 });
 
 export type PlaywrightSettings = typeof playwrightSettings.$inferSelect;
@@ -671,7 +671,7 @@ export const DEFAULT_SELECTOR_PRIORITY: SelectorConfig[] = [
 ];
 
 // Discovered routes for coverage tracking
-export const routes = sqliteTable('routes', {
+export const routes = pgTable('routes', {
   id: text('id').primaryKey(),
   repositoryId: text('repository_id').references(() => repositories.id),
   path: text('path').notNull(),
@@ -681,21 +681,21 @@ export const routes = sqliteTable('routes', {
   framework: text('framework'), // 'nextjs-app' | 'nextjs-pages' | 'react-router' | 'vue'
   routerType: text('router_type'), // 'hash' | 'browser'
   functionalAreaId: text('functional_area_id').references(() => functionalAreas.id),
-  hasTest: integer('has_test', { mode: 'boolean' }).default(false),
-  scannedAt: integer('scanned_at', { mode: 'timestamp' }),
+  hasTest: boolean('has_test').default(false),
+  scannedAt: timestamp('scanned_at'),
 });
 
 // Test suggestions for routes from AI discovery
-export const routeTestSuggestions = sqliteTable('route_test_suggestions', {
+export const routeTestSuggestions = pgTable('route_test_suggestions', {
   id: text('id').primaryKey(),
   routeId: text('route_id').references(() => routes.id, { onDelete: 'cascade' }),
   suggestion: text('suggestion').notNull(),
   matchedTestId: text('matched_test_id').references(() => tests.id),
-  createdAt: integer('created_at', { mode: 'timestamp' }),
+  createdAt: timestamp('created_at'),
 });
 
 // Scan status for progress tracking
-export const scanStatus = sqliteTable('scan_status', {
+export const scanStatus = pgTable('scan_status', {
   id: text('id').primaryKey(),
   repositoryId: text('repository_id').references(() => repositories.id),
   status: text('status').notNull(), // 'idle' | 'scanning' | 'completed' | 'error'
@@ -703,8 +703,8 @@ export const scanStatus = sqliteTable('scan_status', {
   routesFound: integer('routes_found').default(0),
   framework: text('framework'),
   errorMessage: text('error_message'),
-  startedAt: integer('started_at', { mode: 'timestamp' }),
-  completedAt: integer('completed_at', { mode: 'timestamp' }),
+  startedAt: timestamp('started_at'),
+  completedAt: timestamp('completed_at'),
 });
 
 export type Route = typeof routes.$inferSelect;
@@ -717,7 +717,7 @@ export type NewScanStatus = typeof scanStatus.$inferInsert;
 // Environment configuration for managed server startup
 export type EnvironmentMode = 'manual' | 'managed';
 
-export const environmentConfigs = sqliteTable('environment_configs', {
+export const environmentConfigs = pgTable('environment_configs', {
   id: text('id').primaryKey(),
   repositoryId: text('repository_id').references(() => repositories.id),
   mode: text('mode').notNull().default('manual'), // 'manual' | 'managed'
@@ -725,9 +725,9 @@ export const environmentConfigs = sqliteTable('environment_configs', {
   startCommand: text('start_command'), // e.g., 'pnpm dev'
   healthCheckUrl: text('health_check_url'), // defaults to baseUrl if not set
   healthCheckTimeout: integer('health_check_timeout').default(60000), // ms
-  reuseExistingServer: integer('reuse_existing_server', { mode: 'boolean' }).default(true),
-  createdAt: integer('created_at', { mode: 'timestamp' }),
-  updatedAt: integer('updated_at', { mode: 'timestamp' }),
+  reuseExistingServer: boolean('reuse_existing_server').default(true),
+  createdAt: timestamp('created_at'),
+  updatedAt: timestamp('updated_at'),
 });
 
 export type EnvironmentConfig = typeof environmentConfigs.$inferSelect;
@@ -741,21 +741,21 @@ export type TextDetectionGranularity = 'word' | 'line' | 'block';
 export type RegionDetectionMode = 'grid' | 'flood-fill';
 
 // Diff sensitivity settings for classification thresholds
-export const diffSensitivitySettings = sqliteTable('diff_sensitivity_settings', {
+export const diffSensitivitySettings = pgTable('diff_sensitivity_settings', {
   id: text('id').primaryKey(),
   repositoryId: text('repository_id').references(() => repositories.id),
   unchangedThreshold: integer('unchanged_threshold').default(1),  // percentage
   flakyThreshold: integer('flaky_threshold').default(10),        // percentage
-  includeAntiAliasing: integer('include_anti_aliasing', { mode: 'boolean' }).default(false), // include AA pixels in diff
-  ignorePageShift: integer('ignore_page_shift', { mode: 'boolean' }).default(false), // exclude vertical content shifts from diff
+  includeAntiAliasing: boolean('include_anti_aliasing').default(false), // include AA pixels in diff
+  ignorePageShift: boolean('ignore_page_shift').default(false), // exclude vertical content shifts from diff
   diffEngine: text('diff_engine').default('pixelmatch'), // 'pixelmatch' | 'ssim' | 'butteraugli'
-  textRegionAwareDiffing: integer('text_region_aware_diffing', { mode: 'boolean' }).default(false), // opt-in OCR-based text region diffing
+  textRegionAwareDiffing: boolean('text_region_aware_diffing').default(false), // opt-in OCR-based text region diffing
   textRegionThreshold: integer('text_region_threshold').default(30), // percentage, stored as 30 = 0.3
   textRegionPadding: integer('text_region_padding').default(4), // pixels to expand text bounding boxes
   textDetectionGranularity: text('text_detection_granularity').default('word'), // 'word' | 'line' | 'block'
   regionDetectionMode: text('region_detection_mode').default('flood-fill'), // 'grid' | 'flood-fill'
-  createdAt: integer('created_at', { mode: 'timestamp' }),
-  updatedAt: integer('updated_at', { mode: 'timestamp' }),
+  createdAt: timestamp('created_at'),
+  updatedAt: timestamp('updated_at'),
 });
 
 export type DiffSensitivitySettings = typeof diffSensitivitySettings.$inferSelect;
@@ -787,7 +787,7 @@ export type TriggerType = 'webhook' | 'manual' | 'push' | 'scheduled';
 export type AIProvider = 'claude-cli' | 'openrouter' | 'claude-agent-sdk' | 'ollama' | 'openai' | 'anthropic';
 export type AgentSdkPermissionMode = 'plan' | 'default' | 'acceptEdits';
 
-export const aiSettings = sqliteTable('ai_settings', {
+export const aiSettings = pgTable('ai_settings', {
   id: text('id').primaryKey(),
   repositoryId: text('repository_id').references(() => repositories.id),
   provider: text('provider').notNull().default('claude-cli'), // 'claude-cli' | 'openrouter' | 'claude-agent-sdk'
@@ -804,17 +804,17 @@ export const aiSettings = sqliteTable('ai_settings', {
   openaiModel: text('openai_model').default('gpt-4o'),
   customInstructions: text('custom_instructions'),
   // AI Diffing settings (separate from test generation)
-  aiDiffingEnabled: integer('ai_diffing_enabled', { mode: 'boolean' }).default(false),
+  aiDiffingEnabled: boolean('ai_diffing_enabled').default(false),
   aiDiffingProvider: text('ai_diffing_provider'), // 'openrouter' | 'anthropic'
   aiDiffingApiKey: text('ai_diffing_api_key'),
   aiDiffingModel: text('ai_diffing_model').default('anthropic/claude-sonnet-4-5-20250929'),
   aiDiffingOllamaBaseUrl: text('ai_diffing_ollama_base_url'),
   aiDiffingOllamaModel: text('ai_diffing_ollama_model'),
-  pwAgentEnabled: integer('pw_agent_enabled', { mode: 'boolean' }).default(true),
+  pwAgentEnabled: boolean('pw_agent_enabled').default(true),
   pwAgentModel: text('pw_agent_model'),
   pwAgentTimeout: integer('pw_agent_timeout').default(300000),
-  createdAt: integer('created_at', { mode: 'timestamp' }),
-  updatedAt: integer('updated_at', { mode: 'timestamp' }),
+  createdAt: timestamp('created_at'),
+  updatedAt: timestamp('updated_at'),
 });
 
 export type AISettings = typeof aiSettings.$inferSelect;
@@ -843,7 +843,7 @@ export const DEFAULT_AI_SETTINGS = {
 export type AIActionType = 'create_test' | 'fix_test' | 'enhance_test' | 'scan_routes' | 'test_connection' | 'analyze_specs' | 'mcp_explore' | 'analyze_diff' | 'extract_user_stories' | 'generate_spec_tests' | 'classify_template' | 'agent_discover' | 'agent_generate' | 'agent_heal' | 'agent_play' | 'triage';
 export type AILogStatus = 'pending' | 'success' | 'error';
 
-export const aiPromptLogs = sqliteTable('ai_prompt_logs', {
+export const aiPromptLogs = pgTable('ai_prompt_logs', {
   id: text('id').primaryKey(),
   repositoryId: text('repository_id').references(() => repositories.id),
   actionType: text('action_type').notNull(), // 'create_test' | 'fix_test' | 'enhance_test' | 'scan_routes' | 'test_connection'
@@ -855,7 +855,7 @@ export const aiPromptLogs = sqliteTable('ai_prompt_logs', {
   status: text('status').notNull(), // 'success' | 'error'
   errorMessage: text('error_message'),
   durationMs: integer('duration_ms'),
-  createdAt: integer('created_at', { mode: 'timestamp' }),
+  createdAt: timestamp('created_at'),
 });
 
 export type AIPromptLog = typeof aiPromptLogs.$inferSelect;
@@ -865,7 +865,7 @@ export type NewAIPromptLog = typeof aiPromptLogs.$inferInsert;
 export type BackgroundJobType = 'ai_scan' | 'spec_analysis' | 'build_tests' | 'test_run' | 'build_run' | 'ai_fix' | 'ai_validate' | 'ai_diff';
 export type BackgroundJobStatus = 'pending' | 'running' | 'completed' | 'failed';
 
-export const backgroundJobs = sqliteTable('background_jobs', {
+export const backgroundJobs = pgTable('background_jobs', {
   id: text('id').primaryKey(),
   type: text('type').notNull(), // BackgroundJobType
   status: text('status').notNull().default('pending'), // BackgroundJobStatus
@@ -874,38 +874,38 @@ export const backgroundJobs = sqliteTable('background_jobs', {
   completedSteps: integer('completed_steps').default(0),
   label: text('label').notNull(),
   error: text('error'),
-  metadata: text('metadata', { mode: 'json' }).$type<Record<string, unknown>>(),
+  metadata: jsonb('metadata').$type<Record<string, unknown>>(),
   parentJobId: text('parent_job_id'),
   repositoryId: text('repository_id').references(() => repositories.id),
   targetRunnerId: text('target_runner_id'), // 'local' or runner UUID — tracks which runner this job targets
-  createdAt: integer('created_at', { mode: 'timestamp' }),
-  startedAt: integer('started_at', { mode: 'timestamp' }),
-  lastActivityAt: integer('last_activity_at', { mode: 'timestamp' }),
-  completedAt: integer('completed_at', { mode: 'timestamp' }),
+  createdAt: timestamp('created_at'),
+  startedAt: timestamp('started_at'),
+  lastActivityAt: timestamp('last_activity_at'),
+  completedAt: timestamp('completed_at'),
 });
 
 export type BackgroundJob = typeof backgroundJobs.$inferSelect;
 export type NewBackgroundJob = typeof backgroundJobs.$inferInsert;
 
 // Build schedules for recurring test runs
-export const buildSchedules = sqliteTable('build_schedules', {
+export const buildSchedules = pgTable('build_schedules', {
   id: text('id').primaryKey(),
   repositoryId: text('repository_id').references(() => repositories.id, { onDelete: 'cascade' }).notNull(),
   name: text('name').notNull(),
-  enabled: integer('enabled', { mode: 'boolean' }).default(true),
+  enabled: boolean('enabled').default(true),
   cronExpression: text('cron_expression').notNull(),
   timezone: text('timezone').default('UTC'),
   runnerId: text('runner_id'),
-  testIds: text('test_ids', { mode: 'json' }).$type<string[]>(),
+  testIds: jsonb('test_ids').$type<string[]>(),
   suiteId: text('suite_id'),
   gitBranch: text('git_branch'),
-  nextRunAt: integer('next_run_at', { mode: 'timestamp' }),
-  lastRunAt: integer('last_run_at', { mode: 'timestamp' }),
+  nextRunAt: timestamp('next_run_at'),
+  lastRunAt: timestamp('last_run_at'),
   lastBuildId: text('last_build_id'),
   consecutiveFailures: integer('consecutive_failures').default(0),
   maxConsecutiveFailures: integer('max_consecutive_failures').default(5),
-  createdAt: integer('created_at', { mode: 'timestamp' }),
-  updatedAt: integer('updated_at', { mode: 'timestamp' }),
+  createdAt: timestamp('created_at'),
+  updatedAt: timestamp('updated_at'),
 });
 
 export type BuildSchedule = typeof buildSchedules.$inferSelect;
@@ -914,7 +914,7 @@ export type NewBuildSchedule = typeof buildSchedules.$inferInsert;
 // Test versions for version history
 export type TestChangeReason = 'initial' | 'manual_edit' | 'ai_fix' | 'ai_enhance' | 'restored' | 'branch_merge' | 'assertion_sync';
 
-export const testVersions = sqliteTable('test_versions', {
+export const testVersions = pgTable('test_versions', {
   id: text('id').primaryKey(),
   testId: text('test_id').references(() => tests.id, { onDelete: 'cascade' }).notNull(),
   version: integer('version').notNull(),
@@ -928,14 +928,14 @@ export const testVersions = sqliteTable('test_versions', {
   firstBuildCommit: text('first_build_commit'), // denormalized commit SHA from first build
   viewportWidth: integer('viewport_width'),
   viewportHeight: integer('viewport_height'),
-  createdAt: integer('created_at', { mode: 'timestamp' }),
+  createdAt: timestamp('created_at'),
 });
 
 export type TestVersion = typeof testVersions.$inferSelect;
 export type NewTestVersion = typeof testVersions.$inferInsert;
 
 // Test Suites - ordered collections of tests
-export const suites = sqliteTable('suites', {
+export const suites = pgTable('suites', {
   id: text('id').primaryKey(),
   repositoryId: text('repository_id').references(() => repositories.id),
   functionalAreaId: text('functional_area_id').references(() => functionalAreas.id),
@@ -945,16 +945,16 @@ export const suites = sqliteTable('suites', {
   // Setup configuration - setupTestId takes precedence over setupScriptId
   setupTestId: text('setup_test_id'), // Use test as setup
   setupScriptId: text('setup_script_id'), // OR use dedicated script
-  createdAt: integer('created_at', { mode: 'timestamp' }),
-  updatedAt: integer('updated_at', { mode: 'timestamp' }),
+  createdAt: timestamp('created_at'),
+  updatedAt: timestamp('updated_at'),
 });
 
-export const suiteTests = sqliteTable('suite_tests', {
+export const suiteTests = pgTable('suite_tests', {
   id: text('id').primaryKey(),
   suiteId: text('suite_id').references(() => suites.id, { onDelete: 'cascade' }).notNull(),
   testId: text('test_id').references(() => tests.id, { onDelete: 'cascade' }).notNull(),
   orderIndex: integer('order_index').notNull().default(0),
-  createdAt: integer('created_at', { mode: 'timestamp' }),
+  createdAt: timestamp('created_at'),
 });
 
 export type Suite = typeof suites.$inferSelect;
@@ -963,21 +963,21 @@ export type SuiteTest = typeof suiteTests.$inferSelect;
 export type NewSuiteTest = typeof suiteTests.$inferInsert;
 
 // Notification settings for Slack, Discord, GitHub PR comments, GitLab MR comments, and Custom Webhook
-export const notificationSettings = sqliteTable('notification_settings', {
+export const notificationSettings = pgTable('notification_settings', {
   id: text('id').primaryKey(),
   repositoryId: text('repository_id').references(() => repositories.id),
   slackWebhookUrl: text('slack_webhook_url'),
-  slackEnabled: integer('slack_enabled', { mode: 'boolean' }).default(false),
+  slackEnabled: boolean('slack_enabled').default(false),
   discordWebhookUrl: text('discord_webhook_url'),
-  discordEnabled: integer('discord_enabled', { mode: 'boolean' }).default(false),
-  githubPrCommentsEnabled: integer('github_pr_comments_enabled', { mode: 'boolean' }).default(false),
-  gitlabMrCommentsEnabled: integer('gitlab_mr_comments_enabled', { mode: 'boolean' }).default(false),
-  customWebhookEnabled: integer('custom_webhook_enabled', { mode: 'boolean' }).default(false),
+  discordEnabled: boolean('discord_enabled').default(false),
+  githubPrCommentsEnabled: boolean('github_pr_comments_enabled').default(false),
+  gitlabMrCommentsEnabled: boolean('gitlab_mr_comments_enabled').default(false),
+  customWebhookEnabled: boolean('custom_webhook_enabled').default(false),
   customWebhookUrl: text('custom_webhook_url'),
   customWebhookMethod: text('custom_webhook_method').default('POST'),
   customWebhookHeaders: text('custom_webhook_headers'), // JSON: {"Authorization": "Bearer xxx"}
-  createdAt: integer('created_at', { mode: 'timestamp' }),
-  updatedAt: integer('updated_at', { mode: 'timestamp' }),
+  createdAt: timestamp('created_at'),
+  updatedAt: timestamp('updated_at'),
 });
 
 export type NotificationSettings = typeof notificationSettings.$inferSelect;
@@ -993,7 +993,7 @@ export const DEFAULT_NOTIFICATION_SETTINGS = {
 };
 
 // Selector statistics for optimizing fallback strategy
-export const selectorStats = sqliteTable('selector_stats', {
+export const selectorStats = pgTable('selector_stats', {
   id: text('id').primaryKey(),
   testId: text('test_id').references(() => tests.id, { onDelete: 'cascade' }),
   selectorArrayHash: text('selector_array_hash').notNull(),
@@ -1003,8 +1003,8 @@ export const selectorStats = sqliteTable('selector_stats', {
   failureCount: integer('failure_count').default(0),
   totalAttempts: integer('total_attempts').default(0),
   avgResponseTimeMs: integer('avg_response_time_ms'),
-  lastUsedAt: integer('last_used_at', { mode: 'timestamp' }),
-  createdAt: integer('created_at', { mode: 'timestamp' }),
+  lastUsedAt: timestamp('last_used_at'),
+  createdAt: timestamp('created_at'),
 });
 
 export type SelectorStat = typeof selectorStats.$inferSelect;
@@ -1017,22 +1017,22 @@ export type NewSelectorStat = typeof selectorStats.$inferInsert;
 export type UserRole = 'owner' | 'admin' | 'member' | 'viewer';
 
 // Teams - Multi-tenancy support
-export const teams = sqliteTable('teams', {
+export const teams = pgTable('teams', {
   id: text('id').primaryKey(),
   name: text('name').notNull(),
   slug: text('slug').notNull().unique(),
   selectedRepositoryId: text('selected_repository_id'),
-  earlyAdopterMode: integer('early_adopter_mode', { mode: 'boolean' }).default(false),
-  banAiMode: integer('ban_ai_mode', { mode: 'boolean' }).default(false),
-  createdAt: integer('created_at', { mode: 'timestamp' }),
-  updatedAt: integer('updated_at', { mode: 'timestamp' }),
+  earlyAdopterMode: boolean('early_adopter_mode').default(false),
+  banAiMode: boolean('ban_ai_mode').default(false),
+  createdAt: timestamp('created_at'),
+  updatedAt: timestamp('updated_at'),
 });
 
 export type Team = typeof teams.$inferSelect;
 export type NewTeam = typeof teams.$inferInsert;
 
 // Users - Core identity
-export const users = sqliteTable('users', {
+export const users = pgTable('users', {
   id: text('id').primaryKey(),
   email: text('email').notNull().unique(),
   hashedPassword: text('hashed_password'),
@@ -1041,31 +1041,31 @@ export const users = sqliteTable('users', {
   teamId: text('team_id').references(() => teams.id), // Single team membership
   role: text('role').notNull().default('member'), // 'owner' | 'admin' | 'member' | 'viewer'
   selectedRepositoryId: text('selected_repository_id').references(() => repositories.id, { onDelete: 'set null' }),
-  emailVerified: integer('email_verified', { mode: 'boolean' }).default(false),
-  createdAt: integer('created_at', { mode: 'timestamp' }),
-  updatedAt: integer('updated_at', { mode: 'timestamp' }),
+  emailVerified: boolean('email_verified').default(false),
+  createdAt: timestamp('created_at'),
+  updatedAt: timestamp('updated_at'),
 });
 
 export type User = typeof users.$inferSelect;
 export type NewUser = typeof users.$inferInsert;
 
 // Sessions - Database sessions for auth
-export const sessions = sqliteTable('sessions', {
+export const sessions = pgTable('sessions', {
   id: text('id').primaryKey(),
   userId: text('user_id').references(() => users.id, { onDelete: 'cascade' }).notNull(),
   token: text('token').notNull().unique(),
-  expiresAt: integer('expires_at', { mode: 'timestamp' }).notNull(),
+  expiresAt: timestamp('expires_at').notNull(),
   ipAddress: text('ip_address'),
   userAgent: text('user_agent'),
-  createdAt: integer('created_at', { mode: 'timestamp' }),
-  updatedAt: integer('updated_at', { mode: 'timestamp' }),
+  createdAt: timestamp('created_at'),
+  updatedAt: timestamp('updated_at'),
 });
 
 export type Session = typeof sessions.$inferSelect;
 export type NewSession = typeof sessions.$inferInsert;
 
 // OAuth accounts - Link providers to users
-export const oauthAccounts = sqliteTable('oauth_accounts', {
+export const oauthAccounts = pgTable('oauth_accounts', {
   id: text('id').primaryKey(),
   userId: text('user_id').references(() => users.id, { onDelete: 'cascade' }).notNull(),
   provider: text('provider').notNull(), // 'github' | 'google' | 'credential'
@@ -1073,64 +1073,64 @@ export const oauthAccounts = sqliteTable('oauth_accounts', {
   accessToken: text('access_token'),
   refreshToken: text('refresh_token'),
   idToken: text('id_token'),
-  accessTokenExpiresAt: integer('access_token_expires_at', { mode: 'timestamp' }),
-  refreshTokenExpiresAt: integer('refresh_token_expires_at', { mode: 'timestamp' }),
+  accessTokenExpiresAt: timestamp('access_token_expires_at'),
+  refreshTokenExpiresAt: timestamp('refresh_token_expires_at'),
   scope: text('scope'),
-  tokenExpiresAt: integer('token_expires_at', { mode: 'timestamp' }),
+  tokenExpiresAt: timestamp('token_expires_at'),
   password: text('password'), // BetterAuth stores credential passwords here
-  createdAt: integer('created_at', { mode: 'timestamp' }),
-  updatedAt: integer('updated_at', { mode: 'timestamp' }),
+  createdAt: timestamp('created_at'),
+  updatedAt: timestamp('updated_at'),
 });
 
 export type OAuthAccount = typeof oauthAccounts.$inferSelect;
 export type NewOAuthAccount = typeof oauthAccounts.$inferInsert;
 
 // BetterAuth verification table (email verification, password reset, etc.)
-export const verification = sqliteTable('verification', {
+export const verification = pgTable('verification', {
   id: text('id').primaryKey(),
   identifier: text('identifier').notNull(),
   value: text('value').notNull(),
-  expiresAt: integer('expires_at', { mode: 'timestamp' }).notNull(),
-  createdAt: integer('created_at', { mode: 'timestamp' }),
-  updatedAt: integer('updated_at', { mode: 'timestamp' }),
+  expiresAt: timestamp('expires_at').notNull(),
+  createdAt: timestamp('created_at'),
+  updatedAt: timestamp('updated_at'),
 });
 
 // Password reset tokens
-export const passwordResetTokens = sqliteTable('password_reset_tokens', {
+export const passwordResetTokens = pgTable('password_reset_tokens', {
   id: text('id').primaryKey(),
   userId: text('user_id').references(() => users.id, { onDelete: 'cascade' }).notNull(),
   token: text('token').notNull().unique(),
-  expiresAt: integer('expires_at', { mode: 'timestamp' }).notNull(),
-  usedAt: integer('used_at', { mode: 'timestamp' }),
-  createdAt: integer('created_at', { mode: 'timestamp' }),
+  expiresAt: timestamp('expires_at').notNull(),
+  usedAt: timestamp('used_at'),
+  createdAt: timestamp('created_at'),
 });
 
 export type PasswordResetToken = typeof passwordResetTokens.$inferSelect;
 export type NewPasswordResetToken = typeof passwordResetTokens.$inferInsert;
 
 // Email verification tokens
-export const emailVerificationTokens = sqliteTable('email_verification_tokens', {
+export const emailVerificationTokens = pgTable('email_verification_tokens', {
   id: text('id').primaryKey(),
   userId: text('user_id').references(() => users.id, { onDelete: 'cascade' }).notNull(),
   token: text('token').notNull().unique(),
-  expiresAt: integer('expires_at', { mode: 'timestamp' }).notNull(),
-  createdAt: integer('created_at', { mode: 'timestamp' }),
+  expiresAt: timestamp('expires_at').notNull(),
+  createdAt: timestamp('created_at'),
 });
 
 export type EmailVerificationToken = typeof emailVerificationTokens.$inferSelect;
 export type NewEmailVerificationToken = typeof emailVerificationTokens.$inferInsert;
 
 // User invitations - Team-scoped invitations
-export const userInvitations = sqliteTable('user_invitations', {
+export const userInvitations = pgTable('user_invitations', {
   id: text('id').primaryKey(),
   teamId: text('team_id').references(() => teams.id), // Team to join on accept
   email: text('email').notNull(),
   invitedById: text('invited_by_id').references(() => users.id),
   token: text('token').notNull().unique(),
   role: text('role').notNull().default('member'), // Role to assign on accept
-  expiresAt: integer('expires_at', { mode: 'timestamp' }).notNull(),
-  acceptedAt: integer('accepted_at', { mode: 'timestamp' }),
-  createdAt: integer('created_at', { mode: 'timestamp' }),
+  expiresAt: timestamp('expires_at').notNull(),
+  acceptedAt: timestamp('accepted_at'),
+  createdAt: timestamp('created_at'),
 });
 
 export type UserInvitation = typeof userInvitations.$inferSelect;
@@ -1143,20 +1143,20 @@ export type NewUserInvitation = typeof userInvitations.$inferInsert;
 export type RunnerStatus = 'online' | 'offline' | 'busy';
 export type RunnerCapability = 'run' | 'record';
 
-export const runners = sqliteTable('runners', {
+export const runners = pgTable('runners', {
   id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
   teamId: text('team_id').notNull().references(() => teams.id),
   createdById: text('created_by_id').notNull().references(() => users.id),
   name: text('name').notNull(),
   tokenHash: text('token_hash').notNull().unique(),
   status: text('status').notNull().default('offline'), // 'online' | 'offline' | 'busy'
-  lastSeen: integer('last_seen', { mode: 'timestamp' }),
-  capabilities: text('capabilities', { mode: 'json' }).$type<RunnerCapability[]>().default(['run', 'record']),
+  lastSeen: timestamp('last_seen'),
+  capabilities: jsonb('capabilities').$type<RunnerCapability[]>().default(['run', 'record']),
   type: text('type').notNull().default('remote'), // 'remote' | 'embedded'
   maxParallelTests: integer('max_parallel_tests').default(4), // max tests to run in parallel on this runner
-  isSystem: integer('is_system', { mode: 'boolean' }).notNull().default(false), // System EB runners (host-provided, cross-team)
-  authOnly: integer('auth_only', { mode: 'boolean' }).notNull().default(false), // Auth-only runners (for GHA auto mode — not used for execution)
-  createdAt: integer('created_at', { mode: 'timestamp' }).$defaultFn(() => new Date()),
+  isSystem: boolean('is_system').notNull().default(false), // System EB runners (host-provided, cross-team)
+  authOnly: boolean('auth_only').notNull().default(false), // Auth-only runners (for GHA auto mode — not used for execution)
+  createdAt: timestamp('created_at').$defaultFn(() => new Date()),
 });
 
 export type RunnerType = 'remote' | 'embedded';
@@ -1169,19 +1169,19 @@ export type NewRunner = typeof runners.$inferInsert;
 
 export type EmbeddedSessionStatus = 'starting' | 'ready' | 'busy' | 'stopping' | 'stopped';
 
-export const embeddedSessions = sqliteTable('embedded_sessions', {
+export const embeddedSessions = pgTable('embedded_sessions', {
   id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
   teamId: text('team_id').notNull().references(() => teams.id),
   runnerId: text('runner_id').references(() => runners.id),
   status: text('status').notNull().default('starting'), // EmbeddedSessionStatus
   streamUrl: text('stream_url'), // ws://host:9223
   containerUrl: text('container_url'), // http://host:port (for health checks)
-  viewport: text('viewport', { mode: 'json' }).$type<{ width: number; height: number }>(),
+  viewport: jsonb('viewport').$type<{ width: number; height: number }>(),
   currentUrl: text('current_url'),
   userId: text('user_id'), // Clerk user who claimed the session
-  createdAt: integer('created_at', { mode: 'timestamp' }).notNull().$defaultFn(() => new Date()),
-  lastActivityAt: integer('last_activity_at', { mode: 'timestamp' }),
-  expiresAt: integer('expires_at', { mode: 'timestamp' }),
+  createdAt: timestamp('created_at').notNull().$defaultFn(() => new Date()),
+  lastActivityAt: timestamp('last_activity_at'),
+  expiresAt: timestamp('expires_at'),
 });
 
 export type EmbeddedSession = typeof embeddedSessions.$inferSelect;
@@ -1207,20 +1207,20 @@ export interface ExtractedAcceptanceCriterion {
   groupedWith?: string; // ID of another AC to group with for a single test
 }
 
-export const specImports = sqliteTable('spec_imports', {
+export const specImports = pgTable('spec_imports', {
   id: text('id').primaryKey(),
   repositoryId: text('repository_id').references(() => repositories.id),
   name: text('name').notNull(), // Import session name
   sourceType: text('source_type').notNull(), // 'github' | 'upload'
-  sourceFiles: text('source_files', { mode: 'json' }).$type<string[]>(), // file paths or names
+  sourceFiles: jsonb('source_files').$type<string[]>(), // file paths or names
   branch: text('branch'), // Branch used for code analysis
   status: text('status').notNull().default('pending'), // SpecImportStatus
-  extractedStories: text('extracted_stories', { mode: 'json' }).$type<ExtractedUserStory[]>(),
+  extractedStories: jsonb('extracted_stories').$type<ExtractedUserStory[]>(),
   areasCreated: integer('areas_created').default(0),
   testsCreated: integer('tests_created').default(0),
   error: text('error'),
-  createdAt: integer('created_at', { mode: 'timestamp' }),
-  completedAt: integer('completed_at', { mode: 'timestamp' }),
+  createdAt: timestamp('created_at'),
+  completedAt: timestamp('completed_at'),
 });
 
 export type SpecImport = typeof specImports.$inferSelect;
@@ -1233,15 +1233,15 @@ export type NewSpecImport = typeof specImports.$inferInsert;
 export type SetupScriptType = 'playwright' | 'api';
 
 // Setup Scripts - Reusable setup code blocks
-export const setupScripts = sqliteTable('setup_scripts', {
+export const setupScripts = pgTable('setup_scripts', {
   id: text('id').primaryKey(),
   repositoryId: text('repository_id').references(() => repositories.id),
   name: text('name').notNull(),
   type: text('type').notNull().default('playwright'), // 'playwright' | 'api'
   code: text('code').notNull(),
   description: text('description'),
-  createdAt: integer('created_at', { mode: 'timestamp' }),
-  updatedAt: integer('updated_at', { mode: 'timestamp' }),
+  createdAt: timestamp('created_at'),
+  updatedAt: timestamp('updated_at'),
 });
 
 export type SetupScript = typeof setupScripts.$inferSelect;
@@ -1258,15 +1258,15 @@ export interface SetupAuthConfig {
 }
 
 // Setup Configs - API seeding configuration per repository
-export const setupConfigs = sqliteTable('setup_configs', {
+export const setupConfigs = pgTable('setup_configs', {
   id: text('id').primaryKey(),
   repositoryId: text('repository_id').references(() => repositories.id),
   name: text('name').notNull(),
   baseUrl: text('base_url').notNull(),
   authType: text('auth_type').notNull().default('none'), // 'none' | 'bearer' | 'basic' | 'custom'
-  authConfig: text('auth_config', { mode: 'json' }).$type<SetupAuthConfig>(),
-  createdAt: integer('created_at', { mode: 'timestamp' }),
-  updatedAt: integer('updated_at', { mode: 'timestamp' }),
+  authConfig: jsonb('auth_config').$type<SetupAuthConfig>(),
+  createdAt: timestamp('created_at'),
+  updatedAt: timestamp('updated_at'),
 });
 
 export type SetupConfig = typeof setupConfigs.$inferSelect;
@@ -1278,7 +1278,7 @@ export type SetupStatus = 'pending' | 'running' | 'completed' | 'failed' | 'skip
 // Default Setup Steps - Ordered multi-step setup for repositories
 export type SetupStepType = 'test' | 'script' | 'storage_state';
 
-export const defaultSetupSteps = sqliteTable('default_setup_steps', {
+export const defaultSetupSteps = pgTable('default_setup_steps', {
   id: text('id').primaryKey(),
   repositoryId: text('repository_id').references(() => repositories.id, { onDelete: 'cascade' }).notNull(),
   stepType: text('step_type').notNull(), // 'test' | 'script' | 'storage_state'
@@ -1286,14 +1286,14 @@ export const defaultSetupSteps = sqliteTable('default_setup_steps', {
   scriptId: text('script_id').references(() => setupScripts.id, { onDelete: 'cascade' }),
   storageStateId: text('storage_state_id').references(() => storageStates.id, { onDelete: 'cascade' }),
   orderIndex: integer('order_index').notNull().default(0),
-  createdAt: integer('created_at', { mode: 'timestamp' }),
+  createdAt: timestamp('created_at'),
 });
 
 export type DefaultSetupStep = typeof defaultSetupSteps.$inferSelect;
 export type NewDefaultSetupStep = typeof defaultSetupSteps.$inferInsert;
 
 // Default Teardown Steps - Ordered multi-step teardown for repositories
-export const defaultTeardownSteps = sqliteTable('default_teardown_steps', {
+export const defaultTeardownSteps = pgTable('default_teardown_steps', {
   id: text('id').primaryKey(),
   repositoryId: text('repository_id').references(() => repositories.id, { onDelete: 'cascade' }).notNull(),
   stepType: text('step_type').notNull(), // 'test' | 'script' | 'storage_state'
@@ -1301,7 +1301,7 @@ export const defaultTeardownSteps = sqliteTable('default_teardown_steps', {
   scriptId: text('script_id').references(() => setupScripts.id, { onDelete: 'cascade' }),
   storageStateId: text('storage_state_id').references(() => storageStates.id, { onDelete: 'cascade' }),
   orderIndex: integer('order_index').notNull().default(0),
-  createdAt: integer('created_at', { mode: 'timestamp' }),
+  createdAt: timestamp('created_at'),
 });
 
 export type DefaultTeardownStep = typeof defaultTeardownSteps.$inferSelect;
@@ -1312,7 +1312,7 @@ export type NewDefaultTeardownStep = typeof defaultTeardownSteps.$inferInsert;
 // ============================================
 
 // Google Sheets accounts - per-team Google connection with Sheets API scope
-export const googleSheetsAccounts = sqliteTable('google_sheets_accounts', {
+export const googleSheetsAccounts = pgTable('google_sheets_accounts', {
   id: text('id').primaryKey(),
   teamId: text('team_id').references(() => teams.id),
   googleUserId: text('google_user_id').notNull(),
@@ -1320,8 +1320,8 @@ export const googleSheetsAccounts = sqliteTable('google_sheets_accounts', {
   googleName: text('google_name'),
   accessToken: text('access_token').notNull(),
   refreshToken: text('refresh_token'),
-  tokenExpiresAt: integer('token_expires_at', { mode: 'timestamp' }),
-  createdAt: integer('created_at', { mode: 'timestamp' }),
+  tokenExpiresAt: timestamp('token_expires_at'),
+  createdAt: timestamp('created_at'),
 });
 
 export type GoogleSheetsAccount = typeof googleSheetsAccounts.$inferSelect;
@@ -1343,7 +1343,7 @@ export interface SheetColumnInfo {
 }
 
 // Google Sheets data sources - linked spreadsheets for test data
-export const googleSheetsDataSources = sqliteTable('google_sheets_data_sources', {
+export const googleSheetsDataSources = pgTable('google_sheets_data_sources', {
   id: text('id').primaryKey(),
   repositoryId: text('repository_id').references(() => repositories.id),
   teamId: text('team_id').references(() => teams.id),
@@ -1355,11 +1355,11 @@ export const googleSheetsDataSources = sqliteTable('google_sheets_data_sources',
   alias: text('alias').notNull(),                         // Short name used in test references (e.g. "users", "products")
   headerRow: integer('header_row').default(1),            // Which row contains column headers (1-based)
   dataRange: text('data_range'),                          // Optional fixed range like "A1:D100"
-  cachedHeaders: text('cached_headers', { mode: 'json' }).$type<string[]>(),
-  cachedData: text('cached_data', { mode: 'json' }).$type<string[][]>(),     // Cached rows of data
-  lastSyncedAt: integer('last_synced_at', { mode: 'timestamp' }),
-  createdAt: integer('created_at', { mode: 'timestamp' }),
-  updatedAt: integer('updated_at', { mode: 'timestamp' }),
+  cachedHeaders: jsonb('cached_headers').$type<string[]>(),
+  cachedData: jsonb('cached_data').$type<string[][]>(),     // Cached rows of data
+  lastSyncedAt: timestamp('last_synced_at'),
+  createdAt: timestamp('created_at'),
+  updatedAt: timestamp('updated_at'),
 });
 
 export type GoogleSheetsDataSource = typeof googleSheetsDataSources.$inferSelect;
@@ -1369,14 +1369,14 @@ export type NewGoogleSheetsDataSource = typeof googleSheetsDataSources.$inferIns
 // Compose Configs (per-branch build configuration)
 // ============================================
 
-export const composeConfigs = sqliteTable('compose_configs', {
+export const composeConfigs = pgTable('compose_configs', {
   id: text('id').primaryKey(),
   repositoryId: text('repository_id').references(() => repositories.id, { onDelete: 'cascade' }).notNull(),
   branch: text('branch').notNull(),
-  selectedTestIds: text('selected_test_ids', { mode: 'json' }).$type<string[]>(),
-  excludedTestIds: text('excluded_test_ids', { mode: 'json' }).$type<string[]>(),
-  versionOverrides: text('version_overrides', { mode: 'json' }).$type<Record<string, string>>(),
-  updatedAt: integer('updated_at', { mode: 'timestamp' }),
+  selectedTestIds: jsonb('selected_test_ids').$type<string[]>(),
+  excludedTestIds: jsonb('excluded_test_ids').$type<string[]>(),
+  versionOverrides: jsonb('version_overrides').$type<Record<string, string>>(),
+  updatedAt: timestamp('updated_at'),
 });
 
 export type ComposeConfig = typeof composeConfigs.$inferSelect;
@@ -1476,17 +1476,17 @@ export interface AgentSessionMetadata {
   [key: string]: unknown;
 }
 
-export const agentSessions = sqliteTable('agent_sessions', {
+export const agentSessions = pgTable('agent_sessions', {
   id: text('id').primaryKey(),
   repositoryId: text('repository_id').references(() => repositories.id, { onDelete: 'cascade' }).notNull(),
   teamId: text('team_id'),
   status: text('status').$type<AgentSessionStatus>().notNull().default('active'),
   currentStepId: text('current_step_id').$type<AgentStepId>(),
-  steps: text('steps', { mode: 'json' }).$type<AgentStepState[]>().notNull(),
-  metadata: text('metadata', { mode: 'json' }).$type<AgentSessionMetadata>().notNull(),
-  createdAt: integer('created_at', { mode: 'timestamp' }),
-  updatedAt: integer('updated_at', { mode: 'timestamp' }),
-  completedAt: integer('completed_at', { mode: 'timestamp' }),
+  steps: jsonb('steps').$type<AgentStepState[]>().notNull(),
+  metadata: jsonb('metadata').$type<AgentSessionMetadata>().notNull(),
+  createdAt: timestamp('created_at'),
+  updatedAt: timestamp('updated_at'),
+  completedAt: timestamp('completed_at'),
 });
 
 export type AgentSession = typeof agentSessions.$inferSelect;
@@ -1510,25 +1510,25 @@ export interface BugReportContext {
   selectedRepoName?: string | null;
 }
 
-export const bugReports = sqliteTable('bug_reports', {
+export const bugReports = pgTable('bug_reports', {
   id: text('id').primaryKey(),
   teamId: text('team_id').references(() => teams.id, { onDelete: 'cascade' }).notNull(),
   reportedById: text('reported_by_id').references(() => users.id, { onDelete: 'cascade' }).notNull(),
   description: text('description').notNull(),
   severity: text('severity').$type<BugReportSeverity>().notNull().default('medium'),
-  context: text('context', { mode: 'json' }).$type<BugReportContext>(),
+  context: jsonb('context').$type<BugReportContext>(),
   screenshotPath: text('screenshot_path'),
   contentHash: text('content_hash'),
   githubIssueUrl: text('github_issue_url'),
   githubIssueNumber: integer('github_issue_number'),
-  createdAt: integer('created_at', { mode: 'timestamp' }).$defaultFn(() => new Date()),
+  createdAt: timestamp('created_at').$defaultFn(() => new Date()),
 });
 
 export type BugReport = typeof bugReports.$inferSelect;
 export type NewBugReport = typeof bugReports.$inferInsert;
 
 // Review todos — branch-specific actionable items created when reviewer flags a diff
-export const reviewTodos = sqliteTable('review_todos', {
+export const reviewTodos = pgTable('review_todos', {
   id: text('id').primaryKey(),
   repositoryId: text('repository_id').references(() => repositories.id),
   diffId: text('diff_id').references(() => visualDiffs.id),
@@ -1539,8 +1539,8 @@ export const reviewTodos = sqliteTable('review_todos', {
   status: text('status').notNull().default('open'), // 'open' | 'resolved'
   createdBy: text('created_by'),
   resolvedBy: text('resolved_by'),
-  resolvedAt: integer('resolved_at', { mode: 'timestamp' }),
-  createdAt: integer('created_at', { mode: 'timestamp' }).$defaultFn(() => new Date()),
+  resolvedAt: timestamp('resolved_at'),
+  createdAt: timestamp('created_at').$defaultFn(() => new Date()),
 });
 
 export type ReviewTodo = typeof reviewTodos.$inferSelect;
@@ -1552,17 +1552,17 @@ export type NewReviewTodo = typeof reviewTodos.$inferInsert;
 
 export type RunnerCommandStatus = 'pending' | 'claimed' | 'completed' | 'failed' | 'timeout' | 'cancelled';
 
-export const runnerCommands = sqliteTable('runner_commands', {
+export const runnerCommands = pgTable('runner_commands', {
   id: text('id').primaryKey(), // Same as message UUID (becomes correlationId)
   runnerId: text('runner_id').notNull().references(() => runners.id),
   type: text('type').notNull(), // e.g. 'command:run_test', 'command:shutdown'
   status: text('status').notNull().default('pending'), // RunnerCommandStatus
-  payload: text('payload', { mode: 'json' }).$type<Record<string, unknown>>(),
+  payload: jsonb('payload').$type<Record<string, unknown>>(),
   testId: text('test_id'), // Denormalized for dedup lookups
   testRunId: text('test_run_id'), // Denormalized for grouping
-  createdAt: integer('created_at', { mode: 'timestamp' }).$defaultFn(() => new Date()),
-  claimedAt: integer('claimed_at', { mode: 'timestamp' }),
-  completedAt: integer('completed_at', { mode: 'timestamp' }),
+  createdAt: timestamp('created_at').$defaultFn(() => new Date()),
+  claimedAt: timestamp('claimed_at'),
+  completedAt: timestamp('completed_at'),
 }, (table) => ([
   index('idx_runner_commands_runner_status').on(table.runnerId, table.status),
   index('idx_runner_commands_test_run').on(table.testRunId),
@@ -1571,14 +1571,14 @@ export const runnerCommands = sqliteTable('runner_commands', {
 export type RunnerCommand = typeof runnerCommands.$inferSelect;
 export type NewRunnerCommand = typeof runnerCommands.$inferInsert;
 
-export const runnerCommandResults = sqliteTable('runner_command_results', {
+export const runnerCommandResults = pgTable('runner_command_results', {
   id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
   commandId: text('command_id').notNull().references(() => runnerCommands.id),
   runnerId: text('runner_id').notNull().references(() => runners.id),
   type: text('type').notNull(), // 'response:test_result', 'response:screenshot', 'response:error'
-  payload: text('payload', { mode: 'json' }).$type<Record<string, unknown>>(),
-  acknowledged: integer('acknowledged', { mode: 'boolean' }).default(false),
-  createdAt: integer('created_at', { mode: 'timestamp' }).$defaultFn(() => new Date()),
+  payload: jsonb('payload').$type<Record<string, unknown>>(),
+  acknowledged: boolean('acknowledged').default(false),
+  createdAt: timestamp('created_at').$defaultFn(() => new Date()),
 }, (table) => ([
   index('idx_runner_cmd_results_cmd_ack').on(table.commandId, table.acknowledged),
 ]));
@@ -1593,7 +1593,7 @@ export type NewRunnerCommandResult = typeof runnerCommandResults.$inferInsert;
 export type GithubActionMode = 'persistent' | 'ephemeral' | 'auto';
 export type GithubActionTriggerEvent = 'push' | 'pull_request' | 'workflow_dispatch' | 'schedule';
 
-export const githubActionConfigs = sqliteTable('github_action_configs', {
+export const githubActionConfigs = pgTable('github_action_configs', {
   id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
   teamId: text('team_id').notNull().references(() => teams.id),
   runnerId: text('runner_id').references(() => runners.id, { onDelete: 'set null' }),
@@ -1601,19 +1601,19 @@ export const githubActionConfigs = sqliteTable('github_action_configs', {
   repositoryName: text('repository_name').notNull(),
   githubRepoId: integer('github_repo_id'),
   mode: text('mode').notNull().default('persistent'),
-  triggerEvents: text('trigger_events', { mode: 'json' }).$type<GithubActionTriggerEvent[]>()
+  triggerEvents: jsonb('trigger_events').$type<GithubActionTriggerEvent[]>()
     .default(['push', 'pull_request', 'workflow_dispatch']),
-  branchFilter: text('branch_filter', { mode: 'json' }).$type<string[]>().default(['main']),
+  branchFilter: jsonb('branch_filter').$type<string[]>().default(['main']),
   cronSchedule: text('cron_schedule'),
   targetUrl: text('target_url'),
   timeout: integer('timeout').default(300000),
-  failOnChanges: integer('fail_on_changes', { mode: 'boolean' }).default(true),
+  failOnChanges: boolean('fail_on_changes').default(true),
   maxParallelTests: integer('max_parallel_tests'),
   pollInterval: integer('poll_interval'),
-  workflowDeployed: integer('workflow_deployed', { mode: 'boolean' }).default(false),
-  lastDeployedAt: integer('last_deployed_at', { mode: 'timestamp' }),
-  createdAt: integer('created_at', { mode: 'timestamp' }).$defaultFn(() => new Date()),
-  updatedAt: integer('updated_at', { mode: 'timestamp' }).$defaultFn(() => new Date()),
+  workflowDeployed: boolean('workflow_deployed').default(false),
+  lastDeployedAt: timestamp('last_deployed_at'),
+  createdAt: timestamp('created_at').$defaultFn(() => new Date()),
+  updatedAt: timestamp('updated_at').$defaultFn(() => new Date()),
 });
 
 export type GithubActionConfig = typeof githubActionConfigs.$inferSelect;
@@ -1623,17 +1623,17 @@ export type NewGithubActionConfig = typeof githubActionConfigs.$inferInsert;
 // GitHub Issues (cached for analytics)
 // ============================================
 
-export const githubIssues = sqliteTable('github_issues', {
+export const githubIssues = pgTable('github_issues', {
   id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
   repositoryId: text('repository_id').references(() => repositories.id, { onDelete: 'cascade' }).notNull(),
   githubIssueNumber: integer('github_issue_number').notNull(),
   title: text('title').notNull(),
   state: text('state').notNull(), // 'open' | 'closed'
-  labels: text('labels', { mode: 'json' }).$type<string[]>().default([]),
+  labels: jsonb('labels').$type<string[]>().default([]),
   author: text('author'),
-  createdAt: integer('created_at', { mode: 'timestamp' }),
-  closedAt: integer('closed_at', { mode: 'timestamp' }),
-  syncedAt: integer('synced_at', { mode: 'timestamp' }).$defaultFn(() => new Date()),
+  createdAt: timestamp('created_at'),
+  closedAt: timestamp('closed_at'),
+  syncedAt: timestamp('synced_at').$defaultFn(() => new Date()),
 }, (table) => ([
   index('idx_github_issues_repo').on(table.repositoryId),
   index('idx_github_issues_repo_number').on(table.repositoryId, table.githubIssueNumber),
@@ -1646,7 +1646,7 @@ export type NewGithubIssue = typeof githubIssues.$inferInsert;
 // Test Fixtures (files used during test execution)
 // ============================================
 
-export const testFixtures = sqliteTable('test_fixtures', {
+export const testFixtures = pgTable('test_fixtures', {
   id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
   repositoryId: text('repository_id').references(() => repositories.id, { onDelete: 'cascade' }).notNull(),
   testId: text('test_id').references(() => tests.id, { onDelete: 'cascade' }).notNull(),
@@ -1654,7 +1654,7 @@ export const testFixtures = sqliteTable('test_fixtures', {
   storagePath: text('storage_path').notNull(), // relative path under storage/fixtures/
   mimeType: text('mime_type'),
   sizeBytes: integer('size_bytes'),
-  createdAt: integer('created_at', { mode: 'timestamp' }).$defaultFn(() => new Date()),
+  createdAt: timestamp('created_at').$defaultFn(() => new Date()),
 }, (table) => ([
   index('idx_test_fixtures_test').on(table.testId),
   index('idx_test_fixtures_repo').on(table.repositoryId),
@@ -1667,15 +1667,15 @@ export type NewTestFixture = typeof testFixtures.$inferInsert;
 // Storage States (saved browser auth for recordings)
 // ============================================
 
-export const storageStates = sqliteTable('storage_states', {
+export const storageStates = pgTable('storage_states', {
   id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
   repositoryId: text('repository_id').references(() => repositories.id, { onDelete: 'cascade' }),
   name: text('name').notNull(),
   storageStateJson: text('storage_state_json').notNull(),
   cookieCount: integer('cookie_count').default(0),
   originCount: integer('origin_count').default(0),
-  createdAt: integer('created_at', { mode: 'timestamp' }).$defaultFn(() => new Date()),
-  updatedAt: integer('updated_at', { mode: 'timestamp' }).$defaultFn(() => new Date()),
+  createdAt: timestamp('created_at').$defaultFn(() => new Date()),
+  updatedAt: timestamp('updated_at').$defaultFn(() => new Date()),
 }, (table) => ([
   index('idx_storage_states_repo').on(table.repositoryId),
 ]));

@@ -57,11 +57,13 @@ export async function createTeam(data: { name: string; slug?: string }): Promise
 }
 
 export async function getTeam(id: string) {
-  return db.select().from(teams).where(eq(teams.id, id)).get();
+  const [row] = await db.select().from(teams).where(eq(teams.id, id));
+  return row;
 }
 
 export async function getTeamBySlug(slug: string) {
-  return db.select().from(teams).where(eq(teams.slug, slug)).get();
+  const [row] = await db.select().from(teams).where(eq(teams.slug, slug));
+  return row;
 }
 
 export async function updateTeam(id: string, data: Partial<NewTeam>) {
@@ -73,7 +75,7 @@ export async function deleteTeam(id: string) {
 }
 
 export async function getTeamMembers(teamId: string) {
-  return db.select().from(users).where(eq(users.teamId, teamId)).orderBy(desc(users.createdAt)).all();
+  return db.select().from(users).where(eq(users.teamId, teamId)).orderBy(desc(users.createdAt));
 }
 
 export async function getUsersByTeam(teamId: string) {
@@ -86,12 +88,13 @@ export async function removeUserFromTeam(userId: string) {
 
 // Team-scoped repositories
 export async function getRepositoriesByTeam(teamId: string) {
-  return db.select().from(repositories).where(eq(repositories.teamId, teamId)).orderBy(desc(repositories.createdAt)).all();
+  return db.select().from(repositories).where(eq(repositories.teamId, teamId)).orderBy(desc(repositories.createdAt));
 }
 
 // Team-scoped GitHub account
 export async function getGithubAccountByTeam(teamId: string) {
-  return db.select().from(githubAccounts).where(eq(githubAccounts.teamId, teamId)).get();
+  const [row] = await db.select().from(githubAccounts).where(eq(githubAccounts.teamId, teamId));
+  return row;
 }
 
 // Team-scoped invitations
@@ -101,8 +104,7 @@ export async function getPendingInvitationsByTeam(teamId: string) {
     .select()
     .from(userInvitations)
     .where(and(eq(userInvitations.teamId, teamId), isNull(userInvitations.acceptedAt), gte(userInvitations.expiresAt, now)))
-    .orderBy(desc(userInvitations.createdAt))
-    .all();
+    .orderBy(desc(userInvitations.createdAt));
 }
 
 // ============================================
@@ -110,19 +112,21 @@ export async function getPendingInvitationsByTeam(teamId: string) {
 // ============================================
 
 export async function getUsers() {
-  return db.select().from(users).orderBy(desc(users.createdAt)).all();
+  return db.select().from(users).orderBy(desc(users.createdAt));
 }
 
 export async function getUserById(id: string) {
-  return db.select().from(users).where(eq(users.id, id)).get();
+  const [row] = await db.select().from(users).where(eq(users.id, id));
+  return row;
 }
 
 export async function getUserByEmail(email: string) {
-  return db.select().from(users).where(eq(users.email, email.toLowerCase())).get();
+  const [row] = await db.select().from(users).where(eq(users.email, email.toLowerCase()));
+  return row;
 }
 
 export async function getUserCount() {
-  const result = await db.select({ id: users.id }).from(users).all();
+  const result = await db.select({ id: users.id }).from(users);
   return result.length;
 }
 
@@ -161,19 +165,19 @@ export async function updateUserRole(id: string, role: UserRole) {
 // ============================================
 
 export async function getSessionByToken(token: string) {
-  return db.select().from(sessions).where(eq(sessions.token, token)).get();
+  const [row] = await db.select().from(sessions).where(eq(sessions.token, token));
+  return row;
 }
 
 export async function getSessionWithUser(token: string) {
-  const result = await db
+  const [result] = await db
     .select({
       session: sessions,
       user: users,
     })
     .from(sessions)
     .innerJoin(users, eq(sessions.userId, users.id))
-    .where(eq(sessions.token, token))
-    .get();
+    .where(eq(sessions.token, token));
   return result;
 }
 
@@ -195,7 +199,7 @@ export async function deleteExpiredSessions() {
 // ============================================
 
 export async function getOAuthAccount(provider: string, providerAccountId: string) {
-  return db
+  const [row] = await db
     .select()
     .from(oauthAccounts)
     .where(
@@ -203,12 +207,12 @@ export async function getOAuthAccount(provider: string, providerAccountId: strin
         eq(oauthAccounts.provider, provider),
         eq(oauthAccounts.providerAccountId, providerAccountId)
       )
-    )
-    .get();
+    );
+  return row;
 }
 
 export async function getOAuthAccountsByUser(userId: string) {
-  return db.select().from(oauthAccounts).where(eq(oauthAccounts.userId, userId)).all();
+  return db.select().from(oauthAccounts).where(eq(oauthAccounts.userId, userId));
 }
 
 export async function createOAuthAccount(data: Omit<NewOAuthAccount, 'id' | 'createdAt'>) {
@@ -231,7 +235,8 @@ export async function deleteOAuthAccount(id: string) {
 // ============================================
 
 export async function getPasswordResetToken(token: string) {
-  return db.select().from(passwordResetTokens).where(eq(passwordResetTokens.token, token)).get();
+  const [row] = await db.select().from(passwordResetTokens).where(eq(passwordResetTokens.token, token));
+  return row;
 }
 
 export async function createPasswordResetToken(userId: string): Promise<string> {
@@ -270,7 +275,8 @@ export async function deleteExpiredPasswordResetTokens() {
 // ============================================
 
 export async function getEmailVerificationToken(token: string) {
-  return db.select().from(emailVerificationTokens).where(eq(emailVerificationTokens.token, token)).get();
+  const [row] = await db.select().from(emailVerificationTokens).where(eq(emailVerificationTokens.token, token));
+  return row;
 }
 
 export async function createEmailVerificationToken(userId: string): Promise<string> {
@@ -301,7 +307,7 @@ export async function deleteEmailVerificationToken(token: string) {
 // ============================================
 
 export async function getInvitations() {
-  return db.select().from(userInvitations).orderBy(desc(userInvitations.createdAt)).all();
+  return db.select().from(userInvitations).orderBy(desc(userInvitations.createdAt));
 }
 
 export async function getPendingInvitations() {
@@ -310,20 +316,22 @@ export async function getPendingInvitations() {
     .select()
     .from(userInvitations)
     .where(and(isNull(userInvitations.acceptedAt), gte(userInvitations.expiresAt, now)))
-    .orderBy(desc(userInvitations.createdAt))
-    .all();
+    .orderBy(desc(userInvitations.createdAt));
 }
 
 export async function getInvitationById(id: string) {
-  return db.select().from(userInvitations).where(eq(userInvitations.id, id)).get();
+  const [row] = await db.select().from(userInvitations).where(eq(userInvitations.id, id));
+  return row;
 }
 
 export async function getInvitationByToken(token: string) {
-  return db.select().from(userInvitations).where(eq(userInvitations.token, token)).get();
+  const [row] = await db.select().from(userInvitations).where(eq(userInvitations.token, token));
+  return row;
 }
 
 export async function getInvitationByEmail(email: string) {
-  return db.select().from(userInvitations).where(eq(userInvitations.email, email.toLowerCase())).get();
+  const [row] = await db.select().from(userInvitations).where(eq(userInvitations.email, email.toLowerCase()));
+  return row;
 }
 
 export async function createInvitation(data: { email: string; teamId: string; invitedById?: string; role?: UserRole }): Promise<string> {

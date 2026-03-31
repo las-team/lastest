@@ -50,11 +50,10 @@ function mergeSelectorPriority(saved: SelectorConfig[] | null | undefined): Sele
 // Playwright Settings
 export async function getPlaywrightSettings(repositoryId?: string | null) {
   if (repositoryId) {
-    const settings = await db
+    const [settings] = await db
       .select()
       .from(playwrightSettings)
-      .where(eq(playwrightSettings.repositoryId, repositoryId))
-      .get();
+      .where(eq(playwrightSettings.repositoryId, repositoryId));
     if (settings) {
       return {
         ...settings,
@@ -68,11 +67,10 @@ export async function getPlaywrightSettings(repositoryId?: string | null) {
   }
 
   // Return global settings (no repositoryId) or defaults
-  const globalSettings = await db
+  const [globalSettings] = await db
     .select()
     .from(playwrightSettings)
-    .where(isNull(playwrightSettings.repositoryId))
-    .get();
+    .where(isNull(playwrightSettings.repositoryId));
 
   if (globalSettings) {
     return {
@@ -144,11 +142,10 @@ export async function upsertPlaywrightSettings(repositoryId: string | null, data
     ? eq(playwrightSettings.repositoryId, repositoryId)
     : isNull(playwrightSettings.repositoryId);
 
-  const existing = await db
+  const [existing] = await db
     .select()
     .from(playwrightSettings)
-    .where(whereClause)
-    .get();
+    .where(whereClause);
 
   if (existing) {
     await updatePlaywrightSettings(existing.id, data);
@@ -165,20 +162,18 @@ export async function deletePlaywrightSettings(id: string) {
 // Environment Configs
 export async function getEnvironmentConfig(repositoryId?: string | null) {
   if (repositoryId) {
-    const config = await db
+    const [config] = await db
       .select()
       .from(environmentConfigs)
-      .where(eq(environmentConfigs.repositoryId, repositoryId))
-      .get();
+      .where(eq(environmentConfigs.repositoryId, repositoryId));
     if (config) return { ...config, baseUrl: config.baseUrl.replace(/\/+$/, '') };
   }
 
   // Return global config (no repositoryId) or defaults
-  const globalConfig = await db
+  const [globalConfig] = await db
     .select()
     .from(environmentConfigs)
-    .where(eq(environmentConfigs.repositoryId, ''))
-    .get();
+    .where(eq(environmentConfigs.repositoryId, ''));
 
   if (globalConfig) return { ...globalConfig, baseUrl: globalConfig.baseUrl.replace(/\/+$/, '') };
 
@@ -218,11 +213,10 @@ export async function upsertEnvironmentConfig(repositoryId: string | null, data:
     ? eq(environmentConfigs.repositoryId, repositoryId)
     : isNull(environmentConfigs.repositoryId);
 
-  const existing = await db
+  const [existing] = await db
     .select()
     .from(environmentConfigs)
-    .where(whereClause)
-    .get();
+    .where(whereClause);
 
   if (existing) {
     await updateEnvironmentConfig(existing.id, data);
@@ -239,20 +233,18 @@ export async function deleteEnvironmentConfig(id: string) {
 // Diff Sensitivity Settings
 export async function getDiffSensitivitySettings(repositoryId?: string | null) {
   if (repositoryId) {
-    const settings = await db
+    const [settings] = await db
       .select()
       .from(diffSensitivitySettings)
-      .where(eq(diffSensitivitySettings.repositoryId, repositoryId))
-      .get();
+      .where(eq(diffSensitivitySettings.repositoryId, repositoryId));
     if (settings) return settings;
   }
 
   // Return global settings (no repositoryId) or defaults
-  const globalSettings = await db
+  const [globalSettings] = await db
     .select()
     .from(diffSensitivitySettings)
-    .where(eq(diffSensitivitySettings.repositoryId, ''))
-    .get();
+    .where(eq(diffSensitivitySettings.repositoryId, ''));
 
   if (globalSettings) return globalSettings;
 
@@ -296,11 +288,10 @@ export async function upsertDiffSensitivitySettings(repositoryId: string | null,
     ? eq(diffSensitivitySettings.repositoryId, repositoryId)
     : isNull(diffSensitivitySettings.repositoryId);
 
-  const existing = await db
+  const [existing] = await db
     .select()
     .from(diffSensitivitySettings)
-    .where(whereClause)
-    .get();
+    .where(whereClause);
 
   if (existing) {
     await updateDiffSensitivitySettings(existing.id, data);
@@ -317,20 +308,18 @@ export async function deleteDiffSensitivitySettings(id: string) {
 // AI Settings
 export async function getAISettings(repositoryId?: string | null) {
   if (repositoryId) {
-    const settings = await db
+    const [settings] = await db
       .select()
       .from(aiSettings)
-      .where(eq(aiSettings.repositoryId, repositoryId))
-      .get();
+      .where(eq(aiSettings.repositoryId, repositoryId));
     if (settings) return settings;
   }
 
   // Return global settings (no repositoryId) or defaults
-  const globalSettings = await db
+  const [globalSettings] = await db
     .select()
     .from(aiSettings)
-    .where(eq(aiSettings.repositoryId, ''))
-    .get();
+    .where(eq(aiSettings.repositoryId, ''));
 
   if (globalSettings) return globalSettings;
 
@@ -386,11 +375,10 @@ export async function upsertAISettings(repositoryId: string | null, data: Partia
     ? eq(aiSettings.repositoryId, repositoryId)
     : isNull(aiSettings.repositoryId);
 
-  const existing = await db
+  const [existing] = await db
     .select()
     .from(aiSettings)
-    .where(whereClause)
-    .get();
+    .where(whereClause);
 
   if (existing) {
     await updateAISettings(existing.id, data);
@@ -424,7 +412,8 @@ export async function updateAIPromptLog(
 }
 
 export async function getAIPromptLog(id: string) {
-  return db.select().from(aiPromptLogs).where(eq(aiPromptLogs.id, id)).get();
+  const [row] = await db.select().from(aiPromptLogs).where(eq(aiPromptLogs.id, id));
+  return row;
 }
 
 export async function getAIPromptLogs(repositoryId?: string | null, limit = 50) {
@@ -435,14 +424,14 @@ export async function getAIPromptLogs(repositoryId?: string | null, limit = 50) 
       .where(eq(aiPromptLogs.repositoryId, repositoryId))
       .orderBy(desc(aiPromptLogs.createdAt))
       .limit(limit)
-      .all();
+      ;
   }
   return db
     .select()
     .from(aiPromptLogs)
     .orderBy(desc(aiPromptLogs.createdAt))
     .limit(limit)
-    .all();
+    ;
 }
 
 export async function deleteAllAIPromptLogs(repositoryId?: string | null) {
@@ -456,20 +445,18 @@ export async function deleteAllAIPromptLogs(repositoryId?: string | null) {
 // Notification Settings
 export async function getNotificationSettings(repositoryId?: string | null) {
   if (repositoryId) {
-    const settings = await db
+    const [settings] = await db
       .select()
       .from(notificationSettings)
-      .where(eq(notificationSettings.repositoryId, repositoryId))
-      .get();
+      .where(eq(notificationSettings.repositoryId, repositoryId));
     if (settings) return settings;
   }
 
   // Return global settings (no repositoryId) or defaults
-  const globalSettings = await db
+  const [globalSettings] = await db
     .select()
     .from(notificationSettings)
-    .where(isNull(notificationSettings.repositoryId))
-    .get();
+    .where(isNull(notificationSettings.repositoryId));
 
   if (globalSettings) return globalSettings;
 
@@ -513,11 +500,10 @@ export async function upsertNotificationSettings(repositoryId: string | null, da
     ? eq(notificationSettings.repositoryId, repositoryId)
     : isNull(notificationSettings.repositoryId);
 
-  const existing = await db
+  const [existing] = await db
     .select()
     .from(notificationSettings)
-    .where(whereClause)
-    .get();
+    .where(whereClause);
 
   if (existing) {
     await updateNotificationSettings(existing.id, data);

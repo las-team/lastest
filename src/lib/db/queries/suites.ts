@@ -15,13 +15,14 @@ import { v4 as uuid } from 'uuid';
 // Suites
 export async function getSuites(repositoryId?: string | null) {
   if (repositoryId) {
-    return db.select().from(suites).where(eq(suites.repositoryId, repositoryId)).orderBy(desc(suites.createdAt)).all();
+    return db.select().from(suites).where(eq(suites.repositoryId, repositoryId)).orderBy(desc(suites.createdAt));
   }
-  return db.select().from(suites).orderBy(desc(suites.createdAt)).all();
+  return db.select().from(suites).orderBy(desc(suites.createdAt));
 }
 
 export async function getSuite(id: string) {
-  return db.select().from(suites).where(eq(suites.id, id)).get();
+  const [row] = await db.select().from(suites).where(eq(suites.id, id));
+  return row;
 }
 
 export async function createSuite(data: Omit<NewSuite, 'id' | 'createdAt' | 'updatedAt'>) {
@@ -58,20 +59,19 @@ export async function getSuiteTests(suiteId: string) {
     .innerJoin(tests, eq(suiteTests.testId, tests.id))
     .where(eq(suiteTests.suiteId, suiteId))
     .orderBy(suiteTests.orderIndex)
-    .all();
+    ;
 }
 
 export async function addTestToSuite(suiteId: string, testId: string, orderIndex?: number) {
   // Get current max order if not provided
   let order = orderIndex;
   if (order === undefined) {
-    const existing = await db
+    const [existing] = await db
       .select({ maxOrder: suiteTests.orderIndex })
       .from(suiteTests)
       .where(eq(suiteTests.suiteId, suiteId))
       .orderBy(desc(suiteTests.orderIndex))
-      .limit(1)
-      .get();
+      .limit(1);
     order = (existing?.maxOrder ?? -1) + 1;
   }
 
@@ -88,13 +88,12 @@ export async function addTestToSuite(suiteId: string, testId: string, orderIndex
 
 export async function addTestsToSuite(suiteId: string, testIds: string[]) {
   // Get current max order
-  const existing = await db
+  const [existing] = await db
     .select({ maxOrder: suiteTests.orderIndex })
     .from(suiteTests)
     .where(eq(suiteTests.suiteId, suiteId))
     .orderBy(desc(suiteTests.orderIndex))
-    .limit(1)
-    .get();
+    .limit(1);
   let order = (existing?.maxOrder ?? -1) + 1;
 
   const toInsert = testIds.map((testId) => ({
@@ -157,7 +156,7 @@ export async function getFunctionalAreasTree(repositoryId: string): Promise<Func
     .from(functionalAreas)
     .where(and(eq(functionalAreas.repositoryId, repositoryId), isNull(functionalAreas.deletedAt)))
     .orderBy(functionalAreas.orderIndex)
-    .all();
+    ;
 
   const allTests = await getTestsByRepo(repositoryId);
   const testsByArea = new Map<string, typeof allTests>();
@@ -239,11 +238,10 @@ export async function reorderFunctionalAreas(repositoryId: string, orderedIds: s
 }
 
 export async function getOrCreateRoutesFolder(repositoryId: string) {
-  const existing = await db
+  const [existing] = await db
     .select()
     .from(functionalAreas)
-    .where(and(eq(functionalAreas.repositoryId, repositoryId), eq(functionalAreas.name, 'Routes'), eq(functionalAreas.isRouteFolder, true)))
-    .get();
+    .where(and(eq(functionalAreas.repositoryId, repositoryId), eq(functionalAreas.name, 'Routes'), eq(functionalAreas.isRouteFolder, true)));
 
   if (existing) return existing;
 
@@ -269,7 +267,7 @@ export async function moveSuiteToArea(suiteId: string, areaId: string | null) {
 }
 
 export async function getSuitesByArea(areaId: string) {
-  return db.select().from(suites).where(eq(suites.functionalAreaId, areaId)).orderBy(suites.orderIndex).all();
+  return db.select().from(suites).where(eq(suites.functionalAreaId, areaId)).orderBy(suites.orderIndex);
 }
 
 export async function getUnsortedSuites(repositoryId: string) {
@@ -278,5 +276,5 @@ export async function getUnsortedSuites(repositoryId: string) {
     .from(suites)
     .where(and(eq(suites.repositoryId, repositoryId), isNull(suites.functionalAreaId)))
     .orderBy(suites.orderIndex)
-    .all();
+    ;
 }

@@ -17,8 +17,7 @@ export async function getSelectorStats(testId: string, selectorArrayHash: string
   return db
     .select()
     .from(selectorStats)
-    .where(and(eq(selectorStats.testId, testId), eq(selectorStats.selectorArrayHash, selectorArrayHash)))
-    .all();
+    .where(and(eq(selectorStats.testId, testId), eq(selectorStats.selectorArrayHash, selectorArrayHash)));
 }
 
 export async function recordSelectorSuccess(
@@ -29,7 +28,7 @@ export async function recordSelectorSuccess(
   responseTimeMs: number
 ) {
   const now = new Date();
-  const existing = await db
+  const [existing] = await db
     .select()
     .from(selectorStats)
     .where(
@@ -39,8 +38,7 @@ export async function recordSelectorSuccess(
         eq(selectorStats.selectorType, selectorType),
         eq(selectorStats.selectorValue, selectorValue)
       )
-    )
-    .get();
+    );
 
   if (existing) {
     const newSuccessCount = (existing.successCount ?? 0) + 1;
@@ -81,7 +79,7 @@ export async function recordSelectorFailure(
   selectorValue: string
 ) {
   const now = new Date();
-  const existing = await db
+  const [existing] = await db
     .select()
     .from(selectorStats)
     .where(
@@ -91,8 +89,7 @@ export async function recordSelectorFailure(
         eq(selectorStats.selectorType, selectorType),
         eq(selectorStats.selectorValue, selectorValue)
       )
-    )
-    .get();
+    );
 
   if (existing) {
     await db
@@ -135,8 +132,7 @@ export async function getAggregatedSelectorStats(repositoryId: string): Promise<
   const repoTests = await db
     .select({ id: tests.id })
     .from(tests)
-    .where(eq(tests.repositoryId, repositoryId))
-    .all();
+    .where(eq(tests.repositoryId, repositoryId));
 
   if (repoTests.length === 0) {
     return [];
@@ -148,8 +144,7 @@ export async function getAggregatedSelectorStats(repositoryId: string): Promise<
   const stats = await db
     .select()
     .from(selectorStats)
-    .where(inArray(selectorStats.testId, testIds))
-    .all();
+    .where(inArray(selectorStats.testId, testIds));
 
   // Aggregate by selectorType
   const aggregated = new Map<
@@ -227,17 +222,16 @@ export async function countRecentBugReports(userId: string, since: Date) {
   const rows = await db
     .select({ id: bugReports.id })
     .from(bugReports)
-    .where(and(eq(bugReports.reportedById, userId), gte(bugReports.createdAt, since)))
-    .all();
+    .where(and(eq(bugReports.reportedById, userId), gte(bugReports.createdAt, since)));
   return rows.length;
 }
 
 export async function getBugReportByHash(teamId: string, contentHash: string) {
-  return db
+  const [row] = await db
     .select()
     .from(bugReports)
-    .where(and(eq(bugReports.teamId, teamId), eq(bugReports.contentHash, contentHash)))
-    .get();
+    .where(and(eq(bugReports.teamId, teamId), eq(bugReports.contentHash, contentHash)));
+  return row;
 }
 
 export async function updateBugReport(id: string, data: { githubIssueUrl?: string; githubIssueNumber?: number }) {
@@ -253,7 +247,8 @@ export async function createReviewTodo(data: Omit<NewReviewTodo, 'id'>) {
 }
 
 export async function getReviewTodo(id: string) {
-  return db.select().from(reviewTodos).where(eq(reviewTodos.id, id)).get();
+  const [row] = await db.select().from(reviewTodos).where(eq(reviewTodos.id, id));
+  return row;
 }
 
 export async function getReviewTodosByBuild(buildId: string) {
@@ -267,8 +262,7 @@ export async function getReviewTodosByBuild(buildId: string) {
     .leftJoin(tests, eq(reviewTodos.testId, tests.id))
     .leftJoin(functionalAreas, eq(tests.functionalAreaId, functionalAreas.id))
     .where(eq(reviewTodos.buildId, buildId))
-    .orderBy(desc(reviewTodos.createdAt))
-    .all();
+    .orderBy(desc(reviewTodos.createdAt));
 }
 
 export async function getReviewTodosByBranch(repositoryId: string, branch: string) {
@@ -282,16 +276,14 @@ export async function getReviewTodosByBranch(repositoryId: string, branch: strin
     .leftJoin(tests, eq(reviewTodos.testId, tests.id))
     .leftJoin(functionalAreas, eq(tests.functionalAreaId, functionalAreas.id))
     .where(and(eq(reviewTodos.repositoryId, repositoryId), eq(reviewTodos.branch, branch)))
-    .orderBy(desc(reviewTodos.createdAt))
-    .all();
+    .orderBy(desc(reviewTodos.createdAt));
 }
 
 export async function getOpenTodoBranches(repositoryId: string) {
-  const rows = db
+  const rows = await db
     .selectDistinct({ branch: reviewTodos.branch })
     .from(reviewTodos)
-    .where(and(eq(reviewTodos.repositoryId, repositoryId), eq(reviewTodos.status, 'open')))
-    .all();
+    .where(and(eq(reviewTodos.repositoryId, repositoryId), eq(reviewTodos.status, 'open')));
   return rows.map(r => r.branch);
 }
 

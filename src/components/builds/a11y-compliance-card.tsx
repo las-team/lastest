@@ -56,7 +56,7 @@ export function A11yComplianceCard({
           <div className="space-y-1">
             <div className="flex items-center gap-2">
               <span className="text-sm font-medium">
-                {passedRules}/{totalRulesChecked ?? '?'} rules passed
+                {totalRulesChecked ? `${passedRules}/${totalRulesChecked} rules passed` : 'No rules data collected'}
               </span>
               {scoreDelta != null && scoreDelta !== 0 && (
                 <Badge variant="outline" className={cn('text-xs', scoreDelta > 0 ? 'text-green-600' : 'text-red-600')}>

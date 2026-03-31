@@ -19,7 +19,6 @@ Videos explaining use
     Saját demo felvétele ahol van egy laza scripted előre megírva, ami egy törött vibe kódolt appon bemutatja hogy lépésről lépésre hogyan használod a Lastestet. A végén elmondani hogy a runnereket bárhol tudja futtatni, de itt a cloud instance, like and subscribe, kommentelj, kérdezz, nagyon lelkes a szerző.
     sdfsd
 PostgreSQL /home/ewyct/.claude/plans/agile-gliding-island.md
-Run tests on prod to test admin
 Selectors 1 for play agent /home/ewyct/.claude/plans/cozy-doodling-rain.md
 The premium QA agent
 ## ideas

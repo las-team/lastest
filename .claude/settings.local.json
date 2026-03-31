@@ -149,7 +149,12 @@
       "Read(//home/ewyct/.claude/todos/**)",
       "Read(//home/ewyct/.claude/**)",
       "WebFetch(domain:192.168.1.138)",
-      "Bash(pnpm deploy:olares -- --skip-checks)"
+      "Bash(pnpm deploy:olares -- --skip-checks)",
+      "WebFetch(domain:docs.olares.com)",
+      "Bash(perl:*)",
+      "Bash(grep -n \"totalRulesChecked\\\\|a11y\" /home/ewyct/dev/lastest2/src/app/\\\\\\(app\\\\\\)/builds/[buildId]/build-detail-client.tsx)",
+      "Bash(find /home/ewyct/dev/lastest2/src/app -type f \\\\\\(-name *.tsx -o -name *.ts \\\\\\))",
+      "Bash(docker run:*)"
     ]
   },
   "disabledMcpjsonServers": [

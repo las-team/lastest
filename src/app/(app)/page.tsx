@@ -1,5 +1,6 @@
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
+import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip';
 import { CheckCircle, XCircle, Clock, FileCode, Folder, AlertTriangle, Loader2, Shield, Activity, Zap } from 'lucide-react';
 import {
   getSelectedRepository,
@@ -91,22 +92,58 @@ export default async function DashboardPage() {
         {/* Health Score + Stats Cards */}
         <div className="grid grid-cols-5 gap-4">
           {/* Health Score */}
-          <Card className={healthBg}>
-            <CardHeader className="pb-2">
-              <CardDescription className="flex items-center gap-1">
-                <Shield className="h-3.5 w-3.5" />
-                Health Score
-              </CardDescription>
-              <CardTitle className={`text-4xl font-bold ${healthColor}`}>
-                {healthScore}
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="pt-0">
-              <p className="text-xs text-muted-foreground">
-                {healthScore >= 80 ? 'Healthy' : healthScore >= 50 ? 'Needs attention' : 'Critical'}
-              </p>
-            </CardContent>
-          </Card>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Card className={`${healthBg} cursor-default`}>
+                <CardHeader className="pb-2">
+                  <CardDescription className="flex items-center gap-1">
+                    <Shield className="h-3.5 w-3.5" />
+                    Health Score
+                  </CardDescription>
+                  <CardTitle className={`text-4xl font-bold ${healthColor}`}>
+                    {healthScore}
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="pt-0">
+                  <p className="text-xs text-muted-foreground">
+                    {healthScore >= 80 ? 'Healthy' : healthScore >= 50 ? 'Needs attention' : 'Critical'}
+                  </p>
+                </CardContent>
+              </Card>
+            </TooltipTrigger>
+            <TooltipContent side="bottom" className="max-w-xs p-3 space-y-2 text-left">
+              <p className="font-semibold text-sm">How it&apos;s calculated</p>
+              <div className="space-y-1 text-xs">
+                <div className="flex justify-between gap-4">
+                  <span>Pass Rate ({passRate.toFixed(1)}%)</span>
+                  <span className="font-mono">{(passRate * 0.6).toFixed(1)} x 0.6</span>
+                </div>
+                <div className="flex justify-between gap-4">
+                  <span>Non-Flaky Rate ({(100 - flakyRate).toFixed(1)}%)</span>
+                  <span className="font-mono">{((100 - flakyRate) * 0.2).toFixed(1)} x 0.2</span>
+                </div>
+                <div className="flex justify-between gap-4">
+                  <span>Route Coverage ({coveragePct.toFixed(1)}%)</span>
+                  <span className="font-mono">{(coveragePct * 0.2).toFixed(1)} x 0.2</span>
+                </div>
+                <div className="border-t border-background/20 pt-1 flex justify-between gap-4 font-semibold">
+                  <span>Total</span>
+                  <span className="font-mono">{healthScore}</span>
+                </div>
+              </div>
+              <div className="border-t border-background/20 pt-1.5 space-y-0.5 text-xs">
+                <p className="font-semibold">Thresholds</p>
+                <p>80-100 Healthy &middot; 50-79 Needs Attention &middot; 0-49 Critical</p>
+              </div>
+              <div className="border-t border-background/20 pt-1.5 space-y-0.5 text-xs">
+                <p className="font-semibold">Tips to improve</p>
+                {passRate < 100 && <p>Fix failing tests to boost pass rate (60% weight)</p>}
+                {flakyRate > 0 && <p>Stabilize flaky tests to reduce flaky rate (20% weight)</p>}
+                {coveragePct < 100 && <p>Add tests for uncovered routes (20% weight)</p>}
+                {passRate === 100 && flakyRate === 0 && coveragePct === 100 && <p>Perfect score! Keep it up.</p>}
+              </div>
+            </TooltipContent>
+          </Tooltip>
 
           {/* Total Tests */}
           <Card>
