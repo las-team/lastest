@@ -11,10 +11,10 @@ import path from 'path';
 import { STORAGE_ROOT, STORAGE_DIRS, toRelativePath } from '@/lib/storage/paths';
 
 /**
- * Approve a single visual diff
+ * Approve a single visual diff — core logic, no auth check.
+ * Called by both session-authenticated and token-authenticated paths.
  */
-export async function approveDiff(diffId: string, approvedBy?: string) {
-  await requireTeamAccess();
+export async function approveDiffCore(diffId: string, approvedBy?: string) {
   const diff = await queries.getVisualDiff(diffId);
   if (!diff) throw new Error('Diff not found');
   if (!diff.currentImagePath) throw new Error('Cannot approve diff without screenshot');
@@ -68,11 +68,15 @@ export async function approveDiff(diffId: string, approvedBy?: string) {
   return { success: true };
 }
 
-/**
- * Reject a visual diff
- */
-export async function rejectDiff(diffId: string) {
+export async function approveDiff(diffId: string, approvedBy?: string) {
   await requireTeamAccess();
+  return approveDiffCore(diffId, approvedBy);
+}
+
+/**
+ * Reject a visual diff — core logic, no auth check.
+ */
+export async function rejectDiffCore(diffId: string) {
   const diff = await queries.getVisualDiff(diffId);
   if (!diff) throw new Error('Diff not found');
 
@@ -91,15 +95,19 @@ export async function rejectDiff(diffId: string) {
   return { success: true };
 }
 
-/**
- * Approve all pending diffs in a build
- */
-export async function approveAllDiffs(buildId: string, approvedBy?: string) {
+export async function rejectDiff(diffId: string) {
   await requireTeamAccess();
+  return rejectDiffCore(diffId);
+}
+
+/**
+ * Approve all pending diffs in a build — core logic, no auth check.
+ */
+export async function approveAllDiffsCore(buildId: string, approvedBy?: string) {
   const pendingDiffs = await queries.getPendingDiffsByBuild(buildId);
 
   for (const diff of pendingDiffs) {
-    await approveDiff(diff.id, approvedBy);
+    await approveDiffCore(diff.id, approvedBy);
   }
 
   revalidatePath('/builds');
@@ -108,13 +116,17 @@ export async function approveAllDiffs(buildId: string, approvedBy?: string) {
   return { approvedCount: pendingDiffs.length };
 }
 
-/**
- * Batch approve selected diffs
- */
-export async function batchApproveDiffs(diffIds: string[], approvedBy?: string) {
+export async function approveAllDiffs(buildId: string, approvedBy?: string) {
   await requireTeamAccess();
+  return approveAllDiffsCore(buildId, approvedBy);
+}
+
+/**
+ * Batch approve selected diffs — core logic, no auth check.
+ */
+export async function batchApproveDiffsCore(diffIds: string[], approvedBy?: string) {
   for (const diffId of diffIds) {
-    await approveDiff(diffId, approvedBy);
+    await approveDiffCore(diffId, approvedBy);
   }
 
   revalidatePath('/builds');
@@ -122,18 +134,27 @@ export async function batchApproveDiffs(diffIds: string[], approvedBy?: string) 
   return { approvedCount: diffIds.length };
 }
 
-/**
- * Batch reject selected diffs
- */
-export async function batchRejectDiffs(diffIds: string[]) {
+export async function batchApproveDiffs(diffIds: string[], approvedBy?: string) {
   await requireTeamAccess();
+  return batchApproveDiffsCore(diffIds, approvedBy);
+}
+
+/**
+ * Batch reject selected diffs — core logic, no auth check.
+ */
+export async function batchRejectDiffsCore(diffIds: string[]) {
   for (const diffId of diffIds) {
-    await rejectDiff(diffId);
+    await rejectDiffCore(diffId);
   }
 
   revalidatePath('/builds');
 
   return { rejectedCount: diffIds.length };
+}
+
+export async function batchRejectDiffs(diffIds: string[]) {
+  await requireTeamAccess();
+  return batchRejectDiffsCore(diffIds);
 }
 
 /**
@@ -158,10 +179,9 @@ function extractStepLabelFromPath(imagePath: string): string | null {
 }
 
 /**
- * Get a single diff with full details
+ * Get a single diff with full details — core logic, no auth check.
  */
-export async function getDiff(diffId: string) {
-  await requireTeamAccess();
+export async function getDiffCore(diffId: string) {
   const diff = await queries.getVisualDiff(diffId);
   if (!diff) return null;
 
@@ -203,6 +223,11 @@ export async function getDiff(diffId: string) {
     a11yViolations: a11yViolations ?? null,
     test: test ?? null,
   };
+}
+
+export async function getDiff(diffId: string) {
+  await requireTeamAccess();
+  return getDiffCore(diffId);
 }
 
 /**

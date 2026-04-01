@@ -186,7 +186,11 @@ export async function forceResetRunner(repositoryId?: string | null) {
 /**
  * Create and run a new build (queues if tests already running)
  */
-export async function createAndRunBuild(
+/**
+ * Core build creation logic — no auth checks.
+ * Called by both session-authenticated and token-authenticated paths.
+ */
+export async function createAndRunBuildCore(
   triggerType: TriggerType = 'manual',
   testIds?: string[],
   repositoryId?: string | null,
@@ -194,8 +198,6 @@ export async function createAndRunBuild(
   versionOverrides?: Record<string, string>,
   gitBranchOverride?: string,
 ) {
-  if (repositoryId) await requireRepoAccess(repositoryId);
-  else await requireTeamAccess();
   const targetRunner = runnerId || 'local';
 
   // If this runner is busy, queue this build
@@ -277,6 +279,19 @@ export async function createAndRunBuild(
   computeCodeChangeTestIds(build.id, repo, gitInfo.branch, repositoryId).catch(() => {});
 
   return { buildId: build.id, testRunId: testRun.id, testCount: tests.length };
+}
+
+export async function createAndRunBuild(
+  triggerType: TriggerType = 'manual',
+  testIds?: string[],
+  repositoryId?: string | null,
+  runnerId?: string,
+  versionOverrides?: Record<string, string>,
+  gitBranchOverride?: string,
+) {
+  if (repositoryId) await requireRepoAccess(repositoryId);
+  else await requireTeamAccess();
+  return createAndRunBuildCore(triggerType, testIds, repositoryId, runnerId, versionOverrides, gitBranchOverride);
 }
 
 /**

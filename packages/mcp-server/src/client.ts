@@ -89,10 +89,8 @@ export class LastestClient {
     testIds?: string[];
     gitBranch?: string;
   }): Promise<{ buildId: string; testRunId: string; testCount: number }> {
-    return this.post('/api/builds/create', {
+    return this.post('/api/v1/runs', {
       repositoryId: opts.repositoryId,
-      triggerType: opts.triggerType ?? 'manual',
-      gitBranch: opts.gitBranch,
       testIds: opts.testIds,
     });
   }

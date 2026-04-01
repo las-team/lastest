@@ -45,12 +45,11 @@ function buildScanContextFromRoute(
   };
 }
 
-export async function aiCreateTest(
+export async function aiCreateTestCore(
   repositoryId: string,
   context: TestGenerationContext,
   routeId?: string
 ): Promise<{ success: boolean; code?: string; error?: string }> {
-  await requireRepoAccess(repositoryId);
   try {
     // Enrich context with route information if routeId is provided
     const enrichedContext = { ...context };
@@ -93,6 +92,15 @@ export async function aiCreateTest(
     const message = error instanceof Error ? error.message : 'Failed to generate test';
     return { success: false, error: message };
   }
+}
+
+export async function aiCreateTest(
+  repositoryId: string,
+  context: TestGenerationContext,
+  routeId?: string
+): Promise<{ success: boolean; code?: string; error?: string }> {
+  await requireRepoAccess(repositoryId);
+  return aiCreateTestCore(repositoryId, context, routeId);
 }
 
 export async function aiFixTest(

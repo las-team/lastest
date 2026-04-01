@@ -80,6 +80,7 @@ import { ExecutionTargetSelector } from '@/components/execution/execution-target
 import { BrowserViewer } from '@/components/embedded-browser/browser-viewer-client';
 import { toast } from 'sonner';
 import { RecordingSetupPicker, type ExtraStep } from '@/components/setup/recording-setup-picker';
+import { RecordingTutorialOverlay } from '@/components/recording-tutorial/recording-tutorial-overlay';
 
 interface SetupStepInfo {
   id: string;
@@ -581,6 +582,10 @@ export function RecordingClient({
 
   const handleStopRecording = async () => {
     setIsLoading(true);
+    // Exit fullscreen before unmounting the recording layout to avoid lingering backdrop
+    if (document.fullscreenElement) {
+      try { await document.exitFullscreen(); } catch {}
+    }
     setEmbeddedStreamUrl(null);
     try {
       const session = await stopRecording(repositoryId);
@@ -1150,12 +1155,12 @@ export function RecordingClient({
             <Button variant="ghost" size="icon" className="h-8 w-8" onClick={handleTogglePause} title={isPaused ? 'Resume recording' : 'Pause recording'}>
               {isPaused ? <Play className="h-4 w-4" /> : <Pause className="h-4 w-4" />}
             </Button>
-            <Button variant="ghost" size="icon" className="h-8 w-8" onClick={handleCaptureScreenshot} title="Screenshot">
+            <Button variant="ghost" size="icon" className="h-8 w-8" onClick={handleCaptureScreenshot} title="Screenshot" data-tutorial-target="screenshot">
               <Camera className="h-4 w-4" />
             </Button>
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <Button variant="ghost" size="sm" className="h-8 gap-1 px-2">
+                <Button variant="ghost" size="sm" className="h-8 gap-1 px-2" data-tutorial-target="assertion">
                   <CheckCircle2 className="h-4 w-4" />
                   <ChevronDown className="h-3 w-3" />
                 </Button>
@@ -1175,7 +1180,7 @@ export function RecordingClient({
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
-            <Button variant="ghost" size="icon" className="h-8 w-8" onClick={handleFlagDownload} title="Wait for Download">
+            <Button variant="ghost" size="icon" className="h-8 w-8" onClick={handleFlagDownload} title="Wait for Download" data-tutorial-target="download">
               <Download className="h-4 w-4" />
             </Button>
             <Button variant="ghost" size="icon" className="h-8 w-8" onClick={handleInsertTimestamp} title="Insert Timestamp">
@@ -1188,6 +1193,7 @@ export function RecordingClient({
               className={`h-8 w-8 ${timelineOpen ? 'bg-muted' : ''}`}
               onClick={() => setTimelineOpen(!timelineOpen)}
               title="Toggle timeline"
+              data-tutorial-target="timeline"
             >
               <ListFilter className="h-4 w-4" />
             </Button>
@@ -1214,6 +1220,8 @@ export function RecordingClient({
               Stop
             </Button>
           </div>
+
+          <RecordingTutorialOverlay layout="embedded" />
         </div>
       );
     }
@@ -1240,13 +1248,13 @@ export function RecordingClient({
                   {isPaused ? <Play className="h-4 w-4 mr-2" /> : <Pause className="h-4 w-4 mr-2" />}
                   {isPaused ? 'Resume' : 'Pause'}
                 </Button>
-                <Button onClick={handleCaptureScreenshot} variant="outline">
+                <Button onClick={handleCaptureScreenshot} variant="outline" data-tutorial-target="screenshot">
                   <Camera className="h-4 w-4 mr-2" />
                   Screenshot
                 </Button>
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
-                    <Button variant="outline">
+                    <Button variant="outline" data-tutorial-target="assertion">
                       <CheckCircle2 className="h-4 w-4 mr-2" />
                       Create Assertion
                       <ChevronDown className="h-4 w-4 ml-2" />
@@ -1267,7 +1275,7 @@ export function RecordingClient({
                     </DropdownMenuItem>
                   </DropdownMenuContent>
                 </DropdownMenu>
-                <Button onClick={handleFlagDownload} variant="outline">
+                <Button onClick={handleFlagDownload} variant="outline" data-tutorial-target="download">
                   <Download className="h-4 w-4 mr-2" />
                   Wait for Download
                 </Button>
@@ -1293,7 +1301,7 @@ export function RecordingClient({
 
           <div className="grid grid-cols-3 gap-6">
             {/* Interaction Timeline */}
-            <Card className="col-span-2">
+            <Card className="col-span-2" data-tutorial-target="timeline">
               <CardHeader>
                 <CardTitle className="text-sm">Interaction Timeline</CardTitle>
               </CardHeader>
@@ -1413,6 +1421,8 @@ export function RecordingClient({
               Tip: <span className="font-medium">Shift+Right-click</span> on any element to add assertions.
             </div>
           </div>
+
+          <RecordingTutorialOverlay layout="card" />
         </div>
       </div>
     );

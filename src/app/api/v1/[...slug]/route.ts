@@ -34,8 +34,8 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import * as queries from '@/lib/db/queries';
-import { createAndRunBuild } from '@/server/actions/builds';
-import { batchApproveDiffs, batchRejectDiffs, approveDiff, rejectDiff, approveAllDiffs, getDiff } from '@/server/actions/diffs';
+import { createAndRunBuildCore } from '@/server/actions/builds';
+import { batchApproveDiffsCore, batchRejectDiffsCore, approveDiffCore, rejectDiffCore, approveAllDiffsCore, getDiffCore } from '@/server/actions/diffs';
 import { getCurrentSession } from '@/lib/auth';
 import { verifyBearerToken } from '@/lib/auth/api-key';
 
@@ -223,7 +223,7 @@ export async function GET(
       if (!(await verifyDiffOwnership(id, session))) {
         return NextResponse.json({ error: 'Not found' }, { status: 404 });
       }
-      const diff = await getDiff(id);
+      const diff = await getDiffCore(id);
       if (!diff) {
         return NextResponse.json({ error: 'Not found' }, { status: 404 });
       }
@@ -320,8 +320,8 @@ export async function POST(
         return NextResponse.json({ error: 'No tests to run' }, { status: 400 });
       }
 
-      // Use build system for visual diff tracking
-      const result = await createAndRunBuild('manual', testIdsToRun, repositoryId);
+      // Use build system for visual diff tracking (auth already verified above)
+      const result = await createAndRunBuildCore('manual', testIdsToRun, repositoryId);
 
       return NextResponse.json(result);
     }
@@ -339,7 +339,7 @@ export async function POST(
           return NextResponse.json({ error: 'Not found' }, { status: 404 });
         }
       }
-      const result = await batchApproveDiffs(diffIds);
+      const result = await batchApproveDiffsCore(diffIds);
       return NextResponse.json(result);
     }
 
@@ -356,7 +356,7 @@ export async function POST(
           return NextResponse.json({ error: 'Not found' }, { status: 404 });
         }
       }
-      const result = await batchRejectDiffs(diffIds);
+      const result = await batchRejectDiffsCore(diffIds);
       return NextResponse.json(result);
     }
 
@@ -368,8 +368,8 @@ export async function POST(
         return NextResponse.json({ error: 'repositoryId required' }, { status: 400 });
       }
       // Dynamic import to avoid pulling in heavy AI deps at route level
-      const { aiCreateTest } = await import('@/server/actions/ai');
-      const result = await aiCreateTest(repositoryId, {
+      const { aiCreateTestCore } = await import('@/server/actions/ai');
+      const result = await aiCreateTestCore(repositoryId, {
         targetUrl: url,
         userPrompt: prompt,
         functionalAreaId,
@@ -395,8 +395,8 @@ export async function POST(
         }
       }
       // Dynamic import to avoid pulling in heavy AI deps at route level
-      const { agentHealTest } = await import('@/lib/playwright/healer-agent');
-      const result = await agentHealTest(test.repositoryId!, testId);
+      const { agentHealTestCore } = await import('@/lib/playwright/healer-agent');
+      const result = await agentHealTestCore(test.repositoryId!, testId);
       return NextResponse.json(result);
     }
 
@@ -405,7 +405,7 @@ export async function POST(
       if (!(await verifyDiffOwnership(id, session))) {
         return NextResponse.json({ error: 'Not found' }, { status: 404 });
       }
-      await approveDiff(id, 'mcp-agent');
+      await approveDiffCore(id, 'mcp-agent');
       return NextResponse.json({ success: true });
     }
 
@@ -414,7 +414,7 @@ export async function POST(
       if (!(await verifyDiffOwnership(id, session))) {
         return NextResponse.json({ error: 'Not found' }, { status: 404 });
       }
-      await rejectDiff(id);
+      await rejectDiffCore(id);
       return NextResponse.json({ success: true });
     }
 
@@ -423,7 +423,7 @@ export async function POST(
       if (!(await verifyBuildOwnership(id, session))) {
         return NextResponse.json({ error: 'Not found' }, { status: 404 });
       }
-      await approveAllDiffs(id, 'mcp-agent');
+      await approveAllDiffsCore(id, 'mcp-agent');
       return NextResponse.json({ success: true });
     }
 

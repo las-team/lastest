@@ -5,7 +5,6 @@ Gitlab
 Teardown
 Accept Downloads
 Network Interception
-Auto gh action run
 MCP
 QA agent
 sparklines
@@ -14,13 +13,16 @@ ally
 schedule
 success crit
 ## features
-Migrate to gh app /home/ewyct/.claude/plans/cheeky-sparking-torvalds.md
+Auto gh action run
 Videos explaining use
     Saját demo felvétele ahol van egy laza scripted előre megírva, ami egy törött vibe kódolt appon bemutatja hogy lépésről lépésre hogyan használod a Lastestet. A végén elmondani hogy a runnereket bárhol tudja futtatni, de itt a cloud instance, like and subscribe, kommentelj, kérdezz, nagyon lelkes a szerző.
     sdfsd
-Selectors 1 for play agent /home/ewyct/.claude/plans/cozy-doodling-rain.md
-The premium QA agent
+-keyword pattern pages XY product for ZT
+Free tool to site checker - what can be used as selector? full outcome after email, share on social (score) ask llm about ideas
 ## ideas
+Migrate to gh app /home/ewyct/.claude/plans/cheeky-sparking-torvalds.md
+The premium QA agent
+Selectors 1 for play agent /home/ewyct/.claude/plans/cozy-doodling-rain.md
 Payment integration /home/ewyct/.claude/plans/drifting-yawning-hoare.md
 special prompting for ai diff analysis either by user or by branch code change 
 if a pr merge happens, update test manifest with new functions - show as new, prompt test generation
