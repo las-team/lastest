@@ -4,7 +4,7 @@ import { useEffect, useRef, useState, useCallback } from 'react';
 import { Wifi, WifiOff, Loader2, RefreshCw, Upload } from 'lucide-react';
 import { BrowserToolbar } from '@/components/embedded-browser/browser-toolbar-client';
 import { Button } from '@/components/ui/button';
-import type { StreamMouseEvent, StreamKeyboardEvent } from '@/lib/ws/protocol';
+import type { StreamMouseEvent, StreamKeyboardEvent, StreamTouchEvent } from '@/lib/ws/protocol';
 
 type ConnectionStatus = 'connecting' | 'connected' | 'disconnected' | 'error' | 'reconnecting';
 
@@ -398,6 +398,61 @@ export function BrowserViewer({ streamUrl, initialViewport, className, expiresAt
     },
     [sendWs]
   );
+
+  // Touch event helper — extracts touch points relative to canvas
+  const getTouchPoints = useCallback((e: globalThis.TouchEvent): StreamTouchEvent['touches'] => {
+    const canvas = canvasRef.current;
+    if (!canvas) return [];
+    const rect = canvas.getBoundingClientRect();
+    return Array.from(e.touches).map((t) => ({
+      x: Math.round(t.clientX - rect.left),
+      y: Math.round(t.clientY - rect.top),
+      id: t.identifier,
+    }));
+  }, []);
+
+  // Attach non-passive touch listeners so preventDefault() works (suppresses synthetic mouse events)
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+
+    const onTouchStart = (e: globalThis.TouchEvent) => {
+      e.preventDefault();
+      sendWs({
+        type: 'stream:input',
+        payload: { type: 'touch', action: 'start', touches: getTouchPoints(e) } satisfies StreamTouchEvent,
+      });
+    };
+
+    const onTouchMove = (e: globalThis.TouchEvent) => {
+      e.preventDefault();
+      sendWs({
+        type: 'stream:input',
+        payload: { type: 'touch', action: 'move', touches: getTouchPoints(e) } satisfies StreamTouchEvent,
+      });
+    };
+
+    const onTouchEnd = (e: globalThis.TouchEvent) => {
+      e.preventDefault();
+      // On touchend, e.touches is empty — send empty array so CDP knows all fingers lifted
+      sendWs({
+        type: 'stream:input',
+        payload: { type: 'touch', action: 'end', touches: [] } satisfies StreamTouchEvent,
+      });
+    };
+
+    canvas.addEventListener('touchstart', onTouchStart, { passive: false });
+    canvas.addEventListener('touchmove', onTouchMove, { passive: false });
+    canvas.addEventListener('touchend', onTouchEnd, { passive: false });
+    canvas.addEventListener('touchcancel', onTouchEnd, { passive: false });
+
+    return () => {
+      canvas.removeEventListener('touchstart', onTouchStart);
+      canvas.removeEventListener('touchmove', onTouchMove);
+      canvas.removeEventListener('touchend', onTouchEnd);
+      canvas.removeEventListener('touchcancel', onTouchEnd);
+    };
+  }, [sendWs, getTouchPoints]);
 
   // Toolbar handlers
   const handleNavigate = useCallback(

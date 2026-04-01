@@ -551,7 +551,7 @@ export interface ScreencastFrameMessage extends BaseMessage {
 /** Client → Server: Mouse/keyboard input forwarding */
 export interface StreamInputMessage extends BaseMessage {
   type: 'stream:input';
-  payload: StreamMouseEvent | StreamKeyboardEvent | StreamFileUploadEvent | StreamClipboardEvent;
+  payload: StreamMouseEvent | StreamKeyboardEvent | StreamFileUploadEvent | StreamClipboardEvent | StreamTouchEvent;
 }
 
 export interface StreamMouseEvent {
@@ -582,6 +582,12 @@ export interface StreamFileUploadEvent {
 export interface StreamClipboardEvent {
   type: 'clipboard_paste';
   text: string;
+}
+
+export interface StreamTouchEvent {
+  type: 'touch';
+  action: 'start' | 'move' | 'end' | 'cancel';
+  touches: Array<{ x: number; y: number; id: number }>;
 }
 
 /** Client → Server / Server → Client: Session lifecycle control */

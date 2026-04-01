@@ -18,7 +18,6 @@ Migrate to gh app /home/ewyct/.claude/plans/cheeky-sparking-torvalds.md
 Videos explaining use
     Saját demo felvétele ahol van egy laza scripted előre megírva, ami egy törött vibe kódolt appon bemutatja hogy lépésről lépésre hogyan használod a Lastestet. A végén elmondani hogy a runnereket bárhol tudja futtatni, de itt a cloud instance, like and subscribe, kommentelj, kérdezz, nagyon lelkes a szerző.
     sdfsd
-PostgreSQL /home/ewyct/.claude/plans/agile-gliding-island.md
 Selectors 1 for play agent /home/ewyct/.claude/plans/cozy-doodling-rain.md
 The premium QA agent
 ## ideas
@@ -37,10 +36,8 @@ Generate test data with AI
 Sitemap -flow
 Formal verification of code?
 Firecrawl?
-Approve reject changes or create ticket -> gh issue
-Import from prior tools? 
-Determine test coverage based on tests in repo 
-Expand into not just visual testing: https://github.com/coleam00/link-in-bio-page-builder/blob/main/.claude/skills/e2e-test/SKILL.md
+Approve reject changes or create ticket -> gh issue, jira, linear
+Expand into not just visual testing
 ## bugs
 ## marketing
 why is software not just a play button?
@@ -68,9 +65,6 @@ Run online or on your pc?
 ## Excalidraw
 ### Tests missing:
 B.5) Valamit ki kell majd találni, hogy a user feltölthessen asseteket, amiket böngészni tud file opennel. Very low prio MVP-re, csak megemlítem.
-B.6) A remote browseres implementációban a kétujjas canvas panning somewhat hiányzik.
-most veszek fel teszteket az elkövetkező napokban, kérlek ezeket őrizd meg, hogy ne kelljen újragyártani őket.
-B.7) Nem világos hogy hogyan csinálsz multi-step teszteket
 
 ## commands
 ## ourmotto
@@ -81,8 +75,5 @@ Exp testing is kinda ok, at least you learn how your software works
 2) hogy személyre szabott sztoriban tudjam megmutatni Davidnek hogy mennyit segített. 
 3) Alátámasztani mindezt azzal hogy a PR-jaim release utáni bug countja csökken látványosan
 
-  await page.locator('#email').fill('testuser1771664821751@example.com');
-  
-  // Fill in the password field
-  stepLogger.log('Entering password');
-  await page.locator('#password').fill('SecurePass123');
+testuser1771664821751@example.com
+SecurePass123

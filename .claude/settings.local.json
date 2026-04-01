@@ -154,7 +154,10 @@
       "Bash(perl:*)",
       "Bash(grep -n \"totalRulesChecked\\\\|a11y\" /home/ewyct/dev/lastest2/src/app/\\\\\\(app\\\\\\)/builds/[buildId]/build-detail-client.tsx)",
       "Bash(find /home/ewyct/dev/lastest2/src/app -type f \\\\\\(-name *.tsx -o -name *.ts \\\\\\))",
-      "Bash(docker run:*)"
+      "Bash(docker run:*)",
+      "Bash(for f:*)",
+      "Bash(do echo:*)",
+      "Read(//home/ewyct/dev/lastest2/**)"
     ]
   },
   "disabledMcpjsonServers": [

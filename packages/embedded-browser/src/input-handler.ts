@@ -40,7 +40,13 @@ export interface ClipboardPasteEvent {
   text: string;
 }
 
-export type InputEvent = MouseEvent | KeyboardEvent | FileUploadEvent | ClipboardPasteEvent;
+export interface TouchEvent {
+  type: 'touch';
+  action: 'start' | 'move' | 'end' | 'cancel';
+  touches: Array<{ x: number; y: number; id: number }>;
+}
+
+export type InputEvent = MouseEvent | KeyboardEvent | FileUploadEvent | ClipboardPasteEvent | TouchEvent;
 
 const BUTTON_MAP: Record<string, 'left' | 'right' | 'middle'> = {
   left: 'left',
@@ -114,6 +120,8 @@ export class InputHandler {
         await this.handleFileUpload(event);
       } else if (event.type === 'clipboard_paste') {
         await this.handleClipboardPaste(event);
+      } else if (event.type === 'touch') {
+        await this.handleTouch(event);
       }
     } catch (error) {
       console.error('[InputHandler] Error dispatching event:', error);
@@ -251,6 +259,31 @@ export class InputHandler {
     setTimeout(() => {
       try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch { /* ignore */ }
     }, 30000);
+  }
+
+  private async handleTouch(event: TouchEvent): Promise<void> {
+    if (!this.cdpSession) return;
+
+    const CDP_TOUCH_TYPE: Record<string, string> = {
+      start: 'touchStart',
+      move: 'touchMove',
+      end: 'touchEnd',
+      cancel: 'touchCancel',
+    };
+
+    const cdpType = CDP_TOUCH_TYPE[event.action];
+    if (!cdpType) return;
+
+    const touchPoints = event.touches.map((t) => ({
+      x: t.x,
+      y: t.y,
+      id: t.id,
+    }));
+
+    await this.cdpSession.send('Input.dispatchTouchEvent', {
+      type: cdpType,
+      touchPoints,
+    });
   }
 
   private async handleClipboardPaste(event: ClipboardPasteEvent): Promise<void> {
