@@ -24,7 +24,7 @@ for subdir in screenshots baselines diffs traces videos planned bug-reports; do
 done
 
 echo "Starting Lastest2..."
-echo "Database: ${DATABASE_URL:-postgresql://lastest:lastest@localhost:5432/lastest}"
+echo "Database: $(echo "${DATABASE_URL:-postgresql://lastest:lastest@localhost:5432/lastest}" | sed 's|://[^:]*:[^@]*@|://***:***@|')"
 
 # Run database migrations
 if [ -f "/app/migrate.js" ]; then
