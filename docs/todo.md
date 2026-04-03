@@ -18,8 +18,13 @@ Videos explaining use
     Saját demo felvétele ahol van egy laza scripted előre megírva, ami egy törött vibe kódolt appon bemutatja hogy lépésről lépésre hogyan használod a Lastestet. A végén elmondani hogy a runnereket bárhol tudja futtatni, de itt a cloud instance, like and subscribe, kommentelj, kérdezz, nagyon lelkes a szerző.
     sdfsd
 -keyword pattern pages XY product for ZT
-Free tool to site checker - what can be used as selector? full outcome after email, share on social (score) ask llm about ideas
 ## ideas
+Gamify it - beat the bot approach, score, team leaderboard, bug blitz support. Share you beat a bot by xy
+Non-AI test triage,  5-category classification with confidence scoring, maps to article's "failure diagnosis"  recommendation       
+Test governance /        │ AI generates tests fast → need redundancy         │ Medium — extend coverage analytics │
+  │ explosion detection      │ detection, coverage-weighted pruning              │                                     
+  Looped execution         │ Plan → generate → run → heal cycles without       │ Low — already have all pieces,     │
+  │ (--loop)       
 Migrate to gh app /home/ewyct/.claude/plans/cheeky-sparking-torvalds.md
 The premium QA agent
 Selectors 1 for play agent /home/ewyct/.claude/plans/cozy-doodling-rain.md
@@ -64,6 +69,9 @@ Screenshot comparison not reliable? page shift? text comparison?
 Auto-run tests on PRs?
 Video recording
 Run online or on your pc?
+### marketing ideas
+buy a newsletter substack twitter: duuce.com newsletter investor
+AI repurposing engine -> 5 tweets, 3 linkedin, remotion short form, 1 blog, graphics, email sequence
 ## Excalidraw
 ### Tests missing:
 B.5) Valamit ki kell majd találni, hogy a user feltölthessen asseteket, amiket böngészni tud file opennel. Very low prio MVP-re, csak megemlítem.

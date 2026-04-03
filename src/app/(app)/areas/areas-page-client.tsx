@@ -28,9 +28,11 @@ import { cn } from '@/lib/utils';
 import { startRemoteRouteScan } from '@/server/actions/scanner';
 import { AIScanRoutesDialog } from '@/components/ai/ai-scan-routes-dialog';
 import { SpecAnalysisDialog } from '@/components/ai/spec-analysis-dialog';
+import { AreaSpecsPanel } from '@/components/areas/area-specs-panel';
 import { ImportFromSpecDialog } from '@/components/ai/import-from-spec-dialog';
 import { CodeDiffScanDialog } from '@/components/ai/code-diff-scan-dialog';
 import { toast } from 'sonner';
+import type { TestSpec } from '@/lib/db/schema';
 import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from '@/components/ui/resizable';
 import type { FunctionalAreaWithChildren } from '@/lib/db/queries';
 
@@ -48,9 +50,10 @@ interface AreasPageClientProps {
   repositoryId: string;
   selectedBranch: string;
   banAiMode?: boolean;
+  allSpecs?: TestSpec[];
 }
 
-export function AreasPageClient({ tree, uncategorizedTests, unsortedSuites, repositoryId, selectedBranch, banAiMode = false }: AreasPageClientProps) {
+export function AreasPageClient({ tree, uncategorizedTests, unsortedSuites, repositoryId, selectedBranch, banAiMode = false, allSpecs = [] }: AreasPageClientProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const initialTab = searchParams.get('tab') === 'plan' ? 'plan' : 'overview';
@@ -299,6 +302,17 @@ export function AreasPageClient({ tree, uncategorizedTests, unsortedSuites, repo
   const flatAreas = flattenAreas(tree);
   const areasWithPlans = flatAreas.filter(a => a.agentPlan);
 
+  // Group specs by area for the plan tab
+  const specsByArea = new Map<string, TestSpec[]>();
+  for (const spec of allSpecs) {
+    if (spec.functionalAreaId) {
+      const existing = specsByArea.get(spec.functionalAreaId) || [];
+      existing.push(spec);
+      specsByArea.set(spec.functionalAreaId, existing);
+    }
+  }
+  const specsWithTests = allSpecs.filter(s => s.testId != null).length;
+
   return (
     <ResizablePanelGroup orientation="horizontal" className="flex-1 overflow-hidden">
       {/* Left Sidebar - Area Tree */}
@@ -487,6 +501,11 @@ export function AreasPageClient({ tree, uncategorizedTests, unsortedSuites, repo
                   <div className="text-sm text-muted-foreground">
                     {areasWithPlans.length} area{areasWithPlans.length !== 1 ? 's' : ''} with plans
                   </div>
+                  {allSpecs.length > 0 && (
+                    <div className="text-sm text-muted-foreground">
+                      Spec coverage: <span className="font-medium text-foreground">{specsWithTests}/{allSpecs.length}</span> ({allSpecs.length > 0 ? Math.round((specsWithTests / allSpecs.length) * 100) : 0}%)
+                    </div>
+                  )}
                   <Button
                     variant="outline"
                     size="sm"
@@ -507,14 +526,23 @@ export function AreasPageClient({ tree, uncategorizedTests, unsortedSuites, repo
                 ) : (
                   <div className="divide-y">
                     {areasWithPlans.map((area) => (
-                      <PlanAreaEditor
-                        key={area.id}
-                        areaId={area.id}
-                        areaName={area.name}
-                        agentPlan={area.agentPlan!}
-                        planGeneratedAt={area.planGeneratedAt}
-                        depth={area.depth}
-                      />
+                      <div key={area.id}>
+                        <PlanAreaEditor
+                          areaId={area.id}
+                          areaName={area.name}
+                          agentPlan={area.agentPlan!}
+                          planGeneratedAt={area.planGeneratedAt}
+                          depth={area.depth}
+                        />
+                        <div className="px-4 pb-4">
+                          <AreaSpecsPanel
+                            areaId={area.id}
+                            repositoryId={repositoryId}
+                            specs={specsByArea.get(area.id) || []}
+                            hasAgentPlan={!!area.agentPlan}
+                          />
+                        </div>
+                      </div>
                     ))}
                   </div>
                 )}

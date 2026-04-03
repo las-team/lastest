@@ -32,7 +32,7 @@ import { useNotifyJobStarted } from '@/components/queue/job-polling-context';
 import { ExecutionTargetSelector } from '@/components/execution/execution-target-selector';
 import { StepScreenshotMatcher } from '@/components/planned/step-screenshot-matcher';
 import { TestSetupOverrides } from '@/components/setup/test-setup-overrides';
-import type { Test, TestVersion, PlannedScreenshot, SetupScript, GoogleSheetsDataSource, A11yViolation, StabilizationSettings, DiffSensitivitySettings } from '@/lib/db/schema';
+import type { Test, TestVersion, PlannedScreenshot, SetupScript, GoogleSheetsDataSource, A11yViolation, StabilizationSettings, DiffSensitivitySettings, TestSpec } from '@/lib/db/schema';
 import { DEFAULT_STABILIZATION_SETTINGS, DEFAULT_DIFF_THRESHOLDS } from '@/lib/db/schema';
 import { TestStabilizationOverrides } from '@/components/settings/test-stabilization-overrides';
 import { TestDiffOverrides as TestDiffOverridesComponent } from '@/components/settings/test-diff-overrides';
@@ -44,6 +44,7 @@ import { SheetDataPreview } from '@/components/test-data/sheet-data-preview';
 import { SheetReferenceInserter } from '@/components/test-data/sheet-reference-inserter';
 import { BrowserViewer } from '@/components/embedded-browser/browser-viewer-client';
 import { getStreamUrlForRunner } from '@/server/actions/embedded-sessions';
+import { TestSpecEditor } from '@/components/tests/test-spec-editor';
 
 interface StepDiff {
   stepLabel: string | null;
@@ -110,9 +111,10 @@ interface TestDetailClientProps {
   diffDefaults?: DiffSensitivitySettings | null;
   playwrightDefaults?: PlaywrightSettingsForDefaults | null;
   envBaseUrl?: string | null;
+  testSpec?: TestSpec | null;
 }
 
-export function TestDetailClient({ test, results, repositoryId, screenshotGroups = [], plannedScreenshots = [], defaultSetupSteps = [], availableTests = [], availableScripts = [], sheetDataSources = [], stabilizationDefaults, banAiMode = false, earlyAdopterMode = false, diffDefaults, playwrightDefaults, envBaseUrl }: TestDetailClientProps) {
+export function TestDetailClient({ test, results, repositoryId, screenshotGroups = [], plannedScreenshots = [], defaultSetupSteps = [], availableTests = [], availableScripts = [], sheetDataSources = [], stabilizationDefaults, banAiMode = false, earlyAdopterMode = false, diffDefaults, playwrightDefaults, envBaseUrl, testSpec }: TestDetailClientProps) {
   const router = useRouter();
   const notifyJobStarted = useNotifyJobStarted();
   const [isDeleting, setIsDeleting] = useState(false);
@@ -679,6 +681,7 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
         <Tabs defaultValue="code">
           <TabsList className="h-11 w-full p-1 gap-1 bg-white dark:bg-zinc-950 border">
             <TabsTrigger value="code" className="flex-1 px-2 text-sm data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-sm">Code</TabsTrigger>
+            <TabsTrigger value="spec" className="flex-1 px-2 text-sm data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-sm">Spec</TabsTrigger>
             <TabsTrigger value="criteria" className="flex-1 px-2 text-sm data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-sm">Criteria</TabsTrigger>
             <TabsTrigger value="setup" className="flex-1 px-2 text-sm data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-sm">Setup</TabsTrigger>
             <TabsTrigger value="playback" className="flex-1 px-2 text-sm data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-sm">Overrides</TabsTrigger>
@@ -758,6 +761,18 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
                   </p>
                 </CardContent>
               </Card>
+            )}
+          </TabsContent>
+
+          <TabsContent value="spec" className="mt-4">
+            {repositoryId && (
+              <TestSpecEditor
+                testId={test.id}
+                testName={test.name}
+                repositoryId={repositoryId}
+                initialSpec={testSpec ?? null}
+                functionalAreaId={test.functionalAreaId}
+              />
             )}
           </TabsContent>
 

@@ -158,7 +158,8 @@
       "Bash(for f:*)",
       "Bash(do echo:*)",
       "Read(//home/ewyct/dev/lastest2/**)",
-      "Bash(python3 -m json.tool)"
+      "Bash(python3 -m json.tool)",
+      "WebFetch(domain:currents.dev)"
     ]
   },
   "disabledMcpjsonServers": [

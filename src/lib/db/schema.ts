@@ -169,6 +169,7 @@ export const tests = pgTable('tests', {
   executionMode: text('execution_mode').default('procedural'), // 'procedural' | 'agent'
   agentPrompt: text('agent_prompt'), // NL description for agent mode
   quarantined: boolean('quarantined').default(false), // quarantined tests run but don't block builds
+  specId: text('spec_id'), // FK to testSpecs (back-reference for 1:1 link)
   deletedAt: timestamp('deleted_at'),
   createdAt: timestamp('created_at'),
   updatedAt: timestamp('updated_at'),
@@ -822,9 +823,9 @@ export type AISettings = typeof aiSettings.$inferSelect;
 export type NewAISettings = typeof aiSettings.$inferInsert;
 
 export const DEFAULT_AI_SETTINGS = {
-  provider: 'claude-cli' as AIProvider,
+  provider: 'claude-agent-sdk' as AIProvider,
   openrouterModel: 'anthropic/claude-sonnet-4',
-  agentSdkPermissionMode: 'plan' as AgentSdkPermissionMode,
+  agentSdkPermissionMode: 'acceptEdits' as AgentSdkPermissionMode,
   agentSdkModel: '',
   ollamaBaseUrl: 'http://localhost:11434',
   ollamaModel: '',
@@ -913,7 +914,7 @@ export type BuildSchedule = typeof buildSchedules.$inferSelect;
 export type NewBuildSchedule = typeof buildSchedules.$inferInsert;
 
 // Test versions for version history
-export type TestChangeReason = 'initial' | 'manual_edit' | 'ai_fix' | 'ai_enhance' | 'restored' | 'branch_merge' | 'assertion_sync';
+export type TestChangeReason = 'initial' | 'manual_edit' | 'ai_fix' | 'ai_enhance' | 'restored' | 'branch_merge' | 'assertion_sync' | 'spec_regeneration';
 
 export const testVersions = pgTable('test_versions', {
   id: text('id').primaryKey(),
@@ -1683,3 +1684,26 @@ export const storageStates = pgTable('storage_states', {
 
 export type StorageState = typeof storageStates.$inferSelect;
 export type NewStorageState = typeof storageStates.$inferInsert;
+
+// Test specifications — NL intent linked 1:1 with tests
+export const testSpecs = pgTable('test_specs', {
+  id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+  repositoryId: text('repository_id').references(() => repositories.id, { onDelete: 'cascade' }),
+  testId: text('test_id').references(() => tests.id, { onDelete: 'set null' }).unique(), // 1:1 with test when linked
+  functionalAreaId: text('functional_area_id').references(() => functionalAreas.id, { onDelete: 'set null' }),
+  title: text('title').notNull(),
+  spec: text('spec').notNull(), // NL specification (markdown)
+  source: text('source').notNull().default('manual'), // 'manual' | 'planner' | 'route_suggestion' | 'agent_prompt'
+  sourceRef: text('source_ref'), // origin ID (e.g. routeTestSuggestion.id)
+  status: text('status').notNull().default('draft'), // 'draft' | 'approved' | 'has_test' | 'outdated'
+  codeHash: text('code_hash'), // SHA256 of linked test code when last synced
+  createdAt: timestamp('created_at').$defaultFn(() => new Date()),
+  updatedAt: timestamp('updated_at').$defaultFn(() => new Date()),
+}, (table) => ([
+  index('idx_test_specs_repo').on(table.repositoryId),
+  index('idx_test_specs_area').on(table.functionalAreaId),
+  index('idx_test_specs_test').on(table.testId),
+]));
+
+export type TestSpec = typeof testSpecs.$inferSelect;
+export type NewTestSpec = typeof testSpecs.$inferInsert;

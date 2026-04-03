@@ -5,6 +5,7 @@ import {
   getTestsWithStatusByRepo,
   getUnsortedSuites,
   getSuiteTests,
+  getSpecsByRepo,
 } from '@/lib/db/queries';
 import { getCurrentSession } from '@/lib/auth';
 
@@ -24,10 +25,11 @@ export default async function AreasPage() {
     );
   }
 
-  const [tree, tests, unsortedSuitesList] = await Promise.all([
+  const [tree, tests, unsortedSuitesList, allSpecs] = await Promise.all([
     getFunctionalAreasTree(selectedRepo.id),
     getTestsWithStatusByRepo(selectedRepo.id),
     getUnsortedSuites(selectedRepo.id),
+    getSpecsByRepo(selectedRepo.id),
   ]);
 
   // Get test counts for unsorted suites
@@ -58,6 +60,7 @@ export default async function AreasPage() {
         repositoryId={selectedRepo.id}
         selectedBranch={selectedRepo.selectedBranch || selectedRepo.defaultBranch || 'main'}
         banAiMode={banAiMode}
+        allSpecs={allSpecs}
       />
     </div>
   );

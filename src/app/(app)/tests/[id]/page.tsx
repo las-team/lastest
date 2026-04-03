@@ -1,4 +1,4 @@
-import { getTest, getTestResultsByTest, getSelectedRepository, getPlannedScreenshotsByTest, getDefaultSetupSteps, getTestsByRepo, getSetupScripts, getGoogleSheetsDataSources, getPlaywrightSettings, getDiffSensitivitySettings, getEnvironmentConfig } from '@/lib/db/queries';
+import { getTest, getTestResultsByTest, getSelectedRepository, getPlannedScreenshotsByTest, getDefaultSetupSteps, getTestsByRepo, getSetupScripts, getGoogleSheetsDataSources, getPlaywrightSettings, getDiffSensitivitySettings, getEnvironmentConfig, getTestSpec } from '@/lib/db/queries';
 import { getTestScreenshotsGrouped } from '@/server/actions/tests';
 import { getCurrentSession } from '@/lib/auth';
 import { TestDetailClient } from './test-detail-client';
@@ -39,9 +39,10 @@ export default async function TestDetailPage({ params }: TestDetailPageProps) {
   const banAiMode = session?.team?.banAiMode ?? false;
   const earlyAdopterMode = session?.team?.earlyAdopterMode ?? false;
 
-  // Load diff sensitivity settings and environment config for override defaults
+  // Load diff sensitivity settings, environment config, and test spec
   const diffSettings = repoId ? await getDiffSensitivitySettings(repoId) : null;
   const envConfig = repoId ? await getEnvironmentConfig(repoId) : null;
+  const testSpec = await getTestSpec(id);
 
   return (
     <div className="flex flex-col h-full">
@@ -61,6 +62,7 @@ export default async function TestDetailPage({ params }: TestDetailPageProps) {
         diffDefaults={diffSettings}
         playwrightDefaults={playwrightSettings}
         envBaseUrl={envConfig?.baseUrl ?? null}
+        testSpec={testSpec}
       />
     </div>
   );

@@ -254,6 +254,17 @@ export async function exportAllPlans(repositoryId: string) {
       sections.push('', area.agentPlan);
     }
 
+    // Include specs with status indicators
+    const areaSpecs = await queries.getSpecsForArea(area.id);
+    if (areaSpecs.length > 0) {
+      sections.push('', '### Specs', '');
+      for (const spec of areaSpecs) {
+        const check = spec.testId ? 'x' : ' ';
+        const testInfo = spec.testId ? '' : ' — no test';
+        sections.push(`- [${check}] **${spec.title}**${testInfo}`);
+      }
+    }
+
     // Include test cases
     const areaTests = await queries.getTestsByFunctionalArea(area.id);
     if (areaTests.length > 0) {

@@ -14,6 +14,7 @@ import {
   baselines,
   visualDiffs,
   setupScripts,
+  testSpecs,
 } from '../schema';
 import type {
   NewFunctionalArea,
@@ -21,6 +22,7 @@ import type {
   NewTestRun,
   NewTestResult,
   NewTestVersion,
+  NewTestSpec,
   TestChangeReason,
 } from '../schema';
 import { eq, desc, and, inArray, isNull, isNotNull, sql } from 'drizzle-orm';
@@ -776,4 +778,72 @@ export async function updateTestWithVersion(
 
   // Update the test
   await db.update(tests).set({ ...data, updatedAt: new Date() }).where(eq(tests.id, id));
+}
+
+// ===== Test Specs =====
+
+export async function getTestSpec(testId: string) {
+  const [row] = await db.select().from(testSpecs).where(eq(testSpecs.testId, testId));
+  return row ?? null;
+}
+
+export async function getSpecById(specId: string) {
+  const [row] = await db.select().from(testSpecs).where(eq(testSpecs.id, specId));
+  return row ?? null;
+}
+
+export async function getSpecsForArea(functionalAreaId: string) {
+  return db.select().from(testSpecs).where(eq(testSpecs.functionalAreaId, functionalAreaId));
+}
+
+export async function getSpecsByRepo(repositoryId: string) {
+  return db.select().from(testSpecs).where(eq(testSpecs.repositoryId, repositoryId));
+}
+
+export async function getOrphanSpecs(repositoryId: string) {
+  return db.select().from(testSpecs).where(
+    and(eq(testSpecs.repositoryId, repositoryId), isNull(testSpecs.testId))
+  );
+}
+
+export async function getSpecCoverage(repositoryId: string) {
+  const specs = await getSpecsByRepo(repositoryId);
+  const totalSpecs = specs.length;
+  const withTests = specs.filter(s => s.testId != null).length;
+  const withoutTests = totalSpecs - withTests;
+  const outdated = specs.filter(s => s.status === 'outdated').length;
+  return { totalSpecs, withTests, withoutTests, outdated };
+}
+
+export async function createTestSpec(data: Omit<NewTestSpec, 'id' | 'createdAt' | 'updatedAt'>) {
+  const id = uuid();
+  const now = new Date();
+  await db.insert(testSpecs).values({ ...data, id, createdAt: now, updatedAt: now });
+  return id;
+}
+
+export async function updateTestSpec(id: string, data: Partial<Pick<NewTestSpec, 'title' | 'spec' | 'status' | 'codeHash' | 'testId' | 'functionalAreaId'>>) {
+  await db.update(testSpecs).set({ ...data, updatedAt: new Date() }).where(eq(testSpecs.id, id));
+}
+
+export async function deleteTestSpec(id: string) {
+  // Unlink test first
+  const spec = await getSpecById(id);
+  if (spec?.testId) {
+    await db.update(tests).set({ specId: null }).where(eq(tests.id, spec.testId));
+  }
+  await db.delete(testSpecs).where(eq(testSpecs.id, id));
+}
+
+export async function linkSpecToTest(specId: string, testId: string) {
+  await db.update(testSpecs).set({ testId, status: 'has_test', updatedAt: new Date() }).where(eq(testSpecs.id, specId));
+  await db.update(tests).set({ specId }).where(eq(tests.id, testId));
+}
+
+export async function unlinkSpec(specId: string) {
+  const spec = await getSpecById(specId);
+  if (spec?.testId) {
+    await db.update(tests).set({ specId: null }).where(eq(tests.id, spec.testId));
+  }
+  await db.update(testSpecs).set({ testId: null, status: 'draft', codeHash: null, updatedAt: new Date() }).where(eq(testSpecs.id, specId));
 }

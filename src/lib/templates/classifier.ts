@@ -93,12 +93,14 @@ async function classifyWithAI(
   branch: string,
 ): Promise<ClassificationResult | null> {
   const settings = await getAISettings(repositoryId);
-  if (!settings?.provider || settings.provider === 'claude-cli') {
-    // claude-cli requires local CLI — skip for server-side classification
-    // unless it's the only option (still try, let it fail gracefully)
-    if (settings?.provider === 'claude-cli' && !settings.openrouterApiKey) {
+  // claude-cli and claude-agent-sdk are too heavyweight for simple classification
+  // (they spawn full subprocesses). Skip unless a lighter provider is available.
+  const heavyProviders = ['claude-cli', 'claude-agent-sdk'];
+  if (!settings?.provider || heavyProviders.includes(settings.provider)) {
+    if (!settings.openrouterApiKey && !settings.anthropicApiKey && !settings.openaiApiKey) {
       return null;
     }
+    // Fall through with a lighter provider override
   }
 
   const { deps, readme, directories } = await gatherCodebaseSignals(
@@ -123,14 +125,23 @@ Context:
 
 Respond with JSON only, no markdown fences: {"template": "...", "confidence": 0-100, "reasoning": "one sentence"}`;
 
+  // For heavy providers, pick the best available lightweight alternative
+  let effectiveProvider = settings.provider as AIProviderConfig['provider'];
+  if (heavyProviders.includes(settings.provider)) {
+    if (settings.anthropicApiKey) effectiveProvider = 'anthropic';
+    else if (settings.openrouterApiKey) effectiveProvider = 'openrouter';
+    else if (settings.openaiApiKey) effectiveProvider = 'openai';
+  }
+
   const config: AIProviderConfig = {
-    provider: settings.provider as AIProviderConfig['provider'],
+    provider: effectiveProvider,
     openrouterApiKey: settings.openrouterApiKey,
     openrouterModel: settings.openrouterModel || undefined,
+    anthropicApiKey: settings.anthropicApiKey,
+    anthropicModel: settings.anthropicModel || undefined,
+    openaiApiKey: settings.openaiApiKey,
+    openaiModel: settings.openaiModel || undefined,
     customInstructions: settings.customInstructions,
-    agentSdkPermissionMode: settings.agentSdkPermissionMode as AIProviderConfig['agentSdkPermissionMode'],
-    agentSdkModel: settings.agentSdkModel || undefined,
-    agentSdkWorkingDir: settings.agentSdkWorkingDir || undefined,
     ollamaBaseUrl: settings.ollamaBaseUrl || undefined,
     ollamaModel: settings.ollamaModel || undefined,
   };

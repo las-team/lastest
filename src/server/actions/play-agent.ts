@@ -1002,6 +1002,16 @@ async function runPlanWithAgents(
     areas: richAreas,
   };
 
+  // Convert area plans into individual test specs
+  const { convertPlanToSpecs } = await import('./specs');
+  for (const area of richAreas) {
+    try {
+      await convertPlanToSpecs(area.id, repositoryId);
+    } catch {
+      // Non-critical — continue even if spec conversion fails for an area
+    }
+  }
+
   await setStepCompleted(sessionId, 'plan', {
     method: 'pw_agents_parallel',
     areasFound: areaCount,
@@ -1283,6 +1293,21 @@ async function runGenerate(sessionId: string, repositoryId: string, _teamId: str
               areaName: area.name,
               code: genResult.code,
             });
+            // Link to matching spec if one exists
+            try {
+              const areaSpecs = await queries.getSpecsForArea(area.id);
+              const matchingSpec = areaSpecs.find(s =>
+                !s.testId && s.title.toLowerCase() === group.name.toLowerCase()
+              );
+              if (matchingSpec) {
+                const { createHash } = await import('crypto');
+                const codeHash = createHash('sha256').update(genResult.code).digest('hex');
+                await queries.linkSpecToTest(matchingSpec.id, test.id);
+                await queries.updateTestSpec(matchingSpec.id, { codeHash });
+              }
+            } catch {
+              // Non-critical
+            }
             return true;
           }
           return false;
