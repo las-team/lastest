@@ -2,6 +2,42 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import { LastestClient, type ToolResponse } from './client.js';
 
+type ToolHandler = (params: Record<string, unknown>) => Promise<{ content: Array<{ type: 'text'; text: string }> }>;
+
+function withActivityReporting(
+  client: LastestClient,
+  toolName: string,
+  handler: ToolHandler,
+): ToolHandler {
+  return async (params) => {
+    const start = Date.now();
+    client.reportActivity({
+      eventType: 'mcp:tool_call',
+      summary: `MCP: ${toolName}`,
+      detail: { params },
+      toolName,
+    });
+    try {
+      const result = await handler(params);
+      client.reportActivity({
+        eventType: 'mcp:tool_result',
+        summary: `MCP: ${toolName} completed`,
+        durationMs: Date.now() - start,
+        toolName,
+      });
+      return result;
+    } catch (err) {
+      client.reportActivity({
+        eventType: 'mcp:tool_error',
+        summary: `MCP: ${toolName} failed — ${String(err)}`,
+        durationMs: Date.now() - start,
+        toolName,
+      });
+      throw err;
+    }
+  };
+}
+
 export function createServer(client: LastestClient): McpServer {
   const server = new McpServer({
     name: 'lastest2',
@@ -490,11 +526,11 @@ export function createServer(client: LastestClient): McpServer {
       testIds: z.array(z.string()).optional().describe('Specific test IDs to run. If omitted, runs all tests.'),
       gitBranch: z.string().optional().describe('Git branch override'),
     },
-    async (params): Promise<{ content: Array<{ type: 'text'; text: string }> }> => {
+    withActivityReporting(client, 'lastest2_run_tests', async (params) => {
       const result = await client.createBuild({
-        repositoryId: params.repositoryId,
-        testIds: params.testIds,
-        gitBranch: params.gitBranch,
+        repositoryId: params.repositoryId as string | undefined,
+        testIds: params.testIds as string[] | undefined,
+        gitBranch: params.gitBranch as string | undefined,
         triggerType: 'manual',
       });
 
@@ -508,7 +544,7 @@ export function createServer(client: LastestClient): McpServer {
       };
 
       return { content: [{ type: 'text', text: JSON.stringify(response, null, 2) }] };
-    },
+    }),
   );
 
   // --- lastest2_get_build_status ---
@@ -674,8 +710,8 @@ export function createServer(client: LastestClient): McpServer {
     {
       diffIds: z.array(z.string()).describe('Array of visual diff IDs to approve'),
     },
-    async (params): Promise<{ content: Array<{ type: 'text'; text: string }> }> => {
-      const result = await client.approveDiffs(params.diffIds);
+    withActivityReporting(client, 'lastest2_approve_baseline', async (params) => {
+      const result = await client.approveDiffs(params.diffIds as string[]);
 
       const response: ToolResponse = {
         status: 'approved',
@@ -684,7 +720,7 @@ export function createServer(client: LastestClient): McpServer {
       };
 
       return { content: [{ type: 'text', text: JSON.stringify(response, null, 2) }] };
-    },
+    }),
   );
 
   // --- lastest2_reject_baseline ---
@@ -694,8 +730,8 @@ export function createServer(client: LastestClient): McpServer {
     {
       diffIds: z.array(z.string()).describe('Array of visual diff IDs to reject'),
     },
-    async (params): Promise<{ content: Array<{ type: 'text'; text: string }> }> => {
-      const result = await client.rejectDiffs(params.diffIds);
+    withActivityReporting(client, 'lastest2_reject_baseline', async (params) => {
+      const result = await client.rejectDiffs(params.diffIds as string[]);
 
       const response: ToolResponse = {
         status: 'rejected',
@@ -704,7 +740,7 @@ export function createServer(client: LastestClient): McpServer {
       };
 
       return { content: [{ type: 'text', text: JSON.stringify(response, null, 2) }] };
-    },
+    }),
   );
 
   // --- lastest2_create_test ---
@@ -717,12 +753,12 @@ export function createServer(client: LastestClient): McpServer {
       prompt: z.string().optional().describe('Natural language description of what to test'),
       functionalAreaId: z.string().optional().describe('Functional area to assign the test to'),
     },
-    async (params): Promise<{ content: Array<{ type: 'text'; text: string }> }> => {
+    withActivityReporting(client, 'lastest2_create_test', async (params) => {
       const result = (await client.createTest({
-        repositoryId: params.repositoryId,
-        url: params.url,
-        prompt: params.prompt,
-        functionalAreaId: params.functionalAreaId,
+        repositoryId: params.repositoryId as string,
+        url: params.url as string | undefined,
+        prompt: params.prompt as string | undefined,
+        functionalAreaId: params.functionalAreaId as string | undefined,
       })) as Record<string, unknown>;
 
       const response: ToolResponse = {
@@ -733,7 +769,7 @@ export function createServer(client: LastestClient): McpServer {
       };
 
       return { content: [{ type: 'text', text: JSON.stringify(response, null, 2) }] };
-    },
+    }),
   );
 
   // --- lastest2_get_coverage ---
@@ -773,8 +809,8 @@ export function createServer(client: LastestClient): McpServer {
     {
       testId: z.string().describe('ID of the failing test to heal'),
     },
-    async (params): Promise<{ content: Array<{ type: 'text'; text: string }> }> => {
-      const result = (await client.healTest(params.testId)) as Record<string, unknown>;
+    withActivityReporting(client, 'lastest2_heal_test', async (params) => {
+      const result = (await client.healTest(params.testId as string)) as Record<string, unknown>;
 
       const response: ToolResponse = {
         status: result.success ? 'healed' : 'heal_failed',
@@ -788,7 +824,7 @@ export function createServer(client: LastestClient): McpServer {
       };
 
       return { content: [{ type: 'text', text: JSON.stringify(response, null, 2) }] };
-    },
+    }),
   );
 
   return server;

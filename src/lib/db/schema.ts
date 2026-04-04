@@ -1707,3 +1707,48 @@ export const testSpecs = pgTable('test_specs', {
 
 export type TestSpec = typeof testSpecs.$inferSelect;
 export type NewTestSpec = typeof testSpecs.$inferInsert;
+
+// ── Activity Events (Agent Activity Feed) ───────────────────────────────────
+
+export type ActivityEventType =
+  | 'session:start'
+  | 'session:complete'
+  | 'session:error'
+  | 'step:start'
+  | 'step:complete'
+  | 'step:error'
+  | 'step:waiting_user'
+  | 'substep:update'
+  | 'mcp:tool_call'
+  | 'mcp:tool_result'
+  | 'mcp:tool_error'
+  | 'artifact:created';
+
+export type ActivitySourceType = 'play_agent' | 'mcp_server';
+
+export type ActivityArtifactType = 'test' | 'build' | 'area' | 'baseline' | 'suite';
+
+export const activityEvents = pgTable('activity_events', {
+  id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+  teamId: text('team_id').notNull(),
+  repositoryId: text('repository_id'),
+  sessionId: text('session_id'),
+  sourceType: text('source_type').$type<ActivitySourceType>().notNull(),
+  eventType: text('event_type').$type<ActivityEventType>().notNull(),
+  agentType: text('agent_type').$type<PwAgentType>(),
+  stepId: text('step_id'),
+  summary: text('summary').notNull(),
+  detail: jsonb('detail').$type<Record<string, unknown>>(),
+  artifactType: text('artifact_type').$type<ActivityArtifactType>(),
+  artifactId: text('artifact_id'),
+  artifactLabel: text('artifact_label'),
+  promptLogId: text('prompt_log_id'),
+  durationMs: integer('duration_ms'),
+  createdAt: timestamp('created_at').$defaultFn(() => new Date()),
+}, (table) => ([
+  index('idx_activity_events_team_created').on(table.teamId, table.createdAt),
+  index('idx_activity_events_session').on(table.sessionId),
+]));
+
+export type ActivityEvent = typeof activityEvents.$inferSelect;
+export type NewActivityEvent = typeof activityEvents.$inferInsert;

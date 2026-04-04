@@ -199,4 +199,24 @@ export class LastestClient {
   async healTest(testId: string): Promise<unknown> {
     return this.post(`/api/v1/tests/${testId}/heal`);
   }
+
+  // --- Activity Reporting ---
+
+  async reportActivity(data: {
+    eventType: string;
+    summary: string;
+    detail?: Record<string, unknown>;
+    toolName?: string;
+    durationMs?: number;
+    repositoryId?: string;
+    artifactType?: string;
+    artifactId?: string;
+    artifactLabel?: string;
+  }): Promise<void> {
+    try {
+      await this.post('/api/v1/activity', data);
+    } catch {
+      // Activity reporting is best-effort — never fail the tool call
+    }
+  }
 }

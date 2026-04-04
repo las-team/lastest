@@ -32,6 +32,8 @@ import { classifyTemplate } from '@/lib/templates/classifier';
 import { gatherCodebaseIntelligence } from '@/lib/ai/codebase-intelligence';
 import type { CodebaseIntelligence } from '@/lib/ai/codebase-intelligence';
 import type { CodebaseIntelligenceContext } from '@/lib/ai/types';
+import { emitAndPersistActivityEvent } from '@/lib/db/queries/activity-events';
+import type { ActivityEventType, PwAgentType } from '@/lib/db/schema';
 
 // ============================================
 // Constants
@@ -88,6 +90,41 @@ function cleanupController(sessionId: string) {
 
 function hashCode(code: string): string {
   return createHash('sha256').update(code).digest('hex').slice(0, 16);
+}
+
+/** Fire-and-forget activity event — never blocks step execution */
+function emitActivity(
+  teamId: string,
+  repositoryId: string,
+  sessionId: string,
+  eventType: ActivityEventType,
+  summary: string,
+  opts?: {
+    stepId?: string;
+    agentType?: PwAgentType;
+    detail?: Record<string, unknown>;
+    artifactType?: 'test' | 'build' | 'area' | 'baseline' | 'suite';
+    artifactId?: string;
+    artifactLabel?: string;
+    durationMs?: number;
+  },
+) {
+  emitAndPersistActivityEvent({
+    teamId,
+    repositoryId,
+    sessionId,
+    sourceType: 'play_agent',
+    eventType,
+    summary,
+    stepId: opts?.stepId ?? null,
+    agentType: opts?.agentType ?? null,
+    detail: opts?.detail ?? null,
+    artifactType: opts?.artifactType ?? null,
+    artifactId: opts?.artifactId ?? null,
+    artifactLabel: opts?.artifactLabel ?? null,
+    durationMs: opts?.durationMs ?? null,
+    promptLogId: null,
+  }).catch((err) => console.error('[ActivityFeed] emit error:', err));
 }
 
 async function updateStep(
@@ -1808,7 +1845,7 @@ async function runRerunTests(sessionId: string, repositoryId: string, _teamId: s
 // Summary (step 11)
 // ============================================
 
-async function runSummary(sessionId: string, _repositoryId: string, _teamId: string, _signal: AbortSignal) {
+async function runSummary(sessionId: string, repositoryId: string, teamId: string, _signal: AbortSignal) {
   await setStepActive(sessionId, 'summary');
 
   const session = await queries.getAgentSession(sessionId);
@@ -1835,6 +1872,10 @@ async function runSummary(sessionId: string, _repositoryId: string, _teamId: str
     status: 'completed',
     completedAt: new Date(),
   });
+  emitActivity(teamId, repositoryId, sessionId, 'session:complete',
+    `Session completed: ${result.testsCreated} tests, ${result.finalPassed} passed, ${result.finalFailed} failed`,
+    { detail: result as Record<string, unknown> },
+  );
   return true;
 }
 
@@ -1870,9 +1911,57 @@ async function executeFromStep(sessionId: string, repositoryId: string, teamId: 
       if (signal.aborted) return;
 
       const step = STEP_ORDER[i];
+      const stepDef = STEP_DEFINITIONS.find(d => d.id === step.id);
+      const stepLabel = stepDef?.label ?? step.id;
+      const stepStart = Date.now();
+
+      emitActivity(teamId, repositoryId, sessionId, 'step:start', `${stepLabel} started`, { stepId: step.id });
+
       const success = await step.run(sessionId, repositoryId, teamId, signal);
 
-      if (!success) {
+      if (success) {
+        emitActivity(teamId, repositoryId, sessionId, 'step:complete', `${stepLabel} completed`, {
+          stepId: step.id,
+          durationMs: Date.now() - stepStart,
+        });
+
+        // Emit artifact events for key steps
+        const sess = await queries.getAgentSession(sessionId);
+        const completedStep = sess?.steps.find(s => s.id === step.id);
+        if (completedStep?.result) {
+          if (step.id === 'generate' && completedStep.result.testsCreated) {
+            emitActivity(teamId, repositoryId, sessionId, 'artifact:created',
+              `${completedStep.result.testsCreated} tests generated`, {
+                stepId: step.id,
+                artifactType: 'test',
+                detail: { testsCreated: completedStep.result.testsCreated },
+              });
+          }
+          if ((step.id === 'run_tests' || step.id === 'rerun_tests') && completedStep.result.buildId) {
+            emitActivity(teamId, repositoryId, sessionId, 'artifact:created',
+              `Build created: ${completedStep.result.passedCount} passed, ${completedStep.result.failedCount} failed`, {
+                stepId: step.id,
+                artifactType: 'build',
+                artifactId: completedStep.result.buildId as string,
+                artifactLabel: `Build ${(completedStep.result.buildId as string).slice(0, 8)}`,
+              });
+          }
+        }
+      } else {
+        // Step paused (waiting_user) or failed — the specific handler already set the status
+        const session = await queries.getAgentSession(sessionId);
+        const stepState = session?.steps.find(s => s.id === step.id);
+        if (stepState?.status === 'failed') {
+          emitActivity(teamId, repositoryId, sessionId, 'step:error', `${stepLabel} failed: ${stepState.error || 'unknown'}`, {
+            stepId: step.id,
+            durationMs: Date.now() - stepStart,
+          });
+        } else if (stepState?.status === 'waiting_user') {
+          emitActivity(teamId, repositoryId, sessionId, 'step:waiting_user', `${stepLabel}: waiting for user`, {
+            stepId: step.id,
+            detail: { userAction: stepState.userAction },
+          });
+        }
         return;
       }
     }
@@ -1913,10 +2002,15 @@ export async function startPlayAgent(repositoryId: string): Promise<{ sessionId:
     metadata: {},
   });
 
+  const teamId = team?.id ?? '';
+
+  emitActivity(teamId, repositoryId, session.id, 'session:start', 'Play Agent session started');
+
   // Fire-and-forget: run steps
-  executeFromStep(session.id, repositoryId, team?.id ?? '', 'settings_check').catch((err) => {
+  executeFromStep(session.id, repositoryId, teamId, 'settings_check').catch((err) => {
     console.error('[PlayAgent] Unhandled error:', err);
     queries.updateAgentSession(session.id, { status: 'failed' }).catch(() => {});
+    emitActivity(teamId, repositoryId, session.id, 'session:error', `Session failed: ${String(err)}`);
   });
 
   return { sessionId: session.id };

@@ -20,6 +20,7 @@ import {
 import Image from 'next/image';
 import { RepoSelector, SyncReposButton, CreateLocalRepoButton } from './repo-selector';
 import { QueueIndicator } from '@/components/queue/queue-indicator';
+import { ActivityFeedIndicator } from '@/components/activity-feed/activity-feed-indicator-client';
 import { UserMenu } from '@/components/auth/user-menu';
 import type { Repository, User, Team } from '@/lib/db/schema';
 
@@ -201,7 +202,10 @@ export function Sidebar({ repos, selectedRepo, currentUser, team }: SidebarProps
         {currentUser && <UserMenu user={currentUser} />}
         <div className="flex items-center justify-between">
           <span className="text-xs text-muted-foreground">Visual Regression Testing</span>
-          <QueueIndicator />
+          <div className="flex items-center gap-0.5">
+            <ActivityFeedIndicator />
+            <QueueIndicator />
+          </div>
         </div>
       </div>
     </aside>

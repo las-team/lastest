@@ -159,7 +159,8 @@
       "Bash(do echo:*)",
       "Read(//home/ewyct/dev/lastest2/**)",
       "Bash(python3 -m json.tool)",
-      "WebFetch(domain:currents.dev)"
+      "WebFetch(domain:currents.dev)",
+      "WebFetch(domain:mobai.run)"
     ]
   },
   "disabledMcpjsonServers": [
