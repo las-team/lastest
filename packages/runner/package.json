@@ -1,10 +1,10 @@
 {
   "name": "@lastest/runner",
-  "version": "0.4.2",
-  "description": "Remote test execution runner for Lastest2 visual regression testing platform",
+  "version": "0.5.0",
+  "description": "Remote test execution runner for Lastest visual regression testing platform",
   "type": "module",
   "bin": {
-    "lastest2-runner": "./bin/lastest2-runner.js"
+    "lastest-runner": "./bin/lastest-runner.js"
   },
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -38,7 +38,7 @@
     "playwright",
     "testing",
     "runner",
-    "lastest2",
+    "lastest",
     "screenshot",
     "ci-cd"
   ],
@@ -46,12 +46,12 @@
   "license": "FSL-1.1-ALv2",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/dexilion-team/lastest2.git",
+    "url": "git+https://github.com/las-team/lastest.git",
     "directory": "packages/runner"
   },
-  "homepage": "https://github.com/dexilion-team/lastest2#readme",
+  "homepage": "https://github.com/las-team/lastest#readme",
   "bugs": {
-    "url": "https://github.com/dexilion-team/lastest2/issues"
+    "url": "https://github.com/las-team/lastest/issues"
   },
   "publishConfig": {
     "access": "public"

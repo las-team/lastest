@@ -2,7 +2,7 @@
  * autoresearch/evaluate.ts — EVALUATION HARNESS
  *
  * Two modes:
- *   --mode=generate  (default) Generate tests for lastest2 routes, run them
+ *   --mode=generate  (default) Generate tests for lastest routes, run them
  *   --mode=replay    Re-generate tests for previously-failed scenarios from DB
  *
  * Usage:
@@ -44,7 +44,7 @@ const STORAGE_STATE_PATH = path.join(os.tmpdir(), 'autoresearch-auth.json');
 const MODE = process.argv.includes('--mode=replay') ? 'replay' : 'generate';
 const MAX_REPLAY = parseInt(process.env.MAX_REPLAY || '20', 10);
 
-// Fixed routes for generate mode (lastest2 app routes)
+// Fixed routes for generate mode (lastest app routes)
 const GENERATE_ROUTES: { path: string; isDynamic: boolean; description: string }[] = [
   { path: '/', isDynamic: false, description: 'Dashboard / home page' },
   { path: '/tests', isDynamic: false, description: 'Test list page' },

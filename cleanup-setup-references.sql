@@ -1,5 +1,5 @@
 -- Cleanup orphaned setup references
--- Run with: sqlite3 lastest2.db < cleanup-setup-references.sql
+-- Run with: sqlite3 lastest.db < cleanup-setup-references.sql
 
 -- 1. Clear tests.setup_test_id where referenced test doesn't exist
 UPDATE tests

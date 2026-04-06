@@ -15,7 +15,7 @@ const jetbrainsMono = JetBrains_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Lastest2 - Visual Regression Testing",
+  title: "Lastest - Visual Regression Testing",
   description: "AI-powered visual regression testing tool",
   icons: {
     icon: [

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Lastest2 Runner CLI
+ * Lastest Runner CLI
  * Remote test execution runner for cloud deployment.
  */
 
@@ -18,7 +18,7 @@ export { RunnerClient } from './client.js';
 export { TestRunner } from './runner.js';
 export * from './protocol.js';
 
-const CONFIG_DIR = path.join(os.homedir(), '.lastest2');
+const CONFIG_DIR = path.join(os.homedir(), '.lastest');
 const PID_FILE = path.join(CONFIG_DIR, 'runner.pid');
 const LOG_FILE = path.join(CONFIG_DIR, 'runner.log');
 const CONFIG_FILE = path.join(CONFIG_DIR, 'runner.config.json');
@@ -50,7 +50,7 @@ function getRunningPid(): number | null {
 
 // Derive a machine-bound encryption key from hostname + username
 function deriveKey(): Buffer {
-  const material = `lastest2-runner:${os.hostname()}:${os.userInfo().username}`;
+  const material = `lastest-runner:${os.hostname()}:${os.userInfo().username}`;
   return crypto.createHash('sha256').update(material).digest();
 }
 
@@ -126,16 +126,16 @@ export async function main() {
   const program = new Command();
 
   program
-    .name('lastest2-runner')
-    .description('Remote test execution runner for the Lastest2 visual regression testing platform.\n\nConnects to a Lastest2 server via WebSocket, receives test jobs, executes them\nlocally using Playwright, and reports results back. Can run as a background daemon\nor in the foreground.\n\nConfig directory: ~/.lastest2/')
+    .name('lastest-runner')
+    .description('Remote test execution runner for the Lastest visual regression testing platform.\n\nConnects to a Lastest server via WebSocket, receives test jobs, executes them\nlocally using Playwright, and reports results back. Can run as a background daemon\nor in the foreground.\n\nConfig directory: ~/.lastest/')
     .version('0.1.0');
 
   // Start command - runs in background
   program
     .command('start')
-    .description('Start the runner as a background daemon.\n\nSpawns a detached background process that connects to the Lastest2 server,\nlistens for test execution jobs, and runs them using a local Playwright browser.\nThe daemon PID is saved to ~/.lastest2/runner.pid and logs are written to\n~/.lastest2/runner.log. Use "lastest2-runner stop" to terminate the daemon.\n\nIf no options are provided, uses the config saved from the last run.')
-    .option('-t, --token <token>', 'Runner authentication token (from Settings > Runners in the Lastest2 UI)')
-    .option('-s, --server <url>', 'Lastest2 server URL to connect to (e.g., https://your-app.vercel.app)')
+    .description('Start the runner as a background daemon.\n\nSpawns a detached background process that connects to the Lastest server,\nlistens for test execution jobs, and runs them using a local Playwright browser.\nThe daemon PID is saved to ~/.lastest/runner.pid and logs are written to\n~/.lastest/runner.log. Use "lastest-runner stop" to terminate the daemon.\n\nIf no options are provided, uses the config saved from the last run.')
+    .option('-t, --token <token>', 'Runner authentication token (from Settings > Runners in the Lastest UI)')
+    .option('-s, --server <url>', 'Lastest server URL to connect to (e.g., https://your-app.vercel.app)')
     .option('-i, --interval <ms>', 'Poll interval in milliseconds (default: 5000)')
     .option('-b, --base-url <url>', 'Override the target URL for test execution (useful for testing against local or staging environments)')
     .action(async (options) => {
@@ -156,7 +156,7 @@ export async function main() {
 
       if (!token || !server) {
         console.error('Error: --token and --server are required (no saved config found)');
-        console.error('Run with: lastest2-runner start -t <token> -s <server-url>');
+        console.error('Run with: lastest-runner start -t <token> -s <server-url>');
         process.exit(1);
       }
 
@@ -192,7 +192,7 @@ export async function main() {
   // Stop command
   program
     .command('stop')
-    .description('Stop the running background daemon.\n\nSends SIGTERM to the process identified in ~/.lastest2/runner.pid and removes\nthe PID file. Exits with code 1 if no runner is currently running.')
+    .description('Stop the running background daemon.\n\nSends SIGTERM to the process identified in ~/.lastest/runner.pid and removes\nthe PID file. Exits with code 1 if no runner is currently running.')
     .action(() => {
       const pid = getRunningPid();
       if (!pid) {
@@ -233,7 +233,7 @@ export async function main() {
   program
     .command('log')
     .alias('logs')
-    .description('Show runner logs from ~/.lastest2/runner.log.\n\nBy default shows the last 50 lines. Use -f to follow output in real-time\n(like "tail -f"). Use -n to control how many lines are displayed.')
+    .description('Show runner logs from ~/.lastest/runner.log.\n\nBy default shows the last 50 lines. Use -f to follow output in real-time\n(like "tail -f"). Use -n to control how many lines are displayed.')
     .option('-f, --follow', 'Follow log output in real-time (Ctrl+C to stop)')
     .option('-n, --lines <number>', 'Number of recent lines to show (default: 50)', '50')
     .action((options) => {
@@ -268,7 +268,7 @@ export async function main() {
     .command('repos')
     .description('List repositories available for triggering builds.\n\nFetches the list of repositories accessible to the runner\'s team\nand displays them in a table with ID, name, and test count.')
     .option('-t, --token <token>', 'Runner authentication token')
-    .option('-s, --server <url>', 'Lastest2 server URL')
+    .option('-s, --server <url>', 'Lastest server URL')
     .action(async (options) => {
       const saved = loadConfig();
       const token = options.token || saved.token;
@@ -314,10 +314,10 @@ export async function main() {
   // Trigger command — create a build and poll for results
   program
     .command('trigger')
-    .description('Trigger a build for a repository and wait for results.\n\nCreates a new build via the Lastest2 server API, polls for progress,\nand prints a summary when complete. Exits 0 on pass/safe_to_merge/review_required,\nexits 1 on failed/blocked.')
+    .description('Trigger a build for a repository and wait for results.\n\nCreates a new build via the Lastest server API, polls for progress,\nand prints a summary when complete. Exits 0 on pass/safe_to_merge/review_required,\nexits 1 on failed/blocked.')
     .requiredOption('-r, --repo <id-or-name>', 'Repository ID or full name (e.g. "owner/repo")')
     .option('-t, --token <token>', 'Runner authentication token')
-    .option('-s, --server <url>', 'Lastest2 server URL')
+    .option('-s, --server <url>', 'Lastest server URL')
     .option('--timeout <ms>', 'Timeout in milliseconds', '300000')
     .option('--branch <branch>', 'Git branch (defaults to $GITHUB_HEAD_REF || $GITHUB_REF_NAME)')
     .option('--commit <sha>', 'Git commit SHA (defaults to $GITHUB_SHA)')
@@ -564,8 +564,8 @@ export async function main() {
   program
     .command('run')
     .description('Run the runner in the foreground.\n\nSame as "start" but keeps the process attached to the current terminal.\nUseful for debugging, Docker containers, or CI/CD environments where you\nwant to see output directly. Handles SIGINT and SIGTERM for graceful shutdown.\n\nIf no options are provided, uses the config saved from the last run.')
-    .option('-t, --token <token>', 'Runner authentication token (from Settings > Runners in the Lastest2 UI)')
-    .option('-s, --server <url>', 'Lastest2 server URL to connect to (e.g., https://your-app.vercel.app)')
+    .option('-t, --token <token>', 'Runner authentication token (from Settings > Runners in the Lastest UI)')
+    .option('-s, --server <url>', 'Lastest server URL to connect to (e.g., https://your-app.vercel.app)')
     .option('-i, --interval <ms>', 'Poll interval in milliseconds (default: 5000)')
     .option('-b, --base-url <url>', 'Override the target URL for test execution (useful for testing against local or staging environments)')
     .action(async (options) => {
@@ -580,7 +580,7 @@ export async function main() {
 
       if (!token || !server) {
         console.error('Error: --token and --server are required (no saved config found)');
-        console.error('Run with: lastest2-runner run -t <token> -s <server-url>');
+        console.error('Run with: lastest-runner run -t <token> -s <server-url>');
         process.exit(1);
       }
 
@@ -588,13 +588,13 @@ export async function main() {
       saveConfig(token, server, interval, baseUrl);
 
       const timestamp = () => new Date().toISOString();
-      console.log(`[${timestamp()}] Lastest2 Runner starting...`);
+      console.log(`[${timestamp()}] Lastest Runner starting...`);
       console.log(`[${timestamp()}] Server: ${server}`);
       if (baseUrl) {
         console.log(`[${timestamp()}] Base URL override: ${baseUrl}`);
       }
       if (!options.token || !options.server) {
-        console.log(`[${timestamp()}] Using saved config from ~/.lastest2/runner.config.json`);
+        console.log(`[${timestamp()}] Using saved config from ~/.lastest/runner.config.json`);
       }
 
       // Verify Playwright Chromium is installed before connecting

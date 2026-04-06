@@ -47,7 +47,7 @@ export function BuildPollingWrapper({ initialBuild, buildId, isMainBranch = fals
 
   // Mark "Check Results" setup guide step as complete on page visit
   useEffect(() => {
-    try { localStorage.setItem('lastest2-results-viewed', 'true'); } catch {}
+    try { localStorage.setItem('lastest-results-viewed', 'true'); } catch {}
   }, []);
   const router = useRouter();
 

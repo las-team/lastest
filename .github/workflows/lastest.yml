@@ -1,4 +1,4 @@
-name: Lastest2 Visual Tests
+name: Lastest Visual Tests
 on:
   pull_request:
   workflow_dispatch:
@@ -13,13 +13,13 @@ jobs:
           node-version: '20'
       - name: Run visual tests
         env:
-          LASTEST2_TOKEN: ${{ secrets.LASTEST2_TOKEN }}
-          LASTEST2_URL: ${{ secrets.LASTEST2_URL }}
+          LASTEST_TOKEN: ${{ secrets.LASTEST_TOKEN }}
+          LASTEST_URL: ${{ secrets.LASTEST_URL }}
         run: |
-          npx @lastest/runner@0.4.2 trigger \
-            -t "$LASTEST2_TOKEN" \
-            -s "$LASTEST2_URL" \
-            --repo "dexilion-team/lastest2" \
+          npx @lastest/runner@latest trigger \
+            -t "$LASTEST_TOKEN" \
+            -s "$LASTEST_URL" \
+            --repo "las-team/lastest" \
             --branch "${{ github.head_ref || github.ref_name }}" \
             --commit "${{ github.sha }}" \
             --timeout 3000000 \

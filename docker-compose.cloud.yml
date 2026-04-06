@@ -1,5 +1,5 @@
 # =============================================================================
-# Lastest2 - Cloud Deployment with Embedded Browser Replicas
+# Lastest - Cloud Deployment with Embedded Browser Replicas
 # =============================================================================
 #
 # Usage:
@@ -16,13 +16,13 @@
 services:
   postgres:
     image: postgres:17-alpine
-    container_name: lastest2-cloud-db
+    container_name: lastest-cloud-db
     environment:
       POSTGRES_USER: lastest
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-lastest}
       POSTGRES_DB: lastest
     volumes:
-      - lastest2-pgdata:/var/lib/postgresql/data
+      - lastest-pgdata:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U lastest"]
       interval: 5s
@@ -30,15 +30,15 @@ services:
       retries: 5
     restart: unless-stopped
     networks:
-      - lastest2-net
+      - lastest-net
 
-  lastest2:
+  lastest:
     image: ewyc/lastest:latest
-    container_name: lastest2
+    container_name: lastest
     ports:
       - "3000:3000"
     volumes:
-      - lastest2-storage:/app/storage
+      - lastest-storage:/app/storage
     environment:
       - NODE_ENV=production
       - DATABASE_URL=postgresql://lastest:${POSTGRES_PASSWORD:-lastest}@postgres:5432/lastest
@@ -61,7 +61,7 @@ services:
       retries: 3
       start_period: 60s
     networks:
-      - lastest2-net
+      - lastest-net
 
   embedded-browser:
     image: ewyc/lastest-eb:latest
@@ -71,22 +71,22 @@ services:
     deploy:
       replicas: 5
     environment:
-      - LASTEST2_URL=http://lastest2:3000
+      - LASTEST_URL=http://lastest:3000
       - SYSTEM_EB_TOKEN=${SYSTEM_EB_TOKEN:?SYSTEM_EB_TOKEN is required}
       - STREAM_PORT=9223
     depends_on:
-      lastest2:
+      lastest:
         condition: service_healthy
     restart: unless-stopped
     networks:
-      - lastest2-net
+      - lastest-net
 
 networks:
-  lastest2-net:
+  lastest-net:
     driver: bridge
 
 volumes:
-  lastest2-pgdata:
+  lastest-pgdata:
     driver: local
-  lastest2-storage:
+  lastest-storage:
     driver: local

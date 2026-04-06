@@ -1,5 +1,5 @@
 /**
- * HTTP client for Lastest2 REST API v1.
+ * HTTP client for Lastest REST API v1.
  * All MCP tools delegate to this client.
  */
 
@@ -43,7 +43,7 @@ export class LastestClient {
 
     if (!res.ok) {
       const text = await res.text().catch(() => '');
-      throw new Error(`Lastest2 API error ${res.status}: ${text || res.statusText}`);
+      throw new Error(`Lastest API error ${res.status}: ${text || res.statusText}`);
     }
 
     return res.json() as Promise<T>;

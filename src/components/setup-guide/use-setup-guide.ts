@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback, useMemo } from 'react';
 
-const STORAGE_KEY = 'lastest2-setup-guide';
+const STORAGE_KEY = 'lastest-setup-guide';
 
 export interface SetupStatus {
   githubConnected: boolean;
@@ -51,8 +51,8 @@ export function useSetupGuide(initialStatus: SetupStatus) {
     // If database is empty but guide was dismissed, reset the guide state
     if (isDatabaseEmpty && loaded.dismissed) {
       localStorage.removeItem(STORAGE_KEY);
-      localStorage.removeItem('lastest2-ai-configured');
-      localStorage.removeItem('lastest2-results-viewed');
+      localStorage.removeItem('lastest-ai-configured');
+      localStorage.removeItem('lastest-results-viewed');
       loaded.completedSteps = [];
       loaded.dismissed = false;
     }
@@ -60,14 +60,14 @@ export function useSetupGuide(initialStatus: SetupStatus) {
     // Merge server-detected + localStorage-detected completions
     const autoDetected: number[] = [];
     if (initialStatus.githubConnected) autoDetected.push(1);
-    const aiConfigured = localStorage.getItem('lastest2-ai-configured') === 'true';
+    const aiConfigured = localStorage.getItem('lastest-ai-configured') === 'true';
     if (aiConfigured) autoDetected.push(2);
     if (initialStatus.routesExist) autoDetected.push(3);
     if (initialStatus.testsExist) autoDetected.push(4);
     if (initialStatus.buildsExist) autoDetected.push(5);
     if (initialStatus.baselinesApproved) autoDetected.push(6);
     if (initialStatus.buildCount >= 2) autoDetected.push(7);
-    const resultsViewed = localStorage.getItem('lastest2-results-viewed') === 'true';
+    const resultsViewed = localStorage.getItem('lastest-results-viewed') === 'true';
     if (resultsViewed) autoDetected.push(8);
 
     const merged = Array.from(new Set([...loaded.completedSteps, ...autoDetected]));

@@ -162,7 +162,7 @@ function ConfigCard({
                   </span>
                   <div className="flex-1 space-y-2">
                     <p className="text-sm">
-                      Add <code className="text-xs bg-muted px-1 py-0.5 rounded">LASTEST2_TOKEN</code> as
+                      Add <code className="text-xs bg-muted px-1 py-0.5 rounded">LASTEST_TOKEN</code> as
                       a repository secret in GitHub
                     </p>
                     <p className="text-xs text-muted-foreground">
@@ -178,11 +178,11 @@ function ConfigCard({
                   </span>
                   <div className="flex-1 space-y-2">
                     <p className="text-sm">
-                      Add <code className="text-xs bg-muted px-1 py-0.5 rounded">LASTEST2_URL</code> as
+                      Add <code className="text-xs bg-muted px-1 py-0.5 rounded">LASTEST_URL</code> as
                       a repository secret
                     </p>
                     <CopyBlock
-                      label="Your Lastest2 instance URL"
+                      label="Your Lastest instance URL"
                       value={typeof window !== 'undefined' ? window.location.origin : ''}
                     />
                   </div>
@@ -196,7 +196,7 @@ function ConfigCard({
                     <p className="text-sm">
                       Create the workflow file at{' '}
                       <code className="text-xs bg-muted px-1 py-0.5 rounded">
-                        .github/workflows/lastest2.yml
+                        .github/workflows/lastest.yml
                       </code>
                     </p>
                     <p className="text-xs text-muted-foreground">
@@ -238,8 +238,8 @@ function ConfigCard({
               <ul className="list-disc ml-4 mt-1 space-y-0.5">
                 {config.workflowDeployed && (
                   <>
-                    <li>Delete <code className="font-mono">.github/workflows/lastest2.yml</code> from the repo</li>
-                    <li>Remove LASTEST2_TOKEN and LASTEST2_URL secrets</li>
+                    <li>Delete <code className="font-mono">.github/workflows/lastest.yml</code> from the repo</li>
+                    <li>Remove LASTEST_TOKEN and LASTEST_URL secrets</li>
                   </>
                 )}
                 {(mode === 'ephemeral' || mode === 'auto') && config.runnerId && (

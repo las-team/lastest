@@ -164,7 +164,7 @@ export class TestRunner {
     };
 
     const startTime = Date.now();
-    const screenshots: Array<{ filename: string; data: string; width: number; height: number }> = [];
+    const screenshots: Array<{ filename: string; data: string; width: number; height: number; capturedAt?: number }> = [];
     let result: TestRunResult | null = null;
 
     let context: BrowserContext | null = null;

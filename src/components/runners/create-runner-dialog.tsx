@@ -67,7 +67,7 @@ export function CreateRunnerDialog() {
     if (!token) return;
     const serverUrl = typeof window !== 'undefined' ? window.location.origin : 'http://localhost:3000';
     const command = runnerType === 'embedded'
-      ? `LASTEST2_TOKEN=${token} LASTEST2_URL=${serverUrl} docker compose up embedded-browser -d --build`
+      ? `LASTEST_TOKEN=${token} LASTEST_URL=${serverUrl} docker compose up embedded-browser -d --build`
       : `npx @lastest/runner start -t ${token} -s ${serverUrl}`;
     await navigator.clipboard.writeText(command);
     setCopiedCommand(true);
@@ -152,11 +152,11 @@ export function CreateRunnerDialog() {
               {isEmbedded ? (
                 <>
                   <p className="text-xs text-muted-foreground">
-                    Set the token as <code className="bg-muted px-1 py-0.5 rounded text-xs">LASTEST2_TOKEN</code> in your environment or <code className="bg-muted px-1 py-0.5 rounded text-xs">.env</code> file, then start the container:
+                    Set the token as <code className="bg-muted px-1 py-0.5 rounded text-xs">LASTEST_TOKEN</code> in your environment or <code className="bg-muted px-1 py-0.5 rounded text-xs">.env</code> file, then start the container:
                   </p>
                   <div className="relative">
                     <pre className="bg-muted p-3 rounded-md text-xs font-mono whitespace-pre-wrap break-all pr-10">
-{`LASTEST2_TOKEN=${token} \\\nLASTEST2_URL=${typeof window !== 'undefined' ? window.location.origin : 'http://localhost:3000'} \\\ndocker compose up embedded-browser -d`}
+{`LASTEST_TOKEN=${token} \\\nLASTEST_URL=${typeof window !== 'undefined' ? window.location.origin : 'http://localhost:3000'} \\\ndocker compose up embedded-browser -d`}
                     </pre>
                     <Button
                       variant="ghost"

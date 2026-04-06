@@ -5,7 +5,7 @@ import type { WSMessage, TestProgressPayload, TestCompletePayload } from './type
  * SSE-based real-time updates for the VSCode extension.
  * Uses Server-Sent Events since Next.js App Router doesn't support WebSocket.
  */
-export class Lastest2WebSocket {
+export class LastestWebSocket {
   private eventSource: EventSource | null = null;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private readonly reconnectInterval = 5000;
@@ -59,7 +59,7 @@ export class Lastest2WebSocket {
         throw new Error('No response body');
       }
 
-      console.log('Lastest2 SSE connected');
+      console.log('Lastest SSE connected');
       this.onConnectionChangeEmitter.fire(true);
 
       if (this.reconnectTimer) {
@@ -97,7 +97,7 @@ export class Lastest2WebSocket {
       if ((err as Error).name === 'AbortError') {
         return; // Intentional disconnect
       }
-      console.error('Lastest2 SSE error:', e);
+      console.error('Lastest SSE error:', e);
       this.onConnectionChangeEmitter.fire(false);
       this.scheduleReconnect();
     }
@@ -131,7 +131,7 @@ export class Lastest2WebSocket {
         this.onTestCompleteEmitter.fire(message.payload as TestCompletePayload);
         break;
       case 'connected':
-        console.log('Lastest2 SSE handshake complete');
+        console.log('Lastest SSE handshake complete');
         break;
     }
   }

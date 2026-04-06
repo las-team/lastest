@@ -3,7 +3,7 @@
  *
  * Entry point for the embedded browser container.
  * Launches Playwright Chromium, starts CDP screencast streaming,
- * and connects to the main Lastest2 app as a runner.
+ * and connects to the main Lastest app as a runner.
  */
 
 import { chromium, type Browser, type Page, type BrowserContext } from 'playwright';
@@ -20,8 +20,8 @@ import os from 'os';
 
 // Configuration from environment
 const config = {
-  serverUrl: process.env.LASTEST2_URL ?? 'http://localhost:3000',
-  token: process.env.LASTEST2_TOKEN ?? '',
+  serverUrl: process.env.LASTEST_URL ?? 'http://localhost:3000',
+  token: process.env.LASTEST_TOKEN ?? '',
   systemToken: process.env.SYSTEM_EB_TOKEN ?? '',
   streamPort: parseInt(process.env.STREAM_PORT ?? '9223', 10),
   streamHost: process.env.STREAM_HOST ?? '', // Empty = auto-detect container IP
@@ -33,7 +33,7 @@ const config = {
 };
 
 if (!config.token && !config.systemToken) {
-  console.error('Either LASTEST2_TOKEN or SYSTEM_EB_TOKEN is required');
+  console.error('Either LASTEST_TOKEN or SYSTEM_EB_TOKEN is required');
   process.exit(1);
 }
 

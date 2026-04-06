@@ -14,14 +14,14 @@ npx @lastest/mcp-server --url http://localhost:3000 --api-key YOUR_KEY
 
 ### Core Tools
 
-- `lastest2_run_tests` — trigger test build, returns build ID
-- `lastest2_get_build_status` — poll for results (status, pass/fail, diffs)
-- `lastest2_list_failing_tests` — failing tests with errors
-- `lastest2_get_visual_diff` — diff details with AI classification
-- `lastest2_approve_baseline` / `lastest2_reject_baseline` — act on diffs
-- `lastest2_create_test` — AI generates test from URL or prompt
-- `lastest2_heal_test` — AI auto-fixes failing test
-- `lastest2_get_coverage` — coverage by area and route
+- `lastest_run_tests` — trigger test build, returns build ID
+- `lastest_get_build_status` — poll for results (status, pass/fail, diffs)
+- `lastest_list_failing_tests` — failing tests with errors
+- `lastest_get_visual_diff` — diff details with AI classification
+- `lastest_approve_baseline` / `lastest_reject_baseline` — act on diffs
+- `lastest_create_test` — AI generates test from URL or prompt
+- `lastest_heal_test` — AI auto-fixes failing test
+- `lastest_get_coverage` — coverage by area and route
 
 ### Workflow
 

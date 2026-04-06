@@ -66,8 +66,8 @@ export async function deleteGithubActionConfigAction(id: string) {
       // Delete workflow file and secrets (best-effort — don't fail the delete if GitHub is unreachable)
       await Promise.allSettled([
         deleteWorkflowFile(ghAccount.accessToken, config.repositoryOwner, config.repositoryName),
-        deleteRepoSecret(ghAccount.accessToken, config.repositoryOwner, config.repositoryName, 'LASTEST2_TOKEN'),
-        deleteRepoSecret(ghAccount.accessToken, config.repositoryOwner, config.repositoryName, 'LASTEST2_URL'),
+        deleteRepoSecret(ghAccount.accessToken, config.repositoryOwner, config.repositoryName, 'LASTEST_TOKEN'),
+        deleteRepoSecret(ghAccount.accessToken, config.repositoryOwner, config.repositoryName, 'LASTEST_URL'),
       ]);
     }
   }
@@ -149,18 +149,18 @@ export async function deployWorkflowToGithub(
       ghAccount.accessToken,
       config.repositoryOwner,
       config.repositoryName,
-      'LASTEST2_TOKEN',
+      'LASTEST_TOKEN',
       result.token,
     );
     results.tokenSecret = true;
 
-    const lastest2Url = process.env.NEXT_PUBLIC_APP_URL || process.env.BETTER_AUTH_BASE_URL || 'http://localhost:3000';
+    const lastestUrl = process.env.NEXT_PUBLIC_APP_URL || process.env.BETTER_AUTH_BASE_URL || 'http://localhost:3000';
     await setRepoSecret(
       ghAccount.accessToken,
       config.repositoryOwner,
       config.repositoryName,
-      'LASTEST2_URL',
-      lastest2Url,
+      'LASTEST_URL',
+      lastestUrl,
     );
     results.urlSecret = true;
 
@@ -177,18 +177,18 @@ export async function deployWorkflowToGithub(
       ghAccount.accessToken,
       config.repositoryOwner,
       config.repositoryName,
-      'LASTEST2_TOKEN',
+      'LASTEST_TOKEN',
       regen.token,
     );
     results.tokenSecret = true;
 
-    const lastest2Url = process.env.NEXT_PUBLIC_APP_URL || process.env.BETTER_AUTH_BASE_URL || 'http://localhost:3000';
+    const lastestUrl = process.env.NEXT_PUBLIC_APP_URL || process.env.BETTER_AUTH_BASE_URL || 'http://localhost:3000';
     await setRepoSecret(
       ghAccount.accessToken,
       config.repositoryOwner,
       config.repositoryName,
-      'LASTEST2_URL',
-      lastest2Url,
+      'LASTEST_URL',
+      lastestUrl,
     );
     results.urlSecret = true;
   }
@@ -249,8 +249,8 @@ export async function validateGithubActionSetup(configId: string): Promise<Valid
     // Run GitHub API checks in parallel
     const [workflowResult, tokenResult, urlResult, runResult] = await Promise.allSettled([
       getWorkflowFileSha(ghAccount.accessToken, config.repositoryOwner, config.repositoryName),
-      checkRepoSecretExists(ghAccount.accessToken, config.repositoryOwner, config.repositoryName, 'LASTEST2_TOKEN'),
-      checkRepoSecretExists(ghAccount.accessToken, config.repositoryOwner, config.repositoryName, 'LASTEST2_URL'),
+      checkRepoSecretExists(ghAccount.accessToken, config.repositoryOwner, config.repositoryName, 'LASTEST_TOKEN'),
+      checkRepoSecretExists(ghAccount.accessToken, config.repositoryOwner, config.repositoryName, 'LASTEST_URL'),
       getLatestWorkflowRun(ghAccount.accessToken, config.repositoryOwner, config.repositoryName),
     ]);
 
@@ -263,20 +263,20 @@ export async function validateGithubActionSetup(configId: string): Promise<Valid
       result.workflowFile = { status: 'fail', message: `API error: ${workflowResult.reason?.message || 'Unknown'}` };
     }
 
-    // 3. LASTEST2_TOKEN secret
+    // 3. LASTEST_TOKEN secret
     if (tokenResult.status === 'fulfilled') {
       result.secretToken = tokenResult.value
         ? { status: 'pass', message: 'Secret is set' }
-        : { status: 'fail', message: 'LASTEST2_TOKEN secret not found' };
+        : { status: 'fail', message: 'LASTEST_TOKEN secret not found' };
     } else {
       result.secretToken = { status: 'fail', message: `API error: ${tokenResult.reason?.message || 'Unknown'}` };
     }
 
-    // 4. LASTEST2_URL secret
+    // 4. LASTEST_URL secret
     if (urlResult.status === 'fulfilled') {
       result.secretUrl = urlResult.value
         ? { status: 'pass', message: 'Secret is set' }
-        : { status: 'fail', message: 'LASTEST2_URL secret not found' };
+        : { status: 'fail', message: 'LASTEST_URL secret not found' };
     } else {
       result.secretUrl = { status: 'fail', message: `API error: ${urlResult.reason?.message || 'Unknown'}` };
     }

@@ -50,8 +50,8 @@ function buildOnBlock(config: WorkflowConfig): string {
 function buildPersistentSteps(config: WorkflowConfig): string {
   const repo = `${config.repositoryOwner}/${config.repositoryName}`;
   const flags: string[] = [];
-  flags.push('-t "$LASTEST2_TOKEN"');
-  flags.push('-s "$LASTEST2_URL"');
+  flags.push('-t "$LASTEST_TOKEN"');
+  flags.push('-s "$LASTEST_URL"');
   flags.push(`--repo "${repo}"`);
   flags.push(`--branch "$\{{ github.head_ref || github.ref_name }}"`);
   flags.push(`--commit "$\{{ github.sha }}"`);
@@ -67,8 +67,8 @@ function buildPersistentSteps(config: WorkflowConfig): string {
           node-version: '20'
       - name: Run visual tests
         env:
-          LASTEST2_TOKEN: \${{ secrets.LASTEST2_TOKEN }}
-          LASTEST2_URL: \${{ secrets.LASTEST2_URL }}
+          LASTEST_TOKEN: \${{ secrets.LASTEST_TOKEN }}
+          LASTEST_URL: \${{ secrets.LASTEST_URL }}
         run: |
           ${runCmd}`;
 }
@@ -76,8 +76,8 @@ function buildPersistentSteps(config: WorkflowConfig): string {
 function buildEphemeralSteps(config: WorkflowConfig): string {
   const repo = `${config.repositoryOwner}/${config.repositoryName}`;
   const flags: string[] = [];
-  flags.push('-t "$LASTEST2_TOKEN"');
-  flags.push('-s "$LASTEST2_URL"');
+  flags.push('-t "$LASTEST_TOKEN"');
+  flags.push('-s "$LASTEST_URL"');
   flags.push(`--repo "${repo}"`);
   flags.push(`--branch "$\{{ github.head_ref || github.ref_name }}"`);
   flags.push(`--commit "$\{{ github.sha }}"`);
@@ -113,12 +113,12 @@ function buildEphemeralSteps(config: WorkflowConfig): string {
 
       - name: Run visual tests
         env:
-          LASTEST2_TOKEN: \${{ secrets.LASTEST2_TOKEN }}
-          LASTEST2_URL: \${{ secrets.LASTEST2_URL }}
+          LASTEST_TOKEN: \${{ secrets.LASTEST_TOKEN }}
+          LASTEST_URL: \${{ secrets.LASTEST_URL }}
         run: |
           npx @lastest/runner@${RUNNER_VERSION} run \\
-            -t "$LASTEST2_TOKEN" \\
-            -s "$LASTEST2_URL" &
+            -t "$LASTEST_TOKEN" \\
+            -s "$LASTEST_URL" &
           RUNNER_PID=$!
           sleep 3
 
@@ -134,7 +134,7 @@ export function generateWorkflowYaml(config: WorkflowConfig): string {
     ? buildEphemeralSteps(config)
     : buildPersistentSteps(config); // 'persistent' and 'auto' both use trigger-only steps
 
-  return `name: Lastest2 Visual Tests
+  return `name: Lastest Visual Tests
 ${onBlock}
 jobs:
   visual-tests:

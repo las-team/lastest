@@ -2,7 +2,7 @@
 
 import { useCallback, useSyncExternalStore } from 'react';
 
-const STORAGE_KEY = 'lastest2-preferred-runner';
+const STORAGE_KEY = 'lastest-preferred-runner';
 
 // In-memory store that syncs with localStorage
 let currentValue = 'local';

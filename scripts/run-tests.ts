@@ -3,7 +3,7 @@
  * CLI Test Runner for GitHub Actions
  * Supports two modes:
  * 1. Local mode: Runs Playwright tests directly (requires local database and browsers)
- * 2. Remote mode: Dispatches to a remote runner via the Lastest2 server API
+ * 2. Remote mode: Dispatches to a remote runner via the Lastest server API
  *
  * Usage:
  *   # Local mode (existing behavior)
@@ -14,7 +14,7 @@
  *
  * Options:
  *   --repo-id <id>        Repository ID (required)
- *   --server-url <url>    Lastest2 server URL (required for remote mode)
+ *   --server-url <url>    Lastest server URL (required for remote mode)
  *   --runner-token <tok>  API authentication token (required for remote mode)
  *   --runner-id <id>      Remote runner ID (omit or 'local' for local mode)
  *   --team-id <id>        Team ID (required for remote mode)
@@ -113,7 +113,7 @@ Usage:
 
 Options:
   --repo-id <id>        Repository ID (required)
-  --server-url <url>    Lastest2 server URL (for remote mode)
+  --server-url <url>    Lastest server URL (for remote mode)
   --runner-token <tok>  API authentication token (for remote mode)
   --runner-id <id>      Remote runner ID (omit or 'local' for local mode)
   --team-id <id>        Team ID (for remote mode)
@@ -135,7 +135,7 @@ function isRemoteMode(args: CLIArgs): boolean {
 }
 
 // =============================================================================
-// Remote Mode: Dispatch to Lastest2 server
+// Remote Mode: Dispatch to Lastest server
 // =============================================================================
 
 interface BuildResponse {

@@ -219,7 +219,7 @@ Create tests (one-time)          Run tests (forever, $0)
 
 ```bash
 git clone https://github.com/las-team/lastest.git
-cd lastest2
+cd lastest
 docker-compose up -d
 ```
 
@@ -229,8 +229,8 @@ Open [http://localhost:3000](http://localhost:3000) — that's it.
 
 ```bash
 git clone https://github.com/las-team/lastest.git
-cd lastest2
-docker run -d --name lastest2-dev-db -e POSTGRES_USER=lastest -e POSTGRES_PASSWORD=lastest -e POSTGRES_DB=lastest -p 5432:5432 postgres:17-alpine
+cd lastest
+docker run -d --name lastest-dev-db -e POSTGRES_USER=lastest -e POSTGRES_PASSWORD=lastest -e POSTGRES_DB=lastest -p 5432:5432 postgres:17-alpine
 pnpm install
 pnpm db:push
 pnpm dev
@@ -467,8 +467,8 @@ Uses the official Playwright base image (`mcr.microsoft.com/playwright`) with No
 
 | Volume | Purpose |
 |--------|---------|
-| `lastest2-pgdata` | PostgreSQL data |
-| `lastest2-storage` | Screenshots, baselines, diffs, traces |
+| `lastest-pgdata` | PostgreSQL data |
+| `lastest-storage` | Screenshots, baselines, diffs, traces |
 
 ### Environment Variables for Docker
 
@@ -498,20 +498,20 @@ Run tests on remote machines by deploying runners that connect back to your Last
 npm install -g @lastest/runner
 
 # Start as daemon
-lastest2-runner start -t YOUR_TOKEN -s https://your-lastest2-server
+lastest-runner start -t YOUR_TOKEN -s https://your-lastest-server
 
 # Or run in foreground
-lastest2-runner run -t YOUR_TOKEN -s https://your-lastest2-server
+lastest-runner run -t YOUR_TOKEN -s https://your-lastest-server
 ```
 
 ### Runner CLI
 
 ```bash
-lastest2-runner start -t <token> -s <server-url>  # Start as background daemon
-lastest2-runner stop                               # Stop the daemon
-lastest2-runner status                             # Show runner status
-lastest2-runner log [-f] [-n <lines>]              # View logs (-f to follow)
-lastest2-runner run -t <token> -s <server-url>     # Run in foreground
+lastest-runner start -t <token> -s <server-url>  # Start as background daemon
+lastest-runner stop                               # Stop the daemon
+lastest-runner status                             # Show runner status
+lastest-runner log [-f] [-n <lines>]              # View logs (-f to follow)
+lastest-runner run -t <token> -s <server-url>     # Run in foreground
 ```
 
 ### Runner Capabilities
@@ -521,7 +521,7 @@ lastest2-runner run -t <token> -s <server-url>     # Run in foreground
 - **Parallel**: Configurable max parallel tests per runner
 - **System Info**: Automatic OS, architecture, memory, and CPU reporting
 
-Config stored in `~/.lastest2/` (runner.pid, runner.log, runner.config.json).
+Config stored in `~/.lastest/` (runner.pid, runner.log, runner.config.json).
 
 ---
 
@@ -537,24 +537,24 @@ npx @lastest/mcp-server --url http://localhost:3000 --api-key YOUR_API_KEY
 
 | Tool | Description |
 |------|-------------|
-| `lastest2_run_tests` | Trigger a test build. Returns build ID for polling. |
-| `lastest2_get_build_status` | Get build results: pass/fail counts, visual diffs, overall status. |
-| `lastest2_list_tests` | List all tests with latest pass/fail status. |
-| `lastest2_list_failing_tests` | List currently failing tests with error details. |
-| `lastest2_get_visual_diff` | Get visual diff details with AI classification and confidence. |
-| `lastest2_approve_baseline` | Approve visual changes (updates baselines). |
-| `lastest2_reject_baseline` | Reject visual changes (blocks build). |
-| `lastest2_create_test` | Generate a test via AI from a URL or natural language prompt. |
-| `lastest2_heal_test` | Auto-fix a failing test using AI healer agent. |
-| `lastest2_get_coverage` | Get test coverage stats by functional area and route. |
+| `lastest_run_tests` | Trigger a test build. Returns build ID for polling. |
+| `lastest_get_build_status` | Get build results: pass/fail counts, visual diffs, overall status. |
+| `lastest_list_tests` | List all tests with latest pass/fail status. |
+| `lastest_list_failing_tests` | List currently failing tests with error details. |
+| `lastest_get_visual_diff` | Get visual diff details with AI classification and confidence. |
+| `lastest_approve_baseline` | Approve visual changes (updates baselines). |
+| `lastest_reject_baseline` | Reject visual changes (blocks build). |
+| `lastest_create_test` | Generate a test via AI from a URL or natural language prompt. |
+| `lastest_heal_test` | Auto-fix a failing test using AI healer agent. |
+| `lastest_get_coverage` | Get test coverage stats by functional area and route. |
 
 ### Typical Agent Workflow
 
-1. `lastest2_run_tests` — start a build
-2. `lastest2_get_build_status` — poll until complete
-3. If visual changes: `lastest2_get_visual_diff` — inspect diffs
-4. `lastest2_approve_baseline` or `lastest2_reject_baseline` — act on diffs
-5. If failures: `lastest2_heal_test` — auto-fix, then re-run
+1. `lastest_run_tests` — start a build
+2. `lastest_get_build_status` — poll until complete
+3. If visual changes: `lastest_get_visual_diff` — inspect diffs
+4. `lastest_approve_baseline` or `lastest_reject_baseline` — act on diffs
+5. If failures: `lastest_heal_test` — auto-fix, then re-run
 
 Every tool returns structured JSON: `{ status, summary, actionRequired, details }`.
 

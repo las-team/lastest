@@ -80,7 +80,7 @@ export function Sidebar({ repos, selectedRepo, currentUser, team }: SidebarProps
         >
           <Image src="/icon-light.svg" alt="" width={28} height={28} className="rounded-full dark:hidden" />
           <Image src="/icon-dark.svg" alt="" width={28} height={28} className="rounded-full hidden dark:block" />
-          LASTEST2
+          LASTEST
         </Link>
         {team && (
           <div className="flex items-center gap-2 mt-2 text-xs text-muted-foreground">

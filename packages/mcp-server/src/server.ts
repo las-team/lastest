@@ -40,31 +40,31 @@ function withActivityReporting(
 
 export function createServer(client: LastestClient): McpServer {
   const server = new McpServer({
-    name: 'lastest2',
+    name: 'lastest',
     version: '0.1.0',
   });
 
   // ===== Health & Status =====
 
-  // --- lastest2_health_check ---
+  // --- lastest_health_check ---
   server.tool(
-    'lastest2_health_check',
-    'Check connectivity to the Lastest2 instance.',
+    'lastest_health_check',
+    'Check connectivity to the Lastest instance.',
     {},
     async (): Promise<{ content: Array<{ type: 'text'; text: string }> }> => {
       const result = await client.health();
       const response: ToolResponse = {
         status: result.ok ? 'healthy' : 'unhealthy',
-        summary: result.ok ? 'Lastest2 is reachable and healthy' : 'Lastest2 health check failed',
+        summary: result.ok ? 'Lastest is reachable and healthy' : 'Lastest health check failed',
         details: result,
       };
       return { content: [{ type: 'text', text: JSON.stringify(response, null, 2) }] };
     },
   );
 
-  // --- lastest2_list_active_jobs ---
+  // --- lastest_list_active_jobs ---
   server.tool(
-    'lastest2_list_active_jobs',
+    'lastest_list_active_jobs',
     'List currently active background jobs (builds, AI operations, etc.).',
     {},
     async (): Promise<{ content: Array<{ type: 'text'; text: string }> }> => {
@@ -80,9 +80,9 @@ export function createServer(client: LastestClient): McpServer {
     },
   );
 
-  // --- lastest2_get_job_status ---
+  // --- lastest_get_job_status ---
   server.tool(
-    'lastest2_get_job_status',
+    'lastest_get_job_status',
     'Get the status and progress of a specific background job.',
     {
       jobId: z.string().describe('Background job ID'),
@@ -100,9 +100,9 @@ export function createServer(client: LastestClient): McpServer {
 
   // ===== Repositories =====
 
-  // --- lastest2_list_repos ---
+  // --- lastest_list_repos ---
   server.tool(
-    'lastest2_list_repos',
+    'lastest_list_repos',
     'List all repositories accessible to the current team.',
     {},
     async (): Promise<{ content: Array<{ type: 'text'; text: string }> }> => {
@@ -119,9 +119,9 @@ export function createServer(client: LastestClient): McpServer {
     },
   );
 
-  // --- lastest2_get_repo ---
+  // --- lastest_get_repo ---
   server.tool(
-    'lastest2_get_repo',
+    'lastest_get_repo',
     'Get details about a specific repository.',
     {
       repositoryId: z.string().describe('Repository ID'),
@@ -139,9 +139,9 @@ export function createServer(client: LastestClient): McpServer {
 
   // ===== Functional Areas =====
 
-  // --- lastest2_list_areas ---
+  // --- lastest_list_areas ---
   server.tool(
-    'lastest2_list_areas',
+    'lastest_list_areas',
     'List functional areas (test groupings) for a repository.',
     {
       repositoryId: z.string().describe('Repository ID'),
@@ -160,9 +160,9 @@ export function createServer(client: LastestClient): McpServer {
     },
   );
 
-  // --- lastest2_create_area ---
+  // --- lastest_create_area ---
   server.tool(
-    'lastest2_create_area',
+    'lastest_create_area',
     'Create a new functional area for organizing tests.',
     {
       name: z.string().describe('Name of the functional area'),
@@ -184,9 +184,9 @@ export function createServer(client: LastestClient): McpServer {
     },
   );
 
-  // --- lastest2_list_tests_by_area ---
+  // --- lastest_list_tests_by_area ---
   server.tool(
-    'lastest2_list_tests_by_area',
+    'lastest_list_tests_by_area',
     'List tests within a specific functional area.',
     {
       functionalAreaId: z.string().describe('Functional area ID'),
@@ -211,9 +211,9 @@ export function createServer(client: LastestClient): McpServer {
 
   // ===== Test Details & Mutations =====
 
-  // --- lastest2_get_test ---
+  // --- lastest_get_test ---
   server.tool(
-    'lastest2_get_test',
+    'lastest_get_test',
     'Get full details of a single test including code, URL, and last run status.',
     {
       testId: z.string().describe('Test ID'),
@@ -229,9 +229,9 @@ export function createServer(client: LastestClient): McpServer {
     },
   );
 
-  // --- lastest2_update_test ---
+  // --- lastest_update_test ---
   server.tool(
-    'lastest2_update_test',
+    'lastest_update_test',
     'Update a test\'s name, code, URL, or functional area assignment.',
     {
       testId: z.string().describe('Test ID to update'),
@@ -254,9 +254,9 @@ export function createServer(client: LastestClient): McpServer {
     },
   );
 
-  // --- lastest2_delete_test ---
+  // --- lastest_delete_test ---
   server.tool(
-    'lastest2_delete_test',
+    'lastest_delete_test',
     'Soft-delete a test (can be restored). Does not permanently remove test data.',
     {
       testId: z.string().describe('Test ID to delete'),
@@ -274,9 +274,9 @@ export function createServer(client: LastestClient): McpServer {
 
   // ===== Test Runs =====
 
-  // --- lastest2_get_test_run ---
+  // --- lastest_get_test_run ---
   server.tool(
-    'lastest2_get_test_run',
+    'lastest_get_test_run',
     'Get detailed results for a specific test run, including individual test results, errors, and durations.',
     {
       runId: z.string().describe('Test run ID'),
@@ -298,9 +298,9 @@ export function createServer(client: LastestClient): McpServer {
 
   // ===== Builds =====
 
-  // --- lastest2_list_builds ---
+  // --- lastest_list_builds ---
   server.tool(
-    'lastest2_list_builds',
+    'lastest_list_builds',
     'List recent builds for a repository with status and test counts.',
     {
       repositoryId: z.string().describe('Repository ID'),
@@ -327,9 +327,9 @@ export function createServer(client: LastestClient): McpServer {
 
   // ===== Individual Diff Operations =====
 
-  // --- lastest2_get_diff ---
+  // --- lastest_get_diff ---
   server.tool(
-    'lastest2_get_diff',
+    'lastest_get_diff',
     'Get full details of a single visual diff including pixel data, AI analysis, and test info.',
     {
       diffId: z.string().describe('Visual diff ID'),
@@ -345,9 +345,9 @@ export function createServer(client: LastestClient): McpServer {
     },
   );
 
-  // --- lastest2_approve_diff ---
+  // --- lastest_approve_diff ---
   server.tool(
-    'lastest2_approve_diff',
+    'lastest_approve_diff',
     'Approve a single visual diff, accepting the current screenshot as the new baseline.',
     {
       diffId: z.string().describe('Visual diff ID to approve'),
@@ -363,9 +363,9 @@ export function createServer(client: LastestClient): McpServer {
     },
   );
 
-  // --- lastest2_reject_diff ---
+  // --- lastest_reject_diff ---
   server.tool(
-    'lastest2_reject_diff',
+    'lastest_reject_diff',
     'Reject a single visual diff, marking it as a regression.',
     {
       diffId: z.string().describe('Visual diff ID to reject'),
@@ -381,9 +381,9 @@ export function createServer(client: LastestClient): McpServer {
     },
   );
 
-  // --- lastest2_approve_all_diffs ---
+  // --- lastest_approve_all_diffs ---
   server.tool(
-    'lastest2_approve_all_diffs',
+    'lastest_approve_all_diffs',
     'Approve all pending visual diffs in a build at once.',
     {
       buildId: z.string().describe('Build ID to approve all diffs for'),
@@ -401,9 +401,9 @@ export function createServer(client: LastestClient): McpServer {
 
   // ===== Composite QA Workflows =====
 
-  // --- lastest2_review_build ---
+  // --- lastest_review_build ---
   server.tool(
-    'lastest2_review_build',
+    'lastest_review_build',
     'Comprehensive build review: fetches build details, visual diffs, and failed tests into a structured QA summary with action items.',
     {
       buildId: z.string().describe('Build ID to review'),
@@ -424,10 +424,10 @@ export function createServer(client: LastestClient): McpServer {
 
       const actionRequired: string[] = [];
       if (pending.length > 0) {
-        actionRequired.push(`Review ${pending.length} pending diff(s) — use lastest2_get_diff, lastest2_approve_diff, or lastest2_reject_diff`);
+        actionRequired.push(`Review ${pending.length} pending diff(s) — use lastest_get_diff, lastest_approve_diff, or lastest_reject_diff`);
       }
       if (failed > 0) {
-        actionRequired.push(`${failed} test(s) failed — use lastest2_list_failing_tests or lastest2_heal_test`);
+        actionRequired.push(`${failed} test(s) failed — use lastest_list_failing_tests or lastest_heal_test`);
       }
 
       const response: ToolResponse = {
@@ -465,9 +465,9 @@ export function createServer(client: LastestClient): McpServer {
     },
   );
 
-  // --- lastest2_qa_summary ---
+  // --- lastest_qa_summary ---
   server.tool(
-    'lastest2_qa_summary',
+    'lastest_qa_summary',
     'Get a comprehensive QA overview for a repository: test health, recent builds, and action items.',
     {
       repositoryId: z.string().describe('Repository ID'),
@@ -487,13 +487,13 @@ export function createServer(client: LastestClient): McpServer {
 
       const actionRequired: string[] = [];
       if (failing > 0) {
-        actionRequired.push(`${failing} test(s) currently failing — use lastest2_list_failing_tests`);
+        actionRequired.push(`${failing} test(s) currently failing — use lastest_list_failing_tests`);
       }
       if (buildsNeedingReview.length > 0) {
-        actionRequired.push(`${buildsNeedingReview.length} build(s) need review — use lastest2_review_build`);
+        actionRequired.push(`${buildsNeedingReview.length} build(s) need review — use lastest_review_build`);
       }
       if (neverRun > 0) {
-        actionRequired.push(`${neverRun} test(s) never run — use lastest2_run_tests`);
+        actionRequired.push(`${neverRun} test(s) never run — use lastest_run_tests`);
       }
 
       const response: ToolResponse = {
@@ -517,16 +517,16 @@ export function createServer(client: LastestClient): McpServer {
 
   // ===== Original Tools =====
 
-  // --- lastest2_run_tests ---
+  // --- lastest_run_tests ---
   server.tool(
-    'lastest2_run_tests',
+    'lastest_run_tests',
     'Trigger a test build and return structured results. Can run all tests in a repo or specific test IDs.',
     {
       repositoryId: z.string().optional().describe('Repository ID to run tests for. If omitted, uses the default repo.'),
       testIds: z.array(z.string()).optional().describe('Specific test IDs to run. If omitted, runs all tests.'),
       gitBranch: z.string().optional().describe('Git branch override'),
     },
-    withActivityReporting(client, 'lastest2_run_tests', async (params) => {
+    withActivityReporting(client, 'lastest_run_tests', async (params) => {
       const result = await client.createBuild({
         repositoryId: params.repositoryId as string | undefined,
         testIds: params.testIds as string[] | undefined,
@@ -538,7 +538,7 @@ export function createServer(client: LastestClient): McpServer {
         status: 'build_started',
         summary: `Build started: ${result.testCount} test(s) queued. Build ID: ${result.buildId}`,
         actionRequired: [
-          `Poll build status with lastest2_get_build_status using buildId: ${result.buildId}`,
+          `Poll build status with lastest_get_build_status using buildId: ${result.buildId}`,
         ],
         details: result,
       };
@@ -547,10 +547,10 @@ export function createServer(client: LastestClient): McpServer {
     }),
   );
 
-  // --- lastest2_get_build_status ---
+  // --- lastest_get_build_status ---
   server.tool(
-    'lastest2_get_build_status',
-    'Get the current status and results of a build. Use after lastest2_run_tests to check progress.',
+    'lastest_get_build_status',
+    'Get the current status and results of a build. Use after lastest_run_tests to check progress.',
     {
       buildId: z.string().describe('The build ID to check status for'),
     },
@@ -566,13 +566,13 @@ export function createServer(client: LastestClient): McpServer {
 
       const actionRequired: string[] = [];
       if (status === 'review_required') {
-        actionRequired.push(`Review ${changes} visual change(s) — use lastest2_get_visual_diff to inspect`);
+        actionRequired.push(`Review ${changes} visual change(s) — use lastest_get_visual_diff to inspect`);
       }
       if (status === 'blocked') {
         actionRequired.push('Build is blocked — review failed tests and rejected diffs');
       }
       if (failed > 0) {
-        actionRequired.push(`${failed} test(s) failed — use lastest2_list_failing_tests to see details`);
+        actionRequired.push(`${failed} test(s) failed — use lastest_list_failing_tests to see details`);
       }
 
       const response: ToolResponse = {
@@ -586,9 +586,9 @@ export function createServer(client: LastestClient): McpServer {
     },
   );
 
-  // --- lastest2_list_tests ---
+  // --- lastest_list_tests ---
   server.tool(
-    'lastest2_list_tests',
+    'lastest_list_tests',
     'List all tests in a repository with their latest pass/fail status.',
     {
       repositoryId: z.string().describe('Repository ID'),
@@ -621,9 +621,9 @@ export function createServer(client: LastestClient): McpServer {
     },
   );
 
-  // --- lastest2_list_failing_tests ---
+  // --- lastest_list_failing_tests ---
   server.tool(
-    'lastest2_list_failing_tests',
+    'lastest_list_failing_tests',
     'List tests that are currently failing, with error details.',
     {
       repositoryId: z.string().describe('Repository ID'),
@@ -638,7 +638,7 @@ export function createServer(client: LastestClient): McpServer {
           ? `${failing.length} failing test(s): ${failing.map(t => t.name).join(', ')}`
           : 'All tests are passing',
         actionRequired: failing.length > 0
-          ? ['Use lastest2_heal_test to auto-fix failing tests']
+          ? ['Use lastest_heal_test to auto-fix failing tests']
           : undefined,
         details: {
           failingCount: failing.length,
@@ -655,9 +655,9 @@ export function createServer(client: LastestClient): McpServer {
     },
   );
 
-  // --- lastest2_get_visual_diff ---
+  // --- lastest_get_visual_diff ---
   server.tool(
-    'lastest2_get_visual_diff',
+    'lastest_get_visual_diff',
     'Get visual diff details for a build, including AI classification and confidence scores.',
     {
       buildId: z.string().describe('Build ID to get visual diffs for'),
@@ -673,7 +673,7 @@ export function createServer(client: LastestClient): McpServer {
       const actionRequired: string[] = [];
       if (pending.length > 0) {
         actionRequired.push(
-          `${pending.length} diff(s) need review. Use lastest2_approve_baseline or lastest2_reject_baseline with diffIds: [${pending.map(d => `"${d.id}"`).join(', ')}]`,
+          `${pending.length} diff(s) need review. Use lastest_approve_baseline or lastest_reject_baseline with diffIds: [${pending.map(d => `"${d.id}"`).join(', ')}]`,
         );
       }
 
@@ -703,14 +703,14 @@ export function createServer(client: LastestClient): McpServer {
     },
   );
 
-  // --- lastest2_approve_baseline ---
+  // --- lastest_approve_baseline ---
   server.tool(
-    'lastest2_approve_baseline',
+    'lastest_approve_baseline',
     'Approve visual changes, updating baselines. Accepts one or more diff IDs.',
     {
       diffIds: z.array(z.string()).describe('Array of visual diff IDs to approve'),
     },
-    withActivityReporting(client, 'lastest2_approve_baseline', async (params) => {
+    withActivityReporting(client, 'lastest_approve_baseline', async (params) => {
       const result = await client.approveDiffs(params.diffIds as string[]);
 
       const response: ToolResponse = {
@@ -723,14 +723,14 @@ export function createServer(client: LastestClient): McpServer {
     }),
   );
 
-  // --- lastest2_reject_baseline ---
+  // --- lastest_reject_baseline ---
   server.tool(
-    'lastest2_reject_baseline',
+    'lastest_reject_baseline',
     'Reject visual changes, marking them as regressions. Accepts one or more diff IDs.',
     {
       diffIds: z.array(z.string()).describe('Array of visual diff IDs to reject'),
     },
-    withActivityReporting(client, 'lastest2_reject_baseline', async (params) => {
+    withActivityReporting(client, 'lastest_reject_baseline', async (params) => {
       const result = await client.rejectDiffs(params.diffIds as string[]);
 
       const response: ToolResponse = {
@@ -743,9 +743,9 @@ export function createServer(client: LastestClient): McpServer {
     }),
   );
 
-  // --- lastest2_create_test ---
+  // --- lastest_create_test ---
   server.tool(
-    'lastest2_create_test',
+    'lastest_create_test',
     'Create a new test using AI. Provide a URL to test, a natural language prompt, or both.',
     {
       repositoryId: z.string().describe('Repository ID to create the test in'),
@@ -753,7 +753,7 @@ export function createServer(client: LastestClient): McpServer {
       prompt: z.string().optional().describe('Natural language description of what to test'),
       functionalAreaId: z.string().optional().describe('Functional area to assign the test to'),
     },
-    withActivityReporting(client, 'lastest2_create_test', async (params) => {
+    withActivityReporting(client, 'lastest_create_test', async (params) => {
       const result = (await client.createTest({
         repositoryId: params.repositoryId as string,
         url: params.url as string | undefined,
@@ -763,8 +763,8 @@ export function createServer(client: LastestClient): McpServer {
 
       const response: ToolResponse = {
         status: 'test_created',
-        summary: `Test created successfully${result.testId ? ` (ID: ${result.testId})` : ''}. Use lastest2_run_tests to execute it.`,
-        actionRequired: ['Run the test with lastest2_run_tests to verify it works'],
+        summary: `Test created successfully${result.testId ? ` (ID: ${result.testId})` : ''}. Use lastest_run_tests to execute it.`,
+        actionRequired: ['Run the test with lastest_run_tests to verify it works'],
         details: result,
       };
 
@@ -772,9 +772,9 @@ export function createServer(client: LastestClient): McpServer {
     }),
   );
 
-  // --- lastest2_get_coverage ---
+  // --- lastest_get_coverage ---
   server.tool(
-    'lastest2_get_coverage',
+    'lastest_get_coverage',
     'Get test coverage statistics by functional area and route.',
     {
       repositoryId: z.string().describe('Repository ID'),
@@ -793,7 +793,7 @@ export function createServer(client: LastestClient): McpServer {
         status: 'coverage_retrieved',
         summary: `Route coverage: ${routePct ?? 'N/A'}%. Areas: ${areaTested ?? '?'}/${areaTotal ?? '?'} have tests.`,
         actionRequired: routePct !== undefined && routePct < 80
-          ? ['Coverage is below 80% — consider generating tests for uncovered routes with lastest2_create_test']
+          ? ['Coverage is below 80% — consider generating tests for uncovered routes with lastest_create_test']
           : undefined,
         details: coverage,
       };
@@ -802,23 +802,23 @@ export function createServer(client: LastestClient): McpServer {
     },
   );
 
-  // --- lastest2_heal_test ---
+  // --- lastest_heal_test ---
   server.tool(
-    'lastest2_heal_test',
+    'lastest_heal_test',
     'Trigger the AI healer agent to automatically fix a failing test by inspecting the live UI and updating selectors/assertions.',
     {
       testId: z.string().describe('ID of the failing test to heal'),
     },
-    withActivityReporting(client, 'lastest2_heal_test', async (params) => {
+    withActivityReporting(client, 'lastest_heal_test', async (params) => {
       const result = (await client.healTest(params.testId as string)) as Record<string, unknown>;
 
       const response: ToolResponse = {
         status: result.success ? 'healed' : 'heal_failed',
         summary: result.success
-          ? `Test ${params.testId} healed successfully. Run lastest2_run_tests to verify the fix.`
+          ? `Test ${params.testId} healed successfully. Run lastest_run_tests to verify the fix.`
           : `Healing failed for test ${params.testId}. Manual intervention may be needed.`,
         actionRequired: result.success
-          ? ['Re-run the test with lastest2_run_tests to confirm the fix']
+          ? ['Re-run the test with lastest_run_tests to confirm the fix']
           : ['Review the test manually or check error details'],
         details: result,
       };

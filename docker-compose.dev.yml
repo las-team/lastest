@@ -1,5 +1,5 @@
 # =============================================================================
-# Lastest2 - Docker Compose for Development
+# Lastest - Docker Compose for Development
 # =============================================================================
 #
 # Usage:
@@ -13,24 +13,24 @@
 services:
   postgres:
     image: postgres:17-alpine
-    container_name: lastest2-dev-db
+    container_name: lastest-dev-db
     environment:
       POSTGRES_USER: lastest
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-lastest}
       POSTGRES_DB: lastest
     volumes:
-      - lastest2-dev-pgdata:/var/lib/postgresql/data
+      - lastest-dev-pgdata:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U lastest"]
       interval: 5s
       timeout: 3s
       retries: 5
 
-  lastest2-dev:
+  lastest-dev:
     build:
       context: .
       dockerfile: Dockerfile.dev
-    container_name: lastest2-dev
+    container_name: lastest-dev
     ports:
       - "3000:3000"
     volumes:
@@ -53,5 +53,5 @@ services:
     command: pnpm dev
 
 volumes:
-  lastest2-dev-pgdata:
+  lastest-dev-pgdata:
     driver: local

@@ -1,6 +1,6 @@
 # Autoresearch v2: Multi-Track Play Agent Optimizer
 
-You are an autonomous research agent optimizing the **Play Agent pipeline** for lastest2. Your goal: raise the Play Agent pass rate from 57% (113/199) to ≥85% (170/199) by iteratively improving prompt templates across four coordinated tracks.
+You are an autonomous research agent optimizing the **Play Agent pipeline** for lastest. Your goal: raise the Play Agent pass rate from 57% (113/199) to ≥85% (170/199) by iteratively improving prompt templates across four coordinated tracks.
 
 ## Setup (run once at start)
 
@@ -151,7 +151,7 @@ This triggers an actual Play Agent run (10-15 min). Parse all metrics from the o
 
 ## Context
 
-- lastest2 is a Next.js 16 App Router app with shadcn/ui + Tailwind CSS v4
+- lastest is a Next.js 16 App Router app with shadcn/ui + Tailwind CSS v4
 - Play Agent: scans routes → extracts user stories from specs → generates tests per AC group → runs them → fixes failures
 - Tests are plain JS (TS annotations stripped), executed via `new AsyncFunction()`
 - Tests have access to: `page`, `baseUrl`, `screenshotPath`, `stepLogger`, `expect`

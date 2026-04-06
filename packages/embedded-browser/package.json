@@ -1,7 +1,7 @@
 {
   "name": "@lastest/embedded-browser",
   "version": "0.1.0",
-  "description": "Embedded browser service for Lastest2 with CDP screencast streaming",
+  "description": "Embedded browser service for Lastest with CDP screencast streaming",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",

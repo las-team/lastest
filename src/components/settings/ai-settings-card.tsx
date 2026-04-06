@@ -243,7 +243,7 @@ export function AISettingsCard({ settings, repositoryId }: AISettingsCardProps) 
       setTestResult(result);
       if (result.success) {
         toast.success(result.message);
-        try { localStorage.setItem('lastest2-ai-configured', 'true'); } catch {}
+        try { localStorage.setItem('lastest-ai-configured', 'true'); } catch {}
       } else {
         toast.error(result.message);
       }

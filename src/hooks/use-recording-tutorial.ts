@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 
-const STORAGE_KEY = 'lastest2-recording-tutorial';
+const STORAGE_KEY = 'lastest-recording-tutorial';
 const TOTAL_STEPS = 4;
 
 interface TutorialState {

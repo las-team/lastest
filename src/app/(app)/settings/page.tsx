@@ -446,7 +446,7 @@ export default async function SettingsPage({
                       <div>
                         <p className="font-medium mb-1">2. Start as background daemon:</p>
                         <pre className="bg-muted p-2 rounded text-xs font-mono">npx @lastest/runner start -t YOUR_TOKEN -s {serverUrl}</pre>
-                        <p className="text-[11px] mt-1 opacity-75">Logs: ~/.lastest2/runner.log · Config saved for subsequent runs</p>
+                        <p className="text-[11px] mt-1 opacity-75">Logs: ~/.lastest/runner.log · Config saved for subsequent runs</p>
                       </div>
                       <div>
                         <p className="font-medium mb-1">3. Or run in foreground (Docker / CI):</p>

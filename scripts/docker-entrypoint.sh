@@ -23,7 +23,7 @@ for subdir in screenshots baselines diffs traces videos planned bug-reports; do
   fi
 done
 
-echo "Starting Lastest2..."
+echo "Starting Lastest..."
 echo "Database: $(echo "${DATABASE_URL:-postgresql://lastest:lastest@localhost:5432/lastest}" | sed 's|://[^:]*:[^@]*@|://***:***@|')"
 
 # Run database migrations

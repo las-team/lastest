@@ -1,9 +1,9 @@
 {
-  "name": "lastest2-vscode",
-  "displayName": "Lastest2 Visual Testing",
-  "description": "Visual regression testing integration for Lastest2",
+  "name": "lastest-vscode",
+  "displayName": "Lastest Visual Testing",
+  "description": "Visual regression testing integration for Lastest",
   "version": "0.1.0",
-  "publisher": "lastest2",
+  "publisher": "lastest",
   "engines": {
     "vscode": "^1.85.0"
   },
@@ -18,38 +18,38 @@
     "viewsContainers": {
       "activitybar": [
         {
-          "id": "lastest2",
-          "title": "Lastest2",
+          "id": "lastest",
+          "title": "Lastest",
           "icon": "$(beaker)"
         }
       ]
     },
     "views": {
-      "lastest2": [
+      "lastest": [
         {
-          "id": "lastest2.testExplorer",
+          "id": "lastest.testExplorer",
           "name": "Test Explorer"
         }
       ]
     },
     "commands": [
       {
-        "command": "lastest2.runTest",
+        "command": "lastest.runTest",
         "title": "Run Test",
         "icon": "$(play)"
       },
       {
-        "command": "lastest2.runAllTests",
+        "command": "lastest.runAllTests",
         "title": "Run All Tests",
         "icon": "$(run-all)"
       },
       {
-        "command": "lastest2.refreshTests",
+        "command": "lastest.refreshTests",
         "title": "Refresh Tests",
         "icon": "$(refresh)"
       },
       {
-        "command": "lastest2.openInBrowser",
+        "command": "lastest.openInBrowser",
         "title": "Open in Browser",
         "icon": "$(link-external)"
       }
@@ -57,53 +57,53 @@
     "menus": {
       "view/title": [
         {
-          "command": "lastest2.runAllTests",
-          "when": "view == lastest2.testExplorer",
+          "command": "lastest.runAllTests",
+          "when": "view == lastest.testExplorer",
           "group": "navigation"
         },
         {
-          "command": "lastest2.refreshTests",
-          "when": "view == lastest2.testExplorer",
+          "command": "lastest.refreshTests",
+          "when": "view == lastest.testExplorer",
           "group": "navigation"
         }
       ],
       "view/item/context": [
         {
-          "command": "lastest2.runTest",
-          "when": "view == lastest2.testExplorer && viewItem == test",
+          "command": "lastest.runTest",
+          "when": "view == lastest.testExplorer && viewItem == test",
           "group": "inline"
         },
         {
-          "command": "lastest2.runTest",
-          "when": "view == lastest2.testExplorer && viewItem == functionalArea",
+          "command": "lastest.runTest",
+          "when": "view == lastest.testExplorer && viewItem == functionalArea",
           "group": "inline"
         },
         {
-          "command": "lastest2.openInBrowser",
-          "when": "view == lastest2.testExplorer && viewItem == test",
+          "command": "lastest.openInBrowser",
+          "when": "view == lastest.testExplorer && viewItem == test",
           "group": "inline"
         }
       ]
     },
     "configuration": {
-      "title": "Lastest2",
+      "title": "Lastest",
       "properties": {
-        "lastest2.serverUrl": {
+        "lastest.serverUrl": {
           "type": "string",
           "default": "http://localhost:3000",
-          "description": "URL of the Lastest2 server"
+          "description": "URL of the Lastest server"
         },
-        "lastest2.apiToken": {
+        "lastest.apiToken": {
           "type": "string",
           "default": "",
           "description": "API token for authentication"
         },
-        "lastest2.autoRefresh": {
+        "lastest.autoRefresh": {
           "type": "boolean",
           "default": true,
           "description": "Automatically refresh test list after runs"
         },
-        "lastest2.showStatusBar": {
+        "lastest.showStatusBar": {
           "type": "boolean",
           "default": true,
           "description": "Show test status in status bar"

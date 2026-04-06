@@ -31,13 +31,13 @@ Old:                               New:
 # Old
 image: ewyc/lastest:latest
 volumes:
-  - lastest2-storage:/app/storage
+  - lastest-storage:/app/storage
 
 # New
-image: lastest2:latest
+image: lastest:latest
 volumes:
-  - lastest2-screenshots:/app/public/screenshots
-  - lastest2-baselines:/app/public/baselines
+  - lastest-screenshots:/app/public/screenshots
+  - lastest-baselines:/app/public/baselines
 ```
 
 ### Dev Compose (`docker-compose.dev.yml`)

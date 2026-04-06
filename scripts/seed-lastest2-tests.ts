@@ -1,10 +1,10 @@
 /**
- * Seed script for Lastest2 self-testing visual regression tests
+ * Seed script for Lastest self-testing visual regression tests
  *
- * Copies the 7 tests from dexilion-team/lastest2 into a target repository.
+ * Copies the 7 tests from las-team/lastest into a target repository.
  * Generated from production database dump (2026-03-16).
  *
- * Run: pnpm tsx scripts/seed-lastest2-tests.ts
+ * Run: pnpm tsx scripts/seed-lastest-tests.ts
  */
 
 import { db } from '../src/lib/db';
@@ -12,7 +12,7 @@ import { tests, testVersions, repositories, functionalAreas } from '../src/lib/d
 import { eq } from 'drizzle-orm';
 import { randomUUID as uuid } from 'crypto';
 
-const SOURCE_REPO_NAME = 'dexilion-team/lastest2';
+const SOURCE_REPO_NAME = 'las-team/lastest';
 
 // Will be set dynamically
 let REPO_ID: string;
@@ -549,7 +549,7 @@ async function seed() {
     console.log(`Created functional area: ${faDef.name}${faDef.parent ? ` (child of ${faDef.parent})` : ''}`);
   }
 
-  console.log('Seeding lastest2 self-tests...\n');
+  console.log('Seeding lastest self-tests...\n');
 
   const now = new Date();
 
