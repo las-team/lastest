@@ -1,5 +1,5 @@
 <p align="center">
-  <h1 align="center">Lastest2</h1>
+  <h1 align="center">Lastest</h1>
   <p align="center">
     <strong>Free, open-source visual regression testing with AI-generated tests</strong>
   </p>
@@ -12,7 +12,7 @@
   <a href="#features">Features</a> •
   <a href="#quick-start">Quick Start</a> •
   <a href="#how-it-works">How It Works</a> •
-  <a href="#why-lastest2">Why Lastest2</a> •
+  <a href="#why-lastest">Why Lastest</a> •
   <a href="#comparison">Comparison</a> •
   <a href="#commands">Commands</a> •
   <a href="#environment-variables">Config</a>
@@ -28,26 +28,22 @@
 ---
 
 <p align="center">
-  <img src="./docs/demo.gif" alt="Lastest2 Demo — Record, Test, Diff, Approve" width="720" />
+  <img src="./docs/demo.gif" alt="Lastest Demo — Record, Test, Diff, Approve" width="720" />
 </p>
 
 ## The Problem
 
 Visual regression testing is either **expensive**, **flaky**, or **painful to maintain**.
 
-- Percy: **$199-5,000+/mo** depending on screenshots. Cloud-only
-- Applitools: **$699+/mo**. Enterprise pricing, steep learning curve
-- Chromatic: **$179+/mo**. Locked to Storybook
-- Meticulous: **Custom pricing**. Session-based, no self-hosting
-- Argos: **$100+/mo**. OSS core but cloud execution
-- Playwright native: Free, but no dashboard, no collaboration, no AI
-- BackstopJS: Free, but maintenance mode and no UI
+- **Cloud tools**: per-screenshot pricing, cloud-only, no self-hosting
+- **Enterprise tools**: steep learning curve, locked to specific frameworks
+- **Open-source tools**: free but no dashboard, no collaboration, no AI, or in maintenance mode
 
 Meanwhile, you just need to know: **"Did my last commit break the UI?"**
 
 ## The Solution
 
-Lastest2 is a free, self-hosted visual regression testing platform that **records your tests, writes them with AI, runs them anywhere, and fixes them when they break** — all in one tool.
+Lastest is a free, self-hosted visual regression testing platform that **records your tests, writes them with AI, runs them anywhere, and fixes them when they break** — all in one tool.
 
 ```
 1. Point it at your app
@@ -64,11 +60,11 @@ Your data stays on your server. Your screenshots never leave your infra. It cost
 
 ## Three Ways to Work
 
-Lastest2 adapts to how you want to build tests — from fully manual to fully autonomous.
+Lastest adapts to how you want to build tests — from fully manual to fully autonomous.
 
 ### 1. AI-Free (Manual Recording)
 
-Open the recorder, click through your app, hit stop. Lastest2 captures every interaction and generates deterministic Playwright code — no AI involved, no API keys needed. You own the test code and can edit it by hand.
+Open the recorder, click through your app, hit stop. Lastest captures every interaction and generates deterministic Playwright code — no AI involved, no API keys needed. You own the test code and can edit it by hand.
 
 **Best for:** Teams that don't want AI, air-gapped environments, simple flows.
 
@@ -92,7 +88,7 @@ Once your tests exist, you have three execution modes:
 
 | Mode | How | When |
 |------|-----|------|
-| **Local** | Playwright runs on the same machine as Lastest2 | Development, debugging |
+| **Local** | Playwright runs on the same machine as Lastest | Development, debugging |
 | **Remote Runner** | Tests dispatched to remote machines via WebSocket | Distributed execution, different OS/browsers |
 | **Embedded Browser** | Browser runs in a container with live streaming back to the UI | Cloud deployments, recording/running without local Playwright |
 
@@ -107,7 +103,7 @@ Tests are recorded or generated once, then stored as code. Every subsequent run 
 - **First run**: screenshot becomes the baseline
 - **Every run after**: new screenshot is SHA256-hashed — if it matches the baseline, instant pass (no pixel comparison needed). If it differs, the diff engine runs and you review the change.
 - **AI costs are one-time**: AI is only used during test creation and fixing. Running tests uses zero AI — it's pure Playwright execution.
-- **No per-screenshot pricing**: unlike Percy ($5K/mo for 100K shots) or Chromatic ($179+/mo), every run is free regardless of volume.
+- **No per-screenshot pricing**: every run is free regardless of volume.
 
 ```
 Create tests (one-time)          Run tests (forever, $0)
@@ -222,7 +218,7 @@ Create tests (one-time)          Run tests (forever, $0)
 ### Option 1: Docker (recommended)
 
 ```bash
-git clone https://github.com/dexilion-team/lastest2.git
+git clone https://github.com/las-team/lastest.git
 cd lastest2
 docker-compose up -d
 ```
@@ -232,7 +228,7 @@ Open [http://localhost:3000](http://localhost:3000) — that's it.
 ### Option 2: From source
 
 ```bash
-git clone https://github.com/dexilion-team/lastest2.git
+git clone https://github.com/las-team/lastest.git
 cd lastest2
 docker run -d --name lastest2-dev-db -e POSTGRES_USER=lastest -e POSTGRES_PASSWORD=lastest -e POSTGRES_DB=lastest -p 5432:5432 postgres:17-alpine
 pnpm install
@@ -246,7 +242,7 @@ Open [http://localhost:3000](http://localhost:3000)
 
 1. Create an account (local, no external auth required)
 2. Add a repository and set its local path or connect GitHub/GitLab
-3. Click **Record** — interact with your app, Lastest2 captures everything
+3. Click **Record** — interact with your app, Lastest captures everything
 4. AI generates test code automatically
 5. **Run** the test — screenshots are captured and diffed against baselines
 6. **Review** visual changes and approve or reject
@@ -285,16 +281,16 @@ Open [http://localhost:3000](http://localhost:3000)
 
 ---
 
-## Why Lastest2
+## Why Lastest
 
 <a id="comparison"></a>
 
 ### Comparison
 
-| Capability | Lastest2 | Percy | Applitools | Chromatic | Argos | Meticulous | Playwright |
+| Capability | Lastest | Percy | Applitools | Chromatic | Argos | Meticulous | Playwright |
 |---|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
-| **Price** | **$0** | $199+/mo | $699+/mo | $179+/mo | $100+/mo | Custom | $0 |
-| **Free screenshots** | **Unlimited** | 5K/mo | OSS only | 5K/mo | 5K/mo | None | Unlimited |
+| **Price** | **$0** | Paid | Paid | Paid | Paid | Paid | $0 |
+| **Free screenshots** | **Unlimited** | Limited | OSS only | Limited | Limited | None | Unlimited |
 | **Self-hosted** | **Yes** | No | Enterprise | No | OSS core | No | Yes |
 | **Open source** | **FSL-1.1-ALv2** | SDKs only | SDKs only | Storybook | MIT core | No | Apache-2.0 |
 | **No-code recording** | **Yes** | No | Low-code | No | No | Session | Codegen |
@@ -328,13 +324,13 @@ Open [http://localhost:3000](http://localhost:3000)
 | **AI failure triage** | **Yes** | No | No | No | No | No | No |
 | **Assertion tracking** | **Yes** | No | No | No | No | No | No |
 
-### What makes Lastest2 different
+### What makes Lastest different
 
 - **Record + AI generate + run + diff + approve** in one self-hosted tool — no competitor does all five
 - **Three execution modes**: local, remote runners (`@lastest/runner` on npm), or embedded browser container with live streaming — no local Playwright install needed
 - **Autonomous Play Agent**: one-click 9-step pipeline scans routes, generates tests, runs them, fixes failures, and reports results
-- **AI auto-fix**: tests break as your UI evolves, Lastest2 fixes them automatically
-- **$0 with unlimited screenshots** — Percy charges ~$5K/mo for 100K shots
+- **AI auto-fix**: tests break as your UI evolves, Lastest fixes them automatically
+- **$0 with unlimited screenshots** — no per-screenshot pricing, no volume limits
 - **Your data never leaves your server** — screenshots stay local, no cloud dependency
 - **MCP server with 29 tools** — let AI agents (Claude, etc.) run tests, review diffs, and heal failures autonomously
 - **Scheduled test runs** — cron-based automation with smart failure handling
@@ -401,11 +397,11 @@ The runner automatically captures `GITHUB_HEAD_REF`, `GITHUB_REF_NAME`, and `GIT
 
 ## GitHub Action
 
-Use the reusable GitHub Action for zero-config CI/CD integration. No local Playwright install needed — tests run on your Lastest2 server via a remote runner.
+Use the reusable GitHub Action for zero-config CI/CD integration. No local Playwright install needed — tests run on your Lastest server via a remote runner.
 
 ```yaml
 - name: Run visual regression tests
-  uses: dexilion-team/lastest2/action@main
+  uses: las-team/lastest/action@main
   with:
     server-url: ${{ secrets.LASTEST_SERVER_URL }}
     runner-token: ${{ secrets.LASTEST_RUNNER_TOKEN }}
@@ -417,7 +413,7 @@ Use the reusable GitHub Action for zero-config CI/CD integration. No local Playw
 
 | Input | Description | Required | Default |
 |-------|-------------|----------|---------|
-| `server-url` | Lastest2 server URL | Yes | - |
+| `server-url` | Lastest server URL | Yes | - |
 | `runner-token` | Runner authentication token | Yes | - |
 | `timeout` | Build completion timeout (seconds) | No | `300` |
 | `fail-on-changes` | Fail when visual changes detected | No | `false` |
@@ -427,7 +423,7 @@ Use the reusable GitHub Action for zero-config CI/CD integration. No local Playw
 | Output | Description |
 |--------|-------------|
 | `status` | Build status (`passed`, `failed`, `review_required`, `safe_to_merge`, `blocked`) |
-| `build-url` | Link to build results in Lastest2 |
+| `build-url` | Link to build results in Lastest |
 | `changed-count` | Number of visual changes detected |
 | `passed-count` | Number of passed tests |
 | `failed-count` | Number of failed tests |
@@ -442,7 +438,7 @@ Results are automatically posted to the GitHub Actions step summary.
 Run only tests affected by your code changes:
 
 1. Select a feature branch (not main/master)
-2. Lastest2 compares against the default branch via GitHub/GitLab API
+2. Lastest compares against the default branch via GitHub/GitLab API
 3. Tests are matched to changed files by URL patterns and code references
 4. Only affected tests run, skipping unchanged areas
 
@@ -452,7 +448,7 @@ This dramatically reduces test time for large suites while maintaining coverage 
 
 ## Docker Deployment
 
-Deploy Lastest2 on your home server or any Docker host:
+Deploy Lastest on your home server or any Docker host:
 
 ```bash
 # Quick start
@@ -489,7 +485,7 @@ A development compose file (`docker-compose.dev.yml`) is also available.
 
 ## Remote Runners
 
-Run tests on remote machines by deploying runners that connect back to your Lastest2 server via WebSocket.
+Run tests on remote machines by deploying runners that connect back to your Lastest server via WebSocket.
 
 ### Setup
 
@@ -531,7 +527,7 @@ Config stored in `~/.lastest2/` (runner.pid, runner.log, runner.config.json).
 
 ## MCP Server (AI Agent Integration)
 
-Let AI agents interact with Lastest2 programmatically via the Model Context Protocol:
+Let AI agents interact with Lastest programmatically via the Model Context Protocol:
 
 ```bash
 npx @lastest/mcp-server --url http://localhost:3000 --api-key YOUR_API_KEY

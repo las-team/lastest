@@ -203,7 +203,7 @@ export function Sidebar({ repos, selectedRepo, currentUser, team }: SidebarProps
         <div className="flex items-center justify-between">
           <span className="text-xs text-muted-foreground">Visual Regression Testing</span>
           <div className="flex items-center gap-0.5">
-            <ActivityFeedIndicator />
+            {earlyAdopter && <ActivityFeedIndicator />}
             <QueueIndicator />
           </div>
         </div>

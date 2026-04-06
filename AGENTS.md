@@ -1,12 +1,12 @@
-# AGENTS.md — Lastest2
+# AGENTS.md — Lastest
 
-## What is Lastest2?
+## What is Lastest?
 
-Lastest2 is a visual regression testing platform. It records browser interactions, runs Playwright tests, diffs screenshots against baselines, and uses AI to classify changes.
+Lastest is a visual regression testing platform. It records browser interactions, runs Playwright tests, diffs screenshots against baselines, and uses AI to classify changes.
 
 ## MCP Server
 
-Install the MCP server to let AI agents interact with Lastest2:
+Install the MCP server to let AI agents interact with Lastest:
 
 ```bash
 npx @lastest/mcp-server --url http://localhost:3000 --api-key YOUR_API_KEY

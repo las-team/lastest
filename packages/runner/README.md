@@ -1,8 +1,8 @@
 # @lastest/runner
 
-Remote test execution runner for [Lastest2](https://github.com/dexilion-team/lastest2) — free, open-source visual regression testing with AI-generated tests.
+Remote test execution runner for [Lastest](https://github.com/las-team/lastest) — free, open-source visual regression testing with AI-generated tests.
 
-Connects to your Lastest2 server, receives test jobs, executes them locally using Playwright, and reports results back. Run as a background daemon or in the foreground for CI/CD.
+Connects to your Lastest server, receives test jobs, executes them locally using Playwright, and reports results back. Run as a background daemon or in the foreground for CI/CD.
 
 ---
 
@@ -33,7 +33,7 @@ npx playwright install chromium
 
 ## Quick Start
 
-1. **Register a runner** in your Lastest2 instance at Settings → Runners
+1. **Register a runner** in your Lastest instance at Settings → Runners
 2. **Copy the token** (shown only once)
 3. **Start the runner**:
 
@@ -58,7 +58,7 @@ Spawns a detached background process. Logs are written to `~/.lastest2/runner.lo
 | Option | Description | Default |
 |--------|-------------|---------|
 | `-t, --token <token>` | Runner authentication token (required on first run) | — |
-| `-s, --server <url>` | Lastest2 server URL (required on first run) | — |
+| `-s, --server <url>` | Lastest server URL (required on first run) | — |
 | `-i, --interval <ms>` | Poll interval in milliseconds | `5000` |
 | `-b, --base-url <url>` | Override target URL for test execution | — |
 
@@ -134,7 +134,7 @@ jobs:
   visual-tests:
     runs-on: ubuntu-latest
     steps:
-      - name: Run Lastest2 Runner
+      - name: Run Lastest Runner
         run: |
           npx @lastest/runner run \
             -t ${{ secrets.LASTEST2_TOKEN }} \
@@ -158,7 +158,7 @@ For zero-config CI/CD without installing the runner, use the reusable GitHub Act
 
 ```yaml
 - name: Run visual regression tests
-  uses: dexilion-team/lastest2/action@main
+  uses: las-team/lastest/action@main
   with:
     server-url: ${{ secrets.LASTEST_SERVER_URL }}
     runner-token: ${{ secrets.LASTEST_RUNNER_TOKEN }}

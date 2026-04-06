@@ -1,8 +1,8 @@
-# Lastest2 — Visual Regression Testing Agent
+# Lastest — Visual Regression Testing Agent
 
 ## Discovery (100 tokens)
 
-Lastest2 is a visual regression testing platform. It records browser tests, runs them via Playwright, diffs screenshots, and uses AI to classify changes. Available as an MCP server for AI agent integration.
+Lastest is a visual regression testing platform. It records browser tests, runs them via Playwright, diffs screenshots, and uses AI to classify changes. Available as an MCP server for AI agent integration.
 
 ## Activation (1000 tokens)
 
@@ -51,4 +51,4 @@ npx @lastest/mcp-server --url http://localhost:3000 --api-key YOUR_KEY
 
 ### Self-Hosted
 
-Lastest2 runs on your infrastructure. PostgreSQL database, Docker Compose included.
+Lastest runs on your infrastructure. PostgreSQL database, Docker Compose included.

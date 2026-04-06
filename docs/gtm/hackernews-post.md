@@ -2,7 +2,7 @@
 
 ## Title (80 char limit)
 ```
-Show HN: Lastest2 – Free visual regression testing with AI-generated tests
+Show HN: Lastest – Free visual regression testing with AI-generated tests
 ```
 
 ## Body
@@ -11,7 +11,7 @@ I'm a solo founder who ships fast with AI tools. Last month I broke my checkout 
 
 Visual testing tools like Percy ($399/mo) and Chromatic ($149/mo) exist, but they cost more than my entire hosting stack. BackstopJS is free but requires manually writing tests.
 
-So I built Lastest2:
+So I built Lastest:
 
 - Point-and-click test recording (Playwright under the hood)
 - AI generates robust test code with fallback selectors

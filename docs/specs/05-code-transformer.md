@@ -2,7 +2,7 @@
 
 ## Overview
 
-One-way transformation from Playwright Inspector codegen output to the Lastest2 runner format. Handles URL rewriting, import removal, indentation normalization, and function signature wrapping.
+One-way transformation from Playwright Inspector codegen output to the Lastest runner format. Handles URL rewriting, import removal, indentation normalization, and function signature wrapping.
 
 ## Transformation Pipeline
 

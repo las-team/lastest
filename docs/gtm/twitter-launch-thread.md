@@ -32,7 +32,7 @@ Paying 10x my hosting cost for visual testing? No thanks.
 
 **Tweet 3 (The Solution)**
 
-So I built Lastest2:
+So I built Lastest:
 
 ✅ Point-and-click test recording
 ✅ AI writes the test code for you
@@ -84,7 +84,7 @@ If that's you, give it a try.
 
 **Tweet 7 (CTA)**
 
-Lastest2 is free and open source.
+Lastest is free and open source.
 
 GitHub: [LINK]
 Demo: [LINK]

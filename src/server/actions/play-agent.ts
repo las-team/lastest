@@ -821,6 +821,7 @@ async function runPlanWithAgents(
   repositoryId: string,
   branch: string,
   signal: AbortSignal,
+  teamId: string,
 ): Promise<boolean> {
   const envConfig = await getEnvironmentConfig(repositoryId);
   const baseUrl = envConfig?.baseUrl || 'http://localhost:3000';
@@ -840,6 +841,10 @@ async function runPlanWithAgents(
 
   const flushSubsteps = () => updateSubsteps(sessionId, 'plan', [...plannerStates]);
   await flushSubsteps();
+
+  emitActivity(teamId, repositoryId, sessionId, 'substep:update',
+    'Orchestrator coordinating multi-planner pipeline',
+    { stepId: 'plan', agentType: 'orchestrator' });
 
   if (isAborted(signal)) return false;
 
@@ -869,9 +874,16 @@ async function runPlanWithAgents(
   plannerStates[3].status = 'running';
   await flushSubsteps();
 
+  emitActivity(teamId, repositoryId, sessionId, 'substep:update', 'Planner scanning codebase routes', { stepId: 'plan', agentType: 'planner' });
+  emitActivity(teamId, repositoryId, sessionId, 'substep:update', 'Planner checking route coverage', { stepId: 'plan', agentType: 'planner' });
+  emitActivity(teamId, repositoryId, sessionId, 'substep:update', 'Planner analyzing spec files via GitHub API', { stepId: 'plan', agentType: 'planner' });
+
   const specPromise = runSpecPlanner(repositoryId, branch).then(r => {
     enrichSubstep(3, r);
     flushSubsteps();
+    emitActivity(teamId, repositoryId, sessionId, 'substep:update',
+      r.error ? `Planner spec analysis failed: ${r.error.slice(0, 80)}` : `Planner found ${r.areas.length} areas from spec files`,
+      { stepId: 'plan', agentType: 'planner', durationMs: r.durationMs, detail: { source: 'spec', areasFound: r.areas.length, areas: r.areas.map(a => a.name) } });
     return r;
   }).catch(err => {
     plannerStates[3].status = 'error';
@@ -881,10 +893,20 @@ async function runPlanWithAgents(
   });
 
   const [codeResult, routeResult] = await Promise.all([
-    runCodePlanner(repositoryId, branch, intelligence).then(r => { enrichSubstep(1, r); flushSubsteps(); return r; })
-      .catch(err => { plannerStates[1].status = 'error'; plannerStates[1].rawError = String(err); flushSubsteps(); return { source: 'code' as const, areas: [], error: String(err) } as import('@/lib/playwright/planner-types').PlannerResult; }),
-    runRoutePlanner(repositoryId).then(r => { enrichSubstep(2, r); flushSubsteps(); return r; })
-      .catch(err => { plannerStates[2].status = 'error'; plannerStates[2].rawError = String(err); flushSubsteps(); return { source: 'routes' as const, areas: [], error: String(err) } as import('@/lib/playwright/planner-types').PlannerResult; }),
+    runCodePlanner(repositoryId, branch, intelligence).then(r => {
+      enrichSubstep(1, r); flushSubsteps();
+      emitActivity(teamId, repositoryId, sessionId, 'substep:update',
+        r.error ? `Planner codebase scan failed` : `Planner discovered ${r.areas.length} areas from codebase`,
+        { stepId: 'plan', agentType: 'planner', durationMs: r.durationMs, detail: { source: 'code', areasFound: r.areas.length, areas: r.areas.map(a => a.name) } });
+      return r;
+    }).catch(err => { plannerStates[1].status = 'error'; plannerStates[1].rawError = String(err); flushSubsteps(); return { source: 'code' as const, areas: [], error: String(err) } as import('@/lib/playwright/planner-types').PlannerResult; }),
+    runRoutePlanner(repositoryId).then(r => {
+      enrichSubstep(2, r); flushSubsteps();
+      emitActivity(teamId, repositoryId, sessionId, 'substep:update',
+        `Planner mapped ${r.areas.length} areas from known routes`,
+        { stepId: 'plan', agentType: 'planner', durationMs: r.durationMs, detail: { source: 'routes', areasFound: r.areas.length, areas: r.areas.map(a => a.name) } });
+      return r;
+    }).catch(err => { plannerStates[2].status = 'error'; plannerStates[2].rawError = String(err); flushSubsteps(); return { source: 'routes' as const, areas: [], error: String(err) } as import('@/lib/playwright/planner-types').PlannerResult; }),
   ]);
 
   if (isAborted(signal)) return false;
@@ -897,6 +919,10 @@ async function runPlanWithAgents(
   plannerStates[4].status = 'running';
   plannerStates[4].detail = `${otherAreas.length} areas from code+route+spec`;
   await flushSubsteps();
+
+  emitActivity(teamId, repositoryId, sessionId, 'substep:update',
+    `Scout classifying ${otherAreas.length} areas from code+route+spec planners`,
+    { stepId: 'plan', agentType: 'scout', detail: { inputAreaCount: otherAreas.length } });
 
   const browserResult = await runBrowserPlanner(repositoryId, baseUrl, {
     otherPlannerAreas: otherAreas,
@@ -911,6 +937,11 @@ async function runPlanWithAgents(
       plannerStates[4].detail = `${skipCount} skip, ${exploreAreas.length} explore`;
       plannerStates[4].durationMs = scout.durationMs;
       plannerStates[4].promptLogId = scout.promptLogId;
+
+      emitActivity(teamId, repositoryId, sessionId, 'substep:update',
+        `Scout classified areas: ${skipCount} skip, ${exploreAreas.length} marked for deep-dive`,
+        { stepId: 'plan', agentType: 'scout', durationMs: scout.durationMs,
+          detail: { skipCount, exploreCount: exploreAreas.length, exploreAreas: exploreAreas.map(a => a.name) } });
 
       // Add diver substeps for each explore area
       for (const area of exploreAreas) {
@@ -927,6 +958,10 @@ async function runPlanWithAgents(
     onDeepDiveStart: (areaName) => {
       const idx = plannerStates.findIndex(s => s.source === `browser-dive-${areaName}`);
       if (idx >= 0) { plannerStates[idx].status = 'running'; flushSubsteps(); }
+
+      emitActivity(teamId, repositoryId, sessionId, 'substep:update',
+        `Diver exploring ${areaName} with Playwright`,
+        { stepId: 'plan', agentType: 'diver', detail: { areaName } });
     },
     onDeepDiveComplete: (areaName, areasFound, durationMs, promptLogId) => {
       const idx = plannerStates.findIndex(s => s.source === `browser-dive-${areaName}`);
@@ -938,6 +973,12 @@ async function runPlanWithAgents(
         plannerStates[idx].promptLogId = promptLogId;
         flushSubsteps();
       }
+
+      emitActivity(teamId, repositoryId, sessionId, 'substep:update',
+        areasFound > 0
+          ? `Diver found ${areasFound} test areas in ${areaName}`
+          : `Diver found no testable areas in ${areaName}`,
+        { stepId: 'plan', agentType: 'diver', durationMs, detail: { areaName, areasFound } });
     },
   }).catch(err => {
     plannerStates[4].status = 'error';
@@ -971,6 +1012,10 @@ async function runPlanWithAgents(
 
   const mergedAreas = mergePlannerResults(fulfilledResults);
   const sourcesUsed = new Set(fulfilledResults.map(r => r.source)).size;
+
+  emitActivity(teamId, repositoryId, sessionId, 'substep:update',
+    `Orchestrator merged ${fulfilledResults.length} planner results into ${mergedAreas.length} areas`,
+    { stepId: 'plan', agentType: 'orchestrator', detail: { sourcesUsed, areasFound: mergedAreas.length, areas: mergedAreas.map(a => a.name) } });
 
   if (mergedAreas.length === 0) {
     // Fallback: try to discover from routes
@@ -1135,7 +1180,7 @@ async function runPlanPromptMode(
   return true;
 }
 
-async function runPlan(sessionId: string, repositoryId: string, _teamId: string, signal: AbortSignal) {
+async function runPlan(sessionId: string, repositoryId: string, teamId: string, signal: AbortSignal) {
   if (await skipIfManualMode(sessionId, 'plan')) return true;
   await setStepActive(sessionId, 'plan');
   if (isAborted(signal)) return false;
@@ -1150,7 +1195,7 @@ async function runPlan(sessionId: string, repositoryId: string, _teamId: string,
 
   const aiSettings = await getAISettings(repositoryId);
   if (aiSettings?.pwAgentEnabled) {
-    return runPlanWithAgents(sessionId, repositoryId, branch, signal);
+    return runPlanWithAgents(sessionId, repositoryId, branch, signal, teamId);
   }
 
   return runPlanPromptMode(sessionId, repositoryId, branch, signal);
@@ -1223,7 +1268,7 @@ async function runReview(sessionId: string, _repositoryId: string, _teamId: stri
 // Generate (step 7) — formerly second half of discover
 // ============================================
 
-async function runGenerate(sessionId: string, repositoryId: string, _teamId: string, signal: AbortSignal) {
+async function runGenerate(sessionId: string, repositoryId: string, teamId: string, signal: AbortSignal) {
   if (await skipIfManualMode(sessionId, 'generate')) return true;
   await setStepActive(sessionId, 'generate');
   if (isAborted(signal)) return false;
@@ -1303,6 +1348,12 @@ async function runGenerate(sessionId: string, repositoryId: string, _teamId: str
         },
       ]);
 
+      for (const { area, group } of chunk) {
+        emitActivity(teamId, repositoryId, sessionId, 'substep:update',
+          `Generator creating test "${group.name}" for ${area.name} (${group.scenarioCount} scenario${group.scenarioCount > 1 ? 's' : ''})`,
+          { stepId: 'generate', agentType: 'generator', detail: { areaName: area.name, testName: group.name, scenarioCount: group.scenarioCount } });
+      }
+
       const results = await Promise.allSettled(
         chunk.map(async ({ area, group }) => {
           // Combine session abort signal with per-call timeout
@@ -1330,6 +1381,9 @@ async function runGenerate(sessionId: string, repositoryId: string, _teamId: str
               areaName: area.name,
               code: genResult.code,
             });
+            emitActivity(teamId, repositoryId, sessionId, 'artifact:created',
+              `Generator created test "${group.name}" in ${area.name}`,
+              { stepId: 'generate', agentType: 'generator', artifactType: 'test', artifactId: test.id, artifactLabel: group.name });
             // Link to matching spec if one exists
             try {
               const areaSpecs = await queries.getSpecsForArea(area.id);
@@ -1517,7 +1571,7 @@ async function runTests(sessionId: string, repositoryId: string, _teamId: string
 // Fix Tests (step 9)
 // ============================================
 
-async function runFixTests(sessionId: string, repositoryId: string, _teamId: string, signal: AbortSignal) {
+async function runFixTests(sessionId: string, repositoryId: string, teamId: string, signal: AbortSignal) {
   if (await skipIfManualMode(sessionId, 'fix_tests')) return true;
   await setStepActive(sessionId, 'fix_tests');
   if (isAborted(signal)) return false;
@@ -1598,6 +1652,12 @@ async function runFixTests(sessionId: string, repositoryId: string, _teamId: str
         chunk.map(async (result) => {
           const testId = result.testId!;
           const attempts = fixAttempts[testId] || 0;
+          const testBefore = await queries.getTest(testId);
+          const testName = testBefore?.name || testId;
+
+          emitActivity(teamId, repositoryId, sessionId, 'substep:update',
+            `Healer diagnosing "${testName}" (attempt ${attempts + 1}/${MAX_FIX_ATTEMPTS})`,
+            { stepId: 'fix_tests', agentType: 'healer', detail: { testId, testName, attempt: attempts + 1, error: result.errorMessage?.slice(0, 120) } });
 
           const healResult = await agentHealTest(repositoryId, testId);
           fixAttempts[testId] = attempts + 1;
@@ -1609,6 +1669,9 @@ async function runFixTests(sessionId: string, repositoryId: string, _teamId: str
             const newHash = hashCode(healResult.code);
 
             if (hashes.includes(newHash)) {
+              emitActivity(teamId, repositoryId, sessionId, 'substep:update',
+                `Healer detected loop for "${testName}" — marking unfixable`,
+                { stepId: 'fix_tests', agentType: 'healer', detail: { testId, testName } });
               fixes.push({ testName: test?.name || testId, originalError: result.errorMessage!, fixed: false });
               return 'unfixable' as const;
             }
@@ -1629,9 +1692,15 @@ async function runFixTests(sessionId: string, repositoryId: string, _teamId: str
                 branch: branch ?? null,
               });
             }
+            emitActivity(teamId, repositoryId, sessionId, 'substep:update',
+              `Healer fixed "${testName}" — updated selectors/assertions`,
+              { stepId: 'fix_tests', agentType: 'healer', detail: { testId, testName } });
             fixes.push({ testName: test?.name || testId, originalError: result.errorMessage!, fixed: true, newCode: healResult.code });
             return 'fixed' as const;
           }
+          emitActivity(teamId, repositoryId, sessionId, 'substep:update',
+            `Healer could not fix "${testName}"`,
+            { stepId: 'fix_tests', agentType: 'healer', detail: { testId, testName } });
           fixes.push({ testName: test?.name || testId, originalError: result.errorMessage!, fixed: false });
           return 'failed' as const;
         }),

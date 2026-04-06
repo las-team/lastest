@@ -1,4 +1,4 @@
-# Lastest2 Competitive Brief
+# Lastest Competitive Brief
 
 **Research Date:** March 3, 2026 (updated from February 5, 2026)
 
@@ -8,7 +8,7 @@
 
 The visual regression testing market is dominated by three paid SaaS incumbents (Percy, Chromatic, Applitools) and a few open-source alternatives (BackstopJS, Playwright native, Lost Pixel, Argos). All incumbents are cloud-only, metered-pricing tools targeting mid-to-enterprise teams. None offer AI-powered test *generation* combined with recording and self-hosting.
 
-Lastest2 is now the only tool that combines **AI test generation + no-code recording + autonomous agent + 3 diff engines + embedded browser execution + remote runners (published npm package) + full approval workflow** — all self-hosted at $0.
+Lastest is now the only tool that combines **AI test generation + no-code recording + autonomous agent + 3 diff engines + embedded browser execution + remote runners (published npm package) + full approval workflow** — all self-hosted at $0.
 
 - **Biggest opportunity:** No competitor combines AI test generation + recording + visual diffing + autonomous execution in a free, self-hosted package. The "vibe coder" / solo founder segment is entirely unserved.
 - **Biggest threat:** Applitools' "Autonomous" platform is adding natural-language test creation, and Percy launched an AI Review Agent -- incumbents are starting to add AI, though for *reviewing* not *generating*. Meticulous.ai's zero-authoring model is compelling but cloud-only and custom-priced.
@@ -314,7 +314,7 @@ Lastest2 is now the only tool that combines **AI test generation + no-code recor
 
 ## 3. Messaging Comparison Matrix
 
-| Dimension | Lastest2 | Percy | Chromatic | Applitools | Argos | Meticulous |
+| Dimension | Lastest | Percy | Chromatic | Applitools | Argos | Meticulous |
 |-----------|----------|-------|-----------|------------|-------|------------|
 | **Tagline** | "Record it. Test it. Ship it. — $0 forever" | "All-in-one visual testing and review platform" | "Ship flawless UIs with less work" | "AI-Automated Compliance Testing" | "Visual testing for developers" | "AI-powered frontend testing" |
 | **Target buyer** | Solo founders, vibe coders, small teams | Engineering/QA teams | Frontend/design system teams | Enterprise QA | Frontend devs/OSS teams | Frontend teams (Next.js/Vercel) |
@@ -331,14 +331,14 @@ Lastest2 is now the only tool that combines **AI test generation + no-code recor
 
 ## 4. Content Gap Analysis
 
-### Topics competitors own that Lastest2 does not cover yet
+### Topics competitors own that Lastest does not cover yet
 - Cross-browser visual testing best practices (Percy)
 - Component/design system testing (Chromatic)
 - Enterprise compliance and accessibility testing (Applitools)
 - Test Automation University-style education (Applitools -- 150k+ users)
 - "Why Playwright visual testing doesn't scale" (Argos)
 
-### Topics Lastest2 can own that competitors do NOT
+### Topics Lastest can own that competitors do NOT
 - **"AI writes your tests"** -- none offer AI test generation from recordings
 - **"Free visual testing for indie hackers"** -- no competitor targets this segment
 - **"Vibe coding meets visual testing"** -- connecting AI-first dev workflows to testing
@@ -365,8 +365,8 @@ Lastest2 is now the only tool that combines **AI test generation + no-code recor
 3. **Self-hosted demand:** r/selfhosted has 2M+ members. Strong demand for privacy-first, no-cloud tools.
 4. **Price sensitivity:** Percy/Chromatic free tiers cap at 5,000 screenshots/month. Teams burning through this in CI need $150-400+/mo plans.
 5. **"Build with AI, run traditional":** Unique positioning -- AI generates code once, tests run as standard Playwright with zero AI tokens per execution.
-6. **Baseline management:** Percy has known issues with complex git workflows (branch merging breaks baselines). Lastest2's SHA256 hash carry-forward is superior.
-7. **Meticulous.ai gap:** Requires real user traffic -- unusable for pre-launch MVPs. Lastest2 works from day one.
+6. **Baseline management:** Percy has known issues with complex git workflows (branch merging breaks baselines). Lastest's SHA256 hash carry-forward is superior.
+7. **Meticulous.ai gap:** Requires real user traffic -- unusable for pre-launch MVPs. Lastest works from day one.
 8. **Embedded browser execution:** No competitor offers a self-hosted container with live browser streaming. Teams can run tests without installing Playwright locally -- unique for CI/CD and cloud deployments.
 9. **Runner npm package:** `@lastest/runner` is published and ready for distributed execution. No cloud dependency, no per-runner pricing, no vendor lock-in.
 10. **Autonomous agent gap:** Play Agent is the only fully autonomous pipeline that scans, generates, runs, fixes, and reports in one click. Applitools Autonomous is the closest but requires $969+/mo.
@@ -397,21 +397,21 @@ Lastest2 is now the only tool that combines **AI test generation + no-code recor
 ## 7. Recommended Actions
 
 ### Quick Wins (this week)
-1. **Publish comparison pages** -- "Percy vs Lastest2" and "Chromatic vs Lastest2" for SEO on "[tool] alternative" searches
+1. **Publish comparison pages** -- "Percy vs Lastest" and "Chromatic vs Lastest" for SEO on "[tool] alternative" searches
 2. **Create a 30-second demo GIF** showing record, AI generates test, visual diff, approve -- no competitor can show this flow
-3. **Post the cost calculator:** "How much would your visual testing cost with Percy vs Lastest2?" ($0 vs $X,000/year)
+3. **Post the cost calculator:** "How much would your visual testing cost with Percy vs Lastest?" ($0 vs $X,000/year)
 
 ### Strategic Moves (next 30 days)
 4. **Own the "AI test generation" keyword** -- write content about why AI should *write* tests, not just *review* screenshots. Position against Applitools Autonomous (enterprise-only, $969+/mo) and Percy's AI Agent (review-only, not generation).
-5. **Target the Storybook-to-full-page gap** -- Chromatic excels at component testing but can't test full user flows. Position Lastest2 for "the other half" of visual testing that Chromatic can't do.
-6. **Counter the Playwright native narrative** -- publish "Why Playwright toHaveScreenshot isn't enough" content (similar to Argos's strategy), positioning Lastest2 as the upgrade path.
+5. **Target the Storybook-to-full-page gap** -- Chromatic excels at component testing but can't test full user flows. Position Lastest for "the other half" of visual testing that Chromatic can't do.
+6. **Counter the Playwright native narrative** -- publish "Why Playwright toHaveScreenshot isn't enough" content (similar to Argos's strategy), positioning Lastest as the upgrade path.
 7. **Community launch on r/selfhosted** -- emphasize "no cloud, your data stays local, $0 forever" messaging that resonates with this 2M+ member community.
 
 ---
 
 ## Full Competitor Comparison
 
-| Capability | Lastest2 | Percy | Chromatic | Applitools | BackstopJS | Lost Pixel | Meticulous | Argos |
+| Capability | Lastest | Percy | Chromatic | Applitools | BackstopJS | Lost Pixel | Meticulous | Argos |
 |------------|----------|-------|-----------|------------|------------|------------|------------|-------|
 | No-code recording | Yes | No | No | Low-code | No | No | Session record | No |
 | AI test generation | Yes | No | No | Yes (NLP) | No | No | Yes (sessions) | No |

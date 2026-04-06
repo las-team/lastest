@@ -1,6 +1,6 @@
-# Lastest2 Visual Regression Action
+# Lastest Visual Regression Action
 
-Run visual regression tests via Lastest2 remote runner directly from your GitHub Actions workflow.
+Run visual regression tests via Lastest remote runner directly from your GitHub Actions workflow.
 
 ## Features
 
@@ -10,8 +10,8 @@ Run visual regression tests via Lastest2 remote runner directly from your GitHub
 
 ## Prerequisites
 
-1. A running Lastest2 server instance
-2. A remote runner configured and connected to your Lastest2 server
+1. A running Lastest server instance
+2. A remote runner configured and connected to your Lastest server
 3. Runner token for authentication
 
 ## Usage
@@ -20,7 +20,7 @@ Run visual regression tests via Lastest2 remote runner directly from your GitHub
 
 ```yaml
 - name: Visual Regression Tests
-  uses: your-org/lastest2@v1
+  uses: las-team/lastest@v1
   with:
     server-url: ${{ secrets.LASTEST_SERVER_URL }}
     runner-token: ${{ secrets.LASTEST_RUNNER_TOKEN }}
@@ -44,7 +44,7 @@ jobs:
     steps:
       - name: Run visual regression tests
         id: visual
-        uses: your-org/lastest2@v1
+        uses: las-team/lastest@v1
         with:
           server-url: ${{ secrets.LASTEST_SERVER_URL }}
           runner-token: ${{ secrets.LASTEST_RUNNER_TOKEN }}
@@ -82,10 +82,10 @@ jobs:
 
 | Input | Description | Required | Default |
 |-------|-------------|----------|---------|
-| `server-url` | Lastest2 server URL | Yes | - |
+| `server-url` | Lastest server URL | Yes | - |
 | `runner-token` | Runner authentication token | Yes | - |
-| `repo-id` | Repository ID in Lastest2 | Yes | - |
-| `team-id` | Team ID in Lastest2 | Yes | - |
+| `repo-id` | Repository ID in Lastest | Yes | - |
+| `team-id` | Team ID in Lastest | Yes | - |
 | `runner-id` | Remote runner ID | Yes | - |
 | `timeout` | Build timeout in seconds | No | `300` |
 | `fail-on-changes` | Fail when changes detected | No | `false` |
@@ -95,7 +95,7 @@ jobs:
 | Output | Description |
 |--------|-------------|
 | `status` | Build status: `passed`, `failed`, `review_required`, `safe_to_merge`, `blocked` |
-| `build-url` | Direct link to build results in Lastest2 |
+| `build-url` | Direct link to build results in Lastest |
 | `changed-count` | Number of visual changes detected |
 | `passed-count` | Number of passed tests |
 | `failed-count` | Number of failed tests |
@@ -112,20 +112,20 @@ Set `fail-on-changes: 'true'` to make the action fail when visual changes are de
 
 1. Go to your repository Settings > Secrets and variables > Actions
 2. Add the following secrets:
-   - `LASTEST_SERVER_URL`: Your Lastest2 server URL
-   - `LASTEST_RUNNER_TOKEN`: Runner token from Lastest2
+   - `LASTEST_SERVER_URL`: Your Lastest server URL
+   - `LASTEST_RUNNER_TOKEN`: Runner token from Lastest
 
 3. Add the following variables:
-   - `LASTEST_REPO_ID`: Repository ID (from Lastest2 dashboard)
-   - `LASTEST_TEAM_ID`: Team ID (from Lastest2 dashboard)
-   - `LASTEST_RUNNER_ID`: Runner ID (from Lastest2 runners page)
+   - `LASTEST_REPO_ID`: Repository ID (from Lastest dashboard)
+   - `LASTEST_TEAM_ID`: Team ID (from Lastest dashboard)
+   - `LASTEST_RUNNER_ID`: Runner ID (from Lastest runners page)
 
 ## Architecture
 
-This action dispatches tests to your remote Lastest2 runner instead of running Playwright locally:
+This action dispatches tests to your remote Lastest runner instead of running Playwright locally:
 
 ```
-GitHub Actions ──> Lastest2 Server ──> Remote Runner
+GitHub Actions ──> Lastest Server ──> Remote Runner
                          │
                     ┌────┴────┐
                     │ Polling │

@@ -1,5 +1,5 @@
 # =============================================================================
-# Lastest2 - Development Dockerfile
+# Lastest - Development Dockerfile
 # =============================================================================
 
 FROM mcr.microsoft.com/playwright:v1.57.0-noble

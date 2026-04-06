@@ -45,6 +45,11 @@ Formal verification of code?
 Firecrawl?
 Approve reject changes or create ticket -> gh issue, jira, linear
 Expand into not just visual testing
+DOM test repair
+  1. During the passing run: record a full interaction trace — DOM snapshots at each step, network requests, console logs                                    
+  2. When it breaks: diff the last-known-good DOM snapshot against the current failing one
+  3. This gives the maintenance agent before/after context ("this button used to be <button data-testid='submit'> inside a <form>, now it's a <div           
+  role='button'> inside a <dialog>") instead of just "selector not found, figure it out" 
 ## bugs
 ## marketing
 why is software not just a play button?

@@ -1,4 +1,4 @@
-# Outreach Targets for Lastest2
+# Outreach Targets for Lastest
 
 Research compiled from Twitter/X, Reddit, and indie hacker communities.
 

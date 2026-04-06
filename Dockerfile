@@ -1,5 +1,5 @@
 # =============================================================================
-# Lastest2 - Visual Regression Testing Platform
+# Lastest - Visual Regression Testing Platform
 # Multi-stage Dockerfile for production deployment
 # =============================================================================
 
@@ -178,10 +178,10 @@ ENV PORT=3000
 ENV HOSTNAME=0.0.0.0
 
 # Labels for Docker Hub
-LABEL org.opencontainers.image.title="Lastest2"
+LABEL org.opencontainers.image.title="Lastest"
 LABEL org.opencontainers.image.description="Visual regression testing platform with Playwright"
-LABEL org.opencontainers.image.vendor="Lastest2"
-LABEL org.opencontainers.image.source="https://github.com/lastest2/lastest2"
+LABEL org.opencontainers.image.vendor="Lastest"
+LABEL org.opencontainers.image.source="https://github.com/las-team/lastest"
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \

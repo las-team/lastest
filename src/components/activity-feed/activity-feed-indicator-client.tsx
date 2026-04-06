@@ -2,11 +2,13 @@
 
 import { Radio } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { useActivityFeedContext } from './activity-feed-provider-client';
+import { useActivityFeedContextSafe } from './activity-feed-provider-client';
 import { cn } from '@/lib/utils';
 
 export function ActivityFeedIndicator() {
-  const { setIsOpen, activeSessionCount, events, isConnected } = useActivityFeedContext();
+  const ctx = useActivityFeedContextSafe();
+  if (!ctx) return null;
+  const { setIsOpen, activeSessionCount, events, isConnected } = ctx;
 
   const hasActive = activeSessionCount > 0;
   const hasEvents = events.length > 0;

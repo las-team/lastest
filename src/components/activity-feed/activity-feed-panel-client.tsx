@@ -1,16 +1,92 @@
 'use client';
 
 import { useRef, useEffect, useState, useCallback } from 'react';
-import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
+import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from '@/components/ui/sheet';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Radio, Trash2, ArrowDown } from 'lucide-react';
+import { Radio, Trash2, ArrowDown, Loader2, Play, Pause, CheckCircle2, XCircle } from 'lucide-react';
+import Link from 'next/link';
 import { ActivityEventCard } from './activity-event-card-client';
 import { useActivityFeedContext } from './activity-feed-provider-client';
 import { cn } from '@/lib/utils';
+import type { AgentSession } from '@/lib/db/schema';
 
 type FilterType = 'all' | 'play_agent' | 'mcp_server';
+
+function SessionStatusIcon({ status }: { status: string }) {
+  switch (status) {
+    case 'active':
+      return <Loader2 className="h-3.5 w-3.5 text-blue-500 animate-spin" />;
+    case 'paused':
+      return <Pause className="h-3.5 w-3.5 text-amber-500" />;
+    case 'completed':
+      return <CheckCircle2 className="h-3.5 w-3.5 text-green-500" />;
+    case 'failed':
+      return <XCircle className="h-3.5 w-3.5 text-red-500" />;
+    default:
+      return <Play className="h-3.5 w-3.5 text-muted-foreground" />;
+  }
+}
+
+function ActiveSessionsSection() {
+  const [sessions, setSessions] = useState<AgentSession[]>([]);
+
+  useEffect(() => {
+    let active = true;
+
+    async function fetchSessions() {
+      try {
+        const res = await fetch('/api/activity-feed/sessions');
+        if (!res.ok) return;
+        const data = await res.json();
+        if (active) setSessions(data.sessions ?? []);
+      } catch {
+        // ignore
+      }
+    }
+
+    fetchSessions();
+    const interval = setInterval(fetchSessions, 5000);
+    return () => { active = false; clearInterval(interval); };
+  }, []);
+
+  if (sessions.length === 0) return null;
+
+  return (
+    <div className="px-4 py-2 border-b bg-muted/30">
+      <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider mb-1.5">Agent Sessions</p>
+      <div className="space-y-1">
+        {sessions.map((s) => (
+          <div key={s.id} className="flex items-center gap-2 text-xs">
+            <SessionStatusIcon status={s.status} />
+            <span className="flex-1 truncate">
+              {s.currentStepId ? `Step: ${s.currentStepId.replace(/_/g, ' ')}` : s.status}
+            </span>
+            <Badge
+              variant="outline"
+              className={cn(
+                'h-4 px-1 text-[10px]',
+                s.status === 'active' && 'border-blue-500/50 text-blue-600 dark:text-blue-400',
+                s.status === 'paused' && 'border-amber-500/50 text-amber-600 dark:text-amber-400',
+                s.status === 'completed' && 'border-green-500/50 text-green-600 dark:text-green-400',
+                s.status === 'failed' && 'border-red-500/50 text-red-600 dark:text-red-400',
+              )}
+            >
+              {s.status}
+            </Badge>
+            <Link
+              href={`/run?session=${s.id}`}
+              className="text-[10px] text-primary hover:underline"
+            >
+              View
+            </Link>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
 
 export function ActivityFeedPanel() {
   const { isOpen, setIsOpen, events, isConnected, clearEvents } = useActivityFeedContext();
@@ -43,24 +119,22 @@ export function ActivityFeedPanel() {
   return (
     <Sheet open={isOpen} onOpenChange={setIsOpen}>
       <SheetContent className="w-[420px] sm:w-[480px] p-0 flex flex-col">
-        <SheetHeader className="px-4 py-3 border-b shrink-0">
-          <div className="flex items-center justify-between">
-            <SheetTitle className="flex items-center gap-2 text-base">
-              <Radio className="h-4 w-4" />
-              Activity Feed
-              {isConnected && (
-                <span className="h-2 w-2 rounded-full bg-green-500 animate-pulse" />
-              )}
-            </SheetTitle>
-            <div className="flex items-center gap-1">
-              <Button variant="ghost" size="icon" className="h-7 w-7" onClick={clearEvents} title="Clear">
-                <Trash2 className="h-3.5 w-3.5" />
-              </Button>
-            </div>
-          </div>
+        <SheetHeader className="px-4 pt-4 pb-3 border-b shrink-0">
+          <SheetTitle className="flex items-center gap-2 text-base">
+            <Radio className="h-4 w-4" />
+            Activity Feed
+            {isConnected ? (
+              <span className="h-2 w-2 rounded-full bg-green-500 animate-pulse" title="Connected" />
+            ) : (
+              <span className="h-2 w-2 rounded-full bg-red-400" title="Disconnected" />
+            )}
+          </SheetTitle>
+          <SheetDescription className="sr-only">
+            Real-time activity from Play Agent and MCP server
+          </SheetDescription>
 
-          {/* Filter tabs */}
-          <div className="flex gap-1 mt-2">
+          {/* Filter tabs + clear */}
+          <div className="flex items-center gap-1 mt-2">
             <Button
               variant={filter === 'all' ? 'secondary' : 'ghost'}
               size="sm"
@@ -88,8 +162,18 @@ export function ActivityFeedPanel() {
               MCP
               <Badge variant="outline" className="ml-1 h-4 px-1 text-[10px]">{mcpCount}</Badge>
             </Button>
+            <div className="flex-1" />
+            {events.length > 0 && (
+              <Button variant="ghost" size="sm" className="h-7 text-xs gap-1" onClick={clearEvents}>
+                <Trash2 className="h-3 w-3" />
+                Clear
+              </Button>
+            )}
           </div>
         </SheetHeader>
+
+        {/* Active agent sessions */}
+        <ActiveSessionsSection />
 
         {/* Timeline */}
         <ScrollArea className="flex-1">
@@ -111,11 +195,11 @@ export function ActivityFeedPanel() {
 
         {/* Scroll-to-bottom button */}
         {!autoScroll && filteredEvents.length > 0 && (
-          <div className="absolute bottom-4 right-8">
+          <div className="absolute bottom-4 left-1/2 -translate-x-1/2">
             <Button
               size="sm"
               variant="secondary"
-              className={cn('h-8 rounded-full shadow-md gap-1')}
+              className="h-8 rounded-full shadow-md gap-1"
               onClick={() => {
                 bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
                 setAutoScroll(true);

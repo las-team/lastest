@@ -21,92 +21,129 @@ export function useActivityFeedContext() {
   return ctx;
 }
 
+/** Safe version that returns null when provider is not mounted (e.g. early adopter off) */
+export function useActivityFeedContextSafe() {
+  return useContext(ActivityFeedContext);
+}
+
 const MAX_EVENTS = 500;
+const SSE_RETRY_DELAY = 3000;
+const SSE_MAX_RETRIES = 10;
 
 export function ActivityFeedProvider({ children }: { children: React.ReactNode }) {
   const [events, setEvents] = useState<ActivityEvent[]>([]);
   const [isOpen, setIsOpen] = useState(false);
   const [isConnected, setIsConnected] = useState(false);
   const [activeSessionCount, setActiveSessionCount] = useState(0);
-  const isOpenRef = useRef(isOpen);
   const lastMcpToast = useRef(0);
-
-  useEffect(() => {
-    isOpenRef.current = isOpen;
-  }, [isOpen]);
+  const retryCount = useRef(0);
+  const retryTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const clearEvents = useCallback(() => setEvents([]), []);
 
-  // Global SSE connection
+  // Load recent history on mount so there's initial data
   useEffect(() => {
-    const es = new EventSource('/api/activity-feed');
+    fetch('/api/activity-feed/history?limit=50')
+      .then(res => res.ok ? res.json() : null)
+      .then(data => {
+        if (data?.events?.length) {
+          // History comes in DESC order, reverse for chronological
+          const history = [...data.events].reverse() as ActivityEvent[];
+          setEvents(history);
 
-    es.onopen = () => setIsConnected(true);
-
-    es.onmessage = (e) => {
-      try {
-        const data = JSON.parse(e.data);
-        if (data.type === 'connected') return;
-
-        const event = data as ActivityEvent;
-        setEvents((prev) => {
-          const next = [...prev, event];
-          return next.length > MAX_EVENTS ? next.slice(-MAX_EVENTS) : next;
-        });
-
-        // Track active sessions
-        if (event.eventType === 'session:start') {
-          setActiveSessionCount((c) => c + 1);
-        } else if (event.eventType === 'session:complete' || event.eventType === 'session:error') {
-          setActiveSessionCount((c) => Math.max(0, c - 1));
+          // Count active sessions from history
+          const starts = history.filter((e: ActivityEvent) => e.eventType === 'session:start').length;
+          const ends = history.filter((e: ActivityEvent) =>
+            e.eventType === 'session:complete' || e.eventType === 'session:error'
+          ).length;
+          setActiveSessionCount(Math.max(0, starts - ends));
         }
+      })
+      .catch(() => {});
+  }, []);
 
-        // Toast notifications
-        if (event.eventType === 'session:start') {
-          toast('AI session started', {
-            description: event.summary,
-            action: {
-              label: 'View',
-              onClick: () => setIsOpen(true),
-            },
+  // Global SSE connection with retry
+  useEffect(() => {
+    let es: EventSource | null = null;
+    let cancelled = false;
+
+    function connect() {
+      if (cancelled) return;
+
+      es = new EventSource('/api/activity-feed');
+
+      es.onopen = () => {
+        setIsConnected(true);
+        retryCount.current = 0;
+      };
+
+      es.onmessage = (e) => {
+        try {
+          const data = JSON.parse(e.data);
+          if (data.type === 'connected') return;
+
+          const event = data as ActivityEvent;
+          setEvents((prev) => {
+            // Dedupe by id
+            if (prev.some(p => p.id === event.id)) return prev;
+            const next = [...prev, event];
+            return next.length > MAX_EVENTS ? next.slice(-MAX_EVENTS) : next;
           });
-        } else if (event.eventType === 'session:complete') {
-          toast.success('AI session completed', {
-            description: event.summary,
-            action: {
-              label: 'View',
-              onClick: () => setIsOpen(true),
-            },
-          });
-        } else if (event.eventType === 'session:error') {
-          toast.error('AI session failed', {
-            description: event.summary,
-            action: {
-              label: 'View',
-              onClick: () => setIsOpen(true),
-            },
-          });
-        } else if (event.eventType === 'mcp:tool_call') {
-          const now = Date.now();
-          if (now - lastMcpToast.current > 5000) {
-            lastMcpToast.current = now;
-            toast('MCP tool called', {
-              description: event.summary,
-              duration: 3000,
-            });
+
+          // Track active sessions
+          if (event.eventType === 'session:start') {
+            setActiveSessionCount((c) => c + 1);
+          } else if (event.eventType === 'session:complete' || event.eventType === 'session:error') {
+            setActiveSessionCount((c) => Math.max(0, c - 1));
           }
-        }
-      } catch {
-        // Ignore parse errors
-      }
-    };
 
-    es.onerror = () => {
-      setIsConnected(false);
-    };
+          // Toast notifications
+          if (event.eventType === 'session:start') {
+            toast('AI session started', {
+              description: event.summary,
+              action: { label: 'View', onClick: () => setIsOpen(true) },
+            });
+          } else if (event.eventType === 'session:complete') {
+            toast.success('AI session completed', {
+              description: event.summary,
+              action: { label: 'View', onClick: () => setIsOpen(true) },
+            });
+          } else if (event.eventType === 'session:error') {
+            toast.error('AI session failed', {
+              description: event.summary,
+              action: { label: 'View', onClick: () => setIsOpen(true) },
+            });
+          } else if (event.eventType === 'mcp:tool_call') {
+            const now = Date.now();
+            if (now - lastMcpToast.current > 5000) {
+              lastMcpToast.current = now;
+              toast('MCP tool called', { description: event.summary, duration: 3000 });
+            }
+          }
+        } catch {
+          // Ignore parse errors (keepalives)
+        }
+      };
+
+      es.onerror = () => {
+        setIsConnected(false);
+        es?.close();
+
+        // Retry with backoff
+        if (!cancelled && retryCount.current < SSE_MAX_RETRIES) {
+          retryCount.current++;
+          const delay = SSE_RETRY_DELAY * Math.min(retryCount.current, 5);
+          retryTimer.current = setTimeout(connect, delay);
+        }
+      };
+    }
+
+    connect();
 
     return () => {
-      es.close();
+      cancelled = true;
+      es?.close();
+      if (retryTimer.current) clearTimeout(retryTimer.current);
       setIsConnected(false);
     };
   }, []);

@@ -14,7 +14,7 @@ Record user flows, AI writes tests, catch UI regressions before your users do. S
 
 Hey Product Hunt! 👋
 
-I'm [NAME], and I built Lastest2 because I kept breaking my own UI.
+I'm [NAME], and I built Lastest because I kept breaking my own UI.
 
 **The backstory**: I ship fast using Cursor and Claude. Last month I pushed a "quick fix" that broke my checkout page. I didn't notice for 3 days. My users did.
 
@@ -27,7 +27,7 @@ I'm a solo founder. I spend $20/mo on hosting. Paying $150+ for visual testing f
 
 **So I built what I needed:**
 
-1. **Record** - Click around your app, Lastest2 captures everything
+1. **Record** - Click around your app, Lastest captures everything
 2. **Generate** - AI writes robust Playwright tests with fallback selectors
 3. **Run** - Screenshots compared against baselines
 4. **Review** - Approve intentional changes, catch regressions
