@@ -18,6 +18,7 @@ Videos explaining use
     Saját demo felvétele ahol van egy laza scripted előre megírva, ami egy törött vibe kódolt appon bemutatja hogy lépésről lépésre hogyan használod a Lastestet. A végén elmondani hogy a runnereket bárhol tudja futtatni, de itt a cloud instance, like and subscribe, kommentelj, kérdezz, nagyon lelkes a szerző.
     sdfsd
 -keyword pattern pages XY product for ZT
+MCP deploy for smithery
 ## ideas
 Gamify it - beat the bot approach, score, team leaderboard, bug blitz support. Share you beat a bot by xy
 Non-AI test triage,  5-category classification with confidence scoring, maps to article's "failure diagnosis"  recommendation       

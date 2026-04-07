@@ -3,6 +3,12 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { LastestClient } from './client.js';
 import { createServer } from './server.js';
 
+// Re-exports so the Next.js HTTP route (and any other consumer) can build
+// an MCP server with the same tool surface as the stdio CLI.
+export { LastestClient } from './client.js';
+export type { LastestClientConfig, ToolResponse } from './client.js';
+export { createServer } from './server.js';
+
 export async function main() {
   const program = new Command();
 
