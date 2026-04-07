@@ -195,6 +195,44 @@ export async function deleteExpiredSessions() {
 }
 
 // ============================================
+// API Tokens (long-lived sessions of kind='api')
+// ============================================
+
+export async function listApiTokensByUser(userId: string) {
+  return db
+    .select({
+      id: sessions.id,
+      label: sessions.label,
+      createdAt: sessions.createdAt,
+      lastUsedAt: sessions.lastUsedAt,
+      expiresAt: sessions.expiresAt,
+    })
+    .from(sessions)
+    .where(and(eq(sessions.userId, userId), eq(sessions.kind, 'api')))
+    .orderBy(desc(sessions.createdAt));
+}
+
+export async function createApiToken(data: { userId: string; label: string; token: string; expiresAt: Date }) {
+  const id = uuid();
+  const now = new Date();
+  await db.insert(sessions).values({
+    id,
+    userId: data.userId,
+    token: data.token,
+    expiresAt: data.expiresAt,
+    kind: 'api',
+    label: data.label,
+    createdAt: now,
+    updatedAt: now,
+  });
+  return { id };
+}
+
+export async function deleteApiToken(id: string, userId: string) {
+  await db.delete(sessions).where(and(eq(sessions.id, id), eq(sessions.userId, userId), eq(sessions.kind, 'api')));
+}
+
+// ============================================
 // OAuth Accounts
 // ============================================
 

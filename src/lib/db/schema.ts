@@ -1061,6 +1061,13 @@ export const sessions = pgTable('sessions', {
   userAgent: text('user_agent'),
   createdAt: timestamp('created_at'),
   updatedAt: timestamp('updated_at'),
+  // 'browser' = standard interactive session (default)
+  // 'api'     = long-lived programmatic API token (MCP, VSCode extension, scripts)
+  kind: text('kind').notNull().default('browser'),
+  // Human label for 'api' tokens (e.g. "Claude Code laptop"). Null for browser sessions.
+  label: text('label'),
+  // Last time the token was used (for 'api' tokens). Null for browser sessions.
+  lastUsedAt: timestamp('last_used_at'),
 });
 
 export type Session = typeof sessions.$inferSelect;

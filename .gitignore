@@ -75,3 +75,6 @@ screenshot-*.png
 playwright-visual-tests/
 tests/*
 test-results/*
+# mcp-publisher auth tokens — never commit
+.mcpregistry_github_token
+.mcpregistry_registry_token

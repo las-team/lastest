@@ -1,6 +1,7 @@
 {
   "name": "@lastest/mcp-server",
-  "version": "0.2.0",
+  "version": "0.2.2",
+  "mcpName": "io.github.las-team/lastest",
   "description": "MCP server for Lastest visual regression testing platform — lets AI agents run tests, review diffs, and manage baselines",
   "type": "module",
   "bin": {
@@ -11,7 +12,9 @@
   "files": [
     "dist",
     "bin",
-    "LICENSE"
+    "LICENSE",
+    "README.md",
+    "server.json"
   ],
   "scripts": {
     "build": "tsup",

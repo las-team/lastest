@@ -160,7 +160,8 @@
       "Read(//home/ewyct/dev/lastest2/**)",
       "Bash(python3 -m json.tool)",
       "WebFetch(domain:currents.dev)",
-      "WebFetch(domain:mobai.run)"
+      "WebFetch(domain:mobai.run)",
+      "Bash(npm publish:*)"
     ]
   },
   "disabledMcpjsonServers": [
