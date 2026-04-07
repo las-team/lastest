@@ -3,13 +3,13 @@
 # =============================================================================
 #
 # Quick start:
-#   docker-compose up -d
+#   docker compose up -d
 #
 # View logs:
-#   docker-compose logs -f
+#   docker compose logs -f
 #
 # Stop:
-#   docker-compose down
+#   docker compose down
 #
 # =============================================================================
 
@@ -52,6 +52,7 @@ services:
       - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID:-}
       - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET:-}
       - LASTEST_TOKEN=${LASTEST_TOKEN:-}
+      - SYSTEM_EB_TOKEN=${SYSTEM_EB_TOKEN:-}
     depends_on:
       postgres:
         condition: service_healthy
@@ -62,6 +63,33 @@ services:
       timeout: 10s
       retries: 3
       start_period: 60s
+    networks:
+      - lastest-net
+
+  embedded-browser:
+    image: lastest-embedded-browser
+    build:
+      context: .
+      dockerfile: packages/embedded-browser/Dockerfile
+    container_name: lastest-embedded-browser
+    ports:
+      - "9223:9223"  # CDP stream
+      - "9224:9224"  # health/control
+    environment:
+      - LASTEST_URL=http://lastest:3000
+      - SYSTEM_EB_TOKEN=${SYSTEM_EB_TOKEN:?SYSTEM_EB_TOKEN is required (must match lastest SYSTEM_EB_TOKEN list)}
+      - STREAM_HOST=embedded-browser
+      - STREAM_PORT=9223
+      - INSTANCE_ID=eb-1
+    depends_on:
+      lastest:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:9224/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
     networks:
       - lastest-net
 
