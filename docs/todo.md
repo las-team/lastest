@@ -19,6 +19,7 @@ Videos explaining use
     sdfsd
 -keyword pattern pages XY product for ZT
 MCP deploy for smithery
+Reach out to podcasts, meetups, youtube channels, add them to crm
 ## ideas
 Gamify it - beat the bot approach, score, team leaderboard, bug blitz support. Share you beat a bot by xy
 Non-AI test triage,  5-category classification with confidence scoring, maps to article's "failure diagnosis"  recommendation       
