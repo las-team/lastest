@@ -220,10 +220,17 @@ Create tests (one-time)          Run tests (forever, $0)
 ```bash
 git clone https://github.com/las-team/lastest.git
 cd lastest
-docker-compose up -d
+export BETTER_AUTH_SECRET=$(openssl rand -hex 32)
+export SYSTEM_EB_TOKEN=$(openssl rand -hex 32)
+docker compose up -d --build
 ```
 
-Open [http://localhost:3000](http://localhost:3000) — that's it.
+This spins up three services:
+- **lastest** — the Next.js backend on [http://localhost:3000](http://localhost:3000)
+- **postgres** — PostgreSQL 17 database
+- **embedded-browser** — containerized Chromium with CDP live streaming (ports 9223/9224)
+
+`SYSTEM_EB_TOKEN` is shared between the backend and the embedded browser so the backend trusts the instance. `BETTER_AUTH_SECRET` is required for session signing.
 
 ### Option 2: From source
 
@@ -451,14 +458,14 @@ This dramatically reduces test time for large suites while maintaining coverage 
 Deploy Lastest on your home server or any Docker host:
 
 ```bash
-# Quick start
-docker-compose up -d
+# Quick start (backend + postgres + embedded browser)
+docker compose up -d --build
 
 # View logs
-docker-compose logs -f
+docker compose logs -f
 
 # Stop
-docker-compose down
+docker compose down
 ```
 
 Uses the official Playwright base image (`mcr.microsoft.com/playwright`) with Node.js 20, multi-stage build, and health checks via `GET /api/health`. Runs as non-root user.
@@ -469,12 +476,14 @@ Uses the official Playwright base image (`mcr.microsoft.com/playwright`) with No
 |--------|---------|
 | `lastest-pgdata` | PostgreSQL data |
 | `lastest-storage` | Screenshots, baselines, diffs, traces |
+| `lastest-claude-auth` | Claude CLI auth state (optional AI features) |
 
 ### Environment Variables for Docker
 
 ```bash
 POSTGRES_PASSWORD=your-secure-password
-BETTER_AUTH_SECRET=your-auth-secret
+BETTER_AUTH_SECRET=your-auth-secret          # required
+SYSTEM_EB_TOKEN=your-embedded-browser-token  # required for embedded-browser service
 GITHUB_CLIENT_ID=your-github-app-id
 GITHUB_CLIENT_SECRET=your-github-app-secret
 ```
