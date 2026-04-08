@@ -176,7 +176,7 @@ RUN mkdir -p /app/storage/screenshots /app/storage/baselines /app/storage/diffs 
 # Environment configuration
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
-ENV DATABASE_URL=postgresql://lastest:lastest@localhost:5432/lastest
+# DATABASE_URL must be injected by the deployment — no default. Missing env is fatal at boot.
 ENV PORT=3000
 ENV HOSTNAME=0.0.0.0
 

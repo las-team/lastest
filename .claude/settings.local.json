@@ -165,7 +165,14 @@
       "Read(//tmp/**)",
       "Bash(python3 -c \"import json; d=json.load\\(open\\('/tmp/tw.json'\\)\\); print\\(list\\(d.keys\\(\\)\\)\\); print\\(len\\(d.get\\('results',[]\\)\\)\\)\")",
       "Bash(wait)",
-      "Bash(python3:*)"
+      "Bash(python3:*)",
+      "Bash(timeout 3 bash -c 'cat < /dev/tcp/127.0.0.1/15432')",
+      "Bash(echo \"exit=$?\")",
+      "Read(//usr/share/postgresql-common/**)",
+      "Bash(pkill -f \"ssh.*15432\")",
+      "Bash(pkill -f \"kubectl port-forward\")",
+      "Bash(sed -i '163s|.*|  log \"Building $IMAGE_EB:olares-v2\"|; 167s|.*|  ok \"Built $IMAGE_EB:olares-v2\"|' scripts/deploy.sh)",
+      "Bash(sed -n '160,170p' scripts/deploy.sh)"
     ]
   },
   "disabledMcpjsonServers": [
