@@ -58,7 +58,7 @@ RUN node -e "\
   require('fs').writeFileSync('build-info.json', JSON.stringify(info));"
 
 # Run tests (includes Tesseract OCR verification)
-RUN pnpm test
+RUN pnpm vitest run --dir src
 
 # Build the application
 RUN pnpm build
@@ -104,6 +104,9 @@ COPY --from=builder --chown=nextjs:nodejs /app/src/lib/db/schema.ts ./src/lib/db
 COPY --from=deps --chown=nextjs:nodejs /app/node_modules/drizzle-kit ./node_modules/drizzle-kit
 COPY --from=deps --chown=nextjs:nodejs /app/node_modules/drizzle-orm ./node_modules/drizzle-orm
 COPY --from=deps --chown=nextjs:nodejs /app/node_modules/.bin/drizzle-kit ./node_modules/.bin/drizzle-kit
+# Postgres driver required by drizzle-kit push at container startup
+COPY --from=deps --chown=nextjs:nodejs /app/node_modules/.pnpm/postgres@3.4.8 ./node_modules/.pnpm/postgres@3.4.8
+RUN ln -sf .pnpm/postgres@3.4.8/node_modules/postgres ./node_modules/postgres
 COPY --from=deps --chown=nextjs:nodejs /app/node_modules/.pnpm/esbuild@0.25.12 ./node_modules/.pnpm/esbuild@0.25.12
 COPY --from=deps --chown=nextjs:nodejs /app/node_modules/.pnpm/@esbuild+linux-x64@0.25.12 ./node_modules/.pnpm/@esbuild+linux-x64@0.25.12
 COPY --from=deps --chown=nextjs:nodejs /app/node_modules/.pnpm/esbuild-register@3.6.0_esbuild@0.25.12 ./node_modules/.pnpm/esbuild-register@3.6.0_esbuild@0.25.12
