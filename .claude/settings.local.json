@@ -161,7 +161,11 @@
       "Bash(python3 -m json.tool)",
       "WebFetch(domain:currents.dev)",
       "WebFetch(domain:mobai.run)",
-      "Bash(npm publish:*)"
+      "Bash(npm publish:*)",
+      "Read(//tmp/**)",
+      "Bash(python3 -c \"import json; d=json.load\\(open\\('/tmp/tw.json'\\)\\); print\\(list\\(d.keys\\(\\)\\)\\); print\\(len\\(d.get\\('results',[]\\)\\)\\)\")",
+      "Bash(wait)",
+      "Bash(python3:*)"
     ]
   },
   "disabledMcpjsonServers": [

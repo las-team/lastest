@@ -6,8 +6,6 @@ Teardown
 Accept Downloads
 Network Interception
 MCP
-QA agent
-sparklines
 triage
 ally
 schedule
@@ -79,6 +77,8 @@ Run online or on your pc?
 ### marketing ideas
 buy a newsletter substack twitter: duuce.com newsletter investor
 AI repurposing engine -> 5 tweets, 3 linkedin, remotion short form, 1 blog, graphics, email sequence
+Gamifying QA - Could you beat an AI tester? How to get AI testing agents to       
+  work? AI testing or Agentic testing?                                                              
 ## Excalidraw
 ### Tests missing:
 B.5) Valamit ki kell majd találni, hogy a user feltölthessen asseteket, amiket böngészni tud file opennel. Very low prio MVP-re, csak megemlítem.
