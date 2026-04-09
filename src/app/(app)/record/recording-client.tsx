@@ -119,7 +119,7 @@ function isActionReplayable(event: RecordingEvent): { replayable: boolean; reaso
     return { replayable: true, reason: 'valid-selectors' };
   }
 
-  if (event.data.action === 'click' && hasCoords) {
+  if ((event.data.action === 'click' || event.data.action === 'rightclick') && hasCoords) {
     return { replayable: true, reason: 'coords-only' };
   }
 
@@ -140,6 +140,11 @@ function getEventDescription(event: RecordingEvent): string {
       if (event.data.action === 'click') {
         const dlSuffix = event.data.downloadWrap ? ' (download)' : '';
         return `${modPrefix}Click ${event.data.selector?.slice(0, 40) || 'element'}${dlSuffix}`;
+      }
+      if (event.data.action === 'rightclick') {
+        const coords = event.data.coordinates;
+        const target = event.data.selector?.slice(0, 40) || (coords ? `at (${coords.x}, ${coords.y})` : 'element');
+        return `${modPrefix}Right-click ${target}`;
       }
       if (event.data.action === 'fill') {
         return `Fill ${event.data.selector?.slice(0, 30) || 'input'} with "${event.data.value?.slice(0, 20) || ''}"`;

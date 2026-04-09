@@ -18,6 +18,14 @@ Videos explaining use
 -keyword pattern pages XY product for ZT
 MCP deploy for smithery
 Reach out to podcasts, meetups, youtube channels, add them to crm
+I want the ai to define happy path tests going throuhg the menu clicking all, and submenues, and see these as test areas. Then as it populates forms and adds records it should create step by step summaries of what it did, so i can change values or expand what it does.
+quick: 
+I also want any console errors logged during run to be shown
+I also want network trace - sent/received to be viewable 
+(low) Every button is green, multiple primary actions, keep clicking on run test instead of save
+Personal preference: Areas and tests being separate functions is REALLY ANNOYING. At least allow creating new tests right from the area view under a sub-area with one click.
+bug report rate limit exceeded
+
 ## ideas
 Gamify it - beat the bot approach, score, team leaderboard, bug blitz support. Share you beat a bot by xy
 Non-AI test triage,  5-category classification with confidence scoring, maps to article's "failure diagnosis"  recommendation       

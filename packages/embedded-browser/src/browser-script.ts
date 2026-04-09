@@ -344,12 +344,15 @@ export const browserRecordingScript = ({ pointerGestures: pg, cursorFPS: fps, se
     }, true);
 
     document.addEventListener('mousedown', (e: MouseEvent) => {
+      // Skip right-click — contextmenu handler records it as 'rightclick' action
+      if (e.button === 2) return;
       const modifiers = getActiveModifiers();
       // @ts-expect-error - exposed function
       window.__recordMouseEvent?.('down', e.clientX, e.clientY, e.button, modifiers);
     }, true);
 
     document.addEventListener('mouseup', (e: MouseEvent) => {
+      if (e.button === 2) return;
       const modifiers = getActiveModifiers();
       // @ts-expect-error - exposed function
       window.__recordMouseEvent?.('up', e.clientX, e.clientY, e.button, modifiers);
@@ -506,20 +509,19 @@ export const browserRecordingScript = ({ pointerGestures: pg, cursorFPS: fps, se
   }
 
   document.addEventListener('contextmenu', (e) => {
-    e.preventDefault();
-    e.stopPropagation();
     const rawTarget = e.target as HTMLElement;
     if (!rawTarget || rawTarget === document.body || rawTarget === document.documentElement) return;
 
     // Shift+right-click opens the assertion menu instead of recording a right-click
     if (e.shiftKey) {
+      e.preventDefault();
+      e.stopPropagation();
       showAssertionMenu(e.clientX, e.clientY, rawTarget);
       return;
     }
 
-    if (pg) return;
-
-    // Record a plain right-click action. Mirror the left-click handler's
+    // Record a plain right-click action — do NOT preventDefault so the app's
+    // own context menu (e.g. Excalidraw) still fires. Mirror the left-click handler's
     // selector-resolution logic so Radix/unmounted targets still get useful selectors.
     const target = findBestTarget(rawTarget);
     let selectors = generateAllSelectors(target);

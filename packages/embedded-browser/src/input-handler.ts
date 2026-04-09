@@ -132,6 +132,12 @@ export class InputHandler {
     if (!this.cdpSession) return;
 
     const button = BUTTON_MAP[event.button ?? 'left'] ?? 'left';
+    // CDP modifiers bitmask: 1=Alt, 2=Ctrl, 4=Meta, 8=Shift
+    const modifiers =
+      (this.modifiers.alt ? 1 : 0) |
+      (this.modifiers.ctrl ? 2 : 0) |
+      (this.modifiers.meta ? 4 : 0) |
+      (this.modifiers.shift ? 8 : 0);
 
     switch (event.action) {
       case 'move':
@@ -139,6 +145,7 @@ export class InputHandler {
           type: 'mouseMoved',
           x: event.x,
           y: event.y,
+          modifiers,
         });
         break;
 
@@ -149,6 +156,7 @@ export class InputHandler {
           y: event.y,
           button,
           clickCount: event.clickCount ?? 1,
+          modifiers,
         });
         break;
 
@@ -159,6 +167,7 @@ export class InputHandler {
           y: event.y,
           button,
           clickCount: event.clickCount ?? 1,
+          modifiers,
         });
         // Dispatch synthetic contextmenu for right-click so browser-script sees it
         if (button === 'right' && this.page) {
@@ -180,6 +189,7 @@ export class InputHandler {
           y: event.y,
           deltaX: event.deltaX ?? 0,
           deltaY: event.deltaY ?? 0,
+          modifiers,
         });
         break;
     }
