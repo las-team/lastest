@@ -336,7 +336,7 @@ export function DebugClient({ test, repositoryId }: DebugClientProps) {
             <Square className="h-4 w-4" />
           </Button>
           <div className="w-px h-5 bg-border mx-1" />
-          {/* Record toggle (local only) */}
+          {/* Record toggle (local only — remote debug executor doesn't support recording yet) */}
           {!isRemote && (isRecording ? (
             <Button
               variant="destructive"
@@ -446,7 +446,16 @@ export function DebugClient({ test, repositoryId }: DebugClientProps) {
 
               {streamUrl && (
                 <TabsContent value="liveview" className="flex flex-col flex-1 min-h-0 mt-0">
-                  <BrowserViewer streamUrl={streamUrl} className="h-full" />
+                  <BrowserViewer
+                    streamUrl={streamUrl}
+                    className="h-full"
+                    interactive={isRecording}
+                    hideControls
+                    hideFullscreenToggle
+                    hideScreenshot
+                    hideViewportSelector
+                    readOnlyUrl
+                  />
                 </TabsContent>
               )}
             </Tabs>

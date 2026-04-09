@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
-import { Layers, RefreshCw, Github, HardDrive, Plus } from 'lucide-react';
+import { Layers, Github, HardDrive, Plus } from 'lucide-react';
 import {
   Select,
   SelectContent,
@@ -17,7 +17,7 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from '@/components/ui/popover';
-import { fetchAndSyncRepos, fetchAndSyncGitlabRepos, selectRepo, createLocalRepo } from '@/server/actions/repos';
+import { selectRepo, createLocalRepo } from '@/server/actions/repos';
 import type { Repository } from '@/lib/db/schema';
 
 // GitLab icon SVG component
@@ -33,41 +33,6 @@ function RepoIcon({ provider, className }: { provider: string; className?: strin
   if (provider === 'gitlab') return <GitLabIcon className={className} />;
   if (provider === 'local') return <HardDrive className={className} />;
   return <Github className={className} />;
-}
-
-// Separate sync button component that can be positioned independently
-export function SyncReposButton() {
-  const router = useRouter();
-  const [isSyncing, setIsSyncing] = useState(false);
-
-  const handleSync = async () => {
-    setIsSyncing(true);
-    try {
-      // Sync from both GitHub and GitLab in parallel
-      const [githubResult, gitlabResult] = await Promise.all([
-        fetchAndSyncRepos(),
-        fetchAndSyncGitlabRepos(),
-      ]);
-      if (githubResult.success || gitlabResult.success) {
-        // Refresh the page to update RepoSelector with new repos
-        router.refresh();
-      }
-    } finally {
-      setIsSyncing(false);
-    }
-  };
-
-  return (
-    <Button
-      variant="ghost"
-      size="icon"
-      onClick={handleSync}
-      disabled={isSyncing}
-      title="Sync repositories from GitHub and GitLab"
-    >
-      <RefreshCw className={`h-4 w-4 ${isSyncing ? 'animate-spin' : ''}`} />
-    </Button>
-  );
 }
 
 export function CreateLocalRepoButton() {

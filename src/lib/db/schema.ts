@@ -308,6 +308,7 @@ export const githubAccounts = pgTable('github_accounts', {
   refreshToken: text('refresh_token'),
   tokenExpiresAt: timestamp('token_expires_at'),
   selectedRepositoryId: text('selected_repository_id').references(() => repositories.id),
+  reposSyncedAt: timestamp('repos_synced_at'),
   createdAt: timestamp('created_at'),
 });
 
@@ -322,6 +323,7 @@ export const gitlabAccounts = pgTable('gitlab_accounts', {
   tokenExpiresAt: timestamp('token_expires_at'),
   instanceUrl: text('instance_url').default('https://gitlab.com'), // For self-hosted GitLab
   selectedRepositoryId: text('selected_repository_id').references(() => repositories.id),
+  reposSyncedAt: timestamp('repos_synced_at'),
   createdAt: timestamp('created_at'),
 });
 

@@ -561,21 +561,24 @@ async function executeViaRunner(
       const unacked = await getUnacknowledgedResults([dbCmd.id]);
       const testResultMsg = unacked.find(r => r.type === 'response:test_result');
 
-      if (!testResultMsg && dbCmd.status !== 'timeout') {
+      if (!testResultMsg && dbCmd.status !== 'timeout' && dbCmd.status !== 'failed') {
         // Result not yet stored — wait for next poll
         continue;
       }
 
-      if (dbCmd.status === 'timeout') {
+      if (dbCmd.status === 'timeout' || (dbCmd.status === 'failed' && !testResultMsg)) {
         inFlight.delete(dbCmd.id);
         completedCount++;
-        // Timed out — no result payload
+        // No result payload — runner timed out or disconnected
+        const errorMsg = dbCmd.status === 'timeout'
+          ? `Test execution timed out`
+          : `Runner disconnected during test execution`;
         const timeoutResult: TestRunResult = {
           testId: info.testId,
           status: 'failed',
-          durationMs: testTimeout,
+          durationMs: Date.now() - info.startTime,
           screenshots: [],
-          errorMessage: `Test execution timed out`,
+          errorMessage: errorMsg,
         };
         results.push(timeoutResult);
         await onResult?.(timeoutResult);

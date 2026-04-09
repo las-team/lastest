@@ -60,6 +60,8 @@ export async function GET(request: NextRequest) {
           controller.enqueue(encoder.encode(`data: ${JSON.stringify(initialData)}\n\n`));
         } catch (error) {
           console.error('[SSE] Failed to send initial state:', error);
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'error', message: 'Failed to load runners' })}\n\n`));
+          controller.close();
         }
       })();
 

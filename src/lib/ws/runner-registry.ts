@@ -13,6 +13,7 @@ interface WebSocket {
   on(event: string, handler: (...args: unknown[]) => void): void;
 }
 import type { RunnerStatus } from '@/lib/db/schema';
+import { failActiveCommandsForRunner } from '@/lib/db/queries/runners';
 import type {
   Message,
   ServerCommand,
@@ -104,6 +105,11 @@ class RunnerRegistry {
   unregisterRunner(runnerId: string): void {
     const runner = this.runners.get(runnerId);
     if (!runner) return;
+
+    // Fail any in-flight commands so the executor doesn't poll forever
+    failActiveCommandsForRunner(runnerId).catch((err) => {
+      console.error(`[RunnerRegistry] Failed to mark commands as failed for runner ${runnerId}:`, err);
+    });
 
     // Remove from team tracking
     const teamRunners = this.runnersByTeam.get(runner.teamId);

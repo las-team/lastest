@@ -7,6 +7,7 @@ import { hash, verify } from "@node-rs/argon2";
 import * as queries from "@/lib/db/queries";
 import { getGitHubUser } from "@/lib/github/oauth";
 import { sendPasswordResetEmail } from "@/lib/email";
+import { syncReposIfStale } from "@/server/actions/repos";
 
 async function syncGithubAccount(account: { userId: string; accessToken?: string | null }) {
   if (!account.accessToken) return;
@@ -29,6 +30,10 @@ async function syncGithubAccount(account: { userId: string; accessToken?: string
         accessToken: account.accessToken,
         teamId,
       });
+    }
+    // Auto-sync repos on login/reconnect
+    if (teamId) {
+      syncReposIfStale(teamId).catch(() => {});
     }
   } catch {
     // Don't block sign-in if github_accounts sync fails

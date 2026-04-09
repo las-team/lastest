@@ -73,6 +73,16 @@ export async function completeRunnerCommand(commandId: string, status: 'complete
     .where(eq(runnerCommands.id, commandId));
 }
 
+export async function failActiveCommandsForRunner(runnerId: string) {
+  await db
+    .update(runnerCommands)
+    .set({ status: 'failed' as RunnerCommandStatus, completedAt: new Date() })
+    .where(and(
+      eq(runnerCommands.runnerId, runnerId),
+      inArray(runnerCommands.status, ['pending', 'claimed'] as RunnerCommandStatus[])
+    ));
+}
+
 export async function cancelPendingCommandsByTestRun(testRunId: string) {
   await db
     .update(runnerCommands)

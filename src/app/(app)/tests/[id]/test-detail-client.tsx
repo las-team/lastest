@@ -764,9 +764,9 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
 
         {/* Live Browser Viewer (headed runs on embedded/system runners) */}
         {streamUrl && isRunning && (
-          <>
+          <div ref={viewerLayoutRef} className={isViewerFullscreen ? 'flex-1 flex flex-col h-full overflow-hidden bg-muted/50' : ''}>
             {isViewerFullscreen ? (
-              <div ref={viewerLayoutRef} className="flex-1 flex flex-col h-full overflow-hidden bg-muted/50">
+              <>
                 <div className="flex-1 relative flex items-center justify-center overflow-auto min-h-0">
                   <BrowserViewer
                     streamUrl={streamUrl}
@@ -789,9 +789,9 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
                     <Minimize2 className="h-4 w-4" />
                   </Button>
                 </div>
-              </div>
+              </>
             ) : (
-              <Card ref={viewerLayoutRef} className="overflow-hidden py-0">
+              <Card className="overflow-hidden py-0">
                 <div className="flex items-center gap-2 w-full px-3 py-2 text-sm font-medium bg-muted/50">
                   <button
                     type="button"
@@ -818,11 +818,15 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
                   <BrowserViewer
                     streamUrl={streamUrl}
                     className="max-h-[500px]"
+                    hideFullscreenToggle
+                    hideScreenshot
+                    hideViewportSelector
+                    readOnlyUrl
                   />
                 )}
               </Card>
             )}
-          </>
+          </div>
         )}
 
         {/* Tabs for Code, Screenshots, History */}

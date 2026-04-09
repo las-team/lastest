@@ -20,9 +20,14 @@ interface BrowserViewerProps {
   className?: string;
   expiresAt?: Date | string | null;
   hideControls?: boolean;
+  hideFullscreenToggle?: boolean;
+  hideScreenshot?: boolean;
+  hideViewportSelector?: boolean;
+  readOnlyUrl?: boolean;
+  interactive?: boolean;
 }
 
-export function BrowserViewer({ streamUrl, initialViewport, className, expiresAt, hideControls }: BrowserViewerProps) {
+export function BrowserViewer({ streamUrl, initialViewport, className, expiresAt, hideControls, hideFullscreenToggle, hideScreenshot, hideViewportSelector, readOnlyUrl, interactive = true }: BrowserViewerProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const wsRef = useRef<WebSocket | null>(null);
@@ -179,11 +184,13 @@ export function BrowserViewer({ streamUrl, initialViewport, className, expiresAt
               }
               setFileChooserPending(message.payload.fileChooserPending ?? false);
 
+              // Any status message from the server proves the connection is alive
+              lastFrameTimeRef.current = Date.now();
+
               // Track intentional screencast pauses to suppress stall detection
               const status = message.payload.status;
               if (status === 'busy' || status === 'recording' || status === 'debugging') {
                 screencastPausedRef.current = true;
-                lastFrameTimeRef.current = Date.now(); // keep timer fresh
               } else {
                 screencastPausedRef.current = false;
               }
@@ -508,8 +515,12 @@ export function BrowserViewer({ streamUrl, initialViewport, className, expiresAt
         isFullscreen={isFullscreen}
         onNavigate={handleNavigate}
         onViewportChange={handleViewportChange}
-        onFullscreenToggle={toggleFullscreen}
+        onFullscreenToggle={hideFullscreenToggle ? undefined : toggleFullscreen}
         hideControls={hideControls}
+        hideFullscreenToggle={hideFullscreenToggle}
+        hideScreenshot={hideScreenshot}
+        hideViewportSelector={hideViewportSelector}
+        readOnly={readOnlyUrl}
       />
 
       {/* Canvas container — 1:1 pixel rendering, scrollable if larger than available space */}
@@ -553,8 +564,8 @@ export function BrowserViewer({ streamUrl, initialViewport, className, expiresAt
 
         <canvas
           ref={canvasRef}
-          tabIndex={0}
-          className="cursor-default outline-none"
+          tabIndex={interactive ? 0 : -1}
+          className={`outline-none ${interactive ? 'cursor-default' : 'cursor-default pointer-events-none'}`}
           style={{
             width: viewport.width,
             height: viewport.height,

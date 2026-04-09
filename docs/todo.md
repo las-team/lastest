@@ -1,32 +1,31 @@
-## in progress
-## test
-VS Code extension
-Gitlab
-Teardown
-Accept Downloads
-Network Interception
-MCP
-triage
-ally
-schedule
-success crit
-## features
-slow EB launch
-check on steps page how far it got and how variables were resolved
-Test/Spec screen should be EA
-When run w recording is pressed no recording is made w EB run
-❯ fullscreen instantly exits, doesnt work                               
-Auto runner selection doesnt work browserType.launch: headless: expected boolean, got string
-
-EB slow on localhost
-
-Auto gh action run
+## tasks
+move tests to las-team repo on prod
 Videos explaining use
     Saját demo felvétele ahol van egy laza scripted előre megírva, ami egy törött vibe kódolt appon bemutatja hogy lépésről lépésre hogyan használod a Lastestet. A végén elmondani hogy a runnereket bárhol tudja futtatni, de itt a cloud instance, like and subscribe, kommentelj, kérdezz, nagyon lelkes a szerző.
     sdfsd
 -keyword pattern pages XY product for ZT
 MCP deploy for smithery
 Reach out to podcasts, meetups, youtube channels, add them to crm
+## test
+VS Code extension
+Gitlab
+Teardown
+Accept Downloads
+MCP
+triage
+ally
+## bugs
+Edit runner action to not fail on changes by default and edit function fo the runner - redeploy
+
+Test/Spec screen should be EA
+When run w recording is pressed no recording is made w EB run
+❯ fullscreen instantly exits, doesnt work                               
+Auto runner selection doesnt work browserType.launch: headless: expected boolean, got string
+
+## features
+slow EB launch - EB slow on localhost
+check on steps page how far it got and how variables were resolved
+
 I want the ai to define happy path tests going throuhg the menu clicking all, and submenues, and see these as test areas. Then as it populates forms and adds records it should create step by step summaries of what it did, so i can change values or expand what it does.
 (low) Every button is green, multiple primary actions, keep clicking on run test instead of save
 Personal preference: Areas and tests being separate functions is REALLY ANNOYING.
@@ -62,21 +61,6 @@ DOM test repair
   2. When it breaks: diff the last-known-good DOM snapshot against the current failing one
   3. This gives the maintenance agent before/after context ("this button used to be <button data-testid='submit'> inside a <form>, now it's a <div           
   role='button'> inside a <dialog>") instead of just "selector not found, figure it out" 
-## bugs
-api/runners/status:1  Failed to load resource: net::ERR_HTTP2_PROTOCOL_ERROR
-record?rerecordId=40d4ddd4-d71e-44a5-b3a0-1ec36545a968:1  Failed to load resource: the server responded with a status of 502 ()
-api/runners/status:1  Failed to load resource: the server responded with a status of 502 ()
-api/runners/status:1  Failed to load resource: the server responded with a status of 502 ()
-record?rerecordId=40d4ddd4-d71e-44a5-b3a0-1ec36545a968:1  Failed to load resource: the server responded with a status of 502 ()
-record?rerecordId=40d4ddd4-d71e-44a5-b3a0-1ec36545a968:1  Failed to load resource: the server responded with a status of 502 ()
-
-EB timout when recording and during debug if no action taken
-
-Debug shouldnt be interactable unless a record button is pressed
-
-Auto sync gh repos when connected or updated or logged in, remove button
-
-Runner Deploy doesnt work?
 
 ## marketing
 why is software not just a play button?

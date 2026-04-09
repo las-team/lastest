@@ -18,7 +18,7 @@ import {
   TrendingDown,
 } from 'lucide-react';
 import Image from 'next/image';
-import { RepoSelector, SyncReposButton, CreateLocalRepoButton } from './repo-selector';
+import { RepoSelector, CreateLocalRepoButton } from './repo-selector';
 import { QueueIndicator } from '@/components/queue/queue-indicator';
 import { ActivityFeedIndicator } from '@/components/activity-feed/activity-feed-indicator-client';
 import { UserMenu } from '@/components/auth/user-menu';
@@ -99,7 +99,6 @@ export function Sidebar({ repos, selectedRepo, currentUser, team }: SidebarProps
             <RepoSelector initialRepos={repos} initialSelected={selectedRepo} />
           </div>
           <CreateLocalRepoButton />
-          <SyncReposButton />
         </div>
         {justConnected && repos && repos.length > 0 && !selectedRepo && (
           <p className="text-xs text-primary font-medium animate-pulse">

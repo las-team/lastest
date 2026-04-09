@@ -785,6 +785,7 @@ export class PlaywrightRunner extends EventEmitter {
   private screenshotDir: string;
   private isRunning = false;
   private aborted = false;
+  private browserCrashed = false;
   private settings: PlaywrightSettings | null = null;
   private forceVideoRecording = false;
   private environmentConfig: EnvironmentConfig | null = null;
@@ -895,6 +896,7 @@ export class PlaywrightRunner extends EventEmitter {
 
     this.isRunning = true;
     this.aborted = false;
+    this.browserCrashed = false;
     const results: TestRunResult[] = [];
 
     // Ensure screenshot directory exists
@@ -935,6 +937,14 @@ export class PlaywrightRunner extends EventEmitter {
       this.browser = await launcher.launch({
         headless: headless as boolean | undefined,
         args: args.length > 0 ? args : undefined,
+      });
+
+      // Detect browser crashes / disconnections so tests don't hang forever
+      this.browser.on('disconnected', () => {
+        console.error('[PlaywrightRunner] Browser disconnected unexpectedly');
+        this.browserCrashed = true;
+        this.aborted = true;
+        this.browser = null;
       });
 
       this.emit('event', {
@@ -1083,7 +1093,7 @@ export class PlaywrightRunner extends EventEmitter {
         status: 'failed',
         durationMs: 0,
         screenshots: [],
-        errorMessage: 'Browser not initialized',
+        errorMessage: this.browserCrashed ? 'Browser crashed or disconnected' : 'Browser not initialized',
       };
     }
 
@@ -1720,10 +1730,10 @@ export class PlaywrightRunner extends EventEmitter {
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
 
-      // Run teardown even on failure (it's cleanup)
+      // Run teardown even on failure (it's cleanup) — skip if browser crashed
       let teardownDurationMs: number | undefined;
       let teardownError: string | undefined;
-      if (page && await testNeedsTeardown(test)) {
+      if (page && !this.browserCrashed && await testNeedsTeardown(test)) {
         try {
           const teardownOrchestrator = getTeardownOrchestrator();
           const fallbackBaseUrl = this.environmentConfig?.baseUrl || 'http://localhost:3000';

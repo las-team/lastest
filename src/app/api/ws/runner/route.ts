@@ -252,14 +252,36 @@ export async function POST(request: NextRequest) {
         const result = message as TestResultResponse;
         const commandId = result.payload.correlationId;
 
+        // Strip bulky fields (request/response bodies, headers) from network requests
+        // to avoid blowing up the jsonb column
+        const trimmedPayload = { ...result.payload } as Record<string, unknown>;
+        if (Array.isArray(trimmedPayload.networkRequests)) {
+          trimmedPayload.networkRequests = (trimmedPayload.networkRequests as Record<string, unknown>[]).map(r => ({
+            url: r.url,
+            method: r.method,
+            status: r.status,
+            duration: r.duration,
+            resourceType: r.resourceType,
+            startTime: r.startTime,
+            failed: r.failed,
+          }));
+        }
+        // Drop video data — it's saved separately
+        delete trimmedPayload.videoData;
+
         // Store result in DB and mark command completed
         const resultStatus = result.payload.status === 'passed' ? 'completed' : 'failed';
-        await insertCommandResult({
-          commandId,
-          runnerId: runner.id,
-          type: 'response:test_result',
-          payload: result.payload as unknown as Record<string, unknown>,
-        });
+        try {
+          await insertCommandResult({
+            commandId,
+            runnerId: runner.id,
+            type: 'response:test_result',
+            payload: trimmedPayload,
+          });
+        } catch (err) {
+          console.error(`[Runner] Failed to insert test result for command ${commandId}:`, err);
+          // Still mark command completed so the executor doesn't hang
+        }
         await completeRunnerCommand(commandId, resultStatus as 'completed' | 'failed');
 
         return NextResponse.json({ ok: true });
