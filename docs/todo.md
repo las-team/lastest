@@ -17,8 +17,6 @@ ally
 GH action edit
 ## bugs
 ## features
-check on steps page how far it got and how variables were resolved
-
 I want the ai to define happy path tests going throuhg the menu clicking all, and submenues, and see these as test areas. Then as it populates forms and adds records it should create step by step summaries of what it did, so i can change values or expand what it does.
 (low) Every button is green, multiple primary actions, keep clicking on run test instead of save
 Personal preference: Areas and tests being separate functions is REALLY ANNOYING.
@@ -46,15 +44,14 @@ Figma plugin
 Generate test data with AI
 Sitemap -flow
 Formal verification of code?
-Firecrawl?
 Approve reject changes or create ticket -> gh issue, jira, linear
 Expand into not just visual testing
 DOM test repair
-  1. During the passing run: record a full interaction trace — DOM snapshots at each step, network requests, console logs                                    
+  1. During the passing run: record a full interaction trace — DOM snapshots at each step, network requests, console logs                     
   2. When it breaks: diff the last-known-good DOM snapshot against the current failing one
   3. This gives the maintenance agent before/after context ("this button used to be <button data-testid='submit'> inside a <form>, now it's a <div           
   role='button'> inside a <dialog>") instead of just "selector not found, figure it out" 
-
+B.5) Valamit ki kell majd találni, hogy a user feltölthessen asseteket, amiket böngészni tud file opennel. Very low prio MVP-re, csak megemlítem.
 ## marketing
 why is software not just a play button?
 what's between agents and saas? obeservability, human in the loop
@@ -83,9 +80,7 @@ buy a newsletter substack twitter: duuce.com newsletter investor
 AI repurposing engine -> 5 tweets, 3 linkedin, remotion short form, 1 blog, graphics, email sequence
 Gamifying QA - Could you beat an AI tester? How to get AI testing agents to       
   work? AI testing or Agentic testing?                                                              
-## Excalidraw
-### Tests missing:
-B.5) Valamit ki kell majd találni, hogy a user feltölthessen asseteket, amiket böngészni tud file opennel. Very low prio MVP-re, csak megemlítem.
+
 
 ## commands
 ## ourmotto

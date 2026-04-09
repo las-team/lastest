@@ -50,11 +50,19 @@ function StatusIcon({ status }: { status: 'passed' | 'failed' | 'skipped' | 'not
   }
 }
 
-/** Match an assertion to a step by overlapping code line ranges */
+/** Match an assertion to a step by overlapping code line ranges.
+ *  Prefer assertion-type steps to avoid grouping under screenshots/actions. */
 function matchAssertionToStep(assertion: TestAssertion, steps: DebugStep[]): DebugStep | null {
   if (!assertion.codeLineStart) return null;
+  // First pass: only match assertion-type steps
   for (const step of steps) {
-    if (assertion.codeLineStart >= step.lineStart && assertion.codeLineStart <= step.lineEnd) {
+    if (step.type === 'assertion' && assertion.codeLineStart >= step.lineStart && assertion.codeLineStart <= step.lineEnd) {
+      return step;
+    }
+  }
+  // Second pass: match wait steps (waitForLoadState etc. can be assertion targets)
+  for (const step of steps) {
+    if (step.type === 'wait' && assertion.codeLineStart >= step.lineStart && assertion.codeLineStart <= step.lineEnd) {
       return step;
     }
   }
@@ -160,6 +168,8 @@ export function TestStepsTab({
   const passedCount = hasAssertions ? assertions.filter(a => resultMap.get(a.id)?.status === 'passed').length : 0;
   const failedCount = hasAssertions ? assertions.filter(a => resultMap.get(a.id)?.status === 'failed').length : 0;
   const hasResults = hasAssertions && assertionResults && assertionResults.length > 0;
+  // Only hard assertion failures explain why a test stopped
+  const hasFailedHardAssertion = hasAssertions && assertions.some(a => a.isSoft === false && resultMap.get(a.id)?.status === 'failed');
 
   // Count steps by type for filter badges
   const typeCounts = useMemo(() => {
@@ -177,8 +187,11 @@ export function TestStepsTab({
 
     let maxReached = -1;
 
-    // Evidence from screenshots — map captured count to screenshot-type steps
-    if (screenshots && screenshots.length > 0) {
+    // Evidence from screenshots — map captured count to screenshot-type steps.
+    // Only trust screenshot evidence if we also have assertion/soft-error evidence,
+    // because the runner always captures a post-error screenshot even on compile errors.
+    const hasExecutionEvidence = (assertionResults && assertionResults.length > 0) || (softErrors && softErrors.length > 0);
+    if (screenshots && screenshots.length > 0 && hasExecutionEvidence) {
       let screenshotStepIdx = 0;
       for (let i = 0; i < steps.length; i++) {
         if (steps[i].type === 'screenshot') {
@@ -215,9 +228,22 @@ export function TestStepsTab({
       }
     }
 
-    // Match error content to step code (e.g. selector in error → step that uses it)
+    // Match error content to step code
     if (errorMessage && maxReached < steps.length - 1) {
-      // Extract selectors or URLs from error messages
+      // "X is not defined" → find step using X.something or X(
+      const undefinedMatch = errorMessage.match(/^(\w+) is not defined$/);
+      if (undefinedMatch) {
+        const varName = undefinedMatch[1];
+        const pattern = new RegExp(`\\b${varName}[.(]`);
+        for (let i = 0; i < steps.length; i++) {
+          if (pattern.test(steps[i].code)) {
+            maxReached = Math.max(maxReached, i);
+            break; // first usage is where it would fail
+          }
+        }
+      }
+
+      // Extract selectors or URLs from Playwright error messages
       const selectorMatch = errorMessage.match(/(?:selector|locator)\s+['"`]([^'"`]+)['"`]/i)
         || errorMessage.match(/waiting for\s+['"`]([^'"`]+)['"`]/i)
         || errorMessage.match(/No selector matched:\s*\[.*?"value"\s*:\s*"([^"]+)"/);
@@ -230,10 +256,24 @@ export function TestStepsTab({
           }
         }
       }
+
+      // "Timeout" errors — match URL or action in the error to a step
+      const timeoutUrlMatch = errorMessage.match(/(?:navigating to|goto)\s+['"`]([^'"`]+)['"`]/i);
+      if (timeoutUrlMatch) {
+        const url = timeoutUrlMatch[1];
+        for (let i = steps.length - 1; i >= 0; i--) {
+          if (steps[i].code.includes(url) || steps[i].code.includes('.goto(')) {
+            maxReached = Math.max(maxReached, i);
+            break;
+          }
+        }
+      }
     }
 
+    // Mark all steps before the failure point as reached
+    // (the failure step itself is included — everything before it succeeded)
     return maxReached;
-  }, [testStatus, steps, screenshots, assertions, assertionResults, stepAssertionMap, errorMessage]);
+  }, [testStatus, steps, screenshots, assertions, assertionResults, softErrors, stepAssertionMap, errorMessage]);
 
   // Filter steps
   const filteredSteps = useMemo(() => {
@@ -334,7 +374,8 @@ export function TestStepsTab({
 
                 // Execution progress: was this step reached?
                 const wasReached = executionWatermark >= 0 && globalIdx <= executionWatermark;
-                const isFailurePoint = testStatus === 'failed' && globalIdx === executionWatermark && !isAssertionStep;
+                // Only flag non-assertion steps as failure point when no assertion already explains the failure
+                const isFailurePoint = testStatus === 'failed' && globalIdx === executionWatermark && !isAssertionStep && !hasFailedHardAssertion;
 
                 return (
                   <div
@@ -358,7 +399,7 @@ export function TestStepsTab({
                       {/* Status icon */}
                       {isAssertionStep ? (
                         <StatusIcon
-                          status={hasFailed ? 'failed' : allPassed ? 'passed' : 'not_run'}
+                          status={hasFailed ? 'failed' : allPassed ? 'passed' : wasReached ? 'passed' : 'not_run'}
                         />
                       ) : isFailurePoint ? (
                         <XCircle className="h-4 w-4 text-red-500 shrink-0" />
