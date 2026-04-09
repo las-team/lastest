@@ -505,6 +505,8 @@ export type VisualDiffWithTestStatus = VisualDiff & {
   stepLabel?: string | null;
   errorMessage?: string | null;
   a11yViolations?: A11yViolation[] | null;
+  consoleErrors?: string[] | null;
+  networkRequests?: NetworkRequest[] | null;
   browser?: string | null;
 };
 export type NewVisualDiff = typeof visualDiffs.$inferInsert;

@@ -191,10 +191,14 @@ export async function getDiffCore(diffId: string) {
   // Get error message and a11y violations from test result
   let errorMessage: string | null = null;
   let a11yViolations: import('@/lib/db/schema').A11yViolation[] | null = null;
+  let consoleErrors: string[] | null = null;
+  let networkRequests: import('@/lib/db/schema').NetworkRequest[] | null = null;
   if (diff.testResultId) {
     const testResult = await queries.getTestResultById(diff.testResultId);
     errorMessage = testResult?.errorMessage ?? null;
     a11yViolations = testResult?.a11yViolations ?? null;
+    consoleErrors = testResult?.consoleErrors ?? null;
+    networkRequests = testResult?.networkRequests ?? null;
   }
 
   // Look up planned screenshot if not already on the diff
@@ -221,6 +225,8 @@ export async function getDiffCore(diffId: string) {
     plannedPercentageDifference,
     errorMessage,
     a11yViolations: a11yViolations ?? null,
+    consoleErrors,
+    networkRequests,
     test: test ?? null,
   };
 }

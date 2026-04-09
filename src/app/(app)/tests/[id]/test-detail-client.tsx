@@ -38,6 +38,7 @@ import { TestStabilizationOverrides } from '@/components/settings/test-stabiliza
 import { TestDiffOverrides as TestDiffOverridesComponent } from '@/components/settings/test-diff-overrides';
 import { TestPlaywrightOverrides as TestPlaywrightOverridesComponent } from '@/components/settings/test-playwright-overrides';
 import { A11yViolationsPanel } from '@/components/builds/a11y-violations-panel';
+import { RuntimeErrorsPanel, stripRuntimeErrorsFromMessage } from '@/components/builds/runtime-errors-panel';
 import { SuccessCriteriaTab } from '@/components/tests/success-criteria-tab';
 import type { ScreenshotGroup } from '@/server/actions/tests';
 import { SheetDataPreview } from '@/components/test-data/sheet-data-preview';
@@ -65,7 +66,7 @@ interface TestResult {
   viewport: string | null;
   browser: string | null;
   consoleErrors: string[] | null;
-  networkRequests: unknown[] | null;
+  networkRequests: import('@/lib/db/schema').NetworkRequest[] | null;
   videoPath: string | null;
   a11yViolations: A11yViolation[] | null;
   softErrors: string[] | null;
@@ -988,13 +989,18 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
 
                         {expandedRuns.has(result.id) && (
                           <div className="px-3 pb-3 border-t">
-                            {result.status === 'failed' && result.errorMessage && (
-                              <div className="mt-2 p-2 bg-destructive/10 border border-destructive/20 rounded text-sm text-destructive">
-                                <pre className="whitespace-pre-wrap font-mono text-xs overflow-x-auto">
-                                  {result.errorMessage}
-                                </pre>
-                              </div>
-                            )}
+                            {result.status === 'failed' && result.errorMessage && (() => {
+                              const cleaned = stripRuntimeErrorsFromMessage(result.errorMessage);
+                              return cleaned ? (
+                                <div className="mt-2 p-2 bg-destructive/10 border border-destructive/20 rounded text-sm text-destructive">
+                                  <pre className="whitespace-pre-wrap font-mono text-xs overflow-x-auto">
+                                    {cleaned}
+                                  </pre>
+                                </div>
+                              ) : null;
+                            })()}
+
+                            <RuntimeErrorsPanel consoleErrors={result.consoleErrors} networkRequests={result.networkRequests} />
 
                             {result.softErrors && (result.softErrors as string[]).length > 0 && (
                               <div className="mt-2 p-2 bg-yellow-50 border border-yellow-200 rounded text-sm text-yellow-800 dark:bg-yellow-950/30 dark:border-yellow-800 dark:text-yellow-200">

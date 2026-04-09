@@ -63,6 +63,8 @@ export async function getVisualDiffsWithTestStatus(buildId: string) {
       testName: tests.name,
       functionalAreaName: functionalAreas.name,
       a11yViolations: testResults.a11yViolations,
+      consoleErrors: testResults.consoleErrors,
+      networkRequests: testResults.networkRequests,
       browser: visualDiffs.browser,
     })
     .from(visualDiffs)

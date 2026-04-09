@@ -5,15 +5,16 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { SliderComparison } from '@/components/diff/slider-comparison';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { approveDiff, undoApproval, addDiffTodo } from '@/server/actions/diffs';
-import type { VisualDiff, Test, DiffMetadata, AIDiffAnalysis, A11yViolation } from '@/lib/db/schema';
+import type { VisualDiff, Test, DiffMetadata, AIDiffAnalysis, A11yViolation, NetworkRequest } from '@/lib/db/schema';
 import { A11yViolationsPanel } from '@/components/builds/a11y-violations-panel';
+import { RuntimeErrorsPanel, stripRuntimeErrorsFromMessage } from '@/components/builds/runtime-errors-panel';
 import { CheckCircle, ListTodo, SkipForward, Eye, Image as ImageIcon, Sparkles, Loader2, ArrowUpDown, Bug, ChevronDown } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent } from '@/components/ui/card';
 
 interface DiffViewerClientProps {
-  diff: VisualDiff & { test: Test | null; errorMessage?: string | null; a11yViolations?: A11yViolation[] | null };
+  diff: VisualDiff & { test: Test | null; errorMessage?: string | null; a11yViolations?: A11yViolation[] | null; consoleErrors?: string[] | null; networkRequests?: NetworkRequest[] | null };
   buildId: string;
   prevDiffId?: string;
   nextDiffId?: string;
@@ -240,18 +241,23 @@ export function DiffViewerClient({ diff, buildId, prevDiffId, nextDiffId, banAiM
           </div>
 
           {/* Execution Error Banner (collapsed by default) */}
-          {diff.errorMessage && (
-            <details className="border border-orange-200 bg-orange-50 rounded-lg">
-              <summary className="flex items-center gap-3 p-4 cursor-pointer select-none">
-                <Bug className="w-5 h-5 text-orange-600 flex-shrink-0" />
-                <span className="font-medium text-orange-800">Execution Error</span>
-                <ChevronDown className="w-4 h-4 text-orange-400 ml-auto transition-transform [[open]>&]:rotate-180" />
-              </summary>
-              <div className="px-4 pb-4">
-                <pre className="text-sm text-orange-700 whitespace-pre-wrap break-words">{diff.errorMessage}</pre>
-              </div>
-            </details>
-          )}
+          {diff.errorMessage && (() => {
+            const cleaned = stripRuntimeErrorsFromMessage(diff.errorMessage);
+            return cleaned ? (
+              <details className="border border-orange-200 bg-orange-50 rounded-lg">
+                <summary className="flex items-center gap-3 p-4 cursor-pointer select-none">
+                  <Bug className="w-5 h-5 text-orange-600 flex-shrink-0" />
+                  <span className="font-medium text-orange-800">Execution Error</span>
+                  <ChevronDown className="w-4 h-4 text-orange-400 ml-auto transition-transform [[open]>&]:rotate-180" />
+                </summary>
+                <div className="px-4 pb-4">
+                  <pre className="text-sm text-orange-700 whitespace-pre-wrap break-words">{cleaned}</pre>
+                </div>
+              </details>
+            ) : null;
+          })()}
+
+          <RuntimeErrorsPanel consoleErrors={diff.consoleErrors} networkRequests={diff.networkRequests} />
 
           {/* AI Analysis */}
           {!banAiMode && (aiAnalysis || aiStatus === 'running' || aiStatus === 'pending') && (
