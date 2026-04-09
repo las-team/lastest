@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { CheckCircle2, XCircle, Circle, ShieldAlert, ListOrdered } from 'lucide-react';
-import type { TestAssertion, AssertionResult } from '@/lib/db/schema';
+import type { TestAssertion, AssertionResult, CapturedScreenshot } from '@/lib/db/schema';
 import { cn } from '@/lib/utils';
 import { extractTestBody, parseSteps, type DebugStep } from '@/lib/playwright/debug-parser';
 
@@ -13,6 +13,10 @@ interface TestStepsTabProps {
   assertionResults: AssertionResult[] | null;
   softErrors: string[] | null;
   code: string;
+  testStatus?: string | null;
+  errorMessage?: string | null;
+  screenshots?: CapturedScreenshot[] | null;
+  envBaseUrl?: string | null;
   onParseNeeded?: () => void;
 }
 
@@ -57,6 +61,37 @@ function matchAssertionToStep(assertion: TestAssertion, steps: DebugStep[]): Deb
   return null;
 }
 
+/** Resolve variable references in step labels with actual values */
+function resolveStepLabel(label: string, code: string, baseUrl: string | null | undefined): string {
+  if (!baseUrl) return label;
+  let resolved = label;
+
+  // Resolve buildUrl(baseUrl, '/path') patterns in both label and code
+  const buildUrlMatch = code.match(/buildUrl\s*\(\s*baseUrl\s*,\s*['"`]([^'"`]+)['"`]\s*\)/);
+  if (buildUrlMatch) {
+    const path = buildUrlMatch[1];
+    const cleanBase = baseUrl.endsWith('/') ? baseUrl.slice(0, -1) : baseUrl;
+    const cleanPath = path.startsWith('/') ? path : '/' + path;
+    const fullUrl = cleanBase + cleanPath;
+    // Replace the buildUrl(...) portion in the label
+    resolved = resolved.replace(/buildUrl\(baseUrl,\s*/, '');
+    // If the label is "Navigate to buildUrl(baseUrl," try to make it "Navigate to <url>"
+    if (resolved.startsWith('Navigate to ')) {
+      resolved = `Navigate to ${fullUrl}`;
+    }
+  }
+
+  // Resolve template literal ${baseUrl} references
+  resolved = resolved.replace(/\$\{baseUrl\}/g, baseUrl);
+
+  // Resolve bare `baseUrl` when it appears as a standalone goto target
+  if (resolved === 'Navigate to baseUrl') {
+    resolved = `Navigate to ${baseUrl}`;
+  }
+
+  return resolved;
+}
+
 const ALL_TYPES = ['action', 'navigation', 'assertion', 'screenshot', 'wait', 'variable', 'log', 'other'] as const;
 const DEFAULT_HIDDEN: Set<string> = new Set(['wait', 'other']);
 
@@ -65,6 +100,10 @@ export function TestStepsTab({
   assertionResults,
   softErrors,
   code,
+  testStatus,
+  errorMessage,
+  screenshots,
+  envBaseUrl,
   onParseNeeded,
 }: TestStepsTabProps) {
   const [expanded, setExpanded] = useState<Set<number>>(new Set());
@@ -130,6 +169,71 @@ export function TestStepsTab({
     }
     return counts;
   }, [steps]);
+
+  // Compute execution watermark: the index of the last step that was reached
+  const executionWatermark = useMemo(() => {
+    if (!testStatus || steps.length === 0) return -1; // no run data
+    if (testStatus === 'passed') return steps.length - 1; // all steps reached
+
+    let maxReached = -1;
+
+    // Evidence from screenshots — map captured count to screenshot-type steps
+    if (screenshots && screenshots.length > 0) {
+      let screenshotStepIdx = 0;
+      for (let i = 0; i < steps.length; i++) {
+        if (steps[i].type === 'screenshot') {
+          if (screenshotStepIdx < screenshots.length) {
+            maxReached = Math.max(maxReached, i);
+          }
+          screenshotStepIdx++;
+        }
+      }
+    }
+
+    // Evidence from assertion results
+    if (assertions && assertionResults && assertionResults.length > 0) {
+      const ranIds = new Set(assertionResults.map(r => r.assertionId));
+      for (let i = 0; i < steps.length; i++) {
+        const sa = stepAssertionMap.get(steps[i].id) ?? [];
+        if (sa.some(a => ranIds.has(a.id))) {
+          maxReached = Math.max(maxReached, i);
+        }
+      }
+    }
+
+    // Try to parse error line from stack trace
+    if (errorMessage && maxReached < steps.length - 1) {
+      const lineMatch = errorMessage.match(/at\s+(?:<anonymous>|eval)[^:]*:(\d+):/);
+      if (lineMatch) {
+        const errorLine = parseInt(lineMatch[1], 10);
+        for (let i = steps.length - 1; i >= 0; i--) {
+          if (steps[i].lineStart <= errorLine && steps[i].lineEnd >= errorLine) {
+            maxReached = Math.max(maxReached, i);
+            break;
+          }
+        }
+      }
+    }
+
+    // Match error content to step code (e.g. selector in error → step that uses it)
+    if (errorMessage && maxReached < steps.length - 1) {
+      // Extract selectors or URLs from error messages
+      const selectorMatch = errorMessage.match(/(?:selector|locator)\s+['"`]([^'"`]+)['"`]/i)
+        || errorMessage.match(/waiting for\s+['"`]([^'"`]+)['"`]/i)
+        || errorMessage.match(/No selector matched:\s*\[.*?"value"\s*:\s*"([^"]+)"/);
+      if (selectorMatch) {
+        const needle = selectorMatch[1];
+        for (let i = steps.length - 1; i >= 0; i--) {
+          if (steps[i].code.includes(needle)) {
+            maxReached = Math.max(maxReached, i);
+            break;
+          }
+        }
+      }
+    }
+
+    return maxReached;
+  }, [testStatus, steps, screenshots, assertions, assertionResults, stepAssertionMap, errorMessage]);
 
   // Filter steps
   const filteredSteps = useMemo(() => {
@@ -228,6 +332,10 @@ export function TestStepsTab({
                 const hasFailed = stepStatuses.includes('failed');
                 const allPassed = stepStatuses.length > 0 && stepStatuses.every(s => s === 'passed');
 
+                // Execution progress: was this step reached?
+                const wasReached = executionWatermark >= 0 && globalIdx <= executionWatermark;
+                const isFailurePoint = testStatus === 'failed' && globalIdx === executionWatermark && !isAssertionStep;
+
                 return (
                   <div
                     key={step.id}
@@ -247,11 +355,15 @@ export function TestStepsTab({
                         {globalIdx + 1}.
                       </span>
 
-                      {/* Status icon for assertion steps */}
+                      {/* Status icon */}
                       {isAssertionStep ? (
                         <StatusIcon
                           status={hasFailed ? 'failed' : allPassed ? 'passed' : 'not_run'}
                         />
+                      ) : isFailurePoint ? (
+                        <XCircle className="h-4 w-4 text-red-500 shrink-0" />
+                      ) : wasReached ? (
+                        <CheckCircle2 className="h-4 w-4 text-green-500/50 shrink-0" />
                       ) : (
                         <Circle className="h-4 w-4 text-muted-foreground/20 shrink-0" />
                       )}
@@ -261,7 +373,7 @@ export function TestStepsTab({
                         'text-sm flex-1 min-w-0 truncate',
                         isAssertionStep && 'font-medium',
                       )}>
-                        {step.label}
+                        {resolveStepLabel(step.label, step.code, envBaseUrl)}
                       </span>
 
                       {/* Hard/Soft badges for assertion steps */}

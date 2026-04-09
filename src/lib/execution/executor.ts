@@ -634,7 +634,10 @@ async function executeViaRunner(
 
       // Save video file if present in the result
       let videoPath: string | undefined;
-      if (payload.videoData && payload.videoFilename) {
+      if (payload.videoPath) {
+        // Video already saved to disk by the runner route handler
+        videoPath = payload.videoPath as string;
+      } else if (payload.videoData && payload.videoFilename) {
         try {
           const videoDir = path.join(STORAGE_DIRS.videos, options.repositoryId || 'default');
           await fs.mkdir(videoDir, { recursive: true });

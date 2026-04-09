@@ -73,6 +73,7 @@ interface TestResult {
   assertionResults: import('@/lib/db/schema').AssertionResult[] | null;
   startedAt: Date | null;
   networkBodiesPath: string | null;
+  screenshots: import('@/lib/db/schema').CapturedScreenshot[] | null;
 }
 
 interface DefaultStepForUI {
@@ -937,6 +938,10 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
               assertionResults={latestResult?.assertionResults ?? null}
               softErrors={latestResult?.softErrors ?? null}
               code={test.code || ''}
+              testStatus={latestResult?.status ?? null}
+              errorMessage={latestResult?.errorMessage ?? null}
+              screenshots={latestResult?.screenshots ?? null}
+              envBaseUrl={envBaseUrl ?? null}
               onParseNeeded={async () => {
                 try {
                   const { parseAssertions } = await import('@/lib/playwright/assertion-parser');

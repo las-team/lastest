@@ -293,6 +293,7 @@ async function startup(): Promise<void> {
                 correlationId: capturedCommand.id,
                 testId: payload.testId,
                 testRunId: payload.testRunId,
+                repositoryId: payload.repositoryId,
                 status: result.status,
                 durationMs: result.durationMs,
                 screenshotCount: result.screenshots.length,

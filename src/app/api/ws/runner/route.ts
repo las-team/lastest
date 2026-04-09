@@ -252,8 +252,21 @@ export async function POST(request: NextRequest) {
         const result = message as TestResultResponse;
         const commandId = result.payload.correlationId;
 
-        // Drop video data — it's saved separately
+        // Save video to disk before stripping from payload (too large for DB)
         const payload = { ...result.payload } as Record<string, unknown>;
+        if (payload.videoData && payload.videoFilename) {
+          try {
+            const repoId = (payload.repositoryId as string) || 'default';
+            const videoDir = path.join(STORAGE_DIRS.videos, repoId);
+            await fs.mkdir(videoDir, { recursive: true });
+            const videoDest = path.join(videoDir, payload.videoFilename as string);
+            await fs.writeFile(videoDest, Buffer.from(payload.videoData as string, 'base64'));
+            // Store the relative path so executor can find it
+            payload.videoPath = `/videos/${repoId}/${payload.videoFilename}`;
+          } catch (err) {
+            console.error(`[Runner] Failed to save video:`, err);
+          }
+        }
         delete payload.videoData;
 
         // Store result in DB and mark command completed
