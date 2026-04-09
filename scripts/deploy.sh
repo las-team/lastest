@@ -160,11 +160,11 @@ build_olares() {
 
   log "Building EB package..."
   pnpm --filter @lastest/embedded-browser build
-  log "Building $IMAGE_EB:olares-v2"
+  log "Building $IMAGE_EB:olares"
   docker build \
-    -t "$IMAGE_EB:olares-v2" \
+    -t "$IMAGE_EB:olares" \
     -f packages/embedded-browser/Dockerfile .
-  ok "Built $IMAGE_EB:olares-v2"
+  ok "Built $IMAGE_EB:olares"
 }
 
 # --- Targets ---
@@ -226,7 +226,7 @@ deploy_olares() {
     "ctr -n k8s.io images ls -q | grep -E 'ewyc/lastest:olares|ewyc/lastest-eb:olares' | xargs -r ctr -n k8s.io images rm 2>/dev/null || true"
 
   log "Transferring images to Olares (this takes ~10 minutes)..."
-  docker save "$IMAGE_APP:olares" "$IMAGE_EB:olares-v2" | \
+  docker save "$IMAGE_APP:olares" "$IMAGE_EB:olares" | \
     ssh "$OLARES_USER@$OLARES_HOST" 'ctr -n k8s.io images import -'
   ok "Images imported on Olares"
 
@@ -295,8 +295,8 @@ deploy_zima_transfer() {
 deploy_olares_transfer() {
   log "Transferring to Olares..."
   ssh "$OLARES_USER@$OLARES_HOST" \
-    "ctr -n k8s.io images rm docker.io/$IMAGE_APP:olares 2>/dev/null || true"
-  docker save "$IMAGE_APP:olares" | \
+    "ctr -n k8s.io images ls -q | grep -E 'ewyc/lastest:olares|ewyc/lastest-eb:olares' | xargs -r ctr -n k8s.io images rm 2>/dev/null || true"
+  docker save "$IMAGE_APP:olares" "$IMAGE_EB:olares" | \
     ssh "$OLARES_USER@$OLARES_HOST" 'ctr -n k8s.io images import -'
   ssh "$OLARES_USER@$OLARES_HOST" \
     "kubectl rollout restart deployment/$OLARES_DEPLOY -n $OLARES_NS"
