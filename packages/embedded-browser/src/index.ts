@@ -267,6 +267,22 @@ async function startup(): Promise<void> {
               console.log(`[Command] All screenshots uploaded for test ${payload.testId}`);
             }
 
+            // Split network requests: summary for inline result, full bodies sent separately
+            const networkSummaries = result.networkRequests?.map(r => ({
+              url: r.url,
+              method: r.method,
+              status: r.status,
+              duration: r.duration,
+              resourceType: r.resourceType,
+              startTime: r.startTime,
+              failed: r.failed,
+              errorText: r.errorText,
+              responseSize: r.responseSize,
+            }));
+            const hasNetworkBodies = result.networkRequests?.some(
+              r => r.requestHeaders || r.responseHeaders || r.postData || r.responseBody
+            );
+
             // Send result AFTER screenshots so server has them when it sees pass/fail
             await capturedClient.sendMessage({
               id: crypto.randomUUID(),
@@ -282,10 +298,28 @@ async function startup(): Promise<void> {
                 error: result.error,
                 logs: result.logs,
                 consoleErrors: result.consoleErrors,
-                networkRequests: result.networkRequests,
+                networkRequests: networkSummaries,
                 softErrors: result.softErrors,
               },
             });
+
+            // Send full network body data asynchronously (non-blocking)
+            if (hasNetworkBodies && result.networkRequests) {
+              capturedClient.sendMessage({
+                id: crypto.randomUUID(),
+                type: 'response:network_bodies' as 'response:test_result',
+                timestamp: Date.now(),
+                payload: {
+                  correlationId: capturedCommand.id,
+                  testId: payload.testId,
+                  testRunId: payload.testRunId,
+                  repositoryId: payload.repositoryId,
+                  networkRequests: result.networkRequests,
+                },
+              }).catch(err => {
+                console.warn(`[Command] Failed to send network bodies for test ${payload.testId}:`, err);
+              });
+            }
           } catch (err) {
             console.error(`[Command] Test ${payload.testId} failed:`, err);
           } finally {

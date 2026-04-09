@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { Loader2, Cloud, Server, Zap } from 'lucide-react';
+import { Loader2, Cloud, Server, Zap, Check, X, Rocket } from 'lucide-react';
 import {
   Dialog,
   DialogContent,
@@ -22,17 +22,16 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import type { Runner, Repository, GithubActionMode, GithubActionTriggerEvent } from '@/lib/db/schema';
+import type { GithubActionConfig, GithubActionMode, GithubActionTriggerEvent, Runner } from '@/lib/db/schema';
 import { WorkflowPreview } from '@/components/settings/github-actions/workflow-preview-client';
-import { createGithubActionConfigAction } from '@/server/actions/github-actions';
+import { updateGithubActionConfigAction, deployWorkflowToGithub } from '@/server/actions/github-actions';
 import { toast } from 'sonner';
 
-interface AddConfigDialogProps {
+interface EditConfigDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  config: GithubActionConfig;
   runners: Runner[];
-  repos: Repository[];
-  githubUsername: string | null;
 }
 
 const TRIGGER_OPTIONS: { value: GithubActionTriggerEvent; label: string }[] = [
@@ -44,60 +43,48 @@ const TRIGGER_OPTIONS: { value: GithubActionTriggerEvent; label: string }[] = [
 
 const VERCEL_PREVIEW_URL = 'https://${{ github.event.repository.name }}-git-${{ github.head_ref }}-${{ github.repository_owner }}.vercel.app';
 
-export function AddConfigDialog({ open, onOpenChange, runners, repos, githubUsername }: AddConfigDialogProps) {
-  const [selectedRepoId, setSelectedRepoId] = useState<string>('');
-  const [manualEntry, setManualEntry] = useState(false);
-  const [repoOwner, setRepoOwner] = useState(githubUsername ?? '');
-  const [repoName, setRepoName] = useState('');
-  const [mode, setMode] = useState<GithubActionMode>('persistent');
-  const [runnerId, setRunnerId] = useState<string>('');
-  const [triggerEvents, setTriggerEvents] = useState<GithubActionTriggerEvent[]>([
-    'push',
-    'pull_request',
-    'workflow_dispatch',
-  ]);
-  const [branches, setBranches] = useState('');
-  const [cronSchedule, setCronSchedule] = useState('');
-  const [targetUrl, setTargetUrl] = useState('');
-  const [timeout, setTimeout_] = useState('300000');
-  const [failOnChanges, setFailOnChanges] = useState(false);
+type StepStatus = 'pending' | 'loading' | 'success' | 'error';
+
+export function EditConfigDialog({ open, onOpenChange, config, runners }: EditConfigDialogProps) {
+  const [mode, setMode] = useState<GithubActionMode>(config.mode as GithubActionMode);
+  const [runnerId, setRunnerId] = useState<string>(config.runnerId ?? '');
+  const [triggerEvents, setTriggerEvents] = useState<GithubActionTriggerEvent[]>(
+    (config.triggerEvents ?? ['push', 'pull_request', 'workflow_dispatch']) as GithubActionTriggerEvent[],
+  );
+  const [branches, setBranches] = useState((config.branchFilter as string[] ?? []).join(', '));
+  const [cronSchedule, setCronSchedule] = useState(config.cronSchedule ?? '');
+  const [targetUrl, setTargetUrl] = useState(config.targetUrl ?? '');
+  const [timeout, setTimeout_] = useState(String(config.timeout ?? 300000));
+  const [failOnChanges, setFailOnChanges] = useState(config.failOnChanges ?? false);
   const [saving, setSaving] = useState(false);
 
-  const githubRepos = repos.filter((r) => r.provider === 'github');
+  // Redeploy prompt state
+  const [showRedeploy, setShowRedeploy] = useState(false);
+  const [deploying, setDeploying] = useState(false);
+  const [deploySteps, setDeploySteps] = useState<{
+    workflow: StepStatus;
+    tokenSecret: StepStatus;
+    urlSecret: StepStatus;
+  }>({ workflow: 'pending', tokenSecret: 'pending', urlSecret: 'pending' });
 
+  // Re-init state when dialog opens or config changes
   useEffect(() => {
     if (open) {
-      setSelectedRepoId('');
-      setManualEntry(false);
-      setRepoOwner(githubUsername ?? '');
-      setRepoName('');
-      setMode('persistent');
-      setRunnerId('');
-      setTriggerEvents(['push', 'pull_request', 'workflow_dispatch']);
-      setBranches('');
-      setCronSchedule('');
-      setTargetUrl('');
-      setTimeout_('300000');
-      setFailOnChanges(false);
+      setMode(config.mode as GithubActionMode);
+      setRunnerId(config.runnerId ?? '');
+      setTriggerEvents(
+        (config.triggerEvents ?? ['push', 'pull_request', 'workflow_dispatch']) as GithubActionTriggerEvent[],
+      );
+      setBranches((config.branchFilter as string[] ?? []).join(', '));
+      setCronSchedule(config.cronSchedule ?? '');
+      setTargetUrl(config.targetUrl ?? '');
+      setTimeout_(String(config.timeout ?? 300000));
+      setFailOnChanges(config.failOnChanges ?? false);
+      setShowRedeploy(false);
+      setDeploying(false);
+      setDeploySteps({ workflow: 'pending', tokenSecret: 'pending', urlSecret: 'pending' });
     }
-  }, [open, githubUsername]);
-
-  const handleRepoSelect = (value: string) => {
-    if (value === '__manual__') {
-      setManualEntry(true);
-      setSelectedRepoId('');
-      setRepoOwner(githubUsername ?? '');
-      setRepoName('');
-      return;
-    }
-    setManualEntry(false);
-    setSelectedRepoId(value);
-    const repo = githubRepos.find((r) => r.id === value);
-    if (repo) {
-      setRepoOwner(repo.owner);
-      setRepoName(repo.name);
-    }
-  };
+  }, [open, config]);
 
   const toggleTrigger = (event: GithubActionTriggerEvent) => {
     setTriggerEvents((prev) =>
@@ -112,8 +99,8 @@ export function AddConfigDialog({ open, onOpenChange, runners, repos, githubUser
 
   const workflowConfig = {
     mode,
-    repositoryOwner: repoOwner || 'owner',
-    repositoryName: repoName || 'repo',
+    repositoryOwner: config.repositoryOwner,
+    repositoryName: config.repositoryName,
     triggerEvents,
     branchFilter,
     cronSchedule: cronSchedule || null,
@@ -122,105 +109,155 @@ export function AddConfigDialog({ open, onOpenChange, runners, repos, githubUser
     failOnChanges,
   };
 
-  const canSave = repoOwner.trim() && repoName.trim();
-
   const handleSave = async () => {
-    if (!canSave) return;
     setSaving(true);
     try {
-      await createGithubActionConfigAction({
-        repositoryOwner: repoOwner.trim(),
-        repositoryName: repoName.trim(),
+      await updateGithubActionConfigAction(config.id, {
         mode,
-        runnerId: runnerId || undefined,
+        runnerId: runnerId || null,
         triggerEvents,
         branchFilter,
-        cronSchedule: cronSchedule || undefined,
-        targetUrl: targetUrl || undefined,
+        cronSchedule: cronSchedule || null,
+        targetUrl: targetUrl || null,
         timeout: parseInt(timeout, 10) || 300000,
         failOnChanges,
       });
-      toast.success('Config created');
-      onOpenChange(false);
+      toast.success('Config updated');
+      if (config.workflowDeployed) {
+        setShowRedeploy(true);
+      } else {
+        onOpenChange(false);
+      }
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Failed to create config');
+      toast.error(err instanceof Error ? err.message : 'Failed to update config');
     } finally {
       setSaving(false);
     }
   };
 
+  const isEphemeral = config.mode === 'ephemeral';
+  const isAuto = config.mode === 'auto';
+  const hasPersistentRunner = !isEphemeral && !isAuto && !!config.runnerId;
+  const willSetSecrets = isEphemeral || isAuto || hasPersistentRunner;
+
+  const handleRedeploy = async () => {
+    setDeploying(true);
+    setDeploySteps({
+      workflow: 'loading',
+      tokenSecret: willSetSecrets ? 'loading' : 'pending',
+      urlSecret: willSetSecrets ? 'loading' : 'pending',
+    });
+
+    try {
+      const results = await deployWorkflowToGithub(config.id);
+      setDeploySteps({
+        workflow: results.workflow ? 'success' : 'error',
+        tokenSecret: willSetSecrets
+          ? (results.tokenSecret ? 'success' : 'error')
+          : 'pending',
+        urlSecret: willSetSecrets
+          ? (results.urlSecret ? 'success' : 'error')
+          : 'pending',
+      });
+      toast.success('Workflow redeployed');
+    } catch (err) {
+      setDeploySteps((prev) => ({
+        ...prev,
+        workflow: prev.workflow === 'loading' ? 'error' : prev.workflow,
+        tokenSecret: prev.tokenSecret === 'loading' ? 'error' : prev.tokenSecret,
+        urlSecret: prev.urlSecret === 'loading' ? 'error' : prev.urlSecret,
+      }));
+      toast.error(err instanceof Error ? err.message : 'Redeployment failed');
+    } finally {
+      setDeploying(false);
+    }
+  };
+
+  const StepIcon = ({ status }: { status: StepStatus }) => {
+    if (status === 'loading') return <Loader2 className="h-4 w-4 animate-spin text-blue-500" />;
+    if (status === 'success') return <Check className="h-4 w-4 text-green-500" />;
+    if (status === 'error') return <X className="h-4 w-4 text-destructive" />;
+    return <div className="h-4 w-4 rounded-full border-2 border-muted-foreground/30" />;
+  };
+
+  const deployDone = deploySteps.workflow !== 'pending' && deploySteps.workflow !== 'loading';
+
+  // Redeploy prompt view
+  if (showRedeploy) {
+    return (
+      <Dialog open={open} onOpenChange={onOpenChange}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Redeploy Workflow?</DialogTitle>
+            <DialogDescription>
+              Settings for{' '}
+              <span className="font-mono text-foreground">
+                {config.repositoryOwner}/{config.repositoryName}
+              </span>{' '}
+              have been updated. Redeploy to apply changes to GitHub?
+            </DialogDescription>
+          </DialogHeader>
+
+          {deployDone && (
+            <div className="space-y-2 rounded-md bg-muted p-3">
+              <div className="flex items-center gap-2 text-sm">
+                <StepIcon status={deploySteps.workflow} />
+                <span>Workflow file</span>
+              </div>
+              {willSetSecrets && (
+                <>
+                  <div className="flex items-center gap-2 text-sm">
+                    <StepIcon status={deploySteps.tokenSecret} />
+                    <span>LASTEST_TOKEN secret</span>
+                  </div>
+                  <div className="flex items-center gap-2 text-sm">
+                    <StepIcon status={deploySteps.urlSecret} />
+                    <span>LASTEST_URL secret</span>
+                  </div>
+                </>
+              )}
+            </div>
+          )}
+
+          <DialogFooter>
+            {deployDone ? (
+              <Button variant="outline" onClick={() => onOpenChange(false)}>
+                Close
+              </Button>
+            ) : (
+              <>
+                <Button variant="outline" onClick={() => onOpenChange(false)} disabled={deploying}>
+                  Skip
+                </Button>
+                <Button onClick={handleRedeploy} disabled={deploying}>
+                  {deploying && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+                  <Rocket className="h-4 w-4 mr-2" />
+                  Redeploy
+                </Button>
+              </>
+            )}
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    );
+  }
+
+  // Edit form view
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-5xl max-h-[90vh] flex flex-col">
         <DialogHeader>
-          <DialogTitle>Add Repository</DialogTitle>
+          <DialogTitle>
+            Edit Config
+          </DialogTitle>
           <DialogDescription>
-            Configure a GitHub Actions workflow for visual testing
+            <span className="font-mono">{config.repositoryOwner}/{config.repositoryName}</span>
           </DialogDescription>
         </DialogHeader>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 min-h-0 flex-1 overflow-hidden">
           {/* Left: Configuration */}
           <div className="space-y-4 overflow-y-auto pr-1">
-            {/* Repository */}
-            <div className="space-y-2">
-              <h4 className="text-sm font-medium">Repository</h4>
-              {githubRepos.length > 0 && !manualEntry ? (
-                <Select value={selectedRepoId} onValueChange={handleRepoSelect}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select a repository..." />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {githubRepos.map((r) => (
-                      <SelectItem key={r.id} value={r.id}>
-                        {r.fullName}
-                      </SelectItem>
-                    ))}
-                    <SelectItem value="__manual__">Enter manually...</SelectItem>
-                  </SelectContent>
-                </Select>
-              ) : (
-                <div className="space-y-2">
-                  {githubRepos.length > 0 && (
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="h-6 text-xs px-0"
-                      onClick={() => { setManualEntry(false); setSelectedRepoId(''); }}
-                    >
-                      Back to repo list
-                    </Button>
-                  )}
-                  <div className="grid grid-cols-2 gap-2">
-                    <div className="space-y-1">
-                      <Label htmlFor="repo-owner" className="text-xs">
-                        Owner <span className="text-destructive">*</span>
-                      </Label>
-                      <Input
-                        id="repo-owner"
-                        value={repoOwner}
-                        onChange={(e) => setRepoOwner(e.target.value)}
-                        placeholder="owner"
-                        className="font-mono text-sm"
-                      />
-                    </div>
-                    <div className="space-y-1">
-                      <Label htmlFor="repo-name" className="text-xs">
-                        Name <span className="text-destructive">*</span>
-                      </Label>
-                      <Input
-                        id="repo-name"
-                        value={repoName}
-                        onChange={(e) => setRepoName(e.target.value)}
-                        placeholder="repository"
-                        className="font-mono text-sm"
-                      />
-                    </div>
-                  </div>
-                </div>
-              )}
-            </div>
-
             {/* Mode */}
             <div className="space-y-2">
               <h4 className="text-sm font-medium">Mode</h4>
@@ -317,11 +354,11 @@ export function AddConfigDialog({ open, onOpenChange, runners, repos, githubUser
 
             {/* Branch filter + cron */}
             <div className="space-y-1">
-              <Label htmlFor="branches" className="text-xs">
+              <Label htmlFor="edit-branches" className="text-xs">
                 Branch filter (comma-separated)
               </Label>
               <Input
-                id="branches"
+                id="edit-branches"
                 value={branches}
                 onChange={(e) => setBranches(e.target.value)}
                 placeholder="Leave empty for all branches"
@@ -331,9 +368,9 @@ export function AddConfigDialog({ open, onOpenChange, runners, repos, githubUser
 
             {triggerEvents.includes('schedule') && (
               <div className="space-y-1">
-                <Label htmlFor="cron" className="text-xs">Cron schedule</Label>
+                <Label htmlFor="edit-cron" className="text-xs">Cron schedule</Label>
                 <Input
-                  id="cron"
+                  id="edit-cron"
                   value={cronSchedule}
                   onChange={(e) => setCronSchedule(e.target.value)}
                   placeholder="0 6 * * 1-5"
@@ -344,9 +381,9 @@ export function AddConfigDialog({ open, onOpenChange, runners, repos, githubUser
 
             {/* Target URL */}
             <div className="space-y-1">
-              <Label htmlFor="target-url" className="text-xs">Target URL (optional)</Label>
+              <Label htmlFor="edit-target-url" className="text-xs">Target URL (optional)</Label>
               <Input
-                id="target-url"
+                id="edit-target-url"
                 value={targetUrl}
                 onChange={(e) => setTargetUrl(e.target.value)}
                 placeholder="https://staging.example.com"
@@ -368,9 +405,9 @@ export function AddConfigDialog({ open, onOpenChange, runners, repos, githubUser
             {/* Timeout + fail toggle */}
             <div className="flex items-end gap-3">
               <div className="space-y-1 flex-1">
-                <Label htmlFor="timeout" className="text-xs">Timeout (ms)</Label>
+                <Label htmlFor="edit-timeout" className="text-xs">Timeout (ms)</Label>
                 <Input
-                  id="timeout"
+                  id="edit-timeout"
                   type="number"
                   value={timeout}
                   onChange={(e) => setTimeout_(e.target.value)}
@@ -379,11 +416,11 @@ export function AddConfigDialog({ open, onOpenChange, runners, repos, githubUser
               </div>
               <div className="flex items-center gap-2 pb-1.5">
                 <Switch
-                  id="fail-on-changes"
+                  id="edit-fail-on-changes"
                   checked={failOnChanges}
                   onCheckedChange={setFailOnChanges}
                 />
-                <Label htmlFor="fail-on-changes" className="text-xs whitespace-nowrap">
+                <Label htmlFor="edit-fail-on-changes" className="text-xs whitespace-nowrap">
                   Fail on changes
                 </Label>
               </div>
@@ -403,9 +440,9 @@ export function AddConfigDialog({ open, onOpenChange, runners, repos, githubUser
           <Button variant="outline" onClick={() => onOpenChange(false)} disabled={saving}>
             Cancel
           </Button>
-          <Button onClick={handleSave} disabled={!canSave || saving}>
+          <Button onClick={handleSave} disabled={saving}>
             {saving && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
-            Create Config
+            Save Changes
           </Button>
         </DialogFooter>
       </DialogContent>

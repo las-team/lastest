@@ -498,6 +498,7 @@ async function executeViaRunner(
         consoleErrorMode: (options.playwrightSettings?.consoleErrorMode as 'fail' | 'warn' | 'ignore') || 'fail',
         networkErrorMode: (options.playwrightSettings?.networkErrorMode as 'fail' | 'warn' | 'ignore') || 'fail',
         ignoreExternalNetworkErrors: options.playwrightSettings?.ignoreExternalNetworkErrors ?? false,
+        enableNetworkInterception: options.playwrightSettings?.enableNetworkInterception ?? false,
         browser: effectiveBrowser,
         fixtures: fixturePayloads,
         grantClipboardAccess: options.playwrightSettings?.grantClipboardAccess ?? false,
@@ -645,6 +646,12 @@ async function executeViaRunner(
         }
       }
 
+      // Check for async network bodies file
+      const networkBodiesResult = unacked.find(r => r.type === 'response:network_bodies');
+      const networkBodiesPath = networkBodiesResult
+        ? (networkBodiesResult.payload as Record<string, unknown>)?.path as string | undefined
+        : undefined;
+
       const testResult: TestRunResult = {
         testId: (payload.testId as string) || info.testId,
         status: payload.status === 'error' || payload.status === 'timeout' || payload.status === 'cancelled' ? 'failed' : (payload.status as 'passed' | 'failed'),
@@ -656,6 +663,7 @@ async function executeViaRunner(
         networkRequests: Array.isArray(payload.networkRequests) && payload.networkRequests.length > 0 ? payload.networkRequests as NetworkRequest[] : undefined,
         softErrors: Array.isArray(payload.softErrors) && payload.softErrors.length > 0 ? payload.softErrors as string[] : undefined,
         videoPath,
+        networkBodiesPath,
       };
       results.push(testResult);
       await onResult?.(testResult);

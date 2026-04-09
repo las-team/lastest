@@ -770,6 +770,7 @@ export interface TestRunResult {
   stabilityMetadata?: StabilityMetadata;
   videoPath?: string;
   softErrors?: string[];
+  networkBodiesPath?: string;
 }
 
 export interface ProgressCallback {
@@ -916,12 +917,10 @@ export class PlaywrightRunner extends EventEmitter {
       const launcher = this.getBrowserLauncher();
       const headlessMode = this.settings?.headlessMode ?? 'true';
       // Support headlessOverride for backward compatibility
-      // 'shell' uses new headless mode that better avoids bot detection
+      // 'shell' mode is now the default in modern Playwright — map to boolean true
       const headless = headlessOverride !== undefined
         ? headlessOverride
-        : headlessMode === 'shell'
-          ? 'shell'
-          : headlessMode === 'true';
+        : headlessMode !== 'false';
 
       // Cross-OS consistency: inject Chromium flags for identical rendering across OS
       const stabilization = this.getStabilizationSettings();
@@ -931,11 +930,10 @@ export class PlaywrightRunner extends EventEmitter {
       const needsDeterministicRendering = (stabilization.crossOsConsistency || this.settings?.freezeAnimations) && browserType === 'chromium';
       const launchArgs = needsDeterministicRendering ? CROSS_OS_CHROMIUM_ARGS : [];
 
-      // Cast needed as Playwright types may not include 'shell' yet
       const args = [...launchArgs];
       if (!headless) args.push('--start-maximized');
       this.browser = await launcher.launch({
-        headless: headless as boolean | undefined,
+        headless,
         args: args.length > 0 ? args : undefined,
       });
 

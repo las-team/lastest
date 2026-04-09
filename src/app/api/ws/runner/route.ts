@@ -252,22 +252,9 @@ export async function POST(request: NextRequest) {
         const result = message as TestResultResponse;
         const commandId = result.payload.correlationId;
 
-        // Strip bulky fields (request/response bodies, headers) from network requests
-        // to avoid blowing up the jsonb column
-        const trimmedPayload = { ...result.payload } as Record<string, unknown>;
-        if (Array.isArray(trimmedPayload.networkRequests)) {
-          trimmedPayload.networkRequests = (trimmedPayload.networkRequests as Record<string, unknown>[]).map(r => ({
-            url: r.url,
-            method: r.method,
-            status: r.status,
-            duration: r.duration,
-            resourceType: r.resourceType,
-            startTime: r.startTime,
-            failed: r.failed,
-          }));
-        }
         // Drop video data — it's saved separately
-        delete trimmedPayload.videoData;
+        const payload = { ...result.payload } as Record<string, unknown>;
+        delete payload.videoData;
 
         // Store result in DB and mark command completed
         const resultStatus = result.payload.status === 'passed' ? 'completed' : 'failed';
@@ -276,7 +263,7 @@ export async function POST(request: NextRequest) {
             commandId,
             runnerId: runner.id,
             type: 'response:test_result',
-            payload: trimmedPayload,
+            payload,
           });
         } catch (err) {
           console.error(`[Runner] Failed to insert test result for command ${commandId}:`, err);
@@ -342,6 +329,40 @@ export async function POST(request: NextRequest) {
         } catch (error) {
           console.error(`[Screenshot] Validation or save failed:`, error);
           return NextResponse.json({ error: 'Screenshot upload failed' }, { status: 400 });
+        }
+
+        return NextResponse.json({ ok: true });
+      }
+
+      case 'response:network_bodies': {
+        const payload = message.payload as Record<string, unknown>;
+        const commandId = payload.correlationId as string;
+        const testId = payload.testId as string;
+        const testRunId = payload.testRunId as string;
+        const repositoryId = payload.repositoryId as string | undefined;
+        const networkRequests = payload.networkRequests;
+
+        if (!commandId || !networkRequests) {
+          return NextResponse.json({ error: 'Missing correlationId or networkRequests' }, { status: 400 });
+        }
+
+        try {
+          const dir = path.join(STORAGE_DIRS['network-bodies'], repositoryId || 'default');
+          await fs.mkdir(dir, { recursive: true });
+          const filename = `${testRunId}-${testId}.json`;
+          const filePath = path.join(dir, filename);
+          await fs.writeFile(filePath, JSON.stringify(networkRequests));
+          const relativePath = `/network-bodies/${repositoryId || 'default'}/${filename}`;
+
+          await insertCommandResult({
+            commandId,
+            runnerId: runner.id,
+            type: 'response:network_bodies',
+            payload: { path: relativePath },
+          });
+        } catch (error) {
+          console.error(`[NetworkBodies] Failed to save for test ${testId}:`, error);
+          // Non-blocking — test result is already stored
         }
 
         return NextResponse.json({ ok: true });

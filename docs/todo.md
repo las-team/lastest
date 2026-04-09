@@ -14,16 +14,9 @@ Accept Downloads
 MCP
 triage
 ally
+GH action edit
 ## bugs
-Edit runner action to not fail on changes by default and edit function fo the runner - redeploy
-
-Test/Spec screen should be EA
-When run w recording is pressed no recording is made w EB run
-❯ fullscreen instantly exits, doesnt work                               
-Auto runner selection doesnt work browserType.launch: headless: expected boolean, got string
-
 ## features
-slow EB launch - EB slow on localhost
 check on steps page how far it got and how variables were resolved
 
 I want the ai to define happy path tests going throuhg the menu clicking all, and submenues, and see these as test areas. Then as it populates forms and adds records it should create step by step summaries of what it did, so i can change values or expand what it does.

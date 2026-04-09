@@ -85,6 +85,7 @@ export interface RunTestPayload {
   consoleErrorMode?: 'fail' | 'warn' | 'ignore';
   networkErrorMode?: 'fail' | 'warn' | 'ignore';
   ignoreExternalNetworkErrors?: boolean;
+  enableNetworkInterception?: boolean;
 }
 
 /**
@@ -227,6 +228,7 @@ export class EmbeddedTestExecutor {
       page.on('pageerror', (err) => logFn('warn', `Page error: ${err.message}`));
 
       // Network request capture (all requests, not just failures)
+      const captureNetworkBodies = command.enableNetworkInterception ?? false;
       page.on('request', (req) => {
         allNetworkRequests.push({
           url: req.url(),
@@ -236,8 +238,10 @@ export class EmbeddedTestExecutor {
           resourceType: req.resourceType(),
           startTime: Date.now(),
           failed: false,
-          requestHeaders: req.headers(),
-          postData: req.postData() ?? undefined,
+          ...(captureNetworkBodies ? {
+            requestHeaders: req.headers(),
+            postData: req.postData() ?? undefined,
+          } : {}),
         });
         if (allNetworkRequests.length > 500) {
           allNetworkRequests = allNetworkRequests.slice(-500);
@@ -250,16 +254,18 @@ export class EmbeddedTestExecutor {
         if (entry) {
           entry.status = resp.status();
           entry.duration = entry.startTime ? Date.now() - entry.startTime : 0;
-          entry.responseHeaders = resp.headers();
           const contentLength = resp.headers()['content-length'];
           if (contentLength) entry.responseSize = parseInt(contentLength, 10);
-          // Capture response body for API calls (fetch/xhr) — cap at 16KB
-          const rt = entry.resourceType;
-          if (rt === 'fetch' || rt === 'xhr' || rt === 'document') {
-            resp.text().then(body => {
-              entry.responseBody = body.length > 16384 ? body.slice(0, 16384) + '… (truncated)' : body;
-              if (!entry.responseSize) entry.responseSize = body.length;
-            }).catch(() => {});
+          if (captureNetworkBodies) {
+            entry.responseHeaders = resp.headers();
+            // Capture response body for API calls (fetch/xhr) — cap at 16KB
+            const rt = entry.resourceType;
+            if (rt === 'fetch' || rt === 'xhr' || rt === 'document') {
+              resp.text().then(body => {
+                entry.responseBody = body.length > 16384 ? body.slice(0, 16384) + '… (truncated)' : body;
+                if (!entry.responseSize) entry.responseSize = body.length;
+              }).catch(() => {});
+            }
           }
         }
       });

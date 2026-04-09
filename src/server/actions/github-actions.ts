@@ -107,7 +107,7 @@ export async function deployWorkflowToGithub(
     cronSchedule: config.cronSchedule,
     targetUrl: config.targetUrl,
     timeout: config.timeout ?? 300000,
-    failOnChanges: config.failOnChanges ?? true,
+    failOnChanges: config.failOnChanges ?? false,
   });
 
   const results: { workflow: boolean; tokenSecret: boolean; urlSecret: boolean } = {

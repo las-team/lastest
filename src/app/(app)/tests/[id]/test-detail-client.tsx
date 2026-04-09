@@ -833,7 +833,9 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
         <Tabs defaultValue="code">
           <TabsList className="h-11 w-full p-1 gap-1 bg-white dark:bg-zinc-950 border">
             <TabsTrigger value="code" className="flex-1 px-2 text-sm data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-sm">Code</TabsTrigger>
-            <TabsTrigger value="spec" className="flex-1 px-2 text-sm data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-sm">Spec</TabsTrigger>
+            {earlyAdopterMode && (
+              <TabsTrigger value="spec" className="flex-1 px-2 text-sm data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-sm">Spec</TabsTrigger>
+            )}
             <TabsTrigger value="steps" className="flex-1 px-2 text-sm data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-sm">Steps</TabsTrigger>
             <TabsTrigger value="setup" className="flex-1 px-2 text-sm data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-sm">Seed</TabsTrigger>
             <TabsTrigger value="playback" className="flex-1 px-2 text-sm data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-sm">Overrides</TabsTrigger>
@@ -914,17 +916,19 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
             )}
           </TabsContent>
 
-          <TabsContent value="spec" className="mt-4">
-            {repositoryId && (
-              <TestSpecEditor
-                testId={test.id}
-                testName={test.name}
-                repositoryId={repositoryId}
-                initialSpec={testSpec ?? null}
-                functionalAreaId={test.functionalAreaId}
-              />
-            )}
-          </TabsContent>
+          {earlyAdopterMode && (
+            <TabsContent value="spec" className="mt-4">
+              {repositoryId && (
+                <TestSpecEditor
+                  testId={test.id}
+                  testName={test.name}
+                  repositoryId={repositoryId}
+                  initialSpec={testSpec ?? null}
+                  functionalAreaId={test.functionalAreaId}
+                />
+              )}
+            </TabsContent>
+          )}
 
           <TabsContent value="steps" className="mt-4">
             <TestStepsTab

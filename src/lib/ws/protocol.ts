@@ -33,6 +33,7 @@ export type MessageType =
   | 'command:capture_screenshot'
   | 'response:screenshot'
   | 'response:screenshot_ack'
+  | 'response:network_bodies'
   | 'response:error'
   | 'response:pong'
   // Status
@@ -94,6 +95,7 @@ export interface RunTestCommandPayload {
   consoleErrorMode?: 'fail' | 'warn' | 'ignore';
   networkErrorMode?: 'fail' | 'warn' | 'ignore';
   ignoreExternalNetworkErrors?: boolean;
+  enableNetworkInterception?: boolean;
 }
 
 export interface RunTestCommand extends BaseMessage {

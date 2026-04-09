@@ -263,6 +263,7 @@ export const testResults = pgTable('test_results', {
   assertionResults: jsonb('assertion_results').$type<AssertionResult[]>(),
   a11yPassesCount: integer('a11y_passes_count'),
   videoPath: text('video_path'),
+  networkBodiesPath: text('network_bodies_path'),
   softErrors: jsonb('soft_errors').$type<string[]>(),
   retryOf: text('retry_of'), // links to original test result ID if this is a retry
   isFlaky: boolean('is_flaky').default(false), // true if test failed then passed on retry
