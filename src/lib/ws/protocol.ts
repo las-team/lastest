@@ -91,6 +91,9 @@ export interface RunTestCommandPayload {
   forceVideoRecording?: boolean;
   recordingViewport?: { width: number; height: number };
   lockViewportToRecording?: boolean;
+  consoleErrorMode?: 'fail' | 'warn' | 'ignore';
+  networkErrorMode?: 'fail' | 'warn' | 'ignore';
+  ignoreExternalNetworkErrors?: boolean;
 }
 
 export interface RunTestCommand extends BaseMessage {

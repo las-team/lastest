@@ -35,16 +35,16 @@ export function EnvPageClient({
     <div className="flex-1 p-6 overflow-auto">
       <div className="max-w-4xl mx-auto space-y-8">
         <div>
-          <h1 className="text-2xl font-semibold">Environment Setup</h1>
+          <h1 className="text-2xl font-semibold">Seed</h1>
           <p className="text-muted-foreground mt-1">
-            Configure setup and teardown steps for test preparation and cleanup.
+            Configure seed and teardown steps for test preparation and cleanup.
           </p>
         </div>
 
         <Tabs defaultValue="setup">
           <TabsList className="h-11 w-full p-1 bg-white dark:bg-zinc-950 border">
             <TabsTrigger value="setup" className="flex-1 px-6 text-sm data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-sm">
-              Setup
+              Seed
             </TabsTrigger>
             <TabsTrigger value="teardown" className="flex-1 px-6 text-sm data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-sm">
               Teardown

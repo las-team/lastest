@@ -23,7 +23,7 @@ const AI_ONLY_STEPS: Set<AgentStepId> = new Set(['scan_and_template', 'plan', 'r
 const DEFAULT_STEPS: AgentStepState[] = [
   { id: 'settings_check', status: 'pending', label: 'Settings', description: 'Verify configuration' },
   { id: 'select_repo', status: 'pending', label: 'Repo', description: 'Ensure repo selected' },
-  { id: 'env_setup', status: 'pending', label: 'Env Setup', description: 'URL & login setup' },
+  { id: 'env_setup', status: 'pending', label: 'Seed', description: 'URL & login seed' },
   { id: 'scan_and_template', status: 'pending', label: 'Scan', description: 'Scan routes & template' },
   { id: 'plan', status: 'pending', label: 'Plan', description: 'Discover test areas' },
   { id: 'review', status: 'pending', label: 'Review', description: 'Approve test plan' },

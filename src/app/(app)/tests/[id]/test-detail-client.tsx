@@ -17,7 +17,7 @@ import {
 import { Input } from '@/components/ui/input';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { Textarea } from '@/components/ui/textarea';
-import { Play, Trash2, Copy, Edit2, Clock, CheckCircle, XCircle, X, Save, Wrench, Wand2, Loader2, History, RotateCcw, ChevronDown, ChevronRight, ChevronUp, Monitor, Video, AlertTriangle, Image, Bug, GitBranch, GitCommit, Tv2 } from 'lucide-react';
+import { Play, Trash2, Copy, Edit2, Clock, CheckCircle, XCircle, X, Save, Wrench, Wand2, Loader2, History, RotateCcw, ChevronDown, ChevronRight, ChevronUp, Monitor, Video, AlertTriangle, Image, Bug, GitBranch, GitCommit, Tv2, Code2 } from 'lucide-react';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -39,7 +39,7 @@ import { TestDiffOverrides as TestDiffOverridesComponent } from '@/components/se
 import { TestPlaywrightOverrides as TestPlaywrightOverridesComponent } from '@/components/settings/test-playwright-overrides';
 import { A11yViolationsPanel } from '@/components/builds/a11y-violations-panel';
 import { RuntimeErrorsPanel, stripRuntimeErrorsFromMessage } from '@/components/builds/runtime-errors-panel';
-import { SuccessCriteriaTab } from '@/components/tests/success-criteria-tab';
+import { TestStepsTab } from '@/components/tests/success-criteria-tab';
 import type { ScreenshotGroup } from '@/server/actions/tests';
 import { SheetDataPreview } from '@/components/test-data/sheet-data-preview';
 import { SheetReferenceInserter } from '@/components/test-data/sheet-reference-inserter';
@@ -113,6 +113,86 @@ interface TestDetailClientProps {
   playwrightDefaults?: PlaywrightSettingsForDefaults | null;
   envBaseUrl?: string | null;
   testSpec?: TestSpec | null;
+}
+
+function splitBoilerplate(code: string): { boilerplate: string; testBody: string } | null {
+  // Match the standard helper block: from signature line through replayCursorPath closing brace
+  const signatureMatch = code.match(/^(import\s.*\n\n)?export\s+async\s+function\s+test\s*\([^)]*\)\s*\{/m);
+  if (!signatureMatch) return null;
+
+  // Find the end of the last boilerplate helper (replayCursorPath or locateWithFallback)
+  const markers = ['async function replayCursorPath', 'async function locateWithFallback', 'function getScreenshotPath', 'function buildUrl'];
+  let lastHelperEnd = -1;
+
+  for (const marker of markers) {
+    let searchFrom = 0;
+    while (true) {
+      const idx = code.indexOf(marker, searchFrom);
+      if (idx === -1) break;
+      // Find the closing brace of this function by counting braces
+      let braceCount = 0;
+      let started = false;
+      let endIdx = idx;
+      for (let i = idx; i < code.length; i++) {
+        if (code[i] === '{') { braceCount++; started = true; }
+        if (code[i] === '}') { braceCount--; }
+        if (started && braceCount === 0) { endIdx = i + 1; break; }
+      }
+      if (endIdx > lastHelperEnd) lastHelperEnd = endIdx;
+      searchFrom = endIdx;
+    }
+  }
+
+  if (lastHelperEnd === -1) return null;
+
+  // Skip blank lines after the last helper, but preserve indentation
+  let bodyStart = lastHelperEnd;
+  while (bodyStart < code.length && (code[bodyStart] === '\n' || code[bodyStart] === '\r')) {
+    bodyStart++;
+  }
+
+  const boilerplate = code.slice(0, lastHelperEnd);
+  const testBody = code.slice(bodyStart);
+
+  // Only collapse if there's meaningful test body left
+  if (!testBody.trim() || testBody.trim() === '}') return null;
+
+  return { boilerplate, testBody };
+}
+
+function CollapsibleTestCode({ code }: { code: string }) {
+  const [showHelpers, setShowHelpers] = useState(false);
+  const split = splitBoilerplate(code);
+
+  if (!split) {
+    return (
+      <pre className="bg-muted p-4 rounded-lg overflow-x-auto text-sm font-mono">
+        {code}
+      </pre>
+    );
+  }
+
+  return (
+    <div className="bg-muted rounded-lg overflow-x-auto text-sm font-mono">
+      <button
+        type="button"
+        onClick={() => setShowHelpers(!showHelpers)}
+        className="flex items-center gap-2 px-4 py-2 w-full text-left text-muted-foreground hover:text-foreground transition-colors border-b border-border/50"
+      >
+        {showHelpers ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+        <Code2 className="h-3 w-3" />
+        <span className="text-xs">Standard helpers (buildUrl, locateWithFallback, ...)</span>
+      </button>
+      {showHelpers && (
+        <pre className="px-4 py-2 border-b border-border/50 text-muted-foreground">
+          {split.boilerplate}
+        </pre>
+      )}
+      <pre className="p-4">
+        {split.testBody}
+      </pre>
+    </div>
+  );
 }
 
 export function TestDetailClient({ test, results, repositoryId, screenshotGroups = [], plannedScreenshots = [], defaultSetupSteps = [], availableTests = [], availableScripts = [], sheetDataSources = [], stabilizationDefaults, banAiMode = false, earlyAdopterMode = false, diffDefaults, playwrightDefaults, envBaseUrl, testSpec }: TestDetailClientProps) {
@@ -683,8 +763,8 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
           <TabsList className="h-11 w-full p-1 gap-1 bg-white dark:bg-zinc-950 border">
             <TabsTrigger value="code" className="flex-1 px-2 text-sm data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-sm">Code</TabsTrigger>
             <TabsTrigger value="spec" className="flex-1 px-2 text-sm data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-sm">Spec</TabsTrigger>
-            <TabsTrigger value="criteria" className="flex-1 px-2 text-sm data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-sm">Criteria</TabsTrigger>
-            <TabsTrigger value="setup" className="flex-1 px-2 text-sm data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-sm">Setup</TabsTrigger>
+            <TabsTrigger value="steps" className="flex-1 px-2 text-sm data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-sm">Steps</TabsTrigger>
+            <TabsTrigger value="setup" className="flex-1 px-2 text-sm data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-sm">Seed</TabsTrigger>
             <TabsTrigger value="playback" className="flex-1 px-2 text-sm data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-sm">Overrides</TabsTrigger>
             <TabsTrigger value="screenshots" className="flex-1 px-2 text-sm data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-sm">Screenshots</TabsTrigger>
             <TabsTrigger value="plans" className="flex-1 px-2 text-sm data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-sm">Plans</TabsTrigger>
@@ -716,9 +796,7 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
                     className="font-mono text-sm min-h-[300px]"
                   />
                 ) : (
-                  <pre className="bg-muted p-4 rounded-lg overflow-x-auto text-sm font-mono">
-                    {test.code || '// No code generated yet'}
-                  </pre>
+                  <CollapsibleTestCode code={test.code || '// No code generated yet'} />
                 )}
               </CardContent>
             </Card>
@@ -777,8 +855,8 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
             )}
           </TabsContent>
 
-          <TabsContent value="criteria" className="mt-4">
-            <SuccessCriteriaTab
+          <TabsContent value="steps" className="mt-4">
+            <TestStepsTab
               assertions={test.assertions ?? null}
               assertionResults={latestResult?.assertionResults ?? null}
               softErrors={latestResult?.softErrors ?? null}

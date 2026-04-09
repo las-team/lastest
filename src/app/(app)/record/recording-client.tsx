@@ -859,7 +859,7 @@ export function RecordingClient({
                   </p>
                 </div>
 
-                {/* Environment Setup Toggle */}
+                {/* Seed Toggle */}
                 {(() => {
                   const hasDefaults = repositorySetupSteps.length > 0;
                   const activeDefaultCount = repositorySetupSteps.filter(s => !skippedDefaultStepIds.has(s.id)).length;
@@ -875,7 +875,7 @@ export function RecordingClient({
                           <Play className="h-4 w-4 text-muted-foreground" />
                           <div className="space-y-0.5">
                             <Label htmlFor="run-setup" className="text-sm font-medium cursor-pointer">
-                              Run Environment Setup
+                              Run Seed
                             </Label>
                             <p className="text-xs text-muted-foreground">
                               {runSetupBeforeRecording ? stepSummary : hasDefaults ? `${repositorySetupSteps.length} default step${repositorySetupSteps.length !== 1 ? 's' : ''} configured` : 'No setup configured'}

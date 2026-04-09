@@ -42,7 +42,7 @@ import type { ActivityEventType, PwAgentType } from '@/lib/db/schema';
 const STEP_DEFINITIONS: Array<{ id: AgentStepId; label: string; description: string }> = [
   { id: 'settings_check', label: 'Settings Check', description: 'Verify GitHub, AI, and environment configuration' },
   { id: 'select_repo', label: 'Select Repository', description: 'Ensure a repository is selected' },
-  { id: 'env_setup', label: 'Env Setup', description: 'Verify server, detect login, configure setup' },
+  { id: 'env_setup', label: 'Seed', description: 'Verify server, detect login, configure seed' },
   { id: 'scan_and_template', label: 'Scan & Template', description: 'Scan routes and apply testing template' },
   { id: 'plan', label: 'Plan Tests', description: 'Discover functional areas and create test plans' },
   { id: 'review', label: 'Review Plan', description: 'Review and approve the test plan' },
