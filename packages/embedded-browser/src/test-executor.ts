@@ -753,6 +753,102 @@ export class EmbeddedTestExecutor {
         softAction: async (fn: () => Promise<void>) => { try { await fn(); } catch { /* soft */ } },
       };
 
+      // Create helpers matching the test execution path so setup code can use them
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const expect = (target: any, message?: string) => {
+        const msgPrefix = message ? `${message}: ` : '';
+        const isPage = typeof target?.goto === 'function';
+        const isLocator = typeof target?.click === 'function' && typeof target?.fill === 'function';
+        if (isPage) {
+          return {
+            async toHaveTitle(expected: string | RegExp) { const title = await target.title(); const regex = typeof expected === 'string' ? new RegExp(expected) : expected; if (!regex.test(title)) throw new Error(`${msgPrefix}Expected title "${title}" to match ${regex}`); },
+            async toHaveURL(expected: string | RegExp) { const url = target.url(); const regex = typeof expected === 'string' ? new RegExp(expected) : expected; if (!regex.test(url)) throw new Error(`${msgPrefix}Expected URL "${url}" to match ${regex}`); },
+          };
+        }
+        if (isLocator) {
+          return {
+            async toBeVisible() { if (!await target.isVisible()) throw new Error(`${msgPrefix}Expected element to be visible`); },
+            async toBeHidden() { if (await target.isVisible()) throw new Error(`${msgPrefix}Expected element to be hidden`); },
+            async toHaveText(expected: string | RegExp) { const text = await target.textContent() || ''; const regex = typeof expected === 'string' ? new RegExp(expected) : expected; if (!regex.test(text)) throw new Error(`${msgPrefix}Expected text "${text}" to match ${regex}`); },
+            async toContainText(expected: string) { const text = await target.textContent() || ''; if (!text.includes(expected)) throw new Error(`${msgPrefix}Expected text to contain "${expected}"`); },
+            not: { async toBeVisible() { if (await target.isVisible()) throw new Error(`${msgPrefix}Expected element not to be visible`); } },
+          };
+        }
+        return {
+          toBe(expected: unknown) { if (target !== expected) throw new Error(`${msgPrefix}Expected ${JSON.stringify(expected)} but got ${JSON.stringify(target)}`); },
+          toBeTruthy() { if (!target) throw new Error(`${msgPrefix}Expected value to be truthy but got ${target}`); },
+          not: { toBe(expected: unknown) { if (target === expected) throw new Error(`${msgPrefix}Expected not to be ${JSON.stringify(expected)}`); } },
+        };
+      };
+
+      const locateWithFallback = async (
+        pg: Page,
+        selectors: Array<{ type: string; value: string } | string | { selector?: string; css?: string; text?: string }>,
+        action: string,
+        value?: string | null,
+        coords?: { x: number; y: number } | null,
+        options?: Record<string, unknown> | null
+      ) => {
+        const validSelectors = selectors
+          .map((sel) => {
+            if (typeof sel === 'string') return { type: 'css', value: sel };
+            if ('type' in sel && 'value' in sel) return sel as { type: string; value: string };
+            const legacy = sel as { selector?: string; css?: string; text?: string };
+            return { type: 'css', value: legacy.selector || legacy.css || legacy.text || '' };
+          })
+          .filter((s) => s.value && s.value.trim() && !s.value.includes('undefined'));
+
+        logFn('info', `[setup action] ${action}${value ? ` "${value}"` : ''} (${validSelectors.length} selectors)`);
+
+        for (const sel of validSelectors) {
+          try {
+            let locator;
+            if (sel.type === 'ocr-text') {
+              const text = sel.value.replace(/^ocr-text="/, '').replace(/"$/, '');
+              locator = pg.getByText(text, { exact: false });
+            } else if (sel.type === 'role-name') {
+              const match = sel.value.match(/^role=(\w+)\[name="(.+)"\]$/);
+              if (match) locator = pg.getByRole(match[1] as 'button' | 'link' | 'heading', { name: match[2] });
+              else locator = pg.locator(sel.value);
+            } else {
+              locator = pg.locator(sel.value);
+            }
+            const target = locator.first();
+            await target.waitFor({ timeout: 3000 });
+            logFn('info', `[setup action] ${action} matched via ${sel.type}`);
+            if (action === 'locate') return target;
+            if (action === 'click') await target.click(options || {});
+            else if (action === 'fill') await target.fill(value || '');
+            else if (action === 'selectOption') await target.selectOption(value || '');
+            else if (action === 'check') await target.check();
+            else if (action === 'uncheck') await target.uncheck();
+            return target;
+          } catch {
+            continue;
+          }
+        }
+        if (action === 'click' && coords) {
+          logFn('info', `Falling back to coordinate click at (${coords.x}, ${coords.y})`);
+          await pg.mouse.click(coords.x, coords.y, options || {});
+          return;
+        }
+        if (action === 'fill' && coords) {
+          logFn('info', `Falling back to coordinate fill at (${coords.x}, ${coords.y})`);
+          await pg.mouse.click(coords.x, coords.y);
+          await pg.keyboard.press('Control+a');
+          await pg.keyboard.type(value || '');
+          return;
+        }
+        throw new Error('No selector matched: ' + JSON.stringify(validSelectors));
+      };
+
+      const replayCursorPathFn = async (_pg: Page, moves: [number, number, number][]) => {
+        for (const [x, y, delay] of moves) {
+          await page.mouse.move(x, y);
+          if (delay > 0) await page.waitForTimeout(delay);
+        }
+      };
+
       logFn('info', 'Executing setup code...');
 
       // Execute with timeout
@@ -761,10 +857,10 @@ export class EmbeddedTestExecutor {
         (async () => {
           const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
           const setupFn = new AsyncFunction(
-            'page', 'baseUrl', 'screenshotPath', 'stepLogger',
+            'page', 'baseUrl', 'screenshotPath', 'stepLogger', 'expect', 'appState', 'locateWithFallback', 'replayCursorPath',
             body
           );
-          await setupFn(page, command.targetUrl.replace(/\/+$/, ''), 'screenshot.png', stepLogger);
+          await setupFn(page, command.targetUrl.replace(/\/+$/, ''), 'screenshot.png', stepLogger, expect, null, locateWithFallback, replayCursorPathFn);
         })().then(r => { clearTimeout(timeoutTimer); return r; }),
         new Promise<never>((_, reject) => {
           timeoutTimer = setTimeout(() => {

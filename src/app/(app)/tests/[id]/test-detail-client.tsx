@@ -382,7 +382,7 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
 
       // Poll job status for completion (ensures results are saved before refresh)
       pollIntervalRef.current = setInterval(async () => {
-        const { isComplete } = await getJobStatus(jobId);
+        const { isComplete, status, error } = await getJobStatus(jobId);
         if (isComplete) {
           if (pollIntervalRef.current) {
             clearInterval(pollIntervalRef.current);
@@ -391,7 +391,11 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
           setIsRunning(false);
           setStreamUrl(null);
           router.refresh();
-          toast.success('Test completed');
+          if (status === 'failed') {
+            toast.error(error || 'Test run failed');
+          } else {
+            toast.success('Test completed');
+          }
         }
       }, 1000);
     } catch (error) {

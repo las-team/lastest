@@ -200,7 +200,7 @@ async function runTestsAsync(runId: string, tests: Test[], repositoryId?: string
     }
 
     // Update run status
-    const hasFailures = results.some(r => r.status === 'failed');
+    const hasFailures = results.some(r => r.status === 'failed' || r.status === 'setup_failed');
     await queries.updateTestRun(runId, {
       completedAt: new Date(),
       status: hasFailures ? 'failed' : 'passed',
@@ -246,6 +246,7 @@ export async function getJobStatus(jobId: string) {
   return {
     status: job?.status || 'unknown',
     isComplete: job?.status === 'completed' || job?.status === 'failed',
+    error: job?.error || undefined,
   };
 }
 
