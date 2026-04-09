@@ -193,12 +193,14 @@ export async function getDiffCore(diffId: string) {
   let a11yViolations: import('@/lib/db/schema').A11yViolation[] | null = null;
   let consoleErrors: string[] | null = null;
   let networkRequests: import('@/lib/db/schema').NetworkRequest[] | null = null;
+  let networkBodiesPath: string | null = null;
   if (diff.testResultId) {
     const testResult = await queries.getTestResultById(diff.testResultId);
     errorMessage = testResult?.errorMessage ?? null;
     a11yViolations = testResult?.a11yViolations ?? null;
     consoleErrors = testResult?.consoleErrors ?? null;
     networkRequests = testResult?.networkRequests ?? null;
+    networkBodiesPath = testResult?.networkBodiesPath ?? null;
   }
 
   // Look up planned screenshot if not already on the diff
@@ -227,6 +229,7 @@ export async function getDiffCore(diffId: string) {
     a11yViolations: a11yViolations ?? null,
     consoleErrors,
     networkRequests,
+    networkBodiesPath,
     test: test ?? null,
   };
 }

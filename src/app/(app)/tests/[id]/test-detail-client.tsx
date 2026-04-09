@@ -72,6 +72,7 @@ interface TestResult {
   softErrors: string[] | null;
   assertionResults: import('@/lib/db/schema').AssertionResult[] | null;
   startedAt: Date | null;
+  networkBodiesPath: string | null;
 }
 
 interface DefaultStepForUI {
@@ -1153,7 +1154,7 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
                               ) : null;
                             })()}
 
-                            <RuntimeErrorsPanel consoleErrors={result.consoleErrors} networkRequests={result.networkRequests} />
+                            <RuntimeErrorsPanel consoleErrors={result.consoleErrors} networkRequests={result.networkRequests} networkBodiesPath={result.networkBodiesPath} />
 
                             {result.softErrors && (result.softErrors as string[]).length > 0 && (
                               <div className="mt-2 p-2 bg-yellow-50 border border-yellow-200 rounded text-sm text-yellow-800 dark:bg-yellow-950/30 dark:border-yellow-800 dark:text-yellow-200">

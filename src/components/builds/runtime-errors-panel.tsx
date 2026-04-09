@@ -1,13 +1,14 @@
 'use client';
 
-import { useState } from 'react';
-import { Terminal, Globe, Filter, ChevronDown, ChevronRight } from 'lucide-react';
+import { useState, useCallback } from 'react';
+import { Terminal, Globe, Filter, ChevronDown, ChevronRight, Loader2 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import type { NetworkRequest } from '@/lib/db/schema';
 
 interface RuntimeErrorsPanelProps {
   consoleErrors?: string[] | null;
   networkRequests?: NetworkRequest[] | null;
+  networkBodiesPath?: string | null;
 }
 
 /** Strip "Console errors detected: ..." and "Network failures detected: ..." from an errorMessage. */
@@ -74,7 +75,35 @@ function dedupeErrors(errors: string[]): { message: string; count: number }[] {
   return order.map(msg => ({ message: msg, count: map.get(msg)! }));
 }
 
-function NetworkRequestDetail({ req }: { req: NetworkRequest }) {
+function NetworkRequestDetail({ req, index, networkBodiesPath }: { req: NetworkRequest; index: number; networkBodiesPath?: string | null }) {
+  // Lazy-load body data from file when bodies aren't inline
+  const hasInlineBodies = !!(req.postData || req.responseBody || req.requestHeaders || req.responseHeaders);
+  const [bodyData, setBodyData] = useState<NetworkRequest | null>(hasInlineBodies ? req : null);
+  const [loadingBodies, setLoadingBodies] = useState(false);
+  const [loadError, setLoadError] = useState(false);
+
+  const loadBodies = useCallback(() => {
+    if (hasInlineBodies || !networkBodiesPath || bodyData || loadingBodies) return;
+    setLoadingBodies(true);
+    fetch(`/api/media${networkBodiesPath}`)
+      .then(r => r.ok ? r.json() : Promise.reject(new Error('Failed to load')))
+      .then((bodies: NetworkRequest[]) => {
+        setBodyData(bodies[index] || null);
+        setLoadingBodies(false);
+      })
+      .catch(() => {
+        setLoadError(true);
+        setLoadingBodies(false);
+      });
+  }, [hasInlineBodies, networkBodiesPath, bodyData, loadingBodies, index]);
+
+  // Trigger load on first render (component only mounts when expanded)
+  if (!hasInlineBodies && networkBodiesPath && !bodyData && !loadingBodies && !loadError) {
+    loadBodies();
+  }
+
+  const detail = bodyData || req;
+
   return (
     <div className="px-3 py-2 border-t border-border/30 bg-muted/20 text-xs space-y-2">
       {/* Full URL */}
@@ -111,34 +140,46 @@ function NetworkRequestDetail({ req }: { req: NetworkRequest }) {
         </div>
       </div>
 
+      {/* Loading indicator for lazy-loaded bodies */}
+      {loadingBodies && (
+        <div className="flex items-center gap-1.5 text-muted-foreground">
+          <Loader2 className="h-3 w-3 animate-spin" />
+          <span>Loading request details...</span>
+        </div>
+      )}
+
+      {loadError && (
+        <div className="text-muted-foreground italic">Body data unavailable</div>
+      )}
+
       {/* Post Data */}
-      {req.postData && (
+      {detail.postData && (
         <div>
           <span className="font-medium text-muted-foreground">Request Body</span>
           <pre className="font-mono bg-muted/50 rounded p-1.5 mt-0.5 max-h-40 overflow-auto break-all whitespace-pre-wrap">
-            {tryFormatJson(req.postData)}
+            {tryFormatJson(detail.postData)}
           </pre>
         </div>
       )}
 
       {/* Response Body */}
-      {req.responseBody && (
+      {detail.responseBody && (
         <div>
           <span className="font-medium text-muted-foreground">Response Body</span>
           <pre className="font-mono bg-muted/50 rounded p-1.5 mt-0.5 max-h-48 overflow-auto break-all whitespace-pre-wrap text-[11px]">
-            {tryFormatJson(req.responseBody)}
+            {tryFormatJson(detail.responseBody)}
           </pre>
         </div>
       )}
 
       {/* Request Headers */}
-      {req.requestHeaders && Object.keys(req.requestHeaders).length > 0 && (
+      {detail.requestHeaders && Object.keys(detail.requestHeaders).length > 0 && (
         <details>
           <summary className="font-medium text-muted-foreground cursor-pointer select-none">
-            Request Headers ({Object.keys(req.requestHeaders).length})
+            Request Headers ({Object.keys(detail.requestHeaders).length})
           </summary>
           <div className="font-mono bg-muted/50 rounded p-1.5 mt-0.5 max-h-32 overflow-auto">
-            {Object.entries(req.requestHeaders).map(([k, v]) => (
+            {Object.entries(detail.requestHeaders).map(([k, v]) => (
               <div key={k} className="break-all">
                 <span className="text-muted-foreground">{k}:</span> {v}
               </div>
@@ -148,13 +189,13 @@ function NetworkRequestDetail({ req }: { req: NetworkRequest }) {
       )}
 
       {/* Response Headers */}
-      {req.responseHeaders && Object.keys(req.responseHeaders).length > 0 && (
+      {detail.responseHeaders && Object.keys(detail.responseHeaders).length > 0 && (
         <details>
           <summary className="font-medium text-muted-foreground cursor-pointer select-none">
-            Response Headers ({Object.keys(req.responseHeaders).length})
+            Response Headers ({Object.keys(detail.responseHeaders).length})
           </summary>
           <div className="font-mono bg-muted/50 rounded p-1.5 mt-0.5 max-h-32 overflow-auto">
-            {Object.entries(req.responseHeaders).map(([k, v]) => (
+            {Object.entries(detail.responseHeaders).map(([k, v]) => (
               <div key={k} className="break-all">
                 <span className="text-muted-foreground">{k}:</span> {v}
               </div>
@@ -174,7 +215,7 @@ function tryFormatJson(str: string): string {
   }
 }
 
-function NetworkTraceTable({ requests }: { requests: NetworkRequest[] }) {
+function NetworkTraceTable({ requests, networkBodiesPath }: { requests: NetworkRequest[]; networkBodiesPath?: string | null }) {
   const [errorsOnly, setErrorsOnly] = useState(false);
   const [expandedIdx, setExpandedIdx] = useState<number | null>(null);
 
@@ -241,7 +282,7 @@ function NetworkTraceTable({ requests }: { requests: NetworkRequest[] }) {
                   {req.resourceType}
                 </span>
               </div>
-              {isExpanded && <NetworkRequestDetail req={req} />}
+              {isExpanded && <NetworkRequestDetail req={req} index={i} networkBodiesPath={networkBodiesPath} />}
             </div>
           );
         })}
@@ -253,7 +294,7 @@ function NetworkTraceTable({ requests }: { requests: NetworkRequest[] }) {
   );
 }
 
-export function RuntimeErrorsPanel({ consoleErrors, networkRequests }: RuntimeErrorsPanelProps) {
+export function RuntimeErrorsPanel({ consoleErrors, networkRequests, networkBodiesPath }: RuntimeErrorsPanelProps) {
   const hasConsole = consoleErrors && consoleErrors.length > 0;
   const hasNetwork = networkRequests && networkRequests.length > 0;
 
@@ -304,7 +345,7 @@ export function RuntimeErrorsPanel({ consoleErrors, networkRequests }: RuntimeEr
               {networkRequests!.length}
             </Badge>
           </summary>
-          <NetworkTraceTable requests={networkRequests!} />
+          <NetworkTraceTable requests={networkRequests!} networkBodiesPath={networkBodiesPath} />
         </details>
       )}
 
@@ -325,7 +366,7 @@ export function RuntimeErrorsPanel({ consoleErrors, networkRequests }: RuntimeEr
               {networkRequests!.length}
             </Badge>
           </summary>
-          <NetworkTraceTable requests={networkRequests!} />
+          <NetworkTraceTable requests={networkRequests!} networkBodiesPath={networkBodiesPath} />
         </details>
       )}
     </div>

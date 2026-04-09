@@ -14,7 +14,7 @@ import { Input } from '@/components/ui/input';
 import { Card, CardContent } from '@/components/ui/card';
 
 interface DiffViewerClientProps {
-  diff: VisualDiff & { test: Test | null; errorMessage?: string | null; a11yViolations?: A11yViolation[] | null; consoleErrors?: string[] | null; networkRequests?: NetworkRequest[] | null };
+  diff: VisualDiff & { test: Test | null; errorMessage?: string | null; a11yViolations?: A11yViolation[] | null; consoleErrors?: string[] | null; networkRequests?: NetworkRequest[] | null; networkBodiesPath?: string | null };
   buildId: string;
   prevDiffId?: string;
   nextDiffId?: string;
@@ -257,7 +257,7 @@ export function DiffViewerClient({ diff, buildId, prevDiffId, nextDiffId, banAiM
             ) : null;
           })()}
 
-          <RuntimeErrorsPanel consoleErrors={diff.consoleErrors} networkRequests={diff.networkRequests} />
+          <RuntimeErrorsPanel consoleErrors={diff.consoleErrors} networkRequests={diff.networkRequests} networkBodiesPath={diff.networkBodiesPath} />
 
           {/* AI Analysis */}
           {!banAiMode && (aiAnalysis || aiStatus === 'running' || aiStatus === 'pending') && (

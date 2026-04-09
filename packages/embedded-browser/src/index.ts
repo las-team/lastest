@@ -183,6 +183,7 @@ async function startup(): Promise<void> {
           cursorPlaybackSpeed?: number;
           stabilization?: import('./protocol.js').StabilizationPayload;
           headed?: boolean;
+          forceVideoRecording?: boolean;
         };
 
         // Dedup: skip if already running (mirrors standard runner activeTestIds)
@@ -300,6 +301,8 @@ async function startup(): Promise<void> {
                 consoleErrors: result.consoleErrors,
                 networkRequests: networkSummaries,
                 softErrors: result.softErrors,
+                videoData: result.videoData,
+                videoFilename: result.videoFilename,
               },
             });
 

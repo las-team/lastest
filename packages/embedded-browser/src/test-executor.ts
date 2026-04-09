@@ -21,6 +21,9 @@
 import type { Browser, Page } from 'playwright';
 import type { StabilizationPayload } from './protocol.js';
 import { setupFreezeScripts, applyPreScreenshotStabilization } from './stabilization.js';
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
 
 export interface EmbeddedNetworkRequest {
   url: string;
@@ -47,6 +50,8 @@ export interface EmbeddedTestResult {
   consoleErrors?: string[];
   networkRequests?: EmbeddedNetworkRequest[];
   softErrors?: string[];
+  videoData?: string; // base64-encoded video file
+  videoFilename?: string;
 }
 
 export interface EmbeddedSetupResult {
@@ -86,6 +91,7 @@ export interface RunTestPayload {
   networkErrorMode?: 'fail' | 'warn' | 'ignore';
   ignoreExternalNetworkErrors?: boolean;
   enableNetworkInterception?: boolean;
+  forceVideoRecording?: boolean;
 }
 
 /**
@@ -189,6 +195,13 @@ export class EmbeddedTestExecutor {
       }
     }
 
+    // Set up video recording if requested
+    const videoEnabled = command.forceVideoRecording;
+    const videoDir = videoEnabled ? path.join(os.tmpdir(), `lastest-video-${Date.now()}`) : undefined;
+    if (videoDir) {
+      fs.mkdirSync(videoDir, { recursive: true });
+    }
+
     // Create a fresh context + page per test (mirrors standard runner)
     const testContext = await browser.newContext({
       viewport,
@@ -196,11 +209,14 @@ export class EmbeddedTestExecutor {
       ...(needsStabilizedContext ? { deviceScaleFactor: 1 } : {}),
       ...(needsStabilizedContext ? { locale: 'en-US', timezoneId: 'UTC', colorScheme: 'light' as const } : {}),
       ...(command.stabilization?.freezeAnimations ? { reducedMotion: 'reduce' as const } : {}),
+      ...(videoDir ? { recordVideo: { dir: videoDir, size: viewport } } : {}),
     });
     const page = await testContext.newPage();
     if (callbacks?.onPageCreated) {
       await callbacks.onPageCreated(page);
     }
+
+    let result: EmbeddedTestResult | undefined;
 
     try {
       if (abortCtrl.signal.aborted) {
@@ -636,8 +652,8 @@ export class EmbeddedTestExecutor {
       const durationMs = Date.now() - startTime;
       logFn('info', `Test passed in ${durationMs}ms (${screenshots.length} screenshots)`);
 
-      return {
-        status: 'passed',
+      result = {
+        status: 'passed' as const,
         durationMs,
         logs,
         screenshots,
@@ -653,38 +669,40 @@ export class EmbeddedTestExecutor {
 
       if (isCancelled) {
         logFn('info', 'Test cancelled');
-        return {
-          status: 'cancelled', durationMs, logs, screenshots,
+        result = {
+          status: 'cancelled' as const, durationMs, logs, screenshots,
+          consoleErrors: consoleErrors.length > 0 ? consoleErrors : undefined,
+          networkRequests: allNetworkRequests.length > 0 ? allNetworkRequests : undefined,
+          softErrors: softErrors.length > 0 ? softErrors : undefined,
+        };
+      } else {
+        const isTimeout = errorMessage.includes('timed out');
+        logFn('error', `Test ${isTimeout ? 'timed out' : 'failed'}: ${errorMessage}`);
+
+        // Try to capture error screenshot (skip on timeout — context is closed)
+        let errorScreenshot: string | undefined;
+        if (!isTimeout) {
+          try {
+            const buffer = await page.screenshot();
+            errorScreenshot = buffer.toString('base64');
+          } catch { /* ignore */ }
+        }
+
+        result = {
+          status: (isTimeout ? 'timeout' : 'failed') as 'timeout' | 'failed',
+          durationMs,
+          error: { message: errorMessage, stack: errorStack, screenshot: errorScreenshot },
+          logs,
+          screenshots,
           consoleErrors: consoleErrors.length > 0 ? consoleErrors : undefined,
           networkRequests: allNetworkRequests.length > 0 ? allNetworkRequests : undefined,
           softErrors: softErrors.length > 0 ? softErrors : undefined,
         };
       }
-
-      const isTimeout = errorMessage.includes('timed out');
-      logFn('error', `Test ${isTimeout ? 'timed out' : 'failed'}: ${errorMessage}`);
-
-      // Try to capture error screenshot (skip on timeout — context is closed)
-      let errorScreenshot: string | undefined;
-      if (!isTimeout) {
-        try {
-          const buffer = await page.screenshot();
-          errorScreenshot = buffer.toString('base64');
-        } catch { /* ignore */ }
-      }
-
-      return {
-        status: isTimeout ? 'timeout' : 'failed',
-        durationMs,
-        error: { message: errorMessage, stack: errorStack, screenshot: errorScreenshot },
-        logs,
-        screenshots,
-        consoleErrors: consoleErrors.length > 0 ? consoleErrors : undefined,
-        networkRequests: allNetworkRequests.length > 0 ? allNetworkRequests : undefined,
-        softErrors: softErrors.length > 0 ? softErrors : undefined,
-      };
     } finally {
       this.abortController = null;
+      // Capture video before closing context (video is finalized on close)
+      const video = page?.video();
       // Stop screencast before closing page so CDP session doesn't die unexpectedly
       if (callbacks?.onBeforePageClose) {
         try { await callbacks.onBeforePageClose(); } catch { /* ignore */ }
@@ -693,7 +711,27 @@ export class EmbeddedTestExecutor {
       // context.close() may have already been called by timeout/cancel handler — that's fine
       await page.close().catch(() => {});
       await testContext.close().catch(() => {});
+
+      // After context close, video file is finalized — read and base64 encode it
+      if (video && videoDir && result) {
+        try {
+          const videoFilename = `${command.testRunId}-${command.testId}.webm`;
+          const tempDest = path.join(videoDir, videoFilename);
+          await video.saveAs(tempDest);
+          await video.delete();
+          const videoBuffer = fs.readFileSync(tempDest);
+          result.videoData = videoBuffer.toString('base64');
+          result.videoFilename = videoFilename;
+          logFn('info', `Video captured: ${videoFilename} (${Math.round(videoBuffer.length / 1024)}KB)`);
+          // Clean up temp dir
+          fs.rmSync(videoDir, { recursive: true, force: true });
+        } catch {
+          // Video capture is best-effort
+        }
+      }
     }
+
+    return result!
   }
 
   async runSetup(browser: Browser, command: RunSetupPayload): Promise<EmbeddedSetupResult> {
