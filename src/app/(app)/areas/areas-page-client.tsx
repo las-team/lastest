@@ -300,7 +300,7 @@ export function AreasPageClient({ tree, uncategorizedTests, unsortedSuites, repo
   }
 
   const flatAreas = flattenAreas(tree);
-  const areasWithPlans = flatAreas.filter(a => a.agentPlan);
+  const areasWithPlans = flatAreas;
 
   // Group specs by area for the plan tab
   const specsByArea = new Map<string, TestSpec[]>();
@@ -499,7 +499,7 @@ export function AreasPageClient({ tree, uncategorizedTests, unsortedSuites, repo
                 {/* Plan tab header */}
                 <div className="flex items-center gap-4 mb-3">
                   <div className="text-sm text-muted-foreground">
-                    {areasWithPlans.length} area{areasWithPlans.length !== 1 ? 's' : ''} with plans
+                    {areasWithPlans.length} area{areasWithPlans.length !== 1 ? 's' : ''}
                   </div>
                   {allSpecs.length > 0 && (
                     <div className="text-sm text-muted-foreground">
@@ -517,35 +517,28 @@ export function AreasPageClient({ tree, uncategorizedTests, unsortedSuites, repo
                   </Button>
                 </div>
 
-                {areasWithPlans.length === 0 ? (
-                  <div className="py-12 text-center text-muted-foreground">
-                    <FileText className="h-10 w-10 mx-auto mb-3 opacity-50" />
-                    <p>No test plans generated yet.</p>
-                    <p className="text-sm mt-1">Run the Play Agent to generate test plans for your functional areas.</p>
-                  </div>
-                ) : (
-                  <div className="divide-y">
-                    {areasWithPlans.map((area) => (
-                      <div key={area.id}>
-                        <PlanAreaEditor
+                <div className="divide-y">
+                  {areasWithPlans.map((area) => (
+                    <div key={area.id}>
+                      <PlanAreaEditor
+                        areaId={area.id}
+                        areaName={area.name}
+                        description={area.description}
+                        agentPlan={area.agentPlan || ''}
+                        planGeneratedAt={area.planGeneratedAt}
+                        depth={area.depth}
+                      />
+                      <div className="px-4 pb-4">
+                        <AreaSpecsPanel
                           areaId={area.id}
-                          areaName={area.name}
-                          agentPlan={area.agentPlan!}
-                          planGeneratedAt={area.planGeneratedAt}
-                          depth={area.depth}
+                          repositoryId={repositoryId}
+                          specs={specsByArea.get(area.id) || []}
+                          hasAgentPlan={!!area.agentPlan}
                         />
-                        <div className="px-4 pb-4">
-                          <AreaSpecsPanel
-                            areaId={area.id}
-                            repositoryId={repositoryId}
-                            specs={specsByArea.get(area.id) || []}
-                            hasAgentPlan={!!area.agentPlan}
-                          />
-                        </div>
                       </div>
-                    ))}
-                  </div>
-                )}
+                    </div>
+                  ))}
+                </div>
               </div>
             </div>
           </TabsContent>
@@ -726,12 +719,14 @@ export function AreasPageClient({ tree, uncategorizedTests, unsortedSuites, repo
 function PlanAreaEditor({
   areaId,
   areaName,
+  description,
   agentPlan,
   planGeneratedAt,
   depth,
 }: {
   areaId: string;
   areaName: string;
+  description: string | null;
   agentPlan: string;
   planGeneratedAt: Date | null;
   depth: number;
@@ -797,6 +792,9 @@ function PlanAreaEditor({
           </span>
         )}
       </div>
+      {description && (
+        <p className="text-xs text-muted-foreground">{description}</p>
+      )}
       <Textarea
         ref={textareaRef}
         value={content}

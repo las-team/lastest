@@ -15,14 +15,20 @@ import {
 } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
-import { ExternalLink, Play, Pencil, Save, X, Folder, FileCode, ListChecks, Trash2 } from 'lucide-react';
+import { ExternalLink, Play, Pencil, Save, X, Folder, FileCode, ListChecks, Trash2, Plus } from 'lucide-react';
 import Link from 'next/link';
 import { updateArea, getArea } from '@/server/actions/areas';
-import { getTest, updateTest } from '@/server/actions/tests';
+import { getTest, updateTest, createTest } from '@/server/actions/tests';
 import { getSuite, updateSuite } from '@/server/actions/suites';
 import type { TreeSelection, SuiteItem } from './area-tree';
 import type { FunctionalArea, Test, Suite } from '@/lib/db/schema';
 import type { FunctionalAreaWithChildren } from '@/lib/db/queries';
+
+const PLACEHOLDER_CODE = `export async function test(page, baseUrl, screenshotPath, stepLogger) {
+  // Placeholder test — record real interactions to replace this stub
+  await page.goto(baseUrl);
+  await page.screenshot({ path: screenshotPath });
+}`;
 
 interface AreaDetailSectionProps {
   selection: TreeSelection | null;
@@ -46,6 +52,11 @@ export function AreaDetailSection({ selection, areas, suites, repositoryId: _rep
   const [parentId, setParentId] = useState<string | null>(null);
   const [targetUrl, setTargetUrl] = useState('');
 
+  // Placeholder test creation
+  const [isCreatingTest, setIsCreatingTest] = useState(false);
+  const [newTestName, setNewTestName] = useState('');
+  const [isSubmittingTest, setIsSubmittingTest] = useState(false);
+
   // Flatten areas for parent selector
   const flattenAreas = (items: FunctionalAreaWithChildren[], exclude?: string): { id: string; name: string; depth: number }[] => {
     const result: { id: string; name: string; depth: number }[] = [];
@@ -67,6 +78,8 @@ export function AreaDetailSection({ selection, areas, suites, repositoryId: _rep
       setTestData(null);
       setSuiteData(null);
       setIsEditing(false);
+      setIsCreatingTest(false);
+      setNewTestName('');
       return;
     }
 
@@ -115,7 +128,7 @@ export function AreaDetailSection({ selection, areas, suites, repositoryId: _rep
         await updateArea(areaData.id, {
           name,
           description: description || undefined,
-          parentId: parentId || undefined,
+          parentId,
         });
         setAreaData({ ...areaData, name, description, parentId });
       } else if (selection.type === 'test' && testData) {
@@ -147,6 +160,25 @@ export function AreaDetailSection({ selection, areas, suites, repositoryId: _rep
     setIsEditing(false);
   };
 
+  const handleCreatePlaceholder = async () => {
+    if (!areaData || !newTestName.trim()) return;
+    setIsSubmittingTest(true);
+    try {
+      await createTest({
+        name: newTestName.trim(),
+        code: PLACEHOLDER_CODE,
+        isPlaceholder: true,
+        repositoryId: areaData.repositoryId,
+        functionalAreaId: areaData.id,
+      });
+      setNewTestName('');
+      setIsCreatingTest(false);
+      onUpdate();
+    } finally {
+      setIsSubmittingTest(false);
+    }
+  };
+
   const availableParents = selection?.type === 'area' ? flattenAreas(areas, selection.id) : [];
 
   // Empty state
@@ -175,6 +207,10 @@ export function AreaDetailSection({ selection, areas, suites, repositoryId: _rep
           </CardTitle>
           {!isEditing ? (
             <div className="flex gap-1">
+              <Button size="sm" onClick={() => setIsCreatingTest(true)}>
+                <Plus className="h-4 w-4 mr-2" />
+                Add Test
+              </Button>
               <Button variant="ghost" size="sm" onClick={() => setIsEditing(true)}>
                 <Pencil className="h-4 w-4 mr-2" />
                 Edit
@@ -261,6 +297,48 @@ export function AreaDetailSection({ selection, areas, suites, repositoryId: _rep
             <Label>Tests in this area</Label>
             <p className="text-2xl font-bold mt-1">{testCount}</p>
           </div>
+
+          {isCreatingTest && (
+            <>
+              <Separator />
+              <div className="space-y-2">
+                <Label htmlFor="newTestName">New Placeholder Test</Label>
+                <Input
+                  id="newTestName"
+                  value={newTestName}
+                  onChange={(e) => setNewTestName(e.target.value)}
+                  placeholder="Test name"
+                  autoFocus
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && newTestName.trim()) {
+                      handleCreatePlaceholder();
+                    } else if (e.key === 'Escape') {
+                      setIsCreatingTest(false);
+                      setNewTestName('');
+                    }
+                  }}
+                />
+                <div className="flex gap-2">
+                  <Button
+                    size="sm"
+                    onClick={handleCreatePlaceholder}
+                    disabled={!newTestName.trim() || isSubmittingTest}
+                  >
+                    <Save className="h-4 w-4 mr-2" />
+                    {isSubmittingTest ? 'Creating...' : 'Create'}
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => { setIsCreatingTest(false); setNewTestName(''); }}
+                  >
+                    <X className="h-4 w-4 mr-2" />
+                    Cancel
+                  </Button>
+                </div>
+              </div>
+            </>
+          )}
 
         </CardContent>
       </Card>

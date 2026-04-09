@@ -232,7 +232,7 @@ export async function rollbackAllAreaPlans(repositoryId: string) {
 export async function exportAllPlans(repositoryId: string) {
   await requireRepoAccess(repositoryId);
   const areas = await queries.getFunctionalAreasByRepo(repositoryId);
-  const areasWithPlans = areas.filter(a => a.agentPlan);
+  const areasWithPlans = areas.filter(a => a.agentPlan || a.description);
 
   if (areasWithPlans.length === 0) return '# Testing Manifesto\n\nNo test plans generated yet.\n';
 

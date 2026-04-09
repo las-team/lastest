@@ -23,9 +23,7 @@ quick:
 I also want any console errors logged during run to be shown
 I also want network trace - sent/received to be viewable 
 (low) Every button is green, multiple primary actions, keep clicking on run test instead of save
-Personal preference: Areas and tests being separate functions is REALLY ANNOYING. At least allow creating new tests right from the area view under a sub-area with one click.
-bug report rate limit exceeded
-
+Personal preference: Areas and tests being separate functions is REALLY ANNOYING.
 ## ideas
 Gamify it - beat the bot approach, score, team leaderboard, bug blitz support. Share you beat a bot by xy
 Non-AI test triage,  5-category classification with confidence scoring, maps to article's "failure diagnosis"  recommendation       
