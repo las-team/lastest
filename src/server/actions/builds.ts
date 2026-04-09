@@ -644,7 +644,7 @@ async function runBuildAsync(
   let currentBrowserType = 'chromium';
 
   // Result callback for processing diffs
-  const onResult = async (result: { testId: string; status: string; screenshotPath?: string; screenshots: { path: string; label?: string }[]; errorMessage?: string; durationMs?: number; a11yViolations?: import('@/lib/db/schema').A11yViolation[]; a11yPassesCount?: number; stabilityMetadata?: { frameCount: number; stableFrames: number; maxFrameDiff: number; isStable: boolean }; videoPath?: string; softErrors?: string[]; assertionResults?: import('@/lib/db/schema').AssertionResult[] }) => {
+  const onResult = async (result: { testId: string; status: string; screenshotPath?: string; screenshots: { path: string; label?: string }[]; errorMessage?: string; durationMs?: number; consoleErrors?: string[]; networkRequests?: import('@/lib/db/schema').NetworkRequest[]; a11yViolations?: import('@/lib/db/schema').A11yViolation[]; a11yPassesCount?: number; stabilityMetadata?: { frameCount: number; stableFrames: number; maxFrameDiff: number; isStable: boolean }; videoPath?: string; softErrors?: string[]; assertionResults?: import('@/lib/db/schema').AssertionResult[] }) => {
     processedCount++;
 
     // Save test result immediately
@@ -659,6 +659,8 @@ async function runBuildAsync(
       durationMs: result.durationMs,
       viewport: '1280x720',
       browser: currentBrowserType,
+      consoleErrors: result.consoleErrors,
+      networkRequests: result.networkRequests,
       a11yViolations: result.a11yViolations,
       a11yPassesCount: result.a11yPassesCount,
       videoPath: result.videoPath,
@@ -996,6 +998,8 @@ async function runBuildAsync(
                 durationMs: result.durationMs,
                 viewport: '1280x720',
                 browser: currentBrowserType,
+                consoleErrors: result.consoleErrors,
+                networkRequests: result.networkRequests,
                 a11yViolations: result.a11yViolations,
                 a11yPassesCount: result.a11yPassesCount,
                 videoPath: result.videoPath,

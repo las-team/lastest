@@ -206,6 +206,8 @@ async function runSuiteTestsAsync(
         errorMessage: result.errorMessage,
         durationMs: result.durationMs,
         videoPath: result.videoPath,
+        consoleErrors: result.consoleErrors,
+        networkRequests: result.networkRequests,
         softErrors: result.softErrors,
       });
 

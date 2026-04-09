@@ -10,7 +10,7 @@
 
 import { getExecutionMode, shouldUseLocalRunner, isLocalDisabled } from './mode';
 import { getRunner, type TestRunResult, type ProgressCallback } from '@/lib/playwright/runner';
-import type { Test, EnvironmentConfig, PlaywrightSettings, StabilizationSettings } from '@/lib/db/schema';
+import type { Test, EnvironmentConfig, PlaywrightSettings, StabilizationSettings, NetworkRequest } from '@/lib/db/schema';
 import { DEFAULT_STABILIZATION_SETTINGS } from '@/lib/db/schema';
 import type {
   RunTestCommand,
@@ -495,6 +495,9 @@ async function executeViaRunner(
         setupVariables: options.setupContext?.variables,
         cursorPlaybackSpeed: pwOverrides?.cursorPlaybackSpeed ?? options.playwrightSettings?.cursorPlaybackSpeed ?? 1,
         stabilization: buildStabilizationPayload(options.playwrightSettings, test.stabilizationOverrides),
+        consoleErrorMode: (options.playwrightSettings?.consoleErrorMode as 'fail' | 'warn' | 'ignore') || 'fail',
+        networkErrorMode: (options.playwrightSettings?.networkErrorMode as 'fail' | 'warn' | 'ignore') || 'fail',
+        ignoreExternalNetworkErrors: options.playwrightSettings?.ignoreExternalNetworkErrors ?? false,
         browser: effectiveBrowser,
         fixtures: fixturePayloads,
         grantClipboardAccess: options.playwrightSettings?.grantClipboardAccess ?? false,
@@ -646,6 +649,8 @@ async function executeViaRunner(
         screenshotPath: allScreenshots[0]?.path,
         screenshots: allScreenshots,
         errorMessage: errorPayload?.message as string | undefined,
+        consoleErrors: Array.isArray(payload.consoleErrors) && payload.consoleErrors.length > 0 ? payload.consoleErrors as string[] : undefined,
+        networkRequests: Array.isArray(payload.networkRequests) && payload.networkRequests.length > 0 ? payload.networkRequests as NetworkRequest[] : undefined,
         softErrors: Array.isArray(payload.softErrors) && payload.softErrors.length > 0 ? payload.softErrors as string[] : undefined,
         videoPath,
       };

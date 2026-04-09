@@ -22,12 +22,31 @@ import type { Browser, Page } from 'playwright';
 import type { StabilizationPayload } from './protocol.js';
 import { setupFreezeScripts, applyPreScreenshotStabilization } from './stabilization.js';
 
+export interface EmbeddedNetworkRequest {
+  url: string;
+  method: string;
+  status: number;
+  duration: number;
+  resourceType: string;
+  failed?: boolean;
+  errorText?: string;
+  startTime?: number;
+  requestHeaders?: Record<string, string>;
+  responseHeaders?: Record<string, string>;
+  postData?: string;
+  responseBody?: string;
+  responseSize?: number;
+}
+
 export interface EmbeddedTestResult {
   status: 'passed' | 'failed' | 'error' | 'timeout' | 'cancelled';
   durationMs: number;
   error?: { message: string; stack?: string; screenshot?: string };
   logs: Array<{ timestamp: number; level: string; message: string }>;
   screenshots: Array<{ filename: string; data: string; width: number; height: number }>;
+  consoleErrors?: string[];
+  networkRequests?: EmbeddedNetworkRequest[];
+  softErrors?: string[];
 }
 
 export interface EmbeddedSetupResult {
@@ -63,6 +82,9 @@ export interface RunTestPayload {
   setupVariables?: Record<string, unknown>;
   cursorPlaybackSpeed?: number;
   stabilization?: StabilizationPayload;
+  consoleErrorMode?: 'fail' | 'warn' | 'ignore';
+  networkErrorMode?: 'fail' | 'warn' | 'ignore';
+  ignoreExternalNetworkErrors?: boolean;
 }
 
 /**
@@ -140,6 +162,8 @@ export class EmbeddedTestExecutor {
     const logs: Array<{ timestamp: number; level: string; message: string }> = [];
     const screenshots: Array<{ filename: string; data: string; width: number; height: number }> = [];
     const softErrors: string[] = [];
+    const consoleErrors: string[] = [];
+    let allNetworkRequests: EmbeddedNetworkRequest[] = [];
     const testTimeout = Math.max(command.timeout || 120000, 30000);
 
     const logFn = (level: string, message: string) => {
@@ -192,10 +216,64 @@ export class EmbeddedTestExecutor {
         logFn('info', `Stabilization: freeze timestamps=${command.stabilization.freezeTimestamps}, random=${command.stabilization.freezeRandomValues}, animations=${command.stabilization.freezeAnimations}, crossOS=${command.stabilization.crossOsConsistency}`);
       }
 
-      // Page event listeners for debugging
-      page.on('console', (msg) => { if (msg.type() === 'error') logFn('warn', `Console error: ${msg.text()}`); });
+      // Page event listeners — capture console errors and network requests
+      page.on('console', (msg) => {
+        if (msg.type() === 'error') {
+          const text = msg.text();
+          consoleErrors.push(text);
+          logFn('warn', `Console error: ${text}`);
+        }
+      });
       page.on('pageerror', (err) => logFn('warn', `Page error: ${err.message}`));
-      page.on('requestfailed', (req) => logFn('warn', `Request failed: ${req.url()} ${req.failure()?.errorText ?? ''}`));
+
+      // Network request capture (all requests, not just failures)
+      page.on('request', (req) => {
+        allNetworkRequests.push({
+          url: req.url(),
+          method: req.method(),
+          status: 0,
+          duration: 0,
+          resourceType: req.resourceType(),
+          startTime: Date.now(),
+          failed: false,
+          requestHeaders: req.headers(),
+          postData: req.postData() ?? undefined,
+        });
+        if (allNetworkRequests.length > 500) {
+          allNetworkRequests = allNetworkRequests.slice(-500);
+        }
+      });
+      page.on('response', (resp) => {
+        const entry = allNetworkRequests.findLast(
+          e => e.url === resp.url() && e.status === 0 && !e.failed
+        );
+        if (entry) {
+          entry.status = resp.status();
+          entry.duration = entry.startTime ? Date.now() - entry.startTime : 0;
+          entry.responseHeaders = resp.headers();
+          const contentLength = resp.headers()['content-length'];
+          if (contentLength) entry.responseSize = parseInt(contentLength, 10);
+          // Capture response body for API calls (fetch/xhr) — cap at 16KB
+          const rt = entry.resourceType;
+          if (rt === 'fetch' || rt === 'xhr' || rt === 'document') {
+            resp.text().then(body => {
+              entry.responseBody = body.length > 16384 ? body.slice(0, 16384) + '… (truncated)' : body;
+              if (!entry.responseSize) entry.responseSize = body.length;
+            }).catch(() => {});
+          }
+        }
+      });
+      page.on('requestfailed', (req) => {
+        const entry = allNetworkRequests.findLast(
+          e => e.url === req.url() && e.status === 0 && !e.failed
+        );
+        if (entry) {
+          entry.failed = true;
+          entry.errorText = req.failure()?.errorText;
+          entry.duration = entry.startTime ? Date.now() - entry.startTime : 0;
+        }
+        logFn('warn', `Request failed: ${req.url()} ${req.failure()?.errorText ?? ''}`);
+      });
 
       // Save raw screenshot method BEFORE overriding page.screenshot (prevents infinite recursion)
       const rawScreenshot = page.screenshot.bind(page);
@@ -506,6 +584,44 @@ export class EmbeddedTestExecutor {
 
       logFn('info', 'Test code execution completed');
 
+      // Check console/network error modes (mirrors runner.ts logic)
+      const consoleErrorMode = command.consoleErrorMode || 'fail';
+      const networkErrorMode = command.networkErrorMode || 'fail';
+      const ignoreExternal = command.ignoreExternalNetworkErrors ?? false;
+      let targetOrigin: string | undefined;
+      try { targetOrigin = new URL(command.targetUrl).origin; } catch { /* ignore */ }
+      const errorParts: string[] = [];
+
+      if (consoleErrors.length > 0 && consoleErrorMode !== 'ignore') {
+        const msg = `Console errors detected: ${consoleErrors.join('; ')}`;
+        if (consoleErrorMode === 'warn') {
+          logFn('warn', msg);
+        } else {
+          errorParts.push(msg);
+        }
+      }
+
+      const networkFailures = allNetworkRequests.filter(r => {
+        if (r.status < 400 && !r.failed) return false;
+        if (ignoreExternal && targetOrigin) {
+          try { if (new URL(r.url).origin !== targetOrigin) return false; } catch { /* keep */ }
+        }
+        return true;
+      });
+      if (networkFailures.length > 0 && networkErrorMode !== 'ignore') {
+        const failureDetails = networkFailures.map(f => `${f.method} ${f.url} (${f.status})`).join('; ');
+        const msg = `Network failures detected: ${failureDetails}`;
+        if (networkErrorMode === 'warn') {
+          logFn('warn', msg);
+        } else {
+          errorParts.push(msg);
+        }
+      }
+
+      if (errorParts.length > 0) {
+        throw new Error(errorParts.join(' | '));
+      }
+
       // Take success screenshot if none captured
       if (screenshots.length === 0) {
         await captureScreenshot('success');
@@ -514,7 +630,15 @@ export class EmbeddedTestExecutor {
       const durationMs = Date.now() - startTime;
       logFn('info', `Test passed in ${durationMs}ms (${screenshots.length} screenshots)`);
 
-      return { status: 'passed', durationMs, logs, screenshots };
+      return {
+        status: 'passed',
+        durationMs,
+        logs,
+        screenshots,
+        consoleErrors: consoleErrors.length > 0 ? consoleErrors : undefined,
+        networkRequests: allNetworkRequests.length > 0 ? allNetworkRequests : undefined,
+        softErrors: softErrors.length > 0 ? softErrors : undefined,
+      };
     } catch (error) {
       const durationMs = Date.now() - startTime;
       const errorMessage = error instanceof Error ? error.message : String(error);
@@ -523,7 +647,12 @@ export class EmbeddedTestExecutor {
 
       if (isCancelled) {
         logFn('info', 'Test cancelled');
-        return { status: 'cancelled', durationMs, logs, screenshots };
+        return {
+          status: 'cancelled', durationMs, logs, screenshots,
+          consoleErrors: consoleErrors.length > 0 ? consoleErrors : undefined,
+          networkRequests: allNetworkRequests.length > 0 ? allNetworkRequests : undefined,
+          softErrors: softErrors.length > 0 ? softErrors : undefined,
+        };
       }
 
       const isTimeout = errorMessage.includes('timed out');
@@ -544,6 +673,9 @@ export class EmbeddedTestExecutor {
         error: { message: errorMessage, stack: errorStack, screenshot: errorScreenshot },
         logs,
         screenshots,
+        consoleErrors: consoleErrors.length > 0 ? consoleErrors : undefined,
+        networkRequests: allNetworkRequests.length > 0 ? allNetworkRequests : undefined,
+        softErrors: softErrors.length > 0 ? softErrors : undefined,
       };
     } finally {
       this.abortController = null;

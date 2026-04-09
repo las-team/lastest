@@ -893,7 +893,10 @@ export class TestRunner {
         return { filename: safeName, path: savePath };
       },
       list: () => dlList,
-    } : null;
+    } : {
+      waitForDownload: async () => { throw new Error('Downloads not enabled — enable "Accept Downloads" in Playwright settings'); },
+      list: () => [] as Array<{ suggestedFilename: string; path: string }>,
+    };
 
     const networkHelper = {
       mock: async (urlPattern: string, response: { status?: number; body?: string; contentType?: string; json?: unknown }) => {

@@ -1092,7 +1092,8 @@ export class PlaywrightRunner extends EventEmitter {
 
     // Track errors during test execution
     const consoleErrors: string[] = [];
-    const networkFailures: NetworkRequest[] = [];
+    let allNetworkRequests: NetworkRequest[] = [];
+    let networkSeq = 0;
 
     // Track captured screenshots from within test code (outside try so catch can access)
     const capturedScreenshots: CapturedScreenshot[] = [];
@@ -1275,27 +1276,58 @@ export class PlaywrightRunner extends EventEmitter {
         }
       });
 
-      // Capture network failures before navigation
+      // Capture all network requests (not just failures) for trace viewing
       const ignoreExternalNetworkErrors = this.settings?.ignoreExternalNetworkErrors ?? false;
       let targetOrigin: string | undefined;
       try { targetOrigin = new URL(targetUrl).origin; } catch { /* ignore */ }
 
+      page.on('request', req => {
+        allNetworkRequests.push({
+          url: req.url(),
+          method: req.method(),
+          status: 0,
+          duration: 0,
+          resourceType: req.resourceType(),
+          startTime: Date.now(),
+          failed: false,
+          requestHeaders: req.headers(),
+          postData: req.postData() ?? undefined,
+        });
+        networkSeq++;
+        if (allNetworkRequests.length > 500) {
+          allNetworkRequests = allNetworkRequests.slice(-500);
+        }
+      });
+
       page.on('response', response => {
-        if (response.status() >= 400) {
-          // Skip external origin errors if configured
-          if (ignoreExternalNetworkErrors && targetOrigin) {
-            try {
-              const responseOrigin = new URL(response.url()).origin;
-              if (responseOrigin !== targetOrigin) return;
-            } catch { /* keep the error if URL parsing fails */ }
+        const entry = allNetworkRequests.findLast(
+          e => e.url === response.url() && e.status === 0 && !e.failed
+        );
+        if (entry) {
+          entry.status = response.status();
+          entry.duration = entry.startTime ? Date.now() - entry.startTime : 0;
+          entry.responseHeaders = response.headers();
+          const contentLength = response.headers()['content-length'];
+          if (contentLength) entry.responseSize = parseInt(contentLength, 10);
+          // Capture response body for API calls (fetch/xhr) — cap at 16KB
+          const rt = entry.resourceType;
+          if (rt === 'fetch' || rt === 'xhr' || rt === 'document') {
+            response.text().then(body => {
+              entry.responseBody = body.length > 16384 ? body.slice(0, 16384) + '… (truncated)' : body;
+              if (!entry.responseSize) entry.responseSize = body.length;
+            }).catch(() => {});
           }
-          networkFailures.push({
-            url: response.url(),
-            method: response.request().method(),
-            status: response.status(),
-            duration: 0,
-            resourceType: response.request().resourceType(),
-          });
+        }
+      });
+
+      page.on('requestfailed', req => {
+        const entry = allNetworkRequests.findLast(
+          e => e.url === req.url() && e.status === 0 && !e.failed
+        );
+        if (entry) {
+          entry.failed = true;
+          entry.errorText = req.failure()?.errorText;
+          entry.duration = entry.startTime ? Date.now() - entry.startTime : 0;
         }
       });
 
@@ -1549,6 +1581,18 @@ export class PlaywrightRunner extends EventEmitter {
           errorParts.push(msg);
         }
       }
+      // Filter for actual failures (status >= 400 or failed) for error mode checks
+      const networkFailures = allNetworkRequests.filter(r => {
+        if (r.status < 400 && !r.failed) return false;
+        // Skip external origin errors if configured
+        if (ignoreExternalNetworkErrors && targetOrigin) {
+          try {
+            const responseOrigin = new URL(r.url).origin;
+            if (responseOrigin !== targetOrigin) return false;
+          } catch { /* keep */ }
+        }
+        return true;
+      });
       if (networkFailures.length > 0 && networkErrorMode !== 'ignore') {
         const failureDetails = networkFailures.map(f => `${f.method} ${f.url} (${f.status})`).join('; ');
         const msg = `Network failures detected: ${failureDetails}`;
@@ -1662,7 +1706,7 @@ export class PlaywrightRunner extends EventEmitter {
         screenshotPath: capturedScreenshots[0]?.path || screenshotPublicPath,
         screenshots: capturedScreenshots,
         consoleErrors: consoleErrors.length > 0 ? consoleErrors : undefined,
-        networkRequests: networkFailures.length > 0 ? networkFailures : undefined,
+        networkRequests: allNetworkRequests.length > 0 ? allNetworkRequests : undefined,
         a11yViolations,
         a11yPassesCount: typeof a11yPassesCount === 'number' ? a11yPassesCount : undefined,
         setupDurationMs: setupDurationMs > 0 ? setupDurationMs : undefined,
@@ -1721,7 +1765,7 @@ export class PlaywrightRunner extends EventEmitter {
         screenshots: capturedScreenshots,
         errorMessage,
         consoleErrors: consoleErrors.length > 0 ? consoleErrors : undefined,
-        networkRequests: networkFailures.length > 0 ? networkFailures : undefined,
+        networkRequests: allNetworkRequests.length > 0 ? allNetworkRequests : undefined,
         setupDurationMs: setupDurationMs > 0 ? setupDurationMs : undefined,
         teardownDurationMs,
         teardownError,
@@ -2032,7 +2076,10 @@ export class PlaywrightRunner extends EventEmitter {
           return { filename: safeName, path: savePath };
         },
         list: () => dlList,
-      } : null;
+      } : {
+        waitForDownload: async () => { throw new Error('Downloads not enabled — enable "Accept Downloads" in Playwright settings'); },
+        list: () => [] as Array<{ suggestedFilename: string; path: string }>,
+      };
 
       // Network interception helper — available when enableNetworkInterception is enabled
       const networkHelper = this.settings?.enableNetworkInterception ? {

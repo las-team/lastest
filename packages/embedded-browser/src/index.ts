@@ -281,6 +281,9 @@ async function startup(): Promise<void> {
                 screenshotCount: result.screenshots.length,
                 error: result.error,
                 logs: result.logs,
+                consoleErrors: result.consoleErrors,
+                networkRequests: result.networkRequests,
+                softErrors: result.softErrors,
               },
             });
           } catch (err) {

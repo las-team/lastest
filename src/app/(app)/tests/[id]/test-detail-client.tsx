@@ -1008,7 +1008,7 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
                                   <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0" />
                                   <div className="space-y-1">
                                     {(result.softErrors as string[]).map((err, i) => (
-                                      <p key={i} className="text-xs">{err}</p>
+                                      <p key={i} className="text-xs break-all whitespace-pre-wrap">{err}</p>
                                     ))}
                                   </div>
                                 </div>

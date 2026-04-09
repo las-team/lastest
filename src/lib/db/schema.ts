@@ -17,6 +17,14 @@ export interface NetworkRequest {
   status: number;
   duration: number;
   resourceType: string;
+  failed?: boolean;
+  errorText?: string;
+  startTime?: number;
+  requestHeaders?: Record<string, string>;
+  responseHeaders?: Record<string, string>;
+  postData?: string;
+  responseBody?: string;
+  responseSize?: number;
 }
 
 // Selector configuration for multi-input recording

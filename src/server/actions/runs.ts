@@ -192,6 +192,8 @@ async function runTestsAsync(runId: string, tests: Test[], repositoryId?: string
         errorMessage: result.errorMessage,
         durationMs: result.durationMs,
         videoPath: result.videoPath,
+        consoleErrors: result.consoleErrors,
+        networkRequests: result.networkRequests,
         softErrors: result.softErrors,
       });
       await updateJobProgress(activeJobId, i + 1, tests.length);
