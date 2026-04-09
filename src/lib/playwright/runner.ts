@@ -2435,6 +2435,9 @@ export function getRunner(repositoryId?: string | null): PlaywrightRunner {
   if (!runnerInstance || currentRepositoryId !== repoId) {
     // Only create new instance if not currently running tests
     if (runnerInstance?.isActive()) {
+      if (currentRepositoryId !== repoId) {
+        console.warn(`[runner] Active runner for repo ${currentRepositoryId} returned instead of ${repoId} — tests may use wrong baseUrl`);
+      }
       return runnerInstance;
     }
     currentRepositoryId = repoId;

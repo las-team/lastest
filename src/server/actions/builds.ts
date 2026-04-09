@@ -209,7 +209,7 @@ export async function createAndRunBuildCore(
 
   // Load and set environment config
   const envConfig = await queries.getEnvironmentConfig(repositoryId);
-  if (envConfig && envConfig.id) {
+  if (envConfig) {
     runner.setEnvironmentConfig(envConfig);
     const serverManager = getServerManager();
     serverManager.setConfig(envConfig);
@@ -318,7 +318,7 @@ export async function createAndRunBuildFromCI(opts: {
 
   // Load and set environment config
   const envConfig = await queries.getEnvironmentConfig(repositoryId);
-  if (envConfig && envConfig.id) {
+  if (envConfig) {
     runner.setEnvironmentConfig(envConfig);
     const serverManager = getServerManager();
     serverManager.setConfig(envConfig);
@@ -752,7 +752,7 @@ async function runBuildAsync(
 
   try {
     // Configure runner with environment and settings
-    if (envConfig?.id) {
+    if (envConfig) {
       runner.setEnvironmentConfig(envConfig);
       getServerManager().setConfig(envConfig);
     }

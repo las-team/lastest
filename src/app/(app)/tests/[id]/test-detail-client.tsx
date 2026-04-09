@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { usePreferredRunner } from '@/hooks/use-preferred-runner';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -17,7 +17,7 @@ import {
 import { Input } from '@/components/ui/input';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { Textarea } from '@/components/ui/textarea';
-import { Play, Trash2, Copy, Edit2, Clock, CheckCircle, XCircle, X, Save, Wrench, Wand2, Loader2, History, RotateCcw, ChevronDown, ChevronRight, ChevronUp, Monitor, Video, AlertTriangle, Image, Bug, GitBranch, GitCommit, Tv2, Code2 } from 'lucide-react';
+import { Play, Trash2, Copy, Edit2, Clock, CheckCircle, XCircle, X, Save, Wrench, Wand2, Loader2, History, RotateCcw, ChevronDown, ChevronRight, ChevronUp, Monitor, Video, AlertTriangle, Image, Bug, GitBranch, GitCommit, Tv2, Code2, Maximize2, Minimize2 } from 'lucide-react';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -217,6 +217,27 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
   // Live browser viewer state
   const [streamUrl, setStreamUrl] = useState<string | null>(null);
   const [showViewer, setShowViewer] = useState(true);
+  const [isViewerFullscreen, setIsViewerFullscreen] = useState(false);
+  const viewerLayoutRef = useRef<HTMLDivElement>(null);
+
+  const toggleViewerFullscreen = useCallback(() => {
+    if (!viewerLayoutRef.current) return;
+    try {
+      if (!isViewerFullscreen) {
+        viewerLayoutRef.current.requestFullscreen?.();
+      } else if (document.fullscreenElement) {
+        document.exitFullscreen();
+      }
+    } catch {
+      setIsViewerFullscreen(false);
+    }
+  }, [isViewerFullscreen]);
+
+  useEffect(() => {
+    const handler = () => setIsViewerFullscreen(!!document.fullscreenElement);
+    document.addEventListener('fullscreenchange', handler);
+    return () => document.removeEventListener('fullscreenchange', handler);
+  }, []);
 
   // Cleanup poll interval on unmount
   useEffect(() => {
@@ -743,23 +764,65 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
 
         {/* Live Browser Viewer (headed runs on embedded/system runners) */}
         {streamUrl && isRunning && (
-          <Card className="overflow-hidden py-0">
-            <button
-              type="button"
-              className="flex items-center gap-2 w-full px-3 py-2 text-sm font-medium bg-muted/50 hover:bg-muted transition-colors"
-              onClick={() => setShowViewer(!showViewer)}
-            >
-              <Tv2 className="h-4 w-4 text-purple-500" />
-              <span>Live Browser View</span>
-              {showViewer ? <ChevronUp className="h-4 w-4 ml-auto" /> : <ChevronDown className="h-4 w-4 ml-auto" />}
-            </button>
-            {showViewer && (
-              <BrowserViewer
-                streamUrl={streamUrl}
-                className="max-h-[500px]"
-              />
+          <>
+            {isViewerFullscreen ? (
+              <div ref={viewerLayoutRef} className="flex-1 flex flex-col h-full overflow-hidden bg-muted/50">
+                <div className="flex-1 relative flex items-center justify-center overflow-auto min-h-0">
+                  <BrowserViewer
+                    streamUrl={streamUrl}
+                    hideControls
+                  />
+                </div>
+                <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 flex items-center gap-1.5 px-3 py-1.5 bg-card/95 backdrop-blur-sm border border-border rounded-full shadow-2xl">
+                  <div className="flex items-center gap-2 px-1">
+                    <div className="h-2.5 w-2.5 rounded-full bg-green-500 animate-pulse" />
+                    <span className="text-sm font-medium text-foreground">Running</span>
+                  </div>
+                  <div className="w-px h-5 bg-border" />
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-8 w-8"
+                    onClick={toggleViewerFullscreen}
+                    title="Exit fullscreen"
+                  >
+                    <Minimize2 className="h-4 w-4" />
+                  </Button>
+                </div>
+              </div>
+            ) : (
+              <Card ref={viewerLayoutRef} className="overflow-hidden py-0">
+                <div className="flex items-center gap-2 w-full px-3 py-2 text-sm font-medium bg-muted/50">
+                  <button
+                    type="button"
+                    className="flex items-center gap-2 flex-1 hover:bg-muted transition-colors rounded px-1 -mx-1"
+                    onClick={() => setShowViewer(!showViewer)}
+                  >
+                    <Tv2 className="h-4 w-4 text-purple-500" />
+                    <span>Live Browser View</span>
+                    {showViewer ? <ChevronUp className="h-4 w-4 ml-auto" /> : <ChevronDown className="h-4 w-4 ml-auto" />}
+                  </button>
+                  {showViewer && (
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-7 w-7 shrink-0"
+                      onClick={toggleViewerFullscreen}
+                      title="Fullscreen"
+                    >
+                      <Maximize2 className="h-4 w-4" />
+                    </Button>
+                  )}
+                </div>
+                {showViewer && (
+                  <BrowserViewer
+                    streamUrl={streamUrl}
+                    className="max-h-[500px]"
+                  />
+                )}
+              </Card>
             )}
-          </Card>
+          </>
         )}
 
         {/* Tabs for Code, Screenshots, History */}

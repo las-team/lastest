@@ -173,13 +173,13 @@ export async function getEnvironmentConfig(repositoryId?: string | null) {
   const [globalConfig] = await db
     .select()
     .from(environmentConfigs)
-    .where(eq(environmentConfigs.repositoryId, ''));
+    .where(isNull(environmentConfigs.repositoryId));
 
   if (globalConfig) return { ...globalConfig, baseUrl: globalConfig.baseUrl.replace(/\/+$/, '') };
 
   // Return default config object (not saved)
   return {
-    id: '',
+    id: 'default',
     repositoryId: null,
     mode: 'manual' as const,
     baseUrl: 'http://localhost:3000',
