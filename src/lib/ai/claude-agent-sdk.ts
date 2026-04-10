@@ -63,17 +63,6 @@ export class ClaudeAgentSDKProvider implements AIProvider {
     const messages: string[] = [];
     const stderrChunks: string[] = [];
 
-    console.log('[claude-agent-sdk] generate() starting', {
-      permissionMode: this.permissionMode,
-      cwd: this.workingDirectory,
-      model: this.model,
-      hasMcpServers: !!this.mcpServers,
-      mcpServerNames: this.mcpServers ? Object.keys(this.mcpServers) : [],
-      allowedTools: this.allowedTools,
-      disallowedTools: this.disallowedTools,
-      promptLength: fullPrompt.length,
-    });
-
     try {
       for await (const message of query({
         prompt: fullPrompt,
@@ -122,9 +111,7 @@ export class ClaudeAgentSDKProvider implements AIProvider {
         const parts = [`Claude Agent SDK error: ${error.message}`];
         if (stderr) parts.push(`stderr: ${stderr.slice(0, 1000)}`);
         if (messages.length > 0) parts.push(`last output: ${messages.slice(-2).join('\n').slice(0, 500)}`);
-        const fullError = parts.join(' | ');
-        console.error('[claude-agent-sdk]', fullError);
-        throw new Error(fullError);
+        throw new Error(parts.join(' | '));
       }
       throw error;
     }

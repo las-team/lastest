@@ -33,7 +33,7 @@
     "deploy:all": "bash scripts/deploy.sh all"
   },
   "dependencies": {
-    "@anthropic-ai/claude-agent-sdk": "^0.2.19",
+    "@anthropic-ai/claude-agent-sdk": "^0.2.98",
     "@axe-core/playwright": "^4.11.0",
     "@dnd-kit/core": "^6.3.1",
     "@dnd-kit/sortable": "^10.0.0",

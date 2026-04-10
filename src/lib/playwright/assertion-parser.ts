@@ -70,7 +70,7 @@ export function parseAssertions(code: string): TestAssertion[] {
       continue;
     }
 
-    // Pattern 3: Inline expect(el) assertions (not in a block)
+    // Pattern 3a: Inline expect(variable) assertions (not in a block)
     const inlineElMatch = trimmed.match(/await\s+expect\((\w+)\)\.(not\.)?(\w+)\((.*)?\)/);
     if (inlineElMatch && inlineElMatch[1] !== 'page') {
       const negated = !!inlineElMatch[2];
@@ -87,6 +87,34 @@ export function parseAssertions(code: string): TestAssertion[] {
         expectedValue,
         isSoft: !hasHardMarker,
         label: describeAssertion('element', assertionType, negated, undefined, expectedValue),
+        codeLineStart: i + 1,
+        codeLineEnd: i + 1,
+      });
+      orderIndex++;
+      continue;
+    }
+
+    // Pattern 3b: Inline expect(page.locator/getByRole/getByText/...) assertions
+    const locatorElMatch = trimmed.match(/await\s+expect\((page\.\w+\([^)]*\)(?:\.\w+\([^)]*\))*)\)\.(not\.)?(\w+)\((.*)?\)/);
+    if (locatorElMatch) {
+      const target = locatorElMatch[1];
+      const negated = !!locatorElMatch[2];
+      const assertionType = locatorElMatch[3];
+      const argStr = locatorElMatch[4] ?? '';
+      const expectedValue = extractStringArg(argStr);
+
+      // Extract a readable selector from the locator chain
+      const selectorLabel = extractLocatorLabel(target);
+
+      assertions.push({
+        id: assertionId(orderIndex, assertionType, target, expectedValue),
+        orderIndex,
+        category: 'element',
+        assertionType,
+        negated,
+        expectedValue,
+        isSoft: !hasHardMarker,
+        label: describeAssertion('element', assertionType, negated, selectorLabel, expectedValue),
         codeLineStart: i + 1,
         codeLineEnd: i + 1,
       });
@@ -215,6 +243,17 @@ function parseElementAssertionBlock(
     codeLineStart: commentLine + 1,
     codeLineEnd: endLine + 1,
   };
+}
+
+/** Extract a readable label from a Playwright locator expression like page.locator('body') or page.getByRole('button', { name: 'Save' }) */
+function extractLocatorLabel(expr: string): string {
+  const locatorMatch = expr.match(/\.locator\s*\(\s*['"](.+?)['"]/);
+  if (locatorMatch) return locatorMatch[1];
+  const roleMatch = expr.match(/\.getByRole\s*\(\s*['"](\w+)['"]\s*,\s*\{\s*name:\s*['"](.+?)['"]/);
+  if (roleMatch) return `${roleMatch[1]} "${roleMatch[2]}"`;
+  const textMatch = expr.match(/\.getBy(?:Text|Label|Placeholder)\s*\(\s*['"](.+?)['"]/);
+  if (textMatch) return `"${textMatch[1]}"`;
+  return expr.length > 30 ? expr.slice(0, 27) + '...' : expr;
 }
 
 function extractStringArg(argStr: string): string | undefined {

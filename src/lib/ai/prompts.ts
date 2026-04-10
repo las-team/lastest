@@ -393,7 +393,7 @@ COMMON FIX PATTERNS:
 
 Rules:
 - Write plain JavaScript only — NO TypeScript type annotations (no ": Page", no ": string", no ": any")
-- Do NOT use \`import\` — expect is provided by the runner
+- Do NOT use \`import\` or \`await import()\` — expect is provided as a parameter by the runner, do NOT re-declare it
 - ALWAYS use regex for URL checks: await expect(page).toHaveURL(/\\/path/); — never exact string URLs
 - Never mix regex text and CSS selectors in one locator — use page.getByText(/pattern/i) for regex
 - Every statement must end with a semicolon or closing brace
@@ -482,7 +482,8 @@ ${context.existingCode}
 
   parts.push(`
 Rules:
-- Plain JavaScript only — NO TypeScript annotations, NO imports
+- Plain JavaScript only — NO TypeScript annotations, NO imports, NO \`await import()\`
+- Do NOT re-declare expect — it is provided as a parameter by the runner
 - ALWAYS use regex for URL checks: await expect(page).toHaveURL(/\\/path/)
 - Prefer toBeVisible() over toBeTruthy() for element presence
 - Every variable must use const or let
@@ -830,7 +831,8 @@ export function extractCodeFromResponse(response: string): string {
   // Try to extract code from markdown code blocks (any language tag or none)
   const codeBlockMatch = response.match(/```(?:\w*)?\n([\s\S]*?)```/);
   if (codeBlockMatch) {
-    return codeBlockMatch[1].trim();
+    // Strip import statements that AI sometimes adds despite instructions
+    return codeBlockMatch[1].replace(/^\s*import\s+.*$/gm, '').trim();
   }
 
   // If no code block, check if response starts with import or export

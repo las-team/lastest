@@ -74,6 +74,8 @@ export interface GenerateWithAIOptions {
   actionType?: AIActionType;
   repositoryId?: string | null;
   useMCP?: boolean;
+  /** Run the MCP browser in headless mode (default: true) */
+  mcpHeadless?: boolean;
   signal?: AbortSignal;
   /** Called with the prompt log ID after the log entry is created (before AI call) */
   onLogCreated?: (logId: string) => void;
@@ -95,6 +97,7 @@ export async function generateWithAI(
         args: [
           path.join(path.dirname(require.resolve('playwright')), 'cli.js'),
           'run-test-mcp-server',
+          ...(options?.mcpHeadless !== false ? ['--headless'] : []),
         ],
       },
     };

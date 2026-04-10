@@ -356,6 +356,12 @@ export class EmbeddedTestExecutor {
         logFn('info', 'No export async function test(...) wrapper found — using code as body');
         body = stripTypeAnnotations(command.code);
       }
+
+      // Strip re-declarations of runner-injected variables (expect, test) from import/require
+      // AI-generated code sometimes includes these despite prompt instructions
+      body = body.replace(/^\s*(?:const|let|var)\s+\{[^}]*\bexpect\b[^}]*\}\s*=\s*(?:await\s+)?(?:import|require)\s*\([^)]*\);?\s*$/gm, '');
+      body = body.replace(/^\s*(?:const|let|var)\s+expect\s*=\s*(?:await\s+)?(?:import|require)\s*\([^)]*\);?\s*$/gm, '');
+      body = body.replace(/^\s*import\s+\{[^}]*\}\s+from\s+['"][^'"]*['"];?\s*$/gm, '');
       logFn('info', `Extracted test body: ${body.length} chars`);
 
       // Remove test-local locateWithFallback (using runner-provided version)

@@ -50,7 +50,8 @@ CRITICAL RULES:
 - ALWAYS inspect the live page via browser_snapshot before fixing
 - NEVER guess selectors — verify them against the current accessibility tree
 - Use role-based locators: page.getByRole(), page.getByText(), page.getByLabel()
-- Plain JavaScript ONLY — NO TypeScript, NO imports
+- Plain JavaScript ONLY — NO TypeScript, NO imports, NO \`await import()\`
+- Do NOT re-declare expect — it is provided as a parameter by the runner
 - Use baseUrl for navigation (no hardcoded URLs)
 - Keep stepLogger.log() calls for step descriptions
 - Output ONLY the fixed code block, no explanations

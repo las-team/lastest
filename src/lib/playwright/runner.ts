@@ -1905,6 +1905,12 @@ export class PlaywrightRunner extends EventEmitter {
       // Also strip TypeScript annotations since code runs as plain JavaScript
       let body = this.stripTypeAnnotations(funcMatch[1]);
 
+      // Strip re-declarations of runner-injected variables (expect, test) from import/require
+      // AI-generated code sometimes includes these despite prompt instructions
+      body = body.replace(/^\s*(?:const|let|var)\s+\{[^}]*\bexpect\b[^}]*\}\s*=\s*(?:await\s+)?(?:import|require)\s*\([^)]*\);?\s*$/gm, '');
+      body = body.replace(/^\s*(?:const|let|var)\s+expect\s*=\s*(?:await\s+)?(?:import|require)\s*\([^)]*\);?\s*$/gm, '');
+      body = body.replace(/^\s*import\s+\{[^}]*\}\s+from\s+['"][^'"]*['"];?\s*$/gm, '');
+
       // Build an async function from the body
       // Include 'expect' for Playwright Inspector-generated tests that use assertions
       // Include 'appState' for internal state inspection (Excalidraw undo/redo, etc.)

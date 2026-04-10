@@ -196,6 +196,139 @@ export async function saveGeneratedTest(data: {
   }
 }
 
+export async function startGenerateTestAgent(data: {
+  repositoryId: string;
+  userPrompt: string;
+  targetUrl?: string;
+  testName: string;
+  functionalAreaId?: string;
+  headless?: boolean;
+}): Promise<{ success: boolean; sessionId?: string; error?: string }> {
+  const { team } = await requireRepoAccess(data.repositoryId);
+  const teamId = team?.id ?? '';
+
+  try {
+    const steps: AgentStepState[] = [{
+      id: 'generate',
+      status: 'active',
+      label: 'Generate Test',
+      description: `Generating "${data.testName}" via MCP exploration`,
+      startedAt: new Date().toISOString(),
+    }];
+
+    const session = await queries.createAgentSession({
+      repositoryId: data.repositoryId,
+      teamId: teamId || null,
+      status: 'active',
+      currentStepId: 'generate',
+      steps,
+      metadata: { testName: data.testName, userPrompt: data.userPrompt },
+    });
+
+    emitAndPersistActivityEvent({
+      teamId,
+      repositoryId: data.repositoryId,
+      sessionId: session.id,
+      sourceType: 'generate_agent',
+      eventType: 'session:start',
+      summary: `Generating test "${data.testName}"`,
+      stepId: null, agentType: 'generator', detail: null,
+      artifactType: null, artifactId: null, artifactLabel: null,
+      durationMs: null, promptLogId: null,
+    }).catch(() => {});
+
+    // Fire-and-forget background execution
+    (async () => {
+      const startTime = Date.now();
+      try {
+        const result = await agentCreateTest(data.repositoryId, {
+          userPrompt: data.userPrompt,
+          targetUrl: data.targetUrl,
+          routePath: data.targetUrl,
+        }, { headless: data.headless });
+
+        if (!result.success || !result.code) {
+          throw new Error(result.error || 'Generator agent produced no test code');
+        }
+
+        const test = await queries.createTest({
+          repositoryId: data.repositoryId,
+          functionalAreaId: data.functionalAreaId || null,
+          name: data.testName,
+          code: result.code,
+          targetUrl: data.targetUrl || null,
+        });
+
+        await queries.updateAgentSession(session.id, {
+          status: 'completed',
+          completedAt: new Date(),
+          steps: [{
+            ...steps[0],
+            status: 'completed',
+            completedAt: new Date().toISOString(),
+            result: { testId: test.id },
+          }],
+        });
+
+        emitAndPersistActivityEvent({
+          teamId,
+          repositoryId: data.repositoryId,
+          sessionId: session.id,
+          sourceType: 'generate_agent',
+          eventType: 'artifact:created',
+          summary: `Created test "${data.testName}"`,
+          stepId: 'generate', agentType: 'generator', detail: null,
+          artifactType: 'test', artifactId: test.id, artifactLabel: data.testName,
+          durationMs: Date.now() - startTime, promptLogId: null,
+        }).catch(() => {});
+
+        emitAndPersistActivityEvent({
+          teamId,
+          repositoryId: data.repositoryId,
+          sessionId: session.id,
+          sourceType: 'generate_agent',
+          eventType: 'session:complete',
+          summary: `Test "${data.testName}" generated successfully`,
+          stepId: null, agentType: null, detail: null,
+          artifactType: null, artifactId: null, artifactLabel: null,
+          durationMs: Date.now() - startTime, promptLogId: null,
+        }).catch(() => {});
+
+        revalidatePath('/tests');
+      } catch (err) {
+        console.error('[GenerateTestAgent] Error:', err);
+        await queries.updateAgentSession(session.id, {
+          status: 'failed',
+          completedAt: new Date(),
+          steps: [{
+            ...steps[0],
+            status: 'failed',
+            completedAt: new Date().toISOString(),
+            error: err instanceof Error ? err.message : String(err),
+          }],
+        }).catch(() => {});
+
+        emitAndPersistActivityEvent({
+          teamId,
+          repositoryId: data.repositoryId,
+          sessionId: session.id,
+          sourceType: 'generate_agent',
+          eventType: 'session:error',
+          summary: `Failed to generate test "${data.testName}": ${err instanceof Error ? err.message : String(err)}`,
+          stepId: null, agentType: null, detail: null,
+          artifactType: null, artifactId: null, artifactLabel: null,
+          durationMs: Date.now() - startTime, promptLogId: null,
+        }).catch(() => {});
+      }
+    })();
+
+    return { success: true, sessionId: session.id };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Failed to start test generation';
+    return { success: false, error: message };
+  }
+}
+
 export async function aiFixAllFailedTests(
   repositoryId: string,
 ): Promise<{ success: boolean; fixed: number; failed: number; errors: string[] }> {

@@ -94,17 +94,21 @@ export async function toggleAssertionSoftness(testId: string, assertionId: strin
     if (!repo || repo.teamId !== session.team.id) throw new Error('Forbidden');
   }
 
-  const assertions = test.assertions as import('@/lib/db/schema').TestAssertion[] | null;
-  if (!assertions) throw new Error('No assertions found');
+  // Parse assertions fresh from code — DB assertions may be stale
+  const { parseAssertions } = await import('@/lib/playwright/assertion-parser');
+  let code = test.code || '';
+  const currentAssertions = parseAssertions(code);
 
-  const assertion = assertions.find(a => a.id === assertionId);
+  // Find assertion in fresh parse first, then fall back to DB
+  const dbAssertions = test.assertions as import('@/lib/db/schema').TestAssertion[] | null;
+  let assertion = currentAssertions.find(a => a.id === assertionId)
+    ?? dbAssertions?.find(a => a.id === assertionId);
   if (!assertion) throw new Error('Assertion not found');
 
   // Update assertion metadata
   assertion.isSoft = makeSoft;
 
   // Update the test code to keep in sync with the metadata
-  let code = test.code || '';
   const lines = code.split('\n');
 
   if (assertion.codeLineStart != null) {
@@ -138,13 +142,12 @@ export async function toggleAssertionSoftness(testId: string, assertionId: strin
   }
 
   // Re-parse assertions from the updated code to keep line numbers consistent
-  const { parseAssertions } = await import('@/lib/playwright/assertion-parser');
   const updatedAssertions = parseAssertions(code);
 
   const branch = await getCurrentBranchForRepo(test.repositoryId);
   await queries.updateTestWithVersion(
     testId,
-    { code, assertions: updatedAssertions.length > 0 ? updatedAssertions : assertions },
+    { code, assertions: updatedAssertions.length > 0 ? updatedAssertions : currentAssertions },
     'manual_edit',
     branch ?? undefined,
   );

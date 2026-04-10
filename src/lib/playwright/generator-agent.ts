@@ -59,7 +59,8 @@ CRITICAL RULES:
 - NEVER guess selectors — always verify via browser_snapshot first
 - Element refs (e.g. "ref=s2e5") are for MCP exploration only, NOT for final test code
 - Use role-based locators: page.getByRole(), page.getByText(), page.getByLabel()
-- Plain JavaScript ONLY — NO TypeScript annotations, NO imports
+- Plain JavaScript ONLY — NO TypeScript annotations, NO imports, NO \`await import()\`
+- Do NOT re-declare expect — it is provided as a parameter by the runner
 - Use baseUrl for navigation (no hardcoded URLs)
 - Take a screenshot after EACH scenario as a checkpoint
 - Use stepLogger.log() for step descriptions — prefix with "Scenario N:" for multi-scenario tests
@@ -91,7 +92,7 @@ export type { ParsedScenario, ScenarioGroup };
 export async function agentCreateTest(
   repositoryId: string,
   context: TestGenerationContext & { scenarioGroup?: ScenarioGroup },
-  options?: { signal?: AbortSignal },
+  options?: { signal?: AbortSignal; headless?: boolean },
 ): Promise<{ success: boolean; code?: string; error?: string }> {
   await requireRepoAccess(repositoryId);
 
@@ -140,6 +141,7 @@ export async function agentCreateTest(
 
     const response = await generateWithAI(config, prompt, GENERATOR_SYSTEM_PROMPT, {
       useMCP: true,
+      mcpHeadless: options?.headless,
       repositoryId,
       actionType: 'agent_generate',
       signal: options?.signal,
