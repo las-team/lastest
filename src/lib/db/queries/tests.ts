@@ -442,6 +442,7 @@ export async function getTestResultsByTest(testId: string) {
       softErrors: testResults.softErrors,
       assertionResults: testResults.assertionResults,
       startedAt: testRuns.startedAt,
+      networkBodiesPath: testResults.networkBodiesPath,
     })
     .from(testResults)
     .innerJoin(testRuns, eq(testResults.testRunId, testRuns.id))

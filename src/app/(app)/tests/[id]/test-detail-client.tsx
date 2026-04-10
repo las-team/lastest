@@ -954,6 +954,11 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
                   // Best effort
                 }
               }}
+              onToggleAssertionSoftness={async (assertionId, makeSoft) => {
+                const { toggleAssertionSoftness } = await import('@/server/actions/tests');
+                await toggleAssertionSoftness(test.id, assertionId, makeSoft);
+                router.refresh();
+              }}
             />
           </TabsContent>
 

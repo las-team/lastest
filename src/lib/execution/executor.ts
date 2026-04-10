@@ -303,9 +303,23 @@ export async function executeSetupViaRunner(
   const maxWait = setupTimeout + 30000; // Allow extra time for network overhead
   const startTime = Date.now();
 
+  let healthCheckCounter = 0;
+
   while (Date.now() - startTime < maxWait) {
     await new Promise((resolve) => setTimeout(resolve, pollInterval));
     pollInterval = Math.min(pollInterval + 100, maxPollInterval);
+
+    // Every ~5 polls, check if the runner is still online
+    healthCheckCounter++;
+    if (healthCheckCounter % 5 === 0) {
+      const [runnerRow] = await db
+        .select({ status: runners.status })
+        .from(runners)
+        .where(eq(runners.id, runnerId));
+      if (runnerRow?.status === 'offline') {
+        throw new Error(`Setup failed: Embedded browser went offline during setup (possible crash-loop). Check container logs for runner ${runnerId.slice(0, 8)}.`);
+      }
+    }
 
     const dbCmd = await getRunnerCommandById(command.id);
     if (!dbCmd) continue;

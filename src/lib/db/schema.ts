@@ -1744,7 +1744,7 @@ export type ActivityEventType =
   | 'mcp:tool_error'
   | 'artifact:created';
 
-export type ActivitySourceType = 'play_agent' | 'mcp_server';
+export type ActivitySourceType = 'play_agent' | 'mcp_server' | 'generate_agent';
 
 export type ActivityArtifactType = 'test' | 'build' | 'area' | 'baseline' | 'suite';
 

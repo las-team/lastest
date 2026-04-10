@@ -14,6 +14,9 @@ import {
 import type { AIProviderConfig, TestGenerationContext, ScanContext, DiscoverySource, CodebaseIntelligenceContext } from '@/lib/ai/types';
 import { revalidatePath } from 'next/cache';
 import { getCurrentBranchForRepo } from '@/lib/git-utils';
+import { agentCreateTest } from '@/lib/playwright/generator-agent';
+import { emitAndPersistActivityEvent } from '@/lib/db/queries/activity-events';
+import type { AgentStepState } from '@/lib/db/schema';
 
 async function getAIConfig(repositoryId?: string | null): Promise<AIProviderConfig> {
   const settings = await queries.getAISettings(repositoryId);

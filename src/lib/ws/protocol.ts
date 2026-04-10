@@ -407,6 +407,19 @@ export interface ScreenshotAckResponse extends BaseMessage {
   payload: ScreenshotAckPayload;
 }
 
+export interface NetworkBodiesPayload {
+  correlationId: string;
+  testId: string;
+  testRunId: string;
+  repositoryId?: string;
+  networkRequests: unknown;
+}
+
+export interface NetworkBodiesResponse extends BaseMessage {
+  type: 'response:network_bodies';
+  payload: NetworkBodiesPayload;
+}
+
 export type ErrorCode =
   | 'BROWSER_LAUNCH_FAILED'
   | 'TEST_TIMEOUT'
@@ -501,6 +514,7 @@ export type AgentResponse =
   | RecordingEventResponse
   | RecordingStoppedResponse
   | ScreenshotUploadResponse
+  | NetworkBodiesResponse
   | DebugStateResponse
   | ErrorResponse
   | PongResponse

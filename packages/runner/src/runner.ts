@@ -620,10 +620,14 @@ export class TestRunner {
     payload?: RunTestCommandPayload
   ): Promise<void> {
     const log = logFn ?? this.log.bind(this);
-    // Extract function body from: export async function test(page, baseUrl, screenshotPath, stepLogger) { ... }
-    const funcMatch = code.match(
+    // Extract function body from: export async function test/setup(page, ...) { ... }
+    const setupMatch = code.match(
+      /export\s+async\s+function\s+setup\s*\(\s*page[^)]*\)\s*\{([\s\S]*)\}\s*$/
+    );
+    const testMatch = code.match(
       /export\s+async\s+function\s+test\s*\(\s*page[^)]*\)\s*\{([\s\S]*)\}\s*$/
     );
+    const funcMatch = setupMatch || testMatch;
 
     let body: string;
     if (funcMatch) {

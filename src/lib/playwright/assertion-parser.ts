@@ -41,6 +41,10 @@ export function parseAssertions(code: string): TestAssertion[] {
       continue;
     }
 
+    // Check if previous line marks this assertion as hard
+    const prevTrimmed = i > 0 ? lines[i - 1].trim() : '';
+    const hasHardMarker = /^\/\/ Hard assertion/.test(prevTrimmed);
+
     // Pattern 2: Page-level assertions
     // await expect(page).toHaveURL(...)
     const pageAssertionMatch = trimmed.match(/await\s+expect\(page\)\.(not\.)?(\w+)\((.*)?\)/);
@@ -57,7 +61,7 @@ export function parseAssertions(code: string): TestAssertion[] {
         assertionType,
         negated,
         expectedValue,
-        isSoft: true,
+        isSoft: !hasHardMarker,
         label: describeAssertion('page', assertionType, negated, undefined, expectedValue),
         codeLineStart: i + 1,
         codeLineEnd: i + 1,
@@ -81,7 +85,7 @@ export function parseAssertions(code: string): TestAssertion[] {
         assertionType,
         negated,
         expectedValue,
-        isSoft: true,
+        isSoft: !hasHardMarker,
         label: describeAssertion('element', assertionType, negated, undefined, expectedValue),
         codeLineStart: i + 1,
         codeLineEnd: i + 1,
@@ -106,9 +110,9 @@ export function parseAssertions(code: string): TestAssertion[] {
         assertionType,
         negated,
         expectedValue,
-        isSoft: true,
+        isSoft: !hasHardMarker,
         label: describeAssertion('generic', assertionType, negated, genericMatch[1], expectedValue),
-        codeLineStart: i + 1,
+        codeLineStart: hasHardMarker ? i : i + 1,
         codeLineEnd: i + 1,
       });
       orderIndex++;
@@ -126,9 +130,9 @@ export function parseAssertions(code: string): TestAssertion[] {
         assertionType: 'waitForLoadState',
         negated: false,
         expectedValue: state,
-        isSoft: true,
+        isSoft: !hasHardMarker,
         label: `Page load state: ${state}`,
-        codeLineStart: i + 1,
+        codeLineStart: hasHardMarker ? i : i + 1,
         codeLineEnd: i + 1,
       });
       orderIndex++;

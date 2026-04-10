@@ -77,10 +77,10 @@ function validateScreenshotSize(base64Data: string): void {
 
 // Track active polling sessions by runner ID (in-memory is fine — duplicate detection only)
 const globalSessionState = globalThis as typeof globalThis & {
-  __runnerActiveSessions?: Map<string, { lastPoll: number; sessionId: string }>;
+  __runnerActiveSessions?: Map<string, { lastPoll: number; sessionId: string; connectCount: number; firstConnectAt: number }>;
 };
 if (!globalSessionState.__runnerActiveSessions) {
-  globalSessionState.__runnerActiveSessions = new Map<string, { lastPoll: number; sessionId: string }>();
+  globalSessionState.__runnerActiveSessions = new Map<string, { lastPoll: number; sessionId: string; connectCount: number; firstConnectAt: number }>();
 }
 const activeRunnerSessions = globalSessionState.__runnerActiveSessions;
 
@@ -218,6 +218,25 @@ export async function POST(request: NextRequest) {
           default:
             status = 'online';
         }
+
+        // Block heartbeat from overriding crash-loop offline status
+        const session = activeRunnerSessions.get(runner.id);
+        const CRASH_LOOP_THRESHOLD = 3;
+        const CRASH_LOOP_WINDOW_MS = 60_000;
+        const isCrashLooping = session
+          && session.connectCount >= CRASH_LOOP_THRESHOLD
+          && (Date.now() - session.firstConnectAt < CRASH_LOOP_WINDOW_MS);
+
+        if (isCrashLooping && status !== 'busy') {
+          // Don't let crash-looping runner mark itself online
+          return NextResponse.json({
+            ok: true,
+            commands: [],
+            crashLoop: true,
+            message: `Runner is crash-looping (${session.connectCount} restarts in ${Math.round((Date.now() - session.firstConnectAt) / 1000)}s). Fix the issue and restart.`,
+          });
+        }
+
         await updateRunnerStatus(runner.id, status);
 
         // Claim pending commands from DB (limit to maxParallelTests to prevent bulk execution)
@@ -348,12 +367,7 @@ export async function POST(request: NextRequest) {
       }
 
       case 'response:network_bodies': {
-        const payload = message.payload as Record<string, unknown>;
-        const commandId = payload.correlationId as string;
-        const testId = payload.testId as string;
-        const testRunId = payload.testRunId as string;
-        const repositoryId = payload.repositoryId as string | undefined;
-        const networkRequests = payload.networkRequests;
+        const { correlationId: commandId, testId, testRunId, repositoryId, networkRequests } = message.payload as import('@/lib/ws/protocol').NetworkBodiesPayload;
 
         if (!commandId || !networkRequests) {
           return NextResponse.json({ error: 'Missing correlationId or networkRequests' }, { status: 400 });
@@ -462,18 +476,37 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'Invalid token' }, { status: 401 });
     }
 
-    // Check for existing active session (duplicate detection)
+    // Check for existing active session — detect duplicates vs crash-loops
     const existingSession = activeRunnerSessions.get(runner.id);
     const now = Date.now();
 
-    if (existingSession && now - existingSession.lastPoll < SESSION_TIMEOUT_MS) {
-      return NextResponse.json(
-        {
-          error: 'Duplicate connection: another runner instance is already connected with this token',
-        },
-        { status: 409 }
-      );
+    // Crash-loop detection: track rapid reconnections
+    const CRASH_LOOP_WINDOW_MS = 60_000;
+    const CRASH_LOOP_THRESHOLD = 3;
+    let connectCount = 1;
+    let firstConnectAt = now;
+
+    if (existingSession) {
+      const timeSinceLastPoll = now - existingSession.lastPoll;
+
+      // If the previous session is genuinely active (recent heartbeat within 5s),
+      // this is a true duplicate — reject it
+      if (timeSinceLastPoll < 5_000 && existingSession.sessionId !== '') {
+        return NextResponse.json(
+          { error: 'Duplicate connection: another runner instance is already connected with this token' },
+          { status: 409 }
+        );
+      }
+
+      // Track reconnection frequency for crash-loop detection
+      if (now - existingSession.firstConnectAt < CRASH_LOOP_WINDOW_MS) {
+        connectCount = existingSession.connectCount + 1;
+        firstConnectAt = existingSession.firstConnectAt;
+      }
+      // else: window expired, reset counter (connectCount=1, firstConnectAt=now)
     }
+
+    const isCrashLooping = connectCount >= CRASH_LOOP_THRESHOLD;
 
     // Generate new session ID
     const sessionId = crypto.randomUUID();
@@ -482,11 +515,19 @@ export async function GET(request: NextRequest) {
     activeRunnerSessions.set(runner.id, {
       lastPoll: now,
       sessionId,
+      connectCount,
+      firstConnectAt,
     });
 
-    // Set runner to 'online' immediately on connect so stale 'busy' status
-    // from a previous crashed session doesn't block task assignment
-    await updateRunnerStatus(runner.id, 'online');
+    if (isCrashLooping) {
+      // Mark offline instead of online — don't let a crash-looping runner accept work
+      await updateRunnerStatus(runner.id, 'offline');
+      console.error(`[CrashLoop] Runner ${runner.id} reconnected ${connectCount} times in ${Math.round((now - firstConnectAt) / 1000)}s — marking offline. Check container logs.`);
+    } else {
+      // Set runner to 'online' immediately on connect so stale 'busy' status
+      // from a previous crashed session doesn't block task assignment
+      await updateRunnerStatus(runner.id, 'online');
+    }
 
     // Claim any pending commands from DB (limit to maxParallelTests)
     const claimed = await claimPendingCommands(runner.id, runner.maxParallelTests ?? undefined);

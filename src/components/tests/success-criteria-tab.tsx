@@ -1,12 +1,13 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { CheckCircle2, XCircle, Circle, ShieldAlert, ListOrdered } from 'lucide-react';
 import type { TestAssertion, AssertionResult, CapturedScreenshot } from '@/lib/db/schema';
 import { cn } from '@/lib/utils';
 import { extractTestBody, parseSteps, type DebugStep } from '@/lib/playwright/debug-parser';
+import { parseAssertions } from '@/lib/playwright/assertion-parser';
 
 interface TestStepsTabProps {
   assertions: TestAssertion[] | null;
@@ -18,6 +19,7 @@ interface TestStepsTabProps {
   screenshots?: CapturedScreenshot[] | null;
   envBaseUrl?: string | null;
   onParseNeeded?: () => void;
+  onToggleAssertionSoftness?: (assertionId: string, makeSoft: boolean) => Promise<void>;
 }
 
 const CATEGORY_COLORS: Record<string, string> = {
@@ -51,18 +53,20 @@ function StatusIcon({ status }: { status: 'passed' | 'failed' | 'skipped' | 'not
 }
 
 /** Match an assertion to a step by overlapping code line ranges.
- *  Prefer assertion-type steps to avoid grouping under screenshots/actions. */
-function matchAssertionToStep(assertion: TestAssertion, steps: DebugStep[]): DebugStep | null {
+ *  Prefer assertion-type steps to avoid grouping under screenshots/actions.
+ *  bodyLineOffset adjusts assertion line numbers (full source) to body-relative lines. */
+function matchAssertionToStep(assertion: TestAssertion, steps: DebugStep[], bodyLineOffset: number): DebugStep | null {
   if (!assertion.codeLineStart) return null;
+  const adjustedLine = assertion.codeLineStart - bodyLineOffset;
   // First pass: only match assertion-type steps
   for (const step of steps) {
-    if (step.type === 'assertion' && assertion.codeLineStart >= step.lineStart && assertion.codeLineStart <= step.lineEnd) {
+    if (step.type === 'assertion' && adjustedLine >= step.lineStart && adjustedLine <= step.lineEnd) {
       return step;
     }
   }
   // Second pass: match wait steps (waitForLoadState etc. can be assertion targets)
   for (const step of steps) {
-    if (step.type === 'wait' && assertion.codeLineStart >= step.lineStart && assertion.codeLineStart <= step.lineEnd) {
+    if (step.type === 'wait' && adjustedLine >= step.lineStart && adjustedLine <= step.lineEnd) {
       return step;
     }
   }
@@ -104,7 +108,7 @@ const ALL_TYPES = ['action', 'navigation', 'assertion', 'screenshot', 'wait', 'v
 const DEFAULT_HIDDEN: Set<string> = new Set(['wait', 'other']);
 
 export function TestStepsTab({
-  assertions,
+  assertions: dbAssertions,
   assertionResults,
   softErrors,
   code,
@@ -113,24 +117,58 @@ export function TestStepsTab({
   screenshots,
   envBaseUrl,
   onParseNeeded,
+  onToggleAssertionSoftness,
 }: TestStepsTabProps) {
   const [expanded, setExpanded] = useState<Set<number>>(new Set());
   const [hiddenTypes, setHiddenTypes] = useState<Set<string>>(new Set(DEFAULT_HIDDEN));
+  const [togglingIds, setTogglingIds] = useState<Set<string>>(new Set());
+  const [optimisticOverrides, setOptimisticOverrides] = useState<Map<string, boolean>>(new Map());
 
-  // If assertions is null, trigger parse
-  useEffect(() => {
-    if (!assertions && code && onParseNeeded) {
-      onParseNeeded();
-    }
-  }, [assertions, code, onParseNeeded]);
-
-  // Parse code into steps
-  const steps = useMemo(() => {
-    if (!code) return [];
+  // Always parse assertions fresh from code — DB assertions can have stale line numbers
+  const { steps, bodyLineOffset, freshAssertions } = useMemo(() => {
+    if (!code) return { steps: [] as DebugStep[], bodyLineOffset: 0, freshAssertions: [] as TestAssertion[] };
     const body = extractTestBody(code);
-    if (!body) return [];
-    return parseSteps(body);
+    if (!body) return { steps: [] as DebugStep[], bodyLineOffset: 0, freshAssertions: [] as TestAssertion[] };
+    const bodyIdx = code.indexOf(body);
+    const offset = bodyIdx >= 0 ? code.slice(0, bodyIdx).split('\n').length - 1 : 0;
+    return {
+      steps: parseSteps(body),
+      bodyLineOffset: offset,
+      freshAssertions: parseAssertions(code),
+    };
   }, [code]);
+
+  // Merge: use fresh-parsed assertions for line numbers/matching, but inherit isSoft
+  // overrides from DB assertions (which the user may have toggled)
+  const assertions = useMemo(() => {
+    if (freshAssertions.length === 0) return dbAssertions ?? [];
+    // Build a lookup from DB assertions by ID for isSoft overrides
+    const dbMap = new Map<string, TestAssertion>();
+    if (dbAssertions) {
+      for (const a of dbAssertions) dbMap.set(a.id, a);
+    }
+    return freshAssertions.map(a => {
+      const dbVersion = dbMap.get(a.id);
+      if (dbVersion && dbVersion.isSoft !== undefined) {
+        return { ...a, isSoft: dbVersion.isSoft };
+      }
+      return a;
+    });
+  }, [freshAssertions, dbAssertions]);
+
+  // Sync DB if assertions are stale
+  useMemo(() => {
+    if (!dbAssertions || !code || !onParseNeeded) return;
+    if (freshAssertions.length === 0) return;
+    // Check if DB assertions have different IDs than fresh ones
+    const dbIds = new Set(dbAssertions.map(a => a.id));
+    const freshIds = new Set(freshAssertions.map(a => a.id));
+    const needsSync = freshAssertions.some(a => !dbIds.has(a.id)) || dbAssertions.some(a => !freshIds.has(a.id));
+    if (needsSync) {
+      // Fire async — best effort DB sync
+      Promise.resolve().then(() => onParseNeeded());
+    }
+  }, [dbAssertions, freshAssertions, code, onParseNeeded]);
 
   const toggleType = (type: string) => {
     setHiddenTypes(prev => {
@@ -143,18 +181,18 @@ export function TestStepsTab({
 
   // Build assertion result map
   const resultMap = new Map<string, AssertionResult>();
-  if (assertions && assertionResults) {
+  if (assertionResults) {
     for (const r of assertionResults) {
       resultMap.set(r.assertionId, r);
     }
   }
 
-  // Build step → assertion(s) map
+  // Build step → assertion(s) map using fresh-parsed assertions (always correct line numbers)
   const stepAssertionMap = useMemo(() => {
     const map = new Map<number, TestAssertion[]>();
-    if (!assertions || steps.length === 0) return map;
+    if (assertions.length === 0 || steps.length === 0) return map;
     for (const a of assertions) {
-      const step = matchAssertionToStep(a, steps);
+      const step = matchAssertionToStep(a, steps, bodyLineOffset);
       if (step) {
         const existing = map.get(step.id) ?? [];
         existing.push(a);
@@ -162,9 +200,9 @@ export function TestStepsTab({
       }
     }
     return map;
-  }, [assertions, steps]);
+  }, [assertions, steps, bodyLineOffset]);
 
-  const hasAssertions = assertions && assertions.length > 0;
+  const hasAssertions = assertions.length > 0;
   const passedCount = hasAssertions ? assertions.filter(a => resultMap.get(a.id)?.status === 'passed').length : 0;
   const failedCount = hasAssertions ? assertions.filter(a => resultMap.get(a.id)?.status === 'failed').length : 0;
   const hasResults = hasAssertions && assertionResults && assertionResults.length > 0;
@@ -204,7 +242,7 @@ export function TestStepsTab({
     }
 
     // Evidence from assertion results
-    if (assertions && assertionResults && assertionResults.length > 0) {
+    if (assertionResults && assertionResults.length > 0) {
       const ranIds = new Set(assertionResults.map(r => r.assertionId));
       for (let i = 0; i < steps.length; i++) {
         const sa = stepAssertionMap.get(steps[i].id) ?? [];
@@ -273,7 +311,7 @@ export function TestStepsTab({
     // Mark all steps before the failure point as reached
     // (the failure step itself is included — everything before it succeeded)
     return maxReached;
-  }, [testStatus, steps, screenshots, assertions, assertionResults, softErrors, stepAssertionMap, errorMessage]);
+  }, [testStatus, steps, screenshots, assertionResults, softErrors, stepAssertionMap, errorMessage]);
 
   // Filter steps
   const filteredSteps = useMemo(() => {
@@ -364,7 +402,8 @@ export function TestStepsTab({
               {filteredSteps.map((step) => {
                 const globalIdx = steps.indexOf(step);
                 const stepAssertions = stepAssertionMap.get(step.id) ?? [];
-                const isAssertionStep = step.type === 'assertion' || stepAssertions.length > 0;
+                const isAssertionStep = step.type === 'assertion' || step.type === 'wait' || stepAssertions.length > 0;
+                const isExpandable = isAssertionStep && stepAssertions.length > 0;
                 const isExpanded = expanded.has(step.id);
 
                 // Determine assertion-level status for this step
@@ -382,13 +421,13 @@ export function TestStepsTab({
                     key={step.id}
                     className={cn(
                       'rounded-md border p-2.5 transition-colors',
-                      isAssertionStep && 'cursor-pointer hover:bg-muted/30',
-                      isAssertionStep && hasFailed && 'border-red-200 bg-red-50/50 dark:border-red-900 dark:bg-red-950/30',
-                      isAssertionStep && allPassed && 'border-green-200 bg-green-50/30 dark:border-green-900 dark:bg-green-950/20',
-                      isAssertionStep && !hasFailed && !allPassed && 'border-amber-200/60 bg-amber-50/20 dark:border-amber-900/40 dark:bg-amber-950/10',
-                      !isAssertionStep && 'border-transparent bg-transparent hover:bg-muted/20',
+                      isExpandable && 'cursor-pointer hover:bg-muted/30',
+                      isExpandable && hasFailed && 'border-red-200 bg-red-50/50 dark:border-red-900 dark:bg-red-950/30',
+                      isExpandable && allPassed && 'border-green-200 bg-green-50/30 dark:border-green-900 dark:bg-green-950/20',
+                      isExpandable && !hasFailed && !allPassed && 'border-amber-200/60 bg-amber-50/20 dark:border-amber-900/40 dark:bg-amber-950/10',
+                      !isExpandable && 'border-transparent bg-transparent hover:bg-muted/20',
                     )}
-                    onClick={() => isAssertionStep && toggleExpand(step.id)}
+                    onClick={() => isExpandable && toggleExpand(step.id)}
                   >
                     <div className="flex items-center gap-2">
                       {/* Step number */}
@@ -397,7 +436,7 @@ export function TestStepsTab({
                       </span>
 
                       {/* Status icon */}
-                      {isAssertionStep ? (
+                      {isExpandable ? (
                         <StatusIcon
                           status={hasFailed ? 'failed' : allPassed ? 'passed' : wasReached ? 'passed' : 'not_run'}
                         />
@@ -412,13 +451,13 @@ export function TestStepsTab({
                       {/* Step label */}
                       <span className={cn(
                         'text-sm flex-1 min-w-0 truncate',
-                        isAssertionStep && 'font-medium',
+                        isExpandable && 'font-medium',
                       )}>
                         {resolveStepLabel(step.label, step.code, envBaseUrl)}
                       </span>
 
                       {/* Hard/Soft badges for assertion steps */}
-                      {isAssertionStep && stepAssertions.length > 0 && (() => {
+                      {isExpandable && stepAssertions.length > 0 && (() => {
                         const hardCount = stepAssertions.filter(a => a.isSoft === false).length;
                         const softCount = stepAssertions.length - hardCount;
                         return (
@@ -451,12 +490,31 @@ export function TestStepsTab({
                     </div>
 
                     {/* Expanded assertion details */}
-                    {isAssertionStep && isExpanded && stepAssertions.length > 0 && (
+                    {isExpandable && isExpanded && (
                       <div className="mt-2 ml-7 space-y-2 border-t pt-2">
                         {stepAssertions.map(assertion => {
                           const result = resultMap.get(assertion.id);
                           const status = result?.status ?? 'not_run';
-                          const isHard = assertion.isSoft === false;
+                          const hasOverride = optimisticOverrides.has(assertion.id);
+                          const effectiveSoft = hasOverride ? optimisticOverrides.get(assertion.id)! : assertion.isSoft !== false;
+                          const isHard = !effectiveSoft;
+                          const isToggling = togglingIds.has(assertion.id);
+
+                          const handleToggleSoftness = async (e: React.MouseEvent) => {
+                            e.stopPropagation();
+                            if (!onToggleAssertionSoftness || isToggling) return;
+                            const newSoft = !effectiveSoft;
+                            setOptimisticOverrides(prev => new Map(prev).set(assertion.id, newSoft));
+                            setTogglingIds(prev => new Set(prev).add(assertion.id));
+                            try {
+                              await onToggleAssertionSoftness(assertion.id, newSoft);
+                            } catch {
+                              setOptimisticOverrides(prev => { const next = new Map(prev); next.delete(assertion.id); return next; });
+                            } finally {
+                              setTogglingIds(prev => { const next = new Set(prev); next.delete(assertion.id); return next; });
+                              setOptimisticOverrides(prev => { const next = new Map(prev); next.delete(assertion.id); return next; });
+                            }
+                          };
 
                           return (
                             <div key={assertion.id} className="space-y-1">
@@ -472,12 +530,30 @@ export function TestStepsTab({
                                   <Badge variant="outline" className="text-[10px] px-1 py-0 h-4">.not</Badge>
                                 )}
                                 {isHard ? (
-                                  <Badge variant="outline" className="text-[10px] px-1 py-0 h-4 bg-red-50 text-red-700 border-red-200 dark:bg-red-950 dark:text-red-300 dark:border-red-800">
+                                  <Badge
+                                    variant="outline"
+                                    className={cn(
+                                      'text-[10px] px-1 py-0 h-4 bg-red-50 text-red-700 border-red-200 dark:bg-red-950 dark:text-red-300 dark:border-red-800',
+                                      onToggleAssertionSoftness && 'cursor-pointer hover:bg-red-100 dark:hover:bg-red-900',
+                                      isToggling && 'opacity-50',
+                                    )}
+                                    onClick={handleToggleSoftness}
+                                    title={onToggleAssertionSoftness ? 'Click to make soft (test continues on failure)' : undefined}
+                                  >
                                     <ShieldAlert className="h-3 w-3 mr-0.5" />
                                     Hard
                                   </Badge>
                                 ) : (
-                                  <Badge variant="outline" className="text-[10px] px-1 py-0 h-4 text-muted-foreground">
+                                  <Badge
+                                    variant="outline"
+                                    className={cn(
+                                      'text-[10px] px-1 py-0 h-4 text-muted-foreground',
+                                      onToggleAssertionSoftness && 'cursor-pointer hover:bg-muted/50',
+                                      isToggling && 'opacity-50',
+                                    )}
+                                    onClick={handleToggleSoftness}
+                                    title={onToggleAssertionSoftness ? 'Click to make hard (test stops on failure)' : undefined}
+                                  >
                                     Soft
                                   </Badge>
                                 )}

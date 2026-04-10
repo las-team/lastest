@@ -85,6 +85,73 @@ export async function syncTestAssertions(id: string, assertions: import('@/lib/d
   revalidatePath(`/tests/${id}`);
 }
 
+export async function toggleAssertionSoftness(testId: string, assertionId: string, makeSoft: boolean) {
+  const session = await requireTeamAccess();
+  const test = await queries.getTest(testId);
+  if (!test) throw new Error('Test not found');
+  if (test.repositoryId) {
+    const repo = await queries.getRepository(test.repositoryId);
+    if (!repo || repo.teamId !== session.team.id) throw new Error('Forbidden');
+  }
+
+  const assertions = test.assertions as import('@/lib/db/schema').TestAssertion[] | null;
+  if (!assertions) throw new Error('No assertions found');
+
+  const assertion = assertions.find(a => a.id === assertionId);
+  if (!assertion) throw new Error('Assertion not found');
+
+  // Update assertion metadata
+  assertion.isSoft = makeSoft;
+
+  // Update the test code to keep in sync with the metadata
+  let code = test.code || '';
+  const lines = code.split('\n');
+
+  if (assertion.codeLineStart != null) {
+    const lineIdx = assertion.codeLineStart - 1; // 0-based
+    const codeLine = lines[lineIdx]?.trim() ?? '';
+
+    // Pattern 1: Element/Hard assertion block comments
+    if (/^\/\/ (Element|Hard) assertion:/.test(codeLine)) {
+      if (makeSoft) {
+        lines[lineIdx] = lines[lineIdx].replace(/\/\/ Hard assertion:/, '// Element assertion:');
+      } else {
+        lines[lineIdx] = lines[lineIdx].replace(/\/\/ Element assertion:/, '// Hard assertion:');
+      }
+    } else {
+      // Patterns 2-5: check for existing hard marker on previous line
+      const prevIdx = lineIdx - 1;
+      const prevLine = prevIdx >= 0 ? lines[prevIdx].trim() : '';
+      const hasHardMarker = /^\/\/ Hard assertion/.test(prevLine);
+
+      if (makeSoft && hasHardMarker) {
+        // Remove the hard marker line
+        lines.splice(prevIdx, 1);
+      } else if (!makeSoft && !hasHardMarker) {
+        // Insert hard marker line before the assertion
+        const indent = lines[lineIdx].match(/^(\s*)/)?.[1] ?? '';
+        lines.splice(lineIdx, 0, `${indent}// Hard assertion`);
+      }
+    }
+
+    code = lines.join('\n');
+  }
+
+  // Re-parse assertions from the updated code to keep line numbers consistent
+  const { parseAssertions } = await import('@/lib/playwright/assertion-parser');
+  const updatedAssertions = parseAssertions(code);
+
+  const branch = await getCurrentBranchForRepo(test.repositoryId);
+  await queries.updateTestWithVersion(
+    testId,
+    { code, assertions: updatedAssertions.length > 0 ? updatedAssertions : assertions },
+    'manual_edit',
+    branch ?? undefined,
+  );
+  revalidatePath('/tests');
+  revalidatePath(`/tests/${testId}`);
+}
+
 async function verifyTestOwnership(testId: string, teamId: string) {
   const test = await queries.getTest(testId);
   if (!test) throw new Error('Test not found');

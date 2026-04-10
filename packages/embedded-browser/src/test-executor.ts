@@ -766,10 +766,14 @@ export class EmbeddedTestExecutor {
         logFn('info', `Stabilization applied`);
       }
 
-      // Extract function body (same pattern as runTest)
-      const funcMatch = command.code.match(
+      // Extract function body (same pattern as runTest, also match setup functions)
+      const setupMatch = command.code.match(
+        /export\s+async\s+function\s+setup\s*\(\s*page[^)]*\)\s*\{([\s\S]*)\}\s*$/
+      );
+      const testMatch = command.code.match(
         /export\s+async\s+function\s+test\s*\(\s*page[^)]*\)\s*\{([\s\S]*)\}\s*$/
       );
+      const funcMatch = setupMatch || testMatch;
 
       let body: string;
       if (funcMatch) {
