@@ -6,6 +6,7 @@ export interface ClaudeAgentSDKOptions {
   workingDirectory?: string;
   model?: string;
   mcpServers?: Record<string, McpStdioServerConfig>;
+  strictMcpConfig?: boolean;
   allowedTools?: string[];
   disallowedTools?: string[];
 }
@@ -35,6 +36,7 @@ export class ClaudeAgentSDKProvider implements AIProvider {
   private workingDirectory?: string;
   private model?: string;
   private mcpServers?: Record<string, McpStdioServerConfig>;
+  private strictMcpConfig?: boolean;
   private allowedTools?: string[];
   private disallowedTools?: string[];
 
@@ -43,6 +45,7 @@ export class ClaudeAgentSDKProvider implements AIProvider {
     this.workingDirectory = options.workingDirectory;
     this.model = options.model;
     this.mcpServers = options.mcpServers;
+    this.strictMcpConfig = options.strictMcpConfig;
     this.allowedTools = options.allowedTools;
     this.disallowedTools = options.disallowedTools;
   }
@@ -71,6 +74,7 @@ export class ClaudeAgentSDKProvider implements AIProvider {
           cwd: this.workingDirectory,
           model: this.model,
           ...(this.mcpServers && { mcpServers: this.mcpServers }),
+          ...(this.strictMcpConfig && { strictMcpConfig: true }),
           ...(this.allowedTools && { allowedTools: this.allowedTools }),
           ...(this.disallowedTools && { disallowedTools: this.disallowedTools }),
           ...(abortController && { abortController }),
@@ -141,6 +145,7 @@ export class ClaudeAgentSDKProvider implements AIProvider {
           cwd: this.workingDirectory,
           model: this.model,
           ...(this.mcpServers && { mcpServers: this.mcpServers }),
+          ...(this.strictMcpConfig && { strictMcpConfig: true }),
           ...(this.allowedTools && { allowedTools: this.allowedTools }),
           ...(this.disallowedTools && { disallowedTools: this.disallowedTools }),
           ...(abortController && { abortController }),

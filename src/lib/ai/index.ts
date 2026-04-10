@@ -31,6 +31,7 @@ export function getAIProvider(config: AIProviderConfig): AIProvider {
       model: config.agentSdkModel || undefined,
       workingDirectory: config.agentSdkWorkingDir,
       mcpServers: config.agentSdkMcpServers,
+      strictMcpConfig: config.agentSdkStrictMcpConfig,
       allowedTools: config.agentSdkAllowedTools,
       disallowedTools: config.agentSdkDisallowedTools,
     });
@@ -73,11 +74,8 @@ export function getAIProvider(config: AIProviderConfig): AIProvider {
 export interface GenerateWithAIOptions {
   actionType?: AIActionType;
   repositoryId?: string | null;
+  /** When true and provider is claude-agent-sdk, injects the Playwright Test MCP server (headless) */
   useMCP?: boolean;
-  /** Run the MCP browser in headless mode (default: true) */
-  mcpHeadless?: boolean;
-  /** CDP endpoint to connect to an existing browser (e.g. embedded browser) */
-  cdpEndpoint?: string;
   signal?: AbortSignal;
   /** Called with the prompt log ID after the log entry is created (before AI call) */
   onLogCreated?: (logId: string) => void;
@@ -90,51 +88,26 @@ export async function generateWithAI(
   options?: GenerateWithAIOptions
 ): Promise<string> {
   // When MCP tools are needed and provider is claude-agent-sdk, inject the Playwright MCP server
+  // Note: generator-agent.ts configures MCP servers directly on config for CDP support.
+  // This fallback handles other callers that pass useMCP: true (planner, healer, ai-routes, etc.)
   const effectiveConfig = { ...config };
-  if (options?.useMCP) {
-    console.log(`[generateWithAI] provider=${config.provider} cdpEndpoint=${options?.cdpEndpoint ?? 'none'} headless=${options?.mcpHeadless}`);
-  }
   if (options?.useMCP && config.provider === 'claude-agent-sdk') {
     const playwrightCli = path.join(path.dirname(require.resolve('playwright')), 'cli.js');
-    const mcpServerName = options?.cdpEndpoint ? 'playwright' : 'playwright-test';
-
-    if (options?.cdpEndpoint) {
-      console.log(`[generateWithAI] Using Browser MCP with CDP endpoint: ${options.cdpEndpoint}`);
-      // Use Browser MCP server connected to an existing browser via CDP
-      // Note: --headless prevents MCP from also opening a local headed browser
-      effectiveConfig.agentSdkMcpServers = {
-        ...effectiveConfig.agentSdkMcpServers,
-        [mcpServerName]: {
-          command: 'node',
-          args: [
-            playwrightCli,
-            'run-mcp-server',
-            '--cdp-endpoint', options.cdpEndpoint,
-            '--headless',
-          ],
-        },
-      };
-    } else {
-      console.log('[generateWithAI] Using Test MCP server (no CDP endpoint, launching own browser)');
-      // Use Test MCP server with its own browser
-      effectiveConfig.agentSdkMcpServers = {
-        ...effectiveConfig.agentSdkMcpServers,
-        [mcpServerName]: {
-          command: 'node',
-          args: [
-            playwrightCli,
-            'run-test-mcp-server',
-            ...(options?.mcpHeadless !== false ? ['--headless'] : []),
-          ],
-        },
-      };
-    }
-    // Auto-allow all Playwright MCP tools without prompting (respects user's permission mode)
+    effectiveConfig.agentSdkMcpServers = {
+      ...effectiveConfig.agentSdkMcpServers,
+      'playwright-test': {
+        command: 'node',
+        args: [
+          playwrightCli,
+          'run-test-mcp-server',
+          '--headless',
+        ],
+      },
+    };
     effectiveConfig.agentSdkAllowedTools = [
       ...(effectiveConfig.agentSdkAllowedTools || []),
-      `mcp__${mcpServerName}__*`,
+      'mcp__playwright-test__*',
     ];
-    // Disable non-MCP tools so the agent focuses on browser exploration, not shell commands
     effectiveConfig.agentSdkDisallowedTools = [
       ...(effectiveConfig.agentSdkDisallowedTools || []),
       'Bash', 'Write', 'Edit', 'NotebookEdit',

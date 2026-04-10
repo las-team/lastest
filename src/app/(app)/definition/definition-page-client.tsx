@@ -14,7 +14,7 @@ import { Badge } from '@/components/ui/badge';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip';
-import { Collapsible, CollapsibleTrigger, CollapsibleContent } from '@/components/ui/collapsible';
+import { Separator } from '@/components/ui/separator';
 import {
   Dialog,
   DialogContent,
@@ -32,8 +32,9 @@ import { AIScanRoutesDialog } from '@/components/ai/ai-scan-routes-dialog';
 import { SpecAnalysisDialog } from '@/components/ai/spec-analysis-dialog';
 import { ImportFromSpecDialog } from '@/components/ai/import-from-spec-dialog';
 import { CodeDiffScanDialog } from '@/components/ai/code-diff-scan-dialog';
-import { createArea, deleteArea, deleteAreaWithContents, moveTestToArea, moveSuiteToArea, moveArea, exportAllPlans, updateAreaPlan } from '@/server/actions/areas';
-import { deleteTests, restoreTests, permanentlyDeleteTests } from '@/server/actions/tests';
+import { createArea, deleteArea, deleteAreaWithContents, moveTestToArea, moveSuiteToArea, moveArea, exportAllPlans, updateAreaPlan, updateArea } from '@/server/actions/areas';
+import { deleteTests, restoreTests, permanentlyDeleteTests, getTest, createTest, getTestDetailData } from '@/server/actions/tests';
+import { TestDetailClient } from '@/app/(app)/tests/[id]/test-detail-client';
 import { runTests } from '@/server/actions/runs';
 import { aiFixAllFailedTests, aiFixTests } from '@/server/actions/ai';
 import { startRemoteRouteScan, generateBasicTests } from '@/server/actions/scanner';
@@ -63,9 +64,12 @@ import {
   Trash2,
   X,
   RotateCcw,
-  Compass,
   Pencil,
   FolderPlus,
+  Folder,
+  FileCode,
+  Save,
+  ExternalLink,
 } from 'lucide-react';
 import type { FunctionalArea, Test, Route, TestSpec } from '@/lib/db/schema';
 import type { FunctionalAreaWithChildren } from '@/lib/db/queries';
@@ -154,7 +158,6 @@ export function DefinitionPageClient({
   const [activeTab, setActiveTab] = useState(initialTab);
 
   // --- Discovery state ---
-  const [discoveryOpen, setDiscoveryOpen] = useState(false);
   const [isScanning, setIsScanning] = useState(false);
   const [showAIScanDialog, setShowAIScanDialog] = useState(false);
   const [showSpecAnalysisDialog, setShowSpecAnalysisDialog] = useState(false);
@@ -171,6 +174,21 @@ export function DefinitionPageClient({
   const [deleteAreaIds, setDeleteAreaIds] = useState<string[]>([]);
   const [deleteTestId, setDeleteTestId] = useState<string | null>(null);
   const [isDeletingArea, setIsDeletingArea] = useState(false);
+
+  // --- Area detail/edit state ---
+  const [isEditingArea, setIsEditingArea] = useState(false);
+  const [isSavingArea, setIsSavingArea] = useState(false);
+  const [editAreaName, setEditAreaName] = useState('');
+  const [editAreaDescription, setEditAreaDescription] = useState('');
+  const [isCreatingPlaceholder, setIsCreatingPlaceholder] = useState(false);
+  const [newPlaceholderName, setNewPlaceholderName] = useState('');
+  const [isSubmittingPlaceholder, setIsSubmittingPlaceholder] = useState(false);
+
+  // --- Inline test detail state ---
+  const [openTestId, setOpenTestId] = useState<string | null>(null);
+  const [openTestData, setOpenTestData] = useState<Test | null>(null);
+  const [openTestDetailData, setOpenTestDetailData] = useState<Awaited<ReturnType<typeof getTestDetailData>> | null>(null);
+  const [isLoadingTestDetail, setIsLoadingTestDetail] = useState(false);
 
   // --- Test list state (from Tests page) ---
   const [searchQuery, setSearchQuery] = useState('');
@@ -198,11 +216,26 @@ export function DefinitionPageClient({
   // --- Plan state ---
   const [isExporting, setIsExporting] = useState(false);
 
-  // Clear test selection when tree selection changes
+  // Clear test selection and reset editing when tree selection changes
   useEffect(() => {
     setSelectedTestIds(new Set());
     setFixResult(null);
-  }, [treeSelection]);
+    setIsEditingArea(false);
+    setIsCreatingPlaceholder(false);
+    setNewPlaceholderName('');
+    setOpenTestId(null);
+    setOpenTestData(null);
+    setOpenTestDetailData(null);
+
+    // Populate area edit fields
+    if (treeSelection?.type === 'area') {
+      const area = findAreaInTree(tree, treeSelection.id);
+      if (area) {
+        setEditAreaName(area.name);
+        setEditAreaDescription(area.description || '');
+      }
+    }
+  }, [treeSelection, tree]);
 
   // Escape key to clear tree selection
   useEffect(() => {
@@ -269,8 +302,12 @@ export function DefinitionPageClient({
     if (treeSelection?.type === 'area') {
       return buildBreadcrumb(tree, treeSelection.id);
     }
+    // When a test is open, show its area's breadcrumb
+    if (openTestId && openTestData?.functionalAreaId) {
+      return buildBreadcrumb(tree, openTestData.functionalAreaId);
+    }
     return [];
-  }, [treeSelection, tree]);
+  }, [treeSelection, tree, openTestId, openTestData]);
 
   // Uncovered routes (from Tests page)
   const areasWithActiveTests = useMemo(() => new Set(tests.map(t => t.functionalAreaId).filter(Boolean)), [tests]);
@@ -421,6 +458,81 @@ export function DefinitionPageClient({
       }
     } finally {
       setIsScanning(false);
+    }
+  };
+
+  // Area edit handlers
+  const handleSaveArea = async () => {
+    if (!treeSelection || treeSelection.type !== 'area') return;
+    setIsSavingArea(true);
+    try {
+      await updateArea(treeSelection.id, {
+        name: editAreaName,
+        description: editAreaDescription || undefined,
+      });
+      setIsEditingArea(false);
+      router.refresh();
+    } finally {
+      setIsSavingArea(false);
+    }
+  };
+
+  const handleCancelEditArea = () => {
+    if (treeSelection?.type === 'area') {
+      const area = findAreaInTree(tree, treeSelection.id);
+      if (area) {
+        setEditAreaName(area.name);
+        setEditAreaDescription(area.description || '');
+      }
+    }
+    setIsEditingArea(false);
+  };
+
+  const PLACEHOLDER_CODE = `export async function test(page, baseUrl, screenshotPath, stepLogger) {
+  // Placeholder test — record real interactions to replace this stub
+  await page.goto(baseUrl);
+  await page.screenshot({ path: screenshotPath });
+}`;
+
+  const handleCreatePlaceholder = async () => {
+    if (!treeSelection || treeSelection.type !== 'area' || !newPlaceholderName.trim()) return;
+    setIsSubmittingPlaceholder(true);
+    try {
+      await createTest({
+        name: newPlaceholderName.trim(),
+        code: PLACEHOLDER_CODE,
+        isPlaceholder: true,
+        repositoryId,
+        functionalAreaId: treeSelection.id,
+      });
+      setNewPlaceholderName('');
+      setIsCreatingPlaceholder(false);
+      router.refresh();
+    } finally {
+      setIsSubmittingPlaceholder(false);
+    }
+  };
+
+  // Inline test detail handlers
+  const handleOpenTest = async (testId: string) => {
+    if (openTestId === testId) {
+      setOpenTestId(null);
+      setOpenTestData(null);
+      setOpenTestDetailData(null);
+      return;
+    }
+    setOpenTestId(testId);
+    setOpenTestData(null);
+    setOpenTestDetailData(null);
+    setIsLoadingTestDetail(true);
+    try {
+      const data = await getTestDetailData(testId, repositoryId);
+      if (data) {
+        setOpenTestData(data.test);
+        setOpenTestDetailData(data);
+      }
+    } finally {
+      setIsLoadingTestDetail(false);
     }
   };
 
@@ -619,70 +731,60 @@ export function DefinitionPageClient({
     );
   };
 
+  // Discovery icons for the AreaTree header
+  const discoveryHeaderExtra = (
+    <>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button variant="ghost" size="icon" className="h-6 w-6" onClick={handleScan} disabled={isScanning}>
+            {isScanning ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <FolderSearch className="h-3.5 w-3.5" />}
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent side="bottom">Scan Routes</TooltipContent>
+      </Tooltip>
+      {!banAiMode && (
+        <>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => setShowSpecAnalysisDialog(true)}>
+                <FileText className="h-3.5 w-3.5" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="bottom">Analyze Specs</TooltipContent>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => setShowImportFromSpecDialog(true)}>
+                <BookOpen className="h-3.5 w-3.5" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="bottom">Import Spec</TooltipContent>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => setShowAIScanDialog(true)}>
+                <Sparkles className="h-3.5 w-3.5" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="bottom">Discover Areas</TooltipContent>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => setShowCodeDiffDialog(true)}>
+                <GitCompare className="h-3.5 w-3.5" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="bottom">Code Diff</TooltipContent>
+          </Tooltip>
+        </>
+      )}
+    </>
+  );
+
   return (
     <ResizablePanelGroup orientation="horizontal" className="flex-1 overflow-hidden">
       {/* ─── Left Sidebar ─── */}
       <ResizablePanel defaultSize="22%" minSize="15%" maxSize="35%" className="bg-muted/30 h-full overflow-hidden flex flex-col">
-        {/* Discovery Actions — compact collapsible strip */}
-        <Collapsible open={discoveryOpen} onOpenChange={setDiscoveryOpen}>
-          <CollapsibleTrigger asChild>
-            <button className="w-full flex items-center gap-2 px-3 py-2 text-xs font-medium text-muted-foreground hover:text-foreground border-b transition-colors">
-              <Compass className="h-3.5 w-3.5" />
-              <span>Discovery</span>
-              <ChevronRight className={cn('h-3 w-3 ml-auto transition-transform duration-200', discoveryOpen && 'rotate-90')} />
-            </button>
-          </CollapsibleTrigger>
-          <CollapsibleContent>
-            <div className="flex items-center gap-1 px-2 py-2 border-b">
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button variant="ghost" size="icon" className="h-8 w-8" onClick={handleScan} disabled={isScanning}>
-                    {isScanning ? <Loader2 className="h-4 w-4 animate-spin" /> : <FolderSearch className="h-4 w-4" />}
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent side="bottom">Scan Routes</TooltipContent>
-              </Tooltip>
-              {!banAiMode && (
-                <>
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => setShowSpecAnalysisDialog(true)}>
-                        <FileText className="h-4 w-4" />
-                      </Button>
-                    </TooltipTrigger>
-                    <TooltipContent side="bottom">Analyze Specs</TooltipContent>
-                  </Tooltip>
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => setShowImportFromSpecDialog(true)}>
-                        <BookOpen className="h-4 w-4" />
-                      </Button>
-                    </TooltipTrigger>
-                    <TooltipContent side="bottom">Import Spec</TooltipContent>
-                  </Tooltip>
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => setShowAIScanDialog(true)}>
-                        <Sparkles className="h-4 w-4" />
-                      </Button>
-                    </TooltipTrigger>
-                    <TooltipContent side="bottom">Discover Areas</TooltipContent>
-                  </Tooltip>
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => setShowCodeDiffDialog(true)}>
-                        <GitCompare className="h-4 w-4" />
-                      </Button>
-                    </TooltipTrigger>
-                    <TooltipContent side="bottom">Code Diff</TooltipContent>
-                  </Tooltip>
-                </>
-              )}
-            </div>
-          </CollapsibleContent>
-        </Collapsible>
-
-        {/* Area Tree */}
         <div className="flex-1 overflow-hidden">
           <AreaTree
             tree={tree}
@@ -700,6 +802,8 @@ export function DefinitionPageClient({
             onMoveSuite={handleMoveSuite}
             onMoveArea={handleMoveArea}
             onDeleteTest={setDeleteTestId}
+            headerExtra={discoveryHeaderExtra}
+            addButtonClassName="text-primary hover:text-primary"
           />
         </div>
       </ResizablePanel>
@@ -710,7 +814,7 @@ export function DefinitionPageClient({
       <ResizablePanel defaultSize="78%" className="overflow-hidden flex flex-col">
         <Tabs value={activeTab} onValueChange={setActiveTab} className="flex flex-col flex-1 overflow-hidden">
           <div className="px-6 pt-4 pb-0 shrink-0">
-            <TabsList className="h-11 w-full max-w-md p-1 bg-white dark:bg-zinc-950 border">
+            <TabsList className="h-11 w-full max-w-5xl p-1 bg-white dark:bg-zinc-950 border">
               <TabsTrigger value="tests" className="flex-1 px-6 text-sm data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-sm">
                 Tests
               </TabsTrigger>
@@ -726,17 +830,17 @@ export function DefinitionPageClient({
           </div>
 
           {/* ─── Tests Tab ─── */}
-          <TabsContent value="tests" className="overflow-auto flex-1">
-            <div className="p-6 pt-4 space-y-4">
-              <div className="max-w-5xl space-y-4">
+          <TabsContent value="tests" className="overflow-auto flex-1 flex flex-col">
+            <div className="px-6 pt-4 pb-2 shrink-0">
+              <div className="max-w-5xl">
                 {/* Breadcrumb + Action Toolbar */}
                 <div className="flex items-center justify-between gap-4">
                   <div className="flex items-center gap-1.5 text-sm min-w-0">
                     <button
-                      onClick={() => { setTreeSelection(null); setSelectedAreaIds(new Set()); }}
+                      onClick={() => { setTreeSelection(null); setSelectedAreaIds(new Set()); setOpenTestId(null); setOpenTestData(null); }}
                       className={cn(
                         'hover:text-primary transition-colors shrink-0',
-                        !treeSelection ? 'text-foreground font-medium' : 'text-muted-foreground'
+                        !treeSelection && !openTestId ? 'text-foreground font-medium' : 'text-muted-foreground'
                       )}
                     >
                       All Tests
@@ -745,10 +849,10 @@ export function DefinitionPageClient({
                       <span key={crumb.id} className="flex items-center gap-1.5">
                         <ChevronRight className="h-3 w-3 text-muted-foreground/50 shrink-0" />
                         <button
-                          onClick={() => setTreeSelection({ type: 'area', id: crumb.id })}
+                          onClick={() => { setTreeSelection({ type: 'area', id: crumb.id }); setOpenTestId(null); setOpenTestData(null); }}
                           className={cn(
                             'hover:text-primary transition-colors truncate max-w-[160px]',
-                            treeSelection?.type === 'area' && treeSelection.id === crumb.id
+                            treeSelection?.type === 'area' && treeSelection.id === crumb.id && !openTestId
                               ? 'text-foreground font-medium'
                               : 'text-muted-foreground'
                           )}
@@ -757,8 +861,15 @@ export function DefinitionPageClient({
                         </button>
                       </span>
                     ))}
+                    {openTestId && openTestData && (
+                      <span className="flex items-center gap-1.5">
+                        <ChevronRight className="h-3 w-3 text-muted-foreground/50 shrink-0" />
+                        <span className="text-foreground font-medium truncate max-w-[200px]">{openTestData.name}</span>
+                      </span>
+                    )}
                   </div>
 
+                  {!openTestId && (
                   <div className="flex items-center gap-2 shrink-0">
                     {/* Area-specific actions */}
                     {treeSelection?.type === 'area' && (
@@ -796,8 +907,46 @@ export function DefinitionPageClient({
                       </Link>
                     </Button>
                   </div>
+                  )}
                 </div>
+              </div>
+            </div>
 
+            {/* Full test detail view (replaces list when a test is opened) */}
+            {openTestId ? (
+              isLoadingTestDetail ? (
+                <div className="flex items-center gap-2 py-12 justify-center text-muted-foreground text-sm flex-1">
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Loading test...
+                </div>
+              ) : openTestDetailData ? (
+                <div className="flex flex-col h-full flex-1">
+                  <TestDetailClient
+                    test={openTestDetailData.test}
+                    results={openTestDetailData.results}
+                    repositoryId={openTestDetailData.repositoryId}
+                    screenshotGroups={openTestDetailData.screenshotGroups}
+                    plannedScreenshots={openTestDetailData.plannedScreenshots}
+                    defaultSetupSteps={openTestDetailData.defaultSetupSteps}
+                    availableTests={openTestDetailData.availableTests}
+                    availableScripts={openTestDetailData.availableScripts}
+                    sheetDataSources={openTestDetailData.sheetDataSources}
+                    stabilizationDefaults={openTestDetailData.stabilizationDefaults}
+                    banAiMode={banAiMode}
+                    earlyAdopterMode={true}
+                    diffDefaults={openTestDetailData.diffDefaults}
+                    playwrightDefaults={openTestDetailData.playwrightDefaults}
+                    envBaseUrl={openTestDetailData.envBaseUrl}
+                    testSpec={openTestDetailData.testSpec}
+                    contentClassName="max-w-5xl mx-0"
+                  />
+                </div>
+              ) : (
+                <div className="text-sm text-muted-foreground py-8 text-center flex-1">Failed to load test details</div>
+              )
+            ) : (
+            <div className="px-6 pb-6 space-y-4 overflow-auto flex-1">
+              <div className="max-w-5xl space-y-4">
                 {/* Stats Row */}
                 <div className="grid grid-cols-4 gap-3">
                   {statsData.map((stat) => (
@@ -826,6 +975,101 @@ export function DefinitionPageClient({
                     {fixResult.failed > 0 && ` ${fixResult.failed} could not be fixed.`}
                   </div>
                 )}
+
+                {/* Area Detail Card */}
+                {treeSelection?.type === 'area' && (() => {
+                  const selectedArea = findAreaInTree(tree, treeSelection.id);
+                  if (!selectedArea) return null;
+                  return (
+                    <Card className="border-border/50">
+                      <CardHeader className="flex flex-row items-center justify-between space-y-0 py-3">
+                        <CardTitle className="flex items-center gap-2 text-sm">
+                          <Folder className="h-4 w-4 text-primary" />
+                          {isEditingArea ? 'Edit Area' : selectedArea.name}
+                          {selectedArea.isRouteFolder && !isEditingArea && (
+                            <Badge variant="secondary" className="text-[10px]">Route</Badge>
+                          )}
+                        </CardTitle>
+                        {!isEditingArea ? (
+                          <div className="flex gap-1">
+                            <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => setIsCreatingPlaceholder(true)}>
+                              <Plus className="h-3.5 w-3.5 mr-1" />
+                              Add Test
+                            </Button>
+                            <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={() => setIsEditingArea(true)}>
+                              <Pencil className="h-3.5 w-3.5 mr-1" />
+                              Edit
+                            </Button>
+                          </div>
+                        ) : (
+                          <div className="flex gap-1">
+                            <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={handleCancelEditArea}>
+                              <X className="h-3.5 w-3.5 mr-1" />
+                              Cancel
+                            </Button>
+                            <Button size="sm" className="h-7 text-xs" onClick={handleSaveArea} disabled={isSavingArea}>
+                              <Save className="h-3.5 w-3.5 mr-1" />
+                              {isSavingArea ? 'Saving...' : 'Save'}
+                            </Button>
+                          </div>
+                        )}
+                      </CardHeader>
+                      <CardContent className="pt-0 space-y-3">
+                        {isEditingArea ? (
+                          <>
+                            <div className="space-y-1.5">
+                              <Label htmlFor="edit-area-name" className="text-xs">Name</Label>
+                              <Input id="edit-area-name" value={editAreaName} onChange={(e) => setEditAreaName(e.target.value)} className="h-8 text-sm" />
+                            </div>
+                            <div className="space-y-1.5">
+                              <Label htmlFor="edit-area-desc" className="text-xs">Description</Label>
+                              <Textarea id="edit-area-desc" value={editAreaDescription} onChange={(e) => setEditAreaDescription(e.target.value)} rows={2} className="text-sm" />
+                            </div>
+                          </>
+                        ) : (
+                          <>
+                            {selectedArea.description && (
+                              <p className="text-sm text-muted-foreground">{selectedArea.description}</p>
+                            )}
+                            {!selectedArea.description && (
+                              <p className="text-sm text-muted-foreground/60 italic">No description</p>
+                            )}
+                          </>
+                        )}
+
+                        {isCreatingPlaceholder && (
+                          <>
+                            <Separator />
+                            <div className="space-y-2">
+                              <Label htmlFor="new-placeholder" className="text-xs">New Placeholder Test</Label>
+                              <Input
+                                id="new-placeholder"
+                                value={newPlaceholderName}
+                                onChange={(e) => setNewPlaceholderName(e.target.value)}
+                                placeholder="Test name"
+                                autoFocus
+                                className="h-8 text-sm"
+                                onKeyDown={(e) => {
+                                  if (e.key === 'Enter' && newPlaceholderName.trim()) handleCreatePlaceholder();
+                                  else if (e.key === 'Escape') { setIsCreatingPlaceholder(false); setNewPlaceholderName(''); }
+                                }}
+                              />
+                              <div className="flex gap-2">
+                                <Button size="sm" className="h-7 text-xs" onClick={handleCreatePlaceholder} disabled={!newPlaceholderName.trim() || isSubmittingPlaceholder}>
+                                  <Save className="h-3.5 w-3.5 mr-1" />
+                                  {isSubmittingPlaceholder ? 'Creating...' : 'Create'}
+                                </Button>
+                                <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={() => { setIsCreatingPlaceholder(false); setNewPlaceholderName(''); }}>
+                                  Cancel
+                                </Button>
+                              </div>
+                            </div>
+                          </>
+                        )}
+                      </CardContent>
+                    </Card>
+                  );
+                })()}
 
                 {/* Test List */}
                 <Card className="border-border/50 overflow-hidden">
@@ -916,9 +1160,10 @@ export function DefinitionPageClient({
                             key={test.id}
                             id={`test-row-${test.id}`}
                             className={cn(
-                              'flex items-center justify-between px-4 py-3 hover:bg-muted/30 transition-colors group',
+                              'flex items-center justify-between px-4 py-3 hover:bg-muted/30 transition-colors group cursor-pointer',
                               treeSelection?.type === 'test' && treeSelection.id === test.id && 'bg-primary/5 ring-1 ring-inset ring-primary/20'
                             )}
+                            onClick={() => handleOpenTest(test.id)}
                           >
                             <div className="flex items-center gap-4 min-w-0">
                               <Checkbox
@@ -926,7 +1171,7 @@ export function DefinitionPageClient({
                                 onCheckedChange={() => {}}
                                 onClick={(e) => { e.stopPropagation(); toggleSelect(test.id, e.shiftKey); }}
                               />
-                              <Link href={`/tests/${test.id}`} className="min-w-0 flex-1">
+                              <div className="min-w-0 flex-1">
                                 <div className="font-medium text-sm truncate group-hover:text-primary transition-colors">
                                   {test.name}
                                 </div>
@@ -935,12 +1180,12 @@ export function DefinitionPageClient({
                                     {getAreaName(test.functionalAreaId)}
                                   </div>
                                 )}
-                              </Link>
+                              </div>
                             </div>
-                            <Link href={`/tests/${test.id}`} className="flex items-center gap-3 shrink-0">
+                            <div className="flex items-center gap-3 shrink-0">
                               <StatusBadge status={test.latestStatus} />
                               <ChevronRight className="h-4 w-4 text-muted-foreground/50 group-hover:text-muted-foreground transition-colors" />
-                            </Link>
+                            </div>
                           </div>
                         ))}
                       </div>
@@ -1018,6 +1263,7 @@ export function DefinitionPageClient({
                 )}
               </div>
             </div>
+            )}
           </TabsContent>
 
           {/* ─── Plan Tab ─── */}

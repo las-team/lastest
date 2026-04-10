@@ -6,6 +6,7 @@
  * `playwright-test` MCP server (npx playwright run-test-mcp-server).
  */
 
+import path from 'path';
 import * as queries from '@/lib/db/queries';
 import { requireRepoAccess } from '@/lib/auth';
 import { generateWithAI } from '@/lib/ai';
@@ -139,10 +140,34 @@ export async function agentCreateTest(
     }
     prompt += `\n\n---\n\n${seed.seedPrompt}`;
 
+    // Configure Playwright MCP with strictMcpConfig to prevent Claude Code's built-in
+    // Playwright plugin from launching a separate headed Chrome window.
+    // Uses the same @playwright/mcp package but with --cdp-endpoint (EB) or --headless.
+    if (config.provider === 'claude-agent-sdk') {
+      config.agentSdkStrictMcpConfig = true;
+
+      if (options?.cdpEndpoint) {
+        console.log(`[GeneratorAgent] MCP using CDP endpoint: ${options.cdpEndpoint}`);
+        config.agentSdkMcpServers = {
+          'playwright': {
+            command: 'npx',
+            args: ['@playwright/mcp@latest', '--cdp-endpoint', options.cdpEndpoint, '--headless'],
+          },
+        };
+      } else {
+        config.agentSdkMcpServers = {
+          'playwright': {
+            command: 'npx',
+            args: ['@playwright/mcp@latest', '--headless'],
+          },
+        };
+      }
+      config.agentSdkAllowedTools = ['mcp__playwright__*'];
+      config.agentSdkDisallowedTools = ['Bash', 'Write', 'Edit', 'NotebookEdit'];
+    }
+
     const response = await generateWithAI(config, prompt, GENERATOR_SYSTEM_PROMPT, {
-      useMCP: true,
-      mcpHeadless: options?.headless,
-      cdpEndpoint: options?.cdpEndpoint,
+      // Don't pass useMCP — we configured MCP servers above directly on the config
       repositoryId,
       actionType: 'agent_generate',
       signal: options?.signal,

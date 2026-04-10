@@ -274,6 +274,44 @@ export async function getTest(id: string) {
   return queries.getTest(id);
 }
 
+export async function getTestDetailData(testId: string, repositoryId?: string | null) {
+  await requireTeamAccess();
+  const test = await queries.getTest(testId);
+  if (!test) return null;
+
+  const repoId = test.repositoryId || repositoryId;
+  const [results, screenshotGroups, plannedScreenshots, defaultSetupSteps, availableTests, setupScripts, sheetDataSources, playwrightSettings, diffSettings, envConfig, testSpec] = await Promise.all([
+    queries.getTestResultsByTest(testId),
+    getTestScreenshotsGrouped(testId, repoId),
+    queries.getPlannedScreenshotsByTest(testId),
+    repoId ? queries.getDefaultSetupSteps(repoId) : Promise.resolve([]),
+    repoId ? queries.getTestsByRepo(repoId) : Promise.resolve([]),
+    repoId ? queries.getSetupScripts(repoId) : Promise.resolve([]),
+    repoId ? queries.getGoogleSheetsDataSources(repoId) : Promise.resolve([]),
+    repoId ? queries.getPlaywrightSettings(repoId) : Promise.resolve(null),
+    repoId ? queries.getDiffSensitivitySettings(repoId) : Promise.resolve(null),
+    repoId ? queries.getEnvironmentConfig(repoId) : Promise.resolve(null),
+    queries.getTestSpec(testId),
+  ]);
+
+  return {
+    test,
+    results,
+    repositoryId: repoId,
+    screenshotGroups,
+    plannedScreenshots,
+    defaultSetupSteps,
+    availableTests,
+    availableScripts: setupScripts,
+    sheetDataSources,
+    stabilizationDefaults: playwrightSettings?.stabilization ?? null,
+    diffDefaults: diffSettings,
+    playwrightDefaults: playwrightSettings,
+    envBaseUrl: envConfig?.baseUrl ?? null,
+    testSpec,
+  };
+}
+
 export async function getTests() {
   await requireTeamAccess();
   return queries.getTests();

@@ -2,6 +2,7 @@
 
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
+import { cn } from '@/lib/utils';
 import { usePreferredRunner } from '@/hooks/use-preferred-runner';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -115,6 +116,7 @@ interface TestDetailClientProps {
   playwrightDefaults?: PlaywrightSettingsForDefaults | null;
   envBaseUrl?: string | null;
   testSpec?: TestSpec | null;
+  contentClassName?: string;
 }
 
 function splitBoilerplate(code: string): { boilerplate: string; testBody: string } | null {
@@ -218,7 +220,7 @@ function CollapsibleTestCode({ code, highlightLine }: { code: string; highlightL
   );
 }
 
-export function TestDetailClient({ test, results, repositoryId, screenshotGroups = [], plannedScreenshots = [], defaultSetupSteps = [], availableTests = [], availableScripts = [], sheetDataSources = [], stabilizationDefaults, banAiMode = false, earlyAdopterMode = false, diffDefaults, playwrightDefaults, envBaseUrl, testSpec }: TestDetailClientProps) {
+export function TestDetailClient({ test, results, repositoryId, screenshotGroups = [], plannedScreenshots = [], defaultSetupSteps = [], availableTests = [], availableScripts = [], sheetDataSources = [], stabilizationDefaults, banAiMode = false, earlyAdopterMode = false, diffDefaults, playwrightDefaults, envBaseUrl, testSpec, contentClassName }: TestDetailClientProps) {
   const router = useRouter();
   const notifyJobStarted = useNotifyJobStarted();
   const [isDeleting, setIsDeleting] = useState(false);
@@ -514,7 +516,7 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
 
   return (
     <div className="flex-1 p-6 overflow-auto">
-      <div className="max-w-4xl mx-auto space-y-6">
+      <div className={cn("max-w-4xl mx-auto space-y-6", contentClassName)}>
         {/* Deleted Banner */}
         {test.deletedAt && (
           <div className="flex items-center justify-between p-4 rounded-lg bg-destructive/10 border border-destructive/20">

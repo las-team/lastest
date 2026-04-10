@@ -20,9 +20,8 @@ agent playback window
 Fix play specs -> test specs route
 
 ## features
-migration function via API
+improve test naming
 play all tests in an area as build
-
 (low) Every button is green, multiple primary actions, keep clicking on run test instead of save
 Areas and tests being separate functions is REALLY ANNOYING.
 Gamify it - beat the bot approach, score, team leaderboard, bug blitz support. Share you beat a bot by xy

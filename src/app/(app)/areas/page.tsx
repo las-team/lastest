@@ -13,6 +13,7 @@ export default async function AreasPage() {
   const session = await getCurrentSession();
   const teamId = session?.team?.id;
   const userId = session?.user?.id;
+  const earlyAdopter = session?.team?.earlyAdopterMode ?? false;
   const selectedRepo = teamId ? await getSelectedRepository(userId, teamId) : null;
 
   if (!selectedRepo) {
@@ -29,7 +30,7 @@ export default async function AreasPage() {
     getFunctionalAreasTree(selectedRepo.id),
     getTestsWithStatusByRepo(selectedRepo.id),
     getUnsortedSuites(selectedRepo.id),
-    getSpecsByRepo(selectedRepo.id),
+    earlyAdopter ? getSpecsByRepo(selectedRepo.id) : Promise.resolve([]),
   ]);
 
   // Get test counts for unsorted suites
@@ -61,6 +62,7 @@ export default async function AreasPage() {
         selectedBranch={selectedRepo.selectedBranch || selectedRepo.defaultBranch || 'main'}
         banAiMode={banAiMode}
         allSpecs={allSpecs}
+        earlyAdopterMode={earlyAdopter}
       />
     </div>
   );
