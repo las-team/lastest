@@ -23,7 +23,10 @@ export function QueueIndicator() {
   }, [open]);
 
   const [mounted, setMounted] = useState(false);
-  useEffect(() => setMounted(true), []);
+  useEffect(() => {
+    const frame = requestAnimationFrame(() => setMounted(true));
+    return () => cancelAnimationFrame(frame);
+  }, []);
 
   if (!ctx) return null;
   const { jobs } = ctx;

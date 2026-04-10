@@ -101,7 +101,7 @@ export async function toggleAssertionSoftness(testId: string, assertionId: strin
 
   // Find assertion in fresh parse first, then fall back to DB
   const dbAssertions = test.assertions as import('@/lib/db/schema').TestAssertion[] | null;
-  let assertion = currentAssertions.find(a => a.id === assertionId)
+  const assertion = currentAssertions.find(a => a.id === assertionId)
     ?? dbAssertions?.find(a => a.id === assertionId);
   if (!assertion) throw new Error('Assertion not found');
 

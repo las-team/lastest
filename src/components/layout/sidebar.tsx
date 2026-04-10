@@ -16,6 +16,7 @@ import {
   Zap,
   ClipboardCheck,
   TrendingDown,
+  LayoutGrid,
 } from 'lucide-react';
 import Image from 'next/image';
 import { RepoSelector, CreateLocalRepoButton } from './repo-selector';
@@ -35,9 +36,10 @@ const dashboardNav = [
   { name: 'Dashboard', href: '/', icon: LayoutDashboard },
 ];
 
-const EARLY_ADOPTER_ITEMS = new Set(['Compose', 'Suites', 'Compare', 'Impact']);
+const EARLY_ADOPTER_ITEMS = new Set(['Compose', 'Suites', 'Compare', 'Impact', 'Definition']);
 
 const definitionNav = [
+  { name: 'Definition', href: '/definition', icon: LayoutGrid },
   { name: 'Areas', href: '/areas', icon: FolderTree },
   { name: 'Tests', href: '/tests', icon: FileCode },
   { name: 'Compose', href: '/compose', icon: Layers },

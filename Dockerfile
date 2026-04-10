@@ -116,9 +116,9 @@ RUN ln -sf .pnpm/esbuild@0.25.12/node_modules/esbuild ./node_modules/esbuild && 
 
 # Copy claude-agent-sdk (standalone prunes serverExternalPackages)
 COPY --from=deps --chown=nextjs:nodejs \
-  /app/node_modules/.pnpm/@anthropic-ai+claude-agent-sdk@0.2.19_zod@4.3.5/node_modules/@anthropic-ai/claude-agent-sdk \
-  ./node_modules/.pnpm/@anthropic-ai+claude-agent-sdk@0.2.19_zod@4.3.5/node_modules/@anthropic-ai/claude-agent-sdk
-RUN ln -sf .pnpm/@anthropic-ai+claude-agent-sdk@0.2.19_zod@4.3.5/node_modules/@anthropic-ai \
+  /app/node_modules/.pnpm/@anthropic-ai+claude-agent-sdk@0.2.98_zod@4.3.5/node_modules/@anthropic-ai/claude-agent-sdk \
+  ./node_modules/.pnpm/@anthropic-ai+claude-agent-sdk@0.2.98_zod@4.3.5/node_modules/@anthropic-ai/claude-agent-sdk
+RUN ln -sf .pnpm/@anthropic-ai+claude-agent-sdk@0.2.98_zod@4.3.5/node_modules/@anthropic-ai \
   ./node_modules/@anthropic-ai
 
 # Copy tesseract.js + all its transitive deps (standalone prunes serverExternalPackages)

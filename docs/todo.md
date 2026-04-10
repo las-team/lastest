@@ -15,6 +15,7 @@ MCP
 triage
 ally
 GH action edit
+agent playback window
 ## bugs
 Fix play specs -> test specs route
 
