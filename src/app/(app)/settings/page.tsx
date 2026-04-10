@@ -40,6 +40,7 @@ import { ConnectGithubButton, ReconnectGithubLink } from '@/components/settings/
 import { GithubActionsCard } from '@/components/settings/github-actions-card-client';
 import { ScheduleManagerCard } from '@/components/settings/schedule-manager-client';
 import { DiagramThumbnail } from '@/components/ui/diagram-thumbnail';
+import { TestMigrationCard } from '@/components/settings/test-migration-card';
 
 export default async function SettingsPage({
   searchParams,
@@ -364,6 +365,11 @@ export default async function SettingsPage({
               repositoryId={selectedRepo?.id}
             />
           </div>
+
+          {/* Test Migration */}
+          {selectedRepo && (
+            <TestMigrationCard repositoryId={selectedRepo.id} />
+          )}
 
           {/* User Management (Admin only) */}
           {isAdmin && currentUser?.teamId && (

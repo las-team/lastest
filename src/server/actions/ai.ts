@@ -21,14 +21,17 @@ import { db } from '@/lib/db';
 import { embeddedSessions } from '@/lib/db/schema';
 import { eq } from 'drizzle-orm';
 
-/** Find a ready embedded browser's CDP URL for MCP integration */
-async function findAvailableCdpEndpoint(): Promise<string | undefined> {
+/** Find a ready embedded browser's CDP + stream URLs for MCP integration */
+async function findAvailableEmbeddedBrowser(): Promise<{ cdpUrl: string; streamUrl: string } | undefined> {
   const [session] = await db
-    .select({ cdpUrl: embeddedSessions.cdpUrl })
+    .select({ cdpUrl: embeddedSessions.cdpUrl, streamUrl: embeddedSessions.streamUrl })
     .from(embeddedSessions)
     .where(eq(embeddedSessions.status, 'ready'))
     .limit(1);
-  return session?.cdpUrl ?? undefined;
+  if (session?.cdpUrl && session?.streamUrl) {
+    return { cdpUrl: session.cdpUrl, streamUrl: session.streamUrl };
+  }
+  return undefined;
 }
 
 async function getAIConfig(repositoryId?: string | null): Promise<AIProviderConfig> {
@@ -235,7 +238,7 @@ export async function startGenerateTestAgent(data: {
       status: 'active',
       currentStepId: 'generate',
       steps,
-      metadata: { testName: data.testName, userPrompt: data.userPrompt },
+      metadata: { testName: data.testName, userPrompt: data.userPrompt, streamUrl: null } as Record<string, unknown>,
     });
 
     emitAndPersistActivityEvent({
@@ -255,16 +258,20 @@ export async function startGenerateTestAgent(data: {
       const startTime = Date.now();
       try {
         // Try to use an embedded browser's CDP endpoint for live streaming
-        const cdpEndpoint = await findAvailableCdpEndpoint();
-        if (cdpEndpoint) {
-          console.log(`[GenerateTestAgent] Using embedded browser CDP: ${cdpEndpoint}`);
+        const eb = await findAvailableEmbeddedBrowser();
+        if (eb) {
+          console.log(`[GenerateTestAgent] Using embedded browser CDP: ${eb.cdpUrl}, stream: ${eb.streamUrl}`);
+          // Store stream URL in session metadata so the UI can show the viewer
+          await queries.updateAgentSession(session.id, {
+            metadata: { ...session.metadata, streamUrl: eb.streamUrl } as Record<string, unknown>,
+          }).catch(() => {});
         }
 
         const result = await agentCreateTest(data.repositoryId, {
           userPrompt: data.userPrompt,
           targetUrl: data.targetUrl,
           routePath: data.targetUrl,
-        }, { headless: data.headless, cdpEndpoint });
+        }, { headless: data.headless, cdpEndpoint: eb?.cdpUrl });
 
         if (!result.success || !result.code) {
           throw new Error(result.error || 'Generator agent produced no test code');

@@ -5,14 +5,15 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from '
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Radio, Trash2, ArrowDown, Loader2, Play, Pause, CheckCircle2, XCircle } from 'lucide-react';
+import { Radio, Trash2, ArrowDown, Loader2, Play, Pause, CheckCircle2, XCircle, Monitor } from 'lucide-react';
 import Link from 'next/link';
 import { ActivityEventCard } from './activity-event-card-client';
 import { useActivityFeedContext } from './activity-feed-provider-client';
+import { BrowserViewer } from '@/components/embedded-browser/browser-viewer-client';
 import { cn } from '@/lib/utils';
 import type { AgentSession } from '@/lib/db/schema';
 
-type FilterType = 'all' | 'play_agent' | 'mcp_server';
+type FilterType = 'all' | 'play_agent' | 'mcp_server' | 'generate_agent';
 
 function SessionStatusIcon({ status }: { status: string }) {
   switch (status) {
@@ -31,6 +32,8 @@ function SessionStatusIcon({ status }: { status: string }) {
 
 function ActiveSessionsSection() {
   const [sessions, setSessions] = useState<AgentSession[]>([]);
+  const [expandedStream, setExpandedStream] = useState<string | null>(null);
+  const [ebStreamUrl, setEbStreamUrl] = useState<string | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -40,7 +43,10 @@ function ActiveSessionsSection() {
         const res = await fetch('/api/activity-feed/sessions');
         if (!res.ok) return;
         const data = await res.json();
-        if (active) setSessions(data.sessions ?? []);
+        if (active) {
+          setSessions(data.sessions ?? []);
+          setEbStreamUrl(data.ebStreamUrl ?? null);
+        }
       } catch {
         // ignore
       }
@@ -57,32 +63,78 @@ function ActiveSessionsSection() {
     <div className="px-4 py-2 border-b bg-muted/30">
       <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider mb-1.5">Agent Sessions</p>
       <div className="space-y-1">
-        {sessions.map((s) => (
-          <div key={s.id} className="flex items-center gap-2 text-xs">
-            <SessionStatusIcon status={s.status} />
-            <span className="flex-1 truncate">
-              {s.currentStepId ? `Step: ${s.currentStepId.replace(/_/g, ' ')}` : s.status}
-            </span>
-            <Badge
-              variant="outline"
-              className={cn(
-                'h-4 px-1 text-[10px]',
-                s.status === 'active' && 'border-blue-500/50 text-blue-600 dark:text-blue-400',
-                s.status === 'paused' && 'border-amber-500/50 text-amber-600 dark:text-amber-400',
-                s.status === 'completed' && 'border-green-500/50 text-green-600 dark:text-green-400',
-                s.status === 'failed' && 'border-red-500/50 text-red-600 dark:text-red-400',
+        {sessions.map((s) => {
+          // Determine label and link based on session type
+          const meta = s.metadata as Record<string, unknown> | null;
+          const isGenerateAgent = !!(meta?.testName);
+          const label = isGenerateAgent
+            ? `Generating "${meta?.testName}"`
+            : s.currentStepId ? `Step: ${s.currentStepId.replace(/_/g, ' ')}` : s.status;
+
+          // For completed generate sessions, link to the created test
+          const completedTestId = s.steps?.find(
+            (step: { id: string; result?: Record<string, unknown> }) => step.result?.testId
+          )?.result?.testId as string | undefined;
+          const streamUrl = (meta?.streamUrl as string | null) || ebStreamUrl;
+          const hasStream = s.status === 'active' && !!streamUrl;
+          const isExpanded = expandedStream === s.id;
+
+          const viewHref = completedTestId
+            ? `/tests/${completedTestId}`
+            : `/run?session=${s.id}`;
+
+          return (
+            <div key={s.id} className="space-y-1">
+              <div className="flex items-center gap-2 text-xs">
+                <SessionStatusIcon status={s.status} />
+                <span className="flex-1 truncate">{label}</span>
+                {hasStream && (
+                  <button
+                    onClick={() => setExpandedStream(isExpanded ? null : s.id)}
+                    className={cn(
+                      'p-0.5 rounded hover:bg-muted',
+                      isExpanded && 'text-primary',
+                    )}
+                    title={isExpanded ? 'Hide browser' : 'Show browser'}
+                  >
+                    <Monitor className="h-3 w-3" />
+                  </button>
+                )}
+                <Badge
+                  variant="outline"
+                  className={cn(
+                    'h-4 px-1 text-[10px]',
+                    s.status === 'active' && 'border-blue-500/50 text-blue-600 dark:text-blue-400',
+                    s.status === 'paused' && 'border-amber-500/50 text-amber-600 dark:text-amber-400',
+                    s.status === 'completed' && 'border-green-500/50 text-green-600 dark:text-green-400',
+                    s.status === 'failed' && 'border-red-500/50 text-red-600 dark:text-red-400',
+                  )}
+                >
+                  {s.status}
+                </Badge>
+                {completedTestId ? (
+                  <Link href={viewHref} className="text-[10px] text-primary hover:underline">
+                    Open
+                  </Link>
+                ) : !hasStream && (
+                  <Link href={viewHref} className="text-[10px] text-primary hover:underline">
+                    View
+                  </Link>
+                )}
+              </div>
+              {isExpanded && streamUrl && (
+                <div className="rounded-md overflow-hidden border">
+                  <BrowserViewer
+                    streamUrl={streamUrl}
+                    initialViewport={{ width: 1280, height: 720 }}
+                    interactive={false}
+                    hideControls
+                  />
+                </div>
               )}
-            >
-              {s.status}
-            </Badge>
-            <Link
-              href={`/run?session=${s.id}`}
-              className="text-[10px] text-primary hover:underline"
-            >
-              View
-            </Link>
-          </div>
-        ))}
+            </div>
+          );
+        })}
       </div>
     </div>
   );

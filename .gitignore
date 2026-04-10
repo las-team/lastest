@@ -79,3 +79,7 @@ test-results/*
 .mcpregistry_github_token
 .mcpregistry_registry_token
 migration-work/
+expanded-sidebar.md
+patient-list-snapshot.md
+patient-record-snapshot.md
+sidebar-expanded.md

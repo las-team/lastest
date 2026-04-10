@@ -7,7 +7,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getCurrentSession } from '@/lib/auth';
 import { db } from '@/lib/db';
-import { agentSessions } from '@/lib/db/schema';
+import { agentSessions, embeddedSessions } from '@/lib/db/schema';
 import { eq, desc } from 'drizzle-orm';
 
 export const dynamic = 'force-dynamic';
@@ -21,14 +21,7 @@ export async function GET(_request: NextRequest) {
 
   // Get active/paused sessions first, then recent completed ones
   const sessions = await db
-    .select({
-      id: agentSessions.id,
-      repositoryId: agentSessions.repositoryId,
-      status: agentSessions.status,
-      currentStepId: agentSessions.currentStepId,
-      createdAt: agentSessions.createdAt,
-      completedAt: agentSessions.completedAt,
-    })
+    .select()
     .from(agentSessions)
     .where(eq(agentSessions.teamId, teamId))
     .orderBy(desc(agentSessions.createdAt))
@@ -44,5 +37,15 @@ export async function GET(_request: NextRequest) {
     return 0;
   });
 
-  return NextResponse.json({ sessions: sorted });
+  // Find a ready EB stream URL for the monitor icon
+  const [eb] = await db
+    .select({ streamUrl: embeddedSessions.streamUrl })
+    .from(embeddedSessions)
+    .where(eq(embeddedSessions.status, 'ready'))
+    .limit(1);
+
+  return NextResponse.json({
+    sessions: sorted,
+    ebStreamUrl: eb?.streamUrl ?? null,
+  });
 }

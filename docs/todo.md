@@ -16,12 +16,17 @@ triage
 ally
 GH action edit
 ## bugs
+Fix play specs -> test specs route
+
 ## features
-I want the ai to define happy path tests going throuhg the menu clicking all, and submenues, and see these as test areas. Then as it populates forms and adds records it should create step by step summaries of what it did, so i can change values or expand what it does.
+migration function via API
+play all tests in an area as build
+
 (low) Every button is green, multiple primary actions, keep clicking on run test instead of save
-Personal preference: Areas and tests being separate functions is REALLY ANNOYING.
-## ideas
+Areas and tests being separate functions is REALLY ANNOYING.
 Gamify it - beat the bot approach, score, team leaderboard, bug blitz support. Share you beat a bot by xy
+
+## ideas
 Non-AI test triage,  5-category classification with confidence scoring, maps to article's "failure diagnosis"  recommendation       
 Test governance /        │ AI generates tests fast → need redundancy         │ Medium — extend coverage analytics │
   │ explosion detection      │ detection, coverage-weighted pruning              │                                     
@@ -79,9 +84,7 @@ Run online or on your pc?
 buy a newsletter substack twitter: duuce.com newsletter investor
 AI repurposing engine -> 5 tweets, 3 linkedin, remotion short form, 1 blog, graphics, email sequence
 Gamifying QA - Could you beat an AI tester? How to get AI testing agents to       
-  work? AI testing or Agentic testing?                                                              
-
-
+  work? AI testing or Agentic testing?                                                             
 ## commands
 ## ourmotto
 Real constraints: if you dont use GH, this tool is not optimized for you - ping is with your stack and we will accommodate it.

@@ -25,6 +25,7 @@
  *   POST /api/v1/diffs/:id/approve - Approve single visual diff
  *   POST /api/v1/diffs/:id/reject - Reject single visual diff
  *   POST /api/v1/builds/:id/approve-all - Approve all diffs in a build
+ *   POST /api/v1/repos/:id/import - Import tests + functional areas (migration)
  *   POST /api/v1/functional-areas - Create functional area
  *   POST /api/v1/tests/create - Create test via AI
  *   POST /api/v1/tests/:id/heal - Heal a failing test via AI
@@ -425,6 +426,127 @@ export async function POST(
       }
       await approveAllDiffsCore(id, 'mcp-agent');
       return NextResponse.json({ success: true });
+    }
+
+    // Import tests + functional areas: POST /api/v1/repos/:id/import
+    if (resource === 'repos' && id && subResource === 'import') {
+      if (!(await verifyRepoOwnership(id, session))) {
+        return NextResponse.json({ error: 'Not found' }, { status: 404 });
+      }
+
+      const body = await request.json();
+      const { functionalAreas = [], tests: importTests = [] } = body;
+
+      let areasCreated = 0;
+      let areasUpdated = 0;
+      let testsCreated = 0;
+      let testsUpdated = 0;
+      const errors: string[] = [];
+      const nameToAreaId = new Map<string, string>();
+
+      // Pass 1: upsert all functional areas (without parent relationships)
+      for (const area of functionalAreas) {
+        try {
+          const existing = (await queries.getFunctionalAreasByRepo(id)).find(
+            (a) => a.name.toLowerCase() === area.name.toLowerCase()
+          );
+          if (existing) {
+            await queries.updateFunctionalArea(existing.id, {
+              description: area.description ?? existing.description,
+              orderIndex: area.orderIndex ?? existing.orderIndex,
+              isRouteFolder: area.isRouteFolder ?? existing.isRouteFolder,
+              agentPlan: area.agentPlan ?? existing.agentPlan,
+            });
+            nameToAreaId.set(area.name.toLowerCase(), existing.id);
+            areasUpdated++;
+          } else {
+            const created = await queries.createFunctionalArea({
+              repositoryId: id,
+              name: area.name,
+              description: area.description ?? null,
+              parentId: null,
+              orderIndex: area.orderIndex ?? 0,
+              isRouteFolder: area.isRouteFolder ?? false,
+              agentPlan: area.agentPlan ?? null,
+            });
+            nameToAreaId.set(area.name.toLowerCase(), created.id);
+            areasCreated++;
+          }
+        } catch (err) {
+          errors.push(`Area "${area.name}": ${(err as Error).message}`);
+        }
+      }
+
+      // Pass 2: set parent relationships
+      for (const area of functionalAreas) {
+        if (!area.parentName) continue;
+        const areaId = nameToAreaId.get(area.name.toLowerCase());
+        const parentId = nameToAreaId.get(area.parentName.toLowerCase());
+        if (areaId && parentId) {
+          try {
+            await queries.updateFunctionalArea(areaId, { parentId });
+          } catch (err) {
+            errors.push(`Area "${area.name}" parent link: ${(err as Error).message}`);
+          }
+        }
+      }
+
+      // Pass 3: upsert tests
+      const repoTests = await queries.getTestsByRepo(id);
+      for (const t of importTests) {
+        try {
+          const functionalAreaId = t.functionalAreaName
+            ? nameToAreaId.get(t.functionalAreaName.toLowerCase()) ?? null
+            : null;
+
+          // Find existing test by name + area
+          const existing = repoTests.find(
+            (et) =>
+              et.name.toLowerCase() === t.name.toLowerCase() &&
+              et.functionalAreaId === functionalAreaId
+          );
+
+          const testData = {
+            repositoryId: id,
+            name: t.name,
+            code: t.code,
+            description: t.description ?? null,
+            targetUrl: t.targetUrl ?? null,
+            functionalAreaId,
+            assertions: t.assertions ?? null,
+            executionMode: t.executionMode ?? 'procedural',
+            agentPrompt: t.agentPrompt ?? null,
+            setupOverrides: t.setupOverrides ?? null,
+            teardownOverrides: t.teardownOverrides ?? null,
+            stabilizationOverrides: t.stabilizationOverrides ?? null,
+            viewportOverride: t.viewportOverride ?? null,
+            diffOverrides: t.diffOverrides ?? null,
+            playwrightOverrides: t.playwrightOverrides ?? null,
+            requiredCapabilities: t.requiredCapabilities ?? null,
+            quarantined: t.quarantined ?? false,
+            isPlaceholder: t.isPlaceholder ?? false,
+          };
+
+          if (existing) {
+            await queries.updateTestWithVersion(existing.id, testData, 'migration_import');
+            testsUpdated++;
+          } else {
+            await queries.createTest(testData);
+            testsCreated++;
+          }
+        } catch (err) {
+          errors.push(`Test "${t.name}": ${(err as Error).message}`);
+        }
+      }
+
+      return NextResponse.json({
+        success: errors.length === 0,
+        areasCreated,
+        areasUpdated,
+        testsCreated,
+        testsUpdated,
+        errors,
+      });
     }
 
     // Create functional area: POST /api/v1/functional-areas
