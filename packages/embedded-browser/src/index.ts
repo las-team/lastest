@@ -30,6 +30,7 @@ const config = {
   viewportHeight: parseInt(process.env.VIEWPORT_HEIGHT ?? '720', 10),
   streamAuthToken: process.env.STREAM_AUTH_TOKEN,
   instanceId: process.env.INSTANCE_ID || os.hostname(),
+  cdpPort: parseInt(process.env.CDP_PORT ?? '9222', 10),
 };
 
 if (!config.token && !config.systemToken) {
@@ -73,8 +74,10 @@ async function startup(): Promise<void> {
     args: [
       ...(useCrossOsArgs ? CROSS_OS_CHROMIUM_ARGS : []),
       '--disable-blink-features=AutomationControlled',
+      `--remote-debugging-port=${config.cdpPort}`,
     ],
   });
+  console.log(`[Startup] CDP endpoint available at http://localhost:${config.cdpPort}`);
 
   context = await browser.newContext({
     viewport: { width: config.viewportWidth, height: config.viewportHeight },
@@ -158,6 +161,7 @@ async function startup(): Promise<void> {
     streamPort: config.streamPort,
     streamHost: config.streamHost,
     pollInterval: config.pollInterval,
+    cdpPort: config.cdpPort,
     systemToken: config.systemToken || undefined,
     instanceId: config.instanceId,
   });

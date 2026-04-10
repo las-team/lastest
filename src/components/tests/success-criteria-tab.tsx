@@ -1,9 +1,9 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { CheckCircle2, XCircle, Circle, ShieldAlert, ListOrdered } from 'lucide-react';
+import { CheckCircle2, XCircle, Circle, ShieldAlert, ListOrdered, Code2 } from 'lucide-react';
 import type { TestAssertion, AssertionResult, CapturedScreenshot } from '@/lib/db/schema';
 import { cn } from '@/lib/utils';
 import { extractTestBody, parseSteps, type DebugStep } from '@/lib/playwright/debug-parser';
@@ -20,6 +20,8 @@ interface TestStepsTabProps {
   envBaseUrl?: string | null;
   onParseNeeded?: () => void;
   onToggleAssertionSoftness?: (assertionId: string, makeSoft: boolean) => Promise<void>;
+  onStepValueChange?: (stepLineStart: number, stepLineEnd: number, oldValue: string, newValue: string) => Promise<void>;
+  onGoToCode?: (line: number) => void;
 }
 
 const CATEGORY_COLORS: Record<string, string> = {
@@ -104,6 +106,34 @@ function resolveStepLabel(label: string, code: string, baseUrl: string | null | 
   return resolved;
 }
 
+/** Extract the fill/type value from a step's code, if editable */
+function extractEditableValue(step: DebugStep): string | null {
+  if (step.type !== 'action') return null;
+  const code = step.code.trim();
+
+  // locateWithFallback fill: locateWithFallback(page, [...], 'fill', 'VALUE', ...)
+  const lwfMatch = code.match(/locateWithFallback\([^,]+,\s*\[[^\]]*\],\s*'fill',\s*'((?:[^'\\]|\\.)*)'/);
+  if (lwfMatch) return lwfMatch[1].replace(/\\'/g, "'").replace(/\\\\/g, '\\');
+
+  // page.locator(...).fill('VALUE') or page.getByRole(...).fill('VALUE')
+  const fillMatch = code.match(/\.fill\s*\(\s*'((?:[^'\\]|\\.)*)'\s*\)/);
+  if (fillMatch) return fillMatch[1].replace(/\\'/g, "'").replace(/\\\\/g, '\\');
+
+  // page.keyboard.type('VALUE')
+  const typeMatch = code.match(/\.keyboard\.type\s*\(\s*'((?:[^'\\]|\\.)*)'\s*\)/);
+  if (typeMatch) return typeMatch[1].replace(/\\'/g, "'").replace(/\\\\/g, '\\');
+
+  // selectOption: locateWithFallback(page, [...], 'selectOption', 'VALUE', ...)
+  const selMatch = code.match(/locateWithFallback\([^,]+,\s*\[[^\]]*\],\s*'selectOption',\s*'((?:[^'\\]|\\.)*)'/);
+  if (selMatch) return selMatch[1].replace(/\\'/g, "'").replace(/\\\\/g, '\\');
+
+  // page.locator(...).selectOption('VALUE')
+  const selOptMatch = code.match(/\.selectOption\s*\(\s*'((?:[^'\\]|\\.)*)'\s*\)/);
+  if (selOptMatch) return selOptMatch[1].replace(/\\'/g, "'").replace(/\\\\/g, '\\');
+
+  return null;
+}
+
 const ALL_TYPES = ['action', 'navigation', 'assertion', 'screenshot', 'wait', 'variable', 'log', 'other'] as const;
 const DEFAULT_HIDDEN: Set<string> = new Set(['wait', 'other']);
 
@@ -118,11 +148,16 @@ export function TestStepsTab({
   envBaseUrl,
   onParseNeeded,
   onToggleAssertionSoftness,
+  onStepValueChange,
+  onGoToCode,
 }: TestStepsTabProps) {
   const [expanded, setExpanded] = useState<Set<number>>(new Set());
   const [hiddenTypes, setHiddenTypes] = useState<Set<string>>(new Set(DEFAULT_HIDDEN));
   const [togglingIds, setTogglingIds] = useState<Set<string>>(new Set());
   const [optimisticOverrides, setOptimisticOverrides] = useState<Map<string, boolean>>(new Map());
+  const [editingValues, setEditingValues] = useState<Map<number, string>>(new Map());
+  const [savingSteps, setSavingSteps] = useState<Set<number>>(new Set());
+  const debounceTimers = useRef<Map<number, ReturnType<typeof setTimeout>>>(new Map());
 
   // Always parse assertions fresh from code — DB assertions can have stale line numbers
   const { steps, bodyLineOffset, freshAssertions } = useMemo(() => {
@@ -179,6 +214,24 @@ export function TestStepsTab({
     });
   };
 
+  const handleValueChange = useCallback((step: DebugStep, originalValue: string, newValue: string) => {
+    setEditingValues(prev => new Map(prev).set(step.id, newValue));
+    // Debounce the save
+    const existing = debounceTimers.current.get(step.id);
+    if (existing) clearTimeout(existing);
+    debounceTimers.current.set(step.id, setTimeout(async () => {
+      debounceTimers.current.delete(step.id);
+      if (!onStepValueChange || newValue === originalValue) return;
+      setSavingSteps(prev => new Set(prev).add(step.id));
+      try {
+        await onStepValueChange(step.lineStart + bodyLineOffset, step.lineEnd + bodyLineOffset, originalValue, newValue);
+      } finally {
+        setSavingSteps(prev => { const next = new Set(prev); next.delete(step.id); return next; });
+        setEditingValues(prev => { const next = new Map(prev); next.delete(step.id); return next; });
+      }
+    }, 500));
+  }, [onStepValueChange, bodyLineOffset]);
+
   // Build assertion result map
   const resultMap = new Map<string, AssertionResult>();
   if (assertionResults) {
@@ -226,9 +279,12 @@ export function TestStepsTab({
     let maxReached = -1;
 
     // Evidence from screenshots — map captured count to screenshot-type steps.
-    // Only trust screenshot evidence if we also have assertion/soft-error evidence,
-    // because the runner always captures a post-error screenshot even on compile errors.
-    const hasExecutionEvidence = (assertionResults && assertionResults.length > 0) || (softErrors && softErrors.length > 0);
+    // Trust screenshot evidence when we have other execution signals OR when there
+    // are more screenshots than just the post-error capture (which means the test's
+    // own screenshot steps were reached), OR when we have an error message (test ran).
+    const hasExecutionEvidence = (assertionResults && assertionResults.length > 0)
+      || (softErrors && softErrors.length > 0)
+      || !!errorMessage;
     if (screenshots && screenshots.length > 0 && hasExecutionEvidence) {
       let screenshotStepIdx = 0;
       for (let i = 0; i < steps.length; i++) {
@@ -448,13 +504,47 @@ export function TestStepsTab({
                         <Circle className="h-4 w-4 text-muted-foreground/20 shrink-0" />
                       )}
 
-                      {/* Step label */}
-                      <span className={cn(
-                        'text-sm flex-1 min-w-0 truncate',
-                        isExpandable && 'font-medium',
-                      )}>
-                        {resolveStepLabel(step.label, step.code, envBaseUrl)}
-                      </span>
+                      {/* Step label — with inline editable value for fill/type steps */}
+                      {(() => {
+                        const originalValue = extractEditableValue(step);
+                        const editValue = editingValues.get(step.id);
+                        const isSaving = savingSteps.has(step.id);
+                        const label = resolveStepLabel(step.label, step.code, envBaseUrl);
+
+                        if (originalValue !== null && onStepValueChange) {
+                          // Split label into prefix (before value) and show value as input
+                          const valueInLabel = originalValue.length > 20 ? originalValue.slice(0, 20) : originalValue;
+                          const labelPrefix = label.includes(`"${valueInLabel}`)
+                            ? label.slice(0, label.indexOf(`"${valueInLabel}`))
+                            : label.replace(/\s*"[^"]*"?\s*$/, '');
+
+                          return (
+                            <span className={cn('text-sm flex-1 min-w-0 flex items-center gap-1', isExpandable && 'font-medium')}>
+                              <span className="truncate shrink-0">{labelPrefix}</span>
+                              <input
+                                type="text"
+                                value={editValue ?? originalValue}
+                                onChange={(e) => handleValueChange(step, originalValue, e.target.value)}
+                                onClick={(e) => e.stopPropagation()}
+                                className={cn(
+                                  'text-sm font-mono bg-muted/50 border border-border/50 rounded px-1.5 py-0 h-5 min-w-[60px] max-w-[200px] flex-1',
+                                  'focus:outline-none focus:ring-1 focus:ring-ring focus:border-ring',
+                                  isSaving && 'opacity-50',
+                                )}
+                              />
+                            </span>
+                          );
+                        }
+
+                        return (
+                          <span className={cn(
+                            'text-sm flex-1 min-w-0 truncate',
+                            isExpandable && 'font-medium',
+                          )}>
+                            {label}
+                          </span>
+                        );
+                      })()}
 
                       {/* Hard/Soft badges for assertion steps */}
                       {isExpandable && stepAssertions.length > 0 && (() => {
@@ -476,6 +566,18 @@ export function TestStepsTab({
                           </>
                         );
                       })()}
+
+                      {/* Go to code line */}
+                      {onGoToCode && (
+                        <button
+                          type="button"
+                          onClick={(e) => { e.stopPropagation(); onGoToCode(step.lineStart + bodyLineOffset); }}
+                          className="shrink-0 text-muted-foreground/40 hover:text-muted-foreground transition-colors"
+                          title={`Go to line ${step.lineStart + bodyLineOffset}`}
+                        >
+                          <Code2 className="h-3.5 w-3.5" />
+                        </button>
+                      )}
 
                       {/* Type badge */}
                       <Badge
@@ -508,18 +610,17 @@ export function TestStepsTab({
                             setTogglingIds(prev => new Set(prev).add(assertion.id));
                             try {
                               await onToggleAssertionSoftness(assertion.id, newSoft);
+                              // Keep optimistic override until fresh data arrives — prevents flicker
                             } catch {
                               setOptimisticOverrides(prev => { const next = new Map(prev); next.delete(assertion.id); return next; });
                             } finally {
                               setTogglingIds(prev => { const next = new Set(prev); next.delete(assertion.id); return next; });
-                              setOptimisticOverrides(prev => { const next = new Map(prev); next.delete(assertion.id); return next; });
                             }
                           };
 
                           return (
                             <div key={assertion.id} className="space-y-1">
                               <div className="flex items-center gap-2 flex-wrap">
-                                <StatusIcon status={status} />
                                 <span className="text-xs font-medium">
                                   {assertion.label ?? `${assertion.assertionType}()`}
                                 </span>

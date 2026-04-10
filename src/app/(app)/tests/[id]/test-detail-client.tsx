@@ -162,17 +162,42 @@ function splitBoilerplate(code: string): { boilerplate: string; testBody: string
   return { boilerplate, testBody };
 }
 
-function CollapsibleTestCode({ code }: { code: string }) {
+function NumberedCode({ code, startLine, highlightLine, className }: { code: string; startLine: number; highlightLine?: number | null; className?: string }) {
+  const lines = code.split('\n');
+  return (
+    <pre className={className}>
+      {lines.map((line, i) => {
+        const lineNum = startLine + i;
+        const isHighlighted = highlightLine === lineNum;
+        return (
+          <div
+            key={lineNum}
+            id={`code-line-${lineNum}`}
+            className={isHighlighted ? 'bg-yellow-200/40 dark:bg-yellow-800/30 -mx-4 px-4 transition-colors duration-1000' : undefined}
+          >
+            <span className="inline-block w-8 text-right mr-4 text-muted-foreground/50 select-none">{lineNum}</span>
+            {line}
+          </div>
+        );
+      })}
+    </pre>
+  );
+}
+
+function CollapsibleTestCode({ code, highlightLine }: { code: string; highlightLine?: number | null }) {
   const [showHelpers, setShowHelpers] = useState(false);
   const split = splitBoilerplate(code);
 
   if (!split) {
     return (
-      <pre className="bg-muted p-4 rounded-lg overflow-x-auto text-sm font-mono">
-        {code}
-      </pre>
+      <div className="bg-muted rounded-lg overflow-x-auto text-sm font-mono">
+        <NumberedCode code={code} startLine={1} highlightLine={highlightLine} className="p-4" />
+      </div>
     );
   }
+
+  const boilerplateLineCount = split.boilerplate.split('\n').length;
+  const testBodyStartLine = boilerplateLineCount + 1;
 
   return (
     <div className="bg-muted rounded-lg overflow-x-auto text-sm font-mono">
@@ -186,13 +211,9 @@ function CollapsibleTestCode({ code }: { code: string }) {
         <span className="text-xs">Standard helpers (buildUrl, locateWithFallback, ...)</span>
       </button>
       {showHelpers && (
-        <pre className="px-4 py-2 border-b border-border/50 text-muted-foreground">
-          {split.boilerplate}
-        </pre>
+        <NumberedCode code={split.boilerplate} startLine={1} highlightLine={highlightLine} className="px-4 py-2 border-b border-border/50 text-muted-foreground" />
       )}
-      <pre className="p-4">
-        {split.testBody}
-      </pre>
+      <NumberedCode code={split.testBody} startLine={testBodyStartLine} highlightLine={highlightLine} className="p-4" />
     </div>
   );
 }
@@ -210,6 +231,8 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
   const [editName, setEditName] = useState(test.name);
   const [editUrl, setEditUrl] = useState(test.targetUrl || '');
   const [editCode, setEditCode] = useState(test.code || '');
+  const [activeTab, setActiveTab] = useState('code');
+  const [highlightLine, setHighlightLine] = useState<number | null>(null);
 
   // Run state
   const [isRunning, setIsRunning] = useState(false);
@@ -832,7 +855,7 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
         )}
 
         {/* Tabs for Code, Screenshots, History */}
-        <Tabs defaultValue="code">
+        <Tabs value={activeTab} onValueChange={setActiveTab}>
           <TabsList className="h-11 w-full p-1 gap-1 bg-white dark:bg-zinc-950 border">
             <TabsTrigger value="code" className="flex-1 px-2 text-sm data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-sm">Code</TabsTrigger>
             {earlyAdopterMode && (
@@ -871,7 +894,7 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
                     className="font-mono text-sm min-h-[300px]"
                   />
                 ) : (
-                  <CollapsibleTestCode code={test.code || '// No code generated yet'} />
+                  <CollapsibleTestCode code={test.code || '// No code generated yet'} highlightLine={highlightLine} />
                 )}
               </CardContent>
             </Card>
@@ -958,6 +981,21 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
                 const { toggleAssertionSoftness } = await import('@/server/actions/tests');
                 await toggleAssertionSoftness(test.id, assertionId, makeSoft);
                 router.refresh();
+              }}
+              onStepValueChange={async (lineStart, lineEnd, oldValue, newValue) => {
+                const { updateStepValue } = await import('@/server/actions/tests');
+                await updateStepValue(test.id, lineStart, lineEnd, oldValue, newValue);
+                router.refresh();
+              }}
+              onGoToCode={(line) => {
+                setHighlightLine(line);
+                setActiveTab('code');
+                // Scroll to the line after tab switch renders
+                setTimeout(() => {
+                  document.getElementById(`code-line-${line}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                  // Clear highlight after animation
+                  setTimeout(() => setHighlightLine(null), 2000);
+                }, 100);
               }}
             />
           </TabsContent>

@@ -76,6 +76,8 @@ export interface GenerateWithAIOptions {
   useMCP?: boolean;
   /** Run the MCP browser in headless mode (default: true) */
   mcpHeadless?: boolean;
+  /** CDP endpoint to connect to an existing browser (e.g. embedded browser) */
+  cdpEndpoint?: string;
   signal?: AbortSignal;
   /** Called with the prompt log ID after the log entry is created (before AI call) */
   onLogCreated?: (logId: string) => void;
@@ -90,21 +92,40 @@ export async function generateWithAI(
   // When MCP tools are needed and provider is claude-agent-sdk, inject the Playwright MCP server
   const effectiveConfig = { ...config };
   if (options?.useMCP && config.provider === 'claude-agent-sdk') {
-    effectiveConfig.agentSdkMcpServers = {
-      ...effectiveConfig.agentSdkMcpServers,
-      'playwright-test': {
-        command: 'node',
-        args: [
-          path.join(path.dirname(require.resolve('playwright')), 'cli.js'),
-          'run-test-mcp-server',
-          ...(options?.mcpHeadless !== false ? ['--headless'] : []),
-        ],
-      },
-    };
+    const playwrightCli = path.join(path.dirname(require.resolve('playwright')), 'cli.js');
+    const mcpServerName = options.cdpEndpoint ? 'playwright' : 'playwright-test';
+
+    if (options.cdpEndpoint) {
+      // Use Browser MCP server connected to an existing browser via CDP
+      effectiveConfig.agentSdkMcpServers = {
+        ...effectiveConfig.agentSdkMcpServers,
+        [mcpServerName]: {
+          command: 'node',
+          args: [
+            playwrightCli,
+            'run-mcp-server',
+            '--cdp-endpoint', options.cdpEndpoint,
+          ],
+        },
+      };
+    } else {
+      // Use Test MCP server with its own browser
+      effectiveConfig.agentSdkMcpServers = {
+        ...effectiveConfig.agentSdkMcpServers,
+        [mcpServerName]: {
+          command: 'node',
+          args: [
+            playwrightCli,
+            'run-test-mcp-server',
+            ...(options?.mcpHeadless !== false ? ['--headless'] : []),
+          ],
+        },
+      };
+    }
     // Auto-allow all Playwright MCP tools without prompting (respects user's permission mode)
     effectiveConfig.agentSdkAllowedTools = [
       ...(effectiveConfig.agentSdkAllowedTools || []),
-      'mcp__playwright-test__*',
+      `mcp__${mcpServerName}__*`,
     ];
     // Disable non-MCP tools so the agent focuses on browser exploration, not shell commands
     effectiveConfig.agentSdkDisallowedTools = [

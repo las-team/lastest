@@ -62,6 +62,8 @@ export interface EmbeddedRunnerOptions {
   streamPort: number;
   streamHost?: string;
   pollInterval?: number;
+  /** CDP port for Playwright MCP integration */
+  cdpPort?: number;
   /** System EB shared token — if set, uses /api/embedded/auto-register instead */
   systemToken?: string;
   /** Container instance ID (os.hostname()) for system registration */
@@ -81,6 +83,7 @@ export class EmbeddedRunnerClient {
   private status: 'idle' | 'busy' = 'idle';
   private currentTask?: string;
   private wakeHeartbeat: (() => void) | null = null;
+  private cdpPort?: number;
   private systemToken?: string;
   private instanceId?: string;
 
@@ -93,6 +96,7 @@ export class EmbeddedRunnerClient {
     this.streamPort = options.streamPort;
     this.streamHost = options.streamHost || '';
     this.pollInterval = options.pollInterval ?? 1000;
+    this.cdpPort = options.cdpPort;
     this.systemToken = options.systemToken;
     this.instanceId = options.instanceId;
   }
@@ -105,6 +109,7 @@ export class EmbeddedRunnerClient {
     try {
       const hostname = this.streamHost || getContainerIP() || os.hostname();
       const streamUrl = `ws://${hostname}:${this.streamPort}`;
+      const cdpUrl = this.cdpPort ? `http://${hostname}:${this.cdpPort}` : undefined;
       const containerUrl = `http://${hostname}:${this.streamPort}`;
 
       const response = await fetch(`${this.serverUrl}/api/embedded/register`, {
@@ -115,6 +120,7 @@ export class EmbeddedRunnerClient {
         },
         body: JSON.stringify({
           streamUrl,
+          cdpUrl,
           containerUrl,
           viewport: { width: 1280, height: 720 },
         }),
@@ -184,6 +190,7 @@ export class EmbeddedRunnerClient {
     try {
       const hostname = this.streamHost || getContainerIP() || os.hostname();
       const streamUrl = `ws://${hostname}:${this.streamPort}`;
+      const cdpUrl = this.cdpPort ? `http://${hostname}:${this.cdpPort}` : undefined;
       const containerUrl = `http://${hostname}:${this.streamPort}`;
 
       const response = await fetch(`${this.serverUrl}/api/embedded/auto-register`, {
@@ -194,6 +201,7 @@ export class EmbeddedRunnerClient {
         },
         body: JSON.stringify({
           streamUrl,
+          cdpUrl,
           containerUrl,
           viewport: { width: 1280, height: 720 },
           instanceId: this.instanceId || os.hostname(),

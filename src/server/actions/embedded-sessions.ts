@@ -140,6 +140,7 @@ export async function upsertEmbeddedSession(params: {
   teamId: string;
   runnerId: string;
   streamUrl: string;
+  cdpUrl?: string;
   containerUrl: string;
   viewport?: { width: number; height: number };
 }): Promise<EmbeddedSession> {
@@ -154,6 +155,7 @@ export async function upsertEmbeddedSession(params: {
       .update(embeddedSessions)
       .set({
         streamUrl: params.streamUrl,
+        cdpUrl: params.cdpUrl ?? null,
         containerUrl: params.containerUrl,
         viewport: params.viewport ?? { width: 1280, height: 720 },
         status: 'ready',
@@ -186,6 +188,7 @@ export async function createEmbeddedSession(params: {
   teamId: string;
   runnerId: string;
   streamUrl: string;
+  cdpUrl?: string;
   containerUrl: string;
   viewport?: { width: number; height: number };
 }): Promise<EmbeddedSession> {
@@ -199,6 +202,7 @@ export async function createEmbeddedSession(params: {
     runnerId: params.runnerId,
     status: 'ready',
     streamUrl: params.streamUrl,
+    cdpUrl: params.cdpUrl ?? null,
     containerUrl: params.containerUrl,
     viewport: params.viewport ?? { width: 1280, height: 720 },
     createdAt: now,

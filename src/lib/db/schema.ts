@@ -1197,6 +1197,7 @@ export const embeddedSessions = pgTable('embedded_sessions', {
   runnerId: text('runner_id').references(() => runners.id),
   status: text('status').notNull().default('starting'), // EmbeddedSessionStatus
   streamUrl: text('stream_url'), // ws://host:9223
+  cdpUrl: text('cdp_url'), // http://host:9222 (CDP endpoint for MCP)
   containerUrl: text('container_url'), // http://host:port (for health checks)
   viewport: jsonb('viewport').$type<{ width: number; height: number }>(),
   currentUrl: text('current_url'),

@@ -17,6 +17,19 @@ import { getCurrentBranchForRepo } from '@/lib/git-utils';
 import { agentCreateTest } from '@/lib/playwright/generator-agent';
 import { emitAndPersistActivityEvent } from '@/lib/db/queries/activity-events';
 import type { AgentStepState } from '@/lib/db/schema';
+import { db } from '@/lib/db';
+import { embeddedSessions } from '@/lib/db/schema';
+import { eq } from 'drizzle-orm';
+
+/** Find a ready embedded browser's CDP URL for MCP integration */
+async function findAvailableCdpEndpoint(): Promise<string | undefined> {
+  const [session] = await db
+    .select({ cdpUrl: embeddedSessions.cdpUrl })
+    .from(embeddedSessions)
+    .where(eq(embeddedSessions.status, 'ready'))
+    .limit(1);
+  return session?.cdpUrl ?? undefined;
+}
 
 async function getAIConfig(repositoryId?: string | null): Promise<AIProviderConfig> {
   const settings = await queries.getAISettings(repositoryId);
@@ -241,11 +254,17 @@ export async function startGenerateTestAgent(data: {
     (async () => {
       const startTime = Date.now();
       try {
+        // Try to use an embedded browser's CDP endpoint for live streaming
+        const cdpEndpoint = await findAvailableCdpEndpoint();
+        if (cdpEndpoint) {
+          console.log(`[GenerateTestAgent] Using embedded browser CDP: ${cdpEndpoint}`);
+        }
+
         const result = await agentCreateTest(data.repositoryId, {
           userPrompt: data.userPrompt,
           targetUrl: data.targetUrl,
           routePath: data.targetUrl,
-        }, { headless: data.headless });
+        }, { headless: data.headless, cdpEndpoint });
 
         if (!result.success || !result.code) {
           throw new Error(result.error || 'Generator agent produced no test code');

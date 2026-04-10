@@ -92,7 +92,7 @@ export type { ParsedScenario, ScenarioGroup };
 export async function agentCreateTest(
   repositoryId: string,
   context: TestGenerationContext & { scenarioGroup?: ScenarioGroup },
-  options?: { signal?: AbortSignal; headless?: boolean },
+  options?: { signal?: AbortSignal; headless?: boolean; cdpEndpoint?: string },
 ): Promise<{ success: boolean; code?: string; error?: string }> {
   await requireRepoAccess(repositoryId);
 
@@ -142,6 +142,7 @@ export async function agentCreateTest(
     const response = await generateWithAI(config, prompt, GENERATOR_SYSTEM_PROMPT, {
       useMCP: true,
       mcpHeadless: options?.headless,
+      cdpEndpoint: options?.cdpEndpoint,
       repositoryId,
       actionType: 'agent_generate',
       signal: options?.signal,

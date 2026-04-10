@@ -155,6 +155,50 @@ export async function toggleAssertionSoftness(testId: string, assertionId: strin
   revalidatePath(`/tests/${testId}`);
 }
 
+export async function updateStepValue(testId: string, lineStart: number, lineEnd: number, oldValue: string, newValue: string) {
+  const session = await requireTeamAccess();
+  const test = await queries.getTest(testId);
+  if (!test) throw new Error('Test not found');
+  if (test.repositoryId) {
+    const repo = await queries.getRepository(test.repositoryId);
+    if (!repo || repo.teamId !== session.team.id) throw new Error('Forbidden');
+  }
+
+  let code = test.code || '';
+  const lines = code.split('\n');
+
+  // Escape the values for string replacement in code
+  const escapedOld = oldValue.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+  const escapedNew = newValue.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+
+  // Replace the value in the relevant lines
+  let replaced = false;
+  for (let i = lineStart - 1; i < Math.min(lineEnd, lines.length); i++) {
+    if (lines[i].includes(escapedOld)) {
+      lines[i] = lines[i].replace(escapedOld, escapedNew);
+      replaced = true;
+      break;
+    }
+  }
+
+  if (!replaced) throw new Error('Could not find value in code');
+
+  code = lines.join('\n');
+
+  const { parseAssertions } = await import('@/lib/playwright/assertion-parser');
+  const updatedAssertions = parseAssertions(code);
+
+  const branch = await getCurrentBranchForRepo(test.repositoryId);
+  await queries.updateTestWithVersion(
+    testId,
+    { code, assertions: updatedAssertions.length > 0 ? updatedAssertions : undefined },
+    'manual_edit',
+    branch ?? undefined,
+  );
+  revalidatePath('/tests');
+  revalidatePath(`/tests/${testId}`);
+}
+
 async function verifyTestOwnership(testId: string, teamId: string) {
   const test = await queries.getTest(testId);
   if (!test) throw new Error('Test not found');

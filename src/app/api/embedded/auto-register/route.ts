@@ -72,6 +72,7 @@ export async function POST(request: Request) {
   // Parse body
   let body: {
     streamUrl: string;
+    cdpUrl?: string;
     containerUrl: string;
     viewport?: { width: number; height: number };
     instanceId: string;
@@ -131,6 +132,7 @@ export async function POST(request: Request) {
     teamId,
     runnerId: runner!.id,
     streamUrl: body.streamUrl,
+    cdpUrl: body.cdpUrl,
     containerUrl: body.containerUrl,
     viewport: body.viewport,
   });
