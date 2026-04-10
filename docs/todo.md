@@ -80,6 +80,8 @@ Screenshot comparison not reliable? page shift? text comparison?
 Auto-run tests on PRs?
 Video recording
 Run online or on your pc?
+Pont erre van szükségünk
+Ilyen AI segítség nélkül soha nem lenne elég erőforrásunk user interface tesztelésre
 ### marketing ideas
 buy a newsletter substack twitter: duuce.com newsletter investor
 AI repurposing engine -> 5 tweets, 3 linkedin, remotion short form, 1 blog, graphics, email sequence

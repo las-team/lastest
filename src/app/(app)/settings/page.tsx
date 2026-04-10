@@ -366,9 +366,12 @@ export default async function SettingsPage({
             />
           </div>
 
-          {/* Test Migration */}
-          {selectedRepo && (
-            <TestMigrationCard repositoryId={selectedRepo.id} />
+          {/* Test Migration (Early Adopter) */}
+          {earlyAdopterMode && teamRepos.length > 0 && (
+            <TestMigrationCard
+              repositories={teamRepos.map(r => ({ id: r.id, fullName: r.fullName ?? `${r.owner}/${r.name}` }))}
+              defaultRepositoryId={selectedRepo?.id}
+            />
           )}
 
           {/* User Management (Admin only) */}

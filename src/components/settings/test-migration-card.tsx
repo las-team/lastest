@@ -26,11 +26,17 @@ interface MigrationResult {
   errors: string[];
 }
 
-export function TestMigrationCard({ repositoryId }: { repositoryId: string }) {
+interface Props {
+  repositories: { id: string; fullName: string }[];
+  defaultRepositoryId?: string;
+}
+
+export function TestMigrationCard({ repositories, defaultRepositoryId }: Props) {
+  const [sourceRepoId, setSourceRepoId] = useState(defaultRepositoryId ?? '');
   const [remoteUrl, setRemoteUrl] = useState('');
   const [apiKey, setApiKey] = useState('');
   const [remoteRepos, setRemoteRepos] = useState<RemoteRepo[]>([]);
-  const [selectedRepoId, setSelectedRepoId] = useState('');
+  const [targetRepoId, setTargetRepoId] = useState('');
   const [fetchingRepos, setFetchingRepos] = useState(false);
   const [migrating, setMigrating] = useState(false);
   const [result, setResult] = useState<MigrationResult | null>(null);
@@ -42,7 +48,7 @@ export function TestMigrationCard({ repositoryId }: { repositoryId: string }) {
     }
     setFetchingRepos(true);
     setRemoteRepos([]);
-    setSelectedRepoId('');
+    setTargetRepoId('');
     setResult(null);
 
     try {
@@ -61,7 +67,11 @@ export function TestMigrationCard({ repositoryId }: { repositoryId: string }) {
   }
 
   async function handleMigrate() {
-    if (!selectedRepoId) {
+    if (!sourceRepoId) {
+      toast.error('Select a source repository');
+      return;
+    }
+    if (!targetRepoId) {
       toast.error('Select a target repository');
       return;
     }
@@ -69,7 +79,7 @@ export function TestMigrationCard({ repositoryId }: { repositoryId: string }) {
     setResult(null);
 
     try {
-      const res = await migrateTests(repositoryId, remoteUrl, apiKey, selectedRepoId);
+      const res = await migrateTests(sourceRepoId, remoteUrl, apiKey, targetRepoId);
       setResult(res);
       if (res.success) {
         toast.success('Migration completed successfully');
@@ -95,6 +105,22 @@ export function TestMigrationCard({ repositoryId }: { repositoryId: string }) {
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
+        <div className="space-y-2">
+          <Label>Source Repository</Label>
+          <Select value={sourceRepoId} onValueChange={setSourceRepoId}>
+            <SelectTrigger>
+              <SelectValue placeholder="Select source repository" />
+            </SelectTrigger>
+            <SelectContent>
+              {repositories.map((repo) => (
+                <SelectItem key={repo.id} value={repo.id}>
+                  {repo.fullName}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+
         <div className="space-y-2">
           <Label htmlFor="remote-url">Remote URL</Label>
           <Input
@@ -130,9 +156,9 @@ export function TestMigrationCard({ repositoryId }: { repositoryId: string }) {
           <>
             <div className="space-y-2">
               <Label>Target Repository</Label>
-              <Select value={selectedRepoId} onValueChange={setSelectedRepoId}>
+              <Select value={targetRepoId} onValueChange={setTargetRepoId}>
                 <SelectTrigger>
-                  <SelectValue placeholder="Select a repository" />
+                  <SelectValue placeholder="Select target repository" />
                 </SelectTrigger>
                 <SelectContent>
                   {remoteRepos.map((repo) => (
@@ -146,7 +172,7 @@ export function TestMigrationCard({ repositoryId }: { repositoryId: string }) {
 
             <Button
               onClick={handleMigrate}
-              disabled={migrating || !selectedRepoId}
+              disabled={migrating || !sourceRepoId || !targetRepoId}
             >
               {migrating && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
               Migrate Tests

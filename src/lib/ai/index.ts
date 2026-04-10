@@ -91,12 +91,17 @@ export async function generateWithAI(
 ): Promise<string> {
   // When MCP tools are needed and provider is claude-agent-sdk, inject the Playwright MCP server
   const effectiveConfig = { ...config };
+  if (options?.useMCP) {
+    console.log(`[generateWithAI] provider=${config.provider} cdpEndpoint=${options?.cdpEndpoint ?? 'none'} headless=${options?.mcpHeadless}`);
+  }
   if (options?.useMCP && config.provider === 'claude-agent-sdk') {
     const playwrightCli = path.join(path.dirname(require.resolve('playwright')), 'cli.js');
-    const mcpServerName = options.cdpEndpoint ? 'playwright' : 'playwright-test';
+    const mcpServerName = options?.cdpEndpoint ? 'playwright' : 'playwright-test';
 
-    if (options.cdpEndpoint) {
+    if (options?.cdpEndpoint) {
+      console.log(`[generateWithAI] Using Browser MCP with CDP endpoint: ${options.cdpEndpoint}`);
       // Use Browser MCP server connected to an existing browser via CDP
+      // Note: --headless prevents MCP from also opening a local headed browser
       effectiveConfig.agentSdkMcpServers = {
         ...effectiveConfig.agentSdkMcpServers,
         [mcpServerName]: {
@@ -105,10 +110,12 @@ export async function generateWithAI(
             playwrightCli,
             'run-mcp-server',
             '--cdp-endpoint', options.cdpEndpoint,
+            '--headless',
           ],
         },
       };
     } else {
+      console.log('[generateWithAI] Using Test MCP server (no CDP endpoint, launching own browser)');
       // Use Test MCP server with its own browser
       effectiveConfig.agentSdkMcpServers = {
         ...effectiveConfig.agentSdkMcpServers,
