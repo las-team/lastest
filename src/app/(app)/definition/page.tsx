@@ -12,18 +12,12 @@ import {
   getDeletedTests,
 } from '@/lib/db/queries';
 import { getCurrentSession } from '@/lib/auth';
-import { redirect } from 'next/navigation';
 
 export default async function DefinitionPage() {
   const session = await getCurrentSession();
   const teamId = session?.team?.id;
   const userId = session?.user?.id;
   const earlyAdopter = session?.team?.earlyAdopterMode ?? false;
-
-  if (!earlyAdopter) {
-    redirect('/areas');
-  }
-
   const selectedRepo = teamId ? await getSelectedRepository(userId, teamId) : null;
 
   if (!selectedRepo) {
@@ -40,7 +34,7 @@ export default async function DefinitionPage() {
     getFunctionalAreasTree(selectedRepo.id),
     getTestsWithStatusByRepo(selectedRepo.id),
     getUnsortedSuites(selectedRepo.id),
-    getSpecsByRepo(selectedRepo.id),
+    earlyAdopter ? getSpecsByRepo(selectedRepo.id) : Promise.resolve([]),
     getFunctionalAreasByRepo(selectedRepo.id),
     getRoutesByRepo(selectedRepo.id),
     getEnvironmentConfig(selectedRepo.id),
@@ -76,6 +70,7 @@ export default async function DefinitionPage() {
         selectedBranch={selectedRepo.selectedBranch || selectedRepo.defaultBranch || 'main'}
         banAiMode={banAiMode}
         allSpecs={allSpecs}
+        earlyAdopterMode={earlyAdopter}
         areas={areas}
         tests={tests}
         routes={routes}

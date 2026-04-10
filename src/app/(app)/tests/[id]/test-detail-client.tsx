@@ -367,7 +367,7 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
     setIsDeleting(true);
     try {
       await deleteTest(test.id);
-      router.push('/tests');
+      router.push('/definition');
     } finally {
       setIsDeleting(false);
     }
@@ -387,7 +387,7 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
     setIsPermanentlyDeleting(true);
     try {
       await permanentlyDeleteTest(test.id);
-      router.push('/tests');
+      router.push('/definition');
     } finally {
       setIsPermanentlyDeleting(false);
     }

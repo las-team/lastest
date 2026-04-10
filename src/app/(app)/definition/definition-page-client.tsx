@@ -93,6 +93,7 @@ interface DefinitionPageClientProps {
   selectedBranch: string;
   banAiMode: boolean;
   allSpecs: TestSpec[];
+  earlyAdopterMode?: boolean;
   areas: FunctionalArea[];
   tests: TestWithStatus[];
   routes: Route[];
@@ -141,6 +142,7 @@ export function DefinitionPageClient({
   selectedBranch,
   banAiMode,
   allSpecs,
+  earlyAdopterMode = false,
   areas,
   tests,
   routes,
@@ -744,22 +746,26 @@ export function DefinitionPageClient({
       </Tooltip>
       {!banAiMode && (
         <>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => setShowSpecAnalysisDialog(true)}>
-                <FileText className="h-3.5 w-3.5" />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent side="bottom">Analyze Specs</TooltipContent>
-          </Tooltip>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => setShowImportFromSpecDialog(true)}>
-                <BookOpen className="h-3.5 w-3.5" />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent side="bottom">Import Spec</TooltipContent>
-          </Tooltip>
+          {earlyAdopterMode && (
+            <>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => setShowSpecAnalysisDialog(true)}>
+                    <FileText className="h-3.5 w-3.5" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent side="bottom">Analyze Specs</TooltipContent>
+              </Tooltip>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => setShowImportFromSpecDialog(true)}>
+                    <BookOpen className="h-3.5 w-3.5" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent side="bottom">Import Spec</TooltipContent>
+              </Tooltip>
+            </>
+          )}
           <Tooltip>
             <TooltipTrigger asChild>
               <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => setShowAIScanDialog(true)}>
@@ -1274,7 +1280,7 @@ export function DefinitionPageClient({
                   <div className="text-sm text-muted-foreground">
                     {flatAreas.length} area{flatAreas.length !== 1 ? 's' : ''}
                   </div>
-                  {allSpecs.length > 0 && (
+                  {earlyAdopterMode && allSpecs.length > 0 && (
                     <div className="text-sm text-muted-foreground">
                       Spec coverage: <span className="font-medium text-foreground">{specsWithTests}/{allSpecs.length}</span> ({allSpecs.length > 0 ? Math.round((specsWithTests / allSpecs.length) * 100) : 0}%)
                     </div>
@@ -1296,14 +1302,16 @@ export function DefinitionPageClient({
                         planGeneratedAt={area.planGeneratedAt}
                         depth={area.depth}
                       />
-                      <div className="px-4 pb-4">
-                        <AreaSpecsPanel
-                          areaId={area.id}
-                          repositoryId={repositoryId}
-                          specs={specsByArea.get(area.id) || []}
-                          hasAgentPlan={!!area.agentPlan}
-                        />
-                      </div>
+                      {earlyAdopterMode && (
+                        <div className="px-4 pb-4">
+                          <AreaSpecsPanel
+                            areaId={area.id}
+                            repositoryId={repositoryId}
+                            specs={specsByArea.get(area.id) || []}
+                            hasAgentPlan={!!area.agentPlan}
+                          />
+                        </div>
+                      )}
                     </div>
                   ))}
                 </div>
@@ -1474,19 +1482,23 @@ export function DefinitionPageClient({
         branch={selectedBranch}
         onSaved={() => router.refresh()}
       />
-      <SpecAnalysisDialog
-        open={showSpecAnalysisDialog}
-        onOpenChange={setShowSpecAnalysisDialog}
-        repositoryId={repositoryId}
-        branch={selectedBranch}
-      />
-      <ImportFromSpecDialog
-        open={showImportFromSpecDialog}
-        onOpenChange={setShowImportFromSpecDialog}
-        repositoryId={repositoryId}
-        branch={selectedBranch}
-        onComplete={() => router.refresh()}
-      />
+      {earlyAdopterMode && (
+        <>
+          <SpecAnalysisDialog
+            open={showSpecAnalysisDialog}
+            onOpenChange={setShowSpecAnalysisDialog}
+            repositoryId={repositoryId}
+            branch={selectedBranch}
+          />
+          <ImportFromSpecDialog
+            open={showImportFromSpecDialog}
+            onOpenChange={setShowImportFromSpecDialog}
+            repositoryId={repositoryId}
+            branch={selectedBranch}
+            onComplete={() => router.refresh()}
+          />
+        </>
+      )}
       <CodeDiffScanDialog
         open={showCodeDiffDialog}
         onOpenChange={setShowCodeDiffDialog}

@@ -20,7 +20,7 @@ agent playback window
 Fix play specs -> test specs route
 
 ## features
-improve test naming
+improve Step naming
 play all tests in an area as build
 (low) Every button is green, multiple primary actions, keep clicking on run test instead of save
 Areas and tests being separate functions is REALLY ANNOYING.

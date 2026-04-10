@@ -338,7 +338,7 @@ export default async function DashboardPage() {
                   return (
                     <Link
                       key={area.id}
-                      href="/tests"
+                      href="/definition"
                       className="flex items-center gap-3 p-3 border rounded-lg hover:bg-muted/50 transition-colors"
                     >
                       <Folder className="h-5 w-5 text-primary" />
