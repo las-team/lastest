@@ -143,10 +143,12 @@ Create tests (one-time)          Run tests (forever, $0)
 - **WCAG 2.2 AA Compliance Scoring** — Automated 0–100 accessibility score per build with severity-weighted deductions (critical/serious/moderate/minor), trend sparklines across builds, and per-test violation detail.
 - **Guided Onboarding** — 8-step setup guide for new users: connect GitHub, configure AI, scan routes, record first test, run, set baselines, re-run, check results. Auto-detects completion.
 - **AI Failure Triage** — Automatic classification of test failures into real regression, flaky test, environment issue, or test maintenance — with confidence scores and reasoning.
+- **Bug Reports** — In-app bug reporting with auto-captured context (URL, viewport, console errors, failed requests, breadcrumbs), screenshot attachment, and GitHub issue creation.
+- **Review Todos** — Branch-specific actionable items created when a reviewer flags a diff. Track review feedback as todos tied to specific builds and tests.
 
 ### AI-Powered
 
-- **Multiple AI Providers** — Claude CLI, OpenRouter, Claude Agent SDK, direct Anthropic API, or **Ollama** (local models).
+- **Multiple AI Providers** — Claude CLI, OpenRouter, Claude Agent SDK, direct Anthropic API, **OpenAI**, or **Ollama** (local models).
 - **Separate AI Diff Provider** — Use a different AI provider for diff analysis than test generation.
 - **AI Diff Analysis** — AI-powered visual diff classification (insignificant/meaningful/noise) with confidence scores and change categories.
 - **AI Test Fixing** — Automatically fix failing tests or enhance existing ones.
@@ -154,6 +156,8 @@ Create tests (one-time)          Run tests (forever, $0)
 - **Route Discovery** — AI scans your source code to discover routes and suggest tests.
 - **MCP Selector Validation** — Real-time selector validation on live pages via Claude MCP.
 - **Play Agent (Autonomous)** — One-click 11-step pipeline: check settings → select repo → environment setup → scan & template → plan areas → review → generate tests → run → fix failures (up to 3 attempts) → re-run → summary. Uses specialized sub-agents (Orchestrator, Planner, Scout, Diver, Generator, Healer). Pause/resume, approve plans, skip steps.
+- **Agent Monitoring & Activity Feed** — Real-time tracking of Play Agent sessions with step-by-step progress, SSE streaming, and session history. Monitor active/paused/completed agents from the dashboard.
+- **Codebase Intelligence** — Automatic detection of project context (framework, CSS framework, auth, state management, API layer, key dependencies) to enrich AI prompts. 100+ package database mapping dependencies to testing recommendations.
 
 ### Stabilization & Flaky Test Prevention
 
@@ -182,7 +186,7 @@ Create tests (one-time)          Run tests (forever, $0)
 ### Infrastructure
 
 - **Smart Run** — Analyzes git diffs to run only tests affected by your changes.
-- **Remote Runners (v2)** — Distributed test execution with concurrent multi-task support, SHA256 code integrity verification, remote recording, heartbeat polling with command queuing, and per-test abort support.
+- **Remote Runners (v2)** — Distributed test execution with concurrent multi-task support, SHA256 code integrity verification, remote recording, DB-backed command queue with result tracking, heartbeat polling, and per-test abort support.
 - **Parallel Test Execution** — Configurable max parallel tests for local and remote runners.
 - **Embedded Browser** — Containerized Chromium with CDP live streaming back to the UI. Record and run tests without local Playwright. JPEG streaming with configurable quality/framerate, WebSocket auth, concurrent contexts.
 - **Docker Deployment** — Production-ready multi-stage Docker setup based on official Playwright image with persistent volumes.
@@ -330,19 +334,23 @@ Open [http://localhost:3000](http://localhost:3000)
 | **WCAG compliance scoring** | **Yes (0–100)** | No | No | No | No | No | No |
 | **AI failure triage** | **Yes** | No | No | No | No | No | No |
 | **Assertion tracking** | **Yes** | No | No | No | No | No | No |
+| **Agent monitoring** | **Yes (real-time SSE)** | No | No | No | No | No | No |
+| **In-app bug reports** | **Yes (auto-context)** | No | No | No | No | No | No |
 
 ### What makes Lastest different
 
 - **Record + AI generate + run + diff + approve** in one self-hosted tool — no competitor does all five
 - **Three execution modes**: local, remote runners (`@lastest/runner` on npm), or embedded browser container with live streaming — no local Playwright install needed
-- **Autonomous Play Agent**: one-click 9-step pipeline scans routes, generates tests, runs them, fixes failures, and reports results
+- **Autonomous Play Agent**: one-click 11-step pipeline scans routes, generates tests, runs them, fixes failures, and reports results
 - **AI auto-fix**: tests break as your UI evolves, Lastest fixes them automatically
 - **$0 with unlimited screenshots** — no per-screenshot pricing, no volume limits
 - **Your data never leaves your server** — screenshots stay local, no cloud dependency
 - **MCP server with 29 tools** — let AI agents (Claude, etc.) run tests, review diffs, and heal failures autonomously
 - **Scheduled test runs** — cron-based automation with smart failure handling
 - **WCAG 2.2 AA compliance scoring** — automated 0–100 accessibility score per build with trend tracking
-- **5 AI providers including Ollama** — run AI completely locally with zero API costs
+- **6 AI providers including OpenAI and Ollama** — run AI completely locally with zero API costs
+- **Agent monitoring** — real-time SSE activity feed tracking Play Agent progress step-by-step
+- **Codebase intelligence** — auto-detects your stack to generate better, more relevant tests
 - **Spec-driven testing** — feed it OpenAPI specs, user stories, or markdown files and get tests back
 - **3 diff engines** — pixelmatch, SSIM, and Butteraugli with OCR-based text-region-aware comparison
 - **12 stabilization features** — timestamp freezing, random seeding, burst capture, auto-masking, DOM/network stability, and more
@@ -619,16 +627,15 @@ Send build results to any HTTP endpoint. Configure in Settings → Notifications
 
 ---
 
-## VSCode Extension API
+## VSCode Extension
 
-A REST + SSE API is available at `/api/v1/` for IDE integration:
+A dedicated VS Code extension (`lastest-vscode`) provides full IDE integration:
 
-- **Repos** — list, get repositories
-- **Functional Areas** — list, create, manage test areas
-- **Tests** — CRUD operations, run individual tests
-- **Builds** — trigger and monitor builds
-- **Runs** — view test run results
-- **Events** — SSE stream at `/api/v1/events` for real-time test updates
+- **Test Explorer** — Tree view of all tests organized by functional area in the Activity Bar
+- **Run Tests** — Run individual tests or all tests directly from VS Code
+- **Status Bar** — Live build status and test counts in the VS Code status bar
+- **Real-Time Updates** — WebSocket-based live updates for test run progress
+- **REST + SSE API** — Backend API at `/api/v1/` powering the extension: repos, functional areas, tests CRUD, builds, runs, and SSE event stream at `/api/v1/events`
 
 ---
 
@@ -667,7 +674,7 @@ All configuration lives under a unified Settings page:
 - **Accessibility**: axe-core
 - **Database**: PostgreSQL + Drizzle ORM
 - **Auth**: better-auth (email/password with Argon2, GitHub, GitLab, Google OAuth)
-- **AI**: Claude (Agent SDK, CLI, OpenRouter, direct Anthropic API), Ollama
+- **AI**: Claude (Agent SDK, CLI, OpenRouter, direct Anthropic API), OpenAI, Ollama
 - **MCP**: `@lastest/mcp-server` for AI agent integration
 - **OCR Fallback**: Tesseract.js
 - **Test Data**: Google Sheets integration
@@ -769,6 +776,15 @@ NEXT_PUBLIC_BASE_URL=             # Base URL for API calls
 - [x] Success criteria tab (parsed assertion tracking with pass/fail per `expect()`)
 - [x] Selector stats & recommendations (auto-suggest enable/disable/reorder)
 - [x] Storage state management (browser state persistence for auth flows)
+- [x] OpenAI provider (6th AI provider)
+- [x] Agent monitoring & activity feed (real-time SSE tracking of Play Agent sessions)
+- [x] Codebase intelligence (auto-detect project context for AI prompts)
+- [x] Bug reports (in-app reporting with auto-captured context + GitHub issue creation)
+- [x] Review todos (branch-specific reviewer feedback tracking)
+- [x] GitHub issues integration (cached issues for analytics and bug report linking)
+- [x] DB-backed runner commands (persistent command queue replacing in-memory approach)
+- [x] Embedded session lifecycle management (claim/release with status tracking)
+- [ ] Gamification / "Beat the Bot" (scoring, seasons, leaderboards, Bug Blitz — in progress)
 
 
 ---
