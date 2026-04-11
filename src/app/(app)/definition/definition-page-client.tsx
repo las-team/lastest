@@ -32,7 +32,8 @@ import { AIScanRoutesDialog } from '@/components/ai/ai-scan-routes-dialog';
 import { ImportFromSpecDialog } from '@/components/ai/import-from-spec-dialog';
 import { CodeDiffScanDialog } from '@/components/ai/code-diff-scan-dialog';
 import { createArea, deleteArea, deleteAreaWithContents, moveTestToArea, moveSuiteToArea, moveArea, exportAllPlans, updateAreaPlan, updateArea } from '@/server/actions/areas';
-import { deleteTests, restoreTests, permanentlyDeleteTests, getTest, createTest, getTestDetailData } from '@/server/actions/tests';
+import { deleteTests, restoreTests, permanentlyDeleteTests, getTest, getTestDetailData } from '@/server/actions/tests';
+import { createPlaceholderTestCase } from '@/server/actions/specs';
 import { TestDetailClient } from '@/app/(app)/tests/[id]/test-detail-client';
 import { runTests } from '@/server/actions/runs';
 import { createAndRunBuild } from '@/server/actions/builds';
@@ -41,7 +42,6 @@ import { startRemoteRouteScan, generateBasicTests } from '@/server/actions/scann
 import { toast } from 'sonner';
 import { downloadMarkdown, timeAgo } from '@/lib/utils';
 import { cn } from '@/lib/utils';
-import { PLACEHOLDER_CODE } from '@/lib/constants/placeholder';
 import Link from 'next/link';
 import {
   FolderSearch,
@@ -223,9 +223,13 @@ export function DefinitionPageClient({
     setIsEditingArea(false);
     setIsCreatingPlaceholder(false);
     setNewPlaceholderName('');
-    setOpenTestId(null);
-    setOpenTestData(null);
-    setOpenTestDetailData(null);
+
+    // Don't clear openTestId when selecting a test — handleOpenTest manages it
+    if (treeSelection?.type !== 'test') {
+      setOpenTestId(null);
+      setOpenTestData(null);
+      setOpenTestDetailData(null);
+    }
 
     // Populate area edit fields
     if (treeSelection?.type === 'area') {
@@ -369,6 +373,11 @@ export function DefinitionPageClient({
         if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
       }, 50);
     }
+    if (sel?.type === 'test') {
+      if (activeTab !== 'tests') setActiveTab('tests');
+      handleOpenTest(sel.id);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab]);
 
   const handleNewArea = (parentId?: string) => {
@@ -500,13 +509,12 @@ export function DefinitionPageClient({
     if (!treeSelection || treeSelection.type !== 'area' || !newPlaceholderName.trim()) return;
     setIsSubmittingPlaceholder(true);
     try {
-      await createTest({
-        name: newPlaceholderName.trim(),
-        code: PLACEHOLDER_CODE,
-        isPlaceholder: true,
+      await createPlaceholderTestCase(
         repositoryId,
-        functionalAreaId: treeSelection.id,
-      });
+        treeSelection.id,
+        newPlaceholderName.trim(),
+        null,
+      );
       setNewPlaceholderName('');
       setIsCreatingPlaceholder(false);
       router.refresh();
@@ -1331,7 +1339,7 @@ export function DefinitionPageClient({
                           repositoryId={repositoryId}
                           tests={testsByArea.get(area.id) || []}
                           hasAgentPlan={!!area.agentPlan}
-                          onOpenTest={(testId) => { setActiveTab('tests'); handleOpenTest(testId); }}
+                          onOpenTest={(testId) => { setTreeSelection({ type: 'test', id: testId }); setActiveTab('tests'); handleOpenTest(testId); }}
                         />
                       </div>
                     </div>

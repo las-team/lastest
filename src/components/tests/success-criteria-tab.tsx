@@ -103,6 +103,9 @@ function resolveStepLabel(label: string, code: string, baseUrl: string | null | 
     resolved = `Navigate to ${baseUrl}`;
   }
 
+  // Resolve new Date().toISOString() references
+  resolved = resolved.replace(/new Date\(\)\.toISOString\(\)/, 'current timestamp');
+
   return resolved;
 }
 

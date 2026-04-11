@@ -9,7 +9,6 @@ import { Radio, Trash2, ArrowDown, Loader2, Play, Pause, CheckCircle2, XCircle, 
 import Link from 'next/link';
 import { ActivityEventCard } from './activity-event-card-client';
 import { useActivityFeedContext } from './activity-feed-provider-client';
-import { cancelPlayAgent } from '@/server/actions/play-agent';
 import { BrowserViewer } from '@/components/embedded-browser/browser-viewer-client';
 import { cn } from '@/lib/utils';
 import type { AgentSession } from '@/lib/db/schema';
@@ -38,13 +37,14 @@ function ActiveSessionsSection({
   expandedStream: string | null;
   setExpandedStream: (id: string | null) => void;
 }) {
-  const [sessions, setSessions] = useState<AgentSession[]>([]);
+  const [sessions, setSessions] = useState<AgentSession[] | null>(null);
   const [ebStreamUrl, setEbStreamUrl] = useState<string | null>(null);
   const [stoppingSessions, setStoppingSessions] = useState<Set<string>>(new Set());
 
   async function handleStop(sessionId: string) {
     setStoppingSessions((prev) => new Set(prev).add(sessionId));
     try {
+      const { cancelPlayAgent } = await import('@/server/actions/play-agent');
       await cancelPlayAgent(sessionId);
     } catch {
       // ignore — session may already be done
@@ -79,13 +79,19 @@ function ActiveSessionsSection({
     return () => { active = false; clearInterval(interval); };
   }, []);
 
-  if (sessions.length === 0) return null;
+  if (sessions !== null && sessions.length === 0) return null;
 
   return (
     <div className="px-4 py-2 border-b bg-muted/30">
       <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider mb-1.5">Agent Sessions</p>
+      {sessions === null && (
+        <div className="flex items-center gap-2 text-xs text-muted-foreground py-1">
+          <Loader2 className="h-3 w-3 animate-spin" />
+          <span>Loading sessions…</span>
+        </div>
+      )}
       <div className="space-y-1">
-        {sessions.map((s) => {
+        {(sessions ?? []).map((s) => {
           // Determine label and link based on session type
           const meta = s.metadata as Record<string, unknown> | null;
           const isGenerateAgent = !!(meta?.testName);

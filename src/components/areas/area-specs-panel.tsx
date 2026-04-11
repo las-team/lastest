@@ -6,9 +6,7 @@ import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { CheckCircle, Circle, Plus, Loader2, ExternalLink } from 'lucide-react';
 import { toast } from 'sonner';
-import { convertPlanToPlaceholders } from '@/server/actions/specs';
-import { createTest } from '@/server/actions/tests';
-import { PLACEHOLDER_CODE } from '@/lib/constants/placeholder';
+import { convertPlanToPlaceholders, createPlaceholderTestCase } from '@/server/actions/specs';
 import { useRouter } from 'next/navigation';
 import { Wand2 } from 'lucide-react';
 
@@ -39,14 +37,12 @@ export function AreaTestCasesPanel({ areaId, repositoryId, tests, hasAgentPlan, 
     if (!newName.trim()) return;
     setSaving(true);
     try {
-      await createTest({
-        name: newName.trim(),
-        code: PLACEHOLDER_CODE,
-        isPlaceholder: true,
+      await createPlaceholderTestCase(
         repositoryId,
-        functionalAreaId: areaId,
-        description: newDescription.trim() || null,
-      });
+        areaId,
+        newName.trim(),
+        newDescription.trim() || null,
+      );
       setNewName('');
       setNewDescription('');
       setShowAdd(false);

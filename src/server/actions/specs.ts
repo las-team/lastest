@@ -12,6 +12,7 @@ import type { AIProviderConfig, TestGenerationContext } from '@/lib/ai/types';
 import { revalidatePath } from 'next/cache';
 import { createHash } from 'crypto';
 import { getCurrentBranchForRepo } from '@/lib/git-utils';
+import { PLACEHOLDER_CODE } from '@/lib/constants/placeholder';
 
 function hashCode(code: string): string {
   return createHash('sha256').update(code).digest('hex');
@@ -96,6 +97,41 @@ export async function createStandaloneSpec(
 
   revalidatePath('/areas');
   return specId;
+}
+
+/** Create a placeholder test with a linked spec in one action */
+export async function createPlaceholderTestCase(
+  repositoryId: string,
+  functionalAreaId: string,
+  name: string,
+  description: string | null,
+): Promise<{ testId: string }> {
+  await requireRepoAccess(repositoryId);
+
+  const test = await queries.createTest({
+    repositoryId,
+    functionalAreaId,
+    name,
+    code: PLACEHOLDER_CODE,
+    description,
+    isPlaceholder: true,
+  });
+
+  const specId = await queries.createTestSpec({
+    repositoryId,
+    testId: test.id,
+    functionalAreaId,
+    title: name,
+    spec: description || name,
+    source: 'manual',
+    status: 'has_test',
+    codeHash: hashCode(PLACEHOLDER_CODE),
+  });
+  await queries.linkSpecToTest(specId, test.id);
+
+  revalidatePath('/areas');
+  revalidatePath('/definition');
+  return { testId: test.id };
 }
 
 /** Generate test code from a spec using AI, create a new test, and link it */
@@ -295,13 +331,19 @@ export async function convertPlanToPlaceholders(
   const existingTests = await queries.getTestsByFunctionalArea(functionalAreaId);
   const existingNames = new Set(existingTests.map(t => t.name.toLowerCase()));
 
-  const { PLACEHOLDER_CODE } = await import('@/lib/constants/placeholder');
+  // Build spec body with area context
+  const areaContext = [
+    area.name ? `**Area:** ${area.name}` : '',
+    area.description ? `**Description:** ${area.description}` : '',
+  ].filter(Boolean).join('\n');
 
   let created = 0;
   for (const { title, body } of items) {
     if (existingNames.has(title.toLowerCase())) continue;
 
-    await queries.createTest({
+    const specBody = [areaContext, body || title].filter(Boolean).join('\n\n');
+
+    const test = await queries.createTest({
       repositoryId,
       functionalAreaId,
       name: title,
@@ -309,6 +351,20 @@ export async function convertPlanToPlaceholders(
       description: body || title,
       isPlaceholder: true,
     });
+
+    // Create linked testSpec so the Spec tab is populated
+    const specId = await queries.createTestSpec({
+      repositoryId,
+      testId: test.id,
+      functionalAreaId,
+      title,
+      spec: specBody,
+      source: 'planner',
+      status: 'has_test',
+      codeHash: hashCode(PLACEHOLDER_CODE),
+    });
+    await queries.linkSpecToTest(specId, test.id);
+
     created++;
   }
 

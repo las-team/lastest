@@ -78,21 +78,25 @@ function classifyStatement(code: string): DebugStep['type'] {
  * Pick the most human-readable selector from a locateWithFallback JSON array.
  * Priority: role-name > id > placeholder > text > ocr-text > css-path
  */
-function extractBestSelector(code: string): { selector: string; action: string } | null {
+function extractBestSelector(code: string): { selector: string; action: string; value?: string } | null {
   const actionMatch = code.match(/locateWithFallback\s*\(\s*page\s*,\s*\[(.+?)\]\s*,\s*['"](\w+)['"]/);
   if (!actionMatch) return null;
 
   const action = actionMatch[2];
   const jsonStr = '[' + actionMatch[1] + ']';
 
+  // Extract fill/selectOption value (4th argument) — match after the action name
+  const valueMatch = code.match(/,\s*'(?:fill|selectOption)'\s*,\s*'((?:[^'\\]|\\.)*)'/);
+  const actionValue = valueMatch ? valueMatch[1].replace(/\\'/g, "'").replace(/\\\\/g, '\\') : undefined;
+
   let selectors: { type: string; value: string }[];
   try {
     selectors = JSON.parse(jsonStr);
   } catch {
-    return { selector: '...', action };
+    return { selector: '...', action, value: actionValue };
   }
 
-  const priority = ['role-name', 'id', 'placeholder', 'text', 'ocr-text', 'css-path'];
+  const priority = ['role-name', 'data-testid', 'id', 'aria-label', 'name', 'placeholder', 'text', 'ocr-text', 'css-path'];
   selectors.sort((a, b) => {
     const ai = priority.indexOf(a.type);
     const bi = priority.indexOf(b.type);
@@ -100,31 +104,45 @@ function extractBestSelector(code: string): { selector: string; action: string }
   });
 
   const best = selectors[0];
-  if (!best) return { selector: '...', action };
+  if (!best) return { selector: '...', action, value: actionValue };
+
+  const result = (selector: string) => ({ selector, action, value: actionValue });
 
   // Format the selector for display
   if (best.type === 'role-name') {
     const m = best.value.match(/^role=(\w+)\[name="(.+)"\]$/);
-    if (m) return { selector: `${m[1]} "${m[2]}"`, action };
-    return { selector: best.value, action };
+    if (m) return result(`${m[1]} "${m[2]}"`);
+    return result(best.value);
   }
-  if (best.type === 'id') return { selector: best.value, action };
+  if (best.type === 'data-testid') {
+    const m = best.value.match(/\[data-testid="(.+?)"\]/);
+    return result(m ? `testid "${m[1]}"` : best.value);
+  }
+  if (best.type === 'id') return result(best.value);
+  if (best.type === 'aria-label') {
+    const m = best.value.match(/\[aria-label="(.+?)"\]/);
+    return result(m ? `"${m[1]}"` : best.value);
+  }
+  if (best.type === 'name') {
+    const m = best.value.match(/\[name="(.+?)"\]/);
+    return result(m ? `name "${m[1]}"` : best.value);
+  }
   if (best.type === 'placeholder') {
     const m = best.value.match(/\[placeholder="(.+?)"\]/);
-    return { selector: m ? `"${m[1]}"` : best.value, action };
+    return result(m ? `"${m[1]}"` : best.value);
   }
   if (best.type === 'text') {
     const m = best.value.match(/text="(.+?)"/);
-    return { selector: m ? `"${m[1]}"` : best.value, action };
+    return result(m ? `"${m[1]}"` : best.value);
   }
   if (best.type === 'ocr-text') {
     const m = best.value.match(/ocr-text="(.+?)"/);
-    return { selector: m ? `"${m[1]}"` : best.value, action };
+    return result(m ? `"${m[1]}"` : best.value);
   }
 
   // css-path: truncate if long
   const css = best.value.length > 30 ? best.value.slice(0, 27) + '...' : best.value;
-  return { selector: css, action };
+  return result(css);
 }
 
 /**
@@ -143,6 +161,9 @@ function extractLocatorTarget(code: string): string | null {
 
   const getByPlaceholder = code.match(/\.getByPlaceholder\s*\(\s*['"](.+?)['"]/);
   if (getByPlaceholder) return `"${getByPlaceholder[1]}"`;
+
+  const getByTestId = code.match(/\.getByTestId\s*\(\s*['"](.+?)['"]/);
+  if (getByTestId) return `testid "${getByTestId[1]}"`;
 
   const locator = code.match(/\.locator\s*\(\s*['"](.+?)['"]/);
   if (locator) {
@@ -215,6 +236,14 @@ function generateLabel(code: string, type: DebugStep['type']): string {
     if (/locateWithFallback/.test(trimmed)) {
       const info = extractBestSelector(trimmed);
       if (info) {
+        if (info.action === 'fill' && info.value) {
+          const truncVal = info.value.length > 20 ? info.value.slice(0, 17) + '...' : info.value;
+          return `Fill ${info.selector} "${truncVal}"`;
+        }
+        if (info.action === 'selectOption' && info.value) {
+          const truncVal = info.value.length > 20 ? info.value.slice(0, 17) + '...' : info.value;
+          return `Select "${truncVal}" in ${info.selector}`;
+        }
         const actionLabel = info.action === 'click' ? 'Click' : info.action === 'fill' ? 'Fill' : info.action === 'selectOption' ? 'Select' : info.action;
         return `${actionLabel} ${info.selector}`;
       }
@@ -233,6 +262,7 @@ function generateLabel(code: string, type: DebugStep['type']): string {
     if (/replayCursorPath/.test(trimmed)) return 'Cursor path';
 
     // Keyboard
+    if (/\.keyboard\.type\s*\(\s*new\s+Date\(\)\.toISOString\(\)/.test(trimmed)) return 'Type current timestamp';
     const typeMatch = trimmed.match(/\.keyboard\.type\s*\(\s*['"]([^'"]{0,30})['"]/);
     if (typeMatch) return `Type "${typeMatch[1]}"`;
     const pressMatch = trimmed.match(/\.press\s*\(\s*['"]([^'"]+)['"]/);
@@ -250,10 +280,13 @@ function generateLabel(code: string, type: DebugStep['type']): string {
     if (target) {
       if (/\.click\s*\(/.test(trimmed)) return `Click ${target}`;
       if (/\.fill\s*\(/.test(trimmed)) {
-        const val = trimmed.match(/\.fill\s*\(\s*['"](.{0,20})/);
+        const val = trimmed.match(/\.fill\s*\(\s*['"]([^'"]{0,20})/);
         return val ? `Fill ${target} "${val[1]}"` : `Fill ${target}`;
       }
-      if (/\.selectOption\s*\(/.test(trimmed)) return `Select option in ${target}`;
+      if (/\.selectOption\s*\(/.test(trimmed)) {
+        const optVal = trimmed.match(/\.selectOption\s*\(\s*['"]([^'"]{0,20})/);
+        return optVal ? `Select "${optVal[1]}" in ${target}` : `Select option in ${target}`;
+      }
       if (/\.hover\s*\(/.test(trimmed)) return `Hover ${target}`;
       if (/\.check\s*\(/.test(trimmed)) return `Check ${target}`;
       if (/\.uncheck\s*\(/.test(trimmed)) return `Uncheck ${target}`;
@@ -262,17 +295,23 @@ function generateLabel(code: string, type: DebugStep['type']): string {
       return `Interact with ${target}`;
     }
 
+    // Try to extract any selector string from the code for fallback labels
+    const anySelectorMatch = trimmed.match(/page\s*\.\s*\w+\s*\(\s*['"]([^'"]{1,40})['"]/);
+    const fallbackTarget = anySelectorMatch
+      ? (anySelectorMatch[1].length > 30 ? anySelectorMatch[1].slice(0, 27) + '...' : anySelectorMatch[1])
+      : null;
+
     // Plain click/fill with locator string
     const clickMatch = trimmed.match(/\.click\s*\(/);
     if (clickMatch) {
       const locMatch = trimmed.match(/\.locator\s*\(\s*['"](.+?)['"]\s*\)/);
       if (locMatch) return `Click ${locMatch[1].length > 30 ? locMatch[1].slice(0, 27) + '...' : locMatch[1]}`;
-      return 'Click';
+      return fallbackTarget ? `Click ${fallbackTarget}` : 'Click';
     }
     const fillMatch = trimmed.match(/\.fill\s*\(\s*['"](.{0,20})/);
-    if (fillMatch) return `Fill "${fillMatch[1]}"`;
+    if (fillMatch) return fallbackTarget ? `Fill ${fallbackTarget} "${fillMatch[1]}"` : `Fill "${fillMatch[1]}"`;
 
-    return 'Action';
+    return fallbackTarget ? `Action on ${fallbackTarget}` : 'Action';
   }
 
   // For waits — show what's waited on

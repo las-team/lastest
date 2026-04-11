@@ -18,11 +18,9 @@ GH action edit
 Fix play specs -> test specs route
 ## features
 improve Step naming
-play all tests in an area as build
+Improve selector reliability for manually recorded tests
 (low) Every button is green, multiple primary actions, keep clicking on run test instead of save
-Areas and tests being separate functions is REALLY ANNOYING.
 Gamify it - beat the bot approach, score, team leaderboard, season, bug blitz support. Minus points for flaky tests. Plus points for created tests that find bugs. Share you beat a bot by xy. Top scorers can select from shop - integrate, set limit budget.
-
 ## ideas
 Non-AI test triage,  5-category classification with confidence scoring, maps to article's "failure diagnosis"  recommendation       
 Test governance /        │ AI generates tests fast → need redundancy         │ Medium — extend coverage analytics │

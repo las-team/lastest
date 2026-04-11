@@ -852,7 +852,7 @@ export async function createPlaceholdersFromStories(
         }
 
         try {
-          await queries.createTest({
+          const test = await queries.createTest({
             repositoryId,
             functionalAreaId: area.id,
             name: testName,
@@ -861,6 +861,29 @@ export async function createPlaceholdersFromStories(
             isPlaceholder: true,
             targetUrl: options?.targetUrl || null,
           });
+
+          // Create linked testSpec with story + area context
+          const specBody = [
+            `**Area:** ${story.title}`,
+            story.description ? `**Story:** ${story.description}` : '',
+            '',
+            group.map(ac => `- ${ac.description}`).join('\n'),
+          ].filter(Boolean).join('\n');
+
+          const { createHash } = await import('crypto');
+          const codeHash = createHash('sha256').update(PLACEHOLDER_CODE).digest('hex');
+          const specId = await queries.createTestSpec({
+            repositoryId,
+            testId: test.id,
+            functionalAreaId: area.id,
+            title: testName,
+            spec: specBody,
+            source: 'planner',
+            status: 'has_test',
+            codeHash,
+          });
+          await queries.linkSpecToTest(specId, test.id);
+
           testsCreated++;
         } catch (err) {
           const msg = err instanceof Error ? err.message : 'Unknown error';

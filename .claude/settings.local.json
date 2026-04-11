@@ -174,7 +174,8 @@
       "Bash(sed -i '163s|.*|  log \"Building $IMAGE_EB:olares-v2\"|; 167s|.*|  ok \"Built $IMAGE_EB:olares-v2\"|' scripts/deploy.sh)",
       "Bash(sed -n '160,170p' scripts/deploy.sh)",
       "Bash(pnpm --filter @lastest/embedded-browser build)",
-      "Bash(PGPASSWORD=lastest psql:*)"
+      "Bash(PGPASSWORD=lastest psql:*)",
+      "WebFetch(domain:lastest.cloud)"
     ]
   },
   "disabledMcpjsonServers": [
