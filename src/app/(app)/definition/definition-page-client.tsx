@@ -4,7 +4,7 @@ import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { usePreferredRunner } from '@/hooks/use-preferred-runner';
 import { AreaTree, type TreeSelection } from '@/components/areas/area-tree';
-import { AreaSpecsPanel } from '@/components/areas/area-specs-panel';
+import { AreaTestCasesPanel } from '@/components/areas/area-specs-panel';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -41,6 +41,7 @@ import { startRemoteRouteScan, generateBasicTests } from '@/server/actions/scann
 import { toast } from 'sonner';
 import { downloadMarkdown, timeAgo } from '@/lib/utils';
 import { cn } from '@/lib/utils';
+import { PLACEHOLDER_CODE } from '@/lib/constants/placeholder';
 import Link from 'next/link';
 import {
   FolderSearch,
@@ -70,7 +71,7 @@ import {
   Save,
   ExternalLink,
 } from 'lucide-react';
-import type { FunctionalArea, Test, Route, TestSpec } from '@/lib/db/schema';
+import type { FunctionalArea, Test, Route } from '@/lib/db/schema';
 import type { FunctionalAreaWithChildren } from '@/lib/db/queries';
 
 interface TestWithStatus extends Test {
@@ -91,7 +92,6 @@ interface DefinitionPageClientProps {
   repositoryId: string;
   selectedBranch: string;
   banAiMode: boolean;
-  allSpecs: TestSpec[];
   earlyAdopterMode?: boolean;
   areas: FunctionalArea[];
   tests: TestWithStatus[];
@@ -140,7 +140,6 @@ export function DefinitionPageClient({
   repositoryId,
   selectedBranch,
   banAiMode,
-  allSpecs,
   earlyAdopterMode = false,
   areas,
   tests,
@@ -237,6 +236,14 @@ export function DefinitionPageClient({
       }
     }
   }, [treeSelection, tree]);
+
+  // Open a test on mount when ?test=<id> is present in the URL (e.g. from /tests/[id] redirect)
+  useEffect(() => {
+    const testIdParam = searchParams.get('test');
+    if (!testIdParam) return;
+    void handleOpenTest(testIdParam);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Escape key to clear tree selection
   useEffect(() => {
@@ -489,12 +496,6 @@ export function DefinitionPageClient({
     setIsEditingArea(false);
   };
 
-  const PLACEHOLDER_CODE = `export async function test(page, baseUrl, screenshotPath, stepLogger) {
-  // Placeholder test — record real interactions to replace this stub
-  await page.goto(baseUrl);
-  await page.screenshot({ path: screenshotPath });
-}`;
-
   const handleCreatePlaceholder = async () => {
     if (!treeSelection || treeSelection.type !== 'area' || !newPlaceholderName.trim()) return;
     setIsSubmittingPlaceholder(true);
@@ -703,19 +704,30 @@ export function DefinitionPageClient({
 
   const flatAreas = flattenAreas(tree);
 
-  const specsByArea = useMemo(() => {
-    const map = new Map<string, TestSpec[]>();
-    for (const spec of allSpecs) {
-      if (spec.functionalAreaId) {
-        const existing = map.get(spec.functionalAreaId) || [];
-        existing.push(spec);
-        map.set(spec.functionalAreaId, existing);
+  const testsByArea = useMemo(() => {
+    const map = new Map<string, { id: string; name: string; description: string | null; isPlaceholder: boolean }[]>();
+    function collect(areas: FunctionalAreaWithChildren[]) {
+      for (const area of areas) {
+        map.set(area.id, area.tests.map(t => ({
+          id: t.id,
+          name: t.name,
+          description: t.description,
+          isPlaceholder: t.isPlaceholder ?? false,
+        })));
+        collect(area.children);
       }
     }
+    collect(tree);
     return map;
-  }, [allSpecs]);
+  }, [tree]);
 
-  const specsWithTests = allSpecs.filter(s => s.testId != null).length;
+  const allAreaTests = useMemo(() => {
+    const all: { isPlaceholder: boolean }[] = [];
+    for (const tests of testsByArea.values()) all.push(...tests);
+    return all;
+  }, [testsByArea]);
+  const placeholderCount = allAreaTests.filter(t => t.isPlaceholder).length;
+  const realTestCount = allAreaTests.length - placeholderCount;
 
   // Collect all suites
   function collectSuites(items: FunctionalAreaWithChildren[]): SuiteItem[] {
@@ -990,132 +1002,131 @@ export function DefinitionPageClient({
                   </div>
                 )}
 
-                {/* Area Detail Card */}
-                {treeSelection?.type === 'area' && (() => {
-                  const selectedArea = findAreaInTree(tree, treeSelection.id);
-                  if (!selectedArea) return null;
-                  return (
-                    <Card className="border-border/50">
-                      <CardHeader className="flex flex-row items-center justify-between space-y-0 py-3">
-                        <CardTitle className="flex items-center gap-2 text-sm">
-                          <Folder className="h-4 w-4 text-primary" />
-                          {isEditingArea ? 'Edit Area' : selectedArea.name}
-                          {selectedArea.isRouteFolder && !isEditingArea && (
-                            <Badge variant="secondary" className="text-[10px]">Route</Badge>
-                          )}
-                        </CardTitle>
-                        {!isEditingArea ? (
-                          <div className="flex gap-1">
-                            <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => handleRunAreaAsBuild(treeSelection.id)} disabled={isRunningAreaBuild}>
-                              <Play className="h-3.5 w-3.5 mr-1" />
-                              {isRunningAreaBuild ? 'Starting...' : 'Run as Build'}
-                            </Button>
-                            <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => setIsCreatingPlaceholder(true)}>
-                              <Plus className="h-3.5 w-3.5 mr-1" />
-                              Add Test
-                            </Button>
-                            <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={() => setIsEditingArea(true)}>
-                              <Pencil className="h-3.5 w-3.5 mr-1" />
-                              Edit
-                            </Button>
-                          </div>
-                        ) : (
-                          <div className="flex gap-1">
-                            <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={handleCancelEditArea}>
-                              <X className="h-3.5 w-3.5 mr-1" />
-                              Cancel
-                            </Button>
-                            <Button size="sm" className="h-7 text-xs" onClick={handleSaveArea} disabled={isSavingArea}>
-                              <Save className="h-3.5 w-3.5 mr-1" />
-                              {isSavingArea ? 'Saving...' : 'Save'}
-                            </Button>
-                          </div>
-                        )}
-                      </CardHeader>
-                      <CardContent className="pt-0 space-y-3">
-                        {isEditingArea ? (
-                          <>
-                            <div className="space-y-1.5">
-                              <Label htmlFor="edit-area-name" className="text-xs">Name</Label>
-                              <Input id="edit-area-name" value={editAreaName} onChange={(e) => setEditAreaName(e.target.value)} className="h-8 text-sm" />
-                            </div>
-                            <div className="space-y-1.5">
-                              <Label htmlFor="edit-area-desc" className="text-xs">Description</Label>
-                              <Textarea id="edit-area-desc" value={editAreaDescription} onChange={(e) => setEditAreaDescription(e.target.value)} rows={2} className="text-sm" />
-                            </div>
-                          </>
-                        ) : (
-                          <>
-                            {selectedArea.description && (
-                              <p className="text-sm text-muted-foreground">{selectedArea.description}</p>
-                            )}
-                            {!selectedArea.description && (
-                              <p className="text-sm text-muted-foreground/60 italic">No description</p>
-                            )}
-                          </>
-                        )}
-
-                        {isCreatingPlaceholder && (
-                          <>
-                            <Separator />
-                            <div className="space-y-2">
-                              <Label htmlFor="new-placeholder" className="text-xs">New Placeholder Test</Label>
-                              <Input
-                                id="new-placeholder"
-                                value={newPlaceholderName}
-                                onChange={(e) => setNewPlaceholderName(e.target.value)}
-                                placeholder="Test name"
-                                autoFocus
-                                className="h-8 text-sm"
-                                onKeyDown={(e) => {
-                                  if (e.key === 'Enter' && newPlaceholderName.trim()) handleCreatePlaceholder();
-                                  else if (e.key === 'Escape') { setIsCreatingPlaceholder(false); setNewPlaceholderName(''); }
-                                }}
-                              />
-                              <div className="flex gap-2">
-                                <Button size="sm" className="h-7 text-xs" onClick={handleCreatePlaceholder} disabled={!newPlaceholderName.trim() || isSubmittingPlaceholder}>
-                                  <Save className="h-3.5 w-3.5 mr-1" />
-                                  {isSubmittingPlaceholder ? 'Creating...' : 'Create'}
-                                </Button>
-                                <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={() => { setIsCreatingPlaceholder(false); setNewPlaceholderName(''); }}>
-                                  Cancel
-                                </Button>
-                              </div>
-                            </div>
-                          </>
-                        )}
-                      </CardContent>
-                    </Card>
-                  );
-                })()}
-
                 {/* Test List */}
                 <Card className="border-border/50 overflow-hidden">
                   <CardHeader className="border-b border-border/50 py-3">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-3">
-                        <Checkbox
-                          checked={allFilteredSelected}
-                          onCheckedChange={toggleSelectAll}
-                          disabled={filteredTests.length === 0}
-                        />
-                        <CardTitle className="text-sm font-medium">
-                          {treeSelection?.type === 'area'
-                            ? findAreaInTree(tree, treeSelection.id)?.name || 'Tests'
-                            : 'All Tests'}
-                        </CardTitle>
-                        <span className="text-xs text-muted-foreground">{filteredTests.length}</span>
-                      </div>
-                      <div className="relative w-56">
-                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
-                        <Input
-                          placeholder="Search tests..."
-                          value={searchQuery}
-                          onChange={(e) => setSearchQuery(e.target.value)}
-                          className="pl-8 h-8 text-sm bg-background"
-                        />
-                      </div>
-                    </div>
+                    {(() => {
+                      const selectedArea = treeSelection?.type === 'area' ? findAreaInTree(tree, treeSelection.id) : null;
+                      return (
+                        <>
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-3">
+                              <Checkbox
+                                checked={allFilteredSelected}
+                                onCheckedChange={toggleSelectAll}
+                                disabled={filteredTests.length === 0}
+                              />
+                              {selectedArea ? (
+                                <>
+                                  <Folder className="h-4 w-4 text-primary" />
+                                  <CardTitle className="text-sm font-medium flex items-center gap-2">
+                                    {isEditingArea ? 'Edit Area' : selectedArea.name}
+                                    {selectedArea.isRouteFolder && !isEditingArea && (
+                                      <Badge variant="secondary" className="text-[10px]">Route</Badge>
+                                    )}
+                                  </CardTitle>
+                                </>
+                              ) : (
+                                <CardTitle className="text-sm font-medium">All Tests</CardTitle>
+                              )}
+                              <span className="text-xs text-muted-foreground">{filteredTests.length}</span>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <div className="relative w-56">
+                                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+                                <Input
+                                  placeholder="Search tests..."
+                                  value={searchQuery}
+                                  onChange={(e) => setSearchQuery(e.target.value)}
+                                  className="pl-8 h-8 text-sm bg-background"
+                                />
+                              </div>
+                              {selectedArea && !isEditingArea && (
+                                <div className="flex gap-1">
+                                  <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => handleRunAreaAsBuild(treeSelection!.id)} disabled={isRunningAreaBuild}>
+                                    <Play className="h-3.5 w-3.5 mr-1" />
+                                    {isRunningAreaBuild ? 'Starting...' : 'Run as Build'}
+                                  </Button>
+                                  <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => setIsCreatingPlaceholder(true)}>
+                                    <Plus className="h-3.5 w-3.5 mr-1" />
+                                    Add Test
+                                  </Button>
+                                  <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={() => setIsEditingArea(true)}>
+                                    <Pencil className="h-3.5 w-3.5 mr-1" />
+                                    Edit
+                                  </Button>
+                                </div>
+                              )}
+                              {selectedArea && isEditingArea && (
+                                <div className="flex gap-1">
+                                  <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={handleCancelEditArea}>
+                                    <X className="h-3.5 w-3.5 mr-1" />
+                                    Cancel
+                                  </Button>
+                                  <Button size="sm" className="h-7 text-xs" onClick={handleSaveArea} disabled={isSavingArea}>
+                                    <Save className="h-3.5 w-3.5 mr-1" />
+                                    {isSavingArea ? 'Saving...' : 'Save'}
+                                  </Button>
+                                </div>
+                              )}
+                            </div>
+                          </div>
+
+                          {selectedArea && !isEditingArea && (
+                            <div className="mt-2">
+                              {selectedArea.description ? (
+                                <p className="text-sm text-muted-foreground">{selectedArea.description}</p>
+                              ) : (
+                                <p className="text-sm text-muted-foreground/60 italic">No description</p>
+                              )}
+                            </div>
+                          )}
+
+                          {selectedArea && isEditingArea && (
+                            <div className="mt-3 space-y-3">
+                              <div className="space-y-1.5">
+                                <Label htmlFor="edit-area-name" className="text-xs">Name</Label>
+                                <Input id="edit-area-name" value={editAreaName} onChange={(e) => setEditAreaName(e.target.value)} className="h-8 text-sm" />
+                              </div>
+                              <div className="space-y-1.5">
+                                <Label htmlFor="edit-area-desc" className="text-xs">Description</Label>
+                                <Textarea id="edit-area-desc" value={editAreaDescription} onChange={(e) => setEditAreaDescription(e.target.value)} rows={2} className="text-sm" />
+                              </div>
+                            </div>
+                          )}
+
+                          {selectedArea && isCreatingPlaceholder && (
+                            <>
+                              <Separator className="my-3" />
+                              <div className="space-y-2">
+                                <Label htmlFor="new-placeholder" className="text-xs">New Placeholder Test</Label>
+                                <Input
+                                  id="new-placeholder"
+                                  value={newPlaceholderName}
+                                  onChange={(e) => setNewPlaceholderName(e.target.value)}
+                                  placeholder="Test name"
+                                  autoFocus
+                                  className="h-8 text-sm"
+                                  onKeyDown={(e) => {
+                                    if (e.key === 'Enter' && newPlaceholderName.trim()) handleCreatePlaceholder();
+                                    else if (e.key === 'Escape') { setIsCreatingPlaceholder(false); setNewPlaceholderName(''); }
+                                  }}
+                                />
+                                <div className="flex gap-2">
+                                  <Button size="sm" className="h-7 text-xs" onClick={handleCreatePlaceholder} disabled={!newPlaceholderName.trim() || isSubmittingPlaceholder}>
+                                    <Save className="h-3.5 w-3.5 mr-1" />
+                                    {isSubmittingPlaceholder ? 'Creating...' : 'Create'}
+                                  </Button>
+                                  <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={() => { setIsCreatingPlaceholder(false); setNewPlaceholderName(''); }}>
+                                    Cancel
+                                  </Button>
+                                </div>
+                              </div>
+                            </>
+                          )}
+                        </>
+                      );
+                    })()}
 
                     {/* Bulk action bar */}
                     {selectedTestIds.size > 0 && (
@@ -1292,9 +1303,9 @@ export function DefinitionPageClient({
                   <div className="text-sm text-muted-foreground">
                     {flatAreas.length} area{flatAreas.length !== 1 ? 's' : ''}
                   </div>
-                  {allSpecs.length > 0 && (
+                  {allAreaTests.length > 0 && (
                     <div className="text-sm text-muted-foreground">
-                      Spec coverage: <span className="font-medium text-foreground">{specsWithTests}/{allSpecs.length}</span> ({allSpecs.length > 0 ? Math.round((specsWithTests / allSpecs.length) * 100) : 0}%)
+                      Test case coverage: <span className="font-medium text-foreground">{realTestCount}/{allAreaTests.length}</span> ({Math.round((realTestCount / allAreaTests.length) * 100)}%)
                     </div>
                   )}
                   <Button variant="outline" size="sm" onClick={handleExportAll} disabled={isExporting || flatAreas.length === 0}>
@@ -1315,11 +1326,12 @@ export function DefinitionPageClient({
                         depth={area.depth}
                       />
                       <div className="px-4 pb-4">
-                        <AreaSpecsPanel
+                        <AreaTestCasesPanel
                           areaId={area.id}
                           repositoryId={repositoryId}
-                          specs={specsByArea.get(area.id) || []}
+                          tests={testsByArea.get(area.id) || []}
                           hasAgentPlan={!!area.agentPlan}
+                          onOpenTest={(testId) => { setActiveTab('tests'); handleOpenTest(testId); }}
                         />
                       </div>
                     </div>

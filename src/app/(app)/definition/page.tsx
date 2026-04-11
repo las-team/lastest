@@ -5,7 +5,6 @@ import {
   getTestsWithStatusByRepo,
   getUnsortedSuites,
   getSuiteTests,
-  getSpecsByRepo,
   getFunctionalAreasByRepo,
   getRoutesByRepo,
   getEnvironmentConfig,
@@ -30,11 +29,10 @@ export default async function DefinitionPage() {
     );
   }
 
-  const [tree, tests, unsortedSuitesList, allSpecs, areas, routes, envConfig, deletedTests] = await Promise.all([
+  const [tree, tests, unsortedSuitesList, areas, routes, envConfig, deletedTests] = await Promise.all([
     getFunctionalAreasTree(selectedRepo.id),
     getTestsWithStatusByRepo(selectedRepo.id),
     getUnsortedSuites(selectedRepo.id),
-    getSpecsByRepo(selectedRepo.id),
     getFunctionalAreasByRepo(selectedRepo.id),
     getRoutesByRepo(selectedRepo.id),
     getEnvironmentConfig(selectedRepo.id),
@@ -69,7 +67,6 @@ export default async function DefinitionPage() {
         repositoryId={selectedRepo.id}
         selectedBranch={selectedRepo.selectedBranch || selectedRepo.defaultBranch || 'main'}
         banAiMode={banAiMode}
-        allSpecs={allSpecs}
         earlyAdopterMode={earlyAdopter}
         areas={areas}
         tests={tests}

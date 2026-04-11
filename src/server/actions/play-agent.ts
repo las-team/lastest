@@ -1084,13 +1084,13 @@ async function runPlanWithAgents(
     areas: richAreas,
   };
 
-  // Convert area plans into individual test specs
-  const { convertPlanToSpecs } = await import('./specs');
+  // Convert area plans into placeholder tests
+  const { convertPlanToPlaceholders } = await import('./specs');
   for (const area of richAreas) {
     try {
-      await convertPlanToSpecs(area.id, repositoryId);
+      await convertPlanToPlaceholders(area.id, repositoryId);
     } catch {
-      // Non-critical — continue even if spec conversion fails for an area
+      // Non-critical — continue even if placeholder creation fails for an area
     }
   }
 
@@ -1367,14 +1367,31 @@ async function runGenerate(sessionId: string, repositoryId: string, teamId: stri
             scenarioGroup: group,
           }, { signal: combinedSignal });
           if (genResult.success && genResult.code) {
-            const test = await queries.createTest({
-              repositoryId,
-              functionalAreaId: area.id,
-              name: group.name,
-              description: group.description,
-              code: genResult.code,
-              targetUrl: baseUrl,
-            });
+            // Check for existing placeholder test to upgrade
+            const areaTests = await queries.getTestsByFunctionalArea(area.id);
+            const existingPlaceholder = areaTests.find(t =>
+              t.isPlaceholder && t.name.toLowerCase() === group.name.toLowerCase()
+            );
+
+            let test;
+            if (existingPlaceholder) {
+              await queries.updateTest(existingPlaceholder.id, {
+                code: genResult.code,
+                description: group.description,
+                targetUrl: baseUrl,
+                isPlaceholder: false,
+              });
+              test = { id: existingPlaceholder.id };
+            } else {
+              test = await queries.createTest({
+                repositoryId,
+                functionalAreaId: area.id,
+                name: group.name,
+                description: group.description,
+                code: genResult.code,
+                targetUrl: baseUrl,
+              });
+            }
             generatedTests.push({
               testId: test.id,
               name: group.name,
@@ -1382,7 +1399,7 @@ async function runGenerate(sessionId: string, repositoryId: string, teamId: stri
               code: genResult.code,
             });
             emitActivity(teamId, repositoryId, sessionId, 'artifact:created',
-              `Generator created test "${group.name}" in ${area.name}`,
+              `Generator ${existingPlaceholder ? 'upgraded placeholder' : 'created'} test "${group.name}" in ${area.name}`,
               { stepId: 'generate', agentType: 'generator', artifactType: 'test', artifactId: test.id, artifactLabel: group.name });
             // Link to matching spec if one exists
             try {

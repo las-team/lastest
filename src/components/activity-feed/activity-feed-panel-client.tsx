@@ -5,10 +5,11 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from '
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Radio, Trash2, ArrowDown, Loader2, Play, Pause, CheckCircle2, XCircle, Monitor } from 'lucide-react';
+import { Radio, Trash2, ArrowDown, Loader2, Play, Pause, CheckCircle2, XCircle, Monitor, Square } from 'lucide-react';
 import Link from 'next/link';
 import { ActivityEventCard } from './activity-event-card-client';
 import { useActivityFeedContext } from './activity-feed-provider-client';
+import { cancelPlayAgent } from '@/server/actions/play-agent';
 import { BrowserViewer } from '@/components/embedded-browser/browser-viewer-client';
 import { cn } from '@/lib/utils';
 import type { AgentSession } from '@/lib/db/schema';
@@ -30,10 +31,31 @@ function SessionStatusIcon({ status }: { status: string }) {
   }
 }
 
-function ActiveSessionsSection() {
+function ActiveSessionsSection({
+  expandedStream,
+  setExpandedStream,
+}: {
+  expandedStream: string | null;
+  setExpandedStream: (id: string | null) => void;
+}) {
   const [sessions, setSessions] = useState<AgentSession[]>([]);
-  const [expandedStream, setExpandedStream] = useState<string | null>(null);
   const [ebStreamUrl, setEbStreamUrl] = useState<string | null>(null);
+  const [stoppingSessions, setStoppingSessions] = useState<Set<string>>(new Set());
+
+  async function handleStop(sessionId: string) {
+    setStoppingSessions((prev) => new Set(prev).add(sessionId));
+    try {
+      await cancelPlayAgent(sessionId);
+    } catch {
+      // ignore — session may already be done
+    } finally {
+      setStoppingSessions((prev) => {
+        const next = new Set(prev);
+        next.delete(sessionId);
+        return next;
+      });
+    }
+  }
 
   useEffect(() => {
     let active = true;
@@ -88,6 +110,20 @@ function ActiveSessionsSection() {
               <div className="flex items-center gap-2 text-xs">
                 <SessionStatusIcon status={s.status} />
                 <span className="flex-1 truncate">{label}</span>
+                {s.status === 'active' && (
+                  <button
+                    onClick={() => handleStop(s.id)}
+                    disabled={stoppingSessions.has(s.id)}
+                    className="p-0.5 rounded hover:bg-red-500/15 text-red-500 hover:text-red-600 dark:hover:text-red-400 disabled:opacity-50"
+                    title="Stop agent"
+                  >
+                    {stoppingSessions.has(s.id) ? (
+                      <Loader2 className="h-3 w-3 animate-spin" />
+                    ) : (
+                      <Square className="h-3 w-3" />
+                    )}
+                  </button>
+                )}
                 {hasStream && (
                   <button
                     onClick={() => setExpandedStream(isExpanded ? null : s.id)}
@@ -144,6 +180,7 @@ export function ActivityFeedPanel() {
   const { isOpen, setIsOpen, events, isConnected, clearEvents } = useActivityFeedContext();
   const [filter, setFilter] = useState<FilterType>('all');
   const [autoScroll, setAutoScroll] = useState(true);
+  const [expandedStream, setExpandedStream] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
 
@@ -170,7 +207,10 @@ export function ActivityFeedPanel() {
 
   return (
     <Sheet open={isOpen} onOpenChange={setIsOpen}>
-      <SheetContent className="w-[420px] sm:w-[480px] p-0 flex flex-col">
+      <SheetContent className={cn(
+          'p-0 flex flex-col transition-[width] duration-300',
+          expandedStream ? 'w-[820px] sm:w-[900px]' : 'w-[420px] sm:w-[480px]',
+        )}>
         <SheetHeader className="px-4 pt-4 pb-3 border-b shrink-0">
           <SheetTitle className="flex items-center gap-2 text-base">
             <Radio className="h-4 w-4" />
@@ -225,7 +265,7 @@ export function ActivityFeedPanel() {
         </SheetHeader>
 
         {/* Active agent sessions */}
-        <ActiveSessionsSection />
+        <ActiveSessionsSection expandedStream={expandedStream} setExpandedStream={setExpandedStream} />
 
         {/* Timeline */}
         <ScrollArea className="flex-1">

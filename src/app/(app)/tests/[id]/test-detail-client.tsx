@@ -18,7 +18,7 @@ import {
 import { Input } from '@/components/ui/input';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { Textarea } from '@/components/ui/textarea';
-import { Play, Trash2, Copy, Edit2, Clock, CheckCircle, XCircle, X, Save, Wrench, Wand2, Loader2, History, RotateCcw, ChevronDown, ChevronRight, ChevronUp, Monitor, Video, AlertTriangle, Image, Bug, GitBranch, GitCommit, Tv2, Code2, Maximize2, Minimize2 } from 'lucide-react';
+import { Play, Trash2, Copy, Edit2, Clock, CheckCircle, XCircle, X, Save, Wrench, Wand2, Loader2, History, RotateCcw, ChevronDown, ChevronRight, ChevronUp, Monitor, Video, AlertTriangle, Image, Bug, GitBranch, GitCommit, Tv2, Code2, Maximize2, Minimize2, Sparkles } from 'lucide-react';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -27,7 +27,7 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { deleteTest, updateTest, getTestVersionHistory, restoreTestVersion, getVisualDiffsForTestResult, restoreTest, permanentlyDeleteTest, cloneTest } from '@/server/actions/tests';
 import { runTests, getJobStatus } from '@/server/actions/runs';
-import { aiFixTest, aiEnhanceTest, updateTestCode } from '@/server/actions/ai';
+import { aiFixTest, aiEnhanceTest, updateTestCode, startGeneratePlaceholderTestAgent } from '@/server/actions/ai';
 import { toast } from 'sonner';
 import { useNotifyJobStarted } from '@/components/queue/job-polling-context';
 import { ExecutionTargetSelector } from '@/components/execution/execution-target-selector';
@@ -278,6 +278,7 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
   // AI Fix/Enhance states
   const [isFixing, setIsFixing] = useState(false);
   const [isEnhancing, setIsEnhancing] = useState(false);
+  const [isGeneratingPlaceholder, setIsGeneratingPlaceholder] = useState(false);
   const [enhancePrompt, setEnhancePrompt] = useState('');
 
   // Version history state
@@ -778,13 +779,47 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
                   {test.description}
                 </div>
               )}
-              <Button
-                size="sm"
-                onClick={() => router.push(`/record?rerecordId=${test.id}`)}
-              >
-                <Video className="h-4 w-4 mr-2" />
-                Record Now
-              </Button>
+              <div className="flex items-center gap-2">
+                <Button
+                  size="sm"
+                  onClick={() => router.push(`/record?rerecordId=${test.id}`)}
+                >
+                  <Video className="h-4 w-4 mr-2" />
+                  Record Now
+                </Button>
+                {!banAiMode && repositoryId && (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={isGeneratingPlaceholder}
+                    onClick={async () => {
+                      setIsGeneratingPlaceholder(true);
+                      try {
+                        const result = await startGeneratePlaceholderTestAgent({
+                          testId: test.id,
+                          repositoryId: repositoryId!,
+                        });
+                        if (result.success) {
+                          toast.success('Test generation started — check the activity feed for progress');
+                        } else {
+                          toast.error(result.error || 'Failed to start AI generation');
+                        }
+                      } catch {
+                        toast.error('Failed to start AI generation');
+                      } finally {
+                        setIsGeneratingPlaceholder(false);
+                      }
+                    }}
+                  >
+                    {isGeneratingPlaceholder ? (
+                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    ) : (
+                      <Sparkles className="h-4 w-4 mr-2" />
+                    )}
+                    {isGeneratingPlaceholder ? 'Generating...' : 'Generate with AI'}
+                  </Button>
+                )}
+              </div>
             </CardContent>
           </Card>
         )}

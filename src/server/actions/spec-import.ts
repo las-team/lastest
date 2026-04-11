@@ -790,11 +790,7 @@ export async function generateTestsFromStories(
 // Step 3b: Create placeholder tests (no AI)
 // ============================================
 
-const PLACEHOLDER_CODE = `export async function test(page, baseUrl, screenshotPath, stepLogger) {
-  // Placeholder test — record real interactions to replace this stub
-  await page.goto(baseUrl);
-  await page.screenshot({ path: screenshotPath });
-}`;
+import { PLACEHOLDER_CODE } from '@/lib/constants/placeholder';
 
 export async function createPlaceholdersFromStories(
   repositoryId: string,

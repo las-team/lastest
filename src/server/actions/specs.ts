@@ -259,6 +259,64 @@ export async function convertPlanToSpecs(
   return { created };
 }
 
+/** Parse an area's agentPlan markdown into individual placeholder tests */
+export async function convertPlanToPlaceholders(
+  functionalAreaId: string,
+  repositoryId: string,
+): Promise<{ created: number }> {
+  await requireRepoAccess(repositoryId);
+
+  const area = await queries.getFunctionalArea(functionalAreaId);
+  if (!area?.agentPlan) return { created: 0 };
+
+  // Parse bullets/numbered items from plan markdown
+  const lines = area.agentPlan.split('\n');
+  const items: { title: string; body: string }[] = [];
+  let currentTitle = '';
+  let currentBody: string[] = [];
+
+  for (const line of lines) {
+    const match = line.match(/^(?:\d+[\.\)]\s*|\-\s+|\*\s+)\*{0,2}(.+?)\*{0,2}\s*$/);
+    if (match) {
+      if (currentTitle) {
+        items.push({ title: currentTitle, body: currentBody.join('\n').trim() });
+      }
+      currentTitle = match[1].replace(/\*\*/g, '').trim();
+      currentBody = [];
+    } else if (currentTitle && line.trim()) {
+      currentBody.push(line.trim());
+    }
+  }
+  if (currentTitle) {
+    items.push({ title: currentTitle, body: currentBody.join('\n').trim() });
+  }
+
+  // Deduplicate against existing tests in this area
+  const existingTests = await queries.getTestsByFunctionalArea(functionalAreaId);
+  const existingNames = new Set(existingTests.map(t => t.name.toLowerCase()));
+
+  const { PLACEHOLDER_CODE } = await import('@/lib/constants/placeholder');
+
+  let created = 0;
+  for (const { title, body } of items) {
+    if (existingNames.has(title.toLowerCase())) continue;
+
+    await queries.createTest({
+      repositoryId,
+      functionalAreaId,
+      name: title,
+      code: PLACEHOLDER_CODE,
+      description: body || title,
+      isPlaceholder: true,
+    });
+    created++;
+  }
+
+  revalidatePath('/areas');
+  revalidatePath('/definition');
+  return { created };
+}
+
 /** Check if a test's code has drifted from its spec */
 export async function detectSpecDrift(testId: string): Promise<{ isDrifted: boolean; specId?: string }> {
   await requireTeamAccess();

@@ -349,6 +349,160 @@ export async function startGenerateTestAgent(data: {
   }
 }
 
+export async function startGeneratePlaceholderTestAgent(data: {
+  testId: string;
+  repositoryId: string;
+}): Promise<{ success: boolean; sessionId?: string; error?: string }> {
+  const { team } = await requireRepoAccess(data.repositoryId);
+  const teamId = team?.id ?? '';
+
+  try {
+    const test = await queries.getTest(data.testId);
+    if (!test) return { success: false, error: 'Test not found' };
+
+    // Build prompt from test description + area context
+    const promptParts: string[] = [];
+    if (test.description) promptParts.push(test.description);
+
+    if (test.functionalAreaId) {
+      const area = await queries.getFunctionalArea(test.functionalAreaId);
+      if (area?.description) promptParts.push(`Area: ${area.name}\nArea Description: ${area.description}`);
+      if (area?.agentPlan) promptParts.push(`Test Plan:\n${area.agentPlan}`);
+    }
+
+    if (promptParts.length === 0) promptParts.push(`Generate a test for: ${test.name}`);
+    const userPrompt = promptParts.join('\n\n');
+
+    const steps: AgentStepState[] = [{
+      id: 'generate',
+      status: 'active',
+      label: 'Generate Test',
+      description: `Generating "${test.name}" from placeholder via MCP exploration`,
+      startedAt: new Date().toISOString(),
+    }];
+
+    const session = await queries.createAgentSession({
+      repositoryId: data.repositoryId,
+      teamId: teamId || null,
+      status: 'active',
+      currentStepId: 'generate',
+      steps,
+      metadata: { testName: test.name, testId: data.testId, userPrompt, streamUrl: null } as Record<string, unknown>,
+    });
+
+    emitAndPersistActivityEvent({
+      teamId,
+      repositoryId: data.repositoryId,
+      sessionId: session.id,
+      sourceType: 'generate_agent',
+      eventType: 'session:start',
+      summary: `Generating placeholder test "${test.name}"`,
+      stepId: null, agentType: 'generator', detail: null,
+      artifactType: null, artifactId: null, artifactLabel: null,
+      durationMs: null, promptLogId: null,
+    }).catch(() => {});
+
+    // Fire-and-forget background execution
+    (async () => {
+      const startTime = Date.now();
+      try {
+        const eb = await findAvailableEmbeddedBrowser();
+        if (eb) {
+          console.log(`[GeneratePlaceholderAgent] Using embedded browser CDP: ${eb.cdpUrl}, stream: ${eb.streamUrl}`);
+          await queries.updateAgentSession(session.id, {
+            metadata: { ...session.metadata, streamUrl: eb.streamUrl } as Record<string, unknown>,
+          }).catch(() => {});
+        }
+
+        const result = await agentCreateTest(data.repositoryId, {
+          userPrompt,
+          testName: test.name,
+          targetUrl: test.targetUrl ?? undefined,
+          routePath: test.targetUrl ?? undefined,
+          functionalAreaId: test.functionalAreaId ?? undefined,
+        }, { cdpEndpoint: eb?.cdpUrl });
+
+        if (!result.success || !result.code) {
+          throw new Error(result.error || 'Generator agent produced no test code');
+        }
+
+        // Update existing test instead of creating a new one
+        await queries.updateTestWithVersion(data.testId, {
+          code: result.code,
+          isPlaceholder: false,
+        }, 'ai_generated');
+
+        await queries.updateAgentSession(session.id, {
+          status: 'completed',
+          completedAt: new Date(),
+          steps: [{
+            ...steps[0],
+            status: 'completed',
+            completedAt: new Date().toISOString(),
+            result: { testId: data.testId },
+          }],
+        });
+
+        emitAndPersistActivityEvent({
+          teamId,
+          repositoryId: data.repositoryId,
+          sessionId: session.id,
+          sourceType: 'generate_agent',
+          eventType: 'artifact:created',
+          summary: `Generated test "${test.name}" from placeholder`,
+          stepId: 'generate', agentType: 'generator', detail: null,
+          artifactType: 'test', artifactId: data.testId, artifactLabel: test.name,
+          durationMs: Date.now() - startTime, promptLogId: null,
+        }).catch(() => {});
+
+        emitAndPersistActivityEvent({
+          teamId,
+          repositoryId: data.repositoryId,
+          sessionId: session.id,
+          sourceType: 'generate_agent',
+          eventType: 'session:complete',
+          summary: `Placeholder test "${test.name}" generated successfully`,
+          stepId: null, agentType: null, detail: null,
+          artifactType: null, artifactId: null, artifactLabel: null,
+          durationMs: Date.now() - startTime, promptLogId: null,
+        }).catch(() => {});
+
+        revalidatePath('/definition');
+        revalidatePath('/tests');
+      } catch (err) {
+        console.error('[GeneratePlaceholderAgent] Error:', err);
+        await queries.updateAgentSession(session.id, {
+          status: 'failed',
+          completedAt: new Date(),
+          steps: [{
+            ...steps[0],
+            status: 'failed',
+            completedAt: new Date().toISOString(),
+            error: err instanceof Error ? err.message : String(err),
+          }],
+        }).catch(() => {});
+
+        emitAndPersistActivityEvent({
+          teamId,
+          repositoryId: data.repositoryId,
+          sessionId: session.id,
+          sourceType: 'generate_agent',
+          eventType: 'session:error',
+          summary: `Failed to generate placeholder test "${test.name}": ${err instanceof Error ? err.message : String(err)}`,
+          stepId: null, agentType: null, detail: null,
+          artifactType: null, artifactId: null, artifactLabel: null,
+          durationMs: Date.now() - startTime, promptLogId: null,
+        }).catch(() => {});
+      }
+    })();
+
+    return { success: true, sessionId: session.id };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Failed to start test generation';
+    return { success: false, error: message };
+  }
+}
+
 export async function aiFixAllFailedTests(
   repositoryId: string,
 ): Promise<{ success: boolean; fixed: number; failed: number; errors: string[] }> {

@@ -1,5 +1,4 @@
 ## tasks
-move tests to las-team repo on prod
 Videos explaining use
     Saját demo felvétele ahol van egy laza scripted előre megírva, ami egy törött vibe kódolt appon bemutatja hogy lépésről lépésre hogyan használod a Lastestet. A végén elmondani hogy a runnereket bárhol tudja futtatni, de itt a cloud instance, like and subscribe, kommentelj, kérdezz, nagyon lelkes a szerző.
     sdfsd
@@ -15,12 +14,9 @@ MCP
 triage
 ally
 GH action edit
-agent playback window
 ## bugs
 Fix play specs -> test specs route
-
 ## features
-Merge placeholder tests and specs
 improve Step naming
 play all tests in an area as build
 (low) Every button is green, multiple primary actions, keep clicking on run test instead of save
