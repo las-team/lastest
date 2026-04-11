@@ -36,7 +36,6 @@ debug - googlesheet data
 cookie sharing from host machine?
 Tweet about us
 Content comparison - compare text in 2 setups
-Explore/Cover instead of Areas
 Component specific testing
 Figma plugin
 Generate test data with AI

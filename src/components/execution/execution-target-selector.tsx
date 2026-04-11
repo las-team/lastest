@@ -95,15 +95,13 @@ export function ExecutionTargetSelector({
         <SelectValue placeholder="Select target" />
       </SelectTrigger>
       <SelectContent>
-        {/* Auto option — uses fallback chain */}
-        {disableLocal && (
-          <SelectItem value="auto">
-            <div className="flex items-center gap-2">
-              <Zap className="h-4 w-4 text-blue-500" />
-              <span>Auto</span>
-            </div>
-          </SelectItem>
-        )}
+        {/* Auto option — uses fallback chain (always available as default) */}
+        <SelectItem value="auto">
+          <div className="flex items-center gap-2">
+            <Zap className="h-4 w-4 text-blue-500" />
+            <span>Auto</span>
+          </div>
+        </SelectItem>
 
         {/* Local option — hidden when disabled */}
         {!disableLocal && (

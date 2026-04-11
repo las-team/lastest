@@ -6,5 +6,5 @@ interface TestDetailPageProps {
 
 export default async function TestDetailPage({ params }: TestDetailPageProps) {
   const { id } = await params;
-  redirect(`/definition?test=${encodeURIComponent(id)}`);
+  redirect(`/tests?test=${encodeURIComponent(id)}`);
 }

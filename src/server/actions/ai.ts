@@ -467,7 +467,6 @@ export async function startGeneratePlaceholderTestAgent(data: {
           durationMs: Date.now() - startTime, promptLogId: null,
         }).catch(() => {});
 
-        revalidatePath('/definition');
         revalidatePath('/tests');
       } catch (err) {
         console.error('[GeneratePlaceholderAgent] Error:', err);

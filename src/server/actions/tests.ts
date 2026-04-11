@@ -8,7 +8,6 @@ import { requireRepoAccess, requireTeamAccess } from '@/lib/auth';
 import type { NewTest, NewFunctionalArea } from '@/lib/db/schema';
 import { getCurrentBranchForRepo } from '@/lib/git-utils';
 import { STORAGE_DIRS } from '@/lib/storage/paths';
-import { awardScore } from '@/server/actions/gamification';
 
 export async function createFunctionalArea(data: Omit<NewFunctionalArea, 'id'>) {
   if (data.repositoryId) await requireRepoAccess(data.repositoryId);
@@ -51,30 +50,11 @@ export async function cloneTest(id: string) {
 }
 
 export async function createTest(data: Omit<NewTest, 'id' | 'createdAt' | 'updatedAt'>) {
-  const session = data.repositoryId
-    ? await requireRepoAccess(data.repositoryId)
-    : await requireTeamAccess();
-  // Gamification: stamp creator (user) — unless the caller already supplied
-  // attribution (e.g. an agent-driven flow passing createdByBotId).
-  const stamped: typeof data = {
-    ...data,
-    createdByUserId: data.createdByUserId ?? (data.createdByBotId ? null : session.user.id),
-  };
-  const result = await queries.createTest(stamped);
-  // Fire-and-forget score award — feature-flag-gated inside awardScore.
-  if (session.team) {
-    const actor = stamped.createdByBotId
-      ? { kind: 'bot' as const, id: stamped.createdByBotId }
-      : { kind: 'user' as const, id: session.user.id };
-    awardScore({
-      teamId: session.team.id,
-      kind: 'test_created',
-      actor,
-      sourceType: 'test',
-      sourceId: result.id,
-      detail: { testName: result.name },
-    }).catch((err) => console.error('[gamification] test_created award failed', err));
-  }
+  if (data.repositoryId) await requireRepoAccess(data.repositoryId);
+  else await requireTeamAccess();
+  // Gamification stamping + awarding happens inside queries.createTest via
+  // the onTestCreated hook — it handles every caller, not just this one.
+  const result = await queries.createTest(data);
   revalidatePath('/tests');
   revalidatePath('/');
   return result;

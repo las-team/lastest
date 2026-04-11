@@ -130,7 +130,7 @@ export async function createPlaceholderTestCase(
   await queries.linkSpecToTest(specId, test.id);
 
   revalidatePath('/areas');
-  revalidatePath('/definition');
+  revalidatePath('/tests');
   return { testId: test.id };
 }
 
@@ -369,7 +369,7 @@ export async function convertPlanToPlaceholders(
   }
 
   revalidatePath('/areas');
-  revalidatePath('/definition');
+  revalidatePath('/tests');
   return { created };
 }
 

@@ -107,6 +107,17 @@ export async function createTest(data: Omit<NewTest, 'id' | 'createdAt' | 'updat
     createdAt: now,
   });
 
+  // Gamification: stamp creator + award test_created. Dynamic import to break
+  // the module-eval cycle (queries → auth → queries). Never throws.
+  import('@/lib/gamification/hooks')
+    .then((m) =>
+      m.onTestCreated(id, {
+        createdByUserId: data.createdByUserId ?? null,
+        createdByBotId: data.createdByBotId ?? null,
+      }),
+    )
+    .catch(() => {});
+
   return { id, ...data, createdAt: now, updatedAt: now };
 }
 
