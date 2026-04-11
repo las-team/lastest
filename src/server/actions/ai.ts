@@ -76,13 +76,7 @@ export async function aiCreateTestCore(
     if (routeId) {
       const routeWithContext = await queries.getRouteWithContext(routeId);
       if (routeWithContext) {
-        // Determine discovery source based on available data
-        let discoverySource: DiscoverySource = 'file-scan';
-        if (routeWithContext.description && routeWithContext.testSuggestions.length > 0) {
-          discoverySource = 'spec-analysis';
-        }
-
-        enrichedContext.scanContext = buildScanContextFromRoute(routeWithContext, discoverySource);
+        enrichedContext.scanContext = buildScanContextFromRoute(routeWithContext);
 
         // Also set routePath if not already set
         if (!enrichedContext.routePath && !enrichedContext.targetUrl) {

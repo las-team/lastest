@@ -304,7 +304,7 @@ function validateAndFilterStories(stories: ExtractedUserStory[]): ExtractedUserS
 }
 
 // ============================================
-// Document Discovery (reuse spec-analysis patterns)
+// Document Discovery
 // ============================================
 
 const SPEC_PATTERNS = ['docs/', 'specs/', 'specifications/', 'requirements/', 'stories/', 'features/'];

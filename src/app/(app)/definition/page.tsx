@@ -34,7 +34,7 @@ export default async function DefinitionPage() {
     getFunctionalAreasTree(selectedRepo.id),
     getTestsWithStatusByRepo(selectedRepo.id),
     getUnsortedSuites(selectedRepo.id),
-    earlyAdopter ? getSpecsByRepo(selectedRepo.id) : Promise.resolve([]),
+    getSpecsByRepo(selectedRepo.id),
     getFunctionalAreasByRepo(selectedRepo.id),
     getRoutesByRepo(selectedRepo.id),
     getEnvironmentConfig(selectedRepo.id),

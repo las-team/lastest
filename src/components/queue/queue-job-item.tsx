@@ -8,7 +8,6 @@ import { Badge } from '@/components/ui/badge';
 
 const TYPE_LABELS: Record<string, string> = {
   ai_scan: 'AI Scan',
-  spec_analysis: 'Spec Analysis',
   build_tests: 'Build Tests',
   test_run: 'Test Run',
   build_run: 'Build',

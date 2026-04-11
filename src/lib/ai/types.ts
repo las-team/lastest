@@ -40,7 +40,7 @@ export interface AIProviderConfig {
   openaiModel?: string;
 }
 
-export type DiscoverySource = 'file-scan' | 'nav-link' | 'spec-analysis' | 'mcp-explore' | 'manual';
+export type DiscoverySource = 'file-scan' | 'nav-link' | 'mcp-explore' | 'manual';
 
 export interface ScanContext {
   discoverySource: DiscoverySource;

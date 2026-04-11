@@ -20,11 +20,12 @@ agent playback window
 Fix play specs -> test specs route
 
 ## features
+Merge placeholder tests and specs
 improve Step naming
 play all tests in an area as build
 (low) Every button is green, multiple primary actions, keep clicking on run test instead of save
 Areas and tests being separate functions is REALLY ANNOYING.
-Gamify it - beat the bot approach, score, team leaderboard, bug blitz support. Share you beat a bot by xy
+Gamify it - beat the bot approach, score, team leaderboard, season, bug blitz support. Minus points for flaky tests. Plus points for created tests that find bugs. Share you beat a bot by xy. Top scorers can select from shop - integrate, set limit budget.
 
 ## ideas
 Non-AI test triage,  5-category classification with confidence scoring, maps to article's "failure diagnosis"  recommendation       

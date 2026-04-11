@@ -283,7 +283,7 @@ function buildScanContextSection(scanContext: import('./types').ScanContext): st
     lines.push('Verify the page matches its navigation label purpose.');
   }
 
-  if (scanContext.discoverySource === 'spec-analysis' && scanContext.specDescription) {
+  if (scanContext.specDescription) {
     lines.push(`From specification: ${scanContext.specDescription}`);
     lines.push('Test the documented behavior.');
   }
@@ -588,46 +588,6 @@ Guidelines:
 - Mark routes as "static" or "dynamic" based on URL parameters
 - For dynamic routes, use bracket notation: /users/[id]
 - If changes are purely backend/non-visual, still suggest routes where the effects would be visible
-
-Return ONLY the JSON object, no explanations or markdown formatting.`;
-}
-
-export function createSpecAnalysisPrompt(specContent: string): string {
-  return `Analyze the following specification/documentation content and extract functional areas, routes, and test scenarios.
-
-Specification content:
-${specContent}
-
-Return a JSON object with this exact structure:
-{
-  "functionalAreas": [
-    {
-      "name": "Area Name",
-      "description": "Brief description of this functional area",
-      "routes": [
-        {
-          "path": "/example-path",
-          "type": "static",
-          "description": "What this route does"
-        }
-      ]
-    }
-  ],
-  "testScenarios": [
-    {
-      "route": "/example-path",
-      "suggestions": ["Test scenario 1", "Test scenario 2"]
-    }
-  ]
-}
-
-Guidelines:
-- Group related routes under logical functional areas
-- Route type should be "static" or "dynamic" (dynamic routes have parameters like [id])
-- For dynamic routes, use bracket notation: /users/[id]
-- Test scenarios should be actionable visual regression test descriptions
-- Focus on user-facing pages that benefit from visual testing
-- Extract as many meaningful routes and test scenarios as possible from the spec
 
 Return ONLY the JSON object, no explanations or markdown formatting.`;
 }

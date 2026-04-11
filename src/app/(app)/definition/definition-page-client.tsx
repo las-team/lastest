@@ -29,13 +29,13 @@ import { useNotifyJobStarted } from '@/components/queue/job-polling-context';
 import { RouteSelectorDialog } from '@/components/routes/route-selector-dialog';
 import { AICreateTestDialog } from '@/components/ai/ai-create-test-dialog';
 import { AIScanRoutesDialog } from '@/components/ai/ai-scan-routes-dialog';
-import { SpecAnalysisDialog } from '@/components/ai/spec-analysis-dialog';
 import { ImportFromSpecDialog } from '@/components/ai/import-from-spec-dialog';
 import { CodeDiffScanDialog } from '@/components/ai/code-diff-scan-dialog';
 import { createArea, deleteArea, deleteAreaWithContents, moveTestToArea, moveSuiteToArea, moveArea, exportAllPlans, updateAreaPlan, updateArea } from '@/server/actions/areas';
 import { deleteTests, restoreTests, permanentlyDeleteTests, getTest, createTest, getTestDetailData } from '@/server/actions/tests';
 import { TestDetailClient } from '@/app/(app)/tests/[id]/test-detail-client';
 import { runTests } from '@/server/actions/runs';
+import { createAndRunBuild } from '@/server/actions/builds';
 import { aiFixAllFailedTests, aiFixTests } from '@/server/actions/ai';
 import { startRemoteRouteScan, generateBasicTests } from '@/server/actions/scanner';
 import { toast } from 'sonner';
@@ -45,7 +45,6 @@ import Link from 'next/link';
 import {
   FolderSearch,
   Sparkles,
-  FileText,
   Loader2,
   BookOpen,
   GitCompare,
@@ -162,7 +161,6 @@ export function DefinitionPageClient({
   // --- Discovery state ---
   const [isScanning, setIsScanning] = useState(false);
   const [showAIScanDialog, setShowAIScanDialog] = useState(false);
-  const [showSpecAnalysisDialog, setShowSpecAnalysisDialog] = useState(false);
   const [showImportFromSpecDialog, setShowImportFromSpecDialog] = useState(false);
   const [showCodeDiffDialog, setShowCodeDiffDialog] = useState(false);
 
@@ -199,6 +197,7 @@ export function DefinitionPageClient({
   const lastSelectedIdRef = useRef<string | null>(null);
   const [executionTarget, setExecutionTarget] = usePreferredRunner();
   const [isBulkRunning, setIsBulkRunning] = useState(false);
+  const [isRunningAreaBuild, setIsRunningAreaBuild] = useState(false);
   const [isBulkDeleting, setIsBulkDeleting] = useState(false);
   const [isBulkFixing, setIsBulkFixing] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
@@ -573,6 +572,27 @@ export function DefinitionPageClient({
     }
   };
 
+  const handleRunAreaAsBuild = async (areaId: string) => {
+    const area = findAreaInTree(tree, areaId);
+    if (!area) return;
+    const testIds = Array.from(collectTestIdsFromArea(area));
+    if (testIds.length === 0) {
+      toast.error('No tests in this area');
+      return;
+    }
+    setIsRunningAreaBuild(true);
+    try {
+      const { buildId } = await createAndRunBuild('manual', testIds, repositoryId, executionTarget);
+      notifyJobStarted();
+      toast.success(`Build started with ${testIds.length} test${testIds.length === 1 ? '' : 's'}`);
+      router.push(`/builds/${buildId}`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to start build');
+    } finally {
+      setIsRunningAreaBuild(false);
+    }
+  };
+
   const handleBulkDelete = async () => {
     if (selectedTestIds.size === 0) return;
     setIsBulkDeleting(true);
@@ -746,26 +766,14 @@ export function DefinitionPageClient({
       </Tooltip>
       {!banAiMode && (
         <>
-          {earlyAdopterMode && (
-            <>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => setShowSpecAnalysisDialog(true)}>
-                    <FileText className="h-3.5 w-3.5" />
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent side="bottom">Analyze Specs</TooltipContent>
-              </Tooltip>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => setShowImportFromSpecDialog(true)}>
-                    <BookOpen className="h-3.5 w-3.5" />
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent side="bottom">Import Spec</TooltipContent>
-              </Tooltip>
-            </>
-          )}
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => setShowImportFromSpecDialog(true)}>
+                <BookOpen className="h-3.5 w-3.5" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="bottom">Import Spec</TooltipContent>
+          </Tooltip>
           <Tooltip>
             <TooltipTrigger asChild>
               <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => setShowAIScanDialog(true)}>
@@ -998,6 +1006,10 @@ export function DefinitionPageClient({
                         </CardTitle>
                         {!isEditingArea ? (
                           <div className="flex gap-1">
+                            <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => handleRunAreaAsBuild(treeSelection.id)} disabled={isRunningAreaBuild}>
+                              <Play className="h-3.5 w-3.5 mr-1" />
+                              {isRunningAreaBuild ? 'Starting...' : 'Run as Build'}
+                            </Button>
                             <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => setIsCreatingPlaceholder(true)}>
                               <Plus className="h-3.5 w-3.5 mr-1" />
                               Add Test
@@ -1280,7 +1292,7 @@ export function DefinitionPageClient({
                   <div className="text-sm text-muted-foreground">
                     {flatAreas.length} area{flatAreas.length !== 1 ? 's' : ''}
                   </div>
-                  {earlyAdopterMode && allSpecs.length > 0 && (
+                  {allSpecs.length > 0 && (
                     <div className="text-sm text-muted-foreground">
                       Spec coverage: <span className="font-medium text-foreground">{specsWithTests}/{allSpecs.length}</span> ({allSpecs.length > 0 ? Math.round((specsWithTests / allSpecs.length) * 100) : 0}%)
                     </div>
@@ -1302,16 +1314,14 @@ export function DefinitionPageClient({
                         planGeneratedAt={area.planGeneratedAt}
                         depth={area.depth}
                       />
-                      {earlyAdopterMode && (
-                        <div className="px-4 pb-4">
-                          <AreaSpecsPanel
-                            areaId={area.id}
-                            repositoryId={repositoryId}
-                            specs={specsByArea.get(area.id) || []}
-                            hasAgentPlan={!!area.agentPlan}
-                          />
-                        </div>
-                      )}
+                      <div className="px-4 pb-4">
+                        <AreaSpecsPanel
+                          areaId={area.id}
+                          repositoryId={repositoryId}
+                          specs={specsByArea.get(area.id) || []}
+                          hasAgentPlan={!!area.agentPlan}
+                        />
+                      </div>
                     </div>
                   ))}
                 </div>
@@ -1482,23 +1492,13 @@ export function DefinitionPageClient({
         branch={selectedBranch}
         onSaved={() => router.refresh()}
       />
-      {earlyAdopterMode && (
-        <>
-          <SpecAnalysisDialog
-            open={showSpecAnalysisDialog}
-            onOpenChange={setShowSpecAnalysisDialog}
-            repositoryId={repositoryId}
-            branch={selectedBranch}
-          />
-          <ImportFromSpecDialog
-            open={showImportFromSpecDialog}
-            onOpenChange={setShowImportFromSpecDialog}
-            repositoryId={repositoryId}
-            branch={selectedBranch}
-            onComplete={() => router.refresh()}
-          />
-        </>
-      )}
+      <ImportFromSpecDialog
+        open={showImportFromSpecDialog}
+        onOpenChange={setShowImportFromSpecDialog}
+        repositoryId={repositoryId}
+        branch={selectedBranch}
+        onComplete={() => router.refresh()}
+      />
       <CodeDiffScanDialog
         open={showCodeDiffDialog}
         onOpenChange={setShowCodeDiffDialog}
