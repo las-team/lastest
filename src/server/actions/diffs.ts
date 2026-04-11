@@ -9,6 +9,7 @@ import type { DiffEngineType, RegionDetectionMode } from '@/lib/db/schema';
 import fs from 'fs';
 import path from 'path';
 import { STORAGE_ROOT, STORAGE_DIRS, toRelativePath } from '@/lib/storage/paths';
+import { awardScore } from '@/server/actions/gamification';
 
 /**
  * Approve a single visual diff — core logic, no auth check.
@@ -69,8 +70,41 @@ export async function approveDiffCore(diffId: string, approvedBy?: string) {
 }
 
 export async function approveDiff(diffId: string, approvedBy?: string) {
-  await requireTeamAccess();
-  return approveDiffCore(diffId, approvedBy);
+  const session = await requireTeamAccess();
+  // Snapshot the diff BEFORE approval so we can see its classification.
+  const diffBefore = await queries.getVisualDiff(diffId);
+  const result = await approveDiffCore(diffId, approvedBy);
+
+  // Gamification: reward the approver for a real change, and credit the test's
+  // creator with catching a regression. Only fires when classification='changed'
+  // so auto-approved or flaky diffs don't generate awards. Idempotent on diffId.
+  if (session.team && diffBefore && diffBefore.classification === 'changed') {
+    awardScore({
+      teamId: session.team.id,
+      kind: 'diff_approved_as_change',
+      actor: { kind: 'user', id: session.user.id },
+      sourceType: 'diff',
+      sourceId: diffId,
+      detail: { testId: diffBefore.testId },
+    }).catch((err) => console.error('[gamification] diff_approved_as_change failed', err));
+
+    queries
+      .getTestCreator(diffBefore.testId)
+      .then((creator) => {
+        if (!creator) return;
+        awardScore({
+          teamId: session.team.id,
+          kind: 'regression_caught',
+          actor: creator,
+          sourceType: 'diff',
+          sourceId: diffId,
+          detail: { testId: diffBefore.testId },
+        }).catch((err) => console.error('[gamification] regression_caught failed', err));
+      })
+      .catch(() => {});
+  }
+
+  return result;
 }
 
 /**

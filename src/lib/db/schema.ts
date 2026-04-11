@@ -178,6 +178,9 @@ export const tests = pgTable('tests', {
   agentPrompt: text('agent_prompt'), // NL description for agent mode
   quarantined: boolean('quarantined').default(false), // quarantined tests run but don't block builds
   specId: text('spec_id'), // FK to testSpecs (back-reference for 1:1 link)
+  // Gamification attribution: who authored this test. Mutually exclusive. Nullable for legacy rows.
+  createdByUserId: text('created_by_user_id'),
+  createdByBotId: text('created_by_bot_id'),
   deletedAt: timestamp('deleted_at'),
   createdAt: timestamp('created_at'),
   updatedAt: timestamp('updated_at'),
@@ -1039,6 +1042,7 @@ export const teams = pgTable('teams', {
   selectedRepositoryId: text('selected_repository_id'),
   earlyAdopterMode: boolean('early_adopter_mode').default(false),
   banAiMode: boolean('ban_ai_mode').default(false),
+  gamificationEnabled: boolean('gamification_enabled').default(false),
   createdAt: timestamp('created_at'),
   updatedAt: timestamp('updated_at'),
 });
@@ -1743,11 +1747,20 @@ export type ActivityEventType =
   | 'mcp:tool_call'
   | 'mcp:tool_result'
   | 'mcp:tool_error'
-  | 'artifact:created';
+  | 'artifact:created'
+  // Gamification
+  | 'score:awarded'
+  | 'score:penalty'
+  | 'beat_the_bot'
+  | 'achievement:unlocked'
+  | 'season:started'
+  | 'season:ended'
+  | 'blitz:started'
+  | 'blitz:ended';
 
 export type ActivitySourceType = 'play_agent' | 'mcp_server' | 'generate_agent';
 
-export type ActivityArtifactType = 'test' | 'build' | 'area' | 'baseline' | 'suite';
+export type ActivityArtifactType = 'test' | 'build' | 'area' | 'baseline' | 'suite' | 'score';
 
 export const activityEvents = pgTable('activity_events', {
   id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
@@ -1773,3 +1786,147 @@ export const activityEvents = pgTable('activity_events', {
 
 export type ActivityEvent = typeof activityEvents.$inferSelect;
 export type NewActivityEvent = typeof activityEvents.$inferInsert;
+
+// ── Gamification: Beat-the-Bot ───────────────────────────────────────────────
+
+export type ActorKind = 'user' | 'bot';
+export type BotKind = 'play_agent' | 'generate_agent' | 'mcp_server';
+
+// Bots that compete on the leaderboard alongside humans. Seeded per team when gamification
+// is first enabled via ensureDefaultBots().
+export const bots = pgTable('bots', {
+  id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+  teamId: text('team_id').notNull(),
+  name: text('name').notNull(),
+  kind: text('kind').$type<BotKind>().notNull(),
+  avatarEmoji: text('avatar_emoji').default('🤖'),
+  createdAt: timestamp('created_at').$defaultFn(() => new Date()),
+}, (table) => ([
+  index('idx_bots_team').on(table.teamId),
+]));
+
+export type Bot = typeof bots.$inferSelect;
+export type NewBot = typeof bots.$inferInsert;
+
+export type GamificationSeasonStatus = 'active' | 'ended';
+
+export const gamificationSeasons = pgTable('gamification_seasons', {
+  id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+  teamId: text('team_id').notNull(),
+  name: text('name').notNull(),
+  startsAt: timestamp('starts_at').notNull(),
+  endsAt: timestamp('ends_at'),
+  status: text('status').$type<GamificationSeasonStatus>().notNull().default('active'),
+  createdAt: timestamp('created_at').$defaultFn(() => new Date()),
+}, (table) => ([
+  index('idx_gamification_seasons_team_status').on(table.teamId, table.status),
+]));
+
+export type GamificationSeason = typeof gamificationSeasons.$inferSelect;
+export type NewGamificationSeason = typeof gamificationSeasons.$inferInsert;
+
+export type BugBlitzStatus = 'scheduled' | 'active' | 'ended';
+
+export const bugBlitzEvents = pgTable('bug_blitz_events', {
+  id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+  teamId: text('team_id').notNull(),
+  seasonId: text('season_id').notNull(),
+  name: text('name').notNull(),
+  startsAt: timestamp('starts_at').notNull(),
+  endsAt: timestamp('ends_at').notNull(),
+  multiplier: integer('multiplier').notNull().default(200), // stored ×100, 200 = 2×
+  status: text('status').$type<BugBlitzStatus>().notNull().default('scheduled'),
+  createdAt: timestamp('created_at').$defaultFn(() => new Date()),
+}, (table) => ([
+  index('idx_bug_blitz_team_window').on(table.teamId, table.startsAt, table.endsAt),
+]));
+
+export type BugBlitzEvent = typeof bugBlitzEvents.$inferSelect;
+export type NewBugBlitzEvent = typeof bugBlitzEvents.$inferInsert;
+
+export type ScoreEventKind =
+  | 'test_created'
+  | 'diff_approved_as_change'
+  | 'regression_caught'
+  | 'triage_resolved'
+  | 'flake_penalty'
+  | 'achievement_bonus';
+
+export type ScoreEventSource = 'test' | 'diff' | 'review_todo' | 'test_result' | 'achievement';
+
+// Immutable ledger of every point change.
+// The (actor, kind, source) index supports idempotency checks in awardScore.
+export const scoreEvents = pgTable('score_events', {
+  id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+  teamId: text('team_id').notNull(),
+  seasonId: text('season_id').notNull(),
+  bugBlitzId: text('bug_blitz_id'),
+  actorKind: text('actor_kind').$type<ActorKind>().notNull(),
+  actorId: text('actor_id').notNull(), // userId or botId
+  kind: text('kind').$type<ScoreEventKind>().notNull(),
+  delta: integer('delta').notNull(), // points after multiplier, can be negative
+  baseDelta: integer('base_delta').notNull(), // rule base value, for auditing
+  multiplier: integer('multiplier').notNull().default(100), // 100 = 1×
+  sourceType: text('source_type').$type<ScoreEventSource>().notNull(),
+  sourceId: text('source_id').notNull(),
+  reason: text('reason'),
+  detail: jsonb('detail').$type<Record<string, unknown>>(),
+  createdAt: timestamp('created_at').$defaultFn(() => new Date()).notNull(),
+}, (table) => ([
+  index('idx_score_events_actor_kind_source').on(
+    table.actorKind, table.actorId, table.kind, table.sourceType, table.sourceId,
+  ),
+  index('idx_score_events_team_season_created').on(table.teamId, table.seasonId, table.createdAt),
+  index('idx_score_events_actor_season').on(table.actorKind, table.actorId, table.seasonId),
+]));
+
+export type ScoreEvent = typeof scoreEvents.$inferSelect;
+export type NewScoreEvent = typeof scoreEvents.$inferInsert;
+
+// Denormalized running totals for O(1) leaderboard reads. Rebuildable from scoreEvents.
+export const userScores = pgTable('user_scores', {
+  id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+  teamId: text('team_id').notNull(),
+  seasonId: text('season_id').notNull(),
+  actorKind: text('actor_kind').$type<ActorKind>().notNull(),
+  actorId: text('actor_id').notNull(),
+  total: integer('total').notNull().default(0),
+  testsCreated: integer('tests_created').notNull().default(0),
+  regressionsCaught: integer('regressions_caught').notNull().default(0),
+  flakesIncurred: integer('flakes_incurred').notNull().default(0),
+  lastEventAt: timestamp('last_event_at'),
+  createdAt: timestamp('created_at').$defaultFn(() => new Date()),
+  updatedAt: timestamp('updated_at').$defaultFn(() => new Date()),
+}, (table) => ([
+  index('idx_user_scores_season_actor').on(table.seasonId, table.actorKind, table.actorId),
+  index('idx_user_scores_season_total').on(table.seasonId, table.total),
+]));
+
+export type UserScore = typeof userScores.$inferSelect;
+export type NewUserScore = typeof userScores.$inferInsert;
+
+export type AchievementCode =
+  | 'first_test'
+  | 'first_regression'
+  | 'beat_bot_first'
+  | 'beat_bot_by_100'
+  | 'blitz_champion'
+  | 'season_winner';
+
+export const achievements = pgTable('achievements', {
+  id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+  teamId: text('team_id').notNull(),
+  seasonId: text('season_id').notNull(),
+  actorKind: text('actor_kind').$type<ActorKind>().notNull(),
+  actorId: text('actor_id').notNull(),
+  code: text('code').$type<AchievementCode>().notNull(),
+  detail: jsonb('detail').$type<Record<string, unknown>>(),
+  awardedAt: timestamp('awarded_at').$defaultFn(() => new Date()).notNull(),
+}, (table) => ([
+  index('idx_achievements_season_actor_code').on(
+    table.seasonId, table.actorKind, table.actorId, table.code,
+  ),
+]));
+
+export type Achievement = typeof achievements.$inferSelect;
+export type NewAchievement = typeof achievements.$inferInsert;

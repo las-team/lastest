@@ -28,6 +28,7 @@ import { createJob, createPendingJob, updateJobProgress, completeJob, failJob, i
 import { triggerAIDiffAnalysis } from './ai-diffs';
 import { forkBaselinesForBranch } from './baselines';
 import { STORAGE_DIRS, STORAGE_ROOT, toRelativePath } from '@/lib/storage/paths';
+import { awardScore } from '@/server/actions/gamification';
 import { compareBranches } from '@/lib/github/content';
 import { findAffectedTests } from '@/lib/smart-selection/file-matcher';
 
@@ -714,6 +715,30 @@ async function runBuildAsync(
       // Fire-and-forget AI diff analysis for non-unchanged diffs
       if (diffResult.classification !== 'unchanged') {
         triggerAIDiffAnalysis(diffResult.diffId, repositoryId, jobId).catch(console.error);
+      }
+
+      // Gamification: flake penalty charged to the test's author.
+      // Feature-flag-gated and daily-capped inside awardScore.
+      if (diffResult.classification === 'flaky' && repositoryId) {
+        const repoId = repositoryId; // narrow for the async closure
+        (async () => {
+          try {
+            const repo = await queries.getRepository(repoId);
+            if (!repo?.teamId) return;
+            const creator = await queries.getTestCreator(result.testId);
+            if (!creator) return;
+            await awardScore({
+              teamId: repo.teamId,
+              kind: 'flake_penalty',
+              actor: creator,
+              sourceType: 'diff',
+              sourceId: diffResult.diffId,
+              detail: { testId: result.testId, buildId },
+            });
+          } catch (err) {
+            console.error('[gamification] flake_penalty failed', err);
+          }
+        })();
       }
     }
 

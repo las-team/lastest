@@ -12,15 +12,13 @@ Teardown
 Accept Downloads
 MCP
 triage
-ally
+a11y
 GH action edit
 ## bugs
 Fix play specs -> test specs route
 ## features
-improve Step naming
 Improve selector reliability for manually recorded tests
 (low) Every button is green, multiple primary actions, keep clicking on run test instead of save
-Gamify it - beat the bot approach, score, team leaderboard, season, bug blitz support. Minus points for flaky tests. Plus points for created tests that find bugs. Share you beat a bot by xy. Top scorers can select from shop - integrate, set limit budget.
 ## ideas
 Non-AI test triage,  5-category classification with confidence scoring, maps to article's "failure diagnosis"  recommendation       
 Test governance /        │ AI generates tests fast → need redundancy         │ Medium — extend coverage analytics │

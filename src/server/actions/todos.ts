@@ -3,6 +3,7 @@
 import { revalidatePath } from 'next/cache';
 import * as queries from '@/lib/db/queries';
 import { requireTeamAccess } from '@/lib/auth';
+import { awardScore } from '@/server/actions/gamification';
 
 export async function getReviewTodos({ repositoryId, branch, buildId }: { repositoryId?: string; branch?: string; buildId?: string }) {
   await requireTeamAccess();
@@ -26,6 +27,18 @@ export async function resolveReviewTodo(todoId: string) {
     resolvedBy: session.user?.email || 'user',
     resolvedAt: new Date(),
   });
+
+  // Gamification: small reward to the resolver for clearing a triage item.
+  if (session.team) {
+    awardScore({
+      teamId: session.team.id,
+      kind: 'triage_resolved',
+      actor: { kind: 'user', id: session.user.id },
+      sourceType: 'review_todo',
+      sourceId: todoId,
+      detail: { diffId: todo.diffId, testId: todo.testId },
+    }).catch((err) => console.error('[gamification] triage_resolved failed', err));
+  }
 
   revalidatePath('/review');
   revalidatePath('/builds');

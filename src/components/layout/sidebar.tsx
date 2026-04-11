@@ -15,12 +15,14 @@ import {
   Zap,
   ClipboardCheck,
   TrendingDown,
+  Trophy,
 } from 'lucide-react';
 import Image from 'next/image';
 import { RepoSelector, CreateLocalRepoButton } from './repo-selector';
 import { QueueIndicator } from '@/components/queue/queue-indicator';
 import { ActivityFeedIndicator } from '@/components/activity-feed/activity-feed-indicator-client';
 import { UserMenu } from '@/components/auth/user-menu';
+import { UserScoreChip } from '@/components/gamification/user-score-chip';
 import type { Repository, User, Team } from '@/lib/db/schema';
 
 interface SidebarProps {
@@ -32,6 +34,10 @@ interface SidebarProps {
 
 const dashboardNav = [
   { name: 'Dashboard', href: '/', icon: LayoutDashboard },
+];
+
+const gamificationNav = [
+  { name: 'Leaderboard', href: '/leaderboard', icon: Trophy },
 ];
 
 const EARLY_ADOPTER_ITEMS = new Set(['Compose', 'Suites', 'Compare', 'Impact']);
@@ -60,6 +66,7 @@ export function Sidebar({ repos, selectedRepo, currentUser, team }: SidebarProps
   const searchParams = useSearchParams();
   const justConnected = searchParams.get('success') === 'github_connected' || searchParams.get('success') === 'gitlab_connected';
   const earlyAdopter = team?.earlyAdopterMode ?? false;
+  const gamificationEnabled = team?.gamificationEnabled ?? false;
 
   const filteredDefinitionNav = earlyAdopter
     ? definitionNav
@@ -177,6 +184,36 @@ export function Sidebar({ repos, selectedRepo, currentUser, team }: SidebarProps
             })}
           </ul>
         </div>
+
+        {gamificationEnabled && (
+          <div>
+            <p className="px-3 pb-1 text-xs font-medium text-muted-foreground uppercase tracking-wider">Arcade</p>
+            <ul className="space-y-1">
+              {gamificationNav.map((item) => {
+                const isActive = pathname === item.href || pathname.startsWith(item.href);
+                return (
+                  <li key={item.name}>
+                    <Link
+                      href={item.href}
+                      className={cn(
+                        'flex items-center gap-3 px-3 py-2 rounded-md text-sm transition-colors',
+                        isActive
+                          ? 'bg-primary text-primary-foreground'
+                          : 'hover:bg-muted'
+                      )}
+                    >
+                      <item.icon className="h-4 w-4" />
+                      {item.name}
+                    </Link>
+                  </li>
+                );
+              })}
+            </ul>
+            <div className="mt-2 px-3">
+              <UserScoreChip />
+            </div>
+          </div>
+        )}
 
       </nav>
 

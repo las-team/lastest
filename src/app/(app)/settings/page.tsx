@@ -36,6 +36,8 @@ import { TestingTemplateSelector } from '@/components/settings/testing-template-
 import { AutoApproveToggle } from '@/components/settings/auto-approve-toggle';
 import { EarlyAdopterToggle } from '@/components/settings/early-adopter-toggle';
 import { BanAiModeToggle } from '@/components/settings/ban-ai-mode-toggle';
+import { GamificationToggle } from '@/components/settings/gamification-toggle';
+import { GamificationAdminCard } from '@/components/settings/gamification-admin-card';
 import { ConnectGithubButton, ReconnectGithubLink } from '@/components/settings/connect-github-button';
 import { GithubActionsCard } from '@/components/settings/github-actions-card-client';
 import { ScheduleManagerCard } from '@/components/settings/schedule-manager-client';
@@ -83,6 +85,14 @@ export default async function SettingsPage({
         queries.getPendingInvitationsByTeam(currentUser.teamId),
       ])
     : [[], []];
+
+  // Gamification admin data
+  const [activeGamificationSeason, activeBugBlitz] = session?.team?.gamificationEnabled && teamId
+    ? await Promise.all([
+        queries.getActiveSeason(teamId),
+        queries.getActiveBugBlitz(teamId),
+      ])
+    : [null, null];
 
   const serverUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
   const earlyAdopterMode = session?.team?.earlyAdopterMode ?? false;
@@ -295,8 +305,27 @@ export default async function SettingsPage({
             <CardContent className="space-y-4">
               <EarlyAdopterToggle enabled={session?.team?.earlyAdopterMode ?? false} />
               <BanAiModeToggle enabled={session?.team?.banAiMode ?? false} />
+              <GamificationToggle enabled={session?.team?.gamificationEnabled ?? false} />
             </CardContent>
           </Card>
+
+          {/* Gamification admin controls (admin-only) */}
+          {isAdmin && (
+            <GamificationAdminCard
+              enabled={session?.team?.gamificationEnabled ?? false}
+              activeSeasonName={activeGamificationSeason?.name ?? null}
+              activeBlitz={
+                activeBugBlitz
+                  ? {
+                      id: activeBugBlitz.id,
+                      name: activeBugBlitz.name,
+                      endsAt: activeBugBlitz.endsAt,
+                      multiplier: activeBugBlitz.multiplier,
+                    }
+                  : null
+              }
+            />
+          )}
 
 
           {/* Environment Config */}

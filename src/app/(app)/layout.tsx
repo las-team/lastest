@@ -4,6 +4,7 @@ import { ContextCollectorProvider } from '@/components/bug-report/context-collec
 import { BugReportWidget } from '@/components/bug-report/bug-report-widget';
 import { ActivityFeedProvider } from '@/components/activity-feed/activity-feed-provider-client';
 import { ActivityFeedPanel } from '@/components/activity-feed/activity-feed-panel-client';
+import { CelebrationListener } from '@/components/gamification/celebration-listener-client';
 
 export default async function AppLayout({
   children,
@@ -22,6 +23,7 @@ export default async function AppLayout({
           </div>
           <BugReportWidget />
           <ActivityFeedPanel />
+          <CelebrationListener />
         </ActivityFeedProvider>
       </ContextCollectorProvider>
     </JobPollingProvider>

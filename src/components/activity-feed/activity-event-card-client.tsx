@@ -1,11 +1,12 @@
 'use client';
 
 import { useState } from 'react';
-import { ChevronDown, Radio, Cpu, Zap, AlertCircle, CheckCircle2, Clock, Wrench } from 'lucide-react';
+import { ChevronDown, Radio, Cpu, Zap, AlertCircle, CheckCircle2, Clock, Wrench, Trophy, Share2, Sparkles } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { ArtifactLink } from './artifact-link-client';
 import { cn } from '@/lib/utils';
+import { toast } from 'sonner';
 import type { ActivityEvent, PwAgentType, ActivityArtifactType } from '@/lib/db/schema';
 
 const AGENT_LABELS: Record<string, string> = {
@@ -26,7 +27,21 @@ const AGENT_BADGE_STYLES: Record<string, { bg: string; text: string }> = {
   healer: { bg: 'bg-amber-500/15', text: 'text-amber-600 dark:text-amber-400' },
 };
 
+const GAMIFICATION_EVENT_TYPES = new Set([
+  'score:awarded',
+  'score:penalty',
+  'beat_the_bot',
+  'achievement:unlocked',
+  'season:started',
+  'season:ended',
+  'blitz:started',
+  'blitz:ended',
+]);
+
 function getDotColor(event: ActivityEvent): string {
+  if (event.eventType === 'beat_the_bot' || event.eventType === 'achievement:unlocked') return 'bg-yellow-500';
+  if (event.eventType === 'score:awarded') return 'bg-primary';
+  if (event.eventType === 'score:penalty') return 'bg-orange-500';
   if (event.eventType.includes('error')) return 'bg-red-500';
   if (event.eventType === 'artifact:created') return 'bg-emerald-500';
   if (event.eventType === 'session:complete') return 'bg-green-500';
@@ -37,6 +52,10 @@ function getDotColor(event: ActivityEvent): string {
 }
 
 function EventIcon({ event }: { event: ActivityEvent }) {
+  if (event.eventType === 'beat_the_bot') return <Trophy className="h-3.5 w-3.5 text-yellow-500 shrink-0" />;
+  if (event.eventType === 'achievement:unlocked') return <Sparkles className="h-3.5 w-3.5 text-yellow-500 shrink-0" />;
+  if (event.eventType === 'score:awarded' || event.eventType === 'score:penalty')
+    return <Zap className="h-3.5 w-3.5 text-muted-foreground shrink-0" />;
   if (event.eventType.includes('error')) return <AlertCircle className="h-3.5 w-3.5 text-muted-foreground shrink-0" />;
   if (event.eventType === 'artifact:created') return <Zap className="h-3.5 w-3.5 text-muted-foreground shrink-0" />;
   if (event.eventType === 'session:complete') return <CheckCircle2 className="h-3.5 w-3.5 text-muted-foreground shrink-0" />;
@@ -44,6 +63,28 @@ function EventIcon({ event }: { event: ActivityEvent }) {
   if (event.sourceType === 'mcp_server') return <Wrench className="h-3.5 w-3.5 text-muted-foreground shrink-0" />;
   if (event.eventType === 'session:start') return <Radio className="h-3.5 w-3.5 text-muted-foreground shrink-0" />;
   return <Cpu className="h-3.5 w-3.5 text-muted-foreground shrink-0" />;
+}
+
+function ShareBeatBotButton({ event }: { event: ActivityEvent }) {
+  const detail = (event.detail as Record<string, unknown> | null) ?? {};
+  const botName = String(detail.botName ?? 'Bot');
+  const beatBy = Number(detail.beatBy ?? 0);
+  const text = `I beat ${botName} by ${beatBy} points on Lastest ★`;
+  return (
+    <button
+      type="button"
+      className="inline-flex items-center gap-1 mt-1 text-xs text-primary hover:underline"
+      onClick={() => {
+        navigator.clipboard.writeText(text).then(
+          () => toast.success('Copied to clipboard'),
+          () => toast.error('Could not copy'),
+        );
+      }}
+    >
+      <Share2 className="h-3 w-3" />
+      Share
+    </button>
+  );
 }
 
 function formatTime(date: Date | string | null): string {
@@ -93,7 +134,21 @@ export function ActivityEventCard({ event }: ActivityEventCardProps) {
               </span>
             )}
 
-            <span className="text-sm truncate">{event.summary}</span>
+            {/* Gamification badge */}
+            {GAMIFICATION_EVENT_TYPES.has(event.eventType) && (
+              <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-yellow-500/15 text-yellow-600 dark:text-yellow-400">
+                ARCADE
+              </span>
+            )}
+
+            <span
+              className={cn(
+                'text-sm truncate',
+                event.eventType === 'beat_the_bot' && 'font-bold tracking-wider',
+              )}
+            >
+              {event.summary}
+            </span>
           </div>
 
           <span className="text-[10px] text-muted-foreground whitespace-nowrap shrink-0">
@@ -102,8 +157,8 @@ export function ActivityEventCard({ event }: ActivityEventCardProps) {
           </span>
         </div>
 
-        {/* Artifact link */}
-        {hasArtifact && (
+        {/* Artifact link (skip for score events — the artifactId is just the ledger row) */}
+        {hasArtifact && event.artifactType !== 'score' && (
           <div className="mt-1">
             <ArtifactLink
               artifactType={event.artifactType as ActivityArtifactType}
@@ -112,6 +167,9 @@ export function ActivityEventCard({ event }: ActivityEventCardProps) {
             />
           </div>
         )}
+
+        {/* Share button on beat-the-bot events */}
+        {event.eventType === 'beat_the_bot' && <ShareBeatBotButton event={event} />}
 
         {/* Expandable detail */}
         {hasDetail && (
