@@ -987,6 +987,8 @@ export class PlaywrightRecorder extends EventEmitter {
         // call preventDefault() on pointerdown which suppresses mousedown entirely
         document.addEventListener('pointerdown', (e: PointerEvent) => {
           if (e.pointerType !== 'mouse') return;
+          // Skip right-click — contextmenu handler records it as 'rightclick' action
+          if (e.button === 2) return;
           const modifiers = getActiveModifiers();
           // @ts-expect-error - exposed function
           window.__recordMouseEvent?.('down', e.clientX, e.clientY, e.button, modifiers);
@@ -994,6 +996,7 @@ export class PlaywrightRecorder extends EventEmitter {
 
         document.addEventListener('pointerup', (e: PointerEvent) => {
           if (e.pointerType !== 'mouse') return;
+          if (e.button === 2) return;
           const modifiers = getActiveModifiers();
           // @ts-expect-error - exposed function
           window.__recordMouseEvent?.('up', e.clientX, e.clientY, e.button, modifiers);
@@ -1734,10 +1737,11 @@ export class PlaywrightRecorder extends EventEmitter {
       } else if (event.type === 'action') {
         const { action, selector, selectors, value, coordinates, button, modifiers, downloadWrap } = event.data;
 
-        // Skip click actions that follow mouse-up — pointer gestures already captured the click
-        // via mouse-down/up events, so the click action is a duplicate that can interfere
-        // (e.g. clicking canvas center instead of actual position, stealing focus from canvas apps)
-        if ((action === 'click' || action === 'rightclick') && lastEmittedEventType === 'mouse-up') {
+        // Skip LEFT click actions that follow mouse-up — pointer gestures already captured it
+        // via mouse-down/up events, so the click action is a duplicate that can interfere.
+        // Right-click is NOT skipped: pointer gesture handlers skip button=2, so the
+        // contextmenu 'rightclick' action is the sole record and must always be emitted.
+        if (action === 'click' && lastEmittedEventType === 'mouse-up') {
           continue;
         }
 

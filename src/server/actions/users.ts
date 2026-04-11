@@ -93,18 +93,18 @@ export async function removeUser(userId: string) {
 
 export async function cancelInvitation(invitationId: string) {
   const session = await requireTeamAdmin();
-  const invitation = await queries.getInvitationByToken(invitationId);
+  const invitation = await queries.getInvitationById(invitationId);
   if (!invitation || invitation.teamId !== session.team.id) {
     return { error: 'Invitation not found' };
   }
-  await queries.deleteInvitation(invitationId);
+  await queries.deleteInvitation(invitation.id);
   return { success: true };
 }
 
 export async function resendInvitation(invitationId: string) {
   const session = await requireTeamAdmin();
 
-  const invitation = await queries.getInvitationByToken(invitationId);
+  const invitation = await queries.getInvitationById(invitationId);
   if (!invitation) {
     return { error: 'Invitation not found' };
   }

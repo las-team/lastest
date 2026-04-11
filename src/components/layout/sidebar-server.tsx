@@ -1,16 +1,27 @@
+import { Suspense } from 'react';
 import { getSelectedRepository, getRepositoriesByTeam } from '@/lib/db/queries';
 import { getCurrentSession } from '@/lib/auth';
+import { syncReposIfStale } from '@/server/actions/repos';
 import { Sidebar } from './sidebar';
 
 export async function SidebarServer() {
   const session = await getCurrentSession();
 
   if (!session) {
-    return <Sidebar repos={[]} selectedRepo={null} currentUser={null} team={null} />;
+    return (
+      <Suspense>
+        <Sidebar repos={[]} selectedRepo={null} currentUser={null} team={null} />
+      </Suspense>
+    );
   }
 
   const teamId = session.team?.id;
   const userId = session.user?.id;
+
+  // Fire-and-forget: sync repos if stale (don't block render)
+  if (teamId) {
+    syncReposIfStale(teamId).catch(() => {});
+  }
 
   const [selectedRepo, repos] = await Promise.all([
     teamId ? getSelectedRepository(userId, teamId) : Promise.resolve(null),
@@ -18,11 +29,13 @@ export async function SidebarServer() {
   ]);
 
   return (
-    <Sidebar
-      repos={repos}
-      selectedRepo={selectedRepo ?? null}
-      currentUser={session.user}
-      team={session.team}
-    />
+    <Suspense>
+      <Sidebar
+        repos={repos}
+        selectedRepo={selectedRepo ?? null}
+        currentUser={session.user}
+        team={session.team}
+      />
+    </Suspense>
   );
 }

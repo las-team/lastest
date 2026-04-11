@@ -19,7 +19,7 @@ export default async function EnvPage() {
         <div className="max-w-2xl mx-auto text-center py-12">
           <h2 className="text-lg font-semibold">No Repository Selected</h2>
           <p className="text-muted-foreground mt-2">
-            Select a repository from the sidebar to manage environment setup.
+            Select a repository from the sidebar to manage seed.
           </p>
         </div>
       </div>

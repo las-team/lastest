@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { RotateCcw } from 'lucide-react';
 
-const STORAGE_KEY = 'lastest2-setup-guide';
+const STORAGE_KEY = 'lastest-setup-guide';
 
 export function ResetSetupGuide() {
   const [isDismissed, setIsDismissed] = useState(false);
@@ -28,8 +28,8 @@ export function ResetSetupGuide() {
   const handleRestore = () => {
     try {
       localStorage.removeItem(STORAGE_KEY);
-      localStorage.removeItem('lastest2-ai-configured');
-      localStorage.removeItem('lastest2-results-viewed');
+      localStorage.removeItem('lastest-ai-configured');
+      localStorage.removeItem('lastest-results-viewed');
     } catch {}
     setIsDismissed(false);
   };

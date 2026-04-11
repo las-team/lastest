@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Master deploy script for Lastest2
+# Master deploy script for Lastest
 # Usage: deploy.sh <target> [options]
 #
 # Targets: local, eb, zima, olares, npm, all
@@ -16,7 +16,7 @@ cd "$ROOT_DIR"
 # --- Config ---
 ZIMA_HOST="192.168.1.138"
 ZIMA_USER="ewyct"
-ZIMA_COMPOSE="/var/lib/casaos/apps/lastest2/docker-compose.yml"
+ZIMA_COMPOSE="/var/lib/casaos/apps/lastest/docker-compose.yml"
 
 OLARES_HOST="ewyctorlab.olares.local"
 OLARES_USER="root"
@@ -208,7 +208,7 @@ deploy_zima() {
   ok "Images loaded on $ZIMA_HOST"
 
   log "Restarting containers..."
-  ssh "$ZIMA_USER@$ZIMA_HOST" "cd /var/lib/casaos/apps/lastest2 && docker compose up -d"
+  ssh "$ZIMA_USER@$ZIMA_HOST" "cd /var/lib/casaos/apps/lastest && docker compose up -d"
 
   log "Verifying deployment..."
   bash "$SCRIPT_DIR/health-check.sh" "http://$ZIMA_HOST:3000"
@@ -220,9 +220,10 @@ deploy_olares() {
   build_olares
 
   log "Removing old images on Olares..."
+  # Remove tags AND all by-digest references so ctr import fully replaces the image.
+  # Without this, containerd caches old platform manifests and k8s picks them up.
   ssh "$OLARES_USER@$OLARES_HOST" \
-    "ctr -n k8s.io images rm docker.io/$IMAGE_APP:olares 2>/dev/null || true; \
-     ctr -n k8s.io images rm docker.io/$IMAGE_EB:olares 2>/dev/null || true"
+    "ctr -n k8s.io images ls -q | grep -E 'ewyc/lastest:olares|ewyc/lastest-eb:olares' | xargs -r ctr -n k8s.io images rm 2>/dev/null || true"
 
   log "Transferring images to Olares (this takes ~10 minutes)..."
   docker save "$IMAGE_APP:olares" "$IMAGE_EB:olares" | \
@@ -287,15 +288,15 @@ deploy_zima_transfer() {
   local images=("$IMAGE_APP:latest")
   [ "$APP_ONLY" != true ] && images+=("$IMAGE_EB:latest")
   docker save "${images[@]}" | ssh "$ZIMA_USER@$ZIMA_HOST" 'docker load'
-  ssh "$ZIMA_USER@$ZIMA_HOST" "cd /var/lib/casaos/apps/lastest2 && docker compose up -d"
+  ssh "$ZIMA_USER@$ZIMA_HOST" "cd /var/lib/casaos/apps/lastest && docker compose up -d"
   bash "$SCRIPT_DIR/health-check.sh" "http://$ZIMA_HOST:3000"
 }
 
 deploy_olares_transfer() {
   log "Transferring to Olares..."
   ssh "$OLARES_USER@$OLARES_HOST" \
-    "ctr -n k8s.io images rm docker.io/$IMAGE_APP:olares 2>/dev/null || true"
-  docker save "$IMAGE_APP:olares" | \
+    "ctr -n k8s.io images ls -q | grep -E 'ewyc/lastest:olares|ewyc/lastest-eb:olares' | xargs -r ctr -n k8s.io images rm 2>/dev/null || true"
+  docker save "$IMAGE_APP:olares" "$IMAGE_EB:olares" | \
     ssh "$OLARES_USER@$OLARES_HOST" 'ctr -n k8s.io images import -'
   ssh "$OLARES_USER@$OLARES_HOST" \
     "kubectl rollout restart deployment/$OLARES_DEPLOY -n $OLARES_NS"

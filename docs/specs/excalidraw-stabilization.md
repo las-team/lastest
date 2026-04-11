@@ -107,6 +107,6 @@ Excalidraw uses roughjs for hand-drawn shapes. The rendering chain:
 7. Reducing setTimeout gate threshold from 100ms to lower value
 
 ## Operational Notes
-- Runner must be restarted after builds: `pnpm lastest2-runner stop && pnpm lastest2-runner start`
-- Test command: `pnpm lastest2-runner trigger --repo ewyct/excalidraw_test`
+- Runner must be restarted after builds: `pnpm lastest-runner stop && pnpm lastest-runner start`
+- Test command: `pnpm lastest-runner trigger --repo ewyct/excalidraw_test`
 - Success criteria: two consecutive runs produce identical diff percentages

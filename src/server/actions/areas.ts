@@ -232,7 +232,7 @@ export async function rollbackAllAreaPlans(repositoryId: string) {
 export async function exportAllPlans(repositoryId: string) {
   await requireRepoAccess(repositoryId);
   const areas = await queries.getFunctionalAreasByRepo(repositoryId);
-  const areasWithPlans = areas.filter(a => a.agentPlan);
+  const areasWithPlans = areas.filter(a => a.agentPlan || a.description);
 
   if (areasWithPlans.length === 0) return '# Testing Manifesto\n\nNo test plans generated yet.\n';
 
@@ -252,6 +252,17 @@ export async function exportAllPlans(repositoryId: string) {
     }
     if (area.agentPlan) {
       sections.push('', area.agentPlan);
+    }
+
+    // Include specs with status indicators
+    const areaSpecs = await queries.getSpecsForArea(area.id);
+    if (areaSpecs.length > 0) {
+      sections.push('', '### Specs', '');
+      for (const spec of areaSpecs) {
+        const check = spec.testId ? 'x' : ' ';
+        const testInfo = spec.testId ? '' : ' — no test';
+        sections.push(`- [${check}] **${spec.title}**${testInfo}`);
+      }
     }
 
     // Include test cases

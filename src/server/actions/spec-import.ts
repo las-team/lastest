@@ -304,7 +304,7 @@ function validateAndFilterStories(stories: ExtractedUserStory[]): ExtractedUserS
 }
 
 // ============================================
-// Document Discovery (reuse spec-analysis patterns)
+// Document Discovery
 // ============================================
 
 const SPEC_PATTERNS = ['docs/', 'specs/', 'specifications/', 'requirements/', 'stories/', 'features/'];
@@ -790,11 +790,7 @@ export async function generateTestsFromStories(
 // Step 3b: Create placeholder tests (no AI)
 // ============================================
 
-const PLACEHOLDER_CODE = `export async function test(page, baseUrl, screenshotPath, stepLogger) {
-  // Placeholder test — record real interactions to replace this stub
-  await page.goto(baseUrl);
-  await page.screenshot({ path: screenshotPath });
-}`;
+import { PLACEHOLDER_CODE } from '@/lib/constants/placeholder';
 
 export async function createPlaceholdersFromStories(
   repositoryId: string,
@@ -856,7 +852,7 @@ export async function createPlaceholdersFromStories(
         }
 
         try {
-          await queries.createTest({
+          const test = await queries.createTest({
             repositoryId,
             functionalAreaId: area.id,
             name: testName,
@@ -865,6 +861,29 @@ export async function createPlaceholdersFromStories(
             isPlaceholder: true,
             targetUrl: options?.targetUrl || null,
           });
+
+          // Create linked testSpec with story + area context
+          const specBody = [
+            `**Area:** ${story.title}`,
+            story.description ? `**Story:** ${story.description}` : '',
+            '',
+            group.map(ac => `- ${ac.description}`).join('\n'),
+          ].filter(Boolean).join('\n');
+
+          const { createHash } = await import('crypto');
+          const codeHash = createHash('sha256').update(PLACEHOLDER_CODE).digest('hex');
+          const specId = await queries.createTestSpec({
+            repositoryId,
+            testId: test.id,
+            functionalAreaId: area.id,
+            title: testName,
+            spec: specBody,
+            source: 'planner',
+            status: 'has_test',
+            codeHash,
+          });
+          await queries.linkSpecToTest(specId, test.id);
+
           testsCreated++;
         } catch (err) {
           const msg = err instanceof Error ? err.message : 'Unknown error';

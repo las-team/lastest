@@ -1,4 +1,4 @@
--- Seed script for dexilion-team/lastest2
+-- Seed script for las-team/lastest
 -- Generated from local DB on 2026-03-19
 -- 59 tests, 72 functional areas, 7 setup scripts, 1 setup steps
 -- Target repo ID: de09a6f4-9225-475f-bd04-f53b44ea3edc

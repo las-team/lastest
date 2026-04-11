@@ -2,7 +2,7 @@
  * autoresearch/evaluate.ts — EVALUATION HARNESS
  *
  * Two modes:
- *   --mode=generate  (default) Generate tests for lastest2 routes, run them
+ *   --mode=generate  (default) Generate tests for lastest routes, run them
  *   --mode=replay    Re-generate tests for previously-failed scenarios from DB
  *
  * Usage:
@@ -44,7 +44,7 @@ const STORAGE_STATE_PATH = path.join(os.tmpdir(), 'autoresearch-auth.json');
 const MODE = process.argv.includes('--mode=replay') ? 'replay' : 'generate';
 const MAX_REPLAY = parseInt(process.env.MAX_REPLAY || '20', 10);
 
-// Fixed routes for generate mode (lastest2 app routes)
+// Fixed routes for generate mode (lastest app routes)
 const GENERATE_ROUTES: { path: string; isDynamic: boolean; description: string }[] = [
   { path: '/', isDynamic: false, description: 'Dashboard / home page' },
   { path: '/tests', isDynamic: false, description: 'Test list page' },
@@ -268,11 +268,10 @@ async function runGenerateMode(
 
 async function loadReplayScenarios(): Promise<ReplayScenario[]> {
   // Get the most recent test run
-  const latestRun = db.select({ id: testRuns.id, repositoryId: testRuns.repositoryId })
+  const [latestRun] = await db.select({ id: testRuns.id, repositoryId: testRuns.repositoryId })
     .from(testRuns)
     .orderBy(desc(testRuns.startedAt))
-    .limit(1)
-    .get();
+    .limit(1);
 
   if (!latestRun) {
     console.error('No test runs found in DB');
@@ -280,7 +279,7 @@ async function loadReplayScenarios(): Promise<ReplayScenario[]> {
   }
 
   // Get failed tests with their info
-  const failed = db.select({
+  const failed = await db.select({
     testName: tests.name,
     testCode: tests.code,
     targetUrl: tests.targetUrl,
@@ -294,8 +293,7 @@ async function loadReplayScenarios(): Promise<ReplayScenario[]> {
   .where(and(
     eq(testResults.testRunId, latestRun.id),
     eq(testResults.status, 'failed')
-  ))
-  .all();
+  ));
 
   return failed.slice(0, MAX_REPLAY).map(f => ({
     testName: f.testName || 'Unknown',

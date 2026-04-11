@@ -21,6 +21,25 @@
 import type { Browser, Page } from 'playwright';
 import type { StabilizationPayload } from './protocol.js';
 import { setupFreezeScripts, applyPreScreenshotStabilization } from './stabilization.js';
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
+
+export interface EmbeddedNetworkRequest {
+  url: string;
+  method: string;
+  status: number;
+  duration: number;
+  resourceType: string;
+  failed?: boolean;
+  errorText?: string;
+  startTime?: number;
+  requestHeaders?: Record<string, string>;
+  responseHeaders?: Record<string, string>;
+  postData?: string;
+  responseBody?: string;
+  responseSize?: number;
+}
 
 export interface EmbeddedTestResult {
   status: 'passed' | 'failed' | 'error' | 'timeout' | 'cancelled';
@@ -28,6 +47,11 @@ export interface EmbeddedTestResult {
   error?: { message: string; stack?: string; screenshot?: string };
   logs: Array<{ timestamp: number; level: string; message: string }>;
   screenshots: Array<{ filename: string; data: string; width: number; height: number }>;
+  consoleErrors?: string[];
+  networkRequests?: EmbeddedNetworkRequest[];
+  softErrors?: string[];
+  videoData?: string; // base64-encoded video file
+  videoFilename?: string;
 }
 
 export interface EmbeddedSetupResult {
@@ -63,6 +87,11 @@ export interface RunTestPayload {
   setupVariables?: Record<string, unknown>;
   cursorPlaybackSpeed?: number;
   stabilization?: StabilizationPayload;
+  consoleErrorMode?: 'fail' | 'warn' | 'ignore';
+  networkErrorMode?: 'fail' | 'warn' | 'ignore';
+  ignoreExternalNetworkErrors?: boolean;
+  enableNetworkInterception?: boolean;
+  forceVideoRecording?: boolean;
 }
 
 /**
@@ -140,6 +169,8 @@ export class EmbeddedTestExecutor {
     const logs: Array<{ timestamp: number; level: string; message: string }> = [];
     const screenshots: Array<{ filename: string; data: string; width: number; height: number }> = [];
     const softErrors: string[] = [];
+    const consoleErrors: string[] = [];
+    let allNetworkRequests: EmbeddedNetworkRequest[] = [];
     const testTimeout = Math.max(command.timeout || 120000, 30000);
 
     const logFn = (level: string, message: string) => {
@@ -164,6 +195,13 @@ export class EmbeddedTestExecutor {
       }
     }
 
+    // Set up video recording if requested
+    const videoEnabled = command.forceVideoRecording;
+    const videoDir = videoEnabled ? path.join(os.tmpdir(), `lastest-video-${Date.now()}`) : undefined;
+    if (videoDir) {
+      fs.mkdirSync(videoDir, { recursive: true });
+    }
+
     // Create a fresh context + page per test (mirrors standard runner)
     const testContext = await browser.newContext({
       viewport,
@@ -171,11 +209,14 @@ export class EmbeddedTestExecutor {
       ...(needsStabilizedContext ? { deviceScaleFactor: 1 } : {}),
       ...(needsStabilizedContext ? { locale: 'en-US', timezoneId: 'UTC', colorScheme: 'light' as const } : {}),
       ...(command.stabilization?.freezeAnimations ? { reducedMotion: 'reduce' as const } : {}),
+      ...(videoDir ? { recordVideo: { dir: videoDir, size: viewport } } : {}),
     });
     const page = await testContext.newPage();
     if (callbacks?.onPageCreated) {
       await callbacks.onPageCreated(page);
     }
+
+    let result: EmbeddedTestResult | undefined;
 
     try {
       if (abortCtrl.signal.aborted) {
@@ -192,10 +233,69 @@ export class EmbeddedTestExecutor {
         logFn('info', `Stabilization: freeze timestamps=${command.stabilization.freezeTimestamps}, random=${command.stabilization.freezeRandomValues}, animations=${command.stabilization.freezeAnimations}, crossOS=${command.stabilization.crossOsConsistency}`);
       }
 
-      // Page event listeners for debugging
-      page.on('console', (msg) => { if (msg.type() === 'error') logFn('warn', `Console error: ${msg.text()}`); });
+      // Page event listeners — capture console errors and network requests
+      page.on('console', (msg) => {
+        if (msg.type() === 'error') {
+          const text = msg.text();
+          consoleErrors.push(text);
+          logFn('warn', `Console error: ${text}`);
+        }
+      });
       page.on('pageerror', (err) => logFn('warn', `Page error: ${err.message}`));
-      page.on('requestfailed', (req) => logFn('warn', `Request failed: ${req.url()} ${req.failure()?.errorText ?? ''}`));
+
+      // Network request capture (all requests, not just failures)
+      const captureNetworkBodies = command.enableNetworkInterception ?? false;
+      page.on('request', (req) => {
+        allNetworkRequests.push({
+          url: req.url(),
+          method: req.method(),
+          status: 0,
+          duration: 0,
+          resourceType: req.resourceType(),
+          startTime: Date.now(),
+          failed: false,
+          ...(captureNetworkBodies ? {
+            requestHeaders: req.headers(),
+            postData: req.postData() ?? undefined,
+          } : {}),
+        });
+        if (allNetworkRequests.length > 500) {
+          allNetworkRequests = allNetworkRequests.slice(-500);
+        }
+      });
+      page.on('response', (resp) => {
+        const entry = allNetworkRequests.findLast(
+          e => e.url === resp.url() && e.status === 0 && !e.failed
+        );
+        if (entry) {
+          entry.status = resp.status();
+          entry.duration = entry.startTime ? Date.now() - entry.startTime : 0;
+          const contentLength = resp.headers()['content-length'];
+          if (contentLength) entry.responseSize = parseInt(contentLength, 10);
+          if (captureNetworkBodies) {
+            entry.responseHeaders = resp.headers();
+            // Capture response body for API calls (fetch/xhr) — cap at 16KB
+            const rt = entry.resourceType;
+            if (rt === 'fetch' || rt === 'xhr' || rt === 'document') {
+              resp.text().then(body => {
+                entry.responseBody = body.length > 16384 ? body.slice(0, 16384) + '… (truncated)' : body;
+                if (!entry.responseSize) entry.responseSize = body.length;
+              }).catch(() => {});
+            }
+          }
+        }
+      });
+      page.on('requestfailed', (req) => {
+        const entry = allNetworkRequests.findLast(
+          e => e.url === req.url() && e.status === 0 && !e.failed
+        );
+        if (entry) {
+          entry.failed = true;
+          entry.errorText = req.failure()?.errorText;
+          entry.duration = entry.startTime ? Date.now() - entry.startTime : 0;
+        }
+        logFn('warn', `Request failed: ${req.url()} ${req.failure()?.errorText ?? ''}`);
+      });
 
       // Save raw screenshot method BEFORE overriding page.screenshot (prevents infinite recursion)
       const rawScreenshot = page.screenshot.bind(page);
@@ -256,6 +356,12 @@ export class EmbeddedTestExecutor {
         logFn('info', 'No export async function test(...) wrapper found — using code as body');
         body = stripTypeAnnotations(command.code);
       }
+
+      // Strip re-declarations of runner-injected variables (expect, test) from import/require
+      // AI-generated code sometimes includes these despite prompt instructions
+      body = body.replace(/^\s*(?:const|let|var)\s+\{[^}]*\bexpect\b[^}]*\}\s*=\s*(?:await\s+)?(?:import|require)\s*\([^)]*\);?\s*$/gm, '');
+      body = body.replace(/^\s*(?:const|let|var)\s+expect\s*=\s*(?:await\s+)?(?:import|require)\s*\([^)]*\);?\s*$/gm, '');
+      body = body.replace(/^\s*import\s+\{[^}]*\}\s+from\s+['"][^'"]*['"];?\s*$/gm, '');
       logFn('info', `Extracted test body: ${body.length} chars`);
 
       // Remove test-local locateWithFallback (using runner-provided version)
@@ -278,7 +384,7 @@ export class EmbeddedTestExecutor {
       // Soft error wrapping — skip screenshot lines (mirrors runner.ts)
       body = body.replace(/^(\s*)(await\s+.+;)\s*$/gm, (_match, indent, stmt) => {
         if (stmt.includes('.screenshot(')) return `${indent}${stmt}`;
-        return `${indent}try { ${stmt} } catch(__softErr) { stepLogger.warn(typeof __softErr === 'object' && __softErr !== null && 'message' in __softErr ? __softErr.message : String(__softErr)); }`;
+        return `${indent}try { ${stmt} } catch(__softErr) { if (__softErr && __softErr.__hardAssertion) throw __softErr; stepLogger.warn(typeof __softErr === 'object' && __softErr !== null && 'message' in __softErr ? __softErr.message : String(__softErr)); }`;
       });
 
       // Step logger with softExpect/softAction (matches runner)
@@ -506,6 +612,44 @@ export class EmbeddedTestExecutor {
 
       logFn('info', 'Test code execution completed');
 
+      // Check console/network error modes (mirrors runner.ts logic)
+      const consoleErrorMode = command.consoleErrorMode || 'fail';
+      const networkErrorMode = command.networkErrorMode || 'fail';
+      const ignoreExternal = command.ignoreExternalNetworkErrors ?? false;
+      let targetOrigin: string | undefined;
+      try { targetOrigin = new URL(command.targetUrl).origin; } catch { /* ignore */ }
+      const errorParts: string[] = [];
+
+      if (consoleErrors.length > 0 && consoleErrorMode !== 'ignore') {
+        const msg = `Console errors detected: ${consoleErrors.join('; ')}`;
+        if (consoleErrorMode === 'warn') {
+          logFn('warn', msg);
+        } else {
+          errorParts.push(msg);
+        }
+      }
+
+      const networkFailures = allNetworkRequests.filter(r => {
+        if (r.status < 400 && !r.failed) return false;
+        if (ignoreExternal && targetOrigin) {
+          try { if (new URL(r.url).origin !== targetOrigin) return false; } catch { /* keep */ }
+        }
+        return true;
+      });
+      if (networkFailures.length > 0 && networkErrorMode !== 'ignore') {
+        const failureDetails = networkFailures.map(f => `${f.method} ${f.url} (${f.status})`).join('; ');
+        const msg = `Network failures detected: ${failureDetails}`;
+        if (networkErrorMode === 'warn') {
+          logFn('warn', msg);
+        } else {
+          errorParts.push(msg);
+        }
+      }
+
+      if (errorParts.length > 0) {
+        throw new Error(errorParts.join(' | '));
+      }
+
       // Take success screenshot if none captured
       if (screenshots.length === 0) {
         await captureScreenshot('success');
@@ -514,7 +658,15 @@ export class EmbeddedTestExecutor {
       const durationMs = Date.now() - startTime;
       logFn('info', `Test passed in ${durationMs}ms (${screenshots.length} screenshots)`);
 
-      return { status: 'passed', durationMs, logs, screenshots };
+      result = {
+        status: 'passed' as const,
+        durationMs,
+        logs,
+        screenshots,
+        consoleErrors: consoleErrors.length > 0 ? consoleErrors : undefined,
+        networkRequests: allNetworkRequests.length > 0 ? allNetworkRequests : undefined,
+        softErrors: softErrors.length > 0 ? softErrors : undefined,
+      };
     } catch (error) {
       const durationMs = Date.now() - startTime;
       const errorMessage = error instanceof Error ? error.message : String(error);
@@ -523,30 +675,40 @@ export class EmbeddedTestExecutor {
 
       if (isCancelled) {
         logFn('info', 'Test cancelled');
-        return { status: 'cancelled', durationMs, logs, screenshots };
+        result = {
+          status: 'cancelled' as const, durationMs, logs, screenshots,
+          consoleErrors: consoleErrors.length > 0 ? consoleErrors : undefined,
+          networkRequests: allNetworkRequests.length > 0 ? allNetworkRequests : undefined,
+          softErrors: softErrors.length > 0 ? softErrors : undefined,
+        };
+      } else {
+        const isTimeout = errorMessage.includes('timed out');
+        logFn('error', `Test ${isTimeout ? 'timed out' : 'failed'}: ${errorMessage}`);
+
+        // Try to capture error screenshot (skip on timeout — context is closed)
+        let errorScreenshot: string | undefined;
+        if (!isTimeout) {
+          try {
+            const buffer = await page.screenshot();
+            errorScreenshot = buffer.toString('base64');
+          } catch { /* ignore */ }
+        }
+
+        result = {
+          status: (isTimeout ? 'timeout' : 'failed') as 'timeout' | 'failed',
+          durationMs,
+          error: { message: errorMessage, stack: errorStack, screenshot: errorScreenshot },
+          logs,
+          screenshots,
+          consoleErrors: consoleErrors.length > 0 ? consoleErrors : undefined,
+          networkRequests: allNetworkRequests.length > 0 ? allNetworkRequests : undefined,
+          softErrors: softErrors.length > 0 ? softErrors : undefined,
+        };
       }
-
-      const isTimeout = errorMessage.includes('timed out');
-      logFn('error', `Test ${isTimeout ? 'timed out' : 'failed'}: ${errorMessage}`);
-
-      // Try to capture error screenshot (skip on timeout — context is closed)
-      let errorScreenshot: string | undefined;
-      if (!isTimeout) {
-        try {
-          const buffer = await page.screenshot();
-          errorScreenshot = buffer.toString('base64');
-        } catch { /* ignore */ }
-      }
-
-      return {
-        status: isTimeout ? 'timeout' : 'failed',
-        durationMs,
-        error: { message: errorMessage, stack: errorStack, screenshot: errorScreenshot },
-        logs,
-        screenshots,
-      };
     } finally {
       this.abortController = null;
+      // Capture video before closing context (video is finalized on close)
+      const video = page?.video();
       // Stop screencast before closing page so CDP session doesn't die unexpectedly
       if (callbacks?.onBeforePageClose) {
         try { await callbacks.onBeforePageClose(); } catch { /* ignore */ }
@@ -555,7 +717,27 @@ export class EmbeddedTestExecutor {
       // context.close() may have already been called by timeout/cancel handler — that's fine
       await page.close().catch(() => {});
       await testContext.close().catch(() => {});
+
+      // After context close, video file is finalized — read and base64 encode it
+      if (video && videoDir && result) {
+        try {
+          const videoFilename = `${command.testRunId}-${command.testId}.webm`;
+          const tempDest = path.join(videoDir, videoFilename);
+          await video.saveAs(tempDest);
+          await video.delete();
+          const videoBuffer = fs.readFileSync(tempDest);
+          result.videoData = videoBuffer.toString('base64');
+          result.videoFilename = videoFilename;
+          logFn('info', `Video captured: ${videoFilename} (${Math.round(videoBuffer.length / 1024)}KB)`);
+          // Clean up temp dir
+          fs.rmSync(videoDir, { recursive: true, force: true });
+        } catch {
+          // Video capture is best-effort
+        }
+      }
     }
+
+    return result!
   }
 
   async runSetup(browser: Browser, command: RunSetupPayload): Promise<EmbeddedSetupResult> {
@@ -590,10 +772,14 @@ export class EmbeddedTestExecutor {
         logFn('info', `Stabilization applied`);
       }
 
-      // Extract function body (same pattern as runTest)
-      const funcMatch = command.code.match(
+      // Extract function body (same pattern as runTest, also match setup functions)
+      const setupMatch = command.code.match(
+        /export\s+async\s+function\s+setup\s*\(\s*page[^)]*\)\s*\{([\s\S]*)\}\s*$/
+      );
+      const testMatch = command.code.match(
         /export\s+async\s+function\s+test\s*\(\s*page[^)]*\)\s*\{([\s\S]*)\}\s*$/
       );
+      const funcMatch = setupMatch || testMatch;
 
       let body: string;
       if (funcMatch) {
@@ -621,6 +807,102 @@ export class EmbeddedTestExecutor {
         softAction: async (fn: () => Promise<void>) => { try { await fn(); } catch { /* soft */ } },
       };
 
+      // Create helpers matching the test execution path so setup code can use them
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const expect = (target: any, message?: string) => {
+        const msgPrefix = message ? `${message}: ` : '';
+        const isPage = typeof target?.goto === 'function';
+        const isLocator = typeof target?.click === 'function' && typeof target?.fill === 'function';
+        if (isPage) {
+          return {
+            async toHaveTitle(expected: string | RegExp) { const title = await target.title(); const regex = typeof expected === 'string' ? new RegExp(expected) : expected; if (!regex.test(title)) throw new Error(`${msgPrefix}Expected title "${title}" to match ${regex}`); },
+            async toHaveURL(expected: string | RegExp) { const url = target.url(); const regex = typeof expected === 'string' ? new RegExp(expected) : expected; if (!regex.test(url)) throw new Error(`${msgPrefix}Expected URL "${url}" to match ${regex}`); },
+          };
+        }
+        if (isLocator) {
+          return {
+            async toBeVisible() { if (!await target.isVisible()) throw new Error(`${msgPrefix}Expected element to be visible`); },
+            async toBeHidden() { if (await target.isVisible()) throw new Error(`${msgPrefix}Expected element to be hidden`); },
+            async toHaveText(expected: string | RegExp) { const text = await target.textContent() || ''; const regex = typeof expected === 'string' ? new RegExp(expected) : expected; if (!regex.test(text)) throw new Error(`${msgPrefix}Expected text "${text}" to match ${regex}`); },
+            async toContainText(expected: string) { const text = await target.textContent() || ''; if (!text.includes(expected)) throw new Error(`${msgPrefix}Expected text to contain "${expected}"`); },
+            not: { async toBeVisible() { if (await target.isVisible()) throw new Error(`${msgPrefix}Expected element not to be visible`); } },
+          };
+        }
+        return {
+          toBe(expected: unknown) { if (target !== expected) throw new Error(`${msgPrefix}Expected ${JSON.stringify(expected)} but got ${JSON.stringify(target)}`); },
+          toBeTruthy() { if (!target) throw new Error(`${msgPrefix}Expected value to be truthy but got ${target}`); },
+          not: { toBe(expected: unknown) { if (target === expected) throw new Error(`${msgPrefix}Expected not to be ${JSON.stringify(expected)}`); } },
+        };
+      };
+
+      const locateWithFallback = async (
+        pg: Page,
+        selectors: Array<{ type: string; value: string } | string | { selector?: string; css?: string; text?: string }>,
+        action: string,
+        value?: string | null,
+        coords?: { x: number; y: number } | null,
+        options?: Record<string, unknown> | null
+      ) => {
+        const validSelectors = selectors
+          .map((sel) => {
+            if (typeof sel === 'string') return { type: 'css', value: sel };
+            if ('type' in sel && 'value' in sel) return sel as { type: string; value: string };
+            const legacy = sel as { selector?: string; css?: string; text?: string };
+            return { type: 'css', value: legacy.selector || legacy.css || legacy.text || '' };
+          })
+          .filter((s) => s.value && s.value.trim() && !s.value.includes('undefined'));
+
+        logFn('info', `[setup action] ${action}${value ? ` "${value}"` : ''} (${validSelectors.length} selectors)`);
+
+        for (const sel of validSelectors) {
+          try {
+            let locator;
+            if (sel.type === 'ocr-text') {
+              const text = sel.value.replace(/^ocr-text="/, '').replace(/"$/, '');
+              locator = pg.getByText(text, { exact: false });
+            } else if (sel.type === 'role-name') {
+              const match = sel.value.match(/^role=(\w+)\[name="(.+)"\]$/);
+              if (match) locator = pg.getByRole(match[1] as 'button' | 'link' | 'heading', { name: match[2] });
+              else locator = pg.locator(sel.value);
+            } else {
+              locator = pg.locator(sel.value);
+            }
+            const target = locator.first();
+            await target.waitFor({ timeout: 3000 });
+            logFn('info', `[setup action] ${action} matched via ${sel.type}`);
+            if (action === 'locate') return target;
+            if (action === 'click') await target.click(options || {});
+            else if (action === 'fill') await target.fill(value || '');
+            else if (action === 'selectOption') await target.selectOption(value || '');
+            else if (action === 'check') await target.check();
+            else if (action === 'uncheck') await target.uncheck();
+            return target;
+          } catch {
+            continue;
+          }
+        }
+        if (action === 'click' && coords) {
+          logFn('info', `Falling back to coordinate click at (${coords.x}, ${coords.y})`);
+          await pg.mouse.click(coords.x, coords.y, options || {});
+          return;
+        }
+        if (action === 'fill' && coords) {
+          logFn('info', `Falling back to coordinate fill at (${coords.x}, ${coords.y})`);
+          await pg.mouse.click(coords.x, coords.y);
+          await pg.keyboard.press('Control+a');
+          await pg.keyboard.type(value || '');
+          return;
+        }
+        throw new Error('No selector matched: ' + JSON.stringify(validSelectors));
+      };
+
+      const replayCursorPathFn = async (_pg: Page, moves: [number, number, number][]) => {
+        for (const [x, y, delay] of moves) {
+          await page.mouse.move(x, y);
+          if (delay > 0) await page.waitForTimeout(delay);
+        }
+      };
+
       logFn('info', 'Executing setup code...');
 
       // Execute with timeout
@@ -629,10 +911,10 @@ export class EmbeddedTestExecutor {
         (async () => {
           const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
           const setupFn = new AsyncFunction(
-            'page', 'baseUrl', 'screenshotPath', 'stepLogger',
+            'page', 'baseUrl', 'screenshotPath', 'stepLogger', 'expect', 'appState', 'locateWithFallback', 'replayCursorPath',
             body
           );
-          await setupFn(page, command.targetUrl.replace(/\/+$/, ''), 'screenshot.png', stepLogger);
+          await setupFn(page, command.targetUrl.replace(/\/+$/, ''), 'screenshot.png', stepLogger, expect, null, locateWithFallback, replayCursorPathFn);
         })().then(r => { clearTimeout(timeoutTimer); return r; }),
         new Promise<never>((_, reject) => {
           timeoutTimer = setTimeout(() => {

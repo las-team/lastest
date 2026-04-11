@@ -92,7 +92,7 @@ getScreenshots(runnerId)             // retrieve and clear
 
 ## Runner CLI
 - **Postinstall**: Changed `npx` → `pnpm exec` (project policy)
-- **Package**: `lastest2-runner`, npm-publishable with `publishConfig.access: "public"`
+- **Package**: `lastest-runner`, npm-publishable with `publishConfig.access: "public"`
 
 ## Key Files
 | File | Purpose |

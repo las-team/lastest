@@ -1,5 +1,5 @@
 # =============================================================================
-# Lastest2 - Visual Regression Testing Platform
+# Lastest - Visual Regression Testing Platform
 # Multi-stage Dockerfile for production deployment
 # =============================================================================
 
@@ -7,10 +7,6 @@
 # Stage 1: Dependencies
 # -----------------------------------------------------------------------------
 FROM node:24-slim AS deps
-
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    python3 make g++ && \
-    rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
@@ -29,11 +25,6 @@ RUN pnpm install --frozen-lockfile
 # Stage 2: Builder
 # -----------------------------------------------------------------------------
 FROM node:24-slim AS builder
-
-# Install build dependencies for native modules
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    python3 make g++ && \
-    rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
@@ -65,6 +56,9 @@ RUN node -e "\
   const runner = require('./packages/runner/package.json');\
   const info = { gitHash: '$GIT_HASH', commitCount: '$GIT_COMMIT_COUNT', version: pkg.version, runnerVersion: runner.version };\
   require('fs').writeFileSync('build-info.json', JSON.stringify(info));"
+
+# Run tests (includes Tesseract OCR verification)
+RUN pnpm vitest run --dir src
 
 # Build the application
 RUN pnpm build
@@ -110,6 +104,9 @@ COPY --from=builder --chown=nextjs:nodejs /app/src/lib/db/schema.ts ./src/lib/db
 COPY --from=deps --chown=nextjs:nodejs /app/node_modules/drizzle-kit ./node_modules/drizzle-kit
 COPY --from=deps --chown=nextjs:nodejs /app/node_modules/drizzle-orm ./node_modules/drizzle-orm
 COPY --from=deps --chown=nextjs:nodejs /app/node_modules/.bin/drizzle-kit ./node_modules/.bin/drizzle-kit
+# Postgres driver required by drizzle-kit push at container startup
+COPY --from=deps --chown=nextjs:nodejs /app/node_modules/.pnpm/postgres@3.4.8 ./node_modules/.pnpm/postgres@3.4.8
+RUN ln -sf .pnpm/postgres@3.4.8/node_modules/postgres ./node_modules/postgres
 COPY --from=deps --chown=nextjs:nodejs /app/node_modules/.pnpm/esbuild@0.25.12 ./node_modules/.pnpm/esbuild@0.25.12
 COPY --from=deps --chown=nextjs:nodejs /app/node_modules/.pnpm/@esbuild+linux-x64@0.25.12 ./node_modules/.pnpm/@esbuild+linux-x64@0.25.12
 COPY --from=deps --chown=nextjs:nodejs /app/node_modules/.pnpm/esbuild-register@3.6.0_esbuild@0.25.12 ./node_modules/.pnpm/esbuild-register@3.6.0_esbuild@0.25.12
@@ -119,10 +116,39 @@ RUN ln -sf .pnpm/esbuild@0.25.12/node_modules/esbuild ./node_modules/esbuild && 
 
 # Copy claude-agent-sdk (standalone prunes serverExternalPackages)
 COPY --from=deps --chown=nextjs:nodejs \
-  /app/node_modules/.pnpm/@anthropic-ai+claude-agent-sdk@0.2.19_zod@4.3.5/node_modules/@anthropic-ai/claude-agent-sdk \
-  ./node_modules/.pnpm/@anthropic-ai+claude-agent-sdk@0.2.19_zod@4.3.5/node_modules/@anthropic-ai/claude-agent-sdk
-RUN ln -sf .pnpm/@anthropic-ai+claude-agent-sdk@0.2.19_zod@4.3.5/node_modules/@anthropic-ai \
+  /app/node_modules/.pnpm/@anthropic-ai+claude-agent-sdk@0.2.98_zod@4.3.5/node_modules/@anthropic-ai/claude-agent-sdk \
+  ./node_modules/.pnpm/@anthropic-ai+claude-agent-sdk@0.2.98_zod@4.3.5/node_modules/@anthropic-ai/claude-agent-sdk
+RUN ln -sf .pnpm/@anthropic-ai+claude-agent-sdk@0.2.98_zod@4.3.5/node_modules/@anthropic-ai \
   ./node_modules/@anthropic-ai
+
+# Copy tesseract.js + all its transitive deps (standalone prunes serverExternalPackages)
+# Each subdep is a separate pnpm dir that tesseract.js symlinks to
+COPY --from=deps --chown=nextjs:nodejs \
+  /app/node_modules/.pnpm/tesseract.js@7.0.0 \
+  ./node_modules/.pnpm/tesseract.js@7.0.0
+COPY --from=deps --chown=nextjs:nodejs \
+  /app/node_modules/.pnpm/tesseract.js-core@7.0.0 \
+  ./node_modules/.pnpm/tesseract.js-core@7.0.0
+COPY --from=deps --chown=nextjs:nodejs \
+  /app/node_modules/.pnpm/bmp-js@0.1.0 \
+  ./node_modules/.pnpm/bmp-js@0.1.0
+COPY --from=deps --chown=nextjs:nodejs \
+  /app/node_modules/.pnpm/zlibjs@0.3.1 \
+  ./node_modules/.pnpm/zlibjs@0.3.1
+COPY --from=deps --chown=nextjs:nodejs \
+  /app/node_modules/.pnpm/wasm-feature-detect@1.8.0 \
+  ./node_modules/.pnpm/wasm-feature-detect@1.8.0
+COPY --from=deps --chown=nextjs:nodejs \
+  /app/node_modules/.pnpm/regenerator-runtime@0.13.11 \
+  ./node_modules/.pnpm/regenerator-runtime@0.13.11
+COPY --from=deps --chown=nextjs:nodejs \
+  /app/node_modules/.pnpm/is-url@1.2.4 \
+  ./node_modules/.pnpm/is-url@1.2.4
+COPY --from=deps --chown=nextjs:nodejs \
+  /app/node_modules/.pnpm/node-fetch@2.7.0 \
+  ./node_modules/.pnpm/node-fetch@2.7.0
+RUN ln -sf .pnpm/tesseract.js@7.0.0/node_modules/tesseract.js ./node_modules/tesseract.js && \
+    ln -sf .pnpm/tesseract.js-core@7.0.0/node_modules/tesseract.js-core ./node_modules/tesseract.js-core
 
 # Install Claude Code CLI globally (for `docker exec ... claude login`)
 RUN npm install -g @anthropic-ai/claude-code@latest 2>/dev/null || \
@@ -142,23 +168,23 @@ RUN chmod +x /docker-entrypoint.sh
 COPY --chown=nextjs:nodejs scripts/migrate.js /app/migrate.js
 COPY --chown=nextjs:nodejs scripts/ws-proxy-preload.js /app/ws-proxy-preload.js
 
-# Create data directories
-RUN mkdir -p /app/data /app/storage/screenshots /app/storage/baselines /app/storage/diffs /app/storage/traces /app/storage/videos /app/storage/planned /app/storage/bug-reports /home/nextjs/.claude && \
+# Create storage directories
+RUN mkdir -p /app/storage/screenshots /app/storage/baselines /app/storage/diffs /app/storage/traces /app/storage/videos /app/storage/planned /app/storage/bug-reports /home/nextjs/.claude && \
     chown -R nextjs:nodejs /app && \
     chown nextjs:nodejs /home/nextjs/.claude
 
 # Environment configuration
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
-ENV DATABASE_PATH=/app/data/lastest2.db
+# DATABASE_URL must be injected by the deployment — no default. Missing env is fatal at boot.
 ENV PORT=3000
 ENV HOSTNAME=0.0.0.0
 
 # Labels for Docker Hub
-LABEL org.opencontainers.image.title="Lastest2"
+LABEL org.opencontainers.image.title="Lastest"
 LABEL org.opencontainers.image.description="Visual regression testing platform with Playwright"
-LABEL org.opencontainers.image.vendor="Lastest2"
-LABEL org.opencontainers.image.source="https://github.com/lastest2/lastest2"
+LABEL org.opencontainers.image.vendor="Lastest"
+LABEL org.opencontainers.image.source="https://github.com/las-team/lastest"
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
@@ -169,7 +195,7 @@ EXPOSE 3000 9223 9224
 USER nextjs
 
 # Volumes for persistent data
-VOLUME ["/app/data", "/app/storage"]
+VOLUME ["/app/storage"]
 
 ENTRYPOINT ["/docker-entrypoint.sh"]
 CMD ["node", "--require", "./ws-proxy-preload.js", "server.js"]

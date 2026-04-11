@@ -31,13 +31,13 @@ Old:                               New:
 # Old
 image: ewyc/lastest:latest
 volumes:
-  - lastest2-storage:/app/storage
+  - lastest-storage:/app/storage
 
 # New
-image: lastest2:latest
+image: lastest:latest
 volumes:
-  - lastest2-screenshots:/app/public/screenshots
-  - lastest2-baselines:/app/public/baselines
+  - lastest-screenshots:/app/public/screenshots
+  - lastest-baselines:/app/public/baselines
 ```
 
 ### Dev Compose (`docker-compose.dev.yml`)
@@ -72,8 +72,8 @@ Remote mode available as commented template requiring `repo-id`, `team-id`, `run
 
 ### New Required Inputs
 ```yaml
-repo-id: Repository ID in Lastest2 (required)
-team-id: Team ID in Lastest2 (required)
+repo-id: Repository ID in Lastest (required)
+team-id: Team ID in Lastest (required)
 runner-id: Remote runner ID (required)
 ```
 

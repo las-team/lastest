@@ -1,0 +1,62 @@
+{
+  "name": "@lastest/mcp-server",
+  "version": "0.2.2",
+  "mcpName": "io.github.las-team/lastest",
+  "description": "MCP server for Lastest visual regression testing platform — lets AI agents run tests, review diffs, and manage baselines",
+  "type": "module",
+  "bin": {
+    "lastest-mcp": "./bin/lastest-mcp.js"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist",
+    "bin",
+    "LICENSE",
+    "README.md",
+    "server.json"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsx src/index.ts",
+    "typecheck": "tsc --noEmit",
+    "prepublishOnly": "pnpm build"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.12.1",
+    "commander": "^12.0.0",
+    "zod": "^3.23.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.10.0",
+    "tsup": "^8.0.0",
+    "tsx": "^4.7.0",
+    "typescript": "^5.3.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "visual-regression",
+    "testing",
+    "lastest",
+    "ai-agent",
+    "qa-automation"
+  ],
+  "author": "Dexilion Team",
+  "license": "FSL-1.1-ALv2",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/las-team/lastest.git",
+    "directory": "packages/mcp-server"
+  },
+  "homepage": "https://github.com/las-team/lastest#readme",
+  "bugs": {
+    "url": "https://github.com/las-team/lastest/issues"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

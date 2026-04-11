@@ -14,6 +14,25 @@ import {
 import type { AIProviderConfig, TestGenerationContext, ScanContext, DiscoverySource, CodebaseIntelligenceContext } from '@/lib/ai/types';
 import { revalidatePath } from 'next/cache';
 import { getCurrentBranchForRepo } from '@/lib/git-utils';
+import { agentCreateTest } from '@/lib/playwright/generator-agent';
+import { emitAndPersistActivityEvent } from '@/lib/db/queries/activity-events';
+import type { AgentStepState } from '@/lib/db/schema';
+import { db } from '@/lib/db';
+import { embeddedSessions } from '@/lib/db/schema';
+import { eq } from 'drizzle-orm';
+
+/** Find a ready embedded browser's CDP + stream URLs for MCP integration */
+async function findAvailableEmbeddedBrowser(): Promise<{ cdpUrl: string; streamUrl: string } | undefined> {
+  const [session] = await db
+    .select({ cdpUrl: embeddedSessions.cdpUrl, streamUrl: embeddedSessions.streamUrl })
+    .from(embeddedSessions)
+    .where(eq(embeddedSessions.status, 'ready'))
+    .limit(1);
+  if (session?.cdpUrl && session?.streamUrl) {
+    return { cdpUrl: session.cdpUrl, streamUrl: session.streamUrl };
+  }
+  return undefined;
+}
 
 async function getAIConfig(repositoryId?: string | null): Promise<AIProviderConfig> {
   const settings = await queries.getAISettings(repositoryId);
@@ -45,12 +64,11 @@ function buildScanContextFromRoute(
   };
 }
 
-export async function aiCreateTest(
+export async function aiCreateTestCore(
   repositoryId: string,
   context: TestGenerationContext,
   routeId?: string
 ): Promise<{ success: boolean; code?: string; error?: string }> {
-  await requireRepoAccess(repositoryId);
   try {
     // Enrich context with route information if routeId is provided
     const enrichedContext = { ...context };
@@ -58,13 +76,7 @@ export async function aiCreateTest(
     if (routeId) {
       const routeWithContext = await queries.getRouteWithContext(routeId);
       if (routeWithContext) {
-        // Determine discovery source based on available data
-        let discoverySource: DiscoverySource = 'file-scan';
-        if (routeWithContext.description && routeWithContext.testSuggestions.length > 0) {
-          discoverySource = 'spec-analysis';
-        }
-
-        enrichedContext.scanContext = buildScanContextFromRoute(routeWithContext, discoverySource);
+        enrichedContext.scanContext = buildScanContextFromRoute(routeWithContext);
 
         // Also set routePath if not already set
         if (!enrichedContext.routePath && !enrichedContext.targetUrl) {
@@ -93,6 +105,15 @@ export async function aiCreateTest(
     const message = error instanceof Error ? error.message : 'Failed to generate test';
     return { success: false, error: message };
   }
+}
+
+export async function aiCreateTest(
+  repositoryId: string,
+  context: TestGenerationContext,
+  routeId?: string
+): Promise<{ success: boolean; code?: string; error?: string }> {
+  await requireRepoAccess(repositoryId);
+  return aiCreateTestCore(repositoryId, context, routeId);
 }
 
 export async function aiFixTest(
@@ -181,6 +202,303 @@ export async function saveGeneratedTest(data: {
     return { success: true, testId: test.id };
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Failed to save test';
+    return { success: false, error: message };
+  }
+}
+
+export async function startGenerateTestAgent(data: {
+  repositoryId: string;
+  userPrompt: string;
+  targetUrl?: string;
+  testName: string;
+  functionalAreaId?: string;
+  headless?: boolean;
+}): Promise<{ success: boolean; sessionId?: string; error?: string }> {
+  const { team } = await requireRepoAccess(data.repositoryId);
+  const teamId = team?.id ?? '';
+
+  try {
+    const steps: AgentStepState[] = [{
+      id: 'generate',
+      status: 'active',
+      label: 'Generate Test',
+      description: `Generating "${data.testName}" via MCP exploration`,
+      startedAt: new Date().toISOString(),
+    }];
+
+    const session = await queries.createAgentSession({
+      repositoryId: data.repositoryId,
+      teamId: teamId || null,
+      status: 'active',
+      currentStepId: 'generate',
+      steps,
+      metadata: { testName: data.testName, userPrompt: data.userPrompt, streamUrl: null } as Record<string, unknown>,
+    });
+
+    emitAndPersistActivityEvent({
+      teamId,
+      repositoryId: data.repositoryId,
+      sessionId: session.id,
+      sourceType: 'generate_agent',
+      eventType: 'session:start',
+      summary: `Generating test "${data.testName}"`,
+      stepId: null, agentType: 'generator', detail: null,
+      artifactType: null, artifactId: null, artifactLabel: null,
+      durationMs: null, promptLogId: null,
+    }).catch(() => {});
+
+    // Fire-and-forget background execution
+    (async () => {
+      const startTime = Date.now();
+      try {
+        // Try to use an embedded browser's CDP endpoint for live streaming
+        const eb = await findAvailableEmbeddedBrowser();
+        if (eb) {
+          console.log(`[GenerateTestAgent] Using embedded browser CDP: ${eb.cdpUrl}, stream: ${eb.streamUrl}`);
+          // Store stream URL in session metadata so the UI can show the viewer
+          await queries.updateAgentSession(session.id, {
+            metadata: { ...session.metadata, streamUrl: eb.streamUrl } as Record<string, unknown>,
+          }).catch(() => {});
+        }
+
+        const result = await agentCreateTest(data.repositoryId, {
+          userPrompt: data.userPrompt,
+          targetUrl: data.targetUrl,
+          routePath: data.targetUrl,
+        }, { headless: data.headless, cdpEndpoint: eb?.cdpUrl });
+
+        if (!result.success || !result.code) {
+          throw new Error(result.error || 'Generator agent produced no test code');
+        }
+
+        const test = await queries.createTest({
+          repositoryId: data.repositoryId,
+          functionalAreaId: data.functionalAreaId || null,
+          name: data.testName,
+          code: result.code,
+          targetUrl: data.targetUrl || null,
+        });
+
+        await queries.updateAgentSession(session.id, {
+          status: 'completed',
+          completedAt: new Date(),
+          steps: [{
+            ...steps[0],
+            status: 'completed',
+            completedAt: new Date().toISOString(),
+            result: { testId: test.id },
+          }],
+        });
+
+        emitAndPersistActivityEvent({
+          teamId,
+          repositoryId: data.repositoryId,
+          sessionId: session.id,
+          sourceType: 'generate_agent',
+          eventType: 'artifact:created',
+          summary: `Created test "${data.testName}"`,
+          stepId: 'generate', agentType: 'generator', detail: null,
+          artifactType: 'test', artifactId: test.id, artifactLabel: data.testName,
+          durationMs: Date.now() - startTime, promptLogId: null,
+        }).catch(() => {});
+
+        emitAndPersistActivityEvent({
+          teamId,
+          repositoryId: data.repositoryId,
+          sessionId: session.id,
+          sourceType: 'generate_agent',
+          eventType: 'session:complete',
+          summary: `Test "${data.testName}" generated successfully`,
+          stepId: null, agentType: null, detail: null,
+          artifactType: null, artifactId: null, artifactLabel: null,
+          durationMs: Date.now() - startTime, promptLogId: null,
+        }).catch(() => {});
+
+        revalidatePath('/tests');
+      } catch (err) {
+        console.error('[GenerateTestAgent] Error:', err);
+        await queries.updateAgentSession(session.id, {
+          status: 'failed',
+          completedAt: new Date(),
+          steps: [{
+            ...steps[0],
+            status: 'failed',
+            completedAt: new Date().toISOString(),
+            error: err instanceof Error ? err.message : String(err),
+          }],
+        }).catch(() => {});
+
+        emitAndPersistActivityEvent({
+          teamId,
+          repositoryId: data.repositoryId,
+          sessionId: session.id,
+          sourceType: 'generate_agent',
+          eventType: 'session:error',
+          summary: `Failed to generate test "${data.testName}": ${err instanceof Error ? err.message : String(err)}`,
+          stepId: null, agentType: null, detail: null,
+          artifactType: null, artifactId: null, artifactLabel: null,
+          durationMs: Date.now() - startTime, promptLogId: null,
+        }).catch(() => {});
+      }
+    })();
+
+    return { success: true, sessionId: session.id };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Failed to start test generation';
+    return { success: false, error: message };
+  }
+}
+
+export async function startGeneratePlaceholderTestAgent(data: {
+  testId: string;
+  repositoryId: string;
+}): Promise<{ success: boolean; sessionId?: string; error?: string }> {
+  const { team } = await requireRepoAccess(data.repositoryId);
+  const teamId = team?.id ?? '';
+
+  try {
+    const test = await queries.getTest(data.testId);
+    if (!test) return { success: false, error: 'Test not found' };
+
+    // Build prompt from test description + area context
+    const promptParts: string[] = [];
+    if (test.description) promptParts.push(test.description);
+
+    if (test.functionalAreaId) {
+      const area = await queries.getFunctionalArea(test.functionalAreaId);
+      if (area?.description) promptParts.push(`Area: ${area.name}\nArea Description: ${area.description}`);
+      if (area?.agentPlan) promptParts.push(`Test Plan:\n${area.agentPlan}`);
+    }
+
+    if (promptParts.length === 0) promptParts.push(`Generate a test for: ${test.name}`);
+    const userPrompt = promptParts.join('\n\n');
+
+    const steps: AgentStepState[] = [{
+      id: 'generate',
+      status: 'active',
+      label: 'Generate Test',
+      description: `Generating "${test.name}" from placeholder via MCP exploration`,
+      startedAt: new Date().toISOString(),
+    }];
+
+    const session = await queries.createAgentSession({
+      repositoryId: data.repositoryId,
+      teamId: teamId || null,
+      status: 'active',
+      currentStepId: 'generate',
+      steps,
+      metadata: { testName: test.name, testId: data.testId, userPrompt, streamUrl: null } as Record<string, unknown>,
+    });
+
+    emitAndPersistActivityEvent({
+      teamId,
+      repositoryId: data.repositoryId,
+      sessionId: session.id,
+      sourceType: 'generate_agent',
+      eventType: 'session:start',
+      summary: `Generating placeholder test "${test.name}"`,
+      stepId: null, agentType: 'generator', detail: null,
+      artifactType: null, artifactId: null, artifactLabel: null,
+      durationMs: null, promptLogId: null,
+    }).catch(() => {});
+
+    // Fire-and-forget background execution
+    (async () => {
+      const startTime = Date.now();
+      try {
+        const eb = await findAvailableEmbeddedBrowser();
+        if (eb) {
+          console.log(`[GeneratePlaceholderAgent] Using embedded browser CDP: ${eb.cdpUrl}, stream: ${eb.streamUrl}`);
+          await queries.updateAgentSession(session.id, {
+            metadata: { ...session.metadata, streamUrl: eb.streamUrl } as Record<string, unknown>,
+          }).catch(() => {});
+        }
+
+        const result = await agentCreateTest(data.repositoryId, {
+          userPrompt,
+          testName: test.name,
+          targetUrl: test.targetUrl ?? undefined,
+          routePath: test.targetUrl ?? undefined,
+          functionalAreaId: test.functionalAreaId ?? undefined,
+        }, { cdpEndpoint: eb?.cdpUrl });
+
+        if (!result.success || !result.code) {
+          throw new Error(result.error || 'Generator agent produced no test code');
+        }
+
+        // Update existing test instead of creating a new one
+        await queries.updateTestWithVersion(data.testId, {
+          code: result.code,
+          isPlaceholder: false,
+        }, 'ai_generated');
+
+        await queries.updateAgentSession(session.id, {
+          status: 'completed',
+          completedAt: new Date(),
+          steps: [{
+            ...steps[0],
+            status: 'completed',
+            completedAt: new Date().toISOString(),
+            result: { testId: data.testId },
+          }],
+        });
+
+        emitAndPersistActivityEvent({
+          teamId,
+          repositoryId: data.repositoryId,
+          sessionId: session.id,
+          sourceType: 'generate_agent',
+          eventType: 'artifact:created',
+          summary: `Generated test "${test.name}" from placeholder`,
+          stepId: 'generate', agentType: 'generator', detail: null,
+          artifactType: 'test', artifactId: data.testId, artifactLabel: test.name,
+          durationMs: Date.now() - startTime, promptLogId: null,
+        }).catch(() => {});
+
+        emitAndPersistActivityEvent({
+          teamId,
+          repositoryId: data.repositoryId,
+          sessionId: session.id,
+          sourceType: 'generate_agent',
+          eventType: 'session:complete',
+          summary: `Placeholder test "${test.name}" generated successfully`,
+          stepId: null, agentType: null, detail: null,
+          artifactType: null, artifactId: null, artifactLabel: null,
+          durationMs: Date.now() - startTime, promptLogId: null,
+        }).catch(() => {});
+
+        revalidatePath('/definition');
+        revalidatePath('/tests');
+      } catch (err) {
+        console.error('[GeneratePlaceholderAgent] Error:', err);
+        await queries.updateAgentSession(session.id, {
+          status: 'failed',
+          completedAt: new Date(),
+          steps: [{
+            ...steps[0],
+            status: 'failed',
+            completedAt: new Date().toISOString(),
+            error: err instanceof Error ? err.message : String(err),
+          }],
+        }).catch(() => {});
+
+        emitAndPersistActivityEvent({
+          teamId,
+          repositoryId: data.repositoryId,
+          sessionId: session.id,
+          sourceType: 'generate_agent',
+          eventType: 'session:error',
+          summary: `Failed to generate placeholder test "${test.name}": ${err instanceof Error ? err.message : String(err)}`,
+          stepId: null, agentType: null, detail: null,
+          artifactType: null, artifactId: null, artifactLabel: null,
+          durationMs: Date.now() - startTime, promptLogId: null,
+        }).catch(() => {});
+      }
+    })();
+
+    return { success: true, sessionId: session.id };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Failed to start test generation';
     return { success: false, error: message };
   }
 }

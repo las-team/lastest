@@ -13,7 +13,7 @@ const SYSTEM_USER_EMAIL = 'system@lastest.internal';
  * Find or create the __system__ team and user for system EBs.
  */
 async function getOrCreateSystemTeam(): Promise<{ teamId: string; userId: string }> {
-  let team = await db.select().from(teams).where(eq(teams.slug, SYSTEM_TEAM_SLUG)).get();
+  let [team] = await db.select().from(teams).where(eq(teams.slug, SYSTEM_TEAM_SLUG));
   if (!team) {
     const teamId = crypto.randomUUID();
     await db.insert(teams).values({
@@ -23,10 +23,10 @@ async function getOrCreateSystemTeam(): Promise<{ teamId: string; userId: string
       createdAt: new Date(),
       updatedAt: new Date(),
     });
-    team = await db.select().from(teams).where(eq(teams.id, teamId)).get();
+    [team] = await db.select().from(teams).where(eq(teams.id, teamId));
   }
 
-  let user = await db.select().from(users).where(eq(users.email, SYSTEM_USER_EMAIL)).get();
+  let [user] = await db.select().from(users).where(eq(users.email, SYSTEM_USER_EMAIL));
   if (!user) {
     const userId = crypto.randomUUID();
     await db.insert(users).values({
@@ -38,7 +38,7 @@ async function getOrCreateSystemTeam(): Promise<{ teamId: string; userId: string
       createdAt: new Date(),
       updatedAt: new Date(),
     });
-    user = await db.select().from(users).where(eq(users.id, userId)).get();
+    [user] = await db.select().from(users).where(eq(users.id, userId));
   }
 
   return { teamId: team!.id, userId: user!.id };
@@ -72,6 +72,7 @@ export async function POST(request: Request) {
   // Parse body
   let body: {
     streamUrl: string;
+    cdpUrl?: string;
     containerUrl: string;
     viewport?: { width: number; height: number };
     instanceId: string;
@@ -91,11 +92,10 @@ export async function POST(request: Request) {
 
   // Upsert system runner by instanceId (name acts as stable key)
   const runnerName = `System EB-${body.instanceId}`;
-  let runner = await db
+  let [runner] = await db
     .select()
     .from(runners)
-    .where(and(eq(runners.name, runnerName), eq(runners.isSystem, true)))
-    .get();
+    .where(and(eq(runners.name, runnerName), eq(runners.isSystem, true)));
 
   // Generate a per-runner token for heartbeats
   const runnerToken = `lastest_runner_${crypto.randomBytes(32).toString('hex')}`;
@@ -117,14 +117,14 @@ export async function POST(request: Request) {
       lastSeen: new Date(),
       createdAt: new Date(),
     });
-    runner = await db.select().from(runners).where(eq(runners.id, runnerId)).get();
+    [runner] = await db.select().from(runners).where(eq(runners.id, runnerId));
   } else {
     // Update existing runner: refresh token & mark online
     await db
       .update(runners)
       .set({ tokenHash, status: 'online', lastSeen: new Date(), maxParallelTests: 6 })
       .where(eq(runners.id, runner.id));
-    runner = await db.select().from(runners).where(eq(runners.id, runner.id)).get();
+    [runner] = await db.select().from(runners).where(eq(runners.id, runner.id));
   }
 
   // Upsert embedded session
@@ -132,6 +132,7 @@ export async function POST(request: Request) {
     teamId,
     runnerId: runner!.id,
     streamUrl: body.streamUrl,
+    cdpUrl: body.cdpUrl,
     containerUrl: body.containerUrl,
     viewport: body.viewport,
   });

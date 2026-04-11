@@ -1,8 +1,8 @@
 # @lastest/runner
 
-Remote test execution runner for [Lastest2](https://github.com/dexilion-team/lastest2) — free, open-source visual regression testing with AI-generated tests.
+Remote test execution runner for [Lastest](https://github.com/las-team/lastest) — free, open-source visual regression testing with AI-generated tests.
 
-Connects to your Lastest2 server, receives test jobs, executes them locally using Playwright, and reports results back. Run as a background daemon or in the foreground for CI/CD.
+Connects to your Lastest server, receives test jobs, executes them locally using Playwright, and reports results back. Run as a background daemon or in the foreground for CI/CD.
 
 ---
 
@@ -33,12 +33,12 @@ npx playwright install chromium
 
 ## Quick Start
 
-1. **Register a runner** in your Lastest2 instance at Settings → Runners
+1. **Register a runner** in your Lastest instance at Settings → Runners
 2. **Copy the token** (shown only once)
 3. **Start the runner**:
 
 ```bash
-lastest2-runner start -t YOUR_TOKEN -s https://your-lastest2-server
+lastest-runner start -t YOUR_TOKEN -s https://your-lastest-server
 ```
 
 That's it. The runner connects, waits for jobs, and executes tests automatically.
@@ -50,48 +50,48 @@ That's it. The runner connects, waits for jobs, and executes tests automatically
 ### Start Runner (Daemon Mode)
 
 ```bash
-lastest2-runner start -t <token> -s <server-url>
+lastest-runner start -t <token> -s <server-url>
 ```
 
-Spawns a detached background process. Logs are written to `~/.lastest2/runner.log`.
+Spawns a detached background process. Logs are written to `~/.lastest/runner.log`.
 
 | Option | Description | Default |
 |--------|-------------|---------|
 | `-t, --token <token>` | Runner authentication token (required on first run) | — |
-| `-s, --server <url>` | Lastest2 server URL (required on first run) | — |
+| `-s, --server <url>` | Lastest server URL (required on first run) | — |
 | `-i, --interval <ms>` | Poll interval in milliseconds | `5000` |
 | `-b, --base-url <url>` | Override target URL for test execution | — |
 
-After the first run, options are saved to `~/.lastest2/runner.config.json`. Subsequent runs can omit them:
+After the first run, options are saved to `~/.lastest/runner.config.json`. Subsequent runs can omit them:
 
 ```bash
-lastest2-runner start  # Uses saved config
+lastest-runner start  # Uses saved config
 ```
 
 ### Stop Runner
 
 ```bash
-lastest2-runner stop
+lastest-runner stop
 ```
 
 ### Check Status
 
 ```bash
-lastest2-runner status
+lastest-runner status
 ```
 
 ### View Logs
 
 ```bash
-lastest2-runner log              # Show last 50 lines
-lastest2-runner log -n 100       # Show last 100 lines
-lastest2-runner log -f           # Follow log output (like tail -f)
+lastest-runner log              # Show last 50 lines
+lastest-runner log -n 100       # Show last 100 lines
+lastest-runner log -f           # Follow log output (like tail -f)
 ```
 
 ### Run in Foreground
 
 ```bash
-lastest2-runner run -t <token> -s <server-url>
+lastest-runner run -t <token> -s <server-url>
 ```
 
 Keeps the process attached to the terminal. Useful for:
@@ -103,7 +103,7 @@ Keeps the process attached to the terminal. Useful for:
 
 ## Configuration
 
-Runner stores its files in `~/.lastest2/`:
+Runner stores its files in `~/.lastest/`:
 
 | File | Purpose |
 |------|---------|
@@ -134,11 +134,11 @@ jobs:
   visual-tests:
     runs-on: ubuntu-latest
     steps:
-      - name: Run Lastest2 Runner
+      - name: Run Lastest Runner
         run: |
           npx @lastest/runner run \
-            -t ${{ secrets.LASTEST2_TOKEN }} \
-            -s ${{ vars.LASTEST2_SERVER }}
+            -t ${{ secrets.LASTEST_TOKEN }} \
+            -s ${{ vars.LASTEST_SERVER }}
 ```
 
 ### Docker
@@ -149,7 +149,7 @@ FROM node:18-slim
 RUN npm install -g @lastest/runner && \
     npx playwright install chromium --with-deps
 
-CMD ["lastest2-runner", "run", "-t", "$TOKEN", "-s", "$SERVER"]
+CMD ["lastest-runner", "run", "-t", "$TOKEN", "-s", "$SERVER"]
 ```
 
 ### GitHub Action (Alternative)
@@ -158,7 +158,7 @@ For zero-config CI/CD without installing the runner, use the reusable GitHub Act
 
 ```yaml
 - name: Run visual regression tests
-  uses: dexilion-team/lastest2/action@main
+  uses: las-team/lastest/action@main
   with:
     server-url: ${{ secrets.LASTEST_SERVER_URL }}
     runner-token: ${{ secrets.LASTEST_RUNNER_TOKEN }}
@@ -176,19 +176,19 @@ npm install -g @lastest/runner
 npx playwright install chromium
 
 # Start the runner
-lastest2-runner start -t lastest_runner_abc123 -s https://lastest2.example.com
+lastest-runner start -t lastest_runner_abc123 -s https://lastest.example.com
 
 # Check it's running
-lastest2-runner status
+lastest-runner status
 # Runner Status: RUNNING
 #   PID: 12345
-#   Server: https://lastest2.example.com
+#   Server: https://lastest.example.com
 
 # View logs
-lastest2-runner log -f
+lastest-runner log -f
 
 # Stop when done
-lastest2-runner stop
+lastest-runner stop
 ```
 
 ---
@@ -202,7 +202,7 @@ import { RunnerClient, TestRunner } from '@lastest/runner';
 
 const client = new RunnerClient({
   token: 'your-token',
-  serverUrl: 'https://your-lastest2-server',
+  serverUrl: 'https://your-lastest-server',
   pollInterval: 5000,
 });
 
@@ -235,7 +235,7 @@ npx playwright install-deps chromium
 
 - Increase poll interval: `-i 10000` (10 seconds)
 - Check network stability between runner and server
-- View logs for error details: `lastest2-runner log -f`
+- View logs for error details: `lastest-runner log -f`
 
 ---
 

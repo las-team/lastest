@@ -1,6 +1,6 @@
 # Development Prompt: New Features To Implement
 
-This document lists all new features to be developed on a clean branch. Each feature is independent and can be implemented in any order. The existing codebase uses **better-auth** for authentication (do NOT replace it), **Playwright** for browser automation, **pixelmatch** + **pngjs** for image diffing, **Drizzle ORM** with **SQLite**, and **Next.js App Router**.
+This document lists all new features to be developed on a clean branch. Each feature is independent and can be implemented in any order. The existing codebase uses **better-auth** for authentication (do NOT replace it), **Playwright** for browser automation, **pixelmatch** + **pngjs** for image diffing, **Drizzle ORM** with **PostgreSQL**, and **Next.js App Router**.
 
 Refer to the individual spec files in `docs/specs/` for full implementation details.
 

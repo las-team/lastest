@@ -72,7 +72,13 @@ export function BugReportWidget() {
         });
 
         if (result.success) {
-          toast.success('Bug report submitted. Thank you!');
+          if (result.forwardingErrors?.length) {
+            toast.warning('Bug report saved, but notifications failed to send.', {
+              description: result.forwardingErrors.join('; '),
+            });
+          } else {
+            toast.success('Bug report submitted. Thank you!');
+          }
           setDescription('');
           setSeverity('medium');
           setIncludeScreenshot(false);

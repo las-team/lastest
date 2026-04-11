@@ -1,7 +1,7 @@
 import sodium from 'libsodium-wrappers';
 
 const GITHUB_API = 'https://api.github.com';
-const WORKFLOW_PATH = '.github/workflows/lastest2.yml';
+const WORKFLOW_PATH = '.github/workflows/lastest.yml';
 
 function headers(token: string) {
   return {
@@ -42,8 +42,8 @@ export async function upsertWorkflowFile(
   const content = Buffer.from(yaml).toString('base64');
   const body: Record<string, string> = {
     message: existingSha
-      ? 'Update Lastest2 visual testing workflow'
-      : 'Add Lastest2 visual testing workflow',
+      ? 'Update Lastest visual testing workflow'
+      : 'Add Lastest visual testing workflow',
     content,
   };
   if (existingSha) body.sha = existingSha;
@@ -87,7 +87,7 @@ export async function deleteWorkflowFile(
       method: 'DELETE',
       headers: headers(token),
       body: JSON.stringify({
-        message: 'Remove Lastest2 visual testing workflow',
+        message: 'Remove Lastest visual testing workflow',
         sha,
       }),
     },
@@ -179,7 +179,7 @@ export async function checkRepoSecretExists(
 }
 
 /**
- * Get the latest workflow run for the lastest2 workflow.
+ * Get the latest workflow run for the lastest workflow.
  */
 export async function getLatestWorkflowRun(
   token: string,
@@ -187,7 +187,7 @@ export async function getLatestWorkflowRun(
   repo: string,
 ): Promise<{ status: string; conclusion: string | null; htmlUrl: string; createdAt: string } | null> {
   const res = await fetch(
-    `${GITHUB_API}/repos/${owner}/${repo}/actions/workflows/lastest2.yml/runs?per_page=1`,
+    `${GITHUB_API}/repos/${owner}/${repo}/actions/workflows/lastest.yml/runs?per_page=1`,
     { headers: headers(token) },
   );
   if (!res.ok) return null;

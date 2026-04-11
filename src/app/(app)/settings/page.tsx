@@ -29,6 +29,8 @@ import { InviteUserDialog } from '@/components/users/invite-user-dialog';
 import { RunnerList } from '@/components/runners/runner-list';
 import { CreateRunnerDialog } from '@/components/runners/create-runner-dialog';
 import { getRunners, getSystemRunners } from '@/server/actions/runners';
+import { listApiTokens } from '@/server/actions/api-tokens';
+import { ApiTokensSection } from '@/components/api-tokens/api-tokens-section';
 import { GoogleSheetsSettingsCard } from '@/components/settings/google-sheets-settings-card';
 import { TestingTemplateSelector } from '@/components/settings/testing-template-selector';
 import { AutoApproveToggle } from '@/components/settings/auto-approve-toggle';
@@ -36,7 +38,9 @@ import { EarlyAdopterToggle } from '@/components/settings/early-adopter-toggle';
 import { BanAiModeToggle } from '@/components/settings/ban-ai-mode-toggle';
 import { ConnectGithubButton, ReconnectGithubLink } from '@/components/settings/connect-github-button';
 import { GithubActionsCard } from '@/components/settings/github-actions-card-client';
+import { ScheduleManagerCard } from '@/components/settings/schedule-manager-client';
 import { DiagramThumbnail } from '@/components/ui/diagram-thumbnail';
+import { TestMigrationCard } from '@/components/settings/test-migration-card';
 
 export default async function SettingsPage({
   searchParams,
@@ -59,6 +63,7 @@ export default async function SettingsPage({
     getRunners(),
     getSystemRunners(),
   ]);
+  const apiTokens = await listApiTokens();
   const playwrightSettings = await queries.getPlaywrightSettings(selectedRepo?.id);
   const environmentConfig = await queries.getEnvironmentConfig(selectedRepo?.id);
   const diffSensitivitySettings = await queries.getDiffSensitivitySettings(selectedRepo?.id);
@@ -157,6 +162,9 @@ export default async function SettingsPage({
               )}
             </CardContent>
           </Card>
+
+          {/* Scheduled Runs */}
+          {selectedRepo && <ScheduleManagerCard repositoryId={selectedRepo.id} />}
 
           {/* GitHub Actions */}
           <GithubActionsCard
@@ -358,6 +366,14 @@ export default async function SettingsPage({
             />
           </div>
 
+          {/* Test Migration (Early Adopter) */}
+          {earlyAdopterMode && teamRepos.length > 0 && (
+            <TestMigrationCard
+              repositories={teamRepos.map(r => ({ id: r.id, fullName: r.fullName ?? `${r.owner}/${r.name}` }))}
+              defaultRepositoryId={selectedRepo?.id}
+            />
+          )}
+
           {/* User Management (Admin only) */}
           {isAdmin && currentUser?.teamId && (
             <div id="team" className="space-y-6">
@@ -398,21 +414,30 @@ export default async function SettingsPage({
                 </CardContent>
               </Card>
 
-              {/* Remote Runners */}
+              {/* Runners & API Access */}
               <Card>
                 <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                   <div className="space-y-1">
                     <CardTitle className="flex items-center gap-2">
                       <Bot className="w-5 h-5" />
-                      Remote Runners ({runners.length})
+                      Runners & API Access
                     </CardTitle>
                     <CardDescription>
-                      Runners run tests on your local machine and report results to the cloud
+                      Local/remote runners that execute tests, plus API keys for the MCP server, VS Code extension, and scripts.
                     </CardDescription>
                   </div>
                   <CreateRunnerDialog />
                 </CardHeader>
-                <CardContent className="space-y-4">
+                <CardContent className="space-y-6">
+                  <ApiTokensSection tokens={apiTokens} serverUrl={serverUrl} />
+
+                  <div className="border-t pt-4 space-y-4">
+                    <div>
+                      <p className="text-sm font-medium flex items-center gap-2">
+                        <Bot className="w-4 h-4" /> Runners ({runners.length})
+                      </p>
+                      <p className="text-xs text-muted-foreground">CLI agents and embedded browsers that run tests on your machines.</p>
+                    </div>
                   {runners.length === 0 && sysRunners.length === 0 ? (
                     <div className="text-center py-4 text-muted-foreground">
                       <Bot className="w-12 h-12 mx-auto mb-4 opacity-50" />
@@ -442,7 +467,7 @@ export default async function SettingsPage({
                       <div>
                         <p className="font-medium mb-1">2. Start as background daemon:</p>
                         <pre className="bg-muted p-2 rounded text-xs font-mono">npx @lastest/runner start -t YOUR_TOKEN -s {serverUrl}</pre>
-                        <p className="text-[11px] mt-1 opacity-75">Logs: ~/.lastest2/runner.log · Config saved for subsequent runs</p>
+                        <p className="text-[11px] mt-1 opacity-75">Logs: ~/.lastest/runner.log · Config saved for subsequent runs</p>
                       </div>
                       <div>
                         <p className="font-medium mb-1">3. Or run in foreground (Docker / CI):</p>
@@ -468,6 +493,7 @@ npx @lastest/runner log -f    # Follow logs in real-time`}</pre>
                       </p>
                     </div>
                   </details>
+                  </div>
                 </CardContent>
               </Card>
 

@@ -1,7 +1,8 @@
 'use client';
 
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
+import { cn } from '@/lib/utils';
 import { usePreferredRunner } from '@/hooks/use-preferred-runner';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -15,8 +16,9 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { Textarea } from '@/components/ui/textarea';
-import { Play, Trash2, Copy, Edit2, Clock, CheckCircle, XCircle, X, Save, Wrench, Wand2, Loader2, History, RotateCcw, ChevronDown, ChevronRight, ChevronUp, Monitor, Video, AlertTriangle, Image, Bug, GitBranch, GitCommit, Tv2 } from 'lucide-react';
+import { Play, Trash2, Copy, Edit2, Clock, CheckCircle, XCircle, X, Save, Wrench, Wand2, Loader2, History, RotateCcw, ChevronDown, ChevronRight, ChevronUp, Monitor, Video, AlertTriangle, Image, Bug, GitBranch, GitCommit, Tv2, Code2, Maximize2, Minimize2, Sparkles } from 'lucide-react';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -25,23 +27,26 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { deleteTest, updateTest, getTestVersionHistory, restoreTestVersion, getVisualDiffsForTestResult, restoreTest, permanentlyDeleteTest, cloneTest } from '@/server/actions/tests';
 import { runTests, getJobStatus } from '@/server/actions/runs';
-import { aiFixTest, aiEnhanceTest, updateTestCode } from '@/server/actions/ai';
+import { aiFixTest, aiEnhanceTest, updateTestCode, startGeneratePlaceholderTestAgent } from '@/server/actions/ai';
 import { toast } from 'sonner';
 import { useNotifyJobStarted } from '@/components/queue/job-polling-context';
 import { ExecutionTargetSelector } from '@/components/execution/execution-target-selector';
 import { StepScreenshotMatcher } from '@/components/planned/step-screenshot-matcher';
 import { TestSetupOverrides } from '@/components/setup/test-setup-overrides';
-import type { Test, TestVersion, PlannedScreenshot, SetupScript, GoogleSheetsDataSource, A11yViolation, StabilizationSettings, DiffSensitivitySettings } from '@/lib/db/schema';
+import type { Test, TestVersion, PlannedScreenshot, SetupScript, GoogleSheetsDataSource, A11yViolation, StabilizationSettings, DiffSensitivitySettings, TestSpec } from '@/lib/db/schema';
 import { DEFAULT_STABILIZATION_SETTINGS, DEFAULT_DIFF_THRESHOLDS } from '@/lib/db/schema';
 import { TestStabilizationOverrides } from '@/components/settings/test-stabilization-overrides';
 import { TestDiffOverrides as TestDiffOverridesComponent } from '@/components/settings/test-diff-overrides';
 import { TestPlaywrightOverrides as TestPlaywrightOverridesComponent } from '@/components/settings/test-playwright-overrides';
 import { A11yViolationsPanel } from '@/components/builds/a11y-violations-panel';
+import { RuntimeErrorsPanel, stripRuntimeErrorsFromMessage } from '@/components/builds/runtime-errors-panel';
+import { TestStepsTab } from '@/components/tests/success-criteria-tab';
 import type { ScreenshotGroup } from '@/server/actions/tests';
 import { SheetDataPreview } from '@/components/test-data/sheet-data-preview';
 import { SheetReferenceInserter } from '@/components/test-data/sheet-reference-inserter';
 import { BrowserViewer } from '@/components/embedded-browser/browser-viewer-client';
 import { getStreamUrlForRunner } from '@/server/actions/embedded-sessions';
+import { TestSpecEditor } from '@/components/tests/test-spec-editor';
 
 interface StepDiff {
   stepLabel: string | null;
@@ -62,11 +67,14 @@ interface TestResult {
   viewport: string | null;
   browser: string | null;
   consoleErrors: string[] | null;
-  networkRequests: unknown[] | null;
+  networkRequests: import('@/lib/db/schema').NetworkRequest[] | null;
   videoPath: string | null;
   a11yViolations: A11yViolation[] | null;
   softErrors: string[] | null;
+  assertionResults: import('@/lib/db/schema').AssertionResult[] | null;
   startedAt: Date | null;
+  networkBodiesPath: string | null;
+  screenshots: import('@/lib/db/schema').CapturedScreenshot[] | null;
 }
 
 interface DefaultStepForUI {
@@ -107,9 +115,112 @@ interface TestDetailClientProps {
   diffDefaults?: DiffSensitivitySettings | null;
   playwrightDefaults?: PlaywrightSettingsForDefaults | null;
   envBaseUrl?: string | null;
+  testSpec?: TestSpec | null;
+  contentClassName?: string;
 }
 
-export function TestDetailClient({ test, results, repositoryId, screenshotGroups = [], plannedScreenshots = [], defaultSetupSteps = [], availableTests = [], availableScripts = [], sheetDataSources = [], stabilizationDefaults, banAiMode = false, earlyAdopterMode = false, diffDefaults, playwrightDefaults, envBaseUrl }: TestDetailClientProps) {
+function splitBoilerplate(code: string): { boilerplate: string; testBody: string } | null {
+  // Match the standard helper block: from signature line through replayCursorPath closing brace
+  const signatureMatch = code.match(/^(import\s.*\n\n)?export\s+async\s+function\s+test\s*\([^)]*\)\s*\{/m);
+  if (!signatureMatch) return null;
+
+  // Find the end of the last boilerplate helper (replayCursorPath or locateWithFallback)
+  const markers = ['async function replayCursorPath', 'async function locateWithFallback', 'function getScreenshotPath', 'function buildUrl'];
+  let lastHelperEnd = -1;
+
+  for (const marker of markers) {
+    let searchFrom = 0;
+    while (true) {
+      const idx = code.indexOf(marker, searchFrom);
+      if (idx === -1) break;
+      // Find the closing brace of this function by counting braces
+      let braceCount = 0;
+      let started = false;
+      let endIdx = idx;
+      for (let i = idx; i < code.length; i++) {
+        if (code[i] === '{') { braceCount++; started = true; }
+        if (code[i] === '}') { braceCount--; }
+        if (started && braceCount === 0) { endIdx = i + 1; break; }
+      }
+      if (endIdx > lastHelperEnd) lastHelperEnd = endIdx;
+      searchFrom = endIdx;
+    }
+  }
+
+  if (lastHelperEnd === -1) return null;
+
+  // Skip blank lines after the last helper, but preserve indentation
+  let bodyStart = lastHelperEnd;
+  while (bodyStart < code.length && (code[bodyStart] === '\n' || code[bodyStart] === '\r')) {
+    bodyStart++;
+  }
+
+  const boilerplate = code.slice(0, lastHelperEnd);
+  const testBody = code.slice(bodyStart);
+
+  // Only collapse if there's meaningful test body left
+  if (!testBody.trim() || testBody.trim() === '}') return null;
+
+  return { boilerplate, testBody };
+}
+
+function NumberedCode({ code, startLine, highlightLine, className }: { code: string; startLine: number; highlightLine?: number | null; className?: string }) {
+  const lines = code.split('\n');
+  return (
+    <pre className={className}>
+      {lines.map((line, i) => {
+        const lineNum = startLine + i;
+        const isHighlighted = highlightLine === lineNum;
+        return (
+          <div
+            key={lineNum}
+            id={`code-line-${lineNum}`}
+            className={isHighlighted ? 'bg-yellow-200/40 dark:bg-yellow-800/30 -mx-4 px-4 transition-colors duration-1000' : undefined}
+          >
+            <span className="inline-block w-8 text-right mr-4 text-muted-foreground/50 select-none">{lineNum}</span>
+            {line}
+          </div>
+        );
+      })}
+    </pre>
+  );
+}
+
+function CollapsibleTestCode({ code, highlightLine }: { code: string; highlightLine?: number | null }) {
+  const [showHelpers, setShowHelpers] = useState(false);
+  const split = splitBoilerplate(code);
+
+  if (!split) {
+    return (
+      <div className="bg-muted rounded-lg overflow-x-auto text-sm font-mono">
+        <NumberedCode code={code} startLine={1} highlightLine={highlightLine} className="p-4" />
+      </div>
+    );
+  }
+
+  const boilerplateLineCount = split.boilerplate.split('\n').length;
+  const testBodyStartLine = boilerplateLineCount + 1;
+
+  return (
+    <div className="bg-muted rounded-lg overflow-x-auto text-sm font-mono">
+      <button
+        type="button"
+        onClick={() => setShowHelpers(!showHelpers)}
+        className="flex items-center gap-2 px-4 py-2 w-full text-left text-muted-foreground hover:text-foreground transition-colors border-b border-border/50"
+      >
+        {showHelpers ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+        <Code2 className="h-3 w-3" />
+        <span className="text-xs">Standard helpers (buildUrl, locateWithFallback, ...)</span>
+      </button>
+      {showHelpers && (
+        <NumberedCode code={split.boilerplate} startLine={1} highlightLine={highlightLine} className="px-4 py-2 border-b border-border/50 text-muted-foreground" />
+      )}
+      <NumberedCode code={split.testBody} startLine={testBodyStartLine} highlightLine={highlightLine} className="p-4" />
+    </div>
+  );
+}
+
+export function TestDetailClient({ test, results, repositoryId, screenshotGroups = [], plannedScreenshots = [], defaultSetupSteps = [], availableTests = [], availableScripts = [], sheetDataSources = [], stabilizationDefaults, banAiMode = false, earlyAdopterMode = false, diffDefaults, playwrightDefaults, envBaseUrl, testSpec, contentClassName }: TestDetailClientProps) {
   const router = useRouter();
   const notifyJobStarted = useNotifyJobStarted();
   const [isDeleting, setIsDeleting] = useState(false);
@@ -122,6 +233,8 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
   const [editName, setEditName] = useState(test.name);
   const [editUrl, setEditUrl] = useState(test.targetUrl || '');
   const [editCode, setEditCode] = useState(test.code || '');
+  const [activeTab, setActiveTab] = useState('code');
+  const [highlightLine, setHighlightLine] = useState<number | null>(null);
 
   // Run state
   const [isRunning, setIsRunning] = useState(false);
@@ -131,6 +244,27 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
   // Live browser viewer state
   const [streamUrl, setStreamUrl] = useState<string | null>(null);
   const [showViewer, setShowViewer] = useState(true);
+  const [isViewerFullscreen, setIsViewerFullscreen] = useState(false);
+  const viewerLayoutRef = useRef<HTMLDivElement>(null);
+
+  const toggleViewerFullscreen = useCallback(() => {
+    if (!viewerLayoutRef.current) return;
+    try {
+      if (!isViewerFullscreen) {
+        viewerLayoutRef.current.requestFullscreen?.();
+      } else if (document.fullscreenElement) {
+        document.exitFullscreen();
+      }
+    } catch {
+      setIsViewerFullscreen(false);
+    }
+  }, [isViewerFullscreen]);
+
+  useEffect(() => {
+    const handler = () => setIsViewerFullscreen(!!document.fullscreenElement);
+    document.addEventListener('fullscreenchange', handler);
+    return () => document.removeEventListener('fullscreenchange', handler);
+  }, []);
 
   // Cleanup poll interval on unmount
   useEffect(() => {
@@ -144,6 +278,7 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
   // AI Fix/Enhance states
   const [isFixing, setIsFixing] = useState(false);
   const [isEnhancing, setIsEnhancing] = useState(false);
+  const [isGeneratingPlaceholder, setIsGeneratingPlaceholder] = useState(false);
   const [enhancePrompt, setEnhancePrompt] = useState('');
 
   // Version history state
@@ -233,7 +368,7 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
     setIsDeleting(true);
     try {
       await deleteTest(test.id);
-      router.push('/tests');
+      router.push('/definition');
     } finally {
       setIsDeleting(false);
     }
@@ -253,7 +388,7 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
     setIsPermanentlyDeleting(true);
     try {
       await permanentlyDeleteTest(test.id);
-      router.push('/tests');
+      router.push('/definition');
     } finally {
       setIsPermanentlyDeleting(false);
     }
@@ -296,7 +431,7 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
 
       // Poll job status for completion (ensures results are saved before refresh)
       pollIntervalRef.current = setInterval(async () => {
-        const { isComplete } = await getJobStatus(jobId);
+        const { isComplete, status, error } = await getJobStatus(jobId);
         if (isComplete) {
           if (pollIntervalRef.current) {
             clearInterval(pollIntervalRef.current);
@@ -305,7 +440,11 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
           setIsRunning(false);
           setStreamUrl(null);
           router.refresh();
-          toast.success('Test completed');
+          if (status === 'failed') {
+            toast.error(error || 'Test run failed');
+          } else {
+            toast.success('Test completed');
+          }
         }
       }, 1000);
     } catch (error) {
@@ -378,7 +517,7 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
 
   return (
     <div className="flex-1 p-6 overflow-auto">
-      <div className="max-w-4xl mx-auto space-y-6">
+      <div className={cn("max-w-4xl mx-auto space-y-6", contentClassName)}>
         {/* Deleted Banner */}
         {test.deletedAt && (
           <div className="flex items-center justify-between p-4 rounded-lg bg-destructive/10 border border-destructive/20">
@@ -579,10 +718,24 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
                       <span className="text-green-600">Passed</span>
                     </>
                   ) : latestResult?.status === 'failed' ? (
-                    <>
-                      <XCircle className="h-4 w-4 text-destructive" />
-                      <span className="text-destructive">Failed</span>
-                    </>
+                    latestResult.errorMessage ? (
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <div className="flex items-center gap-2 cursor-default">
+                            <XCircle className="h-4 w-4 text-destructive" />
+                            <span className="text-destructive">Failed</span>
+                          </div>
+                        </TooltipTrigger>
+                        <TooltipContent side="right" className="max-w-md">
+                          <pre className="whitespace-pre-wrap font-mono text-xs max-h-48 overflow-y-auto">{latestResult.errorMessage}</pre>
+                        </TooltipContent>
+                      </Tooltip>
+                    ) : (
+                      <>
+                        <XCircle className="h-4 w-4 text-destructive" />
+                        <span className="text-destructive">Failed</span>
+                      </>
+                    )
                   ) : (
                     <span className="text-muted-foreground">Not run</span>
                   )}
@@ -626,51 +779,133 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
                   {test.description}
                 </div>
               )}
-              <Button
-                size="sm"
-                onClick={() => router.push(`/record?rerecordId=${test.id}`)}
-              >
-                <Video className="h-4 w-4 mr-2" />
-                Record Now
-              </Button>
+              <div className="flex items-center gap-2">
+                <Button
+                  size="sm"
+                  onClick={() => router.push(`/record?rerecordId=${test.id}`)}
+                >
+                  <Video className="h-4 w-4 mr-2" />
+                  Record Now
+                </Button>
+                {!banAiMode && repositoryId && (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={isGeneratingPlaceholder}
+                    onClick={async () => {
+                      setIsGeneratingPlaceholder(true);
+                      try {
+                        const result = await startGeneratePlaceholderTestAgent({
+                          testId: test.id,
+                          repositoryId: repositoryId!,
+                        });
+                        if (result.success) {
+                          toast.success('Test generation started — check the activity feed for progress');
+                        } else {
+                          toast.error(result.error || 'Failed to start AI generation');
+                        }
+                      } catch {
+                        toast.error('Failed to start AI generation');
+                      } finally {
+                        setIsGeneratingPlaceholder(false);
+                      }
+                    }}
+                  >
+                    {isGeneratingPlaceholder ? (
+                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    ) : (
+                      <Sparkles className="h-4 w-4 mr-2" />
+                    )}
+                    {isGeneratingPlaceholder ? 'Generating...' : 'Generate with AI'}
+                  </Button>
+                )}
+              </div>
             </CardContent>
           </Card>
         )}
 
         {/* Live Browser Viewer (headed runs on embedded/system runners) */}
         {streamUrl && isRunning && (
-          <Card className="overflow-hidden py-0">
-            <button
-              type="button"
-              className="flex items-center gap-2 w-full px-3 py-2 text-sm font-medium bg-muted/50 hover:bg-muted transition-colors"
-              onClick={() => setShowViewer(!showViewer)}
-            >
-              <Tv2 className="h-4 w-4 text-purple-500" />
-              <span>Live Browser View</span>
-              {showViewer ? <ChevronUp className="h-4 w-4 ml-auto" /> : <ChevronDown className="h-4 w-4 ml-auto" />}
-            </button>
-            {showViewer && (
-              <BrowserViewer
-                streamUrl={streamUrl}
-                className="max-h-[500px]"
-              />
+          <div ref={viewerLayoutRef} className={isViewerFullscreen ? 'flex-1 flex flex-col h-full overflow-hidden bg-muted/50' : ''}>
+            {isViewerFullscreen ? (
+              <>
+                <div className="flex-1 relative flex items-center justify-center overflow-auto min-h-0">
+                  <BrowserViewer
+                    streamUrl={streamUrl}
+                    hideControls
+                  />
+                </div>
+                <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 flex items-center gap-1.5 px-3 py-1.5 bg-card/95 backdrop-blur-sm border border-border rounded-full shadow-2xl">
+                  <div className="flex items-center gap-2 px-1">
+                    <div className="h-2.5 w-2.5 rounded-full bg-green-500 animate-pulse" />
+                    <span className="text-sm font-medium text-foreground">Running</span>
+                  </div>
+                  <div className="w-px h-5 bg-border" />
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-8 w-8"
+                    onClick={toggleViewerFullscreen}
+                    title="Exit fullscreen"
+                  >
+                    <Minimize2 className="h-4 w-4" />
+                  </Button>
+                </div>
+              </>
+            ) : (
+              <Card className="overflow-hidden py-0">
+                <div className="flex items-center gap-2 w-full px-3 py-2 text-sm font-medium bg-muted/50">
+                  <button
+                    type="button"
+                    className="flex items-center gap-2 flex-1 hover:bg-muted transition-colors rounded px-1 -mx-1"
+                    onClick={() => setShowViewer(!showViewer)}
+                  >
+                    <Tv2 className="h-4 w-4 text-purple-500" />
+                    <span>Live Browser View</span>
+                    {showViewer ? <ChevronUp className="h-4 w-4 ml-auto" /> : <ChevronDown className="h-4 w-4 ml-auto" />}
+                  </button>
+                  {showViewer && (
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-7 w-7 shrink-0"
+                      onClick={toggleViewerFullscreen}
+                      title="Fullscreen"
+                    >
+                      <Maximize2 className="h-4 w-4" />
+                    </Button>
+                  )}
+                </div>
+                {showViewer && (
+                  <BrowserViewer
+                    streamUrl={streamUrl}
+                    className="max-h-[500px]"
+                    hideFullscreenToggle
+                    hideScreenshot
+                    hideViewportSelector
+                    readOnlyUrl
+                  />
+                )}
+              </Card>
             )}
-          </Card>
+          </div>
         )}
 
         {/* Tabs for Code, Screenshots, History */}
-        <Tabs defaultValue="code">
-          <TabsList>
-            <TabsTrigger value="code">Code</TabsTrigger>
-            <TabsTrigger value="setup">Setup</TabsTrigger>
-            <TabsTrigger value="stabilization">Stabilization</TabsTrigger>
-            {earlyAdopterMode && <TabsTrigger value="diff-overrides">Diff</TabsTrigger>}
-            {earlyAdopterMode && <TabsTrigger value="playwright-overrides">Playwright</TabsTrigger>}
-            <TabsTrigger value="screenshots">Screenshots</TabsTrigger>
-            <TabsTrigger value="plans">Plans</TabsTrigger>
-            <TabsTrigger value="history">Run History</TabsTrigger>
-            <TabsTrigger value="recordings">Recordings</TabsTrigger>
-            <TabsTrigger value="versions" onClick={loadVersions}>Versions</TabsTrigger>
+        <Tabs value={activeTab} onValueChange={setActiveTab}>
+          <TabsList className="h-11 w-full p-1 gap-1 bg-white dark:bg-zinc-950 border">
+            <TabsTrigger value="code" className="flex-1 px-2 text-sm data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-sm">Code</TabsTrigger>
+            {earlyAdopterMode && (
+              <TabsTrigger value="spec" className="flex-1 px-2 text-sm data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-sm">Spec</TabsTrigger>
+            )}
+            <TabsTrigger value="steps" className="flex-1 px-2 text-sm data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-sm">Steps</TabsTrigger>
+            <TabsTrigger value="setup" className="flex-1 px-2 text-sm data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-sm">Seed</TabsTrigger>
+            <TabsTrigger value="playback" className="flex-1 px-2 text-sm data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-sm">Overrides</TabsTrigger>
+            <TabsTrigger value="screenshots" className="flex-1 px-2 text-sm data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-sm">Screenshots</TabsTrigger>
+            <TabsTrigger value="plans" className="flex-1 px-2 text-sm data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-sm">Plans</TabsTrigger>
+            <TabsTrigger value="history" className="flex-1 px-2 text-sm data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-sm">History</TabsTrigger>
+            <TabsTrigger value="recordings" className="flex-1 px-2 text-sm data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-sm">Recordings</TabsTrigger>
+            <TabsTrigger value="versions" onClick={loadVersions} className="flex-1 px-2 text-sm data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-sm">Versions</TabsTrigger>
           </TabsList>
 
           <TabsContent value="code" className="mt-4 space-y-4">
@@ -696,9 +931,7 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
                     className="font-mono text-sm min-h-[300px]"
                   />
                 ) : (
-                  <pre className="bg-muted p-4 rounded-lg overflow-x-auto text-sm font-mono">
-                    {test.code || '// No code generated yet'}
-                  </pre>
+                  <CollapsibleTestCode code={test.code || '// No code generated yet'} highlightLine={highlightLine} />
                 )}
               </CardContent>
             </Card>
@@ -745,6 +978,65 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
             )}
           </TabsContent>
 
+          {earlyAdopterMode && (
+            <TabsContent value="spec" className="mt-4">
+              {repositoryId && (
+                <TestSpecEditor
+                  testId={test.id}
+                  testName={test.name}
+                  repositoryId={repositoryId}
+                  initialSpec={testSpec ?? null}
+                  functionalAreaId={test.functionalAreaId}
+                />
+              )}
+            </TabsContent>
+          )}
+
+          <TabsContent value="steps" className="mt-4">
+            <TestStepsTab
+              assertions={test.assertions ?? null}
+              assertionResults={latestResult?.assertionResults ?? null}
+              softErrors={latestResult?.softErrors ?? null}
+              code={test.code || ''}
+              testStatus={latestResult?.status ?? null}
+              errorMessage={latestResult?.errorMessage ?? null}
+              screenshots={latestResult?.screenshots ?? null}
+              envBaseUrl={envBaseUrl ?? null}
+              onParseNeeded={async () => {
+                try {
+                  const { parseAssertions } = await import('@/lib/playwright/assertion-parser');
+                  const parsed = parseAssertions(test.code || '');
+                  if (parsed.length > 0) {
+                    const { syncTestAssertions } = await import('@/server/actions/tests');
+                    await syncTestAssertions(test.id, parsed);
+                  }
+                } catch {
+                  // Best effort
+                }
+              }}
+              onToggleAssertionSoftness={async (assertionId, makeSoft) => {
+                const { toggleAssertionSoftness } = await import('@/server/actions/tests');
+                await toggleAssertionSoftness(test.id, assertionId, makeSoft);
+                router.refresh();
+              }}
+              onStepValueChange={async (lineStart, lineEnd, oldValue, newValue) => {
+                const { updateStepValue } = await import('@/server/actions/tests');
+                await updateStepValue(test.id, lineStart, lineEnd, oldValue, newValue);
+                router.refresh();
+              }}
+              onGoToCode={(line) => {
+                setHighlightLine(line);
+                setActiveTab('code');
+                // Scroll to the line after tab switch renders
+                setTimeout(() => {
+                  document.getElementById(`code-line-${line}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                  // Clear highlight after animation
+                  setTimeout(() => setHighlightLine(null), 2000);
+                }, 100);
+              }}
+            />
+          </TabsContent>
+
           <TabsContent value="setup" className="mt-4">
             <TestSetupOverrides
               testId={test.id}
@@ -758,16 +1050,14 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
             />
           </TabsContent>
 
-          <TabsContent value="stabilization" className="mt-4">
+          <TabsContent value="playback" className="mt-4 space-y-6">
             <TestStabilizationOverrides
               testId={test.id}
               overrides={test.stabilizationOverrides ?? null}
               defaults={stabilizationDefaults ?? DEFAULT_STABILIZATION_SETTINGS}
             />
-          </TabsContent>
 
-          {earlyAdopterMode && (
-            <TabsContent value="diff-overrides" className="mt-4">
+            {earlyAdopterMode && (
               <TestDiffOverridesComponent
                 testId={test.id}
                 repositoryId={repositoryId ?? null}
@@ -785,11 +1075,9 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
                   regionDetectionMode: (diffDefaults?.regionDetectionMode as 'grid' | 'flood-fill') ?? DEFAULT_DIFF_THRESHOLDS.regionDetectionMode,
                 }}
               />
-            </TabsContent>
-          )}
+            )}
 
-          {earlyAdopterMode && (
-            <TabsContent value="playwright-overrides" className="mt-4">
+            {earlyAdopterMode && (
               <TestPlaywrightOverridesComponent
                 testId={test.id}
                 repositoryId={repositoryId ?? null}
@@ -807,8 +1095,8 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
                   baseUrl: envBaseUrl ?? 'http://localhost:3000',
                 }}
               />
-            </TabsContent>
-          )}
+            )}
+          </TabsContent>
 
           <TabsContent value="screenshots" className="mt-4 space-y-6">
             <Card>
@@ -907,12 +1195,26 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
                             ) : (
                               <ChevronRight className="h-4 w-4 text-muted-foreground" />
                             )}
-                            {result.status === 'passed' ? (
+                            {result.status === 'failed' && result.errorMessage ? (
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <div className="flex items-center gap-2 cursor-default">
+                                    <XCircle className="h-4 w-4 text-destructive" />
+                                    <span className="capitalize">{result.status}</span>
+                                  </div>
+                                </TooltipTrigger>
+                                <TooltipContent side="right" className="max-w-md">
+                                  <pre className="whitespace-pre-wrap font-mono text-xs max-h-48 overflow-y-auto">{result.errorMessage}</pre>
+                                </TooltipContent>
+                              </Tooltip>
+                            ) : result.status === 'passed' ? (
                               <CheckCircle className="h-4 w-4 text-green-500" />
                             ) : (
                               <XCircle className="h-4 w-4 text-destructive" />
                             )}
-                            <span className="capitalize">{result.status}</span>
+                            {!(result.status === 'failed' && result.errorMessage) && (
+                              <span className="capitalize">{result.status}</span>
+                            )}
                           </div>
                           <div className="flex items-center gap-4 text-sm text-muted-foreground">
                             <span>{result.durationMs}ms</span>
@@ -926,13 +1228,18 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
 
                         {expandedRuns.has(result.id) && (
                           <div className="px-3 pb-3 border-t">
-                            {result.status === 'failed' && result.errorMessage && (
-                              <div className="mt-2 p-2 bg-destructive/10 border border-destructive/20 rounded text-sm text-destructive">
-                                <pre className="whitespace-pre-wrap font-mono text-xs overflow-x-auto">
-                                  {result.errorMessage}
-                                </pre>
-                              </div>
-                            )}
+                            {result.status === 'failed' && result.errorMessage && (() => {
+                              const cleaned = stripRuntimeErrorsFromMessage(result.errorMessage);
+                              return cleaned ? (
+                                <div className="mt-2 p-2 bg-destructive/10 border border-destructive/20 rounded text-sm text-destructive">
+                                  <pre className="whitespace-pre-wrap font-mono text-xs overflow-x-auto">
+                                    {cleaned}
+                                  </pre>
+                                </div>
+                              ) : null;
+                            })()}
+
+                            <RuntimeErrorsPanel consoleErrors={result.consoleErrors} networkRequests={result.networkRequests} networkBodiesPath={result.networkBodiesPath} />
 
                             {result.softErrors && (result.softErrors as string[]).length > 0 && (
                               <div className="mt-2 p-2 bg-yellow-50 border border-yellow-200 rounded text-sm text-yellow-800 dark:bg-yellow-950/30 dark:border-yellow-800 dark:text-yellow-200">
@@ -940,7 +1247,7 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
                                   <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0" />
                                   <div className="space-y-1">
                                     {(result.softErrors as string[]).map((err, i) => (
-                                      <p key={i} className="text-xs">{err}</p>
+                                      <p key={i} className="text-xs break-all whitespace-pre-wrap">{err}</p>
                                     ))}
                                   </div>
                                 </div>
@@ -1030,12 +1337,28 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
                       <div key={result.id} className="border rounded-lg p-4 space-y-3">
                         <div className="flex items-center justify-between">
                           <div className="flex items-center gap-3">
-                            {result.status === 'passed' ? (
-                              <CheckCircle className="h-4 w-4 text-green-500" />
+                            {result.status === 'failed' && result.errorMessage ? (
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <div className="flex items-center gap-2 cursor-default">
+                                    <XCircle className="h-4 w-4 text-destructive" />
+                                    <span className="text-sm font-medium capitalize">{result.status}</span>
+                                  </div>
+                                </TooltipTrigger>
+                                <TooltipContent side="right" className="max-w-md">
+                                  <pre className="whitespace-pre-wrap font-mono text-xs max-h-48 overflow-y-auto">{result.errorMessage}</pre>
+                                </TooltipContent>
+                              </Tooltip>
                             ) : (
-                              <XCircle className="h-4 w-4 text-destructive" />
+                              <>
+                                {result.status === 'passed' ? (
+                                  <CheckCircle className="h-4 w-4 text-green-500" />
+                                ) : (
+                                  <XCircle className="h-4 w-4 text-destructive" />
+                                )}
+                                <span className="text-sm font-medium capitalize">{result.status}</span>
+                              </>
                             )}
-                            <span className="text-sm font-medium capitalize">{result.status}</span>
                             {result.durationMs && (
                               <span className="text-xs text-muted-foreground">{result.durationMs}ms</span>
                             )}

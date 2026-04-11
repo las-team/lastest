@@ -6,7 +6,7 @@ import { getBranchInfo } from '@/lib/github/content';
 import { getBranchInfo as getGitLabBranchInfo } from '@/lib/gitlab/content';
 import { getOpenPRsForBranch } from '@/lib/github/oauth';
 import { getOpenMRsForBranch } from '@/lib/gitlab/oauth';
-import { getRunner } from '@/lib/playwright/runner';
+import { getRunner, type TestRunResult } from '@/lib/playwright/runner';
 import { getServerManager } from '@/lib/playwright/server-manager';
 import { getSetupOrchestrator } from '@/lib/setup/setup-orchestrator';
 import type { SetupContext } from '@/lib/setup/types';
@@ -186,7 +186,11 @@ export async function forceResetRunner(repositoryId?: string | null) {
 /**
  * Create and run a new build (queues if tests already running)
  */
-export async function createAndRunBuild(
+/**
+ * Core build creation logic — no auth checks.
+ * Called by both session-authenticated and token-authenticated paths.
+ */
+export async function createAndRunBuildCore(
   triggerType: TriggerType = 'manual',
   testIds?: string[],
   repositoryId?: string | null,
@@ -194,8 +198,6 @@ export async function createAndRunBuild(
   versionOverrides?: Record<string, string>,
   gitBranchOverride?: string,
 ) {
-  if (repositoryId) await requireRepoAccess(repositoryId);
-  else await requireTeamAccess();
   const targetRunner = runnerId || 'local';
 
   // If this runner is busy, queue this build
@@ -207,7 +209,7 @@ export async function createAndRunBuild(
 
   // Load and set environment config
   const envConfig = await queries.getEnvironmentConfig(repositoryId);
-  if (envConfig && envConfig.id) {
+  if (envConfig) {
     runner.setEnvironmentConfig(envConfig);
     const serverManager = getServerManager();
     serverManager.setConfig(envConfig);
@@ -279,6 +281,19 @@ export async function createAndRunBuild(
   return { buildId: build.id, testRunId: testRun.id, testCount: tests.length };
 }
 
+export async function createAndRunBuild(
+  triggerType: TriggerType = 'manual',
+  testIds?: string[],
+  repositoryId?: string | null,
+  runnerId?: string,
+  versionOverrides?: Record<string, string>,
+  gitBranchOverride?: string,
+) {
+  if (repositoryId) await requireRepoAccess(repositoryId);
+  else await requireTeamAccess();
+  return createAndRunBuildCore(triggerType, testIds, repositoryId, runnerId, versionOverrides, gitBranchOverride);
+}
+
 /**
  * Create and run a build from CI (token-authenticated, no session required).
  * Auth is handled by the API route via runner token validation.
@@ -303,7 +318,7 @@ export async function createAndRunBuildFromCI(opts: {
 
   // Load and set environment config
   const envConfig = await queries.getEnvironmentConfig(repositoryId);
-  if (envConfig && envConfig.id) {
+  if (envConfig) {
     runner.setEnvironmentConfig(envConfig);
     const serverManager = getServerManager();
     serverManager.setConfig(envConfig);
@@ -629,7 +644,7 @@ async function runBuildAsync(
   let currentBrowserType = 'chromium';
 
   // Result callback for processing diffs
-  const onResult = async (result: { testId: string; status: string; screenshotPath?: string; screenshots: { path: string; label?: string }[]; errorMessage?: string; durationMs?: number; a11yViolations?: { id: string; impact: 'critical' | 'serious' | 'moderate' | 'minor'; description: string; help: string; helpUrl: string; nodes: number }[]; stabilityMetadata?: { frameCount: number; stableFrames: number; maxFrameDiff: number; isStable: boolean }; videoPath?: string; softErrors?: string[] }) => {
+  const onResult = async (result: { testId: string; status: string; screenshotPath?: string; screenshots: { path: string; label?: string }[]; errorMessage?: string; durationMs?: number; consoleErrors?: string[]; networkRequests?: import('@/lib/db/schema').NetworkRequest[]; a11yViolations?: import('@/lib/db/schema').A11yViolation[]; a11yPassesCount?: number; stabilityMetadata?: { frameCount: number; stableFrames: number; maxFrameDiff: number; isStable: boolean }; videoPath?: string; softErrors?: string[]; assertionResults?: import('@/lib/db/schema').AssertionResult[]; networkBodiesPath?: string }) => {
     processedCount++;
 
     // Save test result immediately
@@ -644,9 +659,14 @@ async function runBuildAsync(
       durationMs: result.durationMs,
       viewport: '1280x720',
       browser: currentBrowserType,
+      consoleErrors: result.consoleErrors,
+      networkRequests: result.networkRequests,
       a11yViolations: result.a11yViolations,
+      a11yPassesCount: result.a11yPassesCount,
       videoPath: result.videoPath,
       softErrors: result.softErrors,
+      assertionResults: result.assertionResults,
+      networkBodiesPath: result.networkBodiesPath,
     });
 
     // Stamp first build on the test version (idempotent)
@@ -733,7 +753,7 @@ async function runBuildAsync(
 
   try {
     // Configure runner with environment and settings
-    if (envConfig?.id) {
+    if (envConfig) {
       runner.setEnvironmentConfig(envConfig);
       getServerManager().setConfig(envConfig);
     }
@@ -934,6 +954,107 @@ async function runBuildAsync(
       return;
     }
 
+    // --- Flaky test detection: auto-retry failed tests ---
+    const autoRetryCount = playwrightSettings?.autoRetryCount ?? 0;
+    if (autoRetryCount > 0 && failedCount > 0) {
+      const allResults = await queries.getTestResultsByRun(testRunId);
+      const failedResults = allResults.filter(r => r.status === 'failed');
+      const failedTestIds = [...new Set(failedResults.map(r => r.testId!))];
+      const failedTests = tests.filter(t => failedTestIds.includes(t.id));
+
+      if (failedTests.length > 0) {
+        console.log(`[build] Auto-retrying ${failedTests.length} failed test(s), max ${autoRetryCount} attempt(s)`);
+        await updateJobProgress(jobId, processedCount, totalTestsAcrossBrowsers, { activeTests: ['Retrying failed tests...'] });
+
+        for (let attempt = 1; attempt <= autoRetryCount; attempt++) {
+          // Re-check which tests are still failing (they may have passed on a previous retry)
+          const currentFailedResults = (await queries.getTestResultsByRun(testRunId))
+            .filter(r => r.status === 'failed' && !r.isFlaky);
+          const currentFailedTestIds = [...new Set(currentFailedResults.map(r => r.testId!))];
+          const testsToRetry = failedTests.filter(t => currentFailedTestIds.includes(t.id));
+
+          if (testsToRetry.length === 0) break;
+
+          console.log(`[build] Retry attempt ${attempt}/${autoRetryCount}: ${testsToRetry.length} test(s)`);
+
+          // Create a temporary retry result handler
+          const retryOnResult = async (result: TestRunResult) => {
+            if (result.status === 'passed') {
+              // Test passed on retry — it's flaky!
+              // Find the original failed result and mark it as flaky
+              const originalResult = currentFailedResults.find(r => r.testId === result.testId);
+              if (originalResult) {
+                await queries.updateTestResult(originalResult.id, { isFlaky: true });
+              }
+
+              // Save the retry result
+              await queries.createTestResult({
+                testRunId,
+                testId: result.testId,
+                testVersionId: versionIdMap.get(result.testId) ?? null,
+                status: result.status,
+                screenshotPath: result.screenshotPath,
+                screenshots: result.screenshots,
+                errorMessage: result.errorMessage,
+                durationMs: result.durationMs,
+                viewport: '1280x720',
+                browser: currentBrowserType,
+                consoleErrors: result.consoleErrors,
+                networkRequests: result.networkRequests,
+                a11yViolations: result.a11yViolations,
+                a11yPassesCount: result.a11yPassesCount,
+                videoPath: result.videoPath,
+                softErrors: result.softErrors,
+                assertionResults: result.assertionResults,
+                networkBodiesPath: result.networkBodiesPath,
+                retryOf: originalResult?.id ?? null,
+                isFlaky: false,
+              });
+
+              // Adjust counts
+              passedCount++;
+              failedCount--;
+              flakyCount++;
+
+              console.log(`[build] Test "${testsToRetry.find(t => t.id === result.testId)?.name}" passed on retry ${attempt} — marked as flaky`);
+            }
+            // If retry also fails, do nothing — keep the original failed result
+          };
+
+          // Re-run failed tests
+          if (isRemoteRunner) {
+            await executeTests(testsToRetry, testRunId, {
+              repositoryId,
+              teamId,
+              runnerId,
+              environmentConfig: envConfig,
+              playwrightSettings: playwrightSettings ? { ...playwrightSettings, browser: currentBrowserType } : null,
+              maxParallelTests: 1, // Retry sequentially for stability
+              jobId,
+              setupContext: {
+                storageState: setupContext.storageState,
+                variables: setupContext.variables,
+              },
+            }, undefined, retryOnResult);
+          } else {
+            if (playwrightSettings) {
+              runner.setSettings({ ...playwrightSettings, browser: currentBrowserType });
+            }
+            runner.setSetupContext(setupContext);
+            await runner.runTests(testsToRetry, testRunId, undefined, retryOnResult);
+            runner.clearSetupContext();
+          }
+
+          // Update build progress after retry
+          await queries.updateBuild(buildId, {
+            passedCount,
+            failedCount,
+            flakyCount,
+          });
+        }
+      }
+    }
+
     // Update test run status
     const hasFailures = failedCount > 0;
     await queries.updateTestRun(testRunId, {
@@ -943,6 +1064,26 @@ async function runBuildAsync(
 
     // Update build final metrics and status
     const overallStatus = await queries.computeBuildStatus(buildId);
+
+    // Aggregate a11y scores across all test results for this build (only if a11y data exists)
+    let a11yUpdate: { a11yScore?: number; a11yViolationCount?: number; a11yCriticalCount?: number; a11yTotalRulesChecked?: number } = {};
+    try {
+      const { aggregateA11yForBuild } = await import('@/lib/a11y/wcag-score');
+      const testResultsForA11y = await queries.getTestResultsByRun(testRunId);
+      const hasA11yData = testResultsForA11y.some(r => r.a11yViolations != null || r.a11yPassesCount != null);
+      if (hasA11yData) {
+        const a11ySummary = aggregateA11yForBuild(testResultsForA11y);
+        a11yUpdate = {
+          a11yScore: a11ySummary.score,
+          a11yViolationCount: a11ySummary.violationCount,
+          a11yCriticalCount: a11ySummary.criticalCount,
+          a11yTotalRulesChecked: a11ySummary.totalRulesChecked,
+        };
+      }
+    } catch {
+      // a11y scoring is best-effort
+    }
+
     await queries.updateBuild(buildId, {
       passedCount,
       failedCount,
@@ -951,6 +1092,7 @@ async function runBuildAsync(
       overallStatus,
       elapsedMs: Date.now() - startTime,
       completedAt: new Date(),
+      ...a11yUpdate,
     });
     await completeJob(jobId);
 
@@ -966,6 +1108,14 @@ async function runBuildAsync(
       gitBranch: branch,
       repositoryId,
     });
+
+    // Fire-and-forget AI failure triage for failed tests
+    if (failedCount > 0 && repositoryId) {
+      const repoId = repositoryId;
+      import('@/lib/ai/failure-triage').then(({ triageBuildFailures }) => {
+        triageBuildFailures(buildId, repoId).catch(console.error);
+      }).catch(console.error);
+    }
 
     // Phase 2: If this was a comparison baseline build, chain the feature build
     const completedBuild = await queries.getBuild(buildId);

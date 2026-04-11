@@ -18,7 +18,7 @@ export async function submitBugReport(data: {
   severity: BugReportSeverity;
   context: BugReportContext;
   screenshotBase64?: string | null;
-}): Promise<{ success: boolean; reportId?: string; error?: string }> {
+}): Promise<{ success: boolean; reportId?: string; error?: string; forwardingErrors?: string[] }> {
   const session = await requireTeamAccess();
 
   // Rate limit
@@ -73,19 +73,29 @@ export async function submitBugReport(data: {
     } catch {}
   }
 
-  // Fire-and-forget forwarding
-  forwardBugReport({
-    reportId,
-    description: data.description,
-    severity: data.severity,
-    reporterEmail: session.user.email,
-    context: data.context,
-    contentHash,
-    screenshotUrl,
-    screenshotBuffer: data.screenshotBase64 ? Buffer.from(data.screenshotBase64, 'base64') : null,
-  }).catch((err) => console.error('[BugReport] forwarding failed:', err));
+  // Await forwarding so failures are surfaced to the user
+  let forwardingErrors: string[] = [];
+  try {
+    forwardingErrors = await forwardBugReport({
+      reportId,
+      description: data.description,
+      severity: data.severity,
+      reporterEmail: session.user.email,
+      context: data.context,
+      contentHash,
+      screenshotUrl,
+      screenshotBuffer: data.screenshotBase64 ? Buffer.from(data.screenshotBase64, 'base64') : null,
+    });
+  } catch (err) {
+    console.error('[BugReport] forwarding failed:', err);
+    forwardingErrors = ['Notification forwarding failed unexpectedly'];
+  }
 
-  return { success: true, reportId };
+  return {
+    success: true,
+    reportId,
+    ...(forwardingErrors.length > 0 ? { forwardingErrors } : {}),
+  };
 }
 
 async function forwardBugReport(data: {
@@ -97,8 +107,8 @@ async function forwardBugReport(data: {
   contentHash: string;
   screenshotUrl: string | null;
   screenshotBuffer: Buffer | null;
-}) {
-  const promises: Promise<void>[] = [];
+}): Promise<string[]> {
+  const errors: string[] = [];
 
   // GitHub Issues
   const githubToken = process.env.BUG_REPORT_GITHUB_TOKEN;
@@ -106,8 +116,8 @@ async function forwardBugReport(data: {
   if (githubToken && githubRepo) {
     const [owner, repo] = githubRepo.split('/');
     if (owner && repo) {
-      promises.push(
-        createGitHubIssue(githubToken, owner, repo, {
+      try {
+        const result = await createGitHubIssue(githubToken, owner, repo, {
           description: data.description,
           severity: data.severity,
           reporterEmail: data.reporterEmail,
@@ -115,23 +125,27 @@ async function forwardBugReport(data: {
           contentHash: data.contentHash,
           reportId: data.reportId,
           screenshotUrl: data.screenshotUrl,
-        }).then(async (result) => {
-          if (result.success && result.issueUrl && result.issueNumber) {
-            await queries.updateBugReport(data.reportId, {
-              githubIssueUrl: result.issueUrl,
-              githubIssueNumber: result.issueNumber,
-            });
-          }
-        }),
-      );
+        });
+        if (result.success && result.issueUrl && result.issueNumber) {
+          await queries.updateBugReport(data.reportId, {
+            githubIssueUrl: result.issueUrl,
+            githubIssueNumber: result.issueNumber,
+          });
+        } else if (!result.success) {
+          errors.push(`GitHub: ${result.error ?? 'unknown error'}`);
+        }
+      } catch (err) {
+        console.error('[BugReport] GitHub forwarding error:', err);
+        errors.push(`GitHub: ${err instanceof Error ? err.message : 'unknown error'}`);
+      }
     }
   }
 
   // Discord
   const discordWebhook = process.env.BUG_REPORT_DISCORD_WEBHOOK_URL;
   if (discordWebhook) {
-    promises.push(
-      sendDiscordBugReport(discordWebhook, {
+    try {
+      const result = await sendDiscordBugReport(discordWebhook, {
         description: data.description,
         severity: data.severity,
         reporterEmail: data.reporterEmail,
@@ -140,9 +154,15 @@ async function forwardBugReport(data: {
         gitHash: data.context.gitHash,
         reportId: data.reportId,
         screenshotBuffer: data.screenshotBuffer,
-      }).then(() => {}),
-    );
+      });
+      if (!result.success) {
+        errors.push(`Discord: ${result.error ?? 'unknown error'}`);
+      }
+    } catch (err) {
+      console.error('[BugReport] Discord forwarding error:', err);
+      errors.push(`Discord: ${err instanceof Error ? err.message : 'unknown error'}`);
+    }
   }
 
-  await Promise.allSettled(promises);
+  return errors;
 }

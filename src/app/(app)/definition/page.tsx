@@ -1,17 +1,22 @@
-import { AreasPageClient } from './areas-page-client';
+import { DefinitionPageClient } from './definition-page-client';
 import {
   getSelectedRepository,
   getFunctionalAreasTree,
   getTestsWithStatusByRepo,
   getUnsortedSuites,
   getSuiteTests,
+  getFunctionalAreasByRepo,
+  getRoutesByRepo,
+  getEnvironmentConfig,
+  getDeletedTests,
 } from '@/lib/db/queries';
 import { getCurrentSession } from '@/lib/auth';
 
-export default async function AreasPage() {
+export default async function DefinitionPage() {
   const session = await getCurrentSession();
   const teamId = session?.team?.id;
   const userId = session?.user?.id;
+  const earlyAdopter = session?.team?.earlyAdopterMode ?? false;
   const selectedRepo = teamId ? await getSelectedRepository(userId, teamId) : null;
 
   if (!selectedRepo) {
@@ -24,10 +29,14 @@ export default async function AreasPage() {
     );
   }
 
-  const [tree, tests, unsortedSuitesList] = await Promise.all([
+  const [tree, tests, unsortedSuitesList, areas, routes, envConfig, deletedTests] = await Promise.all([
     getFunctionalAreasTree(selectedRepo.id),
     getTestsWithStatusByRepo(selectedRepo.id),
     getUnsortedSuites(selectedRepo.id),
+    getFunctionalAreasByRepo(selectedRepo.id),
+    getRoutesByRepo(selectedRepo.id),
+    getEnvironmentConfig(selectedRepo.id),
+    getDeletedTests(selectedRepo.id),
   ]);
 
   // Get test counts for unsorted suites
@@ -51,13 +60,19 @@ export default async function AreasPage() {
 
   return (
     <div className="absolute inset-0 flex flex-col overflow-hidden">
-      <AreasPageClient
+      <DefinitionPageClient
         tree={tree}
         uncategorizedTests={uncategorizedTests}
         unsortedSuites={unsortedSuites}
         repositoryId={selectedRepo.id}
         selectedBranch={selectedRepo.selectedBranch || selectedRepo.defaultBranch || 'main'}
         banAiMode={banAiMode}
+        earlyAdopterMode={earlyAdopter}
+        areas={areas}
+        tests={tests}
+        routes={routes}
+        baseUrl={envConfig.baseUrl}
+        deletedTests={deletedTests}
       />
     </div>
   );

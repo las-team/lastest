@@ -5,36 +5,33 @@ import { eq, and, gte, lt, isNotNull, sql } from 'drizzle-orm';
 export async function getIssueTimeline(
   repositoryId: string,
 ) {
-  const repo = db
+  const [repo] = await db
     .select({ owner: repositories.owner, name: repositories.name })
     .from(repositories)
-    .where(eq(repositories.id, repositoryId))
-    .get();
+    .where(eq(repositories.id, repositoryId));
 
   if (!repo) return [];
 
   return db
     .select({
-      week: sql<string>`strftime('%Y-%W', datetime(${githubIssues.createdAt}, 'unixepoch'))`.as('week'),
+      week: sql<string>`to_char(${githubIssues.createdAt}, 'IYYY-IW')`.as('week'),
       count: sql<number>`count(*)`.as('count'),
       closedCount: sql<number>`sum(case when ${githubIssues.state} = 'closed' then 1 else 0 end)`.as('closed_count'),
     })
     .from(githubIssues)
     .where(eq(githubIssues.repositoryId, repositoryId))
-    .groupBy(sql`strftime('%Y-%W', datetime(${githubIssues.createdAt}, 'unixepoch'))`)
-    .orderBy(sql`week`)
-    .all();
+    .groupBy(sql`to_char(${githubIssues.createdAt}, 'IYYY-IW')`)
+    .orderBy(sql`week`);
 }
 
 export async function getMergedPRs(
   repositoryId: string,
   author?: string,
 ) {
-  const repo = db
+  const [repo] = await db
     .select({ owner: repositories.owner, name: repositories.name })
     .from(repositories)
-    .where(eq(repositories.id, repositoryId))
-    .get();
+    .where(eq(repositories.id, repositoryId));
 
   if (!repo) return [];
 
@@ -58,20 +55,18 @@ export async function getMergedPRs(
     })
     .from(pullRequests)
     .where(and(...conditions))
-    .orderBy(pullRequests.mergedAt)
-    .all();
+    .orderBy(pullRequests.mergedAt);
 }
 
 export async function getPRAuthors(repositoryId: string) {
-  const repo = db
+  const [repo] = await db
     .select({ owner: repositories.owner, name: repositories.name })
     .from(repositories)
-    .where(eq(repositories.id, repositoryId))
-    .get();
+    .where(eq(repositories.id, repositoryId));
 
   if (!repo) return [];
 
-  return db
+  const rows = await db
     .selectDistinct({ author: pullRequests.author })
     .from(pullRequests)
     .where(
@@ -80,8 +75,8 @@ export async function getPRAuthors(repositoryId: string) {
         eq(pullRequests.repoName, repo.name),
         isNotNull(pullRequests.author),
       ),
-    )
-    .all()
+    );
+  return rows
     .map((r) => r.author!)
     .filter(Boolean);
 }
@@ -93,11 +88,10 @@ export async function getImpactSummary(
   const mergedPRs = await getMergedPRs(repositoryId, author);
 
   // Get all issues for this repo
-  const totalResult = db
+  const [totalResult] = await db
     .select({ count: sql<number>`count(*)` })
     .from(githubIssues)
-    .where(eq(githubIssues.repositoryId, repositoryId))
-    .get();
+    .where(eq(githubIssues.repositoryId, repositoryId));
   const totalIssues = totalResult?.count ?? 0;
 
   if (mergedPRs.length === 0) {
@@ -118,7 +112,7 @@ export async function getImpactSummary(
   const lastMergedAt = mergedPRs[mergedPRs.length - 1].mergedAt!;
 
   // "Before first merge" = issues created before first PR merge
-  const beforeResult = db
+  const [beforeResult] = await db
     .select({ count: sql<number>`count(*)` })
     .from(githubIssues)
     .where(
@@ -126,11 +120,10 @@ export async function getImpactSummary(
         eq(githubIssues.repositoryId, repositoryId),
         lt(githubIssues.createdAt, firstMergedAt),
       ),
-    )
-    .get();
+    );
 
   // "After first merge" = issues created from first PR merge onward
-  const afterResult = db
+  const [afterResult] = await db
     .select({ count: sql<number>`count(*)` })
     .from(githubIssues)
     .where(
@@ -138,8 +131,7 @@ export async function getImpactSummary(
         eq(githubIssues.repositoryId, repositoryId),
         gte(githubIssues.createdAt, firstMergedAt),
       ),
-    )
-    .get();
+    );
 
   const before = beforeResult?.count ?? 0;
   const after = afterResult?.count ?? 0;
@@ -150,13 +142,12 @@ export async function getImpactSummary(
   const weekMs = 7 * 24 * 60 * 60 * 1000;
 
   // "Before" period: from earliest issue to first merge
-  const earliestIssue = db
+  const [earliestIssue] = await db
     .select({ createdAt: githubIssues.createdAt })
     .from(githubIssues)
     .where(eq(githubIssues.repositoryId, repositoryId))
     .orderBy(githubIssues.createdAt)
-    .limit(1)
-    .get();
+    .limit(1);
 
   const beforeMs = earliestIssue?.createdAt
     ? firstMergedMs - earliestIssue.createdAt.getTime()

@@ -1,8 +1,7 @@
 #!/bin/sh
 set -e
 
-# Create data directories if they don't exist
-mkdir -p /app/data
+# Create storage directories if they don't exist
 mkdir -p /app/storage/screenshots
 mkdir -p /app/storage/baselines
 mkdir -p /app/storage/diffs
@@ -24,25 +23,15 @@ for subdir in screenshots baselines diffs traces videos planned bug-reports; do
   fi
 done
 
-# Database will be auto-initialized by Drizzle on first connection
-# The app handles schema setup via drizzle-orm
-
-echo "Starting Lastest2..."
-echo "Database path: ${DATABASE_PATH:-/app/data/lastest2.db}"
-
-# Check data directory is writable (volume mounts may have wrong ownership)
-if ! touch /app/data/.write-test 2>/dev/null; then
-  echo "ERROR: /app/data is not writable by user $(id -u). Fix with: docker exec -u 0 <container> chown -R $(id -u):$(id -g) /app/data"
-  exit 1
-fi
-rm -f /app/data/.write-test
+echo "Starting Lastest..."
+echo "Database: $(echo "${DATABASE_URL:-postgresql://lastest:lastest@localhost:5432/lastest}" | sed 's|://[^:]*:[^@]*@|://***:***@|')"
 
 # Run database migrations
 if [ -f "/app/migrate.js" ]; then
   node /app/migrate.js
 elif [ -f "/app/drizzle.config.ts" ]; then
   echo "Running database migrations..."
-  ./node_modules/.bin/drizzle-kit push --force 2>&1 || echo "⚠ Migration had issues (app may still work)"
+  ./node_modules/.bin/drizzle-kit push --force 2>&1 || echo "Warning: Migration had issues (app may still work)"
 fi
 
 # Execute the main command

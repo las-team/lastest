@@ -3,7 +3,7 @@
  *
  * Entry point for the embedded browser container.
  * Launches Playwright Chromium, starts CDP screencast streaming,
- * and connects to the main Lastest2 app as a runner.
+ * and connects to the main Lastest app as a runner.
  */
 
 import { chromium, type Browser, type Page, type BrowserContext } from 'playwright';
@@ -20,8 +20,8 @@ import os from 'os';
 
 // Configuration from environment
 const config = {
-  serverUrl: process.env.LASTEST2_URL ?? 'http://localhost:3000',
-  token: process.env.LASTEST2_TOKEN ?? '',
+  serverUrl: process.env.LASTEST_URL ?? 'http://localhost:3000',
+  token: process.env.LASTEST_TOKEN ?? '',
   systemToken: process.env.SYSTEM_EB_TOKEN ?? '',
   streamPort: parseInt(process.env.STREAM_PORT ?? '9223', 10),
   streamHost: process.env.STREAM_HOST ?? '', // Empty = auto-detect container IP
@@ -30,10 +30,11 @@ const config = {
   viewportHeight: parseInt(process.env.VIEWPORT_HEIGHT ?? '720', 10),
   streamAuthToken: process.env.STREAM_AUTH_TOKEN,
   instanceId: process.env.INSTANCE_ID || os.hostname(),
+  cdpPort: parseInt(process.env.CDP_PORT ?? '9222', 10),
 };
 
 if (!config.token && !config.systemToken) {
-  console.error('Either LASTEST2_TOKEN or SYSTEM_EB_TOKEN is required');
+  console.error('Either LASTEST_TOKEN or SYSTEM_EB_TOKEN is required');
   process.exit(1);
 }
 
@@ -73,8 +74,10 @@ async function startup(): Promise<void> {
     args: [
       ...(useCrossOsArgs ? CROSS_OS_CHROMIUM_ARGS : []),
       '--disable-blink-features=AutomationControlled',
+      `--remote-debugging-port=${config.cdpPort}`,
     ],
   });
+  console.log(`[Startup] CDP endpoint available at http://localhost:${config.cdpPort}`);
 
   context = await browser.newContext({
     viewport: { width: config.viewportWidth, height: config.viewportHeight },
@@ -158,6 +161,7 @@ async function startup(): Promise<void> {
     streamPort: config.streamPort,
     streamHost: config.streamHost,
     pollInterval: config.pollInterval,
+    cdpPort: config.cdpPort,
     systemToken: config.systemToken || undefined,
     instanceId: config.instanceId,
   });
@@ -183,6 +187,7 @@ async function startup(): Promise<void> {
           cursorPlaybackSpeed?: number;
           stabilization?: import('./protocol.js').StabilizationPayload;
           headed?: boolean;
+          forceVideoRecording?: boolean;
         };
 
         // Dedup: skip if already running (mirrors standard runner activeTestIds)
@@ -267,6 +272,22 @@ async function startup(): Promise<void> {
               console.log(`[Command] All screenshots uploaded for test ${payload.testId}`);
             }
 
+            // Split network requests: summary for inline result, full bodies sent separately
+            const networkSummaries = result.networkRequests?.map(r => ({
+              url: r.url,
+              method: r.method,
+              status: r.status,
+              duration: r.duration,
+              resourceType: r.resourceType,
+              startTime: r.startTime,
+              failed: r.failed,
+              errorText: r.errorText,
+              responseSize: r.responseSize,
+            }));
+            const hasNetworkBodies = result.networkRequests?.some(
+              r => r.requestHeaders || r.responseHeaders || r.postData || r.responseBody
+            );
+
             // Send result AFTER screenshots so server has them when it sees pass/fail
             await capturedClient.sendMessage({
               id: crypto.randomUUID(),
@@ -276,13 +297,37 @@ async function startup(): Promise<void> {
                 correlationId: capturedCommand.id,
                 testId: payload.testId,
                 testRunId: payload.testRunId,
+                repositoryId: payload.repositoryId,
                 status: result.status,
                 durationMs: result.durationMs,
                 screenshotCount: result.screenshots.length,
                 error: result.error,
                 logs: result.logs,
+                consoleErrors: result.consoleErrors,
+                networkRequests: networkSummaries,
+                softErrors: result.softErrors,
+                videoData: result.videoData,
+                videoFilename: result.videoFilename,
               },
             });
+
+            // Send full network body data asynchronously (non-blocking)
+            if (hasNetworkBodies && result.networkRequests) {
+              capturedClient.sendMessage({
+                id: crypto.randomUUID(),
+                type: 'response:network_bodies' as 'response:test_result',
+                timestamp: Date.now(),
+                payload: {
+                  correlationId: capturedCommand.id,
+                  testId: payload.testId,
+                  testRunId: payload.testRunId,
+                  repositoryId: payload.repositoryId,
+                  networkRequests: result.networkRequests,
+                },
+              }).catch(err => {
+                console.warn(`[Command] Failed to send network bodies for test ${payload.testId}:`, err);
+              });
+            }
           } catch (err) {
             console.error(`[Command] Test ${payload.testId} failed:`, err);
           } finally {

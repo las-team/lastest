@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { ChevronDown, ChevronRight, Copy, Check, Trash2, Rocket, Cloud, Server, Zap, AlertTriangle, Loader2, ShieldCheck } from 'lucide-react';
+import { ChevronDown, ChevronRight, Copy, Check, Trash2, Rocket, Cloud, Server, Zap, AlertTriangle, Loader2, ShieldCheck, Pencil } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
@@ -17,6 +17,7 @@ import type { GithubActionConfig, GithubActionMode, GithubActionTriggerEvent, Ru
 import { WorkflowPreview } from '@/components/settings/github-actions/workflow-preview-client';
 import { DeployDialog } from '@/components/settings/github-actions/deploy-dialog-client';
 import { ValidateDialog } from '@/components/settings/github-actions/validate-dialog-client';
+import { EditConfigDialog } from '@/components/settings/github-actions/edit-config-dialog-client';
 import { deleteGithubActionConfigAction } from '@/server/actions/github-actions';
 import { toast } from 'sonner';
 
@@ -57,6 +58,7 @@ function ConfigCard({
 }) {
   const [expanded, setExpanded] = useState(false);
   const [deployOpen, setDeployOpen] = useState(false);
+  const [editOpen, setEditOpen] = useState(false);
   const [validateOpen, setValidateOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -86,7 +88,7 @@ function ConfigCard({
     cronSchedule: config.cronSchedule,
     targetUrl: config.targetUrl,
     timeout: config.timeout ?? 300000,
-    failOnChanges: config.failOnChanges ?? true,
+    failOnChanges: config.failOnChanges ?? false,
   };
 
   return (
@@ -127,6 +129,9 @@ function ConfigCard({
               )}
             </div>
             <div className="flex items-center gap-0.5" onClick={(e) => e.stopPropagation()}>
+              <Button variant="ghost" size="icon" onClick={() => setEditOpen(true)} className="h-8 w-8" title="Edit">
+                <Pencil className="h-3.5 w-3.5" />
+              </Button>
               <Button variant="ghost" size="icon" onClick={() => setValidateOpen(true)} className="h-8 w-8" title="Validate">
                 <ShieldCheck className="h-3.5 w-3.5" />
               </Button>
@@ -162,7 +167,7 @@ function ConfigCard({
                   </span>
                   <div className="flex-1 space-y-2">
                     <p className="text-sm">
-                      Add <code className="text-xs bg-muted px-1 py-0.5 rounded">LASTEST2_TOKEN</code> as
+                      Add <code className="text-xs bg-muted px-1 py-0.5 rounded">LASTEST_TOKEN</code> as
                       a repository secret in GitHub
                     </p>
                     <p className="text-xs text-muted-foreground">
@@ -178,11 +183,11 @@ function ConfigCard({
                   </span>
                   <div className="flex-1 space-y-2">
                     <p className="text-sm">
-                      Add <code className="text-xs bg-muted px-1 py-0.5 rounded">LASTEST2_URL</code> as
+                      Add <code className="text-xs bg-muted px-1 py-0.5 rounded">LASTEST_URL</code> as
                       a repository secret
                     </p>
                     <CopyBlock
-                      label="Your Lastest2 instance URL"
+                      label="Your Lastest instance URL"
                       value={typeof window !== 'undefined' ? window.location.origin : ''}
                     />
                   </div>
@@ -196,7 +201,7 @@ function ConfigCard({
                     <p className="text-sm">
                       Create the workflow file at{' '}
                       <code className="text-xs bg-muted px-1 py-0.5 rounded">
-                        .github/workflows/lastest2.yml
+                        .github/workflows/lastest.yml
                       </code>
                     </p>
                     <p className="text-xs text-muted-foreground">
@@ -216,6 +221,7 @@ function ConfigCard({
         )}
       </Card>
 
+      <EditConfigDialog open={editOpen} onOpenChange={setEditOpen} config={config} runners={runners} />
       <ValidateDialog open={validateOpen} onOpenChange={setValidateOpen} config={config} />
       <DeployDialog open={deployOpen} onOpenChange={setDeployOpen} config={config} />
 
@@ -238,8 +244,8 @@ function ConfigCard({
               <ul className="list-disc ml-4 mt-1 space-y-0.5">
                 {config.workflowDeployed && (
                   <>
-                    <li>Delete <code className="font-mono">.github/workflows/lastest2.yml</code> from the repo</li>
-                    <li>Remove LASTEST2_TOKEN and LASTEST2_URL secrets</li>
+                    <li>Delete <code className="font-mono">.github/workflows/lastest.yml</code> from the repo</li>
+                    <li>Remove LASTEST_TOKEN and LASTEST_URL secrets</li>
                   </>
                 )}
                 {(mode === 'ephemeral' || mode === 'auto') && config.runnerId && (

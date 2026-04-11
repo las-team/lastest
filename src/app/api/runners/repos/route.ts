@@ -28,8 +28,7 @@ export async function GET(request: Request) {
       .from(repositories)
       .leftJoin(tests, eq(tests.repositoryId, repositories.id))
       .where(eq(repositories.teamId, runner.teamId))
-      .groupBy(repositories.id)
-      .all();
+      .groupBy(repositories.id);
 
     return NextResponse.json({ repos });
   } catch (error) {

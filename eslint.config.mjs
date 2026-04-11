@@ -27,6 +27,7 @@ const eslintConfig = defineConfig([
     "packages/runner/dist/**",
     "packages/vscode-extension/dist/**",
     "scripts/**",
+    "migration-work/**",
   ]),
 ]);
 

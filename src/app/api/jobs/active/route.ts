@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import * as queries from '@/lib/db/queries';
 import { getCurrentSession } from '@/lib/auth';
 import { cleanupStaleJobs } from '@/server/actions/jobs';
+import { ensureSchedulerStarted } from '@/lib/scheduling/scheduler';
 import type { BackgroundJob } from '@/lib/db/schema';
 
 // Track last cleanup time to avoid running too frequently
@@ -14,6 +15,9 @@ export type JobWithChildren = BackgroundJob & {
 };
 
 export async function GET() {
+  // Start the build scheduler if not already running
+  ensureSchedulerStarted();
+
   const session = await getCurrentSession();
   if (!session?.team) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
@@ -34,25 +38,32 @@ export async function GET() {
   const allJobs = await queries.getRecentBackgroundJobs(10000);
   const teamJobs = allJobs.filter(j => !j.repositoryId || teamRepoIds.has(j.repositoryId));
 
-  // Attach children for active parent jobs
-  const enrichedJobs: JobWithChildren[] = await Promise.all(
-    teamJobs.map(async (job) => {
-      if (job.status === 'running' || job.status === 'pending') {
-        const children = await queries.getChildJobs(job.id);
-        if (children.length > 0) {
-          const summary = {
-            total: children.length,
-            completed: children.filter(c => c.status === 'completed').length,
-            failed: children.filter(c => c.status === 'failed').length,
-            running: children.filter(c => c.status === 'running').length,
-            pending: children.filter(c => c.status === 'pending').length,
-          };
-          return { ...job, _children: children, _childSummary: summary };
-        }
-      }
-      return job;
-    })
-  );
+  // Batch-fetch children for active parent jobs (single query instead of N+1)
+  const activeParentIds = teamJobs
+    .filter(j => j.status === 'running' || j.status === 'pending')
+    .map(j => j.id);
+  const allChildren = await queries.getChildJobsByParentIds(activeParentIds);
+  const childrenByParent = new Map<string, typeof allChildren>();
+  for (const child of allChildren) {
+    const parentId = child.parentJobId!;
+    if (!childrenByParent.has(parentId)) childrenByParent.set(parentId, []);
+    childrenByParent.get(parentId)!.push(child);
+  }
+
+  const enrichedJobs: JobWithChildren[] = teamJobs.map((job) => {
+    const children = childrenByParent.get(job.id);
+    if (children && children.length > 0) {
+      const summary = {
+        total: children.length,
+        completed: children.filter(c => c.status === 'completed').length,
+        failed: children.filter(c => c.status === 'failed').length,
+        running: children.filter(c => c.status === 'running').length,
+        pending: children.filter(c => c.status === 'pending').length,
+      };
+      return { ...job, _children: children, _childSummary: summary };
+    }
+    return job;
+  });
 
   return NextResponse.json(enrichedJobs);
 }

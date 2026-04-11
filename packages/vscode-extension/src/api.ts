@@ -1,18 +1,18 @@
 import * as vscode from 'vscode';
 import type { Repository, Test, TestRun, Build, FunctionalArea } from './types';
 
-export class Lastest2Api {
+export class LastestApi {
   private serverUrl: string;
   private apiToken: string;
 
   constructor() {
-    const config = vscode.workspace.getConfiguration('lastest2');
+    const config = vscode.workspace.getConfiguration('lastest');
     this.serverUrl = config.get('serverUrl', 'http://localhost:3000');
     this.apiToken = config.get('apiToken', '');
   }
 
   updateConfig() {
-    const config = vscode.workspace.getConfiguration('lastest2');
+    const config = vscode.workspace.getConfiguration('lastest');
     this.serverUrl = config.get('serverUrl', 'http://localhost:3000');
     this.apiToken = config.get('apiToken', '');
   }

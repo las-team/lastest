@@ -1,0 +1,37 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-09-29/server.schema.json",
+  "name": "io.github.las-team/lastest",
+  "description": "Run visual regression tests, review diffs, and manage baselines on a Lastest instance.",
+  "repository": {
+    "url": "https://github.com/las-team/lastest",
+    "source": "github",
+    "subfolder": "packages/mcp-server"
+  },
+  "version": "0.2.2",
+  "websiteUrl": "https://github.com/las-team/lastest/wiki/MCP-Server",
+  "packages": [
+    {
+      "registryType": "npm",
+      "identifier": "@lastest/mcp-server",
+      "version": "0.2.2",
+      "transport": { "type": "stdio" },
+      "runtimeArguments": [
+        {
+          "type": "named",
+          "name": "--url",
+          "description": "URL of your Lastest instance (e.g. https://lastest.example.com)",
+          "isRequired": true,
+          "format": "string"
+        },
+        {
+          "type": "named",
+          "name": "--api-key",
+          "description": "API key from Settings → Runners & API Access",
+          "isRequired": true,
+          "isSecret": true,
+          "format": "string"
+        }
+      ]
+    }
+  ]
+}

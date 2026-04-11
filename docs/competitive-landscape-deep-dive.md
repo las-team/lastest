@@ -169,12 +169,12 @@ Sources: [Applitools AI Testing Updates](https://applitools.com/blog/applitools-
 - No cross-browser rendering infrastructure
 - Self-hosting requires ops effort
 
-#### Threat Assessment to Lastest2: **Medium-High**
+#### Threat Assessment to Lastest: **Medium-High**
 - Similar "affordable alternative" positioning
 - Open-source credibility + SOC 2 create trust
-- ARIA snapshot testing is a differentiator for Argos (Lastest2 has accessibility testing but different approach)
+- ARIA snapshot testing is a differentiator for Argos (Lastest has accessibility testing but different approach)
 - Active competitive content strategy
-- However: no recording, no AI test generation -- Lastest2's core differentiators untouched
+- However: no recording, no AI test generation -- Lastest's core differentiators untouched
 
 Sources: [Argos CI](https://argos-ci.com), [GitHub](https://github.com/argos-ci/argos), [Pricing](https://argos-ci.com/pricing), [Blog](https://argos-ci.com/blog), [Docs](https://argos-ci.com/docs/getting-started)
 
@@ -300,7 +300,7 @@ Sources: [TestSprite Seed](https://techfundingnews.com/testsprite-raises-6-7m-se
 
 ## Full Comparison Matrix
 
-| Capability | Lastest2 | Percy | Chromatic | Applitools | BackstopJS | Lost Pixel | Playwright | Meticulous | Argos | Happo |
+| Capability | Lastest | Percy | Chromatic | Applitools | BackstopJS | Lost Pixel | Playwright | Meticulous | Argos | Happo |
 |---|---|---|---|---|---|---|---|---|---|---|
 | **AI Diffing** | Yes | Yes | No | Yes (best) | No | No | No | Deterministic | No | No |
 | **AI Test Gen** | Yes | No | No | Yes (NLP) | No | No | No | Yes (sessions) | No | No |
@@ -363,7 +363,7 @@ Sources: [TestSprite Seed](https://techfundingnews.com/testsprite-raises-6-7m-se
 
 ### #5: Test Maintenance
 - Tests break as UI evolves
-- No tool auto-fixes broken tests (except Meticulous auto-maintain and Lastest2 AI fix)
+- No tool auto-fixes broken tests (except Meticulous auto-maintain and Lastest AI fix)
 - "Technology stack bloat" from adding tools to solve single problems
 
 ### #6: Vendor Lock-in
@@ -378,7 +378,7 @@ Sources: [Tony Ward](https://www.tonyward.dev/articles/visual-regression-testing
 
 ## What Customers Wish Existed
 
-| # | Gap | Lastest2 Status |
+| # | Gap | Lastest Status |
 |---|-----|----------------|
 | 1 | **Self-hosted with SaaS-level UX** -- "an open source, free offering that is completely self-managed" | **SOLVED** -- OSS, self-hosted, full UI |
 | 2 | **AI diff that truly eliminates false positives** | **SOLVED** -- AI-powered diffing + SSIM/Butteraugli perceptual engines |
@@ -393,7 +393,7 @@ Sources: [Tony Ward](https://www.tonyward.dev/articles/visual-regression-testing
 | 11 | **Test from design files** | **SOLVED** -- Figma plugin for importing screens as planned test screenshots |
 | 12 | **Data-driven testing from spreadsheets** | **SOLVED** -- Google Sheets integration with OAuth, multi-tab, caching |
 
-**Lastest2 addresses 11 of 12 top market gaps.** Only remaining gap: native mobile visual testing.
+**Lastest addresses 11 of 12 top market gaps.** Only remaining gap: native mobile visual testing.
 
 ---
 
@@ -432,11 +432,11 @@ Sources: [Tony Ward](https://www.tonyward.dev/articles/visual-regression-testing
 7. **Self-hosted demand persistent** -- Lost Pixel, Argos, VRT, Pixeleye
 8. **Pricing bifurcation** -- enterprise ($699+) vs affordable ($100). Screenshot pricing creates unpredictable costs
 9. **Agentic testing** -- Applitools, Sauce Labs, Katalon all investing in autonomous AI agents for testing
-10. **Design-to-test pipeline** -- Figma integration becoming a differentiator (Applitools Eyes 10.22, Lastest2 Figma plugin)
+10. **Design-to-test pipeline** -- Figma integration becoming a differentiator (Applitools Eyes 10.22, Lastest Figma plugin)
 
 ---
 
-## Lastest2 Competitive Position
+## Lastest Competitive Position
 
 ### Unique advantages no competitor matches:
 1. **AI test generation from recordings** -- only Meticulous auto-generates (cloud-only, no recorder)
@@ -466,12 +466,12 @@ Sources: [Tony Ward](https://www.tonyward.dev/articles/visual-regression-testing
 25. **Testing templates** -- 8 one-click presets for common app types (unique)
 
 ### Gaps to watch:
-- Cross-browser rendering (Happo/Applitools advantage — Lastest2 runs Chromium only via Playwright)
+- Cross-browser rendering (Happo/Applitools advantage — Lastest runs Chromium only via Playwright)
 - ARIA snapshot testing specifically (Argos's unique approach to accessibility-aware diffing)
 - Scale/infrastructure at enterprise level (cloud tools handle thousands of concurrent tests)
 - SOC 2 / enterprise compliance (Argos and Meticulous have it)
 - Native mobile visual testing (Applitools and Panto AI expanding here)
-- MCP server for external AI agents to consume Lastest2 (competitors adding this — Applitools 2x, Percy, Chromatic)
+- MCP server for external AI agents to consume Lastest (competitors adding this — Applitools 2x, Percy, Chromatic)
 
 ### Closest competitors by positioning:
 1. **Argos CI** -- affordable OSS + SaaS, similar target audience, but no AI/recording/autonomous agent
@@ -481,11 +481,11 @@ Sources: [Tony Ward](https://www.tonyward.dev/articles/visual-regression-testing
 5. **TestSprite** -- AI testing with MCP, but focused on AI-generated code testing, not visual regression specifically
 
 ### Pricing opportunity:
-The $100-$200/mo range (Lost Pixel, Percy Pro, Chromatic Starter) is the sweet spot for teams outgrowing free tools. Lastest2's self-hosted model eliminates per-screenshot pricing entirely -- a strong value proposition.
+The $100-$200/mo range (Lost Pixel, Percy Pro, Chromatic Starter) is the sweet spot for teams outgrowing free tools. Lastest's self-hosted model eliminates per-screenshot pricing entirely -- a strong value proposition.
 
 ---
 
-## New Lastest2 Features Since Last Update (Feb 9 → Mar 3, 2026)
+## New Lastest Features Since Last Update (Feb 9 → Mar 3, 2026)
 
 ### Execution & Infrastructure (NEW)
 - **Embedded browser container** -- Docker container with live CDP screencast streaming to UI. Run and record tests without local Playwright installation. Works for both test execution and recording

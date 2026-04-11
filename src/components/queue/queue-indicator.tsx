@@ -22,10 +22,16 @@ export function QueueIndicator() {
     return () => document.removeEventListener('mousedown', handleClick);
   }, [open]);
 
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => {
+    const frame = requestAnimationFrame(() => setMounted(true));
+    return () => cancelAnimationFrame(frame);
+  }, []);
+
   if (!ctx) return null;
   const { jobs } = ctx;
 
-  const activeJobs = jobs.filter(j => j.status === 'running' || j.status === 'pending');
+  const activeJobs = mounted ? jobs.filter(j => j.status === 'running' || j.status === 'pending') : [];
   const hasActive = activeJobs.length > 0;
 
   // Aggregate progress for the indicator bar

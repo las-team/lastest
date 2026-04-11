@@ -1,5 +1,5 @@
-name: 'Lastest2 Visual Regression'
-description: 'Run visual regression tests on pull requests via Lastest2 remote runner. Lightweight — no browsers needed in CI.'
+name: 'Lastest Visual Regression'
+description: 'Run visual regression tests on pull requests via Lastest remote runner. Lightweight — no browsers needed in CI.'
 author: 'Dexilion'
 
 branding:
@@ -8,10 +8,10 @@ branding:
 
 inputs:
   server-url:
-    description: 'Lastest2 server URL (e.g., https://your-lastest2-instance.com)'
+    description: 'Lastest server URL (e.g., https://your-lastest-instance.com)'
     required: true
   runner-token:
-    description: 'Runner authentication token from Lastest2'
+    description: 'Runner authentication token from Lastest'
     required: true
   repo:
     description: 'Repository full name (e.g., "owner/repo"). Defaults to $GITHUB_REPOSITORY.'
@@ -33,7 +33,7 @@ outputs:
     description: 'Build status (passed, failed, review_required, safe_to_merge, blocked)'
     value: ${{ steps.run.outputs.status }}
   build-url:
-    description: 'Link to build results in Lastest2'
+    description: 'Link to build results in Lastest'
     value: ${{ steps.run.outputs.build-url }}
   changed-count:
     description: 'Number of visual changes detected'

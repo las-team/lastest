@@ -1,0 +1,25 @@
+# Lastest
+
+> Visual regression testing platform with AI-powered test generation, self-healing selectors, and MCP server for agent integration.
+
+## Overview
+
+Lastest records browser interactions, runs Playwright tests, diffs screenshots against baselines, and uses AI to classify visual changes. It supports 3 diff engines, 6 AI providers, and 12 stabilization features for flake-free testing.
+
+## MCP Integration
+
+Install: `npx @lastest/mcp-server --url <URL> --api-key <KEY>`
+
+Tools: lastest_run_tests, lastest_get_build_status, lastest_list_tests, lastest_list_failing_tests, lastest_get_visual_diff, lastest_approve_baseline, lastest_reject_baseline, lastest_create_test, lastest_get_coverage, lastest_heal_test
+
+## API
+
+Base: /api/v1/
+Auth: Bearer token
+Endpoints: /repos, /repos/:id/tests, /repos/:id/builds, /repos/:id/coverage, /builds/:id, /diffs/approve, /diffs/reject, /tests/create, /tests/:id/heal
+
+## Documentation
+
+- AGENTS.md: Agent integration guide
+- SKILL.md: OpenClaw skill definition
+- CLAUDE.md: Development instructions

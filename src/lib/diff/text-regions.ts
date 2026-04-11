@@ -157,9 +157,40 @@ export async function detectTextRegions(
   Buffer.from(imageData).copy(png.data as Buffer);
   const pngBuffer = PNG.sync.write(png);
 
-  const worker = await Tesseract.createWorker('eng');
-  const result = await worker.recognize(pngBuffer);
-  await worker.terminate();
+  let result;
+  try {
+    // Suppress uncaughtException from tesseract worker threads (e.g. broken module
+    // resolution in Docker standalone builds). Without this, the worker's require('..')
+    // failure propagates as an uncaughtException that kills the executor's event loop.
+    let workerCrashed = false;
+    const suppressTesseractCrash = (err: Error) => {
+      const stack = err.stack || '';
+      const isTesseract = stack.includes('tesseract') || stack.includes('worker-script') || stack.includes('createWorker');
+      if (isTesseract) {
+        workerCrashed = true;
+        return; // Swallow — handled below
+      }
+      throw err; // Re-throw non-tesseract errors
+    };
+    process.on('uncaughtException', suppressTesseractCrash);
+
+    try {
+      const worker = await Tesseract.createWorker('eng');
+      if (workerCrashed) throw new Error('Tesseract worker crashed during init');
+      result = await worker.recognize(pngBuffer);
+      await worker.terminate();
+    } finally {
+      process.removeListener('uncaughtException', suppressTesseractCrash);
+    }
+  } catch {
+    // Tesseract worker failed (e.g. broken module resolution in Docker)
+    return {
+      regions: [],
+      mask: new Uint8Array(width * height),
+      ocrDurationMs: performance.now() - start,
+      totalTextPixels: 0,
+    };
+  }
 
   // Extract regions at the desired granularity
   const rawRegions: Rectangle[] = [];

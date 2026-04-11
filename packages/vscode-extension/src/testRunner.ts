@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
-import type { Lastest2Api } from './api';
-import type { Lastest2WebSocket } from './websocket';
+import type { LastestApi } from './api';
+import type { LastestWebSocket } from './websocket';
 import type { TestTreeDataProvider } from './testTree';
 import type { TestCompletePayload } from './types';
 
@@ -9,11 +9,11 @@ export class TestRunner {
   private runningTests = new Set<number>();
 
   constructor(
-    private readonly api: Lastest2Api,
-    private readonly ws: Lastest2WebSocket,
+    private readonly api: LastestApi,
+    private readonly ws: LastestWebSocket,
     private readonly treeProvider: TestTreeDataProvider
   ) {
-    this.outputChannel = vscode.window.createOutputChannel('Lastest2');
+    this.outputChannel = vscode.window.createOutputChannel('Lastest');
 
     // Listen for test completion
     this.ws.onTestStart(({ testId }) => {

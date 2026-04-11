@@ -13,7 +13,7 @@ export default function TestNotFound() {
         </p>
         <div className="pt-4">
           <Button asChild>
-            <Link href="/tests">
+            <Link href="/definition">
               <Home className="w-4 h-4" />
               View All Tests
             </Link>

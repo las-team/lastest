@@ -30,17 +30,24 @@ interface BuildPollingWrapperProps {
   isMainBranch?: boolean;
   embeddedStreamUrl?: string | null;
   banAiMode?: boolean;
+  a11y?: {
+    score: number | null;
+    violationCount: number | null;
+    criticalCount: number | null;
+    totalRulesChecked: number | null;
+    trend?: Array<{ id: string; a11yScore: number | null; createdAt: Date | null }>;
+  };
   children?: ReactNode;
 }
 
-export function BuildPollingWrapper({ initialBuild, buildId, isMainBranch = false, embeddedStreamUrl, banAiMode = false, children }: BuildPollingWrapperProps) {
+export function BuildPollingWrapper({ initialBuild, buildId, isMainBranch = false, embeddedStreamUrl, banAiMode = false, a11y, children }: BuildPollingWrapperProps) {
   const [build, setBuild] = useState<BuildData>(initialBuild);
   const [isPolling, setIsPolling] = useState(!initialBuild.completedAt);
   const [showViewer, setShowViewer] = useState(true);
 
   // Mark "Check Results" setup guide step as complete on page visit
   useEffect(() => {
-    try { localStorage.setItem('lastest2-results-viewed', 'true'); } catch {}
+    try { localStorage.setItem('lastest-results-viewed', 'true'); } catch {}
   }, []);
   const router = useRouter();
 
@@ -121,6 +128,7 @@ export function BuildPollingWrapper({ initialBuild, buildId, isMainBranch = fals
           errorsCount: build.diffs.filter(d => d.errorMessage).length,
           elapsedMs: build.elapsedMs,
         }}
+        a11y={a11y}
         hasPendingDiffs={pendingDiffs.length > 0}
         isRunning={isRunning}
         completedTests={completedTests}

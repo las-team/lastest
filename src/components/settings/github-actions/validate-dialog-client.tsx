@@ -25,8 +25,8 @@ interface ValidateDialogProps {
 const CHECK_LABELS: Record<keyof ValidationResult, string> = {
   githubAccount: 'GitHub Account',
   workflowFile: 'Workflow File',
-  secretToken: 'LASTEST2_TOKEN Secret',
-  secretUrl: 'LASTEST2_URL Secret',
+  secretToken: 'LASTEST_TOKEN Secret',
+  secretUrl: 'LASTEST_URL Secret',
   runner: 'Runner',
   serverUrl: 'Server URL',
   lastRun: 'Last Workflow Run',

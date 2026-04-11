@@ -29,6 +29,7 @@ export interface AIProviderConfig {
   agentSdkModel?: string;
   agentSdkWorkingDir?: string;
   agentSdkMcpServers?: Record<string, { command: string; args?: string[]; env?: Record<string, string> }>;
+  agentSdkStrictMcpConfig?: boolean;
   agentSdkAllowedTools?: string[];
   agentSdkDisallowedTools?: string[];
   ollamaBaseUrl?: string;
@@ -39,7 +40,7 @@ export interface AIProviderConfig {
   openaiModel?: string;
 }
 
-export type DiscoverySource = 'file-scan' | 'nav-link' | 'spec-analysis' | 'mcp-explore' | 'manual';
+export type DiscoverySource = 'file-scan' | 'nav-link' | 'mcp-explore' | 'manual';
 
 export interface ScanContext {
   discoverySource: DiscoverySource;

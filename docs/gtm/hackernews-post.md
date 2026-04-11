@@ -2,7 +2,7 @@
 
 ## Title (80 char limit)
 ```
-Show HN: Lastest2 – Free visual regression testing with AI-generated tests
+Show HN: Lastest – Free visual regression testing with AI-generated tests
 ```
 
 ## Body
@@ -11,12 +11,12 @@ I'm a solo founder who ships fast with AI tools. Last month I broke my checkout 
 
 Visual testing tools like Percy ($399/mo) and Chromatic ($149/mo) exist, but they cost more than my entire hosting stack. BackstopJS is free but requires manually writing tests.
 
-So I built Lastest2:
+So I built Lastest:
 
 - Point-and-click test recording (Playwright under the hood)
 - AI generates robust test code with fallback selectors
 - Pixel-perfect visual diffing with approval workflow
-- 100% self-hosted, SQLite database, your data stays local
+- 100% self-hosted, PostgreSQL database, your data stays local
 - Free forever (MIT license)
 
 The workflow: Record a user flow → AI writes the test → Run it → See exactly what pixels changed → Approve or reject.

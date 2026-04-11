@@ -23,3 +23,5 @@ export * from './queries/github-actions';
 export * from './queries/analytics';
 export * from './queries/fixtures';
 export * from './queries/storage-states';
+export * from './queries/schedules';
+export * from './queries/activity-events';

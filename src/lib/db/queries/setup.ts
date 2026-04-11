@@ -38,11 +38,12 @@ export async function getSetupScripts(repositoryId: string) {
     .from(setupScripts)
     .where(eq(setupScripts.repositoryId, repositoryId))
     .orderBy(desc(setupScripts.createdAt))
-    .all();
+    ;
 }
 
 export async function getSetupScript(id: string) {
-  return db.select().from(setupScripts).where(eq(setupScripts.id, id)).get();
+  const [row] = await db.select().from(setupScripts).where(eq(setupScripts.id, id));
+  return row;
 }
 
 export async function createSetupScript(data: Omit<NewSetupScript, 'id' | 'createdAt' | 'updatedAt'>) {
@@ -88,11 +89,12 @@ export async function getSetupConfigs(repositoryId: string) {
     .from(setupConfigs)
     .where(eq(setupConfigs.repositoryId, repositoryId))
     .orderBy(desc(setupConfigs.createdAt))
-    .all();
+    ;
 }
 
 export async function getSetupConfig(id: string) {
-  return db.select().from(setupConfigs).where(eq(setupConfigs.id, id)).get();
+  const [row] = await db.select().from(setupConfigs).where(eq(setupConfigs.id, id));
+  return row;
 }
 
 export async function createSetupConfig(data: Omit<NewSetupConfig, 'id' | 'createdAt' | 'updatedAt'>) {
@@ -198,7 +200,7 @@ export async function getTestsUsingSetupTest(setupTestId: string) {
     .select()
     .from(tests)
     .where(and(eq(tests.setupTestId, setupTestId), isNull(tests.deletedAt)))
-    .all();
+    ;
 }
 
 // Get tests that use a specific setup script
@@ -207,7 +209,7 @@ export async function getTestsUsingSetupScript(setupScriptId: string) {
     .select()
     .from(tests)
     .where(and(eq(tests.setupScriptId, setupScriptId), isNull(tests.deletedAt)))
-    .all();
+    ;
 }
 
 // Get suites that use a specific test as their setup
@@ -216,7 +218,7 @@ export async function getSuitesUsingSetupTest(setupTestId: string) {
     .select()
     .from(suites)
     .where(eq(suites.setupTestId, setupTestId))
-    .all();
+    ;
 }
 
 // Get suites that use a specific setup script
@@ -225,7 +227,7 @@ export async function getSuitesUsingSetupScript(setupScriptId: string) {
     .select()
     .from(suites)
     .where(eq(suites.setupScriptId, setupScriptId))
-    .all();
+    ;
 }
 
 // ============================================
@@ -258,7 +260,7 @@ export async function getDefaultSetupSteps(repositoryId: string) {
     .leftJoin(storageStates, eq(defaultSetupSteps.storageStateId, storageStates.id))
     .where(eq(defaultSetupSteps.repositoryId, repositoryId))
     .orderBy(defaultSetupSteps.orderIndex)
-    .all();
+    ;
 }
 
 export async function createDefaultSetupStep(data: Omit<NewDefaultSetupStep, 'id' | 'createdAt'>) {
@@ -401,7 +403,7 @@ export async function getDefaultTeardownSteps(repositoryId: string) {
     .leftJoin(storageStates, eq(defaultTeardownSteps.storageStateId, storageStates.id))
     .where(eq(defaultTeardownSteps.repositoryId, repositoryId))
     .orderBy(defaultTeardownSteps.orderIndex)
-    .all();
+    ;
 }
 
 export async function createDefaultTeardownStep(data: Omit<NewDefaultTeardownStep, 'id' | 'createdAt'>) {

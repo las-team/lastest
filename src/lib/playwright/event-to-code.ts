@@ -135,10 +135,11 @@ export function eventsToCodeLines(
     } else if (event.type === 'action') {
       const { action, selector, selectors, value, coordinates, button, modifiers, downloadWrap } = event.data;
 
-      // Skip click actions that follow mouse-up — pointer gestures already captured the click
-      // via mouse-down/up events, so the click action is a duplicate that can interfere
-      // (e.g. clicking canvas center instead of actual position, stealing focus from canvas apps)
-      if ((action === 'click' || action === 'rightclick') && lastEmittedEventType === 'mouse-up') {
+      // Skip LEFT click actions that follow mouse-up — pointer gestures already captured it
+      // via mouse-down/up events, so the click action is a duplicate that can interfere.
+      // Right-click is NOT skipped: pointer gesture handlers skip button=2, so the
+      // contextmenu 'rightclick' action is the sole record and must always be emitted.
+      if (action === 'click' && lastEmittedEventType === 'mouse-up') {
         continue;
       }
 
@@ -288,6 +289,8 @@ export function eventsToCodeLines(
     } else if (event.type === 'mouse-down' && event.data.coordinates) {
       const { x, y } = event.data.coordinates;
       const modifiers = event.data.modifiers;
+      const mouseButton = event.data.button;
+      const buttonOpt = mouseButton === 2 ? `{ button: 'right' }` : '';
       const isDownloadMouse = nextClickIsDownload || event.data.downloadWrap;
       if (nextClickIsDownload) nextClickIsDownload = false;
 
@@ -304,14 +307,16 @@ export function eventsToCodeLines(
         }
       }
       lines.push(`${mIndent}await page.mouse.move(${x}, ${y});`);
-      lines.push(`${mIndent}await page.mouse.down();`);
+      lines.push(`${mIndent}await page.mouse.down(${buttonOpt});`);
       lastEmittedEventType = 'mouse-down';
     } else if (event.type === 'mouse-up' && event.data.coordinates) {
       const { x, y } = event.data.coordinates;
       const modifiers = event.data.modifiers;
+      const mouseButton = event.data.button;
+      const buttonOpt = mouseButton === 2 ? `{ button: 'right' }` : '';
       const mIndent = insideDownloadMouseWrap ? indent + '  ' : indent;
       lines.push(`${mIndent}await page.mouse.move(${x}, ${y});`);
-      lines.push(`${mIndent}await page.mouse.up();`);
+      lines.push(`${mIndent}await page.mouse.up(${buttonOpt});`);
       if (modifiers && modifiers.length > 0) {
         for (const mod of modifiers) {
           lines.push(`${mIndent}await page.keyboard.up('${mod}');`);

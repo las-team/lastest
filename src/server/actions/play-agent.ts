@@ -32,6 +32,8 @@ import { classifyTemplate } from '@/lib/templates/classifier';
 import { gatherCodebaseIntelligence } from '@/lib/ai/codebase-intelligence';
 import type { CodebaseIntelligence } from '@/lib/ai/codebase-intelligence';
 import type { CodebaseIntelligenceContext } from '@/lib/ai/types';
+import { emitAndPersistActivityEvent } from '@/lib/db/queries/activity-events';
+import type { ActivityEventType, PwAgentType } from '@/lib/db/schema';
 
 // ============================================
 // Constants
@@ -40,7 +42,7 @@ import type { CodebaseIntelligenceContext } from '@/lib/ai/types';
 const STEP_DEFINITIONS: Array<{ id: AgentStepId; label: string; description: string }> = [
   { id: 'settings_check', label: 'Settings Check', description: 'Verify GitHub, AI, and environment configuration' },
   { id: 'select_repo', label: 'Select Repository', description: 'Ensure a repository is selected' },
-  { id: 'env_setup', label: 'Env Setup', description: 'Verify server, detect login, configure setup' },
+  { id: 'env_setup', label: 'Seed', description: 'Verify server, detect login, configure seed' },
   { id: 'scan_and_template', label: 'Scan & Template', description: 'Scan routes and apply testing template' },
   { id: 'plan', label: 'Plan Tests', description: 'Discover functional areas and create test plans' },
   { id: 'review', label: 'Review Plan', description: 'Review and approve the test plan' },
@@ -88,6 +90,41 @@ function cleanupController(sessionId: string) {
 
 function hashCode(code: string): string {
   return createHash('sha256').update(code).digest('hex').slice(0, 16);
+}
+
+/** Fire-and-forget activity event — never blocks step execution */
+function emitActivity(
+  teamId: string,
+  repositoryId: string,
+  sessionId: string,
+  eventType: ActivityEventType,
+  summary: string,
+  opts?: {
+    stepId?: string;
+    agentType?: PwAgentType;
+    detail?: Record<string, unknown>;
+    artifactType?: 'test' | 'build' | 'area' | 'baseline' | 'suite';
+    artifactId?: string;
+    artifactLabel?: string;
+    durationMs?: number;
+  },
+) {
+  emitAndPersistActivityEvent({
+    teamId,
+    repositoryId,
+    sessionId,
+    sourceType: 'play_agent',
+    eventType,
+    summary,
+    stepId: opts?.stepId ?? null,
+    agentType: opts?.agentType ?? null,
+    detail: opts?.detail ?? null,
+    artifactType: opts?.artifactType ?? null,
+    artifactId: opts?.artifactId ?? null,
+    artifactLabel: opts?.artifactLabel ?? null,
+    durationMs: opts?.durationMs ?? null,
+    promptLogId: null,
+  }).catch((err) => console.error('[ActivityFeed] emit error:', err));
 }
 
 async function updateStep(
@@ -784,6 +821,7 @@ async function runPlanWithAgents(
   repositoryId: string,
   branch: string,
   signal: AbortSignal,
+  teamId: string,
 ): Promise<boolean> {
   const envConfig = await getEnvironmentConfig(repositoryId);
   const baseUrl = envConfig?.baseUrl || 'http://localhost:3000';
@@ -803,6 +841,10 @@ async function runPlanWithAgents(
 
   const flushSubsteps = () => updateSubsteps(sessionId, 'plan', [...plannerStates]);
   await flushSubsteps();
+
+  emitActivity(teamId, repositoryId, sessionId, 'substep:update',
+    'Orchestrator coordinating multi-planner pipeline',
+    { stepId: 'plan', agentType: 'orchestrator' });
 
   if (isAborted(signal)) return false;
 
@@ -832,9 +874,16 @@ async function runPlanWithAgents(
   plannerStates[3].status = 'running';
   await flushSubsteps();
 
+  emitActivity(teamId, repositoryId, sessionId, 'substep:update', 'Planner scanning codebase routes', { stepId: 'plan', agentType: 'planner' });
+  emitActivity(teamId, repositoryId, sessionId, 'substep:update', 'Planner checking route coverage', { stepId: 'plan', agentType: 'planner' });
+  emitActivity(teamId, repositoryId, sessionId, 'substep:update', 'Planner analyzing spec files via GitHub API', { stepId: 'plan', agentType: 'planner' });
+
   const specPromise = runSpecPlanner(repositoryId, branch).then(r => {
     enrichSubstep(3, r);
     flushSubsteps();
+    emitActivity(teamId, repositoryId, sessionId, 'substep:update',
+      r.error ? `Planner spec analysis failed: ${r.error.slice(0, 80)}` : `Planner found ${r.areas.length} areas from spec files`,
+      { stepId: 'plan', agentType: 'planner', durationMs: r.durationMs, detail: { source: 'spec', areasFound: r.areas.length, areas: r.areas.map(a => a.name) } });
     return r;
   }).catch(err => {
     plannerStates[3].status = 'error';
@@ -844,10 +893,20 @@ async function runPlanWithAgents(
   });
 
   const [codeResult, routeResult] = await Promise.all([
-    runCodePlanner(repositoryId, branch, intelligence).then(r => { enrichSubstep(1, r); flushSubsteps(); return r; })
-      .catch(err => { plannerStates[1].status = 'error'; plannerStates[1].rawError = String(err); flushSubsteps(); return { source: 'code' as const, areas: [], error: String(err) } as import('@/lib/playwright/planner-types').PlannerResult; }),
-    runRoutePlanner(repositoryId).then(r => { enrichSubstep(2, r); flushSubsteps(); return r; })
-      .catch(err => { plannerStates[2].status = 'error'; plannerStates[2].rawError = String(err); flushSubsteps(); return { source: 'routes' as const, areas: [], error: String(err) } as import('@/lib/playwright/planner-types').PlannerResult; }),
+    runCodePlanner(repositoryId, branch, intelligence).then(r => {
+      enrichSubstep(1, r); flushSubsteps();
+      emitActivity(teamId, repositoryId, sessionId, 'substep:update',
+        r.error ? `Planner codebase scan failed` : `Planner discovered ${r.areas.length} areas from codebase`,
+        { stepId: 'plan', agentType: 'planner', durationMs: r.durationMs, detail: { source: 'code', areasFound: r.areas.length, areas: r.areas.map(a => a.name) } });
+      return r;
+    }).catch(err => { plannerStates[1].status = 'error'; plannerStates[1].rawError = String(err); flushSubsteps(); return { source: 'code' as const, areas: [], error: String(err) } as import('@/lib/playwright/planner-types').PlannerResult; }),
+    runRoutePlanner(repositoryId).then(r => {
+      enrichSubstep(2, r); flushSubsteps();
+      emitActivity(teamId, repositoryId, sessionId, 'substep:update',
+        `Planner mapped ${r.areas.length} areas from known routes`,
+        { stepId: 'plan', agentType: 'planner', durationMs: r.durationMs, detail: { source: 'routes', areasFound: r.areas.length, areas: r.areas.map(a => a.name) } });
+      return r;
+    }).catch(err => { plannerStates[2].status = 'error'; plannerStates[2].rawError = String(err); flushSubsteps(); return { source: 'routes' as const, areas: [], error: String(err) } as import('@/lib/playwright/planner-types').PlannerResult; }),
   ]);
 
   if (isAborted(signal)) return false;
@@ -860,6 +919,10 @@ async function runPlanWithAgents(
   plannerStates[4].status = 'running';
   plannerStates[4].detail = `${otherAreas.length} areas from code+route+spec`;
   await flushSubsteps();
+
+  emitActivity(teamId, repositoryId, sessionId, 'substep:update',
+    `Scout classifying ${otherAreas.length} areas from code+route+spec planners`,
+    { stepId: 'plan', agentType: 'scout', detail: { inputAreaCount: otherAreas.length } });
 
   const browserResult = await runBrowserPlanner(repositoryId, baseUrl, {
     otherPlannerAreas: otherAreas,
@@ -874,6 +937,11 @@ async function runPlanWithAgents(
       plannerStates[4].detail = `${skipCount} skip, ${exploreAreas.length} explore`;
       plannerStates[4].durationMs = scout.durationMs;
       plannerStates[4].promptLogId = scout.promptLogId;
+
+      emitActivity(teamId, repositoryId, sessionId, 'substep:update',
+        `Scout classified areas: ${skipCount} skip, ${exploreAreas.length} marked for deep-dive`,
+        { stepId: 'plan', agentType: 'scout', durationMs: scout.durationMs,
+          detail: { skipCount, exploreCount: exploreAreas.length, exploreAreas: exploreAreas.map(a => a.name) } });
 
       // Add diver substeps for each explore area
       for (const area of exploreAreas) {
@@ -890,6 +958,10 @@ async function runPlanWithAgents(
     onDeepDiveStart: (areaName) => {
       const idx = plannerStates.findIndex(s => s.source === `browser-dive-${areaName}`);
       if (idx >= 0) { plannerStates[idx].status = 'running'; flushSubsteps(); }
+
+      emitActivity(teamId, repositoryId, sessionId, 'substep:update',
+        `Diver exploring ${areaName} with Playwright`,
+        { stepId: 'plan', agentType: 'diver', detail: { areaName } });
     },
     onDeepDiveComplete: (areaName, areasFound, durationMs, promptLogId) => {
       const idx = plannerStates.findIndex(s => s.source === `browser-dive-${areaName}`);
@@ -901,6 +973,12 @@ async function runPlanWithAgents(
         plannerStates[idx].promptLogId = promptLogId;
         flushSubsteps();
       }
+
+      emitActivity(teamId, repositoryId, sessionId, 'substep:update',
+        areasFound > 0
+          ? `Diver found ${areasFound} test areas in ${areaName}`
+          : `Diver found no testable areas in ${areaName}`,
+        { stepId: 'plan', agentType: 'diver', durationMs, detail: { areaName, areasFound } });
     },
   }).catch(err => {
     plannerStates[4].status = 'error';
@@ -934,6 +1012,10 @@ async function runPlanWithAgents(
 
   const mergedAreas = mergePlannerResults(fulfilledResults);
   const sourcesUsed = new Set(fulfilledResults.map(r => r.source)).size;
+
+  emitActivity(teamId, repositoryId, sessionId, 'substep:update',
+    `Orchestrator merged ${fulfilledResults.length} planner results into ${mergedAreas.length} areas`,
+    { stepId: 'plan', agentType: 'orchestrator', detail: { sourcesUsed, areasFound: mergedAreas.length, areas: mergedAreas.map(a => a.name) } });
 
   if (mergedAreas.length === 0) {
     // Fallback: try to discover from routes
@@ -1001,6 +1083,16 @@ async function runPlanWithAgents(
     type: 'plan',
     areas: richAreas,
   };
+
+  // Convert area plans into placeholder tests
+  const { convertPlanToPlaceholders } = await import('./specs');
+  for (const area of richAreas) {
+    try {
+      await convertPlanToPlaceholders(area.id, repositoryId);
+    } catch {
+      // Non-critical — continue even if placeholder creation fails for an area
+    }
+  }
 
   await setStepCompleted(sessionId, 'plan', {
     method: 'pw_agents_parallel',
@@ -1088,7 +1180,7 @@ async function runPlanPromptMode(
   return true;
 }
 
-async function runPlan(sessionId: string, repositoryId: string, _teamId: string, signal: AbortSignal) {
+async function runPlan(sessionId: string, repositoryId: string, teamId: string, signal: AbortSignal) {
   if (await skipIfManualMode(sessionId, 'plan')) return true;
   await setStepActive(sessionId, 'plan');
   if (isAborted(signal)) return false;
@@ -1103,7 +1195,7 @@ async function runPlan(sessionId: string, repositoryId: string, _teamId: string,
 
   const aiSettings = await getAISettings(repositoryId);
   if (aiSettings?.pwAgentEnabled) {
-    return runPlanWithAgents(sessionId, repositoryId, branch, signal);
+    return runPlanWithAgents(sessionId, repositoryId, branch, signal, teamId);
   }
 
   return runPlanPromptMode(sessionId, repositoryId, branch, signal);
@@ -1176,7 +1268,7 @@ async function runReview(sessionId: string, _repositoryId: string, _teamId: stri
 // Generate (step 7) — formerly second half of discover
 // ============================================
 
-async function runGenerate(sessionId: string, repositoryId: string, _teamId: string, signal: AbortSignal) {
+async function runGenerate(sessionId: string, repositoryId: string, teamId: string, signal: AbortSignal) {
   if (await skipIfManualMode(sessionId, 'generate')) return true;
   await setStepActive(sessionId, 'generate');
   if (isAborted(signal)) return false;
@@ -1256,6 +1348,12 @@ async function runGenerate(sessionId: string, repositoryId: string, _teamId: str
         },
       ]);
 
+      for (const { area, group } of chunk) {
+        emitActivity(teamId, repositoryId, sessionId, 'substep:update',
+          `Generator creating test "${group.name}" for ${area.name} (${group.scenarioCount} scenario${group.scenarioCount > 1 ? 's' : ''})`,
+          { stepId: 'generate', agentType: 'generator', detail: { areaName: area.name, testName: group.name, scenarioCount: group.scenarioCount } });
+      }
+
       const results = await Promise.allSettled(
         chunk.map(async ({ area, group }) => {
           // Combine session abort signal with per-call timeout
@@ -1269,20 +1367,55 @@ async function runGenerate(sessionId: string, repositoryId: string, _teamId: str
             scenarioGroup: group,
           }, { signal: combinedSignal });
           if (genResult.success && genResult.code) {
-            const test = await queries.createTest({
-              repositoryId,
-              functionalAreaId: area.id,
-              name: group.name,
-              description: group.description,
-              code: genResult.code,
-              targetUrl: baseUrl,
-            });
+            // Check for existing placeholder test to upgrade
+            const areaTests = await queries.getTestsByFunctionalArea(area.id);
+            const existingPlaceholder = areaTests.find(t =>
+              t.isPlaceholder && t.name.toLowerCase() === group.name.toLowerCase()
+            );
+
+            let test;
+            if (existingPlaceholder) {
+              await queries.updateTest(existingPlaceholder.id, {
+                code: genResult.code,
+                description: group.description,
+                targetUrl: baseUrl,
+                isPlaceholder: false,
+              });
+              test = { id: existingPlaceholder.id };
+            } else {
+              test = await queries.createTest({
+                repositoryId,
+                functionalAreaId: area.id,
+                name: group.name,
+                description: group.description,
+                code: genResult.code,
+                targetUrl: baseUrl,
+              });
+            }
             generatedTests.push({
               testId: test.id,
               name: group.name,
               areaName: area.name,
               code: genResult.code,
             });
+            emitActivity(teamId, repositoryId, sessionId, 'artifact:created',
+              `Generator ${existingPlaceholder ? 'upgraded placeholder' : 'created'} test "${group.name}" in ${area.name}`,
+              { stepId: 'generate', agentType: 'generator', artifactType: 'test', artifactId: test.id, artifactLabel: group.name });
+            // Link to matching spec if one exists
+            try {
+              const areaSpecs = await queries.getSpecsForArea(area.id);
+              const matchingSpec = areaSpecs.find(s =>
+                !s.testId && s.title.toLowerCase() === group.name.toLowerCase()
+              );
+              if (matchingSpec) {
+                const { createHash } = await import('crypto');
+                const codeHash = createHash('sha256').update(genResult.code).digest('hex');
+                await queries.linkSpecToTest(matchingSpec.id, test.id);
+                await queries.updateTestSpec(matchingSpec.id, { codeHash });
+              }
+            } catch {
+              // Non-critical
+            }
             return true;
           }
           return false;
@@ -1455,7 +1588,7 @@ async function runTests(sessionId: string, repositoryId: string, _teamId: string
 // Fix Tests (step 9)
 // ============================================
 
-async function runFixTests(sessionId: string, repositoryId: string, _teamId: string, signal: AbortSignal) {
+async function runFixTests(sessionId: string, repositoryId: string, teamId: string, signal: AbortSignal) {
   if (await skipIfManualMode(sessionId, 'fix_tests')) return true;
   await setStepActive(sessionId, 'fix_tests');
   if (isAborted(signal)) return false;
@@ -1536,6 +1669,12 @@ async function runFixTests(sessionId: string, repositoryId: string, _teamId: str
         chunk.map(async (result) => {
           const testId = result.testId!;
           const attempts = fixAttempts[testId] || 0;
+          const testBefore = await queries.getTest(testId);
+          const testName = testBefore?.name || testId;
+
+          emitActivity(teamId, repositoryId, sessionId, 'substep:update',
+            `Healer diagnosing "${testName}" (attempt ${attempts + 1}/${MAX_FIX_ATTEMPTS})`,
+            { stepId: 'fix_tests', agentType: 'healer', detail: { testId, testName, attempt: attempts + 1, error: result.errorMessage?.slice(0, 120) } });
 
           const healResult = await agentHealTest(repositoryId, testId);
           fixAttempts[testId] = attempts + 1;
@@ -1547,6 +1686,9 @@ async function runFixTests(sessionId: string, repositoryId: string, _teamId: str
             const newHash = hashCode(healResult.code);
 
             if (hashes.includes(newHash)) {
+              emitActivity(teamId, repositoryId, sessionId, 'substep:update',
+                `Healer detected loop for "${testName}" — marking unfixable`,
+                { stepId: 'fix_tests', agentType: 'healer', detail: { testId, testName } });
               fixes.push({ testName: test?.name || testId, originalError: result.errorMessage!, fixed: false });
               return 'unfixable' as const;
             }
@@ -1567,9 +1709,15 @@ async function runFixTests(sessionId: string, repositoryId: string, _teamId: str
                 branch: branch ?? null,
               });
             }
+            emitActivity(teamId, repositoryId, sessionId, 'substep:update',
+              `Healer fixed "${testName}" — updated selectors/assertions`,
+              { stepId: 'fix_tests', agentType: 'healer', detail: { testId, testName } });
             fixes.push({ testName: test?.name || testId, originalError: result.errorMessage!, fixed: true, newCode: healResult.code });
             return 'fixed' as const;
           }
+          emitActivity(teamId, repositoryId, sessionId, 'substep:update',
+            `Healer could not fix "${testName}"`,
+            { stepId: 'fix_tests', agentType: 'healer', detail: { testId, testName } });
           fixes.push({ testName: test?.name || testId, originalError: result.errorMessage!, fixed: false });
           return 'failed' as const;
         }),
@@ -1783,7 +1931,7 @@ async function runRerunTests(sessionId: string, repositoryId: string, _teamId: s
 // Summary (step 11)
 // ============================================
 
-async function runSummary(sessionId: string, _repositoryId: string, _teamId: string, _signal: AbortSignal) {
+async function runSummary(sessionId: string, repositoryId: string, teamId: string, _signal: AbortSignal) {
   await setStepActive(sessionId, 'summary');
 
   const session = await queries.getAgentSession(sessionId);
@@ -1810,6 +1958,10 @@ async function runSummary(sessionId: string, _repositoryId: string, _teamId: str
     status: 'completed',
     completedAt: new Date(),
   });
+  emitActivity(teamId, repositoryId, sessionId, 'session:complete',
+    `Session completed: ${result.testsCreated} tests, ${result.finalPassed} passed, ${result.finalFailed} failed`,
+    { detail: result as Record<string, unknown> },
+  );
   return true;
 }
 
@@ -1845,9 +1997,57 @@ async function executeFromStep(sessionId: string, repositoryId: string, teamId: 
       if (signal.aborted) return;
 
       const step = STEP_ORDER[i];
+      const stepDef = STEP_DEFINITIONS.find(d => d.id === step.id);
+      const stepLabel = stepDef?.label ?? step.id;
+      const stepStart = Date.now();
+
+      emitActivity(teamId, repositoryId, sessionId, 'step:start', `${stepLabel} started`, { stepId: step.id });
+
       const success = await step.run(sessionId, repositoryId, teamId, signal);
 
-      if (!success) {
+      if (success) {
+        emitActivity(teamId, repositoryId, sessionId, 'step:complete', `${stepLabel} completed`, {
+          stepId: step.id,
+          durationMs: Date.now() - stepStart,
+        });
+
+        // Emit artifact events for key steps
+        const sess = await queries.getAgentSession(sessionId);
+        const completedStep = sess?.steps.find(s => s.id === step.id);
+        if (completedStep?.result) {
+          if (step.id === 'generate' && completedStep.result.testsCreated) {
+            emitActivity(teamId, repositoryId, sessionId, 'artifact:created',
+              `${completedStep.result.testsCreated} tests generated`, {
+                stepId: step.id,
+                artifactType: 'test',
+                detail: { testsCreated: completedStep.result.testsCreated },
+              });
+          }
+          if ((step.id === 'run_tests' || step.id === 'rerun_tests') && completedStep.result.buildId) {
+            emitActivity(teamId, repositoryId, sessionId, 'artifact:created',
+              `Build created: ${completedStep.result.passedCount} passed, ${completedStep.result.failedCount} failed`, {
+                stepId: step.id,
+                artifactType: 'build',
+                artifactId: completedStep.result.buildId as string,
+                artifactLabel: `Build ${(completedStep.result.buildId as string).slice(0, 8)}`,
+              });
+          }
+        }
+      } else {
+        // Step paused (waiting_user) or failed — the specific handler already set the status
+        const session = await queries.getAgentSession(sessionId);
+        const stepState = session?.steps.find(s => s.id === step.id);
+        if (stepState?.status === 'failed') {
+          emitActivity(teamId, repositoryId, sessionId, 'step:error', `${stepLabel} failed: ${stepState.error || 'unknown'}`, {
+            stepId: step.id,
+            durationMs: Date.now() - stepStart,
+          });
+        } else if (stepState?.status === 'waiting_user') {
+          emitActivity(teamId, repositoryId, sessionId, 'step:waiting_user', `${stepLabel}: waiting for user`, {
+            stepId: step.id,
+            detail: { userAction: stepState.userAction },
+          });
+        }
         return;
       }
     }
@@ -1888,10 +2088,15 @@ export async function startPlayAgent(repositoryId: string): Promise<{ sessionId:
     metadata: {},
   });
 
+  const teamId = team?.id ?? '';
+
+  emitActivity(teamId, repositoryId, session.id, 'session:start', 'Play Agent session started');
+
   // Fire-and-forget: run steps
-  executeFromStep(session.id, repositoryId, team?.id ?? '', 'settings_check').catch((err) => {
+  executeFromStep(session.id, repositoryId, teamId, 'settings_check').catch((err) => {
     console.error('[PlayAgent] Unhandled error:', err);
     queries.updateAgentSession(session.id, { status: 'failed' }).catch(() => {});
+    emitActivity(teamId, repositoryId, session.id, 'session:error', `Session failed: ${String(err)}`);
   });
 
   return { sessionId: session.id };

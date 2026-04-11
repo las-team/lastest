@@ -64,5 +64,17 @@ export async function GET(request: NextRequest) {
     });
   }
 
+  // Auto-sync repos so the sidebar is populated immediately
+  try {
+    const { syncGitlabReposForTeam } = await import('@/server/actions/repos');
+    await syncGitlabReposForTeam(teamId, tokenResponse.access_token, instanceUrl);
+    const glAccount = await queries.getGitlabAccountByTeam(teamId);
+    if (glAccount) {
+      await queries.updateGitlabAccount(glAccount.id, { reposSyncedAt: new Date() });
+    }
+  } catch {
+    // Non-fatal — repos will auto-sync on next page load
+  }
+
   return NextResponse.redirect(new URL('/settings?success=gitlab_connected', getPublicUrl(request)));
 }

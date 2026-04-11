@@ -58,7 +58,7 @@ export interface ParsedHealerResult {
 // Temp directory helpers
 // ---------------------------------------------------------------------------
 
-const TEMP_ROOT = path.join(os.tmpdir(), 'lastest2-agents');
+const TEMP_ROOT = path.join(os.tmpdir(), 'lastest-agents');
 
 async function ensureTempRoot(): Promise<void> {
   await fs.mkdir(TEMP_ROOT, { recursive: true });
@@ -225,7 +225,7 @@ export async function parsePlannerOutput(specsDir: string): Promise<ParsedPlanne
 /**
  * Parse Generator agent output from a tests directory.
  * Generator writes `.spec.ts` files. We read them and convert to
- * Lastest2's `export async function test(page, baseUrl, screenshotPath, stepLogger)` signature.
+ * Lastest's `export async function test(page, baseUrl, screenshotPath, stepLogger)` signature.
  */
 export async function parseGeneratorOutput(testsDir: string): Promise<ParsedGeneratorTest[]> {
   const tests: ParsedGeneratorTest[] = [];
@@ -246,8 +246,8 @@ export async function parseGeneratorOutput(testsDir: string): Promise<ParsedGene
       .replace(/-/g, ' ')
       .replace(/\b\w/g, (c) => c.toUpperCase());
 
-    // Convert PW test format to Lastest2 signature
-    const code = convertPwTestToLastest2(rawCode);
+    // Convert PW test format to Lastest signature
+    const code = convertPwTestToLastest(rawCode);
 
     // Try to extract route from the code (e.g. page.goto('/some-path'))
     const routeMatch = rawCode.match(/page\.goto\(['"]([^'"]+)['"]\)/);
@@ -276,7 +276,7 @@ export async function parseHealerOutput(testsDir: string): Promise<ParsedHealerR
     if (!file.endsWith('.spec.ts') && !file.endsWith('.spec.js') && !file.endsWith('.ts') && !file.endsWith('.js')) continue;
 
     const patchedCode = await fs.readFile(path.join(testsDir, file), 'utf-8');
-    results.push({ patchedCode: convertPwTestToLastest2(patchedCode), filename: file });
+    results.push({ patchedCode: convertPwTestToLastest(patchedCode), filename: file });
   }
 
   return results;
@@ -287,13 +287,13 @@ export async function parseHealerOutput(testsDir: string): Promise<ParsedHealerR
 // ---------------------------------------------------------------------------
 
 /**
- * Convert Playwright's standard test format to Lastest2's function signature:
+ * Convert Playwright's standard test format to Lastest's function signature:
  *   export async function test(page, baseUrl, screenshotPath, stepLogger) { ... }
  *
  * This strips `import { test, expect } from '@playwright/test'` and
  * extracts the test body.
  */
-export function convertPwTestToLastest2(rawCode: string): string {
+export function convertPwTestToLastest(rawCode: string): string {
   // Remove PW imports
   const code = rawCode
     .replace(/import\s*\{[^}]*\}\s*from\s*['"]@playwright\/test['"];?\n?/g, '')
@@ -306,7 +306,7 @@ export function convertPwTestToLastest2(rawCode: string): string {
 
   if (testBodyMatch) {
     const body = testBodyMatch[1].trim();
-    // Replace expect() calls with simple assertions that work in Lastest2 context
+    // Replace expect() calls with simple assertions that work in Lastest context
     const convertedBody = body
       .replace(/await\s+expect\(([^)]+)\)\.toBeVisible\(\)/g, 'await $1.waitFor({ state: "visible" })')
       .replace(/await\s+expect\(([^)]+)\)\.toHaveText\(([^)]+)\)/g, 'await $1.waitFor({ state: "visible" })');

@@ -1,8 +1,8 @@
 /**
  * Seed script for Excalidraw visual regression tests
  *
- * Populates the dexilion-team/excalidraw repository with 29 tests.
- * Generated from Zima production database dump (2026-03-19).
+ * Populates the excalidraw repository with 29 tests.
+ * Generated from Zima production database dump (2026-03-30).
  *
  * Run: pnpm tsx scripts/seed-excalidraw-tests.ts
  */
@@ -12,16 +12,17 @@ import { tests, testVersions, repositories, functionalAreas } from '../src/lib/d
 import { eq } from 'drizzle-orm';
 import { randomUUID as uuid } from 'crypto';
 
-const EXCALIDRAW_REPO_NAME = 'dexilion-team/excalidraw';
+const EXCALIDRAW_REPO_NAME = 'excalidraw';
 
 // Will be set dynamically
 let REPO_ID: string;
 
 // Functional area definitions (with hierarchy)
 const FUNCTIONAL_AREA_DEFINITIONS: Array<{ name: string; description?: string; parent?: string }> = [
-  { name: "Arrows & Binding", description: "Binding behavior, simple and elbow arrows." },
-  { name: "Arrows binding to bindables", description: "Arrows' ability to bind and follow bindable shapes.", parent: "Arrows & Binding" },
-  { name: "Binding focus point", description: "The modifiable focus point handling tests.", parent: "Arrows & Binding" },
+  { name: "Arrow Binding", description: "As a user, I want to connect arrows to shapes and add labels to arrows, so that I can create connected diagrams and flowcharts with annotations" },
+  { name: "Arrows binding to bindables", description: "Arrows' ability to bind and follow bindable shapes.", parent: "Arrow Binding" },
+  { name: "Binding focus point", description: "The modifiable focus point handling tests.", parent: "Arrow Binding" },
+  { name: "Generic", description: "based on unit tests" },
 ];
 
 // Test definitions with complete code
@@ -38,10 +39,12 @@ const TEST_DEFINITIONS: Array<{
   viewportOverride?: string;
   diffOverrides?: string;
   playwrightOverrides?: string;
+  stabilizationOverrides?: string;
 }> = [
   {
     name: "Test 1: Move Element Basic",
     targetUrl: "https://excalidraw.com",
+    functionalArea: "Generic",
     code: `import { Page } from 'playwright';
 
 export async function test(page: Page, baseUrl: string, screenshotPath: string, stepLogger: any) {
@@ -139,6 +142,7 @@ export async function test(page: Page, baseUrl: string, screenshotPath: string, 
   {
     name: "Test 1b: Move Element Advanced",
     targetUrl: "https://excalidraw.com",
+    functionalArea: "Generic",
     code: `import { Page } from 'playwright';
 
 export async function test(page: Page, baseUrl: string, screenshotPath: string, stepLogger: any) {
@@ -246,6 +250,8 @@ export async function test(page: Page, baseUrl: string, screenshotPath: string, 
   {
     name: "Test 2: Move Binding Arrow",
     targetUrl: "https://excalidraw.com",
+    functionalArea: "Generic",
+    stabilizationOverrides: '{"reseedRandomOnInput":false}',
     code: `import { Page } from 'playwright';
 
 export async function test(page: Page, baseUrl: string, screenshotPath: string, stepLogger: any) {
@@ -400,6 +406,7 @@ export async function test(page: Page, baseUrl: string, screenshotPath: string, 
   {
     name: "Test 3: ALT+Drag Duplicate",
     targetUrl: "https://excalidraw.com",
+    functionalArea: "Generic",
     code: `import { Page } from 'playwright';
 
 export async function test(page: Page, baseUrl: string, screenshotPath: string, stepLogger: any) {
@@ -498,6 +505,7 @@ export async function test(page: Page, baseUrl: string, screenshotPath: string, 
   {
     name: "Test 4: Rotate Arrow Binding",
     targetUrl: "https://excalidraw.com",
+    functionalArea: "Generic",
     code: `import { Page } from 'playwright';
 
 export async function test(page: Page, baseUrl: string, screenshotPath: string, stepLogger: any) {
@@ -640,6 +648,7 @@ export async function test(page: Page, baseUrl: string, screenshotPath: string, 
   {
     name: "Test 5: Undo Element Creation",
     targetUrl: "https://excalidraw.com",
+    functionalArea: "Generic",
     code: `import { Page } from 'playwright';
 
 export async function test(page: Page, baseUrl: string, screenshotPath: string, stepLogger: any) {
@@ -755,6 +764,7 @@ export async function test(page: Page, baseUrl: string, screenshotPath: string, 
   {
     name: "Test 6: Redo Element Creation",
     targetUrl: "https://excalidraw.com",
+    functionalArea: "Generic",
     code: `import { Page } from 'playwright';
 
 export async function test(page: Page, baseUrl: string, screenshotPath: string, stepLogger: any) {
@@ -873,6 +883,7 @@ export async function test(page: Page, baseUrl: string, screenshotPath: string, 
   {
     name: "Test 7: Undo Multiple Operations",
     targetUrl: "https://excalidraw.com",
+    functionalArea: "Generic",
     code: `import { Page } from 'playwright';
 
 export async function test(page: Page, baseUrl: string, screenshotPath: string, stepLogger: any) {
@@ -1023,6 +1034,7 @@ export async function test(page: Page, baseUrl: string, screenshotPath: string, 
   {
     name: "Test 8: Undo/Redo Button State",
     targetUrl: "https://excalidraw.com",
+    functionalArea: "Generic",
     code: `import { Page } from 'playwright';
 
 export async function test(page: Page, baseUrl: string, screenshotPath: string, stepLogger: any) {
@@ -1150,6 +1162,7 @@ export async function test(page: Page, baseUrl: string, screenshotPath: string, 
   {
     name: "Test 11: Context Menu Actions",
     targetUrl: "https://excalidraw.com",
+    functionalArea: "Generic",
     code: `import { Page } from 'playwright';
 
 export async function test(page: Page, baseUrl: string, screenshotPath: string, stepLogger: any) {
@@ -1250,6 +1263,7 @@ export async function test(page: Page, baseUrl: string, screenshotPath: string, 
   {
     name: "Test 12: Keyboard Shortcuts \u2014 Shape Tools",
     targetUrl: "https://excalidraw.com",
+    functionalArea: "Generic",
     code: `import { Page } from 'playwright';
 
 export async function test(page: Page, baseUrl: string, screenshotPath: string, stepLogger: any) {
@@ -1429,6 +1443,7 @@ export async function test(page: Page, baseUrl: string, screenshotPath: string, 
   {
     name: "Test 13: Tool Switching via Toolbar",
     targetUrl: "https://excalidraw.com",
+    functionalArea: "Generic",
     code: `import { Page } from 'playwright';
 
 export async function test(page: Page, baseUrl: string, screenshotPath: string, stepLogger: any) {
@@ -1661,6 +1676,7 @@ export async function test(page: Page, baseUrl: string, screenshotPath: string, 
   {
     name: "Test 13b: Text recording",
     targetUrl: "https://excalidraw.com",
+    functionalArea: "Generic",
     code: `import { Page } from 'playwright';
 
 export async function test(page: Page, baseUrl: string, screenshotPath: string, stepLogger: any) {
@@ -1827,6 +1843,7 @@ export async function test(page: Page, baseUrl: string, screenshotPath: string, 
   {
     name: "Test 14: Box Selection + Shift-Click",
     targetUrl: "https://excalidraw.com",
+    functionalArea: "Generic",
     code: `import { Page } from 'playwright';
 
 export async function test(page: Page, baseUrl: string, screenshotPath: string, stepLogger: any) {
@@ -1983,6 +2000,7 @@ export async function test(page: Page, baseUrl: string, screenshotPath: string, 
   {
     name: "Test 16: Flip Horizontal/Vertical",
     targetUrl: "https://excalidraw.com",
+    functionalArea: "Generic",
     code: `import { Page } from 'playwright';
 
 export async function test(page: Page, baseUrl: string, screenshotPath: string, stepLogger: any) {
@@ -2152,6 +2170,7 @@ export async function test(page: Page, baseUrl: string, screenshotPath: string, 
   {
     name: "Test 17: Element Locking",
     targetUrl: "https://excalidraw.com",
+    functionalArea: "Generic",
     code: `import { Page } from 'playwright';
 
 export async function test(page: Page, baseUrl: string, screenshotPath: string, stepLogger: any) {
@@ -2296,6 +2315,7 @@ export async function test(page: Page, baseUrl: string, screenshotPath: string, 
   {
     name: "Test 18: Multi-Point Line/Arrow",
     targetUrl: "https://excalidraw.com",
+    functionalArea: "Generic",
     code: `import { Page } from 'playwright';
 
 export async function test(page: Page, baseUrl: string, screenshotPath: string, stepLogger: any) {
@@ -2481,6 +2501,7 @@ export async function test(page: Page, baseUrl: string, screenshotPath: string, 
   {
     name: "Test 19: Canvas Scroll + Zoom",
     targetUrl: "https://excalidraw.com",
+    functionalArea: "Generic",
     code: `import { Page } from 'playwright';
 
 export async function test(page: Page, baseUrl: string, screenshotPath: string, stepLogger: any) {
@@ -2698,6 +2719,7 @@ export async function test(page: Page, baseUrl: string, screenshotPath: string, 
   {
     name: "Test 20: Fit to Content",
     targetUrl: "https://excalidraw.com",
+    functionalArea: "Generic",
     code: `import { Page } from 'playwright';
 
 export async function test(page: Page, baseUrl: string, screenshotPath: string, stepLogger: any) {
@@ -2812,6 +2834,7 @@ export async function test(page: Page, baseUrl: string, screenshotPath: string, 
   {
     name: "Test 21: Color/Style Changes",
     targetUrl: "https://excalidraw.com",
+    functionalArea: "Generic",
     code: `import { Page } from 'playwright';
 
 export async function test(page: Page, baseUrl: string, screenshotPath: string, stepLogger: any) {
@@ -2955,6 +2978,7 @@ export async function test(page: Page, baseUrl: string, screenshotPath: string, 
   {
     name: "Test 22: View Mode Toggle - fixdrag",
     targetUrl: "https://excalidraw.com",
+    functionalArea: "Generic",
     code: `import { Page } from 'playwright';
 
 export async function test(page: Page, baseUrl: string, screenshotPath: string, stepLogger: any) {
@@ -3075,6 +3099,7 @@ export async function test(page: Page, baseUrl: string, screenshotPath: string, 
   {
     name: "Test 23: Search Elements -fix chromium?",
     targetUrl: "https://excalidraw.com",
+    functionalArea: "Generic",
     code: `import { Page } from 'playwright';
 
 export async function test(page: Page, baseUrl: string, screenshotPath: string, stepLogger: any) {
@@ -3241,6 +3266,7 @@ export async function test(page: Page, baseUrl: string, screenshotPath: string, 
   {
     name: "Test 24: Lasso",
     targetUrl: "https://excalidraw.com",
+    functionalArea: "Generic",
     code: `import { Page } from 'playwright';
 
 export async function test(page: Page, baseUrl: string, screenshotPath: string, stepLogger: any) {
@@ -3368,7 +3394,9 @@ export async function test(page: Page, baseUrl: string, screenshotPath: string, 
   {
     name: "Test 25: Laser",
     targetUrl: "https://excalidraw.com",
-    playwrightOverrides: "{\"cursorPlaybackSpeed\": 1, \"screenshotDelay\": 0}",
+    functionalArea: "Generic",
+    playwrightOverrides: '{"cursorPlaybackSpeed":1,"screenshotDelay":0}',
+    stabilizationOverrides: '{"freezeAnimations":true}',
     code: `import { Page } from 'playwright';
 
 export async function test(page: Page, baseUrl: string, screenshotPath: string, stepLogger: any) {
@@ -4938,6 +4966,7 @@ async function seed() {
       viewportOverride: testDef.viewportOverride ?? null,
       diffOverrides: testDef.diffOverrides ?? null,
       playwrightOverrides: testDef.playwrightOverrides ?? null,
+      stabilizationOverrides: testDef.stabilizationOverrides ?? null,
       createdAt: now,
       updatedAt: now,
     });

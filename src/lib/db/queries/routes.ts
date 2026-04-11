@@ -16,16 +16,17 @@ import { v4 as uuid } from 'uuid';
 
 // Routes
 export async function getRoutesByRepo(repositoryId: string) {
-  return db.select().from(routes).where(eq(routes.repositoryId, repositoryId)).all();
+  return db.select().from(routes).where(eq(routes.repositoryId, repositoryId));
 }
 
 export async function getRoute(id: string) {
-  return db.select().from(routes).where(eq(routes.id, id)).get();
+  const [row] = await db.select().from(routes).where(eq(routes.id, id));
+  return row;
 }
 
 export async function getRoutesByIds(ids: string[]) {
   if (ids.length === 0) return [];
-  return db.select().from(routes).where(inArray(routes.id, ids)).all();
+  return db.select().from(routes).where(inArray(routes.id, ids));
 }
 
 export async function createRoute(data: Omit<NewRoute, 'id'>) {
@@ -75,7 +76,8 @@ export async function linkRouteToFunctionalArea(routeId: string, functionalAreaI
 
 // Scan Status
 export async function getScanStatus(repositoryId: string) {
-  return db.select().from(scanStatus).where(eq(scanStatus.repositoryId, repositoryId)).get();
+  const [row] = await db.select().from(scanStatus).where(eq(scanStatus.repositoryId, repositoryId));
+  return row;
 }
 
 export async function createScanStatus(data: Omit<NewScanStatus, 'id'>) {
@@ -94,12 +96,12 @@ export async function deleteScanStatus(repositoryId: string) {
 
 // Route Test Suggestions
 export async function getSuggestionsByRoute(routeId: string) {
-  return db.select().from(routeTestSuggestions).where(eq(routeTestSuggestions.routeId, routeId)).all();
+  return db.select().from(routeTestSuggestions).where(eq(routeTestSuggestions.routeId, routeId));
 }
 
 export async function getSuggestionsByRoutes(routeIds: string[]) {
   if (routeIds.length === 0) return [];
-  return db.select().from(routeTestSuggestions).where(inArray(routeTestSuggestions.routeId, routeIds)).all();
+  return db.select().from(routeTestSuggestions).where(inArray(routeTestSuggestions.routeId, routeIds));
 }
 
 export async function createRouteTestSuggestion(data: Omit<NewRouteTestSuggestion, 'id'>) {
@@ -195,7 +197,7 @@ export async function getSuggestionsWithMatchStatus(routeId: string) {
     .from(routeTestSuggestions)
     .leftJoin(tests, eq(routeTestSuggestions.matchedTestId, tests.id))
     .where(eq(routeTestSuggestions.routeId, routeId))
-    .all();
+    ;
 
   return suggestions;
 }
@@ -206,7 +208,7 @@ export async function getUnmatchedSuggestionsByArea(functionalAreaId: string) {
     .select()
     .from(routes)
     .where(eq(routes.functionalAreaId, functionalAreaId))
-    .all();
+    ;
 
   if (areaRoutes.length === 0) return [];
 
@@ -223,7 +225,7 @@ export async function getUnmatchedSuggestionsByArea(functionalAreaId: string) {
     .from(routeTestSuggestions)
     .innerJoin(routes, eq(routeTestSuggestions.routeId, routes.id))
     .where(inArray(routeTestSuggestions.routeId, routeIds))
-    .all();
+    ;
 
   return suggestions.filter(s => !s.matchedTestId);
 }
@@ -246,7 +248,7 @@ export async function getUnmatchedSuggestionsByRepo(repositoryId: string) {
     .from(routeTestSuggestions)
     .innerJoin(routes, eq(routeTestSuggestions.routeId, routes.id))
     .where(inArray(routeTestSuggestions.routeId, routeIds))
-    .all();
+    ;
 
   return suggestions.filter(s => !s.matchedTestId);
 }

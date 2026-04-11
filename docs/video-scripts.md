@@ -22,7 +22,7 @@
 | 0:16-0:20 | `/builds/[buildId]` | Build results appear — green checks, screenshot thumbnails, metrics row (total/changed/flaky/passed) | Build dashboard with safe_to_merge status |
 | 0:20-0:25 | `/builds/[buildId]/diff/[diffId]` | Visual diff view — toggle slider mode, show diff overlay | The money shot: slider comparison with change regions highlighted |
 | 0:25-0:28 | Same diff page | Click "Approve" (or press E keyboard shortcut) → baseline updated | Approval workflow in action |
-| 0:28-0:30 | Fade to text overlay | "Lastest2 — Record. Test. Ship. $0 forever." | End card |
+| 0:28-0:30 | Fade to text overlay | "Lastest — Record. Test. Ship. $0 forever." | End card |
 
 ### Recording tips
 - Use a **clean demo app** (e.g., a simple todo app or e-commerce page) with visible UI elements
@@ -30,7 +30,7 @@
 - Make a **small CSS change** between baseline and current (e.g., change a button color or move an element) so the diff overlay is visually obvious
 - Keep mouse movements **smooth and deliberate** — speed up in post, don't rush during recording
 - Record at **1.0x speed**, then speed up to **2.0-2.5x** in editing
-- Crop browser chrome — show only the Lastest2 UI and target app, no OS taskbar
+- Crop browser chrome — show only the Lastest UI and target app, no OS taskbar
 - Add a subtle **cursor highlight** ring so viewers can follow the mouse
 
 ### ffmpeg conversion
@@ -56,11 +56,11 @@ ffmpeg -i demo-recording.mp4 -vf "fps=20,scale=720:-1" -c:v libvpx-vp9 -b:v 500k
 
 ### INTRO (0:00 - 0:20)
 
-**[Screen: Lastest2 dashboard — stats cards showing total tests, pass/fail counts, functional area coverage, recent builds with pass-rate bars]**
+**[Screen: Lastest dashboard — stats cards showing total tests, pass/fail counts, functional area coverage, recent builds with pass-rate bars]**
 
 > "Visual regression testing sucks. It's either expensive — Percy charges five grand a month at scale — or it's flaky pixel diffs that flag every font rendering difference. Or you're maintaining hundreds of Playwright screenshots in your git repo like it's 2019.
 >
-> Lastest2 is different. It's free, self-hosted, open source, and it uses AI to write your tests, fix them when they break, and tell you whether a visual change is a regression or noise. Let me show you."
+> Lastest is different. It's free, self-hosted, open source, and it uses AI to write your tests, fix them when they break, and tell you whether a visual change is a regression or noise. Let me show you."
 
 ---
 
@@ -72,7 +72,7 @@ ffmpeg -i demo-recording.mp4 -vf "fps=20,scale=720:-1" -c:v libvpx-vp9 -b:v 500k
 
 **[Action: Click "Start Recording". Browser opens target app]**
 
-> "Lastest2 opens your app in a real browser. I'm going to click around like a user would — navigate to a product page, add something to cart, go to checkout."
+> "Lastest opens your app in a real browser. I'm going to click around like a user would — navigate to a product page, add something to cart, go to checkout."
 
 **[Action: Interact with target app — 3-4 clicks, maybe fill a form field. Show the recorder capturing actions. Capture a manual screenshot mid-flow]**
 
@@ -136,7 +136,7 @@ ffmpeg -i demo-recording.mp4 -vf "fps=20,scale=720:-1" -c:v libvpx-vp9 -b:v 500k
 
 **[Screen: Quick montage — settings page showing AI providers with Ollama, testing templates grid, setup/teardown step builder, remote runners list, functional areas tree with drag-drop, compose page with version sliders, debug mode with step-through controls, review page with developer todos]**
 
-> "A few things that set Lastest2 apart:
+> "A few things that set Lastest apart:
 >
 > It's completely self-hosted — your screenshots never leave your server. No per-screenshot pricing, no cloud dependency.
 >
@@ -154,9 +154,9 @@ ffmpeg -i demo-recording.mp4 -vf "fps=20,scale=720:-1" -c:v libvpx-vp9 -b:v 500k
 
 ### CLOSE (2:50 - 3:00)
 
-**[Screen: GitHub repo page or Lastest2 dashboard]**
+**[Screen: GitHub repo page or Lastest dashboard]**
 
-> "Lastest2 is on GitHub. Clone it, docker-compose up, and you're running visual regression tests in under two minutes. Or use the GitHub Action for zero-config CI/CD. Link in the description.
+> "Lastest is on GitHub. Clone it, docker-compose up, and you're running visual regression tests in under two minutes. Or use the GitHub Action for zero-config CI/CD. Link in the description.
 >
 > Star the repo if this is useful. PRs welcome."
 
@@ -168,7 +168,7 @@ ffmpeg -i demo-recording.mp4 -vf "fps=20,scale=720:-1" -c:v libvpx-vp9 -b:v 500k
 
 - **Demo app:** Use a visually clean app (e-commerce, dashboard, or SaaS UI). Avoid anything that looks like a toy
 - **Pre-seed the diff:** Before recording the video, create a baseline run. Then make a visible CSS change (button color, spacing, font size) so the diff view has something interesting to show
-- **Screen resolution:** Record at 1920x1080. Use browser at ~1440x900 with Lastest2 UI, leaving room for padding
+- **Screen resolution:** Record at 1920x1080. Use browser at ~1440x900 with Lastest UI, leaving room for padding
 - **Voiceover:** Record separately from screen capture. Speak naturally, not scripted-sounding. OK to ad-lib around the key points above
 - **Music:** Optional subtle lo-fi background, very low volume. Or just clean audio
 - **Editing:** Cut dead time (loading spinners, typing). Speed up repetitive actions (2x). Keep transitions simple (cuts, no fancy effects)
@@ -325,7 +325,7 @@ ffmpeg -i demo-recording.mp4 -vf "fps=20,scale=720:-1" -c:v libvpx-vp9 -b:v 500k
    / any AI video tool                               
                                                      
   Create an animated product demo video for          
-  "Lastest2", a visual regression                    
+  "Lastest", a visual regression                    
   testing platform. Use the following screenshots as 
   keyframes, in this exact order.                    
                            
@@ -367,7 +367,7 @@ ffmpeg -i demo-recording.mp4 -vf "fps=20,scale=720:-1" -c:v libvpx-vp9 -b:v 500k
                            
   [0:18-0:26] Screenshot 20-23-42.png — "Browser     
   recorder capturing Google"
-  Caption: "Lastest2 opens a real browser. Every     
+  Caption: "Lastest opens a real browser. Every     
   click and keystroke is captured"                   
   Zoom: From embedded browser → timeline panel
   showing captured actions                           
@@ -460,14 +460,14 @@ ffmpeg -i demo-recording.mp4 -vf "fps=20,scale=720:-1" -c:v libvpx-vp9 -b:v 500k
                                                      
   [2:10-2:16] Screenshot 20-22-18.png — "Back to
   dashboard"                                         
-  Caption: "Lastest2 — Record. Test. Ship. Free
+  Caption: "Lastest — Record. Test. Ship. Free
   forever."                                          
   Zoom: Pull back to show full dashboard, fade to end
    card                                              
                            
   END CARD [2:16-2:20]:                              
   Black background, centered text:
-  "Lastest2" (large, teal)                           
+  "Lastest" (large, teal)                           
   "github.com/..." (smaller, white)                  
   "Star ⭐ if useful"                                
                                                      

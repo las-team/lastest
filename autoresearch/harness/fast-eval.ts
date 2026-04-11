@@ -96,23 +96,22 @@ function extractGotoUrls(code: string): string[] {
   return urls;
 }
 
-function getFailedTests(
+async function getFailedTests(
   repositoryId: string,
   category?: FailureCategory,
   limit: number = SAMPLE_SIZE
 ) {
   // Get latest test run
-  const latestRun = db
+  const [latestRun] = await db
     .select({ id: testRuns.id })
     .from(testRuns)
     .where(eq(testRuns.repositoryId, repositoryId))
     .orderBy(desc(testRuns.startedAt))
-    .limit(1)
-    .get();
+    .limit(1);
 
   if (!latestRun) return [];
 
-  const failed = db
+  const failed = await db
     .select({
       testId: testResults.testId,
       testName: tests.name,
@@ -130,8 +129,7 @@ function getFailedTests(
         eq(testResults.testRunId, latestRun.id),
         eq(testResults.status, 'failed')
       )
-    )
-    .all();
+    );
 
   // Filter by category if specified
   const filtered = category
@@ -154,7 +152,7 @@ export async function evalRouteAccuracy(
   const routePaths = new Set(repoRoutes.map(r => r.path));
 
   // Get 404 failures
-  const failures = getFailedTests(repositoryId, '404_route', SAMPLE_SIZE);
+  const failures = await getFailedTests(repositoryId, '404_route', SAMPLE_SIZE);
 
   if (failures.length === 0) {
     return {
@@ -225,7 +223,7 @@ export async function evalTestGeneration(
   const details: TrackEvalResult['details'] = [];
 
   // Get recent failures to regenerate
-  const failures = getFailedTests(repositoryId, undefined, SAMPLE_SIZE);
+  const failures = await getFailedTests(repositoryId, undefined, SAMPLE_SIZE);
 
   if (failures.length === 0) {
     return {
@@ -312,7 +310,7 @@ export async function evalAuthResilience(
   const details: TrackEvalResult['details'] = [];
 
   // Check auth redirect failures
-  const authFailures = getFailedTests(repositoryId, 'auth_redirect', SAMPLE_SIZE);
+  const authFailures = await getFailedTests(repositoryId, 'auth_redirect', SAMPLE_SIZE);
 
   if (authFailures.length === 0) {
     return {
@@ -356,7 +354,7 @@ export async function evalFixLoop(
   const details: TrackEvalResult['details'] = [];
 
   // Get failures that aren't 404s (those are route issues, not fix issues)
-  const failures = getFailedTests(repositoryId, 'selector_timeout', SAMPLE_SIZE);
+  const failures = await getFailedTests(repositoryId, 'selector_timeout', SAMPLE_SIZE);
 
   if (failures.length === 0) {
     return {

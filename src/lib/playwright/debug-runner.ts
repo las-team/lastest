@@ -899,7 +899,10 @@ export class DebugRunner {
         return { filename: safeName, path: savePath };
       },
       list: () => dlList,
-    } : null;
+    } : {
+      waitForDownload: async () => { throw new Error('Downloads not enabled — enable "Accept Downloads" in Playwright settings'); },
+      list: () => [] as Array<{ suggestedFilename: string; path: string }>,
+    };
 
     // Network interception helper — available when enableNetworkInterception is enabled
     const network = this.settings?.enableNetworkInterception ? {

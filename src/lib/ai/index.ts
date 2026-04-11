@@ -31,6 +31,7 @@ export function getAIProvider(config: AIProviderConfig): AIProvider {
       model: config.agentSdkModel || undefined,
       workingDirectory: config.agentSdkWorkingDir,
       mcpServers: config.agentSdkMcpServers,
+      strictMcpConfig: config.agentSdkStrictMcpConfig,
       allowedTools: config.agentSdkAllowedTools,
       disallowedTools: config.agentSdkDisallowedTools,
     });
@@ -73,6 +74,7 @@ export function getAIProvider(config: AIProviderConfig): AIProvider {
 export interface GenerateWithAIOptions {
   actionType?: AIActionType;
   repositoryId?: string | null;
+  /** When true and provider is claude-agent-sdk, injects the Playwright Test MCP server (headless) */
   useMCP?: boolean;
   signal?: AbortSignal;
   /** Called with the prompt log ID after the log entry is created (before AI call) */
@@ -86,24 +88,26 @@ export async function generateWithAI(
   options?: GenerateWithAIOptions
 ): Promise<string> {
   // When MCP tools are needed and provider is claude-agent-sdk, inject the Playwright MCP server
+  // Note: generator-agent.ts configures MCP servers directly on config for CDP support.
+  // This fallback handles other callers that pass useMCP: true (planner, healer, ai-routes, etc.)
   const effectiveConfig = { ...config };
   if (options?.useMCP && config.provider === 'claude-agent-sdk') {
+    const playwrightCli = path.join(path.dirname(require.resolve('playwright')), 'cli.js');
     effectiveConfig.agentSdkMcpServers = {
       ...effectiveConfig.agentSdkMcpServers,
       'playwright-test': {
         command: 'node',
         args: [
-          path.join(path.dirname(require.resolve('playwright')), 'cli.js'),
+          playwrightCli,
           'run-test-mcp-server',
+          '--headless',
         ],
       },
     };
-    // Auto-allow all Playwright MCP tools without prompting (respects user's permission mode)
     effectiveConfig.agentSdkAllowedTools = [
       ...(effectiveConfig.agentSdkAllowedTools || []),
       'mcp__playwright-test__*',
     ];
-    // Disable non-MCP tools so the agent focuses on browser exploration, not shell commands
     effectiveConfig.agentSdkDisallowedTools = [
       ...(effectiveConfig.agentSdkDisallowedTools || []),
       'Bash', 'Write', 'Edit', 'NotebookEdit',

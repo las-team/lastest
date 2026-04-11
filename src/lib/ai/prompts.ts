@@ -283,7 +283,7 @@ function buildScanContextSection(scanContext: import('./types').ScanContext): st
     lines.push('Verify the page matches its navigation label purpose.');
   }
 
-  if (scanContext.discoverySource === 'spec-analysis' && scanContext.specDescription) {
+  if (scanContext.specDescription) {
     lines.push(`From specification: ${scanContext.specDescription}`);
     lines.push('Test the documented behavior.');
   }
@@ -393,7 +393,7 @@ COMMON FIX PATTERNS:
 
 Rules:
 - Write plain JavaScript only — NO TypeScript type annotations (no ": Page", no ": string", no ": any")
-- Do NOT use \`import\` — expect is provided by the runner
+- Do NOT use \`import\` or \`await import()\` — expect is provided as a parameter by the runner, do NOT re-declare it
 - ALWAYS use regex for URL checks: await expect(page).toHaveURL(/\\/path/); — never exact string URLs
 - Never mix regex text and CSS selectors in one locator — use page.getByText(/pattern/i) for regex
 - Every statement must end with a semicolon or closing brace
@@ -482,7 +482,8 @@ ${context.existingCode}
 
   parts.push(`
 Rules:
-- Plain JavaScript only — NO TypeScript annotations, NO imports
+- Plain JavaScript only — NO TypeScript annotations, NO imports, NO \`await import()\`
+- Do NOT re-declare expect — it is provided as a parameter by the runner
 - ALWAYS use regex for URL checks: await expect(page).toHaveURL(/\\/path/)
 - Prefer toBeVisible() over toBeTruthy() for element presence
 - Every variable must use const or let
@@ -587,46 +588,6 @@ Guidelines:
 - Mark routes as "static" or "dynamic" based on URL parameters
 - For dynamic routes, use bracket notation: /users/[id]
 - If changes are purely backend/non-visual, still suggest routes where the effects would be visible
-
-Return ONLY the JSON object, no explanations or markdown formatting.`;
-}
-
-export function createSpecAnalysisPrompt(specContent: string): string {
-  return `Analyze the following specification/documentation content and extract functional areas, routes, and test scenarios.
-
-Specification content:
-${specContent}
-
-Return a JSON object with this exact structure:
-{
-  "functionalAreas": [
-    {
-      "name": "Area Name",
-      "description": "Brief description of this functional area",
-      "routes": [
-        {
-          "path": "/example-path",
-          "type": "static",
-          "description": "What this route does"
-        }
-      ]
-    }
-  ],
-  "testScenarios": [
-    {
-      "route": "/example-path",
-      "suggestions": ["Test scenario 1", "Test scenario 2"]
-    }
-  ]
-}
-
-Guidelines:
-- Group related routes under logical functional areas
-- Route type should be "static" or "dynamic" (dynamic routes have parameters like [id])
-- For dynamic routes, use bracket notation: /users/[id]
-- Test scenarios should be actionable visual regression test descriptions
-- Focus on user-facing pages that benefit from visual testing
-- Extract as many meaningful routes and test scenarios as possible from the spec
 
 Return ONLY the JSON object, no explanations or markdown formatting.`;
 }
@@ -830,7 +791,8 @@ export function extractCodeFromResponse(response: string): string {
   // Try to extract code from markdown code blocks (any language tag or none)
   const codeBlockMatch = response.match(/```(?:\w*)?\n([\s\S]*?)```/);
   if (codeBlockMatch) {
-    return codeBlockMatch[1].trim();
+    // Strip import statements that AI sometimes adds despite instructions
+    return codeBlockMatch[1].replace(/^\s*import\s+.*$/gm, '').trim();
   }
 
   // If no code block, check if response starts with import or export

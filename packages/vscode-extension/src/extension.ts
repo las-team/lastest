@@ -1,24 +1,24 @@
 import * as vscode from 'vscode';
-import { Lastest2Api } from './api';
-import { Lastest2WebSocket } from './websocket';
+import { LastestApi } from './api';
+import { LastestWebSocket } from './websocket';
 import { TestTreeDataProvider } from './testTree';
 import { TestRunner } from './testRunner';
 import { StatusBarManager } from './statusBar';
 
-let api: Lastest2Api;
-let ws: Lastest2WebSocket;
+let api: LastestApi;
+let ws: LastestWebSocket;
 let treeProvider: TestTreeDataProvider;
 let testRunner: TestRunner;
 let statusBar: StatusBarManager;
 
 export function activate(context: vscode.ExtensionContext) {
-  console.log('Lastest2 extension activating...');
+  console.log('Lastest extension activating...');
 
   // Initialize API client
-  api = new Lastest2Api();
+  api = new LastestApi();
 
   // Initialize WebSocket
-  ws = new Lastest2WebSocket();
+  ws = new LastestWebSocket();
 
   // Initialize tree provider
   treeProvider = new TestTreeDataProvider(api, ws);
@@ -30,18 +30,18 @@ export function activate(context: vscode.ExtensionContext) {
   statusBar = new StatusBarManager(api, ws, treeProvider);
 
   // Register tree view
-  const treeView = vscode.window.createTreeView('lastest2.testExplorer', {
+  const treeView = vscode.window.createTreeView('lastest.testExplorer', {
     treeDataProvider: treeProvider,
     showCollapseAll: true,
   });
 
   // Register commands
   context.subscriptions.push(
-    vscode.commands.registerCommand('lastest2.refreshTests', () => {
+    vscode.commands.registerCommand('lastest.refreshTests', () => {
       treeProvider.refresh();
     }),
 
-    vscode.commands.registerCommand('lastest2.runTest', async (item) => {
+    vscode.commands.registerCommand('lastest.runTest', async (item) => {
       if (item?.test?.id) {
         await testRunner.runTest(item.test.id);
       } else if (item?.area?.id) {
@@ -51,22 +51,22 @@ export function activate(context: vscode.ExtensionContext) {
       }
     }),
 
-    vscode.commands.registerCommand('lastest2.runAllTests', () => {
+    vscode.commands.registerCommand('lastest.runAllTests', () => {
       testRunner.runAllTests();
     }),
 
-    vscode.commands.registerCommand('lastest2.openInBrowser', (item) => {
+    vscode.commands.registerCommand('lastest.openInBrowser', (item) => {
       if (item?.test?.id) {
         const serverUrl = api.getServerUrl();
         vscode.env.openExternal(vscode.Uri.parse(`${serverUrl}/tests/${item.test.id}`));
       }
     }),
 
-    vscode.commands.registerCommand('lastest2.showOutput', () => {
+    vscode.commands.registerCommand('lastest.showOutput', () => {
       testRunner.showOutput();
     }),
 
-    vscode.commands.registerCommand('lastest2.connect', async () => {
+    vscode.commands.registerCommand('lastest.connect', async () => {
       await connect();
     })
   );
@@ -74,7 +74,7 @@ export function activate(context: vscode.ExtensionContext) {
   // Listen for configuration changes
   context.subscriptions.push(
     vscode.workspace.onDidChangeConfiguration((e) => {
-      if (e.affectsConfiguration('lastest2.serverUrl') || e.affectsConfiguration('lastest2.apiToken')) {
+      if (e.affectsConfiguration('lastest.serverUrl') || e.affectsConfiguration('lastest.apiToken')) {
         api.updateConfig();
         reconnect();
       }
@@ -92,11 +92,11 @@ export function activate(context: vscode.ExtensionContext) {
   // Initial connection
   connect();
 
-  console.log('Lastest2 extension activated');
+  console.log('Lastest extension activated');
 }
 
 async function connect() {
-  const config = vscode.workspace.getConfiguration('lastest2');
+  const config = vscode.workspace.getConfiguration('lastest');
   const serverUrl = config.get<string>('serverUrl', 'http://localhost:3000');
   const apiToken = config.get<string>('apiToken', '');
 
@@ -105,14 +105,14 @@ async function connect() {
   if (connected) {
     ws.connect(serverUrl, apiToken);
     await treeProvider.refresh();
-    vscode.window.showInformationMessage('Connected to Lastest2 server');
+    vscode.window.showInformationMessage('Connected to Lastest server');
   } else {
     vscode.window.showWarningMessage(
-      `Cannot connect to Lastest2 server at ${serverUrl}`,
+      `Cannot connect to Lastest server at ${serverUrl}`,
       'Configure'
     ).then(action => {
       if (action === 'Configure') {
-        vscode.commands.executeCommand('workbench.action.openSettings', 'lastest2.serverUrl');
+        vscode.commands.executeCommand('workbench.action.openSettings', 'lastest.serverUrl');
       }
     });
   }

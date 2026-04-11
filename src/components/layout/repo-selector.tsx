@@ -1,15 +1,8 @@
 'use client';
 
-import { useEffect, useState, useTransition } from 'react';
+import { useEffect, useMemo, useRef, useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
-import { Layers, RefreshCw, Github, HardDrive, Plus } from 'lucide-react';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
+import { Layers, Github, HardDrive, Plus, Check, ChevronsUpDown, Search } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import {
@@ -17,7 +10,8 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from '@/components/ui/popover';
-import { fetchAndSyncRepos, fetchAndSyncGitlabRepos, selectRepo, createLocalRepo } from '@/server/actions/repos';
+import { cn } from '@/lib/utils';
+import { selectRepo, createLocalRepo } from '@/server/actions/repos';
 import type { Repository } from '@/lib/db/schema';
 
 // GitLab icon SVG component
@@ -33,41 +27,6 @@ function RepoIcon({ provider, className }: { provider: string; className?: strin
   if (provider === 'gitlab') return <GitLabIcon className={className} />;
   if (provider === 'local') return <HardDrive className={className} />;
   return <Github className={className} />;
-}
-
-// Separate sync button component that can be positioned independently
-export function SyncReposButton() {
-  const router = useRouter();
-  const [isSyncing, setIsSyncing] = useState(false);
-
-  const handleSync = async () => {
-    setIsSyncing(true);
-    try {
-      // Sync from both GitHub and GitLab in parallel
-      const [githubResult, gitlabResult] = await Promise.all([
-        fetchAndSyncRepos(),
-        fetchAndSyncGitlabRepos(),
-      ]);
-      if (githubResult.success || gitlabResult.success) {
-        // Refresh the page to update RepoSelector with new repos
-        router.refresh();
-      }
-    } finally {
-      setIsSyncing(false);
-    }
-  };
-
-  return (
-    <Button
-      variant="ghost"
-      size="icon"
-      onClick={handleSync}
-      disabled={isSyncing}
-      title="Sync repositories from GitHub and GitLab"
-    >
-      <RefreshCw className={`h-4 w-4 ${isSyncing ? 'animate-spin' : ''}`} />
-    </Button>
-  );
 }
 
 export function CreateLocalRepoButton() {
@@ -127,6 +86,9 @@ export function RepoSelector({ initialRepos = [], initialSelected = null }: Repo
   const [repos, setRepos] = useState<Repository[]>(initialRepos);
   const [selected, setSelected] = useState<Repository | null>(initialSelected);
   const [isPending, startTransition] = useTransition();
+  const [open, setOpen] = useState(false);
+  const [search, setSearch] = useState('');
+  const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     setRepos(initialRepos);
@@ -136,7 +98,21 @@ export function RepoSelector({ initialRepos = [], initialSelected = null }: Repo
     setSelected(initialSelected);
   }, [initialSelected]);
 
+  useEffect(() => {
+    if (open) {
+      setSearch('');
+      setTimeout(() => inputRef.current?.focus(), 0);
+    }
+  }, [open]);
+
+  const filtered = useMemo(() => {
+    if (!search) return repos;
+    const q = search.toLowerCase();
+    return repos.filter((r) => r.fullName.toLowerCase().includes(q));
+  }, [repos, search]);
+
   const handleSelect = (repoId: string) => {
+    setOpen(false);
     startTransition(async () => {
       await selectRepo(repoId);
       const repo = repos.find((r) => r.id === repoId) || null;
@@ -146,32 +122,61 @@ export function RepoSelector({ initialRepos = [], initialSelected = null }: Repo
   };
 
   return (
-    <Select
-      value={selected?.id || ''}
-      onValueChange={handleSelect}
-      disabled={isPending || repos.length === 0}
-    >
-      <SelectTrigger className="w-full">
-        <Layers className="h-4 w-4 mr-2 shrink-0" />
-        <SelectValue placeholder="Select repository">
-          {selected?.fullName || 'Select repository'}
-        </SelectValue>
-      </SelectTrigger>
-      <SelectContent>
-        {repos.map((repo) => (
-          <SelectItem key={repo.id} value={repo.id}>
-            <div className="flex items-center gap-2">
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <Button
+          variant="outline"
+          role="combobox"
+          aria-expanded={open}
+          disabled={isPending || repos.length === 0}
+          className="w-full justify-between font-normal"
+        >
+          <span className="flex items-center gap-2 truncate">
+            <Layers className="h-4 w-4 shrink-0" />
+            <span className="truncate">{selected?.fullName || 'Select repository'}</span>
+          </span>
+          <ChevronsUpDown className="h-3.5 w-3.5 shrink-0 opacity-50" />
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent className="w-80 p-0" align="start">
+        <div className="flex items-center border-b px-3">
+          <Search className="h-3.5 w-3.5 shrink-0 opacity-50" />
+          <Input
+            ref={inputRef}
+            placeholder="Search repos..."
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className="h-9 border-0 shadow-none focus-visible:ring-0"
+          />
+        </div>
+        <div className="max-h-60 overflow-y-auto p-1">
+          {filtered.map((repo) => (
+            <button
+              key={repo.id}
+              onClick={() => handleSelect(repo.id)}
+              className={cn(
+                'flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-sm cursor-pointer',
+                'hover:bg-accent hover:text-accent-foreground',
+                selected?.id === repo.id && 'bg-accent'
+              )}
+            >
+              <Check className={cn('h-3.5 w-3.5 shrink-0', selected?.id === repo.id ? 'opacity-100' : 'opacity-0')} />
               <RepoIcon provider={repo.provider} className="h-3.5 w-3.5 shrink-0" />
-              {repo.fullName}
+              <span className="truncate">{repo.fullName}</span>
+            </button>
+          ))}
+          {filtered.length === 0 && repos.length > 0 && (
+            <div className="px-2 py-4 text-center text-sm text-muted-foreground">
+              No repos match &ldquo;{search}&rdquo;
             </div>
-          </SelectItem>
-        ))}
-        {repos.length === 0 && (
-          <div className="px-2 py-1.5 text-sm text-muted-foreground">
-            No repos yet. Create a local repo or sync from GitHub/GitLab.
-          </div>
-        )}
-      </SelectContent>
-    </Select>
+          )}
+          {repos.length === 0 && (
+            <div className="px-2 py-4 text-center text-sm text-muted-foreground">
+              No repos yet. Create a local repo or sync from GitHub/GitLab.
+            </div>
+          )}
+        </div>
+      </PopoverContent>
+    </Popover>
   );
 }

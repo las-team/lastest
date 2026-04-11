@@ -142,8 +142,8 @@ export async function agentDiscoverAreas(
     const seed = await buildSeedFixture(repositoryId);
 
     // Build the exploration prompt with seed fixture
-    let prompt = `Explore the web application at ${seed.baseUrl} and create a comprehensive test plan.\n\n`;
-    prompt += `Start by navigating to ${seed.baseUrl} and thoroughly exploring all pages, forms, and interactive elements.\n`;
+    let prompt = `Explore the web application at ${baseUrl} and create a comprehensive test plan.\n\n`;
+    prompt += `Start by navigating to ${baseUrl} and thoroughly exploring all pages, forms, and interactive elements.\n`;
     prompt += `Discover all functional areas and routes, then produce a structured test plan.\n`;
     prompt += `\n---\n\n${seed.seedPrompt}`;
 

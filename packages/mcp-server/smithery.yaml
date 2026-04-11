@@ -1,0 +1,20 @@
+startCommand:
+  type: stdio
+  configSchema:
+    type: object
+    required: [url, apiKey]
+    properties:
+      url:
+        type: string
+        title: Lastest URL
+        description: URL of your Lastest instance (e.g. https://lastest.example.com)
+      apiKey:
+        type: string
+        title: API Key
+        description: API key generated from Settings → Runners & API Access
+        format: password
+  commandFunction: |-
+    (config) => ({
+      command: 'npx',
+      args: ['-y', '@lastest/mcp-server@latest', '--url', config.url, '--api-key', config.apiKey]
+    })

@@ -1,7 +1,7 @@
 /**
  * Seed script for Excalidraw visual regression tests
  *
- * Populates the lastest2 repository with 9 Excalidraw tests:
+ * Populates the lastest repository with 9 Excalidraw tests:
  * - Test 1: Move Element Basic
  * - Test 1b: Move Element Advanced
  * - Test 2: Move Binding Arrow
@@ -19,7 +19,7 @@ import { db } from '../src/lib/db';
 import { tests, testVersions } from '../src/lib/db/schema';
 import { v4 as uuid } from 'uuid';
 
-const LASTEST2_REPO_ID = '0d881179-1fed-4a44-bcbd-30809e3de39b';
+const LASTEST_REPO_ID = '0d881179-1fed-4a44-bcbd-30809e3de39b';
 const EXCALIDRAW_URL = 'https://excalidraw.com';
 
 // Common test helpers template
@@ -637,7 +637,7 @@ const TEST_DEFINITIONS = [
 ];
 
 async function seed() {
-  console.log('Seeding Excalidraw tests for lastest2 repository...\n');
+  console.log('Seeding Excalidraw tests for lastest repository...\n');
 
   const now = new Date();
 
@@ -647,7 +647,7 @@ async function seed() {
 
     await db.insert(tests).values({
       id: testId,
-      repositoryId: LASTEST2_REPO_ID,
+      repositoryId: LASTEST_REPO_ID,
       functionalAreaId: null,
       name: def.name,
       code: fullCode,

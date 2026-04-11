@@ -36,11 +36,8 @@ export function getPublicUrl(request: NextRequest): string {
   const forwardedProto = request.headers.get('x-forwarded-proto');
   const forwardedHost = request.headers.get('x-forwarded-host') || request.headers.get('host');
   if (forwardedHost) {
-    // Only trust forwarded headers in development
-    if (process.env.NODE_ENV === 'development') {
-      const proto = forwardedProto || 'https';
-      return `${proto}://${forwardedHost}`;
-    }
+    const proto = forwardedProto || 'https';
+    return `${proto}://${forwardedHost}`;
   }
   return request.nextUrl.origin;
 }

@@ -36,7 +36,7 @@ export default function TestError({
             Try Again
           </Button>
           <Button variant="outline" asChild>
-            <Link href="/tests">
+            <Link href="/definition">
               <Home className="w-4 h-4" />
               All Tests
             </Link>

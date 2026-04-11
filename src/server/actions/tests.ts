@@ -72,6 +72,133 @@ export async function updateTest(id: string, data: Partial<NewTest>) {
   revalidatePath(`/tests/${id}`);
 }
 
+// Updates only the parsed assertions metadata — no version history entry
+export async function syncTestAssertions(id: string, assertions: import('@/lib/db/schema').TestAssertion[]) {
+  const session = await requireTeamAccess();
+  const test = await queries.getTest(id);
+  if (!test) throw new Error('Test not found');
+  if (test.repositoryId) {
+    const repo = await queries.getRepository(test.repositoryId);
+    if (!repo || repo.teamId !== session.team.id) throw new Error('Forbidden');
+  }
+  await queries.updateTest(id, { assertions });
+  revalidatePath(`/tests/${id}`);
+}
+
+export async function toggleAssertionSoftness(testId: string, assertionId: string, makeSoft: boolean) {
+  const session = await requireTeamAccess();
+  const test = await queries.getTest(testId);
+  if (!test) throw new Error('Test not found');
+  if (test.repositoryId) {
+    const repo = await queries.getRepository(test.repositoryId);
+    if (!repo || repo.teamId !== session.team.id) throw new Error('Forbidden');
+  }
+
+  // Parse assertions fresh from code — DB assertions may be stale
+  const { parseAssertions } = await import('@/lib/playwright/assertion-parser');
+  let code = test.code || '';
+  const currentAssertions = parseAssertions(code);
+
+  // Find assertion in fresh parse first, then fall back to DB
+  const dbAssertions = test.assertions as import('@/lib/db/schema').TestAssertion[] | null;
+  const assertion = currentAssertions.find(a => a.id === assertionId)
+    ?? dbAssertions?.find(a => a.id === assertionId);
+  if (!assertion) throw new Error('Assertion not found');
+
+  // Update assertion metadata
+  assertion.isSoft = makeSoft;
+
+  // Update the test code to keep in sync with the metadata
+  const lines = code.split('\n');
+
+  if (assertion.codeLineStart != null) {
+    const lineIdx = assertion.codeLineStart - 1; // 0-based
+    const codeLine = lines[lineIdx]?.trim() ?? '';
+
+    // Pattern 1: Element/Hard assertion block comments
+    if (/^\/\/ (Element|Hard) assertion:/.test(codeLine)) {
+      if (makeSoft) {
+        lines[lineIdx] = lines[lineIdx].replace(/\/\/ Hard assertion:/, '// Element assertion:');
+      } else {
+        lines[lineIdx] = lines[lineIdx].replace(/\/\/ Element assertion:/, '// Hard assertion:');
+      }
+    } else {
+      // Patterns 2-5: check for existing hard marker on previous line
+      const prevIdx = lineIdx - 1;
+      const prevLine = prevIdx >= 0 ? lines[prevIdx].trim() : '';
+      const hasHardMarker = /^\/\/ Hard assertion/.test(prevLine);
+
+      if (makeSoft && hasHardMarker) {
+        // Remove the hard marker line
+        lines.splice(prevIdx, 1);
+      } else if (!makeSoft && !hasHardMarker) {
+        // Insert hard marker line before the assertion
+        const indent = lines[lineIdx].match(/^(\s*)/)?.[1] ?? '';
+        lines.splice(lineIdx, 0, `${indent}// Hard assertion`);
+      }
+    }
+
+    code = lines.join('\n');
+  }
+
+  // Re-parse assertions from the updated code to keep line numbers consistent
+  const updatedAssertions = parseAssertions(code);
+
+  const branch = await getCurrentBranchForRepo(test.repositoryId);
+  await queries.updateTestWithVersion(
+    testId,
+    { code, assertions: updatedAssertions.length > 0 ? updatedAssertions : currentAssertions },
+    'manual_edit',
+    branch ?? undefined,
+  );
+  revalidatePath('/tests');
+  revalidatePath(`/tests/${testId}`);
+}
+
+export async function updateStepValue(testId: string, lineStart: number, lineEnd: number, oldValue: string, newValue: string) {
+  const session = await requireTeamAccess();
+  const test = await queries.getTest(testId);
+  if (!test) throw new Error('Test not found');
+  if (test.repositoryId) {
+    const repo = await queries.getRepository(test.repositoryId);
+    if (!repo || repo.teamId !== session.team.id) throw new Error('Forbidden');
+  }
+
+  let code = test.code || '';
+  const lines = code.split('\n');
+
+  // Escape the values for string replacement in code
+  const escapedOld = oldValue.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+  const escapedNew = newValue.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+
+  // Replace the value in the relevant lines
+  let replaced = false;
+  for (let i = lineStart - 1; i < Math.min(lineEnd, lines.length); i++) {
+    if (lines[i].includes(escapedOld)) {
+      lines[i] = lines[i].replace(escapedOld, escapedNew);
+      replaced = true;
+      break;
+    }
+  }
+
+  if (!replaced) throw new Error('Could not find value in code');
+
+  code = lines.join('\n');
+
+  const { parseAssertions } = await import('@/lib/playwright/assertion-parser');
+  const updatedAssertions = parseAssertions(code);
+
+  const branch = await getCurrentBranchForRepo(test.repositoryId);
+  await queries.updateTestWithVersion(
+    testId,
+    { code, assertions: updatedAssertions.length > 0 ? updatedAssertions : undefined },
+    'manual_edit',
+    branch ?? undefined,
+  );
+  revalidatePath('/tests');
+  revalidatePath(`/tests/${testId}`);
+}
+
 async function verifyTestOwnership(testId: string, teamId: string) {
   const test = await queries.getTest(testId);
   if (!test) throw new Error('Test not found');
@@ -145,6 +272,44 @@ export async function getDeletedTests(repositoryId?: string) {
 export async function getTest(id: string) {
   await requireTeamAccess();
   return queries.getTest(id);
+}
+
+export async function getTestDetailData(testId: string, repositoryId?: string | null) {
+  await requireTeamAccess();
+  const test = await queries.getTest(testId);
+  if (!test) return null;
+
+  const repoId = test.repositoryId || repositoryId;
+  const [results, screenshotGroups, plannedScreenshots, defaultSetupSteps, availableTests, setupScripts, sheetDataSources, playwrightSettings, diffSettings, envConfig, testSpec] = await Promise.all([
+    queries.getTestResultsByTest(testId),
+    getTestScreenshotsGrouped(testId, repoId),
+    queries.getPlannedScreenshotsByTest(testId),
+    repoId ? queries.getDefaultSetupSteps(repoId) : Promise.resolve([]),
+    repoId ? queries.getTestsByRepo(repoId) : Promise.resolve([]),
+    repoId ? queries.getSetupScripts(repoId) : Promise.resolve([]),
+    repoId ? queries.getGoogleSheetsDataSources(repoId) : Promise.resolve([]),
+    repoId ? queries.getPlaywrightSettings(repoId) : Promise.resolve(null),
+    repoId ? queries.getDiffSensitivitySettings(repoId) : Promise.resolve(null),
+    repoId ? queries.getEnvironmentConfig(repoId) : Promise.resolve(null),
+    queries.getTestSpec(testId),
+  ]);
+
+  return {
+    test,
+    results,
+    repositoryId: repoId,
+    screenshotGroups,
+    plannedScreenshots,
+    defaultSetupSteps,
+    availableTests,
+    availableScripts: setupScripts,
+    sheetDataSources,
+    stabilizationDefaults: playwrightSettings?.stabilization ?? null,
+    diffDefaults: diffSettings,
+    playwrightDefaults: playwrightSettings,
+    envBaseUrl: envConfig?.baseUrl ?? null,
+    testSpec,
+  };
 }
 
 export async function getTests() {

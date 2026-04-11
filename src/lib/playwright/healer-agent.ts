@@ -50,7 +50,8 @@ CRITICAL RULES:
 - ALWAYS inspect the live page via browser_snapshot before fixing
 - NEVER guess selectors — verify them against the current accessibility tree
 - Use role-based locators: page.getByRole(), page.getByText(), page.getByLabel()
-- Plain JavaScript ONLY — NO TypeScript, NO imports
+- Plain JavaScript ONLY — NO TypeScript, NO imports, NO \`await import()\`
+- Do NOT re-declare expect — it is provided as a parameter by the runner
 - Use baseUrl for navigation (no hardcoded URLs)
 - Keep stepLogger.log() calls for step descriptions
 - Output ONLY the fixed code block, no explanations
@@ -64,12 +65,10 @@ CRITICAL RULES:
  * Heal a single failing test using the PW Healer agent.
  * Uses the AI provider + Playwright MCP tools to inspect and fix.
  */
-export async function agentHealTest(
+export async function agentHealTestCore(
   repositoryId: string,
   testId: string,
 ): Promise<{ success: boolean; code?: string; error?: string }> {
-  await requireRepoAccess(repositoryId);
-
   try {
     const test = await queries.getTest(testId);
     if (!test) {
@@ -121,6 +120,14 @@ ${seed.seedPrompt}`;
     const message = error instanceof Error ? error.message : 'Healer agent failed';
     return { success: false, error: message };
   }
+}
+
+export async function agentHealTest(
+  repositoryId: string,
+  testId: string,
+): Promise<{ success: boolean; code?: string; error?: string }> {
+  await requireRepoAccess(repositoryId);
+  return agentHealTestCore(repositoryId, testId);
 }
 
 /**

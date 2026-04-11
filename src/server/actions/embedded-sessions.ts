@@ -15,8 +15,7 @@ export async function listEmbeddedSessions(): Promise<EmbeddedSession[]> {
     .select()
     .from(embeddedSessions)
     .where(eq(embeddedSessions.teamId, session.team.id))
-    .orderBy(desc(embeddedSessions.createdAt))
-    .all();
+    .orderBy(desc(embeddedSessions.createdAt));
 }
 
 /**
@@ -26,19 +25,17 @@ export async function listSystemEmbeddedSessions(): Promise<EmbeddedSession[]> {
   const systemRunnerIds = await db
     .select({ id: runners.id })
     .from(runners)
-    .where(eq(runners.isSystem, true))
-    .all();
+    .where(eq(runners.isSystem, true));
 
   if (systemRunnerIds.length === 0) return [];
 
   const results: EmbeddedSession[] = [];
   for (const r of systemRunnerIds) {
-    const session = await db
+    const [sess] = await db
       .select()
       .from(embeddedSessions)
-      .where(eq(embeddedSessions.runnerId, r.id))
-      .get();
-    if (session) results.push(session);
+      .where(eq(embeddedSessions.runnerId, r.id));
+    if (sess) results.push(sess);
   }
   return results;
 }
@@ -48,11 +45,10 @@ export async function listSystemEmbeddedSessions(): Promise<EmbeddedSession[]> {
  */
 export async function getEmbeddedSession(sessionId: string): Promise<EmbeddedSession | null> {
   const session = await requireTeamAccess();
-  const result = await db
+  const [result] = await db
     .select()
     .from(embeddedSessions)
-    .where(and(eq(embeddedSessions.id, sessionId), eq(embeddedSessions.teamId, session.team.id)))
-    .get();
+    .where(and(eq(embeddedSessions.id, sessionId), eq(embeddedSessions.teamId, session.team.id)));
   return result ?? null;
 }
 
@@ -61,15 +57,14 @@ export async function getEmbeddedSession(sessionId: string): Promise<EmbeddedSes
  */
 export async function getAvailableEmbeddedSession(): Promise<EmbeddedSession | null> {
   const session = await requireTeamAccess();
-  const result = await db
+  const [result] = await db
     .select()
     .from(embeddedSessions)
     .where(and(
       eq(embeddedSessions.teamId, session.team.id),
       eq(embeddedSessions.status, 'ready'),
     ))
-    .limit(1)
-    .get();
+    .limit(1);
   return result ?? null;
 }
 
@@ -81,11 +76,10 @@ export async function claimEmbeddedSession(
 ): Promise<{ success: boolean } | { error: string }> {
   const session = await requireTeamAccess();
 
-  const existing = await db
+  const [existing] = await db
     .select()
     .from(embeddedSessions)
-    .where(and(eq(embeddedSessions.id, sessionId), eq(embeddedSessions.teamId, session.team.id)))
-    .get();
+    .where(and(eq(embeddedSessions.id, sessionId), eq(embeddedSessions.teamId, session.team.id)));
 
   if (!existing) {
     return { error: 'Session not found' };
@@ -116,11 +110,10 @@ export async function releaseEmbeddedSession(
 ): Promise<{ success: boolean } | { error: string }> {
   const session = await requireTeamAccess();
 
-  const existing = await db
+  const [existing] = await db
     .select()
     .from(embeddedSessions)
-    .where(and(eq(embeddedSessions.id, sessionId), eq(embeddedSessions.teamId, session.team.id)))
-    .get();
+    .where(and(eq(embeddedSessions.id, sessionId), eq(embeddedSessions.teamId, session.team.id)));
 
   if (!existing) {
     return { error: 'Session not found' };
@@ -147,6 +140,7 @@ export async function upsertEmbeddedSession(params: {
   teamId: string;
   runnerId: string;
   streamUrl: string;
+  cdpUrl?: string;
   containerUrl: string;
   viewport?: { width: number; height: number };
 }): Promise<EmbeddedSession> {
@@ -161,6 +155,7 @@ export async function upsertEmbeddedSession(params: {
       .update(embeddedSessions)
       .set({
         streamUrl: params.streamUrl,
+        cdpUrl: params.cdpUrl ?? null,
         containerUrl: params.containerUrl,
         viewport: params.viewport ?? { width: 1280, height: 720 },
         status: 'ready',
@@ -175,11 +170,10 @@ export async function upsertEmbeddedSession(params: {
       .delete(embeddedSessions)
       .where(and(eq(embeddedSessions.runnerId, params.runnerId), ne(embeddedSessions.id, existing.id)));
 
-    const updated = await db
+    const [updated] = await db
       .select()
       .from(embeddedSessions)
-      .where(eq(embeddedSessions.id, existing.id))
-      .get();
+      .where(eq(embeddedSessions.id, existing.id));
 
     return updated!;
   }
@@ -194,6 +188,7 @@ export async function createEmbeddedSession(params: {
   teamId: string;
   runnerId: string;
   streamUrl: string;
+  cdpUrl?: string;
   containerUrl: string;
   viewport?: { width: number; height: number };
 }): Promise<EmbeddedSession> {
@@ -207,6 +202,7 @@ export async function createEmbeddedSession(params: {
     runnerId: params.runnerId,
     status: 'ready',
     streamUrl: params.streamUrl,
+    cdpUrl: params.cdpUrl ?? null,
     containerUrl: params.containerUrl,
     viewport: params.viewport ?? { width: 1280, height: 720 },
     createdAt: now,
@@ -214,11 +210,10 @@ export async function createEmbeddedSession(params: {
     expiresAt,
   });
 
-  const created = await db
+  const [created] = await db
     .select()
     .from(embeddedSessions)
-    .where(eq(embeddedSessions.id, id))
-    .get();
+    .where(eq(embeddedSessions.id, id));
 
   return created!;
 }
@@ -231,11 +226,10 @@ export async function destroyEmbeddedSession(
 ): Promise<{ success: boolean } | { error: string }> {
   const session = await requireTeamAdmin();
 
-  const existing = await db
+  const [existing] = await db
     .select()
     .from(embeddedSessions)
-    .where(and(eq(embeddedSessions.id, sessionId), eq(embeddedSessions.teamId, session.team.id)))
-    .get();
+    .where(and(eq(embeddedSessions.id, sessionId), eq(embeddedSessions.teamId, session.team.id)));
 
   if (!existing) {
     return { error: 'Session not found' };
@@ -269,11 +263,10 @@ export async function updateEmbeddedSessionStatus(
  * Get embedded session by runner ID
  */
 export async function getEmbeddedSessionForRunner(runnerId: string): Promise<EmbeddedSession | null> {
-  const result = await db
+  const [result] = await db
     .select()
     .from(embeddedSessions)
-    .where(eq(embeddedSessions.runnerId, runnerId))
-    .get();
+    .where(eq(embeddedSessions.runnerId, runnerId));
   return result ?? null;
 }
 
@@ -305,8 +298,7 @@ export async function cleanupExpiredSessions(): Promise<number> {
   const expired = await db
     .select()
     .from(embeddedSessions)
-    .where(eq(embeddedSessions.status, 'ready'))
-    .all();
+    .where(eq(embeddedSessions.status, 'ready'));
 
   let cleaned = 0;
   for (const session of expired) {

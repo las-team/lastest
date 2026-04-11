@@ -10,7 +10,7 @@
 
 import { getExecutionMode, shouldUseLocalRunner, isLocalDisabled } from './mode';
 import { getRunner, type TestRunResult, type ProgressCallback } from '@/lib/playwright/runner';
-import type { Test, EnvironmentConfig, PlaywrightSettings, StabilizationSettings } from '@/lib/db/schema';
+import type { Test, EnvironmentConfig, PlaywrightSettings, StabilizationSettings, NetworkRequest } from '@/lib/db/schema';
 import { DEFAULT_STABILIZATION_SETTINGS } from '@/lib/db/schema';
 import type {
   RunTestCommand,
@@ -303,9 +303,23 @@ export async function executeSetupViaRunner(
   const maxWait = setupTimeout + 30000; // Allow extra time for network overhead
   const startTime = Date.now();
 
+  let healthCheckCounter = 0;
+
   while (Date.now() - startTime < maxWait) {
     await new Promise((resolve) => setTimeout(resolve, pollInterval));
     pollInterval = Math.min(pollInterval + 100, maxPollInterval);
+
+    // Every ~5 polls, check if the runner is still online
+    healthCheckCounter++;
+    if (healthCheckCounter % 5 === 0) {
+      const [runnerRow] = await db
+        .select({ status: runners.status })
+        .from(runners)
+        .where(eq(runners.id, runnerId));
+      if (runnerRow?.status === 'offline') {
+        throw new Error(`Setup failed: Embedded browser went offline during setup (possible crash-loop). Check container logs for runner ${runnerId.slice(0, 8)}.`);
+      }
+    }
 
     const dbCmd = await getRunnerCommandById(command.id);
     if (!dbCmd) continue;
@@ -388,7 +402,7 @@ async function executeViaRunner(
   // Load runner's maxParallelTests from DB if not provided in options
   let maxParallel = options.maxParallelTests ?? 1;
   if (!options.maxParallelTests) {
-    const runnerRecord = await db.select({ maxParallelTests: runners.maxParallelTests }).from(runners).where(eq(runners.id, runnerId)).get();
+    const [runnerRecord] = await db.select({ maxParallelTests: runners.maxParallelTests }).from(runners).where(eq(runners.id, runnerId));
     if (runnerRecord?.maxParallelTests) {
       maxParallel = runnerRecord.maxParallelTests;
     }
@@ -495,6 +509,10 @@ async function executeViaRunner(
         setupVariables: options.setupContext?.variables,
         cursorPlaybackSpeed: pwOverrides?.cursorPlaybackSpeed ?? options.playwrightSettings?.cursorPlaybackSpeed ?? 1,
         stabilization: buildStabilizationPayload(options.playwrightSettings, test.stabilizationOverrides),
+        consoleErrorMode: (options.playwrightSettings?.consoleErrorMode as 'fail' | 'warn' | 'ignore') || 'fail',
+        networkErrorMode: (options.playwrightSettings?.networkErrorMode as 'fail' | 'warn' | 'ignore') || 'fail',
+        ignoreExternalNetworkErrors: options.playwrightSettings?.ignoreExternalNetworkErrors ?? false,
+        enableNetworkInterception: options.playwrightSettings?.enableNetworkInterception ?? false,
         browser: effectiveBrowser,
         fixtures: fixturePayloads,
         grantClipboardAccess: options.playwrightSettings?.grantClipboardAccess ?? false,
@@ -558,21 +576,24 @@ async function executeViaRunner(
       const unacked = await getUnacknowledgedResults([dbCmd.id]);
       const testResultMsg = unacked.find(r => r.type === 'response:test_result');
 
-      if (!testResultMsg && dbCmd.status !== 'timeout') {
+      if (!testResultMsg && dbCmd.status !== 'timeout' && dbCmd.status !== 'failed') {
         // Result not yet stored — wait for next poll
         continue;
       }
 
-      if (dbCmd.status === 'timeout') {
+      if (dbCmd.status === 'timeout' || (dbCmd.status === 'failed' && !testResultMsg)) {
         inFlight.delete(dbCmd.id);
         completedCount++;
-        // Timed out — no result payload
+        // No result payload — runner timed out or disconnected
+        const errorMsg = dbCmd.status === 'timeout'
+          ? `Test execution timed out`
+          : `Runner disconnected during test execution`;
         const timeoutResult: TestRunResult = {
           testId: info.testId,
           status: 'failed',
-          durationMs: testTimeout,
+          durationMs: Date.now() - info.startTime,
           screenshots: [],
-          errorMessage: `Test execution timed out`,
+          errorMessage: errorMsg,
         };
         results.push(timeoutResult);
         await onResult?.(timeoutResult);
@@ -627,7 +648,10 @@ async function executeViaRunner(
 
       // Save video file if present in the result
       let videoPath: string | undefined;
-      if (payload.videoData && payload.videoFilename) {
+      if (payload.videoPath) {
+        // Video already saved to disk by the runner route handler
+        videoPath = payload.videoPath as string;
+      } else if (payload.videoData && payload.videoFilename) {
         try {
           const videoDir = path.join(STORAGE_DIRS.videos, options.repositoryId || 'default');
           await fs.mkdir(videoDir, { recursive: true });
@@ -639,6 +663,12 @@ async function executeViaRunner(
         }
       }
 
+      // Check for async network bodies file
+      const networkBodiesResult = unacked.find(r => r.type === 'response:network_bodies');
+      const networkBodiesPath = networkBodiesResult
+        ? (networkBodiesResult.payload as Record<string, unknown>)?.path as string | undefined
+        : undefined;
+
       const testResult: TestRunResult = {
         testId: (payload.testId as string) || info.testId,
         status: payload.status === 'error' || payload.status === 'timeout' || payload.status === 'cancelled' ? 'failed' : (payload.status as 'passed' | 'failed'),
@@ -646,8 +676,11 @@ async function executeViaRunner(
         screenshotPath: allScreenshots[0]?.path,
         screenshots: allScreenshots,
         errorMessage: errorPayload?.message as string | undefined,
+        consoleErrors: Array.isArray(payload.consoleErrors) && payload.consoleErrors.length > 0 ? payload.consoleErrors as string[] : undefined,
+        networkRequests: Array.isArray(payload.networkRequests) && payload.networkRequests.length > 0 ? payload.networkRequests as NetworkRequest[] : undefined,
         softErrors: Array.isArray(payload.softErrors) && payload.softErrors.length > 0 ? payload.softErrors as string[] : undefined,
         videoPath,
+        networkBodiesPath,
       };
       results.push(testResult);
       await onResult?.(testResult);
@@ -758,12 +791,11 @@ async function getAvailableRunner(teamId: string) {
   }
 
   // Fall back to database (polling runners)
-  const dbRunner = await db
+  const [dbRunner] = await db
     .select()
     .from(runners)
     .where(and(eq(runners.teamId, teamId), eq(runners.status, 'online')))
-    .limit(1)
-    .get();
+    .limit(1);
 
   return dbRunner;
 }
@@ -779,11 +811,10 @@ async function getAvailableRunnerById(teamId: string, runnerId: string) {
   }
 
   // Fall back to database (polling runners)
-  const dbRunner = await db
+  const [dbRunner] = await db
     .select()
     .from(runners)
-    .where(and(eq(runners.id, runnerId), eq(runners.teamId, teamId), eq(runners.status, 'online')))
-    .get();
+    .where(and(eq(runners.id, runnerId), eq(runners.teamId, teamId), eq(runners.status, 'online')));
 
   return dbRunner;
 }
@@ -801,12 +832,11 @@ export async function hasAvailableRunner(teamId: string): Promise<boolean> {
  * System EBs are host-provided and available to all teams.
  */
 async function getAvailableSystemRunner() {
-  const dbRunner = await db
+  const [dbRunner] = await db
     .select()
     .from(runners)
     .where(and(eq(runners.isSystem, true), eq(runners.status, 'online')))
-    .limit(1)
-    .get();
+    .limit(1);
 
   return dbRunner;
 }
@@ -815,11 +845,10 @@ async function getAvailableSystemRunner() {
  * Get a specific system runner by ID if it's online.
  */
 async function getAvailableSystemRunnerById(runnerId: string) {
-  const dbRunner = await db
+  const [dbRunner] = await db
     .select()
     .from(runners)
-    .where(and(eq(runners.id, runnerId), eq(runners.isSystem, true), eq(runners.status, 'online')))
-    .get();
+    .where(and(eq(runners.id, runnerId), eq(runners.isSystem, true), eq(runners.status, 'online')));
 
   return dbRunner;
 }

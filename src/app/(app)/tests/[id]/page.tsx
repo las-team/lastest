@@ -1,8 +1,4 @@
-import { getTest, getTestResultsByTest, getSelectedRepository, getPlannedScreenshotsByTest, getDefaultSetupSteps, getTestsByRepo, getSetupScripts, getGoogleSheetsDataSources, getPlaywrightSettings, getDiffSensitivitySettings, getEnvironmentConfig } from '@/lib/db/queries';
-import { getTestScreenshotsGrouped } from '@/server/actions/tests';
-import { getCurrentSession } from '@/lib/auth';
-import { TestDetailClient } from './test-detail-client';
-import { notFound } from 'next/navigation';
+import { redirect } from 'next/navigation';
 
 interface TestDetailPageProps {
   params: Promise<{ id: string }>;
@@ -10,58 +6,5 @@ interface TestDetailPageProps {
 
 export default async function TestDetailPage({ params }: TestDetailPageProps) {
   const { id } = await params;
-  const test = await getTest(id);
-
-  if (!test) {
-    notFound();
-  }
-
-  const session = await getCurrentSession();
-  const teamId = session?.team?.id;
-  const userId = session?.user?.id;
-  const results = await getTestResultsByTest(id);
-  const selectedRepo = teamId ? await getSelectedRepository(userId, teamId) : null;
-  const repoId = test.repositoryId || selectedRepo?.id;
-  const screenshotGroups = await getTestScreenshotsGrouped(id, repoId);
-  const plannedScreenshots = await getPlannedScreenshotsByTest(id);
-
-  // Load setup data
-  const defaultSetupSteps = repoId ? await getDefaultSetupSteps(repoId) : [];
-  const availableTests = repoId ? await getTestsByRepo(repoId) : [];
-  const setupScripts = repoId ? await getSetupScripts(repoId) : [];
-
-  // Load Google Sheets data sources for data reference preview
-  const sheetDataSources = repoId ? await getGoogleSheetsDataSources(repoId) : [];
-
-  // Load playwright settings for stabilization defaults
-  const playwrightSettings = repoId ? await getPlaywrightSettings(repoId) : null;
-
-  const banAiMode = session?.team?.banAiMode ?? false;
-  const earlyAdopterMode = session?.team?.earlyAdopterMode ?? false;
-
-  // Load diff sensitivity settings and environment config for override defaults
-  const diffSettings = repoId ? await getDiffSensitivitySettings(repoId) : null;
-  const envConfig = repoId ? await getEnvironmentConfig(repoId) : null;
-
-  return (
-    <div className="flex flex-col h-full">
-      <TestDetailClient
-        test={test}
-        results={results}
-        repositoryId={repoId}
-        screenshotGroups={screenshotGroups}
-        plannedScreenshots={plannedScreenshots}
-        defaultSetupSteps={defaultSetupSteps}
-        availableTests={availableTests}
-        availableScripts={setupScripts}
-        sheetDataSources={sheetDataSources}
-        stabilizationDefaults={playwrightSettings?.stabilization ?? null}
-        banAiMode={banAiMode}
-        earlyAdopterMode={earlyAdopterMode}
-        diffDefaults={diffSettings}
-        playwrightDefaults={playwrightSettings}
-        envBaseUrl={envConfig?.baseUrl ?? null}
-      />
-    </div>
-  );
+  redirect(`/definition?test=${encodeURIComponent(id)}`);
 }

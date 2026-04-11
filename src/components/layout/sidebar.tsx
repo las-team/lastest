@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { usePathname } from 'next/navigation';
+import { usePathname, useSearchParams } from 'next/navigation';
 import { cn } from '@/lib/utils';
 import {
   LayoutDashboard,
@@ -11,15 +11,15 @@ import {
   Settings,
   Layers,
   ListOrdered,
-  FolderTree,
   Building2,
   Zap,
   ClipboardCheck,
   TrendingDown,
 } from 'lucide-react';
 import Image from 'next/image';
-import { RepoSelector, SyncReposButton, CreateLocalRepoButton } from './repo-selector';
+import { RepoSelector, CreateLocalRepoButton } from './repo-selector';
 import { QueueIndicator } from '@/components/queue/queue-indicator';
+import { ActivityFeedIndicator } from '@/components/activity-feed/activity-feed-indicator-client';
 import { UserMenu } from '@/components/auth/user-menu';
 import type { Repository, User, Team } from '@/lib/db/schema';
 
@@ -37,10 +37,9 @@ const dashboardNav = [
 const EARLY_ADOPTER_ITEMS = new Set(['Compose', 'Suites', 'Compare', 'Impact']);
 
 const definitionNav = [
-  { name: 'Areas', href: '/areas', icon: FolderTree },
-  { name: 'Tests', href: '/tests', icon: FileCode },
+  { name: 'Definition', href: '/definition', icon: FileCode },
   { name: 'Compose', href: '/compose', icon: Layers },
-  { name: 'Env Setup', href: '/env', icon: Zap },
+  { name: 'Seed', href: '/env', icon: Zap },
 ];
 
 const executionNav = [
@@ -58,6 +57,8 @@ const settingsNav = [
 
 export function Sidebar({ repos, selectedRepo, currentUser, team }: SidebarProps) {
   const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const justConnected = searchParams.get('success') === 'github_connected' || searchParams.get('success') === 'gitlab_connected';
   const earlyAdopter = team?.earlyAdopterMode ?? false;
 
   const filteredDefinitionNav = earlyAdopter
@@ -77,7 +78,7 @@ export function Sidebar({ repos, selectedRepo, currentUser, team }: SidebarProps
         >
           <Image src="/icon-light.svg" alt="" width={28} height={28} className="rounded-full dark:hidden" />
           <Image src="/icon-dark.svg" alt="" width={28} height={28} className="rounded-full hidden dark:block" />
-          LASTEST2
+          LASTEST
         </Link>
         {team && (
           <div className="flex items-center gap-2 mt-2 text-xs text-muted-foreground">
@@ -87,14 +88,21 @@ export function Sidebar({ repos, selectedRepo, currentUser, team }: SidebarProps
         )}
       </div>
 
-      <div className="p-4 border-b space-y-3">
+      <div className={cn(
+        'p-4 border-b space-y-3 transition-all duration-500',
+        justConnected && 'ring-2 ring-primary/60 bg-primary/5 rounded-md'
+      )}>
         <div className="flex items-center gap-2">
           <div className="flex-1 min-w-0">
             <RepoSelector initialRepos={repos} initialSelected={selectedRepo} />
           </div>
           <CreateLocalRepoButton />
-          <SyncReposButton />
         </div>
+        {justConnected && repos && repos.length > 0 && !selectedRepo && (
+          <p className="text-xs text-primary font-medium animate-pulse">
+            {repos.length} repo{repos.length !== 1 ? 's' : ''} synced — select one to get started
+          </p>
+        )}
       </div>
 
       <nav className="flex-1 p-4 space-y-4">
@@ -191,7 +199,10 @@ export function Sidebar({ repos, selectedRepo, currentUser, team }: SidebarProps
         {currentUser && <UserMenu user={currentUser} />}
         <div className="flex items-center justify-between">
           <span className="text-xs text-muted-foreground">Visual Regression Testing</span>
-          <QueueIndicator />
+          <div className="flex items-center gap-0.5">
+            <ActivityFeedIndicator />
+            <QueueIndicator />
+          </div>
         </div>
       </div>
     </aside>

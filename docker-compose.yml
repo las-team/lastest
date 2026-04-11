@@ -1,40 +1,61 @@
 # =============================================================================
-# Lastest2 - Docker Compose for Home Server Deployment
+# Lastest - Docker Compose for Home Server Deployment
 # =============================================================================
 #
 # Quick start:
-#   docker-compose up -d
+#   docker compose up -d
 #
 # View logs:
-#   docker-compose logs -f
+#   docker compose logs -f
 #
 # Stop:
-#   docker-compose down
+#   docker compose down
 #
 # =============================================================================
 
 services:
-  lastest2:
+  postgres:
+    image: postgres:17-alpine
+    container_name: lastest-db
+    environment:
+      POSTGRES_USER: lastest
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-lastest}
+      POSTGRES_DB: lastest
+    volumes:
+      - lastest-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U lastest"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - lastest-net
+
+  lastest:
     image: ewyc/lastest:latest
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: lastest2
+    container_name: lastest
     ports:
       - "3000:3000"
     volumes:
-      - lastest2-data:/app/data
-      - lastest2-storage:/app/storage
-      - lastest2-claude-auth:/home/nextjs/.claude
+      - lastest-storage:/app/storage
+      - lastest-claude-auth:/home/nextjs/.claude
     environment:
       - NODE_ENV=production
-      - DATABASE_PATH=/app/data/lastest2.db
+      - DATABASE_URL=postgresql://lastest:${POSTGRES_PASSWORD:-lastest}@postgres:5432/lastest
       - BETTER_AUTH_SECRET=${BETTER_AUTH_SECRET:?BETTER_AUTH_SECRET is required}
       - GITHUB_CLIENT_ID=${GITHUB_CLIENT_ID:-}
       - GITHUB_CLIENT_SECRET=${GITHUB_CLIENT_SECRET:-}
       - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID:-}
       - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET:-}
-      - LASTEST2_TOKEN=${LASTEST2_TOKEN:-}
+      - LASTEST_TOKEN=${LASTEST_TOKEN:-}
+      - SYSTEM_EB_TOKEN=${SYSTEM_EB_TOKEN:-}
+    depends_on:
+      postgres:
+        condition: service_healthy
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "wget", "-q", "--spider", "http://localhost:3000/api/health"]
@@ -43,16 +64,43 @@ services:
       retries: 3
       start_period: 60s
     networks:
-      - lastest2-net
+      - lastest-net
+
+  embedded-browser:
+    image: lastest-embedded-browser
+    build:
+      context: .
+      dockerfile: packages/embedded-browser/Dockerfile
+    container_name: lastest-embedded-browser
+    ports:
+      - "9223:9223"  # CDP stream
+      - "9224:9224"  # health/control
+    environment:
+      - LASTEST_URL=http://lastest:3000
+      - SYSTEM_EB_TOKEN=${SYSTEM_EB_TOKEN:?SYSTEM_EB_TOKEN is required (must match lastest SYSTEM_EB_TOKEN list)}
+      - STREAM_HOST=embedded-browser
+      - STREAM_PORT=9223
+      - INSTANCE_ID=eb-1
+    depends_on:
+      lastest:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:9224/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    networks:
+      - lastest-net
 
 networks:
-  lastest2-net:
+  lastest-net:
     driver: bridge
 
 volumes:
-  lastest2-data:
+  lastest-pgdata:
     driver: local
-  lastest2-storage:
+  lastest-storage:
     driver: local
-  lastest2-claude-auth:
+  lastest-claude-auth:
     driver: local

@@ -45,8 +45,7 @@ export async function GET(request: NextRequest) {
           const teamRunners = await db
             .select()
             .from(runners)
-            .where(eq(runners.teamId, teamId))
-            .all();
+            .where(eq(runners.teamId, teamId));
 
           const initialData = {
             type: 'init',
@@ -61,6 +60,8 @@ export async function GET(request: NextRequest) {
           controller.enqueue(encoder.encode(`data: ${JSON.stringify(initialData)}\n\n`));
         } catch (error) {
           console.error('[SSE] Failed to send initial state:', error);
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'error', message: 'Failed to load runners' })}\n\n`));
+          controller.close();
         }
       })();
 
@@ -85,14 +86,14 @@ export async function GET(request: NextRequest) {
         }
       });
 
-      // Send keepalive every 30 seconds
+      // Send keepalive every 8 seconds (must be under envoy's 10s idle_timeout)
       const keepalive = setInterval(() => {
         try {
           controller.enqueue(encoder.encode(': keepalive\n\n'));
         } catch {
           clearInterval(keepalive);
         }
-      }, 30000);
+      }, 8000);
 
       // Cleanup on close
       request.signal.addEventListener('abort', () => {

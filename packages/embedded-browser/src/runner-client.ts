@@ -62,6 +62,8 @@ export interface EmbeddedRunnerOptions {
   streamPort: number;
   streamHost?: string;
   pollInterval?: number;
+  /** CDP port for Playwright MCP integration */
+  cdpPort?: number;
   /** System EB shared token — if set, uses /api/embedded/auto-register instead */
   systemToken?: string;
   /** Container instance ID (os.hostname()) for system registration */
@@ -81,6 +83,7 @@ export class EmbeddedRunnerClient {
   private status: 'idle' | 'busy' = 'idle';
   private currentTask?: string;
   private wakeHeartbeat: (() => void) | null = null;
+  private cdpPort?: number;
   private systemToken?: string;
   private instanceId?: string;
 
@@ -93,6 +96,7 @@ export class EmbeddedRunnerClient {
     this.streamPort = options.streamPort;
     this.streamHost = options.streamHost || '';
     this.pollInterval = options.pollInterval ?? 1000;
+    this.cdpPort = options.cdpPort;
     this.systemToken = options.systemToken;
     this.instanceId = options.instanceId;
   }
@@ -105,6 +109,7 @@ export class EmbeddedRunnerClient {
     try {
       const hostname = this.streamHost || getContainerIP() || os.hostname();
       const streamUrl = `ws://${hostname}:${this.streamPort}`;
+      const cdpUrl = this.cdpPort ? `http://${hostname}:${this.cdpPort}` : undefined;
       const containerUrl = `http://${hostname}:${this.streamPort}`;
 
       const response = await fetch(`${this.serverUrl}/api/embedded/register`, {
@@ -115,6 +120,7 @@ export class EmbeddedRunnerClient {
         },
         body: JSON.stringify({
           streamUrl,
+          cdpUrl,
           containerUrl,
           viewport: { width: 1280, height: 720 },
         }),
@@ -184,6 +190,7 @@ export class EmbeddedRunnerClient {
     try {
       const hostname = this.streamHost || getContainerIP() || os.hostname();
       const streamUrl = `ws://${hostname}:${this.streamPort}`;
+      const cdpUrl = this.cdpPort ? `http://${hostname}:${this.cdpPort}` : undefined;
       const containerUrl = `http://${hostname}:${this.streamPort}`;
 
       const response = await fetch(`${this.serverUrl}/api/embedded/auto-register`, {
@@ -194,6 +201,7 @@ export class EmbeddedRunnerClient {
         },
         body: JSON.stringify({
           streamUrl,
+          cdpUrl,
           containerUrl,
           viewport: { width: 1280, height: 720 },
           instanceId: this.instanceId || os.hostname(),
@@ -223,18 +231,26 @@ export class EmbeddedRunnerClient {
   async start(): Promise<void> {
     this.running = true;
 
-    if (this.systemToken) {
-      // System EB mode: auto-register via shared token
-      const registered = await this.registerAsSystem();
-      if (!registered) {
-        throw new Error('Failed to register as system embedded browser');
+    // Retry registration with backoff — the app may not be ready yet
+    const maxAttempts = 10;
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      let registered = false;
+
+      if (this.systemToken) {
+        registered = await this.registerAsSystem();
+      } else {
+        registered = await this.register();
       }
-    } else {
-      // Standard mode: register via per-runner LASTEST2_TOKEN
-      const registered = await this.register();
-      if (!registered) {
-        throw new Error('Failed to register embedded browser');
+
+      if (registered) break;
+
+      if (attempt === maxAttempts) {
+        throw new Error('Failed to register embedded browser after ' + maxAttempts + ' attempts');
       }
+
+      const delay = Math.min(1000 * Math.pow(2, attempt - 1), 15000);
+      console.log(`[EmbeddedRunner] Registration attempt ${attempt}/${maxAttempts} failed, retrying in ${delay}ms...`);
+      await new Promise((r) => setTimeout(r, delay));
     }
 
     // Then connect as a runner

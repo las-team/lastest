@@ -33,6 +33,7 @@ export type MessageType =
   | 'command:capture_screenshot'
   | 'response:screenshot'
   | 'response:screenshot_ack'
+  | 'response:network_bodies'
   | 'response:error'
   | 'response:pong'
   // Status
@@ -91,6 +92,10 @@ export interface RunTestCommandPayload {
   forceVideoRecording?: boolean;
   recordingViewport?: { width: number; height: number };
   lockViewportToRecording?: boolean;
+  consoleErrorMode?: 'fail' | 'warn' | 'ignore';
+  networkErrorMode?: 'fail' | 'warn' | 'ignore';
+  ignoreExternalNetworkErrors?: boolean;
+  enableNetworkInterception?: boolean;
 }
 
 export interface RunTestCommand extends BaseMessage {
@@ -402,6 +407,19 @@ export interface ScreenshotAckResponse extends BaseMessage {
   payload: ScreenshotAckPayload;
 }
 
+export interface NetworkBodiesPayload {
+  correlationId: string;
+  testId: string;
+  testRunId: string;
+  repositoryId?: string;
+  networkRequests: unknown;
+}
+
+export interface NetworkBodiesResponse extends BaseMessage {
+  type: 'response:network_bodies';
+  payload: NetworkBodiesPayload;
+}
+
 export type ErrorCode =
   | 'BROWSER_LAUNCH_FAILED'
   | 'TEST_TIMEOUT'
@@ -496,6 +514,7 @@ export type AgentResponse =
   | RecordingEventResponse
   | RecordingStoppedResponse
   | ScreenshotUploadResponse
+  | NetworkBodiesResponse
   | DebugStateResponse
   | ErrorResponse
   | PongResponse
@@ -551,7 +570,7 @@ export interface ScreencastFrameMessage extends BaseMessage {
 /** Client → Server: Mouse/keyboard input forwarding */
 export interface StreamInputMessage extends BaseMessage {
   type: 'stream:input';
-  payload: StreamMouseEvent | StreamKeyboardEvent | StreamFileUploadEvent | StreamClipboardEvent;
+  payload: StreamMouseEvent | StreamKeyboardEvent | StreamFileUploadEvent | StreamClipboardEvent | StreamTouchEvent;
 }
 
 export interface StreamMouseEvent {
@@ -582,6 +601,12 @@ export interface StreamFileUploadEvent {
 export interface StreamClipboardEvent {
   type: 'clipboard_paste';
   text: string;
+}
+
+export interface StreamTouchEvent {
+  type: 'touch';
+  action: 'start' | 'move' | 'end' | 'cancel';
+  touches: Array<{ x: number; y: number; id: number }>;
 }
 
 /** Client → Server / Server → Client: Session lifecycle control */

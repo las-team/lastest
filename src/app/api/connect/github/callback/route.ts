@@ -89,5 +89,19 @@ export async function GET(request: NextRequest) {
     }
   }
 
+  // Auto-sync repos so the sidebar is populated immediately
+  if (teamId) {
+    try {
+      const { syncGithubReposForTeam } = await import('@/server/actions/repos');
+      await syncGithubReposForTeam(teamId, tokenResponse.access_token);
+      const ghAccount = await queries.getGithubAccountByTeam(teamId);
+      if (ghAccount) {
+        await queries.updateGithubAccount(ghAccount.id, { reposSyncedAt: new Date() });
+      }
+    } catch {
+      // Non-fatal — repos will auto-sync on next page load
+    }
+  }
+
   return NextResponse.redirect(new URL('/settings?success=github_connected', getPublicUrl(request)));
 }

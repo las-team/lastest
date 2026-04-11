@@ -61,12 +61,117 @@ function classifyStatement(code: string): DebugStep['type'] {
   if (/expect\s*\(/.test(trimmed)) return 'assertion';
   if (/\.screenshot\s*\(/.test(trimmed)) return 'screenshot';
   if (/\.goto\s*\(/.test(trimmed) || /\.navigate\s*\(/.test(trimmed)) return 'navigation';
+  // Helpers before generic waitFor — they contain "waitFor" but are actions
+  if (/downloads\.\w+/.test(trimmed) || /clipboard\.\w+/.test(trimmed) || /network\.\w+/.test(trimmed)) return 'action';
   if (/\.waitFor/.test(trimmed) || /waitForTimeout/.test(trimmed) || /waitForURL/.test(trimmed) || /waitForLoadState/.test(trimmed) || /waitForSelector/.test(trimmed)) return 'wait';
   if (/\.(click|fill|press|type|check|uncheck|selectOption|hover|dblclick|dragTo|setInputFiles|focus|blur)\s*\(/.test(trimmed)) return 'action';
   if (/locateWithFallback\s*\(/.test(trimmed)) return 'action';
+  if (/replayCursorPath\s*\(/.test(trimmed)) return 'action';
+  if (/page\.mouse\.\w+\s*\(/.test(trimmed)) return 'action';
+  if (/page\.keyboard\.\w+\s*\(/.test(trimmed)) return 'action';
   if (/page\.\w+\s*\(/.test(trimmed)) return 'action';
 
   return 'other';
+}
+
+/**
+ * Pick the most human-readable selector from a locateWithFallback JSON array.
+ * Priority: role-name > id > placeholder > text > ocr-text > css-path
+ */
+function extractBestSelector(code: string): { selector: string; action: string; value?: string } | null {
+  const actionMatch = code.match(/locateWithFallback\s*\(\s*page\s*,\s*\[(.+?)\]\s*,\s*['"](\w+)['"]/);
+  if (!actionMatch) return null;
+
+  const action = actionMatch[2];
+  const jsonStr = '[' + actionMatch[1] + ']';
+
+  // Extract fill/selectOption value (4th argument) — match after the action name
+  const valueMatch = code.match(/,\s*'(?:fill|selectOption)'\s*,\s*'((?:[^'\\]|\\.)*)'/);
+  const actionValue = valueMatch ? valueMatch[1].replace(/\\'/g, "'").replace(/\\\\/g, '\\') : undefined;
+
+  let selectors: { type: string; value: string }[];
+  try {
+    selectors = JSON.parse(jsonStr);
+  } catch {
+    return { selector: '...', action, value: actionValue };
+  }
+
+  const priority = ['role-name', 'data-testid', 'id', 'aria-label', 'name', 'placeholder', 'text', 'ocr-text', 'css-path'];
+  selectors.sort((a, b) => {
+    const ai = priority.indexOf(a.type);
+    const bi = priority.indexOf(b.type);
+    return (ai === -1 ? 99 : ai) - (bi === -1 ? 99 : bi);
+  });
+
+  const best = selectors[0];
+  if (!best) return { selector: '...', action, value: actionValue };
+
+  const result = (selector: string) => ({ selector, action, value: actionValue });
+
+  // Format the selector for display
+  if (best.type === 'role-name') {
+    const m = best.value.match(/^role=(\w+)\[name="(.+)"\]$/);
+    if (m) return result(`${m[1]} "${m[2]}"`);
+    return result(best.value);
+  }
+  if (best.type === 'data-testid') {
+    const m = best.value.match(/\[data-testid="(.+?)"\]/);
+    return result(m ? `testid "${m[1]}"` : best.value);
+  }
+  if (best.type === 'id') return result(best.value);
+  if (best.type === 'aria-label') {
+    const m = best.value.match(/\[aria-label="(.+?)"\]/);
+    return result(m ? `"${m[1]}"` : best.value);
+  }
+  if (best.type === 'name') {
+    const m = best.value.match(/\[name="(.+?)"\]/);
+    return result(m ? `name "${m[1]}"` : best.value);
+  }
+  if (best.type === 'placeholder') {
+    const m = best.value.match(/\[placeholder="(.+?)"\]/);
+    return result(m ? `"${m[1]}"` : best.value);
+  }
+  if (best.type === 'text') {
+    const m = best.value.match(/text="(.+?)"/);
+    return result(m ? `"${m[1]}"` : best.value);
+  }
+  if (best.type === 'ocr-text') {
+    const m = best.value.match(/ocr-text="(.+?)"/);
+    return result(m ? `"${m[1]}"` : best.value);
+  }
+
+  // css-path: truncate if long
+  const css = best.value.length > 30 ? best.value.slice(0, 27) + '...' : best.value;
+  return result(css);
+}
+
+/**
+ * Extract a locator description from Playwright chained calls like
+ * page.getByRole('link', { name: 'Tests' }).click()
+ */
+function extractLocatorTarget(code: string): string | null {
+  const getByRole = code.match(/\.getByRole\s*\(\s*['"](\w+)['"]\s*,\s*\{\s*name:\s*['"](.+?)['"]/);
+  if (getByRole) return `${getByRole[1]} "${getByRole[2]}"`;
+
+  const getByText = code.match(/\.getByText\s*\(\s*['"](.+?)['"]/);
+  if (getByText) return `"${getByText[1]}"`;
+
+  const getByLabel = code.match(/\.getByLabel\s*\(\s*['"](.+?)['"]/);
+  if (getByLabel) return `"${getByLabel[1]}"`;
+
+  const getByPlaceholder = code.match(/\.getByPlaceholder\s*\(\s*['"](.+?)['"]/);
+  if (getByPlaceholder) return `"${getByPlaceholder[1]}"`;
+
+  const getByTestId = code.match(/\.getByTestId\s*\(\s*['"](.+?)['"]/);
+  if (getByTestId) return `testid "${getByTestId[1]}"`;
+
+  const locator = code.match(/\.locator\s*\(\s*['"](.+?)['"]/);
+  if (locator) {
+    const sel = locator[1];
+    return sel.length > 30 ? sel.slice(0, 27) + '...' : sel;
+  }
+
+  return null;
 }
 
 /**
@@ -94,21 +199,137 @@ function generateLabel(code: string, type: DebugStep['type']): string {
     return 'Navigate';
   }
 
-  // For actions
-  if (type === 'action') {
-    const clickMatch = trimmed.match(/\.click\s*\(/);
-    if (clickMatch) return 'Click';
-    const fillMatch = trimmed.match(/\.fill\s*\(\s*['"`](.{0,20})/);
-    if (fillMatch) return `Fill "${fillMatch[1]}..."`;
-    const pressMatch = trimmed.match(/\.press\s*\(\s*['"`](\w+)/);
-    if (pressMatch) return `Press ${pressMatch[1]}`;
-    if (/locateWithFallback/.test(trimmed)) return 'Locate & interact';
-    return 'Action';
+  // For assertions — extract target + matcher
+  if (type === 'assertion') {
+    const negated = /\.not\./.test(trimmed);
+    const neg = negated ? 'not ' : '';
+
+    // expect(page).toHaveURL(...)
+    const urlMatch = trimmed.match(/\.toHaveURL\s*\(\s*\/(.*?)\/\s*\)/);
+    if (urlMatch) return `Assert URL ${neg}matches /${urlMatch[1]}/`;
+
+    // expect(page).toHaveTitle(...)
+    const titleMatch = trimmed.match(/\.toHaveTitle\s*\(\s*(.+?)\s*\)/);
+    if (titleMatch) return `Assert title ${neg}matches ${titleMatch[1]}`;
+
+    // expect(page.getByRole/getByText/etc)
+    const target = extractLocatorTarget(trimmed);
+    // Extract matcher: .toBeVisible(), .toBeEmpty(), .toHaveText(), etc.
+    const matcherMatch = trimmed.match(/\.(toBe\w+|toHave\w+|toContain\w+)\s*\(/);
+    const matcher = matcherMatch?.[1];
+    const friendlyMatcher = matcher
+      ? matcher.replace(/^toBe/, '').replace(/^toHave/, 'has ').replace(/^toContain/, 'contains ').toLowerCase()
+      : 'visible';
+
+    if (target) return `Assert ${target} ${neg}${friendlyMatcher}`;
+
+    // expect(varName).toBeVisible()
+    const varMatch = trimmed.match(/expect\s*\(\s*(\w+)\s*\)/);
+    if (varMatch && varMatch[1] !== 'page') return `Assert ${varMatch[1]} ${neg}${friendlyMatcher}`;
+
+    return 'Assert';
   }
 
-  if (type === 'assertion') return 'Assert';
+  // For actions
+  if (type === 'action') {
+    // locateWithFallback — parse selectors + action
+    if (/locateWithFallback/.test(trimmed)) {
+      const info = extractBestSelector(trimmed);
+      if (info) {
+        if (info.action === 'fill' && info.value) {
+          const truncVal = info.value.length > 20 ? info.value.slice(0, 17) + '...' : info.value;
+          return `Fill ${info.selector} "${truncVal}"`;
+        }
+        if (info.action === 'selectOption' && info.value) {
+          const truncVal = info.value.length > 20 ? info.value.slice(0, 17) + '...' : info.value;
+          return `Select "${truncVal}" in ${info.selector}`;
+        }
+        const actionLabel = info.action === 'click' ? 'Click' : info.action === 'fill' ? 'Fill' : info.action === 'selectOption' ? 'Select' : info.action;
+        return `${actionLabel} ${info.selector}`;
+      }
+      return 'Locate & interact';
+    }
+
+    // Mouse actions
+    if (/\.mouse\.down\s*\(/.test(trimmed)) return 'Mouse down';
+    if (/\.mouse\.up\s*\(/.test(trimmed)) return 'Mouse up';
+    const mouseClickMatch = trimmed.match(/\.mouse\.click\s*\(\s*(\d+)\s*,\s*(\d+)/);
+    if (mouseClickMatch) return `Click at (${mouseClickMatch[1]}, ${mouseClickMatch[2]})`;
+    const mouseMoveMatch = trimmed.match(/\.mouse\.move\s*\(\s*(\d+)\s*,\s*(\d+)/);
+    if (mouseMoveMatch) return `Mouse move to (${mouseMoveMatch[1]}, ${mouseMoveMatch[2]})`;
+
+    // replayCursorPath — keep short
+    if (/replayCursorPath/.test(trimmed)) return 'Cursor path';
+
+    // Keyboard
+    if (/\.keyboard\.type\s*\(\s*new\s+Date\(\)\.toISOString\(\)/.test(trimmed)) return 'Type current timestamp';
+    const typeMatch = trimmed.match(/\.keyboard\.type\s*\(\s*['"]([^'"]{0,30})['"]/);
+    if (typeMatch) return `Type "${typeMatch[1]}"`;
+    const pressMatch = trimmed.match(/\.press\s*\(\s*['"]([^'"]+)['"]/);
+    if (pressMatch) return `Press ${pressMatch[1]}`;
+
+    // downloads/clipboard/network helpers
+    if (/downloads\.waitForDownload/.test(trimmed)) return 'Wait for download';
+    if (/clipboard\.copy/.test(trimmed)) return 'Copy to clipboard';
+    if (/clipboard\.paste/.test(trimmed)) return 'Paste from clipboard';
+    if (/network\.mock/.test(trimmed)) return 'Mock network request';
+    if (/network\.block/.test(trimmed)) return 'Block network request';
+
+    // Chained Playwright actions: page.getByRole(...).click()
+    const target = extractLocatorTarget(trimmed);
+    if (target) {
+      if (/\.click\s*\(/.test(trimmed)) return `Click ${target}`;
+      if (/\.fill\s*\(/.test(trimmed)) {
+        const val = trimmed.match(/\.fill\s*\(\s*['"]([^'"]{0,20})/);
+        return val ? `Fill ${target} "${val[1]}"` : `Fill ${target}`;
+      }
+      if (/\.selectOption\s*\(/.test(trimmed)) {
+        const optVal = trimmed.match(/\.selectOption\s*\(\s*['"]([^'"]{0,20})/);
+        return optVal ? `Select "${optVal[1]}" in ${target}` : `Select option in ${target}`;
+      }
+      if (/\.hover\s*\(/.test(trimmed)) return `Hover ${target}`;
+      if (/\.check\s*\(/.test(trimmed)) return `Check ${target}`;
+      if (/\.uncheck\s*\(/.test(trimmed)) return `Uncheck ${target}`;
+      if (/\.dblclick\s*\(/.test(trimmed)) return `Double-click ${target}`;
+      if (/\.focus\s*\(/.test(trimmed)) return `Focus ${target}`;
+      return `Interact with ${target}`;
+    }
+
+    // Try to extract any selector string from the code for fallback labels
+    const anySelectorMatch = trimmed.match(/page\s*\.\s*\w+\s*\(\s*['"]([^'"]{1,40})['"]/);
+    const fallbackTarget = anySelectorMatch
+      ? (anySelectorMatch[1].length > 30 ? anySelectorMatch[1].slice(0, 27) + '...' : anySelectorMatch[1])
+      : null;
+
+    // Plain click/fill with locator string
+    const clickMatch = trimmed.match(/\.click\s*\(/);
+    if (clickMatch) {
+      const locMatch = trimmed.match(/\.locator\s*\(\s*['"](.+?)['"]\s*\)/);
+      if (locMatch) return `Click ${locMatch[1].length > 30 ? locMatch[1].slice(0, 27) + '...' : locMatch[1]}`;
+      return fallbackTarget ? `Click ${fallbackTarget}` : 'Click';
+    }
+    const fillMatch = trimmed.match(/\.fill\s*\(\s*['"](.{0,20})/);
+    if (fillMatch) return fallbackTarget ? `Fill ${fallbackTarget} "${fillMatch[1]}"` : `Fill "${fillMatch[1]}"`;
+
+    return fallbackTarget ? `Action on ${fallbackTarget}` : 'Action';
+  }
+
+  // For waits — show what's waited on
+  if (type === 'wait') {
+    const timeoutMatch = trimmed.match(/waitForTimeout\s*\(\s*(\d+)/);
+    if (timeoutMatch) return `Wait ${timeoutMatch[1]}ms`;
+    const urlMatch = trimmed.match(/waitForURL\s*\(\s*\/(.*?)\/\s*\)/);
+    if (urlMatch) return `Wait for URL /${urlMatch[1]}/`;
+    const urlStrMatch = trimmed.match(/waitForURL\s*\(\s*['"](.+?)['"]/);
+    if (urlStrMatch) return `Wait for URL ${urlStrMatch[1]}`;
+    const loadMatch = trimmed.match(/waitForLoadState\s*\(\s*['"](\w+)['"]/);
+    if (loadMatch) return `Wait for ${loadMatch[1]}`;
+    const selectorMatch = trimmed.match(/waitForSelector\s*\(\s*['"](.+?)['"]/);
+    if (selectorMatch) return `Wait for ${selectorMatch[1].length > 25 ? selectorMatch[1].slice(0, 22) + '...' : selectorMatch[1]}`;
+    return 'Wait';
+  }
+
   if (type === 'screenshot') return 'Screenshot';
-  if (type === 'wait') return 'Wait';
 
   // Truncate long code for label
   const short = trimmed.length > 40 ? trimmed.slice(0, 37) + '...' : trimmed;

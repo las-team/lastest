@@ -15,6 +15,7 @@ const SECTIONS = [
   { id: 'notifications', label: 'Notifications' },
   { id: 'diff-sensitivity', label: 'Diff Sensitivity' },
   { id: 'playwright', label: 'Playwright' },
+  { id: 'test-migration', label: 'Migration' },
   { id: 'team', label: 'Team' },
   { id: 'about', label: 'About' },
 ];

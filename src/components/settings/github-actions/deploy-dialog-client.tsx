@@ -97,7 +97,7 @@ export function DeployDialog({ open, onOpenChange, config }: DeployDialogProps) 
           <div className="rounded-md border border-amber-500/50 bg-amber-500/5 p-3 text-xs flex gap-2">
             <AlertTriangle className="h-4 w-4 text-amber-500 shrink-0 mt-0.5" />
             <div>
-              This will create <code className="font-mono">.github/workflows/lastest2.yml</code> in
+              This will create <code className="font-mono">.github/workflows/lastest.yml</code> in
               your repo.
               {willSetSecrets
                 ? hasPersistentRunner
@@ -105,7 +105,7 @@ export function DeployDialog({ open, onOpenChange, config }: DeployDialogProps) 
                   : isAuto
                     ? ' An auth-only runner will be created and secrets set automatically. The server will pick the best available runner at build time.'
                     : ' A runner token and server URL will be set as repository secrets automatically.'
-                : ' You will need to manually set LASTEST2_TOKEN and LASTEST2_URL as repository secrets.'}
+                : ' You will need to manually set LASTEST_TOKEN and LASTEST_URL as repository secrets.'}
             </div>
           </div>
 
@@ -119,11 +119,11 @@ export function DeployDialog({ open, onOpenChange, config }: DeployDialogProps) 
                 <>
                   <div className="flex items-center gap-2 text-sm">
                     <StepIcon status={steps.tokenSecret} />
-                    <span>LASTEST2_TOKEN secret</span>
+                    <span>LASTEST_TOKEN secret</span>
                   </div>
                   <div className="flex items-center gap-2 text-sm">
                     <StepIcon status={steps.urlSecret} />
-                    <span>LASTEST2_URL secret</span>
+                    <span>LASTEST_URL secret</span>
                   </div>
                 </>
               )}

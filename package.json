@@ -1,12 +1,11 @@
 {
-  "name": "lastest2",
+  "name": "lastest",
   "version": "0.1.0",
   "private": true,
   "license": "FSL-1.1-ALv2",
   "pnpm": {
     "onlyBuiltDependencies": [
       "@node-rs/argon2",
-      "better-sqlite3",
       "esbuild",
       "tesseract.js"
     ]
@@ -34,12 +33,14 @@
     "deploy:all": "bash scripts/deploy.sh all"
   },
   "dependencies": {
-    "@anthropic-ai/claude-agent-sdk": "^0.2.19",
+    "@anthropic-ai/claude-agent-sdk": "^0.2.98",
     "@axe-core/playwright": "^4.11.0",
     "@dnd-kit/core": "^6.3.1",
     "@dnd-kit/sortable": "^10.0.0",
     "@dnd-kit/utilities": "^3.2.2",
+    "@lastest/mcp-server": "workspace:*",
     "@lastest/shared": "workspace:*",
+    "@modelcontextprotocol/sdk": "^1.28.0",
     "@node-rs/argon2": "^2.0.2",
     "@radix-ui/react-avatar": "^1.1.11",
     "@radix-ui/react-checkbox": "^1.3.3",
@@ -59,7 +60,6 @@
     "@tailwindcss/typography": "^0.5.19",
     "@tanstack/react-query": "^5.90.19",
     "better-auth": "^1.4.18",
-    "better-sqlite3": "^12.6.2",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "date-fns": "^4.1.0",
@@ -73,6 +73,7 @@
     "pixelmatch": "^7.1.0",
     "playwright": "^1.57.0",
     "pngjs": "^7.0.0",
+    "postgres": "^3.4.8",
     "react": "19.2.3",
     "react-dom": "19.2.3",
     "react-markdown": "^10.1.0",
@@ -94,6 +95,7 @@
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "@types/uuid": "^11.0.0",
+    "better-sqlite3": "^12.8.0",
     "drizzle-kit": "^0.31.8",
     "eslint": "^9",
     "eslint-config-next": "16.1.3",

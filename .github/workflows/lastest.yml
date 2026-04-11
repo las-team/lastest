@@ -16,7 +16,7 @@ jobs:
           LASTEST_TOKEN: ${{ secrets.LASTEST_TOKEN }}
           LASTEST_URL: ${{ secrets.LASTEST_URL }}
         run: |
-          npx @lastest/runner@0.4.2 trigger \
+          npx @lastest/runner@latest trigger \
             -t "$LASTEST_TOKEN" \
             -s "$LASTEST_URL" \
             --repo "las-team/lastest" \

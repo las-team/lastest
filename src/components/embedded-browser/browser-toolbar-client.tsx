@@ -29,6 +29,10 @@ interface BrowserToolbarProps {
   onScreenshot?: () => void;
   onFullscreenToggle?: () => void;
   hideControls?: boolean;
+  hideFullscreenToggle?: boolean;
+  hideScreenshot?: boolean;
+  hideViewportSelector?: boolean;
+  readOnly?: boolean;
 }
 
 export function BrowserToolbar({
@@ -40,8 +44,15 @@ export function BrowserToolbar({
   onScreenshot,
   onFullscreenToggle,
   hideControls,
+  hideFullscreenToggle,
+  hideScreenshot,
+  hideViewportSelector,
+  readOnly,
 }: BrowserToolbarProps) {
   const [urlInput, setUrlInput] = useState(currentUrl ?? '');
+  const [userEdited, setUserEdited] = useState(false);
+
+  const displayUrl = userEdited ? urlInput : (currentUrl ?? urlInput);
 
   const handleUrlSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -51,6 +62,7 @@ export function BrowserToolbar({
         url = `https://${url}`;
       }
       onNavigate?.(url);
+      setUserEdited(false);
     }
   };
 
@@ -62,47 +74,57 @@ export function BrowserToolbar({
       <Globe className="h-4 w-4 shrink-0 text-muted-foreground" />
       <form onSubmit={handleUrlSubmit} className="flex-1">
         <Input
-          value={urlInput}
-          onChange={(e) => setUrlInput(e.target.value)}
+          value={displayUrl}
+          onChange={(e) => {
+            if (readOnly) return;
+            setUserEdited(true);
+            setUrlInput(e.target.value);
+          }}
+          onBlur={() => setUserEdited(false)}
+          readOnly={readOnly}
           placeholder="Enter URL..."
-          className="h-7 text-sm"
+          className={`h-7 text-sm ${readOnly ? 'cursor-default opacity-70' : ''}`}
         />
       </form>
 
       {!hideControls && (
         <>
           {/* Viewport selector */}
-          <Select
-            value={viewportLabel}
-            onValueChange={(val) => {
-              const preset = VIEWPORT_PRESETS.find((p) => `${p.width}×${p.height}` === val);
-              if (preset) {
-                onViewportChange?.({ width: preset.width, height: preset.height });
-              }
-            }}
-          >
-            <SelectTrigger className="h-7 w-[160px] text-xs">
-              <Monitor className="mr-1 h-3 w-3" />
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {VIEWPORT_PRESETS.map((preset) => (
-                <SelectItem key={preset.label} value={`${preset.width}×${preset.height}`}>
-                  {preset.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+          {!hideViewportSelector && (
+            <Select
+              value={viewportLabel}
+              onValueChange={(val) => {
+                const preset = VIEWPORT_PRESETS.find((p) => `${p.width}×${p.height}` === val);
+                if (preset) {
+                  onViewportChange?.({ width: preset.width, height: preset.height });
+                }
+              }}
+            >
+              <SelectTrigger className="h-7 w-[160px] text-xs">
+                <Monitor className="mr-1 h-3 w-3" />
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {VIEWPORT_PRESETS.map((preset) => (
+                  <SelectItem key={preset.label} value={`${preset.width}×${preset.height}`}>
+                    {preset.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          )}
 
           {/* Screenshot */}
-          <Button variant="ghost" size="icon" className="h-7 w-7" onClick={onScreenshot} title="Take screenshot">
-            <Camera className="h-4 w-4" />
-          </Button>
+          {!hideScreenshot && (
+            <Button variant="ghost" size="icon" className="h-7 w-7" onClick={onScreenshot} title="Take screenshot">
+              <Camera className="h-4 w-4" />
+            </Button>
+          )}
         </>
       )}
 
-      {/* Fullscreen — hidden when controls are hidden (parent handles fullscreen) */}
-      {!hideControls && (
+      {/* Fullscreen — hidden when controls are hidden or explicitly disabled */}
+      {!hideControls && !hideFullscreenToggle && (
         <Button variant="ghost" size="icon" className="h-7 w-7" onClick={onFullscreenToggle} title="Toggle fullscreen">
           {isFullscreen ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
         </Button>

@@ -60,7 +60,7 @@ export function AddConfigDialog({ open, onOpenChange, runners, repos, githubUser
   const [cronSchedule, setCronSchedule] = useState('');
   const [targetUrl, setTargetUrl] = useState('');
   const [timeout, setTimeout_] = useState('300000');
-  const [failOnChanges, setFailOnChanges] = useState(true);
+  const [failOnChanges, setFailOnChanges] = useState(false);
   const [saving, setSaving] = useState(false);
 
   const githubRepos = repos.filter((r) => r.provider === 'github');
@@ -78,7 +78,7 @@ export function AddConfigDialog({ open, onOpenChange, runners, repos, githubUser
       setCronSchedule('');
       setTargetUrl('');
       setTimeout_('300000');
-      setFailOnChanges(true);
+      setFailOnChanges(false);
     }
   }, [open, githubUsername]);
 

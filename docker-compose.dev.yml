@@ -1,5 +1,5 @@
 # =============================================================================
-# Lastest2 - Docker Compose for Development
+# Lastest - Docker Compose for Development
 # =============================================================================
 #
 # Usage:
@@ -11,11 +11,26 @@
 # =============================================================================
 
 services:
-  lastest2-dev:
+  postgres:
+    image: postgres:17-alpine
+    container_name: lastest-dev-db
+    environment:
+      POSTGRES_USER: lastest
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-lastest}
+      POSTGRES_DB: lastest
+    volumes:
+      - lastest-dev-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U lastest"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  lastest-dev:
     build:
       context: .
       dockerfile: Dockerfile.dev
-    container_name: lastest2-dev
+    container_name: lastest-dev
     ports:
       - "3000:3000"
     volumes:
@@ -24,18 +39,19 @@ services:
       # Preserve node_modules from container
       - /app/node_modules
       - /app/.next
-      # Persistent data
-      - lastest2-dev-data:/app/data
     environment:
       - NODE_ENV=development
-      - DATABASE_PATH=/app/data/lastest2.db
+      - DATABASE_URL=postgresql://lastest:${POSTGRES_PASSWORD:-lastest}@postgres:5432/lastest
       - BETTER_AUTH_SECRET=${BETTER_AUTH_SECRET:?BETTER_AUTH_SECRET is required}
       - GITHUB_CLIENT_ID=${GITHUB_CLIENT_ID:-}
       - GITHUB_CLIENT_SECRET=${GITHUB_CLIENT_SECRET:-}
       - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID:-}
       - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET:-}
+    depends_on:
+      postgres:
+        condition: service_healthy
     command: pnpm dev
 
 volumes:
-  lastest2-dev-data:
+  lastest-dev-pgdata:
     driver: local

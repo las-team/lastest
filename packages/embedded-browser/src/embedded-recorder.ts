@@ -175,7 +175,7 @@ export class EmbeddedRecorder {
 
       const validSelectors = selectors.filter(sel => sel.value && sel.value.trim() && !sel.value.includes('undefined'));
       const hasValidSelectors = validSelectors.length > 0;
-      const hasCoordsFallback = action === 'click' && coordinates !== undefined;
+      const hasCoordsFallback = (action === 'click' || action === 'rightclick') && coordinates !== undefined;
       const syntaxValid = hasValidSelectors || hasCoordsFallback;
 
       // Check if this click was pre-flagged as a download trigger

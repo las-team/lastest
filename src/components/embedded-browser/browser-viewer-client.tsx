@@ -4,7 +4,7 @@ import { useEffect, useRef, useState, useCallback } from 'react';
 import { Wifi, WifiOff, Loader2, RefreshCw, Upload } from 'lucide-react';
 import { BrowserToolbar } from '@/components/embedded-browser/browser-toolbar-client';
 import { Button } from '@/components/ui/button';
-import type { StreamMouseEvent, StreamKeyboardEvent } from '@/lib/ws/protocol';
+import type { StreamMouseEvent, StreamKeyboardEvent, StreamTouchEvent } from '@/lib/ws/protocol';
 
 type ConnectionStatus = 'connecting' | 'connected' | 'disconnected' | 'error' | 'reconnecting';
 
@@ -20,9 +20,14 @@ interface BrowserViewerProps {
   className?: string;
   expiresAt?: Date | string | null;
   hideControls?: boolean;
+  hideFullscreenToggle?: boolean;
+  hideScreenshot?: boolean;
+  hideViewportSelector?: boolean;
+  readOnlyUrl?: boolean;
+  interactive?: boolean;
 }
 
-export function BrowserViewer({ streamUrl, initialViewport, className, expiresAt, hideControls }: BrowserViewerProps) {
+export function BrowserViewer({ streamUrl, initialViewport, className, expiresAt, hideControls, hideFullscreenToggle, hideScreenshot, hideViewportSelector, readOnlyUrl, interactive = true }: BrowserViewerProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const wsRef = useRef<WebSocket | null>(null);
@@ -179,11 +184,13 @@ export function BrowserViewer({ streamUrl, initialViewport, className, expiresAt
               }
               setFileChooserPending(message.payload.fileChooserPending ?? false);
 
+              // Any status message from the server proves the connection is alive
+              lastFrameTimeRef.current = Date.now();
+
               // Track intentional screencast pauses to suppress stall detection
               const status = message.payload.status;
               if (status === 'busy' || status === 'recording' || status === 'debugging') {
                 screencastPausedRef.current = true;
-                lastFrameTimeRef.current = Date.now(); // keep timer fresh
               } else {
                 screencastPausedRef.current = false;
               }
@@ -399,6 +406,61 @@ export function BrowserViewer({ streamUrl, initialViewport, className, expiresAt
     [sendWs]
   );
 
+  // Touch event helper — extracts touch points relative to canvas
+  const getTouchPoints = useCallback((e: globalThis.TouchEvent): StreamTouchEvent['touches'] => {
+    const canvas = canvasRef.current;
+    if (!canvas) return [];
+    const rect = canvas.getBoundingClientRect();
+    return Array.from(e.touches).map((t) => ({
+      x: Math.round(t.clientX - rect.left),
+      y: Math.round(t.clientY - rect.top),
+      id: t.identifier,
+    }));
+  }, []);
+
+  // Attach non-passive touch listeners so preventDefault() works (suppresses synthetic mouse events)
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+
+    const onTouchStart = (e: globalThis.TouchEvent) => {
+      e.preventDefault();
+      sendWs({
+        type: 'stream:input',
+        payload: { type: 'touch', action: 'start', touches: getTouchPoints(e) } satisfies StreamTouchEvent,
+      });
+    };
+
+    const onTouchMove = (e: globalThis.TouchEvent) => {
+      e.preventDefault();
+      sendWs({
+        type: 'stream:input',
+        payload: { type: 'touch', action: 'move', touches: getTouchPoints(e) } satisfies StreamTouchEvent,
+      });
+    };
+
+    const onTouchEnd = (e: globalThis.TouchEvent) => {
+      e.preventDefault();
+      // On touchend, e.touches is empty — send empty array so CDP knows all fingers lifted
+      sendWs({
+        type: 'stream:input',
+        payload: { type: 'touch', action: 'end', touches: [] } satisfies StreamTouchEvent,
+      });
+    };
+
+    canvas.addEventListener('touchstart', onTouchStart, { passive: false });
+    canvas.addEventListener('touchmove', onTouchMove, { passive: false });
+    canvas.addEventListener('touchend', onTouchEnd, { passive: false });
+    canvas.addEventListener('touchcancel', onTouchEnd, { passive: false });
+
+    return () => {
+      canvas.removeEventListener('touchstart', onTouchStart);
+      canvas.removeEventListener('touchmove', onTouchMove);
+      canvas.removeEventListener('touchend', onTouchEnd);
+      canvas.removeEventListener('touchcancel', onTouchEnd);
+    };
+  }, [sendWs, getTouchPoints]);
+
   // Toolbar handlers
   const handleNavigate = useCallback(
     (url: string) => {
@@ -453,8 +515,12 @@ export function BrowserViewer({ streamUrl, initialViewport, className, expiresAt
         isFullscreen={isFullscreen}
         onNavigate={handleNavigate}
         onViewportChange={handleViewportChange}
-        onFullscreenToggle={toggleFullscreen}
+        onFullscreenToggle={hideFullscreenToggle ? undefined : toggleFullscreen}
         hideControls={hideControls}
+        hideFullscreenToggle={hideFullscreenToggle}
+        hideScreenshot={hideScreenshot}
+        hideViewportSelector={hideViewportSelector}
+        readOnly={readOnlyUrl}
       />
 
       {/* Canvas container — 1:1 pixel rendering, scrollable if larger than available space */}
@@ -498,8 +564,8 @@ export function BrowserViewer({ streamUrl, initialViewport, className, expiresAt
 
         <canvas
           ref={canvasRef}
-          tabIndex={0}
-          className="cursor-default outline-none"
+          tabIndex={interactive ? 0 : -1}
+          className={`outline-none ${interactive ? 'cursor-default' : 'cursor-default pointer-events-none'}`}
           style={{
             width: viewport.width,
             height: viewport.height,

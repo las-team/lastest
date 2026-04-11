@@ -344,12 +344,15 @@ export const browserRecordingScript = ({ pointerGestures: pg, cursorFPS: fps, se
     }, true);
 
     document.addEventListener('mousedown', (e: MouseEvent) => {
+      // Skip right-click — contextmenu handler records it as 'rightclick' action
+      if (e.button === 2) return;
       const modifiers = getActiveModifiers();
       // @ts-expect-error - exposed function
       window.__recordMouseEvent?.('down', e.clientX, e.clientY, e.button, modifiers);
     }, true);
 
     document.addEventListener('mouseup', (e: MouseEvent) => {
+      if (e.button === 2) return;
       const modifiers = getActiveModifiers();
       // @ts-expect-error - exposed function
       window.__recordMouseEvent?.('up', e.clientX, e.clientY, e.button, modifiers);
@@ -506,12 +509,46 @@ export const browserRecordingScript = ({ pointerGestures: pg, cursorFPS: fps, se
   }
 
   document.addEventListener('contextmenu', (e) => {
-    if (!e.shiftKey) return;
-    e.preventDefault();
-    e.stopPropagation();
-    const target = e.target as HTMLElement;
-    if (!target || target === document.body || target === document.documentElement) return;
-    showAssertionMenu(e.clientX, e.clientY, target);
+    const rawTarget = e.target as HTMLElement;
+    if (!rawTarget || rawTarget === document.body || rawTarget === document.documentElement) return;
+
+    // Shift+right-click opens the assertion menu instead of recording a right-click
+    if (e.shiftKey) {
+      e.preventDefault();
+      e.stopPropagation();
+      showAssertionMenu(e.clientX, e.clientY, rawTarget);
+      return;
+    }
+
+    // Record a plain right-click action — do NOT preventDefault so the app's
+    // own context menu (e.g. Excalidraw) still fires. Mirror the left-click handler's
+    // selector-resolution logic so Radix/unmounted targets still get useful selectors.
+    const target = findBestTarget(rawTarget);
+    let selectors = generateAllSelectors(target);
+    const rect = target.getBoundingClientRect();
+    let boundingBox: { x: number; y: number; width: number; height: number; clickX?: number; clickY?: number } =
+      { x: rect.x, y: rect.y, width: rect.width, height: rect.height, clickX: e.clientX, clickY: e.clientY };
+
+    const hasUsefulSelectors = selectors.length > 0 &&
+      !(selectors.length === 1 && selectors[0].type === 'css-path' &&
+        (selectors[0].value === 'body' || selectors[0].value === 'html'));
+
+    if (!hasUsefulSelectors && pointerDownSelectors && pointerDownSelectors.length > 0) {
+      selectors = pointerDownSelectors;
+      if (pointerDownBoundingBox) boundingBox = pointerDownBoundingBox;
+    }
+
+    const stillNoSelectors = selectors.length === 0 ||
+      (selectors.length === 1 && selectors[0].type === 'css-path' &&
+        (selectors[0].value === 'body' || selectors[0].value === 'html'));
+    if (stillNoSelectors && hoverSelectors && hoverSelectors.length > 0) {
+      selectors = hoverSelectors;
+      if (hoverBoundingBox) boundingBox = hoverBoundingBox;
+    }
+
+    const modifiers = getActiveModifiers();
+    // @ts-expect-error - exposed function
+    window.__recordAction?.('rightclick', selectors, undefined, boundingBox, generateActionId(), modifiers);
   }, true);
 
   // DOM verification system

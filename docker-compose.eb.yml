@@ -1,5 +1,5 @@
 # =============================================================================
-# Lastest2 - Embedded Browser (Local Development)
+# Lastest - Embedded Browser (Local Development)
 # =============================================================================
 #
 # Runs EB instances alongside a local dev server (localhost:3000).
@@ -16,17 +16,18 @@
 
 services:
   eb-1:
-    image: lastest2-embedded-browser
+    image: lastest-embedded-browser
     build:
       context: .
       dockerfile: packages/embedded-browser/Dockerfile
-    container_name: lastest2-embedded-browser-1
+    container_name: lastest-embedded-browser-1
     network_mode: host
     environment:
-      - LASTEST2_URL=http://localhost:3000
+      - LASTEST_URL=http://localhost:3000
       - SYSTEM_EB_TOKEN=2c0eb9c62caaa0dac8ece295c1c985d6c0dbfb81cd1d9e7516ee5ba8a8083f98
       - STREAM_HOST=localhost
       - STREAM_PORT=9223
+      - CDP_PORT=9222
       - INSTANCE_ID=eb-1
     restart: unless-stopped
     healthcheck:
@@ -36,17 +37,18 @@ services:
       retries: 3
 
   eb-2:
-    image: lastest2-embedded-browser
+    image: lastest-embedded-browser
     build:
       context: .
       dockerfile: packages/embedded-browser/Dockerfile
-    container_name: lastest2-embedded-browser-2
+    container_name: lastest-embedded-browser-2
     network_mode: host
     environment:
-      - LASTEST2_URL=http://localhost:3000
+      - LASTEST_URL=http://localhost:3000
       - SYSTEM_EB_TOKEN=898e8bd52bcb6280aadc754b94f7425ab0a02863fe4c76a9e6a4d038c4535eaf
       - STREAM_HOST=localhost
       - STREAM_PORT=9225
+      - CDP_PORT=9232
       - INSTANCE_ID=eb-2
     restart: unless-stopped
     healthcheck:

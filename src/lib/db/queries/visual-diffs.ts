@@ -23,7 +23,7 @@ import { v4 as uuid } from 'uuid';
 
 // Visual Diffs
 export async function getVisualDiffsByBuild(buildId: string) {
-  return db.select().from(visualDiffs).where(eq(visualDiffs.buildId, buildId)).all();
+  return db.select().from(visualDiffs).where(eq(visualDiffs.buildId, buildId));
 }
 
 // Get visual diffs with test result status for proper filtering
@@ -63,6 +63,8 @@ export async function getVisualDiffsWithTestStatus(buildId: string) {
       testName: tests.name,
       functionalAreaName: functionalAreas.name,
       a11yViolations: testResults.a11yViolations,
+      consoleErrors: testResults.consoleErrors,
+      networkRequests: testResults.networkRequests,
       browser: visualDiffs.browser,
     })
     .from(visualDiffs)
@@ -70,13 +72,14 @@ export async function getVisualDiffsWithTestStatus(buildId: string) {
     .leftJoin(tests, eq(visualDiffs.testId, tests.id))
     .leftJoin(functionalAreas, eq(tests.functionalAreaId, functionalAreas.id))
     .where(eq(visualDiffs.buildId, buildId))
-    .all();
+    ;
 
   return diffs;
 }
 
 export async function getVisualDiff(id: string) {
-  return db.select().from(visualDiffs).where(eq(visualDiffs.id, id)).get();
+  const [row] = await db.select().from(visualDiffs).where(eq(visualDiffs.id, id));
+  return row;
 }
 
 export async function getPendingDiffsByBuild(buildId: string) {
@@ -84,7 +87,7 @@ export async function getPendingDiffsByBuild(buildId: string) {
     .select()
     .from(visualDiffs)
     .where(and(eq(visualDiffs.buildId, buildId), eq(visualDiffs.status, 'pending')))
-    .all();
+    ;
 }
 
 export async function createVisualDiff(data: Omit<NewVisualDiff, 'id'>) {
@@ -111,7 +114,7 @@ export async function getAIDiffSummaryForBuild(buildId: string) {
     })
     .from(visualDiffs)
     .where(eq(visualDiffs.buildId, buildId))
-    .all();
+    ;
 
   // Only count non-unchanged diffs (AI analysis only runs on changed diffs)
   const analyzable = diffs.filter(d => d.classification !== 'unchanged');
@@ -139,7 +142,7 @@ export async function getPendingAIApprovableDiffs(buildId: string) {
         eq(visualDiffs.aiRecommendation, 'approve')
       )
     )
-    .all();
+    ;
 }
 
 // Baselines
@@ -157,7 +160,7 @@ export async function getActiveBaseline(testId: string, stepLabel?: string | nul
 
   // 1. Try branch-specific baseline
   if (branch) {
-    const branchBaseline = await db
+    const [branchBaseline] = await db
       .select()
       .from(baselines)
       .where(and(
@@ -167,14 +170,13 @@ export async function getActiveBaseline(testId: string, stepLabel?: string | nul
         eq(baselines.browser, browser),
         ...stepConditions,
       ))
-      .orderBy(desc(baselines.createdAt))
-      .get();
+      .orderBy(desc(baselines.createdAt));
     if (branchBaseline) return branchBaseline;
   }
 
   // 2. Try default branch baseline
   if (defaultBranch && defaultBranch !== branch) {
-    const mainBaseline = await db
+    const [mainBaseline] = await db
       .select()
       .from(baselines)
       .where(and(
@@ -184,13 +186,12 @@ export async function getActiveBaseline(testId: string, stepLabel?: string | nul
         eq(baselines.browser, browser),
         ...stepConditions,
       ))
-      .orderBy(desc(baselines.createdAt))
-      .get();
+      .orderBy(desc(baselines.createdAt));
     if (mainBaseline) return mainBaseline;
   }
 
   // 3. Legacy fallback — any active baseline for this browser
-  return db
+  const [fallback] = await db
     .select()
     .from(baselines)
     .where(and(
@@ -199,8 +200,8 @@ export async function getActiveBaseline(testId: string, stepLabel?: string | nul
       eq(baselines.browser, browser),
       ...stepConditions,
     ))
-    .orderBy(desc(baselines.createdAt))
-    .get();
+    .orderBy(desc(baselines.createdAt));
+  return fallback;
 }
 
 /**
@@ -211,7 +212,7 @@ export async function getBranchBaseline(testId: string, stepLabel: string | null
     ? [eq(baselines.stepLabel, stepLabel)]
     : [isNull(baselines.stepLabel)];
 
-  return db
+  const [row] = await db
     .select()
     .from(baselines)
     .where(and(
@@ -221,8 +222,8 @@ export async function getBranchBaseline(testId: string, stepLabel: string | null
       eq(baselines.browser, browser),
       ...stepConditions,
     ))
-    .orderBy(desc(baselines.createdAt))
-    .get();
+    .orderBy(desc(baselines.createdAt));
+  return row;
 }
 
 /**
@@ -237,7 +238,7 @@ export async function getBaselinesByBranch(repositoryId: string, branch: string)
       eq(baselines.branch, branch),
       eq(baselines.isActive, true),
     ))
-    .all();
+    ;
 }
 
 export async function getBaselineByHash(testId: string, imageHash: string, stepLabel?: string | null, browser: string = 'chromium') {
@@ -252,11 +253,11 @@ export async function getBaselineByHash(testId: string, imageHash: string, stepL
   } else {
     conditions.push(isNull(baselines.stepLabel));
   }
-  return db
+  const [row] = await db
     .select()
     .from(baselines)
-    .where(and(...conditions))
-    .get();
+    .where(and(...conditions));
+  return row;
 }
 
 export async function createBaseline(data: Omit<NewBaseline, 'id'>) {
@@ -296,7 +297,7 @@ export async function getPreviousRunScreenshot(testId: string, buildId: string, 
     ? [eq(visualDiffs.stepLabel, stepLabel)]
     : [isNull(visualDiffs.stepLabel)];
 
-  const result = await db
+  const [result] = await db
     .select({
       currentImagePath: visualDiffs.currentImagePath,
     })
@@ -311,8 +312,7 @@ export async function getPreviousRunScreenshot(testId: string, buildId: string, 
       ...stepConditions,
     ))
     .orderBy(desc(visualDiffs.createdAt))
-    .limit(1)
-    .get();
+    .limit(1);
 
   return result?.currentImagePath ?? null;
 }
@@ -329,7 +329,7 @@ export async function getStepLabelsForTest(testId: string): Promise<string[]> {
       eq(baselines.testId, testId),
       eq(baselines.isActive, true),
     ))
-    .all();
+    ;
   return rows
     .map(r => r.stepLabel)
     .filter((label): label is string => label !== null)
@@ -338,7 +338,7 @@ export async function getStepLabelsForTest(testId: string): Promise<string[]> {
 
 // Ignore Regions
 export async function getIgnoreRegions(testId: string) {
-  return db.select().from(ignoreRegions).where(eq(ignoreRegions.testId, testId)).all();
+  return db.select().from(ignoreRegions).where(eq(ignoreRegions.testId, testId));
 }
 
 export async function createIgnoreRegion(data: Omit<NewIgnoreRegion, 'id'>) {
@@ -353,7 +353,7 @@ export async function deleteIgnoreRegion(id: string) {
 
 // Get visual diffs for a specific test result (step-level diffs)
 export async function getVisualDiffsByTestResult(testResultId: string) {
-  return db.select().from(visualDiffs).where(eq(visualDiffs.testResultId, testResultId)).all();
+  return db.select().from(visualDiffs).where(eq(visualDiffs.testResultId, testResultId));
 }
 
 // ============================================
@@ -373,7 +373,8 @@ export async function createPlannedScreenshot(data: Omit<NewPlannedScreenshot, '
 }
 
 export async function getPlannedScreenshot(id: string) {
-  return db.select().from(plannedScreenshots).where(eq(plannedScreenshots.id, id)).get();
+  const [row] = await db.select().from(plannedScreenshots).where(eq(plannedScreenshots.id, id));
+  return row;
 }
 
 export async function getPlannedScreenshotByTest(testId: string, stepLabel?: string | null) {
@@ -386,19 +387,19 @@ export async function getPlannedScreenshotByTest(testId: string, stepLabel?: str
   } else {
     conditions.push(isNull(plannedScreenshots.stepLabel));
   }
-  return db
+  const [row] = await db
     .select()
     .from(plannedScreenshots)
-    .where(and(...conditions))
-    .get();
+    .where(and(...conditions));
+  return row;
 }
 
 export async function getPlannedScreenshotByRoute(routeId: string) {
-  return db
+  const [row] = await db
     .select()
     .from(plannedScreenshots)
-    .where(and(eq(plannedScreenshots.routeId, routeId), eq(plannedScreenshots.isActive, true)))
-    .get();
+    .where(and(eq(plannedScreenshots.routeId, routeId), eq(plannedScreenshots.isActive, true)));
+  return row;
 }
 
 export async function getPlannedScreenshotsByRepo(repositoryId: string) {
@@ -407,7 +408,7 @@ export async function getPlannedScreenshotsByRepo(repositoryId: string) {
     .from(plannedScreenshots)
     .where(and(eq(plannedScreenshots.repositoryId, repositoryId), eq(plannedScreenshots.isActive, true)))
     .orderBy(desc(plannedScreenshots.createdAt))
-    .all();
+    ;
 }
 
 export async function getPlannedScreenshotsByTest(testId: string) {
@@ -416,7 +417,7 @@ export async function getPlannedScreenshotsByTest(testId: string) {
     .from(plannedScreenshots)
     .where(and(eq(plannedScreenshots.testId, testId), eq(plannedScreenshots.isActive, true)))
     .orderBy(plannedScreenshots.stepLabel)
-    .all();
+    ;
 }
 
 export async function updatePlannedScreenshot(id: string, data: Partial<NewPlannedScreenshot>) {
@@ -448,7 +449,7 @@ export interface RouteWithContext {
 }
 
 export async function getRouteWithContext(routeId: string): Promise<RouteWithContext | null> {
-  const route = await db
+  const [route] = await db
     .select({
       id: routes.id,
       path: routes.path,
@@ -463,8 +464,7 @@ export async function getRouteWithContext(routeId: string): Promise<RouteWithCon
     })
     .from(routes)
     .leftJoin(functionalAreas, eq(routes.functionalAreaId, functionalAreas.id))
-    .where(eq(routes.id, routeId))
-    .get();
+    .where(eq(routes.id, routeId));
 
   if (!route) return null;
 
@@ -473,7 +473,7 @@ export async function getRouteWithContext(routeId: string): Promise<RouteWithCon
     .select({ suggestion: routeTestSuggestions.suggestion })
     .from(routeTestSuggestions)
     .where(eq(routeTestSuggestions.routeId, routeId))
-    .all();
+    ;
 
   return {
     ...route,

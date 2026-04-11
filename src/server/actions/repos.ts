@@ -7,22 +7,16 @@ import { getUserRepos, getRepoBranches } from '@/lib/github/oauth';
 import { getUserProjects, getProjectBranches } from '@/lib/gitlab/oauth';
 import { TESTING_TEMPLATES, isValidTemplateId } from '@/lib/templates/testing-templates';
 
-export async function fetchAndSyncRepos(): Promise<{ success: boolean; count: number }> {
-  const session = await requireTeamAccess();
-  const account = await queries.getGithubAccountByTeam(session.team.id);
-  if (!account) {
-    return { success: false, count: 0 };
-  }
+const REPO_SYNC_TTL_MS = 10 * 60 * 1000; // 10 minutes
 
-  const ghRepos = await getUserRepos(account.accessToken);
-  if (!ghRepos.length) {
-    return { success: false, count: 0 };
-  }
+/** Core GitHub repo sync — no session required */
+export async function syncGithubReposForTeam(teamId: string, accessToken: string): Promise<number> {
+  const ghRepos = await getUserRepos(accessToken);
+  if (!ghRepos.length) return 0;
 
-  // Upsert repos for this team
   for (const repo of ghRepos) {
     const existing = await queries.getRepositoryByGithubId(repo.id);
-    if (existing && existing.teamId === session.team.id) {
+    if (existing && existing.teamId === teamId) {
       await queries.updateRepository(existing.id, {
         owner: repo.owner.login,
         name: repo.name,
@@ -31,7 +25,7 @@ export async function fetchAndSyncRepos(): Promise<{ success: boolean; count: nu
       });
     } else if (!existing) {
       await queries.createRepository({
-        teamId: session.team.id,
+        teamId,
         githubRepoId: repo.id,
         owner: repo.owner.login,
         name: repo.name,
@@ -40,31 +34,20 @@ export async function fetchAndSyncRepos(): Promise<{ success: boolean; count: nu
       });
     }
   }
-
-  revalidatePath('/');
-  revalidatePath('/settings');
-  return { success: true, count: ghRepos.length };
+  return ghRepos.length;
 }
 
-export async function fetchAndSyncGitlabRepos(): Promise<{ success: boolean; count: number }> {
-  const session = await requireTeamAccess();
-  const account = await queries.getGitlabAccountByTeam(session.team.id);
-  if (!account) {
-    return { success: false, count: 0 };
-  }
+/** Core GitLab repo sync — no session required */
+export async function syncGitlabReposForTeam(teamId: string, accessToken: string, instanceUrl?: string): Promise<number> {
+  const glProjects = await getUserProjects(accessToken, instanceUrl);
+  if (!glProjects.length) return 0;
 
-  const glProjects = await getUserProjects(account.accessToken, account.instanceUrl || undefined);
-  if (!glProjects.length) {
-    return { success: false, count: 0 };
-  }
-
-  // Upsert repos for this team
   for (const project of glProjects) {
     const existing = await queries.getRepositoryByGitlabProjectId(project.id);
     const [namespace, ...nameParts] = project.path_with_namespace.split('/');
-    const projectName = nameParts.join('/'); // Handle nested groups
+    const projectName = nameParts.join('/');
 
-    if (existing && existing.teamId === session.team.id) {
+    if (existing && existing.teamId === teamId) {
       await queries.updateRepository(existing.id, {
         owner: namespace,
         name: projectName,
@@ -73,7 +56,7 @@ export async function fetchAndSyncGitlabRepos(): Promise<{ success: boolean; cou
       });
     } else if (!existing) {
       await queries.createRepository({
-        teamId: session.team.id,
+        teamId,
         provider: 'gitlab',
         gitlabProjectId: project.id,
         owner: namespace,
@@ -83,10 +66,65 @@ export async function fetchAndSyncGitlabRepos(): Promise<{ success: boolean; cou
       });
     }
   }
+  return glProjects.length;
+}
 
-  revalidatePath('/');
-  revalidatePath('/settings');
-  return { success: true, count: glProjects.length };
+/** Sync repos from GitHub/GitLab if last sync was > 10 min ago */
+export async function syncReposIfStale(teamId: string): Promise<void> {
+  const [ghAccount, glAccount] = await Promise.all([
+    queries.getGithubAccountByTeam(teamId),
+    queries.getGitlabAccountByTeam(teamId),
+  ]);
+
+  if (ghAccount?.accessToken) {
+    const isStale = !ghAccount.reposSyncedAt ||
+      Date.now() - ghAccount.reposSyncedAt.getTime() > REPO_SYNC_TTL_MS;
+    if (isStale) {
+      try {
+        await syncGithubReposForTeam(teamId, ghAccount.accessToken);
+        await queries.updateGithubAccount(ghAccount.id, { reposSyncedAt: new Date() });
+      } catch { /* non-fatal */ }
+    }
+  }
+
+  if (glAccount?.accessToken) {
+    const isStale = !glAccount.reposSyncedAt ||
+      Date.now() - glAccount.reposSyncedAt.getTime() > REPO_SYNC_TTL_MS;
+    if (isStale) {
+      try {
+        await syncGitlabReposForTeam(teamId, glAccount.accessToken, glAccount.instanceUrl || undefined);
+        await queries.updateGitlabAccount(glAccount.id, { reposSyncedAt: new Date() });
+      } catch { /* non-fatal */ }
+    }
+  }
+}
+
+export async function fetchAndSyncRepos(): Promise<{ success: boolean; count: number }> {
+  const session = await requireTeamAccess();
+  const account = await queries.getGithubAccountByTeam(session.team.id);
+  if (!account) return { success: false, count: 0 };
+
+  const count = await syncGithubReposForTeam(session.team.id, account.accessToken);
+  if (count > 0) {
+    await queries.updateGithubAccount(account.id, { reposSyncedAt: new Date() });
+    revalidatePath('/');
+    revalidatePath('/settings');
+  }
+  return { success: count > 0, count };
+}
+
+export async function fetchAndSyncGitlabRepos(): Promise<{ success: boolean; count: number }> {
+  const session = await requireTeamAccess();
+  const account = await queries.getGitlabAccountByTeam(session.team.id);
+  if (!account) return { success: false, count: 0 };
+
+  const count = await syncGitlabReposForTeam(session.team.id, account.accessToken, account.instanceUrl || undefined);
+  if (count > 0) {
+    await queries.updateGitlabAccount(account.id, { reposSyncedAt: new Date() });
+    revalidatePath('/');
+    revalidatePath('/settings');
+  }
+  return { success: count > 0, count };
 }
 
 export async function selectRepo(repositoryId: string | null) {

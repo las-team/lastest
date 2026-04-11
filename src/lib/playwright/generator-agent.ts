@@ -6,6 +6,7 @@
  * `playwright-test` MCP server (npx playwright run-test-mcp-server).
  */
 
+import path from 'path';
 import * as queries from '@/lib/db/queries';
 import { requireRepoAccess } from '@/lib/auth';
 import { generateWithAI } from '@/lib/ai';
@@ -59,7 +60,8 @@ CRITICAL RULES:
 - NEVER guess selectors — always verify via browser_snapshot first
 - Element refs (e.g. "ref=s2e5") are for MCP exploration only, NOT for final test code
 - Use role-based locators: page.getByRole(), page.getByText(), page.getByLabel()
-- Plain JavaScript ONLY — NO TypeScript annotations, NO imports
+- Plain JavaScript ONLY — NO TypeScript annotations, NO imports, NO \`await import()\`
+- Do NOT re-declare expect — it is provided as a parameter by the runner
 - Use baseUrl for navigation (no hardcoded URLs)
 - Take a screenshot after EACH scenario as a checkpoint
 - Use stepLogger.log() for step descriptions — prefix with "Scenario N:" for multi-scenario tests
@@ -91,7 +93,7 @@ export type { ParsedScenario, ScenarioGroup };
 export async function agentCreateTest(
   repositoryId: string,
   context: TestGenerationContext & { scenarioGroup?: ScenarioGroup },
-  options?: { signal?: AbortSignal },
+  options?: { signal?: AbortSignal; headless?: boolean; cdpEndpoint?: string },
 ): Promise<{ success: boolean; code?: string; error?: string }> {
   await requireRepoAccess(repositoryId);
 
@@ -138,8 +140,34 @@ export async function agentCreateTest(
     }
     prompt += `\n\n---\n\n${seed.seedPrompt}`;
 
+    // Configure Playwright MCP with strictMcpConfig to prevent Claude Code's built-in
+    // Playwright plugin from launching a separate headed Chrome window.
+    // Uses the same @playwright/mcp package but with --cdp-endpoint (EB) or --headless.
+    if (config.provider === 'claude-agent-sdk') {
+      config.agentSdkStrictMcpConfig = true;
+
+      if (options?.cdpEndpoint) {
+        console.log(`[GeneratorAgent] MCP using CDP endpoint: ${options.cdpEndpoint}`);
+        config.agentSdkMcpServers = {
+          'playwright': {
+            command: 'npx',
+            args: ['@playwright/mcp@latest', '--cdp-endpoint', options.cdpEndpoint, '--headless'],
+          },
+        };
+      } else {
+        config.agentSdkMcpServers = {
+          'playwright': {
+            command: 'npx',
+            args: ['@playwright/mcp@latest', '--headless'],
+          },
+        };
+      }
+      config.agentSdkAllowedTools = ['mcp__playwright__*'];
+      config.agentSdkDisallowedTools = ['Bash', 'Write', 'Edit', 'NotebookEdit'];
+    }
+
     const response = await generateWithAI(config, prompt, GENERATOR_SYSTEM_PROMPT, {
-      useMCP: true,
+      // Don't pass useMCP — we configured MCP servers above directly on the config
       repositoryId,
       actionType: 'agent_generate',
       signal: options?.signal,

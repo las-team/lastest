@@ -20,15 +20,16 @@ import { v4 as uuid } from 'uuid';
 
 // Pull Requests
 export async function getPullRequest(id: string) {
-  return db.select().from(pullRequests).where(eq(pullRequests.id, id)).get();
+  const [row] = await db.select().from(pullRequests).where(eq(pullRequests.id, id));
+  return row;
 }
 
 export async function getPullRequestByBranch(headBranch: string) {
-  return db
+  const [row] = await db
     .select()
     .from(pullRequests)
-    .where(and(eq(pullRequests.headBranch, headBranch), eq(pullRequests.status, 'open')))
-    .get();
+    .where(and(eq(pullRequests.headBranch, headBranch), eq(pullRequests.status, 'open')));
+  return row;
 }
 
 export async function createPullRequest(data: Omit<NewPullRequest, 'id'>) {
@@ -44,7 +45,8 @@ export async function updatePullRequest(id: string, data: Partial<NewPullRequest
 // GitHub Accounts
 /** @deprecated Use getGithubAccountByTeam(teamId) instead for proper tenant isolation */
 export async function getGithubAccount() {
-  return db.select().from(githubAccounts).get();
+  const [row] = await db.select().from(githubAccounts);
+  return row;
 }
 
 export async function createGithubAccount(data: Omit<NewGithubAccount, 'id'>) {
@@ -64,11 +66,13 @@ export async function deleteGithubAccount(id: string) {
 // GitLab Accounts
 /** @deprecated Use getGitlabAccountByTeam(teamId) instead for proper tenant isolation */
 export async function getGitlabAccount() {
-  return db.select().from(gitlabAccounts).get();
+  const [row] = await db.select().from(gitlabAccounts);
+  return row;
 }
 
 export async function getGitlabAccountByTeam(teamId: string) {
-  return db.select().from(gitlabAccounts).where(eq(gitlabAccounts.teamId, teamId)).get();
+  const [row] = await db.select().from(gitlabAccounts).where(eq(gitlabAccounts.teamId, teamId));
+  return row;
 }
 
 export async function createGitlabAccount(data: Omit<NewGitlabAccount, 'id'>) {
@@ -91,19 +95,22 @@ export async function updateGitlabSelectedRepository(accountId: string, reposito
 
 // Repositories
 export async function getRepositories() {
-  return db.select().from(repositories).orderBy(desc(repositories.createdAt)).all();
+  return db.select().from(repositories).orderBy(desc(repositories.createdAt));
 }
 
 export async function getRepository(id: string) {
-  return db.select().from(repositories).where(eq(repositories.id, id)).get();
+  const [row] = await db.select().from(repositories).where(eq(repositories.id, id));
+  return row;
 }
 
 export async function getRepositoryByGithubId(githubRepoId: number) {
-  return db.select().from(repositories).where(eq(repositories.githubRepoId, githubRepoId)).get();
+  const [row] = await db.select().from(repositories).where(eq(repositories.githubRepoId, githubRepoId));
+  return row;
 }
 
 export async function getRepositoryByGitlabProjectId(gitlabProjectId: number) {
-  return db.select().from(repositories).where(eq(repositories.gitlabProjectId, gitlabProjectId)).get();
+  const [row] = await db.select().from(repositories).where(eq(repositories.gitlabProjectId, gitlabProjectId));
+  return row;
 }
 
 export async function createRepository(data: Omit<NewRepository, 'id'>) {
@@ -121,7 +128,7 @@ export async function deleteRepository(id: string) {
 }
 
 export async function getBaselinesByRepo(repositoryId: string) {
-  return db.select().from(baselines).where(eq(baselines.repositoryId, repositoryId)).all();
+  return db.select().from(baselines).where(eq(baselines.repositoryId, repositoryId));
 }
 
 // Update selected repo for github account
@@ -132,7 +139,7 @@ export async function updateSelectedRepository(accountId: string, repositoryId: 
 export async function getSelectedRepository(userId?: string, teamId?: string) {
   // 1. Per-user selection
   if (userId) {
-    const user = await db.select().from(users).where(eq(users.id, userId)).get();
+    const [user] = await db.select().from(users).where(eq(users.id, userId));
     if (user?.selectedRepositoryId) {
       const repo = await getRepository(user.selectedRepositoryId);
       if (repo) return repo;
@@ -141,7 +148,7 @@ export async function getSelectedRepository(userId?: string, teamId?: string) {
 
   // 2. Fallback: team-level selection (lazy migration to user)
   if (teamId) {
-    const team = await db.select().from(teams).where(eq(teams.id, teamId)).get();
+    const [team] = await db.select().from(teams).where(eq(teams.id, teamId));
     if (team?.selectedRepositoryId) {
       const repo = await getRepository(team.selectedRepositoryId);
       if (repo) {

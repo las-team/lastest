@@ -40,7 +40,13 @@ export interface ClipboardPasteEvent {
   text: string;
 }
 
-export type InputEvent = MouseEvent | KeyboardEvent | FileUploadEvent | ClipboardPasteEvent;
+export interface TouchEvent {
+  type: 'touch';
+  action: 'start' | 'move' | 'end' | 'cancel';
+  touches: Array<{ x: number; y: number; id: number }>;
+}
+
+export type InputEvent = MouseEvent | KeyboardEvent | FileUploadEvent | ClipboardPasteEvent | TouchEvent;
 
 const BUTTON_MAP: Record<string, 'left' | 'right' | 'middle'> = {
   left: 'left',
@@ -114,6 +120,8 @@ export class InputHandler {
         await this.handleFileUpload(event);
       } else if (event.type === 'clipboard_paste') {
         await this.handleClipboardPaste(event);
+      } else if (event.type === 'touch') {
+        await this.handleTouch(event);
       }
     } catch (error) {
       console.error('[InputHandler] Error dispatching event:', error);
@@ -124,6 +132,12 @@ export class InputHandler {
     if (!this.cdpSession) return;
 
     const button = BUTTON_MAP[event.button ?? 'left'] ?? 'left';
+    // CDP modifiers bitmask: 1=Alt, 2=Ctrl, 4=Meta, 8=Shift
+    const modifiers =
+      (this.modifiers.alt ? 1 : 0) |
+      (this.modifiers.ctrl ? 2 : 0) |
+      (this.modifiers.meta ? 4 : 0) |
+      (this.modifiers.shift ? 8 : 0);
 
     switch (event.action) {
       case 'move':
@@ -131,6 +145,7 @@ export class InputHandler {
           type: 'mouseMoved',
           x: event.x,
           y: event.y,
+          modifiers,
         });
         break;
 
@@ -141,6 +156,7 @@ export class InputHandler {
           y: event.y,
           button,
           clickCount: event.clickCount ?? 1,
+          modifiers,
         });
         break;
 
@@ -151,6 +167,7 @@ export class InputHandler {
           y: event.y,
           button,
           clickCount: event.clickCount ?? 1,
+          modifiers,
         });
         // Dispatch synthetic contextmenu for right-click so browser-script sees it
         if (button === 'right' && this.page) {
@@ -172,6 +189,7 @@ export class InputHandler {
           y: event.y,
           deltaX: event.deltaX ?? 0,
           deltaY: event.deltaY ?? 0,
+          modifiers,
         });
         break;
     }
@@ -251,6 +269,31 @@ export class InputHandler {
     setTimeout(() => {
       try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch { /* ignore */ }
     }, 30000);
+  }
+
+  private async handleTouch(event: TouchEvent): Promise<void> {
+    if (!this.cdpSession) return;
+
+    const CDP_TOUCH_TYPE: Record<string, string> = {
+      start: 'touchStart',
+      move: 'touchMove',
+      end: 'touchEnd',
+      cancel: 'touchCancel',
+    };
+
+    const cdpType = CDP_TOUCH_TYPE[event.action];
+    if (!cdpType) return;
+
+    const touchPoints = event.touches.map((t) => ({
+      x: t.x,
+      y: t.y,
+      id: t.id,
+    }));
+
+    await this.cdpSession.send('Input.dispatchTouchEvent', {
+      type: cdpType,
+      touchPoints,
+    });
   }
 
   private async handleClipboardPaste(event: ClipboardPasteEvent): Promise<void> {

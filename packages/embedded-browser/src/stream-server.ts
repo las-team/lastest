@@ -29,6 +29,8 @@ export class StreamServer {
   private inputHandler: InputHandler | null = null;
   private authToken?: string;
   private pingInterval: ReturnType<typeof setInterval> | null = null;
+  private keepaliveInterval: ReturnType<typeof setInterval> | null = null;
+  private lastBroadcastTime = 0;
 
   /** Callback for navigate requests from stream clients */
   onNavigate?: (url: string) => Promise<void>;
@@ -116,6 +118,14 @@ export class StreamServer {
       }
     }, 30_000);
 
+    // Send keepalive status when no frames have been broadcast recently,
+    // so clients don't mistake an idle page for a broken connection.
+    this.keepaliveInterval = setInterval(() => {
+      if (this.clients.size === 0) return;
+      if (Date.now() - this.lastBroadcastTime < 3000) return;
+      this.broadcastStatus('idle');
+    }, 5000);
+
     console.log(`[StreamServer] Listening on port ${this.options.port}`);
   }
 
@@ -129,6 +139,7 @@ export class StreamServer {
 
   /** Broadcast a frame to all connected clients */
   broadcastFrame(data: string, width: number, height: number, timestamp: number): void {
+    this.lastBroadcastTime = Date.now();
     const message = JSON.stringify({
       type: 'stream:frame',
       id: crypto.randomUUID(),
@@ -213,6 +224,11 @@ export class StreamServer {
     if (this.pingInterval) {
       clearInterval(this.pingInterval);
       this.pingInterval = null;
+    }
+
+    if (this.keepaliveInterval) {
+      clearInterval(this.keepaliveInterval);
+      this.keepaliveInterval = null;
     }
 
     // Close all clients

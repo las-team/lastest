@@ -60,6 +60,8 @@ interface AreaTreeProps {
   onMoveSuite: (suiteId: string, areaId: string | null) => void;
   onMoveArea: (areaId: string, newParentId: string | null) => void;
   onDeleteTest?: (id: string) => void;
+  headerExtra?: React.ReactNode;
+  addButtonClassName?: string;
 }
 
 function StatusIcon({ status }: { status: string | null }) {
@@ -444,6 +446,8 @@ export function AreaTree({
   onMoveSuite,
   onMoveArea,
   onDeleteTest,
+  headerExtra,
+  addButtonClassName,
 }: AreaTreeProps) {
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
   const [lastClickedAreaId, setLastClickedAreaId] = useState<string | null>(null);
@@ -525,9 +529,12 @@ export function AreaTree({
         ) : (
           <>
             <span>Areas</span>
-            <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => onNewArea()}>
-              <Plus className="h-4 w-4" />
-            </Button>
+            <div className="flex items-center gap-1">
+              {headerExtra}
+              <Button variant="ghost" size="icon" className={cn("h-6 w-6", addButtonClassName)} onClick={() => onNewArea()}>
+                <Plus className="h-4 w-4" />
+              </Button>
+            </div>
           </>
         )}
       </div>

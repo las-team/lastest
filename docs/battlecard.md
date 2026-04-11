@@ -1,4 +1,4 @@
-# Lastest2 - Internal Battlecard for Vibe-Coding Solo Founders
+# Lastest - Internal Battlecard for Vibe-Coding Solo Founders
 
 ## Product Summary
 
@@ -17,7 +17,7 @@
 | **Smart Baseline Carry-Forward** | Same screenshot = auto-approved across runs |
 | **GitHub Integration** | OAuth login, PR linking, branch-aware baselines |
 | **Route Discovery** | Scans your Next.js/React app, suggests test coverage gaps |
-| **Local SQLite** | No cloud bills, no infra—runs on your machine |
+| **PostgreSQL** | No cloud bills, no infra—runs on your machine |
 | **Multi-Selector Fallback** | Tests survive minor UI changes (data-testid → id → text → OCR) |
 | **MCP-Enhanced AI** | AI explores your live app before writing tests |
 
@@ -32,7 +32,7 @@
 | **Applitools** | 100 checkpoints/mo | Enterprise $$$ | Large teams | Overkill complexity, cost |
 | **BackstopJS** | Unlimited (OSS) | Free | Config-savvy devs | No AI, no recording, manual config |
 | **Visual Regression Tracker** | Unlimited (self-hosted) | Free | Privacy-focused | Limited AI, basic UI |
-| **Lastest2** | **Unlimited (OSS)** | **Free** | **Solo founders** | **New project** |
+| **Lastest** | **Unlimited (OSS)** | **Free** | **Solo founders** | **New project** |
 | **Cypress** | N/A (needs plugin) | Free runner + $199/mo Percy | E2E testing | No visual testing native, needs Percy for screenshots |
 
 ---
@@ -114,7 +114,7 @@
 
 ## Feature Comparison Chart
 
-| Capability | Lastest2 | Percy | Chromatic | Cypress | BackstopJS |
+| Capability | Lastest | Percy | Chromatic | Cypress | BackstopJS |
 |------------|----------|-------|-----------|---------|------------|
 | Record & playback | ✅ | ❌ | ❌ | ❌ | ❌ |
 | AI test generation | ✅ | ❌ | ❌ | ❌ | ❌ |
@@ -149,7 +149,7 @@
 - **Setup time:** < 5 min (clone, pnpm install, pnpm dev)
 - **First test:** < 2 min with recorder
 - **Cost:** $0 (bring your own AI API key or use Claude CLI)
-- **Stack:** Next.js 16, Playwright, SQLite, TypeScript
+- **Stack:** Next.js 16, Playwright, PostgreSQL, TypeScript
 
 ---
 
