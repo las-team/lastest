@@ -19,18 +19,22 @@ import { CROSS_OS_CHROMIUM_ARGS } from './stabilization.js';
 import os from 'os';
 
 // Configuration from environment
+const streamPort = parseInt(process.env.STREAM_PORT ?? '9223', 10);
 const config = {
   serverUrl: process.env.LASTEST_URL ?? 'http://localhost:3000',
   token: process.env.LASTEST_TOKEN ?? '',
   systemToken: process.env.SYSTEM_EB_TOKEN ?? '',
-  streamPort: parseInt(process.env.STREAM_PORT ?? '9223', 10),
+  streamPort,
   streamHost: process.env.STREAM_HOST ?? '', // Empty = auto-detect container IP
   pollInterval: parseInt(process.env.POLL_INTERVAL ?? '1000', 10),
   viewportWidth: parseInt(process.env.VIEWPORT_WIDTH ?? '1280', 10),
   viewportHeight: parseInt(process.env.VIEWPORT_HEIGHT ?? '720', 10),
   streamAuthToken: process.env.STREAM_AUTH_TOKEN,
   instanceId: process.env.INSTANCE_ID || os.hostname(),
-  cdpPort: parseInt(process.env.CDP_PORT ?? '9222', 10),
+  // Derive from streamPort when unset so multiple EBs sharing a network
+  // namespace (e.g. k8s pod with eb1..eb5 sidecars) get unique CDP ports
+  // and don't collide on 9222.
+  cdpPort: parseInt(process.env.CDP_PORT ?? String(streamPort + 2), 10),
 };
 
 if (!config.token && !config.systemToken) {
