@@ -173,12 +173,16 @@ export function eventsToCodeLines(
           case 'rightclick':
             target.push(`${dIndent}await locateWithFallback(page, ${selectorsJson}, 'click', null, ${coordsArg}, ${clickOptions});`);
             break;
-          case 'fill':
-            target.push(`${dIndent}await locateWithFallback(page, ${selectorsJson}, 'fill', '${value || ''}', ${coordsArg});`);
+          case 'fill': {
+            const escapedFillVal = (value || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+            target.push(`${dIndent}await locateWithFallback(page, ${selectorsJson}, 'fill', '${escapedFillVal}', ${coordsArg});`);
             break;
-          case 'selectOption':
-            target.push(`${dIndent}await locateWithFallback(page, ${selectorsJson}, 'selectOption', '${value || ''}', null);`);
+          }
+          case 'selectOption': {
+            const escapedOptVal = (value || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+            target.push(`${dIndent}await locateWithFallback(page, ${selectorsJson}, 'selectOption', '${escapedOptVal}', null);`);
             break;
+          }
         }
       } else if (selector && selector.trim()) {
         switch (action) {
@@ -188,12 +192,16 @@ export function eventsToCodeLines(
           case 'rightclick':
             target.push(`${dIndent}await page.locator('${selector}').click(${clickOptions});`);
             break;
-          case 'fill':
-            target.push(`${dIndent}await page.locator('${selector}').fill('${value || ''}');`);
+          case 'fill': {
+            const escapedFillVal = (value || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+            target.push(`${dIndent}await page.locator('${selector}').fill('${escapedFillVal}');`);
             break;
-          case 'selectOption':
-            target.push(`${dIndent}await page.locator('${selector}').selectOption('${value || ''}');`);
+          }
+          case 'selectOption': {
+            const escapedOptVal = (value || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+            target.push(`${dIndent}await page.locator('${selector}').selectOption('${escapedOptVal}');`);
             break;
+          }
         }
       } else if ((action === 'click' || action === 'rightclick') && coordinates) {
         target.push(`${dIndent}// Coordinate-only ${isRightClick ? 'right-' : ''}click (no selectors found)`);

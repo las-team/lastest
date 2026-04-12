@@ -32,6 +32,8 @@ export function BrowserViewer({ streamUrl, initialViewport, className, expiresAt
   const containerRef = useRef<HTMLDivElement>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const imageRef = useRef<HTMLImageElement | null>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const composingRef = useRef(false);
 
   const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>('connecting');
   const [viewport, setViewport] = useState(initialViewport ?? { width: 1280, height: 720 });
@@ -346,13 +348,25 @@ export function BrowserViewer({ streamUrl, initialViewport, className, expiresAt
     input.click();
   }, [sendWs]);
 
-  // Keyboard event handlers
+  // Keyboard event handlers — use hidden textarea for IME/composition support
+  // (canvas elements never fire composition events, so accented characters like áúőóüáé don't work)
+  const focusTextarea = useCallback(() => {
+    if (interactive && textareaRef.current) {
+      textareaRef.current.focus({ preventScroll: true });
+    }
+  }, [interactive]);
+
   const handleKeyDown = useCallback(
-    (e: React.KeyboardEvent<HTMLCanvasElement>) => {
-      e.preventDefault();
+    (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+      // During IME composition, let the browser handle everything
+      if (composingRef.current) return;
+
+      // Dead key starts a composition sequence — don't preventDefault so the browser can compose
+      if (e.key === 'Dead') return;
 
       // Intercept paste: read local clipboard and send as clipboard_paste event
       if ((e.ctrlKey || e.metaKey) && e.key === 'v') {
+        e.preventDefault();
         navigator.clipboard.readText().then(text => {
           if (text) {
             sendWs({
@@ -363,6 +377,10 @@ export function BrowserViewer({ streamUrl, initialViewport, className, expiresAt
         }).catch(() => {});
         return;
       }
+
+      // All keys: preventDefault to stop textarea from accumulating text,
+      // then forward to the remote browser
+      e.preventDefault();
 
       sendWs({
         type: 'stream:input',
@@ -385,7 +403,8 @@ export function BrowserViewer({ streamUrl, initialViewport, className, expiresAt
   );
 
   const handleKeyUp = useCallback(
-    (e: React.KeyboardEvent<HTMLCanvasElement>) => {
+    (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+      if (composingRef.current || e.key === 'Dead') return;
       e.preventDefault();
       sendWs({
         type: 'stream:input',
@@ -402,6 +421,35 @@ export function BrowserViewer({ streamUrl, initialViewport, className, expiresAt
           },
         } satisfies StreamKeyboardEvent,
       });
+    },
+    [sendWs]
+  );
+
+  // IME composition handlers for accented/special characters (á, ú, ő, ó, ü, é, etc.)
+  const handleCompositionStart = useCallback(() => {
+    composingRef.current = true;
+  }, []);
+
+  const handleCompositionEnd = useCallback(
+    (e: React.CompositionEvent<HTMLTextAreaElement>) => {
+      composingRef.current = false;
+      const composed = e.data;
+      if (composed) {
+        // Send composed text as a type action — keyboard.type() handles Unicode correctly
+        sendWs({
+          type: 'stream:input',
+          payload: {
+            type: 'keyboard',
+            action: 'type',
+            key: '',
+            text: composed,
+          } satisfies StreamKeyboardEvent,
+        });
+      }
+      // Clear textarea so it doesn't accumulate composed text
+      if (textareaRef.current) {
+        textareaRef.current.value = '';
+      }
     },
     [sendWs]
   );
@@ -564,20 +612,38 @@ export function BrowserViewer({ streamUrl, initialViewport, className, expiresAt
 
         <canvas
           ref={canvasRef}
-          tabIndex={interactive ? 0 : -1}
+          tabIndex={-1}
           className={`outline-none ${interactive ? 'cursor-default' : 'cursor-default pointer-events-none'}`}
           style={{
             width: viewport.width,
             height: viewport.height,
           }}
           onMouseMove={(e) => handleMouseEvent(e, 'move')}
-          onMouseDown={(e) => handleMouseEvent(e, 'down')}
+          onMouseDown={(e) => { handleMouseEvent(e, 'down'); focusTextarea(); }}
           onMouseUp={(e) => handleMouseEvent(e, 'up')}
           onWheel={handleWheel}
-          onKeyDown={handleKeyDown}
-          onKeyUp={handleKeyUp}
           onContextMenu={(e) => e.preventDefault()}
         />
+        {/* Hidden textarea for IME/composition support — canvas can't receive composition events.
+            Positioned over the canvas, invisible but focusable. Must NOT have pointer-events-none
+            since we programmatically focus it on canvas mousedown. */}
+        {interactive && (
+          <textarea
+            ref={textareaRef}
+            className="absolute top-0 left-0 overflow-hidden outline-none"
+            style={{ width: 1, height: 1, opacity: 0.01, resize: 'none', zIndex: -1, caretColor: 'transparent' }}
+            tabIndex={0}
+            autoComplete="off"
+            autoCapitalize="off"
+            autoCorrect="off"
+            spellCheck={false}
+            aria-hidden="true"
+            onKeyDown={handleKeyDown}
+            onKeyUp={handleKeyUp}
+            onCompositionStart={handleCompositionStart}
+            onCompositionEnd={handleCompositionEnd}
+          />
+        )}
       </div>
 
       {/* Status bar */}

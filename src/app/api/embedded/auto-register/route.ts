@@ -4,6 +4,7 @@ import { teams, users, runners } from '@/lib/db/schema';
 import { upsertEmbeddedSession } from '@/server/actions/embedded-sessions';
 import { eq, and } from 'drizzle-orm';
 import crypto from 'crypto';
+import { syncUserToTwentyCRM } from '@/lib/integrations/twenty-crm';
 
 const SYSTEM_TEAM_NAME = '__system__';
 const SYSTEM_TEAM_SLUG = '__system__';
@@ -39,6 +40,7 @@ async function getOrCreateSystemTeam(): Promise<{ teamId: string; userId: string
       updatedAt: new Date(),
     });
     [user] = await db.select().from(users).where(eq(users.id, userId));
+    syncUserToTwentyCRM({ name: 'System', email: SYSTEM_USER_EMAIL }).catch(() => {});
   }
 
   return { teamId: team!.id, userId: user!.id };

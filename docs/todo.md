@@ -2,7 +2,6 @@
 Videos explaining use
     Saját demo felvétele ahol van egy laza scripted előre megírva, ami egy törött vibe kódolt appon bemutatja hogy lépésről lépésre hogyan használod a Lastestet. A végén elmondani hogy a runnereket bárhol tudja futtatni, de itt a cloud instance, like and subscribe, kommentelj, kérdezz, nagyon lelkes a szerző.
     sdfsd
--keyword pattern pages XY product for ZT
 MCP deploy for smithery
 Reach out to podcasts, meetups, youtube channels, add them to crm
 ## test

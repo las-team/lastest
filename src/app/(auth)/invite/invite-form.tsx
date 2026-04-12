@@ -2,10 +2,13 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
+import Link from 'next/link';
 import { authClient } from '@/lib/auth/auth-client';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Switch } from '@/components/ui/switch';
+import { recordRegistrationConsent } from '@/server/actions/consent';
 
 interface InviteFormProps {
   email: string;
@@ -16,6 +19,7 @@ export function InviteForm({ email, token: _token }: InviteFormProps) {
   const router = useRouter();
   const [name, setName] = useState('');
   const [password, setPassword] = useState('');
+  const [marketingConsent, setMarketingConsent] = useState(false);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
@@ -37,6 +41,8 @@ export function InviteForm({ email, token: _token }: InviteFormProps) {
       setLoading(false);
       return;
     }
+
+    await recordRegistrationConsent({ marketingEmails: marketingConsent });
 
     router.push('/');
     router.refresh();
@@ -85,6 +91,17 @@ export function InviteForm({ email, token: _token }: InviteFormProps) {
           />
         </div>
 
+        <div className="flex items-center justify-between gap-2">
+          <Label htmlFor="marketing" className="text-sm font-normal text-muted-foreground leading-snug">
+            Send me product updates, tips, and feature announcements
+          </Label>
+          <Switch
+            id="marketing"
+            checked={marketingConsent}
+            onCheckedChange={setMarketingConsent}
+          />
+        </div>
+
         {error && (
           <p className="text-sm text-destructive">{error}</p>
         )}
@@ -92,6 +109,18 @@ export function InviteForm({ email, token: _token }: InviteFormProps) {
         <Button type="submit" className="w-full" disabled={loading}>
           {loading ? 'Creating account...' : 'Accept invite & create account'}
         </Button>
+
+        <p className="text-xs text-muted-foreground text-center">
+          By creating an account, you agree to our{' '}
+          <Link href="/terms" className="underline underline-offset-4 hover:text-foreground" target="_blank">
+            Terms of Service
+          </Link>{' '}
+          and{' '}
+          <Link href="/privacy" className="underline underline-offset-4 hover:text-foreground" target="_blank">
+            Privacy Policy
+          </Link>
+          .
+        </p>
       </form>
     </div>
   );

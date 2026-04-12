@@ -839,9 +839,36 @@ export class PlaywrightRecorder extends EventEmitter {
           allSelectors.set('data-testid', `[data-testid="${element.dataset.testid}"]`);
         }
 
-        // ID (skip dynamic/invalid IDs containing 'undefined' or random-looking patterns)
-        if (element.id && !element.id.includes('undefined')) {
+        // ID — detect dynamic IDs (react-select-23-input, mui-7, :r1a:, etc.)
+        // and generate partial-match selectors instead of exact match
+        const DYNAMIC_ID_PATTERNS = [
+          /^react-select-\d+-/,        // react-select
+          /^headlessui-\w+-\d+$/,      // Headless UI
+          /^mui-\d+$/,                 // MUI
+          /^:r[a-z0-9]+:$/,            // React useId() / Radix
+          /^radix-/,                   // Radix UI
+          /^ember\d+$/,                // Ember
+          /[a-f0-9]{8,}/,              // hex hashes 8+ chars
+          /\d{4,}/,                    // 4+ consecutive digits
+        ];
+        function isProbablyDynamicId(id: string): boolean {
+          if (id.includes('undefined')) return true;
+          return DYNAMIC_ID_PATTERNS.some(p => p.test(id));
+        }
+
+        if (element.id && !isProbablyDynamicId(element.id)) {
           allSelectors.set('id', `#${element.id}`);
+        } else if (element.id) {
+          // Generate partial-match selector for dynamic IDs
+          // e.g. react-select-23-input → [id^="react-select"][id$="-input"]
+          const parts = element.id.split(/[-_]?\d+[-_]?/);
+          const prefix = parts[0];
+          const suffix = parts[parts.length - 1];
+          if (prefix && suffix && prefix !== suffix) {
+            allSelectors.set('id', `[id^="${prefix}"][id$="${suffix}"]`);
+          } else if (prefix && prefix.length >= 4) {
+            allSelectors.set('id', `[id^="${prefix}"]`);
+          }
         }
 
         // Role + name (ARIA)

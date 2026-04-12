@@ -1162,6 +1162,23 @@ export const userInvitations = pgTable('user_invitations', {
 export type UserInvitation = typeof userInvitations.$inferSelect;
 export type NewUserInvitation = typeof userInvitations.$inferInsert;
 
+// User consent records - GDPR audit trail
+export const userConsents = pgTable('user_consents', {
+  id: text('id').primaryKey(),
+  userId: text('user_id').references(() => users.id, { onDelete: 'cascade' }).notNull(),
+  consentType: text('consent_type').notNull(), // 'terms_of_service' | 'privacy_policy' | 'marketing_emails'
+  granted: boolean('granted').notNull(),
+  version: text('version').notNull(),
+  ipAddress: text('ip_address'),
+  userAgent: text('user_agent'),
+  grantedAt: timestamp('granted_at').notNull(),
+  revokedAt: timestamp('revoked_at'),
+});
+
+export type ConsentType = 'terms_of_service' | 'privacy_policy' | 'marketing_emails';
+export type UserConsent = typeof userConsents.$inferSelect;
+export type NewUserConsent = typeof userConsents.$inferInsert;
+
 // ============================================
 // Runners Table (Remote Execution)
 // ============================================
