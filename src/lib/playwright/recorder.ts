@@ -890,6 +890,25 @@ export class PlaywrightRecorder extends EventEmitter {
           allSelectors.set('aria-label', `[aria-label="${ariaLabel}"]`);
         }
 
+        // Heading context — for icon-only buttons/elements near headings
+        // Generates Playwright selectors like: h4:has-text("Okmányok") button
+        if (!element.textContent?.trim() || element.querySelector('svg')) {
+          const interactiveTag = element.closest('button, a, [role="button"]');
+          const target = interactiveTag || element;
+          const heading = target.closest('h1, h2, h3, h4, h5, h6') ||
+            target.parentElement?.closest('h1, h2, h3, h4, h5, h6');
+          if (heading) {
+            const headingClone = heading.cloneNode(true) as HTMLElement;
+            headingClone.querySelectorAll('button, svg, [role="button"]').forEach(el => el.remove());
+            const headingText = headingClone.textContent?.trim().slice(0, 50);
+            if (headingText && headingText.length > 1) {
+              const hTag = heading.tagName.toLowerCase();
+              const targetTag = target.tagName.toLowerCase();
+              allSelectors.set('heading-context', `${hTag}:has-text("${headingText}") ${targetTag}`);
+            }
+          }
+        }
+
         // Text content (for buttons/links/interactive elements)
         const INTERACTIVE_ROLES = new Set([
           'button', 'option', 'menuitem', 'menuitemcheckbox', 'menuitemradio',
@@ -1358,8 +1377,8 @@ export class PlaywrightRecorder extends EventEmitter {
                 // Text selectors are hard to test, assume valid
                 return true;
               }
-              if (sel.type === 'ocr-text' || sel.type === 'label') {
-                // OCR/label selectors can't be tested via querySelector
+              if (sel.type === 'ocr-text' || sel.type === 'label' || sel.type === 'heading-context') {
+                // OCR/label/heading-context selectors can't be tested via querySelector
                 return true;
               }
               // Standard CSS selectors

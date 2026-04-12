@@ -319,6 +319,25 @@ export const browserRecordingScript = ({ pointerGestures: pg, cursorFPS: fps, se
       allSelectors.set('role-name', `role=${role}[name="${accessibleName}"]`);
     }
 
+    // Heading context — for icon-only buttons/elements near headings
+    // Generates Playwright selectors like: h4:has-text("Okmányok") button
+    if (!element.textContent?.trim() || element.querySelector('svg')) {
+      const interactiveTag = element.closest('button, a, [role="button"]');
+      const target = interactiveTag || element;
+      const heading = target.closest('h1, h2, h3, h4, h5, h6') ||
+        target.parentElement?.closest('h1, h2, h3, h4, h5, h6');
+      if (heading) {
+        const headingClone = heading.cloneNode(true) as HTMLElement;
+        headingClone.querySelectorAll('button, svg, [role="button"]').forEach(el => el.remove());
+        const headingText = headingClone.textContent?.trim().slice(0, 50);
+        if (headingText && headingText.length > 1) {
+          const hTag = heading.tagName.toLowerCase();
+          const targetTag = target.tagName.toLowerCase();
+          allSelectors.set('heading-context', `${hTag}:has-text("${headingText}") ${targetTag}`);
+        }
+      }
+    }
+
     // aria-label
     const ariaLabel = element.getAttribute('aria-label');
     if (ariaLabel) {
