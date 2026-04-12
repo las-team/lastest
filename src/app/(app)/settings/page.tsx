@@ -43,6 +43,7 @@ import { GithubActionsCard } from '@/components/settings/github-actions-card-cli
 import { ScheduleManagerCard } from '@/components/settings/schedule-manager-client';
 import { DiagramThumbnail } from '@/components/ui/diagram-thumbnail';
 import { TestMigrationCard } from '@/components/settings/test-migration-card';
+import { EmailPreferencesCard } from '@/components/settings/email-preferences-client';
 
 export default async function SettingsPage({
   searchParams,
@@ -368,6 +369,11 @@ export default async function SettingsPage({
             />
           </div>
           )}
+
+          {/* Email Preferences */}
+          <div id="email-preferences">
+            <EmailPreferencesCard />
+          </div>
 
           {/* Notifications */}
           <div id="notifications">

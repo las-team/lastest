@@ -348,11 +348,25 @@ export function BrowserViewer({ streamUrl, initialViewport, className, expiresAt
     input.click();
   }, [sendWs]);
 
-  // Keyboard event handlers — use hidden textarea for IME/composition support
-  // (canvas elements never fire composition events, so accented characters like áúőóüáé don't work)
+  // Keyboard input — hidden textarea receives all keyboard events so that
+  // IME composition (accented chars like áúőóüáé) works.  Canvas elements
+  // never fire composition events, so we focus a 1×1 textarea instead.
+  //
+  // Strategy:
+  //   • Printable chars: DON'T preventDefault — let them enter the textarea,
+  //     then read + forward + clear via the `input` event.
+  //   • Non-printable keys (Enter, Backspace, arrows, etc.) and modifier
+  //     combos (Ctrl+A): preventDefault and forward as keydown/keyup.
+  //   • Dead keys / composition: let the browser compose, then forward the
+  //     final composed string from compositionEnd.
+
   const focusTextarea = useCallback(() => {
     if (interactive && textareaRef.current) {
-      textareaRef.current.focus({ preventScroll: true });
+      // Use rAF so the call runs after the browser finishes its own focus
+      // handling for the mousedown that triggered this.
+      requestAnimationFrame(() => {
+        textareaRef.current?.focus({ preventScroll: true });
+      });
     }
   }, [interactive]);
 
@@ -361,7 +375,7 @@ export function BrowserViewer({ streamUrl, initialViewport, className, expiresAt
       // During IME composition, let the browser handle everything
       if (composingRef.current) return;
 
-      // Dead key starts a composition sequence — don't preventDefault so the browser can compose
+      // Dead key — let the browser start composition
       if (e.key === 'Dead') return;
 
       // Intercept paste: read local clipboard and send as clipboard_paste event
@@ -378,10 +392,14 @@ export function BrowserViewer({ streamUrl, initialViewport, className, expiresAt
         return;
       }
 
-      // All keys: preventDefault to stop textarea from accumulating text,
-      // then forward to the remote browser
-      e.preventDefault();
+      // Printable character without modifier — let it type into the textarea;
+      // the `input` event handler will read, forward, and clear it.
+      if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        return; // don't preventDefault — textarea needs the char
+      }
 
+      // Everything else (non-printable keys, modifier combos): forward directly
+      e.preventDefault();
       sendWs({
         type: 'stream:input',
         payload: {
@@ -405,6 +423,8 @@ export function BrowserViewer({ streamUrl, initialViewport, className, expiresAt
   const handleKeyUp = useCallback(
     (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
       if (composingRef.current || e.key === 'Dead') return;
+      // Only forward non-printable keyups (printable chars handled via input event)
+      if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) return;
       e.preventDefault();
       sendWs({
         type: 'stream:input',
@@ -425,6 +445,25 @@ export function BrowserViewer({ streamUrl, initialViewport, className, expiresAt
     [sendWs]
   );
 
+  // Textarea input event — fires for every character that enters the textarea
+  // (both normal typing and after composition completes)
+  const handleTextareaInput = useCallback(() => {
+    if (composingRef.current) return;
+    const ta = textareaRef.current;
+    if (!ta || !ta.value) return;
+    // Forward all accumulated text and clear
+    sendWs({
+      type: 'stream:input',
+      payload: {
+        type: 'keyboard',
+        action: 'type',
+        key: '',
+        text: ta.value,
+      } satisfies StreamKeyboardEvent,
+    });
+    ta.value = '';
+  }, [sendWs]);
+
   // IME composition handlers for accented/special characters (á, ú, ő, ó, ü, é, etc.)
   const handleCompositionStart = useCallback(() => {
     composingRef.current = true;
@@ -435,7 +474,6 @@ export function BrowserViewer({ streamUrl, initialViewport, className, expiresAt
       composingRef.current = false;
       const composed = e.data;
       if (composed) {
-        // Send composed text as a type action — keyboard.type() handles Unicode correctly
         sendWs({
           type: 'stream:input',
           payload: {
@@ -446,7 +484,6 @@ export function BrowserViewer({ streamUrl, initialViewport, className, expiresAt
           } satisfies StreamKeyboardEvent,
         });
       }
-      // Clear textarea so it doesn't accumulate composed text
       if (textareaRef.current) {
         textareaRef.current.value = '';
       }
@@ -612,7 +649,6 @@ export function BrowserViewer({ streamUrl, initialViewport, className, expiresAt
 
         <canvas
           ref={canvasRef}
-          tabIndex={-1}
           className={`outline-none ${interactive ? 'cursor-default' : 'cursor-default pointer-events-none'}`}
           style={{
             width: viewport.width,
@@ -625,13 +661,12 @@ export function BrowserViewer({ streamUrl, initialViewport, className, expiresAt
           onContextMenu={(e) => e.preventDefault()}
         />
         {/* Hidden textarea for IME/composition support — canvas can't receive composition events.
-            Positioned over the canvas, invisible but focusable. Must NOT have pointer-events-none
-            since we programmatically focus it on canvas mousedown. */}
+            pointer-events:none keeps mouse events going to the canvas; focus is set programmatically. */}
         {interactive && (
           <textarea
             ref={textareaRef}
             className="absolute top-0 left-0 overflow-hidden outline-none"
-            style={{ width: 1, height: 1, opacity: 0.01, resize: 'none', zIndex: -1, caretColor: 'transparent' }}
+            style={{ width: 1, height: 1, opacity: 0.01, resize: 'none', zIndex: 10, pointerEvents: 'none', caretColor: 'transparent' }}
             tabIndex={0}
             autoComplete="off"
             autoCapitalize="off"
@@ -640,6 +675,7 @@ export function BrowserViewer({ streamUrl, initialViewport, className, expiresAt
             aria-hidden="true"
             onKeyDown={handleKeyDown}
             onKeyUp={handleKeyUp}
+            onInput={handleTextareaInput}
             onCompositionStart={handleCompositionStart}
             onCompositionEnd={handleCompositionEnd}
           />

@@ -908,35 +908,35 @@ export function DefinitionPageClient({
                     {/* Area-specific actions */}
                     {treeSelection?.type === 'area' && (
                       <>
-                        <Button variant="ghost" size="sm" className="h-7 px-2 text-xs" onClick={() => handleNewArea(treeSelection.id)}>
-                          <FolderPlus className="h-3.5 w-3.5 mr-1" />
+                        <Button variant="ghost" size="sm" className="h-8 px-2.5 text-sm" onClick={() => handleNewArea(treeSelection.id)}>
+                          <FolderPlus className="h-4 w-4 mr-1.5" />
                           Sub-folder
                         </Button>
-                        <Button variant="ghost" size="sm" className="h-7 px-2 text-xs text-destructive hover:text-destructive" onClick={() => setDeleteAreaId(treeSelection.id)}>
-                          <Trash2 className="h-3.5 w-3.5" />
+                        <Button variant="ghost" size="sm" className="h-8 px-2.5 text-sm text-destructive hover:text-destructive" onClick={() => setDeleteAreaId(treeSelection.id)}>
+                          <Trash2 className="h-4 w-4" />
                         </Button>
-                        <div className="w-px h-4 bg-border" />
+                        <div className="w-px h-5 bg-border" />
                       </>
                     )}
                     {!banAiMode && failedScopedTests.length > 0 && (
-                      <Button variant="outline" size="sm" className="h-7 text-xs" onClick={handleFixAllFailed} disabled={isFixingAll}>
-                        <Wrench className="h-3.5 w-3.5 mr-1" />
+                      <Button variant="outline" size="sm" className="h-8 text-sm" onClick={handleFixAllFailed} disabled={isFixingAll}>
+                        <Wrench className="h-4 w-4 mr-1.5" />
                         {isFixingAll ? 'Fixing...' : `Fix Failed (${failedScopedTests.length})`}
                       </Button>
                     )}
-                    <Button variant="outline" size="sm" className="h-7 text-xs" onClick={() => setIsAddTestsOpen(true)} disabled={uncoveredRoutes.length === 0}>
-                      <FlaskConical className="h-3.5 w-3.5 mr-1" />
+                    <Button variant="outline" size="sm" className="h-8 text-sm" onClick={() => setIsAddTestsOpen(true)} disabled={uncoveredRoutes.length === 0}>
+                      <FlaskConical className="h-4 w-4 mr-1.5" />
                       Add Basic
                     </Button>
                     {!banAiMode && (
-                      <Button variant="outline" size="sm" className="h-7 text-xs" onClick={() => setIsAICreateOpen(true)}>
-                        <Sparkles className="h-3.5 w-3.5 mr-1" />
+                      <Button variant="outline" size="sm" className="h-8 text-sm" onClick={() => setIsAICreateOpen(true)}>
+                        <Sparkles className="h-4 w-4 mr-1.5" />
                         Generate
                       </Button>
                     )}
-                    <Button asChild size="sm" className="h-7 text-xs">
+                    <Button asChild size="sm" className="h-8 text-sm">
                       <Link href="/record">
-                        <Plus className="h-3.5 w-3.5 mr-1" />
+                        <Plus className="h-4 w-4 mr-1.5" />
                         Record
                       </Link>
                     </Button>
