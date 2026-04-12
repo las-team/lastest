@@ -333,17 +333,25 @@ export const BrowserViewer = forwardRef<BrowserViewerHandle, BrowserViewerProps>
       const x = Math.round(e.clientX - rect.left);
       const y = Math.round(e.clientY - rect.top);
 
-      // In inspect mode, intercept clicks and send inspect request instead
-      if (inspectMode && action === 'down') {
-        sendWs({
-          type: 'stream:inspect_element_request',
-          payload: { x, y },
-        });
+      // In inspect mode: forward moves (for CDP overlay highlighting),
+      // intercept clicks to send inspect request instead
+      if (inspectMode) {
+        if (action === 'move') {
+          // Forward moves so CDP Overlay can highlight elements
+          sendWs({
+            type: 'stream:input',
+            payload: { type: 'mouse', action: 'move', x, y } satisfies StreamMouseEvent,
+          });
+        } else if (action === 'down') {
+          // Click → inspect element at this point
+          sendWs({
+            type: 'stream:inspect_element_request',
+            payload: { x, y },
+          });
+        }
+        // Suppress up/wheel in inspect mode
         return;
       }
-
-      // In inspect mode, suppress all other mouse events
-      if (inspectMode) return;
 
       const payload: StreamMouseEvent = {
         type: 'mouse',

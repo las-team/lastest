@@ -40,7 +40,9 @@ export class StreamServer {
   onInspectElement?: (x: number, y: number) => Promise<object | null>;
   /** Callback for full DOM snapshot */
   onDomSnapshot?: () => Promise<object>;
-  /** Whether inspect mode is active (suppresses input forwarding) */
+  /** Callback when inspect mode toggles (for CDP overlay) */
+  onInspectModeChange?: (enabled: boolean) => void;
+  /** Whether inspect mode is active (suppresses non-mouse input forwarding) */
   inspectMode = false;
 
   constructor(private options: StreamServerOptions) {
@@ -183,20 +185,22 @@ export class StreamServer {
   private handleClientMessage(clientId: string, message: { type: string; payload?: unknown }): void {
     switch (message.type) {
       case 'stream:input': {
-        // Suppress input forwarding when inspect mode is active
-        if (this.inspectMode) break;
         const payload = (message as { payload: InputEvent }).payload;
-        if (this.inputHandler && payload) {
+        if (!payload) break;
+        // In inspect mode, only forward mouse moves (for CDP overlay highlighting)
+        if (this.inspectMode && (payload.type !== 'mouse' || (payload as { action?: string }).action !== 'move')) break;
+        if (this.inputHandler) {
           this.inputHandler.handleInput(payload);
         }
         break;
       }
 
       case 'stream:inspect_mode': {
-        const payload = message.payload as { enabled: boolean } | undefined;
-        if (payload) {
-          this.inspectMode = payload.enabled;
+        const modePayload = message.payload as { enabled: boolean } | undefined;
+        if (modePayload) {
+          this.inspectMode = modePayload.enabled;
           console.log(`[StreamServer] Inspect mode: ${this.inspectMode ? 'ON' : 'OFF'}`);
+          this.onInspectModeChange?.(modePayload.enabled);
         }
         break;
       }

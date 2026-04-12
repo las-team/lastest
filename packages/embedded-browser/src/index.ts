@@ -188,6 +188,86 @@ async function startup(): Promise<void> {
     return getAllDomSelectors(targetPage, defaultPriority);
   };
 
+  // Inject/remove a DOM-based highlight overlay that follows the mouse.
+  // CDP Overlay.setInspectMode doesn't respond to Input.dispatchMouseEvent in
+  // headless mode, so we inject a script that listens for native mousemove and
+  // draws a highlight box + info tooltip on the element under the cursor.
+  streamServer.onInspectModeChange = (enabled: boolean) => {
+    const targetPage = (isDebugging && debugExecutor?.getPage())
+      ? debugExecutor.getPage()
+      : (isRecording && recorder?.isActive()) ? recorder.getPage() : page;
+    if (!targetPage) return;
+
+    if (enabled) {
+      targetPage.evaluate(() => {
+        // Remove previous if any
+        document.getElementById('__lastest_inspect_overlay')?.remove();
+        document.getElementById('__lastest_inspect_tooltip')?.remove();
+
+        const overlay = document.createElement('div');
+        overlay.id = '__lastest_inspect_overlay';
+        overlay.style.cssText = 'position:fixed;pointer-events:none;z-index:2147483646;border:2px solid #3b82f6;background:rgba(59,130,246,0.08);border-radius:2px;transition:all 0.05s ease-out;display:none;';
+        document.documentElement.appendChild(overlay);
+
+        const tooltip = document.createElement('div');
+        tooltip.id = '__lastest_inspect_tooltip';
+        tooltip.style.cssText = 'position:fixed;pointer-events:none;z-index:2147483647;background:#1f2937;color:#e5e7eb;font:11px/1.4 system-ui,sans-serif;padding:3px 8px;border-radius:4px;white-space:nowrap;display:none;box-shadow:0 2px 8px rgba(0,0,0,0.3);';
+        document.documentElement.appendChild(tooltip);
+
+        function onMove(e: MouseEvent) {
+          const el = document.elementFromPoint(e.clientX, e.clientY) as HTMLElement | null;
+          if (!el || el === overlay || el === tooltip || el === document.body || el === document.documentElement) {
+            overlay.style.display = 'none';
+            tooltip.style.display = 'none';
+            return;
+          }
+          const rect = el.getBoundingClientRect();
+          overlay.style.display = 'block';
+          overlay.style.left = rect.x + 'px';
+          overlay.style.top = rect.y + 'px';
+          overlay.style.width = rect.width + 'px';
+          overlay.style.height = rect.height + 'px';
+
+          // Build tooltip text
+          let info = el.tagName.toLowerCase();
+          if (el.id) info += '#' + el.id;
+          const cls = el.className;
+          if (typeof cls === 'string' && cls.trim()) {
+            info += '.' + cls.trim().split(/\s+/).slice(0, 2).join('.');
+          }
+          info += '  ' + Math.round(rect.width) + ' \u00d7 ' + Math.round(rect.height);
+          tooltip.textContent = info;
+          tooltip.style.display = 'block';
+
+          // Position tooltip above or below the element
+          const ttRect = tooltip.getBoundingClientRect();
+          let tx = rect.x;
+          let ty = rect.y - ttRect.height - 6;
+          if (ty < 0) ty = rect.bottom + 6;
+          if (tx + ttRect.width > window.innerWidth) tx = window.innerWidth - ttRect.width - 4;
+          if (tx < 0) tx = 4;
+          tooltip.style.left = tx + 'px';
+          tooltip.style.top = ty + 'px';
+        }
+
+        document.addEventListener('mousemove', onMove, true);
+        // Store cleanup reference
+        (window as any).__lastest_inspect_cleanup = () => {
+          document.removeEventListener('mousemove', onMove, true);
+          overlay.remove();
+          tooltip.remove();
+          delete (window as any).__lastest_inspect_cleanup;
+        };
+      }).catch(err => console.error('[Inspect] Failed to inject overlay script:', err));
+      console.log('[Inspect] DOM overlay injected');
+    } else {
+      targetPage.evaluate(() => {
+        (window as any).__lastest_inspect_cleanup?.();
+      }).catch(() => {});
+      console.log('[Inspect] DOM overlay removed');
+    }
+  };
+
   await screencast.start(page, (frame) => {
     streamServer!.broadcastFrame(frame.data, frame.width, frame.height, frame.timestamp);
   });

@@ -16,7 +16,7 @@ cd "$ROOT_DIR"
 # --- Config ---
 ZIMA_HOST="192.168.1.138"
 ZIMA_USER="ewyct"
-ZIMA_COMPOSE="/var/lib/casaos/apps/lastest/docker-compose.yml"
+ZIMA_COMPOSE="/var/lib/casaos/apps/lastest2/docker-compose.yml"
 
 OLARES_HOST="ewyctorlab.olares.local"
 OLARES_USER="root"
@@ -208,7 +208,7 @@ deploy_zima() {
   ok "Images loaded on $ZIMA_HOST"
 
   log "Restarting containers..."
-  ssh "$ZIMA_USER@$ZIMA_HOST" "cd /var/lib/casaos/apps/lastest && docker compose up -d"
+  ssh "$ZIMA_USER@$ZIMA_HOST" "cd /var/lib/casaos/apps/lastest2 && docker compose up -d"
 
   log "Verifying deployment..."
   bash "$SCRIPT_DIR/health-check.sh" "http://$ZIMA_HOST:3000"
@@ -288,7 +288,7 @@ deploy_zima_transfer() {
   local images=("$IMAGE_APP:latest")
   [ "$APP_ONLY" != true ] && images+=("$IMAGE_EB:latest")
   docker save "${images[@]}" | ssh "$ZIMA_USER@$ZIMA_HOST" 'docker load'
-  ssh "$ZIMA_USER@$ZIMA_HOST" "cd /var/lib/casaos/apps/lastest && docker compose up -d"
+  ssh "$ZIMA_USER@$ZIMA_HOST" "cd /var/lib/casaos/apps/lastest2 && docker compose up -d"
   bash "$SCRIPT_DIR/health-check.sh" "http://$ZIMA_HOST:3000"
 }
 

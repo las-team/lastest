@@ -401,7 +401,24 @@ export function DebugClient({ test, repositoryId }: DebugClientProps) {
               Trace
             </Button>
           )}
-          {/* Inspect/DOM buttons removed — auto-enabled via Selectors tab */}
+          {streamUrl && (
+            <>
+              <div className="w-px h-5 bg-border mx-1" />
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  setDomSnapshotLoading(true);
+                  browserViewerRef.current?.requestDomSnapshot();
+                }}
+                disabled={!streamUrl || domSnapshotLoading}
+                title="Download all selectors from current page"
+              >
+                {domSnapshotLoading ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <FileCode className="h-4 w-4 mr-1" />}
+                DOM
+              </Button>
+            </>
+          )}
         </div>
       </div>
 

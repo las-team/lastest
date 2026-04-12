@@ -239,39 +239,19 @@ export async function inspectElementAtPoint(
       }
 
       // --- actual inspection logic ---
+      // Use the exact element at the cursor (no walking up to ancestors).
+      // CDP Overlay handles hover highlighting natively.
 
       const el = document.elementFromPoint(px, py) as HTMLElement | null;
       if (!el || el === document.body || el === document.documentElement) return null;
 
-      const target = findBestTarget(el);
-      const selectors = generateAllSelectors(target);
-      const rect = target.getBoundingClientRect();
-
-      // Inject temporary highlight overlay
-      const overlay = document.createElement('div');
-      overlay.style.cssText = [
-        'position:fixed',
-        'pointer-events:none',
-        'z-index:2147483646',
-        'border:2px solid #3b82f6',
-        'background:rgba(59,130,246,0.12)',
-        'border-radius:3px',
-        'transition:opacity 0.3s',
-        `left:${rect.x}px`,
-        `top:${rect.y}px`,
-        `width:${rect.width}px`,
-        `height:${rect.height}px`,
-      ].join(';');
-      document.body.appendChild(overlay);
-      setTimeout(() => {
-        overlay.style.opacity = '0';
-        setTimeout(() => overlay.remove(), 300);
-      }, 2000);
+      const selectors = generateAllSelectors(el);
+      const rect = el.getBoundingClientRect();
 
       return {
-        tag: target.tagName.toLowerCase(),
-        id: target.id || undefined,
-        textContent: target.textContent?.trim().slice(0, 100) || undefined,
+        tag: el.tagName.toLowerCase(),
+        id: el.id || undefined,
+        textContent: el.textContent?.trim().slice(0, 100) || undefined,
         boundingBox: { x: rect.x, y: rect.y, width: rect.width, height: rect.height },
         selectors,
       };
