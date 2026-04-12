@@ -28,7 +28,7 @@ export interface NetworkRequest {
 }
 
 // Selector configuration for multi-input recording
-export type SelectorType = 'data-testid' | 'id' | 'role-name' | 'text' | 'aria-label' | 'placeholder' | 'name' | 'css-path' | 'ocr-text' | 'coords';
+export type SelectorType = 'data-testid' | 'id' | 'role-name' | 'label' | 'text' | 'aria-label' | 'placeholder' | 'name' | 'css-path' | 'ocr-text' | 'coords';
 
 export interface SelectorConfig {
   type: SelectorType;
@@ -679,13 +679,14 @@ export const DEFAULT_SELECTOR_PRIORITY: SelectorConfig[] = [
   { type: 'data-testid', enabled: true, priority: 1 },
   { type: 'id', enabled: true, priority: 2 },
   { type: 'role-name', enabled: true, priority: 3 },
-  { type: 'aria-label', enabled: true, priority: 4 },
-  { type: 'text', enabled: true, priority: 5 },
-  { type: 'placeholder', enabled: true, priority: 6 },
-  { type: 'name', enabled: true, priority: 7 },
-  { type: 'css-path', enabled: true, priority: 8 },
-  { type: 'ocr-text', enabled: false, priority: 9 },
-  { type: 'coords', enabled: true, priority: 10 },
+  { type: 'label', enabled: true, priority: 4 },
+  { type: 'aria-label', enabled: true, priority: 5 },
+  { type: 'text', enabled: true, priority: 6 },
+  { type: 'placeholder', enabled: true, priority: 7 },
+  { type: 'name', enabled: true, priority: 8 },
+  { type: 'css-path', enabled: true, priority: 9 },
+  { type: 'ocr-text', enabled: false, priority: 10 },
+  { type: 'coords', enabled: true, priority: 11 },
 ];
 
 // Discovered routes for coverage tracking

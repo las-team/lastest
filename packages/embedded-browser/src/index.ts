@@ -228,6 +228,16 @@ async function startup(): Promise<void> {
             const callbacks = shouldStreamTest ? {
               onPageCreated: async (testPage: Page) => {
                 try {
+                  // Force the test page to render at the EB's native resolution
+                  const cdp = await testPage.context().newCDPSession(testPage);
+                  await cdp.send('Emulation.setDeviceMetricsOverride', {
+                    width: config.viewportWidth,
+                    height: config.viewportHeight,
+                    deviceScaleFactor: 1,
+                    mobile: false,
+                  });
+                  await cdp.detach();
+
                   await capturedScreencast.stop();
                   await capturedScreencast.start(testPage, (frame) => {
                     capturedStreamServer.broadcastFrame(frame.data, frame.width, frame.height, frame.timestamp);
@@ -551,6 +561,16 @@ async function startup(): Promise<void> {
           // Attach screencast + input to the debug page
           const dbgPage = debugExecutor.getPage();
           if (dbgPage && screencast) {
+            // Force the debug page to render at the EB's native resolution
+            const cdp = await dbgPage.context().newCDPSession(dbgPage);
+            await cdp.send('Emulation.setDeviceMetricsOverride', {
+              width: config.viewportWidth,
+              height: config.viewportHeight,
+              deviceScaleFactor: 1,
+              mobile: false,
+            });
+            await cdp.detach();
+
             await screencast.start(dbgPage, (frame) => {
               streamServer!.broadcastFrame(frame.data, frame.width, frame.height, frame.timestamp);
             });
@@ -615,6 +635,16 @@ async function startup(): Promise<void> {
           await inputHandler?.detach();
           const newPage = debugExecutor.getPage();
           if (newPage && screencast) {
+            // Force the new debug page to render at the EB's native resolution
+            const cdp = await newPage.context().newCDPSession(newPage);
+            await cdp.send('Emulation.setDeviceMetricsOverride', {
+              width: config.viewportWidth,
+              height: config.viewportHeight,
+              deviceScaleFactor: 1,
+              mobile: false,
+            });
+            await cdp.detach();
+
             await screencast.start(newPage, (frame) => {
               streamServer!.broadcastFrame(frame.data, frame.width, frame.height, frame.timestamp);
             });

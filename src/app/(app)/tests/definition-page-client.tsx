@@ -229,6 +229,12 @@ export function DefinitionPageClient({
       setOpenTestId(null);
       setOpenTestData(null);
       setOpenTestDetailData(null);
+      // Update URL to remove test param when navigating away
+      const url = new URL(window.location.href);
+      if (url.searchParams.has('test')) {
+        url.searchParams.delete('test');
+        window.history.replaceState({}, '', url.pathname + url.search);
+      }
     }
 
     // Populate area edit fields
@@ -245,7 +251,25 @@ export function DefinitionPageClient({
   useEffect(() => {
     const testIdParam = searchParams.get('test');
     if (!testIdParam) return;
-    void handleOpenTest(testIdParam);
+    void handleOpenTest(testIdParam, { pushState: false });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Handle browser back/forward navigation
+  useEffect(() => {
+    const onPopState = () => {
+      const url = new URL(window.location.href);
+      const testId = url.searchParams.get('test');
+      if (testId) {
+        void handleOpenTest(testId, { pushState: false });
+      } else {
+        setOpenTestId(null);
+        setOpenTestData(null);
+        setOpenTestDetailData(null);
+      }
+    };
+    window.addEventListener('popstate', onPopState);
+    return () => window.removeEventListener('popstate', onPopState);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -524,17 +548,29 @@ export function DefinitionPageClient({
   };
 
   // Inline test detail handlers
-  const handleOpenTest = async (testId: string) => {
+  const handleCloseTest = useCallback(() => {
+    setOpenTestId(null);
+    setOpenTestData(null);
+    setOpenTestDetailData(null);
+    const url = new URL(window.location.href);
+    url.searchParams.delete('test');
+    window.history.pushState({}, '', url.pathname + url.search);
+  }, []);
+
+  const handleOpenTest = async (testId: string, { pushState = true }: { pushState?: boolean } = {}) => {
     if (openTestId === testId) {
-      setOpenTestId(null);
-      setOpenTestData(null);
-      setOpenTestDetailData(null);
+      handleCloseTest();
       return;
     }
     setOpenTestId(testId);
     setOpenTestData(null);
     setOpenTestDetailData(null);
     setIsLoadingTestDetail(true);
+    if (pushState) {
+      const url = new URL(window.location.href);
+      url.searchParams.set('test', testId);
+      window.history.pushState({}, '', url.pathname + url.search);
+    }
     try {
       const data = await getTestDetailData(testId, repositoryId);
       if (data) {
@@ -871,7 +907,7 @@ export function DefinitionPageClient({
                 <div className="flex items-center justify-between gap-4">
                   <div className="flex items-center gap-1.5 text-sm min-w-0">
                     <button
-                      onClick={() => { setTreeSelection(null); setSelectedAreaIds(new Set()); setOpenTestId(null); setOpenTestData(null); }}
+                      onClick={() => { setTreeSelection(null); setSelectedAreaIds(new Set()); handleCloseTest(); }}
                       className={cn(
                         'hover:text-primary transition-colors shrink-0',
                         !treeSelection && !openTestId ? 'text-foreground font-medium' : 'text-muted-foreground'
@@ -883,7 +919,7 @@ export function DefinitionPageClient({
                       <span key={crumb.id} className="flex items-center gap-1.5">
                         <ChevronRight className="h-3 w-3 text-muted-foreground/50 shrink-0" />
                         <button
-                          onClick={() => { setTreeSelection({ type: 'area', id: crumb.id }); setOpenTestId(null); setOpenTestData(null); }}
+                          onClick={() => { setTreeSelection({ type: 'area', id: crumb.id }); handleCloseTest(); }}
                           className={cn(
                             'hover:text-primary transition-colors truncate max-w-[160px]',
                             treeSelection?.type === 'area' && treeSelection.id === crumb.id && !openTestId

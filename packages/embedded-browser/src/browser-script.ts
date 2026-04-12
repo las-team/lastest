@@ -5,7 +5,7 @@
  * This is the same script used by the server-side recorder (src/lib/playwright/recorder.ts).
  * It must be kept in sync with the server version.
  *
- * The script captures: clicks, fills, selects, keyboard, mouse gestures,
+ * The script captures: clicks, fills, selects, keyboard, scroll/wheel, mouse gestures,
  * hover previews, element assertions (Shift+right-click), and DOM verification.
  *
  * Exposed functions (must be registered via page.exposeFunction before injection):
@@ -237,46 +237,137 @@ export const browserRecordingScript = ({ pointerGestures: pg, cursorFPS: fps, se
     }
   }, true);
 
+  // Wheel/scroll tracking with debounce and modifier capture
+  let scrollAccumX = 0;
+  let scrollAccumY = 0;
+  let scrollModifiers: string[] = [];
+  let scrollFlushTimer: ReturnType<typeof setTimeout> | null = null;
+  const SCROLL_DEBOUNCE_MS = 100;
+  document.addEventListener('wheel', (e: WheelEvent) => {
+    scrollAccumX += e.deltaX;
+    scrollAccumY += e.deltaY;
+    if (!scrollFlushTimer) {
+      const eventMods: string[] = [];
+      if (e.ctrlKey) eventMods.push('Control');
+      if (e.shiftKey) eventMods.push('Shift');
+      if (e.altKey) eventMods.push('Alt');
+      if (e.metaKey) eventMods.push('Meta');
+      scrollModifiers = eventMods;
+    }
+    if (scrollFlushTimer) clearTimeout(scrollFlushTimer);
+    scrollFlushTimer = setTimeout(() => {
+      if (scrollAccumX !== 0 || scrollAccumY !== 0) {
+        // @ts-expect-error - exposed function
+        window.__recordScroll?.(Math.round(scrollAccumX), Math.round(scrollAccumY), scrollModifiers.length > 0 ? scrollModifiers : undefined);
+        scrollAccumX = 0;
+        scrollAccumY = 0;
+        scrollModifiers = [];
+      }
+      scrollFlushTimer = null;
+    }, SCROLL_DEBOUNCE_MS);
+  }, { passive: true, capture: true });
+
+  // Detect dynamic IDs (react-select-23-input, mui-7, :r1a:, select_99, etc.)
+  const DYNAMIC_ID_PATTERNS = [
+    /^react-select-\d+-/,
+    /^headlessui-\w+-\d+$/,
+    /^mui-\d+$/,
+    /^:r[a-z0-9]+:$/,
+    /^radix-/,
+    /^ember\d+$/,
+    /^[a-z]+[-_]\d{2,}$/i,
+    /[a-f0-9]{8,}/,
+    /\d{4,}/,
+  ];
+  function isProbablyDynamicId(id: string): boolean {
+    if (id.includes('undefined')) return true;
+    return DYNAMIC_ID_PATTERNS.some(p => p.test(id));
+  }
+
   function generateAllSelectors(element: HTMLElement): BrowserActionSelector[] {
     const allSelectors: Map<string, string> = new Map();
 
+    // data-testid
     if (element.dataset.testid) {
       allSelectors.set('data-testid', `[data-testid="${element.dataset.testid}"]`);
     }
-    if (element.id && !element.id.includes('undefined')) {
+
+    // ID — skip dynamic IDs (react-select-23-input, etc.)
+    if (element.id && !isProbablyDynamicId(element.id)) {
       allSelectors.set('id', `#${element.id}`);
     }
+
+    // Label (associated <label> element — most robust for form fields)
+    const labelText = (
+      (element.id ? document.querySelector(`label[for="${element.id}"]`)?.textContent?.trim() : null) ||
+      element.closest('label')?.textContent?.trim() ||
+      (element.getAttribute('aria-labelledby')
+        ? document.getElementById(element.getAttribute('aria-labelledby')!)?.textContent?.trim()
+        : null)
+    )?.slice(0, 50) || null;
+    if (labelText) {
+      allSelectors.set('label', `label="${labelText}"`);
+    }
+
+    // Role + name (ARIA) — use label text as fallback for accessible name
     const role = element.getAttribute('role') || getImplicitRole(element);
     const accessibleName = element.getAttribute('aria-label') ||
       element.getAttribute('title') ||
+      labelText ||
       element.textContent?.trim().slice(0, 30);
     if (role && accessibleName) {
       allSelectors.set('role-name', `role=${role}[name="${accessibleName}"]`);
     }
+
+    // aria-label
     const ariaLabel = element.getAttribute('aria-label');
     if (ariaLabel) {
       allSelectors.set('aria-label', `[aria-label="${ariaLabel}"]`);
     }
+
+    // Text content (for interactive elements)
+    const INTERACTIVE_ROLES = new Set([
+      'button', 'option', 'menuitem', 'menuitemcheckbox', 'menuitemradio',
+      'tab', 'treeitem', 'link', 'switch', 'radio', 'checkbox',
+      'combobox', 'listitem'
+    ]);
+    const elRole = element.getAttribute('role');
     if (element.tagName === 'BUTTON' || element.tagName === 'A' ||
-        element.getAttribute('role') === 'button') {
+        element.tagName === 'LI' || element.tagName === 'LABEL' ||
+        (elRole && INTERACTIVE_ROLES.has(elRole))) {
       const text = element.textContent?.trim().slice(0, 30);
       if (text) {
         allSelectors.set('text', `text="${text}"`);
       }
     }
+
+    // Leaf element fallback: text for elements with no children
+    if (!allSelectors.has('text') && element.children.length === 0) {
+      const leafText = element.textContent?.trim().slice(0, 30);
+      if (leafText && leafText.length > 0) {
+        allSelectors.set('text', `text="${leafText}"`);
+      }
+    }
+
+    // Placeholder
     const placeholder = element.getAttribute('placeholder');
     if (placeholder) {
       allSelectors.set('placeholder', `[placeholder="${placeholder}"]`);
     }
+
+    // Name attribute (skip dynamic names like select_99)
     const name = element.getAttribute('name');
-    if (name) {
+    if (name && !isProbablyDynamicId(name)) {
       allSelectors.set('name', `[name="${name}"]`);
     }
+
+    // CSS path fallback
     const cssPath = generateCssPath(element);
     if (cssPath) {
       allSelectors.set('css-path', cssPath);
     }
 
+    // Filter by enabled selectors and sort by priority
     const enabledConfigs = (priority as BrowserSelectorConfig[])
       .filter(config => config.enabled && config.type !== 'ocr-text')
       .sort((a, b) => a.priority - b.priority);

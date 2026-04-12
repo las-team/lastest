@@ -848,6 +848,7 @@ export class PlaywrightRecorder extends EventEmitter {
           /^:r[a-z0-9]+:$/,            // React useId() / Radix
           /^radix-/,                   // Radix UI
           /^ember\d+$/,                // Ember
+          /^[a-z]+[-_]\d{2,}$/i,       // word-separator-digits (select_99, field_23)
           /[a-f0-9]{8,}/,              // hex hashes 8+ chars
           /\d{4,}/,                    // 4+ consecutive digits
         ];
@@ -858,23 +859,26 @@ export class PlaywrightRecorder extends EventEmitter {
 
         if (element.id && !isProbablyDynamicId(element.id)) {
           allSelectors.set('id', `#${element.id}`);
-        } else if (element.id) {
-          // Generate partial-match selector for dynamic IDs
-          // e.g. react-select-23-input → [id^="react-select"][id$="-input"]
-          const parts = element.id.split(/[-_]?\d+[-_]?/);
-          const prefix = parts[0];
-          const suffix = parts[parts.length - 1];
-          if (prefix && suffix && prefix !== suffix) {
-            allSelectors.set('id', `[id^="${prefix}"][id$="${suffix}"]`);
-          } else if (prefix && prefix.length >= 4) {
-            allSelectors.set('id', `[id^="${prefix}"]`);
-          }
+        }
+        // Dynamic IDs (react-select-23-input, etc.) are simply skipped
+
+        // Label (associated <label> element — most robust for form fields)
+        const labelText = (
+          (element.id ? document.querySelector(`label[for="${element.id}"]`)?.textContent?.trim() : null) ||
+          element.closest('label')?.textContent?.trim() ||
+          (element.getAttribute('aria-labelledby')
+            ? document.getElementById(element.getAttribute('aria-labelledby')!)?.textContent?.trim()
+            : null)
+        )?.slice(0, 50) || null;
+        if (labelText) {
+          allSelectors.set('label', `label="${labelText}"`);
         }
 
-        // Role + name (ARIA)
+        // Role + name (ARIA) — use label text as fallback for accessible name
         const role = element.getAttribute('role') || getImplicitRole(element);
         const accessibleName = element.getAttribute('aria-label') ||
           element.getAttribute('title') ||
+          labelText ||
           element.textContent?.trim().slice(0, 30);
         if (role && accessibleName) {
           allSelectors.set('role-name', `role=${role}[name="${accessibleName}"]`);
@@ -908,9 +912,9 @@ export class PlaywrightRecorder extends EventEmitter {
           allSelectors.set('placeholder', `[placeholder="${placeholder}"]`);
         }
 
-        // Name attribute (for form elements)
+        // Name attribute (for form elements — skip dynamic names like select_99)
         const name = element.getAttribute('name');
-        if (name) {
+        if (name && !isProbablyDynamicId(name)) {
           allSelectors.set('name', `[name="${name}"]`);
         }
 
@@ -1354,8 +1358,8 @@ export class PlaywrightRecorder extends EventEmitter {
                 // Text selectors are hard to test, assume valid
                 return true;
               }
-              if (sel.type === 'ocr-text') {
-                // OCR selectors can't be tested in browser
+              if (sel.type === 'ocr-text' || sel.type === 'label') {
+                // OCR/label selectors can't be tested via querySelector
                 return true;
               }
               // Standard CSS selectors
@@ -1645,6 +1649,9 @@ export class PlaywrightRecorder extends EventEmitter {
       `        if (sel.type === 'ocr-text') {`,
       `          const text = sel.value.replace(/^ocr-text="/, '').replace(/"$/, '');`,
       `          locator = page.getByText(text, { exact: false });`,
+      `        } else if (sel.type === 'label') {`,
+      `          const labelText = sel.value.replace(/^label="/, '').replace(/"$/, '');`,
+      `          locator = page.getByLabel(labelText);`,
       `        } else if (sel.type === 'role-name') {`,
       `          // Parse role=button[name="Label"] format and use getByRole`,
       `          const match = sel.value.match(/^role=(\\w+)\\[name="(.+)"\\]$/);`,

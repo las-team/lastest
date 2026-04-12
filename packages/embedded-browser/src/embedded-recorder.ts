@@ -215,6 +215,24 @@ export class EmbeddedRecorder {
       this.addEvent('keypress', { key, modifiers: modifiers && modifiers.length > 0 ? modifiers : undefined });
     });
 
+    // Scroll tracking with coalescing (mirrors server-side recorder logic)
+    await this.page.exposeFunction('__recordScroll', (deltaX: number, deltaY: number, modifiers?: string[]) => {
+      const mods = modifiers && modifiers.length > 0 ? modifiers : undefined;
+      // Coalesce with previous scroll event if same modifiers
+      if (this.events.length > 0) {
+        const lastEvent = this.events[this.events.length - 1];
+        if (lastEvent?.type === 'scroll') {
+          const lastMods = lastEvent.data.modifiers;
+          if (JSON.stringify(lastMods) === JSON.stringify(mods)) {
+            lastEvent.data.deltaX = ((lastEvent.data.deltaX as number) || 0) + deltaX;
+            lastEvent.data.deltaY = ((lastEvent.data.deltaY as number) || 0) + deltaY;
+            return;
+          }
+        }
+      }
+      this.addEvent('scroll', { deltaX, deltaY, modifiers: mods });
+    });
+
     await this.page.exposeFunction('__recordHoverPreview', (elementInfo: Record<string, unknown>) => {
       // Replace previous hover-preview in pending batch
       if (this.events.length > 0) {

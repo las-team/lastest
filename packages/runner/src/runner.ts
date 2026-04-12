@@ -739,6 +739,9 @@ export class TestRunner {
           if (sel.type === 'ocr-text') {
             const text = sel.value.replace(/^ocr-text="/, '').replace(/"$/, '');
             locator = pg.getByText(text, { exact: false });
+          } else if (sel.type === 'label') {
+            const labelText = sel.value.replace(/^label="/, '').replace(/"$/, '');
+            locator = pg.getByLabel(labelText);
           } else if (sel.type === 'role-name') {
             const match = sel.value.match(/^role=(\w+)\[name="(.+)"\]$/);
             if (match) {

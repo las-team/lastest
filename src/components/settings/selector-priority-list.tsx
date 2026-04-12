@@ -29,6 +29,7 @@ const SELECTOR_LABELS: Record<SelectorType, { name: string; description: string 
   'data-testid': { name: 'data-testid', description: 'Elements with data-testid attribute' },
   'id': { name: 'ID', description: 'Elements with id attribute' },
   'role-name': { name: 'Role + Name', description: 'ARIA role with accessible name' },
+  'label': { name: 'Label', description: 'Associated <label> element text' },
   'aria-label': { name: 'aria-label', description: 'Elements with aria-label attribute' },
   'text': { name: 'Text Content', description: 'Visible text in buttons/links' },
   'placeholder': { name: 'Placeholder', description: 'Input placeholder attribute' },
