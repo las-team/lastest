@@ -119,7 +119,14 @@ export const browserRecordingScript = ({ pointerGestures: pg, cursorFPS: fps, se
       if (INTERACTIVE_TAGS.has(current.tagName)) return current;
       if (current.dataset.testid) return current;
       if (current.hasAttribute('tabindex') || (current.getAttribute('aria-label') && current !== el)) return current;
-      current = current.parentElement;
+      // Traverse shadow DOM boundaries
+      if (current.parentElement) {
+        current = current.parentElement;
+      } else if (current.parentNode instanceof ShadowRoot) {
+        current = (current.parentNode as ShadowRoot).host as HTMLElement;
+      } else {
+        break;
+      }
     }
     return el; // no interactive ancestor found, use original
   }
@@ -380,6 +387,18 @@ export const browserRecordingScript = ({ pointerGestures: pg, cursorFPS: fps, se
       allSelectors.set('name', `[name="${name}"]`);
     }
 
+    // Alt text (for images and image buttons)
+    const alt = element.getAttribute('alt');
+    if (alt) {
+      allSelectors.set('alt-text', `alt-text="${alt}"`);
+    }
+
+    // Title attribute (tooltips)
+    const titleAttr = element.getAttribute('title');
+    if (titleAttr) {
+      allSelectors.set('title', `title="${titleAttr}"`);
+    }
+
     // CSS path fallback
     const cssPath = generateCssPath(element);
     if (cssPath) {
@@ -423,6 +442,8 @@ export const browserRecordingScript = ({ pointerGestures: pg, cursorFPS: fps, se
     const path: string[] = [];
     let current: HTMLElement | null = element;
     while (current && current !== document.body) {
+      // Stop at shadow DOM boundary — Playwright auto-pierces shadow roots
+      if (current.parentNode instanceof ShadowRoot) break;
       let selector = current.tagName.toLowerCase();
       const classAttr = current.getAttribute('class');
       if (classAttr) {

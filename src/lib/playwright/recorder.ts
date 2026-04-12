@@ -693,7 +693,14 @@ export class PlaywrightRecorder extends EventEmitter {
           if (current.dataset.testid) return current;
           // Detect clickable divs: elements with tabindex or aria-label on non-leaf containers
           if (current.hasAttribute('tabindex') || (current.getAttribute('aria-label') && current !== el)) return current;
-          current = current.parentElement;
+          // Traverse shadow DOM boundaries
+          if (current.parentElement) {
+            current = current.parentElement;
+          } else if (current.parentNode instanceof ShadowRoot) {
+            current = (current.parentNode as ShadowRoot).host as HTMLElement;
+          } else {
+            break;
+          }
         }
         return el;
       }
@@ -937,6 +944,18 @@ export class PlaywrightRecorder extends EventEmitter {
           allSelectors.set('name', `[name="${name}"]`);
         }
 
+        // Alt text (for images and image buttons)
+        const alt = element.getAttribute('alt');
+        if (alt) {
+          allSelectors.set('alt-text', `alt-text="${alt}"`);
+        }
+
+        // Title attribute (tooltips)
+        const titleAttr = element.getAttribute('title');
+        if (titleAttr) {
+          allSelectors.set('title', `title="${titleAttr}"`);
+        }
+
         // Leaf element fallback: generate text selector for elements with no children and short text
         if (!allSelectors.has('text') && element.children.length === 0) {
           const leafText = element.textContent?.trim().slice(0, 30);
@@ -1000,6 +1019,8 @@ export class PlaywrightRecorder extends EventEmitter {
         const path: string[] = [];
         let current: HTMLElement | null = element;
         while (current && current !== document.body) {
+          // Stop at shadow DOM boundary — Playwright auto-pierces shadow roots
+          if (current.parentNode instanceof ShadowRoot) break;
           let selector = current.tagName.toLowerCase();
           // Use getAttribute to handle SVG elements (className is SVGAnimatedString, not string)
           const classAttr = current.getAttribute('class');
@@ -1377,8 +1398,8 @@ export class PlaywrightRecorder extends EventEmitter {
                 // Text selectors are hard to test, assume valid
                 return true;
               }
-              if (sel.type === 'ocr-text' || sel.type === 'label' || sel.type === 'heading-context') {
-                // OCR/label/heading-context selectors can't be tested via querySelector
+              if (sel.type === 'ocr-text' || sel.type === 'label' || sel.type === 'heading-context' || sel.type === 'alt-text' || sel.type === 'title') {
+                // These use Playwright-specific APIs (getByLabel, getByAltText, etc.) — can't test via querySelector
                 return true;
               }
               // Standard CSS selectors
@@ -1671,6 +1692,12 @@ export class PlaywrightRecorder extends EventEmitter {
       `        } else if (sel.type === 'label') {`,
       `          const labelText = sel.value.replace(/^label="/, '').replace(/"$/, '');`,
       `          locator = page.getByLabel(labelText);`,
+      `        } else if (sel.type === 'alt-text') {`,
+      `          const altText = sel.value.replace(/^alt-text="/, '').replace(/"$/, '');`,
+      `          locator = page.getByAltText(altText);`,
+      `        } else if (sel.type === 'title') {`,
+      `          const titleText = sel.value.replace(/^title="/, '').replace(/"$/, '');`,
+      `          locator = page.getByTitle(titleText);`,
       `        } else if (sel.type === 'role-name') {`,
       `          // Parse role=button[name="Label"] format and use getByRole`,
       `          const match = sel.value.match(/^role=(\\w+)\\[name="(.+)"\\]$/);`,

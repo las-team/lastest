@@ -36,6 +36,12 @@ export class StreamServer {
   onNavigate?: (url: string) => Promise<void>;
   /** Callback for viewport resize requests from stream clients */
   onResize?: (viewport: { width: number; height: number }) => Promise<void>;
+  /** Callback for inspect element at coordinates */
+  onInspectElement?: (x: number, y: number) => Promise<object | null>;
+  /** Callback for full DOM snapshot */
+  onDomSnapshot?: () => Promise<object>;
+  /** Whether inspect mode is active (suppresses input forwarding) */
+  inspectMode = false;
 
   constructor(private options: StreamServerOptions) {
     this.authToken = options.authToken;
@@ -177,9 +183,69 @@ export class StreamServer {
   private handleClientMessage(clientId: string, message: { type: string; payload?: unknown }): void {
     switch (message.type) {
       case 'stream:input': {
+        // Suppress input forwarding when inspect mode is active
+        if (this.inspectMode) break;
         const payload = (message as { payload: InputEvent }).payload;
         if (this.inputHandler && payload) {
           this.inputHandler.handleInput(payload);
+        }
+        break;
+      }
+
+      case 'stream:inspect_mode': {
+        const payload = message.payload as { enabled: boolean } | undefined;
+        if (payload) {
+          this.inspectMode = payload.enabled;
+          console.log(`[StreamServer] Inspect mode: ${this.inspectMode ? 'ON' : 'OFF'}`);
+        }
+        break;
+      }
+
+      case 'stream:inspect_element_request': {
+        const payload = message.payload as { x: number; y: number } | undefined;
+        if (payload && this.onInspectElement) {
+          this.onInspectElement(payload.x, payload.y)
+            .then(element => {
+              this.sendToClientById(clientId, {
+                type: 'stream:inspect_element_response',
+                id: crypto.randomUUID(),
+                timestamp: Date.now(),
+                payload: { element },
+              });
+            })
+            .catch(err => {
+              console.error(`[StreamServer] Inspect element error:`, err);
+              this.sendToClientById(clientId, {
+                type: 'stream:inspect_element_response',
+                id: crypto.randomUUID(),
+                timestamp: Date.now(),
+                payload: { element: null },
+              });
+            });
+        }
+        break;
+      }
+
+      case 'stream:dom_snapshot_request': {
+        if (this.onDomSnapshot) {
+          this.onDomSnapshot()
+            .then(snapshot => {
+              this.sendToClientById(clientId, {
+                type: 'stream:dom_snapshot_response',
+                id: crypto.randomUUID(),
+                timestamp: Date.now(),
+                payload: snapshot,
+              });
+            })
+            .catch(err => {
+              console.error(`[StreamServer] DOM snapshot error:`, err);
+              this.sendToClientById(clientId, {
+                type: 'stream:dom_snapshot_response',
+                id: crypto.randomUUID(),
+                timestamp: Date.now(),
+                payload: { elements: [], url: '', timestamp: Date.now() },
+              });
+            });
         }
         break;
       }
@@ -212,6 +278,13 @@ export class StreamServer {
   private sendToClient(ws: WebSocket, message: object): void {
     if (ws.readyState === WebSocket.OPEN) {
       ws.send(JSON.stringify(message));
+    }
+  }
+
+  private sendToClientById(clientId: string, message: object): void {
+    const client = this.clients.get(clientId);
+    if (client) {
+      this.sendToClient(client.ws, message);
     }
   }
 

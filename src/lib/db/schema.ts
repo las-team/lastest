@@ -28,7 +28,7 @@ export interface NetworkRequest {
 }
 
 // Selector configuration for multi-input recording
-export type SelectorType = 'data-testid' | 'id' | 'role-name' | 'label' | 'heading-context' | 'text' | 'aria-label' | 'placeholder' | 'name' | 'css-path' | 'ocr-text' | 'coords';
+export type SelectorType = 'data-testid' | 'id' | 'role-name' | 'label' | 'heading-context' | 'text' | 'aria-label' | 'placeholder' | 'name' | 'alt-text' | 'title' | 'css-path' | 'ocr-text' | 'coords';
 
 export interface SelectorConfig {
   type: SelectorType;
@@ -685,9 +685,11 @@ export const DEFAULT_SELECTOR_PRIORITY: SelectorConfig[] = [
   { type: 'text', enabled: true, priority: 7 },
   { type: 'placeholder', enabled: true, priority: 8 },
   { type: 'name', enabled: true, priority: 9 },
-  { type: 'css-path', enabled: true, priority: 10 },
-  { type: 'ocr-text', enabled: false, priority: 11 },
-  { type: 'coords', enabled: true, priority: 12 },
+  { type: 'alt-text', enabled: true, priority: 10 },
+  { type: 'title', enabled: true, priority: 11 },
+  { type: 'css-path', enabled: true, priority: 12 },
+  { type: 'ocr-text', enabled: false, priority: 13 },
+  { type: 'coords', enabled: true, priority: 14 },
 ];
 
 // Discovered routes for coverage tracking

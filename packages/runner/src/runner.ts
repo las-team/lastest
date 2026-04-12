@@ -742,6 +742,12 @@ export class TestRunner {
           } else if (sel.type === 'label') {
             const labelText = sel.value.replace(/^label="/, '').replace(/"$/, '');
             locator = pg.getByLabel(labelText);
+          } else if (sel.type === 'alt-text') {
+            const altText = sel.value.replace(/^alt-text="/, '').replace(/"$/, '');
+            locator = pg.getByAltText(altText);
+          } else if (sel.type === 'title') {
+            const titleText = sel.value.replace(/^title="/, '').replace(/"$/, '');
+            locator = pg.getByTitle(titleText);
           } else if (sel.type === 'role-name') {
             const match = sel.value.match(/^role=(\w+)\[name="(.+)"\]$/);
             if (match) {

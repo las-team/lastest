@@ -15,6 +15,7 @@ import { EmbeddedTestExecutor } from './test-executor.js';
 import { EmbeddedRecorder } from './embedded-recorder.js';
 import { EmbeddedDebugExecutor } from './debug-executor.js';
 import { CROSS_OS_CHROMIUM_ARGS } from './stabilization.js';
+import { inspectElementAtPoint, getAllDomSelectors, type SelectorPriorityConfig } from './selector-utils.js';
 
 import os from 'os';
 
@@ -142,6 +143,49 @@ async function startup(): Promise<void> {
     } catch (err) {
       console.error(`[Resize] Failed:`, err);
     }
+  };
+
+  // Handle inspect element requests (point-and-click selector inspector)
+  streamServer.onInspectElement = async (x: number, y: number) => {
+    const targetPage = (isDebugging && debugExecutor?.getPage())
+      ? debugExecutor.getPage()
+      : (isRecording && recorder?.isActive()) ? recorder.getPage() : page;
+    if (!targetPage) return null;
+    // Use default priority if no settings available
+    const defaultPriority: SelectorPriorityConfig = [
+      { type: 'data-testid', enabled: true, priority: 1 },
+      { type: 'id', enabled: true, priority: 2 },
+      { type: 'label', enabled: true, priority: 3 },
+      { type: 'role-name', enabled: true, priority: 4 },
+      { type: 'aria-label', enabled: true, priority: 5 },
+      { type: 'text', enabled: true, priority: 6 },
+      { type: 'placeholder', enabled: true, priority: 7 },
+      { type: 'name', enabled: true, priority: 8 },
+      { type: 'css-path', enabled: true, priority: 9 },
+      { type: 'heading-context', enabled: true, priority: 10 },
+    ];
+    return inspectElementAtPoint(targetPage, x, y, defaultPriority);
+  };
+
+  // Handle DOM snapshot requests (download all selectors)
+  streamServer.onDomSnapshot = async () => {
+    const targetPage = (isDebugging && debugExecutor?.getPage())
+      ? debugExecutor.getPage()
+      : (isRecording && recorder?.isActive()) ? recorder.getPage() : page;
+    if (!targetPage) return { elements: [], url: '', timestamp: Date.now() };
+    const defaultPriority: SelectorPriorityConfig = [
+      { type: 'data-testid', enabled: true, priority: 1 },
+      { type: 'id', enabled: true, priority: 2 },
+      { type: 'label', enabled: true, priority: 3 },
+      { type: 'role-name', enabled: true, priority: 4 },
+      { type: 'aria-label', enabled: true, priority: 5 },
+      { type: 'text', enabled: true, priority: 6 },
+      { type: 'placeholder', enabled: true, priority: 7 },
+      { type: 'name', enabled: true, priority: 8 },
+      { type: 'css-path', enabled: true, priority: 9 },
+      { type: 'heading-context', enabled: true, priority: 10 },
+    ];
+    return getAllDomSelectors(targetPage, defaultPriority);
   };
 
   await screencast.start(page, (frame) => {

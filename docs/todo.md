@@ -16,6 +16,10 @@ GH action edit
 ## bugs
 Fix play specs -> test specs route
 ## features
+openrouter agent sdk
+default ai
+payment
+storage limits
 Improve selector reliability for manually recorded tests
 (low) Every button is green, multiple primary actions, keep clicking on run test instead of save
 ## ideas

@@ -35,6 +35,8 @@ const SELECTOR_LABELS: Record<SelectorType, { name: string; description: string 
   'text': { name: 'Text Content', description: 'Visible text in buttons/links' },
   'placeholder': { name: 'Placeholder', description: 'Input placeholder attribute' },
   'name': { name: 'Name', description: 'Form element name attribute' },
+  'alt-text': { name: 'Alt Text', description: 'Image alt attribute (for image buttons)' },
+  'title': { name: 'Title', description: 'Element title attribute (tooltips)' },
   'css-path': { name: 'CSS Path', description: 'CSS selector path (fallback)' },
   'ocr-text': { name: 'OCR Text', description: 'Text extracted via OCR' },
   'coords': { name: 'Coordinates', description: 'Click by X/Y coordinates (fallback)' },

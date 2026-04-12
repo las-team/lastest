@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState, useCallback } from 'react';
+import { useEffect, useRef, useState, useCallback, useImperativeHandle, forwardRef } from 'react';
 import { Wifi, WifiOff, Loader2, RefreshCw, Upload } from 'lucide-react';
 import { BrowserToolbar } from '@/components/embedded-browser/browser-toolbar-client';
 import { Button } from '@/components/ui/button';
@@ -14,6 +14,20 @@ const FRAME_STALL_TIMEOUT_MS = 8000; // Reconnect if no frames for 8s while "con
 
 const SESSION_EXPIRY_WARN_MS = 5 * 60 * 1000; // Warn when <5 min remain
 
+export interface InspectElementResult {
+  tag: string;
+  id?: string;
+  textContent?: string;
+  boundingBox: { x: number; y: number; width: number; height: number };
+  selectors: Array<{ type: string; value: string }>;
+}
+
+export interface DomSnapshotResult {
+  elements: InspectElementResult[];
+  url: string;
+  timestamp: number;
+}
+
 interface BrowserViewerProps {
   streamUrl: string;
   initialViewport?: { width: number; height: number };
@@ -25,9 +39,17 @@ interface BrowserViewerProps {
   hideViewportSelector?: boolean;
   readOnlyUrl?: boolean;
   interactive?: boolean;
+  inspectMode?: boolean;
+  onInspectResult?: (result: InspectElementResult | null) => void;
+  onDomSnapshot?: (result: DomSnapshotResult) => void;
 }
 
-export function BrowserViewer({ streamUrl, initialViewport, className, expiresAt, hideControls, hideFullscreenToggle, hideScreenshot, hideViewportSelector, readOnlyUrl, interactive = true }: BrowserViewerProps) {
+export interface BrowserViewerHandle {
+  requestDomSnapshot: () => void;
+  sendInspectMode: (enabled: boolean) => void;
+}
+
+export const BrowserViewer = forwardRef<BrowserViewerHandle, BrowserViewerProps>(function BrowserViewer({ streamUrl, initialViewport, className, expiresAt, hideControls, hideFullscreenToggle, hideScreenshot, hideViewportSelector, readOnlyUrl, interactive = true, inspectMode, onInspectResult, onDomSnapshot }, ref) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const wsRef = useRef<WebSocket | null>(null);
@@ -93,6 +115,23 @@ export function BrowserViewer({ streamUrl, initialViewport, className, expiresAt
       ws.send(JSON.stringify(message));
     }
   }, []);
+
+  // Keep callback refs current so the WebSocket onmessage handler (created
+  // once at connection time) always calls the latest callback.
+  const onInspectResultRef = useRef(onInspectResult);
+  onInspectResultRef.current = onInspectResult;
+  const onDomSnapshotRef = useRef(onDomSnapshot);
+  onDomSnapshotRef.current = onDomSnapshot;
+
+  // Expose imperative methods for parent components
+  useImperativeHandle(ref, () => ({
+    requestDomSnapshot: () => {
+      sendWs({ type: 'stream:dom_snapshot_request', payload: {} });
+    },
+    sendInspectMode: (enabled: boolean) => {
+      sendWs({ type: 'stream:inspect_mode', payload: { enabled } });
+    },
+  }), [sendWs]);
 
   // Ref to hold the connect function so onclose can call it without circular deps
   const connectWsRef = useRef<(attempt: number) => void>(() => {});
@@ -174,6 +213,16 @@ export function BrowserViewer({ streamUrl, initialViewport, className, expiresAt
                 frameCountRef.current = 0;
                 lastFpsUpdateRef.current = now;
               }
+              break;
+            }
+
+            case 'stream:inspect_element_response': {
+              onInspectResultRef.current?.(message.payload.element ?? null);
+              break;
+            }
+
+            case 'stream:dom_snapshot_response': {
+              onDomSnapshotRef.current?.(message.payload);
               break;
             }
 
@@ -284,6 +333,18 @@ export function BrowserViewer({ streamUrl, initialViewport, className, expiresAt
       const x = Math.round(e.clientX - rect.left);
       const y = Math.round(e.clientY - rect.top);
 
+      // In inspect mode, intercept clicks and send inspect request instead
+      if (inspectMode && action === 'down') {
+        sendWs({
+          type: 'stream:inspect_element_request',
+          payload: { x, y },
+        });
+        return;
+      }
+
+      // In inspect mode, suppress all other mouse events
+      if (inspectMode) return;
+
       const payload: StreamMouseEvent = {
         type: 'mouse',
         action,
@@ -298,7 +359,7 @@ export function BrowserViewer({ streamUrl, initialViewport, className, expiresAt
 
       sendWs({ type: 'stream:input', payload });
     },
-    [sendWs]
+    [sendWs, inspectMode]
   );
 
   const handleWheel = useCallback(
@@ -649,7 +710,7 @@ export function BrowserViewer({ streamUrl, initialViewport, className, expiresAt
 
         <canvas
           ref={canvasRef}
-          className={`outline-none ${interactive ? 'cursor-default' : 'cursor-default pointer-events-none'}`}
+          className={`outline-none ${inspectMode ? 'cursor-crosshair' : interactive ? 'cursor-default' : 'cursor-default pointer-events-none'}`}
           style={{
             width: viewport.width,
             height: viewport.height,
@@ -723,4 +784,4 @@ export function BrowserViewer({ streamUrl, initialViewport, className, expiresAt
       </div>
     </div>
   );
-}
+});
