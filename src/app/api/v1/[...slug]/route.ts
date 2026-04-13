@@ -369,12 +369,11 @@ export async function POST(
         return NextResponse.json({ error: 'repositoryId required' }, { status: 400 });
       }
       // Dynamic import to avoid pulling in heavy AI deps at route level
-      const { aiCreateTestCore } = await import('@/server/actions/ai');
-      const result = await aiCreateTestCore(repositoryId, {
+      const { createTest } = await import('@/server/actions/ai');
+      const result = await createTest(repositoryId, {
         targetUrl: url,
         userPrompt: prompt,
         functionalAreaId,
-        useMCP: true,
       });
       return NextResponse.json(result);
     }

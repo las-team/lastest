@@ -346,7 +346,6 @@ export async function getAISettings(repositoryId?: string | null) {
     anthropicModel: DEFAULT_AI_SETTINGS.anthropicModel,
     openaiApiKey: null,
     openaiModel: DEFAULT_AI_SETTINGS.openaiModel,
-    pwAgentEnabled: DEFAULT_AI_SETTINGS.pwAgentEnabled,
     pwAgentModel: DEFAULT_AI_SETTINGS.pwAgentModel,
     pwAgentTimeout: DEFAULT_AI_SETTINGS.pwAgentTimeout,
     createdAt: null,

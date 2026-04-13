@@ -76,7 +76,6 @@ export function AISettingsCard({ settings, repositoryId }: AISettingsCardProps) 
   );
 
   // Playwright Agent settings
-  const [pwAgentEnabled, setPwAgentEnabled] = useState(settings.pwAgentEnabled ?? false);
   const [pwAgentModel, setPwAgentModel] = useState(settings.pwAgentModel || '');
   const [pwAgentTimeout, setPwAgentTimeout] = useState(settings.pwAgentTimeout ?? 300000);
 
@@ -117,7 +116,6 @@ export function AISettingsCard({ settings, repositoryId }: AISettingsCardProps) 
     aiDiffingModel: settings.aiDiffingModel || DEFAULT_AI_SETTINGS.aiDiffingModel,
     aiDiffingOllamaBaseUrl: settings.aiDiffingOllamaBaseUrl || 'http://localhost:11434',
     aiDiffingOllamaModel: settings.aiDiffingOllamaModel || '',
-    pwAgentEnabled: settings.pwAgentEnabled ?? false,
     pwAgentModel: settings.pwAgentModel || '',
     pwAgentTimeout: settings.pwAgentTimeout ?? 300000,
   });
@@ -145,13 +143,12 @@ export function AISettingsCard({ settings, repositoryId }: AISettingsCardProps) 
         aiDiffingModel: aiDiffingModel || null,
         aiDiffingOllamaBaseUrl: aiDiffingOllamaBaseUrl || null,
         aiDiffingOllamaModel: aiDiffingOllamaModel || null,
-        pwAgentEnabled,
         pwAgentModel: pwAgentModel || null,
         pwAgentTimeout,
       });
       toast.success('AI settings saved');
     });
-  }, [repositoryId, provider, openrouterApiKey, openrouterModel, agentSdkPermissionMode, agentSdkModel, agentSdkWorkingDir, ollamaBaseUrl, ollamaModel, anthropicApiKey, anthropicModel, openaiApiKey, openaiModel, customInstructions, aiDiffingEnabled, aiDiffingProvider, aiDiffingApiKey, aiDiffingModel, aiDiffingOllamaBaseUrl, aiDiffingOllamaModel, pwAgentEnabled, pwAgentModel, pwAgentTimeout]);
+  }, [repositoryId, provider, openrouterApiKey, openrouterModel, agentSdkPermissionMode, agentSdkModel, agentSdkWorkingDir, ollamaBaseUrl, ollamaModel, anthropicApiKey, anthropicModel, openaiApiKey, openaiModel, customInstructions, aiDiffingEnabled, aiDiffingProvider, aiDiffingApiKey, aiDiffingModel, aiDiffingOllamaBaseUrl, aiDiffingOllamaModel, pwAgentModel, pwAgentTimeout]);
 
   // Auto-save with debounce - only when values differ from original props
   useEffect(() => {
@@ -176,7 +173,6 @@ export function AISettingsCard({ settings, repositoryId }: AISettingsCardProps) 
       aiDiffingModel !== orig.aiDiffingModel ||
       aiDiffingOllamaBaseUrl !== orig.aiDiffingOllamaBaseUrl ||
       aiDiffingOllamaModel !== orig.aiDiffingOllamaModel ||
-      pwAgentEnabled !== orig.pwAgentEnabled ||
       pwAgentModel !== orig.pwAgentModel ||
       pwAgentTimeout !== orig.pwAgentTimeout;
 
@@ -195,7 +191,7 @@ export function AISettingsCard({ settings, repositoryId }: AISettingsCardProps) 
         clearTimeout(debounceRef.current);
       }
     };
-  }, [provider, openrouterApiKey, openrouterModel, agentSdkPermissionMode, agentSdkModel, agentSdkWorkingDir, ollamaBaseUrl, ollamaModel, anthropicApiKey, anthropicModel, openaiApiKey, openaiModel, customInstructions, aiDiffingEnabled, aiDiffingProvider, aiDiffingApiKey, aiDiffingModel, aiDiffingOllamaBaseUrl, aiDiffingOllamaModel, pwAgentEnabled, pwAgentModel, pwAgentTimeout, doSave]);
+  }, [provider, openrouterApiKey, openrouterModel, agentSdkPermissionMode, agentSdkModel, agentSdkWorkingDir, ollamaBaseUrl, ollamaModel, anthropicApiKey, anthropicModel, openaiApiKey, openaiModel, customInstructions, aiDiffingEnabled, aiDiffingProvider, aiDiffingApiKey, aiDiffingModel, aiDiffingOllamaBaseUrl, aiDiffingOllamaModel, pwAgentModel, pwAgentTimeout, doSave]);
 
   const handleReset = () => {
     startTransition(async () => {
@@ -219,7 +215,6 @@ export function AISettingsCard({ settings, repositoryId }: AISettingsCardProps) 
       setAiDiffingModel(DEFAULT_AI_SETTINGS.aiDiffingModel);
       setAiDiffingOllamaBaseUrl('http://localhost:11434');
       setAiDiffingOllamaModel('');
-      setPwAgentEnabled(false);
       setPwAgentModel('');
       setPwAgentTimeout(300000);
       setTestResult(null);
@@ -590,15 +585,7 @@ export function AISettingsCard({ settings, repositoryId }: AISettingsCardProps) 
             Use Playwright&apos;s built-in AI agents (Planner, Generator, Healer) for live browser-powered test generation, discovery, and auto-fixing.
           </p>
 
-          <div className="flex items-center gap-3 mb-4">
-            <Switch
-              checked={pwAgentEnabled}
-              onCheckedChange={setPwAgentEnabled}
-            />
-            <Label>Enable Playwright Agents</Label>
-          </div>
-
-          {pwAgentEnabled && (provider === 'ollama' || provider === 'claude-cli') && (
+          {(provider === 'ollama' || provider === 'claude-cli') && (
             <div className="flex items-start gap-2 p-3 rounded-md bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 mb-4">
               <AlertTriangle className="w-4 h-4 text-amber-600 mt-0.5 shrink-0" />
               <p className="text-xs text-amber-800 dark:text-amber-200">
@@ -608,45 +595,43 @@ export function AISettingsCard({ settings, repositoryId }: AISettingsCardProps) 
             </div>
           )}
 
-          {pwAgentEnabled && (provider === 'openrouter' || provider === 'openai' || provider === 'anthropic') && (
+          {(provider === 'openrouter' || provider === 'openai' || provider === 'anthropic') && (
             <div className="flex items-start gap-2 p-3 rounded-md bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800 mb-4">
               <Info className="w-4 h-4 text-blue-600 mt-0.5 shrink-0" />
               <p className="text-xs text-blue-800 dark:text-blue-200">
-                PW Agents will use tool calling via {provider === 'openrouter' ? 'OpenRouter' : provider === 'openai' ? 'OpenAI' : 'Anthropic'}. Models with strong function calling support (Claude Sonnet/Opus, GPT-4o, Gemini Pro) work best.
+                Agents will use tool calling via {provider === 'openrouter' ? 'OpenRouter' : provider === 'openai' ? 'OpenAI' : 'Anthropic'}. Models with strong function calling support (Claude Sonnet/Opus, GPT-4o, Gemini Pro) work best.
               </p>
             </div>
           )}
 
-          {pwAgentEnabled && (
-            <div className="space-y-4 pl-2 border-l-2 border-border ml-2">
-              <div className="space-y-2">
-                <Label htmlFor="pwAgentModel">Agent Model (Optional)</Label>
-                <Input
-                  id="pwAgentModel"
-                  value={pwAgentModel}
-                  onChange={(e) => setPwAgentModel(e.target.value)}
-                  placeholder="e.g. claude-sonnet-4-5-20250929"
-                />
-                <p className="text-xs text-muted-foreground">
-                  LLM model powering the Playwright agents. Leave empty for default.
-                </p>
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="pwAgentTimeout">Timeout (seconds)</Label>
-                <Input
-                  id="pwAgentTimeout"
-                  type="number"
-                  value={Math.round(pwAgentTimeout / 1000)}
-                  onChange={(e) => setPwAgentTimeout(Math.max(30000, Number(e.target.value) * 1000))}
-                  placeholder="300"
-                />
-                <p className="text-xs text-muted-foreground">
-                  Maximum time for agent operations. Default: 300s (5 min).
-                </p>
-              </div>
+          <div className="space-y-4 pl-2 border-l-2 border-border ml-2">
+            <div className="space-y-2">
+              <Label htmlFor="pwAgentModel">Agent Model (Optional)</Label>
+              <Input
+                id="pwAgentModel"
+                value={pwAgentModel}
+                onChange={(e) => setPwAgentModel(e.target.value)}
+                placeholder="e.g. claude-sonnet-4-5-20250929"
+              />
+              <p className="text-xs text-muted-foreground">
+                LLM model powering the Playwright agents. Leave empty for default.
+              </p>
             </div>
-          )}
+
+            <div className="space-y-2">
+              <Label htmlFor="pwAgentTimeout">Timeout (seconds)</Label>
+              <Input
+                id="pwAgentTimeout"
+                type="number"
+                value={Math.round(pwAgentTimeout / 1000)}
+                onChange={(e) => setPwAgentTimeout(Math.max(30000, Number(e.target.value) * 1000))}
+                placeholder="300"
+              />
+              <p className="text-xs text-muted-foreground">
+                Maximum time for agent operations. Default: 300s (5 min).
+              </p>
+            </div>
+          </div>
         </div>
 
         {/* Visual Diff Analysis Section */}

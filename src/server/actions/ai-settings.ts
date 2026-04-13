@@ -61,7 +61,6 @@ export async function saveAISettings(data: {
   anthropicModel?: string | null;
   openaiApiKey?: string | null;
   openaiModel?: string | null;
-  pwAgentEnabled?: boolean;
   pwAgentModel?: string | null;
   pwAgentTimeout?: number;
 }) {

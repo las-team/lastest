@@ -5,13 +5,10 @@ import { requireTeamAccess, requireRepoAccess } from '@/lib/auth';
 import {
   generateWithAI,
   SYSTEM_PROMPT,
-  MCP_SYSTEM_PROMPT,
-  createTestPrompt,
   createFixPrompt,
-  createEnhancePrompt,
   extractCodeFromResponse,
 } from '@/lib/ai';
-import type { AIProviderConfig, TestGenerationContext, ScanContext, DiscoverySource, CodebaseIntelligenceContext } from '@/lib/ai/types';
+import type { AIProviderConfig, TestGenerationContext, CodebaseIntelligenceContext } from '@/lib/ai/types';
 import { revalidatePath } from 'next/cache';
 import { getCurrentBranchForRepo } from '@/lib/git-utils';
 import { agentCreateTest } from '@/lib/playwright/generator-agent';
@@ -47,75 +44,6 @@ async function getAIConfig(repositoryId?: string | null): Promise<AIProviderConf
   };
 }
 
-// Build ScanContext from route data
-function buildScanContextFromRoute(
-  route: queries.RouteWithContext,
-  discoverySource: DiscoverySource = 'file-scan'
-): ScanContext {
-  return {
-    discoverySource,
-    sourceFilePath: route.filePath ?? undefined,
-    framework: route.framework ?? undefined,
-    routerType: route.routerType as 'hash' | 'browser' | undefined,
-    specDescription: route.description ?? undefined,
-    testSuggestions: route.testSuggestions.length > 0 ? route.testSuggestions : undefined,
-    functionalAreaName: route.functionalAreaName ?? undefined,
-    functionalAreaDescription: route.functionalAreaDescription ?? undefined,
-  };
-}
-
-export async function aiCreateTestCore(
-  repositoryId: string,
-  context: TestGenerationContext,
-  routeId?: string
-): Promise<{ success: boolean; code?: string; error?: string }> {
-  try {
-    // Enrich context with route information if routeId is provided
-    const enrichedContext = { ...context };
-
-    if (routeId) {
-      const routeWithContext = await queries.getRouteWithContext(routeId);
-      if (routeWithContext) {
-        enrichedContext.scanContext = buildScanContextFromRoute(routeWithContext);
-
-        // Also set routePath if not already set
-        if (!enrichedContext.routePath && !enrichedContext.targetUrl) {
-          enrichedContext.routePath = routeWithContext.path;
-        }
-
-        // Set isDynamicRoute based on route type
-        if (routeWithContext.type === 'dynamic') {
-          enrichedContext.isDynamicRoute = true;
-        }
-      }
-    }
-
-    const config = await getAIConfig(repositoryId);
-    const prompt = createTestPrompt(enrichedContext);
-    const systemPrompt = enrichedContext.useMCP ? MCP_SYSTEM_PROMPT : SYSTEM_PROMPT;
-    const response = await generateWithAI(config, prompt, systemPrompt, {
-      actionType: 'create_test',
-      repositoryId,
-      useMCP: enrichedContext.useMCP,
-    });
-    const code = extractCodeFromResponse(response);
-
-    return { success: true, code };
-  } catch (error) {
-    const message = error instanceof Error ? error.message : 'Failed to generate test';
-    return { success: false, error: message };
-  }
-}
-
-export async function aiCreateTest(
-  repositoryId: string,
-  context: TestGenerationContext,
-  routeId?: string
-): Promise<{ success: boolean; code?: string; error?: string }> {
-  await requireRepoAccess(repositoryId);
-  return aiCreateTestCore(repositoryId, context, routeId);
-}
-
 export async function aiFixTest(
   repositoryId: string,
   testId: string,
@@ -148,34 +76,16 @@ export async function aiFixTest(
   }
 }
 
+/**
+ * Enhance test: uses agentic browser inspection to improve test with verified selectors.
+ */
 export async function aiEnhanceTest(
   repositoryId: string,
   testId: string,
   userPrompt?: string
 ): Promise<{ success: boolean; code?: string; error?: string }> {
-  await requireRepoAccess(repositoryId);
-  try {
-    const test = await queries.getTest(testId);
-    if (!test) {
-      return { success: false, error: 'Test not found' };
-    }
-
-    const config = await getAIConfig(repositoryId);
-    const prompt = createEnhancePrompt({
-      existingCode: test.code,
-      userPrompt,
-    });
-    const response = await generateWithAI(config, prompt, SYSTEM_PROMPT, {
-      actionType: 'enhance_test',
-      repositoryId,
-    });
-    const code = extractCodeFromResponse(response);
-
-    return { success: true, code };
-  } catch (error) {
-    const message = error instanceof Error ? error.message : 'Failed to enhance test';
-    return { success: false, error: message };
-  }
+  const { agentEnhanceTest } = await import('@/lib/playwright/enhancer-agent');
+  return agentEnhanceTest(repositoryId, testId, userPrompt);
 }
 
 export async function saveGeneratedTest(data: {
@@ -595,49 +505,34 @@ export async function aiFixTests(
 }
 
 /**
- * Unified fix: routes to PW Healer agent when enabled, falls back to prompt-based fix.
+ * Heal test: full agentic browser inspection to diagnose and fix complex failures.
  */
-export async function fixTest(
+export async function healTest(
   repositoryId: string,
   testId: string,
-  errorMessage: string
 ): Promise<{ success: boolean; code?: string; error?: string }> {
-  const settings = await queries.getAISettings(repositoryId);
-  if (settings.pwAgentEnabled) {
-    // Dynamic import to avoid circular deps / loading cost when not needed
-    const { agentHealTest } = await import('@/lib/playwright/healer-agent');
-    return agentHealTest(repositoryId, testId);
-  }
-  return aiFixTest(repositoryId, testId, errorMessage);
+  const { agentHealTest } = await import('@/lib/playwright/healer-agent');
+  return agentHealTest(repositoryId, testId);
 }
 
 /**
- * Unified bulk fix: routes to PW Healer agent when enabled.
+ * Heal tests in bulk: agentic browser inspection for each test.
  */
-export async function fixTests(
+export async function healTests(
   testIds: string[],
   repositoryId: string
 ): Promise<{ success: boolean; fixed: number; failed: number; errors: string[] }> {
-  const settings = await queries.getAISettings(repositoryId);
-  if (settings.pwAgentEnabled) {
-    const { agentHealTests } = await import('@/lib/playwright/healer-agent');
-    return agentHealTests(testIds, repositoryId);
-  }
-  return aiFixTests(testIds, repositoryId);
+  const { agentHealTests } = await import('@/lib/playwright/healer-agent');
+  return agentHealTests(testIds, repositoryId);
 }
 
 /**
- * Unified create test: routes to PW Generator agent when enabled.
+ * Create test: always uses agentic MCP-based generation with live browser verification.
  */
 export async function createTest(
   repositoryId: string,
   context: TestGenerationContext,
-  routeId?: string
 ): Promise<{ success: boolean; code?: string; error?: string }> {
-  const settings = await queries.getAISettings(repositoryId);
-  if (settings.pwAgentEnabled) {
-    const { agentCreateTest } = await import('@/lib/playwright/generator-agent');
-    return agentCreateTest(repositoryId, context);
-  }
-  return aiCreateTest(repositoryId, context, routeId);
+  const { agentCreateTest } = await import('@/lib/playwright/generator-agent');
+  return agentCreateTest(repositoryId, context);
 }

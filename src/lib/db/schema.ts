@@ -832,7 +832,6 @@ export const aiSettings = pgTable('ai_settings', {
   aiDiffingModel: text('ai_diffing_model').default('anthropic/claude-sonnet-4-5-20250929'),
   aiDiffingOllamaBaseUrl: text('ai_diffing_ollama_base_url'),
   aiDiffingOllamaModel: text('ai_diffing_ollama_model'),
-  pwAgentEnabled: boolean('pw_agent_enabled').default(true),
   pwAgentModel: text('pw_agent_model'),
   pwAgentTimeout: integer('pw_agent_timeout').default(300000),
   createdAt: timestamp('created_at'),
@@ -856,7 +855,6 @@ export const DEFAULT_AI_SETTINGS = {
   aiDiffingModel: 'anthropic/claude-sonnet-4-5-20250929',
   aiDiffingOllamaBaseUrl: 'http://localhost:11434',
   aiDiffingOllamaModel: '',
-  pwAgentEnabled: true,
   pwAgentModel: '',
   pwAgentTimeout: 300000,
 };
