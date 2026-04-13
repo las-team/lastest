@@ -30,6 +30,7 @@ export interface CodeGenEvent {
     deltaY?: number;
     downloadWrap?: boolean;
     autoDetected?: boolean;
+    downloadFilename?: string;
   };
 }
 
@@ -292,6 +293,17 @@ export function eventsToCodeLines(
             lines.push(`${indent}// Assertion: Verify DOM is ready`);
             lines.push(`${indent}await page.waitForLoadState('domcontentloaded');`);
             break;
+          case 'downloadExists': {
+            const fn = event.data.downloadFilename;
+            if (fn) {
+              lines.push(`${indent}// Download assertion: filenameMatch`);
+              lines.push(`${indent}expect(downloads.list().some(d => d.suggestedFilename === '${fn.replace(/'/g, "\\'")}')).toBe(true);`);
+            } else {
+              lines.push(`${indent}// Download assertion: fileDownloaded`);
+              lines.push(`${indent}expect(downloads.list().length).toBeGreaterThan(0);`);
+            }
+            break;
+          }
         }
       }
     } else if (event.type === 'mouse-down' && event.data.coordinates) {

@@ -423,6 +423,7 @@ export async function getTestResultsByTest(testId: string) {
       browser: testResults.browser,
       consoleErrors: testResults.consoleErrors,
       networkRequests: testResults.networkRequests,
+      downloads: testResults.downloads,
       videoPath: testResults.videoPath,
       a11yViolations: testResults.a11yViolations,
       softErrors: testResults.softErrors,

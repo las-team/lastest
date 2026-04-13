@@ -5,7 +5,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { SliderComparison } from '@/components/diff/slider-comparison';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { approveDiff, undoApproval, addDiffTodo } from '@/server/actions/diffs';
-import type { VisualDiff, Test, DiffMetadata, AIDiffAnalysis, A11yViolation, NetworkRequest } from '@/lib/db/schema';
+import type { VisualDiff, Test, DiffMetadata, AIDiffAnalysis, A11yViolation, NetworkRequest, DownloadRecord } from '@/lib/db/schema';
 import { A11yViolationsPanel } from '@/components/builds/a11y-violations-panel';
 import { RuntimeErrorsPanel, stripRuntimeErrorsFromMessage } from '@/components/builds/runtime-errors-panel';
 import { CheckCircle, ListTodo, SkipForward, Eye, Image as ImageIcon, Sparkles, Loader2, ArrowUpDown, Bug, ChevronDown } from 'lucide-react';
@@ -14,7 +14,7 @@ import { Input } from '@/components/ui/input';
 import { Card, CardContent } from '@/components/ui/card';
 
 interface DiffViewerClientProps {
-  diff: VisualDiff & { test: Test | null; errorMessage?: string | null; a11yViolations?: A11yViolation[] | null; consoleErrors?: string[] | null; networkRequests?: NetworkRequest[] | null; networkBodiesPath?: string | null };
+  diff: VisualDiff & { test: Test | null; errorMessage?: string | null; a11yViolations?: A11yViolation[] | null; consoleErrors?: string[] | null; networkRequests?: NetworkRequest[] | null; networkBodiesPath?: string | null; downloads?: DownloadRecord[] | null };
   buildId: string;
   prevDiffId?: string;
   nextDiffId?: string;
@@ -257,7 +257,7 @@ export function DiffViewerClient({ diff, buildId, prevDiffId, nextDiffId, banAiM
             ) : null;
           })()}
 
-          <RuntimeErrorsPanel consoleErrors={diff.consoleErrors} networkRequests={diff.networkRequests} networkBodiesPath={diff.networkBodiesPath} />
+          <RuntimeErrorsPanel consoleErrors={diff.consoleErrors} networkRequests={diff.networkRequests} networkBodiesPath={diff.networkBodiesPath} downloads={diff.downloads} />
 
           {/* AI Analysis */}
           {!banAiMode && (aiAnalysis || aiStatus === 'running' || aiStatus === 'pending') && (

@@ -147,7 +147,34 @@ export function parseAssertions(code: string): TestAssertion[] {
       continue;
     }
 
-    // Pattern 5: Page wait assertions
+    // Pattern 5: Download assertions
+    // // Download assertion: filenameMatch  OR  // Download assertion: fileDownloaded
+    const downloadCommentMatch = trimmed.match(/^\/\/ Download assertion: (\w+)/);
+    if (downloadCommentMatch) {
+      const assertionType = downloadCommentMatch[1];
+      // Look at next line for expected filename
+      const nextLine = i + 1 < lines.length ? lines[i + 1].trim() : '';
+      let expectedValue: string | undefined;
+      const fnMatch = nextLine.match(/suggestedFilename === '([^']+)'/);
+      if (fnMatch) expectedValue = fnMatch[1];
+
+      assertions.push({
+        id: assertionId(orderIndex, assertionType, 'download', expectedValue),
+        orderIndex,
+        category: 'download',
+        assertionType,
+        negated: false,
+        expectedValue,
+        isSoft: !hasHardMarker,
+        label: expectedValue ? `Download file "${expectedValue}"` : 'File downloaded',
+        codeLineStart: i + 1,
+        codeLineEnd: i + 2,
+      });
+      orderIndex++;
+      continue;
+    }
+
+    // Pattern 6: Page wait assertions
     if (trimmed.match(/await\s+page\.waitForLoadState\(/)) {
       const stateMatch = trimmed.match(/waitForLoadState\(['"](\w+)['"]\)/);
       const state = stateMatch?.[1] ?? 'load';

@@ -183,7 +183,8 @@
       "WebFetch(domain:docs.twenty.com)",
       "WebFetch(domain:hyteck.de)",
       "WebFetch(domain:pipedream.com)",
-      "WebFetch(domain:playbooks.com)"
+      "WebFetch(domain:playbooks.com)",
+      "Bash(jq '.results[:5][] | \"\\\\\\(.url\\) — \\\\\\(.title\\)\"' -r)"
     ]
   },
   "disabledMcpjsonServers": [

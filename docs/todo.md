@@ -19,15 +19,12 @@ Fix play specs -> test specs route
 payment
 (low) Every button is green, multiple primary actions, keep clicking on run test instead of save
 ## ideas
-Non-AI test triage,  5-category classification with confidence scoring, maps to article's "failure diagnosis"  recommendation       
 Test governance /        │ AI generates tests fast → need redundancy         │ Medium — extend coverage analytics │
   │ explosion detection      │ detection, coverage-weighted pruning              │                                     
   Looped execution         │ Plan → generate → run → heal cycles without       │ Low — already have all pieces,     │
   │ (--loop)       
 Migrate to gh app /home/ewyct/.claude/plans/cheeky-sparking-torvalds.md
 The premium QA agent
-Selectors 1 for play agent /home/ewyct/.claude/plans/cozy-doodling-rain.md
-Payment integration /home/ewyct/.claude/plans/drifting-yawning-hoare.md
 special prompting for ai diff analysis either by user or by branch code change 
 if a pr merge happens, update test manifest with new functions - show as new, prompt test generation
 Test coverage assessment and recreation based on existing test set  ~/.claude/plans/shimmying-conjuring-sun.md

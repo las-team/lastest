@@ -65,6 +65,7 @@ export async function getVisualDiffsWithTestStatus(buildId: string) {
       a11yViolations: testResults.a11yViolations,
       consoleErrors: testResults.consoleErrors,
       networkRequests: testResults.networkRequests,
+      downloads: testResults.downloads,
       browser: visualDiffs.browser,
     })
     .from(visualDiffs)

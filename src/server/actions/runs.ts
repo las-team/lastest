@@ -206,6 +206,7 @@ async function runTestsAsync(runId: string, tests: Test[], repositoryId?: string
         videoPath: result.videoPath,
         consoleErrors: result.consoleErrors,
         networkRequests: result.networkRequests,
+        downloads: result.downloads,
         softErrors: result.softErrors,
         networkBodiesPath: result.networkBodiesPath,
       });

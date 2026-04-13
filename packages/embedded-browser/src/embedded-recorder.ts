@@ -128,7 +128,7 @@ export class EmbeddedRecorder {
     });
 
     // Auto-detect downloads: retroactively mark the last click/mouse-down as download-triggering
-    this.page.on('download', () => {
+    this.page.on('download', (download) => {
       if (!this.isRecording) return;
       for (let i = this.events.length - 1; i >= 0; i--) {
         const ev = this.events[i];
@@ -142,6 +142,11 @@ export class EmbeddedRecorder {
           break;
         }
       }
+      // Auto-add download assertion to timeline
+      this.addEvent('assertion', {
+        assertionType: 'downloadExists',
+        downloadFilename: download.suggestedFilename(),
+      });
     });
 
     // Batch events and send to server periodically

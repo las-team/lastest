@@ -68,6 +68,7 @@ interface TestResult {
   browser: string | null;
   consoleErrors: string[] | null;
   networkRequests: import('@/lib/db/schema').NetworkRequest[] | null;
+  downloads: import('@/lib/db/schema').DownloadRecord[] | null;
   videoPath: string | null;
   a11yViolations: A11yViolation[] | null;
   softErrors: string[] | null;
@@ -1239,7 +1240,7 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
                               ) : null;
                             })()}
 
-                            <RuntimeErrorsPanel consoleErrors={result.consoleErrors} networkRequests={result.networkRequests} networkBodiesPath={result.networkBodiesPath} />
+                            <RuntimeErrorsPanel consoleErrors={result.consoleErrors} networkRequests={result.networkRequests} networkBodiesPath={result.networkBodiesPath} downloads={result.downloads} />
 
                             {result.softErrors && (result.softErrors as string[]).length > 0 && (
                               <div className="mt-2 p-2 bg-yellow-50 border border-yellow-200 rounded text-sm text-yellow-800 dark:bg-yellow-950/30 dark:border-yellow-800 dark:text-yellow-200">

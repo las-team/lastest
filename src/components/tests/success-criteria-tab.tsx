@@ -29,6 +29,7 @@ const CATEGORY_COLORS: Record<string, string> = {
   page: 'bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-200',
   generic: 'bg-amber-100 text-amber-800 dark:bg-amber-900 dark:text-amber-200',
   visual: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900 dark:text-emerald-200',
+  download: 'bg-indigo-100 text-indigo-800 dark:bg-indigo-900 dark:text-indigo-200',
 };
 
 const TYPE_COLORS: Record<string, string> = {

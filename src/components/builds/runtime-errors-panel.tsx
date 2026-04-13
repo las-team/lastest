@@ -1,14 +1,15 @@
 'use client';
 
 import { useState, useCallback } from 'react';
-import { Terminal, Globe, Filter, ChevronDown, ChevronRight, Loader2 } from 'lucide-react';
+import { Terminal, Globe, Filter, ChevronDown, ChevronRight, Loader2, Download } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
-import type { NetworkRequest } from '@/lib/db/schema';
+import type { NetworkRequest, DownloadRecord } from '@/lib/db/schema';
 
 interface RuntimeErrorsPanelProps {
   consoleErrors?: string[] | null;
   networkRequests?: NetworkRequest[] | null;
   networkBodiesPath?: string | null;
+  downloads?: DownloadRecord[] | null;
 }
 
 /** Strip "Console errors detected: ..." and "Network failures detected: ..." from an errorMessage. */
@@ -294,11 +295,46 @@ function NetworkTraceTable({ requests, networkBodiesPath }: { requests: NetworkR
   );
 }
 
-export function RuntimeErrorsPanel({ consoleErrors, networkRequests, networkBodiesPath }: RuntimeErrorsPanelProps) {
+function DownloadTraceTable({ downloads }: { downloads: DownloadRecord[] }) {
+  return (
+    <div className="px-2.5 pb-2.5">
+      <div className="max-h-80 overflow-y-auto relative">
+        <div className="flex items-center gap-2 py-1 text-[10px] text-muted-foreground font-medium border-b border-border/50 sticky top-0 z-10 bg-white dark:bg-gray-950">
+          <span className="flex-1 min-w-0">Filename</span>
+          <span className="w-16 shrink-0 text-right">Size</span>
+          <span className="w-14 shrink-0 text-right">Time</span>
+          <span className="flex-1 min-w-0">URL</span>
+        </div>
+        {downloads.map((dl, i) => (
+          <div key={i} className="flex items-center gap-2 py-1.5 border-b border-border/30 text-xs">
+            <span className="flex-1 min-w-0 truncate font-mono text-foreground" title={dl.suggestedFilename}>
+              {dl.suggestedFilename}
+            </span>
+            <span className="w-16 shrink-0 text-right text-muted-foreground text-[10px]">
+              {dl.sizeBytes !== undefined ? formatBytes(dl.sizeBytes) : '—'}
+            </span>
+            <span className="w-14 shrink-0 text-right text-muted-foreground text-[10px]">
+              {dl.durationMs ? `${dl.durationMs}ms` : '—'}
+            </span>
+            <span
+              className="flex-1 min-w-0 truncate font-mono text-muted-foreground text-[11px]"
+              title={dl.url}
+            >
+              {dl.url ? truncateUrl(dl.url) : '—'}
+            </span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+export function RuntimeErrorsPanel({ consoleErrors, networkRequests, networkBodiesPath, downloads }: RuntimeErrorsPanelProps) {
   const hasConsole = consoleErrors && consoleErrors.length > 0;
   const hasNetwork = networkRequests && networkRequests.length > 0;
+  const hasDownloads = downloads && downloads.length > 0;
 
-  if (!hasConsole && !hasNetwork) return null;
+  if (!hasConsole && !hasNetwork && !hasDownloads) return null;
 
   const networkErrors = networkRequests?.filter(r => r.status >= 400 || r.failed) ?? [];
   const hasErrors = networkErrors.length > 0;
@@ -367,6 +403,19 @@ export function RuntimeErrorsPanel({ consoleErrors, networkRequests, networkBodi
             </Badge>
           </summary>
           <NetworkTraceTable requests={networkRequests!} networkBodiesPath={networkBodiesPath} />
+        </details>
+      )}
+
+      {hasDownloads && (
+        <details className="border border-blue-200 bg-blue-50 rounded-lg dark:border-blue-800 dark:bg-blue-950/30">
+          <summary className="flex items-center gap-2 p-2.5 cursor-pointer select-none text-sm">
+            <Download className="w-4 h-4 text-blue-600 dark:text-blue-400 shrink-0" />
+            <span className="font-medium text-blue-800 dark:text-blue-200">Downloads</span>
+            <Badge variant="secondary" className="ml-auto text-xs">
+              {downloads!.length}
+            </Badge>
+          </summary>
+          <DownloadTraceTable downloads={downloads!} />
         </details>
       )}
     </div>

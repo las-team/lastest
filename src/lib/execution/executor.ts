@@ -10,7 +10,7 @@
 
 import { getExecutionMode, shouldUseLocalRunner, isLocalDisabled } from './mode';
 import { getRunner, type TestRunResult, type ProgressCallback } from '@/lib/playwright/runner';
-import type { Test, EnvironmentConfig, PlaywrightSettings, StabilizationSettings, NetworkRequest } from '@/lib/db/schema';
+import type { Test, EnvironmentConfig, PlaywrightSettings, StabilizationSettings, NetworkRequest, DownloadRecord } from '@/lib/db/schema';
 import { DEFAULT_STABILIZATION_SETTINGS } from '@/lib/db/schema';
 import type {
   RunTestCommand,
@@ -678,6 +678,7 @@ async function executeViaRunner(
         errorMessage: errorPayload?.message as string | undefined,
         consoleErrors: Array.isArray(payload.consoleErrors) && payload.consoleErrors.length > 0 ? payload.consoleErrors as string[] : undefined,
         networkRequests: Array.isArray(payload.networkRequests) && payload.networkRequests.length > 0 ? payload.networkRequests as NetworkRequest[] : undefined,
+        downloads: Array.isArray(payload.downloads) && payload.downloads.length > 0 ? payload.downloads as DownloadRecord[] : undefined,
         softErrors: Array.isArray(payload.softErrors) && payload.softErrors.length > 0 ? payload.softErrors as string[] : undefined,
         videoPath,
         networkBodiesPath,

@@ -27,6 +27,15 @@ export interface NetworkRequest {
   responseSize?: number;
 }
 
+export interface DownloadRecord {
+  suggestedFilename: string;
+  savedPath: string;
+  url?: string;
+  sizeBytes?: number;
+  durationMs?: number;
+  startTime?: number;
+}
+
 // Selector configuration for multi-input recording
 export type SelectorType = 'data-testid' | 'id' | 'role-name' | 'label' | 'heading-context' | 'text' | 'aria-label' | 'placeholder' | 'name' | 'alt-text' | 'title' | 'css-path' | 'ocr-text' | 'coords';
 
@@ -218,7 +227,7 @@ export interface A11yViolation {
 export interface TestAssertion {
   id: string;
   orderIndex: number;
-  category: 'element' | 'page' | 'generic' | 'visual';
+  category: 'element' | 'page' | 'generic' | 'visual' | 'download';
   assertionType: string;
   negated: boolean;
   targetSelector?: string;
@@ -262,6 +271,7 @@ export const testResults = pgTable('test_results', {
   browser: text('browser').default('chromium'),
   consoleErrors: jsonb('console_errors').$type<string[]>(),
   networkRequests: jsonb('network_requests').$type<NetworkRequest[]>(),
+  downloads: jsonb('downloads').$type<DownloadRecord[]>(),
   a11yViolations: jsonb('a11y_violations').$type<A11yViolation[]>(),
   assertionResults: jsonb('assertion_results').$type<AssertionResult[]>(),
   a11yPassesCount: integer('a11y_passes_count'),

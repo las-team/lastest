@@ -6,7 +6,7 @@ import fs from 'fs';
 import crypto from 'crypto';
 import AxeBuilder from '@axe-core/playwright';
 import { DEFAULT_SELECTOR_PRIORITY, DEFAULT_STABILIZATION_SETTINGS } from '@/lib/db/schema';
-import type { A11yViolation, StabilizationSettings, StabilityMetadata } from '@/lib/db/schema';
+import type { A11yViolation, StabilizationSettings, StabilityMetadata, DownloadRecord } from '@/lib/db/schema';
 import { getSelectorStats, recordSelectorSuccess, recordSelectorFailure, getDefaultSetupSteps, getTestFixtures, getRecordingViewport } from '@/lib/db/queries';
 import { setupFreezeScripts, setupThirdPartyBlocking, applyStabilization } from './stabilization';
 import { captureWithBurst } from './burst-capture';
@@ -771,6 +771,7 @@ export interface TestRunResult {
   videoPath?: string;
   softErrors?: string[];
   networkBodiesPath?: string;
+  downloads?: DownloadRecord[];
 }
 
 export interface ProgressCallback {
@@ -1102,6 +1103,7 @@ export class PlaywrightRunner extends EventEmitter {
     const consoleErrors: string[] = [];
     let allNetworkRequests: NetworkRequest[] = [];
     let networkSeq = 0;
+    const allDownloads: DownloadRecord[] = [];
 
     // Track captured screenshots from within test code (outside try so catch can access)
     const capturedScreenshots: CapturedScreenshot[] = [];
@@ -1339,6 +1341,31 @@ export class PlaywrightRunner extends EventEmitter {
         }
       });
 
+      // Passive download capture — catches auto-triggered downloads not using waitForDownload helper
+      if (this.settings?.acceptDownloads) {
+        const passiveDlDir = path.join(STORAGE_DIRS.screenshots, this.repositoryId || 'default', 'downloads');
+        fs.mkdirSync(passiveDlDir, { recursive: true });
+        page.on('download', async (download) => {
+          const startTime = Date.now();
+          try {
+            const safeName = path.basename(download.suggestedFilename()).replace(/\.\./g, '_');
+            // Skip if already captured by waitForDownload helper
+            if (allDownloads.some(d => d.suggestedFilename === safeName && Math.abs((d.startTime || 0) - startTime) < 2000)) return;
+            const savePath = path.join(passiveDlDir, safeName);
+            await download.saveAs(savePath);
+            const stats = fs.statSync(savePath);
+            allDownloads.push({
+              suggestedFilename: safeName,
+              savedPath: toRelativePath(savePath),
+              url: download.url(),
+              sizeBytes: stats.size,
+              durationMs: Date.now() - startTime,
+              startTime,
+            });
+          } catch { /* best-effort passive capture */ }
+        });
+      }
+
       // Compute screenshotPath for the test function
       const testScreenshotPath = path.join(this.screenshotDir, `${runId}-${test.id}.png`);
 
@@ -1562,6 +1589,12 @@ export class PlaywrightRunner extends EventEmitter {
         });
         testSoftErrors = execResult.softErrors;
         testAssertionResults = execResult.assertionResults;
+        // Merge downloads from executeTestCode (waitForDownload helper) into passive captures
+        for (const dl of execResult.downloads) {
+          if (!allDownloads.some(d => d.suggestedFilename === dl.suggestedFilename && d.startTime === dl.startTime)) {
+            allDownloads.push(dl);
+          }
+        }
       } catch (e) {
         testThrewError = true;
         const msg = e instanceof Error ? e.message : String(e);
@@ -1723,6 +1756,7 @@ export class PlaywrightRunner extends EventEmitter {
         stabilityMetadata: aggregatedStabilityMetadata,
         softErrors: testSoftErrors.length > 0 ? testSoftErrors : undefined,
         assertionResults: testAssertionResults.length > 0 ? testAssertionResults : undefined,
+        downloads: allDownloads.length > 0 ? allDownloads : undefined,
       };
 
     } catch (error) {
@@ -1779,6 +1813,7 @@ export class PlaywrightRunner extends EventEmitter {
         teardownError,
         softErrors: testSoftErrors.length > 0 ? testSoftErrors : undefined,
         assertionResults: testAssertionResults.length > 0 ? testAssertionResults : undefined,
+        downloads: allDownloads.length > 0 ? allDownloads : undefined,
       };
 
     } finally {
@@ -1820,7 +1855,7 @@ export class PlaywrightRunner extends EventEmitter {
     validateTestCode(code);
   }
 
-  private async executeTestCode(page: Page, test: Test, runId: string, screenshotPath: string, onStepLabel?: (label: string) => void): Promise<{ softErrors: string[]; assertionResults: import('@/lib/db/schema').AssertionResult[] }> {
+  private async executeTestCode(page: Page, test: Test, runId: string, screenshotPath: string, onStepLabel?: (label: string) => void): Promise<{ softErrors: string[]; assertionResults: import('@/lib/db/schema').AssertionResult[]; downloads: DownloadRecord[] }> {
     let code = test.code;
     if (!code) {
       throw new Error('No test code');
@@ -2086,8 +2121,10 @@ export class PlaywrightRunner extends EventEmitter {
         fs.mkdirSync(dlDir, { recursive: true });
       }
       const dlList: Array<{ suggestedFilename: string; path: string }> = [];
+      const execDownloads: DownloadRecord[] = [];
       const downloadsHelper = this.settings?.acceptDownloads ? {
         waitForDownload: async (triggerAction: () => Promise<void>) => {
+          const startTime = Date.now();
           const [download] = await Promise.all([
             page.waitForEvent('download'),
             triggerAction(),
@@ -2095,6 +2132,16 @@ export class PlaywrightRunner extends EventEmitter {
           const safeName = path.basename(download.suggestedFilename()).replace(/\.\./g, '_');
           const savePath = path.join(dlDir, safeName);
           await download.saveAs(savePath);
+          const stats = fs.statSync(savePath);
+          const record: DownloadRecord = {
+            suggestedFilename: safeName,
+            savedPath: toRelativePath(savePath),
+            url: download.url(),
+            sizeBytes: stats.size,
+            durationMs: Date.now() - startTime,
+            startTime,
+          };
+          execDownloads.push(record);
           dlList.push({ suggestedFilename: safeName, path: savePath });
           return { filename: safeName, path: savePath };
         },
@@ -2158,7 +2205,7 @@ export class PlaywrightRunner extends EventEmitter {
       const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
       const testFn = new AsyncFunction('page', 'baseUrl', 'screenshotPath', 'stepLogger', 'expect', 'appState', 'locateWithFallback', 'fileUpload', 'clipboard', 'downloads', 'network', 'replayCursorPath', 'fixtures', body);
       await testFn(page, baseUrl, screenshotPath, stepLogger, expectFn, appStateFn, statsLocateWithFallback, fileUploadHelper, clipboardHelper, downloadsHelper, networkHelper, replayCursorPathFn, fixturesMap);
-      return { softErrors, assertionResults: assertionTracker.results };
+      return { softErrors, assertionResults: assertionTracker.results, downloads: execDownloads };
     }
 
     // Legacy: try Playwright test format
@@ -2171,7 +2218,7 @@ export class PlaywrightRunner extends EventEmitter {
       for (const line of lines) {
         await this.executeLine(page, line.trim(), test.id);
       }
-      return { softErrors: [], assertionResults: [] };
+      return { softErrors: [], assertionResults: [], downloads: [] };
     }
 
     const body = bodyMatch[1];
@@ -2180,7 +2227,7 @@ export class PlaywrightRunner extends EventEmitter {
     for (const line of lines) {
       await this.executeLine(page, line.trim(), test.id);
     }
-    return { softErrors: [], assertionResults: [] };
+    return { softErrors: [], assertionResults: [], downloads: [] };
   }
 
   // Locate element using fallback selector strategy with stats-based optimization
