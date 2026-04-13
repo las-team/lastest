@@ -171,18 +171,32 @@ export function BuildDetailClient({
     }
   };
 
-  // Sort diffs: Tier 0 (failed/rejected), Tier 1 (pending), Tier 2 (other)
-  // Within each tier: sort by pixelDifference descending (highest first)
+  // Sort diffs: failed/changed/flaky tests to top, then by test name → step label
   const sortedDiffs = useMemo(() => {
-    const getTier = (d: VisualDiffWithTestStatus) => {
-      if (d.testResultStatus === 'failed' || d.status === 'rejected') return 0;
-      if (d.status === 'pending' && d.testResultStatus !== 'failed') return 1;
-      return 2;
-    };
+    // Determine per-test tier: a test is tier 0 if ANY of its diffs are failed/rejected
+    const testTiers = new Map<string, number>();
+    for (const d of diffs) {
+      const tier = d.testResultStatus === 'failed' || d.status === 'rejected' ? 0
+        : d.status === 'pending' && d.testResultStatus !== 'failed' ? 1
+        : 2;
+      const prev = testTiers.get(d.testId) ?? 2;
+      if (tier < prev) testTiers.set(d.testId, tier);
+    }
+
+    // Natural sort for step labels (e.g. "Step 2" before "Step 10")
+    const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });
+
     return [...diffs].sort((a, b) => {
-      const tierDiff = getTier(a) - getTier(b);
+      // 1. Test-level tier (move whole tests with issues to top)
+      const tierDiff = (testTiers.get(a.testId) ?? 2) - (testTiers.get(b.testId) ?? 2);
       if (tierDiff !== 0) return tierDiff;
-      return (b.pixelDifference ?? 0) - (a.pixelDifference ?? 0);
+      // 2. Group by test name
+      const nameA = a.testName || '';
+      const nameB = b.testName || '';
+      const nameCmp = nameA.localeCompare(nameB);
+      if (nameCmp !== 0) return nameCmp;
+      // 3. Sort steps within a test by step label (natural sort)
+      return collator.compare(a.stepLabel || '', b.stepLabel || '');
     });
   }, [diffs]);
 
