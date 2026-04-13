@@ -78,7 +78,7 @@ export async function approveDiff(diffId: string, approvedBy?: string) {
   // Gamification: reward the approver for a real change, and credit the test's
   // creator with catching a regression. Only fires when classification='changed'
   // so auto-approved or flaky diffs don't generate awards. Idempotent on diffId.
-  if (session.team && diffBefore && diffBefore.classification === 'changed') {
+  if (session.team && diffBefore && diffBefore.status === 'pending') {
     awardScore({
       teamId: session.team.id,
       kind: 'diff_approved_as_change',
@@ -266,10 +266,10 @@ export async function getDiffCore(diffId: string) {
     networkBodiesPath = testResult?.networkBodiesPath ?? null;
   }
 
-  // Hide network requests if network error mode is 'ignore'
+  // Hide network requests if network interception is off or error mode is 'ignore'
   if (networkRequests && test) {
     const pwSettings = await queries.getPlaywrightSettings(test.repositoryId);
-    if (pwSettings?.networkErrorMode === 'ignore') {
+    if (!pwSettings?.enableNetworkInterception || pwSettings?.networkErrorMode === 'ignore') {
       networkRequests = null;
       networkBodiesPath = null;
     }
@@ -466,6 +466,34 @@ export async function addDiffTodo(diffId: string, description: string) {
     status: 'open',
     createdBy: session.user?.email || 'user',
   });
+
+  // Gamification: reward the reviewer for triaging, and credit the test's
+  // creator with catching a regression. Idempotent on diffId.
+  if (session.team) {
+    awardScore({
+      teamId: session.team.id,
+      kind: 'diff_approved_as_change',
+      actor: { kind: 'user', id: session.user.id },
+      sourceType: 'diff',
+      sourceId: diffId,
+      detail: { testId: diff.testId },
+    }).catch((err) => console.error('[gamification] diff_todo_triage failed', err));
+
+    queries
+      .getTestCreator(diff.testId)
+      .then((creator) => {
+        if (!creator) return;
+        awardScore({
+          teamId: session.team.id,
+          kind: 'regression_caught',
+          actor: creator,
+          sourceType: 'diff',
+          sourceId: diffId,
+          detail: { testId: diff.testId },
+        }).catch((err) => console.error('[gamification] regression_caught_todo failed', err));
+      })
+      .catch(() => {});
+  }
 
   // Recompute build status
   if (diff.buildId) {

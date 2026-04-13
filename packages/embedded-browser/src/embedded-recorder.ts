@@ -164,13 +164,17 @@ export class EmbeddedRecorder {
       action: string,
       selectors: Array<{ type: string; value: string }>,
       value?: string,
-      boundingBox?: { x: number; y: number; width: number; height: number },
+      boundingBox?: { x: number; y: number; width: number; height: number; clickX?: number; clickY?: number },
       actionId?: string,
       modifiers?: string[]
     ) => {
       const primarySelector = selectors[0]?.value || '';
+      // Use actual click position if available (critical for canvas elements),
+      // otherwise fall back to element center (fine for buttons/inputs)
       const coordinates = boundingBox
-        ? { x: Math.round(boundingBox.x + boundingBox.width / 2), y: Math.round(boundingBox.y + boundingBox.height / 2) }
+        ? (boundingBox.clickX != null && boundingBox.clickY != null
+            ? { x: Math.round(boundingBox.clickX), y: Math.round(boundingBox.clickY) }
+            : { x: Math.round(boundingBox.x + boundingBox.width / 2), y: Math.round(boundingBox.y + boundingBox.height / 2) })
         : undefined;
 
       const validSelectors = selectors.filter(sel => sel.value && sel.value.trim() && !sel.value.includes('undefined'));

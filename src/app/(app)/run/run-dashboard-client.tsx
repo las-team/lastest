@@ -684,8 +684,9 @@ export function RunDashboardClient({ tests, runs: _runs, builds, repositoryId, a
             <CardContent className="flex-1">
               {builds.length > 0 ? (
                 (() => {
-                  const mainBaselineBuildId = builds.find(b => b.overallStatus === 'safe_to_merge' && b.gitBranch === defaultBranch)?.id;
-                  const branchBaselineBuildId = currentBranch && currentBranch !== defaultBranch
+                  const effectiveDefaultBranch = defaultBranch || 'main';
+                  const mainBaselineBuildId = builds.find(b => b.overallStatus === 'safe_to_merge' && b.gitBranch === effectiveDefaultBranch)?.id;
+                  const branchBaselineBuildId = currentBranch && currentBranch !== effectiveDefaultBranch
                     ? builds.find(b => b.overallStatus === 'safe_to_merge' && b.gitBranch === currentBranch)?.id
                     : undefined;
                   return buildView === 'graph' ? (

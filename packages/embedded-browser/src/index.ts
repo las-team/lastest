@@ -666,7 +666,8 @@ async function startup(): Promise<void> {
 
       case 'command:start_debug': {
         if (!browser || !runnerClient) break;
-        // Reset inspect mode from any previous session
+        // Remember & reset inspect mode from any previous session
+        const wasInspecting = streamServer?.inspectMode ?? false;
         if (streamServer) {
           streamServer.inspectMode = false;
         }
@@ -713,6 +714,12 @@ async function startup(): Promise<void> {
           }
 
           isDebugging = true;
+
+          // Re-inject inspect overlay on the new debug page if it was active
+          if (wasInspecting && streamServer) {
+            streamServer.inspectMode = true;
+            streamServer.onInspectModeChange?.(true);
+          }
 
           // Start state reporter (250ms interval)
           debugStateReporter = setInterval(() => {
@@ -792,7 +799,8 @@ async function startup(): Promise<void> {
       case 'command:stop_debug': {
         if (!runnerClient || !page) break;
 
-        // Reset inspect mode when stopping debug
+        // Remember & reset inspect mode
+        const debugWasInspecting = streamServer?.inspectMode ?? false;
         if (streamServer) streamServer.inspectMode = false;
 
         // Clear state reporter
@@ -817,6 +825,12 @@ async function startup(): Promise<void> {
             await inputHandler?.attach(page);
           } catch (err) {
             console.error('[Command] Error restoring idle page after debug stop:', err);
+          }
+
+          // Re-inject inspect overlay on the idle page if it was active
+          if (debugWasInspecting && streamServer) {
+            streamServer.inspectMode = true;
+            streamServer.onInspectModeChange?.(true);
           }
         }
 
