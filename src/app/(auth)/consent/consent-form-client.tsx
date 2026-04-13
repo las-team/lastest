@@ -1,7 +1,6 @@
 'use client';
 
 import { useState } from 'react';
-import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
@@ -9,15 +8,13 @@ import { Switch } from '@/components/ui/switch';
 import { recordRegistrationConsent } from '@/server/actions/consent';
 
 export function ConsentFormClient() {
-  const router = useRouter();
   const [marketingConsent, setMarketingConsent] = useState(false);
   const [loading, setLoading] = useState(false);
 
   async function handleContinue() {
     setLoading(true);
     await recordRegistrationConsent({ marketingEmails: marketingConsent });
-    router.push('/');
-    router.refresh();
+    window.location.href = '/';
   }
 
   return (

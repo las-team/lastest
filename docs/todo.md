@@ -15,6 +15,7 @@ a11y
 GH action edit
 ## bugs
 Fix play specs -> test specs route
+gamification toast always pops
 ## features
 openrouter agent sdk
 default ai
