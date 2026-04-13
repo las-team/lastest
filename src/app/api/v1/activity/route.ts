@@ -68,7 +68,7 @@ export async function POST(request: NextRequest) {
     eventType,
     summary,
     detail: detail ? { ...detail, toolName } : toolName ? { toolName } : null,
-    artifactType: (artifactType as 'test' | 'build' | 'area' | 'baseline' | 'suite') || null,
+    artifactType: (artifactType as 'test' | 'build' | 'area' | 'baseline' | 'score') || null,
     artifactId: artifactId || null,
     artifactLabel: artifactLabel || null,
     durationMs: durationMs || null,

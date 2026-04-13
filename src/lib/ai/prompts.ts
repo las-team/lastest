@@ -722,7 +722,7 @@ Test Name: ${context.testName}`);
     parts.push(`\n--- Available Routes (ONLY navigate to these) ---`);
     parts.push(context.availableRoutes.map(r => `- ${r}`).join('\n'));
     parts.push(`\nCRITICAL: Do NOT invent or guess URLs. ONLY use routes from the list above.`);
-    parts.push(`Route hints: /settings = configuration, /tests = test list, /tests/[id] = test detail, /builds/* = build results, /suites = test suites, /areas = functional areas, /run = run tests, /record = record tests, /review = review diffs, /compare = compare builds`);
+    parts.push(`Route hints: /settings = configuration, /tests = test list, /tests/[id] = test detail, /builds/* = build results, /areas = functional areas, /run = run tests, /record = record tests, /review = review diffs, /compare = compare builds`);
     parts.push(`Match the acceptance criterion's feature to the most relevant route above. If no route matches, use "/" (home page).`);
   }
 

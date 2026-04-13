@@ -21,6 +21,9 @@ This directory contains detailed specifications for every feature added, modifie
 | 13 | [Async Background Jobs](./13-async-background-jobs.md) | Fire-and-forget pattern with parallel AI execution |
 | 14 | [AI Prompts](./14-ai-prompts.md) | Simplified prompts, code diff scanning, MCP fix |
 | 20 | [Diff Benchmark Framework](./20-diff-benchmark-framework.md) | 13-scenario benchmark harness for engine comparison |
+| 21 | [Gamification](./21-gamification.md) | Beat the Bot scoring, leaderboard, achievements, Bug Blitz |
+| 22 | [Test Migration](./22-test-migration.md) | Cross-instance test export/import via REST API |
+| 23 | [API Tokens](./23-api-tokens.md) | Long-lived Bearer tokens for MCP, VS Code, CI |
 
 ## Features Modified
 

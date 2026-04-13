@@ -12,7 +12,7 @@ export * from './queries/visual-diffs';
 export * from './queries/repositories';
 export * from './queries/settings';
 export * from './queries/routes';
-export * from './queries/suites';
+export * from './queries/areas';
 export * from './queries/background-jobs';
 export * from './queries/auth';
 export * from './queries/setup';

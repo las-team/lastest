@@ -72,8 +72,8 @@ export function DefaultSetupCard({
           Repository Default Setup
         </CardTitle>
         <CardDescription>
-          Set a default setup that applies to all tests and suites in this repository.
-          Individual tests and suites can override this default.
+          Set a default setup that applies to all tests in this repository.
+          Individual tests can override this default.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">

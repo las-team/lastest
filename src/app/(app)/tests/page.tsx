@@ -3,8 +3,6 @@ import {
   getSelectedRepository,
   getFunctionalAreasTree,
   getTestsWithStatusByRepo,
-  getUnsortedSuites,
-  getSuiteTests,
   getFunctionalAreasByRepo,
   getRoutesByRepo,
   getEnvironmentConfig,
@@ -29,28 +27,14 @@ export default async function DefinitionPage() {
     );
   }
 
-  const [tree, tests, unsortedSuitesList, areas, routes, envConfig, deletedTests] = await Promise.all([
+  const [tree, tests, areas, routes, envConfig, deletedTests] = await Promise.all([
     getFunctionalAreasTree(selectedRepo.id),
     getTestsWithStatusByRepo(selectedRepo.id),
-    getUnsortedSuites(selectedRepo.id),
     getFunctionalAreasByRepo(selectedRepo.id),
     getRoutesByRepo(selectedRepo.id),
     getEnvironmentConfig(selectedRepo.id),
     getDeletedTests(selectedRepo.id),
   ]);
-
-  // Get test counts for unsorted suites
-  const unsortedSuites = await Promise.all(
-    unsortedSuitesList.map(async (suite) => {
-      const suiteTestList = await getSuiteTests(suite.id);
-      return {
-        id: suite.id,
-        name: suite.name,
-        description: suite.description,
-        testCount: suiteTestList.length,
-      };
-    })
-  );
 
   const uncategorizedTests = tests
     .filter((t) => !t.functionalAreaId)
@@ -63,7 +47,6 @@ export default async function DefinitionPage() {
       <DefinitionPageClient
         tree={tree}
         uncategorizedTests={uncategorizedTests}
-        unsortedSuites={unsortedSuites}
         repositoryId={selectedRepo.id}
         selectedBranch={selectedRepo.selectedBranch || selectedRepo.defaultBranch || 'main'}
         banAiMode={banAiMode}

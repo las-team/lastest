@@ -88,11 +88,10 @@ export async function deleteSetupScript(id: string) {
   await requireTeamAccess();
   // Check if script is in use
   const testsUsing = await queries.getTestsUsingSetupScript(id);
-  const suitesUsing = await queries.getSuitesUsingSetupScript(id);
 
-  if (testsUsing.length > 0 || suitesUsing.length > 0) {
+  if (testsUsing.length > 0) {
     throw new Error(
-      `Cannot delete: script is used by ${testsUsing.length} test(s) and ${suitesUsing.length} suite(s)`
+      `Cannot delete: script is used by ${testsUsing.length} test(s)`
     );
   }
 
@@ -206,36 +205,6 @@ export async function clearTestSetup(testId: string) {
 }
 
 /**
- * Assign a setup script to a suite
- */
-export async function assignSetupScriptToSuite(suiteId: string, setupScriptId: string | null) {
-  await requireTeamAccess();
-  await queries.updateSuiteSetup(suiteId, null, setupScriptId);
-  revalidatePath('/suites');
-  return { success: true };
-}
-
-/**
- * Assign a setup test to a suite
- */
-export async function assignSetupTestToSuite(suiteId: string, setupTestId: string | null) {
-  await requireTeamAccess();
-  await queries.updateSuiteSetup(suiteId, setupTestId, null);
-  revalidatePath('/suites');
-  return { success: true };
-}
-
-/**
- * Clear setup from a suite
- */
-export async function clearSuiteSetup(suiteId: string) {
-  await requireTeamAccess();
-  await queries.updateSuiteSetup(suiteId, null, null);
-  revalidatePath('/suites');
-  return { success: true };
-}
-
-/**
  * Update repository default setup
  */
 export async function updateRepositoryDefaultSetup(
@@ -269,13 +238,10 @@ export async function getAvailableSetupTests(repositoryId: string, excludeTestId
  */
 export async function getSetupScriptUsage(scriptId: string) {
   const testsUsing = await queries.getTestsUsingSetupScript(scriptId);
-  const suitesUsing = await queries.getSuitesUsingSetupScript(scriptId);
 
   return {
     testCount: testsUsing.length,
-    suiteCount: suitesUsing.length,
     tests: testsUsing.map(t => ({ id: t.id, name: t.name })),
-    suites: suitesUsing.map(s => ({ id: s.id, name: s.name })),
   };
 }
 
@@ -284,12 +250,9 @@ export async function getSetupScriptUsage(scriptId: string) {
  */
 export async function getSetupTestUsage(testId: string) {
   const testsUsing = await queries.getTestsUsingSetupTest(testId);
-  const suitesUsing = await queries.getSuitesUsingSetupTest(testId);
 
   return {
     testCount: testsUsing.length,
-    suiteCount: suitesUsing.length,
     tests: testsUsing.map(t => ({ id: t.id, name: t.name })),
-    suites: suitesUsing.map(s => ({ id: s.id, name: s.name })),
   };
 }

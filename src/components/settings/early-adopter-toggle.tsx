@@ -30,7 +30,7 @@ export function EarlyAdopterToggle({ enabled }: EarlyAdopterToggleProps) {
       <div className="space-y-0.5">
         <span className="text-sm font-medium">Early Adopter Mode</span>
         <p className="text-xs text-muted-foreground/70">
-          Enable experimental features like Compose, Suites, and Compare
+          Enable experimental features like Compose and Compare
         </p>
       </div>
       <Switch

@@ -6,7 +6,6 @@ import {
   testResults,
   testVersions,
   repositories,
-  suites,
   builds,
   routes,
   routeTestSuggestions,
@@ -137,9 +136,6 @@ export async function softDeleteTest(id: string) {
   await db.update(repositories)
     .set({ defaultSetupTestId: null })
     .where(eq(repositories.defaultSetupTestId, id));
-  await db.update(suites)
-    .set({ setupTestId: null })
-    .where(eq(suites.setupTestId, id));
   await db.update(builds)
     .set({ buildSetupTestId: null })
     .where(eq(builds.buildSetupTestId, id));
@@ -224,9 +220,6 @@ export async function permanentlyDeleteTest(id: string) {
   await db.update(repositories)
     .set({ defaultSetupTestId: null })
     .where(eq(repositories.defaultSetupTestId, id));
-  await db.update(suites)
-    .set({ setupTestId: null })
-    .where(eq(suites.setupTestId, id));
   await db.update(builds)
     .set({ buildSetupTestId: null })
     .where(eq(builds.buildSetupTestId, id));
@@ -306,25 +299,7 @@ export async function cleanupOrphanedSetupReferences() {
     }
   }
 
-  // 5. Clean suites.setupTestId
-  const suitesWithSetupTest = await db.select().from(suites).where(isNotNull(suites.setupTestId));
-  for (const suite of suitesWithSetupTest) {
-    if (suite.setupTestId && !testIds.has(suite.setupTestId)) {
-      await db.update(suites).set({ setupTestId: null }).where(eq(suites.id, suite.id));
-      cleanedCount++;
-    }
-  }
-
-  // 6. Clean suites.setupScriptId
-  const suitesWithSetupScript = await db.select().from(suites).where(isNotNull(suites.setupScriptId));
-  for (const suite of suitesWithSetupScript) {
-    if (suite.setupScriptId && !scriptIds.has(suite.setupScriptId)) {
-      await db.update(suites).set({ setupScriptId: null }).where(eq(suites.id, suite.id));
-      cleanedCount++;
-    }
-  }
-
-  // 7. Clean builds.buildSetupTestId
+  // 5. Clean builds.buildSetupTestId
   const buildsWithSetupTest = await db.select().from(builds).where(isNotNull(builds.buildSetupTestId));
   for (const build of buildsWithSetupTest) {
     if (build.buildSetupTestId && !testIds.has(build.buildSetupTestId)) {

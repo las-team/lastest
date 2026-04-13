@@ -11,6 +11,7 @@
  *   GET  /api/v1/repos/:id/tests - Get tests for repo
  *   GET  /api/v1/repos/:id/builds - Get builds for repo
  *   GET  /api/v1/repos/:id/coverage - Get test coverage stats for repo
+ *   GET  /api/v1/repos/:id/export - Export tests + functional areas (for migration)
  *   GET  /api/v1/functional-areas/:id - Get functional area
  *   GET  /api/v1/functional-areas/:id/tests - Get tests by functional area
  *   GET  /api/v1/tests/:id - Get single test
@@ -158,6 +159,44 @@ export async function GET(
           percentage: areas.length > 0 ? Math.round((areas.filter(a => testedAreaIds.has(a.id)).length / areas.length) * 100) : 0,
         };
         return NextResponse.json({ routeCoverage, areaCoverage });
+      }
+
+      // GET /api/v1/repos/:id/export — full export for migration
+      if (subResource === 'export') {
+        const areas = await queries.getFunctionalAreasByRepo(id);
+        const areaMap = new Map(areas.map(a => [a.id, a]));
+
+        const exportedAreas = areas.map(a => ({
+          name: a.name,
+          description: a.description,
+          parentName: a.parentId ? areaMap.get(a.parentId)?.name ?? null : null,
+          orderIndex: a.orderIndex,
+          isRouteFolder: a.isRouteFolder,
+          agentPlan: a.agentPlan,
+        }));
+
+        const repoTests = await queries.getTestsByRepo(id);
+        const exportedTests = repoTests.map(t => ({
+          name: t.name,
+          code: t.code,
+          description: t.description,
+          targetUrl: t.targetUrl,
+          functionalAreaName: t.functionalAreaId ? areaMap.get(t.functionalAreaId)?.name ?? null : null,
+          executionMode: t.executionMode,
+          agentPrompt: t.agentPrompt,
+          assertions: t.assertions,
+          setupOverrides: t.setupOverrides,
+          teardownOverrides: t.teardownOverrides,
+          stabilizationOverrides: t.stabilizationOverrides,
+          viewportOverride: t.viewportOverride,
+          diffOverrides: t.diffOverrides,
+          playwrightOverrides: t.playwrightOverrides,
+          requiredCapabilities: t.requiredCapabilities,
+          quarantined: t.quarantined,
+          isPlaceholder: t.isPlaceholder,
+        }));
+
+        return NextResponse.json({ functionalAreas: exportedAreas, tests: exportedTests });
       }
 
       return NextResponse.json(repo);

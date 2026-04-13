@@ -10,7 +10,6 @@ import {
   GitCompare,
   Settings,
   Layers,
-  ListOrdered,
   Building2,
   Zap,
   ClipboardCheck,
@@ -40,7 +39,7 @@ const gamificationNav = [
   { name: 'Leaderboard', href: '/leaderboard', icon: Trophy },
 ];
 
-const EARLY_ADOPTER_ITEMS = new Set(['Compose', 'Suites', 'Compare', 'Impact']);
+const EARLY_ADOPTER_ITEMS = new Set(['Compose', 'Compare', 'Impact']);
 
 const definitionNav = [
   { name: 'Tests', href: '/tests', icon: FileCode },
@@ -51,7 +50,6 @@ const definitionNav = [
 const executionNav = [
   { name: 'Runs', href: '/run', icon: Play },
   { name: 'Compare', href: '/compare', icon: GitCompare },
-  { name: 'Suites', href: '/suites', icon: ListOrdered },
   { name: 'Review', href: '/review', icon: ClipboardCheck },
   { name: 'Impact', href: '/analytics/impact', icon: TrendingDown },
 ];

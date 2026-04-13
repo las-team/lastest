@@ -10,7 +10,6 @@ const ARTIFACT_CONFIG: Record<string, { icon: typeof FileCode; route: (id: strin
   build: { icon: Play, route: (id) => `/builds/${id}`, label: 'Build' },
   area: { icon: FolderTree, route: (id) => `/areas?areaId=${id}`, label: 'Area' },
   baseline: { icon: Image, route: (id) => `/review?diffId=${id}`, label: 'Baseline' },
-  suite: { icon: FolderTree, route: (id) => `/suites/${id}`, label: 'Suite' },
 };
 
 interface ArtifactLinkProps {

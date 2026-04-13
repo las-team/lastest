@@ -1,6 +1,6 @@
 import type { Page } from 'playwright';
 import type { SetupContext, SetupResult, ResolvedSetup, SetupScript } from './types';
-import type { Test, Suite, Build } from '@/lib/db/schema';
+import type { Test, Build } from '@/lib/db/schema';
 import { runPlaywrightSetup, runTestAsSetup } from './script-runner';
 import { runApiSetup } from './api-seeder';
 import * as queries from '@/lib/db/queries';
@@ -8,11 +8,10 @@ import * as queries from '@/lib/db/queries';
 /**
  * SetupOrchestrator coordinates setup execution at all levels:
  * - Build level: Runs once at start of build
- * - Suite level: Runs once before each suite
  * - Test level: Runs before each test
  *
  * Variables flow from higher levels to lower levels:
- * Build Setup → Suite Setup → Test Setup → Test
+ * Build Setup → Test Setup → Test
  */
 export class SetupOrchestrator {
   /**
@@ -123,7 +122,7 @@ export class SetupOrchestrator {
 
   /**
    * Run build-level setup
-   * Returns context with variables for suite/test setups
+   * Returns context with variables for test setups
    */
   async runBuildSetup(
     build: Build,
@@ -141,27 +140,8 @@ export class SetupOrchestrator {
   }
 
   /**
-   * Run suite-level setup
-   * Receives context from build setup
-   */
-  async runSuiteSetup(
-    suite: Suite,
-    page: Page,
-    buildContext: SetupContext
-  ): Promise<SetupResult> {
-    const result = await this.resolveAndRunSetup(
-      suite.setupTestId,
-      suite.setupScriptId,
-      page,
-      buildContext
-    );
-
-    return result;
-  }
-
-  /**
    * Run test-level setup
-   * Receives context from suite setup (which includes build setup variables)
+   * Receives context from build setup
    *
    * Uses multi-step default setup steps with per-test overrides:
    * 1. Load default setup steps for repo
@@ -174,7 +154,7 @@ export class SetupOrchestrator {
   async runTestSetup(
     test: Test,
     page: Page,
-    suiteContext: SetupContext
+    buildContext: SetupContext
   ): Promise<SetupResult> {
     const startTime = Date.now();
 
@@ -206,7 +186,7 @@ export class SetupOrchestrator {
         }
 
         // Execute sequentially, accumulate variables, stop on first failure
-        let currentContext = suiteContext;
+        let currentContext = buildContext;
         for (const step of stepsToRun) {
           // Handle storage_state steps: load saved auth state directly
           if (step.stepType === 'storage_state' && step.storageStateId) {
@@ -270,7 +250,7 @@ export class SetupOrchestrator {
       return { success: true, duration: 0, variables: {} };
     }
 
-    return this.resolveAndRunSetup(setupTestId, setupScriptId, page, suiteContext);
+    return this.resolveAndRunSetup(setupTestId, setupScriptId, page, buildContext);
   }
 
   /**

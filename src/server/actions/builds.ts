@@ -1190,6 +1190,15 @@ async function runBuildAsync(
     }
   }
 
+  // Recalculate team storage usage after build completes
+  if (repositoryId) {
+    const repoForStorage = await queries.getRepository(repositoryId);
+    if (repoForStorage?.teamId) {
+      const { recalculateTeamStorage } = await import('@/lib/storage/calculator');
+      recalculateTeamStorage(repoForStorage.teamId).catch(() => {});
+    }
+  }
+
   revalidatePath('/builds');
   revalidatePath('/');
 

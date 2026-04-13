@@ -31,7 +31,7 @@ import { AICreateTestDialog } from '@/components/ai/ai-create-test-dialog';
 import { AIScanRoutesDialog } from '@/components/ai/ai-scan-routes-dialog';
 import { ImportFromSpecDialog } from '@/components/ai/import-from-spec-dialog';
 import { CodeDiffScanDialog } from '@/components/ai/code-diff-scan-dialog';
-import { createArea, deleteArea, deleteAreaWithContents, moveTestToArea, moveSuiteToArea, moveArea, exportAllPlans, updateAreaPlan, updateArea } from '@/server/actions/areas';
+import { createArea, deleteArea, deleteAreaWithContents, moveTestToArea, moveArea, exportAllPlans, updateAreaPlan, updateArea } from '@/server/actions/areas';
 import { deleteTests, restoreTests, permanentlyDeleteTests, getTest, getTestDetailData } from '@/server/actions/tests';
 import { createPlaceholderTestCase } from '@/server/actions/specs';
 import { TestDetailClient } from '@/app/(app)/tests/[id]/test-detail-client';
@@ -78,17 +78,9 @@ interface TestWithStatus extends Test {
   latestStatus: string | null;
 }
 
-interface SuiteItem {
-  id: string;
-  name: string;
-  description: string | null;
-  testCount: number;
-}
-
 interface DefinitionPageClientProps {
   tree: FunctionalAreaWithChildren[];
   uncategorizedTests: { id: string; name: string; description: string | null; latestStatus: string | null; isPlaceholder: boolean }[];
-  unsortedSuites: SuiteItem[];
   repositoryId: string;
   selectedBranch: string;
   banAiMode: boolean;
@@ -136,7 +128,6 @@ function buildBreadcrumb(areas: FunctionalAreaWithChildren[], targetId: string):
 export function DefinitionPageClient({
   tree,
   uncategorizedTests,
-  unsortedSuites,
   repositoryId,
   selectedBranch,
   banAiMode,
@@ -477,11 +468,6 @@ export function DefinitionPageClient({
     router.refresh();
   };
 
-  const handleMoveSuite = async (suiteId: string, areaId: string | null) => {
-    await moveSuiteToArea(suiteId, areaId);
-    router.refresh();
-  };
-
   const handleMoveArea = async (areaId: string, newParentId: string | null) => {
     await moveArea(areaId, newParentId);
     router.refresh();
@@ -773,16 +759,6 @@ export function DefinitionPageClient({
   const placeholderCount = allAreaTests.filter(t => t.isPlaceholder).length;
   const realTestCount = allAreaTests.length - placeholderCount;
 
-  // Collect all suites
-  function collectSuites(items: FunctionalAreaWithChildren[]): SuiteItem[] {
-    const result: SuiteItem[] = [];
-    for (const item of items) {
-      result.push(...item.suites);
-      result.push(...collectSuites(item.children));
-    }
-    return result;
-  }
-
   // StatusBadge component
   const StatusBadge = ({ status }: { status: string | null }) => {
     if (status === 'passed') {
@@ -859,7 +835,6 @@ export function DefinitionPageClient({
           <AreaTree
             tree={tree}
             uncategorizedTests={uncategorizedTests}
-            unsortedSuites={unsortedSuites}
             selection={treeSelection}
             selectedAreaIds={selectedAreaIds}
             onSelect={handleTreeSelect}
@@ -869,7 +844,6 @@ export function DefinitionPageClient({
             onDeleteArea={setDeleteAreaId}
             onDeleteMultipleAreas={setDeleteAreaIds}
             onMoveTest={handleMoveTest}
-            onMoveSuite={handleMoveSuite}
             onMoveArea={handleMoveArea}
             onDeleteTest={setDeleteTestId}
             headerExtra={discoveryHeaderExtra}
@@ -1428,7 +1402,7 @@ export function DefinitionPageClient({
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Delete Area</DialogTitle>
-            <DialogDescription>What would you like to do with the tests, suites, and sub-folders inside this area?</DialogDescription>
+            <DialogDescription>What would you like to do with the tests and sub-folders inside this area?</DialogDescription>
           </DialogHeader>
           <div className="flex flex-col gap-2 py-2">
             <Button variant="outline" onClick={() => handleDeleteArea(false)} disabled={isDeletingArea} className="justify-start h-auto py-3 px-4">
@@ -1440,7 +1414,7 @@ export function DefinitionPageClient({
             <Button variant="destructive" onClick={() => handleDeleteArea(true)} disabled={isDeletingArea} className="justify-start h-auto py-3 px-4">
               <div className="text-left">
                 <div className="font-medium">{isDeletingArea ? 'Deleting...' : 'Delete everything'}</div>
-                <div className="text-xs font-normal opacity-90">Remove the area and all its tests, suites, and sub-folders</div>
+                <div className="text-xs font-normal opacity-90">Remove the area and all its tests and sub-folders</div>
               </div>
             </Button>
           </div>
@@ -1452,7 +1426,7 @@ export function DefinitionPageClient({
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Delete {deleteAreaIds.length} Areas</DialogTitle>
-            <DialogDescription>What would you like to do with the tests, suites, and sub-folders inside these areas?</DialogDescription>
+            <DialogDescription>What would you like to do with the tests and sub-folders inside these areas?</DialogDescription>
           </DialogHeader>
           <div className="flex flex-col gap-2 py-2">
             <Button variant="outline" onClick={() => handleDeleteMultipleAreas(false)} disabled={isDeletingArea} className="justify-start h-auto py-3 px-4">
@@ -1464,7 +1438,7 @@ export function DefinitionPageClient({
             <Button variant="destructive" onClick={() => handleDeleteMultipleAreas(true)} disabled={isDeletingArea} className="justify-start h-auto py-3 px-4">
               <div className="text-left">
                 <div className="font-medium">{isDeletingArea ? 'Deleting...' : 'Delete everything'}</div>
-                <div className="text-xs font-normal opacity-90">Remove all {deleteAreaIds.length} areas and their tests, suites, and sub-folders</div>
+                <div className="text-xs font-normal opacity-90">Remove all {deleteAreaIds.length} areas and their tests and sub-folders</div>
               </div>
             </Button>
           </div>

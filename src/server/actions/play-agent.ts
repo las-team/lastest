@@ -100,7 +100,7 @@ function emitActivity(
     stepId?: string;
     agentType?: PwAgentType;
     detail?: Record<string, unknown>;
-    artifactType?: 'test' | 'build' | 'area' | 'baseline' | 'suite';
+    artifactType?: 'test' | 'build' | 'area' | 'baseline' | 'score';
     artifactId?: string;
     artifactLabel?: string;
     durationMs?: number;
@@ -1210,6 +1210,9 @@ async function runGenerate(sessionId: string, repositoryId: string, teamId: stri
   let testsCreated = 0;
   const generatedTests: Array<{ testId: string; name: string; areaName: string; code: string }> = [];
 
+  // Look up the play_agent bot so test-creation points go to the bot, not the user
+  const playAgentBot = await queries.getBotByKind(teamId, 'play_agent');
+
   if (targetAreas.length > 0) {
     const { agentCreateTest, groupScenariosForGeneration } = await import('@/lib/playwright/generator-agent');
     const GENERATOR_CONCURRENCY = 3;
@@ -1304,6 +1307,7 @@ async function runGenerate(sessionId: string, repositoryId: string, teamId: stri
                 description: group.description,
                 code: genResult.code,
                 targetUrl: baseUrl,
+                ...(playAgentBot ? { createdByBotId: playAgentBot.id } : {}),
               });
             }
             generatedTests.push({

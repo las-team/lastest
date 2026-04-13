@@ -14,9 +14,21 @@ import { useActivityFeedContextSafe } from '@/components/activity-feed/activity-
 export function CelebrationListener() {
   const ctx = useActivityFeedContextSafe();
   const seenIds = useRef<Set<string>>(new Set());
+  const initialSeedDone = useRef(false);
 
   useEffect(() => {
     if (!ctx) return;
+
+    // On the first run, seed seenIds with all existing events (history loaded on mount)
+    // so we don't replay old toasts. Only show toasts for events arriving after this point.
+    if (!initialSeedDone.current) {
+      initialSeedDone.current = true;
+      for (const event of ctx.events) {
+        seenIds.current.add(event.id);
+      }
+      return;
+    }
+
     for (const event of ctx.events) {
       if (seenIds.current.has(event.id)) continue;
       seenIds.current.add(event.id);

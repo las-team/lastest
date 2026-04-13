@@ -791,7 +791,7 @@ export class PlaywrightRunner extends EventEmitter {
   private forceVideoRecording = false;
   private environmentConfig: EnvironmentConfig | null = null;
   private repositoryId: string | null;
-  // Setup context: variables passed from build/suite setup to tests
+  // Setup context: variables passed from build setup to tests
   private setupContext: SetupContext | null = null;
 
   constructor(repositoryId?: string | null, screenshotDir?: string) {
@@ -820,7 +820,7 @@ export class PlaywrightRunner extends EventEmitter {
   }
 
   /**
-   * Set the setup context with variables from build/suite setup
+   * Set the setup context with variables from build setup
    * These variables will be available to all tests
    */
   setSetupContext(context: SetupContext) {

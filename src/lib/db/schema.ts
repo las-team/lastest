@@ -954,34 +954,6 @@ export const testVersions = pgTable('test_versions', {
 export type TestVersion = typeof testVersions.$inferSelect;
 export type NewTestVersion = typeof testVersions.$inferInsert;
 
-// Test Suites - ordered collections of tests
-export const suites = pgTable('suites', {
-  id: text('id').primaryKey(),
-  repositoryId: text('repository_id').references(() => repositories.id),
-  functionalAreaId: text('functional_area_id').references(() => functionalAreas.id),
-  name: text('name').notNull(),
-  description: text('description'),
-  orderIndex: integer('order_index').default(0),
-  // Setup configuration - setupTestId takes precedence over setupScriptId
-  setupTestId: text('setup_test_id'), // Use test as setup
-  setupScriptId: text('setup_script_id'), // OR use dedicated script
-  createdAt: timestamp('created_at'),
-  updatedAt: timestamp('updated_at'),
-});
-
-export const suiteTests = pgTable('suite_tests', {
-  id: text('id').primaryKey(),
-  suiteId: text('suite_id').references(() => suites.id, { onDelete: 'cascade' }).notNull(),
-  testId: text('test_id').references(() => tests.id, { onDelete: 'cascade' }).notNull(),
-  orderIndex: integer('order_index').notNull().default(0),
-  createdAt: timestamp('created_at'),
-});
-
-export type Suite = typeof suites.$inferSelect;
-export type NewSuite = typeof suites.$inferInsert;
-export type SuiteTest = typeof suiteTests.$inferSelect;
-export type NewSuiteTest = typeof suiteTests.$inferInsert;
-
 // Notification settings for Slack, Discord, GitHub PR comments, GitLab MR comments, and Custom Webhook
 export const notificationSettings = pgTable('notification_settings', {
   id: text('id').primaryKey(),
@@ -1782,7 +1754,7 @@ export type ActivityEventType =
 
 export type ActivitySourceType = 'play_agent' | 'mcp_server' | 'generate_agent';
 
-export type ActivityArtifactType = 'test' | 'build' | 'area' | 'baseline' | 'suite' | 'score';
+export type ActivityArtifactType = 'test' | 'build' | 'area' | 'baseline' | 'score';
 
 export const activityEvents = pgTable('activity_events', {
   id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
