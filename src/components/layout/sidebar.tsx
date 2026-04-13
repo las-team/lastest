@@ -1,5 +1,6 @@
 'use client';
 
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { usePathname, useSearchParams } from 'next/navigation';
 import { cn } from '@/lib/utils';
@@ -62,7 +63,12 @@ const settingsNav = [
 export function Sidebar({ repos, selectedRepo, currentUser, team }: SidebarProps) {
   const pathname = usePathname();
   const searchParams = useSearchParams();
-  const justConnected = searchParams.get('success') === 'github_connected' || searchParams.get('success') === 'gitlab_connected';
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => {
+    const id = requestAnimationFrame(() => setMounted(true));
+    return () => cancelAnimationFrame(id);
+  }, []);
+  const justConnected = mounted && (searchParams.get('success') === 'github_connected' || searchParams.get('success') === 'gitlab_connected');
   const earlyAdopter = team?.earlyAdopterMode ?? false;
   const gamificationEnabled = team?.gamificationEnabled ?? false;
 
@@ -99,9 +105,16 @@ export function Sidebar({ repos, selectedRepo, currentUser, team }: SidebarProps
       )}>
         <div className="flex items-center gap-2">
           <div className="flex-1 min-w-0">
-            <RepoSelector initialRepos={repos} initialSelected={selectedRepo} />
+            {mounted ? (
+              <RepoSelector initialRepos={repos} initialSelected={selectedRepo} />
+            ) : (
+              <div className="flex items-center gap-2 h-9 px-3 border rounded-md text-sm">
+                <Layers className="h-4 w-4 shrink-0" />
+                <span className="truncate">{selectedRepo?.fullName || 'Select repository'}</span>
+              </div>
+            )}
           </div>
-          <CreateLocalRepoButton />
+          {mounted && <CreateLocalRepoButton />}
         </div>
         {justConnected && repos && repos.length > 0 && !selectedRepo && (
           <p className="text-xs text-primary font-medium animate-pulse">
@@ -231,7 +244,7 @@ export function Sidebar({ repos, selectedRepo, currentUser, team }: SidebarProps
       </div>
 
       <div className="p-4 border-t space-y-3">
-        {currentUser && <UserMenu user={currentUser} />}
+        {mounted && currentUser && <UserMenu user={currentUser} />}
         <div className="flex items-center justify-between">
           <span className="text-xs text-muted-foreground">Visual Regression Testing</span>
           <div className="flex items-center gap-0.5">

@@ -12,7 +12,7 @@ import { tests, testVersions, repositories, functionalAreas } from '../src/lib/d
 import { eq } from 'drizzle-orm';
 import { randomUUID as uuid } from 'crypto';
 
-const EXCALIDRAW_REPO_NAME = 'excalidraw';
+const EXCALIDRAW_REPO_NAME = 'dexilion-team/excalidraw';
 
 // Will be set dynamically
 let REPO_ID: string;
@@ -4977,7 +4977,9 @@ async function seed() {
       testId,
       version: 1,
       code: testDef.code,
-      changeDescription: 'Initial seed',
+      name: testDef.name,
+      targetUrl: testDef.targetUrl,
+      changeReason: 'manual_edit',
       createdAt: now,
     });
 

@@ -1,4 +1,4 @@
-import { pgTable, text, integer, bigint, boolean, timestamp, jsonb, index } from 'drizzle-orm/pg-core';
+import { pgTable, text, integer, bigint, boolean, timestamp, jsonb, index, real } from 'drizzle-orm/pg-core';
 
 // Type definitions for JSON columns
 
@@ -766,8 +766,8 @@ export type RegionDetectionMode = 'grid' | 'flood-fill';
 export const diffSensitivitySettings = pgTable('diff_sensitivity_settings', {
   id: text('id').primaryKey(),
   repositoryId: text('repository_id').references(() => repositories.id),
-  unchangedThreshold: integer('unchanged_threshold').default(1),  // percentage
-  flakyThreshold: integer('flaky_threshold').default(10),        // percentage
+  unchangedThreshold: real('unchanged_threshold').default(1),  // percentage
+  flakyThreshold: real('flaky_threshold').default(10),        // percentage
   includeAntiAliasing: boolean('include_anti_aliasing').default(false), // include AA pixels in diff
   ignorePageShift: boolean('ignore_page_shift').default(false), // exclude vertical content shifts from diff
   diffEngine: text('diff_engine').default('pixelmatch'), // 'pixelmatch' | 'ssim' | 'butteraugli'

@@ -237,6 +237,15 @@ export async function getDiffCore(diffId: string) {
     networkBodiesPath = testResult?.networkBodiesPath ?? null;
   }
 
+  // Hide network requests if network error mode is 'ignore'
+  if (networkRequests && test) {
+    const pwSettings = await queries.getPlaywrightSettings(test.repositoryId);
+    if (pwSettings?.networkErrorMode === 'ignore') {
+      networkRequests = null;
+      networkBodiesPath = null;
+    }
+  }
+
   // Look up planned screenshot if not already on the diff
   let plannedImagePath = diff.plannedImagePath;
   const plannedDiffImagePath = diff.plannedDiffImagePath;

@@ -208,6 +208,24 @@ deploy_zima() {
   docker save "${images[@]}" | ssh "$ZIMA_USER@$ZIMA_HOST" 'docker load'
   ok "Images loaded on $ZIMA_HOST"
 
+  log "Validating server compose file..."
+  local remote_compose
+  remote_compose=$(ssh "$ZIMA_USER@$ZIMA_HOST" "cat $ZIMA_COMPOSE")
+
+  # EB containers must use LASTEST_URL (not LASTEST2_URL)
+  if echo "$remote_compose" | grep -q 'LASTEST2_URL'; then
+    err "Compose has LASTEST2_URL — should be LASTEST_URL (EB env var mismatch)"
+  fi
+  # Ensure required EB env vars are present when EB service exists
+  if echo "$remote_compose" | grep -q 'embedded-browser'; then
+    for var in LASTEST_URL SYSTEM_EB_TOKEN STREAM_PORT; do
+      if ! echo "$remote_compose" | grep -q "$var"; then
+        err "Compose is missing $var for embedded-browser service"
+      fi
+    done
+  fi
+  ok "Compose file looks good"
+
   log "Restarting containers..."
   ssh "$ZIMA_USER@$ZIMA_HOST" "cd $ZIMA_DIR && docker compose up -d"
 
