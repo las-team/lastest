@@ -17,7 +17,7 @@ import {
 import { saveAISettings, resetAISettings, testAIConnection } from '@/server/actions/ai-settings';
 import { DEFAULT_AI_SETTINGS } from '@/lib/db/schema';
 import type { AISettings, AIProvider, AgentSdkPermissionMode, AIDiffingProvider } from '@/lib/db/schema';
-import { Loader2, RotateCcw, Sparkles, CheckCircle2, XCircle, Zap, Bot, Eye, Server, Brain, Cloud } from 'lucide-react';
+import { Loader2, RotateCcw, Sparkles, CheckCircle2, XCircle, Zap, Bot, Eye, Server, Brain, Cloud, Info, AlertTriangle } from 'lucide-react';
 import { toast } from 'sonner';
 
 interface AISettingsCardProps {
@@ -597,6 +597,25 @@ export function AISettingsCard({ settings, repositoryId }: AISettingsCardProps) 
             />
             <Label>Enable Playwright Agents</Label>
           </div>
+
+          {pwAgentEnabled && (provider === 'ollama' || provider === 'claude-cli') && (
+            <div className="flex items-start gap-2 p-3 rounded-md bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 mb-4">
+              <AlertTriangle className="w-4 h-4 text-amber-600 mt-0.5 shrink-0" />
+              <p className="text-xs text-amber-800 dark:text-amber-200">
+                Playwright Agents require a provider with tool calling support (OpenRouter, Anthropic Direct, OpenAI, or Claude Agent SDK).
+                {provider === 'ollama' ? ' Ollama does not support tool calling.' : ' Claude CLI does not support tool calling.'}
+              </p>
+            </div>
+          )}
+
+          {pwAgentEnabled && (provider === 'openrouter' || provider === 'openai' || provider === 'anthropic') && (
+            <div className="flex items-start gap-2 p-3 rounded-md bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800 mb-4">
+              <Info className="w-4 h-4 text-blue-600 mt-0.5 shrink-0" />
+              <p className="text-xs text-blue-800 dark:text-blue-200">
+                PW Agents will use tool calling via {provider === 'openrouter' ? 'OpenRouter' : provider === 'openai' ? 'OpenAI' : 'Anthropic'}. Models with strong function calling support (Claude Sonnet/Opus, GPT-4o, Gemini Pro) work best.
+              </p>
+            </div>
+          )}
 
           {pwAgentEnabled && (
             <div className="space-y-4 pl-2 border-l-2 border-border ml-2">

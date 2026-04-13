@@ -65,6 +65,18 @@ export async function createTestRun(testIds?: string[], repositoryId?: string | 
 export async function runTests(testIds?: string[], repositoryId?: string | null, headless?: boolean, runnerId?: string, forceVideoRecording?: boolean) {
   if (repositoryId) await requireRepoAccess(repositoryId);
   else await requireTeamAccess();
+
+  // Storage limit enforcement (off by default)
+  if (process.env.ENFORCE_STORAGE_LIMITS === 'true' && repositoryId) {
+    const repo = await queries.getRepository(repositoryId);
+    if (repo?.teamId) {
+      const usage = await queries.getTeamStorageUsage(repo.teamId);
+      if (usage && usage.storageUsedBytes >= usage.storageQuotaBytes) {
+        throw new Error('Storage limit exceeded. Free up space by deleting old test runs or contact your admin.');
+      }
+    }
+  }
+
   const targetRunner = runnerId || 'local';
 
   // If this runner is busy, queue this run
@@ -213,6 +225,15 @@ async function runTestsAsync(runId: string, tests: Test[], repositoryId?: string
       status: 'failed',
     });
     await failJob(activeJobId, error instanceof Error ? error.message : 'Test run failed');
+  }
+
+  // Recalculate team storage usage after run completes
+  if (repositoryId) {
+    const repoForStorage = await queries.getRepository(repositoryId);
+    if (repoForStorage?.teamId) {
+      const { recalculateTeamStorage } = await import('@/lib/storage/calculator');
+      recalculateTeamStorage(repoForStorage.teamId).catch(() => {});
+    }
   }
 
   revalidatePath('/run');

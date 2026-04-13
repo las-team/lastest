@@ -18,6 +18,35 @@ export interface StreamCallbacks {
 export interface AIProvider {
   generate(options: GenerateOptions): Promise<string>;
   generateStream(options: GenerateOptions, callbacks: StreamCallbacks): Promise<void>;
+  generateWithTools?(options: GenerateWithToolsOptions): Promise<string>;
+}
+
+// ---------------------------------------------------------------------------
+// Tool calling types (used by MCP bridge + providers that support function calling)
+// ---------------------------------------------------------------------------
+
+export interface ToolDefinition {
+  name: string;
+  description: string;
+  inputSchema: Record<string, unknown>;
+}
+
+export interface ToolCall {
+  id: string;
+  name: string;
+  arguments: Record<string, unknown>;
+}
+
+export interface ToolResult {
+  toolCallId: string;
+  content: string;
+  isError?: boolean;
+}
+
+export interface GenerateWithToolsOptions extends GenerateOptions {
+  tools: ToolDefinition[];
+  maxToolRounds?: number;
+  onToolCall: (call: ToolCall) => Promise<ToolResult>;
 }
 
 export interface AIProviderConfig {
