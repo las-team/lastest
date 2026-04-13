@@ -871,7 +871,7 @@ export class PlaywrightRecorder extends EventEmitter {
 
         // Label (associated <label> element — most robust for form fields)
         const labelText = (
-          (element.id ? document.querySelector(`label[for="${element.id}"]`)?.textContent?.trim() : null) ||
+          (element.id ? document.querySelector(`label[for="${CSS.escape(element.id)}"]`)?.textContent?.trim() : null) ||
           element.closest('label')?.textContent?.trim() ||
           (element.getAttribute('aria-labelledby')
             ? document.getElementById(element.getAttribute('aria-labelledby')!)?.textContent?.trim()

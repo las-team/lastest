@@ -493,6 +493,10 @@ async function startup(): Promise<void> {
 
       case 'command:start_recording': {
         if (!browser || !runnerClient || !recorder) break;
+        // Reset inspect mode (may have been left on by a debug session)
+        if (streamServer) {
+          streamServer.inspectMode = false;
+        }
         const payload = command.payload as {
           sessionId: string; targetUrl: string;
           viewport?: { width: number; height: number };
@@ -572,6 +576,9 @@ async function startup(): Promise<void> {
       case 'command:stop_recording': {
         if (!runnerClient || !page) break;
         const payload = command.payload as { sessionId: string };
+
+        // Reset inspect mode when stopping recording
+        if (streamServer) streamServer.inspectMode = false;
 
         // Clear watchdog first
         if (recordingWatchdog) { clearInterval(recordingWatchdog); recordingWatchdog = null; }
@@ -659,6 +666,10 @@ async function startup(): Promise<void> {
 
       case 'command:start_debug': {
         if (!browser || !runnerClient) break;
+        // Reset inspect mode from any previous session
+        if (streamServer) {
+          streamServer.inspectMode = false;
+        }
         const payload = command.payload as {
           sessionId: string; testId: string; code: string;
           cleanBody: string; steps: import('./debug-executor.js').DebugStep[];
@@ -780,6 +791,9 @@ async function startup(): Promise<void> {
 
       case 'command:stop_debug': {
         if (!runnerClient || !page) break;
+
+        // Reset inspect mode when stopping debug
+        if (streamServer) streamServer.inspectMode = false;
 
         // Clear state reporter
         if (debugStateReporter) { clearInterval(debugStateReporter); debugStateReporter = null; }

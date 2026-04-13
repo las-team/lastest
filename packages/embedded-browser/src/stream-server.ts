@@ -104,6 +104,12 @@ export class StreamServer {
       ws.on('close', () => {
         this.clients.delete(clientId);
         console.log(`[StreamServer] Client disconnected: ${clientId} (total: ${this.clients.size})`);
+        // Reset inspect mode when all clients disconnect to prevent stuck state
+        if (this.clients.size === 0 && this.inspectMode) {
+          this.inspectMode = false;
+          this.onInspectModeChange?.(false);
+          console.log('[StreamServer] Inspect mode auto-reset (no clients)');
+        }
       });
 
       ws.on('error', (error) => {

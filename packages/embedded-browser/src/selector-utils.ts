@@ -137,7 +137,7 @@ export async function inspectElementAtPoint(
         }
 
         const labelText = (
-          (element.id ? (document.querySelector(`label[for="${element.id}"]`) as HTMLElement)?.textContent?.trim() : null) ||
+          (element.id ? (document.querySelector(`label[for="${CSS.escape(element.id)}"]`) as HTMLElement)?.textContent?.trim() : null) ||
           (element.closest('label') as HTMLElement)?.textContent?.trim() ||
           (element.getAttribute('aria-labelledby')
             ? document.getElementById(element.getAttribute('aria-labelledby')!)?.textContent?.trim()
@@ -353,7 +353,7 @@ export async function getAllDomSelectors(
         }
 
         const labelText = (
-          (element.id ? (document.querySelector(`label[for="${element.id}"]`) as HTMLElement)?.textContent?.trim() : null) ||
+          (element.id ? (document.querySelector(`label[for="${CSS.escape(element.id)}"]`) as HTMLElement)?.textContent?.trim() : null) ||
           (element.closest('label') as HTMLElement)?.textContent?.trim() ||
           (element.getAttribute('aria-labelledby')
             ? document.getElementById(element.getAttribute('aria-labelledby')!)?.textContent?.trim()
