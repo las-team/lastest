@@ -772,6 +772,7 @@ export interface TestRunResult {
   softErrors?: string[];
   networkBodiesPath?: string;
   downloads?: DownloadRecord[];
+  domSnapshot?: import('@/lib/db/schema').DomSnapshotData;
 }
 
 export interface ProgressCallback {
@@ -1609,6 +1610,15 @@ export class PlaywrightRunner extends EventEmitter {
         throw new Error(errorMsg);
       }
 
+      // Capture DOM snapshot for AI fixing and DOM diff comparison
+      let domSnapshot: import('@/lib/db/schema').DomSnapshotData | undefined;
+      try {
+        const { captureDomSnapshot } = await import('./dom-snapshot');
+        domSnapshot = await captureDomSnapshot(page);
+      } catch {
+        // Non-critical — continue without DOM snapshot
+      }
+
       // Check for console errors or network failures after test execution
       const consoleErrorMode = (this.settings?.consoleErrorMode as string) || 'fail';
       const networkErrorMode = (this.settings?.networkErrorMode as string) || 'fail';
@@ -1757,10 +1767,22 @@ export class PlaywrightRunner extends EventEmitter {
         softErrors: testSoftErrors.length > 0 ? testSoftErrors : undefined,
         assertionResults: testAssertionResults.length > 0 ? testAssertionResults : undefined,
         downloads: allDownloads.length > 0 ? allDownloads : undefined,
+        domSnapshot,
       };
 
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
+
+      // Capture DOM snapshot on failure too (valuable for AI diagnosis)
+      let failureDomSnapshot: import('@/lib/db/schema').DomSnapshotData | undefined;
+      if (page) {
+        try {
+          const { captureDomSnapshot } = await import('./dom-snapshot');
+          failureDomSnapshot = await captureDomSnapshot(page);
+        } catch {
+          // Non-critical
+        }
+      }
 
       // Run teardown even on failure (it's cleanup) — skip if browser crashed
       let teardownDurationMs: number | undefined;
@@ -1814,6 +1836,7 @@ export class PlaywrightRunner extends EventEmitter {
         softErrors: testSoftErrors.length > 0 ? testSoftErrors : undefined,
         assertionResults: testAssertionResults.length > 0 ? testAssertionResults : undefined,
         downloads: allDownloads.length > 0 ? allDownloads : undefined,
+        domSnapshot: failureDomSnapshot,
       };
 
     } finally {

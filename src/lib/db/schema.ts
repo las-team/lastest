@@ -83,6 +83,34 @@ export interface AIDiffAnalysis {
   analyzedAt: string;
 }
 
+// DOM snapshot element captured during recording or test execution
+export interface DomSnapshotElement {
+  tag: string;
+  id?: string;
+  textContent?: string;
+  boundingBox: { x: number; y: number; width: number; height: number };
+  selectors: Array<{ type: string; value: string }>;
+}
+
+// Full DOM snapshot with page context
+export interface DomSnapshotData {
+  elements: DomSnapshotElement[];
+  url: string;
+  timestamp: number;
+}
+
+// DOM diff result for comparing two snapshots
+export interface DomDiffResult {
+  added: DomSnapshotElement[];
+  removed: DomSnapshotElement[];
+  changed: Array<{
+    baseline: DomSnapshotElement;
+    current: DomSnapshotElement;
+    changes: ('text' | 'position' | 'size' | 'selector')[];
+  }>;
+  unchangedCount: number;
+}
+
 export interface DiffMetadata {
   changedRegions: { x: number; y: number; width: number; height: number }[];
   affectedComponents?: string[];
@@ -93,6 +121,7 @@ export interface DiffMetadata {
   textRegionDiffPixels?: number;
   nonTextRegionDiffPixels?: number;
   ocrDurationMs?: number;
+  domDiff?: DomDiffResult;
 }
 
 /** Capabilities that a test requires from Playwright settings (detected during recording). */
@@ -186,6 +215,7 @@ export const tests = pgTable('tests', {
   executionMode: text('execution_mode').default('procedural'), // 'procedural' | 'agent'
   agentPrompt: text('agent_prompt'), // NL description for agent mode
   quarantined: boolean('quarantined').default(false), // quarantined tests run but don't block builds
+  domSnapshot: jsonb('dom_snapshot').$type<DomSnapshotData>(), // DOM state captured during recording
   specId: text('spec_id'), // FK to testSpecs (back-reference for 1:1 link)
   // Gamification attribution: who authored this test. Mutually exclusive. Nullable for legacy rows.
   createdByUserId: text('created_by_user_id'),
@@ -281,6 +311,7 @@ export const testResults = pgTable('test_results', {
   retryOf: text('retry_of'), // links to original test result ID if this is a retry
   isFlaky: boolean('is_flaky').default(false), // true if test failed then passed on retry
   triage: jsonb('triage').$type<TriageResult>(), // AI failure triage classification
+  domSnapshot: jsonb('dom_snapshot').$type<DomSnapshotData>(), // DOM state captured at screenshot time
 });
 
 // Repository provider type

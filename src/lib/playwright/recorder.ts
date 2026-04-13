@@ -114,6 +114,7 @@ export interface RecordingSession {
   events: RecordingEvent[];
   generatedCode: string;
   requiredCapabilities?: RequiredCapabilities;
+  domSnapshot?: import('@/lib/db/schema').DomSnapshotData;
 }
 
 export interface CursorSettings {
@@ -1548,6 +1549,16 @@ export class PlaywrightRecorder extends EventEmitter {
     this.session.generatedCode = this.generateCode();
     this.session.requiredCapabilities = this.detectRequiredCapabilities();
     this.addEvent('complete', { code: this.session.generatedCode });
+
+    // Capture DOM snapshot before cleanup (for AI fixing baseline)
+    if (this.page) {
+      try {
+        const { captureDomSnapshot } = await import('./dom-snapshot');
+        this.session.domSnapshot = await captureDomSnapshot(this.page);
+      } catch {
+        // Non-critical — continue without DOM snapshot
+      }
+    }
 
     // Capture storage state (cookies/localStorage) before cleanup
     this.capturedStorageState = null;

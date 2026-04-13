@@ -84,6 +84,20 @@ export async function agentHealTestCore(
     const config = getAIConfig(settings);
     const seed = await buildSeedFixture(repositoryId);
 
+    // Build DOM diff context if snapshots available
+    let domDiffContext = '';
+    if (test.domSnapshot && latestResult?.domSnapshot) {
+      try {
+        const { computeDomDiff, summarizeDomDiff } = await import('@/lib/diff/dom-diff');
+        const diff = computeDomDiff(test.domSnapshot, latestResult.domSnapshot);
+        if (diff.added.length > 0 || diff.removed.length > 0 || diff.changed.length > 0) {
+          domDiffContext = `\n**DOM changes since recording (selectors/elements that changed):**\n\`\`\`\n${summarizeDomDiff(diff)}\n\`\`\`\n\nUse these DOM changes to understand what selectors broke and why. The removed/changed elements are likely the root cause of the failure.\n`;
+        }
+      } catch {
+        // Non-critical
+      }
+    }
+
     const prompt = `Fix this failing Playwright test.
 
 **Test code:**
@@ -95,7 +109,7 @@ ${test.code}
 \`\`\`
 ${errorMessage}
 \`\`\`
-
+${domDiffContext}
 **Base URL:** ${seed.baseUrl}
 
 Navigate to the relevant page using MCP tools, inspect the current UI state via browser_snapshot, diagnose why the test fails, and output the fixed test code.

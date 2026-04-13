@@ -21,6 +21,7 @@ interface TriageInput {
   durationMs: number | null;
   recentHistory: Array<{ status: string | null; errorMessage: string | null }>;
   diffAnalysis?: { classification?: string; aiRecommendation?: string } | null;
+  domDiffSummary?: string | null;
 }
 
 const TRIAGE_SYSTEM_PROMPT = `You are a QA failure triage specialist. Classify test failures into one of these categories:
@@ -74,6 +75,10 @@ export async function triageTestFailure(
       ? input.recentHistory.map((r, i) => `Run ${i + 1}: ${r.status}${r.errorMessage ? ` — ${r.errorMessage.slice(0, 200)}` : ''}`).join('\n')
       : 'No recent history available';
 
+    const domDiffSection = input.domDiffSummary
+      ? `**DOM Changes (recording → failure):**\n${input.domDiffSummary}`
+      : 'No DOM diff data';
+
     const prompt = `Classify this test failure:
 
 **Test:** ${input.testName}
@@ -81,6 +86,7 @@ export async function triageTestFailure(
 **Duration:** ${input.durationMs ? `${input.durationMs}ms` : 'Unknown'}
 **Console Errors:** ${input.consoleErrors?.length ? input.consoleErrors.slice(0, 5).join('\n') : 'None'}
 **Visual Diff:** ${input.diffAnalysis ? `Classification: ${input.diffAnalysis.classification}, AI Recommendation: ${input.diffAnalysis.aiRecommendation}` : 'No visual diff data'}
+**${domDiffSection}**
 
 **Recent History (last 5 runs):**
 ${historyDesc}`;
@@ -152,6 +158,20 @@ export async function triageBuildFailures(buildId: string, repositoryId: string)
       const diffs = await queries.getVisualDiffsByBuild(buildId);
       const testDiff = diffs.find(d => d.testId === result.testId);
 
+      // Compute DOM diff summary if snapshots available
+      let domDiffSummary: string | null = null;
+      if (test.domSnapshot && result.domSnapshot) {
+        try {
+          const { computeDomDiff, summarizeDomDiff } = await import('@/lib/diff/dom-diff');
+          const domDiff = computeDomDiff(test.domSnapshot, result.domSnapshot);
+          if (domDiff.added.length > 0 || domDiff.removed.length > 0 || domDiff.changed.length > 0) {
+            domDiffSummary = summarizeDomDiff(domDiff);
+          }
+        } catch {
+          // Non-critical
+        }
+      }
+
       const triageResult = await triageTestFailure(repositoryId, {
         testId: result.testId,
         testName: test.name,
@@ -163,6 +183,7 @@ export async function triageBuildFailures(buildId: string, repositoryId: string)
           classification: testDiff.classification ?? undefined,
           aiRecommendation: testDiff.aiRecommendation ?? undefined,
         } : null,
+        domDiffSummary,
       });
 
       // Save triage result

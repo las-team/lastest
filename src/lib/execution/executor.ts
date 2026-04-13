@@ -682,6 +682,7 @@ async function executeViaRunner(
         softErrors: Array.isArray(payload.softErrors) && payload.softErrors.length > 0 ? payload.softErrors as string[] : undefined,
         videoPath,
         networkBodiesPath,
+        domSnapshot: payload.domSnapshot as import('@/lib/db/schema').DomSnapshotData | undefined,
       };
       results.push(testResult);
       await onResult?.(testResult);

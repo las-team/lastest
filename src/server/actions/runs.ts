@@ -209,6 +209,7 @@ async function runTestsAsync(runId: string, tests: Test[], repositoryId?: string
         downloads: result.downloads,
         softErrors: result.softErrors,
         networkBodiesPath: result.networkBodiesPath,
+        domSnapshot: result.domSnapshot,
       });
       await updateJobProgress(activeJobId, i + 1, tests.length);
     }

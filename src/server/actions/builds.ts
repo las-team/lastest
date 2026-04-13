@@ -645,7 +645,7 @@ async function runBuildAsync(
   let currentBrowserType = 'chromium';
 
   // Result callback for processing diffs
-  const onResult = async (result: { testId: string; status: string; screenshotPath?: string; screenshots: { path: string; label?: string }[]; errorMessage?: string; durationMs?: number; consoleErrors?: string[]; networkRequests?: import('@/lib/db/schema').NetworkRequest[]; downloads?: import('@/lib/db/schema').DownloadRecord[]; a11yViolations?: import('@/lib/db/schema').A11yViolation[]; a11yPassesCount?: number; stabilityMetadata?: { frameCount: number; stableFrames: number; maxFrameDiff: number; isStable: boolean }; videoPath?: string; softErrors?: string[]; assertionResults?: import('@/lib/db/schema').AssertionResult[]; networkBodiesPath?: string }) => {
+  const onResult = async (result: { testId: string; status: string; screenshotPath?: string; screenshots: { path: string; label?: string }[]; errorMessage?: string; durationMs?: number; consoleErrors?: string[]; networkRequests?: import('@/lib/db/schema').NetworkRequest[]; downloads?: import('@/lib/db/schema').DownloadRecord[]; a11yViolations?: import('@/lib/db/schema').A11yViolation[]; a11yPassesCount?: number; stabilityMetadata?: { frameCount: number; stableFrames: number; maxFrameDiff: number; isStable: boolean }; videoPath?: string; softErrors?: string[]; assertionResults?: import('@/lib/db/schema').AssertionResult[]; networkBodiesPath?: string; domSnapshot?: import('@/lib/db/schema').DomSnapshotData }) => {
     processedCount++;
 
     // Save test result immediately
@@ -669,6 +669,7 @@ async function runBuildAsync(
       softErrors: result.softErrors,
       assertionResults: result.assertionResults,
       networkBodiesPath: result.networkBodiesPath,
+      domSnapshot: result.domSnapshot,
     });
 
     // Stamp first build on the test version (idempotent)
@@ -740,6 +741,26 @@ async function runBuildAsync(
             console.error('[gamification] flake_penalty failed', err);
           }
         })();
+      }
+    }
+
+    // Compute DOM diff and store on the first visual diff's metadata
+    const testRecord2 = tests.find(t => t.id === result.testId);
+    if (testRecord2?.domSnapshot && result.domSnapshot && diffResults.length > 0) {
+      try {
+        const { computeDomDiff } = await import('@/lib/diff/dom-diff');
+        const domDiff = computeDomDiff(testRecord2.domSnapshot, result.domSnapshot);
+        if (domDiff.added.length > 0 || domDiff.removed.length > 0 || domDiff.changed.length > 0) {
+          // Store DOM diff on the first visual diff's metadata
+          const firstDiffId = diffResults[0].diffId;
+          const existingDiff = await queries.getVisualDiff(firstDiffId);
+          if (existingDiff) {
+            const updatedMetadata = { ...(existingDiff.metadata as import('@/lib/db/schema').DiffMetadata || { changedRegions: [] }), domDiff };
+            await queries.updateVisualDiff(firstDiffId, { metadata: updatedMetadata });
+          }
+        }
+      } catch {
+        // Non-critical — DOM diff is optional
       }
     }
 
@@ -1034,6 +1055,7 @@ async function runBuildAsync(
                 softErrors: result.softErrors,
                 assertionResults: result.assertionResults,
                 networkBodiesPath: result.networkBodiesPath,
+                domSnapshot: result.domSnapshot,
                 retryOf: originalResult?.id ?? null,
                 isFlaky: false,
               });

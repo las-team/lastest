@@ -238,6 +238,7 @@ export async function stopRecording(repositoryId?: string | null) {
       generatedCode,
       requiredCapabilities: undefined,
       capturedStorageState: null as string | null,
+      domSnapshot: undefined as import('@/lib/db/schema').DomSnapshotData | undefined,
     };
   }
 
@@ -414,6 +415,7 @@ export async function getRecordingStatus(repositoryId?: string | null, sinceSequ
       id: lastCompleted.id,
       generatedCode: lastCompleted.generatedCode,
       requiredCapabilities: lastCompleted.requiredCapabilities,
+      domSnapshot: lastCompleted.domSnapshot,
     } : null,
     capturedStorageState: recorder.getCapturedStorageState(),
   };
@@ -444,6 +446,7 @@ export async function saveRecordedTest(data: {
   viewportHeight?: number;
   extraSetupSteps?: Array<{ stepType: 'test' | 'script'; testId?: string | null; scriptId?: string | null }>;
   skippedDefaultStepIds?: string[];
+  domSnapshot?: import('@/lib/db/schema').DomSnapshotData | null;
 }) {
   if (data.repositoryId) await requireRepoAccess(data.repositoryId);
   else await requireTeamAccess();
@@ -454,6 +457,7 @@ export async function saveRecordedTest(data: {
     code: data.code,
     repositoryId: data.repositoryId ?? null,
     requiredCapabilities: data.requiredCapabilities ?? undefined,
+    domSnapshot: data.domSnapshot ?? undefined,
   }, null, data.viewportWidth ? { width: data.viewportWidth, height: data.viewportHeight } : null);
 
   // Auto-enable Playwright settings for detected capabilities

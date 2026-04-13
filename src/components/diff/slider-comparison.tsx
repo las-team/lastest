@@ -31,6 +31,31 @@ function RegionOverlay({ dims, regions }: { dims: { width: number; height: numbe
   );
 }
 
+function DomRegionOverlay({ dims, regions }: { dims: { width: number; height: number } | null; regions: Array<{ x: number; y: number; width: number; height: number; color: string; border: string }> }) {
+  if (!dims || regions.length === 0) return null;
+  return (
+    <svg
+      className="absolute inset-0 w-full h-full pointer-events-none"
+      viewBox={`0 0 ${dims.width} ${dims.height}`}
+      preserveAspectRatio="none"
+    >
+      {regions.map((r, i) => (
+        <rect
+          key={i}
+          x={r.x}
+          y={r.y}
+          width={r.width}
+          height={r.height}
+          fill={r.color}
+          stroke={r.border}
+          strokeWidth="2"
+          vectorEffect="non-scaling-stroke"
+        />
+      ))}
+    </svg>
+  );
+}
+
 interface ChangedRegion {
   x: number;
   y: number;
@@ -49,6 +74,7 @@ interface SliderComparisonProps {
   alignedDiffImage?: string;
   alignmentSegments?: AlignmentSegment[];
   changedRegions?: ChangedRegion[];
+  domOverlayRegions?: Array<{ x: number; y: number; width: number; height: number; color: string; border: string }>;
   showRegions?: boolean;
   leftLabel?: string;
   rightLabel?: string;
@@ -68,6 +94,7 @@ export function SliderComparison({
   alignedDiffImage,
   alignmentSegments,
   changedRegions,
+  domOverlayRegions,
   showRegions: showRegionsProp = false,
   leftLabel = 'Baseline',
   rightLabel = 'Current',
@@ -288,6 +315,7 @@ export function SliderComparison({
             <div className="relative">
               <img src={currentImage} alt={rightLabel} className="w-full border rounded" />
               <RegionOverlay dims={imageDims} regions={visibleRegions} />
+              <DomRegionOverlay dims={imageDims} regions={domOverlayRegions ?? []} />
             </div>
           </div>
         </div>
@@ -388,6 +416,7 @@ export function SliderComparison({
             className="absolute inset-0 w-full h-full opacity-70 mix-blend-multiply"
           />
           <RegionOverlay dims={imageDims} regions={visibleRegions} />
+          <DomRegionOverlay dims={imageDims} regions={domOverlayRegions ?? []} />
         </div>
       </div>
     );
@@ -432,6 +461,7 @@ export function SliderComparison({
 
         {/* Region overlays */}
         <RegionOverlay dims={imageDims} regions={visibleRegions} />
+        <DomRegionOverlay dims={imageDims} regions={domOverlayRegions ?? []} />
 
         {/* Slider handle */}
         <div

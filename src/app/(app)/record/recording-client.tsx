@@ -282,6 +282,7 @@ export function RecordingClient({
   const [selectedStorageStateId, setSelectedStorageStateId] = useState<string | null>(null);
   const [storageStateOptions, setStorageStateOptions] = useState<Array<{ id: string; name: string; cookieCount: number; originCount: number }>>([]);
   const [capturedStorageState, setCapturedStorageState] = useState<string | null>(null);
+  const [domSnapshot, setDomSnapshot] = useState<import('@/lib/db/schema').DomSnapshotData | null>(null);
   const [saveCookieName, setSaveCookieName] = useState('');
 
   // Re-record mode
@@ -343,6 +344,7 @@ export function RecordingClient({
             setGeneratedCode(status.lastCompletedSession.generatedCode);
             setRequiredCapabilities(status.lastCompletedSession.requiredCapabilities ?? null);
             setCapturedStorageState(status.capturedStorageState ?? null);
+            setDomSnapshot(status.lastCompletedSession.domSnapshot ?? null);
             await clearLastCompletedSession(repositoryId);
             setStep('saving');
           } else {
@@ -598,6 +600,7 @@ export function RecordingClient({
         setGeneratedCode(session.generatedCode);
         setRequiredCapabilities(session.requiredCapabilities ?? null);
         setCapturedStorageState(session.capturedStorageState ?? null);
+        setDomSnapshot(session.domSnapshot ?? null);
         setStep('saving');
       }
     } catch (error) {
@@ -668,6 +671,7 @@ export function RecordingClient({
           viewportHeight: settings.viewportHeight ?? 720,
           extraSetupSteps: runSetupBeforeRecording && extraSetupSteps.length > 0 ? extraSetupSteps : undefined,
           skippedDefaultStepIds: runSetupBeforeRecording && skippedDefaultStepIds.size > 0 ? Array.from(skippedDefaultStepIds) : undefined,
+          domSnapshot,
         });
         router.push(`/tests/${test.id}`);
       }

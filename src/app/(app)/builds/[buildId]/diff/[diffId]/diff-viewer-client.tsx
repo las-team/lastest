@@ -5,10 +5,10 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { SliderComparison } from '@/components/diff/slider-comparison';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { approveDiff, undoApproval, addDiffTodo } from '@/server/actions/diffs';
-import type { VisualDiff, Test, DiffMetadata, AIDiffAnalysis, A11yViolation, NetworkRequest, DownloadRecord } from '@/lib/db/schema';
+import type { VisualDiff, Test, DiffMetadata, AIDiffAnalysis, A11yViolation, NetworkRequest, DownloadRecord, DomDiffResult } from '@/lib/db/schema';
 import { A11yViolationsPanel } from '@/components/builds/a11y-violations-panel';
 import { RuntimeErrorsPanel, stripRuntimeErrorsFromMessage } from '@/components/builds/runtime-errors-panel';
-import { CheckCircle, ListTodo, SkipForward, Eye, Image as ImageIcon, Sparkles, Loader2, ArrowUpDown, Bug, ChevronDown } from 'lucide-react';
+import { CheckCircle, ListTodo, SkipForward, Eye, Image as ImageIcon, Sparkles, Loader2, ArrowUpDown, Bug, ChevronDown, Code2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent } from '@/components/ui/card';
@@ -176,7 +176,17 @@ export function DiffViewerClient({ diff, buildId, prevDiffId, nextDiffId, banAiM
   const aiAnalysis = diff.aiAnalysis as AIDiffAnalysis | null;
   const aiStatus = diff.aiAnalysisStatus;
   const [showRegions, setShowRegions] = useState(false);
+  const [showDomOverlay, setShowDomOverlay] = useState(false);
   const changedRegions = metadata?.changedRegions;
+  const domDiff = metadata?.domDiff;
+  const hasDomChanges = domDiff && (domDiff.added.length > 0 || domDiff.removed.length > 0 || domDiff.changed.length > 0);
+
+  // Build DOM overlay regions from DOM diff bounding boxes
+  const domOverlayRegions = showDomOverlay && domDiff ? [
+    ...domDiff.removed.map(el => ({ ...el.boundingBox, color: 'rgba(239, 68, 68, 0.25)' as const, border: '#ef4444' })),
+    ...domDiff.added.map(el => ({ ...el.boundingBox, color: 'rgba(34, 197, 94, 0.25)' as const, border: '#22c55e' })),
+    ...domDiff.changed.map(c => ({ ...c.current.boundingBox, color: 'rgba(234, 179, 8, 0.25)' as const, border: '#eab308' })),
+  ] : [];
 
   return (
     <div className="space-y-6">
@@ -311,6 +321,11 @@ export function DiffViewerClient({ diff, buildId, prevDiffId, nextDiffId, banAiM
 
           <A11yViolationsPanel violations={diff.a11yViolations ?? []} />
 
+          {/* DOM Changes Panel */}
+          {metadata?.domDiff && (metadata.domDiff.added.length > 0 || metadata.domDiff.removed.length > 0 || metadata.domDiff.changed.length > 0) && (
+            <DomChangesPanel domDiff={metadata.domDiff} />
+          )}
+
           {/* Diff Comparison */}
           {diff.currentImagePath ? (
             (() => {
@@ -369,6 +384,7 @@ export function DiffViewerClient({ diff, buildId, prevDiffId, nextDiffId, banAiM
                     alignedDiffImage={tab.alignedDiffImage}
                     alignmentSegments={tab.alignmentSegments}
                     changedRegions={changedRegions}
+                    domOverlayRegions={domOverlayRegions}
                     showRegions={showRegions}
                     initialViewMode={viewParam || undefined}
                     onViewModeChange={handleViewModeChange}
@@ -413,6 +429,7 @@ export function DiffViewerClient({ diff, buildId, prevDiffId, nextDiffId, banAiM
                           alignedDiffImage={tab.alignedDiffImage}
                           alignmentSegments={tab.alignmentSegments}
                           changedRegions={changedRegions}
+                          domOverlayRegions={domOverlayRegions}
                           showRegions={showRegions}
                           initialViewMode={viewParam || undefined}
                           onViewModeChange={handleViewModeChange}
@@ -533,6 +550,19 @@ export function DiffViewerClient({ diff, buildId, prevDiffId, nextDiffId, banAiM
                   </span>
                 </>
               )}
+              {hasDomChanges && (
+                <button
+                  onClick={() => setShowDomOverlay(!showDomOverlay)}
+                  className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs transition-colors ${
+                    showDomOverlay
+                      ? 'bg-cyan-100 text-cyan-700 dark:bg-cyan-900/30 dark:text-cyan-400'
+                      : 'bg-muted hover:bg-muted/80'
+                  }`}
+                >
+                  <Code2 className="w-3 h-3" />
+                  {showDomOverlay ? 'Hide' : 'Show'} DOM
+                </button>
+              )}
               {metadata?.pageShift?.detected && (
                 <span className="ml-3 text-blue-600">
                   · Shift: {metadata.pageShift.insertedRows ?? 0} rows added, {metadata.pageShift.deletedRows ?? 0} removed
@@ -554,6 +584,116 @@ export function DiffViewerClient({ diff, buildId, prevDiffId, nextDiffId, banAiM
             Undo
           </button>
         </div>
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// DOM Changes Panel — shows added/removed/changed elements from DOM diff
+// ---------------------------------------------------------------------------
+
+function DomChangesPanel({ domDiff }: { domDiff: DomDiffResult }) {
+  const [expanded, setExpanded] = useState(false);
+  const totalChanges = domDiff.added.length + domDiff.removed.length + domDiff.changed.length;
+
+  return (
+    <details
+      className="border border-cyan-200 bg-cyan-50/50 dark:border-cyan-800 dark:bg-cyan-950/30 rounded-lg"
+      open={expanded}
+      onToggle={(e) => setExpanded((e.target as HTMLDetailsElement).open)}
+    >
+      <summary className="flex items-center gap-3 p-4 cursor-pointer select-none">
+        <Code2 className="w-5 h-5 text-cyan-600 dark:text-cyan-400 flex-shrink-0" />
+        <span className="font-medium text-cyan-800 dark:text-cyan-200">
+          DOM Changes
+        </span>
+        <span className="text-xs text-cyan-600 dark:text-cyan-400">
+          {domDiff.removed.length > 0 && <span className="text-red-600 dark:text-red-400 mr-2">-{domDiff.removed.length} removed</span>}
+          {domDiff.added.length > 0 && <span className="text-green-600 dark:text-green-400 mr-2">+{domDiff.added.length} added</span>}
+          {domDiff.changed.length > 0 && <span className="text-yellow-600 dark:text-yellow-400">~{domDiff.changed.length} changed</span>}
+        </span>
+        <span className="text-xs text-muted-foreground ml-auto mr-2">
+          {domDiff.unchangedCount} unchanged
+        </span>
+        <ChevronDown className="w-4 h-4 text-cyan-400 transition-transform [[open]>&]:rotate-180" />
+      </summary>
+      <div className="px-4 pb-4 space-y-3 max-h-80 overflow-y-auto">
+        {/* Removed elements */}
+        {domDiff.removed.length > 0 && (
+          <div>
+            <div className="text-xs font-semibold text-red-700 dark:text-red-400 mb-1">Removed ({domDiff.removed.length})</div>
+            <div className="space-y-1">
+              {domDiff.removed.slice(0, 20).map((el, i) => (
+                <DomElementRow key={`r-${i}`} element={el} variant="removed" />
+              ))}
+              {domDiff.removed.length > 20 && (
+                <div className="text-xs text-muted-foreground pl-2">... and {domDiff.removed.length - 20} more</div>
+              )}
+            </div>
+          </div>
+        )}
+        {/* Added elements */}
+        {domDiff.added.length > 0 && (
+          <div>
+            <div className="text-xs font-semibold text-green-700 dark:text-green-400 mb-1">Added ({domDiff.added.length})</div>
+            <div className="space-y-1">
+              {domDiff.added.slice(0, 20).map((el, i) => (
+                <DomElementRow key={`a-${i}`} element={el} variant="added" />
+              ))}
+              {domDiff.added.length > 20 && (
+                <div className="text-xs text-muted-foreground pl-2">... and {domDiff.added.length - 20} more</div>
+              )}
+            </div>
+          </div>
+        )}
+        {/* Changed elements */}
+        {domDiff.changed.length > 0 && (
+          <div>
+            <div className="text-xs font-semibold text-yellow-700 dark:text-yellow-400 mb-1">Changed ({domDiff.changed.length})</div>
+            <div className="space-y-1">
+              {domDiff.changed.slice(0, 20).map((c, i) => (
+                <div key={`c-${i}`} className="flex items-start gap-2 text-xs bg-yellow-50/50 dark:bg-yellow-900/10 rounded px-2 py-1">
+                  <span className="font-mono text-yellow-700 dark:text-yellow-400">&lt;{c.current.tag}&gt;</span>
+                  <span className="text-muted-foreground truncate flex-1">
+                    {c.current.selectors[0]?.value ?? ''}
+                  </span>
+                  <div className="flex gap-1 flex-shrink-0">
+                    {c.changes.map(ch => (
+                      <span key={ch} className="px-1 py-0.5 rounded bg-yellow-100 dark:bg-yellow-800/30 text-yellow-800 dark:text-yellow-300 text-[10px]">
+                        {ch}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              ))}
+              {domDiff.changed.length > 20 && (
+                <div className="text-xs text-muted-foreground pl-2">... and {domDiff.changed.length - 20} more</div>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
+    </details>
+  );
+}
+
+function DomElementRow({ element, variant }: { element: import('@/lib/db/schema').DomSnapshotElement; variant: 'added' | 'removed' }) {
+  const color = variant === 'added'
+    ? 'bg-green-50/50 dark:bg-green-900/10 text-green-700 dark:text-green-400'
+    : 'bg-red-50/50 dark:bg-red-900/10 text-red-700 dark:text-red-400';
+  const sign = variant === 'added' ? '+' : '-';
+
+  return (
+    <div className={`flex items-center gap-2 text-xs rounded px-2 py-1 ${color}`}>
+      <span className="font-mono flex-shrink-0">{sign} &lt;{element.tag}&gt;</span>
+      <span className="text-muted-foreground truncate flex-1">
+        {element.selectors[0]?.value ?? element.textContent?.slice(0, 40) ?? ''}
+      </span>
+      {element.textContent && (
+        <span className="text-muted-foreground/60 truncate max-w-32 text-[10px]">
+          {element.textContent.slice(0, 30)}
+        </span>
       )}
     </div>
   );
