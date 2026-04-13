@@ -1,4 +1,4 @@
-import { pgTable, text, integer, boolean, timestamp, jsonb, index } from 'drizzle-orm/pg-core';
+import { pgTable, text, integer, bigint, boolean, timestamp, jsonb, index } from 'drizzle-orm/pg-core';
 
 // Type definitions for JSON columns
 
@@ -884,7 +884,7 @@ export type AIPromptLog = typeof aiPromptLogs.$inferSelect;
 export type NewAIPromptLog = typeof aiPromptLogs.$inferInsert;
 
 // Background Jobs for queue tracking
-export type BackgroundJobType = 'ai_scan' | 'build_tests' | 'test_run' | 'build_run' | 'ai_fix' | 'ai_validate' | 'ai_diff';
+export type BackgroundJobType = 'ai_scan' | 'build_tests' | 'test_run' | 'build_run' | 'ai_fix' | 'ai_validate' | 'ai_diff' | 'storage_cleanup';
 export type BackgroundJobStatus = 'pending' | 'running' | 'completed' | 'failed';
 
 export const backgroundJobs = pgTable('background_jobs', {
@@ -1047,6 +1047,9 @@ export const teams = pgTable('teams', {
   earlyAdopterMode: boolean('early_adopter_mode').default(false),
   banAiMode: boolean('ban_ai_mode').default(false),
   gamificationEnabled: boolean('gamification_enabled').default(false),
+  storageQuotaBytes: bigint('storage_quota_bytes', { mode: 'number' }).default(10737418240), // 10 GB
+  storageUsedBytes: bigint('storage_used_bytes', { mode: 'number' }).default(0),
+  storageLastCalculatedAt: timestamp('storage_last_calculated_at'),
   createdAt: timestamp('created_at'),
   updatedAt: timestamp('updated_at'),
 });
