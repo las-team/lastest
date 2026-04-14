@@ -209,7 +209,7 @@ export class EmbeddedTestExecutor {
     // Create a fresh context + page per test (mirrors standard runner)
     const testContext = await browser.newContext({
       viewport,
-      ...(command.acceptDownloads ? { acceptDownloads: true } : {}),
+      acceptDownloads: true, // Always accept in EB — native file dialogs hang in headless
       ...(parsedStorageState ? { storageState: parsedStorageState } : {}),
       ...(needsStabilizedContext ? { deviceScaleFactor: 1 } : {}),
       ...(needsStabilizedContext ? { locale: 'en-US', timezoneId: 'UTC', colorScheme: 'light' as const } : {}),
@@ -232,37 +232,39 @@ export class EmbeddedTestExecutor {
       page.setDefaultNavigationTimeout(30000);
       page.setDefaultTimeout(15000);
 
-      // Intercept File System Access API so blob downloads trigger Playwright's download event
-      if (command.acceptDownloads) {
-        await page.addInitScript(() => {
-          if (typeof window !== 'undefined') {
-            (window as unknown as Record<string, unknown>).showSaveFilePicker = async function (...args: unknown[]) {
-              const opts = (args[0] ?? {}) as Record<string, unknown>;
-              const suggestedName = (opts.suggestedName as string) || 'download';
-              const chunks: BlobPart[] = [];
-              return {
-                createWritable: async () => ({
-                  write: async (data: BlobPart) => { chunks.push(data); },
-                  seek: async () => {},
-                  truncate: async () => {},
-                  close: async () => {
-                    const blob = new Blob(chunks);
-                    const url = URL.createObjectURL(blob);
-                    const a = document.createElement('a');
-                    a.href = url;
-                    a.download = suggestedName;
-                    a.style.display = 'none';
-                    document.body.appendChild(a);
-                    a.click();
-                    setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 100);
-                  },
-                }),
-                getFile: async () => new File(chunks, suggestedName),
-              };
+      // Intercept File System Access API so blob downloads trigger Playwright's download event.
+      // Always inject — native file dialogs hang forever in headless mode.
+      await page.addInitScript(() => {
+        if (typeof window !== 'undefined') {
+          (window as unknown as Record<string, unknown>).showSaveFilePicker = async function (...args: unknown[]) {
+            const opts = (args[0] ?? {}) as Record<string, unknown>;
+            const suggestedName = (opts.suggestedName as string) || 'download';
+            console.log('[lastest-shim] showSaveFilePicker called:', suggestedName);
+            const chunks: BlobPart[] = [];
+            return {
+              createWritable: async () => ({
+                write: async (data: BlobPart) => { chunks.push(data); },
+                seek: async () => {},
+                truncate: async () => {},
+                close: async () => {
+                  console.log('[lastest-shim] writable.close() — triggering download:', suggestedName, 'chunks:', chunks.length);
+                  const blob = new Blob(chunks);
+                  const url = URL.createObjectURL(blob);
+                  const a = document.createElement('a');
+                  a.href = url;
+                  a.download = suggestedName;
+                  a.style.display = 'none';
+                  document.body.appendChild(a);
+                  a.click();
+                  console.log('[lastest-shim] <a> clicked, download should fire');
+                  setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 100);
+                },
+              }),
+              getFile: async () => new File(chunks, suggestedName),
             };
-          }
-        });
-      }
+          };
+        }
+      });
 
       // Setup freeze scripts (timestamps, random, animations) BEFORE any navigation
       if (command.stabilization) {
@@ -272,8 +274,12 @@ export class EmbeddedTestExecutor {
 
       // Page event listeners — capture console errors and network requests
       page.on('console', (msg) => {
+        const text = msg.text();
+        // Log shim messages to container output for debugging
+        if (text.startsWith('[lastest-shim]')) {
+          logFn('info', text);
+        }
         if (msg.type() === 'error') {
-          const text = msg.text();
           consoleErrors.push(text);
           logFn('warn', `Console error: ${text}`);
         }
@@ -429,6 +435,10 @@ export class EmbeddedTestExecutor {
         if (stmt.includes('.screenshot(')) return `${indent}${stmt}`;
         return `${indent}try { ${stmt} } catch(__softErr) { if (__softErr && __softErr.__hardAssertion) throw __softErr; stepLogger.warn(typeof __softErr === 'object' && __softErr !== null && 'message' in __softErr ? __softErr.message : String(__softErr)); }`;
       });
+      // Also soft-wrap synchronous expect() calls so assertion failures don't kill the test
+      body = body.replace(/^(\s*)(expect\(.+;)\s*$/gm, (_match, indent, stmt) => {
+        return `${indent}try { ${stmt} } catch(__softErr) { if (__softErr && __softErr.__hardAssertion) throw __softErr; stepLogger.warn(typeof __softErr === 'object' && __softErr !== null && 'message' in __softErr ? __softErr.message : String(__softErr)); }`;
+      });
 
       // Step logger with softExpect/softAction (matches runner)
       const stepLogger = {
@@ -512,6 +522,8 @@ export class EmbeddedTestExecutor {
             else if (typeof target === 'string') { if (!target.includes(expected as string)) throw new Error(`${msgPrefix}Expected string to contain "${expected}"`); }
           },
           toHaveLength(expected: number) { if (target?.length !== expected) throw new Error(`${msgPrefix}Expected length ${expected} but got ${target?.length}`); },
+          toBeGreaterThan(expected: number) { if (!(target > expected)) throw new Error(`${msgPrefix}Expected ${target} to be greater than ${expected}`); },
+          toBeGreaterThanOrEqual(expected: number) { if (!(target >= expected)) throw new Error(`${msgPrefix}Expected ${target} to be greater than or equal to ${expected}`); },
           toMatch(expected: string | RegExp) {
             const regex = typeof expected === 'string' ? new RegExp(expected) : expected;
             if (!regex.test(String(target))) throw new Error(`${msgPrefix}Expected "${target}" to match ${regex}`);
@@ -618,6 +630,7 @@ export class EmbeddedTestExecutor {
       // Passive listener — catches all downloads automatically
       page.on('download', async (download) => {
         const safeName = download.suggestedFilename().replace(/\.\./g, '_');
+        logFn('info', `[download] Captured: ${safeName} (url: ${download.url().slice(0, 80)})`);
         if (!dlList.some(d => d.suggestedFilename === safeName)) {
           dlList.push({ suggestedFilename: safeName, path: safeName });
         }
@@ -635,10 +648,13 @@ export class EmbeddedTestExecutor {
           return { filename: safeName, path: safeName };
         },
         list: () => dlList,
-        waitForAny: async (timeoutMs = 10000) => {
-          if (dlList.length > 0) return;
-          try { await page.waitForEvent('download', { timeout: timeoutMs }); } catch { /* timeout */ }
-          await page.waitForTimeout(500);
+        waitForAny: async (timeoutMs = 5000) => {
+          logFn('info', `[download] waitForAny: polling for up to ${timeoutMs}ms (current count: ${dlList.length})`);
+          const start = Date.now();
+          while (dlList.length === 0 && Date.now() - start < timeoutMs) {
+            await page.waitForTimeout(250);
+          }
+          logFn('info', `[download] waitForAny: done after ${Date.now() - start}ms, downloads: ${dlList.length}`);
         },
       };
 

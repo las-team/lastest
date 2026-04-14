@@ -149,8 +149,9 @@ export function parseAssertions(code: string): TestAssertion[] {
 
     // Pattern 5: Download assertions
     // // Download assertion: wait for download to complete then verify
-    const downloadCommentMatch = trimmed.match(/^\/\/ Download assertion:/);
+    const downloadCommentMatch = trimmed.match(/^\/\/ Download assertion:\s*(.+)?$/);
     if (downloadCommentMatch) {
+      const filename = downloadCommentMatch[1]?.trim();
       // Find the expect line (may be 1-3 lines after the comment, past waitForAny)
       let endLine = i + 1;
       for (let j = i + 1; j < Math.min(i + 4, lines.length); j++) {
@@ -158,13 +159,14 @@ export function parseAssertions(code: string): TestAssertion[] {
       }
 
       assertions.push({
-        id: assertionId(orderIndex, 'fileDownloaded', 'download'),
+        id: assertionId(orderIndex, 'fileDownloaded', 'download', filename),
         orderIndex,
         category: 'download',
         assertionType: 'fileDownloaded',
         negated: false,
+        expectedValue: filename,
         isSoft: !hasHardMarker,
-        label: 'File downloaded',
+        label: filename && filename !== 'fileDownloaded' ? `Download: ${filename}` : 'File downloaded',
         codeLineStart: i + 1,
         codeLineEnd: endLine + 1,
       });

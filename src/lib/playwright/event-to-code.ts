@@ -296,7 +296,8 @@ export function eventsToCodeLines(
             lines.push(`${indent}await page.waitForLoadState('domcontentloaded');`);
             break;
           case 'downloadExists': {
-            lines.push(`${indent}// Download assertion: wait for download to complete then verify`);
+            const dlName = event.data.downloadFilename;
+            lines.push(`${indent}// Download assertion: ${dlName || 'fileDownloaded'}`);
             lines.push(`${indent}await downloads.waitForAny();`);
             lines.push(`${indent}expect(downloads.list().length).toBeGreaterThan(0);`);
             break;

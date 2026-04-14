@@ -2181,11 +2181,11 @@ export class PlaywrightRunner extends EventEmitter {
           return { filename: safeName, path: savePath };
         },
         list: () => dlList,
-        waitForAny: async (timeoutMs = 10000) => {
-          if (dlList.length > 0) return;
-          try { await page.waitForEvent('download', { timeout: timeoutMs }); } catch { /* timeout — no download arrived */ }
-          // Give passive listener time to save the file
-          await page.waitForTimeout(500);
+        waitForAny: async (timeoutMs = 5000) => {
+          const start = Date.now();
+          while (dlList.length === 0 && Date.now() - start < timeoutMs) {
+            await page.waitForTimeout(250);
+          }
         },
       } : {
         waitForDownload: async () => { throw new Error('Downloads not enabled — enable "Accept Downloads" in Playwright settings'); },
