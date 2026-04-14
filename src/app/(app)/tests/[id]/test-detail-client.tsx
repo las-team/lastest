@@ -76,6 +76,8 @@ interface TestResult {
   startedAt: Date | null;
   networkBodiesPath: string | null;
   screenshots: import('@/lib/db/schema').CapturedScreenshot[] | null;
+  lastReachedStep: number | null;
+  totalSteps: number | null;
 }
 
 interface DefaultStepForUI {
@@ -1003,6 +1005,8 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
               errorMessage={latestResult?.errorMessage ?? null}
               screenshots={latestResult?.screenshots ?? null}
               envBaseUrl={envBaseUrl ?? null}
+              lastReachedStep={latestResult?.lastReachedStep ?? null}
+              totalSteps={latestResult?.totalSteps ?? null}
               onParseNeeded={async () => {
                 try {
                   const { parseAssertions } = await import('@/lib/playwright/assertion-parser');

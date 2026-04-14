@@ -21,6 +21,7 @@
 import type { Browser, Page } from 'playwright';
 import type { StabilizationPayload } from './protocol.js';
 import { setupFreezeScripts, applyPreScreenshotStabilization } from './stabilization.js';
+import { instrumentStepTracking } from '@lastest/shared';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
@@ -52,6 +53,8 @@ export interface EmbeddedTestResult {
   softErrors?: string[];
   videoData?: string; // base64-encoded video file
   videoFilename?: string;
+  lastReachedStep?: number;
+  totalSteps?: number;
 }
 
 export interface EmbeddedSetupResult {
@@ -91,6 +94,7 @@ export interface RunTestPayload {
   networkErrorMode?: 'fail' | 'warn' | 'ignore';
   ignoreExternalNetworkErrors?: boolean;
   enableNetworkInterception?: boolean;
+  acceptDownloads?: boolean;
   forceVideoRecording?: boolean;
 }
 
@@ -205,6 +209,7 @@ export class EmbeddedTestExecutor {
     // Create a fresh context + page per test (mirrors standard runner)
     const testContext = await browser.newContext({
       viewport,
+      ...(command.acceptDownloads ? { acceptDownloads: true } : {}),
       ...(parsedStorageState ? { storageState: parsedStorageState } : {}),
       ...(needsStabilizedContext ? { deviceScaleFactor: 1 } : {}),
       ...(needsStabilizedContext ? { locale: 'en-US', timezoneId: 'UTC', colorScheme: 'light' as const } : {}),
@@ -226,6 +231,38 @@ export class EmbeddedTestExecutor {
       // Set default timeouts (mirrors standard runner)
       page.setDefaultNavigationTimeout(30000);
       page.setDefaultTimeout(15000);
+
+      // Intercept File System Access API so blob downloads trigger Playwright's download event
+      if (command.acceptDownloads) {
+        await page.addInitScript(() => {
+          if (typeof window !== 'undefined') {
+            (window as unknown as Record<string, unknown>).showSaveFilePicker = async function (...args: unknown[]) {
+              const opts = (args[0] ?? {}) as Record<string, unknown>;
+              const suggestedName = (opts.suggestedName as string) || 'download';
+              const chunks: BlobPart[] = [];
+              return {
+                createWritable: async () => ({
+                  write: async (data: BlobPart) => { chunks.push(data); },
+                  seek: async () => {},
+                  truncate: async () => {},
+                  close: async () => {
+                    const blob = new Blob(chunks);
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = suggestedName;
+                    a.style.display = 'none';
+                    document.body.appendChild(a);
+                    a.click();
+                    setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 100);
+                  },
+                }),
+                getFile: async () => new File(chunks, suggestedName),
+              };
+            };
+          }
+        });
+      }
 
       // Setup freeze scripts (timestamps, random, animations) BEFORE any navigation
       if (command.stabilization) {
@@ -380,6 +417,12 @@ export class EmbeddedTestExecutor {
 
       // Patch selectAll (mirrors runner.ts)
       body = body.replace(/page\.keyboard\.selectAll\(\)/g, "page.keyboard.press('Control+a')");
+
+      // Instrument step tracking before soft error wrapping
+      const { instrumentedBody, stepCount } = instrumentStepTracking(body);
+      body = instrumentedBody;
+      let lastReachedStep = -1;
+      const __stepReached = async (n: number) => { lastReachedStep = Math.max(lastReachedStep, n); };
 
       // Soft error wrapping — skip screenshot lines (mirrors runner.ts)
       body = body.replace(/^(\s*)(await\s+.+;)\s*$/gm, (_match, indent, stmt) => {
@@ -570,6 +613,35 @@ export class EmbeddedTestExecutor {
         }
       };
 
+      // Downloads helper — always provided, captures downloads passively + on-demand
+      const dlList: Array<{ suggestedFilename: string; path: string }> = [];
+      // Passive listener — catches all downloads automatically
+      page.on('download', async (download) => {
+        const safeName = download.suggestedFilename().replace(/\.\./g, '_');
+        if (!dlList.some(d => d.suggestedFilename === safeName)) {
+          dlList.push({ suggestedFilename: safeName, path: safeName });
+        }
+      });
+      const downloadsHelper = {
+        waitForDownload: async (triggerAction: () => Promise<void>) => {
+          const [download] = await Promise.all([
+            page.waitForEvent('download'),
+            triggerAction(),
+          ]);
+          const safeName = download.suggestedFilename().replace(/\.\./g, '_');
+          if (!dlList.some(d => d.suggestedFilename === safeName)) {
+            dlList.push({ suggestedFilename: safeName, path: safeName });
+          }
+          return { filename: safeName, path: safeName };
+        },
+        list: () => dlList,
+        waitForAny: async (timeoutMs = 10000) => {
+          if (dlList.length > 0) return;
+          try { await page.waitForEvent('download', { timeout: timeoutMs }); } catch { /* timeout */ }
+          await page.waitForTimeout(500);
+        },
+      };
+
       logFn('info', 'Executing test code...');
 
       // Heartbeat timer — logs every 15s so the user knows the test is still running
@@ -586,10 +658,10 @@ export class EmbeddedTestExecutor {
           (async () => {
             const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
             const testFn = new AsyncFunction(
-              'page', 'baseUrl', 'screenshotPath', 'stepLogger', 'expect', 'locateWithFallback', 'replayCursorPath',
+              'page', 'baseUrl', 'screenshotPath', 'stepLogger', 'expect', 'appState', 'locateWithFallback', 'fileUpload', 'clipboard', 'downloads', 'network', 'replayCursorPath', 'fixtures', '__stepReached',
               body
             );
-            await testFn(page, command.targetUrl.replace(/\/+$/, ''), 'screenshot.png', stepLogger, expect, locateWithFallback, replayCursorPathFn);
+            await testFn(page, command.targetUrl.replace(/\/+$/, ''), 'screenshot.png', stepLogger, expect, null, locateWithFallback, null, null, downloadsHelper, null, replayCursorPathFn, {}, __stepReached);
           })().then(r => { clearTimeout(timeoutTimer); return r; }),
           new Promise<never>((_, reject) => {
             timeoutTimer = setTimeout(() => {
@@ -666,6 +738,8 @@ export class EmbeddedTestExecutor {
         consoleErrors: consoleErrors.length > 0 ? consoleErrors : undefined,
         networkRequests: allNetworkRequests.length > 0 ? allNetworkRequests : undefined,
         softErrors: softErrors.length > 0 ? softErrors : undefined,
+        lastReachedStep: lastReachedStep >= 0 ? lastReachedStep : undefined,
+        totalSteps: stepCount > 0 ? stepCount : undefined,
       };
     } catch (error) {
       const durationMs = Date.now() - startTime;
@@ -680,6 +754,8 @@ export class EmbeddedTestExecutor {
           consoleErrors: consoleErrors.length > 0 ? consoleErrors : undefined,
           networkRequests: allNetworkRequests.length > 0 ? allNetworkRequests : undefined,
           softErrors: softErrors.length > 0 ? softErrors : undefined,
+          lastReachedStep: lastReachedStep >= 0 ? lastReachedStep : undefined,
+          totalSteps: stepCount > 0 ? stepCount : undefined,
         };
       } else {
         const isTimeout = errorMessage.includes('timed out');
@@ -703,6 +779,8 @@ export class EmbeddedTestExecutor {
           consoleErrors: consoleErrors.length > 0 ? consoleErrors : undefined,
           networkRequests: allNetworkRequests.length > 0 ? allNetworkRequests : undefined,
           softErrors: softErrors.length > 0 ? softErrors : undefined,
+          lastReachedStep: lastReachedStep >= 0 ? lastReachedStep : undefined,
+          totalSteps: stepCount > 0 ? stepCount : undefined,
         };
       }
     } finally {

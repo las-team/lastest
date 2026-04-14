@@ -148,27 +148,25 @@ export function parseAssertions(code: string): TestAssertion[] {
     }
 
     // Pattern 5: Download assertions
-    // // Download assertion: filenameMatch  OR  // Download assertion: fileDownloaded
-    const downloadCommentMatch = trimmed.match(/^\/\/ Download assertion: (\w+)/);
+    // // Download assertion: wait for download to complete then verify
+    const downloadCommentMatch = trimmed.match(/^\/\/ Download assertion:/);
     if (downloadCommentMatch) {
-      const assertionType = downloadCommentMatch[1];
-      // Look at next line for expected filename
-      const nextLine = i + 1 < lines.length ? lines[i + 1].trim() : '';
-      let expectedValue: string | undefined;
-      const fnMatch = nextLine.match(/suggestedFilename === '([^']+)'/);
-      if (fnMatch) expectedValue = fnMatch[1];
+      // Find the expect line (may be 1-3 lines after the comment, past waitForAny)
+      let endLine = i + 1;
+      for (let j = i + 1; j < Math.min(i + 4, lines.length); j++) {
+        if (lines[j].trim().startsWith('expect(')) { endLine = j; break; }
+      }
 
       assertions.push({
-        id: assertionId(orderIndex, assertionType, 'download', expectedValue),
+        id: assertionId(orderIndex, 'fileDownloaded', 'download'),
         orderIndex,
         category: 'download',
-        assertionType,
+        assertionType: 'fileDownloaded',
         negated: false,
-        expectedValue,
         isSoft: !hasHardMarker,
-        label: expectedValue ? `Download file "${expectedValue}"` : 'File downloaded',
+        label: 'File downloaded',
         codeLineStart: i + 1,
-        codeLineEnd: i + 2,
+        codeLineEnd: endLine + 1,
       });
       orderIndex++;
       continue;

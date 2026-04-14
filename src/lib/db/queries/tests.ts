@@ -431,6 +431,8 @@ export async function getTestResultsByTest(testId: string) {
       startedAt: testRuns.startedAt,
       networkBodiesPath: testResults.networkBodiesPath,
       domSnapshot: testResults.domSnapshot,
+      lastReachedStep: testResults.lastReachedStep,
+      totalSteps: testResults.totalSteps,
     })
     .from(testResults)
     .innerJoin(testRuns, eq(testResults.testRunId, testRuns.id))

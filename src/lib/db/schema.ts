@@ -312,6 +312,8 @@ export const testResults = pgTable('test_results', {
   isFlaky: boolean('is_flaky').default(false), // true if test failed then passed on retry
   triage: jsonb('triage').$type<TriageResult>(), // AI failure triage classification
   domSnapshot: jsonb('dom_snapshot').$type<DomSnapshotData>(), // DOM state captured at screenshot time
+  lastReachedStep: integer('last_reached_step'), // 0-based index of last step reached during execution
+  totalSteps: integer('total_steps'), // total parsed step count for watermark ratio computation
 });
 
 // Repository provider type

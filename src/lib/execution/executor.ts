@@ -683,6 +683,8 @@ async function executeViaRunner(
         videoPath,
         networkBodiesPath,
         domSnapshot: payload.domSnapshot as import('@/lib/db/schema').DomSnapshotData | undefined,
+        lastReachedStep: typeof payload.lastReachedStep === 'number' ? payload.lastReachedStep : undefined,
+        totalSteps: typeof payload.totalSteps === 'number' ? payload.totalSteps : undefined,
       };
       results.push(testResult);
       await onResult?.(testResult);

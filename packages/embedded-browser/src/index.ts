@@ -446,6 +446,8 @@ async function startup(): Promise<void> {
                 softErrors: result.softErrors,
                 videoData: result.videoData,
                 videoFilename: result.videoFilename,
+                lastReachedStep: result.lastReachedStep,
+                totalSteps: result.totalSteps,
               },
             });
 

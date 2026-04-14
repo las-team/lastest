@@ -18,6 +18,8 @@ interface TestStepsTabProps {
   errorMessage?: string | null;
   screenshots?: CapturedScreenshot[] | null;
   envBaseUrl?: string | null;
+  lastReachedStep?: number | null;
+  totalSteps?: number | null;
   onParseNeeded?: () => void;
   onToggleAssertionSoftness?: (assertionId: string, makeSoft: boolean) => Promise<void>;
   onStepValueChange?: (stepLineStart: number, stepLineEnd: number, oldValue: string, newValue: string) => Promise<void>;
@@ -150,6 +152,8 @@ export function TestStepsTab({
   errorMessage,
   screenshots,
   envBaseUrl,
+  lastReachedStep: serverLastReachedStep,
+  totalSteps: serverTotalSteps,
   onParseNeeded,
   onToggleAssertionSoftness,
   onStepValueChange,
@@ -275,17 +279,30 @@ export function TestStepsTab({
     return counts;
   }, [steps]);
 
-  // Compute execution watermark: the index of the last step that was reached
+  // Compute execution watermark: the index of the last step that was reached.
+  // Primary source: server-side __stepReached() instrumentation (precise).
+  // Fallback: client-side heuristics for old results without server data.
   const executionWatermark = useMemo(() => {
-    if (!testStatus || steps.length === 0) return -1; // no run data
-    if (testStatus === 'passed') return steps.length - 1; // all steps reached
+    if (!testStatus || steps.length === 0) return -1;
+    if (testStatus === 'passed') return steps.length - 1;
 
+    // Use server-provided step tracking when available (robust)
+    if (typeof serverLastReachedStep === 'number' && serverLastReachedStep >= 0 && typeof serverTotalSteps === 'number' && serverTotalSteps > 0) {
+      // Server parsed the transformed body (after type stripping etc.) which may
+      // have a different step count than the client's parse of the original code.
+      // Map using ratio to handle count differences.
+      if (serverTotalSteps === steps.length) {
+        return serverLastReachedStep; // perfect match
+      }
+      return Math.min(
+        Math.round((serverLastReachedStep / serverTotalSteps) * steps.length),
+        steps.length - 1,
+      );
+    }
+
+    // Fallback: client-side heuristics for old results
     let maxReached = -1;
 
-    // Evidence from screenshots — map captured count to screenshot-type steps.
-    // Trust screenshot evidence when we have other execution signals OR when there
-    // are more screenshots than just the post-error capture (which means the test's
-    // own screenshot steps were reached), OR when we have an error message (test ran).
     const hasExecutionEvidence = (assertionResults && assertionResults.length > 0)
       || (softErrors && softErrors.length > 0)
       || !!errorMessage;
@@ -301,7 +318,6 @@ export function TestStepsTab({
       }
     }
 
-    // Evidence from assertion results
     if (assertionResults && assertionResults.length > 0) {
       const ranIds = new Set(assertionResults.map(r => r.assertionId));
       for (let i = 0; i < steps.length; i++) {
@@ -312,7 +328,6 @@ export function TestStepsTab({
       }
     }
 
-    // Try to parse error line from stack trace
     if (errorMessage && maxReached < steps.length - 1) {
       const lineMatch = errorMessage.match(/at\s+(?:<anonymous>|eval)[^:]*:(\d+):/);
       if (lineMatch) {
@@ -326,22 +341,7 @@ export function TestStepsTab({
       }
     }
 
-    // Match error content to step code
     if (errorMessage && maxReached < steps.length - 1) {
-      // "X is not defined" → find step using X.something or X(
-      const undefinedMatch = errorMessage.match(/^(\w+) is not defined$/);
-      if (undefinedMatch) {
-        const varName = undefinedMatch[1];
-        const pattern = new RegExp(`\\b${varName}[.(]`);
-        for (let i = 0; i < steps.length; i++) {
-          if (pattern.test(steps[i].code)) {
-            maxReached = Math.max(maxReached, i);
-            break; // first usage is where it would fail
-          }
-        }
-      }
-
-      // Extract selectors or URLs from Playwright error messages
       const selectorMatch = errorMessage.match(/(?:selector|locator)\s+['"`]([^'"`]+)['"`]/i)
         || errorMessage.match(/waiting for\s+['"`]([^'"`]+)['"`]/i)
         || errorMessage.match(/No selector matched:\s*\[.*?"value"\s*:\s*"([^"]+)"/);
@@ -354,24 +354,10 @@ export function TestStepsTab({
           }
         }
       }
-
-      // "Timeout" errors — match URL or action in the error to a step
-      const timeoutUrlMatch = errorMessage.match(/(?:navigating to|goto)\s+['"`]([^'"`]+)['"`]/i);
-      if (timeoutUrlMatch) {
-        const url = timeoutUrlMatch[1];
-        for (let i = steps.length - 1; i >= 0; i--) {
-          if (steps[i].code.includes(url) || steps[i].code.includes('.goto(')) {
-            maxReached = Math.max(maxReached, i);
-            break;
-          }
-        }
-      }
     }
 
-    // Mark all steps before the failure point as reached
-    // (the failure step itself is included — everything before it succeeded)
     return maxReached;
-  }, [testStatus, steps, screenshots, assertionResults, softErrors, stepAssertionMap, errorMessage]);
+  }, [testStatus, steps, screenshots, assertionResults, softErrors, stepAssertionMap, errorMessage, serverLastReachedStep, serverTotalSteps]);
 
   // Filter steps
   const filteredSteps = useMemo(() => {

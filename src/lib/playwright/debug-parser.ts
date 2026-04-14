@@ -598,3 +598,30 @@ export function removeInlineReplayCursorPath(body: string): string {
 
   return body.slice(0, startIdx) + '/* replayCursorPath provided by runner */' + body.slice(endIdx);
 }
+
+/**
+ * Instrument a transformed test body with step-tracking markers.
+ *
+ * Parses the body into steps then inserts `await __stepReached(N);` before
+ * each step (working backwards to preserve line positions).  The caller
+ * provides the `__stepReached` callback when constructing the AsyncFunction.
+ *
+ * Returns the instrumented body and the total step count so the runner can
+ * persist both values alongside the test result.
+ */
+export function instrumentStepTracking(body: string): { instrumentedBody: string; stepCount: number } {
+  const steps = parseSteps(body);
+  if (steps.length === 0) return { instrumentedBody: body, stepCount: 0 };
+
+  const lines = body.split('\n');
+
+  // Insert backwards so earlier insertions don't shift later line indices
+  for (let i = steps.length - 1; i >= 0; i--) {
+    const lineIdx = steps[i].lineStart - 1; // lineStart is 1-based
+    if (lineIdx < 0 || lineIdx > lines.length) continue;
+    const indent = lines[lineIdx]?.match(/^(\s*)/)?.[1] ?? '';
+    lines.splice(lineIdx, 0, `${indent}await __stepReached(${i});`);
+  }
+
+  return { instrumentedBody: lines.join('\n'), stepCount: steps.length };
+}

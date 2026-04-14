@@ -10,6 +10,7 @@ import path from 'path';
 import os from 'os';
 import type { RunTestCommandPayload, RunSetupCommandPayload, LogEntry, StabilizationPayload } from './protocol.js';
 import { CROSS_OS_CHROMIUM_ARGS, setupFreezeScripts, applyPreScreenshotStabilization } from './stabilization.js';
+import { instrumentStepTracking } from '@lastest/shared';
 
 /**
  * Verify code integrity by comparing SHA256 hash.
@@ -32,6 +33,8 @@ export interface TestRunResult {
   softErrors?: string[];
   videoData?: string; // base64-encoded video file
   videoFilename?: string;
+  lastReachedStep?: number;
+  totalSteps?: number;
 }
 
 export class TestRunner {
@@ -381,6 +384,8 @@ export class TestRunner {
         logs,
         screenshots,
         softErrors: softErrors.length > 0 ? softErrors : undefined,
+        lastReachedStep: lastReachedStep >= 0 ? lastReachedStep : undefined,
+        totalSteps: stepCount > 0 ? stepCount : undefined,
       };
     } catch (error) {
       const durationMs = Date.now() - startTime;
@@ -399,6 +404,8 @@ export class TestRunner {
           },
           logs,
           screenshots,
+          lastReachedStep: lastReachedStep >= 0 ? lastReachedStep : undefined,
+          totalSteps: stepCount > 0 ? stepCount : undefined,
         };
       } else {
         // Check if timeout
@@ -437,6 +444,8 @@ export class TestRunner {
           logs,
           screenshots,
           softErrors: softErrors.length > 0 ? softErrors : undefined,
+          lastReachedStep: lastReachedStep >= 0 ? lastReachedStep : undefined,
+          totalSteps: stepCount > 0 ? stepCount : undefined,
         };
       }
     } finally {
@@ -678,6 +687,12 @@ export class TestRunner {
     // Fix legacy page.keyboard.selectAll() → keyboard.press('Control+a')
     body = body.replace(/page\.keyboard\.selectAll\(\)/g, "page.keyboard.press('Control+a')");
 
+    // Instrument step tracking
+    const { instrumentedBody, stepCount } = instrumentStepTracking(body);
+    body = instrumentedBody;
+    let lastReachedStep = -1;
+    const __stepReached = async (n: number) => { lastReachedStep = Math.max(lastReachedStep, n); };
+
     // Wrap standalone await statements (except screenshots) in try/catch for soft error handling
     // This matches the local runner behavior so tests continue past failures to reach screenshots
     // Hard assertion errors (.__hardAssertion) are re-thrown to fail the test immediately
@@ -906,9 +921,15 @@ export class TestRunner {
         return { filename: safeName, path: savePath };
       },
       list: () => dlList,
+      waitForAny: async (timeoutMs = 10000) => {
+        if (dlList.length > 0) return;
+        try { await page.waitForEvent('download', { timeout: timeoutMs }); } catch { /* timeout */ }
+        await page.waitForTimeout(500);
+      },
     } : {
       waitForDownload: async () => { throw new Error('Downloads not enabled — enable "Accept Downloads" in Playwright settings'); },
       list: () => [] as Array<{ suggestedFilename: string; path: string }>,
+      waitForAny: async () => {},
     };
 
     const networkHelper = {
@@ -966,6 +987,7 @@ export class TestRunner {
       'network',
       'replayCursorPath',
       'fixtures',
+      '__stepReached',
       body
     );
 
@@ -975,7 +997,7 @@ export class TestRunner {
         page, targetUrl.replace(/\/+$/, ''), 'screenshot.png', stepLogger, expect,
         null, locateWithFallback,
         fileUploadHelper, clipboardHelper, downloadsHelper, networkHelper, replayCursorPathFn,
-        fixturesMap
+        fixturesMap, __stepReached
       );
       log('info', 'Test function returned successfully');
     } finally {

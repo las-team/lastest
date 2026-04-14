@@ -773,6 +773,8 @@ export interface TestRunResult {
   networkBodiesPath?: string;
   downloads?: DownloadRecord[];
   domSnapshot?: import('@/lib/db/schema').DomSnapshotData;
+  lastReachedStep?: number;
+  totalSteps?: number;
 }
 
 export interface ProgressCallback {
@@ -1113,6 +1115,10 @@ export class PlaywrightRunner extends EventEmitter {
 
     // Track setup duration (outside try so catch can access)
     let setupDurationMs = 0;
+
+    // Track step progress (outside try so catch can access)
+    let testLastReachedStep: number | undefined;
+    let testTotalSteps: number | undefined;
 
     // Track soft errors (outside try so catch can access)
     let testSoftErrors: string[] = [];
@@ -1590,6 +1596,8 @@ export class PlaywrightRunner extends EventEmitter {
         });
         testSoftErrors = execResult.softErrors;
         testAssertionResults = execResult.assertionResults;
+        testLastReachedStep = execResult.lastReachedStep;
+        testTotalSteps = execResult.totalSteps;
         // Merge downloads from executeTestCode (waitForDownload helper) into passive captures
         for (const dl of execResult.downloads) {
           if (!allDownloads.some(d => d.suggestedFilename === dl.suggestedFilename && d.startTime === dl.startTime)) {
@@ -1768,6 +1776,8 @@ export class PlaywrightRunner extends EventEmitter {
         assertionResults: testAssertionResults.length > 0 ? testAssertionResults : undefined,
         downloads: allDownloads.length > 0 ? allDownloads : undefined,
         domSnapshot,
+        lastReachedStep: testLastReachedStep,
+        totalSteps: testTotalSteps,
       };
 
     } catch (error) {
@@ -1837,6 +1847,8 @@ export class PlaywrightRunner extends EventEmitter {
         assertionResults: testAssertionResults.length > 0 ? testAssertionResults : undefined,
         downloads: allDownloads.length > 0 ? allDownloads : undefined,
         domSnapshot: failureDomSnapshot,
+        lastReachedStep: testLastReachedStep,
+        totalSteps: testTotalSteps,
       };
 
     } finally {
@@ -1878,7 +1890,7 @@ export class PlaywrightRunner extends EventEmitter {
     validateTestCode(code);
   }
 
-  private async executeTestCode(page: Page, test: Test, runId: string, screenshotPath: string, onStepLabel?: (label: string) => void): Promise<{ softErrors: string[]; assertionResults: import('@/lib/db/schema').AssertionResult[]; downloads: DownloadRecord[] }> {
+  private async executeTestCode(page: Page, test: Test, runId: string, screenshotPath: string, onStepLabel?: (label: string) => void): Promise<{ softErrors: string[]; assertionResults: import('@/lib/db/schema').AssertionResult[]; downloads: DownloadRecord[]; lastReachedStep?: number; totalSteps?: number }> {
     let code = test.code;
     if (!code) {
       throw new Error('No test code');
@@ -2169,9 +2181,16 @@ export class PlaywrightRunner extends EventEmitter {
           return { filename: safeName, path: savePath };
         },
         list: () => dlList,
+        waitForAny: async (timeoutMs = 10000) => {
+          if (dlList.length > 0) return;
+          try { await page.waitForEvent('download', { timeout: timeoutMs }); } catch { /* timeout — no download arrived */ }
+          // Give passive listener time to save the file
+          await page.waitForTimeout(500);
+        },
       } : {
         waitForDownload: async () => { throw new Error('Downloads not enabled — enable "Accept Downloads" in Playwright settings'); },
         list: () => [] as Array<{ suggestedFilename: string; path: string }>,
+        waitForAny: async () => {},
       };
 
       // Network interception helper — available when enableNetworkInterception is enabled
@@ -2225,10 +2244,17 @@ export class PlaywrightRunner extends EventEmitter {
         }
       }
 
+      // Instrument step tracking: inject __stepReached(N) markers so we
+      // know exactly which steps were reached during execution.
+      const { instrumentStepTracking } = await import('./debug-parser');
+      const { instrumentedBody, stepCount } = instrumentStepTracking(body);
+      let lastReachedStep = -1;
+      const __stepReached = async (n: number) => { lastReachedStep = Math.max(lastReachedStep, n); };
+
       const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
-      const testFn = new AsyncFunction('page', 'baseUrl', 'screenshotPath', 'stepLogger', 'expect', 'appState', 'locateWithFallback', 'fileUpload', 'clipboard', 'downloads', 'network', 'replayCursorPath', 'fixtures', body);
-      await testFn(page, baseUrl, screenshotPath, stepLogger, expectFn, appStateFn, statsLocateWithFallback, fileUploadHelper, clipboardHelper, downloadsHelper, networkHelper, replayCursorPathFn, fixturesMap);
-      return { softErrors, assertionResults: assertionTracker.results, downloads: execDownloads };
+      const testFn = new AsyncFunction('page', 'baseUrl', 'screenshotPath', 'stepLogger', 'expect', 'appState', 'locateWithFallback', 'fileUpload', 'clipboard', 'downloads', 'network', 'replayCursorPath', 'fixtures', '__stepReached', instrumentedBody);
+      await testFn(page, baseUrl, screenshotPath, stepLogger, expectFn, appStateFn, statsLocateWithFallback, fileUploadHelper, clipboardHelper, downloadsHelper, networkHelper, replayCursorPathFn, fixturesMap, __stepReached);
+      return { softErrors, assertionResults: assertionTracker.results, downloads: execDownloads, lastReachedStep: lastReachedStep >= 0 ? lastReachedStep : undefined, totalSteps: stepCount > 0 ? stepCount : undefined };
     }
 
     // Legacy: try Playwright test format
