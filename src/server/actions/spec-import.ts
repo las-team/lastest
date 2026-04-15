@@ -18,6 +18,7 @@ import { createJob, updateJobProgress, completeJob, failJob } from './jobs';
 import { getCurrentBranchForRepo } from '@/lib/git-utils';
 import { requireRepoAccess } from '@/lib/auth';
 import { extractText } from 'unpdf';
+import mammoth from 'mammoth';
 
 // ============================================
 // Types
@@ -427,9 +428,13 @@ export async function extractUserStoriesFromUpload(
     for (const file of files) {
       const buf = Buffer.from(file.content, 'base64');
       let text: string;
-      if (file.name.toLowerCase().endsWith('.pdf')) {
+      const lower = file.name.toLowerCase();
+      if (lower.endsWith('.pdf')) {
         const { text: pages } = await extractText(new Uint8Array(buf));
         text = pages.join('\n');
+      } else if (lower.endsWith('.docx')) {
+        const { value } = await mammoth.extractRawText({ buffer: buf });
+        text = value;
       } else {
         text = buf.toString('utf-8');
       }

@@ -27,8 +27,13 @@ export function useActivityFeedContextSafe() {
 }
 
 const MAX_EVENTS = 500;
-const SSE_RETRY_DELAY = 3000;
-const SSE_MAX_RETRIES = 10;
+const WS_RETRY_DELAY = 3000;
+const WS_MAX_RETRIES = 10;
+
+function buildWsUrl(path: string): string {
+  const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+  return `${proto}//${window.location.host}${path}`;
+}
 
 export function ActivityFeedProvider({ children }: { children: React.ReactNode }) {
   const [events, setEvents] = useState<ActivityEvent[]>([]);
@@ -62,22 +67,22 @@ export function ActivityFeedProvider({ children }: { children: React.ReactNode }
       .catch(() => {});
   }, []);
 
-  // Global SSE connection with retry
+  // WebSocket connection with retry
   useEffect(() => {
-    let es: EventSource | null = null;
+    let ws: WebSocket | null = null;
     let cancelled = false;
 
     function connect() {
       if (cancelled) return;
 
-      es = new EventSource('/api/activity-feed');
+      ws = new WebSocket(buildWsUrl('/api/activity-feed/ws'));
 
-      es.onopen = () => {
+      ws.onopen = () => {
         setIsConnected(true);
         retryCount.current = 0;
       };
 
-      es.onmessage = (e) => {
+      ws.onmessage = (e) => {
         try {
           const data = JSON.parse(e.data);
           if (data.type === 'connected') return;
@@ -121,20 +126,23 @@ export function ActivityFeedProvider({ children }: { children: React.ReactNode }
             }
           }
         } catch {
-          // Ignore parse errors (keepalives)
+          // Ignore parse errors
         }
       };
 
-      es.onerror = () => {
+      ws.onclose = () => {
         setIsConnected(false);
-        es?.close();
 
         // Retry with backoff
-        if (!cancelled && retryCount.current < SSE_MAX_RETRIES) {
+        if (!cancelled && retryCount.current < WS_MAX_RETRIES) {
           retryCount.current++;
-          const delay = SSE_RETRY_DELAY * Math.min(retryCount.current, 5);
+          const delay = WS_RETRY_DELAY * Math.min(retryCount.current, 5);
           retryTimer.current = setTimeout(connect, delay);
         }
+      };
+
+      ws.onerror = () => {
+        // onclose will fire after this
       };
     }
 
@@ -142,7 +150,7 @@ export function ActivityFeedProvider({ children }: { children: React.ReactNode }
 
     return () => {
       cancelled = true;
-      es?.close();
+      ws?.close();
       if (retryTimer.current) clearTimeout(retryTimer.current);
       setIsConnected(false);
     };

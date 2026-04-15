@@ -475,13 +475,13 @@ export function ImportFromSpecDialog({
               <div className="flex flex-col items-center justify-center py-8 gap-4">
                 <Upload className="h-12 w-12 text-muted-foreground" />
                 <p className="text-sm text-muted-foreground text-center">
-                  Upload specification files (.md, .txt, .pdf)
+                  Upload specification files (.md, .txt, .pdf, .docx)
                 </p>
                 <input
                   ref={fileInputRef}
                   type="file"
                   multiple
-                  accept=".md,.txt,.pdf"
+                  accept=".md,.txt,.pdf,.docx"
                   onChange={handleFilesChange}
                   className="hidden"
                 />
