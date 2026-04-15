@@ -12,12 +12,8 @@ import { NextRequest } from 'next/server';
 import { getCurrentSession } from '@/lib/auth';
 import { verifyBearerToken } from '@/lib/auth/api-key';
 import { subscribeToActivityFeed, type ActivityFeedEvent } from '@/lib/ws/activity-events';
-import { startActivityFeedServer } from '@/lib/ws/activity-feed-server';
 
 export const dynamic = 'force-dynamic';
-
-// Start the activity feed WS server on module load (idempotent)
-startActivityFeedServer();
 
 async function verifyAuth(request: NextRequest) {
   const session = await getCurrentSession();

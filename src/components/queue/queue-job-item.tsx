@@ -12,6 +12,7 @@ const TYPE_LABELS: Record<string, string> = {
   test_run: 'Test Run',
   build_run: 'Build',
   ai_diff: 'AI Diff',
+  spec_import: 'Spec Import',
 };
 
 function StatusIcon({ status }: { status: string }) {
@@ -27,12 +28,15 @@ function StatusIcon({ status }: { status: string }) {
   }
 }
 
+const CLICKABLE_TYPES = new Set(['spec_import']);
+
 export function QueueJobItem({ job }: { job: JobWithChildren }) {
   const [isPending, startTransition] = useTransition();
   const [expanded, setExpanded] = useState(false);
-  const { refreshJobs } = useJobPollingContext();
+  const { refreshJobs, onJobClick } = useJobPollingContext();
   const typeLabel = TYPE_LABELS[job.type] || job.type;
   const isActive = job.status === 'running' || job.status === 'pending';
+  const isClickable = job.status === 'completed' && CLICKABLE_TYPES.has(job.type);
   const hasChildren = job._childSummary && job._childSummary.total > 0;
 
   // Extract parallel execution info from metadata
@@ -57,7 +61,10 @@ export function QueueJobItem({ job }: { job: JobWithChildren }) {
 
   return (
     <>
-    <div className="flex items-center gap-3 px-3 py-2 group">
+    <div
+      className={`flex items-center gap-3 px-3 py-2 group${isClickable ? ' cursor-pointer hover:bg-muted/50 transition-colors' : ''}`}
+      onClick={isClickable ? () => onJobClick(job) : undefined}
+    >
       <StatusIcon status={job.status} />
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2">

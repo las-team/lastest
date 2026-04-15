@@ -25,7 +25,7 @@ import {
 } from '@/components/ui/dialog';
 import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from '@/components/ui/resizable';
 import { ExecutionTargetSelector } from '@/components/execution/execution-target-selector';
-import { useNotifyJobStarted } from '@/components/queue/job-polling-context';
+import { useNotifyJobStarted, useJobPollingContext, type JobWithChildren } from '@/components/queue/job-polling-context';
 import { RouteSelectorDialog } from '@/components/routes/route-selector-dialog';
 import { AICreateTestDialog } from '@/components/ai/ai-create-test-dialog';
 import { AIScanRoutesDialog } from '@/components/ai/ai-scan-routes-dialog';
@@ -141,6 +141,7 @@ export function DefinitionPageClient({
   const router = useRouter();
   const searchParams = useSearchParams();
   const notifyJobStarted = useNotifyJobStarted();
+  const { registerJobClickHandler, unregisterJobClickHandler } = useJobPollingContext();
   const initialTab = searchParams.get('tab') === 'plan' ? 'plan' : 'tests';
 
   // --- Tree state (from Areas page) ---
@@ -152,6 +153,7 @@ export function DefinitionPageClient({
   const [isScanning, setIsScanning] = useState(false);
   const [showAIScanDialog, setShowAIScanDialog] = useState(false);
   const [showImportFromSpecDialog, setShowImportFromSpecDialog] = useState(false);
+  const [specImportJobId, setSpecImportJobId] = useState<string | null>(null);
   const [showCodeDiffDialog, setShowCodeDiffDialog] = useState(false);
 
   // --- Area CRUD state ---
@@ -206,6 +208,19 @@ export function DefinitionPageClient({
 
   // --- Plan state ---
   const [isExporting, setIsExporting] = useState(false);
+
+  // Open spec import dialog when a completed spec_import job is clicked in queue
+  const handleSpecImportJobClick = useCallback((job: JobWithChildren) => {
+    if (job.type === 'spec_import' && job.status === 'completed') {
+      setSpecImportJobId(job.id);
+      setShowImportFromSpecDialog(true);
+    }
+  }, []);
+
+  useEffect(() => {
+    registerJobClickHandler(handleSpecImportJobClick);
+    return () => unregisterJobClickHandler(handleSpecImportJobClick);
+  }, [registerJobClickHandler, unregisterJobClickHandler, handleSpecImportJobClick]);
 
   // Clear test selection and reset editing when tree selection changes
   useEffect(() => {
@@ -1524,10 +1539,14 @@ export function DefinitionPageClient({
       />
       <ImportFromSpecDialog
         open={showImportFromSpecDialog}
-        onOpenChange={setShowImportFromSpecDialog}
+        onOpenChange={(open) => {
+          setShowImportFromSpecDialog(open);
+          if (!open) setSpecImportJobId(null);
+        }}
         repositoryId={repositoryId}
         branch={selectedBranch}
         onComplete={() => router.refresh()}
+        initialJobId={specImportJobId}
       />
       <CodeDiffScanDialog
         open={showCodeDiffDialog}

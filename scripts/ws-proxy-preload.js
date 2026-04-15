@@ -10,15 +10,14 @@ http.Server.prototype.listen = function (...args) {
   this.on('upgrade', (req, socket, head) => {
     const url = req.url || '';
 
-    // Activity feed WS — proxy to internal WS server
+    // Activity feed WS — proxy to activity-feed WS server (port 9400)
     if (url.startsWith('/api/activity-feed/ws')) {
       const originalDestroy = socket.destroy.bind(socket);
-      socket.end = () => { console.log('[WS-PROXY] activity-feed socket.end() blocked'); return socket; };
-      socket.destroy = (...a) => { console.log('[WS-PROXY] activity-feed socket.destroy()'); return originalDestroy(...a); };
+      socket.end = () => { return socket; };
+      socket.destroy = (...a) => { return originalDestroy(...a); };
 
+      const qs = url.includes('?') ? url.slice(url.indexOf('?')) : '';
       const proxy = net.connect(activityFeedPort, '127.0.0.1', () => {
-        console.log('[WS-PROXY] activity-feed upstream connected to port', activityFeedPort);
-        const qs = url.includes('?') ? url.slice(url.indexOf('?')) : '';
         const lines = [
           `GET /${qs} HTTP/1.1`,
           `Host: 127.0.0.1:${activityFeedPort}`,
@@ -27,7 +26,6 @@ http.Server.prototype.listen = function (...args) {
           `Sec-WebSocket-Key: ${req.headers['sec-websocket-key']}`,
           `Sec-WebSocket-Version: ${req.headers['sec-websocket-version']}`,
         ];
-        // Forward cookie for auth
         if (req.headers.cookie) lines.push(`Cookie: ${req.headers.cookie}`);
         if (req.headers['sec-websocket-protocol'])
           lines.push(`Sec-WebSocket-Protocol: ${req.headers['sec-websocket-protocol']}`);
@@ -37,7 +35,7 @@ http.Server.prototype.listen = function (...args) {
         proxy.pipe(socket, { end: false });
         socket.pipe(proxy);
       });
-      proxy.on('error', (e) => { console.log('[WS-PROXY] activity-feed proxy error:', e.message); socket.destroy(); });
+      proxy.on('error', (e) => { console.log('[WS-PROXY] activity-feed error:', e.message); socket.destroy(); });
       proxy.on('close', () => { socket.destroy(); });
       socket.on('error', () => proxy.destroy());
       socket.on('close', () => proxy.destroy());

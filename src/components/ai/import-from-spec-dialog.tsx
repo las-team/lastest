@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useRef, useCallback } from 'react';
+import { useState, useRef, useCallback, useEffect } from 'react';
 import {
   Dialog,
   DialogContent,
@@ -24,6 +24,7 @@ import {
   validateAllTestsWithMCP,
 } from '@/server/actions/spec-import';
 import type { DiscoveredSpecFile } from '@/server/actions/spec-import';
+import { useNotifyJobStarted } from '@/components/queue/job-polling-context';
 import type { ExtractedUserStory } from '@/lib/db/schema';
 import {
   Loader2,
@@ -58,6 +59,7 @@ interface ImportFromSpecDialogProps {
   repositoryId: string;
   branch: string;
   onComplete?: () => void;
+  initialJobId?: string | null;
 }
 
 export function ImportFromSpecDialog({
@@ -66,7 +68,9 @@ export function ImportFromSpecDialog({
   repositoryId,
   branch,
   onComplete,
+  initialJobId,
 }: ImportFromSpecDialogProps) {
+  const notifyJobStarted = useNotifyJobStarted();
   const [step, setStep] = useState<Step>('input');
   const [isDiscovering, setIsDiscovering] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
@@ -99,6 +103,25 @@ export function ImportFromSpecDialog({
     testIds?: string[];
     usedPlaceholders?: boolean;
   } | null>(null);
+
+  // Load stories from a completed background job (e.g. clicked from queue)
+  useEffect(() => {
+    if (!open || !initialJobId) return;
+    let cancelled = false;
+    (async () => {
+      const result = await getSpecImportJobResult(initialJobId);
+      if (cancelled) return;
+      if (result.success && result.stories) {
+        setStories(result.stories);
+        setImportId(result.importId || null);
+        setExpandedStories(new Set(result.stories.map(s => s.id)));
+        setStep('review');
+      } else {
+        toast.error(result.error || 'Failed to load spec import results');
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [open, initialJobId]);
 
   // ============================================
   // Step 1: Document Selection
@@ -189,6 +212,7 @@ export function ImportFromSpecDialog({
         Array.from(selectedFiles)
       );
       if (response.success && response.jobId) {
+        notifyJobStarted();
         await pollForStories(response.jobId, 'file-selection');
       } else {
         toast.error(response.error || 'Failed to extract user stories');
@@ -220,6 +244,7 @@ export function ImportFromSpecDialog({
 
       const response = await extractUserStoriesFromUpload(encodedFiles, repositoryId, branch);
       if (response.success && response.jobId) {
+        notifyJobStarted();
         await pollForStories(response.jobId, 'input');
       } else {
         toast.error(response.error || 'Failed to extract user stories');

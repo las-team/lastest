@@ -8,12 +8,14 @@ import { CelebrationListener } from '@/components/gamification/celebration-liste
 import { ConsentBanner } from '@/components/layout/consent-banner-client';
 import { getCurrentSession } from '@/lib/auth';
 import { hasAcceptedTerms } from '@/lib/db/queries';
+import { startActivityFeedServer } from '@/lib/ws/activity-feed-server';
 
 export default async function AppLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
+  startActivityFeedServer();
   const session = await getCurrentSession();
   const showConsentBanner = session?.user
     ? !(await hasAcceptedTerms(session.user.id))
