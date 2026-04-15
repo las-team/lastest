@@ -11,7 +11,6 @@ import { WebSocketServer, WebSocket } from 'ws';
 import { subscribeToActivityFeed, type ActivityFeedEvent } from './activity-events';
 import { verifyBearerToken } from '@/lib/auth/api-key';
 import type { IncomingMessage } from 'http';
-import type { Duplex } from 'stream';
 
 const ACTIVITY_FEED_PORT = parseInt(process.env.ACTIVITY_FEED_WS_PORT || '9400', 10);
 const KEEPALIVE_INTERVAL = 25_000;
@@ -38,7 +37,6 @@ function parseCookies(cookieHeader: string): Record<string, string> {
 
 function extractSessionToken(req: IncomingMessage): string | null {
   const cookies = parseCookies(req.headers.cookie || '');
-  // better-auth uses this cookie name (with or without __Secure- prefix)
   return cookies['__Secure-better-auth.session_token']
     || cookies['better-auth.session_token']
     || null;
@@ -52,10 +50,35 @@ function extractFilters(req: IncomingMessage): { repo?: string; source?: string 
   };
 }
 
+// Map from request to resolved session for passing auth data to connection handler
+const pendingAuth = new WeakMap<IncomingMessage, { teamId: string }>();
+
 export function startActivityFeedServer(): WebSocketServer {
   if (globalWss.__activityFeedWss) return globalWss.__activityFeedWss;
 
-  const wss = new WebSocketServer({ port: ACTIVITY_FEED_PORT });
+  const wss = new WebSocketServer({
+    port: ACTIVITY_FEED_PORT,
+    verifyClient: (info, cb) => {
+      const token = extractSessionToken(info.req);
+      if (!token) {
+        console.log('[ActivityFeed WS] No session token found in cookies');
+        cb(false, 401, 'Unauthorized');
+        return;
+      }
+      verifyBearerToken(token).then((session) => {
+        if (!session?.team?.id) {
+          console.log('[ActivityFeed WS] No team access');
+          cb(false, 403, 'Forbidden');
+          return;
+        }
+        pendingAuth.set(info.req, { teamId: session.team.id });
+        cb(true);
+      }).catch((err) => {
+        console.log('[ActivityFeed WS] Auth error:', err);
+        cb(false, 401, 'Unauthorized');
+      });
+    },
+  });
   globalWss.__activityFeedWss = wss;
 
   console.log(`[ActivityFeed WS] Listening on port ${ACTIVITY_FEED_PORT}`);
@@ -88,57 +111,26 @@ export function startActivityFeedServer(): WebSocketServer {
 
   wss.on('close', () => clearInterval(interval));
 
-  wss.on('connection', (ws: AuthenticatedSocket) => {
-    ws.isAlive = true;
-    ws.on('pong', () => { ws.isAlive = true; });
+  wss.on('connection', (ws: WebSocket, req: IncomingMessage) => {
+    const authWs = ws as AuthenticatedSocket;
+    const auth = pendingAuth.get(req);
+    if (!auth) {
+      ws.close(1008, 'Auth failed');
+      return;
+    }
+    pendingAuth.delete(req);
+
+    const filters = extractFilters(req);
+    authWs.teamId = auth.teamId;
+    authWs.repoFilter = filters.repo;
+    authWs.sourceFilter = filters.source;
+    authWs.isAlive = true;
+
+    ws.on('pong', () => { authWs.isAlive = true; });
 
     // Send connected message
     ws.send(JSON.stringify({ type: 'connected', timestamp: Date.now() }));
   });
 
   return wss;
-}
-
-/**
- * Handle an HTTP upgrade for activity feed WS.
- * Called from ws-proxy-preload or a custom upgrade handler.
- */
-export async function handleActivityFeedUpgrade(
-  wss: WebSocketServer,
-  req: IncomingMessage,
-  socket: Duplex,
-  head: Buffer,
-): Promise<void> {
-  const token = extractSessionToken(req);
-  if (!token) {
-    socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
-    socket.destroy();
-    return;
-  }
-
-  let session;
-  try {
-    session = await verifyBearerToken(token);
-  } catch {
-    socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
-    socket.destroy();
-    return;
-  }
-
-  if (!session?.team?.id) {
-    socket.write('HTTP/1.1 403 Forbidden\r\n\r\n');
-    socket.destroy();
-    return;
-  }
-
-  const filters = extractFilters(req);
-
-  wss.handleUpgrade(req, socket, head, (ws) => {
-    const authWs = ws as AuthenticatedSocket;
-    authWs.teamId = session.team!.id;
-    authWs.repoFilter = filters.repo;
-    authWs.sourceFilter = filters.source;
-    authWs.isAlive = true;
-    wss.emit('connection', authWs, req);
-  });
 }

@@ -17,6 +17,7 @@ import {
   discoverSpecFiles,
   extractUserStoriesFromFiles,
   extractUserStoriesFromUpload,
+  getSpecImportJobResult,
   generateTestsFromStories,
   createPlaceholdersFromStories,
   getBranchChanges,
@@ -144,12 +145,41 @@ export function ImportFromSpecDialog({
   // Step 2: Extract User Stories
   // ============================================
 
+  const pollForStories = useCallback(async (jobId: string, fallbackStep: Step) => {
+    const poll = async (): Promise<void> => {
+      const result = await getSpecImportJobResult(jobId);
+      if (!result.success) {
+        toast.error(result.error || 'Failed to extract user stories');
+        setStep(fallbackStep);
+        return;
+      }
+      if (result.stories) {
+        setStories(result.stories);
+        setImportId(result.importId || null);
+        setExpandedStories(new Set(result.stories.map(s => s.id)));
+
+        const branchResult = await getBranchChanges(repositoryId, branch);
+        if (branchResult.success && branchResult.changedFiles) {
+          setChangedFiles(branchResult.changedFiles);
+        }
+
+        setStep('review');
+        const totalAC = result.stories.reduce((sum, s) => sum + s.acceptanceCriteria.length, 0);
+        toast.success(`Extracted ${result.stories.length} user stories, ${totalAC} acceptance criteria`);
+        return;
+      }
+      // Still running — poll again
+      await new Promise(r => setTimeout(r, 2000));
+      return poll();
+    };
+    await poll();
+  }, [repositoryId, branch]);
+
   const handleExtractFromGitHub = async () => {
     if (selectedFiles.size === 0) {
       toast.error('Please select at least one file');
       return;
     }
-
 
     setStep('extracting');
     try {
@@ -158,20 +188,8 @@ export function ImportFromSpecDialog({
         branch,
         Array.from(selectedFiles)
       );
-      if (response.success && response.stories) {
-        setStories(response.stories);
-        setImportId(response.importId || null);
-        setExpandedStories(new Set(response.stories.map(s => s.id)));
-
-        // Also fetch branch changes in parallel
-        const branchResult = await getBranchChanges(repositoryId, branch);
-        if (branchResult.success && branchResult.changedFiles) {
-          setChangedFiles(branchResult.changedFiles);
-        }
-
-        setStep('review');
-        const totalAC = response.stories.reduce((sum, s) => sum + s.acceptanceCriteria.length, 0);
-        toast.success(`Extracted ${response.stories.length} user stories, ${totalAC} acceptance criteria`);
+      if (response.success && response.jobId) {
+        await pollForStories(response.jobId, 'file-selection');
       } else {
         toast.error(response.error || 'Failed to extract user stories');
         setStep('file-selection');
@@ -179,8 +197,6 @@ export function ImportFromSpecDialog({
     } catch {
       toast.error('Failed to extract user stories');
       setStep('file-selection');
-    } finally {
-
     }
   };
 
@@ -189,7 +205,6 @@ export function ImportFromSpecDialog({
       toast.error('Please select files first');
       return;
     }
-
 
     setStep('extracting');
     try {
@@ -204,19 +219,8 @@ export function ImportFromSpecDialog({
       );
 
       const response = await extractUserStoriesFromUpload(encodedFiles, repositoryId, branch);
-      if (response.success && response.stories) {
-        setStories(response.stories);
-        setImportId(response.importId || null);
-        setExpandedStories(new Set(response.stories.map(s => s.id)));
-
-        const branchResult = await getBranchChanges(repositoryId, branch);
-        if (branchResult.success && branchResult.changedFiles) {
-          setChangedFiles(branchResult.changedFiles);
-        }
-
-        setStep('review');
-        const totalAC = response.stories.reduce((sum, s) => sum + s.acceptanceCriteria.length, 0);
-        toast.success(`Extracted ${response.stories.length} user stories, ${totalAC} acceptance criteria`);
+      if (response.success && response.jobId) {
+        await pollForStories(response.jobId, 'input');
       } else {
         toast.error(response.error || 'Failed to extract user stories');
         setStep('input');
@@ -224,8 +228,6 @@ export function ImportFromSpecDialog({
     } catch {
       toast.error('Failed to extract user stories');
       setStep('input');
-    } finally {
-
     }
   };
 

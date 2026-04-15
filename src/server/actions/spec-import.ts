@@ -28,6 +28,7 @@ export interface SpecImportResponse {
   success: boolean;
   stories?: ExtractedUserStory[];
   importId?: string;
+  jobId?: string;
   error?: string;
 }
 
@@ -405,7 +406,12 @@ export async function extractUserStoriesFromFiles(
     }
 
     const specContent = contents.join('\n\n');
-    return await extractStoriesFromContent(specContent, repositoryId, branch, filePaths, 'github');
+    const jobId = await createJob('spec_import', `Extracting stories from ${filePaths.length} file(s)`, undefined, repositoryId);
+
+    // Fire and forget — runs in background, not blocked by proxy timeout
+    extractStoriesFromContent(specContent, repositoryId, branch, filePaths, 'github', jobId).catch(() => {});
+
+    return { success: true, jobId };
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Failed to extract user stories';
     return { success: false, error: message };
@@ -449,7 +455,12 @@ export async function extractUserStoriesFromUpload(
     }
 
     const specContent = contents.join('\n\n');
-    return await extractStoriesFromContent(specContent, repositoryId, branch, fileNames, 'upload');
+    const jobId = await createJob('spec_import', `Extracting stories from ${fileNames.length} file(s)`, undefined, repositoryId);
+
+    // Fire and forget — runs in background, not blocked by proxy timeout
+    extractStoriesFromContent(specContent, repositoryId, branch, fileNames, 'upload', jobId).catch(() => {});
+
+    return { success: true, jobId };
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Failed to extract user stories';
     return { success: false, error: message };
@@ -461,77 +472,115 @@ async function extractStoriesFromContent(
   repositoryId: string,
   branch: string,
   sourceFiles: string[],
-  sourceType: 'github' | 'upload'
-): Promise<SpecImportResponse> {
-  const config = await getAIConfig(repositoryId);
-  const prompt = createUserStoryExtractionPrompt(specContent);
+  sourceType: 'github' | 'upload',
+  jobId: string,
+): Promise<void> {
+  try {
+    const config = await getAIConfig(repositoryId);
+    const prompt = createUserStoryExtractionPrompt(specContent);
 
-  const response = await generateWithAI(config, prompt, 'You are a document parser that extracts structured user stories and acceptance criteria. Output ONLY the requested format — no code, no tests, no conversation.', {
-    actionType: 'extract_user_stories',
-    repositoryId,
-  });
+    const response = await generateWithAI(config, prompt, 'You are a document parser that extracts structured user stories and acceptance criteria. Output ONLY the requested format — no code, no tests, no conversation.', {
+      actionType: 'extract_user_stories',
+      repositoryId,
+    });
 
-  // Parse response — try JSON first, then markdown
-  let stories: ExtractedUserStory[];
-  const jsonStr = extractJsonArray(response);
-  if (jsonStr) {
-    try {
-      stories = JSON.parse(jsonStr);
-      // Normalize JSON ACs to match markdown-path quality
-      for (const story of stories) {
-        if (!story.acceptanceCriteria) continue;
-        for (const ac of story.acceptanceCriteria) {
-          if (!ac.description) continue;
-          // Ensure testName is set
-          if (!ac.testName) ac.testName = ac.description;
-          // If description looks like a raw title (no sentence structure), wrap it
-          if (!ac.description.match(/\b(given|when|then|verify|check|should|must)\b/i)) {
-            const rawDesc = ac.description;
-            ac.description = `When ${rawDesc.charAt(0).toLowerCase() + rawDesc.slice(1)}, verify the expected behavior`;
+    // Parse response — try JSON first, then markdown
+    let stories: ExtractedUserStory[];
+    const jsonStr = extractJsonArray(response);
+    if (jsonStr) {
+      try {
+        stories = JSON.parse(jsonStr);
+        // Normalize JSON ACs to match markdown-path quality
+        for (const story of stories) {
+          if (!story.acceptanceCriteria) continue;
+          for (const ac of story.acceptanceCriteria) {
+            if (!ac.description) continue;
+            // Ensure testName is set
+            if (!ac.testName) ac.testName = ac.description;
+            // If description looks like a raw title (no sentence structure), wrap it
+            if (!ac.description.match(/\b(given|when|then|verify|check|should|must)\b/i)) {
+              const rawDesc = ac.description;
+              ac.description = `When ${rawDesc.charAt(0).toLowerCase() + rawDesc.slice(1)}, verify the expected behavior`;
+            }
           }
         }
+      } catch {
+        // extractJsonArray returned non-JSON — fall through to markdown
+        const parsed = parseStoriesFromMarkdown(response);
+        if (!parsed) {
+          await failJob(jobId, 'Could not extract stories from AI response');
+          return;
+        }
+        stories = parsed;
       }
-    } catch {
-      // extractJsonArray returned non-JSON — fall through to markdown
+    } else {
+      // AI returned markdown/prose — parse directly
       const parsed = parseStoriesFromMarkdown(response);
       if (!parsed) {
-        return { success: false, error: 'Could not extract stories from AI response' };
+        await failJob(jobId, 'Could not extract stories from AI response');
+        return;
       }
       stories = parsed;
     }
-  } else {
-    // AI returned markdown/prose — parse directly
-    const parsed = parseStoriesFromMarkdown(response);
-    if (!parsed) {
-      return { success: false, error: 'Could not extract stories from AI response' };
+
+    // Quality gate: filter non-testable ACs and deduplicate
+    stories = validateAndFilterStories(stories);
+    if (stories.length === 0) {
+      await failJob(jobId, 'No testable stories found after quality filtering');
+      return;
     }
-    stories = parsed;
-  }
 
-  // Quality gate: filter non-testable ACs and deduplicate
-  stories = validateAndFilterStories(stories);
-  if (stories.length === 0) {
-    return { success: false, error: 'No testable stories found after quality filtering' };
-  }
+    // Create import record (non-fatal — stories are still usable if DB tracking fails)
+    let importId: string | null = null;
+    try {
+      const importRecord = await queries.createSpecImport({
+        repositoryId,
+        name: `Import from ${sourceFiles.length} file(s)`,
+        sourceType,
+        sourceFiles,
+        branch,
+        status: 'extracted',
+        extractedStories: stories,
+      });
+      importId = importRecord.id;
+    } catch (err) {
+      console.error('Failed to create spec import record:', err);
+    }
 
-  // Create import record (non-fatal — stories are still usable if DB tracking fails)
-  let importId: string | null = null;
-  try {
-    const importRecord = await queries.createSpecImport({
-      repositoryId,
-      name: `Import from ${sourceFiles.length} file(s)`,
-      sourceType,
-      sourceFiles,
-      branch,
-      status: 'extracted',
-      extractedStories: stories,
+    // Store results in job metadata so client can retrieve them
+    await queries.updateBackgroundJob(jobId, {
+      metadata: { stories, importId },
     });
-    importId = importRecord.id;
-  } catch (err) {
-    console.error('Failed to create spec import record:', err);
+    await completeJob(jobId);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Failed to extract user stories';
+    await failJob(jobId, message);
+  }
+}
+
+// ============================================
+// Poll spec import job result
+// ============================================
+
+export async function getSpecImportJobResult(jobId: string): Promise<SpecImportResponse> {
+  const job = await queries.getBackgroundJob(jobId);
+  if (!job) return { success: false, error: 'Job not found' };
+
+  if (job.status === 'running' || job.status === 'pending') {
+    return { success: true, jobId }; // Still in progress
   }
 
-  return { success: true, stories, importId: importId ?? undefined };
+  if (job.status === 'failed') {
+    return { success: false, error: job.error || 'Spec import failed' };
+  }
+
+  // Completed — extract results from metadata
+  const meta = job.metadata as { stories?: ExtractedUserStory[]; importId?: string } | null;
+  return {
+    success: true,
+    stories: meta?.stories,
+    importId: meta?.importId ?? undefined,
+  };
 }
 
 // ============================================
