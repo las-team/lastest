@@ -1797,7 +1797,7 @@ export type ActivityEventType =
 
 export type ActivitySourceType = 'play_agent' | 'mcp_server' | 'generate_agent';
 
-export type ActivityArtifactType = 'test' | 'build' | 'area' | 'baseline' | 'score';
+export type ActivityArtifactType = 'test' | 'build' | 'area' | 'baseline' | 'score' | 'spec_import';
 
 export const activityEvents = pgTable('activity_events', {
   id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),

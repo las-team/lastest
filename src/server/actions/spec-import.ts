@@ -19,6 +19,8 @@ import { getCurrentBranchForRepo } from '@/lib/git-utils';
 import { requireRepoAccess } from '@/lib/auth';
 import { extractText } from 'unpdf';
 import mammoth from 'mammoth';
+import { PLACEHOLDER_CODE } from '@/lib/constants/placeholder';
+import { emitAndPersistActivityEvent } from '@/lib/db/queries/activity-events';
 
 // ============================================
 // Types
@@ -376,7 +378,7 @@ export async function extractUserStoriesFromFiles(
   branch: string,
   filePaths: string[]
 ): Promise<SpecImportResponse> {
-  await requireRepoAccess(repositoryId);
+  const { team } = await requireRepoAccess(repositoryId);
   try {
     if (filePaths.length === 0) {
       return { success: false, error: 'No files selected' };
@@ -406,12 +408,11 @@ export async function extractUserStoriesFromFiles(
     }
 
     const specContent = contents.join('\n\n');
-    const jobId = await createJob('spec_import', `Extracting stories from ${filePaths.length} file(s)`, undefined, repositoryId);
 
     // Fire and forget — runs in background, not blocked by proxy timeout
-    extractStoriesFromContent(specContent, repositoryId, branch, filePaths, 'github', jobId).catch(() => {});
+    extractStoriesFromContent(specContent, repositoryId, branch, filePaths, 'github', team.id).catch(() => {});
 
-    return { success: true, jobId };
+    return { success: true };
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Failed to extract user stories';
     return { success: false, error: message };
@@ -423,7 +424,7 @@ export async function extractUserStoriesFromUpload(
   repositoryId: string,
   branch: string
 ): Promise<SpecImportResponse> {
-  await requireRepoAccess(repositoryId);
+  const { team } = await requireRepoAccess(repositoryId);
   try {
     if (files.length === 0) {
       return { success: false, error: 'No files uploaded' };
@@ -455,12 +456,11 @@ export async function extractUserStoriesFromUpload(
     }
 
     const specContent = contents.join('\n\n');
-    const jobId = await createJob('spec_import', `Extracting stories from ${fileNames.length} file(s)`, undefined, repositoryId);
 
     // Fire and forget — runs in background, not blocked by proxy timeout
-    extractStoriesFromContent(specContent, repositoryId, branch, fileNames, 'upload', jobId).catch(() => {});
+    extractStoriesFromContent(specContent, repositoryId, branch, fileNames, 'upload', team.id).catch(() => {});
 
-    return { success: true, jobId };
+    return { success: true };
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Failed to extract user stories';
     return { success: false, error: message };
@@ -473,8 +473,32 @@ async function extractStoriesFromContent(
   branch: string,
   sourceFiles: string[],
   sourceType: 'github' | 'upload',
-  jobId: string,
+  teamId: string,
 ): Promise<void> {
+  const startTime = Date.now();
+  const steps = [
+    { id: 'plan' as const, status: 'active' as const, label: 'Extracting Stories', description: `Analyzing ${sourceFiles.length} document(s)...`, startedAt: new Date().toISOString() },
+    { id: 'review' as const, status: 'pending' as const, label: 'Review Stories', description: 'Review extracted user stories' },
+  ];
+
+  const session = await queries.createAgentSession({
+    repositoryId,
+    teamId,
+    status: 'active',
+    currentStepId: 'plan',
+    steps,
+    metadata: { specImport: true, sourceFiles, sourceType } as Record<string, unknown>,
+  });
+
+  emitAndPersistActivityEvent({
+    teamId, repositoryId, sessionId: session.id,
+    sourceType: 'generate_agent', eventType: 'session:start',
+    summary: `Importing spec from ${sourceFiles.length} file(s)`,
+    agentType: 'planner', stepId: null, detail: null,
+    artifactType: null, artifactId: null, artifactLabel: null,
+    durationMs: null, promptLogId: null,
+  }).catch(() => {});
+
   try {
     const config = await getAIConfig(repositoryId);
     const prompt = createUserStoryExtractionPrompt(specContent);
@@ -490,14 +514,11 @@ async function extractStoriesFromContent(
     if (jsonStr) {
       try {
         stories = JSON.parse(jsonStr);
-        // Normalize JSON ACs to match markdown-path quality
         for (const story of stories) {
           if (!story.acceptanceCriteria) continue;
           for (const ac of story.acceptanceCriteria) {
             if (!ac.description) continue;
-            // Ensure testName is set
             if (!ac.testName) ac.testName = ac.description;
-            // If description looks like a raw title (no sentence structure), wrap it
             if (!ac.description.match(/\b(given|when|then|verify|check|should|must)\b/i)) {
               const rawDesc = ac.description;
               ac.description = `When ${rawDesc.charAt(0).toLowerCase() + rawDesc.slice(1)}, verify the expected behavior`;
@@ -505,40 +526,26 @@ async function extractStoriesFromContent(
           }
         }
       } catch {
-        // extractJsonArray returned non-JSON — fall through to markdown
         const parsed = parseStoriesFromMarkdown(response);
-        if (!parsed) {
-          await failJob(jobId, 'Could not extract stories from AI response');
-          return;
-        }
+        if (!parsed) throw new Error('Could not extract stories from AI response');
         stories = parsed;
       }
     } else {
-      // AI returned markdown/prose — parse directly
       const parsed = parseStoriesFromMarkdown(response);
-      if (!parsed) {
-        await failJob(jobId, 'Could not extract stories from AI response');
-        return;
-      }
+      if (!parsed) throw new Error('Could not extract stories from AI response');
       stories = parsed;
     }
 
-    // Quality gate: filter non-testable ACs and deduplicate
     stories = validateAndFilterStories(stories);
-    if (stories.length === 0) {
-      await failJob(jobId, 'No testable stories found after quality filtering');
-      return;
-    }
+    if (stories.length === 0) throw new Error('No testable stories found after quality filtering');
 
-    // Create import record (non-fatal — stories are still usable if DB tracking fails)
+    // Create import record
     let importId: string | null = null;
     try {
       const importRecord = await queries.createSpecImport({
         repositoryId,
         name: `Import from ${sourceFiles.length} file(s)`,
-        sourceType,
-        sourceFiles,
-        branch,
+        sourceType, sourceFiles, branch,
         status: 'extracted',
         extractedStories: stories,
       });
@@ -547,40 +554,88 @@ async function extractStoriesFromContent(
       console.error('Failed to create spec import record:', err);
     }
 
-    // Store results in job metadata so client can retrieve them
-    await queries.updateBackgroundJob(jobId, {
-      metadata: { stories, importId },
+    const totalAC = stories.reduce((sum, s) => sum + s.acceptanceCriteria.length, 0);
+
+    // Transition: plan → completed, review → waiting_user, session → paused
+    await queries.updateAgentSession(session.id, {
+      status: 'paused',
+      currentStepId: 'review',
+      steps: [
+        { ...steps[0], status: 'completed', completedAt: new Date().toISOString() },
+        { ...steps[1], status: 'waiting_user', startedAt: new Date().toISOString() },
+      ],
+      metadata: { specImport: true, sourceFiles, sourceType, stories, importId } as Record<string, unknown>,
     });
-    await completeJob(jobId);
+
+    emitAndPersistActivityEvent({
+      teamId, repositoryId, sessionId: session.id,
+      sourceType: 'generate_agent', eventType: 'step:waiting_user',
+      summary: `${stories.length} stories, ${totalAC} acceptance criteria extracted — review pending`,
+      agentType: 'planner', stepId: 'review', detail: null,
+      artifactType: 'spec_import', artifactId: session.id,
+      artifactLabel: `${stories.length} stories ready for review`,
+      durationMs: Date.now() - startTime, promptLogId: null,
+    }).catch(() => {});
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'Failed to extract user stories';
-    await failJob(jobId, message);
+    console.error('[spec-import] extractStoriesFromContent failed:', error);
+    const message = error instanceof Error ? error.message : String(error);
+
+    await queries.updateAgentSession(session.id, {
+      status: 'failed',
+      steps: [
+        { ...steps[0], status: 'failed', error: message, completedAt: new Date().toISOString() },
+        { ...steps[1], status: 'skipped' },
+      ],
+    });
+
+    emitAndPersistActivityEvent({
+      teamId, repositoryId, sessionId: session.id,
+      sourceType: 'generate_agent', eventType: 'session:error',
+      summary: `Spec import failed: ${message}`,
+      agentType: 'planner', stepId: null, detail: null,
+      artifactType: null, artifactId: null, artifactLabel: null,
+      durationMs: Date.now() - startTime, promptLogId: null,
+    }).catch(() => {});
   }
 }
 
 // ============================================
-// Poll spec import job result
+// Spec import session helpers
 // ============================================
 
-export async function getSpecImportJobResult(jobId: string): Promise<SpecImportResponse> {
-  const job = await queries.getBackgroundJob(jobId);
-  if (!job) return { success: false, error: 'Job not found' };
+export async function getSpecImportSession(sessionId: string): Promise<SpecImportResponse> {
+  const session = await queries.getAgentSession(sessionId);
+  if (!session) return { success: false, error: 'Session not found' };
 
-  if (job.status === 'running' || job.status === 'pending') {
-    return { success: true, jobId }; // Still in progress
-  }
+  const meta = session.metadata as { stories?: ExtractedUserStory[]; importId?: string } | null;
+  if (!meta?.stories) return { success: false, error: 'No stories found in session' };
 
-  if (job.status === 'failed') {
-    return { success: false, error: job.error || 'Spec import failed' };
-  }
+  return { success: true, stories: meta.stories, importId: meta.importId ?? undefined };
+}
 
-  // Completed — extract results from metadata
-  const meta = job.metadata as { stories?: ExtractedUserStory[]; importId?: string } | null;
-  return {
-    success: true,
-    stories: meta?.stories,
-    importId: meta?.importId ?? undefined,
-  };
+export async function completeSpecImportSession(sessionId: string): Promise<void> {
+  const session = await queries.getAgentSession(sessionId);
+  if (!session) return;
+
+  const meta = session.metadata as Record<string, unknown> | null;
+  const teamId = session.teamId || '';
+
+  await queries.updateAgentSession(sessionId, {
+    status: 'completed',
+    completedAt: new Date(),
+    steps: (session.steps || []).map(s =>
+      s.id === 'review' ? { ...s, status: 'completed' as const, completedAt: new Date().toISOString() } : s
+    ),
+  });
+
+  emitAndPersistActivityEvent({
+    teamId, repositoryId: session.repositoryId, sessionId,
+    sourceType: 'generate_agent', eventType: 'session:complete',
+    summary: 'Spec import review completed',
+    agentType: null, stepId: null, detail: null,
+    artifactType: null, artifactId: null, artifactLabel: null,
+    durationMs: null, promptLogId: null,
+  }).catch(() => {});
 }
 
 // ============================================
@@ -849,8 +904,6 @@ export async function generateTestsFromStories(
 // ============================================
 // Step 3b: Create placeholder tests (no AI)
 // ============================================
-
-import { PLACEHOLDER_CODE } from '@/lib/constants/placeholder';
 
 export async function createPlaceholdersFromStories(
   repositoryId: string,

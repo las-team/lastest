@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { Badge } from '@/components/ui/badge';
-import { FileCode, Play, FolderTree, Image } from 'lucide-react';
+import { FileCode, Play, FolderTree, Image, BookOpen } from 'lucide-react';
 import type { ActivityArtifactType } from '@/lib/db/schema';
 
 const ARTIFACT_CONFIG: Record<string, { icon: typeof FileCode; route: (id: string) => string; label: string }> = {
@@ -10,6 +10,7 @@ const ARTIFACT_CONFIG: Record<string, { icon: typeof FileCode; route: (id: strin
   build: { icon: Play, route: (id) => `/builds/${id}`, label: 'Build' },
   area: { icon: FolderTree, route: (id) => `/areas?areaId=${id}`, label: 'Area' },
   baseline: { icon: Image, route: (id) => `/review?diffId=${id}`, label: 'Baseline' },
+  spec_import: { icon: BookOpen, route: () => `/tests`, label: 'Spec Import' },
 };
 
 interface ArtifactLinkProps {

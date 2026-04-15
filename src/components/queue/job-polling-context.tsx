@@ -8,15 +8,10 @@ export type JobWithChildren = BackgroundJob & {
   _childSummary?: { total: number; completed: number; failed: number; running: number; pending: number };
 };
 
-type JobClickHandler = (job: JobWithChildren) => void;
-
 interface JobPollingContextValue {
   jobs: JobWithChildren[];
   startPolling: () => void;
   refreshJobs: () => void;
-  registerJobClickHandler: (handler: JobClickHandler) => void;
-  unregisterJobClickHandler: (handler: JobClickHandler) => void;
-  onJobClick: (job: JobWithChildren) => void;
 }
 
 export const JobPollingContext = createContext<JobPollingContextValue | null>(null);
@@ -60,24 +55,8 @@ export function JobPollingProvider({ children }: { children: ReactNode }) {
     fetchJobs();
   }, [fetchJobs]);
 
-  const handlersRef = useRef<Set<JobClickHandler>>(new Set());
-
-  const registerJobClickHandler = useCallback((handler: JobClickHandler) => {
-    handlersRef.current.add(handler);
-  }, []);
-
-  const unregisterJobClickHandler = useCallback((handler: JobClickHandler) => {
-    handlersRef.current.delete(handler);
-  }, []);
-
-  const onJobClick = useCallback((job: JobWithChildren) => {
-    for (const handler of handlersRef.current) {
-      handler(job);
-    }
-  }, []);
-
   return (
-    <JobPollingContext.Provider value={{ jobs, startPolling, refreshJobs: fetchJobs, registerJobClickHandler, unregisterJobClickHandler, onJobClick }}>
+    <JobPollingContext.Provider value={{ jobs, startPolling, refreshJobs: fetchJobs }}>
       {children}
     </JobPollingContext.Provider>
   );

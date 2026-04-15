@@ -28,15 +28,12 @@ function StatusIcon({ status }: { status: string }) {
   }
 }
 
-const CLICKABLE_TYPES = new Set(['spec_import']);
-
 export function QueueJobItem({ job }: { job: JobWithChildren }) {
   const [isPending, startTransition] = useTransition();
   const [expanded, setExpanded] = useState(false);
-  const { refreshJobs, onJobClick } = useJobPollingContext();
+  const { refreshJobs } = useJobPollingContext();
   const typeLabel = TYPE_LABELS[job.type] || job.type;
   const isActive = job.status === 'running' || job.status === 'pending';
-  const isClickable = job.status === 'completed' && CLICKABLE_TYPES.has(job.type);
   const hasChildren = job._childSummary && job._childSummary.total > 0;
 
   // Extract parallel execution info from metadata
@@ -61,10 +58,7 @@ export function QueueJobItem({ job }: { job: JobWithChildren }) {
 
   return (
     <>
-    <div
-      className={`flex items-center gap-3 px-3 py-2 group${isClickable ? ' cursor-pointer hover:bg-muted/50 transition-colors' : ''}`}
-      onClick={isClickable ? () => onJobClick(job) : undefined}
-    >
+    <div className="flex items-center gap-3 px-3 py-2 group">
       <StatusIcon status={job.status} />
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2">

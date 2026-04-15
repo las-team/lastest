@@ -67,7 +67,7 @@ export function ActivityFeedProvider({ children }: { children: React.ReactNode }
       .catch(() => {});
   }, []);
 
-  // WebSocket connection with retry
+  // WebSocket connection with retry (deferred to next tick to avoid hydration mismatch)
   useEffect(() => {
     let ws: WebSocket | null = null;
     let cancelled = false;

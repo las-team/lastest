@@ -17,14 +17,14 @@ import {
   discoverSpecFiles,
   extractUserStoriesFromFiles,
   extractUserStoriesFromUpload,
-  getSpecImportJobResult,
+  getSpecImportSession,
+  completeSpecImportSession,
   generateTestsFromStories,
   createPlaceholdersFromStories,
   getBranchChanges,
   validateAllTestsWithMCP,
 } from '@/server/actions/spec-import';
 import type { DiscoveredSpecFile } from '@/server/actions/spec-import';
-import { useNotifyJobStarted } from '@/components/queue/job-polling-context';
 import type { ExtractedUserStory } from '@/lib/db/schema';
 import {
   Loader2,
@@ -59,7 +59,7 @@ interface ImportFromSpecDialogProps {
   repositoryId: string;
   branch: string;
   onComplete?: () => void;
-  initialJobId?: string | null;
+  reviewSessionId?: string | null;
 }
 
 export function ImportFromSpecDialog({
@@ -68,9 +68,8 @@ export function ImportFromSpecDialog({
   repositoryId,
   branch,
   onComplete,
-  initialJobId,
+  reviewSessionId,
 }: ImportFromSpecDialogProps) {
-  const notifyJobStarted = useNotifyJobStarted();
   const [step, setStep] = useState<Step>('input');
   const [isDiscovering, setIsDiscovering] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
@@ -104,12 +103,12 @@ export function ImportFromSpecDialog({
     usedPlaceholders?: boolean;
   } | null>(null);
 
-  // Load stories from a completed background job (e.g. clicked from queue)
+  // Load stories from a completed spec import session (clicked from activity feed)
   useEffect(() => {
-    if (!open || !initialJobId) return;
+    if (!open || !reviewSessionId) return;
     let cancelled = false;
     (async () => {
-      const result = await getSpecImportJobResult(initialJobId);
+      const result = await getSpecImportSession(reviewSessionId);
       if (cancelled) return;
       if (result.success && result.stories) {
         setStories(result.stories);
@@ -121,7 +120,7 @@ export function ImportFromSpecDialog({
       }
     })();
     return () => { cancelled = true; };
-  }, [open, initialJobId]);
+  }, [open, reviewSessionId]);
 
   // ============================================
   // Step 1: Document Selection
@@ -168,59 +167,26 @@ export function ImportFromSpecDialog({
   // Step 2: Extract User Stories
   // ============================================
 
-  const pollForStories = useCallback(async (jobId: string, fallbackStep: Step) => {
-    const poll = async (): Promise<void> => {
-      const result = await getSpecImportJobResult(jobId);
-      if (!result.success) {
-        toast.error(result.error || 'Failed to extract user stories');
-        setStep(fallbackStep);
-        return;
-      }
-      if (result.stories) {
-        setStories(result.stories);
-        setImportId(result.importId || null);
-        setExpandedStories(new Set(result.stories.map(s => s.id)));
-
-        const branchResult = await getBranchChanges(repositoryId, branch);
-        if (branchResult.success && branchResult.changedFiles) {
-          setChangedFiles(branchResult.changedFiles);
-        }
-
-        setStep('review');
-        const totalAC = result.stories.reduce((sum, s) => sum + s.acceptanceCriteria.length, 0);
-        toast.success(`Extracted ${result.stories.length} user stories, ${totalAC} acceptance criteria`);
-        return;
-      }
-      // Still running — poll again
-      await new Promise(r => setTimeout(r, 2000));
-      return poll();
-    };
-    await poll();
-  }, [repositoryId, branch]);
-
   const handleExtractFromGitHub = async () => {
     if (selectedFiles.size === 0) {
       toast.error('Please select at least one file');
       return;
     }
 
-    setStep('extracting');
     try {
       const response = await extractUserStoriesFromFiles(
         repositoryId,
         branch,
         Array.from(selectedFiles)
       );
-      if (response.success && response.jobId) {
-        notifyJobStarted();
-        await pollForStories(response.jobId, 'file-selection');
+      if (response.success) {
+        toast.success('Spec import started — check the activity feed for progress');
+        onOpenChange(false);
       } else {
-        toast.error(response.error || 'Failed to extract user stories');
-        setStep('file-selection');
+        toast.error(response.error || 'Failed to start extraction');
       }
     } catch {
-      toast.error('Failed to extract user stories');
-      setStep('file-selection');
+      toast.error('Failed to start extraction');
     }
   };
 
@@ -230,7 +196,6 @@ export function ImportFromSpecDialog({
       return;
     }
 
-    setStep('extracting');
     try {
       const encodedFiles = await Promise.all(
         uploadedFiles.map(async (file) => {
@@ -243,16 +208,14 @@ export function ImportFromSpecDialog({
       );
 
       const response = await extractUserStoriesFromUpload(encodedFiles, repositoryId, branch);
-      if (response.success && response.jobId) {
-        notifyJobStarted();
-        await pollForStories(response.jobId, 'input');
+      if (response.success) {
+        toast.success('Spec import started — check the activity feed for progress');
+        onOpenChange(false);
       } else {
-        toast.error(response.error || 'Failed to extract user stories');
-        setStep('input');
+        toast.error(response.error || 'Failed to start extraction');
       }
     } catch {
-      toast.error('Failed to extract user stories');
-      setStep('input');
+      toast.error('Failed to start extraction');
     }
   };
 
@@ -355,6 +318,7 @@ export function ImportFromSpecDialog({
 
       if (response.success) {
         toast.success(`Created ${response.areasCreated} areas and ${response.testsCreated} tests`);
+        if (reviewSessionId) completeSpecImportSession(reviewSessionId).catch(() => {});
       } else {
         toast.error(response.error || 'Failed to generate tests');
       }
@@ -393,6 +357,7 @@ export function ImportFromSpecDialog({
 
       if (response.success) {
         toast.success(`Created ${response.areasCreated} areas and ${response.testsCreated} placeholder tests`);
+        if (reviewSessionId) completeSpecImportSession(reviewSessionId).catch(() => {});
       } else {
         toast.error(response.error || 'Failed to create placeholders');
       }
