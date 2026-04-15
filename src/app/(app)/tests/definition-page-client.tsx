@@ -145,6 +145,7 @@ export function DefinitionPageClient({
 
   // --- Tree state (from Areas page) ---
   const [treeSelection, setTreeSelection] = useState<TreeSelection | null>(null);
+  const prevTreeSelectionRef = useRef(treeSelection);
   const [selectedAreaIds, setSelectedAreaIds] = useState<Set<string>>(new Set());
   const [activeTab, setActiveTab] = useState(initialTab);
 
@@ -223,26 +224,32 @@ export function DefinitionPageClient({
 
   // Clear test selection and reset editing when tree selection changes
   useEffect(() => {
-    setSelectedTestIds(new Set());
-    setFixResult(null);
-    setIsEditingArea(false);
-    setIsCreatingPlaceholder(false);
-    setNewPlaceholderName('');
+    const selectionChanged = prevTreeSelectionRef.current !== treeSelection;
+    prevTreeSelectionRef.current = treeSelection;
 
-    // Don't clear openTestId when selecting a test — handleOpenTest manages it
-    if (treeSelection?.type !== 'test') {
-      setOpenTestId(null);
-      setOpenTestData(null);
-      setOpenTestDetailData(null);
-      // Update URL to remove test param when navigating away
-      const url = new URL(window.location.href);
-      if (url.searchParams.has('test')) {
-        url.searchParams.delete('test');
-        window.history.replaceState({}, '', url.pathname + url.search);
+    // Only reset state when treeSelection actually changed (not when tree prop refreshes)
+    if (selectionChanged) {
+      setSelectedTestIds(new Set());
+      setFixResult(null);
+      setIsEditingArea(false);
+      setIsCreatingPlaceholder(false);
+      setNewPlaceholderName('');
+
+      // Don't clear openTestId when selecting a test — handleOpenTest manages it
+      if (treeSelection?.type !== 'test') {
+        setOpenTestId(null);
+        setOpenTestData(null);
+        setOpenTestDetailData(null);
+        // Update URL to remove test param when navigating away
+        const url = new URL(window.location.href);
+        if (url.searchParams.has('test')) {
+          url.searchParams.delete('test');
+          window.history.replaceState({}, '', url.pathname + url.search);
+        }
       }
     }
 
-    // Populate area edit fields
+    // Populate area edit fields (always refresh from tree data)
     if (treeSelection?.type === 'area') {
       const area = findAreaInTree(tree, treeSelection.id);
       if (area) {

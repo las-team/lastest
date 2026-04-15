@@ -160,7 +160,7 @@ export async function cancelJob(jobId: string, repositoryId?: string | null, run
   }
 
   // If a remote runner is assigned, send cancel command
-  if (effectiveRunnerId && effectiveRunnerId !== 'local' && job.status === 'running') {
+  if (effectiveRunnerId && effectiveRunnerId !== 'local' && effectiveRunnerId !== 'auto' && job.status === 'running') {
     // Extract testRunId from job metadata if available
     const testRunId = (job.metadata as Record<string, unknown>)?.testRunId as string | undefined;
     if (testRunId) {

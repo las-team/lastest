@@ -390,11 +390,18 @@ export async function getTestScreenshotsGrouped(
   const runs = await queries.getTestRunsByIds(runIds);
   const runMap = new Map(runs.map(r => [r.id, r.startedAt]));
 
+  // Natural sort for filenames like step_1, step_2, ..., step_10
+  const naturalCompare = (a: string, b: string) => {
+    const nameA = a.split('/').pop() || '';
+    const nameB = b.split('/').pop() || '';
+    return nameA.localeCompare(nameB, undefined, { numeric: true, sensitivity: 'base' });
+  };
+
   // Build result
   const result: ScreenshotGroup[] = runIds.map(runId => ({
     runId,
     startedAt: runMap.get(runId) || null,
-    screenshots: groups.get(runId)?.screenshots || [],
+    screenshots: (groups.get(runId)?.screenshots || []).sort(naturalCompare),
   }));
 
   // Sort by startedAt descending (newest first)

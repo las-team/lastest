@@ -17,7 +17,7 @@ DOM delta
 ## bugs
 Fix play specs -> test specs route
 ## features
-payment
+better way to handle baseURL
 (low) Every button is green, multiple primary actions, keep clicking on run test instead of save
 ## ideas
 Test governance /        │ AI generates tests fast → need redundancy         │ Medium — extend coverage analytics │
@@ -75,7 +75,8 @@ Ilyen AI segítség nélkül soha nem lenne elég erőforrásunk user interface 
 buy a newsletter substack twitter: duuce.com newsletter investor
 AI repurposing engine -> 5 tweets, 3 linkedin, remotion short form, 1 blog, graphics, email sequence
 Gamifying QA - Could you beat an AI tester? How to get AI testing agents to       
-  work? AI testing or Agentic testing?                                                             
+  work? AI testing or Agentic testing?                         
+"tyű" - sanyi                          
 ## commands
 ## ourmotto
 Real constraints: if you dont use GH, this tool is not optimized for you - ping is with your stack and we will accommodate it.

@@ -221,7 +221,7 @@ export function ActivityFeedPanel() {
     <Sheet open={isOpen} onOpenChange={setIsOpen}>
       <SheetContent className={cn(
           'p-0 flex flex-col transition-[width] duration-300',
-          expandedStream ? 'w-[820px] sm:w-[900px]' : 'w-[420px] sm:w-[480px]',
+          expandedStream ? 'w-[1340px]' : 'w-[480px]',
         )}>
         <SheetHeader className="px-4 pt-4 pb-3 border-b shrink-0">
           <SheetTitle className="flex items-center gap-2 text-base">
