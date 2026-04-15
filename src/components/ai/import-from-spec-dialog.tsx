@@ -193,12 +193,17 @@ export function ImportFromSpecDialog({
 
     setStep('extracting');
     try {
-      const formData = new FormData();
-      for (const file of uploadedFiles) {
-        formData.append('files', file);
-      }
+      const encodedFiles = await Promise.all(
+        uploadedFiles.map(async (file) => {
+          const buffer = await file.arrayBuffer();
+          const bytes = new Uint8Array(buffer);
+          let binary = '';
+          for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+          return { name: file.name, content: btoa(binary) };
+        })
+      );
 
-      const response = await extractUserStoriesFromUpload(formData, repositoryId, branch);
+      const response = await extractUserStoriesFromUpload(encodedFiles, repositoryId, branch);
       if (response.success && response.stories) {
         setStories(response.stories);
         setImportId(response.importId || null);

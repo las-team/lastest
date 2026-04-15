@@ -13,11 +13,11 @@ import type { AIProviderConfig, CodebaseIntelligenceContext } from '@/lib/ai/typ
 import type { ExtractedUserStory, ExtractedAcceptanceCriterion } from '@/lib/db/schema';
 import { revalidatePath } from 'next/cache';
 import { getRepoTree, getFileContent, compareBranches } from '@/lib/github/content';
-import { extractTextFromFile } from '@/lib/file-parser';
 import { runParallel } from '@/lib/ai/parallel';
 import { createJob, updateJobProgress, completeJob, failJob } from './jobs';
 import { getCurrentBranchForRepo } from '@/lib/git-utils';
 import { requireRepoAccess } from '@/lib/auth';
+import { extractText } from 'unpdf';
 
 // ============================================
 // Types
@@ -412,13 +412,12 @@ export async function extractUserStoriesFromFiles(
 }
 
 export async function extractUserStoriesFromUpload(
-  formData: FormData,
+  files: { name: string; content: string }[],
   repositoryId: string,
   branch: string
 ): Promise<SpecImportResponse> {
   await requireRepoAccess(repositoryId);
   try {
-    const files = formData.getAll('files') as File[];
     if (files.length === 0) {
       return { success: false, error: 'No files uploaded' };
     }
@@ -426,7 +425,14 @@ export async function extractUserStoriesFromUpload(
     const contents: string[] = [];
     const fileNames: string[] = [];
     for (const file of files) {
-      const text = await extractTextFromFile(file);
+      const buf = Buffer.from(file.content, 'base64');
+      let text: string;
+      if (file.name.toLowerCase().endsWith('.pdf')) {
+        const { text: pages } = await extractText(new Uint8Array(buf));
+        text = pages.join('\n');
+      } else {
+        text = buf.toString('utf-8');
+      }
       if (text.trim()) {
         contents.push(`--- ${file.name} ---\n${text}`);
         fileNames.push(file.name);

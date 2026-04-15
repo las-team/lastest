@@ -21,6 +21,7 @@ const nextConfig: NextConfig = {
   experimental: {
     serverActions: {
       bodySizeLimit: "10mb",
+      allowedOrigins: ["app.lastest.cloud", "*.olares.local"],
     },
     proxyClientMaxBodySize: "50mb",
   },

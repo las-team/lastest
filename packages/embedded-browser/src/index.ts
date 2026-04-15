@@ -252,16 +252,19 @@ async function startup(): Promise<void> {
 
         document.addEventListener('mousemove', onMove, true);
         // Store cleanup reference
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         (window as any).__lastest_inspect_cleanup = () => {
           document.removeEventListener('mousemove', onMove, true);
           overlay.remove();
           tooltip.remove();
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
           delete (window as any).__lastest_inspect_cleanup;
         };
       }).catch(err => console.error('[Inspect] Failed to inject overlay script:', err));
       console.log('[Inspect] DOM overlay injected');
     } else {
       targetPage.evaluate(() => {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         (window as any).__lastest_inspect_cleanup?.();
       }).catch(() => {});
       console.log('[Inspect] DOM overlay removed');

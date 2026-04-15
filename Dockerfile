@@ -169,9 +169,8 @@ COPY --chown=nextjs:nodejs scripts/migrate.js /app/migrate.js
 COPY --chown=nextjs:nodejs scripts/ws-proxy-preload.js /app/ws-proxy-preload.js
 
 # Create storage directories
-RUN mkdir -p /app/storage/screenshots /app/storage/baselines /app/storage/diffs /app/storage/traces /app/storage/videos /app/storage/planned /app/storage/bug-reports /home/nextjs/.claude && \
-    chown -R nextjs:nodejs /app && \
-    chown nextjs:nodejs /home/nextjs/.claude
+RUN mkdir -p /app/storage/screenshots /app/storage/baselines /app/storage/diffs /app/storage/traces /app/storage/videos /app/storage/planned /app/storage/bug-reports && \
+    chown -R nextjs:nodejs /app
 
 # Environment configuration
 ENV NODE_ENV=production
