@@ -15,20 +15,57 @@ import { agentCreateTest } from '@/lib/playwright/generator-agent';
 import { emitAndPersistActivityEvent } from '@/lib/db/queries/activity-events';
 import { awardScore } from '@/server/actions/gamification';
 import type { AgentStepState } from '@/lib/db/schema';
+import { claimPoolEB, releasePoolEB } from '@/server/actions/embedded-sessions';
 import { db } from '@/lib/db';
 import { embeddedSessions } from '@/lib/db/schema';
 import { eq } from 'drizzle-orm';
 
-/** Find a ready embedded browser's CDP + stream URLs for MCP integration */
-async function findAvailableEmbeddedBrowser(): Promise<{ cdpUrl: string; streamUrl: string } | undefined> {
-  const [session] = await db
-    .select({ cdpUrl: embeddedSessions.cdpUrl, streamUrl: embeddedSessions.streamUrl })
-    .from(embeddedSessions)
-    .where(eq(embeddedSessions.status, 'ready'))
-    .limit(1);
-  if (session?.cdpUrl && session?.streamUrl) {
-    return { cdpUrl: session.cdpUrl, streamUrl: session.streamUrl };
+/**
+ * Claim an embedded browser from the pool for AI agent use.
+ * Waits (polls) until an EB becomes available, up to maxWaitMs.
+ * Returns CDP + stream URLs and the runnerId for release.
+ * Caller MUST call releasePoolEB(runnerId) when done.
+ */
+async function claimEmbeddedBrowserForAgent(
+  maxWaitMs = 5 * 60 * 1000,
+  onQueued?: () => void,
+): Promise<{
+  cdpUrl: string;
+  streamUrl: string;
+  runnerId: string;
+} | undefined> {
+  const deadline = Date.now() + maxWaitMs;
+  let notifiedQueued = false;
+
+  while (Date.now() < deadline) {
+    const poolEB = await claimPoolEB();
+    if (poolEB) {
+      // Look up the CDP/stream URLs from the session
+      const [session] = await db
+        .select({ cdpUrl: embeddedSessions.cdpUrl, streamUrl: embeddedSessions.streamUrl })
+        .from(embeddedSessions)
+        .where(eq(embeddedSessions.runnerId, poolEB.runnerId));
+
+      if (session?.cdpUrl && session?.streamUrl) {
+        return { cdpUrl: session.cdpUrl, streamUrl: session.streamUrl, runnerId: poolEB.runnerId };
+      }
+
+      // Session not found or missing URLs — release and retry
+      await releasePoolEB(poolEB.runnerId);
+    }
+
+    // Notify caller on first queue (so UI can update status)
+    if (!notifiedQueued) {
+      notifiedQueued = true;
+      onQueued?.();
+      console.log(`[AgentPool] All browsers busy, waiting for one to become available (timeout ${maxWaitMs / 1000}s)`);
+    }
+
+    // Poll every 3 seconds
+    await new Promise((r) => setTimeout(r, 3000));
   }
+
+  console.warn(`[AgentPool] Timed out waiting for an available browser after ${maxWaitMs / 1000}s`);
   return undefined;
 }
 
@@ -161,22 +198,25 @@ export async function startGenerateTestAgent(data: {
     // Fire-and-forget background execution
     (async () => {
       const startTime = Date.now();
+      // Wait for an EB from the pool (queues if all busy)
+      const eb = await claimEmbeddedBrowserForAgent(5 * 60 * 1000, () => {
+        queries.updateAgentSession(session.id, {
+          metadata: { ...session.metadata, queuedForBrowser: true } as Record<string, unknown>,
+        }).catch(() => {});
+      });
+      if (!eb) {
+        throw new Error('No browsers available — all browsers are busy. Please try again later.');
+      }
+      console.log(`[GenerateTestAgent] Claimed pool EB ${eb.runnerId.slice(0, 8)}, CDP: ${eb.cdpUrl}`);
+      await queries.updateAgentSession(session.id, {
+        metadata: { ...session.metadata, streamUrl: eb.streamUrl, queuedForBrowser: false } as Record<string, unknown>,
+      }).catch(() => {});
       try {
-        // Try to use an embedded browser's CDP endpoint for live streaming
-        const eb = await findAvailableEmbeddedBrowser();
-        if (eb) {
-          console.log(`[GenerateTestAgent] Using embedded browser CDP: ${eb.cdpUrl}, stream: ${eb.streamUrl}`);
-          // Store stream URL in session metadata so the UI can show the viewer
-          await queries.updateAgentSession(session.id, {
-            metadata: { ...session.metadata, streamUrl: eb.streamUrl } as Record<string, unknown>,
-          }).catch(() => {});
-        }
-
         const result = await agentCreateTest(data.repositoryId, {
           userPrompt: data.userPrompt,
           targetUrl: data.targetUrl,
           routePath: data.targetUrl,
-        }, { headless: data.headless, cdpEndpoint: eb?.cdpUrl });
+        }, { headless: data.headless, cdpEndpoint: eb.cdpUrl });
 
         if (!result.success || !result.code) {
           throw new Error(result.error || 'Generator agent produced no test code');
@@ -252,6 +292,12 @@ export async function startGenerateTestAgent(data: {
           artifactType: null, artifactId: null, artifactLabel: null,
           durationMs: Date.now() - startTime, promptLogId: null,
         }).catch(() => {});
+      } finally {
+        // Always release the EB back to the pool
+        if (eb) {
+          await releasePoolEB(eb.runnerId);
+          console.log(`[GenerateTestAgent] Released pool EB ${eb.runnerId.slice(0, 8)}`);
+        }
       }
     })();
 
@@ -318,22 +364,27 @@ export async function startGeneratePlaceholderTestAgent(data: {
     // Fire-and-forget background execution
     (async () => {
       const startTime = Date.now();
+      // Wait for an EB from the pool (queues if all busy)
+      const eb = await claimEmbeddedBrowserForAgent(5 * 60 * 1000, () => {
+        queries.updateAgentSession(session.id, {
+          metadata: { ...session.metadata, queuedForBrowser: true } as Record<string, unknown>,
+        }).catch(() => {});
+      });
+      if (!eb) {
+        throw new Error('No browsers available — all browsers are busy. Please try again later.');
+      }
+      console.log(`[GeneratePlaceholderAgent] Claimed pool EB ${eb.runnerId.slice(0, 8)}, CDP: ${eb.cdpUrl}`);
+      await queries.updateAgentSession(session.id, {
+        metadata: { ...session.metadata, streamUrl: eb.streamUrl, queuedForBrowser: false } as Record<string, unknown>,
+      }).catch(() => {});
       try {
-        const eb = await findAvailableEmbeddedBrowser();
-        if (eb) {
-          console.log(`[GeneratePlaceholderAgent] Using embedded browser CDP: ${eb.cdpUrl}, stream: ${eb.streamUrl}`);
-          await queries.updateAgentSession(session.id, {
-            metadata: { ...session.metadata, streamUrl: eb.streamUrl } as Record<string, unknown>,
-          }).catch(() => {});
-        }
-
         const result = await agentCreateTest(data.repositoryId, {
           userPrompt,
           testName: test.name,
           targetUrl: test.targetUrl ?? undefined,
           routePath: test.targetUrl ?? undefined,
           functionalAreaId: test.functionalAreaId ?? undefined,
-        }, { cdpEndpoint: eb?.cdpUrl });
+        }, { cdpEndpoint: eb.cdpUrl });
 
         if (!result.success || !result.code) {
           throw new Error(result.error || 'Generator agent produced no test code');
@@ -417,6 +468,12 @@ export async function startGeneratePlaceholderTestAgent(data: {
           artifactType: null, artifactId: null, artifactLabel: null,
           durationMs: Date.now() - startTime, promptLogId: null,
         }).catch(() => {});
+      } finally {
+        // Always release the EB back to the pool
+        if (eb) {
+          await releasePoolEB(eb.runnerId);
+          console.log(`[GeneratePlaceholderAgent] Released pool EB ${eb.runnerId.slice(0, 8)}`);
+        }
       }
     })();
 

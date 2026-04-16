@@ -222,6 +222,8 @@ export class EmbeddedTestExecutor {
     }
 
     let result: EmbeddedTestResult | undefined;
+    let reachedStep = -1;
+    let stepCount = 0;
 
     try {
       if (abortCtrl.signal.aborted) {
@@ -425,10 +427,11 @@ export class EmbeddedTestExecutor {
       body = body.replace(/page\.keyboard\.selectAll\(\)/g, "page.keyboard.press('Control+a')");
 
       // Instrument step tracking before soft error wrapping
-      const { instrumentedBody, stepCount } = instrumentStepTracking(body);
-      body = instrumentedBody;
-      let lastReachedStep = -1;
-      const __stepReached = async (n: number) => { lastReachedStep = Math.max(lastReachedStep, n); };
+      const instrumentResult = instrumentStepTracking(body);
+      body = instrumentResult.instrumentedBody;
+      stepCount = instrumentResult.stepCount;
+      reachedStep = -1;
+      const __stepReached = async (n: number) => { reachedStep = Math.max(reachedStep, n); };
 
       // Soft error wrapping — skip screenshot lines (mirrors runner.ts)
       body = body.replace(/^(\s*)(await\s+.+;)\s*$/gm, (_match, indent, stmt) => {
@@ -754,7 +757,7 @@ export class EmbeddedTestExecutor {
         consoleErrors: consoleErrors.length > 0 ? consoleErrors : undefined,
         networkRequests: allNetworkRequests.length > 0 ? allNetworkRequests : undefined,
         softErrors: softErrors.length > 0 ? softErrors : undefined,
-        lastReachedStep: lastReachedStep >= 0 ? lastReachedStep : undefined,
+        lastReachedStep: reachedStep >= 0 ? reachedStep : undefined,
         totalSteps: stepCount > 0 ? stepCount : undefined,
       };
     } catch (error) {
@@ -770,7 +773,7 @@ export class EmbeddedTestExecutor {
           consoleErrors: consoleErrors.length > 0 ? consoleErrors : undefined,
           networkRequests: allNetworkRequests.length > 0 ? allNetworkRequests : undefined,
           softErrors: softErrors.length > 0 ? softErrors : undefined,
-          lastReachedStep: lastReachedStep >= 0 ? lastReachedStep : undefined,
+          lastReachedStep: reachedStep >= 0 ? reachedStep : undefined,
           totalSteps: stepCount > 0 ? stepCount : undefined,
         };
       } else {
@@ -795,7 +798,7 @@ export class EmbeddedTestExecutor {
           consoleErrors: consoleErrors.length > 0 ? consoleErrors : undefined,
           networkRequests: allNetworkRequests.length > 0 ? allNetworkRequests : undefined,
           softErrors: softErrors.length > 0 ? softErrors : undefined,
-          lastReachedStep: lastReachedStep >= 0 ? lastReachedStep : undefined,
+          lastReachedStep: reachedStep >= 0 ? reachedStep : undefined,
           totalSteps: stepCount > 0 ? stepCount : undefined,
         };
       }

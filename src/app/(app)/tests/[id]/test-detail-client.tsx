@@ -27,7 +27,7 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { deleteTest, updateTest, getTestVersionHistory, restoreTestVersion, getVisualDiffsForTestResult, restoreTest, permanentlyDeleteTest, cloneTest } from '@/server/actions/tests';
 import { runTests, getJobStatus } from '@/server/actions/runs';
-import { aiFixTest, aiEnhanceTest, updateTestCode, startGeneratePlaceholderTestAgent } from '@/server/actions/ai';
+import { healTest, aiEnhanceTest, updateTestCode, startGeneratePlaceholderTestAgent } from '@/server/actions/ai';
 import { toast } from 'sonner';
 import { useNotifyJobStarted } from '@/components/queue/job-polling-context';
 import { ExecutionTargetSelector } from '@/components/execution/execution-target-selector';
@@ -482,8 +482,7 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
     if (!repositoryId) return;
     setIsFixing(true);
     try {
-      const errorMsg = latestResult?.errorMessage || 'Test needs fixing';
-      const result = await aiFixTest(repositoryId, test.id, errorMsg);
+      const result = await healTest(repositoryId, test.id);
       if (result.success && result.code) {
         await updateTestCode(test.id, result.code, 'ai_fix');
         toast.success('Test fixed and saved');

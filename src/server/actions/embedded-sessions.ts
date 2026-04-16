@@ -464,9 +464,15 @@ export async function releasePoolEB(runnerId: string): Promise<void> {
 /**
  * Process queued jobs that are waiting for any available EB.
  * Called after an EB is released back to the pool.
+ *
+ * Does NOT pre-claim an EB — lets the normal execution flow
+ * (runTests → executeFallbackChain → claimPoolEB) handle claiming.
+ * This avoids deadlocks where claimPoolEB marks the EB busy
+ * but processNextQueuedTestRun can't use it.
  */
-async function processPoolQueue(): Promise<void> {
+export async function processPoolQueue(): Promise<void> {
   // Find first pending job with no target runner (queued because all EBs were busy)
+  // Check both test_run and build_run types
   const [pendingJob] = await db
     .select()
     .from(backgroundJobs)
@@ -474,32 +480,27 @@ async function processPoolQueue(): Promise<void> {
       and(
         eq(backgroundJobs.status, 'pending'),
         isNull(backgroundJobs.targetRunnerId),
-        eq(backgroundJobs.type, 'test_run'),
       )
     )
     .limit(1);
 
   if (!pendingJob) return;
 
-  // Try to claim an EB for this job
-  const poolEB = await claimPoolEB();
-  if (!poolEB) return; // No EBs available yet
+  console.log(`[Pool] Processing queued job ${pendingJob.id} (${pendingJob.type})`);
 
-  // Assign the EB to the job so processNextQueuedTestRun can pick it up
-  await db
-    .update(backgroundJobs)
-    .set({ targetRunnerId: poolEB.runnerId })
-    .where(eq(backgroundJobs.id, pendingJob.id));
-
-  console.log(`[Pool] Assigned EB ${poolEB.runnerId.slice(0, 8)} to queued job ${pendingJob.id}`);
-
-  // Import dynamically to avoid circular dependency
-  const { processNextQueuedTestRun } = await import('@/server/actions/runs');
-  processNextQueuedTestRun(pendingJob.repositoryId, poolEB.runnerId).catch((err) => {
-    console.error(`[Pool] Error processing queued test run:`, err);
-    // Release the EB if processing failed
-    releasePoolEB(poolEB.runnerId).catch(() => {});
-  });
+  // Route to the appropriate processor — they call runTests/createAndRunBuild
+  // which go through executeFallbackChain → claimPoolEB naturally
+  try {
+    if (pendingJob.type === 'test_run') {
+      const { processNextQueuedTestRun } = await import('@/server/actions/runs');
+      await processNextQueuedTestRun(pendingJob.repositoryId);
+    } else if (pendingJob.type === 'build_run') {
+      const { processNextQueuedBuild } = await import('@/server/actions/builds');
+      await processNextQueuedBuild(pendingJob.repositoryId);
+    }
+  } catch (err) {
+    console.error(`[Pool] Error processing queued job ${pendingJob.id}:`, err);
+  }
 }
 
 /**

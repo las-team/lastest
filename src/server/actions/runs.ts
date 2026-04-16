@@ -82,7 +82,8 @@ export async function runTests(testIds?: string[], repositoryId?: string | null,
   if (targetRunner === 'auto' || targetRunner === 'local') {
     const { isPoolBusy } = await import('@/server/actions/embedded-sessions');
     if (await isPoolBusy()) {
-      return queueTestRun(testIds, repositoryId, headless, runnerId, forceVideoRecording);
+      // Queue with null targetRunnerId so processPoolQueue can find it
+      return queueTestRun(testIds, repositoryId, headless, undefined, forceVideoRecording);
     }
   } else if (await isRunnerBusy(targetRunner)) {
     return queueTestRun(testIds, repositoryId, headless, runnerId, forceVideoRecording);
@@ -210,8 +211,8 @@ async function runTestsAsync(runId: string, tests: Test[], repositoryId?: string
   revalidatePath('/tests', 'layout');
   revalidatePath('/');
 
-  // Process next queued test run for this runner
-  processNextQueuedTestRun(repositoryId, targetRunner);
+  // Process next queued job for this specific runner (if non-pool)
+  processNextQueuedTestRun(repositoryId, targetRunner === 'auto' ? undefined : targetRunner);
 }
 
 export async function getTestRun(runId: string) {
@@ -266,7 +267,9 @@ async function queueTestRun(
     throw new Error('No tests to run');
   }
 
-  const targetRunner = runnerId || 'auto';
+  // null targetRunnerId = pool-managed (any available EB)
+  // specific runnerId = queue for that specific runner
+  const targetRunner = runnerId || undefined;
   const jobId = await createPendingJob(
     'test_run',
     `Queued Test Run (${tests.length} tests)`,
@@ -280,11 +283,15 @@ async function queueTestRun(
 }
 
 export async function processNextQueuedTestRun(repositoryId?: string | null, targetRunnerId?: string) {
-  const effectiveRunner = targetRunnerId || 'auto';
+  // When targetRunnerId is undefined, look for pool-managed jobs (null targetRunnerId in DB).
+  // When it's a specific runner, look for jobs targeting that runner.
+  const effectiveRunner = targetRunnerId || undefined;
 
-  // Don't process if this runner is still busy
-  if (await isRunnerBusy(effectiveRunner)) return;
+  // Skip busy check for pool-managed jobs — the execution flow handles claiming
+  if (effectiveRunner && await isRunnerBusy(effectiveRunner)) return;
 
+  // getPendingTestRunJobs: when effectiveRunner is undefined, omits targetRunnerId filter
+  // which finds jobs with ANY targetRunnerId. We need jobs with NULL targetRunnerId for pool mode.
   const pendingJobs = await queries.getPendingTestRunJobs(repositoryId, effectiveRunner);
   if (pendingJobs.length === 0) return;
 
@@ -304,7 +311,8 @@ export async function processNextQueuedTestRun(repositoryId?: string | null, tar
     completedAt: new Date(),
   });
 
-  // Run the tests
+  // Run the tests — for pool-managed jobs, runnerId is undefined so
+  // runTests goes through auto mode → executeFallbackChain → claimPoolEB
   try {
     await runTests(
       metadata?.testIds || undefined,

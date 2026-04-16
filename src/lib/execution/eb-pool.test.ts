@@ -388,25 +388,60 @@ describe('Pool Integration Scenarios', () => {
       });
     });
 
-    it('queued jobs are picked up when EB is released', () => {
-      // Structural test: releasePoolEB → processPoolQueue → claim + assign + process
-      const claimPoolEB = vi.fn().mockResolvedValue({ runnerId: 'eb-1', sessionId: 's-1' });
-      const processNextQueuedTestRun = vi.fn().mockResolvedValue(undefined);
-      let pendingJobs = [{ id: 'job-1', type: 'test_run', repositoryId: 'repo-1' }];
+    it('queued jobs use null targetRunnerId for pool mode', () => {
+      // When queueing in auto mode, runnerId should be undefined → null in DB
+      // This ensures processPoolQueue (which queries IS NULL) can find them
+      const createPendingJob = vi.fn().mockResolvedValue('job-1');
 
-      const simulateProcessPoolQueue = async () => {
-        const [nextJob] = pendingJobs;
-        if (!nextJob) return;
-        const poolEB = await claimPoolEB();
-        if (!poolEB) return;
-        pendingJobs = []; // Mark consumed
-        await processNextQueuedTestRun(nextJob.repositoryId, poolEB.runnerId);
+      const simulateQueueTestRun = async (runnerId?: string) => {
+        const targetRunner = runnerId || undefined; // NOT 'local' or 'auto'
+        await createPendingJob('test_run', 'label', 3, 'repo-1', {}, targetRunner);
       };
 
-      return simulateProcessPoolQueue().then(() => {
-        expect(claimPoolEB).toHaveBeenCalled();
-        expect(processNextQueuedTestRun).toHaveBeenCalledWith('repo-1', 'eb-1');
-        expect(pendingJobs).toHaveLength(0);
+      return simulateQueueTestRun(undefined).then(() => {
+        expect(createPendingJob).toHaveBeenCalledWith(
+          'test_run', 'label', 3, 'repo-1', {},
+          undefined, // targetRunnerId = undefined → becomes null in DB
+        );
+      });
+    });
+
+    it('processPoolQueue routes to correct processor without pre-claiming', () => {
+      // processPoolQueue should NOT call claimPoolEB itself.
+      // It should let processNextQueuedTestRun/processNextQueuedBuild handle claiming
+      // through the normal execution flow (runTests → executeFallbackChain → claimPoolEB)
+      const processNextQueuedTestRun = vi.fn().mockResolvedValue(undefined);
+      const processNextQueuedBuild = vi.fn().mockResolvedValue(undefined);
+
+      const simulateProcessPoolQueue = async (pendingJob: { type: string; repositoryId: string }) => {
+        if (pendingJob.type === 'test_run') {
+          await processNextQueuedTestRun(pendingJob.repositoryId);
+        } else if (pendingJob.type === 'build_run') {
+          await processNextQueuedBuild(pendingJob.repositoryId);
+        }
+      };
+
+      return simulateProcessPoolQueue({ type: 'test_run', repositoryId: 'repo-1' }).then(() => {
+        expect(processNextQueuedTestRun).toHaveBeenCalledWith('repo-1');
+        expect(processNextQueuedBuild).not.toHaveBeenCalled();
+      });
+    });
+
+    it('processPoolQueue handles build_run jobs too', () => {
+      const processNextQueuedTestRun = vi.fn().mockResolvedValue(undefined);
+      const processNextQueuedBuild = vi.fn().mockResolvedValue(undefined);
+
+      const simulateProcessPoolQueue = async (pendingJob: { type: string; repositoryId: string }) => {
+        if (pendingJob.type === 'test_run') {
+          await processNextQueuedTestRun(pendingJob.repositoryId);
+        } else if (pendingJob.type === 'build_run') {
+          await processNextQueuedBuild(pendingJob.repositoryId);
+        }
+      };
+
+      return simulateProcessPoolQueue({ type: 'build_run', repositoryId: 'repo-1' }).then(() => {
+        expect(processNextQueuedBuild).toHaveBeenCalledWith('repo-1');
+        expect(processNextQueuedTestRun).not.toHaveBeenCalled();
       });
     });
   });

@@ -192,7 +192,8 @@ export async function createAndRunBuildCore(
   if (targetRunner === 'auto' || targetRunner === 'local') {
     const { isPoolBusy } = await import('@/server/actions/embedded-sessions');
     if (await isPoolBusy()) {
-      return queueBuild(triggerType, testIds, repositoryId, runnerId);
+      // Queue with undefined runnerId so targetRunnerId becomes null (pool-managed)
+      return queueBuild(triggerType, testIds, repositoryId, undefined);
     }
   } else if (await isRunnerBusy(targetRunner)) {
     return queueBuild(triggerType, testIds, repositoryId, runnerId);
@@ -878,7 +879,7 @@ async function runBuildAsync(
     if (currentJob?.error === 'Cancelled by user') {
       revalidatePath('/builds');
       revalidatePath('/');
-      processNextQueuedBuild(repositoryId, targetRunner);
+      processNextQueuedBuild(repositoryId, targetRunner === 'auto' ? undefined : targetRunner);
       return;
     }
 
@@ -1091,8 +1092,8 @@ async function runBuildAsync(
   revalidatePath('/builds');
   revalidatePath('/');
 
-  // Process next queued build for this runner
-  processNextQueuedBuild(repositoryId, targetRunner);
+  // Process next queued job for this specific runner (if non-pool)
+  processNextQueuedBuild(repositoryId, targetRunner === 'auto' ? undefined : targetRunner);
 }
 
 /**
@@ -1120,7 +1121,9 @@ async function queueBuild(
     throw new Error('No tests to run');
   }
 
-  const targetRunner = runnerId || 'auto';
+  // null targetRunnerId = pool-managed (any available EB)
+  // specific runnerId = queue for that specific runner
+  const targetRunner = runnerId || undefined;
 
   // Create a pending job
   const jobId = await createPendingJob(
@@ -1145,12 +1148,12 @@ async function queueBuild(
  * Process the next queued build if any
  */
 export async function processNextQueuedBuild(repositoryId?: string | null, targetRunnerId?: string) {
-  const effectiveRunner = targetRunnerId || 'auto';
+  const effectiveRunner = targetRunnerId || undefined;
 
-  // Don't process if this runner is still busy
-  if (await isRunnerBusy(effectiveRunner)) return;
+  // Skip busy check for pool-managed jobs — the execution flow handles claiming
+  if (effectiveRunner && await isRunnerBusy(effectiveRunner)) return;
 
-  // Get pending builds for this runner
+  // getPendingBuildJobs: when effectiveRunner is undefined, finds jobs with null targetRunnerId (pool mode)
   const pendingJobs = await queries.getPendingBuildJobs(repositoryId, effectiveRunner);
   if (pendingJobs.length === 0) return;
 
@@ -1159,13 +1162,14 @@ export async function processNextQueuedBuild(repositoryId?: string | null, targe
 
   // Complete the queue placeholder — createAndRunBuild creates its own running job.
   // We must NOT call startJob() here because that marks it 'running', which causes
-  // createAndRunBuild's isRunnerBusy() check to see a running job and re-queue.
+  // createAndRunBuild's isPoolBusy() check to see a running job and re-queue.
   await queries.updateBackgroundJob(nextJob.id, {
     status: 'completed',
     completedAt: new Date(),
   });
 
-  // Run the build
+  // Run the build — for pool-managed jobs, runnerId is undefined so
+  // createAndRunBuildCore goes through auto mode → executeFallbackChain → claimPoolEB
   try {
     await createAndRunBuild(
       metadata?.triggerType || 'manual',

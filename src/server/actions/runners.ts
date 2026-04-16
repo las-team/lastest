@@ -280,26 +280,43 @@ export async function updateRunnerStatus(
   const [current] = await db.select().from(runners).where(eq(runners.id, runnerId));
   const previousStatus = current?.status;
 
+  // If heartbeat says 'online' but the embedded session is still busy,
+  // keep runner as 'busy' — the pool claimed it and the session hasn't been released yet.
+  let effectiveStatus = status;
+  if (status === 'online' && current?.type === 'embedded') {
+    const [busySession] = await db
+      .select({ id: embeddedSessions.id })
+      .from(embeddedSessions)
+      .where(and(
+        eq(embeddedSessions.runnerId, runnerId),
+        eq(embeddedSessions.status, 'busy'),
+      ))
+      .limit(1);
+    if (busySession) {
+      effectiveStatus = 'busy';
+    }
+  }
+
   await db
     .update(runners)
     .set({
-      status,
+      status: effectiveStatus,
       lastSeen: lastSeen ?? new Date(),
     })
     .where(eq(runners.id, runnerId));
 
   // Emit event if status actually changed
-  if (current && previousStatus !== status) {
+  if (current && previousStatus !== effectiveStatus) {
     emitRunnerStatusChange({
       runnerId,
       teamId: current.teamId,
-      status,
+      status: effectiveStatus,
       previousStatus: previousStatus as 'online' | 'offline' | 'busy' | undefined,
       timestamp: Date.now(),
     });
 
     // When a runner comes online, check for pending queued jobs
-    if (status === 'online') {
+    if (effectiveStatus === 'online') {
       pickUpQueuedJobs(runnerId).catch((err) => {
         console.error(`[Runner ${runnerId}] Error picking up queued jobs:`, err);
       });

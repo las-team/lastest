@@ -25,6 +25,7 @@ import {
   AlertTriangle,
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
+import { toast } from 'sonner';
 import { createAndRunBuild, createComparisonRun } from '@/server/actions/builds';
 import type { BuildChanges } from '@/server/actions/builds';
 import { analyzeSmartRun, runSmartBuild, type SmartRunAnalysis } from '@/server/actions/smart-run';
@@ -165,9 +166,13 @@ export function RunDashboardClient({ tests, runs: _runs, builds, repositoryId, a
         }
 
         const versionOverrides = composeConfig.versionOverrides ?? undefined;
-        const { buildId } = await createAndRunBuild('manual', filteredTestIds, repositoryId, executionTarget, versionOverrides);
+        const result = await createAndRunBuild('manual', filteredTestIds, repositoryId, executionTarget, versionOverrides);
         notifyJobStarted();
-        router.push(`/builds/${buildId}`);
+        if ('queued' in result && result.queued) {
+          toast.info('All browsers are busy — build queued and will start automatically');
+        } else {
+          router.push(`/builds/${result.buildId}`);
+        }
       } else {
         const result = await runSmartBuild(repositoryId ?? null, executionTarget);
         if ('error' in result) {
@@ -240,9 +245,13 @@ export function RunDashboardClient({ tests, runs: _runs, builds, repositoryId, a
         notifyJobStarted();
         router.push(`/builds/${baselineBuildId}`);
       } else {
-        const { buildId } = await createAndRunBuild('manual', testIds, repositoryId, executionTarget, versionOverrides);
+        const result = await createAndRunBuild('manual', testIds, repositoryId, executionTarget, versionOverrides);
         notifyJobStarted();
-        router.push(`/builds/${buildId}`);
+        if ('queued' in result && result.queued) {
+          toast.info('All browsers are busy — build queued and will start automatically');
+        } else {
+          router.push(`/builds/${result.buildId}`);
+        }
       }
     } catch (error) {
       console.error('Failed to start build:', error);

@@ -634,10 +634,14 @@ export function DefinitionPageClient({
     }
     setIsRunningAreaBuild(true);
     try {
-      const { buildId } = await createAndRunBuild('manual', testIds, repositoryId, executionTarget);
+      const result = await createAndRunBuild('manual', testIds, repositoryId, executionTarget);
       notifyJobStarted();
-      toast.success(`Build started with ${testIds.length} test${testIds.length === 1 ? '' : 's'}`);
-      router.push(`/builds/${buildId}`);
+      if ('queued' in result && result.queued) {
+        toast.info('All browsers are busy — build queued and will start automatically');
+      } else {
+        toast.success(`Build started with ${testIds.length} test${testIds.length === 1 ? '' : 's'}`);
+        router.push(`/builds/${result.buildId}`);
+      }
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed to start build');
     } finally {

@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import * as queries from '@/lib/db/queries';
 import { getCurrentSession } from '@/lib/auth';
 import { cleanupStaleJobs } from '@/server/actions/jobs';
+import { processPoolQueue } from '@/server/actions/embedded-sessions';
 import { ensureSchedulerStarted } from '@/lib/scheduling/scheduler';
 import type { BackgroundJob } from '@/lib/db/schema';
 
@@ -27,8 +28,9 @@ export async function GET() {
   const now = Date.now();
   if (now - lastCleanupTime > CLEANUP_INTERVAL_MS) {
     lastCleanupTime = now;
-    // Run cleanup async - don't block the response
+    // Run cleanup + queue processing async - don't block the response
     cleanupStaleJobs(300000).catch(() => {});
+    processPoolQueue().catch(() => {});
   }
 
   // Get team's repos to filter jobs

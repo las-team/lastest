@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import { formatDistanceToNow } from 'date-fns';
 import { Bot, MoreVertical, Trash2, RefreshCw, Copy, Check, Settings, Layers, Square, Tv2, Server } from 'lucide-react';
-import type { Runner } from '@/lib/db/schema';
+import type { Runner, EmbeddedSession } from '@/lib/db/schema';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import {
@@ -29,9 +29,10 @@ import { useRouter } from 'next/navigation';
 interface RunnerListProps {
   runners: Runner[];
   systemRunners?: Runner[];
+  systemSessions?: EmbeddedSession[];
 }
 
-export function RunnerList({ runners, systemRunners = [] }: RunnerListProps) {
+export function RunnerList({ runners, systemRunners = [], systemSessions = [] }: RunnerListProps) {
   const router = useRouter();
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [tokenDialogOpen, setTokenDialogOpen] = useState(false);
@@ -214,42 +215,58 @@ export function RunnerList({ runners, systemRunners = [] }: RunnerListProps) {
         ))}
 
         {/* System runners (read-only, host-provided) */}
-        {systemRunners.map((runner) => (
-          <div
-            key={runner.id}
-            className="flex items-center justify-between p-3 rounded-lg border bg-card opacity-80"
-          >
-            <div className="flex items-center gap-3">
-              <div className={`p-2 rounded-lg ${
-                runner.status === 'online' ? 'bg-blue-500/10' :
-                runner.status === 'busy' ? 'bg-yellow-500/10' :
-                'bg-muted'
-              }`}>
-                <Server className={`w-5 h-5 ${
-                  runner.status === 'online' ? 'text-blue-500' :
-                  runner.status === 'busy' ? 'text-yellow-500' :
-                  'text-muted-foreground'
-                }`} />
-              </div>
-              <div>
-                <div className="flex items-center gap-2">
-                  <span className="font-medium">{runner.name}</span>
-                  {getStatusBadge(runner.status)}
-                  <Badge variant="outline" className="text-xs text-blue-500 border-blue-500/30">
-                    System
-                  </Badge>
+        {systemRunners.map((runner) => {
+          const session = systemSessions.find((s) => s.runnerId === runner.id);
+          // Use session status as source of truth when available
+          const effectiveStatus = session
+            ? session.status === 'ready' ? 'online' : session.status === 'busy' ? 'busy' : runner.status
+            : runner.status;
+          return (
+            <div
+              key={runner.id}
+              className="flex items-center justify-between p-3 rounded-lg border bg-card opacity-80"
+            >
+              <div className="flex items-center gap-3">
+                <div className={`p-2 rounded-lg ${
+                  effectiveStatus === 'online' ? 'bg-blue-500/10' :
+                  effectiveStatus === 'busy' ? 'bg-yellow-500/10' :
+                  'bg-muted'
+                }`}>
+                  <Server className={`w-5 h-5 ${
+                    effectiveStatus === 'online' ? 'text-blue-500' :
+                    effectiveStatus === 'busy' ? 'text-yellow-500' :
+                    'text-muted-foreground'
+                  }`} />
                 </div>
-                <div className="text-sm text-muted-foreground">
-                  {runner.lastSeen ? (
-                    <>Last seen {formatDistanceToNow(runner.lastSeen, { addSuffix: true })}</>
-                  ) : (
-                    <>Never connected</>
-                  )}
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="font-medium">{runner.name}</span>
+                    {getStatusBadge(effectiveStatus)}
+                    <Badge variant="outline" className="text-xs text-blue-500 border-blue-500/30">
+                      System
+                    </Badge>
+                    {session?.viewport && (
+                      <span className="text-xs text-muted-foreground">
+                        {session.viewport.width}x{session.viewport.height}
+                      </span>
+                    )}
+                  </div>
+                  <div className="text-sm text-muted-foreground">
+                    {session?.status === 'busy' && session.busySince ? (
+                      <>Busy for {formatDistanceToNow(session.busySince)}</>
+                    ) : session?.status === 'ready' && session.lastActivityAt ? (
+                      <>Idle since {formatDistanceToNow(session.lastActivityAt, { addSuffix: true })}</>
+                    ) : runner.lastSeen ? (
+                      <>Last seen {formatDistanceToNow(runner.lastSeen, { addSuffix: true })}</>
+                    ) : (
+                      <>Never connected</>
+                    )}
+                  </div>
                 </div>
               </div>
             </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
 
       {/* Delete Confirmation Dialog */}

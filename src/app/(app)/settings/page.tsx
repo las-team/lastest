@@ -43,7 +43,6 @@ import { ConnectGithubButton, ReconnectGithubLink } from '@/components/settings/
 import { GithubActionsCard } from '@/components/settings/github-actions-card-client';
 import { ScheduleManagerCard } from '@/components/settings/schedule-manager-client';
 import { DiagramThumbnail } from '@/components/ui/diagram-thumbnail';
-import { BrowserPoolCard } from '@/components/embedded-browser/browser-pool-card';
 import { TestMigrationCard } from '@/components/settings/test-migration-card';
 import { EmailPreferencesCard } from '@/components/settings/email-preferences-client';
 import { StorageUsageCard } from '@/components/settings/storage-usage-card-client';
@@ -500,7 +499,7 @@ export default async function SettingsPage({
                       <p className="text-sm">Create a runner above to get a token, then start it with the CLI.</p>
                     </div>
                   ) : (
-                    <RunnerList runners={runners} systemRunners={sysRunners} />
+                    <RunnerList runners={runners} systemRunners={sysRunners} systemSessions={systemEBSessions} />
                   )}
 
                   <details open={runners.length === 0 ? true : undefined}>
@@ -552,10 +551,6 @@ npx @lastest/runner log -f    # Follow logs in real-time`}</pre>
                 </CardContent>
               </Card>
 
-              {/* Browser Pool Status */}
-              {systemEBSessions.length > 0 && (
-                <BrowserPoolCard sessions={systemEBSessions} systemRunners={sysRunners} />
-              )}
 
             </div>
           )}

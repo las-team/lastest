@@ -184,6 +184,18 @@ function isAborted(signal: AbortSignal): boolean {
   return signal.aborted;
 }
 
+async function isAbortedOrCancelled(sessionId: string, signal: AbortSignal): Promise<boolean> {
+  if (signal.aborted) return true;
+  const session = await queries.getAgentSession(sessionId);
+  if (session?.status === 'cancelled') {
+    // Sync the in-memory controller so downstream checks also bail
+    const controller = activeControllers.get(sessionId);
+    if (controller) controller.abort();
+    return true;
+  }
+  return false;
+}
+
 async function skipIfManualMode(sessionId: string, stepId: AgentStepId): Promise<boolean> {
   const session = await queries.getAgentSession(sessionId);
   if (session?.metadata?.manualMode) {
@@ -193,9 +205,9 @@ async function skipIfManualMode(sessionId: string, stepId: AgentStepId): Promise
   return false;
 }
 
-async function waitForBuild(buildId: string, signal: AbortSignal): Promise<Awaited<ReturnType<typeof getBuildSummary>>> {
+async function waitForBuild(buildId: string, signal: AbortSignal, sessionId?: string): Promise<Awaited<ReturnType<typeof getBuildSummary>>> {
   for (;;) {
-    if (signal.aborted) return null;
+    if (sessionId ? await isAbortedOrCancelled(sessionId, signal) : signal.aborted) return null;
     const summary = await getBuildSummary(buildId);
     if (!summary) return null;
     if (summary.completedAt) return summary;
@@ -1459,7 +1471,7 @@ async function runTests(sessionId: string, repositoryId: string, _teamId: string
       ]);
     }
 
-    const summary = await waitForBuild(buildId, signal);
+    const summary = await waitForBuild(buildId, signal, sessionId);
     if (!summary) {
       if (isAborted(signal)) return false;
       await setStepFailed(sessionId, 'run_tests', 'Build not found after creation');
@@ -1729,7 +1741,7 @@ async function runRerunTests(sessionId: string, repositoryId: string, _teamId: s
       { label: `Re-running ${buildResult.testCount} tests`, status: 'running' },
     ]);
 
-    const summary = await waitForBuild(buildId, signal);
+    const summary = await waitForBuild(buildId, signal, sessionId);
     if (!summary) {
       if (isAborted(signal)) return false;
       await setStepFailed(sessionId, 'rerun_tests', 'Build not found');
@@ -1837,7 +1849,7 @@ async function executeFromStep(sessionId: string, repositoryId: string, teamId: 
     if (startIdx === -1) return;
 
     for (let i = startIdx; i < STEP_ORDER.length; i++) {
-      if (signal.aborted) return;
+      if (await isAbortedOrCancelled(sessionId, signal)) return;
 
       const step = STEP_ORDER[i];
       const stepDef = STEP_DEFINITIONS.find(d => d.id === step.id);

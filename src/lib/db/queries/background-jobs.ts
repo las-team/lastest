@@ -113,6 +113,9 @@ export async function getPendingBuildJobs(repositoryId?: string | null, targetRu
   }
   if (targetRunnerId) {
     conditions.push(eq(backgroundJobs.targetRunnerId, targetRunnerId));
+  } else {
+    // Pool mode: find jobs with no assigned runner (waiting for any available EB)
+    conditions.push(isNull(backgroundJobs.targetRunnerId));
   }
   return db
     .select()
@@ -132,6 +135,9 @@ export async function getPendingTestRunJobs(repositoryId?: string | null, target
   }
   if (targetRunnerId) {
     conditions.push(eq(backgroundJobs.targetRunnerId, targetRunnerId));
+  } else {
+    // Pool mode: find jobs with no assigned runner (waiting for any available EB)
+    conditions.push(isNull(backgroundJobs.targetRunnerId));
   }
   return db
     .select()
