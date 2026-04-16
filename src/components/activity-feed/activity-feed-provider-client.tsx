@@ -11,6 +11,7 @@ interface ActivityFeedContextValue {
   isConnected: boolean;
   activeSessionCount: number;
   clearEvents: () => void;
+  historyLoaded: boolean;
 }
 
 const ActivityFeedContext = createContext<ActivityFeedContextValue | null>(null);
@@ -40,6 +41,7 @@ export function ActivityFeedProvider({ children }: { children: React.ReactNode }
   const [isOpen, setIsOpen] = useState(false);
   const [isConnected, setIsConnected] = useState(false);
   const [activeSessionCount, setActiveSessionCount] = useState(0);
+  const [historyLoaded, setHistoryLoaded] = useState(false);
   const lastMcpToast = useRef(0);
   const retryCount = useRef(0);
   const retryTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -63,8 +65,11 @@ export function ActivityFeedProvider({ children }: { children: React.ReactNode }
           ).length;
           setActiveSessionCount(Math.max(0, starts - ends));
         }
+        setHistoryLoaded(true);
       })
-      .catch(() => {});
+      .catch(() => {
+        setHistoryLoaded(true);
+      });
   }, []);
 
   // WebSocket connection with retry (deferred to next tick to avoid hydration mismatch)
@@ -158,7 +163,7 @@ export function ActivityFeedProvider({ children }: { children: React.ReactNode }
 
   return (
     <ActivityFeedContext.Provider
-      value={{ events, isOpen, setIsOpen, isConnected, activeSessionCount, clearEvents }}
+      value={{ events, isOpen, setIsOpen, isConnected, activeSessionCount, clearEvents, historyLoaded }}
     >
       {children}
     </ActivityFeedContext.Provider>

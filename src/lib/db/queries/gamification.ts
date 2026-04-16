@@ -9,6 +9,7 @@ import {
   users,
   tests,
 } from '../schema';
+import { getTeamMembers } from './auth';
 import type {
   NewBot,
   NewGamificationSeason,
@@ -285,16 +286,60 @@ export interface LeaderboardRow {
  * Read the leaderboard for a season. Joins users & bots for display info.
  * Limit applied post-enrichment; caller appends viewer's own row if outside top-N.
  */
-export async function getSeasonLeaderboard(seasonId: string, limit: number = 50): Promise<LeaderboardRow[]> {
+export async function getSeasonLeaderboard(seasonId: string, teamId: string, limit: number = 50): Promise<LeaderboardRow[]> {
   const scores = await db
     .select()
     .from(userScores)
     .where(eq(userScores.seasonId, seasonId))
-    .orderBy(desc(userScores.total))
-    .limit(limit);
+    .orderBy(desc(userScores.total));
 
-  const userIds = scores.filter((s) => s.actorKind === 'user').map((s) => s.actorId);
-  const botIds = scores.filter((s) => s.actorKind === 'bot').map((s) => s.actorId);
+  // Merge in team members & bots that have no score rows yet (show with 0 points)
+  const scoredKeys = new Set(scores.map((s) => `${s.actorKind}:${s.actorId}`));
+  const [allMembers, allBots] = await Promise.all([
+    getTeamMembers(teamId),
+    listBots(teamId),
+  ]);
+  for (const member of allMembers) {
+    if (!scoredKeys.has(`user:${member.id}`)) {
+      scores.push({
+        id: `stub:user:${member.id}`,
+        teamId,
+        seasonId,
+        actorKind: 'user' as const,
+        actorId: member.id,
+        total: 0,
+        testsCreated: 0,
+        regressionsCaught: 0,
+        flakesIncurred: 0,
+        lastEventAt: null,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+    }
+  }
+  for (const bot of allBots) {
+    if (!scoredKeys.has(`bot:${bot.id}`)) {
+      scores.push({
+        id: `stub:bot:${bot.id}`,
+        teamId,
+        seasonId,
+        actorKind: 'bot' as const,
+        actorId: bot.id,
+        total: 0,
+        testsCreated: 0,
+        regressionsCaught: 0,
+        flakesIncurred: 0,
+        lastEventAt: null,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+    }
+  }
+  scores.sort((a, b) => b.total - a.total);
+  const limited = scores.slice(0, limit);
+
+  const userIds = limited.filter((s) => s.actorKind === 'user').map((s) => s.actorId);
+  const botIds = limited.filter((s) => s.actorKind === 'bot').map((s) => s.actorId);
 
   const [userRows, botRows] = await Promise.all([
     userIds.length > 0
@@ -310,7 +355,7 @@ export async function getSeasonLeaderboard(seasonId: string, limit: number = 50)
   const userMap = new Map(userRows.map((u) => [u.id, u]));
   const botMap = new Map(botRows.map((b) => [b.id, b]));
 
-  return scores.map((s, idx): LeaderboardRow => {
+  return limited.map((s, idx): LeaderboardRow => {
     if (s.actorKind === 'user') {
       const u = userMap.get(s.actorId);
       return {

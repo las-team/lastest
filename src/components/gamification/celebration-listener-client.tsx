@@ -18,6 +18,7 @@ export function CelebrationListener() {
 
   useEffect(() => {
     if (!ctx) return;
+    if (!ctx.historyLoaded) return; // wait until history is loaded before seeding
 
     // On the first run, seed seenIds with all existing events (history loaded on mount)
     // so we don't replay old toasts. Only show toasts for events arriving after this point.
@@ -101,7 +102,7 @@ export function CelebrationListener() {
         }
       }
     }
-  }, [ctx, ctx?.events]);
+  }, [ctx, ctx?.events, ctx?.historyLoaded]);
 
   return null;
 }

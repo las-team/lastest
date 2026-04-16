@@ -455,7 +455,7 @@ export async function getLeaderboardSnapshot(): Promise<{
   const season = await queries.getActiveSeason(session.team.id);
   if (!season) return null;
 
-  const leaderboard = await queries.getSeasonLeaderboard(season.id, 10);
+  const leaderboard = await queries.getSeasonLeaderboard(season.id, session.team.id, 10);
   const rows = leaderboard.map((lb) => ({
     id: `${lb.actorKind}:${lb.actorId}`,
     teamId: session.team.id,
