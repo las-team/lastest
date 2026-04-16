@@ -941,6 +941,7 @@ export const backgroundJobs = pgTable('background_jobs', {
   parentJobId: text('parent_job_id'),
   repositoryId: text('repository_id').references(() => repositories.id),
   targetRunnerId: text('target_runner_id'), // 'local' or runner UUID — tracks which runner this job targets
+  actualRunnerId: text('actual_runner_id'), // Runner UUID that actually executed (resolved from 'auto')
   createdAt: timestamp('created_at'),
   startedAt: timestamp('started_at'),
   lastActivityAt: timestamp('last_activity_at'),

@@ -17,7 +17,8 @@ DOM delta
 ## bugs
 Fix play specs -> test specs route
 ## features
-better way to handle baseURL
+from EBs running 6 browsers -> 6*5 EBs forming on-demand
+
 (low) Every button is green, multiple primary actions, keep clicking on run test instead of save
 ## ideas
 Test governance /        │ AI generates tests fast → need redundancy         │ Medium — extend coverage analytics │

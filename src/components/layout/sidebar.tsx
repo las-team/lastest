@@ -23,13 +23,17 @@ import { QueueIndicator } from '@/components/queue/queue-indicator';
 import { ActivityFeedIndicator } from '@/components/activity-feed/activity-feed-indicator-client';
 import { UserMenu } from '@/components/auth/user-menu';
 import { UserScoreChip } from '@/components/gamification/user-score-chip';
-import type { Repository, User, Team } from '@/lib/db/schema';
+import { SidebarQuickActions } from './sidebar-quick-actions';
+import type { Repository, User, Team, EmbeddedSession } from '@/lib/db/schema';
 
 interface SidebarProps {
   repos?: Repository[];
   selectedRepo?: Repository | null;
   currentUser?: User | null;
   team?: Team | null;
+  baseUrl?: string;
+  repositoryId?: string;
+  ebSessions?: EmbeddedSession[];
 }
 
 const dashboardNav = [
@@ -60,7 +64,7 @@ const settingsNav = [
   { name: 'Settings', href: '/settings', icon: Settings },
 ];
 
-export function Sidebar({ repos, selectedRepo, currentUser, team }: SidebarProps) {
+export function Sidebar({ repos, selectedRepo, currentUser, team, baseUrl, repositoryId, ebSessions }: SidebarProps) {
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const [mounted, setMounted] = useState(false);
@@ -227,6 +231,8 @@ export function Sidebar({ repos, selectedRepo, currentUser, team }: SidebarProps
         )}
 
       </nav>
+
+      <SidebarQuickActions baseUrl={baseUrl} repositoryId={repositoryId} ebSessions={ebSessions} />
 
       <div className="px-4 pb-2 space-y-1">
         <Link

@@ -16,7 +16,7 @@ export async function startDebugSession(
   testId: string,
   repositoryId?: string | null,
   runnerId?: string | null
-): Promise<{ sessionId: string; error?: string }> {
+): Promise<{ sessionId: string; error?: string; actualRunnerId?: string }> {
   if (repositoryId) await requireRepoAccess(repositoryId);
   else await requireTeamAccess();
 
@@ -104,7 +104,7 @@ export async function startDebugSession(
     },
   } as unknown as Message);
 
-  return { sessionId };
+  return { sessionId, actualRunnerId: runnerId };
 }
 
 export async function getDebugState(

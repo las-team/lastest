@@ -416,7 +416,9 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
       }
 
       // Fetch stream URL for headed runs on embedded/system runners
-      if (!headless && executionTarget !== 'local') {
+      // For specific runners, fetch immediately. For 'auto', resolve via job poll below.
+      const isAutoTarget = !executionTarget || executionTarget === 'auto' || executionTarget === 'local';
+      if (!headless && !isAutoTarget) {
         try {
           const streamInfo = await getStreamUrlForRunner(executionTarget);
           if (streamInfo?.streamUrl) {
@@ -433,8 +435,29 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
       }
 
       // Poll job status for completion (ensures results are saved before refresh)
+      // Also resolves stream URL for 'auto' target headed runs
+      let streamResolved = !isAutoTarget || headless;
       pollIntervalRef.current = setInterval(async () => {
-        const { isComplete, status, error } = await getJobStatus(jobId);
+        const { isComplete, status, error, actualRunnerId } = await getJobStatus(jobId);
+
+        // Resolve stream URL once the actual runner is known
+        if (!streamResolved && !headless && actualRunnerId) {
+          streamResolved = true;
+          try {
+            const streamInfo = await getStreamUrlForRunner(actualRunnerId);
+            if (streamInfo?.streamUrl) {
+              const token = streamInfo.streamAuthToken;
+              setStreamUrl(
+                token
+                  ? `${streamInfo.streamUrl}?token=${encodeURIComponent(token)}`
+                  : streamInfo.streamUrl
+              );
+            }
+          } catch {
+            // Stream not available — not critical
+          }
+        }
+
         if (isComplete) {
           if (pollIntervalRef.current) {
             clearInterval(pollIntervalRef.current);

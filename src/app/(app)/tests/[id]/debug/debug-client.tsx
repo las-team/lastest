@@ -57,6 +57,7 @@ export function DebugClient({ test, repositoryId }: DebugClientProps) {
   // Runner selector + live view state
   const [executionTarget, setExecutionTarget, isRunnerHydrated] = usePreferredRunner();
   const [streamUrl, setStreamUrl] = useState<string | null>(null);
+  const [resolvedRunnerId, setResolvedRunnerId] = useState<string | null>(null);
 
   // Inspect / DOM snapshot state
   const [inspectMode, setInspectMode] = useState(false);
@@ -107,6 +108,9 @@ export function DebugClient({ test, repositoryId }: DebugClientProps) {
         return;
       }
       setSessionId(result.sessionId);
+      if (result.actualRunnerId) {
+        setResolvedRunnerId(result.actualRunnerId);
+      }
     }
     init();
     return () => {
@@ -231,16 +235,16 @@ export function DebugClient({ test, repositoryId }: DebugClientProps) {
     };
   }, [sendCmd, handleStop]);
 
-  // Resolve stream URL when execution target changes
+  // Resolve stream URL when actual runner is known
   useEffect(() => {
     let cancelled = false;
-    if (executionTarget === 'local') {
-      // Use async to avoid synchronous setState in effect
+    const runnerId = resolvedRunnerId || (executionTarget !== 'local' && executionTarget !== 'auto' ? executionTarget : null);
+    if (!runnerId) {
       Promise.resolve().then(() => { if (!cancelled) setStreamUrl(null); });
     } else {
       (async () => {
         try {
-          const streamInfo = await getStreamUrlForRunner(executionTarget);
+          const streamInfo = await getStreamUrlForRunner(runnerId);
           if (cancelled) return;
           if (streamInfo?.streamUrl) {
             const token = streamInfo.streamAuthToken;
@@ -258,7 +262,7 @@ export function DebugClient({ test, repositoryId }: DebugClientProps) {
       })();
     }
     return () => { cancelled = true; };
-  }, [executionTarget]);
+  }, [executionTarget, resolvedRunnerId]);
 
   const isPaused = state?.status === 'paused';
   const isError = state?.status === 'error';

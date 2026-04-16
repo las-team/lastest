@@ -2,6 +2,8 @@ import { Suspense } from 'react';
 import { getSelectedRepository, getRepositoriesByTeam } from '@/lib/db/queries';
 import { getCurrentSession } from '@/lib/auth';
 import { syncReposIfStale } from '@/server/actions/repos';
+import { getEnvironmentConfig } from '@/server/actions/environment';
+import { listSystemEmbeddedSessions } from '@/server/actions/embedded-sessions';
 import { Sidebar } from './sidebar';
 
 export async function SidebarServer() {
@@ -23,10 +25,13 @@ export async function SidebarServer() {
     syncReposIfStale(teamId).catch(() => {});
   }
 
-  const [selectedRepo, repos] = await Promise.all([
+  const [selectedRepo, repos, ebSessions] = await Promise.all([
     teamId ? getSelectedRepository(userId, teamId) : Promise.resolve(null),
     teamId ? getRepositoriesByTeam(teamId) : Promise.resolve([]),
+    listSystemEmbeddedSessions().catch(() => []),
   ]);
+
+  const envConfig = await getEnvironmentConfig(selectedRepo?.id).catch(() => null);
 
   return (
     <Suspense>
@@ -35,6 +40,9 @@ export async function SidebarServer() {
         selectedRepo={selectedRepo ?? null}
         currentUser={session.user}
         team={session.team}
+        baseUrl={envConfig?.baseUrl ?? ''}
+        repositoryId={selectedRepo?.id}
+        ebSessions={ebSessions}
       />
     </Suspense>
   );

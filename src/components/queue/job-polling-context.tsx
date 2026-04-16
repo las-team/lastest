@@ -57,6 +57,7 @@ export function JobPollingProvider({ children }: { children: ReactNode }) {
               parentJobId: data.parentJobId,
               repositoryId: data.repositoryId,
               targetRunnerId: data.targetRunnerId,
+              actualRunnerId: data.actualRunnerId ?? null,
               createdAt: data.createdAt ? new Date(data.createdAt) : null,
               startedAt: data.startedAt ? new Date(data.startedAt) : null,
               completedAt: data.completedAt ? new Date(data.completedAt) : null,

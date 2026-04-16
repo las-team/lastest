@@ -740,11 +740,20 @@ async function executeFallbackChain(
   onProgress?: (progress: ExecutionProgress) => void,
   onResult?: (result: TestRunResult) => Promise<void>
 ): Promise<TestRunResult[]> {
+  // Helper: record which runner actually executes the job
+  const recordActualRunner = async (runnerId: string) => {
+    if (options.jobId) {
+      const { updateBackgroundJob } = await import('@/lib/db/queries/background-jobs');
+      await updateBackgroundJob(options.jobId, { actualRunnerId: runnerId });
+    }
+  };
+
   // 1. Try team runner first
   if (options.teamId) {
     const teamRunner = await getAvailableRunner(options.teamId);
     if (teamRunner) {
       console.log(`Fallback chain: using team runner ${teamRunner.id}`);
+      await recordActualRunner(teamRunner.id);
       return executeViaRunner(tests, runId, teamRunner.id, options, onProgress, onResult);
     }
   }
@@ -754,6 +763,7 @@ async function executeFallbackChain(
   const poolEB = await claimPoolEB();
   if (poolEB) {
     console.log(`Fallback chain: claimed pool EB ${poolEB.runnerId.slice(0, 8)}`);
+    await recordActualRunner(poolEB.runnerId);
     try {
       return await executeViaRunner(tests, runId, poolEB.runnerId, options, onProgress, onResult);
     } finally {

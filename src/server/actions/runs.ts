@@ -245,6 +245,7 @@ export async function getJobStatus(jobId: string) {
     status: job?.status || 'unknown',
     isComplete: job?.status === 'completed' || job?.status === 'failed',
     error: job?.error || undefined,
+    actualRunnerId: job?.actualRunnerId || undefined,
   };
 }
 
