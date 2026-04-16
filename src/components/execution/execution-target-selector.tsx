@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect } from 'react';
 import {
   Select,
   SelectContent,
@@ -10,35 +10,10 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { Monitor, Cloud, Tv2, Zap, Server } from 'lucide-react';
+import { Cloud, Tv2, Zap, Server } from 'lucide-react';
 import type { RunnerCapability } from '@/lib/db/schema';
 import { useRunnerStatus } from './use-runner-status';
 import { persistRunnerPreference } from '@/hooks/use-preferred-runner';
-
-/** Cached config — fetched once per page load */
-let cachedDisableLocal: boolean | null = null;
-
-function useDisableLocalRunner(propOverride?: boolean): boolean {
-  const [disableLocal, setDisableLocal] = useState(propOverride ?? cachedDisableLocal ?? false);
-
-  useEffect(() => {
-    if (propOverride !== undefined) return; // prop takes precedence
-    if (cachedDisableLocal !== null) {
-      const val = cachedDisableLocal;
-      queueMicrotask(() => setDisableLocal(val));
-      return;
-    }
-    fetch('/api/config')
-      .then((r) => r.json())
-      .then((data: { disableLocalRunner?: boolean }) => {
-        cachedDisableLocal = data.disableLocalRunner ?? false;
-        setDisableLocal(cachedDisableLocal);
-      })
-      .catch(() => {}); // fail open — show local option
-  }, [propOverride]);
-
-  return disableLocal;
-}
 
 interface ExecutionTargetSelectorProps {
   value: string;
@@ -47,7 +22,6 @@ interface ExecutionTargetSelectorProps {
   capabilityFilter?: RunnerCapability;
   size?: 'sm' | 'default';
   className?: string;
-  disableLocal?: boolean;
 }
 
 export function ExecutionTargetSelector({
@@ -57,37 +31,30 @@ export function ExecutionTargetSelector({
   capabilityFilter,
   size = 'default',
   className,
-  disableLocal: disableLocalProp,
 }: ExecutionTargetSelectorProps) {
-  const disableLocal = useDisableLocalRunner(disableLocalProp);
   const { runners, isLoading } = useRunnerStatus(capabilityFilter);
 
   const teamRunners = runners.filter((r) => r.type !== 'embedded' && !r.isSystem);
   const teamEmbeddedRunners = runners.filter((r) => r.type === 'embedded' && !r.isSystem);
   const systemRunners = runners.filter((r) => r.isSystem);
 
-  // If selected runner goes offline, fallback appropriately
+  // If selected runner goes offline, fallback to auto
   useEffect(() => {
-    if (value === 'local' || value === 'auto' || isLoading || disabled) return;
+    if (value === 'auto' || isLoading || disabled) return;
 
     const selectedRunner = runners.find((r) => r.id === value);
     if (selectedRunner && selectedRunner.status !== 'online' && selectedRunner.status !== 'busy') {
-      if (disableLocal) {
-        // Try to find first available system EB or switch to auto
-        const availableSystem = systemRunners.find((r) => r.status === 'online');
-        onChange(availableSystem ? availableSystem.id : 'auto');
-      } else {
-        onChange('local');
-      }
+      const availableSystem = systemRunners.find((r) => r.status === 'online');
+      onChange(availableSystem ? availableSystem.id : 'auto');
     }
-  }, [runners, value, isLoading, onChange, disableLocal, systemRunners, disabled]);
+  }, [runners, value, isLoading, onChange, systemRunners, disabled]);
 
-  // If local is disabled and current value is 'local', switch to 'auto'
+  // If current value is 'local', switch to 'auto'
   useEffect(() => {
-    if (disableLocal && value === 'local') {
+    if (value === 'local') {
       onChange('auto');
     }
-  }, [disableLocal, value, onChange]);
+  }, [value, onChange]);
 
   return (
     <Select value={value} onValueChange={(v) => { persistRunnerPreference(v); onChange(v); }} disabled={disabled}>
@@ -102,16 +69,6 @@ export function ExecutionTargetSelector({
             <span>Auto</span>
           </div>
         </SelectItem>
-
-        {/* Local option — hidden when disabled */}
-        {!disableLocal && (
-          <SelectItem value="local">
-            <div className="flex items-center gap-2">
-              <Monitor className="h-4 w-4" />
-              <span>Local</span>
-            </div>
-          </SelectItem>
-        )}
 
         {/* Team remote runners */}
         {teamRunners.length > 0 && (

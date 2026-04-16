@@ -7,7 +7,5 @@ import { NextResponse } from 'next/server';
  * No auth required — only exposes non-sensitive flags.
  */
 export async function GET() {
-  return NextResponse.json({
-    disableLocalRunner: process.env.DISABLE_LOCAL_RUNNER === 'true',
-  });
+  return NextResponse.json({});
 }

@@ -23,7 +23,7 @@ import {
   createFixPrompt,
   extractCodeFromResponse,
 } from '@/lib/ai/prompts';
-import { stripTypeAnnotations } from '@/lib/playwright/runner';
+import { stripTypeAnnotations } from '@/lib/playwright/types';
 import { classifyFailure, type FailureCategory } from './metrics';
 
 // ─── Config ─────────────────────────────────────────────────────

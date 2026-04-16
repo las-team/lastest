@@ -36,7 +36,7 @@ import {
 import { startDebugSession, getDebugState, sendDebugCommand, stopDebugSession, flushDebugTrace } from '@/server/actions/debug';
 import { toast } from 'sonner';
 import type { Test } from '@/lib/db/schema';
-import type { DebugState, DebugNetworkEntry, DebugConsoleEntry } from '@/lib/playwright/debug-runner';
+import type { DebugState, DebugNetworkEntry, DebugConsoleEntry } from '@/lib/playwright/types';
 import { BrowserViewer, type BrowserViewerHandle, type InspectElementResult, type DomSnapshotResult } from '@/components/embedded-browser/browser-viewer-client';
 import { Input } from '@/components/ui/input';
 import { ExecutionTargetSelector } from '@/components/execution/execution-target-selector';

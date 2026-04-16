@@ -2,14 +2,9 @@
 
 import * as queries from '@/lib/db/queries';
 import type { BackgroundJobType } from '@/lib/db/schema';
-import { getRunner } from '@/lib/playwright/runner';
 import { queueCancelCommandToDB } from '@/app/api/ws/runner/route';
 
 export async function isRunnerBusy(targetRunnerId: string): Promise<boolean> {
-  if (targetRunnerId === 'local') {
-    const runner = getRunner();
-    if (runner.isActive()) return true;
-  }
   const running = await queries.getRunningJobsForRunner(targetRunnerId);
   return running.length > 0;
 }
@@ -150,17 +145,8 @@ export async function cancelJob(jobId: string, repositoryId?: string | null, run
   // Determine the effective runner — prefer job's stored targetRunnerId, fall back to passed runnerId
   const effectiveRunnerId = job.targetRunnerId || runnerId;
 
-  // If job is running and it's a build or test run, abort the local runner only if this is a local job
-  if (job.status === 'running' && (job.type === 'build_run' || job.type === 'test_run')) {
-    if (!effectiveRunnerId || effectiveRunnerId === 'local') {
-      const runner = getRunner(repositoryId);
-      runner.abort();
-      await runner.forceReset();
-    }
-  }
-
   // If a remote runner is assigned, send cancel command
-  if (effectiveRunnerId && effectiveRunnerId !== 'local' && effectiveRunnerId !== 'auto' && job.status === 'running') {
+  if (effectiveRunnerId && effectiveRunnerId !== 'auto' && job.status === 'running') {
     // Extract testRunId from job metadata if available
     const testRunId = (job.metadata as Record<string, unknown>)?.testRunId as string | undefined;
     if (testRunId) {
@@ -206,7 +192,7 @@ export async function cancelJob(jobId: string, repositoryId?: string | null, run
 
   // If this was the active job, process next queued job of the same type for the same runner
   if (job.status === 'running' && (job.type === 'build_run' || job.type === 'test_run')) {
-    const targetRunner = job.targetRunnerId || 'local';
+    const targetRunner = job.targetRunnerId || 'auto';
     // Dynamically import to avoid circular deps
     if (job.type === 'build_run') {
       const { processNextQueuedBuild } = await import('./builds');
@@ -237,28 +223,11 @@ export async function getActiveJobs() {
 export async function cleanupStaleJobs(staleThresholdMs = 300000) {
   const staleJobs = await queries.markStaleJobsAsCrashed(staleThresholdMs);
 
-  // Only reset local runner if stale local jobs existed
-  const hadStaleLocalJobs = staleJobs.some(j => !j.targetRunnerId || j.targetRunnerId === 'local');
-  if (hadStaleLocalJobs) {
-    const runner = getRunner();
-    await runner.forceReset();
-  } else if (staleJobs.length === 0) {
-    // Also check if runner is stuck without any running jobs
-    const runner = getRunner();
-    if (runner.isActive()) {
-      const activeJobs = await queries.getActiveBackgroundJobs();
-      const hasRunningBuild = activeJobs.some(j => j.type === 'build_run' && j.status === 'running');
-      if (!hasRunningBuild) {
-        await runner.forceReset();
-      }
-    }
-  }
-
   // Trigger processNext* for each distinct (repositoryId, targetRunnerId) pair
   if (staleJobs.length > 0) {
     const jobsByRunner = new Map<string, Set<string | null>>();
     for (const j of staleJobs) {
-      const rId = j.targetRunnerId || 'local';
+      const rId = j.targetRunnerId || 'auto';
       if (!jobsByRunner.has(rId)) jobsByRunner.set(rId, new Set());
       jobsByRunner.get(rId)!.add(j.repositoryId);
     }

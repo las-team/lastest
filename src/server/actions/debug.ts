@@ -1,10 +1,10 @@
 'use server';
 
 import { requireRepoAccess, requireTeamAccess } from '@/lib/auth';
-import { getDebugRunner, type DebugState, type DebugCommand } from '@/lib/playwright/debug-runner';
+import type { DebugState, DebugCommand } from '@/lib/playwright/types';
 import { getTest, getPlaywrightSettings, getEnvironmentConfig } from '@/lib/db/queries';
 import { extractTestBody, removeInlineLocateWithFallback, removeInlineReplayCursorPath, parseSteps } from '@/lib/playwright/debug-parser';
-import { stripTypeAnnotations } from '@/lib/playwright/runner';
+import { stripTypeAnnotations } from '@/lib/playwright/types';
 import { queueCommandToDB } from '@/app/api/ws/runner/route';
 import { createRemoteDebugSession, getRemoteDebugSession, clearRemoteDebugSession } from '@/app/api/ws/runner/route';
 import { resolveSetupCodeForRunner } from '@/lib/execution/setup-capture';
@@ -38,74 +38,70 @@ export async function startDebugSession(
     runnerId = systemRunner.id;
   }
 
-  // Remote debug: route to embedded browser runner
-  if (runnerId && runnerId !== 'local') {
-    const code = test.code || '';
-    const body = extractTestBody(code);
-    if (!body) {
-      return { sessionId: '', error: 'Could not parse test function body' };
-    }
-
-    const cleanBody = removeInlineReplayCursorPath(
-      removeInlineLocateWithFallback(stripTypeAnnotations(body))
-    );
-    const steps = parseSteps(cleanBody);
-    const sessionId = crypto.randomUUID();
-
-    createRemoteDebugSession(sessionId, runnerId, repoId || null, testId);
-
-    const targetUrl = envConfig?.baseUrl || 'about:blank';
-    const viewport = settings?.viewportWidth && settings?.viewportHeight
-      ? { width: settings.viewportWidth, height: settings.viewportHeight }
-      : undefined;
-
-    // Run setup on the remote runner if needed (get storageState for auth)
-    let storageState: string | undefined;
-    let setupVariables: Record<string, unknown> | undefined;
-    const setupInfo = await resolveSetupCodeForRunner([test]);
-    if (setupInfo) {
-      try {
-        const setupResult = await executeSetupViaRunner(
-          setupInfo.code,
-          setupInfo.setupId,
-          runnerId,
-          targetUrl,
-          viewport,
-          settings?.navigationTimeout ?? undefined,
-          settings,
-        );
-        storageState = setupResult.storageState;
-        setupVariables = setupResult.variables;
-      } catch (err) {
-        clearRemoteDebugSession(sessionId);
-        return { sessionId: '', error: `Setup failed: ${err instanceof Error ? err.message : String(err)}` };
-      }
-    }
-
-    await queueCommandToDB(runnerId, {
-      id: crypto.randomUUID(),
-      type: 'command:start_debug',
-      timestamp: Date.now(),
-      payload: {
-        sessionId,
-        testId,
-        code,
-        cleanBody,
-        steps,
-        targetUrl,
-        viewport,
-        storageState,
-        setupVariables,
-        stabilization: settings?.stabilization ?? undefined,
-      },
-    } as unknown as Message);
-
-    return { sessionId };
+  // Require a runner or EB — local debug is not supported
+  if (!runnerId || runnerId === 'local') {
+    return { sessionId: '', error: 'Please select a runner or embedded browser for debugging.' };
   }
 
-  // Local debug: use existing debug runner
-  const runner = getDebugRunner(repoId);
-  const sessionId = await runner.start(test, settings, envConfig, repoId || null);
+  const code = test.code || '';
+  const body = extractTestBody(code);
+  if (!body) {
+    return { sessionId: '', error: 'Could not parse test function body' };
+  }
+
+  const cleanBody = removeInlineReplayCursorPath(
+    removeInlineLocateWithFallback(stripTypeAnnotations(body))
+  );
+  const steps = parseSteps(cleanBody);
+  const sessionId = crypto.randomUUID();
+
+  createRemoteDebugSession(sessionId, runnerId, repoId || null, testId);
+
+  const targetUrl = envConfig?.baseUrl || 'about:blank';
+  const viewport = settings?.viewportWidth && settings?.viewportHeight
+    ? { width: settings.viewportWidth, height: settings.viewportHeight }
+    : undefined;
+
+  // Run setup on the remote runner if needed (get storageState for auth)
+  let storageState: string | undefined;
+  let setupVariables: Record<string, unknown> | undefined;
+  const setupInfo = await resolveSetupCodeForRunner([test]);
+  if (setupInfo) {
+    try {
+      const setupResult = await executeSetupViaRunner(
+        setupInfo.code,
+        setupInfo.setupId,
+        runnerId,
+        targetUrl,
+        viewport,
+        settings?.navigationTimeout ?? undefined,
+        settings,
+      );
+      storageState = setupResult.storageState;
+      setupVariables = setupResult.variables;
+    } catch (err) {
+      clearRemoteDebugSession(sessionId);
+      return { sessionId: '', error: `Setup failed: ${err instanceof Error ? err.message : String(err)}` };
+    }
+  }
+
+  await queueCommandToDB(runnerId, {
+    id: crypto.randomUUID(),
+    type: 'command:start_debug',
+    timestamp: Date.now(),
+    payload: {
+      sessionId,
+      testId,
+      code,
+      cleanBody,
+      steps,
+      targetUrl,
+      viewport,
+      storageState,
+      setupVariables,
+      stabilization: settings?.stabilization ?? undefined,
+    },
+  } as unknown as Message);
 
   return { sessionId };
 }
@@ -113,7 +109,7 @@ export async function startDebugSession(
 export async function getDebugState(
   sessionId: string
 ): Promise<DebugState | null> {
-  // Check remote session first
+  // Check remote session
   const remoteSession = getRemoteDebugSession(sessionId);
   if (remoteSession) {
     if (!remoteSession.state) {
@@ -144,11 +140,7 @@ export async function getDebugState(
     } as DebugState;
   }
 
-  // Local debug runner
-  const runner = getDebugRunner();
-  const state = runner.getState();
-  if (!state || state.sessionId !== sessionId) return null;
-  return state;
+  return null;
 }
 
 export async function sendDebugCommand(
@@ -156,7 +148,7 @@ export async function sendDebugCommand(
   command: DebugCommand
 ): Promise<{ ok: boolean; error?: string }> {
 
-  // Check remote session first
+  // Check remote session
   const remoteSession = getRemoteDebugSession(sessionId);
   if (remoteSession) {
     if (command.type === 'update_code' && 'code' in command) {
@@ -194,21 +186,13 @@ export async function sendDebugCommand(
     return { ok: true };
   }
 
-  // Local debug runner
-  const runner = getDebugRunner();
-  const state = runner.getState();
-  if (!state || state.sessionId !== sessionId) {
-    return { ok: false, error: 'Session not found' };
-  }
-
-  const ok = runner.sendCommand(command);
-  return { ok, error: ok ? undefined : 'Command not accepted (session may not be paused)' };
+  return { ok: false, error: 'Session not found' };
 }
 
 export async function stopDebugSession(
   sessionId: string
 ): Promise<void> {
-  // Check remote session first
+  // Check remote session
   const remoteSession = getRemoteDebugSession(sessionId);
   if (remoteSession) {
     await queueCommandToDB(remoteSession.runnerId, {
@@ -220,30 +204,10 @@ export async function stopDebugSession(
     clearRemoteDebugSession(sessionId);
     return;
   }
-
-  // Local debug runner
-  const runner = getDebugRunner();
-  const state = runner.getState();
-  if (state && state.sessionId === sessionId) {
-    await runner.stop();
-  }
 }
 
 export async function flushDebugTrace(
-  sessionId: string
+  _sessionId: string
 ): Promise<{ url: string | null }> {
-  // Remote: no trace in MVP
-  const remoteSession = getRemoteDebugSession(sessionId);
-  if (remoteSession) {
-    return { url: null };
-  }
-
-  // Local debug runner
-  const runner = getDebugRunner();
-  const state = runner.getState();
-  if (!state || state.sessionId !== sessionId) {
-    return { url: null };
-  }
-  const url = await runner.flushTrace();
-  return { url };
+  return { url: null };
 }

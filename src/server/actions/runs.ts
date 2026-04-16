@@ -1,8 +1,6 @@
 'use server';
 
 import { revalidatePath } from 'next/cache';
-import { getRunner } from '@/lib/playwright/runner';
-import { getServerManager } from '@/lib/playwright/server-manager';
 import { executeTests } from '@/lib/execution/executor';
 import { resolveSetupCodeForRunner } from '@/lib/execution/setup-capture';
 import { requireTeamAccess, requireRepoAccess } from '@/lib/auth';
@@ -77,27 +75,11 @@ export async function runTests(testIds?: string[], repositoryId?: string | null,
     }
   }
 
-  const targetRunner = runnerId || 'local';
+  const targetRunner = runnerId || 'auto';
 
   // If this runner is busy, queue this run
   if (await isRunnerBusy(targetRunner)) {
     return queueTestRun(testIds, repositoryId, headless, runnerId, forceVideoRecording);
-  }
-
-  const runner = getRunner(repositoryId);
-
-  // Load and set environment config
-  const envConfig = await queries.getEnvironmentConfig(repositoryId);
-  if (envConfig && envConfig.id) {
-    runner.setEnvironmentConfig(envConfig);
-    const serverManager = getServerManager();
-    serverManager.setConfig(envConfig);
-  }
-
-  // Load and set playwright settings (viewport, browser, timeouts, etc.)
-  const playwrightSettings = await queries.getPlaywrightSettings(repositoryId);
-  if (playwrightSettings) {
-    runner.setSettings(playwrightSettings);
   }
 
   // Get tests to run (filter out soft-deleted tests)
@@ -139,15 +121,13 @@ export async function runTests(testIds?: string[], repositoryId?: string | null,
 }
 
 async function runTestsAsync(runId: string, tests: Test[], repositoryId?: string | null, headless?: boolean, jobId?: string, runnerId?: string, forceVideoRecording?: boolean) {
-  const runner = getRunner(repositoryId);
-
   // Use provided jobId or create new one (for backwards compatibility)
-  const targetRunner = runnerId || 'local';
+  const targetRunner = runnerId || 'auto';
   const activeJobId = jobId ?? await createJob('test_run', `Test Run (${tests.length} tests)`, tests.length, repositoryId, undefined, targetRunner);
 
   // Get teamId from runner record (not session — session is unavailable in fire-and-forget context)
   let teamId: string | undefined;
-  if (runnerId && runnerId !== 'local') {
+  if (runnerId && runnerId !== 'auto') {
     const runnerRecord = await queries.getRunnerById(runnerId);
     teamId = runnerRecord?.teamId;
   }
@@ -157,40 +137,20 @@ async function runTestsAsync(runId: string, tests: Test[], repositoryId?: string
   const playwrightSettings = await queries.getPlaywrightSettings(repositoryId);
 
   try {
-    let results;
+    // Resolve setup code to run on the runner
+    const setupInfo = await resolveSetupCodeForRunner(tests);
 
-    if (runnerId && runnerId !== 'local' && teamId) {
-      // Resolve setup code to run on the runner (not locally — different server instance)
-      const setupInfo = await resolveSetupCodeForRunner(tests);
-
-      // Use executor for agent routing
-      results = await executeTests(tests, runId, {
-        repositoryId,
-        teamId,
-        runnerId,
-        headless,
-        environmentConfig: envConfig,
-        playwrightSettings,
-        setupInfo,
-        forceVideoRecording,
-        jobId: activeJobId,
-      });
-    } else {
-      // Local execution
-      if (envConfig?.id) {
-        runner.setEnvironmentConfig(envConfig);
-        getServerManager().setConfig(envConfig);
-      }
-      if (playwrightSettings) {
-        runner.setSettings(playwrightSettings);
-      }
-      // Clear any stale setup context before standalone run
-      runner.clearSetupContext();
-      results = await runner.runTests(tests, runId, undefined, undefined, headless, undefined, forceVideoRecording);
-    }
-
-    // Clear any stale setup context from previous runs
-    runner.clearSetupContext();
+    const results = await executeTests(tests, runId, {
+      repositoryId,
+      teamId,
+      runnerId: runnerId || 'auto',
+      headless,
+      environmentConfig: envConfig,
+      playwrightSettings,
+      setupInfo,
+      forceVideoRecording,
+      jobId: activeJobId,
+    });
 
     // Save results
     for (let i = 0; i < results.length; i++) {
@@ -261,9 +221,10 @@ export async function getTestRuns() {
 }
 
 export async function getRunStatus(repositoryId?: string | null) {
-  const runner = getRunner(repositoryId);
+  // Check DB for running jobs
+  const runningJobs = await queries.getRunningJobsForRunner('auto');
   return {
-    isRunning: runner.isActive(),
+    isRunning: runningJobs.length > 0,
   };
 }
 
@@ -299,7 +260,7 @@ async function queueTestRun(
     throw new Error('No tests to run');
   }
 
-  const targetRunner = runnerId || 'local';
+  const targetRunner = runnerId || 'auto';
   const jobId = await createPendingJob(
     'test_run',
     `Queued Test Run (${tests.length} tests)`,
@@ -313,7 +274,7 @@ async function queueTestRun(
 }
 
 export async function processNextQueuedTestRun(repositoryId?: string | null, targetRunnerId?: string) {
-  const effectiveRunner = targetRunnerId || 'local';
+  const effectiveRunner = targetRunnerId || 'auto';
 
   // Don't process if this runner is still busy
   if (await isRunnerBusy(effectiveRunner)) return;

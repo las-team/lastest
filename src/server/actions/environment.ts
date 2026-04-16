@@ -3,7 +3,6 @@
 import { revalidatePath } from 'next/cache';
 import * as queries from '@/lib/db/queries';
 import { requireTeamAccess, requireRepoAccess } from '@/lib/auth';
-import { getServerManager } from '@/lib/playwright/server-manager';
 import type { EnvironmentMode } from '@/lib/db/schema';
 
 export interface EnvironmentConfigInput {
@@ -53,10 +52,6 @@ export async function testServerConnection(url: string): Promise<{
 }> {
   await requireTeamAccess();
 
-  // No SSRF check here — environment config is specifically for testing
-  // the user's own dev/staging server, which is typically localhost or LAN.
-
-  const _serverManager = getServerManager();
   const startTime = Date.now();
 
   try {
@@ -104,55 +99,8 @@ export async function saveBranchBaseUrl(repositoryId: string, branch: string, ba
  */
 export async function getServerStatus(repositoryId?: string | null) {
   const config = await queries.getEnvironmentConfig(repositoryId);
-  const serverManager = getServerManager();
-
-  // Configure server manager with latest config
-  if (config && config.id) {
-    serverManager.setConfig(config);
-  }
-
-  const status = await serverManager.getStatus();
   return {
-    ...status,
     mode: config?.mode || 'manual',
     baseUrl: config?.baseUrl || 'http://localhost:3000',
   };
-}
-
-/**
- * Manually start the managed server
- */
-export async function startManagedServer(repositoryId?: string | null): Promise<{
-  success: boolean;
-  error?: string;
-}> {
-  if (repositoryId) await requireRepoAccess(repositoryId);
-  else await requireTeamAccess();
-  const config = await queries.getEnvironmentConfig(repositoryId);
-
-  if (!config || config.mode !== 'managed') {
-    return { success: false, error: 'Not in managed mode' };
-  }
-
-  if (!config.startCommand) {
-    return { success: false, error: 'No start command configured' };
-  }
-
-  const serverManager = getServerManager();
-  serverManager.setConfig(config);
-
-  const result = await serverManager.ensureServerRunning();
-  return {
-    success: result.ready,
-    error: result.error,
-  };
-}
-
-/**
- * Stop the managed server
- */
-export async function stopManagedServer(): Promise<void> {
-  await requireTeamAccess();
-  const serverManager = getServerManager();
-  await serverManager.stopManagedServer();
 }
