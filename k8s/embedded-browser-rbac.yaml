@@ -1,0 +1,43 @@
+# RBAC for the Lastest app pod to provision on-demand EB Jobs.
+# Scope is namespace-local — no cluster-wide rights.
+#
+# Apply once per environment:
+#   kubectl apply -n lastest -f k8s/embedded-browser-rbac.yaml
+#
+# Then set `serviceAccountName: lastest-app` on the app deployment.
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: lastest-app
+  namespace: lastest
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: lastest-eb-provisioner
+  namespace: lastest
+rules:
+  - apiGroups: ["batch"]
+    resources: ["jobs"]
+    verbs: ["create", "delete", "get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["pods/log"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: lastest-eb-provisioner
+  namespace: lastest
+subjects:
+  - kind: ServiceAccount
+    name: lastest-app
+    namespace: lastest
+roleRef:
+  kind: Role
+  name: lastest-eb-provisioner
+  apiGroup: rbac.authorization.k8s.io

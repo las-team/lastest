@@ -699,6 +699,13 @@ export const playwrightSettings = pgTable('playwright_settings', {
   enableVideoRecording: boolean('enable_video_recording').default(false), // record test runs as WebM video
   screenshotDelay: integer('screenshot_delay').default(0), // ms delay before screenshot
   maxParallelTests: integer('max_parallel_tests').default(2), // max tests to run in parallel locally
+  // On-demand Kubernetes EB pool (see src/lib/eb/provisioner.ts):
+  //   maxParallelEBs: per-build cap on concurrent EB claims (1 test per EB).
+  //   ebPoolMax:      hard cap on concurrent system EBs across the cluster.
+  //   ebIdleTTLSeconds: idle timeout before a released EB Job is torn down.
+  maxParallelEBs: integer('max_parallel_ebs').default(10),
+  ebPoolMax: integer('eb_pool_max').default(30),
+  ebIdleTTLSeconds: integer('eb_idle_ttl_seconds').default(90),
   stabilization: jsonb('stabilization').$type<StabilizationSettings>(), // snapshot stabilization settings
   acceptAnyCertificate: boolean('accept_any_certificate').default(false), // ignore HTTPS/SSL cert errors
   networkErrorMode: text('network_error_mode').default('fail'), // 'fail' | 'warn' | 'ignore'

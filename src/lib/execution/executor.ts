@@ -603,6 +603,145 @@ async function executeViaRunner(
 }
 
 /**
+ * Worker-pool fan-out for the on-demand EB model: N concurrent workers, each
+ * claiming its own EB and running exactly ONE test per claim, then releasing.
+ *
+ * Returns the collected results, or `null` if no EB could be claimed at all
+ * (so the caller can fall through to the queue path).
+ */
+async function executeViaPoolWorkers(
+  tests: Test[],
+  runId: string,
+  options: ExecutionOptions,
+  maxParallelEBs: number,
+  recordActualRunner: (runnerId: string) => Promise<void>,
+  onProgress?: (progress: ExecutionProgress) => void,
+  onResult?: (result: TestRunResult) => Promise<void>,
+): Promise<TestRunResult[] | null> {
+  const { claimOrProvisionPoolEB, releasePoolEB } = await import('@/server/actions/embedded-sessions');
+
+  // Run setup once on a single EB first so every worker can share the resulting
+  // storageState instead of paying setup cost per-test.
+  let sharedSetup = options.setupContext;
+  if (options.setupInfo && !sharedSetup?.storageState) {
+    const setupEB = await claimOrProvisionPoolEB();
+    if (setupEB) {
+      try {
+        const baseUrl = (options.environmentConfig?.baseUrl || 'http://localhost:3000').replace(/\/+$/, '');
+        const viewport = options.playwrightSettings
+          ? {
+              width: options.playwrightSettings.viewportWidth || 1280,
+              height: options.playwrightSettings.viewportHeight || 720,
+            }
+          : undefined;
+        const setupResult = await executeSetupViaRunner(
+          options.setupInfo.code,
+          options.setupInfo.setupId,
+          setupEB.runnerId,
+          baseUrl,
+          viewport,
+          options.playwrightSettings?.navigationTimeout ?? undefined,
+          options.playwrightSettings,
+        );
+        sharedSetup = {
+          storageState: setupResult.storageState ?? sharedSetup?.storageState,
+          variables: { ...sharedSetup?.variables, ...setupResult.variables },
+        };
+      } finally {
+        await releasePoolEB(setupEB.runnerId);
+      }
+    }
+  }
+
+  const results: TestRunResult[] = [];
+  const resultMap = new Map<string, TestRunResult>();
+  let nextIdx = 0;
+  let completedCount = 0;
+  let everClaimed = false;
+  const workerCount = Math.min(maxParallelEBs, tests.length);
+
+  const updateProgress = (activeCount: number, currentName?: string) => {
+    onProgress?.({
+      completed: completedCount,
+      total: tests.length,
+      currentTestName: currentName,
+      activeCount,
+      activeTests: currentName ? [currentName] : [],
+    });
+  };
+
+  let activeWorkers = 0;
+
+  const runWorker = async (workerId: number): Promise<void> => {
+    while (true) {
+      const myIdx = nextIdx++;
+      if (myIdx >= tests.length) return;
+      const test = tests[myIdx]!;
+
+      const claimed = await claimOrProvisionPoolEB();
+      if (!claimed) {
+        // Capacity exhausted or provisioning failed — record skipped and continue
+        const skipped: TestRunResult = {
+          testId: test.id,
+          status: 'skipped' as const,
+          durationMs: 0,
+          screenshots: [],
+          errorMessage: 'Queued: waiting for an available runner',
+        };
+        resultMap.set(test.id, skipped);
+        completedCount++;
+        updateProgress(activeWorkers, test.name);
+        continue;
+      }
+      everClaimed = true;
+      await recordActualRunner(claimed.runnerId);
+      console.log(`[Worker ${workerId}] Claimed EB ${claimed.runnerId.slice(0, 8)} for test ${test.name}`);
+
+      activeWorkers++;
+      updateProgress(activeWorkers, test.name);
+      try {
+        const [oneResult] = await executeViaRunner(
+          [test],
+          runId,
+          claimed.runnerId,
+          { ...options, setupContext: sharedSetup, setupInfo: undefined, maxParallelTests: 1 },
+          undefined, // progress emitted at the worker-pool level
+          onResult,
+        );
+        if (oneResult) resultMap.set(test.id, oneResult);
+      } catch (err) {
+        console.error(`[Worker ${workerId}] Error running test ${test.id}:`, err);
+        resultMap.set(test.id, {
+          testId: test.id,
+          status: 'failed' as const,
+          durationMs: 0,
+          screenshots: [],
+          errorMessage: err instanceof Error ? err.message : String(err),
+        });
+      } finally {
+        await releasePoolEB(claimed.runnerId);
+        activeWorkers--;
+        completedCount++;
+        updateProgress(activeWorkers);
+      }
+    }
+  };
+
+  // Kick off workers in parallel
+  const workers = Array.from({ length: workerCount }, (_, i) => runWorker(i + 1));
+  await Promise.all(workers);
+
+  // Preserve input order
+  for (const t of tests) {
+    const r = resultMap.get(t.id);
+    if (r) results.push(r);
+  }
+
+  // If nothing ever got claimed, let the caller fall through to the queue path.
+  return everClaimed ? results : null;
+}
+
+/**
  * Find screenshots saved to disk by the route handler.
  * Screenshots are saved with pattern: {runId}-{testId}-{label}.png
  * Checks both repository subfolder and root screenshots folder (for remote runner uploads).
@@ -758,17 +897,34 @@ async function executeFallbackChain(
     }
   }
 
-  // 2. Try system EB pool (atomic claim + guaranteed release)
-  const { claimPoolEB, releasePoolEB } = await import('@/server/actions/embedded-sessions');
-  const poolEB = await claimPoolEB();
-  if (poolEB) {
-    console.log(`Fallback chain: claimed pool EB ${poolEB.runnerId.slice(0, 8)}`);
-    await recordActualRunner(poolEB.runnerId);
-    try {
-      return await executeViaRunner(tests, runId, poolEB.runnerId, options, onProgress, onResult);
-    } finally {
-      await releasePoolEB(poolEB.runnerId);
-      console.log(`Fallback chain: released pool EB ${poolEB.runnerId.slice(0, 8)}`);
+  // 2. Try system EB pool. In the on-demand model each EB runs ONE test, so for
+  //    multi-test runs we spawn a worker pool sized to `maxParallelEBs` where
+  //    each worker claims its own EB, runs a single test, releases, and loops.
+  const maxParallelEBs = Math.max(1, options.playwrightSettings?.maxParallelEBs ?? 10);
+  if (tests.length > 1 && maxParallelEBs > 1) {
+    const poolResults = await executeViaPoolWorkers(
+      tests,
+      runId,
+      options,
+      maxParallelEBs,
+      recordActualRunner,
+      onProgress,
+      onResult,
+    );
+    if (poolResults) return poolResults;
+  } else {
+    // Single-test path: claim one EB and run.
+    const { claimOrProvisionPoolEB, releasePoolEB } = await import('@/server/actions/embedded-sessions');
+    const poolEB = await claimOrProvisionPoolEB();
+    if (poolEB) {
+      console.log(`Fallback chain: claimed pool EB ${poolEB.runnerId.slice(0, 8)}`);
+      await recordActualRunner(poolEB.runnerId);
+      try {
+        return await executeViaRunner(tests, runId, poolEB.runnerId, options, onProgress, onResult);
+      } finally {
+        await releasePoolEB(poolEB.runnerId);
+        console.log(`Fallback chain: released pool EB ${poolEB.runnerId.slice(0, 8)}`);
+      }
     }
   }
 

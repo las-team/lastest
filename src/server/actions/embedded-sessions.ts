@@ -6,6 +6,15 @@ import { eq, and, ne, desc, isNull } from 'drizzle-orm';
 import { requireTeamAccess, requireTeamAdmin } from '@/lib/auth';
 import { revalidatePath } from 'next/cache';
 import { emitRunnerStatusChange } from '@/lib/ws/runner-events';
+import {
+  isKubernetesMode,
+  launchEBJob,
+  terminateEBJob,
+  jobNameForRunnerName,
+  poolMax,
+  warmPoolMin,
+  currentPoolSize,
+} from '@/lib/eb/provisioner';
 
 /**
  * List all embedded sessions for the current team
@@ -459,10 +468,48 @@ export async function releasePoolEB(runnerId: string): Promise<void> {
 
   console.log(`[Pool] Released EB ${runnerId.slice(0, 8)}`);
 
+  // In Kubernetes mode, tear down the Job unless we're below warm-pool minimum.
+  // Pod deletion is async; the runner's heartbeat-timeout reaper will mark the row offline.
+  if (isKubernetesMode()) {
+    maybeTerminateReleasedEB(runnerId).catch((err) => {
+      console.error(`[Pool] Error terminating released EB ${runnerId.slice(0, 8)}:`, err);
+    });
+  }
+
   // Process any queued jobs waiting for an EB
   processPoolQueue().catch((err) => {
     console.error(`[Pool] Error processing queue after release:`, err);
   });
+}
+
+/**
+ * Delete the k8s Job backing this runner if the pool is above its warm-pool minimum.
+ * Ephemeral-per-test model: the default is to terminate immediately after release so
+ * each test gets a fresh browser. Set EB_WARM_POOL_MIN > 0 to keep idle capacity.
+ */
+async function maybeTerminateReleasedEB(runnerId: string): Promise<void> {
+  const [runner] = await db
+    .select({ name: runners.name, isSystem: runners.isSystem, type: runners.type })
+    .from(runners)
+    .where(eq(runners.id, runnerId));
+  if (!runner?.isSystem || runner.type !== 'embedded') return;
+
+  const size = await currentPoolSize();
+  if (size <= warmPoolMin()) {
+    return; // Keep this one alive to absorb back-to-back claims
+  }
+
+  const jobName = jobNameForRunnerName(runner.name);
+  if (!jobName) return; // Not a provisioner-created runner (e.g. docker-compose EB)
+
+  // Mark the runner offline so no future claim picks it up while the pod drains
+  await db.update(runners).set({ status: 'offline', lastSeen: new Date() }).where(eq(runners.id, runnerId));
+  await db
+    .update(embeddedSessions)
+    .set({ status: 'stopped', busySince: null })
+    .where(eq(embeddedSessions.runnerId, runnerId));
+
+  await terminateEBJob(jobName);
 }
 
 /**
@@ -507,6 +554,146 @@ export async function processPoolQueue(): Promise<void> {
   } catch (err) {
     console.error(`[Pool] Error processing queued job ${pendingJob.id}:`, err);
   }
+}
+
+/**
+ * Claim an idle pool EB; if none is available and we're running in Kubernetes
+ * mode (EB_PROVISIONER=kubernetes), provision a new Job and wait for it to
+ * register, then claim it.
+ *
+ * Returns null if:
+ *   - not in kubernetes mode and no idle EB available
+ *   - pool is at EB_POOL_MAX capacity
+ *   - provisioning timed out (pod failed to register within waitTimeoutMs)
+ */
+export async function claimOrProvisionPoolEB(
+  opts: { waitTimeoutMs?: number } = {},
+): Promise<{ runnerId: string; sessionId: string | null } | null> {
+  // Fast path: an idle EB is already online
+  const claimed = await claimPoolEB();
+  if (claimed) return claimed;
+
+  if (!isKubernetesMode()) return null;
+
+  // Enforce global cap
+  const size = await currentPoolSize();
+  if (size >= poolMax()) {
+    console.warn(`[Pool] At capacity (${size}/${poolMax()}) — cannot provision new EB`);
+    return null;
+  }
+
+  // Provision a new Job
+  let jobInfo: { jobName: string; instanceId: string };
+  try {
+    jobInfo = await launchEBJob();
+  } catch (err) {
+    console.error('[Pool] launchEBJob failed:', err);
+    return null;
+  }
+
+  // Wait for the new EB to auto-register and reach `online`
+  const waitTimeoutMs = opts.waitTimeoutMs ?? 90_000;
+  const deadline = Date.now() + waitTimeoutMs;
+  const expectedRunnerName = `System EB-${jobInfo.instanceId}`;
+
+  while (Date.now() < deadline) {
+    await new Promise((r) => setTimeout(r, 1000));
+
+    const [runner] = await db
+      .select({ id: runners.id, status: runners.status })
+      .from(runners)
+      .where(and(eq(runners.name, expectedRunnerName), eq(runners.isSystem, true)));
+
+    if (!runner) continue; // Not yet registered
+
+    if (runner.status !== 'online') continue; // Registered but still initializing
+
+    // Try to atomically claim this specific runner
+    const result = await db
+      .update(runners)
+      .set({ status: 'busy' as const, lastSeen: new Date() })
+      .where(and(eq(runners.id, runner.id), eq(runners.status, 'online')))
+      .returning({ id: runners.id, teamId: runners.teamId });
+    if (result.length === 0) {
+      // Someone else grabbed it — fall back to a generic claim
+      const fallback = await claimPoolEB();
+      if (fallback) return fallback;
+      continue;
+    }
+
+    const [session] = await db
+      .select({ id: embeddedSessions.id })
+      .from(embeddedSessions)
+      .where(eq(embeddedSessions.runnerId, runner.id));
+    if (session) {
+      await db
+        .update(embeddedSessions)
+        .set({ status: 'busy', busySince: new Date(), lastActivityAt: new Date() })
+        .where(eq(embeddedSessions.id, session.id));
+    }
+
+    if (result[0]) {
+      emitRunnerStatusChange({
+        runnerId: runner.id,
+        teamId: result[0].teamId,
+        status: 'busy',
+        previousStatus: 'online',
+        timestamp: Date.now(),
+      });
+    }
+
+    console.log(`[Pool] Provisioned + claimed new EB ${runner.id.slice(0, 8)} (${jobInfo.jobName})`);
+    return { runnerId: runner.id, sessionId: session?.id ?? null };
+  }
+
+  // Timed out waiting for registration — tear the Job back down to free the slot
+  console.warn(`[Pool] Provisioned Job ${jobInfo.jobName} did not register within ${waitTimeoutMs}ms; terminating`);
+  terminateEBJob(jobInfo.jobName).catch(() => {});
+  return null;
+}
+
+/**
+ * Reaper: terminate Jobs for system EB runners that are offline or have
+ * been idle (online & unclaimed) for longer than the idle TTL. Keeps the
+ * configured warm-pool minimum alive.
+ *
+ * Call alongside reapStalePoolEBs() from the periodic cleanup interval.
+ */
+export async function reapIdleEBJobs(idleTtlMs: number): Promise<number> {
+  if (!isKubernetesMode()) return 0;
+
+  const size = await currentPoolSize();
+  const minKeep = warmPoolMin();
+  if (size <= minKeep) return 0;
+
+  const cutoff = new Date(Date.now() - idleTtlMs);
+  const candidates = await db
+    .select({ id: runners.id, name: runners.name, status: runners.status, lastSeen: runners.lastSeen })
+    .from(runners)
+    .where(and(eq(runners.isSystem, true), eq(runners.type, 'embedded')));
+
+  let terminated = 0;
+  for (const row of candidates) {
+    if (size - terminated <= minKeep) break;
+    const isOffline = row.status === 'offline';
+    const isIdle = row.status === 'online' && (!row.lastSeen || row.lastSeen < cutoff);
+    if (!isOffline && !isIdle) continue;
+
+    const jobName = jobNameForRunnerName(row.name);
+    if (!jobName) continue; // docker-compose EB — don't touch
+
+    try {
+      await db.delete(runners).where(eq(runners.id, row.id));
+      await db.delete(embeddedSessions).where(eq(embeddedSessions.runnerId, row.id));
+      await terminateEBJob(jobName);
+      terminated++;
+    } catch (err) {
+      console.error(`[Pool] Failed to reap ${row.name}:`, err);
+    }
+  }
+
+  if (terminated > 0) console.log(`[Pool] Reaped ${terminated} idle EB Job(s)`);
+  return terminated;
 }
 
 /**

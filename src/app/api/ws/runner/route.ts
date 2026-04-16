@@ -11,7 +11,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { validateRunnerToken, updateRunnerStatus, markStaleRunnersOffline, deleteStaleSystemRunners } from '@/server/actions/runners';
-import { reapStalePoolEBs } from '@/server/actions/embedded-sessions';
+import { reapStalePoolEBs, reapIdleEBJobs } from '@/server/actions/embedded-sessions';
 import type { Message, HeartbeatMessage, TestResultResponse, SetupResultResponse, ScreenshotUploadResponse, RecordingEventResponse, RecordingStoppedResponse } from '@/lib/ws/protocol';
 import { waitForCommandQueued, notifyCommandQueued } from '@/lib/ws/runner-events';
 import fs from 'fs/promises';
@@ -163,6 +163,14 @@ function ensureInitialized() {
       }
     } catch (error) {
       console.error('[Reaper] Failed to reap stale pool EBs:', error);
+    }
+
+    // Tear down idle/offline on-demand EB Jobs above the warm-pool minimum
+    try {
+      const idleTtlMs = parseInt(process.env.EB_IDLE_TTL_SECONDS || '90', 10) * 1000;
+      await reapIdleEBJobs(idleTtlMs);
+    } catch (error) {
+      console.error('[Reaper] Failed to reap idle EB Jobs:', error);
     }
   }, CLEANUP_INTERVAL_MS);
 }
