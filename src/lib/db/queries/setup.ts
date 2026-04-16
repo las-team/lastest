@@ -5,7 +5,6 @@ import {
   defaultSetupSteps,
   defaultTeardownSteps,
   tests,
-  suites,
   repositories,
   storageStates,
 } from '../schema';
@@ -23,7 +22,6 @@ import type {
 } from '../schema';
 import { getTest } from './tests';
 import { getRepository } from './repositories';
-import { getSuite } from './suites';
 import { getStorageState } from './storage-states';
 import { eq, desc, and, isNull } from 'drizzle-orm';
 import { v4 as uuid } from 'uuid';
@@ -118,7 +116,7 @@ export async function deleteSetupConfig(id: string) {
 }
 
 // ============================================
-// Setup-related test/suite/build/repo queries
+// Setup-related test/build/repo queries
 // ============================================
 
 // Get test with its setup configuration resolved
@@ -147,23 +145,6 @@ export async function getTestWithSetup(testId: string) {
   return { ...test, setupTest, setupScript };
 }
 
-// Get suite with its setup configuration
-export async function getSuiteWithSetup(suiteId: string) {
-  const suite = await getSuite(suiteId);
-  if (!suite) return null;
-
-  let setupTest = null;
-  let setupScript = null;
-
-  if (suite.setupTestId) {
-    setupTest = await getTest(suite.setupTestId);
-  } else if (suite.setupScriptId) {
-    setupScript = await getSetupScript(suite.setupScriptId);
-  }
-
-  return { ...suite, setupTest, setupScript };
-}
-
 // Update test setup configuration
 export async function updateTestSetup(testId: string, setupTestId: string | null, setupScriptId: string | null) {
   await db.update(tests).set({
@@ -171,15 +152,6 @@ export async function updateTestSetup(testId: string, setupTestId: string | null
     setupScriptId,
     updatedAt: new Date(),
   }).where(eq(tests.id, testId));
-}
-
-// Update suite setup configuration
-export async function updateSuiteSetup(suiteId: string, setupTestId: string | null, setupScriptId: string | null) {
-  await db.update(suites).set({
-    setupTestId,
-    setupScriptId,
-    updatedAt: new Date(),
-  }).where(eq(suites.id, suiteId));
 }
 
 // Update repository default setup configuration
@@ -209,24 +181,6 @@ export async function getTestsUsingSetupScript(setupScriptId: string) {
     .select()
     .from(tests)
     .where(and(eq(tests.setupScriptId, setupScriptId), isNull(tests.deletedAt)))
-    ;
-}
-
-// Get suites that use a specific test as their setup
-export async function getSuitesUsingSetupTest(setupTestId: string) {
-  return db
-    .select()
-    .from(suites)
-    .where(eq(suites.setupTestId, setupTestId))
-    ;
-}
-
-// Get suites that use a specific setup script
-export async function getSuitesUsingSetupScript(setupScriptId: string) {
-  return db
-    .select()
-    .from(suites)
-    .where(eq(suites.setupScriptId, setupScriptId))
     ;
 }
 

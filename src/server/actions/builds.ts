@@ -6,9 +6,7 @@ import { getBranchInfo } from '@/lib/github/content';
 import { getBranchInfo as getGitLabBranchInfo } from '@/lib/gitlab/content';
 import { getOpenPRsForBranch } from '@/lib/github/oauth';
 import { getOpenMRsForBranch } from '@/lib/gitlab/oauth';
-import { getRunner, type TestRunResult } from '@/lib/playwright/runner';
-import { getServerManager } from '@/lib/playwright/server-manager';
-import { getSetupOrchestrator } from '@/lib/setup/setup-orchestrator';
+import type { TestRunResult } from '@/lib/playwright/types';
 import type { SetupContext } from '@/lib/setup/types';
 import { executeTests } from '@/lib/execution/executor';
 import { resolveSetupCodeForRunner } from '@/lib/execution/setup-capture';
@@ -25,6 +23,7 @@ import { postMRComment } from '@/lib/integrations/gitlab-mr';
 import type { Test, TriggerType, BuildStatus, VisualDiffWithTestStatus, DiffClassification, DiffStatus } from '@/lib/db/schema';
 import path from 'path';
 import { createJob, createPendingJob, updateJobProgress, completeJob, failJob, isRunnerBusy } from './jobs';
+import { emitJobEvent } from '@/lib/ws/job-events';
 import { triggerAIDiffAnalysis } from './ai-diffs';
 import { forkBaselinesForBranch } from './baselines';
 import { STORAGE_DIRS, STORAGE_ROOT, toRelativePath } from '@/lib/storage/paths';
@@ -176,18 +175,6 @@ export interface BuildSummary {
 }
 
 /**
- * Force reset the test runner if stuck in "running" state
- */
-export async function forceResetRunner(repositoryId?: string | null) {
-  const runner = getRunner(repositoryId);
-  await runner.forceReset();
-  return { success: true };
-}
-
-/**
- * Create and run a new build (queues if tests already running)
- */
-/**
  * Core build creation logic — no auth checks.
  * Called by both session-authenticated and token-authenticated paths.
  */
@@ -199,28 +186,22 @@ export async function createAndRunBuildCore(
   versionOverrides?: Record<string, string>,
   gitBranchOverride?: string,
 ) {
-  const targetRunner = runnerId || 'local';
+  const targetRunner = runnerId || 'auto';
 
-  // If this runner is busy, queue this build
-  if (await isRunnerBusy(targetRunner)) {
+  // If targeting a specific runner and it's busy, queue this build.
+  // For 'auto' mode (pool-managed EBs), check if any pool EB is available.
+  if (targetRunner === 'auto' || targetRunner === 'local') {
+    const { isPoolBusy } = await import('@/server/actions/embedded-sessions');
+    if (await isPoolBusy()) {
+      // Queue with undefined runnerId so targetRunnerId becomes null (pool-managed)
+      return queueBuild(triggerType, testIds, repositoryId, undefined);
+    }
+  } else if (await isRunnerBusy(targetRunner)) {
     return queueBuild(triggerType, testIds, repositoryId, runnerId);
   }
 
-  const runner = getRunner(repositoryId);
-
-  // Load and set environment config
+  // Load environment config
   const envConfig = await queries.getEnvironmentConfig(repositoryId);
-  if (envConfig) {
-    runner.setEnvironmentConfig(envConfig);
-    const serverManager = getServerManager();
-    serverManager.setConfig(envConfig);
-  }
-
-  // Load and set playwright settings (viewport, browser, timeouts, etc.)
-  const playwrightSettings = await queries.getPlaywrightSettings(repositoryId);
-  if (playwrightSettings) {
-    runner.setSettings(playwrightSettings);
-  }
 
   // Get tests to run (filter out soft-deleted tests)
   let tests: Test[];
@@ -308,28 +289,15 @@ export async function createAndRunBuildFromCI(opts: {
   targetUrl?: string;
 }) {
   const { triggerType, repositoryId, runnerId, gitBranch, gitCommit, targetUrl } = opts;
-  const targetRunner = runnerId || 'local';
+  const targetRunner = runnerId || 'auto';
 
   // Auto mode: skip busy check — fallback chain handles concurrency internally
   if (targetRunner !== 'auto' && await isRunnerBusy(targetRunner)) {
     return queueBuild(triggerType, undefined, repositoryId, runnerId);
   }
 
-  const runner = getRunner(repositoryId);
-
-  // Load and set environment config
+  // Load environment config
   const envConfig = await queries.getEnvironmentConfig(repositoryId);
-  if (envConfig) {
-    runner.setEnvironmentConfig(envConfig);
-    const serverManager = getServerManager();
-    serverManager.setConfig(envConfig);
-  }
-
-  // Load and set playwright settings
-  const playwrightSettings = await queries.getPlaywrightSettings(repositoryId);
-  if (playwrightSettings) {
-    runner.setSettings(playwrightSettings);
-  }
 
   // Get tests to run (filter out soft-deleted)
   const tests = await queries.getTestsByRepo(repositoryId);
@@ -395,16 +363,19 @@ export async function createComparisonRun(
   versionOverrides?: Record<string, string>,
 ) {
   await requireRepoAccess(repositoryId);
-  const targetRunner = runnerId || 'local';
+  const targetRunner = runnerId || 'auto';
 
   // If runner is busy, we can't start — comparison runs are not queued
-  if (await isRunnerBusy(targetRunner)) {
+  if (targetRunner === 'auto' || targetRunner === 'local') {
+    const { isPoolBusy } = await import('@/server/actions/embedded-sessions');
+    if (await isPoolBusy()) {
+      throw new Error('All browsers are busy. Please wait for a browser to become available before starting a comparison run.');
+    }
+  } else if (await isRunnerBusy(targetRunner)) {
     throw new Error('Runner is busy. Please wait for the current build to finish before starting a comparison run.');
   }
 
   const comparisonPairId = crypto.randomUUID();
-
-  const runner = getRunner(repositoryId);
 
   // Load env + playwright settings
   // Override base URL with baseline URL for this comparison run
@@ -412,14 +383,8 @@ export async function createComparisonRun(
   const overriddenEnvConfig = envConfig
     ? { ...envConfig, baseUrl: baselineUrl }
     : { id: 'comparison-override', repositoryId, mode: 'manual', baseUrl: baselineUrl, startCommand: null, healthCheckUrl: null, healthCheckTimeout: 60000, reuseExistingServer: true, createdAt: null, updatedAt: null } satisfies import('@/lib/db/schema').EnvironmentConfig;
-  runner.setEnvironmentConfig(overriddenEnvConfig);
-  const serverManager = getServerManager();
-  serverManager.setConfig(overriddenEnvConfig);
 
   const playwrightSettings = await queries.getPlaywrightSettings(repositoryId);
-  if (playwrightSettings) {
-    runner.setSettings(playwrightSettings);
-  }
 
   // Get tests
   let tests: Test[];
@@ -494,15 +459,7 @@ async function createComparisonFeatureBuild(
   const overriddenEnvConfig = envConfig
     ? { ...envConfig, baseUrl: meta.featureUrl }
     : { id: 'comparison-override', repositoryId, mode: 'manual', baseUrl: meta.featureUrl, startCommand: null, healthCheckUrl: null, healthCheckTimeout: 60000, reuseExistingServer: true, createdAt: null, updatedAt: null } satisfies import('@/lib/db/schema').EnvironmentConfig;
-  const runner = getRunner(repositoryId);
-  runner.setEnvironmentConfig(overriddenEnvConfig);
-  const serverManager = getServerManager();
-  serverManager.setConfig(overriddenEnvConfig);
-
   const playwrightSettings = await queries.getPlaywrightSettings(repositoryId);
-  if (playwrightSettings) {
-    runner.setSettings(playwrightSettings);
-  }
 
   let tests: Test[];
   if (meta.testIds && meta.testIds.length > 0) {
@@ -561,9 +518,8 @@ async function runBuildAsync(
   versionOverrides?: Record<string, string>,
   forceAutoApprove?: boolean,
 ) {
-  const runner = getRunner(repositoryId);
   const startTime = Date.now();
-  const targetRunner = runnerId || 'local';
+  const targetRunner = runnerId || 'auto';
   const jobId = await createJob('build_run', `Build (${tests.length} tests)`, tests.length, repositoryId, { buildId, testRunId }, targetRunner);
 
   // Auto-fork baselines for branch builds
@@ -623,7 +579,7 @@ async function runBuildAsync(
 
   // Get teamId from runner record (not session — session is unavailable in fire-and-forget context)
   let teamId: string | undefined;
-  if (runnerId && runnerId !== 'local') {
+  if (runnerId && runnerId !== 'auto') {
     const runnerRecord = await queries.getRunnerById(runnerId);
     teamId = runnerRecord?.teamId;
   }
@@ -645,7 +601,7 @@ async function runBuildAsync(
   let currentBrowserType = 'chromium';
 
   // Result callback for processing diffs
-  const onResult = async (result: { testId: string; status: string; screenshotPath?: string; screenshots: { path: string; label?: string }[]; errorMessage?: string; durationMs?: number; consoleErrors?: string[]; networkRequests?: import('@/lib/db/schema').NetworkRequest[]; a11yViolations?: import('@/lib/db/schema').A11yViolation[]; a11yPassesCount?: number; stabilityMetadata?: { frameCount: number; stableFrames: number; maxFrameDiff: number; isStable: boolean }; videoPath?: string; softErrors?: string[]; assertionResults?: import('@/lib/db/schema').AssertionResult[]; networkBodiesPath?: string }) => {
+  const onResult = async (result: { testId: string; status: string; screenshotPath?: string; screenshots: { path: string; label?: string }[]; errorMessage?: string; durationMs?: number; consoleErrors?: string[]; networkRequests?: import('@/lib/db/schema').NetworkRequest[]; downloads?: import('@/lib/db/schema').DownloadRecord[]; a11yViolations?: import('@/lib/db/schema').A11yViolation[]; a11yPassesCount?: number; stabilityMetadata?: { frameCount: number; stableFrames: number; maxFrameDiff: number; isStable: boolean }; videoPath?: string; softErrors?: string[]; assertionResults?: import('@/lib/db/schema').AssertionResult[]; networkBodiesPath?: string; domSnapshot?: import('@/lib/db/schema').DomSnapshotData; lastReachedStep?: number; totalSteps?: number }) => {
     processedCount++;
 
     // Save test result immediately
@@ -662,12 +618,16 @@ async function runBuildAsync(
       browser: currentBrowserType,
       consoleErrors: result.consoleErrors,
       networkRequests: result.networkRequests,
+      downloads: result.downloads,
       a11yViolations: result.a11yViolations,
       a11yPassesCount: result.a11yPassesCount,
       videoPath: result.videoPath,
       softErrors: result.softErrors,
       assertionResults: result.assertionResults,
       networkBodiesPath: result.networkBodiesPath,
+      domSnapshot: result.domSnapshot,
+      lastReachedStep: result.lastReachedStep,
+      totalSteps: result.totalSteps,
     });
 
     // Stamp first build on the test version (idempotent)
@@ -742,6 +702,26 @@ async function runBuildAsync(
       }
     }
 
+    // Compute DOM diff and store on the first visual diff's metadata
+    const testRecord2 = tests.find(t => t.id === result.testId);
+    if (testRecord2?.domSnapshot && result.domSnapshot && diffResults.length > 0) {
+      try {
+        const { computeDomDiff } = await import('@/lib/diff/dom-diff');
+        const domDiff = computeDomDiff(testRecord2.domSnapshot, result.domSnapshot);
+        if (domDiff.added.length > 0 || domDiff.removed.length > 0 || domDiff.changed.length > 0) {
+          // Store DOM diff on the first visual diff's metadata
+          const firstDiffId = diffResults[0].diffId;
+          const existingDiff = await queries.getVisualDiff(firstDiffId);
+          if (existingDiff) {
+            const updatedMetadata = { ...(existingDiff.metadata as import('@/lib/db/schema').DiffMetadata || { changedRegions: [] }), domDiff };
+            await queries.updateVisualDiff(firstDiffId, { metadata: updatedMetadata });
+          }
+        }
+      } catch {
+        // Non-critical — DOM diff is optional
+      }
+    }
+
     // Create placeholder diff for failed tests with no screenshots
     if (screenshots.length === 0 && (result.status === 'failed' || result.status === 'setup_failed')) {
       await queries.createVisualDiff({
@@ -777,15 +757,6 @@ async function runBuildAsync(
   };
 
   try {
-    // Configure runner with environment and settings
-    if (envConfig) {
-      runner.setEnvironmentConfig(envConfig);
-      getServerManager().setConfig(envConfig);
-    }
-    if (playwrightSettings) {
-      runner.setSettings(playwrightSettings);
-    }
-
     // Get the build to check for build-level setup
     const build = await queries.getBuild(buildId);
     const baseUrl = envConfig?.baseUrl || 'http://localhost:3000';
@@ -812,94 +783,38 @@ async function runBuildAsync(
       }
     }
 
-    // Resolve setup info for remote runner (run setup on the runner, not locally)
+    // Resolve setup info for remote runner
     let remoteSetupInfo: { code: string; setupId: string } | undefined;
-    const isRemoteRunner = runnerId && runnerId !== 'local' && teamId;
 
     // Run build-level setup if configured
     if (build?.buildSetupTestId || build?.buildSetupScriptId) {
-      if (isRemoteRunner) {
-        // Remote runner: resolve setup code locally, but execute it on the runner
-        await queries.updateBuild(buildId, { setupStatus: 'running' });
+      // Resolve setup code locally, but execute it on the runner
+      await queries.updateBuild(buildId, { setupStatus: 'running' });
 
-        if (build.buildSetupTestId) {
-          const setupTest = await queries.getTest(build.buildSetupTestId);
-          if (setupTest) {
-            remoteSetupInfo = { code: setupTest.code, setupId: setupTest.id };
-          } else {
-            console.warn(`[build-setup] Setup test not found: ${build.buildSetupTestId} - skipping`);
-          }
-        } else if (build.buildSetupScriptId) {
-          const setupScript = await queries.getSetupScript(build.buildSetupScriptId);
-          if (setupScript && setupScript.type === 'playwright') {
-            remoteSetupInfo = { code: setupScript.code, setupId: setupScript.id };
-          } else {
-            console.warn(`[build-setup] Setup script not found or not playwright type: ${build.buildSetupScriptId} - skipping`);
-          }
+      if (build.buildSetupTestId) {
+        const setupTest = await queries.getTest(build.buildSetupTestId);
+        if (setupTest) {
+          remoteSetupInfo = { code: setupTest.code, setupId: setupTest.id };
+        } else {
+          console.warn(`[build-setup] Setup test not found: ${build.buildSetupTestId} - skipping`);
         }
-
-        if (!remoteSetupInfo) {
-          // No valid setup code found, mark as skipped
-          await queries.updateBuild(buildId, { setupStatus: 'skipped' });
-        }
-        // setupStatus will be updated after executor runs setup on the runner
-      } else {
-        // Local runner: run setup locally with a browser
-        await queries.updateBuild(buildId, { setupStatus: 'running' });
-
-        const orchestrator = getSetupOrchestrator();
-        const pw = await import('playwright');
-        const browser = await pw.chromium.launch({ headless: true });
-        const page = await browser.newPage();
-
-        try {
-          setupContext.page = page;
-          const setupResult = await orchestrator.resolveAndRunSetup(
-            build.buildSetupTestId,
-            build.buildSetupScriptId,
-            page,
-            setupContext
-          );
-
-          if (!setupResult.success) {
-            await queries.updateBuild(buildId, {
-              setupStatus: 'failed',
-              setupError: setupResult.error,
-              setupDurationMs: setupResult.duration,
-            });
-            throw new Error(`Build setup failed: ${setupResult.error}`);
-          }
-
-          if (setupResult.variables) {
-            setupContext.variables = { ...setupContext.variables, ...setupResult.variables };
-          }
-
-          try {
-            const state = await page.context().storageState();
-            setupContext.storageState = JSON.stringify(state);
-            console.log(`[build-setup] Captured storageState: ${state.cookies.length} cookies, ${state.origins.length} origins`);
-          } catch (e) {
-            console.warn('[build-setup] Failed to capture storageState:', e);
-          }
-
-          await queries.updateBuild(buildId, {
-            setupStatus: 'completed',
-            setupDurationMs: setupResult.duration,
-          });
-        } finally {
-          await page.close().catch(() => {});
-          await browser.close().catch(() => {});
+      } else if (build.buildSetupScriptId) {
+        const setupScript = await queries.getSetupScript(build.buildSetupScriptId);
+        if (setupScript && setupScript.type === 'playwright') {
+          remoteSetupInfo = { code: setupScript.code, setupId: setupScript.id };
+        } else {
+          console.warn(`[build-setup] Setup script not found or not playwright type: ${build.buildSetupScriptId} - skipping`);
         }
       }
+
+      if (!remoteSetupInfo) {
+        // No valid setup code found, mark as skipped
+        await queries.updateBuild(buildId, { setupStatus: 'skipped' });
+      }
+      // setupStatus will be updated after executor runs setup on the runner
     } else {
       await queries.updateBuild(buildId, { setupStatus: 'skipped' });
     }
-
-    // Remove page from context (each test gets its own)
-    delete setupContext.page;
-
-    // Set the setup context on the runner so tests can access it
-    runner.setSetupContext(setupContext);
 
     // Run tests for each browser in the browsers list
     for (const browserType of browsers) {
@@ -911,71 +826,65 @@ async function runBuildAsync(
         ? { ...playwrightSettings, browser: browserType }
         : null;
 
-      // Use executor for agent routing, or direct runner for local
-      if (isRemoteRunner) {
-        // Load runner's maxParallelTests setting
-        const remoteRunner = await queries.getRunnerById(runnerId!);
-        const maxParallelTests = remoteRunner?.maxParallelTests ?? 1;
+      // Load runner's maxParallelTests setting.
+      // For 'auto' (pool), leave undefined — the executor resolves it from
+      // the actually-claimed pool EB's DB record.
+      let maxParallelTests: number | undefined;
+      if (runnerId && runnerId !== 'auto') {
+        const remoteRunner = await queries.getRunnerById(runnerId);
+        maxParallelTests = remoteRunner?.maxParallelTests ?? 1;
+      }
 
-        // If no build-level setup, resolve per-test setup code to run on the runner
-        // (don't run locally — cookies from a different server instance would be invalid)
-        if (!remoteSetupInfo) {
-          const resolved = await resolveSetupCodeForRunner(tests);
-          if (resolved) {
-            remoteSetupInfo = resolved;
-            await queries.updateBuild(buildId, { setupStatus: 'running' });
-            console.log(`[build] Resolved per-test setup for remote runner: setupId=${resolved.setupId}`);
-          }
+      // If no build-level setup, resolve per-test setup code to run on the runner
+      if (!remoteSetupInfo) {
+        const resolved = await resolveSetupCodeForRunner(tests);
+        if (resolved) {
+          remoteSetupInfo = resolved;
+          await queries.updateBuild(buildId, { setupStatus: 'running' });
+          console.log(`[build] Resolved per-test setup for runner: setupId=${resolved.setupId}`);
         }
+      }
 
-        try {
-          await executeTests(tests, testRunId, {
-            repositoryId,
-            teamId,
-            runnerId,
-            environmentConfig: envConfig,
-            playwrightSettings: browserSettings,
-            maxParallelTests,
-            jobId,
-            setupInfo: remoteSetupInfo,
-            setupContext: {
-              storageState: setupContext.storageState,
-              variables: setupContext.variables,
-            },
-          }, onProgress, onResult);
+      try {
+        await executeTests(tests, testRunId, {
+          repositoryId,
+          teamId,
+          runnerId,
+          environmentConfig: envConfig,
+          playwrightSettings: browserSettings,
+          maxParallelTests,
+          jobId,
+          setupInfo: remoteSetupInfo,
+          setupContext: {
+            storageState: setupContext.storageState,
+            variables: setupContext.variables,
+          },
+        }, onProgress, onResult);
 
-          // If remote setup was used, mark it completed now
-          if (remoteSetupInfo) {
-            await queries.updateBuild(buildId, { setupStatus: 'completed' });
-          }
-        } catch (error) {
-          // If setup failed on the runner, mark it
-          if (remoteSetupInfo && error instanceof Error && error.message.includes('setup')) {
-            await queries.updateBuild(buildId, {
-              setupStatus: 'failed',
-              setupError: error.message,
-            });
-          }
-          throw error;
+        // If setup was used, mark it completed now
+        if (remoteSetupInfo) {
+          await queries.updateBuild(buildId, { setupStatus: 'completed' });
         }
-      } else {
-        // Local: update runner settings with current browser
-        if (browserSettings) {
-          runner.setSettings(browserSettings);
+      } catch (error) {
+        // If setup failed on the runner, mark it
+        if (remoteSetupInfo && error instanceof Error && error.message.includes('setup')) {
+          await queries.updateBuild(buildId, {
+            setupStatus: 'failed',
+            setupError: error.message,
+          });
         }
-        await runner.runTests(tests, testRunId, onProgress, onResult);
+        throw error;
       }
     }
-
-    // Clear setup context after tests complete
-    runner.clearSetupContext();
 
     // Check if this build was cancelled while running
     const currentJob = await queries.getBackgroundJob(jobId);
     if (currentJob?.error === 'Cancelled by user') {
       revalidatePath('/builds');
       revalidatePath('/');
-      processNextQueuedBuild(repositoryId, targetRunner);
+      if (targetRunner !== 'auto') {
+        processNextQueuedBuild(repositoryId, targetRunner);
+      }
       return;
     }
 
@@ -1026,12 +935,16 @@ async function runBuildAsync(
                 browser: currentBrowserType,
                 consoleErrors: result.consoleErrors,
                 networkRequests: result.networkRequests,
+                downloads: result.downloads,
                 a11yViolations: result.a11yViolations,
                 a11yPassesCount: result.a11yPassesCount,
                 videoPath: result.videoPath,
                 softErrors: result.softErrors,
                 assertionResults: result.assertionResults,
                 networkBodiesPath: result.networkBodiesPath,
+                domSnapshot: result.domSnapshot,
+                lastReachedStep: result.lastReachedStep,
+                totalSteps: result.totalSteps,
                 retryOf: originalResult?.id ?? null,
                 isFlaky: false,
               });
@@ -1047,28 +960,19 @@ async function runBuildAsync(
           };
 
           // Re-run failed tests
-          if (isRemoteRunner) {
-            await executeTests(testsToRetry, testRunId, {
-              repositoryId,
-              teamId,
-              runnerId,
-              environmentConfig: envConfig,
-              playwrightSettings: playwrightSettings ? { ...playwrightSettings, browser: currentBrowserType } : null,
-              maxParallelTests: 1, // Retry sequentially for stability
-              jobId,
-              setupContext: {
-                storageState: setupContext.storageState,
-                variables: setupContext.variables,
-              },
-            }, undefined, retryOnResult);
-          } else {
-            if (playwrightSettings) {
-              runner.setSettings({ ...playwrightSettings, browser: currentBrowserType });
-            }
-            runner.setSetupContext(setupContext);
-            await runner.runTests(testsToRetry, testRunId, undefined, retryOnResult);
-            runner.clearSetupContext();
-          }
+          await executeTests(testsToRetry, testRunId, {
+            repositoryId,
+            teamId,
+            runnerId,
+            environmentConfig: envConfig,
+            playwrightSettings: playwrightSettings ? { ...playwrightSettings, browser: currentBrowserType } : null,
+            maxParallelTests: 1, // Retry sequentially for stability
+            jobId,
+            setupContext: {
+              storageState: setupContext.storageState,
+              variables: setupContext.variables,
+            },
+          }, undefined, retryOnResult);
 
           // Update build progress after retry
           await queries.updateBuild(buildId, {
@@ -1153,11 +1057,6 @@ async function runBuildAsync(
         versionOverrides?: Record<string, string>;
       };
       try {
-        // Force-reset runner to guarantee clean state for Phase 2
-        const phaseRunner = getRunner(repositoryId);
-        console.log(`[comparison] Resetting runner before Phase 2 (isActive=${phaseRunner.isActive()})`);
-        await phaseRunner.forceReset();
-
         console.log(`[comparison] Baseline build ${buildId} completed. Starting feature build on ${meta.featureBranch}...`);
         const featureResult = await createComparisonFeatureBuild(
           completedBuild.comparisonPairId!,
@@ -1172,9 +1071,7 @@ async function runBuildAsync(
   } catch (error) {
     // Check if this build was cancelled while running — don't overwrite cancelJob's statuses
     const currentJob = await queries.getBackgroundJob(jobId);
-    if (currentJob?.error === 'Cancelled by user') {
-      runner.clearSetupContext();
-    } else {
+    if (currentJob?.error !== 'Cancelled by user') {
       await queries.updateTestRun(testRunId, {
         completedAt: new Date(),
         status: 'failed',
@@ -1185,16 +1082,26 @@ async function runBuildAsync(
         elapsedMs: Date.now() - startTime,
       });
       await failJob(jobId, error instanceof Error ? error.message : 'Build failed');
-      // Clear setup context on error to prevent stale state leaking to future runs
-      runner.clearSetupContext();
+    }
+  }
+
+  // Recalculate team storage usage after build completes
+  if (repositoryId) {
+    const repoForStorage = await queries.getRepository(repositoryId);
+    if (repoForStorage?.teamId) {
+      const { recalculateTeamStorage } = await import('@/lib/storage/calculator');
+      recalculateTeamStorage(repoForStorage.teamId).catch(() => {});
     }
   }
 
   revalidatePath('/builds');
   revalidatePath('/');
 
-  // Process next queued build for this runner
-  processNextQueuedBuild(repositoryId, targetRunner);
+  // Process next queued job for this specific runner.
+  // Pool-managed queue (targetRunner='auto') is handled by releasePoolEB + periodic consumer.
+  if (targetRunner !== 'auto') {
+    processNextQueuedBuild(repositoryId, targetRunner);
+  }
 }
 
 /**
@@ -1222,7 +1129,9 @@ async function queueBuild(
     throw new Error('No tests to run');
   }
 
-  const targetRunner = runnerId || 'local';
+  // null targetRunnerId = pool-managed (any available EB)
+  // specific runnerId = queue for that specific runner
+  const targetRunner = runnerId || undefined;
 
   // Create a pending job
   const jobId = await createPendingJob(
@@ -1247,27 +1156,24 @@ async function queueBuild(
  * Process the next queued build if any
  */
 export async function processNextQueuedBuild(repositoryId?: string | null, targetRunnerId?: string) {
-  const effectiveRunner = targetRunnerId || 'local';
+  const effectiveRunner = targetRunnerId || undefined;
 
-  // Don't process if this runner is still busy
-  if (await isRunnerBusy(effectiveRunner)) return;
+  // Skip busy check for pool-managed jobs — the execution flow handles claiming
+  if (effectiveRunner && await isRunnerBusy(effectiveRunner)) return;
 
-  // Get pending builds for this runner
+  // getPendingBuildJobs: when effectiveRunner is undefined, finds jobs with null targetRunnerId (pool mode)
   const pendingJobs = await queries.getPendingBuildJobs(repositoryId, effectiveRunner);
   if (pendingJobs.length === 0) return;
 
   const nextJob = pendingJobs[0];
   const metadata = nextJob.metadata as { triggerType?: TriggerType; testIds?: string[] | null; runnerId?: string } | null;
 
-  // Complete the queue placeholder — createAndRunBuild creates its own running job.
-  // We must NOT call startJob() here because that marks it 'running', which causes
-  // createAndRunBuild's isRunnerBusy() check to see a running job and re-queue.
-  await queries.updateBackgroundJob(nextJob.id, {
-    status: 'completed',
-    completedAt: new Date(),
-  });
+  // Delete the queue placeholder — createAndRunBuild creates its own running job.
+  await queries.deleteBackgroundJob(nextJob.id);
+  emitJobEvent({ type: 'job:delete', jobId: nextJob.id });
 
-  // Run the build
+  // Run the build — for pool-managed jobs, runnerId is undefined so
+  // createAndRunBuildCore goes through auto mode → executeFallbackChain → claimPoolEB
   try {
     await createAndRunBuild(
       metadata?.triggerType || 'manual',

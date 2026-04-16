@@ -13,6 +13,9 @@
 import type { Browser, Page, BrowserContext } from 'playwright';
 import { browserRecordingScript } from './browser-script.js';
 import { executeSetupCode } from './setup-executor.js';
+import path from 'path';
+import fs from 'fs';
+import os from 'os';
 
 // Re-define minimal payload type to avoid cross-package imports
 interface StartRecordingPayload {
@@ -76,6 +79,42 @@ export class EmbeddedRecorder {
     this.page = await this.context.newPage();
     await this.page.addInitScript(() => {
       Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+
+      // Intercept File System Access API (showSaveFilePicker) — convert to a regular
+      // blob download so Playwright's download event fires and we can capture it.
+      if (typeof window !== 'undefined') {
+        const origSave = (window as unknown as Record<string, unknown>).showSaveFilePicker as ((...args: unknown[]) => Promise<unknown>) | undefined;
+        (window as unknown as Record<string, unknown>).showSaveFilePicker = async function (...args: unknown[]) {
+          // Extract suggested filename from options
+          const opts = (args[0] ?? {}) as Record<string, unknown>;
+          const suggestedName = (opts.suggestedName as string) || 'download';
+
+          // Create a fake FileSystemFileHandle that collects written data
+          // then triggers a real <a download> click
+          const chunks: BlobPart[] = [];
+          const fakeHandle = {
+            createWritable: async () => ({
+              write: async (data: BlobPart) => { chunks.push(data); },
+              seek: async () => {},
+              truncate: async () => {},
+              close: async () => {
+                // Trigger a real download via <a> element
+                const blob = new Blob(chunks);
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = suggestedName;
+                a.style.display = 'none';
+                document.body.appendChild(a);
+                a.click();
+                setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 100);
+              },
+            }),
+            getFile: async () => new File(chunks, suggestedName),
+          };
+          return fakeHandle;
+        };
+      }
     });
 
     // Detect page crash/close to prevent using a dead page
@@ -128,7 +167,10 @@ export class EmbeddedRecorder {
     });
 
     // Auto-detect downloads: retroactively mark the last click/mouse-down as download-triggering
-    this.page.on('download', () => {
+    // and auto-save the file so the download completes without a file dialog
+    const dlDir = path.join(os.tmpdir(), 'lastest-eb-downloads');
+    fs.mkdirSync(dlDir, { recursive: true });
+    this.page.on('download', async (download) => {
       if (!this.isRecording) return;
       for (let i = this.events.length - 1; i >= 0; i--) {
         const ev = this.events[i];
@@ -142,6 +184,16 @@ export class EmbeddedRecorder {
           break;
         }
       }
+      // Auto-save to temp dir so the download completes cleanly
+      const safeName = path.basename(download.suggestedFilename()).replace(/\.\./g, '_');
+      try {
+        await download.saveAs(path.join(dlDir, safeName));
+      } catch { /* best-effort */ }
+      // Auto-add download assertion to timeline
+      this.addEvent('assertion', {
+        assertionType: 'downloadExists',
+        downloadFilename: download.suggestedFilename(),
+      });
     });
 
     // Batch events and send to server periodically
@@ -164,13 +216,17 @@ export class EmbeddedRecorder {
       action: string,
       selectors: Array<{ type: string; value: string }>,
       value?: string,
-      boundingBox?: { x: number; y: number; width: number; height: number },
+      boundingBox?: { x: number; y: number; width: number; height: number; clickX?: number; clickY?: number },
       actionId?: string,
       modifiers?: string[]
     ) => {
       const primarySelector = selectors[0]?.value || '';
+      // Use actual click position if available (critical for canvas elements),
+      // otherwise fall back to element center (fine for buttons/inputs)
       const coordinates = boundingBox
-        ? { x: Math.round(boundingBox.x + boundingBox.width / 2), y: Math.round(boundingBox.y + boundingBox.height / 2) }
+        ? (boundingBox.clickX != null && boundingBox.clickY != null
+            ? { x: Math.round(boundingBox.clickX), y: Math.round(boundingBox.clickY) }
+            : { x: Math.round(boundingBox.x + boundingBox.width / 2), y: Math.round(boundingBox.y + boundingBox.height / 2) })
         : undefined;
 
       const validSelectors = selectors.filter(sel => sel.value && sel.value.trim() && !sel.value.includes('undefined'));
@@ -213,6 +269,24 @@ export class EmbeddedRecorder {
 
     await this.page.exposeFunction('__recordKeypress', (key: string, modifiers?: string[]) => {
       this.addEvent('keypress', { key, modifiers: modifiers && modifiers.length > 0 ? modifiers : undefined });
+    });
+
+    // Scroll tracking with coalescing (mirrors server-side recorder logic)
+    await this.page.exposeFunction('__recordScroll', (deltaX: number, deltaY: number, modifiers?: string[]) => {
+      const mods = modifiers && modifiers.length > 0 ? modifiers : undefined;
+      // Coalesce with previous scroll event if same modifiers
+      if (this.events.length > 0) {
+        const lastEvent = this.events[this.events.length - 1];
+        if (lastEvent?.type === 'scroll') {
+          const lastMods = lastEvent.data.modifiers;
+          if (JSON.stringify(lastMods) === JSON.stringify(mods)) {
+            lastEvent.data.deltaX = ((lastEvent.data.deltaX as number) || 0) + deltaX;
+            lastEvent.data.deltaY = ((lastEvent.data.deltaY as number) || 0) + deltaY;
+            return;
+          }
+        }
+      }
+      this.addEvent('scroll', { deltaX, deltaY, modifiers: mods });
     });
 
     await this.page.exposeFunction('__recordHoverPreview', (elementInfo: Record<string, unknown>) => {

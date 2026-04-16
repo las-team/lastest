@@ -1,5 +1,6 @@
 'use client';
 
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { usePathname, useSearchParams } from 'next/navigation';
 import { cn } from '@/lib/utils';
@@ -10,7 +11,6 @@ import {
   GitCompare,
   Settings,
   Layers,
-  ListOrdered,
   Building2,
   Zap,
   ClipboardCheck,
@@ -23,13 +23,17 @@ import { QueueIndicator } from '@/components/queue/queue-indicator';
 import { ActivityFeedIndicator } from '@/components/activity-feed/activity-feed-indicator-client';
 import { UserMenu } from '@/components/auth/user-menu';
 import { UserScoreChip } from '@/components/gamification/user-score-chip';
-import type { Repository, User, Team } from '@/lib/db/schema';
+import { SidebarQuickActions } from './sidebar-quick-actions';
+import type { Repository, User, Team, EmbeddedSession } from '@/lib/db/schema';
 
 interface SidebarProps {
   repos?: Repository[];
   selectedRepo?: Repository | null;
   currentUser?: User | null;
   team?: Team | null;
+  baseUrl?: string;
+  repositoryId?: string;
+  ebSessions?: EmbeddedSession[];
 }
 
 const dashboardNav = [
@@ -40,10 +44,10 @@ const gamificationNav = [
   { name: 'Leaderboard', href: '/leaderboard', icon: Trophy },
 ];
 
-const EARLY_ADOPTER_ITEMS = new Set(['Compose', 'Suites', 'Compare', 'Impact']);
+const EARLY_ADOPTER_ITEMS = new Set(['Compose', 'Compare', 'Impact']);
 
 const definitionNav = [
-  { name: 'Definition', href: '/definition', icon: FileCode },
+  { name: 'Tests', href: '/tests', icon: FileCode },
   { name: 'Compose', href: '/compose', icon: Layers },
   { name: 'Seed', href: '/env', icon: Zap },
 ];
@@ -51,7 +55,6 @@ const definitionNav = [
 const executionNav = [
   { name: 'Runs', href: '/run', icon: Play },
   { name: 'Compare', href: '/compare', icon: GitCompare },
-  { name: 'Suites', href: '/suites', icon: ListOrdered },
   { name: 'Review', href: '/review', icon: ClipboardCheck },
   { name: 'Impact', href: '/analytics/impact', icon: TrendingDown },
 ];
@@ -61,10 +64,15 @@ const settingsNav = [
   { name: 'Settings', href: '/settings', icon: Settings },
 ];
 
-export function Sidebar({ repos, selectedRepo, currentUser, team }: SidebarProps) {
+export function Sidebar({ repos, selectedRepo, currentUser, team, baseUrl, repositoryId, ebSessions }: SidebarProps) {
   const pathname = usePathname();
   const searchParams = useSearchParams();
-  const justConnected = searchParams.get('success') === 'github_connected' || searchParams.get('success') === 'gitlab_connected';
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => {
+    const id = requestAnimationFrame(() => setMounted(true));
+    return () => cancelAnimationFrame(id);
+  }, []);
+  const justConnected = mounted && (searchParams.get('success') === 'github_connected' || searchParams.get('success') === 'gitlab_connected');
   const earlyAdopter = team?.earlyAdopterMode ?? false;
   const gamificationEnabled = team?.gamificationEnabled ?? false;
 
@@ -101,9 +109,16 @@ export function Sidebar({ repos, selectedRepo, currentUser, team }: SidebarProps
       )}>
         <div className="flex items-center gap-2">
           <div className="flex-1 min-w-0">
-            <RepoSelector initialRepos={repos} initialSelected={selectedRepo} />
+            {mounted ? (
+              <RepoSelector initialRepos={repos} initialSelected={selectedRepo} />
+            ) : (
+              <div className="flex items-center gap-2 h-9 px-3 border rounded-md text-sm">
+                <Layers className="h-4 w-4 shrink-0" />
+                <span className="truncate">{selectedRepo?.fullName || 'Select repository'}</span>
+              </div>
+            )}
           </div>
-          <CreateLocalRepoButton />
+          {mounted && <CreateLocalRepoButton />}
         </div>
         {justConnected && repos && repos.length > 0 && !selectedRepo && (
           <p className="text-xs text-primary font-medium animate-pulse">
@@ -136,7 +151,7 @@ export function Sidebar({ repos, selectedRepo, currentUser, team }: SidebarProps
         </ul>
 
         <div>
-          <p className="px-3 pb-1 text-xs font-medium text-muted-foreground uppercase tracking-wider">Definition</p>
+          <p className="px-3 pb-1 text-xs font-medium text-muted-foreground uppercase tracking-wider">Tests</p>
           <ul className="space-y-1">
             {filteredDefinitionNav.map((item) => {
               const isActive = pathname === item.href || pathname.startsWith(item.href);
@@ -217,7 +232,7 @@ export function Sidebar({ repos, selectedRepo, currentUser, team }: SidebarProps
 
       </nav>
 
-      <div className="px-4 pb-2 space-y-1">
+      <div className="px-4 pb-3 space-y-1">
         <Link
           href="/settings"
           className={cn(
@@ -232,8 +247,12 @@ export function Sidebar({ repos, selectedRepo, currentUser, team }: SidebarProps
         </Link>
       </div>
 
+      <div className="border-t pt-3">
+        <SidebarQuickActions baseUrl={baseUrl} repositoryId={repositoryId} ebSessions={ebSessions} />
+      </div>
+
       <div className="p-4 border-t space-y-3">
-        {currentUser && <UserMenu user={currentUser} />}
+        {mounted && currentUser && <UserMenu user={currentUser} />}
         <div className="flex items-center justify-between">
           <span className="text-xs text-muted-foreground">Visual Regression Testing</span>
           <div className="flex items-center gap-0.5">

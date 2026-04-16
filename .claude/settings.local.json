@@ -175,7 +175,17 @@
       "Bash(sed -n '160,170p' scripts/deploy.sh)",
       "Bash(pnpm --filter @lastest/embedded-browser build)",
       "Bash(PGPASSWORD=lastest psql:*)",
-      "WebFetch(domain:lastest.cloud)"
+      "WebFetch(domain:lastest.cloud)",
+      "Bash(export TOKEN='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI0ODI1YWI1My1mZTI4LTQyNjMtOWFiNS1iN2UzMmE2YWY1MGQiLCJ0eXBlIjoiQVBJX0tFWSIsIndvcmtzcGFjZUlkIjoiNDgyNWFiNTMtZmUyOC00MjYzLTlhYjUtYjdlMzJhNmFmNTBkIiwiaWF0IjoxNzc1MjgwMjY0LCJleHAiOjQ5Mjg4ODM4NjMsImp0aSI6ImVjZDNiMzQzLTRiMWEtNGRhNi04MWYyLTRhMjgwNDk0YjdmYyJ9.lSJWsdVzLEjBeg3zoidIox1wm0W9CqTMbku1813vMZI')",
+      "Bash(curl -s 'https://ab389eda.ewyctorlab.olares.com/rest/people?limit=60' -H 'Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI0ODI1YWI1My1mZTI4LTQyNjMtOWFiNS1iN2UzMmE2YWY1MGQiLCJ0eXBlIjoiQVBJX0tFWSIsIndvcmtzcGFjZUlkIjoiNDgyNWFiNTMtZmUyOC00MjYzLTlhYjUtYjdlMzJhNmFmNTBkIiwiaWF0IjoxNzc1MjgwMjY0LCJleHAiOjQ5Mjg4ODM4NjMsImp0aSI6ImVjZDNiMzQzLTRiMWEtNGRhNi04MWYyLTRhMjgwNDk0YjdmYyJ9.lSJWsdVzLEjBeg3zoidIox1wm0W9CqTMbku1813vMZI')",
+      "mcp__plugin_playwright_playwright__browser_press_key",
+      "WebFetch(domain:twenty.com)",
+      "WebFetch(domain:docs.twenty.com)",
+      "WebFetch(domain:hyteck.de)",
+      "WebFetch(domain:pipedream.com)",
+      "WebFetch(domain:playbooks.com)",
+      "Bash(jq '.results[:5][] | \"\\\\\\(.url\\) — \\\\\\(.title\\)\"' -r)",
+      "Bash(kubectl get:*)"
     ]
   },
   "disabledMcpjsonServers": [

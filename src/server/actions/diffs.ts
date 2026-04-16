@@ -78,7 +78,7 @@ export async function approveDiff(diffId: string, approvedBy?: string) {
   // Gamification: reward the approver for a real change, and credit the test's
   // creator with catching a regression. Only fires when classification='changed'
   // so auto-approved or flaky diffs don't generate awards. Idempotent on diffId.
-  if (session.team && diffBefore && diffBefore.classification === 'changed') {
+  if (session.team && diffBefore && diffBefore.status === 'pending') {
     awardScore({
       teamId: session.team.id,
       kind: 'diff_approved_as_change',
@@ -192,11 +192,40 @@ export async function batchRejectDiffs(diffIds: string[]) {
 }
 
 /**
- * Get diffs for a build
+ * Get diffs for a build (raw, unordered)
  */
 export async function getDiffsByBuild(buildId: string) {
   await requireTeamAccess();
   return queries.getVisualDiffsByBuild(buildId);
+}
+
+/**
+ * Get diffs for a build sorted by test/step for navigation.
+ * Failed/changed/flaky tests first, then by test name → step label (natural sort).
+ */
+export async function getSortedDiffsByBuild(buildId: string) {
+  await requireTeamAccess();
+  const diffs = await queries.getVisualDiffsWithTestStatus(buildId);
+
+  // Per-test tier: tier 0 if any diff in test is failed/rejected
+  const testTiers = new Map<string, number>();
+  for (const d of diffs) {
+    const tier = d.testResultStatus === 'failed' || d.status === 'rejected' ? 0
+      : d.status === 'pending' && d.testResultStatus !== 'failed' ? 1
+      : 2;
+    const prev = testTiers.get(d.testId) ?? 2;
+    if (tier < prev) testTiers.set(d.testId, tier);
+  }
+
+  const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });
+
+  return diffs.sort((a, b) => {
+    const tierDiff = (testTiers.get(a.testId) ?? 2) - (testTiers.get(b.testId) ?? 2);
+    if (tierDiff !== 0) return tierDiff;
+    const nameCmp = (a.testName || '').localeCompare(b.testName || '');
+    if (nameCmp !== 0) return nameCmp;
+    return collator.compare(a.stepLabel || '', b.stepLabel || '');
+  });
 }
 
 /**
@@ -235,6 +264,15 @@ export async function getDiffCore(diffId: string) {
     consoleErrors = testResult?.consoleErrors ?? null;
     networkRequests = testResult?.networkRequests ?? null;
     networkBodiesPath = testResult?.networkBodiesPath ?? null;
+  }
+
+  // Hide network requests if network interception is off or error mode is 'ignore'
+  if (networkRequests && test) {
+    const pwSettings = await queries.getPlaywrightSettings(test.repositoryId);
+    if (!pwSettings?.enableNetworkInterception || pwSettings?.networkErrorMode === 'ignore') {
+      networkRequests = null;
+      networkBodiesPath = null;
+    }
   }
 
   // Look up planned screenshot if not already on the diff
@@ -428,6 +466,34 @@ export async function addDiffTodo(diffId: string, description: string) {
     status: 'open',
     createdBy: session.user?.email || 'user',
   });
+
+  // Gamification: reward the reviewer for triaging, and credit the test's
+  // creator with catching a regression. Idempotent on diffId.
+  if (session.team) {
+    awardScore({
+      teamId: session.team.id,
+      kind: 'diff_approved_as_change',
+      actor: { kind: 'user', id: session.user.id },
+      sourceType: 'diff',
+      sourceId: diffId,
+      detail: { testId: diff.testId },
+    }).catch((err) => console.error('[gamification] diff_todo_triage failed', err));
+
+    queries
+      .getTestCreator(diff.testId)
+      .then((creator) => {
+        if (!creator) return;
+        awardScore({
+          teamId: session.team.id,
+          kind: 'regression_caught',
+          actor: creator,
+          sourceType: 'diff',
+          sourceId: diffId,
+          detail: { testId: diff.testId },
+        }).catch((err) => console.error('[gamification] regression_caught_todo failed', err));
+      })
+      .catch(() => {});
+  }
 
   // Recompute build status
   if (diff.buildId) {

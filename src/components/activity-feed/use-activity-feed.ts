@@ -11,16 +11,21 @@ interface UseActivityFeedOpts {
   enabled?: boolean;
 }
 
+function buildWsUrl(path: string): string {
+  const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+  return `${proto}//${window.location.host}${path}`;
+}
+
 export function useActivityFeed(opts: UseActivityFeedOpts = {}) {
   const { repoId, sourceType, enabled = true } = opts;
   const [events, setEvents] = useState<ActivityEvent[]>([]);
   const [isConnected, setIsConnected] = useState(false);
   const [activeSessionCount, setActiveSessionCount] = useState(0);
-  const eventSourceRef = useRef<EventSource | null>(null);
+  const wsRef = useRef<WebSocket | null>(null);
 
   const clearEvents = useCallback(() => setEvents([]), []);
 
-  // SSE connection for live feed
+  // WebSocket connection for live feed
   useEffect(() => {
     if (!enabled) return;
 
@@ -28,13 +33,13 @@ export function useActivityFeed(opts: UseActivityFeedOpts = {}) {
     if (repoId) params.set('repo', repoId);
     if (sourceType) params.set('source', sourceType);
 
-    const url = `/api/activity-feed${params.toString() ? `?${params}` : ''}`;
-    const es = new EventSource(url);
-    eventSourceRef.current = es;
+    const qs = params.toString() ? `?${params}` : '';
+    const ws = new WebSocket(buildWsUrl(`/api/activity-feed/ws${qs}`));
+    wsRef.current = ws;
 
-    es.onopen = () => setIsConnected(true);
+    ws.onopen = () => setIsConnected(true);
 
-    es.onmessage = (e) => {
+    ws.onmessage = (e) => {
       try {
         const data = JSON.parse(e.data);
         if (data.type === 'connected') return;
@@ -52,17 +57,17 @@ export function useActivityFeed(opts: UseActivityFeedOpts = {}) {
           setActiveSessionCount((c) => Math.max(0, c - 1));
         }
       } catch {
-        // Ignore parse errors (keepalive comments)
+        // Ignore parse errors
       }
     };
 
-    es.onerror = () => {
+    ws.onclose = () => {
       setIsConnected(false);
     };
 
     return () => {
-      es.close();
-      eventSourceRef.current = null;
+      ws.close();
+      wsRef.current = null;
       setIsConnected(false);
     };
   }, [enabled, repoId, sourceType]);

@@ -25,6 +25,7 @@ import {
   AlertTriangle,
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
+import { toast } from 'sonner';
 import { createAndRunBuild, createComparisonRun } from '@/server/actions/builds';
 import type { BuildChanges } from '@/server/actions/builds';
 import { analyzeSmartRun, runSmartBuild, type SmartRunAnalysis } from '@/server/actions/smart-run';
@@ -124,6 +125,17 @@ export function RunDashboardClient({ tests, runs: _runs, builds, repositoryId, a
   const [showSmartDetails, setShowSmartDetails] = useState(false);
   const [buildView, setBuildView] = useState<'list' | 'graph'>('graph');
 
+  // Sync base URL state when repo/branch changes
+  useEffect(() => {
+    setBaseUrl(initialBaseUrl);
+    initialBaseUrlRef.current = initialBaseUrl;
+  }, [initialBaseUrl]);
+
+  // Sync baseline URL when branch base URLs change
+  useEffect(() => {
+    setBaselineUrl(branchBaseUrls?.[baselineBranch] || initialBaseUrl);
+  }, [branchBaseUrls, baselineBranch, initialBaseUrl]);
+
   // Load smart run analysis (uses GitHub API to compare branches)
   useEffect(() => {
     if (repositoryId) {
@@ -154,9 +166,13 @@ export function RunDashboardClient({ tests, runs: _runs, builds, repositoryId, a
         }
 
         const versionOverrides = composeConfig.versionOverrides ?? undefined;
-        const { buildId } = await createAndRunBuild('manual', filteredTestIds, repositoryId, executionTarget, versionOverrides);
+        const result = await createAndRunBuild('manual', filteredTestIds, repositoryId, executionTarget, versionOverrides);
         notifyJobStarted();
-        router.push(`/builds/${buildId}`);
+        if ('queued' in result && result.queued) {
+          toast.info('All browsers are busy — build queued and will start automatically');
+        } else {
+          router.push(`/builds/${result.buildId}`);
+        }
       } else {
         const result = await runSmartBuild(repositoryId ?? null, executionTarget);
         if ('error' in result) {
@@ -229,9 +245,13 @@ export function RunDashboardClient({ tests, runs: _runs, builds, repositoryId, a
         notifyJobStarted();
         router.push(`/builds/${baselineBuildId}`);
       } else {
-        const { buildId } = await createAndRunBuild('manual', testIds, repositoryId, executionTarget, versionOverrides);
+        const result = await createAndRunBuild('manual', testIds, repositoryId, executionTarget, versionOverrides);
         notifyJobStarted();
-        router.push(`/builds/${buildId}`);
+        if ('queued' in result && result.queued) {
+          toast.info('All browsers are busy — build queued and will start automatically');
+        } else {
+          router.push(`/builds/${result.buildId}`);
+        }
       }
     } catch (error) {
       console.error('Failed to start build:', error);
@@ -243,8 +263,8 @@ export function RunDashboardClient({ tests, runs: _runs, builds, repositoryId, a
   return (
     <div className="flex-1 p-6 overflow-auto">
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 max-w-6xl mx-auto">
-        {/* Left Column - Run Tests */}
-        <div className="space-y-6">
+        {/* Right Column - Run Tests */}
+        <div className="space-y-6 lg:order-2">
           <Card>
             <CardHeader>
               <div className="flex items-center justify-between">
@@ -640,8 +660,8 @@ export function RunDashboardClient({ tests, runs: _runs, builds, repositoryId, a
           </Card>
         </div>
 
-        {/* Right Column - Build History */}
-        <div className="space-y-6 flex flex-col">
+        {/* Left Column - Build History */}
+        <div className="space-y-6 flex flex-col lg:order-1">
           <Card className="flex-1 flex flex-col">
             <CardHeader>
               <div className="flex items-center justify-between">
@@ -684,8 +704,9 @@ export function RunDashboardClient({ tests, runs: _runs, builds, repositoryId, a
             <CardContent className="flex-1">
               {builds.length > 0 ? (
                 (() => {
-                  const mainBaselineBuildId = builds.find(b => b.overallStatus === 'safe_to_merge' && b.gitBranch === defaultBranch)?.id;
-                  const branchBaselineBuildId = currentBranch && currentBranch !== defaultBranch
+                  const effectiveDefaultBranch = defaultBranch || 'main';
+                  const mainBaselineBuildId = builds.find(b => b.overallStatus === 'safe_to_merge' && b.gitBranch === effectiveDefaultBranch)?.id;
+                  const branchBaselineBuildId = currentBranch && currentBranch !== effectiveDefaultBranch
                     ? builds.find(b => b.overallStatus === 'safe_to_merge' && b.gitBranch === currentBranch)?.id
                     : undefined;
                   return buildView === 'graph' ? (

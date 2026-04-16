@@ -15,6 +15,7 @@ import { EmbeddedTestExecutor } from './test-executor.js';
 import { EmbeddedRecorder } from './embedded-recorder.js';
 import { EmbeddedDebugExecutor } from './debug-executor.js';
 import { CROSS_OS_CHROMIUM_ARGS } from './stabilization.js';
+import { inspectElementAtPoint, getAllDomSelectors, type SelectorPriorityConfig } from './selector-utils.js';
 
 import os from 'os';
 
@@ -144,6 +145,132 @@ async function startup(): Promise<void> {
     }
   };
 
+  // Handle inspect element requests (point-and-click selector inspector)
+  streamServer.onInspectElement = async (x: number, y: number) => {
+    const targetPage = (isDebugging && debugExecutor?.getPage())
+      ? debugExecutor.getPage()
+      : (isRecording && recorder?.isActive()) ? recorder.getPage() : page;
+    if (!targetPage) return null;
+    // Use default priority if no settings available
+    const defaultPriority: SelectorPriorityConfig = [
+      { type: 'data-testid', enabled: true, priority: 1 },
+      { type: 'id', enabled: true, priority: 2 },
+      { type: 'label', enabled: true, priority: 3 },
+      { type: 'role-name', enabled: true, priority: 4 },
+      { type: 'aria-label', enabled: true, priority: 5 },
+      { type: 'text', enabled: true, priority: 6 },
+      { type: 'placeholder', enabled: true, priority: 7 },
+      { type: 'name', enabled: true, priority: 8 },
+      { type: 'css-path', enabled: true, priority: 9 },
+      { type: 'heading-context', enabled: true, priority: 10 },
+    ];
+    return inspectElementAtPoint(targetPage, x, y, defaultPriority);
+  };
+
+  // Handle DOM snapshot requests (download all selectors)
+  streamServer.onDomSnapshot = async () => {
+    const targetPage = (isDebugging && debugExecutor?.getPage())
+      ? debugExecutor.getPage()
+      : (isRecording && recorder?.isActive()) ? recorder.getPage() : page;
+    if (!targetPage) return { elements: [], url: '', timestamp: Date.now() };
+    const defaultPriority: SelectorPriorityConfig = [
+      { type: 'data-testid', enabled: true, priority: 1 },
+      { type: 'id', enabled: true, priority: 2 },
+      { type: 'label', enabled: true, priority: 3 },
+      { type: 'role-name', enabled: true, priority: 4 },
+      { type: 'aria-label', enabled: true, priority: 5 },
+      { type: 'text', enabled: true, priority: 6 },
+      { type: 'placeholder', enabled: true, priority: 7 },
+      { type: 'name', enabled: true, priority: 8 },
+      { type: 'css-path', enabled: true, priority: 9 },
+      { type: 'heading-context', enabled: true, priority: 10 },
+    ];
+    return getAllDomSelectors(targetPage, defaultPriority);
+  };
+
+  // Inject/remove a DOM-based highlight overlay that follows the mouse.
+  // CDP Overlay.setInspectMode doesn't respond to Input.dispatchMouseEvent in
+  // headless mode, so we inject a script that listens for native mousemove and
+  // draws a highlight box + info tooltip on the element under the cursor.
+  streamServer.onInspectModeChange = (enabled: boolean) => {
+    const targetPage = (isDebugging && debugExecutor?.getPage())
+      ? debugExecutor.getPage()
+      : (isRecording && recorder?.isActive()) ? recorder.getPage() : page;
+    if (!targetPage) return;
+
+    if (enabled) {
+      targetPage.evaluate(() => {
+        // Remove previous if any
+        document.getElementById('__lastest_inspect_overlay')?.remove();
+        document.getElementById('__lastest_inspect_tooltip')?.remove();
+
+        const overlay = document.createElement('div');
+        overlay.id = '__lastest_inspect_overlay';
+        overlay.style.cssText = 'position:fixed;pointer-events:none;z-index:2147483646;border:2px solid #3b82f6;background:rgba(59,130,246,0.08);border-radius:2px;transition:all 0.05s ease-out;display:none;';
+        document.documentElement.appendChild(overlay);
+
+        const tooltip = document.createElement('div');
+        tooltip.id = '__lastest_inspect_tooltip';
+        tooltip.style.cssText = 'position:fixed;pointer-events:none;z-index:2147483647;background:#1f2937;color:#e5e7eb;font:11px/1.4 system-ui,sans-serif;padding:3px 8px;border-radius:4px;white-space:nowrap;display:none;box-shadow:0 2px 8px rgba(0,0,0,0.3);';
+        document.documentElement.appendChild(tooltip);
+
+        function onMove(e: MouseEvent) {
+          const el = document.elementFromPoint(e.clientX, e.clientY) as HTMLElement | null;
+          if (!el || el === overlay || el === tooltip || el === document.body || el === document.documentElement) {
+            overlay.style.display = 'none';
+            tooltip.style.display = 'none';
+            return;
+          }
+          const rect = el.getBoundingClientRect();
+          overlay.style.display = 'block';
+          overlay.style.left = rect.x + 'px';
+          overlay.style.top = rect.y + 'px';
+          overlay.style.width = rect.width + 'px';
+          overlay.style.height = rect.height + 'px';
+
+          // Build tooltip text
+          let info = el.tagName.toLowerCase();
+          if (el.id) info += '#' + el.id;
+          const cls = el.className;
+          if (typeof cls === 'string' && cls.trim()) {
+            info += '.' + cls.trim().split(/\s+/).slice(0, 2).join('.');
+          }
+          info += '  ' + Math.round(rect.width) + ' \u00d7 ' + Math.round(rect.height);
+          tooltip.textContent = info;
+          tooltip.style.display = 'block';
+
+          // Position tooltip above or below the element
+          const ttRect = tooltip.getBoundingClientRect();
+          let tx = rect.x;
+          let ty = rect.y - ttRect.height - 6;
+          if (ty < 0) ty = rect.bottom + 6;
+          if (tx + ttRect.width > window.innerWidth) tx = window.innerWidth - ttRect.width - 4;
+          if (tx < 0) tx = 4;
+          tooltip.style.left = tx + 'px';
+          tooltip.style.top = ty + 'px';
+        }
+
+        document.addEventListener('mousemove', onMove, true);
+        // Store cleanup reference
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (window as any).__lastest_inspect_cleanup = () => {
+          document.removeEventListener('mousemove', onMove, true);
+          overlay.remove();
+          tooltip.remove();
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          delete (window as any).__lastest_inspect_cleanup;
+        };
+      }).catch(err => console.error('[Inspect] Failed to inject overlay script:', err));
+      console.log('[Inspect] DOM overlay injected');
+    } else {
+      targetPage.evaluate(() => {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (window as any).__lastest_inspect_cleanup?.();
+      }).catch(() => {});
+      console.log('[Inspect] DOM overlay removed');
+    }
+  };
+
   await screencast.start(page, (frame) => {
     streamServer!.broadcastFrame(frame.data, frame.width, frame.height, frame.timestamp);
   });
@@ -228,6 +355,16 @@ async function startup(): Promise<void> {
             const callbacks = shouldStreamTest ? {
               onPageCreated: async (testPage: Page) => {
                 try {
+                  // Force the test page to render at the EB's native resolution
+                  const cdp = await testPage.context().newCDPSession(testPage);
+                  await cdp.send('Emulation.setDeviceMetricsOverride', {
+                    width: config.viewportWidth,
+                    height: config.viewportHeight,
+                    deviceScaleFactor: 1,
+                    mobile: false,
+                  });
+                  await cdp.detach();
+
                   await capturedScreencast.stop();
                   await capturedScreencast.start(testPage, (frame) => {
                     capturedStreamServer.broadcastFrame(frame.data, frame.width, frame.height, frame.timestamp);
@@ -312,6 +449,8 @@ async function startup(): Promise<void> {
                 softErrors: result.softErrors,
                 videoData: result.videoData,
                 videoFilename: result.videoFilename,
+                lastReachedStep: result.lastReachedStep,
+                totalSteps: result.totalSteps,
               },
             });
 
@@ -338,6 +477,25 @@ async function startup(): Promise<void> {
             activeTestIds.delete(payload.testId);
             activeTasks--;
             if (activeTasks === 0) {
+              // Post-task cleanup: ensure clean state for next pool assignment
+              if (browser) {
+                // Close any lingering contexts (leaked from crashed tests)
+                const contexts = browser.contexts();
+                for (const ctx of contexts) {
+                  if (ctx !== context) {
+                    try { await ctx.close(); } catch {}
+                  }
+                }
+                // Clear idle context state so next task starts fresh
+                if (context) {
+                  try {
+                    await context.clearCookies();
+                    await context.clearPermissions();
+                    if (page) await page.goto('about:blank');
+                  } catch {}
+                }
+              }
+
               capturedClient.setStatus('idle');
               streamServer?.broadcastStatus('ready');
               // Restart screencast on idle page (headed: already restored by onBeforePageClose,
@@ -359,6 +517,10 @@ async function startup(): Promise<void> {
 
       case 'command:start_recording': {
         if (!browser || !runnerClient || !recorder) break;
+        // Reset inspect mode (may have been left on by a debug session)
+        if (streamServer) {
+          streamServer.inspectMode = false;
+        }
         const payload = command.payload as {
           sessionId: string; targetUrl: string;
           viewport?: { width: number; height: number };
@@ -438,6 +600,9 @@ async function startup(): Promise<void> {
       case 'command:stop_recording': {
         if (!runnerClient || !page) break;
         const payload = command.payload as { sessionId: string };
+
+        // Reset inspect mode when stopping recording
+        if (streamServer) streamServer.inspectMode = false;
 
         // Clear watchdog first
         if (recordingWatchdog) { clearInterval(recordingWatchdog); recordingWatchdog = null; }
@@ -525,6 +690,11 @@ async function startup(): Promise<void> {
 
       case 'command:start_debug': {
         if (!browser || !runnerClient) break;
+        // Remember & reset inspect mode from any previous session
+        const wasInspecting = streamServer?.inspectMode ?? false;
+        if (streamServer) {
+          streamServer.inspectMode = false;
+        }
         const payload = command.payload as {
           sessionId: string; testId: string; code: string;
           cleanBody: string; steps: import('./debug-executor.js').DebugStep[];
@@ -551,6 +721,16 @@ async function startup(): Promise<void> {
           // Attach screencast + input to the debug page
           const dbgPage = debugExecutor.getPage();
           if (dbgPage && screencast) {
+            // Force the debug page to render at the EB's native resolution
+            const cdp = await dbgPage.context().newCDPSession(dbgPage);
+            await cdp.send('Emulation.setDeviceMetricsOverride', {
+              width: config.viewportWidth,
+              height: config.viewportHeight,
+              deviceScaleFactor: 1,
+              mobile: false,
+            });
+            await cdp.detach();
+
             await screencast.start(dbgPage, (frame) => {
               streamServer!.broadcastFrame(frame.data, frame.width, frame.height, frame.timestamp);
             });
@@ -558,6 +738,12 @@ async function startup(): Promise<void> {
           }
 
           isDebugging = true;
+
+          // Re-inject inspect overlay on the new debug page if it was active
+          if (wasInspecting && streamServer) {
+            streamServer.inspectMode = true;
+            streamServer.onInspectModeChange?.(true);
+          }
 
           // Start state reporter (250ms interval)
           debugStateReporter = setInterval(() => {
@@ -615,6 +801,16 @@ async function startup(): Promise<void> {
           await inputHandler?.detach();
           const newPage = debugExecutor.getPage();
           if (newPage && screencast) {
+            // Force the new debug page to render at the EB's native resolution
+            const cdp = await newPage.context().newCDPSession(newPage);
+            await cdp.send('Emulation.setDeviceMetricsOverride', {
+              width: config.viewportWidth,
+              height: config.viewportHeight,
+              deviceScaleFactor: 1,
+              mobile: false,
+            });
+            await cdp.detach();
+
             await screencast.start(newPage, (frame) => {
               streamServer!.broadcastFrame(frame.data, frame.width, frame.height, frame.timestamp);
             });
@@ -626,6 +822,10 @@ async function startup(): Promise<void> {
 
       case 'command:stop_debug': {
         if (!runnerClient || !page) break;
+
+        // Remember & reset inspect mode
+        const debugWasInspecting = streamServer?.inspectMode ?? false;
+        if (streamServer) streamServer.inspectMode = false;
 
         // Clear state reporter
         if (debugStateReporter) { clearInterval(debugStateReporter); debugStateReporter = null; }
@@ -649,6 +849,12 @@ async function startup(): Promise<void> {
             await inputHandler?.attach(page);
           } catch (err) {
             console.error('[Command] Error restoring idle page after debug stop:', err);
+          }
+
+          // Re-inject inspect overlay on the idle page if it was active
+          if (debugWasInspecting && streamServer) {
+            streamServer.inspectMode = true;
+            streamServer.onInspectModeChange?.(true);
           }
         }
 

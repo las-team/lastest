@@ -16,7 +16,8 @@ cd "$ROOT_DIR"
 # --- Config ---
 ZIMA_HOST="192.168.1.138"
 ZIMA_USER="ewyct"
-ZIMA_COMPOSE="/var/lib/casaos/apps/lastest/docker-compose.yml"
+ZIMA_DIR="/var/lib/casaos/apps/lastest2"
+ZIMA_COMPOSE="$ZIMA_DIR/docker-compose.yml"
 
 OLARES_HOST="ewyctorlab.olares.local"
 OLARES_USER="root"
@@ -207,8 +208,26 @@ deploy_zima() {
   docker save "${images[@]}" | ssh "$ZIMA_USER@$ZIMA_HOST" 'docker load'
   ok "Images loaded on $ZIMA_HOST"
 
+  log "Validating server compose file..."
+  local remote_compose
+  remote_compose=$(ssh "$ZIMA_USER@$ZIMA_HOST" "cat $ZIMA_COMPOSE")
+
+  # EB containers must use LASTEST_URL (not LASTEST2_URL)
+  if echo "$remote_compose" | grep -q 'LASTEST2_URL'; then
+    err "Compose has LASTEST2_URL — should be LASTEST_URL (EB env var mismatch)"
+  fi
+  # Ensure required EB env vars are present when EB service exists
+  if echo "$remote_compose" | grep -q 'embedded-browser'; then
+    for var in LASTEST_URL SYSTEM_EB_TOKEN STREAM_PORT; do
+      if ! echo "$remote_compose" | grep -q "$var"; then
+        err "Compose is missing $var for embedded-browser service"
+      fi
+    done
+  fi
+  ok "Compose file looks good"
+
   log "Restarting containers..."
-  ssh "$ZIMA_USER@$ZIMA_HOST" "cd /var/lib/casaos/apps/lastest && docker compose up -d"
+  ssh "$ZIMA_USER@$ZIMA_HOST" "cd $ZIMA_DIR && docker compose up -d"
 
   log "Verifying deployment..."
   bash "$SCRIPT_DIR/health-check.sh" "http://$ZIMA_HOST:3000"
@@ -288,7 +307,7 @@ deploy_zima_transfer() {
   local images=("$IMAGE_APP:latest")
   [ "$APP_ONLY" != true ] && images+=("$IMAGE_EB:latest")
   docker save "${images[@]}" | ssh "$ZIMA_USER@$ZIMA_HOST" 'docker load'
-  ssh "$ZIMA_USER@$ZIMA_HOST" "cd /var/lib/casaos/apps/lastest && docker compose up -d"
+  ssh "$ZIMA_USER@$ZIMA_HOST" "cd $ZIMA_DIR && docker compose up -d"
   bash "$SCRIPT_DIR/health-check.sh" "http://$ZIMA_HOST:3000"
 }
 

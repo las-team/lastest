@@ -30,6 +30,7 @@ export interface CodeGenEvent {
     deltaY?: number;
     downloadWrap?: boolean;
     autoDetected?: boolean;
+    downloadFilename?: string;
   };
 }
 
@@ -145,7 +146,9 @@ export function eventsToCodeLines(
 
       const isRightClick = action === 'rightclick' || button === 2;
       const hasModifiers = modifiers && modifiers.length > 0;
-      const isDownloadClick = (action === 'click' || action === 'rightclick') && (nextClickIsDownload || downloadWrap);
+      // Auto-detected downloads are handled by passive page.on('download') listener — no wrapping needed.
+      // Only wrap if explicitly marked (not auto-detected) via nextClickIsDownload.
+      const isDownloadClick = (action === 'click' || action === 'rightclick') && nextClickIsDownload;
       if (nextClickIsDownload && (action === 'click' || action === 'rightclick')) nextClickIsDownload = false;
 
       const clickOptParts: string[] = [];
@@ -173,12 +176,16 @@ export function eventsToCodeLines(
           case 'rightclick':
             target.push(`${dIndent}await locateWithFallback(page, ${selectorsJson}, 'click', null, ${coordsArg}, ${clickOptions});`);
             break;
-          case 'fill':
-            target.push(`${dIndent}await locateWithFallback(page, ${selectorsJson}, 'fill', '${value || ''}', ${coordsArg});`);
+          case 'fill': {
+            const escapedFillVal = (value || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+            target.push(`${dIndent}await locateWithFallback(page, ${selectorsJson}, 'fill', '${escapedFillVal}', ${coordsArg});`);
             break;
-          case 'selectOption':
-            target.push(`${dIndent}await locateWithFallback(page, ${selectorsJson}, 'selectOption', '${value || ''}', null);`);
+          }
+          case 'selectOption': {
+            const escapedOptVal = (value || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+            target.push(`${dIndent}await locateWithFallback(page, ${selectorsJson}, 'selectOption', '${escapedOptVal}', null);`);
             break;
+          }
         }
       } else if (selector && selector.trim()) {
         switch (action) {
@@ -188,12 +195,16 @@ export function eventsToCodeLines(
           case 'rightclick':
             target.push(`${dIndent}await page.locator('${selector}').click(${clickOptions});`);
             break;
-          case 'fill':
-            target.push(`${dIndent}await page.locator('${selector}').fill('${value || ''}');`);
+          case 'fill': {
+            const escapedFillVal = (value || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+            target.push(`${dIndent}await page.locator('${selector}').fill('${escapedFillVal}');`);
             break;
-          case 'selectOption':
-            target.push(`${dIndent}await page.locator('${selector}').selectOption('${value || ''}');`);
+          }
+          case 'selectOption': {
+            const escapedOptVal = (value || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+            target.push(`${dIndent}await page.locator('${selector}').selectOption('${escapedOptVal}');`);
             break;
+          }
         }
       } else if ((action === 'click' || action === 'rightclick') && coordinates) {
         target.push(`${dIndent}// Coordinate-only ${isRightClick ? 'right-' : ''}click (no selectors found)`);
@@ -284,6 +295,13 @@ export function eventsToCodeLines(
             lines.push(`${indent}// Assertion: Verify DOM is ready`);
             lines.push(`${indent}await page.waitForLoadState('domcontentloaded');`);
             break;
+          case 'downloadExists': {
+            const dlName = event.data.downloadFilename;
+            lines.push(`${indent}// Download assertion: ${dlName || 'fileDownloaded'}`);
+            lines.push(`${indent}await downloads.waitForAny();`);
+            lines.push(`${indent}expect(downloads.list().length).toBeGreaterThan(0);`);
+            break;
+          }
         }
       }
     } else if (event.type === 'mouse-down' && event.data.coordinates) {
@@ -291,7 +309,8 @@ export function eventsToCodeLines(
       const modifiers = event.data.modifiers;
       const mouseButton = event.data.button;
       const buttonOpt = mouseButton === 2 ? `{ button: 'right' }` : '';
-      const isDownloadMouse = nextClickIsDownload || event.data.downloadWrap;
+      // Auto-detected downloads handled by passive listener — only wrap explicit markers
+      const isDownloadMouse = nextClickIsDownload;
       if (nextClickIsDownload) nextClickIsDownload = false;
 
       if (isDownloadMouse) {

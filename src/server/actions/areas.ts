@@ -60,12 +60,6 @@ export async function deleteArea(id: string) {
     await queries.moveTestToArea(test.id, null);
   }
 
-  // Move suites to unsorted
-  const areaSuites = await queries.getSuitesByArea(id);
-  for (const suite of areaSuites) {
-    await queries.moveSuiteToArea(suite.id, null);
-  }
-
   // Get child areas and move them to root
   const allAreas = await queries.getFunctionalAreas();
   const childAreas = allAreas.filter(a => a.parentId === id);
@@ -92,22 +86,17 @@ export async function deleteAreaWithContents(id: string) {
   };
   collect(id);
 
-  // Soft-delete all tests and suites in those areas
+  // Soft-delete all tests in those areas
   for (const areaId of idsToDelete) {
     const areaTests = await queries.getTestsByFunctionalArea(areaId);
     for (const test of areaTests) {
       await queries.softDeleteTest(test.id);
-    }
-    const areaSuites = await queries.getSuitesByArea(areaId);
-    for (const suite of areaSuites) {
-      await queries.deleteSuite(suite.id);
     }
     await queries.deleteFunctionalArea(areaId);
   }
 
   revalidatePath('/areas');
   revalidatePath('/tests');
-  revalidatePath('/suites');
 }
 
 export async function moveArea(id: string, newParentId: string | null) {
@@ -138,14 +127,6 @@ export async function moveTestToArea(testId: string, areaId: string | null) {
   revalidatePath('/areas');
   revalidatePath('/tests');
   revalidatePath(`/tests/${testId}`);
-}
-
-export async function moveSuiteToArea(suiteId: string, areaId: string | null) {
-  await requireTeamAccess();
-  await queries.moveSuiteToArea(suiteId, areaId);
-  revalidatePath('/areas');
-  revalidatePath('/suites');
-  revalidatePath(`/suites/${suiteId}`);
 }
 
 export async function reorderAreas(repositoryId: string, orderedIds: string[]) {

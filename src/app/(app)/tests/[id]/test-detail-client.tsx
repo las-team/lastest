@@ -27,7 +27,7 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { deleteTest, updateTest, getTestVersionHistory, restoreTestVersion, getVisualDiffsForTestResult, restoreTest, permanentlyDeleteTest, cloneTest } from '@/server/actions/tests';
 import { runTests, getJobStatus } from '@/server/actions/runs';
-import { aiFixTest, aiEnhanceTest, updateTestCode, startGeneratePlaceholderTestAgent } from '@/server/actions/ai';
+import { startHealTestAgent, aiEnhanceTest, updateTestCode, startGeneratePlaceholderTestAgent } from '@/server/actions/ai';
 import { toast } from 'sonner';
 import { useNotifyJobStarted } from '@/components/queue/job-polling-context';
 import { ExecutionTargetSelector } from '@/components/execution/execution-target-selector';
@@ -68,6 +68,7 @@ interface TestResult {
   browser: string | null;
   consoleErrors: string[] | null;
   networkRequests: import('@/lib/db/schema').NetworkRequest[] | null;
+  downloads: import('@/lib/db/schema').DownloadRecord[] | null;
   videoPath: string | null;
   a11yViolations: A11yViolation[] | null;
   softErrors: string[] | null;
@@ -75,6 +76,8 @@ interface TestResult {
   startedAt: Date | null;
   networkBodiesPath: string | null;
   screenshots: import('@/lib/db/schema').CapturedScreenshot[] | null;
+  lastReachedStep: number | null;
+  totalSteps: number | null;
 }
 
 interface DefaultStepForUI {
@@ -368,7 +371,7 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
     setIsDeleting(true);
     try {
       await deleteTest(test.id);
-      router.push('/definition');
+      router.push('/tests');
     } finally {
       setIsDeleting(false);
     }
@@ -388,7 +391,7 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
     setIsPermanentlyDeleting(true);
     try {
       await permanentlyDeleteTest(test.id);
-      router.push('/definition');
+      router.push('/tests');
     } finally {
       setIsPermanentlyDeleting(false);
     }
@@ -413,7 +416,9 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
       }
 
       // Fetch stream URL for headed runs on embedded/system runners
-      if (!headless && executionTarget !== 'local') {
+      // For specific runners, fetch immediately. For 'auto', resolve via job poll below.
+      const isAutoTarget = !executionTarget || executionTarget === 'auto' || executionTarget === 'local';
+      if (!headless && !isAutoTarget) {
         try {
           const streamInfo = await getStreamUrlForRunner(executionTarget);
           if (streamInfo?.streamUrl) {
@@ -430,8 +435,29 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
       }
 
       // Poll job status for completion (ensures results are saved before refresh)
+      // Also resolves stream URL for 'auto' target headed runs
+      let streamResolved = !isAutoTarget || headless;
       pollIntervalRef.current = setInterval(async () => {
-        const { isComplete, status, error } = await getJobStatus(jobId);
+        const { isComplete, status, error, actualRunnerId } = await getJobStatus(jobId);
+
+        // Resolve stream URL once the actual runner is known
+        if (!streamResolved && !headless && actualRunnerId) {
+          streamResolved = true;
+          try {
+            const streamInfo = await getStreamUrlForRunner(actualRunnerId);
+            if (streamInfo?.streamUrl) {
+              const token = streamInfo.streamAuthToken;
+              setStreamUrl(
+                token
+                  ? `${streamInfo.streamUrl}?token=${encodeURIComponent(token)}`
+                  : streamInfo.streamUrl
+              );
+            }
+          } catch {
+            // Stream not available — not critical
+          }
+        }
+
         if (isComplete) {
           if (pollIntervalRef.current) {
             clearInterval(pollIntervalRef.current);
@@ -479,17 +505,18 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
     if (!repositoryId) return;
     setIsFixing(true);
     try {
-      const errorMsg = latestResult?.errorMessage || 'Test needs fixing';
-      const result = await aiFixTest(repositoryId, test.id, errorMsg);
-      if (result.success && result.code) {
-        await updateTestCode(test.id, result.code, 'ai_fix');
-        toast.success('Test fixed and saved');
-        router.refresh();
+      const result = await startHealTestAgent({
+        repositoryId,
+        testId: test.id,
+        testName: test.name,
+      });
+      if (result.success) {
+        toast.success('Test healing started — check the activity feed for progress');
       } else {
-        toast.error(result.error || 'Failed to fix test');
+        toast.error(result.error || 'Failed to start test healing');
       }
     } catch {
-      toast.error('Failed to fix test');
+      toast.error('Failed to start test healing');
     } finally {
       setIsFixing(false);
     }
@@ -1002,6 +1029,8 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
               errorMessage={latestResult?.errorMessage ?? null}
               screenshots={latestResult?.screenshots ?? null}
               envBaseUrl={envBaseUrl ?? null}
+              lastReachedStep={latestResult?.lastReachedStep ?? null}
+              totalSteps={latestResult?.totalSteps ?? null}
               onParseNeeded={async () => {
                 try {
                   const { parseAssertions } = await import('@/lib/playwright/assertion-parser');
@@ -1239,7 +1268,7 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
                               ) : null;
                             })()}
 
-                            <RuntimeErrorsPanel consoleErrors={result.consoleErrors} networkRequests={result.networkRequests} networkBodiesPath={result.networkBodiesPath} />
+                            <RuntimeErrorsPanel consoleErrors={result.consoleErrors} networkRequests={result.networkRequests} networkBodiesPath={result.networkBodiesPath} downloads={result.downloads} />
 
                             {result.softErrors && (result.softErrors as string[]).length > 0 && (
                               <div className="mt-2 p-2 bg-yellow-50 border border-yellow-200 rounded text-sm text-yellow-800 dark:bg-yellow-950/30 dark:border-yellow-800 dark:text-yellow-200">

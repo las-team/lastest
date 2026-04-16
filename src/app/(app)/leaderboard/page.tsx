@@ -24,7 +24,7 @@ export default async function LeaderboardPage() {
   }
 
   const [leaderboard, blitz] = await Promise.all([
-    queries.getSeasonLeaderboard(season.id, 10),
+    queries.getSeasonLeaderboard(season.id, session.team.id, 10),
     queries.getActiveBugBlitz(session.team.id),
   ]);
 
@@ -35,7 +35,7 @@ export default async function LeaderboardPage() {
     const row = await queries.getUserScoreRow(season.id, 'user', viewerId);
     if (row) {
       // Rank is approximate (count of actors with strictly higher score + 1).
-      const allRows = await queries.getSeasonLeaderboard(season.id, 1000);
+      const allRows = await queries.getSeasonLeaderboard(season.id, session.team.id, 1000);
       const betterCount = allRows.findIndex((r) => r.actorKind === 'user' && r.actorId === viewerId);
       viewerRow = {
         rank: betterCount >= 0 ? betterCount + 1 : leaderboard.length + 1,

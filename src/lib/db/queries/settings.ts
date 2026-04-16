@@ -169,18 +169,19 @@ export async function getEnvironmentConfig(repositoryId?: string | null) {
     if (config) return { ...config, baseUrl: config.baseUrl.replace(/\/+$/, '') };
   }
 
-  // Return global config (no repositoryId) or defaults
-  const [globalConfig] = await db
-    .select()
-    .from(environmentConfigs)
-    .where(isNull(environmentConfigs.repositoryId));
-
-  if (globalConfig) return { ...globalConfig, baseUrl: globalConfig.baseUrl.replace(/\/+$/, '') };
+  // Only return global config when explicitly asked (no repositoryId)
+  if (!repositoryId) {
+    const [globalConfig] = await db
+      .select()
+      .from(environmentConfigs)
+      .where(isNull(environmentConfigs.repositoryId));
+    if (globalConfig) return { ...globalConfig, baseUrl: globalConfig.baseUrl.replace(/\/+$/, '') };
+  }
 
   // Return default config object (not saved)
   return {
     id: 'default',
-    repositoryId: null,
+    repositoryId: repositoryId ?? null,
     mode: 'manual' as const,
     baseUrl: 'http://localhost:3000',
     startCommand: null,
@@ -346,7 +347,6 @@ export async function getAISettings(repositoryId?: string | null) {
     anthropicModel: DEFAULT_AI_SETTINGS.anthropicModel,
     openaiApiKey: null,
     openaiModel: DEFAULT_AI_SETTINGS.openaiModel,
-    pwAgentEnabled: DEFAULT_AI_SETTINGS.pwAgentEnabled,
     pwAgentModel: DEFAULT_AI_SETTINGS.pwAgentModel,
     pwAgentTimeout: DEFAULT_AI_SETTINGS.pwAgentTimeout,
     createdAt: null,

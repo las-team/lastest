@@ -7,6 +7,7 @@ import {
   passwordResetTokens,
   emailVerificationTokens,
   userInvitations,
+  userConsents,
   repositories,
   githubAccounts,
 } from '../schema';
@@ -17,6 +18,7 @@ import type {
   User,
   Team,
   UserRole,
+  ConsentType,
 } from '../schema';
 import { eq, desc, and, gte, lt, isNull } from 'drizzle-orm';
 import { v4 as uuid } from 'uuid';
@@ -405,4 +407,67 @@ export async function deleteInvitation(id: string) {
 export async function deleteExpiredInvitations() {
   const now = new Date();
   await db.delete(userInvitations).where(lt(userInvitations.expiresAt, now));
+}
+
+// ============================================
+// User Consents (GDPR)
+// ============================================
+
+export async function recordConsent(data: {
+  userId: string;
+  consentType: ConsentType;
+  granted: boolean;
+  version: string;
+  ipAddress?: string;
+  userAgent?: string;
+}) {
+  const id = uuid();
+  await db.insert(userConsents).values({
+    id,
+    userId: data.userId,
+    consentType: data.consentType,
+    granted: data.granted,
+    version: data.version,
+    ipAddress: data.ipAddress ?? null,
+    userAgent: data.userAgent ?? null,
+    grantedAt: new Date(),
+  });
+  return { id };
+}
+
+export async function getUserActiveConsents(userId: string) {
+  return db
+    .select()
+    .from(userConsents)
+    .where(and(eq(userConsents.userId, userId), isNull(userConsents.revokedAt)))
+    .orderBy(desc(userConsents.grantedAt));
+}
+
+export async function hasAcceptedTerms(userId: string): Promise<boolean> {
+  const [row] = await db
+    .select({ id: userConsents.id })
+    .from(userConsents)
+    .where(
+      and(
+        eq(userConsents.userId, userId),
+        eq(userConsents.consentType, 'terms_of_service'),
+        eq(userConsents.granted, true),
+        isNull(userConsents.revokedAt)
+      )
+    )
+    .limit(1);
+  return !!row;
+}
+
+export async function revokeConsent(userId: string, consentType: ConsentType) {
+  await db
+    .update(userConsents)
+    .set({ revokedAt: new Date() })
+    .where(
+      and(
+        eq(userConsents.userId, userId),
+        eq(userConsents.consentType, consentType),
+        isNull(userConsents.revokedAt)
+      )
+    );
 }

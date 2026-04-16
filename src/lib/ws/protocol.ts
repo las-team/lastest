@@ -43,7 +43,12 @@ export type MessageType =
   | 'stream:frame'
   | 'stream:input'
   | 'stream:session'
-  | 'stream:status';
+  | 'stream:status'
+  | 'stream:inspect_element_request'
+  | 'stream:inspect_element_response'
+  | 'stream:dom_snapshot_request'
+  | 'stream:dom_snapshot_response'
+  | 'stream:inspect_mode';
 
 export interface BaseMessage {
   id: string;
@@ -630,11 +635,63 @@ export interface StreamStatusMessage extends BaseMessage {
   };
 }
 
+/** Client → Server: Request selectors for element at coordinates */
+export interface InspectElementRequestMessage extends BaseMessage {
+  type: 'stream:inspect_element_request';
+  payload: { x: number; y: number };
+}
+
+/** Server → Client: Selectors for inspected element */
+export interface InspectElementResponseMessage extends BaseMessage {
+  type: 'stream:inspect_element_response';
+  payload: {
+    element: {
+      tag: string;
+      id?: string;
+      textContent?: string;
+      boundingBox: { x: number; y: number; width: number; height: number };
+      selectors: Array<{ type: string; value: string }>;
+    } | null;
+  };
+}
+
+/** Client → Server: Request full DOM selector snapshot */
+export interface DomSnapshotRequestMessage extends BaseMessage {
+  type: 'stream:dom_snapshot_request';
+}
+
+/** Server → Client: Full DOM snapshot with all interactive elements */
+export interface DomSnapshotResponseMessage extends BaseMessage {
+  type: 'stream:dom_snapshot_response';
+  payload: {
+    elements: Array<{
+      tag: string;
+      id?: string;
+      textContent?: string;
+      boundingBox: { x: number; y: number; width: number; height: number };
+      selectors: Array<{ type: string; value: string }>;
+    }>;
+    url: string;
+    timestamp: number;
+  };
+}
+
+/** Client → Server: Toggle inspect mode (suppresses input forwarding on EB side) */
+export interface InspectModeMessage extends BaseMessage {
+  type: 'stream:inspect_mode';
+  payload: { enabled: boolean };
+}
+
 export type StreamMessage =
   | ScreencastFrameMessage
   | StreamInputMessage
   | StreamSessionMessage
-  | StreamStatusMessage;
+  | StreamStatusMessage
+  | InspectElementRequestMessage
+  | InspectElementResponseMessage
+  | DomSnapshotRequestMessage
+  | DomSnapshotResponseMessage
+  | InspectModeMessage;
 
 export function isStreamMessage(msg: { type: string }): boolean {
   return msg.type.startsWith('stream:');

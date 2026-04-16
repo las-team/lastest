@@ -154,11 +154,15 @@ RUN ln -sf .pnpm/tesseract.js@7.0.0/node_modules/tesseract.js ./node_modules/tes
 RUN npm install -g @anthropic-ai/claude-code@latest 2>/dev/null || \
     ln -s /app/node_modules/@anthropic-ai/claude-agent-sdk/cli.js /usr/local/bin/claude
 
+# Copy ws (used by activity-feed-server + embedded-browser)
+COPY --from=deps --chown=nextjs:nodejs /app/node_modules/.pnpm/ws@8.19.0/node_modules/ws ./node_modules/.pnpm/ws@8.19.0/node_modules/ws
+RUN ln -sf .pnpm/ws@8.19.0/node_modules/ws ./node_modules/ws
+
 # Copy embedded-browser dist + runtime deps
 COPY --from=builder --chown=nextjs:nodejs /app/packages/embedded-browser/dist /app/embedded-browser/dist
 COPY --from=builder --chown=nextjs:nodejs /app/packages/embedded-browser/package.json /app/embedded-browser/
-COPY --from=deps --chown=nextjs:nodejs /app/node_modules/.pnpm/ws@8.19.0/node_modules/ws /app/embedded-browser/node_modules/ws
 RUN mkdir -p /app/embedded-browser/node_modules && \
+    ln -s /app/node_modules/ws /app/embedded-browser/node_modules/ws && \
     ln -s /app/node_modules/playwright /app/embedded-browser/node_modules/playwright && \
     ln -s /app/node_modules/playwright-core /app/embedded-browser/node_modules/playwright-core
 
@@ -169,9 +173,8 @@ COPY --chown=nextjs:nodejs scripts/migrate.js /app/migrate.js
 COPY --chown=nextjs:nodejs scripts/ws-proxy-preload.js /app/ws-proxy-preload.js
 
 # Create storage directories
-RUN mkdir -p /app/storage/screenshots /app/storage/baselines /app/storage/diffs /app/storage/traces /app/storage/videos /app/storage/planned /app/storage/bug-reports /home/nextjs/.claude && \
-    chown -R nextjs:nodejs /app && \
-    chown nextjs:nodejs /home/nextjs/.claude
+RUN mkdir -p /app/storage/screenshots /app/storage/baselines /app/storage/diffs /app/storage/traces /app/storage/videos /app/storage/planned /app/storage/bug-reports && \
+    chown -R nextjs:nodejs /app
 
 # Environment configuration
 ENV NODE_ENV=production

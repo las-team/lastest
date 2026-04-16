@@ -2,7 +2,7 @@
  * Setup System Exports
  *
  * Infrastructure for setting up target application environment before visual tests run.
- * Supports setup scripts (Playwright code) and API seeding at build, suite, and test levels.
+ * Supports setup scripts (Playwright code) and API seeding at build and test levels.
  */
 
 // Types

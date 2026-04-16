@@ -11,6 +11,7 @@ interface ActivityFeedContextValue {
   isConnected: boolean;
   activeSessionCount: number;
   clearEvents: () => void;
+  historyLoaded: boolean;
 }
 
 const ActivityFeedContext = createContext<ActivityFeedContextValue | null>(null);
@@ -27,19 +28,34 @@ export function useActivityFeedContextSafe() {
 }
 
 const MAX_EVENTS = 500;
-const SSE_RETRY_DELAY = 3000;
-const SSE_MAX_RETRIES = 10;
+const WS_RETRY_DELAY = 3000;
+const WS_MAX_RETRIES = 10;
+
+function buildWsUrl(path: string): string {
+  const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+  return `${proto}//${window.location.host}${path}`;
+}
 
 export function ActivityFeedProvider({ children }: { children: React.ReactNode }) {
   const [events, setEvents] = useState<ActivityEvent[]>([]);
   const [isOpen, setIsOpen] = useState(false);
   const [isConnected, setIsConnected] = useState(false);
   const [activeSessionCount, setActiveSessionCount] = useState(0);
+  const [historyLoaded, setHistoryLoaded] = useState(false);
   const lastMcpToast = useRef(0);
   const retryCount = useRef(0);
   const retryTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const clearedAtRef = useRef<string | null>(
+    typeof window !== 'undefined' ? sessionStorage.getItem('activity-feed-cleared-at') : null
+  );
 
-  const clearEvents = useCallback(() => setEvents([]), []);
+  const clearEvents = useCallback(() => {
+    setEvents([]);
+    // Remember the timestamp so history reloads and WS messages don't bring them back
+    const ts = new Date().toISOString();
+    clearedAtRef.current = ts;
+    try { sessionStorage.setItem('activity-feed-cleared-at', ts); } catch {}
+  }, []);
 
   // Load recent history on mount so there's initial data
   useEffect(() => {
@@ -48,7 +64,11 @@ export function ActivityFeedProvider({ children }: { children: React.ReactNode }
       .then(data => {
         if (data?.events?.length) {
           // History comes in DESC order, reverse for chronological
-          const history = [...data.events].reverse() as ActivityEvent[];
+          let history = [...data.events].reverse() as ActivityEvent[];
+          // Filter out events before the last clear
+          if (clearedAtRef.current) {
+            history = history.filter(e => e.createdAt && new Date(e.createdAt) > new Date(clearedAtRef.current!));
+          }
           setEvents(history);
 
           // Count active sessions from history
@@ -58,31 +78,36 @@ export function ActivityFeedProvider({ children }: { children: React.ReactNode }
           ).length;
           setActiveSessionCount(Math.max(0, starts - ends));
         }
+        setHistoryLoaded(true);
       })
-      .catch(() => {});
+      .catch(() => {
+        setHistoryLoaded(true);
+      });
   }, []);
 
-  // Global SSE connection with retry
+  // WebSocket connection with retry (deferred to next tick to avoid hydration mismatch)
   useEffect(() => {
-    let es: EventSource | null = null;
+    let ws: WebSocket | null = null;
     let cancelled = false;
 
     function connect() {
       if (cancelled) return;
 
-      es = new EventSource('/api/activity-feed');
+      ws = new WebSocket(buildWsUrl('/api/activity-feed/ws'));
 
-      es.onopen = () => {
+      ws.onopen = () => {
         setIsConnected(true);
         retryCount.current = 0;
       };
 
-      es.onmessage = (e) => {
+      ws.onmessage = (e) => {
         try {
           const data = JSON.parse(e.data);
           if (data.type === 'connected') return;
 
           const event = data as ActivityEvent;
+          // Skip events from before the last clear
+          if (clearedAtRef.current && event.createdAt && new Date(event.createdAt) <= new Date(clearedAtRef.current)) return;
           setEvents((prev) => {
             // Dedupe by id
             if (prev.some(p => p.id === event.id)) return prev;
@@ -121,20 +146,23 @@ export function ActivityFeedProvider({ children }: { children: React.ReactNode }
             }
           }
         } catch {
-          // Ignore parse errors (keepalives)
+          // Ignore parse errors
         }
       };
 
-      es.onerror = () => {
+      ws.onclose = () => {
         setIsConnected(false);
-        es?.close();
 
         // Retry with backoff
-        if (!cancelled && retryCount.current < SSE_MAX_RETRIES) {
+        if (!cancelled && retryCount.current < WS_MAX_RETRIES) {
           retryCount.current++;
-          const delay = SSE_RETRY_DELAY * Math.min(retryCount.current, 5);
+          const delay = WS_RETRY_DELAY * Math.min(retryCount.current, 5);
           retryTimer.current = setTimeout(connect, delay);
         }
+      };
+
+      ws.onerror = () => {
+        // onclose will fire after this
       };
     }
 
@@ -142,7 +170,7 @@ export function ActivityFeedProvider({ children }: { children: React.ReactNode }
 
     return () => {
       cancelled = true;
-      es?.close();
+      ws?.close();
       if (retryTimer.current) clearTimeout(retryTimer.current);
       setIsConnected(false);
     };
@@ -150,7 +178,7 @@ export function ActivityFeedProvider({ children }: { children: React.ReactNode }
 
   return (
     <ActivityFeedContext.Provider
-      value={{ events, isOpen, setIsOpen, isConnected, activeSessionCount, clearEvents }}
+      value={{ events, isOpen, setIsOpen, isConnected, activeSessionCount, clearEvents, historyLoaded }}
     >
       {children}
     </ActivityFeedContext.Provider>

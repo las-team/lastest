@@ -130,7 +130,7 @@ export async function createPlaceholderTestCase(
   await queries.linkSpecToTest(specId, test.id);
 
   revalidatePath('/areas');
-  revalidatePath('/definition');
+  revalidatePath('/tests');
   return { testId: test.id };
 }
 
@@ -369,8 +369,203 @@ export async function convertPlanToPlaceholders(
   }
 
   revalidatePath('/areas');
-  revalidatePath('/definition');
+  revalidatePath('/tests');
   return { created };
+}
+
+/** Reverse of convertPlanToSpecs: compose an area's `agentPlan` from its existing specs. */
+export async function generatePlanFromSpecs(
+  functionalAreaId: string,
+  repositoryId: string,
+): Promise<{ success: boolean; planLength?: number; error?: string }> {
+  await requireRepoAccess(repositoryId);
+
+  const area = await queries.getFunctionalArea(functionalAreaId);
+  if (!area) return { success: false, error: 'Area not found' };
+
+  const specs = await queries.getSpecsForArea(functionalAreaId);
+  if (specs.length === 0) return { success: false, error: 'No specs to compose plan from' };
+
+  const header = `## ${area.name}${area.description ? `\n\n${area.description}` : ''}`;
+  const scenarios = specs.map((s, idx) => {
+    const body = s.spec?.trim() ? s.spec.trim() : s.title;
+    return `### Scenario ${idx + 1}: ${s.title}\n${body}`;
+  });
+  const plan = `${header}\n\n${scenarios.join('\n\n')}`;
+
+  await queries.updateFunctionalArea(functionalAreaId, {
+    agentPlan: plan,
+    planGeneratedAt: new Date(),
+  });
+
+  revalidatePath('/areas');
+  revalidatePath('/tests');
+  return { success: true, planLength: plan.length };
+}
+
+/** Given tests (optionally placeholder) in an area, create a linked spec for each one that lacks one. */
+export async function generateSpecsFromTests(
+  functionalAreaId: string,
+  repositoryId: string,
+  options?: { testIds?: string[] },
+): Promise<{ created: number }> {
+  await requireRepoAccess(repositoryId);
+
+  const area = await queries.getFunctionalArea(functionalAreaId);
+  if (!area) return { created: 0 };
+
+  const allTests = await queries.getTestsByFunctionalArea(functionalAreaId);
+  const targetTests = options?.testIds
+    ? allTests.filter(t => options.testIds!.includes(t.id))
+    : allTests;
+
+  let created = 0;
+  for (const test of targetTests) {
+    const existing = await queries.getTestSpec(test.id);
+    if (existing) continue;
+
+    const specBody = [
+      area.name ? `**Area:** ${area.name}` : '',
+      area.description ? `**Description:** ${area.description}` : '',
+      test.description || '',
+    ].filter(Boolean).join('\n\n') || test.name;
+
+    const specId = await queries.createTestSpec({
+      repositoryId,
+      testId: test.id,
+      functionalAreaId,
+      title: test.name,
+      spec: specBody,
+      source: 'manual',
+      status: 'has_test',
+      codeHash: hashCode(test.code),
+    });
+    await queries.linkSpecToTest(specId, test.id);
+    created++;
+  }
+
+  if (created > 0) {
+    revalidatePath('/areas');
+    revalidatePath('/tests');
+  }
+  return { created };
+}
+
+/** Compose an area's `agentPlan` from its existing tests (name + description). */
+export async function generatePlanFromTests(
+  functionalAreaId: string,
+  repositoryId: string,
+  options?: { testIds?: string[] },
+): Promise<{ success: boolean; planLength?: number; error?: string }> {
+  await requireRepoAccess(repositoryId);
+
+  const area = await queries.getFunctionalArea(functionalAreaId);
+  if (!area) return { success: false, error: 'Area not found' };
+
+  const allTests = await queries.getTestsByFunctionalArea(functionalAreaId);
+  const targetTests = options?.testIds
+    ? allTests.filter(t => options.testIds!.includes(t.id))
+    : allTests;
+
+  if (targetTests.length === 0) return { success: false, error: 'No tests to compose plan from' };
+
+  const header = `## ${area.name}${area.description ? `\n\n${area.description}` : ''}`;
+  const scenarios = targetTests.map((t, idx) => {
+    const body = t.description?.trim() ? t.description.trim() : t.name;
+    return `### Scenario ${idx + 1}: ${t.name}\n${body}`;
+  });
+  const plan = `${header}\n\n${scenarios.join('\n\n')}`;
+
+  await queries.updateFunctionalArea(functionalAreaId, {
+    agentPlan: plan,
+    planGeneratedAt: new Date(),
+  });
+
+  revalidatePath('/areas');
+  revalidatePath('/tests');
+  return { success: true, planLength: plan.length };
+}
+
+/**
+ * Fill the missing half (plan or specs) of an area, using tests as a fallback.
+ * Idempotent: safe to call after each of the generation paths (planner, generator, import).
+ */
+export async function syncAreaPlanAndSpecs(
+  functionalAreaId: string,
+  repositoryId: string,
+): Promise<{ specsCreated: number; planCreated: boolean }> {
+  await requireRepoAccess(repositoryId);
+
+  const area = await queries.getFunctionalArea(functionalAreaId);
+  if (!area) return { specsCreated: 0, planCreated: false };
+
+  const specs = await queries.getSpecsForArea(functionalAreaId);
+  const tests = await queries.getTestsByFunctionalArea(functionalAreaId);
+  const hasPlan = !!area.agentPlan?.trim();
+
+  let specsCreated = 0;
+  let planCreated = false;
+
+  // Fill specs side
+  if (specs.length === 0) {
+    if (hasPlan) {
+      const result = await convertPlanToSpecs(functionalAreaId, repositoryId);
+      specsCreated += result.created;
+    } else if (tests.length > 0) {
+      const result = await generateSpecsFromTests(functionalAreaId, repositoryId);
+      specsCreated += result.created;
+    }
+  } else {
+    // Back-fill specs for any tests missing one
+    const result = await generateSpecsFromTests(functionalAreaId, repositoryId);
+    specsCreated += result.created;
+  }
+
+  // Fill plan side
+  if (!hasPlan) {
+    const currentSpecs = specs.length > 0 ? specs : await queries.getSpecsForArea(functionalAreaId);
+    if (currentSpecs.length > 0) {
+      const result = await generatePlanFromSpecs(functionalAreaId, repositoryId);
+      planCreated = result.success;
+    } else if (tests.length > 0) {
+      const result = await generatePlanFromTests(functionalAreaId, repositoryId);
+      planCreated = result.success;
+    }
+  }
+
+  return { specsCreated, planCreated };
+}
+
+/** Bulk: for a set of tests (possibly across areas), create missing specs and refresh plan per area. */
+export async function bulkGenerateForTests(
+  repositoryId: string,
+  testIds: string[],
+): Promise<{ specsCreated: number; areasUpdated: number }> {
+  await requireRepoAccess(repositoryId);
+
+  if (testIds.length === 0) return { specsCreated: 0, areasUpdated: 0 };
+
+  // Group tests by area
+  const testsById = await Promise.all(testIds.map(id => queries.getTest(id)));
+  const areaGroups = new Map<string, string[]>();
+  for (const t of testsById) {
+    if (!t?.functionalAreaId) continue;
+    const list = areaGroups.get(t.functionalAreaId) ?? [];
+    list.push(t.id);
+    areaGroups.set(t.functionalAreaId, list);
+  }
+
+  let specsCreated = 0;
+  for (const [areaId, ids] of areaGroups) {
+    const { created } = await generateSpecsFromTests(areaId, repositoryId, { testIds: ids });
+    specsCreated += created;
+    // Refresh the plan side so both halves stay in sync.
+    await generatePlanFromTests(areaId, repositoryId);
+  }
+
+  revalidatePath('/areas');
+  revalidatePath('/tests');
+  return { specsCreated, areasUpdated: areaGroups.size };
 }
 
 /** Check if a test's code has drifted from its spec */

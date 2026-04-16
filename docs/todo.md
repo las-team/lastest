@@ -1,8 +1,7 @@
 ## tasks
 Videos explaining use
     Saját demo felvétele ahol van egy laza scripted előre megírva, ami egy törött vibe kódolt appon bemutatja hogy lépésről lépésre hogyan használod a Lastestet. A végén elmondani hogy a runnereket bárhol tudja futtatni, de itt a cloud instance, like and subscribe, kommentelj, kérdezz, nagyon lelkes a szerző.
-    sdfsd
--keyword pattern pages XY product for ZT
+    video2: claude uses lastest mcp
 MCP deploy for smithery
 Reach out to podcasts, meetups, youtube channels, add them to crm
 ## test
@@ -14,21 +13,20 @@ MCP
 triage
 a11y
 GH action edit
+DOM delta
 ## bugs
 Fix play specs -> test specs route
 ## features
-Improve selector reliability for manually recorded tests
+from EBs running 6 browsers -> 6*5 EBs forming on-demand
+
 (low) Every button is green, multiple primary actions, keep clicking on run test instead of save
 ## ideas
-Non-AI test triage,  5-category classification with confidence scoring, maps to article's "failure diagnosis"  recommendation       
 Test governance /        │ AI generates tests fast → need redundancy         │ Medium — extend coverage analytics │
   │ explosion detection      │ detection, coverage-weighted pruning              │                                     
   Looped execution         │ Plan → generate → run → heal cycles without       │ Low — already have all pieces,     │
   │ (--loop)       
 Migrate to gh app /home/ewyct/.claude/plans/cheeky-sparking-torvalds.md
 The premium QA agent
-Selectors 1 for play agent /home/ewyct/.claude/plans/cozy-doodling-rain.md
-Payment integration /home/ewyct/.claude/plans/drifting-yawning-hoare.md
 special prompting for ai diff analysis either by user or by branch code change 
 if a pr merge happens, update test manifest with new functions - show as new, prompt test generation
 Test coverage assessment and recreation based on existing test set  ~/.claude/plans/shimmying-conjuring-sun.md
@@ -36,7 +34,6 @@ debug - googlesheet data
 cookie sharing from host machine?
 Tweet about us
 Content comparison - compare text in 2 setups
-Explore/Cover instead of Areas
 Component specific testing
 Figma plugin
 Generate test data with AI
@@ -79,7 +76,8 @@ Ilyen AI segítség nélkül soha nem lenne elég erőforrásunk user interface 
 buy a newsletter substack twitter: duuce.com newsletter investor
 AI repurposing engine -> 5 tweets, 3 linkedin, remotion short form, 1 blog, graphics, email sequence
 Gamifying QA - Could you beat an AI tester? How to get AI testing agents to       
-  work? AI testing or Agentic testing?                                                             
+  work? AI testing or Agentic testing?                         
+"tyű" - sanyi                          
 ## commands
 ## ourmotto
 Real constraints: if you dont use GH, this tool is not optimized for you - ping is with your stack and we will accommodate it.

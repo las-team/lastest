@@ -11,14 +11,12 @@ import type {
 } from '@/lib/db/schema';
 import { createAndRunBuild } from './builds';
 import { approveAllDiffs } from './diffs';
+import { awardScore } from './gamification';
 import { getCurrentBranchForRepo } from '@/lib/git-utils';
 import { getBuildSummary } from './builds';
-import { startRemoteRouteScan, generateBasicTests } from './scanner';
+import { startRemoteRouteScan } from './scanner';
 import { applyTestingTemplate } from './repos';
-import { aiScanRoutes, saveDiscoveredRoutes } from './ai-routes';
-import { discoverSpecFiles, extractUserStoriesFromFiles } from './spec-import';
 import { testServerConnection } from './environment';
-import { aiFixTest } from './ai';
 import { getAISettings } from './ai-settings';
 import { getEnvironmentConfig } from './environment';
 import { addDefaultSetupStep } from './setup-steps';
@@ -30,6 +28,8 @@ import type { SetupContext, SetupScript } from '@/lib/setup/types';
 import { runPlaywrightSetup } from '@/lib/setup/script-runner';
 import { classifyTemplate } from '@/lib/templates/classifier';
 import { gatherCodebaseIntelligence } from '@/lib/ai/codebase-intelligence';
+import { claimEmbeddedBrowserForAgent } from '@/server/actions/ai';
+import { releasePoolEB } from '@/server/actions/embedded-sessions';
 import type { CodebaseIntelligence } from '@/lib/ai/codebase-intelligence';
 import type { CodebaseIntelligenceContext } from '@/lib/ai/types';
 import { emitAndPersistActivityEvent } from '@/lib/db/queries/activity-events';
@@ -103,7 +103,7 @@ function emitActivity(
     stepId?: string;
     agentType?: PwAgentType;
     detail?: Record<string, unknown>;
-    artifactType?: 'test' | 'build' | 'area' | 'baseline' | 'suite';
+    artifactType?: 'test' | 'build' | 'area' | 'baseline' | 'score';
     artifactId?: string;
     artifactLabel?: string;
     durationMs?: number;
@@ -186,6 +186,18 @@ function isAborted(signal: AbortSignal): boolean {
   return signal.aborted;
 }
 
+async function isAbortedOrCancelled(sessionId: string, signal: AbortSignal): Promise<boolean> {
+  if (signal.aborted) return true;
+  const session = await queries.getAgentSession(sessionId);
+  if (session?.status === 'cancelled') {
+    // Sync the in-memory controller so downstream checks also bail
+    const controller = activeControllers.get(sessionId);
+    if (controller) controller.abort();
+    return true;
+  }
+  return false;
+}
+
 async function skipIfManualMode(sessionId: string, stepId: AgentStepId): Promise<boolean> {
   const session = await queries.getAgentSession(sessionId);
   if (session?.metadata?.manualMode) {
@@ -195,9 +207,9 @@ async function skipIfManualMode(sessionId: string, stepId: AgentStepId): Promise
   return false;
 }
 
-async function waitForBuild(buildId: string, signal: AbortSignal): Promise<Awaited<ReturnType<typeof getBuildSummary>>> {
+async function waitForBuild(buildId: string, signal: AbortSignal, sessionId?: string): Promise<Awaited<ReturnType<typeof getBuildSummary>>> {
   for (;;) {
-    if (signal.aborted) return null;
+    if (sessionId ? await isAbortedOrCancelled(sessionId, signal) : signal.aborted) return null;
     const summary = await getBuildSummary(buildId);
     if (!summary) return null;
     if (summary.completedAt) return summary;
@@ -247,7 +259,7 @@ async function runSettingsCheck(sessionId: string, repositoryId: string, teamId:
     });
   }
 
-  const pwEnabled = !isManual && (aiSettings.pwAgentEnabled ?? false);
+  const pwEnabled = !isManual;
   await setStepCompleted(sessionId, 'settings_check', {
     ghAccount: ghAccount?.githubUsername || (skipGithub ? 'Skipped' : 'Connected'),
     aiProvider: isManual ? 'manual' : aiSettings.provider,
@@ -1103,83 +1115,6 @@ async function runPlanWithAgents(
   return true;
 }
 
-async function runPlanPromptMode(
-  sessionId: string,
-  repositoryId: string,
-  branch: string,
-  signal: AbortSignal,
-): Promise<boolean> {
-  const discoverSession = await queries.getAgentSession(sessionId);
-  const discoverIntelligence = discoverSession?.metadata?.codebaseIntelligence as CodebaseIntelligenceContext | undefined;
-
-  // Check if tests already exist
-  const existingTests = await queries.getTestsByRepo(repositoryId);
-  if (existingTests.length > 0) {
-    const existingAreas = await queries.getFunctionalAreasByRepo(repositoryId);
-    await updateSubsteps(sessionId, 'plan', [
-      { label: 'Using existing tests', status: 'done', detail: `${existingTests.length} tests in ${existingAreas.length} areas` },
-    ]);
-
-    const session = await queries.getAgentSession(sessionId);
-    if (session) {
-      await queries.updateAgentSession(sessionId, {
-        metadata: { ...session.metadata, testsCreated: existingTests.length },
-      });
-    }
-
-    await setStepCompleted(sessionId, 'plan', {
-      testsCreated: existingTests.length,
-      areasCreated: existingAreas.length,
-      cached: true,
-    });
-    return true;
-  }
-
-  // Discover spec files
-  await updateSubsteps(sessionId, 'plan', [
-    { label: 'Finding spec files', status: 'running' },
-    { label: 'Extracting user stories', status: 'pending' },
-  ]);
-
-  const specResult = await discoverSpecFiles(repositoryId, branch);
-
-  if (!specResult.success || !specResult.files || specResult.files.length === 0) {
-    // Fallback: AI route scan
-    await updateSubsteps(sessionId, 'plan', [
-      { label: 'Finding spec files', status: 'done', detail: 'No spec files found' },
-      { label: 'AI route scan', status: 'running' },
-    ]);
-
-    const aiResult = await aiScanRoutes(repositoryId, branch, discoverIntelligence);
-    if (aiResult.success && aiResult.functionalAreas && aiResult.functionalAreas.length > 0) {
-      await saveDiscoveredRoutes(repositoryId, aiResult.functionalAreas);
-    }
-
-    await setStepCompleted(sessionId, 'plan', {
-      method: 'ai_scan_fallback',
-      areasFound: aiResult.functionalAreas?.length || 0,
-    });
-    return true;
-  }
-
-  if (isAborted(signal)) return false;
-
-  await updateSubsteps(sessionId, 'plan', [
-    { label: 'Finding spec files', status: 'done', detail: `${specResult.files.length} files` },
-    { label: 'Extracting user stories', status: 'running' },
-  ]);
-
-  const filePaths = specResult.files.map(f => f.path);
-  const storiesResult = await extractUserStoriesFromFiles(repositoryId, branch, filePaths);
-
-  await setStepCompleted(sessionId, 'plan', {
-    method: 'spec_discovery',
-    specsFound: specResult.files.length,
-    storiesExtracted: storiesResult.stories?.length || 0,
-  });
-  return true;
-}
-
 async function runPlan(sessionId: string, repositoryId: string, teamId: string, signal: AbortSignal) {
   if (await skipIfManualMode(sessionId, 'plan')) return true;
   await setStepActive(sessionId, 'plan');
@@ -1193,12 +1128,7 @@ async function runPlan(sessionId: string, repositoryId: string, teamId: string, 
 
   const branch = repo.selectedBranch || repo.defaultBranch || 'main';
 
-  const aiSettings = await getAISettings(repositoryId);
-  if (aiSettings?.pwAgentEnabled) {
-    return runPlanWithAgents(sessionId, repositoryId, branch, signal, teamId);
-  }
-
-  return runPlanPromptMode(sessionId, repositoryId, branch, signal);
+  return runPlanWithAgents(sessionId, repositoryId, branch, signal, teamId);
 }
 
 // ============================================
@@ -1281,7 +1211,6 @@ async function runGenerate(sessionId: string, repositoryId: string, teamId: stri
   const approvedAreaIds = session.metadata.approvedAreaIds;
 
   const aiSettings = await getAISettings(repositoryId);
-  const useAgents = aiSettings?.pwAgentEnabled ?? false;
   const agentTimeout = aiSettings?.pwAgentTimeout ?? 300_000;
 
   // Get areas to generate tests for
@@ -1296,7 +1225,10 @@ async function runGenerate(sessionId: string, repositoryId: string, teamId: stri
   let testsCreated = 0;
   const generatedTests: Array<{ testId: string; name: string; areaName: string; code: string }> = [];
 
-  if (useAgents && targetAreas.length > 0) {
+  // Look up the play_agent bot so test-creation points go to the bot, not the user
+  const playAgentBot = await queries.getBotByKind(teamId, 'play_agent');
+
+  if (targetAreas.length > 0) {
     const { agentCreateTest, groupScenariosForGeneration } = await import('@/lib/playwright/generator-agent');
     const GENERATOR_CONCURRENCY = 3;
 
@@ -1382,6 +1314,16 @@ async function runGenerate(sessionId: string, repositoryId: string, teamId: stri
                 isPlaceholder: false,
               });
               test = { id: existingPlaceholder.id };
+              // Award test_created points to play_agent bot for placeholder upgrade
+              if (playAgentBot) {
+                awardScore({
+                  teamId,
+                  kind: 'test_created',
+                  actor: { kind: 'bot', id: playAgentBot.id },
+                  sourceType: 'test',
+                  sourceId: existingPlaceholder.id,
+                }).catch(() => {});
+              }
             } else {
               test = await queries.createTest({
                 repositoryId,
@@ -1390,6 +1332,7 @@ async function runGenerate(sessionId: string, repositoryId: string, teamId: stri
                 description: group.description,
                 code: genResult.code,
                 targetUrl: baseUrl,
+                ...(playAgentBot ? { createdByBotId: playAgentBot.id } : {}),
               });
             }
             generatedTests.push({
@@ -1401,17 +1344,37 @@ async function runGenerate(sessionId: string, repositoryId: string, teamId: stri
             emitActivity(teamId, repositoryId, sessionId, 'artifact:created',
               `Generator ${existingPlaceholder ? 'upgraded placeholder' : 'created'} test "${group.name}" in ${area.name}`,
               { stepId: 'generate', agentType: 'generator', artifactType: 'test', artifactId: test.id, artifactLabel: group.name });
-            // Link to matching spec if one exists
+            // Link to matching spec if one exists; otherwise create a new one so
+            // every generated test has a populated spec side.
             try {
               const areaSpecs = await queries.getSpecsForArea(area.id);
               const matchingSpec = areaSpecs.find(s =>
                 !s.testId && s.title.toLowerCase() === group.name.toLowerCase()
               );
+              const codeHash = createHash('sha256').update(genResult.code).digest('hex');
               if (matchingSpec) {
-                const { createHash } = await import('crypto');
-                const codeHash = createHash('sha256').update(genResult.code).digest('hex');
                 await queries.linkSpecToTest(matchingSpec.id, test.id);
                 await queries.updateTestSpec(matchingSpec.id, { codeHash });
+              } else {
+                const existingForTest = await queries.getTestSpec(test.id);
+                if (!existingForTest) {
+                  const specBody = [
+                    `**Area:** ${area.name}`,
+                    area.description ? `**Description:** ${area.description}` : '',
+                    group.description || group.name,
+                  ].filter(Boolean).join('\n\n');
+                  const specId = await queries.createTestSpec({
+                    repositoryId,
+                    testId: test.id,
+                    functionalAreaId: area.id,
+                    title: group.name,
+                    spec: specBody,
+                    source: 'planner',
+                    status: 'has_test',
+                    codeHash,
+                  });
+                  await queries.linkSpecToTest(specId, test.id);
+                }
               }
             } catch {
               // Non-critical
@@ -1423,18 +1386,6 @@ async function runGenerate(sessionId: string, repositoryId: string, teamId: stri
       );
 
       testsCreated += results.filter(r => r.status === 'fulfilled' && r.value).length;
-    }
-  } else {
-    // Prompt mode: generate basic tests from saved routes
-    const { saveDiscoveredRoutes: _sr } = await import('./ai-routes');
-    const repoRoutes = await queries.getRoutesByRepo(repositoryId);
-    if (repoRoutes.length > 0) {
-      await updateSubsteps(sessionId, 'generate', [
-        { label: `Generating smoke tests for ${repoRoutes.length} routes`, status: 'running' },
-      ]);
-      const routeIds = repoRoutes.map(r => r.id);
-      const genResult = await generateBasicTests(repositoryId, routeIds, baseUrl);
-      testsCreated = genResult.testsCreated + genResult.testsUpdated;
     }
   }
 
@@ -1471,13 +1422,13 @@ async function runGenerate(sessionId: string, repositoryId: string, teamId: stri
     {
       label: `Generated ${testsCreated} tests`,
       status: 'done',
-      agent: useAgents ? 'generator' : undefined,
+      agent: 'generator',
     },
   ]);
 
   await setStepCompleted(sessionId, 'generate', {
     testsCreated,
-    method: useAgents ? 'pw_agents' : 'prompt',
+    method: 'pw_agents',
   }, richResult);
   return true;
 }
@@ -1542,7 +1493,7 @@ async function runTests(sessionId: string, repositoryId: string, _teamId: string
       ]);
     }
 
-    const summary = await waitForBuild(buildId, signal);
+    const summary = await waitForBuild(buildId, signal, sessionId);
     if (!summary) {
       if (isAborted(signal)) return false;
       await setStepFailed(sessionId, 'run_tests', 'Build not found after creation');
@@ -1595,8 +1546,6 @@ async function runFixTests(sessionId: string, repositoryId: string, teamId: stri
 
   const session = await queries.getAgentSession(sessionId);
   if (!session) return false;
-  const intelligence = session.metadata?.codebaseIntelligence as CodebaseIntelligenceContext | undefined;
-
   const buildIds = session.metadata.buildIds || [];
   const lastBuildId = buildIds[buildIds.length - 1];
   if (!lastBuildId) {
@@ -1632,9 +1581,6 @@ async function runFixTests(sessionId: string, repositoryId: string, teamId: stri
   let unfixableCount = 0;
   const fixes: Array<{ testName: string; originalError: string; fixed: boolean; newCode?: string }> = [];
 
-  const fixAiSettings = await getAISettings(repositoryId);
-  const useHealer = fixAiSettings?.pwAgentEnabled ?? false;
-
   const fixableResults: typeof failedResults = [];
   for (const result of failedResults) {
     const attempts = fixAttempts[result.testId!] || 0;
@@ -1645,7 +1591,7 @@ async function runFixTests(sessionId: string, repositoryId: string, teamId: stri
     }
   }
 
-  if (useHealer) {
+  {
     const HEALER_CONCURRENCY = 3;
     const { agentHealTest } = await import('@/lib/playwright/healer-agent');
 
@@ -1676,7 +1622,16 @@ async function runFixTests(sessionId: string, repositoryId: string, teamId: stri
             `Healer diagnosing "${testName}" (attempt ${attempts + 1}/${MAX_FIX_ATTEMPTS})`,
             { stepId: 'fix_tests', agentType: 'healer', detail: { testId, testName, attempt: attempts + 1, error: result.errorMessage?.slice(0, 120) } });
 
-          const healResult = await agentHealTest(repositoryId, testId);
+          // Claim an EB for this healer call
+          const eb = await claimEmbeddedBrowserForAgent(5 * 60 * 1000).catch(() => undefined);
+          let healResult: { success: boolean; code?: string; error?: string };
+          try {
+            healResult = await agentHealTest(repositoryId, testId, eb ? { cdpEndpoint: eb.cdpUrl } : undefined);
+          } finally {
+            if (eb) {
+              await releasePoolEB(eb.runnerId).catch(() => {});
+            }
+          }
           fixAttempts[testId] = attempts + 1;
 
           const test = await queries.getTest(testId);
@@ -1737,85 +1692,16 @@ async function runFixTests(sessionId: string, repositoryId: string, teamId: stri
         });
       }
     }
-  } else {
-    for (let i = 0; i < fixableResults.length; i++) {
-      if (isAborted(signal)) return false;
-
-      const result = fixableResults[i];
-      const testId = result.testId!;
-      const errorMessage = result.errorMessage!;
-      const attempts = fixAttempts[testId] || 0;
-
-      const test = await queries.getTest(testId);
-      await updateSubsteps(sessionId, 'fix_tests', [
-        {
-          label: `Fixing test ${i + 1}/${fixableResults.length}: ${test?.name || testId}`,
-          status: 'running',
-          detail: `Attempt ${attempts + 1}/${MAX_FIX_ATTEMPTS}`,
-        },
-      ]);
-
-      const fixResult = await aiFixTest(repositoryId, testId, errorMessage, intelligence);
-      fixAttempts[testId] = attempts + 1;
-
-      if (fixResult.success && fixResult.code) {
-        const hashes = codeHashes[testId] || [];
-        const newHash = hashCode(fixResult.code);
-
-        if (hashes.includes(newHash)) {
-          unfixableCount++;
-          fixes.push({ testName: test?.name || testId, originalError: errorMessage, fixed: false });
-          continue;
-        }
-
-        hashes.push(newHash);
-        codeHashes[testId] = hashes;
-
-        await queries.updateTest(testId, { code: fixResult.code });
-        if (test) {
-          const branch = await getCurrentBranchForRepo(repositoryId);
-          const versions = await queries.getTestVersions(testId);
-          await queries.createTestVersion({
-            testId,
-            name: test.name,
-            code: fixResult.code,
-            version: (versions.length || 0) + 1,
-            changeReason: 'ai_fix',
-            branch: branch ?? null,
-          });
-        }
-        fixedCount++;
-        fixes.push({ testName: test?.name || testId, originalError: errorMessage, fixed: true, newCode: fixResult.code });
-      } else {
-        fixes.push({ testName: test?.name || testId, originalError: errorMessage, fixed: false });
-      }
-
-      const currentSession = await queries.getAgentSession(sessionId);
-      if (currentSession) {
-        await queries.updateAgentSession(sessionId, {
-          metadata: { ...currentSession.metadata, fixAttempts, codeHashes },
-        });
-      }
-    }
   }
 
-  if (useHealer) {
-    await updateSubsteps(sessionId, 'fix_tests', [
-      { label: 'Fix pipeline complete', status: 'done', agent: 'orchestrator' },
-      {
-        label: `${fixedCount} healed, ${unfixableCount} unfixable`,
-        status: fixedCount > 0 ? 'done' : unfixableCount > 0 ? 'error' : 'done',
-        agent: 'healer',
-      },
-    ]);
-  } else {
-    await updateSubsteps(sessionId, 'fix_tests', [
-      {
-        label: `${fixedCount} fixed, ${unfixableCount} unfixable`,
-        status: fixedCount > 0 ? 'done' : unfixableCount > 0 ? 'error' : 'done',
-      },
-    ]);
-  }
+  await updateSubsteps(sessionId, 'fix_tests', [
+    { label: 'Fix pipeline complete', status: 'done', agent: 'orchestrator' },
+    {
+      label: `${fixedCount} healed, ${unfixableCount} unfixable`,
+      status: fixedCount > 0 ? 'done' : unfixableCount > 0 ? 'error' : 'done',
+      agent: 'healer',
+    },
+  ]);
 
   const richResult: AgentStepRichResult = { type: 'fix_tests', fixes };
   await setStepCompleted(sessionId, 'fix_tests', { fixedCount, unfixableCount }, richResult);
@@ -1886,7 +1772,7 @@ async function runRerunTests(sessionId: string, repositoryId: string, _teamId: s
       { label: `Re-running ${buildResult.testCount} tests`, status: 'running' },
     ]);
 
-    const summary = await waitForBuild(buildId, signal);
+    const summary = await waitForBuild(buildId, signal, sessionId);
     if (!summary) {
       if (isAborted(signal)) return false;
       await setStepFailed(sessionId, 'rerun_tests', 'Build not found');
@@ -1994,7 +1880,7 @@ async function executeFromStep(sessionId: string, repositoryId: string, teamId: 
     if (startIdx === -1) return;
 
     for (let i = startIdx; i < STEP_ORDER.length; i++) {
-      if (signal.aborted) return;
+      if (await isAbortedOrCancelled(sessionId, signal)) return;
 
       const step = STEP_ORDER[i];
       const stepDef = STEP_DEFINITIONS.find(d => d.id === step.id);

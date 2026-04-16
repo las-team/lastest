@@ -1,16 +1,11 @@
 /**
  * Test Executor
  *
- * Unified interface for test execution that routes through either:
- * - Local Playwright runner (development, self-hosted)
- * - Remote runner (cloud deployment)
- *
- * Mode is determined by EXECUTION_MODE env variable or auto-detected.
+ * Routes test execution through remote runners or embedded browsers.
  */
 
-import { getExecutionMode, shouldUseLocalRunner, isLocalDisabled } from './mode';
-import { getRunner, type TestRunResult, type ProgressCallback } from '@/lib/playwright/runner';
-import type { Test, EnvironmentConfig, PlaywrightSettings, StabilizationSettings, NetworkRequest } from '@/lib/db/schema';
+import type { TestRunResult } from '@/lib/playwright/types';
+import type { Test, EnvironmentConfig, PlaywrightSettings, StabilizationSettings, NetworkRequest, DownloadRecord } from '@/lib/db/schema';
 import { DEFAULT_STABILIZATION_SETTINGS } from '@/lib/db/schema';
 import type {
   RunTestCommand,
@@ -77,11 +72,10 @@ function buildStabilizationPayload(settings?: PlaywrightSettings | null, testOve
 export interface ExecutionOptions {
   repositoryId?: string | null;
   teamId?: string;
-  forceLocal?: boolean;
   headless?: boolean;
   environmentConfig?: EnvironmentConfig | null;
   playwrightSettings?: PlaywrightSettings | null;
-  runnerId?: string; // 'local' or specific runner ID - if set, overrides mode detection
+  runnerId?: string; // specific runner ID or 'auto' for fallback chain
   maxParallelTests?: number; // Override parallel test setting (used for remote runners)
   setupContext?: { storageState?: string; variables?: Record<string, unknown> }; // Auth session + variables from setup scripts
   forceVideoRecording?: boolean; // Force video recording for this run regardless of global setting
@@ -99,7 +93,7 @@ export interface ExecutionProgress {
 }
 
 /**
- * Execute tests using the appropriate runner (local or remote runner).
+ * Execute tests using the appropriate runner (remote runner or embedded browser).
  */
 export async function executeTests(
   tests: Test[],
@@ -108,163 +102,41 @@ export async function executeTests(
   onProgress?: (progress: ExecutionProgress) => void,
   onResult?: (result: TestRunResult) => Promise<void>
 ): Promise<TestRunResult[]> {
-  const localDisabled = isLocalDisabled();
-
-  // If explicit runnerId is provided, use that routing
-  if (options.runnerId) {
-    if (options.runnerId === 'local') {
-      if (localDisabled) {
-        console.warn('Local runner disabled, redirecting to fallback chain');
-        return executeFallbackChain(tests, runId, options, onProgress, onResult);
-      }
-      console.log('Execution target: local (explicit)');
-      return executeLocally(tests, runId, options, onProgress, onResult);
-    }
-
-    if (options.runnerId === 'auto') {
-      console.log('Execution target: auto (fallback chain)');
-      return executeFallbackChain(tests, runId, options, onProgress, onResult);
-    }
-
-    // Explicit runner ID provided - verify runner is available
-    if (options.teamId) {
-      const runner = await getAvailableRunnerById(options.teamId, options.runnerId);
-      if (runner) {
-        console.log(`Execution target: runner ${runner.id} (explicit)`);
-        return executeViaRunner(tests, runId, runner.id, options, onProgress, onResult);
-      }
-      // Also check system runners (cross-team)
-      const sysRunner = await getAvailableSystemRunnerById(options.runnerId);
-      if (sysRunner) {
-        console.log(`Execution target: system runner ${sysRunner.id} (explicit)`);
-        return executeViaRunner(tests, runId, sysRunner.id, options, onProgress, onResult);
-      }
-      console.warn(`Runner ${options.runnerId} not available, using fallback chain`);
-    } else {
-      console.warn('No teamId provided for runner execution, using fallback chain');
-    }
-
-    if (localDisabled) {
-      return executeFallbackChain(tests, runId, options, onProgress, onResult);
-    }
-    return executeLocally(tests, runId, options, onProgress, onResult);
-  }
-
-  // Auto-detect mode (legacy behavior)
-  const mode = getExecutionMode();
-  const useLocal = shouldUseLocalRunner(options.forceLocal);
-
-  console.log(`Execution mode: ${mode}, using local: ${useLocal}`);
-
-  if (useLocal) {
-    return executeLocally(tests, runId, options, onProgress, onResult);
-  }
-
-  // Runner mode requires teamId
-  if (!options.teamId) {
-    if (localDisabled) {
-      console.warn('No teamId provided and local disabled, using fallback chain');
-      return executeFallbackChain(tests, runId, options, onProgress, onResult);
-    }
-    console.warn('No teamId provided for runner mode, falling back to local');
-    return executeLocally(tests, runId, options, onProgress, onResult);
-  }
-
-  // Check if team runner is available
-  const runner = await getAvailableRunner(options.teamId);
-  if (runner) {
-    return executeViaRunner(tests, runId, runner.id, options, onProgress, onResult);
-  }
-
-  // No team runner — use fallback chain if local disabled
-  if (localDisabled) {
+  // 'local' is no longer supported — redirect to fallback chain
+  if (!options.runnerId || options.runnerId === 'local' || options.runnerId === 'auto') {
+    console.log('Execution target: auto (fallback chain)');
     return executeFallbackChain(tests, runId, options, onProgress, onResult);
   }
 
-  console.warn('No runner available, falling back to local');
-  return executeLocally(tests, runId, options, onProgress, onResult);
-}
-
-/**
- * Execute tests locally using Playwright runner.
- */
-async function executeLocally(
-  tests: Test[],
-  runId: string,
-  options: ExecutionOptions,
-  onProgress?: (progress: ExecutionProgress) => void,
-  onResult?: (result: TestRunResult) => Promise<void>
-): Promise<TestRunResult[]> {
-  // Split tests into procedural and agent-mode
-  const proceduralTests = tests.filter(t => t.executionMode !== 'agent');
-  const agentTests = tests.filter(t => t.executionMode === 'agent');
-
-  const allResults: TestRunResult[] = [];
-
-  // Execute agent-mode tests via the agent executor
-  if (agentTests.length > 0) {
-    const { executeAgentTest } = await import('@/lib/playwright/agent-executor');
-    const baseUrl = options.environmentConfig?.baseUrl || 'http://localhost:3000';
-
-    for (const test of agentTests) {
-      onProgress?.({
-        completed: allResults.length,
-        total: tests.length,
-        currentTestName: test.name,
-        activeCount: 1,
-        activeTests: [test.name],
-      });
-
-      const screenshotPath = test.id; // Runner normalizes this
-      const agentResult = await executeAgentTest(test, {
-        baseUrl,
-        screenshotPath,
-        setupCode: options.setupContext?.storageState ? undefined : undefined,
-        timeout: options.playwrightSettings?.navigationTimeout ?? 300_000,
-        headless: options.headless,
-      });
-
-      const result: TestRunResult = {
-        testId: agentResult.testId,
-        status: agentResult.status === 'error' ? 'failed' : agentResult.status,
-        durationMs: agentResult.duration,
-        screenshots: agentResult.screenshots,
-        errorMessage: agentResult.errorMessage,
-      };
-
-      allResults.push(result);
-      if (onResult) await onResult(result);
+  // Explicit runner ID provided - verify runner is available
+  if (options.teamId) {
+    const runner = await getAvailableRunnerById(options.teamId, options.runnerId);
+    if (runner) {
+      // If it's a system EB, redirect to pool-managed fallback chain
+      if ('type' in runner && runner.type === 'embedded' && 'isSystem' in runner && runner.isSystem) {
+        console.log(`Runner ${runner.id} is a pool EB, redirecting to auto`);
+        return executeFallbackChain(tests, runId, options, onProgress, onResult);
+      }
+      console.log(`Execution target: runner ${runner.id} (explicit)`);
+      return executeViaRunner(tests, runId, runner.id, options, onProgress, onResult);
     }
+    // Also check system runners (cross-team) — redirect system EBs to pool
+    const sysRunner = await getAvailableSystemRunnerById(options.runnerId);
+    if (sysRunner) {
+      // System runners that are embedded type are pool-managed
+      if (sysRunner.type === 'embedded') {
+        console.log(`System runner ${sysRunner.id} is a pool EB, redirecting to auto`);
+        return executeFallbackChain(tests, runId, options, onProgress, onResult);
+      }
+      console.log(`Execution target: system runner ${sysRunner.id} (explicit)`);
+      return executeViaRunner(tests, runId, sysRunner.id, options, onProgress, onResult);
+    }
+    console.warn(`Runner ${options.runnerId} not available, using fallback chain`);
+  } else {
+    console.warn('No teamId provided for runner execution, using fallback chain');
   }
 
-  // Execute procedural tests via the standard runner
-  if (proceduralTests.length > 0) {
-    const runner = getRunner(options.repositoryId);
-
-    if (options.environmentConfig) {
-      runner.setEnvironmentConfig(options.environmentConfig);
-    }
-    if (options.playwrightSettings) {
-      runner.setSettings(options.playwrightSettings);
-    }
-
-    const progressCallback = onProgress
-      ? (p: ProgressCallback) => {
-          onProgress({
-            completed: allResults.length + p.completed,
-            total: tests.length,
-            currentTestName: p.currentTestName,
-            activeCount: p.activeCount,
-            activeTests: p.activeTests,
-          });
-        }
-      : undefined;
-
-    const proceduralResults = await runner.runTests(proceduralTests, runId, progressCallback, onResult, options.headless, options.maxParallelTests, options.forceVideoRecording);
-    allResults.push(...proceduralResults);
-  }
-
-  return allResults;
+  return executeFallbackChain(tests, runId, options, onProgress, onResult);
 }
 
 /**
@@ -678,9 +550,13 @@ async function executeViaRunner(
         errorMessage: errorPayload?.message as string | undefined,
         consoleErrors: Array.isArray(payload.consoleErrors) && payload.consoleErrors.length > 0 ? payload.consoleErrors as string[] : undefined,
         networkRequests: Array.isArray(payload.networkRequests) && payload.networkRequests.length > 0 ? payload.networkRequests as NetworkRequest[] : undefined,
+        downloads: Array.isArray(payload.downloads) && payload.downloads.length > 0 ? payload.downloads as DownloadRecord[] : undefined,
         softErrors: Array.isArray(payload.softErrors) && payload.softErrors.length > 0 ? payload.softErrors as string[] : undefined,
         videoPath,
         networkBodiesPath,
+        domSnapshot: payload.domSnapshot as import('@/lib/db/schema').DomSnapshotData | undefined,
+        lastReachedStep: typeof payload.lastReachedStep === 'number' ? payload.lastReachedStep : undefined,
+        totalSteps: typeof payload.totalSteps === 'number' ? payload.totalSteps : undefined,
       };
       results.push(testResult);
       await onResult?.(testResult);
@@ -864,20 +740,36 @@ async function executeFallbackChain(
   onProgress?: (progress: ExecutionProgress) => void,
   onResult?: (result: TestRunResult) => Promise<void>
 ): Promise<TestRunResult[]> {
+  // Helper: record which runner actually executes the job
+  const recordActualRunner = async (runnerId: string) => {
+    if (options.jobId) {
+      const { updateBackgroundJob } = await import('@/lib/db/queries/background-jobs');
+      await updateBackgroundJob(options.jobId, { actualRunnerId: runnerId });
+    }
+  };
+
   // 1. Try team runner first
   if (options.teamId) {
     const teamRunner = await getAvailableRunner(options.teamId);
     if (teamRunner) {
       console.log(`Fallback chain: using team runner ${teamRunner.id}`);
+      await recordActualRunner(teamRunner.id);
       return executeViaRunner(tests, runId, teamRunner.id, options, onProgress, onResult);
     }
   }
 
-  // 2. Try system EB
-  const systemRunner = await getAvailableSystemRunner();
-  if (systemRunner) {
-    console.log(`Fallback chain: using system EB ${systemRunner.id}`);
-    return executeViaRunner(tests, runId, systemRunner.id, options, onProgress, onResult);
+  // 2. Try system EB pool (atomic claim + guaranteed release)
+  const { claimPoolEB, releasePoolEB } = await import('@/server/actions/embedded-sessions');
+  const poolEB = await claimPoolEB();
+  if (poolEB) {
+    console.log(`Fallback chain: claimed pool EB ${poolEB.runnerId.slice(0, 8)}`);
+    await recordActualRunner(poolEB.runnerId);
+    try {
+      return await executeViaRunner(tests, runId, poolEB.runnerId, options, onProgress, onResult);
+    } finally {
+      await releasePoolEB(poolEB.runnerId);
+      console.log(`Fallback chain: released pool EB ${poolEB.runnerId.slice(0, 8)}`);
+    }
   }
 
   // 3. Queue — return empty results with "skipped" status
@@ -893,21 +785,3 @@ async function executeFallbackChain(
   }));
 }
 
-/**
- * Get execution mode information for display.
- */
-export function getExecutionModeInfo(): {
-  mode: 'local' | 'runner' | 'embedded';
-  description: string;
-} {
-  const mode = getExecutionMode();
-  const descriptions: Record<string, string> = {
-    local: 'Tests run directly on this machine using Playwright',
-    runner: 'Tests run on a remote runner connected to this server',
-    embedded: 'Tests run in an embedded browser container with live streaming',
-  };
-  return {
-    mode,
-    description: descriptions[mode] ?? descriptions.runner,
-  };
-}

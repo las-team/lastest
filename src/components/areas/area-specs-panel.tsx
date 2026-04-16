@@ -6,9 +6,15 @@ import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { CheckCircle, Circle, Plus, Loader2, ExternalLink } from 'lucide-react';
 import { toast } from 'sonner';
-import { convertPlanToPlaceholders, createPlaceholderTestCase } from '@/server/actions/specs';
+import {
+  convertPlanToPlaceholders,
+  createPlaceholderTestCase,
+  generatePlanFromSpecs,
+  generateSpecsFromTests,
+  generatePlanFromTests,
+} from '@/server/actions/specs';
 import { useRouter } from 'next/navigation';
-import { Wand2 } from 'lucide-react';
+import { Wand2, FileText, FileCode2 } from 'lucide-react';
 
 interface AreaTestCase {
   id: string;
@@ -22,16 +28,19 @@ interface AreaTestCasesPanelProps {
   repositoryId: string;
   tests: AreaTestCase[];
   hasAgentPlan: boolean;
+  hasSpecs?: boolean;
   onOpenTest?: (testId: string) => void;
 }
 
-export function AreaTestCasesPanel({ areaId, repositoryId, tests, hasAgentPlan, onOpenTest }: AreaTestCasesPanelProps) {
+export function AreaTestCasesPanel({ areaId, repositoryId, tests, hasAgentPlan, hasSpecs = false, onOpenTest }: AreaTestCasesPanelProps) {
   const router = useRouter();
   const [showAdd, setShowAdd] = useState(false);
   const [newName, setNewName] = useState('');
   const [newDescription, setNewDescription] = useState('');
   const [saving, setSaving] = useState(false);
   const [convertingPlan, setConvertingPlan] = useState(false);
+  const [specsToPlan, setSpecsToPlan] = useState(false);
+  const [fromTests, setFromTests] = useState(false);
 
   const handleAddTestCase = async () => {
     if (!newName.trim()) return;
@@ -72,15 +81,68 @@ export function AreaTestCasesPanel({ areaId, repositoryId, tests, hasAgentPlan, 
     }
   };
 
+  const handleSpecsToPlan = async () => {
+    setSpecsToPlan(true);
+    try {
+      const result = await generatePlanFromSpecs(areaId, repositoryId);
+      if (result.success) {
+        toast.success('Plan generated from specs');
+        router.refresh();
+      } else {
+        toast.error(result.error || 'Failed to generate plan');
+      }
+    } catch {
+      toast.error('Failed to generate plan');
+    } finally {
+      setSpecsToPlan(false);
+    }
+  };
+
+  const handleGenerateFromTests = async () => {
+    setFromTests(true);
+    try {
+      const specsResult = await generateSpecsFromTests(areaId, repositoryId);
+      const planResult = hasAgentPlan
+        ? { success: true }
+        : await generatePlanFromTests(areaId, repositoryId);
+
+      const bits: string[] = [];
+      if (specsResult.created > 0) bits.push(`${specsResult.created} spec${specsResult.created === 1 ? '' : 's'}`);
+      if (!hasAgentPlan && planResult.success) bits.push('plan');
+      if (bits.length > 0) {
+        toast.success(`Generated ${bits.join(' + ')} from existing tests`);
+        router.refresh();
+      } else {
+        toast.info('All tests already have specs and a plan');
+      }
+    } catch {
+      toast.error('Failed to generate from tests');
+    } finally {
+      setFromTests(false);
+    }
+  };
+
   return (
     <div className="mt-4 space-y-2">
       <div className="flex items-center justify-between">
         <h4 className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Test Cases ({tests.length})</h4>
-        <div className="flex items-center gap-1.5">
+        <div className="flex items-center gap-1.5 flex-wrap justify-end">
           {hasAgentPlan && (
-            <Button variant="ghost" size="sm" onClick={handleConvertPlan} disabled={convertingPlan} className="h-7 text-xs">
+            <Button variant="ghost" size="sm" onClick={handleConvertPlan} disabled={convertingPlan} className="h-7 text-xs" title="Create placeholder tests + specs from the plan">
               {convertingPlan ? <Loader2 className="h-3 w-3 mr-1 animate-spin" /> : <Wand2 className="h-3 w-3 mr-1" />}
               From Plan
+            </Button>
+          )}
+          {!hasAgentPlan && (hasSpecs || tests.length > 0) && (
+            <Button variant="ghost" size="sm" onClick={handleSpecsToPlan} disabled={specsToPlan} className="h-7 text-xs" title="Compose an agent plan from the existing specs">
+              {specsToPlan ? <Loader2 className="h-3 w-3 mr-1 animate-spin" /> : <FileText className="h-3 w-3 mr-1" />}
+              From Specs
+            </Button>
+          )}
+          {tests.length > 0 && (
+            <Button variant="ghost" size="sm" onClick={handleGenerateFromTests} disabled={fromTests} className="h-7 text-xs" title="Back-fill missing specs (and plan) from these tests">
+              {fromTests ? <Loader2 className="h-3 w-3 mr-1 animate-spin" /> : <FileCode2 className="h-3 w-3 mr-1" />}
+              From Tests
             </Button>
           )}
           <Button variant="ghost" size="sm" onClick={() => setShowAdd(true)} className="h-7 text-xs">

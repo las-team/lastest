@@ -1,15 +1,38 @@
 'use server';
 
 import * as queries from '@/lib/db/queries';
-import type { BackgroundJobType } from '@/lib/db/schema';
-import { getRunner } from '@/lib/playwright/runner';
+import type { BackgroundJob, BackgroundJobType } from '@/lib/db/schema';
 import { queueCancelCommandToDB } from '@/app/api/ws/runner/route';
+import { emitJobEvent, type JobUpdateEvent } from '@/lib/ws/job-events';
+
+function jobToEvent(job: BackgroundJob): JobUpdateEvent {
+  return {
+    type: 'job:update',
+    jobId: job.id,
+    jobType: job.type as BackgroundJobType,
+    status: job.status as JobUpdateEvent['status'],
+    progress: job.progress ?? 0,
+    completedSteps: job.completedSteps ?? 0,
+    totalSteps: job.totalSteps ?? null,
+    label: job.label,
+    error: job.error ?? null,
+    metadata: (job.metadata as Record<string, unknown>) ?? null,
+    parentJobId: job.parentJobId ?? null,
+    repositoryId: job.repositoryId ?? null,
+    targetRunnerId: job.targetRunnerId ?? null,
+    createdAt: job.createdAt ?? null,
+    startedAt: job.startedAt ?? null,
+    completedAt: job.completedAt ?? null,
+    lastActivityAt: job.lastActivityAt ?? null,
+  };
+}
+
+async function emitJobUpdate(jobId: string) {
+  const job = await queries.getBackgroundJob(jobId);
+  if (job) emitJobEvent(jobToEvent(job));
+}
 
 export async function isRunnerBusy(targetRunnerId: string): Promise<boolean> {
-  if (targetRunnerId === 'local') {
-    const runner = getRunner();
-    if (runner.isActive()) return true;
-  }
   const running = await queries.getRunningJobsForRunner(targetRunnerId);
   return running.length > 0;
 }
@@ -36,6 +59,7 @@ export async function createJob(
     startedAt: now,
     lastActivityAt: now,
   });
+  emitJobUpdate(id).catch(() => {});
   return id;
 }
 
@@ -55,6 +79,7 @@ export async function createPendingJob(
     metadata,
     targetRunnerId: targetRunnerId ?? null,
   });
+  emitJobUpdate(id).catch(() => {});
   return id;
 }
 
@@ -65,6 +90,7 @@ export async function startJob(jobId: string) {
     startedAt: now,
     lastActivityAt: now,
   });
+  emitJobUpdate(jobId).catch(() => {});
 }
 
 export async function updateJobProgress(
@@ -96,6 +122,7 @@ export async function updateJobProgress(
     lastActivityAt: new Date(),
     ...(mergedMetadata ? { metadata: mergedMetadata } : {}),
   });
+  emitJobUpdate(jobId).catch(() => {});
 }
 
 export async function completeJob(jobId: string) {
@@ -104,6 +131,7 @@ export async function completeJob(jobId: string) {
     progress: 100,
     completedAt: new Date(),
   });
+  emitJobUpdate(jobId).catch(() => {});
 }
 
 export async function failJob(jobId: string, error: string) {
@@ -112,6 +140,7 @@ export async function failJob(jobId: string, error: string) {
     error,
     completedAt: new Date(),
   });
+  emitJobUpdate(jobId).catch(() => {});
 }
 
 export async function createChildJob(
@@ -134,6 +163,7 @@ export async function createChildJob(
     startedAt: now,
     lastActivityAt: now,
   });
+  emitJobUpdate(id).catch(() => {});
   return id;
 }
 
@@ -144,23 +174,15 @@ export async function cancelJob(jobId: string, repositoryId?: string | null, run
   // For pending (queued) jobs that haven't started, just delete them entirely
   if (job.status === 'pending') {
     await queries.deleteBackgroundJob(jobId);
+    emitJobEvent({ type: 'job:delete', jobId });
     return { success: true };
   }
 
   // Determine the effective runner — prefer job's stored targetRunnerId, fall back to passed runnerId
   const effectiveRunnerId = job.targetRunnerId || runnerId;
 
-  // If job is running and it's a build or test run, abort the local runner only if this is a local job
-  if (job.status === 'running' && (job.type === 'build_run' || job.type === 'test_run')) {
-    if (!effectiveRunnerId || effectiveRunnerId === 'local') {
-      const runner = getRunner(repositoryId);
-      runner.abort();
-      await runner.forceReset();
-    }
-  }
-
   // If a remote runner is assigned, send cancel command
-  if (effectiveRunnerId && effectiveRunnerId !== 'local' && job.status === 'running') {
+  if (effectiveRunnerId && effectiveRunnerId !== 'auto' && job.status === 'running') {
     // Extract testRunId from job metadata if available
     const testRunId = (job.metadata as Record<string, unknown>)?.testRunId as string | undefined;
     if (testRunId) {
@@ -203,17 +225,20 @@ export async function cancelJob(jobId: string, repositoryId?: string | null, run
     error: 'Cancelled by user',
     completedAt: new Date(),
   });
+  emitJobUpdate(jobId).catch(() => {});
 
-  // If this was the active job, process next queued job of the same type for the same runner
+  // If this was the active job, process next queued job
   if (job.status === 'running' && (job.type === 'build_run' || job.type === 'test_run')) {
-    const targetRunner = job.targetRunnerId || 'local';
-    // Dynamically import to avoid circular deps
-    if (job.type === 'build_run') {
-      const { processNextQueuedBuild } = await import('./builds');
-      processNextQueuedBuild(repositoryId, targetRunner);
-    } else {
-      const { processNextQueuedTestRun } = await import('./runs');
-      processNextQueuedTestRun(repositoryId, targetRunner);
+    const targetRunner = job.targetRunnerId || undefined;
+    // Process runner-specific queue (pool-managed jobs are handled by periodic consumer)
+    if (targetRunner) {
+      if (job.type === 'build_run') {
+        const { processNextQueuedBuild } = await import('./builds');
+        processNextQueuedBuild(repositoryId, targetRunner);
+      } else {
+        const { processNextQueuedTestRun } = await import('./runs');
+        processNextQueuedTestRun(repositoryId, targetRunner);
+      }
     }
   }
 
@@ -227,6 +252,7 @@ export async function dismissJob(jobId: string) {
     return { success: false, error: 'Cannot dismiss an active job' };
   }
   await queries.deleteBackgroundJob(jobId);
+  emitJobEvent({ type: 'job:delete', jobId });
   return { success: true };
 }
 
@@ -237,34 +263,19 @@ export async function getActiveJobs() {
 export async function cleanupStaleJobs(staleThresholdMs = 300000) {
   const staleJobs = await queries.markStaleJobsAsCrashed(staleThresholdMs);
 
-  // Only reset local runner if stale local jobs existed
-  const hadStaleLocalJobs = staleJobs.some(j => !j.targetRunnerId || j.targetRunnerId === 'local');
-  if (hadStaleLocalJobs) {
-    const runner = getRunner();
-    await runner.forceReset();
-  } else if (staleJobs.length === 0) {
-    // Also check if runner is stuck without any running jobs
-    const runner = getRunner();
-    if (runner.isActive()) {
-      const activeJobs = await queries.getActiveBackgroundJobs();
-      const hasRunningBuild = activeJobs.some(j => j.type === 'build_run' && j.status === 'running');
-      if (!hasRunningBuild) {
-        await runner.forceReset();
-      }
-    }
-  }
-
   // Trigger processNext* for each distinct (repositoryId, targetRunnerId) pair
   if (staleJobs.length > 0) {
-    const jobsByRunner = new Map<string, Set<string | null>>();
+    const jobsByRunner = new Map<string | undefined, Set<string | null>>();
     for (const j of staleJobs) {
-      const rId = j.targetRunnerId || 'local';
+      const rId = j.targetRunnerId || undefined;
       if (!jobsByRunner.has(rId)) jobsByRunner.set(rId, new Set());
       jobsByRunner.get(rId)!.add(j.repositoryId);
     }
     const { processNextQueuedBuild } = await import('./builds');
     const { processNextQueuedTestRun } = await import('./runs');
     for (const [rId, repoIds] of jobsByRunner) {
+      // Pool-managed jobs (rId=undefined) are handled by periodic consumer
+      if (!rId) continue;
       for (const repoId of repoIds) {
         processNextQueuedBuild(repoId, rId);
         processNextQueuedTestRun(repoId, rId);

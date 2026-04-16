@@ -13,7 +13,7 @@ import { BrowserViewer } from '@/components/embedded-browser/browser-viewer-clie
 import { cn } from '@/lib/utils';
 import type { AgentSession } from '@/lib/db/schema';
 
-type FilterType = 'all' | 'play_agent' | 'mcp_server' | 'generate_agent';
+type FilterType = 'all' | 'play_agent' | 'mcp_server' | 'generate_agent' | 'heal_agent';
 
 function SessionStatusIcon({ status }: { status: string }) {
   switch (status) {
@@ -63,14 +63,16 @@ function ActiveSessionsSection({
     async function fetchSessions() {
       try {
         const res = await fetch('/api/activity-feed/sessions');
-        if (!res.ok) return;
-        const data = await res.json();
-        if (active) {
-          setSessions(data.sessions ?? []);
-          setEbStreamUrl(data.ebStreamUrl ?? null);
+        if (!active) return;
+        if (!res.ok) {
+          setSessions(prev => prev ?? []);
+          return;
         }
+        const data = await res.json();
+        setSessions(data.sessions ?? []);
+        setEbStreamUrl(data.ebStreamUrl ?? null);
       } catch {
-        // ignore
+        if (active) setSessions(prev => prev ?? []);
       }
     }
 
@@ -94,10 +96,16 @@ function ActiveSessionsSection({
         {(sessions ?? []).map((s) => {
           // Determine label and link based on session type
           const meta = s.metadata as Record<string, unknown> | null;
-          const isGenerateAgent = !!(meta?.testName);
-          const label = isGenerateAgent
-            ? `Generating "${meta?.testName}"`
-            : s.currentStepId ? `Step: ${s.currentStepId.replace(/_/g, ' ')}` : s.status;
+          const isSpecImport = !!(meta?.specImport);
+          const isHealAgent = !!(meta?.testId) && s.currentStepId === 'heal';
+          const isGenerateAgent = !!(meta?.testName) && !isHealAgent;
+          const label = isSpecImport
+            ? (s.status === 'paused' ? `Spec Import: ${(meta?.stories as unknown[])?.length ?? 0} stories ready` : 'Importing spec...')
+            : isHealAgent
+              ? `Healing "${meta?.testName}"`
+              : isGenerateAgent
+                ? `Generating "${meta?.testName}"`
+                : s.currentStepId ? `Step: ${s.currentStepId.replace(/_/g, ' ')}` : s.status;
 
           // For completed generate sessions, link to the created test
           const completedTestId = s.steps?.find(
@@ -107,9 +115,12 @@ function ActiveSessionsSection({
           const hasStream = s.status === 'active' && !!streamUrl;
           const isExpanded = expandedStream === s.id;
 
-          const viewHref = completedTestId
-            ? `/tests/${completedTestId}`
-            : `/run?session=${s.id}`;
+          const viewHref = isSpecImport && s.status === 'paused'
+            ? `/tests?reviewSpecImport=${s.id}`
+            : completedTestId
+              ? `/tests/${completedTestId}`
+              : `/run?session=${s.id}`;
+          const viewLabel = isSpecImport && s.status === 'paused' ? 'Review' : completedTestId ? 'Open' : 'View';
 
           return (
             <div key={s.id} className="space-y-1">
@@ -154,13 +165,13 @@ function ActiveSessionsSection({
                 >
                   {s.status}
                 </Badge>
-                {completedTestId ? (
+                {(completedTestId || (isSpecImport && s.status === 'paused')) ? (
                   <Link href={viewHref} className="text-[10px] text-primary hover:underline">
-                    Open
+                    {viewLabel}
                   </Link>
                 ) : !hasStream && (
                   <Link href={viewHref} className="text-[10px] text-primary hover:underline">
-                    View
+                    {viewLabel}
                   </Link>
                 )}
               </div>
@@ -215,7 +226,7 @@ export function ActivityFeedPanel() {
     <Sheet open={isOpen} onOpenChange={setIsOpen}>
       <SheetContent className={cn(
           'p-0 flex flex-col transition-[width] duration-300',
-          expandedStream ? 'w-[820px] sm:w-[900px]' : 'w-[420px] sm:w-[480px]',
+          expandedStream ? 'w-[1340px]' : 'w-[480px]',
         )}>
         <SheetHeader className="px-4 pt-4 pb-3 border-b shrink-0">
           <SheetTitle className="flex items-center gap-2 text-base">

@@ -13,11 +13,14 @@ import type { AIProviderConfig, CodebaseIntelligenceContext } from '@/lib/ai/typ
 import type { ExtractedUserStory, ExtractedAcceptanceCriterion } from '@/lib/db/schema';
 import { revalidatePath } from 'next/cache';
 import { getRepoTree, getFileContent, compareBranches } from '@/lib/github/content';
-import { extractTextFromFile } from '@/lib/file-parser';
 import { runParallel } from '@/lib/ai/parallel';
 import { createJob, updateJobProgress, completeJob, failJob } from './jobs';
 import { getCurrentBranchForRepo } from '@/lib/git-utils';
 import { requireRepoAccess } from '@/lib/auth';
+import { extractText } from 'unpdf';
+import mammoth from 'mammoth';
+import { PLACEHOLDER_CODE } from '@/lib/constants/placeholder';
+import { emitAndPersistActivityEvent } from '@/lib/db/queries/activity-events';
 
 // ============================================
 // Types
@@ -27,6 +30,7 @@ export interface SpecImportResponse {
   success: boolean;
   stories?: ExtractedUserStory[];
   importId?: string;
+  jobId?: string;
   error?: string;
 }
 
@@ -374,7 +378,7 @@ export async function extractUserStoriesFromFiles(
   branch: string,
   filePaths: string[]
 ): Promise<SpecImportResponse> {
-  await requireRepoAccess(repositoryId);
+  const { team } = await requireRepoAccess(repositoryId);
   try {
     if (filePaths.length === 0) {
       return { success: false, error: 'No files selected' };
@@ -404,7 +408,11 @@ export async function extractUserStoriesFromFiles(
     }
 
     const specContent = contents.join('\n\n');
-    return await extractStoriesFromContent(specContent, repositoryId, branch, filePaths, 'github');
+
+    // Fire and forget — runs in background, not blocked by proxy timeout
+    extractStoriesFromContent(specContent, repositoryId, branch, filePaths, 'github', team.id).catch(() => {});
+
+    return { success: true };
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Failed to extract user stories';
     return { success: false, error: message };
@@ -412,13 +420,12 @@ export async function extractUserStoriesFromFiles(
 }
 
 export async function extractUserStoriesFromUpload(
-  formData: FormData,
+  files: { name: string; content: string }[],
   repositoryId: string,
   branch: string
 ): Promise<SpecImportResponse> {
-  await requireRepoAccess(repositoryId);
+  const { team } = await requireRepoAccess(repositoryId);
   try {
-    const files = formData.getAll('files') as File[];
     if (files.length === 0) {
       return { success: false, error: 'No files uploaded' };
     }
@@ -426,7 +433,18 @@ export async function extractUserStoriesFromUpload(
     const contents: string[] = [];
     const fileNames: string[] = [];
     for (const file of files) {
-      const text = await extractTextFromFile(file);
+      const buf = Buffer.from(file.content, 'base64');
+      let text: string;
+      const lower = file.name.toLowerCase();
+      if (lower.endsWith('.pdf')) {
+        const { text: pages } = await extractText(new Uint8Array(buf));
+        text = pages.join('\n');
+      } else if (lower.endsWith('.docx')) {
+        const { value } = await mammoth.extractRawText({ buffer: buf });
+        text = value;
+      } else {
+        text = buf.toString('utf-8');
+      }
       if (text.trim()) {
         contents.push(`--- ${file.name} ---\n${text}`);
         fileNames.push(file.name);
@@ -438,7 +456,11 @@ export async function extractUserStoriesFromUpload(
     }
 
     const specContent = contents.join('\n\n');
-    return await extractStoriesFromContent(specContent, repositoryId, branch, fileNames, 'upload');
+
+    // Fire and forget — runs in background, not blocked by proxy timeout
+    extractStoriesFromContent(specContent, repositoryId, branch, fileNames, 'upload', team.id).catch(() => {});
+
+    return { success: true };
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Failed to extract user stories';
     return { success: false, error: message };
@@ -450,77 +472,170 @@ async function extractStoriesFromContent(
   repositoryId: string,
   branch: string,
   sourceFiles: string[],
-  sourceType: 'github' | 'upload'
-): Promise<SpecImportResponse> {
-  const config = await getAIConfig(repositoryId);
-  const prompt = createUserStoryExtractionPrompt(specContent);
+  sourceType: 'github' | 'upload',
+  teamId: string,
+): Promise<void> {
+  const startTime = Date.now();
+  const steps = [
+    { id: 'plan' as const, status: 'active' as const, label: 'Extracting Stories', description: `Analyzing ${sourceFiles.length} document(s)...`, startedAt: new Date().toISOString() },
+    { id: 'review' as const, status: 'pending' as const, label: 'Review Stories', description: 'Review extracted user stories' },
+  ];
 
-  const response = await generateWithAI(config, prompt, 'You are a document parser that extracts structured user stories and acceptance criteria. Output ONLY the requested format — no code, no tests, no conversation.', {
-    actionType: 'extract_user_stories',
+  const session = await queries.createAgentSession({
     repositoryId,
+    teamId,
+    status: 'active',
+    currentStepId: 'plan',
+    steps,
+    metadata: { specImport: true, sourceFiles, sourceType } as Record<string, unknown>,
   });
 
-  // Parse response — try JSON first, then markdown
-  let stories: ExtractedUserStory[];
-  const jsonStr = extractJsonArray(response);
-  if (jsonStr) {
-    try {
-      stories = JSON.parse(jsonStr);
-      // Normalize JSON ACs to match markdown-path quality
-      for (const story of stories) {
-        if (!story.acceptanceCriteria) continue;
-        for (const ac of story.acceptanceCriteria) {
-          if (!ac.description) continue;
-          // Ensure testName is set
-          if (!ac.testName) ac.testName = ac.description;
-          // If description looks like a raw title (no sentence structure), wrap it
-          if (!ac.description.match(/\b(given|when|then|verify|check|should|must)\b/i)) {
-            const rawDesc = ac.description;
-            ac.description = `When ${rawDesc.charAt(0).toLowerCase() + rawDesc.slice(1)}, verify the expected behavior`;
+  emitAndPersistActivityEvent({
+    teamId, repositoryId, sessionId: session.id,
+    sourceType: 'generate_agent', eventType: 'session:start',
+    summary: `Importing spec from ${sourceFiles.length} file(s)`,
+    agentType: 'planner', stepId: null, detail: null,
+    artifactType: null, artifactId: null, artifactLabel: null,
+    durationMs: null, promptLogId: null,
+  }).catch(() => {});
+
+  try {
+    const config = await getAIConfig(repositoryId);
+    const prompt = createUserStoryExtractionPrompt(specContent);
+
+    const response = await generateWithAI(config, prompt, 'You are a document parser that extracts structured user stories and acceptance criteria. Output ONLY the requested format — no code, no tests, no conversation.', {
+      actionType: 'extract_user_stories',
+      repositoryId,
+    });
+
+    // Parse response — try JSON first, then markdown
+    let stories: ExtractedUserStory[];
+    const jsonStr = extractJsonArray(response);
+    if (jsonStr) {
+      try {
+        stories = JSON.parse(jsonStr);
+        for (const story of stories) {
+          if (!story.acceptanceCriteria) continue;
+          for (const ac of story.acceptanceCriteria) {
+            if (!ac.description) continue;
+            if (!ac.testName) ac.testName = ac.description;
+            if (!ac.description.match(/\b(given|when|then|verify|check|should|must)\b/i)) {
+              const rawDesc = ac.description;
+              ac.description = `When ${rawDesc.charAt(0).toLowerCase() + rawDesc.slice(1)}, verify the expected behavior`;
+            }
           }
         }
+      } catch {
+        const parsed = parseStoriesFromMarkdown(response);
+        if (!parsed) throw new Error('Could not extract stories from AI response');
+        stories = parsed;
       }
-    } catch {
-      // extractJsonArray returned non-JSON — fall through to markdown
+    } else {
       const parsed = parseStoriesFromMarkdown(response);
-      if (!parsed) {
-        return { success: false, error: 'Could not extract stories from AI response' };
-      }
+      if (!parsed) throw new Error('Could not extract stories from AI response');
       stories = parsed;
     }
-  } else {
-    // AI returned markdown/prose — parse directly
-    const parsed = parseStoriesFromMarkdown(response);
-    if (!parsed) {
-      return { success: false, error: 'Could not extract stories from AI response' };
+
+    stories = validateAndFilterStories(stories);
+    if (stories.length === 0) throw new Error('No testable stories found after quality filtering');
+
+    // Create import record
+    let importId: string | null = null;
+    try {
+      const importRecord = await queries.createSpecImport({
+        repositoryId,
+        name: `Import from ${sourceFiles.length} file(s)`,
+        sourceType, sourceFiles, branch,
+        status: 'extracted',
+        extractedStories: stories,
+      });
+      importId = importRecord.id;
+    } catch (err) {
+      console.error('Failed to create spec import record:', err);
     }
-    stories = parsed;
-  }
 
-  // Quality gate: filter non-testable ACs and deduplicate
-  stories = validateAndFilterStories(stories);
-  if (stories.length === 0) {
-    return { success: false, error: 'No testable stories found after quality filtering' };
-  }
+    const totalAC = stories.reduce((sum, s) => sum + s.acceptanceCriteria.length, 0);
 
-  // Create import record (non-fatal — stories are still usable if DB tracking fails)
-  let importId: string | null = null;
-  try {
-    const importRecord = await queries.createSpecImport({
-      repositoryId,
-      name: `Import from ${sourceFiles.length} file(s)`,
-      sourceType,
-      sourceFiles,
-      branch,
-      status: 'extracted',
-      extractedStories: stories,
+    // Transition: plan → completed, review → waiting_user, session → paused
+    await queries.updateAgentSession(session.id, {
+      status: 'paused',
+      currentStepId: 'review',
+      steps: [
+        { ...steps[0], status: 'completed', completedAt: new Date().toISOString() },
+        { ...steps[1], status: 'waiting_user', startedAt: new Date().toISOString() },
+      ],
+      metadata: { specImport: true, sourceFiles, sourceType, stories, importId } as Record<string, unknown>,
     });
-    importId = importRecord.id;
-  } catch (err) {
-    console.error('Failed to create spec import record:', err);
-  }
 
-  return { success: true, stories, importId: importId ?? undefined };
+    emitAndPersistActivityEvent({
+      teamId, repositoryId, sessionId: session.id,
+      sourceType: 'generate_agent', eventType: 'step:waiting_user',
+      summary: `${stories.length} stories, ${totalAC} acceptance criteria extracted — review pending`,
+      agentType: 'planner', stepId: 'review', detail: null,
+      artifactType: 'spec_import', artifactId: session.id,
+      artifactLabel: `${stories.length} stories ready for review`,
+      durationMs: Date.now() - startTime, promptLogId: null,
+    }).catch(() => {});
+  } catch (error) {
+    console.error('[spec-import] extractStoriesFromContent failed:', error);
+    const message = error instanceof Error ? error.message : String(error);
+
+    await queries.updateAgentSession(session.id, {
+      status: 'failed',
+      steps: [
+        { ...steps[0], status: 'failed', error: message, completedAt: new Date().toISOString() },
+        { ...steps[1], status: 'skipped' },
+      ],
+    });
+
+    emitAndPersistActivityEvent({
+      teamId, repositoryId, sessionId: session.id,
+      sourceType: 'generate_agent', eventType: 'session:error',
+      summary: `Spec import failed: ${message}`,
+      agentType: 'planner', stepId: null, detail: null,
+      artifactType: null, artifactId: null, artifactLabel: null,
+      durationMs: Date.now() - startTime, promptLogId: null,
+    }).catch(() => {});
+  }
+}
+
+// ============================================
+// Spec import session helpers
+// ============================================
+
+export async function getSpecImportSession(sessionId: string): Promise<SpecImportResponse> {
+  const session = await queries.getAgentSession(sessionId);
+  if (!session) return { success: false, error: 'Session not found' };
+
+  const meta = session.metadata as { stories?: ExtractedUserStory[]; importId?: string } | null;
+  if (!meta?.stories) return { success: false, error: 'No stories found in session' };
+
+  return { success: true, stories: meta.stories, importId: meta.importId ?? undefined };
+}
+
+export async function completeSpecImportSession(sessionId: string): Promise<void> {
+  const session = await queries.getAgentSession(sessionId);
+  if (!session) return;
+
+  const meta = session.metadata as Record<string, unknown> | null;
+  const teamId = session.teamId || '';
+
+  await queries.updateAgentSession(sessionId, {
+    status: 'completed',
+    completedAt: new Date(),
+    steps: (session.steps || []).map(s =>
+      s.id === 'review' ? { ...s, status: 'completed' as const, completedAt: new Date().toISOString() } : s
+    ),
+  });
+
+  emitAndPersistActivityEvent({
+    teamId, repositoryId: session.repositoryId, sessionId,
+    sourceType: 'generate_agent', eventType: 'session:complete',
+    summary: 'Spec import review completed',
+    agentType: null, stepId: null, detail: null,
+    artifactType: null, artifactId: null, artifactLabel: null,
+    durationMs: null, promptLogId: null,
+  }).catch(() => {});
 }
 
 // ============================================
@@ -731,7 +846,7 @@ export async function generateTestsFromStories(
           const code = extractCodeFromResponse(response);
 
           if (code) {
-            await queries.createTest({
+            const test = await queries.createTest({
               repositoryId,
               functionalAreaId: task.areaId,
               name: testName,
@@ -739,6 +854,28 @@ export async function generateTestsFromStories(
               description: acDescription,
               targetUrl: options?.targetUrl || null,
             });
+
+            // Create a linked spec so the spec side is populated alongside the test.
+            const specBody = [
+              `**Area:** ${task.story.title}`,
+              task.story.description ? `**Story:** ${task.story.description}` : '',
+              '',
+              task.group.map(ac => `- ${ac.description}`).join('\n'),
+            ].filter(Boolean).join('\n');
+            const { createHash } = await import('crypto');
+            const codeHash = createHash('sha256').update(code).digest('hex');
+            const specId = await queries.createTestSpec({
+              repositoryId,
+              testId: test.id,
+              functionalAreaId: task.areaId,
+              title: testName,
+              spec: specBody,
+              source: 'planner',
+              status: 'has_test',
+              codeHash,
+            });
+            await queries.linkSpecToTest(specId, test.id);
+
             return { created: true, testName };
           }
           return { created: false, testName };
@@ -755,6 +892,17 @@ export async function generateTestsFromStories(
         testsCreated++;
       } else if (!result.success) {
         errors.push(`${result.error || 'Unknown error'}`);
+      }
+    }
+
+    // Materialize `agentPlan` for each touched area so the plan side isn't empty.
+    const { syncAreaPlanAndSpecs } = await import('./specs');
+    const touchedAreaIds = Array.from(new Set(allTasks.map(t => t.areaId)));
+    for (const areaId of touchedAreaIds) {
+      try {
+        await syncAreaPlanAndSpecs(areaId, repositoryId);
+      } catch {
+        // Non-critical.
       }
     }
 
@@ -789,8 +937,6 @@ export async function generateTestsFromStories(
 // ============================================
 // Step 3b: Create placeholder tests (no AI)
 // ============================================
-
-import { PLACEHOLDER_CODE } from '@/lib/constants/placeholder';
 
 export async function createPlaceholdersFromStories(
   repositoryId: string,
@@ -889,6 +1035,25 @@ export async function createPlaceholdersFromStories(
           const msg = err instanceof Error ? err.message : 'Unknown error';
           errors.push(`${testName}: ${msg}`);
         }
+      }
+    }
+
+    // Materialize `agentPlan` for each touched area so plan/spec stay in sync.
+    const { syncAreaPlanAndSpecs } = await import('./specs');
+    const touchedAreaIds = new Set<string>();
+    for (const story of stories) {
+      const area = await queries.getOrCreateFunctionalAreaByRepo(
+        repositoryId,
+        story.title,
+        story.description,
+      );
+      touchedAreaIds.add(area.id);
+    }
+    for (const areaId of touchedAreaIds) {
+      try {
+        await syncAreaPlanAndSpecs(areaId, repositoryId);
+      } catch {
+        // Non-critical.
       }
     }
 

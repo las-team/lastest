@@ -7,13 +7,16 @@ import { authClient } from '@/lib/auth/auth-client';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Switch } from '@/components/ui/switch';
 import { Github } from 'lucide-react';
+import { recordRegistrationConsent } from '@/server/actions/consent';
 
 export default function RegisterPage() {
   const router = useRouter();
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [marketingConsent, setMarketingConsent] = useState(false);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
@@ -34,12 +37,14 @@ export default function RegisterPage() {
       return;
     }
 
+    await recordRegistrationConsent({ marketingEmails: marketingConsent });
+
     router.push('/');
     router.refresh();
   }
 
   async function handleOAuth(provider: 'github' | 'google') {
-    await authClient.signIn.social({ provider, callbackURL: '/' });
+    await authClient.signIn.social({ provider, callbackURL: '/consent' });
   }
 
   return (
@@ -88,6 +93,17 @@ export default function RegisterPage() {
             />
           </div>
 
+          <div className="flex items-center justify-between gap-2">
+            <Label htmlFor="marketing" className="text-sm font-normal text-muted-foreground leading-snug">
+              Send me product updates, tips, and feature announcements
+            </Label>
+            <Switch
+              id="marketing"
+              checked={marketingConsent}
+              onCheckedChange={setMarketingConsent}
+            />
+          </div>
+
           {error && (
             <p className="text-sm text-destructive">{error}</p>
           )}
@@ -95,6 +111,18 @@ export default function RegisterPage() {
           <Button type="submit" className="w-full" disabled={loading}>
             {loading ? 'Creating account...' : 'Create account'}
           </Button>
+
+          <p className="text-xs text-muted-foreground text-center">
+            By creating an account, you agree to our{' '}
+            <Link href="/terms" className="underline underline-offset-4 hover:text-foreground" target="_blank">
+              Terms of Service
+            </Link>{' '}
+            and{' '}
+            <Link href="/privacy" className="underline underline-offset-4 hover:text-foreground" target="_blank">
+              Privacy Policy
+            </Link>
+            .
+          </p>
         </form>
 
         <div className="relative">

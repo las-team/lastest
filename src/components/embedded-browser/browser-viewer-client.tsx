@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState, useCallback } from 'react';
+import { useEffect, useRef, useState, useCallback, useImperativeHandle, forwardRef } from 'react';
 import { Wifi, WifiOff, Loader2, RefreshCw, Upload } from 'lucide-react';
 import { BrowserToolbar } from '@/components/embedded-browser/browser-toolbar-client';
 import { Button } from '@/components/ui/button';
@@ -14,6 +14,20 @@ const FRAME_STALL_TIMEOUT_MS = 8000; // Reconnect if no frames for 8s while "con
 
 const SESSION_EXPIRY_WARN_MS = 5 * 60 * 1000; // Warn when <5 min remain
 
+export interface InspectElementResult {
+  tag: string;
+  id?: string;
+  textContent?: string;
+  boundingBox: { x: number; y: number; width: number; height: number };
+  selectors: Array<{ type: string; value: string }>;
+}
+
+export interface DomSnapshotResult {
+  elements: InspectElementResult[];
+  url: string;
+  timestamp: number;
+}
+
 interface BrowserViewerProps {
   streamUrl: string;
   initialViewport?: { width: number; height: number };
@@ -25,13 +39,23 @@ interface BrowserViewerProps {
   hideViewportSelector?: boolean;
   readOnlyUrl?: boolean;
   interactive?: boolean;
+  inspectMode?: boolean;
+  onInspectResult?: (result: InspectElementResult | null) => void;
+  onDomSnapshot?: (result: DomSnapshotResult) => void;
 }
 
-export function BrowserViewer({ streamUrl, initialViewport, className, expiresAt, hideControls, hideFullscreenToggle, hideScreenshot, hideViewportSelector, readOnlyUrl, interactive = true }: BrowserViewerProps) {
+export interface BrowserViewerHandle {
+  requestDomSnapshot: () => void;
+  sendInspectMode: (enabled: boolean) => void;
+}
+
+export const BrowserViewer = forwardRef<BrowserViewerHandle, BrowserViewerProps>(function BrowserViewer({ streamUrl, initialViewport, className, expiresAt, hideControls, hideFullscreenToggle, hideScreenshot, hideViewportSelector, readOnlyUrl, interactive = true, inspectMode, onInspectResult, onDomSnapshot }, ref) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const imageRef = useRef<HTMLImageElement | null>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const composingRef = useRef(false);
 
   const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>('connecting');
   const [viewport, setViewport] = useState(initialViewport ?? { width: 1280, height: 720 });
@@ -91,6 +115,23 @@ export function BrowserViewer({ streamUrl, initialViewport, className, expiresAt
       ws.send(JSON.stringify(message));
     }
   }, []);
+
+  // Keep callback refs current so the WebSocket onmessage handler (created
+  // once at connection time) always calls the latest callback.
+  const onInspectResultRef = useRef(onInspectResult);
+  onInspectResultRef.current = onInspectResult;
+  const onDomSnapshotRef = useRef(onDomSnapshot);
+  onDomSnapshotRef.current = onDomSnapshot;
+
+  // Expose imperative methods for parent components
+  useImperativeHandle(ref, () => ({
+    requestDomSnapshot: () => {
+      sendWs({ type: 'stream:dom_snapshot_request', payload: {} });
+    },
+    sendInspectMode: (enabled: boolean) => {
+      sendWs({ type: 'stream:inspect_mode', payload: { enabled } });
+    },
+  }), [sendWs]);
 
   // Ref to hold the connect function so onclose can call it without circular deps
   const connectWsRef = useRef<(attempt: number) => void>(() => {});
@@ -172,6 +213,16 @@ export function BrowserViewer({ streamUrl, initialViewport, className, expiresAt
                 frameCountRef.current = 0;
                 lastFpsUpdateRef.current = now;
               }
+              break;
+            }
+
+            case 'stream:inspect_element_response': {
+              onInspectResultRef.current?.(message.payload.element ?? null);
+              break;
+            }
+
+            case 'stream:dom_snapshot_response': {
+              onDomSnapshotRef.current?.(message.payload);
               break;
             }
 
@@ -282,6 +333,26 @@ export function BrowserViewer({ streamUrl, initialViewport, className, expiresAt
       const x = Math.round(e.clientX - rect.left);
       const y = Math.round(e.clientY - rect.top);
 
+      // In inspect mode: forward moves (for CDP overlay highlighting),
+      // intercept clicks to send inspect request instead
+      if (inspectMode) {
+        if (action === 'move') {
+          // Forward moves so CDP Overlay can highlight elements
+          sendWs({
+            type: 'stream:input',
+            payload: { type: 'mouse', action: 'move', x, y } satisfies StreamMouseEvent,
+          });
+        } else if (action === 'down') {
+          // Click → inspect element at this point
+          sendWs({
+            type: 'stream:inspect_element_request',
+            payload: { x, y },
+          });
+        }
+        // Suppress up/wheel in inspect mode
+        return;
+      }
+
       const payload: StreamMouseEvent = {
         type: 'mouse',
         action,
@@ -296,7 +367,7 @@ export function BrowserViewer({ streamUrl, initialViewport, className, expiresAt
 
       sendWs({ type: 'stream:input', payload });
     },
-    [sendWs]
+    [sendWs, inspectMode]
   );
 
   const handleWheel = useCallback(
@@ -346,13 +417,39 @@ export function BrowserViewer({ streamUrl, initialViewport, className, expiresAt
     input.click();
   }, [sendWs]);
 
-  // Keyboard event handlers
+  // Keyboard input — hidden textarea receives all keyboard events so that
+  // IME composition (accented chars like áúőóüáé) works.  Canvas elements
+  // never fire composition events, so we focus a 1×1 textarea instead.
+  //
+  // Strategy:
+  //   • Printable chars: DON'T preventDefault — let them enter the textarea,
+  //     then read + forward + clear via the `input` event.
+  //   • Non-printable keys (Enter, Backspace, arrows, etc.) and modifier
+  //     combos (Ctrl+A): preventDefault and forward as keydown/keyup.
+  //   • Dead keys / composition: let the browser compose, then forward the
+  //     final composed string from compositionEnd.
+
+  const focusTextarea = useCallback(() => {
+    if (interactive && textareaRef.current) {
+      // Use rAF so the call runs after the browser finishes its own focus
+      // handling for the mousedown that triggered this.
+      requestAnimationFrame(() => {
+        textareaRef.current?.focus({ preventScroll: true });
+      });
+    }
+  }, [interactive]);
+
   const handleKeyDown = useCallback(
-    (e: React.KeyboardEvent<HTMLCanvasElement>) => {
-      e.preventDefault();
+    (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+      // During IME composition, let the browser handle everything
+      if (composingRef.current) return;
+
+      // Dead key — let the browser start composition
+      if (e.key === 'Dead') return;
 
       // Intercept paste: read local clipboard and send as clipboard_paste event
       if ((e.ctrlKey || e.metaKey) && e.key === 'v') {
+        e.preventDefault();
         navigator.clipboard.readText().then(text => {
           if (text) {
             sendWs({
@@ -364,6 +461,14 @@ export function BrowserViewer({ streamUrl, initialViewport, className, expiresAt
         return;
       }
 
+      // Printable character without modifier — let it type into the textarea;
+      // the `input` event handler will read, forward, and clear it.
+      if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        return; // don't preventDefault — textarea needs the char
+      }
+
+      // Everything else (non-printable keys, modifier combos): forward directly
+      e.preventDefault();
       sendWs({
         type: 'stream:input',
         payload: {
@@ -385,7 +490,10 @@ export function BrowserViewer({ streamUrl, initialViewport, className, expiresAt
   );
 
   const handleKeyUp = useCallback(
-    (e: React.KeyboardEvent<HTMLCanvasElement>) => {
+    (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+      if (composingRef.current || e.key === 'Dead') return;
+      // Only forward non-printable keyups (printable chars handled via input event)
+      if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) return;
       e.preventDefault();
       sendWs({
         type: 'stream:input',
@@ -402,6 +510,52 @@ export function BrowserViewer({ streamUrl, initialViewport, className, expiresAt
           },
         } satisfies StreamKeyboardEvent,
       });
+    },
+    [sendWs]
+  );
+
+  // Textarea input event — fires for every character that enters the textarea
+  // (both normal typing and after composition completes)
+  const handleTextareaInput = useCallback(() => {
+    if (composingRef.current) return;
+    const ta = textareaRef.current;
+    if (!ta || !ta.value) return;
+    // Forward all accumulated text and clear
+    sendWs({
+      type: 'stream:input',
+      payload: {
+        type: 'keyboard',
+        action: 'type',
+        key: '',
+        text: ta.value,
+      } satisfies StreamKeyboardEvent,
+    });
+    ta.value = '';
+  }, [sendWs]);
+
+  // IME composition handlers for accented/special characters (á, ú, ő, ó, ü, é, etc.)
+  const handleCompositionStart = useCallback(() => {
+    composingRef.current = true;
+  }, []);
+
+  const handleCompositionEnd = useCallback(
+    (e: React.CompositionEvent<HTMLTextAreaElement>) => {
+      composingRef.current = false;
+      const composed = e.data;
+      if (composed) {
+        sendWs({
+          type: 'stream:input',
+          payload: {
+            type: 'keyboard',
+            action: 'type',
+            key: '',
+            text: composed,
+          } satisfies StreamKeyboardEvent,
+        });
+      }
+      if (textareaRef.current) {
+        textareaRef.current.value = '';
+      }
     },
     [sendWs]
   );
@@ -564,20 +718,37 @@ export function BrowserViewer({ streamUrl, initialViewport, className, expiresAt
 
         <canvas
           ref={canvasRef}
-          tabIndex={interactive ? 0 : -1}
-          className={`outline-none ${interactive ? 'cursor-default' : 'cursor-default pointer-events-none'}`}
+          className={`outline-none ${inspectMode ? 'cursor-crosshair' : interactive ? 'cursor-default' : 'cursor-default pointer-events-none'}`}
           style={{
             width: viewport.width,
             height: viewport.height,
           }}
           onMouseMove={(e) => handleMouseEvent(e, 'move')}
-          onMouseDown={(e) => handleMouseEvent(e, 'down')}
+          onMouseDown={(e) => { handleMouseEvent(e, 'down'); focusTextarea(); }}
           onMouseUp={(e) => handleMouseEvent(e, 'up')}
           onWheel={handleWheel}
-          onKeyDown={handleKeyDown}
-          onKeyUp={handleKeyUp}
           onContextMenu={(e) => e.preventDefault()}
         />
+        {/* Hidden textarea for IME/composition support — canvas can't receive composition events.
+            pointer-events:none keeps mouse events going to the canvas; focus is set programmatically. */}
+        {interactive && (
+          <textarea
+            ref={textareaRef}
+            className="absolute top-0 left-0 overflow-hidden outline-none"
+            style={{ width: 1, height: 1, opacity: 0.01, resize: 'none', zIndex: 10, pointerEvents: 'none', caretColor: 'transparent' }}
+            tabIndex={0}
+            autoComplete="off"
+            autoCapitalize="off"
+            autoCorrect="off"
+            spellCheck={false}
+            aria-hidden="true"
+            onKeyDown={handleKeyDown}
+            onKeyUp={handleKeyUp}
+            onInput={handleTextareaInput}
+            onCompositionStart={handleCompositionStart}
+            onCompositionEnd={handleCompositionEnd}
+          />
+        )}
       </div>
 
       {/* Status bar */}
@@ -621,4 +792,4 @@ export function BrowserViewer({ streamUrl, initialViewport, className, expiresAt
       </div>
     </div>
   );
-}
+});

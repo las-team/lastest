@@ -11,6 +11,7 @@
  *   GET  /api/v1/repos/:id/tests - Get tests for repo
  *   GET  /api/v1/repos/:id/builds - Get builds for repo
  *   GET  /api/v1/repos/:id/coverage - Get test coverage stats for repo
+ *   GET  /api/v1/repos/:id/export - Export tests + functional areas (for migration)
  *   GET  /api/v1/functional-areas/:id - Get functional area
  *   GET  /api/v1/functional-areas/:id/tests - Get tests by functional area
  *   GET  /api/v1/tests/:id - Get single test
@@ -37,6 +38,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import * as queries from '@/lib/db/queries';
 import { createAndRunBuildCore } from '@/server/actions/builds';
 import { batchApproveDiffsCore, batchRejectDiffsCore, approveDiffCore, rejectDiffCore, approveAllDiffsCore, getDiffCore } from '@/server/actions/diffs';
+import { awardScore } from '@/server/actions/gamification';
 import { getCurrentSession } from '@/lib/auth';
 import { verifyBearerToken } from '@/lib/auth/api-key';
 
@@ -158,6 +160,44 @@ export async function GET(
           percentage: areas.length > 0 ? Math.round((areas.filter(a => testedAreaIds.has(a.id)).length / areas.length) * 100) : 0,
         };
         return NextResponse.json({ routeCoverage, areaCoverage });
+      }
+
+      // GET /api/v1/repos/:id/export — full export for migration
+      if (subResource === 'export') {
+        const areas = await queries.getFunctionalAreasByRepo(id);
+        const areaMap = new Map(areas.map(a => [a.id, a]));
+
+        const exportedAreas = areas.map(a => ({
+          name: a.name,
+          description: a.description,
+          parentName: a.parentId ? areaMap.get(a.parentId)?.name ?? null : null,
+          orderIndex: a.orderIndex,
+          isRouteFolder: a.isRouteFolder,
+          agentPlan: a.agentPlan,
+        }));
+
+        const repoTests = await queries.getTestsByRepo(id);
+        const exportedTests = repoTests.map(t => ({
+          name: t.name,
+          code: t.code,
+          description: t.description,
+          targetUrl: t.targetUrl,
+          functionalAreaName: t.functionalAreaId ? areaMap.get(t.functionalAreaId)?.name ?? null : null,
+          executionMode: t.executionMode,
+          agentPrompt: t.agentPrompt,
+          assertions: t.assertions,
+          setupOverrides: t.setupOverrides,
+          teardownOverrides: t.teardownOverrides,
+          stabilizationOverrides: t.stabilizationOverrides,
+          viewportOverride: t.viewportOverride,
+          diffOverrides: t.diffOverrides,
+          playwrightOverrides: t.playwrightOverrides,
+          requiredCapabilities: t.requiredCapabilities,
+          quarantined: t.quarantined,
+          isPlaceholder: t.isPlaceholder,
+        }));
+
+        return NextResponse.json({ functionalAreas: exportedAreas, tests: exportedTests });
       }
 
       return NextResponse.json(repo);
@@ -369,12 +409,11 @@ export async function POST(
         return NextResponse.json({ error: 'repositoryId required' }, { status: 400 });
       }
       // Dynamic import to avoid pulling in heavy AI deps at route level
-      const { aiCreateTestCore } = await import('@/server/actions/ai');
-      const result = await aiCreateTestCore(repositoryId, {
+      const { createTest } = await import('@/server/actions/ai');
+      const result = await createTest(repositoryId, {
         targetUrl: url,
         userPrompt: prompt,
         functionalAreaId,
-        useMCP: true,
       });
       return NextResponse.json(result);
     }
@@ -620,6 +659,26 @@ export async function PUT(
       }
 
       await queries.updateTestWithVersion(id, updates, 'mcp_edit');
+
+      // Award MCP bot points when a placeholder test gets real code via API
+      if (updates.code && test.isPlaceholder && test.repositoryId) {
+        const repo = await queries.getRepository(test.repositoryId);
+        if (repo?.teamId) {
+          const mcpBot = await queries.getBotByKind(repo.teamId, 'mcp_server');
+          if (mcpBot) {
+            // Stamp bot as creator for future regression/flake attribution
+            queries.updateTest(id, { createdByBotId: mcpBot.id }).catch(() => {});
+            awardScore({
+              teamId: repo.teamId,
+              kind: 'test_created',
+              actor: { kind: 'bot', id: mcpBot.id },
+              sourceType: 'test',
+              sourceId: id,
+            }).catch(() => {});
+          }
+        }
+      }
+
       const updated = await queries.getTest(id);
       return NextResponse.json(updated);
     }

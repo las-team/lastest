@@ -28,7 +28,7 @@ export function SetupScriptList({ repositoryId, scripts }: SetupScriptListProps)
   const [editingScript, setEditingScript] = useState<SetupScript | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [duplicatingId, setDuplicatingId] = useState<string | null>(null);
-  const [usageMap, setUsageMap] = useState<Map<string, { testCount: number; suiteCount: number }>>(new Map());
+  const [usageMap, setUsageMap] = useState<Map<string, { testCount: number }>>(new Map());
 
   const handleCreate = () => {
     setEditingScript(null);
@@ -72,7 +72,7 @@ export function SetupScriptList({ repositoryId, scripts }: SetupScriptListProps)
     if (usageMap.has(id)) return;
     try {
       const usage = await getSetupScriptUsage(id);
-      setUsageMap(prev => new Map(prev).set(id, { testCount: usage.testCount, suiteCount: usage.suiteCount }));
+      setUsageMap(prev => new Map(prev).set(id, { testCount: usage.testCount }));
     } catch {
       // Ignore errors
     }
@@ -134,10 +134,9 @@ export function SetupScriptList({ repositoryId, scripts }: SetupScriptListProps)
                             {script.description}
                           </p>
                         )}
-                        {usage && (usage.testCount > 0 || usage.suiteCount > 0) && (
+                        {usage && usage.testCount > 0 && (
                           <p className="text-xs text-muted-foreground mt-1">
                             Used by {usage.testCount} test{usage.testCount !== 1 ? 's' : ''}
-                            {usage.suiteCount > 0 && `, ${usage.suiteCount} suite${usage.suiteCount !== 1 ? 's' : ''}`}
                           </p>
                         )}
                       </div>

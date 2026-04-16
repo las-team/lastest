@@ -34,7 +34,7 @@ export default function LoginPage() {
   }
 
   async function handleOAuth(provider: 'github' | 'google') {
-    await authClient.signIn.social({ provider, callbackURL: '/' });
+    await authClient.signIn.social({ provider, callbackURL: '/consent' });
   }
 
   return (

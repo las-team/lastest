@@ -293,8 +293,7 @@ export async function discoverAreas(
   baseURL?: string,
   intelligence?: CodebaseIntelligenceContext,
 ): Promise<{ success: boolean; functionalAreas?: DiscoveredArea[]; error?: string }> {
-  const settings = await queries.getAISettings(repositoryId);
-  if (settings.pwAgentEnabled && baseURL) {
+  if (baseURL) {
     const { agentDiscoverAreas } = await import('@/lib/playwright/planner-agent');
     return agentDiscoverAreas(repositoryId, baseURL);
   }

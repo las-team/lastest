@@ -16,7 +16,6 @@ import {
   X,
   Pause,
   Route,
-  ListChecks,
   GripVertical,
   ScrollText,
 } from 'lucide-react';
@@ -33,21 +32,13 @@ import { cn } from '@/lib/utils';
 import type { FunctionalAreaWithChildren } from '@/lib/db/queries';
 
 export interface TreeSelection {
-  type: 'area' | 'test' | 'suite';
+  type: 'area' | 'test';
   id: string;
-}
-
-export interface SuiteItem {
-  id: string;
-  name: string;
-  description: string | null;
-  testCount: number;
 }
 
 interface AreaTreeProps {
   tree: FunctionalAreaWithChildren[];
   uncategorizedTests: { id: string; name: string; description: string | null; latestStatus: string | null; isPlaceholder?: boolean }[];
-  unsortedSuites: SuiteItem[];
   selection: TreeSelection | null;
   selectedAreaIds: Set<string>;
   onSelect: (selection: TreeSelection | null) => void;
@@ -57,7 +48,6 @@ interface AreaTreeProps {
   onDeleteArea: (id: string) => void;
   onDeleteMultipleAreas: (ids: string[]) => void;
   onMoveTest: (testId: string, areaId: string | null) => void;
-  onMoveSuite: (suiteId: string, areaId: string | null) => void;
   onMoveArea: (areaId: string, newParentId: string | null) => void;
   onDeleteTest?: (id: string) => void;
   headerExtra?: React.ReactNode;
@@ -90,7 +80,6 @@ interface AreaNodeProps {
   onEditArea: (id: string) => void;
   onDeleteArea: (id: string) => void;
   onMoveTest: (testId: string, areaId: string | null) => void;
-  onMoveSuite: (suiteId: string, areaId: string | null) => void;
   onMoveArea: (areaId: string, newParentId: string | null) => void;
   onDeleteTest?: (id: string) => void;
 }
@@ -141,14 +130,13 @@ function AreaNode({
   onEditArea,
   onDeleteArea,
   onMoveTest,
-  onMoveSuite,
   onMoveArea,
   onDeleteTest,
 }: AreaNodeProps) {
   const isExpanded = expandedIds.has(area.id);
   const isSelected = selection?.type === 'area' && selection.id === area.id;
   const isMultiSelected = selectedAreaIds.has(area.id);
-  const hasChildren = area.children.length > 0 || area.tests.length > 0 || area.suites.length > 0;
+  const hasChildren = area.children.length > 0 || area.tests.length > 0;
   const FolderIcon = area.isRouteFolder ? Route : isExpanded ? FolderOpen : Folder;
 
   const handleDragStart = (e: React.DragEvent) => {
@@ -171,12 +159,9 @@ function AreaNode({
     e.preventDefault();
     e.stopPropagation();
     const testId = e.dataTransfer.getData('text/test-id');
-    const suiteId = e.dataTransfer.getData('text/suite-id');
     const areaId = e.dataTransfer.getData('text/area-id');
     if (testId) {
       onMoveTest(testId, area.id);
-    } else if (suiteId) {
-      onMoveSuite(suiteId, area.id);
     } else if (areaId && areaId !== area.id) {
       // Move the dragged area to become a child of this area
       onMoveArea(areaId, area.id);
@@ -230,7 +215,7 @@ function AreaNode({
         <span className="flex-1 truncate text-sm">{area.name}</span>
         {area.agentPlan && <ScrollText className="h-3 w-3 text-muted-foreground shrink-0" />}
         <CoverageBadge area={area} />
-        <span className="text-xs text-muted-foreground">{area.tests.length + area.suites.length}</span>
+        <span className="text-xs text-muted-foreground">{area.tests.length}</span>
         <DropdownMenu>
           <DropdownMenuTrigger asChild onClick={(e) => e.stopPropagation()}>
             <Button
@@ -279,18 +264,8 @@ function AreaNode({
               onEditArea={onEditArea}
               onDeleteArea={onDeleteArea}
               onMoveTest={onMoveTest}
-              onMoveSuite={onMoveSuite}
               onMoveArea={onMoveArea}
               onDeleteTest={onDeleteTest}
-            />
-          ))}
-          {area.suites.map((suite) => (
-            <SuiteNode
-              key={suite.id}
-              suite={suite}
-              depth={depth + 1}
-              selection={selection}
-              onSelect={onSelect}
             />
           ))}
           {area.tests.map((test) => (
@@ -383,43 +358,6 @@ function TestNode({ test, depth, selection, onSelect, onDeleteTest }: TestNodePr
   );
 }
 
-interface SuiteNodeProps {
-  suite: SuiteItem;
-  depth: number;
-  selection: TreeSelection | null;
-  onSelect: (selection: TreeSelection | null) => void;
-}
-
-function SuiteNode({ suite, depth, selection, onSelect }: SuiteNodeProps) {
-  const isSelected = selection?.type === 'suite' && selection.id === suite.id;
-
-  const handleDragStart = (e: React.DragEvent) => {
-    e.dataTransfer.setData('text/suite-id', suite.id);
-    e.dataTransfer.effectAllowed = 'move';
-  };
-
-  return (
-    <div
-      role="treeitem"
-      aria-label={suite.name}
-      aria-selected={isSelected}
-      className={cn(
-        'group flex items-center gap-2 py-1 px-2 rounded cursor-pointer hover:bg-muted',
-        isSelected && 'bg-primary/10 hover:bg-primary/15'
-      )}
-      style={{ paddingLeft: `${depth * 16 + 8}px` }}
-      onClick={() => onSelect({ type: 'suite', id: suite.id })}
-      draggable
-      onDragStart={handleDragStart}
-    >
-      <GripVertical className="h-3 w-3 text-muted-foreground opacity-0 group-hover:opacity-100 cursor-grab" />
-      <ListChecks className="h-4 w-4 text-violet-500" />
-      <span className="flex-1 truncate text-sm">{suite.name}</span>
-      <span className="text-xs text-muted-foreground">{suite.testCount}</span>
-    </div>
-  );
-}
-
 // Flatten tree into ordered list of area IDs (depth-first)
 function flattenAreaIds(areas: FunctionalAreaWithChildren[]): string[] {
   const result: string[] = [];
@@ -433,7 +371,6 @@ function flattenAreaIds(areas: FunctionalAreaWithChildren[]): string[] {
 export function AreaTree({
   tree,
   uncategorizedTests,
-  unsortedSuites,
   selection,
   selectedAreaIds,
   onSelect,
@@ -443,7 +380,6 @@ export function AreaTree({
   onDeleteArea,
   onDeleteMultipleAreas,
   onMoveTest,
-  onMoveSuite,
   onMoveArea,
   onDeleteTest,
   headerExtra,
@@ -489,12 +425,9 @@ export function AreaTree({
   const handleUnsortedDrop = (e: React.DragEvent) => {
     e.preventDefault();
     const testId = e.dataTransfer.getData('text/test-id');
-    const suiteId = e.dataTransfer.getData('text/suite-id');
     const areaId = e.dataTransfer.getData('text/area-id');
     if (testId) {
       onMoveTest(testId, null);
-    } else if (suiteId) {
-      onMoveSuite(suiteId, null);
     } else if (areaId) {
       // Move area to root level
       onMoveArea(areaId, null);
@@ -557,13 +490,12 @@ export function AreaTree({
               onEditArea={onEditArea}
               onDeleteArea={onDeleteArea}
               onMoveTest={onMoveTest}
-              onMoveSuite={onMoveSuite}
               onMoveArea={onMoveArea}
               onDeleteTest={onDeleteTest}
             />
           ))}
 
-          {/* Unsorted section (tests, suites, and drop zone for moving areas to root) */}
+          {/* Unsorted section (tests and drop zone for moving areas to root) */}
           <div
             className="mt-2 pt-2 border-t"
             onDragOver={(e) => {
@@ -575,19 +507,10 @@ export function AreaTree({
             <div className="flex items-center gap-2 py-1 px-2 text-sm text-muted-foreground">
               <FolderInput className="h-4 w-4" />
               <span>Unsorted</span>
-              {(uncategorizedTests.length > 0 || unsortedSuites.length > 0) && (
-                <span className="text-xs">({uncategorizedTests.length + unsortedSuites.length})</span>
+              {uncategorizedTests.length > 0 && (
+                <span className="text-xs">({uncategorizedTests.length})</span>
               )}
             </div>
-            {unsortedSuites.map((suite) => (
-              <SuiteNode
-                key={suite.id}
-                suite={suite}
-                depth={0}
-                selection={selection}
-                onSelect={onSelect}
-              />
-            ))}
             {uncategorizedTests.map((test) => (
               <TestNode
                 key={test.id}
@@ -598,14 +521,14 @@ export function AreaTree({
                 onDeleteTest={onDeleteTest}
               />
             ))}
-            {uncategorizedTests.length === 0 && unsortedSuites.length === 0 && (
+            {uncategorizedTests.length === 0 && (
               <div className="py-2 px-2 text-xs text-muted-foreground/60 italic">
                 Drop items here to unsort
               </div>
             )}
           </div>
 
-          {tree.length === 0 && uncategorizedTests.length === 0 && unsortedSuites.length === 0 && (
+          {tree.length === 0 && uncategorizedTests.length === 0 && (
             <div className="text-center py-8 text-muted-foreground text-sm">
               <Folder className="h-8 w-8 mx-auto mb-2 opacity-50" />
               <p>No areas yet</p>

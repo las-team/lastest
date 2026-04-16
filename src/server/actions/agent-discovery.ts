@@ -9,7 +9,7 @@ import { aiScanRoutes, type DiscoveredArea } from './ai-routes';
 /**
  * Unified area discovery server action.
  *
- * Routes to PW Planner agent when enabled, falls back to AI scan.
+ * Always uses PW Planner agent for live browser exploration, falls back to AI scan on failure.
  * This is the primary entry point for the "Discover Areas" button.
  */
 export async function discoverAreas(
@@ -18,37 +18,32 @@ export async function discoverAreas(
 ): Promise<{ success: boolean; functionalAreas?: DiscoveredArea[]; error?: string }> {
   await requireRepoAccess(repositoryId);
 
-  const settings = await queries.getAISettings(repositoryId);
+  // Get base URL for agent
+  const envConfig = await queries.getEnvironmentConfig(repositoryId);
+  const baseUrl = envConfig?.baseUrl || 'http://localhost:3000';
 
-  if (settings.pwAgentEnabled) {
-    // Get base URL for agent
-    const envConfig = await queries.getEnvironmentConfig(repositoryId);
-    const baseUrl = envConfig?.baseUrl || 'http://localhost:3000';
+  const result = await runAgentDiscovery(repositoryId, baseUrl);
 
-    const result = await runAgentDiscovery(repositoryId, baseUrl);
-
-    if (result.success && result.functionalAreas) {
-      revalidatePath('/areas');
-      return {
-        success: true,
-        functionalAreas: result.functionalAreas.map(area => ({
-          name: area.name,
-          routes: area.routes.map(r => ({
-            path: r.path,
-            type: r.type as 'static' | 'dynamic',
-            description: r.description,
-          })),
+  if (result.success && result.functionalAreas) {
+    revalidatePath('/areas');
+    return {
+      success: true,
+      functionalAreas: result.functionalAreas.map(area => ({
+        name: area.name,
+        routes: area.routes.map(r => ({
+          path: r.path,
+          type: r.type as 'static' | 'dynamic',
+          description: r.description,
         })),
-      };
-    }
-
-    // If agent failed but we have a GitHub connection, fall back to AI scan
-    if (result.error) {
-      console.warn(`Planner agent failed: ${result.error}, falling back to AI scan`);
-    }
+      })),
+    };
   }
 
-  // Fall back to AI scan
+  // If agent failed, fall back to AI scan
+  if (result.error) {
+    console.warn(`Planner agent failed: ${result.error}, falling back to AI scan`);
+  }
+
   return aiScanRoutes(repositoryId, branch);
 }
 

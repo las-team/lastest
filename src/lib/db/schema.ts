@@ -1,4 +1,4 @@
-import { pgTable, text, integer, boolean, timestamp, jsonb, index } from 'drizzle-orm/pg-core';
+import { pgTable, text, integer, bigint, boolean, timestamp, jsonb, index, real } from 'drizzle-orm/pg-core';
 
 // Type definitions for JSON columns
 
@@ -27,8 +27,17 @@ export interface NetworkRequest {
   responseSize?: number;
 }
 
+export interface DownloadRecord {
+  suggestedFilename: string;
+  savedPath: string;
+  url?: string;
+  sizeBytes?: number;
+  durationMs?: number;
+  startTime?: number;
+}
+
 // Selector configuration for multi-input recording
-export type SelectorType = 'data-testid' | 'id' | 'role-name' | 'text' | 'aria-label' | 'placeholder' | 'name' | 'css-path' | 'ocr-text' | 'coords';
+export type SelectorType = 'data-testid' | 'id' | 'role-name' | 'label' | 'heading-context' | 'text' | 'aria-label' | 'placeholder' | 'name' | 'alt-text' | 'title' | 'css-path' | 'ocr-text' | 'coords';
 
 export interface SelectorConfig {
   type: SelectorType;
@@ -74,6 +83,34 @@ export interface AIDiffAnalysis {
   analyzedAt: string;
 }
 
+// DOM snapshot element captured during recording or test execution
+export interface DomSnapshotElement {
+  tag: string;
+  id?: string;
+  textContent?: string;
+  boundingBox: { x: number; y: number; width: number; height: number };
+  selectors: Array<{ type: string; value: string }>;
+}
+
+// Full DOM snapshot with page context
+export interface DomSnapshotData {
+  elements: DomSnapshotElement[];
+  url: string;
+  timestamp: number;
+}
+
+// DOM diff result for comparing two snapshots
+export interface DomDiffResult {
+  added: DomSnapshotElement[];
+  removed: DomSnapshotElement[];
+  changed: Array<{
+    baseline: DomSnapshotElement;
+    current: DomSnapshotElement;
+    changes: ('text' | 'position' | 'size' | 'selector')[];
+  }>;
+  unchangedCount: number;
+}
+
 export interface DiffMetadata {
   changedRegions: { x: number; y: number; width: number; height: number }[];
   affectedComponents?: string[];
@@ -84,6 +121,7 @@ export interface DiffMetadata {
   textRegionDiffPixels?: number;
   nonTextRegionDiffPixels?: number;
   ocrDurationMs?: number;
+  domDiff?: DomDiffResult;
 }
 
 /** Capabilities that a test requires from Playwright settings (detected during recording). */
@@ -177,6 +215,7 @@ export const tests = pgTable('tests', {
   executionMode: text('execution_mode').default('procedural'), // 'procedural' | 'agent'
   agentPrompt: text('agent_prompt'), // NL description for agent mode
   quarantined: boolean('quarantined').default(false), // quarantined tests run but don't block builds
+  domSnapshot: jsonb('dom_snapshot').$type<DomSnapshotData>(), // DOM state captured during recording
   specId: text('spec_id'), // FK to testSpecs (back-reference for 1:1 link)
   // Gamification attribution: who authored this test. Mutually exclusive. Nullable for legacy rows.
   createdByUserId: text('created_by_user_id'),
@@ -218,7 +257,7 @@ export interface A11yViolation {
 export interface TestAssertion {
   id: string;
   orderIndex: number;
-  category: 'element' | 'page' | 'generic' | 'visual';
+  category: 'element' | 'page' | 'generic' | 'visual' | 'download';
   assertionType: string;
   negated: boolean;
   targetSelector?: string;
@@ -262,6 +301,7 @@ export const testResults = pgTable('test_results', {
   browser: text('browser').default('chromium'),
   consoleErrors: jsonb('console_errors').$type<string[]>(),
   networkRequests: jsonb('network_requests').$type<NetworkRequest[]>(),
+  downloads: jsonb('downloads').$type<DownloadRecord[]>(),
   a11yViolations: jsonb('a11y_violations').$type<A11yViolation[]>(),
   assertionResults: jsonb('assertion_results').$type<AssertionResult[]>(),
   a11yPassesCount: integer('a11y_passes_count'),
@@ -271,6 +311,9 @@ export const testResults = pgTable('test_results', {
   retryOf: text('retry_of'), // links to original test result ID if this is a retry
   isFlaky: boolean('is_flaky').default(false), // true if test failed then passed on retry
   triage: jsonb('triage').$type<TriageResult>(), // AI failure triage classification
+  domSnapshot: jsonb('dom_snapshot').$type<DomSnapshotData>(), // DOM state captured at screenshot time
+  lastReachedStep: integer('last_reached_step'), // 0-based index of last step reached during execution
+  totalSteps: integer('total_steps'), // total parsed step count for watermark ratio computation
 });
 
 // Repository provider type
@@ -679,13 +722,17 @@ export const DEFAULT_SELECTOR_PRIORITY: SelectorConfig[] = [
   { type: 'data-testid', enabled: true, priority: 1 },
   { type: 'id', enabled: true, priority: 2 },
   { type: 'role-name', enabled: true, priority: 3 },
-  { type: 'aria-label', enabled: true, priority: 4 },
-  { type: 'text', enabled: true, priority: 5 },
-  { type: 'placeholder', enabled: true, priority: 6 },
-  { type: 'name', enabled: true, priority: 7 },
-  { type: 'css-path', enabled: true, priority: 8 },
-  { type: 'ocr-text', enabled: false, priority: 9 },
-  { type: 'coords', enabled: true, priority: 10 },
+  { type: 'label', enabled: true, priority: 4 },
+  { type: 'heading-context', enabled: true, priority: 5 },
+  { type: 'aria-label', enabled: true, priority: 6 },
+  { type: 'text', enabled: true, priority: 7 },
+  { type: 'placeholder', enabled: true, priority: 8 },
+  { type: 'name', enabled: true, priority: 9 },
+  { type: 'alt-text', enabled: true, priority: 10 },
+  { type: 'title', enabled: true, priority: 11 },
+  { type: 'css-path', enabled: true, priority: 12 },
+  { type: 'ocr-text', enabled: false, priority: 13 },
+  { type: 'coords', enabled: true, priority: 14 },
 ];
 
 // Discovered routes for coverage tracking
@@ -762,8 +809,8 @@ export type RegionDetectionMode = 'grid' | 'flood-fill';
 export const diffSensitivitySettings = pgTable('diff_sensitivity_settings', {
   id: text('id').primaryKey(),
   repositoryId: text('repository_id').references(() => repositories.id),
-  unchangedThreshold: integer('unchanged_threshold').default(1),  // percentage
-  flakyThreshold: integer('flaky_threshold').default(10),        // percentage
+  unchangedThreshold: real('unchanged_threshold').default(1),  // percentage
+  flakyThreshold: real('flaky_threshold').default(10),        // percentage
   includeAntiAliasing: boolean('include_anti_aliasing').default(false), // include AA pixels in diff
   ignorePageShift: boolean('ignore_page_shift').default(false), // exclude vertical content shifts from diff
   diffEngine: text('diff_engine').default('pixelmatch'), // 'pixelmatch' | 'ssim' | 'butteraugli'
@@ -828,7 +875,6 @@ export const aiSettings = pgTable('ai_settings', {
   aiDiffingModel: text('ai_diffing_model').default('anthropic/claude-sonnet-4-5-20250929'),
   aiDiffingOllamaBaseUrl: text('ai_diffing_ollama_base_url'),
   aiDiffingOllamaModel: text('ai_diffing_ollama_model'),
-  pwAgentEnabled: boolean('pw_agent_enabled').default(true),
   pwAgentModel: text('pw_agent_model'),
   pwAgentTimeout: integer('pw_agent_timeout').default(300000),
   createdAt: timestamp('created_at'),
@@ -852,7 +898,6 @@ export const DEFAULT_AI_SETTINGS = {
   aiDiffingModel: 'anthropic/claude-sonnet-4-5-20250929',
   aiDiffingOllamaBaseUrl: 'http://localhost:11434',
   aiDiffingOllamaModel: '',
-  pwAgentEnabled: true,
   pwAgentModel: '',
   pwAgentTimeout: 300000,
 };
@@ -880,7 +925,7 @@ export type AIPromptLog = typeof aiPromptLogs.$inferSelect;
 export type NewAIPromptLog = typeof aiPromptLogs.$inferInsert;
 
 // Background Jobs for queue tracking
-export type BackgroundJobType = 'ai_scan' | 'build_tests' | 'test_run' | 'build_run' | 'ai_fix' | 'ai_validate' | 'ai_diff';
+export type BackgroundJobType = 'ai_scan' | 'build_tests' | 'test_run' | 'build_run' | 'ai_fix' | 'ai_validate' | 'ai_diff' | 'storage_cleanup' | 'spec_import';
 export type BackgroundJobStatus = 'pending' | 'running' | 'completed' | 'failed';
 
 export const backgroundJobs = pgTable('background_jobs', {
@@ -896,6 +941,7 @@ export const backgroundJobs = pgTable('background_jobs', {
   parentJobId: text('parent_job_id'),
   repositoryId: text('repository_id').references(() => repositories.id),
   targetRunnerId: text('target_runner_id'), // 'local' or runner UUID — tracks which runner this job targets
+  actualRunnerId: text('actual_runner_id'), // Runner UUID that actually executed (resolved from 'auto')
   createdAt: timestamp('created_at'),
   startedAt: timestamp('started_at'),
   lastActivityAt: timestamp('last_activity_at'),
@@ -951,34 +997,6 @@ export const testVersions = pgTable('test_versions', {
 
 export type TestVersion = typeof testVersions.$inferSelect;
 export type NewTestVersion = typeof testVersions.$inferInsert;
-
-// Test Suites - ordered collections of tests
-export const suites = pgTable('suites', {
-  id: text('id').primaryKey(),
-  repositoryId: text('repository_id').references(() => repositories.id),
-  functionalAreaId: text('functional_area_id').references(() => functionalAreas.id),
-  name: text('name').notNull(),
-  description: text('description'),
-  orderIndex: integer('order_index').default(0),
-  // Setup configuration - setupTestId takes precedence over setupScriptId
-  setupTestId: text('setup_test_id'), // Use test as setup
-  setupScriptId: text('setup_script_id'), // OR use dedicated script
-  createdAt: timestamp('created_at'),
-  updatedAt: timestamp('updated_at'),
-});
-
-export const suiteTests = pgTable('suite_tests', {
-  id: text('id').primaryKey(),
-  suiteId: text('suite_id').references(() => suites.id, { onDelete: 'cascade' }).notNull(),
-  testId: text('test_id').references(() => tests.id, { onDelete: 'cascade' }).notNull(),
-  orderIndex: integer('order_index').notNull().default(0),
-  createdAt: timestamp('created_at'),
-});
-
-export type Suite = typeof suites.$inferSelect;
-export type NewSuite = typeof suites.$inferInsert;
-export type SuiteTest = typeof suiteTests.$inferSelect;
-export type NewSuiteTest = typeof suiteTests.$inferInsert;
 
 // Notification settings for Slack, Discord, GitHub PR comments, GitLab MR comments, and Custom Webhook
 export const notificationSettings = pgTable('notification_settings', {
@@ -1043,6 +1061,9 @@ export const teams = pgTable('teams', {
   earlyAdopterMode: boolean('early_adopter_mode').default(false),
   banAiMode: boolean('ban_ai_mode').default(false),
   gamificationEnabled: boolean('gamification_enabled').default(false),
+  storageQuotaBytes: bigint('storage_quota_bytes', { mode: 'number' }).default(10737418240), // 10 GB
+  storageUsedBytes: bigint('storage_used_bytes', { mode: 'number' }).default(0),
+  storageLastCalculatedAt: timestamp('storage_last_calculated_at'),
   createdAt: timestamp('created_at'),
   updatedAt: timestamp('updated_at'),
 });
@@ -1162,6 +1183,23 @@ export const userInvitations = pgTable('user_invitations', {
 export type UserInvitation = typeof userInvitations.$inferSelect;
 export type NewUserInvitation = typeof userInvitations.$inferInsert;
 
+// User consent records - GDPR audit trail
+export const userConsents = pgTable('user_consents', {
+  id: text('id').primaryKey(),
+  userId: text('user_id').references(() => users.id, { onDelete: 'cascade' }).notNull(),
+  consentType: text('consent_type').notNull(), // 'terms_of_service' | 'privacy_policy' | 'marketing_emails'
+  granted: boolean('granted').notNull(),
+  version: text('version').notNull(),
+  ipAddress: text('ip_address'),
+  userAgent: text('user_agent'),
+  grantedAt: timestamp('granted_at').notNull(),
+  revokedAt: timestamp('revoked_at'),
+});
+
+export type ConsentType = 'terms_of_service' | 'privacy_policy' | 'marketing_emails';
+export type UserConsent = typeof userConsents.$inferSelect;
+export type NewUserConsent = typeof userConsents.$inferInsert;
+
 // ============================================
 // Runners Table (Remote Execution)
 // ============================================
@@ -1209,6 +1247,7 @@ export const embeddedSessions = pgTable('embedded_sessions', {
   createdAt: timestamp('created_at').notNull().$defaultFn(() => new Date()),
   lastActivityAt: timestamp('last_activity_at'),
   expiresAt: timestamp('expires_at'),
+  busySince: timestamp('busy_since'), // Set when claimed by pool, cleared on release. Used for stale-lock detection.
 });
 
 export type EmbeddedSession = typeof embeddedSessions.$inferSelect;
@@ -1426,7 +1465,8 @@ export type AgentStepId =
   | 'run_tests'
   | 'fix_tests'
   | 'rerun_tests'
-  | 'summary';
+  | 'summary'
+  | 'heal';
 
 export type AgentStepStatus = 'pending' | 'active' | 'waiting_user' | 'completed' | 'failed' | 'skipped';
 
@@ -1748,6 +1788,7 @@ export type ActivityEventType =
   | 'mcp:tool_result'
   | 'mcp:tool_error'
   | 'artifact:created'
+  | 'artifact:updated'
   // Gamification
   | 'score:awarded'
   | 'score:penalty'
@@ -1758,9 +1799,9 @@ export type ActivityEventType =
   | 'blitz:started'
   | 'blitz:ended';
 
-export type ActivitySourceType = 'play_agent' | 'mcp_server' | 'generate_agent';
+export type ActivitySourceType = 'play_agent' | 'mcp_server' | 'generate_agent' | 'heal_agent';
 
-export type ActivityArtifactType = 'test' | 'build' | 'area' | 'baseline' | 'suite' | 'score';
+export type ActivityArtifactType = 'test' | 'build' | 'area' | 'baseline' | 'score' | 'spec_import';
 
 export const activityEvents = pgTable('activity_events', {
   id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),

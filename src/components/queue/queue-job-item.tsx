@@ -12,6 +12,7 @@ const TYPE_LABELS: Record<string, string> = {
   test_run: 'Test Run',
   build_run: 'Build',
   ai_diff: 'AI Diff',
+  spec_import: 'Spec Import',
 };
 
 function StatusIcon({ status }: { status: string }) {

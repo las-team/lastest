@@ -21,6 +21,7 @@
 import type { Browser, Page } from 'playwright';
 import type { StabilizationPayload } from './protocol.js';
 import { setupFreezeScripts, applyPreScreenshotStabilization } from './stabilization.js';
+import { instrumentStepTracking } from '@lastest/shared';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
@@ -52,6 +53,8 @@ export interface EmbeddedTestResult {
   softErrors?: string[];
   videoData?: string; // base64-encoded video file
   videoFilename?: string;
+  lastReachedStep?: number;
+  totalSteps?: number;
 }
 
 export interface EmbeddedSetupResult {
@@ -91,6 +94,7 @@ export interface RunTestPayload {
   networkErrorMode?: 'fail' | 'warn' | 'ignore';
   ignoreExternalNetworkErrors?: boolean;
   enableNetworkInterception?: boolean;
+  acceptDownloads?: boolean;
   forceVideoRecording?: boolean;
 }
 
@@ -205,6 +209,7 @@ export class EmbeddedTestExecutor {
     // Create a fresh context + page per test (mirrors standard runner)
     const testContext = await browser.newContext({
       viewport,
+      acceptDownloads: true, // Always accept in EB — native file dialogs hang in headless
       ...(parsedStorageState ? { storageState: parsedStorageState } : {}),
       ...(needsStabilizedContext ? { deviceScaleFactor: 1 } : {}),
       ...(needsStabilizedContext ? { locale: 'en-US', timezoneId: 'UTC', colorScheme: 'light' as const } : {}),
@@ -217,6 +222,8 @@ export class EmbeddedTestExecutor {
     }
 
     let result: EmbeddedTestResult | undefined;
+    let reachedStep = -1;
+    let stepCount = 0;
 
     try {
       if (abortCtrl.signal.aborted) {
@@ -227,6 +234,40 @@ export class EmbeddedTestExecutor {
       page.setDefaultNavigationTimeout(30000);
       page.setDefaultTimeout(15000);
 
+      // Intercept File System Access API so blob downloads trigger Playwright's download event.
+      // Always inject — native file dialogs hang forever in headless mode.
+      await page.addInitScript(() => {
+        if (typeof window !== 'undefined') {
+          (window as unknown as Record<string, unknown>).showSaveFilePicker = async function (...args: unknown[]) {
+            const opts = (args[0] ?? {}) as Record<string, unknown>;
+            const suggestedName = (opts.suggestedName as string) || 'download';
+            console.log('[lastest-shim] showSaveFilePicker called:', suggestedName);
+            const chunks: BlobPart[] = [];
+            return {
+              createWritable: async () => ({
+                write: async (data: BlobPart) => { chunks.push(data); },
+                seek: async () => {},
+                truncate: async () => {},
+                close: async () => {
+                  console.log('[lastest-shim] writable.close() — triggering download:', suggestedName, 'chunks:', chunks.length);
+                  const blob = new Blob(chunks);
+                  const url = URL.createObjectURL(blob);
+                  const a = document.createElement('a');
+                  a.href = url;
+                  a.download = suggestedName;
+                  a.style.display = 'none';
+                  document.body.appendChild(a);
+                  a.click();
+                  console.log('[lastest-shim] <a> clicked, download should fire');
+                  setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 100);
+                },
+              }),
+              getFile: async () => new File(chunks, suggestedName),
+            };
+          };
+        }
+      });
+
       // Setup freeze scripts (timestamps, random, animations) BEFORE any navigation
       if (command.stabilization) {
         await setupFreezeScripts(page, command.stabilization);
@@ -235,8 +276,12 @@ export class EmbeddedTestExecutor {
 
       // Page event listeners — capture console errors and network requests
       page.on('console', (msg) => {
+        const text = msg.text();
+        // Log shim messages to container output for debugging
+        if (text.startsWith('[lastest-shim]')) {
+          logFn('info', text);
+        }
         if (msg.type() === 'error') {
-          const text = msg.text();
           consoleErrors.push(text);
           logFn('warn', `Console error: ${text}`);
         }
@@ -381,9 +426,20 @@ export class EmbeddedTestExecutor {
       // Patch selectAll (mirrors runner.ts)
       body = body.replace(/page\.keyboard\.selectAll\(\)/g, "page.keyboard.press('Control+a')");
 
+      // Instrument step tracking before soft error wrapping
+      const instrumentResult = instrumentStepTracking(body);
+      body = instrumentResult.instrumentedBody;
+      stepCount = instrumentResult.stepCount;
+      reachedStep = -1;
+      const __stepReached = async (n: number) => { reachedStep = Math.max(reachedStep, n); };
+
       // Soft error wrapping — skip screenshot lines (mirrors runner.ts)
       body = body.replace(/^(\s*)(await\s+.+;)\s*$/gm, (_match, indent, stmt) => {
         if (stmt.includes('.screenshot(')) return `${indent}${stmt}`;
+        return `${indent}try { ${stmt} } catch(__softErr) { if (__softErr && __softErr.__hardAssertion) throw __softErr; stepLogger.warn(typeof __softErr === 'object' && __softErr !== null && 'message' in __softErr ? __softErr.message : String(__softErr)); }`;
+      });
+      // Also soft-wrap synchronous expect() calls so assertion failures don't kill the test
+      body = body.replace(/^(\s*)(expect\(.+;)\s*$/gm, (_match, indent, stmt) => {
         return `${indent}try { ${stmt} } catch(__softErr) { if (__softErr && __softErr.__hardAssertion) throw __softErr; stepLogger.warn(typeof __softErr === 'object' && __softErr !== null && 'message' in __softErr ? __softErr.message : String(__softErr)); }`;
       });
 
@@ -469,6 +525,8 @@ export class EmbeddedTestExecutor {
             else if (typeof target === 'string') { if (!target.includes(expected as string)) throw new Error(`${msgPrefix}Expected string to contain "${expected}"`); }
           },
           toHaveLength(expected: number) { if (target?.length !== expected) throw new Error(`${msgPrefix}Expected length ${expected} but got ${target?.length}`); },
+          toBeGreaterThan(expected: number) { if (!(target > expected)) throw new Error(`${msgPrefix}Expected ${target} to be greater than ${expected}`); },
+          toBeGreaterThanOrEqual(expected: number) { if (!(target >= expected)) throw new Error(`${msgPrefix}Expected ${target} to be greater than or equal to ${expected}`); },
           toMatch(expected: string | RegExp) {
             const regex = typeof expected === 'string' ? new RegExp(expected) : expected;
             if (!regex.test(String(target))) throw new Error(`${msgPrefix}Expected "${target}" to match ${regex}`);
@@ -570,6 +628,39 @@ export class EmbeddedTestExecutor {
         }
       };
 
+      // Downloads helper — always provided, captures downloads passively + on-demand
+      const dlList: Array<{ suggestedFilename: string; path: string }> = [];
+      // Passive listener — catches all downloads automatically
+      page.on('download', async (download) => {
+        const safeName = download.suggestedFilename().replace(/\.\./g, '_');
+        logFn('info', `[download] Captured: ${safeName} (url: ${download.url().slice(0, 80)})`);
+        if (!dlList.some(d => d.suggestedFilename === safeName)) {
+          dlList.push({ suggestedFilename: safeName, path: safeName });
+        }
+      });
+      const downloadsHelper = {
+        waitForDownload: async (triggerAction: () => Promise<void>) => {
+          const [download] = await Promise.all([
+            page.waitForEvent('download'),
+            triggerAction(),
+          ]);
+          const safeName = download.suggestedFilename().replace(/\.\./g, '_');
+          if (!dlList.some(d => d.suggestedFilename === safeName)) {
+            dlList.push({ suggestedFilename: safeName, path: safeName });
+          }
+          return { filename: safeName, path: safeName };
+        },
+        list: () => dlList,
+        waitForAny: async (timeoutMs = 5000) => {
+          logFn('info', `[download] waitForAny: polling for up to ${timeoutMs}ms (current count: ${dlList.length})`);
+          const start = Date.now();
+          while (dlList.length === 0 && Date.now() - start < timeoutMs) {
+            await page.waitForTimeout(250);
+          }
+          logFn('info', `[download] waitForAny: done after ${Date.now() - start}ms, downloads: ${dlList.length}`);
+        },
+      };
+
       logFn('info', 'Executing test code...');
 
       // Heartbeat timer — logs every 15s so the user knows the test is still running
@@ -586,10 +677,10 @@ export class EmbeddedTestExecutor {
           (async () => {
             const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
             const testFn = new AsyncFunction(
-              'page', 'baseUrl', 'screenshotPath', 'stepLogger', 'expect', 'locateWithFallback', 'replayCursorPath',
+              'page', 'baseUrl', 'screenshotPath', 'stepLogger', 'expect', 'appState', 'locateWithFallback', 'fileUpload', 'clipboard', 'downloads', 'network', 'replayCursorPath', 'fixtures', '__stepReached',
               body
             );
-            await testFn(page, command.targetUrl.replace(/\/+$/, ''), 'screenshot.png', stepLogger, expect, locateWithFallback, replayCursorPathFn);
+            await testFn(page, command.targetUrl.replace(/\/+$/, ''), 'screenshot.png', stepLogger, expect, null, locateWithFallback, null, null, downloadsHelper, null, replayCursorPathFn, {}, __stepReached);
           })().then(r => { clearTimeout(timeoutTimer); return r; }),
           new Promise<never>((_, reject) => {
             timeoutTimer = setTimeout(() => {
@@ -666,6 +757,8 @@ export class EmbeddedTestExecutor {
         consoleErrors: consoleErrors.length > 0 ? consoleErrors : undefined,
         networkRequests: allNetworkRequests.length > 0 ? allNetworkRequests : undefined,
         softErrors: softErrors.length > 0 ? softErrors : undefined,
+        lastReachedStep: reachedStep >= 0 ? reachedStep : undefined,
+        totalSteps: stepCount > 0 ? stepCount : undefined,
       };
     } catch (error) {
       const durationMs = Date.now() - startTime;
@@ -680,6 +773,8 @@ export class EmbeddedTestExecutor {
           consoleErrors: consoleErrors.length > 0 ? consoleErrors : undefined,
           networkRequests: allNetworkRequests.length > 0 ? allNetworkRequests : undefined,
           softErrors: softErrors.length > 0 ? softErrors : undefined,
+          lastReachedStep: reachedStep >= 0 ? reachedStep : undefined,
+          totalSteps: stepCount > 0 ? stepCount : undefined,
         };
       } else {
         const isTimeout = errorMessage.includes('timed out');
@@ -703,6 +798,8 @@ export class EmbeddedTestExecutor {
           consoleErrors: consoleErrors.length > 0 ? consoleErrors : undefined,
           networkRequests: allNetworkRequests.length > 0 ? allNetworkRequests : undefined,
           softErrors: softErrors.length > 0 ? softErrors : undefined,
+          lastReachedStep: reachedStep >= 0 ? reachedStep : undefined,
+          totalSteps: stepCount > 0 ? stepCount : undefined,
         };
       }
     } finally {

@@ -25,12 +25,20 @@ import {
   Terminal,
   Circle,
   Tv2,
+  Crosshair,
+  FileCode,
+  Copy,
+  Download,
+  Search,
+  ChevronDown,
+  ChevronRight,
 } from 'lucide-react';
 import { startDebugSession, getDebugState, sendDebugCommand, stopDebugSession, flushDebugTrace } from '@/server/actions/debug';
 import { toast } from 'sonner';
 import type { Test } from '@/lib/db/schema';
-import type { DebugState, DebugNetworkEntry, DebugConsoleEntry } from '@/lib/playwright/debug-runner';
-import { BrowserViewer } from '@/components/embedded-browser/browser-viewer-client';
+import type { DebugState, DebugNetworkEntry, DebugConsoleEntry } from '@/lib/playwright/types';
+import { BrowserViewer, type BrowserViewerHandle, type InspectElementResult, type DomSnapshotResult } from '@/components/embedded-browser/browser-viewer-client';
+import { Input } from '@/components/ui/input';
 import { ExecutionTargetSelector } from '@/components/execution/execution-target-selector';
 import { getStreamUrlForRunner } from '@/server/actions/embedded-sessions';
 
@@ -49,6 +57,17 @@ export function DebugClient({ test, repositoryId }: DebugClientProps) {
   // Runner selector + live view state
   const [executionTarget, setExecutionTarget, isRunnerHydrated] = usePreferredRunner();
   const [streamUrl, setStreamUrl] = useState<string | null>(null);
+  const [resolvedRunnerId, setResolvedRunnerId] = useState<string | null>(null);
+
+  // Inspect / DOM snapshot state
+  const [inspectMode, setInspectMode] = useState(false);
+  const [inspectedElement, setInspectedElement] = useState<InspectElementResult | null>(null);
+  const [domSnapshot, setDomSnapshot] = useState<DomSnapshotResult | null>(null);
+  const [domSnapshotLoading, setDomSnapshotLoading] = useState(false);
+  const [selectorSearch, setSelectorSearch] = useState('');
+  const browserViewerRef = useRef<BrowserViewerHandle>(null);
+  const [rightTab, setRightTab] = useState('steps');
+  const [leftTab, setLeftTab] = useState('code');
 
   // Editable code state
   const [localCode, setLocalCode] = useState<string>(test.code || '');
@@ -62,17 +81,30 @@ export function DebugClient({ test, repositoryId }: DebugClientProps) {
     sessionIdRef.current = sessionId;
   }, [sessionId]);
 
+  // Guards against double-releasing the EB across stop button, unmount, and pagehide beacon
+  const releasedRef = useRef(false);
+  useEffect(() => {
+    releasedRef.current = false;
+  }, [sessionId]);
+
   const isRemote = executionTarget !== 'local';
 
   // Track whether initial mount has completed to avoid double-start from hydration
   const hasMountedRef = useRef(false);
+  // Serializes concurrent init attempts (e.g. Strict Mode double-mount in dev) so the
+  // second mount waits for the first to finish releasing its claimed EB before claiming again.
+  const initPromiseRef = useRef<Promise<void> | null>(null);
 
   // Start session on mount or when execution target changes (wait for hydration)
   useEffect(() => {
     if (!isRunnerHydrated) return;
 
     let cancelled = false;
-    async function init() {
+    const previous = initPromiseRef.current;
+    const run = (async () => {
+      if (previous) await previous.catch(() => {});
+      if (cancelled) return;
+
       // Stop any existing session (only on target change after initial mount)
       const prevSessionId = sessionIdRef.current;
       if (prevSessionId && hasMountedRef.current) {
@@ -83,14 +115,25 @@ export function DebugClient({ test, repositoryId }: DebugClientProps) {
       }
       hasMountedRef.current = true;
       const result = await startDebugSession(test.id, repositoryId, executionTarget === 'local' ? null : executionTarget);
-      if (cancelled) return;
+      if (cancelled) {
+        // Effect was cancelled after the EB was already claimed (e.g. Strict Mode double-mount
+        // in dev, or fast unmount). Release it so subsequent claims can succeed.
+        if (result.sessionId) {
+          await stopDebugSession(result.sessionId).catch(() => {});
+        }
+        return;
+      }
       if (result.error) {
         toast.error(result.error);
         return;
       }
       setSessionId(result.sessionId);
-    }
-    init();
+      if (result.actualRunnerId) {
+        setResolvedRunnerId(result.actualRunnerId);
+      }
+    })();
+    initPromiseRef.current = run;
+
     return () => {
       cancelled = true;
     };
@@ -125,14 +168,38 @@ export function DebugClient({ test, repositoryId }: DebugClientProps) {
     };
   }, [sessionId]);
 
-  // Cleanup on unmount
+  // Cleanup on unmount (covers SPA route changes — other exit paths handled separately)
   useEffect(() => {
     return () => {
-      if (sessionIdRef.current) {
+      if (sessionIdRef.current && !releasedRef.current) {
+        releasedRef.current = true;
         stopDebugSession(sessionIdRef.current).catch(() => {});
       }
     };
   }, []);
+
+  // Tab close / reload / browser close: use sendBeacon since server actions get aborted on unload.
+  // pagehide is preferred over beforeunload (doesn't break bfcache, more reliable on mobile).
+  // visibilitychange=hidden is a belt-and-braces guard for mobile Safari edge cases.
+  useEffect(() => {
+    if (!sessionId) return;
+    const release = () => {
+      if (releasedRef.current) return;
+      releasedRef.current = true;
+      const blob = new Blob([JSON.stringify({ sessionId })], { type: 'application/json' });
+      navigator.sendBeacon('/api/debug/release', blob);
+    };
+    const onPageHide = () => release();
+    const onVisibility = () => {
+      if (document.visibilityState === 'hidden') release();
+    };
+    window.addEventListener('pagehide', onPageHide);
+    document.addEventListener('visibilitychange', onVisibility);
+    return () => {
+      window.removeEventListener('pagehide', onPageHide);
+      document.removeEventListener('visibilitychange', onVisibility);
+    };
+  }, [sessionId]);
 
   // Auto-scroll step list to current step
   useEffect(() => {
@@ -152,12 +219,16 @@ export function DebugClient({ test, repositoryId }: DebugClientProps) {
     }
   }, [sessionId]);
 
-  const handleStop = useCallback(() => {
-    router.push(`/tests/${test.id}`);
-    // Session cleanup handled by unmount effect + background stop
-    if (sessionId) {
-      stopDebugSession(sessionId).catch(() => {});
+  const handleStop = useCallback(async () => {
+    if (sessionId && !releasedRef.current) {
+      releasedRef.current = true;
+      try {
+        await stopDebugSession(sessionId);
+      } catch {
+        // ignore — reaper / unmount fallback will catch it
+      }
     }
+    router.push(`/tests/${test.id}`);
   }, [sessionId, router, test.id]);
 
   // Debounced code update handler
@@ -213,16 +284,16 @@ export function DebugClient({ test, repositoryId }: DebugClientProps) {
     };
   }, [sendCmd, handleStop]);
 
-  // Resolve stream URL when execution target changes
+  // Resolve stream URL when actual runner is known
   useEffect(() => {
     let cancelled = false;
-    if (executionTarget === 'local') {
-      // Use async to avoid synchronous setState in effect
+    const runnerId = resolvedRunnerId || (executionTarget !== 'local' && executionTarget !== 'auto' ? executionTarget : null);
+    if (!runnerId) {
       Promise.resolve().then(() => { if (!cancelled) setStreamUrl(null); });
     } else {
       (async () => {
         try {
-          const streamInfo = await getStreamUrlForRunner(executionTarget);
+          const streamInfo = await getStreamUrlForRunner(runnerId);
           if (cancelled) return;
           if (streamInfo?.streamUrl) {
             const token = streamInfo.streamAuthToken;
@@ -240,7 +311,7 @@ export function DebugClient({ test, repositoryId }: DebugClientProps) {
       })();
     }
     return () => { cancelled = true; };
-  }, [executionTarget]);
+  }, [executionTarget, resolvedRunnerId]);
 
   const isPaused = state?.status === 'paused';
   const isError = state?.status === 'error';
@@ -383,6 +454,24 @@ export function DebugClient({ test, repositoryId }: DebugClientProps) {
               Trace
             </Button>
           )}
+          {streamUrl && (
+            <>
+              <div className="w-px h-5 bg-border mx-1" />
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  setDomSnapshotLoading(true);
+                  browserViewerRef.current?.requestDomSnapshot();
+                }}
+                disabled={!streamUrl || domSnapshotLoading}
+                title="Download all selectors from current page"
+              >
+                {domSnapshotLoading ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <FileCode className="h-4 w-4 mr-1" />}
+                DOM
+              </Button>
+            </>
+          )}
         </div>
       </div>
 
@@ -398,7 +487,7 @@ export function DebugClient({ test, repositoryId }: DebugClientProps) {
         <ResizablePanelGroup orientation="horizontal" className="flex-1 min-h-0">
           {/* Left Panel — Code / Live View */}
           <ResizablePanel defaultSize={60} minSize={30}>
-            <Tabs defaultValue="code" className="flex flex-col h-full gap-0">
+            <Tabs value={leftTab} onValueChange={setLeftTab} className="flex flex-col h-full gap-0">
               <div className="px-2 py-1.5 border-b bg-muted/50">
                 <TabsList className="h-7">
                   <TabsTrigger value="code" className="text-xs px-2 py-0.5 h-6">
@@ -447,9 +536,13 @@ export function DebugClient({ test, repositoryId }: DebugClientProps) {
               {streamUrl && (
                 <TabsContent value="liveview" className="flex flex-col flex-1 min-h-0 mt-0">
                   <BrowserViewer
+                    ref={browserViewerRef}
                     streamUrl={streamUrl}
                     className="h-full"
-                    interactive={isRecording}
+                    interactive={isRecording || inspectMode}
+                    inspectMode={inspectMode}
+                    onInspectResult={(result) => setInspectedElement(result)}
+                    onDomSnapshot={(result) => { setDomSnapshot(result); setDomSnapshotLoading(false); }}
                     hideControls
                     hideFullscreenToggle
                     hideScreenshot
@@ -465,7 +558,19 @@ export function DebugClient({ test, repositoryId }: DebugClientProps) {
 
           {/* Right Panel — Tabbed: Steps / Network / Console */}
           <ResizablePanel defaultSize={40} minSize={20} className="overflow-hidden">
-            <Tabs defaultValue="steps" className="flex flex-col h-full gap-0">
+            <Tabs value={rightTab} onValueChange={(tab) => {
+              setRightTab(tab);
+              if (tab === 'selectors' && streamUrl) {
+                // Auto-enable inspect mode and switch to live view
+                setInspectMode(true);
+                browserViewerRef.current?.sendInspectMode(true);
+                if (leftTab !== 'liveview') setLeftTab('liveview');
+              } else if (rightTab === 'selectors' && tab !== 'selectors') {
+                // Leaving selectors tab — disable inspect mode
+                setInspectMode(false);
+                browserViewerRef.current?.sendInspectMode(false);
+              }
+            }} className="flex flex-col h-full gap-0">
               <div className="px-2 py-1.5 border-b bg-muted/50">
                 <TabsList className="h-7">
                   <TabsTrigger value="steps" className="text-xs px-2 py-0.5 h-6">
@@ -479,6 +584,12 @@ export function DebugClient({ test, repositoryId }: DebugClientProps) {
                     <Terminal className="h-3 w-3 mr-1" />
                     Console{(state?.consoleEntries?.length ?? 0) > 0 && ` (${state!.consoleEntries.length})`}
                   </TabsTrigger>
+                  {streamUrl && (
+                    <TabsTrigger value="selectors" className="text-xs px-2 py-0.5 h-6">
+                      <Crosshair className="h-3 w-3 mr-1" />
+                      Selectors
+                    </TabsTrigger>
+                  )}
                 </TabsList>
               </div>
 
@@ -585,6 +696,23 @@ export function DebugClient({ test, repositoryId }: DebugClientProps) {
               <TabsContent value="console" className="flex flex-col flex-1 min-h-0 mt-0 overflow-hidden">
                 <ConsolePanel entries={state?.consoleEntries || []} />
               </TabsContent>
+
+              {/* Selectors Tab */}
+              {streamUrl && (
+                <TabsContent value="selectors" className="flex flex-col flex-1 min-h-0 mt-0">
+                  <SelectorsPanel
+                    inspectedElement={inspectedElement}
+                    domSnapshot={domSnapshot}
+                    domSnapshotLoading={domSnapshotLoading}
+                    search={selectorSearch}
+                    onSearchChange={setSelectorSearch}
+                    onRequestDomSnapshot={() => {
+                      setDomSnapshotLoading(true);
+                      browserViewerRef.current?.requestDomSnapshot();
+                    }}
+                  />
+                </TabsContent>
+              )}
 
             </Tabs>
           </ResizablePanel>
@@ -858,5 +986,197 @@ function ConsolePanel({ entries }: { entries: DebugConsoleEntry[] }) {
         ))}
       </div>
     </ScrollArea>
+  );
+}
+
+// -------- Selectors Panel Component --------
+
+interface SelectorsPanelProps {
+  inspectedElement: InspectElementResult | null;
+  domSnapshot: DomSnapshotResult | null;
+  domSnapshotLoading: boolean;
+  search: string;
+  onSearchChange: (s: string) => void;
+  onRequestDomSnapshot: () => void;
+}
+
+function SelectorsPanel({ inspectedElement, domSnapshot, domSnapshotLoading, search, onSearchChange, onRequestDomSnapshot }: SelectorsPanelProps) {
+  const [expandedIdx, setExpandedIdx] = useState<Set<number>>(new Set());
+
+  const copyToClipboard = useCallback((text: string) => {
+    navigator.clipboard.writeText(text).then(() => toast.success('Copied'));
+  }, []);
+
+  const handleDownloadJson = useCallback(() => {
+    if (!domSnapshot) return;
+    const blob = new Blob([JSON.stringify(domSnapshot, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `dom-selectors-${new Date().toISOString().slice(0, 19)}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }, [domSnapshot]);
+
+  const toggleExpand = useCallback((idx: number) => {
+    setExpandedIdx(prev => {
+      const next = new Set(prev);
+      if (next.has(idx)) next.delete(idx);
+      else next.add(idx);
+      return next;
+    });
+  }, []);
+
+  // No data at all
+  if (!inspectedElement && !domSnapshot) {
+    return (
+      <div className="flex-1 flex flex-col items-center justify-center gap-3 px-4">
+        <Crosshair className="h-8 w-8 text-muted-foreground/40" />
+        <p className="text-xs text-muted-foreground text-center">
+          Click any element in the Live View to inspect its selectors.
+        </p>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={onRequestDomSnapshot}
+          disabled={domSnapshotLoading}
+        >
+          {domSnapshotLoading ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <FileCode className="h-4 w-4 mr-1" />}
+          Snapshot All Selectors
+        </Button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex flex-col flex-1 min-h-0">
+      {/* Inspected element result */}
+      {inspectedElement && (
+        <div className="border-b">
+          <div className="px-3 py-2 bg-blue-500/5 border-b">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-medium">
+                &lt;{inspectedElement.tag}&gt;
+                {inspectedElement.id && <span className="text-muted-foreground ml-1">#{inspectedElement.id}</span>}
+              </span>
+              <span className="text-[10px] text-muted-foreground">
+                {Math.round(inspectedElement.boundingBox.width)}x{Math.round(inspectedElement.boundingBox.height)}
+              </span>
+            </div>
+            {inspectedElement.textContent && (
+              <p className="text-[10px] text-muted-foreground mt-0.5 truncate">{inspectedElement.textContent}</p>
+            )}
+          </div>
+          <div className="divide-y">
+            {inspectedElement.selectors.map((sel, i) => (
+              <div key={i} className="flex items-center gap-2 px-3 py-1.5 hover:bg-muted/30">
+                <Badge variant="outline" className="text-[10px] px-1.5 py-0 h-4 flex-shrink-0 font-mono">
+                  {sel.type}
+                </Badge>
+                <code className="flex-1 min-w-0 text-[11px] font-mono truncate" title={sel.value}>
+                  {sel.value}
+                </code>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-5 w-5 flex-shrink-0"
+                  onClick={() => copyToClipboard(sel.value)}
+                >
+                  <Copy className="h-3 w-3" />
+                </Button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* DOM snapshot */}
+      {domSnapshot && (
+        <div className="flex flex-col flex-1 min-h-0">
+          {/* Snapshot header with search + download */}
+          <div className="flex items-center gap-2 px-3 py-1.5 border-b bg-muted/30">
+            <div className="relative flex-1">
+              <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-3 w-3 text-muted-foreground" />
+              <Input
+                value={search}
+                onChange={(e) => onSearchChange(e.target.value)}
+                placeholder="Filter selectors..."
+                className="h-6 text-xs pl-7 py-0"
+              />
+            </div>
+            <span className="text-[10px] text-muted-foreground flex-shrink-0">
+              {domSnapshot.elements.length} elements
+            </span>
+            <Button variant="outline" size="sm" className="h-6 text-xs px-2" onClick={handleDownloadJson}>
+              <Download className="h-3 w-3 mr-1" />
+              JSON
+            </Button>
+          </div>
+
+          {/* Elements list */}
+          <ScrollArea className="flex-1">
+            <div className="text-xs">
+              {domSnapshot.elements
+                .filter(el => {
+                  if (!search) return true;
+                  const q = search.toLowerCase();
+                  return (
+                    el.tag.includes(q) ||
+                    el.id?.toLowerCase().includes(q) ||
+                    el.textContent?.toLowerCase().includes(q) ||
+                    el.selectors.some(s => s.value.toLowerCase().includes(q) || s.type.toLowerCase().includes(q))
+                  );
+                })
+                .map((el, idx) => {
+                  const isExpanded = expandedIdx.has(idx);
+                  return (
+                    <div key={idx} className="border-b border-border/50">
+                      <div
+                        className="flex items-center gap-2 px-3 py-1.5 cursor-pointer hover:bg-muted/30"
+                        onClick={() => toggleExpand(idx)}
+                      >
+                        {isExpanded
+                          ? <ChevronDown className="h-3 w-3 flex-shrink-0 text-muted-foreground" />
+                          : <ChevronRight className="h-3 w-3 flex-shrink-0 text-muted-foreground" />
+                        }
+                        <span className="font-mono font-medium">&lt;{el.tag}&gt;</span>
+                        {el.id && <span className="text-muted-foreground font-mono">#{el.id}</span>}
+                        <span className="flex-1 min-w-0 truncate text-muted-foreground">
+                          {el.textContent?.slice(0, 40)}
+                        </span>
+                        <Badge variant="outline" className="text-[10px] px-1 py-0 h-4 flex-shrink-0">
+                          {el.selectors.length}
+                        </Badge>
+                      </div>
+                      {isExpanded && (
+                        <div className="divide-y pl-7 bg-muted/20">
+                          {el.selectors.map((sel, si) => (
+                            <div key={si} className="flex items-center gap-2 px-3 py-1 hover:bg-muted/30">
+                              <Badge variant="outline" className="text-[10px] px-1.5 py-0 h-4 flex-shrink-0 font-mono">
+                                {sel.type}
+                              </Badge>
+                              <code className="flex-1 min-w-0 text-[11px] font-mono truncate" title={sel.value}>
+                                {sel.value}
+                              </code>
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-5 w-5 flex-shrink-0"
+                                onClick={(e) => { e.stopPropagation(); copyToClipboard(sel.value); }}
+                              >
+                                <Copy className="h-3 w-3" />
+                              </Button>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+            </div>
+          </ScrollArea>
+        </div>
+      )}
+    </div>
   );
 }

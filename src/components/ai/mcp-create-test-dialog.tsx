@@ -22,7 +22,7 @@ import {
 } from '@/components/ui/select';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { AICodePreview } from './ai-code-preview';
-import { aiCreateTest, saveGeneratedTest } from '@/server/actions/ai';
+import { createTest, saveGeneratedTest } from '@/server/actions/ai';
 import { mcpValidateTest } from '@/server/actions/ai-mcp';
 import { Switch } from '@/components/ui/switch';
 import { Loader2, Wand2, Save, RefreshCw, CheckCircle2, XCircle, Zap } from 'lucide-react';
@@ -79,7 +79,7 @@ export function MCPCreateTestDialog({
     setIterationCount(0);
 
     try {
-      const result = await aiCreateTest(repositoryId, {
+      const result = await createTest(repositoryId, {
         userPrompt: prompt,
         targetUrl: targetUrl || undefined,
         useMCP,
@@ -159,7 +159,7 @@ export function MCPCreateTestDialog({
     try {
       const fixPrompt = `${prompt}\n\nThe following selectors in your previous code are invalid:\n${invalidSelectors}\n\nPlease regenerate the test with valid selectors. Use more robust selectors like data-testid, aria-label, or text content.`;
 
-      const result = await aiCreateTest(repositoryId, {
+      const result = await createTest(repositoryId, {
         userPrompt: fixPrompt,
         targetUrl: targetUrl || undefined,
         useMCP,

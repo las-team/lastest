@@ -145,6 +145,10 @@ Create tests (one-time)          Run tests (forever, $0)
 - **AI Failure Triage** — Automatic classification of test failures into real regression, flaky test, environment issue, or test maintenance — with confidence scores and reasoning.
 - **Bug Reports** — In-app bug reporting with auto-captured context (URL, viewport, console errors, failed requests, breadcrumbs), screenshot attachment, and GitHub issue creation.
 - **Review Todos** — Branch-specific actionable items created when a reviewer flags a diff. Track review feedback as todos tied to specific builds and tests.
+- **Gamification (Beat the Bot)** — Competitive scoring layer where humans compete against AI bots on a team leaderboard. Earn points for creating tests (+10), catching regressions (+100), approving real changes (+15), resolving review todos (+5). Small flaky-test penalty (−5, daily-capped). Seasonal play with named seasons, achievements (first test, first regression, beat-the-bot tiers), and Bug Blitz events with configurable multipliers (2–5×). Team-level toggle. Celebratory toasts on score events via SSE.
+- **Leaderboard** — Ranked season standings for humans and bots with top-3 podium styling, per-actor breakdowns (tests created, regressions caught, flakes incurred), and "you are here" row for viewers outside the top 10.
+- **Test Migration** — Move tests and functional areas between Lastest instances. Connect to a remote instance via URL + API key, browse remote repos, and import with idempotent name-based upsert. Also available via REST API (`GET /export` + `POST /import`).
+- **API Tokens** — Generate long-lived Bearer tokens (`lastest_api_*`) for the MCP server, VS Code extension, CI scripts, and cross-instance migration. Revokable per-user with labels.
 
 ### AI-Powered
 
@@ -336,6 +340,9 @@ Open [http://localhost:3000](http://localhost:3000)
 | **Assertion tracking** | **Yes** | No | No | No | No | No | No |
 | **Agent monitoring** | **Yes (real-time SSE)** | No | No | No | No | No | No |
 | **In-app bug reports** | **Yes (auto-context)** | No | No | No | No | No | No |
+| **Gamification** | **Yes (leaderboard + achievements)** | No | No | No | No | No | No |
+| **Cross-instance migration** | **Yes (API export/import)** | No | No | No | No | No | No |
+| **API tokens** | **Yes (long-lived Bearer)** | Cloud | Cloud | Cloud | Cloud | Cloud | No |
 
 ### What makes Lastest different
 
@@ -355,6 +362,8 @@ Open [http://localhost:3000](http://localhost:3000)
 - **3 diff engines** — pixelmatch, SSIM, and Butteraugli with OCR-based text-region-aware comparison
 - **12 stabilization features** — timestamp freezing, random seeding, burst capture, auto-masking, DOM/network stability, and more
 - **Auto-capability detection** — recordings auto-detect clipboard, upload, download, and network needs
+- **Gamification** — "Beat the Bot" leaderboard with seasonal scoring, achievements, and Bug Blitz multiplier events
+- **Cross-instance migration** — export/import tests between Lastest deployments via REST API or in-app UI
 
 ---
 

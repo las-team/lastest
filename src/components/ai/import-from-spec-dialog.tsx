@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useRef, useCallback } from 'react';
+import { useState, useRef, useCallback, useEffect } from 'react';
 import {
   Dialog,
   DialogContent,
@@ -17,6 +17,8 @@ import {
   discoverSpecFiles,
   extractUserStoriesFromFiles,
   extractUserStoriesFromUpload,
+  getSpecImportSession,
+  completeSpecImportSession,
   generateTestsFromStories,
   createPlaceholdersFromStories,
   getBranchChanges,
@@ -57,6 +59,7 @@ interface ImportFromSpecDialogProps {
   repositoryId: string;
   branch: string;
   onComplete?: () => void;
+  reviewSessionId?: string | null;
 }
 
 export function ImportFromSpecDialog({
@@ -65,6 +68,7 @@ export function ImportFromSpecDialog({
   repositoryId,
   branch,
   onComplete,
+  reviewSessionId,
 }: ImportFromSpecDialogProps) {
   const [step, setStep] = useState<Step>('input');
   const [isDiscovering, setIsDiscovering] = useState(false);
@@ -98,6 +102,25 @@ export function ImportFromSpecDialog({
     testIds?: string[];
     usedPlaceholders?: boolean;
   } | null>(null);
+
+  // Load stories from a completed spec import session (clicked from activity feed)
+  useEffect(() => {
+    if (!open || !reviewSessionId) return;
+    let cancelled = false;
+    (async () => {
+      const result = await getSpecImportSession(reviewSessionId);
+      if (cancelled) return;
+      if (result.success && result.stories) {
+        setStories(result.stories);
+        setImportId(result.importId || null);
+        setExpandedStories(new Set(result.stories.map(s => s.id)));
+        setStep('review');
+      } else {
+        toast.error(result.error || 'Failed to load spec import results');
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [open, reviewSessionId]);
 
   // ============================================
   // Step 1: Document Selection
@@ -150,37 +173,20 @@ export function ImportFromSpecDialog({
       return;
     }
 
-
-    setStep('extracting');
     try {
       const response = await extractUserStoriesFromFiles(
         repositoryId,
         branch,
         Array.from(selectedFiles)
       );
-      if (response.success && response.stories) {
-        setStories(response.stories);
-        setImportId(response.importId || null);
-        setExpandedStories(new Set(response.stories.map(s => s.id)));
-
-        // Also fetch branch changes in parallel
-        const branchResult = await getBranchChanges(repositoryId, branch);
-        if (branchResult.success && branchResult.changedFiles) {
-          setChangedFiles(branchResult.changedFiles);
-        }
-
-        setStep('review');
-        const totalAC = response.stories.reduce((sum, s) => sum + s.acceptanceCriteria.length, 0);
-        toast.success(`Extracted ${response.stories.length} user stories, ${totalAC} acceptance criteria`);
+      if (response.success) {
+        toast.success('Spec import started — check the activity feed for progress');
+        onOpenChange(false);
       } else {
-        toast.error(response.error || 'Failed to extract user stories');
-        setStep('file-selection');
+        toast.error(response.error || 'Failed to start extraction');
       }
     } catch {
-      toast.error('Failed to extract user stories');
-      setStep('file-selection');
-    } finally {
-
+      toast.error('Failed to start extraction');
     }
   };
 
@@ -190,37 +196,26 @@ export function ImportFromSpecDialog({
       return;
     }
 
-
-    setStep('extracting');
     try {
-      const formData = new FormData();
-      for (const file of uploadedFiles) {
-        formData.append('files', file);
-      }
+      const encodedFiles = await Promise.all(
+        uploadedFiles.map(async (file) => {
+          const buffer = await file.arrayBuffer();
+          const bytes = new Uint8Array(buffer);
+          let binary = '';
+          for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+          return { name: file.name, content: btoa(binary) };
+        })
+      );
 
-      const response = await extractUserStoriesFromUpload(formData, repositoryId, branch);
-      if (response.success && response.stories) {
-        setStories(response.stories);
-        setImportId(response.importId || null);
-        setExpandedStories(new Set(response.stories.map(s => s.id)));
-
-        const branchResult = await getBranchChanges(repositoryId, branch);
-        if (branchResult.success && branchResult.changedFiles) {
-          setChangedFiles(branchResult.changedFiles);
-        }
-
-        setStep('review');
-        const totalAC = response.stories.reduce((sum, s) => sum + s.acceptanceCriteria.length, 0);
-        toast.success(`Extracted ${response.stories.length} user stories, ${totalAC} acceptance criteria`);
+      const response = await extractUserStoriesFromUpload(encodedFiles, repositoryId, branch);
+      if (response.success) {
+        toast.success('Spec import started — check the activity feed for progress');
+        onOpenChange(false);
       } else {
-        toast.error(response.error || 'Failed to extract user stories');
-        setStep('input');
+        toast.error(response.error || 'Failed to start extraction');
       }
     } catch {
-      toast.error('Failed to extract user stories');
-      setStep('input');
-    } finally {
-
+      toast.error('Failed to start extraction');
     }
   };
 
@@ -323,6 +318,7 @@ export function ImportFromSpecDialog({
 
       if (response.success) {
         toast.success(`Created ${response.areasCreated} areas and ${response.testsCreated} tests`);
+        if (reviewSessionId) completeSpecImportSession(reviewSessionId).catch(() => {});
       } else {
         toast.error(response.error || 'Failed to generate tests');
       }
@@ -361,6 +357,7 @@ export function ImportFromSpecDialog({
 
       if (response.success) {
         toast.success(`Created ${response.areasCreated} areas and ${response.testsCreated} placeholder tests`);
+        if (reviewSessionId) completeSpecImportSession(reviewSessionId).catch(() => {});
       } else {
         toast.error(response.error || 'Failed to create placeholders');
       }
@@ -470,13 +467,13 @@ export function ImportFromSpecDialog({
               <div className="flex flex-col items-center justify-center py-8 gap-4">
                 <Upload className="h-12 w-12 text-muted-foreground" />
                 <p className="text-sm text-muted-foreground text-center">
-                  Upload specification files (.md, .txt, .pdf)
+                  Upload specification files (.md, .txt, .pdf, .docx)
                 </p>
                 <input
                   ref={fileInputRef}
                   type="file"
                   multiple
-                  accept=".md,.txt,.pdf"
+                  accept=".md,.txt,.pdf,.docx"
                   onChange={handleFilesChange}
                   className="hidden"
                 />

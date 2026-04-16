@@ -14,7 +14,7 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
 import { scanBranchDiff, saveDiscoveredRoutes, type SavedRouteInfo, type DiscoveredArea } from '@/server/actions/ai-routes';
-import { aiCreateTest, saveGeneratedTest } from '@/server/actions/ai';
+import { createTest, saveGeneratedTest } from '@/server/actions/ai';
 import { Loader2, GitCompare, Save, RefreshCw, Check, Minus, Route, FlaskConical, CheckCircle2, XCircle, ChevronDown, ChevronRight, FolderOpen } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -199,10 +199,10 @@ export function CodeDiffScanDialog({
           ? route.testSuggestions.join('. ')
           : `Visual regression test for changes on ${route.path}`;
 
-        const result = await aiCreateTest(repositoryId, {
+        const result = await createTest(repositoryId, {
           userPrompt: `Create a visual regression test for ${route.path} that specifically targets these code changes: ${suggestionText}`,
           routePath: route.path,
-        }, route.routeId);
+        });
 
         if (result.success && result.code) {
           const testName = route.path === '/' ? 'Homepage' : route.path.split('/').filter(Boolean).map(s => s.replace(/[\[\]]/g, '')).join(' - ');

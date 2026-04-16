@@ -81,7 +81,7 @@ export interface ResolvedSetup {
 }
 
 // Setup execution level
-export type SetupLevel = 'build' | 'suite' | 'test';
+export type SetupLevel = 'build' | 'test';
 
 // Setup status for builds
 export type SetupStatus = 'pending' | 'running' | 'completed' | 'failed' | 'skipped';

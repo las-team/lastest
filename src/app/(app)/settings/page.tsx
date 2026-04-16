@@ -29,6 +29,7 @@ import { InviteUserDialog } from '@/components/users/invite-user-dialog';
 import { RunnerList } from '@/components/runners/runner-list';
 import { CreateRunnerDialog } from '@/components/runners/create-runner-dialog';
 import { getRunners, getSystemRunners } from '@/server/actions/runners';
+import { listSystemEmbeddedSessions } from '@/server/actions/embedded-sessions';
 import { listApiTokens } from '@/server/actions/api-tokens';
 import { ApiTokensSection } from '@/components/api-tokens/api-tokens-section';
 import { GoogleSheetsSettingsCard } from '@/components/settings/google-sheets-settings-card';
@@ -43,6 +44,8 @@ import { GithubActionsCard } from '@/components/settings/github-actions-card-cli
 import { ScheduleManagerCard } from '@/components/settings/schedule-manager-client';
 import { DiagramThumbnail } from '@/components/ui/diagram-thumbnail';
 import { TestMigrationCard } from '@/components/settings/test-migration-card';
+import { EmailPreferencesCard } from '@/components/settings/email-preferences-client';
+import { StorageUsageCard } from '@/components/settings/storage-usage-card-client';
 
 export default async function SettingsPage({
   searchParams,
@@ -65,7 +68,10 @@ export default async function SettingsPage({
     getRunners(),
     getSystemRunners(),
   ]);
-  const apiTokens = await listApiTokens();
+  const [apiTokens, systemEBSessions] = await Promise.all([
+    listApiTokens(),
+    listSystemEmbeddedSessions(),
+  ]);
   const playwrightSettings = await queries.getPlaywrightSettings(selectedRepo?.id);
   const environmentConfig = await queries.getEnvironmentConfig(selectedRepo?.id);
   const diffSensitivitySettings = await queries.getDiffSensitivitySettings(selectedRepo?.id);
@@ -93,6 +99,9 @@ export default async function SettingsPage({
         queries.getActiveBugBlitz(teamId),
       ])
     : [null, null];
+
+  const storageUsage = teamId ? await queries.getTeamStorageUsage(teamId) : null;
+  const enforcementEnabled = process.env.ENFORCE_STORAGE_LIMITS === 'true';
 
   const serverUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
   const earlyAdopterMode = session?.team?.earlyAdopterMode ?? false;
@@ -328,6 +337,17 @@ export default async function SettingsPage({
           )}
 
 
+          {/* Storage Usage */}
+          {storageUsage && (
+            <StorageUsageCard
+              usedBytes={storageUsage.storageUsedBytes}
+              quotaBytes={storageUsage.storageQuotaBytes}
+              lastCalculatedAt={storageUsage.storageLastCalculatedAt?.toISOString() ?? null}
+              isAdmin={isAdmin}
+              enforcementEnabled={enforcementEnabled}
+            />
+          )}
+
           {/* Environment Config */}
           <div id="environment">
             <EnvironmentConfigCard
@@ -368,6 +388,11 @@ export default async function SettingsPage({
             />
           </div>
           )}
+
+          {/* Email Preferences */}
+          <div id="email-preferences">
+            <EmailPreferencesCard />
+          </div>
 
           {/* Notifications */}
           <div id="notifications">
@@ -474,7 +499,7 @@ export default async function SettingsPage({
                       <p className="text-sm">Create a runner above to get a token, then start it with the CLI.</p>
                     </div>
                   ) : (
-                    <RunnerList runners={runners} systemRunners={sysRunners} />
+                    <RunnerList runners={runners} systemRunners={sysRunners} systemSessions={systemEBSessions} />
                   )}
 
                   <details open={runners.length === 0 ? true : undefined}>

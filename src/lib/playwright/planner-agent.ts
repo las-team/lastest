@@ -171,7 +171,9 @@ export async function agentDiscoverAreas(
       })),
     }));
 
-    // Save agent plans to functional areas
+    // Save agent plans to functional areas + auto-populate specs side so both
+    // halves are generated together by the planner path.
+    const { syncAreaPlanAndSpecs } = await import('@/server/actions/specs');
     for (const area of areas) {
       if (area.testPlan) {
         const dbArea = await queries.getOrCreateFunctionalAreaByRepo(
@@ -183,6 +185,11 @@ export async function agentDiscoverAreas(
           agentPlan: area.testPlan,
           planGeneratedAt: new Date(),
         });
+        try {
+          await syncAreaPlanAndSpecs(dbArea.id, repositoryId);
+        } catch {
+          // Non-critical: spec sync failure shouldn't fail discovery.
+        }
       }
     }
 

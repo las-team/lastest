@@ -24,7 +24,14 @@ import {
   createBranchAwareTestPrompt,
   extractCodeFromResponse,
 } from '@/lib/ai/prompts';
-import { stripTypeAnnotations, createExpect } from '@/lib/playwright/runner';
+import { stripTypeAnnotations } from '@/lib/playwright/types';
+
+// TODO: createExpect was removed with local PW runner — needs reimplementation if autoresearch is used
+function createExpect(_timeout = 5000) {
+  return function expect(_target: unknown, _message?: string) {
+    throw new Error('createExpect not available — local Playwright runner has been removed');
+  };
+}
 import { db } from '@/lib/db';
 import { testResults, tests, testRuns, functionalAreas } from '@/lib/db/schema';
 import { eq, and, desc } from 'drizzle-orm';

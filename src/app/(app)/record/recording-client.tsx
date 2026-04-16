@@ -27,12 +27,6 @@ import {
   getOrCreateFunctionalArea,
   getRecordingStatus,
   clearLastCompletedSession,
-  checkPlaywrightAvailability,
-  startPlaywrightInspector,
-  getInspectorStatus,
-  cancelPlaywrightInspector,
-  finalizeInspectorSession,
-  type PlaywrightAvailability,
 } from '@/server/actions/recording';
 import { listStorageStates, saveStorageState } from '@/server/actions/storage-states';
 import {
@@ -41,7 +35,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import type { AssertionType } from '@/lib/playwright/recorder';
+import type { AssertionType } from '@/lib/playwright/types';
 import {
   Video,
   Square,
@@ -103,7 +97,7 @@ interface RecordingClientProps {
   availableScripts?: { id: string; name: string }[];
 }
 
-type RecordingStep = 'setup' | 'recording' | 'inspector-running' | 'saving';
+type RecordingStep = 'setup' | 'recording' | 'saving';
 
 // Check if an action event can be replayed by the runner
 function isActionReplayable(event: RecordingEvent): { replayable: boolean; reason?: 'valid-selectors' | 'coords-only' | 'no-selectors' } {
@@ -272,9 +266,7 @@ export function RecordingClient({
 }: RecordingClientProps) {
   const router = useRouter();
   const [step, setStep] = useState<RecordingStep>('setup');
-  const [playwrightStatus, setPlaywrightStatus] = useState<PlaywrightAvailability | null>(null);
   const [selectedEngine, setSelectedEngine] = useState<RecordingEngine>(defaultEngine);
-  const [inspectorSessionId, setInspectorSessionId] = useState<string | null>(null);
   const [executionTarget, setExecutionTarget] = usePreferredRunner();
   const [runSetupBeforeRecording, setRunSetupBeforeRecording] = useState(true);
   const [extraSetupSteps, setExtraSetupSteps] = useState<ExtraStep[]>([]);
@@ -282,19 +274,11 @@ export function RecordingClient({
   const [selectedStorageStateId, setSelectedStorageStateId] = useState<string | null>(null);
   const [storageStateOptions, setStorageStateOptions] = useState<Array<{ id: string; name: string; cookieCount: number; originCount: number }>>([]);
   const [capturedStorageState, setCapturedStorageState] = useState<string | null>(null);
+  const [domSnapshot, setDomSnapshot] = useState<import('@/lib/db/schema').DomSnapshotData | null>(null);
   const [saveCookieName, setSaveCookieName] = useState('');
 
   // Re-record mode
   const isRerecording = !!rerecordTest;
-
-  // Check Playwright availability on mount
-  useEffect(() => {
-    async function verifyPlaywright() {
-      const status = await checkPlaywrightAvailability(repositoryId);
-      setPlaywrightStatus(status);
-    }
-    verifyPlaywright();
-  }, [repositoryId]);
 
   // Load saved storage states
   useEffect(() => {
@@ -341,8 +325,9 @@ export function RecordingClient({
         if (!status.isRecording) {
           if (status.lastCompletedSession) {
             setGeneratedCode(status.lastCompletedSession.generatedCode);
-            setRequiredCapabilities(status.lastCompletedSession.requiredCapabilities ?? null);
-            setCapturedStorageState(status.capturedStorageState ?? null);
+            setRequiredCapabilities((status.lastCompletedSession as Record<string, unknown>).requiredCapabilities as typeof requiredCapabilities ?? null);
+            setCapturedStorageState((status as Record<string, unknown>).capturedStorageState as string ?? null);
+            setDomSnapshot((status.lastCompletedSession as Record<string, unknown>).domSnapshot as typeof domSnapshot ?? null);
             await clearLastCompletedSession(repositoryId);
             setStep('saving');
           } else {
@@ -355,8 +340,8 @@ export function RecordingClient({
         }
 
         // Sync pause state
-        if (status.isPaused !== undefined) {
-          setIsPaused(status.isPaused);
+        if ((status as Record<string, unknown>).isPaused !== undefined) {
+          setIsPaused((status as Record<string, unknown>).isPaused as boolean);
         }
 
         // Apply verification updates to existing events
@@ -415,35 +400,6 @@ export function RecordingClient({
     return () => clearInterval(pollInterval);
   }, [step, repositoryId]);
 
-  // Poll for inspector status when in inspector-running step
-  useEffect(() => {
-    if (step !== 'inspector-running' || !inspectorSessionId) return;
-
-    const pollInterval = setInterval(async () => {
-      try {
-        const status = await getInspectorStatus(inspectorSessionId);
-
-        // If inspector stopped (user closed the window), finalize session
-        if (!status.isRunning) {
-          const result = await finalizeInspectorSession(inspectorSessionId);
-          if (result.success && result.code) {
-            setGeneratedCode(result.code);
-            setStep('saving');
-          } else {
-            setStep('setup');
-            setError(result.error || 'No code was generated. Try recording some interactions.');
-          }
-          setInspectorSessionId(null);
-          clearInterval(pollInterval);
-        }
-      } catch (err) {
-        console.error('Failed to poll inspector status:', err);
-      }
-    }, 1000); // Poll every 1s for inspector
-
-    return () => clearInterval(pollInterval);
-  }, [step, inspectorSessionId]);
-
   const handleStartRecording = async () => {
     if (!url || !testName) return;
 
@@ -469,21 +425,8 @@ export function RecordingClient({
         setAreaId(area.id);
       }
 
-      if (selectedEngine === 'playwright-inspector') {
-        // Start Playwright Inspector
-        const result = await startPlaywrightInspector(url, repositoryId);
-
-        if (result.error) {
-          setError(result.error);
-          return;
-        }
-
-        if (result.sessionId) {
-          setInspectorSessionId(result.sessionId);
-          setStep('inspector-running');
-        }
-      } else {
-        // Start Lastest recorder with optional setup
+      {
+        // Start recorder with optional setup
         const activeDefaults = repositorySetupSteps.filter(s => !skippedDefaultStepIds.has(s.id));
         const allSteps = [
           ...activeDefaults.map(s => ({ stepType: s.stepType, testId: s.testId, scriptId: s.scriptId })),
@@ -508,7 +451,7 @@ export function RecordingClient({
 
           // Fetch embedded stream URL if recording via an embedded runner
           const resolvedTarget = result.resolvedRunnerId || executionTarget;
-          if (resolvedTarget !== 'local') {
+          if (resolvedTarget && resolvedTarget !== 'auto') {
             fetch(`/api/embedded/stream`)
               .then(res => res.ok ? res.json() : null)
               .then(data => {
@@ -598,6 +541,7 @@ export function RecordingClient({
         setGeneratedCode(session.generatedCode);
         setRequiredCapabilities(session.requiredCapabilities ?? null);
         setCapturedStorageState(session.capturedStorageState ?? null);
+        setDomSnapshot(session.domSnapshot ?? null);
         setStep('saving');
       }
     } catch (error) {
@@ -627,21 +571,6 @@ export function RecordingClient({
     return () => document.removeEventListener('fullscreenchange', handler);
   }, []);
 
-  const handleCancelInspector = async () => {
-    if (!inspectorSessionId) return;
-
-    setIsLoading(true);
-    try {
-      await cancelPlaywrightInspector(inspectorSessionId);
-      setInspectorSessionId(null);
-      setStep('setup');
-    } catch (error) {
-      console.error('Failed to cancel inspector:', error);
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
   const handleSaveTest = async () => {
     setIsLoading(true);
     try {
@@ -668,6 +597,7 @@ export function RecordingClient({
           viewportHeight: settings.viewportHeight ?? 720,
           extraSetupSteps: runSetupBeforeRecording && extraSetupSteps.length > 0 ? extraSetupSteps : undefined,
           skippedDefaultStepIds: runSetupBeforeRecording && skippedDefaultStepIds.size > 0 ? Array.from(skippedDefaultStepIds) : undefined,
+          domSnapshot,
         });
         router.push(`/tests/${test.id}`);
       }
@@ -679,63 +609,6 @@ export function RecordingClient({
   };
 
   if (step === 'setup') {
-    // Playwright status section component
-    const PlaywrightStatusSection = () => {
-      if (!playwrightStatus) {
-        return (
-          <Card>
-            <CardContent className="py-3">
-              <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                <Loader2 className="h-4 w-4 animate-spin" />
-                <span>Checking browser availability...</span>
-              </div>
-            </CardContent>
-          </Card>
-        );
-      }
-
-      if (playwrightStatus.available) {
-        return (
-          <Card>
-            <CardContent className="py-3">
-              <div className="flex items-center gap-2 text-sm text-green-600">
-                <CheckCircle2 className="h-4 w-4" />
-                <span>Local Playwright recording available</span>
-              </div>
-            </CardContent>
-          </Card>
-        );
-      }
-
-      return (
-        <Card className="border-destructive/50">
-          <CardContent className="py-3 space-y-3">
-            <div className="flex items-center gap-2 text-sm text-destructive">
-              <AlertTriangle className="h-4 w-4" />
-              <span>Local Playwright recording not available</span>
-            </div>
-            {playwrightStatus.installCommand && (
-              <div className="flex items-center gap-2 p-2 bg-muted rounded font-mono text-xs">
-                <Terminal className="h-3 w-3 text-muted-foreground shrink-0" />
-                <code>{playwrightStatus.installCommand}</code>
-              </div>
-            )}
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={async () => {
-                setPlaywrightStatus(null);
-                const status = await checkPlaywrightAvailability(repositoryId);
-                setPlaywrightStatus(status);
-              }}
-            >
-              <RefreshCw className="h-3 w-3 mr-1" />
-              Retry
-            </Button>
-          </CardContent>
-        </Card>
-      );
-    };
     return (
       <div className="flex-1 p-6 overflow-auto">
         <div className="max-w-5xl mx-auto space-y-4">
@@ -945,7 +818,7 @@ export function RecordingClient({
                 {/* Start Button */}
                 <Button
                   onClick={handleStartRecording}
-                  disabled={!url || !testName || isLoading || !playwrightStatus?.available}
+                  disabled={!url || !testName || isLoading}
                   className="w-full"
                   size="lg"
                 >
@@ -993,60 +866,6 @@ export function RecordingClient({
                 />
               </CardContent>
             </Card>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  if (step === 'inspector-running') {
-    return (
-      <div className="flex-1 p-6 overflow-auto">
-        <div className="max-w-2xl mx-auto space-y-6">
-          <Card className="border-primary">
-            <CardHeader className="pb-3">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  <div className="h-3 w-3 rounded-full bg-blue-500 animate-pulse" />
-                  <CardTitle>Playwright Inspector Running</CardTitle>
-                </div>
-                <Badge variant="outline">{testName}</Badge>
-              </div>
-              <CardDescription>{url}</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="p-4 bg-muted rounded-lg space-y-3">
-                <div className="flex items-center gap-2 text-sm">
-                  <Terminal className="h-4 w-4 text-muted-foreground" />
-                  <span className="font-medium">Playwright Inspector is open</span>
-                </div>
-                <ul className="text-sm text-muted-foreground space-y-1 ml-6">
-                  <li>Interact with the browser to record actions</li>
-                  <li>Use the Inspector toolbar for assertions</li>
-                  <li>Close the Inspector window when done</li>
-                </ul>
-              </div>
-
-              <div className="flex gap-2">
-                <Button
-                  onClick={handleCancelInspector}
-                  variant="destructive"
-                  disabled={isLoading}
-                >
-                  {isLoading ? (
-                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                  ) : (
-                    <Square className="h-4 w-4 mr-2" />
-                  )}
-                  Cancel Recording
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
-
-          <div className="text-sm text-muted-foreground text-center">
-            <Clock className="h-4 w-4 inline mr-1" />
-            Recording... Close the Inspector window to save.
           </div>
         </div>
       </div>

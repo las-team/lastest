@@ -147,7 +147,34 @@ export function parseAssertions(code: string): TestAssertion[] {
       continue;
     }
 
-    // Pattern 5: Page wait assertions
+    // Pattern 5: Download assertions
+    // // Download assertion: wait for download to complete then verify
+    const downloadCommentMatch = trimmed.match(/^\/\/ Download assertion:\s*(.+)?$/);
+    if (downloadCommentMatch) {
+      const filename = downloadCommentMatch[1]?.trim();
+      // Find the expect line (may be 1-3 lines after the comment, past waitForAny)
+      let endLine = i + 1;
+      for (let j = i + 1; j < Math.min(i + 4, lines.length); j++) {
+        if (lines[j].trim().startsWith('expect(')) { endLine = j; break; }
+      }
+
+      assertions.push({
+        id: assertionId(orderIndex, 'fileDownloaded', 'download', filename),
+        orderIndex,
+        category: 'download',
+        assertionType: 'fileDownloaded',
+        negated: false,
+        expectedValue: filename,
+        isSoft: !hasHardMarker,
+        label: filename && filename !== 'fileDownloaded' ? `Download: ${filename}` : 'File downloaded',
+        codeLineStart: i + 1,
+        codeLineEnd: endLine + 1,
+      });
+      orderIndex++;
+      continue;
+    }
+
+    // Pattern 6: Page wait assertions
     if (trimmed.match(/await\s+page\.waitForLoadState\(/)) {
       const stateMatch = trimmed.match(/waitForLoadState\(['"](\w+)['"]\)/);
       const state = stateMatch?.[1] ?? 'load';

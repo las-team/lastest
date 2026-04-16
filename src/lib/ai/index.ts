@@ -1,11 +1,13 @@
 import path from 'path';
-import type { AIProvider, AIProviderConfig } from './types';
+import type { AIProvider, AIProviderConfig, AIProviderType } from './types';
 import { ClaudeCLIProvider } from './claude-cli';
 import { createOpenRouterProvider } from './openrouter';
 import { createOllamaProvider } from './ollama';
 import { ClaudeAgentSDKProvider } from './claude-agent-sdk';
 import { createOpenAIProvider } from './openai';
 import { createAnthropicDirectProvider } from './anthropic-direct';
+import { MCPBridge, createPlaywrightMCPBridge } from './mcp-bridge';
+import type { MCPServerConfig } from './mcp-bridge';
 import { createAIPromptLog, updateAIPromptLog } from '@/lib/db/queries';
 import type { AIActionType, AILogStatus } from '@/lib/db/schema';
 
@@ -13,6 +15,9 @@ export * from './types';
 export * from './prompts';
 export { gatherCodebaseIntelligence } from './codebase-intelligence';
 export type { CodebaseIntelligence, DependencyInsight } from './codebase-intelligence';
+
+/** Providers that support tool/function calling via their API */
+const TOOL_CALLING_PROVIDERS: AIProviderType[] = ['openrouter', 'openai', 'anthropic'];
 
 export function getAIProvider(config: AIProviderConfig): AIProvider {
   if (config.provider === 'openrouter') {
@@ -74,8 +79,16 @@ export function getAIProvider(config: AIProviderConfig): AIProvider {
 export interface GenerateWithAIOptions {
   actionType?: AIActionType;
   repositoryId?: string | null;
-  /** When true and provider is claude-agent-sdk, injects the Playwright Test MCP server (headless) */
+  /** When true, enables MCP tool calling. For claude-agent-sdk this uses native MCP;
+   *  for other tool-calling providers (openrouter, openai, anthropic) it uses the MCP bridge. */
   useMCP?: boolean;
+  /** MCP configuration for non-SDK providers. When omitted, defaults to Playwright MCP (headless). */
+  mcpConfig?: {
+    /** Custom MCP servers to spawn (key = server name) */
+    servers?: Record<string, MCPServerConfig>;
+    /** CDP endpoint for Playwright MCP (e.g. from embedded browser) */
+    cdpEndpoint?: string;
+  };
   signal?: AbortSignal;
   /** Called with the prompt log ID after the log entry is created (before AI call) */
   onLogCreated?: (logId: string) => void;
@@ -114,6 +127,11 @@ export async function generateWithAI(
     ];
   }
 
+  // For non-SDK providers with tool calling support, use MCP bridge
+  const useToolCallingBridge = options?.useMCP
+    && config.provider !== 'claude-agent-sdk'
+    && TOOL_CALLING_PROVIDERS.includes(config.provider);
+
   const provider = getAIProvider(effectiveConfig);
   const startTime = Date.now();
 
@@ -151,11 +169,24 @@ export async function generateWithAI(
   }
 
   try {
-    const response = await provider.generate({
-      prompt,
-      systemPrompt: finalSystemPrompt || undefined,
-      signal: options?.signal,
-    });
+    let response: string;
+
+    if (useToolCallingBridge && provider.generateWithTools) {
+      // MCP bridge path: spawn MCP server, list tools, run agentic tool-calling loop
+      response = await generateWithMCPBridge(provider, {
+        prompt,
+        systemPrompt: finalSystemPrompt || undefined,
+        signal: options?.signal,
+        cdpEndpoint: options?.mcpConfig?.cdpEndpoint,
+        customServers: options?.mcpConfig?.servers,
+      });
+    } else {
+      response = await provider.generate({
+        prompt,
+        systemPrompt: finalSystemPrompt || undefined,
+        signal: options?.signal,
+      });
+    }
 
     // Update log with success
     if (logId) {
@@ -179,5 +210,76 @@ export async function generateWithAI(
       });
     }
     throw error;
+  }
+}
+
+/**
+ * Run an AI provider through the MCP bridge: spawn MCP server(s), list their
+ * tools, then use the provider's generateWithTools() for the agentic loop.
+ */
+async function generateWithMCPBridge(
+  provider: AIProvider,
+  options: {
+    prompt: string;
+    systemPrompt?: string;
+    signal?: AbortSignal;
+    cdpEndpoint?: string;
+    customServers?: Record<string, MCPServerConfig>;
+  },
+): Promise<string> {
+  if (!provider.generateWithTools) {
+    throw new Error('Provider does not support tool calling');
+  }
+
+  // Determine which MCP bridges to create
+  const bridges: MCPBridge[] = [];
+
+  if (options.customServers) {
+    // Custom MCP server configs (e.g. from generator-agent)
+    for (const config of Object.values(options.customServers)) {
+      bridges.push(new MCPBridge(config));
+    }
+  } else {
+    // Default: Playwright MCP
+    bridges.push(createPlaywrightMCPBridge({
+      cdpEndpoint: options.cdpEndpoint,
+      headless: true,
+    }));
+  }
+
+  try {
+    // Connect all bridges and collect tools
+    await Promise.all(bridges.map(b => b.connect()));
+    const allTools = (await Promise.all(bridges.map(b => b.listTools()))).flat();
+
+    if (allTools.length === 0) {
+      throw new Error('MCP bridge: no tools available from MCP server(s)');
+    }
+
+    // Build a lookup for routing tool calls to the right bridge
+    const toolToBridge = new Map<string, MCPBridge>();
+    for (let i = 0; i < bridges.length; i++) {
+      const tools = await bridges[i].listTools();
+      for (const tool of tools) {
+        toolToBridge.set(tool.name, bridges[i]);
+      }
+    }
+
+    return await provider.generateWithTools({
+      prompt: options.prompt,
+      systemPrompt: options.systemPrompt,
+      signal: options.signal,
+      tools: allTools,
+      onToolCall: async (call) => {
+        const bridge = toolToBridge.get(call.name);
+        if (!bridge) {
+          return { toolCallId: call.id, content: `Unknown tool: ${call.name}`, isError: true };
+        }
+        return bridge.callTool(call);
+      },
+    });
+  } finally {
+    // Always clean up MCP subprocesses
+    await Promise.all(bridges.map(b => b.close().catch(() => {})));
   }
 }

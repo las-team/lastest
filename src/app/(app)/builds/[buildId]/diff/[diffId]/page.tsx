@@ -1,6 +1,6 @@
 import { notFound } from 'next/navigation';
 import Link from 'next/link';
-import { getDiff, getDiffsByBuild, getStepLabelSuggestions } from '@/server/actions/diffs';
+import { getDiff, getSortedDiffsByBuild, getStepLabelSuggestions } from '@/server/actions/diffs';
 import { getBuild } from '@/server/actions/builds';
 import { DiffViewerClient } from './diff-viewer-client';
 import { StepLabelEditor } from './step-label-editor';
@@ -45,8 +45,8 @@ export default async function DiffPage({ params }: PageProps) {
   // Get step label suggestions for inline editing
   const suggestions = await getStepLabelSuggestions(diff.testId);
 
-  // Get all diffs for navigation
-  const allDiffs = await getDiffsByBuild(buildId);
+  // Get all diffs sorted by test/step for consistent navigation
+  const allDiffs = await getSortedDiffsByBuild(buildId);
   const currentIndex = allDiffs.findIndex((d) => d.id === diffId);
   const prevDiff = currentIndex > 0 ? allDiffs[currentIndex - 1] : null;
   const nextDiff = currentIndex < allDiffs.length - 1 ? allDiffs[currentIndex + 1] : null;

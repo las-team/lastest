@@ -8,6 +8,7 @@ import * as queries from "@/lib/db/queries";
 import { getGitHubUser } from "@/lib/github/oauth";
 import { sendPasswordResetEmail } from "@/lib/email";
 import { syncReposIfStale } from "@/server/actions/repos";
+import { syncUserToTwentyCRM } from "@/lib/integrations/twenty-crm";
 
 async function syncGithubAccount(account: { userId: string; accessToken?: string | null }) {
   if (!account.accessToken) return;
@@ -142,6 +143,7 @@ export const auth = betterAuth({
             });
             await queries.updateUser(user.id, { teamId: team.id, role: "owner" });
           }
+          syncUserToTwentyCRM({ name: user.name || '', email: user.email }).catch(() => {});
         },
       },
     },

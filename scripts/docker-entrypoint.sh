@@ -23,8 +23,14 @@ for subdir in screenshots baselines diffs traces videos planned bug-reports; do
   fi
 done
 
+# Persist Claude Code auth across pod restarts (symlink to persistent volume)
+if mkdir -p /app/storage/.claude 2>/dev/null; then
+  rm -rf /home/nextjs/.claude
+  ln -sf /app/storage/.claude /home/nextjs/.claude
+fi
+
 echo "Starting Lastest..."
-echo "Database: $(echo "${DATABASE_URL:-postgresql://lastest:lastest@localhost:5432/lastest}" | sed 's|://[^:]*:[^@]*@|://***:***@|')"
+echo "Database: $(echo "${DATABASE_URL:-postgresql://lastest:lastest@localhost:5432/lastest}" | sed 's|://[^:]*:[^@]*@|://***:***@|')"1
 
 # Run database migrations
 if [ -f "/app/migrate.js" ]; then

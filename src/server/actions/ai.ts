@@ -5,32 +5,67 @@ import { requireTeamAccess, requireRepoAccess } from '@/lib/auth';
 import {
   generateWithAI,
   SYSTEM_PROMPT,
-  MCP_SYSTEM_PROMPT,
-  createTestPrompt,
   createFixPrompt,
-  createEnhancePrompt,
   extractCodeFromResponse,
 } from '@/lib/ai';
-import type { AIProviderConfig, TestGenerationContext, ScanContext, DiscoverySource, CodebaseIntelligenceContext } from '@/lib/ai/types';
+import type { AIProviderConfig, TestGenerationContext, CodebaseIntelligenceContext } from '@/lib/ai/types';
 import { revalidatePath } from 'next/cache';
 import { getCurrentBranchForRepo } from '@/lib/git-utils';
 import { agentCreateTest } from '@/lib/playwright/generator-agent';
 import { emitAndPersistActivityEvent } from '@/lib/db/queries/activity-events';
+import { awardScore } from '@/server/actions/gamification';
 import type { AgentStepState } from '@/lib/db/schema';
+import { claimPoolEB, releasePoolEB } from '@/server/actions/embedded-sessions';
 import { db } from '@/lib/db';
 import { embeddedSessions } from '@/lib/db/schema';
 import { eq } from 'drizzle-orm';
 
-/** Find a ready embedded browser's CDP + stream URLs for MCP integration */
-async function findAvailableEmbeddedBrowser(): Promise<{ cdpUrl: string; streamUrl: string } | undefined> {
-  const [session] = await db
-    .select({ cdpUrl: embeddedSessions.cdpUrl, streamUrl: embeddedSessions.streamUrl })
-    .from(embeddedSessions)
-    .where(eq(embeddedSessions.status, 'ready'))
-    .limit(1);
-  if (session?.cdpUrl && session?.streamUrl) {
-    return { cdpUrl: session.cdpUrl, streamUrl: session.streamUrl };
+/**
+ * Claim an embedded browser from the pool for AI agent use.
+ * Waits (polls) until an EB becomes available, up to maxWaitMs.
+ * Returns CDP + stream URLs and the runnerId for release.
+ * Caller MUST call releasePoolEB(runnerId) when done.
+ */
+export async function claimEmbeddedBrowserForAgent(
+  maxWaitMs = 5 * 60 * 1000,
+  onQueued?: () => void,
+): Promise<{
+  cdpUrl: string;
+  streamUrl: string;
+  runnerId: string;
+} | undefined> {
+  const deadline = Date.now() + maxWaitMs;
+  let notifiedQueued = false;
+
+  while (Date.now() < deadline) {
+    const poolEB = await claimPoolEB();
+    if (poolEB) {
+      // Look up the CDP/stream URLs from the session
+      const [session] = await db
+        .select({ cdpUrl: embeddedSessions.cdpUrl, streamUrl: embeddedSessions.streamUrl })
+        .from(embeddedSessions)
+        .where(eq(embeddedSessions.runnerId, poolEB.runnerId));
+
+      if (session?.cdpUrl && session?.streamUrl) {
+        return { cdpUrl: session.cdpUrl, streamUrl: session.streamUrl, runnerId: poolEB.runnerId };
+      }
+
+      // Session not found or missing URLs — release and retry
+      await releasePoolEB(poolEB.runnerId);
+    }
+
+    // Notify caller on first queue (so UI can update status)
+    if (!notifiedQueued) {
+      notifiedQueued = true;
+      onQueued?.();
+      console.log(`[AgentPool] All browsers busy, waiting for one to become available (timeout ${maxWaitMs / 1000}s)`);
+    }
+
+    // Poll every 3 seconds
+    await new Promise((r) => setTimeout(r, 3000));
   }
+
+  console.warn(`[AgentPool] Timed out waiting for an available browser after ${maxWaitMs / 1000}s`);
   return undefined;
 }
 
@@ -45,75 +80,6 @@ async function getAIConfig(repositoryId?: string | null): Promise<AIProviderConf
     agentSdkModel: settings.agentSdkModel || undefined,
     agentSdkWorkingDir: settings.agentSdkWorkingDir || undefined,
   };
-}
-
-// Build ScanContext from route data
-function buildScanContextFromRoute(
-  route: queries.RouteWithContext,
-  discoverySource: DiscoverySource = 'file-scan'
-): ScanContext {
-  return {
-    discoverySource,
-    sourceFilePath: route.filePath ?? undefined,
-    framework: route.framework ?? undefined,
-    routerType: route.routerType as 'hash' | 'browser' | undefined,
-    specDescription: route.description ?? undefined,
-    testSuggestions: route.testSuggestions.length > 0 ? route.testSuggestions : undefined,
-    functionalAreaName: route.functionalAreaName ?? undefined,
-    functionalAreaDescription: route.functionalAreaDescription ?? undefined,
-  };
-}
-
-export async function aiCreateTestCore(
-  repositoryId: string,
-  context: TestGenerationContext,
-  routeId?: string
-): Promise<{ success: boolean; code?: string; error?: string }> {
-  try {
-    // Enrich context with route information if routeId is provided
-    const enrichedContext = { ...context };
-
-    if (routeId) {
-      const routeWithContext = await queries.getRouteWithContext(routeId);
-      if (routeWithContext) {
-        enrichedContext.scanContext = buildScanContextFromRoute(routeWithContext);
-
-        // Also set routePath if not already set
-        if (!enrichedContext.routePath && !enrichedContext.targetUrl) {
-          enrichedContext.routePath = routeWithContext.path;
-        }
-
-        // Set isDynamicRoute based on route type
-        if (routeWithContext.type === 'dynamic') {
-          enrichedContext.isDynamicRoute = true;
-        }
-      }
-    }
-
-    const config = await getAIConfig(repositoryId);
-    const prompt = createTestPrompt(enrichedContext);
-    const systemPrompt = enrichedContext.useMCP ? MCP_SYSTEM_PROMPT : SYSTEM_PROMPT;
-    const response = await generateWithAI(config, prompt, systemPrompt, {
-      actionType: 'create_test',
-      repositoryId,
-      useMCP: enrichedContext.useMCP,
-    });
-    const code = extractCodeFromResponse(response);
-
-    return { success: true, code };
-  } catch (error) {
-    const message = error instanceof Error ? error.message : 'Failed to generate test';
-    return { success: false, error: message };
-  }
-}
-
-export async function aiCreateTest(
-  repositoryId: string,
-  context: TestGenerationContext,
-  routeId?: string
-): Promise<{ success: boolean; code?: string; error?: string }> {
-  await requireRepoAccess(repositoryId);
-  return aiCreateTestCore(repositoryId, context, routeId);
 }
 
 export async function aiFixTest(
@@ -148,34 +114,16 @@ export async function aiFixTest(
   }
 }
 
+/**
+ * Enhance test: uses agentic browser inspection to improve test with verified selectors.
+ */
 export async function aiEnhanceTest(
   repositoryId: string,
   testId: string,
   userPrompt?: string
 ): Promise<{ success: boolean; code?: string; error?: string }> {
-  await requireRepoAccess(repositoryId);
-  try {
-    const test = await queries.getTest(testId);
-    if (!test) {
-      return { success: false, error: 'Test not found' };
-    }
-
-    const config = await getAIConfig(repositoryId);
-    const prompt = createEnhancePrompt({
-      existingCode: test.code,
-      userPrompt,
-    });
-    const response = await generateWithAI(config, prompt, SYSTEM_PROMPT, {
-      actionType: 'enhance_test',
-      repositoryId,
-    });
-    const code = extractCodeFromResponse(response);
-
-    return { success: true, code };
-  } catch (error) {
-    const message = error instanceof Error ? error.message : 'Failed to enhance test';
-    return { success: false, error: message };
-  }
+  const { agentEnhanceTest } = await import('@/lib/playwright/enhancer-agent');
+  return agentEnhanceTest(repositoryId, testId, userPrompt);
 }
 
 export async function saveGeneratedTest(data: {
@@ -250,33 +198,38 @@ export async function startGenerateTestAgent(data: {
     // Fire-and-forget background execution
     (async () => {
       const startTime = Date.now();
+      // Wait for an EB from the pool (queues if all busy)
+      const eb = await claimEmbeddedBrowserForAgent(5 * 60 * 1000, () => {
+        queries.updateAgentSession(session.id, {
+          metadata: { ...session.metadata, queuedForBrowser: true } as Record<string, unknown>,
+        }).catch(() => {});
+      });
+      if (!eb) {
+        throw new Error('No browsers available — all browsers are busy. Please try again later.');
+      }
+      console.log(`[GenerateTestAgent] Claimed pool EB ${eb.runnerId.slice(0, 8)}, CDP: ${eb.cdpUrl}`);
+      await queries.updateAgentSession(session.id, {
+        metadata: { ...session.metadata, streamUrl: eb.streamUrl, queuedForBrowser: false } as Record<string, unknown>,
+      }).catch(() => {});
       try {
-        // Try to use an embedded browser's CDP endpoint for live streaming
-        const eb = await findAvailableEmbeddedBrowser();
-        if (eb) {
-          console.log(`[GenerateTestAgent] Using embedded browser CDP: ${eb.cdpUrl}, stream: ${eb.streamUrl}`);
-          // Store stream URL in session metadata so the UI can show the viewer
-          await queries.updateAgentSession(session.id, {
-            metadata: { ...session.metadata, streamUrl: eb.streamUrl } as Record<string, unknown>,
-          }).catch(() => {});
-        }
-
         const result = await agentCreateTest(data.repositoryId, {
           userPrompt: data.userPrompt,
           targetUrl: data.targetUrl,
           routePath: data.targetUrl,
-        }, { headless: data.headless, cdpEndpoint: eb?.cdpUrl });
+        }, { headless: data.headless, cdpEndpoint: eb.cdpUrl });
 
         if (!result.success || !result.code) {
           throw new Error(result.error || 'Generator agent produced no test code');
         }
 
+        const generateBot = await queries.getBotByKind(teamId, 'generate_agent');
         const test = await queries.createTest({
           repositoryId: data.repositoryId,
           functionalAreaId: data.functionalAreaId || null,
           name: data.testName,
           code: result.code,
           targetUrl: data.targetUrl || null,
+          ...(generateBot ? { createdByBotId: generateBot.id } : {}),
         });
 
         await queries.updateAgentSession(session.id, {
@@ -339,6 +292,12 @@ export async function startGenerateTestAgent(data: {
           artifactType: null, artifactId: null, artifactLabel: null,
           durationMs: Date.now() - startTime, promptLogId: null,
         }).catch(() => {});
+      } finally {
+        // Always release the EB back to the pool
+        if (eb) {
+          await releasePoolEB(eb.runnerId);
+          console.log(`[GenerateTestAgent] Released pool EB ${eb.runnerId.slice(0, 8)}`);
+        }
       }
     })();
 
@@ -405,22 +364,27 @@ export async function startGeneratePlaceholderTestAgent(data: {
     // Fire-and-forget background execution
     (async () => {
       const startTime = Date.now();
+      // Wait for an EB from the pool (queues if all busy)
+      const eb = await claimEmbeddedBrowserForAgent(5 * 60 * 1000, () => {
+        queries.updateAgentSession(session.id, {
+          metadata: { ...session.metadata, queuedForBrowser: true } as Record<string, unknown>,
+        }).catch(() => {});
+      });
+      if (!eb) {
+        throw new Error('No browsers available — all browsers are busy. Please try again later.');
+      }
+      console.log(`[GeneratePlaceholderAgent] Claimed pool EB ${eb.runnerId.slice(0, 8)}, CDP: ${eb.cdpUrl}`);
+      await queries.updateAgentSession(session.id, {
+        metadata: { ...session.metadata, streamUrl: eb.streamUrl, queuedForBrowser: false } as Record<string, unknown>,
+      }).catch(() => {});
       try {
-        const eb = await findAvailableEmbeddedBrowser();
-        if (eb) {
-          console.log(`[GeneratePlaceholderAgent] Using embedded browser CDP: ${eb.cdpUrl}, stream: ${eb.streamUrl}`);
-          await queries.updateAgentSession(session.id, {
-            metadata: { ...session.metadata, streamUrl: eb.streamUrl } as Record<string, unknown>,
-          }).catch(() => {});
-        }
-
         const result = await agentCreateTest(data.repositoryId, {
           userPrompt,
           testName: test.name,
           targetUrl: test.targetUrl ?? undefined,
           routePath: test.targetUrl ?? undefined,
           functionalAreaId: test.functionalAreaId ?? undefined,
-        }, { cdpEndpoint: eb?.cdpUrl });
+        }, { cdpEndpoint: eb.cdpUrl });
 
         if (!result.success || !result.code) {
           throw new Error(result.error || 'Generator agent produced no test code');
@@ -431,6 +395,18 @@ export async function startGeneratePlaceholderTestAgent(data: {
           code: result.code,
           isPlaceholder: false,
         }, 'ai_generated');
+
+        // Award test_created points to generate_agent bot
+        const generateBot = await queries.getBotByKind(teamId, 'generate_agent');
+        if (generateBot && teamId) {
+          awardScore({
+            teamId,
+            kind: 'test_created',
+            actor: { kind: 'bot', id: generateBot.id },
+            sourceType: 'test',
+            sourceId: data.testId,
+          }).catch(() => {});
+        }
 
         await queries.updateAgentSession(session.id, {
           status: 'completed',
@@ -467,7 +443,6 @@ export async function startGeneratePlaceholderTestAgent(data: {
           durationMs: Date.now() - startTime, promptLogId: null,
         }).catch(() => {});
 
-        revalidatePath('/definition');
         revalidatePath('/tests');
       } catch (err) {
         console.error('[GeneratePlaceholderAgent] Error:', err);
@@ -493,6 +468,12 @@ export async function startGeneratePlaceholderTestAgent(data: {
           artifactType: null, artifactId: null, artifactLabel: null,
           durationMs: Date.now() - startTime, promptLogId: null,
         }).catch(() => {});
+      } finally {
+        // Always release the EB back to the pool
+        if (eb) {
+          await releasePoolEB(eb.runnerId);
+          console.log(`[GeneratePlaceholderAgent] Released pool EB ${eb.runnerId.slice(0, 8)}`);
+        }
       }
     })();
 
@@ -596,49 +577,178 @@ export async function aiFixTests(
 }
 
 /**
- * Unified fix: routes to PW Healer agent when enabled, falls back to prompt-based fix.
+ * Heal test: full agentic browser inspection to diagnose and fix complex failures.
+ * Lightweight wrapper — no agent session or EB. Used by API route.
  */
-export async function fixTest(
+export async function healTest(
   repositoryId: string,
   testId: string,
-  errorMessage: string
 ): Promise<{ success: boolean; code?: string; error?: string }> {
-  const settings = await queries.getAISettings(repositoryId);
-  if (settings.pwAgentEnabled) {
-    // Dynamic import to avoid circular deps / loading cost when not needed
-    const { agentHealTest } = await import('@/lib/playwright/healer-agent');
-    return agentHealTest(repositoryId, testId);
-  }
-  return aiFixTest(repositoryId, testId, errorMessage);
+  const { agentHealTest } = await import('@/lib/playwright/healer-agent');
+  return agentHealTest(repositoryId, testId);
 }
 
 /**
- * Unified bulk fix: routes to PW Healer agent when enabled.
+ * Start a heal-test agent session with EB, activity feed, and async execution.
+ * Mirrors startGenerateTestAgent pattern.
  */
-export async function fixTests(
+export async function startHealTestAgent(data: {
+  repositoryId: string;
+  testId: string;
+  testName: string;
+}): Promise<{ success: boolean; sessionId?: string; error?: string }> {
+  const { team } = await requireRepoAccess(data.repositoryId);
+  const teamId = team?.id ?? '';
+
+  try {
+    const steps: AgentStepState[] = [{
+      id: 'heal',
+      status: 'active',
+      label: 'Heal Test',
+      description: `Healing "${data.testName}" via MCP browser inspection`,
+      startedAt: new Date().toISOString(),
+    }];
+
+    const session = await queries.createAgentSession({
+      repositoryId: data.repositoryId,
+      teamId: teamId || null,
+      status: 'active',
+      currentStepId: 'heal',
+      steps,
+      metadata: { testName: data.testName, testId: data.testId, streamUrl: null } as Record<string, unknown>,
+    });
+
+    emitAndPersistActivityEvent({
+      teamId,
+      repositoryId: data.repositoryId,
+      sessionId: session.id,
+      sourceType: 'heal_agent',
+      eventType: 'session:start',
+      summary: `Healing test "${data.testName}"`,
+      stepId: null, agentType: 'healer', detail: null,
+      artifactType: null, artifactId: null, artifactLabel: null,
+      durationMs: null, promptLogId: null,
+    }).catch(() => {});
+
+    // Fire-and-forget background execution
+    (async () => {
+      const startTime = Date.now();
+      const eb = await claimEmbeddedBrowserForAgent(5 * 60 * 1000, () => {
+        queries.updateAgentSession(session.id, {
+          metadata: { ...session.metadata, queuedForBrowser: true } as Record<string, unknown>,
+        }).catch(() => {});
+      });
+      if (!eb) {
+        throw new Error('No browsers available — all browsers are busy. Please try again later.');
+      }
+      console.log(`[HealTestAgent] Claimed pool EB ${eb.runnerId.slice(0, 8)}, CDP: ${eb.cdpUrl}`);
+      await queries.updateAgentSession(session.id, {
+        metadata: { ...session.metadata, streamUrl: eb.streamUrl, queuedForBrowser: false } as Record<string, unknown>,
+      }).catch(() => {});
+      try {
+        const { agentHealTestCore } = await import('@/lib/playwright/healer-agent');
+        const result = await agentHealTestCore(data.repositoryId, data.testId, { cdpEndpoint: eb.cdpUrl });
+
+        if (!result.success || !result.code) {
+          throw new Error(result.error || 'Healer agent produced no fixed code');
+        }
+
+        const branch = await getCurrentBranchForRepo(data.repositoryId);
+        await queries.updateTestWithVersion(data.testId, { code: result.code }, 'ai_fix', branch ?? undefined);
+
+        await queries.updateAgentSession(session.id, {
+          status: 'completed',
+          completedAt: new Date(),
+          steps: [{
+            ...steps[0],
+            status: 'completed',
+            completedAt: new Date().toISOString(),
+            result: { testId: data.testId },
+          }],
+        });
+
+        emitAndPersistActivityEvent({
+          teamId,
+          repositoryId: data.repositoryId,
+          sessionId: session.id,
+          sourceType: 'heal_agent',
+          eventType: 'artifact:updated',
+          summary: `Healed test "${data.testName}"`,
+          stepId: 'heal', agentType: 'healer', detail: null,
+          artifactType: 'test', artifactId: data.testId, artifactLabel: data.testName,
+          durationMs: Date.now() - startTime, promptLogId: null,
+        }).catch(() => {});
+
+        emitAndPersistActivityEvent({
+          teamId,
+          repositoryId: data.repositoryId,
+          sessionId: session.id,
+          sourceType: 'heal_agent',
+          eventType: 'session:complete',
+          summary: `Test "${data.testName}" healed successfully`,
+          stepId: null, agentType: null, detail: null,
+          artifactType: null, artifactId: null, artifactLabel: null,
+          durationMs: Date.now() - startTime, promptLogId: null,
+        }).catch(() => {});
+
+        revalidatePath('/tests');
+      } catch (err) {
+        console.error('[HealTestAgent] Error:', err);
+        await queries.updateAgentSession(session.id, {
+          status: 'failed',
+          completedAt: new Date(),
+          steps: [{
+            ...steps[0],
+            status: 'failed',
+            completedAt: new Date().toISOString(),
+            error: err instanceof Error ? err.message : String(err),
+          }],
+        }).catch(() => {});
+
+        emitAndPersistActivityEvent({
+          teamId,
+          repositoryId: data.repositoryId,
+          sessionId: session.id,
+          sourceType: 'heal_agent',
+          eventType: 'session:error',
+          summary: `Failed to heal test "${data.testName}": ${err instanceof Error ? err.message : String(err)}`,
+          stepId: null, agentType: null, detail: null,
+          artifactType: null, artifactId: null, artifactLabel: null,
+          durationMs: Date.now() - startTime, promptLogId: null,
+        }).catch(() => {});
+      } finally {
+        if (eb) {
+          await releasePoolEB(eb.runnerId);
+          console.log(`[HealTestAgent] Released pool EB ${eb.runnerId.slice(0, 8)}`);
+        }
+      }
+    })();
+
+    return { success: true, sessionId: session.id };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Failed to start test healing';
+    return { success: false, error: message };
+  }
+}
+
+/**
+ * Heal tests in bulk: agentic browser inspection for each test.
+ */
+export async function healTests(
   testIds: string[],
   repositoryId: string
 ): Promise<{ success: boolean; fixed: number; failed: number; errors: string[] }> {
-  const settings = await queries.getAISettings(repositoryId);
-  if (settings.pwAgentEnabled) {
-    const { agentHealTests } = await import('@/lib/playwright/healer-agent');
-    return agentHealTests(testIds, repositoryId);
-  }
-  return aiFixTests(testIds, repositoryId);
+  const { agentHealTests } = await import('@/lib/playwright/healer-agent');
+  return agentHealTests(testIds, repositoryId);
 }
 
 /**
- * Unified create test: routes to PW Generator agent when enabled.
+ * Create test: always uses agentic MCP-based generation with live browser verification.
  */
 export async function createTest(
   repositoryId: string,
   context: TestGenerationContext,
-  routeId?: string
 ): Promise<{ success: boolean; code?: string; error?: string }> {
-  const settings = await queries.getAISettings(repositoryId);
-  if (settings.pwAgentEnabled) {
-    const { agentCreateTest } = await import('@/lib/playwright/generator-agent');
-    return agentCreateTest(repositoryId, context);
-  }
-  return aiCreateTest(repositoryId, context, routeId);
+  const { agentCreateTest } = await import('@/lib/playwright/generator-agent');
+  return agentCreateTest(repositoryId, context);
 }

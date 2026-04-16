@@ -78,7 +78,7 @@ Always verify connectivity before mutating state.
 1. **Check health** — call `lastest_health_check`. If it fails, ask the user to verify the URL and API key, then stop.
 2. **Find the repo** — call `list_repos`. If there are multiple, ask the user which one.
 3. **Pick tests**:
-   - Whole suite: skip to step 4.
+   - All tests in an area: call `list_tests_by_area` and skip to step 4.
    - A subset: call `list_tests` (or `list_tests_by_area`) and confirm which ones with the user.
 4. **Run** — call `create_build` with the repo id and optional `testIds`. Poll `get_build` until the build finishes, surfacing progress to the user.
 5. **Review diffs**:

@@ -18,45 +18,122 @@ export const JobPollingContext = createContext<JobPollingContextValue | null>(nu
 
 export function JobPollingProvider({ children }: { children: ReactNode }) {
   const [jobs, setJobs] = useState<JobWithChildren[]>([]);
-  const [isPolling, setIsPolling] = useState(false);
-  const timerRef = useRef<NodeJS.Timeout | null>(null);
+  const eventSourceRef = useRef<EventSource | null>(null);
+  const reconnectTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const reconnectAttemptRef = useRef(0);
 
-  const fetchJobs = useCallback(async () => {
+  const connect = useCallback(() => {
+    // Close existing connection
+    if (eventSourceRef.current) {
+      eventSourceRef.current.close();
+      eventSourceRef.current = null;
+    }
+
+    const es = new EventSource('/api/jobs/events');
+    eventSourceRef.current = es;
+
+    es.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data);
+
+        if (data.type === 'snapshot') {
+          // Full snapshot on connect — replace all jobs
+          setJobs(data.jobs);
+          reconnectAttemptRef.current = 0;
+        } else if (data.type === 'job:update') {
+          // Merge single job update into state
+          setJobs(prev => {
+            const idx = prev.findIndex(j => j.id === data.jobId);
+            const updated: JobWithChildren = {
+              id: data.jobId,
+              type: data.jobType,
+              status: data.status,
+              progress: data.progress,
+              completedSteps: data.completedSteps,
+              totalSteps: data.totalSteps,
+              label: data.label,
+              error: data.error,
+              metadata: data.metadata,
+              parentJobId: data.parentJobId,
+              repositoryId: data.repositoryId,
+              targetRunnerId: data.targetRunnerId,
+              actualRunnerId: data.actualRunnerId ?? null,
+              createdAt: data.createdAt ? new Date(data.createdAt) : null,
+              startedAt: data.startedAt ? new Date(data.startedAt) : null,
+              completedAt: data.completedAt ? new Date(data.completedAt) : null,
+              lastActivityAt: data.lastActivityAt ? new Date(data.lastActivityAt) : null,
+              // Preserve existing children until next snapshot
+              ...(idx >= 0 ? { _children: prev[idx]._children, _childSummary: prev[idx]._childSummary } : {}),
+            };
+
+            if (idx >= 0) {
+              const next = [...prev];
+              next[idx] = updated;
+              return next;
+            }
+            // New job — only add if not a child job (parent list only)
+            if (!data.parentJobId) {
+              return [updated, ...prev];
+            }
+            return prev;
+          });
+        } else if (data.type === 'job:delete') {
+          setJobs(prev => prev.filter(j => j.id !== data.jobId));
+        }
+      } catch {
+        // Ignore parse errors (e.g. keepalive comments)
+      }
+    };
+
+    es.onerror = () => {
+      es.close();
+      eventSourceRef.current = null;
+      // Reconnect with exponential backoff (max 30s)
+      const attempt = reconnectAttemptRef.current++;
+      const delay = Math.min(1000 * Math.pow(2, attempt), 30000);
+      reconnectTimerRef.current = setTimeout(connect, delay);
+    };
+  }, []);
+
+  useEffect(() => {
+    connect();
+    return () => {
+      if (eventSourceRef.current) {
+        eventSourceRef.current.close();
+        eventSourceRef.current = null;
+      }
+      if (reconnectTimerRef.current) {
+        clearTimeout(reconnectTimerRef.current);
+        reconnectTimerRef.current = null;
+      }
+    };
+  }, [connect]);
+
+  // Manual refresh fallback — fetches from HTTP endpoint
+  const refreshJobs = useCallback(async () => {
     try {
       const res = await fetch('/api/jobs/active');
       if (res.ok) {
         const data: JobWithChildren[] = await res.json();
         setJobs(data);
-        const hasActive = data.some(j => j.status === 'pending' || j.status === 'running');
-        setIsPolling(hasActive);
       }
     } catch {
       // Silently fail
     }
   }, []);
 
-  useEffect(() => {
-    queueMicrotask(() => fetchJobs());
-  }, [fetchJobs]);
-
-  useEffect(() => {
-    if (isPolling) {
-      timerRef.current = setInterval(fetchJobs, 3000);
-    } else {
-      if (timerRef.current) clearInterval(timerRef.current);
-    }
-    return () => {
-      if (timerRef.current) clearInterval(timerRef.current);
-    };
-  }, [isPolling, fetchJobs]);
-
+  // startPolling is now a no-op since SSE is always connected
+  // but kept for API compatibility with existing callers
   const startPolling = useCallback(() => {
-    setIsPolling(true);
-    fetchJobs();
-  }, [fetchJobs]);
+    // If SSE is disconnected, reconnect immediately
+    if (!eventSourceRef.current || eventSourceRef.current.readyState === EventSource.CLOSED) {
+      reconnectAttemptRef.current = 0;
+      connect();
+    }
+  }, [connect]);
 
   return (
-    <JobPollingContext.Provider value={{ jobs, startPolling, refreshJobs: fetchJobs }}>
+    <JobPollingContext.Provider value={{ jobs, startPolling, refreshJobs }}>
       {children}
     </JobPollingContext.Provider>
   );

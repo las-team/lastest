@@ -140,37 +140,37 @@ export async function agentCreateTest(
     }
     prompt += `\n\n---\n\n${seed.seedPrompt}`;
 
-    // Configure Playwright MCP with strictMcpConfig to prevent Claude Code's built-in
-    // Playwright plugin from launching a separate headed Chrome window.
-    // Uses the same @playwright/mcp package but with --cdp-endpoint (EB) or --headless.
+    // Configure Playwright MCP for the AI provider.
+    // For claude-agent-sdk: configure MCP servers directly on config (native MCP support).
+    // For other providers: pass useMCP + mcpConfig to let generateWithAI use the MCP bridge.
+    const mcpArgs = options?.cdpEndpoint
+      ? ['@playwright/mcp@latest', '--cdp-endpoint', options.cdpEndpoint, '--headless']
+      : ['@playwright/mcp@latest', '--headless'];
+
+    if (options?.cdpEndpoint) {
+      console.log(`[GeneratorAgent] MCP using CDP endpoint: ${options.cdpEndpoint}`);
+    }
+
     if (config.provider === 'claude-agent-sdk') {
       config.agentSdkStrictMcpConfig = true;
-
-      if (options?.cdpEndpoint) {
-        console.log(`[GeneratorAgent] MCP using CDP endpoint: ${options.cdpEndpoint}`);
-        config.agentSdkMcpServers = {
-          'playwright': {
-            command: 'npx',
-            args: ['@playwright/mcp@latest', '--cdp-endpoint', options.cdpEndpoint, '--headless'],
-          },
-        };
-      } else {
-        config.agentSdkMcpServers = {
-          'playwright': {
-            command: 'npx',
-            args: ['@playwright/mcp@latest', '--headless'],
-          },
-        };
-      }
+      config.agentSdkMcpServers = { 'playwright': { command: 'npx', args: mcpArgs } };
       config.agentSdkAllowedTools = ['mcp__playwright__*'];
       config.agentSdkDisallowedTools = ['Bash', 'Write', 'Edit', 'NotebookEdit'];
     }
 
+    const useMCP = config.provider !== 'claude-agent-sdk';
+
     const response = await generateWithAI(config, prompt, GENERATOR_SYSTEM_PROMPT, {
-      // Don't pass useMCP — we configured MCP servers above directly on the config
       repositoryId,
       actionType: 'agent_generate',
       signal: options?.signal,
+      useMCP,
+      ...(useMCP && {
+        mcpConfig: {
+          servers: { 'playwright': { command: 'npx', args: mcpArgs } },
+          cdpEndpoint: options?.cdpEndpoint,
+        },
+      }),
     });
 
     const code = extractCodeFromResponse(response);
