@@ -2,11 +2,14 @@
 
 import { useState, useEffect, useRef } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
+import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import {
   Video,
+  Play,
   Loader2,
   CheckCircle2,
   XCircle,
@@ -16,6 +19,9 @@ import {
 } from 'lucide-react';
 import { saveEnvironmentConfig, testServerConnection } from '@/server/actions/environment';
 import { listSystemEmbeddedSessions } from '@/server/actions/embedded-sessions';
+import { createAndRunBuild } from '@/server/actions/builds';
+import { usePreferredRunner } from '@/hooks/use-preferred-runner';
+import { useNotifyJobStarted } from '@/components/queue/job-polling-context';
 import type { EmbeddedSession } from '@/lib/db/schema';
 
 interface SidebarQuickActionsProps {
@@ -51,9 +57,13 @@ function isLocalUrl(url: string): boolean {
 }
 
 export function SidebarQuickActions({ baseUrl: initialBaseUrl = '', repositoryId, ebSessions: initialEbSessions = [] }: SidebarQuickActionsProps) {
+  const router = useRouter();
+  const notifyJobStarted = useNotifyJobStarted();
+  const [executionTarget] = usePreferredRunner();
   const [baseUrl, setBaseUrl] = useState(initialBaseUrl);
   const [expanded, setExpanded] = useState(false);
   const [isTesting, setIsTesting] = useState(false);
+  const [isRunning, setIsRunning] = useState(false);
   const [testResult, setTestResult] = useState<{ success: boolean; responseTime?: number; statusCode?: number } | null>(null);
   const [showHistory, setShowHistory] = useState(false);
   const [urlHistory, setUrlHistory] = useState<string[]>([]);
@@ -122,15 +132,49 @@ export function SidebarQuickActions({ baseUrl: initialBaseUrl = '', repositoryId
     if (baseUrl) saveAndTest();
   };
 
+  const handleRunAll = async () => {
+    setIsRunning(true);
+    try {
+      const result = await createAndRunBuild('manual', undefined, repositoryId ?? null, executionTarget, undefined);
+      notifyJobStarted();
+      if ('queued' in result && result.queued) {
+        toast.info('All browsers are busy — build queued and will start automatically');
+      } else {
+        router.push(`/builds/${result.buildId}`);
+      }
+    } catch (error) {
+      console.error('Failed to start build:', error);
+      toast.error('Failed to start build');
+    } finally {
+      setIsRunning(false);
+    }
+  };
+
   return (
     <div className="px-4 pb-3 space-y-2.5">
-      {/* Record Button */}
-      <Button asChild variant="secondary" size="sm" className="w-full gap-2">
-        <Link href="/record">
-          <Video className="h-3.5 w-3.5" />
-          Record Test
-        </Link>
-      </Button>
+      {/* Record + Run All */}
+      <div className="flex gap-1.5">
+        <Button asChild variant="secondary" size="sm" className="flex-1 gap-1.5">
+          <Link href="/record">
+            <Video className="h-3.5 w-3.5" />
+            Record
+          </Link>
+        </Button>
+        <Button
+          variant="secondary"
+          size="sm"
+          className="flex-1 gap-1.5"
+          onClick={handleRunAll}
+          disabled={isRunning}
+        >
+          {isRunning ? (
+            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+          ) : (
+            <Play className="h-3.5 w-3.5" />
+          )}
+          Run All
+        </Button>
+      </div>
 
       {/* Base URL */}
       <div className="space-y-1">

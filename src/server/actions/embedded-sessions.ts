@@ -346,7 +346,7 @@ export async function isPoolBusy(): Promise<boolean> {
  */
 export async function claimPoolEB(): Promise<{
   runnerId: string;
-  sessionId: string;
+  sessionId: string | null;
 } | null> {
   for (let attempt = 0; attempt < 3; attempt++) {
     // 1. Find an online system EB
@@ -405,8 +405,12 @@ export async function claimPoolEB(): Promise<{
       });
     }
 
+    if (!session) {
+      console.warn(`[Pool] Claimed EB ${candidate.id.slice(0, 8)} but no embedded_sessions row found — data inconsistency`);
+    }
+
     console.log(`[Pool] Claimed EB ${candidate.id.slice(0, 8)} (attempt ${attempt + 1})`);
-    return { runnerId: candidate.id, sessionId: session?.id ?? '' };
+    return { runnerId: candidate.id, sessionId: session?.id ?? null };
   }
 
   // All retries exhausted due to contention
@@ -506,13 +510,14 @@ export async function processPoolQueue(): Promise<void> {
 }
 
 /**
- * Reaper: release EBs that have been busy for too long (likely crashed).
- * An EB is considered stale if busySince > maxBusyDurationMs AND lastSeen is also stale.
- * Wire this into the periodic cleanup interval (e.g., alongside markStaleRunnersOffline).
+ * Reaper: release EBs whose runner has stopped heartbeating.
+ * Heartbeat is the authoritative liveness signal — a healthy long-running test
+ * keeps the runner heartbeating, so this won't kill legitimate work. Per-test
+ * timeouts are enforced separately by the executor.
+ * Wire this into the periodic cleanup interval (alongside markStaleRunnersOffline).
  */
-export async function reapStalePoolEBs(maxBusyDurationMs = 10 * 60 * 1000): Promise<number> {
-  const busyCutoff = new Date(Date.now() - maxBusyDurationMs);
-  const heartbeatCutoff = new Date(Date.now() - 60_000); // No heartbeat for 60s
+export async function reapStalePoolEBs(heartbeatTimeoutMs = 90_000): Promise<number> {
+  const heartbeatCutoff = new Date(Date.now() - heartbeatTimeoutMs);
 
   const stale = await db
     .select({
@@ -530,16 +535,14 @@ export async function reapStalePoolEBs(maxBusyDurationMs = 10 * 60 * 1000): Prom
 
   let reaped = 0;
   for (const row of stale) {
-    // Only reap if BOTH busySince is old AND heartbeat stopped
-    if (row.busySince && row.busySince < busyCutoff
-        && row.lastSeen && row.lastSeen < heartbeatCutoff) {
+    if (!row.lastSeen || row.lastSeen < heartbeatCutoff) {
       await db.update(runners).set({ status: 'offline' }).where(eq(runners.id, row.runnerId));
       await db
         .update(embeddedSessions)
         .set({ status: 'stopped', busySince: null, userId: null })
         .where(eq(embeddedSessions.id, row.sessionId));
       reaped++;
-      console.warn(`[Reaper] Force-released stale EB ${row.runnerId.slice(0, 8)} (busy since ${row.busySince?.toISOString()})`);
+      console.warn(`[Reaper] Force-released stale EB ${row.runnerId.slice(0, 8)} (lastSeen ${row.lastSeen?.toISOString() ?? 'never'}, busy since ${row.busySince?.toISOString() ?? 'unknown'})`);
     }
   }
   return reaped;

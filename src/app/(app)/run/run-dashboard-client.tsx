@@ -263,8 +263,8 @@ export function RunDashboardClient({ tests, runs: _runs, builds, repositoryId, a
   return (
     <div className="flex-1 p-6 overflow-auto">
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 max-w-6xl mx-auto">
-        {/* Left Column - Run Tests */}
-        <div className="space-y-6">
+        {/* Right Column - Run Tests */}
+        <div className="space-y-6 lg:order-2">
           <Card>
             <CardHeader>
               <div className="flex items-center justify-between">
@@ -660,8 +660,8 @@ export function RunDashboardClient({ tests, runs: _runs, builds, repositoryId, a
           </Card>
         </div>
 
-        {/* Right Column - Build History */}
-        <div className="space-y-6 flex flex-col">
+        {/* Left Column - Build History */}
+        <div className="space-y-6 flex flex-col lg:order-1">
           <Card className="flex-1 flex flex-col">
             <CardHeader>
               <div className="flex items-center justify-between">

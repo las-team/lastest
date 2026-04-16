@@ -287,6 +287,23 @@ describe('EB Pool Management', () => {
 
       expect(reaped).toBe(0);
     });
+
+    it('reaps EBs whose heartbeat stopped even if busySince is recent', async () => {
+      const recentBusy = new Date(Date.now() - 30 * 1000); // busy 30s ago
+      const staleHeartbeat = new Date(Date.now() - 5 * 60 * 1000); // no heartbeat for 5min
+      dbSelectResults = [[{
+        sessionId: 'session-1',
+        runnerId: 'eb-runner-1',
+        busySince: recentBusy,
+        lastSeen: staleHeartbeat,
+      }]];
+
+      const { reapStalePoolEBs } = await import('@/server/actions/embedded-sessions');
+      const reaped = await reapStalePoolEBs();
+
+      expect(reaped).toBe(1);
+      expect(mockDb.update).toHaveBeenCalled();
+    });
   });
 });
 

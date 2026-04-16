@@ -826,8 +826,10 @@ async function runBuildAsync(
         ? { ...playwrightSettings, browser: browserType }
         : null;
 
-      // Load runner's maxParallelTests setting
-      let maxParallelTests = 1;
+      // Load runner's maxParallelTests setting.
+      // For 'auto' (pool), leave undefined — the executor resolves it from
+      // the actually-claimed pool EB's DB record.
+      let maxParallelTests: number | undefined;
       if (runnerId && runnerId !== 'auto') {
         const remoteRunner = await queries.getRunnerById(runnerId);
         maxParallelTests = remoteRunner?.maxParallelTests ?? 1;

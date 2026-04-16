@@ -81,6 +81,12 @@ export function DebugClient({ test, repositoryId }: DebugClientProps) {
     sessionIdRef.current = sessionId;
   }, [sessionId]);
 
+  // Guards against double-releasing the EB across stop button, unmount, and pagehide beacon
+  const releasedRef = useRef(false);
+  useEffect(() => {
+    releasedRef.current = false;
+  }, [sessionId]);
+
   const isRemote = executionTarget !== 'local';
 
   // Track whether initial mount has completed to avoid double-start from hydration
@@ -147,14 +153,38 @@ export function DebugClient({ test, repositoryId }: DebugClientProps) {
     };
   }, [sessionId]);
 
-  // Cleanup on unmount
+  // Cleanup on unmount (covers SPA route changes — other exit paths handled separately)
   useEffect(() => {
     return () => {
-      if (sessionIdRef.current) {
+      if (sessionIdRef.current && !releasedRef.current) {
+        releasedRef.current = true;
         stopDebugSession(sessionIdRef.current).catch(() => {});
       }
     };
   }, []);
+
+  // Tab close / reload / browser close: use sendBeacon since server actions get aborted on unload.
+  // pagehide is preferred over beforeunload (doesn't break bfcache, more reliable on mobile).
+  // visibilitychange=hidden is a belt-and-braces guard for mobile Safari edge cases.
+  useEffect(() => {
+    if (!sessionId) return;
+    const release = () => {
+      if (releasedRef.current) return;
+      releasedRef.current = true;
+      const blob = new Blob([JSON.stringify({ sessionId })], { type: 'application/json' });
+      navigator.sendBeacon('/api/debug/release', blob);
+    };
+    const onPageHide = () => release();
+    const onVisibility = () => {
+      if (document.visibilityState === 'hidden') release();
+    };
+    window.addEventListener('pagehide', onPageHide);
+    document.addEventListener('visibilitychange', onVisibility);
+    return () => {
+      window.removeEventListener('pagehide', onPageHide);
+      document.removeEventListener('visibilitychange', onVisibility);
+    };
+  }, [sessionId]);
 
   // Auto-scroll step list to current step
   useEffect(() => {
@@ -174,12 +204,16 @@ export function DebugClient({ test, repositoryId }: DebugClientProps) {
     }
   }, [sessionId]);
 
-  const handleStop = useCallback(() => {
-    router.push(`/tests/${test.id}`);
-    // Session cleanup handled by unmount effect + background stop
-    if (sessionId) {
-      stopDebugSession(sessionId).catch(() => {});
+  const handleStop = useCallback(async () => {
+    if (sessionId && !releasedRef.current) {
+      releasedRef.current = true;
+      try {
+        await stopDebugSession(sessionId);
+      } catch {
+        // ignore — reaper / unmount fallback will catch it
+      }
     }
+    router.push(`/tests/${test.id}`);
   }, [sessionId, router, test.id]);
 
   // Debounced code update handler

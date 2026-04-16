@@ -232,9 +232,7 @@ export function Sidebar({ repos, selectedRepo, currentUser, team, baseUrl, repos
 
       </nav>
 
-      <SidebarQuickActions baseUrl={baseUrl} repositoryId={repositoryId} ebSessions={ebSessions} />
-
-      <div className="px-4 pb-2 space-y-1">
+      <div className="px-4 pb-3 space-y-1">
         <Link
           href="/settings"
           className={cn(
@@ -247,6 +245,10 @@ export function Sidebar({ repos, selectedRepo, currentUser, team, baseUrl, repos
           <Settings className="h-4 w-4" />
           Settings
         </Link>
+      </div>
+
+      <div className="border-t pt-3">
+        <SidebarQuickActions baseUrl={baseUrl} repositoryId={repositoryId} ebSessions={ebSessions} />
       </div>
 
       <div className="p-4 border-t space-y-3">
