@@ -52,8 +52,8 @@ export function poolMax(): number {
 }
 
 export function warmPoolMin(): number {
-  const n = parseInt(process.env.EB_WARM_POOL_MIN || '0', 10);
-  return Number.isFinite(n) && n >= 0 ? n : 0;
+  const n = parseInt(process.env.EB_WARM_POOL_MIN || '2', 10);
+  return Number.isFinite(n) && n >= 0 ? n : 2;
 }
 
 interface ClusterCreds {
@@ -267,4 +267,57 @@ export async function terminateEBJob(jobName: string): Promise<void> {
 export function jobNameForRunnerName(runnerName: string): string | null {
   const m = runnerName.match(/^System EB-(.+)$/);
   return m ? m[1]! : null;
+}
+
+/**
+ * Ensure the pool has at least `warmPoolMin()` idle EBs launched.
+ * Counts `online` system EB runners; if the count is below the warm minimum,
+ * launches Jobs until it's satisfied (bounded by EB_POOL_MAX).
+ *
+ * Safe to call repeatedly — subsequent calls no-op once the pool is warm.
+ * Call on app startup and from the periodic cleanup loop.
+ */
+export async function ensureWarmPool(): Promise<number> {
+  if (!isKubernetesMode()) return 0;
+  const want = warmPoolMin();
+  if (want <= 0) return 0;
+
+  // Count EBs currently online and idle (ready for immediate claim)
+  const { db } = await import('@/lib/db');
+  const { runners, embeddedSessions } = await import('@/lib/db/schema');
+  const { and, eq } = await import('drizzle-orm');
+
+  const idle = await db
+    .select({ id: runners.id })
+    .from(runners)
+    .innerJoin(embeddedSessions, eq(embeddedSessions.runnerId, runners.id))
+    .where(
+      and(
+        eq(runners.isSystem, true),
+        eq(runners.type, 'embedded'),
+        eq(runners.status, 'online'),
+        eq(embeddedSessions.status, 'ready'),
+      ),
+    );
+
+  const deficit = want - idle.length;
+  if (deficit <= 0) return 0;
+
+  const cap = poolMax();
+  const size = await currentPoolSize();
+  const canLaunch = Math.min(deficit, Math.max(0, cap - size));
+  if (canLaunch <= 0) return 0;
+
+  let launched = 0;
+  for (let i = 0; i < canLaunch; i++) {
+    try {
+      await launchEBJob();
+      launched++;
+    } catch (err) {
+      console.warn('[EB Provisioner] ensureWarmPool launch failed:', err);
+      break;
+    }
+  }
+  if (launched > 0) console.log(`[EB Provisioner] Warm pool topped up (+${launched}, target ${want})`);
+  return launched;
 }
