@@ -71,21 +71,38 @@ export function SidebarQuickActions({ baseUrl: initialBaseUrl = '', repositoryId
   const initialBaseUrlRef = useRef(initialBaseUrl);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  // Listen to runner SSE for real-time EB status updates
+  // Keep EB pool status fresh: poll every 5s (pausing when tab is hidden)
+  // and also refetch instantly on same-team runner SSE events. Polling is
+  // needed because system EB events are filtered out by the per-team SSE.
   useEffect(() => {
-    if (initialEbSessions.length === 0) return;
-    const es = new EventSource('/api/runners/status');
-    es.onmessage = async () => {
+    let cancelled = false;
+    const refetch = async () => {
       try {
         const updated = await listSystemEmbeddedSessions();
-        setSessions(updated);
+        if (!cancelled) setSessions(updated);
       } catch { /* ignore */ }
     };
-    es.onerror = () => {
-      // EventSource auto-reconnects
+
+    const tick = () => {
+      if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
+      refetch();
     };
-    return () => es.close();
-  }, [initialEbSessions.length]);
+    const interval = setInterval(tick, 5000);
+
+    const es = new EventSource('/api/runners/status');
+    es.onmessage = () => { refetch(); };
+    es.onerror = () => { /* EventSource auto-reconnects */ };
+
+    const onVisibility = () => { if (document.visibilityState === 'visible') refetch(); };
+    document.addEventListener('visibilitychange', onVisibility);
+
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+      es.close();
+      document.removeEventListener('visibilitychange', onVisibility);
+    };
+  }, []);
 
   const total = sessions.length;
 

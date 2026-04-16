@@ -91,13 +91,20 @@ export function DebugClient({ test, repositoryId }: DebugClientProps) {
 
   // Track whether initial mount has completed to avoid double-start from hydration
   const hasMountedRef = useRef(false);
+  // Serializes concurrent init attempts (e.g. Strict Mode double-mount in dev) so the
+  // second mount waits for the first to finish releasing its claimed EB before claiming again.
+  const initPromiseRef = useRef<Promise<void> | null>(null);
 
   // Start session on mount or when execution target changes (wait for hydration)
   useEffect(() => {
     if (!isRunnerHydrated) return;
 
     let cancelled = false;
-    async function init() {
+    const previous = initPromiseRef.current;
+    const run = (async () => {
+      if (previous) await previous.catch(() => {});
+      if (cancelled) return;
+
       // Stop any existing session (only on target change after initial mount)
       const prevSessionId = sessionIdRef.current;
       if (prevSessionId && hasMountedRef.current) {
@@ -108,7 +115,14 @@ export function DebugClient({ test, repositoryId }: DebugClientProps) {
       }
       hasMountedRef.current = true;
       const result = await startDebugSession(test.id, repositoryId, executionTarget === 'local' ? null : executionTarget);
-      if (cancelled) return;
+      if (cancelled) {
+        // Effect was cancelled after the EB was already claimed (e.g. Strict Mode double-mount
+        // in dev, or fast unmount). Release it so subsequent claims can succeed.
+        if (result.sessionId) {
+          await stopDebugSession(result.sessionId).catch(() => {});
+        }
+        return;
+      }
       if (result.error) {
         toast.error(result.error);
         return;
@@ -117,8 +131,9 @@ export function DebugClient({ test, repositoryId }: DebugClientProps) {
       if (result.actualRunnerId) {
         setResolvedRunnerId(result.actualRunnerId);
       }
-    }
-    init();
+    })();
+    initPromiseRef.current = run;
+
     return () => {
       cancelled = true;
     };
