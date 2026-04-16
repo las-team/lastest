@@ -477,6 +477,25 @@ async function startup(): Promise<void> {
             activeTestIds.delete(payload.testId);
             activeTasks--;
             if (activeTasks === 0) {
+              // Post-task cleanup: ensure clean state for next pool assignment
+              if (browser) {
+                // Close any lingering contexts (leaked from crashed tests)
+                const contexts = browser.contexts();
+                for (const ctx of contexts) {
+                  if (ctx !== context) {
+                    try { await ctx.close(); } catch {}
+                  }
+                }
+                // Clear idle context state so next task starts fresh
+                if (context) {
+                  try {
+                    await context.clearCookies();
+                    await context.clearPermissions();
+                    if (page) await page.goto('about:blank');
+                  } catch {}
+                }
+              }
+
               capturedClient.setStatus('idle');
               streamServer?.broadcastStatus('ready');
               // Restart screencast on idle page (headed: already restored by onBeforePageClose,

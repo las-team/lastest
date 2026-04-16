@@ -29,6 +29,7 @@ import { InviteUserDialog } from '@/components/users/invite-user-dialog';
 import { RunnerList } from '@/components/runners/runner-list';
 import { CreateRunnerDialog } from '@/components/runners/create-runner-dialog';
 import { getRunners, getSystemRunners } from '@/server/actions/runners';
+import { listSystemEmbeddedSessions } from '@/server/actions/embedded-sessions';
 import { listApiTokens } from '@/server/actions/api-tokens';
 import { ApiTokensSection } from '@/components/api-tokens/api-tokens-section';
 import { GoogleSheetsSettingsCard } from '@/components/settings/google-sheets-settings-card';
@@ -42,6 +43,7 @@ import { ConnectGithubButton, ReconnectGithubLink } from '@/components/settings/
 import { GithubActionsCard } from '@/components/settings/github-actions-card-client';
 import { ScheduleManagerCard } from '@/components/settings/schedule-manager-client';
 import { DiagramThumbnail } from '@/components/ui/diagram-thumbnail';
+import { BrowserPoolCard } from '@/components/embedded-browser/browser-pool-card';
 import { TestMigrationCard } from '@/components/settings/test-migration-card';
 import { EmailPreferencesCard } from '@/components/settings/email-preferences-client';
 import { StorageUsageCard } from '@/components/settings/storage-usage-card-client';
@@ -67,7 +69,10 @@ export default async function SettingsPage({
     getRunners(),
     getSystemRunners(),
   ]);
-  const apiTokens = await listApiTokens();
+  const [apiTokens, systemEBSessions] = await Promise.all([
+    listApiTokens(),
+    listSystemEmbeddedSessions(),
+  ]);
   const playwrightSettings = await queries.getPlaywrightSettings(selectedRepo?.id);
   const environmentConfig = await queries.getEnvironmentConfig(selectedRepo?.id);
   const diffSensitivitySettings = await queries.getDiffSensitivitySettings(selectedRepo?.id);
@@ -547,6 +552,10 @@ npx @lastest/runner log -f    # Follow logs in real-time`}</pre>
                 </CardContent>
               </Card>
 
+              {/* Browser Pool Status */}
+              {systemEBSessions.length > 0 && (
+                <BrowserPoolCard sessions={systemEBSessions} systemRunners={sysRunners} />
+              )}
 
             </div>
           )}

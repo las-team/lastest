@@ -77,8 +77,14 @@ export async function runTests(testIds?: string[], repositoryId?: string | null,
 
   const targetRunner = runnerId || 'auto';
 
-  // If this runner is busy, queue this run
-  if (await isRunnerBusy(targetRunner)) {
+  // If targeting a specific runner and it's busy, queue this run.
+  // For 'auto' mode (pool-managed EBs), check if any pool EB is available.
+  if (targetRunner === 'auto' || targetRunner === 'local') {
+    const { isPoolBusy } = await import('@/server/actions/embedded-sessions');
+    if (await isPoolBusy()) {
+      return queueTestRun(testIds, repositoryId, headless, runnerId, forceVideoRecording);
+    }
+  } else if (await isRunnerBusy(targetRunner)) {
     return queueTestRun(testIds, repositoryId, headless, runnerId, forceVideoRecording);
   }
 

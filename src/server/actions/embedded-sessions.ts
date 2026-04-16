@@ -1,10 +1,11 @@
 'use server';
 
 import { db } from '@/lib/db';
-import { embeddedSessions, runners, type EmbeddedSession, type EmbeddedSessionStatus } from '@/lib/db/schema';
-import { eq, and, ne, desc } from 'drizzle-orm';
+import { embeddedSessions, runners, backgroundJobs, type EmbeddedSession, type EmbeddedSessionStatus } from '@/lib/db/schema';
+import { eq, and, ne, desc, isNull } from 'drizzle-orm';
 import { requireTeamAccess, requireTeamAdmin } from '@/lib/auth';
 import { revalidatePath } from 'next/cache';
+import { emitRunnerStatusChange } from '@/lib/ws/runner-events';
 
 /**
  * List all embedded sessions for the current team
@@ -312,4 +313,231 @@ export async function cleanupExpiredSessions(): Promise<number> {
   }
 
   return cleaned;
+}
+
+// ============================================
+// Pool Management — Ephemeral EB Assignment
+// ============================================
+
+/**
+ * Check if all pool EBs are busy (no idle ones available).
+ * Used by runTests() to decide whether to queue or proceed.
+ */
+export async function isPoolBusy(): Promise<boolean> {
+  const [available] = await db
+    .select({ id: runners.id })
+    .from(runners)
+    .where(and(
+      eq(runners.isSystem, true),
+      eq(runners.status, 'online'),
+      eq(runners.type, 'embedded'),
+    ))
+    .limit(1);
+  return !available;
+}
+
+/**
+ * Atomically claim an idle system EB from the pool.
+ * Uses optimistic locking: SELECT one online EB, then UPDATE with WHERE status='online'
+ * to prevent races. Retries up to 3 times if another caller grabs it first.
+ * Returns the runnerId + sessionId, or null if none available.
+ *
+ * Internal function — no requireTeamAccess (called from executor).
+ */
+export async function claimPoolEB(): Promise<{
+  runnerId: string;
+  sessionId: string;
+} | null> {
+  for (let attempt = 0; attempt < 3; attempt++) {
+    // 1. Find an online system EB
+    const [candidate] = await db
+      .select({ id: runners.id })
+      .from(runners)
+      .where(and(
+        eq(runners.isSystem, true),
+        eq(runners.status, 'online'),
+        eq(runners.type, 'embedded'),
+      ))
+      .limit(1);
+
+    if (!candidate) return null;
+
+    // 2. Optimistic lock: only claim if still online
+    const result = await db
+      .update(runners)
+      .set({ status: 'busy' as const, lastSeen: new Date() })
+      .where(and(
+        eq(runners.id, candidate.id),
+        eq(runners.status, 'online'),
+      ))
+      .returning({ id: runners.id, teamId: runners.teamId });
+
+    if (result.length === 0) {
+      // Another caller grabbed it — retry
+      continue;
+    }
+
+    // 3. Mark the embedded session as busy
+    const [session] = await db
+      .select({ id: embeddedSessions.id })
+      .from(embeddedSessions)
+      .where(eq(embeddedSessions.runnerId, candidate.id));
+
+    if (session) {
+      await db
+        .update(embeddedSessions)
+        .set({
+          status: 'busy',
+          busySince: new Date(),
+          lastActivityAt: new Date(),
+        })
+        .where(eq(embeddedSessions.id, session.id));
+    }
+
+    // 4. Emit status change event
+    if (result[0]) {
+      emitRunnerStatusChange({
+        runnerId: candidate.id,
+        teamId: result[0].teamId,
+        status: 'busy',
+        previousStatus: 'online',
+        timestamp: Date.now(),
+      });
+    }
+
+    console.log(`[Pool] Claimed EB ${candidate.id.slice(0, 8)} (attempt ${attempt + 1})`);
+    return { runnerId: candidate.id, sessionId: session?.id ?? '' };
+  }
+
+  // All retries exhausted due to contention
+  return null;
+}
+
+/**
+ * Release an EB back to the pool after task completion.
+ * Resets runner to 'online' and session to 'ready'.
+ * Triggers queue processing for any waiting jobs.
+ *
+ * Internal function — no requireTeamAccess (called from executor).
+ */
+export async function releasePoolEB(runnerId: string): Promise<void> {
+  const [runner] = await db
+    .select({ status: runners.status, teamId: runners.teamId })
+    .from(runners)
+    .where(eq(runners.id, runnerId));
+
+  // Only release if still busy (heartbeat may have already set it online)
+  if (runner?.status === 'busy') {
+    await db
+      .update(runners)
+      .set({ status: 'online', lastSeen: new Date() })
+      .where(eq(runners.id, runnerId));
+
+    emitRunnerStatusChange({
+      runnerId,
+      teamId: runner.teamId,
+      status: 'online',
+      previousStatus: 'busy',
+      timestamp: Date.now(),
+    });
+  }
+
+  // Reset session
+  await db
+    .update(embeddedSessions)
+    .set({
+      status: 'ready',
+      userId: null,
+      busySince: null,
+      lastActivityAt: new Date(),
+    })
+    .where(eq(embeddedSessions.runnerId, runnerId));
+
+  console.log(`[Pool] Released EB ${runnerId.slice(0, 8)}`);
+
+  // Process any queued jobs waiting for an EB
+  processPoolQueue().catch((err) => {
+    console.error(`[Pool] Error processing queue after release:`, err);
+  });
+}
+
+/**
+ * Process queued jobs that are waiting for any available EB.
+ * Called after an EB is released back to the pool.
+ */
+async function processPoolQueue(): Promise<void> {
+  // Find first pending job with no target runner (queued because all EBs were busy)
+  const [pendingJob] = await db
+    .select()
+    .from(backgroundJobs)
+    .where(
+      and(
+        eq(backgroundJobs.status, 'pending'),
+        isNull(backgroundJobs.targetRunnerId),
+        eq(backgroundJobs.type, 'test_run'),
+      )
+    )
+    .limit(1);
+
+  if (!pendingJob) return;
+
+  // Try to claim an EB for this job
+  const poolEB = await claimPoolEB();
+  if (!poolEB) return; // No EBs available yet
+
+  // Assign the EB to the job so processNextQueuedTestRun can pick it up
+  await db
+    .update(backgroundJobs)
+    .set({ targetRunnerId: poolEB.runnerId })
+    .where(eq(backgroundJobs.id, pendingJob.id));
+
+  console.log(`[Pool] Assigned EB ${poolEB.runnerId.slice(0, 8)} to queued job ${pendingJob.id}`);
+
+  // Import dynamically to avoid circular dependency
+  const { processNextQueuedTestRun } = await import('@/server/actions/runs');
+  processNextQueuedTestRun(pendingJob.repositoryId, poolEB.runnerId).catch((err) => {
+    console.error(`[Pool] Error processing queued test run:`, err);
+    // Release the EB if processing failed
+    releasePoolEB(poolEB.runnerId).catch(() => {});
+  });
+}
+
+/**
+ * Reaper: release EBs that have been busy for too long (likely crashed).
+ * An EB is considered stale if busySince > maxBusyDurationMs AND lastSeen is also stale.
+ * Wire this into the periodic cleanup interval (e.g., alongside markStaleRunnersOffline).
+ */
+export async function reapStalePoolEBs(maxBusyDurationMs = 10 * 60 * 1000): Promise<number> {
+  const busyCutoff = new Date(Date.now() - maxBusyDurationMs);
+  const heartbeatCutoff = new Date(Date.now() - 60_000); // No heartbeat for 60s
+
+  const stale = await db
+    .select({
+      sessionId: embeddedSessions.id,
+      runnerId: runners.id,
+      busySince: embeddedSessions.busySince,
+      lastSeen: runners.lastSeen,
+    })
+    .from(embeddedSessions)
+    .innerJoin(runners, eq(embeddedSessions.runnerId, runners.id))
+    .where(and(
+      eq(runners.isSystem, true),
+      eq(embeddedSessions.status, 'busy'),
+    ));
+
+  let reaped = 0;
+  for (const row of stale) {
+    // Only reap if BOTH busySince is old AND heartbeat stopped
+    if (row.busySince && row.busySince < busyCutoff
+        && row.lastSeen && row.lastSeen < heartbeatCutoff) {
+      await db.update(runners).set({ status: 'offline' }).where(eq(runners.id, row.runnerId));
+      await db
+        .update(embeddedSessions)
+        .set({ status: 'stopped', busySince: null, userId: null })
+        .where(eq(embeddedSessions.id, row.sessionId));
+      reaped++;
+      console.warn(`[Reaper] Force-released stale EB ${row.runnerId.slice(0, 8)} (busy since ${row.busySince?.toISOString()})`);
+    }
+  }
+  return reaped;
 }

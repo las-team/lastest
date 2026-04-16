@@ -1246,6 +1246,7 @@ export const embeddedSessions = pgTable('embedded_sessions', {
   createdAt: timestamp('created_at').notNull().$defaultFn(() => new Date()),
   lastActivityAt: timestamp('last_activity_at'),
   expiresAt: timestamp('expires_at'),
+  busySince: timestamp('busy_since'), // Set when claimed by pool, cleared on release. Used for stale-lock detection.
 });
 
 export type EmbeddedSession = typeof embeddedSessions.$inferSelect;

@@ -10,7 +10,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { Cloud, Tv2, Zap, Server } from 'lucide-react';
+import { Cloud, Zap } from 'lucide-react';
 import type { RunnerCapability } from '@/lib/db/schema';
 import { useRunnerStatus } from './use-runner-status';
 import { persistRunnerPreference } from '@/hooks/use-preferred-runner';
@@ -34,20 +34,25 @@ export function ExecutionTargetSelector({
 }: ExecutionTargetSelectorProps) {
   const { runners, isLoading } = useRunnerStatus(capabilityFilter);
 
+  // Only show team remote runners — EBs are pool-managed (auto-assigned)
   const teamRunners = runners.filter((r) => r.type !== 'embedded' && !r.isSystem);
-  const teamEmbeddedRunners = runners.filter((r) => r.type === 'embedded' && !r.isSystem);
-  const systemRunners = runners.filter((r) => r.isSystem);
 
-  // If selected runner goes offline, fallback to auto
+  // If selected value is an EB or system runner, reset to 'auto' (pool handles EBs)
   useEffect(() => {
-    if (value === 'auto' || isLoading || disabled) return;
+    if (value === 'auto' || value === 'local' || isLoading || disabled) return;
 
     const selectedRunner = runners.find((r) => r.id === value);
-    if (selectedRunner && selectedRunner.status !== 'online' && selectedRunner.status !== 'busy') {
-      const availableSystem = systemRunners.find((r) => r.status === 'online');
-      onChange(availableSystem ? availableSystem.id : 'auto');
+    // Redirect EB/system selections to auto (pool-managed)
+    if (selectedRunner && (selectedRunner.type === 'embedded' || selectedRunner.isSystem)) {
+      persistRunnerPreference('auto');
+      onChange('auto');
+      return;
     }
-  }, [runners, value, isLoading, onChange, systemRunners, disabled]);
+    // If selected team runner goes offline, fallback to auto
+    if (selectedRunner && selectedRunner.status !== 'online' && selectedRunner.status !== 'busy') {
+      onChange('auto');
+    }
+  }, [runners, value, isLoading, onChange, disabled]);
 
   // If current value is 'local', switch to 'auto'
   useEffect(() => {
@@ -62,7 +67,7 @@ export function ExecutionTargetSelector({
         <SelectValue placeholder="Select target" />
       </SelectTrigger>
       <SelectContent>
-        {/* Auto option — uses fallback chain (always available as default) */}
+        {/* Auto option — uses fallback chain with pool-managed EBs */}
         <SelectItem value="auto">
           <div className="flex items-center gap-2">
             <Zap className="h-4 w-4 text-blue-500" />
@@ -70,7 +75,7 @@ export function ExecutionTargetSelector({
           </div>
         </SelectItem>
 
-        {/* Team remote runners */}
+        {/* Team remote runners (non-EB, non-system) */}
         {teamRunners.length > 0 && (
           <SelectGroup>
             <SelectLabel className="text-xs text-muted-foreground">Remote Runners</SelectLabel>
@@ -88,62 +93,6 @@ export function ExecutionTargetSelector({
                       />
                     </div>
                     <span className={!isOnline ? 'text-muted-foreground' : ''}>{runner.name}</span>
-                  </div>
-                </SelectItem>
-              );
-            })}
-          </SelectGroup>
-        )}
-
-        {/* Team embedded browsers */}
-        {teamEmbeddedRunners.length > 0 && (
-          <SelectGroup>
-            <SelectLabel className="text-xs text-muted-foreground">Embedded Browsers</SelectLabel>
-            {teamEmbeddedRunners.map((runner) => {
-              const isOnline = runner.status === 'online';
-              const isBusy = runner.status === 'busy';
-              return (
-                <SelectItem key={runner.id} value={runner.id} disabled={!isOnline && !isBusy}>
-                  <div className="flex items-center gap-2">
-                    <div className="relative">
-                      <Tv2 className={`h-4 w-4 ${!isOnline && !isBusy ? 'text-muted-foreground' : 'text-purple-500'}`} />
-                      <div
-                        className={`absolute -top-0.5 -right-0.5 h-2 w-2 rounded-full ${
-                          isOnline ? 'bg-green-500' : isBusy ? 'bg-yellow-500' : 'bg-gray-400'
-                        }`}
-                      />
-                    </div>
-                    <span className={!isOnline && !isBusy ? 'text-muted-foreground' : ''}>
-                      {runner.name}
-                    </span>
-                  </div>
-                </SelectItem>
-              );
-            })}
-          </SelectGroup>
-        )}
-
-        {/* System runners (host-provided EBs) */}
-        {systemRunners.length > 0 && (
-          <SelectGroup>
-            <SelectLabel className="text-xs text-muted-foreground">System Browsers</SelectLabel>
-            {systemRunners.map((runner) => {
-              const isOnline = runner.status === 'online';
-              const isBusy = runner.status === 'busy';
-              return (
-                <SelectItem key={runner.id} value={runner.id} disabled={!isOnline && !isBusy}>
-                  <div className="flex items-center gap-2">
-                    <div className="relative">
-                      <Server className={`h-4 w-4 ${!isOnline && !isBusy ? 'text-muted-foreground' : 'text-blue-500'}`} />
-                      <div
-                        className={`absolute -top-0.5 -right-0.5 h-2 w-2 rounded-full ${
-                          isOnline ? 'bg-green-500' : isBusy ? 'bg-yellow-500' : 'bg-gray-400'
-                        }`}
-                      />
-                    </div>
-                    <span className={!isOnline && !isBusy ? 'text-muted-foreground' : ''}>
-                      {runner.name}
-                    </span>
                   </div>
                 </SelectItem>
               );

@@ -187,8 +187,14 @@ export async function createAndRunBuildCore(
 ) {
   const targetRunner = runnerId || 'auto';
 
-  // If this runner is busy, queue this build
-  if (await isRunnerBusy(targetRunner)) {
+  // If targeting a specific runner and it's busy, queue this build.
+  // For 'auto' mode (pool-managed EBs), check if any pool EB is available.
+  if (targetRunner === 'auto' || targetRunner === 'local') {
+    const { isPoolBusy } = await import('@/server/actions/embedded-sessions');
+    if (await isPoolBusy()) {
+      return queueBuild(triggerType, testIds, repositoryId, runnerId);
+    }
+  } else if (await isRunnerBusy(targetRunner)) {
     return queueBuild(triggerType, testIds, repositoryId, runnerId);
   }
 
@@ -358,7 +364,12 @@ export async function createComparisonRun(
   const targetRunner = runnerId || 'auto';
 
   // If runner is busy, we can't start — comparison runs are not queued
-  if (await isRunnerBusy(targetRunner)) {
+  if (targetRunner === 'auto' || targetRunner === 'local') {
+    const { isPoolBusy } = await import('@/server/actions/embedded-sessions');
+    if (await isPoolBusy()) {
+      throw new Error('All browsers are busy. Please wait for a browser to become available before starting a comparison run.');
+    }
+  } else if (await isRunnerBusy(targetRunner)) {
     throw new Error('Runner is busy. Please wait for the current build to finish before starting a comparison run.');
   }
 

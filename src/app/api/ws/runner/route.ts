@@ -11,6 +11,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { validateRunnerToken, updateRunnerStatus, markStaleRunnersOffline, deleteStaleSystemRunners } from '@/server/actions/runners';
+import { reapStalePoolEBs } from '@/server/actions/embedded-sessions';
 import type { Message, HeartbeatMessage, TestResultResponse, SetupResultResponse, ScreenshotUploadResponse, RecordingEventResponse, RecordingStoppedResponse } from '@/lib/ws/protocol';
 import { waitForCommandQueued, notifyCommandQueued } from '@/lib/ws/runner-events';
 import fs from 'fs/promises';
@@ -152,6 +153,16 @@ function ensureInitialized() {
       await timeoutStaleCommands(30 * 60 * 1000, 10 * 60 * 1000);
     } catch (error) {
       console.error('[GC] Failed to timeout stale commands:', error);
+    }
+
+    // Reap stale pool EBs: busy + no heartbeat for 10min
+    try {
+      const reaped = await reapStalePoolEBs();
+      if (reaped > 0) {
+        console.log(`[Reaper] Released ${reaped} stale pool EB(s)`);
+      }
+    } catch (error) {
+      console.error('[Reaper] Failed to reap stale pool EBs:', error);
     }
   }, CLEANUP_INTERVAL_MS);
 }

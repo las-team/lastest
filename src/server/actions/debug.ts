@@ -9,7 +9,7 @@ import { queueCommandToDB } from '@/app/api/ws/runner/route';
 import { createRemoteDebugSession, getRemoteDebugSession, clearRemoteDebugSession } from '@/app/api/ws/runner/route';
 import { resolveSetupCodeForRunner } from '@/lib/execution/setup-capture';
 import { executeSetupViaRunner } from '@/lib/execution/executor';
-import { getAvailableSystemRunner } from '@/server/actions/runners';
+import { claimPoolEB, releasePoolEB } from '@/server/actions/embedded-sessions';
 import type { Message } from '@/lib/ws/protocol';
 
 export async function startDebugSession(
@@ -29,13 +29,13 @@ export async function startDebugSession(
   const settings = await getPlaywrightSettings(repoId);
   const envConfig = await getEnvironmentConfig(repoId);
 
-  // Resolve 'auto' to an available system runner
+  // Resolve 'auto' to a pool-managed system EB (atomic claim)
   if (runnerId === 'auto') {
-    const systemRunner = await getAvailableSystemRunner();
-    if (!systemRunner) {
-      return { sessionId: '', error: 'No system browsers available. Please try again later.' };
+    const poolEB = await claimPoolEB();
+    if (!poolEB) {
+      return { sessionId: '', error: 'All browsers are busy. Please try again later.' };
     }
-    runnerId = systemRunner.id;
+    runnerId = poolEB.runnerId;
   }
 
   // Require a runner or EB — local debug is not supported
@@ -81,6 +81,7 @@ export async function startDebugSession(
       setupVariables = setupResult.variables;
     } catch (err) {
       clearRemoteDebugSession(sessionId);
+      await releasePoolEB(runnerId);
       return { sessionId: '', error: `Setup failed: ${err instanceof Error ? err.message : String(err)}` };
     }
   }
@@ -201,6 +202,10 @@ export async function stopDebugSession(
       timestamp: Date.now(),
       payload: { sessionId },
     } as unknown as Message);
+
+    // Release the EB back to the pool
+    await releasePoolEB(remoteSession.runnerId);
+
     clearRemoteDebugSession(sessionId);
     return;
   }

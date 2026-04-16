@@ -9,7 +9,7 @@ import { v4 as uuid } from 'uuid';
 import { revalidatePath } from 'next/cache';
 import { createMessage } from '@/lib/ws/protocol';
 import type { StartRecordingCommand, StopRecordingCommand, CaptureScreenshotCommand, CreateAssertionCommand, FlagDownloadCommand, InsertTimestampCommand } from '@/lib/ws/protocol';
-import { getAvailableSystemRunner } from '@/server/actions/runners';
+import { claimPoolEB, releasePoolEB } from '@/server/actions/embedded-sessions';
 import {
   queueCommandToDB,
   createRemoteRecordingSession,
@@ -38,13 +38,13 @@ export async function startRecording(
   const settings = await getPlaywrightSettings(repositoryId);
   const selectorPriority = settings.selectorPriority ?? DEFAULT_SELECTOR_PRIORITY;
 
-  // Resolve 'auto' to an available system runner
+  // Resolve 'auto' to a pool-managed system EB (atomic claim)
   if (runnerId === 'auto') {
-    const systemRunner = await getAvailableSystemRunner();
-    if (!systemRunner) {
-      return { error: 'No system browsers available. Please try again later.' };
+    const poolEB = await claimPoolEB();
+    if (!poolEB) {
+      return { error: 'All browsers are busy. Please try again later.' };
     }
-    runnerId = systemRunner.id;
+    runnerId = poolEB.runnerId;
   }
 
   // Require a runner or EB — local recording is not supported
@@ -130,6 +130,9 @@ export async function stopRecording(repositoryId?: string | null) {
       remoteSession.targetUrl
     );
     completeRemoteRecordingSession(repositoryId, generatedCode);
+
+    // Release the EB back to the pool
+    await releasePoolEB(remoteSession.runnerId);
 
     return {
       id: remoteSession.sessionId,

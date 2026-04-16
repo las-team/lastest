@@ -112,12 +112,22 @@ export async function executeTests(
   if (options.teamId) {
     const runner = await getAvailableRunnerById(options.teamId, options.runnerId);
     if (runner) {
+      // If it's a system EB, redirect to pool-managed fallback chain
+      if ('type' in runner && runner.type === 'embedded' && 'isSystem' in runner && runner.isSystem) {
+        console.log(`Runner ${runner.id} is a pool EB, redirecting to auto`);
+        return executeFallbackChain(tests, runId, options, onProgress, onResult);
+      }
       console.log(`Execution target: runner ${runner.id} (explicit)`);
       return executeViaRunner(tests, runId, runner.id, options, onProgress, onResult);
     }
-    // Also check system runners (cross-team)
+    // Also check system runners (cross-team) — redirect system EBs to pool
     const sysRunner = await getAvailableSystemRunnerById(options.runnerId);
     if (sysRunner) {
+      // System runners that are embedded type are pool-managed
+      if (sysRunner.type === 'embedded') {
+        console.log(`System runner ${sysRunner.id} is a pool EB, redirecting to auto`);
+        return executeFallbackChain(tests, runId, options, onProgress, onResult);
+      }
       console.log(`Execution target: system runner ${sysRunner.id} (explicit)`);
       return executeViaRunner(tests, runId, sysRunner.id, options, onProgress, onResult);
     }
@@ -739,11 +749,17 @@ async function executeFallbackChain(
     }
   }
 
-  // 2. Try system EB
-  const systemRunner = await getAvailableSystemRunner();
-  if (systemRunner) {
-    console.log(`Fallback chain: using system EB ${systemRunner.id}`);
-    return executeViaRunner(tests, runId, systemRunner.id, options, onProgress, onResult);
+  // 2. Try system EB pool (atomic claim + guaranteed release)
+  const { claimPoolEB, releasePoolEB } = await import('@/server/actions/embedded-sessions');
+  const poolEB = await claimPoolEB();
+  if (poolEB) {
+    console.log(`Fallback chain: claimed pool EB ${poolEB.runnerId.slice(0, 8)}`);
+    try {
+      return await executeViaRunner(tests, runId, poolEB.runnerId, options, onProgress, onResult);
+    } finally {
+      await releasePoolEB(poolEB.runnerId);
+      console.log(`Fallback chain: released pool EB ${poolEB.runnerId.slice(0, 8)}`);
+    }
   }
 
   // 3. Queue — return empty results with "skipped" status
