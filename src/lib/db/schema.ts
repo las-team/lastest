@@ -1464,7 +1464,8 @@ export type AgentStepId =
   | 'run_tests'
   | 'fix_tests'
   | 'rerun_tests'
-  | 'summary';
+  | 'summary'
+  | 'heal';
 
 export type AgentStepStatus = 'pending' | 'active' | 'waiting_user' | 'completed' | 'failed' | 'skipped';
 
@@ -1786,6 +1787,7 @@ export type ActivityEventType =
   | 'mcp:tool_result'
   | 'mcp:tool_error'
   | 'artifact:created'
+  | 'artifact:updated'
   // Gamification
   | 'score:awarded'
   | 'score:penalty'
@@ -1796,7 +1798,7 @@ export type ActivityEventType =
   | 'blitz:started'
   | 'blitz:ended';
 
-export type ActivitySourceType = 'play_agent' | 'mcp_server' | 'generate_agent';
+export type ActivitySourceType = 'play_agent' | 'mcp_server' | 'generate_agent' | 'heal_agent';
 
 export type ActivityArtifactType = 'test' | 'build' | 'area' | 'baseline' | 'score' | 'spec_import';
 

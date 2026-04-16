@@ -8,6 +8,7 @@ import { getBranchInfo } from '@/lib/github/content';
 import * as queries from '@/lib/db/queries';
 import type { Test } from '@/lib/db/schema';
 import { createJob, createPendingJob, updateJobProgress, completeJob, failJob, isRunnerBusy } from './jobs';
+import { emitJobEvent } from '@/lib/ws/job-events';
 
 interface GitInfo {
   branch: string;
@@ -211,8 +212,11 @@ async function runTestsAsync(runId: string, tests: Test[], repositoryId?: string
   revalidatePath('/tests', 'layout');
   revalidatePath('/');
 
-  // Process next queued job for this specific runner (if non-pool)
-  processNextQueuedTestRun(repositoryId, targetRunner === 'auto' ? undefined : targetRunner);
+  // Process next queued job for this specific runner.
+  // Pool-managed queue (targetRunner='auto') is handled by releasePoolEB + periodic consumer.
+  if (targetRunner !== 'auto') {
+    processNextQueuedTestRun(repositoryId, targetRunner);
+  }
 }
 
 export async function getTestRun(runId: string) {
@@ -303,13 +307,9 @@ export async function processNextQueuedTestRun(repositoryId?: string | null, tar
     forceVideoRecording?: boolean;
   } | null;
 
-  // Complete the queue placeholder — runTests creates its own running job.
-  // We must NOT call startJob() here because that marks it 'running', which causes
-  // runTests' isRunnerBusy() check to see a running job and re-queue.
-  await queries.updateBackgroundJob(nextJob.id, {
-    status: 'completed',
-    completedAt: new Date(),
-  });
+  // Delete the queue placeholder — runTests creates its own running job.
+  await queries.deleteBackgroundJob(nextJob.id);
+  emitJobEvent({ type: 'job:delete', jobId: nextJob.id });
 
   // Run the tests — for pool-managed jobs, runnerId is undefined so
   // runTests goes through auto mode → executeFallbackChain → claimPoolEB

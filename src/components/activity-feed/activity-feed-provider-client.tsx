@@ -45,8 +45,17 @@ export function ActivityFeedProvider({ children }: { children: React.ReactNode }
   const lastMcpToast = useRef(0);
   const retryCount = useRef(0);
   const retryTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const clearedAtRef = useRef<string | null>(
+    typeof window !== 'undefined' ? sessionStorage.getItem('activity-feed-cleared-at') : null
+  );
 
-  const clearEvents = useCallback(() => setEvents([]), []);
+  const clearEvents = useCallback(() => {
+    setEvents([]);
+    // Remember the timestamp so history reloads and WS messages don't bring them back
+    const ts = new Date().toISOString();
+    clearedAtRef.current = ts;
+    try { sessionStorage.setItem('activity-feed-cleared-at', ts); } catch {}
+  }, []);
 
   // Load recent history on mount so there's initial data
   useEffect(() => {
@@ -55,7 +64,11 @@ export function ActivityFeedProvider({ children }: { children: React.ReactNode }
       .then(data => {
         if (data?.events?.length) {
           // History comes in DESC order, reverse for chronological
-          const history = [...data.events].reverse() as ActivityEvent[];
+          let history = [...data.events].reverse() as ActivityEvent[];
+          // Filter out events before the last clear
+          if (clearedAtRef.current) {
+            history = history.filter(e => e.createdAt && new Date(e.createdAt) > new Date(clearedAtRef.current!));
+          }
           setEvents(history);
 
           // Count active sessions from history
@@ -93,6 +106,8 @@ export function ActivityFeedProvider({ children }: { children: React.ReactNode }
           if (data.type === 'connected') return;
 
           const event = data as ActivityEvent;
+          // Skip events from before the last clear
+          if (clearedAtRef.current && event.createdAt && new Date(event.createdAt) <= new Date(clearedAtRef.current)) return;
           setEvents((prev) => {
             // Dedupe by id
             if (prev.some(p => p.id === event.id)) return prev;

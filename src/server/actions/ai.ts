@@ -26,7 +26,7 @@ import { eq } from 'drizzle-orm';
  * Returns CDP + stream URLs and the runnerId for release.
  * Caller MUST call releasePoolEB(runnerId) when done.
  */
-async function claimEmbeddedBrowserForAgent(
+export async function claimEmbeddedBrowserForAgent(
   maxWaitMs = 5 * 60 * 1000,
   onQueued?: () => void,
 ): Promise<{
@@ -578,6 +578,7 @@ export async function aiFixTests(
 
 /**
  * Heal test: full agentic browser inspection to diagnose and fix complex failures.
+ * Lightweight wrapper — no agent session or EB. Used by API route.
  */
 export async function healTest(
   repositoryId: string,
@@ -585,6 +586,149 @@ export async function healTest(
 ): Promise<{ success: boolean; code?: string; error?: string }> {
   const { agentHealTest } = await import('@/lib/playwright/healer-agent');
   return agentHealTest(repositoryId, testId);
+}
+
+/**
+ * Start a heal-test agent session with EB, activity feed, and async execution.
+ * Mirrors startGenerateTestAgent pattern.
+ */
+export async function startHealTestAgent(data: {
+  repositoryId: string;
+  testId: string;
+  testName: string;
+}): Promise<{ success: boolean; sessionId?: string; error?: string }> {
+  const { team } = await requireRepoAccess(data.repositoryId);
+  const teamId = team?.id ?? '';
+
+  try {
+    const steps: AgentStepState[] = [{
+      id: 'heal',
+      status: 'active',
+      label: 'Heal Test',
+      description: `Healing "${data.testName}" via MCP browser inspection`,
+      startedAt: new Date().toISOString(),
+    }];
+
+    const session = await queries.createAgentSession({
+      repositoryId: data.repositoryId,
+      teamId: teamId || null,
+      status: 'active',
+      currentStepId: 'heal',
+      steps,
+      metadata: { testName: data.testName, testId: data.testId, streamUrl: null } as Record<string, unknown>,
+    });
+
+    emitAndPersistActivityEvent({
+      teamId,
+      repositoryId: data.repositoryId,
+      sessionId: session.id,
+      sourceType: 'heal_agent',
+      eventType: 'session:start',
+      summary: `Healing test "${data.testName}"`,
+      stepId: null, agentType: 'healer', detail: null,
+      artifactType: null, artifactId: null, artifactLabel: null,
+      durationMs: null, promptLogId: null,
+    }).catch(() => {});
+
+    // Fire-and-forget background execution
+    (async () => {
+      const startTime = Date.now();
+      const eb = await claimEmbeddedBrowserForAgent(5 * 60 * 1000, () => {
+        queries.updateAgentSession(session.id, {
+          metadata: { ...session.metadata, queuedForBrowser: true } as Record<string, unknown>,
+        }).catch(() => {});
+      });
+      if (!eb) {
+        throw new Error('No browsers available — all browsers are busy. Please try again later.');
+      }
+      console.log(`[HealTestAgent] Claimed pool EB ${eb.runnerId.slice(0, 8)}, CDP: ${eb.cdpUrl}`);
+      await queries.updateAgentSession(session.id, {
+        metadata: { ...session.metadata, streamUrl: eb.streamUrl, queuedForBrowser: false } as Record<string, unknown>,
+      }).catch(() => {});
+      try {
+        const { agentHealTestCore } = await import('@/lib/playwright/healer-agent');
+        const result = await agentHealTestCore(data.repositoryId, data.testId, { cdpEndpoint: eb.cdpUrl });
+
+        if (!result.success || !result.code) {
+          throw new Error(result.error || 'Healer agent produced no fixed code');
+        }
+
+        const branch = await getCurrentBranchForRepo(data.repositoryId);
+        await queries.updateTestWithVersion(data.testId, { code: result.code }, 'ai_fix', branch ?? undefined);
+
+        await queries.updateAgentSession(session.id, {
+          status: 'completed',
+          completedAt: new Date(),
+          steps: [{
+            ...steps[0],
+            status: 'completed',
+            completedAt: new Date().toISOString(),
+            result: { testId: data.testId },
+          }],
+        });
+
+        emitAndPersistActivityEvent({
+          teamId,
+          repositoryId: data.repositoryId,
+          sessionId: session.id,
+          sourceType: 'heal_agent',
+          eventType: 'artifact:updated',
+          summary: `Healed test "${data.testName}"`,
+          stepId: 'heal', agentType: 'healer', detail: null,
+          artifactType: 'test', artifactId: data.testId, artifactLabel: data.testName,
+          durationMs: Date.now() - startTime, promptLogId: null,
+        }).catch(() => {});
+
+        emitAndPersistActivityEvent({
+          teamId,
+          repositoryId: data.repositoryId,
+          sessionId: session.id,
+          sourceType: 'heal_agent',
+          eventType: 'session:complete',
+          summary: `Test "${data.testName}" healed successfully`,
+          stepId: null, agentType: null, detail: null,
+          artifactType: null, artifactId: null, artifactLabel: null,
+          durationMs: Date.now() - startTime, promptLogId: null,
+        }).catch(() => {});
+
+        revalidatePath('/tests');
+      } catch (err) {
+        console.error('[HealTestAgent] Error:', err);
+        await queries.updateAgentSession(session.id, {
+          status: 'failed',
+          completedAt: new Date(),
+          steps: [{
+            ...steps[0],
+            status: 'failed',
+            completedAt: new Date().toISOString(),
+            error: err instanceof Error ? err.message : String(err),
+          }],
+        }).catch(() => {});
+
+        emitAndPersistActivityEvent({
+          teamId,
+          repositoryId: data.repositoryId,
+          sessionId: session.id,
+          sourceType: 'heal_agent',
+          eventType: 'session:error',
+          summary: `Failed to heal test "${data.testName}": ${err instanceof Error ? err.message : String(err)}`,
+          stepId: null, agentType: null, detail: null,
+          artifactType: null, artifactId: null, artifactLabel: null,
+          durationMs: Date.now() - startTime, promptLogId: null,
+        }).catch(() => {});
+      } finally {
+        if (eb) {
+          await releasePoolEB(eb.runnerId);
+          console.log(`[HealTestAgent] Released pool EB ${eb.runnerId.slice(0, 8)}`);
+        }
+      }
+    })();
+
+    return { success: true, sessionId: session.id };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Failed to start test healing';
+    return { success: false, error: message };
+  }
 }
 
 /**

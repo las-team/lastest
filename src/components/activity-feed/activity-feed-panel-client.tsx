@@ -13,7 +13,7 @@ import { BrowserViewer } from '@/components/embedded-browser/browser-viewer-clie
 import { cn } from '@/lib/utils';
 import type { AgentSession } from '@/lib/db/schema';
 
-type FilterType = 'all' | 'play_agent' | 'mcp_server' | 'generate_agent';
+type FilterType = 'all' | 'play_agent' | 'mcp_server' | 'generate_agent' | 'heal_agent';
 
 function SessionStatusIcon({ status }: { status: string }) {
   switch (status) {
@@ -63,14 +63,16 @@ function ActiveSessionsSection({
     async function fetchSessions() {
       try {
         const res = await fetch('/api/activity-feed/sessions');
-        if (!res.ok) return;
-        const data = await res.json();
-        if (active) {
-          setSessions(data.sessions ?? []);
-          setEbStreamUrl(data.ebStreamUrl ?? null);
+        if (!active) return;
+        if (!res.ok) {
+          setSessions(prev => prev ?? []);
+          return;
         }
+        const data = await res.json();
+        setSessions(data.sessions ?? []);
+        setEbStreamUrl(data.ebStreamUrl ?? null);
       } catch {
-        // ignore
+        if (active) setSessions(prev => prev ?? []);
       }
     }
 
@@ -95,12 +97,15 @@ function ActiveSessionsSection({
           // Determine label and link based on session type
           const meta = s.metadata as Record<string, unknown> | null;
           const isSpecImport = !!(meta?.specImport);
-          const isGenerateAgent = !!(meta?.testName);
+          const isHealAgent = !!(meta?.testId) && s.currentStepId === 'heal';
+          const isGenerateAgent = !!(meta?.testName) && !isHealAgent;
           const label = isSpecImport
             ? (s.status === 'paused' ? `Spec Import: ${(meta?.stories as unknown[])?.length ?? 0} stories ready` : 'Importing spec...')
-            : isGenerateAgent
-              ? `Generating "${meta?.testName}"`
-              : s.currentStepId ? `Step: ${s.currentStepId.replace(/_/g, ' ')}` : s.status;
+            : isHealAgent
+              ? `Healing "${meta?.testName}"`
+              : isGenerateAgent
+                ? `Generating "${meta?.testName}"`
+                : s.currentStepId ? `Step: ${s.currentStepId.replace(/_/g, ' ')}` : s.status;
 
           // For completed generate sessions, link to the created test
           const completedTestId = s.steps?.find(

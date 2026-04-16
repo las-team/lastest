@@ -471,8 +471,10 @@ export async function releasePoolEB(runnerId: string): Promise<void> {
  * but processNextQueuedTestRun can't use it.
  */
 export async function processPoolQueue(): Promise<void> {
+  // Don't bother if no EBs are available — avoids churning jobs
+  if (await isPoolBusy()) return;
+
   // Find first pending job with no target runner (queued because all EBs were busy)
-  // Check both test_run and build_run types
   const [pendingJob] = await db
     .select()
     .from(backgroundJobs)

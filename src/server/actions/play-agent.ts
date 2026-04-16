@@ -28,6 +28,8 @@ import type { SetupContext, SetupScript } from '@/lib/setup/types';
 import { runPlaywrightSetup } from '@/lib/setup/script-runner';
 import { classifyTemplate } from '@/lib/templates/classifier';
 import { gatherCodebaseIntelligence } from '@/lib/ai/codebase-intelligence';
+import { claimEmbeddedBrowserForAgent } from '@/server/actions/ai';
+import { releasePoolEB } from '@/server/actions/embedded-sessions';
 import type { CodebaseIntelligence } from '@/lib/ai/codebase-intelligence';
 import type { CodebaseIntelligenceContext } from '@/lib/ai/types';
 import { emitAndPersistActivityEvent } from '@/lib/db/queries/activity-events';
@@ -1600,7 +1602,16 @@ async function runFixTests(sessionId: string, repositoryId: string, teamId: stri
             `Healer diagnosing "${testName}" (attempt ${attempts + 1}/${MAX_FIX_ATTEMPTS})`,
             { stepId: 'fix_tests', agentType: 'healer', detail: { testId, testName, attempt: attempts + 1, error: result.errorMessage?.slice(0, 120) } });
 
-          const healResult = await agentHealTest(repositoryId, testId);
+          // Claim an EB for this healer call
+          const eb = await claimEmbeddedBrowserForAgent(5 * 60 * 1000).catch(() => undefined);
+          let healResult: { success: boolean; code?: string; error?: string };
+          try {
+            healResult = await agentHealTest(repositoryId, testId, eb ? { cdpEndpoint: eb.cdpUrl } : undefined);
+          } finally {
+            if (eb) {
+              await releasePoolEB(eb.runnerId).catch(() => {});
+            }
+          }
           fixAttempts[testId] = attempts + 1;
 
           const test = await queries.getTest(testId);

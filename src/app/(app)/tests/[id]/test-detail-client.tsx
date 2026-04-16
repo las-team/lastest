@@ -27,7 +27,7 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { deleteTest, updateTest, getTestVersionHistory, restoreTestVersion, getVisualDiffsForTestResult, restoreTest, permanentlyDeleteTest, cloneTest } from '@/server/actions/tests';
 import { runTests, getJobStatus } from '@/server/actions/runs';
-import { healTest, aiEnhanceTest, updateTestCode, startGeneratePlaceholderTestAgent } from '@/server/actions/ai';
+import { startHealTestAgent, aiEnhanceTest, updateTestCode, startGeneratePlaceholderTestAgent } from '@/server/actions/ai';
 import { toast } from 'sonner';
 import { useNotifyJobStarted } from '@/components/queue/job-polling-context';
 import { ExecutionTargetSelector } from '@/components/execution/execution-target-selector';
@@ -482,16 +482,18 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
     if (!repositoryId) return;
     setIsFixing(true);
     try {
-      const result = await healTest(repositoryId, test.id);
-      if (result.success && result.code) {
-        await updateTestCode(test.id, result.code, 'ai_fix');
-        toast.success('Test fixed and saved');
-        router.refresh();
+      const result = await startHealTestAgent({
+        repositoryId,
+        testId: test.id,
+        testName: test.name,
+      });
+      if (result.success) {
+        toast.success('Test healing started — check the activity feed for progress');
       } else {
-        toast.error(result.error || 'Failed to fix test');
+        toast.error(result.error || 'Failed to start test healing');
       }
     } catch {
-      toast.error('Failed to fix test');
+      toast.error('Failed to start test healing');
     } finally {
       setIsFixing(false);
     }

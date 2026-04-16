@@ -68,6 +68,7 @@ CRITICAL RULES:
 export async function agentHealTestCore(
   repositoryId: string,
   testId: string,
+  options?: { cdpEndpoint?: string; signal?: AbortSignal },
 ): Promise<{ success: boolean; code?: string; error?: string }> {
   try {
     const test = await queries.getTest(testId);
@@ -118,10 +119,35 @@ Navigate to the relevant page using MCP tools, inspect the current UI state via 
 
 ${seed.seedPrompt}`;
 
+    // Configure Playwright MCP for the AI provider (matches generator-agent pattern)
+    const mcpArgs = options?.cdpEndpoint
+      ? ['@playwright/mcp@latest', '--cdp-endpoint', options.cdpEndpoint, '--headless']
+      : ['@playwright/mcp@latest', '--headless'];
+
+    if (options?.cdpEndpoint) {
+      console.log(`[HealerAgent] MCP using CDP endpoint: ${options.cdpEndpoint}`);
+    }
+
+    if (config.provider === 'claude-agent-sdk') {
+      config.agentSdkStrictMcpConfig = true;
+      config.agentSdkMcpServers = { 'playwright': { command: 'npx', args: mcpArgs } };
+      config.agentSdkAllowedTools = ['mcp__playwright__*'];
+      config.agentSdkDisallowedTools = ['Bash', 'Write', 'Edit', 'NotebookEdit'];
+    }
+
+    const useMCP = config.provider !== 'claude-agent-sdk';
+
     const response = await generateWithAI(config, prompt, HEALER_SYSTEM_PROMPT, {
-      useMCP: true,
       repositoryId,
       actionType: 'agent_heal',
+      signal: options?.signal,
+      useMCP,
+      ...(useMCP && {
+        mcpConfig: {
+          servers: { 'playwright': { command: 'npx', args: mcpArgs } },
+          cdpEndpoint: options?.cdpEndpoint,
+        },
+      }),
     });
 
     const code = extractCodeFromResponse(response);
@@ -139,9 +165,10 @@ ${seed.seedPrompt}`;
 export async function agentHealTest(
   repositoryId: string,
   testId: string,
+  options?: { cdpEndpoint?: string; signal?: AbortSignal },
 ): Promise<{ success: boolean; code?: string; error?: string }> {
   await requireRepoAccess(repositoryId);
-  return agentHealTestCore(repositoryId, testId);
+  return agentHealTestCore(repositoryId, testId, options);
 }
 
 /**
@@ -150,6 +177,7 @@ export async function agentHealTest(
 export async function agentHealTests(
   testIds: string[],
   repositoryId: string,
+  options?: { cdpEndpoint?: string },
 ): Promise<{ success: boolean; fixed: number; failed: number; errors: string[] }> {
   await requireRepoAccess(repositoryId);
   const branch = await getCurrentBranchForRepo(repositoryId);
@@ -163,7 +191,7 @@ export async function agentHealTests(
     const batch = testIds.slice(i, i + CONCURRENCY);
     const results = await Promise.allSettled(
       batch.map(async (testId) => {
-        const result = await agentHealTest(repositoryId, testId);
+        const result = await agentHealTest(repositoryId, testId, options);
         if (result.success && result.code) {
           await queries.updateTestWithVersion(testId, { code: result.code }, 'ai_fix', branch ?? undefined);
           return { testId, success: true };

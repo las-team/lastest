@@ -23,6 +23,7 @@ import { postMRComment } from '@/lib/integrations/gitlab-mr';
 import type { Test, TriggerType, BuildStatus, VisualDiffWithTestStatus, DiffClassification, DiffStatus } from '@/lib/db/schema';
 import path from 'path';
 import { createJob, createPendingJob, updateJobProgress, completeJob, failJob, isRunnerBusy } from './jobs';
+import { emitJobEvent } from '@/lib/ws/job-events';
 import { triggerAIDiffAnalysis } from './ai-diffs';
 import { forkBaselinesForBranch } from './baselines';
 import { STORAGE_DIRS, STORAGE_ROOT, toRelativePath } from '@/lib/storage/paths';
@@ -879,7 +880,9 @@ async function runBuildAsync(
     if (currentJob?.error === 'Cancelled by user') {
       revalidatePath('/builds');
       revalidatePath('/');
-      processNextQueuedBuild(repositoryId, targetRunner === 'auto' ? undefined : targetRunner);
+      if (targetRunner !== 'auto') {
+        processNextQueuedBuild(repositoryId, targetRunner);
+      }
       return;
     }
 
@@ -1092,8 +1095,11 @@ async function runBuildAsync(
   revalidatePath('/builds');
   revalidatePath('/');
 
-  // Process next queued job for this specific runner (if non-pool)
-  processNextQueuedBuild(repositoryId, targetRunner === 'auto' ? undefined : targetRunner);
+  // Process next queued job for this specific runner.
+  // Pool-managed queue (targetRunner='auto') is handled by releasePoolEB + periodic consumer.
+  if (targetRunner !== 'auto') {
+    processNextQueuedBuild(repositoryId, targetRunner);
+  }
 }
 
 /**
@@ -1160,13 +1166,9 @@ export async function processNextQueuedBuild(repositoryId?: string | null, targe
   const nextJob = pendingJobs[0];
   const metadata = nextJob.metadata as { triggerType?: TriggerType; testIds?: string[] | null; runnerId?: string } | null;
 
-  // Complete the queue placeholder — createAndRunBuild creates its own running job.
-  // We must NOT call startJob() here because that marks it 'running', which causes
-  // createAndRunBuild's isPoolBusy() check to see a running job and re-queue.
-  await queries.updateBackgroundJob(nextJob.id, {
-    status: 'completed',
-    completedAt: new Date(),
-  });
+  // Delete the queue placeholder — createAndRunBuild creates its own running job.
+  await queries.deleteBackgroundJob(nextJob.id);
+  emitJobEvent({ type: 'job:delete', jobId: nextJob.id });
 
   // Run the build — for pool-managed jobs, runnerId is undefined so
   // createAndRunBuildCore goes through auto mode → executeFallbackChain → claimPoolEB
