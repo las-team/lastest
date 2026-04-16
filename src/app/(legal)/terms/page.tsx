@@ -12,9 +12,8 @@ export default function TermsOfServicePage() {
 
       <h2>1. Acceptance of Terms</h2>
       <p>
-        By creating an account or using Lastest (&quot;the Service&quot;), operated by Dexilion Kft
-        (&quot;we&quot;, &quot;us&quot;, &quot;our&quot;), a company incorporated under the laws of
-        Hungary, you agree to be bound by these Terms of Service (&quot;Terms&quot;). If you do not
+        By creating an account or using Lastest (&quot;the Service&quot;), operated by Lastest
+        (&quot;we&quot;, &quot;us&quot;, &quot;our&quot;), you agree to be bound by these Terms of Service (&quot;Terms&quot;). If you do not
         agree, do not use the Service.
       </p>
 
@@ -55,8 +54,7 @@ export default function TermsOfServicePage() {
 
       <h2>6. Intellectual Property</h2>
       <p>
-        The Service, including its software, design, logos, and documentation, is owned by Dexilion
-        Kft and is protected by intellectual property laws. These Terms do not grant you any rights
+        The Service, including its software, design, logos, and documentation, is owned by Lastest and is protected by intellectual property laws. These Terms do not grant you any rights
         to our intellectual property except the limited right to use the Service as permitted herein.
       </p>
 
@@ -70,7 +68,7 @@ export default function TermsOfServicePage() {
 
       <h2>8. Limitation of Liability</h2>
       <p>
-        To the maximum extent permitted by applicable law, Dexilion Kft shall not be liable for any
+        To the maximum extent permitted by applicable law, Lastest shall not be liable for any
         indirect, incidental, special, consequential, or punitive damages, including but not limited
         to loss of profits, data, or business opportunities, arising out of or related to your use
         of the Service.
@@ -101,9 +99,9 @@ export default function TermsOfServicePage() {
         If you have questions about these Terms, please contact us at:
       </p>
       <p>
-        <strong>Dexilion Kft</strong>
+        <strong>Lastest</strong>
         <br />
-        Email: legal@dexilion.com
+        Email: info@lastest.cloud
       </p>
     </article>
   );

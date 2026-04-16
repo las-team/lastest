@@ -12,12 +12,11 @@ export default function PrivacyPolicyPage() {
 
       <h2>1. Data Controller</h2>
       <p>
-        Dexilion Kft (&quot;we&quot;, &quot;us&quot;, &quot;our&quot;), a company incorporated under
-        the laws of Hungary, is the data controller responsible for processing your personal data in
+        Lastest (&quot;we&quot;, &quot;us&quot;, &quot;our&quot;) is the data controller responsible for processing your personal data in
         connection with the Lastest service (&quot;the Service&quot;).
       </p>
       <p>
-        Email: privacy@dexilion.com
+        Email: info@lastest.cloud
       </p>
 
       <h2>2. Personal Data We Collect</h2>
@@ -202,9 +201,9 @@ export default function PrivacyPolicyPage() {
         us at:
       </p>
       <p>
-        <strong>Dexilion Kft</strong>
+        <strong>Lastest</strong>
         <br />
-        Email: privacy@dexilion.com
+        Email: info@lastest.cloud
       </p>
     </article>
   );
