@@ -3,7 +3,7 @@ import {
   functionalAreas,
   tests,
 } from '../schema';
-import { getTestsByRepo, getTestResultsByTest } from './tests';
+import { getTestsByRepo, getLatestStatusMapForTestIds } from './tests';
 import { eq, and, isNull } from 'drizzle-orm';
 
 // Functional Areas Tree
@@ -41,14 +41,7 @@ export async function getFunctionalAreasTree(repositoryId: string): Promise<Func
     }
   }
 
-  // Get latest status for each test
-  const testsWithStatus = await Promise.all(
-    allTests.map(async (test) => {
-      const results = await getTestResultsByTest(test.id);
-      return { id: test.id, name: test.name, latestStatus: results[0]?.status || null };
-    })
-  );
-  const statusMap = new Map(testsWithStatus.map(t => [t.id, t.latestStatus]));
+  const statusMap = await getLatestStatusMapForTestIds(allTests.map(t => t.id));
 
   // Build tree structure
   const areaMap = new Map<string, FunctionalAreaWithChildren>();

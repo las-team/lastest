@@ -482,25 +482,38 @@ export async function setTestQuarantined(testId: string, quarantined: boolean) {
   await db.update(tests).set({ quarantined, updatedAt: new Date() }).where(eq(tests.id, testId));
 }
 
+// Latest status per test, one query. PG DISTINCT ON picks the most recent
+// test_run per test_id. Returns a Map<testId, status>.
+export async function getLatestStatusMapForTestIds(testIds: string[]): Promise<Map<string, string>> {
+  if (testIds.length === 0) return new Map();
+  const rows = await db
+    .selectDistinctOn([testResults.testId], {
+      testId: testResults.testId,
+      status: testResults.status,
+    })
+    .from(testResults)
+    .innerJoin(testRuns, eq(testResults.testRunId, testRuns.id))
+    .where(inArray(testResults.testId, testIds))
+    .orderBy(testResults.testId, desc(testRuns.startedAt));
+  const map = new Map<string, string>();
+  for (const r of rows) {
+    if (r.testId && r.status) map.set(r.testId, r.status);
+  }
+  return map;
+}
+
 // Get tests with their latest result status
 export async function getTestsWithStatus() {
   const allTests = await getTests();
   const areas = await getFunctionalAreas();
   const areaMap = new Map(areas.map(a => [a.id, a]));
+  const statusMap = await getLatestStatusMapForTestIds(allTests.map(t => t.id));
 
-  return Promise.all(
-    allTests.map(async (test) => {
-      const results = await getTestResultsByTest(test.id);
-      // Results are already sorted by startedAt desc, so first is latest
-      const latestResult = results[0];
-
-      return {
-        ...test,
-        area: test.functionalAreaId ? areaMap.get(test.functionalAreaId) : null,
-        latestStatus: latestResult?.status || null,
-      };
-    })
-  );
+  return allTests.map((test) => ({
+    ...test,
+    area: test.functionalAreaId ? areaMap.get(test.functionalAreaId) : null,
+    latestStatus: statusMap.get(test.id) ?? null,
+  }));
 }
 
 // Get tests with status filtered by repo
@@ -508,20 +521,13 @@ export async function getTestsWithStatusByRepo(repositoryId: string) {
   const allTests = await getTestsByRepo(repositoryId);
   const areas = await getFunctionalAreasByRepo(repositoryId);
   const areaMap = new Map(areas.map(a => [a.id, a]));
+  const statusMap = await getLatestStatusMapForTestIds(allTests.map(t => t.id));
 
-  return Promise.all(
-    allTests.map(async (test) => {
-      const results = await getTestResultsByTest(test.id);
-      // Results are already sorted by startedAt desc, so first is latest
-      const latestResult = results[0];
-
-      return {
-        ...test,
-        area: test.functionalAreaId ? areaMap.get(test.functionalAreaId) : null,
-        latestStatus: latestResult?.status || null,
-      };
-    })
-  );
+  return allTests.map((test) => ({
+    ...test,
+    area: test.functionalAreaId ? areaMap.get(test.functionalAreaId) : null,
+    latestStatus: statusMap.get(test.id) ?? null,
+  }));
 }
 
 // Repo-filtered queries
@@ -539,19 +545,13 @@ export async function getUncategorizedTests() {
 
 export async function getUncategorizedTestsWithStatus() {
   const allTests = await getUncategorizedTests();
+  const statusMap = await getLatestStatusMapForTestIds(allTests.map(t => t.id));
 
-  return Promise.all(
-    allTests.map(async (test) => {
-      const results = await getTestResultsByTest(test.id);
-      const latestResult = results[0];
-
-      return {
-        ...test,
-        area: null,
-        latestStatus: latestResult?.status || null,
-      };
-    })
-  );
+  return allTests.map((test) => ({
+    ...test,
+    area: null,
+    latestStatus: statusMap.get(test.id) ?? null,
+  }));
 }
 
 export async function getDeletedUncategorizedTests() {
