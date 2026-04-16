@@ -38,6 +38,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import * as queries from '@/lib/db/queries';
 import { createAndRunBuildCore } from '@/server/actions/builds';
 import { batchApproveDiffsCore, batchRejectDiffsCore, approveDiffCore, rejectDiffCore, approveAllDiffsCore, getDiffCore } from '@/server/actions/diffs';
+import { awardScore } from '@/server/actions/gamification';
 import { getCurrentSession } from '@/lib/auth';
 import { verifyBearerToken } from '@/lib/auth/api-key';
 
@@ -658,6 +659,26 @@ export async function PUT(
       }
 
       await queries.updateTestWithVersion(id, updates, 'mcp_edit');
+
+      // Award MCP bot points when a placeholder test gets real code via API
+      if (updates.code && test.isPlaceholder && test.repositoryId) {
+        const repo = await queries.getRepository(test.repositoryId);
+        if (repo?.teamId) {
+          const mcpBot = await queries.getBotByKind(repo.teamId, 'mcp_server');
+          if (mcpBot) {
+            // Stamp bot as creator for future regression/flake attribution
+            queries.updateTest(id, { createdByBotId: mcpBot.id }).catch(() => {});
+            awardScore({
+              teamId: repo.teamId,
+              kind: 'test_created',
+              actor: { kind: 'bot', id: mcpBot.id },
+              sourceType: 'test',
+              sourceId: id,
+            }).catch(() => {});
+          }
+        }
+      }
+
       const updated = await queries.getTest(id);
       return NextResponse.json(updated);
     }

@@ -11,6 +11,7 @@ import type {
 } from '@/lib/db/schema';
 import { createAndRunBuild } from './builds';
 import { approveAllDiffs } from './diffs';
+import { awardScore } from './gamification';
 import { getCurrentBranchForRepo } from '@/lib/git-utils';
 import { getBuildSummary } from './builds';
 import { startRemoteRouteScan } from './scanner';
@@ -1299,6 +1300,16 @@ async function runGenerate(sessionId: string, repositoryId: string, teamId: stri
                 isPlaceholder: false,
               });
               test = { id: existingPlaceholder.id };
+              // Award test_created points to play_agent bot for placeholder upgrade
+              if (playAgentBot) {
+                awardScore({
+                  teamId,
+                  kind: 'test_created',
+                  actor: { kind: 'bot', id: playAgentBot.id },
+                  sourceType: 'test',
+                  sourceId: existingPlaceholder.id,
+                }).catch(() => {});
+              }
             } else {
               test = await queries.createTest({
                 repositoryId,

@@ -13,6 +13,7 @@ import { revalidatePath } from 'next/cache';
 import { getCurrentBranchForRepo } from '@/lib/git-utils';
 import { agentCreateTest } from '@/lib/playwright/generator-agent';
 import { emitAndPersistActivityEvent } from '@/lib/db/queries/activity-events';
+import { awardScore } from '@/server/actions/gamification';
 import type { AgentStepState } from '@/lib/db/schema';
 import { db } from '@/lib/db';
 import { embeddedSessions } from '@/lib/db/schema';
@@ -181,12 +182,14 @@ export async function startGenerateTestAgent(data: {
           throw new Error(result.error || 'Generator agent produced no test code');
         }
 
+        const generateBot = await queries.getBotByKind(teamId, 'generate_agent');
         const test = await queries.createTest({
           repositoryId: data.repositoryId,
           functionalAreaId: data.functionalAreaId || null,
           name: data.testName,
           code: result.code,
           targetUrl: data.targetUrl || null,
+          ...(generateBot ? { createdByBotId: generateBot.id } : {}),
         });
 
         await queries.updateAgentSession(session.id, {
@@ -341,6 +344,18 @@ export async function startGeneratePlaceholderTestAgent(data: {
           code: result.code,
           isPlaceholder: false,
         }, 'ai_generated');
+
+        // Award test_created points to generate_agent bot
+        const generateBot = await queries.getBotByKind(teamId, 'generate_agent');
+        if (generateBot && teamId) {
+          awardScore({
+            teamId,
+            kind: 'test_created',
+            actor: { kind: 'bot', id: generateBot.id },
+            sourceType: 'test',
+            sourceId: data.testId,
+          }).catch(() => {});
+        }
 
         await queries.updateAgentSession(session.id, {
           status: 'completed',
