@@ -33,7 +33,7 @@ import { ImportFromSpecDialog } from '@/components/ai/import-from-spec-dialog';
 import { CodeDiffScanDialog } from '@/components/ai/code-diff-scan-dialog';
 import { createArea, deleteArea, deleteAreaWithContents, moveTestToArea, moveArea, exportAllPlans, updateAreaPlan, updateArea } from '@/server/actions/areas';
 import { deleteTests, restoreTests, permanentlyDeleteTests, getTest, getTestDetailData } from '@/server/actions/tests';
-import { createPlaceholderTestCase } from '@/server/actions/specs';
+import { createPlaceholderTestCase, bulkGenerateForTests } from '@/server/actions/specs';
 import { TestDetailClient } from '@/app/(app)/tests/[id]/test-detail-client';
 import { runTests } from '@/server/actions/runs';
 import { createAndRunBuild } from '@/server/actions/builds';
@@ -53,6 +53,7 @@ import {
   FlaskConical,
   Plus,
   Wrench,
+  FileText,
   CheckCircle2,
   XCircle,
   Clock,
@@ -192,6 +193,7 @@ export function DefinitionPageClient({
   const [isRunningAreaBuild, setIsRunningAreaBuild] = useState(false);
   const [isBulkDeleting, setIsBulkDeleting] = useState(false);
   const [isBulkFixing, setIsBulkFixing] = useState(false);
+  const [isBulkGenSpecs, setIsBulkGenSpecs] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [isFixingAll, setIsFixingAll] = useState(false);
   const [fixResult, setFixResult] = useState<{ fixed: number; failed: number } | null>(null);
@@ -671,6 +673,26 @@ export function DefinitionPageClient({
       setFixResult({ fixed: result.fixed, failed: result.failed });
     } finally {
       setIsBulkFixing(false);
+    }
+  };
+
+  const handleBulkGenerateSpecs = async () => {
+    if (selectedTestIds.size === 0) return;
+    setIsBulkGenSpecs(true);
+    try {
+      const result = await bulkGenerateForTests(repositoryId, Array.from(selectedTestIds));
+      if (result.specsCreated > 0 || result.areasUpdated > 0) {
+        toast.success(
+          `Created ${result.specsCreated} spec${result.specsCreated === 1 ? '' : 's'} and refreshed ${result.areasUpdated} plan${result.areasUpdated === 1 ? '' : 's'}`,
+        );
+        router.refresh();
+      } else {
+        toast.info('All selected tests already have specs');
+      }
+    } catch {
+      toast.error('Failed to generate specs/plan from selection');
+    } finally {
+      setIsBulkGenSpecs(false);
     }
   };
 
@@ -1198,6 +1220,18 @@ export function DefinitionPageClient({
                             {isBulkFixing ? 'Fixing...' : `Fix (${selectedFailedTests.length})`}
                           </Button>
                         )}
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={handleBulkGenerateSpecs}
+                          disabled={isBulkGenSpecs}
+                          title="Back-fill missing specs and refresh the plan for the selected tests' areas"
+                        >
+                          {isBulkGenSpecs
+                            ? <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
+                            : <FileText className="h-3.5 w-3.5 mr-1.5" />}
+                          {isBulkGenSpecs ? 'Generating...' : 'Generate Plan & Specs'}
+                        </Button>
                         <Button variant="ghost" size="sm" onClick={() => setSelectedTestIds(new Set())}>
                           <X className="h-3.5 w-3.5 mr-1.5" />
                           Clear

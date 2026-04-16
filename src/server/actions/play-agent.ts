@@ -1344,17 +1344,37 @@ async function runGenerate(sessionId: string, repositoryId: string, teamId: stri
             emitActivity(teamId, repositoryId, sessionId, 'artifact:created',
               `Generator ${existingPlaceholder ? 'upgraded placeholder' : 'created'} test "${group.name}" in ${area.name}`,
               { stepId: 'generate', agentType: 'generator', artifactType: 'test', artifactId: test.id, artifactLabel: group.name });
-            // Link to matching spec if one exists
+            // Link to matching spec if one exists; otherwise create a new one so
+            // every generated test has a populated spec side.
             try {
               const areaSpecs = await queries.getSpecsForArea(area.id);
               const matchingSpec = areaSpecs.find(s =>
                 !s.testId && s.title.toLowerCase() === group.name.toLowerCase()
               );
+              const codeHash = createHash('sha256').update(genResult.code).digest('hex');
               if (matchingSpec) {
-                const { createHash } = await import('crypto');
-                const codeHash = createHash('sha256').update(genResult.code).digest('hex');
                 await queries.linkSpecToTest(matchingSpec.id, test.id);
                 await queries.updateTestSpec(matchingSpec.id, { codeHash });
+              } else {
+                const existingForTest = await queries.getTestSpec(test.id);
+                if (!existingForTest) {
+                  const specBody = [
+                    `**Area:** ${area.name}`,
+                    area.description ? `**Description:** ${area.description}` : '',
+                    group.description || group.name,
+                  ].filter(Boolean).join('\n\n');
+                  const specId = await queries.createTestSpec({
+                    repositoryId,
+                    testId: test.id,
+                    functionalAreaId: area.id,
+                    title: group.name,
+                    spec: specBody,
+                    source: 'planner',
+                    status: 'has_test',
+                    codeHash,
+                  });
+                  await queries.linkSpecToTest(specId, test.id);
+                }
               }
             } catch {
               // Non-critical
