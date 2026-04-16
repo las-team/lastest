@@ -124,6 +124,17 @@ export function RunDashboardClient({ tests, runs: _runs, builds, repositoryId, a
   const [showSmartDetails, setShowSmartDetails] = useState(false);
   const [buildView, setBuildView] = useState<'list' | 'graph'>('graph');
 
+  // Sync base URL state when repo/branch changes
+  useEffect(() => {
+    setBaseUrl(initialBaseUrl);
+    initialBaseUrlRef.current = initialBaseUrl;
+  }, [initialBaseUrl]);
+
+  // Sync baseline URL when branch base URLs change
+  useEffect(() => {
+    setBaselineUrl(branchBaseUrls?.[baselineBranch] || initialBaseUrl);
+  }, [branchBaseUrls, baselineBranch, initialBaseUrl]);
+
   // Load smart run analysis (uses GitHub API to compare branches)
   useEffect(() => {
     if (repositoryId) {
