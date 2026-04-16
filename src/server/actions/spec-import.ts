@@ -846,7 +846,7 @@ export async function generateTestsFromStories(
           const code = extractCodeFromResponse(response);
 
           if (code) {
-            await queries.createTest({
+            const test = await queries.createTest({
               repositoryId,
               functionalAreaId: task.areaId,
               name: testName,
@@ -854,6 +854,28 @@ export async function generateTestsFromStories(
               description: acDescription,
               targetUrl: options?.targetUrl || null,
             });
+
+            // Create a linked spec so the spec side is populated alongside the test.
+            const specBody = [
+              `**Area:** ${task.story.title}`,
+              task.story.description ? `**Story:** ${task.story.description}` : '',
+              '',
+              task.group.map(ac => `- ${ac.description}`).join('\n'),
+            ].filter(Boolean).join('\n');
+            const { createHash } = await import('crypto');
+            const codeHash = createHash('sha256').update(code).digest('hex');
+            const specId = await queries.createTestSpec({
+              repositoryId,
+              testId: test.id,
+              functionalAreaId: task.areaId,
+              title: testName,
+              spec: specBody,
+              source: 'planner',
+              status: 'has_test',
+              codeHash,
+            });
+            await queries.linkSpecToTest(specId, test.id);
+
             return { created: true, testName };
           }
           return { created: false, testName };
@@ -870,6 +892,17 @@ export async function generateTestsFromStories(
         testsCreated++;
       } else if (!result.success) {
         errors.push(`${result.error || 'Unknown error'}`);
+      }
+    }
+
+    // Materialize `agentPlan` for each touched area so the plan side isn't empty.
+    const { syncAreaPlanAndSpecs } = await import('./specs');
+    const touchedAreaIds = Array.from(new Set(allTasks.map(t => t.areaId)));
+    for (const areaId of touchedAreaIds) {
+      try {
+        await syncAreaPlanAndSpecs(areaId, repositoryId);
+      } catch {
+        // Non-critical.
       }
     }
 
@@ -1002,6 +1035,25 @@ export async function createPlaceholdersFromStories(
           const msg = err instanceof Error ? err.message : 'Unknown error';
           errors.push(`${testName}: ${msg}`);
         }
+      }
+    }
+
+    // Materialize `agentPlan` for each touched area so plan/spec stay in sync.
+    const { syncAreaPlanAndSpecs } = await import('./specs');
+    const touchedAreaIds = new Set<string>();
+    for (const story of stories) {
+      const area = await queries.getOrCreateFunctionalAreaByRepo(
+        repositoryId,
+        story.title,
+        story.description,
+      );
+      touchedAreaIds.add(area.id);
+    }
+    for (const areaId of touchedAreaIds) {
+      try {
+        await syncAreaPlanAndSpecs(areaId, repositoryId);
+      } catch {
+        // Non-critical.
       }
     }
 
