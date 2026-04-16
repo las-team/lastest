@@ -144,16 +144,21 @@ export function TestSetupOverrides({
   const router = useRouter();
   const [mounted, setMounted] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  const [localOverrides, setLocalOverrides] = useState<TestSetupOverridesType | null>(setupOverrides);
+
+  useEffect(() => {
+    setLocalOverrides(setupOverrides);
+  }, [setupOverrides]);
 
   // Local state for skipped defaults
-  const skippedIds = new Set(setupOverrides?.skippedDefaultStepIds ?? []);
-  const hasOverrides = setupOverrides !== null && (
-    (setupOverrides.skippedDefaultStepIds?.length ?? 0) > 0 ||
-    (setupOverrides.extraSteps?.length ?? 0) > 0
+  const skippedIds = new Set(localOverrides?.skippedDefaultStepIds ?? []);
+  const hasOverrides = localOverrides !== null && (
+    (localOverrides.skippedDefaultStepIds?.length ?? 0) > 0 ||
+    (localOverrides.extraSteps?.length ?? 0) > 0
   );
 
   // Build extra steps display list
-  const extraSteps: ExtraStepDisplay[] = (setupOverrides?.extraSteps ?? []).map((step, i) => {
+  const extraSteps: ExtraStepDisplay[] = (localOverrides?.extraSteps ?? []).map((step, i) => {
     let name = 'Unknown';
     if (step.stepType === 'test' && step.testId) {
       const t = availableTests.find((t) => t.id === step.testId);
@@ -180,6 +185,21 @@ export function TestSetupOverrides({
   );
 
   const handleToggleSkip = async (stepId: string, isCurrentlySkipped: boolean) => {
+    const base: TestSetupOverridesType = localOverrides
+      ? {
+          skippedDefaultStepIds: [...(localOverrides.skippedDefaultStepIds ?? [])],
+          extraSteps: [...(localOverrides.extraSteps ?? [])],
+        }
+      : { skippedDefaultStepIds: [], extraSteps: [] };
+    if (isCurrentlySkipped) {
+      base.skippedDefaultStepIds = base.skippedDefaultStepIds.filter((id) => id !== stepId);
+    } else if (!base.skippedDefaultStepIds.includes(stepId)) {
+      base.skippedDefaultStepIds.push(stepId);
+    }
+    const next: TestSetupOverridesType | null =
+      base.skippedDefaultStepIds.length === 0 && base.extraSteps.length === 0 ? null : base;
+    setLocalOverrides(next);
+
     setIsSaving(true);
     try {
       if (isCurrentlySkipped) {
@@ -189,6 +209,7 @@ export function TestSetupOverrides({
       }
       router.refresh();
     } catch {
+      setLocalOverrides(localOverrides);
       toast.error('Failed to update setup override');
     } finally {
       setIsSaving(false);
@@ -196,12 +217,27 @@ export function TestSetupOverrides({
   };
 
   const handleAddExtra = async (stepType: 'test' | 'script', itemId: string) => {
+    const base: TestSetupOverridesType = localOverrides
+      ? {
+          skippedDefaultStepIds: [...(localOverrides.skippedDefaultStepIds ?? [])],
+          extraSteps: [...(localOverrides.extraSteps ?? [])],
+        }
+      : { skippedDefaultStepIds: [], extraSteps: [] };
+    base.extraSteps.push({
+      stepType,
+      testId: stepType === 'test' ? itemId : null,
+      scriptId: stepType === 'script' ? itemId : null,
+      storageStateId: null,
+    });
+    setLocalOverrides(base);
+
     setIsSaving(true);
     try {
       await addExtraSetupStep(testId, stepType, itemId);
       router.refresh();
       toast.success('Extra step added');
     } catch {
+      setLocalOverrides(localOverrides);
       toast.error('Failed to add extra step');
     } finally {
       setIsSaving(false);
@@ -209,11 +245,25 @@ export function TestSetupOverrides({
   };
 
   const handleRemoveExtra = async (index: number) => {
+    const base: TestSetupOverridesType = localOverrides
+      ? {
+          skippedDefaultStepIds: [...(localOverrides.skippedDefaultStepIds ?? [])],
+          extraSteps: [...(localOverrides.extraSteps ?? [])],
+        }
+      : { skippedDefaultStepIds: [], extraSteps: [] };
+    if (index >= 0 && index < base.extraSteps.length) {
+      base.extraSteps.splice(index, 1);
+    }
+    const next: TestSetupOverridesType | null =
+      base.skippedDefaultStepIds.length === 0 && base.extraSteps.length === 0 ? null : base;
+    setLocalOverrides(next);
+
     setIsSaving(true);
     try {
       await removeExtraSetupStep(testId, index);
       router.refresh();
     } catch {
+      setLocalOverrides(localOverrides);
       toast.error('Failed to remove extra step');
     } finally {
       setIsSaving(false);
@@ -232,11 +282,22 @@ export function TestSetupOverrides({
       newIndex
     );
 
+    const base: TestSetupOverridesType = localOverrides
+      ? {
+          skippedDefaultStepIds: [...(localOverrides.skippedDefaultStepIds ?? [])],
+          extraSteps: reordered
+            .map((i) => localOverrides.extraSteps?.[i])
+            .filter((s): s is NonNullable<typeof s> => Boolean(s)),
+        }
+      : { skippedDefaultStepIds: [], extraSteps: [] };
+    setLocalOverrides(base);
+
     setIsSaving(true);
     try {
       await reorderExtraSetupSteps(testId, reordered);
       router.refresh();
     } catch {
+      setLocalOverrides(localOverrides);
       toast.error('Failed to reorder steps');
     } finally {
       setIsSaving(false);
@@ -244,12 +305,14 @@ export function TestSetupOverrides({
   };
 
   const handleResetToDefaults = async () => {
+    setLocalOverrides(null);
     setIsSaving(true);
     try {
       await saveTestSetupOverrides(testId, null);
       router.refresh();
       toast.success('Reset to defaults');
     } catch {
+      setLocalOverrides(localOverrides);
       toast.error('Failed to reset');
     } finally {
       setIsSaving(false);

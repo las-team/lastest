@@ -16,6 +16,12 @@ GH action edit
 DOM delta
 ## bugs
 Fix play specs -> test specs route
+Route scanning skipped during play agent, discpvery skipped
+Plan doesnt refresh when added from test
+area moved to end of list when generated
+placeholder tests and specs are the same -remove specs naming
+play agent - shows only 1 generator in activity feed/agent sessions - shoudl show 3 lines in play agent as well.  
+bulk generate full tests from placeholder tests - remove generate plan from test detail page
 ## features
 from EBs running 6 browsers -> 6*5 EBs forming on-demand
 

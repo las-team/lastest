@@ -186,7 +186,11 @@
       "WebFetch(domain:playbooks.com)",
       "Bash(jq '.results[:5][] | \"\\\\\\(.url\\) — \\\\\\(.title\\)\"' -r)",
       "Bash(kubectl get:*)",
-      "Bash(docker version *)"
+      "Bash(docker version *)",
+      "Bash(pnpm deploy:olares *)",
+      "Bash(pg_isready -h localhost -p 5432)",
+      "Bash(docker exec *)",
+      "Read(//etc/**)"
     ]
   },
   "disabledMcpjsonServers": [

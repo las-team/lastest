@@ -8,7 +8,7 @@ import type {
   NewBackgroundJob,
   BackgroundJobType,
 } from '../schema';
-import { eq, desc, and, or, gte, lt, isNull, inArray } from 'drizzle-orm';
+import { eq, desc, and, or, gte, lt, isNull, isNotNull, inArray } from 'drizzle-orm';
 import { v4 as uuid } from 'uuid';
 
 // Background Jobs
@@ -192,7 +192,7 @@ export async function markStaleJobsAsCrashed(staleThresholdMs = 300000) {
         or(
           // Job has lastActivityAt set and it's stale
           and(
-            backgroundJobs.lastActivityAt,
+            isNotNull(backgroundJobs.lastActivityAt),
             lt(backgroundJobs.lastActivityAt, threshold)
           ),
           // Job has no lastActivityAt (legacy) and startedAt is stale

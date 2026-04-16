@@ -21,6 +21,7 @@ export function JobPollingProvider({ children }: { children: ReactNode }) {
   const eventSourceRef = useRef<EventSource | null>(null);
   const reconnectTimerRef = useRef<NodeJS.Timeout | null>(null);
   const reconnectAttemptRef = useRef(0);
+  const connectRef = useRef<(() => void) | null>(null);
 
   const connect = useCallback(() => {
     // Close existing connection
@@ -91,9 +92,13 @@ export function JobPollingProvider({ children }: { children: ReactNode }) {
       // Reconnect with exponential backoff (max 30s)
       const attempt = reconnectAttemptRef.current++;
       const delay = Math.min(1000 * Math.pow(2, attempt), 30000);
-      reconnectTimerRef.current = setTimeout(connect, delay);
+      reconnectTimerRef.current = setTimeout(() => connectRef.current?.(), delay);
     };
   }, []);
+
+  useEffect(() => {
+    connectRef.current = connect;
+  }, [connect]);
 
   useEffect(() => {
     connect();
