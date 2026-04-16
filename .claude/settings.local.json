@@ -185,7 +185,8 @@
       "WebFetch(domain:pipedream.com)",
       "WebFetch(domain:playbooks.com)",
       "Bash(jq '.results[:5][] | \"\\\\\\(.url\\) — \\\\\\(.title\\)\"' -r)",
-      "Bash(kubectl get:*)"
+      "Bash(kubectl get:*)",
+      "Bash(docker version *)"
     ]
   },
   "disabledMcpjsonServers": [
