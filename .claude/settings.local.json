@@ -190,7 +190,8 @@
       "Bash(pnpm deploy:olares *)",
       "Bash(pg_isready -h localhost -p 5432)",
       "Bash(docker exec *)",
-      "Read(//etc/**)"
+      "Read(//etc/**)",
+      "Bash(pnpm eslint *)"
     ]
   },
   "disabledMcpjsonServers": [

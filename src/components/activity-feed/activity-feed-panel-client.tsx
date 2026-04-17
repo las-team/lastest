@@ -5,13 +5,14 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from '
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Radio, Trash2, ArrowDown, Loader2, Play, Pause, CheckCircle2, XCircle, Monitor, Square } from 'lucide-react';
+import { Radio, Trash2, ArrowDown, Loader2, Play, Pause, CheckCircle2, XCircle, Monitor, Square, Check, X, Circle } from 'lucide-react';
 import Link from 'next/link';
 import { ActivityEventCard } from './activity-event-card-client';
 import { useActivityFeedContext } from './activity-feed-provider-client';
 import { BrowserViewer } from '@/components/embedded-browser/browser-viewer-client';
+import { AgentBadge } from '@/components/play-agent/play-agent-step';
 import { cn } from '@/lib/utils';
-import type { AgentSession } from '@/lib/db/schema';
+import type { AgentSession, AgentSubstep } from '@/lib/db/schema';
 
 type FilterType = 'all' | 'play_agent' | 'mcp_server' | 'generate_agent' | 'heal_agent';
 
@@ -27,6 +28,19 @@ function SessionStatusIcon({ status }: { status: string }) {
       return <XCircle className="h-3.5 w-3.5 text-red-500" />;
     default:
       return <Play className="h-3.5 w-3.5 text-muted-foreground" />;
+  }
+}
+
+function SubstepStatusIcon({ status }: { status: AgentSubstep['status'] }) {
+  switch (status) {
+    case 'running':
+      return <Loader2 className="h-3.5 w-3.5 text-blue-500 animate-spin" />;
+    case 'done':
+      return <Check className="h-3.5 w-3.5 text-green-500" />;
+    case 'error':
+      return <X className="h-3.5 w-3.5 text-red-500" />;
+    default:
+      return <Circle className="h-3.5 w-3.5 text-muted-foreground" />;
   }
 }
 
@@ -122,59 +136,97 @@ function ActiveSessionsSection({
               : `/run?session=${s.id}`;
           const viewLabel = isSpecImport && s.status === 'paused' ? 'Review' : completedTestId ? 'Open' : 'View';
 
+          // Expand active-step sub-agents into separate rows (e.g. 3 parallel Generators).
+          const activeStep = s.status === 'active'
+            ? s.steps?.find((st) => st.status === 'active')
+            : undefined;
+          const subAgents: AgentSubstep[] = (activeStep?.substeps ?? []).filter(
+            (sub) => !!sub.agent && sub.status !== 'pending',
+          );
+          const showSubAgents = subAgents.length > 0;
+
+          const stopButton = s.status === 'active' && (
+            <button
+              onClick={() => handleStop(s.id)}
+              disabled={stoppingSessions.has(s.id)}
+              className="p-0.5 rounded hover:bg-red-500/15 text-red-500 hover:text-red-600 dark:hover:text-red-400 disabled:opacity-50"
+              title="Stop agent"
+            >
+              {stoppingSessions.has(s.id) ? (
+                <Loader2 className="h-3 w-3 animate-spin" />
+              ) : (
+                <Square className="h-3 w-3" />
+              )}
+            </button>
+          );
+
+          const streamButton = hasStream && (
+            <button
+              onClick={() => setExpandedStream(isExpanded ? null : s.id)}
+              className={cn(
+                'p-0.5 rounded hover:bg-muted',
+                isExpanded && 'text-primary',
+              )}
+              title={isExpanded ? 'Hide browser' : 'Show browser'}
+            >
+              <Monitor className="h-3 w-3" />
+            </button>
+          );
+
+          const statusBadge = (
+            <Badge
+              variant="outline"
+              className={cn(
+                'h-4 px-1 text-[10px]',
+                s.status === 'active' && 'border-blue-500/50 text-blue-600 dark:text-blue-400',
+                s.status === 'paused' && 'border-amber-500/50 text-amber-600 dark:text-amber-400',
+                s.status === 'completed' && 'border-green-500/50 text-green-600 dark:text-green-400',
+                s.status === 'failed' && 'border-red-500/50 text-red-600 dark:text-red-400',
+              )}
+            >
+              {s.status}
+            </Badge>
+          );
+
+          const viewLink = (completedTestId || (isSpecImport && s.status === 'paused')) ? (
+            <Link href={viewHref} className="text-[10px] text-primary hover:underline">
+              {viewLabel}
+            </Link>
+          ) : !hasStream && (
+            <Link href={viewHref} className="text-[10px] text-primary hover:underline">
+              {viewLabel}
+            </Link>
+          );
+
           return (
             <div key={s.id} className="space-y-1">
-              <div className="flex items-center gap-2 text-xs">
-                <SessionStatusIcon status={s.status} />
-                <span className="flex-1 truncate">{label}</span>
-                {s.status === 'active' && (
-                  <button
-                    onClick={() => handleStop(s.id)}
-                    disabled={stoppingSessions.has(s.id)}
-                    className="p-0.5 rounded hover:bg-red-500/15 text-red-500 hover:text-red-600 dark:hover:text-red-400 disabled:opacity-50"
-                    title="Stop agent"
-                  >
-                    {stoppingSessions.has(s.id) ? (
-                      <Loader2 className="h-3 w-3 animate-spin" />
-                    ) : (
-                      <Square className="h-3 w-3" />
-                    )}
-                  </button>
-                )}
-                {hasStream && (
-                  <button
-                    onClick={() => setExpandedStream(isExpanded ? null : s.id)}
-                    className={cn(
-                      'p-0.5 rounded hover:bg-muted',
-                      isExpanded && 'text-primary',
-                    )}
-                    title={isExpanded ? 'Hide browser' : 'Show browser'}
-                  >
-                    <Monitor className="h-3 w-3" />
-                  </button>
-                )}
-                <Badge
-                  variant="outline"
-                  className={cn(
-                    'h-4 px-1 text-[10px]',
-                    s.status === 'active' && 'border-blue-500/50 text-blue-600 dark:text-blue-400',
-                    s.status === 'paused' && 'border-amber-500/50 text-amber-600 dark:text-amber-400',
-                    s.status === 'completed' && 'border-green-500/50 text-green-600 dark:text-green-400',
-                    s.status === 'failed' && 'border-red-500/50 text-red-600 dark:text-red-400',
-                  )}
-                >
-                  {s.status}
-                </Badge>
-                {(completedTestId || (isSpecImport && s.status === 'paused')) ? (
-                  <Link href={viewHref} className="text-[10px] text-primary hover:underline">
-                    {viewLabel}
-                  </Link>
-                ) : !hasStream && (
-                  <Link href={viewHref} className="text-[10px] text-primary hover:underline">
-                    {viewLabel}
-                  </Link>
-                )}
-              </div>
+              {showSubAgents ? (
+                <>
+                  {subAgents.map((sub, i) => (
+                    <div key={`${s.id}-sub-${i}`} className="flex items-center gap-2 text-xs">
+                      <SubstepStatusIcon status={sub.status} />
+                      {sub.agent && <AgentBadge agent={sub.agent} />}
+                      <span className="flex-1 truncate">
+                        {sub.label}
+                        {sub.detail && (
+                          <span className="text-muted-foreground/60 ml-1">{sub.detail}</span>
+                        )}
+                      </span>
+                      {i === 0 && stopButton}
+                      {i === 0 && streamButton}
+                    </div>
+                  ))}
+                </>
+              ) : (
+                <div className="flex items-center gap-2 text-xs">
+                  <SessionStatusIcon status={s.status} />
+                  <span className="flex-1 truncate">{label}</span>
+                  {stopButton}
+                  {streamButton}
+                  {statusBadge}
+                  {viewLink}
+                </div>
+              )}
               {isExpanded && streamUrl && (
                 <div className="rounded-md overflow-hidden border">
                   <BrowserViewer

@@ -1,5 +1,9 @@
 import { describe, it, expect } from 'vitest';
-import { parseSteps, extractTestBody } from './debug-parser';
+import { parseSteps, extractTestBody, extractEditableValue, type DebugStep } from './debug-parser';
+
+function actionStep(code: string): DebugStep {
+  return { id: 0, type: 'action', code, label: '', lineStart: 1, lineEnd: 1 };
+}
 
 /** Helper: wrap code in test function, parse, return step labels */
 function labelsFor(body: string): string[] {
@@ -115,6 +119,76 @@ describe('generateLabel — fallback labels', () => {
       `  await page.mouse.click(100, 200);`
     );
     expect(labels[0]).toBe('Click at (100, 200)');
+  });
+});
+
+describe('extractEditableValue', () => {
+  it('returns fill value from locateWithFallback with role-name selector', () => {
+    const v = extractEditableValue(actionStep(
+      `await locateWithFallback(page, [{"type":"role-name","value":"role=textbox[name=\\"First Name\\"]"}], 'fill', 'John', null);`
+    ));
+    expect(v).toBe('John');
+  });
+
+  it('returns fill value from locateWithFallback with data-testid selector', () => {
+    const v = extractEditableValue(actionStep(
+      `await locateWithFallback(page, [{"type":"data-testid","value":"[data-testid=\\"email\\"]"}], 'fill', 'a@b.com', null);`
+    ));
+    expect(v).toBe('a@b.com');
+  });
+
+  it('returns selectOption value from locateWithFallback', () => {
+    const v = extractEditableValue(actionStep(
+      `await locateWithFallback(page, [{"type":"placeholder","value":"[placeholder=\\"Country\\"]"}], 'selectOption', 'Canada', null);`
+    ));
+    expect(v).toBe('Canada');
+  });
+
+  it('returns value from chained page.locator(...).fill()', () => {
+    const v = extractEditableValue(actionStep(
+      `await page.locator('#email').fill('user@example.com');`
+    ));
+    expect(v).toBe('user@example.com');
+  });
+
+  it('tolerates trailing options argument on .fill()', () => {
+    const v = extractEditableValue(actionStep(
+      `await page.locator('#email').fill('hello', { timeout: 5000 });`
+    ));
+    expect(v).toBe('hello');
+  });
+
+  it('returns value from page.keyboard.type()', () => {
+    const v = extractEditableValue(actionStep(
+      `await page.keyboard.type('Hello World');`
+    ));
+    expect(v).toBe('Hello World');
+  });
+
+  it('returns value from chained .selectOption()', () => {
+    const v = extractEditableValue(actionStep(
+      `await page.getByRole('combobox').selectOption('CA');`
+    ));
+    expect(v).toBe('CA');
+  });
+
+  it('un-escapes single quotes and backslashes in the value', () => {
+    const v = extractEditableValue(actionStep(
+      `await page.locator('#x').fill('it\\'s a \\\\ test');`
+    ));
+    expect(v).toBe("it's a \\ test");
+  });
+
+  it('returns null for non-action step', () => {
+    const v = extractEditableValue({ id: 0, type: 'assertion', code: `expect(page).toHaveTitle('X');`, label: '', lineStart: 1, lineEnd: 1 });
+    expect(v).toBeNull();
+  });
+
+  it('returns null when action has no editable value', () => {
+    const v = extractEditableValue(actionStep(
+      `await locateWithFallback(page, [{"type":"role-name","value":"role=button[name=\\"Save\\"]"}], 'click', null, null);`
+    ));
+    expect(v).toBeNull();
   });
 });
 
