@@ -1652,6 +1652,14 @@ function PlanAreaEditor({
     autoResize(textareaRef.current);
   }, [autoResize]);
 
+  useEffect(() => {
+    if (content === lastSavedRef.current && agentPlan !== content) {
+      setContent(agentPlan);
+      lastSavedRef.current = agentPlan;
+      requestAnimationFrame(() => autoResize(textareaRef.current));
+    }
+  }, [agentPlan, content, autoResize]);
+
   const doSave = useCallback(async (text: string) => {
     if (text === lastSavedRef.current) return;
     setSaving(true);

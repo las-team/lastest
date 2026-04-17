@@ -301,7 +301,7 @@ function normalizeUrl(rawUrl: string): string {
 
 async function detectLoginRequired(
   baseUrl: string,
-): Promise<{ needsLogin: boolean; loginUrl?: string; hasRegisterLink?: boolean; registerUrl?: string; pageContent: string }> {
+): Promise<{ needsLogin: boolean; loginUrl?: string; hasRegisterLink?: boolean; registerUrl?: string; pageContent: string; detectionError?: string }> {
   let browser = null;
   try {
     browser = await chromium.launch({ headless: true });
@@ -353,8 +353,9 @@ async function detectLoginRequired(
     }
 
     return { needsLogin: false, pageContent };
-  } catch {
-    return { needsLogin: false, pageContent: '' };
+  } catch (err) {
+    const detectionError = err instanceof Error ? err.message : String(err);
+    return { needsLogin: false, pageContent: '', detectionError };
   } finally {
     if (browser) await browser.close().catch(() => {});
   }
@@ -540,6 +541,34 @@ async function runEnvSetup(sessionId: string, repositoryId: string, _teamId: str
     return true;
   }
 
+  // Existing seed wins: if the repo already has any usable setup wiring,
+  // recognize it and skip login detection + AI generation entirely.
+  // Covers script, test-as-setup, storage_state step types, plus legacy
+  // repo-level defaultSetupTestId / defaultSetupScriptId.
+  const defaultSteps = await queries.getDefaultSetupSteps(repositoryId);
+  const usableDefaultSteps = defaultSteps.filter(
+    s => s.stepType === 'script' || s.stepType === 'test' || s.stepType === 'storage_state',
+  );
+  const repoRecord = await queries.getRepository(repositoryId);
+  const hasLegacyDefault = !!(repoRecord?.defaultSetupTestId || repoRecord?.defaultSetupScriptId);
+
+  if (usableDefaultSteps.length > 0 || hasLegacyDefault) {
+    const stepCount = usableDefaultSteps.length + (hasLegacyDefault && usableDefaultSteps.length === 0 ? 1 : 0);
+    await updateSubsteps(sessionId, 'env_setup', [
+      { label: 'Checking base URL', status: 'done', detail: `${connResult.responseTime}ms` },
+      { label: 'Detecting login', status: 'done', detail: 'Existing seed' },
+      { label: 'Login setup', status: 'done', detail: `Already configured (${stepCount} step${stepCount === 1 ? '' : 's'})` },
+    ]);
+    await setStepCompleted(sessionId, 'env_setup', {
+      url: baseUrl,
+      responseTime: connResult.responseTime,
+      loginRequired: true,
+      loginSetup: true,
+      existingSetup: true,
+    });
+    return true;
+  }
+
   await updateSubsteps(sessionId, 'env_setup', [
     { label: 'Checking base URL', status: 'done', detail: `${connResult.responseTime}ms` },
     { label: 'Detecting login', status: 'running' },
@@ -548,26 +577,8 @@ async function runEnvSetup(sessionId: string, repositoryId: string, _teamId: str
 
   const loginDetection = await detectLoginRequired(baseUrl);
 
-  // Check if setup steps or scripts already exist
-  if (loginDetection.needsLogin) {
-    const existingSteps = await queries.getDefaultSetupSteps(repositoryId);
-    const hasScriptStep = existingSteps.some(s => s.stepType === 'script');
-    const existingScripts = await queries.getSetupScripts(repositoryId);
-    if (hasScriptStep || existingScripts.length > 0) {
-      await updateSubsteps(sessionId, 'env_setup', [
-        { label: 'Checking base URL', status: 'done', detail: `${connResult.responseTime}ms` },
-        { label: 'Detecting login', status: 'done', detail: 'Login required' },
-        { label: 'Login setup', status: 'done', detail: 'Already configured' },
-      ]);
-      await setStepCompleted(sessionId, 'env_setup', {
-        url: baseUrl,
-        responseTime: connResult.responseTime,
-        loginRequired: true,
-        loginSetup: true,
-        existingSetup: true,
-      });
-      return true;
-    }
+  if (loginDetection.detectionError) {
+    console.warn(`[play-agent] env_setup login detection error: ${loginDetection.detectionError}`);
   }
 
   if (!loginDetection.needsLogin) {
@@ -836,7 +847,15 @@ async function runPlanWithAgents(
   teamId: string,
 ): Promise<boolean> {
   const envConfig = await getEnvironmentConfig(repositoryId);
-  const baseUrl = envConfig?.baseUrl || 'http://localhost:3000';
+  if (!envConfig?.baseUrl) {
+    await setStepFailed(
+      sessionId,
+      'plan',
+      'Base URL missing — env_setup did not complete. Restart the Play run from env setup.',
+    );
+    return false;
+  }
+  const baseUrl = envConfig.baseUrl;
 
   const sessionData = await queries.getAgentSession(sessionId);
   const intelligence = sessionData?.metadata?.codebaseIntelligence as CodebaseIntelligenceContext | undefined;

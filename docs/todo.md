@@ -15,7 +15,6 @@ a11y
 GH action edit
 DOM delta
 ## bugs
-The step text input value fields are not editable anymore
 Test playback seems to be happening in 1280 not set up 1440
 ## features
 from EBs running 6 browsers -> 6*5 EBs forming on-demand
