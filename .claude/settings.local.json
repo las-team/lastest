@@ -191,7 +191,8 @@
       "Bash(pg_isready -h localhost -p 5432)",
       "Bash(docker exec *)",
       "Read(//etc/**)",
-      "Bash(pnpm eslint *)"
+      "Bash(pnpm eslint *)",
+      "Bash(pnpm --filter embedded-browser build)"
     ]
   },
   "disabledMcpjsonServers": [

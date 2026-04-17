@@ -26,6 +26,7 @@ import type {
 } from '../schema';
 import { eq, desc, and, inArray, isNull, isNotNull, sql } from 'drizzle-orm';
 import { v4 as uuid } from 'uuid';
+import { PLACEHOLDER_CODE } from '@/lib/constants/placeholder';
 
 // Functional Areas
 export async function getFunctionalAreas() {
@@ -121,7 +122,19 @@ export async function createTest(data: Omit<NewTest, 'id' | 'createdAt' | 'updat
 }
 
 export async function updateTest(id: string, data: Partial<NewTest>) {
-  await db.update(tests).set({ ...data, updatedAt: new Date() }).where(eq(tests.id, id));
+  const patch = { ...data };
+  if (
+    patch.code !== undefined &&
+    patch.code !== PLACEHOLDER_CODE &&
+    patch.isPlaceholder === undefined
+  ) {
+    const [current] = await db
+      .select({ isPlaceholder: tests.isPlaceholder })
+      .from(tests)
+      .where(eq(tests.id, id));
+    if (current?.isPlaceholder) patch.isPlaceholder = false;
+  }
+  await db.update(tests).set({ ...patch, updatedAt: new Date() }).where(eq(tests.id, id));
 }
 
 export async function softDeleteTest(id: string) {
@@ -767,8 +780,19 @@ export async function updateTestWithVersion(
     viewportHeight: viewport?.height ?? null,
   });
 
+  // Clear placeholder flag when real code overwrites the stub
+  const patch = { ...data };
+  if (
+    patch.code !== undefined &&
+    patch.code !== PLACEHOLDER_CODE &&
+    patch.isPlaceholder === undefined &&
+    test.isPlaceholder
+  ) {
+    patch.isPlaceholder = false;
+  }
+
   // Update the test
-  await db.update(tests).set({ ...data, updatedAt: new Date() }).where(eq(tests.id, id));
+  await db.update(tests).set({ ...patch, updatedAt: new Date() }).where(eq(tests.id, id));
 }
 
 // ===== Test Specs =====

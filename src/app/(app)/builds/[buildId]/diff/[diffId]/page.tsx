@@ -93,7 +93,7 @@ export default async function DiffPage({ params }: PageProps) {
                 )}
                 <span>·</span>
                 <Link
-                  href={`/tests/${diff.testId}`}
+                  href={`/tests?test=${encodeURIComponent(diff.testId)}`}
                   className="flex items-center gap-1 text-primary hover:text-primary/80 hover:underline"
                 >
                   View Test

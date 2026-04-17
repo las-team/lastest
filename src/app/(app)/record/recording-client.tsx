@@ -583,7 +583,7 @@ export function RecordingClient({
           viewportWidth: settings.viewportWidth ?? 1280,
           viewportHeight: settings.viewportHeight ?? 720,
         });
-        router.push(`/tests/${rerecordTest.id}`);
+        router.push(`/tests?test=${encodeURIComponent(rerecordTest.id)}`);
       } else {
         // Create new test
         const test = await saveRecordedTest({
@@ -599,7 +599,7 @@ export function RecordingClient({
           skippedDefaultStepIds: runSetupBeforeRecording && skippedDefaultStepIds.size > 0 ? Array.from(skippedDefaultStepIds) : undefined,
           domSnapshot,
         });
-        router.push(`/tests/${test.id}`);
+        router.push(`/tests?test=${encodeURIComponent(test.id)}`);
       }
     } catch (error) {
       console.error('Failed to save test:', error);

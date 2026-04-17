@@ -1,11 +1,11 @@
 'use client';
 
-import { useRef, useEffect, useState, useCallback } from 'react';
+import { useRef, useEffect, useState } from 'react';
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from '@/components/ui/sheet';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Radio, Trash2, ArrowDown, Loader2, Play, Pause, CheckCircle2, XCircle, Monitor, Square, Check, X, Circle } from 'lucide-react';
+import { Radio, Trash2, ArrowUp, Loader2, Play, Pause, CheckCircle2, XCircle, Monitor, Square, Check, X, Circle } from 'lucide-react';
 import Link from 'next/link';
 import { ActivityEventCard } from './activity-event-card-client';
 import { useActivityFeedContext } from './activity-feed-provider-client';
@@ -14,7 +14,9 @@ import { AgentBadge } from '@/components/play-agent/play-agent-step';
 import { cn } from '@/lib/utils';
 import type { AgentSession, AgentSubstep } from '@/lib/db/schema';
 
-type FilterType = 'all' | 'play_agent' | 'mcp_server' | 'generate_agent' | 'heal_agent';
+type FilterType = 'all' | 'agent' | 'mcp_server';
+
+const AGENT_SOURCES = new Set(['play_agent', 'generate_agent', 'heal_agent']);
 
 function SessionStatusIcon({ status }: { status: string }) {
   switch (status) {
@@ -250,28 +252,41 @@ export function ActivityFeedPanel() {
   const [filter, setFilter] = useState<FilterType>('all');
   const [autoScroll, setAutoScroll] = useState(true);
   const [expandedStream, setExpandedStream] = useState<string | null>(null);
-  const scrollRef = useRef<HTMLDivElement>(null);
-  const bottomRef = useRef<HTMLDivElement>(null);
+  const scrollRootRef = useRef<HTMLDivElement>(null);
+  const viewportRef = useRef<HTMLDivElement | null>(null);
 
-  const filteredEvents = filter === 'all'
+  const visibleEvents = filter === 'all'
     ? events
-    : events.filter((e) => e.sourceType === filter);
+    : filter === 'agent'
+      ? events.filter((e) => AGENT_SOURCES.has(e.sourceType))
+      : events.filter((e) => e.sourceType === filter);
 
-  // Auto-scroll to bottom when new events arrive
+  // Latest events first
+  const filteredEvents = [...visibleEvents].reverse();
+
+  // Resolve the Radix ScrollArea viewport and wire scroll detection
   useEffect(() => {
-    if (autoScroll && bottomRef.current && isOpen) {
-      bottomRef.current.scrollIntoView({ behavior: 'smooth' });
+    const root = scrollRootRef.current;
+    if (!root) return;
+    const viewport = root.querySelector<HTMLDivElement>('[data-slot="scroll-area-viewport"]');
+    viewportRef.current = viewport;
+    if (!viewport) return;
+    const onScroll = () => {
+      const atTop = viewport.scrollTop < 60;
+      setAutoScroll(atTop);
+    };
+    viewport.addEventListener('scroll', onScroll);
+    return () => viewport.removeEventListener('scroll', onScroll);
+  }, [isOpen]);
+
+  // Auto-scroll to top when new events arrive
+  useEffect(() => {
+    if (autoScroll && viewportRef.current && isOpen) {
+      viewportRef.current.scrollTo({ top: 0, behavior: 'smooth' });
     }
   }, [filteredEvents.length, autoScroll, isOpen]);
 
-  // Detect when user scrolls away from bottom
-  const handleScroll = useCallback((e: React.UIEvent<HTMLDivElement>) => {
-    const el = e.currentTarget;
-    const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 60;
-    setAutoScroll(atBottom);
-  }, []);
-
-  const agentCount = events.filter((e) => e.sourceType === 'play_agent').length;
+  const agentCount = events.filter((e) => AGENT_SOURCES.has(e.sourceType)).length;
   const mcpCount = events.filter((e) => e.sourceType === 'mcp_server').length;
 
   return (
@@ -306,10 +321,10 @@ export function ActivityFeedPanel() {
               <Badge variant="outline" className="ml-1 h-4 px-1 text-[10px]">{events.length}</Badge>
             </Button>
             <Button
-              variant={filter === 'play_agent' ? 'secondary' : 'ghost'}
+              variant={filter === 'agent' ? 'secondary' : 'ghost'}
               size="sm"
               className="h-7 text-xs"
-              onClick={() => setFilter('play_agent')}
+              onClick={() => setFilter('agent')}
             >
               Agent
               <Badge variant="outline" className="ml-1 h-4 px-1 text-[10px]">{agentCount}</Badge>
@@ -337,8 +352,8 @@ export function ActivityFeedPanel() {
         <ActiveSessionsSection expandedStream={expandedStream} setExpandedStream={setExpandedStream} />
 
         {/* Timeline */}
-        <ScrollArea className="flex-1">
-          <div ref={scrollRef} className="py-2" onScroll={handleScroll}>
+        <ScrollArea ref={scrollRootRef} className="flex-1">
+          <div className="py-2">
             {filteredEvents.length === 0 ? (
               <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
                 <Radio className="h-8 w-8 mb-3 opacity-40" />
@@ -346,15 +361,18 @@ export function ActivityFeedPanel() {
                 <p className="text-xs mt-1">Events from Play Agent and MCP will appear here</p>
               </div>
             ) : (
-              filteredEvents.map((event) => (
-                <ActivityEventCard key={event.id} event={event} />
+              filteredEvents.map((event, idx) => (
+                <ActivityEventCard
+                  key={event.id}
+                  event={event}
+                  isLast={idx === filteredEvents.length - 1}
+                />
               ))
             )}
-            <div ref={bottomRef} />
           </div>
         </ScrollArea>
 
-        {/* Scroll-to-bottom button */}
+        {/* Scroll-to-top button */}
         {!autoScroll && filteredEvents.length > 0 && (
           <div className="absolute bottom-4 left-1/2 -translate-x-1/2">
             <Button
@@ -362,11 +380,11 @@ export function ActivityFeedPanel() {
               variant="secondary"
               className="h-8 rounded-full shadow-md gap-1"
               onClick={() => {
-                bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+                viewportRef.current?.scrollTo({ top: 0, behavior: 'smooth' });
                 setAutoScroll(true);
               }}
             >
-              <ArrowDown className="h-3.5 w-3.5" />
+              <ArrowUp className="h-3.5 w-3.5" />
               Latest
             </Button>
           </div>

@@ -152,7 +152,7 @@ export function TreeView({ areas, tests, suggestions = [], onNewArea }: TreeView
                     {areaTests.map((test) => (
                       <Link
                         key={test.id}
-                        href={`/tests/${test.id}`}
+                        href={`/tests?test=${encodeURIComponent(test.id)}`}
                         className="flex items-center gap-2 px-2 py-1.5 rounded hover:bg-muted text-sm"
                       >
                         <StatusIcon status={test.latestStatus} />
@@ -181,7 +181,7 @@ export function TreeView({ areas, tests, suggestions = [], onNewArea }: TreeView
                 {uncategorizedTests.map((test) => (
                   <Link
                     key={test.id}
-                    href={`/tests/${test.id}`}
+                    href={`/tests?test=${encodeURIComponent(test.id)}`}
                     className="flex items-center gap-2 px-2 py-1.5 rounded hover:bg-muted text-sm"
                   >
                     <StatusIcon status={test.latestStatus} />

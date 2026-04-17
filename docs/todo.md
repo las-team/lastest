@@ -15,6 +15,7 @@ a11y
 GH action edit
 DOM delta
 ## bugs
+ source: '/tests/:id', destination: '/tests?test=:id' path fixing
 ## features
 from EBs running 6 browsers -> 6*5 EBs forming on-demand
 

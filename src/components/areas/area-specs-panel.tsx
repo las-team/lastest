@@ -141,7 +141,7 @@ export function AreaTestCasesPanel({ areaId, repositoryId, tests, hasAgentPlan, 
             <Button
               variant="ghost"
               size="sm"
-              onClick={() => onOpenTest ? onOpenTest(test.id) : router.push(`/tests/${test.id}`)}
+              onClick={() => onOpenTest ? onOpenTest(test.id) : router.push(`/tests?test=${encodeURIComponent(test.id)}`)}
               className="h-6 text-xs px-2"
             >
               <ExternalLink className="h-3 w-3" />

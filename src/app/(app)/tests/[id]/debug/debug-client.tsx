@@ -228,7 +228,7 @@ export function DebugClient({ test, repositoryId }: DebugClientProps) {
         // ignore — reaper / unmount fallback will catch it
       }
     }
-    router.push(`/tests/${test.id}`);
+    router.push(`/tests?test=${encodeURIComponent(test.id)}`);
   }, [sessionId, router, test.id]);
 
   // Debounced code update handler
@@ -337,7 +337,7 @@ export function DebugClient({ test, repositoryId }: DebugClientProps) {
       {/* Header */}
       <div className="flex items-center justify-between border-b px-4 py-2 bg-background">
         <div className="flex items-center gap-3">
-          <Button variant="ghost" size="icon" onClick={() => router.push(`/tests/${test.id}`)}>
+          <Button variant="ghost" size="icon" onClick={() => router.push(`/tests?test=${encodeURIComponent(test.id)}`)}>
             <ArrowLeft className="h-4 w-4" />
           </Button>
           <h1 className="text-sm font-medium">Debug: {test.name}</h1>

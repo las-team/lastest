@@ -37,7 +37,7 @@ import { createPlaceholderTestCase } from '@/server/actions/specs';
 import { TestDetailClient } from '@/app/(app)/tests/[id]/test-detail-client';
 import { runTests } from '@/server/actions/runs';
 import { createAndRunBuild } from '@/server/actions/builds';
-import { aiFixAllFailedTests, aiFixTests, startGeneratePlaceholderTestAgent } from '@/server/actions/ai';
+import { startHealTestAgent, startGeneratePlaceholderTestAgent } from '@/server/actions/ai';
 import { startRemoteRouteScan, generateBasicTests } from '@/server/actions/scanner';
 import { toast } from 'sonner';
 import { downloadMarkdown, timeAgo } from '@/lib/utils';
@@ -195,7 +195,6 @@ export function DefinitionPageClient({
   const [isBulkGeneratingPlaceholders, setIsBulkGeneratingPlaceholders] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [isFixingAll, setIsFixingAll] = useState(false);
-  const [fixResult, setFixResult] = useState<{ fixed: number; failed: number } | null>(null);
   const [isAddTestsOpen, setIsAddTestsOpen] = useState(false);
   const [isAICreateOpen, setIsAICreateOpen] = useState(false);
 
@@ -231,7 +230,6 @@ export function DefinitionPageClient({
     // Only reset state when treeSelection actually changed (not when tree prop refreshes)
     if (selectionChanged) {
       setSelectedTestIds(new Set());
-      setFixResult(null);
       setIsEditingArea(false);
       setIsCreatingPlaceholder(false);
       setNewPlaceholderName('');
@@ -673,10 +671,28 @@ export function DefinitionPageClient({
   const handleBulkFix = async () => {
     if (selectedFailedTests.length === 0) return;
     setIsBulkFixing(true);
-    setFixResult(null);
     try {
-      const result = await aiFixTests(selectedFailedTests, repositoryId);
-      setFixResult({ fixed: result.fixed, failed: result.failed });
+      const results = await Promise.all(
+        selectedFailedTests.map(testId => {
+          const test = tests.find(t => t.id === testId);
+          return startHealTestAgent({
+            repositoryId,
+            testId,
+            testName: test?.name ?? 'Test',
+          }).catch(() => ({ success: false as const, error: 'Failed to start' }));
+        }),
+      );
+      const started = results.filter(r => r.success).length;
+      const failed = results.length - started;
+      if (started > 0) {
+        toast.success(
+          `Started healing for ${started} test${started === 1 ? '' : 's'} — check the activity feed for progress`,
+        );
+      }
+      if (failed > 0) {
+        toast.error(`Failed to start ${failed} healing${failed === 1 ? '' : 's'}`);
+      }
+      setSelectedTestIds(new Set());
     } finally {
       setIsBulkFixing(false);
     }
@@ -712,10 +728,26 @@ export function DefinitionPageClient({
   const handleFixAllFailed = async () => {
     if (failedScopedTests.length === 0) return;
     setIsFixingAll(true);
-    setFixResult(null);
     try {
-      const result = await aiFixAllFailedTests(repositoryId);
-      setFixResult({ fixed: result.fixed, failed: result.failed });
+      const results = await Promise.all(
+        failedScopedTests.map(test =>
+          startHealTestAgent({
+            repositoryId,
+            testId: test.id,
+            testName: test.name,
+          }).catch(() => ({ success: false as const, error: 'Failed to start' })),
+        ),
+      );
+      const started = results.filter(r => r.success).length;
+      const failed = results.length - started;
+      if (started > 0) {
+        toast.success(
+          `Started healing for ${started} test${started === 1 ? '' : 's'} — check the activity feed for progress`,
+        );
+      }
+      if (failed > 0) {
+        toast.error(`Failed to start ${failed} healing${failed === 1 ? '' : 's'}`);
+      }
     } finally {
       setIsFixingAll(false);
     }
@@ -1043,6 +1075,14 @@ export function DefinitionPageClient({
                     envBaseUrl={openTestDetailData.envBaseUrl}
                     testSpec={openTestDetailData.testSpec}
                     contentClassName="max-w-5xl mx-0"
+                    onRefresh={async () => {
+                      if (!openTestId) return;
+                      const data = await getTestDetailData(openTestId, repositoryId);
+                      if (data) {
+                        setOpenTestData(data.test);
+                        setOpenTestDetailData(data);
+                      }
+                    }}
                   />
                 </div>
               ) : (
@@ -1072,13 +1112,6 @@ export function DefinitionPageClient({
                     </button>
                   ))}
                 </div>
-
-                {fixResult && (
-                  <div className="text-sm p-3 rounded-lg bg-muted/50 border border-border/50">
-                    Fixed {fixResult.fixed} test{fixResult.fixed !== 1 ? 's' : ''}.
-                    {fixResult.failed > 0 && ` ${fixResult.failed} could not be fixed.`}
-                  </div>
-                )}
 
                 {/* Test List */}
                 <Card className="border-border/50 overflow-hidden">

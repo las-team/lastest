@@ -351,21 +351,24 @@ async function startup(): Promise<void> {
             const capturedStreamServer = streamServer;
             const capturedPage = page; // idle page for screencast restore
             const shouldStreamTest = isHeaded && activeTasks === 1 && capturedScreencast && capturedStreamServer;
+            const testViewport = payload.viewport ?? { width: config.viewportWidth, height: config.viewportHeight };
 
             const callbacks = shouldStreamTest ? {
               onPageCreated: async (testPage: Page) => {
                 try {
-                  // Force the test page to render at the EB's native resolution
+                  // Force the test page to render at the test's configured viewport so the
+                  // streamed framebuffer matches the resolution the test was authored for.
                   const cdp = await testPage.context().newCDPSession(testPage);
                   await cdp.send('Emulation.setDeviceMetricsOverride', {
-                    width: config.viewportWidth,
-                    height: config.viewportHeight,
+                    width: testViewport.width,
+                    height: testViewport.height,
                     deviceScaleFactor: 1,
                     mobile: false,
                   });
                   await cdp.detach();
 
                   await capturedScreencast.stop();
+                  await capturedScreencast.updateViewport(testViewport.width, testViewport.height);
                   await capturedScreencast.start(testPage, (frame) => {
                     capturedStreamServer.broadcastFrame(frame.data, frame.width, frame.height, frame.timestamp);
                   });

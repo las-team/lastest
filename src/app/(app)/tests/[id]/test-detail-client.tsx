@@ -120,6 +120,7 @@ interface TestDetailClientProps {
   envBaseUrl?: string | null;
   testSpec?: TestSpec | null;
   contentClassName?: string;
+  onRefresh?: () => void | Promise<void>;
 }
 
 function splitBoilerplate(code: string): { boilerplate: string; testBody: string } | null {
@@ -223,11 +224,10 @@ function CollapsibleTestCode({ code, highlightLine }: { code: string; highlightL
   );
 }
 
-export function TestDetailClient({ test, results, repositoryId, screenshotGroups = [], plannedScreenshots = [], defaultSetupSteps = [], availableTests = [], availableScripts = [], sheetDataSources = [], stabilizationDefaults, banAiMode = false, earlyAdopterMode = false, diffDefaults, playwrightDefaults, envBaseUrl, testSpec, contentClassName }: TestDetailClientProps) {
+export function TestDetailClient({ test, results, repositoryId, screenshotGroups = [], plannedScreenshots = [], defaultSetupSteps = [], availableTests = [], availableScripts = [], sheetDataSources = [], stabilizationDefaults, banAiMode = false, earlyAdopterMode = false, diffDefaults, playwrightDefaults, envBaseUrl, testSpec, contentClassName, onRefresh }: TestDetailClientProps) {
   const router = useRouter();
   const notifyJobStarted = useNotifyJobStarted();
   const [isDeleting, setIsDeleting] = useState(false);
-  const [showDeleteDialog, setShowDeleteDialog] = useState(false);
   const [isRestoringDeleted, setIsRestoringDeleted] = useState(false);
   const [isPermanentlyDeleting, setIsPermanentlyDeleting] = useState(false);
   const [showPermanentDeleteDialog, setShowPermanentDeleteDialog] = useState(false);
@@ -371,8 +371,10 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
     setIsDeleting(true);
     try {
       await deleteTest(test.id);
+      toast.success('Test moved to trash');
       router.push('/tests');
-    } finally {
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to move test to trash');
       setIsDeleting(false);
     }
   };
@@ -466,6 +468,13 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
           setIsRunning(false);
           setStreamUrl(null);
           router.refresh();
+          if (onRefresh) {
+            try {
+              await onRefresh();
+            } catch {
+              // Ignore refresh errors
+            }
+          }
           if (status === 'failed') {
             toast.error(error || 'Test run failed');
           } else {
@@ -688,7 +697,7 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
                         try {
                           const cloned = await cloneTest(test.id);
                           toast.success('Test cloned');
-                          router.push(`/tests/${cloned.id}`);
+                          router.push(`/tests?test=${encodeURIComponent(cloned.id)}`);
                         } catch {
                           toast.error('Failed to clone test');
                         }
@@ -699,7 +708,8 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
                     <Button
                       variant="outline"
                       size="icon"
-                      onClick={() => setShowDeleteDialog(true)}
+                      onClick={handleDelete}
+                      disabled={isDeleting}
                     >
                       <Trash2 className="h-4 w-4" />
                     </Button>
@@ -1506,30 +1516,6 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
           </TabsContent>
         </Tabs>
       </div>
-
-      {/* Delete Confirmation Dialog */}
-      <Dialog open={showDeleteDialog} onOpenChange={setShowDeleteDialog}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Move to Trash</DialogTitle>
-            <DialogDescription>
-              &quot;{test.name}&quot; will be moved to the Recently Deleted section. You can restore it later.
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setShowDeleteDialog(false)}>
-              Cancel
-            </Button>
-            <Button
-              variant="destructive"
-              onClick={handleDelete}
-              disabled={isDeleting}
-            >
-              {isDeleting ? 'Moving...' : 'Move to Trash'}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
 
       {/* Permanent Delete Confirmation Dialog */}
       <Dialog open={showPermanentDeleteDialog} onOpenChange={setShowPermanentDeleteDialog}>
