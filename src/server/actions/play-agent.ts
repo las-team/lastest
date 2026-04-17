@@ -1266,19 +1266,25 @@ async function runGenerate(sessionId: string, repositoryId: string, teamId: stri
 
     const totalWork = workItems.length;
 
+    type GeneratorSubstep = NonNullable<AgentStepState['substeps']>[number];
+    const generatorStates: GeneratorSubstep[] = [];
+    const flushGenerators = () => updateSubsteps(sessionId, 'generate', [...generatorStates]);
+
     for (let batch = 0; batch < workItems.length; batch += GENERATOR_CONCURRENCY) {
       if (isAborted(signal)) return false;
 
       const chunk = workItems.slice(batch, batch + GENERATOR_CONCURRENCY);
+      const batchStartIdx = generatorStates.length;
 
-      await updateSubsteps(sessionId, 'generate', [
-        {
-          label: `Generating tests (${Math.min(batch, totalWork)}/${totalWork})`,
+      for (const { area, group } of chunk) {
+        generatorStates.push({
+          label: `Generating "${group.name}"`,
           status: 'running',
-          detail: `${chunk.length} generators in parallel`,
+          detail: `${area.name} · ${group.scenarioCount} scenario${group.scenarioCount > 1 ? 's' : ''}`,
           agent: 'generator',
-        },
-      ]);
+        });
+      }
+      await flushGenerators();
 
       for (const { area, group } of chunk) {
         emitActivity(teamId, repositoryId, sessionId, 'substep:update',
@@ -1287,7 +1293,9 @@ async function runGenerate(sessionId: string, repositoryId: string, teamId: stri
       }
 
       const results = await Promise.allSettled(
-        chunk.map(async ({ area, group }) => {
+        chunk.map(async ({ area, group }, chunkIdx) => {
+          const subIdx = batchStartIdx + chunkIdx;
+          try {
           // Combine session abort signal with per-call timeout
           const timeoutSignal = AbortSignal.timeout(agentTimeout);
           const combinedSignal = signal
@@ -1379,9 +1387,22 @@ async function runGenerate(sessionId: string, repositoryId: string, teamId: stri
             } catch {
               // Non-critical
             }
+            generatorStates[subIdx] = { ...generatorStates[subIdx], status: 'done' };
+            await flushGenerators();
             return true;
           }
+          generatorStates[subIdx] = { ...generatorStates[subIdx], status: 'error' };
+          await flushGenerators();
           return false;
+          } catch (err) {
+            generatorStates[subIdx] = {
+              ...generatorStates[subIdx],
+              status: 'error',
+              rawError: err instanceof Error ? err.message : String(err),
+            };
+            await flushGenerators();
+            throw err;
+          }
         }),
       );
 

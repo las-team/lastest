@@ -33,11 +33,11 @@ import { ImportFromSpecDialog } from '@/components/ai/import-from-spec-dialog';
 import { CodeDiffScanDialog } from '@/components/ai/code-diff-scan-dialog';
 import { createArea, deleteArea, deleteAreaWithContents, moveTestToArea, moveArea, exportAllPlans, updateAreaPlan, updateArea } from '@/server/actions/areas';
 import { deleteTests, restoreTests, permanentlyDeleteTests, getTest, getTestDetailData } from '@/server/actions/tests';
-import { createPlaceholderTestCase, bulkGenerateForTests } from '@/server/actions/specs';
+import { createPlaceholderTestCase } from '@/server/actions/specs';
 import { TestDetailClient } from '@/app/(app)/tests/[id]/test-detail-client';
 import { runTests } from '@/server/actions/runs';
 import { createAndRunBuild } from '@/server/actions/builds';
-import { aiFixAllFailedTests, aiFixTests } from '@/server/actions/ai';
+import { aiFixAllFailedTests, aiFixTests, startGeneratePlaceholderTestAgent } from '@/server/actions/ai';
 import { startRemoteRouteScan, generateBasicTests } from '@/server/actions/scanner';
 import { toast } from 'sonner';
 import { downloadMarkdown, timeAgo } from '@/lib/utils';
@@ -53,7 +53,6 @@ import {
   FlaskConical,
   Plus,
   Wrench,
-  FileText,
   CheckCircle2,
   XCircle,
   Clock,
@@ -193,7 +192,7 @@ export function DefinitionPageClient({
   const [isRunningAreaBuild, setIsRunningAreaBuild] = useState(false);
   const [isBulkDeleting, setIsBulkDeleting] = useState(false);
   const [isBulkFixing, setIsBulkFixing] = useState(false);
-  const [isBulkGenSpecs, setIsBulkGenSpecs] = useState(false);
+  const [isBulkGeneratingPlaceholders, setIsBulkGeneratingPlaceholders] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [isFixingAll, setIsFixingAll] = useState(false);
   const [fixResult, setFixResult] = useState<{ fixed: number; failed: number } | null>(null);
@@ -345,6 +344,13 @@ export function DefinitionPageClient({
     return Array.from(selectedTestIds).filter(id => {
       const test = tests.find(t => t.id === id);
       return test?.latestStatus === 'failed';
+    });
+  }, [selectedTestIds, tests]);
+
+  const selectedPlaceholderTests = useMemo(() => {
+    return Array.from(selectedTestIds).filter(id => {
+      const test = tests.find(t => t.id === id);
+      return test?.isPlaceholder === true;
     });
   }, [selectedTestIds, tests]);
 
@@ -676,23 +682,30 @@ export function DefinitionPageClient({
     }
   };
 
-  const handleBulkGenerateSpecs = async () => {
-    if (selectedTestIds.size === 0) return;
-    setIsBulkGenSpecs(true);
+  const handleBulkGeneratePlaceholders = async () => {
+    if (selectedPlaceholderTests.length === 0) return;
+    setIsBulkGeneratingPlaceholders(true);
     try {
-      const result = await bulkGenerateForTests(repositoryId, Array.from(selectedTestIds));
-      if (result.specsCreated > 0 || result.areasUpdated > 0) {
+      const results = await Promise.all(
+        selectedPlaceholderTests.map(testId =>
+          startGeneratePlaceholderTestAgent({ testId, repositoryId }).catch(() => ({
+            success: false as const,
+            error: 'Failed to start',
+          })),
+        ),
+      );
+      const started = results.filter(r => r.success).length;
+      const failed = results.length - started;
+      if (started > 0) {
         toast.success(
-          `Created ${result.specsCreated} spec${result.specsCreated === 1 ? '' : 's'} and refreshed ${result.areasUpdated} plan${result.areasUpdated === 1 ? '' : 's'}`,
+          `Started generation for ${started} test${started === 1 ? '' : 's'} — check the activity feed for progress`,
         );
-        router.refresh();
-      } else {
-        toast.info('All selected tests already have specs');
       }
-    } catch {
-      toast.error('Failed to generate specs/plan from selection');
+      if (failed > 0) {
+        toast.error(`Failed to start ${failed} generation${failed === 1 ? '' : 's'}`);
+      }
     } finally {
-      setIsBulkGenSpecs(false);
+      setIsBulkGeneratingPlaceholders(false);
     }
   };
 
@@ -1220,18 +1233,22 @@ export function DefinitionPageClient({
                             {isBulkFixing ? 'Fixing...' : `Fix (${selectedFailedTests.length})`}
                           </Button>
                         )}
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={handleBulkGenerateSpecs}
-                          disabled={isBulkGenSpecs}
-                          title="Back-fill missing specs and refresh the plan for the selected tests' areas"
-                        >
-                          {isBulkGenSpecs
-                            ? <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
-                            : <FileText className="h-3.5 w-3.5 mr-1.5" />}
-                          {isBulkGenSpecs ? 'Generating...' : 'Generate Plan & Specs'}
-                        </Button>
+                        {!banAiMode && selectedPlaceholderTests.length > 0 && (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={handleBulkGeneratePlaceholders}
+                            disabled={isBulkGeneratingPlaceholders}
+                            title="Generate full tests for selected placeholders using AI"
+                          >
+                            {isBulkGeneratingPlaceholders
+                              ? <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
+                              : <Sparkles className="h-3.5 w-3.5 mr-1.5" />}
+                            {isBulkGeneratingPlaceholders
+                              ? 'Generating...'
+                              : `Generate (${selectedPlaceholderTests.length})`}
+                          </Button>
+                        )}
                         <Button variant="ghost" size="sm" onClick={() => setSelectedTestIds(new Set())}>
                           <X className="h-3.5 w-3.5 mr-1.5" />
                           Clear

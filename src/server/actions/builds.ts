@@ -203,14 +203,14 @@ export async function createAndRunBuildCore(
   // Load environment config
   const envConfig = await queries.getEnvironmentConfig(repositoryId);
 
-  // Get tests to run (filter out soft-deleted tests)
+  // Get tests to run (filter out soft-deleted and placeholder tests)
   let tests: Test[];
   if (testIds && testIds.length > 0) {
     tests = await Promise.all(
       testIds.map((id) => queries.getTest(id))
-    ).then((results) => results.filter((t): t is Test => t !== undefined && !t.deletedAt));
+    ).then((results) => results.filter((t): t is Test => t !== undefined && !t.deletedAt && !t.isPlaceholder));
   } else if (repositoryId) {
-    tests = await queries.getTestsByRepo(repositoryId);
+    tests = (await queries.getTestsByRepo(repositoryId)).filter(t => !t.isPlaceholder);
   } else {
     tests = [];
   }
@@ -299,8 +299,8 @@ export async function createAndRunBuildFromCI(opts: {
   // Load environment config
   const envConfig = await queries.getEnvironmentConfig(repositoryId);
 
-  // Get tests to run (filter out soft-deleted)
-  const tests = await queries.getTestsByRepo(repositoryId);
+  // Get tests to run (filter out soft-deleted and placeholder tests)
+  const tests = (await queries.getTestsByRepo(repositoryId)).filter(t => !t.isPlaceholder);
   if (tests.length === 0) {
     throw new Error('No tests to run');
   }
@@ -386,14 +386,14 @@ export async function createComparisonRun(
 
   const playwrightSettings = await queries.getPlaywrightSettings(repositoryId);
 
-  // Get tests
+  // Get tests (filter out soft-deleted and placeholder tests)
   let tests: Test[];
   if (testIds && testIds.length > 0) {
     tests = await Promise.all(
       testIds.map((id) => queries.getTest(id))
-    ).then((results) => results.filter((t): t is Test => t !== undefined && !t.deletedAt));
+    ).then((results) => results.filter((t): t is Test => t !== undefined && !t.deletedAt && !t.isPlaceholder));
   } else {
-    tests = await queries.getTestsByRepo(repositoryId);
+    tests = (await queries.getTestsByRepo(repositoryId)).filter(t => !t.isPlaceholder);
   }
   if (tests.length === 0) {
     throw new Error('No tests to run');
@@ -465,9 +465,9 @@ async function createComparisonFeatureBuild(
   if (meta.testIds && meta.testIds.length > 0) {
     tests = await Promise.all(
       meta.testIds.map((id) => queries.getTest(id))
-    ).then((results) => results.filter((t): t is Test => t !== undefined && !t.deletedAt));
+    ).then((results) => results.filter((t): t is Test => t !== undefined && !t.deletedAt && !t.isPlaceholder));
   } else {
-    tests = await queries.getTestsByRepo(repositoryId);
+    tests = (await queries.getTestsByRepo(repositoryId)).filter(t => !t.isPlaceholder);
   }
   if (tests.length === 0) throw new Error('No tests to run for feature build');
 
@@ -1113,16 +1113,16 @@ async function queueBuild(
   repositoryId?: string | null,
   runnerId?: string,
 ) {
-  // Get tests to determine label (filter out soft-deleted tests)
+  // Get tests to determine label (filter out soft-deleted and placeholder tests)
   let tests: Test[];
   if (testIds && testIds.length > 0) {
     tests = await Promise.all(
       testIds.map((id) => queries.getTest(id))
-    ).then((results) => results.filter((t): t is Test => t !== undefined && !t.deletedAt));
+    ).then((results) => results.filter((t): t is Test => t !== undefined && !t.deletedAt && !t.isPlaceholder));
   } else if (repositoryId) {
-    tests = await queries.getTestsByRepo(repositoryId);
+    tests = (await queries.getTestsByRepo(repositoryId)).filter(t => !t.isPlaceholder);
   } else {
-    tests = await queries.getTests();
+    tests = (await queries.getTests()).filter(t => !t.isPlaceholder);
   }
 
   if (tests.length === 0) {
