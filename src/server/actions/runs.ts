@@ -7,6 +7,7 @@ import { requireTeamAccess, requireRepoAccess } from '@/lib/auth';
 import { getBranchInfo } from '@/lib/github/content';
 import * as queries from '@/lib/db/queries';
 import type { Test } from '@/lib/db/schema';
+import type { SetupContext } from '@/lib/setup/types';
 import { createJob, createPendingJob, updateJobProgress, completeJob, failJob, isRunnerBusy } from './jobs';
 import { emitJobEvent } from '@/lib/ws/job-events';
 
@@ -144,6 +145,29 @@ async function runTestsAsync(runId: string, tests: Test[], repositoryId?: string
   const envConfig = await queries.getEnvironmentConfig(repositoryId);
   const playwrightSettings = await queries.getPlaywrightSettings(repositoryId);
 
+  // Initialize setup context and pre-load storage states from default setup
+  // steps (mirrors runBuildAsync in builds.ts — without this, tests whose
+  // setup is a pre-captured `storage_state` step start unauthenticated).
+  const baseUrl = envConfig?.baseUrl || 'http://localhost:3000';
+  const setupContext: SetupContext = {
+    baseUrl,
+    variables: {},
+    repositoryId: repositoryId || null,
+  };
+  if (repositoryId) {
+    const defaultSteps = await queries.getDefaultSetupSteps(repositoryId);
+    for (const step of defaultSteps) {
+      if (step.stepType === 'storage_state' && step.storageStateId) {
+        const ss = await queries.getStorageState(step.storageStateId);
+        if (ss) {
+          setupContext.storageState = ss.storageStateJson;
+          console.log(`[test-run] Pre-loaded storage state "${ss.name}" for setup context`);
+          break;
+        }
+      }
+    }
+  }
+
   try {
     // Resolve setup code to run on the runner
     const setupInfo = await resolveSetupCodeForRunner(tests);
@@ -156,6 +180,10 @@ async function runTestsAsync(runId: string, tests: Test[], repositoryId?: string
       environmentConfig: envConfig,
       playwrightSettings,
       setupInfo,
+      setupContext: {
+        storageState: setupContext.storageState,
+        variables: setupContext.variables,
+      },
       forceVideoRecording,
       jobId: activeJobId,
     });
