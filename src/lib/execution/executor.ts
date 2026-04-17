@@ -620,11 +620,29 @@ async function executeViaPoolWorkers(
 ): Promise<TestRunResult[] | null> {
   const { claimOrProvisionPoolEB, releasePoolEB } = await import('@/server/actions/embedded-sessions');
 
+  // When the pool is finite (e.g. docker-compose with 2 EBs locally) and we have
+  // more workers than EBs, a worker's claim can legitimately return null. Wait
+  // for another worker to release rather than marking the test skipped. In k8s
+  // mode claimOrProvisionPoolEB already provisions on demand, so this mainly
+  // helps localhost/compose mode and the k8s "at capacity" edge case.
+  const claimMaxWaitMs = parseInt(process.env.EB_CLAIM_MAX_WAIT_MS || '120000', 10);
+  const claimWithRetry = async () => {
+    const deadline = Date.now() + claimMaxWaitMs;
+    let wait = 500;
+    while (Date.now() < deadline) {
+      const c = await claimOrProvisionPoolEB();
+      if (c) return c;
+      await new Promise((r) => setTimeout(r, wait));
+      wait = Math.min(wait * 2, 5000);
+    }
+    return null;
+  };
+
   // Run setup once on a single EB first so every worker can share the resulting
   // storageState instead of paying setup cost per-test.
   let sharedSetup = options.setupContext;
   if (options.setupInfo && !sharedSetup?.storageState) {
-    const setupEB = await claimOrProvisionPoolEB();
+    const setupEB = await claimWithRetry();
     if (setupEB) {
       try {
         const baseUrl = (options.environmentConfig?.baseUrl || 'http://localhost:3000').replace(/\/+$/, '');
@@ -678,9 +696,9 @@ async function executeViaPoolWorkers(
       if (myIdx >= tests.length) return;
       const test = tests[myIdx]!;
 
-      const claimed = await claimOrProvisionPoolEB();
+      const claimed = await claimWithRetry();
       if (!claimed) {
-        // Capacity exhausted or provisioning failed — record skipped and continue
+        // Waited past deadline — capacity exhausted, mark skipped and continue
         const skipped: TestRunResult = {
           testId: test.id,
           status: 'skipped' as const,
