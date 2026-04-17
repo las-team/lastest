@@ -11,7 +11,8 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { validateRunnerToken, updateRunnerStatus, markStaleRunnersOffline, deleteStaleSystemRunners } from '@/server/actions/runners';
-import { reapStalePoolEBs } from '@/server/actions/embedded-sessions';
+import { reapStalePoolEBs, reapIdleEBJobs } from '@/server/actions/embedded-sessions';
+import { ensureWarmPool, isKubernetesMode } from '@/lib/eb/provisioner';
 import type { Message, HeartbeatMessage, TestResultResponse, SetupResultResponse, ScreenshotUploadResponse, RecordingEventResponse, RecordingStoppedResponse } from '@/lib/ws/protocol';
 import { waitForCommandQueued, notifyCommandQueued } from '@/lib/ws/runner-events';
 import fs from 'fs/promises';
@@ -108,6 +109,13 @@ function ensureInitialized() {
     console.error('[Startup] Failed to mark stale runners offline:', error);
   });
 
+  // Top up the warm EB pool so the first claim hits an already-online EB
+  if (isKubernetesMode()) {
+    ensureWarmPool().catch((error) => {
+      console.error('[Startup] ensureWarmPool failed:', error);
+    });
+  }
+
   // Start cleanup interval to remove stale sessions, mark runners offline, and GC old commands
   setInterval(async () => {
     const now = Date.now();
@@ -163,6 +171,21 @@ function ensureInitialized() {
       }
     } catch (error) {
       console.error('[Reaper] Failed to reap stale pool EBs:', error);
+    }
+
+    // Tear down idle/offline on-demand EB Jobs above the warm-pool minimum
+    try {
+      const idleTtlMs = parseInt(process.env.EB_IDLE_TTL_SECONDS || '90', 10) * 1000;
+      await reapIdleEBJobs(idleTtlMs);
+    } catch (error) {
+      console.error('[Reaper] Failed to reap idle EB Jobs:', error);
+    }
+
+    // Top up the warm pool if it has drifted below the minimum
+    try {
+      await ensureWarmPool();
+    } catch (error) {
+      console.error('[WarmPool] ensureWarmPool failed:', error);
     }
   }, CLEANUP_INTERVAL_MS);
 }

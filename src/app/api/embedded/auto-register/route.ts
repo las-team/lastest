@@ -115,7 +115,9 @@ export async function POST(request: Request) {
       capabilities: ['run', 'record'],
       type: 'embedded',
       isSystem: true,
-      maxParallelTests: 6,
+      // New EB model: 1 test per EB. Build parallelism is achieved by claiming
+      // multiple EBs from the pool (see maxParallelEBs in playwright_settings).
+      maxParallelTests: 1,
       lastSeen: new Date(),
       createdAt: new Date(),
     });
@@ -124,7 +126,7 @@ export async function POST(request: Request) {
     // Update existing runner: refresh token & mark online
     await db
       .update(runners)
-      .set({ tokenHash, status: 'online', lastSeen: new Date(), maxParallelTests: 6 })
+      .set({ tokenHash, status: 'online', lastSeen: new Date(), maxParallelTests: 1 })
       .where(eq(runners.id, runner.id));
     [runner] = await db.select().from(runners).where(eq(runners.id, runner.id));
   }
