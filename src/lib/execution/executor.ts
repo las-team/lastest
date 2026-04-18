@@ -775,7 +775,7 @@ async function executeViaPoolWorkers(
         }
 
         if (ebDied) {
-          const dying = claimed;
+          const dying = claimed as WorkerEB | null;
           if (dying) {
             try { await releasePoolEB(dying.runnerId); } catch { /* ignore */ }
           }
@@ -784,7 +784,7 @@ async function executeViaPoolWorkers(
         }
       }
     } finally {
-      const held = claimed;
+      const held = claimed as WorkerEB | null;
       if (held) {
         try { await releasePoolEB(held.runnerId); } catch { /* ignore */ }
       }
