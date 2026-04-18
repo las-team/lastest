@@ -638,38 +638,21 @@ async function executeViaPoolWorkers(
     return null;
   };
 
-  // Run setup once on a single EB first so every worker can share the resulting
-  // storageState instead of paying setup cost per-test.
-  let sharedSetup = options.setupContext;
-  if (options.setupInfo && !sharedSetup?.storageState) {
-    const setupEB = await claimWithRetry();
-    if (setupEB) {
-      try {
-        const baseUrl = (options.environmentConfig?.baseUrl || 'http://localhost:3000').replace(/\/+$/, '');
-        const viewport = options.playwrightSettings
-          ? {
-              width: options.playwrightSettings.viewportWidth || 1280,
-              height: options.playwrightSettings.viewportHeight || 720,
-            }
-          : undefined;
-        const setupResult = await executeSetupViaRunner(
-          options.setupInfo.code,
-          options.setupInfo.setupId,
-          setupEB.runnerId,
-          baseUrl,
-          viewport,
-          options.playwrightSettings?.navigationTimeout ?? undefined,
-          options.playwrightSettings,
-        );
-        sharedSetup = {
-          storageState: setupResult.storageState ?? sharedSetup?.storageState,
-          variables: { ...sharedSetup?.variables, ...setupResult.variables },
-        };
-      } finally {
-        await releasePoolEB(setupEB.runnerId);
+  // Setup propagation model: each worker runs its own setup on its claimed EB once,
+  // then passes `storageState: "persistent:<setupId>"` to every subsequent run_test
+  // on that EB. The EB's TestExecutor.setupContexts Map reuses the live
+  // BrowserContext — preserving cookies, localStorage, sessionStorage, IndexedDB,
+  // and in-memory auth tokens (which `page.context().storageState()` drops).
+  //
+  // Fallback: if caller already provided a pre-computed setupContext.storageState
+  // (no setupInfo to re-run), we pass that blob through as the cold-start state.
+  const baseUrl = (options.environmentConfig?.baseUrl || 'http://localhost:3000').replace(/\/+$/, '');
+  const viewport = options.playwrightSettings
+    ? {
+        width: options.playwrightSettings.viewportWidth || 1280,
+        height: options.playwrightSettings.viewportHeight || 720,
       }
-    }
-  }
+    : undefined;
 
   const results: TestRunResult[] = [];
   const resultMap = new Map<string, TestRunResult>();
@@ -690,57 +673,120 @@ async function executeViaPoolWorkers(
 
   let activeWorkers = 0;
 
+  type WorkerEB = { runnerId: string; sessionId: string | null };
   const runWorker = async (workerId: number): Promise<void> => {
-    while (true) {
-      const myIdx = nextIdx++;
-      if (myIdx >= tests.length) return;
-      const test = tests[myIdx]!;
+    // Each worker holds onto a single EB for as long as possible. Setup runs once
+    // per EB. If the EB dies mid-sequence, we claim a fresh one and re-setup.
+    let claimed: WorkerEB | null = null;
+    let setupDone = false;
+    const workerSetupId = options.setupInfo ? `${runId}-w${workerId}` : null;
 
-      const claimed = await claimWithRetry();
-      if (!claimed) {
-        // Waited past deadline — capacity exhausted, mark skipped and continue
-        const skipped: TestRunResult = {
-          testId: test.id,
-          status: 'skipped' as const,
-          durationMs: 0,
-          screenshots: [],
-          errorMessage: 'Queued: waiting for an available runner',
-        };
-        resultMap.set(test.id, skipped);
-        completedCount++;
-        updateProgress(activeWorkers, test.name);
-        continue;
-      }
+    const ensureEBWithSetup = async (): Promise<WorkerEB | null> => {
+      if (claimed) return claimed;
+      const c = await claimWithRetry();
+      if (!c) return null;
+      claimed = c;
+      setupDone = false;
       everClaimed = true;
-      await recordActualRunner(claimed.runnerId);
-      console.log(`[Worker ${workerId}] Claimed EB ${claimed.runnerId.slice(0, 8)} for test ${test.name}`);
+      await recordActualRunner(c.runnerId);
+      console.log(`[Worker ${workerId}] Claimed EB ${c.runnerId.slice(0, 8)}`);
 
-      activeWorkers++;
-      updateProgress(activeWorkers, test.name);
-      try {
-        const [oneResult] = await executeViaRunner(
-          [test],
-          runId,
-          claimed.runnerId,
-          { ...options, setupContext: sharedSetup, setupInfo: undefined, maxParallelTests: 1 },
-          undefined, // progress emitted at the worker-pool level
-          onResult,
-        );
-        if (oneResult) resultMap.set(test.id, oneResult);
-      } catch (err) {
-        console.error(`[Worker ${workerId}] Error running test ${test.id}:`, err);
-        resultMap.set(test.id, {
-          testId: test.id,
-          status: 'failed' as const,
-          durationMs: 0,
-          screenshots: [],
-          errorMessage: err instanceof Error ? err.message : String(err),
-        });
-      } finally {
-        await releasePoolEB(claimed.runnerId);
-        activeWorkers--;
-        completedCount++;
-        updateProgress(activeWorkers);
+      if (options.setupInfo && workerSetupId) {
+        try {
+          await executeSetupViaRunner(
+            options.setupInfo.code,
+            workerSetupId,
+            c.runnerId,
+            baseUrl,
+            viewport,
+            options.playwrightSettings?.navigationTimeout ?? undefined,
+            options.playwrightSettings,
+          );
+          setupDone = true;
+          console.log(`[Worker ${workerId}] Setup completed on EB ${c.runnerId.slice(0, 8)} (persistent:${workerSetupId})`);
+        } catch (err) {
+          console.error(`[Worker ${workerId}] Setup failed on EB ${c.runnerId.slice(0, 8)}:`, err);
+          try { await releasePoolEB(c.runnerId); } catch { /* ignore */ }
+          claimed = null;
+          return null;
+        }
+      }
+      return claimed;
+    };
+
+    try {
+      while (true) {
+        const myIdx = nextIdx++;
+        if (myIdx >= tests.length) return;
+        const test = tests[myIdx]!;
+
+        const eb = await ensureEBWithSetup();
+        if (!eb) {
+          const skipped: TestRunResult = {
+            testId: test.id,
+            status: 'skipped' as const,
+            durationMs: 0,
+            screenshots: [],
+            errorMessage: 'Queued: waiting for an available runner',
+          };
+          resultMap.set(test.id, skipped);
+          completedCount++;
+          updateProgress(activeWorkers, test.name);
+          continue;
+        }
+
+        // Prefer the live persistent context over serialized storageState.
+        const effectiveSetup = workerSetupId && setupDone
+          ? { storageState: `persistent:${workerSetupId}`, variables: options.setupContext?.variables }
+          : options.setupContext;
+
+        activeWorkers++;
+        updateProgress(activeWorkers, test.name);
+        let ebDied = false;
+        try {
+          const [oneResult] = await executeViaRunner(
+            [test],
+            runId,
+            eb.runnerId,
+            { ...options, setupContext: effectiveSetup, setupInfo: undefined, maxParallelTests: 1 },
+            undefined, // progress emitted at the worker-pool level
+            onResult,
+          );
+          if (oneResult) resultMap.set(test.id, oneResult);
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          console.error(`[Worker ${workerId}] Error running test ${test.id}:`, err);
+          resultMap.set(test.id, {
+            testId: test.id,
+            status: 'failed' as const,
+            durationMs: 0,
+            screenshots: [],
+            errorMessage: msg,
+          });
+          // Heuristic: if the EB looks dead (went offline, crash-loop, command timed out),
+          // drop it so the next iteration claims a fresh one and re-runs setup.
+          if (/offline|crash|timed out|runner went/i.test(msg)) {
+            ebDied = true;
+          }
+        } finally {
+          activeWorkers--;
+          completedCount++;
+          updateProgress(activeWorkers);
+        }
+
+        if (ebDied) {
+          const dying = claimed;
+          if (dying) {
+            try { await releasePoolEB(dying.runnerId); } catch { /* ignore */ }
+          }
+          claimed = null;
+          setupDone = false;
+        }
+      }
+    } finally {
+      const held = claimed;
+      if (held) {
+        try { await releasePoolEB(held.runnerId); } catch { /* ignore */ }
       }
     }
   };
@@ -916,16 +962,13 @@ async function executeFallbackChain(
   }
 
   // 2. Try system EB pool.
-  //    - Worker-pool fan-out: one EB per test, parallelism across many EBs. Only safe
-  //      when there's no `options.setupInfo`, because the pool setup-then-fan-out path
-  //      would serialize the setup's storageState across fresh EBs and Playwright's
-  //      storageState() drops sessionStorage/IndexedDB/in-memory auth tokens.
-  //    - Single-EB path: all tests on one EB. The runner reuses the setup's live
-  //      BrowserContext (persistent-context mode — see packages/embedded-browser/src/
-  //      test-executor.ts) so full setup state is preserved.
+  //    Worker-pool fan-out: one EB per WORKER (not per test). Each worker runs its
+  //    own setup on its claimed EB and then reuses that EB's live BrowserContext
+  //    via `persistent:<setupId>` for every subsequent test. Preserves full setup
+  //    state (cookies + localStorage + sessionStorage + IndexedDB + in-memory
+  //    tokens) that `storageState()` serialization would drop.
   const maxParallelEBs = Math.max(1, options.playwrightSettings?.maxParallelEBs ?? 10);
   const canUseWorkerPool =
-    !options.setupInfo &&
     tests.length > 1 &&
     maxParallelEBs > 1;
   if (canUseWorkerPool) {

@@ -150,7 +150,10 @@ export class EmbeddedTestExecutor {
   // in-memory auth that Playwright's storageState() can't capture).
   private setupContexts = new Map<string, { context: BrowserContext; createdAt: number }>();
   private setupContextSweeper: ReturnType<typeof setInterval> | null = null;
-  private readonly SETUP_CONTEXT_TTL_MS = 30 * 60 * 1000;
+  // Live persistent BrowserContext TTL. Must comfortably exceed a full build's
+  // wall-clock time (setup + all tests on this worker). Default 60 min; override
+  // via EB_SETUP_CONTEXT_TTL_MS env.
+  private readonly SETUP_CONTEXT_TTL_MS = parseInt(process.env.EB_SETUP_CONTEXT_TTL_MS || String(60 * 60 * 1000), 10);
 
   get isRunning(): boolean {
     return this.abortController !== null;

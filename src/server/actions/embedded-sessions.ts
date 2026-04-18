@@ -486,6 +486,12 @@ export async function releasePoolEB(runnerId: string): Promise<void> {
  * Delete the k8s Job backing this runner if the pool is above its warm-pool minimum.
  * Ephemeral-per-test model: the default is to terminate immediately after release so
  * each test gets a fresh browser. Set EB_WARM_POOL_MIN > 0 to keep idle capacity.
+ *
+ * Graceful teardown: we enqueue a `command:shutdown` first, then poll for the EB
+ * to self-report disconnect (status='offline' via final heartbeat) or for all its
+ * in-flight commands to reach a terminal state. The EB's drain() flushes pending
+ * test_result/screenshot/network_bodies POSTs before exiting. Only after the
+ * grace window do we DELETE the k8s Job as a fallback.
  */
 async function maybeTerminateReleasedEB(runnerId: string): Promise<void> {
   const [runner] = await db
@@ -502,7 +508,60 @@ async function maybeTerminateReleasedEB(runnerId: string): Promise<void> {
   const jobName = jobNameForRunnerName(runner.name);
   if (!jobName) return; // Not a provisioner-created runner (e.g. docker-compose EB)
 
-  // Mark the runner offline so no future claim picks it up while the pod drains
+  // Step 1: ask the EB to shut itself down gracefully.
+  const { createRunnerCommand } = await import('@/lib/db/queries');
+  const { notifyCommandQueued } = await import('@/lib/ws/runner-events');
+  try {
+    const cmdId = crypto.randomUUID();
+    await createRunnerCommand({
+      id: cmdId,
+      runnerId,
+      type: 'command:shutdown',
+      status: 'pending',
+      payload: { reason: 'pool-release' },
+      createdAt: new Date(),
+    });
+    notifyCommandQueued(runnerId);
+  } catch (err) {
+    console.warn(`[Pool] Failed to enqueue shutdown for ${runnerId.slice(0, 8)}:`, err);
+  }
+
+  // Step 2: wait up to EB_SHUTDOWN_GRACE_MS for the EB to disconnect.
+  // Signal: runner row flipped to 'offline' OR all claimed commands completed/failed.
+  const graceMs = parseInt(process.env.EB_SHUTDOWN_GRACE_MS || '30000', 10);
+  const deadline = Date.now() + graceMs;
+  let gracefullyExited = false;
+  while (Date.now() < deadline) {
+    await new Promise((r) => setTimeout(r, 500));
+    const [current] = await db
+      .select({ status: runners.status })
+      .from(runners)
+      .where(eq(runners.id, runnerId));
+    if (!current || current.status === 'offline') {
+      gracefullyExited = true;
+      break;
+    }
+    const pendingOrClaimed = await db
+      .select({ id: runnerCommands.id })
+      .from(runnerCommands)
+      .where(and(
+        eq(runnerCommands.runnerId, runnerId),
+        ne(runnerCommands.status, 'completed'),
+        ne(runnerCommands.status, 'failed'),
+        ne(runnerCommands.status, 'timeout'),
+        ne(runnerCommands.status, 'cancelled'),
+      ));
+    if (pendingOrClaimed.length === 0) {
+      // All work resolved; ok to proceed with Job deletion even if heartbeat
+      // hasn't landed yet (drain() may still be running but results are in).
+      break;
+    }
+  }
+
+  // Step 3: mark offline (if not already) and tear down the Job.
+  if (!gracefullyExited) {
+    console.warn(`[Pool] EB ${runnerId.slice(0, 8)} did not disconnect within ${graceMs}ms; forcing Job delete`);
+  }
   await db.update(runners).set({ status: 'offline', lastSeen: new Date() }).where(eq(runners.id, runnerId));
   await db
     .update(embeddedSessions)

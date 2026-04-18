@@ -164,6 +164,10 @@ function jobSpec(name: string, instanceId: string): Record<string, unknown> {
         },
         spec: {
           restartPolicy: 'Never',
+          // Allow enough time for runnerClient.drain() to flush pending
+          // test_result / screenshot / network_bodies POSTs after SIGTERM.
+          // Must be ≥ drain timeout in index.ts shutdown() (15s) plus headroom.
+          terminationGracePeriodSeconds: 60,
           // `/dev/shm` size ≥512Mi is required — default 64Mi crashes Chromium under load
           volumes: [
             { name: 'dshm', emptyDir: { medium: 'Memory', sizeLimit: shmSize } },
@@ -179,6 +183,7 @@ function jobSpec(name: string, instanceId: string): Record<string, unknown> {
                 { name: 'INSTANCE_ID', value: instanceId },
                 { name: 'STREAM_PORT', value: '9223' },
                 { name: 'CDP_PORT', value: '9222' },
+                { name: 'EB_SETUP_CONTEXT_TTL_MS', value: process.env.EB_SETUP_CONTEXT_TTL_MS || String(60 * 60 * 1000) },
               ],
               ports: [
                 { containerPort: 9222, name: 'cdp' },
