@@ -14,6 +14,7 @@ import {
   queueCommandToDB,
   createRemoteRecordingSession,
   getRemoteRecordingSession,
+  getRemoteRecordingEvents,
   completeRemoteRecordingSession,
   clearRemoteRecordingSession,
   type RemoteRecordingEvent,
@@ -57,7 +58,7 @@ export async function startRecording(
   // reconnecting to the same runner should always be allowed
   const existingSession = getRemoteRecordingSession(repositoryId);
   if (existingSession) {
-    clearRemoteRecordingSession(repositoryId);
+    await clearRemoteRecordingSession(repositoryId);
   }
 
   // Create the remote recording session on the server
@@ -124,9 +125,10 @@ export async function stopRecording(repositoryId?: string | null) {
       if (!session?.isRecording) break;
     }
 
-    // Generate code from the stored events
+    // Generate code from the stored events (merged in-memory + DB-forwarded)
+    const allEvents = await getRemoteRecordingEvents(repositoryId);
     const generatedCode = generateCodeFromRemoteEvents(
-      remoteSession.events,
+      allEvents,
       remoteSession.selectorPriority,
       remoteSession.targetUrl
     );
@@ -139,7 +141,7 @@ export async function stopRecording(repositoryId?: string | null) {
       id: remoteSession.sessionId,
       url: remoteSession.targetUrl,
       startedAt: remoteSession.startedAt,
-      events: remoteSession.events,
+      events: allEvents,
       generatedCode,
       requiredCapabilities: undefined,
       capturedStorageState: null as string | null,
@@ -230,11 +232,13 @@ export async function getRecordingStatus(repositoryId?: string | null, sinceSequ
   // Check for remote recording session first
   const remoteSession = getRemoteRecordingSession(repositoryId);
   if (remoteSession) {
-    const allEvents = remoteSession.events;
-    const events = sinceSequence !== undefined
-      ? allEvents.filter(e => e.sequence > sinceSequence)
-      : allEvents;
-    const lastSequence = allEvents.at(-1)?.sequence ?? 0;
+    // Pull events from the merged view (in-memory + DB-forwarded from
+    // cross-pod recording_event POSTs).
+    const events = await getRemoteRecordingEvents(repositoryId, sinceSequence);
+    const allCount = remoteSession.events.length; // for legacy eventsCount; DB-merged may differ but in-memory is fine here
+    const lastSequence = events.length > 0
+      ? events[events.length - 1]!.sequence
+      : (remoteSession.events.at(-1)?.sequence ?? sinceSequence ?? 0);
 
     // If recording stopped and we have generated code, return as completed session
     const isCompleted = !remoteSession.isRecording && remoteSession.generatedCode;
@@ -248,7 +252,7 @@ export async function getRecordingStatus(repositoryId?: string | null, sinceSequ
         id: remoteSession.sessionId,
         url: remoteSession.targetUrl,
         startedAt: remoteSession.startedAt,
-        eventsCount: allEvents.length,
+        eventsCount: allCount,
       } : null,
       lastCompletedSession: isCompleted ? {
         id: remoteSession.sessionId,
@@ -273,7 +277,7 @@ export async function clearLastCompletedSession(repositoryId?: string | null) {
   // Clear remote session if it exists and is completed
   const remoteSession = getRemoteRecordingSession(repositoryId);
   if (remoteSession && !remoteSession.isRecording) {
-    clearRemoteRecordingSession(repositoryId);
+    await clearRemoteRecordingSession(repositoryId);
   }
 }
 

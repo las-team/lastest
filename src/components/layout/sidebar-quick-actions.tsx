@@ -106,6 +106,19 @@ export function SidebarQuickActions({ baseUrl: initialBaseUrl = '', repositoryId
 
   const total = sessions.length;
 
+  const STATUS_ORDER = ['ready', 'busy', 'starting', 'stopping', 'stopped'] as const;
+  const STATUS_COLOR: Record<string, string> = {
+    ready: 'bg-green-500',
+    busy: 'bg-yellow-500',
+    starting: 'bg-blue-500',
+    stopping: 'bg-muted-foreground/30',
+    stopped: 'bg-muted-foreground/30',
+  };
+  const counts = sessions.reduce<Record<string, number>>((acc, s) => {
+    acc[s.status] = (acc[s.status] ?? 0) + 1;
+    return acc;
+  }, {});
+
   useEffect(() => {
     setBaseUrl(initialBaseUrl);
     initialBaseUrlRef.current = initialBaseUrl;
@@ -277,21 +290,38 @@ export function SidebarQuickActions({ baseUrl: initialBaseUrl = '', repositoryId
       {total > 0 && (
         <div className="flex items-center gap-2 px-1">
           <Tv2 className="h-3.5 w-3.5 text-muted-foreground" />
-          <div className="flex items-center gap-1">
-            {sessions.map((session) => (
-              <div
-                key={session.id}
-                title={session.status === 'ready' ? 'Available' : session.status === 'busy' ? 'Busy' : session.status}
-                className={`w-3 h-3 rounded-sm ${
-                  session.status === 'ready' ? 'bg-green-500' :
-                  session.status === 'busy' ? 'bg-yellow-500' :
-                  session.status === 'starting' ? 'bg-blue-500' :
-                  'bg-muted-foreground/30'
-                }`}
-              />
-            ))}
-          </div>
-          <span className="text-[10px] text-muted-foreground">EB</span>
+          {total <= 10 ? (
+            <>
+              <div className="flex items-center gap-1">
+                {sessions.map((session) => (
+                  <div
+                    key={session.id}
+                    title={session.status === 'ready' ? 'Available' : session.status === 'busy' ? 'Busy' : session.status}
+                    className={`w-3 h-3 rounded-sm ${STATUS_COLOR[session.status] ?? 'bg-muted-foreground/30'}`}
+                  />
+                ))}
+              </div>
+              <span className="text-[10px] text-muted-foreground">EB</span>
+            </>
+          ) : (
+            <>
+              <div className="flex items-center gap-1">
+                {STATUS_ORDER.filter((s) => (counts[s] ?? 0) > 0).map((status) => (
+                  <div
+                    key={status}
+                    title={`${counts[status]} ${status}`}
+                    className="inline-flex items-center gap-1 px-1.5 h-4 rounded-full border border-border/50"
+                  >
+                    <span className={`h-2 w-2 rounded-full ${STATUS_COLOR[status]}`} />
+                    <span className="text-[10px] tabular-nums text-muted-foreground leading-none">
+                      {counts[status]}
+                    </span>
+                  </div>
+                ))}
+              </div>
+              <span className="text-[10px] text-muted-foreground">EB · {total}</span>
+            </>
+          )}
         </div>
       )}
     </div>

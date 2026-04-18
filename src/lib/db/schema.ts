@@ -1661,6 +1661,32 @@ export type RunnerCommandResult = typeof runnerCommandResults.$inferSelect;
 export type NewRunnerCommandResult = typeof runnerCommandResults.$inferInsert;
 
 // ============================================
+// Remote Recording Events (cross-pod forwarding)
+// ============================================
+// Recording events POSTed by the EB land on whichever pod serves LASTEST_URL
+// (the envoy-less `*-internal` pod in kubernetes mode). The recording session
+// state lives in-memory on the main pod (where startRecording ran). Without
+// this table the internal pod has no way to hand events back to the main pod
+// — logs fill with "Received events for unknown session". This table is the
+// shared inbox: internal pod inserts, main pod reads since-last-sequence.
+export const remoteRecordingEvents = pgTable('remote_recording_events', {
+  id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+  sessionId: text('session_id').notNull(),
+  sequence: integer('sequence').notNull(),
+  type: text('type').notNull(),
+  timestamp: bigint('timestamp', { mode: 'number' }).notNull(),
+  status: text('status').notNull(), // 'preview' | 'committed'
+  verification: jsonb('verification').$type<Record<string, unknown> | null>(),
+  data: jsonb('data').$type<Record<string, unknown>>(),
+  createdAt: timestamp('created_at').$defaultFn(() => new Date()).notNull(),
+}, (table) => ([
+  index('idx_remote_recording_events_session_seq').on(table.sessionId, table.sequence),
+]));
+
+export type RemoteRecordingEventRow = typeof remoteRecordingEvents.$inferSelect;
+export type NewRemoteRecordingEventRow = typeof remoteRecordingEvents.$inferInsert;
+
+// ============================================
 // GitHub Actions Configs
 // ============================================
 

@@ -15,7 +15,7 @@ import { agentCreateTest } from '@/lib/playwright/generator-agent';
 import { emitAndPersistActivityEvent } from '@/lib/db/queries/activity-events';
 import { awardScore } from '@/server/actions/gamification';
 import type { AgentStepState } from '@/lib/db/schema';
-import { claimPoolEB, releasePoolEB } from '@/server/actions/embedded-sessions';
+import { claimPoolEB, claimOrProvisionPoolEB, releasePoolEB } from '@/server/actions/embedded-sessions';
 import { db } from '@/lib/db';
 import { embeddedSessions } from '@/lib/db/schema';
 import { eq } from 'drizzle-orm';
@@ -36,9 +36,16 @@ export async function claimEmbeddedBrowserForAgent(
 } | undefined> {
   const deadline = Date.now() + maxWaitMs;
   let notifiedQueued = false;
+  let firstAttempt = true;
 
   while (Date.now() < deadline) {
-    const poolEB = await claimPoolEB();
+    // First attempt: try to claim OR provision (spawns a fresh EB Job if the
+    // pool has room and no idle EB is available). Subsequent attempts just
+    // poll for release — we don't want to keep launching fresh Jobs in a loop.
+    const poolEB = firstAttempt
+      ? await claimOrProvisionPoolEB()
+      : await claimPoolEB();
+    firstAttempt = false;
     if (poolEB) {
       // Look up the CDP/stream URLs from the session
       const [session] = await db

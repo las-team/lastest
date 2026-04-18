@@ -40,23 +40,25 @@ import { createAndRunBuildCore } from '@/server/actions/builds';
 import { batchApproveDiffsCore, batchRejectDiffsCore, approveDiffCore, rejectDiffCore, approveAllDiffsCore, getDiffCore } from '@/server/actions/diffs';
 import { awardScore } from '@/server/actions/gamification';
 import { getCurrentSession } from '@/lib/auth';
-import { verifyBearerToken } from '@/lib/auth/api-key';
 
-// Helper to verify API auth (session or Bearer token)
-async function verifyAuth(request: NextRequest) {
-  // Try session first
-  const session = await getCurrentSession();
-  if (session) {
-    return session;
+// Helper to verify API auth. `getCurrentSession` already handles both cookie
+// sessions and `Authorization: Bearer <token>` headers, so v1 and any
+// downstream server actions share the same resolution path.
+async function verifyAuth(_request: NextRequest) {
+  return getCurrentSession();
+}
+
+// Map thrown auth errors from server actions to proper HTTP status codes
+// (instead of opaque 500s). Server actions throw plain Errors with these
+// prefixes — see `src/lib/auth/session.ts`.
+function mapAuthError(error: unknown): NextResponse | null {
+  const message = error instanceof Error ? error.message : '';
+  if (message === 'Unauthorized') {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
-
-  // Try API token auth (Bearer token)
-  const authHeader = request.headers.get('authorization');
-  if (authHeader?.startsWith('Bearer ')) {
-    const token = authHeader.slice(7);
-    return verifyBearerToken(token);
+  if (message.startsWith('Forbidden')) {
+    return NextResponse.json({ error: message }, { status: 403 });
   }
-
   return null;
 }
 
@@ -318,6 +320,8 @@ export async function GET(
 
     return NextResponse.json({ error: 'Not found' }, { status: 404 });
   } catch (error) {
+    const mapped = mapAuthError(error);
+    if (mapped) return mapped;
     console.error('[API v1] GET error:', error);
     return NextResponse.json(
       { error: 'Internal server error' },
@@ -612,6 +616,8 @@ export async function POST(
 
     return NextResponse.json({ error: 'Not found' }, { status: 404 });
   } catch (error) {
+    const mapped = mapAuthError(error);
+    if (mapped) return mapped;
     console.error('[API v1] POST error:', error);
     return NextResponse.json(
       { error: 'Internal server error' },
@@ -685,6 +691,8 @@ export async function PUT(
 
     return NextResponse.json({ error: 'Not found' }, { status: 404 });
   } catch (error) {
+    const mapped = mapAuthError(error);
+    if (mapped) return mapped;
     console.error('[API v1] PUT error:', error);
     return NextResponse.json(
       { error: 'Internal server error' },
@@ -726,6 +734,8 @@ export async function DELETE(
 
     return NextResponse.json({ error: 'Not found' }, { status: 404 });
   } catch (error) {
+    const mapped = mapAuthError(error);
+    if (mapped) return mapped;
     console.error('[API v1] DELETE error:', error);
     return NextResponse.json(
       { error: 'Internal server error' },

@@ -12,19 +12,31 @@ export interface SessionData {
 
 export const getCurrentSession = cache(
   async (): Promise<SessionData | null> => {
-    const session = await auth.api.getSession({ headers: await headers() });
-    if (!session) return null;
+    const h = await headers();
+    const session = await auth.api.getSession({ headers: h });
+    if (session) {
+      const user = await queries.getUserById(session.user.id);
+      if (!user) return null;
 
-    const user = await queries.getUserById(session.user.id);
-    if (!user) return null;
+      const team = user.teamId ? await queries.getTeam(user.teamId) : null;
 
-    const team = user.teamId ? await queries.getTeam(user.teamId) : null;
+      return {
+        user,
+        sessionId: session.session.id,
+        team: team ?? null,
+      };
+    }
 
-    return {
-      user,
-      sessionId: session.session.id,
-      team: team ?? null,
-    };
+    // Fallback: Bearer-token auth for programmatic API clients (VS Code ext,
+    // MCP server, CI/CD). Lets server actions reached via v1 API routes
+    // transparently resolve a session when there are no cookies.
+    const authHeader = h.get("authorization");
+    if (authHeader?.startsWith("Bearer ")) {
+      const { verifyBearerToken } = await import("./api-key");
+      return verifyBearerToken(authHeader.slice(7));
+    }
+
+    return null;
   }
 );
 

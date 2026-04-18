@@ -342,7 +342,15 @@ export async function isPoolBusy(): Promise<boolean> {
       eq(runners.type, 'embedded'),
     ))
     .limit(1);
-  return !available;
+  if (available) return false;
+
+  // No idle EB right now — but in kubernetes mode we can provision a new one.
+  // Only consider the pool "busy" (and queue the job) when we're ALSO at the
+  // cluster cap. Otherwise let the caller proceed; claimOrProvisionPoolEB will
+  // spin up a fresh EB.
+  if (!isKubernetesMode()) return true;
+  const size = await currentPoolSize();
+  return size >= poolMax();
 }
 
 /**
@@ -493,6 +501,11 @@ export async function releasePoolEB(runnerId: string): Promise<void> {
  * test_result/screenshot/network_bodies POSTs before exiting. Only after the
  * grace window do we DELETE the k8s Job as a fallback.
  */
+// Serializes the "check pool size + reserve slot" decision across concurrent
+// release calls. Without this, two parallel releases both read size=3 under a
+// warmPoolMin=2 budget and both terminate, dropping the pool below the floor.
+let reserveGate: Promise<void> = Promise.resolve();
+
 async function maybeTerminateReleasedEB(runnerId: string): Promise<void> {
   const [runner] = await db
     .select({ name: runners.name, isSystem: runners.isSystem, type: runners.type })
@@ -500,15 +513,39 @@ async function maybeTerminateReleasedEB(runnerId: string): Promise<void> {
     .where(eq(runners.id, runnerId));
   if (!runner?.isSystem || runner.type !== 'embedded') return;
 
-  const size = await currentPoolSize();
-  if (size <= warmPoolMin()) {
-    return; // Keep this one alive to absorb back-to-back claims
-  }
-
   const jobName = jobNameForRunnerName(runner.name);
   if (!jobName) return; // Not a provisioner-created runner (e.g. docker-compose EB)
 
-  // Step 1: ask the EB to shut itself down gracefully.
+  // Step 1 — under the reserve gate: check pool size, and if we're above warm
+  // min, atomically flip this runner to 'offline' so (a) it can't be re-claimed
+  // and (b) subsequent concurrent releases see the new lower count.
+  let resolveGate!: () => void;
+  const nextGate = new Promise<void>((r) => { resolveGate = r; });
+  const prevGate = reserveGate;
+  reserveGate = nextGate;
+  let reserved = false;
+  try {
+    await prevGate;
+    const size = await currentPoolSize();
+    if (size <= warmPoolMin()) {
+      return; // Keep this one alive to absorb back-to-back claims
+    }
+    // Flip to offline now — other concurrent releases will see the decremented count.
+    const res = await db
+      .update(runners)
+      .set({ status: 'offline', lastSeen: new Date() })
+      .where(and(eq(runners.id, runnerId), ne(runners.status, 'offline')))
+      .returning({ id: runners.id });
+    if (res.length === 0) return; // already offline (double release)
+    reserved = true;
+  } finally {
+    resolveGate();
+  }
+  if (!reserved) return;
+
+  // Step 2: ask the EB to shut itself down gracefully. It was flipped to
+  // offline in step 1, so no new work will be queued. Existing in-flight
+  // commands still drain through `runnerClient.drain()` on the EB side.
   const { createRunnerCommand } = await import('@/lib/db/queries');
   const { notifyCommandQueued } = await import('@/lib/ws/runner-events');
   try {
@@ -526,21 +563,12 @@ async function maybeTerminateReleasedEB(runnerId: string): Promise<void> {
     console.warn(`[Pool] Failed to enqueue shutdown for ${runnerId.slice(0, 8)}:`, err);
   }
 
-  // Step 2: wait up to EB_SHUTDOWN_GRACE_MS for the EB to disconnect.
-  // Signal: runner row flipped to 'offline' OR all claimed commands completed/failed.
+  // Step 3: wait up to EB_SHUTDOWN_GRACE_MS for the EB's in-flight commands to
+  // complete (drain signal). If everything's already settled, proceed.
   const graceMs = parseInt(process.env.EB_SHUTDOWN_GRACE_MS || '30000', 10);
   const deadline = Date.now() + graceMs;
-  let gracefullyExited = false;
   while (Date.now() < deadline) {
     await new Promise((r) => setTimeout(r, 500));
-    const [current] = await db
-      .select({ status: runners.status })
-      .from(runners)
-      .where(eq(runners.id, runnerId));
-    if (!current || current.status === 'offline') {
-      gracefullyExited = true;
-      break;
-    }
     const pendingOrClaimed = await db
       .select({ id: runnerCommands.id })
       .from(runnerCommands)
@@ -558,11 +586,8 @@ async function maybeTerminateReleasedEB(runnerId: string): Promise<void> {
     }
   }
 
-  // Step 3: mark offline (if not already) and tear down the Job.
-  if (!gracefullyExited) {
-    console.warn(`[Pool] EB ${runnerId.slice(0, 8)} did not disconnect within ${graceMs}ms; forcing Job delete`);
-  }
-  await db.update(runners).set({ status: 'offline', lastSeen: new Date() }).where(eq(runners.id, runnerId));
+  // Step 4: update the embedded_sessions row + tear down the Job. Runner row
+  // was already flipped in step 1 under the gate.
   await db
     .update(embeddedSessions)
     .set({ status: 'stopped', busySince: null })
