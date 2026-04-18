@@ -193,7 +193,10 @@
       "Read(//etc/**)",
       "Bash(pnpm eslint *)",
       "Bash(pnpm --filter embedded-browser build)",
-      "Bash(docker buildx *)"
+      "Bash(docker buildx *)",
+      "Bash(rm -f /tmp/lastest-dev-*.tgz)",
+      "Bash(tar czf *)",
+      "Bash(tar xzf *)"
     ]
   },
   "disabledMcpjsonServers": [

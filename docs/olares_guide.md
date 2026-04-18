@@ -32,13 +32,16 @@ Hard-won notes from deploying `lastest` / `lastestalt` to Olares-on-k3s. Each se
 - **Correct target for CF Tunnel on Olares:** `https://<bfl-cluster-ip>:443` with `originRequest: { noTLSVerify: true }`. bfl handles per-hostname routing + injects `X-BFL-User` before forwarding upstream.
 - After fixing, persist via backup: `cp /etc/cloudflared/config.yaml /etc/cloudflared/config.yaml.bak`
 
-## 5. Helm tracks template resource names; Olares webhook renames → upgrade conflicts
+## 5. Chart Deployment name MUST equal app name (Olares lint)
 
-- Chart template says `Deployment/lastest`. Olares webhook renames the resource on apply to `Deployment/<app-name>-<release-suffix>` → `Deployment/lastest-dev` in the cluster.
-- Helm's release state records `Deployment/lastest` (the template name).
-- Next `helm upgrade`: Helm diffs template (name: lastest) vs cluster (there's no lastest), decides to CREATE. Webhook renames CREATE to `lastest-dev`. Conflict with existing → `deployments.apps "lastest-dev" already exists`. Upgrade fails, ApplicationManager state → `upgradeFailed`, UI shows the app red.
-- **Workaround**: delete the failed Helm release secret (`sh.helm.release.v1.<app>.<rev>`) and let Helm re-use the last successful revision. The live Deployment stays running; cosmetic UI state eventually reconciles.
-- **Long-term fix**: chart templates should use the post-rename resource name (`name: <app-name>`) so the webhook is a no-op. Transition requires either downtime (delete + reinstall) or manually editing the Helm release secret to rename the tracked resource.
+- Olares lint rejects charts where the Deployment/StatefulSet resource name ≠ `metadata.name` from OlaresManifest:
+  ```
+  must have a deployment/sts name equal app name lastest-dev
+  ```
+- The original older chart (pre-lint) sometimes had `name: lastest` (template) while the app was `lastest-dev` — Olares's webhook renamed at apply time. That era is over; current lint enforces name-match at chart-upload time.
+- **Helm-upgrade conflict anti-pattern (historical)**: when template said `Deployment/lastest` and cluster had webhook-renamed `Deployment/lastest-dev`, Helm upgrade tried to CREATE `lastest` (not in cluster), webhook renamed to `lastest-dev`, collided → `deployments.apps "lastest-dev" already exists`. Fixed by using `lastest-dev` in template directly.
+- **If you inherit this mismatch**: delete the failed Helm release secret (`sh.helm.release.v1.<app>.<rev>`); Helm re-uses the last successful revision. Live Deployment stays running; `upgradeFailed` ApplicationManager state eventually reconciles.
+- `Service` resource name can differ from Deployment name (we use `lastest` for the Service, `lastest-dev` for the Deployment — selectors must match the Deployment's `io.kompose.service` label).
 
 ## 6. Custom domain binding is bfl state, not chart config
 
