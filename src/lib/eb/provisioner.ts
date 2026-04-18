@@ -30,7 +30,7 @@ import { readFileSync } from 'fs';
 import https from 'https';
 import { db } from '@/lib/db';
 import { runners } from '@/lib/db/schema';
-import { and, eq } from 'drizzle-orm';
+import { and, eq, ne } from 'drizzle-orm';
 
 const SA_PATH = '/var/run/secrets/kubernetes.io/serviceaccount';
 
@@ -117,13 +117,19 @@ async function k8sRequest(method: string, path: string, body?: unknown): Promise
 
 /**
  * Count currently-known system EB runners (online + busy) — proxy for pool size.
- * Used to enforce EB_POOL_MAX before provisioning.
+ * Offline rows are excluded: they represent dying/dead Jobs awaiting GC and shouldn't
+ * block new provisioning. Used to enforce EB_POOL_MAX before provisioning and to
+ * decide whether `maybeTerminateReleasedEB` can tear down past warmPoolMin.
  */
 export async function currentPoolSize(): Promise<number> {
   const rows = await db
     .select({ id: runners.id })
     .from(runners)
-    .where(and(eq(runners.isSystem, true), eq(runners.type, 'embedded')));
+    .where(and(
+      eq(runners.isSystem, true),
+      eq(runners.type, 'embedded'),
+      ne(runners.status, 'offline'),
+    ));
   return rows.length;
 }
 

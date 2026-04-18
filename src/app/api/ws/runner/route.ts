@@ -163,9 +163,12 @@ function ensureInitialized() {
       console.error('[GC] Failed to timeout stale commands:', error);
     }
 
-    // Reap stale pool EBs: busy + no heartbeat for 10min
+    // Reap stale pool EBs: busy + no heartbeat longer than EB_HEARTBEAT_TIMEOUT_MS.
+    // Default 300s; must comfortably exceed the slowest expected test + upload time on
+    // a contended node, otherwise we kill live test runs mid-execution.
     try {
-      const reaped = await reapStalePoolEBs();
+      const heartbeatTimeoutMs = parseInt(process.env.EB_HEARTBEAT_TIMEOUT_MS || '300000', 10);
+      const reaped = await reapStalePoolEBs(heartbeatTimeoutMs);
       if (reaped > 0) {
         console.log(`[Reaper] Released ${reaped} stale pool EB(s)`);
       }

@@ -475,13 +475,17 @@ export async function markStaleRunnersOffline(staleThresholdMs: number = 60_000)
     }
   }
 
-  // Also check busy runners
+  // Also check busy runners — but skip busy system EBs: their liveness is governed
+  // authoritatively by reapStalePoolEBs (EB_HEARTBEAT_TIMEOUT_MS, default 300s).
+  // Flipping a busy EB offline here mid-test lets reapIdleEBJobs tear down its Job
+  // before results report back.
   const busyRunners = await db
     .select()
     .from(runners)
     .where(eq(runners.status, 'busy'));
 
   for (const runner of busyRunners) {
+    if (runner.isSystem && runner.type === 'embedded') continue;
     if (!runner.lastSeen || runner.lastSeen < staleThreshold) {
       await db
         .update(runners)

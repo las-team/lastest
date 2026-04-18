@@ -1,7 +1,7 @@
 'use server';
 
 import { db } from '@/lib/db';
-import { embeddedSessions, runners, backgroundJobs, type EmbeddedSession, type EmbeddedSessionStatus } from '@/lib/db/schema';
+import { embeddedSessions, runners, runnerCommands, runnerCommandResults, backgroundJobs, type EmbeddedSession, type EmbeddedSessionStatus } from '@/lib/db/schema';
 import { eq, and, ne, desc, isNull } from 'drizzle-orm';
 import { requireTeamAccess, requireTeamAdmin } from '@/lib/auth';
 import { revalidatePath } from 'next/cache';
@@ -662,9 +662,11 @@ export async function claimOrProvisionPoolEB(
 export async function reapIdleEBJobs(idleTtlMs: number): Promise<number> {
   if (!isKubernetesMode()) return 0;
 
-  const size = await currentPoolSize();
+  // currentPoolSize now excludes offline rows; they count as already-dead slots.
+  // Offline reaping is always safe (we aren't burning capacity by tearing them down).
+  // Idle-online reaping is bounded by warmPoolMin so we preserve the warm pool.
+  const activeSize = await currentPoolSize();
   const minKeep = warmPoolMin();
-  if (size <= minKeep) return 0;
 
   const cutoff = new Date(Date.now() - idleTtlMs);
   const candidates = await db
@@ -673,20 +675,30 @@ export async function reapIdleEBJobs(idleTtlMs: number): Promise<number> {
     .where(and(eq(runners.isSystem, true), eq(runners.type, 'embedded')));
 
   let terminated = 0;
+  let onlineReaped = 0;
   for (const row of candidates) {
-    if (size - terminated <= minKeep) break;
     const isOffline = row.status === 'offline';
     const isIdle = row.status === 'online' && (!row.lastSeen || row.lastSeen < cutoff);
     if (!isOffline && !isIdle) continue;
+
+    // Protect warm pool: only reap an idle-online row if doing so would still
+    // leave at least minKeep non-offline rows alive. Offline rows are unconditional.
+    if (isIdle && activeSize - onlineReaped <= minKeep) continue;
 
     const jobName = jobNameForRunnerName(row.name);
     if (!jobName) continue; // docker-compose EB — don't touch
 
     try {
-      await db.delete(runners).where(eq(runners.id, row.id));
-      await db.delete(embeddedSessions).where(eq(embeddedSessions.runnerId, row.id));
+      // FK-order-respecting cleanup: children before parent.
+      await db.transaction(async (tx) => {
+        await tx.delete(embeddedSessions).where(eq(embeddedSessions.runnerId, row.id));
+        await tx.delete(runnerCommandResults).where(eq(runnerCommandResults.runnerId, row.id));
+        await tx.delete(runnerCommands).where(eq(runnerCommands.runnerId, row.id));
+        await tx.delete(runners).where(eq(runners.id, row.id));
+      });
       await terminateEBJob(jobName);
       terminated++;
+      if (!isOffline) onlineReaped++;
     } catch (err) {
       console.error(`[Pool] Failed to reap ${row.name}:`, err);
     }

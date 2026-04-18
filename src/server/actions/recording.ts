@@ -9,7 +9,7 @@ import { v4 as uuid } from 'uuid';
 import { revalidatePath } from 'next/cache';
 import { createMessage } from '@/lib/ws/protocol';
 import type { StartRecordingCommand, StopRecordingCommand, CaptureScreenshotCommand, CreateAssertionCommand, FlagDownloadCommand, InsertTimestampCommand } from '@/lib/ws/protocol';
-import { claimPoolEB, releasePoolEB } from '@/server/actions/embedded-sessions';
+import { claimOrProvisionPoolEB, releasePoolEB } from '@/server/actions/embedded-sessions';
 import {
   queueCommandToDB,
   createRemoteRecordingSession,
@@ -38,9 +38,10 @@ export async function startRecording(
   const settings = await getPlaywrightSettings(repositoryId);
   const selectorPriority = settings.selectorPriority ?? DEFAULT_SELECTOR_PRIORITY;
 
-  // Resolve 'auto' to a pool-managed system EB (atomic claim)
+  // Resolve 'auto' to a pool-managed system EB (atomic claim, with on-demand
+  // provisioning when EB_PROVISIONER=kubernetes and no idle EB is available).
   if (runnerId === 'auto') {
-    const poolEB = await claimPoolEB();
+    const poolEB = await claimOrProvisionPoolEB();
     if (!poolEB) {
       return { error: 'All browsers are busy. Please try again later.' };
     }

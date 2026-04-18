@@ -457,22 +457,26 @@ async function startup(): Promise<void> {
               },
             });
 
-            // Send full network body data asynchronously (non-blocking)
+            // Send full network body data. Awaited so that if a SIGTERM arrives
+            // immediately after test completion, the payload is flushed before
+            // shutdown()'s drain() returns.
             if (hasNetworkBodies && result.networkRequests) {
-              capturedClient.sendMessage({
-                id: crypto.randomUUID(),
-                type: 'response:network_bodies' as 'response:test_result',
-                timestamp: Date.now(),
-                payload: {
-                  correlationId: capturedCommand.id,
-                  testId: payload.testId,
-                  testRunId: payload.testRunId,
-                  repositoryId: payload.repositoryId,
-                  networkRequests: result.networkRequests,
-                },
-              }).catch(err => {
+              try {
+                await capturedClient.sendMessage({
+                  id: crypto.randomUUID(),
+                  type: 'response:network_bodies' as 'response:test_result',
+                  timestamp: Date.now(),
+                  payload: {
+                    correlationId: capturedCommand.id,
+                    testId: payload.testId,
+                    testRunId: payload.testRunId,
+                    repositoryId: payload.repositoryId,
+                    networkRequests: result.networkRequests,
+                  },
+                });
+              } catch (err) {
                 console.warn(`[Command] Failed to send network bodies for test ${payload.testId}:`, err);
-              });
+              }
             }
           } catch (err) {
             console.error(`[Command] Test ${payload.testId} failed:`, err);
@@ -963,6 +967,17 @@ async function startup(): Promise<void> {
         break;
       }
 
+      case 'command:shutdown': {
+        // Graceful shutdown initiated by the server (typically by
+        // maybeTerminateReleasedEB before the k8s Job is DELETEd).
+        // Detach the command loop and enter shutdown(); shutdown() will
+        // drain any in-flight sendMessage promises before process.exit.
+        const reason = (command.payload as { reason?: string } | undefined)?.reason ?? 'server-requested';
+        console.log(`[Command] Shutdown requested: ${reason}`);
+        void shutdown();
+        break;
+      }
+
       default:
         console.warn(`[Command] Unknown command type: ${command.type}`);
     }
@@ -972,10 +987,22 @@ async function startup(): Promise<void> {
   console.log('[Startup] Fully operational');
 }
 
+let shuttingDown = false;
+
 async function shutdown(): Promise<void> {
+  if (shuttingDown) return;
+  shuttingDown = true;
   console.log('[Shutdown] Starting...');
 
   if (runnerClient) {
+    // Drain any in-flight test_result / screenshot / network_bodies POSTs
+    // BEFORE stopping the runner loop. 15s covers typical k8s termination
+    // grace (we set terminationGracePeriodSeconds=60 on the Job template).
+    try {
+      await runnerClient.drain(15_000);
+    } catch (err) {
+      console.warn('[Shutdown] drain error:', err);
+    }
     await runnerClient.stop();
   }
 
