@@ -34,7 +34,12 @@ export default function proxy(request: NextRequest) {
 
   const session = getSessionCookie(request);
   if (!session) {
-    return NextResponse.redirect(new URL('/login', request.url));
+    const forwardedHost = request.headers.get('x-forwarded-host');
+    const forwardedProto = request.headers.get('x-forwarded-proto');
+    const base = forwardedHost
+      ? `${forwardedProto ?? 'https'}://${forwardedHost}`
+      : request.url;
+    return NextResponse.redirect(new URL('/login', base));
   }
 
   return NextResponse.next();

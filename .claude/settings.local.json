@@ -192,7 +192,8 @@
       "Bash(docker exec *)",
       "Read(//etc/**)",
       "Bash(pnpm eslint *)",
-      "Bash(pnpm --filter embedded-browser build)"
+      "Bash(pnpm --filter embedded-browser build)",
+      "Bash(docker buildx *)"
     ]
   },
   "disabledMcpjsonServers": [

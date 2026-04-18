@@ -915,11 +915,20 @@ async function executeFallbackChain(
     }
   }
 
-  // 2. Try system EB pool. In the on-demand model each EB runs ONE test, so for
-  //    multi-test runs we spawn a worker pool sized to `maxParallelEBs` where
-  //    each worker claims its own EB, runs a single test, releases, and loops.
+  // 2. Try system EB pool.
+  //    - Worker-pool fan-out: one EB per test, parallelism across many EBs. Only safe
+  //      when there's no `options.setupInfo`, because the pool setup-then-fan-out path
+  //      would serialize the setup's storageState across fresh EBs and Playwright's
+  //      storageState() drops sessionStorage/IndexedDB/in-memory auth tokens.
+  //    - Single-EB path: all tests on one EB. The runner reuses the setup's live
+  //      BrowserContext (persistent-context mode — see packages/embedded-browser/src/
+  //      test-executor.ts) so full setup state is preserved.
   const maxParallelEBs = Math.max(1, options.playwrightSettings?.maxParallelEBs ?? 10);
-  if (tests.length > 1 && maxParallelEBs > 1) {
+  const canUseWorkerPool =
+    !options.setupInfo &&
+    tests.length > 1 &&
+    maxParallelEBs > 1;
+  if (canUseWorkerPool) {
     const poolResults = await executeViaPoolWorkers(
       tests,
       runId,
@@ -930,19 +939,18 @@ async function executeFallbackChain(
       onResult,
     );
     if (poolResults) return poolResults;
-  } else {
-    // Single-test path: claim one EB and run.
-    const { claimOrProvisionPoolEB, releasePoolEB } = await import('@/server/actions/embedded-sessions');
-    const poolEB = await claimOrProvisionPoolEB();
-    if (poolEB) {
-      console.log(`Fallback chain: claimed pool EB ${poolEB.runnerId.slice(0, 8)}`);
-      await recordActualRunner(poolEB.runnerId);
-      try {
-        return await executeViaRunner(tests, runId, poolEB.runnerId, options, onProgress, onResult);
-      } finally {
-        await releasePoolEB(poolEB.runnerId);
-        console.log(`Fallback chain: released pool EB ${poolEB.runnerId.slice(0, 8)}`);
-      }
+  }
+
+  const { claimOrProvisionPoolEB, releasePoolEB } = await import('@/server/actions/embedded-sessions');
+  const poolEB = await claimOrProvisionPoolEB();
+  if (poolEB) {
+    console.log(`Fallback chain: claimed pool EB ${poolEB.runnerId.slice(0, 8)}`);
+    await recordActualRunner(poolEB.runnerId);
+    try {
+      return await executeViaRunner(tests, runId, poolEB.runnerId, options, onProgress, onResult);
+    } finally {
+      await releasePoolEB(poolEB.runnerId);
+      console.log(`Fallback chain: released pool EB ${poolEB.runnerId.slice(0, 8)}`);
     }
   }
 

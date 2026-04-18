@@ -47,6 +47,12 @@ export class TestRunner {
   // Legacy single-test tracking (for backward compat with abort/isRunning)
   private abortController: AbortController | null = null;
   private currentTestRunId: string | null = null;
+  // Persistent setup contexts: keyed by setupId, reused across all tests in a run.
+  // Fixes the storageState-serialization path losing session state that Playwright's
+  // storageState() can't capture (sessionStorage, IndexedDB, in-memory auth tokens).
+  private setupContexts = new Map<string, { context: BrowserContext; createdAt: number }>();
+  private setupContextSweeper: ReturnType<typeof setInterval> | null = null;
+  private readonly SETUP_CONTEXT_TTL_MS = 30 * 60 * 1000;
 
   /**
    * Ensure a shared browser instance is running.
@@ -84,17 +90,54 @@ export class TestRunner {
   }
 
   /**
-   * Close the shared browser if no tests are running.
-   * Nulls the reference BEFORE closing so concurrent ensureBrowser()
-   * calls see null and launch a fresh browser instead of getting the
-   * dying one.
+   * Close the shared browser if no tests are running AND no persistent
+   * setup contexts are alive. Persistent contexts depend on the shared
+   * browser, so we must keep it up while any are held.
    */
   async closeBrowserIfIdle(): Promise<void> {
-    if (this.activeTests.size === 0 && this.browser) {
+    if (this.activeTests.size === 0 && this.setupContexts.size === 0 && this.browser) {
       const b = this.browser;
       this.browser = null;
       await b.close().catch(() => {});
     }
+  }
+
+  /**
+   * Lazily start a sweeper that closes persistent setup contexts idle longer
+   * than SETUP_CONTEXT_TTL_MS. Called from runSetup when we store the first
+   * persistent context.
+   */
+  private ensureSetupContextSweeper() {
+    if (this.setupContextSweeper) return;
+    this.setupContextSweeper = setInterval(() => {
+      const now = Date.now();
+      for (const [id, entry] of this.setupContexts) {
+        if (now - entry.createdAt > this.SETUP_CONTEXT_TTL_MS) {
+          console.log(`  [INFO] Evicting persistent setup context ${id} (TTL exceeded)`);
+          entry.context.close().catch(() => {});
+          this.setupContexts.delete(id);
+        }
+      }
+      // Stop sweeper + maybe close browser if no contexts remain
+      if (this.setupContexts.size === 0) {
+        clearInterval(this.setupContextSweeper!);
+        this.setupContextSweeper = null;
+        this.closeBrowserIfIdle().catch(() => {});
+      }
+    }, 60 * 1000);
+    if (this.setupContextSweeper.unref) this.setupContextSweeper.unref();
+  }
+
+  /**
+   * Explicitly release a persistent setup context. Called by the cleanup
+   * command or on error paths.
+   */
+  async releaseSetupContext(setupId: string): Promise<void> {
+    const entry = this.setupContexts.get(setupId);
+    if (!entry) return;
+    this.setupContexts.delete(setupId);
+    await entry.context.close().catch(() => {});
+    await this.closeBrowserIfIdle();
   }
 
   /**
@@ -172,6 +215,8 @@ export class TestRunner {
 
     let context: BrowserContext | null = null;
     let page: Page | null = null;
+    // Whether `context` is a reused persistent setup context (don't close in finally).
+    let reusedPersistentContext = false;
     // Raw screenshot function, saved before executeTestCode overrides page.screenshot
     let rawScreenshot: ((options?: { fullPage?: boolean }) => Promise<Buffer>) | null = null;
 
@@ -225,15 +270,22 @@ export class TestRunner {
         }
       }
 
-      // Inject storageState from setup scripts (e.g. login session cookies/localStorage)
+      // Detect persistent-context marker from runSetup — format: "persistent:<setupId>".
+      // When present, reuse the setup's live BrowserContext instead of serializing
+      // storageState (which drops sessionStorage / IndexedDB / in-memory auth).
+      let persistentSetupId: string | undefined;
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       let parsedStorageState: any;
       if (command.storageState) {
-        try {
-          parsedStorageState = JSON.parse(command.storageState);
-          logFn('info', `Injecting storageState: ${parsedStorageState.cookies?.length ?? 0} cookies, ${parsedStorageState.origins?.length ?? 0} origins`);
-        } catch (e) {
-          logFn('warn', `Failed to parse storageState: ${e}`);
+        if (command.storageState.startsWith('persistent:')) {
+          persistentSetupId = command.storageState.slice('persistent:'.length);
+        } else {
+          try {
+            parsedStorageState = JSON.parse(command.storageState);
+            logFn('info', `Injecting storageState: ${parsedStorageState.cookies?.length ?? 0} cookies, ${parsedStorageState.origins?.length ?? 0} origins`);
+          } catch (e) {
+            logFn('warn', `Failed to parse storageState: ${e}`);
+          }
         }
       }
       const needsStabilizedContext = command.stabilization?.crossOsConsistency || command.stabilization?.freezeAnimations;
@@ -248,15 +300,38 @@ export class TestRunner {
         logFn('info', 'Video recording enabled');
       }
 
-      context = await this.browser!.newContext({
-        viewport,
-        ...(parsedStorageState ? { storageState: parsedStorageState } : {}),
-        ...(needsStabilizedContext ? { deviceScaleFactor: 1 } : {}),
-        ...(needsStabilizedContext ? { locale: 'en-US', timezoneId: 'UTC', colorScheme: 'light' as const } : {}),
-        ...(command.stabilization?.freezeAnimations ? { reducedMotion: 'reduce' as const } : {}),
-        ...(videoDir ? { recordVideo: { dir: videoDir, size: viewport } } : {}),
-      });
+      // Persistent-context branch: reuse setup's live context, create a fresh page in it.
+      // Limitations: per-test video recording and context-level stabilization overrides
+      // cannot be applied (context already exists). Per-page stabilization still applies below.
+      if (persistentSetupId) {
+        const entry = this.setupContexts.get(persistentSetupId);
+        if (entry) {
+          if (videoDir) {
+            logFn('warn', 'Per-test video recording not supported in persistent-context mode — disabled for this test');
+          }
+          context = entry.context;
+          reusedPersistentContext = true;
+          logFn('info', `Reusing persistent setup context (setupId=${persistentSetupId})`);
+        } else {
+          logFn('warn', `persistent setup context ${persistentSetupId} not found — falling back to fresh context (auth state will be missing)`);
+        }
+      }
+
+      if (!context) {
+        context = await this.browser!.newContext({
+          viewport,
+          ...(parsedStorageState ? { storageState: parsedStorageState } : {}),
+          ...(needsStabilizedContext ? { deviceScaleFactor: 1 } : {}),
+          ...(needsStabilizedContext ? { locale: 'en-US', timezoneId: 'UTC', colorScheme: 'light' as const } : {}),
+          ...(command.stabilization?.freezeAnimations ? { reducedMotion: 'reduce' as const } : {}),
+          ...(videoDir ? { recordVideo: { dir: videoDir, size: viewport } } : {}),
+        });
+      }
       page = await context.newPage();
+      // Persistent contexts may have a different viewport than this test; sync it.
+      if (reusedPersistentContext) {
+        try { await page.setViewportSize(viewport); } catch { /* best-effort */ }
+      }
 
       // Set explicit timeouts to prevent indefinite hangs
       page.setDefaultNavigationTimeout(30000);
@@ -341,17 +416,29 @@ export class TestRunner {
             .catch(e => { clearTimeout(timeoutTimer); throw e; }),
           new Promise<never>((_, reject) => {
             timeoutTimer = setTimeout(() => {
-              logFn('warn', `Timeout fired (${testTimeout}ms) — closing context to kill in-flight operations`);
-              context?.close().catch(() => {});
-              context = null;
+              // For a reused persistent context, close only the page (not the
+              // context — other tests in this run still need it).
+              if (reusedPersistentContext) {
+                logFn('warn', `Timeout fired (${testTimeout}ms) — closing page (keeping persistent context)`);
+                page?.close().catch(() => {});
+              } else {
+                logFn('warn', `Timeout fired (${testTimeout}ms) — closing context to kill in-flight operations`);
+                context?.close().catch(() => {});
+                context = null;
+              }
               page = null;
               reject(new Error(`Test execution timed out after ${testTimeout}ms`));
             }, testTimeout);
             testAbort.signal.addEventListener('abort', () => {
               clearTimeout(timeoutTimer);
-              logFn('info', 'Abort signal received — closing context');
-              context?.close().catch(() => {});
-              context = null;
+              if (reusedPersistentContext) {
+                logFn('info', 'Abort signal received — closing page (keeping persistent context)');
+                page?.close().catch(() => {});
+              } else {
+                logFn('info', 'Abort signal received — closing context');
+                context?.close().catch(() => {});
+                context = null;
+              }
               page = null;
               reject(new Error('Test cancelled'));
             });
@@ -455,10 +542,12 @@ export class TestRunner {
         this.abortController = null;
         this.currentTestRunId = null;
       }
-      // Capture video before closing context (video is finalized on close)
+      // Capture video before closing context (video is finalized on close).
+      // For persistent (reused) contexts, close only the page — keep the context
+      // alive for sibling tests in this run. Sweeper/cleanup command evicts it later.
       const video = page?.video();
       if (page) await page.close().catch(() => {});
-      if (context) await context.close().catch(() => {});
+      if (context && !reusedPersistentContext) await context.close().catch(() => {});
       // After context close, video file is finalized — read and base64-encode
       if (video && command.forceVideoRecording && result) {
         try {
@@ -581,16 +670,30 @@ export class TestRunner {
         }
       }
 
-      // Capture storageState (cookies/localStorage)
+      // Capture storageState (cookies/localStorage) for logging + as a fallback marker.
+      // The authoritative state carrier is the persistent BrowserContext kept alive below —
+      // storageState alone drops sessionStorage, IndexedDB, service workers, and in-memory
+      // auth tokens, which is why setup-based builds were losing login state across tests.
       let storageState: string | undefined;
       if (context) {
         try {
           const state = await context.storageState();
-          storageState = JSON.stringify(state);
-          logFn('info', `Captured storageState: ${state.cookies.length} cookies, ${state.origins.length} origins`);
+          logFn('info', `Captured storageState snapshot: ${state.cookies.length} cookies, ${state.origins.length} origins`);
         } catch (e) {
-          logFn('warn', `Failed to capture storageState: ${e}`);
+          logFn('warn', `Failed to capture storageState snapshot: ${e}`);
         }
+      }
+
+      // Persist the context for reuse by tests in this run. Close the setup page
+      // (we don't want setup's page open during tests) but keep the context alive.
+      if (context) {
+        if (page) await page.close().catch(() => {});
+        page = null;
+        this.setupContexts.set(command.setupId, { context, createdAt: Date.now() });
+        this.ensureSetupContextSweeper();
+        logFn('info', `Persistent setup context retained (setupId=${command.setupId}) — tests in this run will reuse it`);
+        storageState = `persistent:${command.setupId}`;
+        context = null; // prevent finally from closing it
       }
 
       return {
@@ -612,6 +715,7 @@ export class TestRunner {
       };
     } finally {
       if (page) await page.close().catch(() => {});
+      // Only close context if we didn't hand it off to setupContexts (nulled above on success).
       if (context) await context.close().catch(() => {});
       await this.closeBrowserIfIdle();
     }

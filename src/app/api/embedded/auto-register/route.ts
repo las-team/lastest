@@ -115,8 +115,9 @@ export async function POST(request: Request) {
       capabilities: ['run', 'record'],
       type: 'embedded',
       isSystem: true,
-      // New EB model: 1 test per EB. Build parallelism is achieved by claiming
-      // multiple EBs from the pool (see maxParallelEBs in playwright_settings).
+      // Sequential within an EB: 6 concurrent contexts on one Chromium instance
+      // race each other on setup storageState and deadlock. Build-level parallelism
+      // comes from distributing across sidecars (10 EBs → 10 parallel runs).
       maxParallelTests: 1,
       lastSeen: new Date(),
       createdAt: new Date(),

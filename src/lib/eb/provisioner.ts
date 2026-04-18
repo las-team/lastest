@@ -261,11 +261,13 @@ export async function terminateEBJob(jobName: string): Promise<void> {
 }
 
 /**
- * Derive the Job name for a runner row. Runner names follow the format
- * `System EB-${instanceId}` and we use instanceId as the job name.
+ * Derive the Job name for a runner row. Only matches runners created by
+ * `generateInstanceId()` — `eb-<base36-ts>-<6-char-rand>` — so static
+ * sidecar EBs (`eb1`, `eb2`, ...) are NOT misidentified as dynamic Jobs
+ * and reaped by `reapIdleEBJobs`.
  */
 export function jobNameForRunnerName(runnerName: string): string | null {
-  const m = runnerName.match(/^System EB-(.+)$/);
+  const m = runnerName.match(/^System EB-(eb-[a-z0-9]+-[a-z0-9]+)$/);
   return m ? m[1]! : null;
 }
 
