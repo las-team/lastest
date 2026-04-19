@@ -30,7 +30,20 @@
     "deploy:zima": "bash scripts/deploy.sh zima",
     "deploy:olares": "bash scripts/deploy.sh olares",
     "deploy:npm": "bash scripts/deploy.sh npm",
-    "deploy:all": "bash scripts/deploy.sh all"
+    "deploy:all": "bash scripts/deploy.sh all",
+    "stack": "bash scripts/k3d-up.sh",
+    "stack:up": "bash scripts/k3d-up.sh",
+    "stack:stop": "bash scripts/k3d-down.sh",
+    "stack:down": "bash scripts/k3d-down.sh",
+    "stack:purge": "bash scripts/k3d-down.sh --purge",
+    "stack:refresh": "bash scripts/k3d-rebuild-app.sh",
+    "stack:refresh:app": "bash scripts/k3d-rebuild-app.sh",
+    "stack:refresh:eb": "bash scripts/k3d-rebuild-eb.sh",
+    "stack:refresh:all": "bash scripts/k3d-rebuild-eb.sh && bash scripts/k3d-rebuild-app.sh",
+    "stack:logs": "bash scripts/k3d-logs.sh",
+    "stack:logs:eb": "bash scripts/k3d-logs.sh eb",
+    "stack:logs:all": "bash scripts/k3d-logs.sh all",
+    "stack:status": "bash scripts/k3d-status.sh"
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.2.98",
