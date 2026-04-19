@@ -1173,9 +1173,12 @@ export async function processNextQueuedBuild(repositoryId?: string | null, targe
   emitJobEvent({ type: 'job:delete', jobId: nextJob.id });
 
   // Run the build — for pool-managed jobs, runnerId is undefined so
-  // createAndRunBuildCore goes through auto mode → executeFallbackChain → claimPoolEB
+  // createAndRunBuildCore goes through auto mode → executeFallbackChain → claimPoolEB.
+  // MUST use the -Core variant: this runs from a fire-and-forget context
+  // (no request headers), so the auth'd `createAndRunBuild` would throw
+  // from `requireRepoAccess → headers()` and the queued run would be lost.
   try {
-    await createAndRunBuild(
+    await createAndRunBuildCore(
       metadata?.triggerType || 'manual',
       metadata?.testIds || undefined,
       nextJob.repositoryId,

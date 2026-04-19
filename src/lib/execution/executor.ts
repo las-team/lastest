@@ -674,11 +674,18 @@ async function executeViaPoolWorkers(
   let activeWorkers = 0;
 
   type WorkerEB = { runnerId: string; sessionId: string | null };
+  // Bounded setup retry: burst-starting many workers against one target URL
+  // triggers network/DNS flakes (e.g. ERR_NETWORK_CHANGED) on a minority of
+  // EBs. Retrying on a fresh EB almost always succeeds, so we back off and
+  // retry rather than burning one test per failed setup. Cap retries so a
+  // persistently-unreachable target doesn't loop forever.
+  const MAX_SETUP_RETRIES = 5;
   const runWorker = async (workerId: number): Promise<void> => {
     // Each worker holds onto a single EB for as long as possible. Setup runs once
     // per EB. If the EB dies mid-sequence, we claim a fresh one and re-setup.
     let claimed: WorkerEB | null = null;
     let setupDone = false;
+    let setupFailureStreak = 0;
     const workerSetupId = options.setupInfo ? `${runId}-w${workerId}` : null;
 
     const ensureEBWithSetup = async (): Promise<WorkerEB | null> => {
@@ -716,24 +723,43 @@ async function executeViaPoolWorkers(
 
     try {
       while (true) {
-        const myIdx = nextIdx++;
-        if (myIdx >= tests.length) return;
-        const test = tests[myIdx]!;
+        // Don't reserve a test index until setup actually succeeds — otherwise
+        // one setup flake per worker silently burns one test as "skipped".
+        if (nextIdx >= tests.length) return;
 
         const eb = await ensureEBWithSetup();
         if (!eb) {
-          const skipped: TestRunResult = {
-            testId: test.id,
-            status: 'skipped' as const,
-            durationMs: 0,
-            screenshots: [],
-            errorMessage: 'Queued: waiting for an available runner',
-          };
-          resultMap.set(test.id, skipped);
-          completedCount++;
-          updateProgress(activeWorkers, test.name);
+          setupFailureStreak++;
+          if (setupFailureStreak >= MAX_SETUP_RETRIES) {
+            // Target looks persistently unreachable from this worker. Mark
+            // the next pending test as setup_failed so the failure surfaces
+            // in the build report, then exit — peer workers may still succeed.
+            const idx = nextIdx++;
+            if (idx < tests.length) {
+              const t = tests[idx]!;
+              resultMap.set(t.id, {
+                testId: t.id,
+                status: 'setup_failed' as const,
+                durationMs: 0,
+                screenshots: [],
+                errorMessage: `Setup failed ${MAX_SETUP_RETRIES} times in a row — worker giving up`,
+              });
+              completedCount++;
+              updateProgress(activeWorkers, t.name);
+            }
+            return;
+          }
+          // Exponential back-off (0.5s, 1s, 2s, 4s, ...) — gives DNS/CNI
+          // bursts time to quiesce and lets peer workers free an EB.
+          const delayMs = 500 * 2 ** (setupFailureStreak - 1);
+          await new Promise((r) => setTimeout(r, delayMs));
           continue;
         }
+        setupFailureStreak = 0;
+
+        const myIdx = nextIdx++;
+        if (myIdx >= tests.length) return;
+        const test = tests[myIdx]!;
 
         // Prefer the live persistent context over serialized storageState.
         const effectiveSetup = workerSetupId && setupDone
@@ -798,7 +824,19 @@ async function executeViaPoolWorkers(
   // Preserve input order
   for (const t of tests) {
     const r = resultMap.get(t.id);
-    if (r) results.push(r);
+    if (r) {
+      results.push(r);
+    } else {
+      // Defensive: every worker gave up on setup before reaching this test.
+      // Surface it as setup_failed rather than silently dropping it.
+      results.push({
+        testId: t.id,
+        status: 'setup_failed' as const,
+        durationMs: 0,
+        screenshots: [],
+        errorMessage: 'Setup failed — all workers exhausted retries before reaching this test',
+      });
+    }
   }
 
   // If nothing ever got claimed, let the caller fall through to the queue path.

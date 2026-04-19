@@ -62,10 +62,7 @@ export async function createTestRun(testIds?: string[], repositoryId?: string | 
   return run;
 }
 
-export async function runTests(testIds?: string[], repositoryId?: string | null, headless?: boolean, runnerId?: string, forceVideoRecording?: boolean) {
-  if (repositoryId) await requireRepoAccess(repositoryId);
-  else await requireTeamAccess();
-
+export async function runTestsCore(testIds?: string[], repositoryId?: string | null, headless?: boolean, runnerId?: string, forceVideoRecording?: boolean) {
   // Storage limit enforcement (off by default)
   if (process.env.ENFORCE_STORAGE_LIMITS === 'true' && repositoryId) {
     const repo = await queries.getRepository(repositoryId);
@@ -127,6 +124,12 @@ export async function runTests(testIds?: string[], repositoryId?: string | null,
   runTestsAsync(run.id, tests, repositoryId, headless, jobId, runnerId, forceVideoRecording);
 
   return { runId: run.id, testCount: tests.length, jobId };
+}
+
+export async function runTests(testIds?: string[], repositoryId?: string | null, headless?: boolean, runnerId?: string, forceVideoRecording?: boolean) {
+  if (repositoryId) await requireRepoAccess(repositoryId);
+  else await requireTeamAccess();
+  return runTestsCore(testIds, repositoryId, headless, runnerId, forceVideoRecording);
 }
 
 async function runTestsAsync(runId: string, tests: Test[], repositoryId?: string | null, headless?: boolean, jobId?: string, runnerId?: string, forceVideoRecording?: boolean) {
@@ -341,9 +344,12 @@ export async function processNextQueuedTestRun(repositoryId?: string | null, tar
   emitJobEvent({ type: 'job:delete', jobId: nextJob.id });
 
   // Run the tests — for pool-managed jobs, runnerId is undefined so
-  // runTests goes through auto mode → executeFallbackChain → claimPoolEB
+  // runTestsCore goes through auto mode → executeFallbackChain → claimPoolEB.
+  // MUST use -Core: fire-and-forget context has no request headers, so the
+  // auth'd `runTests` would throw from `requireRepoAccess → headers()` and
+  // drop the queued run (pending job was already deleted above).
   try {
-    await runTests(
+    await runTestsCore(
       metadata?.testIds || undefined,
       nextJob.repositoryId,
       metadata?.headless,
