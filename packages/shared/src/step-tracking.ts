@@ -70,7 +70,8 @@ function parseStatementBoundaries(body: string): StatementBoundary[] {
           boundaries.push({ lineStart: currentStart + 1 });
         }
         current = '';
-        currentStart = lineIdx;
+        const restOfLineAfterSemicolon = line.slice(i + 1);
+        currentStart = lineIdx + (restOfLineAfterSemicolon.trim() !== '' ? 0 : 1);
         continue;
       }
 
