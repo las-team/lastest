@@ -32,10 +32,13 @@ export async function listEmbeddedSessions(): Promise<EmbeddedSession[]> {
  * List embedded sessions for system runners (cross-team, available to all authenticated users)
  */
 export async function listSystemEmbeddedSessions(): Promise<EmbeddedSession[]> {
+  // Exclude offline runners — they represent dying Jobs awaiting GC and
+  // shouldn't be surfaced as "available EBs" in the UI (caused transient
+  // overcounts like 8/24/32 just after a build drained).
   const systemRunnerIds = await db
     .select({ id: runners.id })
     .from(runners)
-    .where(eq(runners.isSystem, true));
+    .where(and(eq(runners.isSystem, true), ne(runners.status, 'offline')));
 
   if (systemRunnerIds.length === 0) return [];
 

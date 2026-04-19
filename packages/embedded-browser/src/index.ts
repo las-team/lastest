@@ -73,6 +73,12 @@ async function startup(): Promise<void> {
   // 1. Launch browser
   console.log('[Startup] Launching Chromium...');
   const useCrossOsArgs = process.env.CROSS_OS_CONSISTENCY !== 'false';
+  // Bind CDP on all interfaces so the main app pod can reach it directly
+  // at http://<podIP>:9222 (registered as cdpUrl). Chrome's default
+  // --remote-debugging-address=127.0.0.1 makes CDP unreachable across pods,
+  // which breaks @playwright/mcp (--cdp-endpoint) for healer/generator agents
+  // when the EB is provisioned dynamically in Kubernetes.
+  const cdpAddress = process.env.CDP_BIND_ADDRESS ?? '0.0.0.0';
   browser = await chromium.launch({
     headless: true,
     ignoreDefaultArgs: ['--enable-automation'],
@@ -80,9 +86,10 @@ async function startup(): Promise<void> {
       ...(useCrossOsArgs ? CROSS_OS_CHROMIUM_ARGS : []),
       '--disable-blink-features=AutomationControlled',
       `--remote-debugging-port=${config.cdpPort}`,
+      `--remote-debugging-address=${cdpAddress}`,
     ],
   });
-  console.log(`[Startup] CDP endpoint available at http://localhost:${config.cdpPort}`);
+  console.log(`[Startup] CDP endpoint available at http://${cdpAddress}:${config.cdpPort}`);
 
   context = await browser.newContext({
     viewport: { width: config.viewportWidth, height: config.viewportHeight },
