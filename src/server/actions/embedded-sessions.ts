@@ -533,13 +533,16 @@ async function maybeTerminateReleasedEB(runnerId: string): Promise<void> {
     if (size <= warmPoolMin()) {
       return; // Keep this one alive to absorb back-to-back claims
     }
-    // Flip to offline now — other concurrent releases will see the decremented count.
+    // Flip to offline now — only if still 'online' (idle). If the EB was
+    // already reclaimed for another test by processPoolQueue → claimPoolEB
+    // (status='busy'), leave it alone — sending shutdown here would kill a
+    // live test and surface as ERR_NETWORK_CHANGED in the browser.
     const res = await db
       .update(runners)
       .set({ status: 'offline', lastSeen: new Date() })
-      .where(and(eq(runners.id, runnerId), ne(runners.status, 'offline')))
+      .where(and(eq(runners.id, runnerId), eq(runners.status, 'online')))
       .returning({ id: runners.id });
-    if (res.length === 0) return; // already offline (double release)
+    if (res.length === 0) return; // already offline, or reclaimed as busy
     reserved = true;
   } finally {
     resolveGate();
