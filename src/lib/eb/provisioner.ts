@@ -324,6 +324,27 @@ export function jobNameForRunnerName(runnerName: string): string | null {
 }
 
 /**
+ * List the names of currently-existing EB Jobs in the cluster.
+ * Used by boot-time reconciliation to detect "phantom" runner rows whose
+ * backing Job has been deleted (e.g. TTL expiry during an app restart when
+ * no reaper was running) so we don't hand them out to claimers.
+ */
+export async function listEBJobNames(): Promise<Set<string>> {
+  if (!isKubernetesMode()) return new Set();
+  const creds = loadClusterCreds();
+  const { status, data } = await k8sRequest(
+    'GET',
+    `/apis/batch/v1/namespaces/${encodeURIComponent(creds.namespace)}/jobs?labelSelector=${encodeURIComponent('app=lastest-eb')}`,
+  );
+  if (status < 200 || status >= 300) {
+    console.warn(`[EB Provisioner] listEBJobNames failed: ${status}`);
+    return new Set();
+  }
+  const items = (data as { items?: Array<{ metadata?: { name?: string } }> } | null)?.items ?? [];
+  return new Set(items.map((j) => j.metadata?.name).filter((n): n is string => !!n));
+}
+
+/**
  * Ensure the pool has at least `warmPoolMin()` idle EBs launched.
  * Counts `online` system EB runners; if the count is below the warm minimum,
  * launches Jobs until it's satisfied (bounded by the global ebPoolMax).

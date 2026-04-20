@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { Zap } from 'lucide-react';
+import { Star, Zap } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { getViewerGamificationSnapshot } from '@/server/actions/gamification';
 
@@ -53,27 +53,44 @@ function useScoreSnapshot() {
  * Slim inline score display meant to sit beside the Leaderboard nav label.
  * Renders just the number (+ optional blitz Zap). Parent link handles navigation.
  */
-export function InlineScore({ className }: { className?: string }) {
+export function InlineScore({
+  className,
+  active = false,
+}: {
+  className?: string;
+  active?: boolean;
+}) {
   const { snapshot, pulse } = useScoreSnapshot();
 
   if (!snapshot) return null;
 
+  const numberColor = active
+    ? 'text-primary-foreground'
+    : snapshot.blitz
+      ? 'text-yellow-500'
+      : 'text-primary';
+
   return (
     <span
       className={cn('flex items-center gap-1 font-mono text-xs tabular-nums', className)}
-      title={`Season: ${snapshot.seasonName}`}
+      title={`Score — Season: ${snapshot.seasonName}`}
+      aria-label="Score"
     >
+      <Star className={cn('h-3 w-3 shrink-0', numberColor)} aria-hidden="true" />
       <span
         className={cn(
           'font-bold tabular-nums rounded px-1',
-          snapshot.blitz ? 'text-yellow-500' : 'text-primary',
+          numberColor,
           pulse && 'ring-2 ring-primary shadow-[0_0_12px_rgba(250,204,21,0.55)]',
         )}
       >
         {snapshot.total.toLocaleString()}
       </span>
       {snapshot.blitz && (
-        <Zap className="h-3 w-3 text-yellow-500 animate-pulse" aria-label="Bug Blitz active" />
+        <Zap
+          className={cn('h-3 w-3 animate-pulse', active ? 'text-primary-foreground' : 'text-yellow-500')}
+          aria-label="Bug Blitz active"
+        />
       )}
     </span>
   );

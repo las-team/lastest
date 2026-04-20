@@ -1518,8 +1518,8 @@ export function DefinitionPageClient({
 
           {/* ─── Setup Tab ─── */}
           <TabsContent value="setup" className="overflow-auto flex-1">
-            <div className="p-6">
-              <div className="max-w-4xl mx-auto space-y-6">
+            <div className="p-6 pt-4">
+              <div className="max-w-5xl space-y-6">
                 <p className="text-sm text-muted-foreground">
                   Configure seed and teardown steps for test preparation and cleanup.
                 </p>

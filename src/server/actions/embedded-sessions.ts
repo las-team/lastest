@@ -11,6 +11,7 @@ import {
   launchEBJob,
   terminateEBJob,
   jobNameForRunnerName,
+  listEBJobNames,
   poolMax,
   warmPoolMin,
   currentPoolSize,
@@ -846,32 +847,71 @@ export async function reconcileOrphanedPoolEBs(): Promise<number> {
     .where(and(eq(runners.isSystem, true), eq(runners.status, 'busy')))
     .for('update');
 
-  if (orphaned.length === 0) return 0;
-
-  // Flip sessions to ready first (independent of per-runner release below).
-  await db
-    .update(embeddedSessions)
-    .set({ status: 'ready', busySince: null, userId: null, lastActivityAt: new Date() })
-    .where(eq(embeddedSessions.status, 'busy'));
-
-  // Step 2: for each orphan, go through releasePoolEB so warm-pool trimming
-  // (maybeTerminateReleasedEB) kicks in and tears the Job down if we're above
-  // EB_WARM_POOL_MIN. Releases run serially to avoid racing the warm-pool
-  // reserve gate.
-  for (const row of orphaned) {
+  if (orphaned.length > 0) {
+    // Flip sessions to ready first (independent of per-runner release below).
     await db
-      .update(runners)
-      .set({ status: 'busy', lastSeen: new Date() })
-      .where(eq(runners.id, row.id));
+      .update(embeddedSessions)
+      .set({ status: 'ready', busySince: null, userId: null, lastActivityAt: new Date() })
+      .where(eq(embeddedSessions.status, 'busy'));
+
+    // Step 2: for each orphan, go through releasePoolEB so warm-pool trimming
+    // (maybeTerminateReleasedEB) kicks in and tears the Job down if we're above
+    // EB_WARM_POOL_MIN. Releases run serially to avoid racing the warm-pool
+    // reserve gate.
+    for (const row of orphaned) {
+      await db
+        .update(runners)
+        .set({ status: 'busy', lastSeen: new Date() })
+        .where(eq(runners.id, row.id));
+      try {
+        await releasePoolEB(row.id);
+      } catch (err) {
+        console.error(`[Boot] releasePoolEB failed for ${row.id.slice(0, 8)}:`, err);
+      }
+    }
+
+    console.log(`[Boot] Reconciled ${orphaned.length} orphaned busy EB(s) via releasePoolEB`);
+  }
+
+  // Step 3: prune phantom rows — system EB runners in the DB whose backing
+  // k8s Job no longer exists (TTL expired, manually deleted, cluster was
+  // down when the Job finished). Without this, claimPoolEB hands out a dead
+  // runner and start_debug commands pile up in `runner_commands` with nothing
+  // to consume them — symptom: UI stuck on "Launching browser..." forever.
+  let phantoms = 0;
+  if (isKubernetesMode()) {
     try {
-      await releasePoolEB(row.id);
+      const liveJobs = await listEBJobNames();
+      const poolRows = await db
+        .select({ id: runners.id, name: runners.name })
+        .from(runners)
+        .where(and(
+          eq(runners.isSystem, true),
+          eq(runners.type, 'embedded'),
+          ne(runners.status, 'offline'),
+        ));
+
+      for (const row of poolRows) {
+        const jobName = jobNameForRunnerName(row.name);
+        // Only touch dynamic pool rows (eb-<ts>-<rand>); skip static sidecars.
+        if (!jobName) continue;
+        if (liveJobs.has(jobName)) continue;
+
+        await db.transaction(async (tx) => {
+          await tx.delete(embeddedSessions).where(eq(embeddedSessions.runnerId, row.id));
+          await tx.delete(runnerCommandResults).where(eq(runnerCommandResults.runnerId, row.id));
+          await tx.delete(runnerCommands).where(eq(runnerCommands.runnerId, row.id));
+          await tx.delete(runners).where(eq(runners.id, row.id));
+        });
+        phantoms++;
+        console.log(`[Boot] Pruned phantom EB runner ${row.name} (no matching k8s Job)`);
+      }
     } catch (err) {
-      console.error(`[Boot] releasePoolEB failed for ${row.id.slice(0, 8)}:`, err);
+      console.error('[Boot] phantom reconciliation failed:', err);
     }
   }
 
-  console.log(`[Boot] Reconciled ${orphaned.length} orphaned busy EB(s) via releasePoolEB`);
-  return orphaned.length;
+  return orphaned.length + phantoms;
 }
 
 /**

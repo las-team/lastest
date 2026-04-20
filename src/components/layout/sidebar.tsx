@@ -12,7 +12,6 @@ import {
   Settings,
   Layers,
   Building2,
-  ClipboardCheck,
   TrendingDown,
   Trophy,
 } from 'lucide-react';
@@ -53,7 +52,6 @@ const definitionNav = [
 const executionNav = [
   { name: 'Runs', href: '/run', icon: Play },
   { name: 'Compare', href: '/compare', icon: GitCompare },
-  { name: 'Review', href: '/review', icon: ClipboardCheck },
   { name: 'Impact', href: '/analytics/impact', icon: TrendingDown },
 ];
 
@@ -217,7 +215,7 @@ export function Sidebar({ repos, selectedRepo, currentUser, team, baseUrl, repos
                     >
                       <item.icon className="h-4 w-4 shrink-0" />
                       <span className="min-w-0 truncate">{item.name}</span>
-                      <InlineScore className="ml-auto shrink-0" />
+                      <InlineScore className="ml-auto shrink-0" active={isActive} />
                     </Link>
                   </li>
                 );
