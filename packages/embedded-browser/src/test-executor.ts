@@ -147,8 +147,12 @@ export class EmbeddedTestExecutor {
   private abortController: AbortController | null = null;
   // Persistent setup contexts — setup stores its BrowserContext here keyed by setupId.
   // Subsequent tests in the same run reuse it (preserves sessionStorage/IndexedDB/
-  // in-memory auth that Playwright's storageState() can't capture).
-  private setupContexts = new Map<string, { context: BrowserContext; createdAt: number }>();
+  // in-memory auth that Playwright's storageState() can't capture). We also store
+  // a serialized storageState snapshot alongside — if Chromium disposes the live
+  // context's target for any reason (observed behavior between tests), subsequent
+  // tests can rebuild a fresh context with the same cookies/localStorage.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private setupContexts = new Map<string, { context: BrowserContext; createdAt: number; storageState?: any; viewport?: { width: number; height: number } }>();
   private setupContextSweeper: ReturnType<typeof setInterval> | null = null;
   // Live persistent BrowserContext TTL. Must comfortably exceed a full build's
   // wall-clock time (setup + all tests on this worker). Default 60 min; override
@@ -250,6 +254,17 @@ export class EmbeddedTestExecutor {
     // Limitations: per-test video + context-level stabilization overrides can't be applied.
     let testContext: BrowserContext;
     let reusedPersistentContext = false;
+    const buildFreshContext = async (state: unknown) => {
+      return browser.newContext({
+        viewport,
+        acceptDownloads: true,
+        ...(state ? { storageState: state as Parameters<Browser['newContext']>[0] extends infer T ? T extends { storageState?: infer S } ? S : never : never } : {}),
+        ...(needsStabilizedContext ? { deviceScaleFactor: 1 } : {}),
+        ...(needsStabilizedContext ? { locale: 'en-US', timezoneId: 'UTC', colorScheme: 'light' as const } : {}),
+        ...(command.stabilization?.freezeAnimations ? { reducedMotion: 'reduce' as const } : {}),
+        ...(videoDir ? { recordVideo: { dir: videoDir, size: viewport } } : {}),
+      });
+    };
     if (persistentSetupId) {
       const entry = this.setupContexts.get(persistentSetupId);
       if (entry) {
@@ -261,28 +276,38 @@ export class EmbeddedTestExecutor {
         logFn('info', `Reusing persistent setup context (setupId=${persistentSetupId})`);
       } else {
         logFn('warn', `persistent setup context ${persistentSetupId} not found — falling back to fresh context (auth state will be missing)`);
-        testContext = await browser.newContext({
-          viewport,
-          acceptDownloads: true,
-          ...(needsStabilizedContext ? { deviceScaleFactor: 1 } : {}),
-          ...(needsStabilizedContext ? { locale: 'en-US', timezoneId: 'UTC', colorScheme: 'light' as const } : {}),
-          ...(command.stabilization?.freezeAnimations ? { reducedMotion: 'reduce' as const } : {}),
-          ...(videoDir ? { recordVideo: { dir: videoDir, size: viewport } } : {}),
-        });
+        testContext = await buildFreshContext(undefined);
       }
     } else {
       // Create a fresh context + page per test (mirrors standard runner)
-      testContext = await browser.newContext({
-        viewport,
-        acceptDownloads: true, // Always accept in EB — native file dialogs hang in headless
-        ...(parsedStorageState ? { storageState: parsedStorageState } : {}),
-        ...(needsStabilizedContext ? { deviceScaleFactor: 1 } : {}),
-        ...(needsStabilizedContext ? { locale: 'en-US', timezoneId: 'UTC', colorScheme: 'light' as const } : {}),
-        ...(command.stabilization?.freezeAnimations ? { reducedMotion: 'reduce' as const } : {}),
-        ...(videoDir ? { recordVideo: { dir: videoDir, size: viewport } } : {}),
-      });
+      testContext = await buildFreshContext(parsedStorageState);
     }
-    const page = await testContext.newPage();
+
+    // FALLBACK: Chromium sometimes disposes a persistent BrowserContext's
+    // target between tests (observed: test N passes, test N+1 throws "Target
+    // has been closed" on newPage). When that happens, rebuild a fresh
+    // context using the storageState snapshot we captured during setup, so
+    // the test still runs with the right cookies/localStorage even though
+    // sessionStorage/IndexedDB/in-memory auth are lost.
+    let page;
+    try {
+      page = await testContext.newPage();
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      if (reusedPersistentContext && /Target .*has been closed|has been closed/i.test(msg)) {
+        logFn('warn', `Persistent context for ${persistentSetupId} is zombie — rebuilding fresh context from storageState snapshot`);
+        const snapshotEntry = this.setupContexts.get(persistentSetupId!);
+        const snapshot = snapshotEntry?.storageState;
+        // Drop the dead context from the map so other tests don't hit it too.
+        this.setupContexts.delete(persistentSetupId!);
+        try { await snapshotEntry?.context.close(); } catch { /* already dead */ }
+        testContext = await buildFreshContext(snapshot);
+        reusedPersistentContext = false;
+        page = await testContext.newPage();
+      } else {
+        throw err;
+      }
+    }
     if (reusedPersistentContext) {
       try { await page.setViewportSize(viewport); } catch { /* best-effort */ }
     }
@@ -1188,11 +1213,15 @@ export class EmbeddedTestExecutor {
         // Cookie polling failed — continue anyway
       }
 
-      // Capture storageState snapshot for logging (not returned to caller —
-      // the persistent context below is the authoritative state carrier).
+      // Capture storageState snapshot. Used as a fallback: if Chromium
+      // disposes the live context's target between tests (observed behavior),
+      // we rebuild a fresh context with these cookies + localStorage instead
+      // of failing the test with "Target has been closed".
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      let storageStateSnapshot: any = undefined;
       try {
-        const state = await setupContext.storageState();
-        logFn('info', `Captured storageState snapshot: ${state.cookies.length} cookies, ${state.origins.length} origins`);
+        storageStateSnapshot = await setupContext.storageState();
+        logFn('info', `Captured storageState snapshot: ${storageStateSnapshot.cookies.length} cookies, ${storageStateSnapshot.origins.length} origins`);
       } catch (e) {
         logFn('warn', `Failed to capture storageState snapshot: ${e}`);
       }
@@ -1202,13 +1231,15 @@ export class EmbeddedTestExecutor {
       //
       // KEEPALIVE PAGE: we intentionally keep the setup page OPEN. Chromium
       // disposes a BrowserContext's target when it has 0 pages for a short
-      // while — after the first test closes its page, a second test calling
-      // `context.newPage()` would throw "Target page, context or browser has
-      // been closed" even though our Map still holds a reference. Keeping one
-      // navigated-but-idle page alive anchors the context's target so tests
-      // can open and close their own pages freely alongside it.
+      // while — keeping one navigated-but-idle page alive anchors the target
+      // so tests can open and close their own pages freely alongside it.
       setupPageClosed = true; // prevent the finally block from closing it
-      this.setupContexts.set(command.setupId, { context: setupContext, createdAt: Date.now() });
+      this.setupContexts.set(command.setupId, {
+        context: setupContext,
+        createdAt: Date.now(),
+        storageState: storageStateSnapshot,
+        viewport,
+      });
       this.ensureSetupContextSweeper();
       retainContext = true;
       logFn('info', `Persistent setup context retained with keepalive page (setupId=${command.setupId}) — tests in this run will reuse it`);

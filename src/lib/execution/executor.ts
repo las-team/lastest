@@ -804,6 +804,15 @@ async function executeViaPoolWorkers(
         activeWorkers++;
         updateProgress(activeWorkers, test.name);
         let ebDied = false;
+        // Pattern an EB-health failure looks like when it comes back as a
+        // test RESULT (not a thrown exception): the EB reports the test
+        // failed with a Playwright "Target ... has been closed" error, which
+        // means its persistent BrowserContext got disposed and every
+        // subsequent test on this EB will fail the same way. Detect it and
+        // swap EBs for the next iteration. Checked against the result's
+        // errorMessage below, since `executeViaRunner` doesn't throw for
+        // reported-failed tests.
+        const EB_DEAD_RESULT_RX = /Target .*has been closed|offline|crash|runner went|EB network unhealthy/i;
         try {
           const [oneResult] = await executeViaRunner(
             [test],
@@ -813,7 +822,16 @@ async function executeViaPoolWorkers(
             undefined, // progress emitted at the worker-pool level
             onResult,
           );
-          if (oneResult) resultMap.set(test.id, oneResult);
+          if (oneResult) {
+            resultMap.set(test.id, oneResult);
+            // Reported-failed tests with an EB-health error message: the EB
+            // is in a broken state (e.g. context closed). Drop it so the
+            // next iteration claims a fresh one.
+            if (oneResult.status === 'failed' && oneResult.errorMessage && EB_DEAD_RESULT_RX.test(oneResult.errorMessage)) {
+              console.warn(`[Worker ${workerId}] EB ${eb.runnerId.slice(0, 8)} returned dead-state error — will swap to fresh EB: ${oneResult.errorMessage}`);
+              ebDied = true;
+            }
+          }
         } catch (err) {
           const msg = err instanceof Error ? err.message : String(err);
           console.error(`[Worker ${workerId}] Error running test ${test.id}:`, err);
