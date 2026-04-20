@@ -6,22 +6,25 @@
  * Model:
  *   - One Job = one browser = one test (1 test per EB).
  *   - A single build can claim up to `maxParallelEBs` Jobs concurrently.
- *   - Total cluster pool is capped at `EB_POOL_MAX` (default 30).
+ *   - Total cluster pool is capped by the global `playwright_settings.ebPoolMax` (default 30).
  *   - Each Job is short-lived. After the worker releases the EB, the Job is
  *     deleted (subject to a small idle-TTL to absorb back-to-back tests).
  *
- * Controlled via env:
+ * Controlled via env (deployment topology / infra):
  *   EB_PROVISIONER     = 'kubernetes' | 'compose' | 'none'    (default: 'none')
  *   EB_NAMESPACE       = k8s namespace (default: 'lastest')
  *   EB_IMAGE           = container image for the EB
- *   EB_POOL_MAX        = hard cap on concurrent EBs (default: 30)
- *   EB_WARM_POOL_MIN   = min EBs to keep alive while idle (default: 0)
+ *   EB_WARM_POOL_MIN   = min EBs to keep alive while idle (default: 2)
  *   EB_CPU_REQUEST / EB_CPU_LIMIT / EB_MEM_REQUEST / EB_MEM_LIMIT
  *   EB_SHM_SIZE        = /dev/shm size (default: '512Mi') — Chromium crash guard
  *   EB_ACTIVE_DEADLINE_SECONDS (default: 1800)
  *   EB_TTL_SECONDS_AFTER_FINISHED (default: 60)
  *   LASTEST_URL        = URL the EB calls back to (default: in-cluster service DNS)
  *   SYSTEM_EB_TOKEN    = shared secret passed to spawned EB
+ *
+ * Controlled via the global `playwright_settings` row (cluster-wide, DB):
+ *   ebPoolMax          = hard cap on concurrent EBs (schema default: 30)
+ *   ebIdleTTLSeconds   = idle timeout before a released EB Job is torn down
  *
  * The provisioner is a no-op unless EB_PROVISIONER === 'kubernetes'.
  */
@@ -46,9 +49,31 @@ export function isKubernetesMode(): boolean {
   return provisionerMode() === 'kubernetes';
 }
 
-export function poolMax(): number {
-  const n = parseInt(process.env.EB_POOL_MAX || '30', 10);
-  return Number.isFinite(n) && n > 0 ? n : 30;
+// Cluster-wide EB pool limits live in the global `playwright_settings` row.
+// Short in-process cache so hot paths (isPoolBusy, claimOrProvisionPoolEB) don't
+// hammer the DB — cap changes are rare, pool decisions are frequent.
+let _limitsCache: { value: { ebPoolMax: number; ebIdleTTLSeconds: number }; expiresAt: number } | null = null;
+const LIMITS_CACHE_TTL_MS = 5000;
+
+async function readPoolLimits(): Promise<{ ebPoolMax: number; ebIdleTTLSeconds: number }> {
+  if (_limitsCache && Date.now() < _limitsCache.expiresAt) return _limitsCache.value;
+  const { getGlobalPoolLimits } = await import('@/lib/db/queries/settings');
+  const row = await getGlobalPoolLimits();
+  if (!row) {
+    throw new Error(
+      'Global playwright_settings row missing — call ensureGlobalPlaywrightSettings() during app boot or create one via the settings UI',
+    );
+  }
+  _limitsCache = { value: row, expiresAt: Date.now() + LIMITS_CACHE_TTL_MS };
+  return row;
+}
+
+export async function poolMax(): Promise<number> {
+  return (await readPoolLimits()).ebPoolMax;
+}
+
+export async function ebIdleTTLMs(): Promise<number> {
+  return (await readPoolLimits()).ebIdleTTLSeconds * 1000;
 }
 
 export function warmPoolMin(): number {
@@ -118,7 +143,7 @@ async function k8sRequest(method: string, path: string, body?: unknown): Promise
 /**
  * Count currently-known system EB runners (online + busy) — proxy for pool size.
  * Offline rows are excluded: they represent dying/dead Jobs awaiting GC and shouldn't
- * block new provisioning. Used to enforce EB_POOL_MAX before provisioning and to
+ * block new provisioning. Used to enforce the global ebPoolMax before provisioning and to
  * decide whether `maybeTerminateReleasedEB` can tear down past warmPoolMin.
  */
 export async function currentPoolSize(): Promise<number> {
@@ -230,7 +255,7 @@ export async function launchEBJob(): Promise<{ jobName: string; instanceId: stri
   }
 
   const poolSize = await currentPoolSize();
-  const cap = poolMax();
+  const cap = await poolMax();
   if (poolSize >= cap) {
     throw new Error(`EB pool at capacity (${poolSize}/${cap})`);
   }
@@ -285,7 +310,7 @@ export function jobNameForRunnerName(runnerName: string): string | null {
 /**
  * Ensure the pool has at least `warmPoolMin()` idle EBs launched.
  * Counts `online` system EB runners; if the count is below the warm minimum,
- * launches Jobs until it's satisfied (bounded by EB_POOL_MAX).
+ * launches Jobs until it's satisfied (bounded by the global ebPoolMax).
  *
  * Safe to call repeatedly — subsequent calls no-op once the pool is warm.
  * Call on app startup and from the periodic cleanup loop.
@@ -316,7 +341,7 @@ export async function ensureWarmPool(): Promise<number> {
   const deficit = want - idle.length;
   if (deficit <= 0) return 0;
 
-  const cap = poolMax();
+  const cap = await poolMax();
   const size = await currentPoolSize();
   const canLaunch = Math.min(deficit, Math.max(0, cap - size));
   if (canLaunch <= 0) return 0;

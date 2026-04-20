@@ -258,13 +258,23 @@ export function DefinitionPageClient({
     }
   }, [treeSelection, tree]);
 
-  // Open a test on mount when ?test=<id> is present in the URL (e.g. from /tests/[id] redirect)
+  // Sync inline test detail with the ?test=<id> search param.
+  // Opens on mount (e.g. /tests/[id] redirect), and clears when the param is
+  // removed by an external navigation (e.g. clicking "Tests" in the sidebar).
   useEffect(() => {
     const testIdParam = searchParams.get('test');
-    if (!testIdParam) return;
-    void handleOpenTest(testIdParam, { pushState: false });
+    if (testIdParam) {
+      if (testIdParam !== openTestId) {
+        void handleOpenTest(testIdParam, { pushState: false });
+      }
+    } else if (openTestId) {
+      setOpenTestId(null);
+      setOpenTestData(null);
+      setOpenTestDetailData(null);
+      setTreeSelection(null);
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [searchParams]);
 
   // Handle browser back/forward navigation
   useEffect(() => {
@@ -620,11 +630,20 @@ export function DefinitionPageClient({
 
   const handleBulkRun = async () => {
     if (selectedTestIds.size === 0) return;
+    const testIds = Array.from(selectedTestIds);
     setIsBulkRunning(true);
     try {
-      const result = await runTests(Array.from(selectedTestIds), repositoryId, true, executionTarget);
+      const result = await createAndRunBuild('manual', testIds, repositoryId, executionTarget);
       notifyJobStarted();
-      if ('queued' in result && result.queued) toast.success('Tests queued — will run when current tests finish');
+      if ('queued' in result && result.queued) {
+        toast.info('All browsers are busy — build queued and will start automatically');
+      } else {
+        toast.success(`Build started with ${testIds.length} test${testIds.length === 1 ? '' : 's'}`);
+        setSelectedTestIds(new Set());
+        router.push(`/builds/${result.buildId}`);
+      }
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to start build');
     } finally {
       setIsBulkRunning(false);
     }

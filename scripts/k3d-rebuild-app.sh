@@ -25,6 +25,12 @@ docker build \
 echo "==> k3d image import"
 k3d image import "${APP_IMAGE}" -c "${CLUSTER_NAME}"
 
+# Re-merge .env.local into the secrets so rebuilds pick up edited OAuth /
+# BETTER_AUTH_* / Resend keys. Cluster-owned randoms are preserved.
+echo "==> Refreshing .k8s-secrets.yaml from .env.local"
+bash scripts/_generate-secrets.sh .k8s-secrets.yaml
+kubectl apply -f .k8s-secrets.yaml
+
 echo "==> kubectl set image"
 kubectl -n "${NAMESPACE}" set image deploy/lastest-app app="${APP_IMAGE}"
 kubectl -n "${NAMESPACE}" rollout status deploy/lastest-app --timeout=300s

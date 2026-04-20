@@ -353,7 +353,7 @@ export async function isPoolBusy(): Promise<boolean> {
   // spin up a fresh EB.
   if (!isKubernetesMode()) return true;
   const size = await currentPoolSize();
-  return size >= poolMax();
+  return size >= await poolMax();
 }
 
 /**
@@ -653,7 +653,7 @@ export async function processPoolQueue(): Promise<void> {
  *
  * Returns null if:
  *   - not in kubernetes mode and no idle EB available
- *   - pool is at EB_POOL_MAX capacity
+ *   - pool is at ebPoolMax capacity (global playwright_settings)
  *   - provisioning timed out (pod failed to register within waitTimeoutMs)
  */
 export async function claimOrProvisionPoolEB(
@@ -667,8 +667,9 @@ export async function claimOrProvisionPoolEB(
 
   // Enforce global cap
   const size = await currentPoolSize();
-  if (size >= poolMax()) {
-    console.warn(`[Pool] At capacity (${size}/${poolMax()}) — cannot provision new EB`);
+  const cap = await poolMax();
+  if (size >= cap) {
+    console.warn(`[Pool] At capacity (${size}/${cap}) — cannot provision new EB`);
     return null;
   }
 

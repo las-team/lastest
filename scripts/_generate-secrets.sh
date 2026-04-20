@@ -1,27 +1,38 @@
 #!/usr/bin/env bash
-# Generates .k8s-secrets.yaml at the repo root with random values.
-# Also merges OAuth / integration keys from .env.local when present so
-# that google/github sign-in, email, and CRM wiring survive fresh clusters.
-# Gitignored — safe to persist across cluster recreates.
+# Generates / refreshes .k8s-secrets.yaml at the repo root.
+#
+# - Cluster-owned randoms (POSTGRES_PASSWORD, SYSTEM_EB_TOKEN, and
+#   BETTER_AUTH_SECRET when not set in .env.local) are generated on first
+#   run and PRESERVED across re-runs so sessions / DB auth don't break.
+# - Every other key (OAuth, Resend, Twenty, bug-report, BETTER_AUTH_SECRET
+#   when it IS set in .env.local) is re-merged from .env.local on every run,
+#   so editing .env.local + re-running `pnpm stack` / `pnpm stack:refresh`
+#   propagates changes into the cluster.
+# - Gitignored. Safe to persist.
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 OUT="${1:-${REPO_ROOT}/.k8s-secrets.yaml}"
 
-if [ -f "$OUT" ]; then
-  echo "$OUT already exists — leaving it alone. Delete it to regenerate." >&2
-  exit 0
-fi
+# Extract a `  KEY: value` line's value from an existing secrets file.
+# Returns empty if the key isn't present.
+existing() {
+  local key="$1"
+  [ -f "$OUT" ] || { echo ""; return; }
+  awk -v k="  ${key}:" '$0 ~ "^"k" " { sub("^"k" ", ""); print; exit }' "$OUT"
+}
 
-BETTER_AUTH_SECRET=$(openssl rand -hex 32)
-SYSTEM_EB_TOKEN=$(openssl rand -hex 32)
-POSTGRES_PASSWORD=$(openssl rand -hex 16)
+PREV_BETTER_AUTH_SECRET=$(existing BETTER_AUTH_SECRET)
+PREV_SYSTEM_EB_TOKEN=$(existing SYSTEM_EB_TOKEN)
+PREV_POSTGRES_PASSWORD=$(existing POSTGRES_PASSWORD)
 
-# Pull optional keys from .env.local. We deliberately skip DATABASE_URL,
-# BETTER_AUTH_SECRET, and SYSTEM_EB_TOKEN from .env.local because the k8s
-# stack owns those (in-cluster postgres DSN, fresh secrets).
+# Pull optional keys from .env.local. DATABASE_URL stays k8s-owned (points
+# at the in-cluster postgres service).
 ENV_LOCAL="${REPO_ROOT}/.env.local"
 MERGE_KEYS=(
+  BETTER_AUTH_SECRET
+  BETTER_AUTH_BASE_URL BETTER_AUTH_TRUSTED_ORIGINS
+  NEXT_PUBLIC_APP_URL
   GITHUB_CLIENT_ID GITHUB_CLIENT_SECRET
   GOOGLE_CLIENT_ID GOOGLE_CLIENT_SECRET
   BUG_REPORT_GITHUB_TOKEN BUG_REPORT_GITHUB_REPO BUG_REPORT_DISCORD_WEBHOOK_URL
@@ -38,6 +49,21 @@ if [ -f "$ENV_LOCAL" ]; then
   done
 fi
 
+# BETTER_AUTH_SECRET precedence: .env.local > existing file > fresh random.
+if [ -n "${EXTRA[BETTER_AUTH_SECRET]:-}" ]; then
+  BETTER_AUTH_SECRET="${EXTRA[BETTER_AUTH_SECRET]}"
+  unset 'EXTRA[BETTER_AUTH_SECRET]'  # don't also emit it below
+elif [ -n "$PREV_BETTER_AUTH_SECRET" ]; then
+  BETTER_AUTH_SECRET="$PREV_BETTER_AUTH_SECRET"
+else
+  BETTER_AUTH_SECRET="$(openssl rand -hex 32)"
+fi
+
+# SYSTEM_EB_TOKEN + POSTGRES_PASSWORD: preserve across re-runs, generate on first.
+SYSTEM_EB_TOKEN="${PREV_SYSTEM_EB_TOKEN:-$(openssl rand -hex 32)}"
+POSTGRES_PASSWORD="${PREV_POSTGRES_PASSWORD:-$(openssl rand -hex 16)}"
+
+TMP="${OUT}.tmp"
 {
   cat <<EOF
 ---
@@ -64,13 +90,19 @@ stringData:
   DATABASE_URL: postgresql://lastest:${POSTGRES_PASSWORD}@postgres.lastest.svc.cluster.local:5432/lastest
 EOF
   for k in "${!EXTRA[@]}"; do
-    # stringData values are raw strings; quote to survive special chars.
+    # stringData values are raw strings; %q survives special chars.
     printf '  %s: %q\n' "$k" "${EXTRA[$k]}"
   done
-} > "$OUT"
+} > "$TMP"
 
+mv "$TMP" "$OUT"
 chmod 600 "$OUT"
-echo "Wrote $OUT"
+
+if [ -n "$PREV_POSTGRES_PASSWORD" ]; then
+  echo "Refreshed $OUT (preserved cluster-owned randoms)"
+else
+  echo "Wrote $OUT"
+fi
 if [ "${#EXTRA[@]}" -gt 0 ]; then
   echo "Merged ${#EXTRA[@]} keys from .env.local: ${!EXTRA[*]}"
 fi

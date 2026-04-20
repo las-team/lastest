@@ -712,9 +712,17 @@ async function executeViaPoolWorkers(
           setupDone = true;
           console.log(`[Worker ${workerId}] Setup completed on EB ${c.runnerId.slice(0, 8)} (persistent:${workerSetupId})`);
         } catch (err) {
+          // Setup flake on this worker. Retry on the SAME EB — don't release +
+          // re-provision, otherwise N flaky setups churn N fresh Jobs and starve
+          // the pool cap. Only drop the EB if it looks unhealthy (offline/crash);
+          // a fresh claim won't help if the failure was e.g. ERR_NETWORK_CHANGED
+          // from target load.
+          const msg = err instanceof Error ? err.message : String(err);
           console.error(`[Worker ${workerId}] Setup failed on EB ${c.runnerId.slice(0, 8)}:`, err);
-          try { await releasePoolEB(c.runnerId); } catch { /* ignore */ }
-          claimed = null;
+          if (/offline|crash|runner went|ECONNREFUSED|timed out/i.test(msg)) {
+            try { await releasePoolEB(c.runnerId); } catch { /* ignore */ }
+            claimed = null;
+          }
           return null;
         }
       }

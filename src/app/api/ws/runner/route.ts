@@ -12,7 +12,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { validateRunnerToken, updateRunnerStatus, markStaleRunnersOffline, deleteStaleSystemRunners } from '@/server/actions/runners';
 import { reapStalePoolEBs, reapIdleEBJobs } from '@/server/actions/embedded-sessions';
-import { ensureWarmPool, isKubernetesMode } from '@/lib/eb/provisioner';
+import { ensureWarmPool, isKubernetesMode, ebIdleTTLMs } from '@/lib/eb/provisioner';
+import { ensureGlobalPlaywrightSettings } from '@/lib/db/queries/settings';
 import type { Message, HeartbeatMessage, TestResultResponse, SetupResultResponse, ScreenshotUploadResponse, RecordingEventResponse, RecordingStoppedResponse } from '@/lib/ws/protocol';
 import { waitForCommandQueued, notifyCommandQueued } from '@/lib/ws/runner-events';
 import fs from 'fs/promises';
@@ -109,12 +110,18 @@ function ensureInitialized() {
     console.error('[Startup] Failed to mark stale runners offline:', error);
   });
 
-  // Top up the warm EB pool so the first claim hits an already-online EB
-  if (isKubernetesMode()) {
-    ensureWarmPool().catch((error) => {
-      console.error('[Startup] ensureWarmPool failed:', error);
+  // Ensure the global playwright_settings row exists — poolMax() / ebIdleTTLMs()
+  // read from it and throw if it's missing. Must run before the warm-pool top-up.
+  ensureGlobalPlaywrightSettings()
+    .then(() => {
+      // Top up the warm EB pool so the first claim hits an already-online EB
+      if (isKubernetesMode()) {
+        return ensureWarmPool();
+      }
+    })
+    .catch((error) => {
+      console.error('[Startup] ensureGlobalPlaywrightSettings / warm pool init failed:', error);
     });
-  }
 
   // Start cleanup interval to remove stale sessions, mark runners offline, and GC old commands
   setInterval(async () => {
@@ -178,7 +185,7 @@ function ensureInitialized() {
 
     // Tear down idle/offline on-demand EB Jobs above the warm-pool minimum
     try {
-      const idleTtlMs = parseInt(process.env.EB_IDLE_TTL_SECONDS || '90', 10) * 1000;
+      const idleTtlMs = await ebIdleTTLMs();
       await reapIdleEBJobs(idleTtlMs);
     } catch (error) {
       console.error('[Reaper] Failed to reap idle EB Jobs:', error);

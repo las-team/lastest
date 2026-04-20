@@ -7,7 +7,7 @@ data:
   EB_PROVISIONER: "kubernetes"
   EB_NAMESPACE: "lastest"
   LASTEST_URL: "http://lastest-app.lastest.svc.cluster.local:3000"
-  EB_POOL_MAX: "3"
+  # EB_POOL_MAX moved to DB: global playwright_settings.ebPoolMax (seeded on boot)
   EB_WARM_POOL_MIN: "1"
   EB_CPU_REQUEST: "500m"
   EB_CPU_LIMIT: "1000m"

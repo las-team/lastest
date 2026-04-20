@@ -29,8 +29,8 @@ else
     --agents 0 --servers 1 \
     --port "3000:3000@loadbalancer" \
     --k3s-arg "--disable=traefik@server:*" \
-    --label "com.docker.compose.project=lastest@server:*" \
-    --label "com.docker.compose.project=lastest@loadbalancer" \
+    --runtime-label "com.docker.compose.project=lastest@server:*" \
+    --runtime-label "com.docker.compose.project=lastest@loadbalancer" \
     --wait
 fi
 
@@ -68,11 +68,11 @@ echo "==> Applying namespace + RBAC"
 kubectl apply -f k8s/namespace.yaml
 kubectl apply -f k8s/embedded-browser-rbac.yaml
 
-# 5. Secrets (generate on first run; persist across re-runs)
-if [ ! -f .k8s-secrets.yaml ]; then
-  echo "==> Generating .k8s-secrets.yaml"
-  bash scripts/_generate-secrets.sh .k8s-secrets.yaml
-fi
+# 5. Secrets — always re-merge .env.local so edits propagate. Cluster-owned
+#    randoms (POSTGRES_PASSWORD, SYSTEM_EB_TOKEN, BETTER_AUTH_SECRET when
+#    absent from .env.local) are preserved across re-runs.
+echo "==> Refreshing .k8s-secrets.yaml from .env.local"
+bash scripts/_generate-secrets.sh .k8s-secrets.yaml
 kubectl apply -f .k8s-secrets.yaml
 
 # 6. Postgres
