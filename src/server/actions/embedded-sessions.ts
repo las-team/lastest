@@ -14,6 +14,8 @@ import {
   poolMax,
   warmPoolMin,
   currentPoolSize,
+  incInFlightProvisions,
+  decInFlightProvisions,
 } from '@/lib/eb/provisioner';
 
 /**
@@ -368,43 +370,42 @@ export async function claimPoolEB(): Promise<{
   runnerId: string;
   sessionId: string | null;
 } | null> {
-  for (let attempt = 0; attempt < 3; attempt++) {
-    // 1. Find an online system EB
-    const [candidate] = await db
-      .select({ id: runners.id })
+  // Observed in production: two concurrent callers both ended up with the same
+  // EB using the previous `UPDATE WHERE status='online' RETURNING id` pattern
+  // (both "attempt 1" claims succeeded on the same row). Downstream the EB's
+  // `index.ts:338` fire-and-forget model runs both workers' tests on one
+  // Chromium process → contention, blank screenshots, stuck builds.
+  //
+  // Switching to the canonical PG concurrent-claim pattern: a transaction
+  // with `SELECT ... FOR UPDATE SKIP LOCKED`. This guarantees that concurrent
+  // claimers pick DIFFERENT rows (the row lock is acquired inside the SELECT),
+  // so no two claimers can ever end up on the same EB.
+  return await db.transaction(async (tx) => {
+    const [candidate] = await tx
+      .select({ id: runners.id, teamId: runners.teamId })
       .from(runners)
       .where(and(
         eq(runners.isSystem, true),
         eq(runners.status, 'online'),
         eq(runners.type, 'embedded'),
       ))
-      .limit(1);
+      .limit(1)
+      .for('update', { skipLocked: true });
 
     if (!candidate) return null;
 
-    // 2. Optimistic lock: only claim if still online
-    const result = await db
+    await tx
       .update(runners)
       .set({ status: 'busy' as const, lastSeen: new Date() })
-      .where(and(
-        eq(runners.id, candidate.id),
-        eq(runners.status, 'online'),
-      ))
-      .returning({ id: runners.id, teamId: runners.teamId });
+      .where(eq(runners.id, candidate.id));
 
-    if (result.length === 0) {
-      // Another caller grabbed it — retry
-      continue;
-    }
-
-    // 3. Mark the embedded session as busy
-    const [session] = await db
+    const [session] = await tx
       .select({ id: embeddedSessions.id })
       .from(embeddedSessions)
       .where(eq(embeddedSessions.runnerId, candidate.id));
 
     if (session) {
-      await db
+      await tx
         .update(embeddedSessions)
         .set({
           status: 'busy',
@@ -414,27 +415,21 @@ export async function claimPoolEB(): Promise<{
         .where(eq(embeddedSessions.id, session.id));
     }
 
-    // 4. Emit status change event
-    if (result[0]) {
-      emitRunnerStatusChange({
-        runnerId: candidate.id,
-        teamId: result[0].teamId,
-        status: 'busy',
-        previousStatus: 'online',
-        timestamp: Date.now(),
-      });
-    }
+    emitRunnerStatusChange({
+      runnerId: candidate.id,
+      teamId: candidate.teamId,
+      status: 'busy',
+      previousStatus: 'online',
+      timestamp: Date.now(),
+    });
 
     if (!session) {
       console.warn(`[Pool] Claimed EB ${candidate.id.slice(0, 8)} but no embedded_sessions row found — data inconsistency`);
     }
 
-    console.log(`[Pool] Claimed EB ${candidate.id.slice(0, 8)} (attempt ${attempt + 1})`);
+    console.log(`[Pool] Claimed EB ${candidate.id.slice(0, 8)}`);
     return { runnerId: candidate.id, sessionId: session?.id ?? null };
-  }
-
-  // All retries exhausted due to contention
-  return null;
+  });
 }
 
 /**
@@ -665,7 +660,9 @@ export async function claimOrProvisionPoolEB(
 
   if (!isKubernetesMode()) return null;
 
-  // Enforce global cap
+  // Enforce global cap (currentPoolSize now includes in-flight provisions so
+  // concurrent callers during an app restart or burst claim can't collectively
+  // blow past the cap).
   const size = await currentPoolSize();
   const cap = await poolMax();
   if (size >= cap) {
@@ -673,12 +670,25 @@ export async function claimOrProvisionPoolEB(
     return null;
   }
 
+  // Reserve a slot in the in-flight counter BEFORE launching. Decrement in
+  // the success branch (after the runner row is inserted by register) or in
+  // any early-return / timeout / error branch below.
+  incInFlightProvisions();
+  let provisionReserved = true;
+  const releaseReservation = () => {
+    if (provisionReserved) {
+      decInFlightProvisions();
+      provisionReserved = false;
+    }
+  };
+
   // Provision a new Job
   let jobInfo: { jobName: string; instanceId: string };
   try {
     jobInfo = await launchEBJob();
   } catch (err) {
     console.error('[Pool] launchEBJob failed:', err);
+    releaseReservation();
     return null;
   }
 
@@ -690,56 +700,73 @@ export async function claimOrProvisionPoolEB(
   while (Date.now() < deadline) {
     await new Promise((r) => setTimeout(r, 1000));
 
-    const [runner] = await db
-      .select({ id: runners.id, status: runners.status })
-      .from(runners)
-      .where(and(eq(runners.name, expectedRunnerName), eq(runners.isSystem, true)));
+    // Transactional claim with row-level lock (SKIP LOCKED) — same pattern as
+    // claimPoolEB. Guarantees that two concurrent callers can't end up on the
+    // same runner even if they both see it as `online` in their snapshots.
+    const claimResult = await db.transaction(async (tx) => {
+      const [r] = await tx
+        .select({ id: runners.id, teamId: runners.teamId, status: runners.status })
+        .from(runners)
+        .where(and(
+          eq(runners.name, expectedRunnerName),
+          eq(runners.isSystem, true),
+          eq(runners.status, 'online'),
+        ))
+        .limit(1)
+        .for('update', { skipLocked: true });
 
-    if (!runner) continue; // Not yet registered
+      if (!r) return null;
 
-    if (runner.status !== 'online') continue; // Registered but still initializing
+      await tx
+        .update(runners)
+        .set({ status: 'busy' as const, lastSeen: new Date() })
+        .where(eq(runners.id, r.id));
 
-    // Try to atomically claim this specific runner
-    const result = await db
-      .update(runners)
-      .set({ status: 'busy' as const, lastSeen: new Date() })
-      .where(and(eq(runners.id, runner.id), eq(runners.status, 'online')))
-      .returning({ id: runners.id, teamId: runners.teamId });
-    if (result.length === 0) {
-      // Someone else grabbed it — fall back to a generic claim
+      const [s] = await tx
+        .select({ id: embeddedSessions.id })
+        .from(embeddedSessions)
+        .where(eq(embeddedSessions.runnerId, r.id));
+
+      if (s) {
+        await tx
+          .update(embeddedSessions)
+          .set({ status: 'busy', busySince: new Date(), lastActivityAt: new Date() })
+          .where(eq(embeddedSessions.id, s.id));
+      }
+
+      return { runnerId: r.id, teamId: r.teamId, sessionId: s?.id ?? null };
+    });
+
+    if (!claimResult) {
+      // Not registered yet, or already claimed by someone else — retry via
+      // generic claim (may pick this very same row once its lock releases,
+      // or a different idle one).
       const fallback = await claimPoolEB();
-      if (fallback) return fallback;
+      if (fallback) {
+        releaseReservation();
+        return fallback;
+      }
       continue;
     }
 
-    const [session] = await db
-      .select({ id: embeddedSessions.id })
-      .from(embeddedSessions)
-      .where(eq(embeddedSessions.runnerId, runner.id));
-    if (session) {
-      await db
-        .update(embeddedSessions)
-        .set({ status: 'busy', busySince: new Date(), lastActivityAt: new Date() })
-        .where(eq(embeddedSessions.id, session.id));
-    }
+    emitRunnerStatusChange({
+      runnerId: claimResult.runnerId,
+      teamId: claimResult.teamId,
+      status: 'busy',
+      previousStatus: 'online',
+      timestamp: Date.now(),
+    });
 
-    if (result[0]) {
-      emitRunnerStatusChange({
-        runnerId: runner.id,
-        teamId: result[0].teamId,
-        status: 'busy',
-        previousStatus: 'online',
-        timestamp: Date.now(),
-      });
-    }
-
-    console.log(`[Pool] Provisioned + claimed new EB ${runner.id.slice(0, 8)} (${jobInfo.jobName})`);
-    return { runnerId: runner.id, sessionId: session?.id ?? null };
+    console.log(`[Pool] Provisioned + claimed new EB ${claimResult.runnerId.slice(0, 8)} (${jobInfo.jobName})`);
+    // Runner row now exists; currentPoolSize() will see it normally.
+    releaseReservation();
+    return { runnerId: claimResult.runnerId, sessionId: claimResult.sessionId };
   }
 
   // Timed out waiting for registration — tear the Job back down to free the slot
   console.warn(`[Pool] Provisioned Job ${jobInfo.jobName} did not register within ${waitTimeoutMs}ms; terminating`);
   terminateEBJob(jobInfo.jobName).catch(() => {});
+  releaseReservation();
   return null;
 }
 

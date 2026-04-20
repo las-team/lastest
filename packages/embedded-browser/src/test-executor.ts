@@ -344,6 +344,12 @@ export class EmbeddedTestExecutor {
       }
 
       // Page event listeners — capture console errors and network requests
+      // Environmental transient errors (CNI/DNS/NAT bursts when 30 EB pods start
+      // near-simultaneously) surface as `ERR_NETWORK_CHANGED` / `ERR_NAME_NOT_RESOLVED`
+      // on sub-resource loads fired AFTER the main navigation — unrelated to
+      // the test's intent. Keep them out of the failure classification; log as
+      // info so they're still traceable.
+      const TRANSIENT_NET_CONSOLE_RX = /ERR_NETWORK_CHANGED|ERR_NAME_NOT_RESOLVED|ERR_CONNECTION_RESET|ERR_CONNECTION_CLOSED|ERR_NETWORK_IO_SUSPENDED/i;
       page.on('console', (msg) => {
         const text = msg.text();
         // Log shim messages to container output for debugging
@@ -351,6 +357,10 @@ export class EmbeddedTestExecutor {
           logFn('info', text);
         }
         if (msg.type() === 'error') {
+          if (TRANSIENT_NET_CONSOLE_RX.test(text)) {
+            logFn('info', `Transient network console error (ignored for classification): ${text}`);
+            return;
+          }
           consoleErrors.push(text);
           logFn('warn', `Console error: ${text}`);
         }
@@ -836,6 +846,11 @@ export class EmbeddedTestExecutor {
         if (r.status < 400 && !r.failed) return false;
         if (ignoreExternal && targetOrigin) {
           try { if (new URL(r.url).origin !== targetOrigin) return false; } catch { /* keep */ }
+        }
+        // Ignore transient network bursts on sub-resource loads (CNI/DNS
+        // instability during build startup). Keep real 4xx/5xx.
+        if (r.failed && r.errorText && /net::ERR_NETWORK_CHANGED|net::ERR_NAME_NOT_RESOLVED|net::ERR_CONNECTION_RESET|net::ERR_CONNECTION_CLOSED|net::ERR_NETWORK_IO_SUSPENDED/i.test(r.errorText)) {
+          return false;
         }
         return true;
       });

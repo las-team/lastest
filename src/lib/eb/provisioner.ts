@@ -140,11 +140,26 @@ async function k8sRequest(method: string, path: string, body?: unknown): Promise
   });
 }
 
+// In-flight provision counter: the window between `launchEBJob()` creating a
+// k8s Job and the pod's `registerAsSystem` callback inserting a runner row is
+// 5–30s (image pull, Chromium startup, first heartbeat). During that window
+// `currentPoolSize()` used to return a low count because it only sees
+// registered runners — so concurrent callers could each think "pool is small,
+// safe to provision" and collectively blow past the cap. Observed in prod as
+// 29 EB pods created while app was restarting (pool size log stayed at 3/30).
+let _inFlightProvisions = 0;
+export function incInFlightProvisions(): void { _inFlightProvisions++; }
+export function decInFlightProvisions(): void { _inFlightProvisions = Math.max(0, _inFlightProvisions - 1); }
+export function inFlightProvisions(): number { return _inFlightProvisions; }
+
 /**
  * Count currently-known system EB runners (online + busy) — proxy for pool size.
  * Offline rows are excluded: they represent dying/dead Jobs awaiting GC and shouldn't
- * block new provisioning. Used to enforce the global ebPoolMax before provisioning and to
- * decide whether `maybeTerminateReleasedEB` can tear down past warmPoolMin.
+ * block new provisioning. Also includes `_inFlightProvisions` — Jobs that were
+ * created but haven't registered yet. Without that, app restarts + burst
+ * claims cause runaway provisioning. Used to enforce the global ebPoolMax
+ * before provisioning and to decide whether `maybeTerminateReleasedEB` can
+ * tear down past warmPoolMin.
  */
 export async function currentPoolSize(): Promise<number> {
   const rows = await db
@@ -155,7 +170,7 @@ export async function currentPoolSize(): Promise<number> {
       eq(runners.type, 'embedded'),
       ne(runners.status, 'offline'),
     ));
-  return rows.length;
+  return rows.length + _inFlightProvisions;
 }
 
 function jobSpec(name: string, instanceId: string): Record<string, unknown> {
@@ -348,10 +363,15 @@ export async function ensureWarmPool(): Promise<number> {
 
   let launched = 0;
   for (let i = 0; i < canLaunch; i++) {
+    incInFlightProvisions();
     try {
       await launchEBJob();
       launched++;
+      // Decrement scheduled after a grace period: the pod should have
+      // registered as a runner by then, so it counts via the DB row instead.
+      setTimeout(() => decInFlightProvisions(), 120_000);
     } catch (err) {
+      decInFlightProvisions();
       console.warn('[EB Provisioner] ensureWarmPool launch failed:', err);
       break;
     }
