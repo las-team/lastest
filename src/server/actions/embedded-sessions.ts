@@ -17,6 +17,7 @@ import {
   incInFlightProvisions,
   decInFlightProvisions,
 } from '@/lib/eb/provisioner';
+import { toProxyStreamUrl } from '@/lib/eb/stream-url';
 
 /**
  * List all embedded sessions for the current team
@@ -299,7 +300,7 @@ export async function getStreamUrlForRunner(runnerId: string): Promise<{
 
   const streamAuthToken = process.env.STREAM_AUTH_TOKEN || null;
   return {
-    streamUrl: session.streamUrl,
+    streamUrl: toProxyStreamUrl(session.streamUrl),
     sessionId: session.id,
     streamAuthToken,
   };

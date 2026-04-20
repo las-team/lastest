@@ -78,7 +78,11 @@ export async function startDebugSession(
         settings?.navigationTimeout ?? undefined,
         settings,
       );
-      storageState = setupResult.storageState;
+      // Prefer the serialized JSON snapshot over the `persistent:<id>` marker —
+      // debug-executor creates its own BrowserContext and can't reach the
+      // test-executor's in-process setupContexts map, so the marker would be
+      // silently dropped by the JSON.parse/catch in createContextAndPage.
+      storageState = setupResult.storageStateJson ?? setupResult.storageState;
       setupVariables = setupResult.variables;
     } catch (err) {
       clearRemoteDebugSession(sessionId);

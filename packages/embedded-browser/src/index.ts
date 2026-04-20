@@ -945,6 +945,7 @@ async function startup(): Promise<void> {
                 correlationId: capturedCommand.id,
                 status: result.status,
                 storageState: result.storageState,
+                storageStateJson: result.storageStateJson,
                 variables: result.variables,
                 durationMs: result.durationMs,
                 error: result.error,

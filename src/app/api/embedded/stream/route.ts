@@ -1,25 +1,7 @@
 import { NextResponse } from 'next/server';
 import { requireAuth } from '@/lib/auth';
 import { listEmbeddedSessions, listSystemEmbeddedSessions } from '@/server/actions/embedded-sessions';
-
-/**
- * Convert a direct ws:// streamUrl to a proxy path so the browser connects
- * through the main app's WS proxy (ws-proxy-preload.js) instead of directly
- * to the container IP, which fails behind HTTPS/nginx.
- */
-function toProxyStreamUrl(streamUrl: string | null): string | null {
-  if (!streamUrl) return null;
-  try {
-    const url = new URL(streamUrl);
-    if (url.protocol === 'ws:' || url.protocol === 'wss:') {
-      const target = `${url.hostname}:${url.port || '9223'}`;
-      return `/api/embedded/stream/ws?target=${encodeURIComponent(target)}`;
-    }
-  } catch {
-    // not a valid URL — return as-is
-  }
-  return streamUrl;
-}
+import { toProxyStreamUrl } from '@/lib/eb/stream-url';
 
 /**
  * GET /api/embedded/stream

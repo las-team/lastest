@@ -153,7 +153,7 @@ export async function executeSetupViaRunner(
   timeout?: number,
   playwrightSettings?: PlaywrightSettings | null,
   browser?: 'chromium' | 'firefox' | 'webkit',
-): Promise<{ storageState?: string; variables?: Record<string, unknown> }> {
+): Promise<{ storageState?: string; storageStateJson?: string; variables?: Record<string, unknown> }> {
   const setupTimeout = timeout || 120000;
 
   const command = createMessage<RunSetupCommand>('command:run_setup', {
@@ -210,6 +210,7 @@ export async function executeSetupViaRunner(
           console.log(`[Executor] Setup completed successfully on runner ${runnerId}`);
           return {
             storageState: payload.storageState as string | undefined,
+            storageStateJson: payload.storageStateJson as string | undefined,
             variables: payload.variables as Record<string, unknown> | undefined,
           };
         } else {

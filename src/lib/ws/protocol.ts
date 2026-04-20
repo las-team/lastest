@@ -131,6 +131,10 @@ export interface SetupResultPayload {
   correlationId: string;
   status: 'passed' | 'failed' | 'error' | 'timeout';
   storageState?: string;
+  // Serialized JSON of the captured storageState. `storageState` may be a
+  // "persistent:<setupId>" marker; debug-executor and other non-test consumers
+  // need the real JSON here instead.
+  storageStateJson?: string;
   variables?: Record<string, unknown>;
   durationMs: number;
   error?: string;

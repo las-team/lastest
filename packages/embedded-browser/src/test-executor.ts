@@ -60,6 +60,11 @@ export interface EmbeddedTestResult {
 export interface EmbeddedSetupResult {
   status: 'passed' | 'failed' | 'error' | 'timeout';
   storageState?: string;
+  // Serialized JSON of the captured storageState. `storageState` above may be
+  // a "persistent:<setupId>" marker that instructs the test-executor to reuse
+  // the live BrowserContext; consumers that can't access that in-process map
+  // (e.g. the debug-executor) need the real JSON here.
+  storageStateJson?: string;
   variables?: Record<string, unknown>;
   durationMs: number;
   error?: string;
@@ -1247,6 +1252,7 @@ export class EmbeddedTestExecutor {
       return {
         status: 'passed',
         storageState: `persistent:${command.setupId}`,
+        storageStateJson: storageStateSnapshot ? JSON.stringify(storageStateSnapshot) : undefined,
         durationMs: Date.now() - startTime,
         logs,
       };
