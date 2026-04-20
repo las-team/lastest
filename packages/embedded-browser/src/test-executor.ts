@@ -1199,13 +1199,19 @@ export class EmbeddedTestExecutor {
 
       // Persist the setup's BrowserContext — tests in this run reuse it,
       // preserving sessionStorage/IndexedDB/in-memory auth that storageState drops.
-      // Close the setup page (tests open their own) but keep the context alive.
-      await page.close().catch(() => {});
-      setupPageClosed = true;
+      //
+      // KEEPALIVE PAGE: we intentionally keep the setup page OPEN. Chromium
+      // disposes a BrowserContext's target when it has 0 pages for a short
+      // while — after the first test closes its page, a second test calling
+      // `context.newPage()` would throw "Target page, context or browser has
+      // been closed" even though our Map still holds a reference. Keeping one
+      // navigated-but-idle page alive anchors the context's target so tests
+      // can open and close their own pages freely alongside it.
+      setupPageClosed = true; // prevent the finally block from closing it
       this.setupContexts.set(command.setupId, { context: setupContext, createdAt: Date.now() });
       this.ensureSetupContextSweeper();
       retainContext = true;
-      logFn('info', `Persistent setup context retained (setupId=${command.setupId}) — tests in this run will reuse it`);
+      logFn('info', `Persistent setup context retained with keepalive page (setupId=${command.setupId}) — tests in this run will reuse it`);
 
       return {
         status: 'passed',

@@ -33,6 +33,7 @@ function createSelectChain(result: unknown[]) {
   chain.limit = vi.fn().mockReturnValue(chain);
   chain.orderBy = vi.fn().mockReturnValue(chain);
   chain.innerJoin = vi.fn().mockReturnValue(chain);
+  chain.for = vi.fn().mockReturnValue(chain);
   // Make thenable at any point
   chain.then = (onfulfilled?: (v: unknown) => unknown, onrejected?: (e: unknown) => unknown) =>
     resolve().then(onfulfilled, onrejected);
@@ -56,7 +57,7 @@ function createUpdateChain(returningResult: unknown[]) {
   return chain;
 }
 
-const mockDb = {
+const mockDb: Record<string, unknown> = {
   select: vi.fn().mockImplementation(() => {
     const idx = selectCallCount++;
     return createSelectChain(dbSelectResults[idx] ?? []);
@@ -75,6 +76,11 @@ const mockDb = {
     chain.where = vi.fn().mockResolvedValue(undefined);
     return chain;
   }),
+  // Drizzle-style transaction: `db.transaction(cb)` passes a `tx` equivalent
+  // to `db`. Share the same mock select/update call counters so tests can
+  // script sequence outcomes without caring whether a call happened inside
+  // a transaction or not.
+  transaction: vi.fn().mockImplementation((cb: (tx: unknown) => Promise<unknown>) => cb(mockDb)),
 };
 
 vi.mock('@/lib/db', () => ({
@@ -146,13 +152,14 @@ describe('EB Pool Management', () => {
 
   describe('claimPoolEB', () => {
     it('claims an available EB and returns runnerId + sessionId', async () => {
-      // SELECT candidate → UPDATE returning → SELECT session
+      // Inside the transaction:
+      //   SELECT ... FOR UPDATE SKIP LOCKED  → candidate
+      //   UPDATE runner → busy                (no returning read)
+      //   SELECT session                      → session row
+      //   UPDATE session → busy               (no returning read)
       dbSelectResults = [
-        [EB_RUNNER_1],   // Find online system EB
-        [EB_SESSION_1],  // Find embedded session
-      ];
-      dbUpdateReturningResults = [
-        [{ id: 'eb-runner-1', teamId: 'system-team' }], // Optimistic lock succeeds
+        [EB_RUNNER_1],   // candidate pick
+        [EB_SESSION_1],  // session for that runner
       ];
 
       const { claimPoolEB } = await import('@/server/actions/embedded-sessions');
@@ -163,8 +170,8 @@ describe('EB Pool Management', () => {
       expect(result!.sessionId).toBe('session-1');
     });
 
-    it('returns null when no EBs are available', async () => {
-      dbSelectResults = [[]]; // No online system EBs
+    it('returns null when no online EBs exist', async () => {
+      dbSelectResults = [[]]; // candidate query returns nothing
 
       const { claimPoolEB } = await import('@/server/actions/embedded-sessions');
       const result = await claimPoolEB();
@@ -172,38 +179,12 @@ describe('EB Pool Management', () => {
       expect(result).toBeNull();
     });
 
-    it('retries on contention (optimistic lock failure)', async () => {
-      // First attempt: finds EB but update returns 0 rows (grabbed by another caller)
-      // Second attempt: finds same EB, update succeeds
-      dbSelectResults = [
-        [EB_RUNNER_1],   // Attempt 1: find candidate
-        [EB_RUNNER_2],   // Attempt 2: find candidate
-        [EB_SESSION_2],  // Find session for runner-2
-      ];
-      dbUpdateReturningResults = [
-        [],                                                // Attempt 1: optimistic lock fails
-        [{ id: 'eb-runner-2', teamId: 'system-team' }],   // Attempt 2: succeeds
-      ];
-
-      const { claimPoolEB } = await import('@/server/actions/embedded-sessions');
-      const result = await claimPoolEB();
-
-      expect(result).not.toBeNull();
-      expect(result!.runnerId).toBe('eb-runner-2');
-    });
-
-    it('returns null after 3 failed contention retries', async () => {
-      // All 3 attempts fail due to contention
-      dbSelectResults = [
-        [EB_RUNNER_1],
-        [EB_RUNNER_1],
-        [EB_RUNNER_1],
-      ];
-      dbUpdateReturningResults = [
-        [], // Attempt 1 fails
-        [], // Attempt 2 fails
-        [], // Attempt 3 fails
-      ];
+    it('returns null when every online EB row is locked by a peer claimer', async () => {
+      // SKIP LOCKED means locked rows are invisible to this query — the
+      // candidate SELECT comes back empty just like "no EBs at all". We don't
+      // need a separate retry loop any more; the test is semantically the
+      // same as "no EBs available" from the caller's point of view.
+      dbSelectResults = [[]];
 
       const { claimPoolEB } = await import('@/server/actions/embedded-sessions');
       const result = await claimPoolEB();
