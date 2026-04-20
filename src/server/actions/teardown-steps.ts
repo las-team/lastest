@@ -63,7 +63,7 @@ export async function addDefaultTeardownStep(
     orderIndex: maxOrder + 1,
   });
 
-  revalidatePath('/env');
+  revalidatePath('/tests');
   return { success: true };
 }
 
@@ -73,7 +73,7 @@ export async function addDefaultTeardownStep(
 export async function removeDefaultTeardownStep(stepId: string) {
   await requireTeamAccess();
   await queries.deleteDefaultTeardownStep(stepId);
-  revalidatePath('/env');
+  revalidatePath('/tests');
   return { success: true };
 }
 
@@ -89,7 +89,7 @@ export async function reorderDefaultTeardownSteps(
     await queries.updateDefaultTeardownStepOrder(stepIds[i], i);
   }
 
-  revalidatePath('/env');
+  revalidatePath('/tests');
   return { success: true };
 }
 

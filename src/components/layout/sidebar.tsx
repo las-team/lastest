@@ -12,7 +12,6 @@ import {
   Settings,
   Layers,
   Building2,
-  Zap,
   ClipboardCheck,
   TrendingDown,
   Trophy,
@@ -49,7 +48,6 @@ const EARLY_ADOPTER_ITEMS = new Set(['Compose', 'Compare', 'Impact']);
 const definitionNav = [
   { name: 'Tests', href: '/tests', icon: FileCode },
   { name: 'Compose', href: '/compose', icon: Layers },
-  { name: 'Seed', href: '/env', icon: Zap },
 ];
 
 const executionNav = [

@@ -33,6 +33,9 @@ import { ImportFromSpecDialog } from '@/components/ai/import-from-spec-dialog';
 import { CodeDiffScanDialog } from '@/components/ai/code-diff-scan-dialog';
 import { createArea, deleteArea, deleteAreaWithContents, moveTestToArea, moveArea, exportAllPlans, updateAreaPlan, updateArea } from '@/server/actions/areas';
 import { deleteTests, restoreTests, permanentlyDeleteTests, getTest, getTestDetailData } from '@/server/actions/tests';
+import { ApiConfigList } from '@/components/setup/api-config-list';
+import { SetupStepBuilder } from '@/components/setup/setup-step-builder';
+import { addDefaultTeardownStep, removeDefaultTeardownStep, reorderDefaultTeardownSteps } from '@/server/actions/teardown-steps';
 import { createPlaceholderTestCase } from '@/server/actions/specs';
 import { TestDetailClient } from '@/app/(app)/tests/[id]/test-detail-client';
 import { runTests } from '@/server/actions/runs';
@@ -71,8 +74,10 @@ import {
   Save,
   ExternalLink,
 } from 'lucide-react';
-import type { FunctionalArea, Test, Route } from '@/lib/db/schema';
+import type { FunctionalArea, Test, Route, Repository, SetupScript, SetupConfig, StorageState } from '@/lib/db/schema';
 import type { FunctionalAreaWithChildren } from '@/lib/db/queries';
+import type { SetupStep } from '@/server/actions/setup-steps';
+import type { TeardownStep } from '@/server/actions/teardown-steps';
 
 interface TestWithStatus extends Test {
   latestStatus: string | null;
@@ -81,6 +86,7 @@ interface TestWithStatus extends Test {
 interface DefinitionPageClientProps {
   tree: FunctionalAreaWithChildren[];
   uncategorizedTests: { id: string; name: string; description: string | null; latestStatus: string | null; isPlaceholder: boolean }[];
+  repository: Repository;
   repositoryId: string;
   selectedBranch: string;
   banAiMode: boolean;
@@ -90,6 +96,12 @@ interface DefinitionPageClientProps {
   routes: Route[];
   baseUrl: string;
   deletedTests: Test[];
+  setupScripts: SetupScript[];
+  setupConfigs: SetupConfig[];
+  availableSetupTests: Test[];
+  defaultSetupSteps: SetupStep[];
+  defaultTeardownSteps: TeardownStep[];
+  storageStates: StorageState[];
 }
 
 // Collect all test IDs recursively from an area subtree
@@ -128,6 +140,7 @@ function buildBreadcrumb(areas: FunctionalAreaWithChildren[], targetId: string):
 export function DefinitionPageClient({
   tree,
   uncategorizedTests,
+  repository,
   repositoryId,
   selectedBranch,
   banAiMode,
@@ -137,11 +150,18 @@ export function DefinitionPageClient({
   routes,
   baseUrl,
   deletedTests,
+  setupScripts,
+  setupConfigs,
+  availableSetupTests,
+  defaultSetupSteps,
+  defaultTeardownSteps,
+  storageStates,
 }: DefinitionPageClientProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const notifyJobStarted = useNotifyJobStarted();
-  const initialTab = searchParams.get('tab') === 'plan' ? 'plan' : 'tests';
+  const tabParam = searchParams.get('tab');
+  const initialTab = tabParam === 'plan' || tabParam === 'setup' ? tabParam : 'tests';
 
   // --- Tree state (from Areas page) ---
   const [treeSelection, setTreeSelection] = useState<TreeSelection | null>(null);
@@ -970,9 +990,6 @@ export function DefinitionPageClient({
         <Tabs value={activeTab} onValueChange={setActiveTab} className="flex flex-col flex-1 overflow-hidden">
           <div className="px-6 pt-4 pb-0 shrink-0">
             <TabsList className="h-11 w-full max-w-5xl p-1 bg-white dark:bg-zinc-950 border">
-              <TabsTrigger value="tests" className="flex-1 px-6 text-sm data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-sm">
-                Tests
-              </TabsTrigger>
               <TabsTrigger value="plan" className="flex-1 px-6 text-sm data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-sm">
                 Plan
                 {flatAreas.length > 0 && (
@@ -980,6 +997,12 @@ export function DefinitionPageClient({
                     {flatAreas.length}
                   </Badge>
                 )}
+              </TabsTrigger>
+              <TabsTrigger value="setup" className="flex-1 px-6 text-sm data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-sm">
+                Setup
+              </TabsTrigger>
+              <TabsTrigger value="tests" className="flex-1 px-6 text-sm data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-sm">
+                Tests
               </TabsTrigger>
             </TabsList>
           </div>
@@ -1489,6 +1512,81 @@ export function DefinitionPageClient({
                     <p>No areas yet. Create areas to start planning.</p>
                   </div>
                 )}
+              </div>
+            </div>
+          </TabsContent>
+
+          {/* ─── Setup Tab ─── */}
+          <TabsContent value="setup" className="overflow-auto flex-1">
+            <div className="p-6">
+              <div className="max-w-4xl mx-auto space-y-6">
+                <p className="text-sm text-muted-foreground">
+                  Configure seed and teardown steps for test preparation and cleanup.
+                </p>
+                <Tabs defaultValue="seed-setup">
+                  <TabsList className="h-11 w-full p-1 bg-white dark:bg-zinc-950 border">
+                    <TabsTrigger value="seed-setup" className="flex-1 px-6 text-sm data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-sm">
+                      Seed
+                    </TabsTrigger>
+                    <TabsTrigger value="seed-teardown" className="flex-1 px-6 text-sm data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-sm">
+                      Teardown
+                    </TabsTrigger>
+                  </TabsList>
+
+                  <TabsContent value="seed-setup" className="space-y-8 mt-6">
+                    <section>
+                      <SetupStepBuilder
+                        repositoryId={repository.id}
+                        setupSteps={defaultSetupSteps}
+                        availableTests={availableSetupTests}
+                        availableScripts={setupScripts}
+                        availableStorageStates={storageStates}
+                      />
+                    </section>
+
+                    <section className="space-y-4">
+                      <div>
+                        <h2 className="text-lg font-medium">API Configurations</h2>
+                        <p className="text-sm text-muted-foreground">
+                          Configure API endpoints for data seeding scripts.
+                        </p>
+                      </div>
+                      <ApiConfigList
+                        repositoryId={repository.id}
+                        configs={setupConfigs}
+                      />
+                    </section>
+                  </TabsContent>
+
+                  <TabsContent value="seed-teardown" className="space-y-8 mt-6">
+                    <section>
+                      <SetupStepBuilder
+                        repositoryId={repository.id}
+                        setupSteps={defaultTeardownSteps}
+                        availableTests={availableSetupTests}
+                        availableScripts={setupScripts}
+                        onAddStep={addDefaultTeardownStep}
+                        onRemoveStep={removeDefaultTeardownStep}
+                        onReorderSteps={reorderDefaultTeardownSteps}
+                        title="Default Teardown Steps"
+                        description="Configure the default teardown sequence that runs after each test for cleanup."
+                      />
+                    </section>
+
+                    <section className="space-y-4">
+                      <div>
+                        <h2 className="text-lg font-medium">API Configurations</h2>
+                        <p className="text-sm text-muted-foreground">
+                          Configure API endpoints for data seeding scripts.
+                        </p>
+                      </div>
+                      <ApiConfigList
+                        repositoryId={repository.id}
+                        configs={setupConfigs}
+                      />
+                    </section>
+                  </TabsContent>
+                </Tabs>
               </div>
             </div>
           </TabsContent>
