@@ -10,7 +10,7 @@ data:
   # EB_POOL_MAX moved to DB: global playwright_settings.ebPoolMax (seeded on boot)
   EB_WARM_POOL_MIN: "1"
   EB_CPU_REQUEST: "500m"
-  EB_CPU_LIMIT: "1000m"
+  EB_CPU_LIMIT: "2000m"
   EB_MEM_REQUEST: "1Gi"
   EB_MEM_LIMIT: "2Gi"
   EB_SHM_SIZE: "512Mi"

@@ -48,7 +48,29 @@ function createSetupPageProxy(page: Page, baseUrl: string): Page {
           } else if (!urlStr.startsWith('http://') && !urlStr.startsWith('https://')) {
             resolvedUrl = `${baseUrl.replace(/\/$/, '')}/${urlStr}`;
           }
-          return target.goto(resolvedUrl, options);
+          // Retry ladder for transient CNI/DNS bursts during build startup
+          // (30 EBs hitting the target concurrently can trip ERR_NETWORK_CHANGED).
+          // Total wait budget: 1s + 2s + 4s ≈ 7s before giving up.
+          const TRANSIENT_NET_RX = /ERR_NETWORK_CHANGED|ERR_NAME_NOT_RESOLVED|ERR_CONNECTION_RESET|ERR_CONNECTION_CLOSED|ERR_NETWORK_IO_SUSPENDED/i;
+          const delays = [1000, 2000, 4000];
+          let lastErr: unknown;
+          for (let attempt = 0; attempt <= delays.length; attempt++) {
+            try {
+              return await target.goto(resolvedUrl, options);
+            } catch (err) {
+              lastErr = err;
+              const msg = err instanceof Error ? err.message : String(err);
+              if (!TRANSIENT_NET_RX.test(msg)) throw err;
+              if (attempt === delays.length) break;
+              console.warn(`[Setup] page.goto transient error (attempt ${attempt + 1}/${delays.length + 1}), backing off ${delays[attempt]}ms: ${msg}`);
+              await new Promise((r) => setTimeout(r, delays[attempt]!));
+            }
+          }
+          const finalMsg = lastErr instanceof Error ? lastErr.message : String(lastErr);
+          const tagged = new Error(`EB network unhealthy after retries: ${finalMsg}`);
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          (tagged as unknown as Record<string, unknown>).__ebNetworkUnhealthy = true;
+          throw tagged;
         };
       }
       if (prop === 'waitForURL') {

@@ -797,11 +797,15 @@ export class TestRunner {
     let lastReachedStep = -1;
     const __stepReached = async (n: number) => { lastReachedStep = Math.max(lastReachedStep, n); };
 
-    // Wrap standalone await statements (except screenshots) in try/catch for soft error handling
-    // This matches the local runner behavior so tests continue past failures to reach screenshots
-    // Hard assertion errors (.__hardAssertion) are re-thrown to fail the test immediately
+    // Wrap standalone await statements (except screenshots/navigation) in try/catch
+    // for soft error handling. This matches the local runner behavior so tests
+    // continue past failures to reach screenshots.
+    // Hard assertion errors (.__hardAssertion) are re-thrown to fail the test immediately.
+    // `page.goto` is NOT soft-wrapped: if navigation fails, subsequent steps would
+    // run on about:blank and produce blank screenshots recorded as passes.
     body = body.replace(/^(\s*)(await\s+.+;)\s*$/gm, (_match: string, indent: string, stmt: string) => {
       if (stmt.includes('.screenshot(')) return `${indent}${stmt}`;
+      if (stmt.includes('.goto(')) return `${indent}${stmt}`;
       return `${indent}try { ${stmt} } catch(__softErr) { if (__softErr && __softErr.__hardAssertion) throw __softErr; stepLogger.warn(typeof __softErr === 'object' && __softErr !== null && 'message' in __softErr ? __softErr.message : String(__softErr)); }`;
     });
 

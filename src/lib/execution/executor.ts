@@ -286,8 +286,11 @@ async function executeViaRunner(
   let completedCount = 0;
   let cancelled = false;
   const baseTimeout = options.playwrightSettings?.navigationTimeout || 120000;
-  // Scale timeout for concurrency — parallel tests compete for resources
-  const testTimeout = Math.max(baseTimeout * maxParallel, 300000);
+  // Scale timeout for concurrency — parallel tests compete for resources.
+  // Floor of 10 min: under heavy pool concurrency (e.g. 30 EBs on one node),
+  // Chromium gets CPU-starved and page.goto can take several minutes. A lower
+  // floor caused healthy tests to be cancelled mid-run with `command:cancel_test`.
+  const testTimeout = Math.max(baseTimeout * maxParallel, 600000);
   let pollInterval = 250;
   const maxPollInterval = 500;
 
@@ -705,38 +708,46 @@ async function executeViaPoolWorkers(
     const workerSetupId = options.setupInfo ? `${runId}-w${workerId}` : null;
 
     const ensureEBWithSetup = async (): Promise<WorkerEB | null> => {
-      if (claimed) return claimed;
-      const c = await claimWithRetry();
-      if (!c) return null;
-      claimed = c;
-      setupDone = false;
-      everClaimed = true;
-      await recordActualRunner(c.runnerId);
-      console.log(`[Worker ${workerId}] Claimed EB ${c.runnerId.slice(0, 8)}`);
+      // Claim a fresh EB if we don't hold one yet.
+      if (!claimed) {
+        const c = await claimWithRetry();
+        if (!c) return null;
+        claimed = c;
+        setupDone = false;
+        everClaimed = true;
+        await recordActualRunner(c.runnerId);
+        console.log(`[Worker ${workerId}] Claimed EB ${c.runnerId.slice(0, 8)}`);
+      }
 
-      if (options.setupInfo && workerSetupId) {
+      // If we hold an EB but setup hasn't completed, RE-RUN setup. We don't
+      // want to short-circuit on `claimed` while setupDone=false — otherwise
+      // the worker proceeds to run tests with no persistent context (silent
+      // data bug: tests hang on auth redirects and time out at 300s).
+      if (options.setupInfo && workerSetupId && !setupDone) {
         try {
           await executeSetupViaRunner(
             options.setupInfo.code,
             workerSetupId,
-            c.runnerId,
+            claimed.runnerId,
             baseUrl,
             viewport,
             options.playwrightSettings?.navigationTimeout ?? undefined,
             options.playwrightSettings,
           );
           setupDone = true;
-          console.log(`[Worker ${workerId}] Setup completed on EB ${c.runnerId.slice(0, 8)} (persistent:${workerSetupId})`);
+          console.log(`[Worker ${workerId}] Setup completed on EB ${claimed.runnerId.slice(0, 8)} (persistent:${workerSetupId})`);
         } catch (err) {
-          // Setup flake on this worker. Retry on the SAME EB — don't release +
-          // re-provision, otherwise N flaky setups churn N fresh Jobs and starve
-          // the pool cap. Only drop the EB if it looks unhealthy (offline/crash);
-          // a fresh claim won't help if the failure was e.g. ERR_NETWORK_CHANGED
-          // from target load.
+          // Setup flake. By default, retry on the SAME EB — a fresh EB won't
+          // help if the target URL is briefly contended. But if the error
+          // signals the EB itself is unhealthy (offline/crash/command timeout,
+          // OR the EB's network stack exhausted its goto retry ladder and
+          // surfaced the `EB network unhealthy` tag), drop the EB so the next
+          // iteration claims a fresh one. Signal failure via `return null` so
+          // setupFailureStreak increments and we back off before retrying.
           const msg = err instanceof Error ? err.message : String(err);
-          console.error(`[Worker ${workerId}] Setup failed on EB ${c.runnerId.slice(0, 8)}:`, err);
-          if (/offline|crash|runner went|ECONNREFUSED|timed out/i.test(msg)) {
-            try { await releasePoolEB(c.runnerId); } catch { /* ignore */ }
+          console.error(`[Worker ${workerId}] Setup failed on EB ${claimed.runnerId.slice(0, 8)}:`, err);
+          if (/offline|crash|runner went|ECONNREFUSED|timed out|EB network unhealthy/i.test(msg)) {
+            try { await releasePoolEB(claimed.runnerId); } catch { /* ignore */ }
             claimed = null;
           }
           return null;
@@ -813,9 +824,11 @@ async function executeViaPoolWorkers(
             screenshots: [],
             errorMessage: msg,
           });
-          // Heuristic: if the EB looks dead (went offline, crash-loop, command timed out),
-          // drop it so the next iteration claims a fresh one and re-runs setup.
-          if (/offline|crash|timed out|runner went/i.test(msg)) {
+          // Heuristic: if the EB looks dead (went offline, crash-loop, command
+          // timed out, or tagged as network-unhealthy by the in-pod goto retry
+          // ladder), drop it so the next iteration claims a fresh one and
+          // re-runs setup.
+          if (/offline|crash|timed out|runner went|EB network unhealthy|page\.screenshot.*Target page.*closed|Target .*has been closed/i.test(msg)) {
             ebDied = true;
           }
         } finally {

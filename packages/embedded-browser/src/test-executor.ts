@@ -447,15 +447,43 @@ export class EmbeddedTestExecutor {
         return rawScreenshot(options);
       };
 
-      // Intercept page.goto with logging + random seed reset
+      // Intercept page.goto with logging + retry ladder for transient CNI
+      // bursts observed on builds (ERR_NETWORK_CHANGED / DNS flakes from 30 EBs
+      // hitting the same target concurrently). Retries at 1s, 2s, 4s = ~7s
+      // total; if still failing, throw a tagged error so the upper layer can
+      // decide to swap to a fresh EB instead of burning the test.
       const originalGoto = page.goto.bind(page);
+      const TRANSIENT_NET_RX = /ERR_NETWORK_CHANGED|ERR_NAME_NOT_RESOLVED|ERR_CONNECTION_RESET|ERR_CONNECTION_CLOSED|ERR_NETWORK_IO_SUSPENDED/i;
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (page as any).goto = async (url: string, options?: any) => {
         logFn('info', `Navigating to ${url}...`);
-        const response = await originalGoto(url, options);
-        logFn('info', `Navigation complete: ${response?.status() ?? 'no response'}`);
-        // addInitScript already resets mathState on each navigation — no explicit reset needed
-        return response;
+        const delays = [1000, 2000, 4000];
+        let lastErr: unknown;
+        for (let attempt = 0; attempt <= delays.length; attempt++) {
+          try {
+            const response = await originalGoto(url, options);
+            if (attempt > 0) {
+              logFn('info', `Navigation complete (retry ${attempt}): ${response?.status() ?? 'no response'}`);
+            } else {
+              logFn('info', `Navigation complete: ${response?.status() ?? 'no response'}`);
+            }
+            return response;
+          } catch (err) {
+            lastErr = err;
+            const msg = err instanceof Error ? err.message : String(err);
+            if (!TRANSIENT_NET_RX.test(msg)) throw err;
+            if (attempt === delays.length) break;
+            logFn('warn', `Navigation hit transient network error (attempt ${attempt + 1}/${delays.length + 1}), backing off ${delays[attempt]}ms: ${msg}`);
+            await new Promise((r) => setTimeout(r, delays[attempt]));
+          }
+        }
+        // All retries exhausted on a transient error — this EB's network stack
+        // looks unhealthy. Tag the error so the app-side worker releases + re-claims.
+        const finalMsg = lastErr instanceof Error ? lastErr.message : String(lastErr);
+        const tagged = new Error(`EB network unhealthy after retries: ${finalMsg}`);
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (tagged as any).__ebNetworkUnhealthy = true;
+        throw tagged;
       };
 
       // Extract function body
@@ -502,9 +530,13 @@ export class EmbeddedTestExecutor {
       reachedStep = -1;
       const __stepReached = async (n: number) => { reachedStep = Math.max(reachedStep, n); };
 
-      // Soft error wrapping — skip screenshot lines (mirrors runner.ts)
+      // Soft error wrapping — skip screenshot lines AND navigation lines
+      // (mirrors runner.ts). `page.goto` failures must fail the test hard:
+      // if a worker can't reach the target URL, subsequent steps would run
+      // on about:blank and produce blank-white screenshots recorded as passes.
       body = body.replace(/^(\s*)(await\s+.+;)\s*$/gm, (_match, indent, stmt) => {
         if (stmt.includes('.screenshot(')) return `${indent}${stmt}`;
+        if (stmt.includes('.goto(')) return `${indent}${stmt}`;
         return `${indent}try { ${stmt} } catch(__softErr) { if (__softErr && __softErr.__hardAssertion) throw __softErr; stepLogger.warn(typeof __softErr === 'object' && __softErr !== null && 'message' in __softErr ? __softErr.message : String(__softErr)); }`;
       });
       // Also soft-wrap synchronous expect() calls so assertion failures don't kill the test

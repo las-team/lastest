@@ -800,6 +800,53 @@ export async function reapIdleEBJobs(idleTtlMs: number): Promise<number> {
 }
 
 /**
+ * Boot-time reconciliation: release any pool EBs stuck in `busy` state.
+ *
+ * Claims live in app-process memory — when the app pod restarts mid-test,
+ * the worker promise is gone but the DB still shows runner='busy' and
+ * session='busy'. The heartbeat reaper can't clean these up because the
+ * EB container itself is alive and keeps heartbeating. Nothing can be
+ * legitimately mid-claim when the app just booted (single-replica, Recreate
+ * strategy), so flip everything busy back to online/ready.
+ */
+export async function reconcileOrphanedPoolEBs(): Promise<number> {
+  // Step 1: flip any busy system runner back to 'online' so releasePoolEB
+  // sees it as claimed and goes through the normal release path.
+  const orphaned = await db
+    .select({ id: runners.id })
+    .from(runners)
+    .where(and(eq(runners.isSystem, true), eq(runners.status, 'busy')))
+    .for('update');
+
+  if (orphaned.length === 0) return 0;
+
+  // Flip sessions to ready first (independent of per-runner release below).
+  await db
+    .update(embeddedSessions)
+    .set({ status: 'ready', busySince: null, userId: null, lastActivityAt: new Date() })
+    .where(eq(embeddedSessions.status, 'busy'));
+
+  // Step 2: for each orphan, go through releasePoolEB so warm-pool trimming
+  // (maybeTerminateReleasedEB) kicks in and tears the Job down if we're above
+  // EB_WARM_POOL_MIN. Releases run serially to avoid racing the warm-pool
+  // reserve gate.
+  for (const row of orphaned) {
+    await db
+      .update(runners)
+      .set({ status: 'busy', lastSeen: new Date() })
+      .where(eq(runners.id, row.id));
+    try {
+      await releasePoolEB(row.id);
+    } catch (err) {
+      console.error(`[Boot] releasePoolEB failed for ${row.id.slice(0, 8)}:`, err);
+    }
+  }
+
+  console.log(`[Boot] Reconciled ${orphaned.length} orphaned busy EB(s) via releasePoolEB`);
+  return orphaned.length;
+}
+
+/**
  * Reaper: release EBs whose runner has stopped heartbeating.
  * Heartbeat is the authoritative liveness signal — a healthy long-running test
  * keeps the runner heartbeating, so this won't kill legitimate work. Per-test
