@@ -31,6 +31,7 @@ import {
   getRunnerCommandById,
   getTestFixtures,
 } from '@/lib/db/queries';
+import { isScreenshotBlankWhite } from '@/lib/diff/blank-detector';
 
 /**
  * Generate SHA256 hash of test code for integrity verification.
@@ -558,6 +559,21 @@ async function executeViaRunner(
         lastReachedStep: typeof payload.lastReachedStep === 'number' ? payload.lastReachedStep : undefined,
         totalSteps: typeof payload.totalSteps === 'number' ? payload.totalSteps : undefined,
       };
+
+      // Guardrail: a passed test whose screenshot is all-white is almost
+      // certainly a race between navigation and capture under load (seen when
+      // the EB pool saturates without setup). Surface it loudly instead of
+      // letting it pollute baselines as a silent pass.
+      if (testResult.status === 'passed' && allScreenshots[0]?.path) {
+        try {
+          if (await isScreenshotBlankWhite(allScreenshots[0].path)) {
+            testResult.status = 'failed';
+            testResult.errorMessage =
+              'Screenshot is blank/white — navigation likely raced capture under pool pressure. Does this test need setup?';
+          }
+        } catch { /* best-effort */ }
+      }
+
       results.push(testResult);
       await onResult?.(testResult);
 
