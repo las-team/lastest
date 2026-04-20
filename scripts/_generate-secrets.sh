@@ -26,10 +26,12 @@ PREV_BETTER_AUTH_SECRET=$(existing BETTER_AUTH_SECRET)
 PREV_SYSTEM_EB_TOKEN=$(existing SYSTEM_EB_TOKEN)
 PREV_POSTGRES_PASSWORD=$(existing POSTGRES_PASSWORD)
 
-# Pull optional keys from .env.local. DATABASE_URL stays k8s-owned (points
-# at the in-cluster postgres service).
+# Pull optional keys from .env.local. DATABASE_URL, when set, overrides the
+# in-cluster default so you can point at an external postgres (e.g. a
+# host-side container reachable at host.k3d.internal:5432).
 ENV_LOCAL="${REPO_ROOT}/.env.local"
 MERGE_KEYS=(
+  DATABASE_URL
   BETTER_AUTH_SECRET
   BETTER_AUTH_BASE_URL BETTER_AUTH_TRUSTED_ORIGINS
   NEXT_PUBLIC_APP_URL
@@ -63,6 +65,18 @@ fi
 SYSTEM_EB_TOKEN="${PREV_SYSTEM_EB_TOKEN:-$(openssl rand -hex 32)}"
 POSTGRES_PASSWORD="${PREV_POSTGRES_PASSWORD:-$(openssl rand -hex 16)}"
 
+# DATABASE_URL precedence: .env.local > in-cluster default.
+# localhost/127.0.0.1 in .env.local is rewritten to host.k3d.internal so
+# the same URL works for both host-side `pnpm dev` and in-cluster pods.
+if [ -n "${EXTRA[DATABASE_URL]:-}" ]; then
+  DATABASE_URL="${EXTRA[DATABASE_URL]}"
+  DATABASE_URL="${DATABASE_URL//@localhost:/@host.k3d.internal:}"
+  DATABASE_URL="${DATABASE_URL//@127.0.0.1:/@host.k3d.internal:}"
+  unset 'EXTRA[DATABASE_URL]'  # don't emit it twice
+else
+  DATABASE_URL="postgresql://lastest:${POSTGRES_PASSWORD}@postgres.lastest.svc.cluster.local:5432/lastest"
+fi
+
 TMP="${OUT}.tmp"
 {
   cat <<EOF
@@ -87,7 +101,7 @@ type: Opaque
 stringData:
   BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET}
   SYSTEM_EB_TOKEN: ${SYSTEM_EB_TOKEN}
-  DATABASE_URL: postgresql://lastest:${POSTGRES_PASSWORD}@postgres.lastest.svc.cluster.local:5432/lastest
+  DATABASE_URL: ${DATABASE_URL}
 EOF
   for k in "${!EXTRA[@]}"; do
     # stringData values are raw strings; %q survives special chars.

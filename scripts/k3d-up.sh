@@ -36,7 +36,17 @@ fi
 
 kubectl config use-context "k3d-${CLUSTER_NAME}" >/dev/null
 
-# 2. Build images (EB first — its Dockerfile copies pre-built dist/)
+# 2. Namespace + RBAC + Secrets. Done BEFORE the expensive docker builds so
+#    .env.local edits propagate even if a later build step fails.
+echo "==> Applying namespace + RBAC"
+kubectl apply -f k8s/namespace.yaml
+kubectl apply -f k8s/embedded-browser-rbac.yaml
+
+echo "==> Refreshing .k8s-secrets.yaml from .env.local"
+bash scripts/_generate-secrets.sh .k8s-secrets.yaml
+kubectl apply -f .k8s-secrets.yaml
+
+# 3. Build images (EB first — its Dockerfile copies pre-built dist/)
 echo "==> Building @lastest/embedded-browser"
 pnpm --filter @lastest/embedded-browser build
 
@@ -59,30 +69,27 @@ docker build \
   -t "${APP_IMAGE}" \
   -f Dockerfile .
 
-# 3. Import into k3d nodes (skips the registry roundtrip)
+# 4. Import into k3d nodes (skips the registry roundtrip)
 echo "==> Importing images into k3d"
 k3d image import "${APP_IMAGE}" "${EB_IMAGE}" -c "${CLUSTER_NAME}"
 
-# 4. Namespace + RBAC
-echo "==> Applying namespace + RBAC"
-kubectl apply -f k8s/namespace.yaml
-kubectl apply -f k8s/embedded-browser-rbac.yaml
+# 5. Postgres (skip if .env.local points DATABASE_URL at an external DB)
+EXTERNAL_DB_URL="$(grep -E '^DATABASE_URL=' .env.local 2>/dev/null | tail -1 | cut -d= -f2- || true)"
+if [ -n "${EXTERNAL_DB_URL}" ]; then
+  echo "==> External DATABASE_URL detected — skipping in-cluster postgres"
+  kubectl -n "${NAMESPACE}" delete deploy postgres --ignore-not-found >/dev/null
+  kubectl -n "${NAMESPACE}" delete svc postgres --ignore-not-found >/dev/null
+else
+  echo "==> Applying postgres"
+  kubectl apply -f k8s/postgres.yaml
+  kubectl -n "${NAMESPACE}" rollout status deploy/postgres --timeout=120s
+fi
 
-# 5. Secrets — always re-merge .env.local so edits propagate. Cluster-owned
-#    randoms (POSTGRES_PASSWORD, SYSTEM_EB_TOKEN, BETTER_AUTH_SECRET when
-#    absent from .env.local) are preserved across re-runs.
-echo "==> Refreshing .k8s-secrets.yaml from .env.local"
-bash scripts/_generate-secrets.sh .k8s-secrets.yaml
-kubectl apply -f .k8s-secrets.yaml
-
-# 6. Postgres
-echo "==> Applying postgres"
-kubectl apply -f k8s/postgres.yaml
-kubectl -n "${NAMESPACE}" rollout status deploy/postgres --timeout=120s
-
-# 7. App (with per-build image tags)
+# 6. App (with per-build image tags). If the image tag didn't change (no-op
+#    build) but secrets did, force a rollout so pods pick up new env.
 echo "==> Applying app deployment"
 envsubst '${APP_IMAGE} ${EB_IMAGE}' < k8s/app-deployment.yaml | kubectl apply -f -
+kubectl -n "${NAMESPACE}" rollout restart deploy/lastest-app >/dev/null 2>&1 || true
 kubectl -n "${NAMESPACE}" rollout status deploy/lastest-app --timeout=300s
 
 # 8. Schema is auto-pushed by the app's docker-entrypoint (drizzle-kit push --force).

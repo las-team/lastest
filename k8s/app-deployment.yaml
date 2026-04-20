@@ -81,7 +81,21 @@ spec:
               mountPath: /app/storage
       volumes:
         - name: storage
-          emptyDir: {}
+          persistentVolumeClaim:
+            claimName: lastest-storage
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: lastest-storage
+  namespace: lastest
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: local-path
+  resources:
+    requests:
+      storage: 20Gi
 ---
 apiVersion: v1
 kind: Service
