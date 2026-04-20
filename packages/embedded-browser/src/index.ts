@@ -18,6 +18,7 @@ import { CROSS_OS_CHROMIUM_ARGS } from './stabilization.js';
 import { inspectElementAtPoint, getAllDomSelectors, type SelectorPriorityConfig } from './selector-utils.js';
 
 import os from 'os';
+import net from 'net';
 
 // Configuration from environment
 const streamPort = parseInt(process.env.STREAM_PORT ?? '9223', 10);
@@ -73,12 +74,12 @@ async function startup(): Promise<void> {
   // 1. Launch browser
   console.log('[Startup] Launching Chromium...');
   const useCrossOsArgs = process.env.CROSS_OS_CONSISTENCY !== 'false';
-  // Bind CDP on all interfaces so the main app pod can reach it directly
-  // at http://<podIP>:9222 (registered as cdpUrl). Chrome's default
-  // --remote-debugging-address=127.0.0.1 makes CDP unreachable across pods,
-  // which breaks @playwright/mcp (--cdp-endpoint) for healer/generator agents
-  // when the EB is provisioned dynamically in Kubernetes.
-  const cdpAddress = process.env.CDP_BIND_ADDRESS ?? '0.0.0.0';
+  // Modern Chromium (106+) hard-codes `--remote-debugging-address=127.0.0.1`
+  // as a security measure — the flag is silently ignored for non-localhost
+  // values. That breaks @playwright/mcp (--cdp-endpoint) for healer/generator
+  // agents when the EB runs in a separate k8s pod. Work around by binding
+  // Chromium to localhost as usual, then running a tiny Node TCP proxy on
+  // 0.0.0.0:<cdpPort> that forwards to 127.0.0.1:<cdpPort>.
   browser = await chromium.launch({
     headless: true,
     ignoreDefaultArgs: ['--enable-automation'],
@@ -86,10 +87,30 @@ async function startup(): Promise<void> {
       ...(useCrossOsArgs ? CROSS_OS_CHROMIUM_ARGS : []),
       '--disable-blink-features=AutomationControlled',
       `--remote-debugging-port=${config.cdpPort}`,
-      `--remote-debugging-address=${cdpAddress}`,
     ],
   });
-  console.log(`[Startup] CDP endpoint available at http://${cdpAddress}:${config.cdpPort}`);
+  console.log(`[Startup] CDP endpoint available at http://127.0.0.1:${config.cdpPort}`);
+
+  // TCP proxy: expose the Chromium CDP port on all interfaces so other pods
+  // can reach it. Plain byte pipe — CDP is WebSocket + HTTP, both just TCP.
+  try {
+    const cdpProxy = net.createServer((client) => {
+      const upstream = net.createConnection(config.cdpPort, '127.0.0.1');
+      upstream.on('error', () => client.destroy());
+      client.on('error', () => upstream.destroy());
+      client.pipe(upstream);
+      upstream.pipe(client);
+    });
+    cdpProxy.on('error', (err) => {
+      console.error('[CDP proxy] error:', err);
+    });
+    await new Promise<void>((resolve) => {
+      cdpProxy.listen(config.cdpPort + 10, '0.0.0.0', () => resolve());
+    });
+    console.log(`[Startup] CDP proxy listening on 0.0.0.0:${config.cdpPort + 10} → 127.0.0.1:${config.cdpPort}`);
+  } catch (err) {
+    console.error('[Startup] Failed to start CDP proxy (MCP tools from other pods will not work):', err);
+  }
 
   context = await browser.newContext({
     viewport: { width: config.viewportWidth, height: config.viewportHeight },
@@ -299,7 +320,9 @@ async function startup(): Promise<void> {
     streamPort: config.streamPort,
     streamHost: config.streamHost,
     pollInterval: config.pollInterval,
-    cdpPort: config.cdpPort,
+    // Register the PROXY port as the externally-reachable CDP endpoint. The
+    // raw Chromium CDP socket is 127.0.0.1-only (see TCP proxy above).
+    cdpPort: config.cdpPort + 10,
     systemToken: config.systemToken || undefined,
     instanceId: config.instanceId,
   });

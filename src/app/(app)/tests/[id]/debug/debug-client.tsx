@@ -94,8 +94,20 @@ export function DebugClient({ test, repositoryId }: DebugClientProps) {
   // Serializes concurrent init attempts (e.g. Strict Mode double-mount in dev) so the
   // second mount waits for the first to finish releasing its claimed EB before claiming again.
   const initPromiseRef = useRef<Promise<void> | null>(null);
+  // Read executionTarget via a ref inside the session-init effect. If we
+  // depended on `executionTarget` directly, the effect would re-run every
+  // time a sibling component (ExecutionTargetSelector) perturbs the target
+  // — which happens transiently during SSE reconnect cycles on
+  // /api/runners/status. Each re-run cancels the in-flight startDebugSession
+  // and fires stopDebugSession before the session is even viewable, causing
+  // the "Launching browser..." UI to spin forever.
+  const executionTargetRef = useRef(executionTarget);
+  useEffect(() => { executionTargetRef.current = executionTarget; }, [executionTarget]);
 
-  // Start session on mount or when execution target changes (wait for hydration)
+  // Start session on mount. Re-starts only if the TEST itself changes (e.g.
+  // user navigates to a different test ID). `executionTarget` changes no
+  // longer re-run this effect — mid-build reassignments don't affect an
+  // already-launched debug session.
   useEffect(() => {
     if (!isRunnerHydrated) return;
 
@@ -114,7 +126,8 @@ export function DebugClient({ test, repositoryId }: DebugClientProps) {
         setState(null);
       }
       hasMountedRef.current = true;
-      const result = await startDebugSession(test.id, repositoryId, executionTarget === 'local' ? null : executionTarget);
+      const target = executionTargetRef.current;
+      const result = await startDebugSession(test.id, repositoryId, target === 'local' ? null : target);
       if (cancelled) {
         // Effect was cancelled after the EB was already claimed (e.g. Strict Mode double-mount
         // in dev, or fast unmount). Release it so subsequent claims can succeed.
@@ -137,7 +150,7 @@ export function DebugClient({ test, repositoryId }: DebugClientProps) {
     return () => {
       cancelled = true;
     };
-  }, [test.id, repositoryId, executionTarget, isRunnerHydrated]);
+  }, [test.id, repositoryId, isRunnerHydrated]);
 
   // Poll for state
   useEffect(() => {

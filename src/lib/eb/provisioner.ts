@@ -226,9 +226,10 @@ function jobSpec(name: string, instanceId: string): Record<string, unknown> {
                 { name: 'EB_SETUP_CONTEXT_TTL_MS', value: process.env.EB_SETUP_CONTEXT_TTL_MS || String(60 * 60 * 1000) },
               ],
               ports: [
-                { containerPort: 9222, name: 'cdp' },
+                { containerPort: 9222, name: 'cdp-local' }, // Chromium's own CDP, localhost-only
                 { containerPort: 9223, name: 'stream' },
                 { containerPort: 9224, name: 'health' },
+                { containerPort: 9232, name: 'cdp' }, // TCP proxy exposing CDP across the cluster
               ],
               resources: {
                 requests: { cpu: cpuRequest, memory: memRequest },
