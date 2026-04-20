@@ -27,7 +27,6 @@ import {
 import { Badge } from '@/components/ui/badge';
 import { toast } from 'sonner';
 import { createAndRunBuild, createComparisonRun } from '@/server/actions/builds';
-import type { BuildChanges } from '@/server/actions/builds';
 import { analyzeSmartRun, runSmartBuild, type SmartRunAnalysis } from '@/server/actions/smart-run';
 import { testServerConnection, saveEnvironmentConfig, saveBranchBaseUrl } from '@/server/actions/environment';
 import { updateComparisonRunSettings } from '@/server/actions/repos';
@@ -46,6 +45,8 @@ import type { Test, TestRun, Build } from '@/lib/db/schema';
 import { BuildSummaryCard } from '@/components/builds/build-summary-card';
 import { BuildGraphView } from '@/components/builds/build-graph-view';
 import { BranchSelector } from '@/components/settings/branch-selector';
+import { ReviewContent, type TodoRow } from '@/components/review/review-content';
+import type { VisualDiffWithTestStatus } from '@/lib/db/schema';
 import { cn } from '@/lib/utils';
 
 interface BuildWithBranch extends Build {
@@ -68,7 +69,9 @@ interface RunDashboardClientProps {
   defaultBranch: string | null;
   baseUrl: string;
   branchHeads?: Record<string, string>;
-  buildChanges?: BuildChanges | null;
+  initialTodos: TodoRow[];
+  initialDiffs: VisualDiffWithTestStatus[];
+  latestBuildId: string | null;
   composeConfig?: ComposeConfigProp | null;
   banAiMode?: boolean;
   comparisonRunEnabled?: boolean;
@@ -103,7 +106,7 @@ function isLocalUrl(url: string): boolean {
   }
 }
 
-export function RunDashboardClient({ tests, runs: _runs, builds, repositoryId, activeBranch, currentBranch, defaultBranch, baseUrl: initialBaseUrl, branchHeads, buildChanges, composeConfig, banAiMode = false, comparisonRunEnabled: initialComparisonEnabled = false, comparisonBaselineBranch: initialBaselineBranch, branches = [], branchBaseUrls }: RunDashboardClientProps) {
+export function RunDashboardClient({ tests, runs: _runs, builds, repositoryId, activeBranch, currentBranch, defaultBranch, baseUrl: initialBaseUrl, branchHeads, initialTodos, initialDiffs, latestBuildId, composeConfig, banAiMode = false, comparisonRunEnabled: initialComparisonEnabled = false, comparisonBaselineBranch: initialBaselineBranch, branches = [], branchBaseUrls }: RunDashboardClientProps) {
   const router = useRouter();
   const notifyJobStarted = useNotifyJobStarted();
   const [isRunning, setIsRunning] = useState(false);
@@ -395,7 +398,7 @@ export function RunDashboardClient({ tests, runs: _runs, builds, repositoryId, a
           </Card>
 
           {/* Smart Run Card - Compares selected branch to default branch via GitHub API */}
-          {!banAiMode && repositoryId && (
+          {!banAiMode && repositoryId && (isAnalyzing || smartAnalysis?.isAvailable) && (
             <Card>
               <CardHeader className="pb-3">
                 <div className="flex items-center justify-between">
@@ -405,11 +408,11 @@ export function RunDashboardClient({ tests, runs: _runs, builds, repositoryId, a
                   </div>
                   {isAnalyzing ? (
                     <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
-                  ) : smartAnalysis?.isAvailable ? (
+                  ) : (
                     <Badge variant="outline" className="text-[10px] gap-0.5 px-1.5 py-0 bg-yellow-50 text-yellow-700 border-yellow-200">
                       Available
                     </Badge>
-                  ) : null}
+                  )}
                 </div>
                 <CardDescription className="text-xs">
                   Run only tests affected by your git changes
@@ -421,11 +424,7 @@ export function RunDashboardClient({ tests, runs: _runs, builds, repositoryId, a
                     <Loader2 className="h-3 w-3 animate-spin" />
                     Analyzing git diff...
                   </div>
-                ) : !smartAnalysis?.isAvailable ? (
-                  <p className="text-sm text-muted-foreground">
-                    {smartAnalysis?.unavailableReason || 'Configure local path in Settings'}
-                  </p>
-                ) : (
+                ) : smartAnalysis?.isAvailable && (
                   <>
                     {/* Branch comparison */}
                     <div className="flex items-center gap-2 text-xs">
@@ -586,78 +585,13 @@ export function RunDashboardClient({ tests, runs: _runs, builds, repositoryId, a
             </CardContent>
           </Card>
 
-          <Card>
-            <CardHeader className="pb-3">
-              <CardTitle className="text-sm font-medium">Changes</CardTitle>
-              <CardDescription className="text-xs">Latest build vs. baseline</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              {!buildChanges ? (
-                <p className="text-sm text-muted-foreground">Run builds to see changes here</p>
-              ) : buildChanges.topChanges.length === 0 && (!buildChanges.passingDelta) ? (
-                <p className="text-sm text-muted-foreground">No changes found :)</p>
-              ) : (
-                <>
-                  {builds.length >= 2 && (() => {
-                    const chartBuilds = [...builds].reverse();
-                    const data = chartBuilds.map(b => b.passedCount ?? 0);
-                    const max = Math.max(...data, 1);
-                    const min = Math.min(...data, 0);
-                    const range = max - min || 1;
-                    const w = 200, h = 48, px = 8, py = 6;
-                    const points = data.map((v, i) => ({
-                      x: px + (i / (data.length - 1)) * (w - 2 * px),
-                      y: py + (1 - (v - min) / range) * (h - 2 * py),
-                    }));
-                    const line = points.map((p, i) => `${i === 0 ? 'M' : 'L'}${p.x},${p.y}`).join(' ');
-                    const areaPath = `${line} L${points[points.length - 1].x},${h - py} L${points[0].x},${h - py} Z`;
-                    const latest = data[data.length - 1];
-                    const prev = data[data.length - 2];
-                    const delta = latest - prev;
-                    return (
-                      <div className="space-y-1">
-                        <div className="flex items-center justify-between">
-                          <span className="text-xs text-muted-foreground">Passing tests</span>
-                          <div className="flex items-center gap-1.5 text-xs">
-                            <span className="font-medium">{latest}</span>
-                            {delta !== 0 && (
-                              <span className={delta > 0 ? 'text-green-600' : 'text-red-600'}>
-                                {delta > 0 ? '+' : ''}{delta}
-                              </span>
-                            )}
-                          </div>
-                        </div>
-                        <svg viewBox={`0 0 ${w} ${h}`} className="w-full h-12" preserveAspectRatio="none">
-                          <defs>
-                            <linearGradient id="passGrad" x1="0" y1="0" x2="0" y2="1">
-                              <stop offset="0%" stopColor="rgb(34,197,94)" stopOpacity="0.2" />
-                              <stop offset="100%" stopColor="rgb(34,197,94)" stopOpacity="0" />
-                            </linearGradient>
-                          </defs>
-                          <path d={areaPath} fill="url(#passGrad)" />
-                          <path d={line} fill="none" stroke="rgb(34,197,94)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-                          {points.map((p, i) => (
-                            <circle key={i} cx={p.x} cy={p.y} r={i === points.length - 1 ? 3 : 1.5} fill="rgb(34,197,94)" />
-                          ))}
-                        </svg>
-                      </div>
-                    );
-                  })()}
-                  {buildChanges.topChanges.length > 0 && (
-                    <div className="space-y-1.5">
-                      <div className="text-xs text-muted-foreground font-medium">Top changes</div>
-                      {buildChanges.topChanges.map((change, i) => (
-                        <div key={i} className="flex items-center justify-between text-xs">
-                          <span className="truncate flex-1 mr-2">{change.testName}</span>
-                          <span className="text-yellow-600 font-medium shrink-0">{change.percentageDifference.toFixed(1)}%</span>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </>
-              )}
-            </CardContent>
-          </Card>
+          {repositoryId && (
+            <ReviewContent
+              initialTodos={initialTodos}
+              initialDiffs={initialDiffs}
+              latestBuildId={latestBuildId}
+            />
+          )}
         </div>
 
         {/* Left Column - Build History */}
