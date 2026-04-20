@@ -193,7 +193,15 @@ export function DebugClient({ test, repositoryId }: DebugClientProps) {
 
   // Tab close / reload / browser close: use sendBeacon since server actions get aborted on unload.
   // pagehide is preferred over beforeunload (doesn't break bfcache, more reliable on mobile).
-  // visibilitychange=hidden is a belt-and-braces guard for mobile Safari edge cases.
+  //
+  // NOTE: `visibilitychange=hidden` was previously used as a belt-and-braces
+  // guard, but it fires transiently in many normal scenarios on desktop (tab
+  // switch, devtools detach, window blur on some OSes, OS notifications) and
+  // caused the debug session to be released while the user was still on the
+  // page — symptoms: session starts, then immediately gets stopped by the
+  // release beacon, UI stuck on "Launching browser...". Sticking to
+  // `pagehide` only; the mobile-Safari edge cases it covered are rare vs the
+  // false positives it causes on desktop.
   useEffect(() => {
     if (!sessionId) return;
     const release = () => {
@@ -203,14 +211,9 @@ export function DebugClient({ test, repositoryId }: DebugClientProps) {
       navigator.sendBeacon('/api/debug/release', blob);
     };
     const onPageHide = () => release();
-    const onVisibility = () => {
-      if (document.visibilityState === 'hidden') release();
-    };
     window.addEventListener('pagehide', onPageHide);
-    document.addEventListener('visibilitychange', onVisibility);
     return () => {
       window.removeEventListener('pagehide', onPageHide);
-      document.removeEventListener('visibilitychange', onVisibility);
     };
   }, [sessionId]);
 

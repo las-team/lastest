@@ -197,6 +197,11 @@ export async function stopDebugSession(
   // Check remote session
   const remoteSession = getRemoteDebugSession(sessionId);
   if (remoteSession) {
+    // Diagnostic: log the call stack so we can see WHICH client path is stopping
+    // a session that still looks alive to the user. Only useful while hunting
+    // the "Launching browser..." → instant-stop bug; remove once identified.
+    const stack = new Error().stack?.split('\n').slice(1, 5).join(' | ') ?? '(no stack)';
+    console.log(`[Debug] stopDebugSession(${sessionId.slice(0, 8)}) called — stack: ${stack}`);
     await queueCommandToDB(remoteSession.runnerId, {
       id: crypto.randomUUID(),
       type: 'command:stop_debug',
