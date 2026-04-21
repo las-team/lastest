@@ -27,7 +27,7 @@ else
   echo "==> Creating cluster '${CLUSTER_NAME}'"
   k3d cluster create "${CLUSTER_NAME}" \
     --agents 0 --servers 1 \
-    --port "3000:3000@loadbalancer" \
+    --port "3001:3000@loadbalancer" \
     --k3s-arg "--disable=traefik@server:*" \
     --runtime-label "com.docker.compose.project=lastest@server:*" \
     --runtime-label "com.docker.compose.project=lastest@loadbalancer" \
@@ -35,6 +35,36 @@ else
 fi
 
 kubectl config use-context "k3d-${CLUSTER_NAME}" >/dev/null
+
+# 1b. host.k3d.internal → Docker bridge gateway.
+#     k3d's auto-injection is unreliable across versions/host OSes (especially
+#     Linux without Docker Desktop). We install a CoreDNS override so pods can
+#     always resolve the host (used by DATABASE_URL for the host-side postgres
+#     and by any other .env setting that points at host.k3d.internal).
+#     Must be a `.server` (own server block) — a `.override` would try to add a
+#     second `hosts{}` plugin to the main block, which CoreDNS rejects.
+HOST_GATEWAY_IP="$(docker network inspect "k3d-${CLUSTER_NAME}" -f '{{(index .IPAM.Config 0).Gateway}}' 2>/dev/null || true)"
+if [ -n "${HOST_GATEWAY_IP}" ]; then
+  echo "==> Pinning host.k3d.internal → ${HOST_GATEWAY_IP} in CoreDNS"
+  kubectl apply -f - <<YAML >/dev/null
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: coredns-custom
+  namespace: kube-system
+data:
+  host-k3d-internal.server: |
+    host.k3d.internal:53 {
+      hosts {
+        ${HOST_GATEWAY_IP} host.k3d.internal
+      }
+    }
+YAML
+  kubectl -n kube-system rollout restart deploy/coredns >/dev/null 2>&1 || true
+  kubectl -n kube-system rollout status deploy/coredns --timeout=60s >/dev/null 2>&1 || true
+else
+  echo "==> WARN: could not read k3d network gateway — pods may fail to resolve host.k3d.internal"
+fi
 
 # 2. Namespace + RBAC + Secrets. Done BEFORE the expensive docker builds so
 #    .env.local edits propagate even if a later build step fails.
@@ -99,7 +129,8 @@ cat <<EOF
 
 ==> Ready.
 
-  UI:         http://localhost:3000
+  UI:         http://localhost:3001   (k3d loadbalancer → in-cluster app)
+              http://localhost:3000   (reserved for \`pnpm dev\` on host)
   Namespace:  ${NAMESPACE}
   App image:  ${APP_IMAGE}
   EB image:   ${EB_IMAGE}

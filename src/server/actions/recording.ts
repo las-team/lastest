@@ -145,7 +145,10 @@ export async function stopRecording(repositoryId?: string | null) {
       generatedCode,
       requiredCapabilities: undefined,
       capturedStorageState: null as string | null,
-      domSnapshot: undefined as import('@/lib/db/schema').DomSnapshotData | undefined,
+      // Captured by the EB on `command:stop_recording` and forwarded via
+      // `response:recording_stopped`; mutation on the in-memory session is
+      // visible here because both handlers share the same Map entry.
+      domSnapshot: remoteSession.domSnapshot,
     };
   }
 

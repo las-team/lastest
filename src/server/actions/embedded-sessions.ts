@@ -19,6 +19,7 @@ import {
   decInFlightProvisions,
 } from '@/lib/eb/provisioner';
 import { toProxyStreamUrl } from '@/lib/eb/stream-url';
+import { stopDevPortForward } from '@/lib/eb/dev-port-forward';
 
 /**
  * List all embedded sessions for the current team
@@ -597,6 +598,7 @@ async function maybeTerminateReleasedEB(runnerId: string): Promise<void> {
     .where(eq(embeddedSessions.runnerId, runnerId));
 
   await terminateEBJob(jobName);
+  stopDevPortForward(jobName);
 }
 
 /**
@@ -768,6 +770,7 @@ export async function claimOrProvisionPoolEB(
   // Timed out waiting for registration — tear the Job back down to free the slot
   console.warn(`[Pool] Provisioned Job ${jobInfo.jobName} did not register within ${waitTimeoutMs}ms; terminating`);
   terminateEBJob(jobInfo.jobName).catch(() => {});
+  stopDevPortForward(jobInfo.jobName);
   releaseReservation();
   return null;
 }
@@ -817,6 +820,7 @@ export async function reapIdleEBJobs(idleTtlMs: number): Promise<number> {
         await tx.delete(runners).where(eq(runners.id, row.id));
       });
       await terminateEBJob(jobName);
+      stopDevPortForward(jobName);
       terminated++;
       if (!isOffline) onlineReaped++;
     } catch (err) {

@@ -5,6 +5,7 @@ import { upsertEmbeddedSession } from '@/server/actions/embedded-sessions';
 import { eq, and } from 'drizzle-orm';
 import crypto from 'crypto';
 import { syncUserToTwentyCRM } from '@/lib/integrations/twenty-crm';
+import { rewriteDevStreamUrl, rewriteDevCdpUrl } from '@/lib/eb/dev-port-forward';
 
 const SYSTEM_TEAM_NAME = '__system__';
 const SYSTEM_TEAM_SLUG = '__system__';
@@ -132,12 +133,17 @@ export async function POST(request: Request) {
     [runner] = await db.select().from(runners).where(eq(runners.id, runner.id));
   }
 
+  // Dev-only: when EB_DEV_PORT_FORWARD=1, spawn `kubectl port-forward` for this
+  // pod so the host dev server can reach cluster-internal ports. No-op in prod.
+  const streamUrl = (await rewriteDevStreamUrl(body.instanceId, body.streamUrl)) ?? body.streamUrl;
+  const cdpUrl = await rewriteDevCdpUrl(body.instanceId, body.cdpUrl);
+
   // Upsert embedded session
   const session = await upsertEmbeddedSession({
     teamId,
     runnerId: runner!.id,
-    streamUrl: body.streamUrl,
-    cdpUrl: body.cdpUrl,
+    streamUrl,
+    cdpUrl,
     containerUrl: body.containerUrl,
     viewport: body.viewport,
   });

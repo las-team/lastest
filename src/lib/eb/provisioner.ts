@@ -29,6 +29,7 @@
  * The provisioner is a no-op unless EB_PROVISIONER === 'kubernetes'.
  */
 
+import { execFileSync } from 'child_process';
 import { readFileSync } from 'fs';
 import https from 'https';
 import { db } from '@/lib/db';
@@ -84,9 +85,12 @@ export function warmPoolMin(): number {
 interface ClusterCreds {
   host: string;
   port: string;
-  token: string;
+  token?: string;          // bearer token — in-pod SA, or kubeconfig with user.token
+  cert?: Buffer;           // client cert (mTLS) — kubeconfig with user.client-certificate
+  key?: Buffer;            // client key (mTLS)
   ca: Buffer;
   namespace: string;
+  insecureSkipTLSVerify?: boolean;
 }
 
 let cachedCreds: ClusterCreds | null = null;
@@ -95,19 +99,84 @@ function loadClusterCreds(): ClusterCreds {
   if (cachedCreds) return cachedCreds;
   const host = process.env.KUBERNETES_SERVICE_HOST;
   const port = process.env.KUBERNETES_SERVICE_PORT || '443';
-  if (!host) {
-    throw new Error('KUBERNETES_SERVICE_HOST not set — not running inside a Kubernetes pod');
+  if (host) {
+    // In-pod: ServiceAccount token mount. Unchanged from before.
+    const token = readFileSync(`${SA_PATH}/token`, 'utf8').trim();
+    const ca = readFileSync(`${SA_PATH}/ca.crt`);
+    const namespace = process.env.EB_NAMESPACE || readFileSync(`${SA_PATH}/namespace`, 'utf8').trim() || 'default';
+    cachedCreds = { host, port, token, ca, namespace };
+    return cachedCreds;
   }
-  const token = readFileSync(`${SA_PATH}/token`, 'utf8').trim();
-  const ca = readFileSync(`${SA_PATH}/ca.crt`);
-  const namespace = process.env.EB_NAMESPACE || readFileSync(`${SA_PATH}/namespace`, 'utf8').trim() || 'default';
-  cachedCreds = { host, port, token, ca, namespace };
+  // Dev fallback: reach the k8s API via the host's kubeconfig. Only used when
+  // the SA mount isn't present (i.e. `pnpm dev` on the host against a local
+  // k3d cluster). Shells out to kubectl to avoid pulling in a YAML parser —
+  // kubectl is already required for k3d.
+  cachedCreds = loadKubeconfigCreds();
   return cachedCreds;
+}
+
+// Minimal kubeconfig output shape we consume. `kubectl config view --raw
+// --minify -o json` returns a single-context config, so clusters/users/contexts
+// are length-1 arrays after --minify.
+interface KubectlConfigView {
+  clusters?: Array<{ cluster?: { server?: string; 'certificate-authority-data'?: string; 'insecure-skip-tls-verify'?: boolean } }>;
+  users?: Array<{ user?: { token?: string; 'client-certificate-data'?: string; 'client-key-data'?: string } }>;
+  contexts?: Array<{ context?: { namespace?: string } }>;
+}
+
+function loadKubeconfigCreds(): ClusterCreds {
+  let raw: string;
+  try {
+    raw = execFileSync('kubectl', ['config', 'view', '--raw', '--minify', '-o', 'json'], {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+  } catch (err) {
+    throw new Error(
+      `EB_PROVISIONER=kubernetes but no in-pod SA token and kubectl config view failed: ${(err as Error).message}. ` +
+        `Ensure kubectl is on PATH and the current kube-context points at the target cluster (e.g. 'kubectl config use-context k3d-lastest').`,
+    );
+  }
+  const cfg = JSON.parse(raw) as KubectlConfigView;
+  const cluster = cfg.clusters?.[0]?.cluster;
+  const user = cfg.users?.[0]?.user;
+  const ctx = cfg.contexts?.[0]?.context;
+  if (!cluster?.server) {
+    throw new Error('kubeconfig has no current cluster.server — check `kubectl config current-context`');
+  }
+  const url = new URL(cluster.server);
+  const host = url.hostname;
+  const kcPort = url.port || (url.protocol === 'https:' ? '443' : '80');
+  const ca = cluster['certificate-authority-data']
+    ? Buffer.from(cluster['certificate-authority-data'], 'base64')
+    : Buffer.alloc(0);
+  const insecureSkipTLSVerify = cluster['insecure-skip-tls-verify'] === true;
+
+  let token: string | undefined;
+  let cert: Buffer | undefined;
+  let key: Buffer | undefined;
+  if (user?.token) {
+    token = user.token;
+  } else if (user?.['client-certificate-data'] && user?.['client-key-data']) {
+    cert = Buffer.from(user['client-certificate-data'], 'base64');
+    key = Buffer.from(user['client-key-data'], 'base64');
+  } else {
+    throw new Error('kubeconfig user has neither token nor client-certificate-data — unsupported auth mode');
+  }
+
+  const namespace = process.env.EB_NAMESPACE || ctx?.namespace || 'default';
+  return { host, port: kcPort, token, cert, key, ca, namespace, insecureSkipTLSVerify };
 }
 
 async function k8sRequest(method: string, path: string, body?: unknown): Promise<{ status: number; data: unknown }> {
   const creds = loadClusterCreds();
   const payload = body ? JSON.stringify(body) : undefined;
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    Accept: 'application/json',
+    ...(payload ? { 'Content-Length': Buffer.byteLength(payload).toString() } : {}),
+  };
+  if (creds.token) headers.Authorization = `Bearer ${creds.token}`;
   return new Promise((resolve, reject) => {
     const req = https.request(
       {
@@ -115,13 +184,11 @@ async function k8sRequest(method: string, path: string, body?: unknown): Promise
         host: creds.host,
         port: creds.port,
         path,
-        ca: creds.ca,
-        headers: {
-          Authorization: `Bearer ${creds.token}`,
-          'Content-Type': 'application/json',
-          Accept: 'application/json',
-          ...(payload ? { 'Content-Length': Buffer.byteLength(payload).toString() } : {}),
-        },
+        ca: creds.ca.length > 0 ? creds.ca : undefined,
+        cert: creds.cert,
+        key: creds.key,
+        rejectUnauthorized: !creds.insecureSkipTLSVerify,
+        headers,
       },
       (res) => {
         const chunks: Buffer[] = [];

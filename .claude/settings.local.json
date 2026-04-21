@@ -204,7 +204,8 @@
       "mcp__lastest__lastest_get_test",
       "mcp__lastest__lastest_create_area",
       "mcp__lastest__lastest_create_test",
-      "mcp__lastest__lastest_health_check"
+      "mcp__lastest__lastest_health_check",
+      "Bash(pnpm stack:stop)"
     ]
   },
   "disabledMcpjsonServers": [

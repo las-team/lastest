@@ -267,7 +267,7 @@ export function ComposeClient({ tests, repositoryId, currentBranch, defaultBranc
               onClick={() => setGroupByArea(v => !v)}
               className={`inline-flex items-center gap-2 px-4 py-1.5 text-sm font-medium rounded-lg border transition-colors ${
                 groupByArea
-                  ? 'bg-primary/10 text-primary border-primary/30'
+                  ? 'bg-accent text-accent-foreground border-accent'
                   : 'bg-muted text-muted-foreground border-transparent hover:text-foreground'
               }`}
             >

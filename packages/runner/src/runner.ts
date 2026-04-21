@@ -8,7 +8,7 @@ import { createHash } from 'crypto';
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
-import type { RunTestCommandPayload, RunSetupCommandPayload, LogEntry, StabilizationPayload } from './protocol.js';
+import type { RunTestCommandPayload, RunSetupCommandPayload, LogEntry, StabilizationPayload, DomSnapshotPayload } from './protocol.js';
 import { CROSS_OS_CHROMIUM_ARGS, setupFreezeScripts, applyPreScreenshotStabilization } from './stabilization.js';
 import { instrumentStepTracking, stripTypeAnnotations } from '@lastest/shared';
 
@@ -35,6 +35,119 @@ export interface TestRunResult {
   videoFilename?: string;
   lastReachedStep?: number;
   totalSteps?: number;
+  domSnapshot?: DomSnapshotPayload;
+}
+
+/**
+ * Capture a DOM snapshot of the live page. Evaluates a self-contained script
+ * that extracts interactive-element metadata + selector candidates. Mirrors
+ * `packages/embedded-browser/src/selector-utils.ts` but inlined so the runner
+ * package stays zero-dep on server code.
+ */
+async function captureDomSnapshotForRunner(page: Page): Promise<DomSnapshotPayload> {
+  let url = '';
+  try { url = page.url(); } catch { /* page may be closed */ }
+  const elements = await page.evaluate(() => {
+    const DYNAMIC_ID_PATTERNS = [
+      /^react-select-\d+-/, /^headlessui-\w+-\d+$/, /^mui-\d+$/, /^:r[a-z0-9]+:$/,
+      /^radix-/, /^ember\d+$/, /^[a-z]+[-_]\d{2,}$/i, /[a-f0-9]{8,}/, /\d{4,}/,
+    ];
+    const isDyn = (id: string) => id.includes('undefined') || DYNAMIC_ID_PATTERNS.some(p => p.test(id));
+    const implicitRole = (el: HTMLElement): string | null => {
+      const map: Record<string, string> = {
+        BUTTON: 'button', A: 'link',
+        INPUT: el.getAttribute('type') === 'checkbox' ? 'checkbox'
+          : el.getAttribute('type') === 'radio' ? 'radio'
+          : el.getAttribute('type') === 'submit' ? 'button'
+          : 'textbox',
+        SELECT: 'combobox', TEXTAREA: 'textbox', IMG: 'img',
+        NAV: 'navigation', MAIN: 'main', HEADER: 'banner', FOOTER: 'contentinfo',
+      };
+      return map[el.tagName] || null;
+    };
+    const cssPath = (el: HTMLElement): string => {
+      const parts: string[] = [];
+      let cur: HTMLElement | null = el;
+      while (cur && cur !== document.body) {
+        let s = cur.tagName.toLowerCase();
+        const c = cur.getAttribute('class');
+        if (c) {
+          const cls = c.split(' ').filter(x => x && !x.includes(':') && !x.startsWith('_')).slice(0, 2)
+            .map(x => x.replace(/([[\]()#.>+~=|^$*!@])/g, '\\$1'));
+          if (cls.length) s += '.' + cls.join('.');
+        }
+        parts.unshift(s);
+        cur = cur.parentElement;
+      }
+      return parts.slice(-3).join(' > ');
+    };
+    const INTERACTIVE = new Set([
+      'button','option','menuitem','menuitemcheckbox','menuitemradio',
+      'tab','treeitem','link','switch','radio','checkbox','combobox','listitem',
+    ]);
+    const buildSelectors = (el: HTMLElement) => {
+      const m = new Map<string, string>();
+      if (el.dataset.testid) m.set('data-testid', `[data-testid="${el.dataset.testid}"]`);
+      if (el.id && !isDyn(el.id)) m.set('id', `#${el.id}`);
+      const labelText = (
+        (el.id ? (document.querySelector(`label[for="${CSS.escape(el.id)}"]`) as HTMLElement)?.textContent?.trim() : null) ||
+        (el.closest('label') as HTMLElement)?.textContent?.trim() ||
+        (el.getAttribute('aria-labelledby') ? document.getElementById(el.getAttribute('aria-labelledby')!)?.textContent?.trim() : null)
+      )?.slice(0, 50) || null;
+      if (labelText) m.set('label', `label="${labelText}"`);
+      const role = el.getAttribute('role') || implicitRole(el);
+      const name = el.getAttribute('aria-label') || el.getAttribute('title') || labelText || el.textContent?.trim().slice(0, 30);
+      if (role && name) m.set('role-name', `role=${role}[name="${name}"]`);
+      const aria = el.getAttribute('aria-label');
+      if (aria) m.set('aria-label', `[aria-label="${aria}"]`);
+      const elRole = el.getAttribute('role');
+      if (el.tagName === 'BUTTON' || el.tagName === 'A' || el.tagName === 'LI' || el.tagName === 'LABEL' || (elRole && INTERACTIVE.has(elRole))) {
+        const t = el.textContent?.trim().slice(0, 30);
+        if (t) m.set('text', `text="${t}"`);
+      }
+      if (!m.has('text') && el.children.length === 0) {
+        const t = el.textContent?.trim().slice(0, 30);
+        if (t) m.set('text', `text="${t}"`);
+      }
+      const ph = el.getAttribute('placeholder');
+      if (ph) m.set('placeholder', `[placeholder="${ph}"]`);
+      const nm = el.getAttribute('name');
+      if (nm && !isDyn(nm)) m.set('name', `[name="${nm}"]`);
+      const cp = cssPath(el);
+      if (cp) m.set('css-path', cp);
+      const PRIORITY = ['data-testid','id','label','role-name','aria-label','text','placeholder','name','css-path'];
+      const out: Array<{ type: string; value: string }> = [];
+      for (const k of PRIORITY) { const v = m.get(k); if (v) out.push({ type: k, value: v }); }
+      for (const [k, v] of m) { if (!out.some(s => s.type === k)) out.push({ type: k, value: v }); }
+      return out;
+    };
+    const SEL = 'a, button, input, select, textarea, [role], [data-testid], [tabindex], [aria-label], label, li, [onclick]';
+    const list = document.querySelectorAll(SEL);
+    const seen = new Set<HTMLElement>();
+    const out: Array<{ tag: string; id?: string; textContent?: string; boundingBox: { x: number; y: number; width: number; height: number }; selectors: Array<{ type: string; value: string }> }> = [];
+    const MAX = 5000;
+    let n = 0;
+    for (const node of list) {
+      if (n >= MAX) break;
+      const el = node as HTMLElement;
+      if (seen.has(el)) continue;
+      seen.add(el);
+      const r = el.getBoundingClientRect();
+      if (r.width === 0 && r.height === 0) continue;
+      const sels = buildSelectors(el);
+      if (sels.length === 0) continue;
+      out.push({
+        tag: el.tagName.toLowerCase(),
+        id: el.id || undefined,
+        textContent: el.textContent?.trim().slice(0, 100) || undefined,
+        boundingBox: { x: r.x, y: r.y, width: r.width, height: r.height },
+        selectors: sels,
+      });
+      n++;
+    }
+    return out;
+  }).catch(() => [] as DomSnapshotPayload['elements']);
+  return { elements, url, timestamp: Date.now() };
 }
 
 export class TestRunner {
@@ -462,6 +575,13 @@ export class TestRunner {
         await captureScreenshot('success');
       }
 
+      // Capture DOM snapshot after test body ran, aligned with the final screenshot.
+      let domSnapshot: DomSnapshotPayload | undefined;
+      if (page && !page.isClosed()) {
+        try { domSnapshot = await captureDomSnapshotForRunner(page); }
+        catch (err) { logFn('warn', `DOM snapshot capture failed: ${err instanceof Error ? err.message : String(err)}`); }
+      }
+
       const durationMs = Date.now() - startTime;
       logFn('info', `Test passed in ${durationMs}ms (${screenshots.length} screenshots)`);
 
@@ -473,6 +593,7 @@ export class TestRunner {
         softErrors: softErrors.length > 0 ? softErrors : undefined,
         lastReachedStep: lastReachedStep >= 0 ? lastReachedStep : undefined,
         totalSteps: stepCount > 0 ? stepCount : undefined,
+        domSnapshot,
       };
     } catch (error) {
       const durationMs = Date.now() - startTime;
@@ -503,6 +624,7 @@ export class TestRunner {
         // is still running on the page and Playwright can't screenshot while
         // operations are in-flight (it would hang).
         let errorScreenshot: string | undefined;
+        let failureDomSnapshot: DomSnapshotPayload | undefined;
         if (page && rawScreenshot && !isTimeout) {
           try {
             const buffer = await rawScreenshot({ fullPage: true });
@@ -517,6 +639,10 @@ export class TestRunner {
             });
           } catch {
             logFn('warn', 'Failed to capture error screenshot');
+          }
+          if (!page.isClosed()) {
+            try { failureDomSnapshot = await captureDomSnapshotForRunner(page); }
+            catch { /* best-effort */ }
           }
         }
 
@@ -533,6 +659,7 @@ export class TestRunner {
           softErrors: softErrors.length > 0 ? softErrors : undefined,
           lastReachedStep: lastReachedStep >= 0 ? lastReachedStep : undefined,
           totalSteps: stepCount > 0 ? stepCount : undefined,
+          domSnapshot: failureDomSnapshot,
         };
       }
     } finally {

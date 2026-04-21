@@ -490,12 +490,15 @@ export async function POST(request: NextRequest) {
 
       case 'response:recording_stopped': {
         const stoppedMsg = message as RecordingStoppedResponse;
-        const { sessionId: stoppedSessionId } = stoppedMsg.payload;
+        const { sessionId: stoppedSessionId, domSnapshot: stoppedDomSnapshot } = stoppedMsg.payload;
 
         const session = findRemoteSessionBySessionId(stoppedSessionId);
         if (session) {
           session.isRecording = false;
-          console.log(`[Recording] Session ${stoppedSessionId} stopped, ${session.events.length} events`);
+          if (stoppedDomSnapshot) {
+            session.domSnapshot = stoppedDomSnapshot;
+          }
+          console.log(`[Recording] Session ${stoppedSessionId} stopped, ${session.events.length} events, domSnapshot=${stoppedDomSnapshot ? `${stoppedDomSnapshot.elements?.length ?? 0} elements` : 'none'}`);
         }
 
         return NextResponse.json({ ok: true });
@@ -713,6 +716,7 @@ export interface RemoteRecordingSession {
   generatedCode: string | null;
   startedAt: Date;
   selectorPriority: Array<{ type: string; enabled: boolean; priority: number }>;
+  domSnapshot?: import('@/lib/db/schema').DomSnapshotData;
 }
 
 function findRemoteSessionBySessionId(sessionId: string): RemoteRecordingSession | undefined {

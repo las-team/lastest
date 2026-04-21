@@ -231,6 +231,9 @@ export interface TestResultPayload {
   softErrors?: string[];
   videoData?: string; // base64-encoded video file
   videoFilename?: string;
+  lastReachedStep?: number;
+  totalSteps?: number;
+  domSnapshot?: import('@/lib/db/schema').DomSnapshotData; // DOM state captured after test body ran
 }
 
 export interface TestResultResponse extends BaseMessage {
@@ -276,6 +279,7 @@ export interface RecordingEventResponse extends BaseMessage {
 export interface RecordingStoppedPayload {
   sessionId: string;
   generatedCode: string;
+  domSnapshot?: import('@/lib/db/schema').DomSnapshotData; // DOM state captured on the recording page before stop
 }
 
 export interface RecordingStoppedResponse extends BaseMessage {

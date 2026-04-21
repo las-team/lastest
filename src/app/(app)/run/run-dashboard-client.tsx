@@ -613,7 +613,7 @@ export function RunDashboardClient({ tests, runs: _runs, builds, repositoryId, a
                       className={cn(
                         'inline-flex items-center justify-center rounded-sm px-2 py-1 text-xs transition-colors',
                         buildView === 'list'
-                          ? 'bg-primary text-primary-foreground'
+                          ? 'bg-accent text-accent-foreground'
                           : 'text-muted-foreground hover:text-foreground'
                       )}
                     >
@@ -625,7 +625,7 @@ export function RunDashboardClient({ tests, runs: _runs, builds, repositoryId, a
                       className={cn(
                         'inline-flex items-center justify-center rounded-sm px-2 py-1 text-xs transition-colors',
                         buildView === 'graph'
-                          ? 'bg-primary text-primary-foreground'
+                          ? 'bg-accent text-accent-foreground'
                           : 'text-muted-foreground hover:text-foreground'
                       )}
                     >

@@ -990,18 +990,18 @@ export function DefinitionPageClient({
         <Tabs value={activeTab} onValueChange={setActiveTab} className="flex flex-col flex-1 overflow-hidden">
           <div className="px-6 pt-4 pb-0 shrink-0">
             <TabsList className="h-11 w-full max-w-5xl p-1 bg-white dark:bg-zinc-950 border">
-              <TabsTrigger value="plan" className="flex-1 px-6 text-sm data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-sm">
+              <TabsTrigger value="plan" className="flex-1 px-6 text-sm data-[state=active]:bg-accent data-[state=active]:text-accent-foreground data-[state=active]:shadow-sm">
                 Plan
                 {flatAreas.length > 0 && (
-                  <Badge variant="secondary" className="ml-1.5 h-5 px-1.5 text-[10px] data-[state=active]:bg-primary-foreground/20 data-[state=active]:text-primary-foreground">
+                  <Badge variant="secondary" className="ml-1.5 h-5 px-1.5 text-[10px] data-[state=active]:bg-accent-foreground/20 data-[state=active]:text-accent-foreground">
                     {flatAreas.length}
                   </Badge>
                 )}
               </TabsTrigger>
-              <TabsTrigger value="setup" className="flex-1 px-6 text-sm data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-sm">
+              <TabsTrigger value="setup" className="flex-1 px-6 text-sm data-[state=active]:bg-accent data-[state=active]:text-accent-foreground data-[state=active]:shadow-sm">
                 Setup
               </TabsTrigger>
-              <TabsTrigger value="tests" className="flex-1 px-6 text-sm data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-sm">
+              <TabsTrigger value="tests" className="flex-1 px-6 text-sm data-[state=active]:bg-accent data-[state=active]:text-accent-foreground data-[state=active]:shadow-sm">
                 Tests
               </TabsTrigger>
             </TabsList>
@@ -1525,10 +1525,10 @@ export function DefinitionPageClient({
                 </p>
                 <Tabs defaultValue="seed-setup">
                   <TabsList className="h-11 w-full p-1 bg-white dark:bg-zinc-950 border">
-                    <TabsTrigger value="seed-setup" className="flex-1 px-6 text-sm data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-sm">
+                    <TabsTrigger value="seed-setup" className="flex-1 px-6 text-sm data-[state=active]:bg-accent data-[state=active]:text-accent-foreground data-[state=active]:shadow-sm">
                       Seed
                     </TabsTrigger>
-                    <TabsTrigger value="seed-teardown" className="flex-1 px-6 text-sm data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-sm">
+                    <TabsTrigger value="seed-teardown" className="flex-1 px-6 text-sm data-[state=active]:bg-accent data-[state=active]:text-accent-foreground data-[state=active]:shadow-sm">
                       Teardown
                     </TabsTrigger>
                   </TabsList>
