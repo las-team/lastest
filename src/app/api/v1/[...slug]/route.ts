@@ -26,12 +26,17 @@
  *   POST /api/v1/diffs/:id/approve - Approve single visual diff
  *   POST /api/v1/diffs/:id/reject - Reject single visual diff
  *   POST /api/v1/builds/:id/approve-all - Approve all diffs in a build
+ *   POST /api/v1/repos - Create a local repository
  *   POST /api/v1/repos/:id/import - Import tests + functional areas (migration)
  *   POST /api/v1/functional-areas - Create functional area
+ *   POST /api/v1/tests - Create a test directly with raw code (no AI)
  *   POST /api/v1/tests/create - Create test via AI
  *   POST /api/v1/tests/:id/heal - Heal a failing test via AI
+ *   PUT  /api/v1/repos/:id - Update a repository (name/defaultBranch/selectedBranch)
  *   PUT  /api/v1/tests/:id - Update a test
+ *   PUT  /api/v1/functional-areas/:id - Update a functional area
  *   DELETE /api/v1/tests/:id - Soft-delete a test
+ *   DELETE /api/v1/functional-areas/:id - Soft-delete a functional area
  */
 
 import { NextRequest, NextResponse } from 'next/server';
@@ -344,6 +349,26 @@ export async function POST(
   const { resource, id, subResource } = parseSlug(slug);
 
   try {
+    // Create local repository: POST /api/v1/repos
+    if (resource === 'repos' && !id) {
+      if (!session.team) {
+        return NextResponse.json({ error: 'No team access' }, { status: 403 });
+      }
+      const body = await request.json();
+      const { name } = body;
+      if (!name || typeof name !== 'string' || !name.trim()) {
+        return NextResponse.json({ error: 'name required' }, { status: 400 });
+      }
+      const repo = await queries.createRepository({
+        teamId: session.team.id,
+        provider: 'local',
+        owner: 'local',
+        name: name.trim(),
+        fullName: name.trim(),
+      });
+      return NextResponse.json(repo, { status: 201 });
+    }
+
     // Create test run
     if (resource === 'runs' && !id) {
       const body = await request.json();
@@ -403,6 +428,44 @@ export async function POST(
       }
       const result = await batchRejectDiffsCore(diffIds);
       return NextResponse.json(result);
+    }
+
+    // Create test directly with raw code: POST /api/v1/tests
+    if (resource === 'tests' && !slug[1]) {
+      const body = await request.json();
+      const { repositoryId, name, code, functionalAreaId, targetUrl, description } = body;
+      if (!repositoryId) {
+        return NextResponse.json({ error: 'repositoryId required' }, { status: 400 });
+      }
+      if (!name || typeof name !== 'string') {
+        return NextResponse.json({ error: 'name required' }, { status: 400 });
+      }
+      if (!code || typeof code !== 'string') {
+        return NextResponse.json({ error: 'code required' }, { status: 400 });
+      }
+      if (!(await verifyRepoOwnership(repositoryId, session))) {
+        return NextResponse.json({ error: 'Not found' }, { status: 404 });
+      }
+      // Validate functionalAreaId if provided
+      if (functionalAreaId) {
+        const area = await queries.getFunctionalArea(functionalAreaId);
+        if (!area || (area.repositoryId && area.repositoryId !== repositoryId)) {
+          return NextResponse.json({ error: 'Invalid functionalAreaId' }, { status: 400 });
+        }
+      }
+      // Stamp MCP bot as creator when available, so gamification & attribution work
+      const mcpBot = await queries.getBotByKind(session.team!.id, 'mcp_server');
+      const created = await queries.createTest({
+        repositoryId,
+        name,
+        code,
+        targetUrl: targetUrl ?? null,
+        description: description ?? null,
+        functionalAreaId: functionalAreaId ?? null,
+        createdByBotId: mcpBot?.id ?? null,
+        createdByUserId: mcpBot ? null : (session.user?.id ?? null),
+      });
+      return NextResponse.json(created, { status: 201 });
     }
 
     // Create test via AI
@@ -640,6 +703,48 @@ export async function PUT(
   const { resource, id } = parseSlug(slug);
 
   try {
+    // Update repository: PUT /api/v1/repos/:id
+    if (resource === 'repos' && id) {
+      if (!(await verifyRepoOwnership(id, session))) {
+        return NextResponse.json({ error: 'Not found' }, { status: 404 });
+      }
+      const body = await request.json();
+      const updates: Record<string, unknown> = {};
+      if (body.name !== undefined) updates.name = body.name;
+      if (body.defaultBranch !== undefined) updates.defaultBranch = body.defaultBranch;
+      if (body.selectedBranch !== undefined) updates.selectedBranch = body.selectedBranch;
+      if (Object.keys(updates).length === 0) {
+        return NextResponse.json({ error: 'No fields to update' }, { status: 400 });
+      }
+      await queries.updateRepository(id, updates);
+      const updated = await queries.getRepository(id);
+      return NextResponse.json(updated);
+    }
+
+    // Update functional area: PUT /api/v1/functional-areas/:id
+    if (resource === 'functional-areas' && id) {
+      const area = await queries.getFunctionalArea(id);
+      if (!area) {
+        return NextResponse.json({ error: 'Not found' }, { status: 404 });
+      }
+      if (area.repositoryId) {
+        if (!(await verifyRepoOwnership(area.repositoryId, session))) {
+          return NextResponse.json({ error: 'Not found' }, { status: 404 });
+        }
+      }
+      const body = await request.json();
+      const updates: Record<string, unknown> = {};
+      if (body.name !== undefined) updates.name = body.name;
+      if (body.description !== undefined) updates.description = body.description;
+      if (body.parentId !== undefined) updates.parentId = body.parentId;
+      if (Object.keys(updates).length === 0) {
+        return NextResponse.json({ error: 'No fields to update' }, { status: 400 });
+      }
+      await queries.updateFunctionalArea(id, updates);
+      const updated = await queries.getFunctionalArea(id);
+      return NextResponse.json(updated);
+    }
+
     // Update test: PUT /api/v1/tests/:id
     if (resource === 'tests' && id) {
       const test = await queries.getTest(id);
@@ -715,6 +820,21 @@ export async function DELETE(
   const { resource, id } = parseSlug(slug);
 
   try {
+    // Soft-delete functional area: DELETE /api/v1/functional-areas/:id
+    if (resource === 'functional-areas' && id) {
+      const area = await queries.getFunctionalArea(id);
+      if (!area) {
+        return NextResponse.json({ error: 'Not found' }, { status: 404 });
+      }
+      if (area.repositoryId) {
+        if (!(await verifyRepoOwnership(area.repositoryId, session))) {
+          return NextResponse.json({ error: 'Not found' }, { status: 404 });
+        }
+      }
+      await queries.deleteFunctionalArea(id);
+      return NextResponse.json({ success: true });
+    }
+
     // Soft-delete test: DELETE /api/v1/tests/:id
     if (resource === 'tests' && id) {
       const test = await queries.getTest(id);

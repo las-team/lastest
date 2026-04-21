@@ -41,7 +41,7 @@ function withActivityReporting(
 export function createServer(client: LastestClient): McpServer {
   const server = new McpServer({
     name: 'lastest',
-    version: '0.1.0',
+    version: '0.3.0',
   });
 
   // ===== Health & Status =====
@@ -137,6 +137,53 @@ export function createServer(client: LastestClient): McpServer {
     },
   );
 
+  // --- lastest_create_repo ---
+  server.tool(
+    'lastest_create_repo',
+    'Create a new local repository in the current team. Use this when you need a fresh workspace for tests without connecting to GitHub/GitLab.',
+    {
+      name: z.string().describe('Repository name (e.g. "my-app")'),
+    },
+    withActivityReporting(client, 'lastest_create_repo', async (params) => {
+      const repo = await client.createRepo(params.name as string);
+      const response: ToolResponse = {
+        status: 'created',
+        summary: `Repository "${repo.name}" created (ID: ${repo.id})`,
+        actionRequired: [
+          'Create functional areas with lastest_create_area',
+          'Add tests with lastest_create_test',
+        ],
+        details: repo,
+      };
+      return { content: [{ type: 'text', text: JSON.stringify(response, null, 2) }] };
+    }),
+  );
+
+  // --- lastest_update_repo ---
+  server.tool(
+    'lastest_update_repo',
+    'Update a repository\'s name, default branch, or selected branch.',
+    {
+      repositoryId: z.string().describe('Repository ID to update'),
+      name: z.string().optional().describe('New repository name'),
+      defaultBranch: z.string().optional().describe('New default branch name'),
+      selectedBranch: z.string().optional().describe('Branch selected for test runs'),
+    },
+    withActivityReporting(client, 'lastest_update_repo', async (params) => {
+      const { repositoryId, ...rest } = params;
+      const cleanUpdates = Object.fromEntries(
+        Object.entries(rest).filter(([, v]) => v !== undefined),
+      ) as { name?: string; defaultBranch?: string; selectedBranch?: string };
+      const result = (await client.updateRepo(repositoryId as string, cleanUpdates)) as Record<string, unknown>;
+      const response: ToolResponse = {
+        status: 'updated',
+        summary: `Repository ${repositoryId} updated (fields: ${Object.keys(cleanUpdates).join(', ')})`,
+        details: result,
+      };
+      return { content: [{ type: 'text', text: JSON.stringify(response, null, 2) }] };
+    }),
+  );
+
   // ===== Functional Areas =====
 
   // --- lastest_list_areas ---
@@ -182,6 +229,50 @@ export function createServer(client: LastestClient): McpServer {
       };
       return { content: [{ type: 'text', text: JSON.stringify(response, null, 2) }] };
     },
+  );
+
+  // --- lastest_update_area ---
+  server.tool(
+    'lastest_update_area',
+    'Update a functional area\'s name, description, or parent.',
+    {
+      functionalAreaId: z.string().describe('Functional area ID to update'),
+      name: z.string().optional().describe('New name'),
+      description: z.string().optional().describe('New description'),
+      parentId: z.string().optional().describe('New parent area ID (pass empty string to clear)'),
+    },
+    withActivityReporting(client, 'lastest_update_area', async (params) => {
+      const { functionalAreaId, ...rest } = params;
+      const cleanUpdates: { name?: string; description?: string; parentId?: string | null } = {};
+      if (rest.name !== undefined) cleanUpdates.name = rest.name as string;
+      if (rest.description !== undefined) cleanUpdates.description = rest.description as string;
+      if (rest.parentId !== undefined) cleanUpdates.parentId = (rest.parentId as string) || null;
+      const result = (await client.updateArea(functionalAreaId as string, cleanUpdates)) as Record<string, unknown>;
+      const response: ToolResponse = {
+        status: 'updated',
+        summary: `Functional area ${functionalAreaId} updated (fields: ${Object.keys(cleanUpdates).join(', ')})`,
+        details: result,
+      };
+      return { content: [{ type: 'text', text: JSON.stringify(response, null, 2) }] };
+    }),
+  );
+
+  // --- lastest_delete_area ---
+  server.tool(
+    'lastest_delete_area',
+    'Soft-delete a functional area. Tests remain but become unassigned.',
+    {
+      functionalAreaId: z.string().describe('Functional area ID to delete'),
+    },
+    withActivityReporting(client, 'lastest_delete_area', async (params) => {
+      const result = await client.deleteArea(params.functionalAreaId as string);
+      const response: ToolResponse = {
+        status: 'deleted',
+        summary: `Functional area ${params.functionalAreaId} soft-deleted`,
+        details: result,
+      };
+      return { content: [{ type: 'text', text: JSON.stringify(response, null, 2) }] };
+    }),
   );
 
   // --- lastest_list_tests_by_area ---
@@ -746,24 +837,57 @@ export function createServer(client: LastestClient): McpServer {
   // --- lastest_create_test ---
   server.tool(
     'lastest_create_test',
-    'Create a new test using AI. Provide a URL to test, a natural language prompt, or both.',
+    'Create a test. Two modes: (1) **direct** — pass { name, code } to insert ready-made Playwright code. (2) **AI** — pass { url } and/or { prompt } to have the Lastest AI agent generate the test. Direct mode returns immediately with a test ID; AI mode may take longer and returns the generated code.',
     {
       repositoryId: z.string().describe('Repository ID to create the test in'),
-      url: z.string().optional().describe('URL to generate a test for'),
-      prompt: z.string().optional().describe('Natural language description of what to test'),
+      name: z.string().optional().describe('Test name (required for direct mode)'),
+      code: z.string().optional().describe('Playwright test code (required for direct mode). Expected signature: `export async function test(page, baseUrl, screenshotPath, stepLogger)`'),
+      url: z.string().optional().describe('URL to generate a test for (AI mode)'),
+      prompt: z.string().optional().describe('Natural language description of what to test (AI mode)'),
       functionalAreaId: z.string().optional().describe('Functional area to assign the test to'),
+      targetUrl: z.string().optional().describe('Target URL for the test (direct mode)'),
+      description: z.string().optional().describe('Test description (direct mode)'),
     },
     withActivityReporting(client, 'lastest_create_test', async (params) => {
+      const repositoryId = params.repositoryId as string;
+      const name = params.name as string | undefined;
+      const code = params.code as string | undefined;
+      const functionalAreaId = params.functionalAreaId as string | undefined;
+
+      // Direct mode: name + code provided → insert as-is, skip AI
+      if (name && code) {
+        const result = await client.createTestDirect({
+          repositoryId,
+          name,
+          code,
+          functionalAreaId,
+          targetUrl: params.targetUrl as string | undefined,
+          description: params.description as string | undefined,
+        });
+        const response: ToolResponse = {
+          status: 'test_created',
+          summary: `Test "${result.name}" created from supplied code (ID: ${result.id}). Use lastest_run_tests to execute it.`,
+          actionRequired: ['Run the test with lastest_run_tests to verify it works'],
+          details: result,
+        };
+        return { content: [{ type: 'text', text: JSON.stringify(response, null, 2) }] };
+      }
+
+      // AI mode: require at least url or prompt
+      if (!params.url && !params.prompt) {
+        throw new Error('Provide either { name, code } for direct creation, or { url } and/or { prompt } for AI generation.');
+      }
+
       const result = (await client.createTest({
-        repositoryId: params.repositoryId as string,
+        repositoryId,
         url: params.url as string | undefined,
         prompt: params.prompt as string | undefined,
-        functionalAreaId: params.functionalAreaId as string | undefined,
+        functionalAreaId,
       })) as Record<string, unknown>;
 
       const response: ToolResponse = {
         status: 'test_created',
-        summary: `Test created successfully${result.testId ? ` (ID: ${result.testId})` : ''}. Use lastest_run_tests to execute it.`,
+        summary: `Test created via AI${result.testId ? ` (ID: ${result.testId})` : ''}. Use lastest_run_tests to execute it.`,
         actionRequired: ['Run the test with lastest_run_tests to verify it works'],
         details: result,
       };
