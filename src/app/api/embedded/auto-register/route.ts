@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { teams, users, runners } from '@/lib/db/schema';
 import { upsertEmbeddedSession } from '@/server/actions/embedded-sessions';
+import { updateRunnerStatus } from '@/server/actions/runners';
 import { eq, and } from 'drizzle-orm';
 import crypto from 'crypto';
 import { syncUserToTwentyCRM } from '@/lib/integrations/twenty-crm';
@@ -125,11 +126,15 @@ export async function POST(request: Request) {
     });
     [runner] = await db.select().from(runners).where(eq(runners.id, runnerId));
   } else {
-    // Update existing runner: refresh token & mark online
+    // Update existing runner: refresh token & mark online via updateRunnerStatus,
+    // which preserves `busy` when an embedded session is still in flight — otherwise
+    // a re-register races with `claimPoolEB` and the same EB gets handed to two
+    // workers concurrently (observed in production as `Target … has been closed`).
     await db
       .update(runners)
-      .set({ tokenHash, status: 'online', lastSeen: new Date(), maxParallelTests: 1 })
+      .set({ tokenHash, lastSeen: new Date(), maxParallelTests: 1 })
       .where(eq(runners.id, runner.id));
+    await updateRunnerStatus(runner.id, 'online');
     [runner] = await db.select().from(runners).where(eq(runners.id, runner.id));
   }
 

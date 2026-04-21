@@ -168,7 +168,11 @@ export async function upsertEmbeddedSession(params: {
     const now = new Date();
     const expiresAt = new Date(now.getTime() + 30 * 60 * 1000);
 
-    // Update the existing session
+    // Update the existing session. Preserve `busy` — a re-register that wipes it
+    // to `ready` defeats the session-busy safeguard in `updateRunnerStatus` and
+    // lets `claimPoolEB` hand the same EB to a second worker concurrently
+    // (observed in production as `Target … has been closed`).
+    const preserveBusy = existing.status === 'busy';
     await db
       .update(embeddedSessions)
       .set({
@@ -176,8 +180,7 @@ export async function upsertEmbeddedSession(params: {
         cdpUrl: params.cdpUrl ?? null,
         containerUrl: params.containerUrl,
         viewport: params.viewport ?? { width: 1280, height: 720 },
-        status: 'ready',
-        userId: null,
+        ...(preserveBusy ? {} : { status: 'ready', userId: null }),
         lastActivityAt: now,
         expiresAt,
       })

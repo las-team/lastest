@@ -700,12 +700,20 @@ async function executeViaPoolWorkers(
   // retry rather than burning one test per failed setup. Cap retries so a
   // persistently-unreachable target doesn't loop forever.
   const MAX_SETUP_RETRIES = 5;
+  // A test that lands on a dead EB (see EB_DEAD_RESULT_RX) gets one retry on a
+  // fresh EB before we record the failure — prevents a pool infra flake
+  // (e.g. the double-claim race previously surfaced by concurrent re-register +
+  // claimPoolEB) from masquerading as a real test failure. Shared across workers
+  // so a test that ping-pongs between bad EBs still respects the budget.
+  const MAX_DEAD_STATE_RETRIES = 1;
+  const deadStateAttempts = new Map<string, number>();
   const runWorker = async (workerId: number): Promise<void> => {
     // Each worker holds onto a single EB for as long as possible. Setup runs once
     // per EB. If the EB dies mid-sequence, we claim a fresh one and re-setup.
     let claimed: WorkerEB | null = null;
     let setupDone = false;
     let setupFailureStreak = 0;
+    let retryTest: Test | null = null;
     const workerSetupId = options.setupInfo ? `${runId}-w${workerId}` : null;
 
     const ensureEBWithSetup = async (): Promise<WorkerEB | null> => {
@@ -761,7 +769,7 @@ async function executeViaPoolWorkers(
       while (true) {
         // Don't reserve a test index until setup actually succeeds — otherwise
         // one setup flake per worker silently burns one test as "skipped".
-        if (nextIdx >= tests.length) return;
+        if (!retryTest && nextIdx >= tests.length) return;
 
         const eb = await ensureEBWithSetup();
         if (!eb) {
@@ -770,9 +778,10 @@ async function executeViaPoolWorkers(
             // Target looks persistently unreachable from this worker. Mark
             // the next pending test as setup_failed so the failure surfaces
             // in the build report, then exit — peer workers may still succeed.
-            const idx = nextIdx++;
-            if (idx < tests.length) {
-              const t = tests[idx]!;
+            // If we were holding a retry, surface it as the failure instead of
+            // skipping a fresh test.
+            const t = retryTest ?? (nextIdx < tests.length ? tests[nextIdx++]! : null);
+            if (t) {
               resultMap.set(t.id, {
                 testId: t.id,
                 status: 'setup_failed' as const,
@@ -783,6 +792,7 @@ async function executeViaPoolWorkers(
               completedCount++;
               updateProgress(activeWorkers, t.name);
             }
+            retryTest = null;
             return;
           }
           // Exponential back-off (0.5s, 1s, 2s, 4s, ...) — gives DNS/CNI
@@ -793,9 +803,20 @@ async function executeViaPoolWorkers(
         }
         setupFailureStreak = 0;
 
-        const myIdx = nextIdx++;
-        if (myIdx >= tests.length) return;
-        const test = tests[myIdx]!;
+        // Pick the test: a dead-state retry takes priority over claiming a new
+        // index — otherwise a retry from this worker could race with a peer
+        // worker picking up the same test.
+        let test: Test;
+        let isRetry = false;
+        if (retryTest) {
+          test = retryTest;
+          retryTest = null;
+          isRetry = true;
+        } else {
+          const myIdx = nextIdx++;
+          if (myIdx >= tests.length) return;
+          test = tests[myIdx]!;
+        }
 
         // Prefer the live persistent context over serialized storageState.
         const effectiveSetup = workerSetupId && setupDone
@@ -805,6 +826,7 @@ async function executeViaPoolWorkers(
         activeWorkers++;
         updateProgress(activeWorkers, test.name);
         let ebDied = false;
+        let deferredRetry = false;
         // Pattern an EB-health failure looks like when it comes back as a
         // test RESULT (not a thrown exception): the EB reports the test
         // failed with a Playwright "Target ... has been closed" error, which
@@ -814,6 +836,18 @@ async function executeViaPoolWorkers(
         // errorMessage below, since `executeViaRunner` doesn't throw for
         // reported-failed tests.
         const EB_DEAD_RESULT_RX = /Target .*has been closed|offline|crash|runner went|EB network unhealthy/i;
+        const tryDeadStateRetry = (errMsg: string): boolean => {
+          const attempts = (deadStateAttempts.get(test.id) ?? 0) + 1;
+          deadStateAttempts.set(test.id, attempts);
+          if (attempts <= MAX_DEAD_STATE_RETRIES) {
+            console.warn(`[Worker ${workerId}] EB ${eb.runnerId.slice(0, 8)} returned dead-state error (attempt ${attempts}/${MAX_DEAD_STATE_RETRIES + 1}) — retrying "${test.name}" on fresh EB: ${errMsg}`);
+            retryTest = test;
+            deferredRetry = true;
+            return true;
+          }
+          console.warn(`[Worker ${workerId}] EB ${eb.runnerId.slice(0, 8)} returned dead-state error on final attempt — recording failure: ${errMsg}`);
+          return false;
+        };
         try {
           const [oneResult] = await executeViaRunner(
             [test],
@@ -824,37 +858,46 @@ async function executeViaPoolWorkers(
             onResult,
           );
           if (oneResult) {
-            resultMap.set(test.id, oneResult);
-            // Reported-failed tests with an EB-health error message: the EB
-            // is in a broken state (e.g. context closed). Drop it so the
-            // next iteration claims a fresh one.
-            if (oneResult.status === 'failed' && oneResult.errorMessage && EB_DEAD_RESULT_RX.test(oneResult.errorMessage)) {
-              console.warn(`[Worker ${workerId}] EB ${eb.runnerId.slice(0, 8)} returned dead-state error — will swap to fresh EB: ${oneResult.errorMessage}`);
+            const deadResult = oneResult.status === 'failed'
+              && !!oneResult.errorMessage
+              && EB_DEAD_RESULT_RX.test(oneResult.errorMessage);
+            if (deadResult && tryDeadStateRetry(oneResult.errorMessage!)) {
               ebDied = true;
+            } else {
+              resultMap.set(test.id, oneResult);
+              if (deadResult) ebDied = true;
             }
           }
         } catch (err) {
           const msg = err instanceof Error ? err.message : String(err);
-          console.error(`[Worker ${workerId}] Error running test ${test.id}:`, err);
-          resultMap.set(test.id, {
-            testId: test.id,
-            status: 'failed' as const,
-            durationMs: 0,
-            screenshots: [],
-            errorMessage: msg,
-          });
-          // Heuristic: if the EB looks dead (went offline, crash-loop, command
-          // timed out, or tagged as network-unhealthy by the in-pod goto retry
-          // ladder), drop it so the next iteration claims a fresh one and
-          // re-runs setup.
-          if (/offline|crash|timed out|runner went|EB network unhealthy|page\.screenshot.*Target page.*closed|Target .*has been closed/i.test(msg)) {
+          const looksDead = /offline|crash|timed out|runner went|EB network unhealthy|page\.screenshot.*Target page.*closed|Target .*has been closed/i.test(msg);
+          if (looksDead && tryDeadStateRetry(msg)) {
             ebDied = true;
+          } else {
+            console.error(`[Worker ${workerId}] Error running test ${test.id}:`, err);
+            resultMap.set(test.id, {
+              testId: test.id,
+              status: 'failed' as const,
+              durationMs: 0,
+              screenshots: [],
+              errorMessage: msg,
+            });
+            // Heuristic: if the EB looks dead (went offline, crash-loop, command
+            // timed out, or tagged as network-unhealthy by the in-pod goto retry
+            // ladder), drop it so the next iteration claims a fresh one and
+            // re-runs setup.
+            if (looksDead) ebDied = true;
           }
         } finally {
           activeWorkers--;
-          completedCount++;
+          // Deferred retries aren't "completed" yet — bumping here would make
+          // the progress bar overshoot and then stick when the retry records.
+          if (!deferredRetry) completedCount++;
           updateProgress(activeWorkers);
         }
+        // Reference isRetry to keep it available for future logging without
+        // tripping the unused-var lint.
+        void isRetry;
 
         if (ebDied) {
           const dying = claimed as WorkerEB | null;
