@@ -25,7 +25,7 @@ export async function startRecording(
   repositoryId?: string | null,
   runnerId?: string,
   setupOptions?: { testId?: string | null; scriptId?: string | null; steps?: Array<{ stepType: 'test' | 'script'; testId?: string | null; scriptId?: string | null }> },
-  storageStateId?: string,
+  _storageStateId?: string,
 ): Promise<{ sessionId?: string; resolvedRunnerId?: string; error?: string }> {
   await requireTeamAccess();
   // Validate URL format
@@ -225,7 +225,7 @@ export async function flagDownload(repositoryId?: string | null): Promise<{ succ
   return { success: false };
 }
 
-export async function togglePauseRecording(repositoryId?: string | null): Promise<{ paused: boolean; error?: string }> {
+export async function togglePauseRecording(_repositoryId?: string | null): Promise<{ paused: boolean; error?: string }> {
   await requireTeamAccess();
   return { paused: false, error: 'Pause is not supported for remote recording sessions' };
 }

@@ -109,7 +109,7 @@ export async function runBrowserPlanner(
             const diveDuration = Date.now() - diveStart;
             options?.onDeepDiveComplete?.(area.name, areas.length, diveDuration, diveLogId);
             return areas;
-          } catch (err) {
+          } catch (_err) {
             const diveDuration = Date.now() - diveStart;
             options?.onDeepDiveComplete?.(area.name, 0, diveDuration, diveLogId);
             // On failure, create a basic plan from scout's focus points

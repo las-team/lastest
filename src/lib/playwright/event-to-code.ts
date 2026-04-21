@@ -134,7 +134,7 @@ export function eventsToCodeLines(
       }
       lastAction = 'goto';
     } else if (event.type === 'action') {
-      const { action, selector, selectors, value, coordinates, button, modifiers, downloadWrap } = event.data;
+      const { action, selector, selectors, value, coordinates, button, modifiers } = event.data;
 
       // Skip LEFT click actions that follow mouse-up — pointer gestures already captured it
       // via mouse-down/up events, so the click action is a duplicate that can interfere.

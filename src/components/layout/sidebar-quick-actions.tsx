@@ -130,7 +130,6 @@ export function SidebarQuickActions({ baseUrl: initialBaseUrl = '', repositoryId
         setTestResult({ success: result.success, responseTime: result.responseTime, statusCode: result.statusCode });
       });
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps -- repositoryId change must reset state
   }, [initialBaseUrl, repositoryId]);
 
   const saveAndTest = async () => {

@@ -2,12 +2,11 @@
 
 import { useState } from 'react';
 import { ChevronDown, Radio, Cpu, Zap, AlertCircle, CheckCircle2, Clock, Wrench, Trophy, Share2, Sparkles } from 'lucide-react';
-import { Badge } from '@/components/ui/badge';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { ArtifactLink } from './artifact-link-client';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
-import type { ActivityEvent, PwAgentType, ActivityArtifactType } from '@/lib/db/schema';
+import type { ActivityEvent, ActivityArtifactType } from '@/lib/db/schema';
 
 const AGENT_LABELS: Record<string, string> = {
   orchestrator: 'Orchestrator',

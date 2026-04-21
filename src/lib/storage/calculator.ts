@@ -1,7 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import { db } from '@/lib/db';
-import { repositories, testResults, testRuns, baselines, plannedScreenshots } from '@/lib/db/schema';
+import { repositories, testResults, testRuns, plannedScreenshots } from '@/lib/db/schema';
 import { eq, inArray } from 'drizzle-orm';
 import { updateTeamStorageUsage, getTeamStorageUsage } from '@/lib/db/queries/storage';
 import { STORAGE_ROOT } from './paths';

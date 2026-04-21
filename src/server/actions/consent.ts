@@ -4,7 +4,6 @@ import { headers } from 'next/headers';
 import { requireAuth } from '@/lib/auth';
 import * as queries from '@/lib/db/queries';
 import { TERMS_VERSION, PRIVACY_VERSION } from '@/lib/legal/versions';
-import type { ConsentType } from '@/lib/db/schema';
 
 export async function recordRegistrationConsent(data: { marketingEmails: boolean }) {
   const session = await requireAuth();

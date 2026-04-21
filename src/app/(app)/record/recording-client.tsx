@@ -54,8 +54,6 @@ import {
   ListFilter,
   AlertTriangle,
   Check,
-  RefreshCw,
-  Terminal,
   Keyboard,
   ShieldCheck,
   Play,

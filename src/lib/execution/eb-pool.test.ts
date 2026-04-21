@@ -121,7 +121,6 @@ vi.mock('next/cache', () => ({
 const EB_RUNNER_1 = { id: 'eb-runner-1', teamId: 'system-team', status: 'online', type: 'embedded', isSystem: true };
 const EB_RUNNER_2 = { id: 'eb-runner-2', teamId: 'system-team', status: 'online', type: 'embedded', isSystem: true };
 const EB_SESSION_1 = { id: 'session-1', runnerId: 'eb-runner-1', status: 'ready' };
-const EB_SESSION_2 = { id: 'session-2', runnerId: 'eb-runner-2', status: 'ready' };
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -655,7 +654,7 @@ describe('Pool Integration Scenarios', () => {
       const runner = { id: 'eb-1', type: 'embedded', isSystem: true, status: 'online' };
       const executeFallbackChain = vi.fn().mockResolvedValue([]);
 
-      const simulateExecuteTests = async (runnerId: string) => {
+      const simulateExecuteTests = async (_runnerId: string) => {
         // Simulate the check in executeTests
         if ('type' in runner && runner.type === 'embedded' && 'isSystem' in runner && runner.isSystem) {
           return executeFallbackChain();

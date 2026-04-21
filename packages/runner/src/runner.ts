@@ -919,7 +919,7 @@ export class TestRunner {
     body = body.replace(/page\.keyboard\.selectAll\(\)/g, "page.keyboard.press('Control+a')");
 
     // Instrument step tracking
-    const { instrumentedBody, stepCount } = instrumentStepTracking(body);
+    const { instrumentedBody } = instrumentStepTracking(body);
     body = instrumentedBody;
     let lastReachedStep = -1;
     const __stepReached = async (n: number) => { lastReachedStep = Math.max(lastReachedStep, n); };

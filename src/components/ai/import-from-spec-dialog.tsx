@@ -21,7 +21,6 @@ import {
   completeSpecImportSession,
   generateTestsFromStories,
   createPlaceholdersFromStories,
-  getBranchChanges,
   validateAllTestsWithMCP,
 } from '@/server/actions/spec-import';
 import type { DiscoveredSpecFile } from '@/server/actions/spec-import';

@@ -32,13 +32,12 @@ import { AIScanRoutesDialog } from '@/components/ai/ai-scan-routes-dialog';
 import { ImportFromSpecDialog } from '@/components/ai/import-from-spec-dialog';
 import { CodeDiffScanDialog } from '@/components/ai/code-diff-scan-dialog';
 import { createArea, deleteArea, deleteAreaWithContents, moveTestToArea, moveArea, exportAllPlans, updateAreaPlan, updateArea } from '@/server/actions/areas';
-import { deleteTests, restoreTests, permanentlyDeleteTests, getTest, getTestDetailData } from '@/server/actions/tests';
+import { deleteTests, restoreTests, permanentlyDeleteTests, getTestDetailData } from '@/server/actions/tests';
 import { ApiConfigList } from '@/components/setup/api-config-list';
 import { SetupStepBuilder } from '@/components/setup/setup-step-builder';
 import { addDefaultTeardownStep, removeDefaultTeardownStep, reorderDefaultTeardownSteps } from '@/server/actions/teardown-steps';
 import { createPlaceholderTestCase } from '@/server/actions/specs';
 import { TestDetailClient } from '@/app/(app)/tests/[id]/test-detail-client';
-import { runTests } from '@/server/actions/runs';
 import { createAndRunBuild } from '@/server/actions/builds';
 import { startHealTestAgent, startGeneratePlaceholderTestAgent } from '@/server/actions/ai';
 import { startRemoteRouteScan, generateBasicTests } from '@/server/actions/scanner';
@@ -70,9 +69,7 @@ import {
   Pencil,
   FolderPlus,
   Folder,
-  FileCode,
   Save,
-  ExternalLink,
 } from 'lucide-react';
 import type { FunctionalArea, Test, Route, Repository, SetupScript, SetupConfig, StorageState } from '@/lib/db/schema';
 import type { FunctionalAreaWithChildren } from '@/lib/db/queries';

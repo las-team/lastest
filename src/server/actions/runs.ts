@@ -262,7 +262,7 @@ export async function getTestRuns() {
   return queries.getTestRuns();
 }
 
-export async function getRunStatus(repositoryId?: string | null) {
+export async function getRunStatus(_repositoryId?: string | null) {
   // Check DB for running jobs
   const runningJobs = await queries.getRunningJobsForRunner('auto');
   return {

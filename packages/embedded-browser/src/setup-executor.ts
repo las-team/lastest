@@ -47,7 +47,6 @@ function createSetupPageProxy(page: Page, baseUrl: string): Page {
           }
           const finalMsg = lastErr instanceof Error ? lastErr.message : String(lastErr);
           const tagged = new Error(`EB network unhealthy after retries: ${finalMsg}`);
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
           (tagged as unknown as Record<string, unknown>).__ebNetworkUnhealthy = true;
           throw tagged;
         };

@@ -6,7 +6,6 @@
  * `playwright-test` MCP server (npx playwright run-test-mcp-server).
  */
 
-import path from 'path';
 import * as queries from '@/lib/db/queries';
 import { requireRepoAccess } from '@/lib/auth';
 import { generateWithAI } from '@/lib/ai';
