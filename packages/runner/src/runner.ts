@@ -10,7 +10,7 @@ import path from 'path';
 import os from 'os';
 import type { RunTestCommandPayload, RunSetupCommandPayload, LogEntry, StabilizationPayload } from './protocol.js';
 import { CROSS_OS_CHROMIUM_ARGS, setupFreezeScripts, applyPreScreenshotStabilization } from './stabilization.js';
-import { instrumentStepTracking } from '@lastest/shared';
+import { instrumentStepTracking, stripTypeAnnotations } from '@lastest/shared';
 
 /**
  * Verify code integrity by comparing SHA256 hash.
@@ -744,11 +744,11 @@ export class TestRunner {
 
     let body: string;
     if (funcMatch) {
-      body = this.stripTypeAnnotations(funcMatch[1]);
+      body = stripTypeAnnotations(funcMatch[1]);
     } else {
       // Fallback: treat entire code as the function body (unwrapped test code)
       log('info', 'No export async function test(...) wrapper found — using code as body');
-      body = this.stripTypeAnnotations(code);
+      body = stripTypeAnnotations(code);
     }
     log('info', `Extracted test body: ${body.length} chars`);
 
@@ -1119,16 +1119,6 @@ export class TestRunner {
         try { fs.rmSync(dlDir, { recursive: true, force: true }); } catch {}
       }
     }
-  }
-
-  private stripTypeAnnotations(code: string): string {
-    let result = code;
-    result = result.replace(/\b(const|let|var)\s+(\w+)\s*:\s*[^=\n;]+(\s*=)/g, '$1 $2$3');
-    result = result.replace(/\b(const|let|var)\s+(\{[^}]+\}|\[[^\]]+\])\s*:\s*[^=\n;]+(\s*=)/g, '$1 $2$3');
-    result = result.replace(/\)\s+as\s+\w[\w<>\[\],\s|]*/g, ')');
-    result = result.replace(/(\w)\s+as\s+\w[\w<>\[\],\s|]*/g, '$1');
-    result = result.replace(/<\w[\w<>\[\],\s|]*>\s*(?=\(|[\w])/g, '');
-    return result;
   }
 
   private createExpect(timeout = 5000) {

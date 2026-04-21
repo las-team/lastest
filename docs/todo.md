@@ -9,15 +9,11 @@ VS Code extension
 Gitlab
 Teardown
 Accept Downloads
-MCP
 triage
 a11y
-GH action edit
 DOM delta
 ## bugs
-
 ## features
-/home/ewyct/dev/lastest/docs/runner-ts-stripper-hardening.md
 Asset management
 mcp-oauth flow
 (low) Every button is green, multiple primary actions, keep clicking on run test instead of save

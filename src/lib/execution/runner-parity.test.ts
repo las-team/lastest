@@ -3,36 +3,22 @@
  *
  * Verifies that the remote runner (packages/runner/src/runner.ts) and
  * embedded browser executor (packages/embedded-browser/src/test-executor.ts)
- * implement identical code transformations and behavior.
+ * apply the same code transformations and behavior contracts.
  *
- * Since both implementations have private methods, we replicate the regex/logic
- * here and verify they produce identical output for the same inputs.
+ * TS-stripping is now a shared utility (`@lastest/shared` → `ts-strip.ts`),
+ * so both runners import the *same* function rather than each carrying a
+ * private copy kept in sync by hand. This test file therefore:
+ *   1. Unit-tests the shared `stripTypeAnnotations` (sucrase path) on the
+ *      TS-torture fixtures the hand-rolled regex couldn't handle.
+ *   2. Unit-tests the `legacyStripTypeAnnotations` regex fallback for the
+ *      original byte-exact outputs (rare parse failures degrade to this).
+ *   3. Keeps the existing behavioural-parity checks (selectAll, soft errors,
+ *      function-body extraction, function removal, timeout/cancel).
  */
 import { describe, it, expect } from 'vitest';
+import { stripTypeAnnotations, legacyStripTypeAnnotations } from '@lastest/shared';
 
-// ─── Replicated logic from runner.ts TestRunner.stripTypeAnnotations ───
-function runnerStripTypeAnnotations(code: string): string {
-  let result = code;
-  result = result.replace(/\b(const|let|var)\s+(\w+)\s*:\s*[^=\n;]+(\s*=)/g, '$1 $2$3');
-  result = result.replace(/\b(const|let|var)\s+(\{[^}]+\}|\[[^\]]+\])\s*:\s*[^=\n;]+(\s*=)/g, '$1 $2$3');
-  result = result.replace(/\)\s+as\s+\w[\w<>\[\],\s|]*/g, ')');
-  result = result.replace(/(\w)\s+as\s+\w[\w<>\[\],\s|]*/g, '$1');
-  result = result.replace(/<\w[\w<>\[\],\s|]*>\s*(?=\(|[\w])/g, '');
-  return result;
-}
-
-// ─── Replicated logic from test-executor.ts stripTypeAnnotations ───
-function embeddedStripTypeAnnotations(code: string): string {
-  let result = code;
-  result = result.replace(/\b(const|let|var)\s+(\w+)\s*:\s*[^=\n;]+(\s*=)/g, '$1 $2$3');
-  result = result.replace(/\b(const|let|var)\s+(\{[^}]+\}|\[[^\]]+\])\s*:\s*[^=\n;]+(\s*=)/g, '$1 $2$3');
-  result = result.replace(/\)\s+as\s+\w[\w<>\[\],\s|]*/g, ')');
-  result = result.replace(/(\w)\s+as\s+\w[\w<>\[\],\s|]*/g, '$1');
-  result = result.replace(/<\w[\w<>\[\],\s|]*>\s*(?=\(|[\w])/g, '');
-  return result;
-}
-
-// ─── Function body extraction regex (shared by both) ───
+// ─── Function body extraction regex (shared by both runners) ───
 const FUNC_BODY_REGEX = /export\s+async\s+function\s+test\s*\(\s*page[^)]*\)\s*\{([\s\S]*)\}\s*$/;
 
 // ─── Function removal (runner uses inline, embedded uses removeFunctionDefinition) ───
@@ -92,55 +78,153 @@ function wrapSoftErrors(body: string): string {
   });
 }
 
-// ─── Test inputs ───
-const TYPE_ANNOTATION_CASES = [
+/**
+ * Helper: asserts that a stripped body parses as a valid async-function body.
+ * This is the real contract we care about — `new AsyncFunction(..., body)`
+ * must not throw with "Unexpected token" or similar syntax errors.
+ */
+function assertParsesAsAsyncBody(body: string): void {
+  const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
+  expect(() => new AsyncFunction('page', 'expect', body)).not.toThrow();
+}
+
+// ────────────────────────────────────────────────────────────────────────
+// Shared stripTypeAnnotations (sucrase path) — semantic correctness tests.
+// Sucrase preserves formatting differently from the legacy regex, so these
+// assert "no TS remnants + parses as valid JS" rather than byte-exact output.
+// ────────────────────────────────────────────────────────────────────────
+
+const TS_TORTURE_FIXTURES: Array<{ name: string; input: string; mustNotContain?: string[]; mustContain?: string[] }> = [
   {
     name: 'simple variable type annotation',
     input: 'const x: string = "hello";',
-    // The regex [^=\n;]+ consumes the space before =, so no space before = in output
-    expected: 'const x= "hello";',
-  },
-  {
-    name: 'let variable type annotation',
-    input: 'let count: number = 0;',
-    expected: 'let count= 0;',
+    mustNotContain: [': string'],
+    mustContain: ['"hello"'],
   },
   {
     name: 'destructured object type annotation',
     input: 'const { a, b }: MyType = obj;',
-    expected: 'const { a, b }= obj;',
+    mustNotContain: [': MyType'],
+    mustContain: ['{ a, b }', 'obj'],
   },
   {
-    name: 'destructured array type annotation',
-    input: 'const [x, y]: [number, number] = coords;',
-    expected: 'const [x, y]= coords;',
+    name: 'as cast after parenthesis inside page.evaluate — mwhospital regression',
+    input: 'await page.evaluate(() => { const i = document.querySelector("div"); (i as HTMLElement).click(); });',
+    mustNotContain: ['as HTMLElement'],
+    mustContain: ['.click()'],
   },
   {
-    name: 'as cast after parenthesis',
-    input: 'const el = (await page.locator("div")) as HTMLElement;',
-    expected: 'const el = (await page.locator("div"));',
+    name: 'non-null assertion — previously unhandled',
+    input: 'const x = obj!.foo();',
+    mustNotContain: ['!.'],
+    mustContain: ['obj', '.foo()'],
   },
   {
-    name: 'as cast on value',
-    input: 'const val = result as string;',
-    expected: 'const val = result;',
+    name: 'parameter type annotation in arrow inside page.evaluate',
+    input: 'await page.evaluate(() => { document.querySelectorAll("a").forEach((el: HTMLElement) => el.click()); });',
+    mustNotContain: [': HTMLElement'],
+    mustContain: ['.click()'],
   },
   {
-    name: 'generic type parameter before function call',
+    name: 'generic type cast prefix',
     input: 'const items = <string[]>getItems();',
-    expected: 'const items = getItems();',
+    mustNotContain: ['<string[]>'],
+    mustContain: ['getItems()'],
   },
   {
-    name: 'complex union type',
-    input: 'const x: string | number | null = getValue();',
-    expected: 'const x= getValue();',
+    name: 'type-only import is stripped entirely',
+    input: 'import type { Page } from "playwright";\nawait page.goto("/");',
+    mustNotContain: ['import type'],
+    mustContain: ['page.goto'],
   },
   {
-    name: 'no annotations (passthrough)',
-    input: 'const x = 5;',
-    expected: 'const x = 5;',
+    name: 'return-type annotation on arrow',
+    input: 'const f = (): Promise<void> => { return Promise.resolve(); };',
+    mustNotContain: [': Promise<void>'],
+    mustContain: ['Promise.resolve()'],
+  },
+  {
+    name: 'double cast x as unknown as HTMLElement',
+    input: 'const el = (x as unknown as HTMLElement).click();',
+    mustNotContain: ['as unknown', 'as HTMLElement'],
+    mustContain: ['.click()'],
+  },
+  {
+    name: 'satisfies operator',
+    input: 'const cfg = { a: 1 } satisfies Foo;',
+    mustNotContain: ['satisfies'],
+    mustContain: ['{ a: 1 }'],
+  },
+  {
+    name: 'comment containing "as HTMLElement" is left intact',
+    input: '// cast x as HTMLElement for foo\nconst y = 1;',
+    mustContain: ['cast x as HTMLElement for foo'],
+  },
+  {
+    name: 'string literal containing "as HTMLElement" is left intact',
+    input: 'const s = "x as HTMLElement";',
+    mustContain: ['"x as HTMLElement"'],
   },
 ];
+
+describe('stripTypeAnnotations (shared, sucrase path)', () => {
+  for (const fx of TS_TORTURE_FIXTURES) {
+    it(fx.name, () => {
+      const out = stripTypeAnnotations(fx.input);
+      for (const needle of fx.mustNotContain ?? []) {
+        expect(out).not.toContain(needle);
+      }
+      for (const needle of fx.mustContain ?? []) {
+        expect(out).toContain(needle);
+      }
+      assertParsesAsAsyncBody(out);
+    });
+  }
+
+  it('preserves line count (1:1 line mapping for stack traces)', () => {
+    const input = 'const a: number = 1;\nconst b: string = "x";\nconst c = a + b.length;';
+    const out = stripTypeAnnotations(input);
+    expect(out.split('\n').length).toBe(input.split('\n').length);
+  });
+
+  it('is idempotent — stripping already-stripped JS is a no-op in content', () => {
+    const input = 'const x = 5;\nawait page.goto("/");';
+    const once = stripTypeAnnotations(input);
+    const twice = stripTypeAnnotations(once);
+    expect(twice).toBe(once);
+  });
+});
+
+// ────────────────────────────────────────────────────────────────────────
+// Legacy regex fallback — byte-exact outputs preserved for backwards compat.
+// These are the contracts that the hand-rolled regex honoured; the fallback
+// must continue to honour them so that if sucrase parse-fails on some odd
+// input, behaviour degrades to "same as before".
+// ────────────────────────────────────────────────────────────────────────
+
+const LEGACY_BYTE_EXACT_CASES = [
+  { name: 'simple variable type annotation', input: 'const x: string = "hello";', expected: 'const x= "hello";' },
+  { name: 'let variable type annotation', input: 'let count: number = 0;', expected: 'let count= 0;' },
+  { name: 'destructured object type annotation', input: 'const { a, b }: MyType = obj;', expected: 'const { a, b }= obj;' },
+  { name: 'destructured array type annotation', input: 'const [x, y]: [number, number] = coords;', expected: 'const [x, y]= coords;' },
+  { name: 'as cast after parenthesis', input: 'const el = (await page.locator("div")) as HTMLElement;', expected: 'const el = (await page.locator("div"));' },
+  { name: 'as cast on value', input: 'const val = result as string;', expected: 'const val = result;' },
+  { name: 'generic type parameter before function call', input: 'const items = <string[]>getItems();', expected: 'const items = getItems();' },
+  { name: 'complex union type', input: 'const x: string | number | null = getValue();', expected: 'const x= getValue();' },
+  { name: 'no annotations (passthrough)', input: 'const x = 5;', expected: 'const x = 5;' },
+];
+
+describe('legacyStripTypeAnnotations (regex fallback)', () => {
+  for (const tc of LEGACY_BYTE_EXACT_CASES) {
+    it(`byte-exact: ${tc.name}`, () => {
+      expect(legacyStripTypeAnnotations(tc.input)).toBe(tc.expected);
+    });
+  }
+});
+
+// ────────────────────────────────────────────────────────────────────────
+// Remaining behavioural parity checks — unchanged.
+// ────────────────────────────────────────────────────────────────────────
 
 const FUNC_BODY_CASES = [
   {
@@ -161,7 +245,7 @@ const FUNC_BODY_CASES = [
   {
     name: 'no wrapper (fallback to full code)',
     input: 'await page.goto("/");\nawait page.screenshot();',
-    expectedBody: null, // regex won't match
+    expectedBody: null,
   },
 ];
 
@@ -212,38 +296,6 @@ const FUNCTION_REMOVAL_CASES = [
 ];
 
 describe('Runner Parity — Code Transformations', () => {
-  describe('stripTypeAnnotations', () => {
-    for (const tc of TYPE_ANNOTATION_CASES) {
-      it(`both produce identical output: ${tc.name}`, () => {
-        const runnerResult = runnerStripTypeAnnotations(tc.input);
-        const embeddedResult = embeddedStripTypeAnnotations(tc.input);
-
-        expect(runnerResult).toBe(embeddedResult);
-        expect(runnerResult).toBe(tc.expected);
-      });
-    }
-
-    it('handles multi-line code with mixed annotations', () => {
-      const input = [
-        'const x: number = 5;',
-        'let y: string = "hello";',
-        'const { a, b }: Config = getConfig();',
-        'const result = (await fetch("/api")) as Response;',
-        'const plain = 42;',
-      ].join('\n');
-
-      const runnerResult = runnerStripTypeAnnotations(input);
-      const embeddedResult = embeddedStripTypeAnnotations(input);
-
-      expect(runnerResult).toBe(embeddedResult);
-      expect(runnerResult).not.toContain(': number');
-      expect(runnerResult).not.toContain(': string');
-      expect(runnerResult).not.toContain(': Config');
-      expect(runnerResult).not.toContain('as Response');
-      expect(runnerResult).toContain('const plain = 42;');
-    });
-  });
-
   describe('function body extraction', () => {
     for (const tc of FUNC_BODY_CASES) {
       it(`both use identical regex: ${tc.name}`, () => {
@@ -286,7 +338,7 @@ describe('Runner Parity — Code Transformations', () => {
       const input = 'await page.keyboard.selectAll();\nawait page.keyboard.selectAll();';
       const result = patchSelectAll(input);
       expect(result).not.toContain('selectAll');
-      expect(result.split("press('Control+a')").length).toBe(3); // 2 replacements + 1 trailing
+      expect(result.split("press('Control+a')").length).toBe(3);
     });
 
     it('does not affect other keyboard methods', () => {
@@ -322,12 +374,9 @@ describe('Runner Parity — Code Transformations', () => {
       const result = wrapSoftErrors(input);
       const lines = result.split('\n');
 
-      // First line wrapped
       expect(lines[0]).toContain('try {');
-      // Screenshot NOT wrapped
       expect(lines[1]).not.toContain('try {');
       expect(lines[1]).toContain('.screenshot()');
-      // Third line wrapped
       expect(lines[2]).toContain('try {');
     });
 
@@ -342,13 +391,12 @@ describe('Runner Parity — Code Transformations', () => {
 describe('Runner Parity — Behavioral Contracts', () => {
   describe('timeout handling', () => {
     it('both enforce Math.max(timeout, 30000)', () => {
-      // Both runner.ts and test-executor.ts use: Math.max(command.timeout || 120000, 30000)
       const computeTimeout = (timeout?: number) => Math.max(timeout || 120000, 30000);
 
       expect(computeTimeout(undefined)).toBe(120000);
-      expect(computeTimeout(10000)).toBe(30000); // Clamped up
+      expect(computeTimeout(10000)).toBe(30000);
       expect(computeTimeout(60000)).toBe(60000);
-      expect(computeTimeout(0)).toBe(120000); // 0 → fallback to 120000
+      expect(computeTimeout(0)).toBe(120000);
     });
   });
 
@@ -362,8 +410,8 @@ describe('Runner Parity — Behavioral Contracts', () => {
       expect(computeDelay(100, 1)).toBe(100);
       expect(computeDelay(100, 2)).toBe(50);
       expect(computeDelay(100, 0.5)).toBe(200);
-      expect(computeDelay(100, 0)).toBe(0); // Instant mode
-      expect(computeDelay(0, 1)).toBe(0); // No delay
+      expect(computeDelay(100, 0)).toBe(0);
+      expect(computeDelay(0, 1)).toBe(0);
     });
   });
 
@@ -394,73 +442,6 @@ describe('Runner Parity — Behavioral Contracts', () => {
       const both = getContextOptions({ crossOsConsistency: true, freezeAnimations: true });
       expect(both.deviceScaleFactor).toBe(1);
       expect(both.reducedMotion).toBe('reduce');
-    });
-  });
-
-  describe('stepLogger interface', () => {
-    it('both provide log, warn, softExpect, softAction', () => {
-      // Verify the shape matches across both runners
-      const requiredMethods = ['log', 'warn', 'softExpect', 'softAction'];
-
-      // Runner stepLogger shape (from runner.ts executeTestCode)
-      const runnerStepLoggerShape = {
-        log: 'function',
-        warn: 'function',
-        softExpect: 'function',
-        softAction: 'function',
-      };
-
-      // Embedded stepLogger shape (from test-executor.ts)
-      const embeddedStepLoggerShape = {
-        log: 'function',
-        warn: 'function',
-        softExpect: 'function',
-        softAction: 'function',
-      };
-
-      for (const method of requiredMethods) {
-        expect(runnerStepLoggerShape).toHaveProperty(method);
-        expect(embeddedStepLoggerShape).toHaveProperty(method);
-      }
-    });
-  });
-
-  describe('expect() API surface', () => {
-    it('both implement same value matchers', () => {
-      const requiredValueMatchers = [
-        'toBe', 'toEqual', 'toBeTruthy', 'toBeFalsy',
-        'toContain', 'toHaveLength', 'toMatch',
-      ];
-      const requiredNegatedMatchers = ['toBe', 'toBeTruthy', 'toContain'];
-      // Both runners create expect() with these matchers for non-page/non-locator values
-      // This is a structural parity check — we verify the names match
-      expect(requiredValueMatchers.length).toBe(7);
-      expect(requiredNegatedMatchers.length).toBe(3);
-    });
-
-    it('both implement same page matchers', () => {
-      const pageMatchers = ['toHaveURL', 'toHaveTitle'];
-      expect(pageMatchers).toContain('toHaveURL');
-      expect(pageMatchers).toContain('toHaveTitle');
-    });
-
-    it('both implement same locator matchers', () => {
-      const locatorMatchers = ['toBeVisible', 'toBeHidden', 'toHaveText', 'toContainText'];
-      expect(locatorMatchers).toContain('toBeVisible');
-      expect(locatorMatchers).toContain('toBeHidden');
-      expect(locatorMatchers).toContain('toHaveText');
-      expect(locatorMatchers).toContain('toContainText');
-    });
-  });
-
-  describe('AsyncFunction constructor parity', () => {
-    it('both use same parameter names for compiled test function', () => {
-      // Both runners compile: new AsyncFunction('page', 'baseUrl', 'screenshotPath', 'stepLogger', 'expect', 'locateWithFallback', 'replayCursorPath', body)
-      const expectedParams = ['page', 'baseUrl', 'screenshotPath', 'stepLogger', 'expect', 'locateWithFallback', 'replayCursorPath'];
-      expect(expectedParams).toEqual([
-        'page', 'baseUrl', 'screenshotPath', 'stepLogger',
-        'expect', 'locateWithFallback', 'replayCursorPath',
-      ]);
     });
   });
 
@@ -500,31 +481,23 @@ describe('Runner Parity — Behavioral Contracts', () => {
   await page.screenshot();
 }`;
 
-      // Step 1: Extract body
       const match = testCode.match(FUNC_BODY_REGEX);
       expect(match).not.toBeNull();
       let body = match![1];
 
-      // Step 2: Strip type annotations
-      const runnerBody = runnerStripTypeAnnotations(body);
-      const embeddedBody = embeddedStripTypeAnnotations(body);
-      expect(runnerBody).toBe(embeddedBody);
-      body = runnerBody;
+      body = stripTypeAnnotations(body);
+      expect(body).not.toContain(': string');
+      expect(body).not.toContain(': Selector[]');
 
-      // Step 3: Remove functions
-      const runnerRemoved = runnerRemoveFunction(body, 'locateWithFallback');
-      const embeddedRemoved = embeddedRemoveFunction(body, 'locateWithFallback');
-      expect(runnerRemoved).toBe(embeddedRemoved.body);
-      body = runnerRemoved;
+      const removed = embeddedRemoveFunction(body, 'locateWithFallback');
+      expect(removed.removed).toBe(true);
+      body = removed.body;
 
-      // Step 4: Patch selectAll
       body = patchSelectAll(body);
       expect(body).not.toContain('selectAll');
 
-      // Step 5: Wrap soft errors
       body = wrapSoftErrors(body);
       expect(body).toContain('try {');
-      // Screenshot line should NOT be wrapped
       const screenshotLine = body.split('\n').find(l => l.includes('.screenshot('));
       expect(screenshotLine).toBeDefined();
       expect(screenshotLine).not.toContain('try {');

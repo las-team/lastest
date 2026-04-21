@@ -484,6 +484,7 @@ async function startup(): Promise<void> {
                 videoFilename: result.videoFilename,
                 lastReachedStep: result.lastReachedStep,
                 totalSteps: result.totalSteps,
+                domSnapshot: result.domSnapshot,
               },
             });
 
@@ -644,6 +645,32 @@ async function startup(): Promise<void> {
         // Clear watchdog first
         if (recordingWatchdog) { clearInterval(recordingWatchdog); recordingWatchdog = null; }
 
+        // Capture final DOM snapshot on the recording page BEFORE stopping —
+        // the test baseline needs this to compute DOM deltas at run time.
+        let recordingDomSnapshot: Awaited<ReturnType<typeof getAllDomSelectors>> | undefined;
+        if (isRecording && recorder?.isActive()) {
+          const recPage = recorder.getPage();
+          if (recPage && !recPage.isClosed()) {
+            try {
+              const defaultPriority: SelectorPriorityConfig = [
+                { type: 'data-testid', enabled: true, priority: 1 },
+                { type: 'id', enabled: true, priority: 2 },
+                { type: 'label', enabled: true, priority: 3 },
+                { type: 'role-name', enabled: true, priority: 4 },
+                { type: 'aria-label', enabled: true, priority: 5 },
+                { type: 'text', enabled: true, priority: 6 },
+                { type: 'placeholder', enabled: true, priority: 7 },
+                { type: 'name', enabled: true, priority: 8 },
+                { type: 'css-path', enabled: true, priority: 9 },
+                { type: 'heading-context', enabled: true, priority: 10 },
+              ];
+              recordingDomSnapshot = await getAllDomSelectors(recPage, defaultPriority);
+            } catch (err) {
+              console.warn('[Command] Failed to capture recording DOM snapshot:', err);
+            }
+          }
+        }
+
         if (isRecording && recorder) {
           try {
             await screencast?.stop();
@@ -674,6 +701,7 @@ async function startup(): Promise<void> {
           payload: {
             sessionId: payload.sessionId,
             generatedCode: '',
+            domSnapshot: recordingDomSnapshot,
           },
         });
 

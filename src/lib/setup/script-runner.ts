@@ -1,4 +1,5 @@
 import type { Page, Locator } from 'playwright';
+import { stripTypeAnnotations } from '@lastest/shared';
 import type { SetupScript, SetupContext, SetupResult } from './types';
 
 /**
@@ -463,27 +464,6 @@ function createSetupPageProxy(page: Page, baseUrl: string): Page {
       return value;
     }
   });
-}
-
-/**
- * Strip TypeScript type annotations from code
- */
-function stripTypeAnnotations(code: string): string {
-  let result = code;
-  // Remove variable type annotations
-  result = result.replace(
-    /\b(const|let|var)\s+(\w+)\s*:\s*[^=\n;]+(\s*=)/g,
-    '$1 $2$3'
-  );
-  // Remove type annotations on destructured assignments
-  result = result.replace(
-    /\b(const|let|var)\s+(\{[^}]+\}|\[[^\]]+\])\s*:\s*[^=\n;]+(\s*=)/g,
-    '$1 $2$3'
-  );
-  // Remove `as Type` assertions
-  result = result.replace(/\)\s+as\s+\w[\w<>\[\],\s|]*/g, ')');
-  result = result.replace(/(\w)\s+as\s+\w[\w<>\[\],\s|]*/g, '$1');
-  return result;
 }
 
 /**

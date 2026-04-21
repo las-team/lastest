@@ -21,10 +21,24 @@
 import type { Browser, BrowserContext, Page } from 'playwright';
 import type { StabilizationPayload } from './protocol.js';
 import { setupFreezeScripts, applyPreScreenshotStabilization } from './stabilization.js';
-import { instrumentStepTracking } from '@lastest/shared';
+import { getAllDomSelectors, type DomSnapshotResult, type SelectorPriorityConfig } from './selector-utils.js';
+import { instrumentStepTracking, stripTypeAnnotations } from '@lastest/shared';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
+
+const DEFAULT_DOM_SNAPSHOT_PRIORITY: SelectorPriorityConfig = [
+  { type: 'data-testid', enabled: true, priority: 1 },
+  { type: 'id', enabled: true, priority: 2 },
+  { type: 'label', enabled: true, priority: 3 },
+  { type: 'role-name', enabled: true, priority: 4 },
+  { type: 'aria-label', enabled: true, priority: 5 },
+  { type: 'text', enabled: true, priority: 6 },
+  { type: 'placeholder', enabled: true, priority: 7 },
+  { type: 'name', enabled: true, priority: 8 },
+  { type: 'css-path', enabled: true, priority: 9 },
+  { type: 'heading-context', enabled: true, priority: 10 },
+];
 
 export interface EmbeddedNetworkRequest {
   url: string;
@@ -55,6 +69,7 @@ export interface EmbeddedTestResult {
   videoFilename?: string;
   lastReachedStep?: number;
   totalSteps?: number;
+  domSnapshot?: DomSnapshotResult; // DOM state captured after test body ran
 }
 
 export interface EmbeddedSetupResult {
@@ -101,25 +116,6 @@ export interface RunTestPayload {
   enableNetworkInterception?: boolean;
   acceptDownloads?: boolean;
   forceVideoRecording?: boolean;
-}
-
-/**
- * Strip TypeScript type annotations from test code so it can run as plain JS.
- * Matches the runner's more robust version that handles destructured types,
- * `as` casts, and generic type params.
- */
-function stripTypeAnnotations(code: string): string {
-  let result = code;
-  // Variable type annotations: const x: Type = / let x: Type =
-  result = result.replace(/\b(const|let|var)\s+(\w+)\s*:\s*[^=\n;]+(\s*=)/g, '$1 $2$3');
-  // Destructured type annotations: const { a, b }: Type = / const [a, b]: Type =
-  result = result.replace(/\b(const|let|var)\s+(\{[^}]+\}|\[[^\]]+\])\s*:\s*[^=\n;]+(\s*=)/g, '$1 $2$3');
-  // `as` casts: ) as Type / value as Type
-  result = result.replace(/\)\s+as\s+\w[\w<>\[\],\s|]*/g, ')');
-  result = result.replace(/(\w)\s+as\s+\w[\w<>\[\],\s|]*/g, '$1');
-  // Generic type params: <Type>( / <Type>identifier
-  result = result.replace(/<\w[\w<>\[\],\s|]*>\s*(?=\(|[\w])/g, '');
-  return result;
 }
 
 /**
@@ -323,6 +319,15 @@ export class EmbeddedTestExecutor {
     let result: EmbeddedTestResult | undefined;
     let reachedStep = -1;
     let stepCount = 0;
+    let domSnapshot: DomSnapshotResult | undefined;
+    const captureFinalDomSnapshot = async () => {
+      if (!page || page.isClosed()) return;
+      try {
+        domSnapshot = await getAllDomSelectors(page, DEFAULT_DOM_SNAPSHOT_PRIORITY);
+      } catch (err) {
+        logFn('warn', `DOM snapshot capture failed: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    };
 
     try {
       if (abortCtrl.signal.aborted) {
@@ -903,6 +908,9 @@ export class EmbeddedTestExecutor {
         await captureScreenshot('success');
       }
 
+      // Capture DOM snapshot after test body ran so it aligns with the final screenshot.
+      await captureFinalDomSnapshot();
+
       const durationMs = Date.now() - startTime;
       logFn('info', `Test passed in ${durationMs}ms (${screenshots.length} screenshots)`);
 
@@ -916,6 +924,7 @@ export class EmbeddedTestExecutor {
         softErrors: softErrors.length > 0 ? softErrors : undefined,
         lastReachedStep: reachedStep >= 0 ? reachedStep : undefined,
         totalSteps: stepCount > 0 ? stepCount : undefined,
+        domSnapshot,
       };
     } catch (error) {
       const durationMs = Date.now() - startTime;
@@ -932,18 +941,20 @@ export class EmbeddedTestExecutor {
           softErrors: softErrors.length > 0 ? softErrors : undefined,
           lastReachedStep: reachedStep >= 0 ? reachedStep : undefined,
           totalSteps: stepCount > 0 ? stepCount : undefined,
+          domSnapshot,
         };
       } else {
         const isTimeout = errorMessage.includes('timed out');
         logFn('error', `Test ${isTimeout ? 'timed out' : 'failed'}: ${errorMessage}`);
 
-        // Try to capture error screenshot (skip on timeout — context is closed)
+        // Try to capture error screenshot + DOM snapshot (skip on timeout — context is closed)
         let errorScreenshot: string | undefined;
         if (!isTimeout) {
           try {
             const buffer = await page.screenshot();
             errorScreenshot = buffer.toString('base64');
           } catch { /* ignore */ }
+          await captureFinalDomSnapshot();
         }
 
         result = {
@@ -957,6 +968,7 @@ export class EmbeddedTestExecutor {
           softErrors: softErrors.length > 0 ? softErrors : undefined,
           lastReachedStep: reachedStep >= 0 ? reachedStep : undefined,
           totalSteps: stepCount > 0 ? stepCount : undefined,
+          domSnapshot,
         };
       }
     } finally {
