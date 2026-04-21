@@ -377,14 +377,8 @@ export async function createComparisonRun(
 
   const comparisonPairId = crypto.randomUUID();
 
-  // Load env + playwright settings
-  // Override base URL with baseline URL for this comparison run
-  const envConfig = await queries.getEnvironmentConfig(repositoryId);
-  const overriddenEnvConfig = envConfig
-    ? { ...envConfig, baseUrl: baselineUrl }
-    : { id: 'comparison-override', repositoryId, mode: 'manual', baseUrl: baselineUrl, startCommand: null, healthCheckUrl: null, healthCheckTimeout: 60000, reuseExistingServer: true, createdAt: null, updatedAt: null } satisfies import('@/lib/db/schema').EnvironmentConfig;
-
-  const playwrightSettings = await queries.getPlaywrightSettings(repositoryId);
+  // The comparison-specific URL is stored on the build record below; runBuildAsync
+  // reads it back and overrides the env config baseUrl at execution time.
 
   // Get tests (filter out soft-deleted and placeholder tests)
   let tests: Test[];
@@ -454,12 +448,8 @@ async function createComparisonFeatureBuild(
 ) {
   if (!repositoryId) throw new Error('Comparison run requires a repository');
 
-  const envConfig = await queries.getEnvironmentConfig(repositoryId);
-  // Override base URL with feature URL for this comparison run
-  const overriddenEnvConfig = envConfig
-    ? { ...envConfig, baseUrl: meta.featureUrl }
-    : { id: 'comparison-override', repositoryId, mode: 'manual', baseUrl: meta.featureUrl, startCommand: null, healthCheckUrl: null, healthCheckTimeout: 60000, reuseExistingServer: true, createdAt: null, updatedAt: null } satisfies import('@/lib/db/schema').EnvironmentConfig;
-  const playwrightSettings = await queries.getPlaywrightSettings(repositoryId);
+  // The feature URL is stored on the build record below; runBuildAsync reads it
+  // back and overrides the env config baseUrl at execution time.
 
   let tests: Test[];
   if (meta.testIds && meta.testIds.length > 0) {
@@ -584,8 +574,20 @@ async function runBuildAsync(
     teamId = runnerRecord?.teamId;
   }
 
-  // Prepare environment and settings for executor
-  const envConfig = await queries.getEnvironmentConfig(repositoryId);
+  // Prepare environment and settings for executor.
+  // The build record's `baseUrl` is the per-build override (set by createBuild from
+  // `targetUrl` for CI runs and `baselineUrl`/`featureUrl` for comparison runs).
+  // Honor it here so the executor hits the right URL.
+  const dbEnvConfig = await queries.getEnvironmentConfig(repositoryId);
+  const buildRecord = await queries.getBuild(buildId);
+  const effectiveBaseUrl = buildRecord?.baseUrl || dbEnvConfig?.baseUrl;
+  const envConfig = dbEnvConfig
+    ? (effectiveBaseUrl && effectiveBaseUrl !== dbEnvConfig.baseUrl
+        ? { ...dbEnvConfig, baseUrl: effectiveBaseUrl }
+        : dbEnvConfig)
+    : (buildRecord?.baseUrl
+        ? { id: 'build-override', repositoryId: repositoryId ?? null, mode: 'manual', baseUrl: buildRecord.baseUrl, startCommand: null, healthCheckUrl: null, healthCheckTimeout: 60000, reuseExistingServer: true, createdAt: null, updatedAt: null } satisfies import('@/lib/db/schema').EnvironmentConfig
+        : null);
   const playwrightSettings = await queries.getPlaywrightSettings(repositoryId);
 
   // Determine browsers for this build
@@ -757,8 +759,8 @@ async function runBuildAsync(
   };
 
   try {
-    // Get the build to check for build-level setup
-    const build = await queries.getBuild(buildId);
+    // Reuse the build record fetched above for the baseUrl override.
+    const build = buildRecord;
     const baseUrl = envConfig?.baseUrl || 'http://localhost:3000';
 
     // Initialize setup context
