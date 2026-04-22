@@ -3,7 +3,8 @@ import Link from 'next/link';
 import type { Metadata } from 'next';
 import * as queries from '@/lib/db/queries';
 import { isValidShareSlug, buildShareUrl } from '@/lib/share/slug';
-import { ShareViewerClient } from './share-viewer-client';
+import { ShareViewer } from './share-viewer-client';
+import type { VisualDiffWithTestStatus } from '@/lib/db/schema';
 
 export const revalidate = 60;
 
@@ -11,17 +12,16 @@ interface PageProps {
   params: Promise<{ slug: string }>;
 }
 
-function formatTimeAgo(d: Date | null): string {
+function formatTimestamp(d: Date | null): string {
   if (!d) return '';
-  const ms = Date.now() - d.getTime();
-  const minutes = Math.round(ms / 60000);
-  if (minutes < 1) return 'just now';
-  if (minutes < 60) return `${minutes}m ago`;
-  const hours = Math.round(minutes / 60);
-  if (hours < 24) return `${hours}h ago`;
-  const days = Math.round(hours / 24);
-  if (days < 30) return `${days}d ago`;
-  return d.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
+  return d.toLocaleString(undefined, {
+    year: 'numeric',
+    month: 'short',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  });
 }
 
 export async function generateMetadata({ params }: PageProps): Promise<Metadata> {
@@ -32,12 +32,10 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
   if (!ctx) return { title: 'Share removed' };
 
   const domain = ctx.share.targetDomain || ctx.test?.name || 'this site';
-  const title = `Visual test of ${domain} · Lastest`;
+  const title = `${domain} — specimen · Lastest`;
   const description = ctx.build.changesDetected
-    ? `${ctx.build.changesDetected} visual changes detected across ${ctx.build.totalTests} tests.`
-    : `We ran a visual regression check on ${domain}. See the screenshots and recording.`;
-
-  const url = buildShareUrl(slug);
+    ? `${ctx.build.changesDetected} visual changes logged across ${ctx.build.totalTests} tests.`
+    : `A Lastest dossier on ${domain}: recording, screenshots, and visual diff report.`;
 
   return {
     title,
@@ -46,15 +44,11 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
     openGraph: {
       title,
       description,
-      url,
+      url: buildShareUrl(slug),
       type: 'article',
       siteName: 'Lastest',
     },
-    twitter: {
-      card: 'summary_large_image',
-      title,
-      description,
-    },
+    twitter: { card: 'summary_large_image', title, description },
   };
 }
 
@@ -67,12 +61,20 @@ export default async function PublicSharePage({ params }: PageProps) {
 
   const { share, build, test, testRun } = ctx;
 
-  const [diffs, results] = await Promise.all([
-    queries.getVisualDiffsByBuild(build.id),
+  const [diffsRaw, results] = await Promise.all([
+    queries.getVisualDiffsWithTestStatus(build.id),
     testRun ? queries.getTestResultsByRun(testRun.id) : Promise.resolve([]),
   ]);
 
-  // Fire-and-forget increment. Not awaited to keep the page fast.
+  // Test-level share: filter diffs + results to just that test.
+  const diffs: VisualDiffWithTestStatus[] = share.testId
+    ? diffsRaw.filter((d) => d.testId === share.testId)
+    : diffsRaw;
+  const scopedResults = share.testId
+    ? results.filter((r) => r.testId === share.testId)
+    : results;
+
+  // Fire-and-forget view bump
   queries.incrementPublicShareView(slug).catch(() => {});
 
   const mediaBase = `/api/share/${slug}/media`;
@@ -81,61 +83,126 @@ export default async function PublicSharePage({ params }: PageProps) {
     return mediaBase + (p.startsWith('/') ? p : `/${p}`);
   };
 
-  // Pick the hero diff: highest pixel difference among "changed" diffs.
-  const changedDiffs = diffs.filter((d) => (d.pixelDifference ?? 0) > 0);
-  const heroDiff = changedDiffs.sort(
-    (a, b) => (b.pixelDifference ?? 0) - (a.pixelDifference ?? 0),
-  )[0];
+  // Group diffs by test; sort tests by severity then name.
+  const byTest = new Map<string, { testId: string; testName: string; diffs: VisualDiffWithTestStatus[] }>();
+  for (const d of diffs) {
+    const key = d.testId;
+    if (!byTest.has(key)) {
+      byTest.set(key, {
+        testId: d.testId,
+        testName: d.testName || test?.name || 'Unnamed test',
+        diffs: [],
+      });
+    }
+    byTest.get(key)!.diffs.push(d);
+  }
 
-  // Collect all screenshots across all test results
-  const galleryImages: Array<{ src: string; label: string }> = [];
+  function diffTier(d: VisualDiffWithTestStatus): number {
+    if (d.testResultStatus === 'failed' || d.status === 'rejected') return 0;
+    if ((d.classification === 'changed') || ((d.pixelDifference ?? 0) > 0)) return 1;
+    return 2;
+  }
+
+  const testGroups = Array.from(byTest.values())
+    .map((g) => ({
+      ...g,
+      diffs: g.diffs.slice().sort((a, b) => {
+        const t = diffTier(a) - diffTier(b);
+        if (t !== 0) return t;
+        return (b.pixelDifference ?? 0) - (a.pixelDifference ?? 0);
+      }),
+      severity: Math.min(...g.diffs.map(diffTier)),
+    }))
+    .sort((a, b) => a.severity - b.severity || a.testName.localeCompare(b.testName));
+
+  // Screenshots catalog (deduped across all results in scope)
+  const catalog: Array<{ src: string; label: string; testName: string }> = [];
   const seen = new Set<string>();
-  for (const r of results) {
+  for (const r of scopedResults) {
+    const thisTestName =
+      testGroups.find((g) => g.testId === r.testId)?.testName || test?.name || 'capture';
     if (r.screenshotPath && !seen.has(r.screenshotPath)) {
       seen.add(r.screenshotPath);
-      galleryImages.push({ src: toUrl(r.screenshotPath)!, label: 'Primary' });
+      catalog.push({ src: toUrl(r.screenshotPath)!, label: 'Primary', testName: thisTestName });
     }
     const captured = (r.screenshots ?? []) as Array<{ path: string; label?: string }>;
     for (const s of captured) {
       if (!seen.has(s.path)) {
         seen.add(s.path);
-        galleryImages.push({ src: toUrl(s.path)!, label: s.label || 'Step' });
+        catalog.push({ src: toUrl(s.path)!, label: s.label || 'Step', testName: thisTestName });
       }
     }
   }
 
-  // Primary video (first non-null)
-  const videoResult = results.find((r) => r.videoPath);
-  const videoUrl = videoResult ? toUrl(videoResult.videoPath) : null;
+  // Videos: collect one per test result that has one
+  const videos: Array<{ src: string; testName: string; durationMs: number | null }> = [];
+  for (const r of scopedResults) {
+    if (!r.videoPath) continue;
+    const thisTestName =
+      testGroups.find((g) => g.testId === r.testId)?.testName || test?.name || 'Recording';
+    videos.push({
+      src: toUrl(r.videoPath)!,
+      testName: thisTestName,
+      durationMs: r.durationMs ?? null,
+    });
+  }
+
+  // Serialize diffs (plain JSON) for client
+  const clientTestGroups = testGroups.map((g) => ({
+    testId: g.testId,
+    testName: g.testName,
+    diffs: g.diffs.map((d) => ({
+      id: d.id,
+      stepLabel: d.stepLabel,
+      baseline: toUrl(d.baselineImagePath),
+      current: toUrl(d.currentImagePath),
+      diff: toUrl(d.diffImagePath),
+      pixelDifference: d.pixelDifference ?? 0,
+      percentageDifference: d.percentageDifference,
+      classification: d.classification,
+      status: d.status,
+      testResultStatus: d.testResultStatus,
+    })),
+  }));
 
   const displayDomain = share.targetDomain || test?.name || 'this site';
-  const faviconUrl = share.targetDomain
-    ? `https://www.google.com/s2/favicons?domain=${share.targetDomain}&sz=64`
-    : null;
+  const claimLink = `/register?claim=${slug}`;
+  const signInLink = `/login?claim=${slug}`;
 
   const changed = build.changesDetected ?? 0;
   const failed = build.failedCount ?? 0;
   const flaky = build.flakyCount ?? 0;
-  const total = build.totalTests ?? 0;
-  const passed = build.passedCount ?? 0;
+  const total = share.testId ? scopedResults.length : build.totalTests ?? 0;
+  const passed = share.testId ? scopedResults.filter((r) => r.status === 'passed').length : build.passedCount ?? 0;
 
-  const claimLink = `/register?claim=${slug}`;
-  const signInLink = `/login?claim=${slug}`;
+  const scopeLabel = share.testId ? 'Test specimen' : 'Build specimen';
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-background via-background to-muted/30">
+    <div className="min-h-screen bg-[oklch(0.985_0.003_230)] text-foreground selection:bg-primary/20">
+      {/* Paper grain */}
+      <div
+        className="pointer-events-none fixed inset-0 z-0 opacity-[0.035] mix-blend-multiply"
+        style={{
+          backgroundImage:
+            "url(\"data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='200' height='200'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0.5 0'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>\")",
+        }}
+        aria-hidden
+      />
+
       {/* Top bar */}
-      <header className="border-b border-border/60 bg-background/80 backdrop-blur sticky top-0 z-20">
-        <div className="mx-auto max-w-5xl px-4 h-14 flex items-center justify-between">
-          <Link href="/" className="flex items-center gap-2 font-semibold tracking-tight">
-            <span className="inline-block w-6 h-6 rounded-md bg-primary" aria-hidden />
-            Lastest
+      <header className="relative z-10 border-b border-foreground/10 bg-background/80 backdrop-blur-sm">
+        <div className="mx-auto max-w-5xl px-5 sm:px-8 h-14 flex items-center justify-between">
+          <Link href="/" className="flex items-center gap-2.5 group">
+            <LastestMark />
+            <span className="font-mono text-[11px] tracking-[0.25em] uppercase font-medium">
+              Lastest
+            </span>
           </Link>
-          <div className="flex items-center gap-2 text-xs text-muted-foreground">
-            <span className="hidden sm:inline">Shared visual test</span>
+          <div className="flex items-center gap-5 text-[11px] font-mono tracking-[0.15em] uppercase text-muted-foreground">
+            <span className="hidden sm:inline">{scopeLabel} · Ref {slug.slice(0, 6).toUpperCase()}</span>
             <Link
               href={signInLink}
-              className="text-primary font-medium hover:underline underline-offset-4"
+              className="text-foreground hover:text-primary transition-colors"
             >
               Sign in
             </Link>
@@ -143,127 +210,110 @@ export default async function PublicSharePage({ params }: PageProps) {
         </div>
       </header>
 
-      <main className="mx-auto max-w-5xl px-4 py-8 sm:py-12 space-y-10">
+      <main className="relative z-10 mx-auto max-w-5xl px-5 sm:px-8 pb-32">
         {/* Hero */}
-        <section className="space-y-4">
-          <div className="flex items-start gap-3 sm:gap-4">
-            {faviconUrl && (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img
-                src={faviconUrl}
-                alt=""
-                width={40}
-                height={40}
-                className="rounded-md border border-border bg-card shrink-0 mt-1"
-              />
-            )}
-            <div className="min-w-0">
-              <p className="text-xs uppercase tracking-wider text-muted-foreground font-medium">
-                We visually tested
-              </p>
-              <h1 className="font-semibold text-2xl sm:text-4xl tracking-tight break-words">
-                {displayDomain}
-              </h1>
-              <p className="text-sm text-muted-foreground mt-1">
-                {testRun?.gitBranch && (
-                  <span className="font-mono">{testRun.gitBranch}</span>
-                )}
-                {testRun?.gitCommit && testRun.gitCommit !== 'unknown' && (
-                  <>
-                    <span className="mx-1.5">·</span>
-                    <span className="font-mono">{testRun.gitCommit.slice(0, 7)}</span>
-                  </>
-                )}
-                {build.completedAt && (
-                  <>
-                    {(testRun?.gitBranch || testRun?.gitCommit) && (
-                      <span className="mx-1.5">·</span>
-                    )}
-                    <span>{formatTimeAgo(build.completedAt)}</span>
-                  </>
-                )}
-              </p>
-            </div>
-          </div>
+        <section className="pt-10 sm:pt-14">
+          <div className="flex flex-col gap-6">
+            <p className="font-mono text-[10px] tracking-[0.35em] uppercase text-muted-foreground">
+              File · {formatTimestamp(build.completedAt ?? build.createdAt)}
+              {testRun?.gitBranch && (
+                <>
+                  <span className="mx-2">——</span>
+                  branch <span className="text-foreground/80">{testRun.gitBranch}</span>
+                </>
+              )}
+              {testRun?.gitCommit && testRun.gitCommit !== 'unknown' && (
+                <>
+                  <span className="mx-2">——</span>
+                  commit <span className="text-foreground/80">{testRun.gitCommit.slice(0, 7)}</span>
+                </>
+              )}
+            </p>
 
-          {/* Summary chips */}
-          <div className="flex flex-wrap gap-2">
-            <SummaryChip label="tests" value={total} tone="neutral" />
-            <SummaryChip label="passed" value={passed} tone="success" />
-            {changed > 0 && <SummaryChip label="changed" value={changed} tone="warning" />}
-            {failed > 0 && <SummaryChip label="failed" value={failed} tone="danger" />}
-            {flaky > 0 && <SummaryChip label="flaky" value={flaky} tone="warning" />}
+            <div className="flex items-start gap-5">
+              <FaviconOrInitialServer domain={share.targetDomain} />
+              <div className="min-w-0 flex-1">
+                <p className="font-mono text-[10px] tracking-[0.3em] uppercase text-muted-foreground mb-1">
+                  Subject of inspection
+                </p>
+                <h1
+                  className="font-[family-name:var(--font-display)] text-[clamp(2.5rem,7vw,5.5rem)] leading-[0.95] tracking-tight break-words"
+                >
+                  {displayDomain}
+                </h1>
+              </div>
+            </div>
+
+            {/* Summary rail */}
+            <div className="mt-2 border-y border-foreground/15 py-3 flex flex-wrap items-baseline gap-x-8 gap-y-2">
+              <Stat label="Tests" value={total} />
+              <Stat label="Passed" value={passed} tone="neutral" />
+              {changed > 0 && <Stat label="Changed" value={changed} tone="changed" />}
+              {failed > 0 && <Stat label="Failed" value={failed} tone="failed" />}
+              {flaky > 0 && <Stat label="Flaky" value={flaky} tone="flaky" />}
+              <div className="ml-auto font-mono text-[10px] tracking-[0.3em] uppercase text-muted-foreground">
+                Dossier {slug.slice(0, 8).toUpperCase()}
+              </div>
+            </div>
           </div>
         </section>
 
-        {/* Hero visual: diff slider or screenshot */}
-        <ShareViewerClient
-          heroBaseline={toUrl(heroDiff?.baselineImagePath)}
-          heroCurrent={toUrl(heroDiff?.currentImagePath)}
-          heroDiff={toUrl(heroDiff?.diffImagePath)}
-          heroScreenshot={galleryImages[0]?.src ?? null}
-          videoUrl={videoUrl}
-          gallery={galleryImages}
+        <ShareViewer
+          videos={videos}
+          testGroups={clientTestGroups}
+          catalog={catalog}
           claimLink={claimLink}
+          signInLink={signInLink}
+          domain={displayDomain}
         />
 
-        {/* What is Lastest? trust strip */}
-        <section className="rounded-xl border border-border/80 bg-card/70 p-6 sm:p-8">
-          <h2 className="font-semibold text-lg mb-4">What is Lastest?</h2>
-          <div className="grid sm:grid-cols-3 gap-4 text-sm text-muted-foreground">
-            <div>
-              <p className="font-medium text-foreground mb-1">Pixel-perfect regression catch</p>
-              Every deploy, we compare every screen against the last known-good baseline.
-            </div>
-            <div>
-              <p className="font-medium text-foreground mb-1">AI-triaged diffs</p>
-              We tell you which changes matter and which are noise so you ship faster.
-            </div>
-            <div>
-              <p className="font-medium text-foreground mb-1">Claim & own it</p>
-              Sign up to import this test into your workspace and re-run it anytime.
-            </div>
-          </div>
-        </section>
-
         {/* Primary CTA */}
-        <section className="rounded-xl border border-primary/30 bg-primary/5 p-6 sm:p-8 flex flex-col sm:flex-row sm:items-center gap-4 sm:gap-6">
-          <div className="flex-1">
-            <h2 className="font-semibold text-xl mb-1">Claim this test — free</h2>
-            <p className="text-sm text-muted-foreground">
-              Your next run lives in your own Lastest workspace. We import the test
-              code automatically; you set up environment variables the way you want.
-            </p>
-          </div>
-          <div className="flex flex-col sm:flex-row gap-2 shrink-0">
-            <Link
-              href={claimLink}
-              className="inline-flex items-center justify-center rounded-md bg-primary text-primary-foreground font-medium px-5 py-2.5 hover:bg-primary/90 transition-colors"
-            >
-              Claim this test
-            </Link>
-            <Link
-              href={signInLink}
-              className="inline-flex items-center justify-center rounded-md border border-border font-medium px-5 py-2.5 hover:bg-muted transition-colors"
-            >
-              Sign in
-            </Link>
+        <section className="mt-14 sm:mt-20 relative overflow-hidden border border-foreground bg-foreground text-background">
+          <CornerReticles />
+          <div className="relative px-6 sm:px-12 py-10 sm:py-14 grid gap-8 sm:grid-cols-[1fr_auto] sm:items-end">
+            <div className="space-y-5 max-w-lg">
+              <p className="font-mono text-[10px] tracking-[0.35em] uppercase text-primary">
+                Chain of custody
+              </p>
+              <h2 className="font-[family-name:var(--font-display)] text-4xl sm:text-5xl leading-[1.02] tracking-tight">
+                Take ownership of this specimen.
+              </h2>
+              <p className="text-background/70 text-[15px] leading-relaxed">
+                Sign up free. We&apos;ll clone the test code into your own Lastest workspace —
+                you supply the environment, we supply the regression coverage.
+              </p>
+            </div>
+            <div className="flex flex-col gap-2.5">
+              <Link
+                href={claimLink}
+                className="group inline-flex items-center justify-between gap-8 bg-primary text-primary-foreground px-6 py-4 font-mono text-xs tracking-[0.2em] uppercase hover:bg-primary/90 transition-colors"
+              >
+                <span>Sign up free</span>
+                <ArrowIcon />
+              </Link>
+              <Link
+                href={signInLink}
+                className="inline-flex items-center justify-center gap-2 border border-background/25 text-background/90 px-6 py-3 font-mono text-[11px] tracking-[0.2em] uppercase hover:bg-background/10 transition-colors"
+              >
+                Already have an account
+              </Link>
+            </div>
           </div>
         </section>
 
         {/* Footer */}
-        <footer className="border-t border-border/60 pt-6 pb-10 text-xs text-muted-foreground flex flex-wrap items-center gap-x-4 gap-y-2 justify-between">
-          <span>Run by Lastest · Shared {formatTimeAgo(share.createdAt)}</span>
-          <div className="flex items-center gap-3">
-            <Link href="/terms" className="hover:text-foreground underline-offset-4 hover:underline">
+        <footer className="mt-12 pt-6 border-t border-foreground/10 flex flex-wrap items-center gap-x-5 gap-y-2 justify-between font-mono text-[10px] tracking-[0.2em] uppercase text-muted-foreground">
+          <span>Dossier generated by Lastest</span>
+          <div className="flex items-center gap-5">
+            <Link href="/terms" className="hover:text-foreground transition-colors">
               Terms
             </Link>
-            <Link href="/privacy" className="hover:text-foreground underline-offset-4 hover:underline">
+            <Link href="/privacy" className="hover:text-foreground transition-colors">
               Privacy
             </Link>
             <a
               href={`mailto:abuse@lastest.cloud?subject=Takedown%20request:%20${slug}`}
-              className="hover:text-foreground underline-offset-4 hover:underline"
+              className="hover:text-foreground transition-colors"
             >
               Report abuse
             </a>
@@ -274,27 +324,102 @@ export default async function PublicSharePage({ params }: PageProps) {
   );
 }
 
-function SummaryChip({
+function LastestMark() {
+  // Real Lastest logo from /public. Use light svg with a dark-mode override via <picture>.
+  return (
+    <span className="relative inline-flex items-center justify-center w-6 h-6">
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img
+        src="/icon-light.svg"
+        alt=""
+        width={24}
+        height={24}
+        className="block dark:hidden"
+      />
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img
+        src="/icon-dark.svg"
+        alt=""
+        width={24}
+        height={24}
+        className="hidden dark:block"
+      />
+    </span>
+  );
+}
+
+// Server-rendered version of the favicon tile. The client version in the
+// viewer handles onError fallbacks — at this point we can't know which, so we
+// default to the favicon and let a client fallback upgrade it gracefully.
+function FaviconOrInitialServer({ domain }: { domain: string | null }) {
+  const letter = (domain ?? '?').charAt(0).toUpperCase();
+  return (
+    <div className="relative w-16 h-16 sm:w-20 sm:h-20 shrink-0 border border-foreground/15 bg-card flex items-center justify-center overflow-hidden">
+      {/* Letter tile is always rendered; favicon covers it when it loads. */}
+      <span className="font-[family-name:var(--font-display)] text-3xl sm:text-4xl text-foreground/80">
+        {letter}
+      </span>
+      {domain && (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          src={`https://www.google.com/s2/favicons?domain=${domain}&sz=128`}
+          alt=""
+          width={80}
+          height={80}
+          className="absolute inset-0 w-full h-full object-contain p-2.5"
+          referrerPolicy="no-referrer"
+          loading="lazy"
+        />
+      )}
+    </div>
+  );
+}
+
+function Stat({
   label,
   value,
-  tone,
+  tone = 'default',
 }: {
   label: string;
   value: number;
-  tone: 'neutral' | 'success' | 'warning' | 'danger';
+  tone?: 'default' | 'neutral' | 'changed' | 'failed' | 'flaky';
 }) {
-  const toneClasses = {
-    neutral: 'bg-muted text-muted-foreground border-border',
-    success: 'bg-emerald-50 text-emerald-700 border-emerald-200',
-    warning: 'bg-amber-50 text-amber-700 border-amber-200',
-    danger: 'bg-red-50 text-red-700 border-red-200',
+  const toneClass = {
+    default: 'text-foreground',
+    neutral: 'text-foreground',
+    changed: 'text-amber-600',
+    failed: 'text-red-600',
+    flaky: 'text-amber-700',
   }[tone];
   return (
-    <span
-      className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium ${toneClasses}`}
-    >
-      <span className="tabular-nums">{value}</span>
-      <span className="uppercase tracking-wide">{label}</span>
-    </span>
+    <div className="flex items-baseline gap-2">
+      <span className={`font-mono tabular-nums text-2xl ${toneClass}`}>
+        {String(value).padStart(2, '0')}
+      </span>
+      <span className="font-mono text-[10px] tracking-[0.25em] uppercase text-muted-foreground">
+        {label}
+      </span>
+    </div>
+  );
+}
+
+function CornerReticles() {
+  const cls =
+    'absolute w-3 h-3 pointer-events-none border-primary';
+  return (
+    <>
+      <span className={`${cls} top-2 left-2 border-t border-l`} aria-hidden />
+      <span className={`${cls} top-2 right-2 border-t border-r`} aria-hidden />
+      <span className={`${cls} bottom-2 left-2 border-b border-l`} aria-hidden />
+      <span className={`${cls} bottom-2 right-2 border-b border-r`} aria-hidden />
+    </>
+  );
+}
+
+function ArrowIcon() {
+  return (
+    <svg width="18" height="10" viewBox="0 0 18 10" fill="none" className="transition-transform group-hover:translate-x-0.5">
+      <path d="M0 5H17M17 5L13 1M17 5L13 9" stroke="currentColor" strokeWidth="1.5" />
+    </svg>
   );
 }

@@ -25,7 +25,10 @@ function deriveTargetDomain(targetUrl: string | null | undefined): string | null
   }
 }
 
-export async function publishBuildShare(buildId: string): Promise<PublishShareResult> {
+export async function publishBuildShare(
+  buildId: string,
+  options: { scopedTestId?: string | null } = {},
+): Promise<PublishShareResult> {
   const build = await queries.getBuild(buildId);
   if (!build) throw new Error('Build not found');
 
@@ -35,16 +38,24 @@ export async function publishBuildShare(buildId: string): Promise<PublishShareRe
 
   const session = await requireRepoAccess(repoId);
 
-  const results = await queries.getTestResultsByRun(build.testRunId!);
-  const firstResult = results[0];
-  const test = firstResult?.testId ? await queries.getTest(firstResult.testId) : null;
-  const targetDomain = deriveTargetDomain(test?.targetUrl);
+  const scopedTest = options.scopedTestId
+    ? await queries.getTest(options.scopedTestId)
+    : null;
+
+  let primaryTest = scopedTest;
+  if (!primaryTest && build.testRunId) {
+    const results = await queries.getTestResultsByRun(build.testRunId);
+    const firstResult = results[0];
+    primaryTest = firstResult?.testId ? (await queries.getTest(firstResult.testId)) ?? null : null;
+  }
+
+  const targetDomain = deriveTargetDomain(primaryTest?.targetUrl);
 
   const slug = generateShareSlug();
   const share = await queries.createPublicShare({
     slug,
     buildId,
-    testId: test?.id ?? null,
+    testId: scopedTest?.id ?? primaryTest?.id ?? null,
     repositoryId: repoId,
     ownerTeamId: session.team.id,
     publishedByUserId: session.user.id,
@@ -54,6 +65,33 @@ export async function publishBuildShare(buildId: string): Promise<PublishShareRe
 
   revalidatePath(`/builds/${buildId}`);
   return { shareId: share.id, slug: share.slug, url: buildShareUrl(share.slug) };
+}
+
+export async function publishLatestTestShare(testId: string): Promise<PublishShareResult> {
+  const test = await queries.getTest(testId);
+  if (!test) throw new Error('Test not found');
+  if (!test.repositoryId) throw new Error('Test has no repository');
+
+  await requireRepoAccess(test.repositoryId);
+
+  const results = await queries.getTestResultsByTest(testId);
+  const mostRecent = results.find((r) => r.testRunId);
+  if (!mostRecent?.testRunId) {
+    throw new Error(
+      'No test runs found. Run this test at least once before publishing a share.',
+    );
+  }
+  const build = await queries.getBuildByTestRun(mostRecent.testRunId);
+  if (!build) throw new Error('Most recent run has no associated build');
+
+  return publishBuildShare(build.id, { scopedTestId: testId });
+}
+
+export async function listTestShares(testId: string): Promise<PublicShare[]> {
+  const test = await queries.getTest(testId);
+  if (!test?.repositoryId) return [];
+  await requireRepoAccess(test.repositoryId);
+  return queries.listPublicSharesForTest(testId);
 }
 
 export async function revokePublicShare(shareId: string): Promise<void> {

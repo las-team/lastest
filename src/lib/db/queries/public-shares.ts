@@ -32,6 +32,14 @@ export async function listPublicSharesForBuild(buildId: string): Promise<PublicS
     .orderBy(desc(publicShares.createdAt));
 }
 
+export async function listPublicSharesForTest(testId: string): Promise<PublicShare[]> {
+  return db
+    .select()
+    .from(publicShares)
+    .where(eq(publicShares.testId, testId))
+    .orderBy(desc(publicShares.createdAt));
+}
+
 export async function revokePublicShareById(id: string): Promise<void> {
   await db
     .update(publicShares)

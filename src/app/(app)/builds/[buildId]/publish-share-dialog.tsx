@@ -12,7 +12,11 @@ import {
   DialogTrigger,
 } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
-import { publishBuildShare, revokePublicShare } from '@/server/actions/public-shares';
+import {
+  publishBuildShare,
+  publishLatestTestShare,
+  revokePublicShare,
+} from '@/server/actions/public-shares';
 import { toast } from 'sonner';
 
 export interface ShareRecord {
@@ -25,13 +29,21 @@ export interface ShareRecord {
   claimedAt: Date | null;
 }
 
+export interface PublishShareDialogProps {
+  buildId?: string;
+  testId?: string;
+  initialShares: ShareRecord[];
+  size?: 'sm' | 'default';
+  variant?: 'outline' | 'secondary';
+}
+
 export function PublishShareDialog({
   buildId,
+  testId,
   initialShares,
-}: {
-  buildId: string;
-  initialShares: ShareRecord[];
-}) {
+  size = 'sm',
+  variant = 'outline',
+}: PublishShareDialogProps) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [isPending, startTransition] = useTransition();
@@ -43,7 +55,15 @@ export function PublishShareDialog({
   async function handlePublish() {
     startTransition(async () => {
       try {
-        const result = await publishBuildShare(buildId);
+        const result = buildId
+          ? await publishBuildShare(buildId)
+          : testId
+            ? await publishLatestTestShare(testId)
+            : null;
+        if (!result) {
+          toast.error('Nothing to publish');
+          return;
+        }
         setShares((prev) => [
           {
             id: result.shareId,
@@ -90,7 +110,7 @@ export function PublishShareDialog({
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
-        <Button variant={activeShare ? 'secondary' : 'outline'} size="sm" className="gap-2">
+        <Button variant={activeShare ? 'secondary' : variant} size={size} className="gap-2">
           <Share2 className="w-4 h-4" />
           {activeShare ? 'Shared publicly' : 'Publish share'}
         </Button>

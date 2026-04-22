@@ -47,6 +47,7 @@ import { SheetReferenceInserter } from '@/components/test-data/sheet-reference-i
 import { BrowserViewer } from '@/components/embedded-browser/browser-viewer-client';
 import { getStreamUrlForRunner } from '@/server/actions/embedded-sessions';
 import { TestSpecEditor } from '@/components/tests/test-spec-editor';
+import { PublishShareDialog } from '@/app/(app)/builds/[buildId]/publish-share-dialog';
 
 interface StepDiff {
   stepLabel: string | null;
@@ -713,6 +714,7 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
                     >
                       <Trash2 className="h-4 w-4" />
                     </Button>
+                    <PublishShareDialog testId={test.id} initialShares={[]} />
                   </>
                 )}
               </div>
