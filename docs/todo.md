@@ -14,6 +14,11 @@ a11y
 DOM delta
 ## bugs
 ## features
+change logo
+Watermark recordings
+Build free tests and share them - have them shareable
+SuperAdmin account to help manage them
+Openrouter agent sdk parity
 Asset management
 mcp-oauth flow
 (low) Every button is green, multiple primary actions, keep clicking on run test instead of save
