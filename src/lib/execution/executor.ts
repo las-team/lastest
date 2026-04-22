@@ -707,6 +707,11 @@ async function executeViaPoolWorkers(
   // so a test that ping-pongs between bad EBs still respects the budget.
   const MAX_DEAD_STATE_RETRIES = 1;
   const deadStateAttempts = new Map<string, number>();
+  // Per-worker diagnostic counters — logs how many tests each worker processed
+  // so pool parallelism issues (e.g. one worker doing all the work while peers
+  // idle) show up clearly at build end.
+  const workerTestCounts = new Map<number, number>();
+  console.log(`[PoolDispatch] Starting build run=${runId} with ${workerCount} workers across ${tests.length} tests`);
   const runWorker = async (workerId: number): Promise<void> => {
     // Each worker holds onto a single EB for as long as possible. Setup runs once
     // per EB. If the EB dies mid-sequence, we claim a fresh one and re-setup.
@@ -824,6 +829,8 @@ async function executeViaPoolWorkers(
           : options.setupContext;
 
         activeWorkers++;
+        workerTestCounts.set(workerId, (workerTestCounts.get(workerId) ?? 0) + 1);
+        console.log(`[Worker ${workerId}] Starting test "${test.name}" (count=${workerTestCounts.get(workerId)}, active=${activeWorkers}/${workerCount}, nextIdx=${nextIdx}/${tests.length}) on EB ${eb.runnerId.slice(0, 8)}`);
         updateProgress(activeWorkers, test.name);
         let ebDied = false;
         let deferredRetry = false;
@@ -893,6 +900,7 @@ async function executeViaPoolWorkers(
           // Deferred retries aren't "completed" yet — bumping here would make
           // the progress bar overshoot and then stick when the retry records.
           if (!deferredRetry) completedCount++;
+          console.log(`[Worker ${workerId}] Finished test "${test.name}" (completed=${completedCount}/${tests.length}, active=${activeWorkers}, ebDied=${ebDied})`);
           updateProgress(activeWorkers);
         }
         // Reference isRetry to keep it available for future logging without
@@ -913,12 +921,15 @@ async function executeViaPoolWorkers(
       if (held) {
         try { await releasePoolEB(held.runnerId); } catch { /* ignore */ }
       }
+      console.log(`[Worker ${workerId}] Exiting — ran ${workerTestCounts.get(workerId) ?? 0} test(s)`);
     }
   };
 
   // Kick off workers in parallel
   const workers = Array.from({ length: workerCount }, (_, i) => runWorker(i + 1));
   await Promise.all(workers);
+  const summary = Array.from({ length: workerCount }, (_, i) => `W${i + 1}=${workerTestCounts.get(i + 1) ?? 0}`).join(' ');
+  console.log(`[PoolDispatch] Build run=${runId} done. Per-worker test counts: ${summary}`);
 
   // Preserve input order
   for (const t of tests) {

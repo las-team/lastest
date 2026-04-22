@@ -1,8 +1,8 @@
 import { NextResponse } from 'next/server';
 import { db } from '@/lib/db';
-import { teams, users, runners } from '@/lib/db/schema';
+import { teams, users, runners, embeddedSessions } from '@/lib/db/schema';
 import { upsertEmbeddedSession } from '@/server/actions/embedded-sessions';
-import { updateRunnerStatus } from '@/server/actions/runners';
+import { emitRunnerStatusChange } from '@/lib/ws/runner-events';
 import { eq, and } from 'drizzle-orm';
 import crypto from 'crypto';
 import { syncUserToTwentyCRM } from '@/lib/integrations/twenty-crm';
@@ -94,67 +94,104 @@ export async function POST(request: Request) {
 
   const { teamId, userId } = await getOrCreateSystemTeam();
 
-  // Upsert system runner by instanceId (name acts as stable key)
   const runnerName = `System EB-${body.instanceId}`;
-  let [runner] = await db
-    .select()
-    .from(runners)
-    .where(and(eq(runners.name, runnerName), eq(runners.isSystem, true)));
-
-  // Generate a per-runner token for heartbeats
   const runnerToken = `lastest_runner_${crypto.randomBytes(32).toString('hex')}`;
   const tokenHash = crypto.createHash('sha256').update(runnerToken).digest('hex');
 
-  if (!runner) {
-    const runnerId = crypto.randomUUID();
-    await db.insert(runners).values({
-      id: runnerId,
-      teamId,
-      createdById: userId,
-      name: runnerName,
-      tokenHash,
-      status: 'online',
-      capabilities: ['run', 'record'],
-      type: 'embedded',
-      isSystem: true,
-      // Sequential within an EB: 6 concurrent contexts on one Chromium instance
-      // race each other on setup storageState and deadlock. Build-level parallelism
-      // comes from distributing across sidecars (10 EBs → 10 parallel runs).
-      maxParallelTests: 1,
-      lastSeen: new Date(),
-      createdAt: new Date(),
-    });
-    [runner] = await db.select().from(runners).where(eq(runners.id, runnerId));
-  } else {
-    // Update existing runner: refresh token & mark online via updateRunnerStatus,
-    // which preserves `busy` when an embedded session is still in flight — otherwise
-    // a re-register races with `claimPoolEB` and the same EB gets handed to two
-    // workers concurrently (observed in production as `Target … has been closed`).
-    await db
-      .update(runners)
-      .set({ tokenHash, lastSeen: new Date(), maxParallelTests: 1 })
-      .where(eq(runners.id, runner.id));
-    await updateRunnerStatus(runner.id, 'online');
-    [runner] = await db.select().from(runners).where(eq(runners.id, runner.id));
-  }
-
-  // Dev-only: when EB_DEV_PORT_FORWARD=1, spawn `kubectl port-forward` for this
-  // pod so the host dev server can reach cluster-internal ports. No-op in prod.
+  // Dev-only: spawn `kubectl port-forward` for this pod so the host dev server
+  // can reach cluster-internal ports. Async + external — must run BEFORE the
+  // DB transaction so we don't hold a row lock while kubectl is spawning.
   const streamUrl = (await rewriteDevStreamUrl(body.instanceId, body.streamUrl)) ?? body.streamUrl;
   const cdpUrl = await rewriteDevCdpUrl(body.instanceId, body.cdpUrl);
 
-  // Upsert embedded session
-  const session = await upsertEmbeddedSession({
-    teamId,
-    runnerId: runner!.id,
-    streamUrl,
-    cdpUrl,
-    containerUrl: body.containerUrl,
-    viewport: body.viewport,
+  // Atomic upsert of runner + session. If these aren't in the same tx, a
+  // worker's `claimPoolEB` can see `runner.status='online'` in the gap before
+  // the session row is inserted, flip the runner to `busy`, find no session
+  // row, and leave the session permanently in `status='ready'` — which makes
+  // the sidebar show the EB as idle/green while it's actively running tests,
+  // and also defangs the `updateRunnerStatus` session-busy guard. One tx
+  // eliminates the visibility gap.
+  const {
+    runner,
+    session,
+    previousStatus,
+  } = await db.transaction(async (tx) => {
+    let [existingRunner] = await tx
+      .select()
+      .from(runners)
+      .where(and(eq(runners.name, runnerName), eq(runners.isSystem, true)));
+
+    let runnerRow;
+    const previousStatus = existingRunner?.status;
+    if (!existingRunner) {
+      const runnerId = crypto.randomUUID();
+      await tx.insert(runners).values({
+        id: runnerId,
+        teamId,
+        createdById: userId,
+        name: runnerName,
+        tokenHash,
+        status: 'online',
+        capabilities: ['run', 'record'],
+        type: 'embedded',
+        isSystem: true,
+        // Sequential within an EB: 6 concurrent contexts on one Chromium instance
+        // race each other on setup storageState and deadlock. Build-level parallelism
+        // comes from distributing across sidecars (10 EBs → 10 parallel runs).
+        maxParallelTests: 1,
+        lastSeen: new Date(),
+        createdAt: new Date(),
+      });
+      [existingRunner] = await tx.select().from(runners).where(eq(runners.id, runnerId));
+      runnerRow = existingRunner!;
+    } else {
+      // Re-register. Preserve `busy` when the session is still busy — a
+      // re-register that clobbers `busy→online` races with `claimPoolEB` and
+      // can hand the same EB to two workers (previously surfaced as
+      // `Target … has been closed`). Inlines the safeguard that used to live
+      // in `updateRunnerStatus`, since that helper can't participate in our tx.
+      const [busySession] = await tx
+        .select({ id: embeddedSessions.id })
+        .from(embeddedSessions)
+        .where(and(
+          eq(embeddedSessions.runnerId, existingRunner.id),
+          eq(embeddedSessions.status, 'busy'),
+        ))
+        .limit(1);
+      const effectiveStatus = busySession ? existingRunner.status : 'online';
+      await tx
+        .update(runners)
+        .set({ tokenHash, status: effectiveStatus, lastSeen: new Date(), maxParallelTests: 1 })
+        .where(eq(runners.id, existingRunner.id));
+      [runnerRow] = await tx.select().from(runners).where(eq(runners.id, existingRunner.id));
+    }
+
+    const sessionRow = await upsertEmbeddedSession({
+      teamId,
+      runnerId: runnerRow!.id,
+      streamUrl,
+      cdpUrl,
+      containerUrl: body.containerUrl,
+      viewport: body.viewport,
+    }, tx);
+
+    return { runner: runnerRow!, session: sessionRow, previousStatus };
   });
 
+  // Emit status change outside the tx so subscribers see the change only once
+  // it's durable. Mirrors what `updateRunnerStatus` would have emitted.
+  if (previousStatus !== runner.status) {
+    emitRunnerStatusChange({
+      runnerId: runner.id,
+      teamId: runner.teamId,
+      status: runner.status as 'online' | 'busy' | 'offline',
+      previousStatus: previousStatus as 'online' | 'busy' | 'offline' | undefined,
+      timestamp: Date.now(),
+    });
+  }
+
   return NextResponse.json({
-    runnerId: runner!.id,
+    runnerId: runner.id,
     token: runnerToken,
     sessionId: session.id,
   });

@@ -150,9 +150,19 @@ export async function releaseEmbeddedSession(
   return { success: true };
 }
 
+// Drizzle's transaction callback arg has the same DB-op methods as `db` but
+// without `.transaction`. Use a narrow union so callers can pass either the
+// top-level `db` or a `tx` from inside a transaction.
+type DBExecutor = typeof db | Parameters<Parameters<typeof db.transaction>[0]>[0];
+
 /**
  * Upsert an embedded session for a runner — ensures exactly 1 session per runner.
  * On restart, updates the existing session instead of creating a duplicate.
+ *
+ * Optionally accepts a transaction `tx` so callers (e.g. the auto-register
+ * route) can bundle runner + session writes atomically — required to close the
+ * race where `claimPoolEB` sees `runner.status='online'` before the session
+ * row exists and claims into a half-registered state.
  */
 export async function upsertEmbeddedSession(params: {
   teamId: string;
@@ -161,8 +171,12 @@ export async function upsertEmbeddedSession(params: {
   cdpUrl?: string;
   containerUrl: string;
   viewport?: { width: number; height: number };
-}): Promise<EmbeddedSession> {
-  const existing = await getEmbeddedSessionForRunner(params.runnerId);
+}, tx?: DBExecutor): Promise<EmbeddedSession> {
+  const exec = tx ?? db;
+  const [existing] = await exec
+    .select()
+    .from(embeddedSessions)
+    .where(eq(embeddedSessions.runnerId, params.runnerId));
 
   if (existing) {
     const now = new Date();
@@ -173,7 +187,7 @@ export async function upsertEmbeddedSession(params: {
     // lets `claimPoolEB` hand the same EB to a second worker concurrently
     // (observed in production as `Target … has been closed`).
     const preserveBusy = existing.status === 'busy';
-    await db
+    await exec
       .update(embeddedSessions)
       .set({
         streamUrl: params.streamUrl,
@@ -187,11 +201,11 @@ export async function upsertEmbeddedSession(params: {
       .where(eq(embeddedSessions.id, existing.id));
 
     // Delete any accumulated duplicates
-    await db
+    await exec
       .delete(embeddedSessions)
       .where(and(eq(embeddedSessions.runnerId, params.runnerId), ne(embeddedSessions.id, existing.id)));
 
-    const [updated] = await db
+    const [updated] = await exec
       .select()
       .from(embeddedSessions)
       .where(eq(embeddedSessions.id, existing.id));
@@ -199,7 +213,7 @@ export async function upsertEmbeddedSession(params: {
     return updated!;
   }
 
-  return createEmbeddedSession(params);
+  return createEmbeddedSession(params, tx);
 }
 
 /**
@@ -212,12 +226,13 @@ export async function createEmbeddedSession(params: {
   cdpUrl?: string;
   containerUrl: string;
   viewport?: { width: number; height: number };
-}): Promise<EmbeddedSession> {
+}, tx?: DBExecutor): Promise<EmbeddedSession> {
+  const exec = tx ?? db;
   const id = crypto.randomUUID();
   const now = new Date();
   const expiresAt = new Date(now.getTime() + 30 * 60 * 1000); // 30min expiry
 
-  await db.insert(embeddedSessions).values({
+  await exec.insert(embeddedSessions).values({
     id,
     teamId: params.teamId,
     runnerId: params.runnerId,
@@ -231,7 +246,7 @@ export async function createEmbeddedSession(params: {
     expiresAt,
   });
 
-  const [created] = await db
+  const [created] = await exec
     .select()
     .from(embeddedSessions)
     .where(eq(embeddedSessions.id, id));
@@ -387,9 +402,19 @@ export async function claimPoolEB(): Promise<{
   // claimers pick DIFFERENT rows (the row lock is acquired inside the SELECT),
   // so no two claimers can ever end up on the same EB.
   return await db.transaction(async (tx) => {
+    // Defense-in-depth: only match runners that already have a corresponding
+    // `ready` embedded_session row. Auto-register now writes both in one tx, so
+    // this should always match — but if any future codepath writes the runner
+    // row before its session (or leaves a dangling runner), we refuse the
+    // claim instead of flipping `runner.status='busy'` while the session stays
+    // `ready` (the UI-green-while-active bug).
     const [candidate] = await tx
-      .select({ id: runners.id, teamId: runners.teamId })
+      .select({ id: runners.id, teamId: runners.teamId, sessionId: embeddedSessions.id })
       .from(runners)
+      .innerJoin(embeddedSessions, and(
+        eq(embeddedSessions.runnerId, runners.id),
+        eq(embeddedSessions.status, 'ready'),
+      ))
       .where(and(
         eq(runners.isSystem, true),
         eq(runners.status, 'online'),
@@ -405,21 +430,14 @@ export async function claimPoolEB(): Promise<{
       .set({ status: 'busy' as const, lastSeen: new Date() })
       .where(eq(runners.id, candidate.id));
 
-    const [session] = await tx
-      .select({ id: embeddedSessions.id })
-      .from(embeddedSessions)
-      .where(eq(embeddedSessions.runnerId, candidate.id));
-
-    if (session) {
-      await tx
-        .update(embeddedSessions)
-        .set({
-          status: 'busy',
-          busySince: new Date(),
-          lastActivityAt: new Date(),
-        })
-        .where(eq(embeddedSessions.id, session.id));
-    }
+    await tx
+      .update(embeddedSessions)
+      .set({
+        status: 'busy',
+        busySince: new Date(),
+        lastActivityAt: new Date(),
+      })
+      .where(eq(embeddedSessions.id, candidate.sessionId));
 
     emitRunnerStatusChange({
       runnerId: candidate.id,
@@ -429,12 +447,8 @@ export async function claimPoolEB(): Promise<{
       timestamp: Date.now(),
     });
 
-    if (!session) {
-      console.warn(`[Pool] Claimed EB ${candidate.id.slice(0, 8)} but no embedded_sessions row found — data inconsistency`);
-    }
-
     console.log(`[Pool] Claimed EB ${candidate.id.slice(0, 8)}`);
-    return { runnerId: candidate.id, sessionId: session?.id ?? null };
+    return { runnerId: candidate.id, sessionId: candidate.sessionId };
   });
 }
 
@@ -711,9 +725,22 @@ export async function claimOrProvisionPoolEB(
     // claimPoolEB. Guarantees that two concurrent callers can't end up on the
     // same runner even if they both see it as `online` in their snapshots.
     const claimResult = await db.transaction(async (tx) => {
-      const [r] = await tx
-        .select({ id: runners.id, teamId: runners.teamId, status: runners.status })
+      // Require the session row to exist + be `ready`. If the auto-register
+      // tx hasn't committed yet we skip this cycle and let the outer loop
+      // retry — prevents the half-registered state (runner=busy, session=ready)
+      // that stalled the UI + defeated the `updateRunnerStatus` busy guard.
+      const [row] = await tx
+        .select({
+          id: runners.id,
+          teamId: runners.teamId,
+          status: runners.status,
+          sessionId: embeddedSessions.id,
+        })
         .from(runners)
+        .innerJoin(embeddedSessions, and(
+          eq(embeddedSessions.runnerId, runners.id),
+          eq(embeddedSessions.status, 'ready'),
+        ))
         .where(and(
           eq(runners.name, expectedRunnerName),
           eq(runners.isSystem, true),
@@ -722,26 +749,19 @@ export async function claimOrProvisionPoolEB(
         .limit(1)
         .for('update', { skipLocked: true });
 
-      if (!r) return null;
+      if (!row) return null;
 
       await tx
         .update(runners)
         .set({ status: 'busy' as const, lastSeen: new Date() })
-        .where(eq(runners.id, r.id));
+        .where(eq(runners.id, row.id));
 
-      const [s] = await tx
-        .select({ id: embeddedSessions.id })
-        .from(embeddedSessions)
-        .where(eq(embeddedSessions.runnerId, r.id));
+      await tx
+        .update(embeddedSessions)
+        .set({ status: 'busy', busySince: new Date(), lastActivityAt: new Date() })
+        .where(eq(embeddedSessions.id, row.sessionId));
 
-      if (s) {
-        await tx
-          .update(embeddedSessions)
-          .set({ status: 'busy', busySince: new Date(), lastActivityAt: new Date() })
-          .where(eq(embeddedSessions.id, s.id));
-      }
-
-      return { runnerId: r.id, teamId: r.teamId, sessionId: s?.id ?? null };
+      return { runnerId: row.id, teamId: row.teamId, sessionId: row.sessionId };
     });
 
     if (!claimResult) {

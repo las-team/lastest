@@ -11,11 +11,12 @@ import {
   XCircle,
   AlertTriangle,
   ListTodo,
+  Trash2,
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { resolveReviewTodo, reopenReviewTodo } from '@/server/actions/todos';
+import { resolveReviewTodo, reopenReviewTodo, deleteReviewTodoAction } from '@/server/actions/todos';
 import type { VisualDiffWithTestStatus } from '@/lib/db/schema';
 
 export interface TodoRow {
@@ -69,6 +70,14 @@ export function ReviewContent({
     setTodos(prev => prev.map(t =>
       t.todo.id === todoId ? { ...t, todo: { ...t.todo, status: 'open' } } : t
     ));
+    router.refresh();
+  };
+
+  const handleClearResolved = async () => {
+    const resolvedIds = todos.filter(t => t.todo.status === 'resolved').map(t => t.todo.id);
+    if (resolvedIds.length === 0) return;
+    setTodos(prev => prev.filter(t => t.todo.status !== 'resolved'));
+    await Promise.all(resolvedIds.map(id => deleteReviewTodoAction(id)));
     router.refresh();
   };
 
@@ -161,7 +170,19 @@ export function ReviewContent({
 
               {resolvedTodos.length > 0 && (
                 <div className="pt-2">
-                  <p className="text-xs text-muted-foreground mb-2">Resolved ({resolvedTodos.length})</p>
+                  <div className="flex items-center justify-between mb-2">
+                    <p className="text-xs text-muted-foreground">Resolved ({resolvedTodos.length})</p>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={handleClearResolved}
+                      className="h-6 text-xs text-muted-foreground hover:text-destructive"
+                      title="Clear all resolved todos"
+                    >
+                      <Trash2 className="w-3 h-3 mr-1" />
+                      Clear
+                    </Button>
+                  </div>
                   {resolvedTodos.map(({ todo, testName, functionalAreaName }) => (
                     <div key={todo.id} className="flex items-center gap-3 p-3 border rounded-lg opacity-60">
                       <button
