@@ -10,7 +10,7 @@ import path from 'path';
 import os from 'os';
 import type { RunTestCommandPayload, RunSetupCommandPayload, LogEntry, StabilizationPayload, DomSnapshotPayload } from './protocol.js';
 import { CROSS_OS_CHROMIUM_ARGS, setupFreezeScripts, applyPreScreenshotStabilization } from './stabilization.js';
-import { instrumentStepTracking, stripTypeAnnotations } from '@lastest/shared';
+import { instrumentStepTracking, stripTypeAnnotations, watermarkVideo } from '@lastest/shared';
 
 /**
  * Verify code integrity by comparing SHA256 hash.
@@ -680,6 +680,7 @@ export class TestRunner {
         try {
           const videoPath = await video.path();
           if (videoPath && fs.existsSync(videoPath)) {
+            await watermarkVideo(videoPath);
             const videoBuffer = fs.readFileSync(videoPath);
             result.videoData = videoBuffer.toString('base64');
             result.videoFilename = `${command.testRunId}-${command.testId}.webm`;

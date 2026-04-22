@@ -22,7 +22,7 @@ import type { Browser, BrowserContext, Page } from 'playwright';
 import type { StabilizationPayload } from './protocol.js';
 import { setupFreezeScripts, applyPreScreenshotStabilization } from './stabilization.js';
 import { getAllDomSelectors, type DomSnapshotResult, type SelectorPriorityConfig } from './selector-utils.js';
-import { instrumentStepTracking, stripTypeAnnotations } from '@lastest/shared';
+import { instrumentStepTracking, stripTypeAnnotations, watermarkVideo } from '@lastest/shared';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
@@ -993,6 +993,7 @@ export class EmbeddedTestExecutor {
           const tempDest = path.join(videoDir, videoFilename);
           await video.saveAs(tempDest);
           await video.delete();
+          await watermarkVideo(tempDest);
           const videoBuffer = fs.readFileSync(tempDest);
           result.videoData = videoBuffer.toString('base64');
           result.videoFilename = videoFilename;
