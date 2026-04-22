@@ -79,6 +79,9 @@ export interface RunSetupCommandPayload {
   viewport?: { width: number; height: number };
   browser?: 'chromium' | 'firefox' | 'webkit';
   stabilization?: StabilizationPayload;
+  // Debug-mode flag: when true, the EB keeps the CDP screencast attached to
+  // the setup page so the user can watch setup execute live.
+  headed?: boolean;
 }
 
 export interface RunSetupCommand extends BaseMessage {

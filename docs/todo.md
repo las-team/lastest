@@ -13,7 +13,13 @@ triage
 a11y
 DOM delta
 ## bugs
+rerecord doesnt work
+debug doesnt launch
+captures only cursor IF record path is enabled
+always just warn by def Network Error Mode
 ## features
+check tabs and enters
+Select focus areas and evaluation criteria (assertions)
 Openrouter agent sdk parity
 Asset management
 mcp-oauth flow

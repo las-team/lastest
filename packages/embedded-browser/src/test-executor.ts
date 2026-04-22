@@ -95,6 +95,7 @@ export interface RunSetupPayload {
   viewport?: { width: number; height: number };
   stabilization?: StabilizationPayload;
   browser?: string;
+  headed?: boolean;
 }
 
 export interface RunTestPayload {
@@ -1009,7 +1010,13 @@ export class EmbeddedTestExecutor {
     return result!
   }
 
-  async runSetup(browser: Browser, command: RunSetupPayload): Promise<EmbeddedSetupResult> {
+  async runSetup(
+    browser: Browser,
+    command: RunSetupPayload,
+    callbacks?: {
+      onPageCreated?: (page: Page) => Promise<void> | void;
+    },
+  ): Promise<EmbeddedSetupResult> {
     const startTime = Date.now();
     const logs: Array<{ timestamp: number; level: string; message: string }> = [];
     const setupTimeout = Math.max(command.timeout || 120000, 30000);
@@ -1036,6 +1043,17 @@ export class EmbeddedTestExecutor {
     let retainContext = false;
 
     try {
+      // Give the caller a chance to attach live-stream infra (CDP screencast) to
+      // the setup page before navigation begins. Used by debug mode so the user
+      // can watch setup run.
+      if (callbacks?.onPageCreated) {
+        try {
+          await callbacks.onPageCreated(page);
+        } catch (cbErr) {
+          logFn('warn', `onPageCreated callback failed: ${cbErr instanceof Error ? cbErr.message : String(cbErr)}`);
+        }
+      }
+
       page.setDefaultNavigationTimeout(30000);
       page.setDefaultTimeout(15000);
 

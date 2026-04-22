@@ -153,6 +153,7 @@ export async function executeSetupViaRunner(
   timeout?: number,
   playwrightSettings?: PlaywrightSettings | null,
   browser?: 'chromium' | 'firefox' | 'webkit',
+  headed?: boolean,
 ): Promise<{ storageState?: string; storageStateJson?: string; variables?: Record<string, unknown> }> {
   const setupTimeout = timeout || 120000;
 
@@ -165,6 +166,7 @@ export async function executeSetupViaRunner(
     viewport,
     stabilization: buildStabilizationPayload(playwrightSettings),
     browser,
+    headed: headed || undefined,
   });
 
   console.log(`[Executor] Queuing setup command ${command.id.slice(0, 8)} for runner ${runnerId}`);

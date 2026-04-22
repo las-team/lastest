@@ -23,5 +23,5 @@ export default async function ClaimPage({ params }: PageProps) {
   if (!share || share.status !== 'public') notFound();
 
   const result = await claimPublicShare(slug);
-  redirect(`/tests/${result.newTestId}`);
+  redirect(result.newTestId ? `/tests/${result.newTestId}` : '/tests');
 }

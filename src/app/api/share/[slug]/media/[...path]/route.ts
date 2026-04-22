@@ -44,6 +44,45 @@ function buildAllowlist(diffs: VisualDiff[], results: TestResult[]): Set<string>
   return allow;
 }
 
+type AllowEntry = { allow: Set<string> | null; expiresAt: number };
+const POSITIVE_TTL_MS = 5 * 60 * 1000;
+const NEGATIVE_TTL_MS = 30 * 1000;
+const allowCache = new Map<string, AllowEntry>();
+const inFlight = new Map<string, Promise<Set<string> | null>>();
+
+async function fetchAllowlist(slug: string): Promise<Set<string> | null> {
+  const ctx = await queries.getPublicShareContext(slug);
+  if (!ctx) return null;
+  const diffs = await queries.getVisualDiffsByBuild(ctx.build.id);
+  const results = ctx.build.testRunId
+    ? await queries.getTestResultsByRun(ctx.build.testRunId)
+    : [];
+  return buildAllowlist(diffs, results);
+}
+
+async function getAllowlistForSlug(slug: string): Promise<Set<string> | null> {
+  const now = Date.now();
+  const cached = allowCache.get(slug);
+  if (cached && cached.expiresAt > now) return cached.allow;
+
+  const existing = inFlight.get(slug);
+  if (existing) return existing;
+
+  const promise = fetchAllowlist(slug)
+    .then((allow) => {
+      allowCache.set(slug, {
+        allow,
+        expiresAt: Date.now() + (allow ? POSITIVE_TTL_MS : NEGATIVE_TTL_MS),
+      });
+      return allow;
+    })
+    .finally(() => {
+      inFlight.delete(slug);
+    });
+  inFlight.set(slug, promise);
+  return promise;
+}
+
 export async function GET(
   _request: NextRequest,
   { params }: { params: Promise<{ slug: string; path: string[] }> },
@@ -53,21 +92,15 @@ export async function GET(
     return new Response('Bad Request', { status: 400 });
   }
 
-  const ctx = await queries.getPublicShareContext(slug);
-  if (!ctx) {
-    return new Response('Not Found', { status: 404 });
-  }
-
   const requested = '/' + segments.join('/');
   if (requested.includes('..')) {
     return new Response('Bad Request', { status: 400 });
   }
 
-  const diffs = await queries.getVisualDiffsByBuild(ctx.build.id);
-  const results = ctx.build.testRunId
-    ? await queries.getTestResultsByRun(ctx.build.testRunId)
-    : [];
-  const allowlist = buildAllowlist(diffs, results);
+  const allowlist = await getAllowlistForSlug(slug);
+  if (!allowlist) {
+    return new Response('Not Found', { status: 404 });
+  }
 
   if (!allowlist.has(requested)) {
     return new Response('Not Found', { status: 404 });

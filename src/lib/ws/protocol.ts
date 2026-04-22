@@ -120,6 +120,11 @@ export interface RunSetupCommandPayload {
   };
   stabilization?: StabilizationPayload;
   browser?: 'chromium' | 'firefox' | 'webkit';
+  // Debug-mode flag: when true, the EB keeps the CDP screencast attached to
+  // the setup page so the user can watch setup execute live (login flow,
+  // OAuth redirects). Default false preserves the CPU-saving behavior of
+  // headless batch runs.
+  headed?: boolean;
 }
 
 export interface RunSetupCommand extends BaseMessage {

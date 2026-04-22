@@ -77,6 +77,10 @@ export async function startDebugSession(
         viewport,
         settings?.navigationTimeout ?? undefined,
         settings,
+        undefined,
+        // headed: keep screencast attached to the setup page so the user can
+        // watch setup (login flow, OAuth redirects) live in the debug stream.
+        true,
       );
       // Prefer the serialized JSON snapshot over the `persistent:<id>` marker —
       // debug-executor creates its own BrowserContext and can't reach the

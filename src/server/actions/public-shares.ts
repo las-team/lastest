@@ -42,20 +42,21 @@ export async function publishBuildShare(
     ? await queries.getTest(options.scopedTestId)
     : null;
 
-  let primaryTest = scopedTest;
-  if (!primaryTest && build.testRunId) {
+  // targetDomain still needs a representative URL for build-wide shares.
+  let domainTest = scopedTest;
+  if (!domainTest && build.testRunId) {
     const results = await queries.getTestResultsByRun(build.testRunId);
     const firstResult = results[0];
-    primaryTest = firstResult?.testId ? (await queries.getTest(firstResult.testId)) ?? null : null;
+    domainTest = firstResult?.testId ? (await queries.getTest(firstResult.testId)) ?? null : null;
   }
 
-  const targetDomain = deriveTargetDomain(primaryTest?.targetUrl);
+  const targetDomain = deriveTargetDomain(domainTest?.targetUrl);
 
   const slug = generateShareSlug();
   const share = await queries.createPublicShare({
     slug,
     buildId,
-    testId: scopedTest?.id ?? primaryTest?.id ?? null,
+    testId: scopedTest?.id ?? null,
     repositoryId: repoId,
     ownerTeamId: session.team.id,
     publishedByUserId: session.user.id,
@@ -163,7 +164,7 @@ async function copyBaselineFiles(
 
 export interface ClaimShareResult {
   newRepositoryId: string;
-  newTestId: string;
+  newTestId: string | null;
 }
 
 /**
@@ -171,12 +172,23 @@ export interface ClaimShareResult {
  * (and only the test code + active baselines) into a fresh repository in
  * the claimer's team. Idempotent: claiming the same slug from the same team
  * returns the existing clone.
+ *
+ * For test-scoped shares (share.testId set), clones the single test.
+ * For build-wide shares (share.testId null), clones every distinct test
+ * in the build's run and returns newTestId = null so the caller can land
+ * on the repo's test list rather than a single test.
  */
 export async function claimPublicShare(slug: string): Promise<ClaimShareResult> {
   const session = await requireTeamAccess();
   const ctx = await queries.getPublicShareContext(slug);
   if (!ctx) throw new Error('Share not found or revoked');
-  if (!ctx.test) throw new Error('Share has no test to claim');
+
+  const sourceTests = ctx.test
+    ? [ctx.test]
+    : ctx.build.testRunId
+      ? await loadTestsFromRun(ctx.build.testRunId)
+      : [];
+  if (sourceTests.length === 0) throw new Error('Share has no tests to claim');
 
   // Idempotency: if this team already has a repo named after the share, reuse it.
   const existingRepos = await queries.getRepositoriesByTeam(session.team.id);
@@ -198,50 +210,73 @@ export async function claimPublicShare(slug: string): Promise<ClaimShareResult> 
     targetRepoId = repo.id;
   }
 
-  // If the test was already claimed into this repo (from an earlier claim), reuse it.
   const priorTests = await queries.getTestsByRepo(targetRepoId);
-  const prior = priorTests.find((t) => t.name === ctx.test!.name && t.code === ctx.test!.code);
-  if (prior) {
-    return { newRepositoryId: targetRepoId, newTestId: prior.id };
-  }
+  const clonedTestIds: string[] = [];
 
-  const newTest = await queries.createTest({
-    repositoryId: targetRepoId,
-    functionalAreaId: null,
-    name: ctx.test.name,
-    code: ctx.test.code,
-    description: ctx.test.description,
-    targetUrl: ctx.test.targetUrl,
-    executionMode: ctx.test.executionMode ?? 'procedural',
-    agentPrompt: ctx.test.agentPrompt,
-    createdByUserId: session.user.id,
-    createdByBotId: null,
-  });
+  for (const sourceTest of sourceTests) {
+    const prior = priorTests.find((t) => t.name === sourceTest.name && t.code === sourceTest.code);
+    if (prior) {
+      clonedTestIds.push(prior.id);
+      continue;
+    }
 
-  // Best-effort: copy active baselines so first run has something to diff against.
-  if (ctx.share.repositoryId) {
-    const activeBaselines = await queries.getActiveBaselinesForTest(ctx.test.id);
-    const pathMap = await copyBaselineFiles(activeBaselines, ctx.share.repositoryId, targetRepoId);
-    for (const b of activeBaselines) {
-      if (!b.imagePath) continue;
-      const newPath = pathMap.get(b.imagePath);
-      if (!newPath) continue;
-      await queries.createBaseline({
-        repositoryId: targetRepoId,
-        testId: newTest.id,
-        stepLabel: b.stepLabel,
-        imagePath: newPath,
-        imageHash: b.imageHash,
-        branch: b.branch,
-        isActive: true,
-        browser: b.browser ?? 'chromium',
-      });
+    const newTest = await queries.createTest({
+      repositoryId: targetRepoId,
+      functionalAreaId: null,
+      name: sourceTest.name,
+      code: sourceTest.code,
+      description: sourceTest.description,
+      targetUrl: sourceTest.targetUrl,
+      executionMode: sourceTest.executionMode ?? 'procedural',
+      agentPrompt: sourceTest.agentPrompt,
+      createdByUserId: session.user.id,
+      createdByBotId: null,
+    });
+    clonedTestIds.push(newTest.id);
+
+    if (ctx.share.repositoryId) {
+      const activeBaselines = await queries.getActiveBaselinesForTest(sourceTest.id);
+      const pathMap = await copyBaselineFiles(activeBaselines, ctx.share.repositoryId, targetRepoId);
+      for (const b of activeBaselines) {
+        if (!b.imagePath) continue;
+        const newPath = pathMap.get(b.imagePath);
+        if (!newPath) continue;
+        await queries.createBaseline({
+          repositoryId: targetRepoId,
+          testId: newTest.id,
+          stepLabel: b.stepLabel,
+          imagePath: newPath,
+          imageHash: b.imageHash,
+          branch: b.branch,
+          isActive: true,
+          browser: b.browser ?? 'chromium',
+        });
+      }
     }
   }
 
+  // Land the claimer in the new repo so /tests shows what they just claimed.
+  await queries.updateUser(session.user.id, { selectedRepositoryId: targetRepoId });
+
   await queries.markPublicShareClaimed(slug, session.team.id, session.user.id);
   revalidatePath(`/r/${slug}`);
-  return { newRepositoryId: targetRepoId, newTestId: newTest.id };
+  return {
+    newRepositoryId: targetRepoId,
+    newTestId: ctx.test ? clonedTestIds[0] ?? null : null,
+  };
+}
+
+async function loadTestsFromRun(testRunId: string) {
+  const results = await queries.getTestResultsByRun(testRunId);
+  const seen = new Set<string>();
+  const tests: NonNullable<Awaited<ReturnType<typeof queries.getTest>>>[] = [];
+  for (const r of results) {
+    if (!r.testId || seen.has(r.testId)) continue;
+    seen.add(r.testId);
+    const t = await queries.getTest(r.testId);
+    if (t) tests.push(t);
+  }
+  return tests;
 }
 
 /**
@@ -250,5 +285,5 @@ export async function claimPublicShare(slug: string): Promise<ClaimShareResult> 
 export async function claimAndRedirect(slug: string): Promise<never> {
   await requireAuth();
   const result = await claimPublicShare(slug);
-  redirect(`/tests/${result.newTestId}`);
+  redirect(result.newTestId ? `/tests/${result.newTestId}` : '/tests');
 }
