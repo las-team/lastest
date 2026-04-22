@@ -120,7 +120,6 @@ vi.mock('next/cache', () => ({
 
 const EB_RUNNER_1 = { id: 'eb-runner-1', teamId: 'system-team', status: 'online', type: 'embedded', isSystem: true };
 const EB_RUNNER_2 = { id: 'eb-runner-2', teamId: 'system-team', status: 'online', type: 'embedded', isSystem: true };
-const EB_SESSION_1 = { id: 'session-1', runnerId: 'eb-runner-1', status: 'ready' };
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -151,14 +150,11 @@ describe('EB Pool Management', () => {
 
   describe('claimPoolEB', () => {
     it('claims an available EB and returns runnerId + sessionId', async () => {
-      // Inside the transaction:
-      //   SELECT ... FOR UPDATE SKIP LOCKED  → candidate
-      //   UPDATE runner → busy                (no returning read)
-      //   SELECT session                      → session row
-      //   UPDATE session → busy               (no returning read)
+      // Inside the transaction a single SELECT ... FOR UPDATE SKIP LOCKED joins
+      // runners × embedded_sessions and returns `{ id, teamId, sessionId }` in
+      // one row, then two UPDATEs flip runner + session to busy.
       dbSelectResults = [
-        [EB_RUNNER_1],   // candidate pick
-        [EB_SESSION_1],  // session for that runner
+        [{ id: 'eb-runner-1', teamId: 'system-team', sessionId: 'session-1' }],
       ];
 
       const { claimPoolEB } = await import('@/server/actions/embedded-sessions');

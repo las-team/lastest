@@ -714,7 +714,7 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
                     >
                       <Trash2 className="h-4 w-4" />
                     </Button>
-                    <PublishShareDialog testId={test.id} initialShares={[]} />
+                    <PublishShareDialog testId={test.id} initialShares={[]} iconOnly />
                   </>
                 )}
               </div>

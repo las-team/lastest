@@ -29,6 +29,7 @@ else
     --agents 0 --servers 1 \
     --port "3001:3000@loadbalancer" \
     --k3s-arg "--disable=traefik@server:*" \
+    --volume "${REPO_ROOT}/storage:/host-storage@server:*" \
     --runtime-label "com.docker.compose.project=lastest@server:*" \
     --runtime-label "com.docker.compose.project=lastest@loadbalancer" \
     --wait
