@@ -81,8 +81,30 @@ export async function publishLatestTestShare(testId: string): Promise<PublishSha
       'No test runs found. Run this test at least once before publishing a share.',
     );
   }
-  const build = await queries.getBuildByTestRun(mostRecent.testRunId);
-  if (!build) throw new Error('Most recent run has no associated build');
+
+  // Per-test runs started from the test detail page go through runTests()
+  // in src/server/actions/runs.ts which creates a testRun without a build.
+  // Full-repo runs go through createAndRunBuildCore() which creates both.
+  // For the share system we need a build to anchor the snapshot, so if the
+  // most recent testRun has no build, synthesize a minimal one now.
+  let build = await queries.getBuildByTestRun(mostRecent.testRunId);
+  if (!build) {
+    const runResults = await queries.getTestResultsByRun(mostRecent.testRunId);
+    const passed = runResults.filter((r) => r.status === 'passed').length;
+    const failed = runResults.filter((r) => r.status === 'failed').length;
+    build = await queries.createBuild({
+      testRunId: mostRecent.testRunId,
+      triggerType: 'manual',
+      overallStatus: failed > 0 ? 'blocked' : 'review_required',
+      totalTests: runResults.length,
+      passedCount: passed,
+      failedCount: failed,
+      changesDetected: 0,
+      flakyCount: 0,
+      comparisonMode: 'vs_both',
+      completedAt: new Date(),
+    });
+  }
 
   return publishBuildShare(build.id, { scopedTestId: testId });
 }

@@ -933,18 +933,18 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
         {/* Tabs for Code, Screenshots, History */}
         <Tabs value={activeTab} onValueChange={setActiveTab}>
           <TabsList className="h-11 w-full p-1 gap-1 bg-white dark:bg-zinc-950 border">
-            <TabsTrigger value="code" className="flex-1 px-2 text-sm data-[state=active]:bg-accent data-[state=active]:text-accent-foreground data-[state=active]:shadow-sm">Code</TabsTrigger>
+            <TabsTrigger value="code" className="h-full flex-1 px-2 text-sm data-[state=active]:bg-accent data-[state=active]:text-accent-foreground data-[state=active]:shadow-sm">Code</TabsTrigger>
             {earlyAdopterMode && (
-              <TabsTrigger value="spec" className="flex-1 px-2 text-sm data-[state=active]:bg-accent data-[state=active]:text-accent-foreground data-[state=active]:shadow-sm">Spec</TabsTrigger>
+              <TabsTrigger value="spec" className="h-full flex-1 px-2 text-sm data-[state=active]:bg-accent data-[state=active]:text-accent-foreground data-[state=active]:shadow-sm">Spec</TabsTrigger>
             )}
-            <TabsTrigger value="steps" className="flex-1 px-2 text-sm data-[state=active]:bg-accent data-[state=active]:text-accent-foreground data-[state=active]:shadow-sm">Steps</TabsTrigger>
-            <TabsTrigger value="setup" className="flex-1 px-2 text-sm data-[state=active]:bg-accent data-[state=active]:text-accent-foreground data-[state=active]:shadow-sm">Seed</TabsTrigger>
-            <TabsTrigger value="playback" className="flex-1 px-2 text-sm data-[state=active]:bg-accent data-[state=active]:text-accent-foreground data-[state=active]:shadow-sm">Overrides</TabsTrigger>
-            <TabsTrigger value="screenshots" className="flex-1 px-2 text-sm data-[state=active]:bg-accent data-[state=active]:text-accent-foreground data-[state=active]:shadow-sm">Screenshots</TabsTrigger>
-            <TabsTrigger value="plans" className="flex-1 px-2 text-sm data-[state=active]:bg-accent data-[state=active]:text-accent-foreground data-[state=active]:shadow-sm">Plans</TabsTrigger>
-            <TabsTrigger value="history" className="flex-1 px-2 text-sm data-[state=active]:bg-accent data-[state=active]:text-accent-foreground data-[state=active]:shadow-sm">History</TabsTrigger>
-            <TabsTrigger value="recordings" className="flex-1 px-2 text-sm data-[state=active]:bg-accent data-[state=active]:text-accent-foreground data-[state=active]:shadow-sm">Recordings</TabsTrigger>
-            <TabsTrigger value="versions" onClick={loadVersions} className="flex-1 px-2 text-sm data-[state=active]:bg-accent data-[state=active]:text-accent-foreground data-[state=active]:shadow-sm">Versions</TabsTrigger>
+            <TabsTrigger value="steps" className="h-full flex-1 px-2 text-sm data-[state=active]:bg-accent data-[state=active]:text-accent-foreground data-[state=active]:shadow-sm">Steps</TabsTrigger>
+            <TabsTrigger value="setup" className="h-full flex-1 px-2 text-sm data-[state=active]:bg-accent data-[state=active]:text-accent-foreground data-[state=active]:shadow-sm">Seed</TabsTrigger>
+            <TabsTrigger value="playback" className="h-full flex-1 px-2 text-sm data-[state=active]:bg-accent data-[state=active]:text-accent-foreground data-[state=active]:shadow-sm">Overrides</TabsTrigger>
+            <TabsTrigger value="screenshots" className="h-full flex-1 px-2 text-sm data-[state=active]:bg-accent data-[state=active]:text-accent-foreground data-[state=active]:shadow-sm">Screenshots</TabsTrigger>
+            <TabsTrigger value="plans" className="h-full flex-1 px-2 text-sm data-[state=active]:bg-accent data-[state=active]:text-accent-foreground data-[state=active]:shadow-sm">Plans</TabsTrigger>
+            <TabsTrigger value="history" className="h-full flex-1 px-2 text-sm data-[state=active]:bg-accent data-[state=active]:text-accent-foreground data-[state=active]:shadow-sm">History</TabsTrigger>
+            <TabsTrigger value="recordings" className="h-full flex-1 px-2 text-sm data-[state=active]:bg-accent data-[state=active]:text-accent-foreground data-[state=active]:shadow-sm">Recordings</TabsTrigger>
+            <TabsTrigger value="versions" onClick={loadVersions} className="h-full flex-1 px-2 text-sm data-[state=active]:bg-accent data-[state=active]:text-accent-foreground data-[state=active]:shadow-sm">Versions</TabsTrigger>
           </TabsList>
 
           <TabsContent value="code" className="mt-4 space-y-4">

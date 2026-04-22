@@ -71,36 +71,22 @@ let cachedFfmpegPath: string | null | undefined;
 function resolveFfmpegPath(): string {
   if (cachedFfmpegPath !== undefined) return cachedFfmpegPath ?? 'ffmpeg';
 
-  // Prefer Playwright's bundled ffmpeg — it's guaranteed to match the
-  // environment already used to record the video.
-  const candidates: string[] = [];
-  const msPlaywright = '/ms-playwright';
-  if (fs.existsSync(msPlaywright)) {
-    for (const entry of fs.readdirSync(msPlaywright)) {
-      if (entry.startsWith('ffmpeg-')) {
-        candidates.push(path.join(msPlaywright, entry, 'ffmpeg-linux'));
-      }
+  // Always prefer a full ffmpeg from PATH. The Playwright-bundled binary
+  // under /ms-playwright is a stripped build (no drawtext, no overlay, no
+  // VP9 encoder) and cannot render our watermark.
+  for (const dir of (process.env.PATH || '').split(path.delimiter)) {
+    if (!dir) continue;
+    for (const name of ['ffmpeg', 'ffmpeg.exe']) {
+      const candidate = path.join(dir, name);
+      try {
+        if (fs.existsSync(candidate)) {
+          cachedFfmpegPath = candidate;
+          return candidate;
+        }
+      } catch { /* ignore */ }
     }
   }
-  const userCache = path.join(os.homedir(), '.cache', 'ms-playwright');
-  if (fs.existsSync(userCache)) {
-    for (const entry of fs.readdirSync(userCache)) {
-      if (entry.startsWith('ffmpeg-')) {
-        candidates.push(
-          path.join(userCache, entry, 'ffmpeg-linux'),
-          path.join(userCache, entry, 'ffmpeg-mac'),
-          path.join(userCache, entry, 'ffmpeg.exe')
-        );
-      }
-    }
-  }
-  for (const p of candidates) {
-    if (fs.existsSync(p)) {
-      cachedFfmpegPath = p;
-      return p;
-    }
-  }
-  // Fallback: rely on PATH.
+  // Last resort — let the OS resolve it and surface any ENOENT to the caller.
   cachedFfmpegPath = 'ffmpeg';
   return cachedFfmpegPath;
 }
@@ -200,28 +186,39 @@ export async function watermarkVideo(
   const ok = await new Promise<boolean>((resolve) => {
     let settled = false;
     let child: ReturnType<typeof spawn>;
+    let stderr = '';
     try {
       child = spawn(ffmpeg, args, { stdio: ['ignore', 'ignore', 'pipe'] });
-    } catch {
+    } catch (err) {
+      console.warn('[watermark] spawn failed:', err instanceof Error ? err.message : err);
       resolve(false);
       return;
     }
+    child.stderr?.on('data', (chunk: Buffer) => {
+      stderr += chunk.toString();
+      if (stderr.length > 8192) stderr = stderr.slice(-8192);
+    });
     const timer = setTimeout(() => {
       if (settled) return;
       settled = true;
       try { child.kill('SIGKILL'); } catch { /* already gone */ }
+      console.warn(`[watermark] ffmpeg timed out after ${timeoutMs}ms; stderr: ${stderr.trim()}`);
       resolve(false);
     }, timeoutMs);
-    child.on('error', () => {
+    child.on('error', (err) => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
+      console.warn(`[watermark] ffmpeg error (${ffmpeg}):`, err.message);
       resolve(false);
     });
     child.on('close', (code) => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
+      if (code !== 0) {
+        console.warn(`[watermark] ffmpeg exit=${code}; stderr: ${stderr.trim()}`);
+      }
       resolve(code === 0);
     });
   });
