@@ -5,7 +5,9 @@ import { getCurrentSession } from '@/lib/auth';
 import { RecentHistory } from '@/components/dashboard/recent-history';
 import { BuildActionsClient } from './build-actions-client';
 import { BuildPollingWrapper } from './build-polling-wrapper';
+import { PublishShareDialog, type ShareRecord } from './publish-share-dialog';
 import { getStreamUrlForRunner } from '@/server/actions/embedded-sessions';
+import { buildShareUrl } from '@/lib/share/slug';
 import * as queries from '@/lib/db/queries';
 
 interface PageProps {
@@ -71,6 +73,24 @@ export default async function BuildPage({ params }: PageProps) {
     (d) => d.aiRecommendation === 'approve' && d.status === 'pending'
   ).length;
 
+  // Load existing public shares for this build (only when repo access is known)
+  let shareRecords: ShareRecord[] = [];
+  if (buildRecord && teamId && selectedRepo && buildRecord.testRunId) {
+    const testRun = await queries.getTestRun(buildRecord.testRunId);
+    if (testRun?.repositoryId === selectedRepo.id) {
+      const rows = await queries.listPublicSharesForBuild(buildId);
+      shareRecords = rows.map((r) => ({
+        id: r.id,
+        slug: r.slug,
+        url: buildShareUrl(r.slug),
+        status: r.status,
+        createdAt: r.createdAt,
+        viewCount: r.viewCount ?? 0,
+        claimedAt: r.claimedAt,
+      }));
+    }
+  }
+
   return (
     <div className="flex-1 p-6 overflow-auto">
       <div className="max-w-6xl mx-auto space-y-6">
@@ -126,7 +146,10 @@ export default async function BuildPage({ params }: PageProps) {
               </>
             )}
           </div>
-          <div className="ml-auto">
+          <div className="ml-auto flex items-center gap-2">
+            {session && (
+              <PublishShareDialog buildId={buildId} initialShares={shareRecords} />
+            )}
             <BuildActionsClient
               buildId={buildId}
               hasPendingDiffs={pendingDiffs.length > 0}

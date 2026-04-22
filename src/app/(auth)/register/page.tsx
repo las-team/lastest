@@ -1,7 +1,7 @@
 'use client';
 
-import { useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { Suspense, useState } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { authClient } from '@/lib/auth/auth-client';
 import { Button } from '@/components/ui/button';
@@ -10,9 +10,24 @@ import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import { Github } from 'lucide-react';
 import { recordRegistrationConsent } from '@/server/actions/consent';
+import { isValidShareSlug } from '@/lib/share/slug';
 
 export default function RegisterPage() {
+  return (
+    <Suspense fallback={null}>
+      <RegisterForm />
+    </Suspense>
+  );
+}
+
+function RegisterForm() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const rawClaim = searchParams.get('claim');
+  const claim = rawClaim && isValidShareSlug(rawClaim) ? rawClaim : null;
+  const emailPostAuthUrl = claim ? `/r/${claim}/claim` : '/';
+  const oauthPostAuthUrl = claim ? `/r/${claim}/claim` : '/consent';
+
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -39,21 +54,25 @@ export default function RegisterPage() {
 
     await recordRegistrationConsent({ marketingEmails: marketingConsent });
 
-    router.push('/');
+    router.push(emailPostAuthUrl);
     router.refresh();
   }
 
   async function handleOAuth(provider: 'github' | 'google') {
-    await authClient.signIn.social({ provider, callbackURL: '/consent' });
+    await authClient.signIn.social({ provider, callbackURL: oauthPostAuthUrl });
   }
 
   return (
     <div className="min-h-screen flex items-center justify-center">
       <div className="w-full max-w-sm space-y-6 px-4">
         <div className="text-center space-y-2">
-          <h1 className="text-2xl font-bold">Create an account</h1>
+          <h1 className="text-2xl font-bold">
+            {claim ? 'Claim this test' : 'Create an account'}
+          </h1>
           <p className="text-sm text-muted-foreground">
-            Get started with visual regression testing
+            {claim
+              ? "Sign up and we'll copy the test into your own workspace — free."
+              : 'Get started with visual regression testing'}
           </p>
         </div>
 
@@ -172,7 +191,10 @@ export default function RegisterPage() {
 
         <p className="text-center text-sm text-muted-foreground">
           Already have an account?{' '}
-          <Link href="/login" className="text-primary underline-offset-4 hover:underline">
+          <Link
+            href={claim ? `/login?claim=${claim}` : '/login'}
+            className="text-primary underline-offset-4 hover:underline"
+          >
             Sign in
           </Link>
         </p>

@@ -2004,3 +2004,40 @@ export const achievements = pgTable('achievements', {
 
 export type Achievement = typeof achievements.$inferSelect;
 export type NewAchievement = typeof achievements.$inferInsert;
+
+// ============================================
+// Public Shares (Campaign Landing Pages)
+// ============================================
+// An operator on a build detail page can publish a public share, producing
+// a short URL (lastest.cloud/r/:slug) that shows the build's artifacts to
+// unauthenticated visitors. A "claim" signs the visitor up and copies the
+// test definition into their new team. The share itself remains owned by
+// the publishing team — copy-on-claim keeps the public URL stable forever.
+
+export type PublicShareStatus = 'public' | 'revoked';
+
+export const publicShares = pgTable('public_shares', {
+  id: text('id').primaryKey(),
+  // 22-char URL-safe token (~128 bits of entropy) — the public handle.
+  slug: text('slug').notNull().unique(),
+  buildId: text('build_id').notNull(),
+  testId: text('test_id'),
+  repositoryId: text('repository_id'),
+  ownerTeamId: text('owner_team_id'),
+  publishedByUserId: text('published_by_user_id'),
+  status: text('status').$type<PublicShareStatus>().notNull().default('public'),
+  targetDomain: text('target_domain'),
+  claimedByTeamId: text('claimed_by_team_id'),
+  claimedByUserId: text('claimed_by_user_id'),
+  claimedAt: timestamp('claimed_at'),
+  viewCount: integer('view_count').notNull().default(0),
+  lastViewedAt: timestamp('last_viewed_at'),
+  revokedAt: timestamp('revoked_at'),
+  createdAt: timestamp('created_at'),
+}, (table) => ([
+  index('idx_public_shares_build').on(table.buildId),
+  index('idx_public_shares_owner_team').on(table.ownerTeamId),
+]));
+
+export type PublicShare = typeof publicShares.$inferSelect;
+export type NewPublicShare = typeof publicShares.$inferInsert;

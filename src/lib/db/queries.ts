@@ -27,3 +27,4 @@ export * from './queries/schedules';
 export * from './queries/activity-events';
 export * from './queries/gamification';
 export * from './queries/storage';
+export * from './queries/public-shares';

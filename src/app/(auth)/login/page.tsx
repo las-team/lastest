@@ -1,16 +1,31 @@
 'use client';
 
-import { useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { Suspense, useState } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { authClient } from '@/lib/auth/auth-client';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Github } from 'lucide-react';
+import { isValidShareSlug } from '@/lib/share/slug';
 
 export default function LoginPage() {
+  return (
+    <Suspense fallback={null}>
+      <LoginForm />
+    </Suspense>
+  );
+}
+
+function LoginForm() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const rawClaim = searchParams.get('claim');
+  const claim = rawClaim && isValidShareSlug(rawClaim) ? rawClaim : null;
+  const emailPostAuthUrl = claim ? `/r/${claim}/claim` : '/';
+  const oauthPostAuthUrl = claim ? `/r/${claim}/claim` : '/consent';
+
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
@@ -29,12 +44,12 @@ export default function LoginPage() {
       return;
     }
 
-    router.push('/');
+    router.push(emailPostAuthUrl);
     router.refresh();
   }
 
   async function handleOAuth(provider: 'github' | 'google') {
-    await authClient.signIn.social({ provider, callbackURL: '/consent' });
+    await authClient.signIn.social({ provider, callbackURL: oauthPostAuthUrl });
   }
 
   return (
@@ -43,7 +58,9 @@ export default function LoginPage() {
         <div className="text-center space-y-2">
           <h1 className="text-2xl font-bold">Sign in</h1>
           <p className="text-sm text-muted-foreground">
-            Sign in to your account to continue
+            {claim
+              ? "Sign in to claim the test that's been shared with you."
+              : 'Sign in to your account to continue'}
           </p>
         </div>
 
@@ -131,7 +148,10 @@ export default function LoginPage() {
 
         <p className="text-center text-sm text-muted-foreground">
           Don&apos;t have an account?{' '}
-          <Link href="/register" className="text-primary underline-offset-4 hover:underline">
+          <Link
+            href={claim ? `/register?claim=${claim}` : '/register'}
+            className="text-primary underline-offset-4 hover:underline"
+          >
             Sign up
           </Link>
         </p>

@@ -14,7 +14,6 @@ a11y
 DOM delta
 ## bugs
 ## features
-Watermark recordings
 Build free tests and share them - have them shareable
 SuperAdmin account to help manage them
 Openrouter agent sdk parity
