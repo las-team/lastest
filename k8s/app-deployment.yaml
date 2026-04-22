@@ -38,6 +38,10 @@ spec:
         app: lastest-app
     spec:
       serviceAccountName: lastest-app
+      securityContext:
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
       containers:
         - name: app
           image: ${APP_IMAGE}

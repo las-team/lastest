@@ -12,7 +12,6 @@ import {
   DialogTrigger,
 } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import {
   publishBuildShare,
   publishLatestTestShare,
@@ -160,19 +159,15 @@ export function PublishShareDialog({
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
         {iconOnly ? (
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                variant={variant}
-                size="icon"
-                aria-label={triggerLabel}
-                className={activeShare ? 'text-primary' : undefined}
-              >
-                <Share2 className="h-4 w-4" />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>{triggerLabel}</TooltipContent>
-          </Tooltip>
+          <Button
+            variant={variant}
+            size="icon"
+            aria-label={triggerLabel}
+            title={triggerLabel}
+            className={activeShare ? 'text-primary' : undefined}
+          >
+            <Share2 className="h-4 w-4" />
+          </Button>
         ) : (
           <Button
             variant={activeShare ? 'secondary' : variant}

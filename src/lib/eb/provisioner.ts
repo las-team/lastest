@@ -244,7 +244,11 @@ function jobSpec(name: string, instanceId: string): Record<string, unknown> {
   const creds = (() => { try { return loadClusterCreds(); } catch { return null; } })();
   const image = process.env.EB_IMAGE || 'lastest-embedded-browser:latest';
   const lastestUrl = process.env.LASTEST_URL || 'http://lastest-app.lastest.svc.cluster.local:3000';
-  const systemToken = process.env.SYSTEM_EB_TOKEN || '';
+  // `SYSTEM_EB_TOKEN` may hold a comma-separated rotation list on the app side
+  // (auto-register validates by splitting on `,`). Each EB sends the env var
+  // verbatim as its Bearer token, so it must be a SINGLE token or the app 401s
+  // every register attempt. Take the first entry — the one the app prefers.
+  const systemToken = (process.env.SYSTEM_EB_TOKEN || '').split(',')[0].trim();
   const cpuRequest = process.env.EB_CPU_REQUEST || '1000m';
   const cpuLimit = process.env.EB_CPU_LIMIT || '2000m';
   const memRequest = process.env.EB_MEM_REQUEST || '2Gi';

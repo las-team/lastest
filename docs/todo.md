@@ -14,8 +14,6 @@ a11y
 DOM delta
 ## bugs
 ## features
-Build free tests and share them - have them shareable
-SuperAdmin account to help manage them
 Openrouter agent sdk parity
 Asset management
 mcp-oauth flow

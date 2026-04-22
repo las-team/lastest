@@ -553,7 +553,7 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
   };
 
   return (
-    <div className="flex-1 p-6 overflow-auto">
+    <div className="flex-1 p-6">
       <div className={cn("max-w-4xl mx-auto space-y-6", contentClassName)}>
         {/* Deleted Banner */}
         {test.deletedAt && (

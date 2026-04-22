@@ -20,10 +20,11 @@ echo "==> docker build ${EB_IMAGE}"
 docker build \
   --label "com.docker.compose.project=lastest" \
   -t "${EB_IMAGE}" \
+  -t "lastest-embedded-browser:latest" \
   -f packages/embedded-browser/Dockerfile .
 
 echo "==> k3d image import"
-k3d image import "${EB_IMAGE}" -c "${CLUSTER_NAME}"
+k3d image import "${EB_IMAGE}" "lastest-embedded-browser:latest" -c "${CLUSTER_NAME}"
 
 echo "==> kubectl set env EB_IMAGE=${EB_IMAGE}"
 kubectl -n "${NAMESPACE}" set env deploy/lastest-app EB_IMAGE="${EB_IMAGE}"

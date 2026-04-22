@@ -1,9 +1,12 @@
 import { notFound } from 'next/navigation';
 import Link from 'next/link';
 import type { Metadata } from 'next';
+import { CheckCircle, XCircle, AlertTriangle, FileCheck2 } from 'lucide-react';
 import * as queries from '@/lib/db/queries';
 import { isValidShareSlug, buildShareUrl } from '@/lib/share/slug';
 import { ShareViewer } from './share-viewer-client';
+import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
 import type { VisualDiffWithTestStatus } from '@/lib/db/schema';
 
 export const revalidate = 60;
@@ -12,16 +15,17 @@ interface PageProps {
   params: Promise<{ slug: string }>;
 }
 
-function formatTimestamp(d: Date | null): string {
+function formatTimeAgo(d: Date | null): string {
   if (!d) return '';
-  return d.toLocaleString(undefined, {
-    year: 'numeric',
-    month: 'short',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    hour12: false,
-  });
+  const ms = Date.now() - d.getTime();
+  const minutes = Math.round(ms / 60000);
+  if (minutes < 1) return 'just now';
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.round(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.round(hours / 24);
+  if (days < 30) return `${days}d ago`;
+  return d.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
 }
 
 export async function generateMetadata({ params }: PageProps): Promise<Metadata> {
@@ -32,10 +36,10 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
   if (!ctx) return { title: 'Share removed' };
 
   const domain = ctx.share.targetDomain || ctx.test?.name || 'this site';
-  const title = `${domain} — specimen · Lastest`;
+  const title = `${domain} · Lastest`;
   const description = ctx.build.changesDetected
-    ? `${ctx.build.changesDetected} visual changes logged across ${ctx.build.totalTests} tests.`
-    : `A Lastest dossier on ${domain}: recording, screenshots, and visual diff report.`;
+    ? `${ctx.build.changesDetected} visual changes detected across ${ctx.build.totalTests} tests.`
+    : `Visual regression check for ${domain} — recording, screenshots, and diff report.`;
 
   return {
     title,
@@ -66,7 +70,6 @@ export default async function PublicSharePage({ params }: PageProps) {
     testRun ? queries.getTestResultsByRun(testRun.id) : Promise.resolve([]),
   ]);
 
-  // Test-level share: filter diffs + results to just that test.
   const diffs: VisualDiffWithTestStatus[] = share.testId
     ? diffsRaw.filter((d) => d.testId === share.testId)
     : diffsRaw;
@@ -74,53 +77,55 @@ export default async function PublicSharePage({ params }: PageProps) {
     ? results.filter((r) => r.testId === share.testId)
     : results;
 
-  // Fire-and-forget view bump
-  queries.incrementPublicShareView(slug).catch(() => {});
-
   const mediaBase = `/api/share/${slug}/media`;
   const toUrl = (p: string | null | undefined): string | null => {
     if (!p) return null;
     return mediaBase + (p.startsWith('/') ? p : `/${p}`);
   };
 
-  // Group diffs by test; sort tests by severity then name.
+  // Group diffs by test
   const byTest = new Map<string, { testId: string; testName: string; diffs: VisualDiffWithTestStatus[] }>();
   for (const d of diffs) {
-    const key = d.testId;
-    if (!byTest.has(key)) {
-      byTest.set(key, {
+    if (!byTest.has(d.testId)) {
+      byTest.set(d.testId, {
         testId: d.testId,
         testName: d.testName || test?.name || 'Unnamed test',
         diffs: [],
       });
     }
-    byTest.get(key)!.diffs.push(d);
+    byTest.get(d.testId)!.diffs.push(d);
   }
 
   function diffTier(d: VisualDiffWithTestStatus): number {
     if (d.testResultStatus === 'failed' || d.status === 'rejected') return 0;
-    if ((d.classification === 'changed') || ((d.pixelDifference ?? 0) > 0)) return 1;
+    if (d.classification === 'changed' || (d.pixelDifference ?? 0) > 0) return 1;
     return 2;
+  }
+  function hasChange(d: VisualDiffWithTestStatus): boolean {
+    return diffTier(d) < 2;
   }
 
   const testGroups = Array.from(byTest.values())
-    .map((g) => ({
-      ...g,
-      diffs: g.diffs.slice().sort((a, b) => {
-        const t = diffTier(a) - diffTier(b);
-        if (t !== 0) return t;
-        return (b.pixelDifference ?? 0) - (a.pixelDifference ?? 0);
-      }),
-      severity: Math.min(...g.diffs.map(diffTier)),
-    }))
+    .map((g) => {
+      const changed = g.diffs.filter(hasChange);
+      return {
+        ...g,
+        diffs: changed.slice().sort((a, b) => {
+          const t = diffTier(a) - diffTier(b);
+          if (t !== 0) return t;
+          return (b.pixelDifference ?? 0) - (a.pixelDifference ?? 0);
+        }),
+        severity: changed.length > 0 ? Math.min(...changed.map(diffTier)) : 2,
+      };
+    })
+    .filter((g) => g.diffs.length > 0)
     .sort((a, b) => a.severity - b.severity || a.testName.localeCompare(b.testName));
 
-  // Screenshots catalog (deduped across all results in scope)
+  // Screenshot catalog (deduped)
   const catalog: Array<{ src: string; label: string; testName: string }> = [];
   const seen = new Set<string>();
   for (const r of scopedResults) {
-    const thisTestName =
-      testGroups.find((g) => g.testId === r.testId)?.testName || test?.name || 'capture';
+    const thisTestName = test?.name ?? 'capture';
     if (r.screenshotPath && !seen.has(r.screenshotPath)) {
       seen.add(r.screenshotPath);
       catalog.push({ src: toUrl(r.screenshotPath)!, label: 'Primary', testName: thisTestName });
@@ -134,20 +139,17 @@ export default async function PublicSharePage({ params }: PageProps) {
     }
   }
 
-  // Videos: collect one per test result that has one
+  // Videos
   const videos: Array<{ src: string; testName: string; durationMs: number | null }> = [];
   for (const r of scopedResults) {
     if (!r.videoPath) continue;
-    const thisTestName =
-      testGroups.find((g) => g.testId === r.testId)?.testName || test?.name || 'Recording';
     videos.push({
       src: toUrl(r.videoPath)!,
-      testName: thisTestName,
+      testName: test?.name || 'Recording',
       durationMs: r.durationMs ?? null,
     });
   }
 
-  // Serialize diffs (plain JSON) for client
   const clientTestGroups = testGroups.map((g) => ({
     testId: g.testId,
     testName: g.testName,
@@ -173,147 +175,135 @@ export default async function PublicSharePage({ params }: PageProps) {
   const failed = build.failedCount ?? 0;
   const flaky = build.flakyCount ?? 0;
   const total = share.testId ? scopedResults.length : build.totalTests ?? 0;
-  const passed = share.testId ? scopedResults.filter((r) => r.status === 'passed').length : build.passedCount ?? 0;
-
-  const scopeLabel = share.testId ? 'Test specimen' : 'Build specimen';
+  const passed = share.testId
+    ? scopedResults.filter((r) => r.status === 'passed').length
+    : build.passedCount ?? 0;
 
   return (
-    <div className="min-h-screen bg-[oklch(0.985_0.003_230)] text-foreground selection:bg-primary/20">
-      {/* Paper grain */}
-      <div
-        className="pointer-events-none fixed inset-0 z-0 opacity-[0.035] mix-blend-multiply"
-        style={{
-          backgroundImage:
-            "url(\"data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='200' height='200'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0.5 0'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>\")",
-        }}
-        aria-hidden
-      />
-
+    <div className="min-h-screen bg-background">
       {/* Top bar */}
-      <header className="relative z-10 border-b border-foreground/10 bg-background/80 backdrop-blur-sm">
-        <div className="mx-auto max-w-5xl px-5 sm:px-8 h-14 flex items-center justify-between">
-          <Link href="/" className="flex items-center gap-2.5 group">
+      <header className="border-b sticky top-0 z-20 bg-background/80 backdrop-blur">
+        <div className="mx-auto max-w-5xl px-4 sm:px-6 h-14 flex items-center justify-between">
+          <Link href="/" className="flex items-center gap-2 font-semibold">
             <LastestMark />
-            <span className="font-mono text-[11px] tracking-[0.25em] uppercase font-medium">
-              Lastest
-            </span>
+            <span>Lastest</span>
           </Link>
-          <div className="flex items-center gap-5 text-[11px] font-mono tracking-[0.15em] uppercase text-muted-foreground">
-            <span className="hidden sm:inline">{scopeLabel} · Ref {slug.slice(0, 6).toUpperCase()}</span>
+          <div className="flex items-center gap-3">
             <Link
               href={signInLink}
-              className="text-foreground hover:text-primary transition-colors"
+              className="text-sm text-muted-foreground hover:text-foreground underline-offset-4 hover:underline"
             >
               Sign in
             </Link>
+            <Button asChild size="sm">
+              <Link href={claimLink}>Sign up free</Link>
+            </Button>
           </div>
         </div>
       </header>
 
-      <main className="relative z-10 mx-auto max-w-5xl px-5 sm:px-8 pb-32">
+      <main className="mx-auto max-w-5xl px-4 sm:px-6 py-8 sm:py-10 space-y-8 pb-32 sm:pb-10">
         {/* Hero */}
-        <section className="pt-10 sm:pt-14">
-          <div className="flex flex-col gap-6">
-            <p className="font-mono text-[10px] tracking-[0.35em] uppercase text-muted-foreground">
-              File · {formatTimestamp(build.completedAt ?? build.createdAt)}
+        <section className="flex flex-col sm:flex-row sm:items-start gap-4">
+          <FaviconTile domain={share.targetDomain} />
+          <div className="min-w-0 flex-1 space-y-2">
+            <p className="text-xs font-medium text-muted-foreground">We visually tested</p>
+            <h1 className="text-3xl sm:text-4xl font-semibold tracking-tight break-words">
+              {displayDomain}
+            </h1>
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-muted-foreground">
               {testRun?.gitBranch && (
-                <>
-                  <span className="mx-2">——</span>
-                  branch <span className="text-foreground/80">{testRun.gitBranch}</span>
-                </>
+                <span className="font-mono">{testRun.gitBranch}</span>
               )}
               {testRun?.gitCommit && testRun.gitCommit !== 'unknown' && (
                 <>
-                  <span className="mx-2">——</span>
-                  commit <span className="text-foreground/80">{testRun.gitCommit.slice(0, 7)}</span>
+                  <span>·</span>
+                  <span className="font-mono">{testRun.gitCommit.slice(0, 7)}</span>
                 </>
               )}
-            </p>
-
-            <div className="flex items-start gap-5">
-              <FaviconOrInitialServer domain={share.targetDomain} />
-              <div className="min-w-0 flex-1">
-                <p className="font-mono text-[10px] tracking-[0.3em] uppercase text-muted-foreground mb-1">
-                  Subject of inspection
-                </p>
-                <h1
-                  className="font-[family-name:var(--font-display)] text-[clamp(2.5rem,7vw,5.5rem)] leading-[0.95] tracking-tight break-words"
-                >
-                  {displayDomain}
-                </h1>
-              </div>
+              {build.completedAt && (
+                <>
+                  <span>·</span>
+                  <span>{formatTimeAgo(build.completedAt)}</span>
+                </>
+              )}
             </div>
-
-            {/* Summary rail */}
-            <div className="mt-2 border-y border-foreground/15 py-3 flex flex-wrap items-baseline gap-x-8 gap-y-2">
-              <Stat label="Tests" value={total} />
-              <Stat label="Passed" value={passed} tone="neutral" />
-              {changed > 0 && <Stat label="Changed" value={changed} tone="changed" />}
-              {failed > 0 && <Stat label="Failed" value={failed} tone="failed" />}
-              {flaky > 0 && <Stat label="Flaky" value={flaky} tone="flaky" />}
-              <div className="ml-auto font-mono text-[10px] tracking-[0.3em] uppercase text-muted-foreground">
-                Dossier {slug.slice(0, 8).toUpperCase()}
-              </div>
+            <div className="flex flex-wrap gap-2 pt-2">
+              <SummaryBadge label="Tests" value={total} />
+              {passed > 0 && (
+                <SummaryBadge
+                  label="Passed"
+                  value={passed}
+                  icon={<CheckCircle className="w-3 h-3" />}
+                  tone="success"
+                />
+              )}
+              {changed > 0 && (
+                <SummaryBadge
+                  label="Changed"
+                  value={changed}
+                  icon={<AlertTriangle className="w-3 h-3" />}
+                  tone="warning"
+                />
+              )}
+              {failed > 0 && (
+                <SummaryBadge
+                  label="Failed"
+                  value={failed}
+                  icon={<XCircle className="w-3 h-3" />}
+                  tone="danger"
+                />
+              )}
+              {flaky > 0 && <SummaryBadge label="Flaky" value={flaky} tone="warning" />}
             </div>
           </div>
         </section>
 
         <ShareViewer
+          slug={slug}
           videos={videos}
           testGroups={clientTestGroups}
           catalog={catalog}
           claimLink={claimLink}
           signInLink={signInLink}
           domain={displayDomain}
+          totals={{ total, passed, changed, failed }}
         />
 
-        {/* Primary CTA */}
-        <section className="mt-14 sm:mt-20 relative overflow-hidden border border-foreground bg-foreground text-background">
-          <CornerReticles />
-          <div className="relative px-6 sm:px-12 py-10 sm:py-14 grid gap-8 sm:grid-cols-[1fr_auto] sm:items-end">
-            <div className="space-y-5 max-w-lg">
-              <p className="font-mono text-[10px] tracking-[0.35em] uppercase text-primary">
-                Chain of custody
-              </p>
-              <h2 className="font-[family-name:var(--font-display)] text-4xl sm:text-5xl leading-[1.02] tracking-tight">
-                Take ownership of this specimen.
-              </h2>
-              <p className="text-background/70 text-[15px] leading-relaxed">
-                Sign up free. We&apos;ll clone the test code into your own Lastest workspace —
-                you supply the environment, we supply the regression coverage.
-              </p>
+        {/* Primary CTA card */}
+        <section className="rounded-xl border bg-primary/5 border-primary/30 p-6 sm:p-8 flex flex-col sm:flex-row sm:items-center gap-4 sm:gap-6">
+          <div className="flex-1">
+            <div className="flex items-center gap-2 mb-1">
+              <FileCheck2 className="w-4 h-4 text-primary" />
+              <span className="text-xs font-medium text-primary uppercase tracking-wide">
+                Ready to own this test
+              </span>
             </div>
-            <div className="flex flex-col gap-2.5">
-              <Link
-                href={claimLink}
-                className="group inline-flex items-center justify-between gap-8 bg-primary text-primary-foreground px-6 py-4 font-mono text-xs tracking-[0.2em] uppercase hover:bg-primary/90 transition-colors"
-              >
-                <span>Sign up free</span>
-                <ArrowIcon />
-              </Link>
-              <Link
-                href={signInLink}
-                className="inline-flex items-center justify-center gap-2 border border-background/25 text-background/90 px-6 py-3 font-mono text-[11px] tracking-[0.2em] uppercase hover:bg-background/10 transition-colors"
-              >
-                Already have an account
-              </Link>
-            </div>
+            <h2 className="text-xl sm:text-2xl font-semibold">Sign up and claim it — free</h2>
+            <p className="text-sm text-muted-foreground mt-1.5 max-w-lg">
+              We&apos;ll copy the test into your own Lastest workspace. You supply the environment,
+              we supply the regression coverage.
+            </p>
+          </div>
+          <div className="flex flex-col sm:flex-row gap-2 shrink-0">
+            <Button asChild size="lg">
+              <Link href={claimLink}>Sign up free</Link>
+            </Button>
+            <Button asChild variant="outline" size="lg">
+              <Link href={signInLink}>Sign in</Link>
+            </Button>
           </div>
         </section>
 
         {/* Footer */}
-        <footer className="mt-12 pt-6 border-t border-foreground/10 flex flex-wrap items-center gap-x-5 gap-y-2 justify-between font-mono text-[10px] tracking-[0.2em] uppercase text-muted-foreground">
-          <span>Dossier generated by Lastest</span>
-          <div className="flex items-center gap-5">
-            <Link href="/terms" className="hover:text-foreground transition-colors">
-              Terms
-            </Link>
-            <Link href="/privacy" className="hover:text-foreground transition-colors">
-              Privacy
-            </Link>
+        <footer className="pt-6 border-t text-xs text-muted-foreground flex flex-wrap items-center gap-x-5 gap-y-2 justify-between">
+          <span>Run by Lastest · Shared {formatTimeAgo(share.createdAt)}</span>
+          <div className="flex items-center gap-4">
+            <Link href="/terms" className="hover:text-foreground">Terms</Link>
+            <Link href="/privacy" className="hover:text-foreground">Privacy</Link>
             <a
               href={`mailto:abuse@lastest.cloud?subject=Takedown%20request:%20${slug}`}
-              className="hover:text-foreground transition-colors"
+              className="hover:text-foreground"
             >
               Report abuse
             </a>
@@ -325,48 +315,29 @@ export default async function PublicSharePage({ params }: PageProps) {
 }
 
 function LastestMark() {
-  // Real Lastest logo from /public. Use light svg with a dark-mode override via <picture>.
   return (
-    <span className="relative inline-flex items-center justify-center w-6 h-6">
+    <span className="relative inline-flex items-center justify-center w-7 h-7 rounded-md">
       {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img
-        src="/icon-light.svg"
-        alt=""
-        width={24}
-        height={24}
-        className="block dark:hidden"
-      />
+      <img src="/icon-light.svg" alt="" width={28} height={28} className="block dark:hidden" />
       {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img
-        src="/icon-dark.svg"
-        alt=""
-        width={24}
-        height={24}
-        className="hidden dark:block"
-      />
+      <img src="/icon-dark.svg" alt="" width={28} height={28} className="hidden dark:block" />
     </span>
   );
 }
 
-// Server-rendered version of the favicon tile. The client version in the
-// viewer handles onError fallbacks — at this point we can't know which, so we
-// default to the favicon and let a client fallback upgrade it gracefully.
-function FaviconOrInitialServer({ domain }: { domain: string | null }) {
+function FaviconTile({ domain }: { domain: string | null }) {
   const letter = (domain ?? '?').charAt(0).toUpperCase();
   return (
-    <div className="relative w-16 h-16 sm:w-20 sm:h-20 shrink-0 border border-foreground/15 bg-card flex items-center justify-center overflow-hidden">
-      {/* Letter tile is always rendered; favicon covers it when it loads. */}
-      <span className="font-[family-name:var(--font-display)] text-3xl sm:text-4xl text-foreground/80">
-        {letter}
-      </span>
+    <div className="relative w-14 h-14 sm:w-16 sm:h-16 shrink-0 rounded-xl border bg-card shadow-sm flex items-center justify-center overflow-hidden">
+      <span className="text-2xl font-semibold text-muted-foreground">{letter}</span>
       {domain && (
         // eslint-disable-next-line @next/next/no-img-element
         <img
           src={`https://www.google.com/s2/favicons?domain=${domain}&sz=128`}
           alt=""
-          width={80}
-          height={80}
-          className="absolute inset-0 w-full h-full object-contain p-2.5"
+          width={64}
+          height={64}
+          className="absolute inset-0 w-full h-full object-contain p-2"
           referrerPolicy="no-referrer"
           loading="lazy"
         />
@@ -375,51 +346,36 @@ function FaviconOrInitialServer({ domain }: { domain: string | null }) {
   );
 }
 
-function Stat({
+function SummaryBadge({
   label,
   value,
   tone = 'default',
+  icon,
 }: {
   label: string;
   value: number;
-  tone?: 'default' | 'neutral' | 'changed' | 'failed' | 'flaky';
+  tone?: 'default' | 'success' | 'warning' | 'danger';
+  icon?: React.ReactNode;
 }) {
-  const toneClass = {
-    default: 'text-foreground',
-    neutral: 'text-foreground',
-    changed: 'text-amber-600',
-    failed: 'text-red-600',
-    flaky: 'text-amber-700',
+  if (tone === 'default') {
+    return (
+      <Badge variant="secondary" className="gap-1.5">
+        {icon}
+        <span className="tabular-nums">{value}</span>
+        <span className="text-muted-foreground font-normal">{label}</span>
+      </Badge>
+    );
+  }
+  const cls = {
+    success: 'bg-green-50 text-green-700 border-green-200',
+    warning: 'bg-amber-50 text-amber-700 border-amber-200',
+    danger: 'bg-red-50 text-red-700 border-red-200',
   }[tone];
   return (
-    <div className="flex items-baseline gap-2">
-      <span className={`font-mono tabular-nums text-2xl ${toneClass}`}>
-        {String(value).padStart(2, '0')}
-      </span>
-      <span className="font-mono text-[10px] tracking-[0.25em] uppercase text-muted-foreground">
-        {label}
-      </span>
-    </div>
-  );
-}
-
-function CornerReticles() {
-  const cls =
-    'absolute w-3 h-3 pointer-events-none border-primary';
-  return (
-    <>
-      <span className={`${cls} top-2 left-2 border-t border-l`} aria-hidden />
-      <span className={`${cls} top-2 right-2 border-t border-r`} aria-hidden />
-      <span className={`${cls} bottom-2 left-2 border-b border-l`} aria-hidden />
-      <span className={`${cls} bottom-2 right-2 border-b border-r`} aria-hidden />
-    </>
-  );
-}
-
-function ArrowIcon() {
-  return (
-    <svg width="18" height="10" viewBox="0 0 18 10" fill="none" className="transition-transform group-hover:translate-x-0.5">
-      <path d="M0 5H17M17 5L13 1M17 5L13 9" stroke="currentColor" strokeWidth="1.5" />
-    </svg>
+    <Badge variant="outline" className={`${cls} gap-1.5`}>
+      {icon}
+      <span className="tabular-nums">{value}</span>
+      <span className="font-normal opacity-80">{label}</span>
+    </Badge>
   );
 }

@@ -85,6 +85,7 @@ echo "==> docker build ${EB_IMAGE}"
 docker build \
   --label "com.docker.compose.project=lastest" \
   -t "${EB_IMAGE}" \
+  -t "lastest-embedded-browser:latest" \
   -f packages/embedded-browser/Dockerfile .
 
 echo "==> pnpm build (app)"
@@ -98,11 +99,18 @@ docker build \
   --build-arg GIT_COMMIT_COUNT="${GIT_COMMIT_COUNT}" \
   --label "com.docker.compose.project=lastest" \
   -t "${APP_IMAGE}" \
+  -t "lastest-app:latest" \
   -f Dockerfile .
 
-# 4. Import into k3d nodes (skips the registry roundtrip)
+# 4. Import into k3d nodes (skips the registry roundtrip).
+#    Also import `:latest` tags so host `pnpm dev` (which hardcodes
+#    EB_IMAGE=lastest-embedded-browser:latest in .env.local) can launch EB Jobs
+#    that reference that stable tag rather than the per-build SHA tag.
 echo "==> Importing images into k3d"
-k3d image import "${APP_IMAGE}" "${EB_IMAGE}" -c "${CLUSTER_NAME}"
+k3d image import \
+  "${APP_IMAGE}" "${EB_IMAGE}" \
+  "lastest-app:latest" "lastest-embedded-browser:latest" \
+  -c "${CLUSTER_NAME}"
 
 # 5. Postgres (skip if .env.local points DATABASE_URL at an external DB)
 EXTERNAL_DB_URL="$(grep -E '^DATABASE_URL=' .env.local 2>/dev/null | tail -1 | cut -d= -f2- || true)"

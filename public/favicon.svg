@@ -1,8 +1,16 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" width="200" height="200" shape-rendering="crispEdges" role="img" aria-label="lasTest Delta Mark">
-  <title>lasTest — Delta Mark (primary)</title>
-  <rect x="34" y="34" width="110" height="110" fill="none" stroke="#0f1012" stroke-width="6"/>
+  <title>lasTest — Delta Mark</title>
+  <style>
+    .fg { fill: #0f1012; }
+    .fg-stroke { fill: none; stroke: #0f1012; }
+    @media (prefers-color-scheme: dark) {
+      .fg { fill: #ffffff; }
+      .fg-stroke { stroke: #ffffff; }
+    }
+  </style>
+  <rect x="34" y="34" width="110" height="110" class="fg-stroke" stroke-width="6"/>
   <rect x="56" y="56" width="110" height="110" fill="#ff3c2a"/>
-  <rect x="56" y="56" width="88" height="88" fill="#0f1012"/>
-  <path d="M 70 34 L 80 18 L 90 34 Z" fill="#0f1012"/>
-  <path d="M 110 34 L 120 18 L 130 34 Z" fill="#0f1012"/>
+  <rect x="56" y="56" width="88" height="88" class="fg"/>
+  <path d="M 70 34 L 80 18 L 90 34 Z" class="fg"/>
+  <path d="M 110 34 L 120 18 L 130 34 Z" class="fg"/>
 </svg>

@@ -20,10 +20,11 @@ docker build \
   --build-arg GIT_COMMIT_COUNT="${GIT_COMMIT_COUNT}" \
   --label "com.docker.compose.project=lastest" \
   -t "${APP_IMAGE}" \
+  -t "lastest-app:latest" \
   -f Dockerfile .
 
 echo "==> k3d image import"
-k3d image import "${APP_IMAGE}" -c "${CLUSTER_NAME}"
+k3d image import "${APP_IMAGE}" "lastest-app:latest" -c "${CLUSTER_NAME}"
 
 # Re-merge .env.local into the secrets so rebuilds pick up edited OAuth /
 # BETTER_AUTH_* / Resend keys. Cluster-owned randoms are preserved.
