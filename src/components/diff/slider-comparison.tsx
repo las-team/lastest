@@ -164,20 +164,20 @@ export function SliderComparison({
       {baselineImage && (
         <>
           <button
-            className={`px-3 py-1 rounded text-sm ${viewMode === 'slider' ? 'bg-primary text-primary-foreground' : 'bg-muted'}`}
+            className={`px-3 py-1 rounded text-sm ${viewMode === 'slider' ? 'bg-accent text-accent-foreground' : 'bg-muted'}`}
             onClick={() => setViewMode('slider')}
           >
             Slider
           </button>
           <button
-            className={`px-3 py-1 rounded text-sm ${viewMode === 'side-by-side' ? 'bg-primary text-primary-foreground' : 'bg-muted'}`}
+            className={`px-3 py-1 rounded text-sm ${viewMode === 'side-by-side' ? 'bg-accent text-accent-foreground' : 'bg-muted'}`}
             onClick={() => setViewMode('side-by-side')}
           >
             Side by Side
           </button>
           {diffImage && (
             <button
-              className={`px-3 py-1 rounded text-sm ${viewMode === 'overlay' ? 'bg-primary text-primary-foreground' : 'bg-muted'}`}
+              className={`px-3 py-1 rounded text-sm ${viewMode === 'overlay' ? 'bg-accent text-accent-foreground' : 'bg-muted'}`}
               onClick={() => setViewMode('overlay')}
             >
               Diff Overlay
@@ -197,14 +197,14 @@ export function SliderComparison({
         <>
           {baselineImage && (
             <button
-              className={`px-3 py-1 rounded text-sm ${viewMode === 'three-way' ? 'bg-primary text-primary-foreground' : 'bg-primary/10 text-primary'}`}
+              className={`px-3 py-1 rounded text-sm ${viewMode === 'three-way' ? 'bg-accent text-accent-foreground' : 'bg-accent/40 text-accent-foreground'}`}
               onClick={() => setViewMode('three-way')}
             >
               Three-Way
             </button>
           )}
           <button
-            className={`px-3 py-1 rounded text-sm ${viewMode === 'planned-vs-actual' ? 'bg-primary text-primary-foreground' : 'bg-primary/10 text-primary'}`}
+            className={`px-3 py-1 rounded text-sm ${viewMode === 'planned-vs-actual' ? 'bg-accent text-accent-foreground' : 'bg-accent/40 text-accent-foreground'}`}
             onClick={() => setViewMode('planned-vs-actual')}
           >
             Planned vs Actual

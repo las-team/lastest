@@ -6,7 +6,7 @@ import { Badge } from '@/components/ui/badge';
 import { CheckCircle2, XCircle, Circle, ShieldAlert, ListOrdered, Code2 } from 'lucide-react';
 import type { TestAssertion, AssertionResult, CapturedScreenshot } from '@/lib/db/schema';
 import { cn } from '@/lib/utils';
-import { extractTestBody, parseSteps, type DebugStep } from '@/lib/playwright/debug-parser';
+import { extractTestBody, parseSteps, extractEditableValue, type DebugStep } from '@/lib/playwright/debug-parser';
 import { parseAssertions } from '@/lib/playwright/assertion-parser';
 
 interface TestStepsTabProps {
@@ -110,34 +110,6 @@ function resolveStepLabel(label: string, code: string, baseUrl: string | null | 
   resolved = resolved.replace(/new Date\(\)\.toISOString\(\)/, 'current timestamp');
 
   return resolved;
-}
-
-/** Extract the fill/type value from a step's code, if editable */
-function extractEditableValue(step: DebugStep): string | null {
-  if (step.type !== 'action') return null;
-  const code = step.code.trim();
-
-  // locateWithFallback fill: locateWithFallback(page, [...], 'fill', 'VALUE', ...)
-  const lwfMatch = code.match(/locateWithFallback\([^,]+,\s*\[[^\]]*\],\s*'fill',\s*'((?:[^'\\]|\\.)*)'/);
-  if (lwfMatch) return lwfMatch[1].replace(/\\'/g, "'").replace(/\\\\/g, '\\');
-
-  // page.locator(...).fill('VALUE') or page.getByRole(...).fill('VALUE')
-  const fillMatch = code.match(/\.fill\s*\(\s*'((?:[^'\\]|\\.)*)'\s*\)/);
-  if (fillMatch) return fillMatch[1].replace(/\\'/g, "'").replace(/\\\\/g, '\\');
-
-  // page.keyboard.type('VALUE')
-  const typeMatch = code.match(/\.keyboard\.type\s*\(\s*'((?:[^'\\]|\\.)*)'\s*\)/);
-  if (typeMatch) return typeMatch[1].replace(/\\'/g, "'").replace(/\\\\/g, '\\');
-
-  // selectOption: locateWithFallback(page, [...], 'selectOption', 'VALUE', ...)
-  const selMatch = code.match(/locateWithFallback\([^,]+,\s*\[[^\]]*\],\s*'selectOption',\s*'((?:[^'\\]|\\.)*)'/);
-  if (selMatch) return selMatch[1].replace(/\\'/g, "'").replace(/\\\\/g, '\\');
-
-  // page.locator(...).selectOption('VALUE')
-  const selOptMatch = code.match(/\.selectOption\s*\(\s*'((?:[^'\\]|\\.)*)'\s*\)/);
-  if (selOptMatch) return selOptMatch[1].replace(/\\'/g, "'").replace(/\\\\/g, '\\');
-
-  return null;
 }
 
 const ALL_TYPES = ['action', 'navigation', 'assertion', 'screenshot', 'wait', 'variable', 'log', 'other'] as const;

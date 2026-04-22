@@ -11,7 +11,9 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { validateRunnerToken, updateRunnerStatus, markStaleRunnersOffline, deleteStaleSystemRunners } from '@/server/actions/runners';
-import { reapStalePoolEBs } from '@/server/actions/embedded-sessions';
+import { reapStalePoolEBs, reapIdleEBJobs } from '@/server/actions/embedded-sessions';
+import { ensureWarmPool, isKubernetesMode, ebIdleTTLMs } from '@/lib/eb/provisioner';
+import { ensureGlobalPlaywrightSettings } from '@/lib/db/queries/settings';
 import type { Message, HeartbeatMessage, TestResultResponse, SetupResultResponse, ScreenshotUploadResponse, RecordingEventResponse, RecordingStoppedResponse } from '@/lib/ws/protocol';
 import { waitForCommandQueued, notifyCommandQueued } from '@/lib/ws/runner-events';
 import fs from 'fs/promises';
@@ -108,6 +110,19 @@ function ensureInitialized() {
     console.error('[Startup] Failed to mark stale runners offline:', error);
   });
 
+  // Ensure the global playwright_settings row exists — poolMax() / ebIdleTTLMs()
+  // read from it and throw if it's missing. Must run before the warm-pool top-up.
+  ensureGlobalPlaywrightSettings()
+    .then(() => {
+      // Top up the warm EB pool so the first claim hits an already-online EB
+      if (isKubernetesMode()) {
+        return ensureWarmPool();
+      }
+    })
+    .catch((error) => {
+      console.error('[Startup] ensureGlobalPlaywrightSettings / warm pool init failed:', error);
+    });
+
   // Start cleanup interval to remove stale sessions, mark runners offline, and GC old commands
   setInterval(async () => {
     const now = Date.now();
@@ -155,14 +170,32 @@ function ensureInitialized() {
       console.error('[GC] Failed to timeout stale commands:', error);
     }
 
-    // Reap stale pool EBs: busy + no heartbeat for 10min
+    // Reap stale pool EBs: busy + no heartbeat longer than EB_HEARTBEAT_TIMEOUT_MS.
+    // Default 300s; must comfortably exceed the slowest expected test + upload time on
+    // a contended node, otherwise we kill live test runs mid-execution.
     try {
-      const reaped = await reapStalePoolEBs();
+      const heartbeatTimeoutMs = parseInt(process.env.EB_HEARTBEAT_TIMEOUT_MS || '300000', 10);
+      const reaped = await reapStalePoolEBs(heartbeatTimeoutMs);
       if (reaped > 0) {
         console.log(`[Reaper] Released ${reaped} stale pool EB(s)`);
       }
     } catch (error) {
       console.error('[Reaper] Failed to reap stale pool EBs:', error);
+    }
+
+    // Tear down idle/offline on-demand EB Jobs above the warm-pool minimum
+    try {
+      const idleTtlMs = await ebIdleTTLMs();
+      await reapIdleEBJobs(idleTtlMs);
+    } catch (error) {
+      console.error('[Reaper] Failed to reap idle EB Jobs:', error);
+    }
+
+    // Top up the warm pool if it has drifted below the minimum
+    try {
+      await ensureWarmPool();
+    } catch (error) {
+      console.error('[WarmPool] ensureWarmPool failed:', error);
     }
   }, CLEANUP_INTERVAL_MS);
 }
@@ -419,15 +452,37 @@ export async function POST(request: NextRequest) {
         const recordingMsg = message as RecordingEventResponse;
         const { sessionId: recSessionId, events } = recordingMsg.payload;
 
-        // Find the remote recording session
+        // Persist to DB first — covers the cross-pod case where the EB POSTs
+        // to the *-internal pod but the recording session lives in-memory on
+        // the main pod. Same-pod code path also reads from DB, so consumers
+        // see events regardless of which pod received them.
+        if (events.length > 0) {
+          try {
+            const { db: dbRw } = await import('@/lib/db');
+            const { remoteRecordingEvents: remoteEventsTable } = await import('@/lib/db/schema');
+            await dbRw.insert(remoteEventsTable).values(
+              events.map((e) => ({
+                sessionId: recSessionId,
+                sequence: (e as RemoteRecordingEvent).sequence,
+                type: (e as RemoteRecordingEvent).type,
+                timestamp: (e as RemoteRecordingEvent).timestamp,
+                status: (e as RemoteRecordingEvent).status,
+                verification: ((e as RemoteRecordingEvent).verification ?? null) as Record<string, unknown> | null,
+                data: (e as RemoteRecordingEvent).data as Record<string, unknown>,
+              })),
+            ).onConflictDoNothing();
+          } catch (err) {
+            console.warn(`[Recording] Failed to persist events for session ${recSessionId}:`, err);
+          }
+        }
+
+        // If the session exists in THIS process's memory, append directly too
+        // so same-pod consumers don't wait for the next DB poll.
         const session = findRemoteSessionBySessionId(recSessionId);
         if (session) {
-          // Append events to the session
           for (const event of events) {
             session.events.push(event as RemoteRecordingEvent);
           }
-        } else {
-          console.warn(`[Recording] Received events for unknown session: ${recSessionId}`);
         }
 
         return NextResponse.json({ ok: true });
@@ -435,12 +490,15 @@ export async function POST(request: NextRequest) {
 
       case 'response:recording_stopped': {
         const stoppedMsg = message as RecordingStoppedResponse;
-        const { sessionId: stoppedSessionId } = stoppedMsg.payload;
+        const { sessionId: stoppedSessionId, domSnapshot: stoppedDomSnapshot } = stoppedMsg.payload;
 
         const session = findRemoteSessionBySessionId(stoppedSessionId);
         if (session) {
           session.isRecording = false;
-          console.log(`[Recording] Session ${stoppedSessionId} stopped, ${session.events.length} events`);
+          if (stoppedDomSnapshot) {
+            session.domSnapshot = stoppedDomSnapshot;
+          }
+          console.log(`[Recording] Session ${stoppedSessionId} stopped, ${session.events.length} events, domSnapshot=${stoppedDomSnapshot ? `${stoppedDomSnapshot.elements?.length ?? 0} elements` : 'none'}`);
         }
 
         return NextResponse.json({ ok: true });
@@ -658,6 +716,7 @@ export interface RemoteRecordingSession {
   generatedCode: string | null;
   startedAt: Date;
   selectorPriority: Array<{ type: string; enabled: boolean; priority: number }>;
+  domSnapshot?: import('@/lib/db/schema').DomSnapshotData;
 }
 
 function findRemoteSessionBySessionId(sessionId: string): RemoteRecordingSession | undefined {
@@ -704,16 +763,45 @@ export function getRemoteRecordingSession(repositoryId?: string | null): RemoteR
 }
 
 /**
- * Get events from a remote recording session since a given sequence number
+ * Get events from a remote recording session since a given sequence number.
+ * Merges same-pod in-memory state with DB-persisted events (which may have
+ * arrived on a different pod, e.g. the envoy-less *-internal pod that EBs POST
+ * to in kubernetes mode). Deduped by sequence.
  */
-export function getRemoteRecordingEvents(repositoryId?: string | null, sinceSequence?: number): RemoteRecordingEvent[] {
+export async function getRemoteRecordingEvents(repositoryId?: string | null, sinceSequence?: number): Promise<RemoteRecordingEvent[]> {
   const session = getRemoteRecordingSession(repositoryId);
   if (!session) return [];
 
-  if (sinceSequence !== undefined) {
-    return session.events.filter(e => e.sequence > sinceSequence);
+  const memEvents = sinceSequence !== undefined
+    ? session.events.filter(e => e.sequence > sinceSequence)
+    : session.events;
+
+  let dbEvents: RemoteRecordingEvent[] = [];
+  try {
+    const { db: dbRo } = await import('@/lib/db');
+    const { remoteRecordingEvents: remoteEventsTable } = await import('@/lib/db/schema');
+    const { and: andOp, eq: eqOp, gt: gtOp } = await import('drizzle-orm');
+    const where = sinceSequence !== undefined
+      ? andOp(eqOp(remoteEventsTable.sessionId, session.sessionId), gtOp(remoteEventsTable.sequence, sinceSequence))
+      : eqOp(remoteEventsTable.sessionId, session.sessionId);
+    const rows = await dbRo.select().from(remoteEventsTable).where(where).orderBy(remoteEventsTable.sequence);
+    dbEvents = rows.map((r) => ({
+      type: r.type,
+      timestamp: r.timestamp,
+      sequence: r.sequence,
+      status: r.status as 'preview' | 'committed',
+      verification: (r.verification ?? undefined) as RemoteRecordingEvent['verification'],
+      data: (r.data ?? {}) as Record<string, unknown>,
+    }));
+  } catch (err) {
+    console.warn('[Recording] DB fetch failed, falling back to in-memory only:', err);
   }
-  return session.events;
+
+  // Dedupe by sequence; prefer DB rows (canonical).
+  const seen = new Map<number, RemoteRecordingEvent>();
+  for (const e of memEvents) seen.set(e.sequence, e);
+  for (const e of dbEvents) seen.set(e.sequence, e);
+  return Array.from(seen.values()).sort((a, b) => a.sequence - b.sequence);
 }
 
 /**
@@ -732,9 +820,20 @@ export function completeRemoteRecordingSession(repositoryId?: string | null, gen
 /**
  * Remove a remote recording session
  */
-export function clearRemoteRecordingSession(repositoryId?: string | null): void {
+export async function clearRemoteRecordingSession(repositoryId?: string | null): Promise<void> {
   const key = repositoryId ?? '__no_repo__';
+  const session = remoteRecordingSessionsMap.get(key);
   remoteRecordingSessionsMap.delete(key);
+  if (session) {
+    try {
+      const { db: dbRw } = await import('@/lib/db');
+      const { remoteRecordingEvents: remoteEventsTable } = await import('@/lib/db/schema');
+      const { eq: eqOp } = await import('drizzle-orm');
+      await dbRw.delete(remoteEventsTable).where(eqOp(remoteEventsTable.sessionId, session.sessionId));
+    } catch (err) {
+      console.warn(`[Recording] Failed to clear DB events for session ${session.sessionId}:`, err);
+    }
+  }
 }
 
 // ============================================

@@ -212,6 +212,7 @@ export interface RecordingEventResponse extends BaseMessage {
 export interface RecordingStoppedPayload {
   sessionId: string;
   generatedCode: string;
+  domSnapshot?: DomSnapshotPayload;
 }
 
 export interface RecordingStoppedResponse extends BaseMessage {
@@ -223,6 +224,20 @@ export interface LogEntry {
   timestamp: number;
   level: 'info' | 'warn' | 'error';
   message: string;
+}
+
+export interface DomSnapshotElementSummary {
+  tag: string;
+  id?: string;
+  textContent?: string;
+  boundingBox: { x: number; y: number; width: number; height: number };
+  selectors: Array<{ type: string; value: string }>;
+}
+
+export interface DomSnapshotPayload {
+  elements: DomSnapshotElementSummary[];
+  url: string;
+  timestamp: number;
 }
 
 export interface TestResultPayload {
@@ -241,6 +256,9 @@ export interface TestResultPayload {
   softErrors?: string[];
   videoData?: string; // base64-encoded video file
   videoFilename?: string;
+  lastReachedStep?: number;
+  totalSteps?: number;
+  domSnapshot?: DomSnapshotPayload;
 }
 
 export interface TestResultResponse extends BaseMessage {

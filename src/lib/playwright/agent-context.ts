@@ -48,9 +48,13 @@ export async function buildSeedFixture(repositoryId: string): Promise<SeedFixtur
   const parts: string[] = [];
   let hasLoginSetup = false;
 
-  // 1. Environment config
+  // 1. Environment config — fail loudly if missing rather than masking with a
+  //    localhost default, which silently sends MCP exploration at the wrong URL.
   const envConfig = await queries.getEnvironmentConfig(repositoryId);
-  const baseUrl = envConfig?.baseUrl || 'http://localhost:3000';
+  if (!envConfig?.baseUrl) {
+    throw new Error(`Base URL not configured for repository ${repositoryId}. Complete env setup first.`);
+  }
+  const baseUrl = envConfig.baseUrl;
 
   parts.push(`## Environment`);
   parts.push(`- Base URL: ${baseUrl}`);

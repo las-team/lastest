@@ -316,7 +316,7 @@ export function MetricsRow({
                 className={cn(
                   'inline-flex items-center gap-2 px-4 py-1.5 text-sm font-medium rounded-md transition-colors',
                   viewMode === 'branch'
-                    ? 'bg-background text-primary shadow-sm'
+                    ? 'bg-accent text-accent-foreground shadow-sm'
                     : 'text-muted-foreground hover:text-foreground'
                 )}
               >
@@ -328,7 +328,7 @@ export function MetricsRow({
                 className={cn(
                   'inline-flex items-center gap-2 px-4 py-1.5 text-sm font-medium rounded-md transition-colors',
                   viewMode === 'main'
-                    ? 'bg-background text-primary shadow-sm'
+                    ? 'bg-accent text-accent-foreground shadow-sm'
                     : 'text-muted-foreground hover:text-foreground'
                 )}
               >
@@ -345,7 +345,7 @@ export function MetricsRow({
               className={cn(
                 'inline-flex items-center gap-2 px-4 py-1.5 text-sm font-medium rounded-lg border transition-colors',
                 groupByTest
-                  ? 'bg-primary/10 text-primary border-primary/30'
+                  ? 'bg-accent text-accent-foreground border-accent'
                   : 'bg-muted text-muted-foreground border-transparent hover:text-foreground'
               )}
             >
@@ -361,7 +361,7 @@ export function MetricsRow({
               className={cn(
                 'inline-flex items-center gap-2 px-4 py-1.5 text-sm font-medium rounded-lg border transition-colors',
                 groupByArea
-                  ? 'bg-primary/10 text-primary border-primary/30'
+                  ? 'bg-accent text-accent-foreground border-accent'
                   : 'bg-muted text-muted-foreground border-transparent hover:text-foreground'
               )}
             >

@@ -20,7 +20,24 @@ pnpm db:studio                  # Drizzle Studio
 
 # Embedded Browser (local dev)
 docker compose -f docker-compose.eb.yml up -d --build  # Rebuild + start
+
+# Local k3s stack (dynamic EB provisioning via k3d)
+pnpm stack                      # bootstrap: build images + create k3d cluster + deploy
+pnpm stack:stop                 # teardown (pnpm stack:purge also drops .k8s-secrets.yaml)
+pnpm stack:refresh              # rebuild app image + rolling restart
+pnpm stack:refresh:eb           # rebuild EB image + restart app so new Jobs use it
+pnpm stack:refresh:all          # EB then app
+pnpm stack:status               # cluster + workloads + /api/health
+pnpm stack:logs [app|eb|all]    # tail pod logs (default: app)
 ```
+
+## k3s Local Dev (dynamic EB provisioning)
+
+- Manifests in `k8s/` (`app-deployment.yaml`, `postgres.yaml`, `embedded-browser-rbac.yaml`, …). Scripts in `scripts/k3d-*.sh`.
+- The EB provisioner (`src/lib/eb/provisioner.ts`) only runs **inside** a k8s pod — it reads the mounted SA token. `pnpm dev` on the host cannot exercise `EB_PROVISIONER=kubernetes`.
+- Service DNS is hard-coded: `lastest-app.lastest.svc.cluster.local:3000`. Override via `LASTEST_URL` only.
+- `scripts/_generate-secrets.sh` auto-merges OAuth / Resend / Twenty keys from `.env.local` into the k8s Secret. DB URL + `BETTER_AUTH_SECRET` + `SYSTEM_EB_TOKEN` stay k8s-owned.
+- All built images + cluster containers carry `com.docker.compose.project=lastest` so Docker Desktop groups them as one stack.
 
 ## Architecture
 

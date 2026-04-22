@@ -190,7 +190,22 @@
       "Bash(pnpm deploy:olares *)",
       "Bash(pg_isready -h localhost -p 5432)",
       "Bash(docker exec *)",
-      "Read(//etc/**)"
+      "Read(//etc/**)",
+      "Bash(pnpm eslint *)",
+      "Bash(pnpm --filter embedded-browser build)",
+      "Bash(docker buildx *)",
+      "Bash(rm -f /tmp/lastest-dev-*.tgz)",
+      "Bash(tar czf *)",
+      "Bash(tar xzf *)",
+      "mcp__lastest__lastest_list_repos",
+      "mcp__lastest__lastest_get_repo",
+      "mcp__lastest__lastest_list_tests",
+      "mcp__lastest__lastest_list_areas",
+      "mcp__lastest__lastest_get_test",
+      "mcp__lastest__lastest_create_area",
+      "mcp__lastest__lastest_create_test",
+      "mcp__lastest__lastest_health_check",
+      "Bash(pnpm stack:stop)"
     ]
   },
   "disabledMcpjsonServers": [

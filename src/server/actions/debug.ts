@@ -9,7 +9,7 @@ import { queueCommandToDB } from '@/app/api/ws/runner/route';
 import { createRemoteDebugSession, getRemoteDebugSession, clearRemoteDebugSession } from '@/app/api/ws/runner/route';
 import { resolveSetupCodeForRunner } from '@/lib/execution/setup-capture';
 import { executeSetupViaRunner } from '@/lib/execution/executor';
-import { claimPoolEB, releasePoolEB } from '@/server/actions/embedded-sessions';
+import { claimOrProvisionPoolEB, releasePoolEB } from '@/server/actions/embedded-sessions';
 import type { Message } from '@/lib/ws/protocol';
 
 export async function startDebugSession(
@@ -29,9 +29,10 @@ export async function startDebugSession(
   const settings = await getPlaywrightSettings(repoId);
   const envConfig = await getEnvironmentConfig(repoId);
 
-  // Resolve 'auto' to a pool-managed system EB (atomic claim)
+  // Resolve 'auto' to a pool-managed system EB (claim idle or provision fresh
+  // when EB_PROVISIONER=kubernetes and the pool has room).
   if (runnerId === 'auto') {
-    const poolEB = await claimPoolEB();
+    const poolEB = await claimOrProvisionPoolEB();
     if (!poolEB) {
       return { sessionId: '', error: 'All browsers are busy. Please try again later.' };
     }
@@ -77,7 +78,11 @@ export async function startDebugSession(
         settings?.navigationTimeout ?? undefined,
         settings,
       );
-      storageState = setupResult.storageState;
+      // Prefer the serialized JSON snapshot over the `persistent:<id>` marker —
+      // debug-executor creates its own BrowserContext and can't reach the
+      // test-executor's in-process setupContexts map, so the marker would be
+      // silently dropped by the JSON.parse/catch in createContextAndPage.
+      storageState = setupResult.storageStateJson ?? setupResult.storageState;
       setupVariables = setupResult.variables;
     } catch (err) {
       clearRemoteDebugSession(sessionId);
@@ -196,6 +201,11 @@ export async function stopDebugSession(
   // Check remote session
   const remoteSession = getRemoteDebugSession(sessionId);
   if (remoteSession) {
+    // Diagnostic: log the call stack so we can see WHICH client path is stopping
+    // a session that still looks alive to the user. Only useful while hunting
+    // the "Launching browser..." → instant-stop bug; remove once identified.
+    const stack = new Error().stack?.split('\n').slice(1, 5).join(' | ') ?? '(no stack)';
+    console.log(`[Debug] stopDebugSession(${sessionId.slice(0, 8)}) called — stack: ${stack}`);
     await queueCommandToDB(remoteSession.runnerId, {
       id: crypto.randomUUID(),
       type: 'command:stop_debug',

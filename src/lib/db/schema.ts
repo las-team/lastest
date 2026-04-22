@@ -699,6 +699,13 @@ export const playwrightSettings = pgTable('playwright_settings', {
   enableVideoRecording: boolean('enable_video_recording').default(false), // record test runs as WebM video
   screenshotDelay: integer('screenshot_delay').default(0), // ms delay before screenshot
   maxParallelTests: integer('max_parallel_tests').default(2), // max tests to run in parallel locally
+  // On-demand Kubernetes EB pool (see src/lib/eb/provisioner.ts):
+  //   maxParallelEBs: per-build cap on concurrent EB claims (1 test per EB).
+  //   ebPoolMax:      hard cap on concurrent system EBs across the cluster.
+  //   ebIdleTTLSeconds: idle timeout before a released EB Job is torn down.
+  maxParallelEBs: integer('max_parallel_ebs').default(10),
+  ebPoolMax: integer('eb_pool_max').default(30),
+  ebIdleTTLSeconds: integer('eb_idle_ttl_seconds').default(90),
   stabilization: jsonb('stabilization').$type<StabilizationSettings>(), // snapshot stabilization settings
   acceptAnyCertificate: boolean('accept_any_certificate').default(false), // ignore HTTPS/SSL cert errors
   networkErrorMode: text('network_error_mode').default('fail'), // 'fail' | 'warn' | 'ignore'
@@ -1652,6 +1659,32 @@ export const runnerCommandResults = pgTable('runner_command_results', {
 
 export type RunnerCommandResult = typeof runnerCommandResults.$inferSelect;
 export type NewRunnerCommandResult = typeof runnerCommandResults.$inferInsert;
+
+// ============================================
+// Remote Recording Events (cross-pod forwarding)
+// ============================================
+// Recording events POSTed by the EB land on whichever pod serves LASTEST_URL
+// (the envoy-less `*-internal` pod in kubernetes mode). The recording session
+// state lives in-memory on the main pod (where startRecording ran). Without
+// this table the internal pod has no way to hand events back to the main pod
+// — logs fill with "Received events for unknown session". This table is the
+// shared inbox: internal pod inserts, main pod reads since-last-sequence.
+export const remoteRecordingEvents = pgTable('remote_recording_events', {
+  id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+  sessionId: text('session_id').notNull(),
+  sequence: integer('sequence').notNull(),
+  type: text('type').notNull(),
+  timestamp: bigint('timestamp', { mode: 'number' }).notNull(),
+  status: text('status').notNull(), // 'preview' | 'committed'
+  verification: jsonb('verification').$type<Record<string, unknown> | null>(),
+  data: jsonb('data').$type<Record<string, unknown>>(),
+  createdAt: timestamp('created_at').$defaultFn(() => new Date()).notNull(),
+}, (table) => ([
+  index('idx_remote_recording_events_session_seq').on(table.sessionId, table.sequence),
+]));
+
+export type RemoteRecordingEventRow = typeof remoteRecordingEvents.$inferSelect;
+export type NewRemoteRecordingEventRow = typeof remoteRecordingEvents.$inferInsert;
 
 // ============================================
 // GitHub Actions Configs

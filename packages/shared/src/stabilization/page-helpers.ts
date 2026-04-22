@@ -9,12 +9,12 @@ export async function waitForSpinnersToDisappear(
   timeout: number
 ): Promise<void> {
   const defaultSelectors = [
-    '[class*="spinner"]',
-    '[class*="loading"]',
-    '[class*="loader"]',
-    '[class*="skeleton"]',
-    '[class*="shimmer"]',
-    '[class*="pulse"]',
+    '[class~="spinner"]',
+    '[class~="loading"]',
+    '[class~="loader"]',
+    '[class~="skeleton"]',
+    '[class~="shimmer"]',
+    '[class~="pulse"]',
     '[aria-busy="true"]',
     '[data-loading="true"]',
     '[data-testid*="loading"]',

@@ -7,6 +7,7 @@ import { requireTeamAccess, requireRepoAccess } from '@/lib/auth';
 import { getBranchInfo } from '@/lib/github/content';
 import * as queries from '@/lib/db/queries';
 import type { Test } from '@/lib/db/schema';
+import type { SetupContext } from '@/lib/setup/types';
 import { createJob, createPendingJob, updateJobProgress, completeJob, failJob, isRunnerBusy } from './jobs';
 import { emitJobEvent } from '@/lib/ws/job-events';
 
@@ -61,10 +62,7 @@ export async function createTestRun(testIds?: string[], repositoryId?: string | 
   return run;
 }
 
-export async function runTests(testIds?: string[], repositoryId?: string | null, headless?: boolean, runnerId?: string, forceVideoRecording?: boolean) {
-  if (repositoryId) await requireRepoAccess(repositoryId);
-  else await requireTeamAccess();
-
+export async function runTestsCore(testIds?: string[], repositoryId?: string | null, headless?: boolean, runnerId?: string, forceVideoRecording?: boolean) {
   // Storage limit enforcement (off by default)
   if (process.env.ENFORCE_STORAGE_LIMITS === 'true' && repositoryId) {
     const repo = await queries.getRepository(repositoryId);
@@ -128,6 +126,12 @@ export async function runTests(testIds?: string[], repositoryId?: string | null,
   return { runId: run.id, testCount: tests.length, jobId };
 }
 
+export async function runTests(testIds?: string[], repositoryId?: string | null, headless?: boolean, runnerId?: string, forceVideoRecording?: boolean) {
+  if (repositoryId) await requireRepoAccess(repositoryId);
+  else await requireTeamAccess();
+  return runTestsCore(testIds, repositoryId, headless, runnerId, forceVideoRecording);
+}
+
 async function runTestsAsync(runId: string, tests: Test[], repositoryId?: string | null, headless?: boolean, jobId?: string, runnerId?: string, forceVideoRecording?: boolean) {
   // Use provided jobId or create new one (for backwards compatibility)
   const targetRunner = runnerId || 'auto';
@@ -144,6 +148,29 @@ async function runTestsAsync(runId: string, tests: Test[], repositoryId?: string
   const envConfig = await queries.getEnvironmentConfig(repositoryId);
   const playwrightSettings = await queries.getPlaywrightSettings(repositoryId);
 
+  // Initialize setup context and pre-load storage states from default setup
+  // steps (mirrors runBuildAsync in builds.ts — without this, tests whose
+  // setup is a pre-captured `storage_state` step start unauthenticated).
+  const baseUrl = envConfig?.baseUrl || 'http://localhost:3000';
+  const setupContext: SetupContext = {
+    baseUrl,
+    variables: {},
+    repositoryId: repositoryId || null,
+  };
+  if (repositoryId) {
+    const defaultSteps = await queries.getDefaultSetupSteps(repositoryId);
+    for (const step of defaultSteps) {
+      if (step.stepType === 'storage_state' && step.storageStateId) {
+        const ss = await queries.getStorageState(step.storageStateId);
+        if (ss) {
+          setupContext.storageState = ss.storageStateJson;
+          console.log(`[test-run] Pre-loaded storage state "${ss.name}" for setup context`);
+          break;
+        }
+      }
+    }
+  }
+
   try {
     // Resolve setup code to run on the runner
     const setupInfo = await resolveSetupCodeForRunner(tests);
@@ -156,6 +183,10 @@ async function runTestsAsync(runId: string, tests: Test[], repositoryId?: string
       environmentConfig: envConfig,
       playwrightSettings,
       setupInfo,
+      setupContext: {
+        storageState: setupContext.storageState,
+        variables: setupContext.variables,
+      },
       forceVideoRecording,
       jobId: activeJobId,
     });
@@ -231,7 +262,7 @@ export async function getTestRuns() {
   return queries.getTestRuns();
 }
 
-export async function getRunStatus(repositoryId?: string | null) {
+export async function getRunStatus(_repositoryId?: string | null) {
   // Check DB for running jobs
   const runningJobs = await queries.getRunningJobsForRunner('auto');
   return {
@@ -313,9 +344,12 @@ export async function processNextQueuedTestRun(repositoryId?: string | null, tar
   emitJobEvent({ type: 'job:delete', jobId: nextJob.id });
 
   // Run the tests — for pool-managed jobs, runnerId is undefined so
-  // runTests goes through auto mode → executeFallbackChain → claimPoolEB
+  // runTestsCore goes through auto mode → executeFallbackChain → claimPoolEB.
+  // MUST use -Core: fire-and-forget context has no request headers, so the
+  // auth'd `runTests` would throw from `requireRepoAccess → headers()` and
+  // drop the queued run (pending job was already deleted above).
   try {
-    await runTests(
+    await runTestsCore(
       metadata?.testIds || undefined,
       nextJob.repositoryId,
       metadata?.headless,

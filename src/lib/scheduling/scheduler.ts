@@ -11,9 +11,16 @@ let intervalId: ReturnType<typeof setInterval> | null = null;
 
 /**
  * Ensure the scheduler is running. Safe to call multiple times — only starts once.
+ * Respects DISABLE_SCHEDULER=true so companion replicas (e.g. an envoy-bypass
+ * Deployment) can share a DB with the main app without duplicate schedule ticks.
  */
 export function ensureSchedulerStarted() {
   if (started) return;
+  if (process.env.DISABLE_SCHEDULER === 'true') {
+    console.log('[scheduler] Disabled via DISABLE_SCHEDULER=true');
+    started = true;
+    return;
+  }
   started = true;
 
   intervalId = setInterval(async () => {

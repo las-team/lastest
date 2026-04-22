@@ -617,7 +617,6 @@ export async function completeSpecImportSession(sessionId: string): Promise<void
   const session = await queries.getAgentSession(sessionId);
   if (!session) return;
 
-  const meta = session.metadata as Record<string, unknown> | null;
   const teamId = session.teamId || '';
 
   await queries.updateAgentSession(sessionId, {

@@ -100,21 +100,4 @@ export type DebugCommand =
   | { type: 'stop' }
   | { type: '_execution_complete' };
 
-/**
- * Strip TypeScript type annotations from code so it can execute as plain JavaScript.
- */
-export function stripTypeAnnotations(code: string): string {
-  let result = code;
-  result = result.replace(
-    /\b(const|let|var)\s+(\w+)\s*:\s*[^=\n;]+(\s*=)/g,
-    '$1 $2$3'
-  );
-  result = result.replace(
-    /\b(const|let|var)\s+(\{[^}]+\}|\[[^\]]+\])\s*:\s*[^=\n;]+(\s*=)/g,
-    '$1 $2$3'
-  );
-  result = result.replace(/\)\s+as\s+\w[\w<>\[\],\s|]*/g, ')');
-  result = result.replace(/(\w)\s+as\s+\w[\w<>\[\],\s|]*/g, '$1');
-  result = result.replace(/<\w[\w<>\[\],\s|]*>\s*(?=\(|[\w])/g, '');
-  return result;
-}
+export { stripTypeAnnotations } from '@lastest/shared';

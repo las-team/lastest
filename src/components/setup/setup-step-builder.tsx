@@ -191,7 +191,7 @@ export function SetupStepBuilder({
 
   if (!mounted) {
     return (
-      <div className="flex gap-4 overflow-hidden" style={{ height: '500px' }}>
+      <div className="flex gap-4">
         <div className="w-1/2 border rounded-lg p-4 bg-card">Loading...</div>
         <div className="w-1/2 border rounded-lg p-4 bg-card">Loading...</div>
       </div>
@@ -213,7 +213,7 @@ export function SetupStepBuilder({
           </div>
         </div>
 
-        <div className="flex gap-4 overflow-hidden" style={{ height: '500px' }}>
+        <div className="flex gap-4">
           {/* Available Items Panel */}
           <div className="w-1/2 border rounded-lg flex flex-col bg-card">
             <div className="p-4 border-b">

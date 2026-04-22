@@ -81,6 +81,17 @@ export class LastestClient {
     return this.get(`/api/v1/repos/${repoId}`);
   }
 
+  async createRepo(name: string): Promise<{ id: string; name: string; fullName: string }> {
+    return this.post('/api/v1/repos', { name });
+  }
+
+  async updateRepo(
+    repoId: string,
+    data: { name?: string; defaultBranch?: string; selectedBranch?: string },
+  ): Promise<unknown> {
+    return this.put(`/api/v1/repos/${repoId}`, data);
+  }
+
   // --- Builds ---
 
   async createBuild(opts: {
@@ -121,6 +132,17 @@ export class LastestClient {
 
   async createArea(data: { name: string; repositoryId?: string; parentId?: string }): Promise<unknown> {
     return this.post('/api/v1/functional-areas', data);
+  }
+
+  async updateArea(
+    areaId: string,
+    data: { name?: string; description?: string; parentId?: string | null },
+  ): Promise<unknown> {
+    return this.put(`/api/v1/functional-areas/${areaId}`, data);
+  }
+
+  async deleteArea(areaId: string): Promise<{ success: boolean }> {
+    return this.del(`/api/v1/functional-areas/${areaId}`);
   }
 
   async listTestsByArea(areaId: string): Promise<unknown[]> {
@@ -194,6 +216,17 @@ export class LastestClient {
     functionalAreaId?: string;
   }): Promise<unknown> {
     return this.post('/api/v1/tests/create', opts);
+  }
+
+  async createTestDirect(opts: {
+    repositoryId: string;
+    name: string;
+    code: string;
+    functionalAreaId?: string;
+    targetUrl?: string;
+    description?: string;
+  }): Promise<{ id: string; name: string; code: string }> {
+    return this.post('/api/v1/tests', opts);
   }
 
   async healTest(testId: string): Promise<unknown> {

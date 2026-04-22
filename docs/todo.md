@@ -9,22 +9,18 @@ VS Code extension
 Gitlab
 Teardown
 Accept Downloads
-MCP
 triage
 a11y
-GH action edit
 DOM delta
 ## bugs
-Fix play specs -> test specs route
-Route scanning skipped during play agent, discpvery skipped
-Plan doesnt refresh when added from test
-area moved to end of list when generated
-placeholder tests and specs are the same -remove specs naming
-play agent - shows only 1 generator in activity feed/agent sessions - shoudl show 3 lines in play agent as well.  
-bulk generate full tests from placeholder tests - remove generate plan from test detail page
 ## features
-from EBs running 6 browsers -> 6*5 EBs forming on-demand
-
+change logo
+Watermark recordings
+Build free tests and share them - have them shareable
+SuperAdmin account to help manage them
+Openrouter agent sdk parity
+Asset management
+mcp-oauth flow
 (low) Every button is green, multiple primary actions, keep clicking on run test instead of save
 ## ideas
 Test governance /        │ AI generates tests fast → need redundancy         │ Medium — extend coverage analytics │

@@ -32,12 +32,14 @@ import { AIScanRoutesDialog } from '@/components/ai/ai-scan-routes-dialog';
 import { ImportFromSpecDialog } from '@/components/ai/import-from-spec-dialog';
 import { CodeDiffScanDialog } from '@/components/ai/code-diff-scan-dialog';
 import { createArea, deleteArea, deleteAreaWithContents, moveTestToArea, moveArea, exportAllPlans, updateAreaPlan, updateArea } from '@/server/actions/areas';
-import { deleteTests, restoreTests, permanentlyDeleteTests, getTest, getTestDetailData } from '@/server/actions/tests';
-import { createPlaceholderTestCase, bulkGenerateForTests } from '@/server/actions/specs';
+import { deleteTests, restoreTests, permanentlyDeleteTests, getTestDetailData } from '@/server/actions/tests';
+import { ApiConfigList } from '@/components/setup/api-config-list';
+import { SetupStepBuilder } from '@/components/setup/setup-step-builder';
+import { addDefaultTeardownStep, removeDefaultTeardownStep, reorderDefaultTeardownSteps } from '@/server/actions/teardown-steps';
+import { createPlaceholderTestCase } from '@/server/actions/specs';
 import { TestDetailClient } from '@/app/(app)/tests/[id]/test-detail-client';
-import { runTests } from '@/server/actions/runs';
 import { createAndRunBuild } from '@/server/actions/builds';
-import { aiFixAllFailedTests, aiFixTests } from '@/server/actions/ai';
+import { startHealTestAgent, startGeneratePlaceholderTestAgent } from '@/server/actions/ai';
 import { startRemoteRouteScan, generateBasicTests } from '@/server/actions/scanner';
 import { toast } from 'sonner';
 import { downloadMarkdown, timeAgo } from '@/lib/utils';
@@ -53,7 +55,6 @@ import {
   FlaskConical,
   Plus,
   Wrench,
-  FileText,
   CheckCircle2,
   XCircle,
   Clock,
@@ -68,12 +69,12 @@ import {
   Pencil,
   FolderPlus,
   Folder,
-  FileCode,
   Save,
-  ExternalLink,
 } from 'lucide-react';
-import type { FunctionalArea, Test, Route } from '@/lib/db/schema';
+import type { FunctionalArea, Test, Route, Repository, SetupScript, SetupConfig, StorageState } from '@/lib/db/schema';
 import type { FunctionalAreaWithChildren } from '@/lib/db/queries';
+import type { SetupStep } from '@/server/actions/setup-steps';
+import type { TeardownStep } from '@/server/actions/teardown-steps';
 
 interface TestWithStatus extends Test {
   latestStatus: string | null;
@@ -82,6 +83,7 @@ interface TestWithStatus extends Test {
 interface DefinitionPageClientProps {
   tree: FunctionalAreaWithChildren[];
   uncategorizedTests: { id: string; name: string; description: string | null; latestStatus: string | null; isPlaceholder: boolean }[];
+  repository: Repository;
   repositoryId: string;
   selectedBranch: string;
   banAiMode: boolean;
@@ -91,6 +93,12 @@ interface DefinitionPageClientProps {
   routes: Route[];
   baseUrl: string;
   deletedTests: Test[];
+  setupScripts: SetupScript[];
+  setupConfigs: SetupConfig[];
+  availableSetupTests: Test[];
+  defaultSetupSteps: SetupStep[];
+  defaultTeardownSteps: TeardownStep[];
+  storageStates: StorageState[];
 }
 
 // Collect all test IDs recursively from an area subtree
@@ -129,6 +137,7 @@ function buildBreadcrumb(areas: FunctionalAreaWithChildren[], targetId: string):
 export function DefinitionPageClient({
   tree,
   uncategorizedTests,
+  repository,
   repositoryId,
   selectedBranch,
   banAiMode,
@@ -138,11 +147,18 @@ export function DefinitionPageClient({
   routes,
   baseUrl,
   deletedTests,
+  setupScripts,
+  setupConfigs,
+  availableSetupTests,
+  defaultSetupSteps,
+  defaultTeardownSteps,
+  storageStates,
 }: DefinitionPageClientProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const notifyJobStarted = useNotifyJobStarted();
-  const initialTab = searchParams.get('tab') === 'plan' ? 'plan' : 'tests';
+  const tabParam = searchParams.get('tab');
+  const initialTab = tabParam === 'plan' || tabParam === 'setup' ? tabParam : 'tests';
 
   // --- Tree state (from Areas page) ---
   const [treeSelection, setTreeSelection] = useState<TreeSelection | null>(null);
@@ -193,10 +209,9 @@ export function DefinitionPageClient({
   const [isRunningAreaBuild, setIsRunningAreaBuild] = useState(false);
   const [isBulkDeleting, setIsBulkDeleting] = useState(false);
   const [isBulkFixing, setIsBulkFixing] = useState(false);
-  const [isBulkGenSpecs, setIsBulkGenSpecs] = useState(false);
+  const [isBulkGeneratingPlaceholders, setIsBulkGeneratingPlaceholders] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [isFixingAll, setIsFixingAll] = useState(false);
-  const [fixResult, setFixResult] = useState<{ fixed: number; failed: number } | null>(null);
   const [isAddTestsOpen, setIsAddTestsOpen] = useState(false);
   const [isAICreateOpen, setIsAICreateOpen] = useState(false);
 
@@ -232,7 +247,6 @@ export function DefinitionPageClient({
     // Only reset state when treeSelection actually changed (not when tree prop refreshes)
     if (selectionChanged) {
       setSelectedTestIds(new Set());
-      setFixResult(null);
       setIsEditingArea(false);
       setIsCreatingPlaceholder(false);
       setNewPlaceholderName('');
@@ -261,13 +275,23 @@ export function DefinitionPageClient({
     }
   }, [treeSelection, tree]);
 
-  // Open a test on mount when ?test=<id> is present in the URL (e.g. from /tests/[id] redirect)
+  // Sync inline test detail with the ?test=<id> search param.
+  // Opens on mount (e.g. /tests/[id] redirect), and clears when the param is
+  // removed by an external navigation (e.g. clicking "Tests" in the sidebar).
   useEffect(() => {
     const testIdParam = searchParams.get('test');
-    if (!testIdParam) return;
-    void handleOpenTest(testIdParam, { pushState: false });
+    if (testIdParam) {
+      if (testIdParam !== openTestId) {
+        void handleOpenTest(testIdParam, { pushState: false });
+      }
+    } else if (openTestId) {
+      setOpenTestId(null);
+      setOpenTestData(null);
+      setOpenTestDetailData(null);
+      setTreeSelection(null);
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [searchParams]);
 
   // Handle browser back/forward navigation
   useEffect(() => {
@@ -345,6 +369,13 @@ export function DefinitionPageClient({
     return Array.from(selectedTestIds).filter(id => {
       const test = tests.find(t => t.id === id);
       return test?.latestStatus === 'failed';
+    });
+  }, [selectedTestIds, tests]);
+
+  const selectedPlaceholderTests = useMemo(() => {
+    return Array.from(selectedTestIds).filter(id => {
+      const test = tests.find(t => t.id === id);
+      return test?.isPlaceholder === true;
     });
   }, [selectedTestIds, tests]);
 
@@ -616,11 +647,20 @@ export function DefinitionPageClient({
 
   const handleBulkRun = async () => {
     if (selectedTestIds.size === 0) return;
+    const testIds = Array.from(selectedTestIds);
     setIsBulkRunning(true);
     try {
-      const result = await runTests(Array.from(selectedTestIds), repositoryId, true, executionTarget);
+      const result = await createAndRunBuild('manual', testIds, repositoryId, executionTarget);
       notifyJobStarted();
-      if ('queued' in result && result.queued) toast.success('Tests queued — will run when current tests finish');
+      if ('queued' in result && result.queued) {
+        toast.info('All browsers are busy — build queued and will start automatically');
+      } else {
+        toast.success(`Build started with ${testIds.length} test${testIds.length === 1 ? '' : 's'}`);
+        setSelectedTestIds(new Set());
+        router.push(`/builds/${result.buildId}`);
+      }
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to start build');
     } finally {
       setIsBulkRunning(false);
     }
@@ -667,42 +707,83 @@ export function DefinitionPageClient({
   const handleBulkFix = async () => {
     if (selectedFailedTests.length === 0) return;
     setIsBulkFixing(true);
-    setFixResult(null);
     try {
-      const result = await aiFixTests(selectedFailedTests, repositoryId);
-      setFixResult({ fixed: result.fixed, failed: result.failed });
+      const results = await Promise.all(
+        selectedFailedTests.map(testId => {
+          const test = tests.find(t => t.id === testId);
+          return startHealTestAgent({
+            repositoryId,
+            testId,
+            testName: test?.name ?? 'Test',
+          }).catch(() => ({ success: false as const, error: 'Failed to start' }));
+        }),
+      );
+      const started = results.filter(r => r.success).length;
+      const failed = results.length - started;
+      if (started > 0) {
+        toast.success(
+          `Started healing for ${started} test${started === 1 ? '' : 's'} — check the activity feed for progress`,
+        );
+      }
+      if (failed > 0) {
+        toast.error(`Failed to start ${failed} healing${failed === 1 ? '' : 's'}`);
+      }
+      setSelectedTestIds(new Set());
     } finally {
       setIsBulkFixing(false);
     }
   };
 
-  const handleBulkGenerateSpecs = async () => {
-    if (selectedTestIds.size === 0) return;
-    setIsBulkGenSpecs(true);
+  const handleBulkGeneratePlaceholders = async () => {
+    if (selectedPlaceholderTests.length === 0) return;
+    setIsBulkGeneratingPlaceholders(true);
     try {
-      const result = await bulkGenerateForTests(repositoryId, Array.from(selectedTestIds));
-      if (result.specsCreated > 0 || result.areasUpdated > 0) {
+      const results = await Promise.all(
+        selectedPlaceholderTests.map(testId =>
+          startGeneratePlaceholderTestAgent({ testId, repositoryId }).catch(() => ({
+            success: false as const,
+            error: 'Failed to start',
+          })),
+        ),
+      );
+      const started = results.filter(r => r.success).length;
+      const failed = results.length - started;
+      if (started > 0) {
         toast.success(
-          `Created ${result.specsCreated} spec${result.specsCreated === 1 ? '' : 's'} and refreshed ${result.areasUpdated} plan${result.areasUpdated === 1 ? '' : 's'}`,
+          `Started generation for ${started} test${started === 1 ? '' : 's'} — check the activity feed for progress`,
         );
-        router.refresh();
-      } else {
-        toast.info('All selected tests already have specs');
       }
-    } catch {
-      toast.error('Failed to generate specs/plan from selection');
+      if (failed > 0) {
+        toast.error(`Failed to start ${failed} generation${failed === 1 ? '' : 's'}`);
+      }
     } finally {
-      setIsBulkGenSpecs(false);
+      setIsBulkGeneratingPlaceholders(false);
     }
   };
 
   const handleFixAllFailed = async () => {
     if (failedScopedTests.length === 0) return;
     setIsFixingAll(true);
-    setFixResult(null);
     try {
-      const result = await aiFixAllFailedTests(repositoryId);
-      setFixResult({ fixed: result.fixed, failed: result.failed });
+      const results = await Promise.all(
+        failedScopedTests.map(test =>
+          startHealTestAgent({
+            repositoryId,
+            testId: test.id,
+            testName: test.name,
+          }).catch(() => ({ success: false as const, error: 'Failed to start' })),
+        ),
+      );
+      const started = results.filter(r => r.success).length;
+      const failed = results.length - started;
+      if (started > 0) {
+        toast.success(
+          `Started healing for ${started} test${started === 1 ? '' : 's'} — check the activity feed for progress`,
+        );
+      }
+      if (failed > 0) {
+        toast.error(`Failed to start ${failed} healing${failed === 1 ? '' : 's'}`);
+      }
     } finally {
       setIsFixingAll(false);
     }
@@ -906,16 +987,19 @@ export function DefinitionPageClient({
         <Tabs value={activeTab} onValueChange={setActiveTab} className="flex flex-col flex-1 overflow-hidden">
           <div className="px-6 pt-4 pb-0 shrink-0">
             <TabsList className="h-11 w-full max-w-5xl p-1 bg-white dark:bg-zinc-950 border">
-              <TabsTrigger value="tests" className="flex-1 px-6 text-sm data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-sm">
-                Tests
-              </TabsTrigger>
-              <TabsTrigger value="plan" className="flex-1 px-6 text-sm data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-sm">
+              <TabsTrigger value="plan" className="flex-1 px-6 text-sm data-[state=active]:bg-accent data-[state=active]:text-accent-foreground data-[state=active]:shadow-sm">
                 Plan
                 {flatAreas.length > 0 && (
-                  <Badge variant="secondary" className="ml-1.5 h-5 px-1.5 text-[10px] data-[state=active]:bg-primary-foreground/20 data-[state=active]:text-primary-foreground">
+                  <Badge variant="secondary" className="ml-1.5 h-5 px-1.5 text-[10px] data-[state=active]:bg-accent-foreground/20 data-[state=active]:text-accent-foreground">
                     {flatAreas.length}
                   </Badge>
                 )}
+              </TabsTrigger>
+              <TabsTrigger value="setup" className="flex-1 px-6 text-sm data-[state=active]:bg-accent data-[state=active]:text-accent-foreground data-[state=active]:shadow-sm">
+                Setup
+              </TabsTrigger>
+              <TabsTrigger value="tests" className="flex-1 px-6 text-sm data-[state=active]:bg-accent data-[state=active]:text-accent-foreground data-[state=active]:shadow-sm">
+                Tests
               </TabsTrigger>
             </TabsList>
           </div>
@@ -1030,6 +1114,14 @@ export function DefinitionPageClient({
                     envBaseUrl={openTestDetailData.envBaseUrl}
                     testSpec={openTestDetailData.testSpec}
                     contentClassName="max-w-5xl mx-0"
+                    onRefresh={async () => {
+                      if (!openTestId) return;
+                      const data = await getTestDetailData(openTestId, repositoryId);
+                      if (data) {
+                        setOpenTestData(data.test);
+                        setOpenTestDetailData(data);
+                      }
+                    }}
                   />
                 </div>
               ) : (
@@ -1059,13 +1151,6 @@ export function DefinitionPageClient({
                     </button>
                   ))}
                 </div>
-
-                {fixResult && (
-                  <div className="text-sm p-3 rounded-lg bg-muted/50 border border-border/50">
-                    Fixed {fixResult.fixed} test{fixResult.fixed !== 1 ? 's' : ''}.
-                    {fixResult.failed > 0 && ` ${fixResult.failed} could not be fixed.`}
-                  </div>
-                )}
 
                 {/* Test List */}
                 <Card className="border-border/50 overflow-hidden">
@@ -1220,18 +1305,22 @@ export function DefinitionPageClient({
                             {isBulkFixing ? 'Fixing...' : `Fix (${selectedFailedTests.length})`}
                           </Button>
                         )}
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={handleBulkGenerateSpecs}
-                          disabled={isBulkGenSpecs}
-                          title="Back-fill missing specs and refresh the plan for the selected tests' areas"
-                        >
-                          {isBulkGenSpecs
-                            ? <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
-                            : <FileText className="h-3.5 w-3.5 mr-1.5" />}
-                          {isBulkGenSpecs ? 'Generating...' : 'Generate Plan & Specs'}
-                        </Button>
+                        {!banAiMode && selectedPlaceholderTests.length > 0 && (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={handleBulkGeneratePlaceholders}
+                            disabled={isBulkGeneratingPlaceholders}
+                            title="Generate full tests for selected placeholders using AI"
+                          >
+                            {isBulkGeneratingPlaceholders
+                              ? <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
+                              : <Sparkles className="h-3.5 w-3.5 mr-1.5" />}
+                            {isBulkGeneratingPlaceholders
+                              ? 'Generating...'
+                              : `Generate (${selectedPlaceholderTests.length})`}
+                          </Button>
+                        )}
                         <Button variant="ghost" size="sm" onClick={() => setSelectedTestIds(new Set())}>
                           <X className="h-3.5 w-3.5 mr-1.5" />
                           Clear
@@ -1420,6 +1509,81 @@ export function DefinitionPageClient({
                     <p>No areas yet. Create areas to start planning.</p>
                   </div>
                 )}
+              </div>
+            </div>
+          </TabsContent>
+
+          {/* ─── Setup Tab ─── */}
+          <TabsContent value="setup" className="overflow-auto flex-1">
+            <div className="p-6 pt-4">
+              <div className="max-w-5xl space-y-6">
+                <p className="text-sm text-muted-foreground">
+                  Configure seed and teardown steps for test preparation and cleanup.
+                </p>
+                <Tabs defaultValue="seed-setup">
+                  <TabsList className="h-11 w-full p-1 bg-white dark:bg-zinc-950 border">
+                    <TabsTrigger value="seed-setup" className="flex-1 px-6 text-sm data-[state=active]:bg-accent data-[state=active]:text-accent-foreground data-[state=active]:shadow-sm">
+                      Seed
+                    </TabsTrigger>
+                    <TabsTrigger value="seed-teardown" className="flex-1 px-6 text-sm data-[state=active]:bg-accent data-[state=active]:text-accent-foreground data-[state=active]:shadow-sm">
+                      Teardown
+                    </TabsTrigger>
+                  </TabsList>
+
+                  <TabsContent value="seed-setup" className="space-y-8 mt-6">
+                    <section>
+                      <SetupStepBuilder
+                        repositoryId={repository.id}
+                        setupSteps={defaultSetupSteps}
+                        availableTests={availableSetupTests}
+                        availableScripts={setupScripts}
+                        availableStorageStates={storageStates}
+                      />
+                    </section>
+
+                    <section className="space-y-4">
+                      <div>
+                        <h2 className="text-lg font-medium">API Configurations</h2>
+                        <p className="text-sm text-muted-foreground">
+                          Configure API endpoints for data seeding scripts.
+                        </p>
+                      </div>
+                      <ApiConfigList
+                        repositoryId={repository.id}
+                        configs={setupConfigs}
+                      />
+                    </section>
+                  </TabsContent>
+
+                  <TabsContent value="seed-teardown" className="space-y-8 mt-6">
+                    <section>
+                      <SetupStepBuilder
+                        repositoryId={repository.id}
+                        setupSteps={defaultTeardownSteps}
+                        availableTests={availableSetupTests}
+                        availableScripts={setupScripts}
+                        onAddStep={addDefaultTeardownStep}
+                        onRemoveStep={removeDefaultTeardownStep}
+                        onReorderSteps={reorderDefaultTeardownSteps}
+                        title="Default Teardown Steps"
+                        description="Configure the default teardown sequence that runs after each test for cleanup."
+                      />
+                    </section>
+
+                    <section className="space-y-4">
+                      <div>
+                        <h2 className="text-lg font-medium">API Configurations</h2>
+                        <p className="text-sm text-muted-foreground">
+                          Configure API endpoints for data seeding scripts.
+                        </p>
+                      </div>
+                      <ApiConfigList
+                        repositoryId={repository.id}
+                        configs={setupConfigs}
+                      />
+                    </section>
+                  </TabsContent>
+                </Tabs>
               </div>
             </div>
           </TabsContent>
@@ -1634,6 +1798,14 @@ function PlanAreaEditor({
   useEffect(() => {
     autoResize(textareaRef.current);
   }, [autoResize]);
+
+  useEffect(() => {
+    if (content === lastSavedRef.current && agentPlan !== content) {
+      setContent(agentPlan);
+      lastSavedRef.current = agentPlan;
+      requestAnimationFrame(() => autoResize(textareaRef.current));
+    }
+  }, [agentPlan, content, autoResize]);
 
   const doSave = useCallback(async (text: string) => {
     if (text === lastSavedRef.current) return;

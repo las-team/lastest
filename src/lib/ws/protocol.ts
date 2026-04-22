@@ -131,6 +131,10 @@ export interface SetupResultPayload {
   correlationId: string;
   status: 'passed' | 'failed' | 'error' | 'timeout';
   storageState?: string;
+  // Serialized JSON of the captured storageState. `storageState` may be a
+  // "persistent:<setupId>" marker; debug-executor and other non-test consumers
+  // need the real JSON here instead.
+  storageStateJson?: string;
   variables?: Record<string, unknown>;
   durationMs: number;
   error?: string;
@@ -227,6 +231,9 @@ export interface TestResultPayload {
   softErrors?: string[];
   videoData?: string; // base64-encoded video file
   videoFilename?: string;
+  lastReachedStep?: number;
+  totalSteps?: number;
+  domSnapshot?: import('@/lib/db/schema').DomSnapshotData; // DOM state captured after test body ran
 }
 
 export interface TestResultResponse extends BaseMessage {
@@ -272,6 +279,7 @@ export interface RecordingEventResponse extends BaseMessage {
 export interface RecordingStoppedPayload {
   sessionId: string;
   generatedCode: string;
+  domSnapshot?: import('@/lib/db/schema').DomSnapshotData; // DOM state captured on the recording page before stop
 }
 
 export interface RecordingStoppedResponse extends BaseMessage {

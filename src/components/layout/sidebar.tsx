@@ -12,8 +12,6 @@ import {
   Settings,
   Layers,
   Building2,
-  Zap,
-  ClipboardCheck,
   TrendingDown,
   Trophy,
 } from 'lucide-react';
@@ -22,7 +20,7 @@ import { RepoSelector, CreateLocalRepoButton } from './repo-selector';
 import { QueueIndicator } from '@/components/queue/queue-indicator';
 import { ActivityFeedIndicator } from '@/components/activity-feed/activity-feed-indicator-client';
 import { UserMenu } from '@/components/auth/user-menu';
-import { UserScoreChip } from '@/components/gamification/user-score-chip';
+import { InlineScore } from '@/components/gamification/user-score-chip';
 import { SidebarQuickActions } from './sidebar-quick-actions';
 import type { Repository, User, Team, EmbeddedSession } from '@/lib/db/schema';
 
@@ -49,13 +47,11 @@ const EARLY_ADOPTER_ITEMS = new Set(['Compose', 'Compare', 'Impact']);
 const definitionNav = [
   { name: 'Tests', href: '/tests', icon: FileCode },
   { name: 'Compose', href: '/compose', icon: Layers },
-  { name: 'Seed', href: '/env', icon: Zap },
 ];
 
 const executionNav = [
   { name: 'Runs', href: '/run', icon: Play },
   { name: 'Compare', href: '/compare', icon: GitCompare },
-  { name: 'Review', href: '/review', icon: ClipboardCheck },
   { name: 'Impact', href: '/analytics/impact', icon: TrendingDown },
 ];
 
@@ -217,16 +213,14 @@ export function Sidebar({ repos, selectedRepo, currentUser, team, baseUrl, repos
                           : 'hover:bg-muted'
                       )}
                     >
-                      <item.icon className="h-4 w-4" />
-                      {item.name}
+                      <item.icon className="h-4 w-4 shrink-0" />
+                      <span className="min-w-0 truncate">{item.name}</span>
+                      <InlineScore className="ml-auto shrink-0" active={isActive} />
                     </Link>
                   </li>
                 );
               })}
             </ul>
-            <div className="mt-2 px-3">
-              <UserScoreChip />
-            </div>
           </div>
         )}
 

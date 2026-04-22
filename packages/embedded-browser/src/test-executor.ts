@@ -18,13 +18,27 @@
  * - Removal of test-local function definitions
  */
 
-import type { Browser, Page } from 'playwright';
+import type { Browser, BrowserContext, Page } from 'playwright';
 import type { StabilizationPayload } from './protocol.js';
 import { setupFreezeScripts, applyPreScreenshotStabilization } from './stabilization.js';
-import { instrumentStepTracking } from '@lastest/shared';
+import { getAllDomSelectors, type DomSnapshotResult, type SelectorPriorityConfig } from './selector-utils.js';
+import { instrumentStepTracking, stripTypeAnnotations } from '@lastest/shared';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
+
+const DEFAULT_DOM_SNAPSHOT_PRIORITY: SelectorPriorityConfig = [
+  { type: 'data-testid', enabled: true, priority: 1 },
+  { type: 'id', enabled: true, priority: 2 },
+  { type: 'label', enabled: true, priority: 3 },
+  { type: 'role-name', enabled: true, priority: 4 },
+  { type: 'aria-label', enabled: true, priority: 5 },
+  { type: 'text', enabled: true, priority: 6 },
+  { type: 'placeholder', enabled: true, priority: 7 },
+  { type: 'name', enabled: true, priority: 8 },
+  { type: 'css-path', enabled: true, priority: 9 },
+  { type: 'heading-context', enabled: true, priority: 10 },
+];
 
 export interface EmbeddedNetworkRequest {
   url: string;
@@ -55,11 +69,17 @@ export interface EmbeddedTestResult {
   videoFilename?: string;
   lastReachedStep?: number;
   totalSteps?: number;
+  domSnapshot?: DomSnapshotResult; // DOM state captured after test body ran
 }
 
 export interface EmbeddedSetupResult {
   status: 'passed' | 'failed' | 'error' | 'timeout';
   storageState?: string;
+  // Serialized JSON of the captured storageState. `storageState` above may be
+  // a "persistent:<setupId>" marker that instructs the test-executor to reuse
+  // the live BrowserContext; consumers that can't access that in-process map
+  // (e.g. the debug-executor) need the real JSON here.
+  storageStateJson?: string;
   variables?: Record<string, unknown>;
   durationMs: number;
   error?: string;
@@ -99,25 +119,6 @@ export interface RunTestPayload {
 }
 
 /**
- * Strip TypeScript type annotations from test code so it can run as plain JS.
- * Matches the runner's more robust version that handles destructured types,
- * `as` casts, and generic type params.
- */
-function stripTypeAnnotations(code: string): string {
-  let result = code;
-  // Variable type annotations: const x: Type = / let x: Type =
-  result = result.replace(/\b(const|let|var)\s+(\w+)\s*:\s*[^=\n;]+(\s*=)/g, '$1 $2$3');
-  // Destructured type annotations: const { a, b }: Type = / const [a, b]: Type =
-  result = result.replace(/\b(const|let|var)\s+(\{[^}]+\}|\[[^\]]+\])\s*:\s*[^=\n;]+(\s*=)/g, '$1 $2$3');
-  // `as` casts: ) as Type / value as Type
-  result = result.replace(/\)\s+as\s+\w[\w<>\[\],\s|]*/g, ')');
-  result = result.replace(/(\w)\s+as\s+\w[\w<>\[\],\s|]*/g, '$1');
-  // Generic type params: <Type>( / <Type>identifier
-  result = result.replace(/<\w[\w<>\[\],\s|]*>\s*(?=\(|[\w])/g, '');
-  return result;
-}
-
-/**
  * Remove a named async function definition from a code body by brace-matching.
  */
 function removeFunctionDefinition(body: string, funcName: string): { body: string; removed: boolean } {
@@ -145,6 +146,19 @@ function removeFunctionDefinition(body: string, funcName: string): { body: strin
 
 export class EmbeddedTestExecutor {
   private abortController: AbortController | null = null;
+  // Persistent setup contexts — setup stores its BrowserContext here keyed by setupId.
+  // Subsequent tests in the same run reuse it (preserves sessionStorage/IndexedDB/
+  // in-memory auth that Playwright's storageState() can't capture). We also store
+  // a serialized storageState snapshot alongside — if Chromium disposes the live
+  // context's target for any reason (observed behavior between tests), subsequent
+  // tests can rebuild a fresh context with the same cookies/localStorage.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private setupContexts = new Map<string, { context: BrowserContext; createdAt: number; storageState?: any; viewport?: { width: number; height: number } }>();
+  private setupContextSweeper: ReturnType<typeof setInterval> | null = null;
+  // Live persistent BrowserContext TTL. Must comfortably exceed a full build's
+  // wall-clock time (setup + all tests on this worker). Default 60 min; override
+  // via EB_SETUP_CONTEXT_TTL_MS env.
+  private readonly SETUP_CONTEXT_TTL_MS = parseInt(process.env.EB_SETUP_CONTEXT_TTL_MS || String(60 * 60 * 1000), 10);
 
   get isRunning(): boolean {
     return this.abortController !== null;
@@ -156,6 +170,32 @@ export class EmbeddedTestExecutor {
       return true;
     }
     return false;
+  }
+
+  private ensureSetupContextSweeper() {
+    if (this.setupContextSweeper) return;
+    this.setupContextSweeper = setInterval(() => {
+      const now = Date.now();
+      for (const [id, entry] of this.setupContexts) {
+        if (now - entry.createdAt > this.SETUP_CONTEXT_TTL_MS) {
+          console.log(`  [INFO] Evicting persistent setup context ${id} (TTL exceeded)`);
+          entry.context.close().catch(() => {});
+          this.setupContexts.delete(id);
+        }
+      }
+      if (this.setupContexts.size === 0) {
+        clearInterval(this.setupContextSweeper!);
+        this.setupContextSweeper = null;
+      }
+    }, 60 * 1000);
+    if (this.setupContextSweeper.unref) this.setupContextSweeper.unref();
+  }
+
+  async releaseSetupContext(setupId: string): Promise<void> {
+    const entry = this.setupContexts.get(setupId);
+    if (!entry) return;
+    this.setupContexts.delete(setupId);
+    await entry.context.close().catch(() => {});
   }
 
   async runTest(
@@ -187,15 +227,20 @@ export class EmbeddedTestExecutor {
     // Determine context options based on stabilization settings
     const needsStabilizedContext = command.stabilization?.crossOsConsistency || command.stabilization?.freezeAnimations;
 
-    // Parse storageState if provided
+    // Parse storageState. "persistent:<setupId>" marker → reuse setup's live context.
+    let persistentSetupId: string | undefined;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     let parsedStorageState: any;
     if (command.storageState) {
-      try {
-        parsedStorageState = JSON.parse(command.storageState);
-        logFn('info', `Injecting storageState: ${parsedStorageState.cookies?.length ?? 0} cookies, ${parsedStorageState.origins?.length ?? 0} origins`);
-      } catch (e) {
-        logFn('warn', `Failed to parse storageState: ${e}`);
+      if (command.storageState.startsWith('persistent:')) {
+        persistentSetupId = command.storageState.slice('persistent:'.length);
+      } else {
+        try {
+          parsedStorageState = JSON.parse(command.storageState);
+          logFn('info', `Injecting storageState: ${parsedStorageState.cookies?.length ?? 0} cookies, ${parsedStorageState.origins?.length ?? 0} origins`);
+        } catch (e) {
+          logFn('warn', `Failed to parse storageState: ${e}`);
+        }
       }
     }
 
@@ -206,17 +251,67 @@ export class EmbeddedTestExecutor {
       fs.mkdirSync(videoDir, { recursive: true });
     }
 
-    // Create a fresh context + page per test (mirrors standard runner)
-    const testContext = await browser.newContext({
-      viewport,
-      acceptDownloads: true, // Always accept in EB — native file dialogs hang in headless
-      ...(parsedStorageState ? { storageState: parsedStorageState } : {}),
-      ...(needsStabilizedContext ? { deviceScaleFactor: 1 } : {}),
-      ...(needsStabilizedContext ? { locale: 'en-US', timezoneId: 'UTC', colorScheme: 'light' as const } : {}),
-      ...(command.stabilization?.freezeAnimations ? { reducedMotion: 'reduce' as const } : {}),
-      ...(videoDir ? { recordVideo: { dir: videoDir, size: viewport } } : {}),
-    });
-    const page = await testContext.newPage();
+    // Persistent-context branch: reuse setup's live context; skip storageState serialization.
+    // Limitations: per-test video + context-level stabilization overrides can't be applied.
+    let testContext: BrowserContext;
+    let reusedPersistentContext = false;
+    const buildFreshContext = async (state: unknown) => {
+      return browser.newContext({
+        viewport,
+        acceptDownloads: true,
+        ...(state ? { storageState: state as Parameters<Browser['newContext']>[0] extends infer T ? T extends { storageState?: infer S } ? S : never : never } : {}),
+        ...(needsStabilizedContext ? { deviceScaleFactor: 1 } : {}),
+        ...(needsStabilizedContext ? { locale: 'en-US', timezoneId: 'UTC', colorScheme: 'light' as const } : {}),
+        ...(command.stabilization?.freezeAnimations ? { reducedMotion: 'reduce' as const } : {}),
+        ...(videoDir ? { recordVideo: { dir: videoDir, size: viewport } } : {}),
+      });
+    };
+    if (persistentSetupId) {
+      const entry = this.setupContexts.get(persistentSetupId);
+      if (entry) {
+        if (videoDir) {
+          logFn('warn', 'Per-test video recording not supported in persistent-context mode — disabled');
+        }
+        testContext = entry.context;
+        reusedPersistentContext = true;
+        logFn('info', `Reusing persistent setup context (setupId=${persistentSetupId})`);
+      } else {
+        logFn('warn', `persistent setup context ${persistentSetupId} not found — falling back to fresh context (auth state will be missing)`);
+        testContext = await buildFreshContext(undefined);
+      }
+    } else {
+      // Create a fresh context + page per test (mirrors standard runner)
+      testContext = await buildFreshContext(parsedStorageState);
+    }
+
+    // FALLBACK: Chromium sometimes disposes a persistent BrowserContext's
+    // target between tests (observed: test N passes, test N+1 throws "Target
+    // has been closed" on newPage). When that happens, rebuild a fresh
+    // context using the storageState snapshot we captured during setup, so
+    // the test still runs with the right cookies/localStorage even though
+    // sessionStorage/IndexedDB/in-memory auth are lost.
+    let page;
+    try {
+      page = await testContext.newPage();
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      if (reusedPersistentContext && /Target .*has been closed|has been closed/i.test(msg)) {
+        logFn('warn', `Persistent context for ${persistentSetupId} is zombie — rebuilding fresh context from storageState snapshot`);
+        const snapshotEntry = this.setupContexts.get(persistentSetupId!);
+        const snapshot = snapshotEntry?.storageState;
+        // Drop the dead context from the map so other tests don't hit it too.
+        this.setupContexts.delete(persistentSetupId!);
+        try { await snapshotEntry?.context.close(); } catch { /* already dead */ }
+        testContext = await buildFreshContext(snapshot);
+        reusedPersistentContext = false;
+        page = await testContext.newPage();
+      } else {
+        throw err;
+      }
+    }
+    if (reusedPersistentContext) {
+      try { await page.setViewportSize(viewport); } catch { /* best-effort */ }
+    }
     if (callbacks?.onPageCreated) {
       await callbacks.onPageCreated(page);
     }
@@ -224,6 +319,15 @@ export class EmbeddedTestExecutor {
     let result: EmbeddedTestResult | undefined;
     let reachedStep = -1;
     let stepCount = 0;
+    let domSnapshot: DomSnapshotResult | undefined;
+    const captureFinalDomSnapshot = async () => {
+      if (!page || page.isClosed()) return;
+      try {
+        domSnapshot = await getAllDomSelectors(page, DEFAULT_DOM_SNAPSHOT_PRIORITY);
+      } catch (err) {
+        logFn('warn', `DOM snapshot capture failed: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    };
 
     try {
       if (abortCtrl.signal.aborted) {
@@ -275,6 +379,12 @@ export class EmbeddedTestExecutor {
       }
 
       // Page event listeners — capture console errors and network requests
+      // Environmental transient errors (CNI/DNS/NAT bursts when 30 EB pods start
+      // near-simultaneously) surface as `ERR_NETWORK_CHANGED` / `ERR_NAME_NOT_RESOLVED`
+      // on sub-resource loads fired AFTER the main navigation — unrelated to
+      // the test's intent. Keep them out of the failure classification; log as
+      // info so they're still traceable.
+      const TRANSIENT_NET_CONSOLE_RX = /ERR_NETWORK_CHANGED|ERR_NAME_NOT_RESOLVED|ERR_CONNECTION_RESET|ERR_CONNECTION_CLOSED|ERR_NETWORK_IO_SUSPENDED/i;
       page.on('console', (msg) => {
         const text = msg.text();
         // Log shim messages to container output for debugging
@@ -282,6 +392,10 @@ export class EmbeddedTestExecutor {
           logFn('info', text);
         }
         if (msg.type() === 'error') {
+          if (TRANSIENT_NET_CONSOLE_RX.test(text)) {
+            logFn('info', `Transient network console error (ignored for classification): ${text}`);
+            return;
+          }
           consoleErrors.push(text);
           logFn('warn', `Console error: ${text}`);
         }
@@ -378,15 +492,43 @@ export class EmbeddedTestExecutor {
         return rawScreenshot(options);
       };
 
-      // Intercept page.goto with logging + random seed reset
+      // Intercept page.goto with logging + retry ladder for transient CNI
+      // bursts observed on builds (ERR_NETWORK_CHANGED / DNS flakes from 30 EBs
+      // hitting the same target concurrently). Retries at 1s, 2s, 4s = ~7s
+      // total; if still failing, throw a tagged error so the upper layer can
+      // decide to swap to a fresh EB instead of burning the test.
       const originalGoto = page.goto.bind(page);
+      const TRANSIENT_NET_RX = /ERR_NETWORK_CHANGED|ERR_NAME_NOT_RESOLVED|ERR_CONNECTION_RESET|ERR_CONNECTION_CLOSED|ERR_NETWORK_IO_SUSPENDED/i;
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (page as any).goto = async (url: string, options?: any) => {
         logFn('info', `Navigating to ${url}...`);
-        const response = await originalGoto(url, options);
-        logFn('info', `Navigation complete: ${response?.status() ?? 'no response'}`);
-        // addInitScript already resets mathState on each navigation — no explicit reset needed
-        return response;
+        const delays = [1000, 2000, 4000];
+        let lastErr: unknown;
+        for (let attempt = 0; attempt <= delays.length; attempt++) {
+          try {
+            const response = await originalGoto(url, options);
+            if (attempt > 0) {
+              logFn('info', `Navigation complete (retry ${attempt}): ${response?.status() ?? 'no response'}`);
+            } else {
+              logFn('info', `Navigation complete: ${response?.status() ?? 'no response'}`);
+            }
+            return response;
+          } catch (err) {
+            lastErr = err;
+            const msg = err instanceof Error ? err.message : String(err);
+            if (!TRANSIENT_NET_RX.test(msg)) throw err;
+            if (attempt === delays.length) break;
+            logFn('warn', `Navigation hit transient network error (attempt ${attempt + 1}/${delays.length + 1}), backing off ${delays[attempt]}ms: ${msg}`);
+            await new Promise((r) => setTimeout(r, delays[attempt]));
+          }
+        }
+        // All retries exhausted on a transient error — this EB's network stack
+        // looks unhealthy. Tag the error so the app-side worker releases + re-claims.
+        const finalMsg = lastErr instanceof Error ? lastErr.message : String(lastErr);
+        const tagged = new Error(`EB network unhealthy after retries: ${finalMsg}`);
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (tagged as any).__ebNetworkUnhealthy = true;
+        throw tagged;
       };
 
       // Extract function body
@@ -433,9 +575,13 @@ export class EmbeddedTestExecutor {
       reachedStep = -1;
       const __stepReached = async (n: number) => { reachedStep = Math.max(reachedStep, n); };
 
-      // Soft error wrapping — skip screenshot lines (mirrors runner.ts)
+      // Soft error wrapping — skip screenshot lines AND navigation lines
+      // (mirrors runner.ts). `page.goto` failures must fail the test hard:
+      // if a worker can't reach the target URL, subsequent steps would run
+      // on about:blank and produce blank-white screenshots recorded as passes.
       body = body.replace(/^(\s*)(await\s+.+;)\s*$/gm, (_match, indent, stmt) => {
         if (stmt.includes('.screenshot(')) return `${indent}${stmt}`;
+        if (stmt.includes('.goto(')) return `${indent}${stmt}`;
         return `${indent}try { ${stmt} } catch(__softErr) { if (__softErr && __softErr.__hardAssertion) throw __softErr; stepLogger.warn(typeof __softErr === 'object' && __softErr !== null && 'message' in __softErr ? __softErr.message : String(__softErr)); }`;
       });
       // Also soft-wrap synchronous expect() calls so assertion failures don't kill the test
@@ -684,14 +830,25 @@ export class EmbeddedTestExecutor {
           })().then(r => { clearTimeout(timeoutTimer); return r; }),
           new Promise<never>((_, reject) => {
             timeoutTimer = setTimeout(() => {
-              logFn('warn', `Timeout fired (${testTimeout}ms) — closing context to kill in-flight operations`);
-              testContext.close().catch(() => {});
+              // For persistent (reused) contexts, close only the page (other tests still need the context).
+              if (reusedPersistentContext) {
+                logFn('warn', `Timeout fired (${testTimeout}ms) — closing page (keeping persistent context)`);
+                page.close().catch(() => {});
+              } else {
+                logFn('warn', `Timeout fired (${testTimeout}ms) — closing context to kill in-flight operations`);
+                testContext.close().catch(() => {});
+              }
               reject(new Error(`Test execution timed out after ${testTimeout}ms`));
             }, testTimeout);
             abortCtrl.signal.addEventListener('abort', () => {
               clearTimeout(timeoutTimer);
-              logFn('info', 'Abort signal received — closing context');
-              testContext.close().catch(() => {});
+              if (reusedPersistentContext) {
+                logFn('info', 'Abort signal received — closing page (keeping persistent context)');
+                page.close().catch(() => {});
+              } else {
+                logFn('info', 'Abort signal received — closing context');
+                testContext.close().catch(() => {});
+              }
               reject(new Error('Test cancelled'));
             });
           }),
@@ -725,6 +882,11 @@ export class EmbeddedTestExecutor {
         if (ignoreExternal && targetOrigin) {
           try { if (new URL(r.url).origin !== targetOrigin) return false; } catch { /* keep */ }
         }
+        // Ignore transient network bursts on sub-resource loads (CNI/DNS
+        // instability during build startup). Keep real 4xx/5xx.
+        if (r.failed && r.errorText && /net::ERR_NETWORK_CHANGED|net::ERR_NAME_NOT_RESOLVED|net::ERR_CONNECTION_RESET|net::ERR_CONNECTION_CLOSED|net::ERR_NETWORK_IO_SUSPENDED/i.test(r.errorText)) {
+          return false;
+        }
         return true;
       });
       if (networkFailures.length > 0 && networkErrorMode !== 'ignore') {
@@ -746,6 +908,9 @@ export class EmbeddedTestExecutor {
         await captureScreenshot('success');
       }
 
+      // Capture DOM snapshot after test body ran so it aligns with the final screenshot.
+      await captureFinalDomSnapshot();
+
       const durationMs = Date.now() - startTime;
       logFn('info', `Test passed in ${durationMs}ms (${screenshots.length} screenshots)`);
 
@@ -759,6 +924,7 @@ export class EmbeddedTestExecutor {
         softErrors: softErrors.length > 0 ? softErrors : undefined,
         lastReachedStep: reachedStep >= 0 ? reachedStep : undefined,
         totalSteps: stepCount > 0 ? stepCount : undefined,
+        domSnapshot,
       };
     } catch (error) {
       const durationMs = Date.now() - startTime;
@@ -775,18 +941,20 @@ export class EmbeddedTestExecutor {
           softErrors: softErrors.length > 0 ? softErrors : undefined,
           lastReachedStep: reachedStep >= 0 ? reachedStep : undefined,
           totalSteps: stepCount > 0 ? stepCount : undefined,
+          domSnapshot,
         };
       } else {
         const isTimeout = errorMessage.includes('timed out');
         logFn('error', `Test ${isTimeout ? 'timed out' : 'failed'}: ${errorMessage}`);
 
-        // Try to capture error screenshot (skip on timeout — context is closed)
+        // Try to capture error screenshot + DOM snapshot (skip on timeout — context is closed)
         let errorScreenshot: string | undefined;
         if (!isTimeout) {
           try {
             const buffer = await page.screenshot();
             errorScreenshot = buffer.toString('base64');
           } catch { /* ignore */ }
+          await captureFinalDomSnapshot();
         }
 
         result = {
@@ -800,6 +968,7 @@ export class EmbeddedTestExecutor {
           softErrors: softErrors.length > 0 ? softErrors : undefined,
           lastReachedStep: reachedStep >= 0 ? reachedStep : undefined,
           totalSteps: stepCount > 0 ? stepCount : undefined,
+          domSnapshot,
         };
       }
     } finally {
@@ -810,10 +979,12 @@ export class EmbeddedTestExecutor {
       if (callbacks?.onBeforePageClose) {
         try { await callbacks.onBeforePageClose(); } catch { /* ignore */ }
       }
-      // Close the per-test page + context (no state leaks between tests)
-      // context.close() may have already been called by timeout/cancel handler — that's fine
+      // Close the per-test page + context (no state leaks between tests).
+      // For reused persistent contexts, keep the context alive for sibling tests.
       await page.close().catch(() => {});
-      await testContext.close().catch(() => {});
+      if (!reusedPersistentContext) {
+        await testContext.close().catch(() => {});
+      }
 
       // After context close, video file is finalized — read and base64 encode it
       if (video && videoDir && result) {
@@ -858,6 +1029,10 @@ export class EmbeddedTestExecutor {
       ...(command.stabilization?.freezeAnimations ? { reducedMotion: 'reduce' as const } : {}),
     });
     const page = await setupContext.newPage();
+    // On success, we transfer ownership of setupContext to this.setupContexts
+    // for reuse by subsequent tests; finally block must not close it in that case.
+    let setupPageClosed = false;
+    let retainContext = false;
 
     try {
       page.setDefaultNavigationTimeout(30000);
@@ -1055,19 +1230,41 @@ export class EmbeddedTestExecutor {
         // Cookie polling failed — continue anyway
       }
 
-      // Capture storageState
-      let storageState: string | undefined;
+      // Capture storageState snapshot. Used as a fallback: if Chromium
+      // disposes the live context's target between tests (observed behavior),
+      // we rebuild a fresh context with these cookies + localStorage instead
+      // of failing the test with "Target has been closed".
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      let storageStateSnapshot: any = undefined;
       try {
-        const state = await setupContext.storageState();
-        storageState = JSON.stringify(state);
-        logFn('info', `Captured storageState: ${state.cookies.length} cookies, ${state.origins.length} origins`);
+        storageStateSnapshot = await setupContext.storageState();
+        logFn('info', `Captured storageState snapshot: ${storageStateSnapshot.cookies.length} cookies, ${storageStateSnapshot.origins.length} origins`);
       } catch (e) {
-        logFn('warn', `Failed to capture storageState: ${e}`);
+        logFn('warn', `Failed to capture storageState snapshot: ${e}`);
       }
+
+      // Persist the setup's BrowserContext — tests in this run reuse it,
+      // preserving sessionStorage/IndexedDB/in-memory auth that storageState drops.
+      //
+      // KEEPALIVE PAGE: we intentionally keep the setup page OPEN. Chromium
+      // disposes a BrowserContext's target when it has 0 pages for a short
+      // while — keeping one navigated-but-idle page alive anchors the target
+      // so tests can open and close their own pages freely alongside it.
+      setupPageClosed = true; // prevent the finally block from closing it
+      this.setupContexts.set(command.setupId, {
+        context: setupContext,
+        createdAt: Date.now(),
+        storageState: storageStateSnapshot,
+        viewport,
+      });
+      this.ensureSetupContextSweeper();
+      retainContext = true;
+      logFn('info', `Persistent setup context retained with keepalive page (setupId=${command.setupId}) — tests in this run will reuse it`);
 
       return {
         status: 'passed',
-        storageState,
+        storageState: `persistent:${command.setupId}`,
+        storageStateJson: storageStateSnapshot ? JSON.stringify(storageStateSnapshot) : undefined,
         durationMs: Date.now() - startTime,
         logs,
       };
@@ -1083,8 +1280,8 @@ export class EmbeddedTestExecutor {
         logs,
       };
     } finally {
-      await page.close().catch(() => {});
-      await setupContext.close().catch(() => {});
+      if (!setupPageClosed) await page.close().catch(() => {});
+      if (!retainContext) await setupContext.close().catch(() => {});
     }
   }
 

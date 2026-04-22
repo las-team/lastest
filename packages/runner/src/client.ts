@@ -468,6 +468,7 @@ export class RunnerClient {
         videoFilename: result.videoFilename,
         lastReachedStep: result.lastReachedStep,
         totalSteps: result.totalSteps,
+        domSnapshot: result.domSnapshot,
       });
       console.log(`[Test ${testId}] Sending result to server...`);
       const resultSent = await this.sendMessage(resultMsg);

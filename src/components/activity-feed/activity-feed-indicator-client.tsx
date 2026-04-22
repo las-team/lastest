@@ -11,6 +11,8 @@ export function ActivityFeedIndicator() {
   const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
+    // Hydration guard: defer SSR-sensitive UI until after client mount.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setMounted(true);
   }, []);
 

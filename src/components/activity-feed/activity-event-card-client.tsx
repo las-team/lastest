@@ -2,12 +2,11 @@
 
 import { useState } from 'react';
 import { ChevronDown, Radio, Cpu, Zap, AlertCircle, CheckCircle2, Clock, Wrench, Trophy, Share2, Sparkles } from 'lucide-react';
-import { Badge } from '@/components/ui/badge';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { ArtifactLink } from './artifact-link-client';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
-import type { ActivityEvent, PwAgentType, ActivityArtifactType } from '@/lib/db/schema';
+import type { ActivityEvent, ActivityArtifactType } from '@/lib/db/schema';
 
 const AGENT_LABELS: Record<string, string> = {
   orchestrator: 'Orchestrator',
@@ -95,9 +94,10 @@ function formatTime(date: Date | string | null): string {
 
 interface ActivityEventCardProps {
   event: ActivityEvent;
+  isLast?: boolean;
 }
 
-export function ActivityEventCard({ event }: ActivityEventCardProps) {
+export function ActivityEventCard({ event, isLast = false }: ActivityEventCardProps) {
   const [open, setOpen] = useState(false);
   const hasDetail = event.detail && Object.keys(event.detail).length > 0;
   const hasArtifact = event.artifactType && event.artifactId;
@@ -107,7 +107,7 @@ export function ActivityEventCard({ event }: ActivityEventCardProps) {
       {/* Timeline dot */}
       <div className="flex flex-col items-center pt-1">
         <div className={cn('h-2.5 w-2.5 rounded-full shrink-0', getDotColor(event))} />
-        <div className="w-px flex-1 bg-border mt-1" />
+        {!isLast && <div className="w-px flex-1 bg-border mt-1" />}
       </div>
 
       {/* Content */}

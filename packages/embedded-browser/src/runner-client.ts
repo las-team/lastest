@@ -86,6 +86,10 @@ export class EmbeddedRunnerClient {
   private cdpPort?: number;
   private systemToken?: string;
   private instanceId?: string;
+  // Track in-flight sendMessage promises so shutdown() can drain them before
+  // the pod exits. Without this the k8s DELETE can race a result/network_bodies
+  // POST and the test's artefacts never land.
+  private pendingSends: Set<Promise<boolean>> = new Set();
 
   /** Called when the main app sends a command (test/recording) */
   onCommand?: (command: BaseMessage) => Promise<void>;
@@ -348,27 +352,51 @@ export class EmbeddedRunnerClient {
     }
   }
 
-  async sendMessage(message: BaseMessage): Promise<boolean> {
+  async sendMessage(message: BaseMessage, opts: { timeoutMs?: number } = {}): Promise<boolean> {
+    const promise = this.doSend(message, opts.timeoutMs ?? 30_000);
+    this.pendingSends.add(promise);
+    promise.finally(() => { this.pendingSends.delete(promise); });
+    return promise;
+  }
+
+  private async doSend(message: BaseMessage, timeoutMs: number): Promise<boolean> {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
     try {
       const headers: Record<string, string> = {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${this.token}`,
       };
-
-      if (this.sessionId) {
-        headers['X-Session-ID'] = this.sessionId;
-      }
-
+      if (this.sessionId) headers['X-Session-ID'] = this.sessionId;
       const response = await fetch(`${this.serverUrl}/api/ws/runner`, {
         method: 'POST',
         headers,
         body: JSON.stringify(message),
+        signal: controller.signal,
       });
-
       return response.ok;
     } catch (error) {
       console.error('[EmbeddedRunner] Send error:', error);
       return false;
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  /**
+   * Wait for all in-flight sendMessage promises to settle, bounded by timeoutMs.
+   * Used by the shutdown handler to ensure test_result / screenshot / network_bodies
+   * POSTs land before the process exits.
+   */
+  async drain(timeoutMs: number): Promise<void> {
+    const pending = Array.from(this.pendingSends);
+    if (pending.length === 0) return;
+    console.log(`[EmbeddedRunner] Draining ${pending.length} pending send(s)`);
+    const drained = Promise.allSettled(pending).then(() => 'drained' as const);
+    const bail = new Promise<'timeout'>((resolve) => setTimeout(() => resolve('timeout'), timeoutMs));
+    const result = await Promise.race([drained, bail]);
+    if (result === 'timeout') {
+      console.warn(`[EmbeddedRunner] Drain timed out after ${timeoutMs}ms; ${this.pendingSends.size} send(s) still pending`);
     }
   }
 

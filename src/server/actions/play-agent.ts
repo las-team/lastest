@@ -301,7 +301,7 @@ function normalizeUrl(rawUrl: string): string {
 
 async function detectLoginRequired(
   baseUrl: string,
-): Promise<{ needsLogin: boolean; loginUrl?: string; hasRegisterLink?: boolean; registerUrl?: string; pageContent: string }> {
+): Promise<{ needsLogin: boolean; loginUrl?: string; hasRegisterLink?: boolean; registerUrl?: string; pageContent: string; detectionError?: string }> {
   let browser = null;
   try {
     browser = await chromium.launch({ headless: true });
@@ -353,8 +353,9 @@ async function detectLoginRequired(
     }
 
     return { needsLogin: false, pageContent };
-  } catch {
-    return { needsLogin: false, pageContent: '' };
+  } catch (err) {
+    const detectionError = err instanceof Error ? err.message : String(err);
+    return { needsLogin: false, pageContent: '', detectionError };
   } finally {
     if (browser) await browser.close().catch(() => {});
   }
@@ -540,6 +541,34 @@ async function runEnvSetup(sessionId: string, repositoryId: string, _teamId: str
     return true;
   }
 
+  // Existing seed wins: if the repo already has any usable setup wiring,
+  // recognize it and skip login detection + AI generation entirely.
+  // Covers script, test-as-setup, storage_state step types, plus legacy
+  // repo-level defaultSetupTestId / defaultSetupScriptId.
+  const defaultSteps = await queries.getDefaultSetupSteps(repositoryId);
+  const usableDefaultSteps = defaultSteps.filter(
+    s => s.stepType === 'script' || s.stepType === 'test' || s.stepType === 'storage_state',
+  );
+  const repoRecord = await queries.getRepository(repositoryId);
+  const hasLegacyDefault = !!(repoRecord?.defaultSetupTestId || repoRecord?.defaultSetupScriptId);
+
+  if (usableDefaultSteps.length > 0 || hasLegacyDefault) {
+    const stepCount = usableDefaultSteps.length + (hasLegacyDefault && usableDefaultSteps.length === 0 ? 1 : 0);
+    await updateSubsteps(sessionId, 'env_setup', [
+      { label: 'Checking base URL', status: 'done', detail: `${connResult.responseTime}ms` },
+      { label: 'Detecting login', status: 'done', detail: 'Existing seed' },
+      { label: 'Login setup', status: 'done', detail: `Already configured (${stepCount} step${stepCount === 1 ? '' : 's'})` },
+    ]);
+    await setStepCompleted(sessionId, 'env_setup', {
+      url: baseUrl,
+      responseTime: connResult.responseTime,
+      loginRequired: true,
+      loginSetup: true,
+      existingSetup: true,
+    });
+    return true;
+  }
+
   await updateSubsteps(sessionId, 'env_setup', [
     { label: 'Checking base URL', status: 'done', detail: `${connResult.responseTime}ms` },
     { label: 'Detecting login', status: 'running' },
@@ -548,26 +577,8 @@ async function runEnvSetup(sessionId: string, repositoryId: string, _teamId: str
 
   const loginDetection = await detectLoginRequired(baseUrl);
 
-  // Check if setup steps or scripts already exist
-  if (loginDetection.needsLogin) {
-    const existingSteps = await queries.getDefaultSetupSteps(repositoryId);
-    const hasScriptStep = existingSteps.some(s => s.stepType === 'script');
-    const existingScripts = await queries.getSetupScripts(repositoryId);
-    if (hasScriptStep || existingScripts.length > 0) {
-      await updateSubsteps(sessionId, 'env_setup', [
-        { label: 'Checking base URL', status: 'done', detail: `${connResult.responseTime}ms` },
-        { label: 'Detecting login', status: 'done', detail: 'Login required' },
-        { label: 'Login setup', status: 'done', detail: 'Already configured' },
-      ]);
-      await setStepCompleted(sessionId, 'env_setup', {
-        url: baseUrl,
-        responseTime: connResult.responseTime,
-        loginRequired: true,
-        loginSetup: true,
-        existingSetup: true,
-      });
-      return true;
-    }
+  if (loginDetection.detectionError) {
+    console.warn(`[play-agent] env_setup login detection error: ${loginDetection.detectionError}`);
   }
 
   if (!loginDetection.needsLogin) {
@@ -836,7 +847,15 @@ async function runPlanWithAgents(
   teamId: string,
 ): Promise<boolean> {
   const envConfig = await getEnvironmentConfig(repositoryId);
-  const baseUrl = envConfig?.baseUrl || 'http://localhost:3000';
+  if (!envConfig?.baseUrl) {
+    await setStepFailed(
+      sessionId,
+      'plan',
+      'Base URL missing — env_setup did not complete. Restart the Play run from env setup.',
+    );
+    return false;
+  }
+  const baseUrl = envConfig.baseUrl;
 
   const sessionData = await queries.getAgentSession(sessionId);
   const intelligence = sessionData?.metadata?.codebaseIntelligence as CodebaseIntelligenceContext | undefined;
@@ -1266,19 +1285,25 @@ async function runGenerate(sessionId: string, repositoryId: string, teamId: stri
 
     const totalWork = workItems.length;
 
+    type GeneratorSubstep = NonNullable<AgentStepState['substeps']>[number];
+    const generatorStates: GeneratorSubstep[] = [];
+    const flushGenerators = () => updateSubsteps(sessionId, 'generate', [...generatorStates]);
+
     for (let batch = 0; batch < workItems.length; batch += GENERATOR_CONCURRENCY) {
       if (isAborted(signal)) return false;
 
       const chunk = workItems.slice(batch, batch + GENERATOR_CONCURRENCY);
+      const batchStartIdx = generatorStates.length;
 
-      await updateSubsteps(sessionId, 'generate', [
-        {
-          label: `Generating tests (${Math.min(batch, totalWork)}/${totalWork})`,
+      for (const { area, group } of chunk) {
+        generatorStates.push({
+          label: `Generating "${group.name}"`,
           status: 'running',
-          detail: `${chunk.length} generators in parallel`,
+          detail: `${area.name} · ${group.scenarioCount} scenario${group.scenarioCount > 1 ? 's' : ''}`,
           agent: 'generator',
-        },
-      ]);
+        });
+      }
+      await flushGenerators();
 
       for (const { area, group } of chunk) {
         emitActivity(teamId, repositoryId, sessionId, 'substep:update',
@@ -1287,7 +1312,9 @@ async function runGenerate(sessionId: string, repositoryId: string, teamId: stri
       }
 
       const results = await Promise.allSettled(
-        chunk.map(async ({ area, group }) => {
+        chunk.map(async ({ area, group }, chunkIdx) => {
+          const subIdx = batchStartIdx + chunkIdx;
+          try {
           // Combine session abort signal with per-call timeout
           const timeoutSignal = AbortSignal.timeout(agentTimeout);
           const combinedSignal = signal
@@ -1379,9 +1406,22 @@ async function runGenerate(sessionId: string, repositoryId: string, teamId: stri
             } catch {
               // Non-critical
             }
+            generatorStates[subIdx] = { ...generatorStates[subIdx], status: 'done' };
+            await flushGenerators();
             return true;
           }
+          generatorStates[subIdx] = { ...generatorStates[subIdx], status: 'error' };
+          await flushGenerators();
           return false;
+          } catch (err) {
+            generatorStates[subIdx] = {
+              ...generatorStates[subIdx],
+              status: 'error',
+              rawError: err instanceof Error ? err.message : String(err),
+            };
+            await flushGenerators();
+            throw err;
+          }
         }),
       );
 

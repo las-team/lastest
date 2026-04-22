@@ -253,6 +253,21 @@ pnpm dev
 
 Open [http://localhost:3000](http://localhost:3000)
 
+### Option 3: Local k3s (exercises dynamic EB provisioning)
+
+Runs the exact Kubernetes-provisioned flow on a local k3d cluster — the app spawns fresh embedded-browser pods on demand via the kube API.
+
+```bash
+pnpm stack           # build images, create k3d cluster, deploy, ready
+                     # open http://localhost:3000
+pnpm stack:refresh   # rebuild app, rolling restart
+pnpm stack:status    # health + pod summary
+pnpm stack:logs eb   # tail all EB pods
+pnpm stack:stop      # teardown (add :purge to also drop generated secrets)
+```
+
+Prereqs: `docker`, `k3d` ≥ 5.6, `kubectl`, `pnpm`, `openssl`. OAuth / email / CRM keys from `.env.local` are auto-merged into the k8s Secret. See [`k8s/`](./k8s) and [`scripts/k3d-*.sh`](./scripts).
+
 ### First steps
 
 1. Create an account (local, no external auth required)
@@ -384,6 +399,15 @@ pnpm db:generate  # Generate Drizzle migrations
 pnpm db:reset     # Reset database (drops all tables + removes screenshots/baselines)
 pnpm db:seed      # Seed test data
 pnpm test:visual  # Run visual tests via CLI (see below)
+
+# Local k3s stack (dynamic EB provisioning on k3d)
+pnpm stack              # bootstrap: build + create cluster + deploy
+pnpm stack:stop         # teardown cluster (pnpm stack:purge also drops .k8s-secrets.yaml)
+pnpm stack:refresh      # rebuild app image + rolling restart
+pnpm stack:refresh:eb   # rebuild EB image + restart app so new Jobs use it
+pnpm stack:refresh:all  # EB then app
+pnpm stack:status       # cluster + workloads + /api/health
+pnpm stack:logs         # tail app pod (variants: :eb, :all)
 ```
 
 ---

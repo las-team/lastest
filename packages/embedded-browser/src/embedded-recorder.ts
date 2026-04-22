@@ -83,7 +83,7 @@ export class EmbeddedRecorder {
       // Intercept File System Access API (showSaveFilePicker) — convert to a regular
       // blob download so Playwright's download event fires and we can capture it.
       if (typeof window !== 'undefined') {
-        const origSave = (window as unknown as Record<string, unknown>).showSaveFilePicker as ((...args: unknown[]) => Promise<unknown>) | undefined;
+        const _origSave = (window as unknown as Record<string, unknown>).showSaveFilePicker as ((...args: unknown[]) => Promise<unknown>) | undefined;
         (window as unknown as Record<string, unknown>).showSaveFilePicker = async function (...args: unknown[]) {
           // Extract suggested filename from options
           const opts = (args[0] ?? {}) as Record<string, unknown>;

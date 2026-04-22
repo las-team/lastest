@@ -63,8 +63,24 @@ export async function runBrowserPlanner(
       testPlan: a.testPlan!,
     }));
 
-  // Phase 2: Deep-dive for explore areas (MCP, parallel batches)
+  // Phase 2: Deep-dive for explore areas (MCP, parallel batches).
+  // Guarantee: at least one Diver must run on the live URL so the user always
+  // gets real MCP discovery. If Scout classified everything as "skip", promote
+  // the first DEEP_DIVE_CONCURRENCY areas (preferring ones with routes) so the
+  // Diver has something meaningful to navigate to.
   const exploreAreas = scoutOutput.areas.filter(a => a.classification === 'explore');
+  if (exploreAreas.length === 0 && scoutOutput.areas.length > 0) {
+    const promotable = [...scoutOutput.areas].sort((a, b) => b.routes.length - a.routes.length);
+    for (const area of promotable.slice(0, DEEP_DIVE_CONCURRENCY)) {
+      exploreAreas.push({ ...area, classification: 'explore' });
+    }
+  }
+
+  // Hard fallback: Scout had no areas at all — fall back to monolithic MCP exploration.
+  if (exploreAreas.length === 0) {
+    return runFallbackExploration(repositoryId, baseUrl, options);
+  }
+
   const deepDiveResults: PlannerArea[] = [];
 
   if (exploreAreas.length > 0) {
@@ -93,7 +109,7 @@ export async function runBrowserPlanner(
             const diveDuration = Date.now() - diveStart;
             options?.onDeepDiveComplete?.(area.name, areas.length, diveDuration, diveLogId);
             return areas;
-          } catch (err) {
+          } catch (_err) {
             const diveDuration = Date.now() - diveStart;
             options?.onDeepDiveComplete?.(area.name, 0, diveDuration, diveLogId);
             // On failure, create a basic plan from scout's focus points

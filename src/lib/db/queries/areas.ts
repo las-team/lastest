@@ -27,7 +27,7 @@ export async function getFunctionalAreasTree(repositoryId: string): Promise<Func
     .select()
     .from(functionalAreas)
     .where(and(eq(functionalAreas.repositoryId, repositoryId), isNull(functionalAreas.deletedAt)))
-    .orderBy(functionalAreas.orderIndex)
+    .orderBy(functionalAreas.orderIndex, functionalAreas.name)
     ;
 
   const allTests = await getTestsByRepo(repositoryId);

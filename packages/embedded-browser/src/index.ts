@@ -18,6 +18,7 @@ import { CROSS_OS_CHROMIUM_ARGS } from './stabilization.js';
 import { inspectElementAtPoint, getAllDomSelectors, type SelectorPriorityConfig } from './selector-utils.js';
 
 import os from 'os';
+import net from 'net';
 
 // Configuration from environment
 const streamPort = parseInt(process.env.STREAM_PORT ?? '9223', 10);
@@ -73,6 +74,12 @@ async function startup(): Promise<void> {
   // 1. Launch browser
   console.log('[Startup] Launching Chromium...');
   const useCrossOsArgs = process.env.CROSS_OS_CONSISTENCY !== 'false';
+  // Modern Chromium (106+) hard-codes `--remote-debugging-address=127.0.0.1`
+  // as a security measure — the flag is silently ignored for non-localhost
+  // values. That breaks @playwright/mcp (--cdp-endpoint) for healer/generator
+  // agents when the EB runs in a separate k8s pod. Work around by binding
+  // Chromium to localhost as usual, then running a tiny Node TCP proxy on
+  // 0.0.0.0:<cdpPort> that forwards to 127.0.0.1:<cdpPort>.
   browser = await chromium.launch({
     headless: true,
     ignoreDefaultArgs: ['--enable-automation'],
@@ -82,7 +89,28 @@ async function startup(): Promise<void> {
       `--remote-debugging-port=${config.cdpPort}`,
     ],
   });
-  console.log(`[Startup] CDP endpoint available at http://localhost:${config.cdpPort}`);
+  console.log(`[Startup] CDP endpoint available at http://127.0.0.1:${config.cdpPort}`);
+
+  // TCP proxy: expose the Chromium CDP port on all interfaces so other pods
+  // can reach it. Plain byte pipe — CDP is WebSocket + HTTP, both just TCP.
+  try {
+    const cdpProxy = net.createServer((client) => {
+      const upstream = net.createConnection(config.cdpPort, '127.0.0.1');
+      upstream.on('error', () => client.destroy());
+      client.on('error', () => upstream.destroy());
+      client.pipe(upstream);
+      upstream.pipe(client);
+    });
+    cdpProxy.on('error', (err) => {
+      console.error('[CDP proxy] error:', err);
+    });
+    await new Promise<void>((resolve) => {
+      cdpProxy.listen(config.cdpPort + 10, '0.0.0.0', () => resolve());
+    });
+    console.log(`[Startup] CDP proxy listening on 0.0.0.0:${config.cdpPort + 10} → 127.0.0.1:${config.cdpPort}`);
+  } catch (err) {
+    console.error('[Startup] Failed to start CDP proxy (MCP tools from other pods will not work):', err);
+  }
 
   context = await browser.newContext({
     viewport: { width: config.viewportWidth, height: config.viewportHeight },
@@ -292,7 +320,9 @@ async function startup(): Promise<void> {
     streamPort: config.streamPort,
     streamHost: config.streamHost,
     pollInterval: config.pollInterval,
-    cdpPort: config.cdpPort,
+    // Register the PROXY port as the externally-reachable CDP endpoint. The
+    // raw Chromium CDP socket is 127.0.0.1-only (see TCP proxy above).
+    cdpPort: config.cdpPort + 10,
     systemToken: config.systemToken || undefined,
     instanceId: config.instanceId,
   });
@@ -351,21 +381,24 @@ async function startup(): Promise<void> {
             const capturedStreamServer = streamServer;
             const capturedPage = page; // idle page for screencast restore
             const shouldStreamTest = isHeaded && activeTasks === 1 && capturedScreencast && capturedStreamServer;
+            const testViewport = payload.viewport ?? { width: config.viewportWidth, height: config.viewportHeight };
 
             const callbacks = shouldStreamTest ? {
               onPageCreated: async (testPage: Page) => {
                 try {
-                  // Force the test page to render at the EB's native resolution
+                  // Force the test page to render at the test's configured viewport so the
+                  // streamed framebuffer matches the resolution the test was authored for.
                   const cdp = await testPage.context().newCDPSession(testPage);
                   await cdp.send('Emulation.setDeviceMetricsOverride', {
-                    width: config.viewportWidth,
-                    height: config.viewportHeight,
+                    width: testViewport.width,
+                    height: testViewport.height,
                     deviceScaleFactor: 1,
                     mobile: false,
                   });
                   await cdp.detach();
 
                   await capturedScreencast.stop();
+                  await capturedScreencast.updateViewport(testViewport.width, testViewport.height);
                   await capturedScreencast.start(testPage, (frame) => {
                     capturedStreamServer.broadcastFrame(frame.data, frame.width, frame.height, frame.timestamp);
                   });
@@ -451,25 +484,30 @@ async function startup(): Promise<void> {
                 videoFilename: result.videoFilename,
                 lastReachedStep: result.lastReachedStep,
                 totalSteps: result.totalSteps,
+                domSnapshot: result.domSnapshot,
               },
             });
 
-            // Send full network body data asynchronously (non-blocking)
+            // Send full network body data. Awaited so that if a SIGTERM arrives
+            // immediately after test completion, the payload is flushed before
+            // shutdown()'s drain() returns.
             if (hasNetworkBodies && result.networkRequests) {
-              capturedClient.sendMessage({
-                id: crypto.randomUUID(),
-                type: 'response:network_bodies' as 'response:test_result',
-                timestamp: Date.now(),
-                payload: {
-                  correlationId: capturedCommand.id,
-                  testId: payload.testId,
-                  testRunId: payload.testRunId,
-                  repositoryId: payload.repositoryId,
-                  networkRequests: result.networkRequests,
-                },
-              }).catch(err => {
+              try {
+                await capturedClient.sendMessage({
+                  id: crypto.randomUUID(),
+                  type: 'response:network_bodies' as 'response:test_result',
+                  timestamp: Date.now(),
+                  payload: {
+                    correlationId: capturedCommand.id,
+                    testId: payload.testId,
+                    testRunId: payload.testRunId,
+                    repositoryId: payload.repositoryId,
+                    networkRequests: result.networkRequests,
+                  },
+                });
+              } catch (err) {
                 console.warn(`[Command] Failed to send network bodies for test ${payload.testId}:`, err);
-              });
+              }
             }
           } catch (err) {
             console.error(`[Command] Test ${payload.testId} failed:`, err);
@@ -607,6 +645,32 @@ async function startup(): Promise<void> {
         // Clear watchdog first
         if (recordingWatchdog) { clearInterval(recordingWatchdog); recordingWatchdog = null; }
 
+        // Capture final DOM snapshot on the recording page BEFORE stopping —
+        // the test baseline needs this to compute DOM deltas at run time.
+        let recordingDomSnapshot: Awaited<ReturnType<typeof getAllDomSelectors>> | undefined;
+        if (isRecording && recorder?.isActive()) {
+          const recPage = recorder.getPage();
+          if (recPage && !recPage.isClosed()) {
+            try {
+              const defaultPriority: SelectorPriorityConfig = [
+                { type: 'data-testid', enabled: true, priority: 1 },
+                { type: 'id', enabled: true, priority: 2 },
+                { type: 'label', enabled: true, priority: 3 },
+                { type: 'role-name', enabled: true, priority: 4 },
+                { type: 'aria-label', enabled: true, priority: 5 },
+                { type: 'text', enabled: true, priority: 6 },
+                { type: 'placeholder', enabled: true, priority: 7 },
+                { type: 'name', enabled: true, priority: 8 },
+                { type: 'css-path', enabled: true, priority: 9 },
+                { type: 'heading-context', enabled: true, priority: 10 },
+              ];
+              recordingDomSnapshot = await getAllDomSelectors(recPage, defaultPriority);
+            } catch (err) {
+              console.warn('[Command] Failed to capture recording DOM snapshot:', err);
+            }
+          }
+        }
+
         if (isRecording && recorder) {
           try {
             await screencast?.stop();
@@ -637,6 +701,7 @@ async function startup(): Promise<void> {
           payload: {
             sessionId: payload.sessionId,
             generatedCode: '',
+            domSnapshot: recordingDomSnapshot,
           },
         });
 
@@ -908,6 +973,7 @@ async function startup(): Promise<void> {
                 correlationId: capturedCommand.id,
                 status: result.status,
                 storageState: result.storageState,
+                storageStateJson: result.storageStateJson,
                 variables: result.variables,
                 durationMs: result.durationMs,
                 error: result.error,
@@ -960,6 +1026,17 @@ async function startup(): Promise<void> {
         break;
       }
 
+      case 'command:shutdown': {
+        // Graceful shutdown initiated by the server (typically by
+        // maybeTerminateReleasedEB before the k8s Job is DELETEd).
+        // Detach the command loop and enter shutdown(); shutdown() will
+        // drain any in-flight sendMessage promises before process.exit.
+        const reason = (command.payload as { reason?: string } | undefined)?.reason ?? 'server-requested';
+        console.log(`[Command] Shutdown requested: ${reason}`);
+        void shutdown();
+        break;
+      }
+
       default:
         console.warn(`[Command] Unknown command type: ${command.type}`);
     }
@@ -969,10 +1046,22 @@ async function startup(): Promise<void> {
   console.log('[Startup] Fully operational');
 }
 
+let shuttingDown = false;
+
 async function shutdown(): Promise<void> {
+  if (shuttingDown) return;
+  shuttingDown = true;
   console.log('[Shutdown] Starting...');
 
   if (runnerClient) {
+    // Drain any in-flight test_result / screenshot / network_bodies POSTs
+    // BEFORE stopping the runner loop. 15s covers typical k8s termination
+    // grace (we set terminationGracePeriodSeconds=60 on the Job template).
+    try {
+      await runnerClient.drain(15_000);
+    } catch (err) {
+      console.warn('[Shutdown] drain error:', err);
+    }
     await runnerClient.stop();
   }
 

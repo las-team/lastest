@@ -51,7 +51,7 @@ export async function updateDefaultSetupSteps(
 ) {
   await requireRepoAccess(repositoryId);
   await queries.replaceDefaultSetupSteps(repositoryId, steps);
-  revalidatePath('/env');
+  revalidatePath('/tests');
   return { success: true };
 }
 
@@ -79,7 +79,7 @@ export async function addDefaultSetupStep(
     orderIndex: maxOrder + 1,
   });
 
-  revalidatePath('/env');
+  revalidatePath('/tests');
   return { success: true };
 }
 
@@ -89,7 +89,7 @@ export async function addDefaultSetupStep(
 export async function removeDefaultSetupStep(stepId: string) {
   await requireTeamAccess();
   await queries.deleteDefaultSetupStep(stepId);
-  revalidatePath('/env');
+  revalidatePath('/tests');
   return { success: true };
 }
 
@@ -106,7 +106,7 @@ export async function reorderDefaultSetupSteps(
     await queries.updateDefaultSetupStepOrder(stepIds[i], i);
   }
 
-  revalidatePath('/env');
+  revalidatePath('/tests');
   return { success: true };
 }
 

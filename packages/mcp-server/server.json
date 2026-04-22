@@ -7,13 +7,13 @@
     "source": "github",
     "subfolder": "packages/mcp-server"
   },
-  "version": "0.2.2",
+  "version": "0.3.0",
   "websiteUrl": "https://github.com/las-team/lastest/wiki/MCP-Server",
   "packages": [
     {
       "registryType": "npm",
       "identifier": "@lastest/mcp-server",
-      "version": "0.2.2",
+      "version": "0.3.0",
       "transport": { "type": "stdio" },
       "runtimeArguments": [
         {

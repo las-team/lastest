@@ -413,7 +413,7 @@ export function BuildDetailClient({
                 <button
                   onClick={() => setBrowserFilter(null)}
                   className={`px-2 py-1 text-xs rounded-md transition-colors ${
-                    browserFilter === null ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground hover:bg-muted/80'
+                    browserFilter === null ? 'bg-accent text-accent-foreground' : 'bg-muted text-muted-foreground hover:bg-muted/80'
                   }`}
                 >
                   All browsers
@@ -423,7 +423,7 @@ export function BuildDetailClient({
                     key={b}
                     onClick={() => setBrowserFilter(b)}
                     className={`px-2 py-1 text-xs rounded-md transition-colors ${
-                      browserFilter === b ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground hover:bg-muted/80'
+                      browserFilter === b ? 'bg-accent text-accent-foreground' : 'bg-muted text-muted-foreground hover:bg-muted/80'
                     }`}
                   >
                     <BrowserIcon browser={b} />

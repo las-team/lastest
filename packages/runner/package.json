@@ -21,7 +21,8 @@
   },
   "dependencies": {
     "playwright": "1.57.0",
-    "commander": "^12.0.0"
+    "commander": "^12.0.0",
+    "sucrase": "^3.35.0"
   },
   "devDependencies": {
     "@lastest/shared": "workspace:*",

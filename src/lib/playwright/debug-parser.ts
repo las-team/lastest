@@ -146,6 +146,44 @@ function extractBestSelector(code: string): { selector: string; action: string; 
 }
 
 /**
+ * Extract the fill/type/selectOption value from an action step's code
+ * so the UI can render it as an editable input.
+ *
+ * Returns the unescaped value, or null if the step has no editable value.
+ * The returned string is the in-memory representation (quotes and backslashes
+ * un-escaped); callers re-escape before writing back to source.
+ */
+export function extractEditableValue(step: DebugStep): string | null {
+  if (step.type !== 'action') return null;
+  const code = step.code.trim();
+  const unescape = (s: string) => s.replace(/\\'/g, "'").replace(/\\\\/g, '\\');
+
+  // locateWithFallback(page, [...selectors...], 'fill', 'VALUE', ...)
+  // The selectors JSON can contain ']' inside string values (e.g. CSS attribute
+  // selectors), so we match the action marker directly instead of trying to
+  // span the bracketed arg.
+  const lwfFill = code.match(/locateWithFallback\s*\([\s\S]*?,\s*'fill'\s*,\s*'((?:[^'\\]|\\.)*)'/);
+  if (lwfFill) return unescape(lwfFill[1]);
+
+  const lwfSelect = code.match(/locateWithFallback\s*\([\s\S]*?,\s*'selectOption'\s*,\s*'((?:[^'\\]|\\.)*)'/);
+  if (lwfSelect) return unescape(lwfSelect[1]);
+
+  // Chained .fill('VALUE'[, { options }])
+  const fillMatch = code.match(/\.fill\s*\(\s*'((?:[^'\\]|\\.)*)'\s*(?:,[^)]*)?\)/);
+  if (fillMatch) return unescape(fillMatch[1]);
+
+  // page.keyboard.type('VALUE'[, { delay }])
+  const typeMatch = code.match(/\.keyboard\.type\s*\(\s*'((?:[^'\\]|\\.)*)'\s*(?:,[^)]*)?\)/);
+  if (typeMatch) return unescape(typeMatch[1]);
+
+  // Chained .selectOption('VALUE'[, { options }])
+  const selOptMatch = code.match(/\.selectOption\s*\(\s*'((?:[^'\\]|\\.)*)'\s*(?:,[^)]*)?\)/);
+  if (selOptMatch) return unescape(selOptMatch[1]);
+
+  return null;
+}
+
+/**
  * Extract a locator description from Playwright chained calls like
  * page.getByRole('link', { name: 'Tests' }).click()
  */

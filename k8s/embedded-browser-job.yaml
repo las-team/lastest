@@ -1,0 +1,89 @@
+# Reference template for a single on-demand Embedded Browser Job.
+#
+# The app's provisioner (src/lib/eb/provisioner.ts) constructs the spec
+# programmatically via the Kubernetes REST API, but this file documents the
+# exact shape and is usable for manual `kubectl apply` during bring-up / debug.
+#
+# Key invariants:
+#   - One Job per browser per test (1 test per EB).
+#   - restartPolicy: Never  + backoffLimit: 0  → no retry loops on failure.
+#   - ttlSecondsAfterFinished cleans up finished Jobs automatically.
+#   - activeDeadlineSeconds hard-caps runtime (prevents stuck pods).
+#   - /dev/shm is mounted as a 512Mi memory emptyDir — Chromium crashes under
+#     load on the default 64Mi /dev/shm.
+#
+# Replace INSTANCE_ID placeholders before applying manually.
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: eb-INSTANCE_ID
+  namespace: lastest
+  labels:
+    app: lastest-eb
+    lastest.dev/eb-instance: INSTANCE_ID
+spec:
+  activeDeadlineSeconds: 1800
+  ttlSecondsAfterFinished: 60
+  backoffLimit: 0
+  template:
+    metadata:
+      labels:
+        app: lastest-eb
+        lastest.dev/eb-instance: INSTANCE_ID
+    spec:
+      restartPolicy: Never
+      volumes:
+        - name: dshm
+          emptyDir:
+            medium: Memory
+            sizeLimit: 512Mi
+      containers:
+        - name: embedded-browser
+          image: lastest-embedded-browser:latest
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: LASTEST_URL
+              value: "http://lastest-app.lastest.svc.cluster.local:3000"
+            - name: SYSTEM_EB_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: lastest-system-eb
+                  key: token
+            - name: INSTANCE_ID
+              value: "INSTANCE_ID"
+            - name: STREAM_PORT
+              value: "9223"
+            - name: CDP_PORT
+              value: "9222"
+          ports:
+            - containerPort: 9222
+              name: cdp
+            - containerPort: 9223
+              name: stream
+            - containerPort: 9224
+              name: health
+          resources:
+            requests:
+              cpu: "1000m"
+              memory: "2Gi"
+            limits:
+              cpu: "2000m"
+              memory: "4Gi"
+          volumeMounts:
+            - name: dshm
+              mountPath: /dev/shm
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 9224
+            initialDelaySeconds: 2
+            periodSeconds: 2
+            failureThreshold: 30
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 9224
+            initialDelaySeconds: 15
+            periodSeconds: 10
+            failureThreshold: 3

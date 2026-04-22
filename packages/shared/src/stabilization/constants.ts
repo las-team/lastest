@@ -244,14 +244,19 @@ export const DEFAULT_SCREENSHOT_DELAY = 0;
 
 /**
  * CSS to hide common loading indicators and spinners.
+ *
+ * Uses word-match ([class~="x"]) instead of substring ([class*="x"]) to avoid
+ * hiding unrelated elements whose classnames happen to contain these words
+ * (e.g. CSS-module hashes, BEM wrappers like `row-loading-panel`, or framework
+ * classes like `MuiDataGrid-overlayWrapper` that collide with "loader"/"loading").
  */
 export const HIDE_SPINNERS_CSS = `
-[class*="spinner"],
-[class*="loading"],
-[class*="loader"],
-[class*="skeleton"],
-[class*="pulse"],
-[class*="shimmer"],
+[class~="spinner"],
+[class~="loading"],
+[class~="loader"],
+[class~="skeleton"],
+[class~="pulse"],
+[class~="shimmer"],
 [aria-busy="true"],
 [data-loading="true"],
 [data-testid*="loading"],

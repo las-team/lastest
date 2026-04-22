@@ -8,9 +8,9 @@ import { createHash } from 'crypto';
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
-import type { RunTestCommandPayload, RunSetupCommandPayload, LogEntry, StabilizationPayload } from './protocol.js';
+import type { RunTestCommandPayload, RunSetupCommandPayload, LogEntry, StabilizationPayload, DomSnapshotPayload } from './protocol.js';
 import { CROSS_OS_CHROMIUM_ARGS, setupFreezeScripts, applyPreScreenshotStabilization } from './stabilization.js';
-import { instrumentStepTracking } from '@lastest/shared';
+import { instrumentStepTracking, stripTypeAnnotations } from '@lastest/shared';
 
 /**
  * Verify code integrity by comparing SHA256 hash.
@@ -35,6 +35,119 @@ export interface TestRunResult {
   videoFilename?: string;
   lastReachedStep?: number;
   totalSteps?: number;
+  domSnapshot?: DomSnapshotPayload;
+}
+
+/**
+ * Capture a DOM snapshot of the live page. Evaluates a self-contained script
+ * that extracts interactive-element metadata + selector candidates. Mirrors
+ * `packages/embedded-browser/src/selector-utils.ts` but inlined so the runner
+ * package stays zero-dep on server code.
+ */
+async function captureDomSnapshotForRunner(page: Page): Promise<DomSnapshotPayload> {
+  let url = '';
+  try { url = page.url(); } catch { /* page may be closed */ }
+  const elements = await page.evaluate(() => {
+    const DYNAMIC_ID_PATTERNS = [
+      /^react-select-\d+-/, /^headlessui-\w+-\d+$/, /^mui-\d+$/, /^:r[a-z0-9]+:$/,
+      /^radix-/, /^ember\d+$/, /^[a-z]+[-_]\d{2,}$/i, /[a-f0-9]{8,}/, /\d{4,}/,
+    ];
+    const isDyn = (id: string) => id.includes('undefined') || DYNAMIC_ID_PATTERNS.some(p => p.test(id));
+    const implicitRole = (el: HTMLElement): string | null => {
+      const map: Record<string, string> = {
+        BUTTON: 'button', A: 'link',
+        INPUT: el.getAttribute('type') === 'checkbox' ? 'checkbox'
+          : el.getAttribute('type') === 'radio' ? 'radio'
+          : el.getAttribute('type') === 'submit' ? 'button'
+          : 'textbox',
+        SELECT: 'combobox', TEXTAREA: 'textbox', IMG: 'img',
+        NAV: 'navigation', MAIN: 'main', HEADER: 'banner', FOOTER: 'contentinfo',
+      };
+      return map[el.tagName] || null;
+    };
+    const cssPath = (el: HTMLElement): string => {
+      const parts: string[] = [];
+      let cur: HTMLElement | null = el;
+      while (cur && cur !== document.body) {
+        let s = cur.tagName.toLowerCase();
+        const c = cur.getAttribute('class');
+        if (c) {
+          const cls = c.split(' ').filter(x => x && !x.includes(':') && !x.startsWith('_')).slice(0, 2)
+            .map(x => x.replace(/([[\]()#.>+~=|^$*!@])/g, '\\$1'));
+          if (cls.length) s += '.' + cls.join('.');
+        }
+        parts.unshift(s);
+        cur = cur.parentElement;
+      }
+      return parts.slice(-3).join(' > ');
+    };
+    const INTERACTIVE = new Set([
+      'button','option','menuitem','menuitemcheckbox','menuitemradio',
+      'tab','treeitem','link','switch','radio','checkbox','combobox','listitem',
+    ]);
+    const buildSelectors = (el: HTMLElement) => {
+      const m = new Map<string, string>();
+      if (el.dataset.testid) m.set('data-testid', `[data-testid="${el.dataset.testid}"]`);
+      if (el.id && !isDyn(el.id)) m.set('id', `#${el.id}`);
+      const labelText = (
+        (el.id ? (document.querySelector(`label[for="${CSS.escape(el.id)}"]`) as HTMLElement)?.textContent?.trim() : null) ||
+        (el.closest('label') as HTMLElement)?.textContent?.trim() ||
+        (el.getAttribute('aria-labelledby') ? document.getElementById(el.getAttribute('aria-labelledby')!)?.textContent?.trim() : null)
+      )?.slice(0, 50) || null;
+      if (labelText) m.set('label', `label="${labelText}"`);
+      const role = el.getAttribute('role') || implicitRole(el);
+      const name = el.getAttribute('aria-label') || el.getAttribute('title') || labelText || el.textContent?.trim().slice(0, 30);
+      if (role && name) m.set('role-name', `role=${role}[name="${name}"]`);
+      const aria = el.getAttribute('aria-label');
+      if (aria) m.set('aria-label', `[aria-label="${aria}"]`);
+      const elRole = el.getAttribute('role');
+      if (el.tagName === 'BUTTON' || el.tagName === 'A' || el.tagName === 'LI' || el.tagName === 'LABEL' || (elRole && INTERACTIVE.has(elRole))) {
+        const t = el.textContent?.trim().slice(0, 30);
+        if (t) m.set('text', `text="${t}"`);
+      }
+      if (!m.has('text') && el.children.length === 0) {
+        const t = el.textContent?.trim().slice(0, 30);
+        if (t) m.set('text', `text="${t}"`);
+      }
+      const ph = el.getAttribute('placeholder');
+      if (ph) m.set('placeholder', `[placeholder="${ph}"]`);
+      const nm = el.getAttribute('name');
+      if (nm && !isDyn(nm)) m.set('name', `[name="${nm}"]`);
+      const cp = cssPath(el);
+      if (cp) m.set('css-path', cp);
+      const PRIORITY = ['data-testid','id','label','role-name','aria-label','text','placeholder','name','css-path'];
+      const out: Array<{ type: string; value: string }> = [];
+      for (const k of PRIORITY) { const v = m.get(k); if (v) out.push({ type: k, value: v }); }
+      for (const [k, v] of m) { if (!out.some(s => s.type === k)) out.push({ type: k, value: v }); }
+      return out;
+    };
+    const SEL = 'a, button, input, select, textarea, [role], [data-testid], [tabindex], [aria-label], label, li, [onclick]';
+    const list = document.querySelectorAll(SEL);
+    const seen = new Set<HTMLElement>();
+    const out: Array<{ tag: string; id?: string; textContent?: string; boundingBox: { x: number; y: number; width: number; height: number }; selectors: Array<{ type: string; value: string }> }> = [];
+    const MAX = 5000;
+    let n = 0;
+    for (const node of list) {
+      if (n >= MAX) break;
+      const el = node as HTMLElement;
+      if (seen.has(el)) continue;
+      seen.add(el);
+      const r = el.getBoundingClientRect();
+      if (r.width === 0 && r.height === 0) continue;
+      const sels = buildSelectors(el);
+      if (sels.length === 0) continue;
+      out.push({
+        tag: el.tagName.toLowerCase(),
+        id: el.id || undefined,
+        textContent: el.textContent?.trim().slice(0, 100) || undefined,
+        boundingBox: { x: r.x, y: r.y, width: r.width, height: r.height },
+        selectors: sels,
+      });
+      n++;
+    }
+    return out;
+  }).catch(() => [] as DomSnapshotPayload['elements']);
+  return { elements, url, timestamp: Date.now() };
 }
 
 export class TestRunner {
@@ -47,6 +160,12 @@ export class TestRunner {
   // Legacy single-test tracking (for backward compat with abort/isRunning)
   private abortController: AbortController | null = null;
   private currentTestRunId: string | null = null;
+  // Persistent setup contexts: keyed by setupId, reused across all tests in a run.
+  // Fixes the storageState-serialization path losing session state that Playwright's
+  // storageState() can't capture (sessionStorage, IndexedDB, in-memory auth tokens).
+  private setupContexts = new Map<string, { context: BrowserContext; createdAt: number }>();
+  private setupContextSweeper: ReturnType<typeof setInterval> | null = null;
+  private readonly SETUP_CONTEXT_TTL_MS = 30 * 60 * 1000;
 
   /**
    * Ensure a shared browser instance is running.
@@ -84,17 +203,54 @@ export class TestRunner {
   }
 
   /**
-   * Close the shared browser if no tests are running.
-   * Nulls the reference BEFORE closing so concurrent ensureBrowser()
-   * calls see null and launch a fresh browser instead of getting the
-   * dying one.
+   * Close the shared browser if no tests are running AND no persistent
+   * setup contexts are alive. Persistent contexts depend on the shared
+   * browser, so we must keep it up while any are held.
    */
   async closeBrowserIfIdle(): Promise<void> {
-    if (this.activeTests.size === 0 && this.browser) {
+    if (this.activeTests.size === 0 && this.setupContexts.size === 0 && this.browser) {
       const b = this.browser;
       this.browser = null;
       await b.close().catch(() => {});
     }
+  }
+
+  /**
+   * Lazily start a sweeper that closes persistent setup contexts idle longer
+   * than SETUP_CONTEXT_TTL_MS. Called from runSetup when we store the first
+   * persistent context.
+   */
+  private ensureSetupContextSweeper() {
+    if (this.setupContextSweeper) return;
+    this.setupContextSweeper = setInterval(() => {
+      const now = Date.now();
+      for (const [id, entry] of this.setupContexts) {
+        if (now - entry.createdAt > this.SETUP_CONTEXT_TTL_MS) {
+          console.log(`  [INFO] Evicting persistent setup context ${id} (TTL exceeded)`);
+          entry.context.close().catch(() => {});
+          this.setupContexts.delete(id);
+        }
+      }
+      // Stop sweeper + maybe close browser if no contexts remain
+      if (this.setupContexts.size === 0) {
+        clearInterval(this.setupContextSweeper!);
+        this.setupContextSweeper = null;
+        this.closeBrowserIfIdle().catch(() => {});
+      }
+    }, 60 * 1000);
+    if (this.setupContextSweeper.unref) this.setupContextSweeper.unref();
+  }
+
+  /**
+   * Explicitly release a persistent setup context. Called by the cleanup
+   * command or on error paths.
+   */
+  async releaseSetupContext(setupId: string): Promise<void> {
+    const entry = this.setupContexts.get(setupId);
+    if (!entry) return;
+    this.setupContexts.delete(setupId);
+    await entry.context.close().catch(() => {});
+    await this.closeBrowserIfIdle();
   }
 
   /**
@@ -172,6 +328,8 @@ export class TestRunner {
 
     let context: BrowserContext | null = null;
     let page: Page | null = null;
+    // Whether `context` is a reused persistent setup context (don't close in finally).
+    let reusedPersistentContext = false;
     // Raw screenshot function, saved before executeTestCode overrides page.screenshot
     let rawScreenshot: ((options?: { fullPage?: boolean }) => Promise<Buffer>) | null = null;
 
@@ -225,15 +383,22 @@ export class TestRunner {
         }
       }
 
-      // Inject storageState from setup scripts (e.g. login session cookies/localStorage)
+      // Detect persistent-context marker from runSetup — format: "persistent:<setupId>".
+      // When present, reuse the setup's live BrowserContext instead of serializing
+      // storageState (which drops sessionStorage / IndexedDB / in-memory auth).
+      let persistentSetupId: string | undefined;
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       let parsedStorageState: any;
       if (command.storageState) {
-        try {
-          parsedStorageState = JSON.parse(command.storageState);
-          logFn('info', `Injecting storageState: ${parsedStorageState.cookies?.length ?? 0} cookies, ${parsedStorageState.origins?.length ?? 0} origins`);
-        } catch (e) {
-          logFn('warn', `Failed to parse storageState: ${e}`);
+        if (command.storageState.startsWith('persistent:')) {
+          persistentSetupId = command.storageState.slice('persistent:'.length);
+        } else {
+          try {
+            parsedStorageState = JSON.parse(command.storageState);
+            logFn('info', `Injecting storageState: ${parsedStorageState.cookies?.length ?? 0} cookies, ${parsedStorageState.origins?.length ?? 0} origins`);
+          } catch (e) {
+            logFn('warn', `Failed to parse storageState: ${e}`);
+          }
         }
       }
       const needsStabilizedContext = command.stabilization?.crossOsConsistency || command.stabilization?.freezeAnimations;
@@ -248,15 +413,38 @@ export class TestRunner {
         logFn('info', 'Video recording enabled');
       }
 
-      context = await this.browser!.newContext({
-        viewport,
-        ...(parsedStorageState ? { storageState: parsedStorageState } : {}),
-        ...(needsStabilizedContext ? { deviceScaleFactor: 1 } : {}),
-        ...(needsStabilizedContext ? { locale: 'en-US', timezoneId: 'UTC', colorScheme: 'light' as const } : {}),
-        ...(command.stabilization?.freezeAnimations ? { reducedMotion: 'reduce' as const } : {}),
-        ...(videoDir ? { recordVideo: { dir: videoDir, size: viewport } } : {}),
-      });
+      // Persistent-context branch: reuse setup's live context, create a fresh page in it.
+      // Limitations: per-test video recording and context-level stabilization overrides
+      // cannot be applied (context already exists). Per-page stabilization still applies below.
+      if (persistentSetupId) {
+        const entry = this.setupContexts.get(persistentSetupId);
+        if (entry) {
+          if (videoDir) {
+            logFn('warn', 'Per-test video recording not supported in persistent-context mode — disabled for this test');
+          }
+          context = entry.context;
+          reusedPersistentContext = true;
+          logFn('info', `Reusing persistent setup context (setupId=${persistentSetupId})`);
+        } else {
+          logFn('warn', `persistent setup context ${persistentSetupId} not found — falling back to fresh context (auth state will be missing)`);
+        }
+      }
+
+      if (!context) {
+        context = await this.browser!.newContext({
+          viewport,
+          ...(parsedStorageState ? { storageState: parsedStorageState } : {}),
+          ...(needsStabilizedContext ? { deviceScaleFactor: 1 } : {}),
+          ...(needsStabilizedContext ? { locale: 'en-US', timezoneId: 'UTC', colorScheme: 'light' as const } : {}),
+          ...(command.stabilization?.freezeAnimations ? { reducedMotion: 'reduce' as const } : {}),
+          ...(videoDir ? { recordVideo: { dir: videoDir, size: viewport } } : {}),
+        });
+      }
       page = await context.newPage();
+      // Persistent contexts may have a different viewport than this test; sync it.
+      if (reusedPersistentContext) {
+        try { await page.setViewportSize(viewport); } catch { /* best-effort */ }
+      }
 
       // Set explicit timeouts to prevent indefinite hangs
       page.setDefaultNavigationTimeout(30000);
@@ -341,17 +529,29 @@ export class TestRunner {
             .catch(e => { clearTimeout(timeoutTimer); throw e; }),
           new Promise<never>((_, reject) => {
             timeoutTimer = setTimeout(() => {
-              logFn('warn', `Timeout fired (${testTimeout}ms) — closing context to kill in-flight operations`);
-              context?.close().catch(() => {});
-              context = null;
+              // For a reused persistent context, close only the page (not the
+              // context — other tests in this run still need it).
+              if (reusedPersistentContext) {
+                logFn('warn', `Timeout fired (${testTimeout}ms) — closing page (keeping persistent context)`);
+                page?.close().catch(() => {});
+              } else {
+                logFn('warn', `Timeout fired (${testTimeout}ms) — closing context to kill in-flight operations`);
+                context?.close().catch(() => {});
+                context = null;
+              }
               page = null;
               reject(new Error(`Test execution timed out after ${testTimeout}ms`));
             }, testTimeout);
             testAbort.signal.addEventListener('abort', () => {
               clearTimeout(timeoutTimer);
-              logFn('info', 'Abort signal received — closing context');
-              context?.close().catch(() => {});
-              context = null;
+              if (reusedPersistentContext) {
+                logFn('info', 'Abort signal received — closing page (keeping persistent context)');
+                page?.close().catch(() => {});
+              } else {
+                logFn('info', 'Abort signal received — closing context');
+                context?.close().catch(() => {});
+                context = null;
+              }
               page = null;
               reject(new Error('Test cancelled'));
             });
@@ -375,6 +575,13 @@ export class TestRunner {
         await captureScreenshot('success');
       }
 
+      // Capture DOM snapshot after test body ran, aligned with the final screenshot.
+      let domSnapshot: DomSnapshotPayload | undefined;
+      if (page && !page.isClosed()) {
+        try { domSnapshot = await captureDomSnapshotForRunner(page); }
+        catch (err) { logFn('warn', `DOM snapshot capture failed: ${err instanceof Error ? err.message : String(err)}`); }
+      }
+
       const durationMs = Date.now() - startTime;
       logFn('info', `Test passed in ${durationMs}ms (${screenshots.length} screenshots)`);
 
@@ -386,6 +593,7 @@ export class TestRunner {
         softErrors: softErrors.length > 0 ? softErrors : undefined,
         lastReachedStep: lastReachedStep >= 0 ? lastReachedStep : undefined,
         totalSteps: stepCount > 0 ? stepCount : undefined,
+        domSnapshot,
       };
     } catch (error) {
       const durationMs = Date.now() - startTime;
@@ -416,6 +624,7 @@ export class TestRunner {
         // is still running on the page and Playwright can't screenshot while
         // operations are in-flight (it would hang).
         let errorScreenshot: string | undefined;
+        let failureDomSnapshot: DomSnapshotPayload | undefined;
         if (page && rawScreenshot && !isTimeout) {
           try {
             const buffer = await rawScreenshot({ fullPage: true });
@@ -430,6 +639,10 @@ export class TestRunner {
             });
           } catch {
             logFn('warn', 'Failed to capture error screenshot');
+          }
+          if (!page.isClosed()) {
+            try { failureDomSnapshot = await captureDomSnapshotForRunner(page); }
+            catch { /* best-effort */ }
           }
         }
 
@@ -446,6 +659,7 @@ export class TestRunner {
           softErrors: softErrors.length > 0 ? softErrors : undefined,
           lastReachedStep: lastReachedStep >= 0 ? lastReachedStep : undefined,
           totalSteps: stepCount > 0 ? stepCount : undefined,
+          domSnapshot: failureDomSnapshot,
         };
       }
     } finally {
@@ -455,10 +669,12 @@ export class TestRunner {
         this.abortController = null;
         this.currentTestRunId = null;
       }
-      // Capture video before closing context (video is finalized on close)
+      // Capture video before closing context (video is finalized on close).
+      // For persistent (reused) contexts, close only the page — keep the context
+      // alive for sibling tests in this run. Sweeper/cleanup command evicts it later.
       const video = page?.video();
       if (page) await page.close().catch(() => {});
-      if (context) await context.close().catch(() => {});
+      if (context && !reusedPersistentContext) await context.close().catch(() => {});
       // After context close, video file is finalized — read and base64-encode
       if (video && command.forceVideoRecording && result) {
         try {
@@ -581,16 +797,30 @@ export class TestRunner {
         }
       }
 
-      // Capture storageState (cookies/localStorage)
+      // Capture storageState (cookies/localStorage) for logging + as a fallback marker.
+      // The authoritative state carrier is the persistent BrowserContext kept alive below —
+      // storageState alone drops sessionStorage, IndexedDB, service workers, and in-memory
+      // auth tokens, which is why setup-based builds were losing login state across tests.
       let storageState: string | undefined;
       if (context) {
         try {
           const state = await context.storageState();
-          storageState = JSON.stringify(state);
-          logFn('info', `Captured storageState: ${state.cookies.length} cookies, ${state.origins.length} origins`);
+          logFn('info', `Captured storageState snapshot: ${state.cookies.length} cookies, ${state.origins.length} origins`);
         } catch (e) {
-          logFn('warn', `Failed to capture storageState: ${e}`);
+          logFn('warn', `Failed to capture storageState snapshot: ${e}`);
         }
+      }
+
+      // Persist the context for reuse by tests in this run. Close the setup page
+      // (we don't want setup's page open during tests) but keep the context alive.
+      if (context) {
+        if (page) await page.close().catch(() => {});
+        page = null;
+        this.setupContexts.set(command.setupId, { context, createdAt: Date.now() });
+        this.ensureSetupContextSweeper();
+        logFn('info', `Persistent setup context retained (setupId=${command.setupId}) — tests in this run will reuse it`);
+        storageState = `persistent:${command.setupId}`;
+        context = null; // prevent finally from closing it
       }
 
       return {
@@ -612,6 +842,7 @@ export class TestRunner {
       };
     } finally {
       if (page) await page.close().catch(() => {});
+      // Only close context if we didn't hand it off to setupContexts (nulled above on success).
       if (context) await context.close().catch(() => {});
       await this.closeBrowserIfIdle();
     }
@@ -640,11 +871,11 @@ export class TestRunner {
 
     let body: string;
     if (funcMatch) {
-      body = this.stripTypeAnnotations(funcMatch[1]);
+      body = stripTypeAnnotations(funcMatch[1]);
     } else {
       // Fallback: treat entire code as the function body (unwrapped test code)
       log('info', 'No export async function test(...) wrapper found — using code as body');
-      body = this.stripTypeAnnotations(code);
+      body = stripTypeAnnotations(code);
     }
     log('info', `Extracted test body: ${body.length} chars`);
 
@@ -688,16 +919,20 @@ export class TestRunner {
     body = body.replace(/page\.keyboard\.selectAll\(\)/g, "page.keyboard.press('Control+a')");
 
     // Instrument step tracking
-    const { instrumentedBody, stepCount } = instrumentStepTracking(body);
+    const { instrumentedBody } = instrumentStepTracking(body);
     body = instrumentedBody;
     let lastReachedStep = -1;
     const __stepReached = async (n: number) => { lastReachedStep = Math.max(lastReachedStep, n); };
 
-    // Wrap standalone await statements (except screenshots) in try/catch for soft error handling
-    // This matches the local runner behavior so tests continue past failures to reach screenshots
-    // Hard assertion errors (.__hardAssertion) are re-thrown to fail the test immediately
+    // Wrap standalone await statements (except screenshots/navigation) in try/catch
+    // for soft error handling. This matches the local runner behavior so tests
+    // continue past failures to reach screenshots.
+    // Hard assertion errors (.__hardAssertion) are re-thrown to fail the test immediately.
+    // `page.goto` is NOT soft-wrapped: if navigation fails, subsequent steps would
+    // run on about:blank and produce blank screenshots recorded as passes.
     body = body.replace(/^(\s*)(await\s+.+;)\s*$/gm, (_match: string, indent: string, stmt: string) => {
       if (stmt.includes('.screenshot(')) return `${indent}${stmt}`;
+      if (stmt.includes('.goto(')) return `${indent}${stmt}`;
       return `${indent}try { ${stmt} } catch(__softErr) { if (__softErr && __softErr.__hardAssertion) throw __softErr; stepLogger.warn(typeof __softErr === 'object' && __softErr !== null && 'message' in __softErr ? __softErr.message : String(__softErr)); }`;
     });
 
@@ -1011,16 +1246,6 @@ export class TestRunner {
         try { fs.rmSync(dlDir, { recursive: true, force: true }); } catch {}
       }
     }
-  }
-
-  private stripTypeAnnotations(code: string): string {
-    let result = code;
-    result = result.replace(/\b(const|let|var)\s+(\w+)\s*:\s*[^=\n;]+(\s*=)/g, '$1 $2$3');
-    result = result.replace(/\b(const|let|var)\s+(\{[^}]+\}|\[[^\]]+\])\s*:\s*[^=\n;]+(\s*=)/g, '$1 $2$3');
-    result = result.replace(/\)\s+as\s+\w[\w<>\[\],\s|]*/g, ')');
-    result = result.replace(/(\w)\s+as\s+\w[\w<>\[\],\s|]*/g, '$1');
-    result = result.replace(/<\w[\w<>\[\],\s|]*>\s*(?=\(|[\w])/g, '');
-    return result;
   }
 
   private createExpect(timeout = 5000) {

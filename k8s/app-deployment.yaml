@@ -1,0 +1,114 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: lastest-app-config
+  namespace: lastest
+data:
+  EB_PROVISIONER: "kubernetes"
+  EB_NAMESPACE: "lastest"
+  LASTEST_URL: "http://lastest-app.lastest.svc.cluster.local:3000"
+  # EB_POOL_MAX moved to DB: global playwright_settings.ebPoolMax (seeded on boot)
+  EB_WARM_POOL_MIN: "1"
+  EB_CPU_REQUEST: "500m"
+  EB_CPU_LIMIT: "2000m"
+  EB_MEM_REQUEST: "1Gi"
+  EB_MEM_LIMIT: "2Gi"
+  EB_SHM_SIZE: "512Mi"
+  NODE_ENV: "production"
+  PORT: "3000"
+  HOSTNAME: "0.0.0.0"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: lastest-app
+  namespace: lastest
+  labels:
+    app: lastest-app
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: lastest-app
+  template:
+    metadata:
+      labels:
+        app: lastest-app
+    spec:
+      serviceAccountName: lastest-app
+      containers:
+        - name: app
+          image: ${APP_IMAGE}
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 3000
+              name: http
+          envFrom:
+            - configMapRef:
+                name: lastest-app-config
+            - secretRef:
+                name: lastest-app-secrets
+          env:
+            - name: EB_IMAGE
+              value: ${EB_IMAGE}
+          readinessProbe:
+            httpGet:
+              path: /api/health
+              port: 3000
+            initialDelaySeconds: 15
+            periodSeconds: 5
+            timeoutSeconds: 5
+            failureThreshold: 12
+          livenessProbe:
+            httpGet:
+              path: /api/health
+              port: 3000
+            initialDelaySeconds: 60
+            periodSeconds: 30
+            timeoutSeconds: 10
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: 500m
+              memory: 1Gi
+            limits:
+              cpu: 2000m
+              memory: 2Gi
+          volumeMounts:
+            - name: storage
+              mountPath: /app/storage
+      volumes:
+        - name: storage
+          persistentVolumeClaim:
+            claimName: lastest-storage
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: lastest-storage
+  namespace: lastest
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: local-path
+  resources:
+    requests:
+      storage: 20Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: lastest-app
+  namespace: lastest
+  labels:
+    app: lastest-app
+spec:
+  type: LoadBalancer
+  selector:
+    app: lastest-app
+  ports:
+    - name: http
+      port: 3000
+      targetPort: 3000

@@ -104,6 +104,9 @@ export async function getPlaywrightSettings(repositoryId?: string | null) {
     enableVideoRecording: false,
     screenshotDelay: 0,
     maxParallelTests: 1,
+    maxParallelEBs: 10,
+    ebPoolMax: 30,
+    ebIdleTTLSeconds: 90,
     stabilization: DEFAULT_STABILIZATION_SETTINGS,
     acceptAnyCertificate: false,
     networkErrorMode: 'fail',
@@ -157,6 +160,37 @@ export async function upsertPlaywrightSettings(repositoryId: string | null, data
 
 export async function deletePlaywrightSettings(id: string) {
   await db.delete(playwrightSettings).where(eq(playwrightSettings.id, id));
+}
+
+// Cluster-wide EB pool limits — read from the global (repositoryId IS NULL) row.
+// Per-repo overrides are ignored on purpose: the pool is a shared cluster resource.
+export async function getGlobalPoolLimits(): Promise<
+  { ebPoolMax: number; ebIdleTTLSeconds: number } | null
+> {
+  const [row] = await db
+    .select({
+      ebPoolMax: playwrightSettings.ebPoolMax,
+      ebIdleTTLSeconds: playwrightSettings.ebIdleTTLSeconds,
+    })
+    .from(playwrightSettings)
+    .where(isNull(playwrightSettings.repositoryId));
+  if (!row) return null;
+  return {
+    ebPoolMax: row.ebPoolMax ?? 30,
+    ebIdleTTLSeconds: row.ebIdleTTLSeconds ?? 90,
+  };
+}
+
+// Idempotent seeder — inserts the global playwright_settings row with schema
+// defaults if missing. Callers (app boot) rely on this so poolMax() / ebIdleTTLMs()
+// always find a row and never have to fall back to env vars.
+export async function ensureGlobalPlaywrightSettings(): Promise<void> {
+  const [existing] = await db
+    .select({ id: playwrightSettings.id })
+    .from(playwrightSettings)
+    .where(isNull(playwrightSettings.repositoryId));
+  if (existing) return;
+  await createPlaywrightSettings({ repositoryId: null });
 }
 
 // Environment Configs

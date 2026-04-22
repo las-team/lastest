@@ -203,14 +203,14 @@ export async function createAndRunBuildCore(
   // Load environment config
   const envConfig = await queries.getEnvironmentConfig(repositoryId);
 
-  // Get tests to run (filter out soft-deleted tests)
+  // Get tests to run (filter out soft-deleted and placeholder tests)
   let tests: Test[];
   if (testIds && testIds.length > 0) {
     tests = await Promise.all(
       testIds.map((id) => queries.getTest(id))
-    ).then((results) => results.filter((t): t is Test => t !== undefined && !t.deletedAt));
+    ).then((results) => results.filter((t): t is Test => t !== undefined && !t.deletedAt && !t.isPlaceholder));
   } else if (repositoryId) {
-    tests = await queries.getTestsByRepo(repositoryId);
+    tests = (await queries.getTestsByRepo(repositoryId)).filter(t => !t.isPlaceholder);
   } else {
     tests = [];
   }
@@ -299,8 +299,8 @@ export async function createAndRunBuildFromCI(opts: {
   // Load environment config
   const envConfig = await queries.getEnvironmentConfig(repositoryId);
 
-  // Get tests to run (filter out soft-deleted)
-  const tests = await queries.getTestsByRepo(repositoryId);
+  // Get tests to run (filter out soft-deleted and placeholder tests)
+  const tests = (await queries.getTestsByRepo(repositoryId)).filter(t => !t.isPlaceholder);
   if (tests.length === 0) {
     throw new Error('No tests to run');
   }
@@ -377,23 +377,17 @@ export async function createComparisonRun(
 
   const comparisonPairId = crypto.randomUUID();
 
-  // Load env + playwright settings
-  // Override base URL with baseline URL for this comparison run
-  const envConfig = await queries.getEnvironmentConfig(repositoryId);
-  const overriddenEnvConfig = envConfig
-    ? { ...envConfig, baseUrl: baselineUrl }
-    : { id: 'comparison-override', repositoryId, mode: 'manual', baseUrl: baselineUrl, startCommand: null, healthCheckUrl: null, healthCheckTimeout: 60000, reuseExistingServer: true, createdAt: null, updatedAt: null } satisfies import('@/lib/db/schema').EnvironmentConfig;
+  // The comparison-specific URL is stored on the build record below; runBuildAsync
+  // reads it back and overrides the env config baseUrl at execution time.
 
-  const playwrightSettings = await queries.getPlaywrightSettings(repositoryId);
-
-  // Get tests
+  // Get tests (filter out soft-deleted and placeholder tests)
   let tests: Test[];
   if (testIds && testIds.length > 0) {
     tests = await Promise.all(
       testIds.map((id) => queries.getTest(id))
-    ).then((results) => results.filter((t): t is Test => t !== undefined && !t.deletedAt));
+    ).then((results) => results.filter((t): t is Test => t !== undefined && !t.deletedAt && !t.isPlaceholder));
   } else {
-    tests = await queries.getTestsByRepo(repositoryId);
+    tests = (await queries.getTestsByRepo(repositoryId)).filter(t => !t.isPlaceholder);
   }
   if (tests.length === 0) {
     throw new Error('No tests to run');
@@ -454,20 +448,16 @@ async function createComparisonFeatureBuild(
 ) {
   if (!repositoryId) throw new Error('Comparison run requires a repository');
 
-  const envConfig = await queries.getEnvironmentConfig(repositoryId);
-  // Override base URL with feature URL for this comparison run
-  const overriddenEnvConfig = envConfig
-    ? { ...envConfig, baseUrl: meta.featureUrl }
-    : { id: 'comparison-override', repositoryId, mode: 'manual', baseUrl: meta.featureUrl, startCommand: null, healthCheckUrl: null, healthCheckTimeout: 60000, reuseExistingServer: true, createdAt: null, updatedAt: null } satisfies import('@/lib/db/schema').EnvironmentConfig;
-  const playwrightSettings = await queries.getPlaywrightSettings(repositoryId);
+  // The feature URL is stored on the build record below; runBuildAsync reads it
+  // back and overrides the env config baseUrl at execution time.
 
   let tests: Test[];
   if (meta.testIds && meta.testIds.length > 0) {
     tests = await Promise.all(
       meta.testIds.map((id) => queries.getTest(id))
-    ).then((results) => results.filter((t): t is Test => t !== undefined && !t.deletedAt));
+    ).then((results) => results.filter((t): t is Test => t !== undefined && !t.deletedAt && !t.isPlaceholder));
   } else {
-    tests = await queries.getTestsByRepo(repositoryId);
+    tests = (await queries.getTestsByRepo(repositoryId)).filter(t => !t.isPlaceholder);
   }
   if (tests.length === 0) throw new Error('No tests to run for feature build');
 
@@ -584,8 +574,20 @@ async function runBuildAsync(
     teamId = runnerRecord?.teamId;
   }
 
-  // Prepare environment and settings for executor
-  const envConfig = await queries.getEnvironmentConfig(repositoryId);
+  // Prepare environment and settings for executor.
+  // The build record's `baseUrl` is the per-build override (set by createBuild from
+  // `targetUrl` for CI runs and `baselineUrl`/`featureUrl` for comparison runs).
+  // Honor it here so the executor hits the right URL.
+  const dbEnvConfig = await queries.getEnvironmentConfig(repositoryId);
+  const buildRecord = await queries.getBuild(buildId);
+  const effectiveBaseUrl = buildRecord?.baseUrl || dbEnvConfig?.baseUrl;
+  const envConfig = dbEnvConfig
+    ? (effectiveBaseUrl && effectiveBaseUrl !== dbEnvConfig.baseUrl
+        ? { ...dbEnvConfig, baseUrl: effectiveBaseUrl }
+        : dbEnvConfig)
+    : (buildRecord?.baseUrl
+        ? { id: 'build-override', repositoryId: repositoryId ?? null, mode: 'manual', baseUrl: buildRecord.baseUrl, startCommand: null, healthCheckUrl: null, healthCheckTimeout: 60000, reuseExistingServer: true, createdAt: null, updatedAt: null } satisfies import('@/lib/db/schema').EnvironmentConfig
+        : null);
   const playwrightSettings = await queries.getPlaywrightSettings(repositoryId);
 
   // Determine browsers for this build
@@ -757,8 +759,8 @@ async function runBuildAsync(
   };
 
   try {
-    // Get the build to check for build-level setup
-    const build = await queries.getBuild(buildId);
+    // Reuse the build record fetched above for the baseUrl override.
+    const build = buildRecord;
     const baseUrl = envConfig?.baseUrl || 'http://localhost:3000';
 
     // Initialize setup context
@@ -1113,16 +1115,16 @@ async function queueBuild(
   repositoryId?: string | null,
   runnerId?: string,
 ) {
-  // Get tests to determine label (filter out soft-deleted tests)
+  // Get tests to determine label (filter out soft-deleted and placeholder tests)
   let tests: Test[];
   if (testIds && testIds.length > 0) {
     tests = await Promise.all(
       testIds.map((id) => queries.getTest(id))
-    ).then((results) => results.filter((t): t is Test => t !== undefined && !t.deletedAt));
+    ).then((results) => results.filter((t): t is Test => t !== undefined && !t.deletedAt && !t.isPlaceholder));
   } else if (repositoryId) {
-    tests = await queries.getTestsByRepo(repositoryId);
+    tests = (await queries.getTestsByRepo(repositoryId)).filter(t => !t.isPlaceholder);
   } else {
-    tests = await queries.getTests();
+    tests = (await queries.getTests()).filter(t => !t.isPlaceholder);
   }
 
   if (tests.length === 0) {
@@ -1173,9 +1175,12 @@ export async function processNextQueuedBuild(repositoryId?: string | null, targe
   emitJobEvent({ type: 'job:delete', jobId: nextJob.id });
 
   // Run the build — for pool-managed jobs, runnerId is undefined so
-  // createAndRunBuildCore goes through auto mode → executeFallbackChain → claimPoolEB
+  // createAndRunBuildCore goes through auto mode → executeFallbackChain → claimPoolEB.
+  // MUST use the -Core variant: this runs from a fire-and-forget context
+  // (no request headers), so the auth'd `createAndRunBuild` would throw
+  // from `requireRepoAccess → headers()` and the queued run would be lost.
   try {
-    await createAndRunBuild(
+    await createAndRunBuildCore(
       metadata?.triggerType || 'manual',
       metadata?.testIds || undefined,
       nextJob.repositoryId,
