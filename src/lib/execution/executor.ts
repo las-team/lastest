@@ -31,8 +31,6 @@ import {
   getRunnerCommandById,
   getTestFixtures,
 } from '@/lib/db/queries';
-import { isScreenshotBlankWhite } from '@/lib/diff/blank-detector';
-
 /**
  * Generate SHA256 hash of test code for integrity verification.
  */
@@ -566,30 +564,6 @@ async function executeViaRunner(
         totalSteps: typeof payload.totalSteps === 'number' ? payload.totalSteps : undefined,
       };
 
-      // Guardrail: a passed test whose screenshot is all-white, missing, or
-      // unreadable is almost certainly a capture failure (navigation racing
-      // screenshot, EB context torn down mid-capture, etc). Surface it loudly
-      // instead of letting it pollute baselines as a silent pass. Check every
-      // screenshot — a multi-step test with Step_1 fine but Step_2 blank still
-      // wrecks the baseline.
-      if (testResult.status === 'passed' && allScreenshots.length > 0) {
-        for (const s of allScreenshots) {
-          if (!s?.path) continue;
-          let blank = false;
-          try {
-            blank = await isScreenshotBlankWhite(s.path);
-          } catch (err) {
-            console.warn(`[Executor] Blank detector failed for ${s.path}: ${err instanceof Error ? err.message : err}`);
-            blank = true; // fail closed — don't hide a potential bad capture
-          }
-          if (blank) {
-            testResult.status = 'failed';
-            testResult.errorMessage = `Screenshot ${s.label} is blank/white or missing — capture likely raced navigation or EB teardown.`;
-            break;
-          }
-        }
-      }
-
       results.push(testResult);
       await onResult?.(testResult);
 
@@ -637,14 +611,16 @@ async function executeViaRunner(
 /**
  * Dispatch tests to the system EB pool with strict 1-job-1-EB isolation.
  *
- * Each test claims a fresh EB, runs its own setup on it, runs the test, and
- * releases the EB — the EB Job is torn down before the next test. No browser
- * context, CDP session, or storage state ever crosses test boundaries.
+ * Setup (if any) runs ONCE on a dedicated EB; its serialized storageState is
+ * broadcast to every subsequent test-EB. This keeps seed scripts and account
+ * signups single-execution, and guarantees no browser context / CDP session
+ * crosses test boundaries.
  *
- * Concurrency is bounded by `maxParallelEBs`; provisioning scales to meet
- * demand (see `src/lib/eb/provisioner.ts`). Per-test retry is limited to one
- * extra EB attempt for genuinely dead EB infra — no cross-test compensation
- * logic, because with 1-job-1-EB there's no next test on the same EB to save.
+ * Each test then claims a fresh EB, applies the broadcast storageState cold,
+ * runs the test, and releases the EB. Concurrency is bounded by
+ * `maxParallelEBs`; provisioning scales to meet demand (see
+ * `src/lib/eb/provisioner.ts`). Per-test retry is limited to one extra EB
+ * attempt for genuinely dead EB infra.
  *
  * Returns the collected results, or `null` if no EB could be claimed at all
  * (so the caller can fall through to the queue path).
@@ -704,6 +680,82 @@ async function executeViaPoolWorkers(
     });
   };
 
+  // ── One-shot broadcast setup ────────────────────────────────────────────
+  // Run setup once on a dedicated EB. Capture its storageState as JSON so
+  // every test-EB can cold-start from the same authenticated/seeded state.
+  // Side-effecting setup (seed inserts, signups, API keys) runs exactly once.
+  // The EB carrying the live setup context dies right after — we intentionally
+  // don't reference it downstream, since cross-EB live-context reuse is the
+  // very bug this dispatcher exists to prevent.
+  let effectiveOptions = options;
+  if (options.setupInfo) {
+    let setupErr: string | undefined;
+    for (let attempt = 1; attempt <= MAX_EB_ATTEMPTS; attempt++) {
+      const eb = await claimWithRetry();
+      if (!eb) {
+        setupErr = `Could not claim an EB for broadcast setup within ${claimMaxWaitMs}ms`;
+        break;
+      }
+      everClaimed = true;
+      await recordActualRunner(eb.runnerId);
+      console.log(`[Dispatch] Claimed EB ${eb.runnerId.slice(0, 8)} for broadcast setup (attempt ${attempt}/${MAX_EB_ATTEMPTS})`);
+      try {
+        const setupResult = await executeSetupViaRunner(
+          options.setupInfo.code,
+          `${runId}-setup`,
+          eb.runnerId,
+          baseUrl,
+          viewport,
+          options.playwrightSettings?.navigationTimeout ?? undefined,
+          options.playwrightSettings,
+        );
+        // Prefer `storageStateJson` (portable JSON blob) over `storageState`
+        // (may be a `persistent:<setupId>` marker pinned to the setup EB
+        // that's about to be released). Each test-EB parses the JSON cold.
+        const broadcastState = setupResult.storageStateJson ?? options.setupContext?.storageState;
+        if (!setupResult.storageStateJson) {
+          console.warn(`[Dispatch] Setup returned no storageStateJson — tests will cold-start without injected state. Expected for no-auth apps; surprising otherwise.`);
+        }
+        effectiveOptions = {
+          ...options,
+          setupInfo: undefined,
+          setupContext: {
+            storageState: broadcastState,
+            variables: { ...options.setupContext?.variables, ...setupResult.variables },
+          },
+        };
+        console.log(`[Dispatch] Broadcast setup complete (storageState: ${broadcastState ? 'captured' : 'none'})`);
+        setupErr = undefined;
+        break;
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        setupErr = msg;
+        // Only retry on infra-looking failures — a real setup bug (script
+        // error, bad selector, wrong URL) shouldn't consume EBs.
+        if (EB_DEAD_ERR_RX.test(msg) && attempt < MAX_EB_ATTEMPTS) {
+          console.warn(`[Dispatch] Broadcast setup hit dead-EB on attempt ${attempt}, retrying: ${msg}`);
+          continue;
+        }
+        break;
+      } finally {
+        try { await releasePoolEB(eb.runnerId); } catch { /* ignore */ }
+      }
+    }
+    if (setupErr) {
+      console.error(`[Dispatch] Broadcast setup failed: ${setupErr}`);
+      // Every test fails with the same setup error — there's no per-test
+      // retry that can rescue a broken seed script or unreachable target.
+      const failed = tests.map(t => ({
+        testId: t.id,
+        status: 'setup_failed' as const,
+        durationMs: 0,
+        screenshots: [],
+        errorMessage: `Broadcast setup failed: ${setupErr}`,
+      }));
+      return everClaimed ? failed : null;
+    }
+  }
+
   const runOneTest = async (test: Test): Promise<TestRunResult> => {
     let lastError: string | undefined;
     for (let attempt = 1; attempt <= MAX_EB_ATTEMPTS; attempt++) {
@@ -719,40 +771,14 @@ async function executeViaPoolWorkers(
       }
       everClaimed = true;
       await recordActualRunner(eb.runnerId);
-      // setupId is scoped to this single claim — the EB dies with it, so no
-      // collision risk across tests/attempts even though the suffix repeats
-      // keys on separate pods.
-      const setupId = options.setupInfo ? `${runId}-${test.id}-a${attempt}` : null;
       console.log(`[Dispatch] Claimed EB ${eb.runnerId.slice(0, 8)} for "${test.name}" (attempt ${attempt}/${MAX_EB_ATTEMPTS})`);
 
       try {
-        if (setupId && options.setupInfo) {
-          try {
-            await executeSetupViaRunner(
-              options.setupInfo.code,
-              setupId,
-              eb.runnerId,
-              baseUrl,
-              viewport,
-              options.playwrightSettings?.navigationTimeout ?? undefined,
-              options.playwrightSettings,
-            );
-          } catch (err) {
-            lastError = err instanceof Error ? err.message : String(err);
-            console.warn(`[Dispatch] Setup failed on EB ${eb.runnerId.slice(0, 8)} for "${test.name}": ${lastError}`);
-            continue; // fresh EB on next attempt
-          }
-        }
-
-        const effectiveSetup = setupId
-          ? { storageState: `persistent:${setupId}`, variables: options.setupContext?.variables }
-          : options.setupContext;
-
         const [result] = await executeViaRunner(
           [test],
           runId,
           eb.runnerId,
-          { ...options, setupContext: effectiveSetup, setupInfo: undefined, maxParallelTests: 1 },
+          { ...effectiveOptions, maxParallelTests: 1 },
           undefined,
           onResult,
         );

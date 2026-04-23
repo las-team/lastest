@@ -1,5 +1,5 @@
 import { ImageResponse } from 'next/og';
-import * as queries from '@/lib/db/queries';
+import { getPublicShareContext } from '@/lib/db/queries/public-shares';
 import { isValidShareSlug } from '@/lib/share/slug';
 
 export const runtime = 'nodejs';
@@ -9,7 +9,7 @@ export const contentType = 'image/png';
 
 export default async function OG({ params }: { params: Promise<{ slug: string }> }) {
   const { slug } = await params;
-  const valid = isValidShareSlug(slug) ? await queries.getPublicShareContext(slug) : null;
+  const valid = isValidShareSlug(slug) ? await getPublicShareContext(slug) : null;
 
   const domain = valid?.share.targetDomain || 'visual regression test';
   const changed = valid?.build.changesDetected ?? 0;

@@ -2,7 +2,7 @@ import { redirect, notFound } from 'next/navigation';
 import { getCurrentSession } from '@/lib/auth';
 import { isValidShareSlug } from '@/lib/share/slug';
 import { claimPublicShare } from '@/server/actions/public-shares';
-import * as queries from '@/lib/db/queries';
+import { getPublicShareBySlug } from '@/lib/db/queries/public-shares';
 
 export const dynamic = 'force-dynamic';
 
@@ -19,7 +19,7 @@ export default async function ClaimPage({ params }: PageProps) {
     redirect(`/login?claim=${slug}`);
   }
 
-  const share = await queries.getPublicShareBySlug(slug);
+  const share = await getPublicShareBySlug(slug);
   if (!share || share.status !== 'public') notFound();
 
   const result = await claimPublicShare(slug);

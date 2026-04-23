@@ -18,6 +18,7 @@ debug doesnt launch
 captures only cursor IF record path is enabled
 always just warn by def Network Error Mode
 ## features
+stream back on headed play
 check tabs and enters
 Select focus areas and evaluation criteria (assertions)
 Openrouter agent sdk parity

@@ -2,12 +2,15 @@ import { notFound } from 'next/navigation';
 import Link from 'next/link';
 import type { Metadata } from 'next';
 import { CheckCircle, XCircle, AlertTriangle, FileCheck2 } from 'lucide-react';
-import * as queries from '@/lib/db/queries';
+import {
+  getPublicShareContext,
+  getShareDataBySlug,
+  type ShareVisualDiff,
+} from '@/lib/db/queries/public-shares';
 import { isValidShareSlug, buildShareUrl } from '@/lib/share/slug';
 import { ShareViewer } from './share-viewer-client';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import type { VisualDiffWithTestStatus } from '@/lib/db/schema';
 
 export const revalidate = 60;
 
@@ -32,7 +35,7 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
   const { slug } = await params;
   if (!isValidShareSlug(slug)) return { title: 'Not Found' };
 
-  const ctx = await queries.getPublicShareContext(slug);
+  const ctx = await getPublicShareContext(slug);
   if (!ctx) return { title: 'Share removed' };
 
   const domain = ctx.share.targetDomain || ctx.test?.name || 'this site';
@@ -60,22 +63,10 @@ export default async function PublicSharePage({ params }: PageProps) {
   const { slug } = await params;
   if (!isValidShareSlug(slug)) notFound();
 
-  const ctx = await queries.getPublicShareContext(slug);
-  if (!ctx) notFound();
+  const data = await getShareDataBySlug(slug);
+  if (!data) notFound();
 
-  const { share, build, test, testRun } = ctx;
-
-  const [diffsRaw, results] = await Promise.all([
-    queries.getVisualDiffsWithTestStatus(build.id),
-    testRun ? queries.getTestResultsByRun(testRun.id) : Promise.resolve([]),
-  ]);
-
-  const diffs: VisualDiffWithTestStatus[] = share.testId
-    ? diffsRaw.filter((d) => d.testId === share.testId)
-    : diffsRaw;
-  const scopedResults = share.testId
-    ? results.filter((r) => r.testId === share.testId)
-    : results;
+  const { share, build, test, testRun, diffs, results: scopedResults } = data;
 
   const mediaBase = `/api/share/${slug}/media`;
   const toUrl = (p: string | null | undefined): string | null => {
@@ -84,7 +75,7 @@ export default async function PublicSharePage({ params }: PageProps) {
   };
 
   // Group diffs by test
-  const byTest = new Map<string, { testId: string; testName: string; diffs: VisualDiffWithTestStatus[] }>();
+  const byTest = new Map<string, { testId: string; testName: string; diffs: ShareVisualDiff[] }>();
   for (const d of diffs) {
     if (!byTest.has(d.testId)) {
       byTest.set(d.testId, {
@@ -96,12 +87,12 @@ export default async function PublicSharePage({ params }: PageProps) {
     byTest.get(d.testId)!.diffs.push(d);
   }
 
-  function diffTier(d: VisualDiffWithTestStatus): number {
+  function diffTier(d: ShareVisualDiff): number {
     if (d.testResultStatus === 'failed' || d.status === 'rejected') return 0;
     if (d.classification === 'changed' || (d.pixelDifference ?? 0) > 0) return 1;
     return 2;
   }
-  function hasChange(d: VisualDiffWithTestStatus): boolean {
+  function hasChange(d: ShareVisualDiff): boolean {
     return diffTier(d) < 2;
   }
 

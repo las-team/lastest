@@ -1,5 +1,5 @@
 import { NextRequest } from 'next/server';
-import * as queries from '@/lib/db/queries';
+import { getPublicShareBySlug, incrementPublicShareView } from '@/lib/db/queries/public-shares';
 import { isValidShareSlug } from '@/lib/share/slug';
 
 export async function POST(
@@ -11,11 +11,11 @@ export async function POST(
     return new Response('Bad Request', { status: 400 });
   }
 
-  const share = await queries.getPublicShareBySlug(slug);
+  const share = await getPublicShareBySlug(slug);
   if (!share || share.status !== 'public') {
     return new Response('Not Found', { status: 404 });
   }
 
-  await queries.incrementPublicShareView(slug);
+  await incrementPublicShareView(slug);
   return new Response(null, { status: 204 });
 }
