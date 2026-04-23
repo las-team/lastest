@@ -13,8 +13,6 @@ triage
 a11y
 DOM delta
 ## bugs
-rerecord doesnt work
-debug doesnt launch
 captures only cursor IF record path is enabled
 always just warn by def Network Error Mode
 ## features
