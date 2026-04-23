@@ -20,20 +20,22 @@ async function resolveImagePath(imagePath: string): Promise<string | null> {
 }
 
 /**
- * Heuristic: returns true when the PNG is nearly all-white (or transparent).
+ * Heuristic: returns true when the PNG is nearly all-white (or transparent),
+ * missing, or unreadable. Invariant: if we can't verify the screenshot is
+ * non-blank, treat it as blank — silent passes on bad captures are worse than
+ * a false positive the user can re-baseline.
  * Samples a sparse 16×16 grid so cost stays O(256) regardless of image size.
- * Used to catch blank screenshots caused by navigation racing screenshot capture.
  */
 export async function isScreenshotBlankWhite(imagePath: string): Promise<boolean> {
   const absPath = await resolveImagePath(imagePath);
-  if (!absPath) return false;
+  if (!absPath) return true;
 
   let png: PNG;
   try {
     const buf = await fs.readFile(absPath);
     png = PNG.sync.read(buf);
   } catch {
-    return false;
+    return true;
   }
 
   const { width, height, data } = png;

@@ -209,7 +209,8 @@
       "Bash(pnpm --version)",
       "Bash(pnpm stack:logs eb)",
       "Bash(pnpm -F @lastest/embedded-browser exec tsc --noEmit)",
-      "Bash(kubectl logs *)"
+      "Bash(kubectl logs *)",
+      "Read(//home/ewyct/Downloads/**)"
     ]
   },
   "disabledMcpjsonServers": [
