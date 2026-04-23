@@ -24,6 +24,12 @@ const nextConfig: NextConfig = {
       allowedOrigins: ["app.lastest.cloud", "*.olares.local"],
     },
     proxyClientMaxBodySize: "50mb",
+    // Barrel imports from these packages are rewritten to deep imports so
+    // SWC never has to parse the whole package per route. Without this,
+    // any dev-server recompile that touches a file using lucide-react pulls
+    // ~1500 icon modules into SWC and OOMs the dev server — the exact
+    // napi_create_string_utf8 crash the share flow kept hitting.
+    optimizePackageImports: ['lucide-react', '@radix-ui/react-icons'],
   },
   async headers() {
     return [

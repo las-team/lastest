@@ -69,24 +69,30 @@ function parseTarget(url) {
 
 function forwardUpgrade(server, req, socket, head, cfg) {
   // We're the first listener (prependListener). Other listeners — notably
-  // Next.js's own upgrade fallback — still fire after us. We neutralise their
-  // ability to touch this specific socket via the write/end/destroy
-  // overrides below, without removing them from the emitter (other upgrade
-  // paths still need Next.js to handle them).
+  // Next.js's own upgrade fallback — still fire after us AND may schedule
+  // destroy/end via microtasks that only run AFTER we've set up piping.
+  // Previously we released the claim once the upgrade completed, which let
+  // those latent cleanup calls through and closed the WS instantly (observed
+  // as code=1006 at ~10ms, no keepalive frames reaching the browser). Fix:
+  // keep destroy/end blocked for the socket's lifetime — only our own
+  // `teardown` flips `sessionOver` to release the block, so the pipe stays
+  // up until TCP naturally closes. `claimed` still gates pre-upgrade writes
+  // so Next's potential 404 body can't corrupt the handshake.
   const realWrite = socket.write.bind(socket);
   const realEnd = socket.end.bind(socket);
   const realDestroy = socket.destroy.bind(socket);
-  let claimed = true;
+  let claimed = true;           // blocks ALL socket.write pre-upgrade
+  let sessionOver = false;      // only set by OUR teardown — gates end/destroy
   socket.write = (...a) => {
     if (claimed) { dlog(cfg.label, 'blocked external socket.write', a[0] && a[0].length); return true; }
     return realWrite(...a);
   };
-  socket.end = () => {
-    if (claimed) { dlog(cfg.label, 'blocked external socket.end'); return socket; }
-    return realEnd();
+  socket.end = (...a) => {
+    if (!sessionOver) { dlog(cfg.label, 'blocked external socket.end'); return socket; }
+    return realEnd(...a);
   };
   socket.destroy = (...a) => {
-    if (claimed) { dlog(cfg.label, 'blocked external socket.destroy'); return socket; }
+    if (!sessionOver) { dlog(cfg.label, 'blocked external socket.destroy'); return socket; }
     return realDestroy(...a);
   };
 
@@ -110,6 +116,11 @@ function forwardUpgrade(server, req, socket, head, cfg) {
     }
     if (!clientClosed) {
       clientClosed = true;
+      // Flip `sessionOver` right before our end/destroy so the socket
+      // override lets them through. External callers that hit the override
+      // after this still pass through — we've already decided the session
+      // is done, so their redundant destroy is harmless.
+      sessionOver = true;
       try { hadError ? realDestroy() : realEnd(); } catch { /* ignore */ }
     }
   };
@@ -183,11 +194,12 @@ function forwardUpgrade(server, req, socket, head, cfg) {
     }
 
     upgraded = true;
+    // Release the pre-upgrade write guard so our overridden `socket.write`
+    // delegates to `realWrite` from here on — that's what `pipe(upstream→socket)`
+    // uses internally. We leave the override in place (not restored to the raw
+    // bound function) so `socket.end`/`socket.destroy` stay gated by
+    // `sessionOver` against Next.js's latent cleanup calls.
     claimed = false;
-    // Restore socket methods for piping.
-    socket.write = realWrite;
-    socket.end = realEnd;
-    socket.destroy = realDestroy;
 
     try { realWrite(hbytes); if (trailing.length) realWrite(trailing); } catch { /* ignore */ }
 
